@@ -217,6 +217,40 @@ UNREADABLE_SIDECAR = "unreadable-sidecar"
 
 
 # ---------------------------------------------------------------------------
+# host_is_author
+# ---------------------------------------------------------------------------
+
+
+def host_is_author(env: dict | None = None) -> bool:
+    """Whether THIS host is a source of new vault content — the fail-safe default.
+
+    Reads the host-local ``makes_vault_content`` declaration (see
+    :func:`lore.vault.config.read_makes_vault_content` for where it lives and
+    why). A host that declares nothing is an author host: a host holding the
+    only copy of a day's work must never discard it, and a host whose owner
+    cannot resolve a conflict must still be allowed to. So every ambiguous
+    case — no declaration, no config file at all, an unparseable config —
+    reads as author here, same as that accessor's ``None``. Only an explicit
+    ``makes_vault_content: false`` reads as non-author.
+
+    This task adds the declaration and its default only; nothing here yet
+    branches on the result — that is a later task's job.
+
+    Args:
+        env: Optional ``{str: str}`` XDG environment override, forwarded to
+             :func:`lore.vault.config.read_makes_vault_content`.
+
+    Raises:
+        VaultConfigError: propagated unchanged when the declared value is
+            present but not a bool — refused, never coerced.
+    """
+    from ..vault import config as vault_config_mod
+
+    declared = vault_config_mod.read_makes_vault_content(env=env)
+    return True if declared is None else declared
+
+
+# ---------------------------------------------------------------------------
 # field-wise merge (pure)
 # ---------------------------------------------------------------------------
 

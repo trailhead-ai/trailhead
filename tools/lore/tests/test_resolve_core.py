@@ -133,6 +133,74 @@ def resolve():
     return load_script("lore.cli.resolve")
 
 
+# ── host_is_author — the fail-safe author/non-author default (unit) ───────
+#
+# A host that declares nothing is an author host: a host holding the only
+# copy of a day's work must never discard it, and a host whose owner cannot
+# resolve a conflict must still be allowed to. The three ambiguous inputs
+# below (key absent, config file absent, config unparseable) are kept
+# together as one enumerated set because they are the same claim — every
+# case read_makes_vault_content answers with None must resolve to True here.
+# ---------------------------------------------------------------------------
+
+
+def _write_lore_config(tmp_path, data: dict) -> None:
+    config_lore_dir = tmp_path / "config" / "lore"
+    config_lore_dir.mkdir(parents=True, exist_ok=True)
+    (config_lore_dir / "config.json").write_text(json.dumps(data))
+
+
+def test_host_is_author_true_when_declared_true(tmp_path, resolve):
+    _write_lore_config(tmp_path, {"makes_vault_content": True})
+    assert resolve.host_is_author() is True
+
+
+def test_host_is_author_false_when_declared_false(tmp_path, resolve):
+    _write_lore_config(tmp_path, {"makes_vault_content": False})
+    assert resolve.host_is_author() is False
+
+
+def test_host_is_author_defaults_to_true_when_key_absent(tmp_path, resolve):
+    _write_lore_config(tmp_path, {"vaults": []})
+    assert resolve.host_is_author() is True
+
+
+def test_host_is_author_defaults_to_true_when_config_file_absent(tmp_path, resolve):
+    assert resolve.host_is_author() is True
+
+
+def test_host_is_author_defaults_to_true_when_config_unparseable(tmp_path, resolve):
+    config_lore_dir = tmp_path / "config" / "lore"
+    config_lore_dir.mkdir(parents=True, exist_ok=True)
+    (config_lore_dir / "config.json").write_text("{not valid json")
+    assert resolve.host_is_author() is True
+
+
+def test_host_is_author_propagates_the_refusal_of_a_non_boolean(tmp_path, resolve):
+    """A present-but-non-bool declaration is refused all the way out to the
+    caller. The accessor raising is only half the property: the resolver must
+    not catch it and substitute a default, because that would turn a config
+    someone got wrong into a silent answer about whether to discard work."""
+    _write_lore_config(tmp_path, {"makes_vault_content": "false"})
+    from lore.vault import config as vault_config_mod
+
+    with pytest.raises(vault_config_mod.VaultConfigError):
+        resolve.host_is_author()
+
+
+def test_host_is_author_is_host_local_not_vault_derived(tmp_path, resolve):
+    """The answer binds to this host's own config, never to vault-side content.
+    A decoy config.json sitting where a synced vault would put one must not
+    move the result — otherwise a teammate's synced file could flip this
+    host into discarding its own unpublished work."""
+    _write_lore_config(tmp_path, {"makes_vault_content": False})
+    vault_dir = tmp_path / "vault"
+    vault_dir.mkdir(exist_ok=True)
+    (vault_dir / "config.json").write_text(json.dumps({"makes_vault_content": True}))
+
+    assert resolve.host_is_author() is False
+
+
 # ── field-wise merge (unit) ────────────────────────────────────────────────
 
 
