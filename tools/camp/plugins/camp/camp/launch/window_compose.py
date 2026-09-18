@@ -50,7 +50,6 @@ from __future__ import annotations
 import os
 import shlex
 import uuid
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping, Sequence
 
@@ -92,17 +91,6 @@ class WindowAtCredentialStore(WindowRefused):
     """
 
 
-@dataclass(frozen=True)
-class WindowComposeResult:
-    """What one `compose_window` call produced, after the record write."""
-
-    window_id: str
-    window_name: str
-    cwd: str
-    conversation_id: str | None
-    command_line: str | None
-
-
 def compose_window(
     group: dict,
     slug: str,
@@ -113,7 +101,7 @@ def compose_window(
     command: Sequence[str] | None = None,
     tmux: Tmux | None = None,
     env: Mapping[str, str] | None = None,
-) -> WindowComposeResult:
+) -> WindowEntry:
     """Compose one window in the workspace at *slug*'s tmux session.
 
     *command*, when given, is run verbatim and recorded as the window's
@@ -141,8 +129,10 @@ def compose_window(
 
     Raises :class:`WindowComposeError` if tmux could not create the window.
     The record write happens only after that create succeeds, and happens
-    exactly once, before this function returns — a caller that reads
-    `WindowComposeResult` back knows the record already reflects it.
+    exactly once, before this function returns — the returned
+    :class:`~camp.group.window_record.WindowEntry` is the very object that
+    was appended, so a caller holding it knows the record already reflects
+    it.
     """
     resolved_env = dict(env) if env is not None else dict(os.environ)
 
@@ -208,10 +198,4 @@ def compose_window(
     )
     append_window_entry(ws_dir, entry)
 
-    return WindowComposeResult(
-        window_id=result.window_id,
-        window_name=result.window_name,
-        cwd=relative_cwd,
-        conversation_id=conversation_id,
-        command_line=command_line,
-    )
+    return entry
