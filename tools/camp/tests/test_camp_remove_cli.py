@@ -36,7 +36,7 @@ import time
 from pathlib import Path
 
 import pytest
-from ._helpers import camp_state_env, init_git_repo
+from ._helpers import camp_state_env, init_git_repo, run_camp
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
@@ -85,7 +85,7 @@ def _wait_provisioned(manifest_path: Path, members: list[str], timeout: float = 
 
 
 @pytest.fixture()
-def remove_env(tmp_path: Path):
+def remove_env(tmp_path: Path, monkeypatch):
     """CLI environment with two real git repos + a provisioned workspace.
 
     Waits for the background provisioner to complete so member worktrees
@@ -111,41 +111,37 @@ def remove_env(tmp_path: Path):
     env.update(_stub.harness_env(tmp_path, path=env.get("PATH", "")))
     agents_file = _stub.fake_agents_file(tmp_path)
 
-    # Author group via real CLI
-    r = subprocess.run(
-        [
-            sys.executable,
-            str(_CLI_CAMP),
-            "group",
-            "rmgroup",
-            "--member",
-            f"repo_a={repo_a}",
-            "--member",
-            f"repo_b={repo_b}",
-        ],
-        capture_output=True,
-        text=True,
+    # Author the group in-process: the fixture wants it on disk, not the fact
+    # that a separate interpreter wrote it. Every `camp remove` a test then
+    # runs — the subject here — is still a real subprocess.
+    r = run_camp(
+        ["group", "rmgroup", "--member", f"repo_a={repo_a}", "--member", f"repo_b={repo_b}"],
         env=env,
     )
     assert r.returncode == 0, f"group authoring failed: {r.stderr}"
 
-    # Provision a workspace via camp new (no harness exec needed). --no-session:
-    # this fixture only needs the workspace provisioned, not the tmux session
-    # `camp new` now creates by default.
-    r2 = subprocess.run(
-        [sys.executable, str(_CLI_CAMP), "new", "ws-slug", "--group", "rmgroup", "--no-session"],
-        capture_output=True,
-        text=True,
+    # Bring the workspace up, then run the provisioning the detached
+    # background process would have run — here, synchronously. `camp new`
+    # normally spawns that process and returns, leaving the fixture to poll
+    # the manifest until the member worktrees appear; doing the same work
+    # inline removes both the extra interpreter and the polling latency, and
+    # leaves the same workspace on disk — held by
+    # `test_synchronous_provisioning_lands_the_workspace_the_detached_route_lands`.
+    # `--no-session`: this fixture needs the workspace provisioned, not the
+    # tmux session `camp new` now creates by default.
+    import camp.provision.provision as provision
+    from camp.group.config import load_group
+    from camp.provision.lifecycle import cmd_setup_group
+
+    monkeypatch.setattr(provision, "spawn_detached_provisioner", lambda **kw: None)
+    r2 = run_camp(
+        ["new", "ws-slug", "--group", "rmgroup", "--no-session"],
         env={**env, "CAMP_TEST_NO_EXEC": "1"},
     )
     assert r2.returncode == 0, f"camp new failed: {r2.stderr}"
+    cmd_setup_group(load_group(groups_dir / "rmgroup.toml"), "ws-slug", env=env)
 
     ws_dir = state_dir / "rmgroup" / "worktrees" / "ws-slug"
-    manifest = ws_dir / "manifest.json"
-
-    # Wait for the detached background provisioner to complete so member
-    # worktrees exist on disk (needed for dirty-block tests).
-    _wait_provisioned(manifest, ["repo_a", "repo_b"])
 
     return {
         "env": env,
@@ -270,11 +266,19 @@ class TestCampRemoveAliasParity:
 
 class TestCampRemoveDirtyBlock:
     def _make_dirty(self, remove_env):
-        """Write an uncommitted file into the repo_a worktree."""
-        ws = remove_env["ws_dir"]
-        worktree_a = ws / "repo_a"
-        if worktree_a.is_dir():
-            (worktree_a / "dirty.txt").write_text("uncommitted change\n")
+        """Write an uncommitted file into the repo_a worktree.
+
+        The worktree must be there: every test below asserts that a *dirty*
+        worktree changes what `camp remove` does, and a silent no-op here
+        would leave them asserting that against a clean one — passing for the
+        wrong reason, whatever provisioning did.
+        """
+        worktree_a = remove_env["ws_dir"] / "repo_a"
+        assert worktree_a.is_dir(), (
+            f"the repo_a member worktree should be provisioned at {worktree_a}; "
+            "without it these tests would assert the dirty-block against a clean tree"
+        )
+        (worktree_a / "dirty.txt").write_text("uncommitted change\n")
 
     def test_dirty_worktree_blocked_without_force(self, remove_env):
         """camp remove without --force blocks on a dirty worktree (non-zero exit)."""

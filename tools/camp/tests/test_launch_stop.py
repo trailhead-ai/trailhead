@@ -27,6 +27,10 @@ Test contract:
 - A tmux that does not answer is its own refusal, never a stop: absence of the
   name is the only evidence of success, and an unanswered question is not
   absence. Every wait the engine takes is bounded.
+- Both wall-clock budgets resolve from the environment when the caller names
+  neither: an override moves the default, an explicit ``timeout=`` /
+  ``poll_timeout=`` still wins, and a malformed or non-positive setting leaves
+  the shipped budget alone.
 - ``Tmux.list_sessions`` extends the same tri-state to a general listing
   rather than a scoped existence query: a no-server condition on stderr is the
   only non-zero exit answered as empty, every other non-zero exit (and an
@@ -185,7 +189,7 @@ def _resumed_pane(harness, session_id: str) -> str:
     return f"env {scrub} " + " ".join(argv)
 
 
-def _stop(ref, *, tmux, transcripts=(), live_records=(), groups=None, env, harness=None):
+def _stop(ref, *, tmux, transcripts=(), live_records=(), groups=None, env, harness=None, **overrides):
     from camp.launch.stop import stop_session
 
     return stop_session(
@@ -198,6 +202,7 @@ def _stop(ref, *, tmux, transcripts=(), live_records=(), groups=None, env, harne
         tmux=tmux,
         now=_NOW,
         sleep=lambda _seconds: None,
+        **overrides,
     )
 
 
@@ -439,6 +444,11 @@ def test_a_session_still_present_after_the_kill_is_not_a_success(tmp_path: Path)
         live_records=[_record(_UUID_A, ws)],
         env=env,
         harness=harness,
+        # The subject is the outcome, not the budget: the engine polls once
+        # before it consults the deadline, so the shortest budget still
+        # exercises the whole path. TestStopBudgetEnvironmentSeams is where
+        # the budget itself is pinned.
+        poll_timeout=0.0,
     )
 
     assert isinstance(outcome, StillPresent)
@@ -1274,3 +1284,95 @@ def test_list_sessions_argv_is_list_sessions_with_dash_f(  # inert-gate: allow s
     assert captured["args"][0] == "tmux"
     assert "list-sessions" in captured["args"]
     assert "-F" in captured["args"]
+
+
+# ---------------------------------------------------------------------------
+# The two wall-clock budgets, and the environment seam over them
+# ---------------------------------------------------------------------------
+
+
+class _CountingTmux(_FakeTmux):
+    """A fake that records how many times the engine re-polled for absence."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.has_session_calls = 0
+
+    def has_session(self, name: str) -> bool:
+        self.has_session_calls += 1
+        return super().has_session(name)
+
+
+def _ticking_clock(step: float = 1.0):
+    """A monotonic clock advancing a fixed step per read.
+
+    The poll count then reads the budget directly: one read sets the deadline
+    and one more is spent per pass, so a longer budget buys proportionally more
+    polls and the two budgets are distinguishable without real waiting.
+    """
+    state = {"t": 0.0}
+
+    def _now() -> float:
+        state["t"] += step
+        return state["t"] - step
+
+    return _now
+
+
+class TestStopPollBudget:
+    """The re-poll budget is the caller's to name.
+
+    The engine reads no environment (see the module docstring): `camp kill`
+    resolves any override at its edge and passes it in. What is pinned here is
+    that the value passed is the one spent — the property that override relies
+    on. `CAMP_TEST_STOP_POLL_TIMEOUT_SECONDS` reaching this parameter is
+    pinned at the CLI, in `test_session_cli_kill_budget`.
+    """
+
+    _runs = 0
+
+    def _polls_before_giving_up(self, tmp_path, **kwargs):
+        """Drive a kill whose session never goes; return how many polls it managed."""
+        from camp.launch.stop import StillPresent
+
+        # Each call gets its own root: two calls per test is the point (a
+        # budget is only readable by comparing two of them), and `_fixture`
+        # builds a workspace tree that cannot be built twice in one place.
+        root = tmp_path / f"run{self._runs}"
+        self._runs += 1
+        root.mkdir()
+        state, ws, env, harness, derived, _unused = _fixture(root)
+        tmux = _CountingTmux(
+            {derived: _launched_pane(harness, _UUID_A, derived, ws)}, undead=True
+        )
+
+        outcome = _stop(
+            _UUID_A[:8],
+            tmux=tmux,
+            transcripts=[_transcript(_UUID_A, ws)],
+            live_records=[_record(_UUID_A, ws)],
+            env=env,
+            harness=harness,
+            monotonic=_ticking_clock(),
+            **kwargs,
+        )
+
+        assert isinstance(outcome, StillPresent)
+        return tmux.has_session_calls
+
+    def test_a_shorter_budget_buys_fewer_polls(self, tmp_path) -> None:
+        short = self._polls_before_giving_up(tmp_path, poll_timeout=1.0)
+        longer = self._polls_before_giving_up(tmp_path, poll_timeout=4.0)
+
+        assert short < longer, (
+            f"the budget should decide the polling: {short} polls at 1s, "
+            f"{longer} at 4s"
+        )
+
+    def test_the_default_is_the_shipped_budget(self, tmp_path) -> None:
+        """A caller naming nothing gets what every real kill gets."""
+        from camp.launch import stop
+
+        polls = self._polls_before_giving_up(tmp_path)
+
+        assert polls >= stop.POLL_TIMEOUT_SECONDS

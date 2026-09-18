@@ -2289,7 +2289,15 @@ def _cmd_kill_cli(args: list[str], env: dict[str, str] | None = None) -> None:
     exits 2, because there the rows are the answer.
     """
     from ..launch.recovery import Ambiguous, NoMatch
-    from ..launch.stop import AlreadyDown, Refused, StillPresent, stop_session
+    from ..launch.stop import (
+        POLL_TIMEOUT_ENV,
+        POLL_TIMEOUT_SECONDS,
+        AlreadyDown,
+        Refused,
+        StillPresent,
+        stop_session,
+    )
+    from ..launch.tmux import resolve_budget
     from ..spine import _die
 
     # `--group` is declared and ignored: a ref names the session outright, so
@@ -2331,6 +2339,12 @@ def _cmd_kill_cli(args: list[str], env: dict[str, str] | None = None) -> None:
 
     outcome = stop_session(
         ref,
+        # The engine reads no environment of its own, so the override on its
+        # re-poll budget is resolved here, from the env this verb already
+        # resolved, and passed in like any other caller's choice.
+        poll_timeout=resolve_budget(
+            POLL_TIMEOUT_ENV, POLL_TIMEOUT_SECONDS, resolved_env
+        ),
         # The ownership check asks a harness which pane commands IT composes, so
         # it needs one harness rather than the pool. Groups sharing a harness
         # but declaring different accounts are now separate pool entries, so

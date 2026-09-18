@@ -427,18 +427,27 @@ def _vault_mid_rebase(vault: Path) -> bool:
 
     Probed via ``rev-parse --git-path`` rather than a hand-built ``.git/...``
     path, because in a linked worktree ``.git`` is a file and the state dirs
-    live elsewhere.
+    live elsewhere. Both backends' directories are asked for in the one call —
+    ``rev-parse`` answers each ``--git-path`` on its own line — because this is
+    the most-called git probe in the resolve path and a second process per
+    check buys nothing.
 
     The single liveness authority for a resolution session (``cli.resolve_state``)
     as well as ``sync``'s abort verification: a stopped rebase leaves its state
     directory behind, and only its disappearance means the rebase is over.
     """
-    for state_dir in ("rebase-merge", "rebase-apply"):
-        rc, out, _ = _git(vault, "rev-parse", "--git-path", state_dir)
-        # `--git-path` output is relative to the vault when not absolute.
-        if rc == 0 and out and (vault / out).exists():
-            return True
-    return False
+    rc, out, _ = _git(
+        vault,
+        "rev-parse",
+        "--git-path",
+        "rebase-merge",
+        "--git-path",
+        "rebase-apply",
+    )
+    if rc != 0 or not out:
+        return False
+    # `--git-path` output is relative to the vault when not absolute.
+    return any((vault / line).exists() for line in out.splitlines() if line)
 
 
 def _vault_mid_merge(vault: Path) -> bool:

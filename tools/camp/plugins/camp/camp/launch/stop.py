@@ -115,6 +115,18 @@ __all__ = [
 POLL_TIMEOUT_SECONDS = 5.0
 POLL_INTERVAL_SECONDS = 0.1
 
+#: Environment override for the budget above, in seconds, read by the `camp
+#: kill` CLI and passed in as `poll_timeout=`. This module deliberately reads
+#: no environment of its own (see the module docstring), so the name lives
+#: here — beside the budget it moves — and the edge does the reading.
+#:
+#: The budget is sized for a busy tmux server, so a test driving a session
+#: that never goes waits all of it before seeing the failure it is asserting.
+#: `camp kill` runs as a subprocess under test, so the `poll_timeout=`
+#: parameter alone cannot reach it.
+POLL_TIMEOUT_ENV = "CAMP_TEST_STOP_POLL_TIMEOUT_SECONDS"
+
+
 #: Where the concierge supervisor publishes the id of the anchor session,
 #: under its own state dir. camp reads it; camp never writes it. The directory
 #: is resolved through `trailhead.paths` (Axiom 4), which spells the same rule

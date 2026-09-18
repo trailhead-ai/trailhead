@@ -121,6 +121,35 @@ _CONFIRM_POLL_INTERVAL_SECONDS = 0.5
 #: does not hang the CLI indefinitely.
 _CONFIRM_POLL_TIMEOUT_SECONDS = 30.0
 
+#: Environment override for the budget above, in seconds.
+#:
+#: The budget is sized for a cold harness boot on a contended machine, so a
+#: caller driving a launch that cannot confirm waits all of it before seeing
+#: the refusal. That is the right behaviour for a real launch and pure dead
+#: time for a test that is asserting the refusal, so the budget is readable
+#: from the environment — the same shape as the other `CAMP_TEST_*` seams.
+#: Only the default is affected: a caller passing `timeout=` still gets
+#: exactly what it asked for.
+_CONFIRM_TIMEOUT_ENV = "CAMP_TEST_CONFIRM_TIMEOUT_SECONDS"
+
+
+def _resolve_confirm_timeout() -> float:
+    """Return the confirmation budget, honouring the environment override.
+
+    An absent, unparseable, or non-positive value leaves the shipped budget in
+    place: a stray or malformed setting must not be able to shorten a real
+    launch's confirmation window to nothing, which would turn a slow boot into
+    a refusal.
+    """
+    raw = os.environ.get(_CONFIRM_TIMEOUT_ENV)
+    if raw is None:
+        return _CONFIRM_POLL_TIMEOUT_SECONDS
+    try:
+        override = float(raw)
+    except ValueError:
+        return _CONFIRM_POLL_TIMEOUT_SECONDS
+    return override if override > 0 else _CONFIRM_POLL_TIMEOUT_SECONDS
+
 #: Bound on each `tmux set-environment` call stating the session environment.
 #: These are client requests against a server that is already up (the spawn just
 #: used it), so they are fast; the bound only keeps a wedged tmux from hanging a
@@ -1164,7 +1193,7 @@ def confirm_session(
     *,
     env: dict[str, str] | None = None,
     interval: float = _CONFIRM_POLL_INTERVAL_SECONDS,
-    timeout: float = _CONFIRM_POLL_TIMEOUT_SECONDS,
+    timeout: float | None = None,
     sleep=time.sleep,
     clock=time.monotonic,
     tmux: Tmux | None = None,
@@ -1173,6 +1202,9 @@ def confirm_session(
 
     Polls ``harness.session_enumerate(launched.launch_dir)`` at *interval* up to
     *timeout*, testing exact-string membership of ``launched.session_id``. A
+    *timeout* of ``None`` resolves the budget through
+    :func:`_resolve_confirm_timeout`, which is :data:`_CONFIRM_POLL_TIMEOUT_SECONDS`
+    unless the environment overrides it. A
     :class:`HarnessError` mid-poll (e.g. an unsafe-argv guard tripping), any
     :class:`OSError` (a missing harness binary as :class:`FileNotFoundError` — camp
     only which-checks tmux, not the harness — or a launch dir yanked out from under
@@ -1205,6 +1237,8 @@ def confirm_session(
     """
     from trailhead.harness import HarnessError
 
+    if timeout is None:
+        timeout = _resolve_confirm_timeout()
     tmux = tmux if tmux is not None else Tmux()
     env = dict(env if env is not None else os.environ)
     start = clock()

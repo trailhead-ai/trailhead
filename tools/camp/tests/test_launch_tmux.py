@@ -8,6 +8,10 @@ Test contract (see task/promote-camp-s-tmux-boundary-to-a-seam-that-owns-every-t
   byte-for-byte. The `-s`-is-not-a-target half of the `=` property.
 - `capture_pane` and `set_environment` each address the exactly-named
   session, never one it prefixes.
+- The per-call budget every tmux invocation carries resolves from the
+  environment when the caller names none: an override moves the default, an
+  explicit `timeout=` still wins, and a malformed or non-positive setting
+  leaves the shipped budget alone.
 - The tri-state contract: `has_session` answers True/False/None,
   `list_sessions` answers a `SessionListing` only on the no-server stderr
   shape and `UNANSWERED` otherwise.
@@ -23,6 +27,8 @@ from __future__ import annotations
 
 import subprocess
 import sys
+
+import pytest
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -406,3 +412,58 @@ def test_new_session_names_with_s_unprefixed_while_a_target_in_the_same_flow_is_
     assert new_session_call[new_session_call.index("-s") + 1] != tmux_module.target(
         name
     )
+
+
+# ---------------------------------------------------------------------------
+# The per-call budget, and the environment seam over it
+# ---------------------------------------------------------------------------
+
+
+class TestTmuxTimeoutEnvironmentSeam:
+    """Every tmux call is bounded, and the bound is overridable for tests.
+
+    The budget absorbs a busy tmux server, so a test driving a question tmux
+    will never answer sits out the whole of it to observe the refusal it is
+    asserting — and those tests drive camp as a subprocess, where the
+    `timeout=` parameter cannot reach.
+    """
+
+    def _timeout_applied(self, monkeypatch, override, **kwargs):
+        """Return the bound `Tmux` actually hands ``subprocess.run``."""
+        import camp.launch.tmux as tmux_module
+
+        if override is None:
+            monkeypatch.delenv("CAMP_TEST_TMUX_TIMEOUT_SECONDS", raising=False)
+        else:
+            monkeypatch.setenv("CAMP_TEST_TMUX_TIMEOUT_SECONDS", override)
+        captured: dict[str, float] = {}
+
+        def _capture(argv, **kw):
+            captured["timeout"] = kw["timeout"]
+            return _completed(returncode=0, stdout="")
+
+        monkeypatch.setattr(tmux_module.subprocess, "run", _capture)
+        tmux_module.Tmux(**kwargs).has_session("camp-feat-a-11112222")
+        return captured["timeout"]
+
+    def test_an_override_shortens_the_bound_actually_applied(self, monkeypatch) -> None:
+        short = self._timeout_applied(monkeypatch, "0.25")
+        shipped = self._timeout_applied(monkeypatch, None)
+
+        assert short < shipped
+        assert short == pytest.approx(0.25)
+
+    def test_an_explicit_timeout_still_beats_the_environment(self, monkeypatch) -> None:
+        """The seam moves the default only — an injecting caller is untouched."""
+        assert self._timeout_applied(monkeypatch, "0.25", timeout=2.0) == pytest.approx(2.0)
+
+    @pytest.mark.parametrize("bad", ["", "abc", "0", "-1"])
+    def test_a_malformed_or_non_positive_override_leaves_the_shipped_bound(
+        self, monkeypatch, bad
+    ) -> None:
+        """A stray setting must not shrink a real caller's bound to nothing."""
+        import camp.launch.tmux as tmux_module
+
+        applied = self._timeout_applied(monkeypatch, bad)
+
+        assert applied == pytest.approx(tmux_module.TMUX_TIMEOUT_SECONDS)

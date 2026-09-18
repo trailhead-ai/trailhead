@@ -99,6 +99,7 @@ assert _helpers_spec and _helpers_spec.loader, _HELPERS_SOURCE
 _helpers = importlib.util.module_from_spec(_helpers_spec)
 _helpers_spec.loader.exec_module(_helpers)
 init_git_repo = _helpers.init_git_repo
+run_camp = _helpers.run_camp
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
@@ -412,6 +413,22 @@ def cli_env(tmp_path: Path):
     env = {**os.environ}
     env["CAMP_CONFIG_DIR"] = str(config_dir)
     env["CAMP_STATE_DIR"] = str(state_dir)
+    # The shipped confirmation budget is sized for a cold `claude` boot on a
+    # loaded machine. The harness here is a stub that answers immediately, so
+    # a launch that is going to confirm does so on the first poll or two, and
+    # every test that drives one which CANNOT confirm would otherwise sit out
+    # the full budget in real seconds to observe a refusal it is asserting.
+    # Well above what the stub needs, far below what waiting costs.
+    env["CAMP_TEST_CONFIRM_TIMEOUT_SECONDS"] = "5"
+    # `camp kill` carries two budgets of its own, both sized for a busy tmux
+    # server. The fake tmux here is a local script, so the only tests that
+    # spend either budget are the ones deliberately driving a tmux that hangs
+    # or a session that never goes — each sitting out the full budget to
+    # observe the outcome it asserts. Both are margins over what the fake
+    # needs, not measured floors: raise them first if these ever go flaky
+    # under heavy parallelism.
+    env["CAMP_TEST_TMUX_TIMEOUT_SECONDS"] = "2"
+    env["CAMP_TEST_STOP_POLL_TIMEOUT_SECONDS"] = "1"
     env["CAMP_FAKE_SESSIONS_FILE"] = str(sessions_file)
     env["TRAILHEAD_CLAUDE_DIR"] = str(tmp_path / "claude")
     env["CAMP_FAKE_TMUX_ARGV_FILE"] = str(tmux_argv_file)
@@ -426,12 +443,10 @@ def cli_env(tmp_path: Path):
         ("mygroup", "fakeharness", repo_a),
         ("badgroup", "nosuchharness", repo_b),
     ):
-        result = subprocess.run(
-            [sys.executable, str(_CLI_CAMP), "group", name, "--member", f"member={repo}"],
-            capture_output=True,
-            text=True,
-            env=env,
-        )
+        # Authored in-process: the fixture wants the group on disk, not the
+        # fact that a separate interpreter wrote it. Every camp call a test
+        # then makes — the thing under test here — is still a real subprocess.
+        result = run_camp(["group", name, "--member", f"member={repo}"], env=env)
         assert result.returncode == 0, f"group authoring failed: {result.stderr}"
         _set_harness_binary(config_dir, name, binary)
 

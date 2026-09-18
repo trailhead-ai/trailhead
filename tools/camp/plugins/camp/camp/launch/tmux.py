@@ -53,6 +53,33 @@ from typing import Mapping, Sequence
 #: Bound on any single tmux call that does not name its own timeout.
 TMUX_TIMEOUT_SECONDS = 5.0
 
+#: Environment override for the budget above, in seconds.
+#:
+#: The budget is sized for a busy tmux server, so a caller driving a question
+#: tmux will never answer waits all of it before seeing the refusal. That is
+#: right for a real call and pure dead time for a test asserting the refusal,
+#: so the default is readable from the environment — the same shape as the
+#: other `CAMP_TEST_*` seams. Only the default: a caller passing `timeout=`
+#: still gets exactly what it asked for.
+_TMUX_TIMEOUT_ENV = "CAMP_TEST_TMUX_TIMEOUT_SECONDS"
+
+
+def resolve_budget(name: str, shipped: float, env: Mapping[str, str] | None = None) -> float:
+    """Return the budget *name* overrides in *env*, else *shipped*.
+
+    An absent, unparseable or non-positive value leaves the shipped budget in
+    place: a stray or malformed setting must not be able to shrink a real
+    call's window to nothing, which would report a busy tmux as a failure.
+    """
+    raw = (os.environ if env is None else env).get(name)
+    if raw is None:
+        return shipped
+    try:
+        override = float(raw)
+    except ValueError:
+        return shipped
+    return override if override > 0 else shipped
+
 
 class _Unanswered:
     """The sentinel a tmux question comes back with when tmux did not answer.
@@ -120,8 +147,12 @@ def target(name: str) -> str:
 class Tmux:
     """Every tmux invocation camp performs, behind one seam."""
 
-    def __init__(self, *, timeout: float = TMUX_TIMEOUT_SECONDS) -> None:
-        self._timeout = timeout
+    def __init__(self, *, timeout: float | None = None) -> None:
+        self._timeout = (
+            timeout
+            if timeout is not None
+            else resolve_budget(_TMUX_TIMEOUT_ENV, TMUX_TIMEOUT_SECONDS)
+        )
 
     def _run(
         self,

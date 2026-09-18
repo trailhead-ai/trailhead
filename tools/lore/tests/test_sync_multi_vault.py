@@ -58,7 +58,7 @@ import sys
 import time
 from pathlib import Path
 
-from conftest import write_vault_config
+from conftest import make_bare_remote, write_vault_config
 from test_vault_write_lock import _spawn_holder
 
 sync_mod = importlib.import_module("lore.cli.sync")
@@ -105,8 +105,7 @@ def _make_vault(path: Path, *, commit: bool = True, dirty: bool = True) -> Path:
 
 
 def _make_bare_remote(path: Path) -> Path:
-    subprocess.run(["git", "init", "--bare", str(path)], check=True, capture_output=True)
-    return path
+    return make_bare_remote(path)
 
 
 def _wire_remote(vault: Path, remote: Path, *, track: bool = True) -> None:

@@ -32,7 +32,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from conftest import CLI_PATH, load_script, run_cli, write_vault_config
+from conftest import CLI_PATH, load_script, make_git_vault, run_cli, write_vault_config
 
 
 # ── harness ────────────────────────────────────────────────────────────────
@@ -49,14 +49,7 @@ def _git_config(path: Path) -> None:
 
 
 def _init_vault(path: Path) -> Path:
-    path.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["git", "init", str(path)], check=True, capture_output=True)
-    _git_config(path)
-    (path / ".gitignore").write_text("*.lock\n")
-    (path / "README.md").write_text("vault\n")
-    _git(path, "add", "-A")
-    _git(path, "commit", "-m", "init")
-    return path
+    return make_git_vault(path)
 
 
 def _commit(vault: Path, message: str) -> str:
