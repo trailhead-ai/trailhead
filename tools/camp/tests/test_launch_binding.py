@@ -19,6 +19,7 @@ there IS to test is the idempotency decision and the command it composes.
 
 from __future__ import annotations
 
+import subprocess
 import sys
 from pathlib import Path
 
@@ -28,16 +29,15 @@ if str(_PLUGIN_DIR) not in sys.path:
     sys.path.insert(0, str(_PLUGIN_DIR))
 
 
-class _Completed:
-    """Stand-in for `subprocess.CompletedProcess` — only `returncode` and
-    `stderr` are read by `remove_window_key_binding`."""
+def _completed(*, returncode: int = 0, stderr: str = "") -> subprocess.CompletedProcess:
+    """What the real `Tmux` seam hands back — `subprocess.CompletedProcess`,
+    the same type every other tmux double in this suite returns."""
+    return subprocess.CompletedProcess(
+        args=["tmux"], returncode=returncode, stdout="", stderr=stderr
+    )
 
-    def __init__(self, *, returncode: int = 0, stderr: str = "") -> None:
-        self.returncode = returncode
-        self.stderr = stderr
 
-
-_OK = _Completed(returncode=0)
+_OK = _completed()
 
 
 class _FakeTmux:
@@ -172,7 +172,7 @@ def test_remove_window_key_binding_raises_camps_own_message_on_non_zero_exit():
     from camp.launch.binding import WindowBindingRemovalError, remove_window_key_binding
 
     tmux = _FakeTmux()
-    tmux._reset_result = _Completed(returncode=1, stderr="some tmux server error")
+    tmux._reset_result = _completed(returncode=1, stderr="some tmux server error")
 
     try:
         remove_window_key_binding(tmux)
@@ -193,7 +193,7 @@ def test_remove_window_key_binding_succeeds_when_no_tmux_server_is_running_at_al
     from camp.launch.binding import remove_window_key_binding
 
     tmux = _FakeTmux()
-    tmux._reset_result = _Completed(
+    tmux._reset_result = _completed(
         returncode=1,
         stderr="error connecting to /tmp/tmux-501/camp_test_sock (No such file or directory)",
     )
