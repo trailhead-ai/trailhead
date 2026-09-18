@@ -106,6 +106,7 @@ class _DoorTmux:
         create_returncode: int = 0,
         create_stderr: str = "",
         switch_client_returncode: int = 0,
+        switch_client_stderr: str = "",
         switch_client_unanswered: bool = False,
         unanswered_reason: str = "no such file or directory",
     ) -> None:
@@ -114,6 +115,7 @@ class _DoorTmux:
         self._create_returncode = create_returncode
         self._create_stderr = create_stderr
         self._switch_client_returncode = switch_client_returncode
+        self._switch_client_stderr = switch_client_stderr
         self._switch_client_unanswered = switch_client_unanswered
         self._unanswered_reason = unanswered_reason
         self.has_session_calls: list[str] = []
@@ -142,7 +144,10 @@ class _DoorTmux:
         if self._switch_client_unanswered:
             return None
         return subprocess.CompletedProcess(
-            args=["tmux"], returncode=self._switch_client_returncode, stdout="", stderr=""
+            args=["tmux"],
+            returncode=self._switch_client_returncode,
+            stdout="",
+            stderr=self._switch_client_stderr,
         )
 
 
@@ -364,20 +369,29 @@ def test_inside_tmux_switch_client_failure_exits_with_its_own_returncode(
 ) -> None:
     """A handover can fail after the outcome line is already printed — the
     created/connected report must survive it, and the exit status must be
-    the switch-client call's own, not swallowed into a generic failure."""
+    the switch-client call's own, not swallowed into a generic failure.
+    tmux's own stderr from the failed switch-client must reach the operator
+    too — an operator inside tmux sees only this process's streams, so a
+    silent nonzero exit here is the one arm that would explain nothing."""
     _isolated_env(tmp_path, monkeypatch)
     monkeypatch.setenv("TMUX", "/tmp/tmux-1000/default,1234,0")
-    tmux = _DoorTmux(present=False, switch_client_returncode=3)
+    tmux = _DoorTmux(
+        present=False,
+        switch_client_returncode=3,
+        switch_client_stderr="no current client\n",
+    )
     _wire_one_workspace(monkeypatch, tmp_path=tmp_path, tmux=tmux)
     monkeypatch.setattr(sys, "stdin", _FakeTTY())
     fake_stdout = _FakeTTY()
     monkeypatch.setattr(sys, "stdout", fake_stdout)
 
     code = _run(["attach", "camp-cli", "--group", "g"], monkeypatch)
+    err = capsys.readouterr().err
 
     assert code == 3
     assert "created" in fake_stdout.getvalue()
     assert tmux.switch_client_calls == [_derived_name("g", "camp-cli")]
+    assert "no current client" in err
 
 
 def test_inside_tmux_switch_client_unanswered_exits_one(
@@ -593,6 +607,45 @@ def test_unrecognised_failure_with_reprobe_absent_refuses_never_reaching_exec(
 
     assert code == 1
     assert "error: unsafe socket directory" in err
+    assert _derived_name("g", "camp-cli") in err, (
+        "the refusal must name the session it could not create, not tmux's "
+        "stderr alone"
+    )
+
+
+class _RaisingCreateDoorTmux(_DoorTmux):
+    """A `_DoorTmux` whose `new_session` raises instead of answering — the
+    shape a wedged tmux server-start (a plugin-heavy `tmux.conf`, a loaded
+    machine) takes at the one call that starts the tmux SERVER."""
+
+    def __init__(self, *, exc: BaseException, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self._exc = exc
+
+    def new_session(self, name, *, cwd, env=None, timeout=None):
+        self.new_session_calls.append({"name": name, "cwd": cwd, "env": env})
+        raise self._exc
+
+
+def test_a_create_call_that_raises_refuses_with_its_own_message_never_a_traceback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """`camp attach` must never surface a raw traceback for a create call
+    that times out or hits an unlaunchable tmux — it refuses, naming the
+    session and carrying the exception's own message, same as any other
+    create failure."""
+    exc = subprocess.TimeoutExpired(cmd=["tmux", "new-session"], timeout=5)
+    tmux = _RaisingCreateDoorTmux(present=False, exc=exc)
+    _isolated_env(tmp_path, monkeypatch)
+    _wire_one_workspace(monkeypatch, tmp_path=tmp_path, tmux=tmux)
+
+    code = _run(["attach", "camp-cli", "--group", "g"], monkeypatch)
+    err = capsys.readouterr().err
+
+    assert code == 1
+    assert str(exc) in err
+    assert _derived_name("g", "camp-cli") in err
+    assert len(tmux.new_session_calls) == 1
 
 
 # ---------------------------------------------------------------------------

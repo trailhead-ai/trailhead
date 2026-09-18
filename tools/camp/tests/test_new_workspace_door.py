@@ -109,6 +109,7 @@ class _DoorTmux:
         create_returncode: int = 0,
         create_stderr: str = "",
         switch_client_returncode: int = 0,
+        switch_client_stderr: str = "",
         switch_client_unanswered: bool = False,
         unanswered_reason: str = "no such file or directory",
     ) -> None:
@@ -117,6 +118,7 @@ class _DoorTmux:
         self._create_returncode = create_returncode
         self._create_stderr = create_stderr
         self._switch_client_returncode = switch_client_returncode
+        self._switch_client_stderr = switch_client_stderr
         self._switch_client_unanswered = switch_client_unanswered
         self._unanswered_reason = unanswered_reason
         self.has_session_calls: list[str] = []
@@ -145,7 +147,10 @@ class _DoorTmux:
         if self._switch_client_unanswered:
             return None
         return subprocess.CompletedProcess(
-            args=["tmux"], returncode=self._switch_client_returncode, stdout="", stderr=""
+            args=["tmux"],
+            returncode=self._switch_client_returncode,
+            stdout="",
+            stderr=self._switch_client_stderr,
         )
 
 
@@ -244,14 +249,17 @@ def test_bare_inside_tmux_reaches_switch_client_never_the_exec_seam(
 
 
 def test_inside_tmux_switch_client_failure_exits_with_its_own_returncode(
-    camp_cli, group_env, monkeypatch
+    camp_cli, group_env, monkeypatch, capsys
 ):
     """`camp new` reaches the switch-client arm through the same handover
     `camp attach` uses, and its own failure must surface here too — a
-    handover can fail after the outcome line already printed."""
+    handover can fail after the outcome line already printed, and tmux's
+    own stderr must reach the operator rather than a silent nonzero exit."""
     g = dict(group_env)
     g["env"] = {**g["env"], "TMUX": "/tmp/tmux-1000/default,1234,0"}
-    tmux = _DoorTmux(present=False, switch_client_returncode=5)
+    tmux = _DoorTmux(
+        present=False, switch_client_returncode=5, switch_client_stderr="no current client\n"
+    )
     _wire_tmux(monkeypatch, tmux)
     monkeypatch.setattr(sys, "stdin", _FakeTTY())
     fake_stdout = _FakeTTY()
@@ -261,6 +269,7 @@ def test_inside_tmux_switch_client_failure_exits_with_its_own_returncode(
         camp_cli._cmd_new_group_cli(["feat-inside-fail"], g["group"], g["env"], dry_run=False)
 
     assert exc.value.code == 5
+    assert "no current client" in capsys.readouterr().err
 
 
 def test_inside_tmux_switch_client_unanswered_exits_one(
@@ -592,6 +601,43 @@ def test_create_failure_exits_zero_with_path_on_stdout_and_reason_on_stderr(
     ws_dir = workspace_dir("g", "feat-createfail", env=g["env"])
     assert captured.out.rstrip("\n").splitlines()[-1] == str(ws_dir)
     assert injected_stderr in captured.err, "tmux's own words reach stderr, varying with input"
+
+
+class _RaisingCreateDoorTmux(_DoorTmux):
+    """A `_DoorTmux` whose `new_session` raises instead of answering — the
+    shape a wedged tmux server-start (a plugin-heavy `tmux.conf`, a loaded
+    machine) takes at the one call that starts the tmux SERVER."""
+
+    def __init__(self, *, exc: BaseException, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self._exc = exc
+
+    def new_session(self, name, *, cwd, env=None, timeout=None):
+        self.new_session_calls.append({"name": name, "cwd": cwd, "env": env})
+        raise self._exc
+
+
+def test_a_create_call_that_raises_reports_workspace_only_never_a_traceback(
+    camp_cli, group_env, monkeypatch, capsys
+):
+    """`camp new` must never surface a raw traceback for a create call that
+    times out or hits an unlaunchable tmux — the workspace already exists on
+    disk, so it reports workspace-only, exit 0, carrying the exception's own
+    message and the session it could not create."""
+    g = group_env
+    exc = subprocess.TimeoutExpired(cmd=["tmux", "new-session"], timeout=5)
+    tmux = _RaisingCreateDoorTmux(present=False, exc=exc)
+    _wire_tmux(monkeypatch, tmux)
+
+    code = _run_capturing_exit(
+        camp_cli._cmd_new_group_cli, ["feat-createraise"], g["group"], g["env"], dry_run=False
+    )
+
+    assert code == 0
+    captured = capsys.readouterr()
+    assert str(exc) in captured.err
+    assert _derived_name("g", "feat-createraise") in captured.err
+    assert len(tmux.new_session_calls) == 1
 
 
 @pytest.mark.parametrize(

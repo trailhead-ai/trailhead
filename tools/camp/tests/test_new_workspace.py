@@ -130,6 +130,51 @@ class TestNewSlug:
         assert execs == [], "the launch path is gone — no harness exec must be attempted"
 
 
+class TestJsonRequiresLaunchRefusesBeforeAnySideEffect:
+    """`--no-session --json` without `--launch` is a documented refusal —
+    `--no-session`'s whole point is to reproduce the pre-flip surface
+    exactly, and that surface never created a workspace or spawned a
+    provisioner just to then refuse. The refusal must happen before
+    `bring_up_workspace`, not after."""
+
+    def test_refuses_before_bring_up_workspace_is_ever_called(
+        self, camp_cli, group_env, monkeypatch, capsys
+    ):
+        import camp.provision.provision as provision
+
+        g = group_env
+        calls: list[str] = []
+        monkeypatch.setattr(
+            provision, "bring_up_workspace", lambda *a, **k: calls.append("called")
+        )
+
+        with pytest.raises(SystemExit) as exc:
+            camp_cli._cmd_new_group_cli(
+                ["feat-refuse", "--no-session", "--json"], g["group"], g["env"], dry_run=False
+            )
+
+        assert exc.value.code == 1
+        assert calls == [], "bring_up_workspace must never run before the refusal"
+
+    def test_refusal_leaves_no_workspace_and_empty_stdout(
+        self, camp_cli, group_env, capsys
+    ):
+        g = group_env
+
+        with pytest.raises(SystemExit) as exc:
+            camp_cli._cmd_new_group_cli(
+                ["feat-refuse2", "--no-session", "--json"], g["group"], g["env"], dry_run=False
+            )
+
+        assert exc.value.code == 1
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert "requires --launch" in captured.err
+        assert not _manifest_path(g["env"], "feat-refuse2").exists(), (
+            "no workspace may be seeded ahead of the refusal"
+        )
+
+
 class TestExistingWorkspace:
     def test_existing_workspace_reenters_same_path_no_reseed(
         self, camp_cli, group_env, monkeypatch, capsys

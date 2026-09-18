@@ -50,13 +50,35 @@ class _FakeTmux:
         self.calls: list[dict[str, object]] = []
 
     def new_session(self, name, *, cwd, env=None, timeout=None):
-        self.calls.append({"name": name, "cwd": cwd, "env": env})
+        self.calls.append({"name": name, "cwd": cwd, "env": env, "timeout": timeout})
         return subprocess.CompletedProcess(
             args=["tmux"],
             returncode=self._returncode,
             stdout="",
             stderr=self._stderr,
         )
+
+
+def test_the_create_call_carries_a_budget_wide_enough_to_start_a_tmux_server(tmp_path):
+    """`new_session` is the one call that starts the tmux SERVER when none is
+    running yet — the same operation `camp launch`'s own spawn budgets 30s
+    for (`_SPAWN_TIMEOUT_SECONDS`, `launch/session.py`). The seam's own
+    default (`Tmux.__init__`'s 5s) is tuned for a quick existence probe, not
+    a server bring-up, so this call states its own wider timeout rather than
+    inheriting that default."""
+    from camp.launch.workspace_session import create_workspace_session
+
+    ws_dir = tmp_path / "workspace"
+    ws_dir.mkdir()
+    tmux = _FakeTmux()
+
+    create_workspace_session("g", "feat-x", ws_dir, env={"HOME": str(tmp_path)}, tmux=tmux)
+
+    assert len(tmux.calls) == 1
+    assert tmux.calls[0]["timeout"] == 30
+    assert tmux.calls[0]["timeout"] != 5.0, (
+        "must not merely inherit the seam's short probe default"
+    )
 
 
 def test_creating_against_a_free_name_produces_a_session_at_that_name_rooted_at_the_workspace_dir(
@@ -244,6 +266,60 @@ def test_a_credential_store_launch_error_during_create_folds_into_create_failed_
     assert probe.state is DoorState.CREATE_FAILED
     assert "credential" in probe.reason.lower() or ".ssh" in probe.reason
     assert tmux.new_session_calls == [], "the gate refuses before any create call reaches tmux"
+
+
+class _RaisingCreateTmux:
+    """A tmux stand-in whose `new_session` raises instead of answering —
+    the shape the real `Tmux.new_session` (via `Tmux.spawn_session`) takes
+    when the create call itself times out or the binary is unlaunchable,
+    rather than completing with a non-zero exit."""
+
+    def __init__(self, *, present: bool | None = False, exc: BaseException) -> None:
+        self._present = present
+        self._exc = exc
+        self.new_session_calls: list[dict[str, object]] = []
+
+    def has_session_with_reason(self, name: str):
+        return self._present, None
+
+    def new_session(self, name, *, cwd, env=None, timeout=None):
+        self.new_session_calls.append({"name": name, "cwd": cwd, "env": env})
+        raise self._exc
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [
+        subprocess.TimeoutExpired(cmd=["tmux", "new-session"], timeout=5),
+        FileNotFoundError("[Errno 2] No such file or directory: 'tmux'"),
+    ],
+    ids=["timeout", "unlaunchable"],
+)
+def test_a_create_call_that_raises_folds_into_create_failed_with_its_own_message(
+    tmp_path, exc
+):
+    """`Tmux.new_session` is unwrapped in the real seam — a plugin-heavy
+    tmux.conf or a loaded machine can raise `OSError` or
+    `TimeoutExpired` starting the tmux server. That must fold into
+    `CREATE_FAILED` carrying the exception's own message, exactly like the
+    `LaunchError` fold above, rather than escape as a raw traceback to
+    either door."""
+    from camp.launch.workspace_session import (
+        DoorState,
+        create_or_connect_workspace_session,
+    )
+
+    ws_dir = tmp_path / "workspace"
+    ws_dir.mkdir()
+    tmux = _RaisingCreateTmux(present=False, exc=exc)
+
+    probe = create_or_connect_workspace_session(
+        "trailhead", "camp-cli", ws_dir, env={"HOME": str(tmp_path)}, tmux=tmux
+    )
+
+    assert probe.state is DoorState.CREATE_FAILED
+    assert str(exc) in probe.reason
+    assert len(tmux.new_session_calls) == 1
 
 
 def test_tmux_unanswered_reason_carries_the_seams_own_words(tmp_path):

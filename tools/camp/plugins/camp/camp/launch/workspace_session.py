@@ -48,6 +48,7 @@ sites.
 
 from __future__ import annotations
 
+import subprocess
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -63,6 +64,14 @@ from .tmux import Tmux
 #: of the whole stderr line, never as the whole line, because tmux does not
 #: guarantee nothing precedes it.
 _DUPLICATE_SESSION_MARKER = "duplicate session:"
+
+#: This create is the one call that starts the tmux SERVER when none is
+#: running yet — the same operation `camp launch`'s own spawn budgets 30s for
+#: (`_SPAWN_TIMEOUT_SECONDS`, `launch/session.py`). `Tmux`'s own default
+#: (`TMUX_TIMEOUT_SECONDS`, 5s) is tuned for a quick existence probe, not a
+#: server bring-up, so this call states its own budget rather than
+#: inheriting that default.
+_CREATE_SESSION_TIMEOUT_SECONDS = 30
 
 
 class WorkspaceSessionOutcome(Enum):
@@ -107,7 +116,9 @@ def create_workspace_session(
 
     tmux = tmux if tmux is not None else Tmux()
     name = workspace_session_name(group_name, slug)
-    result = tmux.new_session(name, cwd=workspace_dir, env=env)
+    result = tmux.new_session(
+        name, cwd=workspace_dir, env=env, timeout=_CREATE_SESSION_TIMEOUT_SECONDS
+    )
 
     if result.returncode == 0:
         return WorkspaceSessionResult(WorkspaceSessionOutcome.CREATED, name)
@@ -173,23 +184,29 @@ def create_or_connect_workspace_session(
     distinct from a create that was attempted and failed
     (:data:`DoorState.CREATE_FAILED`, carrying tmux's own words too).
 
-    :func:`create_workspace_session` also raises
-    :class:`~camp.launch.session.LaunchError` — unconditionally, before any
-    tmux call — when the credential-store gate refuses, including when it
-    cannot even be evaluated because some group's config is unreadable (see
-    :func:`~camp.launch.eligibility.assert_not_a_credential_store`). Both
-    doors share this call, so both would otherwise see a raw traceback
-    instead of a refusal; this function catches it here, once, and folds it
-    into :data:`DoorState.CREATE_FAILED` with the exception's own message as
-    the reason — the same shape any other tmux-boundary create failure
-    reports. `camp attach` turns that into `RefusedCreateFailed` and refuses;
-    `camp new` reports it on the existing workspace-only path, because the
-    workspace this gate is guarding a *session* for is already real and
-    usable on disk regardless of whether the session comes up — the same
-    reasoning that already routes an unanswered tmux and an ordinary create
-    failure there. :func:`create_workspace_session` itself keeps raising for
-    its OWN direct callers (`launch_session`'s own gate, and the tests that
-    exercise it directly) — only this shared door step catches it.
+    :func:`create_workspace_session` also raises two things this function
+    catches, once, on the caller's behalf: :class:`~camp.launch.session.LaunchError`
+    — unconditionally, before any tmux call — when the credential-store gate
+    refuses, including when it cannot even be evaluated because some group's
+    config is unreadable (see
+    :func:`~camp.launch.eligibility.assert_not_a_credential_store`); and
+    `OSError` / `subprocess.TimeoutExpired` straight out of
+    :meth:`~camp.launch.tmux.Tmux.new_session`, which does not swallow them
+    (unlike this seam's other tmux calls) — the one call that starts the
+    tmux SERVER when none is running, and so the one most likely to time out
+    on a plugin-heavy `tmux.conf` or a loaded machine. Both doors share this
+    call, so both would otherwise see a raw traceback instead of a refusal;
+    every one of these folds into :data:`DoorState.CREATE_FAILED`, naming
+    the derived session and carrying the exception's own message — the same
+    shape any other tmux-boundary create failure reports. `camp attach`
+    turns that into `RefusedCreateFailed` and refuses; `camp new` reports it
+    on the existing workspace-only path, because the workspace this gate is
+    guarding a *session* for is already real and usable on disk regardless
+    of whether the session comes up — the same reasoning that already
+    routes an unanswered tmux and an ordinary create failure there.
+    :func:`create_workspace_session` itself keeps raising for its OWN direct
+    callers (`launch_session`'s own gate, and the tests that exercise it
+    directly) — only this shared door step catches any of this.
 
     *tmux* is required, never defaulted: both callers inject the seam their
     own wiring resolved, and a default constructed here would silently
@@ -208,11 +225,11 @@ def create_or_connect_workspace_session(
 
     try:
         result = create_workspace_session(group_name, slug, workspace_dir, env=env, tmux=tmux)
-    except LaunchError as exc:
+    except (LaunchError, OSError, subprocess.TimeoutExpired) as exc:
         return DoorProbe(
             DoorState.CREATE_FAILED,
             name,
-            reason=f"failed to create workspace session — {exc}",
+            reason=f"could not create {name} — {exc}",
         )
     if result.outcome is WorkspaceSessionOutcome.CREATED:
         return DoorProbe(DoorState.CREATED, name)
@@ -223,5 +240,5 @@ def create_or_connect_workspace_session(
     return DoorProbe(
         DoorState.CREATE_FAILED,
         name,
-        reason=f"failed to create workspace session — {result.error}",
+        reason=f"could not create {name} — {result.error}",
     )
