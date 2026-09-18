@@ -241,6 +241,72 @@ def test_the_report_carries_absent_distinctly_from_a_null_value(resolve):
     assert payload["conflicts"][0]["remote"]["absent"] is False
 
 
+# ── the three-way stage answer: parsed / absent / unreadable ───────────────
+
+
+def _stage_blob(vault: Path, stage: int, path: str, content: str) -> None:
+    """Put ``content`` directly into one index stage, with no merge/rebase."""
+    proc = subprocess.run(
+        ["git", "-C", str(vault), "hash-object", "-w", "--stdin"],
+        input=content, capture_output=True, text=True,
+    )
+    assert proc.returncode == 0, proc.stderr
+    sha = proc.stdout.strip()
+    proc = subprocess.run(
+        ["git", "-C", str(vault), "update-index", "--add", "--index-info"],
+        input=f"100644 {sha} {stage}\t{path}\n", capture_output=True, text=True,
+    )
+    assert proc.returncode == 0, proc.stderr
+
+
+def test_an_absent_stage_answers_absent_for_the_sidecar_reader(resolve, tmp_path):
+    vault = _init_vault(tmp_path / "vault")
+
+    result = resolve._load_json_stage(vault, 2, "task/never-staged.json")
+
+    assert result is resolve.StageStatus.ABSENT
+
+
+def test_an_absent_stage_answers_absent_for_the_body_reader(resolve, tmp_path):
+    vault = _init_vault(tmp_path / "vault")
+
+    result = resolve._stage_text(vault, 2, "task/never-staged.md")
+
+    assert result is resolve.StageStatus.ABSENT
+
+
+def test_a_stage_with_non_json_bytes_answers_unreadable_not_absent(resolve, tmp_path):
+    vault = _init_vault(tmp_path / "vault")
+    _stage_blob(vault, 2, "task/x.json", "not json at all {{{")
+
+    result = resolve._load_json_stage(vault, 2, "task/x.json")
+
+    assert result is resolve.StageStatus.UNREADABLE
+    assert result is not resolve.StageStatus.ABSENT
+
+
+@pytest.mark.parametrize("payload", ["[1, 2]", '"a string"', "42", "null"])
+def test_a_stage_with_valid_json_that_is_not_an_object_answers_unreadable(
+    resolve, tmp_path, payload
+):
+    vault = _init_vault(tmp_path / "vault")
+    _stage_blob(vault, 2, "task/x.json", payload)
+
+    result = resolve._load_json_stage(vault, 2, "task/x.json")
+
+    assert result is resolve.StageStatus.UNREADABLE
+
+
+def test_a_stage_with_a_valid_json_object_answers_parsed_byte_equivalent(resolve, tmp_path):
+    vault = _init_vault(tmp_path / "vault")
+    staged = {"kind": "task", "status": "open", "title": "T"}
+    _stage_blob(vault, 2, "task/x.json", json.dumps(staged))
+
+    result = resolve._load_json_stage(vault, 2, "task/x.json")
+
+    assert result == staged
+
+
 # ── two-device auto-merge (end to end) ─────────────────────────────────────
 
 
@@ -749,6 +815,31 @@ def test_record_delete_refuses_at_a_mid_rebase_vault(tmp_path):
     assert r.returncode == 1
     assert "lore resolve vault" in r.stderr
     assert (fx.vault / f"{record_id}.md").exists(), "a refused delete writes nothing"
+
+
+# ── delete/modify refuses on the sidecar, same as it does on the body ──────
+
+
+def test_a_sidecar_only_delete_modify_refuses_with_the_pre_existing_message(tmp_path):
+    """An absent sidecar stage still raises exactly as it did before the split."""
+    fx = _Fixture(tmp_path)
+    record_id = fx.create("task", "A Task")
+    fx.publish()
+    fx.clone_device_b()
+
+    (fx.other / f"{record_id}.json").unlink()
+    fx.push_device_b("device B removed the sidecar")
+
+    r = fx.cli(["record", "update", record_id, "--status", "ready"], stdin_text="")
+    assert r.returncode == 0, r.stderr
+    _commit(fx.vault, "device A edit")
+
+    r = fx.cli(["resolve", "default"])
+
+    assert r.returncode == 1
+    assert "the remote side has no readable sidecar" in r.stderr
+    assert "deleted on one device and edited on the other" in r.stderr
+    assert record_id in r.stderr
 
 
 # ── delete/modify refuses on the body too, not only the sidecar ────────────

@@ -72,6 +72,7 @@ import json
 import os
 import subprocess
 import sys
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -111,6 +112,21 @@ _MAX_STEPS = 500
 
 class ResolveError(Exception):
     """A resolution could not proceed — reported, never worked around."""
+
+
+class StageStatus(Enum):
+    """The three-way answer for reading one git index stage.
+
+    ``ABSENT`` — the stage genuinely does not exist (``git show :N:<path>``
+    exits non-zero), e.g. a deletion. ``UNREADABLE`` — the stage exists but
+    its bytes are not a usable record: for a sidecar, not JSON at all, or
+    valid JSON that is not an object (a sidecar is an object and nothing
+    else). A body has no unreadable case — any bytes are a readable body —
+    so ``_stage_text`` only ever answers a body's text or ``ABSENT``.
+    """
+
+    ABSENT = "absent"
+    UNREADABLE = "unreadable"
 
 
 # ---------------------------------------------------------------------------
@@ -206,8 +222,8 @@ def _conflicted_paths(vault: Path) -> list[str]:
     return seen
 
 
-def _stage_text(vault: Path, stage: int, path: str) -> str | None:
-    """Return the text of one index stage, or ``None`` when that stage is absent.
+def _stage_text(vault: Path, stage: int, path: str) -> str | StageStatus:
+    """Return the text of one index stage, or ``StageStatus.ABSENT``.
 
     Deliberately NOT routed through :func:`_git`, which strips its output: a
     record body's trailing newline is content, and a merge that silently dropped
@@ -217,7 +233,7 @@ def _stage_text(vault: Path, stage: int, path: str) -> str | None:
         ["git", "-C", str(vault), "show", f":{stage}:{path}"],
         capture_output=True, text=True,
     )
-    return proc.stdout if proc.returncode == 0 else None
+    return proc.stdout if proc.returncode == 0 else StageStatus.ABSENT
 
 
 def _side_labels(vault: Path) -> tuple[dict, dict]:
@@ -296,20 +312,23 @@ def _resolve_one_record(
         base = _load_json_stage(vault, 1, sidecar_path)
         remote = _load_json_stage(vault, 2, sidecar_path)
         local = _load_json_stage(vault, 3, sidecar_path)
-        if remote is None or local is None:
+        if isinstance(remote, StageStatus) or isinstance(local, StageStatus):
             # One side has no readable sidecar at this stage — a delete/modify
             # conflict (the record was removed on one device and edited on the
             # other), or a sidecar that is no longer JSON. Neither is a field
             # merge, and guessing which device meant to keep the record would
             # destroy the other's work, so the resolution stops here with the
-            # vault untouched.
-            missing = "remote" if remote is None else "local"
+            # vault untouched. The absent/unreadable split is not yet acted on
+            # here — both raise identically, as they always have.
+            missing = "remote" if isinstance(remote, StageStatus) else "local"
             raise ResolveError(
                 f"{sidecar_path}: the {missing} side has no readable sidecar — the "
                 "record was deleted on one device and edited on the other, or its "
                 "sidecar is not JSON. Settle this record by hand before re-running."
             )
-        merged, raw_conflicts = merge_sidecars(base, remote, local)
+        merged, raw_conflicts = merge_sidecars(
+            None if isinstance(base, StageStatus) else base, remote, local
+        )
     else:
         merged = _read_worktree_json(vault / sidecar_path)
         if merged is None:
@@ -333,12 +352,12 @@ def _resolve_one_record(
         body = None
         remote_body = _stage_text(vault, 2, body_path)
         local_body = _stage_text(vault, 3, body_path)
-        if remote_body is None or local_body is None:
+        if remote_body is StageStatus.ABSENT or local_body is StageStatus.ABSENT:
             # One side has no body at this stage — a delete/modify conflict whose
             # sidecar happened to be identical on both sides, so only the `.md`
             # ever became unmerged. An absent stage is NOT an empty body: parking
             # it as one would let `take` land a deliberate-looking empty body.
-            missing = "remote" if remote_body is None else "local"
+            missing = "remote" if remote_body is StageStatus.ABSENT else "local"
             raise ResolveError(
                 f"{body_path}: the {missing} side has no body — the record was "
                 "deleted on one device and edited on the other. Settle this record "
@@ -368,15 +387,22 @@ def _resolve_one_record(
     return pending, conflicts
 
 
-def _load_json_stage(vault: Path, stage: int, path: str) -> dict | None:
+def _load_json_stage(vault: Path, stage: int, path: str) -> dict | StageStatus:
+    """Return the parsed sidecar object at one index stage.
+
+    ``StageStatus.ABSENT`` when the stage does not exist at all.
+    ``StageStatus.UNREADABLE`` when the stage exists but its bytes are not a
+    JSON object — not JSON, or JSON whose top level is a list, string,
+    number, or ``null``. A sidecar is an object and nothing else.
+    """
     text = _stage_text(vault, stage, path)
-    if text is None:
-        return None
+    if text is StageStatus.ABSENT:
+        return StageStatus.ABSENT
     try:
         parsed = json.loads(text)
     except json.JSONDecodeError:
-        return None
-    return parsed if isinstance(parsed, dict) else None
+        return StageStatus.UNREADABLE
+    return parsed if isinstance(parsed, dict) else StageStatus.UNREADABLE
 
 
 def _read_worktree_json(path: Path) -> dict | None:
