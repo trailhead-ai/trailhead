@@ -223,7 +223,12 @@ def test_key_dispatches_only_on_the_marked_session_never_on_a_plain_or_forged_on
     forged_marked = _sock_run(server.sock, "show-options", "-t", forged_session, "-v", "@camp_workspace")
     assert forged_marked.returncode != 0
 
-    _attach_and_send(server.sock, camp_session, b"\x02c")
+    # settle=1.5 on the camp session only, matching the dedicated
+    # compose test below: camp's branch spawns a real subprocess
+    # (`camp window-dispatch`) that must run to completion before the
+    # record reflects it, unlike the plain/forged sessions' else-branch
+    # (`new-window`), which is synchronous inside tmux itself.
+    _attach_and_send(server.sock, camp_session, b"\x02c", settle=1.5)
     _attach_and_send(server.sock, "plainsess", b"\x02c")
     _attach_and_send(server.sock, forged_session, b"\x02c")
 
@@ -243,12 +248,16 @@ def test_key_dispatches_only_on_the_marked_session_never_on_a_plain_or_forged_on
     # The plain and forged sessions have no workspace directory and so no
     # window record at all — camp's dispatch never ran for them, and there
     # is nowhere it could have written to even if it had. The camp
-    # session's own record is asserted directly (one entry, present) in the
-    # end-to-end test below; this test's job is only the dispatch/no-dispatch
-    # split proven above by the two sessions' unaffected mark state and the
-    # bare default window each still got.
+    # session's own record is the one place a bypass of the mark check
+    # would actually show up: a dispatch that fired for plainsess or
+    # forged_session, in some broken future where the mark gate no longer
+    # decides, has nowhere else to write to but THIS same ws_dir — so
+    # pinning it at exactly "ok" with exactly one entry (never "missing",
+    # never more than one) proves camp's dispatch fired precisely once,
+    # for the marked session alone, rather than merely "did not error".
     camp_record = read_window_record(window_record_path_for(ws_dir))
-    assert camp_record.status in ("ok", "missing")
+    assert camp_record.status == "ok", camp_record
+    assert len(camp_record.entries) == 1, camp_record
 
 
 @pytest.mark.skipif(_REAL_TMUX is None, reason="no tmux binary on PATH (captured at import time)")
