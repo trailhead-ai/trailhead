@@ -99,21 +99,64 @@ def _dispatch_marker(camp_bin: str) -> str:
     return f"{shlex.quote(camp_bin)} window-dispatch --session-id"
 
 
-def _dispatch_true_command(camp_bin: str) -> str:
-    """The `if-shell` true-branch command string: `run-shell "<camp_bin>
-    window-dispatch --session-id '#{session_id}'"`.
+def _tmux_escape_dquoted(text: str) -> str:
+    """Escape *text* for embedding inside a tmux DOUBLE-quoted command-string
+    token (the `"..."` in `run-shell "<text>"`).
 
-    Built from :func:`_dispatch_marker` so the marker is a literal PREFIX of
-    this string by construction: the "already installed" check searches
-    `list-keys` output for the marker, and a marker that drifted out of this
-    command's text would report every re-install as a first install.
+    `bind-key`'s composed argv reaches tmux as one already-built string —
+    never through an OS shell (see `Tmux.install_window_binding`) — so tmux
+    ITSELF re-tokenizes `true_command` using its own command grammar, which
+    treats an embedded `"` as ending the quoted token early, same as a shell
+    would. `shlex.quote` (applied by :func:`_dispatch_marker` to `camp_bin`)
+    only guards the SEPARATE, inner shell layer `run-shell` hands its
+    argument to (`/bin/sh -c`); a literal `"` in a path survives
+    `shlex.quote` unescaped (it wraps in single quotes, which need no
+    internal `"` escaping for the shell) and would still break tmux's own
+    outer quoting. Backslash-escaping `\\` and `"` here is the fix for that
+    SECOND, tmux-level layer — applied last, after the shell-level quoting
+    is already in place, so the two layers compose rather than collide.
+    """
+    return text.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _dispatch_true_command(camp_bin: str) -> str:
+    """The `if-shell` true-branch command string: `run-shell "<guard>"`,
+    where `<guard>` is a shell `if`/`else` that resolves *camp_bin*'s
+    executability at FIRE time (every key press), not merely at install
+    time.
+
+    This repo dogfoods camp from disposable worktrees, so `camp_bin` (a
+    path baked in at import time — see `_DEFAULT_CAMP_BIN`) going stale
+    between install and a later key press is an ordinary end state, not an
+    exotic one. Without the guard, a stale/missing binary makes
+    `run-shell`'s inner `/bin/sh -c` fail silently (command not found) and
+    the key opens NO window at all — a dead key, confirmed against real
+    tmux. With it, a missing/non-executable binary falls through to
+    `tmux new-window -t '#{session_id}'`, the SAME degrade-to-default
+    behaviour the outer `if-shell`'s own else-branch already provides for
+    an unmarked session (see `Tmux.install_window_binding`) — explicitly
+    targeted at the firing session (never the ambient "current" session)
+    since `run-shell`'s spawned shell is not itself bound to the key
+    press's session context the way a direct `if-shell` else-branch is.
+
+    Built from :func:`_dispatch_marker` so the marker stays a substring of
+    this string by construction (no longer a literal PREFIX now that the
+    `if`/`else` guard precedes it) — the "already installed" check searches
+    `list-keys` output for the marker anywhere in the text; substring
+    presence is all that check ever required.
 
     `#{session_id}` is single-quoted WITHIN the run-shell string — see the
     module docstring's "The composed command" section for why that quoting
-    is load-bearing rather than cosmetic.
+    is load-bearing rather than cosmetic. The whole guard is passed through
+    :func:`_tmux_escape_dquoted` before being wrapped in `run-shell "..."`,
+    fixing the separate tmux-level quoting layer described there.
     """
-    inner = f"{_dispatch_marker(camp_bin)} '#{{session_id}}'"
-    return f'run-shell "{inner}"'
+    quoted_bin = shlex.quote(camp_bin)
+    guard = (
+        f"if [ -x {quoted_bin} ]; then {_dispatch_marker(camp_bin)} '#{{session_id}}'; "
+        f"else tmux new-window -t '#{{session_id}}'; fi"
+    )
+    return f'run-shell "{_tmux_escape_dquoted(guard)}"'
 
 
 def install_window_key_binding(

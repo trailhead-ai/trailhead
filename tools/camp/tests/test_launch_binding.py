@@ -161,6 +161,54 @@ def test_notice_is_suppressed_when_tmux_could_not_be_asked_at_all(capsys):
     assert err == ""
 
 
+def test_the_composed_command_degrades_to_tmux_default_when_the_binary_is_missing(capsys):
+    """Finding 5: `_DEFAULT_CAMP_BIN` bakes in this checkout's path at
+    import time; a deleted worktree (this repo dogfoods camp from
+    disposable ones) leaves that path stale forever. The composed command
+    must resolve executability at FIRE time (a shell existence test
+    embedded in the command itself) rather than trust the path was still
+    good when it was installed — proven here at the argv-composition level;
+    the real-tmux proof (this command actually still opens a window) lives
+    in test_window_binding_end_to_end.py."""
+    from camp.launch.binding import install_window_key_binding
+
+    tmux = _FakeTmux()
+    install_window_key_binding(tmux, camp_bin="/opt/camp/cli/camp")
+    capsys.readouterr()
+
+    command = tmux.install_calls[0]
+    assert "-x /opt/camp/cli/camp" in command, command
+    assert "else tmux new-window" in command, command
+
+
+def test_the_composed_command_escapes_a_double_quote_in_the_camp_binary_path(capsys):
+    """Finding 10: the composed command sits inside a tmux DOUBLE-quoted
+    `run-shell "..."` string. `shlex.quote` only guards the SHELL layer —
+    a literal `"` in camp_bin survives it unescaped (shlex.quote wraps in
+    single quotes, which do not need internal escaping for the shell) and
+    would terminate tmux's own double-quoted token early, producing a
+    malformed binding. The composed string must escape it for tmux's own
+    quoting layer too."""
+    from camp.launch.binding import install_window_key_binding
+
+    tmux = _FakeTmux()
+    install_window_key_binding(tmux, camp_bin='/opt/ca"mp/cli/camp')
+    capsys.readouterr()
+
+    command = tmux.install_calls[0]
+    # The command is `run-shell "<inner>"` — exactly one literal `"`
+    # immediately after `run-shell ` (the opening delimiter) and exactly
+    # one at the very end (the closing delimiter); every OTHER `"` in the
+    # string (i.e. the one from the path) must be backslash-escaped.
+    assert command.startswith('run-shell "')
+    assert command.endswith('"')
+    body = command[len('run-shell "'):-1]
+    assert '\\"' in body, body
+    # No unescaped `"` remains inside the body.
+    unescaped = body.replace('\\"', "")
+    assert '"' not in unescaped, unescaped
+
+
 def test_remove_window_key_binding_issues_the_reset_call_and_succeeds():
     """Removal always issues the reset call — whether or not a camp binding
     was ever installed on this server (contract bullet: "no binding

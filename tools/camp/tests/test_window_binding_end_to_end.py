@@ -297,6 +297,52 @@ def test_pressing_the_key_in_the_camp_session_composes_a_real_window_and_records
 
 
 @pytest.mark.skipif(_REAL_TMUX is None, reason="no tmux binary on PATH (captured at import time)")
+def test_a_stale_camp_binary_path_still_opens_a_window_instead_of_a_dead_key(server):
+    """Finding 5: `_DEFAULT_CAMP_BIN` bakes in this checkout's path at
+    install time. This repo dogfoods camp from disposable worktrees, so a
+    checkout getting deleted after a binding was installed is an ordinary
+    end state — proven here by installing the binding against a camp_bin
+    that never existed on disk at all, then pressing the key: the key must
+    still open a real tmux window (the compiled-in `new-window` default),
+    never a dead key. The window record staying empty is the proof that
+    camp's own composition never ran — the fallback fired, not camp's
+    branch happening to succeed anyway."""
+    from camp.launch.binding import install_window_key_binding
+    from camp.launch.workspace_session import create_workspace_session
+    from camp.launch.naming import workspace_session_name
+    from camp.launch.tmux import Tmux
+    from camp.group.window_record import read_window_record, window_record_path_for
+
+    slug = "feat-x"
+    ws_dir = server.workspace_dir(slug)
+    ws_dir.mkdir(parents=True)
+    create_workspace_session(server.group_name, slug, ws_dir, env=server.env, tmux=Tmux())
+    camp_session = workspace_session_name(server.group_name, slug)
+
+    # Overwrite the working binding just installed with one pointing at a
+    # camp_bin that has never existed — reproducing "the checkout got
+    # deleted after install" without needing an actual worktree deletion.
+    install_window_key_binding(Tmux(), camp_bin=str(server.tmp_path / "no-such-checkout" / "cli" / "camp"))
+
+    before = _sock_run(server.sock, "list-windows", "-t", camp_session).stdout.splitlines()
+    assert len(before) == 1
+
+    _attach_and_send(server.sock, camp_session, b"\x02c", settle=1.5)
+
+    after = _sock_run(server.sock, "list-windows", "-t", camp_session).stdout.splitlines()
+    assert len(after) == 2, (
+        f"a stale camp_bin must still degrade to tmux's default window, "
+        f"never a dead key; tmux reports: {after!r}"
+    )
+
+    record = read_window_record(window_record_path_for(ws_dir))
+    assert record.entries == (), (
+        "camp's own composition must never have run — the fallback branch "
+        f"fired, not a lucky success despite the missing binary: {record!r}"
+    )
+
+
+@pytest.mark.skipif(_REAL_TMUX is None, reason="no tmux binary on PATH (captured at import time)")
 def test_the_first_install_on_a_server_notices_and_a_second_workspace_does_not(server, capsys):
     """"The first install in a server emits the notice; a subsequent
     install does not" — two DIFFERENT workspaces created on the SAME
