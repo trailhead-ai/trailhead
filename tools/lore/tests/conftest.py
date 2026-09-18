@@ -336,10 +336,19 @@ def _copy_git_tree(template: Path, path: Path) -> Path:
     templates carry no remote — the one thing that would write an absolute URL
     into `.git/config`. Callers attach their own remotes afterwards, to
     wherever they actually want them.
+
+    Git's own background maintenance can transiently create and remove lock
+    files (e.g. `.git/objects/maintenance.lock`) inside the shared template
+    while a copy is in flight, which raced `shutil.copytree` off a listing
+    that already had the file. Lock files are ephemeral git-internal state
+    that a fresh copy has no use for regardless, so they are excluded from
+    the copy outright rather than raced.
     """
     import shutil
 
-    shutil.copytree(template, path, symlinks=True, dirs_exist_ok=True)
+    shutil.copytree(
+        template, path, symlinks=True, dirs_exist_ok=True, ignore=shutil.ignore_patterns("*.lock")
+    )
     return path
 
 
