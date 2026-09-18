@@ -120,7 +120,6 @@ def install_window_key_binding(
     tmux: _TmuxLike,
     *,
     camp_bin: str | None = None,
-    notify: bool = True,
 ) -> None:
     """Install (or idempotently re-issue) camp's prefix+``c`` binding
     against *tmux*.
@@ -139,7 +138,7 @@ def install_window_key_binding(
 
     tmux.install_window_binding(true_command)
 
-    if is_first_install and notify:
+    if is_first_install:
         print(_NOTICE, file=sys.stderr)
 
 

@@ -125,16 +125,6 @@ def test_the_session_id_placeholder_is_single_quoted_against_shell_expansion(cap
     assert "--session-id '#{session_id}'" in command
 
 
-def test_notify_false_suppresses_the_notice_even_on_first_install(capsys):
-    from camp.launch.binding import install_window_key_binding
-
-    tmux = _FakeTmux()
-    install_window_key_binding(tmux, camp_bin="/opt/camp/cli/camp", notify=False)
-
-    assert len(tmux.install_calls) == 1
-    assert capsys.readouterr().err == ""
-
-
 def test_remove_window_key_binding_issues_the_reset_call_and_succeeds():
     """Removal always issues the reset call — whether or not a camp binding
     was ever installed on this server (contract bullet: "no binding
