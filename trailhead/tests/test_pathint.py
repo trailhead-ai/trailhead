@@ -23,6 +23,23 @@ from trailhead.pathint import (
 _FISH_BIN = shutil.which("fish")
 _HAS_FISH = _FISH_BIN is not None
 
+#: Absolute path per POSIX shell the wrapper is driven under, resolved against
+#: the real PATH. The tests pass a restricted PATH to the shell they spawn, so
+#: a bare name would not resolve even where the shell is installed.
+_POSIX_SHELL_BINS = {name: shutil.which(name) for name in ("bash", "zsh")}
+
+#: The same shells as pytest params, each skipped where it is not installed.
+_POSIX_SHELLS = [
+    pytest.param(
+        name,
+        marks=pytest.mark.skipif(
+            _POSIX_SHELL_BINS[name] is None,
+            reason=f"{name} is not installed in this environment",
+        ),
+    )
+    for name in _POSIX_SHELL_BINS
+]
+
 
 def _env(tmp_path: Path) -> dict[str, str]:
     return {"TRAILHEAD_STATE_DIR": str(tmp_path)}
@@ -566,7 +583,7 @@ def _write_marker_recording_stub(fakebin: Path, marker_file: Path) -> None:
 class TestCampWrapperMarkerScopingPosix:
     """bash/zsh: the stub `camp` reports what it actually saw in its own env."""
 
-    @pytest.fixture(params=["bash", "zsh"])
+    @pytest.fixture(params=_POSIX_SHELLS)
     def shell(self, request):
         return request.param
 
@@ -579,7 +596,7 @@ class TestCampWrapperMarkerScopingPosix:
         wrapper = shellenv_lines(shell=shell, env=_env(tmp_path), trailhead_root="/repo")
         script = f'{wrapper}\nexport PATH="{fakebin}:$PATH"\ncamp new feat\n'
         proc = subprocess.run(
-            [shell, "-c", script],
+            [_POSIX_SHELL_BINS[shell], "-c", script],
             capture_output=True,
             text=True,
             env={"TARGET": str(tmp_path / "ws"), "PATH": "/usr/bin:/bin"},
@@ -598,7 +615,7 @@ class TestCampWrapperMarkerScopingPosix:
         wrapper = shellenv_lines(shell=shell, env=_env(tmp_path), trailhead_root="/repo")
         script = f'{wrapper}\nexport PATH="{fakebin}:$PATH"\ncamp rm\npwd\n'
         proc = subprocess.run(
-            [shell, "-c", script],
+            [_POSIX_SHELL_BINS[shell], "-c", script],
             capture_output=True,
             text=True,
             env={"TARGET": str(home), "PATH": "/usr/bin:/bin"},
