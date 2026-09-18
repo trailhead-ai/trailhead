@@ -1917,3 +1917,153 @@ def test_sync_never_leaks_git_or_remote_text_on_any_new_path(tmp_path):
         rendered = json.dumps(doc)
         for token in forbidden:
             assert token not in rendered, f"{label}: git/remote text leaked into --json: {rendered!r}"
+
+
+# ── AC24: no clock decides a conflict ───────────────────────────────────────
+#
+# The resolver's decision — which side wins a one-side move, and which field
+# parks as judgment — must be invariant under every clock this module can see:
+# git commit dates, the sidecar's own `updated-at` value, and the conflicted
+# files' filesystem mtimes. The single named exception is the volatile
+# `updated-at`/`updated-by` pair, which deliberately takes the newer instant.
+
+
+def _commit_dated(vault: Path, message: str, date: str) -> str:
+    """Commit with an explicit, controlled author/committer date.
+
+    Real wall-clock commit times would make these tests depend on how fast the
+    test runs — an explicit ``GIT_AUTHOR_DATE``/``GIT_COMMITTER_DATE`` keeps the
+    ordering deterministic regardless.
+    """
+    _git(vault, "add", "-A")
+    env = dict(os.environ)
+    env["GIT_AUTHOR_DATE"] = date
+    env["GIT_COMMITTER_DATE"] = date
+    subprocess.run(["git", "-C", str(vault), "commit", "-m", message],
+                    check=True, capture_output=True, env=env)
+    return _git(vault, "rev-parse", "HEAD").stdout.strip()
+
+
+def _run_status_conflict(base_dir: Path, *, remote_date: str, local_date: str,
+                          sidecar_epoch: float | None = None,
+                          body_epoch: float | None = None) -> dict:
+    """Build a genuine both-sides ``status`` collision, under controlled clocks.
+
+    Both devices move the same sidecar key to a different value — a real
+    content collision, independent of any clock — then the two commits and
+    (optionally) the record's on-disk files are stamped with the given, fully
+    explicit dates/mtimes. Asserts the fixture really conflicts before handing
+    off to the resolver, rather than trusting it does.
+    """
+    fx = _Fixture(base_dir)
+    record_id = fx.create("task", "A Task")
+    fx.publish()
+    fx.clone_device_b()
+
+    r = fx.cli_b(["record", "update", record_id, "--status", "done"], stdin_text="")
+    assert r.returncode == 0, r.stderr
+    _commit_dated(fx.other, "device B edit", remote_date)
+    _git(fx.other, "push", "origin", fx.branch)
+
+    r = fx.cli(["record", "update", record_id, "--status", "ready"], stdin_text="")
+    assert r.returncode == 0, r.stderr
+    _commit_dated(fx.vault, "device A edit", local_date)
+
+    if sidecar_epoch is not None:
+        os.utime(fx.vault / f"{record_id}.json", (sidecar_epoch, sidecar_epoch))
+    if body_epoch is not None:
+        os.utime(fx.vault / f"{record_id}.md", (body_epoch, body_epoch))
+
+    _git(fx.vault, "fetch", "origin")
+    rc = _git(fx.vault, "rebase", f"origin/{fx.branch}")
+    assert rc.returncode != 0, "the fixture must really conflict"
+    _git(fx.vault, "rebase", "--abort")
+
+    r = fx.cli(["resolve", "default", "--json"])
+    assert r.returncode == 0, r.stderr
+    return json.loads(r.stdout)
+
+
+def test_swapped_commit_dates_produce_the_same_resolution(tmp_path):
+    """Commit time is the input varied; the decision must not move."""
+    report_early_remote = _run_status_conflict(
+        tmp_path / "a", remote_date="2020-01-01T00:00:00", local_date="2030-01-01T00:00:00")
+    report_early_local = _run_status_conflict(
+        tmp_path / "b", remote_date="2030-01-01T00:00:00", local_date="2020-01-01T00:00:00")
+
+    for report in (report_early_remote, report_early_local):
+        assert len(report["conflicts"]) == 1, "swapping commit dates must not settle the collision"
+        assert report["files"] == []
+
+    assert (report_early_remote["conflicts"][0]["slot"]
+            == report_early_local["conflicts"][0]["slot"] == "status")
+    assert (report_early_remote["conflicts"][0]["local"]["value"]
+            == report_early_local["conflicts"][0]["local"]["value"] == "ready")
+    assert (report_early_remote["conflicts"][0]["remote"]["value"]
+            == report_early_local["conflicts"][0]["remote"]["value"] == "done")
+
+
+def test_inverted_filesystem_mtimes_produce_the_same_resolution(tmp_path):
+    """The conflicted record's own sidecar/body mtimes, inverted, change nothing."""
+    report_sidecar_older = _run_status_conflict(
+        tmp_path / "a", remote_date="2024-01-01T00:00:00", local_date="2024-01-01T00:00:00",
+        sidecar_epoch=1_000_000, body_epoch=2_000_000)
+    report_sidecar_newer = _run_status_conflict(
+        tmp_path / "b", remote_date="2024-01-01T00:00:00", local_date="2024-01-01T00:00:00",
+        sidecar_epoch=2_000_000, body_epoch=1_000_000)
+
+    for report in (report_sidecar_older, report_sidecar_newer):
+        assert len(report["conflicts"]) == 1, "inverting the mtimes must not settle the collision"
+        assert report["files"] == []
+
+    assert (report_sidecar_older["conflicts"][0]["slot"]
+            == report_sidecar_newer["conflicts"][0]["slot"] == "status")
+    assert (report_sidecar_older["conflicts"][0]["local"]["value"]
+            == report_sidecar_newer["conflicts"][0]["local"]["value"] == "ready")
+    assert (report_sidecar_older["conflicts"][0]["remote"]["value"]
+            == report_sidecar_newer["conflicts"][0]["remote"]["value"] == "done")
+
+
+@pytest.mark.parametrize("remote_date,local_date,sidecar_epoch,body_epoch", [
+    ("2020-01-01T00:00:00", "2030-01-01T00:00:00", 1_000_000, 2_000_000),
+    ("2030-01-01T00:00:00", "2020-01-01T00:00:00", 2_000_000, 1_000_000),
+    ("2020-01-01T00:00:00", "2020-01-01T00:00:00", 2_000_000, 2_000_000),
+], ids=["remote-commit-and-mtime-later", "local-commit-and-mtime-later", "identical-commit-dates"])
+def test_a_both_sides_field_move_stays_parked_under_every_clock_arrangement(
+    tmp_path, remote_date, local_date, sidecar_epoch, body_epoch
+):
+    """No arrangement of times turns a judgment conflict into an automatic take."""
+    report = _run_status_conflict(
+        tmp_path, remote_date=remote_date, local_date=local_date,
+        sidecar_epoch=sidecar_epoch, body_epoch=body_epoch)
+
+    assert len(report["conflicts"]) == 1, "no clock arrangement turns judgment into an automatic take"
+    assert report["conflicts"][0]["slot"] == "status"
+    assert report["conflicts"][0]["local"]["value"] == "ready"
+    assert report["conflicts"][0]["remote"]["value"] == "done"
+
+
+def test_swapped_updated_at_leaves_every_other_decision_unchanged(resolve):
+    """Swapping which side holds the newer ``updated-at`` moves only that pair."""
+    base = {"kind": "task", "status": "open",
+            "updated-at": "2026-01-01T00:00:00Z", "updated-by": "base@e.st"}
+    remote = {"kind": "task", "status": "done",
+              "updated-at": "2026-02-01T00:00:00Z", "updated-by": "remote@e.st"}
+    local = {"kind": "task", "status": "ready",
+             "updated-at": "2026-03-01T00:00:00Z", "updated-by": "local@e.st"}
+
+    merged_1, conflicts_1 = resolve.merge_sidecars(base, remote, local)
+
+    # Swap ONLY the volatile pair between the two sides — every other field
+    # of `remote`/`local` is untouched.
+    swapped_remote = {**remote, "updated-at": local["updated-at"], "updated-by": local["updated-by"]}
+    swapped_local = {**local, "updated-at": remote["updated-at"], "updated-by": remote["updated-by"]}
+
+    merged_2, conflicts_2 = resolve.merge_sidecars(base, swapped_remote, swapped_local)
+
+    assert conflicts_1 == conflicts_2, "swapping updated-at must not move the status decision"
+    assert [c["slot"] for c in conflicts_1] == ["status"]
+    non_volatile_1 = {k: v for k, v in merged_1.items() if k not in ("updated-at", "updated-by")}
+    non_volatile_2 = {k: v for k, v in merged_2.items() if k not in ("updated-at", "updated-by")}
+    assert non_volatile_1 == non_volatile_2 == {"kind": "task"}, \
+        "kind is the only field settled either way, and it settles the same way both times"

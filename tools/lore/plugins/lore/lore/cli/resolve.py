@@ -279,6 +279,12 @@ def _merge_volatile(base: dict | None, remote: dict, local: dict) -> dict:
     make. (The value is also re-stamped by the write path itself — it is merged
     anyway so the merged sidecar is a faithful merge on its own terms, rather
     than one that only looks right because a later step overwrote it.)
+
+    This is the module's one deliberate clock read. Every other decision
+    ``merge_sidecars`` makes — which side wins a one-side move, and which key
+    parks as judgment — is invariant under commit dates, filesystem mtimes, and
+    which side happens to hold the newer ``updated-at``; only this pair is
+    scoped to take the newer instant.
     """
     sides = [s for s in (remote, local) if s.get("updated-at") is not None]
     if not sides:
