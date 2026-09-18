@@ -11,9 +11,35 @@ every teammate viewing that vault from their own local Outpost can open it.
 "Deploy" is nothing more than a vault commit + sync — there is no separate
 build or hosting step.
 
-This skill has two parts: **you** resolve which vault the site belongs in and
+A site that belongs to one piece of in-flight work — a scratch analysis, a
+one-off review guide, a throwaway check — can publish into a **camp
+workspace** instead: it serves from `<workspace>/sites/<slug>/`, syncs
+nowhere, is never a vault record, and disappears the moment the workspace
+does. Vault is the default target for anything meant to be shared beyond the
+workspace; a workspace publish is opt-in.
+
+This skill has two parts: **you** resolve which target the site belongs in and
 call the bundled script; the script (`publish_site.py`, stdlib-only) does the
-deterministic work — validating, staging, atomically publishing, and syncing.
+deterministic work — validating, staging, atomically publishing, and (vault
+target only) syncing.
+
+## Choosing a target
+
+Pass exactly one of `--vault-path` or `--workspace-path` — the script refuses
+both given and neither given.
+
+- **Vault** (default) — the site is meant to be shared with the team, or has
+  no natural workspace to scope to. Resolve it per "Resolve the target vault"
+  below.
+- **Workspace** (opt-in) — the site belongs to the work happening in one camp
+  workspace and has no reason to outlive it. Pass `--workspace-path
+  <resolved workspace directory>` (the camp worktree root, e.g. what
+  `camp status`/`camp activate` reports — `<campStateRoot>/<group>/worktrees/<slug>`).
+  No `--vault`/`--vault-path` in that case.
+
+A calling skill that always publishes into its own workspace can pin the
+target rather than negotiating it each time — always pass `--workspace-path`
+and never resolve a vault at all.
 
 ## Inputs
 
@@ -69,12 +95,27 @@ override), skip `resolve` and look the target vault up directly with
 
 ## 2. Publish
 
+Vault target:
+
 ```
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/publish-site/publish_site.py <source-dir> <slug> \
   --vault-path <path-from-resolve> \
   [--vault <name-from-resolve, if not null>] \
   [--overwrite]
 ```
+
+Workspace target:
+
+```
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/publish-site/publish_site.py <source-dir> <slug> \
+  --workspace-path <resolved workspace directory> \
+  [--overwrite]
+```
+
+A workspace publish takes camp's own per-slug lock around the write, so it
+can never race a `camp remove` teardown into a half-swapped or resurrected
+`sites/` tree, and it writes nothing under any vault and runs no `lore sync`
+— there is nothing to share.
 
 The script:
 
@@ -131,8 +172,8 @@ it always prints the same "NOT synced" warning in place of a success URL.
 
 ## Reported URL
 
-On success, the script's last line is the site's local URL, in trailing-slash
-form (anything above it is sync's own output):
+On success (vault target), the script's last line is the site's local URL, in
+trailing-slash form (anything above it is sync's own output):
 
 ```
 http://127.0.0.1:<sites-port>/<vault>/<slug>/
@@ -141,6 +182,20 @@ http://127.0.0.1:<sites-port>/<vault>/<slug>/
 `<sites-port>` defaults to `7314` (override with `--sites-port`).
 `<vault>` is the basename of the resolved vault path — always present, even
 when `--vault` (the sync-scoping name) was omitted for the default floor.
+
+**A workspace publish's success output is shaped differently on purpose** —
+sharing happens by copying printed terminal text, with no cockpit badge in
+the picture, so the two must never look alike:
+
+```
+http://127.0.0.1:<sites-port>/<group>-<slug>/<site-slug>/
+Local to this machine only — this link dies with the <group>-<slug> workspace.
+```
+
+`<group>-<slug>` is derived from the resolved workspace path
+(`<campStateRoot>/<group>/worktrees/<slug>`) — never pass it separately. Pass
+that link along with the caveat sentence, not the bare URL alone, since a
+teammate it was pasted to would otherwise expect it to resolve.
 
 **If the operator moved the sites port, pass it** — otherwise the printed URL
 points at a port nothing is listening on. The daemon resolves its sites port
@@ -151,8 +206,14 @@ as `--sites-port`.
 
 ## Removal
 
-To remove a published site: delete `<vault>/sites/<slug>/` with a plain
-`rm -rf`, then sync that vault the same way the publish step did — scoped
+**Vault target:** delete `<vault>/sites/<slug>/` with a plain `rm -rf`, then
+sync that vault the same way the publish step did — scoped
 (`lore sync --vault <name>`) when the vault has a real configured name, bare
 `lore sync` for the default floor. The `sites/` directory is a free-write
 zone for plain file operations; deletion needs no special tooling.
+
+**Workspace target:** nothing to do by hand — the site lives under
+`<workspace>/sites/<slug>/`, and the whole workspace directory (including
+`sites/`) is removed when the workspace is torn down (`camp remove`). A
+workspace site can also be deleted early the same way, with a plain `rm -rf`
+of `<workspace>/sites/<slug>/` — there is no sync step to run afterward.
