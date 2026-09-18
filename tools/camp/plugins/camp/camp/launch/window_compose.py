@@ -8,19 +8,33 @@ itself assigned on that same creating call, never a value this module
 predicted — and writes the result into the workspace's window record before
 reporting success.
 
-Two things this module deliberately does NOT do, both owned by a later
-slice:
+One thing this module deliberately does NOT do, owned by an earlier slice:
 
 - The remote-control and visible-name flags. `trailhead.harness.claude_code`
   offers `session_launch`, but that method unconditionally adds
   `--remote-control` and `--name` (AC56 forbids both here), so this module
   never calls it — the composed argv is built directly from the harness
   profile's bare binary name plus `--session-id`.
-- The directory floor (AC21). `compose_window` takes *cwd* as given and
-  computes its workspace-relative form; it does not check containment or
-  the credential-store denylist. The insertion point for that refusal is
-  the top of this function, before the conversation id is minted or any
-  tmux call is made — see `task/the-directory-floor-refuse-the-window-record-nothing`.
+
+The directory floor (AC21) IS checked here, first thing, before the
+conversation id is minted or any tmux call is made: `cwd` is resolved once,
+containment against the workspace root is decided on that resolved path (a
+symlink spelling cannot smuggle a directory in or out), and the same
+resolved path — never the caller's original spelling — is what reaches
+`Tmux.new_window` and what the record's relative `cwd` is computed from.
+Two distinct refusals, both raised before any tmux call and before the
+record is touched:
+
+- :class:`WindowOutsideWorkspace` — `cwd` resolves outside the workspace
+  root. Its message names the offending path: the operator supplied it and
+  needs to know which one was rejected.
+- :class:`WindowAtCredentialStore` — `cwd` resolves at, under, or above a
+  declared credential store
+  (`camp.launch.eligibility.assert_not_a_credential_store`, unconditional
+  and independent of the launch allowlist). Its message deliberately does
+  NOT echo the path back — unlike the containment refusal, a credential
+  store's location is not information this module hands back over a
+  channel an operator reads.
 
 The scrub (AC60) rides INSIDE the composed command, exactly the way
 `launch/session.py`'s own pane command carries it (`env -u NAME ... argv`):
@@ -33,20 +47,49 @@ is the one baked into the command tokens themselves.
 
 from __future__ import annotations
 
+import os
 import shlex
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
+from typing import Mapping, Sequence
 
 from ..group.window_record import WindowEntry, append_window_entry
+from .eligibility import assert_not_a_credential_store
 from .naming import workspace_session_name
 from .profile import harness_for, resolve_harness_profile
+from .recovery import printable_path
+from .session import LaunchError
 from .tmux import UNANSWERED, Tmux
 
 
 class WindowComposeError(Exception):
     """Raised when a composed window could not be created in tmux."""
+
+
+class WindowRefused(Exception):
+    """Base for the directory floor's refusals (AC21).
+
+    Raised before any tmux call and before the conversation id is minted —
+    no window was created and the workspace's window record is unchanged.
+    """
+
+
+class WindowOutsideWorkspace(WindowRefused):
+    """`cwd` resolves outside the workspace root.
+
+    The message names the offending path — the operator supplied it and
+    needs to know which one was rejected.
+    """
+
+
+class WindowAtCredentialStore(WindowRefused):
+    """`cwd` resolves at, under, or above a declared credential store.
+
+    The message deliberately does not echo the path — see
+    `camp.launch.eligibility.assert_not_a_credential_store`, the gate this
+    wraps.
+    """
 
 
 @dataclass(frozen=True)
@@ -69,6 +112,7 @@ def compose_window(
     window_name: str,
     command: Sequence[str] | None = None,
     tmux: Tmux | None = None,
+    env: Mapping[str, str] | None = None,
 ) -> WindowComposeResult:
     """Compose one window in the workspace at *slug*'s tmux session.
 
@@ -81,15 +125,45 @@ def compose_window(
     unconditionally adds the two flags AC56 forbids), wraps it in the
     harness's scrub, and records the id with no command line.
 
-    *cwd* is taken as given — see the module docstring for where the
-    directory floor's refusal belongs; this function only computes *cwd*'s
-    workspace-relative form for the record (AC29).
+    *cwd* is resolved once, first thing: the directory floor (AC21) is
+    checked against that resolved path, and the same resolved path is what
+    reaches `Tmux.new_window` and what the record's relative `cwd` (AC29)
+    is computed from — never the caller's original spelling. See the
+    module docstring for the two refusals this raises, both before the
+    conversation id is minted or any tmux call is made. *env* supplies HOME
+    (and the credential gate's account lookups) for that check; `None`
+    (the default) resolves to `os.environ` — the same "caller stated nothing,
+    so read the process's own environment" fallback `cli/group.py`'s door
+    dispatch already applies ahead of this same gate, never a bare `None`
+    forwarded into it, which would hit `assert_not_a_credential_store`'s own
+    `Path.home()` fallback instead of the environment this process actually
+    runs under.
 
     Raises :class:`WindowComposeError` if tmux could not create the window.
     The record write happens only after that create succeeds, and happens
     exactly once, before this function returns — a caller that reads
     `WindowComposeResult` back knows the record already reflects it.
     """
+    resolved_env = dict(env) if env is not None else dict(os.environ)
+
+    resolved_cwd = Path(cwd).resolve()
+    resolved_ws_dir = Path(ws_dir).resolve()
+    if resolved_cwd != resolved_ws_dir and resolved_ws_dir not in resolved_cwd.parents:
+        raise WindowOutsideWorkspace(
+            f"camp: cannot open window — directory {printable_path(resolved_cwd)} "
+            f"is outside the workspace root {printable_path(resolved_ws_dir)}; "
+            "choose a directory inside the workspace"
+        )
+    try:
+        assert_not_a_credential_store(resolved_cwd, env=resolved_env)
+    except LaunchError as exc:
+        raise WindowAtCredentialStore(
+            "camp: cannot open window — the target directory is a credential "
+            "store, which camp will never root a window at; this rule is "
+            "fixed in camp and no group configuration can permit it"
+        ) from exc
+    cwd = resolved_cwd
+
     tmux = tmux if tmux is not None else Tmux()
     group_name = group["group"]["name"]
     session_name = workspace_session_name(group_name, slug)
@@ -123,7 +197,7 @@ def compose_window(
             f"camp: could not create a window in tmux session {session_name!r}"
         )
 
-    relative_cwd = str(Path(cwd).relative_to(Path(ws_dir)))
+    relative_cwd = str(Path(cwd).relative_to(resolved_ws_dir))
 
     entry = WindowEntry(
         window_id=result.window_id,

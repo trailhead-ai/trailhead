@@ -366,3 +366,283 @@ def test_a_record_write_failure_propagates_rather_than_reporting_success(
         wc.compose_window(
             GROUP, "slug", ws_dir, cwd=ws_dir, window_name="w1", tmux=FakeTmux()
         )
+
+
+# ---------------------------------------------------------------------------
+# AC21 — the directory floor (task/the-directory-floor-refuse-the-window-record-nothing)
+#
+# Test contract:
+#  1. A directory inside the workspace, clear of the deny-list, is accepted —
+#     the control case.
+#  2. Outside the workspace root: refused, no window created, record unchanged.
+#  3. At / under / above a declared credential store: refused, no window
+#     created, record unchanged — all three positions.
+#  4. The two refusals are distinguishable, and the credential refusal's
+#     message does not contain the offending path.
+#  5. Neither refusal produces a raw traceback.
+#  6. A symlink pointing outside the workspace is refused on the resolved
+#     path, not the spelling — and the resolved path is what reaches tmux.
+# ---------------------------------------------------------------------------
+
+
+def _install_account(tmp_path, account_path):
+    """Write a group config declaring `[launch] account = account_path` for
+    "testgroup" (the name `GROUP` above uses), and return the env that
+    points camp's config resolver at it. Mirrors
+    `test_launch_eligibility.py`'s `_install_group_configs`."""
+    groups_dir = tmp_path / "camp-config" / "groups"
+    groups_dir.mkdir(parents=True, exist_ok=True)
+    body = (
+        '[group]\nname = "testgroup"\n\n'
+        '[[members]]\nname = "myrepo"\nrepo_root = "/tmp/myrepo"\n\n'
+        f'[launch]\naccount = "{account_path}"\n'
+    )
+    (groups_dir / "testgroup.toml").write_text(body, encoding="utf-8")
+    return {"HOME": str(tmp_path), "CAMP_CONFIG_DIR": str(tmp_path / "camp-config")}
+
+
+def _empty_env(tmp_path):
+    """An env with no declared accounts, so only the fixed floor applies."""
+    return {"HOME": str(tmp_path), "CAMP_CONFIG_DIR": str(tmp_path / "camp-config-empty")}
+
+
+# --- 1. Control case ---------------------------------------------------
+
+
+def test_directory_inside_workspace_clear_of_deny_list_is_accepted(tmp_path):
+    import camp.launch.window_compose as wc
+
+    ws_dir = tmp_path / "ws"
+    ws_dir.mkdir()
+
+    result = wc.compose_window(
+        GROUP, "slug", ws_dir, cwd=ws_dir, window_name="w1",
+        tmux=FakeTmux(), env=_empty_env(tmp_path),
+    )
+
+    assert result.window_id == "@1"
+    assert _recorded_entries(ws_dir)[0].window_id == "@1"
+
+
+# --- 2. Outside the workspace root --------------------------------------
+
+
+def test_directory_outside_workspace_root_is_refused(tmp_path):
+    import camp.launch.window_compose as wc
+
+    ws_dir = tmp_path / "ws"
+    ws_dir.mkdir()
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+
+    tmux = FakeTmux()
+    with pytest.raises(wc.WindowOutsideWorkspace):
+        wc.compose_window(
+            GROUP, "slug", ws_dir, cwd=outside, window_name="w1",
+            tmux=tmux, env=_empty_env(tmp_path),
+        )
+
+    assert tmux.calls == []
+    assert _recorded_entries(ws_dir) == ()
+
+
+# --- 3. At / under / above a declared credential store ------------------
+
+
+def test_directory_at_a_declared_credential_store_is_refused(tmp_path):
+    import camp.launch.window_compose as wc
+
+    ws_dir = tmp_path / "ws"
+    secrets = ws_dir / "secrets"
+    secrets.mkdir(parents=True)
+    env = _install_account(tmp_path, str(secrets))
+
+    tmux = FakeTmux()
+    with pytest.raises(wc.WindowAtCredentialStore):
+        wc.compose_window(
+            GROUP, "slug", ws_dir, cwd=secrets, window_name="w1",
+            tmux=tmux, env=env,
+        )
+
+    assert tmux.calls == []
+    assert _recorded_entries(ws_dir) == ()
+
+
+def test_directory_under_a_declared_credential_store_is_refused(tmp_path):
+    import camp.launch.window_compose as wc
+
+    ws_dir = tmp_path / "ws"
+    nested = ws_dir / "secrets" / "nested"
+    nested.mkdir(parents=True)
+    env = _install_account(tmp_path, str(ws_dir / "secrets"))
+
+    tmux = FakeTmux()
+    with pytest.raises(wc.WindowAtCredentialStore):
+        wc.compose_window(
+            GROUP, "slug", ws_dir, cwd=nested, window_name="w1",
+            tmux=tmux, env=env,
+        )
+
+    assert tmux.calls == []
+    assert _recorded_entries(ws_dir) == ()
+
+
+def test_directory_above_a_declared_credential_store_is_refused(tmp_path):
+    """The workspace root itself, containing the declared store — the
+    ancestor direction, which is what stops a wide root from laundering the
+    store inside it past the gate."""
+    import camp.launch.window_compose as wc
+
+    ws_dir = tmp_path / "ws"
+    (ws_dir / "secrets").mkdir(parents=True)
+    env = _install_account(tmp_path, str(ws_dir / "secrets"))
+
+    tmux = FakeTmux()
+    with pytest.raises(wc.WindowAtCredentialStore):
+        wc.compose_window(
+            GROUP, "slug", ws_dir, cwd=ws_dir, window_name="w1",
+            tmux=tmux, env=env,
+        )
+
+    assert tmux.calls == []
+    assert _recorded_entries(ws_dir) == ()
+
+
+# --- 4. Distinguishable; credential refusal omits the path ---------------
+
+
+def test_the_two_refusals_are_distinguishable_types(tmp_path):
+    import camp.launch.window_compose as wc
+
+    assert wc.WindowOutsideWorkspace is not wc.WindowAtCredentialStore
+    assert not issubclass(wc.WindowOutsideWorkspace, wc.WindowAtCredentialStore)
+    assert not issubclass(wc.WindowAtCredentialStore, wc.WindowOutsideWorkspace)
+
+
+def test_containment_refusal_names_the_offending_path(tmp_path):
+    import camp.launch.window_compose as wc
+
+    ws_dir = tmp_path / "ws"
+    ws_dir.mkdir()
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+
+    with pytest.raises(wc.WindowOutsideWorkspace) as exc_info:
+        wc.compose_window(
+            GROUP, "slug", ws_dir, cwd=outside, window_name="w1",
+            tmux=FakeTmux(), env=_empty_env(tmp_path),
+        )
+
+    assert str(outside.resolve()) in str(exc_info.value)
+
+
+def test_credential_refusal_does_not_name_the_offending_path(tmp_path):
+    import camp.launch.window_compose as wc
+
+    ws_dir = tmp_path / "ws"
+    secrets = ws_dir / "secrets"
+    secrets.mkdir(parents=True)
+    env = _install_account(tmp_path, str(secrets))
+
+    with pytest.raises(wc.WindowAtCredentialStore) as exc_info:
+        wc.compose_window(
+            GROUP, "slug", ws_dir, cwd=secrets, window_name="w1",
+            tmux=FakeTmux(), env=env,
+        )
+
+    assert str(secrets.resolve()) not in str(exc_info.value)
+
+
+# --- 5. No raw traceback --------------------------------------------------
+
+
+def test_neither_refusal_produces_a_raw_traceback(tmp_path):
+    """Drive both refusals through the surface a caller actually sees: the
+    exception it catches. Each must be one of the two typed refusals with a
+    clean, single-line `camp:`-prefixed message — not an unrelated
+    exception (KeyError/AttributeError/etc.) whose str() is stack-trace-shaped
+    noise a caller would have to pass through raw."""
+    import camp.launch.window_compose as wc
+
+    ws_dir = tmp_path / "ws"
+    ws_dir.mkdir()
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+
+    try:
+        wc.compose_window(
+            GROUP, "slug", ws_dir, cwd=outside, window_name="w1",
+            tmux=FakeTmux(), env=_empty_env(tmp_path),
+        )
+        assert False, "expected WindowOutsideWorkspace"
+    except wc.WindowRefused as exc:
+        assert isinstance(exc, wc.WindowOutsideWorkspace)
+        message = str(exc)
+        assert message.startswith("camp:")
+        assert "Traceback" not in message
+        assert "\n" not in message
+
+    secrets = ws_dir / "secrets"
+    secrets.mkdir(parents=True)
+    env = _install_account(tmp_path, str(secrets))
+
+    try:
+        wc.compose_window(
+            GROUP, "slug", ws_dir, cwd=secrets, window_name="w2",
+            tmux=FakeTmux(), env=env,
+        )
+        assert False, "expected WindowAtCredentialStore"
+    except wc.WindowRefused as exc:
+        assert isinstance(exc, wc.WindowAtCredentialStore)
+        message = str(exc)
+        assert message.startswith("camp:")
+        assert "Traceback" not in message
+        assert "\n" not in message
+
+
+# --- 6. Symlink: decided on the resolved path, and the resolved path -----
+#        is what reaches tmux -----------------------------------------
+
+
+def test_symlink_pointing_outside_the_workspace_is_refused(tmp_path):
+    import camp.launch.window_compose as wc
+
+    ws_dir = tmp_path / "ws"
+    ws_dir.mkdir()
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    link = ws_dir / "escape"
+    link.symlink_to(outside)
+
+    tmux = FakeTmux()
+    with pytest.raises(wc.WindowOutsideWorkspace):
+        wc.compose_window(
+            GROUP, "slug", ws_dir, cwd=link, window_name="w1",
+            tmux=tmux, env=_empty_env(tmp_path),
+        )
+
+    assert tmux.calls == []
+    assert _recorded_entries(ws_dir) == ()
+
+
+def test_the_resolved_path_not_the_symlink_spelling_reaches_tmux(tmp_path):
+    """Closes the symlink-swap finding: containment is decided on the
+    resolved path, and that SAME resolved path is what the tmux request
+    actually carries — a symlink swapped between the check and window
+    creation cannot smuggle a different directory to tmux."""
+    import camp.launch.window_compose as wc
+
+    ws_dir = tmp_path / "ws"
+    real_sub = ws_dir / "real_sub"
+    real_sub.mkdir(parents=True)
+    link_sub = ws_dir / "link_sub"
+    link_sub.symlink_to(real_sub)
+
+    tmux = FakeTmux()
+    wc.compose_window(
+        GROUP, "slug", ws_dir, cwd=link_sub, window_name="w1",
+        tmux=tmux, env=_empty_env(tmp_path),
+    )
+
+    assert tmux.calls[0]["cwd"] == real_sub.resolve()
+    assert tmux.calls[0]["cwd"] != link_sub
