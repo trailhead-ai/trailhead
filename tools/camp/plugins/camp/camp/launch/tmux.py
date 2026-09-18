@@ -229,6 +229,39 @@ class Tmux:
         """
         return self._run(["kill-session", "-t", target(name)], timeout=timeout)
 
+    def kill_session_with_reason(
+        self, name: str, *, timeout: float | None = None
+    ) -> tuple[subprocess.CompletedProcess | None, str | None]:
+        """Same call :meth:`kill_session` makes, plus the exception's own
+        message when the call could not complete at all.
+
+        The consumer is `launch/session.py`'s confirmation-timeout cleanup,
+        which reports a failed reclaim on stderr and — unlike
+        :meth:`kill_session`'s other, best-effort callers, which discard the
+        result entirely — has an operator to tell *why* tmux could not be
+        asked, the one thing a plain ``None`` throws away.
+        """
+        return self._run_with_reason(["kill-session", "-t", target(name)], timeout=timeout)
+
+    def set_environment_with_reason(
+        self,
+        name: str,
+        operand: Sequence[str],
+        *,
+        env: Mapping[str, str] | None = None,
+        timeout: float | None = None,
+    ) -> tuple[subprocess.CompletedProcess | None, str | None]:
+        """Same call :meth:`set_environment` makes, plus the exception's own
+        message when the call could not complete at all — the piece of
+        information `launch/session.py`'s session-environment statement
+        reports on stderr instead of a synthesized "tmux did not answer".
+        """
+        return self._run_with_reason(
+            ["set-environment", "-t", target(name), *operand],
+            timeout=timeout,
+            env=env,
+        )
+
     def list_sessions(self) -> SessionListing | _Unanswered:
         """Every session tmux currently holds, or ``UNANSWERED``.
 

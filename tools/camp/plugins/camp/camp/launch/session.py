@@ -928,11 +928,11 @@ def _state_session_environment(
     operands += [[key, value] for key, value in sorted(account_binding.items())]
 
     for operand in operands:
-        stated = tmux.set_environment(
+        stated, unanswered_reason = tmux.set_environment_with_reason(
             tmux_name, operand, env=env, timeout=_SET_ENVIRONMENT_TIMEOUT_SECONDS
         )
         if stated is None:
-            detail = "tmux did not answer"
+            detail = unanswered_reason or "tmux did not answer"
         elif stated.returncode == 0:
             continue
         else:
@@ -1238,11 +1238,13 @@ def confirm_session(
         interval=interval,
         pane=pane,
     )
-    kill = tmux.kill_session(launched.tmux_name, timeout=_KILL_SESSION_TIMEOUT_SECONDS)
+    kill, kill_unanswered_reason = tmux.kill_session_with_reason(
+        launched.tmux_name, timeout=_KILL_SESSION_TIMEOUT_SECONDS
+    )
     if kill is None:
         print(
             f"camp: failed to kill tmux session {launched.tmux_name}: "
-            "tmux did not answer",
+            f"{kill_unanswered_reason or 'tmux did not answer'}",
             file=sys.stderr,
         )
     elif kill.returncode != 0:

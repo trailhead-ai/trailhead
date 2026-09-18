@@ -1485,6 +1485,36 @@ class TestConfirmSession:
 
         err = capsys.readouterr().err
         assert "camp-feat-x-abcd1234" in err
+        assert "timed out" in err
+
+    def test_kill_session_erroring_carries_the_exceptions_own_message(
+        self, confirm_rig, monkeypatch, capsys
+    ):
+        """The failed-kill diagnostic must say WHY tmux could not be asked —
+        varied across two distinct exceptions to prove the message is
+        threaded through from the exception, not a synthesized constant."""
+        session = confirm_rig["module"]
+        harness = SequencedHarness([[]])
+
+        def fake_run(argv, **kwargs):
+            if argv[:2] == ["tmux", "kill-session"]:
+                raise FileNotFoundError("[Errno 2] No such file or directory: 'tmux'")
+            return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+
+        monkeypatch.setattr(session.subprocess, "run", fake_run)
+
+        with pytest.raises(session.LaunchError):
+            session.confirm_session(
+                harness,
+                confirm_rig["launched"],
+                interval=0.5,
+                timeout=1.0,
+                sleep=lambda s: None,
+                clock=FakeClock(0.5),
+            )
+
+        err = capsys.readouterr().err
+        assert "No such file or directory" in err
 
     def test_enumerate_argument_is_the_resolved_directory_symlink_case(
         self, confirm_rig, tmp_path, monkeypatch
@@ -3188,3 +3218,23 @@ class TestTheSessionEnvironmentCarriesTheAccount:
         err = capsys.readouterr().err
         assert launched.tmux_name in err
         assert "new windows" in err
+
+    def test_an_unanswerable_session_env_write_carries_the_reason(
+        self, rig, tmp_path, capsys
+    ):
+        """When tmux itself cannot be asked (a timeout or an unlaunchable
+        binary), the warning must say why — not a synthesized "tmux did not
+        answer" that throws away the exception's own message."""
+
+        def _raise(argv, **kwargs):
+            raise FileNotFoundError("[Errno 2] No such file or directory: 'tmux'")
+
+        rig["setenv"] = _raise
+
+        launched = _launch(
+            rig, group=_group_with_account("/accounts/levr"), env=_poisoned(tmp_path)
+        )
+
+        err = capsys.readouterr().err
+        assert launched.tmux_name in err
+        assert "No such file or directory" in err

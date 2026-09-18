@@ -359,6 +359,9 @@ def _cmd_new_group_cli(
     no_attach = parsed.no_attach
     no_session = parsed.no_session
 
+    if no_session and as_json and not launch:
+        _die("camp new: --json requires --launch")
+
     if parsed.slug is None:
         print("camp new: a slug is required\n  usage: camp new <slug>", file=sys.stderr)
         sys.exit(1)
@@ -430,8 +433,6 @@ def _cmd_new_group_cli(
             trigger_activate_phase_work(group, slug, env=env, wait=not no_wait)
 
         if as_json:
-            if not launch:
-                _die("camp new: --json requires --launch")
             print(
                 json.dumps(
                     {

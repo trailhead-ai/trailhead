@@ -150,7 +150,10 @@ def hand_over_to_session(
     ``switch-client`` returns immediately and an exec'd one would tear down
     the calling pane, and often the whole source session, rather than moving
     the client — and exits on that call's own result, treating a tmux that
-    could not be asked at all (``None``) as a failure.
+    could not be asked at all (``None``) as a failure. A nonzero result
+    prints tmux's own stderr before exiting: the operator's terminal is
+    still attached to the SOURCE session at this point, so this is the only
+    place camp can say why the switch failed.
 
     Never returns: the exec arm's fall-through only runs when a test's
     injected exec seam returns instead of replacing the process, and even
@@ -159,7 +162,12 @@ def hand_over_to_session(
     """
     if inside_multiplexer(env):
         switched = tmux.switch_client(derived_name)
-        sys.exit(switched.returncode if switched is not None else 1)
+        if switched is None:
+            sys.exit(1)
+        stderr = (switched.stderr or "").strip()
+        if switched.returncode != 0 and stderr:
+            print(stderr, file=sys.stderr)
+        sys.exit(switched.returncode)
 
     handoff(door_argv(derived_name))
     sys.exit(0)
