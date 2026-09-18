@@ -918,3 +918,4 @@ def test_a_slug_naming_no_workspace_falls_through_to_the_retired_ref_path(
     assert code != 0
     assert tmux.new_session_calls == [], "a fall-through ref must never reach the door's create"
     assert "no session on this machine matches" in err, err
+    assert "no-such-slug-at-all" in err, err
