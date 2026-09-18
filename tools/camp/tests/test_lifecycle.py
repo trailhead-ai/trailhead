@@ -1168,6 +1168,98 @@ class TestCmdBreak:
 
 
 # ---------------------------------------------------------------------------
+# Test: break tears down a workspace-level `sites/` tree cleanly, and the
+# carve-out for it does not weaken the dirty-check for genuine member changes.
+#
+# `sites/<slug>/index.html` lives directly under the workspace dir (a sibling
+# of each member's worktree, per outpost's `--workspace-path` publish target),
+# never inside a member's git working tree — so it is invisible to
+# `_git_is_dirty`, which only ever runs `git status` inside a member's own
+# worktree. This class proves that assumption behaviorally rather than
+# asserting it once: a `sites/`-only change must not block a force-less break,
+# a genuinely dirty member must still block one even with a `sites/` tree
+# present, and the final `rmtree` of the workspace dir must take the `sites/`
+# tree with it.
+# ---------------------------------------------------------------------------
+
+
+class TestBreakSitesTreeCarveOut:
+    def _write_site(self, ws_dir: Path) -> Path:
+        site_dir = ws_dir / "sites" / "demo-site"
+        site_dir.mkdir(parents=True)
+        (site_dir / "index.html").write_text("<html>demo</html>")
+        return site_dir
+
+    def test_break_removes_workspace_dir_with_sites_tree(self, two_member_group):
+        """A `sites/<slug>/index.html` tree does not survive `reconcile_break` —
+        the whole workspace dir goes, not just the member worktrees."""
+        from camp.group.manifest import workspace_dir
+        from camp.provision.reconcile import reconcile_break, reconcile_worktree
+
+        g = two_member_group
+        slug = "break-with-site"
+        reconcile_worktree(g["group"], slug, env=g["env"])
+
+        ws_dir = workspace_dir("testgroup", slug, env=g["env"])
+        self._write_site(ws_dir)
+
+        result = reconcile_break(g["group"], slug, env=g["env"])
+
+        assert result["status"] == "ok"
+        assert not ws_dir.exists(), "workspace dir (and its sites/ tree) must be gone"
+
+    def test_break_with_only_a_sites_tree_change_needs_no_force(self, two_member_group):
+        """A workspace whose only difference from clean is a `sites/` tree
+        passes the dirty-check: break succeeds without force."""
+        from camp.group.manifest import workspace_dir
+        from camp.provision.reconcile import reconcile_break, reconcile_worktree
+
+        g = two_member_group
+        slug = "break-site-only"
+        reconcile_worktree(g["group"], slug, env=g["env"])
+
+        ws_dir = workspace_dir("testgroup", slug, env=g["env"])
+        self._write_site(ws_dir)
+
+        # Should not raise ReconcileError for "dirty" — force is not passed.
+        result = reconcile_break(g["group"], slug, env=g["env"])
+
+        assert result["status"] == "ok"
+
+    def test_break_with_dirty_member_and_sites_tree_still_refuses_without_force(
+        self, two_member_group
+    ):
+        """The same break, but with a genuinely dirty member present alongside
+        the `sites/` tree, must still refuse without force — pinning that the
+        prior test passes because the sites carve-out works, not because the
+        dirty-check itself is broken."""
+        from camp.group.manifest import workspace_dir
+        from camp.provision.reconcile import reconcile_break, reconcile_worktree
+
+        g = two_member_group
+        slug = "break-site-and-dirty"
+        reconcile_worktree(g["group"], slug, env=g["env"])
+
+        ws_dir = workspace_dir("testgroup", slug, env=g["env"])
+        self._write_site(ws_dir)
+
+        wt_a = _member_wt("testgroup", slug, "repo_a", g["env"])
+        (wt_a / "dirty_file.txt").write_text("uncommitted change")
+
+        with pytest.raises(Exception) as exc_info:
+            reconcile_break(g["group"], slug, env=g["env"], force=False)
+
+        assert (
+            "dirty" in str(exc_info.value).lower() or "uncommitted" in str(exc_info.value).lower()
+        )
+
+        # No half-applied break: the sites tree and both worktrees survive the
+        # refusal (the pre-check aborts before any removal).
+        assert ws_dir.exists()
+        assert wt_a.is_dir()
+
+
+# ---------------------------------------------------------------------------
 # Test: cmd_sync across group members
 # ---------------------------------------------------------------------------
 
