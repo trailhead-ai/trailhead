@@ -130,19 +130,38 @@ class Tmux:
         timeout: float | None = None,
         env: Mapping[str, str] | None = None,
     ) -> subprocess.CompletedProcess | None:
+        done, _reason = self._run_with_reason(args, timeout=timeout, env=env)
+        return done
+
+    def _run_with_reason(
+        self,
+        args: Sequence[str],
+        *,
+        timeout: float | None = None,
+        env: Mapping[str, str] | None = None,
+    ) -> tuple[subprocess.CompletedProcess | None, str | None]:
+        """Same call :meth:`_run` makes, plus the exception's own message
+        when the call could not complete at all — the one piece of
+        information :meth:`_run` throws away. Nothing but
+        :meth:`has_session_with_reason` needs that message today, so every
+        other caller stays on the reason-less :meth:`_run`.
+        """
         kwargs: dict[str, object] = {}
         if env is not None:
             kwargs["env"] = dict(env)
         try:
-            return subprocess.run(
-                ["tmux", *args],
-                capture_output=True,
-                text=True,
-                timeout=timeout if timeout is not None else self._timeout,
-                **kwargs,
+            return (
+                subprocess.run(
+                    ["tmux", *args],
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout if timeout is not None else self._timeout,
+                    **kwargs,
+                ),
+                None,
             )
-        except (OSError, subprocess.TimeoutExpired):
-            return None
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return None, str(exc)
 
     def has_session(self, name: str) -> bool | None:
         """Exact-name existence, or ``None`` when tmux did not answer.
@@ -155,6 +174,26 @@ class Tmux:
         if done is None:
             return None
         return done.returncode == 0
+
+    def has_session_with_reason(self, name: str) -> tuple[bool | None, str | None]:
+        """Same tri-state as :meth:`has_session`, plus tmux's own words for
+        *why* when the answer is ``None`` — the message of the `OSError` or
+        `subprocess.TimeoutExpired` that kept the call from completing at
+        all, the only way this ever answers ``None``. The reason is
+        ``None`` whenever the answer itself is not — a completed call, of
+        whatever exit status, is not something this seam summarizes.
+
+        The one consumer is the door's `TMUX_UNANSWERED` refusal
+        (`camp.launch.workspace_session.create_or_connect_workspace_session`),
+        which has an operator to explain the refusal to; every other
+        `has_session` caller stays on the plain bool/None seam, since
+        adding an unused reason there would be seam-widening with no
+        consumer.
+        """
+        done, reason = self._run_with_reason(["has-session", "-t", target(name)])
+        if done is None:
+            return None, reason
+        return done.returncode == 0, None
 
     def pane_command(self, name: str) -> str | None | _Unanswered:
         """The session's first pane's originating command.

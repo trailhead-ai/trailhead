@@ -26,7 +26,7 @@ slug-given call never even calls *workspaces* lazily-for-terminal reasons
 only after the terminal is confirmed present.
 
 Refusal mapping, settled here rather than left to the next task. Slug
-resolution reaches exactly two of `camp.launch.door`'s six refusal members
+resolution reaches exactly two of `camp.launch.door`'s five refusal members
 — :class:`~camp.launch.door.RefusedNoTerminal` and
 :class:`~camp.launch.door.RefusedEmptyGroup` — constructed from that module
 rather than a second vocabulary defined here, per that module's own

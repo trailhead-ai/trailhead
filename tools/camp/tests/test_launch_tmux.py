@@ -230,6 +230,40 @@ def test_has_session_tri_state_true_false_none(monkeypatch):
     assert tmux_module.Tmux().has_session("x") is None
 
 
+def test_has_session_with_reason_carries_the_exceptions_own_message(monkeypatch):
+    """The one consumer-facing widen Fix 3 needs: when `has_session` itself
+    would answer `None` (the call never completed), `has_session_with_reason`
+    carries the exception's own message — varied across two distinct
+    exceptions to prove the message is threaded through, not synthesized."""
+    import camp.launch.tmux as tmux_module
+
+    monkeypatch.setattr(
+        tmux_module.subprocess, "run", lambda *a, **k: _completed(returncode=0)
+    )
+    assert tmux_module.Tmux().has_session_with_reason("x") == (True, None)
+
+    monkeypatch.setattr(
+        tmux_module.subprocess, "run", lambda *a, **k: _completed(returncode=1)
+    )
+    assert tmux_module.Tmux().has_session_with_reason("x") == (False, None)
+
+    def _raise_timeout(*a, **k):
+        raise subprocess.TimeoutExpired(cmd=["tmux"], timeout=5)
+
+    monkeypatch.setattr(tmux_module.subprocess, "run", _raise_timeout)
+    present, reason = tmux_module.Tmux().has_session_with_reason("x")
+    assert present is None
+    assert "timed out" in reason
+
+    def _raise_oserror(*a, **k):
+        raise FileNotFoundError("[Errno 2] No such file or directory: 'tmux'")
+
+    monkeypatch.setattr(tmux_module.subprocess, "run", _raise_oserror)
+    present, reason = tmux_module.Tmux().has_session_with_reason("x")
+    assert present is None
+    assert "No such file or directory" in reason
+
+
 def test_list_sessions_answers_session_listing_only_on_the_no_server_shape(monkeypatch):
     """`UNANSWERED` for every other non-zero exit, `SessionListing` only for
     the specific no-server stderr shape."""

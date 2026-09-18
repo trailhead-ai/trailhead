@@ -12,11 +12,12 @@ Test contract (task/the-door-s-outcome-renders-as-a-line-an-object-and-an-exit-s
 - A slug or session name carrying a newline or a C0 control character cannot
   inject a second line into the human rendering, including a control
   character a `\\n`-only per-field escaper would not have covered.
-- The JSON object carries the same `tmux_session` string that
-  `workspace_session_name` derives for that group and slug — derived here,
-  never retyped.
 
-Pure values throughout: nothing here does I/O, prints, or touches tmux.
+Pure values throughout: nothing here does I/O, prints, or touches tmux. (The
+property that a dispatch's emitted `tmux_session` actually matches
+`workspace_session_name`'s derivation is a dispatch-layer claim, not a pure
+rendering one — pinned in `test_attach_door_dispatch.py` against the CLI's
+actually-emitted object instead.)
 """
 
 from __future__ import annotations
@@ -136,14 +137,3 @@ def test_a_carriage_return_in_the_tmux_session_is_escaped_too():
     assert "\\x0d" in line
 
 
-def test_json_tmux_session_matches_workspace_session_name_derivation():
-    from camp.launch.door import Created, render_json
-    from camp.launch.naming import workspace_session_name
-
-    group, slug = "trailhead", "camp-cli"
-    session = workspace_session_name(group, slug)
-
-    outcome = _make_success(Created, tmux_session=session, slug=slug, group=group)
-    obj = render_json(outcome)
-
-    assert obj["tmux_session"] == session

@@ -55,6 +55,7 @@ from typing import Mapping
 
 from .eligibility import assert_not_a_credential_store
 from .naming import workspace_session_name
+from .session import LaunchError
 from .tmux import Tmux
 
 #: The exact stderr shape tmux prints for a `new-session` refused because the
@@ -126,11 +127,17 @@ class DoorState(Enum):
     CREATE_FAILED = "create_failed"
 
 
-#: The operator-facing sentence for :data:`DoorState.TMUX_UNANSWERED`. It
-#: points at `camp list`, which degrades and still prints rows where the door
-#: cannot: every outcome the door reports is a claim about the session, so an
-#: unanswered probe leaves it no half-answer to give.
-_TMUX_UNANSWERED_REASON = "tmux did not answer — run `camp list` to see what camp can still tell"
+def _tmux_unanswered_reason(detail: str) -> str:
+    """The operator-facing sentence for :data:`DoorState.TMUX_UNANSWERED`,
+    carrying tmux's own words for *why* it could not be asked (the message
+    of the `OSError` or `subprocess.TimeoutExpired`
+    :meth:`~camp.launch.tmux.Tmux.has_session_with_reason` caught — the only
+    way `has_session` itself ever answers `None`). It also points at `camp
+    list`, which degrades and still prints rows where the door cannot: every
+    outcome the door reports is a claim about the session, so an unanswered
+    probe leaves it no half-answer to give.
+    """
+    return f"tmux did not answer — {detail} — run `camp list` to see what camp can still tell"
 
 
 @dataclass(frozen=True)
@@ -161,24 +168,52 @@ def create_or_connect_workspace_session(
     already-existed (another camp won the race, which is a connect), and any
     other failure, which re-probes `has_session` before giving up rather than
     trusting tmux's stderr text alone. A probe tmux never answers at all is
-    :data:`DoorState.TMUX_UNANSWERED`, distinct from a create that was
-    attempted and failed (:data:`DoorState.CREATE_FAILED`, carrying tmux's
-    own words).
+    :data:`DoorState.TMUX_UNANSWERED`, whose reason carries tmux's own words
+    for why (see :meth:`~camp.launch.tmux.Tmux.has_session_with_reason`),
+    distinct from a create that was attempted and failed
+    (:data:`DoorState.CREATE_FAILED`, carrying tmux's own words too).
+
+    :func:`create_workspace_session` also raises
+    :class:`~camp.launch.session.LaunchError` — unconditionally, before any
+    tmux call — when the credential-store gate refuses, including when it
+    cannot even be evaluated because some group's config is unreadable (see
+    :func:`~camp.launch.eligibility.assert_not_a_credential_store`). Both
+    doors share this call, so both would otherwise see a raw traceback
+    instead of a refusal; this function catches it here, once, and folds it
+    into :data:`DoorState.CREATE_FAILED` with the exception's own message as
+    the reason — the same shape any other tmux-boundary create failure
+    reports. `camp attach` turns that into `RefusedCreateFailed` and refuses;
+    `camp new` reports it on the existing workspace-only path, because the
+    workspace this gate is guarding a *session* for is already real and
+    usable on disk regardless of whether the session comes up — the same
+    reasoning that already routes an unanswered tmux and an ordinary create
+    failure there. :func:`create_workspace_session` itself keeps raising for
+    its OWN direct callers (`launch_session`'s own gate, and the tests that
+    exercise it directly) — only this shared door step catches it.
 
     *tmux* is required, never defaulted: both callers inject the seam their
     own wiring resolved, and a default constructed here would silently
     bypass it.
     """
     name = workspace_session_name(group_name, slug)
-    present = tmux.has_session(name)
+    present, unanswered_reason = tmux.has_session_with_reason(name)
 
     if present is None:
-        return DoorProbe(DoorState.TMUX_UNANSWERED, name, reason=_TMUX_UNANSWERED_REASON)
+        return DoorProbe(
+            DoorState.TMUX_UNANSWERED, name, reason=_tmux_unanswered_reason(unanswered_reason)
+        )
 
     if present:
         return DoorProbe(DoorState.CONNECTED, name)
 
-    result = create_workspace_session(group_name, slug, workspace_dir, env=env, tmux=tmux)
+    try:
+        result = create_workspace_session(group_name, slug, workspace_dir, env=env, tmux=tmux)
+    except LaunchError as exc:
+        return DoorProbe(
+            DoorState.CREATE_FAILED,
+            name,
+            reason=f"failed to create workspace session — {exc}",
+        )
     if result.outcome is WorkspaceSessionOutcome.CREATED:
         return DoorProbe(DoorState.CREATED, name)
     if result.outcome is WorkspaceSessionOutcome.ALREADY_EXISTED:

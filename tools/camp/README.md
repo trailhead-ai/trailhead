@@ -25,7 +25,7 @@ for the full install flow.
 camp groups          # list every configured group (any cwd)
 camp new <slug>      # create or enter a workspace, then attach to its tmux session
 camp new <slug> --no-attach  # create or enter + its session, leave this terminal alone
-camp new <slug> --no-session # create or enter the workspace only — no session created
+camp new <slug> --no-session # create or enter the workspace only — no tmux session, unless --launch is also given
 camp pwd <slug>      # print workspace path
 camp list            # list all worktrees (alias: ls)
 camp status          # show git + drift status
