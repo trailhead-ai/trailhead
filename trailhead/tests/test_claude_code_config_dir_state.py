@@ -246,7 +246,19 @@ def _write_credentials(config_dir: Path, access_token: str) -> None:
 class TestAccountAuthenticationVariesWithTheSignal:
     """The Claude Code override answers from the account's credentials file —
     same input shape (a declared account), different content, different
-    verdict. This is the dependency the method exists to protect."""
+    verdict. This is the dependency the method exists to protect.
+
+    The platform is pinned to one where the credentials file IS the
+    authoritative store, because that is the premise these readings depend on:
+    on macOS the same absent-or-empty file means CANNOT_TELL, since the
+    credential may be in the Keychain. Which platform reads which way is
+    `TestAccountAuthenticationPlatformAuthority`'s subject, not this class's —
+    inheriting it from the host would make these verdicts an accident of who
+    ran the suite."""
+
+    @pytest.fixture(autouse=True)
+    def _where_the_file_is_authoritative(self, monkeypatch):
+        monkeypatch.setattr(sys, "platform", "linux")
 
     def test_a_non_empty_access_token_reads_as_authenticated(self, tmp_path):
         account_dir = tmp_path / "acct"

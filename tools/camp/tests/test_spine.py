@@ -1199,6 +1199,21 @@ def test_doctor_probe_accounts_reachable_through_real_cli_entry_path(
     )
     (tmp_path / "workspace").mkdir()
     (tmp_path / "canonical").mkdir()
+    # A live-looking credential, so the verdict is the one reading that is
+    # conclusive on every platform. An ABSENT credentials file is not: where
+    # the Keychain is the real store (macOS) its absence proves nothing and
+    # reads as cannot-tell, which would make this test's answer depend on who
+    # ran it. The subject here is that the probe is reachable through the real
+    # entry point at all; which platform reads an absent file which way is
+    # `TestAccountAuthenticationPlatformAuthority`'s subject, in trailhead/tests.
+    claude_dir = tmp_path / "home" / ".claude"
+    claude_dir.mkdir(parents=True)
+    (claude_dir / ".credentials.json").write_text(
+        _json.dumps(
+            {"claudeAiOauth": {"accessToken": "sk-ant-oat01-fake", "expiresAt": 1}}
+        ),
+        encoding="utf-8",
+    )
 
     result = subprocess.run(
         [sys.executable, str(cli), "doctor", "--json", "--probe"],
@@ -1211,7 +1226,7 @@ def test_doctor_probe_accounts_reachable_through_real_cli_entry_path(
     accounts = report["accounts"]
     assert len(accounts) == 1
     assert accounts[0]["account"] is None
-    assert accounts[0]["verdict"] == "not-authenticated"
+    assert accounts[0]["verdict"] == "authenticated"
 
 
 # ---------------------------------------------------------------------------
