@@ -246,6 +246,59 @@ class Tmux:
         first = done.stdout.splitlines()
         return first[0] if first else None
 
+    def new_window(
+        self,
+        name: str,
+        *,
+        cwd: object,
+        command: Sequence[str],
+        env: Mapping[str, str] | None = None,
+        timeout: float | None = None,
+    ) -> str | None | _Unanswered:
+        """Create a window in session *name*, rooted at *cwd*, running
+        *command* (empty for the default shell), and return the window id
+        tmux itself assigned.
+
+        Read back on this same invocation — `-P -F '#{window_id}'` — never
+        a second `list-windows` call: verified (tmux 3.7c) that tmux prints
+        the assigned id on the creating call itself, with or without a
+        command and `-c`, so there is no create-then-read race to resolve.
+        `-t` is `=`-qualified through :func:`target`, same as every other
+        `-t` operand this seam builds — see the module docstring's
+        `=`-target property.
+
+        Tri-state, matching :meth:`pane_command`'s contract: the window id
+        (`str`, tmux's raw `#{window_id}` value such as `@7`) on success;
+        `None` when tmux answered with a non-zero exit (the session did not
+        exist, say) and so created no window; :data:`UNANSWERED` when tmux
+        could not be asked at all. Folding the last two together would
+        report a hung or unreachable tmux as an ordinary create failure —
+        the one thing this seam's tri-state exists to keep apart.
+        """
+        done = self._run(
+            [
+                "new-window",
+                "-t",
+                target(name),
+                "-P",
+                "-F",
+                "#{window_id}",
+                "-c",
+                str(cwd),
+                *command,
+            ],
+            timeout=timeout,
+            env=env,
+        )
+        if done is None:
+            return UNANSWERED
+        if done.returncode != 0:
+            return None
+        stdout = done.stdout
+        if stdout.endswith("\n"):
+            stdout = stdout[:-1]
+        return stdout
+
     def kill_session(
         self, name: str, *, timeout: float | None = None
     ) -> subprocess.CompletedProcess | None:

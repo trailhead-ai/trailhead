@@ -59,6 +59,7 @@ class _PrefixMatchingTmux:
     def __init__(self, live: dict[str, str]) -> None:
         self.live = dict(live)
         self.calls: list[list[str]] = []
+        self.next_window_id = 0
 
     def _target(self, argv: list[str]) -> str | None:
         if "-t" not in argv:
@@ -87,6 +88,12 @@ class _PrefixMatchingTmux:
         if verb == "has-session":
             resolved = self._resolve(raw_target) if raw_target else None
             return _completed(returncode=0 if resolved else 1)
+        if verb == "new-window":
+            resolved = self._resolve(raw_target) if raw_target else None
+            if resolved is None:
+                return _completed(returncode=1, stderr="can't find session")
+            self.next_window_id += 1
+            return _completed(returncode=0, stdout=f"@{self.next_window_id}\n")
         return _completed(returncode=1, stderr="unhandled verb in test stand-in")
 
 
@@ -467,3 +474,127 @@ class TestTmuxTimeoutEnvironmentSeam:
         applied = self._timeout_applied(monkeypatch, bad)
 
         assert applied == pytest.approx(tmux_module.TMUX_TIMEOUT_SECONDS)
+
+
+def test_new_window_argv_carries_target_cwd_and_command_with_qualified_target(
+    monkeypatch,
+):
+    """The argv `new_window` issues carries the session target, working
+    directory, and command — with the `-t` target `=`-qualified while no
+    bare session name argument appears anywhere in the call."""
+    import camp.launch.tmux as tmux_module
+
+    calls: list[list[str]] = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(list(argv))
+        return _completed(returncode=0, stdout="@7\n")
+
+    monkeypatch.setattr(tmux_module.subprocess, "run", fake_run)
+
+    tmux_module.Tmux().new_window(
+        "feat", cwd="/tmp/ws", command=["sleep", "30"]
+    )
+
+    assert calls == [
+        [
+            "tmux",
+            "new-window",
+            "-t",
+            "=feat",
+            "-P",
+            "-F",
+            "#{window_id}",
+            "-c",
+            "/tmp/ws",
+            "sleep",
+            "30",
+        ]
+    ]
+
+
+def test_new_window_targeting_a_strict_prefix_of_another_live_session_does_not_resolve_to_it(
+    monkeypatch,
+):
+    """A name that is a prefix of another live session's name must not
+    resolve to that other session: `new_window("feat", ...)` against a
+    live `feat-longer` (and no `feat`) must fail, never silently create the
+    window inside `feat-longer`. Reverting `target` to the identity
+    function makes this go red — the bare target resolves by prefix and
+    the window is created in the wrong session."""
+    import camp.launch.tmux as tmux_module
+
+    fake = _PrefixMatchingTmux({"feat-longer": "sleep 1"})
+    monkeypatch.setattr(tmux_module.subprocess, "run", fake)
+
+    result = tmux_module.Tmux().new_window("feat", cwd="/tmp/ws", command=())
+
+    assert result is None, (
+        "a new-window targeting a name that does not exist must not "
+        "resolve to a same-prefixed session that does"
+    )
+    new_window_calls = [c for c in fake.calls if c[1] == "new-window"]
+    assert len(new_window_calls) == 1
+
+
+def test_new_window_returns_the_id_tmux_reported_varying_across_two_calls(monkeypatch):
+    """The returned id is the one the stand-in tmux printed on THIS call —
+    not a fixed sentinel. Two different canned ids produce two different
+    answers."""
+    import camp.launch.tmux as tmux_module
+
+    monkeypatch.setattr(
+        tmux_module.subprocess,
+        "run",
+        lambda *a, **k: _completed(returncode=0, stdout="@3\n"),
+    )
+    first = tmux_module.Tmux().new_window("ws", cwd="/tmp/a", command=())
+    assert first == "@3"
+
+    monkeypatch.setattr(
+        tmux_module.subprocess,
+        "run",
+        lambda *a, **k: _completed(returncode=0, stdout="@9\n"),
+    )
+    second = tmux_module.Tmux().new_window("ws", cwd="/tmp/a", command=())
+    assert second == "@9"
+
+    assert first != second
+
+
+def test_new_window_non_zero_exit_returns_none_not_an_exception_and_no_id(monkeypatch):
+    """A tmux that exits non-zero (the session does not exist, say) produces
+    the seam's own failure result — `None` — never a raw exception escaping
+    to the caller, and never a window id."""
+    import camp.launch.tmux as tmux_module
+
+    monkeypatch.setattr(
+        tmux_module.subprocess,
+        "run",
+        lambda *a, **k: _completed(returncode=1, stderr="can't find session"),
+    )
+
+    result = tmux_module.Tmux().new_window("ws", cwd="/tmp/a", command=())
+
+    assert result is None
+
+
+def test_new_window_unreachable_tmux_is_distinguishable_from_an_answered_failure(
+    monkeypatch,
+):
+    """A tmux that cannot be reached at all (timeout, unlaunchable binary)
+    answers `UNANSWERED` — the same tri-state sentinel `pane_command`
+    already uses — never the same value a completed, non-zero exit
+    produces. Folding the two together would report a hung tmux as an
+    ordinary create failure."""
+    import camp.launch.tmux as tmux_module
+
+    def _raise(*a, **k):
+        raise subprocess.TimeoutExpired(cmd=["tmux"], timeout=5)
+
+    monkeypatch.setattr(tmux_module.subprocess, "run", _raise)
+
+    result = tmux_module.Tmux().new_window("ws", cwd="/tmp/a", command=())
+
+    assert result is tmux_module.UNANSWERED
+    assert result is not None
