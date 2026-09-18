@@ -430,6 +430,97 @@ def test_activate_ready_marks_activated_in_manifest(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# AC32: `camp activate <member>` never reads the workspace's window record —
+# its exit status and output come entirely from the manifest and the
+# member's own CLAUDE.md.
+# ---------------------------------------------------------------------------
+
+
+def _run_activate_cli(group, slug, member_name, env, capsys):
+    from camp.cli.workspace import _cmd_activate_group_cli
+    from ._helpers import call_and_exit_code
+
+    code = call_and_exit_code(
+        _cmd_activate_group_cli, [member_name, "--name", slug], group, env
+    )
+    out = capsys.readouterr()
+    return code, out.out, out.err
+
+
+def test_activate_missing_valid_and_corrupt_records_answer_identically(
+    tmp_path: Path, capsys
+) -> None:
+    """`_cmd_activate_group_cli` (camp/cli/workspace.py) imports only
+    activation.py and profile.py — no window_record import at all — so
+    activating a ready member must exit and print identically whether
+    windows.json is absent, well-formed, or corrupt.
+    """
+    from ._helpers import (
+        write_corrupt_window_record,
+        write_truncated_window_record,
+        write_valid_window_record,
+    )
+
+    group_name = "mygroup"
+    member_name = "myrepo"
+
+    results = {}
+    for state in ("missing", "valid", "corrupt", "truncated"):
+        slug = f"activate-{state}"
+        case_root = tmp_path / state
+        wt_path = case_root / "camp" / group_name / "worktrees" / slug / member_name
+        wt_path.mkdir(parents=True, exist_ok=True)
+        (wt_path / "CLAUDE.md").write_text("# doc\n")
+
+        _make_manifest(
+            case_root,
+            slug,
+            group_name,
+            [
+                {
+                    "name": member_name,
+                    "repo_root": "/tmp/fake-repo",
+                    "worktree_path": str(wt_path),
+                    "provision_state": "ready",
+                }
+            ],
+        )
+
+        ws_dir = wt_path.parent
+        if state == "valid":
+            write_valid_window_record(ws_dir)
+        elif state == "corrupt":
+            write_corrupt_window_record(ws_dir)
+        elif state == "truncated":
+            write_truncated_window_record(ws_dir)
+
+        group = _make_group(group_name, member_name)
+        env = _env(case_root)
+        code, out, err = _run_activate_cli(group, slug, member_name, env, capsys)
+        results[state] = (code, out.replace(slug, "<slug>"), err.replace(slug, "<slug>"))
+
+    baseline_code, baseline_out, baseline_err = results["missing"]
+    assert baseline_code == 0, f"baseline (no record) unexpectedly failed: {baseline_err}"
+    for state in ("valid", "corrupt", "truncated"):
+        code, out, err = results[state]
+        assert code == baseline_code, (
+            f"camp activate exit code differs for a {state} window record: "
+            f"{code} != {baseline_code} (stderr: {err!r})"
+        )
+        assert out == baseline_out, (
+            f"camp activate stdout differs for a {state} window record: "
+            f"{out!r} != {baseline_out!r}"
+        )
+        assert err == baseline_err, (
+            f"camp activate stderr differs for a {state} window record: "
+            f"{err!r} != {baseline_err!r}"
+        )
+        assert "Traceback" not in err, (
+            f"camp activate printed a raw traceback for a {state} window record: {err!r}"
+        )
+
+
+# ---------------------------------------------------------------------------
 # run_activate_tasks_in_background — the detached run's actual task execution
 # ---------------------------------------------------------------------------
 

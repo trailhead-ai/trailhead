@@ -422,3 +422,87 @@ class TestExactlyOneOf:
 
         with pytest.raises(WindowRecordError):
             WindowEntry(window_id="@1", name="a", cwd="repo_a")
+
+
+# ---------------------------------------------------------------------------
+# 8. Missing vs. corrupt is a distinction at the reader's own boundary
+# ---------------------------------------------------------------------------
+
+
+class TestMissingVsCorrupt:
+    """`read_window_record`'s `.status` is the boundary a later caller (AC32's
+    degrading commands, and AC33's resurrection refusal) tells "no windows
+    recorded" apart from "camp cannot tell" at. Collapsing the two here is
+    the exact fail-open shape this task exists to avoid reproducing — pin
+    both directions so a future edit that merges them goes red here first.
+    """
+
+    def test_no_file_at_all_reads_missing_with_no_error(self, tmp_path):
+        from camp.group.window_record import read_window_record, window_record_path_for
+
+        result = read_window_record(window_record_path_for(tmp_path))
+
+        assert result.status == "missing"
+        assert result.entries == ()
+        assert result.error is None
+
+    def test_present_but_unparseable_file_reads_corrupt_with_an_error(self, tmp_path):
+        from camp.group.window_record import window_record_path_for
+
+        path = window_record_path_for(tmp_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{not valid json at all")
+
+        from camp.group.window_record import read_window_record
+
+        result = read_window_record(path)
+
+        assert result.status == "corrupt"
+        assert result.entries == ()
+        assert result.error is not None
+
+    def test_missing_and_corrupt_are_distinguishable_results(self, tmp_path):
+        """The two states differ at every field a caller can branch on —
+        not merely in name — so a caller cannot accidentally treat one as
+        the other by comparing only `.entries` or only `.error`.
+        """
+        from camp.group.window_record import read_window_record, window_record_path_for
+
+        missing_path = window_record_path_for(tmp_path / "missing-ws")
+        corrupt_path = window_record_path_for(tmp_path / "corrupt-ws")
+        corrupt_path.parent.mkdir(parents=True, exist_ok=True)
+        corrupt_path.write_text("{not valid json at all")
+
+        missing = read_window_record(missing_path)
+        corrupt = read_window_record(corrupt_path)
+
+        assert missing.status != corrupt.status
+        assert missing.error != corrupt.error
+
+    def test_a_truncated_record_reads_corrupt_not_as_an_empty_ok_record(self, tmp_path):
+        """A prefix of a valid record (a write killed mid-flight) must not be
+        mistaken for a legitimately empty ``{"schema_version": 1, "windows":
+        []}`` record — both would have zero entries, so the status field is
+        the only thing that can tell them apart.
+        """
+        from camp.group.window_record import (
+            WindowEntry,
+            read_window_record,
+            window_record_path_for,
+            write_window_record,
+        )
+
+        path = window_record_path_for(tmp_path)
+        write_window_record(
+            path,
+            [WindowEntry(window_id="@1", name="main", cwd=".", conversation_id="c1")],
+        )
+        full_bytes = path.read_bytes()
+        path.write_bytes(full_bytes[: len(full_bytes) // 2])
+
+        truncated = read_window_record(path)
+        empty = read_window_record(window_record_path_for(tmp_path / "genuinely-empty"))
+
+        assert truncated.status == "corrupt"
+        assert truncated.status != empty.status
+        assert truncated.entries == ()

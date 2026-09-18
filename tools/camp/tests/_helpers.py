@@ -176,3 +176,66 @@ def run_camp(argv, *, env):
         os.environ.clear()
         os.environ.update(saved_env)
     return CampResult(list(argv), returncode, out.getvalue(), err.getvalue())
+
+
+def call_and_exit_code(fn, *args, **kwargs) -> int:
+    """Call *fn* and normalize its outcome to an exit code.
+
+    camp's CLI handlers exit via ``sys.exit`` on a refusal but return
+    normally (no exception at all) on success — this lets a caller compare
+    "exit status" uniformly across both instead of special-casing which path
+    a command took.
+    """
+    try:
+        fn(*args, **kwargs)
+    except SystemExit as exc:
+        return exc.code if isinstance(exc.code, int) else 1
+    return 0
+
+
+def write_valid_window_record(ws_dir: Path) -> None:
+    """Write a well-formed windows.json with one entry into *ws_dir*."""
+    from camp.group.window_record import (
+        WindowEntry,
+        window_record_path_for,
+        write_window_record,
+    )
+
+    write_window_record(
+        window_record_path_for(ws_dir),
+        [WindowEntry(window_id="@1", name="main", cwd=".", conversation_id="conv-abc")],
+    )
+
+
+def _valid_window_record_bytes(ws_dir: Path) -> bytes:
+    from camp.group.window_record import window_record_path_for
+
+    write_valid_window_record(ws_dir)
+    path = window_record_path_for(ws_dir)
+    data = path.read_bytes()
+    path.unlink()
+    return data
+
+
+def write_corrupt_window_record(ws_dir: Path) -> None:
+    """Write a windows.json at *ws_dir* that is present but not parseable JSON."""
+    from camp.group.window_record import window_record_path_for
+
+    path = window_record_path_for(ws_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{not valid json at all")
+
+
+def write_truncated_window_record(ws_dir: Path) -> None:
+    """Write a windows.json at *ws_dir* that is a byte-prefix of a valid one.
+
+    A truncated write (process killed mid-``write``) must read as unreadable,
+    never as an accidentally-valid empty record — so this is a distinct
+    fixture from :func:`write_corrupt_window_record`'s arbitrary garbage.
+    """
+    from camp.group.window_record import window_record_path_for
+
+    full = _valid_window_record_bytes(ws_dir)
+    path = window_record_path_for(ws_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(full[: len(full) // 2])

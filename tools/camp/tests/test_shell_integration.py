@@ -327,6 +327,87 @@ class TestCampPwdErrors:
 
 
 # ---------------------------------------------------------------------------
+# AC32: camp pwd (the "path" command) never reads the window record, so a
+# missing, valid, or corrupt windows.json must never change its answer.
+# ---------------------------------------------------------------------------
+
+
+class TestCampPwdWindowRecordDegradation:
+    """`cmd_pwd` (camp/launch/shell_integration.py) resolves a workspace's
+    path from the state dir alone — it does not import window_record at
+    all. This class pins that: exit status and stdout/stderr are identical
+    whether windows.json is absent, well-formed, or corrupt.
+    """
+
+    def _run(self, tmp_path: Path, ws_dir: Path) -> subprocess.CompletedProcess:
+        group_name = "mygroup"
+        member_name = "myrepo"
+        slug = "my-slug"
+
+        _make_group_config(tmp_path, group_name, member_name)
+
+        env = {
+            "CAMP_CONFIG_DIR": str(tmp_path),
+            "CAMP_STATE_DIR": str(tmp_path / "state"),
+        }
+
+        return _run_cli(["pwd", slug, "--group", group_name], env=env)
+
+    def test_missing_valid_and_corrupt_records_answer_identically(
+        self, tmp_path: Path
+    ) -> None:
+        from ._helpers import (
+            write_corrupt_window_record,
+            write_truncated_window_record,
+            write_valid_window_record,
+        )
+
+        group_name = "mygroup"
+        slug = "my-slug"
+
+        # Three independent workspaces (one per record state) so each run
+        # starts from a clean windows.json condition rather than mutating
+        # one workspace's record between runs.
+        results = {}
+        for state in ("missing", "valid", "corrupt", "truncated"):
+            # Each state gets its own case_root (so a run never mutates the
+            # windows.json another run already read), and its output is
+            # normalized to be relative to that root — the case_root itself
+            # varying is fixture plumbing, not a fact under test.
+            case_root = tmp_path / state
+            case_root.mkdir()
+            ws_dir = _make_workspace(case_root, group_name, slug)
+            if state == "valid":
+                write_valid_window_record(ws_dir)
+            elif state == "corrupt":
+                write_corrupt_window_record(ws_dir)
+            elif state == "truncated":
+                write_truncated_window_record(ws_dir)
+            proc = self._run(case_root, ws_dir)
+            results[state] = (
+                proc.returncode,
+                proc.stdout.replace(str(case_root), "<root>"),
+                proc.stderr.replace(str(case_root), "<root>"),
+            )
+
+        baseline_code, baseline_out, _ = results["missing"]
+        assert baseline_code == 0, f"baseline (no record) unexpectedly failed: {results['missing'][2]}"
+        for state in ("valid", "corrupt", "truncated"):
+            code, out, err = results[state]
+            assert code == baseline_code, (
+                f"camp pwd exit status differs for a {state} window record: "
+                f"{code} != {baseline_code} (stderr: {err!r})"
+            )
+            assert out == baseline_out, (
+                f"camp pwd stdout differs for a {state} window record: "
+                f"{out!r} != {baseline_out!r}"
+            )
+            assert "Traceback" not in err, (
+                f"camp pwd printed a raw traceback for a {state} window record: {err!r}"
+            )
+
+
+# ---------------------------------------------------------------------------
 # Seam smoke: the real `bin/trailhead` entry point actually regenerates the
 # one-arm `camp()` wrapper — not just the `shellenv_lines()` function called
 # directly. `trailhead install`'s only shellenv-facing behavior is printing
