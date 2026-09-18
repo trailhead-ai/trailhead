@@ -59,6 +59,15 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      - name: Install tmux
+        # tmux is not on the ubuntu-latest runner image. camp's window-binding
+        # tests (tools/camp/tests/test_window_binding_end_to_end.py) drive a
+        # real tmux server on a throwaway -L socket rather than substituting a
+        # fake for the behavioural proof; without this step they'd silently
+        # skip in CI (the tests carry their own skip guard for contributors
+        # without tmux locally, resolved by absolute PATH at import time).
+        run: sudo apt-get update && sudo apt-get install -y tmux
+
       - name: Install pytest
         # trailhead has zero third-party runtime deps (stdlib only); pytest and
         # pytest-xdist (parallelizes the run via -n auto in pyproject.toml) are
