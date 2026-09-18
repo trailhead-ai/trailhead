@@ -58,6 +58,7 @@ waits is a handful of seconds — a few calls, plus the budget, and no more.
 
 from __future__ import annotations
 
+import os
 import re
 import shlex
 import subprocess
@@ -83,6 +84,35 @@ TMUX_TIMEOUT_SECONDS = 5.0
 #: idle time and leave the time an operator actually waits unbounded.
 POLL_TIMEOUT_SECONDS = 5.0
 POLL_INTERVAL_SECONDS = 0.1
+
+#: Environment overrides for the two budgets above, in seconds.
+#:
+#: Both are sized for a real operator against a busy tmux server, so a caller
+#: driving the path that spends one waits the whole of it before the outcome
+#: appears. That is the right behaviour for a real stop and pure dead time for
+#: a test asserting the outcome, so both defaults are readable from the
+#: environment — the same shape as the other `CAMP_TEST_*` seams. Only the
+#: defaults: a caller passing `timeout=` or `poll_timeout=` still gets exactly
+#: what it asked for.
+_TMUX_TIMEOUT_ENV = "CAMP_TEST_TMUX_TIMEOUT_SECONDS"
+_POLL_TIMEOUT_ENV = "CAMP_TEST_STOP_POLL_TIMEOUT_SECONDS"
+
+
+def _resolve_budget(name: str, shipped: float) -> float:
+    """Return the budget *name* overrides, else *shipped*.
+
+    An absent, unparseable or non-positive value leaves the shipped budget in
+    place: a stray or malformed setting must not be able to shrink a real
+    stop's window to nothing, which would report a busy tmux as a failure.
+    """
+    raw = os.environ.get(name)
+    if raw is None:
+        return shipped
+    try:
+        override = float(raw)
+    except ValueError:
+        return shipped
+    return override if override > 0 else shipped
 
 #: Where the concierge supervisor publishes the id of the anchor session,
 #: under its own state dir. camp reads it; camp never writes it. The directory
@@ -198,8 +228,12 @@ class Refused(StopOutcome):
 class Tmux:
     """The tmux seam: the three questions the engine asks of a session name."""
 
-    def __init__(self, *, timeout: float = TMUX_TIMEOUT_SECONDS) -> None:
-        self._timeout = timeout
+    def __init__(self, *, timeout: float | None = None) -> None:
+        self._timeout = (
+            timeout
+            if timeout is not None
+            else _resolve_budget(_TMUX_TIMEOUT_ENV, TMUX_TIMEOUT_SECONDS)
+        )
 
     def _run(self, args: Sequence[str]) -> subprocess.CompletedProcess | None:
         try:
@@ -448,7 +482,7 @@ def stop_session(
     now=None,
     sleep: Callable[[float], None] = time.sleep,
     monotonic: Callable[[], float] = time.monotonic,
-    poll_timeout: float = POLL_TIMEOUT_SECONDS,
+    poll_timeout: float | None = None,
     poll_interval: float = POLL_INTERVAL_SECONDS,
 ) -> Resolution | StopOutcome:
     """Stop the one session *ref* addresses. See the module docstring.
@@ -456,6 +490,8 @@ def stop_session(
     Returns the resolver's own ``Ambiguous`` / ``NoMatch`` when the ref does not
     address exactly one session, and otherwise one of the ``StopOutcome`` kinds.
     """
+    if poll_timeout is None:
+        poll_timeout = _resolve_budget(_POLL_TIMEOUT_ENV, POLL_TIMEOUT_SECONDS)
     tmux = tmux if tmux is not None else Tmux()
 
     resolution = resolve_session_ref(

@@ -420,6 +420,15 @@ def cli_env(tmp_path: Path):
     # the full budget in real seconds to observe a refusal it is asserting.
     # Well above what the stub needs, far below what waiting costs.
     env["CAMP_TEST_CONFIRM_TIMEOUT_SECONDS"] = "5"
+    # `camp kill` carries two budgets of its own, both sized for a busy tmux
+    # server. The fake tmux here is a local script, so the only tests that
+    # spend either budget are the ones deliberately driving a tmux that hangs
+    # or a session that never goes — each sitting out the full budget to
+    # observe the outcome it asserts. Both are margins over what the fake
+    # needs, not measured floors: raise them first if these ever go flaky
+    # under heavy parallelism.
+    env["CAMP_TEST_TMUX_TIMEOUT_SECONDS"] = "2"
+    env["CAMP_TEST_STOP_POLL_TIMEOUT_SECONDS"] = "1"
     env["CAMP_FAKE_SESSIONS_FILE"] = str(sessions_file)
     env["TRAILHEAD_CLAUDE_DIR"] = str(tmp_path / "claude")
     env["CAMP_FAKE_TMUX_ARGV_FILE"] = str(tmux_argv_file)
