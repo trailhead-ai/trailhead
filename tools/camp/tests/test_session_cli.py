@@ -99,6 +99,7 @@ assert _helpers_spec and _helpers_spec.loader, _HELPERS_SOURCE
 _helpers = importlib.util.module_from_spec(_helpers_spec)
 _helpers_spec.loader.exec_module(_helpers)
 init_git_repo = _helpers.init_git_repo
+run_camp = _helpers.run_camp
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
@@ -426,12 +427,10 @@ def cli_env(tmp_path: Path):
         ("mygroup", "fakeharness", repo_a),
         ("badgroup", "nosuchharness", repo_b),
     ):
-        result = subprocess.run(
-            [sys.executable, str(_CLI_CAMP), "group", name, "--member", f"member={repo}"],
-            capture_output=True,
-            text=True,
-            env=env,
-        )
+        # Authored in-process: the fixture wants the group on disk, not the
+        # fact that a separate interpreter wrote it. Every camp call a test
+        # then makes — the thing under test here — is still a real subprocess.
+        result = run_camp(["group", name, "--member", f"member={repo}"], env=env)
         assert result.returncode == 0, f"group authoring failed: {result.stderr}"
         _set_harness_binary(config_dir, name, binary)
 

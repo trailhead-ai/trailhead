@@ -7,10 +7,23 @@ disagree about its behaviour stays split rather than growing a flag per caller.
 from __future__ import annotations
 
 import atexit
+import contextlib
+import io
+import os
 import shutil
 import subprocess
+import sys
 import tempfile
+import traceback
 from pathlib import Path
+
+_PLUGIN_DIR = Path(__file__).resolve().parents[1] / "plugins" / "camp"
+
+#: The `camp` entry script, for a caller that wants a real subprocess.
+CLI_CAMP = _PLUGIN_DIR / "cli" / "camp"
+
+if str(_PLUGIN_DIR) not in sys.path:
+    sys.path.insert(0, str(_PLUGIN_DIR))
 
 #: Absolute paths git records inside `.git` when a repo is built, keyed by the
 #: file that holds them. Copying a repo to a new location leaves these pointing
@@ -107,3 +120,59 @@ def camp_state_env(tmp_path: Path) -> dict[str, str]:
     state_root = tmp_path / "camp-state"
     state_root.mkdir(parents=True, exist_ok=True)
     return {"CAMP_STATE_DIR": str(state_root)}
+
+
+class CampResult:
+    """The subset of ``CompletedProcess`` the camp fixtures read."""
+
+    def __init__(self, args, returncode, stdout, stderr):
+        self.args = args
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+
+
+def run_camp(argv, *, env):
+    """Run a camp command in this process; returns a CompletedProcess-alike.
+
+    For a fixture that wants a command's *effect* — a group on disk, a
+    workspace brought up — rather than the fact that a separate process
+    produced it. `test_helpers_camp_runner` holds the equivalence that makes
+    the substitution sound: the same argv down either route writes the same
+    thing and reports the same outcome.
+
+    A test whose subject *is* the separate process — an exit status a shell
+    sees, an inherited descriptor, a command that must survive its parent —
+    spawns :data:`CLI_CAMP` itself instead.
+
+    `env` replaces the environment wholesale for the duration of the call, the
+    way a subprocess's would, so a variable the caller left out is absent
+    rather than inherited from the test process. `sys.argv` is staged the same
+    way, because camp's entry point reads it directly. An escaping exception
+    is reported as the interpreter would report it at top level — traceback on
+    stderr, exit code 1 — so a command that refuses by raising still looks to
+    the caller like the subprocess failure it stands in for.
+    """
+    from camp.cli import dispatch
+
+    out, err = io.StringIO(), io.StringIO()
+    saved_env = dict(os.environ)
+    saved_argv = list(sys.argv)
+    try:
+        os.environ.clear()
+        os.environ.update(env)
+        sys.argv = ["camp", *argv]
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            try:
+                dispatch.main()
+                returncode = 0
+            except SystemExit as exc:
+                returncode = exc.code if isinstance(exc.code, int) else (0 if exc.code is None else 1)
+            except BaseException:  # noqa: BLE001 - mirrors the interpreter's top level
+                traceback.print_exc(file=err)
+                returncode = 1
+    finally:
+        sys.argv = saved_argv
+        os.environ.clear()
+        os.environ.update(saved_env)
+    return CampResult(list(argv), returncode, out.getvalue(), err.getvalue())
