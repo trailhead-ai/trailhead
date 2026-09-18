@@ -217,6 +217,30 @@ partial resurrection cannot occur until the window record exists, and reserving 
 an outcome nothing can produce puts a value in the contract with no producer to hold it
 honest. The resurrection slice adds the third code alongside the outcome that earns it.
 
+## State — No session exists: creating, in flight
+
+The window between asking tmux for a session and learning whether it exists.
+
+```
+$ camp attach camp-cli
+<no output; the terminal blocks>
+```
+
+The door prints nothing here, deliberately. Its outcome line is the first and only thing it
+says, and it says it once the answer is known — a progress line would have to be erased or
+lived with, and the create it narrates is normally fast enough that the operator sees the
+outcome rather than the wait.
+
+What bounds the wait is the create timeout: 30 seconds, matching what `camp launch` already
+allows for the same work, because this is the call that starts the tmux server when none is
+running. A plugin-heavy `.tmux.conf` or a loaded machine is the ordinary reason the first
+create of the day is slow, and the shorter probe timeout tmux calls otherwise use is not
+enough for it.
+
+Exceeding the bound is not its own answer. It resolves into *The session could not be created*
+below, carrying tmux's own words — a timeout reads as a failure the operator can act on, not
+as a door that hangs.
+
 ## State — A slug naming a workspace with no session
 
 The ordinary first open of the day.
