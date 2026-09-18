@@ -164,6 +164,18 @@ PUBLISH_RETRIES_EXHAUSTED = "retries-exhausted"
 #: outcomes still exit non-zero.
 SYNC_AWAITING_PERSON = "awaiting-person"
 
+#: A conflict no field-wise merge could settle, on a host that declares it
+#: makes no vault content: `cli.resolve.resolve_for_sweep` took the published
+#: history outright and the vault converged with nobody present (AC37). An
+#: INTERNAL ending only — deliberately NOT a member of :data:`SYNC_OUTCOMES`:
+#: the vault's reported outcome is plain "converged", because from the
+#: owner's side nothing happened but records arriving a little later than
+#: they otherwise would. It exists so this module can tell that ending apart
+#: from :data:`PUBLISH_OK` without re-deriving it from git state: a discard
+#: leaves nothing to push, so the run must not report `published`, and it
+#: must not attempt a push of its own either.
+PUBLISH_DISCARDED = "discarded"
+
 #: Closed failure-reason literals reported ALONGSIDE a `holding` outcome —
 #: never alone, and never in place of it (the row a person or a caller reads
 #: stays "holding" either way; see the module's own council-review note on
@@ -363,7 +375,7 @@ PULL_FAILED = "failed"
 #: `lore sync` (which commits before it rebases) can clear it.
 PULL_DIRTY = "dirty"
 
-#: :func:`_pull_one`'s two conflict-handoff outcomes, reachable only when
+#: :func:`_pull_one`'s three conflict-handoff outcomes, reachable only when
 #: called with ``resolve_conflicts=True`` (the full sync's own call, never
 #: ``_pull_only_one``'s — see :func:`_hand_off_to_resolver`). ``PULL_RESOLVED``
 #: means the resolver settled the vault AND already pushed it (its own finish
@@ -372,8 +384,13 @@ PULL_DIRTY = "dirty"
 #: publish" push cycle of its own. ``PULL_AWAITING_PERSON`` mirrors
 #: :data:`SYNC_AWAITING_PERSON` by value — a separate name here documents
 #: which layer produced it.
+#: :data:`PULL_DISCARDED` mirrors :data:`PUBLISH_DISCARDED` the same way:
+#: the resolver kept the published history and discarded this host's local
+#: commits, so — unlike :data:`PULL_RESOLVED` — nothing was published and the
+#: caller must not run a push cycle of its own.
 PULL_RESOLVED = "resolved"
 PULL_AWAITING_PERSON = SYNC_AWAITING_PERSON
+PULL_DISCARDED = PUBLISH_DISCARDED
 
 
 def _fetch_origin(vault: Path, say_err, *, pull_only: bool = False) -> bool:
@@ -452,25 +469,35 @@ def _hand_off_to_resolver(
       own finish tail already pushed it. ``reason`` is ``None``.
     - :data:`SYNC_AWAITING_PERSON` — a judgment conflict left the vault held
       for a person, clean and diverged. ``reason`` is ``None``.
+    - :data:`PUBLISH_DISCARDED` — this host declares it makes no vault
+      content, so the resolver kept the published history and discarded the
+      local commits with it. Nothing was published, nothing is held, and
+      nothing is said: the vault converged with nobody present. ``reason``
+      is ``None``.
     - :data:`PUBLISH_HOLDING` — the resolver itself could not reach either
-      ending (:class:`resolve.ResolveError`: a record the graph guards
+      ending: a :class:`resolve.ResolveError` (a record the graph guards
       refuse, a ``rebase --continue`` that fails, the step ceiling, an
-      unreadable index). ``reason`` is :data:`FAILURE_POLICY`.
+      unreadable index), or a :class:`vault.config.VaultConfigError` from
+      the host's own author declaration being present but not a bool, which
+      the resolver refuses rather than coerces and which it reads on exactly
+      this path. Both are this host's data needing a fix, which is what
+      :data:`FAILURE_POLICY` names, so both report it.
 
-    Never raises: a :class:`resolve.ResolveError` is caught here. If it left
+    Never raises either of those two named types. If one left
     the vault mid-rebase, that is aborted too before reporting — there is no
     person present to hand a traceback to, so this function's whole job is to
-    always produce one of the three determinate endings above. The failure's
+    always produce one of the four determinate endings above. The failure's
     own detail is written to :func:`resolve_state.mark_failed`'s marker (a
     named, durable location under ``state_dir("lore")/resolve``) in ADDITION
     to the stderr line, so it survives past this one run's terminal — the
     council review's "goes to the terminal and the host's log" promise.
     """
     from . import resolve as resolve_mod
+    from ..vault import config as vault_config_mod
 
     try:
         report = resolve_mod.resolve_for_sweep(vault, name, shared=shared)
-    except resolve_mod.ResolveError as exc:
+    except (resolve_mod.ResolveError, vault_config_mod.VaultConfigError) as exc:
         say_err(f"error: the resolver could not settle this conflict: {exc}")
         if _vault_mid_rebase(vault):
             try:
@@ -483,6 +510,12 @@ def _hand_off_to_resolver(
         return PUBLISH_HOLDING, FAILURE_POLICY
 
     resolve_mod.resolve_state.clear_failed_marker(vault)
+    if report.get("discarded"):
+        # A host that declares it makes no vault content — the resolver kept
+        # the published history and nothing of this host's is left to say.
+        # Deliberately silent: the owner of such a host is never handed a
+        # version-control decision, and a line here would be one.
+        return PUBLISH_DISCARDED, None
     if report["held"]:
         say_err(
             "notice: a judgment conflict needs a person — "
@@ -657,6 +690,12 @@ def _pull_one(
         outcome, _reason = _hand_off_to_resolver(vault, name, say, say_err, shared=shared)
         if outcome == PUBLISH_OK:
             return PULL_RESOLVED, 0
+        if outcome == PUBLISH_DISCARDED:
+            # The published history was kept and this host's own commits were
+            # discarded with it — the vault gained exactly the commits it was
+            # behind by, so they count toward the caller's reindex decision
+            # just as an ordinary pull's do.
+            return PULL_DISCARDED, behind
         if outcome == SYNC_AWAITING_PERSON:
             return PULL_AWAITING_PERSON, 0
         return PULL_FAILED, 0
@@ -719,6 +758,10 @@ def _push_one(
     (:data:`FAILURE_POLICY`, recorded on the resolver's own failed-vault
     marker — see :func:`_hand_off_to_resolver`), :data:`SYNC_AWAITING_PERSON`
     when a replay conflict is a judgment call the resolver held for a person,
+    :data:`PUBLISH_DISCARDED` when a replay conflict on a host that authors
+    nothing was settled by keeping the published history — the commit this
+    push was carrying went with the rest of the local divergence, so there is
+    nothing left to publish and nothing went wrong —
     or :data:`PUBLISH_RETRIES_EXHAUSTED` when the published history kept
     moving past ``max_attempts`` (default :func:`resolve_publish_retry_max`).
     ``attempts_used`` counts only the moved-history case — the one condition
@@ -874,6 +917,14 @@ def _push_one(
             outcome, _reason = _hand_off_to_resolver(vault, name, say, say_err, shared=shared)
             if outcome == PUBLISH_OK:
                 return 0, PUBLISH_OK, attempts_used
+            if outcome == PUBLISH_DISCARDED:
+                # This host authors nothing: the commit this push was carrying
+                # was discarded with the rest of the local divergence, so there
+                # is nothing left to publish and nothing went wrong. The
+                # commits the vault gained count exactly as a replay's do.
+                if on_replay is not None and replayed:
+                    on_replay(replayed)
+                return 0, PUBLISH_DISCARDED, attempts_used
             if outcome == SYNC_AWAITING_PERSON:
                 return 1, SYNC_AWAITING_PERSON, attempts_used
             return 1, PUBLISH_HOLDING, attempts_used
@@ -1099,6 +1150,11 @@ def _pull_and_push_one(
         return 1, 0, PUBLISH_HOLDING, False
     if pull_state == PULL_AWAITING_PERSON:
         return 1, 0, SYNC_AWAITING_PERSON, False
+    if pull_state == PULL_DISCARDED:
+        # A host that authors nothing kept the published history. Nothing of
+        # this host's is left to publish, so no push cycle runs — the vault
+        # is converged, and `published` stays False.
+        return 0, pulled, PUBLISH_DISCARDED, False
     if pull_state == PULL_RESOLVED:
         # Settled field-wise and already pushed by the resolver's own finish
         # tail — no separate push attempt needed.

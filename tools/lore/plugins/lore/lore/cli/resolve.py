@@ -233,8 +233,9 @@ def host_is_author(env: dict | None = None) -> bool:
     reads as author here, same as that accessor's ``None``. Only an explicit
     ``makes_vault_content: false`` reads as non-author.
 
-    This task adds the declaration and its default only; nothing here yet
-    branches on the result — that is a later task's job.
+    :func:`resolve_for_sweep` is the one caller that branches on it: it
+    selects which ending an unsettleable conflict gets — held for a person
+    (author) or discarded toward the published history (non-author).
 
     Args:
         env: Optional ``{str: str}`` XDG environment override, forwarded to
@@ -1190,6 +1191,35 @@ def _abort_replay(vault: Path) -> None:
         raise ResolveError(f"could not abort the rebase to hold it: {err or out}")
 
 
+def _discard_toward_published(vault: Path) -> None:
+    """Move *vault* onto the published history, discarding its local commits.
+
+    The non-author host's ending for a conflict nothing can settle: this host
+    makes no vault content, so its divergence is not somebody's only copy of a
+    day's work, and taking the published side outright is what lets the vault
+    converge with nobody present (AC37).
+
+    The discarded commits are not destroyed — they stay in the vault's own
+    history, reachable through its reflog and by sha — which is what makes
+    this recoverable and is why the declaration defaults to author.
+
+    Called only after :func:`_abort_replay` has returned the vault to its
+    pre-replay state, so the reset moves a clean tree from this host's
+    divergence to the published tip and nothing else.
+
+    Its failure message carries no git or remote text: this ending's whole
+    point is that a non-author host's owner is never handed a version-control
+    decision, and the text of a failure here reaches the same surfaces the
+    success does.
+    """
+    upstream = _vault_upstream_ref(vault)
+    if upstream is None:
+        raise ResolveError("there is no published history to keep")
+    rc, _out, _err = _git(vault, "reset", "--hard", upstream)
+    if rc != 0:
+        raise ResolveError("could not move the vault onto the published history")
+
+
 def resolve_for_sweep(vault: Path, name: str, *, shared: bool) -> dict:
     """Settle *vault* with nobody present and return its outcome report.
 
@@ -1205,8 +1235,21 @@ def resolve_for_sweep(vault: Path, name: str, *, shared: bool) -> dict:
     avoid, not this function's, because :func:`_vault_mid_rebase` cannot tell
     the two apart from git state alone.
 
+    **Which ending an unsettleable conflict gets is the host's own
+    declaration** (:func:`host_is_author`, consulted once, after the replay is
+    aborted so the vault is clean whichever way it answers). An author host
+    keeps its local commits and is held for a person. A host that declares it
+    makes no vault content instead takes the published history outright
+    (:func:`_discard_toward_published`), publishes nothing of its own, carries
+    no held marker, and tells its owner nothing — its owner's experience of a
+    conflict is that records appear a little later than they otherwise would.
+    A conflict the field-wise merge CAN settle never reaches this branch, so
+    the declaration changes ordinary merges not at all.
+
     Returns the same report shape :func:`render_json` produces, plus ``held``
-    (bool) and, only when held, ``entered-at``. Raises :class:`ResolveError` if
+    (bool); ``entered-at`` only when held, and ``discarded`` (``True``) only
+    on the non-author ending — the flag `cli.sync` reads to report a vault
+    that converged without publishing anything. Raises :class:`ResolveError` if
     the rebase cannot be started, driven, or aborted — there is no person here
     to hand a printed remedy to, so the caller decides what to do with it.
 
@@ -1229,6 +1272,13 @@ def resolve_for_sweep(vault: Path, name: str, *, shared: bool) -> dict:
 
         if conflicts or files:
             _abort_replay(vault)
+            if not host_is_author():
+                _discard_toward_published(vault)
+                resolve_state.clear_held_marker(vault)
+                report = render_json(name, [], [], shared=shared)
+                report["held"] = False
+                report["discarded"] = True
+                return report
             marker = resolve_state.mark_held(vault)
             report = render_json(name, conflicts, files, shared=shared)
             report["held"] = True

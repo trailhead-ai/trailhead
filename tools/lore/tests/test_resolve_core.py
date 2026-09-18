@@ -2135,3 +2135,392 @@ def test_swapped_updated_at_leaves_every_other_decision_unchanged(resolve):
     non_volatile_2 = {k: v for k, v in merged_2.items() if k not in ("updated-at", "updated-by")}
     assert non_volatile_1 == non_volatile_2 == {"kind": "task"}, \
         "kind is the only field settled either way, and it settles the same way both times"
+
+
+# ── the declaration branches the unsettleable ending ───────────────────────
+#
+# One fixture, one varied input: the host's own `makes_vault_content`
+# declaration. An author host keeps its local commits and waits for a person;
+# a host that authors nothing keeps the published history instead, with
+# nobody present and nothing of its own published. Getting this pair backwards
+# destroys the only copy of somebody's work, so the two endings are always
+# built from the SAME collision.
+
+
+def _config_home(fx: "_Fixture", *, makes_vault_content: bool | None) -> Path:
+    """A config home pointing at *fx*'s vault, carrying the given declaration.
+
+    ``None`` writes no ``makes_vault_content`` key at all — the undeclared
+    host, which must read as an author host.
+    """
+    home = fx.tmp / f"config-home-{makes_vault_content}"
+    (home / "lore").mkdir(parents=True, exist_ok=True)
+    data: dict = {
+        "vaults": [{"name": "default", "scope": "default", "path": str(fx.vault)}]
+    }
+    if makes_vault_content is not None:
+        data["makes_vault_content"] = makes_vault_content
+    (home / "lore" / "config.json").write_text(json.dumps(data), encoding="utf-8")
+    return home
+
+
+def _sync_declaring(fx: "_Fixture", *, makes_vault_content: bool | None):
+    """Run ``lore sync --json`` on *fx* under the given host declaration."""
+    return fx.cli(
+        ["sync", "--json"],
+        env_extra={
+            "XDG_CONFIG_HOME": str(
+                _config_home(fx, makes_vault_content=makes_vault_content)
+            )
+        },
+    )
+
+
+def _vault_entry(result) -> dict:
+    doc = _json_tail(result.stdout)
+    entries = [v for v in doc["vaults"] if v["vault"] == "default"]
+    assert len(entries) == 1, entries
+    return entries[0]
+
+
+def test_a_host_that_does_not_author_discards_toward_the_published_history(tmp_path):
+    """AC37: an unsettleable conflict on a non-author host resolves toward the
+    published history, without a person, publishing nothing of its own."""
+    fx = _Fixture(tmp_path)
+    record_id, _local_sha, remote_sha = _diverge_on_status(fx)
+
+    synced = _sync_declaring(fx, makes_vault_content=False)
+
+    assert synced.returncode == 0, synced.stderr
+    assert _vault_entry(synced)["outcome"] == "converged"
+    assert _git(fx.vault, "rev-parse", "HEAD").stdout.strip() == remote_sha, (
+        "the vault sits exactly at the published history"
+    )
+    assert fx.sidecar(record_id)["status"] == "done", "the published side's value"
+    assert "Reindexed" in synced.stdout, (
+        "the records the discard brought in are searchable — the run reindexed"
+    )
+    assert _git(fx.vault, "status", "--porcelain").stdout.strip() == "", "clean"
+    ahead = _git(
+        fx.vault, "rev-list", "--count", f"origin/{fx.branch}..HEAD"
+    ).stdout.strip()
+    assert ahead == "0", "nothing of its own was published"
+
+    state = load_script("lore.cli.resolve_state")
+    os.environ["XDG_STATE_HOME"] = str(fx.state)
+    assert not state.vault_is_held(fx.vault), "nothing is waiting for a person here"
+
+
+def test_the_same_conflict_on_an_author_host_waits_for_a_person(tmp_path):
+    """The other half of the pair — the declaration is the only input varied,
+    and it is what selects between keeping local work and discarding it."""
+    fx = _Fixture(tmp_path)
+    record_id, local_sha, _remote_sha = _diverge_on_status(fx)
+
+    synced = _sync_declaring(fx, makes_vault_content=True)
+
+    assert synced.returncode != 0, "a person still has something to act on"
+    assert _vault_entry(synced)["outcome"] == "awaiting-person"
+    assert _git(fx.vault, "rev-parse", "HEAD").stdout.strip() == local_sha, (
+        "the local commit is still here, unpublished"
+    )
+    assert fx.sidecar(record_id)["status"] == "ready", "this host's own value"
+
+    state = load_script("lore.cli.resolve_state")
+    os.environ["XDG_STATE_HOME"] = str(fx.state)
+    assert state.vault_is_held(fx.vault), "held, waiting for a person"
+
+
+def test_the_discarded_commits_stay_recoverable_from_the_vaults_history(tmp_path):
+    """The discard is what makes a non-author host converge alone, and it is
+    only acceptable because nothing is destroyed: the local commit and the
+    record content it carried are still readable from the vault afterwards."""
+    fx = _Fixture(tmp_path)
+    record_id, local_sha, _remote_sha = _diverge_on_status(fx)
+
+    synced = _sync_declaring(fx, makes_vault_content=False)
+    assert synced.returncode == 0, synced.stderr
+
+    assert fx.sidecar(record_id)["status"] == "done", "the working tree took the published side"
+    assert _git(fx.vault, "cat-file", "-t", local_sha).stdout.strip() == "commit", (
+        "the discarded commit is still an object in this vault"
+    )
+    discarded = _git(fx.vault, "show", f"{local_sha}:{record_id}.json").stdout
+    assert json.loads(discarded)["status"] == "ready", (
+        "this host's own value is still readable out of the discarded commit"
+    )
+    reflog = _git(fx.vault, "reflog", "--format=%H").stdout.split()
+    assert local_sha in reflog, "the vault's own history still names where it was"
+
+
+def test_a_settleable_conflict_settles_identically_on_both_kinds_of_host(tmp_path):
+    """The declaration selects only the UNSETTLEABLE branch. A conflict the
+    field-wise merge can settle must reach the same bytes and the same ending
+    on both kinds of host — otherwise the flag quietly changes ordinary
+    merges, which is the one thing it must never do."""
+    settled = {}
+    for label, declaration in (("author", True), ("non-author", False)):
+        fx = _Fixture(tmp_path / label)
+        record_id = _diverge_on_disjoint_fields(fx)
+
+        synced = _sync_declaring(fx, makes_vault_content=declaration)
+
+        assert synced.returncode == 0, f"{label}: {synced.stderr}"
+        sidecar = fx.sidecar(record_id)
+        settled[label] = (
+            _vault_entry(synced)["outcome"],
+            sidecar["status"],
+            sidecar["title"],
+            fx.body(record_id),
+            _git(fx.vault, "rev-list", "--count", f"origin/{fx.branch}..HEAD").stdout.strip(),
+        )
+
+    assert settled["author"] == settled["non-author"], settled
+    assert settled["author"][0] == "published", (
+        "both hosts settled the conflict and published the result"
+    )
+    assert settled["author"][1] == "ready", "the local side's slot survived on both"
+    assert settled["author"][2] == "Remote Title", "the published side's slot survived on both"
+
+
+def test_an_undeclared_host_holds_for_a_person_through_the_whole_loop(tmp_path):
+    """The fail-safe default is only worth anything if it survives the branch
+    that acts on it: a host that declares nothing must reach the author
+    ending through the loop, not merely answer `True` at the accessor."""
+    fx = _Fixture(tmp_path)
+    record_id, local_sha, _remote_sha = _diverge_on_status(fx)
+
+    synced = _sync_declaring(fx, makes_vault_content=None)
+
+    assert _vault_entry(synced)["outcome"] == "awaiting-person"
+    assert _git(fx.vault, "rev-parse", "HEAD").stdout.strip() == local_sha, (
+        "an undeclared host keeps its own commits"
+    )
+    assert fx.sidecar(record_id)["status"] == "ready", "this host's own value survived"
+
+    state = load_script("lore.cli.resolve_state")
+    os.environ["XDG_STATE_HOME"] = str(fx.state)
+    assert state.vault_is_held(fx.vault)
+
+
+def test_an_unparseable_config_holds_for_a_person_at_the_loops_replay_site(
+    tmp_path, monkeypatch
+):
+    """A config nobody can read is the other ambiguous input, and it must land
+    on the same author ending. Driven at the loop's own replay site rather
+    than through the CLI, because a config that will not parse is also a
+    config the CLI cannot resolve a vault out of — the branch still has to
+    default safely for the sweep, which is handed its vault directly."""
+    fx = _Fixture(tmp_path)
+    record_id, local_sha, _remote_sha = _diverge_on_status(fx)
+    broken = fx.tmp / "config-broken"
+    (broken / "lore").mkdir(parents=True, exist_ok=True)
+    (broken / "lore" / "config.json").write_text("{not valid json", encoding="utf-8")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(broken))
+    monkeypatch.setenv("XDG_STATE_HOME", str(fx.state))
+    monkeypatch.setenv("LORE_EMAIL", "tester@example.com")
+
+    sync = load_script("lore.cli.sync")
+    _git(fx.vault, "fetch", "origin")
+    lines: list[str] = []
+    state_after, pulled = sync._pull_one(
+        fx.vault, lines.append, lines.append, already_fetched=True,
+        resolve_conflicts=True, name="default", shared=False,
+    )
+
+    assert state_after == sync.PULL_AWAITING_PERSON, lines
+    assert pulled == 0, "nothing was integrated — the vault is held, not converged"
+    assert _git(fx.vault, "rev-parse", "HEAD").stdout.strip() == local_sha
+    assert fx.sidecar(record_id)["status"] == "ready", "this host's own value survived"
+
+    state = load_script("lore.cli.resolve_state")
+    assert state.vault_is_held(fx.vault)
+
+
+# ── AC38: the non-author ending speaks no version control ─────────────────
+#
+# The outcomes this branch can reach, enumerated from the branch itself:
+# the discard succeeds and the vault converges, or the discard fails and the
+# loop reports the resolver could not settle the vault. (`_abort_replay`'s
+# own failure is reachable BEFORE the declaration is ever consulted and is
+# identical on both kinds of host, so it is not an ending this branch
+# selects.) Both are asserted below.
+
+_VERSION_CONTROL_WORDS = (
+    "git", "rebase", "merge", "commit", "commits", "branch", "head", "origin",
+    "upstream", "push", "pull", "fetch", "reset", "checkout", "stash",
+    "revert", "ours", "theirs", "sha", "refs", "diverged", "unstaged",
+    "worktree", "fast-forward",
+)
+
+
+def _vc_words(text: str) -> set[str]:
+    """Which version-control words *text* uses, matched whole, case-folded."""
+    import re
+
+    found = set()
+    for word in _VERSION_CONTROL_WORDS:
+        if re.search(rf"(?<![\w-]){re.escape(word)}(?![\w-])", text, re.IGNORECASE):
+            found.add(word)
+    return found
+
+
+def _prose(result) -> str:
+    """The run's own prose — stdout before the `--json` document, plus stderr.
+
+    The document's fixed `schema` string is deliberately excluded: it is the
+    report format's own documentation, printed identically on every run of
+    every host, and says nothing about this resolution.
+    """
+    lines = result.stdout.splitlines()
+    end = next((i for i, ln in enumerate(lines) if ln == "{"), len(lines))
+    return "\n".join(lines[:end]) + "\n" + result.stderr
+
+
+def test_the_non_author_ending_adds_no_version_control_words_of_its_own(tmp_path):
+    """AC38, the converged ending: a conflict resolved by keeping the
+    published history must read to its owner exactly like a sync that had no
+    conflict at all — the control run here is that sync, built from the same
+    vault shape with the two devices touching different records."""
+    fx = _Fixture(tmp_path / "discarded")
+    _diverge_on_status(fx)
+    discarded = _sync_declaring(fx, makes_vault_content=False)
+    assert _vault_entry(discarded)["outcome"] == "converged", discarded.stdout
+
+    control = _Fixture(tmp_path / "control")
+    control.create("task", "A Task")
+    other_id = control.create("task", "Another Task")
+    control.publish()
+    control.clone_device_b()
+    control.cli_b(["record", "update", other_id, "--status", "done"], stdin_text="")
+    control.push_device_b()
+    ordinary = _sync_declaring(control, makes_vault_content=False)
+    assert _vault_entry(ordinary)["outcome"] == "converged", ordinary.stdout
+
+    added = _vc_words(_prose(discarded)) - _vc_words(_prose(ordinary))
+    assert added == set(), (
+        f"the resolution spoke version control to its owner: {added} in "
+        f"{_prose(discarded)!r}"
+    )
+    entry_text = json.dumps(_vault_entry(discarded))
+    assert _vc_words(entry_text) == set(), entry_text
+
+
+def test_a_failed_discard_is_reported_without_version_control_words(tmp_path, monkeypatch):
+    """AC38, the other ending this branch can reach: the discard itself
+    failing. The owner is told the vault could not be settled; they are not
+    handed git's account of why, and they are given no decision to make."""
+    fx = _Fixture(tmp_path)
+    _diverge_on_status(fx)
+    monkeypatch.setenv(
+        "XDG_CONFIG_HOME", str(_config_home(fx, makes_vault_content=False))
+    )
+    monkeypatch.setenv("XDG_STATE_HOME", str(fx.state))
+    monkeypatch.setenv("LORE_EMAIL", "tester@example.com")
+
+    resolve_mod = load_script("lore.cli.resolve")
+    sync = load_script("lore.cli.sync")
+    real_git = resolve_mod._git
+
+    def _reset_fails(vault, *args):
+        if args[:2] == ("reset", "--hard"):
+            return 1, "", "fatal: git could not reset --hard onto origin/main"
+        return real_git(vault, *args)
+
+    monkeypatch.setattr(resolve_mod, "_git", _reset_fails)
+
+    _git(fx.vault, "fetch", "origin")
+    lines: list[str] = []
+    state_after, _pulled = sync._pull_one(
+        fx.vault, lines.append, lines.append, already_fetched=True,
+        resolve_conflicts=True, name="default", shared=False,
+    )
+
+    assert state_after == sync.PULL_FAILED, lines
+    reported = "\n".join(lines)
+    assert "could not settle" in reported, reported
+    assert "fatal:" not in reported, "git's own account never reaches the owner"
+    assert _vc_words(reported) == set(), (
+        f"the failed resolution spoke version control: "
+        f"{_vc_words(reported)} in {reported!r}"
+    )
+
+
+def test_the_push_replay_site_discards_on_a_non_author_host_too(tmp_path, monkeypatch):
+    """The declaration must branch at BOTH replay sites, not just whichever
+    one a fixture happens to hit first: the same collision, reached through
+    the publish retry's replay instead of the pull's rebase, ends the same
+    way."""
+    fx = _Fixture(tmp_path)
+    record_id, _local_sha, remote_sha = _diverge_on_status(fx)
+    monkeypatch.setenv(
+        "XDG_CONFIG_HOME", str(_config_home(fx, makes_vault_content=False))
+    )
+    monkeypatch.setenv("XDG_STATE_HOME", str(fx.state))
+    monkeypatch.setenv("LORE_EMAIL", "tester@example.com")
+
+    sync = load_script("lore.cli.sync")
+    lines: list[str] = []
+    rc, ending, _attempts = sync._push_one(
+        fx.vault, lines.append, lines.append, committed=True, max_attempts=3,
+        name="default", shared=False,
+    )
+
+    assert rc == 0, lines
+    assert ending == sync.PUBLISH_DISCARDED, lines
+    assert _git(fx.vault, "rev-parse", "HEAD").stdout.strip() == remote_sha
+    assert fx.sidecar(record_id)["status"] == "done", "the published side's value"
+    assert _git(fx.vault, "status", "--porcelain").stdout.strip() == "", "clean"
+
+
+def test_a_declaration_that_is_not_a_bool_still_reaches_a_determinate_outcome(tmp_path):
+    """A host whose declaration is present but unreadable is refused, never
+    coerced — but the refusal is this host's data being wrong, not the run
+    being over. The vault that hit it must still land on a member of the
+    closed outcome set, and every other vault in the same run must still be
+    synced: one typo in one config key cannot take the whole sweep's report
+    with it."""
+    fx = _Fixture(tmp_path / "held")
+    _diverge_on_status(fx)
+
+    other = _Fixture(tmp_path / "other")
+    other_id = other.create("task", "Another Task")
+    other.publish()
+    other.clone_device_b()
+    other.cli_b(["record", "update", other_id, "--status", "done"], stdin_text="")
+    other.push_device_b()
+
+    home = tmp_path / "config-home-not-a-bool"
+    (home / "lore").mkdir(parents=True, exist_ok=True)
+    (home / "lore" / "config.json").write_text(
+        json.dumps({
+            "vaults": [
+                {"name": "default", "scope": "default", "path": str(fx.vault)},
+                {"name": "other", "scope": "product", "path": str(other.vault)},
+            ],
+            "makes_vault_content": "false",
+        }),
+        encoding="utf-8",
+    )
+
+    synced = fx.cli(["sync", "--json"], env_extra={"XDG_CONFIG_HOME": str(home)})
+
+    assert "Traceback" not in synced.stderr, (
+        f"the refusal is reported, never raised at the operator: {synced.stderr!r}"
+    )
+    sync = load_script("lore.cli.sync")
+    entries = {v["vault"]: v for v in _json_tail(synced.stdout)["vaults"]}
+    assert entries["default"]["outcome"] in sync.SYNC_OUTCOMES, entries
+    assert entries["default"]["outcome"] == sync.PUBLISH_HOLDING, entries
+    assert entries["default"]["reason"] in sync.SYNC_FAILURE_REASONS, entries
+    assert entries["default"]["reason"] == sync.FAILURE_POLICY, (
+        "this host's own data is what has to be fixed"
+    )
+    assert "other" in entries, (
+        "the run carried on to the next vault — one bad declaration does not "
+        f"end the sweep: {entries}"
+    )
+    assert entries["other"]["outcome"] in sync.SYNC_OUTCOMES, entries
+    assert _git(fx.vault, "status", "--porcelain").stdout.strip() == "", (
+        "the vault is left clean — the refusal happens after the replay is aborted"
+    )
