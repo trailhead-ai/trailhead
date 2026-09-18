@@ -289,6 +289,45 @@ def test_inside_tmux_switch_client_unanswered_exits_one(
     assert exc.value.code == 1
 
 
+@pytest.mark.parametrize(
+    "injected_stderr",
+    [
+        "no current client\nfake: forged a second line",
+        "no current client\rfake: overwrote the line",
+    ],
+    ids=["embedded-newline", "embedded-carriage-return"],
+)
+def test_switch_client_stderr_carrying_control_characters_is_neutralized(
+    camp_cli, group_env, monkeypatch, capsys, injected_stderr
+):
+    """The switch-client failure arm prints tmux's own stderr verbatim —
+    hardened like the door's success line, so an embedded newline cannot
+    forge a second stderr row and an embedded carriage return cannot
+    rewrite it. Varied across two distinct control characters so the test
+    depends on the input, not merely on the failure arm being taken."""
+    g = dict(group_env)
+    g["env"] = {**g["env"], "TMUX": "/tmp/tmux-1000/default,1234,0"}
+    tmux = _DoorTmux(present=False, switch_client_returncode=5, switch_client_stderr=injected_stderr)
+    _wire_tmux(monkeypatch, tmux)
+    monkeypatch.setattr(sys, "stdin", _FakeTTY())
+    monkeypatch.setattr(sys, "stdout", _FakeTTY())
+
+    with pytest.raises(SystemExit) as exc:
+        camp_cli._cmd_new_group_cli(["feat-inside-ctrl"], g["group"], g["env"], dry_run=False)
+
+    assert exc.value.code == 5
+    err = capsys.readouterr().err
+    lines = [line for line in err.split("\n") if line]
+    switch_lines = [line for line in lines if "no current client" in line]
+    assert len(switch_lines) == 1, (
+        f"an embedded control character must not forge a second line for "
+        f"the switch-client diagnostic: {err!r}"
+    )
+    switch_line = switch_lines[0]
+    assert "\r" not in switch_line, f"a raw carriage return reached the line: {switch_line!r}"
+    assert "forged a second line" in switch_line or "overwrote the line" in switch_line
+
+
 # ---------------------------------------------------------------------------
 # --no-attach: creates both, never reaches the exec seam
 # ---------------------------------------------------------------------------
@@ -603,6 +642,41 @@ def test_create_failure_exits_zero_with_path_on_stdout_and_reason_on_stderr(
     assert injected_stderr in captured.err, "tmux's own words reach stderr, varying with input"
 
 
+@pytest.mark.parametrize(
+    "injected_stderr",
+    [
+        "disk full\nfake: forged a second line",
+        "disk full\rfake: overwrote the line",
+    ],
+    ids=["embedded-newline", "embedded-carriage-return"],
+)
+def test_create_failure_stderr_carrying_control_characters_is_neutralized(
+    camp_cli, group_env, monkeypatch, capsys, injected_stderr
+):
+    """The workspace-only warning line prints tmux's own stderr verbatim —
+    hardened like the door's success line, so an embedded newline cannot
+    forge a second stderr row and an embedded carriage return cannot
+    rewrite it. Varied across two distinct control characters so the test
+    depends on the input, not merely on the failure arm being taken."""
+    tmux = _DoorTmux(present=False, create_returncode=1, create_stderr=injected_stderr)
+    _wire_tmux(monkeypatch, tmux)
+
+    code = _run_capturing_exit(
+        camp_cli._cmd_new_group_cli, ["feat-createctrl"], group_env["group"], group_env["env"], dry_run=False
+    )
+
+    assert code == 0
+    err = capsys.readouterr().err
+    lines = [line for line in err.split("\n") if line]
+    warning_lines = [line for line in lines if "disk full" in line]
+    assert len(warning_lines) == 1, (
+        f"an embedded control character must not forge a second warning line: {err!r}"
+    )
+    warning_line = warning_lines[0]
+    assert "\r" not in warning_line, f"a raw carriage return reached the line: {warning_line!r}"
+    assert "forged a second line" in warning_line or "overwrote the line" in warning_line
+
+
 class _RaisingCreateDoorTmux(_DoorTmux):
     """A `_DoorTmux` whose `new_session` raises instead of answering — the
     shape a wedged tmux server-start (a plugin-heavy `tmux.conf`, a loaded
@@ -740,6 +814,102 @@ def test_a_malformed_sibling_group_config_reports_workspace_only_never_traceback
     assert "Traceback" not in captured.err
     assert captured.out.strip().endswith("/feat-malformed")
     assert tmux.switch_client_calls == []
+
+
+# ---------------------------------------------------------------------------
+# Security audit Fix 2: a policy refusal (credential-store) and a transient
+# tmux failure share `CREATE_FAILED` no longer — `camp new` must be able to
+# tell them apart in its `--json` object, not just in free text.
+# ---------------------------------------------------------------------------
+
+
+def test_a_credential_store_workspace_reports_a_distinct_outcome_and_wording(
+    camp_cli, group_env, monkeypatch, capsys
+):
+    """A workspace directory that lands at, under, or above a credential
+    store is a POLICY refusal, not tmux having a bad moment — it must reach
+    stderr with wording distinct from the plain 'warning' a transient
+    failure gets, exit 0 exactly like every other workspace-only case
+    (the workspace itself is real and usable), and never reach a create
+    call."""
+    from trailhead.paths import config_dir
+
+    g = dict(group_env)
+    home = g["tmp_path"] / "home"
+    g["env"] = {
+        **g["env"],
+        "HOME": str(home),
+        "CAMP_STATE_DIR": str(home / ".ssh" / "state"),
+    }
+    config_dir("camp", env=g["env"]).mkdir(parents=True, exist_ok=True)
+    tmux = _DoorTmux(present=False)
+    _wire_tmux(monkeypatch, tmux)
+
+    code = _run_capturing_exit(
+        camp_cli._cmd_new_group_cli, ["feat-credstore"], g["group"], g["env"], dry_run=False
+    )
+
+    captured = capsys.readouterr()
+    assert code == 0
+    assert "refused" in captured.err, captured.err
+    assert "warning" not in captured.err, (
+        "a policy refusal must not read as the same routine noise as a "
+        f"transient tmux failure: {captured.err!r}"
+    )
+    assert tmux.new_session_calls == [], "the gate refuses before any create call reaches tmux"
+
+
+def test_credential_store_and_transient_failure_emit_different_json_outcomes(
+    camp_cli, group_env, monkeypatch, capsys
+):
+    """Varies the failure KIND (policy refusal vs. transient tmux failure)
+    and asserts the `--json` `outcome` value changes with it — a consumer
+    must be able to tell them apart without parsing `session_error`."""
+    from trailhead.paths import config_dir
+
+    g_refused = dict(group_env)
+    home = g_refused["tmp_path"] / "home"
+    g_refused["env"] = {
+        **g_refused["env"],
+        "HOME": str(home),
+        "CAMP_STATE_DIR": str(home / ".ssh" / "state"),
+    }
+    config_dir("camp", env=g_refused["env"]).mkdir(parents=True, exist_ok=True)
+    tmux_refused = _DoorTmux(present=False)
+    _wire_tmux(monkeypatch, tmux_refused)
+
+    code = _run_capturing_exit(
+        camp_cli._cmd_new_group_cli,
+        ["feat-credstore-json", "--json"],
+        g_refused["group"],
+        g_refused["env"],
+        dry_run=False,
+    )
+    assert code == 0
+    refused_payload = json.loads(capsys.readouterr().out)
+
+    g_transient = group_env
+    tmux_transient = _DoorTmux(present=False, create_returncode=1, create_stderr="disk full")
+    _wire_tmux(monkeypatch, tmux_transient)
+
+    code = _run_capturing_exit(
+        camp_cli._cmd_new_group_cli,
+        ["feat-transient-json", "--json"],
+        g_transient["group"],
+        g_transient["env"],
+        dry_run=False,
+    )
+    assert code == 0
+    transient_payload = json.loads(capsys.readouterr().out)
+
+    assert refused_payload["outcome"] != transient_payload["outcome"], (
+        "a policy refusal and a transient failure must render different "
+        f"outcome values, got {refused_payload['outcome']!r} for both"
+    )
+    assert refused_payload["outcome"] == "workspace-only-refused"
+    assert transient_payload["outcome"] == "workspace-only"
+    assert refused_payload["tmux_session"] is None
+    assert refused_payload["attached"] is False
 
 
 def test_concierge_invocation_exits_zero_on_a_failure_arm_with_documented_keys(

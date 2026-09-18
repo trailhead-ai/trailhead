@@ -6,12 +6,12 @@ nothing here does I/O, prints, or touches tmux. The dispatch that decides
 which member applies, and the CLI wiring that prints and exits, are later
 tasks' work; this module only defines what can be said and how it renders.
 
-Seven members. Two are the door's successes — :class:`Created` and
+Eight members. Two are the door's successes — :class:`Created` and
 :class:`Connected` — carrying the fields a caller needs to report on and to
-hand off the terminal with. The other five are refusals, one per way the door
+hand off the terminal with. The other six are refusals, one per way the door
 declines to act: :class:`RefusedNoWorkspace`, :class:`RefusedNoTerminal`,
 :class:`RefusedEmptyGroup`, :class:`RefusedTmuxUnanswered`,
-:class:`RefusedCreateFailed`. See
+:class:`RefusedCreateFailed`, :class:`RefusedCreateRefused`. See
 ``docs/design/the-door-creates-or-connects-a-workspace-session.md`` for the
 state each corresponds to; the slug-resolution refusals are constructed by
 the task that resolves a slug into a workspace or a refusal, and the tmux
@@ -100,7 +100,17 @@ class RefusedTmuxUnanswered(DoorOutcome):
 
 @dataclass(frozen=True)
 class RefusedCreateFailed(DoorOutcome):
-    """tmux answered, a create was attempted, and no session resulted."""
+    """tmux answered, a create was attempted, and it failed for a transient
+    reason — an unreachable tmux binary, a timed-out server bring-up. Distinct
+    from :class:`RefusedCreateRefused`, which is a policy refusal, not tmux
+    having a bad moment."""
+
+
+@dataclass(frozen=True)
+class RefusedCreateRefused(DoorOutcome):
+    """tmux was never asked: the workspace directory is at, under, or above a
+    credential store, and the create was refused by policy before any tmux
+    call. Distinct from :class:`RefusedCreateFailed`, a transient failure."""
 
 
 #: The word each success member renders as, both in the human line and as
@@ -159,9 +169,30 @@ _EXIT_STATUS: dict[type, int] = {
     RefusedEmptyGroup: 1,
     RefusedTmuxUnanswered: 1,
     RefusedCreateFailed: 1,
+    RefusedCreateRefused: 1,
 }
 
 
 def exit_status(outcome: DoorOutcome) -> int:
     """The process exit status for *outcome*: 0 for created/connected, 1 for every refusal."""
     return _EXIT_STATUS[type(outcome)]
+
+
+#: The machine-readable word for the two tmux-boundary refusals that share
+#: `_refuse_door`'s JSON shape (`cli/session.py`) — `None` for a refusal with
+#: no defined word, so a caller can omit the key rather than print `None`.
+#: `RefusedCreateFailed` and `RefusedCreateRefused` must render distinct
+#: words: a `--json` consumer needs to tell a policy refusal from a
+#: transient tmux failure without parsing the free-text `reason`.
+_REFUSAL_WORD: dict[type, str] = {
+    RefusedTmuxUnanswered: "tmux_unanswered",
+    RefusedCreateFailed: "create_failed",
+    RefusedCreateRefused: "create_refused",
+}
+
+
+def refusal_outcome_word(outcome: DoorOutcome) -> str | None:
+    """The `outcome` word for a door refusal, or `None` if this refusal type
+    defines none (the slug-resolution refusals, reported through a different
+    path with no shared JSON shape to carry it)."""
+    return _REFUSAL_WORD.get(type(outcome))

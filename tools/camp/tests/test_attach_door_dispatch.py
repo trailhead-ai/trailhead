@@ -221,15 +221,16 @@ def _wire_one_workspace(
     tmux,
     slug: str = "camp-cli",
     group_name: str = "g",
+    ws_dir: Path | None = None,
 ) -> Path:
     """Wires a resolvable `--group g` carrying exactly one workspace
     (`slug`), at a real, unique directory, and points every tmux call the
     door dispatch issues at `tmux` — the caller's own `_DoorTmux` (or
     equivalent) — via the same `stop_module.Tmux` factory seam
-    `_attach_session_context` reads.
-    """
-    state = tmp_path / "state"
-    ws = state / group_name / "worktrees" / slug
+    `_attach_session_context` reads. *ws_dir* overrides the default
+    location under `tmp_path/state` — used to land the workspace at, under,
+    or above a credential store."""
+    ws = ws_dir if ws_dir is not None else (tmp_path / "state" / group_name / "worktrees" / slug)
     ws.mkdir(parents=True, exist_ok=True)
     harness = _Harness([_transcript(_UUID_A, ws)])
 
@@ -613,6 +614,42 @@ def test_unrecognised_failure_with_reprobe_absent_refuses_never_reaching_exec(
     )
 
 
+@pytest.mark.parametrize(
+    "injected_stderr",
+    [
+        "unsafe socket\nfake: forged a second line",
+        "unsafe socket\rfake: overwrote the line",
+    ],
+    ids=["embedded-newline", "embedded-carriage-return"],
+)
+def test_refusal_stderr_carrying_control_characters_is_neutralized(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture, injected_stderr
+) -> None:
+    """`_refuse_door`'s plain-form line prints tmux's own stderr verbatim —
+    hardened like the door's success line, so an embedded newline cannot
+    forge a second stderr row and an embedded carriage return cannot
+    rewrite it. Varied across two distinct control characters so the test
+    depends on the input, not merely on the failure arm being taken."""
+    tmux = _DoorTmux(
+        present=False, reprobe=False, create_returncode=1, create_stderr=injected_stderr
+    )
+    _isolated_env(tmp_path, monkeypatch)
+    _wire_one_workspace(monkeypatch, tmp_path=tmp_path, tmux=tmux)
+
+    code = _run(["attach", "camp-cli", "--group", "g"], monkeypatch)
+    err = capsys.readouterr().err
+
+    assert code == 1
+    lines = [line for line in err.split("\n") if line]
+    refusal_lines = [line for line in lines if "unsafe socket" in line]
+    assert len(refusal_lines) == 1, (
+        f"an embedded control character must not forge a second refusal line: {err!r}"
+    )
+    refusal_line = refusal_lines[0]
+    assert "\r" not in refusal_line, f"a raw carriage return reached the line: {refusal_line!r}"
+    assert "forged a second line" in refusal_line or "overwrote the line" in refusal_line
+
+
 class _RaisingCreateDoorTmux(_DoorTmux):
     """A `_DoorTmux` whose `new_session` raises instead of answering — the
     shape a wedged tmux server-start (a plugin-heavy `tmux.conf`, a loaded
@@ -646,6 +683,60 @@ def test_a_create_call_that_raises_refuses_with_its_own_message_never_a_tracebac
     assert str(exc) in err
     assert _derived_name("g", "camp-cli") in err
     assert len(tmux.new_session_calls) == 1
+
+
+# ---------------------------------------------------------------------------
+# Security audit Fix 2: a workspace under a credential store is a POLICY
+# refusal, distinct from a transient tmux failure — in wording and in the
+# `--json` object's machine-readable field, not merely in free text.
+# ---------------------------------------------------------------------------
+
+
+def test_a_credential_store_workspace_refuses_with_distinct_wording_and_json_outcome(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    _isolated_env(tmp_path, monkeypatch)
+    home = tmp_path / "home"
+    ws = home / ".ssh" / "state" / "g" / "worktrees" / "camp-cli"
+    tmux = _DoorTmux(present=False)
+    _wire_one_workspace(monkeypatch, tmp_path=tmp_path, tmux=tmux, ws_dir=ws)
+
+    code = _run(["attach", "camp-cli", "--group", "g", "--json"], monkeypatch)
+    out = json.loads(capsys.readouterr().out)
+
+    assert code == 1
+    assert out["ok"] is False
+    assert out["outcome"] == "create_refused"
+    assert tmux.new_session_calls == [], "the gate refuses before any create call reaches tmux"
+
+
+def test_credential_refusal_and_transient_create_failure_emit_different_json_outcomes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """Varies the failure KIND and asserts the `--json` `outcome` value
+    changes with it — a consumer must be able to tell a policy refusal from
+    a transient tmux failure without parsing `reason`'s free text."""
+    _isolated_env(tmp_path, monkeypatch)
+    home = tmp_path / "home"
+    ws = home / ".ssh" / "state" / "g" / "worktrees" / "camp-cli"
+    tmux_refused = _DoorTmux(present=False)
+    _wire_one_workspace(monkeypatch, tmp_path=tmp_path, tmux=tmux_refused, ws_dir=ws)
+    code = _run(["attach", "camp-cli", "--group", "g", "--json"], monkeypatch)
+    assert code == 1
+    refused_out = json.loads(capsys.readouterr().out)
+
+    tmux_transient = _DoorTmux(
+        present=False, reprobe=False, create_returncode=1, create_stderr="disk full\n"
+    )
+    _wire_one_workspace(monkeypatch, tmp_path=tmp_path, tmux=tmux_transient)
+    code = _run(["attach", "camp-cli", "--group", "g", "--json"], monkeypatch)
+    assert code == 1
+    transient_out = json.loads(capsys.readouterr().out)
+
+    assert refused_out["outcome"] != transient_out["outcome"], (
+        f"got the same outcome value for both: {refused_out['outcome']!r}"
+    )
+    assert transient_out["outcome"] == "create_failed"
 
 
 # ---------------------------------------------------------------------------
