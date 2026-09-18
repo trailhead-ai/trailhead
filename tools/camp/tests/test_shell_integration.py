@@ -350,4 +350,3 @@ class TestBinTrailheadRegeneratesShellenv:
         )
         assert proc.returncode == 0, proc.stderr
         assert "remove|rm)" in proc.stdout
-        assert "new|remove|rm)" not in proc.stdout

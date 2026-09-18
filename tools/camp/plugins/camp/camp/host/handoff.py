@@ -22,7 +22,7 @@ capture.
 
 The handoff itself is an injected seam (:data:`ExecSeam`, mirroring the
 ``Runner`` seam at ``host/transport.py:174`` and the ``Tmux`` seam at
-``launch/stop.py:158``) so it stays testable: a test substitutes a recorder
+``launch/tmux.py:120``) so it stays testable: a test substitutes a recorder
 for the real ``os.execvp`` and asserts on the argv that would have been
 exec'd, without the test process ever disappearing. What such a test can
 never observe — by construction — is that the real exec actually replaces

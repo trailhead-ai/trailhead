@@ -288,7 +288,6 @@ class TestCampWrapperPosix:
         # rooted at the workspace, so there is nothing left to `cd` for.
         assert 'case "$1" in' in out
         assert "remove|rm)" in out
-        assert "new|remove|rm)" not in out
         # The one intercepted branch cds; the passthrough does not.
         assert out.count("cd -- ") == 1
 

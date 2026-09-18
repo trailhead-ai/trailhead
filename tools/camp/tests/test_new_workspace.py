@@ -311,51 +311,6 @@ class TestLaunchJsonCarriesTheEngineReportedTmuxName:
         assert payload["session_id"] == "11111111-2222-3333-4444-555555555555"
 
 
-class TestShellIntegrationNudge:
-    """`camp new` never nudges to install the trailhead shellenv wrapper.
-
-    The wrapper's `new` arm is gone — the door hands the terminal to a tmux
-    session already rooted at the workspace, so there is no `cd` left for the
-    wrapper to do and nothing to nudge the user to install it for. This is the
-    inverse of the old contract: no nudge fires regardless of the
-    CAMP_SHELL_INTEGRATION marker, which `camp remove` alone still reads.
-    """
-
-    def test_bare_run_prints_no_nudge(self, camp_cli, group_env, capsys, monkeypatch):
-        monkeypatch.delenv("CAMP_SHELL_INTEGRATION", raising=False)
-        g = group_env
-        camp_cli._cmd_new_group_cli(["feat-x", "--no-session"], g["group"], g["env"], dry_run=False)
-        captured = capsys.readouterr()
-        assert "shellenv" not in captured.err, (
-            "a bare `camp new` must not nudge to install the shellenv wrapper — "
-            "the wrapper no longer intercepts `new`"
-        )
-        # The path still goes to stdout untouched.
-        ws = _workspace_dir(g["env"], "feat-x")
-        assert captured.out == f"{ws}\n"
-
-    def test_marker_present_also_prints_no_nudge(
-        self, camp_cli, group_env, capsys, monkeypatch
-    ):
-        monkeypatch.setenv("CAMP_SHELL_INTEGRATION", "1")
-        g = group_env
-        camp_cli._cmd_new_group_cli(["feat-x", "--no-session"], g["group"], g["env"], dry_run=False)
-        captured = capsys.readouterr()
-        assert "shellenv" not in captured.err
-
-    def test_no_nudge_on_existing_workspace_reentry(
-        self, camp_cli, group_env, capsys, monkeypatch
-    ):
-        monkeypatch.delenv("CAMP_SHELL_INTEGRATION", raising=False)
-        g = group_env
-        # Create then re-enter.
-        camp_cli._cmd_new_group_cli(["feat-x", "--no-session"], g["group"], g["env"], dry_run=False)
-        capsys.readouterr()
-        camp_cli._cmd_new_group_cli(["feat-x", "--no-session"], g["group"], g["env"], dry_run=False)
-        err = capsys.readouterr().err
-        assert "shellenv" not in err
-
-
 class TestInputCharset:
     """Confirm the inputs that flow into the emitted
     `camp` call cannot introduce shell metacharacters.

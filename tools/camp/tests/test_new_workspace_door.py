@@ -108,11 +108,17 @@ class _DoorTmux:
         reprobe: bool | None = None,
         create_returncode: int = 0,
         create_stderr: str = "",
+        switch_client_returncode: int = 0,
+        switch_client_unanswered: bool = False,
+        unanswered_reason: str = "no such file or directory",
     ) -> None:
         self._present = present
         self._reprobe = present if reprobe is None else reprobe
         self._create_returncode = create_returncode
         self._create_stderr = create_stderr
+        self._switch_client_returncode = switch_client_returncode
+        self._switch_client_unanswered = switch_client_unanswered
+        self._unanswered_reason = unanswered_reason
         self.has_session_calls: list[str] = []
         self.new_session_calls: list[dict[str, object]] = []
         self.switch_client_calls: list[str] = []
@@ -120,6 +126,10 @@ class _DoorTmux:
     def has_session(self, name: str) -> bool | None:
         self.has_session_calls.append(name)
         return self._present if len(self.has_session_calls) == 1 else self._reprobe
+
+    def has_session_with_reason(self, name: str) -> tuple[bool | None, str | None]:
+        present = self.has_session(name)
+        return present, (self._unanswered_reason if present is None else None)
 
     def new_session(self, name, *, cwd, env=None, timeout=None):
         self.new_session_calls.append({"name": name, "cwd": cwd, "env": env})
@@ -132,7 +142,11 @@ class _DoorTmux:
 
     def switch_client(self, name: str):
         self.switch_client_calls.append(name)
-        return subprocess.CompletedProcess(args=["tmux"], returncode=0, stdout="", stderr="")
+        if self._switch_client_unanswered:
+            return None
+        return subprocess.CompletedProcess(
+            args=["tmux"], returncode=self._switch_client_returncode, stdout="", stderr=""
+        )
 
 
 class _RaisingTmux:
@@ -203,6 +217,67 @@ def test_bare_with_a_terminal_creates_and_reaches_exec_seam_with_attach_argv(
     )
     assert len(tmux.new_session_calls) == 1, "exactly one create attempt"
     assert tmux.switch_client_calls == []
+
+
+# ---------------------------------------------------------------------------
+# Inside tmux: the switch-client arm, including its own failure
+# ---------------------------------------------------------------------------
+
+
+def test_bare_inside_tmux_reaches_switch_client_never_the_exec_seam(
+    camp_cli, group_env, monkeypatch
+):
+    g = dict(group_env)
+    g["env"] = {**g["env"], "TMUX": "/tmp/tmux-1000/default,1234,0"}
+    tmux = _DoorTmux(present=False)
+    _wire_tmux(monkeypatch, tmux)
+    _raising_handoff(monkeypatch)
+    monkeypatch.setattr(sys, "stdin", _FakeTTY())
+    monkeypatch.setattr(sys, "stdout", _FakeTTY())
+
+    with pytest.raises(SystemExit) as exc:
+        camp_cli._cmd_new_group_cli(["feat-inside"], g["group"], g["env"], dry_run=False)
+
+    assert exc.value.code == 0
+    derived = _derived_name("g", "feat-inside")
+    assert tmux.switch_client_calls == [derived]
+
+
+def test_inside_tmux_switch_client_failure_exits_with_its_own_returncode(
+    camp_cli, group_env, monkeypatch
+):
+    """`camp new` reaches the switch-client arm through the same handover
+    `camp attach` uses, and its own failure must surface here too — a
+    handover can fail after the outcome line already printed."""
+    g = dict(group_env)
+    g["env"] = {**g["env"], "TMUX": "/tmp/tmux-1000/default,1234,0"}
+    tmux = _DoorTmux(present=False, switch_client_returncode=5)
+    _wire_tmux(monkeypatch, tmux)
+    monkeypatch.setattr(sys, "stdin", _FakeTTY())
+    fake_stdout = _FakeTTY()
+    monkeypatch.setattr(sys, "stdout", fake_stdout)
+
+    with pytest.raises(SystemExit) as exc:
+        camp_cli._cmd_new_group_cli(["feat-inside-fail"], g["group"], g["env"], dry_run=False)
+
+    assert exc.value.code == 5
+
+
+def test_inside_tmux_switch_client_unanswered_exits_one(
+    camp_cli, group_env, monkeypatch
+):
+    g = dict(group_env)
+    g["env"] = {**g["env"], "TMUX": "/tmp/tmux-1000/default,1234,0"}
+    tmux = _DoorTmux(present=False, switch_client_unanswered=True)
+    _wire_tmux(monkeypatch, tmux)
+    monkeypatch.setattr(sys, "stdin", _FakeTTY())
+    fake_stdout = _FakeTTY()
+    monkeypatch.setattr(sys, "stdout", fake_stdout)
+
+    with pytest.raises(SystemExit) as exc:
+        camp_cli._cmd_new_group_cli(["feat-inside-none"], g["group"], g["env"], dry_run=False)
+
+    assert exc.value.code == 1
 
 
 # ---------------------------------------------------------------------------
@@ -468,6 +543,30 @@ def test_tmux_unreachable_exits_zero_with_path_on_stdout_and_warning_on_stderr(
 
 
 @pytest.mark.parametrize(
+    "injected_reason",
+    ["[Errno 2] No such file or directory: 'tmux'", "Command '['tmux', ...]' timed out after 5 seconds"],
+    ids=["unlaunchable", "timeout"],
+)
+def test_tmux_unreachable_warning_carries_tmuxs_own_words(
+    camp_cli, group_env, monkeypatch, capsys, injected_reason
+):
+    """Varies the injected reason across two distinct values and asserts
+    each one reaches the stderr warning verbatim — the test must depend on
+    the input, not merely on the failure arm being taken."""
+    g = group_env
+    tmux = _DoorTmux(present=None, unanswered_reason=injected_reason)
+    _wire_tmux(monkeypatch, tmux)
+
+    code = _run_capturing_exit(
+        camp_cli._cmd_new_group_cli, ["feat-reason"], g["group"], g["env"], dry_run=False
+    )
+
+    assert code == 0
+    captured = capsys.readouterr()
+    assert injected_reason in captured.err, captured.err
+
+
+@pytest.mark.parametrize(
     "injected_stderr",
     ["error connecting to /tmp/x (permission denied)", "no server running on socket /tmp/y"],
     ids=["permission-denied", "no-server"],
@@ -562,6 +661,39 @@ def test_json_on_each_failure_arm_emits_exactly_one_workspace_only_object(
         "session_error": payload.get("session_error"),
     }
     assert payload["session_error"], "session_error must carry the reason, non-empty"
+
+
+def test_a_malformed_sibling_group_config_reports_workspace_only_never_tracebacks(
+    camp_cli, group_env, monkeypatch, capsys
+):
+    """The credential-store gate's account union spans every group camp
+    knows about, so it reads every group config — including one that has
+    nothing to do with the workspace being created. A sibling group's
+    unparseable config must surface as `camp new`'s own workspace-only
+    warning, never a raw traceback (the door is the one place `LaunchError`
+    was previously uncaught on this path). The workspace itself is real and
+    usable either way, so this is the same exit-0 posture every other
+    session-creation failure gets here — `camp attach`'s own door is the one
+    that refuses on this condition (pinned separately in
+    `test_attach_door_dispatch.py`)."""
+    from trailhead.paths import config_dir
+
+    g = group_env
+    groups_dir = config_dir("camp", env=g["env"]) / "groups"
+    groups_dir.mkdir(parents=True, exist_ok=True)
+    (groups_dir / "broken.toml").write_text("not = [valid toml\n")
+    tmux = _DoorTmux(present=False)
+    _wire_tmux(monkeypatch, tmux)
+
+    code = _run_capturing_exit(
+        camp_cli._cmd_new_group_cli, ["feat-malformed"], g["group"], g["env"], dry_run=False
+    )
+
+    captured = capsys.readouterr()
+    assert code == 0
+    assert "Traceback" not in captured.err
+    assert captured.out.strip().endswith("/feat-malformed")
+    assert tmux.switch_client_calls == []
 
 
 def test_concierge_invocation_exits_zero_on_a_failure_arm_with_documented_keys(

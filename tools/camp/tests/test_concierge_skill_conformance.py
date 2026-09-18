@@ -80,6 +80,9 @@ class _FakeConciergeTmux:
     def has_session(self, name: str):
         return False
 
+    def has_session_with_reason(self, name: str):
+        return False, None
+
     def new_session(self, name, *, cwd, env=None, timeout=None):
         import subprocess
 
@@ -93,6 +96,9 @@ class _UnreachableConciergeTmux:
 
     def has_session(self, name: str):
         return None
+
+    def has_session_with_reason(self, name: str):
+        return None, "no such file or directory"
 
 
 def _build_group_env(tmp_path, *, subdir: str = "") -> dict:

@@ -198,3 +198,77 @@ def test_a_workspace_directory_under_a_credential_store_is_refused_before_any_se
         )
 
     assert fake.calls == [], "no create attempt may reach tmux once the credential rule refuses"
+
+
+class _FakeDoorTmux:
+    """A tmux stand-in for `create_or_connect_workspace_session`, answering
+    `has_session_with_reason` directly (never `None`-reason when present is
+    not `None`, matching the real seam's own contract)."""
+
+    def __init__(self, *, present: bool | None = False) -> None:
+        self._present = present
+        self.new_session_calls: list[dict[str, object]] = []
+
+    def has_session_with_reason(self, name: str):
+        return self._present, None
+
+    def new_session(self, name, *, cwd, env=None, timeout=None):
+        self.new_session_calls.append({"name": name, "cwd": cwd, "env": env})
+        return subprocess.CompletedProcess(args=["tmux"], returncode=0, stdout="", stderr="")
+
+
+def test_a_credential_store_launch_error_during_create_folds_into_create_failed_not_a_traceback(
+    tmp_path,
+):
+    """`create_workspace_session` raises `LaunchError` unconditionally when
+    the credential-store gate refuses — including when it cannot even be
+    evaluated because a sibling group's config is unreadable. Both doors
+    share `create_or_connect_workspace_session`, so it must catch that here
+    once, folding it into `DoorState.CREATE_FAILED` with the exception's own
+    message as the reason, rather than letting it propagate as a raw
+    traceback to either caller."""
+    from camp.launch.workspace_session import (
+        DoorState,
+        create_or_connect_workspace_session,
+    )
+
+    home = tmp_path / "home"
+    ws_dir = home / ".ssh" / "sub"
+    ws_dir.mkdir(parents=True)
+    tmux = _FakeDoorTmux(present=False)
+
+    probe = create_or_connect_workspace_session(
+        "trailhead", "camp-cli", ws_dir, env={"HOME": str(home)}, tmux=tmux
+    )
+
+    assert probe.state is DoorState.CREATE_FAILED
+    assert "credential" in probe.reason.lower() or ".ssh" in probe.reason
+    assert tmux.new_session_calls == [], "the gate refuses before any create call reaches tmux"
+
+
+def test_tmux_unanswered_reason_carries_the_seams_own_words(tmp_path):
+    """`create_or_connect_workspace_session`'s `TMUX_UNANSWERED` reason
+    must vary with what tmux actually said, not a single fixed string —
+    proven across two distinct injected reasons."""
+    from camp.launch.workspace_session import (
+        DoorState,
+        create_or_connect_workspace_session,
+    )
+
+    class _UnansweredTmux:
+        def __init__(self, reason: str) -> None:
+            self._reason = reason
+
+        def has_session_with_reason(self, name: str):
+            return None, self._reason
+
+    ws_dir = tmp_path / "workspace"
+    ws_dir.mkdir()
+
+    for reason in ("[Errno 2] No such file or directory: 'tmux'", "timed out after 5 seconds"):
+        probe = create_or_connect_workspace_session(
+            "trailhead", "camp-cli", ws_dir, env={"HOME": str(tmp_path)}, tmux=_UnansweredTmux(reason)
+        )
+        assert probe.state is DoorState.TMUX_UNANSWERED
+        assert reason in probe.reason
+        assert "camp list" in probe.reason

@@ -84,13 +84,18 @@ class _FakeTTY(io.StringIO):
 
 class _DoorTmux:
     """A tmux stand-in exposing exactly the three calls the door dispatch
-    and `create_workspace_session` issue: `has_session`, `new_session`, and
-    `switch_client`. Anything else the door path must never reach
-    (`list_sessions`, etc.) is deliberately absent, so a call that reaches
-    it fails loudly with `AttributeError` rather than degrading silently.
+    and `create_workspace_session` issue: `has_session`
+    (`has_session_with_reason`), `new_session`, and `switch_client`.
+    Anything else the door path must never reach (`list_sessions`, etc.) is
+    deliberately absent, so a call that reaches it fails loudly with
+    `AttributeError` rather than degrading silently.
 
     `present` is the FIRST `has_session` answer; `reprobe` is every answer
     after the first (the unrecognised-create-failure re-probe).
+    `unanswered_reason` is what `has_session_with_reason` reports alongside
+    a `None` `present` — tmux's own words for why it could not answer.
+    `switch_client_unanswered` makes `switch_client` answer `None` (tmux
+    could not be asked at all) instead of a `CompletedProcess`.
     """
 
     def __init__(
@@ -101,12 +106,16 @@ class _DoorTmux:
         create_returncode: int = 0,
         create_stderr: str = "",
         switch_client_returncode: int = 0,
+        switch_client_unanswered: bool = False,
+        unanswered_reason: str = "no such file or directory",
     ) -> None:
         self._present = present
         self._reprobe = present if reprobe is None else reprobe
         self._create_returncode = create_returncode
         self._create_stderr = create_stderr
         self._switch_client_returncode = switch_client_returncode
+        self._switch_client_unanswered = switch_client_unanswered
+        self._unanswered_reason = unanswered_reason
         self.has_session_calls: list[str] = []
         self.new_session_calls: list[dict[str, object]] = []
         self.switch_client_calls: list[str] = []
@@ -114,6 +123,10 @@ class _DoorTmux:
     def has_session(self, name: str) -> bool | None:
         self.has_session_calls.append(name)
         return self._present if len(self.has_session_calls) == 1 else self._reprobe
+
+    def has_session_with_reason(self, name: str) -> tuple[bool | None, str | None]:
+        present = self.has_session(name)
+        return present, (self._unanswered_reason if present is None else None)
 
     def new_session(self, name, *, cwd, env=None, timeout=None):
         self.new_session_calls.append({"name": name, "cwd": cwd, "env": env})
@@ -126,6 +139,8 @@ class _DoorTmux:
 
     def switch_client(self, name: str):
         self.switch_client_calls.append(name)
+        if self._switch_client_unanswered:
+            return None
         return subprocess.CompletedProcess(
             args=["tmux"], returncode=self._switch_client_returncode, stdout="", stderr=""
         )
@@ -339,6 +354,107 @@ def test_inside_tmux_reaches_the_switch_client_seam_never_the_exec_seam(
     assert tmux.switch_client_calls == [derived]
 
 
+# ---------------------------------------------------------------------------
+# The switch-client handover arm's own failure — outcome already printed
+# ---------------------------------------------------------------------------
+
+
+def test_inside_tmux_switch_client_failure_exits_with_its_own_returncode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """A handover can fail after the outcome line is already printed — the
+    created/connected report must survive it, and the exit status must be
+    the switch-client call's own, not swallowed into a generic failure."""
+    _isolated_env(tmp_path, monkeypatch)
+    monkeypatch.setenv("TMUX", "/tmp/tmux-1000/default,1234,0")
+    tmux = _DoorTmux(present=False, switch_client_returncode=3)
+    _wire_one_workspace(monkeypatch, tmp_path=tmp_path, tmux=tmux)
+    monkeypatch.setattr(sys, "stdin", _FakeTTY())
+    fake_stdout = _FakeTTY()
+    monkeypatch.setattr(sys, "stdout", fake_stdout)
+
+    code = _run(["attach", "camp-cli", "--group", "g"], monkeypatch)
+
+    assert code == 3
+    assert "created" in fake_stdout.getvalue()
+    assert tmux.switch_client_calls == [_derived_name("g", "camp-cli")]
+
+
+def test_inside_tmux_switch_client_unanswered_exits_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """`switch_client` answering `None` (tmux could not be asked at all)
+    must not be mistaken for a success (`returncode` `0`) — it is a
+    failure with no exit code of its own to report, so it is exit 1."""
+    _isolated_env(tmp_path, monkeypatch)
+    monkeypatch.setenv("TMUX", "/tmp/tmux-1000/default,1234,0")
+    tmux = _DoorTmux(present=False, switch_client_unanswered=True)
+    _wire_one_workspace(monkeypatch, tmp_path=tmp_path, tmux=tmux)
+    monkeypatch.setattr(sys, "stdin", _FakeTTY())
+    fake_stdout = _FakeTTY()
+    monkeypatch.setattr(sys, "stdout", fake_stdout)
+
+    code = _run(["attach", "camp-cli", "--group", "g"], monkeypatch)
+
+    assert code == 1
+    assert "created" in fake_stdout.getvalue()
+    assert tmux.switch_client_calls == [_derived_name("g", "camp-cli")]
+
+
+# ---------------------------------------------------------------------------
+# tmux's own stderr line reaches the TMUX_UNANSWERED refusal
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "injected_reason",
+    ["[Errno 2] No such file or directory: 'tmux'", "Command '['tmux', ...]' timed out after 5 seconds"],
+    ids=["unlaunchable", "timeout"],
+)
+def test_tmux_unanswered_refusal_carries_tmuxs_own_words(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture, injected_reason
+) -> None:
+    """Varies the injected reason across two distinct values and asserts
+    each one reaches the refusal verbatim, alongside the existing `camp
+    list` pointer — the test must depend on the input, not merely on the
+    refusal arm being taken."""
+    tmux = _DoorTmux(present=None, unanswered_reason=injected_reason)
+    _isolated_env(tmp_path, monkeypatch)
+    _wire_one_workspace(monkeypatch, tmp_path=tmp_path, tmux=tmux)
+
+    code = _run(["attach", "camp-cli", "--group", "g"], monkeypatch)
+    err = capsys.readouterr().err
+
+    assert code == 1
+    assert injected_reason in err, err
+    assert "camp list" in err
+
+
+def test_a_malformed_sibling_group_config_refuses_cleanly_never_tracebacks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The credential-store gate's account union spans every group camp
+    knows about, so it reads every group config — including one that has
+    nothing to do with the attach target. A sibling group's unparseable
+    config must surface as `camp attach`'s own refusal, never a raw
+    traceback (the door is the one place `LaunchError` was previously
+    uncaught on this path)."""
+    _isolated_env(tmp_path, monkeypatch)
+    groups_dir = tmp_path / "config" / "groups"
+    groups_dir.mkdir(parents=True, exist_ok=True)
+    (groups_dir / "broken.toml").write_text("not = [valid toml\n")
+    tmux = _DoorTmux(present=False)
+    _wire_one_workspace(monkeypatch, tmp_path=tmp_path, tmux=tmux)
+
+    code = _run(["attach", "camp-cli", "--group", "g"], monkeypatch)
+    err = capsys.readouterr().err
+
+    assert code == 1
+    assert "Traceback" not in err
+    assert err.startswith("camp attach: ")
+    assert tmux.switch_client_calls == []
+
+
 def test_the_two_arms_are_distinguishable_by_seam_both_directions(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
@@ -404,6 +520,10 @@ def test_probe_absent_yields_created_with_exactly_one_create(
     assert code == 0
     assert out["outcome"] == "created"
     assert len(tmux.new_session_calls) == 1
+    assert out["tmux_session"] == _derived_name("g", "camp-cli"), (
+        "the JSON object's tmux_session must be the actual derived name the "
+        "dispatch created, not merely whatever render_json was handed"
+    )
 
 
 def test_duplicate_session_failure_yields_connected_no_second_create(
