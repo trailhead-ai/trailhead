@@ -19,8 +19,9 @@ operator). That notice must fire once per server, not once per workspace
 created on it.
 
 "First in this server" is read BEFORE the install call, from
-`Tmux.list_window_binding` (`tmux list-keys -T prefix c`): if the exact
-`true_command` this call is about to install is already present in that
+`Tmux.list_window_binding` (`tmux list-keys -T prefix` — the WHOLE table,
+never a per-key filter; see that method's own docstring): if
+`_dispatch_marker`'s quote-free substring is already present in that
 output, another camp process already installed the identical binding and
 this is a re-install — no notice. Anything else (tmux's own stock
 `new-window` binding, a foreign one, or no answer at all) is treated as a
@@ -37,7 +38,7 @@ travel as session-local tmux OPTIONS instead). `#{session_id}` expands
 shell metacharacter — so it is wrapped in single quotes in the composed
 string: `/bin/sh -c` then treats the resulting `$N` as inert text rather
 than expanding it as an empty positional parameter. Verified against a
-real tmux server in `test_window_binding.py`'s end-to-end test.
+real tmux server in `test_window_binding_end_to_end.py`.
 """
 
 from __future__ import annotations
@@ -68,6 +69,23 @@ class _TmuxLike(Protocol):
     def install_window_binding(self, true_command: str, *, timeout: float | None = None): ...
 
 
+def _dispatch_marker(camp_bin: str) -> str:
+    """A stable, QUOTE-FREE substring of the composed dispatch invocation:
+    `<camp_bin> window-dispatch --session-id`.
+
+    Used to detect "already installed" rather than the full composed
+    command — see :func:`_dispatch_true_command`'s docstring for why a
+    verbatim comparison against `Tmux.list_window_binding`'s answer cannot
+    work: `list-keys` re-serializes a `run-shell` string's internal quoting
+    (backslash-escaping the embedded `"` characters our own composed string
+    carries), so the string this module built and the string `list-keys`
+    prints back are never byte-identical even when they describe the exact
+    same binding. A substring with no quote characters of its own survives
+    that round-trip unescaped, confirmed against a real tmux 3.7c server.
+    """
+    return f"{shlex.quote(camp_bin)} window-dispatch --session-id"
+
+
 def _dispatch_true_command(camp_bin: str) -> str:
     """The `if-shell` true-branch command string: `run-shell "<camp_bin>
     window-dispatch --session-id '#{session_id}'"`.
@@ -95,9 +113,10 @@ def install_window_key_binding(
     """
     resolved_bin = camp_bin if camp_bin is not None else _DEFAULT_CAMP_BIN
     true_command = _dispatch_true_command(resolved_bin)
+    marker = _dispatch_marker(resolved_bin)
 
     before = tmux.list_window_binding()
-    is_first_install = before is None or true_command not in before
+    is_first_install = before is None or marker not in before
 
     tmux.install_window_binding(true_command)
 

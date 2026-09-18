@@ -536,6 +536,21 @@ class Tmux:
             return None
         return done.stdout
 
+    def _pane_syntax_target(self, target: str) -> str:
+        """Normalize *target* for a `set-option` / `show-options` call.
+
+        Measured on tmux 3.7c: `set-option`/`show-options` parse `-t` as a
+        PANE target (`session[:window[.pane]]`), and — unlike `has-session`,
+        `display-message`, or `kill-session`, which all accept a bare
+        `=name` exact-match session target directly — a bare `=name` with
+        no trailing `:` fails these two with `no such session: =name`, even
+        though the named session exists. Appending a trailing `:` (an empty
+        window/pane component, meaning "the session itself") fixes it for
+        both an `=`-qualified name and a raw tmux-minted session id (`$3`);
+        confirmed harmless (idempotent) when *target* already ends in `:`.
+        """
+        return target if target.endswith(":") else f"{target}:"
+
     def set_option(
         self,
         target: str,
@@ -556,11 +571,17 @@ class Tmux:
         the tmux-minted numeric session id (`#{session_id}`, e.g. ``$3``)
         that fired the binding, which :func:`target`'s ``=``-name-prefix
         qualification does not apply to and must not be run through.
+        Either way, *target* is passed through :meth:`_pane_syntax_target`
+        first — see its docstring for the real-tmux quirk that makes this
+        necessary.
 
         Returns ``None`` when tmux could not be asked at all; the caller
         decides what to do with a non-zero exit.
         """
-        return self._run(["set-option", "-t", target, key, value], timeout=timeout)
+        return self._run(
+            ["set-option", "-t", self._pane_syntax_target(target), key, value],
+            timeout=timeout,
+        )
 
     def show_option(
         self, target: str, key: str, *, timeout: float | None = None
@@ -571,9 +592,13 @@ class Tmux:
 
         ``-v`` prints the bare value with no ``key value`` pair to parse.
         *target* is caller-supplied, not qualified here — see
-        :meth:`set_option`'s docstring for why.
+        :meth:`set_option`'s docstring for why, including the
+        :meth:`_pane_syntax_target` normalization both methods share.
         """
-        done = self._run(["show-options", "-t", target, "-v", key], timeout=timeout)
+        done = self._run(
+            ["show-options", "-t", self._pane_syntax_target(target), "-v", key],
+            timeout=timeout,
+        )
         if done is None or done.returncode != 0:
             return None
         value = done.stdout
@@ -593,7 +618,7 @@ class Tmux:
         ``new-window``, is what a stock, never-bound tmux server already
         answers prefix+``c`` with (confirmed against tmux 3.7c's
         `list-keys -T prefix c`). Re-issuing this exact argv a second time
-        produces a byte-identical `list-keys -T prefix c` answer — this
+        produces a byte-identical `list-keys -T prefix` answer — this
         method itself never decides "first install" vs. "already there";
         see `camp.launch.binding.install_window_key_binding`, the one
         caller, for that.
@@ -619,14 +644,28 @@ class Tmux:
         )
 
     def list_window_binding(self, *, timeout: float | None = None) -> str | None:
-        """The current prefix+``c`` binding (``tmux list-keys -T prefix c``),
-        or ``None`` when tmux could not answer.
+        """Every binding in the ``prefix`` table (``tmux list-keys -T
+        prefix``), or ``None`` when tmux could not answer.
+
+        Deliberately NOT ``list-keys -T prefix c`` — measured on tmux 3.7c,
+        a trailing key token there is not a per-key filter (there is no
+        such flag on `list-keys`); it produces an EMPTY answer every time,
+        first install or not, which silently defeated the
+        first-install/re-install distinction until this was caught against
+        a real server. The caller (`camp.launch.binding`) searches the
+        WHOLE table's text for its own marker rather than isolating the
+        `c` line, because `list-keys` re-serializes a `run-shell` string's
+        internal quoting (backslash-escaping embedded `"`), so a caller
+        comparing the composed command VERBATIM against this output would
+        never match — a stable, quote-free substring of the composed
+        command survives that round-trip unescaped and is what actually
+        gets matched.
 
         The one way a caller can tell "first install" from "already
         installed" — read this BEFORE calling :meth:`install_window_binding`
         and compare.
         """
-        done = self._run(["list-keys", "-T", "prefix", "c"], timeout=timeout)
+        done = self._run(["list-keys", "-T", "prefix"], timeout=timeout)
         if done is None or done.returncode != 0:
             return None
         return done.stdout

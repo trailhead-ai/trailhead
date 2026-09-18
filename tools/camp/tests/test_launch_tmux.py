@@ -630,7 +630,7 @@ def test_set_option_states_a_session_local_option_never_global(monkeypatch):
 
     tmux_module.Tmux().set_option("=feat", "@camp_group", "trailhead")
 
-    assert calls == [["tmux", "set-option", "-t", "=feat", "@camp_group", "trailhead"]]
+    assert calls == [["tmux", "set-option", "-t", "=feat:", "@camp_group", "trailhead"]]
     assert "-g" not in calls[0]
 
 
@@ -649,7 +649,7 @@ def test_set_option_addresses_a_raw_session_id_target_verbatim(monkeypatch):
 
     tmux_module.Tmux().set_option("$3", "@camp_slug", "camp-cli")
 
-    assert calls == [["tmux", "set-option", "-t", "$3", "@camp_slug", "camp-cli"]]
+    assert calls == [["tmux", "set-option", "-t", "$3:", "@camp_slug", "camp-cli"]]
 
 
 def test_show_option_reads_back_the_bare_value(monkeypatch):
@@ -718,7 +718,13 @@ def test_install_window_binding_issues_the_exact_argv_shape(monkeypatch):
     ]
 
 
-def test_list_window_binding_reads_the_prefix_c_table_entry(monkeypatch):
+def test_list_window_binding_reads_the_whole_prefix_table_not_a_per_key_filter(monkeypatch):
+    """`list-keys -T prefix c` is NOT a per-key filter on real tmux (there
+    is no such flag) — it answers empty every time, which would silently
+    defeat the first-install/re-install distinction. Pinned here as the
+    exact argv this method must issue: the whole table, no trailing key
+    token — confirmed against a real tmux 3.7c server in
+    test_window_binding_end_to_end.py."""
     import camp.launch.tmux as tmux_module
 
     calls: list[list[str]] = []
@@ -731,7 +737,7 @@ def test_list_window_binding_reads_the_prefix_c_table_entry(monkeypatch):
 
     result = tmux_module.Tmux().list_window_binding()
 
-    assert calls == [["tmux", "list-keys", "-T", "prefix", "c"]]
+    assert calls == [["tmux", "list-keys", "-T", "prefix"]]
     assert result == "bind-key -T prefix c new-window\n"
 
 
