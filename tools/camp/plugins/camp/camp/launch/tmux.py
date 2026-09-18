@@ -30,6 +30,13 @@ class entirely (an interactive `exec`, which cannot go through
 `subprocess.run`). `spawn_session` is the one method that does NOT call
 `target` — it names a session with `-s`, never targets one.
 
+`set_option`, `show_option`, and `display_message` are a second exception:
+they take an already-qualified target STRING from the caller rather than
+applying :func:`target` themselves, because one of their call sites (the
+window-dispatch verb) addresses a session by the tmux-minted numeric id
+`#{session_id}` hands it (e.g. `$3`), which `=`-name-prefix qualification
+does not apply to. See :meth:`Tmux.set_option`'s docstring.
+
 The tri-state contract
 -----------------------
 `has_session` answers `True` / `False` / `None` (tmux did not answer at
@@ -528,3 +535,111 @@ class Tmux:
         if done is None or done.returncode != 0:
             return None
         return done.stdout
+
+    def set_option(
+        self,
+        target: str,
+        key: str,
+        value: str,
+        *,
+        timeout: float | None = None,
+    ) -> subprocess.CompletedProcess | None:
+        """State one session-LOCAL option (``tmux set-option -t <target> <key>
+        <value>``) — no ``-g``, so the value never leaks past the addressed
+        session.
+
+        *target* is the caller's own, already-qualified ``-t`` operand —
+        unlike every other method above, this one does NOT apply
+        :func:`target` itself. The two callers of this method address a
+        session two different ways: `create_workspace_session` has a session
+        NAME and passes ``target(name)``; the window-dispatch verb has only
+        the tmux-minted numeric session id (`#{session_id}`, e.g. ``$3``)
+        that fired the binding, which :func:`target`'s ``=``-name-prefix
+        qualification does not apply to and must not be run through.
+
+        Returns ``None`` when tmux could not be asked at all; the caller
+        decides what to do with a non-zero exit.
+        """
+        return self._run(["set-option", "-t", target, key, value], timeout=timeout)
+
+    def show_option(
+        self, target: str, key: str, *, timeout: float | None = None
+    ) -> str | None:
+        """Read back one option's value (``tmux show-options -t <target> -v
+        <key>``), or ``None`` when tmux could not answer, the option is
+        unset, or the session is gone.
+
+        ``-v`` prints the bare value with no ``key value`` pair to parse.
+        *target* is caller-supplied, not qualified here — see
+        :meth:`set_option`'s docstring for why.
+        """
+        done = self._run(["show-options", "-t", target, "-v", key], timeout=timeout)
+        if done is None or done.returncode != 0:
+            return None
+        value = done.stdout
+        if value.endswith("\n"):
+            value = value[:-1]
+        return value
+
+    def install_window_binding(
+        self, true_command: str, *, timeout: float | None = None
+    ) -> subprocess.CompletedProcess | None:
+        """Install (or re-issue, idempotently) camp's server-global
+        prefix+``c`` binding: ``bind-key -T prefix c if-shell -F
+        '#{@camp_workspace}' <true_command> 'new-window'``.
+
+        tmux has no revert-to-compiled-default primitive — `bind-key`
+        overwrites the single table entry — so the else-branch, literally
+        ``new-window``, is what a stock, never-bound tmux server already
+        answers prefix+``c`` with (confirmed against tmux 3.7c's
+        `list-keys -T prefix c`). Re-issuing this exact argv a second time
+        produces a byte-identical `list-keys -T prefix c` answer — this
+        method itself never decides "first install" vs. "already there";
+        see `camp.launch.binding.install_window_key_binding`, the one
+        caller, for that.
+
+        *true_command* is the tmux command string run when the current
+        session carries a truthy ``@camp_workspace`` option — composed by
+        the caller, never built here, since this seam builds tmux ARGV, not
+        the command text if-shell's own arguments hold.
+        """
+        return self._run(
+            [
+                "bind-key",
+                "-T",
+                "prefix",
+                "c",
+                "if-shell",
+                "-F",
+                "#{@camp_workspace}",
+                true_command,
+                "new-window",
+            ],
+            timeout=timeout,
+        )
+
+    def list_window_binding(self, *, timeout: float | None = None) -> str | None:
+        """The current prefix+``c`` binding (``tmux list-keys -T prefix c``),
+        or ``None`` when tmux could not answer.
+
+        The one way a caller can tell "first install" from "already
+        installed" — read this BEFORE calling :meth:`install_window_binding`
+        and compare.
+        """
+        done = self._run(["list-keys", "-T", "prefix", "c"], timeout=timeout)
+        if done is None or done.returncode != 0:
+            return None
+        return done.stdout
+
+    def display_message(
+        self, target: str, message: str, *, timeout: float | None = None
+    ) -> subprocess.CompletedProcess | None:
+        """Show *message* to the client attached to *target* (``tmux
+        display-message -t <target> <message>``) — the operator-facing
+        surface a detached ``run-shell`` dispatch has for a refusal, since
+        it owns no terminal of its own.
+
+        *target* is caller-supplied, not qualified here — see
+        :meth:`set_option`'s docstring for why.
+        """
+        return self._run(["display-message", "-t", target, message], timeout=timeout)
