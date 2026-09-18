@@ -963,23 +963,18 @@ class TestStatusWindowRecordDegradation:
         self, two_member_group, capsys
     ) -> None:
         from ._helpers import (
-            write_corrupt_window_record,
-            write_truncated_window_record,
-            write_valid_window_record,
+            WINDOW_RECORD_STATES,
+            assert_identical_across_record_states,
+            seed_window_record,
         )
 
         g = two_member_group
         results = {}
-        for state in ("missing", "valid", "corrupt", "truncated"):
+        for state in WINDOW_RECORD_STATES:
             slug = f"status-{state}"
             self._seed_states(g["group"], slug, g["env"], {"repo_a": "ready", "repo_b": "ready"})
             ws_dir = _workspace_dir("testgroup", slug, g["env"])
-            if state == "valid":
-                write_valid_window_record(ws_dir)
-            elif state == "corrupt":
-                write_corrupt_window_record(ws_dir)
-            elif state == "truncated":
-                write_truncated_window_record(ws_dir)
+            seed_window_record(ws_dir, state)
             code, out, err = self._run(g["group"], slug, g["env"], as_json=False, capsys=capsys)
             # slug differs by construction (one workspace per state, so a
             # record write never lands where a prior state's run already
@@ -987,26 +982,12 @@ class TestStatusWindowRecordDegradation:
             # itself is not the fact under test.
             results[state] = (code, out.replace(slug, "<slug>"), err)
 
-        baseline_code, baseline_out, _ = results["missing"]
-        assert baseline_code == 0, f"baseline (no record) unexpectedly failed: {results['missing'][2]}"
-        for state in ("valid", "corrupt", "truncated"):
-            code, out, err = results[state]
-            assert code == baseline_code, (
-                f"camp status exit code differs for a {state} window record: "
-                f"{code} != {baseline_code} (stderr: {err!r})"
-            )
-            assert out == baseline_out, (
-                f"camp status text output differs for a {state} window record: "
-                f"{out!r} != {baseline_out!r}"
-            )
-            assert "Traceback" not in err, (
-                f"camp status printed a raw traceback for a {state} window record: {err!r}"
-            )
+        assert_identical_across_record_states(results, verb="status")
 
     def test_json_report_identical_across_record_states(
         self, two_member_group, capsys
     ) -> None:
-        from ._helpers import write_corrupt_window_record, write_valid_window_record
+        from ._helpers import seed_window_record
 
         g = two_member_group
         results = {}
@@ -1014,10 +995,7 @@ class TestStatusWindowRecordDegradation:
             slug = f"status-json-{state}"
             self._seed_states(g["group"], slug, g["env"], {"repo_a": "ready", "repo_b": "ready"})
             ws_dir = _workspace_dir("testgroup", slug, g["env"])
-            if state == "valid":
-                write_valid_window_record(ws_dir)
-            elif state == "corrupt":
-                write_corrupt_window_record(ws_dir)
+            seed_window_record(ws_dir, state)
             code, out, err = self._run(g["group"], slug, g["env"], as_json=True, capsys=capsys)
             results[state] = (code, json.loads(out), err)
 

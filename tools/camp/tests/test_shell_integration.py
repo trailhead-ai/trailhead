@@ -357,9 +357,9 @@ class TestCampPwdWindowRecordDegradation:
         self, tmp_path: Path
     ) -> None:
         from ._helpers import (
-            write_corrupt_window_record,
-            write_truncated_window_record,
-            write_valid_window_record,
+            WINDOW_RECORD_STATES,
+            assert_identical_across_record_states,
+            seed_window_record,
         )
 
         group_name = "mygroup"
@@ -369,7 +369,7 @@ class TestCampPwdWindowRecordDegradation:
         # starts from a clean windows.json condition rather than mutating
         # one workspace's record between runs.
         results = {}
-        for state in ("missing", "valid", "corrupt", "truncated"):
+        for state in WINDOW_RECORD_STATES:
             # Each state gets its own case_root (so a run never mutates the
             # windows.json another run already read), and its output is
             # normalized to be relative to that root — the case_root itself
@@ -377,12 +377,7 @@ class TestCampPwdWindowRecordDegradation:
             case_root = tmp_path / state
             case_root.mkdir()
             ws_dir = _make_workspace(case_root, group_name, slug)
-            if state == "valid":
-                write_valid_window_record(ws_dir)
-            elif state == "corrupt":
-                write_corrupt_window_record(ws_dir)
-            elif state == "truncated":
-                write_truncated_window_record(ws_dir)
+            seed_window_record(ws_dir, state)
             proc = self._run(case_root, ws_dir)
             results[state] = (
                 proc.returncode,
@@ -390,21 +385,7 @@ class TestCampPwdWindowRecordDegradation:
                 proc.stderr.replace(str(case_root), "<root>"),
             )
 
-        baseline_code, baseline_out, _ = results["missing"]
-        assert baseline_code == 0, f"baseline (no record) unexpectedly failed: {results['missing'][2]}"
-        for state in ("valid", "corrupt", "truncated"):
-            code, out, err = results[state]
-            assert code == baseline_code, (
-                f"camp pwd exit status differs for a {state} window record: "
-                f"{code} != {baseline_code} (stderr: {err!r})"
-            )
-            assert out == baseline_out, (
-                f"camp pwd stdout differs for a {state} window record: "
-                f"{out!r} != {baseline_out!r}"
-            )
-            assert "Traceback" not in err, (
-                f"camp pwd printed a raw traceback for a {state} window record: {err!r}"
-            )
+        assert_identical_across_record_states(results, verb="pwd")
 
 
 # ---------------------------------------------------------------------------

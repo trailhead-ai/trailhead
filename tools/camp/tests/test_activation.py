@@ -456,16 +456,16 @@ def test_activate_missing_valid_and_corrupt_records_answer_identically(
     windows.json is absent, well-formed, or corrupt.
     """
     from ._helpers import (
-        write_corrupt_window_record,
-        write_truncated_window_record,
-        write_valid_window_record,
+        WINDOW_RECORD_STATES,
+        assert_identical_across_record_states,
+        seed_window_record,
     )
 
     group_name = "mygroup"
     member_name = "myrepo"
 
     results = {}
-    for state in ("missing", "valid", "corrupt", "truncated"):
+    for state in WINDOW_RECORD_STATES:
         slug = f"activate-{state}"
         case_root = tmp_path / state
         wt_path = case_root / "camp" / group_name / "worktrees" / slug / member_name
@@ -486,38 +486,14 @@ def test_activate_missing_valid_and_corrupt_records_answer_identically(
             ],
         )
 
-        ws_dir = wt_path.parent
-        if state == "valid":
-            write_valid_window_record(ws_dir)
-        elif state == "corrupt":
-            write_corrupt_window_record(ws_dir)
-        elif state == "truncated":
-            write_truncated_window_record(ws_dir)
+        seed_window_record(wt_path.parent, state)
 
         group = _make_group(group_name, member_name)
         env = _env(case_root)
         code, out, err = _run_activate_cli(group, slug, member_name, env, capsys)
         results[state] = (code, out.replace(slug, "<slug>"), err.replace(slug, "<slug>"))
 
-    baseline_code, baseline_out, baseline_err = results["missing"]
-    assert baseline_code == 0, f"baseline (no record) unexpectedly failed: {baseline_err}"
-    for state in ("valid", "corrupt", "truncated"):
-        code, out, err = results[state]
-        assert code == baseline_code, (
-            f"camp activate exit code differs for a {state} window record: "
-            f"{code} != {baseline_code} (stderr: {err!r})"
-        )
-        assert out == baseline_out, (
-            f"camp activate stdout differs for a {state} window record: "
-            f"{out!r} != {baseline_out!r}"
-        )
-        assert err == baseline_err, (
-            f"camp activate stderr differs for a {state} window record: "
-            f"{err!r} != {baseline_err!r}"
-        )
-        assert "Traceback" not in err, (
-            f"camp activate printed a raw traceback for a {state} window record: {err!r}"
-        )
+    assert_identical_across_record_states(results, verb="activate", compare_stderr=True)
 
 
 # ---------------------------------------------------------------------------

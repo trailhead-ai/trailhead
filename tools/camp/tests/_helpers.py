@@ -239,3 +239,72 @@ def write_truncated_window_record(ws_dir: Path) -> None:
     path = window_record_path_for(ws_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(full[: len(full) // 2])
+
+
+#: The record conditions a workspace-reading verb must answer identically for.
+#: ``missing`` is the baseline every other state is compared against.
+WINDOW_RECORD_STATES = ("missing", "valid", "corrupt", "truncated")
+
+
+def seed_window_record(ws_dir: Path, state: str) -> None:
+    """Put *ws_dir*'s windows.json into *state*.
+
+    ``missing`` writes nothing — the caller's fresh workspace already has no
+    record. Any other name is a typo in the caller's state list and raises
+    rather than silently seeding nothing, which would turn a state the test
+    believes it covered into a second copy of the baseline.
+    """
+    if state == "missing":
+        return
+    if state == "valid":
+        write_valid_window_record(ws_dir)
+    elif state == "corrupt":
+        write_corrupt_window_record(ws_dir)
+    elif state == "truncated":
+        write_truncated_window_record(ws_dir)
+    else:
+        raise ValueError(f"unknown window-record state {state!r}")
+
+
+def assert_identical_across_record_states(
+    results: dict[str, tuple[int, str, str]],
+    *,
+    verb: str,
+    compare_stderr: bool = False,
+) -> None:
+    """Assert every entry of *results* matches the ``missing`` baseline.
+
+    *results* maps a :data:`WINDOW_RECORD_STATES` name to the
+    ``(exit_code, stdout, stderr)`` that running *verb* produced against a
+    workspace in that state. The property is that a workspace command which
+    does not read the window record cannot be made to answer differently by
+    one — and in particular never answers with a traceback.
+
+    *compare_stderr* additionally pins stderr byte-equality. It is off by
+    default because several of these verbs legitimately emit path- or
+    environment-dependent stderr that is normalized per caller; a caller that
+    CAN compare stderr must pass ``True`` rather than rely on the default,
+    since silently dropping that comparison is how this check gets weaker
+    without anyone noticing.
+    """
+    baseline_code, baseline_out, baseline_err = results["missing"]
+    assert baseline_code == 0, f"baseline (no record) unexpectedly failed: {baseline_err}"
+    for state, (code, out, err) in results.items():
+        if state == "missing":
+            continue
+        assert code == baseline_code, (
+            f"camp {verb} exit status differs for a {state} window record: "
+            f"{code} != {baseline_code} (stderr: {err!r})"
+        )
+        assert out == baseline_out, (
+            f"camp {verb} stdout differs for a {state} window record: "
+            f"{out!r} != {baseline_out!r}"
+        )
+        if compare_stderr:
+            assert err == baseline_err, (
+                f"camp {verb} stderr differs for a {state} window record: "
+                f"{err!r} != {baseline_err!r}"
+            )
+        assert "Traceback" not in err, (
+            f"camp {verb} printed a raw traceback for a {state} window record: {err!r}"
+        )

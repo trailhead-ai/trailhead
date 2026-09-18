@@ -1257,40 +1257,17 @@ def _state_tree(root: Path) -> dict[str, bytes]:
 class TestCampRemoveWindowRecordDegradation:
     def test_missing_valid_and_corrupt_records_answer_identically(self, tmp_path: Path, monkeypatch):
         from ._helpers import (
-            write_corrupt_window_record,
-            write_truncated_window_record,
-            write_valid_window_record,
+            WINDOW_RECORD_STATES,
+            assert_identical_across_record_states,
+            seed_window_record,
         )
 
         results = {}
-        for state in ("missing", "valid", "corrupt", "truncated"):
+        for state in WINDOW_RECORD_STATES:
             env_ = _provision_removable_workspace(tmp_path / state, monkeypatch)
-            if state == "valid":
-                write_valid_window_record(env_["ws_dir"])
-            elif state == "corrupt":
-                write_corrupt_window_record(env_["ws_dir"])
-            elif state == "truncated":
-                write_truncated_window_record(env_["ws_dir"])
+            seed_window_record(env_["ws_dir"], state)
 
             r = _camp(env_, "remove", "ws-slug", "--group", "rmgroup")
             results[state] = (r.returncode, r.stdout, r.stderr)
 
-        baseline_code, baseline_out, baseline_err = results["missing"]
-        assert baseline_code == 0, f"baseline (no record) unexpectedly failed: {baseline_err}"
-        for state in ("valid", "corrupt", "truncated"):
-            code, out, err = results[state]
-            assert code == baseline_code, (
-                f"camp remove exit code differs for a {state} window record: "
-                f"{code} != {baseline_code} (stderr: {err!r})"
-            )
-            assert out == baseline_out, (
-                f"camp remove stdout differs for a {state} window record: "
-                f"{out!r} != {baseline_out!r}"
-            )
-            assert err == baseline_err, (
-                f"camp remove stderr differs for a {state} window record: "
-                f"{err!r} != {baseline_err!r}"
-            )
-            assert "Traceback" not in err, (
-                f"camp remove printed a raw traceback for a {state} window record: {err!r}"
-            )
+        assert_identical_across_record_states(results, verb="remove", compare_stderr=True)
