@@ -105,6 +105,8 @@ _SMOKE_INVOCATIONS = [
     ["pwd"],
     ["activate"],
     ["inject", "--drain"],
+    ["window-dispatch"],
+    ["window-dispatch", "--session-id", "$99"],
     ["restock"],
     ["sweep"],
     ["code"],

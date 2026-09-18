@@ -576,6 +576,16 @@ def main() -> None:
         _cmd_inject_cli(argv[1:])
         return
 
+    # Hidden verb the window-creation-key binding's `run-shell` string fires
+    # against — dispatched here, before group resolution, because it
+    # resolves its own (group, slug) from the tmux session that fired it
+    # (via session-local options), never from cwd. Never typed by an
+    # operator; see cli/window_dispatch.py's module docstring.
+    if first == "window-dispatch":
+        from .window_dispatch import _cmd_window_dispatch_cli
+        _cmd_window_dispatch_cli(argv[1:])
+        return
+
     # 'group' is the new name for 'init'; 'init' redirects to 'group'.
     if first == "group":
         _refuse_host_flag_if_present(first, argv[1:])
