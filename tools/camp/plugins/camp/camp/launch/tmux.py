@@ -88,6 +88,32 @@ def resolve_budget(name: str, shipped: float, env: Mapping[str, str] | None = No
     return override if override > 0 else shipped
 
 
+#: The `bind-key` operands that address the one key camp ever rebinds. Shared
+#: by :meth:`Tmux.install_window_binding` and :meth:`Tmux.reset_window_binding`
+#: so the two can only ever address the SAME table entry — a reset that drifted
+#: onto a different key or table would leave camp's binding installed while
+#: reporting the key restored.
+_PREFIX_C_BIND = ["bind-key", "-T", "prefix", "c"]
+
+#: What a stock, never-bound tmux server answers prefix+`c` with (confirmed
+#: against tmux 3.7c's `list-keys -T prefix c`). tmux has no revert-to-default
+#: primitive, so this literal is both `install_window_binding`'s if-shell
+#: else-branch and the whole of `reset_window_binding` — the two MUST agree, so
+#: they read it from here rather than each spelling it.
+_TMUX_DEFAULT_WINDOW_COMMAND = "new-window"
+
+
+def _strip_one_trailing_newline(text: str) -> str:
+    """Drop a single trailing newline from a tmux answer, if present.
+
+    Deliberately not `rstrip`/`splitlines`: a tmux window name (and an option
+    value) is user-influenced text that may legitimately end in whitespace or
+    contain newlines of its own, and an empty answer must stay the empty
+    string rather than becoming an empty list to index into.
+    """
+    return text[:-1] if text.endswith("\n") else text
+
+
 class _Unanswered:
     """The sentinel a tmux question comes back with when tmux did not answer.
 
@@ -331,10 +357,7 @@ class Tmux:
             return UNANSWERED
         if done.returncode != 0:
             return None
-        stdout = done.stdout
-        if stdout.endswith("\n"):
-            stdout = stdout[:-1]
-        window_id, _, actual_name = stdout.partition(" ")
+        window_id, _, actual_name = _strip_one_trailing_newline(done.stdout).partition(" ")
         return NewWindowResult(window_id=window_id, window_name=actual_name)
 
     def kill_session(
@@ -601,10 +624,7 @@ class Tmux:
         )
         if done is None or done.returncode != 0:
             return None
-        value = done.stdout
-        if value.endswith("\n"):
-            value = value[:-1]
-        return value
+        return _strip_one_trailing_newline(done.stdout)
 
     def install_window_binding(
         self, true_command: str, *, timeout: float | None = None
@@ -630,15 +650,12 @@ class Tmux:
         """
         return self._run(
             [
-                "bind-key",
-                "-T",
-                "prefix",
-                "c",
+                *_PREFIX_C_BIND,
                 "if-shell",
                 "-F",
                 "#{@camp_workspace}",
                 true_command,
-                "new-window",
+                _TMUX_DEFAULT_WINDOW_COMMAND,
             ],
             timeout=timeout,
         )
@@ -661,7 +678,7 @@ class Tmux:
         decides what to do with a non-zero exit.
         """
         return self._run(
-            ["bind-key", "-T", "prefix", "c", "new-window"],
+            [*_PREFIX_C_BIND, _TMUX_DEFAULT_WINDOW_COMMAND],
             timeout=timeout,
         )
 
