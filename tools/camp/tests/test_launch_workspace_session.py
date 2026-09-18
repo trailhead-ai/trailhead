@@ -239,16 +239,17 @@ class _FakeDoorTmux:
         return subprocess.CompletedProcess(args=["tmux"], returncode=0, stdout="", stderr="")
 
 
-def test_a_credential_store_launch_error_during_create_folds_into_create_failed_not_a_traceback(
+def test_a_credential_store_launch_error_during_create_folds_into_create_refused_not_a_traceback(
     tmp_path,
 ):
     """`create_workspace_session` raises `LaunchError` unconditionally when
     the credential-store gate refuses — including when it cannot even be
     evaluated because a sibling group's config is unreadable. Both doors
     share `create_or_connect_workspace_session`, so it must catch that here
-    once, folding it into `DoorState.CREATE_FAILED` with the exception's own
-    message as the reason, rather than letting it propagate as a raw
-    traceback to either caller."""
+    once, folding it into `DoorState.CREATE_REFUSED` — a policy refusal,
+    distinct from `DoorState.CREATE_FAILED`'s transient-failure vocabulary —
+    with the exception's own message as the reason, rather than letting it
+    propagate as a raw traceback to either caller."""
     from camp.launch.workspace_session import (
         DoorState,
         create_or_connect_workspace_session,
@@ -263,9 +264,37 @@ def test_a_credential_store_launch_error_during_create_folds_into_create_failed_
         "trailhead", "camp-cli", ws_dir, env={"HOME": str(home)}, tmux=tmux
     )
 
-    assert probe.state is DoorState.CREATE_FAILED
+    assert probe.state is DoorState.CREATE_REFUSED
+    assert probe.state is not DoorState.CREATE_FAILED
     assert "credential" in probe.reason.lower() or ".ssh" in probe.reason
     assert tmux.new_session_calls == [], "the gate refuses before any create call reaches tmux"
+
+
+def test_a_credential_store_workspace_with_an_existing_session_is_connected_without_the_gate(
+    tmp_path,
+):
+    """The connect arm returns from `has_session_with_reason` before
+    `create_workspace_session` — and therefore the credential-store gate —
+    is ever reached. A workspace directory under a credential store with a
+    session already live at the derived name is connected to, not refused:
+    the gate only ever stops camp from ROOTING a session in a credential
+    store, and the connect arm roots nothing."""
+    from camp.launch.workspace_session import (
+        DoorState,
+        create_or_connect_workspace_session,
+    )
+
+    home = tmp_path / "home"
+    ws_dir = home / ".ssh" / "sub"
+    ws_dir.mkdir(parents=True)
+    tmux = _FakeDoorTmux(present=True)
+
+    probe = create_or_connect_workspace_session(
+        "trailhead", "camp-cli", ws_dir, env={"HOME": str(home)}, tmux=tmux
+    )
+
+    assert probe.state is DoorState.CONNECTED
+    assert tmux.new_session_calls == [], "no create attempt is made on the connect arm"
 
 
 class _RaisingCreateTmux:

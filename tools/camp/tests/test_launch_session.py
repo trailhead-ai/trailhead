@@ -809,6 +809,46 @@ class TestNonRefusingWarnings:
         assert result.session_id
 
 
+class TestStateSessionEnvironmentDiagnostic:
+    """`_state_session_environment`'s own best-effort stderr diagnostic —
+    called directly, not through a full launch, since the property under
+    test is entirely local to this one print."""
+
+    @pytest.mark.parametrize(
+        "injected_stderr",
+        [
+            "denied\nfake: forged a second line",
+            "denied\rfake: overwrote the line",
+        ],
+        ids=["embedded-newline", "embedded-carriage-return"],
+    )
+    def test_a_nonzero_result_carrying_control_characters_is_neutralized(
+        self, capsys, injected_stderr
+    ):
+        import camp.launch.session as session
+
+        class _FakeTmux:
+            def set_environment_with_reason(self, name, operand, *, env, timeout):
+                result = type(
+                    "R", (), {"returncode": 1, "stdout": "", "stderr": injected_stderr}
+                )()
+                return result, None
+
+        session._state_session_environment(
+            _FakeTmux(), "camp-x", {"ACCOUNT_DIR": "/a"}, [], {}
+        )
+
+        err = capsys.readouterr().err
+        lines = [line for line in err.split("\n") if line]
+        assert len(lines) == 1, (
+            f"an embedded control character must not forge a second stderr "
+            f"line: {err!r}"
+        )
+        assert "\r" not in lines[0], f"a raw carriage return reached the line: {lines[0]!r}"
+        assert "denied" in lines[0]
+        assert "forged a second line" in lines[0] or "overwrote the line" in lines[0]
+
+
 # ---------------------------------------------------------------------------
 # the seam boundary — camp spells only tmux and env -u
 # ---------------------------------------------------------------------------
@@ -1428,6 +1468,64 @@ class TestConfirmSession:
         err = capsys.readouterr().err
         assert "camp-feat-x-abcd1234" in err
         assert len([c for c in calls if c[:2] == ["tmux", "kill-session"]]) == 1
+
+    @pytest.mark.parametrize(
+        "injected_stderr",
+        [
+            "no such session\nfake: forged a second line",
+            "no such session\rfake: overwrote the line",
+        ],
+        ids=["embedded-newline", "embedded-carriage-return"],
+    )
+    def test_a_nonzero_kill_stderr_carrying_control_characters_is_neutralized(
+        self, confirm_rig, monkeypatch, capsys, injected_stderr
+    ):
+        """A nonzero `kill-session` reports tmux's own stderr verbatim on
+        this diagnostic line, hardened like the door's success line — an
+        embedded newline must not forge a second stderr row, and an
+        embedded carriage return must not rewrite the line already
+        printed. Varied across two distinct control characters so the
+        test depends on the input, not merely on the failure arm being
+        taken."""
+        session = confirm_rig["module"]
+        harness = SequencedHarness([[]])
+
+        def fake_run(argv, **kwargs):
+            if argv[0] == "tmux":
+                return type(
+                    "R", (), {"returncode": 1, "stdout": "", "stderr": injected_stderr}
+                )()
+            output = harness.parse_session_list("")
+            return type("R", (), {"returncode": 0, "stdout": output, "stderr": ""})()
+
+        monkeypatch.setattr(session.subprocess, "run", fake_run)
+
+        with pytest.raises(session.LaunchError):
+            session.confirm_session(
+                harness,
+                confirm_rig["launched"],
+                interval=0.5,
+                timeout=0.5,
+                sleep=lambda s: None,
+                clock=FakeClock(1.0),
+            )
+
+        err = capsys.readouterr().err
+        # Split on real newlines only (never `\r`) so an embedded carriage
+        # return that camp fails to escape stays visible inside a "line"
+        # here, rather than being treated as a legitimate line break.
+        lines = [line for line in err.split("\n") if line]
+        assert len(lines) == 2, (
+            "exactly two stderr lines are printed on this path (the timeout "
+            f"notice, then the kill diagnostic) — an embedded control "
+            f"character must not forge a third: {err!r}"
+        )
+        kill_line = lines[1]
+        assert "\r" not in kill_line, (
+            f"a raw carriage return reached the printed line: {kill_line!r}"
+        )
+        assert "no such session" in kill_line
+        assert "forged a second line" in kill_line or "overwrote the line" in kill_line
 
     def test_kill_session_call_carries_a_timeout(self, confirm_rig, monkeypatch):
         """A wedged tmux must not hang the refusal — the kill call itself needs

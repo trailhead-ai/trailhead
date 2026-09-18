@@ -477,19 +477,21 @@ def _cmd_new_group_cli(
 
 
 def _workspace_only_payload(
-    *, slug: str, group_name: str, ws_dir, session_error: str
+    *, slug: str, group_name: str, ws_dir, session_error: str, refused: bool
 ) -> dict:
     """The `--json` object for `camp new`'s workspace-only outcome — the
-    workspace exists but its tmux session does not, whether tmux was
-    unreachable or the create attempt itself failed. One outcome value
-    covers both causes; no consumer needs to branch on which one happened,
-    only on `session_error`, which carries tmux's own words wherever tmux
-    supplied them. The sole place this key set is assembled — both call
-    sites in `_door_dispatch_for_new` build the object here, never ad hoc.
+    workspace exists but its tmux session does not. `outcome` is
+    `workspace-only-refused` when the session was refused by policy (the
+    workspace directory is at, under, or above a credential store) and
+    `workspace-only` for a transient cause (tmux unreachable, or the create
+    attempt itself failed) — a consumer must be able to tell them apart
+    without parsing `session_error`'s free text. Same key set either way;
+    the sole place this key set is assembled — every call site in
+    `_door_dispatch_for_new` builds the object here, never ad hoc.
     """
     return {
         "ok": True,
-        "outcome": "workspace-only",
+        "outcome": "workspace-only-refused" if refused else "workspace-only",
         "slug": slug,
         "group": group_name,
         "workspace_path": str(ws_dir),
@@ -507,13 +509,16 @@ def _report_workspace_only(
     ws_dir,
     derived_name: str,
     session_error: str,
+    refused: bool = False,
 ) -> None:
     """Report `camp new`'s workspace-only outcome and return — never exits
     and never raises. The workspace is real and usable, so this is success
     with a warning, not a refusal: exactly the workspace path on stdout (or
     the `--json` object replacing it), and a warning naming the unreached
-    session on stderr under the plain form.
-    """
+    session on stderr under the plain form. *refused* selects wording that
+    cannot be mistaken for a transient tmux hiccup — "refused", not
+    "warning" — when the session was denied by policy rather than merely
+    unreachable or failed."""
     if as_json:
         print(
             json.dumps(
@@ -522,13 +527,20 @@ def _report_workspace_only(
                     group_name=group_name,
                     ws_dir=ws_dir,
                     session_error=session_error,
+                    refused=refused,
                 )
             )
         )
         return
 
+    from ..launch.recovery import printable_path
+
     print(str(ws_dir))
-    print(f"camp new: warning — {derived_name} — {session_error}", file=sys.stderr)
+    label = "refused" if refused else "warning"
+    print(
+        printable_path(f"camp new: {label} — {derived_name} — {session_error}"),
+        file=sys.stderr,
+    )
 
 
 def _door_dispatch_for_new(
@@ -555,10 +567,13 @@ def _door_dispatch_for_new(
     reporting. The stream contract: the workspace path is the caller's only
     stdout line, so a human-readable outcome goes to stderr, and `--json`
     prints one object on stdout in place of the path line. And the failure
-    posture: neither an unanswered tmux nor a failed create is a refusal
-    here, because the workspace was already created and is usable on disk,
-    so both report through `_report_workspace_only` and return with exit 0,
-    where `camp attach` refuses.
+    posture: neither an unanswered tmux, nor a failed create, nor a create
+    refused by policy is a refusal here, because the workspace was already
+    created and is usable on disk, so all three report through
+    `_report_workspace_only` and return with exit 0, where `camp attach`
+    refuses — `_report_workspace_only`'s own `refused` flag keeps the
+    policy case distinguishable in what is reported, even though none of
+    the three exit non-zero.
     """
     from ..host.handoff import hand_over_to_session
     from ..launch.door import Connected, Created, render_human, render_json
@@ -571,7 +586,7 @@ def _door_dispatch_for_new(
         group_name, slug, ws_dir, env=resolved_env, tmux=tmux
     )
 
-    if probe.state in (DoorState.TMUX_UNANSWERED, DoorState.CREATE_FAILED):
+    if probe.state in (DoorState.TMUX_UNANSWERED, DoorState.CREATE_FAILED, DoorState.CREATE_REFUSED):
         _report_workspace_only(
             as_json=as_json,
             slug=slug,
@@ -579,6 +594,7 @@ def _door_dispatch_for_new(
             ws_dir=ws_dir,
             derived_name=probe.session_name,
             session_error=probe.reason,
+            refused=probe.state is DoorState.CREATE_REFUSED,
         )
         return
 

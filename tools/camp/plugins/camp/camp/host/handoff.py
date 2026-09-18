@@ -41,6 +41,7 @@ import sys
 from typing import Callable, Mapping, NoReturn, Sequence
 
 from ..attach.prefix_warning import inside_multiplexer
+from ..launch.recovery import printable_path
 from ..launch.tmux import Tmux, target
 from .config import Host
 from .transport import DEFAULT_CONNECT_TIMEOUT_SECONDS, quote_and_join
@@ -166,7 +167,7 @@ def hand_over_to_session(
             sys.exit(1)
         stderr = (switched.stderr or "").strip()
         if switched.returncode != 0 and stderr:
-            print(stderr, file=sys.stderr)
+            print(printable_path(stderr), file=sys.stderr)
         sys.exit(switched.returncode)
 
     handoff(door_argv(derived_name))

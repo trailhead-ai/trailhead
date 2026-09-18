@@ -2745,18 +2745,26 @@ def _resolve_group_for_attach(
 
 def _refuse_door(outcome, reason: str, *, as_json: bool) -> NoReturn:
     """One refusal for `_open_workspace_door`: `camp attach: <reason>` on
-    stderr under the plain form, or `{"ok": false, "reason": <reason>}` on
-    stdout under `--json` — the same `ok`-flagged shape every other `camp
-    attach` JSON answer already carries. *outcome* supplies only the exit
-    status; `camp.launch.door`'s own docstring is explicit that a
-    refusal's message is composed by the code that constructs it, never
-    read back out of that module.
+    stderr under the plain form, or `{"ok": false, "outcome": <word or
+    null>, "reason": <reason>}` on stdout under `--json` — the same
+    `ok`-flagged shape every other `camp attach` JSON answer already
+    carries. `outcome` is the machine-readable word for the two
+    tmux-boundary refusals (`RefusedCreateFailed` vs `RefusedCreateRefused`
+    render distinct words, so a `--json` consumer can tell a policy
+    refusal from a transient tmux failure without parsing `reason`);
+    `None` when *outcome* defines none. *reason* is escaped through
+    `printable_path`, composed whole rather than field by field, because
+    it can carry tmux's own stderr verbatim. `camp.launch.door`'s own
+    docstring is explicit that a refusal's message is composed by the code
+    that constructs it, never read back out of that module.
     """
-    from ..launch.door import exit_status
+    from ..launch.door import exit_status, refusal_outcome_word
+    from ..launch.recovery import printable_path
     from ..spine import _die
 
+    reason = printable_path(reason)
     if as_json:
-        print(json.dumps({"ok": False, "reason": reason}))
+        print(json.dumps({"ok": False, "outcome": refusal_outcome_word(outcome), "reason": reason}))
         sys.exit(exit_status(outcome))
     _die(f"camp attach: {reason}")
 
@@ -2777,10 +2785,11 @@ def _open_workspace_door(
     probe, the create, and the race re-probe, shared with `camp new`'s door
     at `cli/group.py:_door_dispatch_for_new`); the handover is
     `host.handoff.hand_over_to_session` (the exec and `switch-client` arms).
-    What is `camp attach`'s alone, and stays here, is that BOTH failure
-    states are refusals — the session is all this verb has, so an
-    unanswered tmux or a failed create ends in `camp attach: …` and a
-    non-zero exit, where `camp new` reports a workspace-only success.
+    What is `camp attach`'s alone, and stays here, is that every failure
+    state is a refusal — the session is all this verb has, so an
+    unanswered tmux, a failed create, or a create refused by policy each
+    end in `camp attach: …` and a non-zero exit, where `camp new` reports a
+    workspace-only success.
 
     Success prints the outcome line on stdout (or the `--json` object),
     then hands over. `attached` in that report is true on both handover
@@ -2793,6 +2802,7 @@ def _open_workspace_door(
         Connected,
         Created,
         RefusedCreateFailed,
+        RefusedCreateRefused,
         RefusedTmuxUnanswered,
         exit_status,
         render_human,
@@ -2809,6 +2819,9 @@ def _open_workspace_door(
         return
     if probe.state is DoorState.CREATE_FAILED:
         _refuse_door(RefusedCreateFailed(), probe.reason, as_json=as_json)
+        return
+    if probe.state is DoorState.CREATE_REFUSED:
+        _refuse_door(RefusedCreateRefused(), probe.reason, as_json=as_json)
         return
 
     outcome_cls = Created if probe.state is DoorState.CREATED else Connected

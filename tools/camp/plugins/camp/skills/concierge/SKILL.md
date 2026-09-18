@@ -149,19 +149,28 @@ harness session exists yet. The reuse path prints `{"workspace": …,
 defaulted launch says which account it landed on rather than passing silently.
 
 A third `outcome` value, `workspace-only`, means the workspace was created
-but its tmux session could not be — tmux was unreachable, or the create
-itself failed. It prints `{"ok": true, "outcome": "workspace-only", "slug":
-…, "group": …, "workspace_path": …, "tmux_session": null, "attached": false,
-"session_error": …}` — still `ok: true` and still exit 0, because the
-workspace is real and usable; `session_error` carries tmux's own words on
-why the session isn't there yet. Report the workspace as delivered and
-relay `session_error` as a caveat, then point at `camp attach <slug>` to
-retry creating the session directly.
+but its tmux session could not be for a transient reason — tmux was
+unreachable, or the create itself failed. It prints `{"ok": true, "outcome":
+"workspace-only", "slug": …, "group": …, "workspace_path": …,
+"tmux_session": null, "attached": false, "session_error": …}` — still `ok:
+true` and still exit 0, because the workspace is real and usable;
+`session_error` carries tmux's own words on why the session isn't there
+yet. Report the workspace as delivered and relay `session_error` as a
+caveat, then point at `camp attach <slug>` to retry creating the session
+directly.
+
+A fourth value, `workspace-only-refused`, carries the same shape but means
+the session was refused by policy rather than a transient tmux failure —
+the workspace directory sits at, under, or above a credential store. It is
+still `ok: true` and exit 0 for the same reason: the workspace itself is
+real and usable. Retrying with `camp attach <slug>` will refuse for the
+same reason, so report it as a standing refusal rather than a caveat to
+retry past.
 
 - The create path holds the workspace and its shell to be the deliverable. It
   exits 0 whenever the workspace exists — its tmux session created, already
-  running, or (`workspace-only`) not created at all — whatever the
-  provisioning state.
+  running, or (`workspace-only` / `workspace-only-refused`) not created at
+  all — whatever the provisioning state.
 - The reuse path holds the harness session to be the deliverable. Its refusal
   prints nothing at all on stdout and exits non-zero, with camp's reason on
   stderr. There is no JSON to parse there — take the reason from stderr.

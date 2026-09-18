@@ -938,9 +938,11 @@ def _state_session_environment(
         else:
             detail = (stated.stderr or "").strip() or f"exit status {stated.returncode}"
         print(
-            f"camp: could not state the session environment for {tmux_name} "
-            f"({detail}) — this session is bound correctly, but new windows "
-            "opened in it may not be",
+            printable_path(
+                f"camp: could not state the session environment for {tmux_name} "
+                f"({detail}) — this session is bound correctly, but new windows "
+                "opened in it may not be"
+            ),
             file=sys.stderr,
         )
         return
@@ -1249,8 +1251,10 @@ def confirm_session(
         )
     elif kill.returncode != 0:
         print(
-            f"camp: failed to kill tmux session {launched.tmux_name}: "
-            f"{(kill.stderr or '').strip() or kill.returncode}",
+            printable_path(
+                f"camp: failed to kill tmux session {launched.tmux_name}: "
+                f"{(kill.stderr or '').strip() or kill.returncode}"
+            ),
             file=sys.stderr,
         )
     raise LaunchError(message)
