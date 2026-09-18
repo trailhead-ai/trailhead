@@ -242,6 +242,83 @@ def clear_held_marker(vault_root: str | Path) -> bool:
         return False
 
 
+#: Filename suffix distinguishing the failed-vault marker from both the
+#: resolution-session marker and the held marker — a third, disjoint moment of
+#: the same replay: the resolver did not even reach a settled or held ending
+#: (a graph-guard refusal, a `rebase --continue` that failed, the step
+#: ceiling, an unreadable index) or the forge itself rejected a push whose
+#: history never moved. Neither is a judgment conflict, so neither belongs in
+#: the held marker, and neither is a resolution-in-progress, so neither
+#: belongs in the resolution marker. Its liveness rule is the same as the
+#: held marker's: plain file presence, written once when the failure occurs
+#: and cleared once the vault next reaches a determinate, non-failing ending.
+FAILED_SUFFIX = ".failed"
+
+
+def failed_marker_path(vault_root: str | Path) -> Path:
+    """Return the failed-vault marker path for *vault_root*, confined to the
+    marker root.
+
+    Sits beside :func:`marker_path` and :func:`held_marker_path` in the same
+    directory, keyed on the same ``machine_state_key`` but with
+    :data:`FAILED_SUFFIX` appended, so all three markers can coexist under one
+    filename stem without colliding.
+
+    Raises:
+        layers.LayerConfinementError: if the marker path escapes the marker root.
+    """
+    root = resolve_state_root()
+    candidate = root / f"{machine_state_key(vault_root)}{FAILED_SUFFIX}.json"
+    layers_mod.assert_within_root(candidate, root)
+    return candidate
+
+
+def mark_failed(vault_root: str | Path, *, reason: str, detail: str) -> dict:
+    """Record that *vault_root*'s resolution failed, and return the marker.
+
+    This is the durable half of a failure report — the reported document and
+    the terminal both carry the same *reason*, but neither survives past the
+    one run that printed it. Written to a NAMED location under
+    ``state_dir("lore")/resolve`` so a later reader (a person, or a
+    coordinator polling several hosts) can recover what happened without
+    re-running the sync that failed. *reason* and *detail* are stored
+    verbatim; this function does no validation of either — the caller (which
+    knows the closed reason vocabulary) is responsible for that, exactly as
+    :func:`mark_held` takes its caller's word for what state a hold began in.
+    """
+    marker = {
+        "vault": Path(vault_root).name,
+        "reason": reason,
+        "detail": detail,
+        "at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
+    path = failed_marker_path(vault_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(marker, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return marker
+
+
+def read_failed_marker(vault_root: str | Path) -> "dict | None":
+    """Return the failed-vault marker for *vault_root*, or ``None`` if absent
+    or unreadable. Liveness is plain presence, exactly as
+    :func:`read_held_marker` documents for its own marker."""
+    path = failed_marker_path(vault_root)
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def clear_failed_marker(vault_root: str | Path) -> bool:
+    """Delete the failed-vault marker. Returns ``True`` iff one was there to delete."""
+    path = failed_marker_path(vault_root)
+    try:
+        path.unlink()
+        return True
+    except OSError:
+        return False
+
+
 def refusal_notice(vault_root: str | Path, op: str) -> str:
     """Return the stderr line for a write path refused by an in-progress resolution."""
     return (

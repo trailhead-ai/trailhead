@@ -364,27 +364,25 @@ def test_disjoint_sidecar_edits_resolve_with_no_judgment(tmp_path):
     assert "conflict" not in r.stdout.lower(), "nothing needed judgment"
 
 
-def test_sync_hands_off_to_resolve_and_resolve_finishes_the_rebase(tmp_path):
-    """The real path: sync aborts and names the remedy, resolve completes it."""
+def test_sync_hands_off_to_the_resolver_and_settles_a_settleable_conflict_itself(tmp_path):
+    """Breaking change (see CHANGELOG.md): a settleable conflict is no longer
+    aborted-and-reported with a `lore resolve` remedy — `lore sync` alone
+    settles and publishes it, with no separate `lore resolve` call needed and
+    no remedy text printed anywhere."""
     fx = _Fixture(tmp_path)
     record_id = _diverge_on_disjoint_fields(fx)
 
     synced = fx.cli(["sync"])
-    assert synced.returncode == 1
-    assert "lore resolve" in synced.stderr, "sync names the new remedy"
+    assert synced.returncode == 0, synced.stderr
+    assert "lore resolve" not in synced.stdout
+    assert "lore resolve" not in synced.stderr, "the retired remedy is never printed"
     assert "git pull --rebase" not in synced.stderr, "the manual remedy is retired"
 
-    # The remedy sync prints must be runnable verbatim — it names the vault by
-    # directory, which `lore resolve` accepts alongside the configured name.
-    assert f"lore resolve {fx.vault.name}" in synced.stderr
-
-    r = fx.cli(["resolve", "default"])
-    assert r.returncode == 0, r.stderr
     assert fx.sidecar(record_id)["status"] == "ready"
     assert fx.sidecar(record_id)["title"] == "Remote Title"
-    # The merged history reached origin.
+    # The merged history reached origin — sync's own hand-off pushed it.
     ahead = _git(fx.vault, "rev-list", "--count", f"origin/{fx.branch}..HEAD").stdout.strip()
-    assert ahead == "0", "resolve pushed the settled history"
+    assert ahead == "0", "sync pushed the settled history itself"
 
 
 def test_conflicts_at_two_rebase_steps_are_each_read_and_merged(tmp_path):
@@ -1812,3 +1810,110 @@ def test_a_crash_between_write_records_writes_and_adds_never_reaches_a_held_endi
         "the abort restored ok_id's sidecar to its pre-replay content — the "
         "interrupted overwrite left no lasting trace"
     )
+
+
+# ── the loop hands a conflicted vault to the resolver (`lore sync`) ────────
+#
+# Everything above drives `resolve.resolve_for_sweep` directly. These tests
+# drive it through `lore sync` — the actual caller wired in for this task —
+# proving both replay sites hand off rather than reporting a remedy, and
+# that a person at a terminal gets exactly the sweep's own ending.
+
+
+def _json_tail(stdout: str) -> dict:
+    """Pull the trailing ``--json`` document out of ``lore sync``'s stdout,
+    mirroring ``test_sync_multi_vault.py``'s own ``_extract_json_report``."""
+    lines = stdout.splitlines()
+    start = next(i for i, ln in enumerate(lines) if ln == "{")
+    return json.loads("\n".join(lines[start:]))
+
+
+def test_sync_reports_awaiting_person_for_a_both_sides_judgment_conflict(tmp_path):
+    """The both-sides field move `_diverge_on_status` builds is exactly the
+    judgment conflict `resolve_for_sweep` holds — reached here through `lore
+    sync` (the pull replay site), not a direct call. `holding` is retired for
+    this shape; the vault ends clean and diverged, marked held."""
+    fx = _Fixture(tmp_path)
+    record_id, local_sha, _remote_sha = _diverge_on_status(fx)
+
+    synced = fx.cli(["sync", "--json"])
+
+    assert synced.returncode != 0, "a person still has something to act on"
+    doc = _json_tail(synced.stdout)
+    entries = [v for v in doc["vaults"] if v["vault"] == "default"]
+    assert len(entries) == 1, entries
+    assert entries[0]["outcome"] == "awaiting-person"
+    assert "reason" not in entries[0], "awaiting-person is not a failure — no reason tag"
+
+    state = load_script("lore.cli.resolve_state")
+    os.environ["XDG_STATE_HOME"] = str(fx.state)
+    assert state.vault_is_held(fx.vault), "the held marker survives the CLI round-trip"
+    assert _git(fx.vault, "status", "--porcelain").stdout.strip() == "", "clean"
+    assert _git(fx.vault, "rev-parse", "HEAD").stdout.strip() == local_sha, (
+        "the local commit the sweep held is still present at its pre-sweep sha"
+    )
+    ahead = _git(fx.vault, "rev-list", "--count", f"HEAD..origin/{fx.branch}").stdout.strip()
+    assert ahead != "0", "diverged, not merely stale"
+
+
+def test_a_person_at_a_terminal_gets_the_same_ending_the_sweep_would(tmp_path, resolve):
+    """AC18, re-exercised: `lore sync` run by a person and `resolve_for_sweep`
+    run directly are the SAME code path from this task on — a person hits no
+    special case. Two independently built but equivalent fixtures must land
+    on the identically-shaped held ending."""
+    fx_person = _Fixture(tmp_path / "person")
+    _diverge_on_status(fx_person)
+    synced = fx_person.cli(["sync", "--json"])
+    person_doc = _json_tail(synced.stdout)
+    person_entry = [v for v in person_doc["vaults"] if v["vault"] == "default"][0]
+
+    fx_sweep = _Fixture(tmp_path / "sweep")
+    _diverge_on_status(fx_sweep)
+    _git(fx_sweep.vault, "fetch", "origin")
+    _use_state(fx_sweep)
+    sweep_report = resolve.resolve_for_sweep(fx_sweep.vault, "default", shared=False)
+
+    assert person_entry["outcome"] == "awaiting-person"
+    assert sweep_report["held"] is True
+    # Same on-disk shape: clean, diverged, held marker present in both cases.
+    for fx in (fx_person, fx_sweep):
+        assert _git(fx.vault, "status", "--porcelain").stdout.strip() == ""
+        assert not (fx.vault / ".git" / "rebase-merge").exists()
+    state = load_script("lore.cli.resolve_state")
+    os.environ["XDG_STATE_HOME"] = str(fx_person.state)
+    assert state.vault_is_held(fx_person.vault)
+    os.environ["XDG_STATE_HOME"] = str(fx_sweep.state)
+    assert state.vault_is_held(fx_sweep.vault)
+
+
+def test_sync_never_leaks_git_or_remote_text_on_any_new_path(tmp_path):
+    """No git or remote text reaches the reported `--json` document on the
+    settled, held, or failed path — the document's only values are the
+    closed outcome/reason vocabulary and vault names supplied by the test
+    itself, never git error text or a remote URL."""
+    forbidden = ("fatal:", ".git", "origin/", "refs/", "://")
+
+    fx_settled = _Fixture(tmp_path / "settled")
+    _diverge_on_disjoint_fields(fx_settled)
+    settled = fx_settled.cli(["sync", "--json"])
+
+    fx_held = _Fixture(tmp_path / "held")
+    _diverge_on_status(fx_held)
+    held = fx_held.cli(["sync", "--json"])
+
+    fx_failed = _Fixture(tmp_path / "failed")
+    fx_failed.create("task", "A Task")
+    fx_failed.publish()
+    fx_failed.clone_device_b()
+    (fx_failed.other / "task" / "README.md").write_text("edited on device B\n")
+    _commit(fx_failed.other, "device B edit")
+    _git(fx_failed.other, "push", "origin")
+    (fx_failed.vault / "task" / "README.md").write_text("edited on device A\n")
+    _commit(fx_failed.vault, "device A edit")
+    failed = fx_failed.cli(["sync", "--json"])
+
+    for label, result in (("settled", settled), ("held", held), ("failed", failed)):
+        doc = _json_tail(result.stdout)
+        rendered = json.dumps(doc)
+        for token in forbidden:
+            assert token not in rendered, f"{label}: git/remote text leaked into --json: {rendered!r}"

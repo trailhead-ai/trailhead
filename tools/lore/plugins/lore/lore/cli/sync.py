@@ -104,6 +104,7 @@ from .common import (
     _git,
     _resolve_all_vaults,
     _resolve_lore_state_dir,
+    _shared_vault_paths,
     _vault_has_upstream,
     _vault_head_branch,
     _vault_is_git_toplevel,
@@ -150,6 +151,39 @@ PUBLISH_HOLDING = "holding"
 #: can tell "the forge just won't sit still" apart from "something is broken".
 PUBLISH_RETRIES_EXHAUSTED = "retries-exhausted"
 
+#: A judgment conflict at either replay site (the pull's rebase or the push's
+#: moved-history replay) that the resolver could not settle without a
+#: person — `cli.resolve.resolve_for_sweep` aborted the replay whole and left
+#: the vault clean, diverged, and marked held. **Breaking change** (see
+#: `CHANGELOG.md`): before this literal existed, exactly this vault state
+#: reported `holding` and printed a `lore resolve` remedy; a caller keyed on
+#: either signal for this case now sees `awaiting-person` instead, because a
+#: resolver failure and a genuine judgment conflict are no longer the same
+#: outcome (see :data:`PUBLISH_HOLDING` and the failure-reason constants
+#: below). A caller that only checked "exit code != 0" is unaffected: both
+#: outcomes still exit non-zero.
+SYNC_AWAITING_PERSON = "awaiting-person"
+
+#: Closed failure-reason literals reported ALONGSIDE a `holding` outcome —
+#: never alone, and never in place of it (the row a person or a caller reads
+#: stays "holding" either way; see the module's own council-review note on
+#: this task). `FAILURE_POLICY` is a resolver failure: a record the graph
+#: guards refuse, a `rebase --continue` that fails, the step ceiling, or an
+#: unreadable index — `cli.resolve.ResolveError` raised from
+#: `resolve_for_sweep` itself, never a judgment conflict (that is
+#: :data:`SYNC_AWAITING_PERSON`, a DIFFERENT outcome entirely).
+#: `FAILURE_REMOTE_REJECTION` is the forge's own doing: a push rejected where
+#: the published history did NOT move (a pre-receive hook, a protected
+#: branch, a permission refusal) — no resolver is ever consulted for this
+#: one, because there is no conflict to merge. One is cleared by fixing this
+#: host's data; the other is cleared by fixing the forge's policy or the
+#: credential pushing to it — indistinguishable in the row's text, which is
+#: exactly why the tag exists as a separate, closed, git/remote-text-free
+#: fact rather than folded into prose nobody reads until it matters.
+FAILURE_POLICY = "policy-failure"
+FAILURE_REMOTE_REJECTION = "remote-rejection"
+SYNC_FAILURE_REASONS = frozenset({FAILURE_POLICY, FAILURE_REMOTE_REJECTION})
+
 #: The closed outcome vocabulary `lore sync --json` reports, one member per
 #: vault entry in :func:`render_sync_json`'s document. Three members are the
 #: exact literal values of this module's own outcome constants above
@@ -158,8 +192,10 @@ PUBLISH_RETRIES_EXHAUSTED = "retries-exhausted"
 #: directly into its `outcomes` dict, so no separate mapping step exists for
 #: them. "converged", "published", and "refused" are decided in `cmd_sync`
 #: itself (there is no dedicated constant for each — see its outcome-derivation
-#: comment) and asserted here as the literal strings a caller reads. No value
-#: outside this set is ever emitted; a caller may treat it as a closed enum.
+#: comment) and asserted here as the literal strings a caller reads.
+#: :data:`SYNC_AWAITING_PERSON` is the newest member — added, never retired
+#: anything (see `CHANGELOG.md`). No value outside this set is ever emitted;
+#: a caller may treat it as a closed enum.
 SYNC_OUTCOMES = frozenset(
     {
         SYNC_IN_PROGRESS,
@@ -168,6 +204,7 @@ SYNC_OUTCOMES = frozenset(
         PUBLISH_HOLDING,
         "refused",
         PUBLISH_RETRIES_EXHAUSTED,
+        SYNC_AWAITING_PERSON,
     }
 )
 
@@ -176,47 +213,65 @@ SYNC_OUTCOMES = frozenset(
 #: `cli/resolve.py`'s `_REPORT_SCHEMA`.
 _SYNC_REPORT_SCHEMA = (
     'The machine-readable report is: {"schema", "vaults":[{"vault","outcome"'
-    '[,"condition"]}]}. "outcome" is one of "in-progress", "converged", '
-    '"published", "holding", "refused", "retries-exhausted" — a CLOSED set; '
-    "no other value is ever emitted. "
+    '[,"condition"][,"reason"]}]}. "outcome" is one of "in-progress", '
+    '"converged", "published", "holding", "refused", "retries-exhausted", '
+    '"awaiting-person" — a CLOSED set; no other value is ever emitted. '
     '"condition" is present only when "outcome" is "refused", naming which '
     "SYNC_REFUSAL_CONDITIONS member (mid-rebase, mid-merge, detached-head, "
-    "stale-lock) was found. A vault that did not reach a determinate outcome "
-    "this run — for ANY reason, including but not limited to a missing "
-    "vault, a git error while staging, or a failed lock acquisition — has no "
-    "entry; its failure is reported on stderr and reflected only in the exit "
-    "code, exactly as without --json. A run that fails before any vault is "
-    "even selected (an unreadable config, or an unknown --vault name) prints "
-    "no document at all."
+    'stale-lock) was found. "reason" is present only when "outcome" is '
+    '"holding" AND the cause is known, naming which SYNC_FAILURE_REASONS '
+    'member ("policy-failure": the resolver itself could not settle the '
+    'vault; "remote-rejection": the forge rejected a push whose history did '
+    "not move) applied — a caller can act on the two differently even though "
+    "they render identically as prose. A vault that did not reach a "
+    "determinate outcome this run — for ANY reason, including but not "
+    "limited to a missing vault, a git error while staging, or a failed lock "
+    "acquisition — has no entry; its failure is reported on stderr and "
+    "reflected only in the exit code, exactly as without --json. A run that "
+    "fails before any vault is even selected (an unreadable config, or an "
+    "unknown --vault name) prints no document at all."
 )
 
 
-def render_sync_json(entries: list[tuple[str, str, "str | None"]]) -> dict:
+def render_sync_json(entries: list[tuple]) -> dict:
     """Render `lore sync --json`'s report payload.
 
-    *entries* is ``[(vault_name, outcome, condition_or_None), ...]``, in the
-    order the vaults were synced. *outcome* must be a member of
-    :data:`SYNC_OUTCOMES`; *condition* is non-``None`` only for a "refused"
-    outcome. Mirrors `cli/resolve.py`'s `render_json` — a plain dict, printed
-    with ``json.dumps(..., indent=2)`` by the caller.
+    *entries* is ``[(vault_name, outcome, condition_or_None[, reason_or_None]), ...]``,
+    in the order the vaults were synced — the trailing *reason* element is
+    optional so every pre-existing 3-tuple call site keeps working unchanged.
+    *outcome* must be a member of :data:`SYNC_OUTCOMES`; *condition* is
+    non-``None`` only for a "refused" outcome; *reason* is non-``None`` only
+    for a "holding" outcome and must be a member of :data:`SYNC_FAILURE_REASONS`.
+    Mirrors `cli/resolve.py`'s `render_json` — a plain dict, printed with
+    ``json.dumps(..., indent=2)`` by the caller.
 
     Raises:
-        ValueError: if *outcome* is not a member of :data:`SYNC_OUTCOMES` —
-            the schema string promises callers a closed vocabulary, and this
-            is what makes that promise a guarantee rather than a claim
-            resting on review.
+        ValueError: if *outcome* is not a member of :data:`SYNC_OUTCOMES`, or
+            *reason* is given but not a member of :data:`SYNC_FAILURE_REASONS`
+            — the schema string promises callers a closed vocabulary in both
+            cases, and this is what makes that promise a guarantee rather
+            than a claim resting on review.
     """
     vaults = []
-    for name, outcome, condition in entries:
+    for entry in entries:
+        name, outcome, condition, *rest = entry
+        reason = rest[0] if rest else None
         if outcome not in SYNC_OUTCOMES:
             raise ValueError(
                 f"outcome {outcome!r} for vault {name!r} is not in SYNC_OUTCOMES: "
                 f"{sorted(SYNC_OUTCOMES)}"
             )
-        entry: dict = {"vault": name, "outcome": outcome}
+        if reason is not None and reason not in SYNC_FAILURE_REASONS:
+            raise ValueError(
+                f"reason {reason!r} for vault {name!r} is not in SYNC_FAILURE_REASONS: "
+                f"{sorted(SYNC_FAILURE_REASONS)}"
+            )
+        entry_dict: dict = {"vault": name, "outcome": outcome}
         if condition is not None:
-            entry["condition"] = condition
-        vaults.append(entry)
+            entry_dict["condition"] = condition
+        if reason is not None:
+            entry_dict["reason"] = reason
+        vaults.append(entry_dict)
     return {"schema": _SYNC_REPORT_SCHEMA, "vaults": vaults}
 
 
@@ -308,6 +363,18 @@ PULL_FAILED = "failed"
 #: `lore sync` (which commits before it rebases) can clear it.
 PULL_DIRTY = "dirty"
 
+#: :func:`_pull_one`'s two conflict-handoff outcomes, reachable only when
+#: called with ``resolve_conflicts=True`` (the full sync's own call, never
+#: ``_pull_only_one``'s — see :func:`_hand_off_to_resolver`). ``PULL_RESOLVED``
+#: means the resolver settled the vault AND already pushed it (its own finish
+#: tail does that) — distinct from :data:`PULL_OK`, which never publishes, so
+#: the caller knows not to attempt a redundant "did we have anything to
+#: publish" push cycle of its own. ``PULL_AWAITING_PERSON`` mirrors
+#: :data:`SYNC_AWAITING_PERSON` by value — a separate name here documents
+#: which layer produced it.
+PULL_RESOLVED = "resolved"
+PULL_AWAITING_PERSON = SYNC_AWAITING_PERSON
+
 
 def _fetch_origin(vault: Path, say_err, *, pull_only: bool = False) -> bool:
     """Fetch ``origin``. Returns ``True`` on success, reporting on failure.
@@ -371,6 +438,62 @@ def _commits_behind(vault: Path) -> int:
     return int(out) if rc == 0 and out.isdigit() else 0
 
 
+def _hand_off_to_resolver(
+    vault: Path, name: str, say, say_err, *, shared: bool
+) -> tuple[str, "str | None"]:
+    """Drive a conflicted vault through the resolver instead of reporting a
+    remedy. Called only AFTER the plain rebase that hit the conflict has
+    already been aborted (both replay sites abort first, unconditionally,
+    exactly as before this task).
+
+    Returns ``(outcome, reason)``:
+
+    - :data:`PUBLISH_OK` — the resolver settled the vault field-wise and its
+      own finish tail already pushed it. ``reason`` is ``None``.
+    - :data:`SYNC_AWAITING_PERSON` — a judgment conflict left the vault held
+      for a person, clean and diverged. ``reason`` is ``None``.
+    - :data:`PUBLISH_HOLDING` — the resolver itself could not reach either
+      ending (:class:`resolve.ResolveError`: a record the graph guards
+      refuse, a ``rebase --continue`` that fails, the step ceiling, an
+      unreadable index). ``reason`` is :data:`FAILURE_POLICY`.
+
+    Never raises: a :class:`resolve.ResolveError` is caught here. If it left
+    the vault mid-rebase, that is aborted too before reporting — there is no
+    person present to hand a traceback to, so this function's whole job is to
+    always produce one of the three determinate endings above. The failure's
+    own detail is written to :func:`resolve_state.mark_failed`'s marker (a
+    named, durable location under ``state_dir("lore")/resolve``) in ADDITION
+    to the stderr line, so it survives past this one run's terminal — the
+    council review's "goes to the terminal and the host's log" promise.
+    """
+    from . import resolve as resolve_mod
+
+    try:
+        report = resolve_mod.resolve_for_sweep(vault, name, shared=shared)
+    except resolve_mod.ResolveError as exc:
+        say_err(f"error: the resolver could not settle this conflict: {exc}")
+        if _vault_mid_rebase(vault):
+            try:
+                resolve_mod._abort_replay(vault)
+            except resolve_mod.ResolveError as abort_exc:
+                say_err(f"  and the vault is still mid-rebase: {abort_exc}")
+        resolve_mod.resolve_state.mark_failed(
+            vault, reason=FAILURE_POLICY, detail=str(exc)
+        )
+        return PUBLISH_HOLDING, FAILURE_POLICY
+
+    resolve_mod.resolve_state.clear_failed_marker(vault)
+    if report["held"]:
+        say_err(
+            "notice: a judgment conflict needs a person — "
+            f"{resolve_mod.resolve_state.resolve_remedy(vault)} once ready"
+        )
+        return SYNC_AWAITING_PERSON, None
+
+    say("Settled automatically and published.")
+    return PUBLISH_OK, None
+
+
 def _pull_only_one(vault: Path, say, say_err) -> tuple[str, int]:
     """Fetch ``vault`` and integrate ONLY if that costs the working tree nothing.
 
@@ -409,13 +532,23 @@ def _pull_only_one(vault: Path, say, say_err) -> tuple[str, int]:
     return _pull_one(vault, say, say_err, already_fetched=True)
 
 
-def _pull_one(vault: Path, say, say_err, *, already_fetched: bool = False) -> tuple[str, int]:
+def _pull_one(
+    vault: Path, say, say_err, *, already_fetched: bool = False,
+    resolve_conflicts: bool = False, name: str = "", shared: bool = False,
+) -> tuple[str, int]:
     """Fetch ``vault`` and integrate origin's commits. Returns ``(state, commits_pulled)``.
 
     ``already_fetched`` skips the fetch for a caller that has already run one this
     invocation (:func:`_pull_only_one`, which must fetch BEFORE it knows whether
     the tree is clean enough to integrate) — a second fetch would be a wasted
     network round-trip against a ref database that cannot have moved since.
+
+    ``resolve_conflicts`` (with ``name``/``shared``) is the full sync's own
+    opt-in to handing a rebase conflict to :func:`_hand_off_to_resolver`
+    instead of just reporting it — see that function and
+    :data:`PULL_RESOLVED` / :data:`PULL_AWAITING_PERSON`. ``_pull_only_one``
+    never passes it: ``--pull-only`` must never stage, commit, or push, and
+    the resolver's own finish tail does all three.
 
     Quiet no-ops: no origin remote (push reports it), detached HEAD (push
     reports it), a remote that does not have this branch yet (the first push
@@ -506,15 +639,26 @@ def _pull_one(vault: Path, say, say_err, *, already_fetched: bool = False) -> tu
             # anything is reported. Verified below rather than trusted.
             _git(vault, "rebase", "--abort")
     if rc_rebase != 0:
-        say_err("error: rebase onto origin failed — pull skipped")
-        say_err(f"  rebase error: {stderr_rebase or stdout_rebase}")
-        from . import resolve_state as resolve_state_mod
+        if not resolve_conflicts:
+            say_err("error: rebase onto origin failed — pull skipped")
+            say_err(f"  rebase error: {stderr_rebase or stdout_rebase}")
+            from . import resolve_state as resolve_state_mod
 
-        remedy = resolve_state_mod.resolve_remedy(vault)
-        if _vault_mid_rebase(vault):
-            say_err(f"  the vault is STILL mid-rebase; to settle it, {remedy}")
-        else:
-            say_err(f"  to settle the conflict, {remedy}")
+            remedy = resolve_state_mod.resolve_remedy(vault)
+            if _vault_mid_rebase(vault):
+                say_err(f"  the vault is STILL mid-rebase; to settle it, {remedy}")
+            else:
+                say_err(f"  to settle the conflict, {remedy}")
+            return PULL_FAILED, 0
+
+        # Breaking change (see CHANGELOG.md): the conflict is handed to the
+        # resolver instead of reported. The plain rebase above has already
+        # been aborted unconditionally, exactly as before this task.
+        outcome, _reason = _hand_off_to_resolver(vault, name, say, say_err, shared=shared)
+        if outcome == PUBLISH_OK:
+            return PULL_RESOLVED, 0
+        if outcome == SYNC_AWAITING_PERSON:
+            return PULL_AWAITING_PERSON, 0
         return PULL_FAILED, 0
 
     say(f"Pulled {behind} commit(s) from origin.")
@@ -559,17 +703,36 @@ def _push_one(
     committed: bool,
     max_attempts: int | None = None,
     on_replay: Callable[[int], None] | None = None,
+    name: str = "",
+    shared: bool = False,
+    hand_off: bool = True,
 ) -> tuple[int, str, int]:
     """Push ``vault`` to origin, replaying onto a moved history when rejected.
 
     Returns ``(exit_code, ending, attempts_used)``. ``ending`` is
     :data:`PUBLISH_OK` on a clean push (including every existing no-op —
     nothing to push, no origin remote, detached HEAD, a genuinely unreachable
-    forge), :data:`PUBLISH_HOLDING` when the push was rejected for a reason no
-    retry clears, or :data:`PUBLISH_RETRIES_EXHAUSTED` when the published
-    history kept moving past ``max_attempts`` (default
-    :func:`resolve_publish_retry_max`). ``attempts_used`` counts only the
-    moved-history case — the one condition a retry can actually clear.
+    forge, and now also a moved-history replay the resolver settled and
+    already pushed itself), :data:`PUBLISH_HOLDING` when the push was
+    rejected for a reason no retry clears (``name``/``shared`` are unused
+    here) OR the resolver itself failed on a replay conflict
+    (:data:`FAILURE_POLICY`, recorded on the resolver's own failed-vault
+    marker — see :func:`_hand_off_to_resolver`), :data:`SYNC_AWAITING_PERSON`
+    when a replay conflict is a judgment call the resolver held for a person,
+    or :data:`PUBLISH_RETRIES_EXHAUSTED` when the published history kept
+    moving past ``max_attempts`` (default :func:`resolve_publish_retry_max`).
+    ``attempts_used`` counts only the moved-history case — the one condition
+    a retry can actually clear.
+
+    ``hand_off`` (default ``True``) gates whether a moved-history replay
+    conflict is handed to the resolver at all — the caller's explicit opt
+    OUT, not an implicit one inferred from ``name``/``shared``. ``resolve.py``'s
+    ``_finish`` passes ``hand_off=False``: its own push is ALREADY the tail of
+    a resolution the caller is driving (a person's `lore resolve`, or the
+    sweep's own `resolve_for_sweep`), and a replay conflict reached from
+    inside that tail must not start ANOTHER resolution recursively — it
+    reports the pre-existing plain ``PUBLISH_HOLDING`` ending instead, exactly
+    as this branch behaved before this task.
 
     ``on_replay``, when given, is called once per successful replay with the
     number of commits that replay's rebase integrated from origin — the same
@@ -642,6 +805,9 @@ def _push_one(
         rc_push, _, _stderr_push = _git(vault, *push_args)
         if rc_push == 0:
             say("Pushed to origin.")
+            from . import resolve_state as resolve_state_mod
+
+            resolve_state_mod.clear_failed_marker(vault)
             return 0, PUBLISH_OK, attempts_used
 
         fetch_ok, advanced = _refetch_discriminator(vault, branch)
@@ -653,6 +819,12 @@ def _push_one(
             say_err(
                 "notice: the push did not go through and the published history "
                 "did not move — needs a person; re-run `lore sync` later"
+            )
+            from . import resolve_state as resolve_state_mod
+
+            resolve_state_mod.mark_failed(
+                vault, reason=FAILURE_REMOTE_REJECTION,
+                detail="the push was rejected and the published history did not move",
             )
             return 1, PUBLISH_HOLDING, attempts_used
 
@@ -686,7 +858,24 @@ def _push_one(
                 # `_pull_one`'s own conflict-abort contract.
                 _git(vault, "rebase", "--abort")
         if rc_rebase != 0:
-            say_err("error: replaying onto the moved history failed — publish skipped")
+            if not hand_off:
+                # This push is ALREADY the tail of a resolution the caller is
+                # driving (`resolve.py`'s `_finish`, reached from a person's
+                # `lore resolve` or the sweep's own `resolve_for_sweep`) — a
+                # replay conflict reached from inside that tail must not
+                # start ANOTHER resolution recursively. Pre-task behavior,
+                # unchanged.
+                say_err("error: replaying onto the moved history failed — publish skipped")
+                return 1, PUBLISH_HOLDING, attempts_used
+            # Breaking change (see CHANGELOG.md): the conflict is handed to
+            # the resolver instead of reported. The plain rebase above has
+            # already been aborted unconditionally, exactly as before this
+            # task.
+            outcome, _reason = _hand_off_to_resolver(vault, name, say, say_err, shared=shared)
+            if outcome == PUBLISH_OK:
+                return 0, PUBLISH_OK, attempts_used
+            if outcome == SYNC_AWAITING_PERSON:
+                return 1, SYNC_AWAITING_PERSON, attempts_used
             return 1, PUBLISH_HOLDING, attempts_used
 
         if on_replay is not None and replayed:
@@ -854,9 +1043,14 @@ def _stage_and_commit_one(vault: Path, message: str, say, say_err) -> tuple[int,
 
 
 def _pull_and_push_one(
-    vault: Path, say, say_err, *, committed: bool
+    vault: Path, say, say_err, *, committed: bool, name: str = "", shared: bool = False,
 ) -> tuple[int, int, str, bool]:
     """Pull then push one vault, given whether this run just committed to it.
+
+    ``name``/``shared`` are forwarded to both replay sites'
+    :func:`_hand_off_to_resolver` call — see :data:`PULL_RESOLVED`,
+    :data:`PULL_AWAITING_PERSON`, and :data:`SYNC_AWAITING_PERSON` below for
+    the new endings this adds on top of the ones already documented here.
 
     Returns ``(exit_code, commits_pulled, ending, published)``. ``commits_pulled``
     includes commits integrated by the publish retry's replay
@@ -895,9 +1089,20 @@ def _pull_and_push_one(
     :data:`had_something_to_publish` below uses once :func:`_push_one` is
     reached.
     """
-    pull_state, pulled = _pull_one(vault, say, say_err)
+    pull_state, pulled = _pull_one(
+        vault, say, say_err, resolve_conflicts=True, name=name, shared=shared
+    )
     if pull_state == PULL_FAILED:
-        return 1, 0, PUBLISH_OK, False
+        # The resolver itself could not settle the conflict — a policy
+        # failure, not a judgment call. `_hand_off_to_resolver` already wrote
+        # the failed-vault marker `cmd_sync` reads for the `reason` tag.
+        return 1, 0, PUBLISH_HOLDING, False
+    if pull_state == PULL_AWAITING_PERSON:
+        return 1, 0, SYNC_AWAITING_PERSON, False
+    if pull_state == PULL_RESOLVED:
+        # Settled field-wise and already pushed by the resolver's own finish
+        # tail — no separate push attempt needed.
+        return 0, pulled, PUBLISH_OK, True
     if pull_state == PULL_OFFLINE:
         if committed or _vault_unpushed(vault):
             return 1, 0, PUBLISH_HOLDING, False
@@ -911,7 +1116,8 @@ def _pull_and_push_one(
         replayed_total += n
 
     rc, ending, _attempts = _push_one(
-        vault, say, say_err, committed=committed, on_replay=_record_replay
+        vault, say, say_err, committed=committed, on_replay=_record_replay,
+        name=name, shared=shared,
     )
     published = (
         had_something_to_publish
@@ -1141,6 +1347,7 @@ def cmd_sync(args) -> int:
     committed_map: dict[str, bool] = {}
     outcomes: dict[str, str] = {}
     refusal_conditions: dict[str, str] = {}
+    failure_reasons: dict[str, str] = {}
     valid_targets: list[tuple[str, Path]] = []
 
     for name, vault in targets:
@@ -1276,17 +1483,32 @@ def cmd_sync(args) -> int:
                 rc_one = 0
                 outcomes[name] = "converged"
         else:
+            shared = str(Path(vault).resolve()) in _shared_vault_paths()
             rc_one, pulled, ending, published = _pull_and_push_one(
-                Path(vault), say, say_err, committed=committed_map.get(name, False)
+                Path(vault), say, say_err, committed=committed_map.get(name, False),
+                name=name, shared=shared,
             )
-            if ending in (PUBLISH_HOLDING, PUBLISH_RETRIES_EXHAUSTED):
+            if ending == SYNC_AWAITING_PERSON:
+                # A judgment conflict the resolver held for a person — clean,
+                # diverged, distinct from a resolver or forge FAILURE (see
+                # below): there is nothing broken here for a person to fix,
+                # only a choice for them to make.
+                outcomes[name] = SYNC_AWAITING_PERSON
+            elif ending in (PUBLISH_HOLDING, PUBLISH_RETRIES_EXHAUSTED):
                 # Readable value, not a message string to parse back out —
                 # same shape as `outcomes[name] = SYNC_IN_PROGRESS` above.
                 outcomes[name] = ending
+                if ending == PUBLISH_HOLDING:
+                    from . import resolve as resolve_mod
+
+                    marker = resolve_mod.resolve_state.read_failed_marker(Path(vault))
+                    if marker is not None:
+                        failure_reasons[name] = marker["reason"]
             elif rc_one != 0:
-                # PULL_FAILED: a genuine content conflict during integration —
-                # the rebase was aborted, so the vault is clean and diverged,
-                # holding its own commit(s) for `lore resolve` to settle.
+                # Defensive fallback: every `_pull_and_push_one` path that
+                # returns `rc_one != 0` already sets `ending` to one of the
+                # three branches above. Kept for the same reason `cmd_sync`
+                # elsewhere prefers exact attribution over inference.
                 outcomes[name] = PUBLISH_HOLDING
             elif published:
                 outcomes[name] = "published"
@@ -1313,14 +1535,14 @@ def cmd_sync(args) -> int:
     if bool(getattr(args, "json", False)):
         # Printed LAST and unconditionally — an addition to the prose above,
         # never a replacement for it (see `cmd_sync`'s docstring on
-        # `--json`). Only vaults that reached one of `SYNC_OUTCOMES`'s six
+        # `--json`). Only vaults that reached one of `SYNC_OUTCOMES`'s seven
         # determinate outcomes this run get an entry; a vault that did not —
         # for any reason (never existed, not its own git toplevel, a bare git
         # error while staging, a failed lock acquisition, ...) — has no
         # outcome to report and is reflected only in the exit code and
         # stderr, exactly as without `--json`.
         entries = [
-            (name, outcomes[name], refusal_conditions.get(name))
+            (name, outcomes[name], refusal_conditions.get(name), failure_reasons.get(name))
             for name, _vault in targets
             if name in outcomes
         ]
@@ -1338,7 +1560,16 @@ def cmd_sync(args) -> int:
 def add_sync_subparser(sub) -> None:
     """Register the ``sync`` command parser."""
     p_sync = sub.add_parser(
-        "sync", help="Stage, commit, pull, and push every configured vault"
+        "sync", help="Stage, commit, pull, and push every configured vault",
+        description=(
+            "Stage, commit, pull, and push every configured vault. "
+            "Breaking change: a conflict at either replay site (the pull's "
+            "rebase, the push's moved-history replay) is now handed to the "
+            "resolver instead of being reported with a `lore resolve` "
+            "remedy and a non-zero exit. A settleable conflict now publishes "
+            "(exit 0, no remedy printed); an unsettleable one now exits "
+            "non-zero as `awaiting-person`, not `holding` — see CHANGELOG.md."
+        ),
     )
     p_sync.add_argument(
         "--message", "-m", default=None,

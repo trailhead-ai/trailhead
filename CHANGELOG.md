@@ -5,6 +5,19 @@ format described by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+- **Breaking:** `lore sync` no longer aborts a rebase conflict and reports a
+  `lore resolve` remedy with a non-zero exit at either replay site (the pull's
+  rebase, the push's moved-history replay). It now hands the conflict to the
+  resolver: a conflict every side moved a disjoint field on settles field-wise
+  and publishes automatically (`published`, exit 0, no remedy printed — a
+  script or cron wrapper keyed on the old non-zero exit for this case now sees
+  zero). A conflict that genuinely needs a person's judgment reports the new
+  `awaiting-person` outcome instead of `holding` (still exit non-zero) and
+  leaves the vault clean and diverged, marked held, for `lore resolve <vault>`
+  to settle by hand. `SYNC_OUTCOMES` and the `--json` schema gain the
+  `awaiting-person` literal; nothing is retired. A `holding` outcome now also
+  carries a `reason` (`policy-failure` or `remote-rejection`) distinguishing a
+  resolver failure from a forge rejection.
 - `scripts/bootstrap-venv` creates and converges the project `.venv` carrying
   pytest and pytest-xdist, and `.envrc` now calls it rather than carrying its
   own copy. The bootstrap has one home, so a caller that cannot rely on direnv

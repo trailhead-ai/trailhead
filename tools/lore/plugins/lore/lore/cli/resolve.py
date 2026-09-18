@@ -928,7 +928,13 @@ def _finish(vault: Path, name: str, say, say_err, *, shared: bool,
     if shared and not include_shared and not sweep:
         say("Vault is shared — skipping push (pass --include-shared to push).")
         return 0
-    rc, _ending, _attempts_used = _push_one(vault, say, say_err, committed=True)
+    # `hand_off=False`: this push is ALREADY the tail of a resolution this
+    # function itself is finishing (a person's `lore resolve`, or the sweep's
+    # own `resolve_for_sweep`) — a replay conflict reached here must not
+    # start ANOTHER resolution recursively via `_hand_off_to_resolver`.
+    rc, _ending, _attempts_used = _push_one(
+        vault, say, say_err, committed=True, hand_off=False
+    )
     return rc
 
 
