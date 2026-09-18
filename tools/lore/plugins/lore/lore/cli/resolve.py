@@ -64,6 +64,22 @@ vault is never pushed by an agent-actuated resolution unless the operator passes
 ``--include-shared``; and remote-side text from such a vault is wrapped in the
 ``<external-memory layer="shared">`` data channel before it is reported, on the
 same convention ``lore search`` applies.
+
+**A record whose sidecar will not parse is HELD, not merged.** The rule this
+guards against is written for the BOTH-sides case — remote and local sidecar
+both unreadable — but what is implemented here is the stronger, simpler
+EITHER-side rule: if either stage's sidecar fails to parse as a JSON object,
+the whole record is held for a person with no field taken, no body merged, and
+nothing written — not the side that parses, not a partial merge, not an empty
+body standing in for a missing one. It is reported as a judgment-shaped
+conflict at slot ``"sidecar"`` but carries a closed ``reason`` literal,
+``UNREADABLE_SIDECAR``, that a caller can branch on to tell it apart from an
+ordinary both-sides field move: a field conflict asks a person to choose a
+value that already exists on both sides; an unreadable sidecar asks them to
+repair a file that does not parse at all, and conflating the two would send
+them looking for a choice that is not there. Holding this one record never
+suppresses the rest of the same replay — every other conflicted record in the
+same rebase step is still merged or parked on its own terms.
 """
 from __future__ import annotations
 
@@ -127,6 +143,16 @@ class StageStatus(Enum):
 
     ABSENT = "absent"
     UNREADABLE = "unreadable"
+
+
+#: The closed reason literal a parked conflict carries when a record's sidecar
+#: could not be parsed on either side of a rebase step — distinct from an
+#: ordinary judgment slot (whose ``reason`` is absent/``None``), because the
+#: remedy differs: a field conflict asks a person to choose a value that
+#: already exists, this asks them to repair a file that does not parse at
+#: all. A caller branches on it with ``conflict.get("reason") ==
+#: UNREADABLE_SIDECAR`` rather than parsing prose.
+UNREADABLE_SIDECAR = "unreadable-sidecar"
 
 
 # ---------------------------------------------------------------------------
@@ -302,7 +328,9 @@ def _resolve_one_record(
 
     ``pending`` carries everything a later ``lore resolve take`` needs to finish
     this record: the auto-merged sidecar and the merged body (``None`` while the
-    body is itself unsettled).
+    body is itself unsettled). The one exception is a HELD record (an
+    unreadable sidecar, see :func:`_hold_unreadable_sidecar`) — there is no
+    ``take`` verb for it, so ``pending`` carries only empty placeholders.
     """
     sidecar_path = f"{record_id}.json"
     body_path = f"{record_id}.md"
@@ -319,15 +347,16 @@ def _resolve_one_record(
             # unmerged: a record without a sidecar is not a partial record.
             return _delete_record(vault, record_id, sidecar_path, body_path), []
         if isinstance(remote, StageStatus) or isinstance(local, StageStatus):
-            # One side's sidecar is not readable JSON — not absent, corrupt.
-            # Guessing which device meant to keep the record would destroy the
-            # other's work, so the resolution stops here with the vault
-            # untouched, exactly as it always has for this branch.
-            missing = "remote" if isinstance(remote, StageStatus) else "local"
-            raise ResolveError(
-                f"{sidecar_path}: the {missing} side has no readable sidecar — the "
-                "record was deleted on one device and edited on the other, or its "
-                "sidecar is not JSON. Settle this record by hand before re-running."
+            # One (or both) side's sidecar is not readable JSON — not absent,
+            # corrupt. Guessing which device meant to keep the record, or
+            # silently taking whichever side parses, would either destroy work
+            # or paper over a broken file — so the whole record is HELD for a
+            # person: no field taken, no body merged, nothing written. Unlike
+            # the old whole-vault refusal, this does not stop the rest of the
+            # replay; it only parks this one record.
+            return _hold_unreadable_sidecar(
+                vault, record_id, kind, sidecar_path, body_path,
+                remote, local, local_label, remote_label,
             )
         merged, raw_conflicts = merge_sidecars(
             None if isinstance(base, StageStatus) else base, remote, local
@@ -382,6 +411,54 @@ def _resolve_one_record(
         "body": body,
         # Slots this resolution has already been given judgment for. Empty at
         # derivation; `take` appends to it, and a re-derivation reads it back.
+        "settled": [],
+    }
+    return pending, conflicts
+
+
+def _hold_unreadable_sidecar(
+    vault: Path, record_id: str, kind: str, sidecar_path: str, body_path: str,
+    remote: dict | StageStatus, local: dict | StageStatus,
+    local_label: dict, remote_label: dict,
+) -> tuple[dict, list[dict]]:
+    """Park *record_id* whole because its sidecar will not parse on some side.
+
+    Returns ``(pending, conflicts)`` in the same shape as every other branch of
+    :func:`_resolve_one_record`, so the caller's park-or-write decision needs no
+    special case: a non-empty ``conflicts`` list is what keeps
+    :func:`_resolve_step` from ever routing this record through
+    :func:`write_record`. ``pending`` carries empty placeholders for
+    ``sidecar``/``body`` (never populated — there is no ``take`` verb for this
+    reason) purely so a caller that mishandles this record does not crash on a
+    missing key.
+    """
+    def side(stage: int, status: dict | StageStatus) -> dict:
+        # The corrupt side's raw bytes are surfaced so a person can see what to
+        # repair. The side that DOES parse reports no value: this task's
+        # widening is that a readable side is held too, not silently taken, so
+        # showing it as an ordinary value would misstate what happened.
+        if isinstance(status, StageStatus):
+            raw = _stage_text(vault, stage, sidecar_path)
+            value = None if raw is StageStatus.ABSENT else raw
+        else:
+            value = None
+        return {"value": value, "absent": False}
+
+    conflicts = [{
+        "record-id": record_id,
+        "kind": kind,
+        "slot": "sidecar",
+        "reason": UNREADABLE_SIDECAR,
+        "local": {**local_label, **side(3, local)},
+        "remote": {**remote_label, **side(2, remote)},
+    }]
+    pending = {
+        "kind": kind,
+        "sidecar-path": sidecar_path,
+        "body-path": body_path,
+        "reason": UNREADABLE_SIDECAR,
+        "sidecar": {},
+        "body": None,
         "settled": [],
     }
     return pending, conflicts
@@ -531,6 +608,11 @@ def render_json(
     ``value: null`` alone cannot say — a null is a value, and reading a deletion
     as one is how a deliberate removal gets silently discarded. An ``absent``
     side is never fenced; there is no text to fence.
+
+    Each conflict also carries ``reason``: ``None`` for an ordinary judgment
+    slot, or the closed literal ``UNREADABLE_SIDECAR`` when the record is held
+    because its sidecar would not parse — a caller branches on this field
+    rather than the (unfenced, non-closed) prose in either side's value.
     """
     def side(entry: dict, *, fence: bool) -> dict:
         value = entry.get("value")
@@ -548,6 +630,7 @@ def render_json(
                 "record_id": c["record-id"],
                 "kind": c["kind"],
                 "slot": c["slot"],
+                "reason": c.get("reason"),
                 "local": side(c["local"], fence=False),
                 "remote": side(c["remote"], fence=shared),
             }
@@ -578,6 +661,10 @@ def _render_prose(say, vault_name: str, conflicts: list[dict], files: list[dict]
     say(f"{total} conflict(s) need judgment before this vault can sync.")
     for c in conflicts:
         say(f"{c['record-id']} ({c['kind']}) — slot {c['slot']!r}")
+        reason = c.get("reason")
+        if reason == UNREADABLE_SIDECAR:
+            say(f"  held — {reason}: no part of this record was written; "
+                "repair the file by hand, then re-run resolve.")
         for side in ("local", "remote"):
             label = c[side]
             sha = (label.get("sha") or "")[:7]

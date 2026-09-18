@@ -1027,14 +1027,16 @@ def test_a_record_only_one_side_touched_still_lands_unchanged(tmp_path):
     assert (fx.vault / f"{record_b}.md").exists()
 
 
-# ── an unreadable (not absent) sidecar still refuses, exactly as before ────
+# ── an unreadable (not absent) sidecar is HELD, not a deletion, not refused ─
 
 
 def test_an_unreadable_sidecar_on_one_side_still_refuses_not_a_deletion(tmp_path):
     """A corrupt sidecar is not a deletion — treating it as one would destroy
     the other side's work on a merely-unparseable file. This split is owned by
     a sibling task; this test pins that this task's deletion branch did not
-    widen to cover it.
+    widen to cover it. The refusal itself is reversed by this task (see the
+    ``_holds_the_record`` tests below) — this test now pins only the half of
+    the old behaviour that still holds: nothing new is ever written.
     """
     fx = _Fixture(tmp_path)
     record_id = fx.create("task", "A Task")
@@ -1049,7 +1051,180 @@ def test_an_unreadable_sidecar_on_one_side_still_refuses_not_a_deletion(tmp_path
 
     r = fx.cli(["resolve", "default"])
 
-    assert r.returncode == 1
-    assert "no readable sidecar" in r.stderr
-    assert record_id in r.stderr
-    assert (fx.vault / f"{record_id}.md").exists(), "a refused resolution writes nothing new"
+    assert r.returncode == 0, r.stderr
+    assert "no readable sidecar" not in r.stderr, (
+        "the whole-vault refusal is retired — this record is held, not refused"
+    )
+    assert (fx.vault / f"{record_id}.md").exists(), "a held resolution writes nothing new"
+
+
+def test_both_sides_unreadable_sidecar_holds_the_record_nothing_written(tmp_path, resolve):
+    """Neither side's sidecar parses — the record is held whole, not partly written."""
+    fx = _Fixture(tmp_path)
+    record_id = fx.create("task", "A Task")
+    fx.publish()
+    fx.clone_device_b()
+
+    (fx.other / f"{record_id}.json").write_text("{remote not valid", encoding="utf-8")
+    fx.push_device_b("device B corrupted the sidecar")
+
+    (fx.vault / f"{record_id}.json").write_text("{local not valid", encoding="utf-8")
+    _commit(fx.vault, "device A corrupted the sidecar too")
+
+    r = fx.cli(["resolve", "default", "--json"])
+
+    assert r.returncode == 0, r.stderr
+    report = json.loads(r.stdout)
+    held = [c for c in report["conflicts"] if c["record_id"] == record_id]
+    assert len(held) == 1, "the record is parked as a held conflict"
+    assert held[0]["reason"] == resolve.UNREADABLE_SIDECAR
+
+    # Worktree bytes: still git's own conflict-marked file, untouched by resolve
+    # (it never rewrites or stages a held record's worktree content).
+    worktree_text = (fx.vault / f"{record_id}.json").read_text(encoding="utf-8")
+    assert "<<<<<<<" in worktree_text and ">>>>>>>" in worktree_text, (
+        "resolve did not write over git's own conflict markers"
+    )
+    assert (fx.vault / f"{record_id}.md").exists(), "the body is never removed either"
+
+    # Index: still genuinely unmerged — nothing was staged as resolved.
+    unmerged = _git(fx.vault, "ls-files", "-u", "--", f"{record_id}.json").stdout
+    assert unmerged.strip() != "", "the sidecar path is still conflicted in the index"
+    staged = _git(fx.vault, "show", f":0:{record_id}.json")
+    assert staged.returncode != 0, "no merged (stage 0) entry exists — nothing was resolved"
+
+
+def test_exactly_one_side_unreadable_sidecar_holds_not_a_silent_take(tmp_path, resolve):
+    """One side parses cleanly; the record is still held, not taken from that side.
+
+    This is the pair that distinguishes the implemented rule from the
+    criterion's literal (both-sides) reading: only the REMOTE side is corrupt
+    here, and the LOCAL side is an ordinary valid sidecar.
+    """
+    fx = _Fixture(tmp_path)
+    record_id = fx.create("task", "A Task")
+    fx.publish()
+    fx.clone_device_b()
+
+    (fx.other / f"{record_id}.json").write_text("{remote not valid", encoding="utf-8")
+    fx.push_device_b("device B corrupted the sidecar")
+
+    fx.cli(["record", "update", record_id, "--status", "ready"], stdin_text="")
+    _commit(fx.vault, "device A's edit is perfectly readable")
+
+    r = fx.cli(["resolve", "default", "--json"])
+
+    assert r.returncode == 0, r.stderr
+    report = json.loads(r.stdout)
+    held = [c for c in report["conflicts"] if c["record_id"] == record_id]
+    assert len(held) == 1
+    assert held[0]["reason"] == resolve.UNREADABLE_SIDECAR
+
+    staged = _git(fx.vault, "show", f":0:{record_id}.json")
+    assert staged.returncode != 0, (
+        "no merged stage exists — the readable (local) side was not silently taken"
+    )
+    unmerged = _git(fx.vault, "ls-files", "-u", "--", f"{record_id}.json").stdout
+    assert unmerged.strip() != "", "still conflicted in the index"
+
+
+def test_unparseable_reason_is_distinct_from_a_both_sides_field_move_in_one_report(
+    tmp_path, resolve
+):
+    """A held record and an ordinary judgment conflict are reported distinctly,
+    in the SAME report, so a caller can branch on which remedy each one needs.
+    """
+    fx = _Fixture(tmp_path)
+    conflict_id = fx.create("task", "Conflicted Task")
+    broken_id = fx.create("task", "Broken Task")
+    fx.publish()
+    fx.clone_device_b()
+
+    fx.cli_b(["record", "update", conflict_id, "--status", "done"], stdin_text="")
+    (fx.other / f"{broken_id}.json").write_text("{not valid", encoding="utf-8")
+    fx.push_device_b("device B: status move + corrupted sidecar")
+
+    fx.cli(["record", "update", conflict_id, "--status", "ready"], stdin_text="")
+    fx.cli(["record", "update", broken_id, "--status", "ready"], stdin_text="")
+    _commit(fx.vault, "device A edits both records")
+
+    r = fx.cli(["resolve", "default", "--json"])
+
+    assert r.returncode == 0, r.stderr
+    report = json.loads(r.stdout)
+    by_record = {c["record_id"]: c for c in report["conflicts"]}
+
+    assert by_record[conflict_id]["reason"] is None, (
+        "an ordinary both-sides field move carries no reason"
+    )
+    assert by_record[broken_id]["reason"] == resolve.UNREADABLE_SIDECAR
+    assert by_record[conflict_id]["reason"] != by_record[broken_id]["reason"]
+
+
+def test_one_unparseable_record_does_not_suppress_the_rest_of_the_replay(tmp_path):
+    """A held record parks itself only — every other record in the same
+    replay still settles, auto-merged and written with no judgment needed.
+    """
+    fx = _Fixture(tmp_path)
+    ok_id = fx.create("task", "OK Task")
+    broken_id = fx.create("task", "Broken Task")
+    fx.publish()
+    fx.clone_device_b()
+
+    fx.cli_b(["record", "update", ok_id, "--title", "Remote Title"], stdin_text="")
+    (fx.other / f"{broken_id}.json").write_text("{not valid", encoding="utf-8")
+    fx.push_device_b("device B: title move + corrupted sidecar")
+
+    fx.cli(["record", "update", ok_id, "--status", "ready"], stdin_text="")
+    fx.cli(["record", "update", broken_id, "--status", "ready"], stdin_text="")
+    _commit(fx.vault, "device A edits both records")
+
+    r = fx.cli(["resolve", "default", "--json"])
+
+    assert r.returncode == 0, r.stderr
+    report = json.loads(r.stdout)
+    held = [c for c in report["conflicts"] if c["record_id"] == broken_id]
+    assert len(held) == 1, "the broken record parks"
+    assert [c for c in report["conflicts"] if c["record_id"] == ok_id] == [], (
+        "the other record needed no judgment at all"
+    )
+
+    ok_sidecar = fx.sidecar(ok_id)
+    assert ok_sidecar["status"] == "ready", "local's slot on the other record still landed"
+    assert ok_sidecar["title"] == "Remote Title", "remote's slot on the other record still landed"
+
+    staged = _git(fx.vault, "show", f":0:{broken_id}.json")
+    assert staged.returncode != 0, "the broken record was never written or staged"
+
+
+def test_a_valid_but_policy_refused_sidecar_is_not_reported_as_unparseable(tmp_path, resolve):
+    """Control: valid JSON the graph guards refuse is a DIFFERENT state.
+
+    A depends-on cycle is valid JSON that ``write_record``'s guard evaluation
+    refuses — the policy-failure path, which still halts the whole vault
+    (``ResolveError``, exit 1) exactly as before. It must never be conflated
+    with the unparseable-sidecar hold this task adds.
+    """
+    fx = _Fixture(tmp_path)
+    record_id = fx.create("task", "A Task")
+    fx.publish()
+    fx.clone_device_b()
+
+    stem = record_id.split("/", 1)[1]
+    remote_path = fx.other / f"{record_id}.json"
+    remote_sidecar = json.loads(remote_path.read_text(encoding="utf-8"))
+    remote_sidecar["depends-on"] = [stem]  # a task that depends on itself: a cycle
+    remote_path.write_text(json.dumps(remote_sidecar, indent=2), encoding="utf-8")
+    fx.push_device_b("device B set a self-cycle depends-on directly")
+
+    r = fx.cli(["record", "update", record_id, "--title", "Local Title"], stdin_text="")
+    assert r.returncode == 0, r.stderr
+    _commit(fx.vault, "device A edit (disjoint field)")
+
+    r = fx.cli(["resolve", "default"])
+
+    assert r.returncode == 1, r.stdout
+    assert "cycle" in r.stderr
+    assert resolve.UNREADABLE_SIDECAR not in r.stderr, (
+        "a policy refusal is not reported under the unparseable-sidecar reason"
+    )
