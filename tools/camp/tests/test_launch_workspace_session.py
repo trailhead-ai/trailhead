@@ -44,10 +44,15 @@ if str(_PLUGIN_DIR) not in sys.path:
 class _FakeTmux:
     """Records every `new_session` call and answers with a fixed result."""
 
-    def __init__(self, *, returncode: int = 0, stderr: str = "") -> None:
+    def __init__(
+        self, *, returncode: int = 0, stderr: str = "", existing_binding: str | None = None
+    ) -> None:
         self._returncode = returncode
         self._stderr = stderr
+        self._existing_binding = existing_binding
         self.calls: list[dict[str, object]] = []
+        self.set_option_calls: list[dict[str, object]] = []
+        self.install_binding_calls: list[str] = []
 
     def new_session(self, name, *, cwd, env=None, timeout=None):
         self.calls.append({"name": name, "cwd": cwd, "env": env, "timeout": timeout})
@@ -57,6 +62,17 @@ class _FakeTmux:
             stdout="",
             stderr=self._stderr,
         )
+
+    def set_option(self, target, key, value, *, timeout=None):
+        self.set_option_calls.append({"target": target, "key": key, "value": value})
+        return subprocess.CompletedProcess(args=["tmux"], returncode=0, stdout="", stderr="")
+
+    def list_window_binding(self):
+        return self._existing_binding
+
+    def install_window_binding(self, true_command, *, timeout=None):
+        self.install_binding_calls.append(true_command)
+        return subprocess.CompletedProcess(args=["tmux"], returncode=0, stdout="", stderr="")
 
 
 def test_the_create_call_carries_a_budget_wide_enough_to_start_a_tmux_server(tmp_path):
@@ -238,6 +254,15 @@ class _FakeDoorTmux:
         self.new_session_calls.append({"name": name, "cwd": cwd, "env": env})
         return subprocess.CompletedProcess(args=["tmux"], returncode=0, stdout="", stderr="")
 
+    def set_option(self, target, key, value, *, timeout=None):
+        return subprocess.CompletedProcess(args=["tmux"], returncode=0, stdout="", stderr="")
+
+    def list_window_binding(self):
+        return None
+
+    def install_window_binding(self, true_command, *, timeout=None):
+        return subprocess.CompletedProcess(args=["tmux"], returncode=0, stdout="", stderr="")
+
 
 def test_a_credential_store_launch_error_during_create_folds_into_create_refused_not_a_traceback(
     tmp_path,
@@ -377,3 +402,74 @@ def test_tmux_unanswered_reason_carries_the_seams_own_words(tmp_path):
         assert probe.state is DoorState.TMUX_UNANSWERED
         assert reason in probe.reason
         assert "camp list" in probe.reason
+
+
+def test_creating_a_session_marks_it_and_installs_the_window_binding(tmp_path):
+    """AC17's create-time wiring: a CREATED session gets three session-local
+    options — @camp_workspace, @camp_group, @camp_slug — and the
+    server-global window binding is installed, varied across two distinct
+    (group, slug) pairs so this is not a fixed-string echo."""
+    from camp.launch.workspace_session import create_workspace_session
+    from camp.launch.naming import workspace_session_name
+    from camp.launch.tmux import target as tmux_target
+
+    home = tmp_path / "home"
+    home.mkdir()
+    env = {"HOME": str(home)}
+
+    ws_dir_a = tmp_path / "workspace-a"
+    ws_dir_a.mkdir()
+    fake_a = _FakeTmux()
+    create_workspace_session("trailhead", "camp-cli", ws_dir_a, env=env, tmux=fake_a)
+
+    ws_dir_b = tmp_path / "workspace-b"
+    ws_dir_b.mkdir()
+    fake_b = _FakeTmux()
+    create_workspace_session("acme", "feat-x", ws_dir_b, env=env, tmux=fake_b)
+
+    name_a = workspace_session_name("trailhead", "camp-cli")
+    options_a = {c["key"]: c["value"] for c in fake_a.set_option_calls}
+    assert options_a == {"@camp_workspace": "1", "@camp_group": "trailhead", "@camp_slug": "camp-cli"}
+    assert all(c["target"] == tmux_target(name_a) for c in fake_a.set_option_calls)
+    assert len(fake_a.install_binding_calls) == 1
+
+    name_b = workspace_session_name("acme", "feat-x")
+    options_b = {c["key"]: c["value"] for c in fake_b.set_option_calls}
+    assert options_b == {"@camp_workspace": "1", "@camp_group": "acme", "@camp_slug": "feat-x"}
+    assert all(c["target"] == tmux_target(name_b) for c in fake_b.set_option_calls)
+    assert len(fake_b.install_binding_calls) == 1
+
+    assert options_a != options_b, "must vary with the actual (group, slug), not a fixed pair"
+
+
+def test_an_already_existed_outcome_installs_no_new_options_or_binding(tmp_path):
+    """A duplicate-session race means another camp process's own create
+    already marked the session and installed the binding — this call must
+    not repeat that work against a session it never created."""
+    from camp.launch.workspace_session import create_workspace_session
+
+    home = tmp_path / "home"
+    home.mkdir()
+    ws_dir = tmp_path / "workspace"
+    ws_dir.mkdir()
+    fake = _FakeTmux(returncode=1, stderr="duplicate session: camp-trailhead-camp-cli\n")
+
+    create_workspace_session("trailhead", "camp-cli", ws_dir, env={"HOME": str(home)}, tmux=fake)
+
+    assert fake.set_option_calls == []
+    assert fake.install_binding_calls == []
+
+
+def test_a_failed_create_installs_no_options_or_binding(tmp_path):
+    from camp.launch.workspace_session import create_workspace_session
+
+    home = tmp_path / "home"
+    home.mkdir()
+    ws_dir = tmp_path / "workspace"
+    ws_dir.mkdir()
+    fake = _FakeTmux(returncode=1, stderr="error: unsafe socket directory\n")
+
+    create_workspace_session("trailhead", "camp-cli", ws_dir, env={"HOME": str(home)}, tmux=fake)
+
+    assert fake.set_option_calls == []
+    assert fake.install_binding_calls == []
