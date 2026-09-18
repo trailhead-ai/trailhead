@@ -1190,6 +1190,20 @@ def _doctor_hosts_env(
     monkeypatch.setenv("CAMP_TEST_ASDF_PRESENT", "1")
     (tmp_path / "workspace").mkdir(exist_ok=True)
     (tmp_path / "canonical").mkdir(exist_ok=True)
+    # This machine's own account row is part of every `doctor -a` report, and
+    # a caller comparing verdicts across rows needs it to be a fixed one. A
+    # live-looking credential is the only reading conclusive on every platform:
+    # an absent file means not-authenticated where the file is the real store
+    # and cannot-tell where the Keychain is (macOS), so leaving it absent makes
+    # the local row's verdict an accident of who ran the suite.
+    claude_dir = tmp_path / "home" / ".claude"
+    claude_dir.mkdir(parents=True, exist_ok=True)
+    (claude_dir / ".credentials.json").write_text(
+        json.dumps(
+            {"claudeAiOauth": {"accessToken": "sk-ant-oat01-fake", "expiresAt": 1}}
+        ),
+        encoding="utf-8",
+    )
 
 
 def _probe_answered(report: dict) -> "object":

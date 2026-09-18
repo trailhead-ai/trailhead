@@ -1183,6 +1183,16 @@ def _conversation_env(g: dict) -> dict[str, str]:
     return env
 
 
+#: The workspace root a transcript arrived recording, on the machine that sent
+#: it. Deliberately NOT under `/home`: the rewrite resolves the roots it
+#: compares, and on macOS `/home` is a synthetic firmlink onto
+#: `/System/Volumes/Data/home`, so a `/home/...` literal comes back resolved to
+#: a different string and the comparison fails for a reason that has nothing to
+#: do with the rewrite. This prefix exists on no platform, so it resolves to
+#: itself everywhere.
+SENDER_ROOT = "/sender-machine/some-other-workspace"
+
+
 def _archive_bytes(transcript: bytes, nested: dict[str, bytes] | None = None) -> bytes:
     """A tar stream shaped exactly like
     `camp.transfer.conversations.write_conversation_archive`'s output: a
@@ -1307,7 +1317,7 @@ class TestConversationRootLanding:
         assert not (Path(env["TRAILHEAD_CLAUDE_DIR"]) / "projects").exists()
 
         archive = _archive_bytes(
-            json.dumps({"cwd": "/home/sender/some-other-workspace", "type": "summary"}).encode()
+            json.dumps({"cwd": SENDER_ROOT, "type": "summary"}).encode()
             + b"\n"
         )
 
@@ -1346,7 +1356,7 @@ class TestConversationMemberSubpathLanding:
         session_id = "22222222-2222-4222-8222-222222222222"
 
         archive = _archive_bytes(
-            json.dumps({"cwd": "/home/sender/some-workspace/repo_a"}).encode() + b"\n"
+            json.dumps({"cwd": SENDER_ROOT + "/repo_a"}).encode() + b"\n"
         )
 
         receive.conversations(
@@ -1500,7 +1510,7 @@ class TestConversationNestedSubtreeRewrite:
         ws_root = _seed_workspace(g, "feat-x")
         env = _conversation_env(g)
         session_id = "77777777-7777-4777-8777-777777777777"
-        sender_root = "/home/sender/some-other-workspace"
+        sender_root = SENDER_ROOT
 
         nested_line = json.dumps({"cwd": sender_root, "type": "agent"}).encode() + b"\n"
         archive = _archive_bytes(
@@ -1537,7 +1547,7 @@ class TestConversationNestedRootOutsideWorkspaceRefused:
         ws_root = _seed_workspace(g, "feat-x")
         env = _conversation_env(g)
         session_id = "88888888-8888-4888-8888-888888888888"
-        sender_root = "/home/sender/some-other-workspace"
+        sender_root = SENDER_ROOT
 
         foreign_nested = json.dumps({"cwd": "/entirely/unrelated/root"}).encode() + b"\n"
         archive = _archive_bytes(

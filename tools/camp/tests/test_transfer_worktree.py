@@ -181,6 +181,27 @@ def _malicious_archive(member_name: str, *, symlink_to: str | None = None) -> by
     return buf.getvalue()
 
 
+def _simulate_interpreter_without_data_filter(monkeypatch) -> None:
+    """Make the running interpreter look like one that never had `data_filter`.
+
+    Removing the attribute alone is not that interpreter. From Python 3.12 the
+    stdlib's own `TarFile._get_filter_function` falls back to the `data_filter`
+    global when no filter is chosen, so deleting it leaves `tarfile` in a state
+    no real interpreter is ever in — on 3.14 the fallback raises `NameError`
+    before camp's code is reached at all. An interpreter without `data_filter`
+    also extracts fully trusted, because the filter machinery does not exist
+    there, so both halves are simulated: the attribute camp looks for is gone,
+    and extraction behaves the way it did before filters existed. What is under
+    test either way is camp's own confinement check, which is unconditional.
+    """
+    fully_trusted = tarfile.fully_trusted_filter
+    monkeypatch.setattr(
+        tarfile.TarFile, "extraction_filter", staticmethod(fully_trusted), raising=False
+    )
+    monkeypatch.delattr(tarfile, "data_filter", raising=False)
+
+
+
 class TestConfinement:
     def test_absolute_path_member_refused_and_nothing_written_outside(self, tmp_path: Path):
         from camp.transfer.worktree import ArchiveMemberEscaped, extract_archive
@@ -227,7 +248,7 @@ class TestConfinement:
         the escaping member is still refused."""
         import camp.transfer.worktree as worktree_mod
 
-        monkeypatch.delattr(worktree_mod.tarfile, "data_filter", raising=False)
+        _simulate_interpreter_without_data_filter(monkeypatch)
 
         peer_wt = tmp_path / "peer-wt"
         peer_wt.mkdir()
@@ -245,7 +266,7 @@ class TestConfinement:
         must not turn into an over-broad refusal of ordinary content."""
         import camp.transfer.worktree as worktree_mod
 
-        monkeypatch.delattr(worktree_mod.tarfile, "data_filter", raising=False)
+        _simulate_interpreter_without_data_filter(monkeypatch)
 
         archive = _archive_bytes(sender_worktree, excluded=("secrets.env", "build"))
         peer_wt = tmp_path / "peer-wt"
