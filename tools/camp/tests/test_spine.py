@@ -1278,6 +1278,29 @@ def test_help_states_the_kill_exit_code_for_a_session_that_did_not_stop(capsys) 
 
 
 # ---------------------------------------------------------------------------
+# camp window unbind — the operator-facing verb, absent from `camp help`
+# ---------------------------------------------------------------------------
+
+
+def test_help_lists_camp_window_unbind_but_not_the_internal_dispatcher(capsys) -> None:
+    """`camp window unbind` is the one documented way an operator gets
+    their window-creation key back when it misfires — it must be
+    discoverable from `camp help` the way every other canonical verb is.
+    `window-dispatch` is the internal dispatcher the key binding's
+    run-shell fires against, never typed by an operator — it follows the
+    same convention already established for the other pre-group-resolve
+    internal verbs (session-bootstrap, worktree-cleanup, transfer-receive),
+    none of which appear in this menu either."""
+    from camp.spine import cmd_help
+
+    cmd_help([])
+    text = capsys.readouterr().out
+
+    assert "camp window unbind" in text
+    assert "window-dispatch" not in text
+
+
+# ---------------------------------------------------------------------------
 # foreach's opaque payload survives spine's own --dry-run handling.
 # ---------------------------------------------------------------------------
 
