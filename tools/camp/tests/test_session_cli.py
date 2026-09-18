@@ -3211,7 +3211,20 @@ def test_camp_new_json_without_launch_succeeds(cli_env) -> None:
 
 def test_bare_camp_new_output_is_unchanged(cli_env) -> None:
     """Regression pin: stdout stays exactly the path line — the door's outcome
-    line is appended to stderr instead of perturbing it."""
+    line is appended to stderr instead of perturbing it.
+
+    Carries one INTENTIONAL new line since
+    task/the-binding-the-operator-s-ordinary-window-creation-key-opens-a-camp-composed-window:
+    `create_workspace_session` now installs the window-creation-key binding
+    on every session it CREATES and prints a one-line notice the first time
+    a given tmux server gets it (plan bullet: "print one line on first
+    install... not on every keypress" — mirroring
+    `camp.attach.prefix_warning`'s notice for the same class of surprise).
+    This test's `cli_env` starts a fresh stub-tmux table per test, so this
+    IS that server's first install; a second `camp new` against the SAME
+    stub-tmux state (not exercised here) would not repeat it — see
+    `test_launch_binding.py` / `test_window_binding_end_to_end.py` for that
+    per-server, not per-`camp new`, behaviour pinned directly."""
     result = _camp(cli_env, "new", "feat-o", "--group", "mygroup")
 
     assert result.returncode == 0, result.stderr
@@ -3221,6 +3234,7 @@ def test_bare_camp_new_output_is_unchanged(cli_env) -> None:
         "camp new: created workspace 'feat-o' — provisioning in the background\n"
         "  check provisioning: camp status feat-o\n"
         "  activates when ready, or run: camp activate feat-o\n"
+        "camp: installed a tmux key binding — prefix+c now opens a camp-composed window\n"
         "created camp-mygroup-feat-o\n"
     )
 

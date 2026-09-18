@@ -88,6 +88,19 @@ class _FakeConciergeTmux:
 
         return subprocess.CompletedProcess(args=["tmux"], returncode=0, stdout="", stderr="")
 
+    def set_option(self, target, key, value, *, timeout=None):
+        import subprocess
+
+        return subprocess.CompletedProcess(args=["tmux"], returncode=0, stdout="", stderr="")
+
+    def list_window_binding(self):
+        return None
+
+    def install_window_binding(self, true_command, *, timeout=None):
+        import subprocess
+
+        return subprocess.CompletedProcess(args=["tmux"], returncode=0, stdout="", stderr="")
+
 
 class _UnreachableConciergeTmux:
     """A `Tmux` stand-in for `camp new`'s workspace-only outcome: tmux never

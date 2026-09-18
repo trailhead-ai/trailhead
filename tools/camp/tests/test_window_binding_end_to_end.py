@@ -212,10 +212,14 @@ def test_key_dispatches_only_on_the_marked_session_never_on_a_plain_or_forged_on
 
     _sock_run(server.sock, "new-session", "-d", "-s", "plainsess", "-x", "80", "-y", "24")
 
-    forged_session = camp_session + "-forged"
+    # A name camp's OWN naming function would produce for a different,
+    # legitimate workspace — not a hand-built lookalike (a string-concat
+    # suffix is not a shape workspace_session_name ever emits) — created
+    # directly rather than through create_workspace_session, so it is real
+    # camp-pattern name that camp itself never created and never marked.
+    forged_session = workspace_session_name(server.group_name, "forged-slug")
+    assert forged_session != camp_session
     _sock_run(server.sock, "new-session", "-d", "-s", forged_session, "-x", "80", "-y", "24")
-    # Named like camp's own pattern (shares the camp session's full derived
-    # name as a prefix) but created directly — never marked.
     forged_marked = _sock_run(server.sock, "show-options", "-t", forged_session, "-v", "@camp_workspace")
     assert forged_marked.returncode != 0
 

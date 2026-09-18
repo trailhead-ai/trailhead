@@ -124,6 +124,8 @@ class _DoorTmux:
         self.has_session_calls: list[str] = []
         self.new_session_calls: list[dict[str, object]] = []
         self.switch_client_calls: list[str] = []
+        self.set_option_calls: list[dict[str, object]] = []
+        self.install_binding_calls: list[str] = []
 
     def has_session(self, name: str) -> bool | None:
         self.has_session_calls.append(name)
@@ -141,6 +143,17 @@ class _DoorTmux:
             stdout="",
             stderr=self._create_stderr,
         )
+
+    def set_option(self, target, key, value, *, timeout=None):
+        self.set_option_calls.append({"target": target, "key": key, "value": value})
+        return subprocess.CompletedProcess(args=["tmux"], returncode=0, stdout="", stderr="")
+
+    def list_window_binding(self):
+        return None
+
+    def install_window_binding(self, true_command, *, timeout=None):
+        self.install_binding_calls.append(true_command)
+        return subprocess.CompletedProcess(args=["tmux"], returncode=0, stdout="", stderr="")
 
     def switch_client(self, name: str):
         self.switch_client_calls.append(name)

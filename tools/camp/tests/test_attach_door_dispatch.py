@@ -83,12 +83,15 @@ class _FakeTTY(io.StringIO):
 
 
 class _DoorTmux:
-    """A tmux stand-in exposing exactly the three calls the door dispatch
-    and `create_workspace_session` issue: `has_session`
-    (`has_session_with_reason`), `new_session`, and `switch_client`.
-    Anything else the door path must never reach (`list_sessions`, etc.) is
-    deliberately absent, so a call that reaches it fails loudly with
-    `AttributeError` rather than degrading silently.
+    """A tmux stand-in exposing the calls the door dispatch and
+    `create_workspace_session` issue: `has_session`
+    (`has_session_with_reason`), `new_session`, `switch_client`, and —
+    since `create_workspace_session` now marks a CREATED session and
+    installs the window-creation-key binding — `set_option` and
+    `list_window_binding`/`install_window_binding`. Anything else the door
+    path must never reach (`list_sessions`, etc.) is deliberately absent,
+    so a call that reaches it fails loudly with `AttributeError` rather
+    than degrading silently.
 
     `present` is the FIRST `has_session` answer; `reprobe` is every answer
     after the first (the unrecognised-create-failure re-probe).
@@ -121,6 +124,8 @@ class _DoorTmux:
         self.has_session_calls: list[str] = []
         self.new_session_calls: list[dict[str, object]] = []
         self.switch_client_calls: list[str] = []
+        self.set_option_calls: list[dict[str, object]] = []
+        self.install_binding_calls: list[str] = []
 
     def has_session(self, name: str) -> bool | None:
         self.has_session_calls.append(name)
@@ -138,6 +143,17 @@ class _DoorTmux:
             stdout="",
             stderr=self._create_stderr,
         )
+
+    def set_option(self, target, key, value, *, timeout=None):
+        self.set_option_calls.append({"target": target, "key": key, "value": value})
+        return subprocess.CompletedProcess(args=["tmux"], returncode=0, stdout="", stderr="")
+
+    def list_window_binding(self):
+        return None
+
+    def install_window_binding(self, true_command, *, timeout=None):
+        self.install_binding_calls.append(true_command)
+        return subprocess.CompletedProcess(args=["tmux"], returncode=0, stdout="", stderr="")
 
     def switch_client(self, name: str):
         self.switch_client_calls.append(name)
