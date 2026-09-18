@@ -11,6 +11,7 @@ Test contract:
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -23,6 +24,7 @@ import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]  # trailhead root
 _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
+_CLI_CAMP = _PLUGIN_DIR / "cli" / "camp"
 
 if str(_PLUGIN_DIR) not in sys.path:
     sys.path.insert(0, str(_PLUGIN_DIR))
@@ -1371,3 +1373,78 @@ def test_the_env_dry_run_switch_still_reaches_an_opaque_verb(
     seen = _run_spine(monkeypatch, ["foreach", "echo", "hello"])
     assert seen["dry_run"] is expected
     assert seen["rest"] == ["echo", "hello"]
+
+
+# ---------------------------------------------------------------------------
+# AC32: `camp path` (spine's groupless verb, cmd_path) resolves a worktree via
+# _resolve_target's manifest walk-up / WORKSPACE_ROOT lookup — it never reads
+# the group's window record. A missing, valid, corrupt, or truncated
+# windows.json must never change its exit status or stdout.
+# ---------------------------------------------------------------------------
+
+
+class TestCampPathWindowRecordDegradation:
+    """`cmd_path` (camp/spine.py) is dispatched via `_SKIP_GROUP_RESOLVE` —
+    fully groupless, resolving purely from WORKSPACE_ROOT + slug. This pins
+    that windows.json's state (present, absent, corrupt, truncated) never
+    reaches it: exit status and stdout are identical across all four.
+    """
+
+    def _run(self, workspace_root: Path, slug: str) -> subprocess.CompletedProcess:
+        base = {**os.environ}
+        base["WORKSPACE_ROOT"] = str(workspace_root)
+        return subprocess.run(
+            [sys.executable, str(_CLI_CAMP), "path", "--name", slug],
+            capture_output=True,
+            text=True,
+            env=base,
+        )
+
+    def test_missing_valid_corrupt_and_truncated_records_answer_identically(
+        self, tmp_path: Path
+    ) -> None:
+        from ._helpers import (
+            write_corrupt_window_record,
+            write_truncated_window_record,
+            write_valid_window_record,
+        )
+
+        slug = "my-slug"
+
+        # Each state gets its own workspace_root, mirroring the shell_integration
+        # pin: a run never mutates the windows.json another run already read,
+        # and output is normalized against that root since the root itself
+        # varying is fixture plumbing, not a fact under test.
+        results = {}
+        for state in ("missing", "valid", "corrupt", "truncated"):
+            case_root = tmp_path / state
+            ws_dir = case_root / "trailhead" / ".claude" / "worktrees" / slug
+            ws_dir.mkdir(parents=True)
+            if state == "valid":
+                write_valid_window_record(ws_dir)
+            elif state == "corrupt":
+                write_corrupt_window_record(ws_dir)
+            elif state == "truncated":
+                write_truncated_window_record(ws_dir)
+            proc = self._run(case_root, slug)
+            results[state] = (
+                proc.returncode,
+                proc.stdout.replace(str(case_root), "<root>"),
+                proc.stderr.replace(str(case_root), "<root>"),
+            )
+
+        baseline_code, baseline_out, _ = results["missing"]
+        assert baseline_code == 0, f"baseline (no record) unexpectedly failed: {results['missing'][2]}"
+        for state in ("valid", "corrupt", "truncated"):
+            code, out, err = results[state]
+            assert code == baseline_code, (
+                f"camp path exit status differs for a {state} window record: "
+                f"{code} != {baseline_code} (stderr: {err!r})"
+            )
+            assert out == baseline_out, (
+                f"camp path stdout differs for a {state} window record: "
+                f"{out!r} != {baseline_out!r}"
+            )
+            assert "Traceback" not in err, (
+                f"camp path printed a raw traceback for a {state} window record: {err!r}"
+            )
