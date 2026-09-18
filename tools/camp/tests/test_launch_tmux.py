@@ -93,7 +93,10 @@ class _PrefixMatchingTmux:
             if resolved is None:
                 return _completed(returncode=1, stderr="can't find session")
             self.next_window_id += 1
-            return _completed(returncode=0, stdout=f"@{self.next_window_id}\n")
+            window_name = argv[argv.index("-n") + 1] if "-n" in argv else ""
+            return _completed(
+                returncode=0, stdout=f"@{self.next_window_id} {window_name}\n"
+            )
         return _completed(returncode=1, stderr="unhandled verb in test stand-in")
 
 
@@ -493,7 +496,7 @@ def test_new_window_argv_carries_target_cwd_and_command_with_qualified_target(
     monkeypatch.setattr(tmux_module.subprocess, "run", fake_run)
 
     tmux_module.Tmux().new_window(
-        "feat", cwd="/tmp/ws", command=["sleep", "30"]
+        "feat", cwd="/tmp/ws", window_name="my-window", command=["sleep", "30"]
     )
 
     assert calls == [
@@ -504,7 +507,9 @@ def test_new_window_argv_carries_target_cwd_and_command_with_qualified_target(
             "=feat",
             "-P",
             "-F",
-            "#{window_id}",
+            "#{window_id} #{window_name}",
+            "-n",
+            "my-window",
             "-c",
             "/tmp/ws",
             "sleep",
@@ -527,7 +532,9 @@ def test_new_window_targeting_a_strict_prefix_of_another_live_session_does_not_r
     fake = _PrefixMatchingTmux({"feat-longer": "sleep 1"})
     monkeypatch.setattr(tmux_module.subprocess, "run", fake)
 
-    result = tmux_module.Tmux().new_window("feat", cwd="/tmp/ws", command=())
+    result = tmux_module.Tmux().new_window(
+        "feat", cwd="/tmp/ws", window_name="w", command=()
+    )
 
     assert result is None, (
         "a new-window targeting a name that does not exist must not "
@@ -537,29 +544,35 @@ def test_new_window_targeting_a_strict_prefix_of_another_live_session_does_not_r
     assert len(new_window_calls) == 1
 
 
-def test_new_window_returns_the_id_tmux_reported_varying_across_two_calls(monkeypatch):
-    """The returned id is the one the stand-in tmux printed on THIS call —
-    not a fixed sentinel. Two different canned ids produce two different
-    answers."""
+def test_new_window_returns_the_id_and_name_tmux_reported_varying_across_two_calls(
+    monkeypatch,
+):
+    """The returned id AND name are the ones the stand-in tmux printed on
+    THIS call — not a fixed sentinel, and not the `window_name` argument
+    echoed back unread. Two different canned answers produce two different
+    results."""
     import camp.launch.tmux as tmux_module
 
     monkeypatch.setattr(
         tmux_module.subprocess,
         "run",
-        lambda *a, **k: _completed(returncode=0, stdout="@3\n"),
+        lambda *a, **k: _completed(returncode=0, stdout="@3 alpha\n"),
     )
-    first = tmux_module.Tmux().new_window("ws", cwd="/tmp/a", command=())
-    assert first == "@3"
+    first = tmux_module.Tmux().new_window("ws", cwd="/tmp/a", window_name="alpha", command=())
+    assert first.window_id == "@3"
+    assert first.window_name == "alpha"
 
     monkeypatch.setattr(
         tmux_module.subprocess,
         "run",
-        lambda *a, **k: _completed(returncode=0, stdout="@9\n"),
+        lambda *a, **k: _completed(returncode=0, stdout="@9 alpha (1)\n"),
     )
-    second = tmux_module.Tmux().new_window("ws", cwd="/tmp/a", command=())
-    assert second == "@9"
+    second = tmux_module.Tmux().new_window("ws", cwd="/tmp/a", window_name="alpha", command=())
+    assert second.window_id == "@9"
+    assert second.window_name == "alpha (1)"
 
-    assert first != second
+    assert first.window_id != second.window_id
+    assert first.window_name != second.window_name
 
 
 def test_new_window_non_zero_exit_returns_none_not_an_exception_and_no_id(monkeypatch):
@@ -574,7 +587,7 @@ def test_new_window_non_zero_exit_returns_none_not_an_exception_and_no_id(monkey
         lambda *a, **k: _completed(returncode=1, stderr="can't find session"),
     )
 
-    result = tmux_module.Tmux().new_window("ws", cwd="/tmp/a", command=())
+    result = tmux_module.Tmux().new_window("ws", cwd="/tmp/a", window_name="w", command=())
 
     assert result is None
 
@@ -594,7 +607,7 @@ def test_new_window_unreachable_tmux_is_distinguishable_from_an_answered_failure
 
     monkeypatch.setattr(tmux_module.subprocess, "run", _raise)
 
-    result = tmux_module.Tmux().new_window("ws", cwd="/tmp/a", command=())
+    result = tmux_module.Tmux().new_window("ws", cwd="/tmp/a", window_name="w", command=())
 
     assert result is tmux_module.UNANSWERED
     assert result is not None

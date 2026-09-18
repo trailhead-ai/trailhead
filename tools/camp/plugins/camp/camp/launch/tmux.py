@@ -105,6 +105,21 @@ class TmuxSession:
 
 
 @dataclass(frozen=True)
+class NewWindowResult:
+    """What :meth:`Tmux.new_window` reports on a successful create.
+
+    Both fields are read back from tmux on the SAME creating call — never a
+    value this seam predicted or echoed from its own arguments — so a caller
+    that records ``window_name`` is recording what tmux actually holds, not
+    what it asked tmux for. See :meth:`Tmux.new_window`'s docstring for why
+    that distinction is load-bearing.
+    """
+
+    window_id: str
+    window_name: str
+
+
+@dataclass(frozen=True)
 class SessionListing:
     """Every session tmux holds right now, as answered by
     :meth:`Tmux.list_sessions`.
@@ -251,29 +266,42 @@ class Tmux:
         name: str,
         *,
         cwd: object,
+        window_name: str,
         command: Sequence[str],
         env: Mapping[str, str] | None = None,
         timeout: float | None = None,
-    ) -> str | None | _Unanswered:
-        """Create a window in session *name*, rooted at *cwd*, running
-        *command* (empty for the default shell), and return the window id
-        tmux itself assigned.
+    ) -> NewWindowResult | None | _Unanswered:
+        """Create a window in session *name*, rooted at *cwd*, named
+        *window_name*, running *command* (empty for the default shell), and
+        return the window id AND name tmux itself assigned.
 
-        Read back on this same invocation — `-P -F '#{window_id}'` — never
-        a second `list-windows` call: verified (tmux 3.7c) that tmux prints
-        the assigned id on the creating call itself, with or without a
-        command and `-c`, so there is no create-then-read race to resolve.
-        `-t` is `=`-qualified through :func:`target`, same as every other
-        `-t` operand this seam builds — see the module docstring's
-        `=`-target property.
+        Both are read back on this same invocation — `-P -F '#{window_id}
+        #{window_name}'` — never a second `list-windows` call: verified
+        (tmux 3.7c) that tmux prints the format result on the creating call
+        itself, with or without a command and `-c`/`-n`, so there is no
+        create-then-read race to resolve. The two fields are joined by a
+        single space and parsed by splitting on the FIRST space only: a
+        tmux window id (`@7`) never itself contains a space, while a window
+        name is user-influenced text that may, so parsing anywhere but the
+        first space could truncate a name — verified against real tmux 3.7c
+        that a name holding spaces round-trips whole this way. `-t` is
+        `=`-qualified through :func:`target`, same as every other `-t`
+        operand this seam builds — see the module docstring's `=`-target
+        property.
 
-        Tri-state, matching :meth:`pane_command`'s contract: the window id
-        (`str`, tmux's raw `#{window_id}` value such as `@7`) on success;
-        `None` when tmux answered with a non-zero exit (the session did not
-        exist, say) and so created no window; :data:`UNANSWERED` when tmux
-        could not be asked at all. Folding the last two together would
-        report a hung or unreachable tmux as an ordinary create failure —
-        the one thing this seam's tri-state exists to keep apart.
+        The name is READ BACK rather than trusted from *window_name*
+        because what tmux actually assigned is the only value a caller may
+        ever again address or record — asking for a name and recording that
+        same string in parallel would let the two silently diverge the
+        moment tmux does not honor the request verbatim.
+
+        Tri-state, matching :meth:`pane_command`'s contract:
+        :class:`NewWindowResult` on success; `None` when tmux answered with
+        a non-zero exit (the session did not exist, say) and so created no
+        window; :data:`UNANSWERED` when tmux could not be asked at all.
+        Folding the last two together would report a hung or unreachable
+        tmux as an ordinary create failure — the one thing this seam's
+        tri-state exists to keep apart.
         """
         done = self._run(
             [
@@ -282,7 +310,9 @@ class Tmux:
                 target(name),
                 "-P",
                 "-F",
-                "#{window_id}",
+                "#{window_id} #{window_name}",
+                "-n",
+                window_name,
                 "-c",
                 str(cwd),
                 *command,
@@ -297,7 +327,8 @@ class Tmux:
         stdout = done.stdout
         if stdout.endswith("\n"):
             stdout = stdout[:-1]
-        return stdout
+        window_id, _, actual_name = stdout.partition(" ")
+        return NewWindowResult(window_id=window_id, window_name=actual_name)
 
     def kill_session(
         self, name: str, *, timeout: float | None = None
