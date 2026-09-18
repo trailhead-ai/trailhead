@@ -127,6 +127,54 @@ class TestRelativeCwd:
                 conversation_id="c1",
             )
 
+    def test_escaping_relative_cwd_is_rejected_at_entry_construction(self):
+        """An absolute path is one way to point `Tmux.new_window`'s -c
+        outside the workspace root a later slice joins `ws_dir / entry.cwd`
+        against — a `..`-laden relative path escapes exactly as effectively
+        and must be rejected the same way."""
+        from camp.group.window_record import WindowEntry, WindowRecordError
+
+        with pytest.raises(WindowRecordError):
+            WindowEntry(
+                window_id="@1",
+                name="a",
+                cwd="../../escape",
+                conversation_id="c1",
+            )
+
+    def test_escaping_cwd_read_back_from_a_hand_edited_record_is_corrupt(self, tmp_path):
+        """A record file is trusted input from `write_window_record`'s own
+        atomic writer, but it is also a plain JSON file an operator (or a
+        bug) can hand-edit. A `cwd` that escapes the workspace must not
+        round-trip back into a live `WindowEntry` on read."""
+        import json
+
+        from camp.group.window_record import read_window_record, window_record_path_for
+
+        path = window_record_path_for(tmp_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "windows": [
+                        {
+                            "window_id": "@1",
+                            "name": "a",
+                            "cwd": "../../escape",
+                            "conversation_id": "c1",
+                            "command_line": None,
+                        }
+                    ],
+                }
+            )
+        )
+
+        result = read_window_record(path)
+
+        assert result.status == "corrupt"
+        assert result.entries == ()
+
     def test_no_absolute_path_appears_in_the_written_file(self, tmp_path):
         from camp.group.window_record import (
             WindowEntry,

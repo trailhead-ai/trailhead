@@ -94,6 +94,12 @@ class WindowEntry:
                 f"camp: window entry cwd must be workspace-relative, got "
                 f"absolute path {self.cwd!r}"
             )
+        normalized = os.path.normpath(self.cwd)
+        if normalized == os.pardir or normalized.startswith(os.pardir + os.sep):
+            raise WindowRecordError(
+                f"camp: window entry cwd must stay inside the workspace, got "
+                f"escaping path {self.cwd!r}"
+            )
         has_conversation = self.conversation_id is not None
         has_command = self.command_line is not None
         if has_conversation == has_command:
