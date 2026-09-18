@@ -26,7 +26,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from conftest import CLI_PATH, load_script, run_cli, write_vault_config
+from conftest import CLI_PATH, load_script, make_git_vault, run_cli, write_vault_config
 
 
 # ── fixtures ───────────────────────────────────────────────────────────────
@@ -37,15 +37,7 @@ def _git(path: Path, *args: str) -> subprocess.CompletedProcess:
 
 
 def _init_vault(path: Path) -> Path:
-    path.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["git", "init", str(path)], check=True, capture_output=True)
-    for key, val in (("user.email", "t@e.st"), ("user.name", "Test"), ("commit.gpgsign", "false")):
-        _git(path, "config", key, val)
-    (path / "README.md").write_text("vault\n")
-    (path / ".gitignore").write_text("*.lock\n")
-    _git(path, "add", "-A")
-    _git(path, "commit", "-m", "init")
-    return path
+    return make_git_vault(path)
 
 
 def _strand_mid_rebase(vault: Path, tmp_path: Path) -> Path:

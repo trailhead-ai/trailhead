@@ -47,7 +47,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from conftest import write_vault_config
+from conftest import make_bare_remote, make_git_vault, write_vault_config
 
 REPO_ROOT = Path(__file__).parent.parent
 PLUGIN_ROOT = REPO_ROOT / "plugins" / "lore"
@@ -69,26 +69,11 @@ def _make_vault(path: Path, *, commit: bool = True, dirty: bool = True) -> Path:
     ``commit=False`` reproduces the never-committed vault — the state the product
     vault was actually found in (git-init'd, zero commits, records untracked).
     """
-    path.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["git", "init", str(path)], check=True, capture_output=True)
-    for key, val in (("user.email", "t@e.st"), ("user.name", "Test"), ("commit.gpgsign", "false")):
-        _git(path, "config", key, val)
-    (path / "README.md").write_text("vault\n")
-    # Mirrors what `config.installer` scaffolds into every real vault. Lore's
-    # write locks are `*.lock` sidecars living inside the vault, so a fixture
-    # without this would test a vault shape no install ever has.
-    (path / ".gitignore").write_text("*.lock\n")
-    if commit:
-        _git(path, "add", "-A")
-        _git(path, "commit", "-m", "init")
-    if dirty:
-        (path / "record.md").write_text("# a record\n")
-    return path
+    return make_git_vault(path, commit=commit, dirty=dirty)
 
 
 def _make_bare_remote(path: Path) -> Path:
-    subprocess.run(["git", "init", "--bare", str(path)], check=True, capture_output=True)
-    return path
+    return make_bare_remote(path)
 
 
 def _wire_remote(vault: Path, remote: Path, *, track: bool = True) -> None:

@@ -28,7 +28,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from conftest import load_script, write_vault_config
+from conftest import load_script, make_bare_remote, make_git_vault, write_vault_config
 
 REPO_ROOT = Path(__file__).parent.parent
 PLUGIN_ROOT = REPO_ROOT / "plugins" / "lore"
@@ -45,23 +45,13 @@ def _git(path: Path, *args: str) -> subprocess.CompletedProcess:
 
 
 def _make_vault(path: Path, *, dirty: bool = False) -> Path:
-    path.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["git", "init", str(path)], check=True, capture_output=True)
-    for key, val in (("user.email", "a@e.st"), ("user.name", "DeviceA"),
-                     ("commit.gpgsign", "false")):
-        _git(path, "config", key, val)
-    (path / "README.md").write_text("vault\n")
-    (path / ".gitignore").write_text("*.lock\n")
-    _git(path, "add", "-A")
-    _git(path, "commit", "-m", "init")
-    if dirty:
-        (path / "dirt.md").write_text("# uncommitted\n")
-    return path
+    """Device A's vault — its own identity, so commits from the two devices
+    these tests stand apart are distinguishable."""
+    return make_git_vault(path, identity=("a@e.st", "DeviceA"), dirty=dirty)
 
 
 def _make_bare_remote(path: Path) -> Path:
-    subprocess.run(["git", "init", "--bare", str(path)], check=True, capture_output=True)
-    return path
+    return make_bare_remote(path)
 
 
 def _wire_remote(vault: Path, remote: Path) -> None:

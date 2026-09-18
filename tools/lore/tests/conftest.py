@@ -1,5 +1,6 @@
 """Shared pytest fixtures and import helpers for the lore test suite."""
 
+import atexit
 import importlib.util
 import json
 import os
@@ -297,3 +298,116 @@ def load_script(name: str):
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
+
+
+# ---------------------------------------------------------------------------
+# Git-backed vault fixtures
+#
+# The sync, resolve, pull and lock suites need vaults that are real git
+# repositories, and between them build several dozen per run. Built the
+# obvious way that is six git subprocesses each — an init, three configs, an
+# add, and a commit that fsyncs — so the builders below keep one pristine
+# vault per shape and hand out copies.
+#
+# A shape is (identity, committed): the identity is baked into the commit
+# object and the commit into the history, so neither can be applied to a copy
+# after the fact. Everything else a caller varies — dirt in the worktree — is
+# a file written after the copy lands. Each distinct shape is built once per
+# process, and under xdist each worker is its own process.
+# ---------------------------------------------------------------------------
+
+_VAULT_TEMPLATES: dict[tuple[tuple[str, str], bool], Path] = {}
+_BARE_REMOTE_TEMPLATE: list[Path] = []
+
+DEFAULT_VAULT_IDENTITY = ("t@e.st", "Test")
+
+
+def _run_git(path, *args):
+    return subprocess.run(
+        ["git", "-C", str(path), *args], capture_output=True, text=True
+    )
+
+
+def _copy_git_tree(template: Path, path: Path) -> Path:
+    """Copy *template* to *path*.
+
+    A straight copy is enough here: neither shape records its own location
+    anywhere inside it. Git stores paths relative to the repository, and these
+    templates carry no remote — the one thing that would write an absolute URL
+    into `.git/config`. Callers attach their own remotes afterwards, to
+    wherever they actually want them.
+    """
+    import shutil
+
+    shutil.copytree(template, path, symlinks=True, dirs_exist_ok=True)
+    return path
+
+
+def _build_vault_template(path: Path, identity, commit: bool) -> Path:
+    """Create the vault `make_git_vault` promises, the long way, via git."""
+    path.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init", str(path)], check=True, capture_output=True)
+    email, name = identity
+    for key, val in (("user.email", email), ("user.name", name), ("commit.gpgsign", "false")):
+        _run_git(path, "config", key, val)
+    (path / "README.md").write_text("vault\n")
+    # Mirrors what `config.installer` scaffolds into every real vault. Lore's
+    # write locks are `*.lock` sidecars living inside the vault, so a fixture
+    # without this would test a vault shape no install ever has.
+    (path / ".gitignore").write_text("*.lock\n")
+    if commit:
+        _run_git(path, "add", "-A")
+        _run_git(path, "commit", "-m", "init")
+    return path
+
+
+def _vault_template(identity, commit: bool) -> Path:
+    key = (tuple(identity), commit)
+    cached = _VAULT_TEMPLATES.get(key)
+    if cached is not None:
+        return cached
+    import shutil
+    import tempfile
+
+    root = Path(tempfile.mkdtemp(prefix="lore-tests-vault-template-"))
+    atexit.register(shutil.rmtree, root, True)
+    template = _build_vault_template(root / "vault", identity, commit)
+    _VAULT_TEMPLATES[key] = template
+    return template
+
+
+def make_git_vault(
+    path: Path,
+    *,
+    identity=DEFAULT_VAULT_IDENTITY,
+    commit: bool = True,
+    dirty: bool = False,
+) -> Path:
+    """Return a git vault at *path*: README, `*.lock` ignore, fixed identity.
+
+    ``commit=False`` reproduces the never-committed vault — the state a real
+    vault was actually found in: git-init'd, zero commits, records untracked.
+    ``dirty=True`` leaves an uncommitted file in the worktree.
+
+    Copied from a per-shape template rather than built call by call. What lands
+    is a real repository with its own object store and its own history to
+    commit onto; `test_helpers_git_vault` holds that equivalence.
+    """
+    _copy_git_tree(_vault_template(identity, commit), path)
+    if dirty:
+        (path / "dirt.md").write_text("# uncommitted\n")
+    return path
+
+
+def make_bare_remote(path: Path) -> Path:
+    """Return an empty bare repository at *path*, for use as an origin."""
+    if not _BARE_REMOTE_TEMPLATE:
+        import shutil
+        import tempfile
+
+        root = Path(tempfile.mkdtemp(prefix="lore-tests-bare-template-"))
+        atexit.register(shutil.rmtree, root, True)
+        bare = root / "remote.git"
+        subprocess.run(["git", "init", "--bare", str(bare)], check=True, capture_output=True)
+        _BARE_REMOTE_TEMPLATE.append(bare)
+    return _copy_git_tree(_BARE_REMOTE_TEMPLATE[0], path)
