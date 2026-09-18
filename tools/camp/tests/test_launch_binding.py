@@ -44,11 +44,17 @@ class _FakeTmux:
     """Records every `install_window_binding` call and answers
     `list_window_binding` with whatever the test primed."""
 
-    def __init__(self, *, existing_binding: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        existing_binding: str | None = None,
+        install_result: object = _OK,
+    ) -> None:
         self._binding = existing_binding
         self.install_calls: list[str] = []
         self.reset_calls: int = 0
         self._reset_result: object = _OK
+        self._install_result: object = install_result
 
     def list_window_binding(self):
         return self._binding
@@ -56,7 +62,7 @@ class _FakeTmux:
     def install_window_binding(self, true_command, *, timeout=None):
         self.install_calls.append(true_command)
         self._binding = f"bind-key -T prefix c if-shell ... {true_command} ...\n"
-        return None
+        return self._install_result
 
     def reset_window_binding(self, *, timeout=None):
         self.reset_calls += 1
@@ -123,6 +129,36 @@ def test_the_session_id_placeholder_is_single_quoted_against_shell_expansion(cap
     command = tmux.install_calls[0]
     assert "'#{session_id}'" in command
     assert "--session-id '#{session_id}'" in command
+
+
+def test_notice_is_suppressed_when_tmux_refuses_the_first_install(capsys):
+    """The notice claims "prefix+c now opens a camp-composed window" — that
+    is only true when tmux actually accepted the bind-key call. A failed
+    install (non-zero exit) must not print the notice, even on a first
+    install."""
+    from camp.launch.binding import install_window_key_binding
+
+    tmux = _FakeTmux(install_result=_completed(returncode=1, stderr="tmux refused"))
+
+    install_window_key_binding(tmux, camp_bin="/opt/camp/cli/camp")
+
+    assert len(tmux.install_calls) == 1, "the seam call still fires"
+    err = capsys.readouterr().err
+    assert err == ""
+
+
+def test_notice_is_suppressed_when_tmux_could_not_be_asked_at_all(capsys):
+    """`install_window_binding` answers `None` when tmux could not be
+    reached at all — the same "did not answer" case must not be read as a
+    successful install either."""
+    from camp.launch.binding import install_window_key_binding
+
+    tmux = _FakeTmux(install_result=None)
+
+    install_window_key_binding(tmux, camp_bin="/opt/camp/cli/camp")
+
+    err = capsys.readouterr().err
+    assert err == ""
 
 
 def test_remove_window_key_binding_issues_the_reset_call_and_succeeds():

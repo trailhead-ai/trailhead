@@ -136,9 +136,10 @@ def install_window_key_binding(
     before = tmux.list_window_binding()
     is_first_install = before is None or marker not in before
 
-    tmux.install_window_binding(true_command)
+    result = tmux.install_window_binding(true_command)
+    installed = result is not None and result.returncode == 0
 
-    if is_first_install:
+    if is_first_install and installed:
         print(_NOTICE, file=sys.stderr)
 
 
