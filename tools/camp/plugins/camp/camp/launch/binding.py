@@ -103,11 +103,16 @@ def _dispatch_true_command(camp_bin: str) -> str:
     """The `if-shell` true-branch command string: `run-shell "<camp_bin>
     window-dispatch --session-id '#{session_id}'"`.
 
+    Built from :func:`_dispatch_marker` so the marker is a literal PREFIX of
+    this string by construction: the "already installed" check searches
+    `list-keys` output for the marker, and a marker that drifted out of this
+    command's text would report every re-install as a first install.
+
     `#{session_id}` is single-quoted WITHIN the run-shell string — see the
     module docstring's "The composed command" section for why that quoting
     is load-bearing rather than cosmetic.
     """
-    inner = f"{shlex.quote(camp_bin)} window-dispatch --session-id '#{{session_id}}'"
+    inner = f"{_dispatch_marker(camp_bin)} '#{{session_id}}'"
     return f'run-shell "{inner}"'
 
 
