@@ -1391,3 +1391,424 @@ def test_a_valid_but_policy_refused_sidecar_is_not_reported_as_unparseable(tmp_p
     assert resolve.UNREADABLE_SIDECAR not in r.stderr, (
         "a policy refusal is not reported under the unparseable-sidecar reason"
     )
+
+
+# ── the sweep's entry point: hold instead of park, no person, no CLI tail ──
+
+
+def _use_state(fx: "_Fixture") -> None:
+    """Point the in-process ``resolve_state`` reads/writes at *fx*'s state dir.
+
+    Mirrors ``_Fixture.marker()``'s own env-setting, needed here because
+    ``resolve_for_sweep`` is called directly (never through ``fx.cli``'s
+    subprocess) so nothing else sets ``XDG_STATE_HOME`` — or the committer
+    identity ``write_record``'s provenance stamping requires — for this process.
+    """
+    os.environ["XDG_STATE_HOME"] = str(fx.state)
+    os.environ["LORE_EMAIL"] = "tester@example.com"
+
+
+def test_the_held_ending_is_clean_and_diverged(tmp_path, resolve):
+    """AC31/AC35: a both-sides move holds the vault clean, not mid-rebase."""
+    fx = _Fixture(tmp_path)
+    record_id, local_sha, remote_sha = _diverge_on_status(fx)
+    _git(fx.vault, "fetch", "origin")
+    _use_state(fx)
+
+    report = resolve.resolve_for_sweep(fx.vault, "default", shared=False)
+
+    assert report["held"] is True
+    assert not (fx.vault / ".git" / "rebase-merge").exists(), "no rebase in progress"
+    assert not (fx.vault / ".git" / "rebase-apply").exists(), "no am-style rebase either"
+    assert not (fx.vault / ".git" / "MERGE_HEAD").exists(), "no merge in progress"
+    branch = _git(fx.vault, "symbolic-ref", "--short", "HEAD").stdout.strip()
+    assert branch == fx.branch, "HEAD is on the branch, not detached"
+    assert _git(fx.vault, "status", "--porcelain").stdout.strip() == "", "tree is clean"
+    assert _git(fx.vault, "rev-parse", "HEAD").stdout.strip() == local_sha, (
+        "the local commit the sweep held is still present at its pre-sweep sha"
+    )
+    ahead = _git(fx.vault, "rev-list", "--count", f"HEAD..origin/{fx.branch}").stdout.strip()
+    assert ahead != "0", "origin is genuinely ahead — diverged, not merely stale"
+
+
+def test_held_marker_names_the_vault_and_an_entered_at(tmp_path, resolve):
+    fx = _Fixture(tmp_path)
+    _diverge_on_status(fx)
+    _git(fx.vault, "fetch", "origin")
+    _use_state(fx)
+
+    report = resolve.resolve_for_sweep(fx.vault, "default", shared=False)
+
+    marker = resolve.resolve_state.read_held_marker(fx.vault)
+    assert marker is not None
+    assert marker["vault"] == fx.vault.name
+    assert marker["entered-at"], "the instant it entered the held state is recorded"
+    assert report["entered-at"] == marker["entered-at"]
+
+
+def test_the_held_local_commit_is_byte_recoverable(tmp_path, resolve):
+    """AC35: nothing local was discarded — the commit is reachable by its own sha."""
+    fx = _Fixture(tmp_path)
+    record_id, local_sha, remote_sha = _diverge_on_status(fx)
+    _git(fx.vault, "fetch", "origin")
+    _use_state(fx)
+
+    resolve.resolve_for_sweep(fx.vault, "default", shared=False)
+
+    cat = _git(fx.vault, "cat-file", "-e", f"{local_sha}^{{commit}}")
+    assert cat.returncode == 0, "the held commit is still a real, readable object"
+    show = _git(fx.vault, "show", f"{local_sha}:{record_id}.json")
+    assert show.returncode == 0
+    assert json.loads(show.stdout)["status"] == "ready", (
+        "the commit's own content, not just its sha, is byte-recoverable"
+    )
+    ancestor = _git(fx.vault, "merge-base", "--is-ancestor", local_sha, "HEAD")
+    assert ancestor.returncode == 0, (
+        "the commit is reachable from the branch tip, not merely a dangling "
+        "object a hard reset would eventually let git garbage-collect"
+    )
+
+
+def test_all_settleable_conflicts_publish_and_leave_no_held_marker(tmp_path, resolve):
+    fx = _Fixture(tmp_path)
+    _diverge_on_disjoint_fields(fx)
+    _git(fx.vault, "fetch", "origin")
+    _use_state(fx)
+
+    report = resolve.resolve_for_sweep(fx.vault, "default", shared=False)
+
+    assert report["held"] is False
+    assert resolve.resolve_state.read_held_marker(fx.vault) is None
+    ahead = _git(fx.vault, "rev-list", "--count", f"origin/{fx.branch}..HEAD").stdout.strip()
+    assert ahead == "0", "the settled history reached origin"
+
+
+def test_resweep_after_a_person_fixes_the_held_record_settles_and_clears_marker(
+    tmp_path, resolve
+):
+    fx = _Fixture(tmp_path)
+    record_id, local_sha, remote_sha = _diverge_on_status(fx)
+    _git(fx.vault, "fetch", "origin")
+    _use_state(fx)
+
+    held = resolve.resolve_for_sweep(fx.vault, "default", shared=False)
+    assert held["held"] is True
+    assert resolve.resolve_state.vault_is_held(fx.vault)
+
+    # A person fixes the held record by hand, matching the remote's value so
+    # the next replay finds no judgment left at this slot. The fix has to land
+    # in the SAME local commit the rebase replays first, not a new one on top —
+    # a later commit never gets replayed until the first one clears, and the
+    # first one alone still conflicts.
+    r = fx.cli(["record", "update", record_id, "--status", "done"], stdin_text="")
+    assert r.returncode == 0, r.stderr
+    _git(fx.vault, "add", "-A")
+    _git(fx.vault, "commit", "--amend", "--no-edit")
+    _git(fx.vault, "fetch", "origin")
+
+    resweep = resolve.resolve_for_sweep(fx.vault, "default", shared=False)
+
+    assert resweep["held"] is False
+    assert resolve.resolve_state.read_held_marker(fx.vault) is None, "the marker is cleared"
+    ahead = _git(fx.vault, "rev-list", "--count", f"origin/{fx.branch}..HEAD").stdout.strip()
+    assert ahead == "0", "the now-settled history reached origin"
+
+
+def test_resweeping_a_still_held_vault_re_derives_the_same_report(tmp_path, resolve):
+    """The settle/hold pair is the input the ending's answer varies on — re-sweep
+    a vault whose held record has NOT been fixed, and the answer is identical."""
+    fx = _Fixture(tmp_path)
+    _diverge_on_status(fx)
+    _git(fx.vault, "fetch", "origin")
+    _use_state(fx)
+
+    first = resolve.resolve_for_sweep(fx.vault, "default", shared=False)
+    second = resolve.resolve_for_sweep(fx.vault, "default", shared=False)
+
+    assert first["held"] is True and second["held"] is True
+    assert second["conflicts"] == first["conflicts"], "the same conflict re-derives identically"
+    assert second["entered-at"] == first["entered-at"], "the original wait duration survives"
+
+
+def test_a_held_vault_leaves_sibling_vaults_syncing_normally(tmp_path, resolve):
+    """AC8, re-exercised through the resolution path: one host, three vaults, one
+    of them holds — the other two settle and publish untouched."""
+    fx_a = _Fixture(tmp_path / "vault-a")
+    fx_b = _Fixture(tmp_path / "vault-b")
+    fx_c = _Fixture(tmp_path / "vault-c")
+
+    _diverge_on_disjoint_fields(fx_a)
+    _diverge_on_status(fx_b)
+    _diverge_on_disjoint_fields(fx_c)
+
+    for fx in (fx_a, fx_b, fx_c):
+        _git(fx.vault, "fetch", "origin")
+
+    _use_state(fx_a)
+    report_a = resolve.resolve_for_sweep(fx_a.vault, "vault-a", shared=False)
+    report_b = resolve.resolve_for_sweep(fx_b.vault, "vault-b", shared=False)
+    report_c = resolve.resolve_for_sweep(fx_c.vault, "vault-c", shared=False)
+
+    assert report_a["held"] is False
+    assert report_b["held"] is True
+    assert report_c["held"] is False
+    for fx in (fx_a, fx_c):
+        ahead = _git(fx.vault, "rev-list", "--count",
+                     f"origin/{fx.branch}..HEAD").stdout.strip()
+        assert ahead == "0", f"{fx.vault.name} published despite the sibling holding"
+    ahead_b = _git(fx_b.vault, "rev-list", "--count",
+                   f"origin/{fx_b.branch}..HEAD").stdout.strip()
+    assert ahead_b != "0", "the held vault stays diverged"
+
+
+def test_two_vaults_held_at_once_keep_independent_markers(tmp_path, resolve):
+    """AC8's marker half: the held marker is keyed per vault, so two vaults held
+    on the same host do not share, overwrite, or clear each other's marker.
+
+    The sibling-vault test above holds exactly one of its three vaults, so a
+    marker path that ignored its ``vault_root`` entirely would still pass it.
+    This one holds two vaults under a single state dir — the input that varies
+    is *which* vault is asked — and asserts each answer is about that vault.
+    """
+    fx_a = _Fixture(tmp_path / "vault-a")
+    fx_b = _Fixture(tmp_path / "vault-b")
+    fx_c = _Fixture(tmp_path / "vault-c")
+
+    _diverge_on_status(fx_a)
+    _diverge_on_status(fx_b)
+    _diverge_on_disjoint_fields(fx_c)
+
+    for fx in (fx_a, fx_b, fx_c):
+        _git(fx.vault, "fetch", "origin")
+
+    # One host: every vault resolves against the same state dir, so a marker
+    # path that dropped the vault key would collide here and nowhere else.
+    _use_state(fx_a)
+    report_a = resolve.resolve_for_sweep(fx_a.vault, "vault-a", shared=False)
+    report_b = resolve.resolve_for_sweep(fx_b.vault, "vault-b", shared=False)
+    report_c = resolve.resolve_for_sweep(fx_c.vault, "vault-c", shared=False)
+
+    assert report_a["held"] is True
+    assert report_b["held"] is True
+    assert report_c["held"] is False
+
+    marker_a = resolve.resolve_state.read_held_marker(fx_a.vault)
+    marker_b = resolve.resolve_state.read_held_marker(fx_b.vault)
+    assert marker_a is not None, "vault-a has its own held marker"
+    assert marker_b is not None, "vault-b has its own held marker"
+    # Every fixture's vault directory is literally named "vault", so the basename
+    # these markers record is identical across all three — which is exactly why
+    # the marker key carries a digest of the resolved path as well as the name.
+    # The distinctness that matters is therefore the path, not the recorded name.
+    assert resolve.resolve_state.held_marker_path(fx_a.vault) != \
+        resolve.resolve_state.held_marker_path(fx_b.vault), (
+            "two held vaults keyed to one marker path — the second hold "
+            "overwrites the first, and releasing either releases both"
+        )
+    assert resolve.resolve_state.read_held_marker(fx_c.vault) is None, (
+        "the settled vault has no marker, even while two siblings are held"
+    )
+
+    # Clearing one held vault must not release the other.
+    assert resolve.resolve_state.clear_held_marker(fx_a.vault) is True
+    assert resolve.resolve_state.vault_is_held(fx_a.vault) is False, "vault-a released"
+    assert resolve.resolve_state.vault_is_held(fx_b.vault) is True, (
+        "clearing vault-a's marker also released vault-b — the markers are not independent"
+    )
+
+
+def test_person_started_resolve_is_unchanged_by_the_sweep_entry_point(tmp_path):
+    """The sweep is a distinct entry point — `lore resolve <vault>` keeps parking
+    for a person, mid-rebase, exiting zero, exactly as before this task."""
+    fx = _Fixture(tmp_path)
+    _diverge_on_status(fx)
+    _git(fx.vault, "fetch", "origin")
+    rc = _git(fx.vault, "rebase", f"origin/{fx.branch}")
+    assert rc.returncode != 0
+    _git(fx.vault, "rebase", "--abort")
+
+    r = fx.cli(["resolve", "default"])
+
+    assert r.returncode == 0, r.stderr
+    assert (fx.vault / ".git" / "rebase-merge").exists(), "still mid-rebase, parked for a person"
+
+
+def test_a_shared_vault_settled_by_the_sweep_is_pushed_bypassing_the_gate(tmp_path, resolve):
+    """The `--include-shared` gate is `lore resolve`'s own tail — the sweep skips
+    it entirely, because the spec publishes shared vaults automatically. The
+    other half of this contract item (`lore resolve` still honouring the gate on
+    a shared vault) is pinned unchanged by
+    ``test_a_shared_vault_is_not_pushed_by_default`` above."""
+    fx = _Fixture(tmp_path)
+    _diverge_on_disjoint_fields(fx)
+    _git(fx.vault, "fetch", "origin")
+    _use_state(fx)
+
+    report = resolve.resolve_for_sweep(fx.vault, "team", shared=True)
+
+    assert report["held"] is False
+    ahead = _git(fx.vault, "rev-list", "--count", f"origin/{fx.branch}..HEAD").stdout.strip()
+    assert ahead == "0", "a sweep pushes a shared vault unconditionally"
+
+
+# ── crash atomicity between the abort and the held-marker write ────────────
+
+
+def test_a_kill_after_the_abort_and_before_the_marker_write_recovers_next_sweep(
+    tmp_path, resolve, monkeypatch
+):
+    """Council Critical: killed after the abort, before the marker — the vault is
+    already clean, no marker exists, and the next sweep re-derives and re-holds
+    with no data lost (only the wait's start time resets, as the council text
+    accepts: "no marker is required for correctness, only for the duration")."""
+    fx = _Fixture(tmp_path)
+    _diverge_on_status(fx)
+    _git(fx.vault, "fetch", "origin")
+    _use_state(fx)
+
+    def boom(*_a, **_kw):
+        raise RuntimeError("killed between the verified abort and the marker write")
+
+    with monkeypatch.context() as m:
+        m.setattr(resolve.resolve_state, "mark_held", boom)
+        with pytest.raises(RuntimeError):
+            resolve.resolve_for_sweep(fx.vault, "default", shared=False)
+
+    assert not (fx.vault / ".git" / "rebase-merge").exists(), "the abort itself completed"
+    assert resolve.resolve_state.read_held_marker(fx.vault) is None, (
+        "the marker write never ran"
+    )
+
+    recovered = resolve.resolve_for_sweep(fx.vault, "default", shared=False)
+
+    assert recovered["held"] is True
+    assert resolve.resolve_state.read_held_marker(fx.vault) is not None
+
+
+def test_a_kill_during_the_abort_with_a_stale_marker_recovers_by_completing_it(
+    tmp_path, resolve, monkeypatch
+):
+    """Council Critical: a vault already held from a prior cycle is re-swept —
+    a fresh rebase attempt re-conflicts and this time the abort itself is killed
+    before it runs. The next sweep must not trust the STALE marker still on disk;
+    it finds the vault mid-rebase and recovers by completing the abort."""
+    fx = _Fixture(tmp_path)
+    _diverge_on_status(fx)
+    _git(fx.vault, "fetch", "origin")
+    _use_state(fx)
+
+    first = resolve.resolve_for_sweep(fx.vault, "default", shared=False)
+    assert first["held"] is True
+    entered_at = first["entered-at"]
+
+    def boom(_vault):
+        raise RuntimeError("killed during the abort call itself, before it ran")
+
+    with monkeypatch.context() as m:
+        m.setattr(resolve, "_abort_replay", boom)
+        with pytest.raises(RuntimeError):
+            resolve.resolve_for_sweep(fx.vault, "default", shared=False)
+
+    assert (fx.vault / ".git" / "rebase-merge").exists(), "this cycle's abort never ran"
+    stale = resolve.resolve_state.read_held_marker(fx.vault)
+    assert stale is not None and stale["entered-at"] == entered_at, (
+        "the prior hold's marker is still on disk, unrelated to the new mid-rebase state"
+    )
+
+    recovered = resolve.resolve_for_sweep(fx.vault, "default", shared=False)
+
+    assert recovered["held"] is True
+    assert not (fx.vault / ".git" / "rebase-merge").exists(), "the abort was completed"
+    assert recovered["entered-at"] == entered_at, "the original wait duration survives"
+
+
+def test_a_crash_between_write_records_writes_and_adds_never_reaches_a_held_ending(
+    tmp_path, resolve, monkeypatch
+):
+    """The one residue the abort's byte-identical restore does not cover: a file
+    ``write_record`` wrote but never staged, because it writes both `.md`/`.json`
+    before adding either (`write_record`, `cli/resolve.py`). This pins that the
+    window is unreachable BEFORE a held ending is ever declared: reaching
+    `_abort_replay`/`mark_held` requires `_drive` to return, which requires every
+    `_resolve_step` call along the way to have returned (no exception) — and a
+    step only returns after every settled record's `write_record` call has
+    already staged both files (it raises otherwise). A crash inside that window
+    kills the run before the held ending is ever reached; the vault is left
+    mid-rebase with an untracked residue, and the NEXT sweep re-derives the SAME
+    conflicted step deterministically, overwriting and this time staging the
+    residue — before it can ever reach the held ending again."""
+    fx = _Fixture(tmp_path)
+    # Two records in ONE step: "aaa-first" settles with no judgment (the record
+    # whose write is interrupted), "bbb-second" is a genuine both-sides move that
+    # holds the vault. Sorted path order puts aaa-first first, matching
+    # `_group_by_record`'s dict-insertion order over `_conflicted_paths`'s
+    # lexically-sorted `git ls-files -u` output.
+    ok_id = fx.create("task", "AAA First")
+    held_id = fx.create("task", "BBB Second")
+    fx.publish()
+    fx.clone_device_b()
+
+    fx.cli_b(["record", "update", ok_id, "--title", "Remote Title"], stdin_text="")
+    fx.cli_b(["record", "update", held_id, "--status", "done"], stdin_text="")
+    fx.push_device_b()
+
+    fx.cli(["record", "update", ok_id, "--status", "ready"], stdin_text="")
+    fx.cli(["record", "update", held_id, "--status", "ready"], stdin_text="")
+    _commit(fx.vault, "device A edit")
+    _git(fx.vault, "fetch", "origin")
+    _use_state(fx)
+
+    # Let the REAL `write_record` run — it really does write both `.md`/`.json`
+    # to disk (`store_mod.write_temp_then_rename`) before its own loop tries to
+    # `git add` either — then intercept only the FIRST `add` of `ok_id`'s files,
+    # so the crash lands exactly in the writes-done/adds-not-yet-run window the
+    # residue describes, with real overwritten bytes on disk to prove it.
+    real_git = resolve._git
+    first_body_path = f"{ok_id}.md"
+
+    def flaky_git(vault, *args):
+        if args[:1] == ("add",) and args[-1] == first_body_path:
+            raise RuntimeError("process died after the writes, before either add")
+        return real_git(vault, *args)
+
+    # Read the SIDECAR, not the body: `ok_id`'s divergence is on `title`, a
+    # sidecar-only field, so the body text never changes — but the sidecar's
+    # volatile `updated-at` is re-stamped on every `write_record` call and
+    # detects the real, on-disk overwrite unambiguously.
+    ok_sidecar_path = fx.vault / f"{ok_id}.json"
+    before_write = ok_sidecar_path.read_text(encoding="utf-8")
+
+    with monkeypatch.context() as m:
+        m.setattr(resolve, "_git", flaky_git)
+        with pytest.raises(RuntimeError):
+            resolve.resolve_for_sweep(fx.vault, "default", shared=False)
+
+    assert (fx.vault / ".git" / "rebase-merge").exists(), (
+        "the held ending was never reached — the crash happened first"
+    )
+    assert resolve.resolve_state.read_held_marker(fx.vault) is None, (
+        "no held ending was ever declared over the residue"
+    )
+    after_write = ok_sidecar_path.read_text(encoding="utf-8")
+    assert after_write != before_write, (
+        "the real write DID land on disk before the crash — the residue is genuine, "
+        "not merely simulated"
+    )
+    unmerged = _git(fx.vault, "diff", "--name-only", "--diff-filter=U").stdout
+    assert f"{ok_id}.json" in unmerged, "git's index still calls this path unresolved"
+
+    # Retry for real: the SAME step re-derives deterministically, correctly
+    # staging `ok_id` this time, before the genuine conflict on `held_id` is
+    # ever reached and the vault is aborted-and-held.
+    report = resolve.resolve_for_sweep(fx.vault, "default", shared=False)
+
+    assert report["held"] is True
+    assert _git(fx.vault, "status", "--porcelain").stdout.strip() == "", (
+        "the residue was absorbed by the redrive — nothing untracked or unmerged "
+        "survives into the ending we call clean"
+    )
+    assert not (fx.vault / ".git" / "rebase-merge").exists()
+    assert ok_sidecar_path.read_text(encoding="utf-8") == before_write, (
+        "the abort restored ok_id's sidecar to its pre-replay content — the "
+        "interrupted overwrite left no lasting trace"
+    )

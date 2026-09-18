@@ -89,6 +89,58 @@ repair a file that does not parse at all, and conflating the two would send
 them looking for a choice that is not there. Holding this one record never
 suppresses the rest of the same replay — every other conflicted record in the
 same rebase step is still merged or parked on its own terms.
+
+**The sweep's entry point (`resolve_for_sweep`) holds instead of parking.** A
+sweep runs with nobody present to answer `lore resolve take`, so a judgment
+conflict cannot sit parked mid-rebase the way it does for a person — that would
+leave the vault mid-rebase indefinitely and fence every other write path behind
+a resolution nobody is running. Instead the whole replay is aborted (`git
+rebase --abort`), which the resolved unknown behind this task confirmed restores
+the vault byte-identically for everything that reached the git index — so the
+next sweep re-derives the identical conflicts rather than losing any of them.
+This is a distinct entry point from `cmd_resolve`, not a branch inside it: it
+skips `lore resolve`'s own vault selection and fetch (the caller already
+fetched), its emitters, and its shared-vault push gate — a sweep publishes a
+settled shared vault unconditionally, because there is no operator present to
+pass `--include-shared`.
+
+**Crash order between the abort and the held marker: abort first, verified,
+then the marker.** This mirrors `_abort`'s own ordering for the resolution
+session marker (clear it only after a verified abort) and is chosen so the held
+marker is never the source of truth about whether the hold happened — git's own
+rebase state always is. A process killed after a successful abort but before the
+marker write leaves a clean, diverged vault with no marker; the next sweep sees
+no marker and no mid-rebase state, starts fresh, re-derives the identical
+conflicts, and re-holds — the marker is not required for correctness, only for
+reporting how long the wait has lasted in the meantime (which resets). A held
+vault's marker is never cleared until the vault genuinely settles, so a LATER
+re-sweep of an already-held vault starts a fresh rebase attempt against the same
+unresolved conflict with that stale marker still on disk; a process killed
+during THAT abort call — before it runs at all — leaves the vault mid-rebase
+again with the stale marker still present. The recovery is the same control flow
+in both directions: `resolve_for_sweep` never branches on whether a held marker
+exists, only on git's own mid-rebase state, so it always resumes driving from
+wherever the tree actually is rather than trusting a marker that might describe
+a hold the git state no longer matches.
+
+**The one residue the abort does not clean: an untracked write.** `write_record`
+writes a settled record's `.md` and `.json` to disk before staging either
+(below), so a crash in that exact window leaves an untracked file `git rebase
+--abort` cannot revert (abort resets tracked/staged state; it never touches
+untracked worktree content). This window is unreachable BEFORE a held ending is
+ever declared, though: reaching this module's abort-and-hold requires `_drive`
+to return, which requires every `_resolve_step` call along the way to have
+returned without raising — and a step only returns once every settled record's
+`write_record` call has *already* staged both its files (it raises instead of
+returning if the `git add` fails). A crash inside `write_record`'s writes-then-
+adds window therefore always aborts the whole Python call before the held
+ending is ever reached; the run just dies with the vault left mid-rebase, one
+record's files written but unstaged. The NEXT sweep resumes from git's own
+still-conflicted index for that same step, re-derives the identical merge for
+that record (the base/remote/local stages it reads are untouched by the crash),
+and overwrites-and-stages it correctly — closing the window before a held
+ending can ever be declared over it. Pinned by fault injection in the test
+suite rather than by this reasoning alone.
 """
 from __future__ import annotations
 
@@ -853,8 +905,15 @@ def _resolve_step(
 
 
 def _finish(vault: Path, name: str, say, say_err, *, shared: bool,
-            include_shared: bool) -> int:
-    """Reindex and push a vault whose rebase completed. Returns an exit code."""
+            include_shared: bool, sweep: bool = False) -> int:
+    """Reindex and push a vault whose rebase completed. Returns an exit code.
+
+    ``sweep`` bypasses the shared-vault push gate outright — it is the sweep
+    entry point's own escape from the gate, distinct from ``include_shared``
+    (the operator's `--include-shared` flag on `lore resolve`), because a sweep
+    has no operator present to have passed that flag. Never set alongside a
+    person-started call.
+    """
     resolve_state.clear_marker(vault)
     say("Rebase complete.")
 
@@ -866,7 +925,7 @@ def _finish(vault: Path, name: str, say, say_err, *, shared: bool,
     else:
         say(f"Reindexed {count} record(s).")
 
-    if shared and not include_shared:
+    if shared and not include_shared and not sweep:
         say("Vault is shared — skipping push (pass --include-shared to push).")
         return 0
     rc, _ending, _attempts_used = _push_one(vault, say, say_err, committed=True)
@@ -1065,6 +1124,81 @@ def _abort(vault: Path, name: str, say, say_err) -> int:
 
     say("Resolution aborted — the vault is back at its pre-pull state.")
     return 0
+
+
+# ---------------------------------------------------------------------------
+# the sweep's entry point — hold instead of park, no person, no CLI tail
+# ---------------------------------------------------------------------------
+
+
+def _abort_replay(vault: Path) -> None:
+    """Abort *vault*'s mid-rebase replay whole. Raises :class:`ResolveError` on failure.
+
+    Isolated to its own function — distinct from :func:`_abort`, which also
+    clears the resolution-session marker and reports to a person — so a caller
+    (a test injecting a crash at this exact seam) can replace just the git call
+    without touching the driving that got the vault here.
+    """
+    rc, out, err = _git(vault, "rebase", "--abort")
+    if rc != 0 or _vault_mid_rebase(vault):
+        raise ResolveError(f"could not abort the rebase to hold it: {err or out}")
+
+
+def resolve_for_sweep(vault: Path, name: str, *, shared: bool) -> dict:
+    """Settle *vault* with nobody present and return its outcome report.
+
+    The counterpart to :func:`cmd_resolve` for the sweep, not a mode of it — see
+    the module docstring's "sweep's entry point" section for why parking is
+    replaced by a whole abort-and-hold, why the shared-vault push gate does not
+    apply here, and the crash-atomicity ordering between the abort and the held
+    marker.
+
+    Assumes the caller already fetched ``origin`` (a sweep's own pull phase
+    does this) and that nothing else is driving this vault's rebase right now —
+    a live person-started `lore resolve` session is the caller's concern to
+    avoid, not this function's, because :func:`_vault_mid_rebase` cannot tell
+    the two apart from git state alone.
+
+    Returns the same report shape :func:`render_json` produces, plus ``held``
+    (bool) and, only when held, ``entered-at``. Raises :class:`ResolveError` if
+    the rebase cannot be started, driven, or aborted — there is no person here
+    to hand a printed remedy to, so the caller decides what to do with it.
+
+    Never branches on whether a held marker already exists: the only authority
+    consulted for what to do next is git's own mid-rebase state, so a re-sweep
+    always resumes from wherever the tree actually is — the property the crash-
+    atomicity docstring section above depends on.
+    """
+    with locking.vault_write_lock(vault):
+        if not _vault_mid_rebase(vault):
+            started = _start_rebase(vault, lambda _msg: None)
+            if started is None:
+                resolve_state.clear_held_marker(vault)
+                report = render_json(name, [], [], shared=shared)
+                report["held"] = False
+                return report
+            if started is False:
+                raise ResolveError(f"could not start the rebase for {name}")
+        conflicts, files, _pending = _drive(vault)
+
+        if conflicts or files:
+            _abort_replay(vault)
+            marker = resolve_state.mark_held(vault)
+            report = render_json(name, conflicts, files, shared=shared)
+            report["held"] = True
+            report["entered-at"] = marker["entered-at"]
+            return report
+
+    resolve_state.clear_held_marker(vault)
+    say, say_err = _make_emitters(name, len(name) + 1)
+    rc_finish = _finish(vault, name, say, say_err, shared=shared,
+                        include_shared=False, sweep=True)
+    if rc_finish != 0:
+        raise ResolveError(f"could not finish settling {name}")
+
+    report = render_json(name, [], [], shared=shared)
+    report["held"] = False
+    return report
 
 
 # ---------------------------------------------------------------------------
