@@ -47,6 +47,7 @@ from typing import Callable, Mapping, Sequence
 from ..group.manifest import workspace_dir as _real_workspace_dir
 from ..group.resolve import GroupConfinementError, GroupResolutionError, validate_workspace_slug
 from ..group.resolve import resolve_group_override
+from ..group.window_record import WindowRecordError
 from ..launch.window_compose import WindowComposeError, WindowRefused, compose_window as _real_compose_window
 
 #: The window name every camp-dispatched window is created under. Not yet
@@ -126,6 +127,15 @@ def dispatch_window(
         )
     except (WindowRefused, WindowComposeError) as exc:
         _refuse(str(exc))
+    except (WindowRecordError, OSError) as exc:
+        # compose_window creates the tmux window BEFORE it writes the
+        # record, so reaching here means the window genuinely exists — say
+        # something true about that state rather than reusing the
+        # pre-creation refusal wording.
+        _refuse(
+            f"camp: window created but could not be recorded — {exc}; "
+            "camp's window record for this workspace may now be out of date"
+        )
 
 
 def _cmd_window_dispatch_cli(args: list[str]) -> None:

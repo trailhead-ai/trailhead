@@ -195,6 +195,59 @@ def test_compose_windows_own_refusal_message_reaches_display_message_verbatim(tm
     assert message == "camp: cannot open window — directory /tmp/x is outside"
 
 
+def test_a_record_write_failure_after_tmux_created_the_window_does_not_escape(tmp_path):
+    """`compose_window` creates the tmux window BEFORE it writes the
+    record (`window_compose.py`'s own contract) — a `WindowRecordError` or
+    `OSError` out of that write must not propagate past `dispatch_window`
+    the way `WindowRefused`/`WindowComposeError` already don't; the window
+    genuinely exists by then, so the refusal must say something true about
+    that, not just repeat the same wording used when nothing was created."""
+    from camp.group.window_record import WindowRecordError
+    from camp.cli.window_dispatch import dispatch_window
+
+    def _compose_then_fail_to_record(group, slug, ws_dir, *, cwd, window_name, tmux=None, env=None, command=None):
+        raise WindowRecordError("camp: cannot read window record at /ws/windows.json: disk full")
+
+    tmux = _FakeTmux(options={"@camp_group": "testgroup", "@camp_slug": "feat-x"})
+
+    dispatch_window(
+        "$3",
+        tmux=tmux,
+        all_configs=[GROUP],
+        workspace_dir_fn=lambda g, s, env=None: tmp_path / "ws",
+        compose=_compose_then_fail_to_record,
+    )
+
+    assert len(tmux.display_messages) == 1
+    target, message = tmux.display_messages[0]
+    assert target == "$3"
+    assert "camp:" in message
+    # The refusal wording used for a pre-tmux refusal ("cannot open window")
+    # is not true here — the window WAS created; the message must not
+    # falsely claim otherwise.
+    assert "cannot open window" not in message
+
+
+def test_an_oserror_from_the_record_write_also_does_not_escape(tmp_path):
+    from camp.cli.window_dispatch import dispatch_window
+
+    def _compose_then_oserror(group, slug, ws_dir, *, cwd, window_name, tmux=None, env=None, command=None):
+        raise OSError("no space left on device")
+
+    tmux = _FakeTmux(options={"@camp_group": "testgroup", "@camp_slug": "feat-x"})
+
+    dispatch_window(
+        "$3",
+        tmux=tmux,
+        all_configs=[GROUP],
+        workspace_dir_fn=lambda g, s, env=None: tmp_path / "ws",
+        compose=_compose_then_oserror,
+    )
+
+    assert len(tmux.display_messages) == 1
+    assert "camp:" in tmux.display_messages[0][1]
+
+
 def test_camp_window_dispatch_verb_reaches_the_real_handler_end_to_end(tmp_path):
     """Proves the `dispatch.py` wiring, not just `dispatch_window`'s own
     logic: invokes the REAL `cli/camp` binary with `window-dispatch
