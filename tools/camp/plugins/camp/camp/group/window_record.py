@@ -59,6 +59,14 @@ from .manifest import reconcile_lock
 
 WINDOW_RECORD_FILENAME = "windows.json"
 
+#: The one schema version `write_window_record` ever stamps and
+#: `_read_window_record_unlocked` ever accepts. A record carrying any other
+#: value (or none at all) is a version this camp cannot safely interpret —
+#: three later slices read and extend this format, so silently reading an
+#: unrecognised version as if it were this one is the exact fail-open shape
+#: `WindowRecordRead.status` exists to avoid.
+_SCHEMA_VERSION = 1
+
 
 class WindowRecordError(Exception):
     """Raised for an invalid window entry, or internally for a malformed
@@ -160,7 +168,7 @@ def write_window_record(path: Path, entries: list[WindowEntry]) -> None:
     """
     path = Path(path)
     data = {
-        "schema_version": 1,
+        "schema_version": _SCHEMA_VERSION,
         "windows": [e.to_dict() for e in entries],
     }
 
@@ -209,6 +217,12 @@ def _read_window_record_unlocked(path: Path) -> list[WindowEntry]:
             f"camp: window record at {path} is not the expected shape"
         )
 
+    if data.get("schema_version") != _SCHEMA_VERSION:
+        raise WindowRecordError(
+            f"camp: window record at {path} has unrecognised schema_version "
+            f"{data.get('schema_version')!r} (expected {_SCHEMA_VERSION!r})"
+        )
+
     try:
         return [WindowEntry.from_dict(item) for item in data["windows"]]
     except (KeyError, TypeError, WindowRecordError) as e:
@@ -226,6 +240,17 @@ def read_window_record(path: Path) -> WindowRecordRead:
     """
     path = Path(path)
     if not path.is_file():
+        # A path that is present but NOT a regular file — a directory, or a
+        # dangling symlink (present via lstat, absent via the stat this
+        # `exists()` follows) — is a genuinely unknown state, not the
+        # permissive "no session here yet" one: camp cannot tell what is
+        # there, so it must not inherit "missing"'s fail-open answer.
+        if path.exists() or path.is_symlink():
+            return WindowRecordRead(
+                status="corrupt",
+                entries=(),
+                error=f"camp: window record at {path} exists but is not a regular file",
+            )
         return WindowRecordRead(status="missing", entries=())
     try:
         entries = _read_window_record_unlocked(path)

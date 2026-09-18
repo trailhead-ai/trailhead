@@ -554,3 +554,116 @@ class TestMissingVsCorrupt:
         assert truncated.status == "corrupt"
         assert truncated.status != empty.status
         assert truncated.entries == ()
+
+
+# ---------------------------------------------------------------------------
+# 9. schema_version is read, not merely written
+# ---------------------------------------------------------------------------
+
+
+class TestSchemaVersion:
+    """`write_window_record` always stamps `schema_version: 1`, but nothing
+    read it back — a record from an unrecognised future schema, or with no
+    version key at all, round-tripped as an ordinary "ok" record. Three
+    later slices read and extend this format, so an unrecognised version
+    must be treated as camp cannot safely interpret this content, the same
+    "corrupt" state a malformed shape already gets — never silently read as
+    if it were schema v1.
+    """
+
+    def test_an_unrecognised_future_schema_version_reads_corrupt(self, tmp_path):
+        import json
+
+        from camp.group.window_record import read_window_record, window_record_path_for
+
+        path = window_record_path_for(tmp_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"schema_version": 99, "windows": []}))
+
+        result = read_window_record(path)
+
+        assert result.status == "corrupt"
+        assert result.entries == ()
+        assert result.error is not None
+
+    def test_a_record_with_no_schema_version_key_at_all_reads_corrupt(self, tmp_path):
+        import json
+
+        from camp.group.window_record import read_window_record, window_record_path_for
+
+        path = window_record_path_for(tmp_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"windows": []}))
+
+        result = read_window_record(path)
+
+        assert result.status == "corrupt"
+        assert result.entries == ()
+
+    def test_the_current_schema_version_still_reads_ok(self, tmp_path):
+        """The positive half — varying the version to the value
+        `write_window_record` actually stamps must still read as `ok`, so
+        the new check discriminates rather than rejecting everything."""
+        from camp.group.window_record import (
+            WindowEntry,
+            read_window_record,
+            window_record_path_for,
+            write_window_record,
+        )
+
+        path = window_record_path_for(tmp_path)
+        write_window_record(
+            path, [WindowEntry(window_id="@1", name="a", cwd=".", conversation_id="c1")]
+        )
+
+        result = read_window_record(path)
+
+        assert result.status == "ok"
+        assert len(result.entries) == 1
+
+
+# ---------------------------------------------------------------------------
+# 10. A non-file path (directory, dangling symlink) must not fail open
+# ---------------------------------------------------------------------------
+
+
+class TestNonFilePath:
+    """`read_window_record` treated "not `path.is_file()`" as synonymous
+    with "missing" — the permissive, expected-state answer. A directory or
+    a dangling symlink sitting at the record path is a different, genuinely
+    unknown state ("could not tell") and must not inherit the permissive
+    branch."""
+
+    def test_a_directory_at_the_record_path_reads_corrupt_not_missing(self, tmp_path):
+        from camp.group.window_record import read_window_record, window_record_path_for
+
+        path = window_record_path_for(tmp_path)
+        path.mkdir(parents=True)
+
+        result = read_window_record(path)
+
+        assert result.status == "corrupt"
+        assert result.entries == ()
+
+    def test_a_dangling_symlink_at_the_record_path_reads_corrupt_not_missing(self, tmp_path):
+        from camp.group.window_record import read_window_record, window_record_path_for
+
+        path = window_record_path_for(tmp_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.symlink_to(tmp_path / "nowhere-at-all.json")
+
+        result = read_window_record(path)
+
+        assert result.status == "corrupt"
+        assert result.entries == ()
+
+    def test_a_genuinely_missing_path_still_reads_missing(self, tmp_path):
+        """The positive half — an ordinary absent file, with no symlink or
+        directory in its place, must still be the permissive "missing"
+        answer, so the new check discriminates rather than rejecting
+        everything."""
+        from camp.group.window_record import read_window_record, window_record_path_for
+
+        result = read_window_record(window_record_path_for(tmp_path))
+
+        assert result.status == "missing"
