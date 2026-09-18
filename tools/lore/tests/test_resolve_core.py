@@ -241,6 +241,22 @@ def test_the_report_carries_absent_distinctly_from_a_null_value(resolve):
     assert payload["conflicts"][0]["remote"]["absent"] is False
 
 
+# ── the free-write zone: classification by path class, not by one tree ─────
+
+
+@pytest.mark.parametrize("path,expected", [
+    ("sites/board/index.html", True),
+    ("sites/board/sites/index.html", True),
+    ("README.md", True),
+    (".gitignore", True),
+    ("area/sites/index.html", False),
+    ("oracle/a-prophecy.json", False),
+    (".git/config", False),
+])
+def test_is_free_write_path_classifies_by_path_class_not_by_tree(resolve, path, expected):
+    assert resolve._is_free_write_path(path) is expected
+
+
 # ── the three-way stage answer: parsed / absent / unreadable ───────────────
 
 
@@ -632,8 +648,9 @@ def test_a_body_conflict_parks_as_slot_body(tmp_path):
     assert body[0]["remote"]["value"] == "remote prose\n"
 
 
-def test_a_sites_tree_conflict_lists_under_files(tmp_path):
-    """``sites/`` holds static pages, not records — no record-id confinement."""
+def test_a_sites_tree_conflict_takes_the_published_side_automatically(tmp_path):
+    """AC27: a non-record path is not judgment — the published side wins outright,
+    instead of being parked under ``files`` for a person to settle by hand."""
     fx = _Fixture(tmp_path)
     fx.create("task", "A Task")
     site = fx.vault / "sites" / "board" / "index.html"
@@ -650,11 +667,139 @@ def test_a_sites_tree_conflict_lists_under_files(tmp_path):
 
     r = fx.cli(["resolve", "default", "--json"])
     assert r.returncode == 0, r.stderr
+
+    # Orientation: the two sides are distinguishable, and the assertion below
+    # names the REMOTE (published) bytes specifically — a test that passed on
+    # either stage would not pin which side resolve took.
+    assert json.loads(r.stdout) == {"vault": "default", "conflicts": [], "files": []}
+    assert site.read_text() == "<p>remote</p>\n", "the published side landed, not local"
+    assert not (fx.vault / ".git" / "rebase-merge").exists(), "the rebase completed"
+
+
+def test_a_sites_file_deleted_on_the_published_side_is_removed(tmp_path):
+    """Symmetric with the record deletion rule: a deletion wins over a change."""
+    fx = _Fixture(tmp_path)
+    fx.create("task", "A Task")
+    site = fx.vault / "sites" / "board" / "index.html"
+    site.parent.mkdir(parents=True)
+    site.write_text("<p>base</p>\n")
+    fx.publish()
+    fx.clone_device_b()
+
+    (fx.other / "sites" / "board" / "index.html").unlink()
+    _git(fx.other, "add", "-A")
+    fx.push_device_b()
+
+    site.write_text("<p>local</p>\n")
+    _commit(fx.vault, "device A edit")
+
+    r = fx.cli(["resolve", "default", "--json"])
+    assert r.returncode == 0, r.stderr
+
+    assert json.loads(r.stdout) == {"vault": "default", "conflicts": [], "files": []}
+    assert not site.exists(), "the deletion wins over the change on the other side"
+    assert not (fx.vault / ".git" / "rebase-merge").exists(), "the rebase completed"
+
+
+def test_a_root_gitignore_conflict_takes_the_published_side(tmp_path):
+    """``.gitignore`` is vault-root administrivia, not ``sites/`` — but is still
+    free-write by path CLASS, and unlike a static page it governs this host's
+    own sync behaviour, so it earns its own test rather than riding in unexamined."""
+    fx = _Fixture(tmp_path)
+    fx.create("task", "A Task")
+    fx.publish()
+    fx.clone_device_b()
+
+    (fx.other / ".gitignore").write_text("*.lock\nremote-only\n")
+    fx.push_device_b()
+
+    (fx.vault / ".gitignore").write_text("*.lock\nlocal-only\n")
+    _commit(fx.vault, "device A edit")
+
+    r = fx.cli(["resolve", "default", "--json"])
+    assert r.returncode == 0, r.stderr
+
+    assert json.loads(r.stdout) == {"vault": "default", "conflicts": [], "files": []}
+    assert (fx.vault / ".gitignore").read_text() == "*.lock\nremote-only\n"
+
+
+def test_a_mix_of_records_and_files_settles_both_in_one_replay(tmp_path):
+    """Records settle by structure, non-record files by published side — one pass."""
+    fx = _Fixture(tmp_path)
+    record_id = fx.create("task", "A Task")
+    site = fx.vault / "sites" / "board" / "index.html"
+    site.parent.mkdir(parents=True)
+    site.write_text("<p>base</p>\n")
+    fx.publish()
+    fx.clone_device_b()
+
+    fx.cli_b(["record", "update", record_id, "--status", "done"], stdin_text="")
+    (fx.other / "sites" / "board" / "index.html").write_text("<p>remote</p>\n")
+    fx.push_device_b()
+
+    fx.cli(["record", "update", record_id, "--status", "ready"], stdin_text="")
+    site.write_text("<p>local</p>\n")
+    _commit(fx.vault, "device A edit")
+
+    r = fx.cli(["resolve", "default", "--json"])
+    assert r.returncode == 0, r.stderr
     report = json.loads(r.stdout)
 
+    assert [c["slot"] for c in report["conflicts"]] == ["status"], (
+        "the record conflict is still judgment"
+    )
+    assert report["files"] == [], "the file settled automatically, not parked"
+    assert site.read_text() == "<p>remote</p>\n"
+    assert (fx.vault / ".git" / "rebase-merge").exists(), "the record conflict is still open"
+
+
+def test_a_symlink_planted_at_a_conflicted_file_is_refused_not_followed(tmp_path):
+    """The automatic take must confine its write exactly as ``take-file`` does.
+
+    Git itself never conflicts on a symlink swap mid-rebase — the swap has to be
+    planted directly in the worktree, at the exact conflicted path, between the
+    rebase stopping and resolve's own step processing running against it. So this
+    starts the rebase by hand rather than through the CLI, to get a window to
+    plant it before the automatic take ever sees the path.
+    """
+    fx = _Fixture(tmp_path)
+    fx.create("task", "A Task")
+    site = fx.vault / "sites" / "evil.html"
+    site.parent.mkdir(parents=True)
+    site.write_text("<p>base</p>\n")
+    fx.publish()
+    fx.clone_device_b()
+
+    (fx.other / "sites" / "evil.html").write_text("<p>remote</p>\n")
+    fx.push_device_b()
+
+    site.write_text("<p>local</p>\n")
+    _commit(fx.vault, "device A edit")
+
+    _git(fx.vault, "fetch", "origin")
+    _git(fx.vault, "rebase", "--empty=drop", f"origin/{fx.branch}")
+    assert (fx.vault / ".git" / "rebase-merge").exists(), "the rebase stopped on the conflict"
+
+    outside = fx.tmp / "outside.html"
+    outside.write_text("untouched\n")
+    site.unlink()
+    site.symlink_to(outside)
+
+    r = fx.cli(["resolve", "default", "--json"])
+
+    assert r.returncode == 0, r.stderr
+    report = json.loads(r.stdout)
     assert report["conflicts"] == []
-    assert [f["path"] for f in report["files"]] == ["sites/board/index.html"]
-    assert "take-file" in " ".join(f["reason"] for f in report["files"])
+    assert [f["path"] for f in report["files"]] == ["sites/evil.html"], (
+        "the refusal names the path"
+    )
+    assert "sites/evil.html" in report["files"][0]["reason"], "the refusal names the path"
+    assert "symlink" in report["files"][0]["reason"].lower(), (
+        "the held reason is specific to the confinement refusal, not the generic "
+        "'settle by hand' reason a genuinely-outside-the-zone path gets"
+    )
+    assert outside.read_text() == "untouched\n", "the symlink target was never written through"
+    assert (fx.vault / ".git" / "rebase-merge").exists(), "the conflict is still open, held"
 
 
 # ── report surface ─────────────────────────────────────────────────────────
@@ -1205,21 +1350,39 @@ def test_a_valid_but_policy_refused_sidecar_is_not_reported_as_unparseable(tmp_p
     (``ResolveError``, exit 1) exactly as before. It must never be conflated
     with the unparseable-sidecar hold this task adds.
     """
+    sidecar_mod = load_script("lore.record.sidecar")
     fx = _Fixture(tmp_path)
     record_id = fx.create("task", "A Task")
     fx.publish()
     fx.clone_device_b()
 
+    # Device B moves `status` through the CLI, then plants the self-cycle by
+    # hand — the guards would refuse `--depends-on <self>` locally, which is the
+    # whole reason this side is written directly. The hand-write goes through the
+    # canonical serializer so `depends-on` lands in its sorted position: a raw
+    # `json.dumps` appends it to the file's tail instead, where it no longer
+    # shares a diff hunk with anything device A touches.
     stem = record_id.split("/", 1)[1]
+    r = fx.cli_b(["record", "update", record_id, "--status", "ready"], stdin_text="")
+    assert r.returncode == 0, r.stderr
     remote_path = fx.other / f"{record_id}.json"
     remote_sidecar = json.loads(remote_path.read_text(encoding="utf-8"))
     remote_sidecar["depends-on"] = [stem]  # a task that depends on itself: a cycle
-    remote_path.write_text(json.dumps(remote_sidecar, indent=2), encoding="utf-8")
+    remote_path.write_text(sidecar_mod.dumps(remote_sidecar), encoding="utf-8")
     fx.push_device_b("device B set a self-cycle depends-on directly")
 
     r = fx.cli(["record", "update", record_id, "--title", "Local Title"], stdin_text="")
     assert r.returncode == 0, r.stderr
     _commit(fx.vault, "device A edit (disjoint field)")
+
+    # The premise: `status` and `title` serialize onto neighbouring lines, so
+    # these edits really do collide as text and the record reaches the resolver.
+    # Without this the test passes vacuously whenever git auto-merges the two
+    # sides, landing the cycle with the guards never consulted.
+    _git(fx.vault, "fetch", "origin")
+    rc = _git(fx.vault, "rebase", f"origin/{fx.branch}")
+    assert rc.returncode != 0, "the fixture must really conflict"
+    _git(fx.vault, "rebase", "--abort")
 
     r = fx.cli(["resolve", "default"])
 

@@ -42,15 +42,24 @@ case, is landed by ``git rebase``'s own merge machinery: its bytes reach the tre
 and the commit without passing through ``validate_stamp_neutralize`` or the graph
 guards at all. Read the paragraph above as scoped to conflicts, never as "every
 byte a resolution commits was validated on this device" — closing that gap means
-neutralizing the whole rebased tree, which nothing here does. ``lore resolve
-take-file`` is the second, deliberate exception: a ``sites/`` file is not a
-record, so it is settled by writing the chosen side's raw blob into place, fenced
-to that one tree by ``_assert_free_write_zone``.
+neutralizing the whole rebased tree, which nothing here does. A non-record
+conflicted path — a ``sites/`` file, or vault-root administrivia such as
+``README.md`` / ``.gitignore`` — is the second, deliberate exception: it is
+settled by taking the PUBLISHED (remote) side's raw blob outright, never
+parked as judgment, fenced to the vault's free-write zone by
+``_is_free_write_path``. ``lore resolve take-file`` stays a supported verb for
+a person settling one such path by hand — e.g. a free-write path whose
+automatic take was refused because the worktree path resolves outside the
+vault — but this module no longer requires anyone to.
 
 **A body conflict is never auto-merged.** Prose is judgment by definition, so a
-conflicted ``.md`` parks as slot ``body``. Conflicts under the vault's top-level
-``sites/`` tree are not records at all — they are reported in a separate
-``files`` section for ``lore resolve take-file``.
+conflicted ``.md`` parks as slot ``body``. A conflict under the vault's
+top-level ``sites/`` tree, or at vault-root administrivia, is not a record at
+all — it is settled automatically by path CLASS, never by record id (see
+``_is_free_write_path``). The vault's OTHER free-write zone, ``outpost/``, is
+unreachable here by construction: it is gitignored at scaffold time, excluded
+from every status and staging probe, and never committed, so it can never
+appear in ``git ls-files -u`` and this module needs no case for it.
 
 **Exit codes.** A produced report is a SUCCESS: parked judgment conflicts exit 0,
 because reporting them is what this command is for, and the caller distinguishes
@@ -736,6 +745,54 @@ def _carry_settled(prior_entry: dict | None, pending: dict,
     return still_open
 
 
+def _auto_take_published_side(vault: Path, path: str) -> str | None:
+    """Settle one free-write conflict by taking the published (remote) side.
+
+    AC27: a conflicted path that is not a record is not judgment for a person —
+    unlike a sidecar field there is no field-wise merge for arbitrary bytes, so
+    "settle" can only mean picking a side, and the published side is the one
+    nobody local is about to lose: their own bytes are still reachable by sha in
+    this device's own history, exactly as a record's losing side is. Either side
+    DELETING the path wins over a change on the other, symmetrically with the
+    deletion rule :func:`_delete_record` applies to records (AC29).
+
+    Returns ``None`` when the conflict is fully settled (landed, staged, or
+    removed) — the caller drops it from ``files`` entirely, no report needed.
+    Returns a held-file reason, and writes nothing, when landing the bytes
+    would escape the vault (a path traversal, or a symlink planted at the
+    conflicted worktree path): the rest of the replay must not stop over one
+    file that a person can still settle with ``take-file``, by hand, once
+    whatever is at that path stops resolving outside the vault.
+    """
+    remote = subprocess.run(
+        ["git", "-C", str(vault), "show", f":2:{path}"], capture_output=True,
+    )
+    local = subprocess.run(
+        ["git", "-C", str(vault), "show", f":3:{path}"], capture_output=True,
+    )
+    if remote.returncode != 0 or local.returncode != 0:
+        rc, _, err = _git(vault, "rm", "-f", "--ignore-unmatch", "--", path)
+        if rc != 0:
+            raise ResolveError(f"could not stage the removal of {path}: {err}")
+        return None
+
+    target = vault / path
+    try:
+        layers_mod.assert_within_root(target, vault)
+    except layers_mod.LayerConfinementError:
+        return (
+            f"{path}: this path resolves outside the vault (a path traversal or a "
+            "planted symlink) — settle with `lore resolve take-file` once that's fixed"
+        )
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(remote.stdout)
+    rc, _, err = _git(vault, "add", "--", path)
+    if rc != 0:
+        raise ResolveError(f"could not stage {path}: {err}")
+    return None
+
+
 def _resolve_step(
     vault: Path, paths: list[str], carried: dict
 ) -> tuple[list[dict], list[dict], dict]:
@@ -773,15 +830,25 @@ def _resolve_step(
             write_record(vault, record_id, record_pending["sidecar"],
                          record_pending["body"] or "")
 
-    files = [
-        {
+    files: list[dict] = []
+    for path in file_paths:
+        if _is_free_write_path(path):
+            reason = _auto_take_published_side(vault, path)
+            if reason is None:
+                continue  # fully settled: landed, staged, or removed
+            files.append({
+                "path": path,
+                "local": dict(local_label),
+                "remote": dict(remote_label),
+                "reason": reason,
+            })
+            continue
+        files.append({
             "path": path,
             "local": dict(local_label),
             "remote": dict(remote_label),
             "reason": "settle with `lore resolve take-file`",
-        }
-        for path in file_paths
-    ]
+        })
     return conflicts, files, pending
 
 
@@ -1187,26 +1254,64 @@ def cmd_resolve_take(args) -> int:
                                 include_shared=bool(getattr(args, "include_shared", False)))
 
 
+def _is_free_write_path(path: str) -> bool:
+    """True when *path* is outside every record tree — the vault's free-write zone.
+
+    Classified by path CLASS, not by one tree: a vault's top-level ``sites/`` is
+    the example the spec names, but vault-root administrivia — ``README.md``,
+    ``.gitignore`` — is free-write on the same grounds, and this is the single
+    place that decides it for both the automatic take in :func:`_resolve_step`
+    and the manual ``take-file`` verb's own fence.
+
+    Refused (not free-write):
+
+    - a path whose first segment is a known record kind
+      (:data:`record_model.KINDS`) — it is rooted inside a record tree, e.g.
+      ``area/sites/index.html`` (the root decides this, not the name: a site may
+      legitimately hold its own nested ``sites`` directory, so nesting alone
+      never refuses a path — see the parametrized cases below);
+    - a path record-shaped (``<kind>/<name>.md`` or ``.json``) under a kind this
+      build does not recognize, e.g. ``oracle/a-prophecy.json`` — refusing it now
+      keeps the refusal standing once a later build DOES recognize that kind,
+      rather than having already let raw, unneutralized bytes land where record
+      content will live;
+    - ``.git`` — unreachable as a conflicted path today (git does not
+      self-track its own directory), denied explicitly so that guarantee does
+      not rest on a property no test states.
+
+    Everything else is free-write, including a ``sites`` directory nested
+    *inside* the top-level ``sites/`` tree itself.
+    """
+    parts = Path(path).parts
+    if not parts:
+        return False
+    if parts[0] == ".git":
+        return False
+    if parts[0] in record_model.KINDS:
+        return False
+    if len(parts) >= 2:
+        _, dot, ext = path.rpartition(".")
+        if dot == "." and ext in ("md", "json"):
+            return False
+    return True
+
+
 def _assert_free_write_zone(path: str) -> None:
     """Refuse a path ``take-file`` must not write.
 
-    A vault's free-write zone is EXACTLY its tree rooted at top-level ``sites/``.
-    A path rooted anywhere else is inside a record tree and stays CLI-only, so
-    settling it by copying a blob into place would drive a write around the record
-    write path — the one thing this whole command exists to avoid. The root is
-    what decides that, not the name: a site may legitimately hold its own nested
-    ``sites`` directory, and refusing it would leave that conflict no settlement
-    path at all.
+    See :func:`_is_free_write_path` for the classification this enforces —
+    settling a record-tree path by copying a blob into place would drive a
+    write around the record write path, the one thing this whole command
+    exists to avoid.
     """
     parts = Path(path).parts
     if not parts or Path(path).is_absolute() or ".." in parts:
         raise ResolveError(f"{path!r} is not a vault-relative path")
-    if parts[0] != SITES_DIRNAME:
+    if not _is_free_write_path(path):
         raise ResolveError(
-            f"{path}: only a vault's top-level `{SITES_DIRNAME}/` tree is a free-write "
-            f"zone — everything else, including a record-shaped path under a kind this "
-            f"build does not know and a `{SITES_DIRNAME}/` directory inside a record "
-            "tree, is record content and stays CLI-only. Settle this path by hand."
+            f"{path}: not a free-write path — it is inside a record tree, "
+            f"record-shaped under a kind this build does not know, or `.git`, "
+            "and stays CLI-only. Settle this path by hand."
         )
 
 
