@@ -413,6 +413,13 @@ def cli_env(tmp_path: Path):
     env = {**os.environ}
     env["CAMP_CONFIG_DIR"] = str(config_dir)
     env["CAMP_STATE_DIR"] = str(state_dir)
+    # The shipped confirmation budget is sized for a cold `claude` boot on a
+    # loaded machine. The harness here is a stub that answers immediately, so
+    # a launch that is going to confirm does so on the first poll or two, and
+    # every test that drives one which CANNOT confirm would otherwise sit out
+    # the full budget in real seconds to observe a refusal it is asserting.
+    # Well above what the stub needs, far below what waiting costs.
+    env["CAMP_TEST_CONFIRM_TIMEOUT_SECONDS"] = "5"
     env["CAMP_FAKE_SESSIONS_FILE"] = str(sessions_file)
     env["TRAILHEAD_CLAUDE_DIR"] = str(tmp_path / "claude")
     env["CAMP_FAKE_TMUX_ARGV_FILE"] = str(tmux_argv_file)

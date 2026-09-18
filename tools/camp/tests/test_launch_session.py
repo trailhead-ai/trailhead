@@ -2026,6 +2026,79 @@ class TestConfirmPollTimeoutBudget:
         )
 
 
+class TestConfirmPollTimeoutSeam:
+    """The confirmation budget is overridable from the environment.
+
+    The budget exists to absorb a cold harness boot on a loaded machine, so it
+    is deliberately long. A test that drives a launch which can never confirm
+    has to wait the whole of it — real seconds, on every run — to observe a
+    refusal it already knows is coming. The seam lets such a test name a
+    shorter budget without weakening what any other caller gets.
+    """
+
+    def _polls_before_giving_up(self, session, monkeypatch, override):
+        """Drive a never-confirming launch; return how many polls it managed.
+
+        The clock advances a fixed second per read, so the poll count is a
+        direct reading of the budget `confirm_session` resolved.
+        """
+        if override is None:
+            monkeypatch.delenv("CAMP_TEST_CONFIRM_TIMEOUT_SECONDS", raising=False)
+        else:
+            monkeypatch.setenv("CAMP_TEST_CONFIRM_TIMEOUT_SECONDS", override)
+        harness = SequencedHarness([[]])
+        launch_dir = Path(self._tmp) / "resolved"
+        launched = session.LaunchedSession(
+            session_id="never-appears", tmux_name="camp-feat-x-abcd1234", launch_dir=launch_dir
+        )
+        with pytest.raises(Exception):
+            session.confirm_session(
+                harness,
+                launched,
+                interval=0.5,
+                sleep=lambda s: None,
+                clock=FakeClock(1.0),
+            )
+        return harness.run_calls
+
+    @pytest.fixture(autouse=True)
+    def _tmpdir(self, confirm_rig, tmp_path):
+        self._tmp = tmp_path
+        (tmp_path / "resolved").mkdir(exist_ok=True)
+
+    def test_an_override_shortens_the_budget_actually_used(self, confirm_rig, monkeypatch):
+        session = confirm_rig["module"]
+
+        short = self._polls_before_giving_up(session, monkeypatch, "3")
+        unset = self._polls_before_giving_up(session, monkeypatch, None)
+
+        assert short < unset, (
+            f"the override should cut the budget: {short} polls with it set, "
+            f"{unset} with it unset"
+        )
+
+    def test_with_no_override_the_shipped_budget_is_what_applies(
+        self, confirm_rig, monkeypatch
+    ):
+        """Unset → the default every real launch gets, not a test-shrunk one."""
+        session = confirm_rig["module"]
+
+        polls = self._polls_before_giving_up(session, monkeypatch, None)
+
+        assert polls >= session._CONFIRM_POLL_TIMEOUT_SECONDS / 2
+
+    def test_an_unusable_override_falls_back_rather_than_crashing_a_launch(
+        self, confirm_rig, monkeypatch
+    ):
+        """A stray non-numeric value must not take a real launch down with it."""
+        session = confirm_rig["module"]
+
+        garbage = self._polls_before_giving_up(session, monkeypatch, "not-a-number")
+        unset = self._polls_before_giving_up(session, monkeypatch, None)
+
+        assert garbage == unset
+
+
 class TestConfirmationDiagnosisEvidence:
     """Which cause the refusal names is driven by what camp captured, not a
     hardcoded guess: a pane that shows a trust prompt is VERIFIED, a starved
