@@ -121,13 +121,14 @@ def install_window_key_binding(
     *,
     camp_bin: str | None = None,
     notify: bool = True,
-) -> bool:
+) -> None:
     """Install (or idempotently re-issue) camp's prefix+``c`` binding
     against *tmux*.
 
-    Returns whether this call performed a first install (the notice fired
-    or would have, had *notify* been true) — mainly useful to callers/tests
-    that want to assert on the decision without parsing stderr.
+    The seam call fires every time — a stale or foreign binding self-heals
+    on the next workspace creation. Only the operator-facing notice is
+    conditional; see the module docstring for how "first in this server" is
+    decided.
     """
     resolved_bin = camp_bin if camp_bin is not None else _DEFAULT_CAMP_BIN
     true_command = _dispatch_true_command(resolved_bin)
@@ -140,8 +141,6 @@ def install_window_key_binding(
 
     if is_first_install and notify:
         print(_NOTICE, file=sys.stderr)
-
-    return is_first_install
 
 
 def remove_window_key_binding(tmux: _TmuxLike) -> None:
