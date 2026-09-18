@@ -312,14 +312,17 @@ def _resolve_one_record(
         base = _load_json_stage(vault, 1, sidecar_path)
         remote = _load_json_stage(vault, 2, sidecar_path)
         local = _load_json_stage(vault, 3, sidecar_path)
+        if remote is StageStatus.ABSENT or local is StageStatus.ABSENT:
+            # One side deleted the record; the other changed it. Deletion wins,
+            # symmetrically — whichever side deleted — over a modification on
+            # the other. Both files go, even though only the sidecar was itself
+            # unmerged: a record without a sidecar is not a partial record.
+            return _delete_record(vault, record_id, sidecar_path, body_path), []
         if isinstance(remote, StageStatus) or isinstance(local, StageStatus):
-            # One side has no readable sidecar at this stage — a delete/modify
-            # conflict (the record was removed on one device and edited on the
-            # other), or a sidecar that is no longer JSON. Neither is a field
-            # merge, and guessing which device meant to keep the record would
-            # destroy the other's work, so the resolution stops here with the
-            # vault untouched. The absent/unreadable split is not yet acted on
-            # here — both raise identically, as they always have.
+            # One side's sidecar is not readable JSON — not absent, corrupt.
+            # Guessing which device meant to keep the record would destroy the
+            # other's work, so the resolution stops here with the vault
+            # untouched, exactly as it always has for this branch.
             missing = "remote" if isinstance(remote, StageStatus) else "local"
             raise ResolveError(
                 f"{sidecar_path}: the {missing} side has no readable sidecar — the "
@@ -353,16 +356,13 @@ def _resolve_one_record(
         remote_body = _stage_text(vault, 2, body_path)
         local_body = _stage_text(vault, 3, body_path)
         if remote_body is StageStatus.ABSENT or local_body is StageStatus.ABSENT:
-            # One side has no body at this stage — a delete/modify conflict whose
-            # sidecar happened to be identical on both sides, so only the `.md`
-            # ever became unmerged. An absent stage is NOT an empty body: parking
-            # it as one would let `take` land a deliberate-looking empty body.
-            missing = "remote" if remote_body is StageStatus.ABSENT else "local"
-            raise ResolveError(
-                f"{body_path}: the {missing} side has no body — the record was "
-                "deleted on one device and edited on the other. Settle this record "
-                "by hand before re-running."
-            )
+            # One side deleted the record; the other changed its body — the
+            # sidecar happened to be identical on both sides, so only the
+            # `.md` ever became unmerged. Deletion still wins: an absent stage
+            # is NOT an empty body, and parking it as one would let `take`
+            # land a deliberate-looking empty body. Removing the whole record
+            # is what keeps that from ever being possible.
+            return _delete_record(vault, record_id, sidecar_path, body_path), []
         conflicts.append({
             "record-id": record_id,
             "kind": kind,
@@ -411,6 +411,28 @@ def _read_worktree_json(path: Path) -> dict | None:
     except (OSError, json.JSONDecodeError):
         return None
     return parsed if isinstance(parsed, dict) else None
+
+
+def _delete_record(vault: Path, record_id: str, sidecar_path: str, body_path: str) -> dict:
+    """Remove *record_id*'s files from the worktree and stage the removal.
+
+    The other side's change is not lost — the losing side's commit still holds
+    the changed content, reachable by sha in the vault's git history. Only the
+    tree this resolution lands forgets it, which is what "deletion wins" means:
+    the record is gone from the tree, the removal staged, and this record is
+    fully settled — never routed through :func:`write_record`.
+    """
+    for rel in (body_path, sidecar_path):
+        rc, _, err = _git(vault, "rm", "-f", "--ignore-unmatch", "--", rel)
+        if rc != 0:
+            raise ResolveError(f"could not stage the removal of {rel}: {err}")
+    return {
+        "kind": record_id.split("/", 1)[0],
+        "sidecar-path": sidecar_path,
+        "body-path": body_path,
+        "deleted": True,
+        "settled": [],
+    }
 
 
 def write_record(vault: Path, record_id: str, sidecar: dict, body: str) -> None:
@@ -655,6 +677,11 @@ def _resolve_step(
         if record_conflicts:
             conflicts.extend(record_conflicts)
             pending[record_id] = record_pending
+        elif record_pending.get("deleted"):
+            # Already removed and staged by `_delete_record` — never routed
+            # through `write_record`, which would try to write files that no
+            # longer exist.
+            pass
         else:
             write_record(vault, record_id, record_pending["sidecar"],
                          record_pending["body"] or "")
@@ -817,6 +844,13 @@ def _start_rebase(vault: Path, say_err) -> bool | None:
     A successful rebase with no conflict at all also returns ``True``: the caller's
     loop sees no rebase in progress and falls straight through to the finish tail.
 
+    ``--empty=drop`` is pinned explicitly rather than relied on as git's default:
+    when a deletion settles on top of a step whose tree already lacks the
+    record, the replayed commit becomes empty, and dropping it silently (rather
+    than stopping to ask, or landing an empty commit) is what lets the replay
+    continue instead of stopping the vault. Pinning it makes that settlement
+    version-stable rather than dependent on a default that could move.
+
     Called under the vault write lock — every step here mutates the tree. The
     fetch that refreshes ``origin/*`` is the caller's, and runs before the lock.
     """
@@ -827,7 +861,7 @@ def _start_rebase(vault: Path, say_err) -> bool | None:
     if rc != 0 or not count or count == "0":
         return None
 
-    rc, out, err = _git(vault, "rebase", upstream)
+    rc, out, err = _git(vault, "rebase", "--empty=drop", upstream)
     if rc != 0 and not _vault_mid_rebase(vault):
         say_err(f"error: could not start the rebase: {err or out}")
         return False

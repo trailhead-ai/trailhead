@@ -817,11 +817,103 @@ def test_record_delete_refuses_at_a_mid_rebase_vault(tmp_path):
     assert (fx.vault / f"{record_id}.md").exists(), "a refused delete writes nothing"
 
 
+# ── a deletion wins over a change on the other side, symmetrically ─────────
+
+
+def test_a_remote_deletion_wins_over_a_local_change(tmp_path):
+    """Remote (device B) deletes the record; local (device A) changes it.
+
+    The deletion wins: the record is gone from the tree, its removal staged,
+    and the replay completes with no parked conflict for it.
+    """
+    fx = _Fixture(tmp_path)
+    record_id = fx.create("task", "A Task")
+    fx.publish()
+    fx.clone_device_b()
+
+    r = fx.cli_b(["record", "delete", record_id, "--force"])
+    assert r.returncode == 0, r.stderr
+    fx.push_device_b("device B deleted the record")
+
+    fx.cli(["record", "update", record_id, "--status", "ready"], stdin_text="")
+    _commit(fx.vault, "device A edit")
+
+    r = fx.cli(["resolve", "default"])
+
+    assert r.returncode == 0, r.stderr
+    assert "conflict" not in r.stdout.lower(), "nothing needed judgment"
+    assert not (fx.vault / f"{record_id}.md").exists()
+    assert not (fx.vault / f"{record_id}.json").exists()
+    assert not (fx.vault / ".git" / "rebase-merge").exists(), "the rebase completed"
+    assert _git(fx.vault, "status", "--porcelain").stdout.strip() == ""
+
+
+def test_a_local_deletion_wins_over_a_remote_change(tmp_path):
+    """The symmetric case: local (device A) deletes, remote (device B) changes.
+
+    Whichever side did the deleting, the deletion wins — the vary-the-input
+    half of this pair is which side deleted.
+    """
+    fx = _Fixture(tmp_path)
+    record_id = fx.create("task", "A Task")
+    fx.publish()
+    fx.clone_device_b()
+
+    fx.cli_b(["record", "update", record_id, "--status", "ready"], stdin_text="")
+    fx.push_device_b("device B edited the record")
+
+    r = fx.cli(["record", "delete", record_id, "--force"])
+    assert r.returncode == 0, r.stderr
+    _commit(fx.vault, "device A deleted the record")
+
+    r = fx.cli(["resolve", "default"])
+
+    assert r.returncode == 0, r.stderr
+    assert "conflict" not in r.stdout.lower(), "nothing needed judgment"
+    assert not (fx.vault / f"{record_id}.md").exists()
+    assert not (fx.vault / f"{record_id}.json").exists()
+    assert not (fx.vault / ".git" / "rebase-merge").exists(), "the rebase completed"
+    assert _git(fx.vault, "status", "--porcelain").stdout.strip() == ""
+
+
+def test_the_changed_version_stays_recoverable_from_history(tmp_path):
+    """Deletion wins, but the losing side's content is not gone — it is git history.
+
+    The changed version's commit is what the deletion's replay drops silently
+    (a real empty commit once the deletion is staged over it), but the commit
+    object itself is still reachable by sha until gc, and its blob for this
+    record still resolves to the exact changed content.
+    """
+    fx = _Fixture(tmp_path)
+    record_id = fx.create("task", "A Task")
+    fx.publish()
+    fx.clone_device_b()
+
+    r = fx.cli_b(["record", "delete", record_id, "--force"])
+    assert r.returncode == 0, r.stderr
+    fx.push_device_b("device B deleted the record")
+
+    fx.cli(["record", "update", record_id, "--status", "ready"], stdin_text="")
+    losing_sha = _commit(fx.vault, "device A edit")
+
+    r = fx.cli(["resolve", "default"])
+    assert r.returncode == 0, r.stderr
+    assert not (fx.vault / f"{record_id}.json").exists(), "deletion still won"
+
+    recovered = _git(fx.vault, "show", f"{losing_sha}:{record_id}.json")
+    assert recovered.returncode == 0, recovered.stderr
+    recovered_sidecar = json.loads(recovered.stdout)
+    assert recovered_sidecar["status"] == "ready", (
+        "the changed version device A's commit carried is still readable from "
+        "its own (now-unreferenced-by-HEAD) sha"
+    )
+
+
 # ── delete/modify refuses on the sidecar, same as it does on the body ──────
 
 
-def test_a_sidecar_only_delete_modify_refuses_with_the_pre_existing_message(tmp_path):
-    """An absent sidecar stage still raises exactly as it did before the split."""
+def test_a_sidecar_only_delete_modify_takes_the_removal(tmp_path):
+    """An absent sidecar stage takes the removal — the sidecars, not the reverse."""
     fx = _Fixture(tmp_path)
     record_id = fx.create("task", "A Task")
     fx.publish()
@@ -836,17 +928,23 @@ def test_a_sidecar_only_delete_modify_refuses_with_the_pre_existing_message(tmp_
 
     r = fx.cli(["resolve", "default"])
 
-    assert r.returncode == 1
-    assert "the remote side has no readable sidecar" in r.stderr
-    assert "deleted on one device and edited on the other" in r.stderr
-    assert record_id in r.stderr
+    assert r.returncode == 0, r.stderr
+    assert "deleted on one device and edited on the other" not in r.stderr
+    assert not (fx.vault / f"{record_id}.md").exists(), "the whole record is removed"
+    assert not (fx.vault / f"{record_id}.json").exists()
+    assert not (fx.vault / ".git" / "rebase-merge").exists()
 
 
-# ── delete/modify refuses on the body too, not only the sidecar ────────────
+# ── delete/modify takes the removal on the body too, not only the sidecar ──
 
 
-def test_a_body_only_delete_modify_refuses_instead_of_landing_an_empty_body(tmp_path):
-    """The sidecar is identical on both sides, so only the ``.md`` is unmerged."""
+def test_a_body_only_delete_modify_takes_the_removal_not_an_empty_body(tmp_path):
+    """The sidecar is identical on both sides, so only the ``.md`` is unmerged.
+
+    This is the failure mode ``test_resolve_core.py:764`` (pre-reversal) was
+    written to prevent — landing an empty body from an absent stage — still
+    prevented, now by removing the whole record rather than by refusing.
+    """
     fx = _Fixture(tmp_path)
     record_id = fx.create("task", "A Task")
     fx.publish()
@@ -860,6 +958,98 @@ def test_a_body_only_delete_modify_refuses_instead_of_landing_an_empty_body(tmp_
 
     r = fx.cli(["resolve", "default"])
 
+    assert r.returncode == 0, r.stderr
+    assert "deleted on one device and edited on the other" not in r.stderr
+    assert not (fx.vault / f"{record_id}.md").exists(), (
+        "removed, not left behind with an empty body"
+    )
+    assert not (fx.vault / f"{record_id}.json").exists()
+    assert not (fx.vault / ".git" / "rebase-merge").exists()
+
+
+# ── a delete/delete collision settles as a removal with no conflict parked ─
+
+
+def test_a_delete_delete_collision_settles_with_no_conflict_parked(tmp_path):
+    """Both sides removed the same record — the outcome is the same removal."""
+    fx = _Fixture(tmp_path)
+    record_id = fx.create("task", "A Task")
+    fx.publish()
+    fx.clone_device_b()
+
+    r = fx.cli_b(["record", "delete", record_id, "--force"])
+    assert r.returncode == 0, r.stderr
+    fx.push_device_b("device B deleted the record")
+
+    r = fx.cli(["record", "delete", record_id, "--force"])
+    assert r.returncode == 0, r.stderr
+    _commit(fx.vault, "device A deleted the record")
+
+    r = fx.cli(["resolve", "default"])
+
+    assert r.returncode == 0, r.stderr
+    assert "conflict" not in r.stdout.lower(), "nothing needed judgment"
+    assert not (fx.vault / f"{record_id}.md").exists()
+    assert not (fx.vault / f"{record_id}.json").exists()
+    assert not (fx.vault / ".git" / "rebase-merge").exists()
+    assert _git(fx.vault, "status", "--porcelain").stdout.strip() == ""
+
+
+# ── control: a record only one side touched still lands unchanged ─────────
+
+
+def test_a_record_only_one_side_touched_still_lands_unchanged(tmp_path):
+    """This path did not widen to records that never conflicted.
+
+    Device B edits record A only; device A edits record B only. Neither
+    record's stages ever go through the deletion branch, and both land with
+    the touching side's content, present and unchanged.
+    """
+    fx = _Fixture(tmp_path)
+    record_a = fx.create("task", "Record A")
+    record_b = fx.create("task", "Record B")
+    fx.publish()
+    fx.clone_device_b()
+
+    fx.cli_b(["record", "update", record_a, "--status", "ready"], stdin_text="")
+    fx.push_device_b("device B edited record A")
+
+    fx.cli(["record", "update", record_b, "--status", "done"], stdin_text="")
+    _commit(fx.vault, "device A edited record B")
+
+    r = fx.cli(["resolve", "default"])
+
+    assert r.returncode == 0, r.stderr
+    assert "conflict" not in r.stdout.lower(), "nothing needed judgment"
+    assert fx.sidecar(record_a)["status"] == "ready", "device B's edit landed"
+    assert fx.sidecar(record_b)["status"] == "done", "device A's edit landed"
+    assert (fx.vault / f"{record_a}.md").exists()
+    assert (fx.vault / f"{record_b}.md").exists()
+
+
+# ── an unreadable (not absent) sidecar still refuses, exactly as before ────
+
+
+def test_an_unreadable_sidecar_on_one_side_still_refuses_not_a_deletion(tmp_path):
+    """A corrupt sidecar is not a deletion — treating it as one would destroy
+    the other side's work on a merely-unparseable file. This split is owned by
+    a sibling task; this test pins that this task's deletion branch did not
+    widen to cover it.
+    """
+    fx = _Fixture(tmp_path)
+    record_id = fx.create("task", "A Task")
+    fx.publish()
+    fx.clone_device_b()
+
+    (fx.other / f"{record_id}.json").write_text("{not valid json", encoding="utf-8")
+    fx.push_device_b("device B corrupted the sidecar")
+
+    fx.cli(["record", "update", record_id, "--status", "ready"], stdin_text="")
+    _commit(fx.vault, "device A edit")
+
+    r = fx.cli(["resolve", "default"])
+
     assert r.returncode == 1
-    assert "deleted on one device and edited on the other" in r.stderr
+    assert "no readable sidecar" in r.stderr
     assert record_id in r.stderr
+    assert (fx.vault / f"{record_id}.md").exists(), "a refused resolution writes nothing new"
