@@ -23,8 +23,9 @@ for the full install flow.
 
 ```
 camp groups          # list every configured group (any cwd)
-camp new <slug>      # create or enter a workspace
-camp new <slug> --launch  # create or enter, then start a detached session in it
+camp new <slug>      # create or enter a workspace, then attach to its tmux session
+camp new <slug> --no-attach  # create or enter + its session, leave this terminal alone
+camp new <slug> --no-session # create or enter the workspace only — no tmux session, unless --launch is also given
 camp pwd <slug>      # print workspace path
 camp list            # list all worktrees (alias: ls)
 camp status          # show git + drift status
@@ -56,7 +57,7 @@ function camp_cd
 end
 ```
 
-### `camp new` and `camp remove` change your shell's directory
+### `camp remove` changes your shell's directory
 
 camp never starts, stops, or replaces a process, and it cannot change your shell's
 working directory on its own — it only *answers* where to go, as exactly one line
@@ -67,8 +68,12 @@ on stdout. Acting on that answer takes a shell function, which is what the
 eval "$(/path/to/trailhead/bin/trailhead shellenv)"
 ```
 
-The wrapper it defines intercepts `camp new` and `camp remove` and does the `cd`
-for you. Without it, the printed path is inert — use `cd "$(camp pwd <slug>)"`.
+The wrapper it defines intercepts `camp remove` (and `camp rm`) and does the `cd`
+for you, back to the group's first-member repo. Without it, the printed path is
+inert — use `cd "$(camp pwd <slug>)"`.
+
+`camp new` needs no such wrapper: it hands your terminal to a tmux session already
+rooted at the new workspace, so there is nowhere left to `cd`.
 
 ## Detached sessions
 
@@ -85,7 +90,6 @@ camp launch --resume <ref> [--group <name>] # bring a dead one back
 camp sessions [<slug>] [--dir <path>] [--all-groups|-g] [--json]  # what is live
 camp sessions --recoverable [<slug>] [--dir <path>]         # what is dead
                           [--limit <n>|--all] [--json]
-camp new <slug> --launch [--no-wait] [--json]
 ```
 
 `camp launch` has three addressing forms and they are mutually exclusive: a slug
@@ -114,10 +118,14 @@ camp pre-seeds trust for the directory it is about to root the session at. The p
 parent session's environment, so a launched session never inherits the
 credentials of the session that launched it.
 
-`camp new <slug> --launch` blocks until the workspace finishes provisioning
-before launching; `--no-wait` launches immediately and leaves later provisioning
-failures to surface under `camp status <slug>`. Either way stdout stays exactly
-the workspace path.
+`camp new <slug>` no longer starts a harness conversation — it creates the
+workspace's tmux session (a bare shell, rooted at the workspace) and attaches
+to it, described above under "Quick start" and in "`camp remove` changes your
+shell's directory". `--launch` is still accepted, for callers that pass it
+today, and does nothing beyond printing a notice that it is no longer needed.
+Starting a harness conversation in a new workspace is still `camp launch
+<slug>` (above), run from inside the workspace `camp new` just opened, or
+directly by slug from anywhere.
 
 ### Rooting a launch at a directory
 
@@ -240,6 +248,15 @@ camp-owned sessions — most recently active first — and reads one choice;
 same unambiguous prefix `camp kill` and `camp launch --resume` already
 accept, resolved by the identical rule so the three verbs never drift into
 three grammars.
+
+From inside a configured group (or with `--group`), `<ref>` is checked against that
+group's own workspace slugs first: a match creates or connects that workspace's
+tmux session — creating it if nothing is running yet, joining it if something
+already is — and hands you the terminal the same way. A `<ref>` matching no
+workspace falls through to the session-reference form below, unchanged. Outside
+tmux this attaches directly; from inside an existing tmux session it moves your
+client there instead of nesting, so hopping between workspaces never tears down
+the one you came from.
 
 `<ref> --host <name>` carries the reference across untouched: the named
 machine's own camp resolves it and refuses in its own words, exactly as if

@@ -23,6 +23,23 @@ from trailhead.pathint import (
 _FISH_BIN = shutil.which("fish")
 _HAS_FISH = _FISH_BIN is not None
 
+#: Absolute path per POSIX shell the wrapper is driven under, resolved against
+#: the real PATH. The tests pass a restricted PATH to the shell they spawn, so
+#: a bare name would not resolve even where the shell is installed.
+_POSIX_SHELL_BINS = {name: shutil.which(name) for name in ("bash", "zsh")}
+
+#: The same shells as pytest params, each skipped where it is not installed.
+_POSIX_SHELLS = [
+    pytest.param(
+        name,
+        marks=pytest.mark.skipif(
+            _POSIX_SHELL_BINS[name] is None,
+            reason=f"{name} is not installed in this environment",
+        ),
+    )
+    for name in _POSIX_SHELL_BINS
+]
+
 
 def _env(tmp_path: Path) -> dict[str, str]:
     return {"TRAILHEAD_STATE_DIR": str(tmp_path)}
@@ -282,18 +299,28 @@ class TestCampWrapperPosix:
         assert 'command camp "$@"' in out
 
     def test_cds_only_on_the_intercepted_verbs(self, out):
-        # new enters a workspace; remove/rm (both spellings — aliasing happens
-        # inside the CLI, the wrapper sees the raw token) exit one.
+        # remove/rm (both spellings — aliasing happens inside the CLI, the
+        # wrapper sees the raw token) exit a workspace. `new` is no longer
+        # intercepted — the door already drops the shell into a tmux session
+        # rooted at the workspace, so there is nothing left to `cd` for.
         assert 'case "$1" in' in out
-        assert "new|remove|rm)" in out
+        assert "remove|rm)" in out
         # The one intercepted branch cds; the passthrough does not.
         assert out.count("cd -- ") == 1
 
     def test_cd_is_quote_safe(self, out):
         assert 'cd -- "$p"' in out
 
-    def test_exports_marker_only_around_new(self, out):
+    def test_new_is_plain_passthrough_with_no_marker(self, out):
+        # `camp new` must run with no `$( … )` capture and no `cd` — it falls
+        # to the `*)` passthrough branch, same as any other uncaptured verb.
         assert "CAMP_SHELL_INTEGRATION=1 command camp" in out
+        # The only capturing invocation left is the remove/rm one — `new`
+        # never appears paired with the marker assignment.
+        assert "CAMP_SHELL_INTEGRATION=1 command camp \"$@\"" in out
+        lines = out.splitlines()
+        case_idx = next(i for i, line in enumerate(lines) if "remove|rm)" in line)
+        assert "new" not in lines[case_idx]
 
     def test_camp_resume_is_not_intercepted(self, out):
         """The verb is retired: no branch, and nothing left that evals CLI output."""
@@ -326,7 +353,8 @@ class TestCampWrapperFish:
 
     def test_cds_only_on_the_intercepted_verbs(self, out):
         assert 'switch "$argv[1]"' in out
-        assert "case new remove rm" in out
+        assert "case remove rm" in out
+        assert "case new remove rm" not in out
         # The one intercepted branch cds; the passthrough does not.
         assert out.count("cd -- ") == 1
 
@@ -341,6 +369,13 @@ class TestCampWrapperFish:
         assert "set -lx CAMP_SHELL_INTEGRATION 1" in out
         assert "env CAMP_SHELL_INTEGRATION" not in out
 
+    def test_new_is_plain_passthrough_with_no_marker(self, out):
+        # `new` falls to the `case '*'` passthrough — the `set -lx` scoping
+        # block only wraps the remove/rm branch.
+        lines = out.splitlines()
+        case_idx = next(i for i, line in enumerate(lines) if "case remove rm" in line)
+        assert "new" not in lines[case_idx]
+
     def test_camp_resume_is_not_intercepted(self, out):
         """The verb is retired: no branch, and nothing left handed to `sh -c`."""
         assert "case resume" not in out
@@ -354,7 +389,10 @@ class TestCampWrapperFish:
 class TestCampWrapperBehavior:
     """Exercise the emitted bash wrapper end-to-end."""
 
-    def test_space_path_cds_correctly(self, tmp_path):
+    def test_new_stays_put_and_runs_uncaptured(self, tmp_path):
+        # `camp new` is no longer intercepted: the door already drops the
+        # shell into a tmux session rooted at the workspace, so the wrapper
+        # must run it as a plain pass-through — no `$( … )` capture, no `cd`.
         target = tmp_path / "work space"  # a directory whose path contains a space
 
         fakebin = tmp_path / "fakebin"
@@ -369,6 +407,8 @@ class TestCampWrapperBehavior:
         )
         fake_camp.chmod(0o755)
 
+        start = tmp_path / "start"
+        start.mkdir()
         wrapper = shellenv_lines(shell="bash", env=_env(tmp_path), trailhead_root="/repo")
         script = (
             f"{wrapper}\n"
@@ -380,11 +420,16 @@ class TestCampWrapperBehavior:
             ["bash", "-c", script],
             capture_output=True,
             text=True,
+            cwd=str(start),
             env={"TARGET": str(target), "PATH": "/usr/bin:/bin"},
         )
         assert proc.returncode == 0, proc.stderr
-        # Last line of stdout is the cwd after the wrapper cd'd us in.
-        assert proc.stdout.strip().splitlines()[-1] == str(target)
+        lines = proc.stdout.strip().splitlines()
+        # The fake binary's own stdout (the workspace path) reaches the
+        # terminal uncaptured, and the shell never cd'd — `pwd` still reports
+        # the starting directory.
+        assert str(target) in lines
+        assert lines[-1] == str(start)
 
     def test_rm_cds_back_to_the_printed_repo_root(self, tmp_path):
         # `camp rm` from inside a workspace prints the group's first-member
@@ -509,3 +554,115 @@ class TestCampWrapperBehavior:
         # No cd happened — still in the starting dir.
         assert proc.stdout.strip().splitlines()[-1] == str(start)
 
+
+
+# ---------------------------------------------------------------------------
+# CAMP_SHELL_INTEGRATION marker: observed from the STUB's own environment,
+# not inferred from the emitted text. Driven under real bash/zsh/fish — a
+# sentence match can't tell you the function actually scopes the export.
+# ---------------------------------------------------------------------------
+
+
+def _write_marker_recording_stub(fakebin: Path, marker_file: Path) -> None:
+    fake_camp = fakebin / "camp"
+    fake_camp.write_text(
+        "#!/usr/bin/env bash\n"
+        'if [ -n "${CAMP_SHELL_INTEGRATION:-}" ]; then\n'
+        f'  printf "set" > "{marker_file}"\n'
+        "else\n"
+        f'  printf "unset" > "{marker_file}"\n'
+        "fi\n"
+        'if [ "$1" = "new" ] || [ "$1" = "rm" ] || [ "$1" = "remove" ]; then\n'
+        '  mkdir -p "$TARGET"\n'
+        '  printf "%s\\n" "$TARGET"\n'
+        "fi\n"
+    )
+    fake_camp.chmod(0o755)
+
+
+class TestCampWrapperMarkerScopingPosix:
+    """bash/zsh: the stub `camp` reports what it actually saw in its own env."""
+
+    @pytest.fixture(params=_POSIX_SHELLS)
+    def shell(self, request):
+        return request.param
+
+    def test_new_reaches_the_stub_with_no_marker(self, tmp_path, shell):
+        fakebin = tmp_path / "fakebin"
+        fakebin.mkdir()
+        marker_file = tmp_path / "marker.txt"
+        _write_marker_recording_stub(fakebin, marker_file)
+
+        wrapper = shellenv_lines(shell=shell, env=_env(tmp_path), trailhead_root="/repo")
+        script = f'{wrapper}\nexport PATH="{fakebin}:$PATH"\ncamp new feat\n'
+        proc = subprocess.run(
+            [_POSIX_SHELL_BINS[shell], "-c", script],
+            capture_output=True,
+            text=True,
+            env={"TARGET": str(tmp_path / "ws"), "PATH": "/usr/bin:/bin"},
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert marker_file.read_text() == "unset"
+
+    def test_remove_reaches_the_stub_with_the_marker_set(self, tmp_path, shell):
+        fakebin = tmp_path / "fakebin"
+        fakebin.mkdir()
+        marker_file = tmp_path / "marker.txt"
+        _write_marker_recording_stub(fakebin, marker_file)
+        home = tmp_path / "repo home"
+        home.mkdir()
+
+        wrapper = shellenv_lines(shell=shell, env=_env(tmp_path), trailhead_root="/repo")
+        script = f'{wrapper}\nexport PATH="{fakebin}:$PATH"\ncamp rm\npwd\n'
+        proc = subprocess.run(
+            [_POSIX_SHELL_BINS[shell], "-c", script],
+            capture_output=True,
+            text=True,
+            env={"TARGET": str(home), "PATH": "/usr/bin:/bin"},
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert marker_file.read_text() == "set"
+        # Regression pin: remove/rm must still capture and cd.
+        assert proc.stdout.strip().splitlines()[-1] == str(home)
+
+
+@pytest.mark.skipif(not _HAS_FISH, reason="fish is not installed in this environment")
+class TestCampWrapperMarkerScopingFish:
+    """Same contract, driven under a real fish process."""
+
+    def test_new_reaches_the_stub_with_no_marker(self, tmp_path):
+        fakebin = tmp_path / "fakebin"
+        fakebin.mkdir()
+        marker_file = tmp_path / "marker.txt"
+        _write_marker_recording_stub(fakebin, marker_file)
+
+        wrapper = shellenv_lines(shell="fish", env=_env(tmp_path), trailhead_root="/repo")
+        script = f'{wrapper}\nset -gx PATH "{fakebin}" $PATH\ncamp new feat\n'
+        proc = subprocess.run(
+            [_FISH_BIN, "-c", script],
+            capture_output=True,
+            text=True,
+            env={"TARGET": str(tmp_path / "ws"), "PATH": "/usr/bin:/bin"},
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert marker_file.read_text() == "unset"
+
+    def test_remove_reaches_the_stub_with_the_marker_set(self, tmp_path):
+        fakebin = tmp_path / "fakebin"
+        fakebin.mkdir()
+        marker_file = tmp_path / "marker.txt"
+        _write_marker_recording_stub(fakebin, marker_file)
+        home = tmp_path / "repo home"
+        home.mkdir()
+
+        wrapper = shellenv_lines(shell="fish", env=_env(tmp_path), trailhead_root="/repo")
+        script = f'{wrapper}\nset -gx PATH "{fakebin}" $PATH\ncamp rm\npwd\n'
+        proc = subprocess.run(
+            [_FISH_BIN, "-c", script],
+            capture_output=True,
+            text=True,
+            env={"TARGET": str(home), "PATH": "/usr/bin:/bin"},
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert marker_file.read_text() == "set"
+        assert proc.stdout.strip().splitlines()[-1] == str(home)

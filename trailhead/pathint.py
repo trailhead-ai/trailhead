@@ -219,9 +219,12 @@ def _shim_content(name: str, bin_path: Path, trailhead_root: str) -> str:
 # camp() cd-wrapper (validated across bash, zsh, and fish)
 # ---------------------------------------------------------------------------
 #
-# shellenv emits a `camp()` shell function so `camp new <slug>` drops the parent
-# shell into the workspace dir — and `camp remove`/`camp rm` (run from inside a
-# workspace) drops it back into the group's first-member repo — with NO subshell.
+# shellenv emits a `camp()` shell function so `camp remove`/`camp rm` (run from
+# inside a workspace) drops the parent shell back into the group's
+# first-member repo — with NO subshell. `camp new` is a plain pass-through:
+# the door already hands the terminal to a tmux session rooted at the new
+# workspace, so there is nothing left to `cd` for, and capturing its stdout
+# would break the door's own interactivity test (stdout must stay a tty).
 # Design notes (binding):
 #   - `command camp` (not bare `camp`) avoids PATH recursion into this wrapper.
 #   - The function runs in the CURRENT shell (brace body, not a `( … )` subshell),
@@ -229,14 +232,15 @@ def _shim_content(name: str, bin_path: Path, trailhead_root: str) -> str:
 #     `$( … )` runs in a subshell; the `cd` itself does not.
 #   - cd is quote-safe: bash/zsh `cd -- "$p"`; fish `cd -- $p` (fish cmd-sub splits
 #     on newlines, not spaces, so a one-line path-with-spaces is a single element).
-#   - The intercepted verbs are new|remove|rm — BOTH remove spellings, because the
-#     wrapper sees the raw token; alias→canonical resolution happens inside the
-#     CLI. Each such command prints a cd target as its ONLY stdout line (or, for
-#     remove outside the workspace / any failure, nothing — empty capture means
-#     no cd, so the shell stays put).
+#   - The intercepted verbs are remove|rm — BOTH spellings, because the wrapper
+#     sees the raw token; alias→canonical resolution happens inside the CLI.
+#     The command prints a cd target as its ONLY stdout line (or, for remove
+#     outside the workspace / any failure, nothing — empty capture means no cd,
+#     so the shell stays put).
 #   - The CAMP_SHELL_INTEGRATION marker is exported ONLY around the intercepted
-#     camp INVOCATION (new|remove|rm) so the handlers suppress their bare-binary
-#     shellenv nudges; every other verb passes through with NO marker.
+#     camp INVOCATION (remove|rm) so the handler suppresses its bare-binary
+#     shellenv nudge; every other verb, including `new`, passes through with NO
+#     marker.
 #   - bash gets that scoping free from its `VAR=val cmd` prefix assignment. fish
 #     cannot use `env VAR=val command camp` (env would try to exec a binary
 #     literally named `command`), and a bare `set -lx` in the case body would stay
@@ -248,7 +252,7 @@ def _shim_content(name: str, bin_path: Path, trailhead_root: str) -> str:
 _CAMP_WRAPPER_POSIX = """\
 camp() {
     case "$1" in
-        new|remove|rm)
+        remove|rm)
             local p
             p="$(CAMP_SHELL_INTEGRATION=1 command camp "$@")" || return $?
             if [ -n "$p" ]; then
@@ -265,7 +269,7 @@ camp() {
 _CAMP_WRAPPER_FISH = """\
 function camp
     switch "$argv[1]"
-        case new remove rm
+        case remove rm
             set -l p
             begin
                 set -lx CAMP_SHELL_INTEGRATION 1

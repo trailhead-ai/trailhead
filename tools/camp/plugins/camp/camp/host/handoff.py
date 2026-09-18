@@ -1,6 +1,10 @@
 """The interactive attach handoff: replaces this process, local or remote.
 
-Local: ``tmux attach -t <derived name>``. Remote: ``ssh -t <destination>
+Local: ``tmux attach -t =<derived name>`` — `=`-qualified through
+:func:`camp.launch.tmux.target`, the one tmux invocation in camp that
+bypasses the `Tmux` class itself (an interactive `exec`, which cannot go
+through `subprocess.run`) but still routes its target through the seam's
+own normalization. Remote: ``ssh -t <destination>
 <camp_bin> attach <ref>``, carrying the per-host camp location the host
 declaration already holds and the same fixed connection options the listing
 transport pins (``host/transport.py``) — non-interactive authentication,
@@ -18,7 +22,7 @@ capture.
 
 The handoff itself is an injected seam (:data:`ExecSeam`, mirroring the
 ``Runner`` seam at ``host/transport.py:174`` and the ``Tmux`` seam at
-``launch/stop.py:158``) so it stays testable: a test substitutes a recorder
+``launch/tmux.py:120``) so it stays testable: a test substitutes a recorder
 for the real ``os.execvp`` and asserts on the argv that would have been
 exec'd, without the test process ever disappearing. What such a test can
 never observe — by construction — is that the real exec actually replaces
@@ -34,8 +38,11 @@ from __future__ import annotations
 
 import os
 import sys
-from typing import Callable, Sequence
+from typing import Callable, Mapping, NoReturn, Sequence
 
+from ..attach.prefix_warning import inside_multiplexer
+from ..launch.recovery import printable_path
+from ..launch.tmux import Tmux, target
 from .config import Host
 from .transport import DEFAULT_CONNECT_TIMEOUT_SECONDS, quote_and_join
 
@@ -51,7 +58,26 @@ def local_argv(derived_name: str) -> list[str]:
     :class:`camp.launch.recovery.SessionCandidate`) — never the harness's own
     session name, which addresses nothing in tmux.
     """
-    return ["tmux", "attach", "-t", derived_name]
+    return ["tmux", "attach", "-t", target(derived_name)]
+
+
+def door_argv(derived_name: str) -> list[str]:
+    """argv for the door's outside-tmux handover: ``tmux attach-session -t
+    =<derived_name>``.
+
+    Distinct from :func:`local_argv` (``tmux attach``, the retired ref
+    path's own spelling): the door composes the full ``attach-session``
+    subcommand name, matching the transcript
+    ``docs/design/the-door-creates-or-connects-a-workspace-session.md``'s
+    "Handing over the terminal" section pins, since it names both calls —
+    ``attach-session`` and ``switch-client`` — by their full names side by
+    side.
+
+    ``derived_name`` must be the resolved workspace session's own derived
+    name (:func:`~camp.launch.naming.workspace_session_name`) — never the
+    harness's own session id.
+    """
+    return ["tmux", "attach-session", "-t", target(derived_name)]
 
 
 def remote_argv(
@@ -106,3 +132,43 @@ def handoff(argv: Sequence[str], *, exec_seam: ExecSeam = default_exec_seam) -> 
     except OSError as exc:
         print(f"camp: {exc}", file=sys.stderr)
         sys.exit(1)
+
+
+def hand_over_to_session(
+    tmux: Tmux, derived_name: str, *, env: Mapping[str, str]
+) -> NoReturn:
+    """Give this terminal to the workspace session *derived_name* and end the
+    invocation — the door's handover, shared by `camp attach` and `camp new`.
+
+    Two arms on two different seams, chosen by whether the caller is already
+    inside tmux (``TMUX`` set, per
+    :func:`camp.attach.prefix_warning.inside_multiplexer`) — see
+    ``docs/design/the-door-creates-or-connects-a-workspace-session.md``'s
+    "Handing over the terminal". Outside tmux, the door hands off through the
+    exec seam, which blocks for the session's life and never returns on
+    success. Inside tmux, it runs ``switch-client`` through the ordinary
+    :class:`~camp.launch.tmux.Tmux` seam instead — never exec'd, because
+    ``switch-client`` returns immediately and an exec'd one would tear down
+    the calling pane, and often the whole source session, rather than moving
+    the client — and exits on that call's own result, treating a tmux that
+    could not be asked at all (``None``) as a failure. A nonzero result
+    prints tmux's own stderr before exiting: the operator's terminal is
+    still attached to the SOURCE session at this point, so this is the only
+    place camp can say why the switch failed.
+
+    Never returns: the exec arm's fall-through only runs when a test's
+    injected exec seam returns instead of replacing the process, and even
+    then the invocation must end here rather than falling back into the
+    caller's remaining branches.
+    """
+    if inside_multiplexer(env):
+        switched = tmux.switch_client(derived_name)
+        if switched is None:
+            sys.exit(1)
+        stderr = (switched.stderr or "").strip()
+        if switched.returncode != 0 and stderr:
+            print(printable_path(stderr), file=sys.stderr)
+        sys.exit(switched.returncode)
+
+    handoff(door_argv(derived_name))
+    sys.exit(0)

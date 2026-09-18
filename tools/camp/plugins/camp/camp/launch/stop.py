@@ -6,6 +6,12 @@ tmux session, and re-polls until the name is gone. It is data-to-data plus one
 injected `tmux` seam: nothing here prints, exits, or reads `os.environ`, and
 every test drives it with an in-memory tmux.
 
+The tmux seam itself — `Tmux`, its tri-state answers, and the `=`-target
+property — lives in `camp.launch.tmux`, not here; this module imports and
+re-exports it (`Tmux`, `TmuxSession`, `SessionListing`, `UNANSWERED`,
+`_Unanswered`) so every existing importer of `camp.launch.stop` keeps working
+unchanged. New code should import the seam from `camp.launch.tmux` directly.
+
 Resolution is `recovery.resolve_session_ref` unforked, so `camp kill` and
 `camp launch --resume` share one resolver and one ambiguity contract. An
 `Ambiguous` or `NoMatch` from that resolver is returned as-is rather than
@@ -58,21 +64,45 @@ waits is a handful of seconds — a few calls, plus the budget, and no more.
 
 from __future__ import annotations
 
-import os
-import re
 import shlex
-import subprocess
+import subprocess  # noqa: F401 — kept for `stop.subprocess.run` re-export, see below
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Iterable, Mapping, Sequence
+from typing import Any, Callable, Iterable, Mapping
 
 from .identity import current_session_id
 from .recovery import Resolution, Resolved, SessionCandidate, resolve_session_ref
+from .tmux import (  # noqa: F401 — re-exported for this module's existing importers
+    TMUX_TIMEOUT_SECONDS,
+    UNANSWERED,
+    SessionListing,
+    Tmux,
+    TmuxSession,
+    _NO_SERVER_STDERR_RE,
+    _Unanswered,
+)
 
-#: Bound on every individual tmux call. tmux must never be able to hang the
-#: verb: a stop that cannot answer is reported, not waited on forever.
-TMUX_TIMEOUT_SECONDS = 5.0
+#: ``subprocess`` is kept imported here (unused by this module's own code)
+#: because the test suite patches ``stop.subprocess.run`` to drive the tmux
+#: seam through this module's name — patching an attribute on the shared
+#: ``subprocess`` module object affects every importer of it, including
+#: ``camp.launch.tmux``, so the patch still reaches the seam even though the
+#: seam itself now lives there.
+#:
+#: The names imported above but not referenced in this module's own code
+#: (`TMUX_TIMEOUT_SECONDS`, `UNANSWERED`, `SessionListing`, `TmuxSession`,
+#: `_NO_SERVER_STDERR_RE`) are deliberate re-exports, not dead imports — see
+#: the module docstring.
+__all__ = [
+    "TMUX_TIMEOUT_SECONDS",
+    "UNANSWERED",
+    "SessionListing",
+    "Tmux",
+    "TmuxSession",
+    "_NO_SERVER_STDERR_RE",
+    "_Unanswered",
+]
 
 #: How long to keep re-polling for the name's absence after the kill, and how
 #: often. tmux tears the session down server-side as the call returns, so this
@@ -85,34 +115,17 @@ TMUX_TIMEOUT_SECONDS = 5.0
 POLL_TIMEOUT_SECONDS = 5.0
 POLL_INTERVAL_SECONDS = 0.1
 
-#: Environment overrides for the two budgets above, in seconds.
+#: Environment override for the budget above, in seconds, read by the `camp
+#: kill` CLI and passed in as `poll_timeout=`. This module deliberately reads
+#: no environment of its own (see the module docstring), so the name lives
+#: here — beside the budget it moves — and the edge does the reading.
 #:
-#: Both are sized for a real operator against a busy tmux server, so a caller
-#: driving the path that spends one waits the whole of it before the outcome
-#: appears. That is the right behaviour for a real stop and pure dead time for
-#: a test asserting the outcome, so both defaults are readable from the
-#: environment — the same shape as the other `CAMP_TEST_*` seams. Only the
-#: defaults: a caller passing `timeout=` or `poll_timeout=` still gets exactly
-#: what it asked for.
-_TMUX_TIMEOUT_ENV = "CAMP_TEST_TMUX_TIMEOUT_SECONDS"
-_POLL_TIMEOUT_ENV = "CAMP_TEST_STOP_POLL_TIMEOUT_SECONDS"
+#: The budget is sized for a busy tmux server, so a test driving a session
+#: that never goes waits all of it before seeing the failure it is asserting.
+#: `camp kill` runs as a subprocess under test, so the `poll_timeout=`
+#: parameter alone cannot reach it.
+POLL_TIMEOUT_ENV = "CAMP_TEST_STOP_POLL_TIMEOUT_SECONDS"
 
-
-def _resolve_budget(name: str, shipped: float) -> float:
-    """Return the budget *name* overrides, else *shipped*.
-
-    An absent, unparseable or non-positive value leaves the shipped budget in
-    place: a stray or malformed setting must not be able to shrink a real
-    stop's window to nothing, which would report a busy tmux as a failure.
-    """
-    raw = os.environ.get(name)
-    if raw is None:
-        return shipped
-    try:
-        override = float(raw)
-    except ValueError:
-        return shipped
-    return override if override > 0 else shipped
 
 #: Where the concierge supervisor publishes the id of the anchor session,
 #: under its own state dir. camp reads it; camp never writes it. The directory
@@ -136,59 +149,6 @@ REFUSED_TMUX_UNANSWERED = "tmux-unanswered"
 #: of the pinned oracle. Distinct from a foreign pane holding the name, because
 #: the operator's next move differs: there is nothing here for camp to signal.
 REFUSED_LIVE_WITHOUT_SESSION = "live-without-session"
-
-
-class _Unanswered:
-    """The sentinel a tmux question comes back with when tmux did not answer.
-
-    Distinct from ``None``, which is an ANSWER — "there is no such pane". A
-    question that came back with nothing known must never share a branch with
-    one that came back with a fact.
-    """
-
-    def __repr__(self) -> str:  # pragma: no cover - debugging aid
-        return "UNANSWERED"
-
-
-UNANSWERED = _Unanswered()
-
-
-@dataclass(frozen=True)
-class TmuxSession:
-    """One session tmux reported, as its name and live window count."""
-
-    name: str
-    windows: int
-
-
-@dataclass(frozen=True)
-class SessionListing:
-    """Every session tmux holds right now, as answered by
-    :meth:`Tmux.list_sessions`.
-
-    ``sessions`` is empty when tmux genuinely answered "no server running" —
-    the answered-empty case, never folded into :data:`UNANSWERED`. ``dropped``
-    counts rows tmux printed that could not be parsed (no delimiter, or a
-    non-numeric window count) and were excluded from ``sessions`` without
-    failing the rest of the answer, so a caller can tell "one row was
-    unparseable" apart from "the answer was empty".
-    """
-
-    sessions: tuple[TmuxSession, ...]
-    dropped: int = 0
-
-
-#: The whole stderr line tmux prints for the non-zero exit that means "no
-#: server is running" — `error connecting to <socket> (No such file or
-#: directory)`, confirmed against tmux 3.7c. Matched as that shape rather
-#: than on the trailing phrase alone, which any number of unrelated
-#: failures also carry (a config file tmux could not source, a wrapper
-#: script's own complaint). Every OTHER non-zero exit (an unsafe socket
-#: directory, an unreachable socket, or any stderr not yet observed) is an
-#: outage and must never be read as an empty listing.
-_NO_SERVER_STDERR_RE = re.compile(
-    r"error connecting to .*\(No such file or directory\)"
-)
 
 
 @dataclass(frozen=True)
@@ -223,106 +183,6 @@ class Refused(StopOutcome):
 
     candidate: SessionCandidate
     reason: str
-
-
-class Tmux:
-    """The tmux seam: the three questions the engine asks of a session name."""
-
-    def __init__(self, *, timeout: float | None = None) -> None:
-        self._timeout = (
-            timeout
-            if timeout is not None
-            else _resolve_budget(_TMUX_TIMEOUT_ENV, TMUX_TIMEOUT_SECONDS)
-        )
-
-    def _run(self, args: Sequence[str]) -> subprocess.CompletedProcess | None:
-        try:
-            return subprocess.run(
-                ["tmux", *args],
-                capture_output=True,
-                text=True,
-                timeout=self._timeout,
-            )
-        except (OSError, subprocess.TimeoutExpired):
-            return None
-
-    def has_session(self, name: str) -> bool | None:
-        """Exact-name existence, or ``None`` when tmux did not answer.
-
-        `=` is not decoration: without it tmux prefix-matches, and a prefix
-        match would answer for a different session — the one thing this
-        question must never do.
-
-        The tri-state is load-bearing. A call that timed out or could not be
-        launched knows nothing about the session, and folding that into
-        ``False`` would report a hung tmux as a completed stop.
-        """
-        done = self._run(["has-session", "-t", f"={name}"])
-        if done is None:
-            return None
-        return done.returncode == 0
-
-    def pane_command(self, name: str) -> str | None | _Unanswered:
-        """The session's first pane's originating command.
-
-        Tri-state, for the same reason :meth:`has_session` is: ``None`` means
-        tmux answered and there is no pane command to read, while
-        :data:`UNANSWERED` means tmux never answered at all. Folding the second
-        into the first would report a tmux that went quiet between the two
-        questions as a foreign pane holding the name, sending the operator
-        hunting a squatter that does not exist.
-        """
-        done = self._run(
-            ["list-panes", "-t", f"={name}", "-F", "#{pane_start_command}"]
-        )
-        if done is None:
-            return UNANSWERED
-        if done.returncode != 0:
-            return None
-        first = done.stdout.splitlines()
-        return first[0] if first else None
-
-    def kill_session(self, name: str) -> None:
-        """Issue the kill. The result is deliberately unread — absence of the
-        name afterwards is the only evidence this engine accepts."""
-        self._run(["kill-session", "-t", f"={name}"])
-
-    def list_sessions(self) -> SessionListing | _Unanswered:
-        """Every session tmux currently holds, or ``UNANSWERED``.
-
-        Reads ``#{session_windows}|#{session_name}`` — the count first,
-        because it is always digits and a session name may legitimately
-        contain the delimiter, so the name is parsed as the remainder after
-        the FIRST ``|`` and can never be misread as a name-first field.
-
-        Extends this seam's tri-state rather than reusing :meth:`has_session`'s
-        contract: a general listing command's non-zero exit has no single
-        documented meaning, unlike a scoped existence query's. Only the
-        no-server condition on stderr — tmux's own whole
-        connect-failure line, :data:`_NO_SERVER_STDERR_RE`, not the
-        trailing phrase an unrelated error may also carry — is answered as
-        empty; every other non-zero exit, and an unanswerable ``_run``, is
-        ``UNANSWERED``.
-        """
-        done = self._run(["list-sessions", "-F", "#{session_windows}|#{session_name}"])
-        if done is None:
-            return UNANSWERED
-        if done.returncode != 0:
-            if _NO_SERVER_STDERR_RE.search(done.stderr or ""):
-                return SessionListing(sessions=())
-            return UNANSWERED
-
-        sessions: list[TmuxSession] = []
-        dropped = 0
-        for line in done.stdout.splitlines():
-            if not line:
-                continue
-            count, separator, name = line.partition("|")
-            if not separator or not count.isdigit():
-                dropped += 1
-                continue
-            sessions.append(TmuxSession(name=name, windows=int(count)))
-        return SessionListing(sessions=tuple(sessions), dropped=dropped)
 
 
 def anchor_session_id(env: Mapping[str, str]) -> str | None:
@@ -482,7 +342,7 @@ def stop_session(
     now=None,
     sleep: Callable[[float], None] = time.sleep,
     monotonic: Callable[[], float] = time.monotonic,
-    poll_timeout: float | None = None,
+    poll_timeout: float = POLL_TIMEOUT_SECONDS,
     poll_interval: float = POLL_INTERVAL_SECONDS,
 ) -> Resolution | StopOutcome:
     """Stop the one session *ref* addresses. See the module docstring.
@@ -490,8 +350,6 @@ def stop_session(
     Returns the resolver's own ``Ambiguous`` / ``NoMatch`` when the ref does not
     address exactly one session, and otherwise one of the ``StopOutcome`` kinds.
     """
-    if poll_timeout is None:
-        poll_timeout = _resolve_budget(_POLL_TIMEOUT_ENV, POLL_TIMEOUT_SECONDS)
     tmux = tmux if tmux is not None else Tmux()
 
     resolution = resolve_session_ref(

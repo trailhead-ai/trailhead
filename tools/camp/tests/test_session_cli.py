@@ -475,7 +475,14 @@ def _camp(cli_env, *args, extra_env=None, cwd=None):
 
 
 def _new_workspace(cli_env, slug: str, group: str = "mygroup"):
-    result = _camp(cli_env, "new", slug, "--group", group)
+    """Seed a workspace for a test that needs one to exist — not `camp new`'s
+    own door dispatch, which every other caller of this helper (`camp
+    launch`, `camp sessions`, `camp kill`, `camp list`) then drives its own
+    session lifecycle against. `--no-session` keeps this helper from also
+    creating the workspace's tmux session, which would otherwise show up as
+    an extra, untracked session alongside whatever the calling test starts
+    itself."""
+    result = _camp(cli_env, "new", slug, "--group", group, "--no-session")
     assert result.returncode == 0, result.stderr
     _wait_for_workspace_ready(cli_env, slug, group=group)
     return result.stdout.strip()
@@ -1613,7 +1620,7 @@ def test_camp_launch_resume_that_never_confirms_is_killed_by_its_exact_name(
     assert "could not be confirmed" in result.stderr
     tmux_name = f"camp-feat-one-{_UUID_A[:8]}"
     kills = [argv for argv in _tmux_argv(cli_env) if argv[0] == "kill-session"]
-    assert kills == [["kill-session", "-t", tmux_name]]
+    assert kills == [["kill-session", "-t", f"={tmux_name}"]]
     assert _state_tree(cli_env) == before
 
 
@@ -3083,11 +3090,16 @@ def test_camp_sessions_recoverable_scan_stays_within_its_budget(cli_env) -> None
 
 # ---------------------------------------------------------------------------
 # camp new --launch
+#
+# `--launch` is now a no-op notice on the default (door) path — see
+# "camp new default door" below. These tests pin the OLD launch-engine
+# behaviour, which is only reachable through `--no-session`, the escape hatch
+# that reproduces exactly what `camp new` did before the door existed.
 # ---------------------------------------------------------------------------
 
 
 def test_camp_new_launch_stdout_is_the_workspace_path_alone(cli_env) -> None:
-    result = _camp(cli_env, "new", "feat-h", "--group", "mygroup", "--launch")
+    result = _camp(cli_env, "new", "feat-h", "--group", "mygroup", "--no-session", "--launch")
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip().endswith("/feat-h")
@@ -3097,7 +3109,7 @@ def test_camp_new_launch_stdout_is_the_workspace_path_alone(cli_env) -> None:
 
 
 def test_camp_new_launch_failure_keeps_the_path_and_exit_zero(cli_env) -> None:
-    result = _camp(cli_env, "new", "feat-i", "--group", "badgroup", "--launch")
+    result = _camp(cli_env, "new", "feat-i", "--group", "badgroup", "--no-session", "--launch")
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip().endswith("/feat-i")
@@ -3122,7 +3134,9 @@ def test_camp_launch_json_names_the_account_it_chose(cli_env) -> None:
 
 
 def test_camp_new_launch_json_emits_workspace_and_session_id(cli_env) -> None:
-    result = _camp(cli_env, "new", "feat-j", "--group", "mygroup", "--launch", "--json")
+    result = _camp(
+        cli_env, "new", "feat-j", "--group", "mygroup", "--no-session", "--launch", "--json"
+    )
 
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)
@@ -3142,7 +3156,9 @@ def test_camp_new_launch_json_emits_workspace_and_session_id(cli_env) -> None:
 
 
 def test_camp_new_launch_json_failure_nulls_the_session_id(cli_env) -> None:
-    result = _camp(cli_env, "new", "feat-k", "--group", "badgroup", "--launch", "--json")
+    result = _camp(
+        cli_env, "new", "feat-k", "--group", "badgroup", "--no-session", "--launch", "--json"
+    )
 
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)
@@ -3160,7 +3176,9 @@ def test_camp_new_launch_json_failure_nulls_the_session_id(cli_env) -> None:
 
 
 def test_camp_new_no_wait_skips_the_wait_and_names_camp_status(cli_env) -> None:
-    result = _camp(cli_env, "new", "feat-l", "--group", "mygroup", "--launch", "--no-wait")
+    result = _camp(
+        cli_env, "new", "feat-l", "--group", "mygroup", "--no-session", "--launch", "--no-wait"
+    )
 
     assert result.returncode == 0, result.stderr
     assert "camp new: --no-wait" in result.stderr
@@ -3170,7 +3188,7 @@ def test_camp_new_no_wait_skips_the_wait_and_names_camp_status(cli_env) -> None:
 
 def test_camp_new_launch_waits_for_provisioning_then_confirms(cli_env) -> None:
     """The two bounded waits run back to back, in that order."""
-    result = _camp(cli_env, "new", "feat-m", "--group", "mygroup", "--launch")
+    result = _camp(cli_env, "new", "feat-m", "--group", "mygroup", "--no-session", "--launch")
 
     assert result.returncode == 0, result.stderr
     waited = result.stderr.index("camp new: waiting for provisioning")
@@ -3178,16 +3196,22 @@ def test_camp_new_launch_waits_for_provisioning_then_confirms(cli_env) -> None:
     assert waited < confirmed
 
 
-def test_camp_new_json_without_launch_is_refused(cli_env) -> None:
+def test_camp_new_json_without_launch_succeeds(cli_env) -> None:
+    """`--json` no longer requires `--launch` — the door's own object is the
+    machine answer for `camp new` itself, on the default (door) path."""
     result = _camp(cli_env, "new", "feat-n", "--group", "mygroup", "--json")
 
-    assert result.returncode != 0
-    assert result.stdout == ""
-    assert "camp new: --json requires --launch" in result.stderr
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is True
+    assert payload["outcome"] == "created"
+    assert payload["slug"] == "feat-n"
+    assert payload["workspace_path"].endswith("/feat-n")
 
 
 def test_bare_camp_new_output_is_unchanged(cli_env) -> None:
-    """Regression pin: adding --launch must not perturb the bare surface."""
+    """Regression pin: stdout stays exactly the path line — the door's outcome
+    line is appended to stderr instead of perturbing it."""
     result = _camp(cli_env, "new", "feat-o", "--group", "mygroup")
 
     assert result.returncode == 0, result.stderr
@@ -3197,8 +3221,7 @@ def test_bare_camp_new_output_is_unchanged(cli_env) -> None:
         "camp new: created workspace 'feat-o' — provisioning in the background\n"
         "  check provisioning: camp status feat-o\n"
         "  activates when ready, or run: camp activate feat-o\n"
-        '  tip: run eval "$(trailhead shellenv)" so `camp new` cd\'s you in '
-        "automatically\n"
+        "created camp-mygroup-feat-o\n"
     )
 
 
@@ -3278,7 +3301,9 @@ def test_camp_new_without_activate_never_triggers_activate_phase_work(cli_env) -
     task execution, even once the member reaches boot-readiness."""
     _author_activate_group(cli_env, "actgroup2")
 
-    result = _camp(cli_env, "new", "feat-noact", "--group", "actgroup2", "--launch")
+    result = _camp(
+        cli_env, "new", "feat-noact", "--group", "actgroup2", "--no-session", "--launch"
+    )
 
     assert result.returncode == 0, result.stderr
     assert "camp launch: confirmed session" in result.stderr
@@ -3300,7 +3325,9 @@ def test_camp_new_launch_proceeds_once_boot_ready_with_activate_work_still_outst
     activate-phase work that nothing has triggered yet."""
     _author_activate_group(cli_env, "actgroup3")
 
-    result = _camp(cli_env, "new", "feat-lo", "--group", "actgroup3", "--launch")
+    result = _camp(
+        cli_env, "new", "feat-lo", "--group", "actgroup3", "--no-session", "--launch"
+    )
 
     assert result.returncode == 0, result.stderr
     assert "camp launch: confirmed session" in result.stderr
@@ -3315,7 +3342,15 @@ def test_camp_new_activate_on_a_group_with_no_activate_tasks_is_a_clean_no_op(cl
 
 def test_camp_new_activate_composes_with_no_wait(cli_env) -> None:
     result = _camp(
-        cli_env, "new", "feat-anw", "--group", "mygroup", "--launch", "--no-wait", "--activate"
+        cli_env,
+        "new",
+        "feat-anw",
+        "--group",
+        "mygroup",
+        "--no-session",
+        "--launch",
+        "--no-wait",
+        "--activate",
     )
 
     assert result.returncode == 0, result.stderr
@@ -3416,6 +3451,72 @@ def test_camp_kill_stops_a_launched_session(cli_env) -> None:
     assert session_id in result.stderr
     assert "stopped" in result.stderr
     assert result.stdout == f"{session_id}\n"  # stdout is the session id alone
+
+
+def test_camp_kill_of_a_name_that_prefixes_another_live_session_never_touches_it(
+    cli_env, monkeypatch
+) -> None:
+    """`camp kill` targets `-t` `=`-exact. The default `_TMUX_STUB` already
+    resolves a target by exact dict-key lookup (it strips `=` and looks the
+    result up directly), so it cannot distinguish "qualified" from "not" —
+    only a stub that reproduces tmux's OWN bare-target prefix fallback can.
+    This swaps one in for this test alone: a bare `-t` resolves by prefix
+    when there is no exact match; an `=`-qualified one never does.
+
+    Fails against a naive "strip the `=` and match exactly, whether or not
+    one was given" reading of the property, and against the pre-task code
+    (bare `-t` throughout), which would resolve the kill against whichever
+    live session the short name happens to prefix.
+    """
+    session_id = _launched_session(cli_env)
+    tmux_name = f"camp-feat-kill-{session_id[:8]}"
+
+    # A second, unrelated live session whose name the one being killed is a
+    # STRICT PREFIX of. Seeded directly into the table the stub reads, the
+    # same mechanism `test_camp_list.py`'s real-parser test uses.
+    table = json.loads(cli_env["tmux_table_file"].read_text(encoding="utf-8"))
+    survivor = f"{tmux_name}-longer"
+    table[survivor] = "sleep 100000"
+    cli_env["tmux_table_file"].write_text(json.dumps(table), encoding="utf-8")
+
+    prefix_matching_stub = _TMUX_STUB.replace(
+        "def _target():\n"
+        "    for i, arg in enumerate(args):\n"
+        '        if arg == "-t" and i + 1 < len(args):\n'
+        '            return args[i + 1].lstrip("=")\n'
+        "    return None\n",
+        "def _target():\n"
+        "    for i, arg in enumerate(args):\n"
+        '        if arg == "-t" and i + 1 < len(args):\n'
+        "            raw = args[i + 1]\n"
+        '            if raw.startswith("="):\n'
+        "                return raw[1:]\n"
+        "            table = _table()\n"
+        "            if raw in table:\n"
+        "                return raw\n"
+        "            matches = [n for n in table if n.startswith(raw)]\n"
+        "            return matches[0] if len(matches) == 1 else None\n"
+        "    return None\n",
+    )
+    assert prefix_matching_stub != _TMUX_STUB, "the stub's _target() shape moved"
+    stub_dir = cli_env["tmp_path"] / "prefix-matching-tmux"
+    stub_dir.mkdir()
+    stub_path = stub_dir / "tmux"
+    stub_path.write_text(prefix_matching_stub, encoding="utf-8")
+    stub_path.chmod(0o755)
+
+    result = _camp(
+        cli_env,
+        "kill",
+        session_id[:8],
+        cwd=cli_env["tmp_path"],
+        extra_env={"PATH": f"{stub_dir}{os.pathsep}{cli_env['env']['PATH']}"},
+    )
+
+    assert result.returncode == 0, result.stderr
+    table_after = json.loads(cli_env["tmux_table_file"].read_text(encoding="utf-8"))
+    assert survivor in table_after, "the colliding, unrelated session was killed"
+    assert tmux_name not in table_after
 
 
 def test_camp_kill_is_reachable_with_no_group_resolvable(cli_env) -> None:

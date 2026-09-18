@@ -89,13 +89,18 @@ this from a hang.
 """
 from __future__ import annotations
 
+import json
+import os
 import sys
 import time
 from contextlib import ExitStack
 from pathlib import Path
+from typing import Callable
 
 from .. import locking
+from ..record import model as record_model
 from .common import (
+    SYNC_REFUSAL_MESSAGES,
     _git,
     _resolve_all_vaults,
     _resolve_lore_state_dir,
@@ -106,9 +111,151 @@ from .common import (
     _vault_unpushed,
     _vault_upstream_ref,
     machine_state_key,
+    vault_refusal_condition,
 )
+from .init import _SITES_DIR
 
 DEFAULT_SYNC_MSG = "lore: sync vault"
+
+#: The per-vault outcome when that vault's write lock is already held by a
+#: concurrent writer at the moment the sweep/manual `lore sync` tries to
+#: acquire it — a readable value, not a message string a caller has to parse
+#: back out of stdout. A person at a terminal is not stranded behind the
+#: holder: the vault is skipped for this run and reported, not waited on.
+SYNC_IN_PROGRESS = "in-progress"
+
+#: How many times :func:`_push_one` replays onto a moved history and re-pushes
+#: before giving up. Configurable (see :func:`resolve_publish_retry_max`)
+#: because how much a moved history is worth retrying against is an operator
+#: call, not a universal constant — a low-traffic vault rarely needs more than
+#: one replay, a busy multi-device vault may race the forge more often.
+DEFAULT_PUBLISH_RETRY_MAX = 3
+
+#: Outcomes :func:`_push_one` can produce beyond a plain successful push (which
+#: reports :data:`PUBLISH_OK`) or the pre-existing offline/no-op paths (also
+#: :data:`PUBLISH_OK` — this module's existing soft-network contract is
+#: unchanged). Readable values, not message strings a later caller has to
+#: parse back out of stdout/stderr — the same shape as ``SYNC_IN_PROGRESS``
+#: above and ``vault_refusal_condition``'s ``SYNC_REFUSAL_*`` constants.
+PUBLISH_OK = "ok"
+
+#: The push was rejected, but the published history did NOT move — a
+#: pre-receive hook, a protected branch, or a permission refusal, not a race.
+#: No retry can clear this: the local commit is left in place (vault clean,
+#: diverged) for a person, or a later sweep, to settle.
+PUBLISH_HOLDING = "holding"
+
+#: The published history moved on every attempt through the configured
+#: maximum. Hard failure — distinct from a generic push failure so a caller
+#: can tell "the forge just won't sit still" apart from "something is broken".
+PUBLISH_RETRIES_EXHAUSTED = "retries-exhausted"
+
+#: The closed outcome vocabulary `lore sync --json` reports, one member per
+#: vault entry in :func:`render_sync_json`'s document. Three members are the
+#: exact literal values of this module's own outcome constants above
+#: (:data:`SYNC_IN_PROGRESS`, :data:`PUBLISH_HOLDING`,
+#: :data:`PUBLISH_RETRIES_EXHAUSTED`) — `cmd_sync` stores those constants
+#: directly into its `outcomes` dict, so no separate mapping step exists for
+#: them. "converged", "published", and "refused" are decided in `cmd_sync`
+#: itself (there is no dedicated constant for each — see its outcome-derivation
+#: comment) and asserted here as the literal strings a caller reads. No value
+#: outside this set is ever emitted; a caller may treat it as a closed enum.
+SYNC_OUTCOMES = frozenset(
+    {
+        SYNC_IN_PROGRESS,
+        "converged",
+        "published",
+        PUBLISH_HOLDING,
+        "refused",
+        PUBLISH_RETRIES_EXHAUSTED,
+    }
+)
+
+#: The report schema, documented once and shown both on `lore sync --help`
+#: (where the reader is choosing a form) and on `--json` itself — mirrors
+#: `cli/resolve.py`'s `_REPORT_SCHEMA`.
+_SYNC_REPORT_SCHEMA = (
+    'The machine-readable report is: {"schema", "vaults":[{"vault","outcome"'
+    '[,"condition"]}]}. "outcome" is one of "in-progress", "converged", '
+    '"published", "holding", "refused", "retries-exhausted" — a CLOSED set; '
+    "no other value is ever emitted. "
+    '"condition" is present only when "outcome" is "refused", naming which '
+    "SYNC_REFUSAL_CONDITIONS member (mid-rebase, mid-merge, detached-head, "
+    "stale-lock) was found. A vault that did not reach a determinate outcome "
+    "this run — for ANY reason, including but not limited to a missing "
+    "vault, a git error while staging, or a failed lock acquisition — has no "
+    "entry; its failure is reported on stderr and reflected only in the exit "
+    "code, exactly as without --json. A run that fails before any vault is "
+    "even selected (an unreadable config, or an unknown --vault name) prints "
+    "no document at all."
+)
+
+
+def render_sync_json(entries: list[tuple[str, str, "str | None"]]) -> dict:
+    """Render `lore sync --json`'s report payload.
+
+    *entries* is ``[(vault_name, outcome, condition_or_None), ...]``, in the
+    order the vaults were synced. *outcome* must be a member of
+    :data:`SYNC_OUTCOMES`; *condition* is non-``None`` only for a "refused"
+    outcome. Mirrors `cli/resolve.py`'s `render_json` — a plain dict, printed
+    with ``json.dumps(..., indent=2)`` by the caller.
+
+    Raises:
+        ValueError: if *outcome* is not a member of :data:`SYNC_OUTCOMES` —
+            the schema string promises callers a closed vocabulary, and this
+            is what makes that promise a guarantee rather than a claim
+            resting on review.
+    """
+    vaults = []
+    for name, outcome, condition in entries:
+        if outcome not in SYNC_OUTCOMES:
+            raise ValueError(
+                f"outcome {outcome!r} for vault {name!r} is not in SYNC_OUTCOMES: "
+                f"{sorted(SYNC_OUTCOMES)}"
+            )
+        entry: dict = {"vault": name, "outcome": outcome}
+        if condition is not None:
+            entry["condition"] = condition
+        vaults.append(entry)
+    return {"schema": _SYNC_REPORT_SCHEMA, "vaults": vaults}
+
+
+def resolve_publish_retry_max(env: dict | None = None) -> int:
+    """Resolve the max publish-retry attempt count, in precedence order.
+
+    1. ``LORE_PUBLISH_RETRY_MAX``, if set to a valid positive integer string.
+    2. The ``publish_retry_max`` key in ``config.json``, if present and a
+       positive int (see :func:`lore.vault.config.read_publish_retry_max`).
+    3. :data:`DEFAULT_PUBLISH_RETRY_MAX`.
+
+    Mirrors :func:`lore.record_url.resolve_base`'s precedence shape. A
+    non-positive or unparseable value at any layer is treated as absent rather
+    than raising — a malformed override must not turn "keep retrying a moved
+    history" into "never retry at all" (0) or a crash.
+
+    Args:
+        env: Optional ``{str: str}`` environment override, used both for
+             reading ``LORE_PUBLISH_RETRY_MAX`` and forwarded to
+             :func:`lore.vault.config.read_publish_retry_max` for XDG
+             resolution. ``None`` reads the real process environment.
+    """
+    from ..vault import config as vault_config_mod
+
+    source = os.environ if env is None else env
+    env_value = source.get("LORE_PUBLISH_RETRY_MAX", "")
+    if env_value:
+        try:
+            parsed = int(env_value)
+        except ValueError:
+            parsed = None
+        if parsed is not None and parsed > 0:
+            return parsed
+
+    config_value = vault_config_mod.read_publish_retry_max(env=env)
+    if config_value is not None and config_value > 0:
+        return config_value
+
+    return DEFAULT_PUBLISH_RETRY_MAX
 
 
 def _make_emitters(name: str, width: int):
@@ -154,6 +301,13 @@ PULL_OK = "ok"
 PULL_OFFLINE = "offline"
 PULL_FAILED = "failed"
 
+#: :func:`_pull_only_one`'s own outcome for a dirty tree it deliberately did not
+#: rebase (see its docstring) — distinct from :data:`PULL_OK`, which a caller
+#: must be able to tell apart from "nothing needed doing". A dirty tree failed
+#: to integrate is not converged: something is uncommitted, and only the full
+#: `lore sync` (which commits before it rebases) can clear it.
+PULL_DIRTY = "dirty"
+
 
 def _fetch_origin(vault: Path, say_err, *, pull_only: bool = False) -> bool:
     """Fetch ``origin``. Returns ``True`` on success, reporting on failure.
@@ -176,16 +330,35 @@ def _fetch_origin(vault: Path, say_err, *, pull_only: bool = False) -> bool:
     return False
 
 
+#: ``git status``/``git add`` pathspec-magic exclusions applied to every UNSCOPED
+#: probe of a vault's tree: the write-lock sidecar (merely taking the lock
+#: create-or-opens it) and the ``outpost/`` daemon-config carve-out (deliberately
+#: never committed — see :func:`_vault_is_dirty`). Excluding via pathspec magic
+#: means a vault whose OWN ``.gitignore`` was scaffolded before ``outpost/`` was
+#: added to :data:`config.installer._GITIGNORE_PATTERNS` still reads clean,
+#: without depending on that vault ever being re-scaffolded.
+_STATUS_EXCLUDE_PATHSPECS = (
+    f":(exclude){locking.VAULT_LOCK_NAME}",
+    ":(exclude)outpost/",
+)
+
+
 def _vault_is_dirty(vault: Path) -> bool:
     """Return ``True`` iff ``vault``'s working tree has changes to commit.
 
-    Excludes the write-lock sidecar for the same reason
-    :func:`_stage_and_commit_one` does: merely taking the lock create-or-opens
-    ``.lore.lock``, so counting it would make every locked vault read as dirty.
+    Excludes the same two paths :data:`_STATUS_EXCLUDE_PATHSPECS` (and
+    :func:`_stage_and_commit_one`) excludes: the write-lock sidecar — merely
+    taking the lock create-or-opens ``.lore.lock``, so counting it would make
+    every locked vault read as dirty — and the ``outpost/`` daemon-config
+    carve-out, which is deliberately never committed. Excluding ``outpost/``
+    here, not just at the commit-scope allow-list, matters because this
+    function gates whether ``--pull-only`` integrates at all
+    (:func:`_pull_only_one`) and whether the implicit pull's own pull-only call
+    does the same: without it, ANY vault carrying an `outpost/` directory —
+    which is every daemon-managed vault — reads as permanently dirty and never
+    integrates.
     """
-    rc, out, _ = _git(
-        vault, "status", "--porcelain", "--", ".", f":(exclude){locking.VAULT_LOCK_NAME}"
-    )
+    rc, out, _ = _git(vault, "status", "--porcelain", "--", ".", *_STATUS_EXCLUDE_PATHSPECS)
     return rc != 0 or bool(out.strip())
 
 
@@ -212,7 +385,10 @@ def _pull_only_one(vault: Path, say, say_err) -> tuple[str, int]:
     (worse, for a caller that asked for nothing destructive) stashes them. So the
     fetch still runs — it touches no file — and the operator is told how far
     behind the vault is, which is the whole actionable content of the pull they
-    did not get.
+    did not get. **This returns :data:`PULL_DIRTY`, never :data:`PULL_OK`** — a
+    dirty tree that could not be integrated is not "nothing needed doing", and a
+    caller that collapsed the two would report a vault holding uncommitted work
+    as converged.
     """
     rc_remote, remote_url, _ = _git(vault, "remote", "get-url", "origin")
     if rc_remote != 0 or not remote_url:
@@ -228,7 +404,7 @@ def _pull_only_one(vault: Path, say, say_err) -> tuple[str, int]:
                 f"notice: {behind} commit(s) behind origin — the working tree is not "
                 "clean, so nothing was integrated; run `lore sync` to commit and pull"
             )
-        return PULL_OK, 0
+        return PULL_DIRTY, 0
 
     return _pull_one(vault, say, say_err, already_fetched=True)
 
@@ -345,8 +521,63 @@ def _pull_one(vault: Path, say, say_err, *, already_fetched: bool = False) -> tu
     return PULL_OK, behind
 
 
-def _push_one(vault: Path, say, say_err, *, committed: bool) -> int:
-    """Push ``vault`` to origin when there is anything to push. Always returns 0.
+def _refetch_discriminator(vault: Path, branch: str) -> tuple[bool, bool]:
+    """Re-fetch ``origin`` and classify a just-rejected push. Never reads stderr.
+
+    Returns ``(fetch_ok, advanced)`` where ``advanced`` means
+    ``refs/remotes/origin/<branch>`` moved past its pre-fetch value:
+
+    - ``(True, True)``  — the published history genuinely moved; a replay can
+      clear the rejection.
+    - ``(False, False)`` — the forge itself was unreachable; the rejection was
+      never about history at all.
+    - ``(True, False)`` — the forge answered and its history did NOT move, so
+      the rejection has some other cause (a hook, a protected branch,
+      permission) that no amount of retrying will ever clear.
+
+    The discrimination is entirely observable state — a fetch exit code and a
+    ref comparison — never git or remote *text*: lore's stderr embeds the
+    remote URL verbatim, which is a credential in a team-synced vault, and
+    this function's result must never depend on parsing it.
+    """
+    ref = f"refs/remotes/origin/{branch}"
+    rc_before, before, _ = _git(vault, "rev-parse", "--quiet", "--verify", ref)
+    before_sha = before if rc_before == 0 else None
+    rc_fetch, _, _ = _git(vault, "fetch", "origin")
+    fetch_ok = rc_fetch == 0
+    rc_after, after, _ = _git(vault, "rev-parse", "--quiet", "--verify", ref)
+    after_sha = after if rc_after == 0 else None
+    advanced = fetch_ok and before_sha != after_sha
+    return fetch_ok, advanced
+
+
+def _push_one(
+    vault: Path,
+    say,
+    say_err,
+    *,
+    committed: bool,
+    max_attempts: int | None = None,
+    on_replay: Callable[[int], None] | None = None,
+) -> tuple[int, str, int]:
+    """Push ``vault`` to origin, replaying onto a moved history when rejected.
+
+    Returns ``(exit_code, ending, attempts_used)``. ``ending`` is
+    :data:`PUBLISH_OK` on a clean push (including every existing no-op —
+    nothing to push, no origin remote, detached HEAD, a genuinely unreachable
+    forge), :data:`PUBLISH_HOLDING` when the push was rejected for a reason no
+    retry clears, or :data:`PUBLISH_RETRIES_EXHAUSTED` when the published
+    history kept moving past ``max_attempts`` (default
+    :func:`resolve_publish_retry_max`). ``attempts_used`` counts only the
+    moved-history case — the one condition a retry can actually clear.
+
+    ``on_replay``, when given, is called once per successful replay with the
+    number of commits that replay's rebase integrated from origin — the same
+    quantity :func:`_pull_one` returns for an ordinary pull. A vault whose push
+    loses a race fetches and rebases a peer's commits onto its own tree exactly
+    like a pull does, so those commits must count toward the caller's reindex
+    decision the same way a pull's commits do; a caller that ignores
+    ``on_replay`` gets the previous behavior unchanged.
 
     Skipped silently when the vault is clean AND already in sync with its
     upstream — the common case across a multi-vault sync, where an unconditional
@@ -358,116 +589,256 @@ def _push_one(vault: Path, say, say_err, *, committed: bool) -> int:
     upstream branch", exit 128) and, crucially, never sets one either — so
     without this the vault would fail identically on every future sync while the
     error text blamed the network. Setting upstream on the first push is what
-    makes the condition converge.
+    makes the condition converge. A push rejected for a moved history never
+    records an upstream either, so a retry after replaying must still pass
+    ``--set-upstream`` again until one attempt actually lands.
 
     A missing origin is reported only when this run committed something, so the
     per-vault line names the vault whose new commit is now unbacked; a clean
     remote-less vault stays quiet rather than re-reporting a standing condition on
     every sync (``lore status`` is the surface that reports it standing).
+
+    **On rejection, :func:`_refetch_discriminator` classifies the cause before
+    deciding whether to retry** — never by parsing stderr (see that function's
+    docstring). A genuinely unreachable forge falls back to the pre-existing
+    soft "committed locally; push failed" no-op, unchanged and consuming no
+    attempt. A moved history is replayed under the vault's write lock (a tree
+    mutation, exactly like :func:`_pull_one`'s rebase) and the push retried;
+    exhausting ``max_attempts`` this way is a distinct, HARD ending
+    (:data:`PUBLISH_RETRIES_EXHAUSTED`, exit 1) rather than the generic soft
+    push-failure notice, so a caller can tell "the forge just won't sit still"
+    apart from "the network is down". A rejection where the history did NOT
+    move is :data:`PUBLISH_HOLDING` — HARD (exit 1), consumes no attempt, and
+    leaves the local commit exactly where it landed for a person (or a later
+    sweep) to settle; see the module's outcome constants. Both
+    :data:`PUBLISH_HOLDING` producers (this one and the replay-conflict path
+    below) exit non-zero identically — a person must act either way.
     """
     rc_remote, remote_url, _ = _git(vault, "remote", "get-url", "origin")
     if rc_remote != 0 or not remote_url:
         if committed:
             say("No origin remote — skipping push.")
-        return 0
+        return 0, PUBLISH_OK, 0
 
     if not committed and not _vault_unpushed(vault):
-        return 0
+        return 0, PUBLISH_OK, 0
 
-    push_args = ["push", "origin"]
-    if not _vault_has_upstream(vault):
+    if max_attempts is None:
+        max_attempts = resolve_publish_retry_max()
+
+    attempts_used = 0
+    while True:
         branch = _vault_head_branch(vault)
         if branch is None:
             # Detached HEAD: there is no branch to track, and guessing a refspec
             # would push to a name the operator never chose. Report, don't guess.
             say_err("notice: detached HEAD — skipping push; check out a branch and re-run")
-            return 0
-        push_args = ["push", "--set-upstream", "origin", branch]
+            return 0, PUBLISH_OK, attempts_used
 
-    rc_push, _, stderr_push = _git(vault, *push_args)
-    if rc_push != 0:
-        say_err("notice: committed locally; push failed — re-run `lore sync` when online")
-        say_err(f"  push error: {stderr_push}")
-        return 0
-    say("Pushed to origin.")
-    return 0
+        push_args = ["push", "origin"]
+        if not _vault_has_upstream(vault):
+            push_args = ["push", "--set-upstream", "origin", branch]
+
+        rc_push, _, _stderr_push = _git(vault, *push_args)
+        if rc_push == 0:
+            say("Pushed to origin.")
+            return 0, PUBLISH_OK, attempts_used
+
+        fetch_ok, advanced = _refetch_discriminator(vault, branch)
+        if not fetch_ok:
+            say_err("notice: committed locally; push failed — re-run `lore sync` when online")
+            return 0, PUBLISH_OK, attempts_used
+
+        if not advanced:
+            say_err(
+                "notice: the push did not go through and the published history "
+                "did not move — needs a person; re-run `lore sync` later"
+            )
+            return 1, PUBLISH_HOLDING, attempts_used
+
+        attempts_used += 1
+        if attempts_used >= max_attempts:
+            say_err(
+                f"error: publish retries exhausted after {attempts_used} attempt(s) "
+                "— the published history kept moving; re-run `lore sync`"
+            )
+            return 1, PUBLISH_RETRIES_EXHAUSTED, attempts_used
+
+        # Count what the replay is about to integrate BEFORE rebasing — the
+        # same measurement `_pull_one` takes of its own rebase, and for the
+        # same reason: once the rebase replays local commits on top,
+        # `HEAD..origin/<branch>` no longer names the commits that just landed.
+        rc_count, count_out, _ = _git(
+            vault, "rev-list", "--count", f"HEAD..origin/{branch}"
+        )
+        replayed = int(count_out) if rc_count == 0 and count_out.isdigit() else 0
+
+        # Tree mutation — locked, exactly like `_pull_one`'s rebase. The abort
+        # is part of the same critical section: the vault must not be
+        # observable mid-rebase.
+        with locking.vault_write_lock(vault):
+            rc_rebase, _stdout_rebase, _stderr_rebase = _git(
+                vault, "rebase", f"origin/{branch}"
+            )
+            if rc_rebase != 0:
+                # Abort unconditionally, in the same critical section — the
+                # vault must never be left observable mid-rebase, exactly like
+                # `_pull_one`'s own conflict-abort contract.
+                _git(vault, "rebase", "--abort")
+        if rc_rebase != 0:
+            say_err("error: replaying onto the moved history failed — publish skipped")
+            return 1, PUBLISH_HOLDING, attempts_used
+
+        if on_replay is not None and replayed:
+            on_replay(replayed)
+
+
+#: The root file lore scaffolds that IS committed. ``.lore.lock`` is deliberately
+#: absent — the write lock sidecar and never part of the commit scope.
+_COMMIT_SCOPE_ROOT_FILES = (".gitignore",)
+
+def _untracked_allowlist_pathspecs(vault: Path) -> list[str]:
+    """The allow-listed pathspecs an UNTRACKED addition may be staged under in
+    *vault*: every record kind directory, the ``sites/`` free-write zone, and
+    the scaffolded root ``.gitignore`` — filtered to what actually exists on
+    disk.
+
+    This bounds only NEW, untracked content. Tracked content is never bounded
+    by this list — see :func:`_stage_and_commit_one`, which stages every
+    tracked modification and deletion unscoped so a tracked file outside this
+    allow-list (an adopted repo's root ``README.md``, say) is never silently
+    left uncommittable, and a wholesale-removed kind directory's deletion is
+    never invisible because the directory no longer exists to name here.
+
+    ``outpost/`` and ``.lore.lock`` are never named, so neither can ever be
+    staged as a new addition regardless of what a vault's own ``.gitignore``
+    says. The filter to existing paths is required, not an optimization: ``git
+    add -A -- <pathspec ...>`` exits 128 and stages NOTHING AT ALL the moment
+    one named pathspec is absent from disk, and most real vaults do not carry
+    every record kind.
+    """
+    candidates = sorted(record_model.KINDS) + [_SITES_DIR, *_COMMIT_SCOPE_ROOT_FILES]
+    return [name for name in candidates if (vault / name).exists()]
+
+
+def _stray_untracked_paths(status_lines: list[str], allowed_tops: set[str]) -> list[str]:
+    """Untracked paths in *status_lines* whose top-level component is not one of
+    *allowed_tops* — content that will never be staged and must be reported
+    rather than silently swallowed. Tracked lines (any code other than ``??``)
+    are never strays: they are always in scope (see
+    :func:`_stage_and_commit_one`)."""
+    strays = []
+    for line in status_lines:
+        if not line.startswith("??"):
+            continue
+        path = line[3:].strip()
+        top = path.split("/", 1)[0]
+        if top not in allowed_tops:
+            strays.append(path)
+    return strays
+
+
+def _probe_vault_status(vault: Path) -> tuple[int, list[str], list[str], list[str], str]:
+    """Run one UNSCOPED status probe. Returns ``(rc, all_lines, committable_lines,
+    strays, stderr)``. ``committable_lines`` is every line that staging will
+    actually pick up — every tracked change, plus untracked additions under
+    :func:`_untracked_allowlist_pathspecs`. ``strays`` is untracked content
+    outside that allow-list, which staging will never touch.
+    """
+    rc, status_out, stderr = _git(vault, "status", "--porcelain", "--", ".", *_STATUS_EXCLUDE_PATHSPECS)
+    if rc != 0:
+        return rc, [], [], [], stderr
+    lines = [ln for ln in status_out.splitlines() if ln.strip()]
+    allowed = set(_untracked_allowlist_pathspecs(vault))
+    strays = _stray_untracked_paths(lines, allowed)
+    stray_set = set(strays)
+    committable = [
+        ln for ln in lines
+        if not (ln.startswith("??") and ln[3:].strip() in stray_set)
+    ]
+    return rc, lines, committable, strays, stderr
 
 
 def _stage_and_commit_one(vault: Path, message: str, say, say_err) -> tuple[int, bool]:
-    """Stage + commit one vault's whole tree under its write lock.
+    """Stage + commit one vault's tracked content and allow-listed new content
+    under its write lock.
 
     Returns ``(exit_code, committed)``.
 
-    **The lock file itself is excluded from every ``status``/``add`` call here**,
-    not just left to whatever ``.gitignore`` the vault happens to carry.
-    ``config.installer``'s ``scaffold_gitignore`` covers real vaults, but this
-    function must not depend on that: without the exclusion, the mere act of
-    taking the write lock — which create-or-opens ``<vault_root>/.lore.lock`` —
-    would make an otherwise-clean, ungitignored vault read as dirty and "commit"
-    nothing but its own lock sidecar. That would also break a freshly ``git
-    init``-ed vault's unborn-adoption path in :func:`_pull_one`, which assumes an
-    unborn HEAD implies a clean tree. Excluding the lock file makes that true
-    unconditionally, which is what lets :func:`cmd_sync` safely hold every
-    configured vault's lock for its ENTIRE multi-target commit phase (see its
-    docstring) instead of only locking vaults already known to be dirty.
-
-    The ``status`` probes use a ``:(exclude)`` pathspec for this — safe there,
-    since ``status`` never complains about ignored paths. ``add`` can't use the
-    same trick: git treats an *explicitly named* pathspec — even an exclude-only
-    one with no positive match — as an explicit request, and errors out ("The
-    following paths are ignored…") the moment that name also happens to be
-    gitignored (as ``.lore.lock`` is, in every scaffolded vault). So staging
-    instead runs a bare ``git add -A`` (no pathspec — the one shape where git
-    silently skips ignored paths instead of erroring on them) and then unstages
-    the lock file explicitly with ``git reset``, which never errors whether or
-    not the path was staged. Net effect is the same: the lock file is never part
-    of the commit, whether or not the vault's own ``.gitignore`` already excludes it.
+    **Tracked content is always in scope.** Every tracked modification and
+    deletion is staged unscoped (``git add -u -- .`` semantics) — a vault's
+    ``.gitignore`` and ``outpost/`` carve-out excepted via
+    :data:`_STATUS_EXCLUDE_PATHSPECS`, which the dirtiness judgment below uses
+    too, so "clean" means clean and a change confined to ``outpost/`` reads as
+    "nothing to commit" rather than a dirty tree that ``git add`` then silently
+    drops. **Only untracked ADDITIONS are bounded** — to
+    :func:`_untracked_allowlist_pathspecs` (every record kind directory,
+    ``sites/``, and the scaffolded root ``.gitignore``) — which is what the
+    bounding was ever for: keeping ``outpost/`` and stray junk out of a commit,
+    not dropping content already in the vault's history. An untracked path
+    outside that allow-list is never staged and never silently swallowed either
+    — see :func:`_stray_untracked_paths` — it is named in a notice instead.
 
     Probed twice, deliberately, though :func:`cmd_sync` — this function's only
-    caller — already holds every target's lock (lock file created) before
-    calling in, so neither probe here ever finds a vault genuinely un-locked;
-    the exclusion above is what keeps that pre-existing lock file from making
-    an otherwise-clean vault read as dirty regardless. The REPEAT under
-    ``with locking.vault_write_lock(vault)`` below (a reentrant no-op against
-    the lock cmd_sync already holds) exists because staging what the first
-    probe saw would only be safe if this vault's tree can't change between the
-    two reads — true for a standalone caller taking the lock fresh here, and
-    still asserted defensively even though cmd_sync's own batched acquisition
-    already rules out a concurrent cross-vault ``move_record`` doing exactly
-    that in between.
+    caller — already holds every target's lock before calling in, so neither
+    probe here ever finds a vault genuinely un-locked. The REPEAT under ``with
+    locking.vault_write_lock(vault)`` below (a reentrant no-op against the lock
+    cmd_sync already holds) exists because staging what the first probe saw
+    would only be safe if this vault's tree — and its set of kind directories —
+    can't change between the two reads: true for a standalone caller taking the
+    lock fresh here, and still asserted defensively even though cmd_sync's own
+    batched acquisition already rules out a concurrent cross-vault
+    ``move_record`` doing exactly that in between.
 
     No network runs in here — see the module docstring.
     """
-    lock_exclude = f":(exclude){locking.VAULT_LOCK_NAME}"
 
-    # `status --porcelain` reports untracked files too, so nothing is missed —
-    # except the lock sidecar itself, deliberately (see above).
-    rc, status_out, stderr = _git(vault, "status", "--porcelain", "--", ".", lock_exclude)
+    rc, _lines, committable, _strays, stderr = _probe_vault_status(vault)
     if rc != 0:
         say_err(f"error: git status failed: {stderr} — skipped")
         return 1, False
-    if not status_out.strip():
+    if not committable:
         say("Nothing to commit — vault is clean.")
         return 0, False
 
     with locking.vault_write_lock(vault):
-        rc, status_out, stderr = _git(vault, "status", "--porcelain", "--", ".", lock_exclude)
+        rc, _lines, committable, strays, stderr = _probe_vault_status(vault)
         if rc != 0:
             say_err(f"error: git status failed: {stderr} — skipped")
             return 1, False
 
-        if not status_out.strip():
+        if strays:
+            say_err(
+                "notice: untracked and outside the commit scope — never staged: "
+                + ", ".join(strays)
+            )
+
+        if not committable:
             say("Nothing to commit — vault is clean.")
             return 0, False
 
-        # Bare `-A`, no pathspec — see the docstring for why an explicit
-        # exclude pathspec errors here (unlike for `status`).
-        rc, _, stderr = _git(vault, "add", "-A")
-        if rc != 0:
-            say_err(f"error: git add failed: {stderr} — skipped")
-            return 1, False
-        # Unstage the lock sidecar if it got swept up (i.e. wasn't already
-        # gitignored). `reset` never errors on an ignored or never-staged path.
+        # `git add -u -- .` refuses outright on an unborn branch ("pathspec '.'
+        # did not match any file(s) known to git", exit 128) — with zero
+        # commits there is by definition nothing tracked yet for `-u` to
+        # update, so it is skipped rather than treated as a real failure. A
+        # never-committed vault (`lore vault add --path <existing repo>`
+        # before its first sync) is exactly this shape.
+        rc_head, _, _ = _git(vault, "rev-parse", "--verify", "-q", "HEAD")
+        if rc_head == 0:
+            rc, _, stderr = _git(vault, "add", "-u", "--", ".")
+            if rc != 0:
+                say_err(f"error: git add failed: {stderr} — skipped")
+                return 1, False
+        allowlisted = _untracked_allowlist_pathspecs(vault)
+        if allowlisted:
+            rc, _, stderr = _git(vault, "add", "-A", "--", *allowlisted)
+            if rc != 0:
+                say_err(f"error: git add failed: {stderr} — skipped")
+                return 1, False
+        # Belt-and-braces: `.lore.lock` is never staged by either `add` above —
+        # this unstages it anyway in case a future pathspec ever collided with
+        # the lock sidecar's name. `reset` never errors on an ignored or
+        # never-staged path.
         rc, _, stderr = _git(vault, "reset", "-q", "--", locking.VAULT_LOCK_NAME)
         if rc != 0:
             say_err(f"error: git reset (unstaging lock file) failed: {stderr} — skipped")
@@ -484,22 +855,70 @@ def _stage_and_commit_one(vault: Path, message: str, say, say_err) -> tuple[int,
 
 def _pull_and_push_one(
     vault: Path, say, say_err, *, committed: bool
-) -> tuple[int, int]:
+) -> tuple[int, int, str, bool]:
     """Pull then push one vault, given whether this run just committed to it.
 
-    Returns ``(exit_code, commits_pulled)``. Kept separate from
+    Returns ``(exit_code, commits_pulled, ending, published)``. ``commits_pulled``
+    includes commits integrated by the publish retry's replay
+    (:func:`_push_one`'s ``on_replay``), not just :func:`_pull_one`'s own pull —
+    a vault whose push loses a race replays a peer's commits onto its tree just
+    as surely as a pull does, and the caller's reindex decision must not miss
+    them. ``ending`` is
+    :func:`_push_one`'s outcome (:data:`PUBLISH_OK` for every path that never
+    reaches a push attempt — a failed or skipped pull). Kept separate from
     :func:`_stage_and_commit_one` so :func:`cmd_sync` can run every target's
     stage+commit phase under ONE combined lock (see its docstring) before
     running each target's network-touching pull/push tail separately, one
     vault at a time.
+
+    ``published`` is ``True`` only when this call actually landed a commit on
+    the forge — the signal :func:`cmd_sync` needs to tell its "converged"
+    outcome (nothing was ahead, or nothing left this machine) apart from
+    "published" (something was ahead and it landed), which :data:`PUBLISH_OK`
+    alone cannot say: it also covers every existing no-op (nothing to push, no
+    origin remote, an unreachable forge). Derived the same way
+    :func:`_push_one`'s own skip check does — from :func:`_vault_unpushed`,
+    never from git or remote text — read once before the push attempt (had
+    anything to publish at all) and once after (did it land): a push that
+    never reaches the forge (offline, no remote, detached HEAD) leaves the
+    vault still unpushed afterward, so ``published`` stays ``False`` exactly
+    where the existing soft-network contract already treats it as a no-op.
+
+    **An offline fetch that leaves local work unpublished is `holding`, not
+    `converged`.** A vault that just committed (or already carried an unpushed
+    commit) and then found the forge unreachable is hoarding work on this
+    machine — the exact condition the design doc wants visible, never silently
+    reported as nothing-left-to-do. This is a decided exception to the general
+    "offline stays quiet" rule: quiet is right when there is genuinely nothing
+    this host is holding, wrong when there is. `_vault_unpushed` is checked
+    BEFORE any push attempt runs (none does, on this path) — the same read
+    :data:`had_something_to_publish` below uses once :func:`_push_one` is
+    reached.
     """
     pull_state, pulled = _pull_one(vault, say, say_err)
     if pull_state == PULL_FAILED:
-        return 1, 0
+        return 1, 0, PUBLISH_OK, False
     if pull_state == PULL_OFFLINE:
-        return 0, 0
+        if committed or _vault_unpushed(vault):
+            return 1, 0, PUBLISH_HOLDING, False
+        return 0, 0, PUBLISH_OK, False
 
-    return _push_one(vault, say, say_err, committed=committed), pulled
+    had_something_to_publish = committed or _vault_unpushed(vault)
+    replayed_total = 0
+
+    def _record_replay(n: int) -> None:
+        nonlocal replayed_total
+        replayed_total += n
+
+    rc, ending, _attempts = _push_one(
+        vault, say, say_err, committed=committed, on_replay=_record_replay
+    )
+    published = (
+        had_something_to_publish
+        and ending == PUBLISH_OK
+        and not _vault_unpushed(vault)
+    )
+    return rc, pulled + replayed_total, ending, published
 
 
 # ---------------------------------------------------------------------------
@@ -694,6 +1113,19 @@ def cmd_sync(args) -> int:
     true`` vaults too and a shared vault must never be committed or pushed by an
     agent-actuated write). Keep it that way: coupling this function to argparse,
     or making any of those three attributes mandatory, breaks that caller.
+
+    **The commit-phase lock acquisition is non-blocking by default, blocking
+    only when the caller opts in.** ``blocking = getattr(args, "blocking",
+    True)`` — the sweep/manual ``lore sync`` CLI path sets ``blocking=False``
+    explicitly (see ``add_sync_subparser``) so a person at a terminal is never
+    stranded behind another writer holding the vault; a contended vault raises
+    ``BlockingIOError`` at the ExitStack acquisition, is reported as
+    :data:`SYNC_IN_PROGRESS`, skipped for the WHOLE run (commit phase and
+    pull/push phase both), and counted a SUCCESS, not a failure — exit 0.
+    ``_flush_sync_tail``'s ``SimpleNamespace`` carries no ``blocking`` attribute
+    at all, so ``getattr`` defaults it to ``True``: the tail keeps the original
+    always-blocks behavior, because a flush that gave up on its own sync tail
+    would report success while leaving the just-flushed record unpushed.
     """
     targets, rc = _select_targets(getattr(args, "vault", None))
     if rc != 0:
@@ -701,11 +1133,14 @@ def cmd_sync(args) -> int:
 
     message = getattr(args, "message", None) or DEFAULT_SYNC_MSG
     pull_only = bool(getattr(args, "pull_only", False))
+    blocking = bool(getattr(args, "blocking", True))
     width = max(len(name) for name, _ in targets) + 1  # + ':'
 
     say_map = {name: _make_emitters(name, width) for name, _ in targets}
     commit_rc: dict[str, int] = {}
     committed_map: dict[str, bool] = {}
+    outcomes: dict[str, str] = {}
+    refusal_conditions: dict[str, str] = {}
     valid_targets: list[tuple[str, Path]] = []
 
     for name, vault in targets:
@@ -721,6 +1156,16 @@ def cmd_sync(args) -> int:
                 "         (vault may be a subdirectory of a larger repo, or not a git repo)"
             )
             commit_rc[name] = 1
+            continue
+        refusal = vault_refusal_condition(vault_path)
+        if refusal is not None:
+            say_err(
+                f"error: refused — {SYNC_REFUSAL_MESSAGES[refusal]}: "
+                f"{vault_path} — skipped"
+            )
+            commit_rc[name] = 1
+            outcomes[name] = "refused"
+            refusal_conditions[name] = refusal
             continue
         valid_targets.append((name, vault_path))
 
@@ -748,7 +1193,27 @@ def cmd_sync(args) -> int:
             locked: list[tuple[str, Path]] = []
             for name, vault_path in sorted_targets:
                 try:
-                    stack.enter_context(locking.vault_write_lock(vault_path))
+                    stack.enter_context(
+                        locking.vault_write_lock(vault_path, blocking=blocking)
+                    )
+                except BlockingIOError:
+                    # Contention, not breakage — `BlockingIOError` is an
+                    # `OSError` subclass, so this must be caught FIRST or the
+                    # generic handler below misreports "in progress" as
+                    # "broken". Never reached when blocking=True: the plain
+                    # blocking flock below never raises this.
+                    #
+                    # No `commit_rc[name]` entry is set here (unlike the
+                    # `pull_only` branch above, which must set one — it never
+                    # populates `outcomes` at all): the pull/push loop below
+                    # checks `outcomes` BEFORE it ever reads `commit_rc`, so
+                    # this vault is skipped there on the `outcomes` entry
+                    # alone. Mutation-checked: setting `commit_rc[name] = 0`
+                    # here changed nothing observable.
+                    say, _say_err = say_map[name]
+                    say(f"sync already in progress for {name!r} — skipped")
+                    outcomes[name] = SYNC_IN_PROGRESS
+                    continue
                 except OSError as exc:
                     say_err = say_map[name][1]
                     say_err(f"error: failed to acquire vault lock: {exc} — skipped")
@@ -774,6 +1239,13 @@ def cmd_sync(args) -> int:
     failed: list[str] = []
     total_pulled = 0
     for name, vault in targets:
+        if outcomes.get(name) == SYNC_IN_PROGRESS:
+            # Already reported; skipped for the WHOLE run, not just the commit
+            # phase — pull/push would re-take this same vault's lock (inside
+            # `_pull_one`'s rebase/reset, always blocking) and strand the
+            # terminal exactly where the non-blocking commit phase just
+            # refused to.
+            continue
         if commit_rc.get(name, 1) != 0:
             failed.append(name)
             continue
@@ -784,11 +1256,42 @@ def cmd_sync(args) -> int:
         say, say_err = _make_emitters(name, width)
         if pull_only:
             state, pulled = _pull_only_one(Path(vault), say, say_err)
-            rc_one = 1 if state == PULL_FAILED else 0
+            # `--pull-only` never publishes, so there are three reachable
+            # outcomes, not two: the pre-existing "holding" shape
+            # (`PULL_FAILED` — a conflict this run could not integrate, vault
+            # left clean and diverged); a NEW "holding" shape (`PULL_DIRTY` —
+            # the tree had something uncommitted this run deliberately did not
+            # touch, so it is not converged either, exactly the same exit-code
+            # rule as a refused vault: a person must run the full sync);
+            # "converged" (`PULL_OK` — fetched and, if anything was behind,
+            # integrated cleanly); and `PULL_OFFLINE`, which gets NO entry at
+            # all — the loop could not determine an outcome, so it must not
+            # claim one, and the exit code for this vault stays 0.
+            if state == PULL_OFFLINE:
+                rc_one = 0
+            elif state in (PULL_FAILED, PULL_DIRTY):
+                rc_one = 1
+                outcomes[name] = "holding"
+            else:
+                rc_one = 0
+                outcomes[name] = "converged"
         else:
-            rc_one, pulled = _pull_and_push_one(
+            rc_one, pulled, ending, published = _pull_and_push_one(
                 Path(vault), say, say_err, committed=committed_map.get(name, False)
             )
+            if ending in (PUBLISH_HOLDING, PUBLISH_RETRIES_EXHAUSTED):
+                # Readable value, not a message string to parse back out —
+                # same shape as `outcomes[name] = SYNC_IN_PROGRESS` above.
+                outcomes[name] = ending
+            elif rc_one != 0:
+                # PULL_FAILED: a genuine content conflict during integration —
+                # the rebase was aborted, so the vault is clean and diverged,
+                # holding its own commit(s) for `lore resolve` to settle.
+                outcomes[name] = PUBLISH_HOLDING
+            elif published:
+                outcomes[name] = "published"
+            else:
+                outcomes[name] = "converged"
         total_pulled += pulled
         if rc_one != 0:
             failed.append(name)
@@ -805,14 +1308,31 @@ def cmd_sync(args) -> int:
         else:
             print(f"  Reindexed {count} record(s) after pull.")
 
+    rc_final = 1 if failed else 0
+
+    if bool(getattr(args, "json", False)):
+        # Printed LAST and unconditionally — an addition to the prose above,
+        # never a replacement for it (see `cmd_sync`'s docstring on
+        # `--json`). Only vaults that reached one of `SYNC_OUTCOMES`'s six
+        # determinate outcomes this run get an entry; a vault that did not —
+        # for any reason (never existed, not its own git toplevel, a bare git
+        # error while staging, a failed lock acquisition, ...) — has no
+        # outcome to report and is reflected only in the exit code and
+        # stderr, exactly as without `--json`.
+        entries = [
+            (name, outcomes[name], refusal_conditions.get(name))
+            for name, _vault in targets
+            if name in outcomes
+        ]
+        print(json.dumps(render_sync_json(entries), indent=2))
+
     if failed:
         print(
             f"error: {len(failed)} of {len(targets)} vault(s) failed to sync: "
             f"{', '.join(failed)}",
             file=sys.stderr,
         )
-        return 1
-    return 0
+    return rc_final
 
 
 def add_sync_subparser(sub) -> None:
@@ -832,4 +1352,12 @@ def add_sync_subparser(sub) -> None:
         "--pull-only", action="store_true",
         help="Fetch and integrate origin only — never stage, commit, or push",
     )
-    p_sync.set_defaults(func=cmd_sync)
+    p_sync.add_argument(
+        "--json", action="store_true",
+        help=f"Also print a machine-readable per-vault outcome report. {_SYNC_REPORT_SCHEMA}",
+    )
+    # Explicit opt-in to the non-blocking commit-phase lock acquisition — see
+    # `cmd_sync`'s docstring. `_flush_sync_tail`'s SimpleNamespace carries no
+    # `blocking` attribute at all, so it keeps `cmd_sync`'s always-blocks
+    # default instead of inheriting this parser default.
+    p_sync.set_defaults(func=cmd_sync, blocking=False)

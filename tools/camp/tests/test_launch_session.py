@@ -467,7 +467,10 @@ class TestSpawnShape:
 
         assert killed, "a timed-out spawn left the session name unreclaimed"
         assert killed[0][:3] == ["tmux", "kill-session", "-t"]
-        assert killed[0][3].startswith("camp-feat-x-")
+        # `-t` targets are always `=`-exact — see `camp.launch.tmux.target` —
+        # never prefix-matched, so the reclaim cannot collide with an
+        # unrelated session whose name happens to start with this one's.
+        assert killed[0][3].startswith("=camp-feat-x-")
 
     def test_a_spawn_that_fails_outright_reclaims_nothing(self, rig):
         """An OSError means the process never ran, so there is nothing to kill.
@@ -804,6 +807,46 @@ class TestNonRefusingWarnings:
 
         assert len(rig["spawn"].calls) == 1
         assert result.session_id
+
+
+class TestStateSessionEnvironmentDiagnostic:
+    """`_state_session_environment`'s own best-effort stderr diagnostic —
+    called directly, not through a full launch, since the property under
+    test is entirely local to this one print."""
+
+    @pytest.mark.parametrize(
+        "injected_stderr",
+        [
+            "denied\nfake: forged a second line",
+            "denied\rfake: overwrote the line",
+        ],
+        ids=["embedded-newline", "embedded-carriage-return"],
+    )
+    def test_a_nonzero_result_carrying_control_characters_is_neutralized(
+        self, capsys, injected_stderr
+    ):
+        import camp.launch.session as session
+
+        class _FakeTmux:
+            def set_environment_with_reason(self, name, operand, *, env, timeout):
+                result = type(
+                    "R", (), {"returncode": 1, "stdout": "", "stderr": injected_stderr}
+                )()
+                return result, None
+
+        session._state_session_environment(
+            _FakeTmux(), "camp-x", {"ACCOUNT_DIR": "/a"}, [], {}
+        )
+
+        err = capsys.readouterr().err
+        lines = [line for line in err.split("\n") if line]
+        assert len(lines) == 1, (
+            f"an embedded control character must not forge a second stderr "
+            f"line: {err!r}"
+        )
+        assert "\r" not in lines[0], f"a raw carriage return reached the line: {lines[0]!r}"
+        assert "denied" in lines[0]
+        assert "forged a second line" in lines[0] or "overwrote the line" in lines[0]
 
 
 # ---------------------------------------------------------------------------
@@ -1362,7 +1405,7 @@ class TestConfirmSession:
 
         kill_calls = [c for c in confirm_rig["calls"] if c[:2] == ["tmux", "kill-session"]]
         assert len(kill_calls) == 1
-        assert kill_calls[0] == ["tmux", "kill-session", "-t", "camp-feat-x-abcd1234"]
+        assert kill_calls[0] == ["tmux", "kill-session", "-t", "=camp-feat-x-abcd1234"]
         assert "trust" in str(excinfo.value).lower()
 
     def test_a_resumed_session_that_never_confirms_is_killed_and_refused(
@@ -1391,7 +1434,7 @@ class TestConfirmSession:
             )
 
         kill_calls = [c for c in confirm_rig["calls"] if c[:2] == ["tmux", "kill-session"]]
-        assert kill_calls == [["tmux", "kill-session", "-t", tmux_name]]
+        assert kill_calls == [["tmux", "kill-session", "-t", f"={tmux_name}"]]
         assert RESUME_ID in str(excinfo.value)
 
     def test_failing_kill_is_reported_on_stderr_naming_the_session(
@@ -1425,6 +1468,64 @@ class TestConfirmSession:
         err = capsys.readouterr().err
         assert "camp-feat-x-abcd1234" in err
         assert len([c for c in calls if c[:2] == ["tmux", "kill-session"]]) == 1
+
+    @pytest.mark.parametrize(
+        "injected_stderr",
+        [
+            "no such session\nfake: forged a second line",
+            "no such session\rfake: overwrote the line",
+        ],
+        ids=["embedded-newline", "embedded-carriage-return"],
+    )
+    def test_a_nonzero_kill_stderr_carrying_control_characters_is_neutralized(
+        self, confirm_rig, monkeypatch, capsys, injected_stderr
+    ):
+        """A nonzero `kill-session` reports tmux's own stderr verbatim on
+        this diagnostic line, hardened like the door's success line — an
+        embedded newline must not forge a second stderr row, and an
+        embedded carriage return must not rewrite the line already
+        printed. Varied across two distinct control characters so the
+        test depends on the input, not merely on the failure arm being
+        taken."""
+        session = confirm_rig["module"]
+        harness = SequencedHarness([[]])
+
+        def fake_run(argv, **kwargs):
+            if argv[0] == "tmux":
+                return type(
+                    "R", (), {"returncode": 1, "stdout": "", "stderr": injected_stderr}
+                )()
+            output = harness.parse_session_list("")
+            return type("R", (), {"returncode": 0, "stdout": output, "stderr": ""})()
+
+        monkeypatch.setattr(session.subprocess, "run", fake_run)
+
+        with pytest.raises(session.LaunchError):
+            session.confirm_session(
+                harness,
+                confirm_rig["launched"],
+                interval=0.5,
+                timeout=0.5,
+                sleep=lambda s: None,
+                clock=FakeClock(1.0),
+            )
+
+        err = capsys.readouterr().err
+        # Split on real newlines only (never `\r`) so an embedded carriage
+        # return that camp fails to escape stays visible inside a "line"
+        # here, rather than being treated as a legitimate line break.
+        lines = [line for line in err.split("\n") if line]
+        assert len(lines) == 2, (
+            "exactly two stderr lines are printed on this path (the timeout "
+            f"notice, then the kill diagnostic) — an embedded control "
+            f"character must not forge a third: {err!r}"
+        )
+        kill_line = lines[1]
+        assert "\r" not in kill_line, (
+            f"a raw carriage return reached the printed line: {kill_line!r}"
+        )
+        assert "no such session" in kill_line
+        assert "forged a second line" in kill_line or "overwrote the line" in kill_line
 
     def test_kill_session_call_carries_a_timeout(self, confirm_rig, monkeypatch):
         """A wedged tmux must not hang the refusal — the kill call itself needs
@@ -1482,6 +1583,36 @@ class TestConfirmSession:
 
         err = capsys.readouterr().err
         assert "camp-feat-x-abcd1234" in err
+        assert "timed out" in err
+
+    def test_kill_session_erroring_carries_the_exceptions_own_message(
+        self, confirm_rig, monkeypatch, capsys
+    ):
+        """The failed-kill diagnostic must say WHY tmux could not be asked —
+        varied across two distinct exceptions to prove the message is
+        threaded through from the exception, not a synthesized constant."""
+        session = confirm_rig["module"]
+        harness = SequencedHarness([[]])
+
+        def fake_run(argv, **kwargs):
+            if argv[:2] == ["tmux", "kill-session"]:
+                raise FileNotFoundError("[Errno 2] No such file or directory: 'tmux'")
+            return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+
+        monkeypatch.setattr(session.subprocess, "run", fake_run)
+
+        with pytest.raises(session.LaunchError):
+            session.confirm_session(
+                harness,
+                confirm_rig["launched"],
+                interval=0.5,
+                timeout=1.0,
+                sleep=lambda s: None,
+                clock=FakeClock(0.5),
+            )
+
+        err = capsys.readouterr().err
+        assert "No such file or directory" in err
 
     def test_enumerate_argument_is_the_resolved_directory_symlink_case(
         self, confirm_rig, tmp_path, monkeypatch
@@ -1593,7 +1724,7 @@ class TestConfirmFailureReport:
         self._timeout(session, confirm_rig["launched"])
 
         capture = [c for c in calls if c[:2] == ["tmux", "capture-pane"]]
-        assert capture == [["tmux", "capture-pane", "-p", "-t", "camp-feat-x-abcd1234"]]
+        assert capture == [["tmux", "capture-pane", "-p", "-t", "=camp-feat-x-abcd1234"]]
 
     def test_a_pane_readable_only_before_the_kill_still_reaches_the_message(
         self, confirm_rig, monkeypatch
@@ -3141,7 +3272,7 @@ def _session_env_calls(rig, tmux_name: str) -> list[list[str]]:
     calls = []
     for call in rig["setenv"].calls:
         argv = list(call["argv"])
-        assert argv[:4] == ["tmux", "set-environment", "-t", tmux_name], argv
+        assert argv[:4] == ["tmux", "set-environment", "-t", f"={tmux_name}"], argv
         calls.append(argv[4:])
     return calls
 
@@ -3258,3 +3389,23 @@ class TestTheSessionEnvironmentCarriesTheAccount:
         err = capsys.readouterr().err
         assert launched.tmux_name in err
         assert "new windows" in err
+
+    def test_an_unanswerable_session_env_write_carries_the_reason(
+        self, rig, tmp_path, capsys
+    ):
+        """When tmux itself cannot be asked (a timeout or an unlaunchable
+        binary), the warning must say why — not a synthesized "tmux did not
+        answer" that throws away the exception's own message."""
+
+        def _raise(argv, **kwargs):
+            raise FileNotFoundError("[Errno 2] No such file or directory: 'tmux'")
+
+        rig["setenv"] = _raise
+
+        launched = _launch(
+            rig, group=_group_with_account("/accounts/levr"), env=_poisoned(tmp_path)
+        )
+
+        err = capsys.readouterr().err
+        assert launched.tmux_name in err
+        assert "No such file or directory" in err

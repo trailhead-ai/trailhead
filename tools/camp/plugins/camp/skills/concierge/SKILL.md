@@ -120,6 +120,12 @@ groups at once — so probe for the workspace only inside the group you resolved
 camp new <slug> --group <name> --launch --no-wait --json
 ```
 
+`--launch` and `--no-wait` are accepted (kept here for existing callers) but do
+nothing — creating the workspace's tmux session is unconditional now, and it
+never waits on provisioning. This call never starts a harness conversation:
+it creates the workspace and a bare shell rooted at it, the same door
+`camp attach <slug>` opens onto.
+
 **The workspace already exists in that group** — the reuse path, not a
 collision, since a workspace holds as many sessions as you launch into it:
 
@@ -127,24 +133,53 @@ collision, since a workspace holds as many sessions as you launch into it:
 camp launch <slug> --group <name> --json
 ```
 
-On success both print the same object, `{"workspace": …, "session_id": …,
-"tmux_name": …, "account": …, "account_binding": …}` — `account` is the account
-the group declared (null when it declared none) and `account_binding` is the
-environment the harness resolved that into, so a defaulted launch says which
-account it landed on rather than passing silently. They part company when the launch does not happen, and the two
-refusals are read differently:
+This call — unlike the create path — DOES start a harness conversation, and
+it is how you start one in a workspace `camp new` just created.
 
-- The create path holds the workspace to be the deliverable. A launch that never
-  started still exits 0 and still prints that object, with the session and name
-  fields null and the workspace field naming the path that now exists.
-- The reuse path holds the session to be the deliverable. Its refusal prints
-  nothing at all on stdout and exits non-zero, with camp's reason on stderr.
-  There is no JSON to parse there — take the reason from stderr.
+The two calls no longer print the same shape. The create path prints the
+door's own object: `{"ok": true, "outcome": "created"|"connected", "slug": …,
+"group": …, "workspace_path": …, "tmux_session": …, "attached": false}` —
+`attached` is always `false` from this skill's own invocation, since it never
+carries a terminal. `outcome` says whether the workspace's session was fresh
+or already there; there is no `session_id` to relay from this path, because no
+harness session exists yet. The reuse path prints `{"workspace": …,
+"session_id": …, "tmux_name": …, "account": …, "account_binding": …}` —
+`account` is the account the group declared (null when it declared none) and
+`account_binding` is the environment the harness resolved that into, so a
+defaulted launch says which account it landed on rather than passing silently.
 
-The workspace field is not the same path on the two calls either. The create
-path reports the workspace root; the reuse path reports the directory the
-harness was launched in, which sits inside the root whenever the group
-configures one. Say which of the two you are naming.
+A third `outcome` value, `workspace-only`, means the workspace was created
+but its tmux session could not be for a transient reason — tmux was
+unreachable, or the create itself failed. It prints `{"ok": true, "outcome":
+"workspace-only", "slug": …, "group": …, "workspace_path": …,
+"tmux_session": null, "attached": false, "session_error": …}` — still `ok:
+true` and still exit 0, because the workspace is real and usable;
+`session_error` carries tmux's own words on why the session isn't there
+yet. Report the workspace as delivered and relay `session_error` as a
+caveat, then point at `camp attach <slug>` to retry creating the session
+directly.
+
+A fourth value, `workspace-only-refused`, carries the same shape but means
+the session was refused by policy rather than a transient tmux failure —
+the workspace directory sits at, under, or above a credential store. It is
+still `ok: true` and exit 0 for the same reason: the workspace itself is
+real and usable. Retrying with `camp attach <slug>` will refuse for the
+same reason, so report it as a standing refusal rather than a caveat to
+retry past.
+
+- The create path holds the workspace and its shell to be the deliverable. It
+  exits 0 whenever the workspace exists — its tmux session created, already
+  running, or (`workspace-only` / `workspace-only-refused`) not created at
+  all — whatever the provisioning state.
+- The reuse path holds the harness session to be the deliverable. Its refusal
+  prints nothing at all on stdout and exits non-zero, with camp's reason on
+  stderr. There is no JSON to parse there — take the reason from stderr.
+
+The workspace field is not spelled the same on the two calls either. The
+create path reports `workspace_path`, naming the workspace root. The reuse
+path reports `workspace`, naming the directory the harness was launched in,
+which sits inside the root whenever the group configures one. Say which of
+the two you are naming.
 
 **The workspace lives under a different group:** the group argument is
 validation, not a suggestion. A listing only ever reports the group it was
@@ -160,7 +195,9 @@ Lead with the two facts a narrow screen must not truncate — the session's name
 and the path camp reported. Everything else follows as detail:
 
 - The slug camp settled on, flagged when it differs from what was typed.
-- The session uuid.
+- The session uuid — only on the reuse path (`camp launch`), which is the one
+  that starts a harness conversation. The create path's `tmux_session` names a
+  bare shell, not a harness session, and carries no uuid to relay.
 - Any sessions already live in that workspace, from
   `camp sessions <slug> --group <name> --json`.
 - The provisioning state at the time you report, from
@@ -169,14 +206,15 @@ and the path camp reported. Everything else follows as detail:
   code says the same thing (0 ready, 2 pending, 3 failed); relay it as that
   fact, never as a command that failed.
 
-`tmux_name` and the session id are read from camp's output — the derived name
-`camp-<slug>-<uuid8>` is never reconstructed. Present that name as the handle
-for referring to this session, and say plainly that losing the report strands
-nothing: camp rediscovers a dead session from the harness's own transcript, so
-there is no uuid for the operator to keep. While the session is alive
-`camp sessions <slug> --group <name> --json` lists what is running in a
-workspace — each session's name, id, and working directory. Once it is dead it
-moves to the recoverable listing instead (`## Recovering a dead session`).
+`tmux_name` and the session id are read from `camp launch`'s own output — the
+derived name `camp-<slug>-<uuid8>` is never reconstructed. Present that name
+as the handle for referring to this session, and say plainly that losing the
+report strands nothing: camp rediscovers a dead session from the harness's
+own transcript, so there is no uuid for the operator to keep. While the
+session is alive `camp sessions <slug> --group <name> --json` lists what is
+running in a workspace — each session's name, id, and working directory. Once
+it is dead it moves to the recoverable listing instead
+(`## Recovering a dead session`).
 
 Because the launch does not wait for provisioning, members may still be coming
 up when the session is already alive, and the state you just read is a snapshot.

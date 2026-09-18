@@ -1,21 +1,31 @@
-"""Tests for camp new — create-or-re-enter, launch/session surface stripped.
+"""Tests for camp new — create-or-re-enter, seed/manifest/activate mechanics.
 
-Exercises _cmd_new_group_cli in-process. The launch seam, session lock, and
-session-id derivation are GONE from this handler, so nothing is stubbed
-to suppress an exec — there is no exec to suppress.
+Exercises _cmd_new_group_cli in-process. Bare `camp new` now creates the
+workspace's tmux session and, with a terminal, attaches to it by routing
+through the same door `camp attach` opens — see `test_new_workspace_door.py`
+for that dispatch. Everything in THIS file is about seeding, re-entry, the
+inject hook, and `--activate`, which are orthogonal to the door, so every
+call here passes `--no-session` to skip it — no real or fake tmux is wired,
+and there is no exec to suppress (`--no-session` never reaches the door's
+handover arm at all).
 
 Test contract:
-- camp new <slug> (stub group) seeds + exits 0; stdout is EXACTLY the workspace
-  abs path (one line, no trailing whitespace); the background-provisioning notice
-  + next-step guidance (camp status / camp activate) go to stderr.
+- camp new <slug> --no-session (stub group) seeds + exits 0; stdout is EXACTLY
+  the workspace abs path (one line, no trailing whitespace); the
+  background-provisioning notice + next-step guidance (camp status / camp
+  activate) go to stderr.
 - Existing workspace → re-enters, prints the same path, does NOT re-seed/clobber
   the manifest (bring_up_workspace not called again).
-- No `claude` exec is attempted (os.execvp never called).
+- No `claude` exec is attempted (os.execvp never called) with `--no-session`.
 - Seed/provision failure → nonzero exit + stderr message; stdout empty.
 - `--activate` triggers every member's activate-phase work (non-blocking — the
   handler returns without waiting for it) and is a clean no-op for a member
   that declares no activate-phase task. Without `--activate`, no activate-phase
   work is triggered at all.
+- `camp new --no-session` never prints the shellenv-install nudge, marker set
+  or not — the door (when reached, outside `--no-session`) drops the shell
+  into a tmux session already rooted at the workspace, so there is nothing
+  left for the wrapper's `cd` to do.
 """
 
 from __future__ import annotations
@@ -60,7 +70,10 @@ def group_env(tmp_path):
         ],
         "branch_pattern": "worktree-{slug}",
     }
-    env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
+    env = {
+        "CAMP_STATE_DIR": str(tmp_path / "state"),
+        "HOME": str(tmp_path / "home"),
+    }
     return {"group": group, "env": env, "tmp_path": tmp_path}
 
 
@@ -88,12 +101,12 @@ class TestNewSlug:
     def test_new_slug_seeds_and_exits_zero(self, camp_cli, group_env):
         g = group_env
         # Returns normally (no SystemExit) on success.
-        camp_cli._cmd_new_group_cli(["feat-x"], g["group"], g["env"], dry_run=False)
+        camp_cli._cmd_new_group_cli(["feat-x", "--no-session"], g["group"], g["env"], dry_run=False)
         assert _manifest_path(g["env"], "feat-x").is_file(), "new slug should seed the manifest"
 
     def test_stdout_is_exactly_the_workspace_abs_path(self, camp_cli, group_env, capsys):
         g = group_env
-        camp_cli._cmd_new_group_cli(["feat-x"], g["group"], g["env"], dry_run=False)
+        camp_cli._cmd_new_group_cli(["feat-x", "--no-session"], g["group"], g["env"], dry_run=False)
         out = capsys.readouterr().out
         ws = _workspace_dir(g["env"], "feat-x")
         assert ws.is_absolute()
@@ -101,7 +114,7 @@ class TestNewSlug:
 
     def test_stderr_carries_background_and_next_step_guidance(self, camp_cli, group_env, capsys):
         g = group_env
-        camp_cli._cmd_new_group_cli(["feat-x"], g["group"], g["env"], dry_run=False)
+        camp_cli._cmd_new_group_cli(["feat-x", "--no-session"], g["group"], g["env"], dry_run=False)
         err = capsys.readouterr().err
         assert "background" in err.lower(), "stderr must announce background provisioning"
         assert "camp status" in err, "stderr must name 'camp status' to check provisioning"
@@ -113,8 +126,53 @@ class TestNewSlug:
         execs = []
         monkeypatch.setattr(os, "execvp", lambda *a, **k: execs.append(a))
         g = group_env
-        camp_cli._cmd_new_group_cli(["feat-x"], g["group"], g["env"], dry_run=False)
+        camp_cli._cmd_new_group_cli(["feat-x", "--no-session"], g["group"], g["env"], dry_run=False)
         assert execs == [], "the launch path is gone — no harness exec must be attempted"
+
+
+class TestJsonRequiresLaunchRefusesBeforeAnySideEffect:
+    """`--no-session --json` without `--launch` is a documented refusal —
+    `--no-session`'s whole point is to reproduce the pre-flip surface
+    exactly, and that surface never created a workspace or spawned a
+    provisioner just to then refuse. The refusal must happen before
+    `bring_up_workspace`, not after."""
+
+    def test_refuses_before_bring_up_workspace_is_ever_called(
+        self, camp_cli, group_env, monkeypatch, capsys
+    ):
+        import camp.provision.provision as provision
+
+        g = group_env
+        calls: list[str] = []
+        monkeypatch.setattr(
+            provision, "bring_up_workspace", lambda *a, **k: calls.append("called")
+        )
+
+        with pytest.raises(SystemExit) as exc:
+            camp_cli._cmd_new_group_cli(
+                ["feat-refuse", "--no-session", "--json"], g["group"], g["env"], dry_run=False
+            )
+
+        assert exc.value.code == 1
+        assert calls == [], "bring_up_workspace must never run before the refusal"
+
+    def test_refusal_leaves_no_workspace_and_empty_stdout(
+        self, camp_cli, group_env, capsys
+    ):
+        g = group_env
+
+        with pytest.raises(SystemExit) as exc:
+            camp_cli._cmd_new_group_cli(
+                ["feat-refuse2", "--no-session", "--json"], g["group"], g["env"], dry_run=False
+            )
+
+        assert exc.value.code == 1
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert "requires --launch" in captured.err
+        assert not _manifest_path(g["env"], "feat-refuse2").exists(), (
+            "no workspace may be seeded ahead of the refusal"
+        )
 
 
 class TestExistingWorkspace:
@@ -125,7 +183,7 @@ class TestExistingWorkspace:
 
         g = group_env
         # First create the workspace for real.
-        camp_cli._cmd_new_group_cli(["feat-x"], g["group"], g["env"], dry_run=False)
+        camp_cli._cmd_new_group_cli(["feat-x", "--no-session"], g["group"], g["env"], dry_run=False)
         first_out = capsys.readouterr().out
         manifest = _manifest_path(g["env"], "feat-x")
         snapshot = manifest.read_bytes()
@@ -135,7 +193,7 @@ class TestExistingWorkspace:
         monkeypatch.setattr(
             provision, "bring_up_workspace", lambda *a, **k: calls.append(True) or manifest
         )
-        camp_cli._cmd_new_group_cli(["feat-x"], g["group"], g["env"], dry_run=False)
+        camp_cli._cmd_new_group_cli(["feat-x", "--no-session"], g["group"], g["env"], dry_run=False)
 
         second_out = capsys.readouterr().out
         assert calls == [], "existing workspace must NOT re-provision"
@@ -165,7 +223,7 @@ class TestExistingWorkspace:
             "bring_up_workspace",
             lambda *a, **k: calls.append(True) or provision.seed_pending_workspace(*a, **k),
         )
-        camp_cli._cmd_new_group_cli(["feat-x"], g["group"], g["env"], dry_run=False)
+        camp_cli._cmd_new_group_cli(["feat-x", "--no-session"], g["group"], g["env"], dry_run=False)
 
         err = capsys.readouterr().err
         assert calls == [True], "manifest-less dir must be re-seeded (bring_up called)"
@@ -182,7 +240,7 @@ class TestFailure:
         monkeypatch.setattr(provision, "bring_up_workspace", _boom)
         g = group_env
         with pytest.raises(SystemExit) as exc:
-            camp_cli._cmd_new_group_cli(["feat-x"], g["group"], g["env"], dry_run=False)
+            camp_cli._cmd_new_group_cli(["feat-x", "--no-session"], g["group"], g["env"], dry_run=False)
         assert exc.value.code != 0
         captured = capsys.readouterr()
         assert captured.out == "", "stdout must be empty on failure"
@@ -203,7 +261,7 @@ class TestBringUpInjectHook:
 
         g = group_env
         # No [harness] block: resolve_harness_profile returns inject='claude-hook' (the default).
-        camp_cli._cmd_new_group_cli(["feat-x"], g["group"], g["env"], dry_run=False)
+        camp_cli._cmd_new_group_cli(["feat-x", "--no-session"], g["group"], g["env"], dry_run=False)
 
         ws = _workspace_dir(g["env"], "feat-x")
         assert has_inject_drain_hook(ws), (
@@ -216,7 +274,7 @@ class TestBringUpInjectHook:
 
         g = group_env
         g["group"]["harness"] = {"inject": "stdout"}
-        camp_cli._cmd_new_group_cli(["feat-x"], g["group"], g["env"], dry_run=False)
+        camp_cli._cmd_new_group_cli(["feat-x", "--no-session"], g["group"], g["env"], dry_run=False)
 
         ws = _workspace_dir(g["env"], "feat-x")
         assert not has_inject_drain_hook(ws), (
@@ -230,7 +288,7 @@ class TestBringUpInjectHook:
 
         g = group_env
         # First create (new slug path).
-        camp_cli._cmd_new_group_cli(["feat-x"], g["group"], g["env"], dry_run=False)
+        camp_cli._cmd_new_group_cli(["feat-x", "--no-session"], g["group"], g["env"], dry_run=False)
         ws = _workspace_dir(g["env"], "feat-x")
         assert has_inject_drain_hook(ws)
 
@@ -246,7 +304,7 @@ class TestBringUpInjectHook:
         )
 
         # Second invocation: existing workspace → re-enter path (no re-seed).
-        camp_cli._cmd_new_group_cli(["feat-x"], g["group"], g["env"], dry_run=False)
+        camp_cli._cmd_new_group_cli(["feat-x", "--no-session"], g["group"], g["env"], dry_run=False)
 
         # Hook count must be unchanged — re-entry must not touch settings at all.
         after = json.loads(settings.read_text())
@@ -264,8 +322,12 @@ class TestBringUpInjectHook:
 
 
 class TestLaunchJsonCarriesTheEngineReportedTmuxName:
-    """`camp new --launch --json` must carry the launch engine's own tmux_name —
-    never reconstruct `camp-<slug>-<uuid8>` at the print site."""
+    """`camp new --no-session --launch --json` must carry the OLD launch
+    engine's own tmux_name — never reconstruct `camp-<slug>-<uuid8>` at the
+    print site. This is `--no-session`'s escape hatch keeping the pre-flip
+    launch engine reachable in full; the default (no `--no-session`) path
+    no longer starts a harness conversation at all — see
+    `test_new_workspace_door.py`."""
 
     def test_tmux_name_in_json_output_is_the_engine_reported_value_verbatim(
         self, camp_cli, group_env, monkeypatch, capsys
@@ -283,7 +345,7 @@ class TestLaunchJsonCarriesTheEngineReportedTmuxName:
         monkeypatch.setattr(cli_session, "launch_and_confirm", lambda *a, **k: fake_launched)
 
         camp_cli._cmd_new_group_cli(
-            ["feat-x", "--launch", "--json"], g["group"], g["env"], dry_run=False
+            ["feat-x", "--no-session", "--launch", "--json"], g["group"], g["env"], dry_run=False
         )
 
         payload = json.loads(capsys.readouterr().out)
@@ -292,53 +354,6 @@ class TestLaunchJsonCarriesTheEngineReportedTmuxName:
             "re-derivation of camp-<slug>-<uuid8> at the print site"
         )
         assert payload["session_id"] == "11111111-2222-3333-4444-555555555555"
-
-
-class TestShellIntegrationNudge:
-    """Bare `camp new` nudges to install the trailhead shellenv wrapper.
-
-    The `camp()` shell wrapper exports CAMP_SHELL_INTEGRATION=1 around `camp new`
-    so the handler can tell a wrapper-driven run (which will cd for the user) from
-    a bare-binary run (which leaves the user where they were and so needs the nudge).
-    """
-
-    def test_bare_run_prints_shellenv_nudge_to_stderr(
-        self, camp_cli, group_env, capsys, monkeypatch
-    ):
-        monkeypatch.delenv("CAMP_SHELL_INTEGRATION", raising=False)
-        g = group_env
-        camp_cli._cmd_new_group_cli(["feat-x"], g["group"], g["env"], dry_run=False)
-        captured = capsys.readouterr()
-        assert "trailhead shellenv" in captured.err, (
-            "a bare `camp new` must nudge the user to install the shellenv wrapper"
-        )
-        # The path still goes to stdout untouched.
-        ws = _workspace_dir(g["env"], "feat-x")
-        assert captured.out == f"{ws}\n"
-
-    def test_marker_present_suppresses_the_nudge(
-        self, camp_cli, group_env, capsys, monkeypatch
-    ):
-        monkeypatch.setenv("CAMP_SHELL_INTEGRATION", "1")
-        g = group_env
-        camp_cli._cmd_new_group_cli(["feat-x"], g["group"], g["env"], dry_run=False)
-        captured = capsys.readouterr()
-        assert "trailhead shellenv" not in captured.err, (
-            "with the wrapper active (marker set) the handler must stay quiet — "
-            "the wrapper does the cd"
-        )
-
-    def test_nudge_also_fires_on_existing_workspace_reentry(
-        self, camp_cli, group_env, capsys, monkeypatch
-    ):
-        monkeypatch.delenv("CAMP_SHELL_INTEGRATION", raising=False)
-        g = group_env
-        # Create then re-enter.
-        camp_cli._cmd_new_group_cli(["feat-x"], g["group"], g["env"], dry_run=False)
-        capsys.readouterr()
-        camp_cli._cmd_new_group_cli(["feat-x"], g["group"], g["env"], dry_run=False)
-        err = capsys.readouterr().err
-        assert "trailhead shellenv" in err
 
 
 class TestInputCharset:
@@ -423,7 +438,7 @@ class TestNewActivateFlag:
         )
         g = group_env
 
-        camp_cli._cmd_new_group_cli(["feat-act", "--activate"], g["group"], g["env"], dry_run=False)
+        camp_cli._cmd_new_group_cli(["feat-act", "--activate", "--no-session"], g["group"], g["env"], dry_run=False)
 
         assert len(calls) == 1, "camp new --activate must call the activate-phase trigger exactly once"
         called_group, called_slug, called_env, called_wait = calls[0]
@@ -445,7 +460,7 @@ class TestNewActivateFlag:
         )
         g = group_env
 
-        camp_cli._cmd_new_group_cli(["feat-noact"], g["group"], g["env"], dry_run=False)
+        camp_cli._cmd_new_group_cli(["feat-noact", "--no-session"], g["group"], g["env"], dry_run=False)
 
         assert calls == [], (
             "without --activate, camp new must not trigger activate-phase work — "
@@ -476,7 +491,7 @@ class TestNewActivateFlag:
         g = group_env
         g["group"]["members"][0]["tasks"] = [_activate_task()]
 
-        camp_cli._cmd_new_group_cli(["feat-act2", "--activate"], g["group"], g["env"], dry_run=False)
+        camp_cli._cmd_new_group_cli(["feat-act2", "--activate", "--no-session"], g["group"], g["env"], dry_run=False)
 
         activate_calls = [c for c in calls if c.get("_argv") and c["_argv"][1] == "activate"]
         assert len(activate_calls) == 1, calls
@@ -503,7 +518,7 @@ class TestNewActivateFlag:
         )
         g = group_env  # group_env's member carries no "tasks" key
 
-        camp_cli._cmd_new_group_cli(["feat-noop", "--activate"], g["group"], g["env"], dry_run=False)
+        camp_cli._cmd_new_group_cli(["feat-noop", "--activate", "--no-session"], g["group"], g["env"], dry_run=False)
 
         activate_calls = [c for c in calls if c.get("_argv") and c["_argv"][1] == "activate"]
         assert activate_calls == []
@@ -585,7 +600,10 @@ class TestNewActivateFlag:
         g = group_env
 
         camp_cli._cmd_new_group_cli(
-            ["feat-both", "--launch", "--no-wait", "--activate"], g["group"], g["env"], dry_run=False
+            ["feat-both", "--no-session", "--launch", "--no-wait", "--activate"],
+            g["group"],
+            g["env"],
+            dry_run=False,
         )
 
         err = capsys.readouterr().err

@@ -149,6 +149,9 @@ def test_pull_only_integrates_on_a_clean_tree(tmp_path):
 
 
 def test_pull_only_leaves_a_dirty_tree_byte_identical_and_reports_behind(tmp_path):
+    """A dirty tree is never rebased — but it is also never `converged`: it is
+    `holding`, exit non-zero, because something is uncommitted and only the
+    full `lore sync` can clear it (see `PULL_DIRTY` in `cli/sync.py`)."""
     config_home, state_dir, vault, _remote, other = _one_vault(tmp_path, dirty=True)
     _push_from_device_b(other, "theirs.md", "# device B\n")
 
@@ -156,7 +159,9 @@ def test_pull_only_leaves_a_dirty_tree_byte_identical_and_reports_behind(tmp_pat
     before_tree = _worktree_snapshot(vault)
 
     r = _run_cli(["sync", "--pull-only"], config_home=config_home, state_dir=state_dir)
-    assert r.returncode == 0, r.stderr
+    assert r.returncode != 0, (
+        f"a dirty tree that could not be integrated must exit non-zero; stderr={r.stderr!r}"
+    )
     assert _head(vault) == before_head, "a dirty tree must not be rebased"
     assert _worktree_snapshot(vault) == before_tree, "the working tree must be untouched"
     assert "1 commit(s) behind" in r.stderr, (
@@ -165,7 +170,11 @@ def test_pull_only_leaves_a_dirty_tree_byte_identical_and_reports_behind(tmp_pat
 
 
 def test_pull_only_never_commits_or_pushes(tmp_path):
-    """The non-destructive half: local dirt stays local, local commits stay unpushed."""
+    """The non-destructive half: local dirt stays local, local commits stay
+    unpushed. The dirty tree also makes this vault `holding` (exit non-zero,
+    see `PULL_DIRTY`) — that is a DIFFERENT, already-covered contract
+    (`test_pull_only_leaves_a_dirty_tree_byte_identical_and_reports_behind`);
+    this test's own subject is that no commit and no push ever happen."""
     config_home, state_dir, vault, remote, _other = _one_vault(tmp_path)
     (vault / "ours.md").write_text("# device A\n")
     _git(vault, "add", "-A")
@@ -174,7 +183,9 @@ def test_pull_only_never_commits_or_pushes(tmp_path):
     remote_head_before = _git(Path(remote), "rev-parse", "HEAD").stdout.strip()
 
     r = _run_cli(["sync", "--pull-only"], config_home=config_home, state_dir=state_dir)
-    assert r.returncode == 0, r.stderr
+    assert r.returncode != 0, (
+        f"a dirty tree under --pull-only is holding, not converged; stderr={r.stderr!r}"
+    )
     assert _git(Path(remote), "rev-parse", "HEAD").stdout.strip() == remote_head_before, (
         "--pull-only must never push"
     )

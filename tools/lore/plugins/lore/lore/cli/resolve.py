@@ -662,7 +662,8 @@ def _finish(vault: Path, name: str, say, say_err, *, shared: bool,
     if shared and not include_shared:
         say("Vault is shared — skipping push (pass --include-shared to push).")
         return 0
-    return _push_one(vault, say, say_err, committed=True)
+    rc, _ending, _attempts_used = _push_one(vault, say, say_err, committed=True)
+    return rc
 
 
 def _select_vault(wanted: str | None) -> tuple[str, Path] | None:

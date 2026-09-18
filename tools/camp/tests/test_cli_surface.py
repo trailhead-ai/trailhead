@@ -307,13 +307,18 @@ def test_group_path_disabled_verb_prints_stabilizes_message(
 
 
 # camp new via group-aware path → seeds pending + spawns provisioner.
-# the launch/session surface is stripped from the handler, so there is no
-# claude exec to suppress (no CAMP_TEST_NO_EXEC needed).
+# `--no-session` skips the door (creating and attaching to the workspace's
+# tmux session) — orthogonal to what these two tests are about, and this
+# suite's sandboxed `tmux` stub always answers "no server", which the door
+# reads as "create one" and then can't (the stub never actually starts a
+# session) — see `test_new_workspace_door.py` for the door's own dispatch,
+# driven with an injected fake tmux instead of a real subprocess call.
 
 
 def test_group_path_new_seeds_and_exits_zero(stub_group_env: dict[str, str]) -> None:
-    """camp new <slug> via group path seeds the workspace and exits 0 (no claude)."""
-    result = _run_group(["new", "my-slug"], group_env=stub_group_env)
+    """camp new <slug> --no-session via group path seeds the workspace and
+    exits 0 (no claude)."""
+    result = _run_group(["new", "my-slug", "--no-session"], group_env=stub_group_env)
     assert result.returncode == 0, (
         f"camp new via group path should seed + exit 0.\n"
         f"stdout: {result.stdout}\nstderr: {result.stderr}"
@@ -332,7 +337,7 @@ def test_group_path_new_announces_background_provisioning(
     stub_group_env: dict[str, str],
 ) -> None:
     """camp new reports that provisioning runs in the background (on stderr)."""
-    result = _run_group(["new", "my-slug"], group_env=stub_group_env)
+    result = _run_group(["new", "my-slug", "--no-session"], group_env=stub_group_env)
     assert "background" in result.stderr.lower() or "camp status" in result.stderr, (
         f"camp new must announce background provisioning on stderr.\n"
         f"stdout: {result.stdout}\nstderr: {result.stderr}"

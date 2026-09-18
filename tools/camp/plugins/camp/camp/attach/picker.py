@@ -204,23 +204,51 @@ def pick_session(
             reason="no terminal to prompt into — use `camp attach <ref>` instead"
         )
 
-    while True:
+    def render() -> None:
         stdout.write("Running sessions:\n")
         for index, row in enumerate(rows, start=1):
             stdout.write(f"  {index}) {row.machine or 'this machine'}  {row.group or '-'}  {row.slug}\n")
+
+    picked = _prompt_for_index(len(rows), stdin=stdin, stdout=stdout, render=render)
+    if picked is None:
+        return PoolUnreadable(reason="no input read — end of input reached")
+
+    return Picked(row=rows[picked])
+
+
+def _prompt_for_index(
+    count: int,
+    *,
+    stdin: IO[str],
+    stdout: IO[str],
+    render,
+) -> int | None:
+    """The re-prompt loop shared by every numbered picker over *count* rows.
+
+    *render* writes whatever header and rows this call's caller wants shown
+    — this function knows nothing about what a "row" is, only how many
+    there are, so a workspace picker and a session picker share the exact
+    same re-prompt behaviour (blank, non-numeric, and out-of-range input
+    each re-prompt; a valid choice returns) without either copying the
+    other's loop. Returns the chosen row's 0-based index, or ``None`` on
+    EOF (an empty ``readline()``), which a caller renders as its own
+    "nothing was read" outcome.
+    """
+    while True:
+        render()
         stdout.write("> ")
         stdout.flush()
 
         line = stdin.readline()
         if not line:
-            return PoolUnreadable(reason="no input read — end of input reached")
+            return None
 
         choice = line.strip()
         if not choice.isdigit():
             continue
 
         index = int(choice)
-        if index < 1 or index > len(rows):
+        if index < 1 or index > count:
             continue
 
-        return Picked(row=rows[index - 1])
+        return index - 1

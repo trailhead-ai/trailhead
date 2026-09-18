@@ -222,6 +222,33 @@ def test_add_scaffolds_the_lock_gitignore_in_an_existing_dir(tmp_path):
     assert "*.lock" in gitignore.read_text(encoding="utf-8").splitlines()
 
 
+def test_add_scaffolds_a_gitignore_that_hides_outpost_from_git_status(tmp_path):
+    """`outpost/` is the daemon's own free-write carve-out — never committed by
+    `lore sync` — but the scaffolded `.gitignore` never covered it, so a freshly
+    added vault's `outpost/` directory showed up as untracked forever. Runs the
+    real consumer (`git status`) rather than inspecting the `.gitignore` text:
+    the behavior that matters is what git actually reports, not which pattern
+    is on disk.
+    """
+    state, config = _dirs(tmp_path)
+    _seed_default_config(config, state)
+
+    res = _run(["vault", "add", "product-vault", "--scope", "product"], state=state, config=config)
+    assert res.returncode == 0, res.stderr
+
+    vault_dir = _vaults_root(state) / "product-vault"
+    (vault_dir / "outpost").mkdir()
+    (vault_dir / "outpost" / "config.json").write_text('{"tracked": false}\n')
+
+    status = subprocess.run(
+        ["git", "-C", str(vault_dir), "status", "--porcelain", "--untracked-files=all"],
+        capture_output=True, text=True, check=True,
+    ).stdout
+    assert "outpost" not in status, (
+        f"outpost/ must be gitignored by a freshly scaffolded vault; status={status!r}"
+    )
+
+
 def test_add_scans_populated_dir_into_index(tmp_path):
     state, config = _dirs(tmp_path)
     _seed_default_config(config, state)

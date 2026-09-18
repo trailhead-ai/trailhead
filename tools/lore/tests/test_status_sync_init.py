@@ -149,15 +149,15 @@ def _make_sync_vault(tmp_path: Path) -> Path:
     """Create a git-initialized vault with an initial commit."""
     vault = tmp_path / "vault"
     _git_init(vault)
-    (vault / "sessions").mkdir()
-    (vault / "README.md").write_text("vault\n")
+    (vault / "session").mkdir()
+    (vault / "session" / "README.md").write_text("vault\n")
     _git_commit_all(vault, "init")
     return vault
 
 
 def test_sync_commits_dirty_vault(tmp_path):
     vault = _make_sync_vault(tmp_path)
-    (vault / "sessions" / "note.md").write_text(
+    (vault / "session" / "note.md").write_text(
         "---\ntype: session\nstatus: active\n---\n\n# Session\n"
     )
     r = run_cli(["sync"], seed_vault=vault)
@@ -185,7 +185,7 @@ def test_sync_noop_on_clean_tree(tmp_path):
 def test_sync_respects_gpgsign_false(tmp_path):
     """With commit.gpgsign=false in the repo config, sync commits succeed unsigned."""
     vault = _make_sync_vault(tmp_path)
-    (vault / "sessions" / "note.md").write_text(
+    (vault / "session" / "note.md").write_text(
         "---\ntype: session\nstatus: active\n---\n\n# Session\n"
     )
     r = run_cli(["sync"], seed_vault=vault)
@@ -208,7 +208,7 @@ def test_sync_aborts_on_toplevel_mismatch(tmp_path):
     # vault subdir — NOT its own git repo
     vault = parent / "vault-subdir"
     vault.mkdir()
-    (vault / "sessions").mkdir()
+    (vault / "session").mkdir()
 
     r = run_cli(["sync"], seed_vault=vault)
     assert r.returncode != 0
@@ -224,7 +224,7 @@ def test_sync_aborts_on_toplevel_mismatch(tmp_path):
 def test_sync_skips_push_without_origin(tmp_path):
     """No origin remote → commit is made, push is skipped with a notice."""
     vault = _make_sync_vault(tmp_path)
-    (vault / "README.md").write_text("vault updated\n")
+    (vault / "session" / "README.md").write_text("vault updated\n")
     r = run_cli(["sync"], seed_vault=vault)
     assert r.returncode == 0, r.stderr
     combined = r.stdout + r.stderr
@@ -235,7 +235,7 @@ def test_sync_skips_push_without_origin(tmp_path):
 
 def test_sync_accepts_custom_message(tmp_path):
     vault = _make_sync_vault(tmp_path)
-    (vault / "README.md").write_text("vault updated\n")
+    (vault / "session" / "README.md").write_text("vault updated\n")
     r = run_cli(["sync", "--message", "my custom commit"], seed_vault=vault)
     assert r.returncode == 0, r.stderr
     log = subprocess.run(
@@ -253,8 +253,8 @@ def _make_sync_vault_with_failing_remote(tmp_path: Path) -> Path:
     """Create a vault with an origin that will fail to push."""
     vault = tmp_path / "vault"
     _git_init(vault)
-    (vault / "sessions").mkdir()
-    (vault / "README.md").write_text("vault\n")
+    (vault / "session").mkdir()
+    (vault / "session" / "README.md").write_text("vault\n")
     _git_commit_all(vault, "init")
 
     # Add a remote that doesn't exist → push will fail
@@ -274,25 +274,24 @@ def _make_sync_vault_with_failing_remote(tmp_path: Path) -> Path:
     return vault
 
 
-def test_sync_exits_zero_when_push_fails_but_commit_succeeds(tmp_path):
-    """When commit succeeds but push fails (offline/auth), lore sync must exit 0
-    and print a prominent notice — commit is durable, push failure is soft."""
+def test_sync_exits_nonzero_holding_when_offline_with_unpublished_commit(tmp_path):
+    """When commit succeeds but the vault cannot reach the forge (offline/auth),
+    `lore sync` commits durably but exits NON-ZERO — the commit is held on this
+    machine, unpublished, and that needs a person to get online. This is a
+    decided contract change from the prior "push failure is soft" behavior:
+    an offline host that is HOARDING committed work must never report the same
+    quiet `converged`/exit-0 outcome as a host with nothing left to publish."""
     vault = _make_sync_vault_with_failing_remote(tmp_path)
-    (vault / "README.md").write_text("vault updated\n")
+    (vault / "session" / "README.md").write_text("vault updated\n")
 
     r = run_cli(["sync"], seed_vault=vault)
-    assert r.returncode == 0, (
-        f"sync must exit 0 when commit succeeded but push failed; "
-        f"stdout={r.stdout!r} stderr={r.stderr!r}"
+    assert r.returncode != 0, (
+        f"sync must exit non-zero when local work is committed but unreachable "
+        f"to publish; stdout={r.stdout!r} stderr={r.stderr!r}"
     )
     combined = r.stdout + r.stderr
-    # Must have printed a notice about push failure / re-run
-    assert (
-        "push failed" in combined.lower()
-        or "re-run" in combined.lower()
-        or "online" in combined.lower()
-        or "lore sync" in combined
-    ), f"sync must print a soft-failure notice; got: {combined!r}"
+    # Must have printed a notice naming the held vault
+    assert "vault" in combined.lower(), f"sync must name the held vault; got: {combined!r}"
 
     # The commit must have been made
     log = subprocess.run(
@@ -301,7 +300,7 @@ def test_sync_exits_zero_when_push_fails_but_commit_succeeds(tmp_path):
         text=True,
     )
     assert len(log.stdout.strip().splitlines()) == 2, (
-        "commit must have been made before push was attempted"
+        "commit must have been made even though the vault could not publish it"
     )
 
 

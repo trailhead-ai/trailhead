@@ -281,8 +281,9 @@ def _cmd_new_group_cli(
     env: dict[str, str] | None,
     dry_run: bool,
 ) -> None:
-    """camp new <slug> [--launch [--no-wait]] [--activate] [--json] — create or
-    re-enter a workspace.
+    """camp new <slug> [--no-attach] [--no-session] [--launch] [--activate]
+    [--json] — create or re-enter a workspace, then go through the same
+    door `camp attach` opens onto its tmux session.
 
     NEW slug: bring_up_workspace — synchronous seed (workspace dir + manifest with
     each member pending) + a DETACHED provisioner (camp setup --background) that runs
@@ -290,33 +291,42 @@ def _cmd_new_group_cli(
     re-provisioning or clobbering the manifest.
 
     Output contract: the workspace ABSOLUTE PATH is the ONLY thing on stdout —
-    exactly one line, no trailing whitespace — so a shell `camp()` wrapper can
-    `cd "$(camp new …)"`. The created/entered confirmation goes to stderr. Exit 0 on
-    success; on seed/provision failure exit nonzero with a stderr message and EMPTY
-    stdout.
+    exactly one line, no trailing whitespace. The created/entered confirmation
+    and the door's own outcome line go to stderr. Exit 0 on success; on
+    seed/provision failure exit nonzero with a stderr message and EMPTY stdout.
 
     No session lock and no synchronous activation: provisioning is async (check it
     with `camp status <slug>`) and activation is deferred — the workspace activates
     when ready / via `camp activate <slug>`. That next-step guidance is part of the
     stderr confirmation so the user is not stranded.
 
-    `--launch` additionally starts a detached harness session in the new workspace,
-    via the same engine `camp launch` uses. It BLOCKS on provisioning-ready first
-    (a harness launched into a half-cloned workspace is not usefully launched);
-    `--no-wait` skips that wait and says so, naming `camp status <slug>` as where a
-    later provisioning failure will surface. The launch NEVER changes the exit code
-    or the stdout path: a workspace that was created is a success even if the
-    session could not start, and a failed launch is a `camp launch: …` stderr line.
-    `--json` (which requires `--launch`) replaces the bare path line with
-    `{"workspace": <abs path>, "session_id": <id or null>, "tmux_name": <name or
-    null>}` — the single stdout shape a machine caller parses on both outcomes.
-    `tmux_name` is the launch engine's own derived name (never reconstructed
-    here), mirroring what `camp launch --json` already reports on the reuse path.
+    Creating the workspace's tmux session and handing the terminal over is
+    unconditional — `_door_dispatch_for_new` below goes through the same
+    create-or-connect step and the same handover `camp attach`'s own door
+    (`cli/session.py:_open_workspace_door`) goes through, and renders the
+    outcome with the same `launch.door` renderers, but reports on `camp
+    new`'s own stream contract: the outcome line belongs on stderr here,
+    where the door prints it to stdout for `camp attach`.
+
+    `--no-attach` creates the workspace and its session but never touches the
+    exec or `switch-client` seam — `attached` is reported `false`.
+
+    `--no-session` is the escape hatch back to the pre-flip surface in full:
+    it skips the door entirely (no tmux session, no `--json` object built from
+    it) and reproduces exactly what `camp new` did before this task, including
+    `--launch` spawning a detached harness session through the old launch
+    engine and `--json` requiring `--launch` to mean anything.
+
+    `--launch` is accepted and does nothing new outside `--no-session` — it
+    prints one notice on stderr and takes the same door path the bare form
+    already takes, so camp's own concierge skill and other existing callers
+    keep working. `--json` no longer requires `--launch`: the door's object is
+    the machine answer for the command itself.
 
     `--activate` triggers every member's activate-phase work at creation time —
     the non-interactive path to what `camp activate <member>` triggers
-    interactively. Like `--launch`, it waits (bounded) for boot-readiness first
-    — an activate-phase task runs inside a member's worktree, which does not
+    interactively. It waits (bounded) for boot-readiness first — an
+    activate-phase task runs inside a member's worktree, which does not
     exist before boot-readiness — but it never waits for the activate-phase
     work itself, which is what makes it non-blocking: `--activate`'s own wait
     is capped at the same cheap boot budget, never at the potentially-expensive
@@ -325,10 +335,8 @@ def _cmd_new_group_cli(
     clean no-op. Without `--activate`, `camp new` triggers no activate-phase
     work at all — only provision-phase tasks run at creation, which is what
     keeps an expensive activate-phase task (e.g. a knowledge-graph build) from
-    firing for every member of every new workspace. `--activate` and
-    `--no-wait` compose: `--no-wait` skips BOTH waits — `--launch`'s and
-    `--activate`'s — independently, so passing one flag never disables what
-    the other does.
+    firing for every member of every new workspace. `--no-wait` (read only by
+    `--activate` now — the door waits on nothing) skips its wait and says so.
     """
     from ..spine import _resolve_slug, _die
     from ..provision.provision import bring_up_workspace
@@ -339,6 +347,8 @@ def _cmd_new_group_cli(
     parser.add_argument("--no-wait", action="store_true")
     parser.add_argument("--activate", action="store_true")
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--no-attach", action="store_true")
+    parser.add_argument("--no-session", action="store_true")
     parser.add_argument("slug", nargs="?")
     parsed = parser.parse_args(args)
 
@@ -346,11 +356,10 @@ def _cmd_new_group_cli(
     no_wait = parsed.no_wait
     activate = parsed.activate
     as_json = parsed.json
+    no_attach = parsed.no_attach
+    no_session = parsed.no_session
 
-    # --json only has a defined meaning alongside --launch: it exists to carry the
-    # session id next to the path. Refusing it outright beats inventing a second
-    # machine shape for a command whose non-launch output is a single path.
-    if as_json and not launch:
+    if no_session and as_json and not launch:
         _die("camp new: --json requires --launch")
 
     if parsed.slug is None:
@@ -398,58 +407,216 @@ def _cmd_new_group_cli(
         file=sys.stderr,
     )
 
-    # Nudge the user to install the trailhead shellenv `camp()` wrapper
-    # so `camp new` auto-cd's the parent shell. The wrapper exports
-    # CAMP_SHELL_INTEGRATION around its `camp new` call — when that marker is set the
-    # wrapper is active and will cd for the user, so we stay quiet. When it is absent
-    # this is a bare-binary run: the path printed below is the user's only handle.
-    if "CAMP_SHELL_INTEGRATION" not in os.environ:
+    if no_session:
+        # The escape hatch: reproduce exactly what `camp new` did before this
+        # task, including `--launch`'s old detached-harness behaviour and
+        # `--json`'s old dependency on it.
+        launched_session = None
+        if launch:
+            from .session import launch_for_new, wait_for_provisioning
+
+            if no_wait:
+                print(
+                    f"camp new: --no-wait — launching without waiting for provisioning; "
+                    f"a later provisioning failure surfaces in `camp status {slug}`",
+                    file=sys.stderr,
+                )
+                ready = True
+            else:
+                ready = wait_for_provisioning(group, slug, env=env)
+            if ready:
+                launched_session = launch_for_new(group, slug, env=env)
+
+        if activate:
+            from .session import trigger_activate_phase_work
+
+            trigger_activate_phase_work(group, slug, env=env, wait=not no_wait)
+
+        if as_json:
+            print(
+                json.dumps(
+                    {
+                        "workspace": str(ws_dir),
+                        "session_id": launched_session.session_id if launched_session else None,
+                        "tmux_name": launched_session.tmux_name if launched_session else None,
+                        "account": launched_session.account if launched_session else None,
+                        "account_binding": (
+                            dict(launched_session.account_binding) if launched_session else None
+                        ),
+                    }
+                )
+            )
+            return
+
+        # The workspace abs path is the ONLY thing on stdout: exactly one
+        # line, no trailing whitespace (print() appends the single newline).
+        print(str(ws_dir))
+        return
+
+    if launch:
         print(
-            '  tip: run eval "$(trailhead shellenv)" so `camp new` cd\'s you in '
-            "automatically",
+            "camp new: --launch is accepted but no longer needed — "
+            "creating and attaching is now the default",
             file=sys.stderr,
         )
-
-    launched_session = None
-    if launch:
-        from .session import launch_for_new, wait_for_provisioning
-
-        if no_wait:
-            print(
-                f"camp new: --no-wait — launching without waiting for provisioning; "
-                f"a later provisioning failure surfaces in `camp status {slug}`",
-                file=sys.stderr,
-            )
-            ready = True
-        else:
-            ready = wait_for_provisioning(group, slug, env=env)
-        if ready:
-            launched_session = launch_for_new(group, slug, env=env)
 
     if activate:
         from .session import trigger_activate_phase_work
 
         trigger_activate_phase_work(group, slug, env=env, wait=not no_wait)
 
+    interactive = sys.stdin.isatty() and sys.stdout.isatty() and not no_attach
+    _door_dispatch_for_new(
+        group_name=group_name,
+        slug=slug,
+        ws_dir=ws_dir,
+        env=env,
+        as_json=as_json,
+        interactive=interactive,
+    )
+
+
+def _workspace_only_payload(
+    *, slug: str, group_name: str, ws_dir, session_error: str, refused: bool
+) -> dict:
+    """The `--json` object for `camp new`'s workspace-only outcome — the
+    workspace exists but its tmux session does not. `outcome` is
+    `workspace-only-refused` when the session was refused by policy (the
+    workspace directory is at, under, or above a credential store) and
+    `workspace-only` for a transient cause (tmux unreachable, or the create
+    attempt itself failed) — a consumer must be able to tell them apart
+    without parsing `session_error`'s free text. Same key set either way;
+    the sole place this key set is assembled — every call site in
+    `_door_dispatch_for_new` builds the object here, never ad hoc.
+    """
+    return {
+        "ok": True,
+        "outcome": "workspace-only-refused" if refused else "workspace-only",
+        "slug": slug,
+        "group": group_name,
+        "workspace_path": str(ws_dir),
+        "tmux_session": None,
+        "attached": False,
+        "session_error": session_error,
+    }
+
+
+def _report_workspace_only(
+    *,
+    as_json: bool,
+    slug: str,
+    group_name: str,
+    ws_dir,
+    derived_name: str,
+    session_error: str,
+    refused: bool = False,
+) -> None:
+    """Report `camp new`'s workspace-only outcome and return — never exits
+    and never raises. The workspace is real and usable, so this is success
+    with a warning, not a refusal: exactly the workspace path on stdout (or
+    the `--json` object replacing it), and a warning naming the unreached
+    session on stderr under the plain form. *refused* selects wording that
+    cannot be mistaken for a transient tmux hiccup — "refused", not
+    "warning" — when the session was denied by policy rather than merely
+    unreachable or failed."""
     if as_json:
         print(
             json.dumps(
-                {
-                    "workspace": str(ws_dir),
-                    "session_id": launched_session.session_id if launched_session else None,
-                    "tmux_name": launched_session.tmux_name if launched_session else None,
-                    "account": launched_session.account if launched_session else None,
-                    "account_binding": (
-                        dict(launched_session.account_binding) if launched_session else None
-                    ),
-                }
+                _workspace_only_payload(
+                    slug=slug,
+                    group_name=group_name,
+                    ws_dir=ws_dir,
+                    session_error=session_error,
+                    refused=refused,
+                )
             )
         )
         return
 
-    # The workspace abs path is the ONLY thing on stdout: exactly one line, no
-    # trailing whitespace (print() appends the single newline).
+    from ..launch.recovery import printable_path
+
     print(str(ws_dir))
+    label = "refused" if refused else "warning"
+    print(
+        printable_path(f"camp new: {label} — {derived_name} — {session_error}"),
+        file=sys.stderr,
+    )
+
+
+def _door_dispatch_for_new(
+    *,
+    group_name: str,
+    slug: str,
+    ws_dir,
+    env: dict[str, str] | None,
+    as_json: bool,
+    interactive: bool,
+) -> None:
+    """Create-or-connect the workspace's tmux session and, when *interactive*,
+    hand the terminal over — `camp new`'s own door dispatch.
+
+    The tmux boundary is
+    `launch.workspace_session.create_or_connect_workspace_session` (the
+    probe, the create, and the race re-probe, shared with `camp attach`'s
+    door at `cli/session.py:_open_workspace_door`); the handover is
+    `host.handoff.hand_over_to_session` (the exec and `switch-client` arms).
+    The `Tmux` seam is constructed from `launch.stop`'s re-export — the same
+    factory attribute attach's own tests monkeypatch.
+
+    What is `camp new`'s alone, and stays here, is both halves of its
+    reporting. The stream contract: the workspace path is the caller's only
+    stdout line, so a human-readable outcome goes to stderr, and `--json`
+    prints one object on stdout in place of the path line. And the failure
+    posture: neither an unanswered tmux, nor a failed create, nor a create
+    refused by policy is a refusal here, because the workspace was already
+    created and is usable on disk, so all three report through
+    `_report_workspace_only` and return with exit 0, where `camp attach`
+    refuses — `_report_workspace_only`'s own `refused` flag keeps the
+    policy case distinguishable in what is reported, even though none of
+    the three exit non-zero.
+    """
+    from ..host.handoff import hand_over_to_session
+    from ..launch.door import Connected, Created, render_human, render_json
+    from ..launch.stop import Tmux
+    from ..launch.workspace_session import DoorState, create_or_connect_workspace_session
+
+    resolved_env = dict(env) if env is not None else dict(os.environ)
+    tmux = Tmux()
+    probe = create_or_connect_workspace_session(
+        group_name, slug, ws_dir, env=resolved_env, tmux=tmux
+    )
+
+    if probe.state in (DoorState.TMUX_UNANSWERED, DoorState.CREATE_FAILED, DoorState.CREATE_REFUSED):
+        _report_workspace_only(
+            as_json=as_json,
+            slug=slug,
+            group_name=group_name,
+            ws_dir=ws_dir,
+            derived_name=probe.session_name,
+            session_error=probe.reason,
+            refused=probe.state is DoorState.CREATE_REFUSED,
+        )
+        return
+
+    outcome_cls = Created if probe.state is DoorState.CREATED else Connected
+    outcome = outcome_cls(
+        slug=slug,
+        group=group_name,
+        tmux_session=probe.session_name,
+        workspace_path=ws_dir,
+        attached=interactive,
+    )
+
+    if as_json:
+        print(json.dumps(render_json(outcome)))
+    else:
+        print(str(ws_dir))
+        print(render_human(outcome), file=sys.stderr)
+
+    if not interactive:
+        return
+
+    hand_over_to_session(tmux, probe.session_name, env=resolved_env)
 
 
 def _author_group(

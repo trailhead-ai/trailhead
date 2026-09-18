@@ -355,7 +355,49 @@ def test_bare_local_picker_handoff_uses_the_derived_name_not_the_session_id(
     code = _run(["attach"], monkeypatch)
 
     assert code == 0
-    assert seen == [["tmux", "attach", "-t", derived]]
+    assert seen == [["tmux", "attach", "-t", f"={derived}"]]
+
+
+def test_list_json_still_answers_with_the_session_pool_after_bare_form_becomes_the_picker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """`camp attach --list --json` and the bare form share one code branch
+    today (`cli/session.py`'s `if list_only or ref is None:`) — the branch
+    this task's dispatch names a Critical finding, because the bare form is
+    being redefined to a workspace picker while `--list --json` must keep
+    answering with the SESSION pool, unchanged, since `camp attach -a`
+    fires it at every declared host as a read-only probe.
+
+    Same fixture (a resolvable group, `--group g`, plus one live session in
+    the local pool via `_wire_local_session`), two invocations: `--list
+    --json` still returns the session-shaped pool (`session_id` /
+    `derived_name`), and the bare form — reaching the NEW workspace
+    resolver, not the old session picker, proven by the refusal wording —
+    refuses with the workspace-precedence message rather than the old
+    picker's "no terminal to prompt into". If the branch had been
+    redefined wholesale, `--list --json` would answer with workspace rows
+    (no `session_id`) instead, or the bare form would answer with the old
+    session-picker refusal — either way, a single answer would leak across
+    both invocations rather than two different ones."""
+    _isolated_env(tmp_path, monkeypatch)
+    _wire_local_session(monkeypatch, tmp_path=tmp_path)
+
+    list_code = _run(["attach", "--list", "--json", "--group", "g"], monkeypatch)
+    list_out = capsys.readouterr().out
+    payload = json.loads(list_out)
+
+    assert list_code == 0
+    assert payload["ok"] is True
+    assert payload["rows"], payload
+    assert "session_id" in payload["rows"][0], payload
+    assert "derived_name" in payload["rows"][0], payload
+
+    bare_code = _run(["attach", "--group", "g"], monkeypatch)
+    bare_err = capsys.readouterr().err
+
+    assert bare_code != 0
+    assert "no workspace named — pass a slug" in bare_err, bare_err
+    assert "no terminal to prompt into" not in bare_err, bare_err
 
 
 def test_ref_form_reaches_local_resolution(
@@ -446,7 +488,7 @@ def test_ref_form_local_handoff_uses_the_derived_name_not_the_session_id(
     code = _run(["attach", _UUID_A[:8]], monkeypatch)
 
     assert code == 0
-    assert seen == [["tmux", "attach", "-t", derived]]
+    assert seen == [["tmux", "attach", "-t", f"={derived}"]]
 
 
 def test_host_form_reaches_the_untouched_pass_through(
@@ -622,7 +664,7 @@ def test_dash_a_ref_form_local_match_hands_off_using_the_derived_name_not_the_se
     code = _run(["attach", _UUID_A[:8], "-a"], monkeypatch)
 
     assert code == 0
-    assert seen == [["tmux", "attach", "-t", derived]]
+    assert seen == [["tmux", "attach", "-t", f"={derived}"]]
 
 
 def test_dash_a_with_two_machines_matching_refuses_and_names_both(
@@ -1133,7 +1175,7 @@ def test_dash_a_bare_picker_local_selection_uses_the_derived_name_not_the_sessio
     code = _run(["attach", "-a"], monkeypatch)
 
     assert code == 0
-    assert seen == [["tmux", "attach", "-t", derived]]
+    assert seen == [["tmux", "attach", "-t", f"={derived}"]]
 
 
 # ---------------------------------------------------------------------------

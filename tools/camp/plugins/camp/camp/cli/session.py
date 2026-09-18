@@ -61,6 +61,7 @@ from typing import TYPE_CHECKING, NoReturn
 from .parser import CampParser, group_verb_parser
 
 if TYPE_CHECKING:
+    from ..attach.door_target import ResolvedWorkspace
     from ..host.config import Host
 
 #: Bounds for `camp new --launch`'s provisioning wait. Provisioning clones and
@@ -2288,7 +2289,15 @@ def _cmd_kill_cli(args: list[str], env: dict[str, str] | None = None) -> None:
     exits 2, because there the rows are the answer.
     """
     from ..launch.recovery import Ambiguous, NoMatch
-    from ..launch.stop import AlreadyDown, Refused, StillPresent, stop_session
+    from ..launch.stop import (
+        POLL_TIMEOUT_ENV,
+        POLL_TIMEOUT_SECONDS,
+        AlreadyDown,
+        Refused,
+        StillPresent,
+        stop_session,
+    )
+    from ..launch.tmux import resolve_budget
     from ..spine import _die
 
     # `--group` is declared and ignored: a ref names the session outright, so
@@ -2330,6 +2339,12 @@ def _cmd_kill_cli(args: list[str], env: dict[str, str] | None = None) -> None:
 
     outcome = stop_session(
         ref,
+        # The engine reads no environment of its own, so the override on its
+        # re-poll budget is resolved here, from the env this verb already
+        # resolved, and passed in like any other caller's choice.
+        poll_timeout=resolve_budget(
+            POLL_TIMEOUT_ENV, POLL_TIMEOUT_SECONDS, resolved_env
+        ),
         # The ownership check asks a harness which pane commands IT composes, so
         # it needs one harness rather than the pool. Groups sharing a harness
         # but declaring different accounts are now separate pool entries, so
@@ -2715,6 +2730,134 @@ def _attach_pool_payload(pool) -> dict:
     return {"ok": False, "reason": pool.reason}
 
 
+def _resolve_group_for_attach(
+    groups: list[dict], group_override: str | None, *, env: dict[str, str]
+) -> dict | None:
+    """The one group a slug is resolved against, for `camp attach`'s new
+    workspace precedence — `--group` if given, else the same
+    `resolve_from_cwd` every other group-resolved verb uses
+    (`cli/dispatch.py`'s `_resolve_group_for_command`).
+
+    Returns `None` on ANY failure — an unknown `--group`, a cwd that
+    resolves to no group, a cwd matching more than one, or a group config
+    missing a key `resolve_from_cwd` needs — never raises. A sibling
+    group's malformed config, or simply running `camp attach` from
+    somewhere no group claims, must never block an attach; the caller
+    degrades to the pre-existing, groupless behaviour, the same tolerance
+    `_parsable_groups` already applies to this same `groups` list.
+    """
+    from ..group.resolve import resolve_from_cwd, resolve_group_override
+
+    try:
+        if group_override:
+            return resolve_group_override(group_override, groups)
+        group_name, _slug = resolve_from_cwd(Path.cwd(), groups, env=env)
+        return next((g for g in groups if g["group"]["name"] == group_name), None)
+    except Exception:  # noqa: BLE001 — see docstring: never blocks an attach
+        return None
+
+
+def _refuse_door(outcome, reason: str, *, as_json: bool) -> NoReturn:
+    """One refusal for `_open_workspace_door`: `camp attach: <reason>` on
+    stderr under the plain form, or `{"ok": false, "outcome": <word or
+    null>, "reason": <reason>}` on stdout under `--json` — the same
+    `ok`-flagged shape every other `camp attach` JSON answer already
+    carries. `outcome` is the machine-readable word for the two
+    tmux-boundary refusals (`RefusedCreateFailed` vs `RefusedCreateRefused`
+    render distinct words, so a `--json` consumer can tell a policy
+    refusal from a transient tmux failure without parsing `reason`);
+    `None` when *outcome* defines none. *reason* is escaped through
+    `printable_path`, composed whole rather than field by field, because
+    it can carry tmux's own stderr verbatim. `camp.launch.door`'s own
+    docstring is explicit that a refusal's message is composed by the code
+    that constructs it, never read back out of that module.
+    """
+    from ..launch.door import exit_status, refusal_outcome_word
+    from ..launch.recovery import printable_path
+    from ..spine import _die
+
+    reason = printable_path(reason)
+    if as_json:
+        print(json.dumps({"ok": False, "outcome": refusal_outcome_word(outcome), "reason": reason}))
+        sys.exit(exit_status(outcome))
+    _die(f"camp attach: {reason}")
+
+
+def _open_workspace_door(
+    target: "ResolvedWorkspace",
+    *,
+    tmux,
+    resolved_env: dict[str, str],
+    as_json: bool,
+    interactive: bool,
+) -> None:
+    """Create or connect the workspace `target` resolved to, then hand the
+    terminal over — `camp attach`'s door.
+
+    The tmux boundary is
+    `launch.workspace_session.create_or_connect_workspace_session` (the
+    probe, the create, and the race re-probe, shared with `camp new`'s door
+    at `cli/group.py:_door_dispatch_for_new`); the handover is
+    `host.handoff.hand_over_to_session` (the exec and `switch-client` arms).
+    What is `camp attach`'s alone, and stays here, is that every failure
+    state is a refusal — the session is all this verb has, so an
+    unanswered tmux, a failed create, or a create refused by policy each
+    end in `camp attach: …` and a non-zero exit, where `camp new` reports a
+    workspace-only success.
+
+    Success prints the outcome line on stdout (or the `--json` object),
+    then hands over. `attached` in that report is true on both handover
+    arms and false whenever `interactive` is false — without a terminal the
+    session is still created or connected, but nothing is handed over and
+    neither handover seam is touched.
+    """
+    from ..host.handoff import hand_over_to_session
+    from ..launch.door import (
+        Connected,
+        Created,
+        RefusedCreateFailed,
+        RefusedCreateRefused,
+        RefusedTmuxUnanswered,
+        exit_status,
+        render_human,
+        render_json,
+    )
+    from ..launch.workspace_session import DoorState, create_or_connect_workspace_session
+
+    probe = create_or_connect_workspace_session(
+        target.group, target.slug, target.path, env=resolved_env, tmux=tmux
+    )
+
+    if probe.state is DoorState.TMUX_UNANSWERED:
+        _refuse_door(RefusedTmuxUnanswered(), probe.reason, as_json=as_json)
+        return
+    if probe.state is DoorState.CREATE_FAILED:
+        _refuse_door(RefusedCreateFailed(), probe.reason, as_json=as_json)
+        return
+    if probe.state is DoorState.CREATE_REFUSED:
+        _refuse_door(RefusedCreateRefused(), probe.reason, as_json=as_json)
+        return
+
+    outcome_cls = Created if probe.state is DoorState.CREATED else Connected
+    outcome = outcome_cls(
+        slug=target.slug,
+        group=target.group,
+        tmux_session=probe.session_name,
+        workspace_path=target.path,
+        attached=interactive,
+    )
+
+    if as_json:
+        print(json.dumps(render_json(outcome)))
+    else:
+        print(render_human(outcome))
+
+    if not interactive:
+        sys.exit(exit_status(outcome))
+
+    hand_over_to_session(tmux, probe.session_name, env=resolved_env)
+
+
 def _cmd_attach_cli(args: list[str], env: dict[str, str] | None = None) -> None:
     """camp attach [<ref>] [--resolve --json] [--list --json].
 
@@ -2735,7 +2878,10 @@ def _cmd_attach_cli(args: list[str], env: dict[str, str] | None = None) -> None:
     from ..host.handoff import handoff, local_argv
     from ..spine import _die
 
-    # `--group` is declared and ignored: a ref names the session outright.
+    # `--group` was declared and ignored (a ref names the session outright)
+    # until this task: a workspace slug now takes precedence over the ref
+    # path, and resolving THAT needs a group — so `--group` is read below,
+    # the same way every other group-resolved verb reads it.
     # `--json` is accepted on the plain `<ref>` form too (no `--resolve`/
     # `--list`) — deliberately, not an oversight. It changes nothing about
     # the success path (a handoff has no JSON shape to offer), and its only
@@ -2780,11 +2926,78 @@ def _cmd_attach_cli(args: list[str], env: dict[str, str] | None = None) -> None:
         resolved_env
     )
 
-    if list_only or ref is None:
-        # The two reference-less forms read the identical pool: `--list --json`
-        # dumps it for the cross-host picker to merge, the bare form presents
-        # it. Read once, here, rather than twice below.
-        pool = local_pool(
+    # `--list --json` and `--resolve --json` are read-only probes
+    # `camp attach -a` fires at every declared host — never routed through
+    # workspace-slug precedence, so a probe can never create a tmux session
+    # on a remote machine as a side effect of being asked a question (see
+    # `docs/design/the-door-creates-or-connects-a-workspace-session.md`,
+    # "The machine probes are outside the door entirely"). Gated off here,
+    # before either form is consulted at all.
+    if not resolve_only and not list_only:
+        target_group = _resolve_group_for_attach(groups, parsed.group, env=resolved_env)
+        if target_group is not None:
+            from ..attach.door_target import (
+                NotAWorkspace,
+                ResolvedWorkspace,
+                WorkspaceCandidate,
+                refusal_message,
+                resolve_attach_target,
+            )
+            from ..launch.door import RefusedEmptyGroup, RefusedNoTerminal
+            from ..launch.inventory import format_state
+            from ..provision.lifecycle import cmd_ls_group
+
+            group_name = target_group["group"]["name"]
+
+            def _group_workspaces(
+                group=target_group, tmux=tmux, env=resolved_env
+            ) -> list["WorkspaceCandidate"]:
+                listing = cmd_ls_group(group, env=env, tmux=tmux)
+                return [
+                    WorkspaceCandidate(
+                        slug=e["slug"],
+                        path=Path(e["workspace_path"]),
+                        state_text=format_state(e.get("state"), e.get("window_count")),
+                    )
+                    for e in listing.entries
+                ]
+
+            interactive = sys.stdin.isatty() and sys.stdout.isatty()
+            target = resolve_attach_target(
+                ref,
+                group_name=group_name,
+                workspaces=_group_workspaces,
+                isatty=interactive,
+                stdin=sys.stdin,
+                stdout=sys.stdout,
+            )
+
+            if isinstance(target, ResolvedWorkspace):
+                _open_workspace_door(
+                    target,
+                    tmux=tmux,
+                    resolved_env=resolved_env,
+                    as_json=as_json,
+                    interactive=interactive,
+                )
+            if isinstance(target, (RefusedNoTerminal, RefusedEmptyGroup)):
+                _die(refusal_message(target, group_name=group_name))
+            if isinstance(target, PoolUnreadable):
+                _die(f"camp attach: {target.reason}")
+            assert isinstance(target, NotAWorkspace)
+            # A slug that names no workspace in the resolved group is not
+            # the door's — it falls through to the retired ref path below,
+            # unchanged, which refuses in its own words. A bare form never
+            # reaches this assertion: `resolve_attach_target` only returns
+            # `NotAWorkspace` when a ref was given.
+
+    def _read_local_pool():
+        # The two reference-less forms read the identical pool: `--list
+        # --json` dumps it for the cross-host picker to merge, the bare form
+        # presents it. Read lazily, never before the workspace precedence
+        # above has had its say — a probe or a door invocation must not pay
+        # for a pool read it will not use.
+        return local_pool(
             harness=harness,
             tmux=tmux,
             transcripts=transcripts,
@@ -2793,10 +3006,18 @@ def _cmd_attach_cli(args: list[str], env: dict[str, str] | None = None) -> None:
             env=resolved_env,
             machine=machine,
         )
-        if list_only:
-            print(json.dumps(_attach_pool_payload(pool)))
-            sys.exit(0)
 
+    if list_only:
+        print(json.dumps(_attach_pool_payload(_read_local_pool())))
+        sys.exit(0)
+
+    if ref is None:
+        # The workspace precedence above did not resolve a group (or the
+        # sibling `--group`/cwd resolution failed) — degrade to the
+        # pre-existing session picker rather than refuse outright, the same
+        # tolerance `_parsable_groups` already applies to a malformed
+        # sibling config.
+        pool = _read_local_pool()
         result = pick_session(
             pool,
             stdin=sys.stdin,

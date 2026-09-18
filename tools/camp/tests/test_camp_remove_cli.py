@@ -125,13 +125,19 @@ def remove_env(tmp_path: Path, monkeypatch):
     # normally spawns that process and returns, leaving the fixture to poll
     # the manifest until the member worktrees appear; doing the same work
     # inline removes both the extra interpreter and the polling latency, and
-    # leaves the same workspace on disk (`test_helpers_camp_provision`).
+    # leaves the same workspace on disk — held by
+    # `test_synchronous_provisioning_lands_the_workspace_the_detached_route_lands`.
+    # `--no-session`: this fixture needs the workspace provisioned, not the
+    # tmux session `camp new` now creates by default.
     import camp.provision.provision as provision
     from camp.group.config import load_group
     from camp.provision.lifecycle import cmd_setup_group
 
     monkeypatch.setattr(provision, "spawn_detached_provisioner", lambda **kw: None)
-    r2 = run_camp(["new", "ws-slug", "--group", "rmgroup"], env={**env, "CAMP_TEST_NO_EXEC": "1"})
+    r2 = run_camp(
+        ["new", "ws-slug", "--group", "rmgroup", "--no-session"],
+        env={**env, "CAMP_TEST_NO_EXEC": "1"},
+    )
     assert r2.returncode == 0, f"camp new failed: {r2.stderr}"
     cmd_setup_group(load_group(groups_dir / "rmgroup.toml"), "ws-slug", env=env)
 
@@ -870,6 +876,31 @@ class TestRemoveReturnPath:
         cli._cmd_remove_group_cli(["feat-x"], g["group"], g["env"], dry_run=False)
         captured = capsys.readouterr()
         assert "trailhead shellenv" in captured.err
+
+    def test_new_and_remove_differ_on_the_nudge_under_the_same_env(
+        self, inproc_group, monkeypatch, capsys
+    ):
+        """The wrapper's `new` arm is gone; its `remove` arm isn't. Run both
+        commands with the exact same (marker-absent) environment and confirm
+        they diverge: `new` stays quiet, `remove` still nudges."""
+        import camp.cli.group as group_cli
+
+        self._patch_ok_break(monkeypatch)
+        cli = _load_cli_module()
+        g = inproc_group
+        monkeypatch.delenv("CAMP_SHELL_INTEGRATION", raising=False)
+
+        group_cli._cmd_new_group_cli(
+            ["feat-new", "--no-session"], g["group"], g["env"], dry_run=False
+        )
+        new_err = capsys.readouterr().err
+
+        monkeypatch.chdir(self._ws_dir(g))
+        cli._cmd_remove_group_cli(["feat-x"], g["group"], g["env"], dry_run=False)
+        remove_err = capsys.readouterr().err
+
+        assert "shellenv" not in new_err
+        assert "trailhead shellenv" in remove_err
 
     def test_failed_removal_from_inside_emits_no_path(self, inproc_group, monkeypatch, capsys):
         """On failure the workspace may still exist — stdout must stay EMPTY so
