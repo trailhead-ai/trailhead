@@ -586,6 +586,17 @@ def main() -> None:
         _cmd_window_dispatch_cli(argv[1:])
         return
 
+    # `camp window unbind` — the operator-facing removal for the
+    # window-creation-key binding, dispatched groupless before group
+    # resolution for the same reason `kill`/`attach` are: this is the one
+    # command an operator reaches for when something is already broken, and
+    # a sibling group's malformed config must never block it. Server-wide,
+    # not workspace-scoped, so it needs no --group of its own.
+    if first == "window":
+        from .window import _cmd_window_cli
+        _cmd_window_cli(argv[1:])
+        return
+
     # 'group' is the new name for 'init'; 'init' redirects to 'group'.
     if first == "group":
         _refuse_host_flag_if_present(first, argv[1:])

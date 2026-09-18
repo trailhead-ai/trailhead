@@ -48,6 +48,8 @@ import sys
 from pathlib import Path
 from typing import Protocol
 
+from .tmux import _NO_SERVER_STDERR_RE
+
 #: This module lives at plugins/camp/camp/launch/binding.py; parents[2] is
 #: the plugin root (plugins/camp/), the same directory cli/dispatch.py's own
 #: `_PLUGIN_ROOT` resolves to from its own location at the same package
@@ -67,6 +69,17 @@ class _TmuxLike(Protocol):
     def list_window_binding(self) -> str | None: ...
 
     def install_window_binding(self, true_command: str, *, timeout: float | None = None): ...
+
+    def reset_window_binding(self, *, timeout: float | None = None): ...
+
+
+class WindowBindingRemovalError(Exception):
+    """Removal could not be completed — tmux either did not answer at all
+    or answered with a non-zero exit. Carries camp's own words; the one
+    caller (`cli/window.py`'s `unbind` verb) reports `str(exc)` verbatim on
+    stderr rather than letting a raw exception surface, since this is a
+    command an operator runs from a shell specifically because something
+    is already wrong."""
 
 
 def _dispatch_marker(camp_bin: str) -> str:
@@ -124,3 +137,47 @@ def install_window_key_binding(
         print(_NOTICE, file=sys.stderr)
 
     return is_first_install
+
+
+def remove_window_key_binding(tmux: _TmuxLike) -> None:
+    """Restore camp's prefix+``c`` binding to tmux's own compiled-in
+    default across the whole server — the paired removal for
+    :func:`install_window_key_binding`.
+
+    Always issues the reset call, whether or not a camp binding was ever
+    installed on this server: an operator asking for the key to be tmux's
+    default is asking for an END STATE, not for camp to undo a specific
+    prior action, so there is no "already default" branch to special-case
+    and no way for this call to fail simply because there was nothing to
+    remove — see `Tmux.reset_window_binding`'s own docstring for why
+    reasserting the default is always safe and idempotent.
+
+    A server that was never started at all is the SAME end state, not a
+    failure: unlike `new-session`, a bare `bind-key` call does not
+    auto-start a tmux server (confirmed against real tmux 3.7c), so it
+    answers non-zero with tmux's own "no server running" stderr shape
+    (`camp.launch.tmux._NO_SERVER_STDERR_RE`) whenever the socket's server
+    does not exist. With no server, the key is already tmux's default —
+    the identical "answered empty, not unreachable" distinction
+    `Tmux.list_sessions` already draws on this same stderr shape — so this
+    is treated as success, never surfaced as a refusal.
+
+    Raises :class:`WindowBindingRemovalError`, carrying camp's own words,
+    when tmux could not be asked at all or answered with any OTHER
+    non-zero exit — never lets tmux's own exception or stderr reach the
+    caller raw.
+    """
+    result = tmux.reset_window_binding()
+    if result is None:
+        raise WindowBindingRemovalError(
+            "camp: could not reach tmux to reset the window-creation key"
+        )
+    if result.returncode != 0:
+        stderr = result.stderr or ""
+        if _NO_SERVER_STDERR_RE.search(stderr):
+            return
+        detail = stderr.strip()
+        suffix = f" — {detail}" if detail else ""
+        raise WindowBindingRemovalError(
+            f"camp: tmux refused to reset the window-creation key{suffix}"
+        )

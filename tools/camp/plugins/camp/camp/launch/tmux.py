@@ -643,6 +643,28 @@ class Tmux:
             timeout=timeout,
         )
 
+    def reset_window_binding(
+        self, *, timeout: float | None = None
+    ) -> subprocess.CompletedProcess | None:
+        """Restore camp's server-global prefix+``c`` binding to tmux's own
+        compiled-in default: ``bind-key -T prefix c new-window``.
+
+        tmux has no revert-to-default primitive — this reasserts the exact
+        else-branch :meth:`install_window_binding` already wraps in
+        `if-shell`, literally, with no `if-shell` around it, so the key
+        behaves as a stock, never-bound tmux server would regardless of
+        which session fires it. Idempotent and server-global (no `-t`):
+        issuing this against a server that never had camp's binding
+        installed reasserts tmux's own default and still succeeds.
+
+        Returns ``None`` when tmux could not be asked at all; the caller
+        decides what to do with a non-zero exit.
+        """
+        return self._run(
+            ["bind-key", "-T", "prefix", "c", "new-window"],
+            timeout=timeout,
+        )
+
     def list_window_binding(self, *, timeout: float | None = None) -> str | None:
         """Every binding in the ``prefix`` table (``tmux list-keys -T
         prefix``), or ``None`` when tmux could not answer.

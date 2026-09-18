@@ -28,6 +28,18 @@ if str(_PLUGIN_DIR) not in sys.path:
     sys.path.insert(0, str(_PLUGIN_DIR))
 
 
+class _Completed:
+    """Stand-in for `subprocess.CompletedProcess` — only `returncode` and
+    `stderr` are read by `remove_window_key_binding`."""
+
+    def __init__(self, *, returncode: int = 0, stderr: str = "") -> None:
+        self.returncode = returncode
+        self.stderr = stderr
+
+
+_OK = _Completed(returncode=0)
+
+
 class _FakeTmux:
     """Records every `install_window_binding` call and answers
     `list_window_binding` with whatever the test primed."""
@@ -35,6 +47,8 @@ class _FakeTmux:
     def __init__(self, *, existing_binding: str | None = None) -> None:
         self._binding = existing_binding
         self.install_calls: list[str] = []
+        self.reset_calls: int = 0
+        self._reset_result: object = _OK
 
     def list_window_binding(self):
         return self._binding
@@ -43,6 +57,10 @@ class _FakeTmux:
         self.install_calls.append(true_command)
         self._binding = f"bind-key -T prefix c if-shell ... {true_command} ...\n"
         return None
+
+    def reset_window_binding(self, *, timeout=None):
+        self.reset_calls += 1
+        return self._reset_result
 
 
 def test_first_install_in_a_server_emits_the_notice(capsys):
@@ -115,3 +133,70 @@ def test_notify_false_suppresses_the_notice_even_on_first_install(capsys):
 
     assert len(tmux.install_calls) == 1
     assert capsys.readouterr().err == ""
+
+
+def test_remove_window_key_binding_issues_the_reset_call_and_succeeds():
+    """Removal always issues the reset call — whether or not a camp binding
+    was ever installed on this server (contract bullet: "no binding
+    installed" reports the same end state and succeeds, not an error)."""
+    from camp.launch.binding import remove_window_key_binding
+
+    never_installed = _FakeTmux()  # no existing_binding primed
+    remove_window_key_binding(never_installed)
+    assert never_installed.reset_calls == 1
+
+    already_installed = _FakeTmux(existing_binding="bind-key -T prefix c if-shell ...\n")
+    remove_window_key_binding(already_installed)
+    assert already_installed.reset_calls == 1
+
+
+def test_remove_window_key_binding_raises_camps_own_message_when_tmux_unreachable():
+    """The refusal path: tmux could not be asked at all (`reset_window_binding`
+    answers `None`, `Tmux`'s own tri-state for "did not answer") surfaces as
+    camp's own exception with camp's own words, never a raw exception a
+    caller has to translate itself."""
+    from camp.launch.binding import WindowBindingRemovalError, remove_window_key_binding
+
+    tmux = _FakeTmux()
+    tmux._reset_result = None
+
+    try:
+        remove_window_key_binding(tmux)
+        assert False, "expected WindowBindingRemovalError"
+    except WindowBindingRemovalError as exc:
+        assert "camp:" in str(exc)
+        assert "tmux" in str(exc).lower()
+
+
+def test_remove_window_key_binding_raises_camps_own_message_on_non_zero_exit():
+    from camp.launch.binding import WindowBindingRemovalError, remove_window_key_binding
+
+    tmux = _FakeTmux()
+    tmux._reset_result = _Completed(returncode=1, stderr="some tmux server error")
+
+    try:
+        remove_window_key_binding(tmux)
+        assert False, "expected WindowBindingRemovalError"
+    except WindowBindingRemovalError as exc:
+        assert "camp:" in str(exc)
+        assert "some tmux server error" in str(exc)
+
+
+def test_remove_window_key_binding_succeeds_when_no_tmux_server_is_running_at_all():
+    """A `bind-key` call answers non-zero with tmux's own "no server
+    running" stderr shape when the socket's server was never started —
+    unlike `new-session`, `bind-key` does not auto-start one (confirmed
+    against real tmux 3.7c). That is not a reachability failure: with no
+    server at all, the key is already tmux's default — the same "answered
+    empty, not UNANSWERED" distinction `Tmux.list_sessions` already draws
+    on this exact stderr shape."""
+    from camp.launch.binding import remove_window_key_binding
+
+    tmux = _FakeTmux()
+    tmux._reset_result = _Completed(
+        returncode=1,
+        stderr="error connecting to /tmp/tmux-501/camp_test_sock (No such file or directory)",
+    )
+
+    remove_window_key_binding(tmux)  # must not raise
+    assert tmux.reset_calls == 1

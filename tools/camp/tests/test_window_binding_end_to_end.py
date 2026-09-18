@@ -445,3 +445,170 @@ def test_display_message_reaches_the_message_log_distinct_from_run_shells_own_ou
 
     messages = _sock_run(server.sock, "show-messages").stdout
     assert "camp: refused — test message" in messages
+
+
+_CAMP_BIN = str(_PLUGIN_DIR / "cli" / "camp")
+
+
+def _run_camp_window_unbind(server: "_E2EServer") -> subprocess.CompletedProcess[str]:
+    """Invoke the REAL `camp` CLI entry point — `camp window unbind` — as a
+    genuine subprocess against *server*'s throwaway socket, exercising
+    `cli/dispatch.py`'s real routing and `cli/window.py`'s real wiring, not
+    just the pure functions behind them (those are covered by
+    `test_cli_window.py` and `test_launch_binding.py`)."""
+    return subprocess.run(
+        [_CAMP_BIN, "window", "unbind"],
+        env=server.env,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+
+
+@pytest.mark.skipif(_REAL_TMUX is None, reason="no tmux binary on PATH (captured at import time)")
+def test_unbind_restores_tmux_default_in_both_the_camp_session_and_a_plain_one(server):
+    """Test contract bullet 1: after removal, pressing the key in a marked
+    camp workspace session no longer composes anything (the record gains no
+    new entry — camp's branch never fires), and a plain, never-marked
+    session on the same server is unaffected either way. Both sessions
+    still get a real tmux window from the else-branch's own `new-window`,
+    since that IS the default `unbind` restores — the signal that
+    distinguishes "camp composed this" from "tmux's own default fired" is
+    the window record, exactly as the paired install test above uses it."""
+    from camp.launch.workspace_session import create_workspace_session
+    from camp.launch.naming import workspace_session_name
+    from camp.launch.tmux import Tmux
+    from camp.group.window_record import read_window_record, window_record_path_for
+
+    slug = "feat-x"
+    ws_dir = server.workspace_dir(slug)
+    ws_dir.mkdir(parents=True)
+    create_workspace_session(server.group_name, slug, ws_dir, env=server.env, tmux=Tmux())
+    camp_session = workspace_session_name(server.group_name, slug)
+
+    _sock_run(server.sock, "new-session", "-d", "-s", "plainsess", "-x", "80", "-y", "24")
+
+    result = _run_camp_window_unbind(server)
+    assert result.returncode == 0, result.stderr
+    assert "default" in result.stdout.lower()
+
+    _attach_and_send(server.sock, camp_session, b"\x02c", settle=1.0)
+    _attach_and_send(server.sock, "plainsess", b"\x02c", settle=1.0)
+
+    camp_windows = _sock_run(server.sock, "list-windows", "-t", camp_session).stdout.splitlines()
+    plain_windows = _sock_run(server.sock, "list-windows", "-t", "plainsess").stdout.splitlines()
+    assert len(camp_windows) == 2, camp_windows
+    assert len(plain_windows) == 2, plain_windows
+
+    record = read_window_record(window_record_path_for(ws_dir))
+    assert record.entries == (), (
+        "the camp session's own key press must not have composed anything "
+        f"after unbind: {record!r}"
+    )
+
+
+@pytest.mark.skipif(_REAL_TMUX is None, reason="no tmux binary on PATH (captured at import time)")
+def test_unbind_with_no_binding_ever_installed_still_reports_success(server):
+    """Test contract bullet 2: removal when no binding is installed reports
+    the same end state and succeeds — not an error — proven on a server
+    that has NEVER had `create_workspace_session` (and so never
+    `install_window_key_binding`) run against it at all."""
+    result = _run_camp_window_unbind(server)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "camp: the window-creation key is back to its tmux default"
+
+
+@pytest.mark.skipif(_REAL_TMUX is None, reason="no tmux binary on PATH (captured at import time)")
+def test_unbind_then_a_new_workspace_session_reinstalls_the_binding(server):
+    """Test contract bullet 3: removal is not sticky — creating a new
+    workspace session after `unbind` reinstalls the binding, proven by
+    pressing the key in that later session and observing a real compose
+    (a second window plus a window-record entry), not tmux's bare
+    default."""
+    from camp.launch.workspace_session import create_workspace_session
+    from camp.launch.naming import workspace_session_name
+    from camp.launch.tmux import Tmux
+    from camp.group.window_record import read_window_record, window_record_path_for
+
+    result = _run_camp_window_unbind(server)
+    assert result.returncode == 0, result.stderr
+
+    slug = "feat-x"
+    ws_dir = server.workspace_dir(slug)
+    ws_dir.mkdir(parents=True)
+    create_workspace_session(server.group_name, slug, ws_dir, env=server.env, tmux=Tmux())
+    camp_session = workspace_session_name(server.group_name, slug)
+
+    _attach_and_send(server.sock, camp_session, b"\x02c", settle=1.5)
+
+    windows = _sock_run(server.sock, "list-windows", "-t", camp_session).stdout.splitlines()
+    assert len(windows) == 2, windows
+
+    record = read_window_record(window_record_path_for(ws_dir))
+    assert record.status == "ok"
+    assert len(record.entries) == 1, (
+        "the binding must be REINSTALLED by the new create_workspace_session "
+        f"call, composing (not defaulting) the window: {record!r}"
+    )
+
+
+@pytest.mark.skipif(_REAL_TMUX is None, reason="no tmux binary on PATH (captured at import time)")
+def test_unbind_does_not_kill_or_restart_the_server_and_every_session_survives(server):
+    """Test contract bullet 4: removal does not kill or restart the tmux
+    server, and every session on it survives — asserted by re-polling
+    `has-session` for each session AFTER unbind, not merely by reading
+    `unbind`'s own exit code."""
+    from camp.launch.workspace_session import create_workspace_session
+    from camp.launch.tmux import Tmux
+
+    ws_dir_a = server.workspace_dir("feat-a")
+    ws_dir_a.mkdir(parents=True)
+    create_workspace_session(server.group_name, "feat-a", ws_dir_a, env=server.env, tmux=Tmux())
+
+    _sock_run(server.sock, "new-session", "-d", "-s", "plainsess", "-x", "80", "-y", "24")
+
+    result = _run_camp_window_unbind(server)
+    assert result.returncode == 0, result.stderr
+
+    from camp.launch.naming import workspace_session_name
+
+    camp_session = workspace_session_name(server.group_name, "feat-a")
+    camp_alive = _sock_run(server.sock, "has-session", "-t", camp_session)
+    plain_alive = _sock_run(server.sock, "has-session", "-t", "plainsess")
+    assert camp_alive.returncode == 0, "the camp workspace session must survive unbind"
+    assert plain_alive.returncode == 0, "the plain session must survive unbind"
+
+    server_alive = _sock_run(server.sock, "has-session")
+    assert server_alive.returncode == 0, "the server itself must still be reachable"
+
+
+@pytest.mark.skipif(_REAL_TMUX is None, reason="no tmux binary on PATH (captured at import time)")
+def test_unbind_leaves_the_workspace_window_record_untouched(server):
+    """Test contract bullet 5: removal leaves every workspace's window
+    record untouched — a workspace that already composed one window before
+    `unbind` runs still shows exactly that one entry, unchanged, after."""
+    from camp.launch.workspace_session import create_workspace_session
+    from camp.launch.naming import workspace_session_name
+    from camp.launch.tmux import Tmux
+    from camp.group.window_record import read_window_record, window_record_path_for
+
+    slug = "feat-x"
+    ws_dir = server.workspace_dir(slug)
+    ws_dir.mkdir(parents=True)
+    create_workspace_session(server.group_name, slug, ws_dir, env=server.env, tmux=Tmux())
+    camp_session = workspace_session_name(server.group_name, slug)
+
+    _attach_and_send(server.sock, camp_session, b"\x02c", settle=1.5)
+
+    before = read_window_record(window_record_path_for(ws_dir))
+    assert len(before.entries) == 1, before
+
+    result = _run_camp_window_unbind(server)
+    assert result.returncode == 0, result.stderr
+
+    after = read_window_record(window_record_path_for(ws_dir))
+    assert after.entries == before.entries, (
+        f"the window record must be byte-for-byte unchanged by unbind: "
+        f"before={before!r} after={after!r}"
+    )

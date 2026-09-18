@@ -762,3 +762,34 @@ def test_display_message_targets_a_raw_session_id_with_no_qualification(monkeypa
         ["tmux", "display-message", "-t", "$3", "camp: refused — outside workspace"],
         ["tmux", "display-message", "-t", "$3", "camp: refused — credential store"],
     ]
+
+
+def test_reset_window_binding_issues_the_stock_bind_key_argv(monkeypatch):
+    """Removal re-installs tmux's own compiled-in default literally —
+    `bind-key -T prefix c new-window`, server-global (no `-t`) — since tmux
+    has no revert-to-default primitive to call instead. Same argv shape
+    `install_window_binding` uses, minus the `if-shell` wrapping."""
+    import camp.launch.tmux as tmux_module
+
+    calls: list[list[str]] = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(list(argv))
+        return _completed(returncode=0)
+
+    monkeypatch.setattr(tmux_module.subprocess, "run", fake_run)
+
+    tmux_module.Tmux().reset_window_binding()
+
+    assert calls == [["tmux", "bind-key", "-T", "prefix", "c", "new-window"]]
+
+
+def test_reset_window_binding_returns_none_when_tmux_is_unreachable(monkeypatch):
+    import camp.launch.tmux as tmux_module
+
+    def fake_run(argv, **kwargs):
+        raise FileNotFoundError("no such file")
+
+    monkeypatch.setattr(tmux_module.subprocess, "run", fake_run)
+
+    assert tmux_module.Tmux().reset_window_binding() is None
