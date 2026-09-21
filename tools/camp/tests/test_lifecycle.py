@@ -2433,6 +2433,12 @@ class TestCmdSyncGroupBehaviour:
 
         seed = tmp_path / "seed"
         _git_ok("git", "clone", "-q", str(bare), str(seed))
+        # The seed clone commits, so it needs an identity of its own: the
+        # invoking environment may carry none, and a fixture that only works
+        # where the developer's global config happens to supply one is not
+        # reproducible.
+        _git_ok("git", "-C", str(seed), "config", "user.email", "test@test.com")
+        _git_ok("git", "-C", str(seed), "config", "user.name", "Test")
         (seed / "README.md").write_text("seed\n")
         _git_ok("git", "-C", str(seed), "add", "README.md")
         _git_ok("git", "-C", str(seed), "commit", "-q", "-m", "init", "--no-gpg-sign")
