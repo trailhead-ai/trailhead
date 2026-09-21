@@ -127,6 +127,46 @@ POLL_INTERVAL_SECONDS = 0.1
 POLL_TIMEOUT_ENV = "CAMP_TEST_STOP_POLL_TIMEOUT_SECONDS"
 
 
+def poll_for_absence(
+    tmux: Any,
+    name: str,
+    *,
+    sleep: Callable[[float], None] = time.sleep,
+    monotonic: Callable[[], float] = time.monotonic,
+    poll_timeout: float = POLL_TIMEOUT_SECONDS,
+    poll_interval: float = POLL_INTERVAL_SECONDS,
+) -> bool | None:
+    """Poll ``tmux.has_session(name)`` until tmux reports the name gone, the
+    budget expires, or tmux stops answering.
+
+    Returns ``True`` the moment tmux answers the name is gone, ``False`` if
+    the budget expires while tmux still reports it present, and ``None`` the
+    moment tmux answers ``None`` (did not answer at all) — the only three
+    readings a caller may act on. Absence of the name is the only evidence of
+    success this seam accepts (see the module docstring): an unanswered
+    question must never be read as absence, and must never be conflated with
+    "still present" either, since neither is what was observed.
+
+    Shared by `stop_session` (`camp kill`) and
+    `camp.launch.stop_workspace.stop_workspace` (`camp stop`) so the two
+    engines can never drift on how long an operator waits for a kill to be
+    confirmed: the budget is WALL CLOCK, measured on `monotonic` rather than
+    summed from the sleeps, because each `has_session` call may itself cost
+    up to `TMUX_TIMEOUT_SECONDS` — counting only the sleeps would leave the
+    time an operator actually waits unbounded.
+    """
+    deadline = monotonic() + poll_timeout
+    while True:
+        present = tmux.has_session(name)
+        if present is None:
+            return None
+        if not present:
+            return True
+        if monotonic() >= deadline:
+            return False
+        sleep(poll_interval)
+
+
 #: Where the concierge supervisor publishes the id of the anchor session,
 #: under its own state dir. camp reads it; camp never writes it. The directory
 #: is resolved through `trailhead.paths` (Axiom 4), which spells the same rule
@@ -391,17 +431,16 @@ def stop_session(
 
     tmux.kill_session(name)
 
-    # The budget is spent by the polling, not just by the waiting between
-    # polls: a busy tmux can take a full TMUX_TIMEOUT_SECONDS to answer each
-    # question. Measuring elapsed time on a monotonic clock makes the asserted
-    # bound the one the operator actually experiences.
-    deadline = monotonic() + poll_timeout
-    while True:
-        present = tmux.has_session(name)
-        if present is None:
-            return Refused(candidate, REFUSED_TMUX_UNANSWERED)
-        if not present:
-            return Stopped(candidate)
-        if monotonic() >= deadline:
-            return StillPresent(candidate)
-        sleep(poll_interval)
+    result = poll_for_absence(
+        tmux,
+        name,
+        sleep=sleep,
+        monotonic=monotonic,
+        poll_timeout=poll_timeout,
+        poll_interval=poll_interval,
+    )
+    if result is None:
+        return Refused(candidate, REFUSED_TMUX_UNANSWERED)
+    if result:
+        return Stopped(candidate)
+    return StillPresent(candidate)

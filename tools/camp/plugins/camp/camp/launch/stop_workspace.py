@@ -57,10 +57,16 @@ Three renderings, all pure functions of a :class:`StopOutcome`:
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
-from typing import Mapping
+import time
+from dataclasses import dataclass, field, replace
+from pathlib import Path
+from typing import Any, Callable, Mapping
 
+from .naming import workspace_session_name
 from .recovery import printable_path
+from .stop import POLL_INTERVAL_SECONDS, POLL_TIMEOUT_SECONDS, poll_for_absence
+from .tmux import WindowListing
+from .window_reconcile import Reconciled, reconcile_workspace_record, render_changes
 
 
 @dataclass(frozen=True)
@@ -246,6 +252,25 @@ def _row_line(row: PreviewRow) -> str | None:
     return None  # idle: a window at an idle shell shows neither
 
 
+def preview_lines(tmux_session: str, preview: StopPreview) -> list[str]:
+    """The count line, then one indented line per non-idle window — the
+    body every rendering of a non-empty preview shares.
+
+    Escaped whole through `printable_path`, line by line, the same way
+    `render_human` escapes its own composed lines: see this module's
+    docstring. Factored out so `stop_workspace` can hand these SAME lines to
+    `emit` before the kill, without re-deriving the formatting a second
+    time — see that function's docstring for why the preview is emitted
+    before anything is killed.
+    """
+    lines = [printable_path(f"stopping {tmux_session}: {len(preview.windows)} windows")]
+    for row in preview.windows:
+        line = _row_line(row)
+        if line is not None:
+            lines.append(printable_path(line))
+    return lines
+
+
 def render_human(outcome: StopOutcome) -> str:
     """The human lines `camp stop` prints for *outcome*.
 
@@ -258,12 +283,7 @@ def render_human(outcome: StopOutcome) -> str:
     if isinstance(outcome, NotRunning):
         return printable_path(f"not running {outcome.tmux_session}")
 
-    preview = outcome.preview
-    lines = [printable_path(f"stopping {outcome.tmux_session}: {len(preview.windows)} windows")]
-    for row in preview.windows:
-        line = _row_line(row)
-        if line is not None:
-            lines.append(printable_path(line))
+    lines = preview_lines(outcome.tmux_session, outcome.preview)
 
     if isinstance(outcome, Stopped):
         lines.append(printable_path(f"stopped {outcome.tmux_session}"))
@@ -314,3 +334,102 @@ _EXIT_STATUS: dict[type, int] = {
 def exit_status(outcome: StopOutcome) -> int:
     """The process exit status for *outcome*: 0 for stopped/not-running, 1 otherwise."""
     return _EXIT_STATUS[type(outcome)]
+
+
+def stop_workspace(
+    group: str,
+    slug: str,
+    workspace_dir: Path,
+    *,
+    tmux: Any,
+    poll_timeout: float = POLL_TIMEOUT_SECONDS,
+    poll_interval: float = POLL_INTERVAL_SECONDS,
+    emit: Callable[[str], None],
+    shell_names: frozenset[str] = DEFAULT_SHELL_NAMES,
+    sleep: Callable[[float], None] = time.sleep,
+    monotonic: Callable[[], float] = time.monotonic,
+) -> StopOutcome:
+    """`camp stop`'s engine: resolve the session name, reconcile, preview,
+    kill, and check — see this module's docstring and
+    `docs/design/the-record-stays-true-reconciliation-and-stopping.md`'s
+    "Stopping states its cost, then pays it, then checks".
+
+    In order: `has_session` decides `RefusedTmuxUnanswered` (tmux did not
+    answer) or `NotRunning` (no session; the record is never touched — there
+    is no tmux to reconcile it against) before anything else runs. A running
+    session is reconciled under the workspace lock
+    (`reconcile_workspace_record`) — its change lines, or a corrupt record's
+    not-reconciled note, handed to *emit* one line at a time. A FRESH
+    `list_windows` call — never the reconciliation's own internal listing —
+    is then classified against the (possibly corrected) entries into a
+    `StopPreview`, whose lines (`preview_lines`) are handed to *emit* too,
+    before `tmux.kill_session` is ever called: a caller streaming *emit*
+    straight to a terminal sees exactly what a kill is about to cost before
+    it happens, matching the design doc's transcripts. Only then is the
+    session killed and `poll_for_absence` (shared with `stop_session`, so
+    `camp stop` and `camp kill` can never drift on how long an operator
+    waits) polled to confirm it is gone.
+
+    The record is written at most once, during reconciliation, and never
+    again — a stop that ends in `StillPresent` or `RefusedTmuxUnanswered`
+    (mid-poll) leaves the reconciled record exactly as reconciled, and the
+    workspace is exactly as resurrectable as it was before the stop.
+
+    A corrupt record cannot be classified against any entries — reconciling
+    it returns none, so the preview is built as though camp knew nothing
+    recorded, which is the truth: the kill still proceeds (see the design
+    doc's "the stop proceeds, because the record was already lost before the
+    stop was asked for").
+
+    A listing that answers `None` or `UNANSWERED` at the (post-reconcile)
+    preview step — the session raced away between the two tmux calls, a
+    vanishingly narrow window — degrades to an empty preview rather than
+    failing the stop: the kill is of the whole session regardless of what is
+    inside it, and a preview is a courtesy, not a precondition.
+    """
+    session_name = workspace_session_name(group, slug)
+
+    present = tmux.has_session(session_name)
+    if present is None:
+        return RefusedTmuxUnanswered(slug=slug, group=group, tmux_session=session_name)
+    if not present:
+        return NotRunning(slug=slug, group=group, tmux_session=session_name)
+
+    reconcile_outcome = reconcile_workspace_record(workspace_dir, session_name, tmux)
+    if isinstance(reconcile_outcome, Reconciled):
+        entries = reconcile_outcome.entries
+        reconciled = True
+        reconcile_note = None
+        for line in render_changes(reconcile_outcome.changes):
+            emit(line)
+    else:
+        entries = ()
+        reconciled = False
+        reconcile_note = reconcile_outcome.reason
+        emit(reconcile_outcome.reason)
+
+    listing = tmux.list_windows(session_name)
+    live_windows = listing.windows if isinstance(listing, WindowListing) else ()
+    preview = replace(
+        classify(live_windows, entries, shell_names),
+        reconciled=reconciled,
+        reconcile_note=reconcile_note,
+    )
+    for line in preview_lines(session_name, preview):
+        emit(line)
+
+    tmux.kill_session(session_name)
+
+    result = poll_for_absence(
+        tmux,
+        session_name,
+        sleep=sleep,
+        monotonic=monotonic,
+        poll_timeout=poll_timeout,
+        poll_interval=poll_interval,
+    )
+    if result is None:
+        return RefusedTmuxUnanswered(slug=slug, group=group, tmux_session=session_name, preview=preview)
+    if result:
+        return Stopped(slug=slug, group=group, tmux_session=session_name, preview=preview)
+    return StillPresent(slug=slug, group=group, tmux_session=session_name, preview=preview)
