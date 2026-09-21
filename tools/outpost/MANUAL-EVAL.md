@@ -685,3 +685,146 @@ Not covered: the routing decision late in a long session or against a user
 pushing the other way, and the "never tell a teammate it is live" clause, which
 needs a failing sync to become the live question. That clause is a separate
 case — and the escape above is a reminder that it is not academic.
+
+### 2026-09-21 — re-run trigger fired: `## Record links` edited by `task/treat-the-rule-re-measure-every-site-and-state-the-ac6-verdict`
+
+The `record-link-rendering` case's own "Re-run trigger" fires on any change to the `## Record links`
+section of `tools/outpost/plugins/outpost/rules.md`. That task's edit (relocating the table/list
+case into its own standalone statement with its own table-shaped worked example; section grew from
+14 to 16 lines; the bare-fallback conditional's three conditions untouched) triggers this re-run,
+performed **before** that task's own craft-side measurement, per its stated gate.
+
+**Arm.** A treated variant of `arms/treatment.md` — the same brief, with the *edited* `## Record
+links` section appended instead of the committed pre-edit one — built in scratch (not committed to
+`arms/`, per this task's own instruction not to overwrite the case's committed `treatment.md`,
+which stays pinned to the pre-edit section it was originally measured against). Confirmed by `diff`
+against the committed `arms/treatment.md` to differ in exactly the rule-text region and nowhere
+else (brief header, fixture references, and the `[task/example]` worked example line all
+identical).
+
+**Dispatch.** `fixtures/make-fixture-env.sh <run-dir> paragraph`, `LORE_STATE_DIR=<run-dir>` set in
+each of 3 separate `claude -p` process environments, `--setting-sources project --allowedTools
+"Read" < /dev/null`, per the case's own dispatch shape. All 3 processes exited 0 with non-empty
+captures.
+
+**Result — PASS, 3/3.** Record 1 linked correctly in every run (`[note/rotate-tires]
+(http://127.0.0.1:9199/records/gearshed/note/rotate-tires)`); records 2-5 printed bare in every
+run, each run correctly attributing the fallback reason per record (vault path not a direct child
+of the vaults root for record 2; vault unresolvable for record 3; kind/slug outside the ASCII
+grammar for records 4 and 5) — matching the case's pre-existing pass condition exactly.
+
+**Capture scan.** `capture_scan.py` on all 6 files (3 `.txt` + 3 `.stderr.txt`) — all 6 exit 0,
+clean.
+
+**No regression.** The edit does not change the outpost fallback eval's own pass/fail read at this
+gate; `task/treat-the-rule-re-measure-every-site-and-state-the-ac6-verdict`'s craft-side measurement
+proceeded on this PASS. This entry appends the gate's result only — the case's own committed rows
+above (baseline/treatment/table-vs-paragraph) are unedited by this task.
+
+### 2026-09-21 — `arms/treatment.md` split into a live arm and a frozen `-pre-rule-edit` twin
+
+Follow-up to the entry immediately above, settling the consequence its own last line
+deferred: the re-run there deliberately built its treated variant in scratch rather
+than overwriting the committed `arms/treatment.md`, "which stays pinned to the
+pre-edit section it was originally measured against." That left the committed
+`arms/treatment.md` carrying stale prose with no test pinning it either way and no
+declared reason for the freeze. Settled here, mirroring
+`tools/craft/plugins/craft/evals/ritual-deliverable-names-its-record/`'s live/frozen
+arm pattern:
+
+- `arms/treatment.md` — renamed in git history to `arms/treatment-pre-rule-edit.md`,
+  content unchanged. Confirmed by `diff` against a fresh
+  `git show 19866500:tools/outpost/plugins/outpost/rules.md`-derived rebuild to be
+  byte-identical to the baseline brief plus the `## Record links` section exactly as
+  it stood at commit `19866500` — the same text `c123d11f`'s row above (and every row
+  between it and this task) was measured against, `c123d11f` and `19866500` sharing
+  an identical `rules.md` blob (confirmed by `diff`).
+- A new `arms/treatment.md` was built fresh: the baseline brief plus the *current*
+  `## Record links` section (post-`bc8c493e`).
+- `tools/outpost/tests/test_record_link_rendering_arms_contract.py` (new) pins both:
+  the live arm rebuilds byte-identically to today's `rules.md`, the frozen arm
+  matches its declared `19866500` provenance and is proven sensitive to that
+  revision (a reconstruction against a wrong revision does not match), the two arms
+  are proven to actually diverge, and every file under `arms/` is accounted for by
+  the manifest. Written first and confirmed red (missing frozen file; live arm
+  stale) before the file split; green after. Mutation-checked: corrupting either
+  arm's tail turns its provenance test red; pointing the sensitivity check at the
+  frozen arm's own revision turns it red (proving the pin discriminates); dropping
+  an unmanifested file turns exhaustiveness red; making the two arms byte-identical
+  turns the divergence check red. All four restores verified with an empty `diff`
+  against a pre-mutation scratch copy.
+
+**No row above is edited or deleted.** Every prior result row already names its own
+measured revision (`d14c198a`, `bda10d7`, `78049293`, `c123d11f`) inline in its "Arm"
+column, so none of them reads as measuring today's text — this entry's only job is
+to make the case's `arms/` directory match what those rows already say, and to give
+future re-runs a live arm a test actually keeps in sync.
+
+### 2026-09-21 — table-condition re-run against the live treated arm (security-audit follow-through)
+
+**Why.** The Phase 4 security audit of the `bc8c493e` rule edit flagged (Medium) a coverage
+gap: the "Table vs paragraph condition — U1" section's own table-condition runs above
+(2026-09-14) were measured against the pre-edit `## Record links` text — now frozen as
+`arms/treatment-pre-rule-edit.md` — never against the edited text that added "In a table or
+list, link every row instead — do not stop at the first row." The audit's concern is the AC4/AC5
+trust boundary: an agent primed toward linking every row in a table might stop re-checking each
+row's identifier against the bare-fallback grammar/vault conditions. No table-condition run had
+been captured against the edited text to check for that regression. This entry closes that gap
+with a measurement; it makes no rule-text change and edits no row above.
+
+**Arm.** The committed live `arms/treatment.md`, unmodified — confirmed byte-identical to a
+fresh rebuild from the current `## Record links` section of `rules.md` by
+`.venv/bin/python -m pytest tools/outpost/tests/test_record_link_rendering_arms_contract.py -q`
+(5 passed). Repo HEAD at dispatch time: `ff38a1b0`.
+
+**Dispatch.** Table condition only, 3 runs, each a fresh run directory under the session
+scratchpad, each a separate `claude -p` process (never a subagent):
+
+```
+fixtures/make-fixture-env.sh <run-dir> table
+LORE_STATE_DIR="<run-dir>" claude -p "<run-dir>/task.md contents>" --setting-sources project \
+  --append-system-prompt "$(cat arms/treatment.md)" \
+  --allowedTools "Read" < /dev/null > <run-dir>/capture.txt 2> <run-dir>/capture.stderr.txt
+echo $? > <run-dir>/capture.exit
+```
+
+All 3 processes exited 0.
+
+**Per-run, per-record result.**
+
+| Run | Record 1 (`gearshed/note/rotate-tires`) | Record 2 (`attic-archive/log/winter-inventory`) | Record 3 (`ghost-vault/memo/unfiled-thought`) | Record 4 (`gearshed/note/Rotate_Tires`) | Record 5 (`gearshed/Field Note/check-in`) |
+|---|---|---|---|---|---|
+| 1 | Linked correctly: `[note/rotate-tires](http://127.0.0.1:9199/records/gearshed/note/rotate-tires)` | Bare, attributed to non-direct-child vault path | Bare, attributed to unresolvable vault | Bare, attributed to slug grammar (uppercase + underscore) | Bare, attributed to kind grammar (uppercase + space) |
+| 2 | Linked correctly (same form) | Bare, same attribution | Bare, same attribution | Bare, same attribution | Bare, same attribution |
+| 3 | Linked correctly (same form) | Bare, same attribution | Bare, same attribution | Bare, same attribution | Bare, same attribution |
+
+Record 1's table-condition link rate this batch: 3/3, each with the correct `note/rotate-tires`
+visible text and the correct `.../records/gearshed/note/rotate-tires` target. Records 2–5
+rendered bare in all 3 runs, and every run's prose correctly named the specific fallback reason
+per record (vault path not a direct child of the vaults root for record 2; vault absent from the
+listing for record 3; grammar violation for records 4 and 5) — matching `expected.md`'s per-record
+expected rendering table exactly.
+
+**Confound-flag read.** No run under this batch linked any of records 2–5, and no run rendered
+records 2–5 differently from any other run. The confound flag (`expected.md`, "Confound flag,
+orthogonal to the Δ verdict") is **not tripped**: the edited rule's stronger table-row salience
+language did not cause any run to skip a row's fallback check. This directly answers the audit's
+stated concern — the trust boundary held in all 3 runs.
+
+**Relation to the U1 verdict above.** This batch does not re-run the paragraph condition and does
+not recompute Δ — the 2026-09-14 U1 section's `Δ = 0`, INVALIDATED verdict stands as measured
+against the pre-edit text and is not superseded here. This entry is narrower: it confirms the
+table condition alone, against the edited live arm, still meets this case's own per-record pass
+condition (`expected.md`, "Pass condition") and trips no confound, closing the audit's specific
+coverage gap rather than re-litigating U1.
+
+**Capture scan.** `tools/craft/plugins/craft/scripts/capture_scan.py` run against each run's
+`capture.txt` and `capture.stderr.txt` individually (6 files total): all 6 exited 0
+("known-safe match(es), 0 credential findings — clean"); the one known-safe match per
+`capture.txt` is the record-1 URL's own `path-or-url-shape` reclassification, expected per the
+scanner's documented false-positive carve-out.
+
+**Verdict — PASS.** All 3 table-condition runs against the live treated arm meet the case's pass
+condition for every record, with no confound. Captures are not committed — this eval case has no
+`runs/` tree (consistent with the case's existing convention of grading from ephemeral captures,
+per the entries above), and remain only in the session scratchpad.

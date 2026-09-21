@@ -1,0 +1,18 @@
+**Cluster: `spec/dock-scheduling-windows`** (vault `harborlight`)
+
+| | |
+|---|---|
+| Members | `spec/dock-scheduling-windows` |
+| ADRs written | `adr/dock-scheduling-windows-use-fifo-slots` — edges: `related: spec=dock-scheduling-windows` |
+| Decisions absorbed | none |
+| ADRs superseded | none |
+| Area profiles re-synthesized | the areas this cluster touched |
+| Terminal outcome | **ADRs written** — member flipped `complete`, annotated `distilled=adr` |
+
+No deferrals in this run.
+
+Read the ADR:
+
+```
+lore record show adr/dock-scheduling-windows-use-fifo-slots
+```

@@ -1420,6 +1420,21 @@ out of this slice's scope, per the parent's "Explicitly not in this slice" list.
 > own "AC7 verdict: all ten of its one-command outcome sites now measure `own-line`. AC7 holds
 > in full." replaces the verdict stated here.
 
+> **Note added 2026-09-21, after `bc8c493e`.** Every 2026-09-11-dated row above that names a
+> tailed live arm — `rule-only` (`arms/rule-only.md`), `plan-treatment`
+> (`arms/plan-treatment.md`), `review-treatment` (`arms/review-treatment.md`), and
+> `execute-rule-only` (`arms/execute-rule-only.md`) — was dispatched against that arm
+> confirmed byte-identical to its declared source plus the `## Record links` tail pinned
+> at commit `73bf9b22`. That tail has since changed: `bc8c493e` edited `## Record links`
+> and each of these four arms was rebuilt to carry the new tail. The exact tail these
+> rows were measured against — the `73bf9b22` text — is preserved byte-for-byte in each
+> arm's frozen twin (`arms/rule-only-pre-rule-edit.md`,
+> `arms/plan-treatment-pre-rule-edit.md`, `arms/review-treatment-pre-rule-edit.md`,
+> `arms/execute-rule-only-pre-rule-edit.md`), which
+> `tools/craft/tests/test_ritual_deliverable_eval_arms_contract.py` pins against that
+> same revision. Every such row's "Prose under test"/"Arm" description above now
+> describes that frozen twin, not the live arm.
+
 ### 2026-09-12 — `slice`'s two termination sites, baseline arm only
 
 Run by `task/measure-the-baseline-at-both-termination-sites` against the pre-registration appended
@@ -1603,3 +1618,375 @@ are counted evidence and 6 are a disclosed, uniformly-discarded scope deviation.
 `own-line`, matching the pre-change prose's known defect); treatment holds (6/6 `own-line`, matching
 the currently-shipped prose). Combined with the eight already-measured sites, **AC7 holds at all ten
 of its one-command outcome sites** — the criterion this slice exists to close is closed.
+
+> **Note added 2026-09-21, after `bc8c493e`.** The 2026-09-12-dated `slice` spec-complete
+> and early-stop treatment rows above (immediately preceding this note) were dispatched
+> against `arms/rule-only.md`, confirmed byte-identical to its declared source plus the
+> `## Record links` tail pinned at commit `73bf9b22`. (The same section's baseline rows use
+> `arms/slice-frozen-rule-only.md`, a separately frozen arm pinned by its own sha256 at
+> construction — not a live tailed arm, and unaffected by the tail edit below.) That tail
+> has since changed: `bc8c493e` edited `## Record links` and `arms/rule-only.md` was rebuilt
+> to carry the new tail. The exact tail these treatment rows were measured against — the
+> `73bf9b22` text — is preserved byte-for-byte in `arms/rule-only-pre-rule-edit.md`, pinned
+> by `tools/craft/tests/test_ritual_deliverable_eval_arms_contract.py`. These rows' "Arm"
+> description now describes that frozen twin, not the live arm.
+
+### 2026-09-21 — pre-treatment baseline at all three AC6-measurable sites (`slice`, `review`, `distill`), for the record-links rule salience treatment
+
+Run by `task/baseline-all-three-measurable-sites-before-the-rule-is-touched`, against the
+pre-registration in "Extension — Task 1 of
+`task/distill-closing-report-links-the-adr-it-wrote-every-run`, pre-registration for the
+record-links rule salience treatment" in this eval's `expected.md`. This is the fresh, unmodified-
+rule baseline that section calls for before `## Record links` in
+`tools/outpost/plugins/outpost/rules.md` is edited — task 3 of the same slice performs that edit;
+this task changes nothing in the tree except the committed captures and this log entry.
+
+**Site list, re-derived, not assumed.** Per `expected.md`'s own "Pre-registered vacuity rule for
+record-link, per ritual", `record-link` carries a linkable prose mention — and is therefore
+scoreable for AC6 — at exactly three of the seven pinned rituals: `slice` (selection handoff),
+`review` (loop-complete outcome), `distill` (single-cluster outcome). The other four
+(`brainstorm`, `gauntlet`, `plan`, `execute`) are vacuous by construction and are not measured
+here, matching the pre-registration's own scope.
+
+**Pre-treatment verification.** Before dispatch, `cmp` confirmed each site's live arm is
+byte-identical to its frozen pre-rule-edit twin, and `git status --porcelain` on
+`tools/outpost/plugins/outpost/rules.md` returned nothing (clean working tree):
+
+```
+cmp arms/rule-only.md arms/rule-only-pre-rule-edit.md            → identical
+cmp arms/distill-rule-only.md arms/distill-rule-only-pre-rule-edit.md → identical
+cmp arms/review-treatment.md arms/review-treatment-pre-rule-edit.md   → identical
+```
+
+Dispatching against the live arm on disk today *is* the pre-treatment condition this task needs —
+confirmed, not assumed.
+
+**Dispatch.** 9 processes (3 runs × 3 sites), each its own `claude -p` process, never a subagent,
+`--setting-sources project --allowedTools "Read" < /dev/null`, exactly `expected.md`'s dispatch
+shape with the ritual-specific fixture and arm substituted, run in parallel within one batch. Per
+the pre-registration's table:
+
+| Site | Arm | Fixture | Record | Command |
+|---|---|---|---|---|
+| `slice` selection handoff | `arms/rule-only.md` | `fixtures/slice-completed-run.md` | `task/the-berth-allocation-slice` | `/craft:plan task/the-berth-allocation-slice` |
+| `review` loop-complete | `arms/review-treatment.md` | `fixtures/review-completed-run.md` | `spec/dock-scheduling-windows` | `/craft:distill spec/dock-scheduling-windows` |
+| `distill` | `arms/distill-rule-only.md` | `fixtures/distill-completed-run.md` | `adr/dock-scheduling-windows-use-fifo-slots` | `lore record show adr/dock-scheduling-windows-use-fifo-slots` |
+
+All 9 processes exited 0 with a non-empty captured stdout — zero exclusions, zero infrastructure
+failures, no re-dispatch needed. Captures are committed as `runs/recordlinks-baseline-<site>-{1,2,3}.{txt,stderr.txt,exit}`.
+
+**Results, per site, re-graded at report time** via
+`tools/craft/plugins/craft/scripts/ritual_deliverable_grader.py`, never an inline regex or a count
+carried over from dispatch:
+
+| Site | record-link runs (re-graded) | Verdict | Split? |
+|---|---|---|---|
+| `slice` | link, link, link (3/3) | **PASS — clean majority, AC6 holds** | No — 3/3 agreeing, no escalation triggered |
+| `review` | link, link, link (3/3) | **PASS — clean majority, AC6 holds** | No — 3/3 agreeing, no escalation triggered |
+| `distill` | link, link, link (3/3) | **PASS — clean majority, AC6 holds** | No — 3/3 agreeing, no escalation triggered |
+
+No `bare` verdict occurred at any of the 9 runs, so there is nothing to triage among the three
+`bare` shapes (mentioned-but-unlinked / not-mentioned / linked-to-a-different-record) — every run
+at every site rendered a correct markdown link naming the acted-on record.
+
+**Verbatim evidence, one run per site:**
+
+- `slice` (run 1): "Chosen slice: **The berth allocation slice** —
+  `[task/the-berth-allocation-slice](http://127.0.0.1:7313/records/harborlight/task/the-berth-allocation-slice)`,
+  written at `in-progress`..." — the handoff command
+  (`` /craft:plan task/the-berth-allocation-slice ``) stays bare, fenced, on its own line.
+- `review` (run 1): "The slice loop reports
+  `[spec/dock-scheduling-windows](http://127.0.0.1:7313/records/harborlight/spec/dock-scheduling-windows)`
+  closed out" — the handoff command stays bare, fenced, on its own line.
+- `distill` (run 1): table cell "ADRs written" —
+  `[adr/dock-scheduling-windows-use-fifo-slots](http://127.0.0.1:7313/records/harborlight/adr/dock-scheduling-windows-use-fifo-slots)`
+  — the `lore record show ...` handoff command stays bare, fenced, on its own line.
+
+Runs 2 and 3 at every site render the same identifiers as markdown links (confirmed by grep across
+all 9 captures for `[kind/slug](http://...)` targeting the acted-on record); no run at any site
+left the record bare.
+
+**Capture scan.** `tools/craft/plugins/craft/scripts/capture_scan.py` run against each of the 9
+`.txt` captures and their 9 `.stderr.txt` siblings (18 files total) — all 18 exit 0, no findings,
+nothing to triage.
+
+**Real-state check.** `tools/outpost/plugins/outpost/rules.md` carried no working-tree change
+before or after the batch (`git status --porcelain` empty both times; mtime unchanged at
+`2026-09-21 13:16:25`, predating this task's dispatch window). The developer's four configured
+lore vaults (`default`, `lake-in-the-woods`, `levr`, `trailhead`) each show only ordinary background
+sync/session-bookkeeping commits during the dispatch window (13:09–13:20 local); none of those
+commits' diffs contain any of this batch's fixture strings (`harborlight`, `the-berth-allocation-
+slice`, `dock-scheduling-windows`, `dock-scheduling-windows-use-fifo-slots`) — confirmed by
+grepping each commit's `--stat` output in that window. `~/.config/lore/config.json`'s mtime
+(2026-09-09) predates this task entirely. No escape attributable to any of the 9 `Read`-only,
+no-shell arms was found.
+
+**This is the fresh comparison point Task 3's post-treatment measurement is read against — not the
+2026-09-11 numbers.** The pre-registration's own "Baseline this measurement is compared against"
+section named the 2026-09-11 figures (slice 3/3, review 5/6-split-resolved-5-1, distill
+3/6-AMBIGUOUS) as the most recent baseline at the time it was written. Between then and now, the
+rule tail these arms carry is unchanged (confirmed above), but this fresh 9-run batch landed
+markedly different numbers at `review` and `distill` than the 2026-09-11 batch did — clean 3/3 at
+every site here, versus a 2-1 split at both `review` and `distill` on 2026-09-11 (review resolved
+5-1 PASS on re-run; distill resolved 3-3 AMBIGUOUS on re-run). Both batches ran the same live,
+unedited arms against the same fixtures and the same grader; the difference is run-to-run model
+variance at a site this design's own "Minimum detectable effect" section already flags as sitting
+inside a wide binomial band at n=3–6, not a change in the prose or the rule. Because this task's
+numbers are the most recent pre-treatment measurement and were taken immediately before the rule
+edit, they — not the 2026-09-11 figures — are the numbers Task 4 reads the post-treatment result
+against for U1 (does the treatment move `distill`) and U2 (does the treatment hold `slice` and
+`review`). This supersession is stated here explicitly rather than left for Task 4 to reconcile
+silently; `expected.md` is not edited by this task (out of its `**Files:**`).
+
+**Handoff for Task 3 / Task 4.** Per-site baseline verdict buckets: `slice` 3/3 (clean pass, no
+split), `review` 3/3 (clean pass, no split), `distill` 3/3 (clean pass, no split) — all three sites
+are, as of this fresh baseline, at ceiling rather than at the mixed/AMBIGUOUS state the
+2026-09-11 numbers recorded. Capture prefix for this batch: `recordlinks-baseline-<site>-N` where
+`<site>` is `slice`, `review`, or `distill` and `N` is `1`–`3`.
+
+**Test gate.** `.venv/bin/python -m pytest tools/craft/tests/test_ritual_deliverable_eval_arms_contract.py
+trailhead/tests/test_eval_corpus.py -q` — 57 passed. `.venv/bin/python -m ruff check tools/craft` —
+all checks passed. No test was added by this task; it ships no behaviour change, per the task
+body's own stated discipline.
+
+> **Note added 2026-09-21, after `bc8c493e`.** This section's `slice`, `review`, and
+> `distill` runs above were dispatched against `arms/rule-only.md`,
+> `arms/review-treatment.md`, and `arms/distill-rule-only.md` — each confirmed
+> byte-identical to its declared source plus the `## Record links` tail pinned at
+> commit `73bf9b22` (the `cmp` checks quoted above). That tail has since changed:
+> `bc8c493e` edited `## Record links` and every one of those three arms was rebuilt
+> to carry the new tail. The exact tail this baseline was measured against — the
+> `73bf9b22` text — is preserved byte-for-byte in each arm's frozen twin
+> (`arms/rule-only-pre-rule-edit.md`, `arms/review-treatment-pre-rule-edit.md`,
+> `arms/distill-rule-only-pre-rule-edit.md`), which
+> `tools/craft/tests/test_ritual_deliverable_eval_arms_contract.py` pins against
+> that same revision. This row's "Prose under test" — "reader rule appended" — now
+> means the frozen twin's text, not the live arm's current text.
+
+### 2026-09-21 — extended distill baseline to nine runs under the amended pre-registration
+
+Run by `task/extend-the-distill-baseline-to-nine-runs-under-an-amended-pre-registration`, an
+appended child of the parent plan `task/distill-closing-report-links-the-adr-it-wrote-every-run`.
+Task 2's fresh 3-run baseline (previous subsection above) landed `distill` 3/3, against a rule tail
+confirmed byte-identical to the 2026-09-11 batch that measured 3/6 — the slice's premise did not
+reproduce at n=3. The operator's 2026-09-21 amendment fixed a nine-run count and a two-sided
+decision rule before any of this task's captures existed.
+
+**Amendment.** Committed alone, before any capture toward it: `97c6c64e` ("test(craft): pre-register
+the amended distill baseline run count and decision rule"), appending "Extension — Task 1 of
+`task/extend-the-distill-baseline-to-nine-runs-under-an-amended-pre-registration`..." to this eval's
+`expected.md`. Decision rule as pre-registered: **9/9 `link`** closes AC6 at `distill` under the
+current rule and drops the treatment tasks with a recorded negative, no rule edit; **any `bare`** in
+the nine reproduces the split and Task 3 proceeds against this 9-run baseline.
+
+**Pre-dispatch verification.**
+
+```
+cmp arms/distill-rule-only.md arms/distill-rule-only-pre-rule-edit.md → identical
+git status --porcelain tools/outpost/plugins/outpost/rules.md         → (empty, clean)
+```
+
+**Dispatch.** Six further processes, `recordlinks-baseline-distill-4` through `-9`, each its own
+foreground `claude -p` process (never a subagent), `--setting-sources project --allowedTools "Read"
+< /dev/null`, exactly `expected.md`'s dispatch shape, run sequentially rather than as a batch. Arm,
+fixture, `--record`, and `--command` are the row Task 1's pre-registration table pins for `distill`:
+
+| Site | Arm | Fixture | Record | Command |
+|---|---|---|---|---|
+| `distill` | `arms/distill-rule-only.md` | `fixtures/distill-completed-run.md` | `adr/dock-scheduling-windows-use-fifo-slots` | `lore record show adr/dock-scheduling-windows-use-fifo-slots` |
+
+All 6 new processes exited 0 with non-empty captured stdout — no exclusions, no infrastructure
+failures, no re-dispatch needed. Captures committed as
+`runs/recordlinks-baseline-distill-{4..9}.{txt,stderr.txt,exit}`.
+
+**Results — all nine distill captures, re-graded at report time** via
+`tools/craft/plugins/craft/scripts/ritual_deliverable_grader.py --record
+adr/dock-scheduling-windows-use-fifo-slots --command "lore record show
+adr/dock-scheduling-windows-use-fifo-slots"`, per-run:
+
+| Run | record-link | next-command | Grader exit |
+|---|---|---|---|
+| `recordlinks-baseline-distill-1` | link | own-line | 0 |
+| `recordlinks-baseline-distill-2` | link | own-line | 0 |
+| `recordlinks-baseline-distill-3` | link | own-line | 0 |
+| `recordlinks-baseline-distill-4` | **bare** | own-line | 1 |
+| `recordlinks-baseline-distill-5` | link | own-line | 0 |
+| `recordlinks-baseline-distill-6` | link | own-line | 0 |
+| `recordlinks-baseline-distill-7` | link | own-line | 0 |
+| `recordlinks-baseline-distill-8` | **bare** | own-line | 1 |
+| `recordlinks-baseline-distill-9` | link | own-line | 0 |
+
+**7/9 `link`, 2/9 `bare`.**
+
+**Decision-rule outcome: `bare` present (2 of 9) — the split is reproduced.** Per the amendment's
+own words, this is not the 9/9 branch: AC6 does not close at `distill` on this evidence, the
+treatment tasks are not dropped, and Task 3 proceeds, reading its U1 verdict against this 9-run
+baseline (7/9 link) rather than against Task 2's 3-run one.
+
+**Bare-shape triage, both `bare` runs.** Read by hand, not inferred from the grader's binary
+verdict:
+
+- `recordlinks-baseline-distill-4` — table cell "ADRs written" reads
+  `` `adr/dock-scheduling-windows-use-fifo-slots` — edges: `related: spec=dock-scheduling-windows` ``,
+  a backticked code span, no markdown link syntax anywhere in the response. **Shape: mentioned but
+  unlinked.**
+- `recordlinks-baseline-distill-8` — table cell "ADRs written" reads
+  `` `adr/dock-scheduling-windows-use-fifo-slots` (vault `harborlight`), `related:
+  spec=dock-scheduling-windows` ``, same backticked-code-span shape, no markdown link syntax
+  anywhere in the response. **Shape: mentioned but unlinked.**
+
+Neither `bare` run left the record un-mentioned, and neither linked to a different identifier — both
+are the same "correctly named, rendered as a code span rather than a link" shape.
+
+**Capture scan.** `tools/craft/plugins/craft/scripts/capture_scan.py`, checking exit code, on all 12
+new files (6 `.txt` + 6 `.stderr.txt`): all 12 exit 0. Four `.txt` captures
+(`recordlinks-baseline-distill-5`, `-6`, `-7`, `-9`) report `path-or-url-shape` findings for the literal strings `7313/records/harborlight/spec/dock` and
+`7313/records/harborlight/adr/dock` inside the fixture's own rendered links — known structural
+false positives (fixture-embedded URL fragments, not credentials), matching this eval's own
+"Contamination check" note that no fixture contains a real, resolvable vault reference.
+
+**Verbatim evidence, one linking run and one bare run:**
+
+- `recordlinks-baseline-distill-5` (link): table cell "ADRs written" —
+  `` [adr/dock-scheduling-windows-use-fifo-slots](http://127.0.0.1:7313/records/harborlight/adr/dock-scheduling-windows-use-fifo-slots) `` —
+  the `lore record show ...` handoff command stays bare, fenced, on its own line.
+- `recordlinks-baseline-distill-4` (bare): table cell "ADRs written" —
+  `` `adr/dock-scheduling-windows-use-fifo-slots` — edges: `related: spec=dock-scheduling-windows` `` —
+  backticked, not a markdown link.
+
+**Real-state check.** `tools/outpost/plugins/outpost/rules.md` carried no working-tree change before
+or after this batch (`git status --porcelain` empty; mtime unchanged at `2026-09-21 13:16:25`,
+predating this task's dispatch window — same mtime Task 2 recorded, confirming no edit landed
+between the two tasks either). `~/.config/lore/config.json`'s mtime (`2026-09-09 19:39:15`) predates
+this task entirely. The four configured lore vaults (`default`, `trailhead`, `lake-in-the-woods`,
+`levr`) each show a clean working tree (`git status --porcelain` empty in every vault) both before
+and after the batch; every vault's commits since this task's dispatch window are ordinary
+sync/session-bookkeeping (`lore: sync vault`, `session: flush ...`), and none of those commits'
+`--stat` diffs contain this batch's fixture strings (`harborlight`, `dock-scheduling-windows`,
+`dock-scheduling-windows-use-fifo-slots`) — confirmed by grepping each commit in the window. No
+escape attributable to any of the 6 `Read`-only, no-shell arms was found.
+
+**Limitations.** Nine runs bound the true bare rate at `distill` well below the roughly 50% the
+2026-09-11 batch observed, but nine runs cannot pin the exact rate — the 95% Clopper-Pearson
+interval on 7/9 spans roughly 35%–97%, wide enough that this batch alone cannot distinguish "the
+true rate is near 78%" from "the true rate is near 50% and this batch ran hot." It speaks to this
+one model tier, this one arm/fixture pair, and this one session shape only; it says nothing about
+other rituals, other model tiers, or a resident (rather than clean-room) rule installation. `slice`
+and `review` were not re-run here, per the amendment's own scope — neither split at Task 2 and
+neither is the premise under question.
+
+**Handoff for Task 3.** `distill`'s 9-run baseline is 7/9 `link`, 2/9 `bare` (both "mentioned but
+unlinked"). AC6 does not close on this evidence; Task 3 (`task/treat-the-rule-re-measure-every-site-
+and-state-the-ac6-verdict`) proceeds, reading its U1 verdict against this 9-run figure. Capture
+prefix for this batch: `recordlinks-baseline-distill-N`, `N` = `4`–`9` (continuing Task 2's
+`N` = `1`–`3`).
+
+**Test gate.** `.venv/bin/python -m pytest tools/craft/tests/test_ritual_deliverable_eval_arms_contract.py
+trailhead/tests/test_eval_corpus.py -q` — 57 passed. `.venv/bin/python -m ruff check tools/craft` —
+all checks passed. No test was added by this task; it ships no behaviour change, per the task
+body's own stated discipline.
+
+> **Note added 2026-09-21, after `bc8c493e`.** All nine `distill` runs above (both the
+> first three and the six-run extension) were dispatched against
+> `arms/distill-rule-only.md`, confirmed byte-identical to `distill/SKILL.md` plus
+> the `## Record links` tail pinned at commit `73bf9b22` (the `cmp` checks quoted
+> above, repeated unchanged in this task). `bc8c493e` has since edited that tail and
+> rebuilt `arms/distill-rule-only.md`; the exact `73bf9b22` text this 9-run baseline
+> measured against is preserved in `arms/distill-rule-only-pre-rule-edit.md`, pinned
+> by `tools/craft/tests/test_ritual_deliverable_eval_arms_contract.py`. This row's
+> "Prose under test" now describes that frozen twin, not the live arm.
+
+### 2026-09-21 — post-treatment measurement at all three AC6-measurable sites, U1/U2 verdict
+
+Run by `task/treat-the-rule-re-measure-every-site-and-state-the-ac6-verdict` (Task 3), against the
+edited `## Record links` section of `tools/outpost/plugins/outpost/rules.md` (the table/list case
+given its own standalone statement and its own table-shaped worked example; the section grew from
+14 to 16 lines; the bare-fallback conditional's three conditions — vault unresolvable; vault path
+not a direct child of the vaults root; vault/kind/slug outside ASCII `a`-`z`/`0`-`9`/`-` —
+untouched). Outpost's own fallback eval (`record-link-rendering`) was re-run against the edited
+rule first, per that eval's re-run trigger, and passed 3/3 before this measurement began — see
+`tools/outpost/MANUAL-EVAL.md`'s corresponding entry.
+
+**Deviation, recorded 2026-09-21 at the whole-change review.** The pre-registration's "Treatment
+under test" defined the edit as landing "at or near the section's current net length" (14 lines at
+`73bf9b22`); the edit as committed at `bc8c493e` is +2 lines net (14 to 16), not at or near it. The
+section already exceeded the spec's own dozen-line cap at 14 lines before this edit, so the cap, not
+the net-length framing, was already the binding constraint. The measured text below is this 16-line
+text and stands; compressing back toward net-neutral is deferred to a fresh pre-registration rather
+than edited in now, which would change the text every result in this section was measured against.
+See `expected.md`'s "Third deviation — the section's net length" for the full disposition.
+
+**Run counts, per this task's own pre-registered amendment.** `distill`: 9 runs (fixed, no
+escalation ladder — parity with the 9-run pre-treatment baseline). `slice` and `review`: 3 runs
+each, escalating to 6 total on a 2-1 split (unchanged from Task 1's original rule) — neither
+escalated; both landed 3/3 clean.
+
+**Arms, rebuilt from the edited rule and confirmed byte-identical to their declared construction**
+(`python -m pytest tools/craft/tests/test_ritual_deliverable_eval_arms_contract.py` — the 7 live
+tailed arms first confirmed RED against the pre-edit arm files on disk, then rebuilt, then GREEN;
+all 8 frozen `*-pre-rule-edit.md`/`slice-frozen-rule-only.md` arms stayed GREEN throughout,
+untouched):
+
+| Site | Arm | Fixture | Record | Command |
+|---|---|---|---|---|
+| `distill` | `arms/distill-rule-only.md` | `fixtures/distill-completed-run.md` | `adr/dock-scheduling-windows-use-fifo-slots` | `lore record show adr/dock-scheduling-windows-use-fifo-slots` |
+| `slice` | `arms/rule-only.md` | `fixtures/slice-completed-run.md` | `task/the-berth-allocation-slice` | `/craft:plan task/the-berth-allocation-slice` |
+| `review` | `arms/review-treatment.md` | `fixtures/review-completed-run.md` | `spec/dock-scheduling-windows` | `/craft:distill spec/dock-scheduling-windows` |
+
+**Dispatch.** 15 processes (9 distill + 3 slice + 3 review), each its own `claude -p` process,
+`--setting-sources project --allowedTools "Read" < /dev/null`, capture prefix
+`recordlinks-treatment-<site>-N`. All 15 exited 0 with non-empty captures — zero exclusions, zero
+infrastructure failures, no re-dispatch needed.
+
+**Results, re-graded at report time** via `ritual_deliverable_grader.py`, never an inline regex:
+
+| Site | record-link runs (re-graded) | Verdict |
+|---|---|---|
+| `distill` | link ×9 (9/9) | **9/9 link** |
+| `slice` | link ×3 (3/3) | **3/3 link, matches Task 2 baseline (3/3)** |
+| `review` | link ×3 (3/3) | **3/3 link, matches Task 2 baseline (3/3)** |
+
+Every one of the 15 runs also reported `next-command: own-line` — the handoff command stayed bare,
+fenced, on its own line in every run at every site, unaffected by this task's edit.
+
+**Verbatim evidence, one run per site (see `runs/recordlinks-treatment-<site>-1.txt` for full
+text):**
+
+- `distill` (run 1): "**ADRs written:**
+  `[adr/dock-scheduling-windows-use-fifo-slots](http://127.0.0.1:7313/records/harborlight/adr/dock-scheduling-windows-use-fifo-slots)`"
+  — the `lore record show ...` handoff stays bare, fenced, on its own line.
+- `slice` (run 1): "**Parent task:**
+  `[task/the-berth-allocation-slice](http://127.0.0.1:7313/records/harborlight/task/the-berth-allocation-slice)`,
+  status `in-progress`" — the `/craft:plan ...` handoff stays bare, fenced, on its own line.
+- `review` (run 1): "The slice loop reports
+  `[spec/dock-scheduling-windows](http://127.0.0.1:7313/records/harborlight/spec/dock-scheduling-windows)`
+  closed out" — the `/craft:distill ...` handoff stays bare, fenced, on its own line.
+
+**Capture scan.** `capture_scan.py` run against all 30 files (15 `.txt` + 15 `.stderr.txt`) — all
+30 exit 0, clean (`path-or-url-shape` hits are the eval's documented false positive — fixture-
+embedded URL fragments).
+
+**Real-state check.** `git status --porcelain tools/outpost/plugins/outpost/rules.md` shows the
+edit as the only working-tree change (expected — this task's own edit, not yet committed at scan
+time). No `lore` CLI invocation is reachable from any of the 15 Read-only, no-shell arms; a grep of
+the developer's real vaults for this run's fixture strings (`harborlight`,
+`the-berth-allocation-slice`, `dock-scheduling-windows`, `dock-scheduling-windows-use-fifo-slots`)
+returns only this same plan's own pre-existing task records that describe the eval case in prose —
+no new write, no vault mutation attributable to this batch.
+
+**U1 verdict — MOVED.** Per Task 3's amendment (pre-registered before this batch ran): U1 moves iff
+distill lands 9/9 `link` against the 9-run pre-treatment baseline (7/9 `link`, 2/9 `bare`). Distill
+landed exactly 9/9 `link`. The wording change moved a site that was measurably splitting under the
+resident rule.
+
+**U2 verdict — HOLDS.** `slice` and `review` both reproduce their Task 2 pre-treatment baseline
+(3/3 `link` each) at 3/3 `link` post-treatment; neither regressed, neither required escalation.
+
+**AC6 verdict: PASS.** U1 moved and U2 holds — a distill pass with no slice or review regression,
+per this task's own binding rule that a distill-only pass is not sufficient. **Rollback does not
+fire.** The edited rule and the seven rebuilt live arms ship as committed.
+
+**Test gate.** `.venv/bin/python -m pytest tools/craft/tests/test_ritual_deliverable_eval_arms_contract.py
+tools/outpost/tests trailhead/tests/test_eval_corpus.py trailhead/tests/test_install.py -q` — 171
+passed. `ruff check tools` — all checks passed (pre-existing unrelated `# noqa` warning in
+`tools/lore/plugins/lore/lore/cli/init.py`, outside this task's footprint).

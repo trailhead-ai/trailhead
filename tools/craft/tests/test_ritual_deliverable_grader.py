@@ -364,6 +364,30 @@ class TestRegressionAgainstOriginalMeasurement:
             "--record", "spec/glacier-survey-logistics",
             "--command", "/craft:slice spec/glacier-survey-logistics",
         ],
+        "recordlinks-baseline-slice": [
+            "--record", "task/the-berth-allocation-slice",
+            "--command", "/craft:plan task/the-berth-allocation-slice",
+        ],
+        "recordlinks-baseline-review": [
+            "--record", "spec/dock-scheduling-windows",
+            "--command", "/craft:distill spec/dock-scheduling-windows",
+        ],
+        "recordlinks-baseline-distill": [
+            "--record", "adr/dock-scheduling-windows-use-fifo-slots",
+            "--command", "lore record show adr/dock-scheduling-windows-use-fifo-slots",
+        ],
+        "recordlinks-treatment-slice": [
+            "--record", "task/the-berth-allocation-slice",
+            "--command", "/craft:plan task/the-berth-allocation-slice",
+        ],
+        "recordlinks-treatment-review": [
+            "--record", "spec/dock-scheduling-windows",
+            "--command", "/craft:distill spec/dock-scheduling-windows",
+        ],
+        "recordlinks-treatment-distill": [
+            "--record", "adr/dock-scheduling-windows-use-fifo-slots",
+            "--command", "lore record show adr/dock-scheduling-windows-use-fifo-slots",
+        ],
     }
 
     EVAL_RUNS_DIR = (
@@ -408,9 +432,14 @@ class TestRegressionAgainstOriginalMeasurement:
         captures = sorted(
             p for p in self.EVAL_RUNS_DIR.glob("*.txt") if not p.name.endswith(".stderr.txt")
         )
-        assert len(captures) == 66, (
-            f"expected 66 committed captures under runs/, found {len(captures)} — "
-            "the regression pin's own enumeration disagrees with the task's premise"
+        assert captures, "no committed captures under runs/ — the regression pin is vacuous"
+        unmapped = sorted(
+            p.name for p in captures
+            if not (m := self.RITUAL_NAME_RE.match(p.name)) or m.group(1) not in self.RITUAL_GRADER_ARGS
+        )
+        assert not unmapped, (
+            f"captures with no grader arguments declared in RITUAL_GRADER_ARGS: {unmapped} — "
+            "every committed capture must be re-gradable, or the pin silently skips it"
         )
 
         for capture in captures:
