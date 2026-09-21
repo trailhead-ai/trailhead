@@ -119,6 +119,7 @@ _SMOKE_INVOCATIONS = [
     ["ai"],
     ["enter"],
     ["kill"],
+    ["stop"],
     ["bogusverb"],
 ]
 
