@@ -74,6 +74,10 @@ def _cmd_status_group_cli(
     stdout, which additionally carries `work_code` — the same 0/2/3-style
     rollup over work-readiness, exposed for a consumer that reads only the
     exit code and wants that fact too without it ever changing the exit code.
+    Each member in the JSON report also carries the branch-drift facts the
+    text suffix below is rendered from — `branch`, `base`, `ahead`, `behind`
+    (`null` when the worktree is absent or `base` does not resolve locally),
+    and `upstream` (`ok` / `gone` / `none`) — always present on this path.
 
     Text output is line-oriented and STABLE for agent parsing, workspace
     rollup first, then per-member, then per-task detail:

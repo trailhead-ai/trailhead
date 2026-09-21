@@ -769,10 +769,10 @@ def provision_status_code(
     (`"ok"` / `"gone"` / `"none"`). These never influence `code` or `work_code`.
 
     The drift probe is opt-in, guarded by `drift` (default `False`): it runs
-    ~5 git subprocesses per member, and two callers never read the result —
-    the SessionStart hook's `capability_report` and `wait_for_provisioning_
-    ready`'s poll loop — so they leave `drift` at its default and pay none of
-    that cost. When `drift=False` the five keys (`branch`, `base`, `ahead`,
+    ~5 git subprocesses per member, and the callers that never read the
+    result — the SessionStart hook's `capability_report`,
+    `wait_for_provisioning_ready`'s poll loop, and `camp setup --status` —
+    leave `drift` at its default and pay none of that cost. When `drift=False` the five keys (`branch`, `base`, `ahead`,
     `behind`, `upstream`) are simply ABSENT from each member dict, not `None`
     — a caller checking for drift facts should use `"behind" in member`, not
     `member.get("behind")`. Only `camp status` (`_cmd_status_group_cli`)

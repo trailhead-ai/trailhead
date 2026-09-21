@@ -2332,8 +2332,12 @@ class TestStatusBranchDrift:
 
         report = _json.loads(capsys.readouterr().out)
         by_name = {m["name"]: m for m in report["members"]}
-        for key in ("branch", "base", "ahead", "behind", "upstream"):
-            assert key in by_name["repo_a"]
+        member = by_name["repo_a"]
+        assert member["branch"] == "worktree-" + slug
+        assert member["base"] == "origin/main"
+        assert member["ahead"] == 0
+        assert member["behind"] == 0
+        assert member["upstream"] in ("ok", "none")
 
 
 # ---------------------------------------------------------------------------
@@ -2390,9 +2394,10 @@ class TestGitBranchDriftHelper:
         repo = tmp_path / "repo"
         init_git_repo(repo, origin=True)
 
-        result = _git_branch_drift(repo, "origin/main")
+        assert _git_branch_drift(repo, "origin/main")["branch"] == "main"
 
-        assert result["branch"] == "main"
+        _git_ok("git", "-C", str(repo), "checkout", "-q", "-b", "feature-x")
+        assert _git_branch_drift(repo, "origin/main")["branch"] == "feature-x"
 
     def test_non_digit_rev_list_output_yields_null_not_a_crash(self, tmp_path, monkeypatch):
         """Guard the `int(...)` parse of `rev-list --count` output the same

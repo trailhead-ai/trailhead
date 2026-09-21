@@ -80,9 +80,11 @@ def _git_branch_drift(wt_path: Path, base: str) -> dict[str, Any]:
     worktree is absent, since there is no branch to check).
 
     Counts are taken against `HEAD` as the tip, never the branch's ref NAME:
-    git's ref-disambiguation order checks `refs/tags/<name>` before
-    `refs/heads/<name>`, so a tag sharing the branch's name would otherwise
-    resolve `rev-list`'s range ambiguously instead of the true branch tip.
+    a branch whose name is a full 40-hex object id resolves, as a plain
+    token in a `rev-list` range, to that object rather than to the branch
+    (`git rev-parse --abbrev-ref HEAD` hands back the bare name), so counting
+    by name would silently measure the wrong tip. `HEAD` needs no such
+    disambiguation.
     A detached HEAD still reports its usual `branch` value (`"HEAD"` from
     `git rev-parse --abbrev-ref HEAD`) with counts computed correctly against
     it, since HEAD as the tip needs no branch ref to resolve.
