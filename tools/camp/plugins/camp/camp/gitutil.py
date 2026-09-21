@@ -62,3 +62,43 @@ def _git_repo_status(wt_path: Path) -> dict[str, Any]:
         "unpushed_commits": unpushed_commits,
         "last_commit": last_commit,
     }
+
+
+def _git_branch_drift(wt_path: Path, base: str) -> dict[str, Any]:
+    """Return branch name, ahead/behind counts vs `base`, and upstream status.
+
+    No fetch: `ahead`/`behind` are commit counts against whatever `base`
+    resolves to locally right now — freshness is the caller's job (fetch
+    before calling this, if that's what's wanted; status itself stays
+    offline and cheap). `ahead`/`behind` are `None` when the worktree
+    directory is absent or `base` doesn't resolve locally. `upstream` is
+    `"ok"` when the branch has a configured upstream that still resolves,
+    `"gone"` when an upstream is configured but no longer resolves, and
+    `"none"` when no upstream is configured (also the answer when the
+    worktree is absent, since there is no branch to check).
+    """
+    if not wt_path.is_dir():
+        return {"branch": None, "ahead": None, "behind": None, "upstream": "none"}
+
+    branch = _git_out(wt_path, "rev-parse", "--abbrev-ref", "HEAD") or "unknown"
+
+    base_ref = _git(wt_path, "rev-parse", "--verify", "--quiet", base)
+    if base_ref.returncode != 0:
+        ahead: int | None = None
+        behind: int | None = None
+    else:
+        ahead_raw = _git(wt_path, "rev-list", "--count", f"{base}..{branch}")
+        behind_raw = _git(wt_path, "rev-list", "--count", f"{branch}..{base}")
+        ahead = int(ahead_raw.stdout.strip()) if ahead_raw.returncode == 0 else None
+        behind = int(behind_raw.stdout.strip()) if behind_raw.returncode == 0 else None
+
+    merge_ref = _git_out(wt_path, "config", f"branch.{branch}.merge")
+    if not merge_ref:
+        upstream = "none"
+    else:
+        upstream_check = _git(
+            wt_path, "rev-parse", "--verify", "--quiet", f"{branch}@{{upstream}}"
+        )
+        upstream = "ok" if upstream_check.returncode == 0 else "gone"
+
+    return {"branch": branch, "ahead": ahead, "behind": behind, "upstream": upstream}

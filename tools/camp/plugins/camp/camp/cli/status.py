@@ -78,8 +78,13 @@ def _cmd_status_group_cli(
     Text output is line-oriented and STABLE for agent parsing, workspace
     rollup first, then per-member, then per-task detail:
         camp status: <slug> — <header>
-          <member>: <provision_state> / work: <work_state>[ (<reason>)]
+          <member>: <provision_state> / work: <work_state>[ (<reason>)][ [behind N]][ [ahead N]][ [upstream gone]]
             <task-name>: <state>          # one per task, manifest insertion order
+
+    The bracketed drift suffix appears only for a member that actually has
+    drift — `behind`/`ahead` > 0, or `upstream == "gone"` — in that order; a
+    clean member's line renders exactly as before. Drift never changes the
+    exit code.
 
     <header> is derived from both facts (see provision.lifecycle.status_header):
     "ready", "ready, work pending", "ready, work failed", "provisioning", or
@@ -143,6 +148,12 @@ def _cmd_status_group_cli(
                 line = f"  {m['name']}: {m['provision_state']} / work: {m['work_state']}"
                 if m.get("reason"):
                     line += f" ({m['reason']})"
+                if m.get("behind"):
+                    line += f" [behind {m['behind']}]"
+                if m.get("ahead"):
+                    line += f" [ahead {m['ahead']}]"
+                if m.get("upstream") == "gone":
+                    line += " [upstream gone]"
                 print(line)
                 for task_name, info in (m.get("tasks") or {}).items():
                     print(f"    {task_name}: {info.get('state', '?')}")

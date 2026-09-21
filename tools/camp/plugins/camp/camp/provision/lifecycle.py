@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ..gitutil import _git_is_dirty, _git_out, _git_repo_status
+from ..gitutil import _git_branch_drift, _git_is_dirty, _git_out, _git_repo_status
 from ..group.resolve import central_state_dir
 from ..group.manifest import (
     ManifestError,
@@ -761,9 +761,18 @@ def provision_status_code(
     present — an empty dict when the member has no tasks) so callers can surface
     per-task detail without changing exit-code semantics.
 
+    Each member also carries branch-drift facts computed fresh (no fetch) from
+    its worktree against its configured `base` (default `origin/main`):
+    `branch`, `base`, `ahead`, `behind` (commit counts, `None` when the
+    worktree is absent or `base` doesn't resolve locally), and `upstream`
+    (`"ok"` / `"gone"` / `"none"`). These never influence `code` or `work_code`.
+
     report = {
         "slug", "code", "work_code",
-        "members": [{"name", "provision_state", "work_state", "tasks", "reason"?}],
+        "members": [{
+            "name", "provision_state", "work_state", "tasks", "reason"?,
+            "branch", "base", "ahead", "behind", "upstream",
+        }],
     }, where `tasks` is the manifest's {task-name: {"state", "reason"?}} map and
     `work_code` is a distinct 0/2/3-style rollup over each member's work_state
     (see manifest.work_state_for_member) — 0 when every member is work-ready or
@@ -776,6 +785,7 @@ def provision_status_code(
     group_name = group["group"]["name"]
     mpath = manifest_path_for(group_name, slug, env=env)
     data = read_central_manifest(mpath)
+    member_config_by_name = {m["name"]: m for m in group.get("members", [])}
 
     members = []
     any_failed = False
@@ -785,11 +795,19 @@ def provision_status_code(
     for entry in data.get("members", []):
         state = entry.get("provision_state", "pending")
         work_state = work_state_for_member(entry)
+        member_config = member_config_by_name.get(entry["name"], {})
+        base = member_config.get("base") or "origin/main"
+        drift = _git_branch_drift(Path(entry["worktree_path"]), base)
         m: dict[str, Any] = {
             "name": entry["name"],
             "provision_state": state,
             "work_state": work_state,
             "tasks": entry.get("tasks") or {},
+            "branch": drift["branch"],
+            "base": base,
+            "ahead": drift["ahead"],
+            "behind": drift["behind"],
+            "upstream": drift["upstream"],
         }
         if state == "failed":
             any_failed = True
