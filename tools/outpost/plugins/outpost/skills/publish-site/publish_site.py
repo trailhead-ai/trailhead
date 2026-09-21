@@ -247,6 +247,45 @@ def _assert_workspace_still_there(workspace_path: Path) -> None:
         )
 
 
+def _assert_sites_tree_contained(sites_dir: Path, target_dir: Path, root: Path) -> None:
+    """Refuse to publish through a symlinked ``sites/`` tree.
+
+    Everything before this point validates the target ROOT — the vault or
+    workspace directory named on the command line. Nothing validated the
+    ``sites/`` directory underneath it, and that is the directory the publish
+    actually writes into. ``Path.mkdir(exist_ok=True)`` accepts an existing
+    symlink-to-a-directory without replacing it, and both ``mkdtemp(dir=...)``
+    and ``os.rename`` follow a symlinked path component transparently — so a
+    ``sites`` symlink planted beforehand redirects the whole publish somewhere
+    else on disk while the script still reports success at the target's URL.
+
+    The actor who can plant that symlink is an agent writing inside its own
+    workspace, which is exactly the actor this feature's threat model already
+    treats as untrusted. The serving layer refuses a symlinked ``sites/`` for
+    the same reason (outpost server/sites/static.ts); this is the write side
+    of that same rule.
+
+    A symlink anywhere in the chain is a hard refusal rather than a resolve —
+    matching the serving layer's posture — and the resolved directory must
+    still sit inside *root*.
+    """
+    if sites_dir.is_symlink():
+        raise PublishError(
+            f"sites directory is a symlink, refusing to publish through it: {sites_dir}"
+        )
+    if target_dir.is_symlink():
+        raise PublishError(
+            f"site directory is a symlink, refusing to publish through it: {target_dir}"
+        )
+    resolved = sites_dir.resolve()
+    try:
+        resolved.relative_to(root.resolve())
+    except ValueError:
+        raise PublishError(
+            f"sites directory resolves outside its target directory: {resolved}"
+        ) from None
+
+
 # ---------------------------------------------------------------------------
 # Camp's slug lock (mirrors camp.group.manifest.reconcile_lock)
 # ---------------------------------------------------------------------------
@@ -625,8 +664,13 @@ def _publish_to_vault(
 
     vault_path = args.vault_path.resolve()
     sites_dir = vault_path / "sites"
-    sites_dir.mkdir(parents=True, exist_ok=True)
     target_dir = sites_dir / args.slug
+    try:
+        _assert_sites_tree_contained(sites_dir, target_dir, vault_path)
+    except PublishError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    sites_dir.mkdir(parents=True, exist_ok=True)
 
     if target_dir.exists() and not args.overwrite:
         print(f"error: {target_dir} already exists.", file=sys.stderr)
@@ -647,6 +691,22 @@ def _publish_to_vault(
         vault_url_segment=vault_path.name,
         slug=args.slug,
     )
+
+
+def _pre_swap_workspace_check(
+    workspace_path: Path, sites_dir: Path, target_dir: Path
+) -> None:
+    """Re-run both workspace guards immediately before the swap.
+
+    The lock excludes camp's teardown, not a process writing inside the
+    workspace, so the containment check is repeated here as well as before
+    staging: a ``sites`` symlink swapped in after the first check would
+    otherwise redirect the final rename. This narrows that window rather than
+    closing it — closing it needs openat/O_NOFOLLOW handles rather than paths,
+    which is more machinery than this script carries.
+    """
+    _assert_workspace_still_there(workspace_path)
+    _assert_sites_tree_contained(sites_dir, target_dir, workspace_path)
 
 
 def _publish_to_workspace(
@@ -672,6 +732,12 @@ def _publish_to_workspace(
             print(f"error: {exc}", file=sys.stderr)
             return 1
 
+        try:
+            _assert_sites_tree_contained(sites_dir, target_dir, workspace_path)
+        except PublishError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+
         sites_dir.mkdir(parents=True, exist_ok=True)
 
         if target_dir.exists() and not args.overwrite:
@@ -686,7 +752,9 @@ def _publish_to_workspace(
                 sites_dir,
                 target_dir,
                 args.slug,
-                pre_swap_check=lambda: _assert_workspace_still_there(workspace_path),
+                pre_swap_check=lambda: _pre_swap_workspace_check(
+                    workspace_path, sites_dir, target_dir
+                ),
             )
         except Exception as exc:
             print(f"error: publish failed: {exc}", file=sys.stderr)

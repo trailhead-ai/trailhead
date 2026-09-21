@@ -1214,3 +1214,103 @@ def test_two_concurrent_publishes_leave_exactly_one_whole_site(tmp_path):
         assert (target / "a.txt").exists() and not (target / "b.txt").exists()
     else:
         assert (target / "b.txt").exists() and not (target / "a.txt").exists()
+
+
+# ---------------------------------------------------------------------------
+# Write-side containment: a symlinked sites/ directory must never be followed
+# ---------------------------------------------------------------------------
+
+
+def test_workspace_sites_symlink_escape_refused(tmp_path):
+    """A workspace's own agent can create `sites` as a symlink pointing anywhere.
+    Following it would publish outside the workspace entirely while reporting
+    success — the write-side twin of the escape the serving layer already
+    refuses."""
+    camp_state = tmp_path / "camp-state"
+    ws = _make_workspace(camp_state, group="acme", slug="feat-x")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (ws / "sites").symlink_to(elsewhere)
+    source = _write_site(tmp_path / "src", {"index.html": "<html>payload</html>"})
+
+    result = _run(
+        [str(source), "mysite", "--workspace-path", str(ws)],
+        _env(tmp_path, camp_state_dir=camp_state),
+    )
+
+    assert result.returncode == 1
+    assert "is a symlink" in result.stderr
+    assert list(elsewhere.iterdir()) == []
+    assert _url_lines(result.stdout) == []
+
+
+def test_workspace_sites_symlink_into_sibling_workspace_refused(tmp_path):
+    """The sibling-workspace case specifically: one workstream's agent must not
+    be able to inject files into another's live worktree."""
+    camp_state = tmp_path / "camp-state"
+    ws = _make_workspace(camp_state, group="acme", slug="feat-x")
+    victim = _make_workspace(camp_state, group="acme", slug="feat-y")
+    (ws / "sites").symlink_to(victim)
+    source = _write_site(tmp_path / "src", {"index.html": "<html>payload</html>"})
+
+    result = _run(
+        [str(source), "mysite", "--workspace-path", str(ws)],
+        _env(tmp_path, camp_state_dir=camp_state),
+    )
+
+    assert result.returncode == 1
+    assert list(victim.iterdir()) == []
+
+
+def test_vault_sites_symlink_escape_refused(tmp_path):
+    """The vault target carries the identical unguarded pattern."""
+    vault = _make_vault(tmp_path, name="acme")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (vault / "sites").symlink_to(elsewhere)
+    source = _write_site(tmp_path / "src", {"index.html": "<html>payload</html>"})
+
+    result = _run(
+        [str(source), "mysite", "--vault-path", str(vault), "--no-sync"],
+        _env(tmp_path),
+    )
+
+    assert result.returncode == 1
+    assert "is a symlink" in result.stderr
+    assert list(elsewhere.iterdir()) == []
+
+
+def test_workspace_slug_symlink_escape_refused(tmp_path):
+    """One level down: `sites/<slug>` itself symlinked out of the tree."""
+    camp_state = tmp_path / "camp-state"
+    ws = _make_workspace(camp_state, group="acme", slug="feat-x")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (ws / "sites").mkdir()
+    (ws / "sites" / "mysite").symlink_to(elsewhere)
+    source = _write_site(tmp_path / "src", {"index.html": "<html>payload</html>"})
+
+    result = _run(
+        [str(source), "mysite", "--workspace-path", str(ws), "--overwrite"],
+        _env(tmp_path, camp_state_dir=camp_state),
+    )
+
+    assert result.returncode == 1
+    assert list(elsewhere.iterdir()) == []
+
+
+def test_workspace_publish_still_works_with_a_real_sites_directory(tmp_path):
+    """The containment check must not refuse the ordinary case: a real
+    pre-existing `sites/` directory publishes exactly as before."""
+    camp_state = tmp_path / "camp-state"
+    ws = _make_workspace(camp_state, group="acme", slug="feat-x")
+    (ws / "sites").mkdir()
+    source = _write_site(tmp_path / "src", {"index.html": "<html>v1</html>"})
+
+    result = _run(
+        [str(source), "mysite", "--workspace-path", str(ws)],
+        _env(tmp_path, camp_state_dir=camp_state),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (ws / "sites" / "mysite" / "index.html").read_text() == "<html>v1</html>"
