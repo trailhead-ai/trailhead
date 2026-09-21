@@ -150,6 +150,11 @@ class Vault(NamedTuple):
         records: Allowed record kinds; empty list means *all kinds eligible*.
         shared:  ``True`` iff the vault is marked untrusted/shared; the
                  ``default`` vault is always ``False``.
+        auto_publish: ``True`` (default, including when the config key is
+                 absent) unless the vault's ``config.json`` entry sets
+                 ``auto_publish: false`` — an operator opting a vault out of
+                 the write-triggered publish path. Independent of ``shared``:
+                 a shared vault publishes automatically by default too.
     """
 
     name: str
@@ -157,6 +162,7 @@ class Vault(NamedTuple):
     path: Path
     records: list
     shared: bool
+    auto_publish: bool = True
 
 
 # ---------------------------------------------------------------------------
@@ -196,6 +202,18 @@ def is_shared(vault: Vault) -> bool:
     is trusted external content from the index's perspective.
     """
     return vault.shared
+
+
+def auto_publish_flag(vault) -> bool:
+    """Return ``vault``'s ``auto_publish`` flag (default ``True``).
+
+    Mirrors :func:`shared_flag`'s duck-typed-accessor shape: a single place
+    for a caller holding a vault-like object (a real :class:`Vault`, or a
+    test double with the same attribute) to read the flag, so the publish
+    trigger and its tests read it identically rather than each spelling
+    ``vault.auto_publish`` directly.
+    """
+    return vault.auto_publish
 
 
 def shared_flag(vault: Vault) -> int:
@@ -592,6 +610,13 @@ def _validate_config(data: dict, env: dict | None) -> list:
         records = entry.get("records", [])
         shared = bool(entry.get("shared", False))
         explicit_path = entry.get("path")
+        raw_auto_publish = entry.get("auto_publish", True)
+        if not isinstance(raw_auto_publish, bool):
+            raise VaultConfigError(
+                f"lore: vault {raw_name!r} has invalid auto_publish {raw_auto_publish!r}; "
+                "must be a bool (true or false)"
+            )
+        auto_publish = raw_auto_publish
 
         # Validate scope
         if scope not in VALID_SCOPES:
@@ -676,6 +701,7 @@ def _validate_config(data: dict, env: dict | None) -> list:
                 path=resolved_path,
                 records=list(records),
                 shared=shared,
+                auto_publish=auto_publish,
             )
         )
 

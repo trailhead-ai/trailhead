@@ -615,3 +615,36 @@ def test_ls_tolerates_absent_config(tmp_path):
     assert "Traceback" not in res.stderr
 
 
+def test_ls_shows_no_auto_publish_token_for_flagged_vault(tmp_path):
+    state, config = _dirs(tmp_path)
+    cfg_path = _config_path(config)
+    cfg_path.parent.mkdir(parents=True, exist_ok=True)
+    cfg_path.write_text(
+        json.dumps(
+            {
+                "vaults": [
+                    {"name": "default", "scope": "default"},
+                    {"name": "quiet-team", "scope": "team", "auto_publish": False},
+                ]
+            }
+        )
+    )
+
+    res = _run(["vault", "ls"], state=state, config=config)
+    assert res.returncode == 0, res.stderr
+    quiet_line = next(line for line in res.stdout.splitlines() if line.startswith("quiet-team"))
+    assert "no-auto-publish" in quiet_line
+
+
+def test_ls_omits_auto_publish_token_for_default_true_vault(tmp_path):
+    state, config = _dirs(tmp_path)
+    _seed_default_config(config, state)
+    _run(["vault", "add", "team-vault", "--scope", "team"], state=state, config=config)
+
+    res = _run(["vault", "ls"], state=state, config=config)
+    assert res.returncode == 0, res.stderr
+    team_line = next(line for line in res.stdout.splitlines() if line.startswith("team-vault"))
+    assert "no-auto-publish" not in team_line
+    assert team_line == "team-vault\tteam\t" + str(_vaults_root(state) / "team-vault") + "\t[(all kinds)]"
+
+
