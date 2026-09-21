@@ -3234,3 +3234,41 @@ def test_json_terminal_invocation_matches_a_direct_call(tmp_path):
     assert _git(terminal_vault, "status", "--porcelain").stdout.strip() == ""
     assert _git(direct_vault, "status", "--porcelain").stdout.strip() == ""
     assert _commit_count(terminal_vault) == _commit_count(direct_vault)
+
+
+def test_a_converged_run_clears_the_failure_marker_it_finds(tmp_path):
+    """A failure that is over must stop being reported as current.
+
+    The marker is the durable half of a failure report — written so a person
+    or a coordinator can recover what happened after the run that printed it
+    exited. It is cleared on a successful push, and on nothing else: a vault
+    that reaches its converged ending with nothing left to publish left the
+    marker sitting there indefinitely. The holding endings that write no
+    marker of their own (an offline hold, a replay conflict inside a finish
+    tail) read back whatever is on disk, so a months-old reason could be
+    attached verbatim to a later hold that has nothing to do with it.
+    """
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True)
+    vault = _make_vault(tmp_path / "v-default", dirty=False)
+    remote = _make_bare_remote(tmp_path / "remote.git")
+    _wire_remote(vault, remote)
+    _git(vault, "push", "-u", "origin", "HEAD")
+
+    os.environ["XDG_STATE_HOME"] = str(state_dir)
+    resolve_state_mod.mark_failed(
+        vault, reason="remote-rejection", detail="a forge rejection from an earlier run"
+    )
+    assert resolve_state_mod.read_failed_marker(vault) is not None
+
+    write_vault_config(config_home, [("default", "default", vault)])
+    r = run_cli(["sync", "--json"], config_home=config_home, state_dir=state_dir)
+
+    assert r.returncode == 0, r.stderr
+    doc = _extract_json_report(r.stdout)
+    assert doc["vaults"][0]["outcome"] == "converged"
+    os.environ["XDG_STATE_HOME"] = str(state_dir)
+    assert resolve_state_mod.read_failed_marker(vault) is None, (
+        "the vault converged, so the failure it once had is over"
+    )

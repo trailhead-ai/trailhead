@@ -1575,6 +1575,17 @@ def cmd_sync(args) -> int:
                 outcomes[name] = "published"
             else:
                 outcomes[name] = "converged"
+                # A determinate, non-failing ending: whatever failure this
+                # vault once had is over, so the durable half of that report
+                # stops being current. Left in place it would outlive the
+                # failure indefinitely, and the holding endings that write no
+                # marker of their own read back whatever is on disk — which
+                # is how a months-old reason reaches a later, unrelated hold.
+                # The published ending clears it in `_push_one`, on the push
+                # itself.
+                from . import resolve_state as resolve_state_mod
+
+                resolve_state_mod.clear_failed_marker(Path(vault))
         total_pulled += pulled
         if rc_one != 0:
             failed.append(name)

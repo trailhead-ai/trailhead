@@ -1309,6 +1309,13 @@ def resolve_for_sweep(vault: Path, name: str, *, shared: bool) -> dict:
     atomicity docstring section above depends on.
     """
     with locking.vault_write_lock(vault):
+        # A marker whose vault is no longer mid-rebase describes a resolution
+        # that is already over, and git state is the only liveness authority.
+        # The replay seeds its carried judgment from this marker, so a stale
+        # one would supply a dead session's answers to a conflict derived
+        # fresh — settling it to a value neither side holds, with nobody here
+        # to see it. `cmd_resolve` clears one for the same reason.
+        resolve_state.clear_if_stale(vault)
         if not _vault_mid_rebase(vault):
             started = _start_rebase(vault, lambda _msg: None)
             if started is None:

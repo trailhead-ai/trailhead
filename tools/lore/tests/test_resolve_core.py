@@ -2749,3 +2749,52 @@ def test_resolve_on_a_vault_with_nothing_left_to_replay_clears_the_held_marker(
     assert resolve.resolve_state.read_held_marker(fx.vault) is None, (
         "nothing is pending, so nothing is held"
     )
+
+
+def test_the_sweep_ignores_a_resolution_marker_left_by_a_dead_session(tmp_path, resolve):
+    """Judgment from a resolution that is over must not settle a new conflict.
+
+    A resolution marker is live exactly while its vault is mid-rebase; a vault
+    that is not mid-rebase has no resolution in progress, however complete the
+    marker on disk looks. `lore resolve` clears a stale one before it drives
+    anything. The sweep drove straight from whatever was on disk — so a
+    settled slot recorded by a session that ended out of band was folded into
+    a fresh replay as though a person had just supplied it, and a conflict
+    that genuinely needs judgment was settled to a value neither side holds,
+    silently and with nobody present.
+    """
+    fx = _Fixture(tmp_path)
+    record_id, _local_sha, _remote_sha = _diverge_on_status(fx)
+    _git(fx.vault, "fetch", "origin")
+    _use_state(fx)
+    assert not (fx.vault / ".git" / "rebase-merge").exists(), "no resolution is in progress"
+
+    # A marker whose session is over, carrying judgment for the very slot the
+    # fresh replay is about to find conflicted.
+    marker = resolve.resolve_state.begin_session(fx.vault)
+    marker["conflicts"] = []
+    marker["files"] = []
+    marker["auto"] = {
+        record_id: {
+            "kind": "task",
+            "sidecar-path": f"{record_id}.json",
+            "body-path": f"{record_id}.md",
+            "sidecar": {"status": "blocked"},
+            "body": None,
+            "settled": ["status"],
+        }
+    }
+    resolve.resolve_state.write_marker(fx.vault, marker)
+
+    report = resolve.resolve_for_sweep(fx.vault, "default", shared=False)
+
+    assert report["held"] is True, (
+        "the conflict still needs judgment — the dead session does not supply it"
+    )
+    # "blocked" is a valid status neither side chose — the dead session's
+    # value lands silently rather than being caught by the record schema.
+    sidecar = json.loads((fx.vault / f"{record_id}.json").read_text(encoding="utf-8"))
+    assert sidecar["status"] != "blocked", (
+        "no value from the dead session reached the record"
+    )
+    assert sidecar["status"] == "ready", "the vault is back at its own local side"
