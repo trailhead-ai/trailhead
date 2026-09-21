@@ -70,13 +70,16 @@ class PreviewRow:
     `conversation_id` is set only for the two conversation kinds; a
     `foreground` or `idle` row carries `None`, since neither corresponds to
     a recorded conversation. `kind` is one of `live-conversation`,
-    `exited-conversation`, `foreground`, `idle`.
+    `exited-conversation`, `foreground`, `idle`. `command` is the window's
+    foreground command as tmux reported it — the process a `foreground` row
+    names as what the operator would lose.
     """
 
     window_id: str
     name: str
     conversation_id: str | None
     kind: str
+    command: str
 
 
 @dataclass(frozen=True)
@@ -205,6 +208,7 @@ def classify(live_windows, entries, shell_names) -> StopPreview:
                 name=window.name,
                 conversation_id=conversation_id,
                 kind=kind,
+                command=window.current_command,
             )
         )
     return StopPreview(windows=tuple(rows))
@@ -238,7 +242,7 @@ def _row_line(row: PreviewRow) -> str | None:
     if row.kind == "exited-conversation":
         return f'  {row.window_id} "{row.name}"  conversation {row.conversation_id}  exited'
     if row.kind == "foreground":
-        return f'  {row.window_id} "{row.name}"  foreground'
+        return f'  {row.window_id} "{row.name}"  foreground: {row.command}'
     return None  # idle: a window at an idle shell shows neither
 
 

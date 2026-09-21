@@ -153,8 +153,20 @@ def test_render_human_two_rows_produces_count_line_and_two_rows():
 
     preview = StopPreview(
         windows=(
-            PreviewRow(window_id="@1", name="planning", conversation_id="8f2c", kind="live-conversation"),
-            PreviewRow(window_id="@3", name="review", conversation_id="41aa", kind="exited-conversation"),
+            PreviewRow(
+                window_id="@1",
+                name="planning",
+                conversation_id="8f2c",
+                kind="live-conversation",
+                command="2.1.278",
+            ),
+            PreviewRow(
+                window_id="@3",
+                name="review",
+                conversation_id="41aa",
+                kind="exited-conversation",
+                command="zsh",
+            ),
         )
     )
     outcome = Stopped(slug="camp-cli", group="trailhead", tmux_session="camp-trailhead-camp-cli", preview=preview)
@@ -172,15 +184,24 @@ def test_render_human_escapes_a_newline_in_a_window_name():
     from camp.launch.stop_workspace import PreviewRow, Stopped, StopPreview, render_human
 
     preview = StopPreview(
-        windows=(PreviewRow(window_id="@1", name="evil\nInjected: pwned", conversation_id=None, kind="foreground"),)
+        windows=(
+            PreviewRow(
+                window_id="@1",
+                name="evil\nInjected: pwned",
+                conversation_id=None,
+                kind="foreground",
+                command="pytest",
+            ),
+        )
     )
     outcome = Stopped(slug="s", group="g", tmux_session="camp-trailhead-s", preview=preview)
 
     rendered = render_human(outcome)
 
-    assert "\n" not in rendered.split("\nstopped")[0].replace(
-        "stopping camp-trailhead-s: 1 windows", "", 1
-    ) or "\\x0a" in rendered
+    assert (
+        "\n" not in rendered.split("\nstopped")[0].replace("stopping camp-trailhead-s: 1 windows", "", 1)
+        or "\\x0a" in rendered
+    )
     # the header, the row, and the outcome line are the only real newlines
     assert rendered.count("\n") == 2
     assert "\\x0a" in rendered
@@ -190,7 +211,15 @@ def test_render_human_escapes_an_ansi_escape_sequence_in_a_window_name():
     from camp.launch.stop_workspace import PreviewRow, Stopped, StopPreview, render_human
 
     preview = StopPreview(
-        windows=(PreviewRow(window_id="@1", name="evil\x1b[31mred", conversation_id=None, kind="foreground"),)
+        windows=(
+            PreviewRow(
+                window_id="@1",
+                name="evil\x1b[31mred",
+                conversation_id=None,
+                kind="foreground",
+                command="pytest",
+            ),
+        )
     )
     outcome = Stopped(slug="s", group="g", tmux_session="camp-trailhead-s", preview=preview)
 
@@ -207,11 +236,17 @@ def test_render_human_for_still_present_names_session_and_next_step():
     from camp.launch.stop_workspace import PreviewRow, StillPresent, StopPreview, render_human
 
     preview = StopPreview(
-        windows=(PreviewRow(window_id="@1", name="planning", conversation_id="8f2c", kind="live-conversation"),)
+        windows=(
+            PreviewRow(
+                window_id="@1",
+                name="planning",
+                conversation_id="8f2c",
+                kind="live-conversation",
+                command="2.1.278",
+            ),
+        )
     )
-    outcome = StillPresent(
-        slug="camp-cli", group="trailhead", tmux_session="camp-trailhead-camp-cli", preview=preview
-    )
+    outcome = StillPresent(slug="camp-cli", group="trailhead", tmux_session="camp-trailhead-camp-cli", preview=preview)
 
     rendered = render_human(outcome)
 
@@ -228,10 +263,22 @@ def test_render_json_round_trips_and_carries_every_field():
 
     preview = StopPreview(
         windows=(
-            PreviewRow(window_id="@1", name="planning", conversation_id="8f2c", kind="live-conversation"),
-            PreviewRow(window_id="@3", name="review", conversation_id="41aa", kind="exited-conversation"),
-            PreviewRow(window_id="@5", name="build", conversation_id=None, kind="foreground"),
-            PreviewRow(window_id="@7", name="idle-one", conversation_id=None, kind="idle"),
+            PreviewRow(
+                window_id="@1",
+                name="planning",
+                conversation_id="8f2c",
+                kind="live-conversation",
+                command="2.1.278",
+            ),
+            PreviewRow(
+                window_id="@3",
+                name="review",
+                conversation_id="41aa",
+                kind="exited-conversation",
+                command="zsh",
+            ),
+            PreviewRow(window_id="@5", name="build", conversation_id=None, kind="foreground", command="pytest"),
+            PreviewRow(window_id="@7", name="idle-one", conversation_id=None, kind="idle", command="zsh"),
         ),
         reconciled=True,
     )
@@ -271,3 +318,37 @@ def test_exit_status_covers_every_member_via_reflection():
     for cls, status in expected.items():
         instance = cls(slug="s", group="g", tmux_session="t", preview=sw.StopPreview())
         assert sw.exit_status(instance) == status
+
+
+def test_foreground_row_names_the_process_it_would_lose():
+    from camp.launch.stop_workspace import PreviewRow, Stopped, StopPreview, render_human
+
+    def line_for(command):
+        preview = StopPreview(
+            windows=(
+                PreviewRow(
+                    window_id="@5",
+                    name="build",
+                    conversation_id=None,
+                    kind="foreground",
+                    command=command,
+                ),
+            )
+        )
+        outcome = Stopped(slug="camp-cli", group="trailhead", tmux_session="camp-trailhead-camp-cli", preview=preview)
+        return render_human(outcome).splitlines()[1]
+
+    assert line_for("pytest") == '  @5 "build"  foreground: pytest'
+    assert line_for("vim") == '  @5 "build"  foreground: vim'
+
+
+def test_classify_carries_each_window_s_current_command_onto_its_row():
+    from camp.launch.stop_workspace import DEFAULT_SHELL_NAMES, classify
+    from camp.launch.tmux import TmuxWindow
+
+    windows = [
+        TmuxWindow(window_id="@5", current_path="/w", current_command="pytest", name="build"),
+        TmuxWindow(window_id="@7", current_path="/w", current_command="zsh", name="idle-one"),
+    ]
+    result = classify(windows, [], DEFAULT_SHELL_NAMES)
+    assert [(r.kind, r.command) for r in result.windows] == [("foreground", "pytest"), ("idle", "zsh")]
