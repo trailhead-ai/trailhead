@@ -1314,3 +1314,78 @@ def test_workspace_publish_still_works_with_a_real_sites_directory(tmp_path):
 
     assert result.returncode == 0, result.stderr
     assert (ws / "sites" / "mysite" / "index.html").read_text() == "<html>v1</html>"
+
+
+# ---------------------------------------------------------------------------
+# Drift pin: the publisher's hand-copied slug lock vs camp's canonical one
+# ---------------------------------------------------------------------------
+#
+# `publish_site.py` is pinned standalone — it may not import `trailhead`, `lore`
+# or `camp` — so its `--workspace-path` mode reimplements camp's `reconcile_lock`
+# by hand. The copy is correct, but nothing tied it to the original: every other
+# lock test in this file computes the lock path itself, so camp moving its
+# lockfile would leave the two processes silently not sharing a lock, reopening
+# the teardown race with nothing going red.
+#
+# A TEST may import camp even though the script may not, which is what makes a
+# mechanical link possible at all. The path insert mirrors tools/camp/tests/_helpers.py.
+
+_CAMP_PLUGIN_DIR = Path(__file__).resolve().parents[2] / "camp" / "plugins" / "camp"
+if str(_CAMP_PLUGIN_DIR) not in sys.path:
+    sys.path.insert(0, str(_CAMP_PLUGIN_DIR))
+
+
+@pytest.mark.parametrize(
+    ("group", "slug"),
+    [("acme", "feat-x"), ("other-group", "a"), ("acme", "release.2026-09")],
+)
+def test_lock_path_agrees_with_camps_canonical_lock_path(tmp_path, group, slug):
+    """The expected value is DERIVED from camp's own function, never retyped —
+    so camp relocating its lockfile fails here instead of silently unsharing
+    the lock."""
+    from camp.group.manifest import lock_path_for
+
+    mod = _load_module()
+    ws = tmp_path / group / "worktrees" / slug
+
+    assert mod._lock_path_for(ws) == lock_path_for(ws)
+
+
+def test_publish_blocks_on_the_lock_camp_itself_takes(tmp_path):
+    """The strong form of the pin: camp's REAL `reconcile_lock` holds the lock
+    and the publisher must block on it.
+
+    This exercises the whole protocol the two share — which file, and that
+    `flock` is taken on it in a compatible mode — rather than comparing paths
+    and assuming the rest agrees. It is the property the teardown race depends
+    on: `camp remove` holds this lock across its rmtree, so a publish that does
+    not block on it can resurrect a `sites/` tree into a workspace being torn
+    down.
+    """
+    from camp.group.manifest import reconcile_lock
+
+    camp_state = tmp_path / "camp-state"
+    ws = _make_workspace(camp_state, group="acme", slug="feat-x")
+    source = _write_site(tmp_path / "src", {"index.html": "<html></html>"})
+
+    result_holder: dict[str, subprocess.CompletedProcess] = {}
+
+    def _run_publish():
+        result_holder["cp"] = _run(
+            [str(source), "mysite", "--workspace-path", str(ws)],
+            _env(tmp_path, camp_state_dir=camp_state),
+        )
+
+    with reconcile_lock(ws):
+        t = threading.Thread(target=_run_publish)
+        t.start()
+        time.sleep(0.5)
+        assert not (ws / "sites" / "mysite").exists(), (
+            "publish proceeded while camp held its own reconcile lock — "
+            "the two are no longer sharing a lock"
+        )
+
+    t.join(timeout=10)
+
+    assert result_holder["cp"].returncode == 0, result_holder["cp"].stderr
+    assert (ws / "sites" / "mysite" / "index.html").exists()
