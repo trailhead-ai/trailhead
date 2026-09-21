@@ -957,10 +957,8 @@ def test_async_setup_member_with_activate_task_still_reports_pending_work_state(
 
 def test_seed_pending_workspace_carries_forward_ready_work_state_on_reseed(tmp_path):
     """Re-running seed_pending_workspace against an existing workspace (an
-    idempotent re-bring-up) currently rebuilds each entry from
-    provision_state/reason only, dropping any prior "work_state" — a
-    ready-for-work member would silently fall back to "pending". The reseed
-    must carry a prior "ready" forward instead."""
+    idempotent re-bring-up) carries a member's prior "work_state" forward:
+    a member already "ready" stays "ready" rather than reading as "pending"."""
     from camp.provision.provision import seed_pending_workspace
     from camp.group.manifest import read_central_manifest, write_central_manifest
 
@@ -993,10 +991,10 @@ def test_seed_pending_workspace_carries_forward_ready_work_state_on_reseed(tmp_p
 def test_seed_pending_workspace_reseed_assigns_not_applicable_with_no_prior_work_state(
     tmp_path,
 ):
-    """The same reseed, but for a member whose on-disk manifest carries no
-    "work_state" key at all (the pre-fix async provisioner never wrote one) —
-    the reseed must gain "not-applicable" rather than leaving the key absent
-    (which reads as "pending" forever)."""
+    """The same reseed, for a member whose on-disk manifest carries no
+    "work_state" key and declares no activate-phase task: the reseed writes
+    "not-applicable" rather than leaving the key absent (which reads as
+    "pending")."""
     from camp.provision.provision import seed_pending_workspace
     from camp.group.manifest import read_central_manifest, write_central_manifest
 
