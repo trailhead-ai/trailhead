@@ -1420,6 +1420,21 @@ out of this slice's scope, per the parent's "Explicitly not in this slice" list.
 > own "AC7 verdict: all ten of its one-command outcome sites now measure `own-line`. AC7 holds
 > in full." replaces the verdict stated here.
 
+> **Note added 2026-09-21, after `bc8c493e`.** Every 2026-09-11-dated row above that names a
+> tailed live arm — `rule-only` (`arms/rule-only.md`), `plan-treatment`
+> (`arms/plan-treatment.md`), `review-treatment` (`arms/review-treatment.md`), and
+> `execute-rule-only` (`arms/execute-rule-only.md`) — was dispatched against that arm
+> confirmed byte-identical to its declared source plus the `## Record links` tail pinned
+> at commit `73bf9b22`. That tail has since changed: `bc8c493e` edited `## Record links`
+> and each of these four arms was rebuilt to carry the new tail. The exact tail these
+> rows were measured against — the `73bf9b22` text — is preserved byte-for-byte in each
+> arm's frozen twin (`arms/rule-only-pre-rule-edit.md`,
+> `arms/plan-treatment-pre-rule-edit.md`, `arms/review-treatment-pre-rule-edit.md`,
+> `arms/execute-rule-only-pre-rule-edit.md`), which
+> `tools/craft/tests/test_ritual_deliverable_eval_arms_contract.py` pins against that
+> same revision. Every such row's "Prose under test"/"Arm" description above now
+> describes that frozen twin, not the live arm.
+
 ### 2026-09-12 — `slice`'s two termination sites, baseline arm only
 
 Run by `task/measure-the-baseline-at-both-termination-sites` against the pre-registration appended
@@ -1603,6 +1618,18 @@ are counted evidence and 6 are a disclosed, uniformly-discarded scope deviation.
 `own-line`, matching the pre-change prose's known defect); treatment holds (6/6 `own-line`, matching
 the currently-shipped prose). Combined with the eight already-measured sites, **AC7 holds at all ten
 of its one-command outcome sites** — the criterion this slice exists to close is closed.
+
+> **Note added 2026-09-21, after `bc8c493e`.** The 2026-09-12-dated `slice` spec-complete
+> and early-stop treatment rows above (immediately preceding this note) were dispatched
+> against `arms/rule-only.md`, confirmed byte-identical to its declared source plus the
+> `## Record links` tail pinned at commit `73bf9b22`. (The same section's baseline rows use
+> `arms/slice-frozen-rule-only.md`, a separately frozen arm pinned by its own sha256 at
+> construction — not a live tailed arm, and unaffected by the tail edit below.) That tail
+> has since changed: `bc8c493e` edited `## Record links` and `arms/rule-only.md` was rebuilt
+> to carry the new tail. The exact tail these treatment rows were measured against — the
+> `73bf9b22` text — is preserved byte-for-byte in `arms/rule-only-pre-rule-edit.md`, pinned
+> by `tools/craft/tests/test_ritual_deliverable_eval_arms_contract.py`. These rows' "Arm"
+> description now describes that frozen twin, not the live arm.
 
 ### 2026-09-21 — pre-treatment baseline at all three AC6-measurable sites (`slice`, `review`, `distill`), for the record-links rule salience treatment
 
@@ -1879,6 +1906,15 @@ not a direct child of the vaults root; vault/kind/slug outside ASCII `a`-`z`/`0`
 untouched). Outpost's own fallback eval (`record-link-rendering`) was re-run against the edited
 rule first, per that eval's re-run trigger, and passed 3/3 before this measurement began — see
 `tools/outpost/MANUAL-EVAL.md`'s corresponding entry.
+
+**Deviation, recorded 2026-09-21 at the whole-change review.** The pre-registration's "Treatment
+under test" defined the edit as landing "at or near the section's current net length" (14 lines at
+`73bf9b22`); the edit as committed at `bc8c493e` is +2 lines net (14 to 16), not at or near it. The
+section already exceeded the spec's own dozen-line cap at 14 lines before this edit, so the cap, not
+the net-length framing, was already the binding constraint. The measured text below is this 16-line
+text and stands; compressing back toward net-neutral is deferred to a fresh pre-registration rather
+than edited in now, which would change the text every result in this section was measured against.
+See `expected.md`'s "Third deviation — the section's net length" for the full disposition.
 
 **Run counts, per this task's own pre-registered amendment.** `distill`: 9 runs (fixed, no
 escalation ladder — parity with the 9-run pre-treatment baseline). `slice` and `review`: 3 runs

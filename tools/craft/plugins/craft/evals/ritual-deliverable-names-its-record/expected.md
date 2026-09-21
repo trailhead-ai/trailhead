@@ -1091,6 +1091,33 @@ ones above and the pre-existing `slice-frozen-rule-only.md` — now passes an ex
 revision rather than relying on the working tree matching the moment it was frozen, so none of them
 goes red for an environment reason once Task 3 edits the rule.
 
+### Third deviation — the section's net length, recorded 2026-09-21 at the whole-change review
+
+Found by the whole-change correctness review, after Task 3 had committed the edit. Recorded here
+for the same reason as the first two: the conditions above stay exactly as committed at this task's
+own revision.
+
+**What deviated.** "Treatment under test" above defines the treatment as landing "at or near the
+section's current net length" — the 14-line count measured at this task's own commit
+(`73bf9b22`) — with the spec's dozen-line cap stated as what keeps that governing. The treatment
+as committed at `bc8c493e` is **+2 lines net (14 to 16)** against that "at or near net length"
+definition, not at or near it.
+
+**Why it is reported as a deviation, not reconciled.** The section already exceeded the spec's
+own dozen-line cap at 14 lines, before this edit landed — the cap was already the binding
+constraint, not the "at or near net length" framing, and the edit's own text (giving the table/list
+case its own standalone statement and worked example) could not both do that and hold net length
+at a section already over cap. The pre-registration did not anticipate that tension; it is recorded
+here rather than silently reinterpreted into a claim the committed edit does not meet.
+
+**What stands, and what does not.** The measured text is the 16-line text: every arm, capture, and
+verdict in "Extension — Task 3" and the post-treatment sections below reads against `bc8c493e`'s
+16-line section, and none of that measurement is invalidated by this finding. Compressing the
+section back toward net-neutral is **deferred to a fresh pre-registration** — editing the prose
+now, after measurement, would change the text every committed capture above was run against, which
+is the same reasoning "First deviation" and "Second deviation" already apply to a post-hoc edit of
+measured material.
+
 ## Extension — Task 1 of `task/extend-the-distill-baseline-to-nine-runs-under-an-amended-pre-registration`, amendment fixing the run count and decision rule before any new capture exists
 
 Appended mid-run by the operator's 2026-09-21 decision recorded on the parent plan

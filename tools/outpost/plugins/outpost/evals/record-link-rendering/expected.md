@@ -59,10 +59,16 @@ observational, not enforced, and does not generalize past this run.
   fresh rebuild. Every future re-run-trigger dispatch uses this arm.
 - **treatment-pre-rule-edit** — `arms/treatment-pre-rule-edit.md`: the same
   brief with the `## Record links` section frozen exactly as it stood at
-  commit `19866500` — the text the committed rows below the "record-link
-  rendering" case's own results table were actually measured against, before
-  the record-links rule salience treatment (`bc8c493e`) relocated the
-  table/list case into its own standalone statement and worked example. Kept
+  commit `19866500` — the text the `c123d11f` row of the "record-link
+  rendering" case's own results table (`tools/outpost/MANUAL-EVAL.md`) was
+  actually measured against, before the record-links rule salience treatment
+  (`bc8c493e`) relocated the table/list case into its own standalone
+  statement and worked example. The `d14c198a`, `bda10d7`, and `78049293`
+  rows each measured an earlier, since-superseded revision of the section —
+  confirmed by hashing `## Record links` to end-of-file at each of those four
+  revisions: `d14c198a`, `bda10d7`, and `78049293` each hash differently from
+  one another and from `19866500`, while `c123d11f` hashes identical to
+  `19866500`. Kept
   so those rows' "prose under test" stays reconstructible rather than
   silently reread against today's wording. The same contract test pins its
   provenance (source revision `19866500`) and proves the pin discriminates
