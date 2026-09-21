@@ -173,10 +173,12 @@ stopping camp-trailhead-camp-cli: 3 windows
 stopped camp-trailhead-camp-cli
 ```
 
-One line per window, then the outcome. "live" means the window's foreground command is the
-harness's own process, as the harness boundary names it; "exited" is a recorded conversation
-whose window is now at a shell; "foreground" names any other process the operator would lose.
-A window at an idle shell shows neither. Under `--json` the same facts are fields of the
+One line per window, then the outcome. "live" means a recorded conversation whose window's
+foreground command is not a shell; "exited" is a recorded conversation whose window is now at a
+shell; "foreground" names any other process the operator would lose. A window at an idle shell
+shows neither. The shell test is the only classifier: camp never matches on the conversation
+process's own name, because that name is the installed version string and changes on every
+update, and a stale positive match would report a live conversation as exited. Under `--json` the same facts are fields of the
 object, and the human lines are not printed.
 
 ## State — Stop on a workspace with no running session
