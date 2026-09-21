@@ -1,12 +1,10 @@
-"""The stop outcome — the closed value type `camp stop` reports through, and
-the pure classification that builds its preview.
+"""`camp stop`'s engine, the closed outcome type it reports through, and the
+pure classification that builds its preview.
 
-Mirrors :class:`~camp.launch.door.DoorOutcome`: a frozen dataclass base that
-is never returned itself, with one member per outcome. Pure values only —
-nothing here does I/O, prints, or touches tmux. The engine that resolves a
-slug, reconciles the record, kills the session, and constructs one of these
-members is `stop_workspace` (a later task); this module only defines what
-can be said, how the preview is classified, and how the outcome renders.
+:class:`StopOutcome` mirrors :class:`~camp.launch.door.DoorOutcome`: a frozen
+dataclass base that is never returned itself, with one member per outcome.
+Everything but :func:`stop_workspace` is pure — only that one function does
+I/O, and it does it through the injected `tmux` seam and `emit` sink.
 
 Five members: two successes — :class:`Stopped` (killed and confirmed gone)
 and :class:`NotRunning` (nothing to do) — and three failures —
@@ -66,7 +64,7 @@ from .naming import workspace_session_name
 from .recovery import printable_path
 from .stop import POLL_INTERVAL_SECONDS, POLL_TIMEOUT_SECONDS, poll_for_absence
 from .tmux import WindowListing
-from .window_reconcile import Reconciled, reconcile_workspace_record, render_changes
+from .window_reconcile import Reconciled, reconcile_workspace_record, render_reconcile_lines
 
 
 @dataclass(frozen=True)
@@ -398,17 +396,16 @@ def stop_workspace(
         return NotRunning(slug=slug, group=group, tmux_session=session_name)
 
     reconcile_outcome = reconcile_workspace_record(workspace_dir, session_name, tmux)
+    for line in render_reconcile_lines(reconcile_outcome):
+        emit(line)
     if isinstance(reconcile_outcome, Reconciled):
         entries = reconcile_outcome.entries
         reconciled = True
         reconcile_note = None
-        for line in render_changes(reconcile_outcome.changes):
-            emit(line)
     else:
         entries = ()
         reconciled = False
         reconcile_note = reconcile_outcome.reason
-        emit(reconcile_outcome.reason)
 
     listing = tmux.list_windows(session_name)
     if isinstance(listing, WindowListing):

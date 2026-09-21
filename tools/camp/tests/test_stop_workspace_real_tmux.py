@@ -41,14 +41,20 @@ def _sock_run(sock: str, *args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-@pytest.fixture()
-def real_tmux_socket(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
+def redirected_tmux_socket(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, prefix: str):
     """A throwaway real tmux server, reached by every `tmux` call this
     process's production code makes (`Tmux._run(["tmux", ...])` resolves the
     bare name against `PATH`) — a wrapper first on `PATH` redirects it onto
-    an isolated `-L` socket, exactly like `test_window_binding_end_to_end.py`.
+    an isolated `-L` socket named `<prefix>_<pid>_<id>`, exactly like
+    `test_window_binding_end_to_end.py`. Yields the socket name and kills the
+    server on the way out.
+
+    A generator the fixtures delegate to with `yield from`, so the
+    redirection is spelled once for both real-tmux modules: this one and
+    `test_stop_cli_real_tmux.py`, which drives the same server through the
+    CLI entry point.
     """
-    sock = f"camp_stop_e2e_{os.getpid()}_{id(object())}"
+    sock = f"{prefix}_{os.getpid()}_{id(object())}"
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     wrapper = bin_dir / "tmux"
@@ -66,6 +72,12 @@ def real_tmux_socket(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
         subprocess.run(
             [_REAL_TMUX, "-L", sock, "kill-server"], capture_output=True, timeout=5
         )
+
+
+@pytest.fixture()
+def real_tmux_socket(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
+    """This module's throwaway real tmux server — see `redirected_tmux_socket`."""
+    yield from redirected_tmux_socket(tmp_path, monkeypatch, "camp_stop_e2e")
 
 
 @pytest.mark.skipif(_REAL_TMUX is None, reason="no tmux binary on PATH (captured at import time)")

@@ -1,14 +1,16 @@
 """Real-tmux end-to-end test for `camp stop <slug>`
 (task/camp-stop-slug-the-verb-and-its-end-to-end-proof).
 
-Drives a REAL tmux 3.7c server on a throwaway `-L` socket — the same
-redirection trick `test_stop_workspace_real_tmux.py` and
-`test_window_binding_end_to_end.py` use: `_REAL_TMUX` is captured by
-absolute path at import time, before the autouse `_sandbox_tmux` fixture in
-`conftest.py` rewrites `PATH` to a no-server stub for the rest of the
-suite, and a thin `tmux` wrapper placed first on `PATH` transparently
-redirects every call camp's production code makes onto the isolated
-socket.
+Drives a REAL tmux 3.7c server on a throwaway `-L` socket through
+`redirected_tmux_socket`, borrowed from `test_stop_workspace_real_tmux.py`
+— the engine's own real-tmux test — rather than a second copy of it: it
+captures `_REAL_TMUX` by absolute path at import time, before the
+autouse `_sandbox_tmux` fixture in `conftest.py` rewrites `PATH` to a
+no-server stub for the rest of the suite, and puts a thin `tmux` wrapper
+first on `PATH` that transparently redirects every call camp's production
+code makes onto the isolated socket. The CLI harness (`_isolated_env`,
+`_run` through the real entry point) is borrowed from `test_stop_cli.py`
+the same way.
 
 A window is opened through `compose_window` (production code, unmodified,
 with an explicit `command=` so no harness config is needed), then closed
@@ -26,10 +28,6 @@ never faked.
 from __future__ import annotations
 
 import importlib
-import os
-import shutil
-import stat
-import subprocess
 import sys
 from pathlib import Path
 
@@ -43,60 +41,19 @@ if str(_PLUGIN_DIR) not in sys.path:
 if str(_TESTS_DIR) not in sys.path:
     sys.path.insert(0, str(_TESTS_DIR))
 
-# Captured NOW, before conftest's _sandbox_tmux fixture prepends a stub to
-# PATH for every other test in the suite.
-_REAL_TMUX = shutil.which("tmux")
-
-
-def _sock_run(sock: str, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        [_REAL_TMUX, "-L", sock, *args], capture_output=True, text=True, timeout=5
-    )
+from test_stop_cli import _isolated_env, _run  # noqa: E402
+from test_stop_workspace_real_tmux import (  # noqa: E402
+    _REAL_TMUX,
+    _sock_run,
+    redirected_tmux_socket,
+)
 
 
 @pytest.fixture()
 def real_tmux_socket(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
-    """A throwaway real tmux server, reached by every `tmux` call this
-    process's production code makes — a wrapper first on `PATH` redirects
-    it onto an isolated `-L` socket, exactly like
-    `test_stop_workspace_real_tmux.py`.
-    """
-    sock = f"camp_stop_cli_e2e_{os.getpid()}_{id(object())}"
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    wrapper = bin_dir / "tmux"
-    wrapper.write_text(
-        "#!/usr/bin/env python3\n"
-        "import os, sys\n"
-        f"os.execv({_REAL_TMUX!r}, [{_REAL_TMUX!r}, '-L', {sock!r}, *sys.argv[1:]])\n",
-        encoding="utf-8",
-    )
-    wrapper.chmod(wrapper.stat().st_mode | stat.S_IEXEC)
-    monkeypatch.setenv("PATH", os.pathsep.join([str(bin_dir), os.environ.get("PATH", "")]))
-    try:
-        yield sock
-    finally:
-        subprocess.run(
-            [_REAL_TMUX, "-L", sock, "kill-server"], capture_output=True, timeout=5
-        )
-
-
-def _isolated_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    cfg = tmp_path / "config"
-    cfg.mkdir()
-    monkeypatch.setenv("CAMP_CONFIG_DIR", str(cfg))
-    monkeypatch.setenv("CAMP_STATE_DIR", str(tmp_path / "state"))
-    monkeypatch.setenv("HOME", str(tmp_path / "home"))
-
-
-def _run(argv: list[str], monkeypatch: pytest.MonkeyPatch) -> int:
-    dispatch = importlib.import_module("camp.cli.dispatch")
-    monkeypatch.setattr(sys, "argv", ["camp", *argv])
-    try:
-        dispatch.main()
-        return 0
-    except SystemExit as exc:
-        return exc.code if isinstance(exc.code, int) else 1
+    """This module's throwaway real tmux server, on its own socket name —
+    the same redirection the engine's real-tmux test uses."""
+    yield from redirected_tmux_socket(tmp_path, monkeypatch, "camp_stop_cli_e2e")
 
 
 def _wire_workspace(monkeypatch: pytest.MonkeyPatch, *, ws_dir: Path, slug: str, group_name: str) -> None:

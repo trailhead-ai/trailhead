@@ -177,6 +177,25 @@ def reconcile_workspace_record(ws_dir: Path, session_name: str, tmux) -> Reconci
         return Reconciled(entries=result.entries, changes=result.changes)
 
 
+def render_reconcile_lines(outcome: ReconcileOutcome) -> list[str]:
+    """The lines a :func:`reconcile_workspace_record` outcome prints: one per
+    change for a :class:`Reconciled`, or the single reason line for a
+    :class:`NotReconciled`.
+
+    The one rendering both callers share — the door prints them to stderr
+    before its own outcome line (`camp.cli.session._print_reconcile_outcome`)
+    and the stop engine hands them to its `emit` sink before the preview
+    (`camp.launch.stop_workspace.stop_workspace`) — so the two surfaces can
+    never disagree on what a reconciliation says. Every line is escaped whole
+    through `printable_path`, like every other line this module composes.
+    """
+    if isinstance(outcome, Reconciled):
+        return render_changes(outcome.changes)
+    if isinstance(outcome, NotReconciled):
+        return [printable_path(outcome.reason)]
+    raise TypeError(f"camp: unrenderable reconcile outcome {outcome!r}")
+
+
 def render_changes(changes: "list[Change] | tuple[Change, ...]") -> list[str]:
     """One line per change, escaped whole through `printable_path`.
 

@@ -4,8 +4,7 @@ Camp talks to tmux through exactly this module. `Tmux` answers the tri-state
 questions the stop engine and reconciliation are built around (`has_session`,
 `pane_command`, `list_sessions`, `list_windows`) and owns every other tmux
 invocation camp performs — spawning a session with an explicit command and a
-scrubbed
-environment (`spawn_session`), starting a bare login-shell window over it
+scrubbed environment (`spawn_session`), starting a bare login-shell window over it
 (`new_session`), stating its environment (`set_environment`), reading its
 pane (`capture_pane`), and signalling it (`kill_session`). Nothing outside
 this module builds a `["tmux", ...]` argv of its own; a caller that needs

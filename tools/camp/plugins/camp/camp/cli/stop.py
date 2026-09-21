@@ -43,6 +43,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from typing import NoReturn
 
 from ..launch.naming import workspace_session_name
 from ..launch.recovery import printable_path
@@ -79,6 +80,21 @@ def _is_reconcile_line(line: str) -> bool:
     return line.startswith(_RECONCILE_LINE_PREFIXES)
 
 
+def _refuse(outcome, reason: str, *, as_json: bool) -> NoReturn:
+    """One refusal for `camp stop`: `camp stop: <reason>` on stderr under the
+    plain form, or `{"ok": false, "outcome": null, "reason": <reason>}` on
+    stdout under `--json` — the same `ok`-flagged shape `camp attach`'s
+    `_refuse_door` carries. Neither of stop's refusals renders an outcome
+    word, so `outcome` is always null, and the exit status is the outcome's
+    own (`stop_workspace.exit_status`) rather than a literal spelled here.
+    """
+    if as_json:
+        print(json.dumps({"ok": False, "outcome": None, "reason": reason}))
+    else:
+        print(printable_path(f"camp stop: {reason}"), file=sys.stderr)
+    sys.exit(exit_status(outcome))
+
+
 def _cmd_stop_cli(args: list[str], env: dict[str, str] | None = None) -> None:
     """`camp stop <slug> [--group <name>] [--json]`.
 
@@ -113,13 +129,11 @@ def _cmd_stop_cli(args: list[str], env: dict[str, str] | None = None) -> None:
     match = next((e for e in listing.entries if e["slug"] == parsed.slug), None)
     if match is None:
         session_name = workspace_session_name(group_name, parsed.slug)
-        outcome = RefusedNoWorkspace(slug=parsed.slug, group=group_name, tmux_session=session_name)
-        reason = f"no workspace named {parsed.slug} in group {group_name}"
-        if parsed.json:
-            print(json.dumps({"ok": False, "outcome": None, "reason": reason}))
-        else:
-            print(printable_path(f"camp stop: {reason}"), file=sys.stderr)
-        sys.exit(exit_status(outcome))
+        _refuse(
+            RefusedNoWorkspace(slug=parsed.slug, group=group_name, tmux_session=session_name),
+            f"no workspace named {parsed.slug} in group {group_name}",
+            as_json=parsed.json,
+        )
 
     ws_dir = Path(match["workspace_path"])
 
@@ -137,12 +151,7 @@ def _cmd_stop_cli(args: list[str], env: dict[str, str] | None = None) -> None:
     outcome = stop_workspace(group_name, parsed.slug, ws_dir, tmux=tmux, emit=emit)
 
     if isinstance(outcome, RefusedTmuxUnanswered):
-        reason = f"tmux did not answer for {outcome.tmux_session}"
-        if parsed.json:
-            print(json.dumps({"ok": False, "outcome": None, "reason": reason}))
-        else:
-            print(printable_path(f"camp stop: {reason}"), file=sys.stderr)
-        sys.exit(exit_status(outcome))
+        _refuse(outcome, f"tmux did not answer for {outcome.tmux_session}", as_json=parsed.json)
 
     assert isinstance(outcome, (Stopped, NotRunning, StillPresent))
     if parsed.json:

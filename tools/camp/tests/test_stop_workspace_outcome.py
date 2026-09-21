@@ -1,6 +1,6 @@
 """Tests for launch/stop_workspace.py — the stop outcome type and the
-preview classification (the pure half; the engine that constructs these
-outcomes is a later task).
+preview classification (the pure half; `stop_workspace`, the engine that
+constructs these outcomes, is covered by test_stop_workspace.py).
 
 Test contract (see
 task/the-stop-outcome-and-the-preview-classification):

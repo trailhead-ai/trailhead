@@ -2789,21 +2789,16 @@ def _print_reconcile_outcome(reconcile_outcome) -> None:
     could not run at all, the one line naming why.
 
     `None` means no reconciliation was attempted (the create arm has no
-    session to read a record against yet) and prints nothing. A
-    `NotReconciled` reason is composed by `reconcile_workspace_record` and
-    printed as is.
+    session to read a record against yet) and prints nothing. Every other
+    outcome renders through `window_reconcile.render_reconcile_lines`, the
+    one rendering `camp stop` prints through too.
     """
-    from ..launch.recovery import printable_path
-    from ..launch.window_reconcile import NotReconciled, Reconciled, render_changes
+    from ..launch.window_reconcile import render_reconcile_lines
 
     if reconcile_outcome is None:
         return
-    if isinstance(reconcile_outcome, Reconciled):
-        for line in render_changes(reconcile_outcome.changes):
-            print(line, file=sys.stderr)
-        return
-    assert isinstance(reconcile_outcome, NotReconciled)
-    print(printable_path(reconcile_outcome.reason), file=sys.stderr)
+    for line in render_reconcile_lines(reconcile_outcome):
+        print(line, file=sys.stderr)
 
 
 def _open_workspace_door(
