@@ -33,13 +33,15 @@ def _flush_commit(vault: Path, key: str, *, push: bool = True) -> int:
     code.
 
     **Scope of that guarantee: this commit, not the command.** A default `lore
-    flush` ends with :func:`_flush_sync_tail`, a full `lore sync` that DOES
-    `git add -A` every writable vault — so the unrelated dirty files this commit
-    refuses to sweep are committed by the tail, in their own separate sync
-    commit. What survives is the property the guarantee exists for: the session
-    commit is a clean, reviewable unit holding exactly the flushed record.
-    `lore flush --no-sync` runs no tail, and is the form under which the flush
-    command as a whole still touches nothing but the session record.
+    flush` ends with :func:`_flush_request_tail`, which requests a background
+    publish rather than syncing in-process; `lore flush --wait` ends with
+    :func:`_flush_sync_tail`, a full `lore sync` that DOES `git add -A` every
+    writable vault instead — so the unrelated dirty files this commit refuses
+    to sweep are committed there, in their own separate sync commit. What
+    survives is the property the guarantee exists for: the session commit is a
+    clean, reviewable unit holding exactly the flushed record. `lore flush
+    --no-sync` runs neither, and is the form under which the flush command as
+    a whole still touches nothing but the session record.
 
     The per-session *commit* is the deliberate atomicity unit and always runs here,
     under the session-key lock (see :func:`_stage_and_commit_session`). The *push*
@@ -136,11 +138,12 @@ def _flush_push(vault: Path) -> int:
     locally and `lore sync` — or the next successful flush — re-pushes when online.
     Returns exit code (always 0; a push failure does not fail the flush).
 
-    **Only the `--no-sync` path calls this.** A default flush ends with
-    :func:`_flush_sync_tail`, whose per-vault `lore sync` already pushes; running
-    both would be two round-trips for one outcome. Both flush paths therefore
-    take their `push` flag from the tail's own opt-out, so exactly one of the two
-    pushes on any given run.
+    **Only the `--no-sync` path calls this.** A default flush requests a
+    background publish, and `--wait` runs :func:`_flush_sync_tail`, whose
+    per-vault `lore sync` already pushes; running this too would be a second
+    round-trip for one outcome. Both flush paths therefore take their `push`
+    flag from whether `--no-sync` was passed, so exactly one path ever pushes
+    on any given run.
     """
     rc_remote, remote_url, _ = _git(vault, "remote", "get-url", "origin")
     if rc_remote != 0 or not remote_url:
@@ -326,6 +329,47 @@ def _flush_sync_tail() -> None:
             _sync_tail_notice(name, vault)
 
 
+def _flush_request_tail() -> None:
+    """Close the flush by REQUESTING a background publish for every vault.
+
+    The default ending as of the write-triggered publish path: unlike
+    :func:`_flush_sync_tail` (kept for `--wait`), this never runs `cmd_sync`
+    in-process and never blocks — each `publish.request_publish` call writes
+    that vault's request stamp and spawns the debounced worker detached,
+    returning immediately.
+
+    **Every configured vault, `shared: true` included.**
+    `_partition_writable_vaults`'s shared exclusion is `_flush_sync_tail`'s
+    own gate against an agent pushing a shared vault's history under this
+    operator's git identity — a concern specific to synchronous, in-process
+    pushing. It does not apply here: `request_publish` is the SAME
+    write-triggered path a `record create`/`update` into a shared vault
+    already goes through, gated per-vault by that vault's own
+    `auto_publish` setting rather than a blanket flush-time exclusion.
+
+    A vault already mid-resolution is skipped, same as the sync tail —
+    requesting a publish for it would eventually run `cmd_sync` against a
+    tree `lore resolve` is still settling.
+    """
+    from . import publish as publish_mod
+
+    vaults, error = _resolve_all_vaults()
+    if error is not None:
+        print(f"notice: cannot request a publish after flush — {error}", file=sys.stderr)
+        return
+
+    for name, path in vaults:
+        vault = Path(path)
+        if vault_is_resolving(vault):
+            print(
+                f"notice: vault {name!r} is mid-resolution — no publish requested "
+                f"after the flush; to finish the resolution, {resolve_remedy(vault)}.",
+                file=sys.stderr,
+            )
+            continue
+        publish_mod.request_publish(vault)
+
+
 # The literal reserved scope token. It is unambiguous against a KQL
 # query because real KQL queries are field-qualified (e.g. `status:dirty`) — a bare
 # `all` is never a valid scoping query, so it is reclaimed as the all-sessions verb.
@@ -359,30 +403,40 @@ def cmd_flush(args) -> int:
     No code path writes `status: complete` / `active` — that vocab was retired;
     a session status is only ever `dirty` / `clean`.
 
-    Every scope ends with the SYNC TAIL (:func:`_flush_sync_tail`): the full
-    commit → pull → push flow over every WRITABLE vault, which is what makes a
-    flush leave the whole install saved rather than only the session record.
-    `--no-sync` opts out, and that path ends instead with `_report_unsynced_vaults`
-    over every configured vault — the notice that NAMES what such a flush leaves
-    uncommitted. Exactly one of the two governs the writable vaults.
+    Every scope ends with one of three, exactly one of which governs the vaults
+    flush wrote:
 
-    The tail structurally never touches a `shared: true` vault (the shared-vault
-    write gate), so a default flush follows the tail with `_report_unsynced_vaults`
-    a second time, scoped to shared vaults ONLY, on stderr — the one thing nothing
-    else on the default path would otherwise say. This does not compete with the
-    tail: the tail's writable partition and this call's shared partition are
-    exactly complementary, so a vault is only ever covered by one of the two.
+      - **Default** (neither flag): :func:`_flush_request_tail` — a background
+        publish REQUEST for every configured vault (`shared: true` included; a
+        per-vault `auto_publish: false` opts a vault out — see
+        `publish.request_publish`), never an in-process sync. Flush returns
+        without waiting for that publish to land.
+      - **`--wait`**: :func:`_flush_sync_tail` — the full commit → pull → push
+        flow, in-process, over every WRITABLE vault (the pre-existing shape),
+        for a caller that chains on a completed push. The tail structurally
+        never touches a `shared: true` vault, so this path follows the tail
+        with `_report_unsynced_vaults` a second time, scoped to shared vaults
+        ONLY, on stderr.
+      - **`--no-sync`**: no git action of any kind, no publish request —
+        `_report_unsynced_vaults` over every configured vault names what is
+        left uncommitted.
+
+    No code path writes `status: complete` / `active` — that vocab was retired;
+    a session status is only ever `dirty` / `clean`.
 
     Either ending runs on the failure path too: a flush that exits non-zero is
-    exactly when the sessions that DID commit most need pushing and the operator
-    most needs to know what is still uncommitted. Neither changes the exit code.
+    exactly when the sessions that DID commit most need saving and the operator
+    most needs to know what is still uncommitted. None changes the exit code.
 
-    A flush that syncs must not also push on its own (`_flush_push`), so the
-    per-session/per-batch push is enabled only when the tail is opted out of.
+    A flush pushes its own per-session/per-batch commit (`_flush_push`) ONLY
+    under `--no-sync` — the default's publish request and `--wait`'s inline
+    sync each push it themselves, once, along with everything else in the
+    vault.
     """
     scope = getattr(args, "scope", None)
-    sync_tail = not getattr(args, "no_sync", False)
-    push = not sync_tail
+    no_sync = bool(getattr(args, "no_sync", False))
+    wait = bool(getattr(args, "wait", False))
+    push = no_sync
     if scope == FLUSH_SCOPE_ALL:
         rc = _flush_batch(args, query=_FLUSH_ALL_QUERY, scope_label="all", push=push)
     elif scope:
@@ -392,7 +446,9 @@ def cmd_flush(args) -> int:
     else:
         rc = _flush_current_session(args, push=push)
 
-    if sync_tail:
+    if no_sync:
+        _report_unsynced_vaults()
+    elif wait:
         _flush_sync_tail()
         vaults, error = _resolve_all_vaults()
         if error is None:
@@ -400,7 +456,7 @@ def cmd_flush(args) -> int:
             if shared:
                 _report_unsynced_vaults(shared, file=sys.stderr)
     else:
-        _report_unsynced_vaults()
+        _flush_request_tail()
     return rc
 
 
@@ -777,12 +833,22 @@ def add_flush_subparser(sub) -> None:
             "(intersected with dirty)"
         ),
     )
-    p_flush.add_argument(
+    sync_mode = p_flush.add_mutually_exclusive_group()
+    sync_mode.add_argument(
         "--no-sync",
         action="store_true",
         help=(
-            "Skip the closing `lore sync` of every writable vault: commit the "
-            "session record(s) only and name what is left uncommitted"
+            "Skip the closing publish request entirely: commit the session "
+            "record(s) only and name what is left uncommitted"
+        ),
+    )
+    sync_mode.add_argument(
+        "--wait",
+        action="store_true",
+        help=(
+            "Run the closing commit -> pull -> push flow in-process, over "
+            "every writable vault, instead of requesting a background publish "
+            "— for a caller that chains on a completed push"
         ),
     )
     _add_session_selectors(p_flush)

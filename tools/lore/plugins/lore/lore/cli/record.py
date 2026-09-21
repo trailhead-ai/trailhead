@@ -1063,6 +1063,11 @@ def _cmd_record_create(args) -> int:
     # over the network and may reindex, neither of which belongs inside the
     # create's critical section.
     sync_mod.implicit_pull(vault_root)
+    # Beside the freshness note: a stale automatic publish from a PRIOR write
+    # is surfaced here too, before this write's own trigger below runs.
+    from . import publish as publish_mod
+
+    publish_mod.warn_stale_publish(vault_root)
 
     guard_notices: list[str] = []
     try:
@@ -1115,6 +1120,10 @@ def _cmd_record_create(args) -> int:
     # The reader URL for the vault the record actually landed in — last in the
     # stderr trailer (what happened, then warnings, then where to read it).
     _print_record_url(vault_root, record_id)
+
+    # Schedule this vault's background publish AFTER the write has fully
+    # succeeded — never able to change this command's exit code or stdout.
+    publish_mod.request_publish(vault_root)
 
     # Print the vault-relative RECORD_ID on stdout.
     print(record_id)
@@ -1460,9 +1469,13 @@ def _cmd_record_update(args) -> int:
         except Exception:  # noqa: BLE001 — advisory: the real locate runs below
             pull_target = None
     if pull_target is not None and not resolve_state_mod.vault_is_resolving(pull_target):
+        from . import publish as publish_mod
         from . import sync as sync_mod
 
         sync_mod.implicit_pull(pull_target)
+        # Beside the freshness note: a stale automatic publish from a PRIOR
+        # write is surfaced here too, before this write's own trigger below.
+        publish_mod.warn_stale_publish(pull_target)
 
     guard_notices: list[str] = []
     notice_shown: set[str] = set()
@@ -1758,6 +1771,13 @@ def _cmd_record_update(args) -> int:
     # The reader URL for the DESTINATION vault — the one the record now lives
     # in, which on a relocation is not the vault it started this call in.
     _print_record_url(dest_root, new_id)
+
+    # Schedule a background publish for the vault the record now lives in —
+    # covers both the in-place branch and the relocation branch, since
+    # `dest_root` is the record's final vault either way.
+    from . import publish as publish_mod
+
+    publish_mod.request_publish(dest_root)
 
     # The relocation signal (no silent move) precedes the
     # RECORD_ID so the existing stdout contract for the no-move case is unchanged

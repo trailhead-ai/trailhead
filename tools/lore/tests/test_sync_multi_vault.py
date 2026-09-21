@@ -1169,7 +1169,7 @@ def test_flush_sync_tail_commits_and_pushes_unrelated_dirty_files(tmp_path):
     (default / "task" / "stray.md").write_text("# not staged by the flush\n")
     write_vault_config(config_home, [("default", "default", default)])
 
-    r = run_cli(["flush"], config_home=config_home, state_dir=state_dir)
+    r = run_cli(["flush", "--wait"], config_home=config_home, state_dir=state_dir)
     assert r.returncode == 0, r.stderr
     assert _git(default, "status", "--porcelain").stdout.strip() == "", (
         f"the sync tail must leave the vault committed; stdout={r.stdout!r}"
@@ -1224,7 +1224,7 @@ def test_flush_sync_tail_conflict_exits_zero_and_names_lore_resolve(tmp_path):
     (default / "task" / "README.md").write_text("edited on device A\n")
     write_vault_config(config_home, [("default", "default", default)])
 
-    r = run_cli(["flush"], config_home=config_home, state_dir=state_dir)
+    r = run_cli(["flush", "--wait"], config_home=config_home, state_dir=state_dir)
     assert r.returncode == 0, (
         f"the flush itself succeeded — a tail conflict must not fail it; "
         f"stderr={r.stderr!r}"
@@ -1258,7 +1258,7 @@ def test_flush_sync_tail_offline_is_soft(tmp_path):
     write_vault_config(config_home, [("default", "default", default)])
     before = _commit_count(default)
 
-    r = run_cli(["flush"], config_home=config_home, state_dir=state_dir)
+    r = run_cli(["flush", "--wait"], config_home=config_home, state_dir=state_dir)
     assert r.returncode == 0, f"the flush's own exit code is never the tail's; stderr={r.stderr!r}"
     assert _commit_count(default) == before + 1, "the tail's commit must still land"
     assert "fetch failed" in r.stderr
@@ -1285,7 +1285,7 @@ def test_flush_sync_tail_never_touches_a_shared_vault(tmp_path):
     _mark_shared(config_home, "teamvault")
     shared_before = _commit_count(shared)
 
-    r = run_cli(["flush"], config_home=config_home, state_dir=state_dir)
+    r = run_cli(["flush", "--wait"], config_home=config_home, state_dir=state_dir)
     assert r.returncode == 0, r.stderr
     assert _git(default, "status", "--porcelain").stdout.strip() == "", (
         "the writable vault must still be synced"
@@ -1294,9 +1294,9 @@ def test_flush_sync_tail_never_touches_a_shared_vault(tmp_path):
     assert "planted.md" in _git(shared, "status", "--porcelain").stdout
 
 
-def test_flush_default_names_unsynced_work_in_a_shared_vault(tmp_path):
-    """The tail structurally never touches a `shared: true` vault — so a default
-    flush must still say one is holding unsynced work, scoped to shared vaults
+def test_flush_wait_names_unsynced_work_in_a_shared_vault(tmp_path):
+    """The tail structurally never touches a `shared: true` vault — so `--wait`
+    must still say one is holding unsynced work, scoped to shared vaults
     only (the notice `--no-sync` prints over its own, unpartitioned, set)."""
     config_home = tmp_path / "config"
     state_dir = tmp_path / "state"
@@ -1310,10 +1310,10 @@ def test_flush_default_names_unsynced_work_in_a_shared_vault(tmp_path):
     )
     _mark_shared(config_home, "teamvault")
 
-    r = run_cli(["flush"], config_home=config_home, state_dir=state_dir)
+    r = run_cli(["flush", "--wait"], config_home=config_home, state_dir=state_dir)
     assert r.returncode == 0, r.stderr
     assert "teamvault" in r.stderr, (
-        f"a default flush must name the shared vault holding unsynced work; "
+        f"a --wait flush must name the shared vault holding unsynced work; "
         f"stderr={r.stderr!r}"
     )
     assert "run `lore sync`" in r.stderr
@@ -1542,7 +1542,7 @@ def test_flush_sync_tail_skips_a_mid_resolution_vault_without_aborting_it(tmp_pa
     _strand_mid_rebase(stuck, tmp_path)
     stuck_commits_before = _commit_count(stuck)
 
-    r = run_cli(["flush"], config_home=config_home, state_dir=state_dir)
+    r = run_cli(["flush", "--wait"], config_home=config_home, state_dir=state_dir)
     assert r.returncode == 0, r.stderr
     assert _git(default, "status", "--porcelain").stdout.strip() == "", (
         "the unaffected vault must still be synced"

@@ -43,13 +43,19 @@ import fcntl
 import io
 import json
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
 from types import SimpleNamespace
 
 from ..vault import layers as layers_mod
-from .common import _resolve_all_vaults, _resolve_lore_state_dir, machine_state_key
+from .common import (
+    _load_vault_config,
+    _resolve_all_vaults,
+    _resolve_lore_state_dir,
+    machine_state_key,
+)
 
 #: Marker/lock/log/stamp directory under ``state_dir("lore")``.
 PUBLISH_DIRNAME = "publish"
@@ -165,6 +171,154 @@ def _clear_marker(vault_root: "str | Path") -> bool:
         return True
     except OSError:
         return False
+
+
+# ---------------------------------------------------------------------------
+# request_publish — the write-triggered half. Called after a successful
+# record create, record update, or flush; never before the write it follows.
+# ---------------------------------------------------------------------------
+
+
+def _resolve_vault_entry(vault_root: "str | Path"):
+    """Return ``(name, Vault-or-None)`` for *vault_root*.
+
+    Matches the resolved root against every configured vault
+    (:func:`common._load_vault_config`). Vanilla usage (no ``config.json``) and
+    a root that matches no configured entry both fall back to ``("default",
+    None)`` — a ``None`` Vault means :func:`request_publish` treats
+    ``auto_publish`` as its default of ``True`` rather than gating on a
+    config entry that does not exist.
+    """
+    loaded = _load_vault_config()
+    if loaded is not None:
+        _, vaults = loaded
+        resolved = Path(vault_root).resolve()
+        for vault in vaults:
+            if Path(vault.path).resolve() == resolved:
+                return vault.name, vault
+    return "default", None
+
+
+def _worker_argv(vault_name: str) -> list:
+    """Return the argv that re-invokes THIS running lore CLI as the worker.
+
+    ``sys.argv[0]`` is the ``cli/lore`` entry script the running process was
+    launched from — whether that is a repo checkout or an installed plugin
+    (``${CLAUDE_PLUGIN_ROOT}/cli/lore``) — so resolving it here, from the
+    running process, rather than hardcoding a repo-relative path, re-invokes
+    the SAME script under the SAME interpreter. This is the shape
+    ``run_cli_subprocess`` in ``tests/conftest.py`` already spawns the CLI
+    with: ``[sys.executable, str(CLI_PATH), *args]``.
+    """
+    cli_path = Path(sys.argv[0]).resolve()
+    return [sys.executable, str(cli_path), "publish", "--vault", vault_name]
+
+
+def _spawn_worker(argv: list) -> None:
+    """Spawn the publish worker detached (the ``Popen`` new-session idiom).
+
+    Never inherits this process's stdout/stderr — the worker manages its own
+    per-vault log (:func:`log_path`) once it enters :func:`_run_publish`; DEVNULL
+    here just keeps the caller's own streams (a create's single ``RECORD_ID``
+    line, in particular) untouched by anything printed before that point.
+    """
+    subprocess.Popen(
+        argv,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+        close_fds=True,
+    )
+
+
+def _lock_held(vault_root: "str | Path") -> bool:
+    """Return ``True`` iff another worker already holds *vault_root*'s lock.
+
+    A non-blocking probe: takes and immediately releases the same
+    ``fcntl.flock`` :func:`cmd_publish` itself takes for single-flight, on the
+    same :func:`lock_path`. Used only to skip a redundant spawn — the worker's
+    own lock is what actually enforces single-flight, so a race between this
+    probe and a spawn landing anyway is harmless (the second worker's own
+    non-blocking acquisition attempt exits 0 immediately).
+    """
+    lp = lock_path(vault_root)
+    lp.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(lp, os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return True
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        return False
+    finally:
+        os.close(fd)
+
+
+def request_publish(vault_root: "str | Path", *, clock=time.time) -> None:
+    """Request a background publish of *vault_root* — the write-triggered path.
+
+    Called after a successful record create, a successful record update (both
+    the in-place and the relocation branch, for the vault the record landed
+    in), and a flush. ``lore session candidate`` never calls this.
+
+    Skips both the stamp and the spawn when the vault's ``auto_publish``
+    setting is ``False`` (:func:`vault_config.auto_publish_flag`) — an
+    operator opting a vault out entirely. Otherwise always writes the request
+    stamp (so a burst of writes debounces correctly even when a worker is
+    already running), then spawns :func:`_spawn_worker` UNLESS
+    :func:`_lock_held` reports a worker already holds this vault's lock.
+
+    Never raises into the caller: a spawn failure (e.g. the interpreter or CLI
+    script cannot be found, the OS refuses to fork) is caught and reported as
+    one stderr line naming the vault; the write that triggered this already
+    succeeded and its exit code must not change because scheduling a publish
+    for it failed.
+    """
+    from ..vault import config as vault_config_mod
+
+    name, vault = _resolve_vault_entry(vault_root)
+    if vault is not None and not vault_config_mod.auto_publish_flag(vault):
+        return
+
+    touch_request_stamp(vault_root, clock=clock)
+
+    if _lock_held(vault_root):
+        return
+
+    try:
+        _spawn_worker(_worker_argv(name))
+    except Exception as exc:  # noqa: BLE001 — never fail the write that asked
+        print(f"error: could not schedule publish for vault {name!r}: {exc}", file=sys.stderr)
+
+
+def warn_stale_publish(vault_root: "str | Path") -> None:
+    """Print one stderr line if *vault_root*'s last automatic publish did not succeed.
+
+    Reads the publish marker (:func:`read_marker`). Silent when there is no
+    marker (nothing has ever run, or the last run cleared it on success — see
+    :data:`_CLEARED_OUTCOMES`) or the marker's outcome is still
+    :data:`OUTCOME_RUNNING` (a worker is in flight, not yet failed). Any other
+    outcome — :data:`OUTCOME_ERROR`, :data:`OUTCOME_ROUNDS_EXHAUSTED`, or one of
+    the sync loop's own non-success outcomes (``holding``,
+    ``awaiting-person``, ``retries-exhausted``, …) — means the last automatic
+    publish ended without succeeding, which is worth surfacing at the next
+    intentional write. Called beside the existing throttled freshness note
+    (``sync.implicit_pull``) in ``record create``/``record update``.
+    """
+    marker = read_marker(vault_root)
+    if marker is None:
+        return
+    outcome = marker.get("outcome")
+    if outcome in (None, OUTCOME_RUNNING):
+        return
+    name = Path(vault_root).name
+    print(
+        f"  lore: {name}: notice: the last automatic publish did not succeed "
+        f"({outcome}) — run `lore sync` to retry.",
+        file=sys.stderr,
+    )
 
 
 def _resolve_vault_path(vault_name: str) -> "Path | None":
