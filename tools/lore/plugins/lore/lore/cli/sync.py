@@ -515,8 +515,14 @@ def _hand_off_to_resolver(
             # attempt is the more specific fact and is left standing: the
             # forge refusing a settled push is the forge's doing, and sending
             # its reader to fix this host's data would be wrong.
+            # `str(exc)` is the plain wording the owner already read; the
+            # marker is where git's own account belongs, so withholding it
+            # from the terminal does not throw it away (AC38).
+            detail = getattr(exc, "detail", "") or ""
             resolve_mod.resolve_state.mark_failed(
-                vault, reason=FAILURE_POLICY, detail=str(exc)
+                vault,
+                reason=FAILURE_POLICY,
+                detail=f"{exc}: {detail}" if detail else str(exc),
             )
         return PUBLISH_HOLDING
 
@@ -1575,6 +1581,17 @@ def cmd_sync(args) -> int:
                 outcomes[name] = "published"
             else:
                 outcomes[name] = "converged"
+                # A determinate, non-failing ending: whatever failure this
+                # vault once had is over, so the durable half of that report
+                # stops being current. Left in place it would outlive the
+                # failure indefinitely, and the holding endings that write no
+                # marker of their own read back whatever is on disk — which
+                # is how a months-old reason reaches a later, unrelated hold.
+                # The published ending clears it in `_push_one`, on the push
+                # itself.
+                from . import resolve_state as resolve_state_mod
+
+                resolve_state_mod.clear_failed_marker(Path(vault))
         total_pulled += pulled
         if rc_one != 0:
             failed.append(name)

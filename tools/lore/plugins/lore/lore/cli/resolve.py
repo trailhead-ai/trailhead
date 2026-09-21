@@ -189,7 +189,24 @@ _MAX_STEPS = 500
 
 
 class ResolveError(Exception):
-    """A resolution could not proceed — reported, never worked around."""
+    """A resolution could not proceed — reported, never worked around.
+
+    ``str(exc)`` is the wording an operator reads, and it carries no
+    version-control vocabulary. The sweep prints it on every host, including
+    one that declares it makes no vault content and is therefore never to be
+    handed a version-control decision or the words for one (AC38). The
+    declaration is consulted only after the replay is driven, so a failure
+    raised before that point reaches both kinds of host and cannot be worded
+    per host.
+
+    ``detail`` carries git's own account of what happened, for the durable
+    failure marker — the named, machine-local location someone debugging this
+    host goes to. It is never printed beside the message.
+    """
+
+    def __init__(self, message: str, *, detail: str = "") -> None:
+        super().__init__(message)
+        self.detail = detail
 
 
 class StageStatus(Enum):
@@ -339,7 +356,9 @@ def _conflicted_paths(vault: Path) -> list[str]:
     """Return the vault-relative paths git reports as unmerged, in stable order."""
     rc, out, err = _git(vault, "ls-files", "-u", "-z")
     if rc != 0:
-        raise ResolveError(f"could not read the conflict state: {err}")
+        raise ResolveError(
+            "could not read what this vault is holding", detail=err
+        )
     seen: list[str] = []
     # NUL-delimited: git's default `core.quotePath` would otherwise hand back a
     # non-ASCII name C-quoted, and every follow-up `git show :N:<path>` on that
@@ -531,15 +550,15 @@ def _hold_unreadable_sidecar(
     special case: a non-empty ``conflicts`` list is what keeps
     :func:`_resolve_step` from ever routing this record through
     :func:`write_record`. ``pending`` carries empty placeholders for
-    ``sidecar``/``body`` (never populated — there is no ``take`` verb for this
-    reason) purely so a caller that mishandles this record does not crash on a
-    missing key.
+    ``sidecar``/``body``, which stay empty: :func:`_take_targets` refuses a
+    ``take`` against a conflict carrying this reason, so no judgment is ever
+    folded into them and no route composes a record out of them.
     """
     def side(stage: int, status: dict | StageStatus) -> dict:
         # The corrupt side's raw bytes are surfaced so a person can see what to
-        # repair. The side that DOES parse reports no value: this task's
-        # widening is that a readable side is held too, not silently taken, so
-        # showing it as an ordinary value would misstate what happened.
+        # repair. The side that DOES parse reports no value: a readable side is
+        # held too rather than silently taken, so showing it as an ordinary
+        # value would misstate what happened.
         if isinstance(status, StageStatus):
             raw = _stage_text(vault, stage, sidecar_path)
             value = None if raw is StageStatus.ABSENT else raw
@@ -605,7 +624,9 @@ def _delete_record(vault: Path, record_id: str, sidecar_path: str, body_path: st
     for rel in (body_path, sidecar_path):
         rc, _, err = _git(vault, "rm", "-f", "--ignore-unmatch", "--", rel)
         if rc != 0:
-            raise ResolveError(f"could not stage the removal of {rel}: {err}")
+            raise ResolveError(
+                f"could not record the removal of {rel}", detail=err
+            )
     return {
         "kind": record_id.split("/", 1)[0],
         "sidecar-path": sidecar_path,
@@ -662,7 +683,9 @@ def write_record(vault: Path, record_id: str, sidecar: dict, body: str) -> None:
     for rel in (f"{record_id}.md", f"{record_id}.json"):
         rc, _, err = _git(vault, "add", "--", rel)
         if rc != 0:
-            raise ResolveError(f"could not stage {rel}: {err}")
+            raise ResolveError(
+                f"could not record the settled {rel}", detail=err
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -889,12 +912,24 @@ def _auto_take_published_side(vault: Path, path: str) -> str | None:
 
     Returns ``None`` when the conflict is fully settled (landed, staged, or
     removed) — the caller drops it from ``files`` entirely, no report needed.
-    Returns a held-file reason, and writes nothing, when landing the bytes
-    would escape the vault (a path traversal, or a symlink planted at the
+    Returns a held-file reason, and touches nothing, when the conflicted path
+    resolves outside the vault (a path traversal, or a symlink planted at the
     conflicted worktree path): the rest of the replay must not stop over one
     file that a person can still settle with ``take-file``, by hand, once
-    whatever is at that path stops resolving outside the vault.
+    whatever is at that path stops resolving outside the vault. That
+    confinement is checked once, before either settling branch, because a
+    staged removal hands the same path to git as a pathspec and git answers an
+    escaping one with a fatal.
     """
+    target = vault / path
+    try:
+        layers_mod.assert_within_root(target, vault)
+    except layers_mod.LayerConfinementError:
+        return (
+            f"{path}: this path resolves outside the vault (a path traversal or a "
+            "planted symlink) — settle with `lore resolve take-file` once that's fixed"
+        )
+
     oversized = _stage_size_over_ceiling(vault, path)
     if oversized is not None:
         return oversized
@@ -908,23 +943,16 @@ def _auto_take_published_side(vault: Path, path: str) -> str | None:
     if remote.returncode != 0 or local.returncode != 0:
         rc, _, err = _git(vault, "rm", "-f", "--ignore-unmatch", "--", path)
         if rc != 0:
-            raise ResolveError(f"could not stage the removal of {path}: {err}")
+            raise ResolveError(
+                f"could not record the removal of {path}", detail=err
+            )
         return None
-
-    target = vault / path
-    try:
-        layers_mod.assert_within_root(target, vault)
-    except layers_mod.LayerConfinementError:
-        return (
-            f"{path}: this path resolves outside the vault (a path traversal or a "
-            "planted symlink) — settle with `lore resolve take-file` once that's fixed"
-        )
 
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(remote.stdout)
     rc, _, err = _git(vault, "add", "--", path)
     if rc != 0:
-        raise ResolveError(f"could not stage {path}: {err}")
+        raise ResolveError(f"could not record the settled {path}", detail=err)
     return None
 
 
@@ -993,6 +1021,12 @@ def _finish(vault: Path, name: str, say, say_err, *, shared: bool,
     person-started call.
     """
     resolve_state.clear_marker(vault)
+    # The held marker's rule is that it exists exactly while the vault is held,
+    # and this is the one tail every completed resolution runs through — the
+    # sweep's own and the `lore resolve` a held vault's remedy sends a person
+    # to. Clearing it anywhere further up would leave the marker behind on
+    # whichever route did not go through that site.
+    resolve_state.clear_held_marker(vault)
     say("Rebase complete.")
 
     from .areas import run_reindex
@@ -1083,6 +1117,10 @@ def cmd_resolve(args) -> int:
             if not _vault_mid_rebase(vault):
                 started = _start_rebase(vault, say_err)
                 if started is None:
+                    # Nothing left to replay, so nothing is held — a vault
+                    # settled by any route other than this one reaches its
+                    # not-held state here.
+                    resolve_state.clear_held_marker(vault)
                     return _report_nothing_pending(name, say, as_json, shared=shared)
                 if started is False:
                     return 1
@@ -1180,8 +1218,12 @@ def _drive(vault: Path) -> tuple[list[dict], list[dict], dict]:
         if rc != 0 and still_mid and _conflicted_paths(vault):
             continue  # stopped at the next conflicted step
         if rc != 0 and still_mid:
-            raise ResolveError("`git rebase --continue` failed with no conflict to settle")
-    raise ResolveError(f"the rebase did not finish within {_MAX_STEPS} steps")
+            raise ResolveError(
+                "this vault stopped with nothing left to settle"
+            )
+    raise ResolveError(
+        f"settling this vault did not finish within {_MAX_STEPS} steps"
+    )
 
 
 def _abort(vault: Path, name: str, say, say_err) -> int:
@@ -1225,7 +1267,10 @@ def _abort_replay(vault: Path) -> None:
     """
     rc, out, err = _git(vault, "rebase", "--abort")
     if rc != 0 or _vault_mid_rebase(vault):
-        raise ResolveError(f"could not abort the rebase to hold it: {err or out}")
+        raise ResolveError(
+            "could not return the vault to the state it was in",
+            detail=err or out,
+        )
 
 
 def _discard_toward_published(vault: Path) -> None:
@@ -1296,6 +1341,13 @@ def resolve_for_sweep(vault: Path, name: str, *, shared: bool) -> dict:
     atomicity docstring section above depends on.
     """
     with locking.vault_write_lock(vault):
+        # A marker whose vault is no longer mid-rebase describes a resolution
+        # that is already over, and git state is the only liveness authority.
+        # The replay seeds its carried judgment from this marker, so a stale
+        # one would supply a dead session's answers to a conflict derived
+        # fresh — settling it to a value neither side holds, with nobody here
+        # to see it. `cmd_resolve` clears one for the same reason.
+        resolve_state.clear_if_stale(vault)
         if not _vault_mid_rebase(vault):
             started = _start_rebase(vault, lambda _msg: None)
             if started is None:
@@ -1304,7 +1356,7 @@ def resolve_for_sweep(vault: Path, name: str, *, shared: bool) -> dict:
                 report["held"] = False
                 return report
             if started is False:
-                raise ResolveError(f"could not start the rebase for {name}")
+                raise ResolveError(f"could not begin settling {name}")
         conflicts, files, _pending = _drive(vault)
 
         if conflicts or files:
@@ -1322,7 +1374,6 @@ def resolve_for_sweep(vault: Path, name: str, *, shared: bool) -> dict:
             report["entered-at"] = marker["entered-at"]
             return report
 
-    resolve_state.clear_held_marker(vault)
     say, say_err = _make_emitters(name, len(name) + 1)
     rc_finish = _finish(vault, name, say, say_err, shared=shared,
                         include_shared=False, sweep=True)
@@ -1433,10 +1484,25 @@ def _take_request(args) -> tuple[str | None, str | None, str | None]:
 
 def _take_targets(marker: dict, record_id: str, *, slot: str | None,
                   all_slots: bool) -> list[dict]:
-    """Return the parked conflict entries this ``take`` settles."""
+    """Return the parked conflict entries this ``take`` settles.
+
+    A record held for an unreadable sidecar has no settleable slot at all: the
+    hold exists precisely because neither side parsed into fields, so there is
+    nothing for a chosen side to contribute and the pending merge it would be
+    folded into is empty. Refusing here is what makes "no part of this record
+    was written" true on every route rather than only on the reporting one —
+    the record write path downstream would refuse the malformed result, but
+    composing it and being refused is not the same as never reaching the
+    writer.
+    """
     mine = [c for c in marker.get("conflicts", []) if c["record-id"] == record_id]
     if not mine:
         raise ResolveError(f"{record_id} has no open conflict in this resolution")
+    if any(c.get("reason") == UNREADABLE_SIDECAR for c in mine):
+        raise ResolveError(
+            f"{record_id} is held — {UNREADABLE_SIDECAR}: no side of it parsed, so "
+            "there is nothing to take. Repair the file by hand, then re-run resolve."
+        )
     if all_slots:
         return mine
     targets = [c for c in mine if c["slot"] == slot]
