@@ -230,12 +230,11 @@ class DoorProbe:
     derived getting there, and — for the two failure states only — the
     operator-facing ``reason`` both callers report verbatim.
 
-    ``reconcile_outcome`` is set only for :data:`DoorState.CONNECTED`
-    reached via the initial `has_session_with_reason` probe answering
-    present — the connect arm reads and corrects the window record against
-    tmux there, before this probe is returned. It is `None` for every other
-    state, including :data:`DoorState.CREATED`: the create arm has no
-    session to read a record against yet.
+    ``reconcile_outcome`` is set for every :data:`DoorState.CONNECTED` —
+    whichever fold reached it — because each connect reads and corrects the
+    window record against tmux before this probe is returned. It is `None`
+    for every other state, including :data:`DoorState.CREATED`: the create
+    arm has no session to read a record against yet.
     """
 
     state: DoorState
