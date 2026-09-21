@@ -915,3 +915,178 @@ rather than argued away, and it is not revisited if the measured result comes ou
 
 The pre-registration above and both fixtures are committed together, in this task, before any
 capture for either site exists. At this task's own commit, `git log --oneline --all -- 'tools/craft/plugins/craft/evals/ritual-deliverable-names-its-record/runs/*slice-spec-complete*' 'tools/craft/plugins/craft/evals/ritual-deliverable-names-its-record/runs/*slice-early-stop*'` returns nothing: no capture for either site exists under `runs/` at this commit.
+
+## Extension — Task 1 of `task/distill-closing-report-links-the-adr-it-wrote-every-run`, pre-registration for the record-links rule salience treatment
+
+**Committed before any capture for this measurement exists, and before the rule it measures is
+edited.** This task writes this section and freezes copies of every live arm the rule edit will
+rewrite; a later task in the same slice performs the edit; a further task dispatches the runs this
+section pre-registers and grades them. No arm, capture, or verdict for this measurement is created
+here.
+
+### Treatment under test
+
+Outpost's `## Record links` rule — `tools/outpost/plugins/outpost/rules.md`, `## Record links`
+heading to end-of-file, confirmed 14 lines at this task's commit (`73bf9b22`) — states the
+table/list case as a subordinate clause inside a sentence that opens on the prose case ("Link first
+mention per record per response in prose, every row in a table or list."), and the section's only
+worked example (`` [task/example](http://127.0.0.1:7313/records/trailhead/task/example) ``) is
+prose-shaped, not table-shaped. **The treatment gives the table/list case its own standalone
+statement and its own worked table-shaped example**, at or near the section's current net length —
+the spec's "a dozen lines, not a reference manual" cap (`spec/record-mentions-in-agent-output-are-
+reachable`, `## Constraints`) stays governing, so the edit relocates emphasis rather than inflating
+the section. Every other clause — base-URL resolution, vault-segment resolution, the identifier-
+grammar restriction, and the handoff-command-stays-bare rule — is untouched. This is the only
+prose this treatment changes; no ritual `SKILL.md` is edited by this slice. The exact wording is a
+later task's decision (`tools/outpost/plugins/outpost/rules.md` is out of this task's own
+`**Files:**`); this section pre-registers what is measured about it, not what it says.
+
+### Measurable-site list — re-derived from this file's own vacuity rule, not from the plan
+
+Per "Pre-registered vacuity rule for record-link, per ritual" above, `record-link` carries a
+linkable prose mention — and is therefore scoreable for AC6 — at exactly three of the seven pinned
+rituals: **review** (fixtured at its loop-complete outcome), **distill**, and **slice** (its
+selection handoff). The other four (`brainstorm`, `gauntlet`, `plan`, `execute`) are vacuous for
+`record-link` by construction and are not re-measured by this task — a rule-text edit changes no
+ritual's prose, so nothing at those four sites can move. `next-command` is not re-graded by this
+measurement either: the treatment edits only `rules.md`, not any ritual's `SKILL.md`, so every
+already-established AC7 verdict is untouched by construction and this section pre-registers no new
+`next-command` pass condition.
+
+### Per-site pre-registration
+
+Each site is measured against the arm/fixture pair the ritual set's own tables above already pin —
+no new arm or fixture is created by this task. `distill`'s arm is the frozen-then-superseded
+`arms/distill-rule-only.md` **as it will read after the treatment lands** (a "live" arm — it
+rebuilds from current committed prose plus the current tail, so once Task 3 edits `rules.md` it
+rebuilds against the treated tail without any further edit to the manifest); `review`'s arm is
+`arms/review-treatment.md` for the same reason; `slice`'s arm is `arms/rule-only.md`. All three are
+the arms this task freezes pre-treatment copies of, below — the frozen copy is the pre-treatment
+control the eventual write-up compares this measurement against; the live filename is what
+Task 3's edit rewrites and this measurement runs against.
+
+| Site | Arm (post-treatment) | Fixture | Record | Command | Runs |
+|---|---|---|---|---|---|
+| `slice` selection handoff | `arms/rule-only.md` | `fixtures/slice-completed-run.md` | `task/the-berth-allocation-slice` | `/craft:plan task/the-berth-allocation-slice` | 3, escalating to 6 on a 2-1 split |
+| `review` loop-complete | `arms/review-treatment.md` | `fixtures/review-completed-run.md` | `spec/dock-scheduling-windows` | `/craft:distill spec/dock-scheduling-windows` | 3, escalating to 6 on a 2-1 split |
+| `distill` | `arms/distill-rule-only.md` | `fixtures/distill-completed-run.md` | `adr/dock-scheduling-windows-use-fifo-slots` | `lore record show adr/dock-scheduling-windows-use-fifo-slots` | 3, escalating to 6 on a 2-1 split |
+
+**Run budget: 9 processes minimum, 18 maximum** — 3 per site if every site's 3 runs agree, up to 6
+per site (18 total) if all three split 2-1, matching the same escalation rule this file's earlier
+"Pre-registered split rule" section already uses. Each counted run is one discriminating
+observation of `record-link` (`link` or `bare`) at that site; a site that does not split
+contributes 3 observations toward its verdict, a site that splits contributes 6.
+
+### Baseline this measurement is compared against
+
+The most recent pre-treatment baseline for all three sites, already measured and recorded
+(`tools/craft/MANUAL-EVAL.md`, "2026-09-11 — extension to the ritual set"), not re-derived or
+re-run here:
+
+- **slice** — 3/3 `link` (never split; ceiling).
+- **review** — 5/6 `link` (split 2-1, resolved 5-1 clean majority on re-run; PASS).
+- **distill** — 3/6 `link` (split 2-1, resolved 3-3 on re-run; **AMBIGUOUS**, not FAIL — this is
+  the "historical split is 3-in-6" state the treatment is tested against).
+
+### Pass threshold — U1 (does the treatment move distill?)
+
+U1 closes as **moved** (a positive result) if distill's post-treatment runs resolve to a clean
+passing majority under the existing split rule — 3/3, or 5-1/6-0 after a 2-1 escalation. U1 closes
+as **not moved** (a falsification) if the post-treatment result is 0/3, or, after escalation, still
+not a clean majority (4-2, or another 2-1-shaped tie) — i.e., AMBIGUOUS again — or resolves to a
+clean *bare* majority. An AMBIGUOUS-to-AMBIGUOUS result is a falsification of U1, not a
+non-result: this design's whole point is to tell "the treatment moved a coin-flip site" apart from
+"the site is still a coin flip," and a second AMBIGUOUS reading answers that question in the
+negative just as decisively as a clean bare majority would.
+
+### Pass threshold — U2 (does the treatment hold slice and review?)
+
+U2 closes as **held** if both `slice` and `review` resolve to a clean passing majority under the
+existing split rule (matching or exceeding each site's own baseline bucket — 3/3 or a 5-1/6-0
+escalation for slice, 3/3 or a 5-1/6-0 escalation for review). U2 closes as **regressed** — a
+falsification — if either site's post-treatment result is a clean bare majority, or resolves
+AMBIGUOUS where its baseline had resolved to a clean pass. A regression at either site blocks the
+slice from closing per the parent plan's Council amendment (an AC6 failure at any ritual blocks
+the close, not a task to route around).
+
+### Minimum detectable effect, stated per site
+
+This design's resolving power is exactly the resolving power of the split rule it reuses: with 3
+runs, only 3/3 or 0/3 is decisive; with 6 (after a 2-1 escalation), only 5-1/6-0 is a clean
+majority — 4-2 stays AMBIGUOUS. That ceiling, not the site's true underlying link rate, is what a
+result can and cannot distinguish.
+
+- **distill.** Baseline sits at an exact tie (3/6, confirmed twice — once as the raw historical
+  rate across the six committed captures, once as a dedicated 6-run pre-registered measurement).
+  **A post-treatment 5-in-6 or 6-in-6 would establish** that AC6 now holds at distill under this
+  specific rule wording — a real, large shift away from a tie that two independent measurements
+  already confirmed is not sampling noise at n=6. **It would NOT establish**: the exact magnitude
+  of the true post-treatment link rate (binomial uncertainty at n=6 is wide — a 5/6 sample is
+  consistent with true rates from roughly 50% up to nearly 100%); that the effect generalizes to a
+  different model tier, session shape, or ritual site; or that a smaller real improvement did not
+  occur instead of a large one. A result landing at 4/6 is indistinguishable, under this design,
+  from no effect at all — it resolves AMBIGUOUS exactly as the baseline itself did, even if the
+  true underlying rate moved modestly. This is the concrete shape of the Council's "not enough
+  runs" risk: an AMBIGUOUS-to-AMBIGUOUS or 4/6 result means this design cannot resolve what
+  happened, not that nothing happened.
+- **review and slice.** The concern here is regression, not improvement, so the same ceiling cuts
+  the other way: this design can detect a clean drop out of the passing bucket (a bare majority, or
+  a fresh AMBIGUOUS at a site that previously resolved clean), but it cannot detect a *small*
+  regression that still happens to land inside the passing bucket — e.g., slice dropping from a
+  true 3/3 to a true 5/6 would still read as PASS by the same rule that graded its baseline,
+  because both are "clean passing majority." A held U2 verdict therefore means "no regression large
+  enough for this design to see," not "provably unchanged."
+
+### What a falsification means
+
+Per the parent plan's explicit instruction, a falsification of U1 or U2 — distill staying
+AMBIGUOUS or turning bare, or review/slice dropping out of a clean pass — is recorded as a negative
+result and a follow-up task, never as license for a second wording attempt inside this slice. The
+pre-registered split rule's own refusal to reinterpret AMBIGUOUS or FAIL into a softened pass
+applies here on the same terms it already applies to every other measurement in this file.
+
+### Freezing the pre-treatment arms
+
+Every live arm carrying the reader-rule tail is rewritten in bytes the moment `rules.md`'s
+`## Record links` section changes, because each rebuilds its tail from that section verbatim
+(`_record_links_tail()`, `tools/craft/tests/test_ritual_deliverable_eval_arms_contract.py`). That
+rewrite would silently invalidate the provenance of every capture already committed under `runs/`
+for those arms — the capture was measured against the pre-treatment tail, and the live arm file on
+disk would no longer be that tail. This task freezes a byte-identical copy of each such arm's
+current content, pinned to this task's own commit (`73bf9b22`), before any edit lands:
+
+| Frozen file | Mirrors (live, pre-treatment) | Sources |
+|---|---|---|
+| `arms/rule-only-pre-rule-edit.md` | `arms/rule-only.md` | `slice/SKILL.md` @ `73bf9b22` + tail @ `73bf9b22` |
+| `arms/brainstorm-rule-only-pre-rule-edit.md` | `arms/brainstorm-rule-only.md` | `brainstorm/SKILL.md` @ `73bf9b22` + tail @ `73bf9b22` |
+| `arms/distill-rule-only-pre-rule-edit.md` | `arms/distill-rule-only.md` | `distill/SKILL.md` @ `73bf9b22` + tail @ `73bf9b22` |
+| `arms/gauntlet-rule-only-pre-rule-edit.md` | `arms/gauntlet-rule-only.md` | `gauntlet/SKILL.md` @ `73bf9b22` + tail @ `73bf9b22` |
+| `arms/plan-treatment-pre-rule-edit.md` | `arms/plan-treatment.md` | `plan/SKILL.md` @ `73bf9b22` + tail @ `73bf9b22` |
+| `arms/review-treatment-pre-rule-edit.md` | `arms/review-treatment.md` | `review/SKILL.md` @ `73bf9b22` + tail @ `73bf9b22` |
+| `arms/execute-rule-only-pre-rule-edit.md` | `arms/execute-rule-only.md` | `execute/SKILL.md` @ `73bf9b22` + `_shared/execute.md` @ `73bf9b22` + tail @ `73bf9b22` |
+
+`arms/baseline.md` carries no tail (`with_tail: False` in `LIVE_ARMS`) and is unaffected by this
+edit, so it is not frozen. `arms/slice-frozen-rule-only.md` is already a frozen entry from an
+earlier task; it also carries the reader-rule tail, so its own reconstruction is re-pinned to this
+same commit's tail rather than left to read the working tree (see below) — its declared source
+revision (`0336687c`, `## Extension — Task 1 of task/both-slice-termination-outcomes-are-measured-
+not-assumed`) is untouched, only how its *tail* is reconstructed changes.
+
+Each frozen file above is declared in `LIVE_ARMS`/`FROZEN_ARMS`
+(`tools/craft/tests/test_ritual_deliverable_eval_arms_contract.py`) with a one-line reason naming
+this task and the live arm it mirrors, and is asserted to reconstruct byte-identically from its
+declared source revision and its declared tail revision — never regenerated once `rules.md`
+changes, per the standing instruction on every frozen arm in this file.
+
+### Fix to the frozen-arm provenance helper
+
+`_record_links_tail()` previously always read the working-tree `tools/outpost/plugins/outpost/
+rules.md`, which is sound only while the tail never changes — a condition this very task's
+treatment breaks. The helper now accepts an optional revision: given one, it reads the tail via
+`git show <revision>:tools/outpost/plugins/outpost/rules.md` instead of the working tree; given
+none, it keeps reading the working tree, which is what every *live* arm's rebuild still needs
+(a live arm is defined as "matches current committed prose," and current committed prose includes
+whatever tail is committed right now). Every frozen arm's expected reconstruction — the seven new
+ones above and the pre-existing `slice-frozen-rule-only.md` — now passes an explicit pinned
+revision rather than relying on the working tree matching the moment it was frozen, so none of them
+goes red for an environment reason once Task 3 edits the rule.
