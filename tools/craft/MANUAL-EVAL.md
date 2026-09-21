@@ -1722,6 +1722,20 @@ trailhead/tests/test_eval_corpus.py -q` — 57 passed. `.venv/bin/python -m ruff
 all checks passed. No test was added by this task; it ships no behaviour change, per the task
 body's own stated discipline.
 
+> **Note added 2026-09-21, after `bc8c493e`.** This section's `slice`, `review`, and
+> `distill` runs above were dispatched against `arms/rule-only.md`,
+> `arms/review-treatment.md`, and `arms/distill-rule-only.md` — each confirmed
+> byte-identical to its declared source plus the `## Record links` tail pinned at
+> commit `73bf9b22` (the `cmp` checks quoted above). That tail has since changed:
+> `bc8c493e` edited `## Record links` and every one of those three arms was rebuilt
+> to carry the new tail. The exact tail this baseline was measured against — the
+> `73bf9b22` text — is preserved byte-for-byte in each arm's frozen twin
+> (`arms/rule-only-pre-rule-edit.md`, `arms/review-treatment-pre-rule-edit.md`,
+> `arms/distill-rule-only-pre-rule-edit.md`), which
+> `tools/craft/tests/test_ritual_deliverable_eval_arms_contract.py` pins against
+> that same revision. This row's "Prose under test" — "reader rule appended" — now
+> means the frozen twin's text, not the live arm's current text.
+
 ### 2026-09-21 — extended distill baseline to nine runs under the amended pre-registration
 
 Run by `task/extend-the-distill-baseline-to-nine-runs-under-an-amended-pre-registration`, an
@@ -1844,6 +1858,16 @@ prefix for this batch: `recordlinks-baseline-distill-N`, `N` = `4`–`9` (contin
 trailhead/tests/test_eval_corpus.py -q` — 57 passed. `.venv/bin/python -m ruff check tools/craft` —
 all checks passed. No test was added by this task; it ships no behaviour change, per the task
 body's own stated discipline.
+
+> **Note added 2026-09-21, after `bc8c493e`.** All nine `distill` runs above (both the
+> first three and the six-run extension) were dispatched against
+> `arms/distill-rule-only.md`, confirmed byte-identical to `distill/SKILL.md` plus
+> the `## Record links` tail pinned at commit `73bf9b22` (the `cmp` checks quoted
+> above, repeated unchanged in this task). `bc8c493e` has since edited that tail and
+> rebuilt `arms/distill-rule-only.md`; the exact `73bf9b22` text this 9-run baseline
+> measured against is preserved in `arms/distill-rule-only-pre-rule-edit.md`, pinned
+> by `tools/craft/tests/test_ritual_deliverable_eval_arms_contract.py`. This row's
+> "Prose under test" now describes that frozen twin, not the live arm.
 
 ### 2026-09-21 — post-treatment measurement at all three AC6-measurable sites, U1/U2 verdict
 

@@ -720,3 +720,42 @@ clean.
 gate; `task/treat-the-rule-re-measure-every-site-and-state-the-ac6-verdict`'s craft-side measurement
 proceeded on this PASS. This entry appends the gate's result only — the case's own committed rows
 above (baseline/treatment/table-vs-paragraph) are unedited by this task.
+
+### 2026-09-21 — `arms/treatment.md` split into a live arm and a frozen `-pre-rule-edit` twin
+
+Follow-up to the entry immediately above, settling the consequence its own last line
+deferred: the re-run there deliberately built its treated variant in scratch rather
+than overwriting the committed `arms/treatment.md`, "which stays pinned to the
+pre-edit section it was originally measured against." That left the committed
+`arms/treatment.md` carrying stale prose with no test pinning it either way and no
+declared reason for the freeze. Settled here, mirroring
+`tools/craft/plugins/craft/evals/ritual-deliverable-names-its-record/`'s live/frozen
+arm pattern:
+
+- `arms/treatment.md` — renamed in git history to `arms/treatment-pre-rule-edit.md`,
+  content unchanged. Confirmed by `diff` against a fresh
+  `git show 19866500:tools/outpost/plugins/outpost/rules.md`-derived rebuild to be
+  byte-identical to the baseline brief plus the `## Record links` section exactly as
+  it stood at commit `19866500` — the same text `c123d11f`'s row above (and every row
+  between it and this task) was measured against, `c123d11f` and `19866500` sharing
+  an identical `rules.md` blob (confirmed by `diff`).
+- A new `arms/treatment.md` was built fresh: the baseline brief plus the *current*
+  `## Record links` section (post-`bc8c493e`).
+- `tools/outpost/tests/test_record_link_rendering_arms_contract.py` (new) pins both:
+  the live arm rebuilds byte-identically to today's `rules.md`, the frozen arm
+  matches its declared `19866500` provenance and is proven sensitive to that
+  revision (a reconstruction against a wrong revision does not match), the two arms
+  are proven to actually diverge, and every file under `arms/` is accounted for by
+  the manifest. Written first and confirmed red (missing frozen file; live arm
+  stale) before the file split; green after. Mutation-checked: corrupting either
+  arm's tail turns its provenance test red; pointing the sensitivity check at the
+  frozen arm's own revision turns it red (proving the pin discriminates); dropping
+  an unmanifested file turns exhaustiveness red; making the two arms byte-identical
+  turns the divergence check red. All four restores verified with an empty `diff`
+  against a pre-mutation scratch copy.
+
+**No row above is edited or deleted.** Every prior result row already names its own
+measured revision (`d14c198a`, `bda10d7`, `78049293`, `c123d11f`) inline in its "Arm"
+column, so none of them reads as measuring today's text — this entry's only job is
+to make the case's `arms/` directory match what those rows already say, and to give
+future re-runs a live arm a test actually keeps in sync.
