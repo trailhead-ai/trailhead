@@ -2659,3 +2659,38 @@ def test_a_traversing_conflicted_path_is_held_rather_than_crashing_the_replay(tm
 
     assert reason is not None, "an escaping path is held, not crashed on"
     assert "../outside.html" in reason, "the held reason names the path"
+
+
+def test_a_take_on_a_held_unreadable_sidecar_is_refused_not_written(tmp_path, resolve):
+    """A held record's whole guarantee is that nothing of it is written.
+
+    The report tells a person to repair the file by hand — ``take`` is not one
+    of this conflict's remedies, because there is no parsed sidecar for a
+    chosen side to fold into. Handed the slot anyway, the settle path has an
+    empty pending merge to write through, and reaching the writer at all is
+    what the guarantee forbids; the record write refusing the malformed result
+    downstream is not the same as never composing it.
+    """
+    fx = _Fixture(tmp_path)
+    record_id = fx.create("task", "A Task")
+    fx.publish()
+    fx.clone_device_b()
+
+    (fx.other / f"{record_id}.json").write_text("{remote not valid", encoding="utf-8")
+    fx.push_device_b("device B corrupted the sidecar")
+
+    (fx.vault / f"{record_id}.json").write_text("{local not valid", encoding="utf-8")
+    _commit(fx.vault, "device A corrupted the sidecar too")
+
+    assert fx.cli(["resolve", "default", "--json"]).returncode == 0
+    before = (fx.vault / f"{record_id}.md").read_text(encoding="utf-8")
+
+    r = fx.cli(["resolve", "take", record_id, "--slot", "sidecar", "--local"])
+
+    assert r.returncode != 0, "the take is refused"
+    assert "by hand" in (r.stderr + r.stdout), (
+        "the refusal names the same remedy the held report printed"
+    )
+    assert (fx.vault / f"{record_id}.md").read_text(encoding="utf-8") == before, (
+        "no part of the held record was written"
+    )

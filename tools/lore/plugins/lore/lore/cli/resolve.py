@@ -531,15 +531,15 @@ def _hold_unreadable_sidecar(
     special case: a non-empty ``conflicts`` list is what keeps
     :func:`_resolve_step` from ever routing this record through
     :func:`write_record`. ``pending`` carries empty placeholders for
-    ``sidecar``/``body`` (never populated — there is no ``take`` verb for this
-    reason) purely so a caller that mishandles this record does not crash on a
-    missing key.
+    ``sidecar``/``body``, which stay empty: :func:`_take_targets` refuses a
+    ``take`` against a conflict carrying this reason, so no judgment is ever
+    folded into them and no route composes a record out of them.
     """
     def side(stage: int, status: dict | StageStatus) -> dict:
         # The corrupt side's raw bytes are surfaced so a person can see what to
-        # repair. The side that DOES parse reports no value: this task's
-        # widening is that a readable side is held too, not silently taken, so
-        # showing it as an ordinary value would misstate what happened.
+        # repair. The side that DOES parse reports no value: a readable side is
+        # held too rather than silently taken, so showing it as an ordinary
+        # value would misstate what happened.
         if isinstance(status, StageStatus):
             raw = _stage_text(vault, stage, sidecar_path)
             value = None if raw is StageStatus.ABSENT else raw
@@ -1436,10 +1436,25 @@ def _take_request(args) -> tuple[str | None, str | None, str | None]:
 
 def _take_targets(marker: dict, record_id: str, *, slot: str | None,
                   all_slots: bool) -> list[dict]:
-    """Return the parked conflict entries this ``take`` settles."""
+    """Return the parked conflict entries this ``take`` settles.
+
+    A record held for an unreadable sidecar has no settleable slot at all: the
+    hold exists precisely because neither side parsed into fields, so there is
+    nothing for a chosen side to contribute and the pending merge it would be
+    folded into is empty. Refusing here is what makes "no part of this record
+    was written" true on every route rather than only on the reporting one —
+    the record write path downstream would refuse the malformed result, but
+    composing it and being refused is not the same as never reaching the
+    writer.
+    """
     mine = [c for c in marker.get("conflicts", []) if c["record-id"] == record_id]
     if not mine:
         raise ResolveError(f"{record_id} has no open conflict in this resolution")
+    if any(c.get("reason") == UNREADABLE_SIDECAR for c in mine):
+        raise ResolveError(
+            f"{record_id} is held — {UNREADABLE_SIDECAR}: no side of it parsed, so "
+            "there is nothing to take. Repair the file by hand, then re-run resolve."
+        )
     if all_slots:
         return mine
     targets = [c for c in mine if c["slot"] == slot]
