@@ -135,7 +135,7 @@ def _cmd_status_group_cli(
     # is dropped doing so — the explicit collision is already refused above.
     if slug is not None and not parsed.stale:
         try:
-            code, report = provision_status_code(group, slug, env=env)
+            code, report = provision_status_code(group, slug, env=env, drift=True)
         except Exception as e:
             print(f"camp status: {e}", file=sys.stderr)
             sys.exit(1)

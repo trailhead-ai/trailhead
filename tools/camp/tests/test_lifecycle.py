@@ -2072,7 +2072,7 @@ class TestStatusBranchDrift:
         wt_a = _member_wt("testgroup", slug, "repo_a", g["env"])
         _advance_base_past_worktree(g["repo_a"], wt_a, commits=1)
 
-        _code, report = provision_status_code(g["group"], slug, env=g["env"])
+        _code, report = provision_status_code(g["group"], slug, env=g["env"], drift=True)
         by_name = {m["name"]: m for m in report["members"]}
 
         assert by_name["repo_a"]["behind"] == 1
@@ -2092,7 +2092,7 @@ class TestStatusBranchDrift:
         reconcile_worktree(g["group"], slug, env=g["env"])
         _point_upstream_at_missing_ref(_member_wt("testgroup", slug, "repo_a", g["env"]))
 
-        _code, report = provision_status_code(g["group"], slug, env=g["env"])
+        _code, report = provision_status_code(g["group"], slug, env=g["env"], drift=True)
         by_name = {m["name"]: m for m in report["members"]}
         assert by_name["repo_a"]["upstream"] == "gone"
 
@@ -2106,7 +2106,7 @@ class TestStatusBranchDrift:
         wt_a = _member_wt("testgroup", slug, "repo_a", g["env"])
         _git_ok("git", "-C", str(wt_a), "branch", "--unset-upstream")
 
-        _code, report = provision_status_code(g["group"], slug, env=g["env"])
+        _code, report = provision_status_code(g["group"], slug, env=g["env"], drift=True)
         by_name = {m["name"]: m for m in report["members"]}
         assert by_name["repo_a"]["upstream"] == "none"
 
@@ -2118,7 +2118,7 @@ class TestStatusBranchDrift:
         slug = "drift-ok"
         reconcile_worktree(g["group"], slug, env=g["env"])
 
-        _code, report = provision_status_code(g["group"], slug, env=g["env"])
+        _code, report = provision_status_code(g["group"], slug, env=g["env"], drift=True)
         by_name = {m["name"]: m for m in report["members"]}
         assert by_name["repo_a"]["upstream"] == "ok"
         assert by_name["repo_b"]["upstream"] == "ok"
@@ -2133,7 +2133,7 @@ class TestStatusBranchDrift:
         slug = "drift-missing"
         seed_pending_workspace(g["group"], slug, env=g["env"])
 
-        _code, report = provision_status_code(g["group"], slug, env=g["env"])
+        _code, report = provision_status_code(g["group"], slug, env=g["env"], drift=True)
         by_name = {m["name"]: m for m in report["members"]}
         assert by_name["repo_a"]["ahead"] is None
         assert by_name["repo_a"]["behind"] is None
@@ -2169,6 +2169,252 @@ class TestStatusBranchDrift:
         lines = capsys.readouterr().out.splitlines()
         assert "  repo_a: ready / work: ready [behind 3] [upstream gone]" in lines
         assert "  repo_b: ready / work: ready" in lines
+
+    def test_ahead_only_reports_field_and_renders_suffix(self, origin_two_member_group, capsys):
+        """The `[ahead N]` render branch (previously uncovered): a member
+        with local commits not present on its base reports ahead=N and
+        renders the bracketed suffix, with no behind/upstream noise."""
+        from camp.provision.reconcile import reconcile_worktree
+        from camp.provision.lifecycle import provision_status_code
+        from camp.cli.status import _cmd_status_group_cli
+
+        g = origin_two_member_group
+        slug = "drift-ahead"
+        reconcile_worktree(g["group"], slug, env=g["env"])
+
+        wt_a = _member_wt("testgroup", slug, "repo_a", g["env"])
+        (wt_a / "local.txt").write_text("local work\n")
+        _git_ok("git", "-C", str(wt_a), "add", "local.txt")
+        _git_ok("git", "-C", str(wt_a), "commit", "-m", "local work", "--no-gpg-sign")
+
+        _code, report = provision_status_code(g["group"], slug, env=g["env"], drift=True)
+        by_name = {m["name"]: m for m in report["members"]}
+        assert by_name["repo_a"]["ahead"] == 1
+        assert by_name["repo_a"]["behind"] == 0
+
+        _update_manifest_members(
+            g["group"], slug, g["env"],
+            {
+                "repo_a": {"provision_state": "ready", "work_state": "ready"},
+                "repo_b": {"provision_state": "ready", "work_state": "ready"},
+            },
+        )
+
+        with pytest.raises(SystemExit) as exc:
+            _cmd_status_group_cli(["--name", slug], g["group"], g["env"], False)
+        assert exc.value.code == 0
+
+        lines = capsys.readouterr().out.splitlines()
+        assert "  repo_a: ready / work: ready [ahead 1]" in lines
+
+    def test_full_drift_suffix_order_when_behind_ahead_and_gone(
+        self, origin_two_member_group, capsys
+    ):
+        """behind+ahead+gone together must render in the documented order:
+        `[behind N] [ahead N] [upstream gone]`."""
+        from camp.provision.reconcile import reconcile_worktree
+        from camp.provision.lifecycle import provision_status_code
+        from camp.cli.status import _cmd_status_group_cli
+
+        g = origin_two_member_group
+        slug = "drift-full"
+        reconcile_worktree(g["group"], slug, env=g["env"])
+
+        wt_a = _member_wt("testgroup", slug, "repo_a", g["env"])
+        _advance_base_past_worktree(g["repo_a"], wt_a, commits=2)
+        (wt_a / "local.txt").write_text("local work\n")
+        _git_ok("git", "-C", str(wt_a), "add", "local.txt")
+        _git_ok("git", "-C", str(wt_a), "commit", "-m", "local work", "--no-gpg-sign")
+        _point_upstream_at_missing_ref(wt_a)
+
+        _code, report = provision_status_code(g["group"], slug, env=g["env"], drift=True)
+        by_name = {m["name"]: m for m in report["members"]}
+        assert by_name["repo_a"]["behind"] == 2
+        assert by_name["repo_a"]["ahead"] == 1
+        assert by_name["repo_a"]["upstream"] == "gone"
+
+        _update_manifest_members(
+            g["group"], slug, g["env"],
+            {
+                "repo_a": {"provision_state": "ready", "work_state": "ready"},
+                "repo_b": {"provision_state": "ready", "work_state": "ready"},
+            },
+        )
+
+        with pytest.raises(SystemExit) as exc:
+            _cmd_status_group_cli(["--name", slug], g["group"], g["env"], False)
+        assert exc.value.code == 0
+
+        lines = capsys.readouterr().out.splitlines()
+        assert "  repo_a: ready / work: ready [behind 2] [ahead 1] [upstream gone]" in lines
+
+    def test_member_base_override_computes_against_configured_ref(self, tmp_path):
+        """The per-member `base` override must be honored, not just carried
+        through as a label — indistinguishable from the hardcoded default
+        when the fixture's base happens to equal `origin/main`. `develop`
+        diverges from `main` by one commit before the worktree is created, so
+        a helper that silently fell back to `origin/main` would compute a
+        different (wrong) `behind` count."""
+        from camp.provision.reconcile import reconcile_worktree
+        from camp.provision.lifecycle import provision_status_code
+
+        repo = tmp_path / "repo_dev"
+        init_git_repo(repo, origin=True)
+        _git_ok("git", "-C", str(repo), "checkout", "-b", "develop")
+        (repo / "on-develop.txt").write_text("only on develop\n")
+        _git_ok("git", "-C", str(repo), "add", "on-develop.txt")
+        _git_ok("git", "-C", str(repo), "commit", "-m", "develop diverges", "--no-gpg-sign")
+        _git_ok("git", "-C", str(repo), "push", "-u", "origin", "develop")
+        _git_ok("git", "-C", str(repo), "fetch", "origin", "--quiet")
+
+        group = _make_group_config(
+            "devgroup",
+            [{"name": "repo_dev", "repo_root": str(repo), "base": "origin/develop"}],
+        )
+        env = camp_state_env(tmp_path)
+        slug = "drift-base-override"
+        reconcile_worktree(group, slug, env=env)
+
+        wt = _member_wt("devgroup", slug, "repo_dev", env)
+        _advance_base_past_worktree(repo, wt, commits=2)
+
+        _code, report = provision_status_code(group, slug, env=env, drift=True)
+        by_name = {m["name"]: m for m in report["members"]}
+        assert by_name["repo_dev"]["base"] == "origin/develop"
+        assert by_name["repo_dev"]["behind"] == 2
+        assert by_name["repo_dev"]["ahead"] == 0
+
+    def test_drift_false_by_default_omits_the_five_fields(self, origin_two_member_group):
+        """`drift` defaults to False — the SessionStart hook path and the
+        provisioning poll loop never pay for the ~5 git subprocesses per
+        member the probe costs. Absent, not null."""
+        from camp.provision.reconcile import reconcile_worktree
+        from camp.provision.lifecycle import provision_status_code
+
+        g = origin_two_member_group
+        slug = "drift-default-off"
+        reconcile_worktree(g["group"], slug, env=g["env"])
+
+        _code, report = provision_status_code(g["group"], slug, env=g["env"])
+        by_name = {m["name"]: m for m in report["members"]}
+        for key in ("branch", "base", "ahead", "behind", "upstream"):
+            assert key not in by_name["repo_a"]
+
+    def test_drift_true_adds_the_five_fields(self, origin_two_member_group):
+        from camp.provision.reconcile import reconcile_worktree
+        from camp.provision.lifecycle import provision_status_code
+
+        g = origin_two_member_group
+        slug = "drift-default-on"
+        reconcile_worktree(g["group"], slug, env=g["env"])
+
+        _code, report = provision_status_code(g["group"], slug, env=g["env"], drift=True)
+        by_name = {m["name"]: m for m in report["members"]}
+        for key in ("branch", "base", "ahead", "behind", "upstream"):
+            assert key in by_name["repo_a"]
+
+    def test_cli_json_report_carries_drift_fields(
+        self, origin_two_member_group, capsys
+    ):
+        """`camp status --json` is the one caller that opts in — its report
+        must still carry the five fields."""
+        import json as _json
+
+        from camp.provision.reconcile import reconcile_worktree
+        from camp.cli.status import _cmd_status_group_cli
+
+        g = origin_two_member_group
+        slug = "drift-cli-json2"
+        reconcile_worktree(g["group"], slug, env=g["env"])
+
+        with pytest.raises(SystemExit):
+            _cmd_status_group_cli(["--name", slug, "--json"], g["group"], g["env"], False)
+
+        report = _json.loads(capsys.readouterr().out)
+        by_name = {m["name"]: m for m in report["members"]}
+        for key in ("branch", "base", "ahead", "behind", "upstream"):
+            assert key in by_name["repo_a"]
+
+
+# ---------------------------------------------------------------------------
+# Test: `_git_branch_drift` (camp.gitutil) itself — the low-level probe,
+# exercised directly against plain synthetic git repos rather than through
+# a full camp group/manifest fixture.
+# ---------------------------------------------------------------------------
+
+
+class TestGitBranchDriftHelper:
+    def test_ahead_behind_use_head_not_ambiguous_branch_refname(self, tmp_path):
+        """Counting against the branch's ref NAME (rather than HEAD) is
+        unsafe: git's rule for a bare 40-hex-char token tries interpreting it
+        as a raw object id before a ref name (a documented, reproducible git
+        gotcha — not exotic). A branch literally named after an ANCESTOR
+        commit's SHA makes `<base>..<branch-name>` resolve the branch side to
+        that raw (older) object instead of the branch's actual (later) tip,
+        undercounting `ahead`. Counting against HEAD is never subject to
+        this, since HEAD needs no name-based ref resolution."""
+        from camp.gitutil import _git_branch_drift
+
+        repo = tmp_path / "repo"
+        init_git_repo(repo)
+        base_sha = _git_stdout(repo, "rev-parse", "HEAD")
+        (repo / "extra.txt").write_text("more\n")
+        _git_ok("git", "-C", str(repo), "add", "extra.txt")
+        _git_ok("git", "-C", str(repo), "commit", "-m", "extra", "--no-gpg-sign")
+        # Branch renamed to its own ancestor's SHA — the ref points at the
+        # current (later) tip, but the NAME is a valid object id for the
+        # OLDER commit.
+        _git_ok("git", "-C", str(repo), "branch", "-m", base_sha)
+
+        result = _git_branch_drift(repo, base_sha)
+
+        assert result["ahead"] == 1
+        assert result["behind"] == 0
+
+    def test_base_not_resolved_locally_reports_null_counts(self, tmp_path):
+        """A worktree present but whose configured base doesn't resolve
+        locally (never fetched) reports ahead/behind as null, not a crash."""
+        from camp.gitutil import _git_branch_drift
+
+        repo = tmp_path / "repo"
+        init_git_repo(repo)  # no `origin` remote configured
+
+        result = _git_branch_drift(repo, "origin/main")
+
+        assert result["ahead"] is None
+        assert result["behind"] is None
+
+    def test_present_worktree_reports_its_branch_name(self, tmp_path):
+        from camp.gitutil import _git_branch_drift
+
+        repo = tmp_path / "repo"
+        init_git_repo(repo, origin=True)
+
+        result = _git_branch_drift(repo, "origin/main")
+
+        assert result["branch"] == "main"
+
+    def test_non_digit_rev_list_output_yields_null_not_a_crash(self, tmp_path, monkeypatch):
+        """Guard the `int(...)` parse of `rev-list --count` output the same
+        way `_git_repo_status` already does — a returncode==0 result whose
+        stdout isn't a plain integer must not raise."""
+        import camp.gitutil as gitutil_mod
+
+        repo = tmp_path / "repo"
+        init_git_repo(repo, origin=True)
+        real_git = gitutil_mod._git
+
+        def fake_git(path, *args):
+            if args[:2] == ("rev-list", "--count"):
+                return subprocess.CompletedProcess(args, 0, stdout="not-a-number\n", stderr="")
+            return real_git(path, *args)
+
+        monkeypatch.setattr(gitutil_mod, "_git", fake_git)
+
+        result = gitutil_mod._git_branch_drift(repo, "origin/main")
+
+        assert result["ahead"] is None
+        assert result["behind"] is None
 
 
 # ---------------------------------------------------------------------------

@@ -743,6 +743,7 @@ def provision_status_code(
     slug: str,
     *,
     env: dict[str, str] | None = None,
+    drift: bool = False,
 ) -> tuple[int, dict[str, Any]]:
     """Return (exit_code, report) for the provision state of a workspace.
 
@@ -767,13 +768,24 @@ def provision_status_code(
     worktree is absent or `base` doesn't resolve locally), and `upstream`
     (`"ok"` / `"gone"` / `"none"`). These never influence `code` or `work_code`.
 
+    The drift probe is opt-in, guarded by `drift` (default `False`): it runs
+    ~5 git subprocesses per member, and two callers never read the result —
+    the SessionStart hook's `capability_report` and `wait_for_provisioning_
+    ready`'s poll loop — so they leave `drift` at its default and pay none of
+    that cost. When `drift=False` the five keys (`branch`, `base`, `ahead`,
+    `behind`, `upstream`) are simply ABSENT from each member dict, not `None`
+    — a caller checking for drift facts should use `"behind" in member`, not
+    `member.get("behind")`. Only `camp status` (`_cmd_status_group_cli`)
+    passes `drift=True`.
+
     report = {
         "slug", "code", "work_code",
         "members": [{
             "name", "provision_state", "work_state", "tasks", "reason"?,
-            "branch", "base", "ahead", "behind", "upstream",
+            "branch"?, "base"?, "ahead"?, "behind"?, "upstream"?,
         }],
-    }, where `tasks` is the manifest's {task-name: {"state", "reason"?}} map and
+    }, where the five drift keys are present only when `drift=True`, `tasks`
+    is the manifest's {task-name: {"state", "reason"?}} map and
     `work_code` is a distinct 0/2/3-style rollup over each member's work_state
     (see manifest.work_state_for_member) — 0 when every member is work-ready or
     WORK_STATE_NOT_APPLICABLE, 2 when any is pending, 3 when any is failed
@@ -796,20 +808,28 @@ def provision_status_code(
     for entry in data.get("members", []):
         state = entry.get("provision_state", "pending")
         work_state = work_state_for_member(entry)
-        member_config = member_config_by_name.get(entry["name"], {})
-        base = member_config.get("base") or DEFAULT_BASE
-        drift = _git_branch_drift(Path(entry["worktree_path"]), base)
         m: dict[str, Any] = {
             "name": entry["name"],
             "provision_state": state,
             "work_state": work_state,
             "tasks": entry.get("tasks") or {},
-            "branch": drift["branch"],
-            "base": base,
-            "ahead": drift["ahead"],
-            "behind": drift["behind"],
-            "upstream": drift["upstream"],
         }
+        if drift:
+            member_config = member_config_by_name.get(entry["name"], {})
+            base = member_config.get("base") or DEFAULT_BASE
+            # Read-only: rev-parse/rev-list/config run with captured output —
+            # no hooks, no pager, nothing destructive — against the
+            # manifest-supplied worktree_path. Unlike the destructive
+            # consumers activation.py documents (worktree removal, retry
+            # cleanup), which re-resolve and confirm confinement before
+            # touching the path, a read that can only inspect state needs no
+            # such check.
+            drift_facts = _git_branch_drift(Path(entry["worktree_path"]), base)
+            m["branch"] = drift_facts["branch"]
+            m["base"] = base
+            m["ahead"] = drift_facts["ahead"]
+            m["behind"] = drift_facts["behind"]
+            m["upstream"] = drift_facts["upstream"]
         if state == "failed":
             any_failed = True
             if entry.get("reason"):

@@ -71,11 +71,21 @@ def _git_branch_drift(wt_path: Path, base: str) -> dict[str, Any]:
     resolves to locally right now — freshness is the caller's job (fetch
     before calling this, if that's what's wanted; status itself stays
     offline and cheap). `ahead`/`behind` are `None` when the worktree
-    directory is absent or `base` doesn't resolve locally. `upstream` is
-    `"ok"` when the branch has a configured upstream that still resolves,
+    directory is absent, `base` doesn't resolve locally, or a resolved
+    `rev-list --count` result isn't a plain integer (guarded the same way
+    `_git_repo_status` guards its own count, rather than raising). `upstream`
+    is `"ok"` when the branch has a configured upstream that still resolves,
     `"gone"` when an upstream is configured but no longer resolves, and
     `"none"` when no upstream is configured (also the answer when the
     worktree is absent, since there is no branch to check).
+
+    Counts are taken against `HEAD` as the tip, never the branch's ref NAME:
+    git's ref-disambiguation order checks `refs/tags/<name>` before
+    `refs/heads/<name>`, so a tag sharing the branch's name would otherwise
+    resolve `rev-list`'s range ambiguously instead of the true branch tip.
+    A detached HEAD still reports its usual `branch` value (`"HEAD"` from
+    `git rev-parse --abbrev-ref HEAD`) with counts computed correctly against
+    it, since HEAD as the tip needs no branch ref to resolve.
     """
     if not wt_path.is_dir():
         return {"branch": None, "ahead": None, "behind": None, "upstream": "none"}
@@ -87,10 +97,18 @@ def _git_branch_drift(wt_path: Path, base: str) -> dict[str, Any]:
         ahead: int | None = None
         behind: int | None = None
     else:
-        ahead_raw = _git(wt_path, "rev-list", "--count", f"{base}..{branch}")
-        behind_raw = _git(wt_path, "rev-list", "--count", f"{branch}..{base}")
-        ahead = int(ahead_raw.stdout.strip()) if ahead_raw.returncode == 0 else None
-        behind = int(behind_raw.stdout.strip()) if behind_raw.returncode == 0 else None
+        ahead_raw = _git(wt_path, "rev-list", "--count", f"{base}..HEAD")
+        behind_raw = _git(wt_path, "rev-list", "--count", f"HEAD..{base}")
+        ahead = (
+            int(ahead_raw.stdout.strip())
+            if ahead_raw.returncode == 0 and ahead_raw.stdout.strip().isdigit()
+            else None
+        )
+        behind = (
+            int(behind_raw.stdout.strip())
+            if behind_raw.returncode == 0 and behind_raw.stdout.strip().isdigit()
+            else None
+        )
 
     merge_ref = _git_out(wt_path, "config", f"branch.{branch}.merge")
     if not merge_ref:
