@@ -40,9 +40,8 @@ The scrub (AC60) rides INSIDE the composed command, exactly the way
 `launch/session.py`'s own pane command carries it (`env -u NAME ... argv`):
 a tmux pane inherits the SERVER's environment, fixed when that server
 started, so a scrub applied to the `new-window` request itself would do
-nothing. `compose_window` never passes an `env=` operand to
-`Tmux.new_window` for this reason — the only environment statement it makes
-is the one baked into the command tokens themselves.
+nothing — the only environment statement `compose_window` makes is the one
+baked into the command tokens themselves.
 """
 
 from __future__ import annotations

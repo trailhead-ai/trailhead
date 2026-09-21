@@ -301,7 +301,6 @@ class Tmux:
         cwd: object,
         window_name: str,
         command: Sequence[str],
-        env: Mapping[str, str] | None = None,
         timeout: float | None = None,
     ) -> NewWindowResult | None | _Unanswered:
         """Create a window in session *name*, rooted at *cwd*, named
@@ -351,7 +350,6 @@ class Tmux:
                 *command,
             ],
             timeout=timeout,
-            env=env,
         )
         if done is None:
             return UNANSWERED

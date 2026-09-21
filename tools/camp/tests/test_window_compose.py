@@ -20,9 +20,7 @@ task/composing-a-window-camp-chooses-the-conversation-id-and-records-it-at-creat
    and no command line. Both directions pinned.
 6. The composed argv contains neither the remote-control flag nor the
    visible-name flag.
-7. The scrub appears inside the command the window runs, and the tmux
-   request that creates the window carries no scrub — asserted on both
-   halves.
+7. The scrub appears inside the command the window runs.
 8. The record is written before the invocation reports success, and a
    window is recorded exactly once per creation.
 
@@ -69,7 +67,7 @@ class FakeTmux:
         self._window_name_override = window_name_override
         self.calls: list[dict] = []
 
-    def new_window(self, name, *, cwd, window_name, command, env=None, timeout=None):
+    def new_window(self, name, *, cwd, window_name, command, timeout=None):
         from camp.launch.tmux import NewWindowResult
 
         self.calls.append(
@@ -78,7 +76,6 @@ class FakeTmux:
                 "cwd": cwd,
                 "window_name": window_name,
                 "command": list(command),
-                "env": env,
             }
         )
         actual_name = (
@@ -289,11 +286,11 @@ def test_composed_argv_carries_neither_remote_control_nor_name_flag(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# 7. Scrub inside the command; tmux request itself carries no scrub
+# 7. Scrub inside the command the window runs
 # ---------------------------------------------------------------------------
 
 
-def test_scrub_rides_inside_the_command_and_the_tmux_request_carries_none(tmp_path):
+def test_scrub_rides_inside_the_command_tmux_runs(tmp_path):
     import camp.launch.window_compose as wc
 
     ws_dir = tmp_path / "ws"
@@ -304,17 +301,11 @@ def test_scrub_rides_inside_the_command_and_the_tmux_request_carries_none(tmp_pa
         GROUP, "slug", ws_dir, cwd=ws_dir, window_name="w1", tmux=tmux
     )
 
-    call = tmux.calls[0]
-    command = call["command"]
-    # Half one: the scrub is INSIDE the command the window runs.
+    command = tmux.calls[0]["command"]
     assert command[0] == "env"
     for var in ("SCRUB_ONE", "SCRUB_TWO"):
         idx = command.index(var)
         assert command[idx - 1] == "-u"
-
-    # Half two: the tmux request that creates the window carries no scrub —
-    # no separate env channel was used to state it a second time.
-    assert call["env"] is None
 
 
 # ---------------------------------------------------------------------------
