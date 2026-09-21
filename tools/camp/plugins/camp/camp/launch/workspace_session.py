@@ -305,9 +305,15 @@ def create_or_connect_workspace_session(
             DoorState.TMUX_UNANSWERED, name, reason=_tmux_unanswered_reason(unanswered_reason)
         )
 
-    if present:
+    def connected() -> DoorProbe:
+        # Every connect to a running session reconciles its record first —
+        # whether the probe saw the session, the create raced a duplicate,
+        # or the re-probe after a failed create found it.
         reconcile_outcome = reconcile_workspace_record(workspace_dir, name, tmux)
         return DoorProbe(DoorState.CONNECTED, name, reconcile_outcome=reconcile_outcome)
+
+    if present:
+        return connected()
 
     try:
         result = create_workspace_session(group_name, slug, workspace_dir, env=env, tmux=tmux)
@@ -326,9 +332,9 @@ def create_or_connect_workspace_session(
     if result.outcome is WorkspaceSessionOutcome.CREATED:
         return DoorProbe(DoorState.CREATED, name)
     if result.outcome is WorkspaceSessionOutcome.ALREADY_EXISTED:
-        return DoorProbe(DoorState.CONNECTED, name)
+        return connected()
     if tmux.has_session(name):
-        return DoorProbe(DoorState.CONNECTED, name)
+        return connected()
     return DoorProbe(
         DoorState.CREATE_FAILED,
         name,

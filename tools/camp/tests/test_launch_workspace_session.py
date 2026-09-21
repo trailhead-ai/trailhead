@@ -277,8 +277,10 @@ class _FakeDoorTmux:
         present: bool | None = False,
         list_windows_answer: object = None,
         list_windows_raises: bool = False,
+        new_session_duplicate: bool = False,
     ) -> None:
         self._present = present
+        self._new_session_duplicate = new_session_duplicate
         self._list_windows_answer = list_windows_answer
         self._list_windows_raises = list_windows_raises
         self.new_session_calls: list[dict[str, object]] = []
@@ -299,6 +301,10 @@ class _FakeDoorTmux:
 
     def new_session(self, name, *, cwd, env=None, timeout=None):
         self.new_session_calls.append({"name": name, "cwd": cwd, "env": env})
+        if self._new_session_duplicate:
+            return subprocess.CompletedProcess(
+                args=["tmux"], returncode=1, stdout="", stderr=f"duplicate session: {name}\n"
+            )
         return subprocess.CompletedProcess(args=["tmux"], returncode=0, stdout="", stderr="")
 
     def set_option(self, target, key, value, *, timeout=None):
@@ -743,3 +749,37 @@ def _window(window_id, name, current_path="/ws", current_command="bash"):
     return TmuxWindow(
         window_id=window_id, current_path=current_path, current_command=current_command, name=name
     )
+
+
+def test_a_create_that_races_to_duplicate_reconciles_the_record_like_any_connect(tmp_path):
+    """The race fold connects to a running session too, so it reconciles:
+    a session that appeared between the probe and the create is exactly as
+    live as one the probe saw, and its record is exactly as stale."""
+    from camp.group.window_record import WindowEntry, read_window_record, window_record_path_for, write_window_record
+    from camp.launch.tmux import TmuxWindow, WindowListing
+    from camp.launch.window_reconcile import Dropped, Reconciled
+    from camp.launch.workspace_session import DoorState, create_or_connect_workspace_session
+
+    ws_dir = tmp_path / "workspace"
+    ws_dir.mkdir()
+    write_window_record(
+        window_record_path_for(ws_dir),
+        [
+            WindowEntry(window_id="@1", name="first", cwd=".", command_line="zsh"),
+            WindowEntry(window_id="@3", name="gone", cwd=".", conversation_id="41aa"),
+        ],
+    )
+    live = WindowListing(
+        windows=(TmuxWindow(window_id="@1", current_path=str(ws_dir), current_command="zsh", name="first"),),
+        dropped=0,
+    )
+    tmux = _FakeDoorTmux(present=False, list_windows_answer=live, new_session_duplicate=True)
+
+    probe = create_or_connect_workspace_session(
+        "trailhead", "camp-cli", ws_dir, env={"HOME": str(tmp_path)}, tmux=tmux
+    )
+
+    assert probe.state is DoorState.CONNECTED
+    assert isinstance(probe.reconcile_outcome, Reconciled)
+    assert probe.reconcile_outcome.changes == (Dropped(window_id="@3", name="gone", conversation_id="41aa"),)
+    assert [e.window_id for e in read_window_record(window_record_path_for(ws_dir)).entries] == ["@1"]

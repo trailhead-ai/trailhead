@@ -245,7 +245,7 @@ class TestReconcileWorkspaceRecord:
         outcome = reconcile_workspace_record(tmp_path, "sess", tmux)
 
         assert isinstance(outcome, NotReconciled)
-        assert str(path) in outcome.reason
+        assert outcome.reason == f"camp: window record at {path} could not be read; not reconciled"
         assert path.read_bytes() == before
 
     def test_unanswered_listing_yields_not_reconciled_with_no_write(self, tmp_path):

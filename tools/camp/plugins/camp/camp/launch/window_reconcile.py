@@ -159,7 +159,7 @@ def reconcile_workspace_record(ws_dir: Path, session_name: str, tmux) -> Reconci
     with reconcile_lock(ws_dir):
         record = read_window_record(path)
         if record.status == "corrupt":
-            return NotReconciled(reason=record.error or f"camp: window record at {path} could not be read")
+            return NotReconciled(reason=f"camp: window record at {path} could not be read; not reconciled")
 
         listing = tmux.list_windows(session_name)
         if listing is UNANSWERED:
