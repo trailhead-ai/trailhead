@@ -685,3 +685,38 @@ Not covered: the routing decision late in a long session or against a user
 pushing the other way, and the "never tell a teammate it is live" clause, which
 needs a failing sync to become the live question. That clause is a separate
 case — and the escape above is a reminder that it is not academic.
+
+### 2026-09-21 — re-run trigger fired: `## Record links` edited by `task/treat-the-rule-re-measure-every-site-and-state-the-ac6-verdict`
+
+The `record-link-rendering` case's own "Re-run trigger" fires on any change to the `## Record links`
+section of `tools/outpost/plugins/outpost/rules.md`. That task's edit (relocating the table/list
+case into its own standalone statement with its own table-shaped worked example; section grew from
+14 to 16 lines; the bare-fallback conditional's three conditions untouched) triggers this re-run,
+performed **before** that task's own craft-side measurement, per its stated gate.
+
+**Arm.** A treated variant of `arms/treatment.md` — the same brief, with the *edited* `## Record
+links` section appended instead of the committed pre-edit one — built in scratch (not committed to
+`arms/`, per this task's own instruction not to overwrite the case's committed `treatment.md`,
+which stays pinned to the pre-edit section it was originally measured against). Confirmed by `diff`
+against the committed `arms/treatment.md` to differ in exactly the rule-text region and nowhere
+else (brief header, fixture references, and the `[task/example]` worked example line all
+identical).
+
+**Dispatch.** `fixtures/make-fixture-env.sh <run-dir> paragraph`, `LORE_STATE_DIR=<run-dir>` set in
+each of 3 separate `claude -p` process environments, `--setting-sources project --allowedTools
+"Read" < /dev/null`, per the case's own dispatch shape. All 3 processes exited 0 with non-empty
+captures.
+
+**Result — PASS, 3/3.** Record 1 linked correctly in every run (`[note/rotate-tires]
+(http://127.0.0.1:9199/records/gearshed/note/rotate-tires)`); records 2-5 printed bare in every
+run, each run correctly attributing the fallback reason per record (vault path not a direct child
+of the vaults root for record 2; vault unresolvable for record 3; kind/slug outside the ASCII
+grammar for records 4 and 5) — matching the case's pre-existing pass condition exactly.
+
+**Capture scan.** `capture_scan.py` on all 6 files (3 `.txt` + 3 `.stderr.txt`) — all 6 exit 0,
+clean.
+
+**No regression.** The edit does not change the outpost fallback eval's own pass/fail read at this
+gate; `task/treat-the-rule-re-measure-every-site-and-state-the-ac6-verdict`'s craft-side measurement
+proceeded on this PASS. This entry appends the gate's result only — the case's own committed rows
+above (baseline/treatment/table-vs-paragraph) are unedited by this task.

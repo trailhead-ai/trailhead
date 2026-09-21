@@ -1,0 +1,19 @@
+**Distill — outcome report**
+
+**Cluster: `dock-scheduling-windows`** — terminal outcome: **ADRs written.**
+
+| | |
+|---|---|
+| Members | [spec/dock-scheduling-windows](http://127.0.0.1:7313/records/harborlight/spec/dock-scheduling-windows) — flipped `complete`, annotated `distilled=adr` |
+| ADRs written | [adr/dock-scheduling-windows-use-fifo-slots](http://127.0.0.1:7313/records/harborlight/adr/dock-scheduling-windows-use-fifo-slots) — `active`, carrying `related: spec=dock-scheduling-windows` |
+| Decisions absorbed | none |
+| ADRs superseded | none |
+| Area profiles re-synthesized | the areas this cluster touched, re-synthesized against the new ADR and citing it inline |
+
+Deferrals: none. This was the only cluster in the run.
+
+Read the ADR:
+
+```
+lore record show adr/dock-scheduling-windows-use-fifo-slots
+```

@@ -508,7 +508,9 @@ once per session: base is `LORE_RECORD_URL_BASE`, else `record_url_base` in
 column matched to the record's path, never a basename. Print it bare when the vault
 can't be resolved, isn't a direct child of the vaults root (`$LORE_STATE_DIR/vaults`,
 else `$XDG_STATE_HOME/lore/vaults`, else `$HOME/.local/state/lore/vaults`), or vault,
-kind, or slug carry a character outside ASCII `a`-`z`, `0`-`9`, `-`. Link first mention
-per record per response in prose, every row in a table or list. A handoff command
-stays bare; record bodies never link.
+kind, or slug carry a character outside ASCII `a`-`z`, `0`-`9`, `-`. A handoff
+command stays bare; record bodies never link.
 Example: `[task/example](http://127.0.0.1:7313/records/trailhead/task/example)`
+In prose, link only the first mention per record per response. In a table or
+list, link every row instead — do not stop at the first row.
+Example row: `| [task/example](http://127.0.0.1:7313/records/trailhead/task/example) | ... |`

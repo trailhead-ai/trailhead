@@ -1844,3 +1844,89 @@ prefix for this batch: `recordlinks-baseline-distill-N`, `N` = `4`–`9` (contin
 trailhead/tests/test_eval_corpus.py -q` — 57 passed. `.venv/bin/python -m ruff check tools/craft` —
 all checks passed. No test was added by this task; it ships no behaviour change, per the task
 body's own stated discipline.
+
+### 2026-09-21 — post-treatment measurement at all three AC6-measurable sites, U1/U2 verdict
+
+Run by `task/treat-the-rule-re-measure-every-site-and-state-the-ac6-verdict` (Task 3), against the
+edited `## Record links` section of `tools/outpost/plugins/outpost/rules.md` (the table/list case
+given its own standalone statement and its own table-shaped worked example; the section grew from
+14 to 16 lines; the bare-fallback conditional's three conditions — vault unresolvable; vault path
+not a direct child of the vaults root; vault/kind/slug outside ASCII `a`-`z`/`0`-`9`/`-` —
+untouched). Outpost's own fallback eval (`record-link-rendering`) was re-run against the edited
+rule first, per that eval's re-run trigger, and passed 3/3 before this measurement began — see
+`tools/outpost/MANUAL-EVAL.md`'s corresponding entry.
+
+**Run counts, per this task's own pre-registered amendment.** `distill`: 9 runs (fixed, no
+escalation ladder — parity with the 9-run pre-treatment baseline). `slice` and `review`: 3 runs
+each, escalating to 6 total on a 2-1 split (unchanged from Task 1's original rule) — neither
+escalated; both landed 3/3 clean.
+
+**Arms, rebuilt from the edited rule and confirmed byte-identical to their declared construction**
+(`python -m pytest tools/craft/tests/test_ritual_deliverable_eval_arms_contract.py` — the 7 live
+tailed arms first confirmed RED against the pre-edit arm files on disk, then rebuilt, then GREEN;
+all 8 frozen `*-pre-rule-edit.md`/`slice-frozen-rule-only.md` arms stayed GREEN throughout,
+untouched):
+
+| Site | Arm | Fixture | Record | Command |
+|---|---|---|---|---|
+| `distill` | `arms/distill-rule-only.md` | `fixtures/distill-completed-run.md` | `adr/dock-scheduling-windows-use-fifo-slots` | `lore record show adr/dock-scheduling-windows-use-fifo-slots` |
+| `slice` | `arms/rule-only.md` | `fixtures/slice-completed-run.md` | `task/the-berth-allocation-slice` | `/craft:plan task/the-berth-allocation-slice` |
+| `review` | `arms/review-treatment.md` | `fixtures/review-completed-run.md` | `spec/dock-scheduling-windows` | `/craft:distill spec/dock-scheduling-windows` |
+
+**Dispatch.** 15 processes (9 distill + 3 slice + 3 review), each its own `claude -p` process,
+`--setting-sources project --allowedTools "Read" < /dev/null`, capture prefix
+`recordlinks-treatment-<site>-N`. All 15 exited 0 with non-empty captures — zero exclusions, zero
+infrastructure failures, no re-dispatch needed.
+
+**Results, re-graded at report time** via `ritual_deliverable_grader.py`, never an inline regex:
+
+| Site | record-link runs (re-graded) | Verdict |
+|---|---|---|
+| `distill` | link ×9 (9/9) | **9/9 link** |
+| `slice` | link ×3 (3/3) | **3/3 link, matches Task 2 baseline (3/3)** |
+| `review` | link ×3 (3/3) | **3/3 link, matches Task 2 baseline (3/3)** |
+
+Every one of the 15 runs also reported `next-command: own-line` — the handoff command stayed bare,
+fenced, on its own line in every run at every site, unaffected by this task's edit.
+
+**Verbatim evidence, one run per site (see `runs/recordlinks-treatment-<site>-1.txt` for full
+text):**
+
+- `distill` (run 1): "**ADRs written:**
+  `[adr/dock-scheduling-windows-use-fifo-slots](http://127.0.0.1:7313/records/harborlight/adr/dock-scheduling-windows-use-fifo-slots)`"
+  — the `lore record show ...` handoff stays bare, fenced, on its own line.
+- `slice` (run 1): "**Parent task:**
+  `[task/the-berth-allocation-slice](http://127.0.0.1:7313/records/harborlight/task/the-berth-allocation-slice)`,
+  status `in-progress`" — the `/craft:plan ...` handoff stays bare, fenced, on its own line.
+- `review` (run 1): "The slice loop reports
+  `[spec/dock-scheduling-windows](http://127.0.0.1:7313/records/harborlight/spec/dock-scheduling-windows)`
+  closed out" — the `/craft:distill ...` handoff stays bare, fenced, on its own line.
+
+**Capture scan.** `capture_scan.py` run against all 30 files (15 `.txt` + 15 `.stderr.txt`) — all
+30 exit 0, clean (`path-or-url-shape` hits are the eval's documented false positive — fixture-
+embedded URL fragments).
+
+**Real-state check.** `git status --porcelain tools/outpost/plugins/outpost/rules.md` shows the
+edit as the only working-tree change (expected — this task's own edit, not yet committed at scan
+time). No `lore` CLI invocation is reachable from any of the 15 Read-only, no-shell arms; a grep of
+the developer's real vaults for this run's fixture strings (`harborlight`,
+`the-berth-allocation-slice`, `dock-scheduling-windows`, `dock-scheduling-windows-use-fifo-slots`)
+returns only this same plan's own pre-existing task records that describe the eval case in prose —
+no new write, no vault mutation attributable to this batch.
+
+**U1 verdict — MOVED.** Per Task 3's amendment (pre-registered before this batch ran): U1 moves iff
+distill lands 9/9 `link` against the 9-run pre-treatment baseline (7/9 `link`, 2/9 `bare`). Distill
+landed exactly 9/9 `link`. The wording change moved a site that was measurably splitting under the
+resident rule.
+
+**U2 verdict — HOLDS.** `slice` and `review` both reproduce their Task 2 pre-treatment baseline
+(3/3 `link` each) at 3/3 `link` post-treatment; neither regressed, neither required escalation.
+
+**AC6 verdict: PASS.** U1 moved and U2 holds — a distill pass with no slice or review regression,
+per this task's own binding rule that a distill-only pass is not sufficient. **Rollback does not
+fire.** The edited rule and the seven rebuilt live arms ship as committed.
+
+**Test gate.** `.venv/bin/python -m pytest tools/craft/tests/test_ritual_deliverable_eval_arms_contract.py
+tools/outpost/tests trailhead/tests/test_eval_corpus.py trailhead/tests/test_install.py -q` — 171
+passed. `ruff check tools` — all checks passed (pre-existing unrelated `# noqa` warning in
+`tools/lore/plugins/lore/lore/cli/init.py`, outside this task's footprint).
