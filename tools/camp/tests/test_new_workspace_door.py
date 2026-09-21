@@ -112,6 +112,7 @@ class _DoorTmux:
         switch_client_stderr: str = "",
         switch_client_unanswered: bool = False,
         unanswered_reason: str = "no such file or directory",
+        list_windows_answer: object = None,
     ) -> None:
         self._present = present
         self._reprobe = present if reprobe is None else reprobe
@@ -121,11 +122,21 @@ class _DoorTmux:
         self._switch_client_stderr = switch_client_stderr
         self._switch_client_unanswered = switch_client_unanswered
         self._unanswered_reason = unanswered_reason
+        self._list_windows_answer = list_windows_answer
         self.has_session_calls: list[str] = []
         self.new_session_calls: list[dict[str, object]] = []
         self.switch_client_calls: list[str] = []
         self.set_option_calls: list[dict[str, object]] = []
         self.install_binding_calls: list[str] = []
+        self.list_windows_calls: list[str] = []
+
+    def list_windows(self, name: str):
+        self.list_windows_calls.append(name)
+        if self._list_windows_answer is not None:
+            return self._list_windows_answer
+        from camp.launch.tmux import WindowListing
+
+        return WindowListing(windows=(), dropped=0)
 
     def has_session(self, name: str) -> bool | None:
         self.has_session_calls.append(name)
@@ -949,3 +960,48 @@ def test_concierge_invocation_exits_zero_on_a_failure_arm_with_documented_keys(
     assert payload["ok"] is True
     assert payload["outcome"] == "workspace-only"
     assert "session_error" in payload
+
+
+# ---------------------------------------------------------------------------
+# camp new against an existing, running session reconciles the record too
+# ---------------------------------------------------------------------------
+
+
+def test_new_against_a_running_session_with_a_stale_record_prints_dropped_on_stderr(
+    camp_cli, group_env, monkeypatch, capsys
+):
+    """`create_or_connect_workspace_session` reconciles on every CONNECTED
+    fold and writes the corrected record, but `camp new`'s door never
+    printed what it found — unlike `camp attach`, which reports it through
+    `_print_reconcile_outcome`. `camp new` against an existing workspace
+    whose session is already running, carrying a stale record entry, must
+    print the same `dropped @N` line on stderr and correct the record."""
+    from camp.group.manifest import workspace_dir
+    from camp.group.window_record import (
+        WindowEntry,
+        read_window_record,
+        window_record_path_for,
+        write_window_record,
+    )
+
+    g = group_env
+    tmux = _DoorTmux(present=False)
+    _wire_tmux(monkeypatch, tmux)
+    camp_cli._cmd_new_group_cli(["feat-s", "--no-attach"], g["group"], g["env"], dry_run=False)
+    capsys.readouterr()  # discard the create call's own output
+
+    ws_dir = workspace_dir("g", "feat-s", env=g["env"])
+    write_window_record(
+        window_record_path_for(ws_dir),
+        [WindowEntry(window_id="@9", name="gone", cwd=".", conversation_id="dead-conv")],
+    )
+
+    tmux2 = _DoorTmux(present=True)
+    _wire_tmux(monkeypatch, tmux2)
+
+    camp_cli._cmd_new_group_cli(["feat-s", "--no-attach"], g["group"], g["env"], dry_run=False)
+    captured = capsys.readouterr()
+
+    assert "dropped @9" in captured.err
+    reread = read_window_record(window_record_path_for(ws_dir))
+    assert [e.window_id for e in reread.entries] == []

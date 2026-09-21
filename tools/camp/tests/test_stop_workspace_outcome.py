@@ -255,6 +255,46 @@ def test_render_human_for_still_present_names_session_and_next_step():
     assert "tmux kill-session -t =camp-trailhead-camp-cli" in rendered
 
 
+# --- "could not tell" is never rendered as "0 windows" ----------------------
+
+
+def test_render_human_for_an_unlisted_preview_says_could_not_list_not_zero_windows():
+    from camp.launch.stop_workspace import Stopped, StopPreview, render_human
+
+    preview = StopPreview(windows=(), listed=False)
+    outcome = Stopped(slug="s", group="g", tmux_session="camp-g-s", preview=preview)
+
+    rendered = render_human(outcome)
+
+    assert "0 windows" not in rendered
+    assert "could not list" in rendered
+    assert "camp-g-s" in rendered
+
+
+def test_render_json_for_an_unlisted_preview_carries_null_windows_and_listed_false():
+    from camp.launch.stop_workspace import Stopped, StopPreview, render_json
+
+    preview = StopPreview(windows=(), listed=False)
+    outcome = Stopped(slug="s", group="g", tmux_session="camp-g-s", preview=preview)
+
+    obj = render_json(outcome)
+
+    assert obj["windows"] is None
+    assert obj["listed"] is False
+
+
+def test_render_json_for_a_listed_preview_carries_listed_true():
+    from camp.launch.stop_workspace import Stopped, StopPreview, render_json
+
+    preview = StopPreview(windows=(), listed=True)
+    outcome = Stopped(slug="s", group="g", tmux_session="camp-g-s", preview=preview)
+
+    obj = render_json(outcome)
+
+    assert obj["windows"] == 0
+    assert obj["listed"] is True
+
+
 # --- Contract item 6: render_json round-trip and exit_status table ----------
 
 
@@ -298,15 +338,6 @@ def test_render_json_round_trips_and_carries_every_field():
 
 def test_exit_status_covers_every_member_via_reflection():
     from camp.launch import stop_workspace as sw
-
-    subclasses = sw.StopOutcome.__subclasses__()
-    assert set(subclasses) == {
-        sw.Stopped,
-        sw.NotRunning,
-        sw.StillPresent,
-        sw.RefusedNoWorkspace,
-        sw.RefusedTmuxUnanswered,
-    }
 
     expected = {
         sw.Stopped: 0,

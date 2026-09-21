@@ -30,7 +30,9 @@ told apart here by the CLOSED vocabulary `camp.launch.window_reconcile`
 emits for reconciliation: every reconciliation line and every
 not-reconciled reason starts with one of `_RECONCILE_LINE_PREFIXES` below
 (`render_changes`' two `Change` renderings, and `reconcile_workspace_
-record`'s three `NotReconciled.reason` templates) — see that module's
+record`'s `NotReconciled.reason` templates — a corrupt record, an
+unanswered or nonexistent tmux session, a listing with unparseable rows,
+and a lock that could not be acquired in time) — see that module's
 source for the exhaustive set. Nothing else `stop_workspace` emits (the
 preview's count line, its per-window rows, or the "could not list"
 sentinel) starts with any of them, so classifying by prefix is exact
@@ -55,7 +57,7 @@ from ..launch.stop_workspace import (
     StillPresent,
     Stopped,
     exit_status,
-    render_human,
+    outcome_line,
     render_json,
     stop_workspace,
 )
@@ -65,9 +67,11 @@ from .parser import CampParser
 #: The closed set of line prefixes `camp.launch.window_reconcile` emits —
 #: see this module's docstring. `render_changes`' `Dropped`/`Renamed`
 #: lines share the `"camp: window record: "` prefix; `reconcile_workspace_
-#: record`'s three `NotReconciled` reasons are the other three. Every other
-#: line `stop_workspace` emits (the preview's count line, its window rows,
-#: and the "could not list" sentinel) starts with none of these.
+#: record`'s `NotReconciled` reasons all start with `"camp: window record
+#: at "`, except the unanswered-tmux and no-such-session reasons, which
+#: carry their own two prefixes below. Every other line `stop_workspace`
+#: emits (the preview's count line, its window rows, and the "could not
+#: list" sentinel) starts with none of these.
 _RECONCILE_LINE_PREFIXES = (
     "camp: window record: ",
     "camp: window record at ",
@@ -157,7 +161,11 @@ def _cmd_stop_cli(args: list[str], env: dict[str, str] | None = None) -> None:
     if parsed.json:
         print(json.dumps(render_json(outcome)))
     else:
-        print(render_human(outcome))
+        # `emit` has already streamed the preview (count line + rows) to
+        # stdout, before the kill — printing `render_human`'s full
+        # rendering here would re-render that same preview a second time.
+        # Only the one line after it belongs here.
+        print(outcome_line(outcome))
     sys.exit(exit_status(outcome))
 
 

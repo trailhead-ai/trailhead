@@ -573,7 +573,11 @@ def _door_dispatch_for_new(
     `_report_workspace_only` and return with exit 0, where `camp attach`
     refuses — `_report_workspace_only`'s own `refused` flag keeps the
     policy case distinguishable in what is reported, even though none of
-    the three exit non-zero.
+    the three exit non-zero. Every CONNECTED fold reconciles the window
+    record, and — same as `camp attach` — its outcome is printed to stderr
+    through `cli.session._print_reconcile_outcome` before the door's own
+    outcome line, whether or not `--json` was asked for: `--json` only
+    changes stdout.
     """
     from ..host.handoff import hand_over_to_session
     from ..launch.door import Connected, Created, render_human, render_json
@@ -597,6 +601,10 @@ def _door_dispatch_for_new(
             refused=probe.state is DoorState.CREATE_REFUSED,
         )
         return
+
+    from .session import _print_reconcile_outcome
+
+    _print_reconcile_outcome(probe.reconcile_outcome)
 
     outcome_cls = Created if probe.state is DoorState.CREATED else Connected
     outcome = outcome_cls(

@@ -415,6 +415,36 @@ def test_stop_workspace_and_stop_session_share_one_poll_deadline_rule(tmp_path: 
 
 
 # ---------------------------------------------------------------------------
+# 9. A dropped listing row during reconciliation refuses to reconcile, but
+#    the kill still proceeds and the record is left untouched.
+# ---------------------------------------------------------------------------
+
+
+def test_a_dropped_listing_row_during_reconcile_still_kills_and_leaves_the_record(tmp_path: Path) -> None:
+    from camp.launch.tmux import WindowListing
+    from camp.launch.stop_workspace import Stopped
+
+    ws_dir = tmp_path / "ws"
+    ws_dir.mkdir()
+    _write_record(ws_dir, [_entry("@1", "main")])
+    before = _read_record(ws_dir)
+
+    tmux = _ScriptedTmux(
+        listing_sequence=[WindowListing(windows=(_window("@1", "main"),), dropped=1)],
+        listing_windows=[_window("@1", "main")],
+        poll_sequence=[False],
+    )
+
+    outcome, lines = _stop_workspace(ws_dir, tmux)
+
+    assert isinstance(outcome, Stopped)
+    assert tmux.killed
+    after = _read_record(ws_dir)
+    assert after.entries == before.entries
+    assert any(line.startswith("camp: window record at ") and "not reconciled" in line for line in lines)
+
+
+# ---------------------------------------------------------------------------
 # 10. tmux does not answer the preview listing -> no count line, kill proceeds
 # ---------------------------------------------------------------------------
 

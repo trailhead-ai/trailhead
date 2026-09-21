@@ -279,6 +279,74 @@ class TestReconcileWorkspaceRecord:
         assert isinstance(outcome, NotReconciled)
         assert path.read_bytes() == before
 
+    def test_a_lock_held_by_another_process_yields_not_reconciled_and_leaves_the_record_untouched(
+        self, tmp_path
+    ):
+        """The connect fold and the stop path take `reconcile_lock`, which
+        the background provisioner can hold for a long time (across every
+        member's `git worktree add`). `reconcile_workspace_record` bounds
+        its own acquire so a caller stuck behind that lock reports "not
+        reconciled" instead of hanging silently — the record is left
+        exactly as it was."""
+        import threading
+
+        from camp.group.manifest import reconcile_lock
+        from camp.group.window_record import window_record_path_for, write_window_record
+        from camp.launch.tmux import WindowListing
+        from camp.launch.window_reconcile import NotReconciled, reconcile_workspace_record
+
+        entry = _entry("@1", "a", cwd="repo")
+        path = window_record_path_for(tmp_path)
+        write_window_record(path, [entry])
+        before = path.read_bytes()
+
+        holder_ready = threading.Event()
+        release_holder = threading.Event()
+
+        def hold():
+            with reconcile_lock(tmp_path):
+                holder_ready.set()
+                release_holder.wait(timeout=5)
+
+        holder = threading.Thread(target=hold)
+        holder.start()
+        assert holder_ready.wait(timeout=5)
+        try:
+            tmux = _StubTmux(WindowListing(windows=(_window("@1", "a"),), dropped=0))
+            outcome = reconcile_workspace_record(tmp_path, "sess", tmux, lock_timeout=0.2)
+        finally:
+            release_holder.set()
+            holder.join(timeout=5)
+
+        assert isinstance(outcome, NotReconciled)
+        assert outcome.reason.startswith(f"camp: window record at {path} ")
+        assert "locked" in outcome.reason
+        assert path.read_bytes() == before
+
+    def test_a_dropped_listing_row_yields_not_reconciled_and_leaves_the_record_untouched(self, tmp_path):
+        """A live window whose `list-windows` row failed to split (tmux
+        refuses tabs in names only; a pane path can contain one) must never
+        be read as "closed" — that would silently drop its recorded entry,
+        conversation id included, for good. `reconcile_workspace_record`
+        refuses instead, naming the path with the same prefix every other
+        `NotReconciled` reason carries."""
+        from camp.group.window_record import window_record_path_for, write_window_record
+        from camp.launch.tmux import WindowListing
+        from camp.launch.window_reconcile import NotReconciled, reconcile_workspace_record
+
+        entry = _entry("@1", "a", cwd="repo")
+        path = window_record_path_for(tmp_path)
+        write_window_record(path, [entry])
+        before = path.read_bytes()
+
+        tmux = _StubTmux(WindowListing(windows=(_window("@1", "a"),), dropped=1))
+        outcome = reconcile_workspace_record(tmp_path, "sess", tmux)
+
+        assert isinstance(outcome, NotReconciled)
+        assert outcome.reason.startswith(f"camp: window record at {path} ")
+        assert "1" in outcome.reason
+        assert path.read_bytes() == before
+
     def test_missing_record_with_no_windows_is_a_no_op(self, tmp_path):
         from camp.group.window_record import window_record_path_for
         from camp.launch.tmux import WindowListing

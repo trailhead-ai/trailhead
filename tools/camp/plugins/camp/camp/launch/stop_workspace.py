@@ -95,11 +95,19 @@ class StopPreview:
     preview was built, which `classify` has no way to know from a window
     list alone. The engine that reconciles then classifies sets them via
     `dataclasses.replace`.
+
+    `listed` is `False` only when the preview's own `list_windows` call (a
+    FRESH one, taken after reconciliation) came back `UNANSWERED` or `None`
+    — tmux could not say what is in the session, as distinct from "nothing
+    is in the session". `windows` is empty either way, so a renderer must
+    check `listed`, never bare emptiness, to tell "no windows" apart from
+    "could not tell".
     """
 
     windows: tuple[PreviewRow, ...] = ()
     reconciled: bool = False
     reconcile_note: str | None = None
+    listed: bool = True
 
 
 @dataclass(frozen=True)
@@ -253,20 +261,50 @@ def _row_line(row: PreviewRow) -> str:
 
 def preview_lines(tmux_session: str, preview: StopPreview) -> list[str]:
     """The count line, then one indented line per window — the body every
-    rendering of a non-empty preview shares.
+    rendering of a non-empty preview shares. When `preview.listed` is
+    `False`, the single "could not list" line replaces the count line and
+    rows entirely: "could not tell" must never print as "0 windows".
 
     Escaped whole through `printable_path`, line by line, the same way
     `render_human` escapes its own composed lines: see this module's
     docstring. Factored out so `stop_workspace` can hand these SAME lines to
     `emit` before the kill, without re-deriving the formatting a second
     time — see that function's docstring for why the preview is emitted
-    before anything is killed.
+    before anything is killed. The engine reuses this same function for the
+    unlisted case too, rather than composing its own line, so it and
+    `render_human` can never disagree on the wording.
     """
+    if not preview.listed:
+        return [printable_path(f"camp: could not list the windows of {tmux_session}; stopping without a preview")]
     count = len(preview.windows)
     noun = "window" if count == 1 else "windows"
     lines = [printable_path(f"stopping {tmux_session}: {count} {noun}")]
     lines.extend(printable_path(_row_line(row)) for row in preview.windows)
     return lines
+
+
+def outcome_line(outcome: StopOutcome) -> str:
+    """The one line `camp stop` prints after the preview: `not running
+    <session>` for `NotRunning`, `stopped <session>` for `Stopped`, or the
+    still-present message naming the manual next step for `StillPresent`.
+
+    Factored out of :func:`render_human` so a streaming caller — `cli/stop.py`,
+    which has already emitted the preview lines through `emit` before the
+    kill — can print exactly this line afterward instead of re-rendering the
+    preview a second time. `render_human` itself still composes the full
+    rendering (preview plus this line) for any non-streaming caller.
+    """
+    _render_word(outcome)  # raises for a refusal; message composed elsewhere
+
+    if isinstance(outcome, NotRunning):
+        return printable_path(f"not running {outcome.tmux_session}")
+    if isinstance(outcome, Stopped):
+        return printable_path(f"stopped {outcome.tmux_session}")
+    # StillPresent
+    return printable_path(
+        f"camp stop: {outcome.tmux_session} is still present after kill-session; "
+        f"run camp stop again, or kill it in tmux with tmux kill-session -t ={outcome.tmux_session}"
+    )
 
 
 def render_human(outcome: StopOutcome) -> str:
@@ -276,22 +314,11 @@ def render_human(outcome: StopOutcome) -> str:
     escaped whole through `printable_path`, the same way `door.render_human`
     escapes its own composed line: see this module's docstring.
     """
-    _render_word(outcome)  # raises for a refusal; message composed elsewhere
-
     if isinstance(outcome, NotRunning):
-        return printable_path(f"not running {outcome.tmux_session}")
+        return outcome_line(outcome)
 
     lines = preview_lines(outcome.tmux_session, outcome.preview)
-
-    if isinstance(outcome, Stopped):
-        lines.append(printable_path(f"stopped {outcome.tmux_session}"))
-    else:  # StillPresent
-        lines.append(
-            printable_path(
-                f"camp stop: {outcome.tmux_session} is still present after kill-session; "
-                f"run camp stop again, or kill it in tmux with tmux kill-session -t ={outcome.tmux_session}"
-            )
-        )
+    lines.append(outcome_line(outcome))
     return "\n".join(lines)
 
 
@@ -308,11 +335,12 @@ def render_json(outcome: StopOutcome) -> dict:
         "slug": outcome.slug,
         "group": outcome.group,
         "tmux_session": outcome.tmux_session,
-        "windows": len(preview.windows),
+        "windows": len(preview.windows) if preview.listed else None,
         "live_conversations": live_conversations,
         "exited_conversations": exited_conversations,
         "foreground": foreground,
         "reconciled": preview.reconciled,
+        "listed": preview.listed,
     }
 
 
@@ -419,8 +447,9 @@ def stop_workspace(
     else:
         # "Could not tell" is never read as "no windows": no count line,
         # one line saying so, and the kill the operator asked for proceeds.
-        preview = StopPreview(windows=(), reconciled=reconciled, reconcile_note=reconcile_note)
-        emit(printable_path(f"camp: could not list the windows of {session_name}; stopping without a preview"))
+        preview = StopPreview(windows=(), reconciled=reconciled, reconcile_note=reconcile_note, listed=False)
+        for line in preview_lines(session_name, preview):
+            emit(line)
 
     tmux.kill_session(session_name)
 

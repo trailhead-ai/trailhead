@@ -278,16 +278,29 @@ class _FakeDoorTmux:
         list_windows_answer: object = None,
         list_windows_raises: bool = False,
         new_session_duplicate: bool = False,
+        new_session_failure_stderr: str | None = None,
+        reprobe: bool | None = None,
     ) -> None:
         self._present = present
         self._new_session_duplicate = new_session_duplicate
+        self._new_session_failure_stderr = new_session_failure_stderr
         self._list_windows_answer = list_windows_answer
         self._list_windows_raises = list_windows_raises
+        self._reprobe = reprobe
         self.new_session_calls: list[dict[str, object]] = []
         self.list_windows_calls: list[str] = []
+        self.has_session_calls: list[str] = []
 
     def has_session_with_reason(self, name: str):
         return self._present, None
+
+    def has_session(self, name: str) -> bool | None:
+        """The post-failed-create re-probe
+        (`create_or_connect_workspace_session`'s third connect fold) calls
+        this directly, never `has_session_with_reason` — `reprobe` is its
+        answer."""
+        self.has_session_calls.append(name)
+        return self._reprobe
 
     def list_windows(self, name: str):
         self.list_windows_calls.append(name)
@@ -304,6 +317,10 @@ class _FakeDoorTmux:
         if self._new_session_duplicate:
             return subprocess.CompletedProcess(
                 args=["tmux"], returncode=1, stdout="", stderr=f"duplicate session: {name}\n"
+            )
+        if self._new_session_failure_stderr is not None:
+            return subprocess.CompletedProcess(
+                args=["tmux"], returncode=1, stdout="", stderr=self._new_session_failure_stderr
             )
         return subprocess.CompletedProcess(args=["tmux"], returncode=0, stdout="", stderr="")
 
@@ -783,3 +800,44 @@ def test_a_create_that_races_to_duplicate_reconciles_the_record_like_any_connect
     assert isinstance(probe.reconcile_outcome, Reconciled)
     assert probe.reconcile_outcome.changes == (Dropped(window_id="@3", name="gone", conversation_id="41aa"),)
     assert [e.window_id for e in read_window_record(window_record_path_for(ws_dir)).entries] == ["@1"]
+
+
+def test_the_post_failed_create_re_probe_fold_reconciles_the_record_like_any_connect(tmp_path):
+    """The third connect fold — `create_workspace_session` fails for a
+    reason that is not the duplicate-session marker, and the re-probe
+    (`tmux.has_session`) finds the session live anyway — connects too, so it
+    reconciles the record exactly like the other two connect folds."""
+    from camp.group.window_record import WindowEntry, read_window_record, window_record_path_for, write_window_record
+    from camp.launch.tmux import TmuxWindow, WindowListing
+    from camp.launch.window_reconcile import Dropped, Reconciled
+    from camp.launch.workspace_session import DoorState, create_or_connect_workspace_session
+
+    ws_dir = tmp_path / "workspace"
+    ws_dir.mkdir()
+    write_window_record(
+        window_record_path_for(ws_dir),
+        [
+            WindowEntry(window_id="@1", name="first", cwd=".", command_line="zsh"),
+            WindowEntry(window_id="@3", name="gone", cwd=".", conversation_id="41aa"),
+        ],
+    )
+    live = WindowListing(
+        windows=(TmuxWindow(window_id="@1", current_path=str(ws_dir), current_command="zsh", name="first"),),
+        dropped=0,
+    )
+    tmux = _FakeDoorTmux(
+        present=False,
+        list_windows_answer=live,
+        new_session_failure_stderr="unexpected tmux error\n",
+        reprobe=True,
+    )
+
+    probe = create_or_connect_workspace_session(
+        "trailhead", "camp-cli", ws_dir, env={"HOME": str(tmp_path)}, tmux=tmux
+    )
+
+    assert probe.state is DoorState.CONNECTED
+    assert isinstance(probe.reconcile_outcome, Reconciled)
+    assert probe.reconcile_outcome.changes == (Dropped(window_id="@3", name="gone", conversation_id="41aa"),)
+    assert [e.window_id for e in read_window_record(window_record_path_for(ws_dir)).entries] == ["@1"]
+    assert tmux.has_session_calls == [tmux.new_session_calls[0]["name"]]

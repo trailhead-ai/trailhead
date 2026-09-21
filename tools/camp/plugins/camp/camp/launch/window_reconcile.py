@@ -27,7 +27,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from ..group.manifest import reconcile_lock
+from ..group.manifest import LockTimeout, reconcile_lock
 from ..group.window_record import (
     WindowEntry,
     read_window_record,
@@ -142,7 +142,21 @@ class NotReconciled(ReconcileOutcome):
     reason: str
 
 
-def reconcile_workspace_record(ws_dir: Path, session_name: str, tmux) -> ReconcileOutcome:
+#: The bound `reconcile_workspace_record` waits for the workspace lock
+#: before giving up — a few seconds, chosen so a caller stuck behind the
+#: background provisioner's own long-held lock (held across every member's
+#: `git worktree add`) reports "not reconciled" instead of hanging. Callers
+#: that need a different bound (tests) pass `lock_timeout` explicitly.
+RECONCILE_LOCK_TIMEOUT_SECONDS = 3.0
+
+
+def reconcile_workspace_record(
+    ws_dir: Path,
+    session_name: str,
+    tmux,
+    *,
+    lock_timeout: float = RECONCILE_LOCK_TIMEOUT_SECONDS,
+) -> ReconcileOutcome:
     """Correct *ws_dir*'s window record to tmux, under the workspace lock.
 
     A corrupt record is reported and left untouched — reconciliation cannot
@@ -153,28 +167,56 @@ def reconcile_workspace_record(ws_dir: Path, session_name: str, tmux) -> Reconci
     never be read as "no windows". Only when `reconcile` reports a non-empty
     `changes` does this write, through `write_window_record`, still inside
     the lock.
+
+    The lock acquire is bounded (`lock_timeout`, a few seconds) rather than
+    the provisioner's own unbounded wait: a `camp attach`/`camp stop` caught
+    behind the lock the background provisioner holds across every member's
+    `git worktree add` must still connect/stop rather than hang silently. A
+    lock that could not be acquired in time is reported as `NotReconciled`,
+    the record untouched, the same as any other reconciliation refusal.
     """
     ws_dir = Path(ws_dir)
     path = window_record_path_for(ws_dir)
-    with reconcile_lock(ws_dir):
-        record = read_window_record(path)
-        if record.status == "corrupt":
-            return NotReconciled(reason=f"camp: window record at {path} could not be read; not reconciled")
+    try:
+        with reconcile_lock(ws_dir, timeout=lock_timeout):
+            record = read_window_record(path)
+            if record.status == "corrupt":
+                return NotReconciled(reason=f"camp: window record at {path} could not be read; not reconciled")
 
-        listing = tmux.list_windows(session_name)
-        if listing is UNANSWERED:
-            return NotReconciled(
-                reason=f"camp: tmux did not answer for session {session_name!r}; window record at {path} not reconciled"
-            )
-        if listing is None:
-            return NotReconciled(
-                reason=f"camp: no such tmux session {session_name!r}; window record at {path} not reconciled"
-            )
+            listing = tmux.list_windows(session_name)
+            if listing is UNANSWERED:
+                return NotReconciled(
+                    reason=(
+                        f"camp: tmux did not answer for session {session_name!r}; "
+                        f"window record at {path} not reconciled"
+                    )
+                )
+            if listing is None:
+                return NotReconciled(
+                    reason=(
+                        f"camp: no such tmux session {session_name!r}; "
+                        f"window record at {path} not reconciled"
+                    )
+                )
+            if listing.dropped > 0:
+                # A live window whose row failed to split is not "closed" —
+                # `reconcile` has no way to match it and would drop its
+                # recorded entry for good. Refuse instead of guessing.
+                return NotReconciled(
+                    reason=(
+                        f"camp: window record at {path} not reconciled; tmux listed "
+                        f"{listing.dropped} window(s) camp could not read"
+                    )
+                )
 
-        result = reconcile(list(record.entries), listing.windows)
-        if result.changes:
-            write_window_record(path, list(result.entries))
-        return Reconciled(entries=result.entries, changes=result.changes)
+            result = reconcile(list(record.entries), listing.windows)
+            if result.changes:
+                write_window_record(path, list(result.entries))
+            return Reconciled(entries=result.entries, changes=result.changes)
+    except LockTimeout:
+        return NotReconciled(
+            reason=f"camp: window record at {path} is locked by another camp process; not reconciled"
+        )
 
 
 def render_reconcile_lines(outcome: ReconcileOutcome) -> list[str]:

@@ -64,6 +64,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -74,6 +75,20 @@ class ManifestError(Exception):
 
     The message always includes the file path and the failing reason.
     """
+
+
+class LockTimeout(Exception):
+    """Raised by `reconcile_lock` when a bounded `timeout` expires before the
+    lock could be acquired — held by another process or thread.
+
+    Never raised by the default, unbounded acquire (`timeout=None`).
+    """
+
+
+#: The poll interval a bounded `reconcile_lock` acquire sleeps between
+#: `LOCK_NB` attempts. Short relative to any bound a caller would pass, so a
+#: caller's own timeout dominates how long a bounded acquire can take.
+_LOCK_POLL_INTERVAL_SECONDS = 0.05
 
 
 def write_central_manifest(
@@ -244,8 +259,28 @@ def lock_path_for(ws_dir: Path) -> Path:
     return ws_dir.parent / f"{ws_dir.name}.lock"
 
 
+def _acquire_flock(lock_fd, lock_path: Path, *, timeout: float | None) -> None:
+    """Take the exclusive flock on *lock_fd*: unbounded when *timeout* is
+    `None` (today's behaviour, still what the provisioner and every other
+    manifest writer relies on), or polled `LOCK_NB` until free or *timeout*
+    seconds have elapsed, at which point `LockTimeout` is raised instead of
+    blocking forever."""
+    if timeout is None:
+        fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
+        return
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return
+        except BlockingIOError:
+            if time.monotonic() >= deadline:
+                raise LockTimeout(f"camp: lock at {lock_path} is held by another camp process")
+            time.sleep(_LOCK_POLL_INTERVAL_SECONDS)
+
+
 @contextmanager
-def reconcile_lock(ws_dir: Path):
+def reconcile_lock(ws_dir: Path, *, timeout: float | None = None):
     """Acquire the slug-scoped lock guarding manifest mutations.
 
     All status flips (background provisioner + foreground `camp setup`),
@@ -265,13 +300,20 @@ def reconcile_lock(ws_dir: Path):
     no newcomer can see — zero exclusion — so after every flock we re-check that
     the inode we hold is still the inode at lock_path, and retry on the current
     file if not. This is what makes the reap safe.
+
+    *timeout*, when given, bounds acquisition (see :func:`_acquire_flock`) and
+    raises `LockTimeout` on expiry rather than blocking forever — the mode
+    `reconcile_workspace_record` uses so a `camp attach`/`camp stop` caught
+    behind the provisioner's own long-held lock reports "not reconciled"
+    instead of hanging silently. `None` (the default) keeps every other
+    caller's unbounded wait unchanged.
     """
     lock_path = lock_path_for(ws_dir)
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     while True:
         lock_fd = open(str(lock_path), "w")
         try:
-            fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
+            _acquire_flock(lock_fd, lock_path, timeout=timeout)
             try:
                 path_stat = os.stat(lock_path)
             except FileNotFoundError:

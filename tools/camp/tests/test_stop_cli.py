@@ -176,8 +176,14 @@ def test_running_session_prints_preview_then_stopped_reconcile_on_stderr(
 
     assert code == 0
     assert "dropped @9" in captured.err
-    assert captured.out.startswith(f"stopping {session}: 1 window")
-    assert captured.out.strip().splitlines()[-1] == f"stopped {session}"
+    # The preview (count line + rows) is printed exactly once: `emit`
+    # streams it before the kill, and the outcome line printed afterward
+    # must not re-render it a second time.
+    assert captured.out.splitlines() == [
+        f"stopping {session}: 1 window",
+        '  @1 "shell"',
+        f"stopped {session}",
+    ]
     assert tmux.killed == [session]
 
 
@@ -214,6 +220,116 @@ def test_nosuch_slug_refuses_naming_it_no_tmux_call(
     assert tmux.calls == []
 
 
+def test_nosuch_slug_json_refusal_prints_on_stdout_not_stderr(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    _isolated_env(tmp_path, monkeypatch)
+    tmux = _ScriptedTmux(initial=True)
+    _wire_one_workspace(monkeypatch, tmp_path=tmp_path, tmux=tmux, slug="camp-cli")
+
+    code = _run(["stop", "nosuch", "--group", "g", "--json"], monkeypatch)
+    out = capsys.readouterr().out
+
+    payload = json.loads(out)
+    assert code == 1
+    assert payload["ok"] is False
+    assert payload["outcome"] is None
+    assert "nosuch" in payload["reason"]
+    assert len(out.strip().splitlines()) == 1
+
+
+def test_tmux_unanswered_refuses_naming_the_session_human(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    _isolated_env(tmp_path, monkeypatch)
+    session = _derived_name("g", "camp-cli")
+    tmux = _ScriptedTmux(initial=None)
+    _wire_one_workspace(monkeypatch, tmp_path=tmp_path, tmux=tmux, slug="camp-cli")
+
+    code = _run(["stop", "camp-cli", "--group", "g"], monkeypatch)
+    captured = capsys.readouterr()
+
+    assert code == 1
+    assert captured.out == ""
+    assert "camp stop:" in captured.err
+    assert session in captured.err
+    assert "did not answer" in captured.err
+    assert tmux.killed == []
+
+
+def test_tmux_unanswered_refuses_as_one_json_object_exit_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    _isolated_env(tmp_path, monkeypatch)
+    session = _derived_name("g", "camp-cli")
+    tmux = _ScriptedTmux(initial=None)
+    _wire_one_workspace(monkeypatch, tmp_path=tmp_path, tmux=tmux, slug="camp-cli")
+
+    code = _run(["stop", "camp-cli", "--group", "g", "--json"], monkeypatch)
+    out = capsys.readouterr().out
+    payload = json.loads(out)
+
+    assert code == 1
+    assert payload["ok"] is False
+    assert payload["outcome"] is None
+    assert session in payload["reason"]
+    assert len(out.strip().splitlines()) == 1
+
+
+@pytest.mark.parametrize(
+    "make_tmux_and_record",
+    ["corrupt", "unanswered_session", "no_such_session", "dropped_rows"],
+)
+def test_every_not_reconciled_reason_routes_to_stderr_under_json_stdout_still_one_object(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture,
+    make_tmux_and_record: str,
+) -> None:
+    from camp.launch.tmux import UNANSWERED, TmuxWindow, WindowListing
+    from camp.group.window_record import WindowEntry, window_record_path_for, write_window_record
+
+    _isolated_env(tmp_path, monkeypatch)
+    ws = tmp_path / "state" / "g" / "worktrees" / "camp-cli"
+    ws.mkdir(parents=True, exist_ok=True)
+
+    fresh_listing = TmuxWindow(window_id="@1", current_path="/ws", current_command="bash", name="shell")
+
+    if make_tmux_and_record == "corrupt":
+        window_record_path_for(ws).write_text("{not json", encoding="utf-8")
+        tmux = _ScriptedTmux(initial=True, listing_windows=(fresh_listing,), poll_sequence=(False,))
+    elif make_tmux_and_record == "unanswered_session":
+        tmux = _ScriptedTmux(
+            initial=True, listing_sequence=[UNANSWERED], listing_windows=(fresh_listing,), poll_sequence=(False,)
+        )
+    elif make_tmux_and_record == "no_such_session":
+        tmux = _ScriptedTmux(
+            initial=True, listing_sequence=[None], listing_windows=(fresh_listing,), poll_sequence=(False,)
+        )
+    else:  # dropped_rows
+        write_window_record(
+            window_record_path_for(ws),
+            [WindowEntry(window_id="@1", name="a", cwd=".", conversation_id="c")],
+        )
+        tmux = _ScriptedTmux(
+            initial=True,
+            listing_sequence=[WindowListing(windows=(fresh_listing,), dropped=1)],
+            listing_windows=(fresh_listing,),
+            poll_sequence=(False,),
+        )
+
+    _wire_one_workspace(monkeypatch, tmp_path=tmp_path, tmux=tmux, slug="camp-cli")
+
+    code = _run(["stop", "camp-cli", "--group", "g", "--json"], monkeypatch)
+    captured = capsys.readouterr()
+
+    assert code == 0
+    assert "not reconciled" in captured.err
+    payload = json.loads(captured.out)
+    assert payload["outcome"] == "stopped"
+    assert len(captured.out.strip().splitlines()) == 1
+
+
 def test_no_slug_refuses_naming_the_missing_slug_never_reads_stdin(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
@@ -245,6 +361,76 @@ def test_json_still_present_carries_outcome_and_exit_one(
     assert payload["outcome"] == "still-present"
     # stdout parses as exactly one JSON value: exactly one non-empty line.
     assert len(out.strip().splitlines()) == 1
+
+
+def test_unanswered_preview_listing_prints_could_not_list_not_zero_windows_human(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    from camp.launch.tmux import UNANSWERED, TmuxWindow, WindowListing
+
+    _isolated_env(tmp_path, monkeypatch)
+    session = _derived_name("g", "camp-cli")
+    answered = WindowListing(
+        windows=(TmuxWindow(window_id="@1", current_path="/ws", current_command="bash", name="shell"),)
+    )
+    tmux = _ScriptedTmux(listing_sequence=[answered, UNANSWERED], poll_sequence=(False,))
+    _wire_one_workspace(monkeypatch, tmp_path=tmp_path, tmux=tmux, slug="camp-cli")
+
+    code = _run(["stop", "camp-cli", "--group", "g"], monkeypatch)
+    captured = capsys.readouterr()
+
+    assert code == 0
+    assert captured.out.splitlines() == [
+        f"camp: could not list the windows of {session}; stopping without a preview",
+        f"stopped {session}",
+    ]
+    assert "0 windows" not in captured.out
+
+
+def test_unanswered_preview_listing_json_carries_null_windows_and_listed_false(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    from camp.launch.tmux import UNANSWERED, TmuxWindow, WindowListing
+
+    _isolated_env(tmp_path, monkeypatch)
+    answered = WindowListing(
+        windows=(TmuxWindow(window_id="@1", current_path="/ws", current_command="bash", name="shell"),)
+    )
+    tmux = _ScriptedTmux(listing_sequence=[answered, UNANSWERED], poll_sequence=(False,))
+    _wire_one_workspace(monkeypatch, tmp_path=tmp_path, tmux=tmux, slug="camp-cli")
+
+    code = _run(["stop", "camp-cli", "--group", "g", "--json"], monkeypatch)
+    out = capsys.readouterr().out
+    payload = json.loads(out)
+
+    assert code == 0
+    assert payload["windows"] is None
+    assert payload["listed"] is False
+    assert len(out.strip().splitlines()) == 1
+
+
+def test_a_dropped_listing_row_reason_reaches_stderr_and_kill_still_proceeds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    from camp.launch.tmux import TmuxWindow, WindowListing
+
+    _isolated_env(tmp_path, monkeypatch)
+    session = _derived_name("g", "camp-cli")
+    fresh = TmuxWindow(window_id="@1", current_path="/ws", current_command="bash", name="shell")
+    tmux = _ScriptedTmux(
+        listing_sequence=[WindowListing(windows=(fresh,), dropped=1)],
+        listing_windows=(fresh,),
+        poll_sequence=(False,),
+    )
+    _wire_one_workspace(monkeypatch, tmp_path=tmp_path, tmux=tmux, slug="camp-cli")
+
+    code = _run(["stop", "camp-cli", "--group", "g"], monkeypatch)
+    captured = capsys.readouterr()
+
+    assert code == 0
+    assert "not reconciled" in captured.err
+    assert "camp: window record at " in captured.err
+    assert tmux.killed == [session]
 
 
 def test_json_stopped_carries_outcome_and_preview_fields(
