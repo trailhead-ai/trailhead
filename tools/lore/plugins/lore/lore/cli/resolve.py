@@ -42,15 +42,24 @@ case, is landed by ``git rebase``'s own merge machinery: its bytes reach the tre
 and the commit without passing through ``validate_stamp_neutralize`` or the graph
 guards at all. Read the paragraph above as scoped to conflicts, never as "every
 byte a resolution commits was validated on this device" — closing that gap means
-neutralizing the whole rebased tree, which nothing here does. ``lore resolve
-take-file`` is the second, deliberate exception: a ``sites/`` file is not a
-record, so it is settled by writing the chosen side's raw blob into place, fenced
-to that one tree by ``_assert_free_write_zone``.
+neutralizing the whole rebased tree, which nothing here does. A non-record
+conflicted path — a ``sites/`` file, or vault-root administrivia such as
+``README.md`` / ``.gitignore`` — is the second, deliberate exception: it is
+settled by taking the PUBLISHED (remote) side's raw blob outright, never
+parked as judgment, fenced to the vault's free-write zone by
+``_is_free_write_path``. ``lore resolve take-file`` stays a supported verb for
+a person settling one such path by hand — e.g. a free-write path whose
+automatic take was refused because the worktree path resolves outside the
+vault — but this module no longer requires anyone to.
 
 **A body conflict is never auto-merged.** Prose is judgment by definition, so a
-conflicted ``.md`` parks as slot ``body``. Conflicts under the vault's top-level
-``sites/`` tree are not records at all — they are reported in a separate
-``files`` section for ``lore resolve take-file``.
+conflicted ``.md`` parks as slot ``body``. A conflict under the vault's
+top-level ``sites/`` tree, or at vault-root administrivia, is not a record at
+all — it is settled automatically by path CLASS, never by record id (see
+``_is_free_write_path``). The vault's OTHER free-write zone, ``outpost/``, is
+unreachable here by construction: it is gitignored at scaffold time, excluded
+from every status and staging probe, and never committed, so it can never
+appear in ``git ls-files -u`` and this module needs no case for it.
 
 **Exit codes.** A produced report is a SUCCESS: parked judgment conflicts exit 0,
 because reporting them is what this command is for, and the caller distinguishes
@@ -64,6 +73,74 @@ vault is never pushed by an agent-actuated resolution unless the operator passes
 ``--include-shared``; and remote-side text from such a vault is wrapped in the
 ``<external-memory layer="shared">`` data channel before it is reported, on the
 same convention ``lore search`` applies.
+
+**A record whose sidecar will not parse is HELD, not merged.** The rule this
+guards against is written for the BOTH-sides case — remote and local sidecar
+both unreadable — but what is implemented here is the stronger, simpler
+EITHER-side rule: if either stage's sidecar fails to parse as a JSON object,
+the whole record is held for a person with no field taken, no body merged, and
+nothing written — not the side that parses, not a partial merge, not an empty
+body standing in for a missing one. It is reported as a judgment-shaped
+conflict at slot ``"sidecar"`` but carries a closed ``reason`` literal,
+``UNREADABLE_SIDECAR``, that a caller can branch on to tell it apart from an
+ordinary both-sides field move: a field conflict asks a person to choose a
+value that already exists on both sides; an unreadable sidecar asks them to
+repair a file that does not parse at all, and conflating the two would send
+them looking for a choice that is not there. Holding this one record never
+suppresses the rest of the same replay — every other conflicted record in the
+same rebase step is still merged or parked on its own terms.
+
+**The sweep's entry point (`resolve_for_sweep`) holds instead of parking.** A
+sweep runs with nobody present to answer `lore resolve take`, so a judgment
+conflict cannot sit parked mid-rebase the way it does for a person — that would
+leave the vault mid-rebase indefinitely and fence every other write path behind
+a resolution nobody is running. Instead the whole replay is aborted (`git
+rebase --abort`), which the resolved unknown behind this task confirmed restores
+the vault byte-identically for everything that reached the git index — so the
+next sweep re-derives the identical conflicts rather than losing any of them.
+This is a distinct entry point from `cmd_resolve`, not a branch inside it: it
+skips `lore resolve`'s own vault selection and fetch (the caller already
+fetched), its emitters, and its shared-vault push gate — a sweep publishes a
+settled shared vault unconditionally, because there is no operator present to
+pass `--include-shared`.
+
+**Crash order between the abort and the held marker: abort first, verified,
+then the marker.** This mirrors `_abort`'s own ordering for the resolution
+session marker (clear it only after a verified abort) and is chosen so the held
+marker is never the source of truth about whether the hold happened — git's own
+rebase state always is. A process killed after a successful abort but before the
+marker write leaves a clean, diverged vault with no marker; the next sweep sees
+no marker and no mid-rebase state, starts fresh, re-derives the identical
+conflicts, and re-holds — the marker is not required for correctness, only for
+reporting how long the wait has lasted in the meantime (which resets). A held
+vault's marker is never cleared until the vault genuinely settles, so a LATER
+re-sweep of an already-held vault starts a fresh rebase attempt against the same
+unresolved conflict with that stale marker still on disk; a process killed
+during THAT abort call — before it runs at all — leaves the vault mid-rebase
+again with the stale marker still present. The recovery is the same control flow
+in both directions: `resolve_for_sweep` never branches on whether a held marker
+exists, only on git's own mid-rebase state, so it always resumes driving from
+wherever the tree actually is rather than trusting a marker that might describe
+a hold the git state no longer matches.
+
+**The one residue the abort does not clean: an untracked write.** `write_record`
+writes a settled record's `.md` and `.json` to disk before staging either
+(below), so a crash in that exact window leaves an untracked file `git rebase
+--abort` cannot revert (abort resets tracked/staged state; it never touches
+untracked worktree content). This window is unreachable BEFORE a held ending is
+ever declared, though: reaching this module's abort-and-hold requires `_drive`
+to return, which requires every `_resolve_step` call along the way to have
+returned without raising — and a step only returns once every settled record's
+`write_record` call has *already* staged both its files (it raises instead of
+returning if the `git add` fails). A crash inside `write_record`'s writes-then-
+adds window therefore always aborts the whole Python call before the held
+ending is ever reached; the run just dies with the vault left mid-rebase, one
+record's files written but unstaged. The NEXT sweep resumes from git's own
+still-conflicted index for that same step, re-derives the identical merge for
+that record (the base/remote/local stages it reads are untouched by the crash),
+and overwrites-and-stages it correctly — closing the window before a held
+ending can ever be declared over it. Pinned by fault injection in the test
+suite rather than by this reasoning alone.
 """
 from __future__ import annotations
 
@@ -72,6 +149,8 @@ import json
 import os
 import subprocess
 import sys
+import unicodedata
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -111,6 +190,66 @@ _MAX_STEPS = 500
 
 class ResolveError(Exception):
     """A resolution could not proceed — reported, never worked around."""
+
+
+class StageStatus(Enum):
+    """The three-way answer for reading one git index stage.
+
+    ``ABSENT`` — the stage genuinely does not exist (``git show :N:<path>``
+    exits non-zero), e.g. a deletion. ``UNREADABLE`` — the stage exists but
+    its bytes are not a usable record: for a sidecar, not JSON at all, or
+    valid JSON that is not an object (a sidecar is an object and nothing
+    else). A body has no unreadable case — any bytes are a readable body —
+    so ``_stage_text`` only ever answers a body's text or ``ABSENT``.
+    """
+
+    ABSENT = "absent"
+    UNREADABLE = "unreadable"
+
+
+#: The closed reason literal a parked conflict carries when a record's sidecar
+#: could not be parsed on either side of a rebase step — distinct from an
+#: ordinary judgment slot (whose ``reason`` is absent/``None``), because the
+#: remedy differs: a field conflict asks a person to choose a value that
+#: already exists, this asks them to repair a file that does not parse at
+#: all. A caller branches on it with ``conflict.get("reason") ==
+#: UNREADABLE_SIDECAR`` rather than parsing prose.
+UNREADABLE_SIDECAR = "unreadable-sidecar"
+
+
+# ---------------------------------------------------------------------------
+# host_is_author
+# ---------------------------------------------------------------------------
+
+
+def host_is_author(env: dict | None = None) -> bool:
+    """Whether THIS host is a source of new vault content — the fail-safe default.
+
+    Reads the host-local ``makes_vault_content`` declaration (see
+    :func:`lore.vault.config.read_makes_vault_content` for where it lives and
+    why). A host that declares nothing is an author host: a host holding the
+    only copy of a day's work must never discard it, and a host whose owner
+    cannot resolve a conflict must still be allowed to. So every ambiguous
+    case — no declaration, no config file at all, an unparseable config —
+    reads as author here, same as that accessor's ``None``. Only an explicit
+    ``makes_vault_content: false`` reads as non-author.
+
+    :func:`resolve_for_sweep` is the one caller that branches on it: it
+    selects which ending an unsettleable conflict gets — held for a person
+    (author) or discarded toward the published history (non-author).
+
+    Args:
+        env: Optional ``{str: str}`` XDG environment override, forwarded to
+             :func:`lore.vault.config.read_makes_vault_content`.
+
+    Raises:
+        VaultConfigError: propagated unchanged when the declared value is
+            present but not a bool — refused, never coerced.
+    """
+    from ..vault import config as vault_config_mod
+
+    declared = vault_config_mod.read_makes_vault_content(env=env)
+    return True if declared is None else declared
 
 
 # ---------------------------------------------------------------------------
@@ -176,6 +315,12 @@ def _merge_volatile(base: dict | None, remote: dict, local: dict) -> dict:
     make. (The value is also re-stamped by the write path itself — it is merged
     anyway so the merged sidecar is a faithful merge on its own terms, rather
     than one that only looks right because a later step overwrote it.)
+
+    This is the module's one deliberate clock read. Every other decision
+    ``merge_sidecars`` makes — which side wins a one-side move, and which key
+    parks as judgment — is invariant under commit dates, filesystem mtimes, and
+    which side happens to hold the newer ``updated-at``; only this pair is
+    scoped to take the newer instant.
     """
     sides = [s for s in (remote, local) if s.get("updated-at") is not None]
     if not sides:
@@ -206,8 +351,8 @@ def _conflicted_paths(vault: Path) -> list[str]:
     return seen
 
 
-def _stage_text(vault: Path, stage: int, path: str) -> str | None:
-    """Return the text of one index stage, or ``None`` when that stage is absent.
+def _stage_text(vault: Path, stage: int, path: str) -> str | StageStatus:
+    """Return the text of one index stage, or ``StageStatus.ABSENT``.
 
     Deliberately NOT routed through :func:`_git`, which strips its output: a
     record body's trailing newline is content, and a merge that silently dropped
@@ -217,7 +362,7 @@ def _stage_text(vault: Path, stage: int, path: str) -> str | None:
         ["git", "-C", str(vault), "show", f":{stage}:{path}"],
         capture_output=True, text=True,
     )
-    return proc.stdout if proc.returncode == 0 else None
+    return proc.stdout if proc.returncode == 0 else StageStatus.ABSENT
 
 
 def _side_labels(vault: Path) -> tuple[dict, dict]:
@@ -286,7 +431,9 @@ def _resolve_one_record(
 
     ``pending`` carries everything a later ``lore resolve take`` needs to finish
     this record: the auto-merged sidecar and the merged body (``None`` while the
-    body is itself unsettled).
+    body is itself unsettled). The one exception is a HELD record (an
+    unreadable sidecar, see :func:`_hold_unreadable_sidecar`) — there is no
+    ``take`` verb for it, so ``pending`` carries only empty placeholders.
     """
     sidecar_path = f"{record_id}.json"
     body_path = f"{record_id}.md"
@@ -296,20 +443,27 @@ def _resolve_one_record(
         base = _load_json_stage(vault, 1, sidecar_path)
         remote = _load_json_stage(vault, 2, sidecar_path)
         local = _load_json_stage(vault, 3, sidecar_path)
-        if remote is None or local is None:
-            # One side has no readable sidecar at this stage — a delete/modify
-            # conflict (the record was removed on one device and edited on the
-            # other), or a sidecar that is no longer JSON. Neither is a field
-            # merge, and guessing which device meant to keep the record would
-            # destroy the other's work, so the resolution stops here with the
-            # vault untouched.
-            missing = "remote" if remote is None else "local"
-            raise ResolveError(
-                f"{sidecar_path}: the {missing} side has no readable sidecar — the "
-                "record was deleted on one device and edited on the other, or its "
-                "sidecar is not JSON. Settle this record by hand before re-running."
+        if remote is StageStatus.ABSENT or local is StageStatus.ABSENT:
+            # One side deleted the record; the other changed it. Deletion wins,
+            # symmetrically — whichever side deleted — over a modification on
+            # the other. Both files go, even though only the sidecar was itself
+            # unmerged: a record without a sidecar is not a partial record.
+            return _delete_record(vault, record_id, sidecar_path, body_path), []
+        if isinstance(remote, StageStatus) or isinstance(local, StageStatus):
+            # One (or both) side's sidecar is not readable JSON — not absent,
+            # corrupt. Guessing which device meant to keep the record, or
+            # silently taking whichever side parses, would either destroy work
+            # or paper over a broken file — so the whole record is HELD for a
+            # person: no field taken, no body merged, nothing written. Unlike
+            # the old whole-vault refusal, this does not stop the rest of the
+            # replay; it only parks this one record.
+            return _hold_unreadable_sidecar(
+                vault, record_id, kind, sidecar_path, body_path,
+                remote, local, local_label, remote_label,
             )
-        merged, raw_conflicts = merge_sidecars(base, remote, local)
+        merged, raw_conflicts = merge_sidecars(
+            None if isinstance(base, StageStatus) else base, remote, local
+        )
     else:
         merged = _read_worktree_json(vault / sidecar_path)
         if merged is None:
@@ -333,17 +487,14 @@ def _resolve_one_record(
         body = None
         remote_body = _stage_text(vault, 2, body_path)
         local_body = _stage_text(vault, 3, body_path)
-        if remote_body is None or local_body is None:
-            # One side has no body at this stage — a delete/modify conflict whose
-            # sidecar happened to be identical on both sides, so only the `.md`
-            # ever became unmerged. An absent stage is NOT an empty body: parking
-            # it as one would let `take` land a deliberate-looking empty body.
-            missing = "remote" if remote_body is None else "local"
-            raise ResolveError(
-                f"{body_path}: the {missing} side has no body — the record was "
-                "deleted on one device and edited on the other. Settle this record "
-                "by hand before re-running."
-            )
+        if remote_body is StageStatus.ABSENT or local_body is StageStatus.ABSENT:
+            # One side deleted the record; the other changed its body — the
+            # sidecar happened to be identical on both sides, so only the
+            # `.md` ever became unmerged. Deletion still wins: an absent stage
+            # is NOT an empty body, and parking it as one would let `take`
+            # land a deliberate-looking empty body. Removing the whole record
+            # is what keeps that from ever being possible.
+            return _delete_record(vault, record_id, sidecar_path, body_path), []
         conflicts.append({
             "record-id": record_id,
             "kind": kind,
@@ -368,15 +519,70 @@ def _resolve_one_record(
     return pending, conflicts
 
 
-def _load_json_stage(vault: Path, stage: int, path: str) -> dict | None:
+def _hold_unreadable_sidecar(
+    vault: Path, record_id: str, kind: str, sidecar_path: str, body_path: str,
+    remote: dict | StageStatus, local: dict | StageStatus,
+    local_label: dict, remote_label: dict,
+) -> tuple[dict, list[dict]]:
+    """Park *record_id* whole because its sidecar will not parse on some side.
+
+    Returns ``(pending, conflicts)`` in the same shape as every other branch of
+    :func:`_resolve_one_record`, so the caller's park-or-write decision needs no
+    special case: a non-empty ``conflicts`` list is what keeps
+    :func:`_resolve_step` from ever routing this record through
+    :func:`write_record`. ``pending`` carries empty placeholders for
+    ``sidecar``/``body`` (never populated — there is no ``take`` verb for this
+    reason) purely so a caller that mishandles this record does not crash on a
+    missing key.
+    """
+    def side(stage: int, status: dict | StageStatus) -> dict:
+        # The corrupt side's raw bytes are surfaced so a person can see what to
+        # repair. The side that DOES parse reports no value: this task's
+        # widening is that a readable side is held too, not silently taken, so
+        # showing it as an ordinary value would misstate what happened.
+        if isinstance(status, StageStatus):
+            raw = _stage_text(vault, stage, sidecar_path)
+            value = None if raw is StageStatus.ABSENT else raw
+        else:
+            value = None
+        return {"value": value, "absent": False}
+
+    conflicts = [{
+        "record-id": record_id,
+        "kind": kind,
+        "slot": "sidecar",
+        "reason": UNREADABLE_SIDECAR,
+        "local": {**local_label, **side(3, local)},
+        "remote": {**remote_label, **side(2, remote)},
+    }]
+    pending = {
+        "kind": kind,
+        "sidecar-path": sidecar_path,
+        "body-path": body_path,
+        "reason": UNREADABLE_SIDECAR,
+        "sidecar": {},
+        "body": None,
+        "settled": [],
+    }
+    return pending, conflicts
+
+
+def _load_json_stage(vault: Path, stage: int, path: str) -> dict | StageStatus:
+    """Return the parsed sidecar object at one index stage.
+
+    ``StageStatus.ABSENT`` when the stage does not exist at all.
+    ``StageStatus.UNREADABLE`` when the stage exists but its bytes are not a
+    JSON object — not JSON, or JSON whose top level is a list, string,
+    number, or ``null``. A sidecar is an object and nothing else.
+    """
     text = _stage_text(vault, stage, path)
-    if text is None:
-        return None
+    if text is StageStatus.ABSENT:
+        return StageStatus.ABSENT
     try:
         parsed = json.loads(text)
     except json.JSONDecodeError:
-        return None
-    return parsed if isinstance(parsed, dict) else None
+        return StageStatus.UNREADABLE
+    return parsed if isinstance(parsed, dict) else StageStatus.UNREADABLE
 
 
 def _read_worktree_json(path: Path) -> dict | None:
@@ -385,6 +591,28 @@ def _read_worktree_json(path: Path) -> dict | None:
     except (OSError, json.JSONDecodeError):
         return None
     return parsed if isinstance(parsed, dict) else None
+
+
+def _delete_record(vault: Path, record_id: str, sidecar_path: str, body_path: str) -> dict:
+    """Remove *record_id*'s files from the worktree and stage the removal.
+
+    The other side's change is not lost — the losing side's commit still holds
+    the changed content, reachable by sha in the vault's git history. Only the
+    tree this resolution lands forgets it, which is what "deletion wins" means:
+    the record is gone from the tree, the removal staged, and this record is
+    fully settled — never routed through :func:`write_record`.
+    """
+    for rel in (body_path, sidecar_path):
+        rc, _, err = _git(vault, "rm", "-f", "--ignore-unmatch", "--", rel)
+        if rc != 0:
+            raise ResolveError(f"could not stage the removal of {rel}: {err}")
+    return {
+        "kind": record_id.split("/", 1)[0],
+        "sidecar-path": sidecar_path,
+        "body-path": body_path,
+        "deleted": True,
+        "settled": [],
+    }
 
 
 def write_record(vault: Path, record_id: str, sidecar: dict, body: str) -> None:
@@ -483,6 +711,11 @@ def render_json(
     ``value: null`` alone cannot say — a null is a value, and reading a deletion
     as one is how a deliberate removal gets silently discarded. An ``absent``
     side is never fenced; there is no text to fence.
+
+    Each conflict also carries ``reason``: ``None`` for an ordinary judgment
+    slot, or the closed literal ``UNREADABLE_SIDECAR`` when the record is held
+    because its sidecar would not parse — a caller branches on this field
+    rather than the (unfenced, non-closed) prose in either side's value.
     """
     def side(entry: dict, *, fence: bool) -> dict:
         value = entry.get("value")
@@ -500,6 +733,7 @@ def render_json(
                 "record_id": c["record-id"],
                 "kind": c["kind"],
                 "slot": c["slot"],
+                "reason": c.get("reason"),
                 "local": side(c["local"], fence=False),
                 "remote": side(c["remote"], fence=shared),
             }
@@ -530,6 +764,10 @@ def _render_prose(say, vault_name: str, conflicts: list[dict], files: list[dict]
     say(f"{total} conflict(s) need judgment before this vault can sync.")
     for c in conflicts:
         say(f"{c['record-id']} ({c['kind']}) — slot {c['slot']!r}")
+        reason = c.get("reason")
+        if reason == UNREADABLE_SIDECAR:
+            say(f"  held — {reason}: no part of this record was written; "
+                "repair the file by hand, then re-run resolve.")
         for side in ("local", "remote"):
             label = c[side]
             sha = (label.get("sha") or "")[:7]
@@ -601,6 +839,95 @@ def _carry_settled(prior_entry: dict | None, pending: dict,
     return still_open
 
 
+#: The largest published blob the sweep will take on its own. The bytes come
+#: from the forge, so anyone who can push decides their size, and the take
+#: reads the whole blob into this host's memory before writing it — on a host
+#: running unattended. Past this a conflict is held for a person, who can
+#: still settle it with `take-file`: nothing is lost, it just stops being
+#: something a stranger's push can spend this host's memory on.
+_AUTO_TAKE_MAX_BYTES = 64 * 1024 * 1024
+
+
+def _stage_size_over_ceiling(vault: Path, path: str) -> str | None:
+    """A held-file reason when either side of *path* is over the ceiling.
+
+    Asks git for the sizes rather than measuring what was read, so an
+    oversized blob is never buffered at all. A stage git cannot size is not
+    treated as oversized: the take's own read handles a missing side, which is
+    how a deletion on one side settles.
+    """
+    for stage in (2, 3):
+        proc = subprocess.run(
+            ["git", "-C", str(vault), "cat-file", "-s", f":{stage}:{path}"],
+            capture_output=True, text=True,
+        )
+        if proc.returncode != 0:
+            continue
+        try:
+            size = int(proc.stdout.strip())
+        except ValueError:
+            continue
+        if size > _AUTO_TAKE_MAX_BYTES:
+            return (
+                f"{path}: this file is larger than the sweep will take on its own "
+                f"({size} bytes, ceiling {_AUTO_TAKE_MAX_BYTES}) — settle it with "
+                "`lore resolve take-file`"
+            )
+    return None
+
+
+def _auto_take_published_side(vault: Path, path: str) -> str | None:
+    """Settle one free-write conflict by taking the published (remote) side.
+
+    AC27: a conflicted path that is not a record is not judgment for a person —
+    unlike a sidecar field there is no field-wise merge for arbitrary bytes, so
+    "settle" can only mean picking a side, and the published side is the one
+    nobody local is about to lose: their own bytes are still reachable by sha in
+    this device's own history, exactly as a record's losing side is. Either side
+    DELETING the path wins over a change on the other, symmetrically with the
+    deletion rule :func:`_delete_record` applies to records (AC29).
+
+    Returns ``None`` when the conflict is fully settled (landed, staged, or
+    removed) — the caller drops it from ``files`` entirely, no report needed.
+    Returns a held-file reason, and writes nothing, when landing the bytes
+    would escape the vault (a path traversal, or a symlink planted at the
+    conflicted worktree path): the rest of the replay must not stop over one
+    file that a person can still settle with ``take-file``, by hand, once
+    whatever is at that path stops resolving outside the vault.
+    """
+    oversized = _stage_size_over_ceiling(vault, path)
+    if oversized is not None:
+        return oversized
+
+    remote = subprocess.run(
+        ["git", "-C", str(vault), "show", f":2:{path}"], capture_output=True,
+    )
+    local = subprocess.run(
+        ["git", "-C", str(vault), "show", f":3:{path}"], capture_output=True,
+    )
+    if remote.returncode != 0 or local.returncode != 0:
+        rc, _, err = _git(vault, "rm", "-f", "--ignore-unmatch", "--", path)
+        if rc != 0:
+            raise ResolveError(f"could not stage the removal of {path}: {err}")
+        return None
+
+    target = vault / path
+    try:
+        layers_mod.assert_within_root(target, vault)
+    except layers_mod.LayerConfinementError:
+        return (
+            f"{path}: this path resolves outside the vault (a path traversal or a "
+            "planted symlink) — settle with `lore resolve take-file` once that's fixed"
+        )
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(remote.stdout)
+    rc, _, err = _git(vault, "add", "--", path)
+    if rc != 0:
+        raise ResolveError(f"could not stage {path}: {err}")
+    return None
+
+
 def _resolve_step(
     vault: Path, paths: list[str], carried: dict
 ) -> tuple[list[dict], list[dict], dict]:
@@ -629,25 +956,42 @@ def _resolve_step(
         if record_conflicts:
             conflicts.extend(record_conflicts)
             pending[record_id] = record_pending
+        elif record_pending.get("deleted"):
+            # Already removed and staged by `_delete_record` — never routed
+            # through `write_record`, which would try to write files that no
+            # longer exist.
+            pass
         else:
             write_record(vault, record_id, record_pending["sidecar"],
                          record_pending["body"] or "")
 
-    files = [
-        {
+    files: list[dict] = []
+    for path in file_paths:
+        reason = "settle with `lore resolve take-file`"
+        if _is_free_write_path(path):
+            held = _auto_take_published_side(vault, path)
+            if held is None:
+                continue  # fully settled: landed, staged, or removed
+            reason = held
+        files.append({
             "path": path,
             "local": dict(local_label),
             "remote": dict(remote_label),
-            "reason": "settle with `lore resolve take-file`",
-        }
-        for path in file_paths
-    ]
+            "reason": reason,
+        })
     return conflicts, files, pending
 
 
 def _finish(vault: Path, name: str, say, say_err, *, shared: bool,
-            include_shared: bool) -> int:
-    """Reindex and push a vault whose rebase completed. Returns an exit code."""
+            include_shared: bool, sweep: bool = False) -> int:
+    """Reindex and push a vault whose rebase completed. Returns an exit code.
+
+    ``sweep`` bypasses the shared-vault push gate outright — it is the sweep
+    entry point's own escape from the gate, distinct from ``include_shared``
+    (the operator's `--include-shared` flag on `lore resolve`), because a sweep
+    has no operator present to have passed that flag. Never set alongside a
+    person-started call.
+    """
     resolve_state.clear_marker(vault)
     say("Rebase complete.")
 
@@ -659,10 +1003,16 @@ def _finish(vault: Path, name: str, say, say_err, *, shared: bool,
     else:
         say(f"Reindexed {count} record(s).")
 
-    if shared and not include_shared:
+    if shared and not include_shared and not sweep:
         say("Vault is shared — skipping push (pass --include-shared to push).")
         return 0
-    rc, _ending, _attempts_used = _push_one(vault, say, say_err, committed=True)
+    # `hand_off=False`: this push is ALREADY the tail of a resolution this
+    # function itself is finishing (a person's `lore resolve`, or the sweep's
+    # own `resolve_for_sweep`) — a replay conflict reached here must not
+    # start ANOTHER resolution recursively via `_hand_off_to_resolver`.
+    rc, _ending, _attempts_used = _push_one(
+        vault, say, say_err, committed=True, hand_off=False
+    )
     return rc
 
 
@@ -791,6 +1141,13 @@ def _start_rebase(vault: Path, say_err) -> bool | None:
     A successful rebase with no conflict at all also returns ``True``: the caller's
     loop sees no rebase in progress and falls straight through to the finish tail.
 
+    ``--empty=drop`` is pinned explicitly rather than relied on as git's default:
+    when a deletion settles on top of a step whose tree already lacks the
+    record, the replayed commit becomes empty, and dropping it silently (rather
+    than stopping to ask, or landing an empty commit) is what lets the replay
+    continue instead of stopping the vault. Pinning it makes that settlement
+    version-stable rather than dependent on a default that could move.
+
     Called under the vault write lock — every step here mutates the tree. The
     fetch that refreshes ``origin/*`` is the caller's, and runs before the lock.
     """
@@ -801,7 +1158,7 @@ def _start_rebase(vault: Path, say_err) -> bool | None:
     if rc != 0 or not count or count == "0":
         return None
 
-    rc, out, err = _git(vault, "rebase", upstream)
+    rc, out, err = _git(vault, "rebase", "--empty=drop", upstream)
     if rc != 0 and not _vault_mid_rebase(vault):
         say_err(f"error: could not start the rebase: {err or out}")
         return False
@@ -851,6 +1208,130 @@ def _abort(vault: Path, name: str, say, say_err) -> int:
 
     say("Resolution aborted — the vault is back at its pre-pull state.")
     return 0
+
+
+# ---------------------------------------------------------------------------
+# the sweep's entry point — hold instead of park, no person, no CLI tail
+# ---------------------------------------------------------------------------
+
+
+def _abort_replay(vault: Path) -> None:
+    """Abort *vault*'s mid-rebase replay whole. Raises :class:`ResolveError` on failure.
+
+    Isolated to its own function — distinct from :func:`_abort`, which also
+    clears the resolution-session marker and reports to a person — so a caller
+    (a test injecting a crash at this exact seam) can replace just the git call
+    without touching the driving that got the vault here.
+    """
+    rc, out, err = _git(vault, "rebase", "--abort")
+    if rc != 0 or _vault_mid_rebase(vault):
+        raise ResolveError(f"could not abort the rebase to hold it: {err or out}")
+
+
+def _discard_toward_published(vault: Path) -> None:
+    """Move *vault* onto the published history, discarding its local commits.
+
+    The non-author host's ending for a conflict nothing can settle: this host
+    makes no vault content, so its divergence is not somebody's only copy of a
+    day's work, and taking the published side outright is what lets the vault
+    converge with nobody present (AC37).
+
+    The discarded commits are not destroyed — they stay in the vault's own
+    history, reachable through its reflog and by sha — which is what makes
+    this recoverable and is why the declaration defaults to author.
+
+    Called only after :func:`_abort_replay` has returned the vault to its
+    pre-replay state, so the reset moves a clean tree from this host's
+    divergence to the published tip and nothing else.
+
+    Its failure message carries no git or remote text: this ending's whole
+    point is that a non-author host's owner is never handed a version-control
+    decision, and the text of a failure here reaches the same surfaces the
+    success does.
+    """
+    upstream = _vault_upstream_ref(vault)
+    if upstream is None:
+        raise ResolveError("there is no published history to keep")
+    rc, _out, _err = _git(vault, "reset", "--hard", upstream)
+    if rc != 0:
+        raise ResolveError("could not move the vault onto the published history")
+
+
+def resolve_for_sweep(vault: Path, name: str, *, shared: bool) -> dict:
+    """Settle *vault* with nobody present and return its outcome report.
+
+    The counterpart to :func:`cmd_resolve` for the sweep, not a mode of it — see
+    the module docstring's "sweep's entry point" section for why parking is
+    replaced by a whole abort-and-hold, why the shared-vault push gate does not
+    apply here, and the crash-atomicity ordering between the abort and the held
+    marker.
+
+    Assumes the caller already fetched ``origin`` (a sweep's own pull phase
+    does this) and that nothing else is driving this vault's rebase right now —
+    a live person-started `lore resolve` session is the caller's concern to
+    avoid, not this function's, because :func:`_vault_mid_rebase` cannot tell
+    the two apart from git state alone.
+
+    **Which ending an unsettleable conflict gets is the host's own
+    declaration** (:func:`host_is_author`, consulted once, after the replay is
+    aborted so the vault is clean whichever way it answers). An author host
+    keeps its local commits and is held for a person. A host that declares it
+    makes no vault content instead takes the published history outright
+    (:func:`_discard_toward_published`), publishes nothing of its own, carries
+    no held marker, and tells its owner nothing — its owner's experience of a
+    conflict is that records appear a little later than they otherwise would.
+    A conflict the field-wise merge CAN settle never reaches this branch, so
+    the declaration changes ordinary merges not at all.
+
+    Returns the same report shape :func:`render_json` produces, plus ``held``
+    (bool); ``entered-at`` only when held, and ``discarded`` (``True``) only
+    on the non-author ending — the flag `cli.sync` reads to report a vault
+    that converged without publishing anything. Raises :class:`ResolveError` if
+    the rebase cannot be started, driven, or aborted — there is no person here
+    to hand a printed remedy to, so the caller decides what to do with it.
+
+    Never branches on whether a held marker already exists: the only authority
+    consulted for what to do next is git's own mid-rebase state, so a re-sweep
+    always resumes from wherever the tree actually is — the property the crash-
+    atomicity docstring section above depends on.
+    """
+    with locking.vault_write_lock(vault):
+        if not _vault_mid_rebase(vault):
+            started = _start_rebase(vault, lambda _msg: None)
+            if started is None:
+                resolve_state.clear_held_marker(vault)
+                report = render_json(name, [], [], shared=shared)
+                report["held"] = False
+                return report
+            if started is False:
+                raise ResolveError(f"could not start the rebase for {name}")
+        conflicts, files, _pending = _drive(vault)
+
+        if conflicts or files:
+            _abort_replay(vault)
+            if not host_is_author():
+                _discard_toward_published(vault)
+                resolve_state.clear_held_marker(vault)
+                report = render_json(name, [], [], shared=shared)
+                report["held"] = False
+                report["discarded"] = True
+                return report
+            marker = resolve_state.mark_held(vault)
+            report = render_json(name, conflicts, files, shared=shared)
+            report["held"] = True
+            report["entered-at"] = marker["entered-at"]
+            return report
+
+    resolve_state.clear_held_marker(vault)
+    say, say_err = _make_emitters(name, len(name) + 1)
+    rc_finish = _finish(vault, name, say, say_err, shared=shared,
+                        include_shared=False, sweep=True)
+    if rc_finish != 0:
+        raise ResolveError(f"could not finish settling {name}")
+
+    report = render_json(name, [], [], shared=shared)
+    report["held"] = False
+    return report
 
 
 # ---------------------------------------------------------------------------
@@ -1040,26 +1521,102 @@ def cmd_resolve_take(args) -> int:
                                 include_shared=bool(getattr(args, "include_shared", False)))
 
 
+def _as_the_filesystem_reads_it(segment: str) -> str:
+    """The form of *segment* that decides which directory it actually names.
+
+    macOS and Windows are case-insensitive, and Windows also drops trailing
+    dots and spaces from a path component, so ``Task``, ``task.`` and
+    ``task `` all open the same directory ``task`` does. Comparing the literal
+    string would let a name that only looks different past a fence the
+    filesystem is about to collapse. Unicode is folded to NFC for the same
+    reason: two spellings of one name must not answer differently.
+    """
+    return unicodedata.normalize("NFC", segment).rstrip(". ").casefold()
+
+
+#: Files git reads back out of the working tree to decide how to treat it — a
+#: clean/smudge filter, a diff driver, a submodule URL. Taking one of these
+#: from the remote unattended would let the forge change what git does on this
+#: host, which is not the class of thing vault-root administrivia covers.
+#: ``.gitignore`` is not among them: it selects what is tracked and executes
+#: nothing.
+_GIT_CONTROL_NAMES = frozenset({".git", ".gitattributes", ".gitmodules"})
+
+#: Every record kind in the form :func:`_as_the_filesystem_reads_it` produces,
+#: so the fence compares what the filesystem will open rather than what the
+#: remote happened to spell.
+_NORMALIZED_KINDS = frozenset(
+    _as_the_filesystem_reads_it(kind) for kind in record_model.KINDS
+)
+
+
+def _is_free_write_path(path: str) -> bool:
+    """True when *path* is outside every record tree — the vault's free-write zone.
+
+    Classified by path CLASS, not by one tree: a vault's top-level ``sites/`` is
+    the example the spec names, but vault-root administrivia — ``README.md``,
+    ``.gitignore`` — is free-write on the same grounds, and this is the single
+    place that decides it for both the automatic take in :func:`_resolve_step`
+    and the manual ``take-file`` verb's own fence.
+
+    Refused (not free-write):
+
+    - a path whose first segment is a known record kind
+      (:data:`record_model.KINDS`) — it is rooted inside a record tree, e.g.
+      ``area/sites/index.html`` (the root decides this, not the name: a site may
+      legitimately hold its own nested ``sites`` directory, so nesting alone
+      never refuses a path — see the parametrized cases below);
+    - a path record-shaped under a kind this build does not recognize, e.g.
+      ``oracle/a-prophecy.json`` — refusing it now keeps the refusal standing
+      once a later build DOES recognize that kind, rather than having already
+      let raw, unneutralized bytes land where record content will live.
+      Record-shaped means exactly ``<kind>/<name>.md`` or ``.json``: one
+      directory segment and a file, which is the only shape a record occupies.
+      A deeper path is not a record under any kind, and the top-level
+      ``sites/`` tree is free-write whatever its files are named — a site's own
+      ``notes.md`` is site content. A path refused here has no settlement route
+      at all: the automatic take skips it and ``take-file`` refuses it, leaving
+      the vault mid-rebase with ``--abort`` as the only exit;
+    - ``.git`` — unreachable as a conflicted path today (git does not
+      self-track its own directory), denied explicitly so that guarantee does
+      not rest on a property no test states.
+
+    Everything else is free-write, including a ``sites`` directory nested
+    *inside* the top-level ``sites/`` tree itself.
+    """
+    parts = Path(path).parts
+    if not parts:
+        return False
+    root = _as_the_filesystem_reads_it(parts[0])
+    if root in _GIT_CONTROL_NAMES:
+        return False
+    if root in _NORMALIZED_KINDS:
+        return False
+    if root == SITES_DIRNAME:
+        return True
+    if len(parts) == 2:
+        _, dot, ext = path.rpartition(".")
+        if dot == "." and ext in ("md", "json"):
+            return False
+    return True
+
+
 def _assert_free_write_zone(path: str) -> None:
     """Refuse a path ``take-file`` must not write.
 
-    A vault's free-write zone is EXACTLY its tree rooted at top-level ``sites/``.
-    A path rooted anywhere else is inside a record tree and stays CLI-only, so
-    settling it by copying a blob into place would drive a write around the record
-    write path — the one thing this whole command exists to avoid. The root is
-    what decides that, not the name: a site may legitimately hold its own nested
-    ``sites`` directory, and refusing it would leave that conflict no settlement
-    path at all.
+    See :func:`_is_free_write_path` for the classification this enforces —
+    settling a record-tree path by copying a blob into place would drive a
+    write around the record write path, the one thing this whole command
+    exists to avoid.
     """
     parts = Path(path).parts
     if not parts or Path(path).is_absolute() or ".." in parts:
         raise ResolveError(f"{path!r} is not a vault-relative path")
-    if parts[0] != SITES_DIRNAME:
+    if not _is_free_write_path(path):
         raise ResolveError(
-            f"{path}: only a vault's top-level `{SITES_DIRNAME}/` tree is a free-write "
-            f"zone — everything else, including a record-shaped path under a kind this "
-            f"build does not know and a `{SITES_DIRNAME}/` directory inside a record "
-            "tree, is record content and stays CLI-only. Settle this path by hand."
+            f"{path}: not a free-write path — it is inside a record tree, "
+            f"record-shaped under a kind this build does not know, or `.git`, "
+            "and stays CLI-only. Settle this path by hand."
         )
 
 

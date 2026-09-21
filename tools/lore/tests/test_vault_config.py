@@ -677,3 +677,105 @@ def test_read_publish_retry_max_malformed_json_returns_none(tmp_path):
     (config_lore_dir / "config.json").write_text("{ not valid json }")
     result = cfg.read_publish_retry_max(env=env)
     assert result is None
+
+
+# ---------------------------------------------------------------------------
+# 9. read_makes_vault_content
+#
+# Backs a host's own author/non-author declaration (see
+# ``lore.cli.resolve.host_is_author``): every ambiguous input here (key
+# absent, no config file, malformed config) must fold into the same
+# permissive ``None`` a caller treats as "no declaration" — the fail-safe
+# default lives in the resolver, not here. A present non-bool value is the
+# one case that diverges from ``read_record_url_base`` /
+# ``read_publish_retry_max``'s shape: refused with ``VaultConfigError``
+# rather than folded into ``None``, so a stray string can never silently
+# read as either side of the flag.
+# ---------------------------------------------------------------------------
+
+
+def test_read_makes_vault_content_true_returns_true(tmp_path):
+    """config.json declaring makes_vault_content: true returns True."""
+    cfg = vc()
+    env = _make_env(tmp_path)
+    _write_lore_config(
+        tmp_path,
+        {"vaults": [{"name": "default", "scope": "default"}], "makes_vault_content": True},
+    )
+    result = cfg.read_makes_vault_content(env=env)
+    assert result is True
+
+
+def test_read_makes_vault_content_false_returns_false(tmp_path):
+    """config.json declaring makes_vault_content: false returns False."""
+    cfg = vc()
+    env = _make_env(tmp_path)
+    _write_lore_config(
+        tmp_path,
+        {"vaults": [{"name": "default", "scope": "default"}], "makes_vault_content": False},
+    )
+    result = cfg.read_makes_vault_content(env=env)
+    assert result is False
+
+
+def test_read_makes_vault_content_key_absent_returns_none(tmp_path):
+    """config.json present but with no makes_vault_content key returns None."""
+    cfg = vc()
+    env = _make_env(tmp_path)
+    _write_lore_config(
+        tmp_path,
+        {"vaults": [{"name": "default", "scope": "default"}]},
+    )
+    result = cfg.read_makes_vault_content(env=env)
+    assert result is None
+
+
+def test_read_makes_vault_content_no_config_file_returns_none(tmp_path):
+    """No config.json at all returns None."""
+    cfg = vc()
+    env = _make_env(tmp_path)
+    result = cfg.read_makes_vault_content(env=env)
+    assert result is None
+
+
+def test_read_makes_vault_content_malformed_json_returns_none(tmp_path):
+    """Malformed JSON in config.json returns None."""
+    cfg = vc()
+    env = _make_env(tmp_path)
+    config_lore_dir = tmp_path / "config" / "lore"
+    config_lore_dir.mkdir(parents=True, exist_ok=True)
+    (config_lore_dir / "config.json").write_text("{ not valid json }")
+    result = cfg.read_makes_vault_content(env=env)
+    assert result is None
+
+
+def test_read_makes_vault_content_non_bool_value_raises(tmp_path):
+    """A makes_vault_content key holding a non-bool value (e.g. the string
+    "false") is refused with VaultConfigError, never coerced either way —
+    unlike read_publish_retry_max, which folds a bad shape into None."""
+    cfg = vc()
+    env = _make_env(tmp_path)
+    _write_lore_config(
+        tmp_path,
+        {"vaults": [{"name": "default", "scope": "default"}], "makes_vault_content": "false"},
+    )
+    with pytest.raises(cfg.VaultConfigError):
+        cfg.read_makes_vault_content(env=env)
+
+
+def test_read_makes_vault_content_ignores_a_decoy_vault_path(tmp_path):
+    """The declaration is host-local: a same-named decoy config.json sitting
+    where a synced vault would put one must never move the answer — only
+    $XDG_CONFIG_HOME/lore/config.json is ever read."""
+    cfg = vc()
+    env = _make_env(tmp_path)
+    _write_lore_config(
+        tmp_path,
+        {"vaults": [{"name": "default", "scope": "default"}], "makes_vault_content": False},
+    )
+    vault_dir = tmp_path / "vault"
+    vault_dir.mkdir()
+    (vault_dir / "config.json").write_text(json.dumps({"makes_vault_content": True}))
+
+    result = cfg.read_makes_vault_content(env=env)
+    assert result is False

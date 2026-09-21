@@ -5,6 +5,35 @@ format described by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+- **Breaking:** `lore sync` no longer aborts a rebase conflict and reports a
+  `lore resolve` remedy with a non-zero exit at either replay site (the pull's
+  rebase, the push's moved-history replay). It now hands the conflict to the
+  resolver: a conflict every side moved a disjoint field on settles field-wise
+  and publishes automatically (`published`, exit 0, no remedy printed — a
+  script or cron wrapper keyed on the old non-zero exit for this case now sees
+  zero). A conflict that genuinely needs a person's judgment reports the new
+  `awaiting-person` outcome instead of `holding` (still exit non-zero) and
+  leaves the vault clean and diverged, marked held, for `lore resolve <vault>`
+  to settle by hand. `SYNC_OUTCOMES` and the `--json` schema gain the
+  `awaiting-person` literal; nothing is retired. A `holding` outcome now also
+  carries a `reason` (`policy-failure` or `remote-rejection`) distinguishing a
+  resolver failure from a forge rejection.
+- A host can now declare in lore's own `config.json` whether it authors vault
+  content, with `"makes_vault_content": false`. On a host that declares itself
+  a non-author, a conflict the structure cannot settle no longer waits for a
+  person: the vault is reset to the published history and ends `converged`,
+  discarding that host's unpublished commits rather than parking them. Those
+  commits are not destroyed outright — they stay reachable by sha through the
+  vault's reflog, so they survive until the reflog expires them (30 days by
+  git's default) or a `gc` prunes them, not indefinitely. No version-control
+  vocabulary reaches the person either way. The key is
+  host-local by design — read from this host's config file, never from any
+  vault's contents — so nothing a teammate syncs can flip a host into
+  discarding its own work. It is also fail-safe: a missing file, unreadable
+  file, invalid JSON, or an absent key all read as *author*, the branch that
+  keeps work. A key that is present but not a boolean is refused rather than
+  coerced; that vault reports `holding` with reason `policy-failure` and the
+  rest of the sweep continues.
 - `scripts/bootstrap-venv` creates and converges the project `.venv` carrying
   pytest and pytest-xdist, and `.envrc` now calls it rather than carrying its
   own copy. The bootstrap has one home, so a caller that cannot rely on direnv

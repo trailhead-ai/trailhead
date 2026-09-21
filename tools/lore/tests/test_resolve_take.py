@@ -26,8 +26,8 @@ import json
 import os
 import subprocess
 import sys
+from pathlib import Path
 
-import pytest
 from conftest import CLI_PATH, write_vault_config
 from test_resolve_core import _Fixture, _commit, _diverge_on_status, _git, _init_vault
 
@@ -52,7 +52,12 @@ def _diverge_on_status_and_body(fx: _Fixture) -> str:
 
 
 def _diverge_on_a_file(fx: _Fixture, rel: str) -> None:
-    """Diverge on a non-record path — settled by ``take-file``, not by record id."""
+    """Diverge on a non-record path — settled by path, not by record id.
+
+    A free-write path (e.g. ``sites/...``) auto-settles to the published side
+    during ``resolve default`` itself; a held path (inside a record tree, or
+    record-shaped under an unrecognized kind) stays open for `take-file`.
+    """
     fx.create("task", "A Task")
     target = fx.vault / rel
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -65,6 +70,39 @@ def _diverge_on_a_file(fx: _Fixture, rel: str) -> None:
 
     target.write_text("<p>local</p>\n")
     _commit(fx.vault, "device A edit")
+
+
+def _diverge_and_stop_mid_rebase(fx: _Fixture, rel: str) -> None:
+    """Diverge on a non-record path, then stop the rebase on it by hand.
+
+    Bypasses ``resolve default`` for the START of the rebase so the test can
+    alter the conflicted WORKTREE file — e.g. plant a symlink — before
+    resolve's own step processing (the automatic take) ever runs against it.
+    A rebase started through the CLI settles the free-write conflict in the
+    same call, leaving no window to plant anything first.
+    """
+    _diverge_on_a_file(fx, rel)
+    _git(fx.vault, "fetch", "origin")
+    _git(fx.vault, "rebase", "--empty=drop", f"origin/{fx.branch}")
+    assert (fx.vault / ".git" / "rebase-merge").exists(), "the rebase stopped on the conflict"
+
+
+def _diverge_on_a_symlinked_file(fx: _Fixture, rel: str) -> Path:
+    """A free-write conflict whose worktree path is a symlink escaping the vault.
+
+    The automatic take refuses to write through it (confinement), so it stays
+    HELD — genuinely, this time, not because it is inside a record tree — and
+    a person can still settle it with ``take-file`` once the symlink is gone.
+    Returns the outside file the symlink points at, so a test can assert
+    nothing was ever written through it.
+    """
+    _diverge_and_stop_mid_rebase(fx, rel)
+    outside = fx.tmp / "outside.html"
+    outside.write_text("untouched\n")
+    target = fx.vault / rel
+    target.unlink()
+    target.symlink_to(outside)
+    return outside
 
 
 # ── take: the settled value ────────────────────────────────────────────────
@@ -266,19 +304,19 @@ def test_take_errors_speak_local_and_remote_never_ours_and_theirs(tmp_path):
 # ── take-file: the sites tree ──────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("side,expected", [("--local", "<p>local</p>\n"),
-                                           ("--remote", "<p>remote</p>\n")])
-def test_take_file_settles_a_sites_conflict_both_directions(tmp_path, side, expected):
+def test_a_sites_conflict_is_auto_settled_to_the_published_side(tmp_path):
+    """AC27: a free-write conflict is settled by ``resolve default`` itself —
+    there is no open conflict left for ``take-file`` to act on."""
     fx = _Fixture(tmp_path)
     rel = "sites/board/index.html"
     _diverge_on_a_file(fx, rel)
-    assert fx.cli(["resolve", "default"]).returncode == 0
 
-    r = fx.cli(["resolve", "take-file", rel, side])
+    r = fx.cli(["resolve", "default"])
 
     assert r.returncode == 0, r.stderr
-    assert (fx.vault / rel).read_text() == expected
+    assert (fx.vault / rel).read_text() == "<p>remote</p>\n"
     assert not (fx.vault / ".git" / "rebase-merge").exists(), "the rebase completed"
+    assert fx.marker() is None, "nothing was left to settle"
 
 
 def test_a_sites_path_outside_the_free_write_zone_is_refused(tmp_path):
@@ -295,30 +333,65 @@ def test_a_sites_path_outside_the_free_write_zone_is_refused(tmp_path):
     assert (fx.vault / ".git" / "rebase-merge").exists(), "the resolution is untouched"
 
 
-def test_a_sites_directory_nested_inside_the_free_write_zone_is_settleable(tmp_path):
+def test_a_sites_directory_nested_inside_the_free_write_zone_is_auto_settled(tmp_path):
     """The zone is rooted at top-level ``sites/`` — it is not a ban on the name.
 
-    A site may legitimately hold its own ``sites`` directory. Refusing it leaves
-    that conflict with no settlement path at all but ``--abort``.
+    A site may legitimately hold its own ``sites`` directory. Refusing it would
+    leave that conflict with no settlement path at all but ``--abort``.
     """
     fx = _Fixture(tmp_path)
     rel = "sites/board/sites/index.html"
     _diverge_on_a_file(fx, rel)
-    assert fx.cli(["resolve", "default"]).returncode == 0
 
-    r = fx.cli(["resolve", "take-file", rel, "--local"])
+    r = fx.cli(["resolve", "default"])
 
     assert r.returncode == 0, r.stderr
-    assert (fx.vault / rel).read_text() == "<p>local</p>\n"
+    assert (fx.vault / rel).read_text() == "<p>remote</p>\n"
+
+
+def test_a_symlink_planted_at_a_free_write_conflict_is_held_not_followed(tmp_path):
+    """AC27's automatic take must confine its write exactly as ``take-file`` does."""
+    fx = _Fixture(tmp_path)
+    rel = "sites/evil.html"
+    outside = _diverge_on_a_symlinked_file(fx, rel)
+
+    r = fx.cli(["resolve", "default", "--json"])
+
+    assert r.returncode == 0, r.stderr
+    report = json.loads(r.stdout)
+    assert [f["path"] for f in report["files"]] == [rel]
+    assert "symlink" in report["files"][0]["reason"].lower()
+    assert outside.read_text() == "untouched\n", "the symlink target was never written through"
+    assert (fx.vault / ".git" / "rebase-merge").exists(), "the conflict is still open, held"
+
+
+def test_take_file_settles_the_held_symlinked_conflict_once_the_symlink_is_gone(tmp_path):
+    """``take-file`` stays a supported verb for a person settling a file by hand —
+    this task removes only the requirement that somebody always must."""
+    fx = _Fixture(tmp_path)
+    rel = "sites/evil.html"
+    _diverge_on_a_symlinked_file(fx, rel)
+    assert fx.cli(["resolve", "default"]).returncode == 0
+
+    target = fx.vault / rel
+    target.unlink()  # the person removes the symlink by hand
+
+    r = fx.cli(["resolve", "take-file", rel, "--remote"])
+
+    assert r.returncode == 0, r.stderr
+    assert target.read_text() == "<p>remote</p>\n"
+    assert not (fx.vault / ".git" / "rebase-merge").exists(), "the rebase completed"
 
 
 def test_an_unknown_take_file_path_is_a_hard_error(tmp_path):
+    """A held (genuinely open) conflict is the only kind ``take-file`` still acts
+    on; naming a different path errors, naming what genuinely remains open."""
     fx = _Fixture(tmp_path)
-    rel = "sites/board/index.html"
-    _diverge_on_a_file(fx, rel)
+    rel = "sites/evil.html"
+    _diverge_on_a_symlinked_file(fx, rel)
     assert fx.cli(["resolve", "default"]).returncode == 0
 
-    r = fx.cli(["resolve", "take-file", "sites/other/index.html", "--local"])
+    r = fx.cli(["resolve", "take-file", "sites/other.html", "--local"])
 
     assert r.returncode == 1
     assert rel in r.stderr, "the error names the paths that ARE open"
@@ -525,14 +598,13 @@ def test_a_record_shaped_path_under_an_unknown_kind_is_not_free_write(tmp_path):
     assert (fx.vault / ".git" / "rebase-merge").exists(), "the resolution is untouched"
 
 
-def test_take_file_settles_a_non_ascii_sites_path(tmp_path):
+def test_a_non_ascii_sites_path_is_auto_settled(tmp_path):
     """``git ls-files -u`` quotes non-ASCII names unless read NUL-delimited."""
     fx = _Fixture(tmp_path)
     rel = "sites/board/café-ünïcode.html"
     _diverge_on_a_file(fx, rel)
-    assert fx.cli(["resolve", "default"]).returncode == 0
 
-    r = fx.cli(["resolve", "take-file", rel, "--local"])
+    r = fx.cli(["resolve", "default"])
 
     assert r.returncode == 0, r.stderr
-    assert (fx.vault / rel).read_text() == "<p>local</p>\n"
+    assert (fx.vault / rel).read_text() == "<p>remote</p>\n"

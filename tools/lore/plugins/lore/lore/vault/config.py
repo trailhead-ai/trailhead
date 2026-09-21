@@ -7,10 +7,27 @@ the lightweight query helpers ``is_shared`` / ``is_configured_vault``, the
 **config-based active-vault resolver** ``resolve_active_vault`` (returns the
 ``default``-scope vault path, or the floor ``state_dir("lore")/vaults/default``),
 the **config-mutation API:** ``add_vault_entry``, ``remove_vault_entry``,
-``write_config_atomic``, ``read_record_url_base``, and ``read_publish_retry_max``
-— separate, permissive reads of optional top-level keys (``record_url_base`` and
-``publish_retry_max`` respectively) that ``load_config``'s validated
-``list[Vault]`` does not carry forward.
+``write_config_atomic``, ``read_record_url_base``, ``read_publish_retry_max``,
+and ``read_makes_vault_content`` — separate reads of optional top-level keys
+(``record_url_base``, ``publish_retry_max``, and ``makes_vault_content``
+respectively) that ``load_config``'s validated ``list[Vault]`` does not carry
+forward.
+
+**Where a host's author/non-author declaration lives, and why here.** A host
+declares whether it *makes* vault content (as opposed to only reading/
+publishing what other hosts wrote) via ``makes_vault_content`` in this same
+``config.json`` — not in any vault, and not in camp's hosts file. It cannot
+live in a vault, because that would let a vault sync change what a host
+believes about itself, and a host holding the only copy of a day's work must
+never have that belief moved out from under it by someone else's push. It
+cannot live in camp's hosts file either, because that file enumerates *remote*
+machines for a cluster; a solitary laptop — the case this flag exists to
+protect — appears in nobody's registry of a cluster of one. ``config.json`` is
+already host-local, already carries top-level scalars like
+``publish_retry_max``, and already has the read-accessor shape
+(``read_makes_vault_content``) to copy. See that function's docstring for the
+fail-safe default (absent/unparseable reads as author) and the refusal rule
+for a non-bool value.
 
 **Mutation API:**
 
@@ -426,6 +443,56 @@ def read_publish_retry_max(env: dict | None = None) -> int | None:
     value = data.get("publish_retry_max") if isinstance(data, dict) else None
     if isinstance(value, bool) or not isinstance(value, int):
         return None
+    return value
+
+
+# ---------------------------------------------------------------------------
+# read_makes_vault_content
+# ---------------------------------------------------------------------------
+
+
+def read_makes_vault_content(env: dict | None = None) -> bool | None:
+    """Return the top-level ``makes_vault_content`` bool from config.json, or ``None``.
+
+    Backs the host's own author/non-author declaration (see
+    :func:`lore.cli.resolve.host_is_author`): whether THIS host is a source of
+    new vault content, as opposed to one that only reads/publishes what other
+    hosts wrote. Deliberately host-local — read from this file, never from any
+    vault's contents — so no vault sync can change what a host believes about
+    itself; a cluster of one has no registry to consult and camp's hosts file
+    names remote machines only, so a solitary host would appear in neither.
+
+    Unlike :func:`read_record_url_base` / :func:`read_publish_retry_max`,
+    which fold every malformed shape into the same permissive ``None``, a
+    *present* value that is not a bool is refused (raises
+    :class:`VaultConfigError`) rather than coerced or silently dropped: this
+    flag gates whether a host may ever discard local work, and coercing a
+    stray string like ``"false"`` one way or the other is exactly how a host
+    would end up silently on the wrong side of that fail-safe. ``None`` is
+    reserved for the cases that must default to author elsewhere (see
+    :func:`lore.cli.resolve.host_is_author`) — the file is missing,
+    unreadable, not valid JSON, or valid JSON with the key simply absent.
+
+    Args:
+        env: Optional ``{str: str}`` XDG environment override, forwarded to
+             :func:`_resolve_config_path` (see that function's ``env`` docs).
+
+    Raises:
+        VaultConfigError: ``makes_vault_content`` is present but not a bool.
+    """
+    try:
+        config_path = _resolve_config_path(env=env)
+        data = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict) or "makes_vault_content" not in data:
+        return None
+    value = data["makes_vault_content"]
+    if not isinstance(value, bool):
+        raise VaultConfigError(
+            "config.json's makes_vault_content must be a bool "
+            f"(true or false), got {value!r}"
+        )
     return value
 
 

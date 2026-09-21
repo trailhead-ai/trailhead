@@ -133,6 +133,74 @@ def resolve():
     return load_script("lore.cli.resolve")
 
 
+# ── host_is_author — the fail-safe author/non-author default (unit) ───────
+#
+# A host that declares nothing is an author host: a host holding the only
+# copy of a day's work must never discard it, and a host whose owner cannot
+# resolve a conflict must still be allowed to. The three ambiguous inputs
+# below (key absent, config file absent, config unparseable) are kept
+# together as one enumerated set because they are the same claim — every
+# case read_makes_vault_content answers with None must resolve to True here.
+# ---------------------------------------------------------------------------
+
+
+def _write_lore_config(tmp_path, data: dict) -> None:
+    config_lore_dir = tmp_path / "config" / "lore"
+    config_lore_dir.mkdir(parents=True, exist_ok=True)
+    (config_lore_dir / "config.json").write_text(json.dumps(data))
+
+
+def test_host_is_author_true_when_declared_true(tmp_path, resolve):
+    _write_lore_config(tmp_path, {"makes_vault_content": True})
+    assert resolve.host_is_author() is True
+
+
+def test_host_is_author_false_when_declared_false(tmp_path, resolve):
+    _write_lore_config(tmp_path, {"makes_vault_content": False})
+    assert resolve.host_is_author() is False
+
+
+def test_host_is_author_defaults_to_true_when_key_absent(tmp_path, resolve):
+    _write_lore_config(tmp_path, {"vaults": []})
+    assert resolve.host_is_author() is True
+
+
+def test_host_is_author_defaults_to_true_when_config_file_absent(tmp_path, resolve):
+    assert resolve.host_is_author() is True
+
+
+def test_host_is_author_defaults_to_true_when_config_unparseable(tmp_path, resolve):
+    config_lore_dir = tmp_path / "config" / "lore"
+    config_lore_dir.mkdir(parents=True, exist_ok=True)
+    (config_lore_dir / "config.json").write_text("{not valid json")
+    assert resolve.host_is_author() is True
+
+
+def test_host_is_author_propagates_the_refusal_of_a_non_boolean(tmp_path, resolve):
+    """A present-but-non-bool declaration is refused all the way out to the
+    caller. The accessor raising is only half the property: the resolver must
+    not catch it and substitute a default, because that would turn a config
+    someone got wrong into a silent answer about whether to discard work."""
+    _write_lore_config(tmp_path, {"makes_vault_content": "false"})
+    from lore.vault import config as vault_config_mod
+
+    with pytest.raises(vault_config_mod.VaultConfigError):
+        resolve.host_is_author()
+
+
+def test_host_is_author_is_host_local_not_vault_derived(tmp_path, resolve):
+    """The answer binds to this host's own config, never to vault-side content.
+    A decoy config.json sitting where a synced vault would put one must not
+    move the result — otherwise a teammate's synced file could flip this
+    host into discarding its own unpublished work."""
+    _write_lore_config(tmp_path, {"makes_vault_content": False})
+    vault_dir = tmp_path / "vault"
+    vault_dir.mkdir(exist_ok=True)
+    (vault_dir / "config.json").write_text(json.dumps({"makes_vault_content": True}))
+
+    assert resolve.host_is_author() is False
+
+
 # ── field-wise merge (unit) ────────────────────────────────────────────────
 
 
@@ -241,6 +309,116 @@ def test_the_report_carries_absent_distinctly_from_a_null_value(resolve):
     assert payload["conflicts"][0]["remote"]["absent"] is False
 
 
+# ── the free-write zone: classification by path class, not by one tree ─────
+
+
+@pytest.mark.parametrize("path,expected", [
+    ("sites/board/index.html", True),
+    ("sites/board/sites/index.html", True),
+    # A site's own markdown and JSON are site content, not records: the
+    # top-level sites/ tree is a free-write zone whatever a file in it is
+    # named, and a path refused here has no settlement route at all — the
+    # automatic take skips it and take-file refuses it.
+    ("sites/board/notes.md", True),
+    ("sites/board/data.json", True),
+    ("sites/notes.md", True),
+    ("sites/data.json", True),
+    ("README.md", True),
+    (".gitignore", True),
+    ("area/sites/index.html", False),
+    ("oracle/a-prophecy.json", False),
+    # Record-shaped means exactly <kind>/<name>.md — one directory segment and
+    # a file. Deeper than that is not a record path under any kind.
+    ("oracle/nested/a-prophecy.json", True),
+    (".git/config", False),
+    # A record tree is refused at every depth, and by the name the filesystem
+    # will actually use. macOS and Windows both treat these as the same
+    # directory as "task/", so classifying them free-write would let a raw
+    # remote blob land inside a record tree without passing the record write
+    # path — the one thing this fence exists to prevent.
+    ("Task/nested/record.md", False),
+    ("TASK/nested/x.json", False),
+    ("task./nested/record.md", False),
+    ("task /nested/record.md", False),
+    ("task/nested/deeper/x.png", False),
+    # Files git itself reads back out of the working tree to decide how to
+    # treat it — a filter, a diff driver, a submodule URL — are not
+    # administrivia a sweep may take from the remote unattended.
+    (".gitattributes", False),
+    (".gitmodules", False),
+    # Still administrivia, and still free-write.
+    (".gitignore", True),
+])
+def test_is_free_write_path_classifies_by_path_class_not_by_tree(resolve, path, expected):
+    assert resolve._is_free_write_path(path) is expected
+
+
+# ── the three-way stage answer: parsed / absent / unreadable ───────────────
+
+
+def _stage_blob(vault: Path, stage: int, path: str, content: str) -> None:
+    """Put ``content`` directly into one index stage, with no merge/rebase."""
+    proc = subprocess.run(
+        ["git", "-C", str(vault), "hash-object", "-w", "--stdin"],
+        input=content, capture_output=True, text=True,
+    )
+    assert proc.returncode == 0, proc.stderr
+    sha = proc.stdout.strip()
+    proc = subprocess.run(
+        ["git", "-C", str(vault), "update-index", "--add", "--index-info"],
+        input=f"100644 {sha} {stage}\t{path}\n", capture_output=True, text=True,
+    )
+    assert proc.returncode == 0, proc.stderr
+
+
+def test_an_absent_stage_answers_absent_for_the_sidecar_reader(resolve, tmp_path):
+    vault = _init_vault(tmp_path / "vault")
+
+    result = resolve._load_json_stage(vault, 2, "task/never-staged.json")
+
+    assert result is resolve.StageStatus.ABSENT
+
+
+def test_an_absent_stage_answers_absent_for_the_body_reader(resolve, tmp_path):
+    vault = _init_vault(tmp_path / "vault")
+
+    result = resolve._stage_text(vault, 2, "task/never-staged.md")
+
+    assert result is resolve.StageStatus.ABSENT
+
+
+def test_a_stage_with_non_json_bytes_answers_unreadable_not_absent(resolve, tmp_path):
+    vault = _init_vault(tmp_path / "vault")
+    _stage_blob(vault, 2, "task/x.json", "not json at all {{{")
+
+    result = resolve._load_json_stage(vault, 2, "task/x.json")
+
+    assert result is resolve.StageStatus.UNREADABLE
+    assert result is not resolve.StageStatus.ABSENT
+
+
+@pytest.mark.parametrize("payload", ["[1, 2]", '"a string"', "42", "null"])
+def test_a_stage_with_valid_json_that_is_not_an_object_answers_unreadable(
+    resolve, tmp_path, payload
+):
+    vault = _init_vault(tmp_path / "vault")
+    _stage_blob(vault, 2, "task/x.json", payload)
+
+    result = resolve._load_json_stage(vault, 2, "task/x.json")
+
+    assert result is resolve.StageStatus.UNREADABLE
+
+
+def test_a_stage_with_a_valid_json_object_answers_parsed_byte_equivalent(resolve, tmp_path):
+    vault = _init_vault(tmp_path / "vault")
+    staged = {"kind": "task", "status": "open", "title": "T"}
+    _stage_blob(vault, 2, "task/x.json", json.dumps(staged))
+
+    result = resolve._load_json_stage(vault, 2, "task/x.json")
+
+    assert result == staged
+
+
 # ── two-device auto-merge (end to end) ─────────────────────────────────────
 
 
@@ -282,27 +460,25 @@ def test_disjoint_sidecar_edits_resolve_with_no_judgment(tmp_path):
     assert "conflict" not in r.stdout.lower(), "nothing needed judgment"
 
 
-def test_sync_hands_off_to_resolve_and_resolve_finishes_the_rebase(tmp_path):
-    """The real path: sync aborts and names the remedy, resolve completes it."""
+def test_sync_hands_off_to_the_resolver_and_settles_a_settleable_conflict_itself(tmp_path):
+    """Breaking change (see CHANGELOG.md): a settleable conflict is no longer
+    aborted-and-reported with a `lore resolve` remedy — `lore sync` alone
+    settles and publishes it, with no separate `lore resolve` call needed and
+    no remedy text printed anywhere."""
     fx = _Fixture(tmp_path)
     record_id = _diverge_on_disjoint_fields(fx)
 
     synced = fx.cli(["sync"])
-    assert synced.returncode == 1
-    assert "lore resolve" in synced.stderr, "sync names the new remedy"
+    assert synced.returncode == 0, synced.stderr
+    assert "lore resolve" not in synced.stdout
+    assert "lore resolve" not in synced.stderr, "the retired remedy is never printed"
     assert "git pull --rebase" not in synced.stderr, "the manual remedy is retired"
 
-    # The remedy sync prints must be runnable verbatim — it names the vault by
-    # directory, which `lore resolve` accepts alongside the configured name.
-    assert f"lore resolve {fx.vault.name}" in synced.stderr
-
-    r = fx.cli(["resolve", "default"])
-    assert r.returncode == 0, r.stderr
     assert fx.sidecar(record_id)["status"] == "ready"
     assert fx.sidecar(record_id)["title"] == "Remote Title"
-    # The merged history reached origin.
+    # The merged history reached origin — sync's own hand-off pushed it.
     ahead = _git(fx.vault, "rev-list", "--count", f"origin/{fx.branch}..HEAD").stdout.strip()
-    assert ahead == "0", "resolve pushed the settled history"
+    assert ahead == "0", "sync pushed the settled history itself"
 
 
 def test_conflicts_at_two_rebase_steps_are_each_read_and_merged(tmp_path):
@@ -566,8 +742,9 @@ def test_a_body_conflict_parks_as_slot_body(tmp_path):
     assert body[0]["remote"]["value"] == "remote prose\n"
 
 
-def test_a_sites_tree_conflict_lists_under_files(tmp_path):
-    """``sites/`` holds static pages, not records — no record-id confinement."""
+def test_a_sites_tree_conflict_takes_the_published_side_automatically(tmp_path):
+    """AC27: a non-record path is not judgment — the published side wins outright,
+    instead of being parked under ``files`` for a person to settle by hand."""
     fx = _Fixture(tmp_path)
     fx.create("task", "A Task")
     site = fx.vault / "sites" / "board" / "index.html"
@@ -584,11 +761,196 @@ def test_a_sites_tree_conflict_lists_under_files(tmp_path):
 
     r = fx.cli(["resolve", "default", "--json"])
     assert r.returncode == 0, r.stderr
+
+    # Orientation: the two sides are distinguishable, and the assertion below
+    # names the REMOTE (published) bytes specifically — a test that passed on
+    # either stage would not pin which side resolve took.
+    assert json.loads(r.stdout) == {"vault": "default", "conflicts": [], "files": []}
+    assert site.read_text() == "<p>remote</p>\n", "the published side landed, not local"
+    assert not (fx.vault / ".git" / "rebase-merge").exists(), "the rebase completed"
+
+
+def test_a_sites_file_deleted_on_the_published_side_is_removed(tmp_path):
+    """Symmetric with the record deletion rule: a deletion wins over a change."""
+    fx = _Fixture(tmp_path)
+    fx.create("task", "A Task")
+    site = fx.vault / "sites" / "board" / "index.html"
+    site.parent.mkdir(parents=True)
+    site.write_text("<p>base</p>\n")
+    fx.publish()
+    fx.clone_device_b()
+
+    (fx.other / "sites" / "board" / "index.html").unlink()
+    _git(fx.other, "add", "-A")
+    fx.push_device_b()
+
+    site.write_text("<p>local</p>\n")
+    _commit(fx.vault, "device A edit")
+
+    r = fx.cli(["resolve", "default", "--json"])
+    assert r.returncode == 0, r.stderr
+
+    assert json.loads(r.stdout) == {"vault": "default", "conflicts": [], "files": []}
+    assert not site.exists(), "the deletion wins over the change on the other side"
+    assert not (fx.vault / ".git" / "rebase-merge").exists(), "the rebase completed"
+
+
+def test_a_root_gitignore_conflict_takes_the_published_side(tmp_path):
+    """``.gitignore`` is vault-root administrivia, not ``sites/`` — but is still
+    free-write by path CLASS, and unlike a static page it governs this host's
+    own sync behaviour, so it earns its own test rather than riding in unexamined."""
+    fx = _Fixture(tmp_path)
+    fx.create("task", "A Task")
+    fx.publish()
+    fx.clone_device_b()
+
+    (fx.other / ".gitignore").write_text("*.lock\nremote-only\n")
+    fx.push_device_b()
+
+    (fx.vault / ".gitignore").write_text("*.lock\nlocal-only\n")
+    _commit(fx.vault, "device A edit")
+
+    r = fx.cli(["resolve", "default", "--json"])
+    assert r.returncode == 0, r.stderr
+
+    assert json.loads(r.stdout) == {"vault": "default", "conflicts": [], "files": []}
+    assert (fx.vault / ".gitignore").read_text() == "*.lock\nremote-only\n"
+
+
+def test_a_mix_of_records_and_files_settles_both_in_one_replay(tmp_path):
+    """Records settle by structure, non-record files by published side — one pass."""
+    fx = _Fixture(tmp_path)
+    record_id = fx.create("task", "A Task")
+    site = fx.vault / "sites" / "board" / "index.html"
+    site.parent.mkdir(parents=True)
+    site.write_text("<p>base</p>\n")
+    fx.publish()
+    fx.clone_device_b()
+
+    fx.cli_b(["record", "update", record_id, "--status", "done"], stdin_text="")
+    (fx.other / "sites" / "board" / "index.html").write_text("<p>remote</p>\n")
+    fx.push_device_b()
+
+    fx.cli(["record", "update", record_id, "--status", "ready"], stdin_text="")
+    site.write_text("<p>local</p>\n")
+    _commit(fx.vault, "device A edit")
+
+    r = fx.cli(["resolve", "default", "--json"])
+    assert r.returncode == 0, r.stderr
     report = json.loads(r.stdout)
 
+    assert [c["slot"] for c in report["conflicts"]] == ["status"], (
+        "the record conflict is still judgment"
+    )
+    assert report["files"] == [], "the file settled automatically, not parked"
+    assert site.read_text() == "<p>remote</p>\n"
+    assert (fx.vault / ".git" / "rebase-merge").exists(), "the record conflict is still open"
+
+
+def _stop_on_a_sites_conflict(fx: "_Fixture", remote_bytes: bytes) -> Path:
+    """Leave the vault stopped mid-rebase on one conflicted free-write file."""
+    fx.create("task", "A Task")
+    site = fx.vault / "sites" / "page.html"
+    site.parent.mkdir(parents=True, exist_ok=True)
+    site.write_bytes(b"<p>base</p>\n")
+    fx.publish()
+    fx.clone_device_b()
+
+    (fx.other / "sites" / "page.html").write_bytes(remote_bytes)
+    fx.push_device_b()
+
+    site.write_bytes(b"<p>local</p>\n")
+    _commit(fx.vault, "device A edit")
+
+    _git(fx.vault, "fetch", "origin")
+    _git(fx.vault, "rebase", "--empty=drop", f"origin/{fx.branch}")
+    assert (fx.vault / ".git" / "rebase-merge").exists(), "the rebase stopped on the conflict"
+    return site
+
+
+def test_an_oversized_published_blob_is_held_rather_than_taken_unattended(tmp_path, resolve, monkeypatch):
+    """The sweep runs with nobody watching, and the bytes come from the forge.
+
+    Anyone who can push can make one side of a free-write conflict arbitrarily
+    large. Taking it automatically reads the whole thing into this host's
+    memory and then onto its disk, on a host with no person present to notice
+    or stop it. Past the ceiling the conflict is held for a person instead —
+    nothing is lost, and `take-file` still settles it by hand.
+    """
+    fx = _Fixture(tmp_path)
+    site = _stop_on_a_sites_conflict(fx, b"x" * 4096)
+    monkeypatch.setattr(resolve, "_AUTO_TAKE_MAX_BYTES", 64, raising=False)
+
+    reason = resolve._auto_take_published_side(fx.vault, "sites/page.html")
+
+    assert reason is not None, "an oversized blob is held, not taken"
+    assert "sites/page.html" in reason
+    # Git's own conflict markers are still there: the take wrote nothing, so
+    # the path is exactly as the stopped rebase left it.
+    landed = site.read_bytes()
+    assert landed != b"x" * 4096, "the published blob was not landed"
+    assert b"<<<<<<<" in landed, "the path is as the stopped rebase left it"
+
+
+def test_a_published_blob_under_the_ceiling_is_taken_as_before(tmp_path, resolve, monkeypatch):
+    """The ceiling refuses only what is over it — the ordinary take is unchanged."""
+    fx = _Fixture(tmp_path)
+    site = _stop_on_a_sites_conflict(fx, b"<p>remote</p>\n")
+    monkeypatch.setattr(resolve, "_AUTO_TAKE_MAX_BYTES", 64, raising=False)
+
+    reason = resolve._auto_take_published_side(fx.vault, "sites/page.html")
+
+    assert reason is None, "a small blob settles with no report"
+    assert site.read_bytes() == b"<p>remote</p>\n", "the published side landed"
+
+
+def test_a_symlink_planted_at_a_conflicted_file_is_refused_not_followed(tmp_path):
+    """The automatic take must confine its write exactly as ``take-file`` does.
+
+    Git itself never conflicts on a symlink swap mid-rebase — the swap has to be
+    planted directly in the worktree, at the exact conflicted path, between the
+    rebase stopping and resolve's own step processing running against it. So this
+    starts the rebase by hand rather than through the CLI, to get a window to
+    plant it before the automatic take ever sees the path.
+    """
+    fx = _Fixture(tmp_path)
+    fx.create("task", "A Task")
+    site = fx.vault / "sites" / "evil.html"
+    site.parent.mkdir(parents=True)
+    site.write_text("<p>base</p>\n")
+    fx.publish()
+    fx.clone_device_b()
+
+    (fx.other / "sites" / "evil.html").write_text("<p>remote</p>\n")
+    fx.push_device_b()
+
+    site.write_text("<p>local</p>\n")
+    _commit(fx.vault, "device A edit")
+
+    _git(fx.vault, "fetch", "origin")
+    _git(fx.vault, "rebase", "--empty=drop", f"origin/{fx.branch}")
+    assert (fx.vault / ".git" / "rebase-merge").exists(), "the rebase stopped on the conflict"
+
+    outside = fx.tmp / "outside.html"
+    outside.write_text("untouched\n")
+    site.unlink()
+    site.symlink_to(outside)
+
+    r = fx.cli(["resolve", "default", "--json"])
+
+    assert r.returncode == 0, r.stderr
+    report = json.loads(r.stdout)
     assert report["conflicts"] == []
-    assert [f["path"] for f in report["files"]] == ["sites/board/index.html"]
-    assert "take-file" in " ".join(f["reason"] for f in report["files"])
+    assert [f["path"] for f in report["files"]] == ["sites/evil.html"], (
+        "the refusal names the path"
+    )
+    assert "sites/evil.html" in report["files"][0]["reason"], "the refusal names the path"
+    assert "symlink" in report["files"][0]["reason"].lower(), (
+        "the held reason is specific to the confinement refusal, not the generic "
+        "'settle by hand' reason a genuinely-outside-the-zone path gets"
+    )
+    assert outside.read_text() == "untouched\n", "the symlink target was never written through"
+    assert (fx.vault / ".git" / "rebase-merge").exists(), "the conflict is still open, held"
 
 
 # ── report surface ─────────────────────────────────────────────────────────
@@ -751,11 +1113,134 @@ def test_record_delete_refuses_at_a_mid_rebase_vault(tmp_path):
     assert (fx.vault / f"{record_id}.md").exists(), "a refused delete writes nothing"
 
 
-# ── delete/modify refuses on the body too, not only the sidecar ────────────
+# ── a deletion wins over a change on the other side, symmetrically ─────────
 
 
-def test_a_body_only_delete_modify_refuses_instead_of_landing_an_empty_body(tmp_path):
-    """The sidecar is identical on both sides, so only the ``.md`` is unmerged."""
+def test_a_remote_deletion_wins_over_a_local_change(tmp_path):
+    """Remote (device B) deletes the record; local (device A) changes it.
+
+    The deletion wins: the record is gone from the tree, its removal staged,
+    and the replay completes with no parked conflict for it.
+    """
+    fx = _Fixture(tmp_path)
+    record_id = fx.create("task", "A Task")
+    fx.publish()
+    fx.clone_device_b()
+
+    r = fx.cli_b(["record", "delete", record_id, "--force"])
+    assert r.returncode == 0, r.stderr
+    fx.push_device_b("device B deleted the record")
+
+    fx.cli(["record", "update", record_id, "--status", "ready"], stdin_text="")
+    _commit(fx.vault, "device A edit")
+
+    r = fx.cli(["resolve", "default"])
+
+    assert r.returncode == 0, r.stderr
+    assert "conflict" not in r.stdout.lower(), "nothing needed judgment"
+    assert not (fx.vault / f"{record_id}.md").exists()
+    assert not (fx.vault / f"{record_id}.json").exists()
+    assert not (fx.vault / ".git" / "rebase-merge").exists(), "the rebase completed"
+    assert _git(fx.vault, "status", "--porcelain").stdout.strip() == ""
+
+
+def test_a_local_deletion_wins_over_a_remote_change(tmp_path):
+    """The symmetric case: local (device A) deletes, remote (device B) changes.
+
+    Whichever side did the deleting, the deletion wins — the vary-the-input
+    half of this pair is which side deleted.
+    """
+    fx = _Fixture(tmp_path)
+    record_id = fx.create("task", "A Task")
+    fx.publish()
+    fx.clone_device_b()
+
+    fx.cli_b(["record", "update", record_id, "--status", "ready"], stdin_text="")
+    fx.push_device_b("device B edited the record")
+
+    r = fx.cli(["record", "delete", record_id, "--force"])
+    assert r.returncode == 0, r.stderr
+    _commit(fx.vault, "device A deleted the record")
+
+    r = fx.cli(["resolve", "default"])
+
+    assert r.returncode == 0, r.stderr
+    assert "conflict" not in r.stdout.lower(), "nothing needed judgment"
+    assert not (fx.vault / f"{record_id}.md").exists()
+    assert not (fx.vault / f"{record_id}.json").exists()
+    assert not (fx.vault / ".git" / "rebase-merge").exists(), "the rebase completed"
+    assert _git(fx.vault, "status", "--porcelain").stdout.strip() == ""
+
+
+def test_the_changed_version_stays_recoverable_from_history(tmp_path):
+    """Deletion wins, but the losing side's content is not gone — it is git history.
+
+    The changed version's commit is what the deletion's replay drops silently
+    (a real empty commit once the deletion is staged over it), but the commit
+    object itself is still reachable by sha until gc, and its blob for this
+    record still resolves to the exact changed content.
+    """
+    fx = _Fixture(tmp_path)
+    record_id = fx.create("task", "A Task")
+    fx.publish()
+    fx.clone_device_b()
+
+    r = fx.cli_b(["record", "delete", record_id, "--force"])
+    assert r.returncode == 0, r.stderr
+    fx.push_device_b("device B deleted the record")
+
+    fx.cli(["record", "update", record_id, "--status", "ready"], stdin_text="")
+    losing_sha = _commit(fx.vault, "device A edit")
+
+    r = fx.cli(["resolve", "default"])
+    assert r.returncode == 0, r.stderr
+    assert not (fx.vault / f"{record_id}.json").exists(), "deletion still won"
+
+    recovered = _git(fx.vault, "show", f"{losing_sha}:{record_id}.json")
+    assert recovered.returncode == 0, recovered.stderr
+    recovered_sidecar = json.loads(recovered.stdout)
+    assert recovered_sidecar["status"] == "ready", (
+        "the changed version device A's commit carried is still readable from "
+        "its own (now-unreferenced-by-HEAD) sha"
+    )
+
+
+# ── delete/modify refuses on the sidecar, same as it does on the body ──────
+
+
+def test_a_sidecar_only_delete_modify_takes_the_removal(tmp_path):
+    """An absent sidecar stage takes the removal — the sidecars, not the reverse."""
+    fx = _Fixture(tmp_path)
+    record_id = fx.create("task", "A Task")
+    fx.publish()
+    fx.clone_device_b()
+
+    (fx.other / f"{record_id}.json").unlink()
+    fx.push_device_b("device B removed the sidecar")
+
+    r = fx.cli(["record", "update", record_id, "--status", "ready"], stdin_text="")
+    assert r.returncode == 0, r.stderr
+    _commit(fx.vault, "device A edit")
+
+    r = fx.cli(["resolve", "default"])
+
+    assert r.returncode == 0, r.stderr
+    assert "deleted on one device and edited on the other" not in r.stderr
+    assert not (fx.vault / f"{record_id}.md").exists(), "the whole record is removed"
+    assert not (fx.vault / f"{record_id}.json").exists()
+    assert not (fx.vault / ".git" / "rebase-merge").exists()
+
+
+# ── delete/modify takes the removal on the body too, not only the sidecar ──
+
+
+def test_a_body_only_delete_modify_takes_the_removal_not_an_empty_body(tmp_path):
+    """The sidecar is identical on both sides, so only the ``.md`` is unmerged.
+
+    This is the failure mode ``test_resolve_core.py:764`` (pre-reversal) was
+    written to prevent — landing an empty body from an absent stage — still
+    prevented, now by removing the whole record rather than by refusing.
+    """
     fx = _Fixture(tmp_path)
     record_id = fx.create("task", "A Task")
     fx.publish()
@@ -769,6 +1254,1389 @@ def test_a_body_only_delete_modify_refuses_instead_of_landing_an_empty_body(tmp_
 
     r = fx.cli(["resolve", "default"])
 
-    assert r.returncode == 1
-    assert "deleted on one device and edited on the other" in r.stderr
-    assert record_id in r.stderr
+    assert r.returncode == 0, r.stderr
+    assert "deleted on one device and edited on the other" not in r.stderr
+    assert not (fx.vault / f"{record_id}.md").exists(), (
+        "removed, not left behind with an empty body"
+    )
+    assert not (fx.vault / f"{record_id}.json").exists()
+    assert not (fx.vault / ".git" / "rebase-merge").exists()
+
+
+# ── a delete/delete collision settles as a removal with no conflict parked ─
+
+
+def test_a_delete_delete_collision_settles_with_no_conflict_parked(tmp_path):
+    """Both sides removed the same record — the outcome is the same removal."""
+    fx = _Fixture(tmp_path)
+    record_id = fx.create("task", "A Task")
+    fx.publish()
+    fx.clone_device_b()
+
+    r = fx.cli_b(["record", "delete", record_id, "--force"])
+    assert r.returncode == 0, r.stderr
+    fx.push_device_b("device B deleted the record")
+
+    r = fx.cli(["record", "delete", record_id, "--force"])
+    assert r.returncode == 0, r.stderr
+    _commit(fx.vault, "device A deleted the record")
+
+    r = fx.cli(["resolve", "default"])
+
+    assert r.returncode == 0, r.stderr
+    assert "conflict" not in r.stdout.lower(), "nothing needed judgment"
+    assert not (fx.vault / f"{record_id}.md").exists()
+    assert not (fx.vault / f"{record_id}.json").exists()
+    assert not (fx.vault / ".git" / "rebase-merge").exists()
+    assert _git(fx.vault, "status", "--porcelain").stdout.strip() == ""
+
+
+# ── control: a record only one side touched still lands unchanged ─────────
+
+
+def test_a_record_only_one_side_touched_still_lands_unchanged(tmp_path):
+    """This path did not widen to records that never conflicted.
+
+    Device B edits record A only; device A edits record B only. Neither
+    record's stages ever go through the deletion branch, and both land with
+    the touching side's content, present and unchanged.
+    """
+    fx = _Fixture(tmp_path)
+    record_a = fx.create("task", "Record A")
+    record_b = fx.create("task", "Record B")
+    fx.publish()
+    fx.clone_device_b()
+
+    fx.cli_b(["record", "update", record_a, "--status", "ready"], stdin_text="")
+    fx.push_device_b("device B edited record A")
+
+    fx.cli(["record", "update", record_b, "--status", "done"], stdin_text="")
+    _commit(fx.vault, "device A edited record B")
+
+    r = fx.cli(["resolve", "default"])
+
+    assert r.returncode == 0, r.stderr
+    assert "conflict" not in r.stdout.lower(), "nothing needed judgment"
+    assert fx.sidecar(record_a)["status"] == "ready", "device B's edit landed"
+    assert fx.sidecar(record_b)["status"] == "done", "device A's edit landed"
+    assert (fx.vault / f"{record_a}.md").exists()
+    assert (fx.vault / f"{record_b}.md").exists()
+
+
+# ── an unreadable (not absent) sidecar is HELD, not a deletion, not refused ─
+
+
+def test_an_unreadable_sidecar_on_one_side_still_refuses_not_a_deletion(tmp_path):
+    """A corrupt sidecar is not a deletion — treating it as one would destroy
+    the other side's work on a merely-unparseable file. This split is owned by
+    a sibling task; this test pins that this task's deletion branch did not
+    widen to cover it. The refusal itself is reversed by this task (see the
+    ``_holds_the_record`` tests below) — this test now pins only the half of
+    the old behaviour that still holds: nothing new is ever written.
+    """
+    fx = _Fixture(tmp_path)
+    record_id = fx.create("task", "A Task")
+    fx.publish()
+    fx.clone_device_b()
+
+    (fx.other / f"{record_id}.json").write_text("{not valid json", encoding="utf-8")
+    fx.push_device_b("device B corrupted the sidecar")
+
+    fx.cli(["record", "update", record_id, "--status", "ready"], stdin_text="")
+    _commit(fx.vault, "device A edit")
+
+    r = fx.cli(["resolve", "default"])
+
+    assert r.returncode == 0, r.stderr
+    assert "no readable sidecar" not in r.stderr, (
+        "the whole-vault refusal is retired — this record is held, not refused"
+    )
+    assert (fx.vault / f"{record_id}.md").exists(), "a held resolution writes nothing new"
+
+
+def test_both_sides_unreadable_sidecar_holds_the_record_nothing_written(tmp_path, resolve):
+    """Neither side's sidecar parses — the record is held whole, not partly written."""
+    fx = _Fixture(tmp_path)
+    record_id = fx.create("task", "A Task")
+    fx.publish()
+    fx.clone_device_b()
+
+    (fx.other / f"{record_id}.json").write_text("{remote not valid", encoding="utf-8")
+    fx.push_device_b("device B corrupted the sidecar")
+
+    (fx.vault / f"{record_id}.json").write_text("{local not valid", encoding="utf-8")
+    _commit(fx.vault, "device A corrupted the sidecar too")
+
+    r = fx.cli(["resolve", "default", "--json"])
+
+    assert r.returncode == 0, r.stderr
+    report = json.loads(r.stdout)
+    held = [c for c in report["conflicts"] if c["record_id"] == record_id]
+    assert len(held) == 1, "the record is parked as a held conflict"
+    assert held[0]["reason"] == resolve.UNREADABLE_SIDECAR
+
+    # Worktree bytes: still git's own conflict-marked file, untouched by resolve
+    # (it never rewrites or stages a held record's worktree content).
+    worktree_text = (fx.vault / f"{record_id}.json").read_text(encoding="utf-8")
+    assert "<<<<<<<" in worktree_text and ">>>>>>>" in worktree_text, (
+        "resolve did not write over git's own conflict markers"
+    )
+    assert (fx.vault / f"{record_id}.md").exists(), "the body is never removed either"
+
+    # Index: still genuinely unmerged — nothing was staged as resolved.
+    unmerged = _git(fx.vault, "ls-files", "-u", "--", f"{record_id}.json").stdout
+    assert unmerged.strip() != "", "the sidecar path is still conflicted in the index"
+    staged = _git(fx.vault, "show", f":0:{record_id}.json")
+    assert staged.returncode != 0, "no merged (stage 0) entry exists — nothing was resolved"
+
+
+def test_exactly_one_side_unreadable_sidecar_holds_not_a_silent_take(tmp_path, resolve):
+    """One side parses cleanly; the record is still held, not taken from that side.
+
+    This is the pair that distinguishes the implemented rule from the
+    criterion's literal (both-sides) reading: only the REMOTE side is corrupt
+    here, and the LOCAL side is an ordinary valid sidecar.
+    """
+    fx = _Fixture(tmp_path)
+    record_id = fx.create("task", "A Task")
+    fx.publish()
+    fx.clone_device_b()
+
+    (fx.other / f"{record_id}.json").write_text("{remote not valid", encoding="utf-8")
+    fx.push_device_b("device B corrupted the sidecar")
+
+    fx.cli(["record", "update", record_id, "--status", "ready"], stdin_text="")
+    _commit(fx.vault, "device A's edit is perfectly readable")
+
+    r = fx.cli(["resolve", "default", "--json"])
+
+    assert r.returncode == 0, r.stderr
+    report = json.loads(r.stdout)
+    held = [c for c in report["conflicts"] if c["record_id"] == record_id]
+    assert len(held) == 1
+    assert held[0]["reason"] == resolve.UNREADABLE_SIDECAR
+
+    staged = _git(fx.vault, "show", f":0:{record_id}.json")
+    assert staged.returncode != 0, (
+        "no merged stage exists — the readable (local) side was not silently taken"
+    )
+    unmerged = _git(fx.vault, "ls-files", "-u", "--", f"{record_id}.json").stdout
+    assert unmerged.strip() != "", "still conflicted in the index"
+
+
+def test_unparseable_reason_is_distinct_from_a_both_sides_field_move_in_one_report(
+    tmp_path, resolve
+):
+    """A held record and an ordinary judgment conflict are reported distinctly,
+    in the SAME report, so a caller can branch on which remedy each one needs.
+    """
+    fx = _Fixture(tmp_path)
+    conflict_id = fx.create("task", "Conflicted Task")
+    broken_id = fx.create("task", "Broken Task")
+    fx.publish()
+    fx.clone_device_b()
+
+    fx.cli_b(["record", "update", conflict_id, "--status", "done"], stdin_text="")
+    (fx.other / f"{broken_id}.json").write_text("{not valid", encoding="utf-8")
+    fx.push_device_b("device B: status move + corrupted sidecar")
+
+    fx.cli(["record", "update", conflict_id, "--status", "ready"], stdin_text="")
+    fx.cli(["record", "update", broken_id, "--status", "ready"], stdin_text="")
+    _commit(fx.vault, "device A edits both records")
+
+    r = fx.cli(["resolve", "default", "--json"])
+
+    assert r.returncode == 0, r.stderr
+    report = json.loads(r.stdout)
+    by_record = {c["record_id"]: c for c in report["conflicts"]}
+
+    assert by_record[conflict_id]["reason"] is None, (
+        "an ordinary both-sides field move carries no reason"
+    )
+    assert by_record[broken_id]["reason"] == resolve.UNREADABLE_SIDECAR
+    assert by_record[conflict_id]["reason"] != by_record[broken_id]["reason"]
+
+
+def test_one_unparseable_record_does_not_suppress_the_rest_of_the_replay(tmp_path):
+    """A held record parks itself only — every other record in the same
+    replay still settles, auto-merged and written with no judgment needed.
+    """
+    fx = _Fixture(tmp_path)
+    ok_id = fx.create("task", "OK Task")
+    broken_id = fx.create("task", "Broken Task")
+    fx.publish()
+    fx.clone_device_b()
+
+    fx.cli_b(["record", "update", ok_id, "--title", "Remote Title"], stdin_text="")
+    (fx.other / f"{broken_id}.json").write_text("{not valid", encoding="utf-8")
+    fx.push_device_b("device B: title move + corrupted sidecar")
+
+    fx.cli(["record", "update", ok_id, "--status", "ready"], stdin_text="")
+    fx.cli(["record", "update", broken_id, "--status", "ready"], stdin_text="")
+    _commit(fx.vault, "device A edits both records")
+
+    r = fx.cli(["resolve", "default", "--json"])
+
+    assert r.returncode == 0, r.stderr
+    report = json.loads(r.stdout)
+    held = [c for c in report["conflicts"] if c["record_id"] == broken_id]
+    assert len(held) == 1, "the broken record parks"
+    assert [c for c in report["conflicts"] if c["record_id"] == ok_id] == [], (
+        "the other record needed no judgment at all"
+    )
+
+    ok_sidecar = fx.sidecar(ok_id)
+    assert ok_sidecar["status"] == "ready", "local's slot on the other record still landed"
+    assert ok_sidecar["title"] == "Remote Title", "remote's slot on the other record still landed"
+
+    staged = _git(fx.vault, "show", f":0:{broken_id}.json")
+    assert staged.returncode != 0, "the broken record was never written or staged"
+
+
+def test_a_valid_but_policy_refused_sidecar_is_not_reported_as_unparseable(tmp_path, resolve):
+    """Control: valid JSON the graph guards refuse is a DIFFERENT state.
+
+    A depends-on cycle is valid JSON that ``write_record``'s guard evaluation
+    refuses — the policy-failure path, which still halts the whole vault
+    (``ResolveError``, exit 1) exactly as before. It must never be conflated
+    with the unparseable-sidecar hold this task adds.
+    """
+    sidecar_mod = load_script("lore.record.sidecar")
+    fx = _Fixture(tmp_path)
+    record_id = fx.create("task", "A Task")
+    fx.publish()
+    fx.clone_device_b()
+
+    # Device B moves `status` through the CLI, then plants the self-cycle by
+    # hand — the guards would refuse `--depends-on <self>` locally, which is the
+    # whole reason this side is written directly. The hand-write goes through the
+    # canonical serializer so `depends-on` lands in its sorted position: a raw
+    # `json.dumps` appends it to the file's tail instead, where it no longer
+    # shares a diff hunk with anything device A touches.
+    stem = record_id.split("/", 1)[1]
+    r = fx.cli_b(["record", "update", record_id, "--status", "ready"], stdin_text="")
+    assert r.returncode == 0, r.stderr
+    remote_path = fx.other / f"{record_id}.json"
+    remote_sidecar = json.loads(remote_path.read_text(encoding="utf-8"))
+    remote_sidecar["depends-on"] = [stem]  # a task that depends on itself: a cycle
+    remote_path.write_text(sidecar_mod.dumps(remote_sidecar), encoding="utf-8")
+    fx.push_device_b("device B set a self-cycle depends-on directly")
+
+    r = fx.cli(["record", "update", record_id, "--title", "Local Title"], stdin_text="")
+    assert r.returncode == 0, r.stderr
+    _commit(fx.vault, "device A edit (disjoint field)")
+
+    # The premise: `status` and `title` serialize onto neighbouring lines, so
+    # these edits really do collide as text and the record reaches the resolver.
+    # Without this the test passes vacuously whenever git auto-merges the two
+    # sides, landing the cycle with the guards never consulted.
+    _git(fx.vault, "fetch", "origin")
+    rc = _git(fx.vault, "rebase", f"origin/{fx.branch}")
+    assert rc.returncode != 0, "the fixture must really conflict"
+    _git(fx.vault, "rebase", "--abort")
+
+    r = fx.cli(["resolve", "default"])
+
+    assert r.returncode == 1, r.stdout
+    assert "cycle" in r.stderr
+    assert resolve.UNREADABLE_SIDECAR not in r.stderr, (
+        "a policy refusal is not reported under the unparseable-sidecar reason"
+    )
+
+
+# ── the sweep's entry point: hold instead of park, no person, no CLI tail ──
+
+
+def _use_state(fx: "_Fixture") -> None:
+    """Point the in-process ``resolve_state`` reads/writes at *fx*'s state dir.
+
+    Mirrors ``_Fixture.marker()``'s own env-setting, needed here because
+    ``resolve_for_sweep`` is called directly (never through ``fx.cli``'s
+    subprocess) so nothing else sets ``XDG_STATE_HOME`` — or the committer
+    identity ``write_record``'s provenance stamping requires — for this process.
+    """
+    os.environ["XDG_STATE_HOME"] = str(fx.state)
+    os.environ["LORE_EMAIL"] = "tester@example.com"
+
+
+def _reject_every_push(remote: Path) -> None:
+    """A forge that refuses the push without moving its own history — a
+    protected branch or a permission refusal, not a race this host can win."""
+    hook = remote / "hooks" / "pre-receive"
+    hook.parent.mkdir(parents=True, exist_ok=True)
+    hook.write_text("#!/bin/sh\nexit 1\n")
+    hook.chmod(0o755)
+
+
+def test_a_forge_refusing_the_settled_push_reports_the_forge_not_the_policy(tmp_path):
+    """The reason tag names whose problem it is, and a settled conflict does
+    not change that.
+
+    The resolver merges the disjoint edits and pushes the result in its own
+    finish tail. When the forge refuses THAT push, the vault holds for the
+    same reason any refused push holds — the forge — and reporting a policy
+    failure would send the reader to fix this host's data for a condition only
+    the forge's own settings can clear.
+    """
+    fx = _Fixture(tmp_path)
+    _diverge_on_disjoint_fields(fx)
+    _reject_every_push(fx.remote)
+
+    r = fx.cli(["sync", "--json"])
+    doc = json.loads(r.stdout[r.stdout.index("{"):])
+    entry = doc["vaults"][0]
+
+    assert entry["outcome"] == "holding"
+    assert entry["reason"] == "remote-rejection"
+
+
+def test_the_held_ending_is_clean_and_diverged(tmp_path, resolve):
+    """AC31/AC35: a both-sides move holds the vault clean, not mid-rebase."""
+    fx = _Fixture(tmp_path)
+    record_id, local_sha, remote_sha = _diverge_on_status(fx)
+    _git(fx.vault, "fetch", "origin")
+    _use_state(fx)
+
+    report = resolve.resolve_for_sweep(fx.vault, "default", shared=False)
+
+    assert report["held"] is True
+    assert not (fx.vault / ".git" / "rebase-merge").exists(), "no rebase in progress"
+    assert not (fx.vault / ".git" / "rebase-apply").exists(), "no am-style rebase either"
+    assert not (fx.vault / ".git" / "MERGE_HEAD").exists(), "no merge in progress"
+    branch = _git(fx.vault, "symbolic-ref", "--short", "HEAD").stdout.strip()
+    assert branch == fx.branch, "HEAD is on the branch, not detached"
+    assert _git(fx.vault, "status", "--porcelain").stdout.strip() == "", "tree is clean"
+    assert _git(fx.vault, "rev-parse", "HEAD").stdout.strip() == local_sha, (
+        "the local commit the sweep held is still present at its pre-sweep sha"
+    )
+    ahead = _git(fx.vault, "rev-list", "--count", f"HEAD..origin/{fx.branch}").stdout.strip()
+    assert ahead != "0", "origin is genuinely ahead — diverged, not merely stale"
+
+
+def test_held_marker_names_the_vault_and_an_entered_at(tmp_path, resolve):
+    fx = _Fixture(tmp_path)
+    _diverge_on_status(fx)
+    _git(fx.vault, "fetch", "origin")
+    _use_state(fx)
+
+    report = resolve.resolve_for_sweep(fx.vault, "default", shared=False)
+
+    marker = resolve.resolve_state.read_held_marker(fx.vault)
+    assert marker is not None
+    assert marker["vault"] == fx.vault.name
+    assert marker["entered-at"], "the instant it entered the held state is recorded"
+    assert report["entered-at"] == marker["entered-at"]
+
+
+def test_the_held_local_commit_is_byte_recoverable(tmp_path, resolve):
+    """AC35: nothing local was discarded — the commit is reachable by its own sha."""
+    fx = _Fixture(tmp_path)
+    record_id, local_sha, remote_sha = _diverge_on_status(fx)
+    _git(fx.vault, "fetch", "origin")
+    _use_state(fx)
+
+    resolve.resolve_for_sweep(fx.vault, "default", shared=False)
+
+    cat = _git(fx.vault, "cat-file", "-e", f"{local_sha}^{{commit}}")
+    assert cat.returncode == 0, "the held commit is still a real, readable object"
+    show = _git(fx.vault, "show", f"{local_sha}:{record_id}.json")
+    assert show.returncode == 0
+    assert json.loads(show.stdout)["status"] == "ready", (
+        "the commit's own content, not just its sha, is byte-recoverable"
+    )
+    ancestor = _git(fx.vault, "merge-base", "--is-ancestor", local_sha, "HEAD")
+    assert ancestor.returncode == 0, (
+        "the commit is reachable from the branch tip, not merely a dangling "
+        "object a hard reset would eventually let git garbage-collect"
+    )
+
+
+def test_all_settleable_conflicts_publish_and_leave_no_held_marker(tmp_path, resolve):
+    fx = _Fixture(tmp_path)
+    _diverge_on_disjoint_fields(fx)
+    _git(fx.vault, "fetch", "origin")
+    _use_state(fx)
+
+    report = resolve.resolve_for_sweep(fx.vault, "default", shared=False)
+
+    assert report["held"] is False
+    assert resolve.resolve_state.read_held_marker(fx.vault) is None
+    ahead = _git(fx.vault, "rev-list", "--count", f"origin/{fx.branch}..HEAD").stdout.strip()
+    assert ahead == "0", "the settled history reached origin"
+
+
+def test_resweep_after_a_person_fixes_the_held_record_settles_and_clears_marker(
+    tmp_path, resolve
+):
+    fx = _Fixture(tmp_path)
+    record_id, local_sha, remote_sha = _diverge_on_status(fx)
+    _git(fx.vault, "fetch", "origin")
+    _use_state(fx)
+
+    held = resolve.resolve_for_sweep(fx.vault, "default", shared=False)
+    assert held["held"] is True
+    assert resolve.resolve_state.vault_is_held(fx.vault)
+
+    # A person fixes the held record by hand, matching the remote's value so
+    # the next replay finds no judgment left at this slot. The fix has to land
+    # in the SAME local commit the rebase replays first, not a new one on top —
+    # a later commit never gets replayed until the first one clears, and the
+    # first one alone still conflicts.
+    r = fx.cli(["record", "update", record_id, "--status", "done"], stdin_text="")
+    assert r.returncode == 0, r.stderr
+    _git(fx.vault, "add", "-A")
+    _git(fx.vault, "commit", "--amend", "--no-edit")
+    _git(fx.vault, "fetch", "origin")
+
+    resweep = resolve.resolve_for_sweep(fx.vault, "default", shared=False)
+
+    assert resweep["held"] is False
+    assert resolve.resolve_state.read_held_marker(fx.vault) is None, "the marker is cleared"
+    ahead = _git(fx.vault, "rev-list", "--count", f"origin/{fx.branch}..HEAD").stdout.strip()
+    assert ahead == "0", "the now-settled history reached origin"
+
+
+def test_resweeping_a_still_held_vault_re_derives_the_same_report(tmp_path, resolve):
+    """The settle/hold pair is the input the ending's answer varies on — re-sweep
+    a vault whose held record has NOT been fixed, and the answer is identical."""
+    fx = _Fixture(tmp_path)
+    _diverge_on_status(fx)
+    _git(fx.vault, "fetch", "origin")
+    _use_state(fx)
+
+    first = resolve.resolve_for_sweep(fx.vault, "default", shared=False)
+    second = resolve.resolve_for_sweep(fx.vault, "default", shared=False)
+
+    assert first["held"] is True and second["held"] is True
+    assert second["conflicts"] == first["conflicts"], "the same conflict re-derives identically"
+    assert second["entered-at"] == first["entered-at"], "the original wait duration survives"
+
+
+def test_a_held_vault_leaves_sibling_vaults_syncing_normally(tmp_path, resolve):
+    """AC8, re-exercised through the resolution path: one host, three vaults, one
+    of them holds — the other two settle and publish untouched."""
+    fx_a = _Fixture(tmp_path / "vault-a")
+    fx_b = _Fixture(tmp_path / "vault-b")
+    fx_c = _Fixture(tmp_path / "vault-c")
+
+    _diverge_on_disjoint_fields(fx_a)
+    _diverge_on_status(fx_b)
+    _diverge_on_disjoint_fields(fx_c)
+
+    for fx in (fx_a, fx_b, fx_c):
+        _git(fx.vault, "fetch", "origin")
+
+    _use_state(fx_a)
+    report_a = resolve.resolve_for_sweep(fx_a.vault, "vault-a", shared=False)
+    report_b = resolve.resolve_for_sweep(fx_b.vault, "vault-b", shared=False)
+    report_c = resolve.resolve_for_sweep(fx_c.vault, "vault-c", shared=False)
+
+    assert report_a["held"] is False
+    assert report_b["held"] is True
+    assert report_c["held"] is False
+    for fx in (fx_a, fx_c):
+        ahead = _git(fx.vault, "rev-list", "--count",
+                     f"origin/{fx.branch}..HEAD").stdout.strip()
+        assert ahead == "0", f"{fx.vault.name} published despite the sibling holding"
+    ahead_b = _git(fx_b.vault, "rev-list", "--count",
+                   f"origin/{fx_b.branch}..HEAD").stdout.strip()
+    assert ahead_b != "0", "the held vault stays diverged"
+
+
+def test_two_vaults_held_at_once_keep_independent_markers(tmp_path, resolve):
+    """AC8's marker half: the held marker is keyed per vault, so two vaults held
+    on the same host do not share, overwrite, or clear each other's marker.
+
+    The sibling-vault test above holds exactly one of its three vaults, so a
+    marker path that ignored its ``vault_root`` entirely would still pass it.
+    This one holds two vaults under a single state dir — the input that varies
+    is *which* vault is asked — and asserts each answer is about that vault.
+    """
+    fx_a = _Fixture(tmp_path / "vault-a")
+    fx_b = _Fixture(tmp_path / "vault-b")
+    fx_c = _Fixture(tmp_path / "vault-c")
+
+    _diverge_on_status(fx_a)
+    _diverge_on_status(fx_b)
+    _diverge_on_disjoint_fields(fx_c)
+
+    for fx in (fx_a, fx_b, fx_c):
+        _git(fx.vault, "fetch", "origin")
+
+    # One host: every vault resolves against the same state dir, so a marker
+    # path that dropped the vault key would collide here and nowhere else.
+    _use_state(fx_a)
+    report_a = resolve.resolve_for_sweep(fx_a.vault, "vault-a", shared=False)
+    report_b = resolve.resolve_for_sweep(fx_b.vault, "vault-b", shared=False)
+    report_c = resolve.resolve_for_sweep(fx_c.vault, "vault-c", shared=False)
+
+    assert report_a["held"] is True
+    assert report_b["held"] is True
+    assert report_c["held"] is False
+
+    marker_a = resolve.resolve_state.read_held_marker(fx_a.vault)
+    marker_b = resolve.resolve_state.read_held_marker(fx_b.vault)
+    assert marker_a is not None, "vault-a has its own held marker"
+    assert marker_b is not None, "vault-b has its own held marker"
+    # Every fixture's vault directory is literally named "vault", so the basename
+    # these markers record is identical across all three — which is exactly why
+    # the marker key carries a digest of the resolved path as well as the name.
+    # The distinctness that matters is therefore the path, not the recorded name.
+    assert resolve.resolve_state.held_marker_path(fx_a.vault) != \
+        resolve.resolve_state.held_marker_path(fx_b.vault), (
+            "two held vaults keyed to one marker path — the second hold "
+            "overwrites the first, and releasing either releases both"
+        )
+    assert resolve.resolve_state.read_held_marker(fx_c.vault) is None, (
+        "the settled vault has no marker, even while two siblings are held"
+    )
+
+    # Clearing one held vault must not release the other.
+    assert resolve.resolve_state.clear_held_marker(fx_a.vault) is True
+    assert resolve.resolve_state.vault_is_held(fx_a.vault) is False, "vault-a released"
+    assert resolve.resolve_state.vault_is_held(fx_b.vault) is True, (
+        "clearing vault-a's marker also released vault-b — the markers are not independent"
+    )
+
+
+def test_person_started_resolve_is_unchanged_by_the_sweep_entry_point(tmp_path):
+    """The sweep is a distinct entry point — `lore resolve <vault>` keeps parking
+    for a person, mid-rebase, exiting zero, exactly as before this task."""
+    fx = _Fixture(tmp_path)
+    _diverge_on_status(fx)
+    _git(fx.vault, "fetch", "origin")
+    rc = _git(fx.vault, "rebase", f"origin/{fx.branch}")
+    assert rc.returncode != 0
+    _git(fx.vault, "rebase", "--abort")
+
+    r = fx.cli(["resolve", "default"])
+
+    assert r.returncode == 0, r.stderr
+    assert (fx.vault / ".git" / "rebase-merge").exists(), "still mid-rebase, parked for a person"
+
+
+def test_a_shared_vault_settled_by_the_sweep_is_pushed_bypassing_the_gate(tmp_path, resolve):
+    """The `--include-shared` gate is `lore resolve`'s own tail — the sweep skips
+    it entirely, because the spec publishes shared vaults automatically. The
+    other half of this contract item (`lore resolve` still honouring the gate on
+    a shared vault) is pinned unchanged by
+    ``test_a_shared_vault_is_not_pushed_by_default`` above."""
+    fx = _Fixture(tmp_path)
+    _diverge_on_disjoint_fields(fx)
+    _git(fx.vault, "fetch", "origin")
+    _use_state(fx)
+
+    report = resolve.resolve_for_sweep(fx.vault, "team", shared=True)
+
+    assert report["held"] is False
+    ahead = _git(fx.vault, "rev-list", "--count", f"origin/{fx.branch}..HEAD").stdout.strip()
+    assert ahead == "0", "a sweep pushes a shared vault unconditionally"
+
+
+# ── crash atomicity between the abort and the held-marker write ────────────
+
+
+def test_a_kill_after_the_abort_and_before_the_marker_write_recovers_next_sweep(
+    tmp_path, resolve, monkeypatch
+):
+    """Council Critical: killed after the abort, before the marker — the vault is
+    already clean, no marker exists, and the next sweep re-derives and re-holds
+    with no data lost (only the wait's start time resets, as the council text
+    accepts: "no marker is required for correctness, only for the duration")."""
+    fx = _Fixture(tmp_path)
+    _diverge_on_status(fx)
+    _git(fx.vault, "fetch", "origin")
+    _use_state(fx)
+
+    def boom(*_a, **_kw):
+        raise RuntimeError("killed between the verified abort and the marker write")
+
+    with monkeypatch.context() as m:
+        m.setattr(resolve.resolve_state, "mark_held", boom)
+        with pytest.raises(RuntimeError):
+            resolve.resolve_for_sweep(fx.vault, "default", shared=False)
+
+    assert not (fx.vault / ".git" / "rebase-merge").exists(), "the abort itself completed"
+    assert resolve.resolve_state.read_held_marker(fx.vault) is None, (
+        "the marker write never ran"
+    )
+
+    recovered = resolve.resolve_for_sweep(fx.vault, "default", shared=False)
+
+    assert recovered["held"] is True
+    assert resolve.resolve_state.read_held_marker(fx.vault) is not None
+
+
+def test_a_kill_during_the_abort_with_a_stale_marker_recovers_by_completing_it(
+    tmp_path, resolve, monkeypatch
+):
+    """Council Critical: a vault already held from a prior cycle is re-swept —
+    a fresh rebase attempt re-conflicts and this time the abort itself is killed
+    before it runs. The next sweep must not trust the STALE marker still on disk;
+    it finds the vault mid-rebase and recovers by completing the abort."""
+    fx = _Fixture(tmp_path)
+    _diverge_on_status(fx)
+    _git(fx.vault, "fetch", "origin")
+    _use_state(fx)
+
+    first = resolve.resolve_for_sweep(fx.vault, "default", shared=False)
+    assert first["held"] is True
+    entered_at = first["entered-at"]
+
+    def boom(_vault):
+        raise RuntimeError("killed during the abort call itself, before it ran")
+
+    with monkeypatch.context() as m:
+        m.setattr(resolve, "_abort_replay", boom)
+        with pytest.raises(RuntimeError):
+            resolve.resolve_for_sweep(fx.vault, "default", shared=False)
+
+    assert (fx.vault / ".git" / "rebase-merge").exists(), "this cycle's abort never ran"
+    stale = resolve.resolve_state.read_held_marker(fx.vault)
+    assert stale is not None and stale["entered-at"] == entered_at, (
+        "the prior hold's marker is still on disk, unrelated to the new mid-rebase state"
+    )
+
+    recovered = resolve.resolve_for_sweep(fx.vault, "default", shared=False)
+
+    assert recovered["held"] is True
+    assert not (fx.vault / ".git" / "rebase-merge").exists(), "the abort was completed"
+    assert recovered["entered-at"] == entered_at, "the original wait duration survives"
+
+
+def test_a_crash_between_write_records_writes_and_adds_never_reaches_a_held_ending(
+    tmp_path, resolve, monkeypatch
+):
+    """The one residue the abort's byte-identical restore does not cover: a file
+    ``write_record`` wrote but never staged, because it writes both `.md`/`.json`
+    before adding either (`write_record`, `cli/resolve.py`). This pins that the
+    window is unreachable BEFORE a held ending is ever declared: reaching
+    `_abort_replay`/`mark_held` requires `_drive` to return, which requires every
+    `_resolve_step` call along the way to have returned (no exception) — and a
+    step only returns after every settled record's `write_record` call has
+    already staged both files (it raises otherwise). A crash inside that window
+    kills the run before the held ending is ever reached; the vault is left
+    mid-rebase with an untracked residue, and the NEXT sweep re-derives the SAME
+    conflicted step deterministically, overwriting and this time staging the
+    residue — before it can ever reach the held ending again."""
+    fx = _Fixture(tmp_path)
+    # Two records in ONE step: "aaa-first" settles with no judgment (the record
+    # whose write is interrupted), "bbb-second" is a genuine both-sides move that
+    # holds the vault. Sorted path order puts aaa-first first, matching
+    # `_group_by_record`'s dict-insertion order over `_conflicted_paths`'s
+    # lexically-sorted `git ls-files -u` output.
+    ok_id = fx.create("task", "AAA First")
+    held_id = fx.create("task", "BBB Second")
+    fx.publish()
+    fx.clone_device_b()
+
+    fx.cli_b(["record", "update", ok_id, "--title", "Remote Title"], stdin_text="")
+    fx.cli_b(["record", "update", held_id, "--status", "done"], stdin_text="")
+    fx.push_device_b()
+
+    fx.cli(["record", "update", ok_id, "--status", "ready"], stdin_text="")
+    fx.cli(["record", "update", held_id, "--status", "ready"], stdin_text="")
+    _commit(fx.vault, "device A edit")
+    _git(fx.vault, "fetch", "origin")
+    _use_state(fx)
+
+    # Let the REAL `write_record` run — it really does write both `.md`/`.json`
+    # to disk (`store_mod.write_temp_then_rename`) before its own loop tries to
+    # `git add` either — then intercept only the FIRST `add` of `ok_id`'s files,
+    # so the crash lands exactly in the writes-done/adds-not-yet-run window the
+    # residue describes, with real overwritten bytes on disk to prove it.
+    real_git = resolve._git
+    first_body_path = f"{ok_id}.md"
+
+    def flaky_git(vault, *args):
+        if args[:1] == ("add",) and args[-1] == first_body_path:
+            raise RuntimeError("process died after the writes, before either add")
+        return real_git(vault, *args)
+
+    # Read the SIDECAR, not the body: `ok_id`'s divergence is on `title`, a
+    # sidecar-only field, so the body text never changes — but the sidecar's
+    # volatile `updated-at` is re-stamped on every `write_record` call and
+    # detects the real, on-disk overwrite unambiguously.
+    ok_sidecar_path = fx.vault / f"{ok_id}.json"
+    before_write = ok_sidecar_path.read_text(encoding="utf-8")
+
+    with monkeypatch.context() as m:
+        m.setattr(resolve, "_git", flaky_git)
+        with pytest.raises(RuntimeError):
+            resolve.resolve_for_sweep(fx.vault, "default", shared=False)
+
+    assert (fx.vault / ".git" / "rebase-merge").exists(), (
+        "the held ending was never reached — the crash happened first"
+    )
+    assert resolve.resolve_state.read_held_marker(fx.vault) is None, (
+        "no held ending was ever declared over the residue"
+    )
+    after_write = ok_sidecar_path.read_text(encoding="utf-8")
+    assert after_write != before_write, (
+        "the real write DID land on disk before the crash — the residue is genuine, "
+        "not merely simulated"
+    )
+    unmerged = _git(fx.vault, "diff", "--name-only", "--diff-filter=U").stdout
+    assert f"{ok_id}.json" in unmerged, "git's index still calls this path unresolved"
+
+    # Retry for real: the SAME step re-derives deterministically, correctly
+    # staging `ok_id` this time, before the genuine conflict on `held_id` is
+    # ever reached and the vault is aborted-and-held.
+    report = resolve.resolve_for_sweep(fx.vault, "default", shared=False)
+
+    assert report["held"] is True
+    assert _git(fx.vault, "status", "--porcelain").stdout.strip() == "", (
+        "the residue was absorbed by the redrive — nothing untracked or unmerged "
+        "survives into the ending we call clean"
+    )
+    assert not (fx.vault / ".git" / "rebase-merge").exists()
+    assert ok_sidecar_path.read_text(encoding="utf-8") == before_write, (
+        "the abort restored ok_id's sidecar to its pre-replay content — the "
+        "interrupted overwrite left no lasting trace"
+    )
+
+
+# ── the loop hands a conflicted vault to the resolver (`lore sync`) ────────
+#
+# Everything above drives `resolve.resolve_for_sweep` directly. These tests
+# drive it through `lore sync` — the actual caller wired in for this task —
+# proving both replay sites hand off rather than reporting a remedy, and
+# that a person at a terminal gets exactly the sweep's own ending.
+
+
+def _json_tail(stdout: str) -> dict:
+    """Pull the trailing ``--json`` document out of ``lore sync``'s stdout,
+    mirroring ``test_sync_multi_vault.py``'s own ``_extract_json_report``."""
+    lines = stdout.splitlines()
+    start = next(i for i, ln in enumerate(lines) if ln == "{")
+    return json.loads("\n".join(lines[start:]))
+
+
+def test_sync_reports_awaiting_person_for_a_both_sides_judgment_conflict(tmp_path):
+    """The both-sides field move `_diverge_on_status` builds is exactly the
+    judgment conflict `resolve_for_sweep` holds — reached here through `lore
+    sync` (the pull replay site), not a direct call. `holding` is retired for
+    this shape; the vault ends clean and diverged, marked held."""
+    fx = _Fixture(tmp_path)
+    record_id, local_sha, _remote_sha = _diverge_on_status(fx)
+
+    synced = fx.cli(["sync", "--json"])
+
+    assert synced.returncode != 0, "a person still has something to act on"
+    doc = _json_tail(synced.stdout)
+    entries = [v for v in doc["vaults"] if v["vault"] == "default"]
+    assert len(entries) == 1, entries
+    assert entries[0]["outcome"] == "awaiting-person"
+    assert "reason" not in entries[0], "awaiting-person is not a failure — no reason tag"
+
+    state = load_script("lore.cli.resolve_state")
+    os.environ["XDG_STATE_HOME"] = str(fx.state)
+    assert state.vault_is_held(fx.vault), "the held marker survives the CLI round-trip"
+    assert _git(fx.vault, "status", "--porcelain").stdout.strip() == "", "clean"
+    assert _git(fx.vault, "rev-parse", "HEAD").stdout.strip() == local_sha, (
+        "the local commit the sweep held is still present at its pre-sweep sha"
+    )
+    ahead = _git(fx.vault, "rev-list", "--count", f"HEAD..origin/{fx.branch}").stdout.strip()
+    assert ahead != "0", "diverged, not merely stale"
+
+
+def test_a_person_at_a_terminal_gets_the_same_ending_the_sweep_would(tmp_path, resolve):
+    """AC18, re-exercised: `lore sync` run by a person and `resolve_for_sweep`
+    run directly are the SAME code path from this task on — a person hits no
+    special case. Two independently built but equivalent fixtures must land
+    on the identically-shaped held ending."""
+    fx_person = _Fixture(tmp_path / "person")
+    _diverge_on_status(fx_person)
+    synced = fx_person.cli(["sync", "--json"])
+    person_doc = _json_tail(synced.stdout)
+    person_entry = [v for v in person_doc["vaults"] if v["vault"] == "default"][0]
+
+    fx_sweep = _Fixture(tmp_path / "sweep")
+    _diverge_on_status(fx_sweep)
+    _git(fx_sweep.vault, "fetch", "origin")
+    _use_state(fx_sweep)
+    sweep_report = resolve.resolve_for_sweep(fx_sweep.vault, "default", shared=False)
+
+    assert person_entry["outcome"] == "awaiting-person"
+    assert sweep_report["held"] is True
+    # Same on-disk shape: clean, diverged, held marker present in both cases.
+    for fx in (fx_person, fx_sweep):
+        assert _git(fx.vault, "status", "--porcelain").stdout.strip() == ""
+        assert not (fx.vault / ".git" / "rebase-merge").exists()
+    state = load_script("lore.cli.resolve_state")
+    os.environ["XDG_STATE_HOME"] = str(fx_person.state)
+    assert state.vault_is_held(fx_person.vault)
+    os.environ["XDG_STATE_HOME"] = str(fx_sweep.state)
+    assert state.vault_is_held(fx_sweep.vault)
+
+
+def test_sync_never_leaks_git_or_remote_text_on_any_new_path(tmp_path):
+    """No git or remote text reaches the reported `--json` document on the
+    settled, held, or failed path — the document's only values are the
+    closed outcome/reason vocabulary and vault names supplied by the test
+    itself, never git error text or a remote URL."""
+    forbidden = ("fatal:", ".git", "origin/", "refs/", "://")
+
+    fx_settled = _Fixture(tmp_path / "settled")
+    _diverge_on_disjoint_fields(fx_settled)
+    settled = fx_settled.cli(["sync", "--json"])
+
+    fx_held = _Fixture(tmp_path / "held")
+    _diverge_on_status(fx_held)
+    held = fx_held.cli(["sync", "--json"])
+
+    fx_failed = _Fixture(tmp_path / "failed")
+    fx_failed.create("task", "A Task")
+    fx_failed.publish()
+    fx_failed.clone_device_b()
+    (fx_failed.other / "task" / "README.md").write_text("edited on device B\n")
+    _commit(fx_failed.other, "device B edit")
+    _git(fx_failed.other, "push", "origin")
+    (fx_failed.vault / "task" / "README.md").write_text("edited on device A\n")
+    _commit(fx_failed.vault, "device A edit")
+    failed = fx_failed.cli(["sync", "--json"])
+
+    for label, result in (("settled", settled), ("held", held), ("failed", failed)):
+        doc = _json_tail(result.stdout)
+        rendered = json.dumps(doc)
+        for token in forbidden:
+            assert token not in rendered, f"{label}: git/remote text leaked into --json: {rendered!r}"
+
+
+# ── AC24: no clock decides a conflict ───────────────────────────────────────
+#
+# The resolver's decision — which side wins a one-side move, and which field
+# parks as judgment — must be invariant under every clock this module can see:
+# git commit dates, the sidecar's own `updated-at` value, and the conflicted
+# files' filesystem mtimes. The single named exception is the volatile
+# `updated-at`/`updated-by` pair, which deliberately takes the newer instant.
+
+
+def _commit_dated(vault: Path, message: str, date: str) -> str:
+    """Commit with an explicit, controlled author/committer date.
+
+    Real wall-clock commit times would make these tests depend on how fast the
+    test runs — an explicit ``GIT_AUTHOR_DATE``/``GIT_COMMITTER_DATE`` keeps the
+    ordering deterministic regardless.
+    """
+    _git(vault, "add", "-A")
+    env = dict(os.environ)
+    env["GIT_AUTHOR_DATE"] = date
+    env["GIT_COMMITTER_DATE"] = date
+    subprocess.run(["git", "-C", str(vault), "commit", "-m", message],
+                    check=True, capture_output=True, env=env)
+    return _git(vault, "rev-parse", "HEAD").stdout.strip()
+
+
+def _run_status_conflict(base_dir: Path, *, remote_date: str, local_date: str,
+                          sidecar_epoch: float | None = None,
+                          body_epoch: float | None = None) -> dict:
+    """Build a genuine both-sides ``status`` collision, under controlled clocks.
+
+    Both devices move the same sidecar key to a different value — a real
+    content collision, independent of any clock — then the two commits and
+    (optionally) the record's on-disk files are stamped with the given, fully
+    explicit dates/mtimes. Asserts the fixture really conflicts before handing
+    off to the resolver, rather than trusting it does.
+    """
+    fx = _Fixture(base_dir)
+    record_id = fx.create("task", "A Task")
+    fx.publish()
+    fx.clone_device_b()
+
+    r = fx.cli_b(["record", "update", record_id, "--status", "done"], stdin_text="")
+    assert r.returncode == 0, r.stderr
+    _commit_dated(fx.other, "device B edit", remote_date)
+    _git(fx.other, "push", "origin", fx.branch)
+
+    r = fx.cli(["record", "update", record_id, "--status", "ready"], stdin_text="")
+    assert r.returncode == 0, r.stderr
+    _commit_dated(fx.vault, "device A edit", local_date)
+
+    if sidecar_epoch is not None:
+        os.utime(fx.vault / f"{record_id}.json", (sidecar_epoch, sidecar_epoch))
+    if body_epoch is not None:
+        os.utime(fx.vault / f"{record_id}.md", (body_epoch, body_epoch))
+
+    _git(fx.vault, "fetch", "origin")
+    rc = _git(fx.vault, "rebase", f"origin/{fx.branch}")
+    assert rc.returncode != 0, "the fixture must really conflict"
+    _git(fx.vault, "rebase", "--abort")
+
+    r = fx.cli(["resolve", "default", "--json"])
+    assert r.returncode == 0, r.stderr
+    return json.loads(r.stdout)
+
+
+def test_swapped_commit_dates_produce_the_same_resolution(tmp_path):
+    """Commit time is the input varied; the decision must not move."""
+    report_early_remote = _run_status_conflict(
+        tmp_path / "a", remote_date="2020-01-01T00:00:00", local_date="2030-01-01T00:00:00")
+    report_early_local = _run_status_conflict(
+        tmp_path / "b", remote_date="2030-01-01T00:00:00", local_date="2020-01-01T00:00:00")
+
+    for report in (report_early_remote, report_early_local):
+        assert len(report["conflicts"]) == 1, "swapping commit dates must not settle the collision"
+        assert report["files"] == []
+
+    assert (report_early_remote["conflicts"][0]["slot"]
+            == report_early_local["conflicts"][0]["slot"] == "status")
+    assert (report_early_remote["conflicts"][0]["local"]["value"]
+            == report_early_local["conflicts"][0]["local"]["value"] == "ready")
+    assert (report_early_remote["conflicts"][0]["remote"]["value"]
+            == report_early_local["conflicts"][0]["remote"]["value"] == "done")
+
+
+def test_inverted_filesystem_mtimes_produce_the_same_resolution(tmp_path):
+    """The conflicted record's own sidecar/body mtimes, inverted, change nothing."""
+    report_sidecar_older = _run_status_conflict(
+        tmp_path / "a", remote_date="2024-01-01T00:00:00", local_date="2024-01-01T00:00:00",
+        sidecar_epoch=1_000_000, body_epoch=2_000_000)
+    report_sidecar_newer = _run_status_conflict(
+        tmp_path / "b", remote_date="2024-01-01T00:00:00", local_date="2024-01-01T00:00:00",
+        sidecar_epoch=2_000_000, body_epoch=1_000_000)
+
+    for report in (report_sidecar_older, report_sidecar_newer):
+        assert len(report["conflicts"]) == 1, "inverting the mtimes must not settle the collision"
+        assert report["files"] == []
+
+    assert (report_sidecar_older["conflicts"][0]["slot"]
+            == report_sidecar_newer["conflicts"][0]["slot"] == "status")
+    assert (report_sidecar_older["conflicts"][0]["local"]["value"]
+            == report_sidecar_newer["conflicts"][0]["local"]["value"] == "ready")
+    assert (report_sidecar_older["conflicts"][0]["remote"]["value"]
+            == report_sidecar_newer["conflicts"][0]["remote"]["value"] == "done")
+
+
+@pytest.mark.parametrize("remote_date,local_date,sidecar_epoch,body_epoch", [
+    ("2020-01-01T00:00:00", "2030-01-01T00:00:00", 1_000_000, 2_000_000),
+    ("2030-01-01T00:00:00", "2020-01-01T00:00:00", 2_000_000, 1_000_000),
+    ("2020-01-01T00:00:00", "2020-01-01T00:00:00", 2_000_000, 2_000_000),
+], ids=["remote-commit-and-mtime-later", "local-commit-and-mtime-later", "identical-commit-dates"])
+def test_a_both_sides_field_move_stays_parked_under_every_clock_arrangement(
+    tmp_path, remote_date, local_date, sidecar_epoch, body_epoch
+):
+    """No arrangement of times turns a judgment conflict into an automatic take."""
+    report = _run_status_conflict(
+        tmp_path, remote_date=remote_date, local_date=local_date,
+        sidecar_epoch=sidecar_epoch, body_epoch=body_epoch)
+
+    assert len(report["conflicts"]) == 1, "no clock arrangement turns judgment into an automatic take"
+    assert report["conflicts"][0]["slot"] == "status"
+    assert report["conflicts"][0]["local"]["value"] == "ready"
+    assert report["conflicts"][0]["remote"]["value"] == "done"
+
+
+def test_swapped_updated_at_leaves_every_other_decision_unchanged(resolve):
+    """Swapping which side holds the newer ``updated-at`` moves only that pair."""
+    base = {"kind": "task", "status": "open",
+            "updated-at": "2026-01-01T00:00:00Z", "updated-by": "base@e.st"}
+    remote = {"kind": "task", "status": "done",
+              "updated-at": "2026-02-01T00:00:00Z", "updated-by": "remote@e.st"}
+    local = {"kind": "task", "status": "ready",
+             "updated-at": "2026-03-01T00:00:00Z", "updated-by": "local@e.st"}
+
+    merged_1, conflicts_1 = resolve.merge_sidecars(base, remote, local)
+
+    # Swap ONLY the volatile pair between the two sides — every other field
+    # of `remote`/`local` is untouched.
+    swapped_remote = {**remote, "updated-at": local["updated-at"], "updated-by": local["updated-by"]}
+    swapped_local = {**local, "updated-at": remote["updated-at"], "updated-by": remote["updated-by"]}
+
+    merged_2, conflicts_2 = resolve.merge_sidecars(base, swapped_remote, swapped_local)
+
+    assert conflicts_1 == conflicts_2, "swapping updated-at must not move the status decision"
+    assert [c["slot"] for c in conflicts_1] == ["status"]
+    non_volatile_1 = {k: v for k, v in merged_1.items() if k not in ("updated-at", "updated-by")}
+    non_volatile_2 = {k: v for k, v in merged_2.items() if k not in ("updated-at", "updated-by")}
+    assert non_volatile_1 == non_volatile_2 == {"kind": "task"}, \
+        "kind is the only field settled either way, and it settles the same way both times"
+
+
+# ── the declaration branches the unsettleable ending ───────────────────────
+#
+# One fixture, one varied input: the host's own `makes_vault_content`
+# declaration. An author host keeps its local commits and waits for a person;
+# a host that authors nothing keeps the published history instead, with
+# nobody present and nothing of its own published. Getting this pair backwards
+# destroys the only copy of somebody's work, so the two endings are always
+# built from the SAME collision.
+
+
+def _config_home(fx: "_Fixture", *, makes_vault_content: bool | None) -> Path:
+    """A config home pointing at *fx*'s vault, carrying the given declaration.
+
+    ``None`` writes no ``makes_vault_content`` key at all — the undeclared
+    host, which must read as an author host.
+    """
+    home = fx.tmp / f"config-home-{makes_vault_content}"
+    (home / "lore").mkdir(parents=True, exist_ok=True)
+    data: dict = {
+        "vaults": [{"name": "default", "scope": "default", "path": str(fx.vault)}]
+    }
+    if makes_vault_content is not None:
+        data["makes_vault_content"] = makes_vault_content
+    (home / "lore" / "config.json").write_text(json.dumps(data), encoding="utf-8")
+    return home
+
+
+def _sync_declaring(fx: "_Fixture", *, makes_vault_content: bool | None):
+    """Run ``lore sync --json`` on *fx* under the given host declaration."""
+    return fx.cli(
+        ["sync", "--json"],
+        env_extra={
+            "XDG_CONFIG_HOME": str(
+                _config_home(fx, makes_vault_content=makes_vault_content)
+            )
+        },
+    )
+
+
+def _vault_entry(result) -> dict:
+    doc = _json_tail(result.stdout)
+    entries = [v for v in doc["vaults"] if v["vault"] == "default"]
+    assert len(entries) == 1, entries
+    return entries[0]
+
+
+def test_a_host_that_does_not_author_discards_toward_the_published_history(tmp_path):
+    """AC37: an unsettleable conflict on a non-author host resolves toward the
+    published history, without a person, publishing nothing of its own."""
+    fx = _Fixture(tmp_path)
+    record_id, _local_sha, remote_sha = _diverge_on_status(fx)
+
+    synced = _sync_declaring(fx, makes_vault_content=False)
+
+    assert synced.returncode == 0, synced.stderr
+    assert _vault_entry(synced)["outcome"] == "converged"
+    assert _git(fx.vault, "rev-parse", "HEAD").stdout.strip() == remote_sha, (
+        "the vault sits exactly at the published history"
+    )
+    assert fx.sidecar(record_id)["status"] == "done", "the published side's value"
+    assert "Reindexed" in synced.stdout, (
+        "the records the discard brought in are searchable — the run reindexed"
+    )
+    assert _git(fx.vault, "status", "--porcelain").stdout.strip() == "", "clean"
+    ahead = _git(
+        fx.vault, "rev-list", "--count", f"origin/{fx.branch}..HEAD"
+    ).stdout.strip()
+    assert ahead == "0", "nothing of its own was published"
+
+    state = load_script("lore.cli.resolve_state")
+    os.environ["XDG_STATE_HOME"] = str(fx.state)
+    assert not state.vault_is_held(fx.vault), "nothing is waiting for a person here"
+
+
+def test_the_same_conflict_on_an_author_host_waits_for_a_person(tmp_path):
+    """The other half of the pair — the declaration is the only input varied,
+    and it is what selects between keeping local work and discarding it."""
+    fx = _Fixture(tmp_path)
+    record_id, local_sha, _remote_sha = _diverge_on_status(fx)
+
+    synced = _sync_declaring(fx, makes_vault_content=True)
+
+    assert synced.returncode != 0, "a person still has something to act on"
+    assert _vault_entry(synced)["outcome"] == "awaiting-person"
+    assert _git(fx.vault, "rev-parse", "HEAD").stdout.strip() == local_sha, (
+        "the local commit is still here, unpublished"
+    )
+    assert fx.sidecar(record_id)["status"] == "ready", "this host's own value"
+
+    state = load_script("lore.cli.resolve_state")
+    os.environ["XDG_STATE_HOME"] = str(fx.state)
+    assert state.vault_is_held(fx.vault), "held, waiting for a person"
+
+
+def test_the_discarded_commits_stay_recoverable_from_the_vaults_history(tmp_path):
+    """The discard is what makes a non-author host converge alone, and it is
+    only acceptable because nothing is destroyed: the local commit and the
+    record content it carried are still readable from the vault afterwards."""
+    fx = _Fixture(tmp_path)
+    record_id, local_sha, _remote_sha = _diverge_on_status(fx)
+
+    synced = _sync_declaring(fx, makes_vault_content=False)
+    assert synced.returncode == 0, synced.stderr
+
+    assert fx.sidecar(record_id)["status"] == "done", "the working tree took the published side"
+    assert _git(fx.vault, "cat-file", "-t", local_sha).stdout.strip() == "commit", (
+        "the discarded commit is still an object in this vault"
+    )
+    discarded = _git(fx.vault, "show", f"{local_sha}:{record_id}.json").stdout
+    assert json.loads(discarded)["status"] == "ready", (
+        "this host's own value is still readable out of the discarded commit"
+    )
+    reflog = _git(fx.vault, "reflog", "--format=%H").stdout.split()
+    assert local_sha in reflog, "the vault's own history still names where it was"
+
+
+def test_a_settleable_conflict_settles_identically_on_both_kinds_of_host(tmp_path):
+    """The declaration selects only the UNSETTLEABLE branch. A conflict the
+    field-wise merge can settle must reach the same bytes and the same ending
+    on both kinds of host — otherwise the flag quietly changes ordinary
+    merges, which is the one thing it must never do."""
+    settled = {}
+    for label, declaration in (("author", True), ("non-author", False)):
+        fx = _Fixture(tmp_path / label)
+        record_id = _diverge_on_disjoint_fields(fx)
+
+        synced = _sync_declaring(fx, makes_vault_content=declaration)
+
+        assert synced.returncode == 0, f"{label}: {synced.stderr}"
+        sidecar = fx.sidecar(record_id)
+        settled[label] = (
+            _vault_entry(synced)["outcome"],
+            sidecar["status"],
+            sidecar["title"],
+            fx.body(record_id),
+            _git(fx.vault, "rev-list", "--count", f"origin/{fx.branch}..HEAD").stdout.strip(),
+        )
+
+    assert settled["author"] == settled["non-author"], settled
+    assert settled["author"][0] == "published", (
+        "both hosts settled the conflict and published the result"
+    )
+    assert settled["author"][1] == "ready", "the local side's slot survived on both"
+    assert settled["author"][2] == "Remote Title", "the published side's slot survived on both"
+
+
+def test_an_undeclared_host_holds_for_a_person_through_the_whole_loop(tmp_path):
+    """The fail-safe default is only worth anything if it survives the branch
+    that acts on it: a host that declares nothing must reach the author
+    ending through the loop, not merely answer `True` at the accessor."""
+    fx = _Fixture(tmp_path)
+    record_id, local_sha, _remote_sha = _diverge_on_status(fx)
+
+    synced = _sync_declaring(fx, makes_vault_content=None)
+
+    assert _vault_entry(synced)["outcome"] == "awaiting-person"
+    assert _git(fx.vault, "rev-parse", "HEAD").stdout.strip() == local_sha, (
+        "an undeclared host keeps its own commits"
+    )
+    assert fx.sidecar(record_id)["status"] == "ready", "this host's own value survived"
+
+    state = load_script("lore.cli.resolve_state")
+    os.environ["XDG_STATE_HOME"] = str(fx.state)
+    assert state.vault_is_held(fx.vault)
+
+
+def test_an_unparseable_config_holds_for_a_person_at_the_loops_replay_site(
+    tmp_path, monkeypatch
+):
+    """A config nobody can read is the other ambiguous input, and it must land
+    on the same author ending. Driven at the loop's own replay site rather
+    than through the CLI, because a config that will not parse is also a
+    config the CLI cannot resolve a vault out of — the branch still has to
+    default safely for the sweep, which is handed its vault directly."""
+    fx = _Fixture(tmp_path)
+    record_id, local_sha, _remote_sha = _diverge_on_status(fx)
+    broken = fx.tmp / "config-broken"
+    (broken / "lore").mkdir(parents=True, exist_ok=True)
+    (broken / "lore" / "config.json").write_text("{not valid json", encoding="utf-8")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(broken))
+    monkeypatch.setenv("XDG_STATE_HOME", str(fx.state))
+    monkeypatch.setenv("LORE_EMAIL", "tester@example.com")
+
+    sync = load_script("lore.cli.sync")
+    _git(fx.vault, "fetch", "origin")
+    lines: list[str] = []
+    state_after, pulled = sync._pull_one(
+        fx.vault, lines.append, lines.append, already_fetched=True,
+        resolve_conflicts=True, name="default", shared=False,
+    )
+
+    assert state_after == sync.PULL_AWAITING_PERSON, lines
+    assert pulled == 0, "nothing was integrated — the vault is held, not converged"
+    assert _git(fx.vault, "rev-parse", "HEAD").stdout.strip() == local_sha
+    assert fx.sidecar(record_id)["status"] == "ready", "this host's own value survived"
+
+    state = load_script("lore.cli.resolve_state")
+    assert state.vault_is_held(fx.vault)
+
+
+# ── AC38: the non-author ending speaks no version control ─────────────────
+#
+# The outcomes this branch can reach, enumerated from the branch itself:
+# the discard succeeds and the vault converges, or the discard fails and the
+# loop reports the resolver could not settle the vault. (`_abort_replay`'s
+# own failure is reachable BEFORE the declaration is ever consulted and is
+# identical on both kinds of host, so it is not an ending this branch
+# selects.) Both are asserted below.
+
+_VERSION_CONTROL_WORDS = (
+    "git", "rebase", "merge", "commit", "commits", "branch", "head", "origin",
+    "upstream", "push", "pull", "fetch", "reset", "checkout", "stash",
+    "revert", "ours", "theirs", "sha", "refs", "diverged", "unstaged",
+    "worktree", "fast-forward",
+)
+
+
+def _vc_words(text: str) -> set[str]:
+    """Which version-control words *text* uses, matched whole, case-folded."""
+    import re
+
+    found = set()
+    for word in _VERSION_CONTROL_WORDS:
+        if re.search(rf"(?<![\w-]){re.escape(word)}(?![\w-])", text, re.IGNORECASE):
+            found.add(word)
+    return found
+
+
+def _prose(result) -> str:
+    """The run's own prose — stdout before the `--json` document, plus stderr.
+
+    The document's fixed `schema` string is deliberately excluded: it is the
+    report format's own documentation, printed identically on every run of
+    every host, and says nothing about this resolution.
+    """
+    lines = result.stdout.splitlines()
+    end = next((i for i, ln in enumerate(lines) if ln == "{"), len(lines))
+    return "\n".join(lines[:end]) + "\n" + result.stderr
+
+
+def test_the_non_author_ending_adds_no_version_control_words_of_its_own(tmp_path):
+    """AC38, the converged ending: a conflict resolved by keeping the
+    published history must read to its owner exactly like a sync that had no
+    conflict at all — the control run here is that sync, built from the same
+    vault shape with the two devices touching different records."""
+    fx = _Fixture(tmp_path / "discarded")
+    _diverge_on_status(fx)
+    discarded = _sync_declaring(fx, makes_vault_content=False)
+    assert _vault_entry(discarded)["outcome"] == "converged", discarded.stdout
+
+    control = _Fixture(tmp_path / "control")
+    control.create("task", "A Task")
+    other_id = control.create("task", "Another Task")
+    control.publish()
+    control.clone_device_b()
+    control.cli_b(["record", "update", other_id, "--status", "done"], stdin_text="")
+    control.push_device_b()
+    ordinary = _sync_declaring(control, makes_vault_content=False)
+    assert _vault_entry(ordinary)["outcome"] == "converged", ordinary.stdout
+
+    added = _vc_words(_prose(discarded)) - _vc_words(_prose(ordinary))
+    assert added == set(), (
+        f"the resolution spoke version control to its owner: {added} in "
+        f"{_prose(discarded)!r}"
+    )
+    entry_text = json.dumps(_vault_entry(discarded))
+    assert _vc_words(entry_text) == set(), entry_text
+
+
+def test_a_failed_discard_is_reported_without_version_control_words(tmp_path, monkeypatch):
+    """AC38, the other ending this branch can reach: the discard itself
+    failing. The owner is told the vault could not be settled; they are not
+    handed git's account of why, and they are given no decision to make."""
+    fx = _Fixture(tmp_path)
+    _diverge_on_status(fx)
+    monkeypatch.setenv(
+        "XDG_CONFIG_HOME", str(_config_home(fx, makes_vault_content=False))
+    )
+    monkeypatch.setenv("XDG_STATE_HOME", str(fx.state))
+    monkeypatch.setenv("LORE_EMAIL", "tester@example.com")
+
+    resolve_mod = load_script("lore.cli.resolve")
+    sync = load_script("lore.cli.sync")
+    real_git = resolve_mod._git
+
+    def _reset_fails(vault, *args):
+        if args[:2] == ("reset", "--hard"):
+            return 1, "", "fatal: git could not reset --hard onto origin/main"
+        return real_git(vault, *args)
+
+    monkeypatch.setattr(resolve_mod, "_git", _reset_fails)
+
+    _git(fx.vault, "fetch", "origin")
+    lines: list[str] = []
+    state_after, _pulled = sync._pull_one(
+        fx.vault, lines.append, lines.append, already_fetched=True,
+        resolve_conflicts=True, name="default", shared=False,
+    )
+
+    assert state_after == sync.PULL_FAILED, lines
+    reported = "\n".join(lines)
+    assert "could not settle" in reported, reported
+    assert "fatal:" not in reported, "git's own account never reaches the owner"
+    assert _vc_words(reported) == set(), (
+        f"the failed resolution spoke version control: "
+        f"{_vc_words(reported)} in {reported!r}"
+    )
+
+
+def test_the_push_replay_site_discards_on_a_non_author_host_too(tmp_path, monkeypatch):
+    """The declaration must branch at BOTH replay sites, not just whichever
+    one a fixture happens to hit first: the same collision, reached through
+    the publish retry's replay instead of the pull's rebase, ends the same
+    way."""
+    fx = _Fixture(tmp_path)
+    record_id, _local_sha, remote_sha = _diverge_on_status(fx)
+    monkeypatch.setenv(
+        "XDG_CONFIG_HOME", str(_config_home(fx, makes_vault_content=False))
+    )
+    monkeypatch.setenv("XDG_STATE_HOME", str(fx.state))
+    monkeypatch.setenv("LORE_EMAIL", "tester@example.com")
+
+    sync = load_script("lore.cli.sync")
+    lines: list[str] = []
+    rc, ending, _attempts = sync._push_one(
+        fx.vault, lines.append, lines.append, committed=True, max_attempts=3,
+        name="default", shared=False,
+    )
+
+    assert rc == 0, lines
+    assert ending == sync.PUBLISH_DISCARDED, lines
+    assert _git(fx.vault, "rev-parse", "HEAD").stdout.strip() == remote_sha
+    assert fx.sidecar(record_id)["status"] == "done", "the published side's value"
+    assert _git(fx.vault, "status", "--porcelain").stdout.strip() == "", "clean"
+
+
+def test_a_declaration_that_is_not_a_bool_still_reaches_a_determinate_outcome(tmp_path):
+    """A host whose declaration is present but unreadable is refused, never
+    coerced — but the refusal is this host's data being wrong, not the run
+    being over. The vault that hit it must still land on a member of the
+    closed outcome set, and every other vault in the same run must still be
+    synced: one typo in one config key cannot take the whole sweep's report
+    with it."""
+    fx = _Fixture(tmp_path / "held")
+    _diverge_on_status(fx)
+
+    other = _Fixture(tmp_path / "other")
+    other_id = other.create("task", "Another Task")
+    other.publish()
+    other.clone_device_b()
+    other.cli_b(["record", "update", other_id, "--status", "done"], stdin_text="")
+    other.push_device_b()
+
+    home = tmp_path / "config-home-not-a-bool"
+    (home / "lore").mkdir(parents=True, exist_ok=True)
+    (home / "lore" / "config.json").write_text(
+        json.dumps({
+            "vaults": [
+                {"name": "default", "scope": "default", "path": str(fx.vault)},
+                {"name": "other", "scope": "product", "path": str(other.vault)},
+            ],
+            "makes_vault_content": "false",
+        }),
+        encoding="utf-8",
+    )
+
+    synced = fx.cli(["sync", "--json"], env_extra={"XDG_CONFIG_HOME": str(home)})
+
+    assert "Traceback" not in synced.stderr, (
+        f"the refusal is reported, never raised at the operator: {synced.stderr!r}"
+    )
+    sync = load_script("lore.cli.sync")
+    entries = {v["vault"]: v for v in _json_tail(synced.stdout)["vaults"]}
+    assert entries["default"]["outcome"] in sync.SYNC_OUTCOMES, entries
+    assert entries["default"]["outcome"] == sync.PUBLISH_HOLDING, entries
+    assert entries["default"]["reason"] in sync.SYNC_FAILURE_REASONS, entries
+    assert entries["default"]["reason"] == sync.FAILURE_POLICY, (
+        "this host's own data is what has to be fixed"
+    )
+    assert "other" in entries, (
+        "the run carried on to the next vault — one bad declaration does not "
+        f"end the sweep: {entries}"
+    )
+    assert entries["other"]["outcome"] in sync.SYNC_OUTCOMES, entries
+    assert _git(fx.vault, "status", "--porcelain").stdout.strip() == "", (
+        "the vault is left clean — the refusal happens after the replay is aborted"
+    )

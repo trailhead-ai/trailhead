@@ -62,6 +62,8 @@ from conftest import make_bare_remote, write_vault_config
 from test_vault_write_lock import _spawn_holder
 
 sync_mod = importlib.import_module("lore.cli.sync")
+resolve_state_mod = importlib.import_module("lore.cli.resolve_state")
+resolve_mod = importlib.import_module("lore.cli.resolve")
 
 REPO_ROOT = Path(__file__).parent.parent
 PLUGIN_ROOT = REPO_ROOT / "plugins" / "lore"
@@ -524,8 +526,13 @@ def test_sync_diverged_vault_rebases_then_pushes(tmp_path):
     assert _commit_count(Path(remote)) == _commit_count(default)
 
 
-def test_sync_rebase_conflict_aborts_cleanly_and_fails_hard(tmp_path):
-    """A true both-sides edit must abort the rebase, never strand a mid-rebase vault."""
+def test_sync_rebase_conflict_hands_off_to_the_resolver_and_fails_hard(tmp_path):
+    """A conflict the resolver itself cannot settle (README.md has no sidecar
+    counterpart, so it is not a record the field-wise merge can handle) must
+    still abort the rebase and never strand a mid-rebase vault — but the
+    remedy printed is no longer `lore resolve`, which is retired for this
+    breaking change (see CHANGELOG.md): the vault is handed to the resolver,
+    which fails for a policy-uncovered reason and reports `holding`."""
     config_home = tmp_path / "config"
     state_dir = tmp_path / "state"
     state_dir.mkdir(parents=True)
@@ -546,11 +553,16 @@ def test_sync_rebase_conflict_aborts_cleanly_and_fails_hard(tmp_path):
     (default / "task" / "README.md").write_text("edited on device A\n")
 
     write_vault_config(config_home, [("default", "default", default)])
-    r = run_cli(["sync"], config_home=config_home, state_dir=state_dir)
+    r = run_cli(["sync", "--json"], config_home=config_home, state_dir=state_dir)
     assert r.returncode == 1, "an unresolved conflict must surface in the exit code"
-    assert "conflict" in r.stderr.lower()
-    assert "lore resolve" in r.stderr, "the remedy must be actionable"
+    assert "the resolver could not settle" in r.stderr
+    assert "lore resolve" not in r.stderr, "the retired remedy is never printed"
     assert "git pull --rebase" not in r.stderr, "conflicts are settled through the CLI"
+
+    doc = _extract_json_report(r.stdout)
+    entry = _vault_outcome(doc, "default")
+    assert entry["outcome"] == "holding"
+    assert entry["reason"] == "policy-failure"
 
     # The vault is NOT left mid-rebase: no rebase state dir, tree is clean, and
     # the local commit survives intact for the manual resolution.
@@ -2185,15 +2197,16 @@ def _make_conflicting_forge(tmp_path: Path, name: str, vault: Path, remote: Path
     hook.chmod(0o755)
 
 
-def test_push_retry_replay_conflict_aborts_cleanly(tmp_path):
+def test_push_retry_replay_conflict_hands_off_to_the_resolver(tmp_path):
     """When the replay itself cannot be integrated cleanly (a genuine content
     conflict, not just a moved-but-compatible history), the rebase is aborted
-    and the vault is left exactly as it was — no mid-rebase state, no partial
-    commit — mirroring `_pull_one`'s own conflict-abort contract. This is the
-    ONE test reaching `_push_one`'s `if rc_rebase != 0:` branch (`cli/sync.py`),
-    so it pins the branch's specific ending, exit code, and operator-facing
-    message — not just the vault's on-disk state, which a wrong or missing
-    message could satisfy identically."""
+    and the conflict is handed to the resolver instead of just reported. The
+    fixture's conflict (README.md, which has no sidecar counterpart) is one
+    the resolver cannot settle either, so this pins the specific ending, exit
+    code, and operator-facing message for `_push_one`'s
+    `if rc_rebase != 0:` branch (`cli/sync.py`) reaching
+    `_hand_off_to_resolver`'s own failure path — not just the vault's on-disk
+    state, which a wrong or missing message could satisfy identically."""
     vault, remote = _make_pushed_vault(tmp_path, "conflict")
     _make_conflicting_forge(tmp_path, "conflict", vault, remote)
 
@@ -2204,19 +2217,139 @@ def test_push_retry_replay_conflict_aborts_cleanly(tmp_path):
 
     say, say_err, lines = _quiet_emitters()
     rc, ending, attempts = sync_mod._push_one(
-        vault, say, say_err, committed=True, max_attempts=3
+        vault, say, say_err, committed=True, max_attempts=3,
+        name="conflict", shared=False,
     )
 
     assert rc == 1, lines
     assert ending == sync_mod.PUBLISH_HOLDING, lines
     assert attempts == 1, lines
     assert any(
-        "replaying onto the moved history failed" in ln for ln in lines
-    ), f"the replay-failure branch's own message must reach the operator; lines={lines!r}"
+        "the resolver could not settle this conflict" in ln for ln in lines
+    ), f"the hand-off's own failure message must reach the operator; lines={lines!r}"
     assert not (vault / ".git" / "rebase-merge").exists()
     assert not (vault / ".git" / "rebase-apply").exists()
     assert _git(vault, "status", "--porcelain").stdout.strip() == ""
     assert _git(vault, "rev-parse", "HEAD").stdout.strip() == before_head
+
+
+def _write_record(vault: Path, record_id: str, *, status: str) -> None:
+    """Write a minimal valid task record directly — the shape
+    `lore record create` writes (see `test_sync_reindexes_after_a_pull...`
+    above): a record kind directory, a body, and a sidecar with the fields
+    the index schema requires NOT NULL."""
+    kind, _name = record_id.split("/", 1)
+    (vault / kind).mkdir(parents=True, exist_ok=True)
+    (vault / f"{record_id}.md").write_text("body text\n")
+    (vault / f"{record_id}.json").write_text(
+        json.dumps({
+            "title": "A Task", "status": status,
+            "created-at": "2026-07-29", "updated-at": "2026-07-29",
+        })
+    )
+
+
+def test_push_retry_replay_conflict_on_a_judgment_field_is_awaiting_person_like_the_pull(
+    tmp_path,
+):
+    """The vary-the-input pair that proves BOTH replay sites hand off, not
+    just whichever one a fixture happens to hit first: a genuine both-sides
+    field move (`status`), reached through `_push_one`'s moved-history replay
+    instead of `_pull_one`'s rebase, reports the SAME `awaiting-person`
+    outcome the pull site reports for the identical shape of conflict
+    (`test_sync_reports_awaiting_person_for_a_both_sides_judgment_conflict`,
+    `test_resolve_core.py`)."""
+    vault, remote = _make_pushed_vault(tmp_path, "judgment")
+    record_id = "task/a-task"
+    _write_record(vault, record_id, status="open")
+    _git(vault, "add", "-A")
+    _git(vault, "commit", "-m", "seed record")
+    _git(vault, "push", "origin")
+
+    other = _clone_as_second_device(remote, tmp_path / "judgment-device-b")
+    _write_record(other, record_id, status="done")
+    _git(other, "add", "-A")
+    _git(other, "commit", "-m", "device B moves status")
+    _git(other, "push", "origin")
+
+    _write_record(vault, record_id, status="ready")
+    _git(vault, "add", "-A")
+    _git(vault, "commit", "-m", "device A moves status")
+    before_head = _git(vault, "rev-parse", "HEAD").stdout.strip()
+
+    say, say_err, lines = _quiet_emitters()
+    rc, ending, _attempts = sync_mod._push_one(
+        vault, say, say_err, committed=True, max_attempts=3,
+        name="judgment", shared=False,
+    )
+
+    assert rc == 1, lines
+    assert ending == sync_mod.SYNC_AWAITING_PERSON, lines
+    assert not (vault / ".git" / "rebase-merge").exists()
+    assert _git(vault, "status", "--porcelain").stdout.strip() == ""
+    assert _git(vault, "rev-parse", "HEAD").stdout.strip() == before_head, (
+        "the local commit the resolver held is still present at its pre-hold sha"
+    )
+
+
+def test_finish_push_replay_conflict_does_not_recurse_into_the_resolver(tmp_path, monkeypatch):
+    """`resolve.py`'s `_finish` is ALREADY the tail of a resolution (a
+    person's `lore resolve`, or the sweep's own `resolve_for_sweep`). A
+    replay conflict on ITS OWN push (`_push_one` called with
+    `hand_off=False`) must report the pre-task `holding` ending directly and
+    must NEVER re-enter `resolve_for_sweep` — recursing there is exactly the
+    regression the drift gate caught in the prior commit (name/shared were
+    never forwarded from `resolve.py:931`, so the unconditional hand-off
+    recursed with `name=""`, `shared=False`)."""
+    calls = []
+
+    def _counting_resolve_for_sweep(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise AssertionError("resolve_for_sweep must never be called from _finish's own push")
+
+    monkeypatch.setattr(resolve_mod, "resolve_for_sweep", _counting_resolve_for_sweep)
+
+    vault, remote = _make_pushed_vault(tmp_path, "finish-conflict")
+    _make_conflicting_forge(tmp_path, "finish-conflict", vault, remote)
+    (vault / "task" / "README.md").write_text("vault-line\n")
+    _git(vault, "add", "-A")
+    _git(vault, "commit", "-m", "vault edit")
+
+    say, say_err, lines = _quiet_emitters()
+    rc = resolve_mod._finish(
+        vault, "finish-conflict", say, say_err, shared=False, include_shared=False
+    )
+
+    assert calls == [], f"resolve_for_sweep must not be re-entered; calls={calls!r}"
+    assert rc == 1, lines
+    assert any(
+        "replaying onto the moved history failed" in ln for ln in lines
+    ), f"the pre-task message must still reach the operator; lines={lines!r}"
+    assert not (vault / ".git" / "rebase-merge").exists()
+    assert _git(vault, "status", "--porcelain").stdout.strip() == ""
+
+
+def test_finish_push_replay_conflict_leaves_no_held_or_failed_marker(tmp_path):
+    """The held marker and the failed-vault marker are mutually exclusive by
+    design — a vault is either waiting on a person's judgment or failed for a
+    policy reason, never both. `_finish`'s own push conflict (never handed to
+    the resolver — see the sibling test above) must leave NEITHER marker,
+    not stack a held marker (from an inner recursive resolve) on top of a
+    failed marker (from the outer call misclassifying the inner's non-zero
+    exit)."""
+    vault, remote = _make_pushed_vault(tmp_path, "finish-marker")
+    _make_conflicting_forge(tmp_path, "finish-marker", vault, remote)
+    (vault / "task" / "README.md").write_text("vault-line\n")
+    _git(vault, "add", "-A")
+    _git(vault, "commit", "-m", "vault edit")
+
+    say, say_err, _lines = _quiet_emitters()
+    resolve_mod._finish(
+        vault, "finish-marker", say, say_err, shared=False, include_shared=False
+    )
+
+    assert resolve_state_mod.read_held_marker(vault) is None, "no held marker"
+    assert resolve_state_mod.read_failed_marker(vault) is None, "no failed marker either"
 
 
 def _make_single_shot_race_hook(vault: Path, other: Path) -> None:
@@ -2737,6 +2870,150 @@ def test_json_multi_vault_run_reports_three_different_outcomes(tmp_path):
     assert len({outcomes["a"], outcomes["b"], outcomes["c"]}) == 3
 
 
+def test_json_one_vault_awaiting_person_others_still_reach_determinate_outcomes(tmp_path):
+    """AC8 through the new path: a host with several vaults, one of them
+    held on a genuine judgment conflict, still lets every OTHER vault reach
+    its own determinate outcome in the same run — three different outcomes,
+    one of them the new `awaiting-person`."""
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True)
+
+    # Vault A: a both-sides judgment conflict -> awaiting-person.
+    a = _make_vault(tmp_path / "v-a", dirty=False)
+    remote_a = _make_bare_remote(tmp_path / "a-remote.git")
+    _wire_remote(a, remote_a)
+    record_id = "task/a-task"
+    _write_record(a, record_id, status="open")
+    _git(a, "add", "-A")
+    _git(a, "commit", "-m", "seed record")
+    _git(a, "push", "origin")
+    device_b_a = _clone_as_second_device(remote_a, tmp_path / "a-device-b")
+    _write_record(device_b_a, record_id, status="done")
+    _git(device_b_a, "add", "-A")
+    _git(device_b_a, "commit", "-m", "device B moves status")
+    _git(device_b_a, "push", "origin")
+    _write_record(a, record_id, status="ready")
+
+    # Vault B: behind-only -> converged.
+    b = _make_vault(tmp_path / "v-b", dirty=False)
+    remote_b = _make_bare_remote(tmp_path / "b-remote.git")
+    _wire_remote(b, remote_b)
+    device_b_b = _clone_as_second_device(remote_b, tmp_path / "b-device-b")
+    (device_b_b / "theirs.md").write_text("# device B\n")
+    _git(device_b_b, "add", "-A")
+    _git(device_b_b, "commit", "-m", "device B record")
+    _git(device_b_b, "push", "origin")
+
+    # Vault C: ahead-only -> published.
+    c = _make_vault(tmp_path / "v-c", dirty=True)
+    remote_c = _make_bare_remote(tmp_path / "c-remote.git")
+    _wire_remote(c, remote_c)
+
+    write_vault_config(
+        config_home,
+        [("a", "default", a), ("b", "product", b), ("c", "repo", c)],
+    )
+    r = run_cli(["sync", "--json"], config_home=config_home, state_dir=state_dir)
+    assert r.returncode == 1  # vault a's held ending is a hard failure this run
+
+    doc = _extract_json_report(r.stdout)
+    outcomes = {v["vault"]: v["outcome"] for v in doc["vaults"]}
+    assert outcomes == {"a": "awaiting-person", "b": "converged", "c": "published"}
+
+    assert _git(b, "status", "--porcelain").stdout.strip() == ""
+    assert _git(b, "rev-parse", "HEAD").stdout.strip() == \
+        _git(remote_b, "rev-parse", "HEAD").stdout.strip()
+    assert _git(c, "rev-parse", "HEAD").stdout.strip() == \
+        _git(remote_c, "rev-parse", "HEAD").stdout.strip()
+    assert _git(a, "status", "--porcelain").stdout.strip() == "", "a's held ending is clean"
+    assert not (a / ".git" / "rebase-merge").exists()
+
+
+def test_json_holding_reason_distinguishes_policy_failure_from_remote_rejection(tmp_path):
+    """The two `holding` producers a person cannot tell apart from the row's
+    text alone must carry different `reason` tags in the stored document: a
+    resolver failure (`policy-failure`) is cleared by fixing this host's
+    data; a forge rejection (`remote-rejection`) is cleared by fixing the
+    forge's policy or the credential pushing to it."""
+    # -- Producer 1: resolver policy-failure (README.md has no sidecar) -----
+    config_home_policy = tmp_path / "config-policy"
+    state_dir_policy = tmp_path / "state-policy"
+    state_dir_policy.mkdir(parents=True)
+    policy_vault = _make_vault(tmp_path / "v-policy", dirty=False)
+    policy_remote = _make_bare_remote(tmp_path / "policy-remote.git")
+    _wire_remote(policy_vault, policy_remote)
+    other = _clone_as_second_device(policy_remote, tmp_path / "policy-device-b")
+    (other / "task" / "README.md").write_text("edited on device B\n")
+    _git(other, "add", "-A")
+    _git(other, "commit", "-m", "device B edit")
+    _git(other, "push", "origin")
+    (policy_vault / "task" / "README.md").write_text("edited on device A\n")
+
+    write_vault_config(config_home_policy, [("default", "default", policy_vault)])
+    r_policy = run_cli(
+        ["sync", "--json"], config_home=config_home_policy, state_dir=state_dir_policy
+    )
+    doc_policy = _extract_json_report(r_policy.stdout)
+    entry_policy = _vault_outcome(doc_policy, "default")
+
+    # -- Producer 2: forge rejection, no history movement --------------------
+    config_home_hook = tmp_path / "config-hook"
+    state_dir_hook = tmp_path / "state-hook"
+    state_dir_hook.mkdir(parents=True)
+    hook_vault = _make_vault(tmp_path / "v-hook", dirty=False)
+    hook_remote = _make_bare_remote(tmp_path / "hook-remote.git")
+    _wire_remote(hook_vault, hook_remote)
+    _write_plain_rejecting_hook(hook_remote)
+    (hook_vault / "task" / "local.md").write_text("local change\n")
+
+    write_vault_config(config_home_hook, [("default", "default", hook_vault)])
+    r_hook = run_cli(
+        ["sync", "--json"], config_home=config_home_hook, state_dir=state_dir_hook
+    )
+    doc_hook = _extract_json_report(r_hook.stdout)
+    entry_hook = _vault_outcome(doc_hook, "default")
+
+    assert entry_policy["outcome"] == "holding"
+    assert entry_hook["outcome"] == "holding"
+    assert entry_policy["reason"] == "policy-failure"
+    assert entry_hook["reason"] == "remote-rejection"
+    assert entry_policy["reason"] != entry_hook["reason"], (
+        "the row's text may stay unified; the stored fact must not be"
+    )
+
+
+def test_the_failure_diagnostic_lands_in_a_named_durable_location(tmp_path):
+    """The design doc's "goes to the terminal and the host's log" promise,
+    made checkable: the failure's own detail is NOT only in this one run's
+    stderr — it is readable back from a named, durable location on disk
+    (`resolve_state`'s failed-vault marker) after the process that printed it
+    has already exited."""
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True)
+    vault = _make_vault(tmp_path / "v-default", dirty=False)
+    remote = _make_bare_remote(tmp_path / "remote.git")
+    _wire_remote(vault, remote)
+    other = _clone_as_second_device(remote, tmp_path / "device-b")
+    (other / "task" / "README.md").write_text("edited on device B\n")
+    _git(other, "add", "-A")
+    _git(other, "commit", "-m", "device B edit")
+    _git(other, "push", "origin")
+    (vault / "task" / "README.md").write_text("edited on device A\n")
+
+    write_vault_config(config_home, [("default", "default", vault)])
+    r = run_cli(["sync", "--json"], config_home=config_home, state_dir=state_dir)
+    assert r.returncode == 1, r.stderr
+
+    os.environ["XDG_STATE_HOME"] = str(state_dir)
+    marker = resolve_state_mod.read_failed_marker(vault)
+    assert marker is not None, "the failure's own marker must exist on disk"
+    assert marker["reason"] == "policy-failure"
+    assert marker["detail"], "a human reading this later needs to know WHY, not just that"
+    assert marker["vault"] == "v-default"
+
+
 def test_json_unresolved_vault_does_not_strand_the_others(tmp_path):
     """After a run where one vault could not be resolved (a genuine
     conflict), every OTHER vault is clean and at the published history, and
@@ -2816,6 +3093,26 @@ def test_render_sync_json_rejects_an_outcome_outside_the_closed_vocabulary():
     # varies the check's answer.
     doc = sync_mod.render_sync_json([("default", "converged", None)])
     assert doc["vaults"] == [{"vault": "default", "outcome": "converged"}]
+
+    # `awaiting-person` is the newest member of the same closed set, added
+    # in both places (`SYNC_OUTCOMES` and the schema string) — this is the
+    # guard that keeps them from drifting.
+    doc2 = sync_mod.render_sync_json([("default", "awaiting-person", None)])
+    assert doc2["vaults"] == [{"vault": "default", "outcome": "awaiting-person"}]
+    assert "awaiting-person" in sync_mod._SYNC_REPORT_SCHEMA
+
+
+def test_render_sync_json_rejects_a_reason_outside_the_closed_vocabulary():
+    """`SYNC_FAILURE_REASONS` is a closed set too, gated the same way as
+    `SYNC_OUTCOMES` — a reason is meaningful only alongside `holding`, and
+    only as one of the two literals a caller was told to expect."""
+    import pytest
+
+    with pytest.raises(ValueError):
+        sync_mod.render_sync_json([("default", "holding", None, "not-a-real-reason")])
+
+    doc = sync_mod.render_sync_json([("default", "holding", None, "policy-failure")])
+    assert doc["vaults"] == [{"vault": "default", "outcome": "holding", "reason": "policy-failure"}]
 
 
 def test_json_report_parses_and_prose_is_unchanged_without_json(tmp_path):

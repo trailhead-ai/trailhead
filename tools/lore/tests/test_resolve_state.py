@@ -299,6 +299,117 @@ def test_session_candidate_warns_but_still_captures(tmp_path):
     assert "captured anyway" in body, "a warned capture still lands"
 
 
+# ── held marker: the host-local "waiting for a person" fact ────────────────
+
+
+def test_held_marker_round_trip(tmp_path, resolve_state):
+    vault = _init_vault(tmp_path / "vault")
+
+    assert resolve_state.read_held_marker(vault) is None, "no marker before anything is held"
+
+    marker = resolve_state.mark_held(vault)
+    assert marker["vault"] == "vault"
+    assert marker["entered-at"]
+    assert resolve_state.read_held_marker(vault) == marker
+
+
+def test_held_marker_path_distinguishes_vaults_sharing_a_basename(tmp_path, resolve_state):
+    """Same collision `machine_state_key` exists to prevent, for the held marker."""
+    first = _init_vault(tmp_path / "a" / "vault")
+    second = _init_vault(tmp_path / "b" / "vault")
+
+    resolve_state.mark_held(first)
+    resolve_state.mark_held(second)
+
+    assert resolve_state.held_marker_path(first) != resolve_state.held_marker_path(second)
+    assert resolve_state.read_held_marker(first) is not None
+    assert resolve_state.read_held_marker(second) is not None
+    # each vault's own marker file carries only that vault's write
+    resolve_state.clear_held_marker(first)
+    assert resolve_state.read_held_marker(first) is None
+    assert resolve_state.read_held_marker(second) is not None, "clearing one must not touch the other"
+
+
+def test_re_holding_preserves_the_original_entered_at(tmp_path, resolve_state, monkeypatch):
+    vault = _init_vault(tmp_path / "vault")
+    first = resolve_state.mark_held(vault)
+
+    later = dt_module_now_advance()
+    monkeypatch.setattr(resolve_state.dt, "datetime", later)
+    second = resolve_state.mark_held(vault)
+
+    assert second["entered-at"] == first["entered-at"], (
+        "re-holding an already-held vault must not restamp — the duration a "
+        "person reads is how long the vault has been waiting, not how long "
+        "since the last sweep looked"
+    )
+
+
+def test_holding_after_a_clear_stamps_a_fresh_instant(tmp_path, resolve_state, monkeypatch):
+    vault = _init_vault(tmp_path / "vault")
+    first = resolve_state.mark_held(vault)
+    assert resolve_state.clear_held_marker(vault) is True
+
+    later = dt_module_now_advance()
+    monkeypatch.setattr(resolve_state.dt, "datetime", later)
+    second = resolve_state.mark_held(vault)
+
+    assert second["entered-at"] != first["entered-at"], (
+        "holding after a clear starts a fresh instant, not the stale one"
+    )
+
+
+def test_clearing_a_held_marker_removes_it_and_is_a_noop_when_absent(tmp_path, resolve_state):
+    vault = _init_vault(tmp_path / "vault")
+    resolve_state.mark_held(vault)
+
+    assert resolve_state.clear_held_marker(vault) is True
+    assert resolve_state.read_held_marker(vault) is None
+    assert resolve_state.clear_held_marker(vault) is False, "clearing an absent marker is a silent no-op"
+
+
+def test_held_marker_path_refuses_a_symlink_escape(tmp_path, resolve_state):
+    from lore.vault import layers as layers_mod
+
+    vault = _init_vault(tmp_path / "vault")
+    root = resolve_state.resolve_state_root()
+    root.mkdir(parents=True, exist_ok=True)
+    outside = tmp_path / "elsewhere-held.json"
+    outside.write_text("{}")
+    (root / resolve_state.held_marker_path(vault).name).symlink_to(outside)
+
+    with pytest.raises(layers_mod.LayerConfinementError):
+        resolve_state.held_marker_path(vault)
+
+
+def test_held_marker_and_resolution_marker_coexist_for_one_vault(tmp_path, resolve_state):
+    vault = _init_vault(tmp_path / "vault")
+
+    session = resolve_state.begin_session(vault)
+    held = resolve_state.mark_held(vault)
+
+    assert resolve_state.marker_path(vault) != resolve_state.held_marker_path(vault)
+    assert resolve_state.read_marker(vault) == session, "the held write must not clobber the session marker"
+    assert resolve_state.read_held_marker(vault) == held, "the session marker must not clobber the held write"
+
+    resolve_state.clear_held_marker(vault)
+    assert resolve_state.read_marker(vault) == session, "clearing held must not touch the session marker"
+
+
+def dt_module_now_advance():
+    """Return a stand-in ``datetime`` class whose ``now()`` is one hour later."""
+    import datetime as real_dt
+
+    later = real_dt.datetime.now(real_dt.timezone.utc) + real_dt.timedelta(hours=1)
+
+    class _FrozenLater(real_dt.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return later
+
+    return _FrozenLater
+
+
 def test_flush_all_refuses_before_flipping_anything(tmp_path):
     """The batch path refuses the whole batch, never half of it."""
     vault = _init_vault(tmp_path / "vault")
