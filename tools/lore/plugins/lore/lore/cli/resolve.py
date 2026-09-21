@@ -996,6 +996,12 @@ def _finish(vault: Path, name: str, say, say_err, *, shared: bool,
     person-started call.
     """
     resolve_state.clear_marker(vault)
+    # The held marker's rule is that it exists exactly while the vault is held,
+    # and this is the one tail every completed resolution runs through — the
+    # sweep's own and the `lore resolve` a held vault's remedy sends a person
+    # to. Clearing it anywhere further up would leave the marker behind on
+    # whichever route did not go through that site.
+    resolve_state.clear_held_marker(vault)
     say("Rebase complete.")
 
     from .areas import run_reindex
@@ -1086,6 +1092,10 @@ def cmd_resolve(args) -> int:
             if not _vault_mid_rebase(vault):
                 started = _start_rebase(vault, say_err)
                 if started is None:
+                    # Nothing left to replay, so nothing is held — a vault
+                    # settled by any route other than this one reaches its
+                    # not-held state here.
+                    resolve_state.clear_held_marker(vault)
                     return _report_nothing_pending(name, say, as_json, shared=shared)
                 if started is False:
                     return 1
@@ -1325,7 +1335,6 @@ def resolve_for_sweep(vault: Path, name: str, *, shared: bool) -> dict:
             report["entered-at"] = marker["entered-at"]
             return report
 
-    resolve_state.clear_held_marker(vault)
     say, say_err = _make_emitters(name, len(name) + 1)
     rc_finish = _finish(vault, name, say, say_err, shared=shared,
                         include_shared=False, sweep=True)

@@ -2694,3 +2694,58 @@ def test_a_take_on_a_held_unreadable_sidecar_is_refused_not_written(tmp_path, re
     assert (fx.vault / f"{record_id}.md").read_text(encoding="utf-8") == before, (
         "no part of the held record was written"
     )
+
+
+def test_a_person_finishing_the_held_vault_by_hand_clears_the_held_marker(tmp_path, resolve):
+    """The remedy the loop prints must leave the vault genuinely not-held.
+
+    A hold ends by naming ``lore resolve <vault>`` on the terminal, and that
+    is what a person does next. Clearing only inside the sweep's own entry point
+    means the marker survives the very command the sweep sent them to — and
+    every converged sync afterwards, because nothing else looks at it. The
+    marker's rule is "exists exactly while the vault is held", so whatever
+    finishes a resolution is what has to clear it.
+    """
+    fx = _Fixture(tmp_path)
+    record_id, _local_sha, _remote_sha = _diverge_on_status(fx)
+    _git(fx.vault, "fetch", "origin")
+    _use_state(fx)
+
+    assert resolve.resolve_for_sweep(fx.vault, "default", shared=False)["held"] is True
+    assert resolve.resolve_state.vault_is_held(fx.vault), "the vault is held"
+
+    assert fx.cli(["resolve", "default"]).returncode == 0
+    r = fx.cli(["resolve", "take", record_id, "--slot", "status", "--local"])
+    assert r.returncode == 0, r.stderr
+
+    assert resolve.resolve_state.read_held_marker(fx.vault) is None, (
+        "the resolution a person ran cleared the held marker"
+    )
+
+
+def test_resolve_on_a_vault_with_nothing_left_to_replay_clears_the_held_marker(
+    tmp_path, resolve
+):
+    """A vault settled outside the loop still has to stop reporting as held.
+
+    `lore resolve` on a vault with no pending replay reports "no conflict
+    pending" and returns zero — the honest answer, and the one a person gets
+    after settling the divergence by any other route. A marker left behind
+    across that ending is a vault that reads held while being clean and
+    published, which is the reading a later consumer would decline on forever.
+    """
+    fx = _Fixture(tmp_path)
+    _diverge_on_status(fx)
+    _git(fx.vault, "fetch", "origin")
+    _use_state(fx)
+
+    assert resolve.resolve_for_sweep(fx.vault, "default", shared=False)["held"] is True
+    _git(fx.vault, "reset", "--hard", f"origin/{fx.branch}")
+
+    r = fx.cli(["resolve", "default"])
+
+    assert r.returncode == 0, r.stderr
+    assert "no conflict pending" in r.stdout
+    assert resolve.resolve_state.read_held_marker(fx.vault) is None, (
+        "nothing is pending, so nothing is held"
+    )

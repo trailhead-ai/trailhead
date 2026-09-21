@@ -40,8 +40,10 @@ disjoint moments of the same replay:
   The held marker's liveness rule is instead plain file presence: the marker
   exists exactly while the vault is held, full stop. It is written once when a
   hold begins (preserving ``entered-at`` on a re-hold), read many times by
-  whatever wants to know "held?" without re-running a replay, and cleared once,
-  by whatever later sync settles the vault. No process-liveness or git-state
+  whatever wants to know "held?" without re-running a replay, and cleared by
+  whatever finishes a resolution — the sweep's own settle tail, the
+  ``lore resolve`` a held vault's remedy sends a person to, and the ending
+  that finds nothing left to replay at all. No process-liveness or git-state
   check sits on top of that presence, because nothing about *being held* is
   time-bounded to one subprocess the way a resolution step is.
 """
@@ -213,7 +215,7 @@ def read_held_marker(vault_root: str | Path) -> "dict | None":
     definition NOT mid-rebase while held, and it is written once and read many
     times across process boundaries with no rebase state to consult. Its
     liveness rule is simply file presence: the marker exists exactly while the
-    vault is held, and stops existing the moment a later sync settles it
+    vault is held, and stops existing the moment any resolution finishes
     (:func:`clear_held_marker`). There is nothing mid-rebase to distinguish a
     live write from a stale one, so no separate ``live_held_marker`` exists.
     """
