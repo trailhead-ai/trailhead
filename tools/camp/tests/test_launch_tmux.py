@@ -59,6 +59,7 @@ class _PrefixMatchingTmux:
     def __init__(self, live: dict[str, str]) -> None:
         self.live = dict(live)
         self.calls: list[list[str]] = []
+        self.next_window_id = 0
 
     def _target(self, argv: list[str]) -> str | None:
         if "-t" not in argv:
@@ -87,6 +88,15 @@ class _PrefixMatchingTmux:
         if verb == "has-session":
             resolved = self._resolve(raw_target) if raw_target else None
             return _completed(returncode=0 if resolved else 1)
+        if verb == "new-window":
+            resolved = self._resolve(raw_target) if raw_target else None
+            if resolved is None:
+                return _completed(returncode=1, stderr="can't find session")
+            self.next_window_id += 1
+            window_name = argv[argv.index("-n") + 1] if "-n" in argv else ""
+            return _completed(
+                returncode=0, stdout=f"@{self.next_window_id} {window_name}\n"
+            )
         return _completed(returncode=1, stderr="unhandled verb in test stand-in")
 
 
@@ -467,3 +477,449 @@ class TestTmuxTimeoutEnvironmentSeam:
         applied = self._timeout_applied(monkeypatch, bad)
 
         assert applied == pytest.approx(tmux_module.TMUX_TIMEOUT_SECONDS)
+
+
+def test_new_window_argv_carries_target_cwd_and_command_with_qualified_target(
+    monkeypatch,
+):
+    """The argv `new_window` issues carries the session target, working
+    directory, and command — with the `-t` target `=`-qualified while no
+    bare session name argument appears anywhere in the call."""
+    import camp.launch.tmux as tmux_module
+
+    calls: list[list[str]] = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(list(argv))
+        return _completed(returncode=0, stdout="@7\n")
+
+    monkeypatch.setattr(tmux_module.subprocess, "run", fake_run)
+
+    tmux_module.Tmux().new_window(
+        "feat", cwd="/tmp/ws", window_name="my-window", command=["sleep", "30"]
+    )
+
+    assert calls == [
+        [
+            "tmux",
+            "new-window",
+            "-t",
+            "=feat",
+            "-P",
+            "-F",
+            "#{window_id} #{window_name}",
+            "-n",
+            "my-window",
+            "-c",
+            "/tmp/ws",
+            "sleep",
+            "30",
+        ]
+    ]
+
+
+def test_new_window_targeting_a_strict_prefix_of_another_live_session_does_not_resolve_to_it(
+    monkeypatch,
+):
+    """A name that is a prefix of another live session's name must not
+    resolve to that other session: `new_window("feat", ...)` against a
+    live `feat-longer` (and no `feat`) must fail, never silently create the
+    window inside `feat-longer`. Reverting `target` to the identity
+    function makes this go red — the bare target resolves by prefix and
+    the window is created in the wrong session."""
+    import camp.launch.tmux as tmux_module
+
+    fake = _PrefixMatchingTmux({"feat-longer": "sleep 1"})
+    monkeypatch.setattr(tmux_module.subprocess, "run", fake)
+
+    result = tmux_module.Tmux().new_window(
+        "feat", cwd="/tmp/ws", window_name="w", command=()
+    )
+
+    assert result is None, (
+        "a new-window targeting a name that does not exist must not "
+        "resolve to a same-prefixed session that does"
+    )
+    new_window_calls = [c for c in fake.calls if c[1] == "new-window"]
+    assert len(new_window_calls) == 1
+
+
+def test_new_window_returns_the_id_and_name_tmux_reported_varying_across_two_calls(
+    monkeypatch,
+):
+    """The returned id AND name are the ones the stand-in tmux printed on
+    THIS call — not a fixed sentinel, and not the `window_name` argument
+    echoed back unread. Two different canned answers produce two different
+    results."""
+    import camp.launch.tmux as tmux_module
+
+    monkeypatch.setattr(
+        tmux_module.subprocess,
+        "run",
+        lambda *a, **k: _completed(returncode=0, stdout="@3 alpha\n"),
+    )
+    first = tmux_module.Tmux().new_window("ws", cwd="/tmp/a", window_name="alpha", command=())
+    assert first.window_id == "@3"
+    assert first.window_name == "alpha"
+
+    monkeypatch.setattr(
+        tmux_module.subprocess,
+        "run",
+        lambda *a, **k: _completed(returncode=0, stdout="@9 alpha (1)\n"),
+    )
+    second = tmux_module.Tmux().new_window("ws", cwd="/tmp/a", window_name="alpha", command=())
+    assert second.window_id == "@9"
+    assert second.window_name == "alpha (1)"
+
+    assert first.window_id != second.window_id
+    assert first.window_name != second.window_name
+
+
+def test_new_window_non_zero_exit_returns_none_not_an_exception_and_no_id(monkeypatch):
+    """A tmux that exits non-zero (the session does not exist, say) produces
+    the seam's own failure result — `None` — never a raw exception escaping
+    to the caller, and never a window id."""
+    import camp.launch.tmux as tmux_module
+
+    monkeypatch.setattr(
+        tmux_module.subprocess,
+        "run",
+        lambda *a, **k: _completed(returncode=1, stderr="can't find session"),
+    )
+
+    result = tmux_module.Tmux().new_window("ws", cwd="/tmp/a", window_name="w", command=())
+
+    assert result is None
+
+
+def test_new_window_unreachable_tmux_is_distinguishable_from_an_answered_failure(
+    monkeypatch,
+):
+    """A tmux that cannot be reached at all (timeout, unlaunchable binary)
+    answers `UNANSWERED` — the same tri-state sentinel `pane_command`
+    already uses — never the same value a completed, non-zero exit
+    produces. Folding the two together would report a hung tmux as an
+    ordinary create failure."""
+    import camp.launch.tmux as tmux_module
+
+    def _raise(*a, **k):
+        raise subprocess.TimeoutExpired(cmd=["tmux"], timeout=5)
+
+    monkeypatch.setattr(tmux_module.subprocess, "run", _raise)
+
+    result = tmux_module.Tmux().new_window("ws", cwd="/tmp/a", window_name="w", command=())
+
+    assert result is tmux_module.UNANSWERED
+    assert result is not None
+
+
+def test_set_option_states_a_session_local_option_never_global(monkeypatch):
+    """`set_option` issues plain `set-option -t <target> <key> <value>` —
+    no `-g` — so the value is scoped to the addressed session only, and
+    *target* is used exactly as given (no `=` qualification applied by this
+    method — see its own docstring)."""
+    import camp.launch.tmux as tmux_module
+
+    calls: list[list[str]] = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(list(argv))
+        return _completed(returncode=0)
+
+    monkeypatch.setattr(tmux_module.subprocess, "run", fake_run)
+
+    tmux_module.Tmux().set_option("=feat", "@camp_group", "trailhead")
+
+    assert calls == [["tmux", "set-option", "-t", "=feat:", "@camp_group", "trailhead"]]
+    assert "-g" not in calls[0]
+
+
+def test_set_option_addresses_a_raw_session_id_target_verbatim(monkeypatch):
+    """The window-dispatch verb's call shape: *target* is a tmux-minted
+    session id (`$3`), never run through `=`-name qualification."""
+    import camp.launch.tmux as tmux_module
+
+    calls: list[list[str]] = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(list(argv))
+        return _completed(returncode=0)
+
+    monkeypatch.setattr(tmux_module.subprocess, "run", fake_run)
+
+    tmux_module.Tmux().set_option("$3", "@camp_slug", "camp-cli")
+
+    assert calls == [["tmux", "set-option", "-t", "$3:", "@camp_slug", "camp-cli"]]
+
+
+def test_show_option_reads_back_the_bare_value(monkeypatch):
+    """`-v` prints the value alone; the trailing newline tmux always adds is
+    stripped, and two distinct values prove the method reads what tmux
+    actually answered rather than echoing a fixed string."""
+    import camp.launch.tmux as tmux_module
+
+    monkeypatch.setattr(
+        tmux_module.subprocess,
+        "run",
+        lambda *a, **k: _completed(returncode=0, stdout="trailhead\n"),
+    )
+    assert tmux_module.Tmux().show_option("$3", "@camp_group") == "trailhead"
+
+    monkeypatch.setattr(
+        tmux_module.subprocess,
+        "run",
+        lambda *a, **k: _completed(returncode=0, stdout="camp-cli\n"),
+    )
+    assert tmux_module.Tmux().show_option("$3", "@camp_slug") == "camp-cli"
+
+
+def test_show_option_answers_none_on_a_non_zero_exit(monkeypatch):
+    """An unset option, or a session that no longer exists, both surface as
+    a non-zero tmux exit — read back as `None`, never an empty string that
+    could be mistaken for a genuinely empty value."""
+    import camp.launch.tmux as tmux_module
+
+    monkeypatch.setattr(
+        tmux_module.subprocess, "run", lambda *a, **k: _completed(returncode=1)
+    )
+    assert tmux_module.Tmux().show_option("$99", "@camp_group") is None
+
+
+def test_install_window_binding_issues_the_exact_argv_shape(monkeypatch):
+    """The binding argv this seam builds: server-global (no `-t`), bound to
+    `if-shell -F '#{@camp_workspace}'`, whose else-branch is tmux's own real
+    compiled-in default for prefix+c — `new-window` — since tmux has no
+    revert-to-default primitive."""
+    import camp.launch.tmux as tmux_module
+
+    calls: list[list[str]] = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(list(argv))
+        return _completed(returncode=0)
+
+    monkeypatch.setattr(tmux_module.subprocess, "run", fake_run)
+
+    tmux_module.Tmux().install_window_binding('run-shell "camp window-dispatch"')
+
+    assert calls == [
+        [
+            "tmux",
+            "bind-key",
+            "-T",
+            "prefix",
+            "c",
+            "if-shell",
+            "-F",
+            "#{@camp_workspace}",
+            'run-shell "camp window-dispatch"',
+            "new-window",
+        ]
+    ]
+
+
+def test_list_window_binding_reads_the_whole_prefix_table_not_a_per_key_filter(monkeypatch):
+    """`list-keys -T prefix c` is NOT a per-key filter on real tmux (there
+    is no such flag) — it answers empty every time, which would silently
+    defeat the first-install/re-install distinction. Pinned here as the
+    exact argv this method must issue: the whole table, no trailing key
+    token — confirmed against a real tmux 3.7c server in
+    test_window_binding_end_to_end.py."""
+    import camp.launch.tmux as tmux_module
+
+    calls: list[list[str]] = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(list(argv))
+        return _completed(returncode=0, stdout="bind-key -T prefix c new-window\n")
+
+    monkeypatch.setattr(tmux_module.subprocess, "run", fake_run)
+
+    result = tmux_module.Tmux().list_window_binding()
+
+    assert calls == [["tmux", "list-keys", "-T", "prefix"]]
+    assert result == "bind-key -T prefix c new-window\n"
+
+
+def test_display_message_targets_a_raw_session_id_with_no_qualification(monkeypatch):
+    """The refusal surface a detached `run-shell` dispatch has: addresses
+    the client attached to *target* verbatim, never `=`-qualified — proven
+    across two distinct messages so this is not a fixed-string echo."""
+    import camp.launch.tmux as tmux_module
+
+    calls: list[list[str]] = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(list(argv))
+        return _completed(returncode=0)
+
+    monkeypatch.setattr(tmux_module.subprocess, "run", fake_run)
+
+    tmux_module.Tmux().display_message("$3", "camp: refused — outside workspace")
+    tmux_module.Tmux().display_message("$3", "camp: refused — credential store")
+
+    assert calls == [
+        ["tmux", "display-message", "-t", "$3", "camp: refused — outside workspace"],
+        ["tmux", "display-message", "-t", "$3", "camp: refused — credential store"],
+    ]
+
+
+def test_display_message_escapes_hash_so_tmux_does_not_expand_the_message(monkeypatch):
+    """`display-message` FORMAT-expands its argument: verified against real
+    tmux 3.7c that `#{E:SECRETTEST}` in a message is replaced by that
+    variable's value from the session environment, and that `##` is tmux's
+    own escape for a literal `#`.
+
+    Camp's refusal messages embed operator-influenced text — a workspace
+    slug, a group name, a path — so an unescaped `#{...}` in any of them
+    would have tmux read camp's own session environment out onto the
+    operator's status line. Every `#` is doubled before the message reaches
+    tmux; tmux collapses it back, so what the operator READS is unchanged.
+
+    Varied across three messages: one with no `#` at all (must pass through
+    byte-identical — the escape is not a blanket rewrite), one with a format
+    expression, and one with a bare `#`.
+    """
+    import camp.launch.tmux as tmux_module
+
+    calls: list[list[str]] = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(list(argv))
+        return _completed(returncode=0)
+
+    monkeypatch.setattr(tmux_module.subprocess, "run", fake_run)
+
+    tmux_module.Tmux().display_message("$3", "camp: refused — outside workspace")
+    tmux_module.Tmux().display_message("$3", "camp: unknown group '#{E:SECRETTEST}'")
+    tmux_module.Tmux().display_message("$3", "camp: slug a#b")
+
+    assert [argv[-1] for argv in calls] == [
+        "camp: refused — outside workspace",
+        "camp: unknown group '##{E:SECRETTEST}'",
+        "camp: slug a##b",
+    ]
+
+
+def test_prefix_window_binding_line_matches_on_the_key_position_not_the_text(monkeypatch):
+    """Picking the `c` line out of `list-keys -T prefix` output has one
+    trap: tmux's own stock `display-menu` bindings embed bare `c` operands
+    inside their menu definitions, so any match on the TEXT ` c ` finds
+    those instead. The match is anchored on the key's POSITION — the
+    operand immediately after `-T prefix` — and tolerates flags such as
+    `-r` that tmux renders between `bind-key` and `-T`.
+
+    Varied across four tables so each rule is exercised by a case that
+    would pass without it.
+    """
+    from camp.launch.tmux import prefix_window_binding_line
+
+    menu_line = 'bind-key    -T prefix >       display-menu -T "x" c { set-buffer "y" }'
+    custom = 'bind-key    -T prefix c       new-window -c "#{pane_current_path}"'
+    repeating = 'bind-key -r -T prefix c       new-window'
+    other_key = "bind-key    -T prefix n       next-window"
+
+    assert prefix_window_binding_line(f"{menu_line}\n{custom}\n{other_key}\n") == custom
+    assert prefix_window_binding_line(f"{other_key}\n{repeating}\n") == repeating
+    # A table holding the menu line but NO `c` binding answers None — this
+    # is the case a text match gets wrong.
+    assert prefix_window_binding_line(f"{menu_line}\n{other_key}\n") is None
+    assert prefix_window_binding_line("") is None
+
+
+def test_server_option_argv_is_global_and_round_trips_the_value(monkeypatch):
+    """The captured binding outlives the workspace that captured it but must
+    die with the tmux server, which is exactly a server-global user option's
+    lifetime. `-g` here is deliberate and the opposite of `set_option`'s
+    session-local contract, so it is a separate method rather than a flag."""
+    import camp.launch.tmux as tmux_module
+
+    calls: list[list[str]] = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(list(argv))
+        return _completed(returncode=0, stdout="bind-key -T prefix c new-window\n")
+
+    monkeypatch.setattr(tmux_module.subprocess, "run", fake_run)
+
+    tmux = tmux_module.Tmux()
+    tmux.set_server_option("@camp_prior", "bind-key -T prefix c new-window")
+    value = tmux.show_server_option("@camp_prior")
+    tmux.unset_server_option("@camp_prior")
+
+    assert calls == [
+        ["tmux", "set-option", "-g", "@camp_prior", "bind-key -T prefix c new-window"],
+        ["tmux", "show-options", "-gv", "@camp_prior"],
+        ["tmux", "set-option", "-gu", "@camp_prior"],
+    ]
+    assert value == "bind-key -T prefix c new-window"
+
+
+def test_show_server_option_answers_none_for_an_option_that_was_never_set(monkeypatch):
+    """tmux answers a non-zero exit and `invalid option` for an unset user
+    option (confirmed on 3.7c) — that is "nothing captured", not a value."""
+    import camp.launch.tmux as tmux_module
+
+    monkeypatch.setattr(
+        tmux_module.subprocess,
+        "run",
+        lambda argv, **kw: _completed(returncode=1, stderr="invalid option: @camp_prior"),
+    )
+
+    assert tmux_module.Tmux().show_server_option("@camp_prior") is None
+
+
+def test_source_command_hands_the_command_to_tmux_on_stdin(monkeypatch):
+    """Restoring a captured binding means re-running a command string tmux
+    itself wrote. `source-file -` makes TMUX re-parse it with its own
+    grammar, which is the only parser guaranteed to agree with the one that
+    produced it — camp never re-tokenizes the line itself."""
+    import camp.launch.tmux as tmux_module
+
+    seen: list[dict] = []
+
+    def fake_run(argv, **kwargs):
+        seen.append({"argv": list(argv), "input": kwargs.get("input")})
+        return _completed(returncode=0)
+
+    monkeypatch.setattr(tmux_module.subprocess, "run", fake_run)
+
+    tmux_module.Tmux().source_command('bind-key -T prefix c new-window -c "#{pane_current_path}"')
+    tmux_module.Tmux().source_command("unbind-key -T prefix c")
+
+    assert [d["argv"] for d in seen] == [["tmux", "source-file", "-"], ["tmux", "source-file", "-"]]
+    assert [d["input"] for d in seen] == [
+        'bind-key -T prefix c new-window -c "#{pane_current_path}"\n',
+        "unbind-key -T prefix c\n",
+    ]
+
+
+def test_reset_window_binding_issues_the_stock_bind_key_argv(monkeypatch):
+    """Removal re-installs tmux's own compiled-in default literally —
+    `bind-key -T prefix c new-window`, server-global (no `-t`) — since tmux
+    has no revert-to-default primitive to call instead. Same argv shape
+    `install_window_binding` uses, minus the `if-shell` wrapping."""
+    import camp.launch.tmux as tmux_module
+
+    calls: list[list[str]] = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(list(argv))
+        return _completed(returncode=0)
+
+    monkeypatch.setattr(tmux_module.subprocess, "run", fake_run)
+
+    tmux_module.Tmux().reset_window_binding()
+
+    assert calls == [["tmux", "bind-key", "-T", "prefix", "c", "new-window"]]
+
+
+def test_reset_window_binding_returns_none_when_tmux_is_unreachable(monkeypatch):
+    import camp.launch.tmux as tmux_module
+
+    def fake_run(argv, **kwargs):
+        raise FileNotFoundError("no such file")
+
+    monkeypatch.setattr(tmux_module.subprocess, "run", fake_run)
+
+    assert tmux_module.Tmux().reset_window_binding() is None

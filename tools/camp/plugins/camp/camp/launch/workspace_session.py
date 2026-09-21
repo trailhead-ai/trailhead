@@ -29,6 +29,24 @@ exact stderr shape — see :data:`_DUPLICATE_SESSION_MARKER`), or
 :data:`WorkspaceSessionOutcome.FAILED`, carrying tmux's own stderr verbatim
 and unsummarized.
 
+Marking a CREATED session and installing the window binding
+--------------------------------------------------------------
+Only the :data:`WorkspaceSessionOutcome.CREATED` branch — the call that
+actually brought the session up — writes three session-LOCAL options
+(never `-g`) onto it: `@camp_workspace=1` (the mark camp's window-dispatch
+binding reads to decide whether the current session is its own — a
+session-NAME heuristic is forgeable, so this is the one signal that
+isn't), `@camp_group`, and `@camp_slug`. `ALREADY_EXISTED` (another camp
+process won a create race) and `FAILED` write neither: a session this call
+did not create was either already marked by whoever did create it, or was
+never created at all.
+
+The server-global window-creation-key binding
+(:func:`~camp.launch.binding.install_window_key_binding`) is installed on
+every CREATED session too — idempotently; see that function's own
+docstring for why re-issuing it is cheap and how it decides whether to
+print the one-time notice.
+
 The door's own step
 -------------------
 :func:`create_or_connect_workspace_session` is the probe-then-create step
@@ -54,10 +72,11 @@ from enum import Enum
 from pathlib import Path
 from typing import Mapping
 
+from .binding import install_window_key_binding
 from .eligibility import assert_not_a_credential_store
 from .naming import workspace_session_name
 from .session import LaunchError
-from .tmux import Tmux
+from .tmux import Tmux, target
 
 #: The exact stderr shape tmux prints for a `new-session` refused because the
 #: name is already live, confirmed against tmux 3.7c. Matched as a substring
@@ -126,12 +145,59 @@ def create_workspace_session(
     )
 
     if result.returncode == 0:
+        session_target = target(name)
+        for key, value in (
+            ("@camp_workspace", "1"),
+            ("@camp_group", group_name),
+            ("@camp_slug", slug),
+        ):
+            answer = tmux.set_option(session_target, key, value)
+            if answer is None or answer.returncode != 0:
+                return _abandon_half_marked_session(tmux, name, key, answer)
+        install_window_key_binding(tmux)
         return WorkspaceSessionResult(WorkspaceSessionOutcome.CREATED, name)
 
     stderr = result.stderr or ""
     if _DUPLICATE_SESSION_MARKER in stderr:
         return WorkspaceSessionResult(WorkspaceSessionOutcome.ALREADY_EXISTED, name)
     return WorkspaceSessionResult(WorkspaceSessionOutcome.FAILED, name, error=stderr)
+
+
+def _abandon_half_marked_session(
+    tmux: Tmux, name: str, key: str, answer: object
+) -> WorkspaceSessionResult:
+    """Kill the session tmux just created but would not mark, and report
+    FAILED naming the option it refused.
+
+    These three options are what MAKE a tmux session a camp workspace
+    session — the key binding's `if-shell` guard dispatches on
+    `@camp_workspace`, and `window-dispatch` reads `@camp_group`/`@camp_slug`
+    back to decide which workspace it composes into. A session missing any
+    of them is one the binding will never fire for, so reporting CREATED
+    would name an outcome that did not happen.
+
+    The session is killed rather than left in place because leaving it turns
+    a one-time failure into a permanent one: the next create at the same
+    name answers from `create_or_connect_workspace_session`'s own
+    `has_session` probe and connects the operator straight to the unmarked
+    session, with no path back short of killing it by hand. Killing it here
+    makes the next attempt an ordinary retry. The kill's own answer is
+    discarded deliberately — this path is already reporting a failure, and a
+    kill that also failed changes neither the outcome nor the words.
+
+    The binding is NOT installed on this path: a server-global key grab is
+    not something to do on the way out of a failed create.
+    """
+    tmux.kill_session(name)
+    detail = "tmux could not be asked"
+    if answer is not None:
+        stderr = (getattr(answer, "stderr", "") or "").strip()
+        detail = stderr or f"tmux exited {answer.returncode}"
+    return WorkspaceSessionResult(
+        WorkspaceSessionOutcome.FAILED,
+        name,
+        error=f"camp: tmux refused to mark the session with {key} — {detail}",
+    )
 
 
 class DoorState(Enum):

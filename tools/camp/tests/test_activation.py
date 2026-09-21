@@ -430,6 +430,73 @@ def test_activate_ready_marks_activated_in_manifest(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# AC32: `camp activate <member>` never reads the workspace's window record —
+# its exit status and output come entirely from the manifest and the
+# member's own CLAUDE.md.
+# ---------------------------------------------------------------------------
+
+
+def _run_activate_cli(group, slug, member_name, env, capsys):
+    from camp.cli.workspace import _cmd_activate_group_cli
+    from ._helpers import call_and_exit_code
+
+    code = call_and_exit_code(
+        _cmd_activate_group_cli, [member_name, "--name", slug], group, env
+    )
+    out = capsys.readouterr()
+    return code, out.out, out.err
+
+
+def test_activate_missing_valid_and_corrupt_records_answer_identically(
+    tmp_path: Path, capsys
+) -> None:
+    """`_cmd_activate_group_cli` (camp/cli/workspace.py) imports only
+    activation.py and profile.py — no window_record import at all — so
+    activating a ready member must exit and print identically whether
+    windows.json is absent, well-formed, or corrupt.
+    """
+    from ._helpers import (
+        WINDOW_RECORD_STATES,
+        assert_identical_across_record_states,
+        seed_window_record,
+    )
+
+    group_name = "mygroup"
+    member_name = "myrepo"
+
+    results = {}
+    for state in WINDOW_RECORD_STATES:
+        slug = f"activate-{state}"
+        case_root = tmp_path / state
+        wt_path = case_root / "camp" / group_name / "worktrees" / slug / member_name
+        wt_path.mkdir(parents=True, exist_ok=True)
+        (wt_path / "CLAUDE.md").write_text("# doc\n")
+
+        _make_manifest(
+            case_root,
+            slug,
+            group_name,
+            [
+                {
+                    "name": member_name,
+                    "repo_root": "/tmp/fake-repo",
+                    "worktree_path": str(wt_path),
+                    "provision_state": "ready",
+                }
+            ],
+        )
+
+        seed_window_record(wt_path.parent, state)
+
+        group = _make_group(group_name, member_name)
+        env = _env(case_root)
+        code, out, err = _run_activate_cli(group, slug, member_name, env, capsys)
+        results[state] = (code, out.replace(slug, "<slug>"), err.replace(slug, "<slug>"))
+
+    assert_identical_across_record_states(results, verb="activate", compare_stderr=True)
+
+
+# ---------------------------------------------------------------------------
 # run_activate_tasks_in_background — the detached run's actual task execution
 # ---------------------------------------------------------------------------
 

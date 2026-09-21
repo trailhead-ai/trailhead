@@ -78,6 +78,13 @@ _STATIC_RESERVED = frozenset(
         "transfer-probe",
         # The peer side of a workspace move (begin/finish).
         "transfer-receive",
+        # The operator verb that puts the tmux window-creation key back to its
+        # default, and the dispatcher its binding fires against. Same posture as
+        # the three above: both are intercepted before group resolution, and are
+        # listed so a workspace slug of either name still cannot shadow them if
+        # that interception is reordered or removed.
+        "window",
+        "window-dispatch",
         # The operator-facing dry-run verb. Needs a resolved group (self host,
         # workspace ownership, peer declaration) — unlike "transfer-probe" and
         # "groups" above, it is NOT intercepted before group resolution;
@@ -593,6 +600,9 @@ def cmd_help(args: list[str]) -> None:
         "\n"
         "Health:\n"
         "  camp doctor [--json]              Read-only workspace health check\n"
+        "  camp window unbind                Put the window-creation key\n"
+        "                                    (prefix+c) back to tmux's own\n"
+        "                                    default, from any cwd\n"
         "\n"
         "Exit codes (camp transfer):\n"
         "  0                Every check passed — a clean verdict, or (without\n"

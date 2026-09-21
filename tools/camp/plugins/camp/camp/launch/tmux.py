@@ -30,6 +30,13 @@ class entirely (an interactive `exec`, which cannot go through
 `subprocess.run`). `spawn_session` is the one method that does NOT call
 `target` — it names a session with `-s`, never targets one.
 
+`set_option`, `show_option`, and `display_message` are a second exception:
+they take an already-qualified target STRING from the caller rather than
+applying :func:`target` themselves, because one of their call sites (the
+window-dispatch verb) addresses a session by the tmux-minted numeric id
+`#{session_id}` hands it (e.g. `$3`), which `=`-name-prefix qualification
+does not apply to. See :meth:`Tmux.set_option`'s docstring.
+
 The tri-state contract
 -----------------------
 `has_session` answers `True` / `False` / `None` (tmux did not answer at
@@ -81,6 +88,72 @@ def resolve_budget(name: str, shipped: float, env: Mapping[str, str] | None = No
     return override if override > 0 else shipped
 
 
+#: The `bind-key` operands that address the one key camp ever rebinds. Shared
+#: by :meth:`Tmux.install_window_binding` and :meth:`Tmux.reset_window_binding`
+#: so the two can only ever address the SAME table entry — a reset that drifted
+#: onto a different key or table would leave camp's binding installed while
+#: reporting the key restored.
+_PREFIX_C_BIND = ["bind-key", "-T", "prefix", "c"]
+
+#: What a stock, never-bound tmux server answers prefix+`c` with (confirmed
+#: against tmux 3.7c's `list-keys -T prefix c`). tmux has no revert-to-default
+#: primitive, so this literal is both `install_window_binding`'s if-shell
+#: else-branch and the whole of `reset_window_binding` — the two MUST agree, so
+#: they read it from here rather than each spelling it.
+_TMUX_DEFAULT_WINDOW_COMMAND = "new-window"
+
+
+#: The `c` line inside `list-keys -T prefix` output, anchored on the key's
+#: POSITION — the operand immediately after `-T prefix` — rather than on the
+#: text ` c ` appearing anywhere in the line. tmux's own stock `display-menu`
+#: bindings embed bare `c` operands inside their menu definitions, so a text
+#: match finds those instead of the window-creation key. The `(?:-\S+\s+)*`
+#: run absorbs flags tmux renders between `bind-key` and `-T`, such as the
+#: `-r` (repeatable) flag, which it prints as `bind-key -r -T prefix c ...`.
+_PREFIX_C_LINE_RE = re.compile(r"^bind-key\s+(?:-\S+\s+)*-T\s+prefix\s+c\s", re.M)
+
+
+def prefix_window_binding_line(table: str) -> str | None:
+    """The whole `c` line from *table* (`list-keys -T prefix` output), as
+    tmux itself rendered it, or ``None`` when the key carries no binding.
+
+    Returned verbatim, including tmux's own column padding and quoting,
+    because the one thing done with it is handing it straight back to tmux
+    through :meth:`Tmux.source_command` — `list-keys` output is written in
+    tmux's own command grammar precisely so it can be re-sourced, and camp
+    re-tokenizing it would put a second, disagreeing parser in the path.
+    """
+    for line in table.splitlines():
+        if _PREFIX_C_LINE_RE.match(line):
+            return line
+    return None
+
+
+def _escape_tmux_format(text: str) -> str:
+    """Double every `#` in *text* so tmux renders it literally instead of
+    evaluating it as a format expression.
+
+    `##` is tmux's own escape for a literal `#` (confirmed against real tmux
+    3.7c: `display-message -p 'a##b'` prints `a#b`, and `'##{E:NAME}'`
+    prints the literal `#{E:NAME}` rather than the variable's value). A `#`
+    that begins no format expression is unaffected by the round trip, so
+    this is safe to apply unconditionally rather than only to text that
+    looks like a format.
+    """
+    return text.replace("#", "##")
+
+
+def _strip_one_trailing_newline(text: str) -> str:
+    """Drop a single trailing newline from a tmux answer, if present.
+
+    Deliberately not `rstrip`/`splitlines`: a tmux window name (and an option
+    value) is user-influenced text that may legitimately end in whitespace or
+    contain newlines of its own, and an empty answer must stay the empty
+    string rather than becoming an empty list to index into.
+    """
+    return text[:-1] if text.endswith("\n") else text
+
+
 class _Unanswered:
     """The sentinel a tmux question comes back with when tmux did not answer.
 
@@ -102,6 +175,21 @@ class TmuxSession:
 
     name: str
     windows: int
+
+
+@dataclass(frozen=True)
+class NewWindowResult:
+    """What :meth:`Tmux.new_window` reports on a successful create.
+
+    Both fields are read back from tmux on the SAME creating call — never a
+    value this seam predicted or echoed from its own arguments — so a caller
+    that records ``window_name`` is recording what tmux actually holds, not
+    what it asked tmux for. See :meth:`Tmux.new_window`'s docstring for why
+    that distinction is load-bearing.
+    """
+
+    window_id: str
+    window_name: str
 
 
 @dataclass(frozen=True)
@@ -160,8 +248,11 @@ class Tmux:
         *,
         timeout: float | None = None,
         env: Mapping[str, str] | None = None,
+        stdin_text: str | None = None,
     ) -> subprocess.CompletedProcess | None:
-        done, _reason = self._run_with_reason(args, timeout=timeout, env=env)
+        done, _reason = self._run_with_reason(
+            args, timeout=timeout, env=env, stdin_text=stdin_text
+        )
         return done
 
     def _run_with_reason(
@@ -170,6 +261,7 @@ class Tmux:
         *,
         timeout: float | None = None,
         env: Mapping[str, str] | None = None,
+        stdin_text: str | None = None,
     ) -> tuple[subprocess.CompletedProcess | None, str | None]:
         """Same call :meth:`_run` makes, plus the exception's own message
         when the call could not complete at all — the one piece of
@@ -180,6 +272,8 @@ class Tmux:
         kwargs: dict[str, object] = {}
         if env is not None:
             kwargs["env"] = dict(env)
+        if stdin_text is not None:
+            kwargs["input"] = stdin_text
         try:
             return (
                 subprocess.run(
@@ -245,6 +339,70 @@ class Tmux:
             return None
         first = done.stdout.splitlines()
         return first[0] if first else None
+
+    def new_window(
+        self,
+        name: str,
+        *,
+        cwd: object,
+        window_name: str,
+        command: Sequence[str],
+        timeout: float | None = None,
+    ) -> NewWindowResult | None | _Unanswered:
+        """Create a window in session *name*, rooted at *cwd*, named
+        *window_name*, running *command* (empty for the default shell), and
+        return the window id AND name tmux itself assigned.
+
+        Both are read back on this same invocation — `-P -F '#{window_id}
+        #{window_name}'` — never a second `list-windows` call: verified
+        (tmux 3.7c) that tmux prints the format result on the creating call
+        itself, with or without a command and `-c`/`-n`, so there is no
+        create-then-read race to resolve. The two fields are joined by a
+        single space and parsed by splitting on the FIRST space only: a
+        tmux window id (`@7`) never itself contains a space, while a window
+        name is user-influenced text that may, so parsing anywhere but the
+        first space could truncate a name — verified against real tmux 3.7c
+        that a name holding spaces round-trips whole this way. `-t` is
+        `=`-qualified through :func:`target`, same as every other `-t`
+        operand this seam builds — see the module docstring's `=`-target
+        property.
+
+        The name is READ BACK rather than trusted from *window_name*
+        because what tmux actually assigned is the only value a caller may
+        ever again address or record — asking for a name and recording that
+        same string in parallel would let the two silently diverge the
+        moment tmux does not honor the request verbatim.
+
+        Tri-state, matching :meth:`pane_command`'s contract:
+        :class:`NewWindowResult` on success; `None` when tmux answered with
+        a non-zero exit (the session did not exist, say) and so created no
+        window; :data:`UNANSWERED` when tmux could not be asked at all.
+        Folding the last two together would report a hung or unreachable
+        tmux as an ordinary create failure — the one thing this seam's
+        tri-state exists to keep apart.
+        """
+        done = self._run(
+            [
+                "new-window",
+                "-t",
+                target(name),
+                "-P",
+                "-F",
+                "#{window_id} #{window_name}",
+                "-n",
+                window_name,
+                "-c",
+                str(cwd),
+                *command,
+            ],
+            timeout=timeout,
+        )
+        if done is None:
+            return UNANSWERED
+        if done.returncode != 0:
+            return None
+        window_id, _, actual_name = _strip_one_trailing_newline(done.stdout).partition(" ")
+        return NewWindowResult(window_id=window_id, window_name=actual_name)
 
     def kill_session(
         self, name: str, *, timeout: float | None = None
@@ -444,3 +602,243 @@ class Tmux:
         if done is None or done.returncode != 0:
             return None
         return done.stdout
+
+    def _pane_syntax_target(self, target: str) -> str:
+        """Normalize *target* for a `set-option` / `show-options` call.
+
+        Measured on tmux 3.7c: `set-option`/`show-options` parse `-t` as a
+        PANE target (`session[:window[.pane]]`), and — unlike `has-session`,
+        `display-message`, or `kill-session`, which all accept a bare
+        `=name` exact-match session target directly — a bare `=name` with
+        no trailing `:` fails these two with `no such session: =name`, even
+        though the named session exists. Appending a trailing `:` (an empty
+        window/pane component, meaning "the session itself") fixes it for
+        both an `=`-qualified name and a raw tmux-minted session id (`$3`);
+        confirmed harmless (idempotent) when *target* already ends in `:`.
+        """
+        return target if target.endswith(":") else f"{target}:"
+
+    def set_option(
+        self,
+        target: str,
+        key: str,
+        value: str,
+        *,
+        timeout: float | None = None,
+    ) -> subprocess.CompletedProcess | None:
+        """State one session-LOCAL option (``tmux set-option -t <target> <key>
+        <value>``) — no ``-g``, so the value never leaks past the addressed
+        session.
+
+        *target* is the caller's own, already-qualified ``-t`` operand —
+        unlike every other method above, this one does NOT apply
+        :func:`target` itself. The two callers of this method address a
+        session two different ways: `create_workspace_session` has a session
+        NAME and passes ``target(name)``; the window-dispatch verb has only
+        the tmux-minted numeric session id (`#{session_id}`, e.g. ``$3``)
+        that fired the binding, which :func:`target`'s ``=``-name-prefix
+        qualification does not apply to and must not be run through.
+        Either way, *target* is passed through :meth:`_pane_syntax_target`
+        first — see its docstring for the real-tmux quirk that makes this
+        necessary.
+
+        Returns ``None`` when tmux could not be asked at all; the caller
+        decides what to do with a non-zero exit.
+        """
+        return self._run(
+            ["set-option", "-t", self._pane_syntax_target(target), key, value],
+            timeout=timeout,
+        )
+
+    def show_option(
+        self, target: str, key: str, *, timeout: float | None = None
+    ) -> str | None:
+        """Read back one option's value (``tmux show-options -t <target> -v
+        <key>``), or ``None`` when tmux could not answer, the option is
+        unset, or the session is gone.
+
+        ``-v`` prints the bare value with no ``key value`` pair to parse.
+        *target* is caller-supplied, not qualified here — see
+        :meth:`set_option`'s docstring for why, including the
+        :meth:`_pane_syntax_target` normalization both methods share.
+        """
+        done = self._run(
+            ["show-options", "-t", self._pane_syntax_target(target), "-v", key],
+            timeout=timeout,
+        )
+        if done is None or done.returncode != 0:
+            return None
+        return _strip_one_trailing_newline(done.stdout)
+
+    def install_window_binding(
+        self, true_command: str, *, timeout: float | None = None
+    ) -> subprocess.CompletedProcess | None:
+        """Install (or re-issue, idempotently) camp's server-global
+        prefix+``c`` binding: ``bind-key -T prefix c if-shell -F
+        '#{@camp_workspace}' <true_command> 'new-window'``.
+
+        tmux has no revert-to-compiled-default primitive — `bind-key`
+        overwrites the single table entry — so the else-branch, literally
+        ``new-window``, is what a stock, never-bound tmux server already
+        answers prefix+``c`` with (confirmed against tmux 3.7c's
+        `list-keys -T prefix c`). Re-issuing this exact argv a second time
+        produces a byte-identical `list-keys -T prefix` answer — this
+        method itself never decides "first install" vs. "already there";
+        see `camp.launch.binding.install_window_key_binding`, the one
+        caller, for that.
+
+        *true_command* is the tmux command string run when the current
+        session carries a truthy ``@camp_workspace`` option — composed by
+        the caller, never built here, since this seam builds tmux ARGV, not
+        the command text if-shell's own arguments hold.
+        """
+        return self._run(
+            [
+                *_PREFIX_C_BIND,
+                "if-shell",
+                "-F",
+                "#{@camp_workspace}",
+                true_command,
+                _TMUX_DEFAULT_WINDOW_COMMAND,
+            ],
+            timeout=timeout,
+        )
+
+    def reset_window_binding(
+        self, *, timeout: float | None = None
+    ) -> subprocess.CompletedProcess | None:
+        """Restore camp's server-global prefix+``c`` binding to tmux's own
+        compiled-in default: ``bind-key -T prefix c new-window``.
+
+        tmux has no revert-to-default primitive — this reasserts the exact
+        else-branch :meth:`install_window_binding` already wraps in
+        `if-shell`, literally, with no `if-shell` around it, so the key
+        behaves as a stock, never-bound tmux server would regardless of
+        which session fires it. Idempotent and server-global (no `-t`):
+        issuing this against a server that never had camp's binding
+        installed reasserts tmux's own default and still succeeds.
+
+        Returns ``None`` when tmux could not be asked at all; the caller
+        decides what to do with a non-zero exit.
+        """
+        return self._run(
+            [*_PREFIX_C_BIND, _TMUX_DEFAULT_WINDOW_COMMAND],
+            timeout=timeout,
+        )
+
+    def list_window_binding(self, *, timeout: float | None = None) -> str | None:
+        """Every binding in the ``prefix`` table (``tmux list-keys -T
+        prefix``), or ``None`` when tmux could not answer.
+
+        Deliberately NOT ``list-keys -T prefix c`` — measured on tmux 3.7c,
+        a trailing key token there is not a per-key filter (there is no
+        such flag on `list-keys`); it produces an EMPTY answer every time,
+        first install or not, which silently defeated the
+        first-install/re-install distinction until this was caught against
+        a real server. The caller (`camp.launch.binding`) searches the
+        WHOLE table's text for its own marker rather than isolating the
+        `c` line, because `list-keys` re-serializes a `run-shell` string's
+        internal quoting (backslash-escaping embedded `"`), so a caller
+        comparing the composed command VERBATIM against this output would
+        never match — a stable, quote-free substring of the composed
+        command survives that round-trip unescaped and is what actually
+        gets matched.
+
+        The one way a caller can tell "first install" from "already
+        installed" — read this BEFORE calling :meth:`install_window_binding`
+        and compare.
+        """
+        done = self._run(["list-keys", "-T", "prefix"], timeout=timeout)
+        if done is None or done.returncode != 0:
+            return None
+        return done.stdout
+
+    def display_message(
+        self, target: str, message: str, *, timeout: float | None = None
+    ) -> subprocess.CompletedProcess | None:
+        """Show *message* to the client attached to *target* (``tmux
+        display-message -t <target> <message>``) — the operator-facing
+        surface a detached ``run-shell`` dispatch has for a refusal, since
+        it owns no terminal of its own.
+
+        *target* is caller-supplied, not qualified here — see
+        :meth:`set_option`'s docstring for why.
+
+        *message* is FORMAT-expanded by tmux before it is shown: verified
+        against real tmux 3.7c that `#{E:NAME}` in a message is replaced by
+        that variable's value read from the session environment. Camp's
+        refusal messages embed operator-influenced text — a workspace slug,
+        a group name, a path — and this is the one sink in this seam that
+        carries such text as a tmux FORMAT rather than as a `-t` operand or
+        an option value, so every `#` is doubled here (`##` is tmux's own
+        escape for a literal `#`, confirmed on the same server) before the
+        message leaves camp. tmux collapses the escape when it renders, so
+        what the operator READS is byte-identical to what the caller wrote;
+        what tmux never gets is a format expression it would evaluate.
+
+        Escaping lives HERE rather than at each composing call site for the
+        same reason :func:`target` lives here: a sink that is only safe when
+        every caller remembers to sanitize is one caller away from not being
+        safe, and `window_dispatch` composes these messages at seven
+        separate points.
+        """
+        return self._run(
+            ["display-message", "-t", target, _escape_tmux_format(message)],
+            timeout=timeout,
+        )
+
+    def set_server_option(
+        self, key: str, value: str, *, timeout: float | None = None
+    ) -> subprocess.CompletedProcess | None:
+        """State one SERVER-global user option (``tmux set-option -g <key>
+        <value>``).
+
+        The deliberate opposite of :meth:`set_option`'s session-local
+        contract, and a separate method rather than a flag on it so neither
+        scope can be reached by accident. What this scope is for: a value
+        that must outlive the workspace session that wrote it but die with
+        the tmux server — which is exactly the lifetime of a server-global
+        key binding, and so of the binding camp displaces to install its
+        own.
+        """
+        return self._run(["set-option", "-g", key, value], timeout=timeout)
+
+    def show_server_option(self, key: str, *, timeout: float | None = None) -> str | None:
+        """Read back what :meth:`set_server_option` stored, or ``None``.
+
+        ``None`` covers both "never set" and "could not ask": tmux answers a
+        non-zero exit with ``invalid option: <key>`` for an unset user option
+        (confirmed against real tmux 3.7c), and the caller's decision is the
+        same either way — there is nothing captured to act on, so fall back.
+        This is the one place in this seam where the two are deliberately
+        folded rather than kept apart, because no caller can do anything
+        different with them.
+        """
+        done = self._run(["show-options", "-gv", key], timeout=timeout)
+        if done is None or done.returncode != 0:
+            return None
+        return _strip_one_trailing_newline(done.stdout)
+
+    def unset_server_option(
+        self, key: str, *, timeout: float | None = None
+    ) -> subprocess.CompletedProcess | None:
+        """Drop a server-global user option (``tmux set-option -gu <key>``),
+        so a later :meth:`show_server_option` answers ``None`` again."""
+        return self._run(["set-option", "-gu", key], timeout=timeout)
+
+    def source_command(
+        self, command: str, *, timeout: float | None = None
+    ) -> subprocess.CompletedProcess | None:
+        """Run one tmux command written in tmux's OWN command grammar, by
+        handing it to ``tmux source-file -`` on stdin.
+
+        This exists for exactly one job: replaying a `bind-key` line that
+        `list-keys` produced. That output is written to be re-sourceable, so
+        tmux's own parser is the only one guaranteed to read it back the way
+        it was written — camp splitting the line itself would introduce a
+        second parser that can disagree, and tmux's quoting is not POSIX
+        shell's. Confirmed against real tmux 3.7c that a captured line
+        round-trips byte-for-byte through this path, `-r` flag and embedded
+        `#{...}` format included.
+        """
+        return self._run(["source-file", "-"], timeout=timeout, stdin_text=command + "\n")

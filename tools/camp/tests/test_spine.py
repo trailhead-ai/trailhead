@@ -11,6 +11,7 @@ Test contract:
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -23,6 +24,7 @@ import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]  # trailhead root
 _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
+_CLI_CAMP = _PLUGIN_DIR / "cli" / "camp"
 
 if str(_PLUGIN_DIR) not in sys.path:
     sys.path.insert(0, str(_PLUGIN_DIR))
@@ -1276,6 +1278,29 @@ def test_help_states_the_kill_exit_code_for_a_session_that_did_not_stop(capsys) 
 
 
 # ---------------------------------------------------------------------------
+# camp window unbind — the operator-facing verb, absent from `camp help`
+# ---------------------------------------------------------------------------
+
+
+def test_help_lists_camp_window_unbind_but_not_the_internal_dispatcher(capsys) -> None:
+    """`camp window unbind` is the one documented way an operator gets
+    their window-creation key back when it misfires — it must be
+    discoverable from `camp help` the way every other canonical verb is.
+    `window-dispatch` is the internal dispatcher the key binding's
+    run-shell fires against, never typed by an operator — it follows the
+    same convention already established for the other pre-group-resolve
+    internal verbs (session-bootstrap, worktree-cleanup, transfer-receive),
+    none of which appear in this menu either."""
+    from camp.spine import cmd_help
+
+    cmd_help([])
+    text = capsys.readouterr().out
+
+    assert "camp window unbind" in text
+    assert "window-dispatch" not in text
+
+
+# ---------------------------------------------------------------------------
 # foreach's opaque payload survives spine's own --dry-run handling.
 # ---------------------------------------------------------------------------
 
@@ -1371,3 +1396,59 @@ def test_the_env_dry_run_switch_still_reaches_an_opaque_verb(
     seen = _run_spine(monkeypatch, ["foreach", "echo", "hello"])
     assert seen["dry_run"] is expected
     assert seen["rest"] == ["echo", "hello"]
+
+
+# ---------------------------------------------------------------------------
+# AC32: `camp path` (spine's groupless verb, cmd_path) resolves a worktree via
+# _resolve_target's manifest walk-up / WORKSPACE_ROOT lookup — it never reads
+# the group's window record. A missing, valid, corrupt, or truncated
+# windows.json must never change its exit status or stdout.
+# ---------------------------------------------------------------------------
+
+
+class TestCampPathWindowRecordDegradation:
+    """`cmd_path` (camp/spine.py) is dispatched via `_SKIP_GROUP_RESOLVE` —
+    fully groupless, resolving purely from WORKSPACE_ROOT + slug. This pins
+    that windows.json's state (present, absent, corrupt, truncated) never
+    reaches it: exit status and stdout are identical across all four.
+    """
+
+    def _run(self, workspace_root: Path, slug: str) -> subprocess.CompletedProcess:
+        base = {**os.environ}
+        base["WORKSPACE_ROOT"] = str(workspace_root)
+        return subprocess.run(
+            [sys.executable, str(_CLI_CAMP), "path", "--name", slug],
+            capture_output=True,
+            text=True,
+            env=base,
+        )
+
+    def test_missing_valid_corrupt_and_truncated_records_answer_identically(
+        self, tmp_path: Path
+    ) -> None:
+        from ._helpers import (
+            WINDOW_RECORD_STATES,
+            assert_identical_across_record_states,
+            seed_window_record,
+        )
+
+        slug = "my-slug"
+
+        # Each state gets its own workspace_root, mirroring the shell_integration
+        # pin: a run never mutates the windows.json another run already read,
+        # and output is normalized against that root since the root itself
+        # varying is fixture plumbing, not a fact under test.
+        results = {}
+        for state in WINDOW_RECORD_STATES:
+            case_root = tmp_path / state
+            ws_dir = case_root / "trailhead" / ".claude" / "worktrees" / slug
+            ws_dir.mkdir(parents=True)
+            seed_window_record(ws_dir, state)
+            proc = self._run(case_root, slug)
+            results[state] = (
+                proc.returncode,
+                proc.stdout.replace(str(case_root), "<root>"),
+                proc.stderr.replace(str(case_root), "<root>"),
+            )
+
+        assert_identical_across_record_states(results, verb="path")

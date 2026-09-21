@@ -327,6 +327,68 @@ class TestCampPwdErrors:
 
 
 # ---------------------------------------------------------------------------
+# AC32: camp pwd (the "path" command) never reads the window record, so a
+# missing, valid, or corrupt windows.json must never change its answer.
+# ---------------------------------------------------------------------------
+
+
+class TestCampPwdWindowRecordDegradation:
+    """`cmd_pwd` (camp/launch/shell_integration.py) resolves a workspace's
+    path from the state dir alone — it does not import window_record at
+    all. This class pins that: exit status and stdout/stderr are identical
+    whether windows.json is absent, well-formed, or corrupt.
+    """
+
+    def _run(self, tmp_path: Path, ws_dir: Path) -> subprocess.CompletedProcess:
+        group_name = "mygroup"
+        member_name = "myrepo"
+        slug = "my-slug"
+
+        _make_group_config(tmp_path, group_name, member_name)
+
+        env = {
+            "CAMP_CONFIG_DIR": str(tmp_path),
+            "CAMP_STATE_DIR": str(tmp_path / "state"),
+        }
+
+        return _run_cli(["pwd", slug, "--group", group_name], env=env)
+
+    def test_missing_valid_and_corrupt_records_answer_identically(
+        self, tmp_path: Path
+    ) -> None:
+        from ._helpers import (
+            WINDOW_RECORD_STATES,
+            assert_identical_across_record_states,
+            seed_window_record,
+        )
+
+        group_name = "mygroup"
+        slug = "my-slug"
+
+        # Three independent workspaces (one per record state) so each run
+        # starts from a clean windows.json condition rather than mutating
+        # one workspace's record between runs.
+        results = {}
+        for state in WINDOW_RECORD_STATES:
+            # Each state gets its own case_root (so a run never mutates the
+            # windows.json another run already read), and its output is
+            # normalized to be relative to that root — the case_root itself
+            # varying is fixture plumbing, not a fact under test.
+            case_root = tmp_path / state
+            case_root.mkdir()
+            ws_dir = _make_workspace(case_root, group_name, slug)
+            seed_window_record(ws_dir, state)
+            proc = self._run(case_root, ws_dir)
+            results[state] = (
+                proc.returncode,
+                proc.stdout.replace(str(case_root), "<root>"),
+                proc.stderr.replace(str(case_root), "<root>"),
+            )
+
+        assert_identical_across_record_states(results, verb="pwd")
+
+
+# ---------------------------------------------------------------------------
 # Seam smoke: the real `bin/trailhead` entry point actually regenerates the
 # one-arm `camp()` wrapper — not just the `shellenv_lines()` function called
 # directly. `trailhead install`'s only shellenv-facing behavior is printing

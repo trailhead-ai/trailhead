@@ -926,6 +926,96 @@ class TestStatusExitCodes:
 
 
 # ===========================================================================
+# AC32: `camp status <slug>` never reads the workspace's window record —
+# its exit status and output come entirely from the provisioning manifest.
+# ===========================================================================
+
+
+class TestStatusWindowRecordDegradation:
+    """`_cmd_status_group_cli` (camp/cli/status.py) resolves the scoped view
+    from `provision_status_code`, which reads only manifest.json. This class
+    pins that a missing, valid, or corrupt windows.json alongside that
+    manifest changes neither the exit code nor a byte of the printed report.
+    """
+
+    def _seed_states(self, group, slug, env, states: dict[str, str]):
+        import camp.provision.provision as provision
+        from camp.group.manifest import flip_member_state_unlocked, reconcile_lock
+
+        provision.seed_pending_workspace(group, slug, env=env)
+        mpath = provision.workspace_dir(group["group"]["name"], slug, env=env) / "manifest.json"
+        for name, state in states.items():
+            with reconcile_lock(mpath.parent):
+                flip_member_state_unlocked(mpath, name, state)
+
+    def _run(self, group, slug, env, *, as_json: bool, capsys):
+        from camp.cli.status import _cmd_status_group_cli
+        from ._helpers import call_and_exit_code
+
+        args = ["--name", slug]
+        if as_json:
+            args.append("--json")
+        code = call_and_exit_code(_cmd_status_group_cli, args, group, env, False)
+        out = capsys.readouterr()
+        return code, out.out, out.err
+
+    def test_missing_valid_and_corrupt_records_answer_identically(
+        self, two_member_group, capsys
+    ) -> None:
+        from ._helpers import (
+            WINDOW_RECORD_STATES,
+            assert_identical_across_record_states,
+            seed_window_record,
+        )
+
+        g = two_member_group
+        results = {}
+        for state in WINDOW_RECORD_STATES:
+            slug = f"status-{state}"
+            self._seed_states(g["group"], slug, g["env"], {"repo_a": "ready", "repo_b": "ready"})
+            ws_dir = _workspace_dir("testgroup", slug, g["env"])
+            seed_window_record(ws_dir, state)
+            code, out, err = self._run(g["group"], slug, g["env"], as_json=False, capsys=capsys)
+            # slug differs by construction (one workspace per state, so a
+            # record write never lands where a prior state's run already
+            # read); normalize it out before comparing, since the slug
+            # itself is not the fact under test.
+            results[state] = (code, out.replace(slug, "<slug>"), err)
+
+        assert_identical_across_record_states(results, verb="status")
+
+    def test_json_report_identical_across_record_states(
+        self, two_member_group, capsys
+    ) -> None:
+        from ._helpers import seed_window_record
+
+        g = two_member_group
+        results = {}
+        for state in ("missing", "valid", "corrupt"):
+            slug = f"status-json-{state}"
+            self._seed_states(g["group"], slug, g["env"], {"repo_a": "ready", "repo_b": "ready"})
+            ws_dir = _workspace_dir("testgroup", slug, g["env"])
+            seed_window_record(ws_dir, state)
+            code, out, err = self._run(g["group"], slug, g["env"], as_json=True, capsys=capsys)
+            results[state] = (code, json.loads(out), err)
+
+        baseline_code, baseline_report, _ = results["missing"]
+        assert baseline_code == 0
+        for state in ("valid", "corrupt"):
+            code, report, err = results[state]
+            assert code == baseline_code
+            # slug differs by construction (one workspace per state); compare
+            # everything else, which is the part the window record could
+            # conceivably have leaked into.
+            report.pop("slug")
+            baseline_sans_slug = dict(baseline_report)
+            baseline_sans_slug.pop("slug")
+            assert report == baseline_sans_slug, (
+                f"camp status --json report differs for a {state} window record"
+            )
+
+
+# ===========================================================================
 # Test 7: wait_for_provisioning_ready — bounded poll
 # ===========================================================================
 
