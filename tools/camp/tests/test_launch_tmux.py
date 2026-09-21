@@ -764,6 +764,43 @@ def test_display_message_targets_a_raw_session_id_with_no_qualification(monkeypa
     ]
 
 
+def test_display_message_escapes_hash_so_tmux_does_not_expand_the_message(monkeypatch):
+    """`display-message` FORMAT-expands its argument: verified against real
+    tmux 3.7c that `#{E:SECRETTEST}` in a message is replaced by that
+    variable's value from the session environment, and that `##` is tmux's
+    own escape for a literal `#`.
+
+    Camp's refusal messages embed operator-influenced text — a workspace
+    slug, a group name, a path — so an unescaped `#{...}` in any of them
+    would have tmux read camp's own session environment out onto the
+    operator's status line. Every `#` is doubled before the message reaches
+    tmux; tmux collapses it back, so what the operator READS is unchanged.
+
+    Varied across three messages: one with no `#` at all (must pass through
+    byte-identical — the escape is not a blanket rewrite), one with a format
+    expression, and one with a bare `#`.
+    """
+    import camp.launch.tmux as tmux_module
+
+    calls: list[list[str]] = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(list(argv))
+        return _completed(returncode=0)
+
+    monkeypatch.setattr(tmux_module.subprocess, "run", fake_run)
+
+    tmux_module.Tmux().display_message("$3", "camp: refused — outside workspace")
+    tmux_module.Tmux().display_message("$3", "camp: unknown group '#{E:SECRETTEST}'")
+    tmux_module.Tmux().display_message("$3", "camp: slug a#b")
+
+    assert [argv[-1] for argv in calls] == [
+        "camp: refused — outside workspace",
+        "camp: unknown group '##{E:SECRETTEST}'",
+        "camp: slug a##b",
+    ]
+
+
 def test_reset_window_binding_issues_the_stock_bind_key_argv(monkeypatch):
     """Removal re-installs tmux's own compiled-in default literally —
     `bind-key -T prefix c new-window`, server-global (no `-t`) — since tmux

@@ -103,6 +103,20 @@ _PREFIX_C_BIND = ["bind-key", "-T", "prefix", "c"]
 _TMUX_DEFAULT_WINDOW_COMMAND = "new-window"
 
 
+def _escape_tmux_format(text: str) -> str:
+    """Double every `#` in *text* so tmux renders it literally instead of
+    evaluating it as a format expression.
+
+    `##` is tmux's own escape for a literal `#` (confirmed against real tmux
+    3.7c: `display-message -p 'a##b'` prints `a#b`, and `'##{E:NAME}'`
+    prints the literal `#{E:NAME}` rather than the variable's value). A `#`
+    that begins no format expression is unaffected by the round trip, so
+    this is safe to apply unconditionally rather than only to text that
+    looks like a format.
+    """
+    return text.replace("#", "##")
+
+
 def _strip_one_trailing_newline(text: str) -> str:
     """Drop a single trailing newline from a tmux answer, if present.
 
@@ -717,5 +731,26 @@ class Tmux:
 
         *target* is caller-supplied, not qualified here — see
         :meth:`set_option`'s docstring for why.
+
+        *message* is FORMAT-expanded by tmux before it is shown: verified
+        against real tmux 3.7c that `#{E:NAME}` in a message is replaced by
+        that variable's value read from the session environment. Camp's
+        refusal messages embed operator-influenced text — a workspace slug,
+        a group name, a path — and this is the one sink in this seam that
+        carries such text as a tmux FORMAT rather than as a `-t` operand or
+        an option value, so every `#` is doubled here (`##` is tmux's own
+        escape for a literal `#`, confirmed on the same server) before the
+        message leaves camp. tmux collapses the escape when it renders, so
+        what the operator READS is byte-identical to what the caller wrote;
+        what tmux never gets is a format expression it would evaluate.
+
+        Escaping lives HERE rather than at each composing call site for the
+        same reason :func:`target` lives here: a sink that is only safe when
+        every caller remembers to sanitize is one caller away from not being
+        safe, and `window_dispatch` composes these messages at seven
+        separate points.
         """
-        return self._run(["display-message", "-t", target, message], timeout=timeout)
+        return self._run(
+            ["display-message", "-t", target, _escape_tmux_format(message)],
+            timeout=timeout,
+        )
