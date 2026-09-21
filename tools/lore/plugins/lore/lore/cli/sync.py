@@ -457,23 +457,22 @@ def _commits_behind(vault: Path) -> int:
 
 def _hand_off_to_resolver(
     vault: Path, name: str, say, say_err, *, shared: bool
-) -> tuple[str, "str | None"]:
+) -> str:
     """Drive a conflicted vault through the resolver instead of reporting a
     remedy. Called only AFTER the plain rebase that hit the conflict has
     already been aborted (both replay sites abort first, unconditionally,
     exactly as before this task).
 
-    Returns ``(outcome, reason)``:
+    Returns the outcome:
 
     - :data:`PUBLISH_OK` — the resolver settled the vault field-wise and its
-      own finish tail already pushed it. ``reason`` is ``None``.
+      own finish tail already pushed it.
     - :data:`SYNC_AWAITING_PERSON` — a judgment conflict left the vault held
-      for a person, clean and diverged. ``reason`` is ``None``.
+      for a person, clean and diverged.
     - :data:`PUBLISH_DISCARDED` — this host declares it makes no vault
       content, so the resolver kept the published history and discarded the
       local commits with it. Nothing was published, nothing is held, and
-      nothing is said: the vault converged with nobody present. ``reason``
-      is ``None``.
+      nothing is said: the vault converged with nobody present.
     - :data:`PUBLISH_HOLDING` — the resolver itself could not reach either
       ending: a :class:`resolve.ResolveError` (a record the graph guards
       refuse, a ``rebase --continue`` that fails, the step ceiling, an
@@ -481,16 +480,17 @@ def _hand_off_to_resolver(
       the host's own author declaration being present but not a bool, which
       the resolver refuses rather than coerces and which it reads on exactly
       this path. Both are this host's data needing a fix, which is what
-      :data:`FAILURE_POLICY` names, so both report it.
+      :data:`FAILURE_POLICY` names, so both record it.
 
     Never raises either of those two named types. If one left
     the vault mid-rebase, that is aborted too before reporting — there is no
     person present to hand a traceback to, so this function's whole job is to
     always produce one of the four determinate endings above. The failure's
-    own detail is written to :func:`resolve_state.mark_failed`'s marker (a
-    named, durable location under ``state_dir("lore")/resolve``) in ADDITION
-    to the stderr line, so it survives past this one run's terminal — the
-    council review's "goes to the terminal and the host's log" promise.
+    reason and detail are written to :func:`resolve_state.mark_failed`'s
+    marker (a named, durable location under ``state_dir("lore")/resolve``) in
+    ADDITION to the stderr line, so they survive past this one run's terminal
+    — the council review's "goes to the terminal and the host's log" promise,
+    and the channel `cmd_sync` reads the reason back from.
     """
     from . import resolve as resolve_mod
     from ..vault import config as vault_config_mod
@@ -507,7 +507,7 @@ def _hand_off_to_resolver(
         resolve_mod.resolve_state.mark_failed(
             vault, reason=FAILURE_POLICY, detail=str(exc)
         )
-        return PUBLISH_HOLDING, FAILURE_POLICY
+        return PUBLISH_HOLDING
 
     resolve_mod.resolve_state.clear_failed_marker(vault)
     if report.get("discarded"):
@@ -515,16 +515,16 @@ def _hand_off_to_resolver(
         # the published history and nothing of this host's is left to say.
         # Deliberately silent: the owner of such a host is never handed a
         # version-control decision, and a line here would be one.
-        return PUBLISH_DISCARDED, None
+        return PUBLISH_DISCARDED
     if report["held"]:
         say_err(
             "notice: a judgment conflict needs a person — "
             f"{resolve_mod.resolve_state.resolve_remedy(vault)} once ready"
         )
-        return SYNC_AWAITING_PERSON, None
+        return SYNC_AWAITING_PERSON
 
     say("Settled automatically and published.")
-    return PUBLISH_OK, None
+    return PUBLISH_OK
 
 
 def _pull_only_one(vault: Path, say, say_err) -> tuple[str, int]:
@@ -687,7 +687,7 @@ def _pull_one(
         # Breaking change (see CHANGELOG.md): the conflict is handed to the
         # resolver instead of reported. The plain rebase above has already
         # been aborted unconditionally, exactly as before this task.
-        outcome, _reason = _hand_off_to_resolver(vault, name, say, say_err, shared=shared)
+        outcome = _hand_off_to_resolver(vault, name, say, say_err, shared=shared)
         if outcome == PUBLISH_OK:
             return PULL_RESOLVED, 0
         if outcome == PUBLISH_DISCARDED:
@@ -914,7 +914,7 @@ def _push_one(
             # the resolver instead of reported. The plain rebase above has
             # already been aborted unconditionally, exactly as before this
             # task.
-            outcome, _reason = _hand_off_to_resolver(vault, name, say, say_err, shared=shared)
+            outcome = _hand_off_to_resolver(vault, name, say, say_err, shared=shared)
             if outcome == PUBLISH_OK:
                 return 0, PUBLISH_OK, attempts_used
             if outcome == PUBLISH_DISCARDED:
@@ -1560,12 +1560,6 @@ def cmd_sync(args) -> int:
                     marker = resolve_mod.resolve_state.read_failed_marker(Path(vault))
                     if marker is not None:
                         failure_reasons[name] = marker["reason"]
-            elif rc_one != 0:
-                # Defensive fallback: every `_pull_and_push_one` path that
-                # returns `rc_one != 0` already sets `ending` to one of the
-                # three branches above. Kept for the same reason `cmd_sync`
-                # elsewhere prefers exact attribution over inference.
-                outcomes[name] = PUBLISH_HOLDING
             elif published:
                 outcomes[name] = "published"
             else:

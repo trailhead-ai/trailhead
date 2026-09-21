@@ -66,24 +66,59 @@ def resolve_state_root() -> Path:
     return _resolve_lore_state_dir() / RESOLVE_DIRNAME
 
 
-def marker_path(vault_root: str | Path) -> Path:
-    """Return the marker path for *vault_root*, confined to the marker root.
+def _suffixed_marker_path(vault_root: str | Path, suffix: str) -> Path:
+    """Return ``<marker root>/<machine_state_key><suffix>.json``, confined to that root.
 
-    Keyed on ``common.machine_state_key`` — the vault's basename plus a digest of
-    its resolved absolute path — so two configured vaults sharing a final path
-    component keep separate markers instead of overwriting each other's parked
-    conflicts. The resulting path is confined with ``layers.assert_within_root``,
-    the same guard ``vault delete --remove-from-disk`` applies before it touches a
-    configured path, so a symlink planted at the marker's name cannot redirect a
-    write outside the marker root.
+    The one place all three marker families (resolution-session, held, failed)
+    derive their path, so they cannot drift apart on keying or on confinement.
+    Keyed on ``common.machine_state_key`` — the vault's basename plus a digest
+    of its resolved absolute path — so two configured vaults sharing a final
+    path component keep separate markers instead of overwriting each other's.
+    The result is confined with ``layers.assert_within_root``, the same guard
+    ``vault delete --remove-from-disk`` applies before it touches a configured
+    path, so a symlink planted at a marker's name cannot redirect a write
+    outside the marker root.
 
     Raises:
         layers.LayerConfinementError: if the marker path escapes the marker root.
     """
     root = resolve_state_root()
-    candidate = root / f"{machine_state_key(vault_root)}.json"
+    candidate = root / f"{machine_state_key(vault_root)}{suffix}.json"
     layers_mod.assert_within_root(candidate, root)
     return candidate
+
+
+def _read_marker_file(path: Path) -> "dict | None":
+    """Return the JSON at *path*, or ``None`` if it is absent or will not parse."""
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _write_marker_file(path: Path, marker: dict) -> dict:
+    """Write *marker* to *path* as sorted-key JSON and return it."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(marker, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return marker
+
+
+def _unlink_marker_file(path: Path) -> bool:
+    """Delete *path*. Returns ``True`` iff one was there to delete."""
+    try:
+        path.unlink()
+        return True
+    except OSError:
+        return False
+
+
+def marker_path(vault_root: str | Path) -> Path:
+    """Return the resolution-session marker path for *vault_root*.
+
+    Raises:
+        layers.LayerConfinementError: if the marker path escapes the marker root.
+    """
+    return _suffixed_marker_path(vault_root, "")
 
 
 def read_marker(vault_root: str | Path) -> "dict | None":
@@ -92,19 +127,12 @@ def read_marker(vault_root: str | Path) -> "dict | None":
     A raw read with no staleness judgment — see :func:`live_marker` for the
     liveness-aware reader.
     """
-    path = marker_path(vault_root)
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
+    return _read_marker_file(marker_path(vault_root))
 
 
 def write_marker(vault_root: str | Path, marker: dict) -> dict:
     """Write *marker* for *vault_root* and return it."""
-    path = marker_path(vault_root)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(marker, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    return marker
+    return _write_marker_file(marker_path(vault_root), marker)
 
 
 def begin_session(vault_root: str | Path) -> dict:
@@ -137,12 +165,7 @@ def live_marker(vault_root: str | Path) -> "dict | None":
 
 def clear_marker(vault_root: str | Path) -> bool:
     """Delete the marker. Returns ``True`` iff one was there to delete."""
-    path = marker_path(vault_root)
-    try:
-        path.unlink()
-        return True
-    except OSError:
-        return False
+    return _unlink_marker_file(marker_path(vault_root))
 
 
 def clear_if_stale(vault_root: str | Path) -> bool:
@@ -175,10 +198,7 @@ def held_marker_path(vault_root: str | Path) -> Path:
     Raises:
         layers.LayerConfinementError: if the marker path escapes the marker root.
     """
-    root = resolve_state_root()
-    candidate = root / f"{machine_state_key(vault_root)}{HELD_SUFFIX}.json"
-    layers_mod.assert_within_root(candidate, root)
-    return candidate
+    return _suffixed_marker_path(vault_root, HELD_SUFFIX)
 
 
 def read_held_marker(vault_root: str | Path) -> "dict | None":
@@ -197,11 +217,7 @@ def read_held_marker(vault_root: str | Path) -> "dict | None":
     (:func:`clear_held_marker`). There is nothing mid-rebase to distinguish a
     live write from a stale one, so no separate ``live_held_marker`` exists.
     """
-    path = held_marker_path(vault_root)
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
+    return _read_marker_file(held_marker_path(vault_root))
 
 
 def mark_held(vault_root: str | Path) -> dict:
@@ -221,10 +237,7 @@ def mark_held(vault_root: str | Path) -> dict:
         else dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     )
     marker = {"vault": Path(vault_root).name, "entered-at": entered_at}
-    path = held_marker_path(vault_root)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(marker, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    return marker
+    return _write_marker_file(held_marker_path(vault_root), marker)
 
 
 def vault_is_held(vault_root: str | Path) -> bool:
@@ -234,12 +247,7 @@ def vault_is_held(vault_root: str | Path) -> bool:
 
 def clear_held_marker(vault_root: str | Path) -> bool:
     """Delete the held marker. Returns ``True`` iff one was there to delete."""
-    path = held_marker_path(vault_root)
-    try:
-        path.unlink()
-        return True
-    except OSError:
-        return False
+    return _unlink_marker_file(held_marker_path(vault_root))
 
 
 #: Filename suffix distinguishing the failed-vault marker from both the
@@ -267,10 +275,7 @@ def failed_marker_path(vault_root: str | Path) -> Path:
     Raises:
         layers.LayerConfinementError: if the marker path escapes the marker root.
     """
-    root = resolve_state_root()
-    candidate = root / f"{machine_state_key(vault_root)}{FAILED_SUFFIX}.json"
-    layers_mod.assert_within_root(candidate, root)
-    return candidate
+    return _suffixed_marker_path(vault_root, FAILED_SUFFIX)
 
 
 def mark_failed(vault_root: str | Path, *, reason: str, detail: str) -> dict:
@@ -292,31 +297,19 @@ def mark_failed(vault_root: str | Path, *, reason: str, detail: str) -> dict:
         "detail": detail,
         "at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
-    path = failed_marker_path(vault_root)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(marker, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    return marker
+    return _write_marker_file(failed_marker_path(vault_root), marker)
 
 
 def read_failed_marker(vault_root: str | Path) -> "dict | None":
     """Return the failed-vault marker for *vault_root*, or ``None`` if absent
     or unreadable. Liveness is plain presence, exactly as
     :func:`read_held_marker` documents for its own marker."""
-    path = failed_marker_path(vault_root)
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
+    return _read_marker_file(failed_marker_path(vault_root))
 
 
 def clear_failed_marker(vault_root: str | Path) -> bool:
     """Delete the failed-vault marker. Returns ``True`` iff one was there to delete."""
-    path = failed_marker_path(vault_root)
-    try:
-        path.unlink()
-        return True
-    except OSError:
-        return False
+    return _unlink_marker_file(failed_marker_path(vault_root))
 
 
 def refusal_notice(vault_root: str | Path, op: str) -> str:

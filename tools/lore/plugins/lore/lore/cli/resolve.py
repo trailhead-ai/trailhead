@@ -925,22 +925,17 @@ def _resolve_step(
 
     files: list[dict] = []
     for path in file_paths:
+        reason = "settle with `lore resolve take-file`"
         if _is_free_write_path(path):
-            reason = _auto_take_published_side(vault, path)
-            if reason is None:
+            held = _auto_take_published_side(vault, path)
+            if held is None:
                 continue  # fully settled: landed, staged, or removed
-            files.append({
-                "path": path,
-                "local": dict(local_label),
-                "remote": dict(remote_label),
-                "reason": reason,
-            })
-            continue
+            reason = held
         files.append({
             "path": path,
             "local": dict(local_label),
             "remote": dict(remote_label),
-            "reason": "settle with `lore resolve take-file`",
+            "reason": reason,
         })
     return conflicts, files, pending
 
