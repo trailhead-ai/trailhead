@@ -2783,6 +2783,36 @@ def _refuse_door(outcome, reason: str, *, as_json: bool) -> NoReturn:
     _die(f"camp attach: {reason}")
 
 
+def _print_reconcile_outcome(reconcile_outcome) -> None:
+    """Print the connect arm's reconciliation to stderr, one line per
+    change, before the door's own outcome line — or, when reconciliation
+    could not run at all, the one line naming why.
+
+    `None` means no reconciliation was attempted (the create arm has no
+    session to read a record against yet) and prints nothing.
+    `reconcile_outcome.reason` is composed upstream by
+    `reconcile_workspace_record` and does not, for a corrupt record,
+    already say "not reconciled" the way its two tmux-answer variants do —
+    this is the one place both ever reach an operator's terminal, so it is
+    also the one place that guarantees the phrase is there exactly once,
+    rather than depending on wording composed elsewhere.
+    """
+    from ..launch.recovery import printable_path
+    from ..launch.window_reconcile import NotReconciled, Reconciled, render_changes
+
+    if reconcile_outcome is None:
+        return
+    if isinstance(reconcile_outcome, Reconciled):
+        for line in render_changes(reconcile_outcome.changes):
+            print(line, file=sys.stderr)
+        return
+    assert isinstance(reconcile_outcome, NotReconciled)
+    reason = reconcile_outcome.reason
+    if "not reconciled" not in reason.lower():
+        reason = f"{reason}; not reconciled"
+    print(printable_path(reason), file=sys.stderr)
+
+
 def _open_workspace_door(
     target: "ResolvedWorkspace",
     *,
@@ -2837,6 +2867,8 @@ def _open_workspace_door(
     if probe.state is DoorState.CREATE_REFUSED:
         _refuse_door(RefusedCreateRefused(), probe.reason, as_json=as_json)
         return
+
+    _print_reconcile_outcome(probe.reconcile_outcome)
 
     outcome_cls = Created if probe.state is DoorState.CREATED else Connected
     outcome = outcome_cls(

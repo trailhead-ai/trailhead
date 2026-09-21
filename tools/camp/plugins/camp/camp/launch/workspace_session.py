@@ -77,6 +77,7 @@ from .eligibility import assert_not_a_credential_store
 from .naming import workspace_session_name
 from .session import LaunchError
 from .tmux import Tmux, target
+from .window_reconcile import ReconcileOutcome, reconcile_workspace_record
 
 #: The exact stderr shape tmux prints for a `new-session` refused because the
 #: name is already live, confirmed against tmux 3.7c. Matched as a substring
@@ -228,11 +229,19 @@ class DoorProbe:
     """One pass through the door: what state it reached, the session name it
     derived getting there, and — for the two failure states only — the
     operator-facing ``reason`` both callers report verbatim.
+
+    ``reconcile_outcome`` is set only for :data:`DoorState.CONNECTED`
+    reached via the initial `has_session_with_reason` probe answering
+    present — the connect arm reads and corrects the window record against
+    tmux there, before this probe is returned. It is `None` for every other
+    state, including :data:`DoorState.CREATED`: the create arm has no
+    session to read a record against yet.
     """
 
     state: DoorState
     session_name: str
     reason: str | None = None
+    reconcile_outcome: ReconcileOutcome | None = None
 
 
 def create_or_connect_workspace_session(
@@ -297,7 +306,8 @@ def create_or_connect_workspace_session(
         )
 
     if present:
-        return DoorProbe(DoorState.CONNECTED, name)
+        reconcile_outcome = reconcile_workspace_record(workspace_dir, name, tmux)
+        return DoorProbe(DoorState.CONNECTED, name, reconcile_outcome=reconcile_outcome)
 
     try:
         result = create_workspace_session(group_name, slug, workspace_dir, env=env, tmux=tmux)
