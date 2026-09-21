@@ -884,6 +884,41 @@ def test_reconcile_carries_forward_work_state_set_to_ready(tmp_path):
     assert entry["work_state"] == "ready"
 
 
+def test_reconcile_overrides_stale_work_state_when_no_activate_task(tmp_path):
+    """A member whose manifest carries a prior "failed" work_state but declares
+    no activate-phase task has nothing left to run, so reconcile writes
+    "not-applicable" instead of carrying the stale value forward."""
+    from camp.provision.reconcile import reconcile_worktree
+    from camp.group.manifest import read_central_manifest, write_central_manifest
+
+    repo = tmp_path / "repo"
+    init_git_repo(repo, origin=True)
+    env = camp_state_env(tmp_path)
+    group = _make_group(
+        "workstaleg",
+        [
+            {
+                "name": "repo",
+                "repo_root": str(repo),
+                "base": "origin/main",
+                "tasks": [_provision_task("dep-install", ["true"])],
+            }
+        ],
+    )
+
+    reconcile_worktree(group, "s", env=env)
+
+    mpath = _manifest_path("workstaleg", "s", env)
+    data = read_central_manifest(mpath)
+    data["members"][0]["work_state"] = "failed"
+    write_central_manifest(mpath, data)
+
+    reconcile_worktree(group, "s", env=env)
+
+    entry = read_central_manifest(mpath)["members"][0]
+    assert entry["work_state"] == "not-applicable"
+
+
 # ---------------------------------------------------------------------------
 # async path (seed_pending_workspace + cmd_setup_group): work_state
 # ---------------------------------------------------------------------------

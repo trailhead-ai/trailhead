@@ -752,17 +752,15 @@ def reconcile_worktree(
                 merged.update(_tasks_map_from_results(results))
                 if merged:
                     mr["tasks"] = merged
-                mr.update(prior_state.get(member["name"], {}))
-                # The "no activate-phase task -> not-applicable" rule, and the
-                # carry-forward precedence over it, live once in
-                # work_state_for_new_entry — shared with seed_pending_workspace
-                # so both fresh-entry writers agree.
-                if "work_state" not in mr:
-                    new_work_state = work_state_for_new_entry(
-                        member, prior_state.get(member["name"])
-                    )
-                    if new_work_state is not None:
-                        mr["work_state"] = new_work_state
+                prior_entry = prior_state.get(member["name"])
+                mr.update(prior_entry or {})
+                # work_state_for_new_entry owns the "no activate-phase task ->
+                # not-applicable, else carry the prior forward" rule, shared
+                # with seed_pending_workspace so both fresh-entry writers agree.
+                mr.pop("work_state", None)
+                new_work_state = work_state_for_new_entry(member, prior_entry)
+                if new_work_state is not None:
+                    mr["work_state"] = new_work_state
 
             # -- Phase 3: Write central manifest atomically (only after all succeed)
             manifest_data: dict[str, Any] = {

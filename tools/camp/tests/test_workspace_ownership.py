@@ -722,6 +722,18 @@ class TestPerMemberCarryForwardUnaffectedByOwnerFix:
 
         g = one_member_group
         slug = "feat-o"
+        # The member declares the activate-phase task whose run the simulated
+        # state below records; work_state carries forward only for members
+        # that still declare activate work.
+        g["group"]["members"][0]["tasks"] = [
+            {
+                "name": "dep-install",
+                "phase": "activate",
+                "required": False,
+                "timeout_seconds": None,
+                "steps": [{"name": "dep-install", "cmd": ["true"]}],
+            }
+        ]
         env, mpath = _owned_workspace(g["group"], g["tmp_path"], slug=slug)
 
         # Simulate cmd_setup_group having already flipped this member and
