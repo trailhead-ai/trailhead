@@ -7,6 +7,22 @@ for the argv this issues and why its else-branch reproduces tmux's own
 compiled-in default rather than deferring to one (tmux has no
 revert-to-default primitive).
 
+Giving the key back
+---------------------
+prefix+``c`` is a server-global table entry with a single slot, and it is
+not camp's: an operator's own `.tmux.conf` line lives there, and tmux does
+not re-read that file, so overwriting it would destroy it for the life of
+the server. So the FIRST install captures the line it is about to displace
+— read from the same `list-keys` output the first-install check already
+reads — into a server-global user option, and `remove_window_key_binding`
+replays it. A key that carried no binding at all is captured as an
+`unbind-key`, so "put it back how it was" holds in that direction too.
+
+The capture is deliberately server-scoped and in-memory rather than on
+disk: it must live exactly as long as the binding it describes, and a file
+would outlive the server and offer a later, unrelated one a binding from a
+dead server.
+
 Idempotency and the first-install notice
 ------------------------------------------
 Installing the identical binding twice must not accumulate or duplicate the
@@ -48,7 +64,7 @@ import sys
 from pathlib import Path
 from typing import Protocol
 
-from .tmux import _NO_SERVER_STDERR_RE
+from .tmux import _NO_SERVER_STDERR_RE, prefix_window_binding_line
 
 #: This module lives at plugins/camp/camp/launch/binding.py; parents[2] is
 #: the plugin root (plugins/camp/), the same directory cli/dispatch.py's own
@@ -64,6 +80,23 @@ _DEFAULT_CAMP_BIN = str(_PLUGIN_ROOT / "cli" / "camp")
 #: underneath the operator).
 _NOTICE = "camp: installed a tmux key binding — prefix+c now opens a camp-composed window"
 
+#: Where the binding camp displaced is kept until `camp window unbind` puts
+#: it back. A SERVER-global user option, because that is exactly the
+#: lifetime of the thing being displaced: camp's binding is server-global
+#: and dies with the server, so the memory of what it replaced must live
+#: and die on the same boundary. It is deliberately not on disk — a file
+#: would outlive the server and hand a later, unrelated server a binding
+#: from a dead one.
+_PRIOR_BINDING_OPTION = "@camp_prior_window_binding"
+
+#: What is captured when the key carried NO binding before camp took it.
+#: Storing nothing would be indistinguishable from "camp never installed on
+#: this server", which falls back to tmux's compiled-in default — and so
+#: would impose a binding on an operator who had deliberately removed one.
+#: Captured as a command rather than a flag so the restore path has exactly
+#: one shape: replay whatever was stored.
+_CAPTURED_UNBOUND = "unbind-key -T prefix c"
+
 
 class _TmuxLike(Protocol):
     def list_window_binding(self) -> str | None: ...
@@ -71,6 +104,14 @@ class _TmuxLike(Protocol):
     def install_window_binding(self, true_command: str, *, timeout: float | None = None): ...
 
     def reset_window_binding(self, *, timeout: float | None = None): ...
+
+    def set_server_option(self, key: str, value: str, *, timeout: float | None = None): ...
+
+    def show_server_option(self, key: str, *, timeout: float | None = None) -> str | None: ...
+
+    def unset_server_option(self, key: str, *, timeout: float | None = None): ...
+
+    def source_command(self, command: str, *, timeout: float | None = None): ...
 
 
 class WindowBindingRemovalError(Exception):
@@ -179,6 +220,9 @@ def install_window_key_binding(
     before = tmux.list_window_binding()
     is_first_install = before is None or marker not in before
 
+    if is_first_install:
+        _capture_displaced_binding(tmux, before)
+
     result = tmux.install_window_binding(true_command)
     installed = result is not None and result.returncode == 0
 
@@ -186,16 +230,48 @@ def install_window_key_binding(
         print(_NOTICE, file=sys.stderr)
 
 
-def remove_window_key_binding(tmux: _TmuxLike) -> None:
-    """Restore camp's prefix+``c`` binding to tmux's own compiled-in
-    default across the whole server — the paired removal for
-    :func:`install_window_key_binding`.
+def _capture_displaced_binding(tmux: _TmuxLike, table: str | None) -> None:
+    """Remember the prefix+``c`` binding this install is about to overwrite,
+    so :func:`remove_window_key_binding` can put it back.
 
-    Always issues the reset call, whether or not a camp binding was ever
-    installed on this server: an operator asking for the key to be tmux's
-    default is asking for an END STATE, not for camp to undo a specific
+    Runs on the FIRST install only — the caller's own "is this camp's
+    binding already?" answer decides. Re-capturing on every workspace would
+    store CAMP's binding as the thing to restore the moment a second
+    workspace was created on the same server, which is worse than not
+    capturing at all: the operator would get camp's dispatch handed back to
+    them by the very verb that exists to take it away, with nothing to
+    indicate it.
+
+    The line is stored exactly as `list-keys` rendered it (see
+    :func:`~camp.launch.tmux.prefix_window_binding_line`), because the
+    restore replays it through tmux's own parser rather than camp's.
+
+    A table camp could not read at all (`None` — tmux did not answer) is not
+    a capture: there is no evidence about what was there, and recording a
+    guess would be worse than the fallback. Nothing is stored, and removal
+    falls back to tmux's compiled-in default.
+    """
+    if table is None:
+        return
+    displaced = prefix_window_binding_line(table)
+    tmux.set_server_option(
+        _PRIOR_BINDING_OPTION, displaced if displaced is not None else _CAPTURED_UNBOUND
+    )
+
+
+def remove_window_key_binding(tmux: _TmuxLike) -> bool:
+    """Give the server-global prefix+``c`` key back — the paired removal
+    for :func:`install_window_key_binding`.
+
+    When the install captured the binding it displaced, that binding is
+    replayed and the key is exactly what it was before camp touched it.
+    When nothing was captured — camp never installed on this server, or
+    installed before it learned to capture — the key is reasserted to
+    tmux's compiled-in default instead.
+
+    Either way this is an END STATE request, not an undo of a specific
     prior action, so there is no "already default" branch to special-case
-    and no way for this call to fail simply because there was nothing to
+    and no way for the fallback to fail simply because there was nothing to
     remove — see `Tmux.reset_window_binding`'s own docstring for why
     reasserting the default is always safe and idempotent.
 
@@ -209,11 +285,23 @@ def remove_window_key_binding(tmux: _TmuxLike) -> None:
     `Tmux.list_sessions` already draws on this same stderr shape — so this
     is treated as success, never surfaced as a refusal.
 
+    Answers ``True`` when the operator's OWN displaced binding was put back
+    and ``False`` when the key was left at tmux's compiled-in default
+    because camp had nothing captured. The caller reports a different
+    sentence for each: telling an operator the key is "back to its tmux
+    default" when their own `.tmux.conf` binding has just been restored
+    describes the opposite of what happened.
+
     Raises :class:`WindowBindingRemovalError`, carrying camp's own words,
     when tmux could not be asked at all or answered with any OTHER
     non-zero exit — never lets tmux's own exception or stderr reach the
     caller raw.
     """
+    captured = tmux.show_server_option(_PRIOR_BINDING_OPTION)
+    if captured is not None:
+        _replay_captured_binding(tmux, captured)
+        return True
+
     result = tmux.reset_window_binding()
     if result is None:
         raise WindowBindingRemovalError(
@@ -222,9 +310,38 @@ def remove_window_key_binding(tmux: _TmuxLike) -> None:
     if result.returncode != 0:
         stderr = result.stderr or ""
         if _NO_SERVER_STDERR_RE.search(stderr):
-            return
+            return False
         detail = stderr.strip()
         suffix = f" — {detail}" if detail else ""
         raise WindowBindingRemovalError(
             f"camp: tmux refused to reset the window-creation key{suffix}"
         )
+    return False
+
+
+def _replay_captured_binding(tmux: _TmuxLike, captured: str) -> None:
+    """Put back the exact binding camp displaced, then forget it.
+
+    The captured text is a tmux command tmux itself wrote, replayed through
+    tmux's own parser — camp never re-tokenizes it (see
+    :meth:`~camp.launch.tmux.Tmux.source_command`).
+
+    The capture is dropped only after a successful replay: leaving it in
+    place on failure means a retry still has something to restore, while
+    dropping it would silently downgrade every later attempt to the
+    compiled-in default. A refused replay is a failed removal and says so —
+    reporting success here would leave camp's own binding installed while
+    telling the operator it was gone.
+    """
+    result = tmux.source_command(captured)
+    if result is None:
+        raise WindowBindingRemovalError(
+            "camp: could not reach tmux to restore the window-creation key"
+        )
+    if result.returncode != 0:
+        detail = (result.stderr or "").strip()
+        suffix = f" — {detail}" if detail else ""
+        raise WindowBindingRemovalError(
+            f"camp: tmux refused to restore the window-creation key{suffix}"
+        )
+    tmux.unset_server_option(_PRIOR_BINDING_OPTION)

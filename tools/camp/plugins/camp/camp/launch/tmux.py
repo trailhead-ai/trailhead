@@ -103,6 +103,32 @@ _PREFIX_C_BIND = ["bind-key", "-T", "prefix", "c"]
 _TMUX_DEFAULT_WINDOW_COMMAND = "new-window"
 
 
+#: The `c` line inside `list-keys -T prefix` output, anchored on the key's
+#: POSITION — the operand immediately after `-T prefix` — rather than on the
+#: text ` c ` appearing anywhere in the line. tmux's own stock `display-menu`
+#: bindings embed bare `c` operands inside their menu definitions, so a text
+#: match finds those instead of the window-creation key. The `(?:-\S+\s+)*`
+#: run absorbs flags tmux renders between `bind-key` and `-T`, such as the
+#: `-r` (repeatable) flag, which it prints as `bind-key -r -T prefix c ...`.
+_PREFIX_C_LINE_RE = re.compile(r"^bind-key\s+(?:-\S+\s+)*-T\s+prefix\s+c\s", re.M)
+
+
+def prefix_window_binding_line(table: str) -> str | None:
+    """The whole `c` line from *table* (`list-keys -T prefix` output), as
+    tmux itself rendered it, or ``None`` when the key carries no binding.
+
+    Returned verbatim, including tmux's own column padding and quoting,
+    because the one thing done with it is handing it straight back to tmux
+    through :meth:`Tmux.source_command` — `list-keys` output is written in
+    tmux's own command grammar precisely so it can be re-sourced, and camp
+    re-tokenizing it would put a second, disagreeing parser in the path.
+    """
+    for line in table.splitlines():
+        if _PREFIX_C_LINE_RE.match(line):
+            return line
+    return None
+
+
 def _escape_tmux_format(text: str) -> str:
     """Double every `#` in *text* so tmux renders it literally instead of
     evaluating it as a format expression.
@@ -222,8 +248,11 @@ class Tmux:
         *,
         timeout: float | None = None,
         env: Mapping[str, str] | None = None,
+        stdin_text: str | None = None,
     ) -> subprocess.CompletedProcess | None:
-        done, _reason = self._run_with_reason(args, timeout=timeout, env=env)
+        done, _reason = self._run_with_reason(
+            args, timeout=timeout, env=env, stdin_text=stdin_text
+        )
         return done
 
     def _run_with_reason(
@@ -232,6 +261,7 @@ class Tmux:
         *,
         timeout: float | None = None,
         env: Mapping[str, str] | None = None,
+        stdin_text: str | None = None,
     ) -> tuple[subprocess.CompletedProcess | None, str | None]:
         """Same call :meth:`_run` makes, plus the exception's own message
         when the call could not complete at all — the one piece of
@@ -242,6 +272,8 @@ class Tmux:
         kwargs: dict[str, object] = {}
         if env is not None:
             kwargs["env"] = dict(env)
+        if stdin_text is not None:
+            kwargs["input"] = stdin_text
         try:
             return (
                 subprocess.run(
@@ -754,3 +786,59 @@ class Tmux:
             ["display-message", "-t", target, _escape_tmux_format(message)],
             timeout=timeout,
         )
+
+    def set_server_option(
+        self, key: str, value: str, *, timeout: float | None = None
+    ) -> subprocess.CompletedProcess | None:
+        """State one SERVER-global user option (``tmux set-option -g <key>
+        <value>``).
+
+        The deliberate opposite of :meth:`set_option`'s session-local
+        contract, and a separate method rather than a flag on it so neither
+        scope can be reached by accident. What this scope is for: a value
+        that must outlive the workspace session that wrote it but die with
+        the tmux server — which is exactly the lifetime of a server-global
+        key binding, and so of the binding camp displaces to install its
+        own.
+        """
+        return self._run(["set-option", "-g", key, value], timeout=timeout)
+
+    def show_server_option(self, key: str, *, timeout: float | None = None) -> str | None:
+        """Read back what :meth:`set_server_option` stored, or ``None``.
+
+        ``None`` covers both "never set" and "could not ask": tmux answers a
+        non-zero exit with ``invalid option: <key>`` for an unset user option
+        (confirmed against real tmux 3.7c), and the caller's decision is the
+        same either way — there is nothing captured to act on, so fall back.
+        This is the one place in this seam where the two are deliberately
+        folded rather than kept apart, because no caller can do anything
+        different with them.
+        """
+        done = self._run(["show-options", "-gv", key], timeout=timeout)
+        if done is None or done.returncode != 0:
+            return None
+        return _strip_one_trailing_newline(done.stdout)
+
+    def unset_server_option(
+        self, key: str, *, timeout: float | None = None
+    ) -> subprocess.CompletedProcess | None:
+        """Drop a server-global user option (``tmux set-option -gu <key>``),
+        so a later :meth:`show_server_option` answers ``None`` again."""
+        return self._run(["set-option", "-gu", key], timeout=timeout)
+
+    def source_command(
+        self, command: str, *, timeout: float | None = None
+    ) -> subprocess.CompletedProcess | None:
+        """Run one tmux command written in tmux's OWN command grammar, by
+        handing it to ``tmux source-file -`` on stdin.
+
+        This exists for exactly one job: replaying a `bind-key` line that
+        `list-keys` produced. That output is written to be re-sourceable, so
+        tmux's own parser is the only one guaranteed to read it back the way
+        it was written — camp splitting the line itself would introduce a
+        second parser that can disagree, and tmux's quoting is not POSIX
+        shell's. Confirmed against real tmux 3.7c that a captured line
+        round-trips byte-for-byte through this path, `-r` flag and embedded
+        `#{...}` format included.
+        """
+        return self._run(["source-file", "-"], timeout=timeout, stdin_text=command + "\n")

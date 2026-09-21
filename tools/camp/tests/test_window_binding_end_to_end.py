@@ -521,15 +521,16 @@ def _run_camp_window_unbind(server: "_E2EServer") -> subprocess.CompletedProcess
 
 
 @pytest.mark.skipif(_REAL_TMUX is None, reason="no tmux binary on PATH (captured at import time)")
-def test_unbind_restores_tmux_default_in_both_the_camp_session_and_a_plain_one(server):
+def test_unbind_stops_the_key_composing_in_the_camp_session_and_leaves_a_plain_one_alone(server):
     """Test contract bullet 1: after removal, pressing the key in a marked
     camp workspace session no longer composes anything (the record gains no
     new entry — camp's branch never fires), and a plain, never-marked
     session on the same server is unaffected either way. Both sessions
-    still get a real tmux window from the else-branch's own `new-window`,
-    since that IS the default `unbind` restores — the signal that
-    distinguishes "camp composed this" from "tmux's own default fired" is
-    the window record, exactly as the paired install test above uses it."""
+    still get a real tmux window, from the binding camp put back — here
+    tmux's own stock `new-window`, since nothing customized it on this
+    server. The signal that distinguishes "camp composed this" from "the
+    restored binding fired" is the window record, exactly as the paired
+    install test above uses it."""
     from camp.launch.workspace_session import create_workspace_session
     from camp.launch.naming import workspace_session_name
     from camp.launch.tmux import Tmux
@@ -545,7 +546,6 @@ def test_unbind_restores_tmux_default_in_both_the_camp_session_and_a_plain_one(s
 
     result = _run_camp_window_unbind(server)
     assert result.returncode == 0, result.stderr
-    assert "default" in result.stdout.lower()
 
     _attach_and_send(server.sock, camp_session, b"\x02c", settle=1.0)
     _attach_and_send(server.sock, "plainsess", b"\x02c", settle=1.0)
@@ -667,3 +667,124 @@ def test_unbind_leaves_the_workspace_window_record_untouched(server):
         f"the window record must be byte-for-byte unchanged by unbind: "
         f"before={before!r} after={after!r}"
     )
+
+
+_OPERATOR_BINDING_COMMAND = 'new-window -c "#{pane_current_path}"'
+
+
+def _prefix_c_line(sock: str) -> str | None:
+    """The `c` line as tmux itself renders it in `list-keys -T prefix`, or
+    None when the key carries no binding at all.
+
+    Matched on the key POSITION (the operand right after `-T prefix`), never
+    on the text ` c ` appearing anywhere in the line: tmux's stock
+    `display-menu` bindings embed bare `c` operands inside their own menu
+    definitions, so a text search finds them too.
+    """
+    import re
+
+    table = _sock_run(sock, "list-keys", "-T", "prefix").stdout
+    pattern = re.compile(r"^bind-key\s+(?:-\S+\s+)*-T\s+prefix\s+c\s", re.M)
+    for line in table.splitlines():
+        if pattern.match(line):
+            return line
+    return None
+
+
+@pytest.mark.skipif(_REAL_TMUX is None, reason="no tmux binary on PATH (captured at import time)")
+def test_unbind_gives_the_operator_their_own_prefix_c_binding_back(server):
+    """The operator's `.tmux.conf` binding is not camp's to destroy.
+
+    `new-window -c "#{pane_current_path}"` — opening the new window in the
+    current pane's directory — is a near-ubiquitous customization of this
+    exact key. camp overwrites the server-global table entry to install its
+    own dispatch, so it must put back what was there, not tmux's
+    compiled-in default. Asserted byte-for-byte against tmux's own
+    `list-keys` rendering, on a real server, across a full install/unbind
+    cycle.
+    """
+    from camp.launch.naming import workspace_session_name
+    from camp.launch.tmux import Tmux
+    from camp.launch.workspace_session import create_workspace_session
+
+    _sock_run(server.sock, "new-session", "-d", "-s", "plainsess", "-x", "80", "-y", "24")
+    _sock_run(
+        server.sock, "bind-key", "-T", "prefix", "c", "new-window", "-c", "#{pane_current_path}"
+    )
+    before = _prefix_c_line(server.sock)
+    assert before is not None and "pane_current_path" in before, before
+
+    slug = "feat-x"
+    ws_dir = server.workspace_dir(slug)
+    ws_dir.mkdir(parents=True)
+    create_workspace_session(server.group_name, slug, ws_dir, env=server.env, tmux=Tmux())
+    camp_session = workspace_session_name(server.group_name, slug)
+
+    during = _prefix_c_line(server.sock)
+    assert during is not None and "pane_current_path" not in during, (
+        f"camp's install must have taken the key over: {during!r}"
+    )
+
+    result = _run_camp_window_unbind(server)
+    assert result.returncode == 0, result.stderr
+
+    after = _prefix_c_line(server.sock)
+    assert after == before, f"expected the operator's own binding back\nbefore: {before!r}\nafter:  {after!r}"
+
+    # And it WORKS, not merely reads right: pressing the key in the camp
+    # session now runs the operator's binding, so the window opens rooted at
+    # the pane's own directory rather than being composed by camp.
+    _attach_and_send(server.sock, camp_session, b"\x02c", settle=1.0)
+    windows = _sock_run(server.sock, "list-windows", "-t", camp_session).stdout.splitlines()
+    assert len(windows) == 2, windows
+
+
+@pytest.mark.skipif(_REAL_TMUX is None, reason="no tmux binary on PATH (captured at import time)")
+def test_a_second_workspace_does_not_overwrite_the_captured_operator_binding(server):
+    """The capture happens on the FIRST install only. A second workspace on
+    the same server re-issues the bind (so a stale one self-heals) and must
+    not record camp's own binding as the thing to restore — which would make
+    unbind hand the operator camp's dispatch back instead of their own
+    binding, and permanently."""
+    from camp.launch.tmux import Tmux
+    from camp.launch.workspace_session import create_workspace_session
+
+    # A session first: `bind-key` does NOT auto-start a tmux server (unlike
+    # `new-session`), so setting the operator's binding against a socket with
+    # no server is a silent no-op and would leave this test asserting nothing.
+    _sock_run(server.sock, "new-session", "-d", "-s", "plainsess", "-x", "80", "-y", "24")
+    _sock_run(
+        server.sock, "bind-key", "-T", "prefix", "c", "new-window", "-c", "#{pane_current_path}"
+    )
+    before = _prefix_c_line(server.sock)
+    assert before is not None and "pane_current_path" in before, before
+
+    for slug in ("feat-x", "feat-y"):
+        ws_dir = server.workspace_dir(slug)
+        ws_dir.mkdir(parents=True)
+        create_workspace_session(server.group_name, slug, ws_dir, env=server.env, tmux=Tmux())
+
+    assert _run_camp_window_unbind(server).returncode == 0
+    assert _prefix_c_line(server.sock) == before
+
+
+@pytest.mark.skipif(_REAL_TMUX is None, reason="no tmux binary on PATH (captured at import time)")
+def test_unbind_leaves_the_key_unbound_when_the_operator_had_unbound_it(server):
+    """The other end of the same contract: an operator who deliberately
+    unbound this key gets it back UNBOUND, not restored to tmux's
+    compiled-in default — "put it back how it was" has to mean that in both
+    directions, or camp is still imposing a binding the operator removed."""
+    from camp.launch.tmux import Tmux
+    from camp.launch.workspace_session import create_workspace_session
+
+    _sock_run(server.sock, "new-session", "-d", "-s", "plainsess", "-x", "80", "-y", "24")
+    _sock_run(server.sock, "unbind-key", "-T", "prefix", "c")
+    assert _prefix_c_line(server.sock) is None
+
+    ws_dir = server.workspace_dir("feat-x")
+    ws_dir.mkdir(parents=True)
+    create_workspace_session(server.group_name, "feat-x", ws_dir, env=server.env, tmux=Tmux())
+    assert _prefix_c_line(server.sock) is not None, "camp's install should have bound the key"
+
+    assert _run_camp_window_unbind(server).returncode == 0
+    assert _prefix_c_line(server.sock) is None

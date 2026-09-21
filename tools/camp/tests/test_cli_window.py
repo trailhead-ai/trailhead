@@ -26,19 +26,44 @@ if str(_PLUGIN_DIR) not in sys.path:
     sys.path.insert(0, str(_PLUGIN_DIR))
 
 
-def test_unbind_calls_remove_and_reports_the_restored_message():
+def test_the_message_says_which_end_state_removal_actually_reached():
+    """Removal has two honest outcomes and they are not the same sentence:
+    it either put back the binding camp displaced — whatever that was — or,
+    when camp had nothing captured, left the key at tmux's compiled-in
+    default. Reporting "default" for the first would tell an operator their
+    `.tmux.conf` line is gone when it has just been restored. The restored
+    wording does not claim the binding was the operator's own, because camp
+    cannot tell a hand-written binding from tmux's stock one; it claims only
+    what camp actually knows, which is that it replaced something.
+
+    Driven both ways through the same call, so the message is read off
+    removal's answer rather than fixed in the verb.
+    """
     from camp.cli.window import dispatch_window_verb
 
     calls = []
 
-    def fake_remove(tmux):
+    def restoring_remove(tmux):
         calls.append(tmux)
+        return True
 
-    ok, message = dispatch_window_verb("unbind", remove=fake_remove, tmux="the-tmux")
+    def defaulting_remove(tmux):
+        calls.append(tmux)
+        return False
 
-    assert ok is True
-    assert calls == ["the-tmux"]
-    assert "default" in message.lower()
+    ok_restored, restored = dispatch_window_verb(
+        "unbind", remove=restoring_remove, tmux="the-tmux"
+    )
+    ok_default, defaulted = dispatch_window_verb(
+        "unbind", remove=defaulting_remove, tmux="the-tmux"
+    )
+
+    assert (ok_restored, ok_default) == (True, True)
+    assert calls == ["the-tmux", "the-tmux"]
+    assert restored != defaulted
+    assert "default" in defaulted.lower()
+    assert "default" not in restored.lower()
+    assert "replaced" in restored.lower()
 
 
 def test_unbind_when_removal_raises_reports_camps_own_message_not_a_traceback():

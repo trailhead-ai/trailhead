@@ -42,7 +42,11 @@ _OK = _completed()
 
 class _FakeTmux:
     """Records every `install_window_binding` call and answers
-    `list_window_binding` with whatever the test primed."""
+    `list_window_binding` with whatever the test primed.
+
+    Also stands in for the server-global user option camp stores the
+    displaced binding in, and for `source_command`, the replay path.
+    """
 
     def __init__(
         self,
@@ -55,6 +59,8 @@ class _FakeTmux:
         self.reset_calls: int = 0
         self._reset_result: object = _OK
         self._install_result: object = install_result
+        self.server_options: dict[str, str] = {}
+        self.sourced: list[str] = []
 
     def list_window_binding(self):
         return self._binding
@@ -67,6 +73,21 @@ class _FakeTmux:
     def reset_window_binding(self, *, timeout=None):
         self.reset_calls += 1
         return self._reset_result
+
+    def set_server_option(self, key, value, *, timeout=None):
+        self.server_options[key] = value
+        return _OK
+
+    def show_server_option(self, key, *, timeout=None):
+        return self.server_options.get(key)
+
+    def unset_server_option(self, key, *, timeout=None):
+        self.server_options.pop(key, None)
+        return _OK
+
+    def source_command(self, command, *, timeout=None):
+        self.sourced.append(command)
+        return _OK
 
 
 def test_first_install_in_a_server_emits_the_notice(capsys):
@@ -274,3 +295,114 @@ def test_remove_window_key_binding_succeeds_when_no_tmux_server_is_running_at_al
 
     remove_window_key_binding(tmux)  # must not raise
     assert tmux.reset_calls == 1
+
+
+# ---------------------------------------------------------------------------
+# Giving the operator's own binding back
+# ---------------------------------------------------------------------------
+
+
+def test_the_first_install_captures_the_binding_it_displaces(capsys):
+    """camp overwrites a server-global table entry it does not own, so it
+    records what was there in order to put it back. Varied across two
+    different pre-existing bindings so this cannot pass by storing a
+    constant."""
+    from camp.launch.binding import _PRIOR_BINDING_OPTION, install_window_key_binding
+
+    for prior in (
+        'bind-key    -T prefix c       new-window -c "#{pane_current_path}"',
+        "bind-key -r -T prefix c       split-window -h",
+    ):
+        tmux = _FakeTmux(existing_binding=f"bind-key -T prefix n next-window\n{prior}\n")
+        install_window_key_binding(tmux, camp_bin="/opt/camp/cli/camp")
+        capsys.readouterr()
+
+        assert tmux.server_options[_PRIOR_BINDING_OPTION] == prior
+
+
+def test_an_unbound_key_is_captured_as_an_unbind_not_as_nothing(capsys):
+    """An operator who deliberately unbound this key must get it back
+    unbound. Storing nothing would be indistinguishable from "camp never
+    ran here", which falls back to tmux's compiled-in default — imposing a
+    binding the operator had removed."""
+    from camp.launch.binding import _PRIOR_BINDING_OPTION, install_window_key_binding
+
+    tmux = _FakeTmux(existing_binding="bind-key -T prefix n next-window\n")
+    install_window_key_binding(tmux, camp_bin="/opt/camp/cli/camp")
+    capsys.readouterr()
+
+    assert tmux.server_options[_PRIOR_BINDING_OPTION] == "unbind-key -T prefix c"
+
+
+def test_a_re_install_does_not_overwrite_the_captured_binding(capsys):
+    """The capture happens on the first install only. Re-capturing on a
+    second workspace would store CAMP's own binding as the thing to restore,
+    so unbind would hand the operator camp's dispatch back — permanently,
+    and with no way to tell."""
+    from camp.launch.binding import _PRIOR_BINDING_OPTION, install_window_key_binding
+
+    prior = 'bind-key    -T prefix c       new-window -c "#{pane_current_path}"'
+    tmux = _FakeTmux(existing_binding=f"{prior}\n")
+
+    install_window_key_binding(tmux, camp_bin="/opt/camp/cli/camp")
+    install_window_key_binding(tmux, camp_bin="/opt/camp/cli/camp")
+    capsys.readouterr()
+
+    assert len(tmux.install_calls) == 2, "the seam call still fires every time"
+    assert tmux.server_options[_PRIOR_BINDING_OPTION] == prior
+
+
+def test_removal_replays_the_captured_binding_and_drops_the_capture():
+    """Removal restores what was captured rather than tmux's compiled-in
+    default, and clears the capture afterwards so a later install starts
+    over instead of restoring a binding from two servers ago."""
+    from camp.launch.binding import _PRIOR_BINDING_OPTION, remove_window_key_binding
+
+    prior = 'bind-key    -T prefix c       new-window -c "#{pane_current_path}"'
+    tmux = _FakeTmux()
+    tmux.server_options[_PRIOR_BINDING_OPTION] = prior
+
+    remove_window_key_binding(tmux)
+
+    assert tmux.sourced == [prior]
+    assert tmux.reset_calls == 0, "the compiled default must not also be asserted over it"
+    assert _PRIOR_BINDING_OPTION not in tmux.server_options
+
+
+def test_removal_falls_back_to_the_tmux_default_when_nothing_was_captured():
+    """Nothing captured means camp never installed on this server, or
+    installed before it learned to capture. Either way the honest end state
+    is tmux's own default — the behaviour this verb has always had, kept as
+    the fallback rather than replaced by it."""
+    from camp.launch.binding import remove_window_key_binding
+
+    tmux = _FakeTmux()
+
+    remove_window_key_binding(tmux)
+
+    assert tmux.reset_calls == 1
+    assert tmux.sourced == []
+
+
+def test_a_replay_tmux_refuses_is_reported_not_swallowed():
+    """The replay is the whole point of the verb, so a refused replay is a
+    failed removal — reported with camp's own words, never a success that
+    silently left camp's binding in place."""
+    from camp.launch.binding import (
+        _PRIOR_BINDING_OPTION,
+        WindowBindingRemovalError,
+        remove_window_key_binding,
+    )
+
+    tmux = _FakeTmux()
+    tmux.server_options[_PRIOR_BINDING_OPTION] = "bind-key -T prefix c new-window"
+    tmux.source_command = lambda command, *, timeout=None: _completed(
+        returncode=1, stderr="tmux: bad command"
+    )
+
+    try:
+        remove_window_key_binding(tmux)
+        assert False, "expected WindowBindingRemovalError"
+    except WindowBindingRemovalError as exc:
+        assert "camp:" in str(exc)
+        assert "bad command" in str(exc)

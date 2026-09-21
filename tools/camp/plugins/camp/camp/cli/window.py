@@ -23,8 +23,14 @@ from typing import Callable
 from ..launch.binding import WindowBindingRemovalError, remove_window_key_binding
 from .parser import CampParser
 
-#: Printed on success — mirrors the design doc's own worded end state.
-_RESTORED = "camp: the window-creation key is back to its tmux default"
+#: Printed on success. Two sentences because removal has two honest end
+#: states: it put back the binding camp displaced, or — with nothing
+#: captured — left the key at tmux's compiled-in default. The first does
+#: not claim the binding was the operator's own, since camp cannot tell a
+#: hand-written binding from tmux's stock one and only knows it replaced
+#: something.
+_RESTORED_PRIOR = "camp: the window-creation key is back to the binding camp replaced"
+_RESTORED_DEFAULT = "camp: the window-creation key is back to its tmux default"
 
 
 def dispatch_window_verb(
@@ -48,11 +54,11 @@ def dispatch_window_verb(
         return False, "unbind is the only subcommand — usage: camp window unbind"
 
     try:
-        remove(tmux)
+        restored_prior = remove(tmux)
     except WindowBindingRemovalError as exc:
         return False, str(exc)
 
-    return True, _RESTORED
+    return True, (_RESTORED_PRIOR if restored_prior else _RESTORED_DEFAULT)
 
 
 def _cmd_window_cli(args: list[str]) -> None:

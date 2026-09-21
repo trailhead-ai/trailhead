@@ -801,6 +801,99 @@ def test_display_message_escapes_hash_so_tmux_does_not_expand_the_message(monkey
     ]
 
 
+def test_prefix_window_binding_line_matches_on_the_key_position_not_the_text(monkeypatch):
+    """Picking the `c` line out of `list-keys -T prefix` output has one
+    trap: tmux's own stock `display-menu` bindings embed bare `c` operands
+    inside their menu definitions, so any match on the TEXT ` c ` finds
+    those instead. The match is anchored on the key's POSITION — the
+    operand immediately after `-T prefix` — and tolerates flags such as
+    `-r` that tmux renders between `bind-key` and `-T`.
+
+    Varied across four tables so each rule is exercised by a case that
+    would pass without it.
+    """
+    from camp.launch.tmux import prefix_window_binding_line
+
+    menu_line = 'bind-key    -T prefix >       display-menu -T "x" c { set-buffer "y" }'
+    custom = 'bind-key    -T prefix c       new-window -c "#{pane_current_path}"'
+    repeating = 'bind-key -r -T prefix c       new-window'
+    other_key = "bind-key    -T prefix n       next-window"
+
+    assert prefix_window_binding_line(f"{menu_line}\n{custom}\n{other_key}\n") == custom
+    assert prefix_window_binding_line(f"{other_key}\n{repeating}\n") == repeating
+    # A table holding the menu line but NO `c` binding answers None — this
+    # is the case a text match gets wrong.
+    assert prefix_window_binding_line(f"{menu_line}\n{other_key}\n") is None
+    assert prefix_window_binding_line("") is None
+
+
+def test_server_option_argv_is_global_and_round_trips_the_value(monkeypatch):
+    """The captured binding outlives the workspace that captured it but must
+    die with the tmux server, which is exactly a server-global user option's
+    lifetime. `-g` here is deliberate and the opposite of `set_option`'s
+    session-local contract, so it is a separate method rather than a flag."""
+    import camp.launch.tmux as tmux_module
+
+    calls: list[list[str]] = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(list(argv))
+        return _completed(returncode=0, stdout="bind-key -T prefix c new-window\n")
+
+    monkeypatch.setattr(tmux_module.subprocess, "run", fake_run)
+
+    tmux = tmux_module.Tmux()
+    tmux.set_server_option("@camp_prior", "bind-key -T prefix c new-window")
+    value = tmux.show_server_option("@camp_prior")
+    tmux.unset_server_option("@camp_prior")
+
+    assert calls == [
+        ["tmux", "set-option", "-g", "@camp_prior", "bind-key -T prefix c new-window"],
+        ["tmux", "show-options", "-gv", "@camp_prior"],
+        ["tmux", "set-option", "-gu", "@camp_prior"],
+    ]
+    assert value == "bind-key -T prefix c new-window"
+
+
+def test_show_server_option_answers_none_for_an_option_that_was_never_set(monkeypatch):
+    """tmux answers a non-zero exit and `invalid option` for an unset user
+    option (confirmed on 3.7c) — that is "nothing captured", not a value."""
+    import camp.launch.tmux as tmux_module
+
+    monkeypatch.setattr(
+        tmux_module.subprocess,
+        "run",
+        lambda argv, **kw: _completed(returncode=1, stderr="invalid option: @camp_prior"),
+    )
+
+    assert tmux_module.Tmux().show_server_option("@camp_prior") is None
+
+
+def test_source_command_hands_the_command_to_tmux_on_stdin(monkeypatch):
+    """Restoring a captured binding means re-running a command string tmux
+    itself wrote. `source-file -` makes TMUX re-parse it with its own
+    grammar, which is the only parser guaranteed to agree with the one that
+    produced it — camp never re-tokenizes the line itself."""
+    import camp.launch.tmux as tmux_module
+
+    seen: list[dict] = []
+
+    def fake_run(argv, **kwargs):
+        seen.append({"argv": list(argv), "input": kwargs.get("input")})
+        return _completed(returncode=0)
+
+    monkeypatch.setattr(tmux_module.subprocess, "run", fake_run)
+
+    tmux_module.Tmux().source_command('bind-key -T prefix c new-window -c "#{pane_current_path}"')
+    tmux_module.Tmux().source_command("unbind-key -T prefix c")
+
+    assert [d["argv"] for d in seen] == [["tmux", "source-file", "-"], ["tmux", "source-file", "-"]]
+    assert [d["input"] for d in seen] == [
+        'bind-key -T prefix c new-window -c "#{pane_current_path}"\n',
+        "unbind-key -T prefix c\n",
+    ]
+
+
 def test_reset_window_binding_issues_the_stock_bind_key_argv(monkeypatch):
     """Removal re-installs tmux's own compiled-in default literally —
     `bind-key -T prefix c new-window`, server-global (no `-t`) — since tmux

@@ -256,13 +256,31 @@ camp has repeatedly shipped bugs where a probe that could not answer returned th
 probe that answered "no", and the caller read that as permission. "Cannot tell" and "nothing
 there" are different answers and stay different values.
 
-## State — The binding is removed and the key returns to its default
+## State — The binding is removed and the key goes back to what it was
+
+```
+$ camp window unbind
+camp: the window-creation key is back to the binding camp replaced
+```
+
+The key behaves as it did before camp touched it, in every session on the server, immediately and
+without restarting anything.
+
+prefix+`c` is a single server-global slot, and it is not camp's to spend. An operator who binds it
+in `.tmux.conf` — `new-window -c "#{pane_current_path}"` is a near-ubiquitous line — would
+otherwise lose that binding for the life of the tmux server, since tmux does not re-read the file.
+So camp captures the line it displaces when it first installs, and replays it here. A key the
+operator had deliberately left unbound goes back to unbound; "how it was" has to hold in both
+directions or camp is still imposing a binding.
+
+Where camp has nothing captured — it never installed on this server, or installed before it
+learned to capture — the key is reasserted to tmux's compiled-in default instead, and the message
+says so:
 
 ```
 $ camp window unbind
 camp: the window-creation key is back to its tmux default
 ```
 
-The key behaves as tmux ships it again, in every session on the server, immediately and without
-restarting anything. Running it when no binding is installed reports the same end state rather
-than an error: the operator asked for the key to be default, and it is.
+Running the verb when no binding is installed reports that same end state rather than an error:
+the operator asked for the key back, and it is.
