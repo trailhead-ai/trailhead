@@ -118,28 +118,40 @@ def _member_capability_lines(
     stdout/stderr (which may hold credentials on failure) — only where to
     read it.
 
-    An outstanding task with a config-declared `capability` string uses that
-    text verbatim in place of the generic line — the config author states the
-    concrete consequence ("the code-review-graph MCP server has no graph yet
-    — prefer Grep/Glob until told otherwise") rather than the agent having to
-    infer it from a task name. A task with no `capability` declared falls
-    back to the generic state-based line.
+    Walks the member's provision-phase tasks, then its activate-phase tasks,
+    in declaration order within each phase, so an environment probe that
+    runs at provision time reaches the report as readily as a work-enabling
+    activate task.
+
+    An outstanding or failed task with a config-declared `capability` string
+    uses that text verbatim in place of the generic line — the config author
+    states the concrete consequence ("the code-review-graph MCP server has no
+    graph yet — prefer Grep/Glob until told otherwise", "docker is
+    unavailable — container-backed suites cannot run here") rather than the
+    agent having to infer it from a task name and state. A task with no
+    `capability` declared falls back to the generic state-based line.
     """
     from ..group.config import tasks_in_phase
     from ..provision.activation import ACTIVATE_PHASE
+    from ..provision.reconcile import PROVISION_PHASE
 
     states = report_member.get("tasks") or {}
     failed: list[dict] = []
     outstanding: list[dict] = []
-    for task in tasks_in_phase(member_config, ACTIVATE_PHASE):
-        state = (states.get(task["name"]) or {}).get("state")
-        if state == "failed":
-            failed.append(task)
-        elif state != "ok":
-            outstanding.append(task)
+    for phase in (PROVISION_PHASE, ACTIVATE_PHASE):
+        for task in tasks_in_phase(member_config, phase):
+            state = (states.get(task["name"]) or {}).get("state")
+            if state == "failed":
+                failed.append(task)
+            elif state != "ok":
+                outstanding.append(task)
 
     lines: list[str] = []
     for task in failed:
+        capability = task.get("capability")
+        if capability:
+            lines.append(f"{name}: {capability}")
+            continue
         # Deliberately does not point at `camp status --name <slug> --json`:
         # that surface carries the task's unredacted stderr_excerpt, which is
         # known to include credentials on failure (e.g. a private-registry

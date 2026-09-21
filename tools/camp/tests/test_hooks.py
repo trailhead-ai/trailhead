@@ -963,6 +963,15 @@ def _activate_task(
     return task
 
 
+def _provision_task(
+    name: str, *, required: bool = False, capability: str | None = None
+) -> dict[str, Any]:
+    """Build a member provision-phase task in the config-resolved shape."""
+    task = _activate_task(name, required=required, capability=capability)
+    task["phase"] = "provision"
+    return task
+
+
 def _capability_manifest(
     *,
     group_name: str,
@@ -1525,6 +1534,85 @@ class TestCapabilityReport:
         _assert_report_has_no_json_pointer(
             capability_report(group_overflow, "feat-overflow", env=env)
         )
+
+    @staticmethod
+    def _report_for(tmp_path: Path, slug: str, tasks: list[dict[str, Any]], states: dict) -> str:
+        """capability_report for a one-member group declaring `tasks`, whose
+        manifest records `states` as the per-task state map."""
+        from camp.launch.hook_handlers import capability_report
+        from camp.group.manifest import manifest_path_for, write_central_manifest
+
+        env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
+        group = _make_group_config(
+            "capgroup", [{"name": "repo_a", "repo_root": "/x", "tasks": tasks}]
+        )
+        write_central_manifest(
+            manifest_path_for("capgroup", slug, env=env),
+            _capability_manifest(
+                group_name="capgroup",
+                slug=slug,
+                members=[
+                    {
+                        "name": "repo_a",
+                        "repo_root": "/x",
+                        "worktree_path": "/x",
+                        "provision_state": "ready",
+                        "work_state": "pending",
+                        "tasks": states,
+                    }
+                ],
+            ),
+        )
+        return capability_report(group, slug, env=env)
+
+    def test_failed_provision_task_with_capability_reports_it_verbatim(self, tmp_path: Path):
+        """A provision-phase environment probe that failed and declares a
+        capability string reports that consequence, not the broken-setup line."""
+        text = "docker is unavailable — container-backed suites cannot run here"
+        report = self._report_for(
+            tmp_path,
+            "feat-prov-cap",
+            [_provision_task("docker-check", capability=text)],
+            {"docker-check": {"state": "failed"}},
+        )
+        assert text in report
+        assert "broken setup" not in report
+
+    def test_failed_provision_task_without_capability_keeps_generic_line(self, tmp_path: Path):
+        report = self._report_for(
+            tmp_path,
+            "feat-prov-generic",
+            [_provision_task("docker-check")],
+            {"docker-check": {"state": "failed"}},
+        )
+        assert "'docker-check' failed" in report
+        assert "broken setup" in report
+
+    def test_failed_activate_task_with_capability_reports_it_verbatim(self, tmp_path: Path):
+        text = "dependencies failed to install — build and test commands will fail"
+        report = self._report_for(
+            tmp_path,
+            "feat-act-cap",
+            [_activate_task("dep-install", capability=text)],
+            {"dep-install": {"state": "failed"}},
+        )
+        assert text in report
+        assert "broken setup" not in report
+
+    def test_ok_tasks_in_both_phases_emit_nothing(self, tmp_path: Path):
+        report = self._report_for(
+            tmp_path,
+            "feat-both-ok",
+            [_provision_task("docker-check"), _activate_task("dep-install")],
+            {"docker-check": {"state": "ok"}, "dep-install": {"state": "ok"}},
+        )
+        assert report == ""
+
+    def test_outstanding_provision_task_reports_not_finished(self, tmp_path: Path):
+        report = self._report_for(
+            tmp_path, "feat-prov-outstanding", [_provision_task("docker-check")], {}
+        )
+        assert "'docker-check' has not finished yet" in report
 
     def test_internal_failure_returns_empty_string_not_a_raised_exception(
         self, tmp_path: Path, monkeypatch
