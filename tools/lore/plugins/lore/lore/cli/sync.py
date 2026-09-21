@@ -495,6 +495,10 @@ def _hand_off_to_resolver(
     from . import resolve as resolve_mod
     from ..vault import config as vault_config_mod
 
+    # The resolution's own finish tail pushes, and a push refused by the forge
+    # records its own reason there. Read what is on disk before handing over,
+    # so a marker this attempt writes can be told from one an earlier run left.
+    marker_before = resolve_mod.resolve_state.read_failed_marker(vault)
     try:
         report = resolve_mod.resolve_for_sweep(vault, name, shared=shared)
     except (resolve_mod.ResolveError, vault_config_mod.VaultConfigError) as exc:
@@ -504,9 +508,16 @@ def _hand_off_to_resolver(
                 resolve_mod._abort_replay(vault)
             except resolve_mod.ResolveError as abort_exc:
                 say_err(f"  and the vault is still mid-rebase: {abort_exc}")
-        resolve_mod.resolve_state.mark_failed(
-            vault, reason=FAILURE_POLICY, detail=str(exc)
-        )
+        marker_after = resolve_mod.resolve_state.read_failed_marker(vault)
+        if marker_after is None or marker_after == marker_before:
+            # Nothing inside the resolution classified this, so it is the
+            # resolver's own failure. A reason the push recorded during this
+            # attempt is the more specific fact and is left standing: the
+            # forge refusing a settled push is the forge's doing, and sending
+            # its reader to fix this host's data would be wrong.
+            resolve_mod.resolve_state.mark_failed(
+                vault, reason=FAILURE_POLICY, detail=str(exc)
+            )
         return PUBLISH_HOLDING
 
     resolve_mod.resolve_state.clear_failed_marker(vault)

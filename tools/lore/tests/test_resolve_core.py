@@ -315,11 +315,39 @@ def test_the_report_carries_absent_distinctly_from_a_null_value(resolve):
 @pytest.mark.parametrize("path,expected", [
     ("sites/board/index.html", True),
     ("sites/board/sites/index.html", True),
+    # A site's own markdown and JSON are site content, not records: the
+    # top-level sites/ tree is a free-write zone whatever a file in it is
+    # named, and a path refused here has no settlement route at all — the
+    # automatic take skips it and take-file refuses it.
+    ("sites/board/notes.md", True),
+    ("sites/board/data.json", True),
+    ("sites/notes.md", True),
+    ("sites/data.json", True),
     ("README.md", True),
     (".gitignore", True),
     ("area/sites/index.html", False),
     ("oracle/a-prophecy.json", False),
+    # Record-shaped means exactly <kind>/<name>.md — one directory segment and
+    # a file. Deeper than that is not a record path under any kind.
+    ("oracle/nested/a-prophecy.json", True),
     (".git/config", False),
+    # A record tree is refused at every depth, and by the name the filesystem
+    # will actually use. macOS and Windows both treat these as the same
+    # directory as "task/", so classifying them free-write would let a raw
+    # remote blob land inside a record tree without passing the record write
+    # path — the one thing this fence exists to prevent.
+    ("Task/nested/record.md", False),
+    ("TASK/nested/x.json", False),
+    ("task./nested/record.md", False),
+    ("task /nested/record.md", False),
+    ("task/nested/deeper/x.png", False),
+    # Files git itself reads back out of the working tree to decide how to
+    # treat it — a filter, a diff driver, a submodule URL — are not
+    # administrivia a sweep may take from the remote unattended.
+    (".gitattributes", False),
+    (".gitmodules", False),
+    # Still administrivia, and still free-write.
+    (".gitignore", True),
 ])
 def test_is_free_write_path_classifies_by_path_class_not_by_tree(resolve, path, expected):
     assert resolve._is_free_write_path(path) is expected
@@ -817,6 +845,63 @@ def test_a_mix_of_records_and_files_settles_both_in_one_replay(tmp_path):
     assert report["files"] == [], "the file settled automatically, not parked"
     assert site.read_text() == "<p>remote</p>\n"
     assert (fx.vault / ".git" / "rebase-merge").exists(), "the record conflict is still open"
+
+
+def _stop_on_a_sites_conflict(fx: "_Fixture", remote_bytes: bytes) -> Path:
+    """Leave the vault stopped mid-rebase on one conflicted free-write file."""
+    fx.create("task", "A Task")
+    site = fx.vault / "sites" / "page.html"
+    site.parent.mkdir(parents=True, exist_ok=True)
+    site.write_bytes(b"<p>base</p>\n")
+    fx.publish()
+    fx.clone_device_b()
+
+    (fx.other / "sites" / "page.html").write_bytes(remote_bytes)
+    fx.push_device_b()
+
+    site.write_bytes(b"<p>local</p>\n")
+    _commit(fx.vault, "device A edit")
+
+    _git(fx.vault, "fetch", "origin")
+    _git(fx.vault, "rebase", "--empty=drop", f"origin/{fx.branch}")
+    assert (fx.vault / ".git" / "rebase-merge").exists(), "the rebase stopped on the conflict"
+    return site
+
+
+def test_an_oversized_published_blob_is_held_rather_than_taken_unattended(tmp_path, resolve, monkeypatch):
+    """The sweep runs with nobody watching, and the bytes come from the forge.
+
+    Anyone who can push can make one side of a free-write conflict arbitrarily
+    large. Taking it automatically reads the whole thing into this host's
+    memory and then onto its disk, on a host with no person present to notice
+    or stop it. Past the ceiling the conflict is held for a person instead —
+    nothing is lost, and `take-file` still settles it by hand.
+    """
+    fx = _Fixture(tmp_path)
+    site = _stop_on_a_sites_conflict(fx, b"x" * 4096)
+    monkeypatch.setattr(resolve, "_AUTO_TAKE_MAX_BYTES", 64, raising=False)
+
+    reason = resolve._auto_take_published_side(fx.vault, "sites/page.html")
+
+    assert reason is not None, "an oversized blob is held, not taken"
+    assert "sites/page.html" in reason
+    # Git's own conflict markers are still there: the take wrote nothing, so
+    # the path is exactly as the stopped rebase left it.
+    landed = site.read_bytes()
+    assert landed != b"x" * 4096, "the published blob was not landed"
+    assert b"<<<<<<<" in landed, "the path is as the stopped rebase left it"
+
+
+def test_a_published_blob_under_the_ceiling_is_taken_as_before(tmp_path, resolve, monkeypatch):
+    """The ceiling refuses only what is over it — the ordinary take is unchanged."""
+    fx = _Fixture(tmp_path)
+    site = _stop_on_a_sites_conflict(fx, b"<p>remote</p>\n")
+    monkeypatch.setattr(resolve, "_AUTO_TAKE_MAX_BYTES", 64, raising=False)
+
+    reason = resolve._auto_take_published_side(fx.vault, "sites/page.html")
+
+    assert reason is None, "a small blob settles with no report"
+    assert site.read_bytes() == b"<p>remote</p>\n", "the published side landed"
 
 
 def test_a_symlink_planted_at_a_conflicted_file_is_refused_not_followed(tmp_path):
@@ -1472,6 +1557,37 @@ def _use_state(fx: "_Fixture") -> None:
     """
     os.environ["XDG_STATE_HOME"] = str(fx.state)
     os.environ["LORE_EMAIL"] = "tester@example.com"
+
+
+def _reject_every_push(remote: Path) -> None:
+    """A forge that refuses the push without moving its own history — a
+    protected branch or a permission refusal, not a race this host can win."""
+    hook = remote / "hooks" / "pre-receive"
+    hook.parent.mkdir(parents=True, exist_ok=True)
+    hook.write_text("#!/bin/sh\nexit 1\n")
+    hook.chmod(0o755)
+
+
+def test_a_forge_refusing_the_settled_push_reports_the_forge_not_the_policy(tmp_path):
+    """The reason tag names whose problem it is, and a settled conflict does
+    not change that.
+
+    The resolver merges the disjoint edits and pushes the result in its own
+    finish tail. When the forge refuses THAT push, the vault holds for the
+    same reason any refused push holds — the forge — and reporting a policy
+    failure would send the reader to fix this host's data for a condition only
+    the forge's own settings can clear.
+    """
+    fx = _Fixture(tmp_path)
+    _diverge_on_disjoint_fields(fx)
+    _reject_every_push(fx.remote)
+
+    r = fx.cli(["sync", "--json"])
+    doc = json.loads(r.stdout[r.stdout.index("{"):])
+    entry = doc["vaults"][0]
+
+    assert entry["outcome"] == "holding"
+    assert entry["reason"] == "remote-rejection"
 
 
 def test_the_held_ending_is_clean_and_diverged(tmp_path, resolve):

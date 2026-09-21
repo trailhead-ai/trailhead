@@ -149,6 +149,7 @@ import json
 import os
 import subprocess
 import sys
+import unicodedata
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -838,6 +839,43 @@ def _carry_settled(prior_entry: dict | None, pending: dict,
     return still_open
 
 
+#: The largest published blob the sweep will take on its own. The bytes come
+#: from the forge, so anyone who can push decides their size, and the take
+#: reads the whole blob into this host's memory before writing it — on a host
+#: running unattended. Past this a conflict is held for a person, who can
+#: still settle it with `take-file`: nothing is lost, it just stops being
+#: something a stranger's push can spend this host's memory on.
+_AUTO_TAKE_MAX_BYTES = 64 * 1024 * 1024
+
+
+def _stage_size_over_ceiling(vault: Path, path: str) -> str | None:
+    """A held-file reason when either side of *path* is over the ceiling.
+
+    Asks git for the sizes rather than measuring what was read, so an
+    oversized blob is never buffered at all. A stage git cannot size is not
+    treated as oversized: the take's own read handles a missing side, which is
+    how a deletion on one side settles.
+    """
+    for stage in (2, 3):
+        proc = subprocess.run(
+            ["git", "-C", str(vault), "cat-file", "-s", f":{stage}:{path}"],
+            capture_output=True, text=True,
+        )
+        if proc.returncode != 0:
+            continue
+        try:
+            size = int(proc.stdout.strip())
+        except ValueError:
+            continue
+        if size > _AUTO_TAKE_MAX_BYTES:
+            return (
+                f"{path}: this file is larger than the sweep will take on its own "
+                f"({size} bytes, ceiling {_AUTO_TAKE_MAX_BYTES}) — settle it with "
+                "`lore resolve take-file`"
+            )
+    return None
+
+
 def _auto_take_published_side(vault: Path, path: str) -> str | None:
     """Settle one free-write conflict by taking the published (remote) side.
 
@@ -857,6 +895,10 @@ def _auto_take_published_side(vault: Path, path: str) -> str | None:
     file that a person can still settle with ``take-file``, by hand, once
     whatever is at that path stops resolving outside the vault.
     """
+    oversized = _stage_size_over_ceiling(vault, path)
+    if oversized is not None:
+        return oversized
+
     remote = subprocess.run(
         ["git", "-C", str(vault), "show", f":2:{path}"], capture_output=True,
     )
@@ -1479,6 +1521,35 @@ def cmd_resolve_take(args) -> int:
                                 include_shared=bool(getattr(args, "include_shared", False)))
 
 
+def _as_the_filesystem_reads_it(segment: str) -> str:
+    """The form of *segment* that decides which directory it actually names.
+
+    macOS and Windows are case-insensitive, and Windows also drops trailing
+    dots and spaces from a path component, so ``Task``, ``task.`` and
+    ``task `` all open the same directory ``task`` does. Comparing the literal
+    string would let a name that only looks different past a fence the
+    filesystem is about to collapse. Unicode is folded to NFC for the same
+    reason: two spellings of one name must not answer differently.
+    """
+    return unicodedata.normalize("NFC", segment).rstrip(". ").casefold()
+
+
+#: Files git reads back out of the working tree to decide how to treat it — a
+#: clean/smudge filter, a diff driver, a submodule URL. Taking one of these
+#: from the remote unattended would let the forge change what git does on this
+#: host, which is not the class of thing vault-root administrivia covers.
+#: ``.gitignore`` is not among them: it selects what is tracked and executes
+#: nothing.
+_GIT_CONTROL_NAMES = frozenset({".git", ".gitattributes", ".gitmodules"})
+
+#: Every record kind in the form :func:`_as_the_filesystem_reads_it` produces,
+#: so the fence compares what the filesystem will open rather than what the
+#: remote happened to spell.
+_NORMALIZED_KINDS = frozenset(
+    _as_the_filesystem_reads_it(kind) for kind in record_model.KINDS
+)
+
+
 def _is_free_write_path(path: str) -> bool:
     """True when *path* is outside every record tree — the vault's free-write zone.
 
@@ -1495,11 +1566,17 @@ def _is_free_write_path(path: str) -> bool:
       ``area/sites/index.html`` (the root decides this, not the name: a site may
       legitimately hold its own nested ``sites`` directory, so nesting alone
       never refuses a path — see the parametrized cases below);
-    - a path record-shaped (``<kind>/<name>.md`` or ``.json``) under a kind this
-      build does not recognize, e.g. ``oracle/a-prophecy.json`` — refusing it now
-      keeps the refusal standing once a later build DOES recognize that kind,
-      rather than having already let raw, unneutralized bytes land where record
-      content will live;
+    - a path record-shaped under a kind this build does not recognize, e.g.
+      ``oracle/a-prophecy.json`` — refusing it now keeps the refusal standing
+      once a later build DOES recognize that kind, rather than having already
+      let raw, unneutralized bytes land where record content will live.
+      Record-shaped means exactly ``<kind>/<name>.md`` or ``.json``: one
+      directory segment and a file, which is the only shape a record occupies.
+      A deeper path is not a record under any kind, and the top-level
+      ``sites/`` tree is free-write whatever its files are named — a site's own
+      ``notes.md`` is site content. A path refused here has no settlement route
+      at all: the automatic take skips it and ``take-file`` refuses it, leaving
+      the vault mid-rebase with ``--abort`` as the only exit;
     - ``.git`` — unreachable as a conflicted path today (git does not
       self-track its own directory), denied explicitly so that guarantee does
       not rest on a property no test states.
@@ -1510,11 +1587,14 @@ def _is_free_write_path(path: str) -> bool:
     parts = Path(path).parts
     if not parts:
         return False
-    if parts[0] == ".git":
+    root = _as_the_filesystem_reads_it(parts[0])
+    if root in _GIT_CONTROL_NAMES:
         return False
-    if parts[0] in record_model.KINDS:
+    if root in _NORMALIZED_KINDS:
         return False
-    if len(parts) >= 2:
+    if root == SITES_DIRNAME:
+        return True
+    if len(parts) == 2:
         _, dot, ext = path.rpartition(".")
         if dot == "." and ext in ("md", "json"):
             return False
