@@ -25,6 +25,7 @@ tmux's own key-binding dispatch table.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import pty
 import shutil
@@ -36,6 +37,8 @@ import time
 from pathlib import Path
 
 import pytest
+
+from typing import Callable
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
@@ -94,7 +97,58 @@ def _await_client(sock: str, session: str, fd: int, timeout: float) -> str | Non
     return "".join(said).strip()
 
 
-def _attach_and_send(sock: str, session: str, keys: bytes, *, settle: float = 0.5) -> None:
+def _window_count_reaches(sock: str, session: str, n: int) -> "Callable[[], bool]":
+    """Predicate: *session* holds at least *n* windows."""
+    return lambda: len(
+        _sock_run(sock, "list-windows", "-t", session).stdout.splitlines()
+    ) >= n
+
+
+def _record_entries_reach(ws_dir, n: int) -> "Callable[[], bool]":
+    """Predicate: the workspace's window record holds at least *n* entries."""
+    from camp.group.window_record import read_window_record, window_record_path_for
+
+    return lambda: len(read_window_record(window_record_path_for(ws_dir)).entries) >= n
+
+
+@contextlib.contextmanager
+def _attached_client(sock: str, session: str, *, timeout: float = 5.0):
+    """Hold a real attached client on *session* for the body of the block.
+
+    `_attach_and_send` attaches only long enough to deliver a keystroke; this
+    is for the case where the thing under test must happen WHILE a client is
+    attached, rather than being caused by one.
+    """
+    pid, fd = pty.fork()
+    if pid == 0:
+        os.execve(
+            _REAL_TMUX,
+            [_REAL_TMUX, "-L", sock, "attach-session", "-t", session],
+            {**os.environ, "TERM": _ATTACH_TERM},
+        )
+    try:
+        complaint = _await_client(sock, session, fd, timeout=timeout)
+        if complaint is not None:
+            raise AssertionError(
+                f"no client ever attached to {session!r}; tmux said: {complaint!r}"
+            )
+        yield
+    finally:
+        os.kill(pid, signal.SIGTERM)
+        try:
+            os.waitpid(pid, 0)
+        except ChildProcessError:
+            pass
+
+
+def _attach_and_send(
+    sock: str,
+    session: str,
+    keys: bytes,
+    *,
+    settle: float = 0.5,
+    until: "Callable[[], bool] | None" = None,
+) -> None:
     """Fire real keystrokes at *session* through a genuine attached client.
 
     Waits for tmux to REPORT the client attached before writing the keys,
@@ -104,6 +158,15 @@ def _attach_and_send(sock: str, session: str, keys: bytes, *, settle: float = 0.
     all looked exactly like one that attached and ignored the key, so every
     caller failed with "expected a second window, got one" instead of the
     actual reason.
+
+    *until* is the caller's own "the key's effect has landed" predicate —
+    a window appearing, a record gaining an entry. Given one, the keystroke
+    is followed by polling it rather than by another fixed sleep: what
+    follows a key press here is a whole `run-shell` dispatch spawning a
+    process and writing a file, and how long that takes depends on what else
+    is running. A caller that asserts an EFFECT should pass one; the bare
+    sleep remains for the callers that assert nothing happened, which have
+    no effect to wait for and must simply give it time.
     """
     pid, fd = pty.fork()
     if pid == 0:
@@ -120,7 +183,14 @@ def _attach_and_send(sock: str, session: str, keys: bytes, *, settle: float = 0.
             )
         os.set_blocking(fd, True)
         os.write(fd, keys)
-        time.sleep(settle)
+        if until is None:
+            time.sleep(settle)
+            return
+        deadline = time.monotonic() + max(settle, 5.0)
+        while time.monotonic() < deadline:
+            if until():
+                return
+            time.sleep(0.05)
     finally:
         os.kill(pid, signal.SIGTERM)
         try:
@@ -282,9 +352,24 @@ def test_key_dispatches_only_on_the_marked_session_never_on_a_plain_or_forged_on
     # (`camp window-dispatch`) that must run to completion before the
     # record reflects it, unlike the plain/forged sessions' else-branch
     # (`new-window`), which is synchronous inside tmux itself.
-    _attach_and_send(server.sock, camp_session, b"\x02c", settle=1.5)
-    _attach_and_send(server.sock, "plainsess", b"\x02c")
-    _attach_and_send(server.sock, forged_session, b"\x02c")
+    _attach_and_send(
+        server.sock,
+        camp_session,
+        b"\x02c",
+        settle=1.5,
+        until=_record_entries_reach(ws_dir, 1),
+    )
+    # These two assert camp composed nothing, but they still assert a WINDOW
+    # — tmux's own default opens one either way — so they wait for that.
+    _attach_and_send(
+        server.sock, "plainsess", b"\x02c", until=_window_count_reaches(server.sock, "plainsess", 2)
+    )
+    _attach_and_send(
+        server.sock,
+        forged_session,
+        b"\x02c",
+        until=_window_count_reaches(server.sock, forged_session, 2),
+    )
 
     # Every session gets a real tmux window either way — camp's dispatch,
     # when it fires, is what determines WHAT that window runs and whether
@@ -334,7 +419,13 @@ def test_pressing_the_key_in_the_camp_session_composes_a_real_window_and_records
     before = _sock_run(server.sock, "list-windows", "-t", camp_session).stdout.splitlines()
     assert len(before) == 1
 
-    _attach_and_send(server.sock, camp_session, b"\x02c", settle=1.5)
+    _attach_and_send(
+        server.sock,
+        camp_session,
+        b"\x02c",
+        settle=1.5,
+        until=_record_entries_reach(ws_dir, 1),
+    )
 
     after = _sock_run(server.sock, "list-windows", "-t", camp_session).stdout.splitlines()
     assert len(after) == 2, (
@@ -381,7 +472,13 @@ def test_a_stale_camp_binary_path_still_opens_a_window_instead_of_a_dead_key(ser
     before = _sock_run(server.sock, "list-windows", "-t", camp_session).stdout.splitlines()
     assert len(before) == 1
 
-    _attach_and_send(server.sock, camp_session, b"\x02c", settle=1.5)
+    _attach_and_send(
+        server.sock,
+        camp_session,
+        b"\x02c",
+        settle=1.5,
+        until=_window_count_reaches(server.sock, camp_session, 2),
+    )
 
     after = _sock_run(server.sock, "list-windows", "-t", camp_session).stdout.splitlines()
     assert len(after) == 2, (
@@ -548,12 +645,22 @@ def test_display_message_reaches_the_message_log_distinct_from_run_shells_own_ou
 
     _sock_run(server.sock, "new-session", "-d", "-s", "campsess", "-x", "80", "-y", "24")
 
-    tmux = Tmux()
-    result = tmux.display_message("campsess", "camp: refused — test message")
-    assert result is not None and result.returncode == 0
+    with _attached_client(server.sock, "campsess"):
+        result = Tmux().display_message("campsess", "camp: refused — test message")
+        assert result is not None and result.returncode == 0
+        messages = _sock_run(server.sock, "show-messages").stdout
 
-    messages = _sock_run(server.sock, "show-messages").stdout
-    assert "camp: refused — test message" in messages
+    # `show-messages` interleaves two kinds of line: `<client> command: <argv>`,
+    # echoing every command the server ran, and `<client> message: <text>`, the
+    # messages actually DELIVERED to a client. Only the second is evidence of
+    # anything. Matching the raw text against the whole log matches the command
+    # echo of camp's own `display-message` call — which is present even with no
+    # client attached and nothing displayed anywhere, so the assertion passed
+    # while proving nothing.
+    delivered = [line for line in messages.splitlines() if " message: " in line]
+    assert any("camp: refused — test message" in line for line in delivered), (
+        f"no DELIVERED message carried the refusal; full log:\n{messages}"
+    )
 
 
 _CAMP_BIN = str(_PLUGIN_DIR / "cli" / "camp")
@@ -601,8 +708,20 @@ def test_unbind_stops_the_key_composing_in_the_camp_session_and_leaves_a_plain_o
     result = _run_camp_window_unbind(server)
     assert result.returncode == 0, result.stderr
 
-    _attach_and_send(server.sock, camp_session, b"\x02c", settle=1.0)
-    _attach_and_send(server.sock, "plainsess", b"\x02c", settle=1.0)
+    _attach_and_send(
+        server.sock,
+        camp_session,
+        b"\x02c",
+        settle=1.0,
+        until=_window_count_reaches(server.sock, camp_session, 2),
+    )
+    _attach_and_send(
+        server.sock,
+        "plainsess",
+        b"\x02c",
+        settle=1.0,
+        until=_window_count_reaches(server.sock, "plainsess", 2),
+    )
 
     camp_windows = _sock_run(server.sock, "list-windows", "-t", camp_session).stdout.splitlines()
     plain_windows = _sock_run(server.sock, "list-windows", "-t", "plainsess").stdout.splitlines()
@@ -649,7 +768,13 @@ def test_unbind_then_a_new_workspace_session_reinstalls_the_binding(server):
     create_workspace_session(server.group_name, slug, ws_dir, env=server.env, tmux=Tmux())
     camp_session = workspace_session_name(server.group_name, slug)
 
-    _attach_and_send(server.sock, camp_session, b"\x02c", settle=1.5)
+    _attach_and_send(
+        server.sock,
+        camp_session,
+        b"\x02c",
+        settle=1.5,
+        until=_record_entries_reach(ws_dir, 1),
+    )
 
     windows = _sock_run(server.sock, "list-windows", "-t", camp_session).stdout.splitlines()
     assert len(windows) == 2, windows
@@ -708,7 +833,13 @@ def test_unbind_leaves_the_workspace_window_record_untouched(server):
     create_workspace_session(server.group_name, slug, ws_dir, env=server.env, tmux=Tmux())
     camp_session = workspace_session_name(server.group_name, slug)
 
-    _attach_and_send(server.sock, camp_session, b"\x02c", settle=1.5)
+    _attach_and_send(
+        server.sock,
+        camp_session,
+        b"\x02c",
+        settle=1.5,
+        until=_record_entries_reach(ws_dir, 1),
+    )
 
     before = read_window_record(window_record_path_for(ws_dir))
     assert len(before.entries) == 1, before
@@ -788,7 +919,13 @@ def test_unbind_gives_the_operator_their_own_prefix_c_binding_back(server):
     # And it WORKS, not merely reads right: pressing the key in the camp
     # session now runs the operator's binding, so the window opens rooted at
     # the pane's own directory rather than being composed by camp.
-    _attach_and_send(server.sock, camp_session, b"\x02c", settle=1.0)
+    _attach_and_send(
+        server.sock,
+        camp_session,
+        b"\x02c",
+        settle=1.0,
+        until=_window_count_reaches(server.sock, camp_session, 2),
+    )
     windows = _sock_run(server.sock, "list-windows", "-t", camp_session).stdout.splitlines()
     assert len(windows) == 2, windows
 
