@@ -103,6 +103,42 @@ def _member_wt(group_name: str, slug: str, member: str, env: dict[str, str]) -> 
     return central_state_dir(group_name, env=env) / "worktrees" / slug / member
 
 
+def _update_manifest_members(group, slug, env, members) -> Path:
+    """Overwrite each named member's central-manifest entry with the given
+    fields (e.g. {"provision_state": "ready", "work_state": "pending"}) and
+    return the manifest path. The workspace must already exist."""
+    from camp.group.manifest import (
+        manifest_path_for,
+        read_central_manifest,
+        write_central_manifest,
+        reconcile_lock,
+    )
+
+    mpath = manifest_path_for(group["group"]["name"], slug, env=env)
+    with reconcile_lock(mpath.parent):
+        data = read_central_manifest(mpath)
+        for m in data["members"]:
+            if m["name"] in members:
+                m.update(members[m["name"]])
+        write_central_manifest(mpath, data)
+    return mpath
+
+
+def _git_ok(*args: str) -> None:
+    """Run a git command that must succeed, quietly."""
+    subprocess.run(list(args), check=True, capture_output=True, text=True)
+
+
+def _git_stdout(repo: Path, *args: str) -> str:
+    """Return stripped stdout of a `git -C <repo> ...` that must succeed."""
+    return subprocess.run(
+        ["git", "-C", str(repo), *args],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+
 # ---------------------------------------------------------------------------
 # Fixture: 2-member synthetic group
 # ---------------------------------------------------------------------------
@@ -1377,22 +1413,9 @@ class TestStatusTwoFacts:
         given fields (e.g. {"provision_state": "ready", "work_state": "pending"}).
         """
         from camp.provision.provision import seed_pending_workspace
-        from camp.group.manifest import (
-            manifest_path_for,
-            read_central_manifest,
-            write_central_manifest,
-            reconcile_lock,
-        )
 
         seed_pending_workspace(group, slug, env=env)
-        mpath = manifest_path_for(group["group"]["name"], slug, env=env)
-        with reconcile_lock(mpath.parent):
-            data = read_central_manifest(mpath)
-            for m in data["members"]:
-                if m["name"] in members:
-                    m.update(members[m["name"]])
-            write_central_manifest(mpath, data)
-        return mpath
+        return _update_manifest_members(group, slug, env, members)
 
     def test_report_carries_work_state_per_member(self, two_member_group):
         from camp.provision.lifecycle import provision_status_code
@@ -2016,26 +2039,28 @@ def origin_two_member_group(tmp_path: Path):
     return {"group": group, "repo_a": repo_a, "repo_b": repo_b, "env": env, "tmp_path": tmp_path}
 
 
-def _git_ok(*args: str) -> None:
-    subprocess.run(list(args), check=True, capture_output=True, text=True)
+def _advance_base_past_worktree(repo: Path, wt_path: Path, commits: int = 1) -> None:
+    """Commit `commits` times on the canonical repo's main, then fetch inside
+    the worktree — leaving the worktree branch that many commits behind its
+    base. Same object store, so the fetch is local, not a network op."""
+    for i in range(commits):
+        (repo / f"extra{i}.txt").write_text("one more commit\n")
+        _git_ok("git", "-C", str(repo), "add", f"extra{i}.txt")
+        _git_ok("git", "-C", str(repo), "commit", "-m", f"advance {i}", "--no-gpg-sign")
+    _git_ok("git", "-C", str(wt_path), "fetch", "origin", "--quiet")
+
+
+def _point_upstream_at_missing_ref(wt_path: Path) -> None:
+    """Configure the worktree branch's upstream to a ref that does not exist —
+    the shape a merged-and-deleted remote branch leaves behind."""
+    branch = _git_stdout(wt_path, "rev-parse", "--abbrev-ref", "HEAD")
+    _git_ok(
+        "git", "-C", str(wt_path), "config", f"branch.{branch}.merge",
+        "refs/heads/does-not-exist",
+    )
 
 
 class TestStatusBranchDrift:
-    def _mark_ready(self, group, slug, env, members):
-        """Flip each named member's manifest entry to provision_state/work_state
-        ready, matching TestStatusTwoFacts._seed's pattern but without reseeding
-        (reconcile_worktree already wrote the manifest)."""
-        from camp.group.manifest import manifest_path_for, read_central_manifest, write_central_manifest, reconcile_lock
-
-        mpath = manifest_path_for(group["group"]["name"], slug, env=env)
-        with reconcile_lock(mpath.parent):
-            data = read_central_manifest(mpath)
-            for m in data["members"]:
-                if m["name"] in members:
-                    m.update(members[m["name"]])
-            write_central_manifest(mpath, data)
-        return mpath
-
     def test_member_behind_base_reports_commit_count(self, origin_two_member_group):
         from camp.provision.reconcile import reconcile_worktree
         from camp.provision.lifecycle import provision_status_code
@@ -2045,16 +2070,7 @@ class TestStatusBranchDrift:
         reconcile_worktree(g["group"], slug, env=g["env"])
 
         wt_a = _member_wt("testgroup", slug, "repo_a", g["env"])
-
-        # Advance the canonical repo_a's `main` past what the worktree's
-        # branch was cut from, then fetch inside the worktree — same repo
-        # object store, so this is the offline drift check, not a network op.
-        (g["repo_a"] / "extra.txt").write_text("one more commit\n")
-        _git_ok("git", "-C", str(g["repo_a"]), "add", "extra.txt")
-        _git_ok(
-            "git", "-C", str(g["repo_a"]), "commit", "-m", "advance main", "--no-gpg-sign"
-        )
-        _git_ok("git", "-C", str(wt_a), "fetch", "origin", "--quiet")
+        _advance_base_past_worktree(g["repo_a"], wt_a, commits=1)
 
         _code, report = provision_status_code(g["group"], slug, env=g["env"])
         by_name = {m["name"]: m for m in report["members"]}
@@ -2074,15 +2090,7 @@ class TestStatusBranchDrift:
         g = origin_two_member_group
         slug = "drift-gone"
         reconcile_worktree(g["group"], slug, env=g["env"])
-        wt_a = _member_wt("testgroup", slug, "repo_a", g["env"])
-        branch = subprocess.run(
-            ["git", "-C", str(wt_a), "rev-parse", "--abbrev-ref", "HEAD"],
-            capture_output=True, text=True, check=True,
-        ).stdout.strip()
-        _git_ok(
-            "git", "-C", str(wt_a), "config", f"branch.{branch}.merge",
-            "refs/heads/does-not-exist",
-        )
+        _point_upstream_at_missing_ref(_member_wt("testgroup", slug, "repo_a", g["env"]))
 
         _code, report = provision_status_code(g["group"], slug, env=g["env"])
         by_name = {m["name"]: m for m in report["members"]}
@@ -2143,23 +2151,10 @@ class TestStatusBranchDrift:
         reconcile_worktree(g["group"], slug, env=g["env"])
 
         wt_a = _member_wt("testgroup", slug, "repo_a", g["env"])
-        for i in range(3):
-            (g["repo_a"] / f"extra{i}.txt").write_text("commit\n")
-            _git_ok("git", "-C", str(g["repo_a"]), "add", f"extra{i}.txt")
-            _git_ok(
-                "git", "-C", str(g["repo_a"]), "commit", "-m", f"advance {i}", "--no-gpg-sign"
-            )
-        _git_ok("git", "-C", str(wt_a), "fetch", "origin", "--quiet")
-        branch = subprocess.run(
-            ["git", "-C", str(wt_a), "rev-parse", "--abbrev-ref", "HEAD"],
-            capture_output=True, text=True, check=True,
-        ).stdout.strip()
-        _git_ok(
-            "git", "-C", str(wt_a), "config", f"branch.{branch}.merge",
-            "refs/heads/does-not-exist",
-        )
+        _advance_base_past_worktree(g["repo_a"], wt_a, commits=3)
+        _point_upstream_at_missing_ref(wt_a)
 
-        self._mark_ready(
+        _update_manifest_members(
             g["group"], slug, g["env"],
             {
                 "repo_a": {"provision_state": "ready", "work_state": "ready"},
@@ -2183,7 +2178,10 @@ class TestStatusBranchDrift:
 
 
 class TestCmdSyncGroupBehaviour:
-    def _bare_remote_with_two_clones(self, tmp_path: Path):
+    def _group_of_two_clones_behind_remote(self, tmp_path: Path):
+        """Build a 2-member group whose canonical repos are both one commit
+        behind a real bare remote. Returns (group, repo_a, repo_b,
+        remote_head)."""
         bare = tmp_path / "bare.git"
         _git_ok("git", "init", "--bare", "-q", "-b", "main", str(bare))
 
@@ -2205,16 +2203,7 @@ class TestCmdSyncGroupBehaviour:
         _git_ok("git", "-C", str(seed), "commit", "-q", "-m", "second", "--no-gpg-sign")
         _git_ok("git", "-C", str(seed), "push", "-q", "origin", "main")
 
-        remote_head = subprocess.run(
-            ["git", "-C", str(bare), "rev-parse", "main"],
-            capture_output=True, text=True, check=True,
-        ).stdout.strip()
-        return repo_a, repo_b, remote_head
-
-    def test_two_clean_members_fast_forward(self, tmp_path):
-        from camp.provision.lifecycle import cmd_sync_group
-
-        repo_a, repo_b, remote_head = self._bare_remote_with_two_clones(tmp_path)
+        remote_head = _git_stdout(bare, "rev-parse", "main")
         group = _make_group_config(
             "testgroup",
             [
@@ -2222,78 +2211,45 @@ class TestCmdSyncGroupBehaviour:
                 {"name": "repo_b", "repo_root": str(repo_b)},
             ],
         )
+        return group, repo_a, repo_b, remote_head
+
+    def test_two_clean_members_fast_forward(self, tmp_path):
+        from camp.provision.lifecycle import cmd_sync_group
+
+        group, repo_a, repo_b, remote_head = self._group_of_two_clones_behind_remote(tmp_path)
 
         result = cmd_sync_group(group, env=None)
 
         assert result["members"]["repo_a"]["action"] == "ff"
         assert result["members"]["repo_b"]["action"] == "ff"
-        head_a = subprocess.run(
-            ["git", "-C", str(repo_a), "rev-parse", "HEAD"],
-            capture_output=True, text=True, check=True,
-        ).stdout.strip()
-        head_b = subprocess.run(
-            ["git", "-C", str(repo_b), "rev-parse", "HEAD"],
-            capture_output=True, text=True, check=True,
-        ).stdout.strip()
-        assert head_a == remote_head
-        assert head_b == remote_head
+        assert _git_stdout(repo_a, "rev-parse", "HEAD") == remote_head
+        assert _git_stdout(repo_b, "rev-parse", "HEAD") == remote_head
 
     def test_dirty_member_is_skipped(self, tmp_path):
         from camp.provision.lifecycle import cmd_sync_group
 
-        repo_a, repo_b, remote_head = self._bare_remote_with_two_clones(tmp_path)
+        group, _repo_a, repo_b, remote_head = self._group_of_two_clones_behind_remote(tmp_path)
         (repo_b / "uncommitted.txt").write_text("dirty\n")
-
-        pre_head_b = subprocess.run(
-            ["git", "-C", str(repo_b), "rev-parse", "HEAD"],
-            capture_output=True, text=True, check=True,
-        ).stdout.strip()
-
-        group = _make_group_config(
-            "testgroup",
-            [
-                {"name": "repo_a", "repo_root": str(repo_a)},
-                {"name": "repo_b", "repo_root": str(repo_b)},
-            ],
-        )
+        pre_head_b = _git_stdout(repo_b, "rev-parse", "HEAD")
 
         result = cmd_sync_group(group, env=None)
 
         assert result["members"]["repo_a"]["action"] == "ff"
         assert result["members"]["repo_b"]["action"] == "skip-dirty"
-        post_head_b = subprocess.run(
-            ["git", "-C", str(repo_b), "rev-parse", "HEAD"],
-            capture_output=True, text=True, check=True,
-        ).stdout.strip()
+        post_head_b = _git_stdout(repo_b, "rev-parse", "HEAD")
         assert post_head_b == pre_head_b
         assert post_head_b != remote_head
 
     def test_off_main_member_is_skipped(self, tmp_path):
         from camp.provision.lifecycle import cmd_sync_group
 
-        repo_a, repo_b, remote_head = self._bare_remote_with_two_clones(tmp_path)
+        group, _repo_a, repo_b, _remote_head = self._group_of_two_clones_behind_remote(tmp_path)
         _git_ok("git", "-C", str(repo_b), "checkout", "-q", "-b", "feature")
-
-        pre_head_b = subprocess.run(
-            ["git", "-C", str(repo_b), "rev-parse", "HEAD"],
-            capture_output=True, text=True, check=True,
-        ).stdout.strip()
-
-        group = _make_group_config(
-            "testgroup",
-            [
-                {"name": "repo_a", "repo_root": str(repo_a)},
-                {"name": "repo_b", "repo_root": str(repo_b)},
-            ],
-        )
+        pre_head_b = _git_stdout(repo_b, "rev-parse", "HEAD")
 
         result = cmd_sync_group(group, env=None)
 
         assert result["members"]["repo_a"]["action"] == "ff"
         assert result["members"]["repo_b"]["action"] == "skip-off-main"
         assert result["members"]["repo_b"]["branch"] == "feature"
-        post_head_b = subprocess.run(
-            ["git", "-C", str(repo_b), "rev-parse", "HEAD"],
-            capture_output=True, text=True, check=True,
-        ).stdout.strip()
-        assert post_head_b == pre_head_b
+        assert _git_stdout(repo_b, "rev-parse", "HEAD") == pre_head_b

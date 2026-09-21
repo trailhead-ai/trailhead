@@ -781,6 +781,7 @@ def provision_status_code(
     `code` or the process exit status.
     """
     from ..group.manifest import work_state_for_member
+    from .reconcile import DEFAULT_BASE
 
     group_name = group["group"]["name"]
     mpath = manifest_path_for(group_name, slug, env=env)
@@ -796,7 +797,7 @@ def provision_status_code(
         state = entry.get("provision_state", "pending")
         work_state = work_state_for_member(entry)
         member_config = member_config_by_name.get(entry["name"], {})
-        base = member_config.get("base") or "origin/main"
+        base = member_config.get("base") or DEFAULT_BASE
         drift = _git_branch_drift(Path(entry["worktree_path"]), base)
         m: dict[str, Any] = {
             "name": entry["name"],
