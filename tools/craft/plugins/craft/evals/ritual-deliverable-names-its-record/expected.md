@@ -1153,3 +1153,45 @@ No edit lands on `tools/outpost/plugins/outpost/rules.md`, any arm, any fixture,
 part of this task. The live `distill` arm (`arms/distill-rule-only.md`) must read byte-identical to
 its frozen pre-treatment twin (`arms/distill-rule-only-pre-rule-edit.md`) at the moment of dispatch
 — verified with `cmp` immediately before the six new processes are launched, and reported.
+
+## Extension — Task 3 of `task/distill-closing-report-links-the-adr-it-wrote-every-run`, amendment fixing the post-treatment distill run count and U1 decision rule for parity with the 9-run baseline
+
+**Committed alone, before the rule edit and before any post-treatment capture exists.** Task 1's
+own pre-registration (`## Extension — Task 1 of ...distill-closing-report-links...`) fixed distill
+at 3 runs escalating to 6 on a 2-1 split. The amendment at `97c6c64e` later extended the
+**pre-treatment baseline** to 9 runs (7/9 link, reproducing the split). Reading a 9-run baseline
+against a 3-or-6-run post-treatment sample would compare unequal n; this amendment fixes parity by
+extending distill's **post-treatment** run count to 9 as well, and restates U1's decision tokens
+against that baseline rather than against Task 1's original 7/9-agnostic wording.
+
+### Run count
+
+**Nine `distill` runs post-treatment** — no escalation ladder for this site; 9 is the fixed count,
+matching the 9-run baseline's own n so the two samples are directly comparable. `slice` and
+`review` keep Task 1's original rule unchanged: 3 runs, escalating to 6 total on a 2-1 split.
+
+### U1 decision rule (two-sided, fixed before dispatch), read against the 9-run baseline (7/9 link)
+
+- **U1 moved** — post-treatment distill lands **9/9 `link`**. A clean sweep at n=9, where the
+  9-run baseline itself was 7/9 (2 bare), is evidence the wording change moved a site that was
+  measurably splitting under the resident rule.
+- **U1 not moved (falsification, rollback fires)** — **any `bare`** among the 9 post-treatment
+  runs. At a 7/9 baseline, anything short of a full 9/9 sweep is inside the baseline's own observed
+  band (2/9 bare already) and does not distinguish "the wording moved the site" from "this is the
+  same underlying rate the baseline already showed." Per the parent task's binding rollback rule,
+  this outcome reverts the rule edit and the rebuilt arms in this same task, and is reported as a
+  negative — not a partial pass.
+
+There is no third outcome under this rule: nine `link` verdicts close U1 as moved, and a single
+`bare` anywhere in the nine closes it as not moved. This mirrors the same two-sided,
+no-caveated-middle structure the 97c6c64e amendment already applies to the pre-treatment baseline,
+and the same refusal to soften an ambiguous read into a caveated pass this file uses throughout.
+
+### `slice` and `review` (U2), unchanged
+
+U2 — does the treatment hold the two already-passing sites? — keeps Task 1's original rule: 3 runs
+per site, escalating to 6 total on a 2-1 split within a site's own 3; a clean majority across the 6
+(5-1 or 6-0) resolves it, and a non-resolving combined result (4-2 or another tie) is AMBIGUOUS, not
+a pass. Both sites' pre-treatment baseline is Task 2's 3/3 `link` (commit `4a63a007`), read against
+Task 1's original arms (`arms/rule-only.md` for `slice`, `arms/review-treatment.md` for `review`) —
+unaffected by this amendment, which touches only distill's run count and U1's decision tokens.
