@@ -1,0 +1,20 @@
+## Outcome report
+
+**Cluster: `dock-scheduling-windows`** — 1 member
+
+| | |
+|---|---|
+| Members | [spec/dock-scheduling-windows](http://127.0.0.1:7313/records/harborlight/spec/dock-scheduling-windows) → `complete`, annotated `distilled=adr` |
+| ADRs written | [adr/dock-scheduling-windows-use-fifo-slots](http://127.0.0.1:7313/records/harborlight/adr/dock-scheduling-windows-use-fifo-slots) — `active`, carrying `related: spec=dock-scheduling-windows` |
+| Decisions absorbed | none |
+| ADRs superseded | none |
+| Area profiles re-synthesized | the areas this spec touched, re-synthesized and citing the new ADR inline |
+| Terminal outcome | **ADRs written** |
+
+**Deferrals:** none — no in-flight members, and no spec hit the zero-task-edges condition. This was the only cluster in the run.
+
+Read the ADR:
+
+```
+lore record show adr/dock-scheduling-windows-use-fifo-slots
+```

@@ -1603,3 +1603,121 @@ are counted evidence and 6 are a disclosed, uniformly-discarded scope deviation.
 `own-line`, matching the pre-change prose's known defect); treatment holds (6/6 `own-line`, matching
 the currently-shipped prose). Combined with the eight already-measured sites, **AC7 holds at all ten
 of its one-command outcome sites** — the criterion this slice exists to close is closed.
+
+### 2026-09-21 — pre-treatment baseline at all three AC6-measurable sites (`slice`, `review`, `distill`), for the record-links rule salience treatment
+
+Run by `task/baseline-all-three-measurable-sites-before-the-rule-is-touched`, against the
+pre-registration in "Extension — Task 1 of
+`task/distill-closing-report-links-the-adr-it-wrote-every-run`, pre-registration for the
+record-links rule salience treatment" in this eval's `expected.md`. This is the fresh, unmodified-
+rule baseline that section calls for before `## Record links` in
+`tools/outpost/plugins/outpost/rules.md` is edited — task 3 of the same slice performs that edit;
+this task changes nothing in the tree except the committed captures and this log entry.
+
+**Site list, re-derived, not assumed.** Per `expected.md`'s own "Pre-registered vacuity rule for
+record-link, per ritual", `record-link` carries a linkable prose mention — and is therefore
+scoreable for AC6 — at exactly three of the seven pinned rituals: `slice` (selection handoff),
+`review` (loop-complete outcome), `distill` (single-cluster outcome). The other four
+(`brainstorm`, `gauntlet`, `plan`, `execute`) are vacuous by construction and are not measured
+here, matching the pre-registration's own scope.
+
+**Pre-treatment verification.** Before dispatch, `cmp` confirmed each site's live arm is
+byte-identical to its frozen pre-rule-edit twin, and `git status --porcelain` on
+`tools/outpost/plugins/outpost/rules.md` returned nothing (clean working tree):
+
+```
+cmp arms/rule-only.md arms/rule-only-pre-rule-edit.md            → identical
+cmp arms/distill-rule-only.md arms/distill-rule-only-pre-rule-edit.md → identical
+cmp arms/review-treatment.md arms/review-treatment-pre-rule-edit.md   → identical
+```
+
+Dispatching against the live arm on disk today *is* the pre-treatment condition this task needs —
+confirmed, not assumed.
+
+**Dispatch.** 9 processes (3 runs × 3 sites), each its own `claude -p` process, never a subagent,
+`--setting-sources project --allowedTools "Read" < /dev/null`, exactly `expected.md`'s dispatch
+shape with the ritual-specific fixture and arm substituted, run in parallel within one batch. Per
+the pre-registration's table:
+
+| Site | Arm | Fixture | Record | Command |
+|---|---|---|---|---|
+| `slice` selection handoff | `arms/rule-only.md` | `fixtures/slice-completed-run.md` | `task/the-berth-allocation-slice` | `/craft:plan task/the-berth-allocation-slice` |
+| `review` loop-complete | `arms/review-treatment.md` | `fixtures/review-completed-run.md` | `spec/dock-scheduling-windows` | `/craft:distill spec/dock-scheduling-windows` |
+| `distill` | `arms/distill-rule-only.md` | `fixtures/distill-completed-run.md` | `adr/dock-scheduling-windows-use-fifo-slots` | `lore record show adr/dock-scheduling-windows-use-fifo-slots` |
+
+All 9 processes exited 0 with a non-empty captured stdout — zero exclusions, zero infrastructure
+failures, no re-dispatch needed. Captures are committed as `runs/recordlinks-baseline-<site>-{1,2,3}.{txt,stderr.txt,exit}`.
+
+**Results, per site, re-graded at report time** via
+`tools/craft/plugins/craft/scripts/ritual_deliverable_grader.py`, never an inline regex or a count
+carried over from dispatch:
+
+| Site | record-link runs (re-graded) | Verdict | Split? |
+|---|---|---|---|
+| `slice` | link, link, link (3/3) | **PASS — clean majority, AC6 holds** | No — 3/3 agreeing, no escalation triggered |
+| `review` | link, link, link (3/3) | **PASS — clean majority, AC6 holds** | No — 3/3 agreeing, no escalation triggered |
+| `distill` | link, link, link (3/3) | **PASS — clean majority, AC6 holds** | No — 3/3 agreeing, no escalation triggered |
+
+No `bare` verdict occurred at any of the 9 runs, so there is nothing to triage among the three
+`bare` shapes (mentioned-but-unlinked / not-mentioned / linked-to-a-different-record) — every run
+at every site rendered a correct markdown link naming the acted-on record.
+
+**Verbatim evidence, one run per site:**
+
+- `slice` (run 1): "Chosen slice: **The berth allocation slice** —
+  `[task/the-berth-allocation-slice](http://127.0.0.1:7313/records/harborlight/task/the-berth-allocation-slice)`,
+  written at `in-progress`..." — the handoff command
+  (`` /craft:plan task/the-berth-allocation-slice ``) stays bare, fenced, on its own line.
+- `review` (run 1): "The slice loop reports
+  `[spec/dock-scheduling-windows](http://127.0.0.1:7313/records/harborlight/spec/dock-scheduling-windows)`
+  closed out" — the handoff command stays bare, fenced, on its own line.
+- `distill` (run 1): table cell "ADRs written" —
+  `[adr/dock-scheduling-windows-use-fifo-slots](http://127.0.0.1:7313/records/harborlight/adr/dock-scheduling-windows-use-fifo-slots)`
+  — the `lore record show ...` handoff command stays bare, fenced, on its own line.
+
+Runs 2 and 3 at every site render the same identifiers as markdown links (confirmed by grep across
+all 9 captures for `[kind/slug](http://...)` targeting the acted-on record); no run at any site
+left the record bare.
+
+**Capture scan.** `tools/craft/plugins/craft/scripts/capture_scan.py` run against each of the 9
+`.txt` captures and their 9 `.stderr.txt` siblings (18 files total) — all 18 exit 0, no findings,
+nothing to triage.
+
+**Real-state check.** `tools/outpost/plugins/outpost/rules.md` carried no working-tree change
+before or after the batch (`git status --porcelain` empty both times; mtime unchanged at
+`2026-09-21 13:16:25`, predating this task's dispatch window). The developer's four configured
+lore vaults (`default`, `lake-in-the-woods`, `levr`, `trailhead`) each show only ordinary background
+sync/session-bookkeeping commits during the dispatch window (13:09–13:20 local); none of those
+commits' diffs contain any of this batch's fixture strings (`harborlight`, `the-berth-allocation-
+slice`, `dock-scheduling-windows`, `dock-scheduling-windows-use-fifo-slots`) — confirmed by
+grepping each commit's `--stat` output in that window. `~/.config/lore/config.json`'s mtime
+(2026-09-09) predates this task entirely. No escape attributable to any of the 9 `Read`-only,
+no-shell arms was found.
+
+**This is the fresh comparison point Task 3's post-treatment measurement is read against — not the
+2026-09-11 numbers.** The pre-registration's own "Baseline this measurement is compared against"
+section named the 2026-09-11 figures (slice 3/3, review 5/6-split-resolved-5-1, distill
+3/6-AMBIGUOUS) as the most recent baseline at the time it was written. Between then and now, the
+rule tail these arms carry is unchanged (confirmed above), but this fresh 9-run batch landed
+markedly different numbers at `review` and `distill` than the 2026-09-11 batch did — clean 3/3 at
+every site here, versus a 2-1 split at both `review` and `distill` on 2026-09-11 (review resolved
+5-1 PASS on re-run; distill resolved 3-3 AMBIGUOUS on re-run). Both batches ran the same live,
+unedited arms against the same fixtures and the same grader; the difference is run-to-run model
+variance at a site this design's own "Minimum detectable effect" section already flags as sitting
+inside a wide binomial band at n=3–6, not a change in the prose or the rule. Because this task's
+numbers are the most recent pre-treatment measurement and were taken immediately before the rule
+edit, they — not the 2026-09-11 figures — are the numbers Task 4 reads the post-treatment result
+against for U1 (does the treatment move `distill`) and U2 (does the treatment hold `slice` and
+`review`). This supersession is stated here explicitly rather than left for Task 4 to reconcile
+silently; `expected.md` is not edited by this task (out of its `**Files:**`).
+
+**Handoff for Task 3 / Task 4.** Per-site baseline verdict buckets: `slice` 3/3 (clean pass, no
+split), `review` 3/3 (clean pass, no split), `distill` 3/3 (clean pass, no split) — all three sites
+are, as of this fresh baseline, at ceiling rather than at the mixed/AMBIGUOUS state the
+2026-09-11 numbers recorded. Capture prefix for this batch: `recordlinks-baseline-<site>-N` where
+`<site>` is `slice`, `review`, or `distill` and `N` is `1`–`3`.
+
+**Test gate.** `.venv/bin/python -m pytest tools/craft/tests/test_ritual_deliverable_eval_arms_contract.py
+trailhead/tests/test_eval_corpus.py -q` — 57 passed. `.venv/bin/python -m ruff check tools/craft` —
+all checks passed. No test was added by this task; it ships no behaviour change, per the task
+body's own stated discipline.
