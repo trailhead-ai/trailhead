@@ -9,9 +9,20 @@ confirmed byte-identical to the installed one before this case was written.
 
 The rule tells an agent that an HTML deliverable "meant to be *looked at*" goes
 to an Outpost site by default, and names four exceptions: a genuinely throwaway
-or single-use page, content the user framed as private or sensitive, a file that
-must live in the repo because something else consumes it, and the user naming a
-different destination.
+or single-use page *with no camp workspace to scope it to*, content the user
+framed as private or sensitive, a file that must live in the repo because
+something else consumes it, and the user naming a different destination.
+
+**On the throwaway exception's qualifier.** The ruleset offers two publish
+targets — a shared lore vault, and a camp workspace whose sites die with it —
+and routes a throwaway page to the workspace rather than withholding it *when a
+workspace is in play*. This environment has none: `make-fixture-env.sh` builds a
+vault and no camp state, so the workspace target is unavailable and WITHHOLD
+remains the correct verdict for `throwaway-one-off-check`. That fixture is
+therefore unchanged, but it now measures a narrower rule than its name suggests
+— it cannot distinguish "withheld because throwaway" from "withheld because
+there was nowhere better". Measuring the workspace route needs a fixture whose
+environment contains a camp workspace, which this case does not yet have.
 
 This is a **routing decision**, and routing is the whole behaviour — there is no
 mechanical artifact a unit test could inspect instead. Nothing but a run can say
