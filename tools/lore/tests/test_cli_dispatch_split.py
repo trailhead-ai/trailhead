@@ -56,6 +56,7 @@ _HELP_LEVELS = [
     (["init"], "lore init"),
     (["status"], "lore status"),
     (["sync"], "lore sync"),
+    (["publish"], "lore publish"),
     (["flush"], "lore flush"),
     (["areas"], "lore areas"),
     (["reindex"], "lore reindex"),
@@ -98,7 +99,7 @@ class TestHelpAtEveryLevel:
         # Registration order is load-bearing for the help listing; assert the
         # exact choices string argparse renders.
         assert (
-            "{init,status,sync,flush,resolve,areas,reindex,search,record,task,pipeline,vault,session}"
+            "{init,status,sync,publish,flush,resolve,areas,reindex,search,record,task,pipeline,vault,session}"
             in result.stdout
         )
 

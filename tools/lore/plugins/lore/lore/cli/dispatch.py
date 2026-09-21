@@ -11,7 +11,7 @@ import argparse
 import difflib
 import sys
 
-from . import areas, flush, init, pipeline, record, resolve, search, session, sync, task, vault
+from . import areas, flush, init, pipeline, publish, record, resolve, search, session, sync, task, vault
 from ..argparse_util import find_subparsers_action
 
 
@@ -82,10 +82,13 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     # Registration order determines the ``--help`` subcommand listing; it mirrors
-    # the historical single-file ``build_parser`` (init, status, sync, flush,
-    # resolve, areas, reindex, search, record, task, vault, session).
+    # the historical single-file ``build_parser`` (init, status, sync, publish,
+    # flush, resolve, areas, reindex, search, record, task, pipeline, vault,
+    # session). ``publish`` is wired here, not in ``sync.py``, so a change to
+    # this file and a change to ``sync.py`` never touch the same lines.
     init.add_init_subparsers(sub)
     sync.add_sync_subparser(sub)
+    publish.add_publish_subparser(sub)
     flush.add_flush_subparser(sub)
     resolve.add_resolve_subparser(sub)
     areas.add_areas_subparsers(sub)
