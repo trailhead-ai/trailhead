@@ -1090,3 +1090,66 @@ whatever tail is committed right now). Every frozen arm's expected reconstructio
 ones above and the pre-existing `slice-frozen-rule-only.md` — now passes an explicit pinned
 revision rather than relying on the working tree matching the moment it was frozen, so none of them
 goes red for an environment reason once Task 3 edits the rule.
+
+## Extension — Task 1 of `task/extend-the-distill-baseline-to-nine-runs-under-an-amended-pre-registration`, amendment fixing the run count and decision rule before any new capture exists
+
+Appended mid-run by the operator's 2026-09-21 decision recorded on the parent plan
+(`task/distill-closing-report-links-the-adr-it-wrote-every-run`). Task 2's fresh baseline
+(`recordlinks-baseline-distill-1..3`, commit `4a63a007`, logged in `tools/craft/MANUAL-EVAL.md`
+under "2026-09-21 — pre-treatment baseline at all three AC6-measurable sites") rendered the
+`distill` link 3/3, against a `## Record links` tail confirmed byte-identical to the one the
+2026-09-11 batch measured at 3/6. The slice's premise — distill is a coin flip under the
+unmodified rule — did not reproduce at n=3, and U1 (does a wording change move a site that is
+already splitting?) has no split to move if the tie was noise. This amendment is committed before
+any capture toward it exists and before this task performs any dispatch.
+
+### Run count
+
+Six further baseline runs at `distill` only, against the **unmodified** rule — no edit to
+`tools/outpost/plugins/outpost/rules.md` precedes or accompanies this task. These six are added to
+Task 2's already-committed three (`recordlinks-baseline-distill-1..3`) for **nine total** in this
+slice's fresh baseline. The new captures continue the same prefix at `recordlinks-baseline-
+distill-4` through `recordlinks-baseline-distill-9`. Arm, fixture, `--record`, and `--command` are
+exactly the row Task 1's pre-registration table above pins for `distill` — no new arm or fixture is
+created by this task:
+
+| Site | Arm | Fixture | Record | Command |
+|---|---|---|---|---|
+| `distill` | `arms/distill-rule-only.md` | `fixtures/distill-completed-run.md` | `adr/dock-scheduling-windows-use-fifo-slots` | `lore record show adr/dock-scheduling-windows-use-fifo-slots` |
+
+### Decision rule (two-sided, fixed before dispatch)
+
+- **9/9 `link`** — AC6 holds at `distill` under the current, unmodified rule. The treatment tasks
+  (`task/treat-the-rule-re-measure-every-site-and-state-the-ac6-verdict` and
+  `task/settle-the-rule-edit-consequences-across-craft-and-outpost`) are dropped by the controller
+  with a recorded negative result, and no rule edit ships.
+- **Any `bare` in the nine** — the split is reproduced. Task 3 proceeds as planned, reading its U1
+  verdict against this 9-run baseline rather than against Task 2's 3-run one.
+
+There is no third outcome under this rule: nine independent `link` verdicts close the question one
+way, and a single `bare` anywhere in the nine closes it the other way. This mirrors, on a larger n,
+the same refusal to soften an ambiguous read into a caveated pass that this file's earlier
+"Pre-registered split rule" section already applies to the 3-then-6 escalation.
+
+### What 9/9 does and does not establish
+
+At n=9, a clean sweep bounds the true underlying bare rate well below the roughly 50% the
+2026-09-11 batch observed, but it **cannot** exclude a small residual rate — a coin that is fair 1
+time in 20 would still be expected to land 9/9 heads more often than not fail to. It also says
+**nothing** about other model tiers, other session shapes, or any surface besides `distill` under
+this exact arm and fixture. A 9/9 result is strong enough to close this slice's own AC6 question at
+`distill` under the current rule; it is not a claim about the rule's robustness in general.
+
+### `slice` and `review` are not re-run here
+
+Neither `slice` nor `review` split at Task 2 (each landed 3/3), and neither is the premise this
+task is testing — the premise under question is specifically whether `distill`'s historical split
+is real. Re-running sites that already resolved cleanly and are not in question would spend budget
+without bearing on the decision rule above.
+
+### Constraints carried forward, restated for this task's own dispatch
+
+No edit lands on `tools/outpost/plugins/outpost/rules.md`, any arm, any fixture, or any test as
+part of this task. The live `distill` arm (`arms/distill-rule-only.md`) must read byte-identical to
+its frozen pre-treatment twin (`arms/distill-rule-only-pre-rule-edit.md`) at the moment of dispatch
+— verified with `cmp` immediately before the six new processes are launched, and reported.
