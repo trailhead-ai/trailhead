@@ -377,20 +377,21 @@ def work_state_for_new_entry(
     an existing workspace) — apply it identically instead of each inlining
     its own copy.
 
-    Precedence: a *prior* entry that already carries a "work_state" key wins
-    outright (carry-forward — this rebuild never overwrites a value another
-    writer, e.g. activation.py, already recorded). Only when there is no prior
-    value does the "no activate-phase task" rule apply, per `tasks_in_phase`.
-    Returns None when neither applies, so the caller writes no "work_state"
-    key at all — the same "absent reads as pending" posture
+    Precedence: a member that declares no activate-phase task (per
+    `tasks_in_phase`) is always WORK_STATE_NOT_APPLICABLE — nothing can ever
+    run or re-run for it, so any prior value (even "failed") is stale.
+    Otherwise a *prior* entry's "work_state" carries forward, so this rebuild
+    never overwrites a value another writer (e.g. activation.py) already
+    recorded. Returns None when neither applies, so the caller writes no
+    "work_state" key at all — the same "absent reads as pending" posture
     `work_state_for_member` already documents.
     """
     from .config import tasks_in_phase
 
-    if prior is not None and "work_state" in prior:
-        return prior["work_state"]
     if not tasks_in_phase(member, "activate"):
         return WORK_STATE_NOT_APPLICABLE
+    if prior is not None and "work_state" in prior:
+        return prior["work_state"]
     return None
 
 

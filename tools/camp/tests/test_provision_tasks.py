@@ -1015,9 +1015,44 @@ def test_seed_pending_workspace_reseed_assigns_not_applicable_with_no_prior_work
 
     mpath = seed_pending_workspace(group, "s", env=env)
     data = read_central_manifest(mpath)
-    # Simulate the pre-fix on-disk shape: no "work_state" key was ever
-    # written for this member (the defect this task closes).
+    # An on-disk entry with no "work_state" key at all.
     del data["members"][0]["work_state"]
+    write_central_manifest(mpath, data)
+
+    seed_pending_workspace(group, "s", env=env)
+
+    entry = read_central_manifest(mpath)["members"][0]
+    assert entry["work_state"] == "not-applicable"
+
+
+def test_seed_pending_workspace_reseed_overrides_stale_work_state_when_no_activate_task(
+    tmp_path,
+):
+    """A member whose manifest carries a prior "failed" work_state but now
+    declares no activate-phase task has nothing left to run or re-run, so the
+    reseed writes "not-applicable" instead of carrying the stale value
+    forward."""
+    from camp.provision.provision import seed_pending_workspace
+    from camp.group.manifest import read_central_manifest, write_central_manifest
+
+    repo = tmp_path / "repo"
+    init_git_repo(repo, origin=True)
+    env = camp_state_env(tmp_path)
+    group = _make_group(
+        "reseedstaleg",
+        [
+            {
+                "name": "repo",
+                "repo_root": str(repo),
+                "base": "origin/main",
+                "tasks": [_provision_task("ok", ["true"])],
+            }
+        ],
+    )
+
+    mpath = seed_pending_workspace(group, "s", env=env)
+    data = read_central_manifest(mpath)
+    data["members"][0]["work_state"] = "failed"
     write_central_manifest(mpath, data)
 
     seed_pending_workspace(group, "s", env=env)
