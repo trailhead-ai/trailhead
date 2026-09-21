@@ -37,7 +37,7 @@ Three renderings, all pure functions of a :class:`StopOutcome`:
   composed by the code that constructs it, exactly as `door.render_human`
   leaves a refusal's message to its constructor). `Stopped` and
   `StillPresent` print the preview — a count line, then one indented line
-  per non-idle window — before their own outcome line; `NotRunning` prints
+  per window — before their own outcome line; `NotRunning` prints
   only its one line, since there is nothing to preview. Composed and
   escaped line by line through :func:`~camp.launch.recovery.printable_path`,
   never a chosen subset of a line's fields, so a control character in a
@@ -240,19 +240,20 @@ def _render_word(outcome: StopOutcome) -> str:
     return word
 
 
-def _row_line(row: PreviewRow) -> str | None:
+def _row_line(row: PreviewRow) -> str:
+    head = f'  {row.window_id} "{row.name}"'
     if row.kind == "live-conversation":
-        return f'  {row.window_id} "{row.name}"  conversation {row.conversation_id}  live'
+        return f"{head}  conversation {row.conversation_id}  live"
     if row.kind == "exited-conversation":
-        return f'  {row.window_id} "{row.name}"  conversation {row.conversation_id}  exited'
+        return f"{head}  conversation {row.conversation_id}  exited"
     if row.kind == "foreground":
-        return f'  {row.window_id} "{row.name}"  foreground: {row.command}'
-    return None  # idle: a window at an idle shell shows neither
+        return f"{head}  foreground: {row.command}"
+    return head  # idle: a window at an idle shell shows neither
 
 
 def preview_lines(tmux_session: str, preview: StopPreview) -> list[str]:
-    """The count line, then one indented line per non-idle window — the
-    body every rendering of a non-empty preview shares.
+    """The count line, then one indented line per window — the body every
+    rendering of a non-empty preview shares.
 
     Escaped whole through `printable_path`, line by line, the same way
     `render_human` escapes its own composed lines: see this module's
@@ -261,11 +262,10 @@ def preview_lines(tmux_session: str, preview: StopPreview) -> list[str]:
     time — see that function's docstring for why the preview is emitted
     before anything is killed.
     """
-    lines = [printable_path(f"stopping {tmux_session}: {len(preview.windows)} windows")]
-    for row in preview.windows:
-        line = _row_line(row)
-        if line is not None:
-            lines.append(printable_path(line))
+    count = len(preview.windows)
+    noun = "window" if count == 1 else "windows"
+    lines = [printable_path(f"stopping {tmux_session}: {count} {noun}")]
+    lines.extend(printable_path(_row_line(row)) for row in preview.windows)
     return lines
 
 

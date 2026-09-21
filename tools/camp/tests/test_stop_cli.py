@@ -176,7 +176,7 @@ def test_running_session_prints_preview_then_stopped_reconcile_on_stderr(
 
     assert code == 0
     assert "dropped @9" in captured.err
-    assert captured.out.startswith(f"stopping {session}: 1 windows")
+    assert captured.out.startswith(f"stopping {session}: 1 window")
     assert captured.out.strip().splitlines()[-1] == f"stopped {session}"
     assert tmux.killed == [session]
 

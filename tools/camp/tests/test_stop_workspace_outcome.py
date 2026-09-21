@@ -199,7 +199,7 @@ def test_render_human_escapes_a_newline_in_a_window_name():
     rendered = render_human(outcome)
 
     assert (
-        "\n" not in rendered.split("\nstopped")[0].replace("stopping camp-trailhead-s: 1 windows", "", 1)
+        "\n" not in rendered.split("\nstopped")[0].replace("stopping camp-trailhead-s: 1 window", "", 1)
         or "\\x0a" in rendered
     )
     # the header, the row, and the outcome line are the only real newlines
@@ -352,3 +352,36 @@ def test_classify_carries_each_window_s_current_command_onto_its_row():
     ]
     result = classify(windows, [], DEFAULT_SHELL_NAMES)
     assert [(r.kind, r.command) for r in result.windows] == [("foreground", "pytest"), ("idle", "zsh")]
+
+
+# --- The design doc's rendering: one row per window, count agrees in number --
+
+
+def test_a_lone_idle_window_renders_a_bare_row_under_a_singular_count():
+    from camp.launch.stop_workspace import PreviewRow, Stopped, StopPreview, render_human
+
+    preview = StopPreview(
+        windows=(PreviewRow(window_id="@1", name="camp-cli", conversation_id=None, kind="idle", command="zsh"),)
+    )
+    outcome = Stopped(slug="camp-cli", group="trailhead", tmux_session="camp-trailhead-camp-cli", preview=preview)
+
+    lines = render_human(outcome).split("\n")
+
+    assert lines == [
+        "stopping camp-trailhead-camp-cli: 1 window",
+        '  @1 "camp-cli"',
+        "stopped camp-trailhead-camp-cli",
+    ]
+
+
+def test_the_count_line_pluralises_only_above_one():
+    from camp.launch.stop_workspace import PreviewRow, StopPreview, preview_lines
+
+    def row(window_id: str) -> PreviewRow:
+        return PreviewRow(window_id=window_id, name="w", conversation_id=None, kind="foreground", command="pytest")
+
+    one = preview_lines("camp-g-s", StopPreview(windows=(row("@1"),)))
+    two = preview_lines("camp-g-s", StopPreview(windows=(row("@1"), row("@2"))))
+
+    assert one[0] == "stopping camp-g-s: 1 window"
+    assert two[0] == "stopping camp-g-s: 2 windows"
