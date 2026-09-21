@@ -189,7 +189,24 @@ _MAX_STEPS = 500
 
 
 class ResolveError(Exception):
-    """A resolution could not proceed — reported, never worked around."""
+    """A resolution could not proceed — reported, never worked around.
+
+    ``str(exc)`` is the wording an operator reads, and it carries no
+    version-control vocabulary. The sweep prints it on every host, including
+    one that declares it makes no vault content and is therefore never to be
+    handed a version-control decision or the words for one (AC38). The
+    declaration is consulted only after the replay is driven, so a failure
+    raised before that point reaches both kinds of host and cannot be worded
+    per host.
+
+    ``detail`` carries git's own account of what happened, for the durable
+    failure marker — the named, machine-local location someone debugging this
+    host goes to. It is never printed beside the message.
+    """
+
+    def __init__(self, message: str, *, detail: str = "") -> None:
+        super().__init__(message)
+        self.detail = detail
 
 
 class StageStatus(Enum):
@@ -339,7 +356,9 @@ def _conflicted_paths(vault: Path) -> list[str]:
     """Return the vault-relative paths git reports as unmerged, in stable order."""
     rc, out, err = _git(vault, "ls-files", "-u", "-z")
     if rc != 0:
-        raise ResolveError(f"could not read the conflict state: {err}")
+        raise ResolveError(
+            "could not read what this vault is holding", detail=err
+        )
     seen: list[str] = []
     # NUL-delimited: git's default `core.quotePath` would otherwise hand back a
     # non-ASCII name C-quoted, and every follow-up `git show :N:<path>` on that
@@ -605,7 +624,9 @@ def _delete_record(vault: Path, record_id: str, sidecar_path: str, body_path: st
     for rel in (body_path, sidecar_path):
         rc, _, err = _git(vault, "rm", "-f", "--ignore-unmatch", "--", rel)
         if rc != 0:
-            raise ResolveError(f"could not stage the removal of {rel}: {err}")
+            raise ResolveError(
+                f"could not record the removal of {rel}", detail=err
+            )
     return {
         "kind": record_id.split("/", 1)[0],
         "sidecar-path": sidecar_path,
@@ -662,7 +683,9 @@ def write_record(vault: Path, record_id: str, sidecar: dict, body: str) -> None:
     for rel in (f"{record_id}.md", f"{record_id}.json"):
         rc, _, err = _git(vault, "add", "--", rel)
         if rc != 0:
-            raise ResolveError(f"could not stage {rel}: {err}")
+            raise ResolveError(
+                f"could not record the settled {rel}", detail=err
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -920,14 +943,16 @@ def _auto_take_published_side(vault: Path, path: str) -> str | None:
     if remote.returncode != 0 or local.returncode != 0:
         rc, _, err = _git(vault, "rm", "-f", "--ignore-unmatch", "--", path)
         if rc != 0:
-            raise ResolveError(f"could not stage the removal of {path}: {err}")
+            raise ResolveError(
+                f"could not record the removal of {path}", detail=err
+            )
         return None
 
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(remote.stdout)
     rc, _, err = _git(vault, "add", "--", path)
     if rc != 0:
-        raise ResolveError(f"could not stage {path}: {err}")
+        raise ResolveError(f"could not record the settled {path}", detail=err)
     return None
 
 
@@ -1193,8 +1218,12 @@ def _drive(vault: Path) -> tuple[list[dict], list[dict], dict]:
         if rc != 0 and still_mid and _conflicted_paths(vault):
             continue  # stopped at the next conflicted step
         if rc != 0 and still_mid:
-            raise ResolveError("`git rebase --continue` failed with no conflict to settle")
-    raise ResolveError(f"the rebase did not finish within {_MAX_STEPS} steps")
+            raise ResolveError(
+                "this vault stopped with nothing left to settle"
+            )
+    raise ResolveError(
+        f"settling this vault did not finish within {_MAX_STEPS} steps"
+    )
 
 
 def _abort(vault: Path, name: str, say, say_err) -> int:
@@ -1238,7 +1267,10 @@ def _abort_replay(vault: Path) -> None:
     """
     rc, out, err = _git(vault, "rebase", "--abort")
     if rc != 0 or _vault_mid_rebase(vault):
-        raise ResolveError(f"could not abort the rebase to hold it: {err or out}")
+        raise ResolveError(
+            "could not return the vault to the state it was in",
+            detail=err or out,
+        )
 
 
 def _discard_toward_published(vault: Path) -> None:
@@ -1324,7 +1356,7 @@ def resolve_for_sweep(vault: Path, name: str, *, shared: bool) -> dict:
                 report["held"] = False
                 return report
             if started is False:
-                raise ResolveError(f"could not start the rebase for {name}")
+                raise ResolveError(f"could not begin settling {name}")
         conflicts, files, _pending = _drive(vault)
 
         if conflicts or files:

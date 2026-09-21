@@ -2798,3 +2798,122 @@ def test_the_sweep_ignores_a_resolution_marker_left_by_a_dead_session(tmp_path, 
         "no value from the dead session reached the record"
     )
     assert sidecar["status"] == "ready", "the vault is back at its own local side"
+
+
+# The resolver's own failures are raised BEFORE the host declaration is
+# consulted — the declaration is read only once the replay has been driven and
+# aborted — so their wording reaches both kinds of host and cannot be chosen
+# per host. AC38 therefore constrains the whole class: every one of these must
+# read plainly to the owner of a host that authors nothing, which means none of
+# them speaks version control on any host.
+_RESOLVER_FAILURE_SITES = (
+    # (the git call made to fail, how the vault must diverge to reach it,
+    #  what the operator must be told instead)
+    (("ls-files", "-u"), _diverge_on_status,
+     "could not read what this vault is holding"),
+    # A field-wise settle is what reaches the staging site at all: a judgment
+    # conflict is parked before anything is written.
+    (("add", "--"), _diverge_on_disjoint_fields,
+     "could not record the settled"),
+    # Only the resolver's own module is patched, so the sweep's earlier
+    # pull — which drives its own replay through `cli.sync`'s `_git` — still
+    # behaves, and these two failures land inside the resolution proper.
+    (("rebase", "--empty=drop"), _diverge_on_status,
+     "could not begin settling"),
+    (("rebase", "--abort"), _diverge_on_status,
+     "could not return the vault to the state it was in"),
+)
+
+
+@pytest.mark.parametrize("failing_args,diverge,expected_wording", _RESOLVER_FAILURE_SITES)
+@pytest.mark.parametrize("makes_vault_content", [True, False])
+def test_a_resolver_failure_is_reported_without_version_control_words(
+    tmp_path, monkeypatch, failing_args, diverge, expected_wording, makes_vault_content
+):
+    """AC38 over the failure class, not one ending of it.
+
+    The owner is told the resolver could not settle the vault, in words they
+    can act on. They are not handed git's account of why, and nothing in the
+    line asks them to make a version-control decision — on either kind of
+    host, because these failures precede the declaration that would
+    distinguish them.
+    """
+    fx = _Fixture(tmp_path)
+    diverge(fx)
+    monkeypatch.setenv(
+        "XDG_CONFIG_HOME",
+        str(_config_home(fx, makes_vault_content=makes_vault_content)),
+    )
+    monkeypatch.setenv("XDG_STATE_HOME", str(fx.state))
+    monkeypatch.setenv("LORE_EMAIL", "tester@example.com")
+
+    resolve_mod = load_script("lore.cli.resolve")
+    sync = load_script("lore.cli.sync")
+    real_git = resolve_mod._git
+
+    def _one_call_fails(vault, *args):
+        if args[: len(failing_args)] == failing_args:
+            return 1, "", "fatal: git refused, on HEAD, during rebase onto origin/main"
+        return real_git(vault, *args)
+
+    monkeypatch.setattr(resolve_mod, "_git", _one_call_fails)
+
+    _git(fx.vault, "fetch", "origin")
+    lines: list[str] = []
+    state_after, _pulled = sync._pull_one(
+        fx.vault, lines.append, lines.append, already_fetched=True,
+        resolve_conflicts=True, name="default", shared=False,
+    )
+
+    assert state_after == sync.PULL_FAILED, lines
+    reported = "\n".join(lines)
+    assert expected_wording in reported, reported
+    assert "fatal:" not in reported, "git's own account never reaches the owner"
+    assert _vc_words(reported) == set(), (
+        f"the failed resolution spoke version control: "
+        f"{_vc_words(reported)} in {reported!r}"
+    )
+
+
+def test_the_detail_a_failure_withholds_from_the_owner_reaches_the_marker(
+    tmp_path, monkeypatch
+):
+    """Plain words to the owner must not mean the account is thrown away.
+
+    The failed-vault marker is the named, machine-local place someone
+    debugging this host goes to, and it is where git's own text belongs — so
+    the operator-facing line can stay plain without anyone losing what
+    actually happened.
+    """
+    fx = _Fixture(tmp_path)
+    _diverge_on_status(fx)
+    monkeypatch.setenv(
+        "XDG_CONFIG_HOME", str(_config_home(fx, makes_vault_content=True))
+    )
+    monkeypatch.setenv("XDG_STATE_HOME", str(fx.state))
+    monkeypatch.setenv("LORE_EMAIL", "tester@example.com")
+
+    resolve_mod = load_script("lore.cli.resolve")
+    sync = load_script("lore.cli.sync")
+    real_git = resolve_mod._git
+
+    def _ls_files_fails(vault, *args):
+        if args[:2] == ("ls-files", "-u"):
+            return 1, "", "fatal: git could not read the index"
+        return real_git(vault, *args)
+
+    monkeypatch.setattr(resolve_mod, "_git", _ls_files_fails)
+
+    _git(fx.vault, "fetch", "origin")
+    lines: list[str] = []
+    sync._pull_one(
+        fx.vault, lines.append, lines.append, already_fetched=True,
+        resolve_conflicts=True, name="default", shared=False,
+    )
+
+    marker = resolve_mod.resolve_state.read_failed_marker(fx.vault)
+    assert marker is not None, "the failure recorded itself"
+    assert "fatal: git could not read the index" in marker["detail"], (
+        "git's own account is kept where a person debugging goes for it"
+    )
+    assert "fatal:" not in "\n".join(lines), "and nowhere the owner reads"

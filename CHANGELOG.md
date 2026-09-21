@@ -5,6 +5,19 @@ format described by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+- A resolver failure reported by `lore sync` is now worded plainly and carries
+  no version-control vocabulary: the messages that embedded git's own stderr,
+  or named a rebase, now say what could not be done in terms of the vault. The
+  text is the same on every host, because these failures are raised before the
+  host's `makes_vault_content` declaration is consulted and so cannot be worded
+  per host — which is what a host declaring it authors nothing requires. Git's
+  account of the failure is not lost: it is written to the failed-vault marker
+  under `state_dir("lore")/resolve`, where anyone debugging the host reads it.
+  Wording only — no outcome, exit code, or `--json` field changes. The
+  interactive `lore resolve take` / `take-file` verbs are unchanged: a person
+  who typed one is in a version-control workflow and git's detail is useful to
+  them.
+
 - **Breaking:** `lore sync` no longer aborts a rebase conflict and reports a
   `lore resolve` remedy with a non-zero exit at either replay site (the pull's
   rebase, the push's moved-history replay). It now hands the conflict to the

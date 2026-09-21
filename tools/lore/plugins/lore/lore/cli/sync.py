@@ -515,8 +515,14 @@ def _hand_off_to_resolver(
             # attempt is the more specific fact and is left standing: the
             # forge refusing a settled push is the forge's doing, and sending
             # its reader to fix this host's data would be wrong.
+            # `str(exc)` is the plain wording the owner already read; the
+            # marker is where git's own account belongs, so withholding it
+            # from the terminal does not throw it away (AC38).
+            detail = getattr(exc, "detail", "") or ""
             resolve_mod.resolve_state.mark_failed(
-                vault, reason=FAILURE_POLICY, detail=str(exc)
+                vault,
+                reason=FAILURE_POLICY,
+                detail=f"{exc}: {detail}" if detail else str(exc),
             )
         return PUBLISH_HOLDING
 
