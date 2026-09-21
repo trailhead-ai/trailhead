@@ -1721,3 +1721,126 @@ are, as of this fresh baseline, at ceiling rather than at the mixed/AMBIGUOUS st
 trailhead/tests/test_eval_corpus.py -q` — 57 passed. `.venv/bin/python -m ruff check tools/craft` —
 all checks passed. No test was added by this task; it ships no behaviour change, per the task
 body's own stated discipline.
+
+### 2026-09-21 — extended distill baseline to nine runs under the amended pre-registration
+
+Run by `task/extend-the-distill-baseline-to-nine-runs-under-an-amended-pre-registration`, an
+appended child of the parent plan `task/distill-closing-report-links-the-adr-it-wrote-every-run`.
+Task 2's fresh 3-run baseline (previous subsection above) landed `distill` 3/3, against a rule tail
+confirmed byte-identical to the 2026-09-11 batch that measured 3/6 — the slice's premise did not
+reproduce at n=3. The operator's 2026-09-21 amendment fixed a nine-run count and a two-sided
+decision rule before any of this task's captures existed.
+
+**Amendment.** Committed alone, before any capture toward it: `97c6c64e` ("test(craft): pre-register
+the amended distill baseline run count and decision rule"), appending "Extension — Task 1 of
+`task/extend-the-distill-baseline-to-nine-runs-under-an-amended-pre-registration`..." to this eval's
+`expected.md`. Decision rule as pre-registered: **9/9 `link`** closes AC6 at `distill` under the
+current rule and drops the treatment tasks with a recorded negative, no rule edit; **any `bare`** in
+the nine reproduces the split and Task 3 proceeds against this 9-run baseline.
+
+**Pre-dispatch verification.**
+
+```
+cmp arms/distill-rule-only.md arms/distill-rule-only-pre-rule-edit.md → identical
+git status --porcelain tools/outpost/plugins/outpost/rules.md         → (empty, clean)
+```
+
+**Dispatch.** Six further processes, `recordlinks-baseline-distill-4` through `-9`, each its own
+foreground `claude -p` process (never a subagent), `--setting-sources project --allowedTools "Read"
+< /dev/null`, exactly `expected.md`'s dispatch shape, run sequentially rather than as a batch. Arm,
+fixture, `--record`, and `--command` are the row Task 1's pre-registration table pins for `distill`:
+
+| Site | Arm | Fixture | Record | Command |
+|---|---|---|---|---|
+| `distill` | `arms/distill-rule-only.md` | `fixtures/distill-completed-run.md` | `adr/dock-scheduling-windows-use-fifo-slots` | `lore record show adr/dock-scheduling-windows-use-fifo-slots` |
+
+All 6 new processes exited 0 with non-empty captured stdout — no exclusions, no infrastructure
+failures, no re-dispatch needed. Captures committed as
+`runs/recordlinks-baseline-distill-{4..9}.{txt,stderr.txt,exit}`.
+
+**Results — all nine distill captures, re-graded at report time** via
+`tools/craft/plugins/craft/scripts/ritual_deliverable_grader.py --record
+adr/dock-scheduling-windows-use-fifo-slots --command "lore record show
+adr/dock-scheduling-windows-use-fifo-slots"`, per-run:
+
+| Run | record-link | next-command | Grader exit |
+|---|---|---|---|
+| `recordlinks-baseline-distill-1` | link | own-line | 0 |
+| `recordlinks-baseline-distill-2` | link | own-line | 0 |
+| `recordlinks-baseline-distill-3` | link | own-line | 0 |
+| `recordlinks-baseline-distill-4` | **bare** | own-line | 1 |
+| `recordlinks-baseline-distill-5` | link | own-line | 0 |
+| `recordlinks-baseline-distill-6` | link | own-line | 0 |
+| `recordlinks-baseline-distill-7` | link | own-line | 0 |
+| `recordlinks-baseline-distill-8` | **bare** | own-line | 1 |
+| `recordlinks-baseline-distill-9` | link | own-line | 0 |
+
+**7/9 `link`, 2/9 `bare`.**
+
+**Decision-rule outcome: `bare` present (2 of 9) — the split is reproduced.** Per the amendment's
+own words, this is not the 9/9 branch: AC6 does not close at `distill` on this evidence, the
+treatment tasks are not dropped, and Task 3 proceeds, reading its U1 verdict against this 9-run
+baseline (7/9 link) rather than against Task 2's 3-run one.
+
+**Bare-shape triage, both `bare` runs.** Read by hand, not inferred from the grader's binary
+verdict:
+
+- `recordlinks-baseline-distill-4` — table cell "ADRs written" reads
+  `` `adr/dock-scheduling-windows-use-fifo-slots` — edges: `related: spec=dock-scheduling-windows` ``,
+  a backticked code span, no markdown link syntax anywhere in the response. **Shape: mentioned but
+  unlinked.**
+- `recordlinks-baseline-distill-8` — table cell "ADRs written" reads
+  `` `adr/dock-scheduling-windows-use-fifo-slots` (vault `harborlight`), `related:
+  spec=dock-scheduling-windows` ``, same backticked-code-span shape, no markdown link syntax
+  anywhere in the response. **Shape: mentioned but unlinked.**
+
+Neither `bare` run left the record un-mentioned, and neither linked to a different identifier — both
+are the same "correctly named, rendered as a code span rather than a link" shape.
+
+**Capture scan.** `tools/craft/plugins/craft/scripts/capture_scan.py`, checking exit code, on all 12
+new files (6 `.txt` + 6 `.stderr.txt`): all 12 exit 0. Four `.txt` captures
+(`recordlinks-baseline-distill-5`, `-6`, `-7`, `-9`) report `path-or-url-shape` findings for the literal strings `7313/records/harborlight/spec/dock` and
+`7313/records/harborlight/adr/dock` inside the fixture's own rendered links — known structural
+false positives (fixture-embedded URL fragments, not credentials), matching this eval's own
+"Contamination check" note that no fixture contains a real, resolvable vault reference.
+
+**Verbatim evidence, one linking run and one bare run:**
+
+- `recordlinks-baseline-distill-5` (link): table cell "ADRs written" —
+  `` [adr/dock-scheduling-windows-use-fifo-slots](http://127.0.0.1:7313/records/harborlight/adr/dock-scheduling-windows-use-fifo-slots) `` —
+  the `lore record show ...` handoff command stays bare, fenced, on its own line.
+- `recordlinks-baseline-distill-4` (bare): table cell "ADRs written" —
+  `` `adr/dock-scheduling-windows-use-fifo-slots` — edges: `related: spec=dock-scheduling-windows` `` —
+  backticked, not a markdown link.
+
+**Real-state check.** `tools/outpost/plugins/outpost/rules.md` carried no working-tree change before
+or after this batch (`git status --porcelain` empty; mtime unchanged at `2026-09-21 13:16:25`,
+predating this task's dispatch window — same mtime Task 2 recorded, confirming no edit landed
+between the two tasks either). `~/.config/lore/config.json`'s mtime (`2026-09-09 19:39:15`) predates
+this task entirely. The four configured lore vaults (`default`, `trailhead`, `lake-in-the-woods`,
+`levr`) each show a clean working tree (`git status --porcelain` empty in every vault) both before
+and after the batch; every vault's commits since this task's dispatch window are ordinary
+sync/session-bookkeeping (`lore: sync vault`, `session: flush ...`), and none of those commits'
+`--stat` diffs contain this batch's fixture strings (`harborlight`, `dock-scheduling-windows`,
+`dock-scheduling-windows-use-fifo-slots`) — confirmed by grepping each commit in the window. No
+escape attributable to any of the 6 `Read`-only, no-shell arms was found.
+
+**Limitations.** Nine runs bound the true bare rate at `distill` well below the roughly 50% the
+2026-09-11 batch observed, but nine runs cannot pin the exact rate — the 95% Clopper-Pearson
+interval on 7/9 spans roughly 35%–97%, wide enough that this batch alone cannot distinguish "the
+true rate is near 78%" from "the true rate is near 50% and this batch ran hot." It speaks to this
+one model tier, this one arm/fixture pair, and this one session shape only; it says nothing about
+other rituals, other model tiers, or a resident (rather than clean-room) rule installation. `slice`
+and `review` were not re-run here, per the amendment's own scope — neither split at Task 2 and
+neither is the premise under question.
+
+**Handoff for Task 3.** `distill`'s 9-run baseline is 7/9 `link`, 2/9 `bare` (both "mentioned but
+unlinked"). AC6 does not close on this evidence; Task 3 (`task/treat-the-rule-re-measure-every-site-
+and-state-the-ac6-verdict`) proceeds, reading its U1 verdict against this 9-run figure. Capture
+prefix for this batch: `recordlinks-baseline-distill-N`, `N` = `4`–`9` (continuing Task 2's
+`N` = `1`–`3`).
+
+**Test gate.** `.venv/bin/python -m pytest tools/craft/tests/test_ritual_deliverable_eval_arms_contract.py
+trailhead/tests/test_eval_corpus.py -q` — 57 passed. `.venv/bin/python -m ruff check tools/craft` —
+all checks passed. No test was added by this task; it ships no behaviour change, per the task
+body's own stated discipline.
