@@ -1,11 +1,10 @@
 """``lore publish`` — the per-vault debounced, single-flight publish worker.
 
 A record write does not want to wait on a commit-and-push round trip, and a
-burst of writes should not spawn a commit-and-push per write. This module is
-the worker a write's trigger spawns detached (the spawn itself, and the
-request-stamp writer that decides WHEN to spawn it, belong to a later task —
-see :func:`touch_request_stamp` and the path helpers below, which that task
-imports rather than reimplementing).
+burst of writes should not spawn a commit-and-push per write. This module holds
+both halves of that: :func:`request_publish`, which a successful write calls to
+stamp a request and spawn the worker detached, and :func:`cmd_publish`, the
+worker itself.
 
 **Single-flight, not mutual exclusion with the vault write lock.** The worker
 takes its OWN lock — a plain, non-blocking ``fcntl.flock`` on a file under
@@ -132,10 +131,10 @@ def request_stamp_path(vault_root: "str | Path") -> Path:
 def touch_request_stamp(vault_root: "str | Path", *, clock=time.time) -> None:
     """Record that *vault_root* has a pending publish request, now.
 
-    Called by a record create, a record update, or a flush after a successful
-    write (the next task), before it spawns the worker detached. Idempotent:
-    a burst of writes just keeps moving this stamp forward, which is exactly
-    what lets the worker's debounce collapse the burst into one sync.
+    Called by :func:`request_publish` after a record create, a record update,
+    or a flush has written successfully, before it spawns the worker detached.
+    Idempotent: a burst of writes just keeps moving this stamp forward, which
+    is exactly what lets the worker's debounce collapse the burst into one sync.
     """
     path = request_stamp_path(vault_root)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -239,6 +238,19 @@ def _spawn_worker(argv: list) -> None:
     )
 
 
+def _open_lock_fd(vault_root: "str | Path") -> int:
+    """Open — creating if absent, 0600 — *vault_root*'s worker lock file.
+
+    The one place both the worker's own single-flight acquisition
+    (:func:`cmd_publish`) and the trigger's redundant-spawn probe
+    (:func:`_lock_held`) get their descriptor, so the two can never drift onto
+    a different file or a different mode and stop excluding each other.
+    """
+    lp = lock_path(vault_root)
+    lp.parent.mkdir(parents=True, exist_ok=True)
+    return os.open(lp, os.O_CREAT | os.O_RDWR, 0o600)
+
+
 def _lock_held(vault_root: "str | Path") -> bool:
     """Return ``True`` iff another worker already holds *vault_root*'s lock.
 
@@ -249,9 +261,7 @@ def _lock_held(vault_root: "str | Path") -> bool:
     probe and a spawn landing anyway is harmless (the second worker's own
     non-blocking acquisition attempt exits 0 immediately).
     """
-    lp = lock_path(vault_root)
-    lp.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(lp, os.O_CREAT | os.O_RDWR, 0o600)
+    fd = _open_lock_fd(vault_root)
     try:
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -479,9 +489,7 @@ def cmd_publish(args) -> int:
         print(f"error: unknown vault: {vault_name!r}", file=sys.stderr)
         return 1
 
-    lp = lock_path(vault_path)
-    lp.parent.mkdir(parents=True, exist_ok=True)
-    lock_fd = os.open(lp, os.O_CREAT | os.O_RDWR, 0o600)
+    lock_fd = _open_lock_fd(vault_path)
     try:
         fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:

@@ -84,8 +84,7 @@ def build_parser() -> argparse.ArgumentParser:
     # Registration order determines the ``--help`` subcommand listing; it mirrors
     # the historical single-file ``build_parser`` (init, status, sync, publish,
     # flush, resolve, areas, reindex, search, record, task, pipeline, vault,
-    # session). ``publish`` is wired here, not in ``sync.py``, so a change to
-    # this file and a change to ``sync.py`` never touch the same lines.
+    # session).
     init.add_init_subparsers(sub)
     sync.add_sync_subparser(sub)
     publish.add_publish_subparser(sub)
