@@ -151,11 +151,18 @@ def _read_request_stamp(vault_root: "str | Path") -> "float | None":
 
 
 def read_marker(vault_root: "str | Path") -> "dict | None":
-    """Return the publish marker for *vault_root*, or None if absent/unreadable."""
+    """Return the publish marker for *vault_root*, or None if absent/unreadable.
+
+    Also None when the marker parses as JSON but is not an object — a
+    corrupt/truncated write can leave valid JSON that is not a dict (e.g. a
+    bare number), and treating that as "no marker" is what keeps
+    :func:`warn_stale_publish`'s ``marker.get("outcome")`` from raising.
+    """
     try:
-        return json.loads(marker_path(vault_root).read_text(encoding="utf-8"))
+        data = json.loads(marker_path(vault_root).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
+    return data if isinstance(data, dict) else None
 
 
 def _write_marker(vault_root: "str | Path", marker: dict) -> dict:
@@ -270,11 +277,12 @@ def request_publish(vault_root: "str | Path", *, clock=time.time) -> None:
     already running), then spawns :func:`_spawn_worker` UNLESS
     :func:`_lock_held` reports a worker already holds this vault's lock.
 
-    Never raises into the caller: a spawn failure (e.g. the interpreter or CLI
-    script cannot be found, the OS refuses to fork) is caught and reported as
-    one stderr line naming the vault; the write that triggered this already
-    succeeded and its exit code must not change because scheduling a publish
-    for it failed.
+    Never raises into the caller: a failure in ANY step here — the stamp
+    write (permission, ENOSPC), the lock probe (an fcntl error), or the spawn
+    itself (e.g. the interpreter or CLI script cannot be found, the OS
+    refuses to fork) — is caught and reported as one stderr line naming the
+    vault; the write that triggered this already succeeded and its exit code
+    must not change because scheduling a publish for it failed.
     """
     from ..vault import config as vault_config_mod
 
@@ -282,12 +290,12 @@ def request_publish(vault_root: "str | Path", *, clock=time.time) -> None:
     if vault is not None and not vault_config_mod.auto_publish_flag(vault):
         return
 
-    touch_request_stamp(vault_root, clock=clock)
-
-    if _lock_held(vault_root):
-        return
-
     try:
+        touch_request_stamp(vault_root, clock=clock)
+
+        if _lock_held(vault_root):
+            return
+
         _spawn_worker(_worker_argv(name))
     except Exception as exc:  # noqa: BLE001 — never fail the write that asked
         print(f"error: could not schedule publish for vault {name!r}: {exc}", file=sys.stderr)

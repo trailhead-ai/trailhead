@@ -225,6 +225,75 @@ class TestRecordCreateTriggersPublish:
 
 
 # ---------------------------------------------------------------------------
+# every step the trigger takes must be non-raising — a stamp-write failure,
+# a lock-probe failure, or a corrupt marker must never change the exit code
+# of the write that already succeeded (AC44).
+# ---------------------------------------------------------------------------
+
+
+class TestTriggerNeverRaisesIntoTheWrite:
+
+    def test_a_raising_stamp_write_leaves_exit_code_0_and_names_the_vault(
+        self, tmp_path, monkeypatch
+    ):
+        _record_spawner(monkeypatch)
+        vault, state = _make_vault(tmp_path)
+        monkeypatch.setenv("XDG_STATE_HOME", str(state))
+
+        def boom(vault_root, *, clock=time.time):
+            raise OSError("[Errno 28] No space left on device")
+
+        monkeypatch.setattr(publish_mod, "touch_request_stamp", boom)
+
+        r = _create(vault, state, title="x")
+        assert r.returncode == 0, r.stderr
+        assert r.stdout.strip(), "the record ID must still print"
+
+        lines = [
+            line for line in r.stderr.splitlines()
+            if "could not schedule publish" in line
+        ]
+        assert len(lines) == 1, f"expected exactly one notice; stderr={r.stderr!r}"
+        assert "default" in lines[0]
+
+    def test_a_raising_lock_probe_leaves_exit_code_0_and_names_the_vault(
+        self, tmp_path, monkeypatch
+    ):
+        vault, state = _make_vault(tmp_path)
+        monkeypatch.setenv("XDG_STATE_HOME", str(state))
+
+        def boom(vault_root):
+            raise OSError("[Errno 13] Permission denied")
+
+        monkeypatch.setattr(publish_mod, "_lock_held", boom)
+
+        r = _create(vault, state, title="x")
+        assert r.returncode == 0, r.stderr
+        assert r.stdout.strip(), "the record ID must still print"
+
+        lines = [
+            line for line in r.stderr.splitlines()
+            if "could not schedule publish" in line
+        ]
+        assert len(lines) == 1, f"expected exactly one notice; stderr={r.stderr!r}"
+        assert "default" in lines[0]
+
+    def test_a_corrupt_marker_file_does_not_fail_the_write(self, tmp_path, monkeypatch):
+        _record_spawner(monkeypatch)
+        vault, state = _make_vault(tmp_path)
+        monkeypatch.setenv("XDG_STATE_HOME", str(state))
+
+        mp = publish_mod.marker_path(vault)
+        mp.parent.mkdir(parents=True, exist_ok=True)
+        mp.write_text("42", encoding="utf-8")
+
+        r = _create(vault, state, title="x")
+        assert r.returncode == 0, r.stderr
+        assert r.stdout.strip(), "the record ID must still print"
+        assert "could not schedule publish" not in r.stderr
+
+
+# ---------------------------------------------------------------------------
 # record update — in-place and relocation both request the DESTINATION vault
 # ---------------------------------------------------------------------------
 
