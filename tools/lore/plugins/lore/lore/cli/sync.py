@@ -111,12 +111,104 @@ from .common import (
     _vault_mid_rebase,
     _vault_unpushed,
     _vault_upstream_ref,
+    host_name,
     machine_state_key,
     vault_refusal_condition,
 )
 from .init import _SITES_DIR
 
-DEFAULT_SYNC_MSG = "lore: sync vault"
+#: A staged set at or under this many items is listed one item per line in a
+#: generated commit's body; past it, the body collapses to per-kind counts —
+#: past a few dozen record ids the body stops being something a human reads
+#: and starts being noise a `git log` scroll has to skip past.
+_SYNC_MESSAGE_SUMMARY_THRESHOLD = 8
+
+#: Hard cap on a generated commit body's length (characters). A vault write
+#: is never blocked on this — the body is truncated, not the commit.
+_SYNC_MESSAGE_BODY_MAX_CHARS = 500
+
+
+def _sanitize_message_path(path: str) -> str:
+    """Strip characters that don't belong in a commit message body from a
+    staged path — a filesystem allows bytes a terminal or a `git log` reader
+    does not want to render verbatim (escape sequences, control bytes)."""
+    return "".join(ch for ch in path if ch.isprintable())
+
+
+def _porcelain_path(line: str) -> str:
+    """Return the path half of one `git status --porcelain` line.
+
+    The 2-character status code is always followed by exactly one space,
+    then the path (``git`` -> `_git`'s shared subprocess helper strips the
+    WHOLE combined stdout, which eats the leading space of the very first
+    porcelain line whenever that line's status code starts with one, e.g.
+    ``" M path"`` (an unstaged modification) arrives here as ``"M path"``.
+    Re-prepending a space when the 3-char-prefix parse looks short by
+    exactly one restores it before slicing, rather than misreading the
+    status code's second character as the path's first.
+    """
+    if len(line) < 3 or line[2] != " ":
+        line = " " + line
+    return line[3:].strip()
+
+
+def _staged_items_for_message(committable: list[str]) -> list[str]:
+    """Turn `git status --porcelain` lines into commit-message items.
+
+    A record path (``<kind>/<name>.md`` or its ``.json`` sidecar, ``kind`` one
+    of :data:`record_model.KINDS`) becomes its record id ``<kind>/<name>``,
+    deduped so a record whose body AND sidecar are both staged names it once.
+    A ``sites/`` path is kept whole, since a site has no single-id identity
+    the way a record does. Anything else staged (an adopted repo's root file)
+    is kept whole too, sanitized like everything else.
+    """
+    items: list[str] = []
+    seen: set[str] = set()
+    for line in committable:
+        raw_path = _porcelain_path(line)
+        if " -> " in raw_path:
+            raw_path = raw_path.split(" -> ", 1)[1]
+        path = _sanitize_message_path(raw_path)
+        if not path:
+            continue
+        top = path.split("/", 1)[0]
+        if top in record_model.KINDS and "/" in path:
+            stem = path[len(top) + 1 :]
+            for suffix in (".md", ".json"):
+                if stem.endswith(suffix):
+                    stem = stem[: -len(suffix)]
+                    break
+            item = f"{top}/{stem}"
+        else:
+            item = path
+        if item not in seen:
+            seen.add(item)
+            items.append(item)
+    return items
+
+
+def _build_sync_message(committable: list[str], host: str) -> str:
+    """Generate a commit message for a message-less sync: a subject naming
+    *host*, and a body naming what was staged — one line per item, or, past
+    :data:`_SYNC_MESSAGE_SUMMARY_THRESHOLD` items, per-kind counts instead.
+    The body is truncated to :data:`_SYNC_MESSAGE_BODY_MAX_CHARS`.
+    """
+    items = _staged_items_for_message(committable)
+    if not items:
+        return f"lore: {host} synced"
+    subject = f"lore: {host} published {len(items)} item(s)"
+    if len(items) > _SYNC_MESSAGE_SUMMARY_THRESHOLD:
+        counts: dict[str, int] = {}
+        for item in items:
+            kind = item.split("/", 1)[0]
+            counts[kind] = counts.get(kind, 0) + 1
+        body_lines = [f"- {kind}: {count}" for kind, count in sorted(counts.items())]
+    else:
+        body_lines = [f"- {item}" for item in items]
+    body = "\n".join(body_lines)
+    if len(body) > _SYNC_MESSAGE_BODY_MAX_CHARS:
+        body = body[:_SYNC_MESSAGE_BODY_MAX_CHARS].rstrip() + "\n…"
+    return f"{subject}\n\n{body}"
 
 #: The per-vault outcome when that vault's write lock is already held by a
 #: concurrent writer at the moment the sweep/manual `lore sync` tries to
@@ -1016,9 +1108,18 @@ def _probe_vault_status(vault: Path) -> tuple[int, list[str], list[str], list[st
     return rc, lines, committable, strays, stderr
 
 
-def _stage_and_commit_one(vault: Path, message: str, say, say_err) -> tuple[int, bool]:
+def _stage_and_commit_one(
+    vault: Path, message: "str | None", host: str, say, say_err
+) -> tuple[int, bool]:
     """Stage + commit one vault's tracked content and allow-listed new content
     under its write lock.
+
+    ``message`` is used verbatim when given (an explicit ``--message``);
+    ``None`` generates a message from what this call actually stages, naming
+    *host* — see :func:`_build_sync_message`. Generating it per-vault, from
+    the SAME staged-set computation that decides what gets committed, is what
+    keeps the message honest when a multi-vault run stages different content
+    in different vaults.
 
     Returns ``(exit_code, committed)``.
 
@@ -1100,13 +1201,14 @@ def _stage_and_commit_one(vault: Path, message: str, say, say_err) -> tuple[int,
         if rc != 0:
             say_err(f"error: git reset (unstaging lock file) failed: {stderr} — skipped")
             return 1, False
+        commit_message = message if message else _build_sync_message(committable, host)
         # Never pass -S or --no-gpg-sign; honor the adopter's commit.gpgsign.
-        rc, _, stderr = _git(vault, "commit", "-m", message)
+        rc, _, stderr = _git(vault, "commit", "-m", commit_message)
         if rc != 0:
             say_err(f"error: git commit failed: {stderr} — skipped")
             return 1, False
 
-    say(f"Committed: {message}")
+    say(f"Committed: {commit_message.splitlines()[0]}")
     return 0, True
 
 
@@ -1410,7 +1512,12 @@ def cmd_sync(args) -> int:
     if rc != 0:
         return rc
 
-    message = getattr(args, "message", None) or DEFAULT_SYNC_MSG
+    # ``None`` means every vault gets its OWN generated message, computed from
+    # what THAT vault actually stages — see ``_stage_and_commit_one`` /
+    # ``_build_sync_message``. An explicit ``--message`` is shared verbatim
+    # across every target, as before.
+    message = getattr(args, "message", None) or None
+    host = host_name()
     pull_only = bool(getattr(args, "pull_only", False))
     blocking = bool(getattr(args, "blocking", True))
     width = max(len(name) for name, _ in targets) + 1  # + ':'
@@ -1503,7 +1610,7 @@ def cmd_sync(args) -> int:
 
             for name, vault_path in locked:
                 say, say_err = say_map[name]
-                rc_one, committed = _stage_and_commit_one(vault_path, message, say, say_err)
+                rc_one, committed = _stage_and_commit_one(vault_path, message, host, say, say_err)
                 commit_rc[name] = rc_one
                 committed_map[name] = committed
     except OSError as exc:
@@ -1651,7 +1758,7 @@ def add_sync_subparser(sub) -> None:
     )
     p_sync.add_argument(
         "--message", "-m", default=None,
-        help=f"Commit message (default: {DEFAULT_SYNC_MSG!r})",
+        help="Commit message (default: a generated message naming the host and what was staged)",
     )
     p_sync.add_argument(
         "--vault", default=None,

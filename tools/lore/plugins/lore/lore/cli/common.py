@@ -27,6 +27,7 @@ from __future__ import annotations
 import hashlib
 import os
 import select
+import socket
 import subprocess
 import sys
 from pathlib import Path
@@ -73,6 +74,46 @@ def _read_stdin_body() -> str:
             "that closes (e.g. `</dev/null`), or omit the pipe"
         )
     return sys.stdin.read()
+
+
+def _camp_self_host_name(env: dict[str, str]) -> "str | None":
+    """Return camp's declared self name for this host, or ``None``.
+
+    Lazy, guarded import mirroring the ``vault/layers.py`` camp-import
+    precedent — the camp plugin root is a sibling subtree that must be added
+    to ``sys.path`` before ``camp.host.config`` can be imported. Camp being
+    unimportable (no sibling checkout, or blocked deliberately), the hosts
+    file being absent, or it being malformed, all resolve to ``None`` here so
+    the caller falls back to the OS hostname rather than failing a sync over
+    host-name attribution.
+    """
+    try:
+        from ..vault.layers import _CAMP_PLUGIN_ROOT
+    except ImportError:
+        return None
+    if _CAMP_PLUGIN_ROOT is not None and str(_CAMP_PLUGIN_ROOT) not in sys.path:
+        sys.path.insert(0, str(_CAMP_PLUGIN_ROOT))
+    try:
+        import camp.host.config as _host_config
+    except ImportError:
+        return None
+    try:
+        return _host_config.self_host_name(env=env)
+    except _host_config.HostConfigError:
+        return None
+
+
+def host_name(env: "dict[str, str] | None" = None) -> str:
+    """Return this host's name for attribution in generated commit messages.
+
+    Camp's own declared self name (``self_host_name``) when camp is
+    importable and a name is declared; otherwise the OS hostname
+    (``socket.gethostname()``) — a name is always returned, never ``None``,
+    so a message-less sync can always say who published.
+    """
+    if env is None:
+        env = os.environ
+    return _camp_self_host_name(env) or socket.gethostname()
 
 
 def _resolve_xdg_dir(

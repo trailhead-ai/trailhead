@@ -53,6 +53,7 @@ import json
 import os
 import shlex
 import shutil
+import socket
 import subprocess
 import sys
 import time
@@ -440,6 +441,180 @@ def test_sync_message_applies_to_every_vault(tmp_path):
     for name, vault in vaults.items():
         subject = _git(vault, "log", "-1", "--pretty=%s").stdout.strip()
         assert subject == "custom msg", f"{name} got {subject!r}"
+
+
+# ── lore sync: generated commit message (no --message) ─────────────────────
+
+
+def _one_vault_config(tmp_path: Path, name: str = "v") -> tuple[Path, Path, Path]:
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True)
+    vault = tmp_path / name
+    vault.mkdir()
+    _git(vault, "init")
+    for key, val in (("user.email", "t@e.st"), ("user.name", "Test"), ("commit.gpgsign", "false")):
+        _git(vault, "config", key, val)
+    (vault / "task").mkdir()
+    # A tracked file in `task/` already, like a real vault's scaffolded
+    # README — otherwise `task/` is a wholly untracked directory and `git
+    # status --porcelain` collapses a later untracked addition inside it to
+    # the bare directory line (`?? task/`) instead of naming the file.
+    (vault / "task" / "README.md").write_text("vault\n")
+    (vault / "spec").mkdir()
+    (vault / "spec" / "existing-spec.md").write_text("old\n")
+    (vault / "sites").mkdir()
+    (vault / "sites" / ".gitkeep").write_text("")
+    (vault / ".gitignore").write_text("*.lock\n")
+    _git(vault, "add", "-A")
+    _git(vault, "commit", "-m", "init")
+    write_vault_config(config_home, [(name, "default", vault)])
+    return config_home, state_dir, vault
+
+
+def test_sync_no_message_names_host_and_lists_staged_record_ids(tmp_path):
+    """A message-less sync over one new task record and one changed spec
+    record produces a commit whose subject names the host and whose body
+    lists both record ids."""
+    config_home, state_dir, vault = _one_vault_config(tmp_path)
+    (vault / "task" / "new-task.md").write_text("# a new task\n")
+    (vault / "spec" / "existing-spec.md").write_text("changed\n")
+
+    r = run_cli(["sync"], config_home=config_home, state_dir=state_dir)
+    assert r.returncode == 0, r.stderr
+    subject = _git(vault, "log", "-1", "--pretty=%s").stdout.strip()
+    body = _git(vault, "log", "-1", "--pretty=%b").stdout
+    assert socket.gethostname() in subject, subject
+    # Record ids, not raw filenames — the `.md` extension must be stripped,
+    # so match the id at a line boundary rather than as a loose substring
+    # (which "task/new-task.md" would also satisfy).
+    assert "- task/new-task\n" in body, body
+    assert "- spec/existing-spec\n" in body, body
+    assert ".md" not in body, body
+
+
+def test_sync_no_message_uses_camps_declared_self_name(tmp_path):
+    """When camp declares this host's self name, the generated subject uses
+    it instead of the OS hostname."""
+    config_home, state_dir, vault = _one_vault_config(tmp_path)
+    (vault / "task" / "new-task.md").write_text("# a new task\n")
+    camp_dir = config_home / "camp"
+    camp_dir.mkdir(parents=True)
+    (camp_dir / "hosts.toml").write_text('self_name = "camp-quokka"\n')
+
+    r = run_cli(["sync"], config_home=config_home, state_dir=state_dir)
+    assert r.returncode == 0, r.stderr
+    subject = _git(vault, "log", "-1", "--pretty=%s").stdout.strip()
+    assert "camp-quokka" in subject, subject
+    assert socket.gethostname() not in subject, subject
+
+
+def test_sync_no_message_names_a_host_even_when_camp_is_unimportable(tmp_path, monkeypatch):
+    """Camp unimportable never blocks the sync, and the fallback still names
+    a host (the OS hostname) rather than omitting one."""
+    monkeypatch.setitem(sys.modules, "camp", None)
+    monkeypatch.setitem(sys.modules, "camp.host", None)
+    monkeypatch.setitem(sys.modules, "camp.host.config", None)
+
+    tmp_path2 = tmp_path / "in-process"
+    tmp_path2.mkdir()
+    config_home, state_dir, vault = _one_vault_config(tmp_path2)
+    (vault / "task" / "new-task.md").write_text("# a new task\n")
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home))
+    monkeypatch.setenv("XDG_STATE_HOME", str(state_dir))
+    monkeypatch.setenv("HOME", str(state_dir / "home"))
+    monkeypatch.setenv("LORE_EMAIL", "tester@example.com")
+
+    class _Args:
+        vault = None
+        message = None
+        pull_only = False
+        blocking = False
+
+    rc = sync_mod.cmd_sync(_Args())
+    assert rc == 0
+    subject = _git(vault, "log", "-1", "--pretty=%s").stdout.strip()
+    assert socket.gethostname() in subject, subject
+
+
+def test_sync_no_message_summarizes_a_large_staged_set_by_kind(tmp_path):
+    """A staged set past the summarisation threshold collapses to per-kind
+    counts rather than listing every record id."""
+    config_home, state_dir, vault = _one_vault_config(tmp_path)
+    for i in range(sync_mod._SYNC_MESSAGE_SUMMARY_THRESHOLD + 3):
+        (vault / "task" / f"task-{i}.md").write_text(f"# task {i}\n")
+
+    r = run_cli(["sync"], config_home=config_home, state_dir=state_dir)
+    assert r.returncode == 0, r.stderr
+    body = _git(vault, "log", "-1", "--pretty=%b").stdout
+    assert "task/task-0" not in body, body
+    assert "task:" in body, body
+
+
+def test_sync_no_message_names_a_sites_change_as_a_site_path(tmp_path):
+    """A new file inside an ALREADY-TRACKED site directory is named as its
+    own site path — a wholly new site directory instead collapses to the
+    directory line in `git status --porcelain` itself (real git behavior,
+    not this feature's concern), so the fixture tracks the site directory
+    first, the way a site that already has one page does."""
+    config_home, state_dir, vault = _one_vault_config(tmp_path)
+    (vault / "sites" / "my-site").mkdir(parents=True)
+    (vault / "sites" / "my-site" / "index.html").write_text("<html></html>\n")
+    _git(vault, "add", "-A")
+    _git(vault, "commit", "-m", "seed site")
+    (vault / "sites" / "my-site" / "page2.html").write_text("<html>2</html>\n")
+
+    r = run_cli(["sync"], config_home=config_home, state_dir=state_dir)
+    assert r.returncode == 0, r.stderr
+    body = _git(vault, "log", "-1", "--pretty=%b").stdout
+    assert "sites/my-site/page2.html" in body, body
+
+
+def test_sync_no_message_strips_control_characters_from_staged_paths(tmp_path):
+    """`git status --porcelain` itself always C-escapes a control byte in a
+    path (e.g. BEL/ESC become the literal two-character sequences ``\\a`` /
+    ``\\033``, wrapped in quotes) — there is no git config that turns this
+    off, so a raw control byte can never actually reach
+    :func:`sync_mod._staged_items_for_message` by staging a real file with
+    one in its name. This calls the message-building path directly with a
+    synthetic porcelain line carrying a raw control byte, the input shape
+    :func:`sync_mod._sanitize_message_path` exists to defend against even
+    though git's own escaping means that defense is never reached from the
+    CLI in practice."""
+    raw_line = "?? task/weird\x07\x1btask.md"
+    items = sync_mod._staged_items_for_message([raw_line])
+    joined = "".join(items)
+    assert "\x07" not in joined
+    assert "\x1b" not in joined
+
+    config_home, state_dir, vault = _one_vault_config(tmp_path)
+    weird_name = "task-x\x07\x1b[31m.md"
+    (vault / "task" / weird_name).write_text("# weird\n")
+
+    r = run_cli(["sync"], config_home=config_home, state_dir=state_dir)
+    assert r.returncode == 0, r.stderr
+    subject = _git(vault, "log", "-1", "--pretty=%s").stdout
+    body = _git(vault, "log", "-1", "--pretty=%b").stdout
+    for ch in "\x07\x1b":
+        assert ch not in subject
+        assert ch not in body
+
+
+def test_sync_no_message_bounds_body_length(tmp_path):
+    """A body assembled from many long paths is truncated rather than
+    growing without bound, while staying under the summarisation threshold
+    so this test isolates the length bound from the count-based collapse."""
+    config_home, state_dir, vault = _one_vault_config(tmp_path)
+    long_name = "x" * 200
+    count = sync_mod._SYNC_MESSAGE_SUMMARY_THRESHOLD - 1
+    for i in range(count):
+        (vault / "task" / f"{long_name}-{i}.md").write_text("# long\n")
+
+    r = run_cli(["sync"], config_home=config_home, state_dir=state_dir)
+    assert r.returncode == 0, r.stderr
+    body = _git(vault, "log", "-1", "--pretty=%b").stdout
+    assert len(body) <= sync_mod._SYNC_MESSAGE_BODY_MAX_CHARS + 16, len(body)
 
 
 def test_sync_skips_push_when_clean_and_in_sync(tmp_path):
@@ -2800,7 +2975,10 @@ def test_json_outcome_retries_exhausted_moving_forge(tmp_path):
     assert entry["outcome"] == "retries-exhausted"
     assert "condition" not in entry
     _assert_no_mid_rebase(default)
-    assert _git(default, "log", "-1", "--format=%s").stdout.strip() == "lore: sync vault"
+    # DEFAULT_SYNC_MSG is no longer the literal subject of a message-less sync
+    # — task/automatic-commits-name-the-host-and-what-they-published replaced
+    # it with a generated message naming the host and what was staged.
+    assert socket.gethostname() in _git(default, "log", "-1", "--format=%s").stdout.strip()
 
 
 def test_json_outcome_in_progress_contended_vault(tmp_path):
