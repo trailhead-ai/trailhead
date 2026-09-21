@@ -65,6 +65,12 @@ until every check passes:
   byte — the same rule the daemon applies to every request segment. The
   `..` check is a *substring* test, so a file named `notes..v2.html` is
   rejected here rather than publishing and then 404ing.
+- The destination's own `sites/` directory — and the `sites/<slug>/` beneath
+  it — must be a real directory, not a symlink, and must resolve inside the
+  vault or workspace it was addressed under. A symlink there would redirect
+  the staging copy and the atomic swap to wherever it pointed while the
+  publish still reported success at the original address, so it is refused
+  outright rather than resolved.
 - The slug must match `^[a-z0-9][a-z0-9._-]*$`.
 - The vault directory's own name must match that same pattern — it becomes
   the first URL segment, and the daemon gates it identically.
