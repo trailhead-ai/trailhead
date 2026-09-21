@@ -106,6 +106,28 @@ LIVE_ARMS = {
     "execute-rule-only.md": (["execute/SKILL.md", "_shared/execute.md"], True),
 }
 
+# The revision every arm frozen by the record-links rule salience treatment has
+# BOTH its source and its tail pinned to: the treatment's base commit. Each of
+# those arms was measured (or is pre-registered to be measured) against prose
+# exactly as it stood there.
+PRE_RULE_EDIT_REVISION = "73bf9b22"
+
+_SKILLS_GIT_PREFIX = "tools/craft/plugins/craft/skills"
+
+# The treatment rewrites the bytes of every *tailed* live arm, so each one has a
+# frozen pre-treatment twin named `<live stem>-pre-rule-edit.md`, built from that
+# live arm's own sources plus the tail, both at PRE_RULE_EDIT_REVISION. Deriving
+# the twins from LIVE_ARMS keeps the two facts — which arms carry a tail, and which
+# have a frozen twin — from drifting apart as arms are added.
+PRE_RULE_EDIT_LIVE_ARMS = tuple(
+    name for name, (_sources, with_tail) in LIVE_ARMS.items() if with_tail
+)
+
+
+def _pre_rule_edit_name(live_arm: str) -> str:
+    return f"{live_arm.removesuffix('.md')}-pre-rule-edit.md"
+
+
 _REJECTED_VARIANT = (
     "frozen record of a rejected prose variant, kept as evidence "
     "(expected.md, 'What that means for the arms')"
@@ -137,27 +159,11 @@ FROZEN_ARMS = {
         "post-change mirror is rule-only.md (expected.md, 'Extension — Task 1 of "
         "task/both-slice-termination-outcomes-are-measured-not-assumed')"
     ),
-    "rule-only-pre-rule-edit.md": _PRE_RULE_EDIT_REASON.format(
-        live="rule-only.md", rev="73bf9b22"
-    ),
-    "brainstorm-rule-only-pre-rule-edit.md": _PRE_RULE_EDIT_REASON.format(
-        live="brainstorm-rule-only.md", rev="73bf9b22"
-    ),
-    "distill-rule-only-pre-rule-edit.md": _PRE_RULE_EDIT_REASON.format(
-        live="distill-rule-only.md", rev="73bf9b22"
-    ),
-    "gauntlet-rule-only-pre-rule-edit.md": _PRE_RULE_EDIT_REASON.format(
-        live="gauntlet-rule-only.md", rev="73bf9b22"
-    ),
-    "plan-treatment-pre-rule-edit.md": _PRE_RULE_EDIT_REASON.format(
-        live="plan-treatment.md", rev="73bf9b22"
-    ),
-    "review-treatment-pre-rule-edit.md": _PRE_RULE_EDIT_REASON.format(
-        live="review-treatment.md", rev="73bf9b22"
-    ),
-    "execute-rule-only-pre-rule-edit.md": _PRE_RULE_EDIT_REASON.format(
-        live="execute-rule-only.md", rev="73bf9b22"
-    ),
+} | {
+    _pre_rule_edit_name(live): _PRE_RULE_EDIT_REASON.format(
+        live=live, rev=PRE_RULE_EDIT_REVISION
+    )
+    for live in PRE_RULE_EDIT_LIVE_ARMS
 }
 
 
@@ -206,14 +212,6 @@ def test_live_arm_rebuilds_byte_identically(arm_name: str):
 FROZEN_SLICE_SOURCE_COMMIT = "0336687c"
 FROZEN_SLICE_SOURCE_PATH = "tools/craft/plugins/craft/skills/slice/SKILL.md"
 
-# The revision every newly frozen arm's source AND tail are pinned to: this task's
-# own commit, taken before the record-links rule salience treatment lands. Every
-# one of these arms was measured (or, for the six not yet dispatched, is
-# pre-registered to be measured) against prose exactly as it stood here.
-PRE_RULE_EDIT_REVISION = "73bf9b22"
-
-_SKILLS_GIT_PREFIX = "tools/craft/plugins/craft/skills"
-
 # Every frozen arm that carries the reader-rule tail: arm name -> (source specs,
 # tail revision). Each source spec is (git-relative path, revision) so a frozen
 # arm's *source* revision and *tail* revision can be pinned independently — the
@@ -221,37 +219,15 @@ _SKILLS_GIT_PREFIX = "tools/craft/plugins/craft/skills"
 # produced today's rule-only.md, while the seven newly frozen arms' sources are
 # this same commit as their tail.
 FROZEN_TAILED_ARMS: dict[str, tuple[list[tuple[str, str]], str]] = {
-    "rule-only-pre-rule-edit.md": (
-        [(f"{_SKILLS_GIT_PREFIX}/slice/SKILL.md", PRE_RULE_EDIT_REVISION)],
-        PRE_RULE_EDIT_REVISION,
-    ),
-    "brainstorm-rule-only-pre-rule-edit.md": (
-        [(f"{_SKILLS_GIT_PREFIX}/brainstorm/SKILL.md", PRE_RULE_EDIT_REVISION)],
-        PRE_RULE_EDIT_REVISION,
-    ),
-    "distill-rule-only-pre-rule-edit.md": (
-        [(f"{_SKILLS_GIT_PREFIX}/distill/SKILL.md", PRE_RULE_EDIT_REVISION)],
-        PRE_RULE_EDIT_REVISION,
-    ),
-    "gauntlet-rule-only-pre-rule-edit.md": (
-        [(f"{_SKILLS_GIT_PREFIX}/gauntlet/SKILL.md", PRE_RULE_EDIT_REVISION)],
-        PRE_RULE_EDIT_REVISION,
-    ),
-    "plan-treatment-pre-rule-edit.md": (
-        [(f"{_SKILLS_GIT_PREFIX}/plan/SKILL.md", PRE_RULE_EDIT_REVISION)],
-        PRE_RULE_EDIT_REVISION,
-    ),
-    "review-treatment-pre-rule-edit.md": (
-        [(f"{_SKILLS_GIT_PREFIX}/review/SKILL.md", PRE_RULE_EDIT_REVISION)],
-        PRE_RULE_EDIT_REVISION,
-    ),
-    "execute-rule-only-pre-rule-edit.md": (
+    _pre_rule_edit_name(live): (
         [
-            (f"{_SKILLS_GIT_PREFIX}/execute/SKILL.md", PRE_RULE_EDIT_REVISION),
-            (f"{_SKILLS_GIT_PREFIX}/_shared/execute.md", PRE_RULE_EDIT_REVISION),
+            (f"{_SKILLS_GIT_PREFIX}/{src}", PRE_RULE_EDIT_REVISION)
+            for src in LIVE_ARMS[live][0]
         ],
         PRE_RULE_EDIT_REVISION,
-    ),
+    )
+    for live in PRE_RULE_EDIT_LIVE_ARMS
+} | {
     "slice-frozen-rule-only.md": (
         [(FROZEN_SLICE_SOURCE_PATH, FROZEN_SLICE_SOURCE_COMMIT)],
         PRE_RULE_EDIT_REVISION,
