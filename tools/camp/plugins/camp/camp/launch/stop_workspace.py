@@ -383,9 +383,11 @@ def stop_workspace(
 
     A listing that answers `None` or `UNANSWERED` at the (post-reconcile)
     preview step — the session raced away between the two tmux calls, a
-    vanishingly narrow window — degrades to an empty preview rather than
-    failing the stop: the kill is of the whole session regardless of what is
-    inside it, and a preview is a courtesy, not a precondition.
+    vanishingly narrow window — prints no count line, since "could not tell"
+    is never read as "no windows", and says instead that the windows could
+    not be listed. The stop still proceeds: the kill is of the whole session
+    regardless of what is inside it, and a preview is a courtesy, not a
+    precondition.
     """
     session_name = workspace_session_name(group, slug)
 
@@ -409,14 +411,19 @@ def stop_workspace(
         emit(reconcile_outcome.reason)
 
     listing = tmux.list_windows(session_name)
-    live_windows = listing.windows if isinstance(listing, WindowListing) else ()
-    preview = replace(
-        classify(live_windows, entries, shell_names),
-        reconciled=reconciled,
-        reconcile_note=reconcile_note,
-    )
-    for line in preview_lines(session_name, preview):
-        emit(line)
+    if isinstance(listing, WindowListing):
+        preview = replace(
+            classify(listing.windows, entries, shell_names),
+            reconciled=reconciled,
+            reconcile_note=reconcile_note,
+        )
+        for line in preview_lines(session_name, preview):
+            emit(line)
+    else:
+        # "Could not tell" is never read as "no windows": no count line,
+        # one line saying so, and the kill the operator asked for proceeds.
+        preview = StopPreview(windows=(), reconciled=reconciled, reconcile_note=reconcile_note)
+        emit(printable_path(f"camp: could not list the windows of {session_name}; stopping without a preview"))
 
     tmux.kill_session(session_name)
 

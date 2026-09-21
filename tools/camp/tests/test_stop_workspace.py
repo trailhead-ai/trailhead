@@ -44,9 +44,7 @@ if str(_PLUGIN_DIR) not in sys.path:
 def _window(window_id, name, current_path="/ws", current_command="bash"):
     from camp.launch.tmux import TmuxWindow
 
-    return TmuxWindow(
-        window_id=window_id, current_path=current_path, current_command=current_command, name=name
-    )
+    return TmuxWindow(window_id=window_id, current_path=current_path, current_command=current_command, name=name)
 
 
 def _entry(window_id, name, cwd=".", conversation_id="conv", command_line=None):
@@ -84,9 +82,13 @@ class _ScriptedTmux:
         initial: bool | None = True,
         listing_windows=(),
         poll_sequence=(False,),
+        listing_sequence=(),
         calls: list | None = None,
     ) -> None:
         self.calls = calls if calls is not None else []
+        # Scripted answers for successive `list_windows` calls, consumed
+        # first; once exhausted, `listing_windows` answers every call.
+        self._listing_sequence = list(listing_sequence)
         self._initial = initial
         self._listing_windows = tuple(listing_windows)
         self._poll_sequence = list(poll_sequence)
@@ -107,6 +109,8 @@ class _ScriptedTmux:
         from camp.launch.tmux import WindowListing
 
         self.calls.append(("list_windows", name))
+        if self._listing_sequence:
+            return self._listing_sequence.pop(0)
         return WindowListing(windows=self._listing_windows)
 
     def kill_session(self, name: str):
@@ -170,12 +174,8 @@ def test_kill_reaches_the_seam_once_targeted_after_preview_and_reconcile(tmp_pat
 
     kill_index = calls.index(("kill", session))
     emit_indexes = [i for i, c in enumerate(calls) if c[0] == "emit"]
-    reconcile_note_index = min(
-        i for i, c in enumerate(calls) if c[0] == "emit" and "dropped" in c[1]
-    )
-    preview_index = min(
-        i for i, c in enumerate(calls) if c[0] == "emit" and c[1].startswith("stopping ")
-    )
+    reconcile_note_index = min(i for i, c in enumerate(calls) if c[0] == "emit" and "dropped" in c[1])
+    preview_index = min(i for i, c in enumerate(calls) if c[0] == "emit" and c[1].startswith("stopping "))
 
     assert reconcile_note_index < preview_index < kill_index
     assert all(i < kill_index for i in emit_indexes)
@@ -412,3 +412,32 @@ def test_stop_workspace_and_stop_session_share_one_poll_deadline_rule(tmp_path: 
     # pins for `stop_session` — proving one shared deadline rule, not two that
     # happen to agree today.
     assert clock["now"] <= stop.POLL_TIMEOUT_SECONDS + 2 * stop.TMUX_TIMEOUT_SECONDS
+
+
+# ---------------------------------------------------------------------------
+# 10. tmux does not answer the preview listing -> no count line, kill proceeds
+# ---------------------------------------------------------------------------
+
+
+def test_an_unanswered_preview_listing_is_never_read_as_no_windows(tmp_path: Path) -> None:
+    """The reconciliation's listing answered; the preview's own, a moment
+    later, did not. "Could not tell" must not print as "0 windows": the
+    preview says the windows could not be listed, and the stop still
+    proceeds, because the kill is what the operator asked for."""
+    from camp.launch.stop_workspace import Stopped
+    from camp.launch.tmux import UNANSWERED, WindowListing
+
+    ws_dir = tmp_path / "ws"
+    ws_dir.mkdir()
+    _write_record(ws_dir, [_entry("@1", "main")])
+
+    answered = WindowListing(windows=(_window("@1", "main", current_command="pytest"),))
+    for second_answer in (UNANSWERED, None):
+        tmux = _ScriptedTmux(listing_sequence=[answered, second_answer])
+
+        outcome, lines = _stop_workspace(ws_dir, tmux)
+
+        assert isinstance(outcome, Stopped), second_answer
+        assert tmux.killed == ["=camp-g-slug"] or tmux.killed == ["camp-g-slug"], tmux.killed
+        assert not any("0 windows" in line for line in lines), (second_answer, lines)
+        assert any("could not list" in line and "camp-g-slug" in line for line in lines), (second_answer, lines)
