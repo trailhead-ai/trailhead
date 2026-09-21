@@ -58,13 +58,67 @@ def _sock_run(sock: str, *args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+#: The attaching client's terminal type. `attach-session` needs a usable
+#: `TERM` and REFUSES without one — `open terminal failed: terminal does not
+#: support clear` — so it cannot be inherited: a CI runner's environment
+#: routinely has `TERM` unset where a developer's shell always has it set.
+#: Pinned rather than defaulted so the attach behaves identically in both.
+_ATTACH_TERM = "screen"
+
+
+def _await_client(sock: str, session: str, fd: int, timeout: float) -> str | None:
+    """Wait until tmux reports a client attached to *session*.
+
+    Answers ``None`` on success, or whatever the client wrote to its pty
+    before giving up — tmux's own refusal, which is the only thing that
+    explains WHY nothing attached.
+
+    The child's output is drained as we poll rather than after: a client
+    that refuses prints its complaint and exits immediately, and reading a
+    pty whose child has already gone raises `OSError` instead of handing
+    back what it said.
+    """
+    os.set_blocking(fd, False)
+    said: list[str] = []
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            chunk = os.read(fd, 4096)
+        except (BlockingIOError, OSError):
+            chunk = b""
+        if chunk:
+            said.append(chunk.decode(errors="replace"))
+        if _sock_run(sock, "list-clients", "-t", session).stdout.strip():
+            return None
+        time.sleep(0.05)
+    return "".join(said).strip()
+
+
 def _attach_and_send(sock: str, session: str, keys: bytes, *, settle: float = 0.5) -> None:
-    """Fire real keystrokes at *session* through a genuine attached client."""
+    """Fire real keystrokes at *session* through a genuine attached client.
+
+    Waits for tmux to REPORT the client attached before writing the keys,
+    rather than sleeping a fixed interval and hoping. The fixed sleep was
+    both slower than it needed to be locally and not long enough to trust on
+    a loaded runner — and, worse, silent: a client that never attached at
+    all looked exactly like one that attached and ignored the key, so every
+    caller failed with "expected a second window, got one" instead of the
+    actual reason.
+    """
     pid, fd = pty.fork()
     if pid == 0:
-        os.execv(_REAL_TMUX, [_REAL_TMUX, "-L", sock, "attach-session", "-t", session])
+        os.execve(
+            _REAL_TMUX,
+            [_REAL_TMUX, "-L", sock, "attach-session", "-t", session],
+            {**os.environ, "TERM": _ATTACH_TERM},
+        )
     try:
-        time.sleep(settle)
+        complaint = _await_client(sock, session, fd, timeout=max(settle, 5.0))
+        if complaint is not None:
+            raise AssertionError(
+                f"no client ever attached to {session!r}; tmux said: {complaint!r}"
+            )
+        os.set_blocking(fd, True)
         os.write(fd, keys)
         time.sleep(settle)
     finally:
