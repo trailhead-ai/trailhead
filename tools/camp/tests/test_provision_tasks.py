@@ -885,6 +885,150 @@ def test_reconcile_carries_forward_work_state_set_to_ready(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# async path (seed_pending_workspace + cmd_setup_group): work_state
+# ---------------------------------------------------------------------------
+
+
+def test_async_setup_reports_not_applicable_work_state_for_member_with_no_activate_task(
+    tmp_path,
+):
+    """The detached `camp setup --background` provisioner never writes
+    "work_state" itself — only seed_pending_workspace does, on the initial
+    seed. A member declaring only provision-phase tasks must come out of that
+    async path reporting "not-applicable" work, not stuck "pending" forever
+    (manifest.work_state_for_member defaults an absent key to "pending")."""
+    from camp.provision.provision import seed_pending_workspace
+    from camp.provision.lifecycle import cmd_setup_group, provision_status_code, status_header
+
+    repo = tmp_path / "repo"
+    init_git_repo(repo, origin=True)
+    env = camp_state_env(tmp_path)
+    group = _make_group(
+        "asyncnoactivateg",
+        [
+            {
+                "name": "repo",
+                "repo_root": str(repo),
+                "base": "origin/main",
+                "tasks": [_provision_task("ok", ["true"])],
+            }
+        ],
+    )
+
+    seed_pending_workspace(group, "s", env=env)
+    cmd_setup_group(group, "s", env=env)
+
+    code, report = provision_status_code(group, "s", env=env)
+    assert report["members"][0]["work_state"] == "not-applicable"
+    assert report["work_code"] == 0
+    assert status_header(report) == "ready"
+
+
+def test_async_setup_member_with_activate_task_still_reports_pending_work_state(tmp_path):
+    """A member declaring an activate-phase task has real work still to do —
+    the async setup path must not lump it in with the "no activate task"
+    case, so it keeps reporting "pending" (and work_code 2) until `camp
+    activate` actually runs that task."""
+    from camp.provision.provision import seed_pending_workspace
+    from camp.provision.lifecycle import cmd_setup_group, provision_status_code
+
+    repo = tmp_path / "repo"
+    init_git_repo(repo, origin=True)
+    env = camp_state_env(tmp_path)
+    group = _make_group(
+        "asynchasactivateg",
+        [
+            {
+                "name": "repo",
+                "repo_root": str(repo),
+                "base": "origin/main",
+                "tasks": [_provision_task("dep-install", ["true"], phase="activate")],
+            }
+        ],
+    )
+
+    seed_pending_workspace(group, "s", env=env)
+    cmd_setup_group(group, "s", env=env)
+
+    code, report = provision_status_code(group, "s", env=env)
+    assert report["members"][0]["work_state"] == "pending"
+    assert report["work_code"] == 2
+
+
+def test_seed_pending_workspace_carries_forward_ready_work_state_on_reseed(tmp_path):
+    """Re-running seed_pending_workspace against an existing workspace (an
+    idempotent re-bring-up) currently rebuilds each entry from
+    provision_state/reason only, dropping any prior "work_state" — a
+    ready-for-work member would silently fall back to "pending". The reseed
+    must carry a prior "ready" forward instead."""
+    from camp.provision.provision import seed_pending_workspace
+    from camp.group.manifest import read_central_manifest, write_central_manifest
+
+    repo = tmp_path / "repo"
+    init_git_repo(repo, origin=True)
+    env = camp_state_env(tmp_path)
+    group = _make_group(
+        "reseedreadyg",
+        [
+            {
+                "name": "repo",
+                "repo_root": str(repo),
+                "base": "origin/main",
+                "tasks": [_provision_task("dep-install", ["true"], phase="activate")],
+            }
+        ],
+    )
+
+    mpath = seed_pending_workspace(group, "s", env=env)
+    data = read_central_manifest(mpath)
+    data["members"][0]["work_state"] = "ready"
+    write_central_manifest(mpath, data)
+
+    seed_pending_workspace(group, "s", env=env)
+
+    entry = read_central_manifest(mpath)["members"][0]
+    assert entry["work_state"] == "ready"
+
+
+def test_seed_pending_workspace_reseed_assigns_not_applicable_with_no_prior_work_state(
+    tmp_path,
+):
+    """The same reseed, but for a member whose on-disk manifest carries no
+    "work_state" key at all (the pre-fix async provisioner never wrote one) —
+    the reseed must gain "not-applicable" rather than leaving the key absent
+    (which reads as "pending" forever)."""
+    from camp.provision.provision import seed_pending_workspace
+    from camp.group.manifest import read_central_manifest, write_central_manifest
+
+    repo = tmp_path / "repo"
+    init_git_repo(repo, origin=True)
+    env = camp_state_env(tmp_path)
+    group = _make_group(
+        "reseednoactivateg",
+        [
+            {
+                "name": "repo",
+                "repo_root": str(repo),
+                "base": "origin/main",
+                "tasks": [_provision_task("ok", ["true"])],
+            }
+        ],
+    )
+
+    mpath = seed_pending_workspace(group, "s", env=env)
+    data = read_central_manifest(mpath)
+    # Simulate the pre-fix on-disk shape: no "work_state" key was ever
+    # written for this member (the defect this task closes).
+    del data["members"][0]["work_state"]
+    write_central_manifest(mpath, data)
+
+    seed_pending_workspace(group, "s", env=env)
+
+    entry = read_central_manifest(mpath)["members"][0]
+    assert entry["work_state"] == "not-applicable"
+
+
+# ---------------------------------------------------------------------------
 # over-budget: persists verbatim through the manifest projection
 # ---------------------------------------------------------------------------
 

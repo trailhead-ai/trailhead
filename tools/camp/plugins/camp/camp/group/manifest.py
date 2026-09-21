@@ -365,6 +365,35 @@ def work_state_for_member(member: dict[str, Any]) -> str:
     return member.get("work_state", "pending")
 
 
+def work_state_for_new_entry(
+    member: dict[str, Any] | None, prior: dict[str, Any] | None
+) -> str | None:
+    """The `work_state` a freshly built manifest entry should carry, or None.
+
+    The single rule "a member with no activate-phase task has no work to ever
+    become work-ready for" lives here, beside `work_state_for_member`, so both
+    writers of a fresh member entry — `reconcile_worktree`'s Phase 2 merge and
+    `seed_pending_workspace`'s entry build (including its idempotent re-seed of
+    an existing workspace) — apply it identically instead of each inlining
+    its own copy.
+
+    Precedence: a *prior* entry that already carries a "work_state" key wins
+    outright (carry-forward — this rebuild never overwrites a value another
+    writer, e.g. activation.py, already recorded). Only when there is no prior
+    value does the "no activate-phase task" rule apply, per `tasks_in_phase`.
+    Returns None when neither applies, so the caller writes no "work_state"
+    key at all — the same "absent reads as pending" posture
+    `work_state_for_member` already documents.
+    """
+    from .config import tasks_in_phase
+
+    if prior is not None and "work_state" in prior:
+        return prior["work_state"]
+    if not tasks_in_phase(member, "activate"):
+        return WORK_STATE_NOT_APPLICABLE
+    return None
+
+
 def owner_of(manifest: dict[str, Any]) -> str | None:
     """Return the workspace's declared owning host, or None if never recorded.
 

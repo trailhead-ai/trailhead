@@ -1221,13 +1221,15 @@ class TestStatusPerTaskSurfacing:
         assert exc.value.code == 0
 
         lines = capsys.readouterr().out.splitlines()
-        # A member seeded via flip_member_state_unlocked carries no work_state
-        # key, which reads as "pending" per manifest.work_state_for_member.
-        assert "  repo_a: ready / work: pending" in lines
+        # two_member_group's members declare no tasks at all, so no
+        # activate-phase task — seed_pending_workspace assigns "not-applicable"
+        # rather than the flip_member_state_unlocked call ever touching
+        # work_state itself.
+        assert "  repo_a: ready / work: not-applicable" in lines
         assert "    seed: ok" in lines
         assert "    graphify: failed" in lines
         # Insertion order preserved and sub-lines sit under their member line.
-        i_member = lines.index("  repo_a: ready / work: pending")
+        i_member = lines.index("  repo_a: ready / work: not-applicable")
         i_seed = lines.index("    seed: ok")
         i_graphify = lines.index("    graphify: failed")
         assert i_member < i_seed < i_graphify

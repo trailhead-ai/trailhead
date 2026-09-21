@@ -701,6 +701,10 @@ class TestHotPathSafetyForOwnerlessWorkspace:
                     "repo_root": str(g["repo_a"]),
                     "worktree_path": str(wt_path),
                     "provision_state": "pending",
+                    # repo_a declares no activate-phase task, so
+                    # seed_pending_workspace assigns "not-applicable" work
+                    # readiness up front rather than leaving the key absent.
+                    "work_state": "not-applicable",
                 }
             ],
         }
