@@ -759,3 +759,72 @@ measured revision (`d14c198a`, `bda10d7`, `78049293`, `c123d11f`) inline in its 
 column, so none of them reads as measuring today's text — this entry's only job is
 to make the case's `arms/` directory match what those rows already say, and to give
 future re-runs a live arm a test actually keeps in sync.
+
+### 2026-09-21 — table-condition re-run against the live treated arm (security-audit follow-through)
+
+**Why.** The Phase 4 security audit of the `bc8c493e` rule edit flagged (Medium) a coverage
+gap: the "Table vs paragraph condition — U1" section's own table-condition runs above
+(2026-09-14) were measured against the pre-edit `## Record links` text — now frozen as
+`arms/treatment-pre-rule-edit.md` — never against the edited text that added "In a table or
+list, link every row instead — do not stop at the first row." The audit's concern is the AC4/AC5
+trust boundary: an agent primed toward linking every row in a table might stop re-checking each
+row's identifier against the bare-fallback grammar/vault conditions. No table-condition run had
+been captured against the edited text to check for that regression. This entry closes that gap
+with a measurement; it makes no rule-text change and edits no row above.
+
+**Arm.** The committed live `arms/treatment.md`, unmodified — confirmed byte-identical to a
+fresh rebuild from the current `## Record links` section of `rules.md` by
+`.venv/bin/python -m pytest tools/outpost/tests/test_record_link_rendering_arms_contract.py -q`
+(5 passed). Repo HEAD at dispatch time: `ff38a1b0`.
+
+**Dispatch.** Table condition only, 3 runs, each a fresh run directory under the session
+scratchpad, each a separate `claude -p` process (never a subagent):
+
+```
+fixtures/make-fixture-env.sh <run-dir> table
+LORE_STATE_DIR="<run-dir>" claude -p "<run-dir>/task.md contents>" --setting-sources project \
+  --append-system-prompt "$(cat arms/treatment.md)" \
+  --allowedTools "Read" < /dev/null > <run-dir>/capture.txt 2> <run-dir>/capture.stderr.txt
+echo $? > <run-dir>/capture.exit
+```
+
+All 3 processes exited 0.
+
+**Per-run, per-record result.**
+
+| Run | Record 1 (`gearshed/note/rotate-tires`) | Record 2 (`attic-archive/log/winter-inventory`) | Record 3 (`ghost-vault/memo/unfiled-thought`) | Record 4 (`gearshed/note/Rotate_Tires`) | Record 5 (`gearshed/Field Note/check-in`) |
+|---|---|---|---|---|---|
+| 1 | Linked correctly: `[note/rotate-tires](http://127.0.0.1:9199/records/gearshed/note/rotate-tires)` | Bare, attributed to non-direct-child vault path | Bare, attributed to unresolvable vault | Bare, attributed to slug grammar (uppercase + underscore) | Bare, attributed to kind grammar (uppercase + space) |
+| 2 | Linked correctly (same form) | Bare, same attribution | Bare, same attribution | Bare, same attribution | Bare, same attribution |
+| 3 | Linked correctly (same form) | Bare, same attribution | Bare, same attribution | Bare, same attribution | Bare, same attribution |
+
+Record 1's table-condition link rate this batch: 3/3, each with the correct `note/rotate-tires`
+visible text and the correct `.../records/gearshed/note/rotate-tires` target. Records 2–5
+rendered bare in all 3 runs, and every run's prose correctly named the specific fallback reason
+per record (vault path not a direct child of the vaults root for record 2; vault absent from the
+listing for record 3; grammar violation for records 4 and 5) — matching `expected.md`'s per-record
+expected rendering table exactly.
+
+**Confound-flag read.** No run under this batch linked any of records 2–5, and no run rendered
+records 2–5 differently from any other run. The confound flag (`expected.md`, "Confound flag,
+orthogonal to the Δ verdict") is **not tripped**: the edited rule's stronger table-row salience
+language did not cause any run to skip a row's fallback check. This directly answers the audit's
+stated concern — the trust boundary held in all 3 runs.
+
+**Relation to the U1 verdict above.** This batch does not re-run the paragraph condition and does
+not recompute Δ — the 2026-09-14 U1 section's `Δ = 0`, INVALIDATED verdict stands as measured
+against the pre-edit text and is not superseded here. This entry is narrower: it confirms the
+table condition alone, against the edited live arm, still meets this case's own per-record pass
+condition (`expected.md`, "Pass condition") and trips no confound, closing the audit's specific
+coverage gap rather than re-litigating U1.
+
+**Capture scan.** `tools/craft/plugins/craft/scripts/capture_scan.py` run against each run's
+`capture.txt` and `capture.stderr.txt` individually (6 files total): all 6 exited 0
+("known-safe match(es), 0 credential findings — clean"); the one known-safe match per
+`capture.txt` is the record-1 URL's own `path-or-url-shape` reclassification, expected per the
+scanner's documented false-positive carve-out.
+
+**Verdict — PASS.** All 3 table-condition runs against the live treated arm meet the case's pass
+condition for every record, with no confound. Captures are not committed — this eval case has no
+`runs/` tree (consistent with the case's existing convention of grading from ephemeral captures,
+per the entries above), and remain only in the session scratchpad.
