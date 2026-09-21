@@ -889,12 +889,24 @@ def _auto_take_published_side(vault: Path, path: str) -> str | None:
 
     Returns ``None`` when the conflict is fully settled (landed, staged, or
     removed) — the caller drops it from ``files`` entirely, no report needed.
-    Returns a held-file reason, and writes nothing, when landing the bytes
-    would escape the vault (a path traversal, or a symlink planted at the
+    Returns a held-file reason, and touches nothing, when the conflicted path
+    resolves outside the vault (a path traversal, or a symlink planted at the
     conflicted worktree path): the rest of the replay must not stop over one
     file that a person can still settle with ``take-file``, by hand, once
-    whatever is at that path stops resolving outside the vault.
+    whatever is at that path stops resolving outside the vault. That
+    confinement is checked once, before either settling branch, because a
+    staged removal hands the same path to git as a pathspec and git answers an
+    escaping one with a fatal.
     """
+    target = vault / path
+    try:
+        layers_mod.assert_within_root(target, vault)
+    except layers_mod.LayerConfinementError:
+        return (
+            f"{path}: this path resolves outside the vault (a path traversal or a "
+            "planted symlink) — settle with `lore resolve take-file` once that's fixed"
+        )
+
     oversized = _stage_size_over_ceiling(vault, path)
     if oversized is not None:
         return oversized
@@ -910,15 +922,6 @@ def _auto_take_published_side(vault: Path, path: str) -> str | None:
         if rc != 0:
             raise ResolveError(f"could not stage the removal of {path}: {err}")
         return None
-
-    target = vault / path
-    try:
-        layers_mod.assert_within_root(target, vault)
-    except layers_mod.LayerConfinementError:
-        return (
-            f"{path}: this path resolves outside the vault (a path traversal or a "
-            "planted symlink) — settle with `lore resolve take-file` once that's fixed"
-        )
 
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(remote.stdout)

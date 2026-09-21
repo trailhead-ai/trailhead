@@ -2640,3 +2640,22 @@ def test_a_declaration_that_is_not_a_bool_still_reaches_a_determinate_outcome(tm
     assert _git(fx.vault, "status", "--porcelain").stdout.strip() == "", (
         "the vault is left clean — the refusal happens after the replay is aborted"
     )
+
+
+def test_a_traversing_conflicted_path_is_held_rather_than_crashing_the_replay(tmp_path, resolve):
+    """The deletion branch must refuse an escaping path as gracefully as the write branch.
+
+    Landing bytes for a path that escapes the vault is refused with a held-file
+    reason, so the rest of the replay carries on and a person settles that one
+    file by hand. The branch that instead STAGES A REMOVAL had no such check:
+    it handed the pathspec straight to git, whose fatal became a ResolveError
+    that stops the whole replay over one file. Both branches take their path
+    from the same caller, so both owe the same answer.
+    """
+    fx = _Fixture(tmp_path)
+    _stop_on_a_sites_conflict(fx, b"<p>remote</p>\n")
+
+    reason = resolve._auto_take_published_side(fx.vault, "../outside.html")
+
+    assert reason is not None, "an escaping path is held, not crashed on"
+    assert "../outside.html" in reason, "the held reason names the path"
