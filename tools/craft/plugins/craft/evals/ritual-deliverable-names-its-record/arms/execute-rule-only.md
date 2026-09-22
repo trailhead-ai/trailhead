@@ -306,18 +306,18 @@ lands. Full writer and exit-owner rules govern every status value, not just thes
 ### Workspace preflight
 
 Before the claim below writes anything — on both the plan shape and the standalone shape — check
-whether the repos this run is about to build in are stale against their base. Execute never
-rebases on its own: a rebase rewrites a branch an operator may have another session on, so the
-fix stays an operator action and this step only refuses to build on a stale base.
+whether the repos this run is about to build in are stale against their base. Execute never rebases
+on its own: a rebase rewrites a branch an operator may have another session on, so the fix stays an
+operator action and this step only refuses to build on a stale base.
 
-Enumerate the repos the same way Phase 6's push does: in a camp workspace, the member worktrees
-of the current workspace's manifest; in vanilla usage, the single current repo. For each repo,
-fetch its base ref first — `git -C <repo> fetch origin --quiet` — then read drift. The base is
-the member's configured base, default `origin/main`.
+Enumerate the repos the same way Phase 6's push does: in a camp workspace, the member worktrees of
+the current workspace's manifest; in vanilla usage, the single current repo. For each repo, fetch
+its base ref first — `git -C <repo> fetch origin --quiet` — then read drift. The base is the
+member's configured base, default `origin/main`.
 
 In a camp workspace, read `camp status --json` once from the workspace and use each member's
-`behind` and `upstream` fields directly — never re-derive them; the probe is always enabled on
-that CLI path. In vanilla usage, compute the same two facts directly: `git rev-list --count
+`behind` and `upstream` fields directly — never re-derive them; the probe is always enabled on that
+CLI path. In vanilla usage, compute the same two facts directly: `git rev-list --count
 HEAD..<base>` for how far behind, and `git for-each-ref --format='%(upstream:track)'
 refs/heads/<branch>` for whether the upstream is gone.
 
@@ -330,14 +330,13 @@ member, `behind=N` and/or `upstream gone`, followed by the fix: `camp rebase` in
 
 **A fetch failure is not a stop by itself.** When the fetch exits non-zero but the base ref still
 resolves locally, compare against the cached ref and say the fetch failed in that repo's report
-line, rather than stopping on the fetch alone. When the base ref does not resolve at all —
-including a `null` `behind` from `camp status --json` — there is nothing to compare against:
-stop and say so.
+line, rather than stopping on the fetch alone. When the base ref does not resolve at all — including
+a `null` `behind` from `camp status --json` — there is nothing to compare against: stop and say so.
 
-Member names, branch names, and base refs substituted into the commands above come from the
-manifest and the group config, so validate each one against the safe-value shape
-(`^[A-Za-z0-9._/-]+$`) before substitution, the rule every other vault- or config-sourced value in
-this document already follows.
+Member names, branch names, and base refs substituted into the commands above come from the manifest
+and the group config, so validate each one against the safe-value shape (`^[A-Za-z0-9._/-]+$`)
+before substitution, the rule every other vault- or config-sourced value in this document already
+follows.
 
 ### Claiming the run at first dispatch
 
