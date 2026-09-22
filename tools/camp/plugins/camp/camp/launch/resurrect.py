@@ -381,6 +381,21 @@ def resurrect_workspace_session(
     )
 
 
+def _restamp_failure_detail(reason: str, record_path: Path) -> str:
+    """The underlying detail out of a `NotRestamped.reason`, stripped of the
+    redundant `camp: could not restamp window record at <path>: ` prefix
+    `restamp_window_entries` itself spells on a lock timeout
+    (`group/window_record.py:357`) — composing that whole reason into this
+    module's own `camp: window record at <path> could not be re-stamped —
+    <detail>` template would otherwise double the `camp:` prefix and the
+    path. A reason that does not carry the known prefix (any other
+    `NotRestamped` producer) is returned unchanged."""
+    known_prefix = f"camp: could not restamp window record at {record_path}: "
+    if reason.startswith(known_prefix):
+        return reason[len(known_prefix) :]
+    return reason
+
+
 def render_resurrection_lines(result: ResurrectionResult) -> list[str]:
     """The lines a resurrection prints: the drop lines `render_plan_lines`
     already renders for `result.dropped`, then one failure line per
@@ -400,9 +415,10 @@ def render_resurrection_lines(result: ResurrectionResult) -> list[str]:
         )
         lines.append(printable_path(line))
     if isinstance(result.restamp, NotRestamped):
+        detail = _restamp_failure_detail(result.restamp.reason, result.record_path)
         line = (
             f"camp: window record at {result.record_path} could not be "
-            f"re-stamped — {result.restamp.reason}"
+            f"re-stamped — {detail}"
         )
         lines.append(printable_path(line))
     return lines

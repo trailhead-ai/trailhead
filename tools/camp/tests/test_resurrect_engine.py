@@ -347,6 +347,50 @@ def test_a_refused_option_kills_the_session_and_returns_create_failed(tmp_path):
     assert record.entries == (e1, e2, e3), "the record must be untouched"
 
 
+# -- Folded in from Task 4 review: the restamp-failure line must not double
+#    the "camp:" prefix or the record path -------------------------------------
+
+
+def test_the_restamp_failure_line_names_the_underlying_reason_once_not_doubled(tmp_path):
+    """`restamp_window_entries`'s own `NotRestamped.reason` on a lock
+    timeout already spells `camp: could not restamp window record at
+    <path>: <e>` (`group/window_record.py:357`) — composing THAT into
+    `render_resurrection_lines`'s own template doubled the `camp:` prefix
+    and the path. Varied across two distinct underlying reasons: the exact
+    shape `restamp_window_entries` emits on a lock timeout (which carries
+    the redundant prefix), and a plain reason with no such prefix (proving
+    the fix does not merely special-case one literal string)."""
+    from camp.group.window_record import NotRestamped
+    from camp.launch.resurrect import ResurrectionResult, render_resurrection_lines
+
+    path = tmp_path / "windows.json"
+
+    def _result(restamp):
+        return ResurrectionResult(
+            session_name="camp-trailhead-camp-cli",
+            restored=(),
+            failed=(),
+            dropped=(),
+            restamp=restamp,
+            record_path=path,
+        )
+
+    prefixed = NotRestamped(
+        reason=f"camp: could not restamp window record at {path}: locked by another camp process"
+    )
+    lines = render_resurrection_lines(_result(prefixed))
+    assert lines[-1] == (
+        f"camp: window record at {path} could not be re-stamped — "
+        "locked by another camp process"
+    )
+    assert lines[-1].count("camp:") == 1
+    assert lines[-1].count(str(path)) == 1
+
+    bare = NotRestamped(reason="disk full")
+    lines_bare = render_resurrection_lines(_result(bare))
+    assert lines_bare[-1] == f"camp: window record at {path} could not be re-stamped — disk full"
+
+
 # -- 6. restamp lock timeout ---------------------------------------------------
 
 

@@ -83,6 +83,7 @@ def test_exit_status_table_covers_every_known_member_via_reflection():
         Connected,
         Created,
         DoorOutcome,
+        Resurrected,
         _EXIT_STATUS,
         exit_status,
     )
@@ -92,6 +93,10 @@ def test_exit_status_table_covers_every_known_member_via_reflection():
 
     for cls in subclasses:
         assert cls in _EXIT_STATUS, f"{cls.__name__} has no exit-status mapping"
+        if cls is Resurrected:
+            # Resurrected's exit status is a function of `failed`, not a
+            # fixed per-type value — checked separately below.
+            continue
         expected = 0 if cls in (Created, Connected) else 1
         instance = _instantiate_for_exit_status(cls)
         assert exit_status(instance) == expected
@@ -100,9 +105,68 @@ def test_exit_status_table_covers_every_known_member_via_reflection():
 def _instantiate_for_exit_status(cls):
     from camp.launch.door import Connected, Created
 
-    if cls in (Created, Connected):
+    if cls in (Connected, Created):
         return _make_success(cls, tmux_session="camp-trailhead-camp-cli")
     return cls()
+
+
+def _make_resurrected(*, restored: int, failed: int, dropped: int, attached: bool = True):
+    from camp.launch.door import Resurrected
+
+    return Resurrected(
+        slug="camp-cli",
+        group="trailhead",
+        tmux_session="camp-trailhead-camp-cli",
+        workspace_path=Path("/workspaces/camp-cli"),
+        attached=attached,
+        restored=restored,
+        failed=failed,
+        dropped=dropped,
+    )
+
+
+def test_resurrected_exit_status_is_0_when_nothing_failed_and_2_when_something_did():
+    from camp.launch.door import exit_status
+
+    assert exit_status(_make_resurrected(restored=3, failed=0, dropped=0)) == 0
+    assert exit_status(_make_resurrected(restored=2, failed=1, dropped=0)) == 2
+
+
+def test_resurrected_human_line_varies_with_restored_failed_and_dropped():
+    from camp.launch.door import render_human
+
+    whole = render_human(_make_resurrected(restored=3, failed=0, dropped=0))
+    partial = render_human(_make_resurrected(restored=2, failed=1, dropped=0))
+    dropped = render_human(_make_resurrected(restored=2, failed=0, dropped=1))
+
+    assert whole.endswith("(3 windows)")
+    assert partial.endswith("(2 of 3 windows; 1 did not come back)")
+    assert dropped.endswith("(2 windows; 1 dropped)")
+    assert whole != partial != dropped
+
+    both = render_human(_make_resurrected(restored=1, failed=1, dropped=1))
+    assert both.endswith("(1 of 2 windows; 1 did not come back)"), (
+        "failed must take precedence over dropped in the human line when both are non-zero"
+    )
+
+
+def test_resurrected_json_carries_a_windows_key_created_and_connected_do_not():
+    from camp.launch.door import Created, render_json
+
+    resurrected_obj = render_json(_make_resurrected(restored=2, failed=1, dropped=0))
+    assert resurrected_obj["outcome"] == "resurrected"
+    assert resurrected_obj["windows"] == {"restored": 2, "failed": 1, "dropped": 0}
+
+    created_obj = render_json(_make_success(Created, tmux_session="camp-trailhead-camp-cli"))
+    assert "windows" not in created_obj
+
+
+def test_refused_record_unreadable_exit_status_and_word():
+    from camp.launch.door import RefusedRecordUnreadable, exit_status, refusal_outcome_word
+
+    outcome = RefusedRecordUnreadable()
+    assert exit_status(outcome) == 1
+    assert refusal_outcome_word(outcome) == "record_unreadable"
 
 
 def test_a_new_outcome_member_without_a_mapping_raises_instead_of_defaulting():
