@@ -149,10 +149,18 @@ def touch_request_stamp(vault_root: "str | Path", *, clock=time.time) -> None:
     or a flush has written successfully, before it spawns the worker detached.
     Idempotent: a burst of writes just keeps moving this stamp forward, which
     is exactly what lets the worker's debounce collapse the burst into one sync.
+
+    Writes via ``os.open``/``os.fchmod`` rather than ``Path.write_text`` so a
+    stamp file left over at a looser mode (POSIX applies ``O_CREAT``'s mode
+    argument only when the call actually creates the file) is tightened to
+    0600 on every write, not just the first.
     """
     path = request_stamp_path(vault_root)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(repr(clock()), encoding="utf-8")
+    fd = os.open(path, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
+    os.fchmod(fd, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(repr(clock()))
 
 
 def _read_request_stamp(vault_root: "str | Path") -> "float | None":
@@ -179,9 +187,19 @@ def read_marker(vault_root: "str | Path") -> "dict | None":
 
 
 def _write_marker(vault_root: "str | Path", marker: dict) -> dict:
+    """Write *marker* as JSON, tightening its mode to 0600 on every write.
+
+    Same reuse gap as :func:`touch_request_stamp`: a marker left over at a
+    looser mode from before this fix (or written by anything else) would
+    otherwise keep that mode forever, since ``O_CREAT``'s mode argument is a
+    no-op once the file already exists.
+    """
     path = marker_path(vault_root)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(marker, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    fd = os.open(path, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
+    os.fchmod(fd, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(json.dumps(marker, indent=2, sort_keys=True) + "\n")
     return marker
 
 
@@ -254,6 +272,49 @@ def _worker_argv(vault_name: str) -> list:
     return [sys.executable, str(cli_path), "publish", "--vault", vault_name]
 
 
+#: Literal environment variable names forwarded to the detached worker — the
+#: lore/XDG/session vocabulary the CLI's own config and vault resolution reads
+#: (grepped from this package's ``os.environ``/``environ.get`` call sites),
+#: plus GPG-agent/SSH-agent sockets the sync loop's git needs to sign and push
+#: exactly as it would in this process.  ``LORE_PUBLISH_DISABLE`` is included
+#: so a test environment that sets it stays fenced through the real spawn path
+#: too — never force-set, only forwarded when already present (see module
+#: docstring).
+_WORKER_ENV_NAMES = frozenset({
+    "PATH", "HOME", "LANG",
+    "XDG_STATE_HOME", "XDG_CONFIG_HOME", "XDG_CONFIG_DIRS", "XDG_DATA_HOME", "XDG_CACHE_HOME",
+    "LORE_EMAIL", "LORE_USER", "LORE_GROUPS_DIR", "LORE_RECORD_URL_BASE",
+    "LORE_PUBLISH_RETRY_MAX", "LORE_PUBLISH_DISABLE",
+    "LORE_VAULT_GUARD_ROOT", "LORE_VAULT_GUARD_EXEMPT",
+    "CLAUDE_PROJECT_DIR", "CLAUDE_CODE_SESSION_ID", "CLAUDE_SESSION_ID",
+    "SSH_AUTH_SOCK", "GNUPGHOME", "GPG_TTY", "GPG_AGENT_INFO",
+})
+
+#: Prefixes forwarded wholesale rather than by exact name — git's own env
+#: vocabulary (author/committer identity, SSH/signing command overrides) is
+#: too open-ended to enumerate, and locale variants (``LC_ALL``, ``LC_CTYPE``,
+#: ...) likewise.
+_WORKER_ENV_PREFIXES = ("GIT_", "LC_")
+
+
+def _worker_env() -> dict:
+    """Return the minimal environment the detached publish worker gets.
+
+    The worker is spawned fully detached (``start_new_session=True``); left to
+    inherit this process's environment wholesale, it would carry along
+    whatever else is sitting there — an agent session's own API tokens, most
+    concretely. The worker only ever runs ``lore`` (config/vault resolution)
+    and ``git`` (the sync loop's commit/pull/push), so it gets exactly the
+    names :data:`_WORKER_ENV_NAMES`/:data:`_WORKER_ENV_PREFIXES` list, read off
+    THIS process's ``os.environ`` at spawn time.
+    """
+    env = {k: v for k, v in os.environ.items() if k in _WORKER_ENV_NAMES}
+    for key, value in os.environ.items():
+        if key.startswith(_WORKER_ENV_PREFIXES):
+            env[key] = value
+    return env
+
+
 def _spawn_worker(argv: list) -> None:
     """Spawn the publish worker detached (the ``Popen`` new-session idiom).
 
@@ -261,6 +322,8 @@ def _spawn_worker(argv: list) -> None:
     per-vault log (:func:`log_path`) once it enters :func:`_run_publish`; DEVNULL
     here just keeps the caller's own streams (a create's single ``RECORD_ID``
     line, in particular) untouched by anything printed before that point.
+    Likewise never inherits this process's full environment — see
+    :func:`_worker_env`.
 
     Honors ``LORE_PUBLISH_DISABLE`` (see the module docstring) immediately
     before the real spawn — set, this returns without ever touching
@@ -279,6 +342,7 @@ def _spawn_worker(argv: list) -> None:
         stderr=subprocess.DEVNULL,
         start_new_session=True,
         close_fds=True,
+        env=_worker_env(),
     )
 
 
@@ -292,7 +356,9 @@ def _open_lock_fd(vault_root: "str | Path") -> int:
     """
     lp = lock_path(vault_root)
     lp.parent.mkdir(parents=True, exist_ok=True)
-    return os.open(lp, os.O_CREAT | os.O_RDWR, 0o600)
+    fd = os.open(lp, os.O_CREAT | os.O_RDWR, 0o600)
+    os.fchmod(fd, 0o600)
+    return fd
 
 
 def _lock_held(vault_root: "str | Path") -> bool:
@@ -541,6 +607,12 @@ def _run_publish(
     lp = log_path(vault_root)
     lp.parent.mkdir(parents=True, exist_ok=True)
     log_fd = os.open(lp, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
+    # POSIX applies O_CREAT's mode argument only when the call actually
+    # creates the file — a pre-existing log at a looser mode (a leftover from
+    # before this fix, or written by anything else) would otherwise keep that
+    # mode while sync stderr, which can embed a credentialed remote URL, is
+    # written into it.
+    os.fchmod(log_fd, 0o600)
     try:
         with os.fdopen(log_fd, "w") as log_file:
             with contextlib.redirect_stdout(log_file), contextlib.redirect_stderr(log_file):

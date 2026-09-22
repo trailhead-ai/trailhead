@@ -565,6 +565,56 @@ class TestRealSpawn:
         _reap_real_workers.extend(_pids_with_open_file(lock, vault_root=vault))
 
 
+class TestWorkerEnvScoping:
+    """``_spawn_worker`` passes no ``env=`` to ``Popen`` today, so the detached
+    worker inherits this process's ENTIRE environment — including whatever an
+    agent session's own tokens happen to be sitting in it. The worker only
+    ever needs to run ``lore`` (config/vault resolution) and ``git`` (the sync
+    loop's commit/pull/push), so it must get an explicit, minimal environment
+    instead of the ambient one."""
+
+    @pytest.fixture
+    def _allow_real_publish_spawn(self):
+        """Opt out of the autouse no-op — this class calls the real
+        ``_spawn_worker``, with ``subprocess.Popen`` itself patched instead."""
+        return True
+
+    def test_spawn_worker_env_excludes_arbitrary_vars_and_keeps_required_ones(
+        self, tmp_path, monkeypatch
+    ):
+        state_dir = tmp_path / "state"
+        home_dir = tmp_path / "home"
+        monkeypatch.setenv("XDG_STATE_HOME", str(state_dir))
+        monkeypatch.setenv("HOME", str(home_dir))
+        monkeypatch.setenv("SOME_SECRET_TOKEN", "sk-should-not-leak")
+
+        captured = {}
+
+        def fake_popen(argv, **kwargs):
+            captured["argv"] = argv
+            captured["kwargs"] = kwargs
+
+            class _FakeProc:
+                pid = 999999
+
+            return _FakeProc()
+
+        monkeypatch.setattr(publish_mod.subprocess, "Popen", fake_popen)
+
+        publish_mod._spawn_worker([sys.executable, str(CLI_PATH), "publish", "--vault", "default"])
+
+        assert "kwargs" in captured, "the real Popen seam was never reached"
+        worker_env = captured["kwargs"].get("env")
+        assert worker_env is not None, (
+            "the worker must get an explicit env, not inherit this process's own"
+        )
+        assert "SOME_SECRET_TOKEN" not in worker_env, (
+            "an arbitrary ambient variable must not ride along into the detached worker"
+        )
+        assert worker_env.get("XDG_STATE_HOME") == str(state_dir)
+        assert worker_env.get("HOME") == str(home_dir)
+
+
 class TestPidsWithOpenFileFallback:
     """``_pids_with_open_file`` must reap the worker even on a host with no
     ``lsof`` on PATH, via the marker's own ``pid`` field."""

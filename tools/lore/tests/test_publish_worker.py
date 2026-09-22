@@ -376,6 +376,76 @@ class TestLogFile:
         mode = os.stat(log_file).st_mode & 0o777
         assert mode == 0o600, f"log file mode was {oct(mode)}, not 0600"
 
+    def test_log_file_pre_existing_with_looser_mode_is_tightened_to_0600(self, env):
+        """POSIX applies ``O_CREAT``'s mode argument only when the ``open()``
+        call actually creates the file — a log left over from before this
+        worker existed (or written by something else) keeps whatever mode it
+        already had. That log can carry sync stderr with a credentialed
+        remote URL embedded in it, so reuse must tighten the mode, not trust
+        the one already on disk."""
+        vault = _make_vault(env.tmp_path, "default", config_home=env.config_home)
+        clock = FakeClock()
+        publish.touch_request_stamp(vault, clock=lambda: clock() - 10.0)
+        sleeper = RecordingSleeper(clock)
+        sync_call = _stub_sync_call("converged")
+
+        log_file = publish.log_path(vault)
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        log_file.write_text("stale log content from a looser-mode era\n", encoding="utf-8")
+        os.chmod(log_file, 0o644)
+
+        publish.cmd_publish(SimpleNamespace(
+            vault="default", quiet_for=5.0, clock=clock, sleeper=sleeper, sync_call=sync_call,
+        ))
+
+        mode = os.stat(log_file).st_mode & 0o777
+        assert mode == 0o600, f"log file mode was {oct(mode)}, not 0600"
+
+
+# ---------------------------------------------------------------------------
+# marker / stamp / lock file modes — same pre-existing-file gap as the log
+# ---------------------------------------------------------------------------
+
+
+class TestReusedFileModesAreTightened:
+    def test_write_marker_reuses_a_looser_mode_file_and_tightens_it(self, env):
+        vault = _make_vault(env.tmp_path, "default", config_home=env.config_home)
+        path = publish.marker_path(vault)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{}", encoding="utf-8")
+        os.chmod(path, 0o644)
+
+        publish._write_marker(vault, {"outcome": "running"})
+
+        mode = os.stat(path).st_mode & 0o777
+        assert mode == 0o600, f"marker file mode was {oct(mode)}, not 0600"
+
+    def test_touch_request_stamp_reuses_a_looser_mode_file_and_tightens_it(self, env):
+        vault = _make_vault(env.tmp_path, "default", config_home=env.config_home)
+        path = publish.request_stamp_path(vault)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("0", encoding="utf-8")
+        os.chmod(path, 0o644)
+
+        publish.touch_request_stamp(vault, clock=lambda: 42.0)
+
+        mode = os.stat(path).st_mode & 0o777
+        assert mode == 0o600, f"request stamp file mode was {oct(mode)}, not 0600"
+
+    def test_open_lock_fd_reuses_a_looser_mode_file_and_tightens_it(self, env):
+        vault = _make_vault(env.tmp_path, "default", config_home=env.config_home)
+        path = publish.lock_path(vault)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("", encoding="utf-8")
+        os.chmod(path, 0o644)
+
+        fd = publish._open_lock_fd(vault)
+        try:
+            mode = os.stat(path).st_mode & 0o777
+            assert mode == 0o600, f"lock file mode was {oct(mode)}, not 0600"
+        finally:
+            os.close(fd)
+
 
 # ---------------------------------------------------------------------------
 # single-flight
