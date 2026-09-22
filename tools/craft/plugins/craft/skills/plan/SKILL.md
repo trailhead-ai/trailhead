@@ -270,12 +270,12 @@ vault-sourced values, so validate it against the safe-value shape `^[A-Za-z0-9._
 (`_shared/security.md`'s untrusted-input rule) before substitution — a failing value refuses loudly
 rather than being silently omitted; that validation governs this label's value.
 
-When the parent carries no `## Enumerated states` section, this step does nothing.
-
 Once the label is recorded, commit the design doc in the plan's target repository — the camp member
 this plan builds against (the same repository the label's path is relative to; in vanilla usage, the
 current repo). Run every git command below as `git -C <repo>` so the workspace root is never the cwd
-that decides. First the skip test: when `git -C <repo> ls-files --error-unmatch <path>` exits 0 and
+that decides. The commit lands on the branch that repository is on; when that is the repository's
+default branch, ask the user before committing, the same consent execute requires for default-branch
+work. First the skip test: when `git -C <repo> ls-files --error-unmatch <path>` exits 0 and
 `git -C <repo> diff --quiet HEAD -- <path>` exits 0, the file is tracked and unchanged at HEAD and
 there is nothing to commit — skip the rest. Otherwise stage exactly that validated path
 (`git -C <repo> add <path>`, never `git add -A`) and commit only that path, so anything else already
@@ -286,6 +286,9 @@ path. When the commit itself fails — no signing key, a rejecting hook — stop
 the doc stays uncommitted, and execute's preflight will refuse to build until it is committed, so
 the failure is fixed here, not worked around there. After this step, `git -C <repo> status` shows
 nothing for the design-doc path and the path is tracked at HEAD.
+
+When the parent carries no `## Enumerated states` section, this step does nothing — no document, no
+label, no commit.
 
 ### 7. Define Tasks
 

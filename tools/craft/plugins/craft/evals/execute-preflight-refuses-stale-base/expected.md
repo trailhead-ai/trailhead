@@ -195,3 +195,9 @@ the `### Workspace preflight` section itself. That is wrong: `5f41cef2` carries 
 drift rules and lacks only the design-doc sub-step, which is what makes it the tighter control. The
 runs' own transcripts show the baseline agent reading that section and finding no design-doc
 paragraph in it. The predicted verdicts and the RED/GREEN outcome are unaffected.
+
+**Limitation of Revision 3, recorded after review.** The parent fixture carries its
+`craft/design-doc` label as a body line, not as sidecar data the documented `--json` read would
+return, and the clean-room arm has no vault to read from. Both variants therefore exercise only the
+git half of the check (validation, `ls-files`, `diff --quiet`); the label read itself is unmeasured
+by this case and is pinned only by the prose naming the same structural read the resume path uses.

@@ -301,22 +301,28 @@ does not resolve at all there is nothing to compare against: stop and say so. A 
 `camp status --json` is that case, or a member worktree directory that is missing — the report says
 which after `ls`-ing the path.
 
-**The design-doc check.** On the parent-with-children shape only, read the parent's labels
-(`lore record show task/<parent-name> --vault <elected-vault>`, the sidecar's `labels`); when a
-`craft/design-doc` label is present, validate its value against the same shape, leading-slash,
-`..`-segment, and inside-the-working-directory rules the state-coverage gate applies to that same
-label at close (Phase 6), anchored on the same directory that gate uses: the plan's target
-repository — in a camp workspace its member worktree, in vanilla usage the current repo. A value
-that fails validation, or names a file that does not exist there, is reported and stops, the same
-way the close gate treats it. A parent with no `craft/design-doc` label passes this check: a plan
-with no enumerated states has no design doc. Once the value is validated, run
-`git -C <repo> ls-files --error-unmatch <path>` and `git -C <repo> diff --quiet HEAD -- <path>`.
-Untracked, or tracked with uncommitted changes — stop here, before the claim on a fresh run or
-before the next dispatch on a resumed one — and report the path with the remedy: commit it — plan's
-step 6.5 owns that commit; re-run it or commit by hand. Tracked and unchanged — pass. Run this check
-in the same pass as the drift read so one stop reports every finding, drift lines and the design-doc
-line together, rather than surfacing the doc only after the operator has rebased. Execute never
-commits the design doc itself, so plan's step 6.5 stays its one owner.
+**The design-doc check.** On the parent-with-children shape only, read the parent's label
+structurally — `lore record show task/<parent-name> --vault <elected-vault> --json` →
+`.sidecar.labels["craft/design-doc"]`, the same read the resume path uses for its boundary label;
+the plain render prints the body only and shows no labels. When the label is present, validate its
+value against the same shape, leading-slash, `..`-segment, and inside-the-working-directory rules
+the state-coverage gate applies to that same label at close (Phase 6), anchored where that gate
+anchors: the working directory the run started in, which is the repository working directory the
+label's path is relative to. The check never picks a member worktree on its own — a session that
+starts at a workspace root rather than inside the target repository resolves the path against a
+directory that is not a git repository, and that is reported as the stop, not guessed around. A
+value that fails validation, or names a file that does not exist there, is reported and stops, the
+same way the close gate treats it. A parent with no `craft/design-doc` label passes this check: a
+plan with no enumerated states has no design doc. Once the value is validated, run
+`git -C <working-directory> ls-files --error-unmatch <path>` and
+`git -C <working-directory> diff --quiet HEAD -- <path>`. Untracked — stop here, before the claim on
+a fresh run or before the next dispatch on a resumed one — and report the path with the remedy:
+commit it — plan's step 6.5 owns that commit; re-run it or commit by hand. Tracked with uncommitted
+changes — stop the same way, with "commit by hand" as the remedy, since a mid-run edit to the doc is
+this run's own work and plan's step is not the one to re-run for it. Tracked and unchanged — pass.
+Run this check in the same pass as the drift read so one stop reports every finding, drift lines and
+the design-doc line together, rather than surfacing the doc only after the operator has rebased.
+Execute never commits the design doc itself, so plan's step 6.5 stays its one owner.
 
 ### Claiming the run at first dispatch
 

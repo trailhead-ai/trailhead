@@ -2218,7 +2218,11 @@ All 4 processes exited 0; no discards.
 **RED state (baseline), as expected.md's Revision 3 predicted.** Both baseline runs PROCEED,
 including `design-doc-untracked` — `5f41cef2`'s `execute.md` carries the Workspace preflight
 section but nothing in it inspects `craft/design-doc` (the runs' own messages say so: "No ...
-paragraph exists in this copy's Workspace preflight"). Condition 1 fails on baseline as predicted;
+paragraph exists in this copy's Workspace preflight").
+
+**Limitation, recorded after review:** the parent fixture carries the label as a body line rather
+than sidecar data, so neither arm exercises the label read the prose prescribes (`--json` →
+`.sidecar.labels`); the variants pin the git half of the check only. Condition 1 fails on baseline as predicted;
 condition 2 passes (there was never a stop to regress).
 
 **GREEN state (treatment), matching Revision 3 in full.** `design-doc-untracked` STOPs before the
