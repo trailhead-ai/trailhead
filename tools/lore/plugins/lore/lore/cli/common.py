@@ -35,6 +35,7 @@ import sys
 from pathlib import Path
 
 from ..vault import config as vault_config_mod
+from ..vault import signing as signing_mod
 
 
 #: How long ``_read_stdin_body`` waits for stdin to become ready (data or EOF)
@@ -458,11 +459,21 @@ def _partition_writable_vaults(vaults) -> tuple[list, list]:
 
 
 def _git(vault: Path, *args: str) -> tuple[int, str, str]:
-    """Run a git command in the vault. Returns (returncode, stdout, stderr)."""
+    """Run a git command in the vault. Returns (returncode, stdout, stderr).
+
+    The environment carries the host signing overrides
+    (:func:`signing.apply_env_overrides`) when a usable host key is
+    configured — the single choke point every vault-mutating git call in
+    ``sync``, ``flush``, ``resolve`` and ``resolve_state`` goes through, so
+    a commit made anywhere through this helper signs with the host key. With
+    no key configured, the environment handed to git is exactly the
+    inherited one, unchanged from before this override existed.
+    """
     try:
+        env = signing_mod.apply_env_overrides(dict(os.environ))
         result = subprocess.run(
             ["git", "-C", str(vault), *args],
-            capture_output=True, text=True, timeout=60,
+            capture_output=True, text=True, timeout=60, env=env,
         )
         return result.returncode, (result.stdout or "").strip(), (result.stderr or "").strip()
     except Exception as e:
