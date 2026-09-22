@@ -135,17 +135,27 @@ class DirectoryUnavailableError(Exception):
 def _flock_probe(path: Path) -> bool:
     """Return whether *path*'s OS lock is currently held.
 
-    Opens a FRESH, read-only descriptor and attempts a non-blocking exclusive
-    `flock`: `BlockingIOError` means another process holds it (live); a clean
-    acquire means it is not held, and this immediately releases what it just
-    took. Raises (does not catch) on any other failure — no `fcntl` module,
-    a permission or I/O error opening or locking the file — leaving the
-    fail-closed decision to `_is_locked`, the only caller.
+    Opens a FRESH, read-only descriptor — `O_NOFOLLOW` so a lock-directory
+    entry that is a symlink is never followed to whatever it points at
+    (raises `OSError`/`ELOOP` instead, which `_is_locked` reports live), and
+    `O_NONBLOCK` so a lock path swapped for a FIFO returns immediately
+    instead of blocking on a writer that will never arrive. After opening,
+    `fstat`s the descriptor and requires a regular file: anything else
+    (a FIFO slipped past the `O_NONBLOCK` open, a device, a directory) is as
+    undecidable as a failed open. Attempts a non-blocking exclusive `flock`:
+    `BlockingIOError` means another process holds it (live); a clean acquire
+    means it is not held, and this immediately releases what it just took.
+    Raises (does not catch) on any other failure — no `fcntl` module, a
+    permission or I/O error opening or locking the file, a non-regular
+    target — leaving the fail-closed decision to `_is_locked`, the only
+    caller.
     """
     if fcntl is None:
         raise OSError("fcntl module unavailable on this platform")
-    fd = os.open(path, os.O_RDONLY)
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise OSError(f"{path}: not a regular file")
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
@@ -199,6 +209,11 @@ def _iter_thread_lock_paths(lock_dir: Path) -> list[Path]:
     genuinely empty directory. Any `OSError` scanning *lock_dir* itself
     raises `DirectoryUnavailableError`; the caller has already confirmed
     *lock_dir* exists via `_require_dir_or_absent`.
+
+    A symlink entry is included even when it is dangling (its target does
+    not exist, so `entry.is_file()`'s symlink-following stat would otherwise
+    drop it) — `_flock_probe`'s `O_NOFOLLOW` open then reports it live
+    without ever resolving what it points at.
     """
     try:
         with os.scandir(lock_dir) as it:
@@ -210,17 +225,19 @@ def _iter_thread_lock_paths(lock_dir: Path) -> list[Path]:
         for entry in entries
         if entry.name.endswith(".lock")
         and entry.name != _COORDINATION_LOCK_NAME
-        and entry.is_file()
+        and (entry.is_symlink() or entry.is_file())
     )
 
 
 def _under_workspace(cwd: Path, workspace: Path) -> bool:
     """Path-segment "rooted under" test — never a bare string prefix.
 
-    Raises (does not catch) `OSError` resolving either path: a comparison
-    this process cannot decide must not silently read as "not under the
-    workspace" — the caller treats the raise as an unusable-cwd case, the
-    same fail-closed outcome as a missing or unreadable rollout.
+    Raises (does not catch) `OSError` or `ValueError` resolving either path
+    — the latter covers a `cwd` containing a NUL byte, which `Path.resolve`
+    rejects before ever touching the OS. A comparison this process cannot
+    decide must not silently read as "not under the workspace" — the caller
+    treats the raise as an unusable-cwd case, the same fail-closed outcome
+    as a missing or unreadable rollout.
     """
     return cwd.resolve().is_relative_to(workspace.resolve())
 
@@ -272,7 +289,7 @@ def enumerate_live_sessions(env: dict[str, str], workspace: Path | None = None) 
         if workspace is not None:
             try:
                 under = _under_workspace(Path(cwd), workspace)
-            except OSError:
+            except (OSError, ValueError):
                 raise MissingRolloutError(thread_id) from None
             if not under:
                 continue

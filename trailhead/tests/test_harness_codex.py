@@ -707,6 +707,78 @@ class TestCodexSessionsListerSubprocess:
         assert result.returncode != 0
         assert "bad id with spaces.lock" in result.stderr
 
+    def test_symlinked_lock_over_held_original_still_reports_live(self, tmp_path):
+        """A `<id>.lock` entry replaced by a symlink to an unrelated, UNLOCKED
+        decoy file must not read as not-live: the probe must never follow the
+        symlink to the decoy's own lock state, only decide from the symlink
+        entry itself. The original lock stays held on its own inode the whole
+        time, standing in for the real Codex process that still holds it."""
+        env = _env(tmp_path)
+        thread_id = "01a0c9d2-1038-7b11-ad91-9c36433a8ce7"
+        lock_path = _write_lock_file(env, f"{thread_id}.lock")
+        decoy = _lock_dir(env) / "decoy-unlocked-target"
+        decoy.write_text("")
+        _write_rollout(
+            env, f"rollout-2024-01-01T12-00-00-{thread_id}.jsonl", [_meta_line(str(tmp_path))]
+        )
+
+        fd = os.open(lock_path, os.O_RDONLY)
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        try:
+            lock_path.unlink()
+            lock_path.symlink_to(decoy)
+            result = _run_lister(env, cwd=tmp_path)
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            os.close(fd)
+
+        assert result.returncode == 0
+        records = json.loads(result.stdout)
+        assert {r["sessionId"] for r in records} == {thread_id}
+
+    def test_symlinked_lock_with_no_held_lock_behind_it_still_reports_live(self, tmp_path):
+        """Same undecidable-symlink shape, but with nothing holding the
+        original lock at all — this must count as live too, the same
+        fail-closed treatment this module already gives an invalid held lock
+        it cannot map to a rollout."""
+        env = _env(tmp_path)
+        thread_id = "01a0c9d2-1038-7b11-ad91-9c36433a8ce7"
+        lock_path = _write_lock_file(env, f"{thread_id}.lock")
+        decoy = _lock_dir(env) / "decoy-unlocked-target"
+        decoy.write_text("")
+        lock_path.unlink()
+        lock_path.symlink_to(decoy)
+
+        result = _run_lister(env, cwd=tmp_path)
+
+        assert result.returncode != 0
+        assert thread_id in result.stderr
+
+    def test_workspace_scoped_nul_cwd_exits_nonzero_naming_thread_without_traceback(
+        self, tmp_path
+    ):
+        """A held session's rollout `cwd` containing a NUL byte must not
+        escape `--workspace` scoping as an uncaught `ValueError` traceback —
+        it is exactly as undecidable as an `OSError` resolving the path, and
+        gets the same fail-closed nonzero exit naming the thread."""
+        env = _env(tmp_path)
+        thread_id = "01a0c9d2-1038-7b11-ad91-9c36433a8ce7"
+        lock_path = _write_lock_file(env, f"{thread_id}.lock")
+        _write_rollout(
+            env,
+            f"rollout-2024-01-01T12-00-00-{thread_id}.jsonl",
+            [_meta_line("bad\u0000cwd")],
+        )
+        ws = tmp_path / "ws"
+        ws.mkdir()
+
+        with _held(lock_path):
+            result = _run_lister(env, "--workspace", str(ws), cwd=tmp_path)
+
+        assert result.returncode != 0
+        assert thread_id in result.stderr
+        assert "Traceback" not in result.stderr
+
 
 class TestCodexSessionsIsLocked:
     """Direct coverage of the fail-closed probe wrapper, independent of a
@@ -721,6 +793,28 @@ class TestCodexSessionsIsLocked:
 
         monkeypatch.setattr(codex_sessions, "_flock_probe", _raise)
         assert codex_sessions._is_locked(lock_path) is True
+
+    def test_fifo_lock_path_reports_live_without_hanging(self, tmp_path):
+        """A regular lock file swapped for a FIFO between the scandir check
+        and the open must not block the probe forever — an ordinary blocking
+        open-for-read on a FIFO with no writer hangs, so a regression here
+        would hang this test rather than fail it; a background thread with a
+        join timeout turns that hang into a red assertion instead."""
+        import threading
+
+        fifo_path = tmp_path / "fifo.lock"
+        os.mkfifo(fifo_path)
+        outcome: dict[str, bool] = {}
+
+        def _probe():
+            outcome["locked"] = codex_sessions._is_locked(fifo_path)
+
+        thread = threading.Thread(target=_probe, daemon=True)
+        thread.start()
+        thread.join(timeout=5)
+
+        assert not thread.is_alive(), "_is_locked hung opening a FIFO"
+        assert outcome["locked"] is True
 
     def test_unheld_lock_reports_not_locked(self, tmp_path):
         lock_path = tmp_path / "some.lock"
