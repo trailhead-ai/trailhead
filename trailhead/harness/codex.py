@@ -43,10 +43,12 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from trailhead.harness.base import Harness, HarnessError, SessionTranscript
+from trailhead.harness.base import Harness, HarnessError, SessionRecord, SessionTranscript
+from trailhead.harness.claude_code import _excerpt
 
 #: The file whose presence under a Codex home means Codex has been configured
 #: there — read by :meth:`CodexHarness.detect` as the "home has state" signal.
@@ -373,3 +375,115 @@ class CodexHarness(Harness):
         _env = env if env is not None else dict(os.environ)
         sessions_dir = codex_home(_env) / _SESSIONS_SUBDIR
         return _resolve_rollout_path(session_id, sessions_dir)
+
+    # -- live session enumeration -------------------------------------------
+    #
+    # Codex ships no non-interactive session lister of its own (``codex agents``
+    # is a TUI browser), so this seam points at trailhead's own lister module,
+    # which resolves the Codex home from ITS OWN process environment (never an
+    # argv-passed one) and reports liveness by probing
+    # ``<home>/thread-writer-locks/<thread-id>.lock`` — see
+    # ``trailhead.harness.codex_sessions`` for the full contract.
+
+    def session_enumerate(self, workspace: Path | None = None) -> list[str]:
+        """Return the argv that runs :mod:`trailhead.harness.codex_sessions`.
+
+        Raises :class:`HarnessError` on a ``workspace`` whose string form
+        begins with ``-`` — it would land in the value slot right after
+        ``--workspace`` and read as a flag. This is argv safety only, not
+        filesystem validation, mirroring
+        :meth:`~trailhead.harness.claude_code.ClaudeCodeHarness.session_enumerate`.
+        """
+        argv = [sys.executable, "-m", "trailhead.harness.codex_sessions"]
+        if workspace is not None:
+            as_arg = str(workspace)
+            if as_arg.startswith("-"):
+                raise HarnessError(
+                    f"session_enumerate: workspace would read as a flag in "
+                    f"argv: {as_arg!r}"
+                )
+            argv += ["--workspace", as_arg]
+        return argv
+
+    def parse_session_list(self, output: str) -> list[SessionRecord]:
+        """Parse :mod:`trailhead.harness.codex_sessions`'s JSON array output.
+
+        See the base contract for the full failure semantics. ``pid`` is
+        always ``None`` — the lock this seam's liveness signal comes from
+        carries no pid — and ``controllable`` is always ``False``: this
+        slice gives no session a remote-attach capability, regardless of
+        ``kind``. ``startedAt`` is the rollout's ISO 8601 ``session_meta``
+        timestamp (see ``codex.py``'s U1), not the epoch-millis shape Claude
+        Code's own listing uses, so a wrong-typed or unparseable value
+        degrades to ``None`` rather than raising.
+        """
+        try:
+            data = json.loads(output)
+        except (json.JSONDecodeError, ValueError):
+            raise HarnessError(
+                f"codex_sessions: failed to decode output: {_excerpt(output)}"
+            ) from None
+
+        if not isinstance(data, list):
+            raise HarnessError(
+                f"codex_sessions: expected a JSON array, got "
+                f"{type(data).__name__}: {_excerpt(output)}"
+            )
+
+        records: list[SessionRecord] = []
+        for record in data:
+            if not isinstance(record, dict):
+                raise HarnessError(
+                    f"codex_sessions: expected a JSON object per record, got "
+                    f"{type(record).__name__}: {_excerpt(output)}"
+                )
+
+            session_id = record.get("sessionId")
+            if not _is_session_id(session_id):
+                raise HarnessError(
+                    f"codex_sessions: record has missing or invalid "
+                    f"'sessionId': {_excerpt(output)}"
+                )
+
+            raw_cwd = record.get("cwd")
+            if not isinstance(raw_cwd, str) or not raw_cwd:
+                raise HarnessError(
+                    f"codex_sessions: record has missing or invalid "
+                    f"'cwd': {_excerpt(output)}"
+                )
+            cwd = Path(raw_cwd).resolve()
+
+            kind = record.get("kind")
+            if not isinstance(kind, str) or not kind:
+                raise HarnessError(
+                    f"codex_sessions: record has missing or invalid "
+                    f"'kind': {_excerpt(output)}"
+                )
+
+            name = record.get("name")
+            if not isinstance(name, str):
+                name = None
+
+            started_at_raw = record.get("startedAt")
+            started_at = None
+            if isinstance(started_at_raw, str) and started_at_raw:
+                try:
+                    started_at = datetime.fromisoformat(
+                        started_at_raw.replace("Z", "+00:00")
+                    )
+                except ValueError:
+                    started_at = None
+
+            records.append(
+                SessionRecord(
+                    session_id=session_id,
+                    cwd=cwd,
+                    kind=kind,
+                    controllable=False,
+                    name=name,
+                    pid=None,
+                    started_at=started_at,
+                )
+            )
+
+        return records

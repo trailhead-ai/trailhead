@@ -9,14 +9,19 @@ through to it would fail loudly rather than silently reading a real home.
 
 from __future__ import annotations
 
+import fcntl
 import json
+import os
 import stat
+import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
 
 from trailhead.harness import HarnessError, get_harness, known_harness_names
+from trailhead.harness.claude_code import _ERROR_EXCERPT_LIMIT
 from trailhead.harness.codex import CodexHarness, _is_session_id, codex_home
 
 
@@ -361,3 +366,335 @@ class TestCodexSessionIdGuard:
 
     def test_accepts_uuid_shaped_thread_id(self):
         assert _is_session_id("01a0c9d2-1038-7b11-ad91-9c36433a8ce7") is True
+
+
+def _lock_dir(env: dict[str, str]) -> Path:
+    return Path(env["CODEX_HOME"]) / "thread-writer-locks"
+
+
+def _write_lock_file(env: dict[str, str], name: str) -> Path:
+    d = _lock_dir(env)
+    d.mkdir(parents=True, exist_ok=True)
+    path = d / name
+    path.write_text("")
+    return path
+
+
+def _run_lister(env: dict[str, str], *extra_args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, "-m", "trailhead.harness.codex_sessions", *extra_args],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+
+class TestCodexSessionsListerSubprocess:
+    """`python -m trailhead.harness.codex_sessions`, run as a real subprocess
+    against a tmp Codex home — never the ambient environment."""
+
+    def test_missing_lock_dir_prints_empty_array(self, tmp_path):
+        env = _env(tmp_path)
+        result = _run_lister(env)
+        assert result.returncode == 0
+        assert json.loads(result.stdout) == []
+
+    def test_unheld_lock_file_prints_empty_array(self, tmp_path):
+        env = _env(tmp_path)
+        _write_lock_file(env, "01a0c9d2-1038-7b11-ad91-9c36433a8ce7.lock")
+        result = _run_lister(env)
+        assert result.returncode == 0
+        assert json.loads(result.stdout) == []
+
+    def test_held_lock_with_rollout_prints_one_record(self, tmp_path):
+        env = _env(tmp_path)
+        thread_id = "01a0c9d2-1038-7b11-ad91-9c36433a8ce7"
+        lock_path = _write_lock_file(env, f"{thread_id}.lock")
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        _write_rollout(
+            env, f"rollout-2024-01-01T12-00-00-{thread_id}.jsonl", [_meta_line(str(ws))]
+        )
+
+        fd = os.open(lock_path, os.O_RDONLY)
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        try:
+            result = _run_lister(env)
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            os.close(fd)
+
+        assert result.returncode == 0
+        records = json.loads(result.stdout)
+        assert records == [
+            {
+                "sessionId": thread_id,
+                "cwd": str(ws),
+                "kind": "codex",
+                "startedAt": "2024-01-01T00:00:00Z",
+            }
+        ]
+
+    def test_held_lock_without_rollout_exits_nonzero_naming_thread_id(self, tmp_path):
+        env = _env(tmp_path)
+        thread_id = "01a0c9d2-1038-7b11-ad91-9c36433a8ce7"
+        lock_path = _write_lock_file(env, f"{thread_id}.lock")
+
+        fd = os.open(lock_path, os.O_RDONLY)
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        try:
+            result = _run_lister(env)
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            os.close(fd)
+
+        assert result.returncode != 0
+        assert thread_id in result.stderr
+
+    def test_workspace_filters_to_sessions_rooted_under_it(self, tmp_path):
+        env = _env(tmp_path)
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        sibling = tmp_path / "sibling"
+        sibling.mkdir()
+        id_under = "01a0c9d2-1038-7b11-ad91-9c36433a8ce7"
+        id_sibling = "02b1d0e3-2049-8c22-be02-0d47544b9df8"
+        lock_under = _write_lock_file(env, f"{id_under}.lock")
+        lock_sibling = _write_lock_file(env, f"{id_sibling}.lock")
+        _write_rollout(env, f"rollout-2024-01-01T10-00-00-{id_under}.jsonl", [_meta_line(str(ws))])
+        _write_rollout(
+            env, f"rollout-2024-01-01T11-00-00-{id_sibling}.jsonl", [_meta_line(str(sibling))]
+        )
+
+        fd_under = os.open(lock_under, os.O_RDONLY)
+        fd_sibling = os.open(lock_sibling, os.O_RDONLY)
+        fcntl.flock(fd_under, fcntl.LOCK_EX)
+        fcntl.flock(fd_sibling, fcntl.LOCK_EX)
+        try:
+            result = _run_lister(env, "--workspace", str(ws))
+        finally:
+            fcntl.flock(fd_under, fcntl.LOCK_UN)
+            fcntl.flock(fd_sibling, fcntl.LOCK_UN)
+            os.close(fd_under)
+            os.close(fd_sibling)
+
+        assert result.returncode == 0
+        records = json.loads(result.stdout)
+        assert {r["sessionId"] for r in records} == {id_under}
+
+    def test_ignores_coordination_lock(self, tmp_path):
+        env = _env(tmp_path)
+        coord_path = _write_lock_file(env, ".coordination.lock")
+
+        fd = os.open(coord_path, os.O_RDONLY)
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        try:
+            result = _run_lister(env)
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            os.close(fd)
+
+        assert result.returncode == 0
+        assert json.loads(result.stdout) == []
+
+    def test_unreadable_lock_is_reported_live_and_exits_nonzero(self, tmp_path):
+        """Fail-closed liveness via the OS-level route: an unreadable lock
+        file cannot be decided by the probe, so it must be treated as live —
+        and since no rollout backs it, the process exits nonzero."""
+        if hasattr(os, "geteuid") and os.geteuid() == 0:
+            pytest.skip("root bypasses file permissions")
+        env = _env(tmp_path)
+        thread_id = "01a0c9d2-1038-7b11-ad91-9c36433a8ce7"
+        lock_path = _write_lock_file(env, f"{thread_id}.lock")
+        lock_path.chmod(0o000)
+        try:
+            result = _run_lister(env)
+        finally:
+            lock_path.chmod(0o644)
+
+        assert result.returncode != 0
+        assert thread_id in result.stderr
+
+
+class TestCodexSessionsIsLocked:
+    """Direct coverage of the fail-closed probe wrapper, independent of a
+    real subprocess — the alternate route the task allows for proving an
+    undecidable probe reports live."""
+
+    def test_probe_raising_reports_live(self, tmp_path, monkeypatch):
+        from trailhead.harness import codex_sessions
+
+        lock_path = tmp_path / "some.lock"
+        lock_path.write_text("")
+
+        def _raise(path):
+            raise OSError("simulated undecidable probe")
+
+        monkeypatch.setattr(codex_sessions, "_flock_probe", _raise)
+        assert codex_sessions._is_locked(lock_path) is True
+
+    def test_unheld_lock_reports_not_locked(self, tmp_path):
+        from trailhead.harness import codex_sessions
+
+        lock_path = tmp_path / "some.lock"
+        lock_path.write_text("")
+        assert codex_sessions._is_locked(lock_path) is False
+
+
+class TestCodexSessionEnumerate:
+    def test_returns_module_argv_with_no_workspace(self):
+        argv = CodexHarness().session_enumerate()
+        assert argv == [sys.executable, "-m", "trailhead.harness.codex_sessions"]
+
+    def test_appends_workspace_flag(self, tmp_path):
+        argv = CodexHarness().session_enumerate(tmp_path)
+        assert argv == [
+            sys.executable,
+            "-m",
+            "trailhead.harness.codex_sessions",
+            "--workspace",
+            str(tmp_path),
+        ]
+
+    def test_raises_on_dash_prefixed_workspace(self):
+        with pytest.raises(HarnessError):
+            CodexHarness().session_enumerate(Path("-rf"))
+
+
+@pytest.mark.real_home  # error paths route through the shared home-redacting excerpt
+class TestCodexParseSessionList:
+    def test_two_records_preserve_order_and_validate_ids(self, tmp_path):
+        payload = json.dumps(
+            [
+                {
+                    "sessionId": "aaa111",
+                    "cwd": str(tmp_path / "a"),
+                    "kind": "codex",
+                    "startedAt": "2024-01-01T00:00:00Z",
+                },
+                {
+                    "sessionId": "bbb222",
+                    "cwd": str(tmp_path / "b"),
+                    "kind": "codex",
+                    "startedAt": "2024-01-02T00:00:00Z",
+                },
+            ]
+        )
+        records = CodexHarness().parse_session_list(payload)
+        assert [r.session_id for r in records] == ["aaa111", "bbb222"]
+        assert records[0].cwd == (tmp_path / "a").resolve()
+        assert records[1].cwd == (tmp_path / "b").resolve()
+
+    def test_missing_cwd_raises_naming_field(self, tmp_path):
+        payload = json.dumps([{"sessionId": "aaa111", "kind": "codex"}])
+        with pytest.raises(HarnessError, match="cwd"):
+            CodexHarness().parse_session_list(payload)
+
+    def test_invalid_session_id_raises(self, tmp_path):
+        payload = json.dumps(
+            [{"sessionId": "../escape", "cwd": str(tmp_path), "kind": "codex"}]
+        )
+        with pytest.raises(HarnessError, match="sessionId"):
+            CodexHarness().parse_session_list(payload)
+
+    def test_wrong_typed_started_at_degrades_to_none(self, tmp_path):
+        payload = json.dumps(
+            [{"sessionId": "aaa111", "cwd": str(tmp_path), "kind": "codex", "startedAt": 12345}]
+        )
+        records = CodexHarness().parse_session_list(payload)
+        assert records[0].started_at is None
+
+    def test_valid_started_at_parses_as_utc(self, tmp_path):
+        payload = json.dumps(
+            [
+                {
+                    "sessionId": "aaa111",
+                    "cwd": str(tmp_path),
+                    "kind": "codex",
+                    "startedAt": "2024-01-01T00:00:00Z",
+                }
+            ]
+        )
+        records = CodexHarness().parse_session_list(payload)
+        assert records[0].started_at == datetime(2024, 1, 1, tzinfo=timezone.utc)
+
+    def test_unknown_kind_kept_with_controllable_false(self, tmp_path):
+        payload = json.dumps([{"sessionId": "aaa111", "cwd": str(tmp_path), "kind": "mystery"}])
+        records = CodexHarness().parse_session_list(payload)
+        assert records[0].kind == "mystery"
+        assert records[0].controllable is False
+
+    def test_codex_kind_is_also_never_controllable(self, tmp_path):
+        """`controllable` is always `False` this slice, not merely False for
+        an unrecognized `kind` — the recognized `"codex"` kind must be just
+        as uncontrollable, since this seam gives no session remote-attach."""
+        payload = json.dumps([{"sessionId": "aaa111", "cwd": str(tmp_path), "kind": "codex"}])
+        records = CodexHarness().parse_session_list(payload)
+        assert records[0].controllable is False
+
+    def test_pid_is_always_none(self, tmp_path):
+        payload = json.dumps([{"sessionId": "aaa111", "cwd": str(tmp_path), "kind": "codex"}])
+        records = CodexHarness().parse_session_list(payload)
+        assert records[0].pid is None
+
+
+@pytest.mark.real_home  # the error excerpt redacts the real home, so it must resolve it
+class TestCodexParseSessionListFailures:
+    def test_non_json_raises_naming_decode(self):
+        with pytest.raises(HarnessError, match="decode"):
+            CodexHarness().parse_session_list("not json at all")
+
+    def test_top_level_non_array_raises_naming_array(self):
+        """A top-level dict also raises, but via the per-record object check
+        (dict iteration yields its keys as strings) — a non-iterable-as-a-
+        record top level, like an int, is what actually isolates the
+        top-level array guard."""
+        with pytest.raises(HarnessError, match="array"):
+            CodexHarness().parse_session_list("42")
+
+    def test_error_message_is_bounded(self, tmp_path):
+        long_cwd = str(tmp_path / ("x" * 5000))
+        payload = f'[{{"cwd": "{long_cwd}", "kind": "codex"}}]'
+        with pytest.raises(HarnessError) as exc_info:
+            CodexHarness().parse_session_list(payload)
+        message = str(exc_info.value)
+        assert len(message) < _ERROR_EXCERPT_LIMIT + 200
+        assert len(message) < len(payload)
+        assert long_cwd not in message
+
+    def test_home_path_is_redacted_not_merely_bounded(self):
+        home = str(Path.home())
+        payload = f'[{{"sessionId": "s1", "cwd": "{home}/secretproject", "kind": null}}]'
+        with pytest.raises(HarnessError) as exc_info:
+            CodexHarness().parse_session_list(payload)
+        message = str(exc_info.value)
+        assert home not in message
+        assert "~/secretproject" in message
+
+
+class TestCodexSessionListRoundTrip:
+    def test_lister_stdout_round_trips_through_parse_session_list(self, tmp_path):
+        env = _env(tmp_path)
+        thread_id = "01a0c9d2-1038-7b11-ad91-9c36433a8ce7"
+        lock_path = _write_lock_file(env, f"{thread_id}.lock")
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        _write_rollout(
+            env, f"rollout-2024-01-01T12-00-00-{thread_id}.jsonl", [_meta_line(str(ws))]
+        )
+
+        fd = os.open(lock_path, os.O_RDONLY)
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        try:
+            result = _run_lister(env)
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            os.close(fd)
+
+        records = CodexHarness().parse_session_list(result.stdout)
+        assert len(records) == 1
+        assert records[0].session_id == thread_id
+        assert records[0].cwd == ws.resolve()
+        assert records[0].kind == "codex"
+        assert records[0].controllable is False
+        assert records[0].pid is None
