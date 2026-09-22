@@ -2093,6 +2093,12 @@ re-dispatched once each; both retries returned a normal verdict. The counted res
 one run per cell (8 dispatches: 2 discarded as infra errors, 6 counted results including the 2
 retries).
 
+A later commit (`d347b77b`) revised the section's wording after these runs — the base is pinned to
+the configured base rather than the branch's upstream, and the fix commands name the base's remote.
+The runs above are not repeated against it: every fixture variant is cut with
+`git checkout -b work origin/main`, so upstream and configured base coincide and no variant can
+tell the two wordings apart. A fixture whose branch tracks itself is what would.
+
 | Variant | Baseline (`93a83d42`) | Treatment (`f095ad9f`) |
 |---|---|---|
 | `behind` | — (not re-run; unaffected by Revision 2) | **STOP** |
