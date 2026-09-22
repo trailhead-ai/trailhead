@@ -274,8 +274,9 @@ Once the label is recorded, commit the design doc in the plan's target repositor
 this plan builds against (the same repository the label's path is relative to; in vanilla usage, the
 current repo). Run every git command below as `git -C <repo>` so the workspace root is never the cwd
 that decides. The commit lands on the branch that repository is on; when that is the repository's
-default branch, ask the user before committing, the same consent execute requires for default-branch
-work. First the skip test: when `git -C <repo> ls-files --error-unmatch <path>` exits 0 and
+default branch, ask the user before committing. Execute carries this commit onto the task branch it
+cuts, so the doc reaches the build whichever branch it lands on here. First the skip test: when
+`git -C <repo> ls-files --error-unmatch <path>` exits 0 and
 `git -C <repo> diff --quiet HEAD -- <path>` exits 0, the file is tracked and unchanged at HEAD and
 there is nothing to commit — skip the rest. Otherwise stage exactly that validated path
 (`git -C <repo> add <path>`, never `git add -A`) and commit only that path, so anything else already
