@@ -121,7 +121,9 @@ def _member_capability_lines(
     Walks the member's provision-phase tasks, then its activate-phase tasks,
     in declaration order within each phase, so an environment probe that
     runs at provision time reaches the report as readily as a work-enabling
-    activate task.
+    activate task. Any state other than "ok" or "failed" — never ran,
+    skipped, or over-budget — counts as outstanding: the session cannot use
+    what the task provides until a later `camp setup` completes it.
 
     An outstanding or failed task with a config-declared `capability` string
     uses that text verbatim in place of the generic line — the config author

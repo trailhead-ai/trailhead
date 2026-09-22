@@ -1608,6 +1608,27 @@ class TestCapabilityReport:
         )
         assert report == ""
 
+    def test_provision_task_lines_precede_activate_task_lines(self, tmp_path: Path):
+        report = self._report_for(
+            tmp_path,
+            "feat-order",
+            [_activate_task("dep-install"), _provision_task("docker-check")],
+            {},
+        )
+        assert report.index("'docker-check'") < report.index("'dep-install'")
+
+    def test_over_budget_provision_task_reports_its_capability(self, tmp_path: Path):
+        """A provision task that ran out of its boot budget is still outstanding
+        from the session's point of view: its declared capability applies."""
+        text = "the code graph is not built yet — prefer Grep/Glob"
+        report = self._report_for(
+            tmp_path,
+            "feat-over-budget",
+            [_provision_task("graph-build", capability=text)],
+            {"graph-build": {"state": "over-budget"}},
+        )
+        assert text in report
+
     def test_outstanding_provision_task_reports_not_finished(self, tmp_path: Path):
         report = self._report_for(
             tmp_path, "feat-prov-outstanding", [_provision_task("docker-check")], {}
