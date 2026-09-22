@@ -141,22 +141,45 @@ def create_workspace_session(
     )
 
     if result.returncode == 0:
-        session_target = target(name)
-        for key, value in (
-            ("@camp_workspace", "1"),
-            ("@camp_group", group_name),
-            ("@camp_slug", slug),
-        ):
-            answer = tmux.set_option(session_target, key, value)
-            if answer is None or answer.returncode != 0:
-                return _abandon_half_marked_session(tmux, name, key, answer)
-        install_window_key_binding(tmux)
+        failure = _mark_and_bind(tmux, name, group_name, slug)
+        if failure is not None:
+            return failure
         return WorkspaceSessionResult(WorkspaceSessionOutcome.CREATED, name)
 
     stderr = result.stderr or ""
     if _DUPLICATE_SESSION_MARKER in stderr:
         return WorkspaceSessionResult(WorkspaceSessionOutcome.ALREADY_EXISTED, name)
     return WorkspaceSessionResult(WorkspaceSessionOutcome.FAILED, name, error=stderr)
+
+
+def _mark_and_bind(
+    tmux: Tmux, name: str, group_name: str, slug: str
+) -> WorkspaceSessionResult | None:
+    """Mark a just-created session with the three `@camp_*` session-LOCAL
+    options and install the server-global window-creation-key binding.
+
+    The one copy of this step, shared by `create_workspace_session`'s
+    CREATED branch and resurrection's engine (`launch/resurrect.py`) after
+    it rides `Tmux.new_session_with_window` — both bring a session up
+    through a different tmux call, but only this step makes it a camp
+    workspace session, so it exists in exactly one place.
+
+    Returns `None` on success. Returns the FAILED `WorkspaceSessionResult`
+    from :func:`_abandon_half_marked_session` (session already killed) when
+    tmux refused to set one of the three options — the caller returns that
+    value as its own outcome rather than reporting CREATED.
+    """
+    session_target = target(name)
+    for key, value in (
+        ("@camp_workspace", "1"),
+        ("@camp_group", group_name),
+        ("@camp_slug", slug),
+    ):
+        answer = tmux.set_option(session_target, key, value)
+        if answer is None or answer.returncode != 0:
+            return _abandon_half_marked_session(tmux, name, key, answer)
+    install_window_key_binding(tmux)
+    return None
 
 
 def _abandon_half_marked_session(
