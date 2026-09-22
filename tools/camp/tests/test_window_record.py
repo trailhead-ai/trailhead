@@ -27,6 +27,9 @@ needed since window_record operates on a bare directory + reconcile_lock.
 
 from __future__ import annotations
 
+import os
+import signal
+import subprocess
 import sys
 import threading
 from pathlib import Path
@@ -667,3 +670,187 @@ class TestNonFilePath:
         result = read_window_record(window_record_path_for(tmp_path))
 
         assert result.status == "missing"
+
+
+# ---------------------------------------------------------------------------
+# 11. restamp_window_entries — the post-resurrection locked read-modify-write
+# ---------------------------------------------------------------------------
+
+
+class TestRestampWindowEntries:
+    def test_restamps_re_ided_entries_and_drops_removed_in_original_order(self, tmp_path):
+        from camp.group.window_record import (
+            WindowEntry,
+            read_window_record,
+            restamp_window_entries,
+            window_record_path_for,
+            write_window_record,
+        )
+
+        path = window_record_path_for(tmp_path)
+        e1 = WindowEntry(window_id="@1", name="one", cwd="repo_a", conversation_id="c1")
+        e2 = WindowEntry(window_id="@2", name="two", cwd="repo_b", command_line="ls")
+        e3 = WindowEntry(window_id="@3", name="three", cwd="repo_c", command_line="pwd")
+        write_window_record(path, [e1, e2, e3])
+
+        new_e1 = WindowEntry(window_id="@10", name="one", cwd="repo_a", conversation_id="c1")
+        new_e2 = WindowEntry(window_id="@20", name="two", cwd="repo_b", command_line="ls")
+        mapping = {"@1": new_e1, "@2": new_e2}
+
+        outcome = restamp_window_entries(
+            tmp_path, mapping, remove={"@3"}, lock_timeout=None
+        )
+
+        assert outcome.__class__.__name__ == "Restamped"
+        result = read_window_record(path)
+        assert result.status == "ok"
+        assert [e.window_id for e in result.entries] == ["@10", "@20"]
+        assert result.entries[0] == new_e1
+        assert result.entries[1] == new_e2
+
+    def test_empty_remove_keeps_all_entries(self, tmp_path):
+        from camp.group.window_record import (
+            WindowEntry,
+            read_window_record,
+            restamp_window_entries,
+            window_record_path_for,
+            write_window_record,
+        )
+
+        path = window_record_path_for(tmp_path)
+        e1 = WindowEntry(window_id="@1", name="one", cwd="repo_a", conversation_id="c1")
+        e2 = WindowEntry(window_id="@2", name="two", cwd="repo_b", command_line="ls")
+        e3 = WindowEntry(window_id="@3", name="three", cwd="repo_c", command_line="pwd")
+        write_window_record(path, [e1, e2, e3])
+
+        new_e1 = WindowEntry(window_id="@10", name="one", cwd="repo_a", conversation_id="c1")
+        new_e2 = WindowEntry(window_id="@20", name="two", cwd="repo_b", command_line="ls")
+        mapping = {"@1": new_e1, "@2": new_e2}
+
+        outcome = restamp_window_entries(tmp_path, mapping, remove=set(), lock_timeout=None)
+
+        assert outcome.__class__.__name__ == "Restamped"
+        result = read_window_record(path)
+        assert [e.window_id for e in result.entries] == ["@10", "@20", "@3"]
+
+    def test_entry_appended_between_plan_and_restamp_survives_in_position(self, tmp_path):
+        from camp.group.window_record import (
+            WindowEntry,
+            read_window_record,
+            restamp_window_entries,
+            window_record_path_for,
+            write_window_record,
+        )
+
+        path = window_record_path_for(tmp_path)
+        e1 = WindowEntry(window_id="@1", name="one", cwd="repo_a", conversation_id="c1")
+        e2 = WindowEntry(window_id="@2", name="two", cwd="repo_b", command_line="ls")
+        write_window_record(path, [e1, e2])
+
+        # Simulate a concurrent appender writing a fourth entry after the
+        # plan was computed but before the restamp runs.
+        appended = WindowEntry(window_id="@4", name="four", cwd="repo_d", command_line="date")
+        write_window_record(path, [e1, e2, appended])
+
+        new_e1 = WindowEntry(window_id="@10", name="one", cwd="repo_a", conversation_id="c1")
+        mapping = {"@1": new_e1}
+
+        outcome = restamp_window_entries(tmp_path, mapping, remove=set(), lock_timeout=None)
+
+        assert outcome.__class__.__name__ == "Restamped"
+        result = read_window_record(path)
+        assert [e.window_id for e in result.entries] == ["@10", "@2", "@4"]
+        assert result.entries[2] == appended
+
+    def test_mapping_name_wins_over_recorded_name(self, tmp_path):
+        from camp.group.window_record import (
+            WindowEntry,
+            read_window_record,
+            restamp_window_entries,
+            window_record_path_for,
+            write_window_record,
+        )
+
+        path = window_record_path_for(tmp_path)
+        e1 = WindowEntry(window_id="@1", name="stale-name", cwd="repo_a", conversation_id="c1")
+        write_window_record(path, [e1])
+
+        new_e1 = WindowEntry(
+            window_id="@10", name="tmux-read-back-name", cwd="repo_a", conversation_id="c1"
+        )
+        mapping = {"@1": new_e1}
+
+        outcome = restamp_window_entries(tmp_path, mapping, remove=set(), lock_timeout=None)
+
+        assert outcome.__class__.__name__ == "Restamped"
+        result = read_window_record(path)
+        assert result.entries[0].name == "tmux-read-back-name"
+
+    def test_lock_held_by_another_process_times_out_and_leaves_record_unchanged(self, tmp_path):
+        """Spawns a REAL second process holding reconcile_lock — an
+        in-thread hold of a non-reentrant lock does not exercise the
+        timeout path this test names."""
+        from camp.group.manifest import lock_path_for
+        from camp.group.window_record import (
+            WindowEntry,
+            restamp_window_entries,
+            window_record_path_for,
+            write_window_record,
+        )
+
+        path = window_record_path_for(tmp_path)
+        e1 = WindowEntry(window_id="@1", name="one", cwd="repo_a", conversation_id="c1")
+        write_window_record(path, [e1])
+        original_bytes = path.read_bytes()
+
+        lock_path = lock_path_for(tmp_path)
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+
+        holder_src = (
+            "import fcntl, time\n"
+            f"fd = open({str(lock_path)!r}, 'w')\n"
+            "fcntl.flock(fd.fileno(), fcntl.LOCK_EX)\n"
+            "print('locked', flush=True)\n"
+            "time.sleep(60)\n"
+        )
+        holder = subprocess.Popen(
+            [sys.executable, "-c", holder_src],
+            stdout=subprocess.PIPE,
+            text=True,
+        )
+        try:
+            line = holder.stdout.readline()
+            assert line.strip() == "locked", "holder subprocess never acquired the flock"
+
+            new_e1 = WindowEntry(
+                window_id="@10", name="one", cwd="repo_a", conversation_id="c1"
+            )
+            outcome = restamp_window_entries(
+                tmp_path, {"@1": new_e1}, remove=set(), lock_timeout=0.2
+            )
+
+            assert outcome.__class__.__name__ == "NotRestamped"
+            assert str(path) in outcome.reason
+            assert path.read_bytes() == original_bytes
+        finally:
+            os.kill(holder.pid, signal.SIGKILL)
+            holder.wait(timeout=5)
+
+    def test_successful_restamp_leaves_no_temp_file_in_workspace_dir(self, tmp_path):
+        from camp.group.window_record import (
+            WindowEntry,
+            restamp_window_entries,
+            window_record_path_for,
+            write_window_record,
+        )
+
+        path = window_record_path_for(tmp_path)
+        e1 = WindowEntry(window_id="@1", name="one", cwd="repo_a", conversation_id="c1")
+        write_window_record(path, [e1])
+
+        new_e1 = WindowEntry(window_id="@10", name="one", cwd="repo_a", conversation_id="c1")
+        outcome = restamp_window_entries(tmp_path, {"@1": new_e1}, remove=set(), lock_timeout=None)
+
+        assert outcome.__class__.__name__ == "Restamped"
+        leftovers = [p for p in tmp_path.iterdir() if p.name.startswith(".windows-")]
+        assert leftovers == []

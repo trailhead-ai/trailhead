@@ -55,7 +55,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .manifest import reconcile_lock
+from .manifest import LockTimeout, reconcile_lock
 
 WINDOW_RECORD_FILENAME = "windows.json"
 
@@ -286,3 +286,72 @@ def append_window_entry(ws_dir: Path, entry: WindowEntry) -> None:
     path = window_record_path_for(ws_dir)
     with reconcile_lock(ws_dir):
         append_window_entry_unlocked(path, entry)
+
+
+@dataclass(frozen=True)
+class Restamped:
+    """`restamp_window_entries` succeeded; `entries` is the record's new
+    content, in the order written."""
+
+    entries: tuple[WindowEntry, ...]
+
+
+@dataclass(frozen=True)
+class NotRestamped:
+    """`restamp_window_entries` could not write — a lock timeout or a
+    corrupt record at restamp time. `reason` names the record path."""
+
+    reason: str
+
+
+def restamp_window_entries(
+    ws_dir: Path,
+    mapping: dict[str, WindowEntry],
+    *,
+    remove: set[str],
+    lock_timeout: float | None,
+) -> Restamped | NotRestamped:
+    """Re-stamp the window record after resurrection, as one locked
+    read-modify-write.
+
+    Knows nothing about resurrection itself — it is the record
+    read-modify-write resurrection's engine calls once its per-window
+    plan is settled, mirroring append_window_entry's locked-wrapper shape.
+
+    *mapping* is old `window_id` -> replacement `WindowEntry` (same
+    logical entry, tmux's newly assigned id, and tmux's read-back name).
+    *remove* is the set of old ids to drop. Every entry not named in
+    either — including one appended to the record after the caller's plan
+    was computed — is carried forward unchanged, in its original
+    position, so a concurrent appender's write is never lost.
+
+    Under `reconcile_lock(ws_dir, timeout=lock_timeout)`: read the
+    record, apply the plan, write atomically. A lock that cannot be
+    acquired within *lock_timeout*, or a record that cannot be parsed at
+    restamp time (unreachable on the door's path, which already refused
+    an unparseable record before resurrection began — the primitive stays
+    honest about it regardless), returns `NotRestamped` naming the record
+    path rather than raising.
+    """
+    ws_dir = Path(ws_dir)
+    path = window_record_path_for(ws_dir)
+    try:
+        with reconcile_lock(ws_dir, timeout=lock_timeout):
+            try:
+                entries = _read_window_record_unlocked(path)
+            except WindowRecordError as e:
+                return NotRestamped(reason=str(e))
+
+            restamped: list[WindowEntry] = []
+            for entry in entries:
+                if entry.window_id in mapping:
+                    restamped.append(mapping[entry.window_id])
+                elif entry.window_id in remove:
+                    continue
+                else:
+                    restamped.append(entry)
+
+            write_window_record(path, restamped)
+            return Restamped(entries=tuple(restamped))
+    except LockTimeout as e:
+        return NotRestamped(reason=f"camp: could not restamp window record at {path}: {e}")
