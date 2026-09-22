@@ -466,6 +466,8 @@ def _cmd_new_group_cli(
         trigger_activate_phase_work(group, slug, env=env, wait=not no_wait)
 
     interactive = sys.stdin.isatty() and sys.stdout.isatty() and not no_attach
+    from ..launch.profile import harness_for
+
     _door_dispatch_for_new(
         group_name=group_name,
         slug=slug,
@@ -473,6 +475,7 @@ def _cmd_new_group_cli(
         env=env,
         as_json=as_json,
         interactive=interactive,
+        harness=harness_for(group),
     )
 
 
@@ -551,46 +554,57 @@ def _door_dispatch_for_new(
     env: dict[str, str] | None,
     as_json: bool,
     interactive: bool,
+    harness=None,
 ) -> None:
-    """Create-or-connect the workspace's tmux session and, when *interactive*,
-    hand the terminal over — `camp new`'s own door dispatch.
+    """Create, connect, or resurrect the workspace's tmux session and, when
+    *interactive*, hand the terminal over — `camp new`'s own door dispatch.
 
     The tmux boundary is
     `launch.workspace_session.create_or_connect_workspace_session` (the
-    probe, the create, and the race re-probe, shared with `camp attach`'s
-    door at `cli/session.py:_open_workspace_door`); the handover is
-    `host.handoff.hand_over_to_session` (the exec and `switch-client` arms).
-    The `Tmux` seam is constructed from `launch.stop`'s re-export — the same
-    factory attribute attach's own tests monkeypatch.
+    probe, the create, the race re-probe, and — once the workspace has a
+    window record with entries — the resurrection dispatch, shared with
+    `camp attach`'s door at `cli/session.py:_open_workspace_door`); the
+    handover is `host.handoff.hand_over_to_session` (the exec and
+    `switch-client` arms). The `Tmux` seam is constructed from
+    `launch.stop`'s re-export — the same factory attribute attach's own
+    tests monkeypatch. `harness` is forwarded to the resurrection planner
+    unchanged (`None` when the caller could not resolve one for the
+    group).
 
     What is `camp new`'s alone, and stays here, is both halves of its
     reporting. The stream contract: the workspace path is the caller's only
     stdout line, so a human-readable outcome goes to stderr, and `--json`
     prints one object on stdout in place of the path line. And the failure
     posture: neither an unanswered tmux, nor a failed create, nor a create
-    refused by policy is a refusal here, because the workspace was already
-    created and is usable on disk, so all three report through
-    `_report_workspace_only` and return with exit 0, where `camp attach`
-    refuses — `_report_workspace_only`'s own `refused` flag keeps the
-    policy case distinguishable in what is reported, even though none of
-    the three exit non-zero. Every CONNECTED fold reconciles the window
-    record, and — same as `camp attach` — its outcome is printed to stderr
-    through `cli.session._print_reconcile_outcome` before the door's own
-    outcome line, whether or not `--json` was asked for: `--json` only
-    changes stdout.
+    refused by policy, nor an unreadable window record is a refusal here,
+    because the workspace was already created and is usable on disk, so all
+    four report through `_report_workspace_only` and return with exit 0,
+    where `camp attach` refuses — `_report_workspace_only`'s own `refused`
+    flag keeps the policy and record-unreadable cases distinguishable in
+    what is reported, even though none of the four exit non-zero. Every
+    success — created, connected, or resurrected — goes through
+    `cli.session._door_success_outcome`, the fold `camp attach` shares, so
+    the reconciliation and resurrection lines reach stderr before the
+    door's own outcome line whether or not `--json` was asked for: `--json`
+    only changes stdout.
     """
     from ..host.handoff import hand_over_to_session
-    from ..launch.door import Connected, Created, render_human, render_json
+    from ..launch.door import render_human, render_json
     from ..launch.stop import Tmux
     from ..launch.workspace_session import DoorState, create_or_connect_workspace_session
 
     resolved_env = dict(env) if env is not None else dict(os.environ)
     tmux = Tmux()
     probe = create_or_connect_workspace_session(
-        group_name, slug, ws_dir, env=resolved_env, tmux=tmux
+        group_name, slug, ws_dir, env=resolved_env, tmux=tmux, harness=harness
     )
 
-    if probe.state in (DoorState.TMUX_UNANSWERED, DoorState.CREATE_FAILED, DoorState.CREATE_REFUSED):
+    if probe.state in (
+        DoorState.TMUX_UNANSWERED,
+        DoorState.CREATE_FAILED,
+        DoorState.CREATE_REFUSED,
+        DoorState.RECORD_UNREADABLE,
+    ):
         _report_workspace_only(
             as_json=as_json,
             slug=slug,
@@ -598,21 +612,18 @@ def _door_dispatch_for_new(
             ws_dir=ws_dir,
             derived_name=probe.session_name,
             session_error=probe.reason,
-            refused=probe.state is DoorState.CREATE_REFUSED,
+            refused=probe.state in (DoorState.CREATE_REFUSED, DoorState.RECORD_UNREADABLE),
         )
         return
 
-    from .session import _print_reconcile_outcome
+    from .session import _door_success_outcome
 
-    _print_reconcile_outcome(probe.reconcile_outcome)
-
-    outcome_cls = Created if probe.state is DoorState.CREATED else Connected
-    outcome = outcome_cls(
+    outcome = _door_success_outcome(
+        probe,
         slug=slug,
         group=group_name,
-        tmux_session=probe.session_name,
         workspace_path=ws_dir,
-        attached=interactive,
+        interactive=interactive,
     )
 
     if as_json:

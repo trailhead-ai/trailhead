@@ -762,6 +762,71 @@ def test_new_window_unreachable_tmux_is_distinguishable_from_an_answered_failure
     assert result is not None
 
 
+def test_new_window_with_reason_returns_the_result_on_success(monkeypatch):
+    """`new_window_with_reason` answers the same `NewWindowResult` on exit 0
+    that `new_window` does — the richer seam does not change the success
+    shape, only what a failure carries."""
+    import camp.launch.tmux as tmux_module
+
+    monkeypatch.setattr(
+        tmux_module.subprocess,
+        "run",
+        lambda *a, **k: _completed(returncode=0, stdout="@3 alpha\n"),
+    )
+
+    result = tmux_module.Tmux().new_window_with_reason(
+        "ws", cwd="/tmp/a", window_name="alpha", command=()
+    )
+
+    assert result == tmux_module.NewWindowResult(window_id="@3", window_name="alpha")
+
+
+def test_new_window_with_reason_carries_tmux_stderr_on_a_refusal(monkeypatch):
+    """A non-zero exit answers `NewWindowFailure` carrying tmux's own
+    stderr verbatim — varied against a second, distinct stderr, so the
+    assertion pins that the seam forwards what tmux actually said rather
+    than a fixed sentinel."""
+    import camp.launch.tmux as tmux_module
+
+    monkeypatch.setattr(
+        tmux_module.subprocess,
+        "run",
+        lambda *a, **k: _completed(returncode=1, stderr="can't find session: ws\n"),
+    )
+    first = tmux_module.Tmux().new_window_with_reason(
+        "ws", cwd="/tmp/a", window_name="w", command=()
+    )
+    assert first == tmux_module.NewWindowFailure(stderr="can't find session: ws\n")
+
+    monkeypatch.setattr(
+        tmux_module.subprocess,
+        "run",
+        lambda *a, **k: _completed(returncode=1, stderr="server not found\n"),
+    )
+    second = tmux_module.Tmux().new_window_with_reason(
+        "ws", cwd="/tmp/a", window_name="w", command=()
+    )
+    assert second == tmux_module.NewWindowFailure(stderr="server not found\n")
+    assert first != second
+
+
+def test_new_window_with_reason_unreachable_tmux_answers_unanswered(monkeypatch):
+    """An unreachable/timed-out tmux answers `UNANSWERED`, matching
+    `new_window`'s own tri-state for the same condition."""
+    import camp.launch.tmux as tmux_module
+
+    def _raise(*a, **k):
+        raise subprocess.TimeoutExpired(cmd=["tmux"], timeout=5)
+
+    monkeypatch.setattr(tmux_module.subprocess, "run", _raise)
+
+    result = tmux_module.Tmux().new_window_with_reason(
+        "ws", cwd="/tmp/a", window_name="w", command=()
+    )
+
+    assert result is tmux_module.UNANSWERED
+
+
 def test_set_option_states_a_session_local_option_never_global(monkeypatch):
     """`set_option` issues plain `set-option -t <target> <key> <value>` —
     no `-g` — so the value is scoped to the addressed session only, and
@@ -1072,3 +1137,145 @@ def test_reset_window_binding_returns_none_when_tmux_is_unreachable(monkeypatch)
     monkeypatch.setattr(tmux_module.subprocess, "run", fake_run)
 
     assert tmux_module.Tmux().reset_window_binding() is None
+
+
+def test_new_session_with_window_argv_carries_every_operand_in_order(monkeypatch):
+    """The argv issued by `new_session_with_window` carries `-d -s <name>
+    -n <window_name> -c <cwd> -P -F` and the command tokens verbatim, in
+    that order — the exact shape the task's Delivers names."""
+    import camp.launch.tmux as tmux_module
+
+    calls: list[list[str]] = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(list(argv))
+        return _completed(returncode=0, stdout="@0 first\n")
+
+    monkeypatch.setattr(tmux_module.subprocess, "run", fake_run)
+
+    tmux_module.Tmux().new_session_with_window(
+        "ws-1",
+        cwd="/tmp/ws",
+        window_name="first",
+        command=["sleep", "30"],
+    )
+
+    assert calls == [
+        [
+            "tmux",
+            "new-session",
+            "-d",
+            "-s",
+            "ws-1",
+            "-n",
+            "first",
+            "-c",
+            "/tmp/ws",
+            "-P",
+            "-F",
+            "#{window_id} #{window_name}",
+            "sleep",
+            "30",
+        ]
+    ]
+
+
+def test_new_session_with_window_a_name_holding_spaces_round_trips_whole(monkeypatch):
+    """A window name holding spaces round-trips whole through the
+    first-space parse, the same as `new_window`'s: two different names,
+    two different answers, neither truncated at an internal space."""
+    import camp.launch.tmux as tmux_module
+
+    monkeypatch.setattr(
+        tmux_module.subprocess,
+        "run",
+        lambda *a, **k: _completed(returncode=0, stdout="@0 my window\n"),
+    )
+    first = tmux_module.Tmux().new_session_with_window(
+        "ws-1", cwd="/tmp/ws", window_name="my window", command=()
+    )
+    assert first.window_id == "@0"
+    assert first.window_name == "my window"
+
+    monkeypatch.setattr(
+        tmux_module.subprocess,
+        "run",
+        lambda *a, **k: _completed(returncode=0, stdout="@1 other window\n"),
+    )
+    second = tmux_module.Tmux().new_session_with_window(
+        "ws-1", cwd="/tmp/ws", window_name="other window", command=()
+    )
+    assert second.window_id == "@1"
+    assert second.window_name == "other window"
+
+    assert first.window_name != second.window_name
+
+
+def test_new_session_with_window_exit_zero_answers_new_window_result(monkeypatch):
+    import camp.launch.tmux as tmux_module
+
+    monkeypatch.setattr(
+        tmux_module.subprocess,
+        "run",
+        lambda *a, **k: _completed(returncode=0, stdout="@0 first\n"),
+    )
+
+    result = tmux_module.Tmux().new_session_with_window(
+        "ws-1", cwd="/tmp/ws", window_name="first", command=()
+    )
+
+    assert result == tmux_module.NewWindowResult(window_id="@0", window_name="first")
+
+
+def test_new_session_with_window_duplicate_marker_answers_duplicate_sentinel(monkeypatch):
+    import camp.launch.tmux as tmux_module
+
+    monkeypatch.setattr(
+        tmux_module.subprocess,
+        "run",
+        lambda *a, **k: _completed(
+            returncode=1, stderr="duplicate session: ws-1"
+        ),
+    )
+
+    result = tmux_module.Tmux().new_session_with_window(
+        "ws-1", cwd="/tmp/ws", window_name="first", command=()
+    )
+
+    assert result is tmux_module.DUPLICATE
+
+
+def test_new_session_with_window_other_stderr_answers_failure_carrying_it_verbatim(
+    monkeypatch,
+):
+    import camp.launch.tmux as tmux_module
+
+    monkeypatch.setattr(
+        tmux_module.subprocess,
+        "run",
+        lambda *a, **k: _completed(returncode=1, stderr="some other tmux refusal"),
+    )
+
+    result = tmux_module.Tmux().new_session_with_window(
+        "ws-1", cwd="/tmp/ws", window_name="first", command=()
+    )
+
+    assert result is not tmux_module.DUPLICATE
+    assert result.stderr == "some other tmux refusal"
+
+
+def test_new_session_with_window_timeout_expired_propagates_uncaught(monkeypatch):
+    """Exceptions from the spawn propagate exactly as `spawn_session`'s
+    do — this is the server-starting call and the caller already folds
+    them; the seam must not swallow them into a tri-state answer."""
+    import camp.launch.tmux as tmux_module
+
+    def _raise(*a, **k):
+        raise subprocess.TimeoutExpired(cmd=["tmux"], timeout=5)
+
+    monkeypatch.setattr(tmux_module.subprocess, "run", _raise)
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        tmux_module.Tmux().new_session_with_window(
+            "ws-1", cwd="/tmp/ws", window_name="first", command=()
+        )

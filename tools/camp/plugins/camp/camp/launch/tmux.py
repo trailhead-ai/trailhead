@@ -199,6 +199,49 @@ class NewWindowResult:
     window_name: str
 
 
+#: The exact stderr shape tmux prints for a `new-session` refused because
+#: the name is already live, confirmed against tmux 3.7c. Matched as a
+#: substring of the whole stderr line, never as the whole line, because
+#: tmux does not guarantee nothing precedes it. The single spelling both
+#: `new_session_with_window` and `workspace_session.py`'s caller read —
+#: owned here so the two never drift apart.
+DUPLICATE_SESSION_MARKER = "duplicate session:"
+
+
+class _DuplicateSession:
+    """The sentinel :meth:`Tmux.new_session_with_window` answers when tmux
+    refused to create the session because a live session already holds the
+    requested name — not a failure, another camp process won the race.
+    """
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        return "DUPLICATE"
+
+
+DUPLICATE = _DuplicateSession()
+
+
+@dataclass(frozen=True)
+class NewSessionWindowFailure:
+    """A failed :meth:`Tmux.new_session_with_window` call, carrying tmux's
+    own stderr verbatim and unsummarized — never folded into
+    :data:`DUPLICATE`, which is reserved for the one recognised stderr
+    shape.
+    """
+
+    stderr: str
+
+
+@dataclass(frozen=True)
+class NewWindowFailure:
+    """A failed :meth:`Tmux.new_window_with_reason` call, carrying tmux's
+    own stderr verbatim and unsummarized — the same shape
+    :class:`NewSessionWindowFailure` carries for the session-creating call.
+    """
+
+    stderr: str
+
+
 @dataclass(frozen=True)
 class SessionListing:
     """Every session tmux holds right now, as answered by
@@ -444,6 +487,40 @@ class Tmux:
         Folding the last two together would report a hung or unreachable
         tmux as an ordinary create failure — the one thing this seam's
         tri-state exists to keep apart.
+
+        Implemented over :meth:`new_window_with_reason`, which answers the
+        same success and :data:`UNANSWERED` cases and folds a
+        :class:`NewWindowFailure` down to the bare `None` this method has
+        always returned — this method's tri-state is unchanged by that
+        method's existence; a caller that needs tmux's own stderr on a
+        refusal reaches for `new_window_with_reason` instead.
+        """
+        answer = self.new_window_with_reason(
+            name, cwd=cwd, window_name=window_name, command=command, timeout=timeout
+        )
+        if isinstance(answer, NewWindowFailure):
+            return None
+        return answer
+
+    def new_window_with_reason(
+        self,
+        name: str,
+        *,
+        cwd: object,
+        window_name: str,
+        command: Sequence[str],
+        timeout: float | None = None,
+    ) -> NewWindowResult | NewWindowFailure | _Unanswered:
+        """Same call :meth:`new_window` makes, plus tmux's own stderr,
+        verbatim, when the call answers with a non-zero exit — the piece of
+        information :meth:`new_window` throws away, needed by a caller (the
+        resurrection engine) that reports tmux's own words on a failed
+        window rather than a fixed sentence.
+
+        Tri-state: :class:`NewWindowResult` on success; :class:`NewWindowFailure`
+        on a completed, non-zero exit; :data:`UNANSWERED` when tmux could
+        not be asked at all — the same three cases :meth:`new_window`
+        collapses its own `None` from the middle one.
         """
         done = self._run(
             [
@@ -464,7 +541,7 @@ class Tmux:
         if done is None:
             return UNANSWERED
         if done.returncode != 0:
-            return None
+            return NewWindowFailure(stderr=done.stderr or "")
         window_id, _, actual_name = _strip_one_trailing_newline(done.stdout).partition(" ")
         return NewWindowResult(window_id=window_id, window_name=actual_name)
 
@@ -631,6 +708,73 @@ class Tmux:
             text=True,
             timeout=timeout,
         )
+
+    def new_session_with_window(
+        self,
+        name: str,
+        *,
+        cwd: object,
+        window_name: str,
+        command: Sequence[str],
+        env: Mapping[str, str] | None = None,
+        timeout: float | None = None,
+    ) -> NewWindowResult | _DuplicateSession | NewSessionWindowFailure:
+        """Start a detached session named *name*, whose first window is
+        named *window_name*, rooted at *cwd*, and runs *command* — reading
+        that window's id and name back on the SAME creating call, exactly
+        the way :meth:`new_window` reads a later window's back: `-P -F
+        '#{window_id} #{window_name}'`, parsed on the FIRST space only, so
+        a window name holding spaces round-trips whole.
+
+        `-s` names the new session and is never `=`-qualified — the same
+        target-vs-name property :meth:`spawn_session` observes. `-n` goes
+        through the same operand :meth:`new_window` uses.
+
+        A closed, three-way result: :class:`NewWindowResult` on exit 0;
+        :data:`DUPLICATE` when stderr carries :data:`DUPLICATE_SESSION_MARKER`
+        — another camp process already holds *name*, not a failure; a
+        :class:`NewSessionWindowFailure` carrying tmux's verbatim stderr
+        otherwise.
+
+        Exceptions from the spawn (`OSError`, `TimeoutExpired`) are NOT
+        swallowed — propagate exactly as :meth:`spawn_session`'s do. This is
+        the server-starting call, and the caller (the workspace door) already
+        folds them the way it folds `spawn_session`'s.
+        """
+        argv = [
+            "tmux",
+            "new-session",
+            "-d",
+            "-s",
+            name,
+            "-n",
+            window_name,
+            "-c",
+            str(cwd),
+            "-P",
+            "-F",
+            "#{window_id} #{window_name}",
+            *command,
+        ]
+        done = subprocess.run(
+            argv,
+            cwd=str(cwd),
+            env=dict(os.environ) if env is None else dict(env),
+            start_new_session=True,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=timeout if timeout is not None else self._timeout,
+        )
+        if done.returncode == 0:
+            window_id, _, actual_name = _strip_one_trailing_newline(
+                done.stdout
+            ).partition(" ")
+            return NewWindowResult(window_id=window_id, window_name=actual_name)
+        stderr = done.stderr or ""
+        if DUPLICATE_SESSION_MARKER in stderr:
+            return DUPLICATE
+        return NewSessionWindowFailure(stderr=stderr)
 
     def new_session(
         self,

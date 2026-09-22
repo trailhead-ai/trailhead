@@ -113,6 +113,8 @@ class _DoorTmux:
         switch_client_unanswered: bool = False,
         unanswered_reason: str = "no such file or directory",
         list_windows_answer: object = None,
+        first_window: object = None,
+        window_answers: object = (),
     ) -> None:
         self._present = present
         self._reprobe = present if reprobe is None else reprobe
@@ -123,8 +125,12 @@ class _DoorTmux:
         self._switch_client_unanswered = switch_client_unanswered
         self._unanswered_reason = unanswered_reason
         self._list_windows_answer = list_windows_answer
+        self._first_window = first_window
+        self._window_answers = list(window_answers)
         self.has_session_calls: list[str] = []
         self.new_session_calls: list[dict[str, object]] = []
+        self.new_session_with_window_calls: list[dict[str, object]] = []
+        self.new_window_calls: list[dict[str, object]] = []
         self.switch_client_calls: list[str] = []
         self.set_option_calls: list[dict[str, object]] = []
         self.install_binding_calls: list[str] = []
@@ -154,6 +160,18 @@ class _DoorTmux:
             stdout="",
             stderr=self._create_stderr,
         )
+
+    def new_session_with_window(self, name, *, cwd, window_name, command, env=None, timeout=None):
+        self.new_session_with_window_calls.append(
+            {"name": name, "cwd": cwd, "window_name": window_name, "command": command}
+        )
+        return self._first_window
+
+    def new_window_with_reason(self, name, *, cwd, window_name, command, timeout=None):
+        self.new_window_calls.append(
+            {"name": name, "cwd": cwd, "window_name": window_name, "command": command}
+        )
+        return self._window_answers.pop(0)
 
     def set_option(self, target, key, value, *, timeout=None):
         self.set_option_calls.append({"target": target, "key": key, "value": value})
@@ -965,6 +983,102 @@ def test_concierge_invocation_exits_zero_on_a_failure_arm_with_documented_keys(
 # ---------------------------------------------------------------------------
 # camp new against an existing, running session reconciles the record too
 # ---------------------------------------------------------------------------
+
+
+def test_new_against_a_corrupt_record_reports_workspace_only_and_distinguishes_the_refusal(
+    camp_cli, group_env, monkeypatch, capsys
+):
+    """`camp new`'s door folds `RECORD_UNREADABLE` into
+    `_report_workspace_only(refused=True)` — the workspace already exists on
+    disk and is usable, so this is exit 0 with a distinguishable refused
+    wording, same posture as the credential-store policy refusal."""
+    from camp.group.manifest import workspace_dir
+    from camp.group.window_record import window_record_path_for
+
+    g = group_env
+    tmux = _DoorTmux(present=False)
+    _wire_tmux(monkeypatch, tmux)
+    camp_cli._cmd_new_group_cli(["feat-corrupt", "--no-attach"], g["group"], g["env"], dry_run=False)
+    capsys.readouterr()
+
+    ws_dir = workspace_dir("g", "feat-corrupt", env=g["env"])
+    window_record_path_for(ws_dir).write_text("not json", encoding="utf-8")
+
+    tmux2 = _DoorTmux(present=False)
+    _wire_tmux(monkeypatch, tmux2)
+    code = _run_capturing_exit(
+        camp_cli._cmd_new_group_cli, ["feat-corrupt", "--no-attach"], g["group"], g["env"], dry_run=False
+    )
+
+    captured = capsys.readouterr()
+    assert code == 0
+    assert "refused" in captured.err
+    assert tmux2.new_session_calls == []
+    assert tmux2.new_session_with_window_calls == []
+
+
+def test_new_against_a_corrupt_record_json_reports_workspace_only_refused(
+    camp_cli, group_env, monkeypatch, capsys
+):
+    from camp.group.manifest import workspace_dir
+    from camp.group.window_record import window_record_path_for
+
+    g = group_env
+    tmux = _DoorTmux(present=False)
+    _wire_tmux(monkeypatch, tmux)
+    camp_cli._cmd_new_group_cli(["feat-corrupt-json", "--no-attach"], g["group"], g["env"], dry_run=False)
+    capsys.readouterr()
+
+    ws_dir = workspace_dir("g", "feat-corrupt-json", env=g["env"])
+    window_record_path_for(ws_dir).write_text("not json", encoding="utf-8")
+
+    tmux2 = _DoorTmux(present=False)
+    _wire_tmux(monkeypatch, tmux2)
+    camp_cli._cmd_new_group_cli(
+        ["feat-corrupt-json", "--no-attach", "--json"], g["group"], g["env"], dry_run=False
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is True
+    assert payload["outcome"] == "workspace-only-refused"
+
+
+def test_new_resurrects_a_workspace_with_a_gone_session_and_a_surviving_record(
+    camp_cli, group_env, monkeypatch, capsys
+):
+    from camp.group.manifest import workspace_dir
+    from camp.group.window_record import WindowEntry, window_record_path_for, write_window_record
+    from camp.launch.tmux import NewWindowResult
+
+    g = group_env
+    tmux = _DoorTmux(present=False)
+    _wire_tmux(monkeypatch, tmux)
+    camp_cli._cmd_new_group_cli(["feat-res", "--no-attach"], g["group"], g["env"], dry_run=False)
+    capsys.readouterr()
+
+    ws_dir = workspace_dir("g", "feat-res", env=g["env"])
+    (ws_dir / "one").mkdir()
+    write_window_record(
+        window_record_path_for(ws_dir),
+        [WindowEntry(window_id="@1", name="one", cwd="one", conversation_id="c1")],
+    )
+
+    tmux2 = _DoorTmux(present=False, first_window=NewWindowResult(window_id="@10", window_name="one"))
+    _wire_tmux(monkeypatch, tmux2)
+    code = _run_capturing_exit(
+        camp_cli._cmd_new_group_cli,
+        ["feat-res", "--no-attach", "--json"],
+        g["group"],
+        g["env"],
+        dry_run=False,
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 0
+    assert payload["outcome"] == "resurrected"
+    assert payload["windows"] == {"restored": 1, "failed": 0, "dropped": 0}
+    assert tmux2.new_session_calls == []
+    assert len(tmux2.new_session_with_window_calls) == 1
 
 
 def test_new_against_a_running_session_with_a_stale_record_prints_dropped_on_stderr(

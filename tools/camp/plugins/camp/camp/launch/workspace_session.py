@@ -70,20 +70,26 @@ import subprocess
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Mapping
+from typing import TYPE_CHECKING, Mapping
 
+from ..group.window_record import read_window_record, window_record_path_for
 from .binding import install_window_key_binding
 from .eligibility import assert_not_a_credential_store
 from .naming import workspace_session_name
 from .session import LaunchError
+from .tmux import DUPLICATE_SESSION_MARKER as _DUPLICATE_SESSION_MARKER
 from .tmux import Tmux, target
 from .window_reconcile import ReconcileOutcome, reconcile_workspace_record
 
-#: The exact stderr shape tmux prints for a `new-session` refused because the
-#: name is already live, confirmed against tmux 3.7c. Matched as a substring
-#: of the whole stderr line, never as the whole line, because tmux does not
-#: guarantee nothing precedes it.
-_DUPLICATE_SESSION_MARKER = "duplicate session:"
+# `resurrect.py` imports `WorkspaceSessionOutcome`, `_mark_and_bind`, and
+# `create_workspace_session` from THIS module at its own top level (the
+# `_mark_and_bind` step is shared, not duplicated — see that module's
+# docstring), so importing it back at this module's top level would be a
+# circular import at load time. Deferred into the one function that needs
+# it instead; `TYPE_CHECKING` only, below, satisfies the forward reference
+# on `DoorProbe.resurrection` without executing that import at runtime.
+if TYPE_CHECKING:
+    from .resurrect import ResurrectionResult
 
 #: This create is the one call that starts the tmux SERVER when none is
 #: running yet — the same operation `camp launch`'s own spawn budgets 30s for
@@ -146,22 +152,45 @@ def create_workspace_session(
     )
 
     if result.returncode == 0:
-        session_target = target(name)
-        for key, value in (
-            ("@camp_workspace", "1"),
-            ("@camp_group", group_name),
-            ("@camp_slug", slug),
-        ):
-            answer = tmux.set_option(session_target, key, value)
-            if answer is None or answer.returncode != 0:
-                return _abandon_half_marked_session(tmux, name, key, answer)
-        install_window_key_binding(tmux)
+        failure = _mark_and_bind(tmux, name, group_name, slug)
+        if failure is not None:
+            return failure
         return WorkspaceSessionResult(WorkspaceSessionOutcome.CREATED, name)
 
     stderr = result.stderr or ""
     if _DUPLICATE_SESSION_MARKER in stderr:
         return WorkspaceSessionResult(WorkspaceSessionOutcome.ALREADY_EXISTED, name)
     return WorkspaceSessionResult(WorkspaceSessionOutcome.FAILED, name, error=stderr)
+
+
+def _mark_and_bind(
+    tmux: Tmux, name: str, group_name: str, slug: str
+) -> WorkspaceSessionResult | None:
+    """Mark a just-created session with the three `@camp_*` session-LOCAL
+    options and install the server-global window-creation-key binding.
+
+    The one copy of this step, shared by `create_workspace_session`'s
+    CREATED branch and resurrection's engine (`launch/resurrect.py`) after
+    it rides `Tmux.new_session_with_window` — both bring a session up
+    through a different tmux call, but only this step makes it a camp
+    workspace session, so it exists in exactly one place.
+
+    Returns `None` on success. Returns the FAILED `WorkspaceSessionResult`
+    from :func:`_abandon_half_marked_session` (session already killed) when
+    tmux refused to set one of the three options — the caller returns that
+    value as its own outcome rather than reporting CREATED.
+    """
+    session_target = target(name)
+    for key, value in (
+        ("@camp_workspace", "1"),
+        ("@camp_group", group_name),
+        ("@camp_slug", slug),
+    ):
+        answer = tmux.set_option(session_target, key, value)
+        if answer is None or answer.returncode != 0:
+            return _abandon_half_marked_session(tmux, name, key, answer)
+    install_window_key_binding(tmux)
+    return None
 
 
 def _abandon_half_marked_session(
@@ -206,9 +235,11 @@ class DoorState(Enum):
 
     CONNECTED = "connected"
     CREATED = "created"
+    RESURRECTED = "resurrected"
     TMUX_UNANSWERED = "tmux_unanswered"
     CREATE_FAILED = "create_failed"
     CREATE_REFUSED = "create_refused"
+    RECORD_UNREADABLE = "record_unreadable"
 
 
 def _tmux_unanswered_reason(detail: str) -> str:
@@ -224,6 +255,26 @@ def _tmux_unanswered_reason(detail: str) -> str:
     return f"tmux did not answer — {detail} — run `camp list` to see what camp can still tell"
 
 
+def _create_refused_probe(name: str, detail: object) -> "DoorProbe":
+    """The :data:`DoorState.CREATE_REFUSED` probe — a policy refusal, no
+    session created. The one place this operator-facing sentence is
+    spelled: both session-creating arms of
+    :func:`create_or_connect_workspace_session` (the resurrection dispatch
+    and the plain create) reach it, and both callers report it verbatim.
+    """
+    return DoorProbe(DoorState.CREATE_REFUSED, name, reason=f"refused to create {name} — {detail}")
+
+
+def _create_failed_probe(name: str, detail: object) -> "DoorProbe":
+    """The :data:`DoorState.CREATE_FAILED` probe — a transient failure,
+    carrying tmux's (or the exception's) own words. The one place this
+    operator-facing sentence is spelled: every arm of
+    :func:`create_or_connect_workspace_session` that gives up on a create
+    reaches it, and both callers report it verbatim.
+    """
+    return DoorProbe(DoorState.CREATE_FAILED, name, reason=f"could not create {name} — {detail}")
+
+
 @dataclass(frozen=True)
 class DoorProbe:
     """One pass through the door: what state it reached, the session name it
@@ -235,12 +286,18 @@ class DoorProbe:
     window record against tmux before this probe is returned. It is `None`
     for every other state, including :data:`DoorState.CREATED`: the create
     arm has no session to read a record against yet.
+
+    ``resurrection`` is set only for :data:`DoorState.RESURRECTED`, carrying
+    the engine's own :class:`~camp.launch.resurrect.ResurrectionResult` — the
+    caller renders its lines and builds the `Resurrected` door outcome from
+    it.
     """
 
     state: DoorState
     session_name: str
     reason: str | None = None
     reconcile_outcome: ReconcileOutcome | None = None
+    resurrection: "ResurrectionResult | None" = None
 
 
 def create_or_connect_workspace_session(
@@ -250,12 +307,23 @@ def create_or_connect_workspace_session(
     *,
     env: Mapping[str, str] | None = None,
     tmux: Tmux,
+    harness=None,
 ) -> DoorProbe:
-    """Probe for the workspace's session and create it when there is none.
+    """Probe for the workspace's session and create — or resurrect — it
+    when there is none.
 
     One `has_session` probe decides: present is
-    :data:`DoorState.CONNECTED`; absent dispatches
-    :func:`create_workspace_session`, whose three answers fold in — created,
+    :data:`DoorState.CONNECTED`. Absent reads the window record first (see
+    ``docs/design/the-door-resurrects-a-workspace-from-its-record.md``):
+    "corrupt" refuses outright as :data:`DoorState.RECORD_UNREADABLE`,
+    naming the record path, with no tmux call at all — liveness is still
+    tmux's own answer (AC27), so this check happens only on the absent
+    branch, never ahead of the `has_session` probe itself. "ok" with
+    entries dispatches :func:`~camp.launch.resurrect.resurrect_workspace_session`
+    instead of :func:`create_workspace_session`; "missing", or "ok" with no
+    entries, takes the plain create path unchanged.
+
+    :func:`create_workspace_session`'s three answers fold in — created,
     already-existed (another camp won the race, which is a connect), and any
     other failure, which re-probes `has_session` before giving up rather than
     trusting tmux's stderr text alone. A probe tmux never answers at all is
@@ -264,20 +332,27 @@ def create_or_connect_workspace_session(
     distinct from a create that was attempted and failed
     (:data:`DoorState.CREATE_FAILED`, carrying tmux's own words too).
 
-    :func:`create_workspace_session` also raises two things this function
-    catches, once, on the caller's behalf, into two distinct states rather
-    than one shared one: :class:`~camp.launch.session.LaunchError` —
-    unconditionally, before any tmux call — when the credential-store gate
-    refuses, including when it cannot even be evaluated because some
-    group's config is unreadable (see
+    :func:`resurrect_workspace_session`'s three answers fold the same way:
+    a :class:`~camp.launch.resurrect.DuplicateSession` into the existing
+    `connected()` fold, a :class:`~camp.launch.resurrect.CreateFailed` into
+    `CREATE_FAILED`, and a success into :data:`DoorState.RESURRECTED`,
+    carrying the :class:`~camp.launch.resurrect.ResurrectionResult` on the
+    probe's `resurrection` field.
+
+    Both :func:`create_workspace_session` and :func:`resurrect_workspace_session`
+    also raise two things this function catches, once, on the caller's
+    behalf, into two distinct states rather than one shared one:
+    :class:`~camp.launch.session.LaunchError` — unconditionally, before any
+    tmux call — when the credential-store gate refuses, including when it
+    cannot even be evaluated because some group's config is unreadable (see
     :func:`~camp.launch.eligibility.assert_not_a_credential_store`), folds
     into :data:`DoorState.CREATE_REFUSED` — a policy refusal, carrying the
     exception's own message; and `OSError` / `subprocess.TimeoutExpired`
-    straight out of :meth:`~camp.launch.tmux.Tmux.new_session`, which does
-    not swallow them (unlike this seam's other tmux calls) — the one call
-    that starts the tmux SERVER when none is running, and so the one most
-    likely to time out on a plugin-heavy `tmux.conf` or a loaded machine —
-    fold into :data:`DoorState.CREATE_FAILED`, a transient failure, also
+    straight out of the seam's session-creating call, which does not
+    swallow them (unlike this seam's other tmux calls) — the one call that
+    starts the tmux SERVER when none is running, and so the one most likely
+    to time out on a plugin-heavy `tmux.conf` or a loaded machine — fold
+    into :data:`DoorState.CREATE_FAILED`, a transient failure, also
     carrying the exception's own message. Both doors share this call, so
     both would otherwise see a raw traceback instead of a refusal for
     either kind. `camp attach` turns `CREATE_REFUSED` into
@@ -294,8 +369,16 @@ def create_or_connect_workspace_session(
 
     *tmux* is required, never defaulted: both callers inject the seam their
     own wiring resolved, and a default constructed here would silently
-    bypass it.
+    bypass it. *harness* is forwarded to the resurrection planner unchanged
+    (`None` when a caller cannot resolve one for the group) — it decides
+    only what a resurrected window's stub prints, never whether resurrection
+    happens at all.
     """
+    # Deferred: `resurrect.py` imports from this module at its own top
+    # level (see the module-level comment above the import block), so this
+    # module cannot import it back at load time without a cycle.
+    from .resurrect import CreateFailed, DuplicateSession, resurrect_workspace_session
+
     name = workspace_session_name(group_name, slug)
     present, unanswered_reason = tmux.has_session_with_reason(name)
 
@@ -314,28 +397,50 @@ def create_or_connect_workspace_session(
     if present:
         return connected()
 
+    record_path = window_record_path_for(workspace_dir)
+    record = read_window_record(record_path)
+    if record.status == "corrupt":
+        return DoorProbe(
+            DoorState.RECORD_UNREADABLE,
+            name,
+            reason=(
+                f"window record at {record_path} could not be "
+                "read — refusing to resurrect; fix or remove the record and run camp "
+                "attach again"
+            ),
+        )
+
+    if record.status == "ok" and record.entries:
+        try:
+            resurrection = resurrect_workspace_session(
+                group_name,
+                slug,
+                workspace_dir,
+                record.entries,
+                env=env,
+                tmux=tmux,
+                harness=harness,
+            )
+        except LaunchError as exc:
+            return _create_refused_probe(name, exc)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return _create_failed_probe(name, exc)
+        if isinstance(resurrection, DuplicateSession):
+            return connected()
+        if isinstance(resurrection, CreateFailed):
+            return _create_failed_probe(name, resurrection.error)
+        return DoorProbe(DoorState.RESURRECTED, name, resurrection=resurrection)
+
     try:
         result = create_workspace_session(group_name, slug, workspace_dir, env=env, tmux=tmux)
     except LaunchError as exc:
-        return DoorProbe(
-            DoorState.CREATE_REFUSED,
-            name,
-            reason=f"refused to create {name} — {exc}",
-        )
+        return _create_refused_probe(name, exc)
     except (OSError, subprocess.TimeoutExpired) as exc:
-        return DoorProbe(
-            DoorState.CREATE_FAILED,
-            name,
-            reason=f"could not create {name} — {exc}",
-        )
+        return _create_failed_probe(name, exc)
     if result.outcome is WorkspaceSessionOutcome.CREATED:
         return DoorProbe(DoorState.CREATED, name)
     if result.outcome is WorkspaceSessionOutcome.ALREADY_EXISTED:
         return connected()
     if tmux.has_session(name):
         return connected()
-    return DoorProbe(
-        DoorState.CREATE_FAILED,
-        name,
-        reason=f"could not create {name} — {result.error}",
-    )
+    return _create_failed_probe(name, result.error)
