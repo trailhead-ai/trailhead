@@ -16,10 +16,14 @@ imported inside the function that uses it.
 
 from __future__ import annotations
 
+import fcntl
+import os
 import sys
 import threading
 import time
 from pathlib import Path
+
+import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]  # trailhead root
 _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
@@ -101,3 +105,55 @@ def test_unbounded_acquire_still_blocks_until_the_holder_releases(tmp_path: Path
     holder.join(timeout=5)
     waiter.join(timeout=5)
     assert second_done.is_set()
+
+
+def test_the_bound_is_one_deadline_across_a_reaped_lockfile_retry(tmp_path: Path, monkeypatch) -> None:
+    """A lockfile reaped between the flock and the inode re-check makes the
+    acquire retry on a fresh file; the retry spends what is left of the same
+    budget, never a fresh one. The clock, the flock, and the stat are all
+    scripted so the sequence is exact: contended until 0.6s, one acquire
+    that lands on a reaped inode, then contended for good."""
+    import types
+
+    from camp.group import manifest
+    from camp.group.manifest import LockTimeout, lock_path_for, reconcile_lock
+
+    ws_dir = tmp_path / "ws"
+    ws_dir.mkdir()
+    lock_path = lock_path_for(ws_dir)
+
+    clock = {"now": 0.0}
+    state = {"reaped": False}
+
+    def fake_sleep(seconds: float) -> None:
+        clock["now"] += seconds
+
+    def fake_flock(fd: int, op: int) -> None:
+        if op & fcntl.LOCK_UN:
+            return
+        if not state["reaped"] and clock["now"] >= 0.6:
+            return  # the first holder let go; this acquire lands on its reaped inode
+        raise BlockingIOError
+
+    real_stat = os.stat
+
+    def fake_stat(path, *args, **kwargs):
+        if not state["reaped"] and str(path) == str(lock_path):
+            state["reaped"] = True
+            raise FileNotFoundError(path)
+        return real_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(manifest, "time", types.SimpleNamespace(monotonic=lambda: clock["now"], sleep=fake_sleep))
+    monkeypatch.setattr(manifest, "os", types.SimpleNamespace(stat=fake_stat, fstat=os.fstat))
+    monkeypatch.setattr(
+        manifest,
+        "fcntl",
+        types.SimpleNamespace(flock=fake_flock, LOCK_EX=fcntl.LOCK_EX, LOCK_NB=fcntl.LOCK_NB, LOCK_UN=fcntl.LOCK_UN),
+    )
+
+    with pytest.raises(LockTimeout):
+        with reconcile_lock(ws_dir, timeout=1.0):
+            pass
+
+    assert state["reaped"] is True
+    assert clock["now"] < 1.2, clock["now"]

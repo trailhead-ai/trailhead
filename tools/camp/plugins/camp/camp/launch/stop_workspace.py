@@ -32,20 +32,22 @@ not recognise the process name.
 
 Three renderings, all pure functions of a :class:`StopOutcome`:
 
-- :func:`render_human` — the human lines `camp stop` prints on stdout, for
-  `Stopped`, `NotRunning`, and `StillPresent` (a refusal's message is
-  composed by the code that constructs it, exactly as `door.render_human`
-  leaves a refusal's message to its constructor). `Stopped` and
-  `StillPresent` print the preview — a count line, then one indented line
-  per window — before their own outcome line; `NotRunning` prints
-  only its one line, since there is nothing to preview. Composed and
-  escaped line by line through :func:`~camp.launch.recovery.printable_path`,
-  never a chosen subset of a line's fields, so a control character in a
-  window's name cannot inject a line the preview never showed — see
+- :func:`preview_lines` and :func:`outcome_line` — the human lines `camp
+  stop` prints on stdout, for `Stopped`, `NotRunning`, and `StillPresent`
+  (a refusal's message is composed by the code that constructs it, exactly
+  as `door.render_human` leaves a refusal's message to its constructor).
+  `stop_workspace` emits the preview — a count line, then one indented line
+  per window — before the kill, and the CLI prints the outcome line after
+  it; `NotRunning` has only its one line, since there is nothing to
+  preview. Composed and escaped line by line through
+  :func:`~camp.launch.recovery.printable_path`, never a chosen subset of a
+  line's fields, so a control character in a window's name cannot inject a
+  line the preview never showed — see
   `lesson/escape-the-composed-output-line-not-a-chosen-subset-of-its-fields`.
 - :func:`render_json` — the `--json` object, for the same three members.
   Carries the preview as `windows` (count), `live_conversations` (ids),
-  `exited_conversations` (ids), `foreground` (names), and `reconciled`.
+  `exited_conversations` (ids), `foreground` (names), `reconciled`, and
+  `listed`; when the listing did not answer, every window field is null.
 - :func:`exit_status` — `0` for `Stopped` and `NotRunning`, `1` for
   `StillPresent` and every refusal, keyed by exact type like `door.py`'s
   own table, so a member added without an entry raises instead of silently
@@ -265,14 +267,11 @@ def preview_lines(tmux_session: str, preview: StopPreview) -> list[str]:
     `False`, the single "could not list" line replaces the count line and
     rows entirely: "could not tell" must never print as "0 windows".
 
-    Escaped whole through `printable_path`, line by line, the same way
-    `render_human` escapes its own composed lines: see this module's
-    docstring. Factored out so `stop_workspace` can hand these SAME lines to
-    `emit` before the kill, without re-deriving the formatting a second
-    time — see that function's docstring for why the preview is emitted
-    before anything is killed. The engine reuses this same function for the
-    unlisted case too, rather than composing its own line, so it and
-    `render_human` can never disagree on the wording.
+    Escaped whole through `printable_path`, line by line: see this module's
+    docstring. `stop_workspace` hands these lines to `emit` before the kill —
+    see that function's docstring for why the preview is emitted before
+    anything is killed — and the unlisted case goes through here too, so
+    the engine never composes a line of its own.
     """
     if not preview.listed:
         return [printable_path(f"camp: could not list the windows of {tmux_session}; stopping without a preview")]
@@ -288,11 +287,8 @@ def outcome_line(outcome: StopOutcome) -> str:
     <session>` for `NotRunning`, `stopped <session>` for `Stopped`, or the
     still-present message naming the manual next step for `StillPresent`.
 
-    Factored out of :func:`render_human` so a streaming caller — `cli/stop.py`,
-    which has already emitted the preview lines through `emit` before the
-    kill — can print exactly this line afterward instead of re-rendering the
-    preview a second time. `render_human` itself still composes the full
-    rendering (preview plus this line) for any non-streaming caller.
+    `cli/stop.py` prints exactly this line after the preview `stop_workspace`
+    already emitted before the kill.
     """
     _render_word(outcome)  # raises for a refusal; message composed elsewhere
 
@@ -307,28 +303,18 @@ def outcome_line(outcome: StopOutcome) -> str:
     )
 
 
-def render_human(outcome: StopOutcome) -> str:
-    """The human lines `camp stop` prints for *outcome*.
-
-    Every line — the count line, each preview row, the outcome line — is
-    escaped whole through `printable_path`, the same way `door.render_human`
-    escapes its own composed line: see this module's docstring.
-    """
-    if isinstance(outcome, NotRunning):
-        return outcome_line(outcome)
-
-    lines = preview_lines(outcome.tmux_session, outcome.preview)
-    lines.append(outcome_line(outcome))
-    return "\n".join(lines)
-
-
 def render_json(outcome: StopOutcome) -> dict:
     """The `--json` object for *outcome* (`Stopped`, `NotRunning`, or `StillPresent`)."""
     word = _render_word(outcome)
     preview = outcome.preview
-    live_conversations = [r.conversation_id for r in preview.windows if r.kind == "live-conversation"]
-    exited_conversations = [r.conversation_id for r in preview.windows if r.kind == "exited-conversation"]
-    foreground = [r.name for r in preview.windows if r.kind == "foreground"]
+    if preview.listed:
+        live_conversations = [r.conversation_id for r in preview.windows if r.kind == "live-conversation"]
+        exited_conversations = [r.conversation_id for r in preview.windows if r.kind == "exited-conversation"]
+        foreground = [r.name for r in preview.windows if r.kind == "foreground"]
+    else:
+        # "Could not tell" is never read as "nothing was live": every
+        # window field is null, not empty, when the listing did not answer.
+        live_conversations = exited_conversations = foreground = None
     return {
         "ok": word in ("stopped", "not-running"),
         "outcome": word,
@@ -436,7 +422,7 @@ def stop_workspace(
         reconcile_note = reconcile_outcome.reason
 
     listing = tmux.list_windows(session_name)
-    if isinstance(listing, WindowListing):
+    if isinstance(listing, WindowListing) and listing.dropped == 0:
         preview = replace(
             classify(listing.windows, entries, shell_names),
             reconciled=reconciled,
@@ -445,8 +431,10 @@ def stop_workspace(
         for line in preview_lines(session_name, preview):
             emit(line)
     else:
-        # "Could not tell" is never read as "no windows": no count line,
-        # one line saying so, and the kill the operator asked for proceeds.
+        # "Could not tell" is never read as "no windows", and a listing with
+        # rows camp could not read is a partial view, not a count: no count
+        # line, one line saying so, and the kill the operator asked for
+        # proceeds.
         preview = StopPreview(windows=(), reconciled=reconciled, reconcile_note=reconcile_note, listed=False)
         for line in preview_lines(session_name, preview):
             emit(line)

@@ -161,10 +161,8 @@ def _cmd_stop_cli(args: list[str], env: dict[str, str] | None = None) -> None:
     if parsed.json:
         print(json.dumps(render_json(outcome)))
     else:
-        # `emit` has already streamed the preview (count line + rows) to
-        # stdout, before the kill — printing `render_human`'s full
-        # rendering here would re-render that same preview a second time.
-        # Only the one line after it belongs here.
+        # `emit` has already streamed the preview to stdout, before the
+        # kill; only the one line after it belongs here.
         print(outcome_line(outcome))
     sys.exit(exit_status(outcome))
 

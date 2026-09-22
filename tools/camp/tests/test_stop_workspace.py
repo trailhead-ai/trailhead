@@ -471,3 +471,26 @@ def test_an_unanswered_preview_listing_is_never_read_as_no_windows(tmp_path: Pat
         assert tmux.killed == ["=camp-g-slug"] or tmux.killed == ["camp-g-slug"], tmux.killed
         assert not any("0 windows" in line for line in lines), (second_answer, lines)
         assert any("could not list" in line and "camp-g-slug" in line for line in lines), (second_answer, lines)
+
+
+def test_a_preview_listing_with_unreadable_rows_is_never_read_as_the_full_count(tmp_path: Path) -> None:
+    """tmux listed rows camp could not split. The preview cannot state the
+    stop's cost from a partial view, so it says the windows could not be
+    listed rather than printing a count that is short by the rows it lost."""
+    from camp.launch.stop_workspace import Stopped
+    from camp.launch.tmux import WindowListing
+
+    ws_dir = tmp_path / "ws"
+    ws_dir.mkdir()
+    _write_record(ws_dir, [_entry("@1", "main")])
+
+    answered = WindowListing(windows=(_window("@1", "main", current_command="pytest"),))
+    partial = WindowListing(windows=(_window("@1", "main", current_command="pytest"),), dropped=1)
+    tmux = _ScriptedTmux(listing_sequence=[answered, partial])
+
+    outcome, lines = _stop_workspace(ws_dir, tmux)
+
+    assert isinstance(outcome, Stopped)
+    assert outcome.preview.listed is False
+    assert not any(line.startswith("stopping ") for line in lines), lines
+    assert any("could not list" in line for line in lines), lines

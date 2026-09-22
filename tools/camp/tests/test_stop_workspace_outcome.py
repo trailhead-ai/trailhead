@@ -17,10 +17,10 @@ task/the-stop-outcome-and-the-preview-classification):
    `live-conversation`; with the module's default set, a conversation
    window running `2.1.278` is `live-conversation`, one running `claude` is
    `live-conversation`, and one running `bash` is `exited-conversation`.
-4. `render_human` for two rows produces the count line and two indented
+4. `preview_lines` for two rows produces the count line and two indented
    rows; a name carrying a newline, and one carrying an ANSI escape
    sequence, are each rendered printable.
-5. `render_human` for `StillPresent` names the session and the manual next
+5. `outcome_line` for `StillPresent` names the session and the manual next
    step.
 6. `render_json` round-trips through `json.loads` and carries every field
    named above; `exit_status` maps each type as stated.
@@ -145,11 +145,11 @@ def test_default_shell_names_includes_the_basename_of_dollar_shell():
     assert "bash" in names  # the common set is always present
 
 
-# --- Contract item 4: render_human rows and escaping ------------------------
+# --- Contract item 4: preview rows and escaping ------------------------
 
 
-def test_render_human_two_rows_produces_count_line_and_two_rows():
-    from camp.launch.stop_workspace import PreviewRow, Stopped, StopPreview, render_human
+def test_preview_lines_two_rows_produces_count_line_and_two_rows():
+    from camp.launch.stop_workspace import PreviewRow, Stopped, StopPreview, outcome_line, preview_lines
 
     preview = StopPreview(
         windows=(
@@ -171,7 +171,7 @@ def test_render_human_two_rows_produces_count_line_and_two_rows():
     )
     outcome = Stopped(slug="camp-cli", group="trailhead", tmux_session="camp-trailhead-camp-cli", preview=preview)
 
-    rendered = render_human(outcome)
+    rendered = "\n".join([*preview_lines(outcome.tmux_session, outcome.preview), outcome_line(outcome)])
     lines = rendered.split("\n")
 
     assert lines[0] == "stopping camp-trailhead-camp-cli: 2 windows"
@@ -180,8 +180,8 @@ def test_render_human_two_rows_produces_count_line_and_two_rows():
     assert lines[3] == "stopped camp-trailhead-camp-cli"
 
 
-def test_render_human_escapes_a_newline_in_a_window_name():
-    from camp.launch.stop_workspace import PreviewRow, Stopped, StopPreview, render_human
+def test_preview_lines_escapes_a_newline_in_a_window_name():
+    from camp.launch.stop_workspace import PreviewRow, Stopped, StopPreview, outcome_line, preview_lines
 
     preview = StopPreview(
         windows=(
@@ -196,7 +196,7 @@ def test_render_human_escapes_a_newline_in_a_window_name():
     )
     outcome = Stopped(slug="s", group="g", tmux_session="camp-trailhead-s", preview=preview)
 
-    rendered = render_human(outcome)
+    rendered = "\n".join([*preview_lines(outcome.tmux_session, outcome.preview), outcome_line(outcome)])
 
     assert (
         "\n" not in rendered.split("\nstopped")[0].replace("stopping camp-trailhead-s: 1 window", "", 1)
@@ -207,8 +207,8 @@ def test_render_human_escapes_a_newline_in_a_window_name():
     assert "\\x0a" in rendered
 
 
-def test_render_human_escapes_an_ansi_escape_sequence_in_a_window_name():
-    from camp.launch.stop_workspace import PreviewRow, Stopped, StopPreview, render_human
+def test_preview_lines_escapes_an_ansi_escape_sequence_in_a_window_name():
+    from camp.launch.stop_workspace import PreviewRow, Stopped, StopPreview, outcome_line, preview_lines
 
     preview = StopPreview(
         windows=(
@@ -223,17 +223,17 @@ def test_render_human_escapes_an_ansi_escape_sequence_in_a_window_name():
     )
     outcome = Stopped(slug="s", group="g", tmux_session="camp-trailhead-s", preview=preview)
 
-    rendered = render_human(outcome)
+    rendered = "\n".join([*preview_lines(outcome.tmux_session, outcome.preview), outcome_line(outcome)])
 
     assert "\x1b" not in rendered
     assert "\\x1b" in rendered
 
 
-# --- Contract item 5: render_human for StillPresent -------------------------
+# --- Contract item 5: outcome_line for StillPresent -------------------------
 
 
-def test_render_human_for_still_present_names_session_and_next_step():
-    from camp.launch.stop_workspace import PreviewRow, StillPresent, StopPreview, render_human
+def test_outcome_line_for_still_present_names_session_and_next_step():
+    from camp.launch.stop_workspace import PreviewRow, StillPresent, StopPreview, outcome_line, preview_lines
 
     preview = StopPreview(
         windows=(
@@ -248,7 +248,7 @@ def test_render_human_for_still_present_names_session_and_next_step():
     )
     outcome = StillPresent(slug="camp-cli", group="trailhead", tmux_session="camp-trailhead-camp-cli", preview=preview)
 
-    rendered = render_human(outcome)
+    rendered = "\n".join([*preview_lines(outcome.tmux_session, outcome.preview), outcome_line(outcome)])
 
     assert "camp-trailhead-camp-cli" in rendered
     assert "run camp stop again" in rendered
@@ -258,13 +258,13 @@ def test_render_human_for_still_present_names_session_and_next_step():
 # --- "could not tell" is never rendered as "0 windows" ----------------------
 
 
-def test_render_human_for_an_unlisted_preview_says_could_not_list_not_zero_windows():
-    from camp.launch.stop_workspace import Stopped, StopPreview, render_human
+def test_preview_lines_for_an_unlisted_preview_says_could_not_list_not_zero_windows():
+    from camp.launch.stop_workspace import Stopped, StopPreview, outcome_line, preview_lines
 
     preview = StopPreview(windows=(), listed=False)
     outcome = Stopped(slug="s", group="g", tmux_session="camp-g-s", preview=preview)
 
-    rendered = render_human(outcome)
+    rendered = "\n".join([*preview_lines(outcome.tmux_session, outcome.preview), outcome_line(outcome)])
 
     assert "0 windows" not in rendered
     assert "could not list" in rendered
@@ -352,7 +352,7 @@ def test_exit_status_covers_every_member_via_reflection():
 
 
 def test_foreground_row_names_the_process_it_would_lose():
-    from camp.launch.stop_workspace import PreviewRow, Stopped, StopPreview, render_human
+    from camp.launch.stop_workspace import PreviewRow, Stopped, StopPreview, preview_lines
 
     def line_for(command):
         preview = StopPreview(
@@ -367,7 +367,7 @@ def test_foreground_row_names_the_process_it_would_lose():
             )
         )
         outcome = Stopped(slug="camp-cli", group="trailhead", tmux_session="camp-trailhead-camp-cli", preview=preview)
-        return render_human(outcome).splitlines()[1]
+        return preview_lines(outcome.tmux_session, outcome.preview)[1]
 
     assert line_for("pytest") == '  @5 "build"  foreground: pytest'
     assert line_for("vim") == '  @5 "build"  foreground: vim'
@@ -389,14 +389,14 @@ def test_classify_carries_each_window_s_current_command_onto_its_row():
 
 
 def test_a_lone_idle_window_renders_a_bare_row_under_a_singular_count():
-    from camp.launch.stop_workspace import PreviewRow, Stopped, StopPreview, render_human
+    from camp.launch.stop_workspace import PreviewRow, Stopped, StopPreview, outcome_line, preview_lines
 
     preview = StopPreview(
         windows=(PreviewRow(window_id="@1", name="camp-cli", conversation_id=None, kind="idle", command="zsh"),)
     )
     outcome = Stopped(slug="camp-cli", group="trailhead", tmux_session="camp-trailhead-camp-cli", preview=preview)
 
-    lines = render_human(outcome).split("\n")
+    lines = [*preview_lines(outcome.tmux_session, outcome.preview), outcome_line(outcome)]
 
     assert lines == [
         "stopping camp-trailhead-camp-cli: 1 window",
@@ -416,3 +416,14 @@ def test_the_count_line_pluralises_only_above_one():
 
     assert one[0] == "stopping camp-g-s: 1 window"
     assert two[0] == "stopping camp-g-s: 2 windows"
+
+
+def test_render_json_for_an_unlisted_preview_nulls_every_window_list():
+    from camp.launch.stop_workspace import Stopped, StopPreview, render_json
+
+    unlisted = Stopped(slug="s", group="g", tmux_session="camp-g-s", preview=StopPreview(windows=(), listed=False))
+    listed = Stopped(slug="s", group="g", tmux_session="camp-g-s", preview=StopPreview(windows=(), listed=True))
+    keys = ("live_conversations", "exited_conversations", "foreground")
+
+    assert [render_json(unlisted)[k] for k in keys] == [None, None, None]
+    assert [render_json(listed)[k] for k in keys] == [[], [], []]

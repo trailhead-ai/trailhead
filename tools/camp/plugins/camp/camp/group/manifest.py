@@ -91,9 +91,7 @@ class LockTimeout(Exception):
 _LOCK_POLL_INTERVAL_SECONDS = 0.05
 
 
-def write_central_manifest(
-    path: Path, data: dict[str, Any], *, allow_owner_change: bool = False
-) -> None:
+def write_central_manifest(path: Path, data: dict[str, Any], *, allow_owner_change: bool = False) -> None:
     """Write data to path atomically with mode 0o600.
 
     Uses a temp file in the same directory + os.replace for atomicity.
@@ -214,9 +212,7 @@ def read_central_manifest(path: Path) -> dict[str, Any]:
         raise ManifestError(f"camp: malformed manifest at {path}: {e}") from e
 
     if not isinstance(data, dict):
-        raise ManifestError(
-            f"camp: manifest at {path} is not a JSON object (got {type(data).__name__})"
-        )
+        raise ManifestError(f"camp: manifest at {path} is not a JSON object (got {type(data).__name__})")
 
     return data
 
@@ -259,16 +255,16 @@ def lock_path_for(ws_dir: Path) -> Path:
     return ws_dir.parent / f"{ws_dir.name}.lock"
 
 
-def _acquire_flock(lock_fd, lock_path: Path, *, timeout: float | None) -> None:
-    """Take the exclusive flock on *lock_fd*: unbounded when *timeout* is
-    `None` (today's behaviour, still what the provisioner and every other
-    manifest writer relies on), or polled `LOCK_NB` until free or *timeout*
-    seconds have elapsed, at which point `LockTimeout` is raised instead of
-    blocking forever."""
-    if timeout is None:
+def _acquire_flock(lock_fd, lock_path: Path, *, deadline: float | None) -> None:
+    """Take the exclusive flock on *lock_fd*: unbounded when *deadline* is
+    `None` (what the provisioner and every other manifest writer relies on),
+    or polled `LOCK_NB` until free or the monotonic *deadline* has passed, at
+    which point `LockTimeout` is raised instead of blocking forever. The
+    deadline is the caller's, so a retry after a reaped inode spends what is
+    left of the same budget rather than starting a fresh one."""
+    if deadline is None:
         fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
         return
-    deadline = time.monotonic() + timeout
     while True:
         try:
             fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -310,10 +306,11 @@ def reconcile_lock(ws_dir: Path, *, timeout: float | None = None):
     """
     lock_path = lock_path_for(ws_dir)
     lock_path.parent.mkdir(parents=True, exist_ok=True)
+    deadline = None if timeout is None else time.monotonic() + timeout
     while True:
         lock_fd = open(str(lock_path), "w")
         try:
-            _acquire_flock(lock_fd, lock_path, timeout=timeout)
+            _acquire_flock(lock_fd, lock_path, deadline=deadline)
             try:
                 path_stat = os.stat(lock_path)
             except FileNotFoundError:
@@ -385,9 +382,7 @@ def owner_of(manifest: dict[str, Any]) -> str | None:
     if owner is None:
         return None
     if not isinstance(owner, str):
-        raise ManifestError(
-            f"camp: manifest owner must be a string (got {type(owner).__name__})"
-        )
+        raise ManifestError(f"camp: manifest owner must be a string (got {type(owner).__name__})")
     return owner
 
 

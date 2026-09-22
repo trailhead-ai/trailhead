@@ -162,6 +162,19 @@ connects: an unreadable record is a workspace camp cannot describe, not one it c
 The same holds on a stop: the preview says the record could not be reconciled, and the stop
 proceeds, because the record was already lost before the stop was asked for.
 
+A readable record that camp cannot reach in time is reported the same way and treated the same
+way. The workspace lock is held by the background provisioner for as long as it takes to add
+every member's worktree, so reconciliation waits a bounded moment for it and then gives up
+rather than hanging the door:
+
+```
+$ camp attach camp-cli
+camp: window record at /…/worktrees/camp-cli/windows.json is locked by another camp process; not reconciled
+connected camp-trailhead-camp-cli
+```
+
+The record is untouched, the door connects, and the next attach or stop reconciles it.
+
 ## State — Stop previews the windows, live conversations, and other foreground processes it is about to kill
 
 ```
@@ -238,3 +251,16 @@ window that appeared after the preview goes with it, and one that closed was alr
 The preview is a statement of what tmux held when camp looked, and the reconciled record is
 of that same moment; neither is re-read after the kill, because there is nothing left to read.
 A window opened in that gap was never recorded, exactly as an uncomposed window never is.
+
+If tmux does not answer the preview's own listing, or lists a row camp cannot read, the
+preview does not guess:
+
+```
+$ camp stop camp-cli
+camp: could not list the windows of camp-trailhead-camp-cli; stopping without a preview
+stopped camp-trailhead-camp-cli
+```
+
+No count is printed, because "could not tell" is never read as "no windows", and under
+`--json` every window field of the object is null rather than zero or empty. The kill the
+operator asked for still proceeds.

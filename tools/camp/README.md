@@ -35,6 +35,7 @@ camp sessions        # list the live harness sessions camp can see
 camp sessions --recoverable  # list the dead ones that could be brought back
 camp kill <ref>      # stop one session and reclaim its memory
 camp attach <ref>    # hand your terminal to a running session
+camp stop <slug>     # preview, then kill a workspace's whole tmux session
 camp remove          # tear down a worktree (alias: rm)
 camp --help          # full command reference
 camp --version       # show version + resolved binary path
