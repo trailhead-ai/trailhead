@@ -2235,3 +2235,44 @@ of Revision 3's pass condition hold.
 exercised in isolation (drift stipulated clean in the dispatch prompt) — the interaction between
 the branch/base drift check and the design-doc check running back to back in the same preflight
 pass is not covered by this corpus.
+
+---
+
+## Case: execute-cuts-a-task-branch-off-base
+
+`plugins/craft/evals/execute-cuts-a-task-branch-off-base/` — fixture, grader, and `expected.md`
+carrying the pass condition, written before any arm was run.
+
+**Under test:** `### Cutting the task branch` in `plugins/craft/skills/_shared/execute.md`. A fresh
+run (no `craft/branch` label yet) fetches the base and cuts a branch named for the task off it in
+the target repository before the workspace preflight and the claim. On the plan shape, it carries
+plan's design-doc commit across. A dirty tree or a taken name stops the run before anything is cut.
+
+**Fixture.** `fixtures/make-fixture-repo.sh <fresh|dirty|collision|design-doc> <dest>` builds a
+vanilla repo on branch `work` carrying an earlier task's commit (`PRIOR.md`), with `origin/main`
+one unfetched commit ahead (`UPSTREAM.md`). **Graded from disk** by `fixtures/grade.sh`: the branch
+checked out, and whether HEAD contains `UPSTREAM.md` and lacks `PRIOR.md`. The run's own report is
+not used for grading. Before any arm ran, the grader was checked against the untouched fixtures and
+against a correct cut performed by hand.
+
+**Dispatch.** The same clean-room form as `execute-preflight-refuses-stale-base`:
+`scripts/eval-sandbox <run-dir> -- claude -p <prompt> --setting-sources project --allowedTools
+"Bash,Read,Glob,Grep" --append-system-prompt <prose> < /dev/null`. The prompt is identical across
+arms and says nothing about branches. Baseline is `git show 40c8a63c:.../execute.md`; treatment is
+the worktree copy. All 8 runs exited 0 and wrote their completion marker.
+
+| Variant | Baseline (`40c8a63c`) | Treatment |
+|---|---|---|
+| `fresh` | **FAIL**: stayed on `work` and stopped at preflight with `behind=1` | **PASS**: on `fixture-add-a-readme-line` at `origin/main`, with the claim naming `craft/branch=fixture-add-a-readme-line` |
+| `dirty` | PASS, vacuously (stopped at preflight on `behind=1`) | **PASS**: stopped at the cut on ` M README.md`, nothing cut |
+| `collision` | PASS, vacuously (stopped at preflight on `behind=1`) | **PASS**: stopped at the cut naming `origin/fixture-add-a-readme-line`, nothing cut |
+| `design-doc` | **FAIL**: stayed on `work` (PRIOR.md plus the doc over base) | **PASS**: on `fixture-parent-with-design-doc` with exactly one signed commit over `origin/main`, touching only the doc |
+
+**RED → GREEN, as pre-registered.** One fixture correction was made between the arms and recorded
+in `expected.md` as Revision 1: a stand-in signer, so the carried commit's `-S` can succeed. It
+could not affect the baseline, which never signs.
+
+**Limitations.** One run per cell. Vanilla usage only: the camp-workspace path, where the target
+member is chosen among several worktrees, is not exercised. Resume-side branch switching (a
+labelled run whose repo is on another branch) is not exercised. The parent's label is a body line,
+not sidecar data.

@@ -56,6 +56,7 @@ not a fact.
 - The Loop
   - Determine the task shape
   - Resuming a run
+  - Cutting the task branch
   - Workspace preflight
   - Claiming the run at first dispatch
   - 1. Does this task have an unresolved unknown?
@@ -204,10 +205,11 @@ otherwise would — there is no second record to flip. Refine's promotion takes 
 run](#claiming-the-run-at-first-dispatch) prescribes for a parent — status and branch label in one
 command
 (`lore record update task/<name> --vault <elected-vault> --status in-progress --label craft/branch=<bare-branch>`),
-once the [Workspace preflight](#workspace-preflight) has passed, so crash-resume can find the branch
-on a standalone run too. **A standalone run also loads dispatch lessons** — the claim's retrieval
-command runs here too, before that first executor dispatch, and its outcome is recorded the same
-way. Phase 6 takes it `in-progress → done`, where "close the parent" means close the task itself.
+once [Cutting the task branch](#cutting-the-task-branch) and the [Workspace
+preflight](#workspace-preflight) have passed, so crash-resume can find the branch on a standalone
+run too. **A standalone run also loads dispatch lessons** — the claim's retrieval command runs here
+too, before that first executor dispatch, and its outcome is recorded the same way. Phase 6 takes it
+`in-progress → done`, where "close the parent" means close the task itself.
 
 ### Resuming a run
 
@@ -247,23 +249,78 @@ and each escalation site's `blocked` write. An escalation *answered* in-session 
 all — the run simply continues, and the task legitimately holds `in-progress` until one of those two
 lands. Full writer and exit-owner rules govern every status value, not just these two writes.
 
+### Cutting the task branch
+
+Every fresh run builds on its own branch, cut from the latest base, so two runs in one workspace
+never stack onto each other's commits. A **fresh run** is one whose task — the parent on the plan
+shape, the task itself on the standalone shape — carries no `craft/branch` label yet: the cases
+[Claiming the run](#claiming-the-run-at-first-dispatch) claims rather than resumes. A resumed run
+never cuts; it builds on the branch its label names (see [Resuming a run](#resuming-a-run)), and
+when the target repository is on some other branch, switch to that one first with
+`git -C <repo> switch <label-branch>`, once the label value passes the safe-value shape in step 1
+below. A dirty working tree stops the switch, and the run, the same way it stops the cut below.
+
+Run this step once, before the [Workspace preflight](#workspace-preflight), in the **target
+repository** only: the repository this run builds in and the design-doc label's path is relative to
+— the camp member the plan builds against, or the single current repo in vanilla usage. Every other
+camp member stays on the branch it is on. Nothing below writes the task record, so a stop here
+leaves the task untouched.
+
+1. **Name and base.** The branch name is the task's bare name — `<name>` from `task/<name>` (the
+   parent's name on the plan shape). The base is resolved exactly as the preflight resolves it — the
+   configured base, `origin/main` when nothing configures one. Validate both against the safe-value
+   shape (`^[A-Za-z0-9._/-]+$`) before substituting either anywhere; a failing value is reported,
+   never substituted.
+2. **Refresh the base.** When the base is `<remote>/<branch>`, run `git -C <repo> fetch <remote>
+   --quiet`. A fetch failure stops the run here: cutting from a cached base is exactly the stale
+   start this step exists to prevent.
+3. **Refuse what the cut would clobber.** Stop and report, cutting nothing, when any of these hold:
+   - the working tree has uncommitted changes to tracked files —
+     `git -C <repo> status --porcelain --untracked-files=no` prints anything;
+   - the name is taken locally — `git -C <repo> show-ref --verify --quiet refs/heads/<name>` exits 0
+     — or on the base's remote — `git -C <repo> show-ref --verify --quiet
+     refs/remotes/<remote>/<name>` exits 0 after the fetch. A leftover branch from an earlier run is
+     the operator's to delete or reuse; never pick a different name silently;
+   - HEAD is detached — `git -C <repo> symbolic-ref --short HEAD` fails — on the plan shape with a
+     `craft/design-doc` label, since the design-doc commit then has no branch to be carried from.
+4. **Find the design-doc commits** (plan shape with a `craft/design-doc` label only; the label is
+   validated as the preflight's design-doc check validates it). Record the current branch as
+   `<prev>`, then list the commits on it that are not on the base and touch the doc:
+   `git -C <repo> log --reverse --format=%H <base>..<prev> -- <path>`. Plan commits the doc with
+   `--only`, so each listed commit must touch that path alone — check with
+   `git -C <repo> show --name-only --format= <sha>`. A listed commit that touches anything else
+   stops the run, naming the commit: carrying it would carry unrelated work onto the task branch. An
+   empty list is not a stop — the preflight's design-doc check decides whether the doc is where it
+   must be.
+5. **Cut.** `git -C <repo> switch -c <name> <base>`.
+6. **Carry the design-doc commits.** When step 4 listed any, `git -C <repo> cherry-pick -S <sha>...`
+   in the listed order. When the cherry-pick fails, undo the cut entirely —
+   `git -C <repo> cherry-pick --abort`, `git -C <repo> switch <prev>`,
+   `git -C <repo> branch -D <name>` — and stop, reporting the git error through the
+   credential-pattern scrub. Plan's step 6.5 still owns the commit; execute only moves it.
+
+`<name>` is the `<bare-branch>` every later `craft/branch` write in this document records.
+
 ### Workspace preflight
 
-Run this step on every entry into the Loop — a fresh run before the claim below writes anything, and
-a resumed run before its next dispatch — on both the plan shape and the standalone shape. A reused
-camp workspace is where stale branches accumulate, and a resumed run is the one most likely to be
-sitting in one. Execute never rebases on its own: a rebase rewrites a branch an operator may have
-another session on, so the fix stays an operator action and this step only refuses to build — on a
-stale base, or on a design doc that is not committed. A stop here on a fresh run leaves the task
-untouched; a stop on a resumed run leaves its existing claim as it is and dispatches nothing.
+Run this step on every entry into the Loop — a fresh run after the task branch is cut and before the
+claim below writes anything, and a resumed run before its next dispatch — on both the plan shape and
+the standalone shape. A reused camp workspace is where stale branches accumulate, and a resumed run
+is the one most likely to be sitting in one. Execute never rebases on its own: a rebase rewrites a
+branch an operator may have another session on, so the fix stays an operator action and this step
+only refuses to build — on a stale base, or on a design doc that is not committed. A stop here on a
+fresh run leaves the task untouched; a stop on a resumed run leaves its existing claim as it is and
+dispatches nothing.
 
 Enumerate the repos the same way Phase 6's push does: in a camp workspace, the member worktrees of
 the current workspace's manifest; in vanilla usage, the single current repo. Each repo has a branch
 and a base. The base is the configured base in both usages — the member's `base` in the group config
 for a camp workspace, the base the operator named for this run in vanilla usage — and `origin/main`
 when nothing configures one; it is never the branch's upstream, which on a task branch is the branch
-itself. In a camp workspace the branch comes from the manifest; in vanilla usage it is
-`git symbolic-ref --short HEAD` (a detached HEAD has no branch to build on — stop and say so).
+itself. In both usages the branch is the one the repo has checked out, `git symbolic-ref --short
+HEAD` — in the target repository, the task branch [Cutting the task
+branch](#cutting-the-task-branch) cut or switched to (a detached HEAD has no branch to build on —
+stop and say so).
 
 Validate every branch name and base ref against the safe-value shape (`^[A-Za-z0-9._/-]+$`) before
 it is substituted into any command below, the rule every other value this document substitutes
@@ -862,9 +919,9 @@ Non-empty output means push is required — and so does an **error**, since `git
 rather than printing nothing when `origin/<branch>` doesn't exist as a remote-tracking ref; a branch
 with no upstream counts as unpushed either way.
 
-**Auto-push covers task branches only.** If the run is sitting on the repo's default branch — a run
-that started on `main`/`master` with explicit user consent — do not auto-push it. Name the branch
-and its unpushed commits in the completion report and leave the push to the user.
+**Auto-push covers task branches only.** If a repo is sitting on its default branch, do not
+auto-push it. Name the branch and its unpushed commits in the completion report and leave the push
+to the user.
 
 Before pushing a repo with unpushed commits, run the pre-push secret scan: check
 `git log origin/<branch>..HEAD -p` for that repo against the credential-pattern scrub list.
@@ -1254,4 +1311,5 @@ observations, note and proceed.
   the second traps knowledge; skipping the third breaks what `done` means, which is *committed and
   pushed*.
 - Ignore subagent questions or surprises
-- Start on main/master without explicit user consent
+- Build a fresh run on any branch but the one [Cutting the task branch](#cutting-the-task-branch)
+  cut for it
