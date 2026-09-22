@@ -258,6 +258,26 @@ def test_enable_missing_lore_on_path_raises_named_error_naming_lore_writes_nothi
     assert runner.calls == []
 
 
+def test_enable_binary_resolved_through_relative_path_entry_raises_named_error_writes_nothing(outpost):
+    runner = _RecordingRunner()
+
+    def which_relative_git(name: str) -> str | None:
+        return {"node": "/usr/bin/node", "git": "./git", "lore": "/usr/bin/lore"}.get(name)
+
+    with pytest.raises(OutpostLifecycleError, match="'git'.*relative"):
+        osup.enable(
+            env=outpost.env,
+            platform="darwin",
+            supervisor_dir=outpost.supervisor_dir,
+            runner=runner,
+            which_runner=which_relative_git,
+            uid=501,
+        )
+
+    assert not outpost.supervisor_dir.exists() or list(outpost.supervisor_dir.iterdir()) == []
+    assert runner.calls == []
+
+
 # ---------------------------------------------------------------------------
 # enable — checked supervisor return codes
 # ---------------------------------------------------------------------------

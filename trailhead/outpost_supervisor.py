@@ -247,6 +247,12 @@ def _resolve_binary(name: str, which_runner: Callable[[str], Optional[str]]) -> 
             f"outpost enable: '{name}' was not found on the shell's PATH; "
             "install it or fix PATH before enabling the supervisor entry."
         )
+    if not Path(resolved).is_absolute():
+        raise OutpostLifecycleError(
+            f"outpost enable: '{name}' resolved to {resolved}, a relative path; a relative "
+            "PATH entry would resolve against the daemon's working directory. Remove it "
+            "from PATH before enabling the supervisor entry."
+        )
     return resolved
 
 
