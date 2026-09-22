@@ -65,7 +65,7 @@ class TestEmpty:
 
 
 class TestCodexVacuousSurface:
-    """Codex's install-surface methods are vacuous at this stage, so a
+    """Codex's install-surface methods are vacuous, so a
     composed ``codex`` tree with no marketplace or markers on disk is the
     only state doctor can ever observe for it — through the real harness
     seam, not by re-deriving Codex's (nonexistent) marker scheme here."""

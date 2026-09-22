@@ -46,22 +46,17 @@ file, an unreadable file, or one whose first line isn't a decodable
 ``session_meta`` envelope still yields a row, with ``cwd=None``, rather than
 raising or being skipped.
 
-Live enumeration: the lister and its fail-closed lock probe
----------------------------------------------------------------
-Codex ships no non-interactive session lister of its own, so
-``session_enumerate`` returns the argv that runs
+Live enumeration
+----------------
+Codex ships no non-interactive session lister of its own (``codex agents`` is
+a TUI browser), so ``session_enumerate`` returns the argv that runs
 :mod:`trailhead.harness.codex_sessions` as a subprocess (``sys.executable -m
-trailhead.harness.codex_sessions``), which resolves the Codex home from its
-own process environment through the same ``codex_home`` choke point and
+trailhead.harness.codex_sessions``). That module resolves the Codex home from
+its own process environment through the same ``codex_home`` choke point and
 prints one JSON array of the threads whose
-``<home>/thread-writer-locks/<thread-id>.lock`` is currently held. Liveness is
-decided by an OS-level ``fcntl.flock`` probe, not by the lock file's mere
-presence — a crashed Codex leaves the file behind, unlocked — and the probe
-fails CLOSED: any lock it cannot decide (no ``fcntl`` module, a permission or
-I/O error) is reported live rather than not-live, because under-reporting a
-live session would let camp's teardown guard destroy a running session's
-workspace. ``parse_session_list`` decodes that subprocess's stdout under the
-base contract.
+``<home>/thread-writer-locks/<thread-id>.lock`` is currently held; its
+docstring owns the fail-closed liveness contract. ``parse_session_list``
+decodes that subprocess's stdout under the base contract.
 
 Session launch
 --------------
@@ -129,7 +124,8 @@ _CODEX_CONFIG_FILENAME = "config.toml"
 #: "Codex CLI is installed" signal for :meth:`CodexHarness.detect`.
 _CODEX_EXECUTABLE_NAME = "codex"
 
-#: A directory under ``.codex`` Codex itself creates. See :mod:`trailhead.harness`.
+#: The directory under ``HOME``/``USERPROFILE`` Codex uses as its home when
+#: ``CODEX_HOME`` is unset — :func:`codex_home`'s fallback.
 _CODEX_HOME_SUBDIR = ".codex"
 
 #: The directory under a Codex home holding rollout transcripts, laid out as
@@ -251,14 +247,21 @@ def _is_session_id(session_id: object) -> bool:
     return isinstance(session_id, str) and _SESSION_ID_RE.match(session_id) is not None
 
 
-def _iter_rollout_paths(sessions_dir: Path):
-    """Walk ``sessions_dir`` for rollout files, both plain and ``.zst``-compressed.
+def _iter_rollouts(sessions_dir: Path):
+    """Yield ``(path, thread_id)`` for every rollout file under ``sessions_dir``.
 
-    Depth is fixed at ``*/*/*`` — the ``YYYY/MM/DD`` layout Codex itself
-    writes — never a recursive glob.
+    Walks both plain and ``.zst``-compressed rollouts at a fixed ``*/*/*``
+    depth — the ``YYYY/MM/DD`` layout Codex itself writes — never a recursive
+    glob. A non-file, or a filename :func:`_parse_rollout_session_id` rejects,
+    is skipped.
     """
-    yield from sessions_dir.glob("*/*/*/rollout-*.jsonl")
-    yield from sessions_dir.glob("*/*/*/rollout-*.jsonl.zst")
+    for pattern in ("*/*/*/rollout-*.jsonl", "*/*/*/rollout-*.jsonl.zst"):
+        for path in sessions_dir.glob(pattern):
+            if not path.is_file():
+                continue
+            session_id = _parse_rollout_session_id(path)
+            if session_id is not None:
+                yield path, session_id
 
 
 def _parse_rollout_session_id(path: Path) -> str | None:
@@ -336,11 +339,9 @@ def _resolve_rollout_path(session_id: str, sessions_dir: Path) -> Path | None:
         return None
     if not sessions_dir.is_dir():
         return None
-    for candidate in _iter_rollout_paths(sessions_dir):
-        if not candidate.is_file():
-            continue
-        if _parse_rollout_session_id(candidate) == session_id:
-            return candidate
+    for path, candidate_id in _iter_rollouts(sessions_dir):
+        if candidate_id == session_id:
+            return path
     return None
 
 
@@ -382,6 +383,19 @@ def codex_home(env: dict[str, str]) -> Path:
     return Path(home) / _CODEX_HOME_SUBDIR
 
 
+def _workspace_argv_value(caller: str, workspace: Path) -> str:
+    """Return *workspace* as an argv value, or raise if it would read as a flag.
+
+    Argv safety only, not filesystem validation: a value beginning with ``-``
+    would be parsed as an option by the program it is handed to. *caller*
+    prefixes the error so it names the seam method that refused.
+    """
+    as_arg = str(workspace)
+    if as_arg.startswith("-"):
+        raise HarnessError(f"{caller}: workspace would read as a flag in argv: {as_arg!r}")
+    return as_arg
+
+
 def _codex_on_path(env: dict[str, str]) -> bool:
     """True if an executable named ``codex`` is on the given env's ``PATH``.
 
@@ -402,9 +416,9 @@ def _codex_on_path(env: dict[str, str]) -> bool:
 class CodexHarness(Harness):
     """Recognise Codex through the trailhead harness seam.
 
-    See the module docstring for what's implemented (detection, home
-    resolution) versus vacuous (every install/registration method) at this
-    stage.
+    See the module docstring for what's implemented (detection, the
+    transcript store, live enumeration, the launch quartet) versus vacuous
+    (every install/registration method).
     """
 
     name = "codex"
@@ -482,12 +496,7 @@ class CodexHarness(Harness):
         resolved_workspace = Path(workspace).resolve() if workspace is not None else None
 
         rows: list[SessionTranscript] = []
-        for candidate in _iter_rollout_paths(sessions_dir):
-            if not candidate.is_file():
-                continue
-            session_id = _parse_rollout_session_id(candidate)
-            if session_id is None:
-                continue
+        for candidate, session_id in _iter_rollouts(sessions_dir):
             try:
                 mtime = candidate.stat().st_mtime
             except OSError:
@@ -556,12 +565,7 @@ class CodexHarness(Harness):
                 raise HarnessError(
                     f"session_launch: invalid settings_path: {settings_path!r}"
                 )
-        as_arg = str(workspace)
-        if as_arg.startswith("-"):
-            raise HarnessError(
-                f"session_launch: workspace would read as a flag in argv: {as_arg!r}"
-            )
-        return ["codex", "--cd", as_arg]
+        return ["codex", "--cd", _workspace_argv_value("session_launch", workspace)]
 
     def session_launch_modality(self) -> Modality:
         """Codex launch requires a TTY (interactive terminal)."""
@@ -599,13 +603,6 @@ class CodexHarness(Harness):
         return {"CODEX_HOME": str(account_dir)}
 
     # -- live session enumeration -------------------------------------------
-    #
-    # Codex ships no non-interactive session lister of its own (``codex agents``
-    # is a TUI browser), so this seam points at trailhead's own lister module,
-    # which resolves the Codex home from ITS OWN process environment (never an
-    # argv-passed one) and reports liveness by probing
-    # ``<home>/thread-writer-locks/<thread-id>.lock`` — see
-    # ``trailhead.harness.codex_sessions`` for the full contract.
 
     def session_enumerate(self, workspace: Path | None = None) -> list[str]:
         """Return the argv that runs :mod:`trailhead.harness.codex_sessions`.
@@ -618,13 +615,7 @@ class CodexHarness(Harness):
         """
         argv = [sys.executable, "-m", "trailhead.harness.codex_sessions"]
         if workspace is not None:
-            as_arg = str(workspace)
-            if as_arg.startswith("-"):
-                raise HarnessError(
-                    f"session_enumerate: workspace would read as a flag in "
-                    f"argv: {as_arg!r}"
-                )
-            argv += ["--workspace", as_arg]
+            argv += ["--workspace", _workspace_argv_value("session_enumerate", workspace)]
         return argv
 
     def parse_session_list(self, output: str) -> list[SessionRecord]:

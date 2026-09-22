@@ -1,4 +1,8 @@
-"""Tests for trailhead/harness/codex.py — registry entry, home resolution, detection.
+"""Tests for trailhead/harness/codex.py and trailhead/harness/codex_sessions.py.
+
+Covers the registry entry, home resolution, detection, the transcript store,
+the live-session lister and its parser, the launch quartet, and an isolation
+sweep across every read path.
 
 Every test injects its own env (``CODEX_HOME``/``HOME``/``PATH``) rather than
 relying on the ambient process environment, per this suite's isolation
@@ -9,6 +13,7 @@ through to it would fail loudly rather than silently reading a real home.
 
 from __future__ import annotations
 
+import contextlib
 import fcntl
 import json
 import os
@@ -20,10 +25,15 @@ from pathlib import Path
 
 import pytest
 
-from trailhead.harness import HarnessError, get_harness, known_harness_names
+from trailhead.harness import HarnessError, codex_sessions, get_harness, known_harness_names
 from trailhead.harness.base import MODALITIES, MODALITY_TTY_REQUIRED
 from trailhead.harness.claude_code import _ERROR_EXCERPT_LIMIT
-from trailhead.harness.codex import CodexHarness, _is_session_id, codex_home
+from trailhead.harness.codex import (
+    _SESSION_META_MAX_LINE_BYTES,
+    CodexHarness,
+    _is_session_id,
+    codex_home,
+)
 
 
 def _make_executable(path: Path) -> None:
@@ -214,10 +224,7 @@ class TestCodexSessionTranscripts:
         ws = tmp_path / "ws"
         ws.mkdir()
         id_a = "01a0c9d2-1038-7b11-ad91-9c36433a8ce7"
-        d = _sessions_dir(env) / "2024" / "01" / "01"
-        d.mkdir(parents=True)
-        path = d / f"rollout-2024-01-01T12-00-00-{id_a}.jsonl.zst"
-        path.write_text(_meta_line(str(ws)) + "\n")
+        _write_rollout(env, f"rollout-2024-01-01T12-00-00-{id_a}.jsonl.zst", [_meta_line(str(ws))])
         rows = CodexHarness().session_transcripts(env=env)
         assert len(rows) == 1
         assert rows[0].session_id == id_a
@@ -240,23 +247,20 @@ class TestCodexSessionTranscripts:
         assert rows[0].cwd is None
 
     def test_first_line_past_byte_cap_still_yields_row_and_never_reads_second_line(self, tmp_path):
-        from trailhead.harness.codex import _SESSION_META_MAX_LINE_BYTES
-
         env = _env(tmp_path)
         ws = tmp_path / "ws"
         ws.mkdir()
         sentinel = tmp_path / "sentinel-second-line-cwd"
         id_a = "01a0c9d2-1038-7b11-ad91-9c36433a8ce7"
-        d = _sessions_dir(env) / "2024" / "01" / "01"
-        d.mkdir(parents=True)
-        path = d / f"rollout-2024-01-01T12-00-00-{id_a}.jsonl"
 
         # A COMPLETE, well-formed session_meta line padded past the byte cap —
         # if the read were unbounded this would decode fine and yield ws's
         # cwd, so cwd=None below can only come from the cap actually biting.
         oversized_first_line = _meta_line(str(ws), padding="x" * (_SESSION_META_MAX_LINE_BYTES + 100))
         second_line = _meta_line(str(sentinel))
-        path.write_text(oversized_first_line + "\n" + second_line + "\n")
+        _write_rollout(
+            env, f"rollout-2024-01-01T12-00-00-{id_a}.jsonl", [oversized_first_line, second_line]
+        )
 
         rows = CodexHarness().session_transcripts(env=env)
         assert len(rows) == 1
@@ -264,20 +268,14 @@ class TestCodexSessionTranscripts:
 
     def test_dotdot_id_yields_no_row(self, tmp_path):
         env = _env(tmp_path)
-        d = _sessions_dir(env) / "2024" / "01" / "01"
-        d.mkdir(parents=True)
-        (d / "rollout-2024-01-01T12-00-00-...jsonl").write_text(
-            _meta_line(str(tmp_path)) + "\n"
-        )
+        _write_rollout(env, "rollout-2024-01-01T12-00-00-...jsonl", [_meta_line(str(tmp_path))])
         rows = CodexHarness().session_transcripts(env=env)
         assert rows == []
 
     def test_separator_bearing_id_yields_no_row(self, tmp_path):
         env = _env(tmp_path)
-        d = _sessions_dir(env) / "2024" / "01" / "01"
-        d.mkdir(parents=True)
-        (d / "rollout-2024-01-01T12-00-00-back\\slash.jsonl").write_text(
-            _meta_line(str(tmp_path)) + "\n"
+        _write_rollout(
+            env, "rollout-2024-01-01T12-00-00-back\\slash.jsonl", [_meta_line(str(tmp_path))]
         )
         rows = CodexHarness().session_transcripts(env=env)
         assert rows == []
@@ -349,17 +347,13 @@ class TestCodexSessionTranscriptPath:
         literal id ``..`` — proving the guard rejects the id itself, not
         merely that nothing on disk happened to match it."""
         env = _env(tmp_path)
-        d = _sessions_dir(env) / "2024" / "01" / "01"
-        d.mkdir(parents=True)
-        (d / "rollout-2024-01-01T12-00-00-...jsonl").write_text(
-            _meta_line(str(tmp_path)) + "\n"
-        )
+        _write_rollout(env, "rollout-2024-01-01T12-00-00-...jsonl", [_meta_line(str(tmp_path))])
         assert CodexHarness().session_transcript_path("..", tmp_path, env=env) is None
 
 
 class TestCodexSessionIdGuard:
-    """The guard next exported for the live-session lister/parser task to
-    import — direct behavioral coverage independent of any on-disk rollout."""
+    """The guard the transcript store, the lister, and the parser share —
+    direct behavioral coverage independent of any on-disk rollout."""
 
     @pytest.mark.parametrize("session_id", ["..", "", "a/b", "a\\b", ".hidden"])
     def test_rejects_traversal_separator_and_leading_dot_ids(self, session_id):
@@ -390,6 +384,21 @@ def _run_lister(env: dict[str, str], *extra_args: str) -> subprocess.CompletedPr
     )
 
 
+@contextlib.contextmanager
+def _held(*lock_paths: Path):
+    """Hold an exclusive ``flock`` on every path for the duration of the block —
+    standing in for a running Codex session holding its thread's writer lock."""
+    fds = [os.open(p, os.O_RDONLY) for p in lock_paths]
+    try:
+        for fd in fds:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        for fd in fds:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            os.close(fd)
+
+
 class TestCodexSessionsListerSubprocess:
     """`python -m trailhead.harness.codex_sessions`, run as a real subprocess
     against a tmp Codex home — never the ambient environment."""
@@ -417,13 +426,8 @@ class TestCodexSessionsListerSubprocess:
             env, f"rollout-2024-01-01T12-00-00-{thread_id}.jsonl", [_meta_line(str(ws))]
         )
 
-        fd = os.open(lock_path, os.O_RDONLY)
-        fcntl.flock(fd, fcntl.LOCK_EX)
-        try:
+        with _held(lock_path):
             result = _run_lister(env)
-        finally:
-            fcntl.flock(fd, fcntl.LOCK_UN)
-            os.close(fd)
 
         assert result.returncode == 0
         records = json.loads(result.stdout)
@@ -441,13 +445,8 @@ class TestCodexSessionsListerSubprocess:
         thread_id = "01a0c9d2-1038-7b11-ad91-9c36433a8ce7"
         lock_path = _write_lock_file(env, f"{thread_id}.lock")
 
-        fd = os.open(lock_path, os.O_RDONLY)
-        fcntl.flock(fd, fcntl.LOCK_EX)
-        try:
+        with _held(lock_path):
             result = _run_lister(env)
-        finally:
-            fcntl.flock(fd, fcntl.LOCK_UN)
-            os.close(fd)
 
         assert result.returncode != 0
         assert thread_id in result.stderr
@@ -467,17 +466,8 @@ class TestCodexSessionsListerSubprocess:
             env, f"rollout-2024-01-01T11-00-00-{id_sibling}.jsonl", [_meta_line(str(sibling))]
         )
 
-        fd_under = os.open(lock_under, os.O_RDONLY)
-        fd_sibling = os.open(lock_sibling, os.O_RDONLY)
-        fcntl.flock(fd_under, fcntl.LOCK_EX)
-        fcntl.flock(fd_sibling, fcntl.LOCK_EX)
-        try:
+        with _held(lock_under, lock_sibling):
             result = _run_lister(env, "--workspace", str(ws))
-        finally:
-            fcntl.flock(fd_under, fcntl.LOCK_UN)
-            fcntl.flock(fd_sibling, fcntl.LOCK_UN)
-            os.close(fd_under)
-            os.close(fd_sibling)
 
         assert result.returncode == 0
         records = json.loads(result.stdout)
@@ -487,13 +477,8 @@ class TestCodexSessionsListerSubprocess:
         env = _env(tmp_path)
         coord_path = _write_lock_file(env, ".coordination.lock")
 
-        fd = os.open(coord_path, os.O_RDONLY)
-        fcntl.flock(fd, fcntl.LOCK_EX)
-        try:
+        with _held(coord_path):
             result = _run_lister(env)
-        finally:
-            fcntl.flock(fd, fcntl.LOCK_UN)
-            os.close(fd)
 
         assert result.returncode == 0
         assert json.loads(result.stdout) == []
@@ -519,12 +504,9 @@ class TestCodexSessionsListerSubprocess:
 
 class TestCodexSessionsIsLocked:
     """Direct coverage of the fail-closed probe wrapper, independent of a
-    real subprocess — the alternate route the task allows for proving an
-    undecidable probe reports live."""
+    real subprocess — an undecidable probe reports live."""
 
     def test_probe_raising_reports_live(self, tmp_path, monkeypatch):
-        from trailhead.harness import codex_sessions
-
         lock_path = tmp_path / "some.lock"
         lock_path.write_text("")
 
@@ -535,8 +517,6 @@ class TestCodexSessionsIsLocked:
         assert codex_sessions._is_locked(lock_path) is True
 
     def test_unheld_lock_reports_not_locked(self, tmp_path):
-        from trailhead.harness import codex_sessions
-
         lock_path = tmp_path / "some.lock"
         lock_path.write_text("")
         assert codex_sessions._is_locked(lock_path) is False
@@ -684,13 +664,8 @@ class TestCodexSessionListRoundTrip:
             env, f"rollout-2024-01-01T12-00-00-{thread_id}.jsonl", [_meta_line(str(ws))]
         )
 
-        fd = os.open(lock_path, os.O_RDONLY)
-        fcntl.flock(fd, fcntl.LOCK_EX)
-        try:
+        with _held(lock_path):
             result = _run_lister(env)
-        finally:
-            fcntl.flock(fd, fcntl.LOCK_UN)
-            os.close(fd)
 
         records = CodexHarness().parse_session_list(result.stdout)
         assert len(records) == 1
@@ -826,20 +801,18 @@ class TestCodexSessionLaunchEnvSet:
         assert str(ambient) in message
 
 
-def _build_codex_home(root: Path, *, thread_id: str, cwd: Path) -> Path:
+def _build_codex_home(root: Path, *, thread_id: str, cwd: Path) -> tuple[Path, Path, Path]:
     """Build a Codex home under ``root`` — ``config.toml``, one rollout in the
     real ``sessions/YYYY/MM/DD`` envelope shape, and its lock file (unheld;
-    the caller flocks it). Returns the ``.codex`` directory."""
+    the caller holds it). Returns ``(codex_dir, rollout_path, lock_path)``."""
     codex_dir = root / ".codex"
-    day_dir = codex_dir / "sessions" / "2024" / "01" / "01"
-    day_dir.mkdir(parents=True)
+    home_env = {"CODEX_HOME": str(codex_dir)}
+    rollout = _write_rollout(
+        home_env, f"rollout-2024-01-01T12-00-00-{thread_id}.jsonl", [_meta_line(str(cwd))]
+    )
     (codex_dir / "config.toml").write_text("")
-    rollout = day_dir / f"rollout-2024-01-01T12-00-00-{thread_id}.jsonl"
-    rollout.write_text(_meta_line(str(cwd)) + "\n")
-    lock_dir = codex_dir / "thread-writer-locks"
-    lock_dir.mkdir(parents=True)
-    (lock_dir / f"{thread_id}.lock").write_text("")
-    return codex_dir
+    lock = _write_lock_file(home_env, f"{thread_id}.lock")
+    return codex_dir, rollout, lock
 
 
 def _inventory(root: Path) -> dict[str, tuple[int, float]]:
@@ -857,36 +830,35 @@ class TestCodexIsolationSweep:
     binding — must answer only from the injected env, never from a decoy
     tree standing in for the operator's real Codex home."""
 
+    @pytest.mark.parametrize("pin_codex_home", [True, False], ids=["codex-home", "home-fallback"])
     def test_full_sweep_answers_only_from_injected_home_and_leaves_decoy_untouched(
-        self, tmp_path
+        self, tmp_path, pin_codex_home
     ):
         decoy_id = "d0000000-0000-0000-0000-000000000001"
         decoy_cwd = tmp_path / "decoy-cwd"
         decoy_cwd.mkdir()
         decoy_root = tmp_path / "operator-real-home"
-        decoy_codex_dir = _build_codex_home(decoy_root, thread_id=decoy_id, cwd=decoy_cwd)
-        decoy_lock = decoy_codex_dir / "thread-writer-locks" / f"{decoy_id}.lock"
+        _, _, decoy_lock = _build_codex_home(decoy_root, thread_id=decoy_id, cwd=decoy_cwd)
 
         injected_id = "1a111111-1111-1111-1111-111111111111"
         injected_cwd = tmp_path / "injected-cwd"
         injected_cwd.mkdir()
         injected_root = tmp_path / "injected-home"
-        injected_codex_dir = _build_codex_home(
+        injected_codex_dir, injected_rollout, injected_lock = _build_codex_home(
             injected_root, thread_id=injected_id, cwd=injected_cwd
         )
-        injected_lock = injected_codex_dir / "thread-writer-locks" / f"{injected_id}.lock"
 
-        env = {
-            "CODEX_HOME": str(injected_codex_dir),
-            "HOME": str(tmp_path / "unrelated-home"),
-            "PATH": "",
-        }
+        if pin_codex_home:
+            env = {
+                "CODEX_HOME": str(injected_codex_dir),
+                "HOME": str(tmp_path / "unrelated-home"),
+                "PATH": "",
+            }
+        else:
+            # No CODEX_HOME in this env — proves the HOME/.codex fallback answers.
+            env = {"HOME": str(injected_root), "PATH": ""}
 
-        decoy_fd = os.open(decoy_lock, os.O_RDONLY)
-        injected_fd = os.open(injected_lock, os.O_RDONLY)
-        fcntl.flock(decoy_fd, fcntl.LOCK_EX)
-        fcntl.flock(injected_fd, fcntl.LOCK_EX)
-        try:
+        with _held(decoy_lock, injected_lock):
             before = _inventory(decoy_root)
 
             harness = CodexHarness()
@@ -898,22 +870,10 @@ class TestCodexIsolationSweep:
             assert rows[0].cwd == injected_cwd.resolve()
 
             resolved = harness.session_transcript_path(injected_id, injected_cwd, env=env)
-            assert resolved == (
-                injected_codex_dir
-                / "sessions"
-                / "2024"
-                / "01"
-                / "01"
-                / f"rollout-2024-01-01T12-00-00-{injected_id}.jsonl"
-            )
+            assert resolved == injected_rollout
             assert harness.session_transcript_path(decoy_id, injected_cwd, env=env) is None
 
-            result = subprocess.run(
-                [sys.executable, "-m", "trailhead.harness.codex_sessions"],
-                capture_output=True,
-                text=True,
-                env=env,
-            )
+            result = _run_lister(env)
             assert result.returncode == 0
             records = json.loads(result.stdout)
             assert {r["sessionId"] for r in records} == {injected_id}
@@ -938,92 +898,3 @@ class TestCodexIsolationSweep:
 
             after = _inventory(decoy_root)
             assert after == before
-        finally:
-            fcntl.flock(decoy_fd, fcntl.LOCK_UN)
-            fcntl.flock(injected_fd, fcntl.LOCK_UN)
-            os.close(decoy_fd)
-            os.close(injected_fd)
-
-    def test_home_only_fallback_answers_only_from_injected_home_and_leaves_decoy_untouched(
-        self, tmp_path
-    ):
-        decoy_id = "d0000000-0000-0000-0000-000000000002"
-        decoy_cwd = tmp_path / "decoy-cwd-2"
-        decoy_cwd.mkdir()
-        decoy_root = tmp_path / "operator-real-home-2"
-        decoy_codex_dir = _build_codex_home(decoy_root, thread_id=decoy_id, cwd=decoy_cwd)
-        decoy_lock = decoy_codex_dir / "thread-writer-locks" / f"{decoy_id}.lock"
-
-        injected_id = "2b222222-2222-2222-2222-222222222222"
-        injected_cwd = tmp_path / "injected-cwd-2"
-        injected_cwd.mkdir()
-        injected_root = tmp_path / "injected-home-2"
-        injected_codex_dir = _build_codex_home(
-            injected_root, thread_id=injected_id, cwd=injected_cwd
-        )
-        injected_lock = injected_codex_dir / "thread-writer-locks" / f"{injected_id}.lock"
-
-        # No CODEX_HOME in this env — proves the HOME/.codex fallback answers.
-        env = {"HOME": str(injected_root), "PATH": ""}
-
-        decoy_fd = os.open(decoy_lock, os.O_RDONLY)
-        injected_fd = os.open(injected_lock, os.O_RDONLY)
-        fcntl.flock(decoy_fd, fcntl.LOCK_EX)
-        fcntl.flock(injected_fd, fcntl.LOCK_EX)
-        try:
-            before = _inventory(decoy_root)
-
-            harness = CodexHarness()
-
-            assert harness.detect(env) is True
-
-            rows = harness.session_transcripts(env=env)
-            assert {r.session_id for r in rows} == {injected_id}
-            assert rows[0].cwd == injected_cwd.resolve()
-
-            resolved = harness.session_transcript_path(injected_id, injected_cwd, env=env)
-            assert resolved == (
-                injected_codex_dir
-                / "sessions"
-                / "2024"
-                / "01"
-                / "01"
-                / f"rollout-2024-01-01T12-00-00-{injected_id}.jsonl"
-            )
-            assert harness.session_transcript_path(decoy_id, injected_cwd, env=env) is None
-
-            result = subprocess.run(
-                [sys.executable, "-m", "trailhead.harness.codex_sessions"],
-                capture_output=True,
-                text=True,
-                env=env,
-            )
-            assert result.returncode == 0
-            records = json.loads(result.stdout)
-            assert {r["sessionId"] for r in records} == {injected_id}
-            assert records[0]["cwd"] == str(injected_cwd)
-
-            account_dir = injected_root / "account-subdir"
-            launch_env = harness.session_launch_env_set(
-                str(account_dir), env={"HOME": str(injected_root)}
-            )
-            assert launch_env == {"CODEX_HOME": str(account_dir)}
-
-            for answer in (
-                str(injected_codex_dir),
-                str(resolved),
-                str(rows[0].cwd),
-                records[0]["cwd"],
-                records[0]["sessionId"],
-                launch_env["CODEX_HOME"],
-            ):
-                assert str(decoy_root) not in answer
-                assert decoy_id not in answer
-
-            after = _inventory(decoy_root)
-            assert after == before
-        finally:
-            fcntl.flock(decoy_fd, fcntl.LOCK_UN)
-            fcntl.flock(injected_fd, fcntl.LOCK_UN)
-            os.close(decoy_fd)
-            os.close(injected_fd)

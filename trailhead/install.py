@@ -218,9 +218,9 @@ def wire_all_harnesses(
         if not quiet and not as_json:
             # A post-wire read-back through the seam, not a pre-wire
             # announcement: a harness whose install-surface methods are
-            # still vacuous (e.g. Codex's skeleton) genuinely installs
-            # nothing, and this line must say so honestly rather than
-            # repeating the plugin selection as though it landed.
+            # no-ops genuinely installs nothing, and this line must say so
+            # honestly rather than repeating the plugin selection as though
+            # it landed.
             composed_root = harness.composed_root(state_dir("trailhead", env=env))
             installed = harness.installed_tools(composed_root, env=env)
             label = ", ".join(installed) if installed else "no plugins installed"
