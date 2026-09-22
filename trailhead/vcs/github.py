@@ -68,10 +68,12 @@ class MergeConfigError(Exception):
 
 
 class AutoMergeDisabledError(Exception):
-    """Raised when auto_merge is absent or false in the [release] block.
+    """Raised when auto_merge is absent or false in the [release] block and
+    the caller did not pass operator direction.
 
-    Fail-closed default: existing installs that never opted into auto_merge
-    must not silently keep merging once this gate lands.
+    Fail-closed default: with auto_merge off, the operator decides when a
+    merge happens. A PR approval on the host does not stand in for that
+    decision — only an explicit operator direction does.
     """
 
 
@@ -1380,14 +1382,11 @@ def _merge_method_notice(merge_method: str | None) -> str | None:
     read as a deliberate choice. Any concrete strategy (`merge`/`squash`/
     `rebase`) is an explicit configuration and gets no notice at all.
 
-    The `None` branch is defensive rather than routinely reached from
-    `_merge_prs`: `_load_auto_merge` reads the same file and returns False
-    on the same four conditions that make `_load_merge_method` return
-    `None`, so the auto-merge gate refuses such a run before this notice is
-    reached. It stays because the two loads are separate reads of a file
-    that can change between them, and because it is the correct text if the
-    gate order is ever revisited. Exercised directly rather than through
-    `_merge_prs` for that reason.
+    The `None` branch is reached from `_merge_prs` only on an
+    operator-directed run: `_load_auto_merge` reads the same file and
+    returns False on the same four conditions that make
+    `_load_merge_method` return `None`, so without operator direction the
+    auto-merge gate refuses such a run before this notice is reached.
     """
     if merge_method is None:
         return (
@@ -1459,6 +1458,8 @@ def _merge_prs(
     manifest_path: str,
     toml_path: str | None,
     runner: rp.Runner,
+    *,
+    operator_directed: bool = False,
 ) -> dict[str, Any]:
     for pair in pr_pairs:
         validate_pr_number(pair.pr_number)
@@ -1469,11 +1470,17 @@ def _merge_prs(
     merge_order = _load_merge_order(toml_path)
 
     # auto_merge gate — fail-closed: refuse before any subprocess call unless
-    # [release].auto_merge is explicitly true.
-    if not _load_auto_merge(toml_path):
+    # [release].auto_merge is explicitly true or the operator directed this
+    # merge. With auto_merge off the operator owns the timing of every merge;
+    # `operator_directed` is the caller's attestation that they did, and is
+    # not something this layer can verify. Only the auto_merge gate yields to
+    # it — merge_order, merge_method, and per-PR readiness still apply.
+    if not operator_directed and not _load_auto_merge(toml_path):
         raise AutoMergeDisabledError(
-            "refusing to merge — auto_merge is unset/false — "
-            "add `[release] auto_merge = true` to the group TOML to merge automatically."
+            "refusing to merge — auto_merge is unset/false, so merges wait for the "
+            "operator's direction. Pass --operator-directed only when the operator "
+            "has told you to merge these PRs; to merge without asking, add "
+            "`[release] auto_merge = true` to the group TOML."
         )
 
     # merge_method gate — fail-closed on an unrecognized value, before any
@@ -1928,8 +1935,15 @@ class _GitHubPR(PRSurface):
         manifest_path: str,
         *,
         toml_path: str | None = None,
+        operator_directed: bool = False,
     ) -> dict[str, Any]:
-        return _merge_prs(list(pr_pairs), manifest_path, toml_path, self._runner)
+        return _merge_prs(
+            list(pr_pairs),
+            manifest_path,
+            toml_path,
+            self._runner,
+            operator_directed=operator_directed,
+        )
 
     def approval(self, repo_path: str, pr_number: str) -> dict[str, Any]:
         return _check_approval(repo_path, pr_number, runner=self._runner)

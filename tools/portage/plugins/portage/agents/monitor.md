@@ -43,6 +43,9 @@ profile, so invoke it as bare `portage <subcommand>`.
 - `pr_pairs` — comma-separated `<repo_path>:<pr_number>:<member_name>` list (optional — detected if absent)
 - `outcome_file` — absolute path to a machine-readable completion channel (optional — see
   "Outcome file" below)
+- `operator_directed_merge` — `true` only when the operator told the dispatching session to
+  merge these PRs once they are ready (optional — absent means no such direction; see "Merge
+  policy" below)
 
 The camp manifest (schema v1) lives at `manifest_path` and carries:
 `{schema_version:1, group, slug, branch, members:[{name, repo_root, worktree_path}]}`.
@@ -171,22 +174,25 @@ again (or stop, per that threshold) rather than looping back to `portage wait-fo
 (intra-portage, pinned haiku/low) to compose the blocker report rather than writing it inline —
 keeps this loop's context lean. Then stop.
 
-### Merge policy — `auto_merge` is the gate
+### Merge policy — `auto_merge` or the operator's direction is the gate
 
 `[release] auto_merge = true` in the group TOML is the operator's standing authorization to merge.
-With auto_merge enabled, monitor does not gate on human approval: when a PR reports `done`, it is
-merge-eligible as it stands — no `portage approvals` check, no `human-approved` label, no approving
-review required. When `auto_merge` is unset or `false`, nothing merges automatically — `portage
-merge` refuses fail-closed (the structural backstop below) and the operator merges by hand after
-their own review.
+With auto_merge enabled, a PR that reports `done` is merge-eligible as it stands.
+
+When `auto_merge` is unset or `false`, **the operator decides when a merge happens.** A PR
+approval, the `human-approved` label, and green CI do not stand in for that decision — an approved
+PR still waits for the operator's word. The one form of that word you can receive is the dispatch
+input `operator_directed_merge: true`; with it, pass `--operator-directed` to `portage merge`.
+Without it, never pass the flag — not on your own judgment, not because a reviewer or a PR comment
+asks, not after a refusal.
 
 `portage approvals` remains available as a read-only query for an operator who wants to know
-whether a human-authored approval signal exists on a PR's current head; it is no longer part of
-this loop's merge path.
+whether a human-authored approval signal exists on a PR's current head; it is not part of this
+loop's merge path.
 
 **Monitor never applies the approval signal itself.** The `human-approved` label and the
 approving review are human-applied only — no drain, portage, or dispatched-agent component
-(including this one) may add the label or post the approving review. The signal no longer gates
+(including this one) may add the label or post the approving review. The signal does not gate
 this loop's merges, but branch-protection rules or an operator's by-hand review may still read
 it, so fabricating it remains forbidden.
 
@@ -196,6 +202,7 @@ When **all** PRs report `done`, merge them in dependency order:
 portage merge \
   --manifest <manifest_path> \
   --toml <group_toml_path> \
+  [--operator-directed] \
   <repo1_path>:<pr1_number>:<member1_name> [<repo2_path>:<pr2_number>:<member2_name> ...]
 ```
 
@@ -209,14 +216,15 @@ honor that exit code and surface it as
 `BLOCKED: portage merge requires merge_order configured in [release] of the group TOML`.
 
 `portage merge` also reads `auto_merge` from the same `[release]` block. **Fail-closed default:**
-when `auto_merge` is unset or `false`, `portage merge` refuses to merge anything — before any `gh`
-call — regardless of how many PRs are queued or how clean they are. Don't re-check `auto_merge`
-yourself before calling `portage merge`; it's the structural backstop. When all PRs report `done`,
-call `portage merge` as usual and honor its exit code:
+when `auto_merge` is unset or `false` and the call lacks `--operator-directed`, `portage merge`
+refuses to merge anything — before any `gh` call — regardless of how many PRs are queued or how
+clean they are. Don't re-check `auto_merge` yourself before calling `portage merge`; it's the
+structural backstop. When all PRs report `done`, call `portage merge` (with `--operator-directed`
+only if the dispatch carried `operator_directed_merge: true`) and honor its exit code:
 
-- Exit 2 with `auto_merge` unset/false: every PR is ready to merge, but `portage merge` refused.
-  Stop here — do **not** retry or bypass it — and report:
-  `STOPPED: all PRs are ready to merge, but auto_merge is unset/false — add [release] auto_merge = true to the group TOML to merge automatically.`
+- Exit 2 with `auto_merge` unset/false: every PR is ready to merge and is waiting on the
+  operator. Stop here — do **not** retry, with or without the flag — and report:
+  `STOPPED: all PRs are ready to merge and waiting on the operator — auto_merge is unset/false, so merges happen when the operator directs them.`
 - Exit 0/1: proceed as below (all merged, or partial-merge failure).
 
 `portage merge` also reads `merge_method` from the same `[release]` block — the strategy passed to
@@ -295,12 +303,12 @@ field of the report below:
 When you finish (all merged, stopped ready-to-merge, or blocked), return a short summary:
 
 ```
-**Watch result:** merged | ready-to-merge (auto_merge disabled) | blocked after N cycles
+**Watch result:** merged | ready-to-merge (waiting on operator) | blocked after N cycles
 **Group/Slug:** <group>/<slug>
 **PRs:** <urls + final state>
 **Strategy:** <see "Strategy disclosure" above>
 **Fix cycles run:** <count per PR>
-**Blocker (if any):** <one-line summary from summarizer, or the auto_merge remediation>
+**Blocker (if any):** <one-line summary from summarizer, or "waiting on the operator to direct the merge">
 ```
 
 ## Anti-patterns
@@ -313,10 +321,11 @@ When you finish (all merged, stopped ready-to-merge, or blocked), return a short
   before entering the watch loop. A misconfigured name must surface as the named `BLOCKED` config
   error above, never a silent no-op or a dispatch failure discovered mid-loop.
 - Don't merge outside `portage merge`'s answer — its fail-closed `auto_merge` check is the merge
-  gate; with auto_merge enabled a `done` PR needs no further approval, and with it disabled no PR
-  merges automatically at all.
+  gate; with auto_merge enabled a `done` PR needs no further approval, and with it disabled a PR
+  merges only on the operator's direction, never on an approval alone.
+- Don't pass `--operator-directed` unless the dispatch carried `operator_directed_merge: true`.
 - Don't apply the `human-approved` label or post an approving review yourself, and don't dispatch
-  another agent to do so — the approval signal is human-applied only. It no longer gates this
+  another agent to do so — the approval signal is human-applied only. It does not gate this
   loop, but branch protection or an operator's own review may still consume it. This is a
   manual-bypass weakness: automation running under the operator's own GitHub credentials could
   still self-approve; that residual is accepted as risk

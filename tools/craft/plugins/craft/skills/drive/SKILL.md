@@ -456,10 +456,10 @@ the plan and build phases' own worker-channel rule.
 - `STOPPED <reason>` where `<reason>` contains `auto_merge` — closes the slice; the stacked-slice
   success path, not a failure. Match on `auto_merge` appearing anywhere in the reason text, never on
   the whole-string or prefix literal `STOPPED auto_merge disabled` — monitor documents that string
-  only as an example in its token grammar (`tools/portage/plugins/portage/agents/monitor.md:90`),
+  only as an example in its token grammar (`tools/portage/plugins/portage/agents/monitor.md:94`),
   and the reason text it actually emits is
-  `STOPPED: all PRs are ready to merge, but auto_merge is unset/false — …`
-  (`tools/portage/plugins/portage/agents/monitor.md:218`): no prefix of `auto_merge disabled`
+  `STOPPED: all PRs are ready to merge and waiting on the operator — auto_merge is unset/false, …`
+  (`tools/portage/plugins/portage/agents/monitor.md:227`): no prefix of `auto_merge disabled`
   matches that text, so a prefix or whole-string match would silently misclassify every
   stacked-slice success as an escalation.
 - Every other `STOPPED <reason>` — escalates under the `portage-stopped` trigger, following the

@@ -76,7 +76,9 @@ def _write_toml(tmp_path: Path, content: str) -> Path:
     return p
 
 
-def _run_merge(tmp_path, monkeypatch, capsys, toml_content: str | None):
+def _run_merge(
+    tmp_path, monkeypatch, capsys, toml_content: str | None, *, operator_directed: bool = False
+):
     wt = tmp_path / "wt" / "api"
     wt.mkdir(parents=True)
     manifest = _make_manifest(tmp_path, wt)
@@ -87,6 +89,8 @@ def _run_merge(tmp_path, monkeypatch, capsys, toml_content: str | None):
     if toml_content is not None:
         toml = _write_toml(tmp_path, toml_content)
         argv += ["--toml", str(toml)]
+    if operator_directed:
+        argv += ["--operator-directed"]
     argv += [f"{wt}:1:api"]
 
     rc = dispatch.main(argv)
@@ -126,3 +130,42 @@ class TestRefusalMessageNamesRemediation:
         rc, spy, out = _run_merge(tmp_path, monkeypatch, capsys, "[release]\n")
         assert rc == 2
         assert "[release] auto_merge = true" in out.err
+
+
+class TestOperatorDirectedMergesWithAutoMergeOff:
+    """With auto_merge off the operator decides when a merge happens; the
+    ``--operator-directed`` flag is how the caller says the operator did."""
+
+    def test_explicit_false_with_operator_direction_merges(self, tmp_path, monkeypatch, capsys):
+        rc, spy, out = _run_merge(
+            tmp_path, monkeypatch, capsys, "[release]\nauto_merge = false\n", operator_directed=True
+        )
+        assert rc == 0
+        assert spy.merge_attempted()
+        assert any("1" in k for k in json.loads(out.out)["merged"])
+
+    def test_unset_with_operator_direction_merges(self, tmp_path, monkeypatch, capsys):
+        rc, spy, out = _run_merge(
+            tmp_path, monkeypatch, capsys, "[release]\n", operator_directed=True
+        )
+        assert rc == 0
+        assert spy.merge_attempted()
+
+
+class TestRefusalMessageNamesOperatorDirection:
+    def test_stderr_names_the_operator_directed_flag(self, tmp_path, monkeypatch, capsys):
+        rc, spy, out = _run_merge(tmp_path, monkeypatch, capsys, "[release]\n")
+        assert rc == 2
+        assert "--operator-directed" in out.err
+
+    def test_no_toml_with_operator_direction_squashes_and_says_why(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        # An operator-directed run is the only path that reaches the merge
+        # with an unreadable group TOML; it must take the safe strategy and
+        # announce the fallback rather than merge silently.
+        rc, spy, out = _run_merge(tmp_path, monkeypatch, capsys, None, operator_directed=True)
+        assert rc == 0
+        merge_calls = [c for c in spy.calls if "pr" in c and "merge" in c]
+        assert merge_calls and all("--squash" in c for c in merge_calls)
+        assert "merge_method could not be read" in out.err

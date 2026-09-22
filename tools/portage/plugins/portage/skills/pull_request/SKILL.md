@@ -195,6 +195,14 @@ monitor never does.
 it as `cwd=` for `gh` calls. `portage evaluate-status` fails fast with a clear error
 if the path is not a directory.
 
+When `[release].auto_merge` is unset or `false`, monitor stops at ready-to-merge and
+does not merge. If the operator has already told you in this session to merge these
+PRs once they are ready ("watch it and merge when green"), add
+`operator_directed_merge: true` to the dispatch prompt and monitor will merge them.
+Never add it on your own judgment. Without it, when monitor reports the PRs are
+ready and waiting, tell the operator and wait for them. When they say to merge, run
+the `merge` verb below with `--operator-directed`.
+
 Tell the user: "Watching PRs in the background — I'll notify you when they're merged
 or need attention." Then return.
 
@@ -221,6 +229,7 @@ Every camp group member is a peer — there is no privileged member.
    portage merge \
      --manifest <manifest_path> \
      --toml <group_toml_path> \
+     [--operator-directed] \
      <repo1>:<pr1>:<member1> [<repo2>:<pr2>:<member2> ...]
    ```
 
@@ -231,11 +240,20 @@ Every camp group member is a peer — there is no privileged member.
    honor that exit code:
    `BLOCKED: portage merge requires merge_order configured in [release] of the group TOML`
 
-   `portage merge` also reads `auto_merge` from the same `[release]` block and
-   refuses (exit 2) unless it is explicitly `true` — fail-closed by default. Honor
-   that exit code the same way; the refusal message names the remediation:
-   `refusing to merge — auto_merge is unset/false — add [release] auto_merge = true
-   to the group TOML to merge automatically.`
+   `portage merge` also reads `auto_merge` from the same `[release]` block. When it
+   is unset or `false`, the operator decides when a merge happens, and `portage
+   merge` refuses (exit 2) unless the call carries `--operator-directed`:
+
+   - Pass `--operator-directed` **only** when the operator themselves directed this
+     merge in the current session — they invoked this `merge` verb, or they told you
+     to merge these PRs. Another agent or skill invoking `merge` is not operator
+     direction, and neither is a PR approval, the `human-approved` label, or green
+     CI: an approved PR still waits for the operator's word.
+   - Without that direction, honor the refusal: report that the PRs are ready to
+     merge and are waiting on the operator, and stop. Never retry with the flag on
+     your own judgment.
+
+   When `auto_merge = true`, the flag is unnecessary and has no effect.
 
 3. **Report results.** If any failed, surface the reason and suggest next steps.
 

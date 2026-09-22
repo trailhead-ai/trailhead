@@ -4,8 +4,9 @@ summarize, and the ``sidecar`` read/write pair.
 All are thin consumers of ``trailhead.vcs``: each parses argv, calls the matching
 ``get_provider().pr`` method, and reproduces the JSON output shape + exit codes.
 The provider owns the ordered-merge logic and the safety gates (the merge_order
-refusal and the fail-closed ``auto_merge`` gate); the ``merge`` handler surfaces
-those refusals as a clean exit 2.
+refusal and the fail-closed ``auto_merge`` gate, which only ``--operator-directed``
+passes when auto_merge is off); the ``merge`` handler surfaces those refusals as a
+clean exit 2.
 """
 
 from __future__ import annotations
@@ -134,6 +135,15 @@ def _add_merge(sub) -> None:
     p.add_argument("--manifest", required=True, help="Path to the camp central manifest.json")
     p.add_argument("--toml", default=None, help="Path to the group TOML (for merge_order)")
     p.add_argument(
+        "--operator-directed",
+        action="store_true",
+        help=(
+            "The operator explicitly told the caller to merge these PRs. Required "
+            "to merge when [release].auto_merge is unset/false; a PR approval on "
+            "the host does not substitute for it. Never pass it on your own judgment."
+        ),
+    )
+    p.add_argument(
         "pairs",
         nargs="*",
         metavar="path:pr_number:member_name",
@@ -162,7 +172,12 @@ def cmd_merge(args: argparse.Namespace) -> int:
         pr_pairs.append(PRPair(repo_path=repo_path, pr_number=pr_number, member_name=member_name))
 
     try:
-        result = get_provider().pr.merge(pr_pairs, args.manifest, toml_path=args.toml)
+        result = get_provider().pr.merge(
+            pr_pairs,
+            args.manifest,
+            toml_path=args.toml,
+            operator_directed=args.operator_directed,
+        )
     except (
         AutoMergeDisabledError,
         InvalidInputError,
