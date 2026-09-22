@@ -189,3 +189,9 @@ claude -p ... --setting-sources project --allowedTools "Bash,Read,Glob,Grep" --a
 Baseline: `git show 5f41cef2:.../execute.md`. Treatment: the worktree copy (with the design-doc
 check added). A run that errors (missing fixture, dispatch failure, transient `529`) is discarded
 and re-run, not scored.
+
+**Correction to Revision 3, appended after review.** Its baseline paragraph says `5f41cef2` lacks
+the `### Workspace preflight` section itself. That is wrong: `5f41cef2` carries the section with the
+drift rules and lacks only the design-doc sub-step, which is what makes it the tighter control. The
+runs' own transcripts show the baseline agent reading that section and finding no design-doc
+paragraph in it. The predicted verdicts and the RED/GREEN outcome are unaffected.

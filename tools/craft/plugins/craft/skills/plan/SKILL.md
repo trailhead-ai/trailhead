@@ -272,12 +272,20 @@ rather than being silently omitted; that validation governs this label's value.
 
 When the parent carries no `## Enumerated states` section, this step does nothing.
 
-Once the label is recorded, commit the design doc: `git add <path>` for exactly that validated path
-— never `git add -A`, so unrelated working-tree state is untouched — then a GPG-signed conventional
-commit, `docs(<repo>): design doc for <parent-name>`. When the file is already tracked and unchanged
-at HEAD, skip the commit — there is nothing to commit. When it is tracked and modified, commit it
-the same way. After this step, `git status` shows nothing for the design-doc path and the path is
-tracked at HEAD.
+Once the label is recorded, commit the design doc in the plan's target repository — the camp member
+this plan builds against (the same repository the label's path is relative to; in vanilla usage, the
+current repo). Run every git command below as `git -C <repo>` so the workspace root is never the cwd
+that decides. First the skip test: when `git -C <repo> ls-files --error-unmatch <path>` exits 0 and
+`git -C <repo> diff --quiet HEAD -- <path>` exits 0, the file is tracked and unchanged at HEAD and
+there is nothing to commit — skip the rest. Otherwise stage exactly that validated path
+(`git -C <repo> add <path>`, never `git add -A`) and commit only that path, so anything else already
+staged is left where it is:
+`git -C <repo> commit -S --only -m "docs(<repo-name>): design doc for <parent-name>" -- <path>`,
+where `<repo-name>` is the target repository's name. A tracked-and-modified file takes the same
+path. When the commit itself fails — no signing key, a rejecting hook — stop and report the error:
+the doc stays uncommitted, and execute's preflight will refuse to build until it is committed, so
+the failure is fixed here, not worked around there. After this step, `git -C <repo> status` shows
+nothing for the design-doc path and the path is tracked at HEAD.
 
 ### 7. Define Tasks
 

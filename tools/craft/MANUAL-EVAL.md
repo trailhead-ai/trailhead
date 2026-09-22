@@ -2179,8 +2179,8 @@ same file committed). Pre-registered in `expected.md`'s "Revision 3" before any 
 ... --setting-sources project --allowedTools "Bash,Read,Glob,Grep" --append-system-prompt <prose>
 < /dev/null`, fixture repo built fresh inside each `<run-dir>` before the confined process ran. One
 run per cell (2 variants x 2 arms = 4). Baseline: `git show 5f41cef2:.../execute.md` (this task's
-stated base commit — still has no `### Workspace preflight` section at all, let alone the
-design-doc check). Treatment: the worktree copy (with the design-doc check added). The dispatch
+stated base commit — it carries the `### Workspace preflight` section with the drift rules, and no
+design-doc check, so the arms differ in exactly that sub-step). Treatment: the worktree copy (with the design-doc check added). The dispatch
 told the agent it was evaluating only the design-doc check sub-step, with drift stipulated already
 clean, so the earlier branch/base check in the same section could not confound this measurement.
 All 4 processes exited 0; no discards.
@@ -2216,8 +2216,9 @@ All 4 processes exited 0; no discards.
   passes and the run continues to the claim.`
 
 **RED state (baseline), as expected.md's Revision 3 predicted.** Both baseline runs PROCEED,
-including `design-doc-untracked` — `5f41cef2`'s `execute.md` has no Workspace preflight section at
-all, so nothing in it inspects `craft/design-doc`. Condition 1 fails on baseline as predicted;
+including `design-doc-untracked` — `5f41cef2`'s `execute.md` carries the Workspace preflight
+section but nothing in it inspects `craft/design-doc` (the runs' own messages say so: "No ...
+paragraph exists in this copy's Workspace preflight"). Condition 1 fails on baseline as predicted;
 condition 2 passes (there was never a stop to regress).
 
 **GREEN state (treatment), matching Revision 3 in full.** `design-doc-untracked` STOPs before the
