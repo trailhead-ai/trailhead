@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import load_script, make_git_vault, run_cli
+from conftest import CLI_PATH, load_script, make_git_vault, run_cli
 from test_vault_signing import (
     _allowed_signers_path,
     _generate_key,
@@ -153,6 +153,27 @@ def test_status_names_a_passphrase_protected_replacement_key(tmp_path):
     assert "lore signing enable" in r.stderr, r.stderr
 
 
+def test_status_names_a_corrupted_key_that_is_not_a_passphrase_issue(tmp_path):
+    """A configured key replaced with data ``ssh-keygen`` cannot load at all
+    (not a passphrase-protected key, just garbage) must be diagnosed
+    correctly rather than lumped in with the passphrase case — the two point
+    an operator at different realities."""
+    home = _isolated_home()
+    vault = make_git_vault(tmp_path / "vault")
+    state = tmp_path / "state"
+    assert _run_enable(vault, state).returncode == 0
+
+    key_path = _configured_key_path(state, home)
+    key_path.write_text("not a key at all\n")
+    key_path.chmod(0o600)
+
+    r = _run_status(vault, state)
+    assert r.returncode != 0
+    assert "not a private key ssh-keygen can load" in r.stderr, r.stderr
+    assert "passphrase" not in r.stderr, r.stderr
+    assert "lore signing enable" in r.stderr, r.stderr
+
+
 def test_status_names_a_widened_key_mode(tmp_path):
     home = _isolated_home()
     vault = make_git_vault(tmp_path / "vault")
@@ -208,6 +229,62 @@ def test_status_names_missing_ssh_keygen_on_path(tmp_path):
     assert "Traceback" not in r.stderr, r.stderr
 
 
+# ── enable — ssh-keygen failure modes escape as clean `lore:` errors ──────
+
+
+def test_enable_prints_clean_error_when_ssh_keygen_missing(tmp_path):
+    """A fresh `enable` (nothing configured yet) with no ssh-keygen on PATH
+    must not let the FileNotFoundError escape as a traceback — it should be
+    mapped to the same message `lore signing status` already gives."""
+    vault = make_git_vault(tmp_path / "vault")
+    state = tmp_path / "state"
+
+    r = _run_enable(vault, state, extra_env={"PATH": "/nonexistent-bin-dir"})
+    assert r.returncode != 0
+    assert "lore: ssh-keygen is not on PATH" in r.stderr, r.stderr
+    assert "Traceback" not in r.stderr, r.stderr
+
+
+def test_enable_prints_clean_error_when_ssh_keygen_exits_nonzero(tmp_path):
+    """A ``ssh-keygen`` binary on PATH that exits non-zero during generation
+    (``CalledProcessError``, `check=True`) must not escape as a traceback."""
+    vault = make_git_vault(tmp_path / "vault")
+    state = tmp_path / "state"
+
+    fake_bin = tmp_path / "fakebin"
+    fake_bin.mkdir()
+    fake_ssh_keygen = fake_bin / "ssh-keygen"
+    fake_ssh_keygen.write_text("#!/bin/sh\nexit 7\n")
+    fake_ssh_keygen.chmod(0o755)
+
+    r = _run_enable(vault, state, extra_env={"PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}"})
+    assert r.returncode != 0
+    assert r.stderr.startswith("lore: "), r.stderr
+    assert "Traceback" not in r.stderr, r.stderr
+
+
+def test_enable_prints_clean_error_when_ssh_keygen_times_out(tmp_path, monkeypatch):
+    """A ``ssh-keygen`` that hangs past the module's own bound
+    (``TimeoutExpired``) must not escape as a traceback either."""
+    import lore.vault.signing as live_signing_mod
+
+    vault = make_git_vault(tmp_path / "vault")
+    state = tmp_path / "state"
+
+    fake_bin = tmp_path / "fakebin"
+    fake_bin.mkdir()
+    fake_ssh_keygen = fake_bin / "ssh-keygen"
+    fake_ssh_keygen.write_text("#!/bin/sh\nsleep 5\n")
+    fake_ssh_keygen.chmod(0o755)
+
+    monkeypatch.setattr(live_signing_mod, "_SSH_KEYGEN_TIMEOUT", 0.2)
+
+    r = _run_enable(vault, state, extra_env={"PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}"})
+    assert r.returncode != 0
+    assert r.stderr.startswith("lore: "), r.stderr
+    assert "Traceback" not in r.stderr, r.stderr
+
+
 def test_status_names_a_configured_key_since_deleted(tmp_path):
     home = _isolated_home()
     vault = make_git_vault(tmp_path / "vault")
@@ -249,6 +326,35 @@ def test_lore_status_shows_signing_failing_with_remedy_when_key_absent(tmp_path)
     assert r.returncode == 0, r.stderr
     assert "signing" in r.stdout
     assert "lore signing enable" in r.stdout
+
+
+def test_lore_status_degrades_the_signing_line_instead_of_crashing_the_report(tmp_path, monkeypatch):
+    """A ``describe_status`` call that raises (a ``ssh-keygen`` timeout, here)
+    must not take down the rest of `lore status`'s report — the ruleset
+    section above it and the vault-drift section below it must still print,
+    matching the report's existing "an unreadable config downgrades a
+    section to a stderr line" contract."""
+    import lore.vault.signing as live_signing_mod
+
+    vault = make_git_vault(tmp_path / "vault")
+    state = tmp_path / "state"
+    assert _run_enable(vault, state).returncode == 0
+
+    fake_bin = tmp_path / "fakebin"
+    fake_bin.mkdir()
+    fake_ssh_keygen = fake_bin / "ssh-keygen"
+    fake_ssh_keygen.write_text("#!/bin/sh\nsleep 5\n")
+    fake_ssh_keygen.chmod(0o755)
+    monkeypatch.setattr(live_signing_mod, "_SSH_KEYGEN_TIMEOUT", 0.2)
+
+    r = run_cli(
+        ["status"], vault=vault, state_dir=state,
+        env_extra={"PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}"},
+    )
+    assert r.returncode == 0, r.stderr
+    assert "Traceback" not in r.stdout and "Traceback" not in r.stderr, (r.stdout, r.stderr)
+    assert "vault" in r.stdout  # the vault-drift section still ran
+    assert "signing" in r.stdout or "signing" in r.stderr
 
 
 # ── enable --key ──────────────────────────────────────────────────────────
@@ -378,3 +484,169 @@ def test_enable_with_key_switches_from_a_generated_key_and_no_arg_keeps_it(tmp_p
     r = _run_enable(vault, state)
     assert r.returncode == 0, r.stderr
     assert _configured_key_path(state, home) == named_key
+
+
+# ── enable, no argument — recovering from a drifted default-path key ──────
+#
+# Each of these starts from a state ``lore signing status`` names with the
+# remedy "run `lore signing enable`" and proves what a bare re-run actually
+# does: reuse a still-good key at the default path, or refuse by name rather
+# than generating over/beside an unusable file or hanging on a hidden
+# overwrite prompt.
+
+
+def test_enable_refuses_when_the_generated_key_was_replaced_by_a_passphrase_key(tmp_path):
+    """State (a): the configured (generated) key file was replaced in place
+    by a passphrase-protected key. Nothing at the default path is usable, so
+    a bare `enable` must refuse by name rather than silently generating over
+    it — there is no key left to reuse or an argument-free way to replace a
+    passphrase key with an empty one."""
+    home = _isolated_home()
+    vault = make_git_vault(tmp_path / "vault")
+    state = tmp_path / "state"
+    assert _run_enable(vault, state).returncode == 0
+
+    key_path = _configured_key_path(state, home)
+    original_bytes = key_path.read_bytes()
+    passphrase_key = _generate_key(tmp_path, "replacement", passphrase="secret123")
+    key_path.write_bytes(passphrase_key.read_bytes())
+    key_path.chmod(0o600)
+
+    r = _run_enable(vault, state)
+    assert r.returncode != 0
+    assert "needs a passphrase" in r.stderr, r.stderr
+    assert "Traceback" not in r.stderr, r.stderr
+    # refused — the unusable file was not touched or replaced
+    assert key_path.read_bytes() != original_bytes  # still the passphrase key we wrote
+    assert key_path.read_bytes() == passphrase_key.read_bytes()
+
+
+def test_enable_reuses_the_default_key_after_an_adopted_key_is_moved_away(tmp_path):
+    """State (b): generate, adopt an external key with --key, then that
+    external key is moved away. The originally generated key is still sitting
+    untouched at the default path and still loads with no passphrase, so a
+    bare `enable` reuses it rather than trying (and failing/hanging) to
+    generate a new one at an occupied path."""
+    home = _isolated_home()
+    _write_hostile_global_gitconfig(home)
+    vault = make_git_vault(tmp_path / "vault")
+    state = tmp_path / "state"
+
+    assert _run_enable(vault, state).returncode == 0
+    generated_key = _configured_key_path(state, home)
+    generated_fp = _fingerprint(generated_key)
+
+    adopt_dir = tmp_path / "adopt"
+    adopt_dir.mkdir()
+    other_key = _generate_key(adopt_dir, "other")
+    assert _run_enable(vault, state, key=other_key).returncode == 0
+    assert _configured_key_path(state, home) == other_key
+
+    other_key.rename(tmp_path / "other.moved")
+    Path(f"{other_key}.pub").rename(tmp_path / "other.moved.pub")
+
+    r = _run_status(vault, state)
+    assert r.returncode != 0
+    assert "lore signing enable" in r.stderr, r.stderr
+
+    r = _run_enable(vault, state)
+    assert r.returncode == 0, r.stderr
+    assert _configured_key_path(state, home) == generated_key
+    assert _fingerprint(generated_key) == generated_fp
+
+    r = _run_status(vault, state)
+    assert r.returncode == 0, r.stderr
+
+
+def test_enable_reuses_the_default_key_after_its_configuration_file_is_deleted(tmp_path):
+    """State (c): signing.json is deleted but the generated key at the
+    default path remains untouched — `enable` rewrites the configuration to
+    point at it again rather than generating a second key over it."""
+    home = _isolated_home()
+    _write_hostile_global_gitconfig(home)
+    vault = make_git_vault(tmp_path / "vault")
+    state = tmp_path / "state"
+
+    assert _run_enable(vault, state).returncode == 0
+    generated_key = _configured_key_path(state, home)
+    generated_fp = _fingerprint(generated_key)
+
+    signing = _signing_module()
+    signing_dir = signing.signing_dir(env={"XDG_STATE_HOME": str(state), "HOME": str(home)})
+    (signing_dir / signing.CONFIG_FILENAME).unlink()
+
+    r = _run_status(vault, state)
+    assert r.returncode != 0
+    assert "lore signing enable" in r.stderr, r.stderr
+
+    r = _run_enable(vault, state)
+    assert r.returncode == 0, r.stderr
+    assert _configured_key_path(state, home) == generated_key
+    assert _fingerprint(generated_key) == generated_fp
+
+    r = _run_status(vault, state)
+    assert r.returncode == 0, r.stderr
+
+
+def test_enable_with_no_arg_refuses_promptly_via_subprocess_when_default_key_is_occupied(tmp_path):
+    """The same refusal as state (a), driven through a real subprocess with
+    stdin closed — proving `enable` returns a clean refusal rather than
+    blocking on ssh-keygen's hidden "Overwrite (y/n)?" prompt, which a
+    closed/inherited stdin would otherwise expose as a hang in production
+    even though pytest's own captured stdin masks it as an immediate EOF."""
+    home = _isolated_home()
+    vault = make_git_vault(tmp_path / "vault")
+    state = tmp_path / "state"
+    assert _run_enable(vault, state).returncode == 0
+
+    key_path = _configured_key_path(state, home)
+    passphrase_key = _generate_key(tmp_path, "replacement2", passphrase="secret123")
+    key_path.write_bytes(passphrase_key.read_bytes())
+    key_path.chmod(0o600)
+
+    r = subprocess.run(
+        [__import__("sys").executable, str(CLI_PATH), "signing", "enable"],
+        capture_output=True, text=True, timeout=20, stdin=subprocess.DEVNULL,
+        env={**os.environ, "XDG_STATE_HOME": str(state), "HOME": str(home)},
+    )
+    assert r.returncode != 0
+    assert "needs a passphrase" in r.stderr, r.stderr
+    assert "Traceback" not in r.stderr, r.stderr
+
+
+# ── enable — the printed gh registration command is shell-neutral ────────
+
+
+def test_enable_prints_a_gh_command_with_no_process_substitution_for_a_generated_key(tmp_path):
+    """The generated key always has an accompanying ``.pub`` file, so the
+    printed registration command should name that path directly rather than
+    process-substituting the printed public key line — process substitution
+    (`<(...)`) is a bash/zsh construct that fails outright in fish."""
+    vault = make_git_vault(tmp_path / "vault")
+    state = tmp_path / "state"
+
+    r = _run_enable(vault, state)
+    assert r.returncode == 0, r.stderr
+    assert "<(" not in r.stdout, r.stdout
+    assert "gh ssh-key add" in r.stdout, r.stdout
+
+    key_path = _configured_key_path(state, _isolated_home())
+    assert f"{key_path}.pub" in r.stdout, r.stdout
+
+
+def test_enable_prints_a_gh_command_with_no_process_substitution_for_an_adopted_key_with_no_pub_file(tmp_path):
+    """An adopted key may have no ``.pub`` file sitting beside it — the
+    printed command must still avoid process substitution, and must not
+    claim a ``.pub`` path that does not exist."""
+    vault = make_git_vault(tmp_path / "vault")
+    state = tmp_path / "state"
+
+    adopted_dir = tmp_path / "elsewhere"
+    adopted_dir.mkdir()
+    key_path = _generate_key(adopted_dir, "adopted")
+    Path(f"{key_path}.pub").unlink()
+
+    r = _run_enable(vault, state, key=key_path)
+    assert r.returncode == 0, r.stderr
+    assert "<(" not in r.stdout, r.stdout
+    assert f"{key_path}.pub" not in r.stdout, r.stdout

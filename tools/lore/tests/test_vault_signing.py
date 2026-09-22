@@ -38,18 +38,26 @@ def _write_hostile_global_gitconfig(home: Path) -> None:
 
     ``commit.gpgsign=true`` plus a ``gpg.program`` that exits 1 is what stands
     in for a personal key that needs a passphrase gpg-agent has no cache for;
-    a test that passes against this fixture proves lore's override won,
-    rather than proving nothing was configured to interfere at all.
+    a ``gpg.ssh.program`` that also exits 1 stands in for an adopter's SSH
+    signing helper (e.g. 1Password's ``op-ssh-sign``) that would hijack SSH
+    signing the same way if lore's own override left that key unset. A test
+    that passes against this fixture proves lore's override won on BOTH
+    axes, rather than proving nothing was configured to interfere at all.
     """
     home.mkdir(parents=True, exist_ok=True)
     bad_gpg_program = home / "bad-gpg-program"
     bad_gpg_program.write_text("#!/bin/sh\nexit 1\n")
     bad_gpg_program.chmod(0o755)
+    bad_gpg_ssh_program = home / "bad-gpg-ssh-program"
+    bad_gpg_ssh_program.write_text("#!/bin/sh\nexit 1\n")
+    bad_gpg_ssh_program.chmod(0o755)
     (home / ".gitconfig").write_text(
         "[user]\n\tname = Nobody\n\temail = nobody@example.invalid\n"
         "[commit]\n\tgpgsign = true\n"
         "[gpg]\n\tformat = openpgp\n"
         f"\tprogram = {bad_gpg_program}\n"
+        "[gpg \"ssh\"]\n"
+        f"\tprogram = {bad_gpg_ssh_program}\n"
     )
 
 
@@ -87,10 +95,19 @@ def _allowed_signers_path(state: Path, home: Path) -> Path:
 
 def _verify_good(vault: Path, allowed_signers: Path, rev: str = "HEAD") -> str:
     """Return git's ``%G?`` for *rev*, checked against *allowed_signers* directly
-    — independent of whatever environment produced the commit."""
+    — independent of whatever environment produced the commit.
+
+    Also pins ``gpg.ssh.program`` back to plain ``ssh-keygen`` for this
+    verification call: the hostile global gitconfig every test installs
+    breaks that same key so a REAL signing call cannot silently fall through
+    to it (see ``_write_hostile_global_gitconfig``), and this helper's own
+    verification would otherwise inherit that same poison and misreport a
+    genuinely good signature as unverifiable.
+    """
     result = subprocess.run(
         ["git", "-C", str(vault),
          "-c", f"gpg.ssh.allowedSignersFile={allowed_signers}",
+         "-c", "gpg.ssh.program=ssh-keygen",
          "log", "-1", "--pretty=%G?", rev],
         capture_output=True, text=True,
     )
@@ -376,23 +393,25 @@ def test_malformed_configuration_leaves_the_environment_inherited(tmp_path, sign
     assert result == base
 
 
-def test_a_usable_key_yields_the_four_signing_overrides(tmp_path, signing):
+def test_a_usable_key_yields_the_five_signing_overrides(tmp_path, signing):
     cfg_env = _config_env(tmp_path)
     d, key_path = _configure_fake_key(signing, cfg_env, tmp_path)
 
     result = signing.apply_env_overrides({}, env=cfg_env)
 
-    assert result["GIT_CONFIG_COUNT"] == "4"
+    assert result["GIT_CONFIG_COUNT"] == "5"
     entries = {
         result["GIT_CONFIG_KEY_0"]: result["GIT_CONFIG_VALUE_0"],
         result["GIT_CONFIG_KEY_1"]: result["GIT_CONFIG_VALUE_1"],
         result["GIT_CONFIG_KEY_2"]: result["GIT_CONFIG_VALUE_2"],
         result["GIT_CONFIG_KEY_3"]: result["GIT_CONFIG_VALUE_3"],
+        result["GIT_CONFIG_KEY_4"]: result["GIT_CONFIG_VALUE_4"],
     }
     assert entries["gpg.format"] == "ssh"
     assert entries["user.signingkey"] == str(key_path)
     assert entries["commit.gpgsign"] == "true"
     assert entries["gpg.ssh.allowedSignersFile"] == str(d / signing.ALLOWED_SIGNERS_FILENAME)
+    assert entries["gpg.ssh.program"] == "ssh-keygen"
 
 
 def test_an_inherited_unrelated_git_config_entry_is_kept_and_lore_wins(tmp_path, signing):
@@ -410,12 +429,12 @@ def test_an_inherited_unrelated_git_config_entry_is_kept_and_lore_wins(tmp_path,
     }
     result = signing.apply_env_overrides(base, env=cfg_env)
 
-    assert result["GIT_CONFIG_COUNT"] == "5"
+    assert result["GIT_CONFIG_COUNT"] == "6"
     assert result["GIT_CONFIG_KEY_0"] == "user.signingkey"
     assert result["GIT_CONFIG_VALUE_0"] == "/some/other/key"
     # lore's own user.signingkey lands at a higher index, so git applies it last.
     signingkey_indices = [
-        i for i in range(1, 5)
+        i for i in range(1, 6)
         if result[f"GIT_CONFIG_KEY_{i}"] == "user.signingkey"
     ]
     assert len(signingkey_indices) == 1
@@ -429,7 +448,84 @@ def test_a_malformed_inherited_count_still_yields_a_usable_override(tmp_path, si
     base = {"GIT_CONFIG_COUNT": "abc"}
     result = signing.apply_env_overrides(base, env=cfg_env)
 
-    assert result["GIT_CONFIG_COUNT"] == "4"
+    assert result["GIT_CONFIG_COUNT"] == "5"
+    assert result["GIT_CONFIG_KEY_0"] == "gpg.format"
+
+
+def test_sync_commit_signs_with_the_host_key_despite_an_inherited_git_config_entry(tmp_path):
+    """The dict-level assertions above are the mechanism; this proves it holds
+    for a REAL commit — an inherited ``GIT_CONFIG_COUNT=1`` naming an unrelated
+    ``user.signingkey`` is present in the process's own environment (as it
+    would be from a parent that already exported one) when ``lore sync`` runs,
+    and the resulting commit still verifies against the HOST key, not the
+    inherited one."""
+    home = _isolated_home()
+    _write_hostile_global_gitconfig(home)
+
+    vault = make_git_vault(tmp_path / "vault")
+    state = tmp_path / "state"
+    key_path = _generate_key(tmp_path, "host_key")
+    _enable_host_key(state, home, key_path)
+
+    inherited_env = {
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "user.signingkey",
+        "GIT_CONFIG_VALUE_0": "/some/other/key",
+    }
+
+    r = run_cli(["record", "create", "--kind", "task", "--title", "T"],
+                vault=vault, state_dir=state, stdin_text="body\n", env_extra=inherited_env)
+    assert r.returncode == 0, r.stderr
+
+    r = run_cli(["sync"], vault=vault, state_dir=state, env_extra=inherited_env)
+    assert r.returncode == 0, r.stderr
+
+    allowed = _allowed_signers_path(state, home)
+    assert _verify_good(vault, allowed) == "G"
+
+
+def test_sync_commit_signs_with_the_host_key_despite_a_malformed_inherited_count(tmp_path):
+    """Same real-commit proof for the other malformed-count branch: an
+    inherited ``GIT_CONFIG_COUNT=abc`` in the process's own environment does
+    not stop ``lore sync`` from producing a commit that verifies against the
+    host key."""
+    home = _isolated_home()
+    _write_hostile_global_gitconfig(home)
+
+    vault = make_git_vault(tmp_path / "vault")
+    state = tmp_path / "state"
+    key_path = _generate_key(tmp_path, "host_key")
+    _enable_host_key(state, home, key_path)
+
+    inherited_env = {"GIT_CONFIG_COUNT": "abc"}
+
+    r = run_cli(["record", "create", "--kind", "task", "--title", "T"],
+                vault=vault, state_dir=state, stdin_text="body\n", env_extra=inherited_env)
+    assert r.returncode == 0, r.stderr
+
+    r = run_cli(["sync"], vault=vault, state_dir=state, env_extra=inherited_env)
+    assert r.returncode == 0, r.stderr
+
+    allowed = _allowed_signers_path(state, home)
+    assert _verify_good(vault, allowed) == "G"
+
+
+def test_an_inherited_count_with_a_gap_in_its_indices_is_treated_as_malformed(tmp_path, signing):
+    """``GIT_CONFIG_COUNT=2`` naming no ``GIT_CONFIG_KEY_0`` is not a
+    trustworthy index base — git itself aborts every config read against
+    such a gap (`fatal: unable to parse command-line config`), so trusting it
+    would break the very commit lore is trying to make, not just signing."""
+    cfg_env = _config_env(tmp_path)
+    _configure_fake_key(signing, cfg_env, tmp_path)
+
+    base = {
+        "GIT_CONFIG_COUNT": "2",
+        "GIT_CONFIG_KEY_1": "some.key",
+        "GIT_CONFIG_VALUE_1": "x",
+    }
+    result = signing.apply_env_overrides(base, env=cfg_env)
+
+    assert result["GIT_CONFIG_COUNT"] == "5"
     assert result["GIT_CONFIG_KEY_0"] == "gpg.format"
 
 

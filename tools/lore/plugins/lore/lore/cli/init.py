@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -383,11 +384,20 @@ def _report_signing_status() -> None:
 
     Delegates to ``vault/signing.py``'s ``describe_status`` so ``lore signing
     status`` and this line always agree; a failure carries the same
-    ``lore signing enable``/``chmod`` remedy `describe_status` names.
+    ``lore signing enable``/``chmod`` remedy `describe_status` names. An
+    ``ssh-keygen`` call that itself errors out (a hang past its timeout, a
+    permission denial reading the key) is degraded to a stderr line rather
+    than taking down the rest of this report, matching the vault-drift
+    section's own "an unreadable config downgrades a section to a stderr
+    line" contract.
     """
     from ..vault import signing as signing_mod
 
-    _, message = signing_mod.describe_status()
+    try:
+        _, message = signing_mod.describe_status()
+    except (OSError, subprocess.SubprocessError) as exc:
+        print(f"lore: signing: error — {exc}", file=sys.stderr)
+        return
     print(f"lore: signing: {message}")
 
 
