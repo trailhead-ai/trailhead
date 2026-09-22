@@ -141,6 +141,29 @@ def _spawn_unrelated_process() -> subprocess.Popen:
 # ---------------------------------------------------------------------------
 
 
+# The three binaries outpost_supervisor.enable() resolves via its injectable
+# which_runner seam. Tests that exercise enable() stub these under tmp_path
+# rather than passing shutil.which straight through to the real machine PATH —
+# CI (and any dev machine) may not have `lore` installed/on PATH, and the
+# fixture must not depend on that (Axiom 6 plus this run's CI-red finding).
+_STUBBED_BINARIES = ("node", "git", "lore")
+
+
+def _make_stub_which(bin_dir: Path):
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    resolved: dict[str, str] = {}
+    for name in _STUBBED_BINARIES:
+        path = bin_dir / name
+        path.write_text("#!/bin/sh\nexit 0\n")
+        path.chmod(0o755)
+        resolved[name] = str(path)
+
+    def which(name: str) -> str | None:
+        return resolved.get(name)
+
+    return which
+
+
 @pytest.fixture()
 def outpost(tmp_path):
     checkout = tmp_path / "outpost-checkout"
@@ -173,6 +196,7 @@ def outpost(tmp_path):
         state_dir=state_home,
         supervisor_dir=tmp_path / "supervisor",
         port=_free_port(),
+        which_runner=_make_stub_which(tmp_path / "bin"),
     )
     yield ns
 
@@ -924,6 +948,23 @@ def _write_supervisor_entry(outpost, platform: str) -> None:
     (target_dir / name).write_text("placeholder\n")
 
 
+def _systemd_show(
+    *, main_pid: str = "0", active_state: str = "", sub_state: str = "", result: str = "", n_restarts: str = "0"
+) -> str:
+    """A ``systemctl show -p ... `` stand-in whose line order is deliberately
+    the REVERSE of the requested property order (MainPID,ActiveState,SubState,
+    Result,NRestarts) — real systemd prints in its own property order, not the
+    caller's, so a parser that reads by position rather than by ``Key=Value``
+    would read the wrong field."""
+    return (
+        f"NRestarts={n_restarts}\n"
+        f"Result={result}\n"
+        f"SubState={sub_state}\n"
+        f"ActiveState={active_state}\n"
+        f"MainPID={main_pid}\n"
+    )
+
+
 # ---- start -----------------------------------------------------------------
 
 
@@ -985,15 +1026,48 @@ def test_supervised_start_linux_records_reset_failed_before_start(outpost, healt
     ]
 
 
+def test_supervised_start_darwin_raises_named_error_naming_kickstart_when_it_fails(outpost):
+    _write_supervisor_entry(outpost, "darwin")
+    runner = _RecordingRunner(returncode_by_prefix={("launchctl", "kickstart"): 1})
+
+    with pytest.raises(OutpostLifecycleError, match="kickstart"):
+        outpost_lifecycle.start(
+            env=outpost.env,
+            port=outpost.port,
+            platform="darwin",
+            supervisor_dir=outpost.supervisor_dir,
+            runner=runner,
+            uid=501,
+            start_health_timeout=0.3,
+        )
+
+
+def test_supervised_start_linux_raises_named_error_naming_systemctl_start_when_it_fails(outpost):
+    _write_supervisor_entry(outpost, "linux")
+    runner = _RecordingRunner(
+        returncode_by_prefix={("systemctl", "--user", "start"): 1}
+    )
+
+    with pytest.raises(OutpostLifecycleError, match="systemctl --user start"):
+        outpost_lifecycle.start(
+            env=outpost.env,
+            port=outpost.port,
+            platform="linux",
+            supervisor_dir=outpost.supervisor_dir,
+            runner=runner,
+            start_health_timeout=0.3,
+        )
+
+
 # ---- stop --------------------------------------------------------------
 
 
-def test_supervised_stop_records_stop_argv_and_returns_once_health_stops(outpost, health_server):
+def test_supervised_stop_records_kill_term_argv_and_returns_once_health_stops(outpost, health_server):
     _write_supervisor_entry(outpost, "darwin")
     health_server.start()
 
     def on_call(argv):
-        if argv == ["launchctl", "stop", osup.LAUNCHD_LABEL]:
+        if argv == ["launchctl", "kill", "TERM", osup.launchd_service(501)]:
             health_server.stop()
 
     runner = _RecordingRunner(on_call=on_call)
@@ -1004,12 +1078,16 @@ def test_supervised_stop_records_stop_argv_and_returns_once_health_stops(outpost
         platform="darwin",
         supervisor_dir=outpost.supervisor_dir,
         runner=runner,
+        uid=501,
         timeout=3.0,
         pid_settle_timeout=0.3,
     )
 
     assert rc == 0
-    assert runner.calls == [["launchctl", "stop", osup.LAUNCHD_LABEL]]
+    # The stop kill comes first; any further calls in the settle window are
+    # the supervisor-state re-probe (launchctl print), never another stop.
+    assert runner.calls[0] == ["launchctl", "kill", "TERM", osup.launchd_service(501)]
+    assert all(call[:2] == ["launchctl", "print"] for call in runner.calls[1:])
 
 
 def test_supervised_stop_raises_did_not_exit_when_health_keeps_answering(outpost, health_server):
@@ -1024,6 +1102,7 @@ def test_supervised_stop_raises_did_not_exit_when_health_keeps_answering(outpost
             platform="darwin",
             supervisor_dir=outpost.supervisor_dir,
             runner=runner,
+            uid=501,
             timeout=0.3,
         )
 
@@ -1033,7 +1112,7 @@ def test_supervised_stop_raises_named_error_when_supervisor_relaunches_it(outpos
     health_server.start()
 
     def on_call(argv):
-        if argv == ["launchctl", "stop", osup.LAUNCHD_LABEL]:
+        if argv == ["launchctl", "kill", "TERM", osup.launchd_service(501)]:
             health_server.stop()
             threading.Timer(0.05, health_server.start).start()
 
@@ -1046,6 +1125,38 @@ def test_supervised_stop_raises_named_error_when_supervisor_relaunches_it(outpos
             platform="darwin",
             supervisor_dir=outpost.supervisor_dir,
             runner=runner,
+            uid=501,
+            timeout=3.0,
+            pid_settle_timeout=0.5,
+        )
+
+
+def test_supervised_stop_raises_named_error_when_supervisor_reports_a_pid_before_health_answers(
+    outpost, health_server
+):
+    # The supervisor can relaunch the job before /health comes back up (still
+    # starting). A settle window that only re-polls /health misses this —
+    # it also has to re-check the supervisor's own reported pid/state.
+    _write_supervisor_entry(outpost, "darwin")
+    health_server.start()
+
+    def on_call(argv):
+        if argv == ["launchctl", "kill", "TERM", osup.launchd_service(501)]:
+            health_server.stop()
+
+    runner = _RecordingRunner(
+        on_call=on_call,
+        stdout_by_prefix={("launchctl", "print"): "state = running\n\tpid = 9191\n"},
+    )
+
+    with pytest.raises(OutpostLifecycleError, match="relaunch"):
+        outpost_lifecycle.stop(
+            env=outpost.env,
+            port=outpost.port,
+            platform="darwin",
+            supervisor_dir=outpost.supervisor_dir,
+            runner=runner,
+            uid=501,
             timeout=3.0,
             pid_settle_timeout=0.5,
         )
@@ -1075,7 +1186,9 @@ def test_supervised_status_restarting_reports_exit_restarting_with_count(outpost
     _write_supervisor_entry(outpost, "linux")
     runner = _RecordingRunner(
         stdout_by_prefix={
-            ("systemctl", "--user", "show"): "0\nactivating\nauto-restart\n\n3\n",
+            ("systemctl", "--user", "show"): _systemd_show(
+                active_state="activating", sub_state="auto-restart", n_restarts="3"
+            ),
             ("loginctl",): "yes\n",
         }
     )
@@ -1096,7 +1209,9 @@ def test_supervised_status_restarting_message_names_the_restart_count(outpost, c
     _write_supervisor_entry(outpost, "linux")
     runner = _RecordingRunner(
         stdout_by_prefix={
-            ("systemctl", "--user", "show"): "0\nactivating\nauto-restart\n\n3\n",
+            ("systemctl", "--user", "show"): _systemd_show(
+                active_state="activating", sub_state="auto-restart", n_restarts="3"
+            ),
             ("loginctl",): "yes\n",
         }
     )
@@ -1117,7 +1232,40 @@ def test_supervised_status_failed_linux_reports_exit_failed_with_recovery_comman
     _write_supervisor_entry(outpost, "linux")
     runner = _RecordingRunner(
         stdout_by_prefix={
-            ("systemctl", "--user", "show"): "0\nfailed\ndead\nstart-limit-hit\n5\n",
+            ("systemctl", "--user", "show"): _systemd_show(
+                active_state="failed", sub_state="dead", result="start-limit-hit", n_restarts="5"
+            ),
+            ("loginctl",): "yes\n",
+        }
+    )
+
+    rc = outpost_lifecycle.status(
+        env=outpost.env,
+        port=outpost.port,
+        platform="linux",
+        supervisor_dir=outpost.supervisor_dir,
+        runner=runner,
+        user="alice",
+    )
+
+    assert rc == EXIT_FAILED
+    out = capsys.readouterr().out
+    assert "reset-failed" in out
+
+
+def test_supervised_status_failed_linux_active_state_failed_without_start_limit_hit_reports_exit_failed(
+    outpost, capsys
+):
+    # A unit can land in ActiveState=failed (e.g. its RestartSec exhausted a
+    # non-start-limit failure path) without systemd ever setting
+    # Result=start-limit-hit. That must still surface as EXIT_FAILED, not the
+    # stopped default.
+    _write_supervisor_entry(outpost, "linux")
+    runner = _RecordingRunner(
+        stdout_by_prefix={
+            ("systemctl", "--user", "show"): _systemd_show(
+                active_state="failed", sub_state="dead", result="", n_restarts="1"
+            ),
             ("loginctl",): "yes\n",
         }
     )
@@ -1177,11 +1325,86 @@ def test_supervised_status_stopped_reports_exit_stopped(outpost):
     assert rc == EXIT_STOPPED
 
 
+def test_supervised_status_darwin_never_exited_form_reports_exit_stopped(outpost):
+    # A live-until-now job's `last exit code` reads `(never exited)` on a real
+    # Mac, not a bare integer — `int()`-ing that raises. With no pid (the "not
+    # running" case here) and no numeric exit code, this must read as stopped,
+    # not blow up.
+    _write_supervisor_entry(outpost, "darwin")
+    runner = _RecordingRunner(
+        stdout_by_prefix={
+            ("launchctl", "print"): "state = not running\n\tlast exit code = (never exited)\n",
+        }
+    )
+
+    rc = outpost_lifecycle.status(
+        env=outpost.env,
+        port=outpost.port,
+        platform="darwin",
+        supervisor_dir=outpost.supervisor_dir,
+        runner=runner,
+        uid=501,
+    )
+
+    assert rc == EXIT_STOPPED
+
+
+def test_supervised_status_darwin_named_exit_code_form_reports_exit_failed(outpost, capsys):
+    # A failed job can print `last exit code = 78: EX_CONFIG` — a leading
+    # integer followed by the symbolic name, not a bare integer.
+    _write_supervisor_entry(outpost, "darwin")
+    runner = _RecordingRunner(
+        stdout_by_prefix={
+            ("launchctl", "print"): "state = not running\n\tlast exit code = 78: EX_CONFIG\n",
+        }
+    )
+
+    rc = outpost_lifecycle.status(
+        env=outpost.env,
+        port=outpost.port,
+        platform="darwin",
+        supervisor_dir=outpost.supervisor_dir,
+        runner=runner,
+        uid=501,
+    )
+
+    assert rc == EXIT_FAILED
+    assert "trailhead outpost start" in capsys.readouterr().out
+
+
+def test_supervised_status_darwin_terminating_signal_reports_exit_failed(outpost, capsys):
+    # A job killed by a signal (e.g. OOM) prints a `last terminating signal`
+    # line instead of a nonzero `last exit code` — that must also read as a
+    # failure needing recovery, not a clean stop.
+    _write_supervisor_entry(outpost, "darwin")
+    runner = _RecordingRunner(
+        stdout_by_prefix={
+            ("launchctl", "print"): (
+                "state = not running\n"
+                "\tlast exit code = 0\n"
+                "\tlast terminating signal = SIGKILL\n"
+            ),
+        }
+    )
+
+    rc = outpost_lifecycle.status(
+        env=outpost.env,
+        port=outpost.port,
+        platform="darwin",
+        supervisor_dir=outpost.supervisor_dir,
+        runner=runner,
+        uid=501,
+    )
+
+    assert rc == EXIT_FAILED
+    assert "trailhead outpost start" in capsys.readouterr().out
+
+
 def test_supervised_status_linux_linger_no_prints_boot_warning(outpost, capsys):
     _write_supervisor_entry(outpost, "linux")
     runner = _RecordingRunner(
         stdout_by_prefix={
-            ("systemctl", "--user", "show"): "0\ninactive\ndead\n\n0\n",
+            ("systemctl", "--user", "show"): _systemd_show(active_state="inactive", sub_state="dead"),
             ("loginctl",): "no\n",
         }
     )
@@ -1203,7 +1426,7 @@ def test_supervised_status_linux_linger_yes_omits_boot_warning(outpost, capsys):
     _write_supervisor_entry(outpost, "linux")
     runner = _RecordingRunner(
         stdout_by_prefix={
-            ("systemctl", "--user", "show"): "0\ninactive\ndead\n\n0\n",
+            ("systemctl", "--user", "show"): _systemd_show(active_state="inactive", sub_state="dead"),
             ("loginctl",): "yes\n",
         }
     )
@@ -1257,9 +1480,14 @@ def test_supervised_restart_builds_then_runs_restart_argv_confirms_health_and_pi
         if argv[:2] == ["launchctl", "kickstart"]:
             health_server.start()
 
+    # A pid that's genuinely alive throughout the test (this test process
+    # itself) — the settle-window liveness confirmation added for the "pid
+    # dies within the settle window" case would otherwise reject any made-up
+    # pid here too.
+    live_pid = os.getpid()
     runner = _RecordingRunner(
         on_call=on_call,
-        stdout_by_prefix={("launchctl", "print"): "state = running\n\tpid = 7777\n"},
+        stdout_by_prefix={("launchctl", "print"): f"state = running\n\tpid = {live_pid}\n"},
     )
 
     rc = outpost_lifecycle.restart(
@@ -1271,7 +1499,7 @@ def test_supervised_restart_builds_then_runs_restart_argv_confirms_health_and_pi
         runner=runner,
         uid=501,
         restart_health_timeout=3.0,
-        pid_settle_timeout=1.0,
+        pid_settle_timeout=0.3,
     )
 
     assert rc == 0
@@ -1296,3 +1524,50 @@ def test_supervised_restart_build_failure_raises_without_touching_supervisor(out
         )
 
     assert runner.calls == []
+
+
+def test_supervised_restart_raises_when_reported_pid_dies_within_settle_window(
+    outpost, health_server, tmp_path
+):
+    # /health answering alone doesn't prove the pid the supervisor reported is
+    # the one that's actually up — a doomed process can still be observed
+    # "alive" for a moment before it exits. The check must hold the pid live
+    # across the settle window (like the unsupervised restart path does with
+    # _settled_pid_alive), not just take one live sample.
+    _write_supervisor_entry(outpost, "darwin")
+    build_cmd = _build_script(tmp_path)
+
+    dying = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(0.1)"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+    def on_call(argv):
+        if argv[:2] == ["launchctl", "kickstart"]:
+            health_server.start()
+
+    runner = _RecordingRunner(
+        on_call=on_call,
+        stdout_by_prefix={("launchctl", "print"): f"state = running\n\tpid = {dying.pid}\n"},
+    )
+
+    try:
+        with pytest.raises(OutpostLifecycleError, match="not alive"):
+            outpost_lifecycle.restart(
+                env=outpost.env,
+                build_cmd=build_cmd,
+                port=outpost.port,
+                platform="darwin",
+                supervisor_dir=outpost.supervisor_dir,
+                runner=runner,
+                uid=501,
+                restart_health_timeout=3.0,
+                pid_settle_timeout=1.0,
+            )
+    finally:
+        try:
+            dying.wait(timeout=5)
+        except (subprocess.TimeoutExpired, ChildProcessError):
+            pass

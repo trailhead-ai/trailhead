@@ -13,7 +13,6 @@ from __future__ import annotations
 import configparser
 import os
 import plistlib
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -24,7 +23,14 @@ from trailhead import cli, outpost_supervisor as osup
 from trailhead.outpost_lifecycle import OutpostLifecycleError
 
 from . import test_outpost_lifecycle as _lifecycle_tests
-from .test_outpost_lifecycle import _RecordingRunner, _health_reachable, _pid, _start, _wait_until
+from .test_outpost_lifecycle import (
+    _RecordingRunner,
+    _health_reachable,
+    _pid,
+    _start,
+    _wait_until,
+    _write_supervisor_entry,
+)
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
@@ -33,6 +39,11 @@ from .test_outpost_lifecycle import _RecordingRunner, _health_reachable, _pid, _
 # The fake checkout + isolated config/state/HOME fixture the lifecycle verbs'
 # tests use; enable/disable resolve the same entrypoint and state dir.
 outpost = _lifecycle_tests.outpost
+
+# The tiny in-process /health stand-in the supervised lifecycle tests use, so
+# enable()'s inner stop() (driven through a supervised path here) has
+# something real to probe and stop.
+health_server = _lifecycle_tests.health_server
 
 
 # ---------------------------------------------------------------------------
@@ -132,7 +143,7 @@ def test_enable_darwin_writes_plist_and_runs_bootout_then_bootstrap(outpost):
         platform="darwin",
         supervisor_dir=outpost.supervisor_dir,
         runner=runner,
-        which_runner=shutil.which,
+        which_runner=outpost.which_runner,
         uid=501,
     )
 
@@ -157,7 +168,7 @@ def test_enable_linux_writes_unit_and_runs_reload_enable_linger_in_order(outpost
         platform="linux",
         supervisor_dir=outpost.supervisor_dir,
         runner=runner,
-        which_runner=shutil.which,
+        which_runner=outpost.which_runner,
         user="alice",
     )
 
@@ -180,7 +191,7 @@ def test_enable_linux_linger_failure_raises_named_error_unit_stays_written(outpo
             platform="linux",
             supervisor_dir=outpost.supervisor_dir,
             runner=runner,
-            which_runner=shutil.which,
+            which_runner=outpost.which_runner,
             user="bob",
         )
 
@@ -202,7 +213,7 @@ def test_enable_unsupported_platform_raises_named_error_writes_and_runs_nothing(
             platform="win32",
             supervisor_dir=outpost.supervisor_dir,
             runner=runner,
-            which_runner=shutil.which,
+            which_runner=outpost.which_runner,
         )
 
     assert not outpost.supervisor_dir.exists() or list(outpost.supervisor_dir.iterdir()) == []
@@ -219,7 +230,7 @@ def test_enable_missing_entrypoint_raises_named_error_writes_nothing(outpost):
             platform="darwin",
             supervisor_dir=outpost.supervisor_dir,
             runner=runner,
-            which_runner=shutil.which,
+            which_runner=outpost.which_runner,
             uid=501,
         )
 
@@ -248,6 +259,49 @@ def test_enable_missing_lore_on_path_raises_named_error_naming_lore_writes_nothi
 
 
 # ---------------------------------------------------------------------------
+# enable — checked supervisor return codes
+# ---------------------------------------------------------------------------
+
+
+def test_enable_darwin_bootstrap_failure_raises_named_error_and_removes_the_entry(outpost):
+    runner = _RecordingRunner(returncode_by_prefix={("launchctl", "bootstrap"): 1})
+
+    with pytest.raises(OutpostLifecycleError, match="bootstrap"):
+        osup.enable(
+            env=outpost.env,
+            platform="darwin",
+            supervisor_dir=outpost.supervisor_dir,
+            runner=runner,
+            which_runner=outpost.which_runner,
+            uid=501,
+        )
+
+    # A failed bootstrap must not leave an entry file behind — is_enabled()
+    # would otherwise report True for a job that never actually loaded.
+    target = outpost.supervisor_dir / f"{osup.LAUNCHD_LABEL}.plist"
+    assert not target.exists()
+    assert osup.is_enabled(outpost.env, platform="darwin", supervisor_dir=outpost.supervisor_dir) is False
+
+
+def test_enable_linux_enable_now_failure_raises_named_error_and_removes_the_entry(outpost):
+    runner = _RecordingRunner(returncode_by_prefix={("systemctl", "--user", "enable"): 1})
+
+    with pytest.raises(OutpostLifecycleError, match="enable"):
+        osup.enable(
+            env=outpost.env,
+            platform="linux",
+            supervisor_dir=outpost.supervisor_dir,
+            runner=runner,
+            which_runner=outpost.which_runner,
+            user="alice",
+        )
+
+    target = outpost.supervisor_dir / osup.SYSTEMD_UNIT_NAME
+    assert not target.exists()
+    assert osup.is_enabled(outpost.env, platform="linux", supervisor_dir=outpost.supervisor_dir) is False
+
+
+# ---------------------------------------------------------------------------
 # enable / disable — idempotence
 # ---------------------------------------------------------------------------
 
@@ -259,28 +313,34 @@ def test_enable_twice_is_idempotent_same_runner_sequence_no_error(outpost):
         env=outpost.env,
         platform="darwin",
         supervisor_dir=outpost.supervisor_dir,
+        port=outpost.port,
         runner=runner,
-        which_runner=shutil.which,
+        which_runner=outpost.which_runner,
         uid=501,
     )
     osup.enable(
         env=outpost.env,
         platform="darwin",
         supervisor_dir=outpost.supervisor_dir,
+        port=outpost.port,
         runner=runner,
-        which_runner=shutil.which,
+        which_runner=outpost.which_runner,
         uid=501,
     )
 
     target = outpost.supervisor_dir / f"{osup.LAUNCHD_LABEL}.plist"
     assert target.exists()
     prefixes = [call[:2] for call in runner.calls]
-    assert prefixes == [
-        ["launchctl", "bootout"],
-        ["launchctl", "bootstrap"],
-        ["launchctl", "bootout"],
-        ["launchctl", "bootstrap"],
-    ]
+    # The first enable() finds nothing registered yet, so its inner stop() is
+    # a no-op unsupervised check (no runner calls) — just bootout+bootstrap.
+    assert prefixes[:2] == [["launchctl", "bootout"], ["launchctl", "bootstrap"]]
+    # The second enable() now finds the first one's entry already registered,
+    # so its inner stop() drives the supervised path: a kill, then however
+    # many supervisor-state re-probes the settle window takes, before this
+    # enable's own bootout+bootstrap.
+    assert runner.calls[2] == ["launchctl", "kill", "TERM", osup.launchd_service(501)]
+    assert all(c[:2] == ["launchctl", "print"] for c in runner.calls[3:-2])
+    assert prefixes[-2:] == [["launchctl", "bootout"], ["launchctl", "bootstrap"]]
 
 
 def test_disable_removes_file_and_records_deregister_command(outpost):
@@ -290,7 +350,7 @@ def test_disable_removes_file_and_records_deregister_command(outpost):
         platform="darwin",
         supervisor_dir=outpost.supervisor_dir,
         runner=runner,
-        which_runner=shutil.which,
+        which_runner=outpost.which_runner,
         uid=501,
     )
     target = outpost.supervisor_dir / f"{osup.LAUNCHD_LABEL}.plist"
@@ -337,23 +397,69 @@ def test_enable_stops_a_running_detached_daemon_before_registering(outpost):
     old_pid = _pid(outpost)
     assert _wait_until(lambda: _health_reachable(outpost.port), timeout=5.0)
 
-    runner = _RecordingRunner()
+    # Check the old pid's liveness AT THE MOMENT bootstrap runs, inside the
+    # runner's own callback — not after enable() has already returned, which
+    # would also pass if something else (unrelated to this ordering) killed
+    # the daemon sometime before the assertion ran.
+    observed_dead_at_bootstrap = {}
+
+    def on_call(argv):
+        if argv[:2] == ["launchctl", "bootstrap"]:
+            try:
+                os.kill(old_pid, 0)
+            except ProcessLookupError:
+                observed_dead_at_bootstrap["value"] = True
+            else:
+                observed_dead_at_bootstrap["value"] = False
+
+    runner = _RecordingRunner(on_call=on_call)
     rc = osup.enable(
         env=outpost.env,
         platform="darwin",
         supervisor_dir=outpost.supervisor_dir,
         port=outpost.port,
         runner=runner,
-        which_runner=shutil.which,
+        which_runner=outpost.which_runner,
         uid=501,
     )
 
     assert rc == 0
+    assert observed_dead_at_bootstrap == {"value": True}
     assert not (outpost.state_dir / "outpost.pid").exists()
-    with pytest.raises(ProcessLookupError):
-        os.kill(old_pid, 0)
     # bootstrap ran after the daemon was already stopped.
     assert runner.calls[-1][:2] == ["launchctl", "bootstrap"]
+
+
+def test_enable_over_already_registered_running_supervised_daemon_stops_through_injected_runner_first(
+    outpost, health_server
+):
+    # enable()'s own inner stop() must be driven with the SAME platform /
+    # supervisor_dir / runner / uid overrides enable() itself received — not
+    # bare defaults — or it can't see (and drive) an already-registered
+    # supervised daemon at all.
+    _write_supervisor_entry(outpost, "darwin")
+    health_server.start()
+
+    def on_call(argv):
+        if argv == ["launchctl", "kill", "TERM", osup.launchd_service(501)]:
+            health_server.stop()
+
+    runner = _RecordingRunner(on_call=on_call)
+
+    rc = osup.enable(
+        env=outpost.env,
+        platform="darwin",
+        supervisor_dir=outpost.supervisor_dir,
+        port=outpost.port,
+        runner=runner,
+        which_runner=outpost.which_runner,
+        uid=501,
+    )
+
+    assert rc == 0
+    stop_idx = runner.calls.index(["launchctl", "kill", "TERM", osup.launchd_service(501)])
+    bootstrap_idx = next(i for i, c in enumerate(runner.calls) if c[:2] == ["launchctl", "bootstrap"])
+    assert stop_idx < bootstrap_idx
 
 
 # ---------------------------------------------------------------------------
@@ -395,6 +501,7 @@ def test_composed_path_uses_resolved_binaries_dirs_plus_system_dirs_not_shell_pa
         env=outpost.env,
         platform="darwin",
         supervisor_dir=outpost.supervisor_dir,
+        port=outpost.port,
         runner=runner,
         which_runner=which_a,
         uid=501,
@@ -409,6 +516,7 @@ def test_composed_path_uses_resolved_binaries_dirs_plus_system_dirs_not_shell_pa
         env=outpost.env,
         platform="darwin",
         supervisor_dir=outpost.supervisor_dir,
+        port=outpost.port,
         runner=runner,
         which_runner=which_b,
         uid=501,
@@ -438,7 +546,7 @@ def test_is_enabled_true_after_enable_false_after_disable(outpost):
         platform="darwin",
         supervisor_dir=outpost.supervisor_dir,
         runner=runner,
-        which_runner=shutil.which,
+        which_runner=outpost.which_runner,
         uid=501,
     )
     assert osup.is_enabled(outpost.env, platform="darwin", supervisor_dir=outpost.supervisor_dir) is True

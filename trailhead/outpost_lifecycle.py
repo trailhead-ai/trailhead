@@ -387,11 +387,29 @@ class _SupervisorProbe:
     recovery_hint: str
 
 
+def _leading_int(text: str) -> int | None:
+    """Parse a leading integer off *text*, or None if it doesn't start with one.
+
+    launchd's `last exit code` prints forms besides a bare integer: a live
+    job reads ``(never exited)``, and a failed job can read ``78: EX_CONFIG``
+    (a leading integer followed by the symbolic name). Only the last of those
+    is a usable exit code; anything else means "no exit code available".
+    """
+    digits = ""
+    for ch in text:
+        if ch.isdigit():
+            digits += ch
+        else:
+            break
+    return int(digits) if digits else None
+
+
 def _probe_darwin(run, service: str) -> _SupervisorProbe:
     result = run(["launchctl", "print", service])
     text = result.stdout or ""
     pid = None
     last_exit = None
+    terminating_signal = None
     for line in text.splitlines():
         stripped = line.strip()
         if stripped.startswith("pid"):
@@ -401,12 +419,13 @@ def _probe_darwin(run, service: str) -> _SupervisorProbe:
                 pid = int(value)
         elif stripped.startswith("last exit code"):
             _, _, value = stripped.partition("=")
-            value = value.strip()
-            try:
-                last_exit = int(value)
-            except ValueError:
-                last_exit = None
-    failed = pid is None and last_exit not in (None, 0)
+            last_exit = _leading_int(value.strip())
+        elif stripped.startswith("last terminating signal"):
+            _, _, value = stripped.partition("=")
+            terminating_signal = value.strip()
+    failed = pid is None and (
+        last_exit not in (None, 0) or terminating_signal not in (None, "", "0")
+    )
     return _SupervisorProbe(
         pid=pid,
         restarting=False,
@@ -414,6 +433,22 @@ def _probe_darwin(run, service: str) -> _SupervisorProbe:
         restart_count=None,
         recovery_hint="trailhead outpost start",
     )
+
+
+def _parse_systemd_show(stdout: str) -> dict[str, str]:
+    """Parse ``systemctl show -p ...``'s ``Key=Value`` lines into a dict.
+
+    systemd prints properties in its own internal order, not the order they
+    were requested in — a parser that reads by line position rather than by
+    key silently reads the wrong field whenever that order differs (it always
+    does, in practice).
+    """
+    values: dict[str, str] = {}
+    for line in stdout.splitlines():
+        key, sep, value = line.partition("=")
+        if sep:
+            values[key.strip()] = value.strip()
+    return values
 
 
 def _probe_linux(run, unit: str) -> _SupervisorProbe:
@@ -424,18 +459,20 @@ def _probe_linux(run, unit: str) -> _SupervisorProbe:
             "show",
             "-p",
             "MainPID,ActiveState,SubState,Result,NRestarts",
-            "--value",
             unit,
         ]
     )
-    lines = (result.stdout or "").splitlines()
-    lines += [""] * (5 - len(lines))
-    main_pid_text, active_state, sub_state, result_field, n_restarts_text = lines[:5]
+    values = _parse_systemd_show(result.stdout or "")
+    main_pid_text = values.get("MainPID", "")
+    active_state = values.get("ActiveState", "")
+    sub_state = values.get("SubState", "")
+    result_field = values.get("Result", "")
+    n_restarts_text = values.get("NRestarts", "")
 
-    pid = int(main_pid_text) if main_pid_text.strip().isdigit() and main_pid_text.strip() != "0" else None
-    restarting = sub_state.strip() in ("auto-restart", "activating") or active_state.strip() == "activating"
-    failed = pid is None and result_field.strip() == "start-limit-hit"
-    restart_count = int(n_restarts_text.strip()) if n_restarts_text.strip().isdigit() else None
+    pid = int(main_pid_text) if main_pid_text.isdigit() and main_pid_text != "0" else None
+    restarting = sub_state in ("auto-restart", "activating") or active_state == "activating"
+    failed = pid is None and (result_field == "start-limit-hit" or active_state == "failed")
+    restart_count = int(n_restarts_text) if n_restarts_text.isdigit() else None
     return _SupervisorProbe(
         pid=pid,
         restarting=restarting,
@@ -463,10 +500,24 @@ def _supervised_start(
     osup, kind, run = _supervisor_seam(env, platform, runner)
 
     if kind == "darwin":
-        run(["launchctl", "kickstart", osup.launchd_service(uid)])
+        command = ["launchctl", "kickstart", osup.launchd_service(uid)]
+        result = run(command)
+        if result.returncode != 0:
+            raise OutpostLifecycleError(
+                f"outpost start: '{' '.join(command)}' failed (exit "
+                f"{result.returncode}): {(result.stderr or result.stdout or '').strip()}"
+            )
     else:
+        # reset-failed is best-effort: it legitimately "fails" (nonzero) when
+        # there is nothing to reset, which is the common case.
         run(["systemctl", "--user", "reset-failed", osup.SYSTEMD_UNIT_NAME])
-        run(["systemctl", "--user", "start", osup.SYSTEMD_UNIT_NAME])
+        command = ["systemctl", "--user", "start", osup.SYSTEMD_UNIT_NAME]
+        result = run(command)
+        if result.returncode != 0:
+            raise OutpostLifecycleError(
+                f"outpost start: '{' '.join(command)}' failed (exit "
+                f"{result.returncode}): {(result.stderr or result.stdout or '').strip()}"
+            )
 
     if _wait_for_health(port, health_timeout) is None:
         raise OutpostLifecycleError(
@@ -487,11 +538,16 @@ def _supervised_stop(
     pid_settle_timeout: float | None,
     platform: str | None,
     runner,
+    uid: int | None = None,
 ) -> int:
     osup, kind, run = _supervisor_seam(env, platform, runner)
 
     if kind == "darwin":
-        run(["launchctl", "stop", osup.LAUNCHD_LABEL])
+        # `launchctl kill TERM gui/<uid>/<label>` targets the same domain as
+        # `kickstart`/`print` (including over ssh), unlike the bare-label
+        # `launchctl stop <label>` this replaces. A SIGTERM'd job that exits 0
+        # stays stopped under KeepAlive.SuccessfulExit=false, same as before.
+        run(["launchctl", "kill", "TERM", osup.launchd_service(uid)])
     else:
         run(["systemctl", "--user", "stop", osup.SYSTEMD_UNIT_NAME])
 
@@ -505,15 +561,31 @@ def _supervised_stop(
             )
         time.sleep(0.05)
 
+    # A relaunch during the settle window can show up two ways: /health comes
+    # back up, or the supervisor's own view already reports a pid/restarting
+    # sub-state again even before /health answers (still starting). Checking
+    # /health alone misses the second case entirely.
     settle = _resolve_pid_settle_timeout(
         pid_settle_timeout=pid_settle_timeout, restart_health_timeout=timeout
     )
-    if _wait_for_health(port, settle) is not None:
-        raise OutpostLifecycleError(
-            "outpost stop: the host supervisor relaunched outpost after stop "
-            f"(/health answered again within {settle:.1f}s of the stop completing); "
-            "its restart policy may not be limited to failure exits."
-        )
+    settle_deadline = time.time() + settle
+    while True:
+        if _probe_health(port, min(health_timeout, 0.2)) is not None:
+            raise OutpostLifecycleError(
+                "outpost stop: the host supervisor relaunched outpost after stop "
+                f"(/health answered again within {settle:.1f}s of the stop completing); "
+                "its restart policy may not be limited to failure exits."
+            )
+        probe = _probe_supervisor(osup, run, kind, uid)
+        if probe.pid is not None or probe.restarting:
+            raise OutpostLifecycleError(
+                "outpost stop: the host supervisor relaunched outpost after stop "
+                f"(it reports the job running again within {settle:.1f}s of the stop "
+                "completing); its restart policy may not be limited to failure exits."
+            )
+        if time.time() >= settle_deadline:
+            break
+        time.sleep(_PID_SETTLE_POLL_INTERVAL)
 
     print("outpost stopped via the host supervisor.")
     return 0
@@ -609,6 +681,18 @@ def _supervised_restart(
             "outpost restart: /health answered but the host supervisor reports "
             f"no pid for outpost; another process may be holding port {port} "
             "(check the outpost log)."
+        )
+
+    # /health answering and the supervisor reporting a pid once don't prove
+    # THAT pid is what's actually serving it — a doomed spawn can be observed
+    # alive for a moment before it exits. Hold it live across the settle
+    # window, the same confirmation the unsupervised restart path applies to
+    # its own spawned pid.
+    if not _settled_pid_alive(pid, settle_timeout):
+        raise OutpostLifecycleError(
+            "outpost restart: /health answered but the host supervisor's "
+            f"reported pid ({pid}) is not alive; another process may be "
+            f"holding port {port} (check the outpost log)."
         )
 
     print(f"outpost restarted via the host supervisor (pid {pid}).")
@@ -725,6 +809,7 @@ def stop(
             pid_settle_timeout=pid_settle_timeout,
             platform=platform,
             runner=runner,
+            uid=uid,
         )
 
     pidfile = _pidfile(env)

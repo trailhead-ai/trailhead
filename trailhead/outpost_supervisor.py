@@ -317,11 +317,22 @@ def enable(
     )
 
     target = _target_path(kind, environ, supervisor_dir)
+    run = runner if runner is not None else default_runner
 
     # A supervised daemon must own the port cleanly; a detached daemon left
     # running from the unsupervised `start` path would otherwise still be
-    # holding it when the supervisor tries to bind.
-    outpost_lifecycle.stop(env=environ, port=port)
+    # holding it when the supervisor tries to bind. Route through the SAME
+    # platform/supervisor_dir/runner/uid overrides enable() itself received —
+    # an already-registered, running supervised daemon otherwise never gets
+    # seen (let alone stopped) by this inner call.
+    outpost_lifecycle.stop(
+        env=environ,
+        port=port,
+        platform=platform,
+        supervisor_dir=supervisor_dir,
+        runner=run,
+        uid=uid,
+    )
 
     target.parent.mkdir(parents=True, exist_ok=True)
     if kind == "darwin":
@@ -330,14 +341,26 @@ def enable(
         target.write_text(render_systemd_unit(entry))
     target.chmod(0o644)
 
-    run = runner if runner is not None else default_runner
-
     if kind == "darwin":
         run(["launchctl", "bootout", launchd_service(uid)])
-        run(["launchctl", "bootstrap", launchd_domain(uid), str(target)])
+        bootstrap_command = ["launchctl", "bootstrap", launchd_domain(uid), str(target)]
+        result = run(bootstrap_command)
+        if result.returncode != 0:
+            target.unlink(missing_ok=True)
+            raise OutpostLifecycleError(
+                f"outpost enable: '{' '.join(bootstrap_command)}' failed (exit "
+                f"{result.returncode}): {(result.stderr or result.stdout or '').strip()}"
+            )
     else:
         run(["systemctl", "--user", "daemon-reload"])
-        run(["systemctl", "--user", "enable", "--now", SYSTEMD_UNIT_NAME])
+        enable_command = ["systemctl", "--user", "enable", "--now", SYSTEMD_UNIT_NAME]
+        result = run(enable_command)
+        if result.returncode != 0:
+            target.unlink(missing_ok=True)
+            raise OutpostLifecycleError(
+                f"outpost enable: '{' '.join(enable_command)}' failed (exit "
+                f"{result.returncode}): {(result.stderr or result.stdout or '').strip()}"
+            )
         actual_user = resolve_user(environ, user)
         linger_result = run(["loginctl", "enable-linger", actual_user])
         if linger_result.returncode != 0:
