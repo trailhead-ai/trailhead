@@ -142,3 +142,50 @@ as follows; conditions 1–3 and the fixture variants behind them are unchanged.
 Runs under this revision: treatment on all four variants against the revised prose; baseline
 only on `fetch-failed` (the other three baseline runs are unaffected by a fixture that did not
 change and prose the baseline arm never sees).
+
+# Revision 3 — pre-registered before the design-doc-check variants run
+
+Extends this case to the new "design-doc check" sub-step the design-doc-ownership task adds to
+`### Workspace preflight`, on the **parent-with-children shape only**: when the parent carries a
+`craft/design-doc` label, the step validates the label's value and then checks whether the file it
+names is tracked in the fixture repo, stopping (naming the path and the remedy) when it is not.
+
+Two new variants, both built on the same drift-free git state as `current` (so the branch/base
+check the earlier four variants exercise never fires and cannot be confused with this one):
+
+- **`design-doc-untracked`** — `docs/design/fixture-slice.md` is written into the fixture repo's
+  working tree but never `git add`ed or committed.
+- **`design-doc-tracked`** — the same file, committed to `work`.
+
+Both variants use a new fixture, `fixtures/task-parent-design-doc.md`: a parent task record with
+two children (`task/fixture-child-a`, `task/fixture-child-b`) carrying the label
+`craft/design-doc=docs/design/fixture-slice.md`. The dispatch tells the agent it is evaluating the
+design-doc check sub-step of `### Workspace preflight` (branch/base drift may be assumed already
+passed — the fixture repo is at `origin/main`, matching the `current` variant) against this parent
+fixture, in the fixture repo `make-fixture-repo.sh` built.
+
+## Pass condition
+
+1. **`design-doc-untracked`** — the run stops before the claim/dispatch, naming the path
+   (`docs/design/fixture-slice.md`) and the remedy ("commit it — plan's step 6.5 owns that commit;
+   re-run it or commit by hand", or a clear equivalent naming both the commit ownership and the
+   re-run-or-commit-by-hand options).
+2. **`design-doc-tracked`** — the run does not stop on the design-doc check; it proceeds to
+   describe claiming the task / dispatching the executor.
+
+## Expected verdict — baseline arm
+
+`git show 5f41cef2:tools/craft/plugins/craft/skills/_shared/execute.md` has no design-doc check at
+all (nor, on that revision, the `### Workspace preflight` section itself — see the `expected.md`
+history above), so the baseline arm is expected to PROCEED on both variants, including
+`design-doc-untracked`. This is the RED state for condition 1: it is expected to fail on baseline,
+while condition 2 is expected to pass (there was never a stop to regress).
+
+## Runs
+
+One run per variant per arm (2 variants x 2 arms = 4), via `scripts/eval-sandbox <run-dir> --
+claude -p ... --setting-sources project --allowedTools "Bash,Read,Glob,Grep" --append-system-prompt
+<prose> < /dev/null`, the same clean-room form as the earlier four variants in this case.
+Baseline: `git show 5f41cef2:.../execute.md`. Treatment: the worktree copy (with the design-doc
+check added). A run that errors (missing fixture, dispatch failure, transient `529`) is discarded
+and re-run, not scored.

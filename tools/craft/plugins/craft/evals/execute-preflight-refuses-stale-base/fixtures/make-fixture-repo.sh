@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Materialise a vanilla-path fixture repo for the workspace-preflight eval case.
 #
-#   ./make-fixture-repo.sh <behind|upstream-gone|current|fetch-failed> <dest-dir>
+#   ./make-fixture-repo.sh <behind|upstream-gone|current|fetch-failed|design-doc-untracked|design-doc-tracked> <dest-dir>
 #
 # Every variant produces a local `origin` clone source at "<dest>-origin" and
 # a working repo at "<dest>" whose "origin" remote points at it (except
@@ -10,12 +10,12 @@
 # status line; the working repo is left checked out on branch "work".
 set -euo pipefail
 
-variant="${1:?variant required: behind | upstream-gone | current | fetch-failed}"
+variant="${1:?variant required: behind | upstream-gone | current | fetch-failed | design-doc-untracked | design-doc-tracked}"
 dest="${2:?destination directory required}"
 origin="${dest}-origin"
 
 case "$variant" in
-  behind|upstream-gone|current|fetch-failed) ;;
+  behind|upstream-gone|current|fetch-failed|design-doc-untracked|design-doc-tracked) ;;
   *) echo "unknown variant: $variant" >&2; exit 2 ;;
 esac
 
@@ -103,5 +103,27 @@ case "$variant" in
     )
     behind_count="$(cd "$dest" && git rev-list --count HEAD..origin/main)"
     echo "fetch-failed fixture ready: behind=$behind_count (cached), fetch will fail" >&2
+    ;;
+  design-doc-untracked)
+    # "work" is exactly at origin/main (same drift-free state as "current"), so
+    # the branch/base check cannot fire. A design doc file is written into the
+    # working tree but never staged or committed, so it is untracked.
+    (
+      cd "$dest"
+      mkdir -p docs/design
+      echo "# Fixture slice design doc" > docs/design/fixture-slice.md
+    )
+    echo "design-doc-untracked fixture ready" >&2
+    ;;
+  design-doc-tracked)
+    # Same as design-doc-untracked, but the design doc is committed to "work".
+    (
+      cd "$dest"
+      mkdir -p docs/design
+      echo "# Fixture slice design doc" > docs/design/fixture-slice.md
+      git add docs/design/fixture-slice.md
+      git commit -q -m "docs: fixture design doc"
+    )
+    echo "design-doc-tracked fixture ready" >&2
     ;;
 esac

@@ -272,6 +272,13 @@ rather than being silently omitted; that validation governs this label's value.
 
 When the parent carries no `## Enumerated states` section, this step does nothing.
 
+Once the label is recorded, commit the design doc: `git add <path>` for exactly that validated path
+— never `git add -A`, so unrelated working-tree state is untouched — then a GPG-signed conventional
+commit, `docs(<repo>): design doc for <parent-name>`. When the file is already tracked and unchanged
+at HEAD, skip the commit — there is nothing to commit. When it is tracked and modified, commit it
+the same way. After this step, `git status` shows nothing for the design-doc path and the path is
+tracked at HEAD.
+
 ### 7. Define Tasks
 
 **Before decomposing, resolve whether migration and backfill work is suppressed for this plan's

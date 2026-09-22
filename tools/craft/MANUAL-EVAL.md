@@ -2164,3 +2164,69 @@ and `current` were not re-run on baseline — that arm's expectation for those t
 carried over unchanged from the original 8-run entry above, not re-measured here. The `current`
 cell's internal reasoning is unobserved for the reason stated above, which limits how strongly the
 `[gone]`-only-semantics question can be answered from this batch alone.
+
+### Revision 3 runs
+
+Extends this case to the design-doc-ownership task's new "design-doc check" sub-step of `###
+Workspace preflight` (`**The design-doc check.**`, `execute.md:304-313`), on the
+parent-with-children shape only. New fixture `fixtures/task-parent-design-doc.md` — a parent task
+with two children carrying `craft/design-doc=docs/design/fixture-slice.md` — plus two new
+`make-fixture-repo.sh` variants built on the same drift-free git state as `current`:
+`design-doc-untracked` (the labeled file written but never staged) and `design-doc-tracked` (the
+same file committed). Pre-registered in `expected.md`'s "Revision 3" before any run.
+
+**Dispatch.** Same clean-room form as Revisions 1-2: `scripts/eval-sandbox <run-dir> -- claude -p
+... --setting-sources project --allowedTools "Bash,Read,Glob,Grep" --append-system-prompt <prose>
+< /dev/null`, fixture repo built fresh inside each `<run-dir>` before the confined process ran. One
+run per cell (2 variants x 2 arms = 4). Baseline: `git show 5f41cef2:.../execute.md` (this task's
+stated base commit — still has no `### Workspace preflight` section at all, let alone the
+design-doc check). Treatment: the worktree copy (with the design-doc check added). The dispatch
+told the agent it was evaluating only the design-doc check sub-step, with drift stipulated already
+clean, so the earlier branch/base check in the same section could not confound this measurement.
+All 4 processes exited 0; no discards.
+
+| Variant | Baseline (`5f41cef2`) | Treatment (worktree) |
+|---|---|---|
+| `design-doc-untracked` | PROCEED | **STOP** |
+| `design-doc-tracked` | PROCEED | PROCEED |
+
+**Verbatim verdict lines:**
+
+- `design-doc-untracked` (baseline): `VERDICT: PROCEED` / `MESSAGE: No "**The design-doc check.**"
+  paragraph exists in this copy's Workspace preflight (or anywhere in execute.md), so nothing there
+  reads craft/design-doc; with drift already passing, the run proceeds to the claim — though the
+  fixture's docs/design/fixture-slice.md is untracked (?? docs/) and would slip through to Phase
+  6's existence-only state-coverage gate.`
+- `design-doc-untracked` (treatment): `VERDICT: STOP` / `MESSAGE: Design-doc check fails —
+  docs/design/fixture-slice.md exists but is untracked in ./repo; commit it (plan's step 6.5 owns
+  that commit) before the run claims.` — full report quoted the paragraph's own disposition
+  ("Untracked — stop here, before the claim on a fresh run or before the next dispatch on a resumed
+  one") and the exact message it would emit: "Workspace preflight stopped: the parent's
+  craft/design-doc label names docs/design/fixture-slice.md, which exists in ./repo but is
+  untracked by git (git ls-files --error-unmatch exited 1; only README.md is tracked). Remedy:
+  commit it — plan's step 6.5 owns that commit; re-run it or commit by hand. Execute never commits
+  the design doc itself."
+- `design-doc-tracked` (baseline): `VERDICT: PROCEED` / `MESSAGE: No "**The design-doc check.**"
+  paragraph exists in ### Workspace preflight (only craft/design-doc mentions are in Phase 6's
+  close-time state-coverage gate), so no such check applies; with drift stipulated clean the run
+  proceeds to the claim — and incidentally the labeled path docs/design/fixture-slice.md is tracked
+  in ./repo, so the check would have passed even if present.`
+- `design-doc-tracked` (treatment): `VERDICT: PROCEED` / `MESSAGE: Design-doc label validated and
+  docs/design/fixture-slice.md is tracked (git ls-files --error-unmatch exit 0), so the check
+  passes and the run continues to the claim.`
+
+**RED state (baseline), as expected.md's Revision 3 predicted.** Both baseline runs PROCEED,
+including `design-doc-untracked` — `5f41cef2`'s `execute.md` has no Workspace preflight section at
+all, so nothing in it inspects `craft/design-doc`. Condition 1 fails on baseline as predicted;
+condition 2 passes (there was never a stop to regress).
+
+**GREEN state (treatment), matching Revision 3 in full.** `design-doc-untracked` STOPs before the
+claim naming the path and the plan-step-6.5 remedy; `design-doc-tracked` PROCEEDs. Both conditions
+of Revision 3's pass condition hold.
+
+**Result: both variants pass, at both arms, in full.** No falsification.
+
+**Limitations.** One run per cell, no discards needed. Only the design-doc check sub-step was
+exercised in isolation (drift stipulated clean in the dispatch prompt) — the interaction between
+the branch/base drift check and the design-doc check running back to back in the same preflight
+pass is not covered by this corpus.

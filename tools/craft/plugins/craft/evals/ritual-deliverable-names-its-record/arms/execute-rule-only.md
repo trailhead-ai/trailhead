@@ -357,6 +357,17 @@ does not resolve at all there is nothing to compare against: stop and say so. A 
 `camp status --json` is that case, or a member worktree directory that is missing — the report says
 which after `ls`-ing the path.
 
+**The design-doc check.** On the parent-with-children shape only, when the parent carries a
+`craft/design-doc` label, validate its value against the same shape, leading-slash, `..`-segment,
+and inside-the-working-directory rules the state-coverage gate applies to that same label at close
+(Phase 6) — a value that fails validation, or names a file that does not exist, is reported and
+stops, the same way the close gate treats it. A parent with no `craft/design-doc` label passes this
+check: a plan with no enumerated states has no design doc. Once the value is validated, run
+`git ls-files --error-unmatch <path>` against it in the repo it names. Untracked — stop here, before
+the claim on a fresh run or before the next dispatch on a resumed one — and report the path with the
+remedy: commit it — plan's step 6.5 owns that commit; re-run it or commit by hand. Tracked — pass.
+Execute never commits the design doc itself, so plan's step 6.5 stays its one owner.
+
 ### Claiming the run at first dispatch
 
 **Before this run's first dispatch of any agent** — the `assumption-prover` in step 1 counts just as
