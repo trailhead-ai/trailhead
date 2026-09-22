@@ -216,16 +216,21 @@ class SessionListing:
     dropped: int = 0
 
 
-#: The whole stderr line tmux prints for the non-zero exit that means "no
-#: server is running" — `error connecting to <socket> (No such file or
-#: directory)`, confirmed against tmux 3.7c. Matched as that shape rather
-#: than on the trailing phrase alone, which any number of unrelated
-#: failures also carry (a config file tmux could not source, a wrapper
-#: script's own complaint). Every OTHER non-zero exit (an unsafe socket
-#: directory, an unreachable socket, or any stderr not yet observed) is an
-#: outage and must never be read as an empty listing.
+#: The stderr shapes tmux prints for the non-zero exit that means "no
+#: server is running", confirmed against tmux 3.7c:
+#: `error connecting to <socket> (No such file or directory)` when the
+#: socket path never existed (ENOENT), and `no server running on <socket>`
+#: when the path exists but nothing is listening on it (ECONNREFUSED, e.g.
+#: a stale socket file left behind by a server that already exited).
+#: Matched as either whole-line shape rather than on a trailing phrase
+#: alone, which any number of unrelated failures also carry (a config file
+#: tmux could not source, a wrapper script's own complaint). Every OTHER
+#: non-zero exit (an unsafe socket directory, an unreachable socket, or any
+#: stderr not yet observed) is an outage and must never be read as an empty
+#: listing.
 _NO_SERVER_STDERR_RE = re.compile(
     r"error connecting to .*\(No such file or directory\)"
+    r"|no server running on "
 )
 
 

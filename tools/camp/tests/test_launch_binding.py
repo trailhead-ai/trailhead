@@ -297,6 +297,23 @@ def test_remove_window_key_binding_succeeds_when_no_tmux_server_is_running_at_al
     assert tmux.reset_calls == 1
 
 
+def test_remove_window_key_binding_succeeds_when_the_socket_is_stale():
+    """The other stderr shape tmux prints for "no server": the socket file
+    exists but nothing listens on it — `no server running on <socket>` —
+    which a server that exited without unlinking its socket leaves behind.
+    Same meaning, same answer: the key is already tmux's default."""
+    from camp.launch.binding import remove_window_key_binding
+
+    tmux = _FakeTmux()
+    tmux._reset_result = _completed(
+        returncode=1,
+        stderr="no server running on /tmp/tmux-501/camp_test_sock",
+    )
+
+    remove_window_key_binding(tmux)  # must not raise
+    assert tmux.reset_calls == 1
+
+
 # ---------------------------------------------------------------------------
 # Giving the operator's own binding back
 # ---------------------------------------------------------------------------
