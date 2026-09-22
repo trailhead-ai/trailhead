@@ -2067,3 +2067,94 @@ inconsistency measurement); the dispatch used the clean-room `claude` process fo
 could run it, so the subagent fallback in this task's own dispatch instructions was not needed);
 only the vanilla-usage enumeration branch is exercised — the `camp status --json` /
 camp-workspace branch is not covered by this fixture set.
+
+### Revision 2 runs
+
+Prose SHA `f095ad9f` (`fix(craft): make the workspace preflight unambiguous on resume, base
+remote, fetch failure and vanilla sources`) — a correctness review of `74b32bd0` returned
+`FIX_FIRST` on prose ambiguities (resumed runs, the fetch's remote, the contradictory
+fetch-failed rule, unstated vanilla branch/base sources, an undefined on-failure action for a
+value that fails the safe-value shape) and a `fetch-failed` fixture that could not discriminate
+"reported the failure and stopped on the cached ref" from "ignored drift because the fetch
+failed." The fixes and the revised `fetch-failed` fixture (cached `origin/main` now 2 commits
+ahead before the remote is repointed) are recorded as **Revision 2** in `expected.md`, written
+before any of these runs. Conditions 1–3 and their fixture variants are unchanged; only condition
+4 and the `fetch-failed` fixture changed.
+
+**Dispatch.** Same clean-room form as before: `scripts/eval-sandbox <run-dir> -- claude -p ...
+--setting-sources project --allowedTools "Bash,Read,Glob,Grep" --append-system-prompt <prose> <
+/dev/null`, fixture built fresh per run into a new `<run-dir>` (the script now refuses to
+overwrite an existing destination). One run per cell: treatment on all four variants against
+`f095ad9f`; baseline (`git show 93a83d42:.../execute.md`, unchanged) on `fetch-failed` only, per
+Revision 2's stated run plan. Two of the six dispatched processes (`treatment/behind` and
+`baseline/fetch-failed`, first attempts) returned a transient `API Error: 529 Overloaded` with no
+model output at all — an infra failure, not a run that went red or green — and were discarded and
+re-dispatched once each; both retries returned a normal verdict. The counted results below are
+one run per cell (6 dispatches, 2 discarded as infra errors, 6 counted results including the 2
+retries).
+
+| Variant | Baseline (`93a83d42`) | Treatment (`f095ad9f`) |
+|---|---|---|
+| `behind` | — (not re-run; unaffected by Revision 2) | **STOP** |
+| `upstream-gone` | — (not re-run; unaffected by Revision 2) | **STOP** |
+| `current` | — (not re-run; unaffected by Revision 2) | **PROCEED** |
+| `fetch-failed` | **PROCEED** | **STOP** |
+
+**Verbatim stop lines:**
+
+- `behind` (treatment): "Workspace preflight failed — stopping before claiming the run. No task
+  status was written and no build agent was dispatched; `task/fixture-add-a-readme-line` is
+  untouched at `ready`." followed by "`repo` (branch `work`, base `origin/main`) — behind=3" and
+  the fix `git -C repo fetch origin && git -C repo rebase origin/main`.
+- `upstream-gone` (treatment): "Workspace preflight failed — stopping before claiming the run. No
+  dispatch was made and the task record `task/fixture-add-a-readme-line` is untouched (still
+  `ready`)." followed by "repo: branch `work`, behind=0, upstream gone (`origin/deleted-branch`
+  no longer exists on the remote; fetch succeeded)" and the fix
+  `git -C repo branch --unset-upstream` (explicitly not `camp rebase`, matching the prose's
+  revised fix for this case).
+- `fetch-failed` (treatment): "Workspace preflight failed — stopping before claiming the run;
+  nothing was written and no agent was dispatched." followed by "`repo` (branch `work`): behind=2,
+  fetch failed — `git fetch origin` exited 128 ... The base ref still resolved locally
+  (`origin/main` = `c0e3f95`), so drift was read against that cached ref: HEAD is 2 commits behind
+  it. Upstream is not gone (`[behind 2]`, not `[gone]`)." — both halves of revised condition 4
+  present in one report: the fetch failure named, and a stop derived from `behind=2` against the
+  cached ref, not from the fetch alone.
+- `current` (treatment): terse pass, `VERDICT: PROCEED / MESSAGE: none` — the `-p` dispatch format
+  requested exactly that shape on a pass, so no prose reasoning was captured for this cell (see
+  limitations below).
+- `fetch-failed` (baseline): `VERDICT: PROCEED / MESSAGE: none` — the pre-change prose has no
+  preflight step, so nothing in it inspects the fetch or the cached ref; this is the unchanged RED
+  expectation Revision 2 states for baseline.
+
+**Grading against Revision 2: full match, no falsification.** `behind` -> STOP behind=3;
+`upstream-gone` -> STOP with `[gone]` named and the `--unset-upstream` fix (not `camp rebase`);
+`current` -> PROCEED; `fetch-failed` (treatment) -> STOP behind=2 with the fetch failure named,
+satisfying the revised condition 4's full conjunction (reports the failure **and** stops with a
+`behind` count from the cached ref, not from the fetch alone); `fetch-failed` (baseline) ->
+PROCEED, matching Revision 2's unchanged baseline expectation.
+
+**The two side questions the dispatch asked about, honestly answered:**
+
+- **Does `current` rely on `[gone]`-only semantics for the upstream check?** Not independently
+  verifiable from this cell's own transcript: the `-p` dispatch format suppressed reasoning on a
+  clean PROCEED, so there is no quoted evidence of which upstream-track value `current`'s run saw
+  or how it read it. Inferred rather than observed: `current`'s fixture leaves the branch with a
+  normal (non-deleted) upstream, `upstream-gone`'s companion run in this same batch explicitly
+  quoted `[gone]` as the disqualifying value and treated `[behind N]` as non-disqualifying, and no
+  run in this corpus (this one or the original 8) has ever produced a false stop on a repo whose
+  `for-each-ref` output is empty or `[behind N]`. That is corroborating, not confirming, evidence
+  for `current` specifically — recorded as a limitation, not resolved as a fact.
+- **Does the treatment name the vanilla branch/base source it used?** Mixed across the three STOP
+  cells: `fetch-failed`'s report explicitly named the derivation ("base `origin/main` (the
+  branch's configured upstream)"), matching the prose's revised vanilla-sources rule; `behind`'s
+  and `upstream-gone`'s reports named the branch and base *values* (`work`, `origin/main`) but not
+  the derivation rule behind them. One of three counted STOP cells shows the source explicitly; the
+  other two are silent on it rather than wrong about it.
+
+**Limitations.** One run per cell (two cells needed a retry after an unrelated `529 Overloaded`
+infra error — the retries are the counted results, and the discarded first attempts produced no
+model output to grade either way). Per Revision 2's own stated run plan, `behind`, `upstream-gone`,
+and `current` were not re-run on baseline — that arm's expectation for those three variants is
+carried over unchanged from the original 8-run entry above, not re-measured here. The `current`
+cell's internal reasoning is unobserved for the reason stated above, which limits how strongly the
+`[gone]`-only-semantics question can be answered from this batch alone.
