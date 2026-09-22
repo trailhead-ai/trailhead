@@ -824,3 +824,206 @@ class TestCodexSessionLaunchEnvSet:
         message = str(exc_info.value)
         assert str(account_dir) in message
         assert str(ambient) in message
+
+
+def _build_codex_home(root: Path, *, thread_id: str, cwd: Path) -> Path:
+    """Build a Codex home under ``root`` — ``config.toml``, one rollout in the
+    real ``sessions/YYYY/MM/DD`` envelope shape, and its lock file (unheld;
+    the caller flocks it). Returns the ``.codex`` directory."""
+    codex_dir = root / ".codex"
+    day_dir = codex_dir / "sessions" / "2024" / "01" / "01"
+    day_dir.mkdir(parents=True)
+    (codex_dir / "config.toml").write_text("")
+    rollout = day_dir / f"rollout-2024-01-01T12-00-00-{thread_id}.jsonl"
+    rollout.write_text(_meta_line(str(cwd)) + "\n")
+    lock_dir = codex_dir / "thread-writer-locks"
+    lock_dir.mkdir(parents=True)
+    (lock_dir / f"{thread_id}.lock").write_text("")
+    return codex_dir
+
+
+def _inventory(root: Path) -> dict[str, tuple[int, float]]:
+    """A recursive ``{relative path: (size, mtime)}`` snapshot of every file under root."""
+    return {
+        str(p.relative_to(root)): (p.stat().st_size, p.stat().st_mtime)
+        for p in sorted(root.rglob("*"))
+        if p.is_file()
+    }
+
+
+class TestCodexIsolationSweep:
+    """Every read path this harness offers — detection, transcript listing
+    and resolution, the live-enumeration subprocess, and the launch-env
+    binding — must answer only from the injected env, never from a decoy
+    tree standing in for the operator's real Codex home."""
+
+    def test_full_sweep_answers_only_from_injected_home_and_leaves_decoy_untouched(
+        self, tmp_path
+    ):
+        decoy_id = "d0000000-0000-0000-0000-000000000001"
+        decoy_cwd = tmp_path / "decoy-cwd"
+        decoy_cwd.mkdir()
+        decoy_root = tmp_path / "operator-real-home"
+        decoy_codex_dir = _build_codex_home(decoy_root, thread_id=decoy_id, cwd=decoy_cwd)
+        decoy_lock = decoy_codex_dir / "thread-writer-locks" / f"{decoy_id}.lock"
+
+        injected_id = "1a111111-1111-1111-1111-111111111111"
+        injected_cwd = tmp_path / "injected-cwd"
+        injected_cwd.mkdir()
+        injected_root = tmp_path / "injected-home"
+        injected_codex_dir = _build_codex_home(
+            injected_root, thread_id=injected_id, cwd=injected_cwd
+        )
+        injected_lock = injected_codex_dir / "thread-writer-locks" / f"{injected_id}.lock"
+
+        env = {
+            "CODEX_HOME": str(injected_codex_dir),
+            "HOME": str(tmp_path / "unrelated-home"),
+            "PATH": "",
+        }
+
+        decoy_fd = os.open(decoy_lock, os.O_RDONLY)
+        injected_fd = os.open(injected_lock, os.O_RDONLY)
+        fcntl.flock(decoy_fd, fcntl.LOCK_EX)
+        fcntl.flock(injected_fd, fcntl.LOCK_EX)
+        try:
+            before = _inventory(decoy_root)
+
+            harness = CodexHarness()
+
+            assert harness.detect(env) is True
+
+            rows = harness.session_transcripts(env=env)
+            assert {r.session_id for r in rows} == {injected_id}
+            assert rows[0].cwd == injected_cwd.resolve()
+
+            resolved = harness.session_transcript_path(injected_id, injected_cwd, env=env)
+            assert resolved == (
+                injected_codex_dir
+                / "sessions"
+                / "2024"
+                / "01"
+                / "01"
+                / f"rollout-2024-01-01T12-00-00-{injected_id}.jsonl"
+            )
+            assert harness.session_transcript_path(decoy_id, injected_cwd, env=env) is None
+
+            result = subprocess.run(
+                [sys.executable, "-m", "trailhead.harness.codex_sessions"],
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            assert result.returncode == 0
+            records = json.loads(result.stdout)
+            assert {r["sessionId"] for r in records} == {injected_id}
+            assert records[0]["cwd"] == str(injected_cwd)
+
+            account_dir = injected_root / "account-subdir"
+            launch_env = harness.session_launch_env_set(
+                str(account_dir), env={"HOME": str(injected_root)}
+            )
+            assert launch_env == {"CODEX_HOME": str(account_dir)}
+
+            for answer in (
+                str(injected_codex_dir),
+                str(resolved),
+                str(rows[0].cwd),
+                records[0]["cwd"],
+                records[0]["sessionId"],
+                launch_env["CODEX_HOME"],
+            ):
+                assert str(decoy_root) not in answer
+                assert decoy_id not in answer
+
+            after = _inventory(decoy_root)
+            assert after == before
+        finally:
+            fcntl.flock(decoy_fd, fcntl.LOCK_UN)
+            fcntl.flock(injected_fd, fcntl.LOCK_UN)
+            os.close(decoy_fd)
+            os.close(injected_fd)
+
+    def test_home_only_fallback_answers_only_from_injected_home_and_leaves_decoy_untouched(
+        self, tmp_path
+    ):
+        decoy_id = "d0000000-0000-0000-0000-000000000002"
+        decoy_cwd = tmp_path / "decoy-cwd-2"
+        decoy_cwd.mkdir()
+        decoy_root = tmp_path / "operator-real-home-2"
+        decoy_codex_dir = _build_codex_home(decoy_root, thread_id=decoy_id, cwd=decoy_cwd)
+        decoy_lock = decoy_codex_dir / "thread-writer-locks" / f"{decoy_id}.lock"
+
+        injected_id = "2b222222-2222-2222-2222-222222222222"
+        injected_cwd = tmp_path / "injected-cwd-2"
+        injected_cwd.mkdir()
+        injected_root = tmp_path / "injected-home-2"
+        injected_codex_dir = _build_codex_home(
+            injected_root, thread_id=injected_id, cwd=injected_cwd
+        )
+        injected_lock = injected_codex_dir / "thread-writer-locks" / f"{injected_id}.lock"
+
+        # No CODEX_HOME in this env — proves the HOME/.codex fallback answers.
+        env = {"HOME": str(injected_root), "PATH": ""}
+
+        decoy_fd = os.open(decoy_lock, os.O_RDONLY)
+        injected_fd = os.open(injected_lock, os.O_RDONLY)
+        fcntl.flock(decoy_fd, fcntl.LOCK_EX)
+        fcntl.flock(injected_fd, fcntl.LOCK_EX)
+        try:
+            before = _inventory(decoy_root)
+
+            harness = CodexHarness()
+
+            assert harness.detect(env) is True
+
+            rows = harness.session_transcripts(env=env)
+            assert {r.session_id for r in rows} == {injected_id}
+            assert rows[0].cwd == injected_cwd.resolve()
+
+            resolved = harness.session_transcript_path(injected_id, injected_cwd, env=env)
+            assert resolved == (
+                injected_codex_dir
+                / "sessions"
+                / "2024"
+                / "01"
+                / "01"
+                / f"rollout-2024-01-01T12-00-00-{injected_id}.jsonl"
+            )
+            assert harness.session_transcript_path(decoy_id, injected_cwd, env=env) is None
+
+            result = subprocess.run(
+                [sys.executable, "-m", "trailhead.harness.codex_sessions"],
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            assert result.returncode == 0
+            records = json.loads(result.stdout)
+            assert {r["sessionId"] for r in records} == {injected_id}
+            assert records[0]["cwd"] == str(injected_cwd)
+
+            account_dir = injected_root / "account-subdir"
+            launch_env = harness.session_launch_env_set(
+                str(account_dir), env={"HOME": str(injected_root)}
+            )
+            assert launch_env == {"CODEX_HOME": str(account_dir)}
+
+            for answer in (
+                str(injected_codex_dir),
+                str(resolved),
+                str(rows[0].cwd),
+                records[0]["cwd"],
+                records[0]["sessionId"],
+                launch_env["CODEX_HOME"],
+            ):
+                assert str(decoy_root) not in answer
+                assert decoy_id not in answer
+
+            after = _inventory(decoy_root)
+            assert after == before
+        finally:
+            fcntl.flock(decoy_fd, fcntl.LOCK_UN)
+            fcntl.flock(injected_fd, fcntl.LOCK_UN)
+            os.close(decoy_fd)
+            os.close(injected_fd)

@@ -111,8 +111,13 @@ lives in `wire.py`, which sequences:
 `claude plugin` CLI.  Everything Claude-Code-specific (the Shape-A
 `marketplace.json` writer, the `claude plugin …` CLI calls, and the on-disk
 registration markers) lives in `harness/claude_code.py` behind the `Harness`
-interface (`harness/base.py`).  The CLI runner is injectable for test
-hermeticity — tests stub it and assert on the args; the real `claude plugin` CLI
+interface (`harness/base.py`).  `harness/codex.py` registers a second harness,
+`codex`, behind the same interface — it implements only session visibility
+(detection, transcript listing and resolution, live enumeration, and launch),
+with every install/registration method a no-op, so `wire.py` and `doctor`
+treat Codex exactly like any other harness with nothing installed yet.  The
+CLI runner is injectable for test hermeticity — tests stub it and assert on
+the args; the real `claude plugin` CLI
 is never invoked in tests.  `doctor`/`uninstall` likewise read registration state
 through the seam (`is_registered` / `installed_tools` / `manifest_name`), never by
 re-deriving the marker scheme.

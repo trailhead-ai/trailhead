@@ -46,9 +46,13 @@ hidden interactive steps.
 - **Install a subset of plugins:** `./bin/trailhead install --plugin lore --plugin craft`
 - **Fine-grained control** (which subagents/skills, local overrides, multiple
   harnesses): write a config file and pass `--config` (see *Config files* below).
-- **Add support for a new harness** (Codex, OpenCode, …): implement the
-  `Harness` interface in [`trailhead/harness/base.py`](trailhead/harness/base.py)
-  and register it in [`trailhead/harness/__init__.py`](trailhead/harness/__init__.py).
+- **Codex is a registered harness:** trailhead detects Codex and makes its
+  on-disk sessions visible to camp (listing, resolution, live enumeration, and
+  launch), but installs no plugins into it yet — `trailhead doctor` correctly
+  reports it detected with an empty install row.
+- **Add support for a new harness** (OpenCode, …): implement the `Harness`
+  interface in [`trailhead/harness/base.py`](trailhead/harness/base.py) and
+  register it in [`trailhead/harness/__init__.py`](trailhead/harness/__init__.py).
   `install`/`uninstall` are harness-agnostic; they compose generic plugin trees
   and delegate the harness-specific registration to your implementation.
 

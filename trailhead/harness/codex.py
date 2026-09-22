@@ -1,9 +1,11 @@
-"""Codex harness implementation — detection and home resolution skeleton.
+"""Codex harness implementation — the read path of the trailhead Harness seam.
 
 This module owns everything Codex-specific about being recognised through the
 trailhead :class:`~trailhead.harness.base.Harness` seam (Axiom 1). Nothing
 Codex-specific lives outside this file — the shared install/compose/wire/
-doctor path talks to it only through the generic interface.
+doctor path talks to it only through the generic interface. Nothing in this
+module writes into a Codex home: every function here only reads Codex's own
+on-disk state, or returns argv/env for a caller to spawn.
 
 Home resolution
 ----------------
@@ -14,7 +16,9 @@ seam the way it does for Claude Code's ``TRAILHEAD_CLAUDE_DIR``. This resolver
 NEVER falls back to :func:`pathlib.Path.home`: a caller must inject an
 environment (real or test-pinned) explicitly, so a missing injection fails
 loudly instead of silently reading (or, worse, writing under) the operator's
-real Codex home.
+real Codex home. Every other resolver in this module — transcript listing,
+transcript resolution, the lister subprocess, the launch-env binding — goes
+through this one choke point.
 
 Detection
 ---------
@@ -23,16 +27,42 @@ executable on the given environment's ``PATH``, or a ``config.toml`` file
 under the resolved Codex home. A bare, empty home directory (no
 ``config.toml``) is NOT detected — Codex has never been configured there.
 
-Install-surface skeleton
--------------------------
-Every registration/install method below is a vacuous, harness-agnostic-safe
-default (no-op write, ``False``/``[]`` read) so this class can be instantiated
-and registered before the create-phase (compose a manifest Codex can read,
-register it, install/rewire/uninstall tools) is implemented. This makes
-``trailhead doctor`` report Codex as detected with nothing installed, which is
-the honest state until those methods are filled in — never a silent write to
-a harness that can't yet read it, and never a raised error that would abort
-``trailhead install``/``trailhead update`` on any machine with Codex detected.
+Transcript store and the session-id guard
+-------------------------------------------
+Rollouts live at ``<codex-home>/sessions/YYYY/MM/DD/rollout-<timestamp>-
+<thread-id>[_<rollout-id>].jsonl`` (optionally ``.jsonl.zst``). A thread id
+extracted from a filename is accepted only when it also passes
+``_is_session_id`` — a single, inert path component (mirroring the guard
+Claude Code's harness applies to its own session ids) — before it is ever
+joined onto the sessions root or handed to a caller's argv; neither a
+traversal segment (``..``) nor a path separator can reach either. A rollout
+whose id fails the guard yields no row at all, never a row with a rejected id.
+
+``session_transcripts`` recovers each row's ``cwd`` with a single bounded
+read: ``_read_session_meta_payload`` performs one capped ``readline`` on the
+rollout's first line, so an oversized or newline-less line — or a corrupt or
+hostile file — stops there without ever touching a second line. A ``.zst``
+file, an unreadable file, or one whose first line isn't a decodable
+``session_meta`` envelope still yields a row, with ``cwd=None``, rather than
+raising or being skipped.
+
+Live enumeration: the lister and its fail-closed lock probe
+---------------------------------------------------------------
+Codex ships no non-interactive session lister of its own, so
+``session_enumerate`` returns the argv that runs
+:mod:`trailhead.harness.codex_sessions` as a subprocess (``sys.executable -m
+trailhead.harness.codex_sessions``), which resolves the Codex home from its
+own process environment through the same ``codex_home`` choke point and
+prints one JSON array of the threads whose
+``<home>/thread-writer-locks/<thread-id>.lock`` is currently held. Liveness is
+decided by an OS-level ``fcntl.flock`` probe, not by the lock file's mere
+presence — a crashed Codex leaves the file behind, unlocked — and the probe
+fails CLOSED: any lock it cannot decide (no ``fcntl`` module, a permission or
+I/O error) is reported live rather than not-live, because under-reporting a
+live session would let camp's teardown guard destroy a running session's
+workspace. ``parse_session_list`` decodes that subprocess's stdout under the
+base contract.
+
 Session launch
 --------------
 ``session_launch`` returns ``["codex", "--cd", <workspace>]`` — Codex's
@@ -56,9 +86,20 @@ works, refused for a relative value or a control character, and refused when
 the environment's own ambient ``CODEX_HOME`` already names a different
 directory — naming both, so a caller sees which one to fix.
 
-Every other seam method (identity, authentication, live-session enumeration
-beyond what's covered above) stays at the base class's default too; this
-skeleton adds only detection and registry presence beyond the launch quartet.
+Install surface
+----------------
+Every registration/install method on this class (``generate_manifest``,
+``register``, ``install_tool``, ``rewire_tool``, ``unregister_tool``,
+``unregister_marketplace``, ``is_registered``, ``is_installed``,
+``installed_tools``) is a no-op that reports nothing installed. ``trailhead
+doctor`` therefore reports Codex as detected with nothing installed — the
+honest state this seam's read path can report today, never a silent write to
+a harness that can't yet read it, and never a raised error that would abort
+``trailhead install``/``trailhead update`` on any machine with Codex detected.
+
+Every other seam method (identity, authentication) stays at the base class's
+default too; this module implements detection, the transcript store, live
+enumeration, and the launch quartet, and nothing beyond them.
 """
 
 from __future__ import annotations
