@@ -709,7 +709,7 @@ def _rebase_continue(vault: Path) -> tuple[int, bool]:
     the replayed commit's message otherwise and would block forever with no tty.
     The environment also carries the host signing overrides (see
     :func:`common._git`'s docstring), and stdin is closed — a signing step here
-    can no longer prompt for anything, on either channel.
+    cannot prompt for anything, on either channel.
 
     Bounded by :data:`_REBASE_CONTINUE_TIMEOUT_S`: a git process that blocks
     past it (a signing helper that hangs, an editor that never returns) is

@@ -206,10 +206,6 @@ class EnableResult:
         self.generated = generated
 
 
-def _ssh_keygen_available() -> bool:
-    return shutil.which("ssh-keygen") is not None
-
-
 def _probe_key(path: Path) -> "tuple[str | None, bool]":
     """Return ``(public key line, needs_passphrase)`` for the key at *path*.
 
@@ -250,9 +246,8 @@ def _fingerprint(path: Path) -> "str | None":
 def _absolute_expanded(raw: "str | Path") -> Path:
     """Expand ``~`` and make *raw* absolute, without resolving symlinks.
 
-    Matches the Delivers contract literally ("expanded and made absolute")
-    rather than reaching for ``Path.resolve()``, which would also collapse
-    symlinks the operator may have deliberately pointed at a key elsewhere.
+    Deliberately not ``Path.resolve()``, which would also collapse symlinks
+    the operator may have pointed at a key elsewhere.
     """
     expanded = os.path.expanduser(str(raw))
     return Path(os.path.abspath(expanded))
@@ -309,20 +304,23 @@ def _resolve_principal() -> str:
     return email or socket.gethostname()
 
 
-def _write_signing_config(directory: Path, key_path: Path) -> None:
+def _ensure_signing_dir(directory: Path) -> None:
+    directory.mkdir(parents=True, exist_ok=True)
+    os.chmod(directory, 0o700)
+
+
+def _write_configuration(directory: Path, key_path: Path, pub_line: str) -> None:
+    """Point :data:`CONFIG_FILENAME` and :data:`ALLOWED_SIGNERS_FILENAME` at
+    *key_path*, creating *directory* at mode ``0700`` if needed."""
     from ..record.store import write_temp_then_rename
 
+    _ensure_signing_dir(directory)
     write_temp_then_rename(
         directory / CONFIG_FILENAME,
         json.dumps({KEY_PATH_FIELD: str(key_path)}, indent=2) + "\n",
     )
-
-
-def _write_allowed_signers(directory: Path, principal: str, pub_line: str) -> None:
-    from ..record.store import write_temp_then_rename
-
     write_temp_then_rename(
-        directory / ALLOWED_SIGNERS_FILENAME, f"{principal} {pub_line}\n"
+        directory / ALLOWED_SIGNERS_FILENAME, f"{_resolve_principal()} {pub_line}\n"
     )
 
 
@@ -355,29 +353,23 @@ def enable(*, key: "str | Path | None" = None, env: "dict | None" = None) -> Ena
 
     if key is not None:
         resolved = validate_adoptable_key(key)
-        directory.mkdir(parents=True, exist_ok=True)
-        os.chmod(directory, 0o700)
         pub_line, _ = _probe_key(resolved)
-        _write_signing_config(directory, resolved)
-        _write_allowed_signers(directory, _resolve_principal(), pub_line)
+        _write_configuration(directory, resolved, pub_line)
         return EnableResult(key_path=resolved, pub_line=pub_line, generated=False)
 
-    directory.mkdir(parents=True, exist_ok=True)
-    os.chmod(directory, 0o700)
+    _ensure_signing_dir(directory)
 
     existing = load_key_path(env)
     if existing is not None and existing.is_file():
-        pub_line, needs_passphrase = _probe_key(existing)
+        pub_line, _ = _probe_key(existing)
         if pub_line is not None:
-            _write_signing_config(directory, existing)
-            _write_allowed_signers(directory, _resolve_principal(), pub_line)
+            _write_configuration(directory, existing, pub_line)
             return EnableResult(key_path=existing, pub_line=pub_line, generated=False)
 
     dest = directory / GENERATED_KEY_FILENAME
     _generate_key(dest)
     pub_line, _ = _probe_key(dest)
-    _write_signing_config(directory, dest)
-    _write_allowed_signers(directory, _resolve_principal(), pub_line)
+    _write_configuration(directory, dest, pub_line)
     return EnableResult(key_path=dest, pub_line=pub_line, generated=True)
 
 
@@ -389,7 +381,7 @@ def describe_status(env: "dict | None" = None) -> "tuple[bool, str]":
     it always ends with the command that fixes it, matching ``lore
     status``'s existing drift-remedy pattern.
     """
-    if not _ssh_keygen_available():
+    if shutil.which("ssh-keygen") is None:
         return False, "ssh-keygen is not on PATH — install OpenSSH's client tools"
 
     key_path = load_key_path(env)
@@ -407,7 +399,7 @@ def describe_status(env: "dict | None" = None) -> "tuple[bool, str]":
             f"`chmod 600 {key_path}`"
         )
 
-    pub_line, needs_passphrase = _probe_key(key_path)
+    pub_line, _ = _probe_key(key_path)
     if pub_line is None:
         return False, (
             "the configured key needs a passphrase, which cannot sign with "

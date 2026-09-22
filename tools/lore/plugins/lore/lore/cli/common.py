@@ -467,7 +467,7 @@ def _git(vault: Path, *args: str) -> tuple[int, str, str]:
     ``sync``, ``flush``, ``resolve`` and ``resolve_state`` goes through, so
     a commit made anywhere through this helper signs with the host key. With
     no key configured, the environment handed to git is exactly the
-    inherited one, unchanged from before this override existed.
+    inherited one.
     """
     try:
         env = signing_mod.apply_env_overrides(dict(os.environ))

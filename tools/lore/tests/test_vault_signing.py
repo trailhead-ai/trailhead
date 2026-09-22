@@ -21,10 +21,6 @@ import pytest
 
 from conftest import load_script, make_bare_remote, make_git_vault, run_cli
 
-REPO_ROOT = Path(__file__).parent.parent
-PLUGIN_ROOT = REPO_ROOT / "plugins" / "lore"
-CLI_PATH = PLUGIN_ROOT / "cli" / "lore"
-
 
 # ── harness ──────────────────────────────────────────────────────────────
 
@@ -57,10 +53,10 @@ def _write_hostile_global_gitconfig(home: Path) -> None:
     )
 
 
-def _generate_key(tmp_path: Path, name: str) -> Path:
+def _generate_key(tmp_path: Path, name: str, *, passphrase: str = "") -> Path:
     key_path = tmp_path / name
     subprocess.run(
-        ["ssh-keygen", "-t", "ed25519", "-N", "", "-f", str(key_path), "-C", name],
+        ["ssh-keygen", "-t", "ed25519", "-N", passphrase, "-f", str(key_path), "-C", name],
         check=True, capture_output=True, timeout=15,
     )
     return key_path
@@ -81,6 +77,12 @@ def _enable_host_key(state_dir: Path, home: Path, key_path: Path, *, principal="
     )
     pubkey = Path(f"{key_path}.pub").read_text().strip()
     (d / signing.ALLOWED_SIGNERS_FILENAME).write_text(f"{principal} {pubkey}\n")
+
+
+def _allowed_signers_path(state: Path, home: Path) -> Path:
+    signing = load_script("lore.vault.signing")
+    d = signing.signing_dir(env={"XDG_STATE_HOME": str(state), "HOME": str(home)})
+    return d / signing.ALLOWED_SIGNERS_FILENAME
 
 
 def _verify_good(vault: Path, allowed_signers: Path, rev: str = "HEAD") -> str:
@@ -124,9 +126,7 @@ def test_sync_commit_signs_with_the_host_key_when_present(tmp_path):
     r = run_cli(["sync"], vault=vault, state_dir=state)
     assert r.returncode == 0, r.stderr
 
-    signing = load_script("lore.vault.signing")
-    signing_env = {"XDG_STATE_HOME": str(state), "HOME": str(home)}
-    allowed = signing.signing_dir(env=signing_env) / signing.ALLOWED_SIGNERS_FILENAME
+    allowed = _allowed_signers_path(state, home)
     assert _verify_good(vault, allowed) == "G"
 
 
@@ -151,9 +151,7 @@ def test_sync_commit_signs_with_a_key_named_outside_the_signing_directory(tmp_pa
     r = run_cli(["sync"], vault=vault, state_dir=state)
     assert r.returncode == 0, r.stderr
 
-    signing = load_script("lore.vault.signing")
-    signing_env = {"XDG_STATE_HOME": str(state), "HOME": str(home)}
-    allowed = signing.signing_dir(env=signing_env) / signing.ALLOWED_SIGNERS_FILENAME
+    allowed = _allowed_signers_path(state, home)
     assert _verify_good(vault, allowed) == "G"
 
 
@@ -220,9 +218,7 @@ def test_pull_rebase_replay_signs_with_the_host_key(tmp_path):
     assert r.returncode == 0, r.stderr
     assert (vault / "theirs.md").exists()
 
-    signing = load_script("lore.vault.signing")
-    signing_env = {"XDG_STATE_HOME": str(state), "HOME": str(home)}
-    allowed = signing.signing_dir(env=signing_env) / signing.ALLOWED_SIGNERS_FILENAME
+    allowed = _allowed_signers_path(state, home)
     # HEAD is the replayed local commit landed on top of origin's history.
     assert _verify_good(vault, allowed) == "G"
 
@@ -230,11 +226,15 @@ def test_pull_rebase_replay_signs_with_the_host_key(tmp_path):
 # ── resolver settle ────────────────────────────────────────────────────
 
 
-def _diverge_on_disjoint_fields(vault: Path, state: Path):
+def _diverge_on_disjoint_fields(tmp_path: Path, vault: Path, state: Path) -> str:
     """Two devices edit different sidecar fields of the same record — a
     conflict git flags as text (adjacent lines) but the field-wise merge
     settles with no judgment, replaying device A's commit through
-    ``_rebase_continue``."""
+    ``_rebase_continue``.
+
+    Leaves *vault* with device A's edit committed locally and device B's
+    pushed to ``origin``, unpulled. Returns the branch name.
+    """
     r = run_cli(
         ["record", "create", "--kind", "task", "--title", "T"],
         vault=vault, state_dir=state, stdin_text="body\n",
@@ -244,19 +244,6 @@ def _diverge_on_disjoint_fields(vault: Path, state: Path):
     _git(vault, "add", "-A")
     _git(vault, "commit", "-m", "seed")
     branch = _git(vault, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
-    return record_id, branch
-
-
-def test_resolver_settle_signs_its_commit_with_the_host_key(tmp_path):
-    home = _isolated_home()
-    _write_hostile_global_gitconfig(home)
-
-    vault = make_git_vault(tmp_path / "vault")
-    state = tmp_path / "state"
-    key_path = _generate_key(tmp_path, "host_key")
-    _enable_host_key(state, home, key_path)
-
-    record_id, branch = _diverge_on_disjoint_fields(vault, state)
 
     remote = make_bare_remote(tmp_path / "remote.git")
     _git(vault, "remote", "add", "origin", str(remote))
@@ -283,6 +270,19 @@ def test_resolver_settle_signs_its_commit_with_the_host_key(tmp_path):
     assert r.returncode == 0, r.stderr
     _git(vault, "add", "-A")
     _git(vault, "commit", "-m", "device A edit")
+    return branch
+
+
+def test_resolver_settle_signs_its_commit_with_the_host_key(tmp_path):
+    home = _isolated_home()
+    _write_hostile_global_gitconfig(home)
+
+    vault = make_git_vault(tmp_path / "vault")
+    state = tmp_path / "state"
+    key_path = _generate_key(tmp_path, "host_key")
+    _enable_host_key(state, home, key_path)
+
+    branch = _diverge_on_disjoint_fields(tmp_path, vault, state)
 
     # premise: this really conflicts as text.
     _git(vault, "fetch", "origin")
@@ -294,9 +294,7 @@ def test_resolver_settle_signs_its_commit_with_the_host_key(tmp_path):
     assert r.returncode == 0, r.stderr
     assert not (vault / ".git" / "rebase-merge").exists()
 
-    signing = load_script("lore.vault.signing")
-    signing_env = {"XDG_STATE_HOME": str(state), "HOME": str(home)}
-    allowed = signing.signing_dir(env=signing_env) / signing.ALLOWED_SIGNERS_FILENAME
+    allowed = _allowed_signers_path(state, home)
     assert _verify_good(vault, allowed) == "G"
 
 
@@ -324,9 +322,7 @@ def test_flush_commit_signs_with_the_host_key(tmp_path):
                 env_extra={"CLAUDE_CODE_SESSION_ID": "", "CLAUDE_SESSION_ID": ""})
     assert r.returncode == 0, r.stderr
 
-    signing = load_script("lore.vault.signing")
-    signing_env = {"XDG_STATE_HOME": str(state), "HOME": str(home)}
-    allowed = signing.signing_dir(env=signing_env) / signing.ALLOWED_SIGNERS_FILENAME
+    allowed = _allowed_signers_path(state, home)
     assert _verify_good(vault, allowed) == "G"
 
 
@@ -342,6 +338,22 @@ def _config_env(tmp_path: Path) -> dict:
     return {"XDG_STATE_HOME": str(tmp_path / "state"), "HOME": str(tmp_path / "home")}
 
 
+def _write_config(signing, cfg_env: dict, content: str) -> Path:
+    """Write *content* as the signing configuration; return the signing dir."""
+    d = signing.signing_dir(env=cfg_env)
+    d.mkdir(parents=True)
+    (d / signing.CONFIG_FILENAME).write_text(content)
+    return d
+
+
+def _configure_fake_key(signing, cfg_env: dict, tmp_path: Path) -> "tuple[Path, Path]":
+    """Configure a key file that exists on disk; return ``(signing dir, key path)``."""
+    key_path = tmp_path / "key"
+    key_path.write_text("fake-key\n")
+    d = _write_config(signing, cfg_env, json.dumps({signing.KEY_PATH_FIELD: str(key_path)}))
+    return d, key_path
+
+
 def test_no_configuration_leaves_the_environment_exactly_inherited(tmp_path, signing):
     base = {"PATH": "/usr/bin", "SOME_VAR": "x"}
     result = signing.apply_env_overrides(base, env=_config_env(tmp_path))
@@ -350,9 +362,7 @@ def test_no_configuration_leaves_the_environment_exactly_inherited(tmp_path, sig
 
 def test_a_configured_but_missing_key_file_leaves_the_environment_inherited(tmp_path, signing):
     cfg_env = _config_env(tmp_path)
-    d = signing.signing_dir(env=cfg_env)
-    d.mkdir(parents=True)
-    (d / signing.CONFIG_FILENAME).write_text(json.dumps({signing.KEY_PATH_FIELD: str(tmp_path / "nope")}))
+    _write_config(signing, cfg_env, json.dumps({signing.KEY_PATH_FIELD: str(tmp_path / "nope")}))
     base = {"PATH": "/usr/bin"}
     result = signing.apply_env_overrides(base, env=cfg_env)
     assert result == base
@@ -360,9 +370,7 @@ def test_a_configured_but_missing_key_file_leaves_the_environment_inherited(tmp_
 
 def test_malformed_configuration_leaves_the_environment_inherited(tmp_path, signing):
     cfg_env = _config_env(tmp_path)
-    d = signing.signing_dir(env=cfg_env)
-    d.mkdir(parents=True)
-    (d / signing.CONFIG_FILENAME).write_text("{not json")
+    _write_config(signing, cfg_env, "{not json")
     base = {"PATH": "/usr/bin"}
     result = signing.apply_env_overrides(base, env=cfg_env)
     assert result == base
@@ -370,11 +378,7 @@ def test_malformed_configuration_leaves_the_environment_inherited(tmp_path, sign
 
 def test_a_usable_key_yields_the_four_signing_overrides(tmp_path, signing):
     cfg_env = _config_env(tmp_path)
-    d = signing.signing_dir(env=cfg_env)
-    d.mkdir(parents=True)
-    key_path = tmp_path / "key"
-    key_path.write_text("fake-key\n")
-    (d / signing.CONFIG_FILENAME).write_text(json.dumps({signing.KEY_PATH_FIELD: str(key_path)}))
+    d, key_path = _configure_fake_key(signing, cfg_env, tmp_path)
 
     result = signing.apply_env_overrides({}, env=cfg_env)
 
@@ -397,11 +401,7 @@ def test_an_inherited_unrelated_git_config_entry_is_kept_and_lore_wins(tmp_path,
     ``user.signingkey`` is overridden because lore's own entries are appended
     after it and git applies later entries last."""
     cfg_env = _config_env(tmp_path)
-    d = signing.signing_dir(env=cfg_env)
-    d.mkdir(parents=True)
-    key_path = tmp_path / "key"
-    key_path.write_text("fake-key\n")
-    (d / signing.CONFIG_FILENAME).write_text(json.dumps({signing.KEY_PATH_FIELD: str(key_path)}))
+    _, key_path = _configure_fake_key(signing, cfg_env, tmp_path)
 
     base = {
         "GIT_CONFIG_COUNT": "1",
@@ -424,11 +424,7 @@ def test_an_inherited_unrelated_git_config_entry_is_kept_and_lore_wins(tmp_path,
 
 def test_a_malformed_inherited_count_still_yields_a_usable_override(tmp_path, signing):
     cfg_env = _config_env(tmp_path)
-    d = signing.signing_dir(env=cfg_env)
-    d.mkdir(parents=True)
-    key_path = tmp_path / "key"
-    key_path.write_text("fake-key\n")
-    (d / signing.CONFIG_FILENAME).write_text(json.dumps({signing.KEY_PATH_FIELD: str(key_path)}))
+    _configure_fake_key(signing, cfg_env, tmp_path)
 
     base = {"GIT_CONFIG_COUNT": "abc"}
     result = signing.apply_env_overrides(base, env=cfg_env)
@@ -500,33 +496,7 @@ def test_sweep_aborts_and_marks_failed_when_rebase_continue_times_out(tmp_path):
     vault = make_git_vault(tmp_path / "vault")
     state = tmp_path / "state"
 
-    record_id, branch = _diverge_on_disjoint_fields(vault, state)
-
-    remote = make_bare_remote(tmp_path / "remote.git")
-    _git(vault, "remote", "add", "origin", str(remote))
-    _git(vault, "push", "-u", "origin", branch)
-
-    other = tmp_path / "device-b"
-    subprocess.run(["git", "clone", str(remote), str(other)], check=True, capture_output=True)
-    for k, v in (("user.email", "b@e.st"), ("user.name", "B"), ("commit.gpgsign", "false")):
-        _git(other, "config", k, v)
-    state_b = tmp_path / "state-b"
-    r = run_cli(
-        ["record", "update", record_id, "--title", "Remote Title"],
-        vault=other, state_dir=state_b, stdin_text="",
-    )
-    assert r.returncode == 0, r.stderr
-    _git(other, "add", "-A")
-    _git(other, "commit", "-m", "device B edit")
-    _git(other, "push", "origin", branch)
-
-    r = run_cli(
-        ["record", "update", record_id, "--status", "ready"],
-        vault=vault, state_dir=state, stdin_text="",
-    )
-    assert r.returncode == 0, r.stderr
-    _git(vault, "add", "-A")
-    _git(vault, "commit", "-m", "device A edit")
+    _diverge_on_disjoint_fields(tmp_path, vault, state)
     pre_pull_head = _head(vault)
 
     resolve_mod = load_script("lore.cli.resolve")
