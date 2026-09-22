@@ -213,6 +213,21 @@ def default_runner(argv: list) -> subprocess.CompletedProcess:
 
 
 # ---------------------------------------------------------------------------
+# uid / user resolution — shared with outpost_lifecycle's supervised verbs
+# ---------------------------------------------------------------------------
+
+
+def resolve_uid(uid: int | None) -> int:
+    """The launchd GUI domain's uid — the caller's own uid unless overridden."""
+    return uid if uid is not None else os.getuid()
+
+
+def resolve_user(env: dict[str, str], user: str | None) -> str:
+    """The Linux account name for ``loginctl`` — env ``USER`` unless overridden."""
+    return user if user is not None else (env.get("USER") or getpass.getuser())
+
+
+# ---------------------------------------------------------------------------
 # Binary resolution
 # ---------------------------------------------------------------------------
 
@@ -314,14 +329,13 @@ def enable(
     run = runner if runner is not None else default_runner
 
     if kind == "darwin":
-        actual_uid = uid if uid is not None else os.getuid()
-        domain = f"gui/{actual_uid}"
+        domain = f"gui/{resolve_uid(uid)}"
         run(["launchctl", "bootout", f"{domain}/{LAUNCHD_LABEL}"])
         run(["launchctl", "bootstrap", domain, str(target)])
     else:
         run(["systemctl", "--user", "daemon-reload"])
         run(["systemctl", "--user", "enable", "--now", SYSTEMD_UNIT_NAME])
-        actual_user = user if user is not None else (environ.get("USER") or getpass.getuser())
+        actual_user = resolve_user(environ, user)
         linger_result = run(["loginctl", "enable-linger", actual_user])
         if linger_result.returncode != 0:
             command = f"loginctl enable-linger {actual_user}"
@@ -355,8 +369,7 @@ def disable(
     run = runner if runner is not None else default_runner
 
     if kind == "darwin":
-        actual_uid = uid if uid is not None else os.getuid()
-        run(["launchctl", "bootout", f"gui/{actual_uid}/{LAUNCHD_LABEL}"])
+        run(["launchctl", "bootout", f"gui/{resolve_uid(uid)}/{LAUNCHD_LABEL}"])
     else:
         run(["systemctl", "--user", "disable", "--now", SYSTEMD_UNIT_NAME])
 

@@ -17,6 +17,7 @@ import signal
 import socket
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -27,7 +28,10 @@ import pytest
 
 import trailhead
 from trailhead import cli, outpost_lifecycle
+from trailhead import outpost_supervisor as osup
 from trailhead.outpost_lifecycle import (
+    EXIT_FAILED,
+    EXIT_RESTARTING,
     EXIT_RUNNING,
     EXIT_STALE,
     EXIT_STOPPED,
@@ -153,6 +157,13 @@ def outpost(tmp_path):
         "OUTPOST_CONFIG_DIR": str(config_home),
         "OUTPOST_STATE_DIR": str(state_home),
         "PATH": os.environ.get("PATH", ""),
+        # A fake HOME under tmp_path: is_enabled()'s default supervisor-dir
+        # resolution needs SOME HOME to resolve under, and pointing it at a
+        # throwaway path (rather than leaving it unset) means the unsupervised
+        # tests exercise the same "no entry registered" fallback a real host
+        # takes, never an exception-driven one (Axiom 6 — never touch the
+        # developer's real ~/Library/LaunchAgents).
+        "HOME": str(tmp_path / "home"),
     }
     ns = SimpleNamespace(
         env=env,
@@ -160,6 +171,7 @@ def outpost(tmp_path):
         entry=entry,
         config_home=config_home,
         state_dir=state_home,
+        supervisor_dir=tmp_path / "supervisor",
         port=_free_port(),
     )
     yield ns
@@ -818,3 +830,460 @@ def test_cli_open_verb_dispatches_to_open_ui(monkeypatch):
 
     assert cli.main() == 0
     assert called == ["open"]
+
+
+# ---------------------------------------------------------------------------
+# Supervised verbs — start/stop/restart/status drive the host supervisor when
+# a supervisor entry is registered (trailhead outpost enable). No process is
+# ever spawned in this branch; a recording runner stands in for
+# launchctl/systemctl and a small in-process HTTP server stands in for the
+# supervised daemon's /health endpoint.
+# ---------------------------------------------------------------------------
+
+
+class _RecordingRunner:
+    """Records every argv it is called with. ``on_call`` (argv) -> None lets a
+    test simulate a side effect of a real supervisor command, e.g. a `stop`
+    argv actually shutting down the fake daemon's health server."""
+
+    def __init__(self, on_call=None, returncode_by_prefix=None):
+        self.calls: list[list] = []
+        self._on_call = on_call
+        self._returncode_by_prefix = returncode_by_prefix or {}
+
+    def __call__(self, argv: list) -> subprocess.CompletedProcess:
+        self.calls.append(list(argv))
+        if self._on_call is not None:
+            self._on_call(argv)
+        returncode = 0
+        for prefix, code in self._returncode_by_prefix.items():
+            if argv[: len(prefix)] == list(prefix):
+                returncode = code
+        stdout = getattr(self, "stdout_by_prefix", {})
+        for prefix, text in stdout.items():
+            if argv[: len(prefix)] == list(prefix):
+                return subprocess.CompletedProcess(argv, returncode, text, "")
+        return subprocess.CompletedProcess(argv, returncode, "", "")
+
+
+class _FakeHealthServer:
+    """A tiny in-process stand-in for the supervised daemon's /health. start()
+    and stop() are independently callable so a test can simulate the
+    supervisor stopping and (if wanted) relaunching the daemon."""
+
+    def __init__(self, port: int):
+        self.port = port
+        self._httpd = None
+        self._thread = None
+
+    def start(self) -> None:
+        import http.server
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                if self.path == "/health":
+                    body = json.dumps({"ok": True, "contract_version": 1}).encode()
+                    self.send_response(200)
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                else:
+                    self.send_response(404)
+                    self.end_headers()
+
+            def log_message(self, *a):
+                pass
+
+        self._httpd = http.server.HTTPServer(("127.0.0.1", self.port), Handler)
+        self._thread = threading.Thread(target=self._httpd.serve_forever, daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        if self._httpd is not None:
+            self._httpd.shutdown()
+            self._httpd.server_close()
+            self._httpd = None
+            self._thread = None
+
+
+@pytest.fixture()
+def health_server(outpost):
+    server = _FakeHealthServer(outpost.port)
+    yield server
+    server.stop()
+
+
+def _write_supervisor_entry(outpost, platform: str) -> None:
+    """Register *something* at the target path so is_enabled() reports True —
+    the supervised verbs never read the entry's contents, only its presence."""
+    from trailhead import outpost_supervisor as osup
+
+    target_dir = outpost.supervisor_dir
+    target_dir.mkdir(parents=True, exist_ok=True)
+    name = f"{osup.LAUNCHD_LABEL}.plist" if platform == "darwin" else osup.SYSTEMD_UNIT_NAME
+    (target_dir / name).write_text("placeholder\n")
+
+
+# ---- start -----------------------------------------------------------------
+
+
+def test_supervised_start_records_kickstart_spawns_nothing_writes_no_pidfile(outpost, health_server):
+    _write_supervisor_entry(outpost, "darwin")
+    health_server.start()
+    runner = _RecordingRunner()
+
+    rc = outpost_lifecycle.start(
+        env=outpost.env,
+        port=outpost.port,
+        platform="darwin",
+        supervisor_dir=outpost.supervisor_dir,
+        runner=runner,
+        uid=501,
+        start_health_timeout=3.0,
+    )
+
+    assert rc == 0
+    assert runner.calls == [["launchctl", "kickstart", f"gui/501/{osup.LAUNCHD_LABEL}"]]
+    assert not (outpost.state_dir / "outpost.pid").exists()
+
+
+def test_supervised_start_raises_named_error_when_health_never_answers(outpost):
+    _write_supervisor_entry(outpost, "darwin")
+    # No health server started — /health never answers.
+    runner = _RecordingRunner()
+
+    with pytest.raises(OutpostLifecycleError, match="supervisor"):
+        outpost_lifecycle.start(
+            env=outpost.env,
+            port=outpost.port,
+            platform="darwin",
+            supervisor_dir=outpost.supervisor_dir,
+            runner=runner,
+            uid=501,
+            start_health_timeout=0.3,
+        )
+
+
+def test_supervised_start_linux_records_reset_failed_before_start(outpost, health_server):
+    _write_supervisor_entry(outpost, "linux")
+    health_server.start()
+    runner = _RecordingRunner()
+
+    rc = outpost_lifecycle.start(
+        env=outpost.env,
+        port=outpost.port,
+        platform="linux",
+        supervisor_dir=outpost.supervisor_dir,
+        runner=runner,
+        start_health_timeout=3.0,
+    )
+
+    assert rc == 0
+    assert runner.calls == [
+        ["systemctl", "--user", "reset-failed", osup.SYSTEMD_UNIT_NAME],
+        ["systemctl", "--user", "start", osup.SYSTEMD_UNIT_NAME],
+    ]
+
+
+# ---- stop --------------------------------------------------------------
+
+
+def test_supervised_stop_records_stop_argv_and_returns_once_health_stops(outpost, health_server):
+    _write_supervisor_entry(outpost, "darwin")
+    health_server.start()
+
+    def on_call(argv):
+        if argv == ["launchctl", "stop", osup.LAUNCHD_LABEL]:
+            health_server.stop()
+
+    runner = _RecordingRunner(on_call=on_call)
+
+    rc = outpost_lifecycle.stop(
+        env=outpost.env,
+        port=outpost.port,
+        platform="darwin",
+        supervisor_dir=outpost.supervisor_dir,
+        runner=runner,
+        timeout=3.0,
+        pid_settle_timeout=0.3,
+    )
+
+    assert rc == 0
+    assert runner.calls == [["launchctl", "stop", osup.LAUNCHD_LABEL]]
+
+
+def test_supervised_stop_raises_did_not_exit_when_health_keeps_answering(outpost, health_server):
+    _write_supervisor_entry(outpost, "darwin")
+    health_server.start()
+    runner = _RecordingRunner()  # never stops the health server
+
+    with pytest.raises(OutpostLifecycleError, match="did not exit"):
+        outpost_lifecycle.stop(
+            env=outpost.env,
+            port=outpost.port,
+            platform="darwin",
+            supervisor_dir=outpost.supervisor_dir,
+            runner=runner,
+            timeout=0.3,
+        )
+
+
+def test_supervised_stop_raises_named_error_when_supervisor_relaunches_it(outpost, health_server):
+    _write_supervisor_entry(outpost, "darwin")
+    health_server.start()
+
+    def on_call(argv):
+        if argv == ["launchctl", "stop", osup.LAUNCHD_LABEL]:
+            health_server.stop()
+            threading.Timer(0.05, health_server.start).start()
+
+    runner = _RecordingRunner(on_call=on_call)
+
+    with pytest.raises(OutpostLifecycleError, match="relaunch"):
+        outpost_lifecycle.stop(
+            env=outpost.env,
+            port=outpost.port,
+            platform="darwin",
+            supervisor_dir=outpost.supervisor_dir,
+            runner=runner,
+            timeout=3.0,
+            pid_settle_timeout=0.5,
+        )
+
+
+# ---- status --------------------------------------------------------------
+
+
+def test_supervised_status_running_reports_exit_running(outpost, health_server):
+    _write_supervisor_entry(outpost, "darwin")
+    health_server.start()
+    runner = _RecordingRunner()
+    runner.stdout_by_prefix = {("launchctl", "print"): "state = running\n\tpid = 4242\n"}
+
+    rc = outpost_lifecycle.status(
+        env=outpost.env,
+        port=outpost.port,
+        platform="darwin",
+        supervisor_dir=outpost.supervisor_dir,
+        runner=runner,
+        uid=501,
+    )
+
+    assert rc == EXIT_RUNNING
+
+
+def test_supervised_status_restarting_reports_exit_restarting_with_count(outpost):
+    _write_supervisor_entry(outpost, "linux")
+    runner = _RecordingRunner()
+    runner.stdout_by_prefix = {
+        ("systemctl", "--user", "show"): "0\nactivating\nauto-restart\n\n3\n",
+        ("loginctl",): "yes\n",
+    }
+
+    rc = outpost_lifecycle.status(
+        env=outpost.env,
+        port=outpost.port,
+        platform="linux",
+        supervisor_dir=outpost.supervisor_dir,
+        runner=runner,
+        user="alice",
+    )
+
+    assert rc == EXIT_RESTARTING
+
+
+def test_supervised_status_restarting_message_names_the_restart_count(outpost, capsys):
+    _write_supervisor_entry(outpost, "linux")
+    runner = _RecordingRunner()
+    runner.stdout_by_prefix = {
+        ("systemctl", "--user", "show"): "0\nactivating\nauto-restart\n\n3\n",
+        ("loginctl",): "yes\n",
+    }
+
+    outpost_lifecycle.status(
+        env=outpost.env,
+        port=outpost.port,
+        platform="linux",
+        supervisor_dir=outpost.supervisor_dir,
+        runner=runner,
+        user="alice",
+    )
+
+    assert "3" in capsys.readouterr().out
+
+
+def test_supervised_status_failed_linux_reports_exit_failed_with_recovery_command(outpost, capsys):
+    _write_supervisor_entry(outpost, "linux")
+    runner = _RecordingRunner()
+    runner.stdout_by_prefix = {
+        ("systemctl", "--user", "show"): "0\nfailed\ndead\nstart-limit-hit\n5\n",
+        ("loginctl",): "yes\n",
+    }
+
+    rc = outpost_lifecycle.status(
+        env=outpost.env,
+        port=outpost.port,
+        platform="linux",
+        supervisor_dir=outpost.supervisor_dir,
+        runner=runner,
+        user="alice",
+    )
+
+    assert rc == EXIT_FAILED
+    out = capsys.readouterr().out
+    assert "reset-failed" in out
+
+
+def test_supervised_status_failed_darwin_nonzero_last_exit_reports_exit_failed(outpost, capsys):
+    _write_supervisor_entry(outpost, "darwin")
+    runner = _RecordingRunner()
+    runner.stdout_by_prefix = {
+        ("launchctl", "print"): "state = not running\n\tlast exit code = 78\n",
+    }
+
+    rc = outpost_lifecycle.status(
+        env=outpost.env,
+        port=outpost.port,
+        platform="darwin",
+        supervisor_dir=outpost.supervisor_dir,
+        runner=runner,
+        uid=501,
+    )
+
+    assert rc == EXIT_FAILED
+    assert "trailhead outpost start" in capsys.readouterr().out
+
+
+def test_supervised_status_stopped_reports_exit_stopped(outpost):
+    _write_supervisor_entry(outpost, "darwin")
+    runner = _RecordingRunner()
+    runner.stdout_by_prefix = {
+        ("launchctl", "print"): "state = not running\n\tlast exit code = 0\n",
+    }
+
+    rc = outpost_lifecycle.status(
+        env=outpost.env,
+        port=outpost.port,
+        platform="darwin",
+        supervisor_dir=outpost.supervisor_dir,
+        runner=runner,
+        uid=501,
+    )
+
+    assert rc == EXIT_STOPPED
+
+
+def test_supervised_status_linux_linger_no_prints_boot_warning(outpost, capsys):
+    _write_supervisor_entry(outpost, "linux")
+    runner = _RecordingRunner()
+    runner.stdout_by_prefix = {
+        ("systemctl", "--user", "show"): "0\ninactive\ndead\n\n0\n",
+        ("loginctl",): "no\n",
+    }
+
+    outpost_lifecycle.status(
+        env=outpost.env,
+        port=outpost.port,
+        platform="linux",
+        supervisor_dir=outpost.supervisor_dir,
+        runner=runner,
+        user="alice",
+    )
+
+    out = capsys.readouterr().out
+    assert "enable-linger" in out
+
+
+def test_supervised_status_linux_linger_yes_omits_boot_warning(outpost, capsys):
+    _write_supervisor_entry(outpost, "linux")
+    runner = _RecordingRunner()
+    runner.stdout_by_prefix = {
+        ("systemctl", "--user", "show"): "0\ninactive\ndead\n\n0\n",
+        ("loginctl",): "yes\n",
+    }
+
+    outpost_lifecycle.status(
+        env=outpost.env,
+        port=outpost.port,
+        platform="linux",
+        supervisor_dir=outpost.supervisor_dir,
+        runner=runner,
+        user="alice",
+    )
+
+    out = capsys.readouterr().out
+    assert "enable-linger" not in out
+
+
+def test_supervised_status_removes_leftover_pidfile(outpost):
+    _write_supervisor_entry(outpost, "darwin")
+    pidfile = outpost.state_dir / "outpost.pid"
+    pidfile.parent.mkdir(parents=True, exist_ok=True)
+    pidfile.write_text("99999\n")
+    runner = _RecordingRunner()
+    runner.stdout_by_prefix = {
+        ("launchctl", "print"): "state = not running\n\tlast exit code = 0\n",
+    }
+
+    outpost_lifecycle.status(
+        env=outpost.env,
+        port=outpost.port,
+        platform="darwin",
+        supervisor_dir=outpost.supervisor_dir,
+        runner=runner,
+        uid=501,
+    )
+
+    assert not pidfile.exists()
+
+
+# ---- restart --------------------------------------------------------------
+
+
+def test_supervised_restart_builds_then_runs_restart_argv_confirms_health_and_pid(
+    outpost, health_server, tmp_path
+):
+    _write_supervisor_entry(outpost, "darwin")
+    build_cmd = _build_script(tmp_path)
+
+    def on_call(argv):
+        if argv[:2] == ["launchctl", "kickstart"]:
+            health_server.start()
+
+    runner = _RecordingRunner(on_call=on_call)
+    runner.stdout_by_prefix = {("launchctl", "print"): "state = running\n\tpid = 7777\n"}
+
+    rc = outpost_lifecycle.restart(
+        env=outpost.env,
+        build_cmd=build_cmd,
+        port=outpost.port,
+        platform="darwin",
+        supervisor_dir=outpost.supervisor_dir,
+        runner=runner,
+        uid=501,
+        restart_health_timeout=3.0,
+        pid_settle_timeout=1.0,
+    )
+
+    assert rc == 0
+    kickstart_calls = [c for c in runner.calls if c[:2] == ["launchctl", "kickstart"]]
+    assert kickstart_calls == [["launchctl", "kickstart", "-k", f"gui/501/{osup.LAUNCHD_LABEL}"]]
+
+
+def test_supervised_restart_build_failure_raises_without_touching_supervisor(outpost, tmp_path):
+    _write_supervisor_entry(outpost, "darwin")
+    build_cmd = _build_script(tmp_path, exit_code=1)
+    runner = _RecordingRunner()
+
+    with pytest.raises(OutpostLifecycleError):
+        outpost_lifecycle.restart(
+            env=outpost.env,
+            build_cmd=build_cmd,
+            port=outpost.port,
+            platform="darwin",
+            supervisor_dir=outpost.supervisor_dir,
+            runner=runner,
+            uid=501,
+        )
+
+    assert runner.calls == []

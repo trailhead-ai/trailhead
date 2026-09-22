@@ -60,9 +60,47 @@ Contract & invariants
   successful restart while the old daemon keeps serving stale content.
 
 status exit codes (structured, so callers/tests can branch on state):
-    EXIT_RUNNING (0)  pid alive
-    EXIT_STOPPED (3)  no pidfile
-    EXIT_STALE   (4)  pidfile pointed at a dead pid (now cleaned)
+    EXIT_RUNNING    (0)  pid alive, /health answers (or, under supervision,
+                         supervisor reports a pid and /health answers)
+    EXIT_STOPPED    (3)  no pidfile (or, under supervision, supervisor reports
+                         no pid and no failure — the state an operator's own
+                         `stop` leaves)
+    EXIT_STALE      (4)  pidfile pointed at a dead pid (now cleaned) —
+                         unsupervised path only
+    EXIT_RESTARTING (5)  supervised only: supervisor reports a pid (or a
+                         restarting sub-state) but /health has not answered yet
+    EXIT_FAILED     (6)  supervised only: no pid and the supervisor reports a
+                         failure (a start-limit-hit result, or a non-zero last
+                         exit code)
+
+Host-supervisor awareness
+--------------------------
+``start``, ``stop``, ``restart``, and ``status`` each begin by checking whether
+a host-supervisor entry is registered (``trailhead outpost enable`` /
+``trailhead.outpost_supervisor.is_enabled``). When one is, the verb drives the
+supervisor (launchd on macOS, systemd --user on Linux) through the same
+injectable command-runner seam ``outpost_supervisor`` uses, rather than
+spawning or signalling the process itself, and touches no pidfile — a leftover
+one from a prior unsupervised run is removed the first time a supervised verb
+runs. When no entry is registered, every verb runs its unsupervised
+detached-pidfile path exactly as described above, unchanged. Resolving
+"is a supervisor entry registered" can itself fail (an unsupported platform,
+no HOME in the given environment); that failure is treated the same as "no
+entry registered" rather than propagated, since either way there is nothing to
+drive and the detached path is always available.
+
+``stop`` under a supervisor keeps this module's own bounded wait for
+``/health`` to stop answering (the supervisor's own stop command returning
+proves nothing about whether the process actually exited), and then re-checks
+once more after a settle window: a supervisor whose restart policy is not
+limited to failure exits would otherwise silently relaunch what the operator
+just told it to stop.
+
+``status`` under a supervisor reads the supervisor's own view of the job
+(pid/state for launchd, MainPID/ActiveState/SubState/Result/NRestarts for
+systemd) rather than the pidfile, and on Linux also reads ``loginctl
+show-user ... -p Linger`` to warn when the daemon will not start at boot with
+nobody logged in.
 """
 
 from __future__ import annotations
@@ -76,6 +114,7 @@ import tomllib
 import urllib.error
 import urllib.request
 import webbrowser
+from dataclasses import dataclass
 from pathlib import Path
 
 from trailhead.paths import config_dir, ensure_dir, state_dir
@@ -103,6 +142,8 @@ WEB_ASSETS_DIR_PARTS = ("dist-web", "assets")
 EXIT_RUNNING = 0
 EXIT_STOPPED = 3
 EXIT_STALE = 4
+EXIT_RESTARTING = 5
+EXIT_FAILED = 6
 
 # How long to wait for the daemon to exit after SIGTERM before giving up.
 _STOP_TIMEOUT_SECONDS = 10.0
@@ -301,6 +342,304 @@ def _settled_pid_alive(pid: int, timeout: float = _PID_SETTLE_SECONDS) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Host-supervisor awareness — imported lazily (function-local) everywhere
+# below: outpost_supervisor imports OutpostLifecycleError from this module at
+# ITS module scope, so a module-level import here back would be circular.
+# ---------------------------------------------------------------------------
+
+
+def _is_supervised(
+    env: dict[str, str] | None, *, platform: str | None, supervisor_dir: Path | None
+) -> bool:
+    """True if a host-supervisor entry is registered. Resolving that can itself
+    fail (unsupported platform, no HOME in *env*) — treated as "not
+    supervised", since the detached path is always available regardless."""
+    from trailhead import outpost_supervisor as osup
+
+    try:
+        return osup.is_enabled(env, platform=platform, supervisor_dir=supervisor_dir)
+    except OutpostLifecycleError:
+        return False
+
+
+def _clear_stale_pidfile(env: dict[str, str] | None) -> None:
+    """Under supervision the pidfile is meaningless — the supervisor owns the
+    process. A leftover one from a prior unsupervised run is removed the first
+    time a supervised verb runs, so nothing ever reads it again."""
+    _pidfile(env).unlink(missing_ok=True)
+
+
+def _supervised_kind(platform: str | None):
+    from trailhead import outpost_supervisor as osup
+
+    return osup, osup._platform_kind(platform)
+
+
+@dataclass
+class _SupervisorProbe:
+    """One platform-normalized reading of the supervisor's view of the job."""
+
+    pid: int | None
+    restarting: bool
+    failed: bool
+    restart_count: int | None
+    recovery_hint: str
+
+
+def _probe_darwin(run, uid: int) -> "_SupervisorProbe":
+    from trailhead import outpost_supervisor as osup
+
+    result = run(["launchctl", "print", f"gui/{uid}/{osup.LAUNCHD_LABEL}"])
+    text = result.stdout or ""
+    pid = None
+    last_exit = None
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("pid"):
+            _, _, value = stripped.partition("=")
+            value = value.strip()
+            if value.isdigit():
+                pid = int(value)
+        elif stripped.startswith("last exit code"):
+            _, _, value = stripped.partition("=")
+            value = value.strip()
+            try:
+                last_exit = int(value)
+            except ValueError:
+                last_exit = None
+    failed = pid is None and last_exit not in (None, 0)
+    return _SupervisorProbe(
+        pid=pid,
+        restarting=False,
+        failed=failed,
+        restart_count=None,
+        recovery_hint="trailhead outpost start",
+    )
+
+
+def _probe_linux(run) -> "_SupervisorProbe":
+    from trailhead import outpost_supervisor as osup
+
+    result = run(
+        [
+            "systemctl",
+            "--user",
+            "show",
+            "-p",
+            "MainPID,ActiveState,SubState,Result,NRestarts",
+            "--value",
+            osup.SYSTEMD_UNIT_NAME,
+        ]
+    )
+    lines = (result.stdout or "").splitlines()
+    lines += [""] * (5 - len(lines))
+    main_pid_text, active_state, sub_state, result_field, n_restarts_text = lines[:5]
+
+    pid = int(main_pid_text) if main_pid_text.strip().isdigit() and main_pid_text.strip() != "0" else None
+    restarting = sub_state.strip() in ("auto-restart", "activating") or active_state.strip() == "activating"
+    failed = pid is None and result_field.strip() == "start-limit-hit"
+    restart_count = int(n_restarts_text.strip()) if n_restarts_text.strip().isdigit() else None
+    return _SupervisorProbe(
+        pid=pid,
+        restarting=restarting,
+        failed=failed,
+        restart_count=restart_count,
+        recovery_hint=f"systemctl --user reset-failed {osup.SYSTEMD_UNIT_NAME} && trailhead outpost start",
+    )
+
+
+def _probe_supervisor(run, kind: str, environ: dict[str, str], *, uid, user) -> "_SupervisorProbe":
+    from trailhead import outpost_supervisor as osup
+
+    if kind == "darwin":
+        return _probe_darwin(run, osup.resolve_uid(uid))
+    return _probe_linux(run)
+
+
+def _supervised_start(
+    env: dict[str, str] | None,
+    *,
+    port: int,
+    health_timeout: float,
+    platform: str | None,
+    supervisor_dir: Path | None,
+    runner,
+    uid,
+    user,
+) -> int:
+    osup, kind = _supervised_kind(platform)
+    _clear_stale_pidfile(env)
+    run = runner if runner is not None else osup.default_runner
+
+    if kind == "darwin":
+        resolved_uid = osup.resolve_uid(uid)
+        run(["launchctl", "kickstart", f"gui/{resolved_uid}/{osup.LAUNCHD_LABEL}"])
+    else:
+        run(["systemctl", "--user", "reset-failed", osup.SYSTEMD_UNIT_NAME])
+        run(["systemctl", "--user", "start", osup.SYSTEMD_UNIT_NAME])
+
+    if _wait_for_health(port, health_timeout) is None:
+        raise OutpostLifecycleError(
+            "outpost start: the host supervisor was told to start outpost, but "
+            f"/health never answered on port {port} within {health_timeout:.0f}s; "
+            "check the outpost log."
+        )
+    print(f"outpost started via the host supervisor; /health ok on port {port}.")
+    return 0
+
+
+def _supervised_stop(
+    env: dict[str, str] | None,
+    *,
+    port: int,
+    timeout: float,
+    health_timeout: float,
+    pid_settle_timeout: float | None,
+    platform: str | None,
+    supervisor_dir: Path | None,
+    runner,
+    uid,
+    user,
+) -> int:
+    osup, kind = _supervised_kind(platform)
+    _clear_stale_pidfile(env)
+    run = runner if runner is not None else osup.default_runner
+
+    if kind == "darwin":
+        run(["launchctl", "stop", osup.LAUNCHD_LABEL])
+    else:
+        run(["systemctl", "--user", "stop", osup.SYSTEMD_UNIT_NAME])
+
+    deadline = time.time() + timeout
+    while True:
+        if _probe_health(port, health_timeout) is None:
+            break
+        if time.time() >= deadline:
+            raise OutpostLifecycleError(
+                f"outpost (host supervisor) did not exit within {timeout:.0f}s of stop."
+            )
+        time.sleep(0.05)
+
+    settle = _resolve_pid_settle_timeout(
+        pid_settle_timeout=pid_settle_timeout, restart_health_timeout=timeout
+    )
+    if _wait_for_health(port, settle) is not None:
+        raise OutpostLifecycleError(
+            "outpost stop: the host supervisor relaunched outpost after stop "
+            f"(/health answered again within {settle:.1f}s of the stop completing); "
+            "its restart policy may not be limited to failure exits."
+        )
+
+    print("outpost stopped via the host supervisor.")
+    return 0
+
+
+def _supervised_status(
+    env: dict[str, str] | None,
+    *,
+    port: int,
+    health_timeout: float,
+    platform: str | None,
+    supervisor_dir: Path | None,
+    runner,
+    uid,
+    user,
+) -> int:
+    osup, kind = _supervised_kind(platform)
+    _clear_stale_pidfile(env)
+    environ = env if env is not None else dict(os.environ)
+    run = runner if runner is not None else osup.default_runner
+
+    probe = _probe_supervisor(run, kind, environ, uid=uid, user=user)
+    health = _probe_health(port, health_timeout) if probe.pid is not None else None
+
+    linger_warning = ""
+    if kind == "linux":
+        resolved_user = osup.resolve_user(environ, user)
+        linger_result = run(["loginctl", "show-user", resolved_user, "-p", "Linger", "--value"])
+        if (linger_result.stdout or "").strip() == "no":
+            linger_warning = (
+                f" The daemon will not start at boot with nobody logged in until "
+                f"you run: loginctl enable-linger {resolved_user}."
+            )
+
+    if probe.pid is not None and health is not None:
+        print(f"outpost: running (host supervisor, pid {probe.pid}); /health ok.{linger_warning}")
+        return EXIT_RUNNING
+    if probe.pid is not None or probe.restarting:
+        count = f" ({probe.restart_count} restarts so far)" if probe.restart_count else ""
+        print(
+            f"outpost: restarting (host supervisor){count}; /health not yet "
+            f"answering.{linger_warning}"
+        )
+        return EXIT_RESTARTING
+    if probe.failed:
+        print(
+            f"outpost: failed (host supervisor reports a failure); "
+            f"recovery: {probe.recovery_hint}.{linger_warning}"
+        )
+        return EXIT_FAILED
+    print(f"outpost: stopped (host supervisor).{linger_warning}")
+    return EXIT_STOPPED
+
+
+def _supervised_restart(
+    env: dict[str, str] | None,
+    *,
+    port: int,
+    restart_health_timeout: float,
+    pid_settle_timeout: float | None,
+    platform: str | None,
+    supervisor_dir: Path | None,
+    runner,
+    uid,
+    user,
+) -> int:
+    osup, kind = _supervised_kind(platform)
+    _clear_stale_pidfile(env)
+    environ = env if env is not None else dict(os.environ)
+    run = runner if runner is not None else osup.default_runner
+
+    if kind == "darwin":
+        resolved_uid = osup.resolve_uid(uid)
+        run(["launchctl", "kickstart", "-k", f"gui/{resolved_uid}/{osup.LAUNCHD_LABEL}"])
+    else:
+        run(["systemctl", "--user", "restart", osup.SYSTEMD_UNIT_NAME])
+
+    if _wait_for_health(port, restart_health_timeout) is None:
+        raise OutpostLifecycleError(
+            "outpost restart: rebuilt and told the host supervisor to restart "
+            f"outpost, but /health never answered on port {port} within "
+            f"{restart_health_timeout:.0f}s; the new daemon may have failed to "
+            "start (check the outpost log)."
+        )
+
+    settle_timeout = _resolve_pid_settle_timeout(
+        pid_settle_timeout=pid_settle_timeout, restart_health_timeout=restart_health_timeout
+    )
+    deadline = time.time() + settle_timeout
+    pid = None
+    while True:
+        probe = _probe_supervisor(run, kind, environ, uid=uid, user=user)
+        if probe.pid is not None:
+            pid = probe.pid
+            break
+        if time.time() >= deadline:
+            break
+        time.sleep(_PID_SETTLE_POLL_INTERVAL)
+
+    if pid is None:
+        raise OutpostLifecycleError(
+            "outpost restart: /health answered but the host supervisor reports "
+            f"no pid for outpost; another process may be holding port {port} "
+            "(check the outpost log)."
+        )
+
+    print(f"outpost restarted via the host supervisor (pid {pid}).")
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # Verbs
 # ---------------------------------------------------------------------------
 
@@ -311,6 +650,12 @@ def start(
     node_bin: str = "node",
     port: int = DAEMON_PORT,
     health_timeout: float = 2.0,
+    platform: str | None = None,
+    supervisor_dir: Path | None = None,
+    runner=None,
+    uid: int | None = None,
+    user: str | None = None,
+    start_health_timeout: float = 10.0,
 ) -> int:
     """Spawn the outpost daemon detached. Idempotent when already running.
 
@@ -319,7 +664,23 @@ def start(
     pidfile is cleaned and start proceeds: either the recorded pid is dead,
     or it's alive but doesn't answer /health, meaning the OS has reused it
     for an unrelated process since the daemon died.
+
+    When a host-supervisor entry is registered, this drives the supervisor
+    instead (``launchctl kickstart`` / ``systemctl --user start``) and spawns
+    nothing itself; see the module docstring's "Host-supervisor awareness".
     """
+    if _is_supervised(env, platform=platform, supervisor_dir=supervisor_dir):
+        return _supervised_start(
+            env,
+            port=port,
+            health_timeout=start_health_timeout,
+            platform=platform,
+            supervisor_dir=supervisor_dir,
+            runner=runner,
+            uid=uid,
+            user=user,
+        )
+
     checkout, entrypoint = _resolve_entrypoint(env)
 
     pidfile = _pidfile(env)
@@ -361,6 +722,12 @@ def stop(
     port: int = DAEMON_PORT,
     timeout: float = _STOP_TIMEOUT_SECONDS,
     health_timeout: float = 2.0,
+    platform: str | None = None,
+    supervisor_dir: Path | None = None,
+    runner=None,
+    uid: int | None = None,
+    user: str | None = None,
+    pid_settle_timeout: float | None = None,
 ) -> int:
     """SIGTERM the daemon, wait for a clean exit, and remove the pidfile.
 
@@ -369,7 +736,26 @@ def stop(
     answer /health — the latter means the OS has reused the pid for an
     unrelated process since the daemon died, and signaling it would kill the
     wrong process.
+
+    When a host-supervisor entry is registered, this drives the supervisor's
+    stop command instead of signalling a pid, and re-checks after a settle
+    window that the supervisor did not relaunch outpost; see the module
+    docstring's "Host-supervisor awareness".
     """
+    if _is_supervised(env, platform=platform, supervisor_dir=supervisor_dir):
+        return _supervised_stop(
+            env,
+            port=port,
+            timeout=timeout,
+            health_timeout=health_timeout,
+            pid_settle_timeout=pid_settle_timeout,
+            platform=platform,
+            supervisor_dir=supervisor_dir,
+            runner=runner,
+            uid=uid,
+            user=user,
+        )
+
     pidfile = _pidfile(env)
     pid = _read_pid(pidfile)
     if pid is None:
@@ -403,8 +789,31 @@ def status(
     env: dict[str, str] | None = None,
     port: int = DAEMON_PORT,
     health_timeout: float = 2.0,
+    platform: str | None = None,
+    supervisor_dir: Path | None = None,
+    runner=None,
+    uid: int | None = None,
+    user: str | None = None,
 ) -> int:
-    """Report daemon liveness + /health, returning a structured exit code."""
+    """Report daemon liveness + /health, returning a structured exit code.
+
+    When a host-supervisor entry is registered, this reads the supervisor's
+    own view of the job instead of the pidfile, and reports one of four
+    states (running/restarting/failed/stopped); see the module docstring's
+    "Host-supervisor awareness".
+    """
+    if _is_supervised(env, platform=platform, supervisor_dir=supervisor_dir):
+        return _supervised_status(
+            env,
+            port=port,
+            health_timeout=health_timeout,
+            platform=platform,
+            supervisor_dir=supervisor_dir,
+            runner=runner,
+            uid=uid,
+            user=user,
+        )
+
     pidfile = _pidfile(env)
     pid = _read_pid(pidfile)
 
@@ -473,8 +882,20 @@ def restart(
     stop_timeout: float = _STOP_TIMEOUT_SECONDS,
     restart_health_timeout: float = 5.0,
     pid_settle_timeout: float | None = None,
+    platform: str | None = None,
+    supervisor_dir: Path | None = None,
+    runner=None,
+    uid: int | None = None,
+    user: str | None = None,
 ) -> int:
     """Rebuild the outpost checkout, then stop and restart the daemon.
+
+    When a host-supervisor entry is registered, the rebuild runs exactly as
+    below and then the supervisor is told to restart the job (``launchctl
+    kickstart -k`` / ``systemctl --user restart``) instead of this module
+    calling ``stop``/``start`` itself; the pid is read back from the
+    supervisor rather than the pidfile. See the module docstring's
+    "Host-supervisor awareness".
 
     Resolves + validates the checkout first (not the built entrypoint — the build
     about to run is what produces it). Runs the full build with ``cwd=<checkout>``
@@ -528,6 +949,19 @@ def restart(
         print(f"outpost build ok; web bundle: {', '.join(asset_names)}")
     else:
         print(f"outpost build ok; no assets found under {assets_dir}.")
+
+    if _is_supervised(env, platform=platform, supervisor_dir=supervisor_dir):
+        return _supervised_restart(
+            env,
+            port=port,
+            restart_health_timeout=restart_health_timeout,
+            pid_settle_timeout=pid_settle_timeout,
+            platform=platform,
+            supervisor_dir=supervisor_dir,
+            runner=runner,
+            uid=uid,
+            user=user,
+        )
 
     stop(env=env, port=port, timeout=stop_timeout, health_timeout=health_timeout)
     rc = start(env=env, node_bin=node_bin, port=port, health_timeout=health_timeout)
