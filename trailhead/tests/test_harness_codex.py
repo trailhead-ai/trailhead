@@ -135,7 +135,7 @@ def _sessions_dir(env: dict[str, str]) -> Path:
 
 
 def _meta_line(cwd: str, **extra_payload_fields) -> str:
-    """A ``session_meta``-tagged envelope, in the shape U1 observed."""
+    """A ``session_meta``-tagged envelope in the shape Codex writes as a rollout's first line."""
     payload = {
         "session_id": "thread-fixture",
         "id": "thread-fixture",
@@ -625,7 +625,7 @@ class TestCodexParseSessionList:
         assert records[0].controllable is False
 
     def test_codex_kind_is_also_never_controllable(self, tmp_path):
-        """`controllable` is always `False` this slice, not merely False for
+        """`controllable` is always `False` for this harness, not merely False for
         an unrecognized `kind` — the recognized `"codex"` kind must be just
         as uncontrollable, since this seam gives no session remote-attach."""
         payload = json.dumps([{"sessionId": "aaa111", "cwd": str(tmp_path), "kind": "codex"}])

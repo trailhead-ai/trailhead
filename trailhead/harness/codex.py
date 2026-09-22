@@ -411,9 +411,9 @@ class CodexHarness(Harness):
         See the base contract for the full failure semantics. ``pid`` is
         always ``None`` — the lock this seam's liveness signal comes from
         carries no pid — and ``controllable`` is always ``False``: this
-        slice gives no session a remote-attach capability, regardless of
+        harness gives no session a remote-attach capability, regardless of
         ``kind``. ``startedAt`` is the rollout's ISO 8601 ``session_meta``
-        timestamp (see ``codex.py``'s U1), not the epoch-millis shape Claude
+        timestamp (as ``_read_session_meta_payload`` recovers it), not the epoch-millis shape Claude
         Code's own listing uses, so a wrong-typed or unparseable value
         degrades to ``None`` rather than raising.
         """
