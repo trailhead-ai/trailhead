@@ -283,6 +283,27 @@ def test_enable_darwin_bootstrap_failure_raises_named_error_and_removes_the_entr
     assert osup.is_enabled(outpost.env, platform="darwin", supervisor_dir=outpost.supervisor_dir) is False
 
 
+def test_enable_darwin_bootstrap_failure_error_names_start_and_says_daemon_is_down(outpost):
+    # enable()'s own inner stop() already ran before this failure — whatever
+    # was running (detached or supervised) is now stopped, and bootstrap
+    # never registered a replacement. The operator is left with nothing
+    # running at all; the error must say so and name the recovery command.
+    runner = _RecordingRunner(returncode_by_prefix={("launchctl", "bootstrap"): 1})
+
+    with pytest.raises(OutpostLifecycleError, match="trailhead outpost start") as exc:
+        osup.enable(
+            env=outpost.env,
+            platform="darwin",
+            supervisor_dir=outpost.supervisor_dir,
+            runner=runner,
+            which_runner=outpost.which_runner,
+            uid=501,
+        )
+
+    assert "stopped" in str(exc.value)
+    assert "unregistered" in str(exc.value)
+
+
 def test_enable_linux_enable_now_failure_raises_named_error_and_removes_the_entry(outpost):
     runner = _RecordingRunner(returncode_by_prefix={("systemctl", "--user", "enable"): 1})
 
@@ -299,6 +320,44 @@ def test_enable_linux_enable_now_failure_raises_named_error_and_removes_the_entr
     target = outpost.supervisor_dir / osup.SYSTEMD_UNIT_NAME
     assert not target.exists()
     assert osup.is_enabled(outpost.env, platform="linux", supervisor_dir=outpost.supervisor_dir) is False
+
+
+def test_enable_linux_enable_now_failure_deregisters_the_unit_before_removing_the_file(outpost):
+    # `enable --now` failing can still leave the unit half-registered with
+    # systemd (loaded, just not started) — the file alone being deleted
+    # doesn't undo that registration. Clean it up with disable + daemon-reload
+    # (best-effort: their own failure must not mask the real error) before
+    # the unit file is removed.
+    runner = _RecordingRunner(
+        returncode_by_prefix={
+            ("systemctl", "--user", "enable"): 1,
+            ("systemctl", "--user", "disable"): 1,
+        }
+    )
+
+    with pytest.raises(OutpostLifecycleError, match="enable"):
+        osup.enable(
+            env=outpost.env,
+            platform="linux",
+            supervisor_dir=outpost.supervisor_dir,
+            runner=runner,
+            which_runner=outpost.which_runner,
+            user="alice",
+        )
+
+    prefixes = [call[:3] for call in runner.calls]
+    enable_idx = prefixes.index(["systemctl", "--user", "enable"])
+    # daemon-reload runs once before this enable() attempt (registering the
+    # freshly written unit) and again as part of the failure cleanup — the
+    # SECOND occurrence, after the failed enable, is the one this pin cares
+    # about.
+    reload_indices = [i for i, p in enumerate(prefixes) if p == ["systemctl", "--user", "daemon-reload"]]
+    disable_idx = prefixes.index(["systemctl", "--user", "disable"])
+    assert enable_idx < disable_idx
+    assert len(reload_indices) == 2
+    assert reload_indices[-1] > enable_idx
+    target = outpost.supervisor_dir / osup.SYSTEMD_UNIT_NAME
+    assert not target.exists()
 
 
 # ---------------------------------------------------------------------------
@@ -335,11 +394,12 @@ def test_enable_twice_is_idempotent_same_runner_sequence_no_error(outpost):
     # a no-op unsupervised check (no runner calls) — just bootout+bootstrap.
     assert prefixes[:2] == [["launchctl", "bootout"], ["launchctl", "bootstrap"]]
     # The second enable() now finds the first one's entry already registered,
-    # so its inner stop() drives the supervised path: a kill, then however
-    # many supervisor-state re-probes the settle window takes, before this
-    # enable's own bootout+bootstrap.
-    assert runner.calls[2] == ["launchctl", "kill", "TERM", osup.launchd_service(501)]
-    assert all(c[:2] == ["launchctl", "print"] for c in runner.calls[3:-2])
+    # so its inner stop() drives the supervised path: a pre-stop probe, a
+    # kill, then however many supervisor-state re-probes the settle window
+    # takes, before this enable's own bootout+bootstrap.
+    assert runner.calls[2][:2] == ["launchctl", "print"]
+    assert runner.calls[3] == ["launchctl", "kill", "TERM", osup.launchd_service(501)]
+    assert all(c[:2] == ["launchctl", "print"] for c in runner.calls[4:-2])
     assert prefixes[-2:] == [["launchctl", "bootout"], ["launchctl", "bootstrap"]]
 
 
@@ -460,6 +520,76 @@ def test_enable_over_already_registered_running_supervised_daemon_stops_through_
     stop_idx = runner.calls.index(["launchctl", "kill", "TERM", osup.launchd_service(501)])
     bootstrap_idx = next(i for i, c in enumerate(runner.calls) if c[:2] == ["launchctl", "bootstrap"])
     assert stop_idx < bootstrap_idx
+
+
+def test_enable_over_already_registered_daemon_succeeds_when_old_pid_lingers_past_settle_window(
+    outpost, health_server
+):
+    # The same false-relaunch trap as the bare `stop` verb: `launchctl kill
+    # TERM` only sends the signal, and the old process's pid can keep being
+    # reported by `launchctl print`, unchanged, past /health going silent —
+    # until an open SSE subscriber's own backstop closes it. enable()'s inner
+    # stop() must not mistake that lingering old pid for a relaunch and abort
+    # re-registration with the daemon left down and unregistered.
+    _write_supervisor_entry(outpost, "darwin")
+    health_server.start()
+
+    def on_call(argv):
+        if argv == ["launchctl", "kill", "TERM", osup.launchd_service(501)]:
+            health_server.stop()
+
+    runner = _RecordingRunner(
+        on_call=on_call,
+        stdout_by_prefix={("launchctl", "print"): "state = running\n\tpid = 9191\n"},
+    )
+
+    rc = osup.enable(
+        env=outpost.env,
+        platform="darwin",
+        supervisor_dir=outpost.supervisor_dir,
+        port=outpost.port,
+        runner=runner,
+        which_runner=outpost.which_runner,
+        uid=501,
+    )
+
+    assert rc == 0
+    target = outpost.supervisor_dir / f"{osup.LAUNCHD_LABEL}.plist"
+    assert target.exists()
+
+
+def test_enable_linux_over_already_registered_running_daemon_stops_before_enable_now(
+    outpost, health_server
+):
+    # Mirrors the darwin ordering pin: enable()'s inner stop() must actually
+    # run (and complete) BEFORE the `enable --now` that (re)registers and
+    # starts the unit, or the new unit can race an old running process for
+    # the port.
+    _write_supervisor_entry(outpost, "linux")
+    health_server.start()
+
+    def on_call(argv):
+        if argv == ["systemctl", "--user", "stop", osup.SYSTEMD_UNIT_NAME]:
+            health_server.stop()
+
+    runner = _RecordingRunner(on_call=on_call)
+
+    rc = osup.enable(
+        env=outpost.env,
+        platform="linux",
+        supervisor_dir=outpost.supervisor_dir,
+        port=outpost.port,
+        runner=runner,
+        which_runner=outpost.which_runner,
+        user="alice",
+    )
+
+    assert rc == 0
+    stop_idx = runner.calls.index(["systemctl", "--user", "stop", osup.SYSTEMD_UNIT_NAME])
+    enable_now_idx = runner.calls.index(
+        ["systemctl", "--user", "enable", "--now", osup.SYSTEMD_UNIT_NAME]
+    )
+    assert stop_idx < enable_now_idx
 
 
 # ---------------------------------------------------------------------------

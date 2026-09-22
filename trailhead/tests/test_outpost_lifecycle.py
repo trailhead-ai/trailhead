@@ -1084,10 +1084,12 @@ def test_supervised_stop_records_kill_term_argv_and_returns_once_health_stops(ou
     )
 
     assert rc == 0
-    # The stop kill comes first; any further calls in the settle window are
+    # A pre-stop probe (to record the pid the relaunch check compares against)
+    # comes first, then the kill; any further calls in the settle window are
     # the supervisor-state re-probe (launchctl print), never another stop.
-    assert runner.calls[0] == ["launchctl", "kill", "TERM", osup.launchd_service(501)]
-    assert all(call[:2] == ["launchctl", "print"] for call in runner.calls[1:])
+    assert runner.calls[0][:2] == ["launchctl", "print"]
+    assert runner.calls[1] == ["launchctl", "kill", "TERM", osup.launchd_service(501)]
+    assert all(call[:2] == ["launchctl", "print"] for call in runner.calls[2:])
 
 
 def test_supervised_stop_raises_did_not_exit_when_health_keeps_answering(outpost, health_server):
@@ -1131,23 +1133,26 @@ def test_supervised_stop_raises_named_error_when_supervisor_relaunches_it(outpos
         )
 
 
-def test_supervised_stop_raises_named_error_when_supervisor_reports_a_pid_before_health_answers(
+def test_supervised_stop_raises_named_error_when_supervisor_reports_a_different_pid_before_health_answers(
     outpost, health_server
 ):
     # The supervisor can relaunch the job before /health comes back up (still
-    # starting). A settle window that only re-polls /health misses this —
-    # it also has to re-check the supervisor's own reported pid/state.
+    # starting). A settle window that only re-polls /health misses this — it
+    # also has to re-check the supervisor's own reported pid/state. A REAL
+    # relaunch replaces the process, so the reported pid changes from the one
+    # recorded before this stop (9191 -> 4242); that's the signal, not merely
+    # "some pid is reported".
     _write_supervisor_entry(outpost, "darwin")
     health_server.start()
+
+    stdout_by_prefix = {("launchctl", "print"): "state = running\n\tpid = 9191\n"}
 
     def on_call(argv):
         if argv == ["launchctl", "kill", "TERM", osup.launchd_service(501)]:
             health_server.stop()
+            stdout_by_prefix[("launchctl", "print")] = "state = running\n\tpid = 4242\n"
 
-    runner = _RecordingRunner(
-        on_call=on_call,
-        stdout_by_prefix={("launchctl", "print"): "state = running\n\tpid = 9191\n"},
-    )
+    runner = _RecordingRunner(on_call=on_call, stdout_by_prefix=stdout_by_prefix)
 
     with pytest.raises(OutpostLifecycleError, match="relaunch"):
         outpost_lifecycle.stop(
@@ -1160,6 +1165,42 @@ def test_supervised_stop_raises_named_error_when_supervisor_reports_a_pid_before
             timeout=3.0,
             pid_settle_timeout=0.5,
         )
+
+
+def test_supervised_stop_succeeds_when_the_same_pid_lingers_past_the_settle_window(
+    outpost, health_server
+):
+    # `launchctl kill TERM` only sends the signal — outpost closes its
+    # listener at once so /health goes silent, but an open SSE subscriber can
+    # keep the OLD process (and hence its pid, unchanged, still reported by
+    # `launchctl print`) alive past the settle window until its own 2s
+    # backstop fires. That must not read as a relaunch: the pid never
+    # differed from the one recorded before this stop, and it never
+    # disappeared and reappeared.
+    _write_supervisor_entry(outpost, "darwin")
+    health_server.start()
+
+    def on_call(argv):
+        if argv == ["launchctl", "kill", "TERM", osup.launchd_service(501)]:
+            health_server.stop()
+
+    runner = _RecordingRunner(
+        on_call=on_call,
+        stdout_by_prefix={("launchctl", "print"): "state = running\n\tpid = 9191\n"},
+    )
+
+    rc = outpost_lifecycle.stop(
+        env=outpost.env,
+        port=outpost.port,
+        platform="darwin",
+        supervisor_dir=outpost.supervisor_dir,
+        runner=runner,
+        uid=501,
+        timeout=3.0,
+        pid_settle_timeout=0.3,
+    )
+
+    assert rc == 0
 
 
 # ---- status --------------------------------------------------------------
@@ -1476,19 +1517,21 @@ def test_supervised_restart_builds_then_runs_restart_argv_confirms_health_and_pi
     _write_supervisor_entry(outpost, "darwin")
     build_cmd = _build_script(tmp_path)
 
-    def on_call(argv):
-        if argv[:2] == ["launchctl", "kickstart"]:
-            health_server.start()
-
     # A pid that's genuinely alive throughout the test (this test process
     # itself) — the settle-window liveness confirmation added for the "pid
     # dies within the settle window" case would otherwise reject any made-up
-    # pid here too.
+    # pid here too. The pre-restart probe reads a DIFFERENT (made-up) pid, so
+    # this also exercises the "confirm the pid changed" check with a real
+    # relaunch rather than accidentally satisfying it by coincidence.
     live_pid = os.getpid()
-    runner = _RecordingRunner(
-        on_call=on_call,
-        stdout_by_prefix={("launchctl", "print"): f"state = running\n\tpid = {live_pid}\n"},
-    )
+    stdout_by_prefix = {("launchctl", "print"): "state = running\n\tpid = 424242\n"}
+
+    def on_call(argv):
+        if argv[:2] == ["launchctl", "kickstart"]:
+            health_server.start()
+            stdout_by_prefix[("launchctl", "print")] = f"state = running\n\tpid = {live_pid}\n"
+
+    runner = _RecordingRunner(on_call=on_call, stdout_by_prefix=stdout_by_prefix)
 
     rc = outpost_lifecycle.restart(
         env=outpost.env,
@@ -1505,6 +1548,112 @@ def test_supervised_restart_builds_then_runs_restart_argv_confirms_health_and_pi
     assert rc == 0
     kickstart_calls = [c for c in runner.calls if c[:2] == ["launchctl", "kickstart"]]
     assert kickstart_calls == [["launchctl", "kickstart", "-k", f"gui/501/{osup.LAUNCHD_LABEL}"]]
+
+
+def test_supervised_restart_darwin_raises_named_error_naming_kickstart_when_it_fails(outpost, tmp_path):
+    _write_supervisor_entry(outpost, "darwin")
+    build_cmd = _build_script(tmp_path)
+    runner = _RecordingRunner(returncode_by_prefix={("launchctl", "kickstart", "-k"): 1})
+
+    with pytest.raises(OutpostLifecycleError, match="kickstart"):
+        outpost_lifecycle.restart(
+            env=outpost.env,
+            build_cmd=build_cmd,
+            port=outpost.port,
+            platform="darwin",
+            supervisor_dir=outpost.supervisor_dir,
+            runner=runner,
+            uid=501,
+            restart_health_timeout=0.3,
+        )
+
+
+def test_supervised_restart_linux_raises_named_error_naming_systemctl_restart_when_it_fails(
+    outpost, tmp_path
+):
+    _write_supervisor_entry(outpost, "linux")
+    build_cmd = _build_script(tmp_path)
+    runner = _RecordingRunner(returncode_by_prefix={("systemctl", "--user", "restart"): 1})
+
+    with pytest.raises(OutpostLifecycleError, match="systemctl --user restart"):
+        outpost_lifecycle.restart(
+            env=outpost.env,
+            build_cmd=build_cmd,
+            port=outpost.port,
+            platform="linux",
+            supervisor_dir=outpost.supervisor_dir,
+            runner=runner,
+            restart_health_timeout=0.3,
+        )
+
+
+def test_supervised_restart_linux_records_reset_failed_before_restart(outpost, health_server, tmp_path):
+    _write_supervisor_entry(outpost, "linux")
+    build_cmd = _build_script(tmp_path)
+    live_pid = os.getpid()
+    stdout_by_prefix = {
+        ("systemctl", "--user", "show"): _systemd_show(main_pid="424242", active_state="active")
+    }
+
+    def on_call(argv):
+        if argv == ["systemctl", "--user", "restart", osup.SYSTEMD_UNIT_NAME]:
+            health_server.start()
+            stdout_by_prefix[("systemctl", "--user", "show")] = _systemd_show(
+                main_pid=str(live_pid), active_state="active"
+            )
+
+    runner = _RecordingRunner(on_call=on_call, stdout_by_prefix=stdout_by_prefix)
+
+    rc = outpost_lifecycle.restart(
+        env=outpost.env,
+        build_cmd=build_cmd,
+        port=outpost.port,
+        platform="linux",
+        supervisor_dir=outpost.supervisor_dir,
+        runner=runner,
+        restart_health_timeout=3.0,
+        pid_settle_timeout=0.3,
+    )
+
+    assert rc == 0
+    assert runner.calls[0][:3] == ["systemctl", "--user", "show"]
+    assert runner.calls[1:3] == [
+        ["systemctl", "--user", "reset-failed", osup.SYSTEMD_UNIT_NAME],
+        ["systemctl", "--user", "restart", osup.SYSTEMD_UNIT_NAME],
+    ]
+
+
+def test_supervised_restart_raises_when_reported_pid_did_not_change(outpost, health_server, tmp_path):
+    # kickstart -k can return 0 and /health can answer while the job never
+    # actually restarted (e.g. a supervisor bug, or a race that re-reads the
+    # still-running old process). The pid the supervisor reports afterward
+    # must differ from the one recorded before this restart, or the "restart"
+    # cannot be trusted to have happened at all.
+    _write_supervisor_entry(outpost, "darwin")
+    build_cmd = _build_script(tmp_path)
+    live_pid = os.getpid()
+
+    def on_call(argv):
+        if argv[:2] == ["launchctl", "kickstart"]:
+            health_server.start()
+
+    runner = _RecordingRunner(
+        on_call=on_call,
+        stdout_by_prefix={("launchctl", "print"): f"state = running\n\tpid = {live_pid}\n"},
+    )
+
+    with pytest.raises(OutpostLifecycleError, match="same pid"):
+        outpost_lifecycle.restart(
+            env=outpost.env,
+            build_cmd=build_cmd,
+            port=outpost.port,
+            platform="darwin",
+            supervisor_dir=outpost.supervisor_dir,
+            runner=runner,
+            uid=501,
+            restart_health_timeout=3.0,
+            pid_settle_timeout=0.3,
+        )
 
 
 def test_supervised_restart_build_failure_raises_without_touching_supervisor(outpost, tmp_path):
@@ -1544,14 +1693,14 @@ def test_supervised_restart_raises_when_reported_pid_dies_within_settle_window(
         stderr=subprocess.DEVNULL,
     )
 
+    stdout_by_prefix = {("launchctl", "print"): "state = not running\n"}
+
     def on_call(argv):
         if argv[:2] == ["launchctl", "kickstart"]:
             health_server.start()
+            stdout_by_prefix[("launchctl", "print")] = f"state = running\n\tpid = {dying.pid}\n"
 
-    runner = _RecordingRunner(
-        on_call=on_call,
-        stdout_by_prefix={("launchctl", "print"): f"state = running\n\tpid = {dying.pid}\n"},
-    )
+    runner = _RecordingRunner(on_call=on_call, stdout_by_prefix=stdout_by_prefix)
 
     try:
         with pytest.raises(OutpostLifecycleError, match="not alive"):

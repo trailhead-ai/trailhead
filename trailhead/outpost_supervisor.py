@@ -38,10 +38,12 @@ Contract & invariants
   on the enabling shell's PATH — any failure raises
   :class:`~trailhead.outpost_lifecycle.OutpostLifecycleError` naming what is
   missing, and nothing is written or run.
-* **A live detached daemon is stopped first.** ``enable`` calls the existing
-  ``stop`` verb before writing the entry, so the supervised process it starts
-  never fails to bind the port because a detached daemon from the unsupervised
-  path is still holding it.
+* **Any live daemon is stopped first.** ``enable`` calls the existing ``stop``
+  verb before writing the entry — whether that daemon is detached (started
+  the unsupervised way) or already running under a previously registered
+  supervisor entry (a re-enable) — so the newly (re)started supervised
+  process never fails to bind the port because something else is still
+  holding it.
 * **Restart posture matches lookout's**: restart only on a failure exit
   (``KeepAlive.SuccessfulExit=false`` / ``Restart=on-failure``), with a
   breather between attempts, so an operator's own ``stop`` stays stopped and a
@@ -347,15 +349,28 @@ def enable(
         result = run(bootstrap_command)
         if result.returncode != 0:
             target.unlink(missing_ok=True)
+            # The inner stop() above already stopped whatever was running
+            # (detached or supervised) before this bootstrap attempt, and it
+            # just failed to register a replacement — the operator is left
+            # with nothing running at all, not merely a failed re-enable.
             raise OutpostLifecycleError(
                 f"outpost enable: '{' '.join(bootstrap_command)}' failed (exit "
-                f"{result.returncode}): {(result.stderr or result.stdout or '').strip()}"
+                f"{result.returncode}): {(result.stderr or result.stdout or '').strip()}. "
+                "The daemon is now stopped and unregistered; run "
+                "'trailhead outpost start' to bring it back up detached."
             )
     else:
         run(["systemctl", "--user", "daemon-reload"])
         enable_command = ["systemctl", "--user", "enable", "--now", SYSTEMD_UNIT_NAME]
         result = run(enable_command)
         if result.returncode != 0:
+            # `enable --now` can fail after partially registering the unit
+            # with systemd (loaded but not started) — deleting the unit file
+            # alone doesn't undo that. Best-effort deregister first so a
+            # half-registered unit isn't left behind; their own failure must
+            # not mask the real error above.
+            run(["systemctl", "--user", "disable", SYSTEMD_UNIT_NAME])
+            run(["systemctl", "--user", "daemon-reload"])
             target.unlink(missing_ok=True)
             raise OutpostLifecycleError(
                 f"outpost enable: '{' '.join(enable_command)}' failed (exit "

@@ -70,8 +70,9 @@ status exit codes (structured, so callers/tests can branch on state):
     EXIT_RESTARTING (5)  supervised only: supervisor reports a pid (or a
                          restarting sub-state) but /health has not answered yet
     EXIT_FAILED     (6)  supervised only: no pid and the supervisor reports a
-                         failure (a start-limit-hit result, or a non-zero last
-                         exit code)
+                         failure — on Linux a start-limit-hit result or
+                         ActiveState=failed, on macOS a non-zero launchd last
+                         exit code or a launchd terminating signal
 
 Host-supervisor awareness
 --------------------------
@@ -542,11 +543,17 @@ def _supervised_stop(
 ) -> int:
     osup, kind, run = _supervisor_seam(env, platform, runner)
 
+    # Recorded before the stop so the settle-window re-probe can tell a
+    # genuine relaunch (a DIFFERENT pid, or a pid reappearing after the
+    # supervisor first reported none) from the old process simply still
+    # winding down under the same pid.
+    pid_before_stop = _probe_supervisor(osup, run, kind, uid).pid
+
     if kind == "darwin":
         # `launchctl kill TERM gui/<uid>/<label>` targets the same domain as
-        # `kickstart`/`print` (including over ssh), unlike the bare-label
-        # `launchctl stop <label>` this replaces. A SIGTERM'd job that exits 0
-        # stays stopped under KeepAlive.SuccessfulExit=false, same as before.
+        # `kickstart`/`print` (including over ssh) rather than the bare-label
+        # `launchctl stop <label>`. A SIGTERM'd job that exits 0 stays stopped
+        # under KeepAlive.SuccessfulExit=false.
         run(["launchctl", "kill", "TERM", osup.launchd_service(uid)])
     else:
         run(["systemctl", "--user", "stop", osup.SYSTEMD_UNIT_NAME])
@@ -562,13 +569,23 @@ def _supervised_stop(
         time.sleep(0.05)
 
     # A relaunch during the settle window can show up two ways: /health comes
-    # back up, or the supervisor's own view already reports a pid/restarting
-    # sub-state again even before /health answers (still starting). Checking
-    # /health alone misses the second case entirely.
+    # back up, or the supervisor's own view reports the job running again
+    # even before /health answers (still starting). Checking /health alone
+    # misses the second case entirely.
+    #
+    # But the supervisor still reporting *a* pid is not by itself evidence of
+    # a relaunch: `launchctl kill TERM` only sends the signal, and an open SSE
+    # subscriber can keep the OLD process (same pid, unchanged) alive past
+    # /health going silent, until its own backstop timer fires — `launchctl
+    # print` keeps reporting that same pid the whole time. Only a pid that
+    # DIFFERS from the one recorded before this stop, or one that reappears
+    # after the supervisor first reported none, means the job actually
+    # restarted.
     settle = _resolve_pid_settle_timeout(
         pid_settle_timeout=pid_settle_timeout, restart_health_timeout=timeout
     )
     settle_deadline = time.time() + settle
+    seen_no_pid = False
     while True:
         if _probe_health(port, min(health_timeout, 0.2)) is not None:
             raise OutpostLifecycleError(
@@ -577,12 +594,17 @@ def _supervised_stop(
                 "its restart policy may not be limited to failure exits."
             )
         probe = _probe_supervisor(osup, run, kind, uid)
-        if probe.pid is not None or probe.restarting:
+        relaunched_pid = probe.pid is not None and (
+            seen_no_pid or probe.pid != pid_before_stop
+        )
+        if relaunched_pid or probe.restarting:
             raise OutpostLifecycleError(
                 "outpost stop: the host supervisor relaunched outpost after stop "
                 f"(it reports the job running again within {settle:.1f}s of the stop "
                 "completing); its restart policy may not be limited to failure exits."
             )
+        if probe.pid is None:
+            seen_no_pid = True
         if time.time() >= settle_deadline:
             break
         time.sleep(_PID_SETTLE_POLL_INTERVAL)
@@ -649,10 +671,31 @@ def _supervised_restart(
 ) -> int:
     osup, kind, run = _supervisor_seam(env, platform, runner)
 
+    # Recorded before the restart so the reported pid afterward can be
+    # confirmed to have actually changed — a 0 exit and an answering /health
+    # don't by themselves prove the job restarted rather than the still-alive
+    # old process simply being observed again.
+    pid_before_restart = _probe_supervisor(osup, run, kind, uid).pid
+
     if kind == "darwin":
-        run(["launchctl", "kickstart", "-k", osup.launchd_service(uid)])
+        command = ["launchctl", "kickstart", "-k", osup.launchd_service(uid)]
+        result = run(command)
+        if result.returncode != 0:
+            raise OutpostLifecycleError(
+                f"outpost restart: '{' '.join(command)}' failed (exit "
+                f"{result.returncode}): {(result.stderr or result.stdout or '').strip()}"
+            )
     else:
-        run(["systemctl", "--user", "restart", osup.SYSTEMD_UNIT_NAME])
+        # reset-failed is best-effort, same as start(): it legitimately
+        # "fails" (nonzero) when there is nothing to reset, the common case.
+        run(["systemctl", "--user", "reset-failed", osup.SYSTEMD_UNIT_NAME])
+        command = ["systemctl", "--user", "restart", osup.SYSTEMD_UNIT_NAME]
+        result = run(command)
+        if result.returncode != 0:
+            raise OutpostLifecycleError(
+                f"outpost restart: '{' '.join(command)}' failed (exit "
+                f"{result.returncode}): {(result.stderr or result.stdout or '').strip()}"
+            )
 
     if _wait_for_health(port, restart_health_timeout) is None:
         raise OutpostLifecycleError(
@@ -680,6 +723,18 @@ def _supervised_restart(
         raise OutpostLifecycleError(
             "outpost restart: /health answered but the host supervisor reports "
             f"no pid for outpost; another process may be holding port {port} "
+            "(check the outpost log)."
+        )
+
+    # A 0 exit from the restart command and /health answering don't prove the
+    # job actually restarted — the still-running old process could be what
+    # answered. The reported pid must differ from the one recorded before
+    # this restart; when nothing was running beforehand there is no old pid
+    # to have stayed the same as, so any newly reported pid is accepted.
+    if pid_before_restart is not None and pid == pid_before_restart:
+        raise OutpostLifecycleError(
+            f"outpost restart: the host supervisor reports the same pid ({pid}) "
+            "after restart; the process may not have actually restarted "
             "(check the outpost log)."
         )
 
