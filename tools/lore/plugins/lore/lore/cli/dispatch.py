@@ -11,7 +11,7 @@ import argparse
 import difflib
 import sys
 
-from . import areas, flush, init, pipeline, publish, record, resolve, search, session, sync, task, vault
+from . import areas, flush, init, pipeline, publish, record, resolve, search, session, signing, sync, task, vault
 from ..argparse_util import find_subparsers_action
 
 
@@ -97,6 +97,7 @@ def build_parser() -> argparse.ArgumentParser:
     pipeline.add_pipeline_subparser(sub)
     vault.add_vault_subparser(sub)
     session.add_session_subparser(sub)
+    signing.add_signing_subparser(sub)
 
     return parser
 

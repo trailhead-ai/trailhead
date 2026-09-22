@@ -377,6 +377,20 @@ def _drift_remedy(name: str, codes: set) -> str:
     return "inspect the vault"
 
 
+def _report_signing_status() -> None:
+    """Report this host's unattended vault-commit signing state — one line,
+    not one per vault, since the host key signs every vault the same way.
+
+    Delegates to ``vault/signing.py``'s ``describe_status`` so ``lore signing
+    status`` and this line always agree; a failure carries the same
+    ``lore signing enable``/``chmod`` remedy `describe_status` names.
+    """
+    from ..vault import signing as signing_mod
+
+    _, message = signing_mod.describe_status()
+    print(f"lore: signing: {message}")
+
+
 def cmd_status(args) -> int:
     """Report lore's drift surfaces: harness rulesets, then vault sync state.
 
@@ -390,9 +404,11 @@ def cmd_status(args) -> int:
     PreToolUse guardrail does not cover Bash-mediated writes), so a missing or
     stale ruleset is a real coverage hole worth surfacing.
 
-    Then :func:`_report_vault_drift` reports each configured vault's backup state.
+    Then :func:`_report_signing_status` reports this host's unattended
+    vault-commit signing state (one line, per host, not per vault), and
+    :func:`_report_vault_drift` reports each configured vault's backup state.
 
-    Exit code stays 0 for drift: this is a report, and both sections print their
+    Exit code stays 0 for drift: this is a report, and every section prints its
     own remedy. Only an unreadable config downgrades a section to a stderr line.
     """
     from ..config import agent_ruleset as agent_ruleset_mod
@@ -413,6 +429,7 @@ def cmd_status(args) -> int:
                 f"— re-run `lore init` to install it"
             )
 
+    _report_signing_status()
     _report_vault_drift()
     return 0
 

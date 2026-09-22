@@ -74,13 +74,49 @@ The `lore` CLI handles the deterministic operations skills delegate to it.
 lore init                 Scaffold the default vault
 lore flush                Evaluate session candidates and wrap the session (dirty → clean), commit, and request a background publish for every vault (--wait to sync inline, --no-sync to skip)
 lore sync                 Stage, commit, pull, and push every configured vault (--vault <name> for one)
-lore status               Report ruleset drift and any vault holding unsynced records
+lore status               Report ruleset drift, host signing state, and any vault holding unsynced records
 lore search <query>       Query all records (KQL-subset: field:value, full-text, and/or/not)
 lore record show <id>     Read a record's body (add --json for the sidecar)
 lore areas                List the area profiles across every configured non-shared vault
+lore signing enable       Generate (or adopt with --key) a no-passphrase SSH key this host signs vault commits with
+lore signing status       Report whether this host signs vault commits unattended, or what's missing
 ```
 
 Run `lore <subcommand> --help` for full options.
+
+## Unattended vault-commit signing
+
+A host running lore with nobody watching — the sweep, an automatic publish, a
+session flush after a reboot — cannot answer a passphrase prompt. If commit
+signing falls back to the operator's personal GPG/SSH key, it hangs on that
+prompt and publishing stops.
+
+`lore signing enable` fixes this once per host:
+
+- With no argument, it generates a fresh, no-passphrase ed25519 key under
+  lore's state directory and configures it as this host's signing key.
+- With `--key <path>`, it adopts an existing SSH private key **in place**
+  (never copying or modifying it) — provided it has no passphrase, is a
+  regular file, and is readable only by its owner. A key needing a
+  passphrase is refused on every platform: it cannot sign with nobody
+  present.
+
+Either way it writes the key's absolute path and an allowed-signers file into
+`state_dir("lore")/signing/`, and every git commit lore makes or replays in
+any vault signs with that key from then on — via git's environment config
+channel, so no vault's own `.git/config` is touched and the operator's own
+signing setup on an unconfigured host is left exactly as it was.
+
+Re-running `enable` with no argument is a no-op if a usable key is already
+configured; `enable --key` always switches to the named key.
+
+`lore signing status` (and the "signing" line in `lore status`) reports
+whether this host is set up to sign unattended, or names the missing/broken
+piece and the exact command that fixes it.
+
+There is no `disable` verb — deleting `state_dir("lore")/signing/` reverts a
+host to today's behavior (the adopter's own signing config), and `status`
+reports that plainly.
 
 ## How search works
 
