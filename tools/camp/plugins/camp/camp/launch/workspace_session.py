@@ -76,14 +76,9 @@ from .binding import install_window_key_binding
 from .eligibility import assert_not_a_credential_store
 from .naming import workspace_session_name
 from .session import LaunchError
+from .tmux import DUPLICATE_SESSION_MARKER as _DUPLICATE_SESSION_MARKER
 from .tmux import Tmux, target
 from .window_reconcile import ReconcileOutcome, reconcile_workspace_record
-
-#: The exact stderr shape tmux prints for a `new-session` refused because the
-#: name is already live, confirmed against tmux 3.7c. Matched as a substring
-#: of the whole stderr line, never as the whole line, because tmux does not
-#: guarantee nothing precedes it.
-_DUPLICATE_SESSION_MARKER = "duplicate session:"
 
 #: This create is the one call that starts the tmux SERVER when none is
 #: running yet — the same operation `camp launch`'s own spawn budgets 30s for
