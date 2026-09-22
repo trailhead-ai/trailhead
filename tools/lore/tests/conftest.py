@@ -76,9 +76,30 @@ def _publish_spawn_guard(monkeypatch, _allow_real_publish_spawn):
     A test that mocks ``_spawn_worker`` itself (most of
     ``test_publish_trigger.py``) simply overwrites this default with its own
     recording stub — ``monkeypatch.setattr`` composes fine either way.
+
+    Also sets ``LORE_PUBLISH_DISABLE`` in the environment (``monkeypatch.setenv``,
+    so it is inherited by every subprocess this test spawns, not just this
+    interpreter). The in-process ``_spawn_worker`` patch above only reaches
+    calls made through THIS module object — it does nothing for a test that
+    drives the CLI as a real subprocess (``conftest.run_cli_subprocess``, used
+    by ``test_search_cli.py``, ``test_session_vault_pin.py``, and the
+    ``record_cli_*`` suites via ``run_cli_subprocess``): that subprocess
+    imports its own, unpatched ``lore.cli.publish``, and a successful write
+    inside it still calls the REAL ``_spawn_worker``, which really does
+    ``subprocess.Popen`` a detached ``lore publish --vault ...`` worker that
+    sleeps out the debounce window and then runs real git — concurrently with
+    the rest of this test run. ``_spawn_worker`` itself (see
+    ``lore.cli.publish``) checks this variable immediately before the real
+    spawn and skips it when set, so setting it here closes that gap at the
+    subprocess boundary the in-process patch cannot reach.
+    ``TestRealSpawn`` in ``test_publish_trigger.py`` is the one test that
+    wants the genuine spawn and opts back out of BOTH guards via its own
+    ``_allow_real_publish_spawn`` override, handled below.
     """
     if _allow_real_publish_spawn:
+        monkeypatch.delenv("LORE_PUBLISH_DISABLE", raising=False)
         return
+    monkeypatch.setenv("LORE_PUBLISH_DISABLE", "1")
     try:
         from lore.cli import publish as publish_mod
     except Exception:

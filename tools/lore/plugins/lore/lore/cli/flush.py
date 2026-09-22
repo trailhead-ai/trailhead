@@ -359,10 +359,11 @@ def _flush_request_tail() -> None:
     **Names what it did, on stderr.** The flush skill's own report template
     says "Publish requested for: <vaults>"; this is the one line that makes
     that satisfiable, plus a second line naming any vault skipped because its
-    own `auto_publish` setting is `False` — resolved directly here (not read
-    back off `request_publish`'s return, which carries no such signal) so the
-    two outcomes stay distinguishable from each other and from a genuine
-    scheduling error.
+    own `auto_publish` setting is `False` — resolved directly here (that
+    outcome, and a genuine scheduling failure, both keep a vault OFF the
+    "requested" line, but only the former also gets its own named notice;
+    `request_publish`'s own return value is what keeps the "requested" line
+    honest for the latter — see below).
     """
     from . import publish as publish_mod
     from ..vault import config as vault_config_mod
@@ -387,8 +388,8 @@ def _flush_request_tail() -> None:
         if entry is not None and not vault_config_mod.auto_publish_flag(entry):
             auto_publish_off.append(name)
             continue
-        publish_mod.request_publish(vault)
-        requested.append(name)
+        if publish_mod.request_publish(vault):
+            requested.append(name)
 
     if requested:
         print(f"Publish requested for: {', '.join(requested)}", file=sys.stderr)

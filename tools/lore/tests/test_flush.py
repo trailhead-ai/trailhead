@@ -397,6 +397,34 @@ class TestFlushDirtySession:
         ]
         assert len(skipped_lines) == 1, f"expected exactly one notice; stderr={r.stderr!r}"
 
+    def test_default_excludes_a_vault_whose_schedule_failed_from_the_requested_line(
+        self, tmp_path, monkeypatch
+    ):
+        """A vault whose `request_publish` could not actually schedule the
+        worker (an internal exception, caught and reported as its own
+        stderr line) must not ALSO be named on the "Publish requested for"
+        line — that line means the schedule succeeded, same distinction the
+        auto_publish-off notice already draws."""
+        import lore.cli.publish as publish_mod
+
+        def _boom(_name):
+            raise FileNotFoundError("lore CLI entry script not found")
+
+        monkeypatch.setattr(publish_mod, "_worker_argv", _boom)
+        vault, state = self._vault_with_a_stray_file(tmp_path)
+
+        r = _flush(vault, state)
+        assert r.returncode == 0, r.stderr
+
+        requested_lines = [
+            line for line in r.stderr.splitlines() if "Publish requested for" in line
+        ]
+        assert requested_lines == [], (
+            f"a vault whose schedule failed must not be named as requested; "
+            f"stderr={r.stderr!r}"
+        )
+        assert "could not schedule publish" in r.stderr
+
 
 # ---------------------------------------------------------------------------
 # clean no-op vs no-session — distinct notices, no commit

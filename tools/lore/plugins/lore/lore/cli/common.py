@@ -88,7 +88,19 @@ def _camp_self_host_name(env: dict[str, str]) -> "str | None":
     file being absent, or it being malformed, all resolve to ``None`` here so
     the caller falls back to the OS hostname rather than failing a sync over
     host-name attribution.
+
+    Bootstraps trailhead FIRST, before the camp import — same reason and same
+    guard as ``vault/layers.py``'s own camp import: camp lazily imports
+    ``trailhead.paths`` internally (inside ``self_host_name``), and without
+    this call first, that import raises ``ModuleNotFoundError`` whenever
+    nothing else has already made trailhead importable in this process.
     """
+    try:
+        import _bootstrap
+
+        _bootstrap.ensure_trailhead_importable()
+    except (ImportError, SystemExit):
+        return None
     try:
         from ..vault.layers import _CAMP_PLUGIN_ROOT
     except ImportError:

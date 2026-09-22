@@ -22,6 +22,7 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -433,6 +434,38 @@ class TestWorkerArgvDerivation:
         assert "default" in lines[0]
 
 
+class TestPublishDisableFenceAtTheSubprocessBoundary:
+    """``LORE_PUBLISH_DISABLE`` — the guard ``conftest``'s autouse fixture sets
+    for every test — must stop a REAL, unmocked subprocess from spawning a
+    real detached worker, not just the in-process ``_spawn_worker`` patch that
+    only reaches ``conftest.run_cli`` calls. Every OTHER test in this module
+    proves the in-process half; this one proves the half that actually
+    protects ``run_cli_subprocess``-driven suites (search, session-vault-pin,
+    record-cli-*) from leaving live workers running past the test."""
+
+    def test_subprocess_record_create_never_leaves_a_worker_holding_the_lock(
+        self, tmp_path
+    ):
+        vault, state = _make_vault(tmp_path)
+
+        r = run_cli_subprocess(
+            ["record", "create", "--kind", "decision", "--title", "fenced spawn"],
+            vault=vault, state_dir=state, stdin_text="body\n",
+        )
+        assert r.returncode == 0, r.stderr
+
+        lock = publish_mod.lock_path(vault)
+        time.sleep(0.3)
+        assert not _lock_is_held(lock), (
+            "LORE_PUBLISH_DISABLE must stop the real subprocess from spawning "
+            "a worker that holds this vault's publish lock"
+        )
+        assert publish_mod.request_stamp_path(vault).exists(), (
+            "the request stamp must still be written even though the spawn "
+            "was fenced off"
+        )
+
+
 # ---------------------------------------------------------------------------
 # a real spawn — the one integration test, not mocked
 # ---------------------------------------------------------------------------
@@ -454,12 +487,26 @@ def _lock_is_held(lock_path: Path) -> bool:
         os.close(fd)
 
 
-def _pids_with_open_file(path: Path) -> "list[int]":
+def _pids_with_open_file(path: Path, *, vault_root: "Path | None" = None) -> "list[int]":
     """PIDs holding *path* open, via ``lsof -t`` — used to find and reap the
     real worker process ``TestRealSpawn`` deliberately leaves running (a
     ``flock`` is a BSD-style lock, invisible to ``fcntl``'s POSIX ``F_GETLK``,
     so ``lsof`` on the lock file itself is the portable way to name the
-    holder)."""
+    holder).
+
+    Falls back to the worker's own publish marker (``publish._write_marker``
+    stamps ``pid`` into it before the debounce wait even starts — see
+    ``_run_publish``) when ``lsof`` isn't on this host's PATH, so a host
+    without it still reaps the worker instead of raising past a live process.
+    *vault_root* is required for the fallback (it derives the marker path);
+    without it, an unavailable ``lsof`` yields no PIDs rather than raising.
+    """
+    if shutil.which("lsof") is None:
+        if vault_root is None:
+            return []
+        marker = publish_mod.read_marker(vault_root)
+        pid = marker.get("pid") if marker else None
+        return [pid] if isinstance(pid, int) else []
     result = subprocess.run(["lsof", "-t", str(path)], capture_output=True, text=True)
     return [int(pid) for pid in result.stdout.split() if pid.strip()]
 
@@ -515,4 +562,34 @@ class TestRealSpawn:
             "expected a real, unmocked spawn to leave a worker process holding "
             f"its lock at {lock}"
         )
-        _reap_real_workers.extend(_pids_with_open_file(lock))
+        _reap_real_workers.extend(_pids_with_open_file(lock, vault_root=vault))
+
+
+class TestPidsWithOpenFileFallback:
+    """``_pids_with_open_file`` must reap the worker even on a host with no
+    ``lsof`` on PATH, via the marker's own ``pid`` field."""
+
+    def test_falls_back_to_the_marker_pid_when_lsof_is_unavailable(
+        self, tmp_path, monkeypatch
+    ):
+        vault, state = _make_vault(tmp_path)
+        monkeypatch.setenv("XDG_STATE_HOME", str(state))
+        monkeypatch.setattr(shutil, "which", lambda name: None)
+        publish_mod._write_marker(vault, {"pid": 424242, "outcome": publish_mod.OUTCOME_RUNNING})
+
+        result = _pids_with_open_file(publish_mod.lock_path(vault), vault_root=vault)
+
+        assert result == [424242]
+
+    def test_uses_lsof_when_available_even_if_a_marker_pid_also_exists(
+        self, tmp_path, monkeypatch
+    ):
+        """The two sources must not conflate: with `lsof` on PATH, its answer
+        (empty here — no real holder) governs, not the marker's stale `pid`."""
+        vault, state = _make_vault(tmp_path)
+        monkeypatch.setenv("XDG_STATE_HOME", str(state))
+        publish_mod._write_marker(vault, {"pid": 999999, "outcome": publish_mod.OUTCOME_RUNNING})
+
+        result = _pids_with_open_file(publish_mod.lock_path(vault), vault_root=vault)
+
+        assert result == []

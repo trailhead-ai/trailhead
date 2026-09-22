@@ -34,6 +34,20 @@ lock/log handling) can be tested without paying for a real git round trip on
 every case — ``cmd_sync``'s own behavior has its own suite. Production wiring
 (:func:`add_publish_subparser`) never sets it, so the real path always runs
 the genuine sync.
+
+**``LORE_PUBLISH_DISABLE``** — checked in :func:`_spawn_worker`, immediately
+before the real ``subprocess.Popen`` — skips the spawn entirely (after
+:func:`request_publish` has already written the request stamp) and prints one
+stderr line instead. Never set by production wiring; it exists solely for the
+test suite, which sets it from an autouse fixture so a real ``lore`` CLI
+subprocess (driven via a test's own ``subprocess.run`` — the one path an
+in-process ``monkeypatch.setattr(publish, "_spawn_worker", ...)`` cannot
+reach, since that subprocess imports its own, unpatched copy of this module)
+never leaves a live, detached worker running past the test that spawned it.
+It is checked inside ``_spawn_worker`` rather than :func:`request_publish`
+itself so that a test which mocks ``_spawn_worker`` directly (to record and
+assert on its calls) is unaffected — the mock replaces this function's body,
+fence included.
 """
 from __future__ import annotations
 
@@ -247,7 +261,17 @@ def _spawn_worker(argv: list) -> None:
     per-vault log (:func:`log_path`) once it enters :func:`_run_publish`; DEVNULL
     here just keeps the caller's own streams (a create's single ``RECORD_ID``
     line, in particular) untouched by anything printed before that point.
+
+    Honors ``LORE_PUBLISH_DISABLE`` (see the module docstring) immediately
+    before the real spawn — set, this returns without ever touching
+    ``subprocess.Popen``.
     """
+    if os.environ.get("LORE_PUBLISH_DISABLE"):
+        print(
+            "lore: publish spawn disabled (LORE_PUBLISH_DISABLE) — request stamp recorded",
+            file=sys.stderr,
+        )
+        return
     subprocess.Popen(
         argv,
         stdin=subprocess.DEVNULL,
@@ -293,7 +317,7 @@ def _lock_held(vault_root: "str | Path") -> bool:
         os.close(fd)
 
 
-def request_publish(vault_root: "str | Path", *, clock=time.time) -> None:
+def request_publish(vault_root: "str | Path", *, clock=time.time) -> bool:
     """Request a background publish of *vault_root* — the write-triggered path.
 
     Called after a successful record create, a successful record update (both
@@ -317,6 +341,15 @@ def request_publish(vault_root: "str | Path", *, clock=time.time) -> None:
     resolution has to be INSIDE this same guard, not before it, or a broken
     config raises past this function entirely and the "never raises into the
     write" guarantee has a gap right at its own entry.
+
+    Returns:
+        ``True`` if the request was actually scheduled — the stamp was
+        written and either a spawn was attempted or skipped only because
+        another worker already holds the lock (its own debounce wait will
+        pick up this request). ``False`` when the vault opted out via
+        ``auto_publish: false``, or when any step raised (the caller's own
+        "requested" accounting — see ``cli.flush``'s closing tail — must not
+        name a vault whose schedule failed as if it succeeded).
     """
     name = Path(vault_root).name
     try:
@@ -324,16 +357,18 @@ def request_publish(vault_root: "str | Path", *, clock=time.time) -> None:
 
         name, vault = _resolve_vault_entry(vault_root)
         if vault is not None and not vault_config_mod.auto_publish_flag(vault):
-            return
+            return False
 
         touch_request_stamp(vault_root, clock=clock)
 
         if _lock_held(vault_root):
-            return
+            return True
 
         _spawn_worker(_worker_argv(name))
+        return True
     except Exception as exc:  # noqa: BLE001 — never fail the write that asked
         print(f"error: could not schedule publish for vault {name!r}: {exc}", file=sys.stderr)
+        return False
 
 
 def warn_stale_publish(vault_root: "str | Path") -> None:

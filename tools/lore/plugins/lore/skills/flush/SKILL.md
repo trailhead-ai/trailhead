@@ -185,7 +185,7 @@ notice: vault(s) still holding unsynced work — run `lore sync`:
 Flushed session `<key>` (status: clean).
 
 Evaluated N candidate(s) → M record(s) created, K discarded.
-Publish requested for: <vaults the flush wrote>.
+Publish requested for: <every configured vault, per the CLI's own stderr line>.
 ```
 
 ## Edge cases
