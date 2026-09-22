@@ -41,8 +41,8 @@ The tri-state contract
 -----------------------
 `has_session` answers `True` / `False` / `None` (tmux did not answer at
 all — a timeout or an unlaunchable binary). `list_sessions` answers a
-:class:`SessionListing` only when tmux's non-zero exit is the specific
-"no server running" stderr shape (:data:`_NO_SERVER_STDERR_RE`); every other
+:class:`SessionListing` only when tmux's non-zero exit is one of the two
+"no server running" stderr shapes (:data:`_NO_SERVER_STDERR_RE`); every other
 non-zero exit, and an unanswerable `_run`, is :data:`UNANSWERED`. Folding
 "tmux did not answer" into "tmux answered no" would report a hung or
 unreachable tmux as a completed, empty state — the one thing every caller of
@@ -230,7 +230,7 @@ class SessionListing:
 #: listing.
 _NO_SERVER_STDERR_RE = re.compile(
     r"error connecting to .*\(No such file or directory\)"
-    r"|no server running on "
+    r"|no server running on \S"
 )
 
 
@@ -526,8 +526,8 @@ class Tmux:
         Extends this seam's tri-state rather than reusing :meth:`has_session`'s
         contract: a general listing command's non-zero exit has no single
         documented meaning, unlike a scoped existence query's. Only the
-        no-server condition on stderr — tmux's own whole
-        connect-failure line, :data:`_NO_SERVER_STDERR_RE`, not the
+        no-server condition on stderr — one of tmux's two whole
+        connect-failure lines, :data:`_NO_SERVER_STDERR_RE`, not the
         trailing phrase an unrelated error may also carry — is answered as
         empty; every other non-zero exit, and an unanswerable ``_run``, is
         ``UNANSWERED``.

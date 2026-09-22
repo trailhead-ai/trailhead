@@ -293,7 +293,8 @@ def test_remove_window_key_binding_succeeds_when_no_tmux_server_is_running_at_al
         stderr="error connecting to /tmp/tmux-501/camp_test_sock (No such file or directory)",
     )
 
-    remove_window_key_binding(tmux)  # must not raise
+    result = remove_window_key_binding(tmux)  # must not raise
+    assert result is False, "nothing was captured, so this must report the default, not a restore"
     assert tmux.reset_calls == 1
 
 
@@ -310,7 +311,8 @@ def test_remove_window_key_binding_succeeds_when_the_socket_is_stale():
         stderr="no server running on /tmp/tmux-501/camp_test_sock",
     )
 
-    remove_window_key_binding(tmux)  # must not raise
+    result = remove_window_key_binding(tmux)  # must not raise
+    assert result is False, "nothing was captured, so this must report the default, not a restore"
     assert tmux.reset_calls == 1
 
 
