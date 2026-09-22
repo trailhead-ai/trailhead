@@ -13,83 +13,26 @@ from __future__ import annotations
 import configparser
 import os
 import plistlib
-import signal
+import shutil
 import subprocess
 import sys
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
-from trailhead import cli, outpost_lifecycle, outpost_supervisor as osup
+from trailhead import cli, outpost_supervisor as osup
 from trailhead.outpost_lifecycle import OutpostLifecycleError
 
-_REPO_ROOT = Path(outpost_lifecycle.__file__).resolve().parent.parent
-
+from . import test_outpost_lifecycle as _lifecycle_tests
+from .test_outpost_lifecycle import _RecordingRunner, _health_reachable, _pid, _start, _wait_until
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
 # ---------------------------------------------------------------------------
 
-
-@pytest.fixture()
-def outpost(tmp_path):
-    checkout = tmp_path / "outpost-checkout"
-    entry = checkout / "dist" / "server" / "index.js"
-    entry.parent.mkdir(parents=True)
-    entry.write_text("// fake entrypoint\n")
-
-    config_home = tmp_path / "cfg"
-    state_home = tmp_path / "state"
-    config_home.mkdir()
-    (config_home / "config.toml").write_text(f'checkout = "{checkout}"\n')
-
-    env = {
-        "OUTPOST_CONFIG_DIR": str(config_home),
-        "OUTPOST_STATE_DIR": str(state_home),
-        "PATH": os.environ.get("PATH", ""),
-        "HOME": str(tmp_path / "home"),
-    }
-    ns = SimpleNamespace(
-        env=env,
-        checkout=checkout,
-        entry=entry,
-        config_home=config_home,
-        state_dir=state_home,
-        supervisor_dir=tmp_path / "supervisor",
-    )
-    yield ns
-
-    # Teardown: never leak a daemon out of the test (mirrors
-    # test_outpost_lifecycle.py's fixture).
-    pidfile = state_home / "outpost.pid"
-    if pidfile.exists():
-        try:
-            os.kill(int(pidfile.read_text().strip()), signal.SIGKILL)
-        except (ValueError, ProcessLookupError, OSError):
-            pass
-
-
-class _RecordingRunner:
-    """Records every argv passed to it; returns a canned CompletedProcess."""
-
-    def __init__(self, returncode_by_prefix: dict | None = None):
-        self.calls: list = []
-        self._returncode_by_prefix = returncode_by_prefix or {}
-
-    def __call__(self, argv: list) -> subprocess.CompletedProcess:
-        self.calls.append(list(argv))
-        returncode = 0
-        for prefix, code in self._returncode_by_prefix.items():
-            if argv[: len(prefix)] == list(prefix):
-                returncode = code
-        return subprocess.CompletedProcess(argv, returncode, stdout="", stderr="")
-
-
-def _real_which(name: str) -> str | None:
-    import shutil
-
-    return shutil.which(name)
+# The fake checkout + isolated config/state/HOME fixture the lifecycle verbs'
+# tests use; enable/disable resolve the same entrypoint and state dir.
+outpost = _lifecycle_tests.outpost
 
 
 # ---------------------------------------------------------------------------
@@ -189,7 +132,7 @@ def test_enable_darwin_writes_plist_and_runs_bootout_then_bootstrap(outpost):
         platform="darwin",
         supervisor_dir=outpost.supervisor_dir,
         runner=runner,
-        which_runner=_real_which,
+        which_runner=shutil.which,
         uid=501,
     )
 
@@ -214,7 +157,7 @@ def test_enable_linux_writes_unit_and_runs_reload_enable_linger_in_order(outpost
         platform="linux",
         supervisor_dir=outpost.supervisor_dir,
         runner=runner,
-        which_runner=_real_which,
+        which_runner=shutil.which,
         user="alice",
     )
 
@@ -237,7 +180,7 @@ def test_enable_linux_linger_failure_raises_named_error_unit_stays_written(outpo
             platform="linux",
             supervisor_dir=outpost.supervisor_dir,
             runner=runner,
-            which_runner=_real_which,
+            which_runner=shutil.which,
             user="bob",
         )
 
@@ -259,7 +202,7 @@ def test_enable_unsupported_platform_raises_named_error_writes_and_runs_nothing(
             platform="win32",
             supervisor_dir=outpost.supervisor_dir,
             runner=runner,
-            which_runner=_real_which,
+            which_runner=shutil.which,
         )
 
     assert not outpost.supervisor_dir.exists() or list(outpost.supervisor_dir.iterdir()) == []
@@ -276,7 +219,7 @@ def test_enable_missing_entrypoint_raises_named_error_writes_nothing(outpost):
             platform="darwin",
             supervisor_dir=outpost.supervisor_dir,
             runner=runner,
-            which_runner=_real_which,
+            which_runner=shutil.which,
             uid=501,
         )
 
@@ -317,7 +260,7 @@ def test_enable_twice_is_idempotent_same_runner_sequence_no_error(outpost):
         platform="darwin",
         supervisor_dir=outpost.supervisor_dir,
         runner=runner,
-        which_runner=_real_which,
+        which_runner=shutil.which,
         uid=501,
     )
     osup.enable(
@@ -325,7 +268,7 @@ def test_enable_twice_is_idempotent_same_runner_sequence_no_error(outpost):
         platform="darwin",
         supervisor_dir=outpost.supervisor_dir,
         runner=runner,
-        which_runner=_real_which,
+        which_runner=shutil.which,
         uid=501,
     )
 
@@ -347,7 +290,7 @@ def test_disable_removes_file_and_records_deregister_command(outpost):
         platform="darwin",
         supervisor_dir=outpost.supervisor_dir,
         runner=runner,
-        which_runner=_real_which,
+        which_runner=shutil.which,
         uid=501,
     )
     target = outpost.supervisor_dir / f"{osup.LAUNCHD_LABEL}.plist"
@@ -389,100 +332,24 @@ def test_disable_when_nothing_enabled_prints_not_enabled_runs_nothing(outpost, c
 # ---------------------------------------------------------------------------
 
 
-def _wait_until(pred, timeout: float, interval: float = 0.05) -> bool:
-    import time
-
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        if pred():
-            return True
-        time.sleep(interval)
-    return pred()
-
-
-def _health_reachable(port: int) -> bool:
-    import json
-    import urllib.error
-    import urllib.request
-
-    try:
-        with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=0.5) as r:
-            json.loads(r.read())
-        return True
-    except (urllib.error.URLError, OSError, ValueError):
-        return False
-
-
-def _run_lifecycle_verb(o, call: str) -> subprocess.CompletedProcess:
-    code = (
-        "import sys\n"
-        "from trailhead import outpost_lifecycle as ol\n"
-        f"sys.exit(ol.{call})\n"
-    )
-    proc_env = {**o.env, "PYTHONPATH": str(_REPO_ROOT)}
-    return subprocess.run(
-        [sys.executable, "-c", code],
-        env=proc_env,
-        capture_output=True,
-        text=True,
-        timeout=15,
-    )
-
-
 def test_enable_stops_a_running_detached_daemon_before_registering(outpost):
-    import socket
-
-    s = socket.socket()
-    s.bind(("127.0.0.1", 0))
-    port = s.getsockname()[1]
-    s.close()
-
-    fake_daemon = """\
-import http.server, json, os, signal, threading
-port = int(os.environ["HTTP_PORT"])
-class Handler(http.server.BaseHTTPRequestHandler):
-    def do_GET(self):
-        if self.path == "/health":
-            body = json.dumps({"ok": True, "contract_version": 1}).encode()
-            self.send_response(200)
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-        else:
-            self.send_response(404); self.end_headers()
-    def log_message(self, *a): pass
-server = http.server.HTTPServer(("127.0.0.1", port), Handler)
-threading.Thread(target=server.serve_forever, daemon=True).start()
-stop = threading.Event()
-signal.signal(signal.SIGTERM, lambda *a: stop.set())
-stop.wait()
-server.shutdown()
-"""
-    outpost.entry.write_text(fake_daemon)
-
-    result = _run_lifecycle_verb(
-        outpost, f"start(node_bin={sys.executable!r}, port={port})"
-    )
-    assert result.returncode == 0, result.stderr
-
-    pidfile = outpost.state_dir / "outpost.pid"
-    assert pidfile.exists()
-    old_pid = int(pidfile.read_text().strip())
-    assert _wait_until(lambda: _health_reachable(port), timeout=5.0)
+    _start(outpost)
+    old_pid = _pid(outpost)
+    assert _wait_until(lambda: _health_reachable(outpost.port), timeout=5.0)
 
     runner = _RecordingRunner()
     rc = osup.enable(
         env=outpost.env,
         platform="darwin",
         supervisor_dir=outpost.supervisor_dir,
-        port=port,
+        port=outpost.port,
         runner=runner,
-        which_runner=_real_which,
+        which_runner=shutil.which,
         uid=501,
     )
 
     assert rc == 0
-    assert not pidfile.exists()
+    assert not (outpost.state_dir / "outpost.pid").exists()
     with pytest.raises(ProcessLookupError):
         os.kill(old_pid, 0)
     # bootstrap ran after the daemon was already stopped.
@@ -571,7 +438,7 @@ def test_is_enabled_true_after_enable_false_after_disable(outpost):
         platform="darwin",
         supervisor_dir=outpost.supervisor_dir,
         runner=runner,
-        which_runner=_real_which,
+        which_runner=shutil.which,
         uid=501,
     )
     assert osup.is_enabled(outpost.env, platform="darwin", supervisor_dir=outpost.supervisor_dir) is True

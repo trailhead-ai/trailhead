@@ -842,14 +842,17 @@ def test_cli_open_verb_dispatches_to_open_ui(monkeypatch):
 
 
 class _RecordingRunner:
-    """Records every argv it is called with. ``on_call`` (argv) -> None lets a
-    test simulate a side effect of a real supervisor command, e.g. a `stop`
-    argv actually shutting down the fake daemon's health server."""
+    """Records every argv it is called with and returns a CompletedProcess
+    whose returncode/stdout come from the first matching argv prefix in
+    ``returncode_by_prefix`` / ``stdout_by_prefix``. ``on_call`` (argv) -> None
+    lets a test simulate a side effect of a real supervisor command, e.g. a
+    `stop` argv actually shutting down the fake daemon's health server."""
 
-    def __init__(self, on_call=None, returncode_by_prefix=None):
+    def __init__(self, on_call=None, returncode_by_prefix=None, stdout_by_prefix=None):
         self.calls: list[list] = []
         self._on_call = on_call
         self._returncode_by_prefix = returncode_by_prefix or {}
+        self._stdout_by_prefix = stdout_by_prefix or {}
 
     def __call__(self, argv: list) -> subprocess.CompletedProcess:
         self.calls.append(list(argv))
@@ -859,8 +862,7 @@ class _RecordingRunner:
         for prefix, code in self._returncode_by_prefix.items():
             if argv[: len(prefix)] == list(prefix):
                 returncode = code
-        stdout = getattr(self, "stdout_by_prefix", {})
-        for prefix, text in stdout.items():
+        for prefix, text in self._stdout_by_prefix.items():
             if argv[: len(prefix)] == list(prefix):
                 return subprocess.CompletedProcess(argv, returncode, text, "")
         return subprocess.CompletedProcess(argv, returncode, "", "")
@@ -916,8 +918,6 @@ def health_server(outpost):
 def _write_supervisor_entry(outpost, platform: str) -> None:
     """Register *something* at the target path so is_enabled() reports True —
     the supervised verbs never read the entry's contents, only its presence."""
-    from trailhead import outpost_supervisor as osup
-
     target_dir = outpost.supervisor_dir
     target_dir.mkdir(parents=True, exist_ok=True)
     name = f"{osup.LAUNCHD_LABEL}.plist" if platform == "darwin" else osup.SYSTEMD_UNIT_NAME
@@ -1057,8 +1057,7 @@ def test_supervised_stop_raises_named_error_when_supervisor_relaunches_it(outpos
 def test_supervised_status_running_reports_exit_running(outpost, health_server):
     _write_supervisor_entry(outpost, "darwin")
     health_server.start()
-    runner = _RecordingRunner()
-    runner.stdout_by_prefix = {("launchctl", "print"): "state = running\n\tpid = 4242\n"}
+    runner = _RecordingRunner(stdout_by_prefix={("launchctl", "print"): "state = running\n\tpid = 4242\n"})
 
     rc = outpost_lifecycle.status(
         env=outpost.env,
@@ -1074,11 +1073,12 @@ def test_supervised_status_running_reports_exit_running(outpost, health_server):
 
 def test_supervised_status_restarting_reports_exit_restarting_with_count(outpost):
     _write_supervisor_entry(outpost, "linux")
-    runner = _RecordingRunner()
-    runner.stdout_by_prefix = {
-        ("systemctl", "--user", "show"): "0\nactivating\nauto-restart\n\n3\n",
-        ("loginctl",): "yes\n",
-    }
+    runner = _RecordingRunner(
+        stdout_by_prefix={
+            ("systemctl", "--user", "show"): "0\nactivating\nauto-restart\n\n3\n",
+            ("loginctl",): "yes\n",
+        }
+    )
 
     rc = outpost_lifecycle.status(
         env=outpost.env,
@@ -1094,11 +1094,12 @@ def test_supervised_status_restarting_reports_exit_restarting_with_count(outpost
 
 def test_supervised_status_restarting_message_names_the_restart_count(outpost, capsys):
     _write_supervisor_entry(outpost, "linux")
-    runner = _RecordingRunner()
-    runner.stdout_by_prefix = {
-        ("systemctl", "--user", "show"): "0\nactivating\nauto-restart\n\n3\n",
-        ("loginctl",): "yes\n",
-    }
+    runner = _RecordingRunner(
+        stdout_by_prefix={
+            ("systemctl", "--user", "show"): "0\nactivating\nauto-restart\n\n3\n",
+            ("loginctl",): "yes\n",
+        }
+    )
 
     outpost_lifecycle.status(
         env=outpost.env,
@@ -1114,11 +1115,12 @@ def test_supervised_status_restarting_message_names_the_restart_count(outpost, c
 
 def test_supervised_status_failed_linux_reports_exit_failed_with_recovery_command(outpost, capsys):
     _write_supervisor_entry(outpost, "linux")
-    runner = _RecordingRunner()
-    runner.stdout_by_prefix = {
-        ("systemctl", "--user", "show"): "0\nfailed\ndead\nstart-limit-hit\n5\n",
-        ("loginctl",): "yes\n",
-    }
+    runner = _RecordingRunner(
+        stdout_by_prefix={
+            ("systemctl", "--user", "show"): "0\nfailed\ndead\nstart-limit-hit\n5\n",
+            ("loginctl",): "yes\n",
+        }
+    )
 
     rc = outpost_lifecycle.status(
         env=outpost.env,
@@ -1136,10 +1138,11 @@ def test_supervised_status_failed_linux_reports_exit_failed_with_recovery_comman
 
 def test_supervised_status_failed_darwin_nonzero_last_exit_reports_exit_failed(outpost, capsys):
     _write_supervisor_entry(outpost, "darwin")
-    runner = _RecordingRunner()
-    runner.stdout_by_prefix = {
-        ("launchctl", "print"): "state = not running\n\tlast exit code = 78\n",
-    }
+    runner = _RecordingRunner(
+        stdout_by_prefix={
+            ("launchctl", "print"): "state = not running\n\tlast exit code = 78\n",
+        }
+    )
 
     rc = outpost_lifecycle.status(
         env=outpost.env,
@@ -1156,10 +1159,11 @@ def test_supervised_status_failed_darwin_nonzero_last_exit_reports_exit_failed(o
 
 def test_supervised_status_stopped_reports_exit_stopped(outpost):
     _write_supervisor_entry(outpost, "darwin")
-    runner = _RecordingRunner()
-    runner.stdout_by_prefix = {
-        ("launchctl", "print"): "state = not running\n\tlast exit code = 0\n",
-    }
+    runner = _RecordingRunner(
+        stdout_by_prefix={
+            ("launchctl", "print"): "state = not running\n\tlast exit code = 0\n",
+        }
+    )
 
     rc = outpost_lifecycle.status(
         env=outpost.env,
@@ -1175,11 +1179,12 @@ def test_supervised_status_stopped_reports_exit_stopped(outpost):
 
 def test_supervised_status_linux_linger_no_prints_boot_warning(outpost, capsys):
     _write_supervisor_entry(outpost, "linux")
-    runner = _RecordingRunner()
-    runner.stdout_by_prefix = {
-        ("systemctl", "--user", "show"): "0\ninactive\ndead\n\n0\n",
-        ("loginctl",): "no\n",
-    }
+    runner = _RecordingRunner(
+        stdout_by_prefix={
+            ("systemctl", "--user", "show"): "0\ninactive\ndead\n\n0\n",
+            ("loginctl",): "no\n",
+        }
+    )
 
     outpost_lifecycle.status(
         env=outpost.env,
@@ -1196,11 +1201,12 @@ def test_supervised_status_linux_linger_no_prints_boot_warning(outpost, capsys):
 
 def test_supervised_status_linux_linger_yes_omits_boot_warning(outpost, capsys):
     _write_supervisor_entry(outpost, "linux")
-    runner = _RecordingRunner()
-    runner.stdout_by_prefix = {
-        ("systemctl", "--user", "show"): "0\ninactive\ndead\n\n0\n",
-        ("loginctl",): "yes\n",
-    }
+    runner = _RecordingRunner(
+        stdout_by_prefix={
+            ("systemctl", "--user", "show"): "0\ninactive\ndead\n\n0\n",
+            ("loginctl",): "yes\n",
+        }
+    )
 
     outpost_lifecycle.status(
         env=outpost.env,
@@ -1220,10 +1226,11 @@ def test_supervised_status_removes_leftover_pidfile(outpost):
     pidfile = outpost.state_dir / "outpost.pid"
     pidfile.parent.mkdir(parents=True, exist_ok=True)
     pidfile.write_text("99999\n")
-    runner = _RecordingRunner()
-    runner.stdout_by_prefix = {
-        ("launchctl", "print"): "state = not running\n\tlast exit code = 0\n",
-    }
+    runner = _RecordingRunner(
+        stdout_by_prefix={
+            ("launchctl", "print"): "state = not running\n\tlast exit code = 0\n",
+        }
+    )
 
     outpost_lifecycle.status(
         env=outpost.env,
@@ -1250,8 +1257,10 @@ def test_supervised_restart_builds_then_runs_restart_argv_confirms_health_and_pi
         if argv[:2] == ["launchctl", "kickstart"]:
             health_server.start()
 
-    runner = _RecordingRunner(on_call=on_call)
-    runner.stdout_by_prefix = {("launchctl", "print"): "state = running\n\tpid = 7777\n"}
+    runner = _RecordingRunner(
+        on_call=on_call,
+        stdout_by_prefix={("launchctl", "print"): "state = running\n\tpid = 7777\n"},
+    )
 
     rc = outpost_lifecycle.restart(
         env=outpost.env,

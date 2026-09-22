@@ -342,9 +342,10 @@ def _settled_pid_alive(pid: int, timeout: float = _PID_SETTLE_SECONDS) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Host-supervisor awareness — imported lazily (function-local) everywhere
-# below: outpost_supervisor imports OutpostLifecycleError from this module at
-# ITS module scope, so a module-level import here back would be circular.
+# Host-supervisor awareness — outpost_supervisor is imported lazily
+# (function-local) in _is_supervised and _supervisor_seam, and handed on from
+# there: it imports OutpostLifecycleError from this module at ITS module
+# scope, so a module-level import here back would be circular.
 # ---------------------------------------------------------------------------
 
 
@@ -362,17 +363,17 @@ def _is_supervised(
         return False
 
 
-def _clear_stale_pidfile(env: dict[str, str] | None) -> None:
-    """Under supervision the pidfile is meaningless — the supervisor owns the
-    process. A leftover one from a prior unsupervised run is removed the first
-    time a supervised verb runs, so nothing ever reads it again."""
-    _pidfile(env).unlink(missing_ok=True)
-
-
-def _supervised_kind(platform: str | None):
+def _supervisor_seam(env: dict[str, str] | None, platform: str | None, runner):
+    """Resolve ``(outpost_supervisor, platform kind, runner)`` for a supervised
+    verb. Under supervision the pidfile is meaningless — the supervisor owns
+    the process — so a leftover one from a prior unsupervised run is removed
+    here, the first time a supervised verb runs, and nothing reads it again."""
     from trailhead import outpost_supervisor as osup
 
-    return osup, osup._platform_kind(platform)
+    kind = osup._platform_kind(platform)
+    _pidfile(env).unlink(missing_ok=True)
+    run = runner if runner is not None else osup.default_runner
+    return osup, kind, run
 
 
 @dataclass
@@ -386,10 +387,8 @@ class _SupervisorProbe:
     recovery_hint: str
 
 
-def _probe_darwin(run, uid: int) -> "_SupervisorProbe":
-    from trailhead import outpost_supervisor as osup
-
-    result = run(["launchctl", "print", f"gui/{uid}/{osup.LAUNCHD_LABEL}"])
+def _probe_darwin(run, service: str) -> _SupervisorProbe:
+    result = run(["launchctl", "print", service])
     text = result.stdout or ""
     pid = None
     last_exit = None
@@ -417,9 +416,7 @@ def _probe_darwin(run, uid: int) -> "_SupervisorProbe":
     )
 
 
-def _probe_linux(run) -> "_SupervisorProbe":
-    from trailhead import outpost_supervisor as osup
-
+def _probe_linux(run, unit: str) -> _SupervisorProbe:
     result = run(
         [
             "systemctl",
@@ -428,7 +425,7 @@ def _probe_linux(run) -> "_SupervisorProbe":
             "-p",
             "MainPID,ActiveState,SubState,Result,NRestarts",
             "--value",
-            osup.SYSTEMD_UNIT_NAME,
+            unit,
         ]
     )
     lines = (result.stdout or "").splitlines()
@@ -444,16 +441,14 @@ def _probe_linux(run) -> "_SupervisorProbe":
         restarting=restarting,
         failed=failed,
         restart_count=restart_count,
-        recovery_hint=f"systemctl --user reset-failed {osup.SYSTEMD_UNIT_NAME} && trailhead outpost start",
+        recovery_hint=f"systemctl --user reset-failed {unit} && trailhead outpost start",
     )
 
 
-def _probe_supervisor(run, kind: str, environ: dict[str, str], *, uid, user) -> "_SupervisorProbe":
-    from trailhead import outpost_supervisor as osup
-
+def _probe_supervisor(osup, run, kind: str, uid: int | None) -> _SupervisorProbe:
     if kind == "darwin":
-        return _probe_darwin(run, osup.resolve_uid(uid))
-    return _probe_linux(run)
+        return _probe_darwin(run, osup.launchd_service(uid))
+    return _probe_linux(run, osup.SYSTEMD_UNIT_NAME)
 
 
 def _supervised_start(
@@ -462,18 +457,13 @@ def _supervised_start(
     port: int,
     health_timeout: float,
     platform: str | None,
-    supervisor_dir: Path | None,
     runner,
-    uid,
-    user,
+    uid: int | None,
 ) -> int:
-    osup, kind = _supervised_kind(platform)
-    _clear_stale_pidfile(env)
-    run = runner if runner is not None else osup.default_runner
+    osup, kind, run = _supervisor_seam(env, platform, runner)
 
     if kind == "darwin":
-        resolved_uid = osup.resolve_uid(uid)
-        run(["launchctl", "kickstart", f"gui/{resolved_uid}/{osup.LAUNCHD_LABEL}"])
+        run(["launchctl", "kickstart", osup.launchd_service(uid)])
     else:
         run(["systemctl", "--user", "reset-failed", osup.SYSTEMD_UNIT_NAME])
         run(["systemctl", "--user", "start", osup.SYSTEMD_UNIT_NAME])
@@ -496,14 +486,9 @@ def _supervised_stop(
     health_timeout: float,
     pid_settle_timeout: float | None,
     platform: str | None,
-    supervisor_dir: Path | None,
     runner,
-    uid,
-    user,
 ) -> int:
-    osup, kind = _supervised_kind(platform)
-    _clear_stale_pidfile(env)
-    run = runner if runner is not None else osup.default_runner
+    osup, kind, run = _supervisor_seam(env, platform, runner)
 
     if kind == "darwin":
         run(["launchctl", "stop", osup.LAUNCHD_LABEL])
@@ -540,21 +525,18 @@ def _supervised_status(
     port: int,
     health_timeout: float,
     platform: str | None,
-    supervisor_dir: Path | None,
     runner,
-    uid,
-    user,
+    uid: int | None,
+    user: str | None,
 ) -> int:
-    osup, kind = _supervised_kind(platform)
-    _clear_stale_pidfile(env)
-    environ = env if env is not None else dict(os.environ)
-    run = runner if runner is not None else osup.default_runner
+    osup, kind, run = _supervisor_seam(env, platform, runner)
 
-    probe = _probe_supervisor(run, kind, environ, uid=uid, user=user)
+    probe = _probe_supervisor(osup, run, kind, uid)
     health = _probe_health(port, health_timeout) if probe.pid is not None else None
 
     linger_warning = ""
     if kind == "linux":
+        environ = env if env is not None else dict(os.environ)
         resolved_user = osup.resolve_user(environ, user)
         linger_result = run(["loginctl", "show-user", resolved_user, "-p", "Linger", "--value"])
         if (linger_result.stdout or "").strip() == "no":
@@ -590,19 +572,13 @@ def _supervised_restart(
     restart_health_timeout: float,
     pid_settle_timeout: float | None,
     platform: str | None,
-    supervisor_dir: Path | None,
     runner,
-    uid,
-    user,
+    uid: int | None,
 ) -> int:
-    osup, kind = _supervised_kind(platform)
-    _clear_stale_pidfile(env)
-    environ = env if env is not None else dict(os.environ)
-    run = runner if runner is not None else osup.default_runner
+    osup, kind, run = _supervisor_seam(env, platform, runner)
 
     if kind == "darwin":
-        resolved_uid = osup.resolve_uid(uid)
-        run(["launchctl", "kickstart", "-k", f"gui/{resolved_uid}/{osup.LAUNCHD_LABEL}"])
+        run(["launchctl", "kickstart", "-k", osup.launchd_service(uid)])
     else:
         run(["systemctl", "--user", "restart", osup.SYSTEMD_UNIT_NAME])
 
@@ -620,7 +596,7 @@ def _supervised_restart(
     deadline = time.time() + settle_timeout
     pid = None
     while True:
-        probe = _probe_supervisor(run, kind, environ, uid=uid, user=user)
+        probe = _probe_supervisor(osup, run, kind, uid)
         if probe.pid is not None:
             pid = probe.pid
             break
@@ -675,10 +651,8 @@ def start(
             port=port,
             health_timeout=start_health_timeout,
             platform=platform,
-            supervisor_dir=supervisor_dir,
             runner=runner,
             uid=uid,
-            user=user,
         )
 
     checkout, entrypoint = _resolve_entrypoint(env)
@@ -750,10 +724,7 @@ def stop(
             health_timeout=health_timeout,
             pid_settle_timeout=pid_settle_timeout,
             platform=platform,
-            supervisor_dir=supervisor_dir,
             runner=runner,
-            uid=uid,
-            user=user,
         )
 
     pidfile = _pidfile(env)
@@ -808,7 +779,6 @@ def status(
             port=port,
             health_timeout=health_timeout,
             platform=platform,
-            supervisor_dir=supervisor_dir,
             runner=runner,
             uid=uid,
             user=user,
@@ -957,10 +927,8 @@ def restart(
             restart_health_timeout=restart_health_timeout,
             pid_settle_timeout=pid_settle_timeout,
             platform=platform,
-            supervisor_dir=supervisor_dir,
             runner=runner,
             uid=uid,
-            user=user,
         )
 
     stop(env=env, port=port, timeout=stop_timeout, health_timeout=health_timeout)

@@ -213,13 +213,19 @@ def default_runner(argv: list) -> subprocess.CompletedProcess:
 
 
 # ---------------------------------------------------------------------------
-# uid / user resolution — shared with outpost_lifecycle's supervised verbs
+# launchd target / user resolution — shared with outpost_lifecycle's
+# supervised verbs
 # ---------------------------------------------------------------------------
 
 
-def resolve_uid(uid: int | None) -> int:
-    """The launchd GUI domain's uid — the caller's own uid unless overridden."""
-    return uid if uid is not None else os.getuid()
+def launchd_domain(uid: int | None) -> str:
+    """The launchd GUI domain — the caller's own uid unless overridden."""
+    return f"gui/{uid if uid is not None else os.getuid()}"
+
+
+def launchd_service(uid: int | None) -> str:
+    """The launchd service target for the outpost job in :func:`launchd_domain`."""
+    return f"{launchd_domain(uid)}/{LAUNCHD_LABEL}"
 
 
 def resolve_user(env: dict[str, str], user: str | None) -> str:
@@ -295,10 +301,8 @@ def enable(
     checkout, entrypoint = outpost_lifecycle._resolve_entrypoint(environ)
 
     _which = which_runner or (lambda name: shutil.which(name, path=environ.get("PATH")))
-    node_bin = _resolve_binary("node", _which)
-    git_bin = _resolve_binary("git", _which)
-    lore_bin = _resolve_binary("lore", _which)
-    path_value = _compose_path([node_bin, git_bin, lore_bin])
+    resolved = {name: _resolve_binary(name, _which) for name in _REQUIRED_BINARIES}
+    path_value = _compose_path(list(resolved.values()))
 
     state = ensure_dir(state_dir(outpost_lifecycle.APP, env=environ))
     log_path = state / outpost_lifecycle.LOG_NAME
@@ -306,7 +310,7 @@ def enable(
     entry = SupervisorEntry(
         entrypoint=entrypoint,
         checkout=checkout,
-        node_bin=node_bin,
+        node_bin=resolved["node"],
         port=port,
         log_path=log_path,
         path_value=path_value,
@@ -329,9 +333,8 @@ def enable(
     run = runner if runner is not None else default_runner
 
     if kind == "darwin":
-        domain = f"gui/{resolve_uid(uid)}"
-        run(["launchctl", "bootout", f"{domain}/{LAUNCHD_LABEL}"])
-        run(["launchctl", "bootstrap", domain, str(target)])
+        run(["launchctl", "bootout", launchd_service(uid)])
+        run(["launchctl", "bootstrap", launchd_domain(uid), str(target)])
     else:
         run(["systemctl", "--user", "daemon-reload"])
         run(["systemctl", "--user", "enable", "--now", SYSTEMD_UNIT_NAME])
@@ -369,7 +372,7 @@ def disable(
     run = runner if runner is not None else default_runner
 
     if kind == "darwin":
-        run(["launchctl", "bootout", f"gui/{resolve_uid(uid)}/{LAUNCHD_LABEL}"])
+        run(["launchctl", "bootout", launchd_service(uid)])
     else:
         run(["systemctl", "--user", "disable", "--now", SYSTEMD_UNIT_NAME])
 
