@@ -5,6 +5,20 @@ format described by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+- **Breaking:** A record create, a record update, or a default `lore flush` no
+  longer waits on a commit-and-push round trip — each schedules its own
+  debounced, single-flight `lore publish --vault NAME` for the vault it wrote,
+  in the background, and returns immediately. `lore flush --wait` keeps the
+  previous default: the full commit → pull → push flow, run in-process, before
+  flush returns. `lore flush --no-sync` is unchanged (no git action of any
+  kind). A vault with `auto_publish: false` in `config.json` is opted out of
+  the write-triggered publish entirely; it still requires an explicit
+  `lore sync` (or `lore flush --wait`) to converge. A `shared: true` vault now
+  publishes automatically by default too, unless it sets `auto_publish: false`
+  itself — the write-triggered path no longer exempts shared vaults the way
+  `lore flush`'s old sync tail did. If the last automatic publish for a vault
+  did not succeed, the next `lore record create`/`update` into it prints one
+  stderr line naming the vault and `lore sync` as the remedy.
 - A resolver failure reported by `lore sync` is now worded plainly and carries
   no version-control vocabulary: the messages that embedded git's own stderr,
   or named a rebase, now say what could not be done in terms of the vault. The

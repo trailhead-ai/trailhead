@@ -1,6 +1,6 @@
 ---
 name: flush
-description: "Evaluate outstanding session candidates into vault records, then flip the session clean. Runnable at any time — not just at session end. Clean session → nothing to flush. Dirty session → read the candidate log, apply agent judgment to evaluate each outstanding candidate (those after the flushed-at watermark) into a record via `lore record create`, then call `lore flush` to stamp clean, commit, and sync every writable vault. Use for /lore:flush, \"flush the session\", \"evaluate candidates\", \"finalize the session\", \"I'm done\", \"wrap up\", \"close this out\"."
+description: "Evaluate outstanding session candidates into vault records, then flip the session clean. Runnable at any time — not just at session end. Clean session → nothing to flush. Dirty session → read the candidate log, apply agent judgment to evaluate each outstanding candidate (those after the flushed-at watermark) into a record via `lore record create`, then call `lore flush` to stamp clean, commit, and request a background publish for every vault. Use for /lore:flush, \"flush the session\", \"evaluate candidates\", \"finalize the session\", \"I'm done\", \"wrap up\", \"close this out\"."
 ---
 
 # /lore:flush — Evaluate candidates and flip the session clean
@@ -19,18 +19,23 @@ discards the noise). The flow:
 3. Apply agent judgment to evaluate each outstanding candidate into a durable vault
    record via `lore record create`.
 4. Call `lore flush` (the CLI verb) to flip the session `clean`, stamp the new
-   `flushed-at` watermark, commit, and — in its **sync tail** — commit, pull, and
-   push every writable vault.
+   `flushed-at` watermark, commit, and — by default — REQUEST a background
+   publish (commit → pull → push) for every vault it wrote, without waiting
+   for that publish to land.
 
 The **CLI** (`lore flush`) carries the mechanical flip; this **skill** carries the
 judgment (candidate evaluation).
 
-**No separate sync step.** The records step 3 created routinely live in a
-*different vault* from the session record, since `lore record create` routes by
-scope. `lore flush` handles that itself: its own commit stages the session
-record's paths, and the sync tail that follows saves everything else — every
-writable vault, committed, pulled, and pushed. Shared (`shared: true`) vaults are
-never touched by the tail.
+**No separate sync step, and no waiting for one either.** The records step 3
+created routinely live in a *different vault* from the session record, since
+`lore record create` already requested its own background publish for that
+vault at create time (the write-triggered publish path). `lore flush`'s own
+commit stages the session record's paths, and its default closing step
+requests a publish for every configured vault — `shared: true` included,
+unless that vault opts out with its own `auto_publish: false` — rather than
+syncing in-process. `lore flush --wait` runs that commit → pull → push flow
+in-process instead, for a caller that needs to know the push has actually
+landed before it moves on.
 
 ## Scoping
 
@@ -128,7 +133,7 @@ For each outstanding candidate, apply agent judgment:
 
 If no outstanding candidates exist (all already evaluated), proceed directly
 to Step 4 — a clean session says nothing about whether the vaults themselves are
-committed, and the flush's sync tail is what settles that.
+saved, and the flush's closing step is what settles that.
 
 ### Step 4 — Flip the session clean
 
@@ -139,12 +144,23 @@ lore flush
 This stamps `status: clean`, records the new `flushed-at` watermark in
 `annotations`, and commits the session record's own explicit paths (that commit,
 and only that commit, is scoped to those paths — never `git add -A`). Relay any
-notices it prints (e.g. non-git vault, push failure).
+notices it prints (e.g. non-git vault, a mid-resolution vault skipped).
 
-It then runs the **sync tail**: the full commit → pull → push flow over every
-writable vault, which is what saves the records Step 3 created. Its per-vault
-output is `lore sync`'s own — relay it, especially any vault reporting "No origin
-remote", whose records exist only on this disk.
+It then **requests a background publish** for every configured vault it wrote —
+the same debounced, single-flight worker a record create/update already
+triggers — rather than syncing in-process, and returns without waiting for that
+publish to land. There is nothing further to relay about the publish itself:
+it runs after this command has already exited.
+
+**`--wait` runs the closing flow in-process instead**, for a caller that needs
+the push to have actually landed before it moves on:
+
+```bash
+lore flush --wait
+```
+
+That form's per-vault output is `lore sync`'s own — relay it, especially any
+vault reporting "No origin remote", whose records exist only on this disk.
 
 **`--no-sync` is the opt-out**, for offline work or when the vaults must not move
 yet:
@@ -153,16 +169,15 @@ yet:
 lore flush --no-sync
 ```
 
-That form commits the session record(s) only — nothing else — and ends by naming
-what it left behind:
+That form commits the session record(s) only — nothing else, no publish
+requested — and ends by naming what it left behind:
 
 ```
 notice: vault(s) still holding unsynced work — run `lore sync`:
   trailhead: 12 uncommitted change(s); no origin remote — nothing is backed up off-disk
 ```
 
-Only that notice-and-stop shape needs a follow-up sync; a default flush has
-already done it.
+`--wait` and `--no-sync` are mutually exclusive.
 
 ### Step 5 — Report to the user
 
@@ -170,7 +185,7 @@ already done it.
 Flushed session `<key>` (status: clean).
 
 Evaluated N candidate(s) → M record(s) created, K discarded.
-Synced: <per-vault outcomes from the sync tail>.
+Publish requested for: <every configured vault, per the CLI's own stderr line>.
 ```
 
 ## Edge cases
@@ -184,18 +199,22 @@ Synced: <per-vault outcomes from the sync tail>.
   outstanding (conservative — never drop candidates silently).
 - **Non-git vault.** `lore flush` stamps the sidecar but skips the commit,
   printing a notice on stderr. Relay it.
-- **The sync tail hit a rebase conflict.** Flush still exits **0** — its commits
+- **`--wait` hit a rebase conflict.** Flush still exits **0** — its commits
   are durable — and the signal is a stderr notice naming the remedy:
   ``the flush is committed locally, but syncing vault 'x' did not complete — to
   settle it, run `lore resolve <vault-dir>` `` (the vault *directory* name, e.g.
   `v-default`). Do not re-run `lore sync`; it would abort straight back out of
   the same conflict. Run the resolve flow in `/lore:sync` instead. Because the
-  exit code is 0, this notice is the only thing that tells you — read the tail's
-  output rather than trusting the exit code.
-- **The sync tail could not reach the network.** Soft, same as `lore sync`: the
-  notice says the flush is committed locally and to re-run `lore sync` later.
-- **A vault already mid-resolution** is skipped by the tail rather than synced —
-  syncing would throw away an in-progress `lore resolve`.
+  exit code is 0, this notice is the only thing that tells you.
+- **A vault's `auto_publish` is `false`.** The default publish request skips
+  that vault entirely (no stamp, no worker) — it stays exactly where the
+  operator asked it to stay, and needs an explicit `lore sync` or
+  `lore flush --wait` to converge.
+- **The last automatic publish for a vault did not succeed.** The next
+  `lore record create`/`update` into it prints a stderr notice naming the
+  vault and `lore sync` as the remedy — relay it.
+- **A vault already mid-resolution** is skipped rather than synced or
+  requested — acting on it would throw away an in-progress `lore resolve`.
 - **`lore flush all` or `lore flush <search>`.** The same evaluation loop applies
   per session. Each session is flushed atomically; a mid-batch failure names the
   failed session and states that already-flushed sessions are clean — a re-run

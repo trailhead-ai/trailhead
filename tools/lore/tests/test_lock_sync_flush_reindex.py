@@ -1393,7 +1393,7 @@ class TestFlushSyncTailHoldsNoLock:
         monkeypatch.setattr(locking, "vault_write_lock", spy_vault)
         monkeypatch.setattr(sync, "cmd_sync", spy_sync)
 
-        args = dispatch.build_parser().parse_args(["flush", "--session-id", SID])
+        args = dispatch.build_parser().parse_args(["flush", "--session-id", SID, "--wait"])
         rc = args.func(args)
 
         assert rc == 0

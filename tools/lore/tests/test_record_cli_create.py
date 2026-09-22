@@ -1903,7 +1903,14 @@ def test_adr_create_second_same_title_gets_dash_2_suffix(tmp_path):
 
 def test_adr_create_leaves_no_lock_file_under_state_dir(tmp_path):
     """No ``.adr-*.lock`` file is created anywhere under the state dir on an
-    adr create — the per-number flock is gone entirely."""
+    adr create — the per-number flock is gone entirely.
+
+    The publish trigger's own single-flight probe lock
+    (``state_dir("lore")/publish/*.lock``) is a distinct, unrelated mechanism
+    introduced later and is excluded here rather than asserted away — this
+    test's subject is the retired per-number adr lock, not every lock file
+    under the state dir.
+    """
     vault, state = _make_vault(tmp_path)
     r = _run(
         ["record", "create", "--kind", "adr", "--title", "First decision"],
@@ -1913,7 +1920,10 @@ def test_adr_create_leaves_no_lock_file_under_state_dir(tmp_path):
     )
     assert r.returncode == 0, r.stderr
     assert list(state.rglob("*.adr-*.lock")) == []
-    assert list(state.rglob("*.lock")) == []
+    non_publish_locks = [
+        p for p in state.rglob("*.lock") if "publish" not in p.parts
+    ]
+    assert non_publish_locks == []
 
 
 def test_existing_numbered_adr_record_remains_readable_and_updatable(tmp_path):

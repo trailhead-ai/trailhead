@@ -333,7 +333,8 @@ def _cmd_vault_ls(args) -> int:
     for v in vaults:
         allowlist = ", ".join(v.records) if v.records else "(all kinds)"
         shared = " shared" if v.shared else ""
-        print(f"{v.name}\t{v.scope}{shared}\t{v.path}\t[{allowlist}]")
+        no_auto_publish = " no-auto-publish" if not v.auto_publish else ""
+        print(f"{v.name}\t{v.scope}{shared}{no_auto_publish}\t{v.path}\t[{allowlist}]")
     return 0
 
 

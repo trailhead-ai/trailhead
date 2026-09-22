@@ -426,10 +426,14 @@ class TestBatchPushesOnce:
         return code, pushes["n"], buf_out.getvalue(), buf_err.getvalue()
 
     def test_the_sync_tail_owns_the_push_when_it_runs(self, tmp_path):
-        """A default (tail-running) batch must not ALSO push via `_flush_push`.
+        """A batch whose tail actually SYNCS (`--wait`) must not ALSO push via
+        `_flush_push`.
 
         Two pushes for one set of commits is the parallel-tail shape this slice
-        exists to remove: the tail's `lore sync` is the push.
+        exists to remove: the tail's `lore sync` is the push. The bare-default
+        tail (`_flush_request_tail`) never runs an in-process sync at all, so
+        exercising this property requires the one tail that does —
+        `--wait` (`_flush_sync_tail`).
         """
         vault, state = _make_vault(tmp_path)
         _git_init(vault)
@@ -437,7 +441,7 @@ class TestBatchPushesOnce:
             assert _candidate(vault, state, sid).returncode == 0
         _commit_baseline(vault)
 
-        code, pushes, out, err = self._run_counting_pushes(state, extra_args=())
+        code, pushes, out, err = self._run_counting_pushes(state, extra_args=("--wait",))
         assert code == 0, err
         for sid in (SID_A, SID_B):
             assert _sidecar(vault, sid)["status"] == "clean"

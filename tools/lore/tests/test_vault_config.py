@@ -404,6 +404,140 @@ def test_is_shared_default_vault_always_false(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# 4b. auto_publish
+# ---------------------------------------------------------------------------
+
+
+def test_auto_publish_false_loads_false(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    cfg = vc()
+    config_path = _write_config(
+        tmp_path,
+        _minimal_config(
+            extra_vaults=[
+                {"name": "my-team", "scope": "team", "auto_publish": False},
+            ]
+        ),
+    )
+    vaults = cfg.load_config(config_path)
+    team_vault = next(v for v in vaults if v.name == "my-team")
+    assert team_vault.auto_publish is False
+
+
+def test_auto_publish_absent_loads_true(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    cfg = vc()
+    config_path = _write_config(
+        tmp_path,
+        _minimal_config(
+            extra_vaults=[
+                {"name": "my-team", "scope": "team"},
+            ]
+        ),
+    )
+    vaults = cfg.load_config(config_path)
+    team_vault = next(v for v in vaults if v.name == "my-team")
+    assert team_vault.auto_publish is True
+
+
+def test_auto_publish_true_loads_true(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    cfg = vc()
+    config_path = _write_config(
+        tmp_path,
+        _minimal_config(
+            extra_vaults=[
+                {"name": "my-team", "scope": "team", "auto_publish": True},
+            ]
+        ),
+    )
+    vaults = cfg.load_config(config_path)
+    team_vault = next(v for v in vaults if v.name == "my-team")
+    assert team_vault.auto_publish is True
+
+
+def test_auto_publish_shared_and_non_shared_behave_identically(tmp_path, monkeypatch):
+    """A shared vault and a non-shared vault honor auto_publish the same way."""
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    cfg = vc()
+    config_path = _write_config(
+        tmp_path,
+        _minimal_config(
+            extra_vaults=[
+                {
+                    "name": "shared-team",
+                    "scope": "team",
+                    "shared": True,
+                    "auto_publish": False,
+                },
+                {
+                    "name": "own-team",
+                    "scope": "team",
+                    "shared": False,
+                    "auto_publish": False,
+                },
+            ]
+        ),
+    )
+    vaults = cfg.load_config(config_path)
+    shared_vault = next(v for v in vaults if v.name == "shared-team")
+    own_vault = next(v for v in vaults if v.name == "own-team")
+    assert shared_vault.auto_publish is False
+    assert own_vault.auto_publish is False
+
+
+def test_auto_publish_non_bool_string_raises(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    cfg = vc()
+    config_path = _write_config(
+        tmp_path,
+        _minimal_config(
+            extra_vaults=[
+                {"name": "my-team", "scope": "team", "auto_publish": "false"},
+            ]
+        ),
+    )
+    with pytest.raises(cfg.VaultConfigError) as exc_info:
+        cfg.load_config(config_path)
+    assert "my-team" in str(exc_info.value)
+
+
+def test_auto_publish_non_bool_number_raises(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    cfg = vc()
+    config_path = _write_config(
+        tmp_path,
+        _minimal_config(
+            extra_vaults=[
+                {"name": "my-team", "scope": "team", "auto_publish": 1},
+            ]
+        ),
+    )
+    with pytest.raises(cfg.VaultConfigError) as exc_info:
+        cfg.load_config(config_path)
+    assert "my-team" in str(exc_info.value)
+
+
+def test_auto_publish_flag_helper_mirrors_shared_flag(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    cfg = vc()
+    config_path = _write_config(
+        tmp_path,
+        _minimal_config(
+            extra_vaults=[
+                {"name": "off-team", "scope": "team", "auto_publish": False},
+                {"name": "on-team", "scope": "team", "auto_publish": True},
+            ]
+        ),
+    )
+    vaults = cfg.load_config(config_path)
+    off_vault = next(v for v in vaults if v.name == "off-team")
+    on_vault = next(v for v in vaults if v.name == "on-team")
+    assert cfg.auto_publish_flag(off_vault) is False
+    assert cfg.auto_publish_flag(on_vault) is True
+
+
+# ---------------------------------------------------------------------------
 # 5. is_configured_vault
 # ---------------------------------------------------------------------------
 

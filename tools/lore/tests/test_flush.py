@@ -6,8 +6,11 @@
     - a ``dirty`` session → status becomes ``clean``, ``annotations['flushed-at']``
       is stamped in the pinned key/format, the one record is reindexed, and the
       session commit stages EXPLICIT paths only (never ``git add -A``).
-    - the sync tail (the default) commits the vault's OTHER dirty files, in its
-      own commit; ``--no-sync`` opts out and leaves them exactly where they were.
+    - the default requests a background publish (commit + pull + push) for every
+      configured vault rather than syncing in-process; ``--wait`` runs that flow
+      in-process instead — for a caller that chains on a completed push — and
+      commits the vault's OTHER dirty files in its own commit; ``--no-sync`` opts
+      out of both and leaves them exactly where they were.
     - re-flush of a now-``clean`` session is an idempotent no-op (no second commit).
     - NO code path ever writes ``status: complete`` / ``status: active`` — the
       sidecar status is only ever ``dirty`` / ``clean``.
@@ -97,8 +100,8 @@ def _candidate(vault, state, sid=SID, body="a candidate\n"):
     )
 
 
-def _flush(vault, state, sid=SID):
-    return _run(["flush", "--session-id", sid], vault=vault, state_dir=state,
+def _flush(vault, state, sid=SID, extra_args=()):
+    return _run(["flush", "--session-id", sid, *extra_args], vault=vault, state_dir=state,
                 env_extra={"CLAUDE_CODE_SESSION_ID": "", "CLAUDE_SESSION_ID": ""})
 
 
@@ -194,11 +197,11 @@ class TestFlushDirtySession:
         assert "unrelated-scratch.md" not in in_session_commit
         assert f"session/{SID}.json" in in_session_commit
 
-    def test_the_sync_tail_commits_the_unrelated_dirty_file(self, tmp_path):
-        """A default flush ends with the full sync flow, so nothing is left dirty."""
+    def test_wait_commits_the_unrelated_dirty_file(self, tmp_path):
+        """`--wait` runs the full sync flow in-process, so nothing is left dirty."""
         vault, state = self._vault_with_a_stray_file(tmp_path)
 
-        r = _flush(vault, state)
+        r = _flush(vault, state, extra_args=["--wait"])
         assert r.returncode == 0, r.stderr
 
         status = subprocess.run(
@@ -227,6 +230,200 @@ class TestFlushDirtySession:
             capture_output=True, text=True,
         ).stdout
         assert "unrelated-scratch.md" in status, "stray file must stay untracked"
+
+    def test_no_sync_requests_no_publish(self, tmp_path, monkeypatch):
+        """`--no-sync` is the full opt-out: no publish request, no spawn."""
+        import lore.cli.publish as publish_mod
+
+        calls = []
+        monkeypatch.setattr(publish_mod, "_spawn_worker", lambda argv: calls.append(list(argv)))
+        vault, state = self._vault_with_a_stray_file(tmp_path)
+        # Matches the XDG_STATE_HOME the CLI call below resolves internally, so
+        # this process's own `request_stamp_path` computation agrees with it.
+        monkeypatch.setenv("XDG_STATE_HOME", str(state))
+
+        r = _flush(vault, state, extra_args=["--no-sync"])
+        assert r.returncode == 0, r.stderr
+
+        assert calls == []
+        assert not publish_mod.request_stamp_path(vault).exists()
+
+    def test_wait_requests_no_publish_and_syncs_inline(self, tmp_path, monkeypatch):
+        """`--wait` runs the sync loop in-process and requests nothing."""
+        import lore.cli.publish as publish_mod
+
+        calls = []
+        monkeypatch.setattr(publish_mod, "_spawn_worker", lambda argv: calls.append(list(argv)))
+        vault, state = self._vault_with_a_stray_file(tmp_path)
+        monkeypatch.setenv("XDG_STATE_HOME", str(state))
+
+        r = _flush(vault, state, extra_args=["--wait"])
+        assert r.returncode == 0, r.stderr
+
+        assert calls == []
+        assert not publish_mod.request_stamp_path(vault).exists()
+        status = subprocess.run(
+            ["git", "-C", str(vault), "status", "--porcelain"],
+            capture_output=True, text=True,
+        ).stdout
+        assert "unrelated-scratch.md" not in status, "--wait must still sync inline"
+
+    def test_default_requests_a_publish_for_every_vault_including_shared_and_syncs_nothing(
+        self, tmp_path, monkeypatch
+    ):
+        """The default tail requests a publish per configured vault (shared
+        included) and never runs an in-process sync — the stray file stays
+        exactly where it was, unlike under `--wait` (see the test above)."""
+        import lore.cli.publish as publish_mod
+
+        calls = []
+        monkeypatch.setattr(publish_mod, "_spawn_worker", lambda argv: calls.append(list(argv)))
+        vault, state = self._vault_with_a_stray_file(tmp_path)
+
+        shared = tmp_path / "shared-vault"
+        shared.mkdir()
+        config_home = tmp_path / "publish-trigger-config"
+        (config_home / "lore").mkdir(parents=True)
+        (config_home / "lore" / "config.json").write_text(
+            json.dumps(
+                {
+                    "vaults": [
+                        {"name": "default", "scope": "default", "path": str(vault)},
+                        {
+                            "name": "teamvault",
+                            "scope": "product",
+                            "path": str(shared),
+                            "shared": True,
+                        },
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        r = _run(
+            ["flush", "--session-id", SID],
+            vault=vault,
+            state_dir=state,
+            env_extra={
+                "CLAUDE_CODE_SESSION_ID": "",
+                "CLAUDE_SESSION_ID": "",
+                "XDG_CONFIG_HOME": str(config_home),
+            },
+        )
+        assert r.returncode == 0, r.stderr
+
+        requested_vaults = {c[-1] for c in calls}
+        assert requested_vaults == {"default", "teamvault"}, (
+            "a shared vault must be requested too, not excluded like the old "
+            f"writable-only sync tail; calls={calls!r}"
+        )
+        status = subprocess.run(
+            ["git", "-C", str(vault), "status", "--porcelain"],
+            capture_output=True, text=True,
+        ).stdout
+        assert "unrelated-scratch.md" in status, (
+            "the default tail must not sync in-process — only request a publish"
+        )
+
+    def test_default_names_the_vaults_a_publish_was_requested_for_on_stderr(
+        self, tmp_path, monkeypatch
+    ):
+        """The flush skill's Step-5 report template says `Publish requested
+        for: <vaults>` — nothing on the default tail prints that today, so
+        the template is unsatisfiable. This pins the stderr line it needs."""
+        import lore.cli.publish as publish_mod
+
+        monkeypatch.setattr(publish_mod, "_spawn_worker", lambda argv: None)
+        vault, state = self._vault_with_a_stray_file(tmp_path)
+
+        r = _flush(vault, state)
+        assert r.returncode == 0, r.stderr
+
+        lines = [
+            line for line in r.stderr.splitlines()
+            if "Publish requested for" in line
+        ]
+        assert len(lines) == 1, f"expected exactly one notice; stderr={r.stderr!r}"
+        assert "default" in lines[0]
+
+    def test_default_names_a_vault_skipped_for_auto_publish_false_on_stderr(
+        self, tmp_path, monkeypatch
+    ):
+        import lore.cli.publish as publish_mod
+
+        calls = []
+        monkeypatch.setattr(publish_mod, "_spawn_worker", lambda argv: calls.append(list(argv)))
+        vault, state = self._vault_with_a_stray_file(tmp_path)
+
+        config_home = tmp_path / "auto-publish-off-config"
+        (config_home / "lore").mkdir(parents=True)
+        (config_home / "lore" / "config.json").write_text(
+            json.dumps(
+                {
+                    "vaults": [
+                        {
+                            "name": "default",
+                            "scope": "default",
+                            "path": str(vault),
+                            "auto_publish": False,
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        r = _run(
+            ["flush", "--session-id", SID],
+            vault=vault,
+            state_dir=state,
+            env_extra={
+                "CLAUDE_CODE_SESSION_ID": "",
+                "CLAUDE_SESSION_ID": "",
+                "XDG_CONFIG_HOME": str(config_home),
+            },
+        )
+        assert r.returncode == 0, r.stderr
+
+        assert calls == [], "auto_publish: false must never spawn"
+        requested_lines = [
+            line for line in r.stderr.splitlines() if "Publish requested for" in line
+        ]
+        assert requested_lines == [], "a fully-skipped flush must not claim a request"
+        skipped_lines = [
+            line for line in r.stderr.splitlines()
+            if "auto_publish" in line and "default" in line
+        ]
+        assert len(skipped_lines) == 1, f"expected exactly one notice; stderr={r.stderr!r}"
+
+    def test_default_excludes_a_vault_whose_schedule_failed_from_the_requested_line(
+        self, tmp_path, monkeypatch
+    ):
+        """A vault whose `request_publish` could not actually schedule the
+        worker (an internal exception, caught and reported as its own
+        stderr line) must not ALSO be named on the "Publish requested for"
+        line — that line means the schedule succeeded, same distinction the
+        auto_publish-off notice already draws."""
+        import lore.cli.publish as publish_mod
+
+        def _boom(_name):
+            raise FileNotFoundError("lore CLI entry script not found")
+
+        monkeypatch.setattr(publish_mod, "_worker_argv", _boom)
+        vault, state = self._vault_with_a_stray_file(tmp_path)
+
+        r = _flush(vault, state)
+        assert r.returncode == 0, r.stderr
+
+        requested_lines = [
+            line for line in r.stderr.splitlines() if "Publish requested for" in line
+        ]
+        assert requested_lines == [], (
+            f"a vault whose schedule failed must not be named as requested; "
+            f"stderr={r.stderr!r}"
+        )
+        assert "could not schedule publish" in r.stderr
 
 
 # ---------------------------------------------------------------------------

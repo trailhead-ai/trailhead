@@ -13,8 +13,10 @@ the command modules stay free of cross-imports for generic plumbing:
   - ``_load_vault_config`` — the single gate for config-driven behavior;
   - ``_resolve_all_vaults`` — the whole-install vault enumeration used by ``sync``
     and ``status``, as opposed to ``resolve_active_vault``'s ``default``-only view,
-    plus ``_partition_writable_vaults`` — the ``shared: true`` exclusion every
-    WRITE/PUSH fan-out over that enumeration applies;
+    plus ``_partition_writable_vaults`` — splits that enumeration into
+    ``(writable, shared)``, used by the in-process commit/push fan-outs that must
+    never act on a ``shared: true`` vault (``lore flush --wait``'s sync tail and
+    its own shared-vault report);
   - the git primitives (``_git`` / ``_vault_is_git_toplevel`` /
     ``_vault_mid_rebase`` / ``_vault_upstream_ref``) shared by ``sync``, ``flush``,
     ``resolve`` and ``resolve_state``, plus ``_vault_drift`` — the "is this vault
@@ -27,6 +29,7 @@ from __future__ import annotations
 import hashlib
 import os
 import select
+import socket
 import subprocess
 import sys
 from pathlib import Path
@@ -73,6 +76,58 @@ def _read_stdin_body() -> str:
             "that closes (e.g. `</dev/null`), or omit the pipe"
         )
     return sys.stdin.read()
+
+
+def _camp_self_host_name(env: dict[str, str]) -> "str | None":
+    """Return camp's declared self name for this host, or ``None``.
+
+    Lazy, guarded import mirroring the ``vault/layers.py`` camp-import
+    precedent — the camp plugin root is a sibling subtree that must be added
+    to ``sys.path`` before ``camp.host.config`` can be imported. Camp being
+    unimportable (no sibling checkout, or blocked deliberately), the hosts
+    file being absent, or it being malformed, all resolve to ``None`` here so
+    the caller falls back to the OS hostname rather than failing a sync over
+    host-name attribution.
+
+    Bootstraps trailhead FIRST, before the camp import — same reason and same
+    guard as ``vault/layers.py``'s own camp import: camp lazily imports
+    ``trailhead.paths`` internally (inside ``self_host_name``), and without
+    this call first, that import raises ``ModuleNotFoundError`` whenever
+    nothing else has already made trailhead importable in this process.
+    """
+    try:
+        import _bootstrap
+
+        _bootstrap.ensure_trailhead_importable()
+    except (ImportError, SystemExit):
+        return None
+    try:
+        from ..vault.layers import _CAMP_PLUGIN_ROOT
+    except ImportError:
+        return None
+    if _CAMP_PLUGIN_ROOT is not None and str(_CAMP_PLUGIN_ROOT) not in sys.path:
+        sys.path.insert(0, str(_CAMP_PLUGIN_ROOT))
+    try:
+        import camp.host.config as _host_config
+    except ImportError:
+        return None
+    try:
+        return _host_config.self_host_name(env=env)
+    except _host_config.HostConfigError:
+        return None
+
+
+def host_name(env: "dict[str, str] | None" = None) -> str:
+    """Return this host's name for attribution in generated commit messages.
+
+    Camp's own declared self name (``self_host_name``) when camp is
+    importable and a name is declared; otherwise the OS hostname
+    (``socket.gethostname()``) — a name is always returned, never ``None``,
+    so a message-less sync can always say who published.
+    """
+    if env is None:
+        env = os.environ
+    return _camp_self_host_name(env) or socket.gethostname()
 
 
 def _resolve_xdg_dir(
@@ -374,13 +429,15 @@ def _resolve_all_vaults_and_shared() -> tuple[list[tuple[str, Path]], set[str], 
 def _partition_writable_vaults(vaults) -> tuple[list, list]:
     """Split ``(name, path)`` pairs into ``(writable, shared)``, order preserved.
 
-    The session surface resolves a key by asking every configured vault whether
-    it holds it. That is fine for reads, but it also made every configured vault
-    a WRITE target: a dirty session record planted in a shared vault would be
-    flipped ``clean``, committed, and pushed by a bare ``lore flush`` — untrusted
-    content actuating a local commit under the operator's git identity.
-    Excluding ``shared: true`` vaults from a write fan-out is the same default
-    ``lore record rename``'s reference sweep already takes.
+    A ``shared`` vault holds untrusted, multi-user content, so no in-process
+    commit or push may act on it under this operator's git identity. This is
+    the filter behind ``lore flush --wait``'s sync tail (which stages, commits,
+    and pushes every writable vault directly, in-process) and that same path's
+    own shared-vault report. It is NOT applied to every write surface: the
+    default flush's background publish request (``publish.request_publish``,
+    via ``_flush_request_tail``) covers ``shared: true`` vaults too, gated
+    per-vault by that vault's own ``auto_publish`` setting instead of this
+    blanket exclusion — see ``_flush_request_tail``'s own docstring.
 
     The ``shared`` half is RETURNED rather than dropped so callers can name what
     they skipped once they know it was relevant: an operator whose session really
