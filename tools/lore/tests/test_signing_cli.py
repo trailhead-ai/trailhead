@@ -18,57 +18,21 @@ from pathlib import Path
 import pytest
 
 from conftest import load_script, make_git_vault, run_cli
-
-REPO_ROOT = Path(__file__).parent.parent
-PLUGIN_ROOT = REPO_ROOT / "plugins" / "lore"
+from test_vault_signing import (
+    _allowed_signers_path,
+    _generate_key,
+    _isolated_home,
+    _verify_good,
+    _write_hostile_global_gitconfig,
+)
 
 
 # ── harness ──────────────────────────────────────────────────────────────
 
 
-def _git(path: Path, *args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(["git", "-C", str(path), *args], capture_output=True, text=True)
-
-
-def _write_hostile_global_gitconfig(home: Path) -> None:
-    home.mkdir(parents=True, exist_ok=True)
-    bad_gpg_program = home / "bad-gpg-program"
-    bad_gpg_program.write_text("#!/bin/sh\nexit 1\n")
-    bad_gpg_program.chmod(0o755)
-    (home / ".gitconfig").write_text(
-        "[user]\n\tname = Nobody\n\temail = nobody@example.invalid\n"
-        "[commit]\n\tgpgsign = true\n"
-        "[gpg]\n\tformat = openpgp\n"
-        f"\tprogram = {bad_gpg_program}\n"
-    )
-
-
-def _verify_good(vault: Path, allowed_signers: Path, rev: str = "HEAD") -> str:
-    result = subprocess.run(
-        ["git", "-C", str(vault),
-         "-c", f"gpg.ssh.allowedSignersFile={allowed_signers}",
-         "log", "-1", "--pretty=%G?", rev],
-        capture_output=True, text=True,
-    )
-    return result.stdout.strip()
-
-
-def _generate_key(tmp_path: Path, name: str, *, passphrase: str = "") -> Path:
-    key_path = tmp_path / name
-    subprocess.run(
-        ["ssh-keygen", "-t", "ed25519", "-N", passphrase, "-f", str(key_path), "-C", name],
-        check=True, capture_output=True, timeout=15,
-    )
-    return key_path
-
-
 @pytest.fixture(autouse=True)
 def _no_agent_no_tty(monkeypatch):
     monkeypatch.delenv("SSH_AUTH_SOCK", raising=False)
-
-
-def _isolated_home() -> Path:
-    return Path(os.environ["HOME"])
 
 
 def _run_enable(vault, state, *, key=None, extra_env=None):
@@ -86,11 +50,6 @@ def _signing_module():
     return load_script("lore.vault.signing")
 
 
-def _allowed_signers_path(state: Path, home: Path) -> Path:
-    signing = _signing_module()
-    return signing.signing_dir(env={"XDG_STATE_HOME": str(state), "HOME": str(home)}) / signing.ALLOWED_SIGNERS_FILENAME
-
-
 def _configured_key_path(state: Path, home: Path):
     signing = _signing_module()
     return signing.load_key_path(env={"XDG_STATE_HOME": str(state), "HOME": str(home)})
@@ -102,7 +61,7 @@ def _fingerprint(key_path: Path) -> str:
     return result.stdout.strip()
 
 
-# ── enable, no argument — the seam test with Task 1 (written first) ───────
+# ── enable, no argument ───────────────────────────────────────────────────
 
 
 def test_enable_generates_a_key_and_a_sync_commit_verifies_against_it(tmp_path):
