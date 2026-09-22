@@ -325,9 +325,10 @@ def test_enable_with_key_adopts_an_existing_unencrypted_key_in_place(tmp_path):
     assert _verify_good(vault, allowed) == "G"
 
 
-def _assert_refused_and_nothing_written(r, state: Path, reason_substr: str):
+def _assert_refused_and_nothing_written(r, state: Path, reason_substr: str, remedy_substr: str):
     assert r.returncode != 0
     assert reason_substr in r.stderr, r.stderr
+    assert remedy_substr in r.stderr, r.stderr
     signing = _signing_module()
     d = signing.signing_dir(env={"XDG_STATE_HOME": str(state), "HOME": os.environ["HOME"]})
     assert not (d / signing.CONFIG_FILENAME).exists()
@@ -340,7 +341,9 @@ def test_enable_with_key_refuses_a_nonexistent_path(tmp_path):
     missing = tmp_path / "nope" / "no-such-key"
 
     r = _run_enable(vault, state, key=missing)
-    _assert_refused_and_nothing_written(r, state, "does not exist")
+    _assert_refused_and_nothing_written(
+        r, state, "does not exist", "run `lore signing enable` with no argument"
+    )
 
 
 def test_enable_with_key_refuses_a_public_key_file(tmp_path):
@@ -351,7 +354,9 @@ def test_enable_with_key_refuses_a_public_key_file(tmp_path):
     pub_path.chmod(0o600)
 
     r = _run_enable(vault, state, key=pub_path)
-    _assert_refused_and_nothing_written(r, state, "not a private key")
+    _assert_refused_and_nothing_written(
+        r, state, "not a private key", "point --key at a regular SSH private key file"
+    )
 
 
 def test_enable_with_key_refuses_a_passphrase_protected_key(tmp_path):
@@ -360,7 +365,9 @@ def test_enable_with_key_refuses_a_passphrase_protected_key(tmp_path):
     key_path = _generate_key(tmp_path, "passkey", passphrase="hunter2")
 
     r = _run_enable(vault, state, key=key_path)
-    _assert_refused_and_nothing_written(r, state, "passphrase")
+    _assert_refused_and_nothing_written(
+        r, state, "needs a passphrase", "run `lore signing enable` with no argument"
+    )
 
 
 def test_enable_with_key_refuses_a_key_at_mode_0644(tmp_path):
@@ -370,7 +377,9 @@ def test_enable_with_key_refuses_a_key_at_mode_0644(tmp_path):
     key_path.chmod(0o644)
 
     r = _run_enable(vault, state, key=key_path)
-    _assert_refused_and_nothing_written(r, state, "chmod 600")
+    _assert_refused_and_nothing_written(
+        r, state, "readable by others", f"chmod 600 {key_path}"
+    )
 
 
 def test_enable_with_key_switches_from_a_generated_key_and_no_arg_keeps_it(tmp_path):
