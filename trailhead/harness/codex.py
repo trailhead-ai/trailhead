@@ -50,8 +50,14 @@ Live enumeration
 ----------------
 Codex ships no non-interactive session lister of its own (``codex agents`` is
 a TUI browser), so ``session_enumerate`` returns the argv that runs
-:mod:`trailhead.harness.codex_sessions` as a subprocess (``sys.executable -m
-trailhead.harness.codex_sessions``). That module resolves the Codex home from
+:mod:`trailhead.harness.codex_sessions` as a subprocess, invoked BY FILE PATH
+(``sys.executable <path-to-codex_sessions.py>``) rather than ``-m``: a caller
+(camp's teardown guard, ``enumerate_records``) spawns this argv with no cwd
+override and no guarantee ``trailhead`` is importable via ``sys.path`` — an
+installed package, or the caller's own cwd sitting at the repo root, is never
+assumed. ``codex_sessions.py`` bootstraps its own ``sys.path`` from
+``__file__`` before importing ``trailhead``, so the file-path invocation
+works unmodified from any cwd. That module resolves the Codex home from
 its own process environment through the same ``codex_home`` choke point and
 prints one JSON array of the threads whose
 ``<home>/thread-writer-locks/<thread-id>.lock`` is currently held; its
@@ -201,7 +207,14 @@ def _account_dir(account: str, env: dict[str, str]) -> Path:
         )
     expanded = account
     if account == "~" or account.startswith("~/"):
-        home = env.get("HOME") or env.get("USERPROFILE") or ""
+        home = env.get("HOME") or env.get("USERPROFILE")
+        if not home:
+            raise HarnessError(
+                f"session_launch_env_set: account {account!r} is `~`-relative, but "
+                "neither HOME nor USERPROFILE is set in the given environment, so "
+                "it cannot be resolved. An empty HOME would otherwise expand the "
+                "account to a path rooted at the filesystem root."
+            )
         expanded = home + account[1:]
     path = Path(expanded)
     if not path.is_absolute():
@@ -334,15 +347,32 @@ def _resolve_rollout_path(session_id: str, sessions_dir: Path) -> Path | None:
 
     Returns ``None`` when the id is not a usable path component, the sessions
     directory does not exist, or no rollout filename parses to that id.
+
+    A thread can have several rollouts sharing the same parsed id — the
+    ``_<rollout-id>`` suffix form. When more than one candidate matches, the
+    choice is DETERMINISTIC rather than whichever the filesystem happens to
+    list first: newest by ``mtime`` wins, with the filename as a tiebreak for
+    an exact ``mtime`` collision. A candidate this process cannot ``stat`` is
+    treated as older than every candidate it can.
     """
     if not _is_session_id(session_id):
         return None
     if not sessions_dir.is_dir():
         return None
-    for path, candidate_id in _iter_rollouts(sessions_dir):
-        if candidate_id == session_id:
-            return path
-    return None
+    candidates = [
+        path for path, candidate_id in _iter_rollouts(sessions_dir) if candidate_id == session_id
+    ]
+    if not candidates:
+        return None
+
+    def _sort_key(path: Path) -> tuple[float, str]:
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            mtime = float("-inf")
+        return (mtime, path.name)
+
+    return max(candidates, key=_sort_key)
 
 
 def codex_home(env: dict[str, str]) -> Path:
@@ -427,7 +457,16 @@ class CodexHarness(Harness):
     def detect(cls, env: dict[str, str]) -> bool:
         if _codex_on_path(env):
             return True
-        return (codex_home(env) / _CODEX_CONFIG_FILENAME).is_file()
+        try:
+            home = codex_home(env)
+        except HarnessError:
+            # A relative CODEX_HOME or a missing HOME/USERPROFILE means the
+            # config-file half of detection cannot be answered — treated as
+            # absent rather than propagated, so a stray malformed env var
+            # never aborts `detect_harnesses` (and so `trailhead install`)
+            # for a user who has never touched Codex.
+            return False
+        return (home / _CODEX_CONFIG_FILENAME).is_file()
 
     # -- manifest ---------------------------------------------------------
 
@@ -613,7 +652,8 @@ class CodexHarness(Harness):
         filesystem validation, mirroring
         :meth:`~trailhead.harness.claude_code.ClaudeCodeHarness.session_enumerate`.
         """
-        argv = [sys.executable, "-m", "trailhead.harness.codex_sessions"]
+        script = Path(__file__).resolve().parent / "codex_sessions.py"
+        argv = [sys.executable, str(script)]
         if workspace is not None:
             argv += ["--workspace", _workspace_argv_value("session_enumerate", workspace)]
         return argv

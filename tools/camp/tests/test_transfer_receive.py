@@ -1611,3 +1611,46 @@ class TestConversationUnknownRootRefused:
         # them: a leftover would be an un-rewritten transcript surviving a
         # refusal under a name nothing else looks for.
         assert list(claude_dir.rglob("*rewrite-staged*")) == []
+
+
+class TestConversationRewriteUnsupportedForCodex:
+    """AC25: a Codex-configured group's conversation transfer visibly
+    degrades rather than silently landing a transcript, or crashing, on a
+    harness with no transcript-rewrite concept. `CodexHarness` overrides
+    neither `session_transcript_destination` (base default `None`) nor
+    `rewrite_transcript_workspace` (base default `False`) — driven here
+    through the real consumer, `camp.transfer.receive.conversations`, via
+    `harness_for` resolving a `[harness] binary = "codex"` group. The refusal
+    fires at the DESTINATION step (before rewrite is ever reached), which is
+    itself the seam's existing visible-degradation path: an operator sees
+    `ConversationDestinationRefused` naming the session id rather than a
+    silently un-rewritten or missing transcript.
+    """
+
+    def test_codex_group_conversation_refuses_naming_no_transcript_destination_concept(
+        self, one_member_group
+    ):
+        from camp.transfer import receive
+
+        g = one_member_group
+        g["group"]["harness"] = {"binary": "codex"}
+        _seed_workspace(g, "feat-x")
+        env = _conversation_env(g)
+        session_id = "11111111-1111-4111-8111-111111111111"
+
+        with pytest.raises(receive.ConversationDestinationRefused) as exc_info:
+            receive.conversations(
+                groups=[g["group"]],
+                group_name="testgroup",
+                slug="feat-x",
+                session_id=session_id,
+                subpath=".",
+                archive_stream=io.BytesIO(
+                    _archive_bytes(json.dumps({"cwd": SENDER_ROOT}).encode() + b"\n")
+                ),
+                env=env,
+            )
+
+        message = str(exc_info.value)
+        assert session_id in message
+        assert "could not compose a destination" in message

@@ -29,6 +29,7 @@ Every path comes from ``tmp_path`` and every group state dir from an injected
 from __future__ import annotations
 
 import ast
+import json
 import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
@@ -606,3 +607,61 @@ def test_a_session_in_the_second_declared_store_still_blocks_removal_when_live(
     )
 
     assert [c.session_id for c in blocking] == [_UUID_A]
+
+def test_gather_pool_finds_a_live_codex_session_from_a_cwd_with_no_trailhead_on_sys_path(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Regression for the real Codex harness's `session_enumerate` argv: camp
+    puts the repo root on `sys.path` inside ITS OWN process
+    (`_bootstrap.ensure_trailhead_importable`), but `gather_pool`'s live probe
+    spawns `session_enumerate`'s argv as a SUBPROCESS with no cwd override, so
+    a child process does not inherit that `sys.path` entry. Driven against the
+    real `get_harness("codex")` (not `_Harness`) and a real held thread lock,
+    from a cwd that is neither the repo root nor on any Python path, so this
+    only stays green if the argv itself is importable from anywhere.
+    """
+    import fcntl
+    import os
+
+    from trailhead.harness import get_harness
+
+    import camp.launch.teardown_guard as guard
+
+    codex_home = tmp_path / "codex-home"
+    lock_dir = codex_home / "thread-writer-locks"
+    lock_dir.mkdir(parents=True)
+    thread_id = "01a0c9d2-1038-7b11-ad91-9c36433a8ce7"
+    lock_path = lock_dir / f"{thread_id}.lock"
+    lock_path.write_text("")
+
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    sessions_dir = codex_home / "sessions" / "2024" / "01" / "01"
+    sessions_dir.mkdir(parents=True)
+    payload = {
+        "session_id": thread_id,
+        "id": thread_id,
+        "timestamp": "2024-01-01T00:00:00Z",
+        "cwd": str(ws),
+        "source": "cli",
+    }
+    meta_line = json.dumps(
+        {"timestamp": "2024-01-01T00:00:00Z", "ordinal": 0, "type": "session_meta", "payload": payload}
+    )
+    (sessions_dir / f"rollout-2024-01-01T12-00-00-{thread_id}.jsonl").write_text(meta_line + "\n")
+
+    env = {"CODEX_HOME": str(codex_home), "HOME": str(tmp_path / "home")}
+
+    caller_cwd = tmp_path / "camp-launch-dir"
+    caller_cwd.mkdir()
+    monkeypatch.chdir(caller_cwd)
+
+    fd = os.open(lock_path, os.O_RDONLY)
+    fcntl.flock(fd, fcntl.LOCK_EX)
+    try:
+        transcripts, live = guard.gather_pool([get_harness("codex")], env=env)
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+
+    assert [r.session_id for r in live] == [thread_id]
