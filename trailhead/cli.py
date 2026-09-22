@@ -35,6 +35,8 @@ from trailhead.outpost_lifecycle import (
     status,
     stop,
 )
+from trailhead.outpost_supervisor import disable as supervisor_disable
+from trailhead.outpost_supervisor import enable as supervisor_enable
 from trailhead.pathint import PathIntegrationError, shellenv_lines
 from trailhead.paths import PathResolutionError
 from trailhead.uninstall import run_uninstall
@@ -166,6 +168,8 @@ def _cmd_outpost(args: argparse.Namespace) -> int:
         "status": status,
         "restart": restart,
         "open": open_ui,
+        "enable": supervisor_enable,
+        "disable": supervisor_disable,
     }
     handler = dispatch.get(args.outpost_command)
     if handler is None:
@@ -342,6 +346,12 @@ def _build_parser() -> argparse.ArgumentParser:
         "restart", help="Rebuild the outpost checkout, then stop and start the daemon."
     )
     outpost_sub.add_parser("open", help="Open the outpost web UI in your browser.")
+    outpost_sub.add_parser(
+        "enable", help="Register the outpost daemon with the host supervisor (launchd/systemd)."
+    )
+    outpost_sub.add_parser(
+        "disable", help="Deregister and remove the outpost daemon's host-supervisor entry."
+    )
     # Carry the parser so the handler can print help when no verb is given.
     outpost_p.set_defaults(outpost_parser=outpost_p)
 
