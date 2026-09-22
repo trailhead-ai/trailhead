@@ -140,12 +140,12 @@ class TestTeardown:
     def test_multiple_harnesses_torn_down(self, tmp_path):
         _make_harness_tree(tmp_path, "claude_code", ["lore"])
         # A second (unknown) harness dir — torn down without CLI calls.
-        _make_harness_tree(tmp_path, "codex", ["craft"], registered=False)
+        _make_harness_tree(tmp_path, "an-unimplemented-harness", ["craft"], registered=False)
         with _recording() as (calls, runner, _):
             rc = run_uninstall(env=_env(tmp_path), assume_yes=True, runner=runner)
         assert rc == 0
         assert not (tmp_path / "composed" / "claude_code").exists()
-        assert not (tmp_path / "composed" / "codex").exists()
+        assert not (tmp_path / "composed" / "an-unimplemented-harness").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -155,12 +155,12 @@ class TestTeardown:
 
 class TestBestEffort:
     def test_unknown_harness_warns_but_removes_tree(self, tmp_path, capsys):
-        _make_harness_tree(tmp_path, "codex", ["craft"])
+        _make_harness_tree(tmp_path, "an-unimplemented-harness", ["craft"])
         with _recording() as (calls, runner, _):
             rc = run_uninstall(env=_env(tmp_path), assume_yes=True, runner=runner)
         assert rc == 0
         assert "unknown harness" in capsys.readouterr().err
-        assert not (tmp_path / "composed" / "codex").exists()
+        assert not (tmp_path / "composed" / "an-unimplemented-harness").exists()
         # No CLI calls for an unknown harness.
         assert calls == []
 

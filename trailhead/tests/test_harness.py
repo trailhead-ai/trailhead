@@ -44,8 +44,8 @@ class TestFactory:
         assert isinstance(get_harness("claude"), ClaudeCodeHarness)
 
     def test_unknown_harness_raises(self):
-        with pytest.raises(HarnessError, match="codex"):
-            get_harness("codex")
+        with pytest.raises(HarnessError, match="bogus-harness"):
+            get_harness("bogus-harness")
 
 
 class TestDetection:

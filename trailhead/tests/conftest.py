@@ -25,6 +25,7 @@ def _redirect_claude_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
     `_forbid_real_home` below is what covers those.
     """
     monkeypatch.setenv("TRAILHEAD_CLAUDE_DIR", str(tmp_path / "ambient-claude"))
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "ambient-codex"))
 
 
 @pytest.fixture()

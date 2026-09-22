@@ -14,6 +14,7 @@ import os
 
 from trailhead.harness.base import Harness, HarnessError, SessionTranscript
 from trailhead.harness.claude_code import ClaudeCodeHarness, claude_config_file
+from trailhead.harness.codex import CodexHarness
 
 __all__ = [
     "Harness",
@@ -21,6 +22,7 @@ __all__ = [
     "SessionTranscript",
     "ClaudeCodeHarness",
     "claude_config_file",
+    "CodexHarness",
     "canonical_name",
     "get_harness",
     "detect_harnesses",
@@ -30,6 +32,7 @@ __all__ = [
 # Canonical name → implementation class.
 _HARNESSES: dict[str, type[Harness]] = {
     ClaudeCodeHarness.name: ClaudeCodeHarness,
+    CodexHarness.name: CodexHarness,
 }
 
 # User-friendly aliases → canonical name.

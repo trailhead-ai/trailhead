@@ -143,8 +143,8 @@ class TestHarnessResolution:
         assert cfg.harnesses == []
 
     def test_unknown_harness_raises(self):
-        with pytest.raises(ConfigResolveError, match="codex"):
-            resolve_config(cli_harnesses=["codex"], detected_harnesses=[])
+        with pytest.raises(ConfigResolveError, match="bogus-harness"):
+            resolve_config(cli_harnesses=["bogus-harness"], detected_harnesses=[])
 
 
 # ---------------------------------------------------------------------------

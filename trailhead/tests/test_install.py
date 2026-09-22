@@ -123,6 +123,49 @@ class TestDetectionDrivenInstall:
 
 
 # ---------------------------------------------------------------------------
+# Post-wire read-back line
+# ---------------------------------------------------------------------------
+
+
+class _StubTwoToolHarness:
+    """A harness whose ``installed_tools`` reports two names regardless of
+    on-disk state — used to prove the read-back line reflects whatever the
+    seam answers, not a count `wire_all_harnesses` derives itself."""
+
+    name = "codex"
+
+    def composed_root(self, state_dir_path):
+        return state_dir_path / "composed" / self.name
+
+    def installed_tools(self, composed_root, *, env=None):
+        return ["lore", "camp"]
+
+
+class TestWireReadback:
+    def test_prints_zero_installed_plugins_for_a_harness_that_installs_nothing(
+        self, tmp_path, capsys
+    ):
+        with _patched(detected=False):
+            run_install(env=_env(tmp_path), harnesses=["codex"], plugins=["lore"])
+        out = capsys.readouterr().out
+        assert "codex" in out
+        assert "installing into" not in out
+        codex_line = next((ln for ln in out.splitlines() if "codex" in ln), "")
+        assert "0" in codex_line or "no plugins" in codex_line.lower()
+
+    def test_prints_the_seams_installed_tools_for_a_stubbed_harness(self, tmp_path, capsys):
+        with _patched(detected=False), patch(
+            "trailhead.install.get_harness", return_value=_StubTwoToolHarness()
+        ):
+            run_install(env=_env(tmp_path), harnesses=["codex"], plugins=["lore"])
+        out = capsys.readouterr().out
+        assert "installing into" not in out
+        codex_line = next((ln for ln in out.splitlines() if "codex" in ln), "")
+        assert "lore" in codex_line
+        assert "camp" in codex_line
+
+
+# ---------------------------------------------------------------------------
 # CLI overrides
 # ---------------------------------------------------------------------------
 

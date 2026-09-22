@@ -52,6 +52,7 @@ from trailhead.install_config import (
     resolve_config_path,
 )
 from trailhead.pathint import create_shims, repo_root, trailhead_bin_executable
+from trailhead.paths import state_dir
 from trailhead.provenance import write_stamp
 from trailhead.wire import LockError, WireError, default_manifest_paths, wire, wire_lock
 
@@ -212,10 +213,18 @@ def wire_all_harnesses(
     for rh in cfg.harnesses:
         harness = get_harness(rh.name)
         plugin_names = [p.name for p in rh.plugins]
-        if not quiet and not as_json:
-            print(f"installing into {rh.name}: {', '.join(plugin_names) or '(no plugins)'}…")
         wire(rh.selection(), harness=harness, env=env, runner=runner)
         wired[rh.name] = plugin_names
+        if not quiet and not as_json:
+            # A post-wire read-back through the seam, not a pre-wire
+            # announcement: a harness whose install-surface methods are
+            # still vacuous (e.g. Codex's skeleton) genuinely installs
+            # nothing, and this line must say so honestly rather than
+            # repeating the plugin selection as though it landed.
+            composed_root = harness.composed_root(state_dir("trailhead", env=env))
+            installed = harness.installed_tools(composed_root, env=env)
+            label = ", ".join(installed) if installed else "no plugins installed"
+            print(f"{rh.name}: {label}")
     return wired
 
 

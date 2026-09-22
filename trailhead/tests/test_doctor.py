@@ -64,6 +64,27 @@ class TestEmpty:
         assert "no harnesses installed" in r.human_output
 
 
+class TestCodexVacuousSurface:
+    """Codex's install-surface methods are vacuous at this stage, so a
+    composed ``codex`` tree with no marketplace or markers on disk is the
+    only state doctor can ever observe for it — through the real harness
+    seam, not by re-deriving Codex's (nonexistent) marker scheme here."""
+
+    def test_reports_detected_codex_as_unregistered_with_nothing_installed(self, tmp_path):
+        (tmp_path / "composed" / "codex").mkdir(parents=True)
+        r = run_doctor(
+            env=_env(tmp_path), which_runner=lambda n: None, python_version_runner=_fake_py
+        )
+        info = r.data["harnesses"]["codex"]
+        assert info["registered"] is False
+        assert info["installed"] == []
+        # Only present when `get_harness` resolves a real implementation —
+        # the fallback path for a genuinely unknown harness name never sets
+        # this key, so its presence proves this read went through the seam.
+        assert info["marketplace_malformed"] is False
+        assert r.exit_code == 0
+
+
 class TestReport:
     def test_reports_installed_tools(self, tmp_path):
         _make_tree(tmp_path, "claude_code", ["lore", "camp"])
