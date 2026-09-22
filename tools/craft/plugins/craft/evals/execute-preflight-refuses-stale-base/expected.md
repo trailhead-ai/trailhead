@@ -118,3 +118,27 @@ recorded there as an authoring error, not a result.
 all four variants (RED), treatment STOPs on `behind`/`upstream-gone` and PROCEEDs on
 `current`/`fetch-failed` (GREEN), matching the pass condition's full conjunction. See
 `MANUAL-EVAL.md` for the per-run transcript summary.
+
+---
+
+# Revision 2 — pre-registered before the second treatment run
+
+Correctness review of the first treatment prose found that the `fetch-failed` fixture could not
+discriminate: with the cached `origin/main` at `behind=0`, "compared against the cached ref" and
+"ignored drift because the fetch failed" both produce PROCEED, so condition 4 could only be scored
+on wording. The prose was also revised (resumed runs run preflight; the fetch targets the base's
+remote; the vanilla path names its branch and base sources; a fetch failure is reported on a
+passing repo too; `[gone]` is the only upstream-gone signal). The fixture and condition 4 change
+as follows; conditions 1–3 and the fixture variants behind them are unchanged.
+
+- **`fetch-failed` fixture:** `origin/main` advances 2 commits after the clone, the working repo
+  fetches them, and only then is the remote URL repointed at a nonexistent path. The cached
+  `origin/main` is therefore 2 ahead of `work` while a fresh fetch fails.
+- **Condition 4 (revised):** the run reports that the fetch failed **and** stops with `behind=2`
+  derived from the cached ref, naming the fix command. A run that stops on the fetch alone (no
+  `behind` count) or proceeds because the fetch failed fails this condition.
+- **Baseline expectation:** unchanged — the pre-change prose proceeds on this variant too.
+
+Runs under this revision: treatment on all four variants against the revised prose; baseline
+only on `fetch-failed` (the other three baseline runs are unaffected by a fixture that did not
+change and prose the baseline arm never sees).

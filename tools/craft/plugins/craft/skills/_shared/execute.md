@@ -249,38 +249,54 @@ lands. Full writer and exit-owner rules govern every status value, not just thes
 
 ### Workspace preflight
 
-Before the claim below writes anything — on both the plan shape and the standalone shape — check
-whether the repos this run is about to build in are stale against their base. Execute never rebases
-on its own: a rebase rewrites a branch an operator may have another session on, so the fix stays an
-operator action and this step only refuses to build on a stale base.
+Run this step on every entry into the Loop — a fresh run before the claim below writes anything, and
+a resumed run before its next dispatch — on both the plan shape and the standalone shape. A reused
+camp workspace is where stale branches accumulate, and a resumed run is the one most likely to be
+sitting in one. Execute never rebases on its own: a rebase rewrites a branch an operator may have
+another session on, so the fix stays an operator action and this step only refuses to build on a
+stale base. A stop here on a fresh run leaves the task untouched; a stop on a resumed run leaves its
+existing claim as it is and dispatches nothing.
 
 Enumerate the repos the same way Phase 6's push does: in a camp workspace, the member worktrees of
-the current workspace's manifest; in vanilla usage, the single current repo. For each repo, fetch
-its base ref first — `git -C <repo> fetch origin --quiet` — then read drift. The base is the
-member's configured base, default `origin/main`.
+the current workspace's manifest; in vanilla usage, the single current repo. Each repo has a branch
+and a base. In a camp workspace both come from the manifest and the group config — the member's
+configured base, default `origin/main`. In vanilla usage both come from the local repo: the branch
+is `git symbolic-ref --short HEAD` (a detached HEAD has no branch to build on — stop and say so),
+and the base is the branch's upstream when it has one (`git rev-parse --abbrev-ref @{upstream}`),
+otherwise `origin/main`.
 
-In a camp workspace, read `camp status --json` once from the workspace and use each member's
-`behind` and `upstream` fields directly — never re-derive them; the probe is always enabled on that
-CLI path. In vanilla usage, compute the same two facts directly: `git rev-list --count
-HEAD..<base>` for how far behind, and `git for-each-ref --format='%(upstream:track)'
-refs/heads/<branch>` for whether the upstream is gone.
+Validate every branch name and base ref against the safe-value shape (`^[A-Za-z0-9._/-]+$`) before
+it is substituted into any command below, the rule every other value this document substitutes
+already follows. A value that fails the shape is never substituted: stop, name the repo and the
+offending value, and let the operator fix the manifest, config, or branch.
 
-**Verdict.** A repo with `behind == 0` (ahead is fine) and an upstream that is not gone passes
-silently, and the run continues to the claim. Otherwise the run stops here — before the claim,
-before any status write, before any dispatch — and reports one line per stale repo naming the
-member, `behind=N` and/or `upstream gone`, followed by the fix: `camp rebase` in a camp workspace
-(it rebases every member worktree onto `origin/main` by default), or
-`git fetch origin && git rebase <base>` in vanilla usage.
+For each repo, refresh the base first: when the base is `<remote>/<branch>`, run
+`git -C <repo> fetch <remote> --quiet`; a base with no remote component is a local ref and needs no
+fetch. Then read drift. In a camp workspace, run `camp status --json` once from the workspace root —
+the drift fields exist only on that workspace-scoped view, and the probe is always enabled on that
+path — and use each member's `behind` and `upstream` fields directly; never re-derive them. An exit
+status of 2 or 3 from `camp status` reports pending or failed provisioning, not a failed probe: the
+JSON still carries the fields. In vanilla usage, compute the same two facts directly:
+`git rev-list --count HEAD..<base>` for how far behind, and
+`git for-each-ref --format='%(upstream:track)' refs/heads/<branch>` for the upstream — only the
+literal `[gone]` means the upstream is gone; `[behind N]`, `[ahead N]`, or empty output (in sync, or
+no upstream configured) does not.
+
+**Verdict.** A repo with `behind == 0` (ahead is fine) and an upstream that is not gone passes, and
+the run continues. Otherwise the run stops here — before the claim on a fresh run, before the next
+dispatch on a resumed one — and reports one line per stale repo naming the member, `behind=N` and/or
+`upstream gone`, followed by the fix. For `behind`: `camp rebase` in a camp workspace (it rebases
+every member worktree onto `origin/main` by default), or `git fetch origin && git rebase <base>` in
+vanilla usage. For `upstream gone`: the remote branch was deleted; once the operator confirms that
+was intended, `git branch --unset-upstream` in that repo clears it — a rebase does not.
 
 **A fetch failure is not a stop by itself.** When the fetch exits non-zero but the base ref still
-resolves locally, compare against the cached ref and say the fetch failed in that repo's report
-line, rather than stopping on the fetch alone. When the base ref does not resolve at all — including
-a `null` `behind` from `camp status --json` — there is nothing to compare against: stop and say so.
-
-Member names, branch names, and base refs substituted into the commands above come from the manifest
-and the group config, so validate each one against the safe-value shape (`^[A-Za-z0-9._/-]+$`)
-before substitution, the rule every other vault- or config-sourced value in this document already
-follows.
+resolves locally, compare against the cached ref and apply the verdict above to that comparison,
+adding "fetch failed" to that repo's report line either way — so a repo that passes on the cached
+ref still gets one line saying its fetch failed, rather than passing silently. When the base ref
+does not resolve at all there is nothing to compare against: stop and say so. A `null` `behind` from
+`camp status --json` is that case, or a member worktree directory that is missing — the report says
+which after `ls`-ing the path.
 
 ### Claiming the run at first dispatch
 

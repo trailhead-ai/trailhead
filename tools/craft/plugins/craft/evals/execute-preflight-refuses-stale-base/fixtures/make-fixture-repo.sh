@@ -5,9 +5,9 @@
 #
 # Every variant produces a local `origin` clone source at "<dest>-origin" and
 # a working repo at "<dest>" whose "origin" remote points at it (except
-# fetch-failed, which repoints the remote after cloning). Prints nothing on
-# success other than a final status line; the working repo is left checked
-# out on branch "work".
+# fetch-failed, which repoints the remote after cloning). Refuses to run when
+# either path already exists. Prints nothing on success other than a final
+# status line; the working repo is left checked out on branch "work".
 set -euo pipefail
 
 variant="${1:?variant required: behind | upstream-gone | current | fetch-failed}"
@@ -19,7 +19,10 @@ case "$variant" in
   *) echo "unknown variant: $variant" >&2; exit 2 ;;
 esac
 
-rm -rf "$dest" "$origin"
+if [ -e "$dest" ] || [ -e "$origin" ]; then
+  echo "refusing to overwrite existing path: $dest or $origin" >&2
+  exit 2
+fi
 mkdir -p "$origin"
 
 # --- the "origin" repo: a bare-equivalent local remote --------------------
@@ -78,14 +81,27 @@ case "$variant" in
     echo "current fixture ready" >&2
     ;;
   fetch-failed)
-    # origin/main is already cached locally from the clone (git clone always
-    # writes refs/remotes/origin/main), then the remote URL is repointed at a
-    # path that does not exist, so a later `git fetch origin` fails while the
-    # cached ref is still readable.
+    # origin/main advances 2 commits after the clone and the working repo
+    # fetches them, so the cached origin/main is 2 ahead of "work". The
+    # remote URL is then repointed at a path that does not exist, so a later
+    # `git fetch origin` fails while the cached ref is still readable. A
+    # correct preflight reports the fetch failure AND stops with behind=2
+    # from the cached ref; one that stops on the fetch alone, or ignores
+    # drift because the fetch failed, gives a different answer.
+    for i in 1 2; do
+      (
+        cd "$origin"
+        echo "change $i" >> UNRELATED.md
+        git add -A
+        git commit -q -m "chore: upstream change $i"
+      )
+    done
+    (cd "$dest" && git fetch -q origin)
     (
       cd "$dest"
       git remote set-url origin "${dest}-origin-does-not-exist"
     )
-    echo "fetch-failed fixture ready" >&2
+    behind_count="$(cd "$dest" && git rev-list --count HEAD..origin/main)"
+    echo "fetch-failed fixture ready: behind=$behind_count (cached), fetch will fail" >&2
     ;;
 esac
