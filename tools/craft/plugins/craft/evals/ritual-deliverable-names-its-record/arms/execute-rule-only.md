@@ -260,10 +260,10 @@ otherwise would — there is no second record to flip. Refine's promotion takes 
 run](#claiming-the-run-at-first-dispatch) prescribes for a parent — status and branch label in one
 command
 (`lore record update task/<name> --vault <elected-vault> --status in-progress --label craft/branch=<bare-branch>`),
-so crash-resume can find the branch on a standalone run too. **A standalone run also loads dispatch
-lessons** — the claim's retrieval command runs here too, before that first executor dispatch, and
-its outcome is recorded the same way. Phase 6 takes it `in-progress → done`, where "close the
-parent" means close the task itself.
+once the [Workspace preflight](#workspace-preflight) has passed, so crash-resume can find the branch
+on a standalone run too. **A standalone run also loads dispatch lessons** — the claim's retrieval
+command runs here too, before that first executor dispatch, and its outcome is recorded the same
+way. Phase 6 takes it `in-progress → done`, where "close the parent" means close the task itself.
 
 ### Resuming a run
 
@@ -315,11 +315,11 @@ existing claim as it is and dispatches nothing.
 
 Enumerate the repos the same way Phase 6's push does: in a camp workspace, the member worktrees of
 the current workspace's manifest; in vanilla usage, the single current repo. Each repo has a branch
-and a base. In a camp workspace both come from the manifest and the group config — the member's
-configured base, default `origin/main`. In vanilla usage both come from the local repo: the branch
-is `git symbolic-ref --short HEAD` (a detached HEAD has no branch to build on — stop and say so),
-and the base is the branch's upstream when it has one (`git rev-parse --abbrev-ref @{upstream}`),
-otherwise `origin/main`.
+and a base. The base is the configured base in both usages — the member's `base` in the group config
+for a camp workspace, the base the operator named for this run in vanilla usage — and `origin/main`
+when nothing configures one; it is never the branch's upstream, which on a task branch is the branch
+itself. In a camp workspace the branch comes from the manifest; in vanilla usage it is
+`git symbolic-ref --short HEAD` (a detached HEAD has no branch to build on — stop and say so).
 
 Validate every branch name and base ref against the safe-value shape (`^[A-Za-z0-9._/-]+$`) before
 it is substituted into any command below, the rule every other value this document substitutes
@@ -330,21 +330,24 @@ For each repo, refresh the base first: when the base is `<remote>/<branch>`, run
 `git -C <repo> fetch <remote> --quiet`; a base with no remote component is a local ref and needs no
 fetch. Then read drift. In a camp workspace, run `camp status --json` once from the workspace root —
 the drift fields exist only on that workspace-scoped view, and the probe is always enabled on that
-path — and use each member's `behind` and `upstream` fields directly; never re-derive them. An exit
-status of 2 or 3 from `camp status` reports pending or failed provisioning, not a failed probe: the
-JSON still carries the fields. In vanilla usage, compute the same two facts directly:
-`git rev-list --count HEAD..<base>` for how far behind, and
-`git for-each-ref --format='%(upstream:track)' refs/heads/<branch>` for the upstream — only the
-literal `[gone]` means the upstream is gone; `[behind N]`, `[ahead N]`, or empty output (in sync, or
-no upstream configured) does not.
+path — and use each member's `behind` and `upstream` fields directly (`upstream` is `ok`, `gone`, or
+`none`; only `gone` matters); never re-derive them. An exit status of 2 or 3 from `camp status`
+reports pending or failed provisioning, not a failed probe: the JSON still carries the fields. In
+vanilla usage, compute the same two facts directly: `git rev-list --count HEAD..<base>` for how far
+behind, and `git for-each-ref --format='%(upstream:track)' refs/heads/<branch>` for the upstream —
+only the literal `[gone]` means the upstream is gone; `[behind N]`, `[ahead N]`, or empty output (in
+sync, or no upstream configured) does not.
 
 **Verdict.** A repo with `behind == 0` (ahead is fine) and an upstream that is not gone passes, and
 the run continues. Otherwise the run stops here — before the claim on a fresh run, before the next
 dispatch on a resumed one — and reports one line per stale repo naming the member, `behind=N` and/or
 `upstream gone`, followed by the fix. For `behind`: `camp rebase` in a camp workspace (it rebases
-every member worktree onto `origin/main` by default), or `git fetch origin && git rebase <base>` in
-vanilla usage. For `upstream gone`: the remote branch was deleted; once the operator confirms that
-was intended, `git branch --unset-upstream` in that repo clears it — a rebase does not.
+every member worktree onto `origin/main` by default; `camp rebase --onto <base>` when a member's
+base is something else), or `git fetch <remote> && git rebase <base>` in vanilla usage. For
+`upstream gone`: the remote branch was deleted; once the operator confirms that was intended,
+`git branch --unset-upstream` in that repo clears it — a rebase does not. The upstream check reads
+the branch's own tracking ref and the base is never derived from it, so a gone upstream and an
+unresolvable base are separate findings with separate fixes.
 
 **A fetch failure is not a stop by itself.** When the fetch exits non-zero but the base ref still
 resolves locally, compare against the cached ref and apply the verdict above to that comparison,

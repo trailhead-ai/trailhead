@@ -2090,7 +2090,7 @@ Revision 2's stated run plan. Two of the six dispatched processes (`treatment/be
 `baseline/fetch-failed`, first attempts) returned a transient `API Error: 529 Overloaded` with no
 model output at all — an infra failure, not a run that went red or green — and were discarded and
 re-dispatched once each; both retries returned a normal verdict. The counted results below are
-one run per cell (6 dispatches, 2 discarded as infra errors, 6 counted results including the 2
+one run per cell (8 dispatches: 2 discarded as infra errors, 6 counted results including the 2
 retries).
 
 | Variant | Baseline (`93a83d42`) | Treatment (`f095ad9f`) |
