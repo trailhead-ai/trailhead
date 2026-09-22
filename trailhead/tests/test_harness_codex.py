@@ -21,6 +21,7 @@ from pathlib import Path
 import pytest
 
 from trailhead.harness import HarnessError, get_harness, known_harness_names
+from trailhead.harness.base import MODALITIES, MODALITY_TTY_REQUIRED
 from trailhead.harness.claude_code import _ERROR_EXCERPT_LIMIT
 from trailhead.harness.codex import CodexHarness, _is_session_id, codex_home
 
@@ -698,3 +699,128 @@ class TestCodexSessionListRoundTrip:
         assert records[0].kind == "codex"
         assert records[0].controllable is False
         assert records[0].pid is None
+
+
+class TestCodexSessionLaunch:
+    """Codex launches a brand-new session rooted at a workspace directory.
+    Codex's interactive launch offers no session-id, session-name, or
+    settings-file flag, so the id/name/settings hints are validated for
+    argv safety and then ignored — the argv reflects only the workspace."""
+
+    def test_returns_launch_argv_rooted_at_the_workspace(self, tmp_path):
+        assert CodexHarness().session_launch(tmp_path, "sess-1") == [
+            "codex",
+            "--cd",
+            str(tmp_path),
+        ]
+
+    def test_raises_on_dot_dot_session_id(self, tmp_path):
+        with pytest.raises(HarnessError):
+            CodexHarness().session_launch(tmp_path, "..")
+
+    def test_raises_on_empty_session_id(self, tmp_path):
+        with pytest.raises(HarnessError):
+            CodexHarness().session_launch(tmp_path, "")
+
+    def test_raises_on_session_id_with_separator(self, tmp_path):
+        with pytest.raises(HarnessError):
+            CodexHarness().session_launch(tmp_path, "a/b")
+
+    def test_raises_on_session_name_with_control_character(self, tmp_path):
+        with pytest.raises(HarnessError):
+            CodexHarness().session_launch(tmp_path, "sess-1", session_name="a\x00b")
+
+    def test_raises_on_workspace_beginning_with_dash(self, tmp_path):
+        with pytest.raises(HarnessError):
+            CodexHarness().session_launch(Path("-weird"), "sess-1")
+
+    def test_argv_identical_with_and_without_session_name_and_settings_path(self, tmp_path):
+        bare = CodexHarness().session_launch(tmp_path, "sess-1")
+        with_name = CodexHarness().session_launch(
+            tmp_path, "sess-1", session_name="camp-feat-x-abcd1234"
+        )
+        with_settings = CodexHarness().session_launch(
+            tmp_path, "sess-1", settings_path=tmp_path / "settings.json"
+        )
+        with_both = CodexHarness().session_launch(
+            tmp_path,
+            "sess-1",
+            session_name="camp-feat-x-abcd1234",
+            settings_path=tmp_path / "settings.json",
+        )
+        assert bare == with_name == with_settings == with_both
+
+
+class TestCodexSessionLaunchModality:
+    def test_returns_tty_required(self):
+        assert CodexHarness().session_launch_modality() == MODALITY_TTY_REQUIRED
+
+    def test_is_a_member_of_modalities(self):
+        assert CodexHarness().session_launch_modality() in MODALITIES
+
+
+class TestCodexSessionLaunchEnvUnset:
+    def test_returns_a_list_never_none(self):
+        assert isinstance(CodexHarness().session_launch_env_unset(), list)
+
+    def test_includes_codex_home(self):
+        assert "CODEX_HOME" in CodexHarness().session_launch_env_unset()
+
+    def test_includes_every_measured_injected_variable(self):
+        measured = {
+            "CODEX_CI",
+            "CODEX_SANDBOX",
+            "CODEX_SANDBOX_NETWORK_DISABLED",
+            "CODEX_SESSION_ID",
+            "CODEX_THREAD_ID",
+            "CODEX_VERSION",
+        }
+        assert measured <= set(CodexHarness().session_launch_env_unset())
+
+
+class TestCodexSessionLaunchEnvSet:
+    def test_none_account_is_empty_mapping(self, tmp_path):
+        assert CodexHarness().session_launch_env_set(None, env={"HOME": str(tmp_path)}) == {}
+
+    def test_tilde_relative_account_resolves_against_envs_home_not_the_machines(self, tmp_path):
+        env_home = tmp_path / "env-home"
+        assert CodexHarness().session_launch_env_set("~/.codex-work", env={"HOME": str(env_home)}) == {
+            "CODEX_HOME": str(env_home / ".codex-work")
+        }
+
+    def test_absolute_account_is_returned_verbatim(self, tmp_path):
+        account_dir = tmp_path / "some" / "codex-account"
+        assert CodexHarness().session_launch_env_set(
+            str(account_dir), env={"HOME": str(tmp_path / "home")}
+        ) == {"CODEX_HOME": str(account_dir)}
+
+    def test_relative_account_raises_naming_the_value(self, tmp_path):
+        with pytest.raises(HarnessError, match="relative-account"):
+            CodexHarness().session_launch_env_set(
+                "relative-account", env={"HOME": str(tmp_path / "home")}
+            )
+
+    def test_control_character_account_raises_naming_the_value(self, tmp_path):
+        bad = str(tmp_path) + "/acc\x00ount"
+        with pytest.raises(HarnessError, match=r"acc.*ount"):
+            CodexHarness().session_launch_env_set(bad, env={"HOME": str(tmp_path / "home")})
+
+    def test_ambient_codex_home_equal_to_account_dir_is_accepted(self, tmp_path):
+        account_dir = tmp_path / "codex-account"
+        result = CodexHarness().session_launch_env_set(
+            str(account_dir),
+            env={"HOME": str(tmp_path / "home"), "CODEX_HOME": str(account_dir)},
+        )
+        assert result == {"CODEX_HOME": str(account_dir)}
+
+    def test_ambient_codex_home_different_from_account_dir_raises_naming_both(self, tmp_path):
+        account_dir = tmp_path / "codex-account"
+        ambient = tmp_path / "other-account"
+        with pytest.raises(HarnessError) as exc_info:
+            CodexHarness().session_launch_env_set(
+                str(account_dir),
+                env={"HOME": str(tmp_path / "home"), "CODEX_HOME": str(ambient)},
+            )
+        message = str(exc_info.value)
+        assert str(account_dir) in message
+        assert str(ambient) in message

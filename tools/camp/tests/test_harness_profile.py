@@ -369,3 +369,24 @@ class TestHarnessStoreForBindingFailures:
         monkeypatch.setattr(profile, "harness_for", lambda group: None)
 
         assert profile.harness_store_for({"group": {"name": "g"}}, env={}) is None
+
+
+class TestHarnessStoreForCodexGroup:
+    """A group declaring the codex binary plus an account is a real
+    consumer of the codex launch seam — the store must bind through the
+    actual harness, not a stand-in."""
+
+    def test_a_codex_group_with_an_account_resolves_without_store_binding_error(
+        self, tmp_path
+    ):
+        import camp.launch.profile as profile
+
+        group = {
+            "group": {"name": "g"},
+            "harness": {"binary": "codex"},
+            "launch": {"account": str(tmp_path / "codex-account")},
+        }
+        store = profile.harness_store_for(group, env={"HOME": str(tmp_path / "home")})
+
+        assert store is not None
+        assert store.env["CODEX_HOME"] == str(tmp_path / "codex-account")

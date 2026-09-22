@@ -33,9 +33,32 @@ register it, install/rewire/uninstall tools) is implemented. This makes
 the honest state until those methods are filled in — never a silent write to
 a harness that can't yet read it, and never a raised error that would abort
 ``trailhead install``/``trailhead update`` on any machine with Codex detected.
-Every other seam method (transcripts, live-session enumeration, launch,
-account identity/authentication) stays at the base class's default too; this
-skeleton adds only detection and registry presence.
+Session launch
+--------------
+``session_launch`` returns ``["codex", "--cd", <workspace>]`` — Codex's
+interactive launch offers no flag for a caller-chosen session id, session
+name, or an additional settings file, so ``session_id``/``session_name``/
+``settings_path`` are validated for argv safety (the same inert-token guard
+``session_id`` gets everywhere else in this seam) and then ignored; the argv
+never varies with them. ``session_launch_modality`` reports
+``tty-required``: Codex's CLI is an interactive terminal program.
+
+``session_launch_env_unset`` names ``CODEX_HOME`` (the variable this seam
+itself uses to redirect a session's home) plus every environment variable a
+running Codex session has been observed injecting into its own child
+processes, as a floor that may grow in a later Codex version.
+
+``session_launch_env_set`` binds a launched session to an account by naming
+its Codex home directory. An account is a ``~``-relative or absolute path,
+expanded against the given environment's ``HOME``/``USERPROFILE`` (never the
+machine's) exactly the way Claude Code's own declared-account resolution
+works, refused for a relative value or a control character, and refused when
+the environment's own ambient ``CODEX_HOME`` already names a different
+directory — naming both, so a caller sees which one to fix.
+
+Every other seam method (identity, authentication, live-session enumeration
+beyond what's covered above) stays at the base class's default too; this
+skeleton adds only detection and registry presence beyond the launch quartet.
 """
 
 from __future__ import annotations
@@ -47,7 +70,14 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from trailhead.harness.base import Harness, HarnessError, SessionRecord, SessionTranscript
+from trailhead.harness.base import (
+    MODALITY_TTY_REQUIRED,
+    Harness,
+    HarnessError,
+    Modality,
+    SessionRecord,
+    SessionTranscript,
+)
 from trailhead.harness.claude_code import _excerpt
 
 #: The file whose presence under a Codex home means Codex has been configured
@@ -87,6 +117,87 @@ _ROLLOUT_STEM_RE = re.compile(
 #: metadata line should ever approach, so a corrupt or hostile file cannot
 #: force an unbounded read.
 _SESSION_META_MAX_LINE_BYTES = 65_536
+
+#: Env var names a launching caller must scrub before spawning a Codex
+#: session, returned by :meth:`CodexHarness.session_launch_env_unset`.
+#: ``CODEX_HOME`` is the variable this seam itself uses to redirect a
+#: session's home (never injected by Codex itself, but scrubbed here for the
+#: same reason Claude Code scrubs ``CLAUDE_CONFIG_DIR``: a caller must assert
+#: the default rather than inherit whatever the launching process carried).
+#: The remaining six are variables an interactive Codex session has been
+#: observed injecting into its own child processes — a floor, not an
+#: exhaustive guarantee, per the base contract.
+_LAUNCH_ENV_UNSET = [
+    "CODEX_HOME",
+    "CODEX_CI",
+    "CODEX_SANDBOX",
+    "CODEX_SANDBOX_NETWORK_DISABLED",
+    "CODEX_SESSION_ID",
+    "CODEX_THREAD_ID",
+    "CODEX_VERSION",
+]
+
+#: Characters an account value may never carry: the C0 controls (NUL among
+#: them), DEL, and the C1 controls. Mirrors Claude Code's own account guard.
+_ACCOUNT_FORBIDDEN_CHARS = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+
+
+def _account_dir(account: str, env: dict[str, str]) -> Path:
+    """Resolve a declared *account* to an absolute Codex home directory, or raise.
+
+    A leading ``~`` expands against *env*'s ``HOME``/``USERPROFILE`` rather
+    than the machine's, so a caller's declaration never resolves through the
+    running user's password-db entry. Every other form must already be
+    absolute: a relative value resolves against whichever working directory
+    the launching process happens to have.
+
+    A control character is refused before either check, for the same reason
+    Claude Code's own ``_account_dir`` refuses one: the value becomes a path
+    the caller resolves and an operand of a process spawn.
+    """
+    found = _ACCOUNT_FORBIDDEN_CHARS.search(account)
+    if found:
+        raise HarnessError(
+            f"session_launch_env_set: account {account!r} contains the control "
+            f"character {found.group()!r}. An account names a directory a session "
+            "reads and a value a process is spawned with, and neither can carry one."
+        )
+    expanded = account
+    if account == "~" or account.startswith("~/"):
+        home = env.get("HOME") or env.get("USERPROFILE") or ""
+        expanded = home + account[1:]
+    path = Path(expanded)
+    if not path.is_absolute():
+        raise HarnessError(
+            f"session_launch_env_set: account {account!r} is not an absolute path. "
+            "An account names the directory a launched session reads as its Codex "
+            "home, so it must resolve identically from any working directory."
+        )
+    return path
+
+
+def _refuse_conflicting_codex_home(account_dir: Path, env: dict[str, str]) -> None:
+    """Raise when *env*'s ambient ``CODEX_HOME`` names a different directory
+    than the one a declared account just resolved to.
+
+    Compared both textually and by realpath, mirroring Claude Code's
+    ``_refuse_conflicting_config_dirs``: a caller may spell the same directory
+    two different ways (a symlink, a trailing slash) and that is not a
+    conflict, only two different values naming the same place are.
+    """
+    ambient = (env.get("CODEX_HOME") or "").strip()
+    if not ambient:
+        return
+    if Path(ambient) == account_dir:
+        return
+    if os.path.realpath(ambient) == os.path.realpath(str(account_dir)):
+        return
+    raise HarnessError(
+        f"session_launch_env_set: account {str(account_dir)!r} disagrees with the "
+        f"ambient CODEX_HOME={ambient!r}. A launched session reads whichever "
+        "directory CODEX_HOME names, so trailhead will not guess which one you "
+        "meant."
+    )
 
 
 def _is_session_id(session_id: object) -> bool:
@@ -375,6 +486,76 @@ class CodexHarness(Harness):
         _env = env if env is not None else dict(os.environ)
         sessions_dir = codex_home(_env) / _SESSIONS_SUBDIR
         return _resolve_rollout_path(session_id, sessions_dir)
+
+    # -- session launch ------------------------------------------------------
+
+    def session_launch(
+        self,
+        workspace: Path,
+        session_id: str,
+        *,
+        session_name: str | None = None,
+        settings_path: Path | None = None,
+    ) -> list[str]:
+        """Return ``["codex", "--cd", str(workspace)]``.
+
+        Codex's interactive launch offers no flag for a caller-chosen session
+        id, session name, or an additional settings file, so all three are
+        validated as inert argv tokens and then ignored — the returned argv
+        never varies with them. See the module docstring's "Session launch"
+        section for the full contract.
+        """
+        if not _is_session_id(session_id):
+            raise HarnessError(f"session_launch: invalid session_id: {session_id!r}")
+        if session_name is not None and not _is_session_id(session_name):
+            raise HarnessError(f"session_launch: invalid session_name: {session_name!r}")
+        if settings_path is not None:
+            text = str(settings_path)
+            if not text or text.startswith("-"):
+                raise HarnessError(
+                    f"session_launch: invalid settings_path: {settings_path!r}"
+                )
+        as_arg = str(workspace)
+        if as_arg.startswith("-"):
+            raise HarnessError(
+                f"session_launch: workspace would read as a flag in argv: {as_arg!r}"
+            )
+        return ["codex", "--cd", as_arg]
+
+    def session_launch_modality(self) -> Modality:
+        """Codex launch requires a TTY (interactive terminal)."""
+        return MODALITY_TTY_REQUIRED
+
+    def session_launch_env_unset(self) -> list[str]:
+        """Env var names a launching caller must scrub before spawning.
+
+        See :data:`_LAUNCH_ENV_UNSET` for why each name is here.
+        """
+        return list(_LAUNCH_ENV_UNSET)
+
+    def session_launch_env_set(
+        self, account: str | None, *, env: dict[str, str] | None = None
+    ) -> dict[str, str]:
+        """Bind a launched session to *account* by naming its Codex home.
+
+        ``account=None`` — the caller declared nothing — contributes NO
+        assignment: Codex's own default (``CODEX_HOME`` unset, falling back
+        to ``HOME``/``.codex``) is expressed as the variable's ABSENCE, and
+        the name is in :data:`_LAUNCH_ENV_UNSET` so a launching caller
+        scrubs it.
+
+        For a declared account, resolves it via :func:`_account_dir` (raising
+        on a relative value or a control character), refuses one that
+        disagrees with an ambient ``CODEX_HOME`` already in *env* (via
+        :func:`_refuse_conflicting_codex_home`), and returns
+        ``{"CODEX_HOME": <resolved dir>}``.
+        """
+        if account is None:
+            return {}
+        source = env if env is not None else dict(os.environ)
+        account_dir = _account_dir(account, source)
+        _refuse_conflicting_codex_home(account_dir, source)
+        return {"CODEX_HOME": str(account_dir)}
 
     # -- live session enumeration -------------------------------------------
     #
