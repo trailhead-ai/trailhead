@@ -1990,3 +1990,80 @@ fire.** The edited rule and the seven rebuilt live arms ship as committed.
 tools/outpost/tests trailhead/tests/test_eval_corpus.py trailhead/tests/test_install.py -q` — 171
 passed. `ruff check tools` — all checks passed (pre-existing unrelated `# noqa` warning in
 `tools/lore/plugins/lore/lore/cli/init.py`, outside this task's footprint).
+---
+
+## Case: execute-preflight-refuses-stale-base
+
+`plugins/craft/evals/execute-preflight-refuses-stale-base/` — fixture, and `expected.md` carrying
+the pass condition, written before any arm was run.
+
+**Under test:** the new `### Workspace preflight` step added to `## The Loop` in
+`plugins/craft/skills/_shared/execute.md`, immediately before `### Claiming the run at first
+dispatch` — a check that refuses to claim or dispatch against a repo whose branch is stale
+against its base, naming the fix rather than rebasing on its own.
+
+**Fixture.** `fixtures/make-fixture-repo.sh <behind|upstream-gone|current|fetch-failed> <dest>`
+materialises a real vanilla-path git repo with a local `origin` clone source, plus
+`fixtures/task-ready.md`, a minimal standalone `ready` task naming a one-line `README.md` edit,
+held constant across all four variants:
+
+| Variant | Git state | Expected verdict |
+|---|---|---|
+| `behind` | branch `work` is 3 commits behind `origin/main` (on an unrelated file, so the citation-resolution gate stays clean) | STOP, `behind=3`, fix named |
+| `upstream-gone` | `branch.work.merge` points at a ref never pushed to `origin` | STOP, upstream gone named |
+| `current` | `work` == `origin/main` | PROCEED |
+| `fetch-failed` | cached `origin/main` present from the clone; `origin`'s URL then repointed at a nonexistent path so a fresh fetch fails | PROCEED, against the cached ref, fetch failure named in the report |
+
+**First authoring error, corrected before any counted run.** The initial `behind` fixture had the
+three upstream commits append to `README.md` — the same file the task's `Files:` cites. Against
+the baseline (pre-change) prose this triggered the *existing*, unrelated citation-resolution gate
+(the standalone-`ready` re-citation check that already ships), which stopped for a different
+reason than the property under test and would have registered as a false RED-state failure. Fixed
+by moving the upstream commits in the `behind` variant to an `UNRELATED.md` file the task never
+cites, isolating branch staleness from the citation gate. Recorded as an authoring error, not a
+result, per the precedent in `compound-criterion-detection` fixture 2 and
+`gate-reads-the-evidence-artifact`'s negative-fixture correction.
+
+**Dispatch.** Per `docs/eval-protocol.md` — the clean-room `claude` process form *is* runnable
+from this session (`claude --setting-sources project --allowedTools ... --append-system-prompt
+<prose>`), so it was used rather than falling back to a subagent. Each of the 8 runs (4 variants x
+2 arms) executed inside `scripts/eval-sandbox <run-dir> -- claude -p ... < /dev/null`, with the
+fixture repo built fresh inside `<run-dir>` (outside the sandbox, since the sandbox's read
+allow-list does not cover this checkout's path under `~/.local/state`) before the confined `claude`
+process ran against it. One run per variant per arm (8 total), per this task's stated scope — not
+the multi-run-per-arm norm the protocol recommends for measuring inconsistency; a single run per
+cell is an anecdote about that run, not a statement about variance across runs. All 8 processes
+exited 0.
+
+**Baseline: `git show 93a83d42:.../execute.md`** (pre-change, no `### Workspace preflight`
+section). **Treatment: the worktree copy** (with the section added).
+
+| Variant | Baseline verdict | Treatment verdict |
+|---|---|---|
+| `behind` | PROCEED | **STOP** — `behind=3`, freshly-fetched base, fix (`git fetch origin && git rebase origin/main`) named |
+| `upstream-gone` | PROCEED | **STOP** — upstream gone (`origin/deleted-branch`), fix named |
+| `current` | PROCEED | PROCEED |
+| `fetch-failed` | PROCEED | PROCEED — fetch failure named in the report, verdict driven by the cached `origin/main` (`behind=0`) |
+
+**RED state (baseline), as expected.md predicted.** All four baseline runs PROCEED, including
+`behind` (`behind=3`) and `upstream-gone` — the pre-change document has no drift check, so nothing
+stops the run before the claim. This is the required RED state: conditions 1 and 2 of `expected.md`
+fail on baseline (as predicted), conditions 3 and 4 pass (there was never a stop to regress).
+
+**GREEN state (treatment), matching every condition in `expected.md`.** `behind` and
+`upstream-gone` STOP before any claim/dispatch, each naming the repo, the specific drift fact, and
+the fix command, and stating (unprompted, matching the prose's own wording) that execute does not
+rebase on its own because another session may hold the branch. `current` and `fetch-failed`
+PROCEED; `fetch-failed`'s report explicitly names the fetch failure and explains it read the
+cached ref rather than treating the fetch failure itself as a stop — exactly condition 4's
+distinction between "fetch failed" and "fetch failed and the base doesn't resolve".
+
+**Result: all 4 variants pass, at both arms, in full.** The pre-registered pass condition (the
+conjunction across all four variants) holds for the treatment arm; the pre-registered RED state
+holds for the baseline arm. No falsification.
+
+**Limitations, from `expected.md`, confirmed as run:** one run per variant per arm (no
+inconsistency measurement); the dispatch used the clean-room `claude` process form (this session
+could run it, so the subagent fallback in this task's own dispatch instructions was not needed);
+only the vanilla-usage enumeration branch is exercised — the `camp status --json` /
+camp-workspace branch is not covered by this fixture set.
