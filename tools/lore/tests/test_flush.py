@@ -326,6 +326,77 @@ class TestFlushDirtySession:
             "the default tail must not sync in-process — only request a publish"
         )
 
+    def test_default_names_the_vaults_a_publish_was_requested_for_on_stderr(
+        self, tmp_path, monkeypatch
+    ):
+        """The flush skill's Step-5 report template says `Publish requested
+        for: <vaults>` — nothing on the default tail prints that today, so
+        the template is unsatisfiable. This pins the stderr line it needs."""
+        import lore.cli.publish as publish_mod
+
+        monkeypatch.setattr(publish_mod, "_spawn_worker", lambda argv: None)
+        vault, state = self._vault_with_a_stray_file(tmp_path)
+
+        r = _flush(vault, state)
+        assert r.returncode == 0, r.stderr
+
+        lines = [
+            line for line in r.stderr.splitlines()
+            if "Publish requested for" in line
+        ]
+        assert len(lines) == 1, f"expected exactly one notice; stderr={r.stderr!r}"
+        assert "default" in lines[0]
+
+    def test_default_names_a_vault_skipped_for_auto_publish_false_on_stderr(
+        self, tmp_path, monkeypatch
+    ):
+        import lore.cli.publish as publish_mod
+
+        calls = []
+        monkeypatch.setattr(publish_mod, "_spawn_worker", lambda argv: calls.append(list(argv)))
+        vault, state = self._vault_with_a_stray_file(tmp_path)
+
+        config_home = tmp_path / "auto-publish-off-config"
+        (config_home / "lore").mkdir(parents=True)
+        (config_home / "lore" / "config.json").write_text(
+            json.dumps(
+                {
+                    "vaults": [
+                        {
+                            "name": "default",
+                            "scope": "default",
+                            "path": str(vault),
+                            "auto_publish": False,
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        r = _run(
+            ["flush", "--session-id", SID],
+            vault=vault,
+            state_dir=state,
+            env_extra={
+                "CLAUDE_CODE_SESSION_ID": "",
+                "CLAUDE_SESSION_ID": "",
+                "XDG_CONFIG_HOME": str(config_home),
+            },
+        )
+        assert r.returncode == 0, r.stderr
+
+        assert calls == [], "auto_publish: false must never spawn"
+        requested_lines = [
+            line for line in r.stderr.splitlines() if "Publish requested for" in line
+        ]
+        assert requested_lines == [], "a fully-skipped flush must not claim a request"
+        skipped_lines = [
+            line for line in r.stderr.splitlines()
+            if "auto_publish" in line and "default" in line
+        ]
+        assert len(skipped_lines) == 1, f"expected exactly one notice; stderr={r.stderr!r}"
+
 
 # ---------------------------------------------------------------------------
 # clean no-op vs no-session — distinct notices, no commit

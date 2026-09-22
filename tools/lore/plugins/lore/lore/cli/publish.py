@@ -205,18 +205,38 @@ def _resolve_vault_entry(vault_root: "str | Path"):
     return "default", None
 
 
-def _worker_argv(vault_name: str) -> list:
-    """Return the argv that re-invokes THIS running lore CLI as the worker.
+def _cli_script_path() -> Path:
+    """Return the ``cli/lore`` entry script beside the running ``lore`` package.
 
-    ``sys.argv[0]`` is the ``cli/lore`` entry script the running process was
-    launched from — whether that is a repo checkout or an installed plugin
-    (``${CLAUDE_PLUGIN_ROOT}/cli/lore``) — so resolving it here, from the
-    running process, rather than hardcoding a repo-relative path, re-invokes
-    the SAME script under the SAME interpreter. This is the shape
-    ``run_cli_subprocess`` in ``tests/conftest.py`` already spawns the CLI
-    with: ``[sys.executable, str(CLI_PATH), *args]``.
+    Derived from THIS module's own location — ``<plugin root>/lore/cli/publish.py``
+    → ``<plugin root>/cli/lore`` — never from ``sys.argv[0]``. ``sys.argv[0]`` is
+    only the CLI entry script when a real ``cli/lore`` process is what is
+    running; under any other entry point (``tests/conftest.py``'s in-process
+    ``run_cli``, dispatched via ``dispatch.main`` inside pytest itself) it is
+    whatever launched THAT process instead, and re-invoking it with
+    ``publish --vault <name>`` argv spawns the wrong program entirely — pytest
+    itself, most concretely, which then tries to collect ``publish`` as a test
+    path. Resolving from the package's own install location, whether that is a
+    repo checkout or an installed plugin (``${CLAUDE_PLUGIN_ROOT}/cli/lore``),
+    always names the genuine CLI script regardless of what process is calling
+    this function.
     """
-    cli_path = Path(sys.argv[0]).resolve()
+    return Path(__file__).resolve().parents[2] / "cli" / "lore"
+
+
+def _worker_argv(vault_name: str) -> list:
+    """Return the argv that re-invokes the real ``lore`` CLI as the worker.
+
+    Raises:
+        FileNotFoundError: if :func:`_cli_script_path` does not resolve to an
+            existing regular file — caught by :func:`request_publish`'s
+            blanket guard, which reports it as the same one-stderr-line
+            "could not schedule publish" notice as any other scheduling
+            failure, rather than spawning a broken subprocess.
+    """
+    cli_path = _cli_script_path()
+    if not cli_path.is_file():
+        raise FileNotFoundError(f"lore CLI entry script not found: {cli_path}")
     return [sys.executable, str(cli_path), "publish", "--vault", vault_name]
 
 
@@ -287,20 +307,25 @@ def request_publish(vault_root: "str | Path", *, clock=time.time) -> None:
     already running), then spawns :func:`_spawn_worker` UNLESS
     :func:`_lock_held` reports a worker already holds this vault's lock.
 
-    Never raises into the caller: a failure in ANY step here — the stamp
+    Never raises into the caller: a failure in ANY step here — resolving the
+    vault's config entry (a broken/unreadable ``config.json``), the stamp
     write (permission, ENOSPC), the lock probe (an fcntl error), or the spawn
     itself (e.g. the interpreter or CLI script cannot be found, the OS
     refuses to fork) — is caught and reported as one stderr line naming the
     vault; the write that triggered this already succeeded and its exit code
-    must not change because scheduling a publish for it failed.
+    must not change because scheduling a publish for it failed. The config
+    resolution has to be INSIDE this same guard, not before it, or a broken
+    config raises past this function entirely and the "never raises into the
+    write" guarantee has a gap right at its own entry.
     """
-    from ..vault import config as vault_config_mod
-
-    name, vault = _resolve_vault_entry(vault_root)
-    if vault is not None and not vault_config_mod.auto_publish_flag(vault):
-        return
-
+    name = Path(vault_root).name
     try:
+        from ..vault import config as vault_config_mod
+
+        name, vault = _resolve_vault_entry(vault_root)
+        if vault is not None and not vault_config_mod.auto_publish_flag(vault):
+            return
+
         touch_request_stamp(vault_root, clock=clock)
 
         if _lock_held(vault_root):
@@ -323,20 +348,30 @@ def warn_stale_publish(vault_root: "str | Path") -> None:
     ``awaiting-person``, ``retries-exhausted``, …) — means the last automatic
     publish ended without succeeding, which is worth surfacing at the next
     intentional write. Called beside the existing throttled freshness note
-    (``sync.implicit_pull``) in ``record create``/``record update``.
+    (``sync.implicit_pull``) in ``record create``/``record update``, UNGUARDED
+    at both call sites — so this function is never allowed to raise past
+    itself. ``read_marker`` catches ``OSError``/``JSONDecodeError``, but
+    ``marker_path`` (via ``_suffixed_path``'s confinement check) can raise
+    ``layers_mod.LayerConfinementError`` instead — a plain ``Exception``, not
+    an ``OSError`` — if something other than this module's own writes ever
+    occupies the marker path (e.g. a symlink planted there). A record write
+    must never traceback over a stale-publish notice.
     """
-    marker = read_marker(vault_root)
-    if marker is None:
-        return
-    outcome = marker.get("outcome")
-    if outcome in (None, OUTCOME_RUNNING):
-        return
-    name = Path(vault_root).name
-    print(
-        f"  lore: {name}: notice: the last automatic publish did not succeed "
-        f"({outcome}) — run `lore sync` to retry.",
-        file=sys.stderr,
-    )
+    try:
+        marker = read_marker(vault_root)
+        if marker is None:
+            return
+        outcome = marker.get("outcome")
+        if outcome in (None, OUTCOME_RUNNING):
+            return
+        name = Path(vault_root).name
+        print(
+            f"  lore: {name}: notice: the last automatic publish did not succeed "
+            f"({outcome}) — run `lore sync` to retry.",
+            file=sys.stderr,
+        )
+    except Exception:  # noqa: BLE001 — a stale-publish notice must never fail the write
+        pass
 
 
 def _resolve_vault_path(vault_name: str) -> "Path | None":
@@ -361,13 +396,27 @@ def _default_sync_call(vault_name: str) -> "tuple[int, str | None]":
     which of ``sync.SYNC_OUTCOMES`` this vault landed on. ``None`` when the
     vault never reached a determinate outcome this run (e.g. a hard failure
     ``cmd_sync`` never assigns one to — see its own ``--json`` docstring).
+
+    ``blocking=False`` is explicit here for the same reason ``add_sync_subparser``
+    sets it on the sweep/manual ``lore sync`` CLI path (see ``cmd_sync``'s own
+    docstring): a bare ``SimpleNamespace`` with no ``blocking`` attribute makes
+    ``cmd_sync`` default to ``blocking=True``, and this worker already holds
+    its OWN single-flight lock (see :func:`cmd_publish`) while it runs the sync
+    loop — a blocking commit-phase lock acquisition here would leave the
+    worker parked indefinitely on a contended vault write lock, still holding
+    that single-flight lock, so every OTHER trigger for this vault sees it
+    held and never spawns a worker of its own. ``blocking=False`` turns
+    contention into the sync loop's own ``in-progress`` outcome instead, which
+    :func:`_run_rounds` already treats as non-terminal and retries.
     """
     from . import sync as sync_mod
 
     out_buf = io.StringIO()
     with contextlib.redirect_stdout(out_buf):
         rc = sync_mod.cmd_sync(
-            SimpleNamespace(vault=vault_name, message=None, pull_only=False, json=True)
+            SimpleNamespace(
+                vault=vault_name, message=None, pull_only=False, json=True, blocking=False,
+            )
         )
     text = out_buf.getvalue()
     sys.stdout.write(text)
@@ -399,12 +448,19 @@ def _quiet_wait(vault_root: "str | Path", *, quiet_for: float, clock, sleeper) -
     refreshed" bookkeeping is needed, the reread already gives the right
     answer. Returns immediately if there is no stamp at all (nothing to wait
     on for a vault with no pending request).
+
+    ``remaining`` is clamped to *quiet_for*: a stamp that reads in the future
+    relative to ``clock()`` (a backwards wall-clock step between the write and
+    this read) would otherwise compute a *remaining* far larger than the
+    debounce window itself, and the worker would sleep the whole skew — while
+    holding its own single-flight lock — instead of the bounded window the
+    caller asked for.
     """
     while True:
         stamp = _read_request_stamp(vault_root)
         if stamp is None:
             return
-        remaining = quiet_for - (clock() - stamp)
+        remaining = min(quiet_for, quiet_for - (clock() - stamp))
         if remaining <= 0:
             return
         sleeper(remaining)
@@ -477,9 +533,15 @@ def cmd_publish(args) -> int:
     ``clock``, ``sleeper``, and ``sync_call`` are read off *args* with
     ``getattr`` and default to real wall-clock time, real ``time.sleep``, and
     :func:`_default_sync_call` — the CLI wiring never sets them; tests do.
+
+    ``quiet_for`` defaults via an explicit ``is None`` check, not
+    ``... or DEFAULT_QUIET_FOR`` — the latter treats an explicit
+    ``--quiet-for 0`` (publish now, no debounce) as falsy and silently
+    restores the 5s default instead of honoring it.
     """
     vault_name = args.vault
-    quiet_for = float(getattr(args, "quiet_for", None) or DEFAULT_QUIET_FOR)
+    quiet_for_raw = getattr(args, "quiet_for", None)
+    quiet_for = float(quiet_for_raw) if quiet_for_raw is not None else DEFAULT_QUIET_FOR
     clock = getattr(args, "clock", None) or time.time
     sleeper = getattr(args, "sleeper", None) or time.sleep
     sync_call = getattr(args, "sync_call", None) or _default_sync_call

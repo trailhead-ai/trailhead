@@ -13,8 +13,10 @@ the command modules stay free of cross-imports for generic plumbing:
   - ``_load_vault_config`` — the single gate for config-driven behavior;
   - ``_resolve_all_vaults`` — the whole-install vault enumeration used by ``sync``
     and ``status``, as opposed to ``resolve_active_vault``'s ``default``-only view,
-    plus ``_partition_writable_vaults`` — the ``shared: true`` exclusion every
-    WRITE/PUSH fan-out over that enumeration applies;
+    plus ``_partition_writable_vaults`` — splits that enumeration into
+    ``(writable, shared)``, used by the in-process commit/push fan-outs that must
+    never act on a ``shared: true`` vault (``lore flush --wait``'s sync tail and
+    its own shared-vault report);
   - the git primitives (``_git`` / ``_vault_is_git_toplevel`` /
     ``_vault_mid_rebase`` / ``_vault_upstream_ref``) shared by ``sync``, ``flush``,
     ``resolve`` and ``resolve_state``, plus ``_vault_drift`` — the "is this vault
@@ -415,13 +417,15 @@ def _resolve_all_vaults_and_shared() -> tuple[list[tuple[str, Path]], set[str], 
 def _partition_writable_vaults(vaults) -> tuple[list, list]:
     """Split ``(name, path)`` pairs into ``(writable, shared)``, order preserved.
 
-    The session surface resolves a key by asking every configured vault whether
-    it holds it. That is fine for reads, but it also made every configured vault
-    a WRITE target: a dirty session record planted in a shared vault would be
-    flipped ``clean``, committed, and pushed by a bare ``lore flush`` — untrusted
-    content actuating a local commit under the operator's git identity.
-    Excluding ``shared: true`` vaults from a write fan-out is the same default
-    ``lore record rename``'s reference sweep already takes.
+    A ``shared`` vault holds untrusted, multi-user content, so no in-process
+    commit or push may act on it under this operator's git identity. This is
+    the filter behind ``lore flush --wait``'s sync tail (which stages, commits,
+    and pushes every writable vault directly, in-process) and that same path's
+    own shared-vault report. It is NOT applied to every write surface: the
+    default flush's background publish request (``publish.request_publish``,
+    via ``_flush_request_tail``) covers ``shared: true`` vaults too, gated
+    per-vault by that vault's own ``auto_publish`` setting instead of this
+    blanket exclusion — see ``_flush_request_tail``'s own docstring.
 
     The ``shared`` half is RETURNED rather than dropped so callers can name what
     they skipped once they know it was relevant: an operator whose session really

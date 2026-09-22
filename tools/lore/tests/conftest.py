@@ -49,6 +49,43 @@ def _isolate_ambient_env(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(config))
 
 
+@pytest.fixture
+def _allow_real_publish_spawn():
+    """Default seam a test overrides (fixture-override, not a call) to opt
+    back into a real publish-worker spawn. See ``_publish_spawn_guard``."""
+    return False
+
+
+@pytest.fixture(autouse=True)
+def _publish_spawn_guard(monkeypatch, _allow_real_publish_spawn):
+    """No-op ``lore.cli.publish._spawn_worker`` by default, in every test.
+
+    A successful ``record create``/``update`` or ``flush`` calls
+    ``publish.request_publish``, which spawns the publish worker as a real
+    detached subprocess. Left unguarded, EVERY test that runs one of those
+    commands through ``conftest.run_cli`` (in-process) spawns a real worker
+    keyed off whatever ``sys.argv[0]`` happens to be in this test run —
+    pytest's own entry point, not the CLI script — which is exactly the
+    wrong-argv bug ``lore.cli.publish._worker_argv`` exists to close. Most
+    tests have no interest in that spawn at all; this fixture defaults it to
+    a no-op so the suite does not litter live processes and lock files behind
+    it. ``_allow_real_publish_spawn`` is the one seam back in — see
+    ``TestRealSpawn`` in ``test_publish_trigger.py``, which overrides that
+    fixture to prove the genuine, unmocked spawn wiring.
+
+    A test that mocks ``_spawn_worker`` itself (most of
+    ``test_publish_trigger.py``) simply overwrites this default with its own
+    recording stub — ``monkeypatch.setattr`` composes fine either way.
+    """
+    if _allow_real_publish_spawn:
+        return
+    try:
+        from lore.cli import publish as publish_mod
+    except Exception:
+        return
+    monkeypatch.setattr(publish_mod, "_spawn_worker", lambda argv: None, raising=False)
+
+
 def write_default_config(config_home: Path, vault_path: Path) -> None:
     """Seed config.json under config_home with a single default-scope vault.
 

@@ -168,16 +168,20 @@ def _report_unsynced_vaults(
     unpartitioned shape, still printed to stdout) — the full report that
     substitutes for the sync tail it opted out of.
 
-    A default flush ends with :func:`_flush_sync_tail`, which SYNCS every
+    A `--wait` flush ends with :func:`_flush_sync_tail`, which SYNCS every
     writable vault instead of naming it — leaving nothing for that half of the
     report. But the tail structurally never touches a `shared: true` vault (the
     shared-vault write gate — see :func:`_flush_sync_tail`), so a shared vault
-    left holding unsynced work is never mentioned by anything on the default
+    left holding unsynced work is never mentioned by anything on the `--wait`
     path either, unless this notice runs a second time, scoped to shared vaults
     ONLY, after the tail (`cmd_flush` passes `file=sys.stderr` there, matching
     every other post-tail notice). The two scopes never overlap — the tail's
     writable partition and this call's shared partition are exactly
     complementary — so calling both is not double-reporting the same vault.
+
+    The DEFAULT flush (neither `--wait` nor `--no-sync`) never calls this at
+    all: it ends with :func:`_flush_request_tail` instead, which reports what
+    it requested (and what it skipped) on its own stderr lines.
 
     `_flush_commit` stages the flushed session record's EXPLICIT paths and nothing
     else — deliberately, so unrelated dirty files are never swept into a session
@@ -190,9 +194,10 @@ def _report_unsynced_vaults(
 
     Reporting rather than committing is what `--no-sync` MEANS: that flush still
     touches only what it staged, and the operator gets the one command that covers
-    the rest. (A default flush covers its writable vaults instead of naming them —
+    the rest. (A `--wait` flush covers its writable vaults instead of naming them —
     :func:`_flush_sync_tail` — and can only ever NAME its shared ones, since it
-    must never write to them.)
+    must never write to them. The default flush neither covers nor uses this
+    reporting function — see :func:`_flush_request_tail`.)
 
     **Only ``DRIFT_SYNC_FIXABLE`` findings are reported**, because the notice's
     whole payload is "run `lore sync`". A standing condition sync cannot fix — a
@@ -350,14 +355,25 @@ def _flush_request_tail() -> None:
     A vault already mid-resolution is skipped, same as the sync tail —
     requesting a publish for it would eventually run `cmd_sync` against a
     tree `lore resolve` is still settling.
+
+    **Names what it did, on stderr.** The flush skill's own report template
+    says "Publish requested for: <vaults>"; this is the one line that makes
+    that satisfiable, plus a second line naming any vault skipped because its
+    own `auto_publish` setting is `False` — resolved directly here (not read
+    back off `request_publish`'s return, which carries no such signal) so the
+    two outcomes stay distinguishable from each other and from a genuine
+    scheduling error.
     """
     from . import publish as publish_mod
+    from ..vault import config as vault_config_mod
 
     vaults, error = _resolve_all_vaults()
     if error is not None:
         print(f"notice: cannot request a publish after flush — {error}", file=sys.stderr)
         return
 
+    requested: list[str] = []
+    auto_publish_off: list[str] = []
     for name, path in vaults:
         vault = Path(path)
         if vault_is_resolving(vault):
@@ -367,7 +383,20 @@ def _flush_request_tail() -> None:
                 file=sys.stderr,
             )
             continue
+        _, entry = publish_mod._resolve_vault_entry(vault)
+        if entry is not None and not vault_config_mod.auto_publish_flag(entry):
+            auto_publish_off.append(name)
+            continue
         publish_mod.request_publish(vault)
+        requested.append(name)
+
+    if requested:
+        print(f"Publish requested for: {', '.join(requested)}", file=sys.stderr)
+    if auto_publish_off:
+        print(
+            f"Publish skipped (auto_publish disabled) for: {', '.join(auto_publish_off)}",
+            file=sys.stderr,
+        )
 
 
 # The literal reserved scope token. It is unambiguous against a KQL

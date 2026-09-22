@@ -22,11 +22,16 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+import signal
+import subprocess
 import sys
 import time
 from pathlib import Path
 
+import pytest
+
 from conftest import (
+    CLI_PATH,
     make_vault as _make_vault,
     run_cli as _run,
     run_cli_subprocess,
@@ -292,6 +297,52 @@ class TestTriggerNeverRaisesIntoTheWrite:
         assert r.stdout.strip(), "the record ID must still print"
         assert "could not schedule publish" not in r.stderr
 
+    def test_a_raising_auto_publish_resolution_leaves_exit_code_0_and_names_the_vault(
+        self, tmp_path, monkeypatch
+    ):
+        """`_resolve_vault_entry` (config load + path resolution) must be inside
+        the same non-raising guard as the stamp write and spawn — a broken
+        config must not fail the write it follows any more than a broken
+        stamp write does."""
+        vault, state = _make_vault(tmp_path)
+        monkeypatch.setenv("XDG_STATE_HOME", str(state))
+
+        def boom(vault_root):
+            raise OSError("[Errno 13] Permission denied reading config.json")
+
+        monkeypatch.setattr(publish_mod, "_resolve_vault_entry", boom)
+
+        r = _create(vault, state, title="x")
+        assert r.returncode == 0, r.stderr
+        assert r.stdout.strip(), "the record ID must still print"
+
+        lines = [
+            line for line in r.stderr.splitlines()
+            if "could not schedule publish" in line
+        ]
+        assert len(lines) == 1, f"expected exactly one notice; stderr={r.stderr!r}"
+
+    def test_a_symlinked_marker_path_does_not_fail_the_write(self, tmp_path, monkeypatch):
+        """`warn_stale_publish` reads the marker before the write's own trigger
+        runs; a symlink planted at the marker path makes ``marker_path``'s
+        confinement check raise ``LayerConfinementError`` (not an ``OSError``),
+        which ``read_marker``'s own except clause does not catch. That must
+        never traceback into a record write."""
+        _record_spawner(monkeypatch)
+        vault, state = _make_vault(tmp_path)
+        monkeypatch.setenv("XDG_STATE_HOME", str(state))
+
+        mp = publish_mod.marker_path(vault)
+        mp.parent.mkdir(parents=True, exist_ok=True)
+        outside = tmp_path / "outside-target"
+        outside.write_text("not a marker", encoding="utf-8")
+        mp.symlink_to(outside)
+
+        r = _create(vault, state, title="x")
+        assert r.returncode == 0, r.stderr
+        assert r.stdout.strip(), "the record ID must still print"
+        assert "Traceback" not in r.stderr
+
 
 # ---------------------------------------------------------------------------
 # record update — in-place and relocation both request the DESTINATION vault
@@ -342,6 +393,47 @@ class TestRecordUpdateTriggersPublish:
 
 
 # ---------------------------------------------------------------------------
+# worker argv derivation — must not trust sys.argv[0]
+# ---------------------------------------------------------------------------
+
+
+class TestWorkerArgvDerivation:
+    """``_worker_argv`` must derive the real ``cli/lore`` entry script from the
+    ``lore`` package's own location, not from ``sys.argv[0]`` — which, under
+    ``conftest.run_cli``'s in-process dispatch (used by nearly every other test
+    in this file), is whatever launched THIS test run, not the CLI."""
+
+    def test_worker_argv_points_at_the_real_cli_script_regardless_of_sys_argv0(
+        self, monkeypatch
+    ):
+        monkeypatch.setattr(sys, "argv", ["/not/the/cli/entrypoint"])
+
+        argv = publish_mod._worker_argv("default")
+
+        assert argv == [sys.executable, str(CLI_PATH), "publish", "--vault", "default"]
+
+    def test_a_missing_cli_script_skips_the_spawn_with_one_stderr_line(
+        self, tmp_path, monkeypatch
+    ):
+        vault, state = _make_vault(tmp_path)
+        monkeypatch.setenv("XDG_STATE_HOME", str(state))
+        monkeypatch.setattr(
+            publish_mod, "_cli_script_path", lambda: tmp_path / "no-such-cli-script"
+        )
+
+        r = _create(vault, state, title="x")
+        assert r.returncode == 0, r.stderr
+        assert r.stdout.strip(), "the record ID must still print"
+
+        lines = [
+            line for line in r.stderr.splitlines()
+            if "could not schedule publish" in line
+        ]
+        assert len(lines) == 1, f"expected exactly one notice; stderr={r.stderr!r}"
+        assert "default" in lines[0]
+
+
+# ---------------------------------------------------------------------------
 # a real spawn — the one integration test, not mocked
 # ---------------------------------------------------------------------------
 
@@ -362,9 +454,41 @@ def _lock_is_held(lock_path: Path) -> bool:
         os.close(fd)
 
 
+def _pids_with_open_file(path: Path) -> "list[int]":
+    """PIDs holding *path* open, via ``lsof -t`` — used to find and reap the
+    real worker process ``TestRealSpawn`` deliberately leaves running (a
+    ``flock`` is a BSD-style lock, invisible to ``fcntl``'s POSIX ``F_GETLK``,
+    so ``lsof`` on the lock file itself is the portable way to name the
+    holder)."""
+    result = subprocess.run(["lsof", "-t", str(path)], capture_output=True, text=True)
+    return [int(pid) for pid in result.stdout.split() if pid.strip()]
+
+
 class TestRealSpawn:
 
-    def test_a_real_spawn_leaves_a_worker_process_running(self, tmp_path, monkeypatch):
+    @pytest.fixture
+    def _allow_real_publish_spawn(self):
+        """This class's whole point is the real, unmocked spawn — opt back
+        into it explicitly against the autouse no-op default."""
+        return True
+
+    @pytest.fixture
+    def _reap_real_workers(self):
+        """Kill the process group of every PID this test registers, so the
+        real worker it deliberately spawns (still mid-debounce, since
+        `--quiet-for` defaults to 5s) never survives to run real git against
+        this test's own `tmp_path` after it has been torn down."""
+        pids: list[int] = []
+        yield pids
+        for pid in pids:
+            try:
+                os.killpg(pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
+
+    def test_a_real_spawn_leaves_a_worker_process_running(
+        self, tmp_path, monkeypatch, _reap_real_workers
+    ):
         """The UNMOCKED spawn path: a real `lore record create` subprocess, with
         no injected spawner, must leave a real `lore publish --vault default`
         process alive afterwards — proven by that process holding the worker's
@@ -391,3 +515,4 @@ class TestRealSpawn:
             "expected a real, unmocked spawn to leave a worker process holding "
             f"its lock at {lock}"
         )
+        _reap_real_workers.extend(_pids_with_open_file(lock))

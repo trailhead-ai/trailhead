@@ -26,6 +26,7 @@ import pytest
 
 from conftest import CLI_PATH, make_bare_remote, make_git_vault, write_vault_config
 from test_sync_multi_vault import _wire_remote
+from test_vault_write_lock import _spawn_holder
 
 from lore.cli import publish
 from lore.cli import resolve_state
@@ -168,6 +169,46 @@ class TestQuietWindow:
         assert rc == 0
         assert len(sleeper.calls) >= 2, "the refresh must force at least one more wait"
         assert sync_call.calls == ["default"]
+
+    def test_explicit_quiet_for_zero_publishes_now(self, env):
+        """`--quiet-for 0` must mean publish NOW, not fall back to the 5s
+        default — `0.0 or DEFAULT_QUIET_FOR` treats 0 as falsy and silently
+        restores the default, which is the bug this pins."""
+        vault = _make_vault(env.tmp_path, "default", config_home=env.config_home)
+        clock = FakeClock()
+        publish.touch_request_stamp(vault, clock=clock)  # stamp is "now" — fresh
+        sleeper = RecordingSleeper(clock)
+        sync_call = _stub_sync_call("converged")
+
+        rc = publish.cmd_publish(SimpleNamespace(
+            vault="default", quiet_for=0.0, clock=clock, sleeper=sleeper, sync_call=sync_call,
+        ))
+
+        assert rc == 0
+        assert sleeper.calls == [], "an explicit --quiet-for 0 must not wait at all"
+        assert sync_call.calls == ["default"]
+
+    def test_quiet_wait_clamps_a_backwards_clock_skew_to_the_quiet_window(self, env):
+        """A stamp that reads in the FUTURE relative to `clock()` (a backwards
+        wall-clock step) must not stretch the wait past `quiet_for` — the
+        worker holds its own lock the whole time it waits."""
+        vault = _make_vault(env.tmp_path, "default", config_home=env.config_home)
+        clock = FakeClock(start=1_000_000.0)
+        publish.touch_request_stamp(vault, clock=lambda: clock.now + 10_000.0)
+
+        def _settle_after_first_sleep(call_count, seconds):
+            if call_count == 1:
+                publish.touch_request_stamp(vault, clock=lambda: clock.now - 100.0)
+
+        sleeper = RecordingSleeper(clock, on_sleep=_settle_after_first_sleep)
+
+        publish._quiet_wait(vault, quiet_for=5.0, clock=clock, sleeper=sleeper)
+
+        assert sleeper.calls, "a stamp reading in the future must still wait once"
+        assert max(sleeper.calls) <= 5.0, (
+            f"a backwards clock skew must not stretch the wait past quiet_for; "
+            f"calls={sleeper.calls!r}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -406,7 +447,14 @@ time.sleep(1.0)
     def test_worker_for_a_different_vault_proceeds_while_another_is_held(self, env):
         held_vault = _make_vault(env.tmp_path, "held", config_home=env.config_home)
         free_vault = _make_vault(env.tmp_path, "free", config_home=env.config_home)
-        publish.touch_request_stamp(free_vault, clock=lambda: time.time() - 10.0)
+        clock = FakeClock()
+        # Written against the SAME injected clock `cmd_publish` below reads
+        # with — a stamp written against a different clock basis (e.g. real
+        # `time.time()`) is a fresh-looking stamp from `_quiet_wait`'s clamped
+        # point of view (`remaining` is bounded to `quiet_for` per read, so an
+        # arbitrarily large, cross-basis gap would take arbitrarily many
+        # iterations of this injected, non-blocking sleeper to close).
+        publish.touch_request_stamp(free_vault, clock=lambda: clock() - 10.0)
 
         held_lock = publish.lock_path(held_vault)
         held_lock.parent.mkdir(parents=True, exist_ok=True)
@@ -414,7 +462,6 @@ time.sleep(1.0)
         fcntl.flock(holder_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         try:
             sync_call = _stub_sync_call("converged")
-            clock = FakeClock()
             rc = publish.cmd_publish(SimpleNamespace(
                 vault="free", quiet_for=5.0, clock=clock,
                 sleeper=RecordingSleeper(clock), sync_call=sync_call,
@@ -454,6 +501,45 @@ class TestRealSyncWiring:
         subprocess.run(["git", "clone", str(remote), str(clone)], check=True, capture_output=True)
         assert (clone / "task" / "new-record.md").exists(), (
             "the real cmd_sync path never pushed the pending write to origin"
+        )
+
+    def test_cmd_publish_never_blocks_on_a_contended_real_vault_lock(self, env):
+        """A real, separate process holds the vault write lock (`_spawn_holder`,
+        mirroring `test_vault_write_lock.py`'s own contention proof) while the
+        worker runs the UNSTUBBED `_default_sync_call` against it. If the
+        worker's `cmd_sync` invocation blocks (the default-`blocking=True`
+        namespace bug), this test hangs for the holder's full `hold_for`
+        instead of returning almost immediately with a contended-round
+        outcome — proving the worker retries under real contention rather
+        than stalling on the vault lock while holding its own single-flight
+        lock."""
+        vault = _make_vault(env.tmp_path, "default", config_home=env.config_home)
+        remote = make_bare_remote(env.tmp_path / "remote.git")
+        _wire_remote(vault, remote, track=True)
+
+        clock = FakeClock()
+        publish.touch_request_stamp(vault, clock=lambda: clock() - 10.0)
+
+        holder = _spawn_holder(vault, hold_for=20.0)
+        try:
+            start = time.monotonic()
+            rc = publish.cmd_publish(SimpleNamespace(
+                vault="default", quiet_for=0.0, clock=clock, sleeper=RecordingSleeper(clock),
+            ))
+            elapsed = time.monotonic() - start
+        finally:
+            holder.kill()
+            holder.wait(timeout=15)
+
+        assert elapsed < 10.0, (
+            f"worker blocked on the contended vault lock for {elapsed:.2f}s instead "
+            "of retrying under blocking=False"
+        )
+        assert rc == 0
+        marker = publish.read_marker(vault)
+        assert marker is not None, "3 rounds under permanent contention leave a marker"
+        assert marker["outcome"] == publish.OUTCOME_ROUNDS_EXHAUSTED, (
+            f"expected rounds-exhausted under permanent contention; marker={marker!r}"
         )
 
 
