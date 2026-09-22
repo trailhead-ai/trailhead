@@ -653,7 +653,7 @@ def test_restart_build_failure_includes_stdout_diagnostics(outpost, tmp_path):
 
 def test_outpost_verbs_parse():
     parser = cli._build_parser()
-    for verb in ("start", "stop", "status", "restart", "open"):
+    for verb in ("start", "stop", "status", "restart", "open", "enable", "disable"):
         args = parser.parse_args(["outpost", verb])
         assert args.command == "outpost"
         assert args.outpost_command == verb
