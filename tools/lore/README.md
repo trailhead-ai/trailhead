@@ -118,6 +118,17 @@ There is no `disable` verb — deleting `state_dir("lore")/signing/` reverts a
 host to today's behavior (the adopter's own signing config), and `status`
 reports that plainly.
 
+**Threat model.** This key has no passphrase, by design — that is what lets
+it sign with nobody present. That means its `0600` file mode (and the
+containing directory's `0700` mode) is the *only* control standing between
+"this host signs unattended" and "anyone with a shell on this host can forge
+a signed commit in any vault it can reach." There is no agent, no passphrase
+prompt, and no hardware token in the loop to fall back on if the file
+permissions are ever widened. Treat this key the same way you would treat any
+other no-passphrase credential on the box: keep it per-host, never copy it to
+another machine, and never let it anywhere near a synced vault, a backup
+that leaves the host, or a dotfiles repo.
+
 ## How search works
 
 The agent pulls what's relevant when it needs it — explained, not guessed.

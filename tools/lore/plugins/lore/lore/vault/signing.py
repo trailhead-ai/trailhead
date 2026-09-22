@@ -35,16 +35,35 @@ calling it at all — whenever :func:`load_key_path` returns ``None`` or the
 returned path does not name an existing file: a missing, absent, malformed, or
 dangling configuration means git runs exactly as it does with no configuration
 at all, honoring the adopter's own signing setup. When a usable key is
-present, it appends four entries (``gpg.format=ssh``, ``user.signingkey=<key
+present, it appends five entries (``gpg.format=ssh``, ``user.signingkey=<key
 path>``, ``commit.gpgsign=true``, ``gpg.ssh.allowedSignersFile=<allowed-signers
-path>``) after whatever ``GIT_CONFIG_*`` entries *base_env* already carries,
-raising ``GIT_CONFIG_COUNT`` to cover them. git applies later entries last, so
-lore's signing keys win over the adopter's own config (global or repo) without
-this module ever writing to a vault's git config, while any operator-supplied
-override with an unrelated key stays in effect. An inherited
-``GIT_CONFIG_COUNT`` that does not parse as a non-negative integer is not
-trusted as an index base — lore's four entries are written starting at index
-0, replacing whatever the malformed count claimed to enumerate.
+path>``, ``gpg.ssh.program=ssh-keygen``) after whatever ``GIT_CONFIG_*``
+entries *base_env* already carries, raising ``GIT_CONFIG_COUNT`` to cover
+them. The fifth entry pins the SSH signing helper itself: without it, an
+adopter's own ``gpg.ssh.program`` (a 1Password ``op-ssh-sign`` shim, for
+instance) would still run and could fail or hijack the signature even though
+``user.signingkey`` and the other three entries point at lore's own key. git
+applies later entries last, so lore's signing keys win over the adopter's own
+config (global or repo) without this module ever writing to a vault's git
+config, while any operator-supplied override with an unrelated key stays in
+effect. An inherited ``GIT_CONFIG_COUNT`` is not trusted as an index base —
+lore's five entries are written starting at index 0, replacing whatever the
+inherited count claimed to enumerate — when it does not parse as a
+non-negative integer, or when it claims an entry (``GIT_CONFIG_KEY_<i>`` for
+some ``i`` below the count) that is not actually present: git itself aborts
+every config read with "fatal: unable to parse command-line config" against
+such a gap, so trusting it would break every git call this module makes, not
+just signing.
+
+**A limit this module cannot fix.** A parent process that already invoked
+``git -c key=value`` encodes that override in ``GIT_CONFIG_PARAMETERS``, a
+separate environment channel git consults ahead of the
+``GIT_CONFIG_COUNT``/``KEY``/``VALUE`` triples this module writes. When the
+parent's ``-c`` names the same git config key lore also overrides (rare, but
+possible for a caller that already passes ``-c user.signingkey=...`` or
+similar), the parent's value wins regardless of what this module appends —
+there is no environment-only way to outrank ``GIT_CONFIG_PARAMETERS`` from
+outside the process that set it.
 """
 from __future__ import annotations
 
@@ -148,24 +167,37 @@ def _override_entries(env: "dict | None" = None) -> "list[tuple[str, str]] | Non
         ("user.signingkey", str(key_path)),
         ("commit.gpgsign", "true"),
         ("gpg.ssh.allowedSignersFile", str(allowed_signers)),
+        ("gpg.ssh.program", "ssh-keygen"),
     ]
 
 
 def _inherited_git_config_count(base_env: dict) -> int:
     """Return the trustworthy inherited ``GIT_CONFIG_COUNT``, or ``0``.
 
-    ``0`` covers "absent" as well as "malformed" (non-numeric or negative) —
-    in the malformed case lore's own entries are written starting at index 0,
-    which is what "replaced by lore's own entries alone" means: any
-    ``GIT_CONFIG_KEY_0``/``VALUE_0`` the malformed count could not itself
-    make trustworthy gets overwritten rather than read.
+    ``0`` covers "absent" as well as "malformed": non-numeric, negative, or
+    claiming an entry (some ``GIT_CONFIG_KEY_<i>`` for ``i`` below the count)
+    that is not actually present in *base_env*. That last case is not a
+    theoretical nicety — git itself refuses to read ANY config, for this call
+    or any other, against a ``GIT_CONFIG_COUNT`` with a gap in its indices
+    ("fatal: unable to parse command-line config"), so an ungapped count is
+    required for this module's own git calls to work at all, not just for
+    signing to apply cleanly. In the malformed case lore's own entries are
+    written starting at index 0, which is what "replaced by lore's own
+    entries alone" means: any ``GIT_CONFIG_KEY_0``/``VALUE_0`` the malformed
+    count could not itself make trustworthy gets overwritten rather than
+    read.
     """
     raw = base_env.get("GIT_CONFIG_COUNT", "")
     try:
         count = int(raw)
     except ValueError:
         return 0
-    return count if count >= 0 else 0
+    if count < 0:
+        return 0
+    for i in range(count):
+        if f"GIT_CONFIG_KEY_{i}" not in base_env:
+            return 0
+    return count
 
 
 def apply_env_overrides(base_env: dict, *, env: "dict | None" = None) -> dict:
@@ -226,6 +258,7 @@ def _probe_key(path: Path) -> "tuple[str | None, bool]":
     result = subprocess.run(
         ["ssh-keygen", "-y", "-P", "", "-f", str(path)],
         capture_output=True, text=True, timeout=_SSH_KEYGEN_TIMEOUT,
+        stdin=subprocess.DEVNULL,
     )
     if result.returncode == 0:
         return result.stdout.strip(), False
@@ -237,6 +270,7 @@ def _fingerprint(path: Path) -> "str | None":
     result = subprocess.run(
         ["ssh-keygen", "-lf", str(path)],
         capture_output=True, text=True, timeout=_SSH_KEYGEN_TIMEOUT,
+        stdin=subprocess.DEVNULL,
     )
     if result.returncode != 0:
         return None
@@ -328,8 +362,40 @@ def _generate_key(dest: Path) -> None:
     subprocess.run(
         ["ssh-keygen", "-t", "ed25519", "-N", "", "-f", str(dest), "-C", socket.gethostname()],
         check=True, capture_output=True, timeout=_SSH_KEYGEN_TIMEOUT,
+        stdin=subprocess.DEVNULL,
     )
     os.chmod(dest, 0o600)
+
+
+def _usable_pub_line_or_refusal(path: Path) -> "tuple[str | None, str | None]":
+    """Return ``(pub_line, refusal_message)`` for a key file that already
+    exists on disk.
+
+    ``pub_line`` is not ``None`` exactly when *path* loads with no
+    passphrase. Otherwise ``refusal_message`` names the reason and the
+    remedy for refusing to touch *path* — this function never generates over
+    or beside an existing file, so a caller reaching a non-``None`` refusal
+    must stop rather than fall through to :func:`_generate_key`.
+    """
+    mode = stat.S_IMODE(path.stat().st_mode)
+    if mode & 0o077:
+        return None, (
+            f"{path} is readable by others (mode {oct(mode)[-3:]}) — run "
+            f"`chmod 600 {path}`"
+        )
+    pub_line, needs_passphrase = _probe_key(path)
+    if pub_line is not None:
+        return pub_line, None
+    if needs_passphrase:
+        return None, (
+            f"{path} needs a passphrase, which cannot sign with nobody "
+            "present — replace it with a key that has none, or point --key "
+            "at a different key"
+        )
+    return None, (
+        f"{path} is not a private key ssh-keygen can load — replace it, or "
+        "point --key at a different key"
+    )
 
 
 def enable(*, key: "str | Path | None" = None, env: "dict | None" = None) -> EnableResult:
@@ -344,10 +410,19 @@ def enable(*, key: "str | Path | None" = None, env: "dict | None" = None) -> Ena
 
     With no *key*, an already-configured, still-loadable key is left alone
     (re-writing the same config/allowed-signers content is a no-op in
-    substance: the fingerprint does not change) — a dangling configuration
-    (the file was deleted or replaced with a passphrase-protected key) falls
-    through to generating a fresh key at :data:`GENERATED_KEY_FILENAME`,
-    since that is what a host with no configured key does on this path.
+    substance: the fingerprint does not change). When the configured key is
+    missing or there is no configuration at all, and a key file already sits
+    at :data:`GENERATED_KEY_FILENAME` (the default path a prior no-argument
+    ``enable`` would have written), that file is reused if it still loads
+    with no passphrase — the configuration is simply rewritten to name it
+    again. A key file present at either location but unusable (needs a
+    passphrase, wrong mode, or not a key ``ssh-keygen`` can load at all)
+    raises :class:`SigningEnableError` rather than being silently generated
+    over or beside: this function never runs ``ssh-keygen -f`` against a path
+    it has not first confirmed is empty, since that call would otherwise
+    either fail outright or hang on ssh-keygen's own hidden overwrite prompt.
+    A key is generated fresh at :data:`GENERATED_KEY_FILENAME` only when
+    nothing exists there yet.
     """
     directory = signing_dir(env)
 
@@ -361,12 +436,25 @@ def enable(*, key: "str | Path | None" = None, env: "dict | None" = None) -> Ena
 
     existing = load_key_path(env)
     if existing is not None and existing.is_file():
-        pub_line, _ = _probe_key(existing)
+        pub_line, refusal = _usable_pub_line_or_refusal(existing)
         if pub_line is not None:
             _write_configuration(directory, existing, pub_line)
             return EnableResult(key_path=existing, pub_line=pub_line, generated=False)
+        raise SigningEnableError(refusal)
 
     dest = directory / GENERATED_KEY_FILENAME
+    if dest.exists():
+        if not dest.is_file():
+            raise SigningEnableError(
+                f"{dest} is not a private key — remove it, or point --key at "
+                "a different key"
+            )
+        pub_line, refusal = _usable_pub_line_or_refusal(dest)
+        if pub_line is not None:
+            _write_configuration(directory, dest, pub_line)
+            return EnableResult(key_path=dest, pub_line=pub_line, generated=False)
+        raise SigningEnableError(refusal)
+
     _generate_key(dest)
     pub_line, _ = _probe_key(dest)
     _write_configuration(directory, dest, pub_line)
@@ -399,11 +487,16 @@ def describe_status(env: "dict | None" = None) -> "tuple[bool, str]":
             f"`chmod 600 {key_path}`"
         )
 
-    pub_line, _ = _probe_key(key_path)
+    pub_line, needs_passphrase = _probe_key(key_path)
     if pub_line is None:
+        if needs_passphrase:
+            return False, (
+                "the configured key needs a passphrase, which cannot sign "
+                "with nobody present — run `lore signing enable`"
+            )
         return False, (
-            "the configured key needs a passphrase, which cannot sign with "
-            "nobody present — run `lore signing enable`"
+            "the configured key is not a private key ssh-keygen can load — "
+            "run `lore signing enable`"
         )
 
     allowed_signers = signing_dir(env) / ALLOWED_SIGNERS_FILENAME

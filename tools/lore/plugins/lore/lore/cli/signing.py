@@ -7,6 +7,7 @@ argument parsing, the ``lore: <message>`` error shape, and exit codes.
 """
 from __future__ import annotations
 
+import subprocess
 import sys
 from pathlib import Path
 
@@ -35,15 +36,40 @@ def _cmd_signing_enable(args) -> int:
     except signing_mod.SigningEnableError as exc:
         print(f"lore: {exc}", file=sys.stderr)
         return 1
+    except FileNotFoundError:
+        print("lore: ssh-keygen is not on PATH — install OpenSSH's client tools",
+              file=sys.stderr)
+        return 1
+    except subprocess.TimeoutExpired:
+        print(
+            "lore: ssh-keygen timed out — check for a stuck ssh-keygen "
+            "process and retry",
+            file=sys.stderr,
+        )
+        return 1
+    except subprocess.CalledProcessError as exc:
+        # `_generate_key`'s `subprocess.run` passes `capture_output=True,
+        # text=True`, so `exc.stderr` is always a `str` here, never `bytes`.
+        stderr = (exc.stderr or "").strip()
+        detail = f" — {stderr}" if stderr else ""
+        print(f"lore: ssh-keygen failed{detail} — check its output and retry", file=sys.stderr)
+        return 1
 
     verb = "Generated" if result.generated else "Configured"
     print(f"lore: {verb} signing key at {result.key_path}")
     print(result.pub_line)
-    print(
-        "Register it with GitHub for a Verified badge (this command is not run):\n"
-        f"  gh ssh-key add <(printf '%s\\n' \"{result.pub_line}\") "
-        "--type signing --title \"lore\""
-    )
+    pub_path = Path(f"{result.key_path}.pub")
+    if pub_path.is_file():
+        print(
+            "Register it with GitHub for a Verified badge (this command is not run):\n"
+            f"  gh ssh-key add {pub_path} --type signing --title \"lore\""
+        )
+    else:
+        print(
+            "Register it with GitHub for a Verified badge: save the public "
+            "key line above to a file, then run (this command is not run):\n"
+            "  gh ssh-key add <path-to-saved-file> --type signing --title \"lore\""
+        )
     return 0
 
 
