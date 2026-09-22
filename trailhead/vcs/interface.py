@@ -79,8 +79,14 @@ class PRSurface(ABC):
         manifest_path: str,
         *,
         toml_path: str | None = None,
+        operator_directed: bool = False,
     ) -> dict[str, Any]:
-        """Merge PRs in dependency order with the safety gate."""
+        """Merge PRs in dependency order with the safety gate.
+
+        With ``[release].auto_merge`` off, the merge proceeds only when
+        ``operator_directed`` is true — the caller's attestation that the
+        operator told it to merge these PRs.
+        """
 
     @abstractmethod
     def approval(self, repo_path: str, pr_number: str) -> dict[str, Any]:

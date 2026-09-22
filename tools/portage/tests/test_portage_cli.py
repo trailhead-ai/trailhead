@@ -67,7 +67,7 @@ class _FakePR:
         self.calls.append(("evaluate", status, review_bot_login, fail_count))
         return self.evaluate_result
 
-    def merge(self, pr_pairs, manifest_path, *, toml_path=None):
+    def merge(self, pr_pairs, manifest_path, *, toml_path=None, operator_directed=False):
         self.calls.append(("merge", list(pr_pairs), manifest_path, toml_path))
         return self.merge_result
 
@@ -378,7 +378,7 @@ class TestMerge:
 
         provider = _FakeProvider()
 
-        def raising_merge(pr_pairs, manifest_path, *, toml_path=None):
+        def raising_merge(pr_pairs, manifest_path, *, toml_path=None, operator_directed=False):
             raise MergeOrderRequiredError(
                 "refusing to merge 2 PRs with no merge_order declared — "
                 "add merge_order = [...] to the [release] block of your group TOML"
