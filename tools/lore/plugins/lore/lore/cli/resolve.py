@@ -159,6 +159,7 @@ from ..record import model as record_model
 from ..record import sidecar as sidecar_format
 from ..search import xml_escape
 from ..vault import layers as layers_mod
+from ..vault import signing as signing_mod
 from . import resolve_state
 from .common import (
     _git,
@@ -693,11 +694,31 @@ def write_record(vault: Path, record_id: str, sidecar: dict, body: str) -> None:
 # ---------------------------------------------------------------------------
 
 
+#: Bound on ``git rebase --continue`` (below). A module-level attribute
+#: rather than a default parameter value so a test can shorten it with
+#: ``monkeypatch.setattr`` and have the shortened value actually take effect
+#: — a default parameter is captured once at function-definition time and a
+#: patch to the constant afterward would never be read.
+_REBASE_CONTINUE_TIMEOUT_S = 60
+
+
 def _rebase_continue(vault: Path) -> tuple[int, bool]:
     """Run ``git rebase --continue`` non-interactively. Returns ``(rc, mid_rebase)``.
 
     ``GIT_EDITOR=true`` is what makes this non-interactive: ``--continue`` opens
     the replayed commit's message otherwise and would block forever with no tty.
+    The environment also carries the host signing overrides (see
+    :func:`common._git`'s docstring), and stdin is closed — a signing step here
+    can no longer prompt for anything, on either channel.
+
+    Bounded by :data:`_REBASE_CONTINUE_TIMEOUT_S`: a git process that blocks
+    past it (a signing helper that hangs, an editor that never returns) is
+    killed and reported as failure, never left to hang the caller's vault
+    write lock forever and never raised as an exception — the caller (the
+    sweep's own driving loop) already treats a non-zero, still-mid-rebase
+    result as "this vault stopped with nothing left to settle" and aborts the
+    replay whole, which is exactly the right ending for a git process that
+    will never finish on its own.
 
     **"Still mid-rebase" is read from git's state directory, never from the exit
     code.** A non-zero ``--continue`` means either "stopped at the next conflict"
@@ -707,11 +728,17 @@ def _rebase_continue(vault: Path) -> tuple[int, bool]:
     """
     env = dict(os.environ)
     env["GIT_EDITOR"] = "true"
-    proc = subprocess.run(
-        ["git", "-C", str(vault), "rebase", "--continue"],
-        capture_output=True, text=True, env=env,
-    )
-    return proc.returncode, _vault_mid_rebase(vault)
+    env = signing_mod.apply_env_overrides(env)
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(vault), "rebase", "--continue"],
+            capture_output=True, text=True, env=env,
+            stdin=subprocess.DEVNULL, timeout=_REBASE_CONTINUE_TIMEOUT_S,
+        )
+        rc = proc.returncode
+    except subprocess.TimeoutExpired:
+        rc = 1
+    return rc, _vault_mid_rebase(vault)
 
 
 # ---------------------------------------------------------------------------

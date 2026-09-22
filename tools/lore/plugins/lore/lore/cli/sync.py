@@ -1202,7 +1202,9 @@ def _stage_and_commit_one(
             say_err(f"error: git reset (unstaging lock file) failed: {stderr} — skipped")
             return 1, False
         commit_message = message if message else _build_sync_message(committable, host)
-        # Never pass -S or --no-gpg-sign; honor the adopter's commit.gpgsign.
+        # Never pass -S or --no-gpg-sign here: signing is the host key when one
+        # is configured (`_git`'s own environment override), and the adopter's
+        # own commit.gpgsign otherwise.
         rc, _, stderr = _git(vault, "commit", "-m", commit_message)
         if rc != 0:
             say_err(f"error: git commit failed: {stderr} — skipped")

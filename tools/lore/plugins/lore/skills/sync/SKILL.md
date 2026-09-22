@@ -207,5 +207,5 @@ list of mechanical auto-takes.
   synced and the command exits 1 with a summary naming the failures. Relay which
   vaults failed — the others did commit.
 
-Do not pass `--no-gpg-sign` or force `-S`; signing is controlled by the adopter's
-git config.
+Do not pass `--no-gpg-sign` or force `-S`; signing uses the host's own key when
+one is configured, and the adopter's own git config otherwise.
