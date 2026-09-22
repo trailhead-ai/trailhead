@@ -1277,6 +1277,18 @@ def test_help_states_the_kill_exit_code_for_a_session_that_did_not_stop(capsys) 
     assert "still running after the stop" in text
 
 
+def test_help_lists_camp_stop_beside_attach(capsys) -> None:
+    """`camp stop <slug>` is a canonical, operator-typed verb — it belongs
+    in the same menu `camp attach` is documented in, discoverable the way
+    every other verb here is."""
+    from camp.spine import cmd_help
+
+    cmd_help([])
+    text = capsys.readouterr().out
+
+    assert "camp stop <slug>" in text
+
+
 # ---------------------------------------------------------------------------
 # camp window unbind — the operator-facing verb, absent from `camp help`
 # ---------------------------------------------------------------------------

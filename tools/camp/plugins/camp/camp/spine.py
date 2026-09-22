@@ -106,6 +106,10 @@ _STATIC_RESERVED = frozenset(
         # Same posture as "kill" — a reference names the session to attach to,
         # so a workspace slug called "attach" can never shadow the verb.
         "attach",
+        # A stop resolves the group the same way "attach" does, and is
+        # dispatched beside it — reserved so a workspace slug called "stop"
+        # can never shadow the verb.
+        "stop",
         # Meta verbs.
         "help",
         "version",
@@ -554,6 +558,12 @@ def cmd_help(args: list[str]) -> None:
         "                                    across every declared machine; a ref\n"
         "                                    matching on more than one machine\n"
         "                                    refuses and names each one\n"
+        "  camp stop <slug> [--group <name>] [--json]\n"
+        "                                    Reconcile, preview, then kill a\n"
+        "                                    workspace's tmux session. No\n"
+        "                                    picker — a missing slug refuses\n"
+        "                                    outright. Stopping an already-down\n"
+        "                                    workspace is success\n"
         "  camp sessions [<slug>] [--dir <path>] [--all-groups|-g] [--json]\n"
         "                                    List the LIVE harness sessions camp can\n"
         "                                    see, scoped to a workspace or to a\n"
@@ -1627,6 +1637,14 @@ def main() -> None:
         from .cli.session import _cmd_attach_cli
 
         _cmd_attach_cli(rest)
+    # A stop resolves the group exactly as "attach" does — internally, via
+    # `_resolve_group_for_attach` — so it is skipped by the group-aware
+    # router the same way (`cli/dispatch.py`'s `_SKIP_GROUP_RESOLVE`) and
+    # dispatched here beside it.
+    elif first == "stop":
+        from .cli.stop import _cmd_stop_cli
+
+        _cmd_stop_cli(rest)
     # "transfer" needs a resolved group exactly like NEEDS_GROUP_VERBS does,
     # but it is not a member of that taxonomy set (its real handler lives on
     # the group-aware path via an explicit dispatch, not the taxonomy-derived

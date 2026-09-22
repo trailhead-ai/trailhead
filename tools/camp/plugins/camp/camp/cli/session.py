@@ -2783,6 +2783,24 @@ def _refuse_door(outcome, reason: str, *, as_json: bool) -> NoReturn:
     _die(f"camp attach: {reason}")
 
 
+def _print_reconcile_outcome(reconcile_outcome) -> None:
+    """Print the connect arm's reconciliation to stderr, one line per
+    change, before the door's own outcome line — or, when reconciliation
+    could not run at all, the one line naming why.
+
+    `None` means no reconciliation was attempted (the create arm has no
+    session to read a record against yet) and prints nothing. Every other
+    outcome renders through `window_reconcile.render_reconcile_lines`, the
+    one rendering `camp stop` prints through too.
+    """
+    from ..launch.window_reconcile import render_reconcile_lines
+
+    if reconcile_outcome is None:
+        return
+    for line in render_reconcile_lines(reconcile_outcome):
+        print(line, file=sys.stderr)
+
+
 def _open_workspace_door(
     target: "ResolvedWorkspace",
     *,
@@ -2837,6 +2855,8 @@ def _open_workspace_door(
     if probe.state is DoorState.CREATE_REFUSED:
         _refuse_door(RefusedCreateRefused(), probe.reason, as_json=as_json)
         return
+
+    _print_reconcile_outcome(probe.reconcile_outcome)
 
     outcome_cls = Created if probe.state is DoorState.CREATED else Connected
     outcome = outcome_cls(

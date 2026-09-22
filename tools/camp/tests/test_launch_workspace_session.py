@@ -260,17 +260,68 @@ def test_a_workspace_directory_under_a_credential_store_is_refused_before_any_se
 class _FakeDoorTmux:
     """A tmux stand-in for `create_or_connect_workspace_session`, answering
     `has_session_with_reason` directly (never `None`-reason when present is
-    not `None`, matching the real seam's own contract)."""
+    not `None`, matching the real seam's own contract).
 
-    def __init__(self, *, present: bool | None = False) -> None:
+    `list_windows_answer` is what the connect arm's reconciliation call
+    gets back from `list_windows` — defaulting to an empty, answered
+    listing so a test that does not care about reconciliation (most of the
+    existing ones in this module) keeps working unchanged once the connect
+    arm starts calling it. `list_windows_raises`, when set, makes
+    `list_windows` fail the test instead of answering — used to prove the
+    create arm never reaches it.
+    """
+
+    def __init__(
+        self,
+        *,
+        present: bool | None = False,
+        list_windows_answer: object = None,
+        list_windows_raises: bool = False,
+        new_session_duplicate: bool = False,
+        new_session_failure_stderr: str | None = None,
+        reprobe: bool | None = None,
+    ) -> None:
         self._present = present
+        self._new_session_duplicate = new_session_duplicate
+        self._new_session_failure_stderr = new_session_failure_stderr
+        self._list_windows_answer = list_windows_answer
+        self._list_windows_raises = list_windows_raises
+        self._reprobe = reprobe
         self.new_session_calls: list[dict[str, object]] = []
+        self.list_windows_calls: list[str] = []
+        self.has_session_calls: list[str] = []
 
     def has_session_with_reason(self, name: str):
         return self._present, None
 
+    def has_session(self, name: str) -> bool | None:
+        """The post-failed-create re-probe
+        (`create_or_connect_workspace_session`'s third connect fold) calls
+        this directly, never `has_session_with_reason` — `reprobe` is its
+        answer."""
+        self.has_session_calls.append(name)
+        return self._reprobe
+
+    def list_windows(self, name: str):
+        self.list_windows_calls.append(name)
+        if self._list_windows_raises:
+            raise AssertionError("list_windows must not be called on the create arm")
+        if self._list_windows_answer is not None:
+            return self._list_windows_answer
+        from camp.launch.tmux import WindowListing
+
+        return WindowListing(windows=(), dropped=0)
+
     def new_session(self, name, *, cwd, env=None, timeout=None):
         self.new_session_calls.append({"name": name, "cwd": cwd, "env": env})
+        if self._new_session_duplicate:
+            return subprocess.CompletedProcess(
+                args=["tmux"], returncode=1, stdout="", stderr=f"duplicate session: {name}\n"
+            )
+        if self._new_session_failure_stderr is not None:
+            return subprocess.CompletedProcess(
+                args=["tmux"], returncode=1, stdout="", stderr=self._new_session_failure_stderr
+            )
         return subprocess.CompletedProcess(args=["tmux"], returncode=0, stdout="", stderr="")
 
     def set_option(self, target, key, value, *, timeout=None):
@@ -553,3 +604,240 @@ def test_a_fully_marked_session_is_created_and_never_killed(tmp_path):
     assert result.outcome is WorkspaceSessionOutcome.CREATED
     assert tmux.killed == []
     assert len(tmux.install_binding_calls) == 1
+
+
+class TestConnectArmReconciliation:
+    """`create_or_connect_workspace_session` reconciles the window record
+    to tmux on the connect arm — after `has_session_with_reason` answers
+    present, before the `DoorProbe` is returned — and never on the create
+    arm, per task/the-door-reconciles-on-connect-and-the-listing-never-
+    writes."""
+
+    def test_connect_arm_drops_a_window_closed_in_tmux_and_carries_the_change(self, tmp_path):
+        from camp.group.window_record import WindowEntry, window_record_path_for, write_window_record
+        from camp.launch.tmux import WindowListing
+        from camp.launch.window_reconcile import Dropped, Reconciled
+        from camp.launch.workspace_session import (
+            DoorState,
+            create_or_connect_workspace_session,
+        )
+
+        ws_dir = tmp_path / "workspace"
+        ws_dir.mkdir()
+        surviving = WindowEntry(window_id="@1", name="planning", cwd="repo", conversation_id="c1")
+        closed = WindowEntry(window_id="@3", name="review", cwd="repo", conversation_id="41aa")
+        write_window_record(window_record_path_for(ws_dir), [surviving, closed])
+
+        tmux = _FakeDoorTmux(
+            present=True,
+            list_windows_answer=WindowListing(
+                windows=(_window("@1", "planning"),), dropped=0
+            ),
+        )
+
+        probe = create_or_connect_workspace_session(
+            "trailhead", "camp-cli", ws_dir, env={"HOME": str(tmp_path)}, tmux=tmux
+        )
+
+        assert probe.state is DoorState.CONNECTED
+        assert isinstance(probe.reconcile_outcome, Reconciled)
+        assert probe.reconcile_outcome.changes == (
+            Dropped(window_id="@3", name="review", conversation_id="41aa"),
+        )
+        from camp.group.window_record import read_window_record
+
+        reread = read_window_record(window_record_path_for(ws_dir))
+        assert [e.window_id for e in reread.entries] == ["@1"]
+
+    def test_connect_arm_with_a_matching_record_leaves_the_file_byte_for_byte_unchanged(
+        self, tmp_path
+    ):
+        from camp.group.window_record import WindowEntry, window_record_path_for, write_window_record
+        from camp.launch.tmux import WindowListing
+        from camp.launch.window_reconcile import Reconciled
+        from camp.launch.workspace_session import (
+            DoorState,
+            create_or_connect_workspace_session,
+        )
+
+        ws_dir = tmp_path / "workspace"
+        ws_dir.mkdir()
+        entry = WindowEntry(window_id="@1", name="planning", cwd="repo", conversation_id="c1")
+        path = window_record_path_for(ws_dir)
+        write_window_record(path, [entry])
+        before_bytes = path.read_bytes()
+        before_mtime_ns = path.stat().st_mtime_ns
+
+        tmux = _FakeDoorTmux(
+            present=True,
+            list_windows_answer=WindowListing(
+                windows=(_window("@1", "planning"),), dropped=0
+            ),
+        )
+
+        probe = create_or_connect_workspace_session(
+            "trailhead", "camp-cli", ws_dir, env={"HOME": str(tmp_path)}, tmux=tmux
+        )
+
+        assert probe.state is DoorState.CONNECTED
+        assert isinstance(probe.reconcile_outcome, Reconciled)
+        assert probe.reconcile_outcome.changes == ()
+        assert path.read_bytes() == before_bytes
+        assert path.stat().st_mtime_ns == before_mtime_ns
+
+    def test_connect_arm_with_a_corrupt_record_yields_not_reconciled_and_leaves_the_file_untouched(
+        self, tmp_path
+    ):
+        from camp.group.window_record import window_record_path_for
+        from camp.launch.tmux import WindowListing
+        from camp.launch.window_reconcile import NotReconciled
+        from camp.launch.workspace_session import (
+            DoorState,
+            create_or_connect_workspace_session,
+        )
+
+        ws_dir = tmp_path / "workspace"
+        ws_dir.mkdir()
+        path = window_record_path_for(ws_dir)
+        path.write_text("not json", encoding="utf-8")
+        before = path.read_bytes()
+
+        tmux = _FakeDoorTmux(present=True, list_windows_answer=WindowListing(windows=(), dropped=0))
+
+        probe = create_or_connect_workspace_session(
+            "trailhead", "camp-cli", ws_dir, env={"HOME": str(tmp_path)}, tmux=tmux
+        )
+
+        assert probe.state is DoorState.CONNECTED
+        assert isinstance(probe.reconcile_outcome, NotReconciled)
+        assert str(path) in probe.reconcile_outcome.reason
+        assert path.read_bytes() == before
+
+    def test_connect_arm_with_an_unanswered_listing_yields_not_reconciled_with_no_write(
+        self, tmp_path
+    ):
+        from camp.group.window_record import WindowEntry, window_record_path_for, write_window_record
+        from camp.launch.tmux import UNANSWERED
+        from camp.launch.window_reconcile import NotReconciled
+        from camp.launch.workspace_session import (
+            DoorState,
+            create_or_connect_workspace_session,
+        )
+
+        ws_dir = tmp_path / "workspace"
+        ws_dir.mkdir()
+        entry = WindowEntry(window_id="@1", name="planning", cwd="repo", conversation_id="c1")
+        path = window_record_path_for(ws_dir)
+        write_window_record(path, [entry])
+        before = path.read_bytes()
+
+        tmux = _FakeDoorTmux(present=True, list_windows_answer=UNANSWERED)
+
+        probe = create_or_connect_workspace_session(
+            "trailhead", "camp-cli", ws_dir, env={"HOME": str(tmp_path)}, tmux=tmux
+        )
+
+        assert probe.state is DoorState.CONNECTED
+        assert isinstance(probe.reconcile_outcome, NotReconciled)
+        assert path.read_bytes() == before
+
+    def test_create_arm_never_calls_list_windows(self, tmp_path):
+        from camp.launch.workspace_session import (
+            DoorState,
+            create_or_connect_workspace_session,
+        )
+
+        ws_dir = tmp_path / "workspace"
+        ws_dir.mkdir()
+        tmux = _FakeDoorTmux(present=False, list_windows_raises=True)
+
+        probe = create_or_connect_workspace_session(
+            "trailhead", "camp-cli", ws_dir, env={"HOME": str(tmp_path)}, tmux=tmux
+        )
+
+        assert probe.state is DoorState.CREATED
+        assert probe.reconcile_outcome is None
+        assert tmux.list_windows_calls == []
+
+
+def _window(window_id, name, current_path="/ws", current_command="bash"):
+    from camp.launch.tmux import TmuxWindow
+
+    return TmuxWindow(
+        window_id=window_id, current_path=current_path, current_command=current_command, name=name
+    )
+
+
+def test_a_create_that_races_to_duplicate_reconciles_the_record_like_any_connect(tmp_path):
+    """The race fold connects to a running session too, so it reconciles:
+    a session that appeared between the probe and the create is exactly as
+    live as one the probe saw, and its record is exactly as stale."""
+    from camp.group.window_record import WindowEntry, read_window_record, window_record_path_for, write_window_record
+    from camp.launch.tmux import TmuxWindow, WindowListing
+    from camp.launch.window_reconcile import Dropped, Reconciled
+    from camp.launch.workspace_session import DoorState, create_or_connect_workspace_session
+
+    ws_dir = tmp_path / "workspace"
+    ws_dir.mkdir()
+    write_window_record(
+        window_record_path_for(ws_dir),
+        [
+            WindowEntry(window_id="@1", name="first", cwd=".", command_line="zsh"),
+            WindowEntry(window_id="@3", name="gone", cwd=".", conversation_id="41aa"),
+        ],
+    )
+    live = WindowListing(
+        windows=(TmuxWindow(window_id="@1", current_path=str(ws_dir), current_command="zsh", name="first"),),
+        dropped=0,
+    )
+    tmux = _FakeDoorTmux(present=False, list_windows_answer=live, new_session_duplicate=True)
+
+    probe = create_or_connect_workspace_session(
+        "trailhead", "camp-cli", ws_dir, env={"HOME": str(tmp_path)}, tmux=tmux
+    )
+
+    assert probe.state is DoorState.CONNECTED
+    assert isinstance(probe.reconcile_outcome, Reconciled)
+    assert probe.reconcile_outcome.changes == (Dropped(window_id="@3", name="gone", conversation_id="41aa"),)
+    assert [e.window_id for e in read_window_record(window_record_path_for(ws_dir)).entries] == ["@1"]
+
+
+def test_the_post_failed_create_re_probe_fold_reconciles_the_record_like_any_connect(tmp_path):
+    """The third connect fold — `create_workspace_session` fails for a
+    reason that is not the duplicate-session marker, and the re-probe
+    (`tmux.has_session`) finds the session live anyway — connects too, so it
+    reconciles the record exactly like the other two connect folds."""
+    from camp.group.window_record import WindowEntry, read_window_record, window_record_path_for, write_window_record
+    from camp.launch.tmux import TmuxWindow, WindowListing
+    from camp.launch.window_reconcile import Dropped, Reconciled
+    from camp.launch.workspace_session import DoorState, create_or_connect_workspace_session
+
+    ws_dir = tmp_path / "workspace"
+    ws_dir.mkdir()
+    write_window_record(
+        window_record_path_for(ws_dir),
+        [
+            WindowEntry(window_id="@1", name="first", cwd=".", command_line="zsh"),
+            WindowEntry(window_id="@3", name="gone", cwd=".", conversation_id="41aa"),
+        ],
+    )
+    live = WindowListing(
+        windows=(TmuxWindow(window_id="@1", current_path=str(ws_dir), current_command="zsh", name="first"),),
+        dropped=0,
+    )
+    tmux = _FakeDoorTmux(
+        present=False,
+        list_windows_answer=live,
+        new_session_failure_stderr="unexpected tmux error\n",
+        reprobe=True,
+    )
+
+    probe = create_or_connect_workspace_session(
+        "trailhead", "camp-cli", ws_dir, env={"HOME": str(tmp_path)}, tmux=tmux
+    )
+
+    assert probe.state is DoorState.CONNECTED
+    assert isinstance(probe.reconcile_outcome, Reconciled)
+    assert probe.reconcile_outcome.changes == (Dropped(window_id="@3", name="gone", conversation_id="41aa"),)
+    assert [e.window_id for e in read_window_record(window_record_path_for(ws_dir)).entries] == ["@1"]
+    assert tmux.has_session_calls == [tmux.new_session_calls[0]["name"]]

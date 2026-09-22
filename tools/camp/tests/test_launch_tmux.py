@@ -367,6 +367,155 @@ def test_list_sessions_answers_session_listing_only_on_the_no_server_shape(monke
     assert tmux_module.Tmux().list_sessions() is tmux_module.UNANSWERED
 
 
+def test_list_windows_carries_both_windows_in_order_including_a_special_name(monkeypatch):
+    """Two tab-separated lines come back as a `WindowListing` carrying both
+    windows, in tmux's order, with every field split correctly — including a
+    window name holding a space and a `|`, which a `|`-delimited split (the
+    `list_sessions` pattern) would mis-parse but a tab-separated one, with
+    the name last, does not."""
+    import camp.launch.tmux as tmux_module
+
+    stdout = (
+        "@1\t/home/x/one\tzsh\tfirst\n"
+        "@2\t/home/x/two dir\tsleep\treview copy | draft\n"
+    )
+    monkeypatch.setattr(
+        tmux_module.subprocess,
+        "run",
+        lambda *a, **k: _completed(returncode=0, stdout=stdout),
+    )
+
+    result = tmux_module.Tmux().list_windows("x")
+
+    assert isinstance(result, tmux_module.WindowListing)
+    assert result.dropped == 0
+    assert result.windows == (
+        tmux_module.TmuxWindow(
+            window_id="@1", current_path="/home/x/one", current_command="zsh", name="first"
+        ),
+        tmux_module.TmuxWindow(
+            window_id="@2",
+            current_path="/home/x/two dir",
+            current_command="sleep",
+            name="review copy | draft",
+        ),
+    )
+
+
+def test_list_windows_no_such_session_answers_none_not_unanswered_or_empty(monkeypatch):
+    """`can't find session` is an ANSWER — `None` — never `UNANSWERED` and
+    never an empty `WindowListing`, which would report a missing session as
+    a composed-but-windowless one."""
+    import camp.launch.tmux as tmux_module
+
+    monkeypatch.setattr(
+        tmux_module.subprocess,
+        "run",
+        lambda *a, **k: _completed(
+            returncode=1, stderr="can't find session: x\n"
+        ),
+    )
+
+    assert tmux_module.Tmux().list_windows("x") is None
+
+
+def test_list_windows_other_non_zero_exit_is_unanswered(monkeypatch):
+    """Any other stderr shape on a non-zero exit — the no-server shape, an
+    unsafe-socket message — is `UNANSWERED`, not `None`."""
+    import camp.launch.tmux as tmux_module
+
+    monkeypatch.setattr(
+        tmux_module.subprocess,
+        "run",
+        lambda *a, **k: _completed(
+            returncode=1,
+            stderr="error connecting to /tmp/x (No such file or directory)\n",
+        ),
+    )
+    assert tmux_module.Tmux().list_windows("x") is tmux_module.UNANSWERED
+
+    monkeypatch.setattr(
+        tmux_module.subprocess,
+        "run",
+        lambda *a, **k: _completed(returncode=1, stderr="unsafe permissions\n"),
+    )
+    assert tmux_module.Tmux().list_windows("x") is tmux_module.UNANSWERED
+
+
+def test_list_windows_unreachable_tmux_is_unanswered(monkeypatch):
+    """A `TimeoutExpired` or `OSError` from the runner — tmux never answered
+    at all — is `UNANSWERED`, never folded into `None`."""
+    import camp.launch.tmux as tmux_module
+
+    def _raise_timeout(*a, **k):
+        raise subprocess.TimeoutExpired(cmd=["tmux"], timeout=5)
+
+    monkeypatch.setattr(tmux_module.subprocess, "run", _raise_timeout)
+    assert tmux_module.Tmux().list_windows("x") is tmux_module.UNANSWERED
+
+    def _raise_oserror(*a, **k):
+        raise FileNotFoundError("[Errno 2] No such file or directory: 'tmux'")
+
+    monkeypatch.setattr(tmux_module.subprocess, "run", _raise_oserror)
+    assert tmux_module.Tmux().list_windows("x") is tmux_module.UNANSWERED
+
+
+def test_list_windows_drops_and_counts_a_row_that_does_not_split_into_four_fields(monkeypatch):
+    """A malformed row is excluded from `windows` and counted in `dropped`
+    rather than failing the whole answer — the `SessionListing.dropped`
+    pattern, extended: a row missing a field entirely (only three of the
+    four tab-separated columns) cannot be a real window, so it is dropped
+    rather than silently misassigning fields."""
+    import camp.launch.tmux as tmux_module
+
+    stdout = "@1\t/home/x/one\tzsh\tfirst\n" "@2\t/home/x/two\tsleep\n"
+    monkeypatch.setattr(
+        tmux_module.subprocess,
+        "run",
+        lambda *a, **k: _completed(returncode=0, stdout=stdout),
+    )
+
+    result = tmux_module.Tmux().list_windows("x")
+
+    assert isinstance(result, tmux_module.WindowListing)
+    assert result.dropped == 1
+    assert result.windows == (
+        tmux_module.TmuxWindow(
+            window_id="@1", current_path="/home/x/one", current_command="zsh", name="first"
+        ),
+    )
+
+
+def test_list_windows_argv_is_exact_and_target_is_qualified(monkeypatch):
+    """The argv reaching the runner is exactly `["tmux", "list-windows",
+    "-t", "=<name>", "-F", <format>]` — the `=` property holds for this
+    method too, and the format string is the literal, never an
+    interpolation of *name*."""
+    import camp.launch.tmux as tmux_module
+
+    calls: list[list[str]] = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(list(argv))
+        return _completed(returncode=0)
+
+    monkeypatch.setattr(tmux_module.subprocess, "run", fake_run)
+
+    tmux_module.Tmux().list_windows("my-workspace")
+
+    assert calls == [
+        [
+            "tmux",
+            "list-windows",
+            "-t",
+            "=my-workspace",
+            "-F",
+            tmux_module._LIST_WINDOWS_FORMAT,
+        ]
+    ]
+    assert "my-workspace" not in tmux_module._LIST_WINDOWS_FORMAT
+
+
 def test_new_session_composes_no_command_and_no_argv_of_its_own(monkeypatch):
     """`new_session` is a thin wrapper over `spawn_session` with an empty
     command — it must not build a second `new-session` argv of its own.

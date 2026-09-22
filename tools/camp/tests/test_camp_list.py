@@ -1252,6 +1252,45 @@ class TestReviewRepairs:
         assert capsys.readouterr().out.split() == ["s", "-", "/ws/s"]
 
 
+class TestListingNeverWritesTheWindowRecord:
+    """`camp list` is a read verb: it reports tmux's own window count and
+    leaves the window record exactly as it found it, whether or not the two
+    agree — task/the-door-reconciles-on-connect-and-the-listing-never-
+    writes."""
+
+    def test_listing_against_a_disagreeing_record_leaves_the_file_byte_for_byte_unchanged(
+        self, camp_cli, tmp_path, capsys
+    ):
+        from camp.group.window_record import WindowEntry, window_record_path_for, write_window_record
+        from camp.launch.naming import workspace_session_name
+        from camp.launch.stop import SessionListing, TmuxSession
+
+        group = _make_group("wingrp")
+        env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
+        ws = _seed_manifest("wingrp", "feat-w", env=env)
+        name = workspace_session_name("wingrp", "feat-w")
+
+        record_path = window_record_path_for(ws)
+        recorded = [
+            WindowEntry(window_id="@1", name="planning", cwd="repo_a", conversation_id="c1"),
+            WindowEntry(window_id="@9", name="ghost", cwd="repo_a", conversation_id="c9"),
+        ]
+        write_window_record(record_path, recorded)
+        before_bytes = record_path.read_bytes()
+        before_mtime_ns = record_path.stat().st_mtime_ns
+
+        # tmux disagrees with the record: only @1 is live, and there are
+        # 5 windows total by tmux's own session-level count — a number the
+        # record (2 entries) does not carry at all.
+        tmux = _FakeTmux(SessionListing(sessions=(TmuxSession(name=name, windows=5),)))
+        camp_cli._cmd_ls_group_cli([], group, env, tmux=tmux)
+
+        out = capsys.readouterr().out
+        assert out.split()[1] == "running:5", "the row reports tmux's own count, not the record's"
+        assert record_path.read_bytes() == before_bytes
+        assert record_path.stat().st_mtime_ns == before_mtime_ns
+
+
 class TestSiblingGroupSessionsAreNotLeftovers:
     """A leftover is a session no workspace ON THE HOST claims. Each
     `cmd_ls_group` call knows only its own group's workspaces, so a sibling

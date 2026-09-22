@@ -99,6 +99,11 @@ class _DoorTmux:
     a `None` `present` — tmux's own words for why it could not answer.
     `switch_client_unanswered` makes `switch_client` answer `None` (tmux
     could not be asked at all) instead of a `CompletedProcess`.
+
+    `list_windows_answer` is what the connect arm's reconciliation call
+    gets back — an empty, answered listing by default, so a test that does
+    not care about reconciliation is unaffected by the connect arm now
+    reading the window record against tmux.
     """
 
     def __init__(
@@ -112,6 +117,7 @@ class _DoorTmux:
         switch_client_stderr: str = "",
         switch_client_unanswered: bool = False,
         unanswered_reason: str = "no such file or directory",
+        list_windows_answer: object = None,
     ) -> None:
         self._present = present
         self._reprobe = present if reprobe is None else reprobe
@@ -121,11 +127,13 @@ class _DoorTmux:
         self._switch_client_stderr = switch_client_stderr
         self._switch_client_unanswered = switch_client_unanswered
         self._unanswered_reason = unanswered_reason
+        self._list_windows_answer = list_windows_answer
         self.has_session_calls: list[str] = []
         self.new_session_calls: list[dict[str, object]] = []
         self.switch_client_calls: list[str] = []
         self.set_option_calls: list[dict[str, object]] = []
         self.install_binding_calls: list[str] = []
+        self.list_windows_calls: list[str] = []
 
     def has_session(self, name: str) -> bool | None:
         self.has_session_calls.append(name)
@@ -134,6 +142,14 @@ class _DoorTmux:
     def has_session_with_reason(self, name: str) -> tuple[bool | None, str | None]:
         present = self.has_session(name)
         return present, (self._unanswered_reason if present is None else None)
+
+    def list_windows(self, name: str):
+        self.list_windows_calls.append(name)
+        if self._list_windows_answer is not None:
+            return self._list_windows_answer
+        from camp.launch.tmux import WindowListing
+
+        return WindowListing(windows=(), dropped=0)
 
     def new_session(self, name, *, cwd, env=None, timeout=None):
         self.new_session_calls.append({"name": name, "cwd": cwd, "env": env})
@@ -914,6 +930,133 @@ def test_json_refusals_emit_an_ok_false_object(
     assert code == 1
     assert out["ok"] is False
     assert "camp list" in out["reason"]
+
+
+# ---------------------------------------------------------------------------
+# Reconciliation on the connect arm — stderr carries the change lines (or
+# the not-reconciled line) before the door's own outcome line; the door
+# still connects and exits 0 either way; `--json`'s stdout object is
+# unchanged in shape.
+# task/the-door-reconciles-on-connect-and-the-listing-never-writes
+# ---------------------------------------------------------------------------
+
+
+def test_connected_with_a_dropped_window_prints_the_change_before_the_outcome_line(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    from camp.group.window_record import WindowEntry, window_record_path_for, write_window_record
+    from camp.launch.tmux import WindowListing, TmuxWindow
+
+    _isolated_env(tmp_path, monkeypatch)
+    surviving = WindowEntry(window_id="@1", name="planning", cwd="repo", conversation_id="8f2c")
+    closed = WindowEntry(window_id="@3", name="review", cwd="repo", conversation_id="41aa")
+    tmux = _DoorTmux(
+        present=True,
+        list_windows_answer=WindowListing(
+            windows=(TmuxWindow(window_id="@1", current_path="/repo", current_command="bash", name="planning"),),
+            dropped=0,
+        ),
+    )
+    ws = _wire_one_workspace(monkeypatch, tmp_path=tmp_path, tmux=tmux)
+    write_window_record(window_record_path_for(ws), [surviving, closed])
+
+    code = _run(["attach", "camp-cli", "--group", "g"], monkeypatch)
+    captured = capsys.readouterr()
+
+    assert code == 0
+    err_lines = [line for line in captured.err.splitlines() if line]
+    assert err_lines == [
+        'camp: window record: dropped @3 "review" (closed in tmux; conversation 41aa)'
+    ]
+    assert captured.out.strip() == "connected camp-g-camp-cli"
+
+
+def test_connected_with_a_matching_record_prints_nothing_to_stderr(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    from camp.group.window_record import WindowEntry, window_record_path_for, write_window_record
+    from camp.launch.tmux import WindowListing, TmuxWindow
+
+    _isolated_env(tmp_path, monkeypatch)
+    entry = WindowEntry(window_id="@1", name="planning", cwd="repo", conversation_id="8f2c")
+    tmux = _DoorTmux(
+        present=True,
+        list_windows_answer=WindowListing(
+            windows=(TmuxWindow(window_id="@1", current_path="/repo", current_command="bash", name="planning"),),
+            dropped=0,
+        ),
+    )
+    ws = _wire_one_workspace(monkeypatch, tmp_path=tmp_path, tmux=tmux)
+    write_window_record(window_record_path_for(ws), [entry])
+
+    code = _run(["attach", "camp-cli", "--group", "g"], monkeypatch)
+    captured = capsys.readouterr()
+
+    assert code == 0
+    assert captured.err == ""
+    assert captured.out.strip() == "connected camp-g-camp-cli"
+
+
+def test_connected_with_a_corrupt_record_prints_a_not_reconciled_line_and_still_connects(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    from camp.group.window_record import window_record_path_for
+
+    _isolated_env(tmp_path, monkeypatch)
+    tmux = _DoorTmux(present=True)
+    ws = _wire_one_workspace(monkeypatch, tmp_path=tmp_path, tmux=tmux)
+    path = window_record_path_for(ws)
+    path.write_text("not json", encoding="utf-8")
+
+    code = _run(["attach", "camp-cli", "--group", "g"], monkeypatch)
+    captured = capsys.readouterr()
+
+    assert code == 0
+    err_lines = [line for line in captured.err.splitlines() if line]
+    assert len(err_lines) == 1
+    assert str(path) in err_lines[0]
+    assert "not reconciled" in err_lines[0].lower()
+    assert captured.out.strip() == "connected camp-g-camp-cli"
+    assert path.read_text(encoding="utf-8") == "not json"
+
+
+def test_connected_json_still_carries_the_change_lines_on_stderr_with_unchanged_json_shape(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    from camp.group.window_record import WindowEntry, window_record_path_for, write_window_record
+    from camp.launch.tmux import WindowListing, TmuxWindow
+
+    _isolated_env(tmp_path, monkeypatch)
+    surviving = WindowEntry(window_id="@1", name="planning", cwd="repo", conversation_id="8f2c")
+    closed = WindowEntry(window_id="@3", name="review", cwd="repo", conversation_id="41aa")
+    tmux = _DoorTmux(
+        present=True,
+        list_windows_answer=WindowListing(
+            windows=(TmuxWindow(window_id="@1", current_path="/repo", current_command="bash", name="planning"),),
+            dropped=0,
+        ),
+    )
+    ws = _wire_one_workspace(monkeypatch, tmp_path=tmp_path, tmux=tmux)
+    write_window_record(window_record_path_for(ws), [surviving, closed])
+
+    code = _run(["attach", "camp-cli", "--group", "g", "--json"], monkeypatch)
+    captured = capsys.readouterr()
+    out = json.loads(captured.out)
+
+    assert code == 0
+    err_lines = [line for line in captured.err.splitlines() if line]
+    assert err_lines == [
+        'camp: window record: dropped @3 "review" (closed in tmux; conversation 41aa)'
+    ]
+    assert out == {
+        "ok": True,
+        "outcome": "connected",
+        "slug": "camp-cli",
+        "group": "g",
+        "workspace_path": str(ws),
+        "tmux_session": "camp-g-camp-cli",
+        "attached": False,
+    }
 
 
 # ---------------------------------------------------------------------------

@@ -979,3 +979,53 @@ def test_unbind_leaves_the_key_unbound_when_the_operator_had_unbound_it(server):
 
     assert _run_camp_window_unbind(server).returncode == 0
     assert _prefix_c_line(server.sock) is None
+
+
+@pytest.mark.skipif(_REAL_TMUX is None, reason="no tmux binary on PATH (captured at import time)")
+def test_list_windows_reports_a_rename_a_running_command_and_a_killed_session(server, tmp_path):
+    """`Tmux.list_windows` against a REAL server: a session with two
+    windows — one renamed after creation, one running `sleep` in the
+    foreground — lists both ids, the renamed window's new name, and the
+    directory tmux itself reports; killing the session then answers `None`,
+    not `UNANSWERED` and not an empty listing."""
+    from camp.launch.tmux import Tmux
+
+    name = "camp-e2e-list-windows"
+    ws_dir = tmp_path / "ws"
+    ws_dir.mkdir()
+    tmux = Tmux()
+
+    # A second, unrelated session keeps the SERVER alive once ours is
+    # killed below — otherwise the last session's kill tears down the
+    # whole server, and `list-windows` answers "no server running" instead
+    # of the "can't find session" shape this test means to exercise.
+    _sock_run(server.sock, "new-session", "-d", "-s", "keepalive")
+
+    created = tmux.new_session(name, cwd=str(ws_dir), env=server.env, timeout=5)
+    assert created.returncode == 0, created.stderr
+
+    second = tmux.new_window(
+        name, cwd=str(ws_dir), window_name="worker", command=["sleep", "30"]
+    )
+    assert second is not None and not isinstance(second, str), second
+
+    first_before = _sock_run(server.sock, "list-windows", "-t", name, "-F", "#{window_id}")
+    first_id = first_before.stdout.splitlines()[0]
+    renamed = _sock_run(server.sock, "rename-window", "-t", first_id, "renamed-window")
+    assert renamed.returncode == 0, renamed.stderr
+
+    listing = tmux.list_windows(name)
+
+    from camp.launch.tmux import WindowListing
+
+    assert isinstance(listing, WindowListing), listing
+    assert listing.dropped == 0
+    by_name = {window.name: window for window in listing.windows}
+    assert set(by_name) == {"renamed-window", "worker"}
+    assert by_name["renamed-window"].window_id == first_id
+    assert by_name["renamed-window"].current_path == str(ws_dir)
+    assert by_name["worker"].current_command == "sleep"
+    assert by_name["worker"].window_id == second.window_id
+
+    _sock_run(server.sock, "kill-session", "-t", name)
+    assert tmux.list_windows(name) is None

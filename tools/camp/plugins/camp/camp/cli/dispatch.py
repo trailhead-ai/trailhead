@@ -863,6 +863,10 @@ def main() -> None:
         # Same reasoning as "kill" — a reference names the session, and a
         # sibling group's malformed config must never block an attach.
         "attach",
+        # A stop resolves the group internally, the same way "attach" does
+        # (`_resolve_group_for_attach`) — so it must never let the
+        # group-aware router resolve a group for it first.
+        "stop",
     })
     if first and first not in _SKIP_GROUP_RESOLVE:
         try:

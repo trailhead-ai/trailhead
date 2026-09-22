@@ -1134,6 +1134,49 @@ def test_a_no_server_condition_answers_empty_not_unanswered(monkeypatch) -> None
     assert result.sessions == ()
 
 
+def test_a_stale_socket_with_no_server_listening_is_an_empty_listing(monkeypatch) -> None:
+    """tmux's other "no server" shape: the socket path exists but nothing
+    listens on it (`no server running on <socket>`). Same meaning as the
+    connect failure, same answer: an empty listing, not an outage."""
+    from camp.launch import stop
+
+    monkeypatch.setattr(
+        stop.subprocess,
+        "run",
+        lambda *a, **k: _completed(
+            returncode=1,
+            stderr="no server running on /tmp/tmux-501/default",
+        ),
+    )
+
+    result = stop.Tmux().list_sessions()
+
+    assert isinstance(result, stop.SessionListing)
+    assert result.sessions == ()
+
+
+def test_no_server_running_on_with_no_operand_is_unanswered(monkeypatch) -> None:
+    """The stale-socket shape always names the socket it found dead —
+    `no server running on <socket>`. A stderr line that merely ends in the
+    bare phrase, with nothing after the trailing space, is not that shape
+    (real tmux answers always carry an operand) and must not be read as an
+    empty server."""
+    from camp.launch import stop
+
+    monkeypatch.setattr(
+        stop.subprocess,
+        "run",
+        lambda *a, **k: _completed(
+            returncode=1,
+            stderr="camp: no server running on ",
+        ),
+    )
+
+    result = stop.Tmux().list_sessions()
+
+    assert result is stop.UNANSWERED
+
+
 def test_an_unrelated_error_mentioning_a_missing_file_is_unanswered(monkeypatch) -> None:
     """The no-server condition is `error connecting to <socket> (No such
     file or directory)`. A non-zero exit that merely CARRIES that phrase —

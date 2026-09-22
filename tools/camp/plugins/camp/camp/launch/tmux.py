@@ -1,10 +1,10 @@
 """The tmux seam: every tmux invocation camp makes, in one place.
 
-Camp talks to tmux through exactly this module. `Tmux` answers the three
-tri-state questions the stop engine was built around (`has_session`,
-`pane_command`, `list_sessions`) and owns every other tmux invocation camp
-performs — spawning a session with an explicit command and a scrubbed
-environment (`spawn_session`), starting a bare login-shell window over it
+Camp talks to tmux through exactly this module. `Tmux` answers the tri-state
+questions the stop engine and reconciliation are built around (`has_session`,
+`pane_command`, `list_sessions`, `list_windows`) and owns every other tmux
+invocation camp performs — spawning a session with an explicit command and a
+scrubbed environment (`spawn_session`), starting a bare login-shell window over it
 (`new_session`), stating its environment (`set_environment`), reading its
 pane (`capture_pane`), and signalling it (`kill_session`). Nothing outside
 this module builds a `["tmux", ...]` argv of its own; a caller that needs
@@ -41,12 +41,19 @@ The tri-state contract
 -----------------------
 `has_session` answers `True` / `False` / `None` (tmux did not answer at
 all — a timeout or an unlaunchable binary). `list_sessions` answers a
-:class:`SessionListing` only when tmux's non-zero exit is the specific
-"no server running" stderr shape (:data:`_NO_SERVER_STDERR_RE`); every other
+:class:`SessionListing` only when tmux's non-zero exit is one of the two
+"no server running" stderr shapes (:data:`_NO_SERVER_STDERR_RE`); every other
 non-zero exit, and an unanswerable `_run`, is :data:`UNANSWERED`. Folding
 "tmux did not answer" into "tmux answered no" would report a hung or
 unreachable tmux as a completed, empty state — the one thing every caller of
 this seam must never be told.
+
+`list_windows` extends the same shape one level down: a :class:`WindowListing`
+of a session's windows when tmux answered, `None` when tmux answered that the
+named session does not exist (the specific `can't find session` stderr shape),
+and :data:`UNANSWERED` for every other non-zero exit or an unanswerable
+`_run`. A caller that cannot get an answer must change nothing — "could not
+tell" is never read as "no windows".
 """
 
 from __future__ import annotations
@@ -209,17 +216,74 @@ class SessionListing:
     dropped: int = 0
 
 
-#: The whole stderr line tmux prints for the non-zero exit that means "no
-#: server is running" — `error connecting to <socket> (No such file or
-#: directory)`, confirmed against tmux 3.7c. Matched as that shape rather
-#: than on the trailing phrase alone, which any number of unrelated
-#: failures also carry (a config file tmux could not source, a wrapper
-#: script's own complaint). Every OTHER non-zero exit (an unsafe socket
-#: directory, an unreachable socket, or any stderr not yet observed) is an
-#: outage and must never be read as an empty listing.
+#: The stderr shapes tmux prints for the non-zero exit that means "no
+#: server is running", confirmed against tmux 3.7c:
+#: `error connecting to <socket> (No such file or directory)` when the
+#: socket path never existed (ENOENT), and `no server running on <socket>`
+#: when the path exists but nothing is listening on it (ECONNREFUSED, e.g.
+#: a stale socket file left behind by a server that already exited).
+#: Matched as either whole-line shape rather than on a trailing phrase
+#: alone, which any number of unrelated failures also carry (a config file
+#: tmux could not source, a wrapper script's own complaint). Every OTHER
+#: non-zero exit (an unsafe socket directory, an unreachable socket, or any
+#: stderr not yet observed) is an outage and must never be read as an empty
+#: listing.
 _NO_SERVER_STDERR_RE = re.compile(
     r"error connecting to .*\(No such file or directory\)"
+    r"|no server running on \S"
 )
+
+
+@dataclass(frozen=True)
+class TmuxWindow:
+    """One window tmux reported for a session, as answered by
+    :meth:`Tmux.list_windows`.
+
+    ``current_path`` and ``current_command`` are the ACTIVE pane's — the one
+    a plain `tmux attach` would land in — not every pane the window may hold;
+    a multi-pane window is out of scope for reconciliation and the stop
+    preview, both of which only need "what is this window doing right now".
+    """
+
+    window_id: str
+    current_path: str
+    current_command: str
+    name: str
+
+
+#: The whole stderr line tmux prints for `list-windows -t <target>` against a
+#: session that does not exist — `can't find session: <name>`, confirmed
+#: against tmux 3.7c. Distinct from :data:`_NO_SERVER_STDERR_RE`: a missing
+#: SESSION on a live server is an answer ("no such session"), while a missing
+#: SERVER is a different question this method never has to ask, since a
+#: caller of `list_windows` already has a session name to check.
+_CANT_FIND_SESSION_STDERR_RE = re.compile(r"can't find session:")
+
+
+@dataclass(frozen=True)
+class WindowListing:
+    """Every window tmux holds for one session right now, as answered by
+    :meth:`Tmux.list_windows`.
+
+    Mirrors :class:`SessionListing`'s shape: ``windows`` in tmux's own order,
+    ``dropped`` counting rows that did not split into exactly four
+    tab-separated fields — malformed rows are excluded rather than failing
+    the whole answer, so a caller can tell "one row was unparseable" apart
+    from "the session has no windows".
+    """
+
+    windows: tuple[TmuxWindow, ...]
+    dropped: int = 0
+
+
+#: The `list-windows -F` format this seam reads: window id, the active
+#: pane's current directory, the active pane's current foreground command,
+#: then the window's own name — name LAST, because tmux refuses a window
+#: name containing a tab or a newline (confirmed against tmux 3.7c,
+#: `invalid window name`), so a tab-separated format with the name last
+#: splits unambiguously no matter what a name legitimately contains (a
+#: space, a `|`). A literal, never built from an interpolated name.
+_LIST_WINDOWS_FORMAT = "#{window_id}\t#{pane_current_path}\t#{pane_current_command}\t#{window_name}"
 
 
 def target(name: str) -> str:
@@ -462,8 +526,8 @@ class Tmux:
         Extends this seam's tri-state rather than reusing :meth:`has_session`'s
         contract: a general listing command's non-zero exit has no single
         documented meaning, unlike a scoped existence query's. Only the
-        no-server condition on stderr — tmux's own whole
-        connect-failure line, :data:`_NO_SERVER_STDERR_RE`, not the
+        no-server condition on stderr — one of tmux's two whole
+        connect-failure lines, :data:`_NO_SERVER_STDERR_RE`, not the
         trailing phrase an unrelated error may also carry — is answered as
         empty; every other non-zero exit, and an unanswerable ``_run``, is
         ``UNANSWERED``.
@@ -487,6 +551,55 @@ class Tmux:
                 continue
             sessions.append(TmuxSession(name=name, windows=int(count)))
         return SessionListing(sessions=tuple(sessions), dropped=dropped)
+
+    def list_windows(self, name: str) -> WindowListing | None | _Unanswered:
+        """Every window session *name* currently holds, or the answer that
+        it does not exist, or ``UNANSWERED``.
+
+        Reads :data:`_LIST_WINDOWS_FORMAT` — id, active-pane directory,
+        active-pane command, name last — over a single `list-windows -t
+        <target>` call, `=`-qualified through :func:`target` like every
+        other `-t` operand this seam builds.
+
+        Tri-state, but shaped differently from :meth:`list_sessions`: a
+        session-scoped question DOES have a single documented non-zero-exit
+        meaning — `can't find session: <name>` — so that specific stderr
+        shape (:data:`_CANT_FIND_SESSION_STDERR_RE`) answers `None`, an
+        answer distinct from a :class:`WindowListing`. Every other non-zero
+        exit, and an unanswerable `_run`, is :data:`UNANSWERED`: folding a
+        hung or unreachable tmux into "no such session" would report a
+        session reconciliation cannot ask about as one that was never
+        composed.
+        """
+        done = self._run(
+            ["list-windows", "-t", target(name), "-F", _LIST_WINDOWS_FORMAT]
+        )
+        if done is None:
+            return UNANSWERED
+        if done.returncode != 0:
+            if _CANT_FIND_SESSION_STDERR_RE.search(done.stderr or ""):
+                return None
+            return UNANSWERED
+
+        windows: list[TmuxWindow] = []
+        dropped = 0
+        for line in done.stdout.splitlines():
+            if not line:
+                continue
+            fields = line.split("\t")
+            if len(fields) != 4:
+                dropped += 1
+                continue
+            window_id, current_path, current_command, window_name = fields
+            windows.append(
+                TmuxWindow(
+                    window_id=window_id,
+                    current_path=current_path,
+                    current_command=current_command,
+                    name=window_name,
+                )
+            )
+        return WindowListing(windows=tuple(windows), dropped=dropped)
 
     def spawn_session(
         self,
