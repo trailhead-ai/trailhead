@@ -255,6 +255,26 @@ def _tmux_unanswered_reason(detail: str) -> str:
     return f"tmux did not answer — {detail} — run `camp list` to see what camp can still tell"
 
 
+def _create_refused_probe(name: str, detail: object) -> "DoorProbe":
+    """The :data:`DoorState.CREATE_REFUSED` probe — a policy refusal, no
+    session created. The one place this operator-facing sentence is
+    spelled: both session-creating arms of
+    :func:`create_or_connect_workspace_session` (the resurrection dispatch
+    and the plain create) reach it, and both callers report it verbatim.
+    """
+    return DoorProbe(DoorState.CREATE_REFUSED, name, reason=f"refused to create {name} — {detail}")
+
+
+def _create_failed_probe(name: str, detail: object) -> "DoorProbe":
+    """The :data:`DoorState.CREATE_FAILED` probe — a transient failure,
+    carrying tmux's (or the exception's) own words. The one place this
+    operator-facing sentence is spelled: every arm of
+    :func:`create_or_connect_workspace_session` that gives up on a create
+    reaches it, and both callers report it verbatim.
+    """
+    return DoorProbe(DoorState.CREATE_FAILED, name, reason=f"could not create {name} — {detail}")
+
+
 @dataclass(frozen=True)
 class DoorProbe:
     """One pass through the door: what state it reached, the session name it
@@ -377,13 +397,14 @@ def create_or_connect_workspace_session(
     if present:
         return connected()
 
-    record = read_window_record(window_record_path_for(workspace_dir))
+    record_path = window_record_path_for(workspace_dir)
+    record = read_window_record(record_path)
     if record.status == "corrupt":
         return DoorProbe(
             DoorState.RECORD_UNREADABLE,
             name,
             reason=(
-                f"window record at {window_record_path_for(workspace_dir)} could not be "
+                f"window record at {record_path} could not be "
                 "read — refusing to resurrect; fix or remove the record and run camp "
                 "attach again"
             ),
@@ -401,49 +422,25 @@ def create_or_connect_workspace_session(
                 harness=harness,
             )
         except LaunchError as exc:
-            return DoorProbe(
-                DoorState.CREATE_REFUSED,
-                name,
-                reason=f"refused to create {name} — {exc}",
-            )
+            return _create_refused_probe(name, exc)
         except (OSError, subprocess.TimeoutExpired) as exc:
-            return DoorProbe(
-                DoorState.CREATE_FAILED,
-                name,
-                reason=f"could not create {name} — {exc}",
-            )
+            return _create_failed_probe(name, exc)
         if isinstance(resurrection, DuplicateSession):
             return connected()
         if isinstance(resurrection, CreateFailed):
-            return DoorProbe(
-                DoorState.CREATE_FAILED,
-                name,
-                reason=f"could not create {name} — {resurrection.error}",
-            )
+            return _create_failed_probe(name, resurrection.error)
         return DoorProbe(DoorState.RESURRECTED, name, resurrection=resurrection)
 
     try:
         result = create_workspace_session(group_name, slug, workspace_dir, env=env, tmux=tmux)
     except LaunchError as exc:
-        return DoorProbe(
-            DoorState.CREATE_REFUSED,
-            name,
-            reason=f"refused to create {name} — {exc}",
-        )
+        return _create_refused_probe(name, exc)
     except (OSError, subprocess.TimeoutExpired) as exc:
-        return DoorProbe(
-            DoorState.CREATE_FAILED,
-            name,
-            reason=f"could not create {name} — {exc}",
-        )
+        return _create_failed_probe(name, exc)
     if result.outcome is WorkspaceSessionOutcome.CREATED:
         return DoorProbe(DoorState.CREATED, name)
     if result.outcome is WorkspaceSessionOutcome.ALREADY_EXISTED:
         return connected()
     if tmux.has_session(name):
         return connected()
-    return DoorProbe(
-        DoorState.CREATE_FAILED,
-        name,
-        reason=f"could not create {name} — {result.error}",
-    )
+    return _create_failed_probe(name, result.error)

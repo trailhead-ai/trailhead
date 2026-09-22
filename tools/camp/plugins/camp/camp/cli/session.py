@@ -2811,6 +2811,56 @@ def _print_resurrection_lines(resurrection) -> None:
         print(line, file=sys.stderr)
 
 
+def _door_success_outcome(
+    probe,
+    *,
+    slug: str,
+    group: str,
+    workspace_path,
+    interactive: bool,
+):
+    """Print *probe*'s own stderr lines and build the door outcome it
+    reports — the success fold both doors share (`camp attach`'s
+    `_open_workspace_door` and `camp new`'s
+    `cli/group.py:_door_dispatch_for_new`), so the two verbs can never
+    disagree on what a created, connected, or resurrected session says.
+
+    A `RESURRECTED` probe prints resurrection's drop/failure lines and
+    counts its windows into a :class:`~camp.launch.door.Resurrected`; every
+    other success prints the connect arm's reconciliation (nothing at all
+    on the create arm, which has no record to read yet) and builds
+    :class:`~camp.launch.door.Created` or
+    :class:`~camp.launch.door.Connected`. What each caller does with the
+    returned outcome — which stream it renders on, and whether it exits on
+    its status — stays at the call site.
+    """
+    from ..launch.door import Connected, Created, Resurrected
+    from ..launch.workspace_session import DoorState
+
+    if probe.state is DoorState.RESURRECTED:
+        _print_resurrection_lines(probe.resurrection)
+        return Resurrected(
+            slug=slug,
+            group=group,
+            tmux_session=probe.session_name,
+            workspace_path=workspace_path,
+            attached=interactive,
+            restored=len(probe.resurrection.restored),
+            failed=len(probe.resurrection.failed),
+            dropped=len(probe.resurrection.dropped),
+        )
+
+    _print_reconcile_outcome(probe.reconcile_outcome)
+    outcome_cls = Created if probe.state is DoorState.CREATED else Connected
+    return outcome_cls(
+        slug=slug,
+        group=group,
+        tmux_session=probe.session_name,
+        workspace_path=workspace_path,
+        attached=interactive,
+    )
+
+
 def _open_workspace_door(
     target: "ResolvedWorkspace",
     *,
@@ -2842,21 +2892,19 @@ def _open_workspace_door(
     then hands over. `attached` in that report is true on both handover
     arms and false whenever `interactive` is false — without a terminal the
     session is still created, connected, or resurrected, but nothing is
-    handed over and neither handover seam is touched. A `RESURRECTED` probe
-    prints its own drop/failure lines to stderr first, exactly the way
-    `CONNECTED`'s reconciliation does, and a partial resurrection's exit
+    handed over and neither handover seam is touched. Every success is
+    folded by `_door_success_outcome`, shared with `camp new`, which prints
+    a `RESURRECTED` probe's drop/failure lines to stderr first, exactly the
+    way `CONNECTED`'s reconciliation does; a partial resurrection's exit
     status (2, via `exit_status`) applies only on the non-interactive path —
     an interactive attach still hands the terminal over regardless.
     """
     from ..host.handoff import hand_over_to_session
     from ..launch.door import (
-        Connected,
-        Created,
         RefusedCreateFailed,
         RefusedCreateRefused,
         RefusedRecordUnreadable,
         RefusedTmuxUnanswered,
-        Resurrected,
         exit_status,
         render_human,
         render_json,
@@ -2880,28 +2928,13 @@ def _open_workspace_door(
         _refuse_door(RefusedRecordUnreadable(), probe.reason, as_json=as_json)
         return
 
-    if probe.state is DoorState.RESURRECTED:
-        _print_resurrection_lines(probe.resurrection)
-        outcome = Resurrected(
-            slug=target.slug,
-            group=target.group,
-            tmux_session=probe.session_name,
-            workspace_path=target.path,
-            attached=interactive,
-            restored=len(probe.resurrection.restored),
-            failed=len(probe.resurrection.failed),
-            dropped=len(probe.resurrection.dropped),
-        )
-    else:
-        _print_reconcile_outcome(probe.reconcile_outcome)
-        outcome_cls = Created if probe.state is DoorState.CREATED else Connected
-        outcome = outcome_cls(
-            slug=target.slug,
-            group=target.group,
-            tmux_session=probe.session_name,
-            workspace_path=target.path,
-            attached=interactive,
-        )
+    outcome = _door_success_outcome(
+        probe,
+        slug=target.slug,
+        group=target.group,
+        workspace_path=target.path,
+        interactive=interactive,
+    )
 
     if as_json:
         print(json.dumps(render_json(outcome)))
