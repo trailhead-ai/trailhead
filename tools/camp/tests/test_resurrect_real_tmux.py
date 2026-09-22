@@ -150,12 +150,19 @@ def _default_harness(**overrides) -> _FakeHarness:
 
 
 def _three_entries():
+    """The third entry ("cmd-c") is rooted at a real subdirectory ("sub"),
+    not the workspace root every other entry uses — every caller must
+    `mkdir` `ws_dir / "sub"` before writing these into a record, so a
+    caller that asserts the resurrected windows' directories (e.g.
+    `test_resurrection_brings_back_three_windows_...`) exercises real
+    subdirectory rooting, not just the workspace root every entry would
+    trivially share with `cwd="."`."""
     from camp.group.window_record import WindowEntry
 
     return [
         WindowEntry(window_id="@100", name="conv-a", cwd=".", conversation_id=CONV_A),
         WindowEntry(window_id="@101", name="conv-b", cwd=".", conversation_id=CONV_B),
-        WindowEntry(window_id="@102", name="cmd-c", cwd=".", command_line=CMD_LINE),
+        WindowEntry(window_id="@102", name="cmd-c", cwd="sub", command_line=CMD_LINE),
     ]
 
 
@@ -206,6 +213,7 @@ def test_resurrection_brings_back_three_windows_and_reconciles_clean_on_the_next
 
     ws_dir = tmp_path / "state" / group_name / "worktrees" / slug
     ws_dir.mkdir(parents=True)
+    (ws_dir / "sub").mkdir()
 
     from camp.group.window_record import write_window_record
 
@@ -231,10 +239,25 @@ def test_resurrection_brings_back_three_windows_and_reconciles_clean_on_the_next
     names = [row[1] for row in rows]
     dirs = [row[2] for row in rows]
     assert names == ["conv-a", "conv-b", "cmd-c"], "record order must be preserved"
-    assert dirs == [str(ws_dir.resolve())] * 3
+    # "cmd-c" is recorded at "sub" (see `_three_entries`'s docstring), not
+    # the workspace root the other two entries share — pins that a
+    # restored entry's OWN recorded cwd is what roots its window, not the
+    # workspace root every entry would trivially share with `cwd="."`.
+    assert dirs == [
+        str(ws_dir.resolve()),
+        str(ws_dir.resolve()),
+        str((ws_dir / "sub").resolve()),
+    ]
 
     window_ids = [row[0] for row in rows]
     first_id, _second_id, third_id = window_ids
+
+    # Cross-checked directly against the real tmux server, not just the
+    # `list-windows` format string above.
+    third_pane_path = _sock_run(
+        sock, "display-message", "-p", "-t", third_id, "#{pane_current_path}"
+    ).stdout.strip()
+    assert third_pane_path == str((ws_dir / "sub").resolve())
 
     for window_id in window_ids:
         _wait_for_shell(sock, window_id, _COMMON_SHELL_BASENAMES)
@@ -324,6 +347,7 @@ def test_camp_stop_previews_a_resurrected_session_and_the_record_survives_with_r
 
     ws_dir = tmp_path / "state" / group_name / "worktrees" / slug
     ws_dir.mkdir(parents=True)
+    (ws_dir / "sub").mkdir()
 
     write_window_record(window_record_path_for(ws_dir), _three_entries())
 
@@ -350,10 +374,101 @@ def test_camp_stop_previews_a_resurrected_session_and_the_record_survives_with_r
     assert f"conversation {CONV_A}  exited" in captured2.out
     assert f"conversation {CONV_B}  exited" in captured2.out
 
+    # The resurrected command-line window ("cmd-c") carries no
+    # conversation_id and, like the other two, has landed at a plain shell
+    # once the stub script exec'd — so the preview classifies it `idle`
+    # (stop_workspace.py:~217), which prints as the bare window head with
+    # no "conversation ... live/exited" or "foreground:" suffix.
+    third_id = window_ids[2]
+    idle_line = f'  {third_id} "cmd-c"'
+    assert idle_line in captured2.out
+    assert f"{idle_line}  conversation" not in captured2.out
+    assert f"{idle_line}  foreground:" not in captured2.out
+
     after_has_session = _sock_run(sock, "has-session", "-t", f"={session}")
     assert after_has_session.returncode != 0
 
     after_record = read_window_record(window_record_path_for(ws_dir))
     assert {e.window_id for e in after_record.entries} == resurrected_ids
+
+    _sock_run(sock, "kill-server")
+
+
+def _wait_for_output(sock: str, window_id: str, marker: str, timeout: float = 5.0) -> str:
+    """Poll `capture-pane` for *window_id* until *marker* appears — a fixed
+    sleep would be both slow and occasionally wrong."""
+    deadline = time.monotonic() + timeout
+    last = ""
+    while time.monotonic() < deadline:
+        last = _capture_pane(sock, window_id)
+        if marker in last:
+            return last
+        time.sleep(0.05)
+    raise AssertionError(f"window {window_id!r} never showed {marker!r} (last saw {last!r})")
+
+
+@pytest.mark.skipif(_REAL_TMUX is None, reason="no tmux binary on PATH (captured at import time)")
+def test_a_refused_conversation_fails_inside_its_own_window_siblings_untouched(
+    real_tmux_socket: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """AC39: a conversation Claude refuses to re-enter fails inside its own
+    window, with the refusal visible there, and sibling windows are
+    untouched. camp never starts a Claude process on the way back — the
+    resurrected window is a plain shell — so the "refusal" here is
+    simulated by a failing shell command run BY THE OPERATOR in that shell
+    (never a real `claude` invocation), and this test proves the resurrected
+    windows are isolated shells: what happens in one never reaches another,
+    and every window is still there afterward."""
+    from camp.group.window_record import read_window_record, window_record_path_for
+    from camp.launch.naming import workspace_session_name
+    from camp.launch.stop_workspace import _COMMON_SHELL_BASENAMES
+
+    sock = real_tmux_socket
+    group_name = "g"
+    slug = "camp-cli"
+    session = workspace_session_name(group_name, slug)
+
+    _isolated_env(tmp_path, monkeypatch)
+
+    ws_dir = tmp_path / "state" / group_name / "worktrees" / slug
+    ws_dir.mkdir(parents=True)
+    (ws_dir / "sub").mkdir()
+
+    from camp.group.window_record import write_window_record
+
+    write_window_record(window_record_path_for(ws_dir), _three_entries())
+
+    _wire_workspace(monkeypatch, ws_dir=ws_dir, slug=slug, group_name=group_name, harness=_default_harness())
+
+    code = _run(["attach", slug, "--group", group_name], monkeypatch)
+    captured = capsys.readouterr()
+    assert code == 0, captured.err
+
+    rows = _list_windows(sock, session)
+    window_ids = [row[0] for row in rows]
+    assert len(window_ids) == 3
+    for window_id in window_ids:
+        _wait_for_shell(sock, window_id, _COMMON_SHELL_BASENAMES)
+
+    first_id, second_id, third_id = window_ids
+    marker = "camp-test-refusal-1"
+
+    _sock_run(sock, "send-keys", "-t", first_id, "false; echo camp-test-refusal-$?", "Enter")
+    first_pane = _wait_for_output(sock, first_id, marker)
+
+    assert marker in first_pane
+
+    second_pane = _capture_pane(sock, second_id)
+    third_pane = _capture_pane(sock, third_id)
+    assert marker not in second_pane, "the refusal must not reach a sibling window's pane"
+    assert marker not in third_pane, "the refusal must not reach a sibling window's pane"
+
+    rows_after = _list_windows(sock, session)
+    assert {row[0] for row in rows_after} == set(window_ids), (
+        "every window must still be present after one window's command failed"
+    )
+
+    after_record = read_window_record(window_record_path_for(ws_dir))
+    assert {e.window_id for e in after_record.entries} == set(window_ids)
 
     _sock_run(sock, "kill-server")

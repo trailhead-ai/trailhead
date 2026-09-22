@@ -33,6 +33,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
@@ -124,19 +126,29 @@ def test_entry_through_symlink_outside_root_is_drop_naming_recorded_path(tmp_pat
 # -- 2. credential store floor -----------------------------------------------
 
 
-def test_entry_under_credential_store_is_drop_without_the_path(tmp_path, monkeypatch):
+def _install_account(tmp_path, account_path):
+    """Write a group config declaring `[launch] account = account_path`, and
+    return the env that points camp's config resolver at it — mirrors
+    `test_window_compose.py`'s `_install_account`, so AC41's re-check is
+    pinned against a REAL declared credential store, not a monkeypatched
+    `assert_not_a_credential_store`."""
+    groups_dir = tmp_path / "camp-config" / "groups"
+    groups_dir.mkdir(parents=True, exist_ok=True)
+    body = (
+        '[group]\nname = "testgroup"\n\n'
+        '[[members]]\nname = "myrepo"\nrepo_root = "/tmp/myrepo"\n\n'
+        f'[launch]\naccount = "{account_path}"\n'
+    )
+    (groups_dir / "testgroup.toml").write_text(body, encoding="utf-8")
+    return {"HOME": str(tmp_path), "CAMP_CONFIG_DIR": str(tmp_path / "camp-config")}
+
+
+def test_entry_under_credential_store_is_drop_without_the_path(tmp_path):
     ws = _mkws(tmp_path)
     entry = _conv_entry(cwd="member")
+    env = _install_account(tmp_path, str(ws / "member"))
 
-    import camp.launch.resurrect as resurrect_mod
-    from camp.launch.session import LaunchError
-
-    def _fake_assert(resolved, *, env):
-        raise LaunchError("camp: cannot launch — credential store")
-
-    monkeypatch.setattr(resurrect_mod, "assert_not_a_credential_store", _fake_assert)
-
-    (decision,) = plan_resurrection([entry], ws, env={"HOME": str(tmp_path)}, harness=None)
+    (decision,) = plan_resurrection([entry], ws, env=env, harness=None)
     assert isinstance(decision, Drop)
     assert str(ws / "member") not in decision.reason
     assert "member" not in decision.reason
@@ -258,6 +270,27 @@ def test_script_carries_the_harness_scrub_as_env_unset_flags(tmp_path):
     (decision,) = plan_resurrection([entry], ws, env={"HOME": str(tmp_path)}, harness=harness)
     assert "-u ANTHROPIC_API_KEY" in decision.argv[2]
     assert "-u SOME_TOKEN" in decision.argv[2]
+
+
+def test_a_scrub_name_outside_the_shell_identifier_shape_is_refused(tmp_path):
+    """The harness's `session_launch_env_unset()` names are spliced into the
+    stub script by string replace — a harness-contract violation (not vault
+    input), so a name outside a plain shell identifier's shape must raise
+    rather than silently reach the composed shell source. Varied across a
+    value carrying shell metacharacters and one carrying whitespace, so the
+    assertion pins the general shape check rather than one blocked literal."""
+    ws = _mkws(tmp_path)
+    entry = _cmd_entry(cwd="member")
+
+    from camp.launch.session import LaunchError
+
+    injected = FakeHarness(scrub=("SAFE_NAME", "FOO; rm -rf /"))
+    with pytest.raises(LaunchError):
+        plan_resurrection([entry], ws, env={"HOME": str(tmp_path)}, harness=injected)
+
+    spaced = FakeHarness(scrub=("FOO BAR",))
+    with pytest.raises(LaunchError):
+        plan_resurrection([entry], ws, env={"HOME": str(tmp_path)}, harness=spaced)
 
 
 def test_empty_harness_scrub_gives_no_u_flags(tmp_path):

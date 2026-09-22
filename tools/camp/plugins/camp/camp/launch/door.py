@@ -175,13 +175,18 @@ def _resurrected_windows_phrase(outcome: "Resurrected") -> str:
     about a dropped count reads `windows.dropped` (always present under
     `--json`); the drop itself is also already reported on its own stderr
     line by `render_resurrection_lines`, so the one-line summary's job here
-    is to say what tmux did, not to repeat every detail."""
+    is to say what tmux did, not to repeat every detail.
+
+    `window` singularizes when `restored == 1` in the whole and dropped
+    forms; the failed branch's total always stays plural (`1 of 3 windows`)
+    — it counts every window attempted, not just the ones that came back."""
     total_attempted = outcome.restored + outcome.failed
     if outcome.failed:
         return f"({outcome.restored} of {total_attempted} windows; {outcome.failed} did not come back)"
+    word = "window" if outcome.restored == 1 else "windows"
     if outcome.dropped:
-        return f"({outcome.restored} windows; {outcome.dropped} dropped)"
-    return f"({outcome.restored} windows)"
+        return f"({outcome.restored} {word}; {outcome.dropped} dropped)"
+    return f"({outcome.restored} {word})"
 
 
 def render_human(outcome: DoorOutcome) -> str:

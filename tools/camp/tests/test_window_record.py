@@ -836,6 +836,29 @@ class TestRestampWindowEntries:
             os.kill(holder.pid, signal.SIGKILL)
             holder.wait(timeout=5)
 
+    def test_a_corrupt_record_at_restamp_time_returns_not_restamped_naming_the_path(
+        self, tmp_path
+    ):
+        """The `WindowRecordError` branch inside `restamp_window_entries`'s
+        locked read (`_read_window_record_unlocked`, malformed JSON) is
+        unreachable on the door's own path — it already refuses an
+        unparseable record before resurrection begins — but the primitive
+        must stay honest about it regardless. Pinned directly: a record that
+        cannot be parsed at restamp time answers `NotRestamped` naming the
+        record path, and the file is left exactly as it was."""
+        from camp.group.window_record import restamp_window_entries, window_record_path_for
+
+        path = window_record_path_for(tmp_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("not json", encoding="utf-8")
+        original_bytes = path.read_bytes()
+
+        outcome = restamp_window_entries(tmp_path, {}, remove=set(), lock_timeout=None)
+
+        assert outcome.__class__.__name__ == "NotRestamped"
+        assert str(path) in outcome.reason
+        assert path.read_bytes() == original_bytes
+
     def test_successful_restamp_leaves_no_temp_file_in_workspace_dir(self, tmp_path):
         from camp.group.window_record import (
             WindowEntry,
@@ -854,3 +877,40 @@ class TestRestampWindowEntries:
         assert outcome.__class__.__name__ == "Restamped"
         leftovers = [p for p in tmp_path.iterdir() if p.name.startswith(".windows-")]
         assert leftovers == []
+
+    def test_an_oserror_from_the_write_folds_to_not_restamped_not_raised(
+        self, tmp_path, monkeypatch
+    ):
+        """A restamp-time `OSError` (e.g. `ENOSPC` on the atomic write) must
+        fold into `NotRestamped` the same way a lock timeout or a corrupt
+        record does — the resurrection door's caller treats any raised
+        `OSError` as a create failure, which would report `CREATE_FAILED`
+        for a workspace whose session tmux already stood up. Raised from
+        `write_window_record` itself (the atomic write `restamp_window_entries`
+        calls once its plan is settled) via monkeypatch, since forcing a real
+        ENOSPC is not practical in a test."""
+        from camp.group import window_record as wr_module
+        from camp.group.window_record import (
+            WindowEntry,
+            restamp_window_entries,
+            window_record_path_for,
+            write_window_record,
+        )
+
+        path = window_record_path_for(tmp_path)
+        e1 = WindowEntry(window_id="@1", name="one", cwd="repo_a", conversation_id="c1")
+        write_window_record(path, [e1])
+        original_bytes = path.read_bytes()
+
+        def _raise_enospc(path, entries):
+            raise OSError(28, "No space left on device")
+
+        monkeypatch.setattr(wr_module, "write_window_record", _raise_enospc)
+
+        new_e1 = WindowEntry(window_id="@10", name="one", cwd="repo_a", conversation_id="c1")
+        outcome = restamp_window_entries(tmp_path, {"@1": new_e1}, remove=set(), lock_timeout=None)
+
+        assert outcome.__class__.__name__ == "NotRestamped"
+        assert str(path) in outcome.reason
+        assert "No space left on device" in outcome.reason
+        assert path.read_bytes() == original_bytes

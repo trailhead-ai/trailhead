@@ -172,7 +172,7 @@ class _DoorTmux:
         )
         return self._first_window
 
-    def new_window(self, name, *, cwd, window_name, command, timeout=None):
+    def new_window_with_reason(self, name, *, cwd, window_name, command, timeout=None):
         self.new_window_calls.append(
             {"name": name, "cwd": cwd, "window_name": window_name, "command": command}
         )
@@ -1092,13 +1092,13 @@ def test_attach_with_a_partial_resurrection_prints_resurrected_line_and_exits_2(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     from camp.group.window_record import WindowEntry, window_record_path_for, write_window_record
-    from camp.launch.tmux import NewWindowResult
+    from camp.launch.tmux import NewWindowFailure, NewWindowResult
 
     _isolated_env(tmp_path, monkeypatch)
     tmux = _DoorTmux(
         present=False,
         first_window=NewWindowResult(window_id="@10", window_name="one"),
-        window_answers=[None],
+        window_answers=[NewWindowFailure(stderr="tmux: refused")],
     )
     ws = _wire_one_workspace(monkeypatch, tmp_path=tmp_path, tmux=tmux)
     (ws / "one").mkdir()
@@ -1124,13 +1124,13 @@ def test_attach_with_a_partial_resurrection_json_carries_the_windows_object(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     from camp.group.window_record import WindowEntry, window_record_path_for, write_window_record
-    from camp.launch.tmux import NewWindowResult
+    from camp.launch.tmux import NewWindowFailure, NewWindowResult
 
     _isolated_env(tmp_path, monkeypatch)
     tmux = _DoorTmux(
         present=False,
         first_window=NewWindowResult(window_id="@10", window_name="one"),
-        window_answers=[None],
+        window_answers=[NewWindowFailure(stderr="tmux: refused")],
     )
     ws = _wire_one_workspace(monkeypatch, tmp_path=tmp_path, tmux=tmux)
     (ws / "one").mkdir()
@@ -1170,7 +1170,44 @@ def test_attach_with_a_whole_resurrection_prints_the_plain_line_and_exits_0(
     captured = capsys.readouterr()
 
     assert code == 0
-    assert captured.out.strip() == "resurrected camp-g-camp-cli (1 windows)"
+    assert captured.out.strip() == "resurrected camp-g-camp-cli (1 window)"
+
+
+def test_a_restamp_write_oserror_still_reports_resurrected_not_create_failed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """An `OSError` from the restamp's own atomic write (e.g. `ENOSPC`) must
+    NOT escape as a create failure — tmux already holds the fully
+    resurrected session by the time the restamp runs, so the door must
+    still report `resurrected`, exit 0, with the one stderr line naming the
+    record and the OS error, never `CREATE_FAILED`/exit 1."""
+    from camp.group import window_record as wr_module
+    from camp.group.window_record import WindowEntry, window_record_path_for, write_window_record
+    from camp.launch.tmux import NewWindowResult
+
+    _isolated_env(tmp_path, monkeypatch)
+    tmux = _DoorTmux(present=False, first_window=NewWindowResult(window_id="@10", window_name="one"))
+    ws = _wire_one_workspace(monkeypatch, tmp_path=tmp_path, tmux=tmux)
+    (ws / "one").mkdir()
+    record_path = window_record_path_for(ws)
+    write_window_record(
+        record_path,
+        [WindowEntry(window_id="@1", name="one", cwd="one", conversation_id="c1")],
+    )
+
+    def _raise_enospc(path, entries):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(wr_module, "write_window_record", _raise_enospc)
+
+    code = _run(["attach", "camp-cli", "--group", "g"], monkeypatch)
+    captured = capsys.readouterr()
+
+    assert code == 0
+    assert captured.out.strip() == "resurrected camp-g-camp-cli (1 window)"
+    assert str(record_path) in captured.err
+    assert "No space left on device" in captured.err
+    assert "could not be re-stamped" in captured.err
 
 
 def test_attach_with_a_corrupt_record_refuses_naming_the_path_exit_1(
@@ -1212,6 +1249,93 @@ def test_attach_with_a_corrupt_record_json_gives_the_refusal_object(
     assert code == 1
     assert out == {"ok": False, "outcome": "record_unreadable", "reason": out["reason"]}
     assert str(window_record_path_for(ws)) in out["reason"]
+
+
+def _install_account(tmp_path: Path, account_path: str) -> None:
+    """Declares a real `[launch] account` group config at the isolated
+    `CAMP_CONFIG_DIR` `_isolated_env` points at — mirrors
+    `test_resurrect_plan.py`'s `_install_account` (lines ~129-155), so the
+    resurrection arm's credential-floor re-check is pinned against real
+    detection (`credential_deny_entries` reading group configs off disk)
+    rather than a monkeypatched gate."""
+    groups_dir = tmp_path / "config" / "groups"
+    groups_dir.mkdir(parents=True, exist_ok=True)
+    body = (
+        '[group]\nname = "credgroup"\n\n'
+        '[[members]]\nname = "myrepo"\nrepo_root = "/tmp/myrepo"\n\n'
+        f'[launch]\naccount = "{account_path}"\n'
+    )
+    (groups_dir / "credgroup.toml").write_text(body, encoding="utf-8")
+
+
+def test_resurrection_arm_above_a_declared_account_refuses_create_no_traceback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The resurrection arm's own `assert_not_a_credential_store(ws_dir)`
+    re-check (`resurrect_workspace_session`, `LaunchError` folded by
+    `workspace_session.py`'s `except LaunchError` into `create_refused`) —
+    exercised end to end through the real door dispatch, with a populated
+    window record so the resurrection arm (not the plain create arm) is
+    the one that runs the check. The workspace root is an ANCESTOR of the
+    declared account (`ws/secrets`), the "above" match
+    `assert_not_a_credential_store` denies, mirroring
+    `test_resurrect_engine.py`'s
+    `test_the_workspace_root_itself_is_checked_against_the_credential_floor`."""
+    from camp.group.window_record import WindowEntry, window_record_path_for, write_window_record
+
+    _isolated_env(tmp_path, monkeypatch)
+    tmux = _DoorTmux(present=False)
+    ws = _wire_one_workspace(monkeypatch, tmp_path=tmp_path, tmux=tmux)
+    (ws / "secrets").mkdir()
+    (ws / "one").mkdir()
+    _install_account(tmp_path, str(ws / "secrets"))
+    write_window_record(
+        window_record_path_for(ws),
+        [WindowEntry(window_id="@1", name="one", cwd="one", conversation_id="c1")],
+    )
+
+    code = _run(["attach", "camp-cli", "--group", "g", "--json"], monkeypatch)
+    out = json.loads(capsys.readouterr().out)
+
+    assert code == 1
+    assert out["ok"] is False
+    assert out["outcome"] == "create_refused"
+    assert tmux.new_session_calls == []
+    assert tmux.new_session_with_window_calls == []
+
+
+def test_resurrection_arm_timeout_expired_folds_to_create_failed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The resurrection arm's `except (OSError, subprocess.TimeoutExpired)`
+    fold (`workspace_session.py:~426`) for `subprocess.TimeoutExpired`
+    specifically — driven end to end through the real door dispatch with a
+    fake `Tmux.new_session_with_window` that raises it directly, rather
+    than answering a normal result."""
+    import subprocess
+
+    from camp.group.window_record import WindowEntry, window_record_path_for, write_window_record
+    from camp.launch.tmux import NewWindowResult
+
+    class _TimeoutTmux(_DoorTmux):
+        def new_session_with_window(self, *a, **k):
+            raise subprocess.TimeoutExpired(cmd="tmux", timeout=30)
+
+    _isolated_env(tmp_path, monkeypatch)
+    tmux = _TimeoutTmux(present=False, first_window=NewWindowResult(window_id="@10", window_name="one"))
+    ws = _wire_one_workspace(monkeypatch, tmp_path=tmp_path, tmux=tmux)
+    (ws / "one").mkdir()
+    write_window_record(
+        window_record_path_for(ws),
+        [WindowEntry(window_id="@1", name="one", cwd="one", conversation_id="c1")],
+    )
+
+    code = _run(["attach", "camp-cli", "--group", "g", "--json"], monkeypatch)
+    out = json.loads(capsys.readouterr().out)
+
+    assert code == 1
+    assert out["ok"] is False
+    assert out["outcome"] == "create_failed"
 
 
 def test_a_slug_naming_no_workspace_falls_through_to_the_retired_ref_path(

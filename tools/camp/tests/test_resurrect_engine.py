@@ -61,6 +61,7 @@ from camp.launch.tmux import (  # noqa: E402
     DUPLICATE,
     UNANSWERED,
     NewSessionWindowFailure,
+    NewWindowFailure,
     NewWindowResult,
 )
 
@@ -94,11 +95,17 @@ class _FakeTmux:
 
     def new_session_with_window(self, name, *, cwd, window_name, command, env=None, timeout=None):
         self.new_session_with_window_calls.append(
-            {"name": name, "cwd": cwd, "window_name": window_name, "command": command}
+            {
+                "name": name,
+                "cwd": cwd,
+                "window_name": window_name,
+                "command": command,
+                "timeout": timeout,
+            }
         )
         return self._first_window
 
-    def new_window(self, name, *, cwd, window_name, command, timeout=None):
+    def new_window_with_reason(self, name, *, cwd, window_name, command, timeout=None):
         self.new_window_calls.append(
             {"name": name, "cwd": cwd, "window_name": window_name, "command": command}
         )
@@ -196,10 +203,68 @@ def test_three_restorable_entries_ride_new_session_with_window_then_two_new_wind
     assert record.entries == result.restored
 
 
+def test_the_record_holds_tmuxs_read_back_name_not_the_requested_one(tmp_path):
+    """`_restamped_entry` must write what tmux actually assigned, never the
+    `window_name` the engine asked for — the fake here answers a DIFFERENT
+    name than requested for the second window (tmux renaming on a
+    collision, say), and the record must hold that read-back name."""
+    ws = _mkws(tmp_path)
+    e1, e2, e3 = _entries()
+    path = window_record_path_for(ws)
+    write_window_record(path, [e1, e2, e3])
+
+    tmux = _FakeTmux(
+        first_window=NewWindowResult(window_id="@10", window_name="one"),
+        window_answers=[
+            NewWindowResult(window_id="@11", window_name="two (1)"),
+            NewWindowResult(window_id="@12", window_name="three"),
+        ],
+    )
+
+    result = resurrect_workspace_session(
+        "trailhead", "camp-cli", ws, [e1, e2, e3], env=_env(tmp_path), tmux=tmux, harness=None
+    )
+
+    assert tmux.new_window_calls[0]["window_name"] == "two", "requested the recorded name"
+    assert result.restored[1].name == "two (1)", "but the record holds tmux's read-back name"
+
+    record = read_window_record(path)
+    assert record.entries[1].name == "two (1)"
+
+
+# -- 1b. the session-starting call gets the same 30s budget the create arm's
+#         own server-starting `new_session` call does, not tmux's 5s default --
+
+
+def test_the_session_starting_call_gets_the_create_arms_thirty_second_budget(tmp_path):
+    from camp.launch.workspace_session import _CREATE_SESSION_TIMEOUT_SECONDS
+
+    ws = _mkws(tmp_path)
+    e1, e2, e3 = _entries()
+    path = window_record_path_for(ws)
+    write_window_record(path, [e1, e2, e3])
+
+    tmux = _FakeTmux(
+        first_window=NewWindowResult(window_id="@10", window_name="one"),
+        window_answers=[
+            NewWindowResult(window_id="@11", window_name="two"),
+            NewWindowResult(window_id="@12", window_name="three"),
+        ],
+    )
+
+    resurrect_workspace_session(
+        "trailhead", "camp-cli", ws, [e1, e2, e3], env=_env(tmp_path), tmux=tmux, harness=None
+    )
+
+    assert tmux.new_session_with_window_calls[0]["timeout"] == _CREATE_SESSION_TIMEOUT_SECONDS
+
+
 # -- 2. one window fails, the rest still come back ---------------------------
 
 
-@pytest.mark.parametrize("bad_answer", [None, UNANSWERED])
+@pytest.mark.parametrize(
+    "bad_answer", [NewWindowFailure(stderr="tmux: refused\n"), UNANSWERED]
+)
 def test_a_failed_window_is_isolated_and_the_rest_still_come_back(tmp_path, bad_answer):
     ws = _mkws(tmp_path)
     e1, e2, e3 = _entries()
@@ -224,6 +289,69 @@ def test_a_failed_window_is_isolated_and_the_rest_still_come_back(tmp_path, bad_
 
     lines = render_resurrection_lines(result)
     assert any("c2" in line for line in lines), lines
+
+
+def test_a_refused_windows_failure_line_carries_tmuxs_own_stderr(tmp_path):
+    """A `NewWindowFailure` answer's `stderr` reaches the operator-facing
+    failure line verbatim, distinct from an `UNANSWERED` answer's fixed
+    'tmux did not answer' wording — varied across two distinct stderr
+    strings so the assertion pins that the exact text is forwarded, not a
+    fixed sentence."""
+    ws = _mkws(tmp_path)
+    e1, e2, e3 = _entries()
+    path = window_record_path_for(ws)
+    write_window_record(path, [e1, e2, e3])
+
+    tmux = _FakeTmux(
+        first_window=NewWindowResult(window_id="@10", window_name="one"),
+        window_answers=[
+            NewWindowFailure(stderr="tmux: create window failed: no space for new pane"),
+            NewWindowResult(window_id="@12", window_name="three"),
+        ],
+    )
+
+    result = resurrect_workspace_session(
+        "trailhead", "camp-cli", ws, [e1, e2, e3], env=_env(tmp_path), tmux=tmux, harness=None
+    )
+
+    lines = render_resurrection_lines(result)
+    assert any(
+        "no space for new pane" in line for line in lines
+    ), lines
+    assert not any("tmux refused to create it" in line for line in lines), lines
+
+
+def test_a_refused_windows_failure_line_strips_tmuxs_trailing_newline(tmp_path):
+    """Real tmux stderr ends in `\\n`. Composed unstripped, `printable_path`
+    renders that trailing newline as the literal `\\x0a` escape sequence in
+    the middle of the failure line — `_abandon_half_marked_session`
+    (`workspace_session.py:~224`) already `.strip()`s tmux stderr for the
+    same reason before composing its own message. Pinned by FULL line
+    equality (not a substring check), so a stray `\\x0a` anywhere in the
+    composed line fails this test."""
+    ws = _mkws(tmp_path)
+    e1, e2, e3 = _entries()
+    path = window_record_path_for(ws)
+    write_window_record(path, [e1, e2, e3])
+
+    tmux = _FakeTmux(
+        first_window=NewWindowResult(window_id="@10", window_name="one"),
+        window_answers=[
+            NewWindowFailure(stderr="tmux: refused\n"),
+            NewWindowResult(window_id="@12", window_name="three"),
+        ],
+    )
+
+    result = resurrect_workspace_session(
+        "trailhead", "camp-cli", ws, [e1, e2, e3], env=_env(tmp_path), tmux=tmux, harness=None
+    )
+
+    lines = render_resurrection_lines(result)
+    failure_line = next(line for line in lines if "@2" in line)
+    assert failure_line == (
+        'camp: window @2 "two" did not come back — '
+        "tmux: create window failed: tmux: refused (conversation c2)"
+    )
 
 
 # -- 3. every directory gone: the create arm, record ends empty --------------
@@ -389,6 +517,99 @@ def test_the_restamp_failure_line_names_the_underlying_reason_once_not_doubled(t
     bare = NotRestamped(reason="disk full")
     lines_bare = render_resurrection_lines(_result(bare))
     assert lines_bare[-1] == f"camp: window record at {path} could not be re-stamped — disk full"
+
+
+def test_the_restamp_failure_line_strips_the_malformed_record_shape_too(tmp_path):
+    """`_read_window_record_unlocked`'s malformed-record `NotRestamped`
+    reason (`group/window_record.py`'s `camp: malformed window record at
+    <path>: <e>`) doubles the `camp:` prefix and the path the same way the
+    lock-timeout shape does — `_restamp_failure_detail` must strip either
+    verb generally, not special-case "could not restamp". The `NotRestamped`
+    here comes from the REAL producer — `restamp_window_entries` run
+    against an actually malformed record on disk — rather than a hand-built
+    reason string, so a reword of `window_record.py`'s malformed-record
+    message cannot silently decouple this test from what the strip
+    actually has to handle."""
+    from camp.group.window_record import restamp_window_entries, window_record_path_for
+    from camp.launch.resurrect import ResurrectionResult, render_resurrection_lines
+
+    path = window_record_path_for(tmp_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("not json", encoding="utf-8")
+
+    malformed = restamp_window_entries(tmp_path, {}, remove=set(), lock_timeout=None)
+    assert malformed.__class__.__name__ == "NotRestamped"
+
+    result = ResurrectionResult(
+        session_name="camp-trailhead-camp-cli",
+        restored=(),
+        failed=(),
+        dropped=(),
+        restamp=malformed,
+        record_path=path,
+    )
+    lines = render_resurrection_lines(result)
+    assert lines[-1].startswith(f"camp: window record at {path} could not be re-stamped — ")
+    assert lines[-1].count("camp:") == 1
+    assert lines[-1].count(str(path)) == 1
+
+
+# -- 7. the credential floor applies to the workspace root itself ------------
+
+
+def _install_account(tmp_path, account_path):
+    """Mirrors `test_window_compose.py`'s `_install_account` and
+    `test_resurrect_plan.py`'s copy: declares a real `[launch] account`, so
+    the credential-floor re-check on the workspace root is pinned against
+    real detection rather than a monkeypatched gate."""
+    groups_dir = tmp_path / "camp-config" / "groups"
+    groups_dir.mkdir(parents=True, exist_ok=True)
+    body = (
+        '[group]\nname = "testgroup"\n\n'
+        '[[members]]\nname = "myrepo"\nrepo_root = "/tmp/myrepo"\n\n'
+        f'[launch]\naccount = "{account_path}"\n'
+    )
+    (groups_dir / "testgroup.toml").write_text(body, encoding="utf-8")
+    return {"HOME": str(tmp_path), "CAMP_CONFIG_DIR": str(tmp_path / "camp-config")}
+
+
+def test_the_workspace_root_itself_is_checked_against_the_credential_floor(tmp_path):
+    """`plan_resurrection` only checks each entry's OWN resolved `cwd` — it
+    never checks the workspace ROOT, unlike `create_workspace_session`'s own
+    `assert_not_a_credential_store(Path(workspace_dir), ...)` gate for the
+    plain create arm. Declaring the account at `ws/secrets` — a directory
+    ws_dir CONTAINS, never one the recorded entries ("one"/"two"/"three")
+    resolve under — makes ws_dir an ancestor of the store (the "above"
+    match `assert_not_a_credential_store` denies) while every entry's own
+    check passes clean; only a root-level check catches this. Resurrection
+    must refuse outright, before any tmux call, exactly as the plain create
+    arm would for the same workspace_dir."""
+    from camp.launch.session import LaunchError
+
+    ws = _mkws(tmp_path)
+    (ws / "secrets").mkdir()
+    e1, e2, e3 = _entries()
+    path = window_record_path_for(ws)
+    write_window_record(path, [e1, e2, e3])
+    env = _install_account(tmp_path, str(ws / "secrets"))
+
+    tmux = _FakeTmux(
+        first_window=NewWindowResult(window_id="@10", window_name="one"),
+        window_answers=[
+            NewWindowResult(window_id="@11", window_name="two"),
+            NewWindowResult(window_id="@12", window_name="three"),
+        ],
+    )
+
+    with pytest.raises(LaunchError):
+        resurrect_workspace_session(
+            "trailhead", "camp-cli", ws, [e1, e2, e3], env=env, tmux=tmux, harness=None
+        )
+
+    assert tmux.new_session_with_window_calls == []
+    assert tmux.new_window_calls == []
+    record = read_window_record(path)
+    assert record.entries == (e1, e2, e3), "the record must be untouched"
 
 
 # -- 6. restamp lock timeout ---------------------------------------------------

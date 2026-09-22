@@ -331,7 +331,12 @@ def restamp_window_entries(
     restamp time (unreachable on the door's path, which already refused
     an unparseable record before resurrection began — the primitive stays
     honest about it regardless), returns `NotRestamped` naming the record
-    path rather than raising.
+    path rather than raising. An `OSError` from acquiring the lock or from
+    the atomic write itself (e.g. `ENOSPC`) folds the same way — the
+    caller already treats `NotRestamped` as "the resurrection still
+    counts, the record just didn't get re-stamped"; letting an `OSError`
+    escape instead would surface as a false create failure even though
+    tmux already holds the resurrected session.
     """
     ws_dir = Path(ws_dir)
     path = window_record_path_for(ws_dir)
@@ -354,4 +359,6 @@ def restamp_window_entries(
             write_window_record(path, restamped)
             return Restamped(entries=tuple(restamped))
     except LockTimeout as e:
+        return NotRestamped(reason=f"camp: could not restamp window record at {path}: {e}")
+    except OSError as e:
         return NotRestamped(reason=f"camp: could not restamp window record at {path}: {e}")

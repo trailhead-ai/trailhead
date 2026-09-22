@@ -150,6 +150,21 @@ def test_resurrected_human_line_varies_with_restored_failed_and_dropped():
     )
 
 
+def test_resurrected_human_line_singularizes_window_when_restored_is_one():
+    from camp.launch.door import render_human
+
+    one_whole = render_human(_make_resurrected(restored=1, failed=0, dropped=0))
+    one_dropped = render_human(_make_resurrected(restored=1, failed=0, dropped=2))
+    two_dropped = render_human(_make_resurrected(restored=2, failed=0, dropped=1))
+    partial_one_of_three = render_human(_make_resurrected(restored=1, failed=2, dropped=0))
+
+    assert one_whole.endswith("(1 window)")
+    assert one_dropped.endswith("(1 window; 2 dropped)")
+    assert two_dropped.endswith("(2 windows; 1 dropped)")
+    # the failed-branch total stays plural even when only one window is restored
+    assert partial_one_of_three.endswith("(1 of 3 windows; 2 did not come back)")
+
+
 def test_resurrected_json_carries_a_windows_key_created_and_connected_do_not():
     from camp.launch.door import Created, render_json
 

@@ -167,7 +167,7 @@ class _DoorTmux:
         )
         return self._first_window
 
-    def new_window(self, name, *, cwd, window_name, command, timeout=None):
+    def new_window_with_reason(self, name, *, cwd, window_name, command, timeout=None):
         self.new_window_calls.append(
             {"name": name, "cwd": cwd, "window_name": window_name, "command": command}
         )

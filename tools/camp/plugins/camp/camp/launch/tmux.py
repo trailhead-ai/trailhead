@@ -233,6 +233,16 @@ class NewSessionWindowFailure:
 
 
 @dataclass(frozen=True)
+class NewWindowFailure:
+    """A failed :meth:`Tmux.new_window_with_reason` call, carrying tmux's
+    own stderr verbatim and unsummarized — the same shape
+    :class:`NewSessionWindowFailure` carries for the session-creating call.
+    """
+
+    stderr: str
+
+
+@dataclass(frozen=True)
 class SessionListing:
     """Every session tmux holds right now, as answered by
     :meth:`Tmux.list_sessions`.
@@ -477,6 +487,40 @@ class Tmux:
         Folding the last two together would report a hung or unreachable
         tmux as an ordinary create failure — the one thing this seam's
         tri-state exists to keep apart.
+
+        Implemented over :meth:`new_window_with_reason`, which answers the
+        same success and :data:`UNANSWERED` cases and folds a
+        :class:`NewWindowFailure` down to the bare `None` this method has
+        always returned — this method's tri-state is unchanged by that
+        method's existence; a caller that needs tmux's own stderr on a
+        refusal reaches for `new_window_with_reason` instead.
+        """
+        answer = self.new_window_with_reason(
+            name, cwd=cwd, window_name=window_name, command=command, timeout=timeout
+        )
+        if isinstance(answer, NewWindowFailure):
+            return None
+        return answer
+
+    def new_window_with_reason(
+        self,
+        name: str,
+        *,
+        cwd: object,
+        window_name: str,
+        command: Sequence[str],
+        timeout: float | None = None,
+    ) -> NewWindowResult | NewWindowFailure | _Unanswered:
+        """Same call :meth:`new_window` makes, plus tmux's own stderr,
+        verbatim, when the call answers with a non-zero exit — the piece of
+        information :meth:`new_window` throws away, needed by a caller (the
+        resurrection engine) that reports tmux's own words on a failed
+        window rather than a fixed sentence.
+
+        Tri-state: :class:`NewWindowResult` on success; :class:`NewWindowFailure`
+        on a completed, non-zero exit; :data:`UNANSWERED` when tmux could
+        not be asked at all — the same three cases :meth:`new_window`
+        collapses its own `None` from the middle one.
         """
         done = self._run(
             [
@@ -497,7 +541,7 @@ class Tmux:
         if done is None:
             return UNANSWERED
         if done.returncode != 0:
-            return None
+            return NewWindowFailure(stderr=done.stderr or "")
         window_id, _, actual_name = _strip_one_trailing_newline(done.stdout).partition(" ")
         return NewWindowResult(window_id=window_id, window_name=actual_name)
 

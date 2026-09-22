@@ -340,7 +340,7 @@ class _FakeDoorTmux:
             return DUPLICATE
         return self._first_window
 
-    def new_window(self, name, *, cwd, window_name, command, timeout=None):
+    def new_window_with_reason(self, name, *, cwd, window_name, command, timeout=None):
         self.new_window_calls.append(
             {"name": name, "cwd": cwd, "window_name": window_name, "command": command}
         )
@@ -790,10 +790,22 @@ def _window(window_id, name, current_path="/ws", current_command="bash"):
     )
 
 
-def test_a_create_that_races_to_duplicate_reconciles_the_record_like_any_connect(tmp_path):
-    """The race fold connects to a running session too, so it reconciles:
-    a session that appeared between the probe and the create is exactly as
-    live as one the probe saw, and its record is exactly as stale."""
+def test_a_resurrection_that_races_to_duplicate_reconciles_the_record_like_any_connect(
+    tmp_path,
+):
+    """The window record here holds entries, so this routes through the
+    RESURRECTION arm (`resurrect_workspace_session`'s own
+    `new_session_with_window` call), not the plain create arm's
+    `new_session` — `new_session_duplicate=True` on `_FakeDoorTmux` makes
+    both answer DUPLICATE, so it is the entries in the record, not the
+    fake's name, that decide which arm this test exercises. The plain
+    create arm's own duplicate-race fold is pinned separately at
+    `test_attach_door_dispatch.py::test_duplicate_session_failure_yields_connected_no_second_create`.
+
+    Either way the race fold connects to a running session too, so it
+    reconciles: a session that appeared between the probe and the create is
+    exactly as live as one the probe saw, and its record is exactly as
+    stale."""
     from camp.group.window_record import WindowEntry, read_window_record, window_record_path_for, write_window_record
     from camp.launch.tmux import TmuxWindow, WindowListing
     from camp.launch.window_reconcile import Dropped, Reconciled
