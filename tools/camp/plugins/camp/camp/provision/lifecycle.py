@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ..gitutil import _git_is_dirty, _git_out, _git_repo_status
+from ..gitutil import _git_branch_drift, _git_is_dirty, _git_out, _git_repo_status
 from ..group.resolve import central_state_dir
 from ..group.manifest import (
     ManifestError,
@@ -743,6 +743,7 @@ def provision_status_code(
     slug: str,
     *,
     env: dict[str, str] | None = None,
+    drift: bool = False,
 ) -> tuple[int, dict[str, Any]]:
     """Return (exit_code, report) for the provision state of a workspace.
 
@@ -761,10 +762,30 @@ def provision_status_code(
     present — an empty dict when the member has no tasks) so callers can surface
     per-task detail without changing exit-code semantics.
 
+    Each member also carries branch-drift facts computed fresh (no fetch) from
+    its worktree against its configured `base` (default `origin/main`):
+    `branch`, `base`, `ahead`, `behind` (commit counts, `None` when the
+    worktree is absent or `base` doesn't resolve locally), and `upstream`
+    (`"ok"` / `"gone"` / `"none"`). These never influence `code` or `work_code`.
+
+    The drift probe is opt-in, guarded by `drift` (default `False`): it runs
+    ~5 git subprocesses per member, and the callers that never read the
+    result — the SessionStart hook's `capability_report`,
+    `wait_for_provisioning_ready`'s poll loop, and `camp setup --status` —
+    leave `drift` at its default and pay none of that cost. When `drift=False` the five keys (`branch`, `base`, `ahead`,
+    `behind`, `upstream`) are simply ABSENT from each member dict, not `None`
+    — a caller checking for drift facts should use `"behind" in member`, not
+    `member.get("behind")`. Only `camp status` (`_cmd_status_group_cli`)
+    passes `drift=True`.
+
     report = {
         "slug", "code", "work_code",
-        "members": [{"name", "provision_state", "work_state", "tasks", "reason"?}],
-    }, where `tasks` is the manifest's {task-name: {"state", "reason"?}} map and
+        "members": [{
+            "name", "provision_state", "work_state", "tasks", "reason"?,
+            "branch"?, "base"?, "ahead"?, "behind"?, "upstream"?,
+        }],
+    }, where the five drift keys are present only when `drift=True`, `tasks`
+    is the manifest's {task-name: {"state", "reason"?}} map and
     `work_code` is a distinct 0/2/3-style rollup over each member's work_state
     (see manifest.work_state_for_member) — 0 when every member is work-ready or
     WORK_STATE_NOT_APPLICABLE, 2 when any is pending, 3 when any is failed
@@ -772,10 +793,12 @@ def provision_status_code(
     `code` or the process exit status.
     """
     from ..group.manifest import work_state_for_member
+    from .reconcile import DEFAULT_BASE
 
     group_name = group["group"]["name"]
     mpath = manifest_path_for(group_name, slug, env=env)
     data = read_central_manifest(mpath)
+    member_config_by_name = {m["name"]: m for m in group.get("members", [])}
 
     members = []
     any_failed = False
@@ -791,6 +814,22 @@ def provision_status_code(
             "work_state": work_state,
             "tasks": entry.get("tasks") or {},
         }
+        if drift:
+            member_config = member_config_by_name.get(entry["name"], {})
+            base = member_config.get("base") or DEFAULT_BASE
+            # Read-only: rev-parse/rev-list/config run with captured output —
+            # no hooks, no pager, nothing destructive — against the
+            # manifest-supplied worktree_path. Unlike the destructive
+            # consumers activation.py documents (worktree removal, retry
+            # cleanup), which re-resolve and confirm confinement before
+            # touching the path, a read that can only inspect state needs no
+            # such check.
+            drift_facts = _git_branch_drift(Path(entry["worktree_path"]), base)
+            m["branch"] = drift_facts["branch"]
+            m["base"] = base
+            m["ahead"] = drift_facts["ahead"]
+            m["behind"] = drift_facts["behind"]
+            m["upstream"] = drift_facts["upstream"]
         if state == "failed":
             any_failed = True
             if entry.get("reason"):

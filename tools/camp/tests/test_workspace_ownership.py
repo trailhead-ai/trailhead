@@ -701,6 +701,10 @@ class TestHotPathSafetyForOwnerlessWorkspace:
                     "repo_root": str(g["repo_a"]),
                     "worktree_path": str(wt_path),
                     "provision_state": "pending",
+                    # repo_a declares no activate-phase task, so
+                    # seed_pending_workspace assigns "not-applicable" work
+                    # readiness up front rather than leaving the key absent.
+                    "work_state": "not-applicable",
                 }
             ],
         }
@@ -718,6 +722,18 @@ class TestPerMemberCarryForwardUnaffectedByOwnerFix:
 
         g = one_member_group
         slug = "feat-o"
+        # The member declares the activate-phase task whose run the simulated
+        # state below records; work_state carries forward only for members
+        # that still declare activate work.
+        g["group"]["members"][0]["tasks"] = [
+            {
+                "name": "dep-install",
+                "phase": "activate",
+                "required": False,
+                "timeout_seconds": None,
+                "steps": [{"name": "dep-install", "cmd": ["true"]}],
+            }
+        ]
         env, mpath = _owned_workspace(g["group"], g["tmp_path"], slug=slug)
 
         # Simulate cmd_setup_group having already flipped this member and

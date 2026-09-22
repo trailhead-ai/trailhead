@@ -56,6 +56,7 @@ not a fact.
 - The Loop
   - Determine the task shape
   - Resuming a run
+  - Workspace preflight
   - Claiming the run at first dispatch
   - 1. Does this task have an unresolved unknown?
   - 2. Absorb findings
@@ -203,10 +204,10 @@ otherwise would — there is no second record to flip. Refine's promotion takes 
 run](#claiming-the-run-at-first-dispatch) prescribes for a parent — status and branch label in one
 command
 (`lore record update task/<name> --vault <elected-vault> --status in-progress --label craft/branch=<bare-branch>`),
-so crash-resume can find the branch on a standalone run too. **A standalone run also loads dispatch
-lessons** — the claim's retrieval command runs here too, before that first executor dispatch, and
-its outcome is recorded the same way. Phase 6 takes it `in-progress → done`, where "close the
-parent" means close the task itself.
+once the [Workspace preflight](#workspace-preflight) has passed, so crash-resume can find the branch
+on a standalone run too. **A standalone run also loads dispatch lessons** — the claim's retrieval
+command runs here too, before that first executor dispatch, and its outcome is recorded the same
+way. Phase 6 takes it `in-progress → done`, where "close the parent" means close the task itself.
 
 ### Resuming a run
 
@@ -245,6 +246,83 @@ Two writes move the task off `in-progress`: [Phase 6](#phase-6-close-and-complet
 and each escalation site's `blocked` write. An escalation *answered* in-session writes no status at
 all — the run simply continues, and the task legitimately holds `in-progress` until one of those two
 lands. Full writer and exit-owner rules govern every status value, not just these two writes.
+
+### Workspace preflight
+
+Run this step on every entry into the Loop — a fresh run before the claim below writes anything, and
+a resumed run before its next dispatch — on both the plan shape and the standalone shape. A reused
+camp workspace is where stale branches accumulate, and a resumed run is the one most likely to be
+sitting in one. Execute never rebases on its own: a rebase rewrites a branch an operator may have
+another session on, so the fix stays an operator action and this step only refuses to build — on a
+stale base, or on a design doc that is not committed. A stop here on a fresh run leaves the task
+untouched; a stop on a resumed run leaves its existing claim as it is and dispatches nothing.
+
+Enumerate the repos the same way Phase 6's push does: in a camp workspace, the member worktrees of
+the current workspace's manifest; in vanilla usage, the single current repo. Each repo has a branch
+and a base. The base is the configured base in both usages — the member's `base` in the group config
+for a camp workspace, the base the operator named for this run in vanilla usage — and `origin/main`
+when nothing configures one; it is never the branch's upstream, which on a task branch is the branch
+itself. In a camp workspace the branch comes from the manifest; in vanilla usage it is
+`git symbolic-ref --short HEAD` (a detached HEAD has no branch to build on — stop and say so).
+
+Validate every branch name and base ref against the safe-value shape (`^[A-Za-z0-9._/-]+$`) before
+it is substituted into any command below, the rule every other value this document substitutes
+already follows. A value that fails the shape is never substituted: stop, name the repo and the
+offending value, and let the operator fix the manifest, config, or branch.
+
+For each repo, refresh the base first: when the base is `<remote>/<branch>`, run
+`git -C <repo> fetch <remote> --quiet`; a base with no remote component is a local ref and needs no
+fetch. Then read drift. In a camp workspace, run `camp status --json` once from the workspace root —
+the drift fields exist only on that workspace-scoped view, and the probe is always enabled on that
+path — and use each member's `behind` and `upstream` fields directly (`upstream` is `ok`, `gone`, or
+`none`; only `gone` matters); never re-derive them. An exit status of 2 or 3 from `camp status`
+reports pending or failed provisioning, not a failed probe: the JSON still carries the fields. In
+vanilla usage, compute the same two facts directly: `git rev-list --count HEAD..<base>` for how far
+behind, and `git for-each-ref --format='%(upstream:track)' refs/heads/<branch>` for the upstream —
+only the literal `[gone]` means the upstream is gone; `[behind N]`, `[ahead N]`, or empty output (in
+sync, or no upstream configured) does not.
+
+**Verdict.** A repo with `behind == 0` (ahead is fine) and an upstream that is not gone passes, and
+the run continues. Otherwise the run stops here — before the claim on a fresh run, before the next
+dispatch on a resumed one — and reports one line per stale repo naming the member, `behind=N` and/or
+`upstream gone`, followed by the fix. For `behind`: `camp rebase` in a camp workspace (it rebases
+every member worktree onto `origin/main` by default; `camp rebase --onto <base>` when a member's
+base is something else), or `git fetch <remote> && git rebase <base>` in vanilla usage. For
+`upstream gone`: the remote branch was deleted; once the operator confirms that was intended,
+`git branch --unset-upstream` in that repo clears it — a rebase does not. The upstream check reads
+the branch's own tracking ref and the base is never derived from it, so a gone upstream and an
+unresolvable base are separate findings with separate fixes.
+
+**A fetch failure is not a stop by itself.** When the fetch exits non-zero but the base ref still
+resolves locally, compare against the cached ref and apply the verdict above to that comparison,
+adding "fetch failed" to that repo's report line either way — so a repo that passes on the cached
+ref still gets one line saying its fetch failed, rather than passing silently. When the base ref
+does not resolve at all there is nothing to compare against: stop and say so. A `null` `behind` from
+`camp status --json` is that case, or a member worktree directory that is missing — the report says
+which after `ls`-ing the path.
+
+**The design-doc check.** On the parent-with-children shape only, read the parent's label
+structurally — `lore record show task/<parent-name> --vault <elected-vault> --json` →
+`.sidecar.labels["craft/design-doc"]`, the same read the resume path uses for its boundary label;
+the plain render prints the body only and shows no labels. When the label is present, validate its
+value against the same shape, leading-slash, `..`-segment, and inside-the-working-directory rules
+the state-coverage gate applies to that same label at close (Phase 6), anchored where that gate
+anchors: the working directory the run started in, which is the repository working directory the
+label's path is relative to. The check never picks a member worktree on its own — a session that
+starts at a workspace root rather than inside the target repository resolves the path against a
+directory that is not a git repository, and that is reported as the stop, not guessed around. A
+value that fails validation, or names a file that does not exist there, is reported and stops, the
+same way the close gate treats it. A parent with no `craft/design-doc` label passes this check: a
+plan with no enumerated states has no design doc. Once the value is validated, run
+`git -C <working-directory> ls-files --error-unmatch <path>` and
+`git -C <working-directory> diff --quiet HEAD -- <path>`. Untracked — stop here, before the claim on
+a fresh run or before the next dispatch on a resumed one — and report the path with the remedy:
+commit it — plan's step 6.5 owns that commit; re-run it or commit by hand. Tracked with uncommitted
+changes — stop the same way, with "commit by hand" as the remedy, since a mid-run edit to the doc is
+this run's own work and plan's step is not the one to re-run for it. Tracked and unchanged — pass.
+Run this check in the same pass as the drift read so one stop reports every finding, drift lines and
+the design-doc line together, rather than surfacing the doc only after the operator has rebased.
+Execute never commits the design doc itself, so plan's step 6.5 stays its one owner.
 
 ### Claiming the run at first dispatch
 

@@ -365,6 +365,29 @@ class TestCampStatusTwoFacts:
         i_member = next(idx for idx, line in enumerate(lines) if line.startswith("  repo_a"))
         assert i_header < i_member
 
+    def test_missing_worktree_line_is_byte_identical_to_before_drift(self, cli_env):
+        """A member with no worktree yet (seed_pending_workspace never runs
+        `git worktree add`) has nothing to report drift on — its ahead/behind
+        come back null and its line carries no drift suffix at all."""
+        self._seed_two_facts(
+            cli_env,
+            "twf9",
+            {
+                "repo_a": {"provision_state": "ready", "work_state": "ready"},
+                "repo_b": {"provision_state": "ready", "work_state": "ready"},
+            },
+        )
+        r = _camp(cli_env, "status", "--group", "mygroup", "--name", "twf9")
+        lines = r.stdout.splitlines()
+        assert "  repo_a: ready / work: ready" in lines
+        assert "  repo_b: ready / work: ready" in lines
+
+        r_json = _camp(cli_env, "status", "--group", "mygroup", "--name", "twf9", "--json")
+        report = json.loads(r_json.stdout)
+        by_name = {m["name"]: m for m in report["members"]}
+        assert by_name["repo_a"]["ahead"] is None
+        assert by_name["repo_a"]["behind"] is None
+
 
 class TestCampSetupActivatePhaseRetry:
     """End-to-end (real subprocess CLI) coverage for camp setup's

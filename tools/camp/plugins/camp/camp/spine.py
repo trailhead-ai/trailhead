@@ -711,8 +711,11 @@ def cmd_sync(args: list[str], dry_run: bool = False) -> None:
     SAFE BY DEFAULT: dirty or off-main siblings are SKIPPED.
     --force reproduces the legacy reset behavior.
 
-    Currently operates on the trailhead repo only; operating on group-config
-    members is future work.
+    This is the no-group path — the standalone fallback used when no group
+    config resolves for cwd, so there is nothing to iterate but the trailhead
+    repo itself. Group usage is served by
+    `camp.provision.lifecycle.cmd_sync_group`, which syncs every member of the
+    resolved group.
     """
     parser = CampParser(verb="sync")
     parser.add_argument("--json", action="store_true")
@@ -723,7 +726,8 @@ def cmd_sync(args: list[str], dry_run: bool = False) -> None:
     force = parsed.force
 
     workspace_root = _workspace_root()
-    # Currently trailhead only; group members are a future expansion.
+    # No-group path: trailhead only. A resolved group iterates its own
+    # members via cmd_sync_group instead of reaching this body.
     sibling_repos = [("trailhead", workspace_root / "trailhead")]
 
     siblings: dict[str, Any] = {}

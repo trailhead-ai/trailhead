@@ -25,8 +25,9 @@ Schema:
                                          # step's cmd; retry-cleanup run before the task
                                          # re-runs; absent means None, not "run nothing"
   capability = "..."                    # optional; single string, stated as a capability
-                                         # consequence for an agent still waiting on this
-                                         # task; absent means None, not ""; the SessionStart
+                                         # consequence for an agent whose session starts
+                                         # while this task (either phase) is outstanding or
+                                         # failed; absent means None, not ""; the SessionStart
                                          # capability report uses it verbatim when declared
 
   [[tasks.graphify.steps]]
@@ -817,8 +818,10 @@ def _parse_tasks(raw: Any, path: Path) -> dict[str, dict[str, Any]]:
     versus "run nothing").
 
     `capability` is an optional plain string naming the capability consequence
-    of this task still being outstanding (e.g. "the code-review-graph MCP
-    server has no graph yet — prefer Grep/Glob until told otherwise"),
+    of this task, in either phase, being outstanding or failed (e.g. "the
+    code-review-graph MCP server has no graph yet — prefer Grep/Glob until
+    told otherwise", "docker is unavailable — container-backed suites cannot
+    run here"),
     validated the same way as other single-string fields (non-blank string or
     a config error naming the task). Absent means None, not "". The
     SessionStart capability report uses it verbatim in place of its generic

@@ -74,12 +74,21 @@ def _cmd_status_group_cli(
     stdout, which additionally carries `work_code` — the same 0/2/3-style
     rollup over work-readiness, exposed for a consumer that reads only the
     exit code and wants that fact too without it ever changing the exit code.
+    Each member in the JSON report also carries the branch-drift facts the
+    text suffix below is rendered from — `branch`, `base`, `ahead`, `behind`
+    (`null` when the worktree is absent or `base` does not resolve locally),
+    and `upstream` (`ok` / `gone` / `none`) — always present on this path.
 
     Text output is line-oriented and STABLE for agent parsing, workspace
     rollup first, then per-member, then per-task detail:
         camp status: <slug> — <header>
-          <member>: <provision_state> / work: <work_state>[ (<reason>)]
+          <member>: <provision_state> / work: <work_state>[ (<reason>)][ [behind N]][ [ahead N]][ [upstream gone]]
             <task-name>: <state>          # one per task, manifest insertion order
+
+    The bracketed drift suffix appears only for a member that actually has
+    drift — `behind`/`ahead` > 0, or `upstream == "gone"` — in that order; a
+    clean member's line renders exactly as before. Drift never changes the
+    exit code.
 
     <header> is derived from both facts (see provision.lifecycle.status_header):
     "ready", "ready, work pending", "ready, work failed", "provisioning", or
@@ -130,7 +139,7 @@ def _cmd_status_group_cli(
     # is dropped doing so — the explicit collision is already refused above.
     if slug is not None and not parsed.stale:
         try:
-            code, report = provision_status_code(group, slug, env=env)
+            code, report = provision_status_code(group, slug, env=env, drift=True)
         except Exception as e:
             print(f"camp status: {e}", file=sys.stderr)
             sys.exit(1)
@@ -143,6 +152,12 @@ def _cmd_status_group_cli(
                 line = f"  {m['name']}: {m['provision_state']} / work: {m['work_state']}"
                 if m.get("reason"):
                     line += f" ({m['reason']})"
+                if m.get("behind"):
+                    line += f" [behind {m['behind']}]"
+                if m.get("ahead"):
+                    line += f" [ahead {m['ahead']}]"
+                if m.get("upstream") == "gone":
+                    line += " [upstream gone]"
                 print(line)
                 for task_name, info in (m.get("tasks") or {}).items():
                     print(f"    {task_name}: {info.get('state', '?')}")

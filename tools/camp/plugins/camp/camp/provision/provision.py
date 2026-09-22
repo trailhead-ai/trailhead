@@ -35,6 +35,7 @@ from ..group.manifest import (
     carry_forward_owner,
     manifest_path_for,
     owner_of,
+    work_state_for_new_entry,
     workspace_dir,
     write_central_manifest,
 )
@@ -133,7 +134,12 @@ def seed_pending_workspace(
     re-run of camp ai does not reset a ready member back to pending. Same
     posture for the workspace-level "owner" key: a manifest that already
     carries one keeps it unchanged; only a workspace whose ownership was
-    never recorded gets stamped.
+    never recorded gets stamped. A member's "work_state" is carried forward
+    the same way (via manifest.work_state_for_new_entry) — and a member with
+    no activate-phase task and no prior "work_state" is seeded straight to
+    "not-applicable" rather than the absent-reads-as-pending default, since
+    the async `camp setup --background` provisioner that eventually flips
+    "provision_state" never touches "work_state" itself.
 
     By default (owner=None) a freshly stamped workspace is stamped with THIS
     host's own declared name — the self-stamping every existing caller relies
@@ -194,6 +200,9 @@ def seed_pending_workspace(
             }
             if prior and prior.get("reason"):
                 entry["reason"] = prior["reason"]
+            new_work_state = work_state_for_new_entry(member, prior)
+            if new_work_state is not None:
+                entry["work_state"] = new_work_state
             member_entries.append(entry)
 
         manifest_data: dict[str, Any] = {

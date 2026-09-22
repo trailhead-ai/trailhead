@@ -1990,3 +1990,248 @@ fire.** The edited rule and the seven rebuilt live arms ship as committed.
 tools/outpost/tests trailhead/tests/test_eval_corpus.py trailhead/tests/test_install.py -q` — 171
 passed. `ruff check tools` — all checks passed (pre-existing unrelated `# noqa` warning in
 `tools/lore/plugins/lore/lore/cli/init.py`, outside this task's footprint).
+---
+
+## Case: execute-preflight-refuses-stale-base
+
+`plugins/craft/evals/execute-preflight-refuses-stale-base/` — fixture, and `expected.md` carrying
+the pass condition, written before any arm was run.
+
+**Under test:** the new `### Workspace preflight` step added to `## The Loop` in
+`plugins/craft/skills/_shared/execute.md`, immediately before `### Claiming the run at first
+dispatch` — a check that refuses to claim or dispatch against a repo whose branch is stale
+against its base, naming the fix rather than rebasing on its own.
+
+**Fixture.** `fixtures/make-fixture-repo.sh <behind|upstream-gone|current|fetch-failed> <dest>`
+materialises a real vanilla-path git repo with a local `origin` clone source, plus
+`fixtures/task-ready.md`, a minimal standalone `ready` task naming a one-line `README.md` edit,
+held constant across all four variants:
+
+| Variant | Git state | Expected verdict |
+|---|---|---|
+| `behind` | branch `work` is 3 commits behind `origin/main` (on an unrelated file, so the citation-resolution gate stays clean) | STOP, `behind=3`, fix named |
+| `upstream-gone` | `branch.work.merge` points at a ref never pushed to `origin` | STOP, upstream gone named |
+| `current` | `work` == `origin/main` | PROCEED |
+| `fetch-failed` | cached `origin/main` present from the clone; `origin`'s URL then repointed at a nonexistent path so a fresh fetch fails | PROCEED, against the cached ref, fetch failure named in the report |
+
+**First authoring error, corrected before any counted run.** The initial `behind` fixture had the
+three upstream commits append to `README.md` — the same file the task's `Files:` cites. Against
+the baseline (pre-change) prose this triggered the *existing*, unrelated citation-resolution gate
+(the standalone-`ready` re-citation check that already ships), which stopped for a different
+reason than the property under test and would have registered as a false RED-state failure. Fixed
+by moving the upstream commits in the `behind` variant to an `UNRELATED.md` file the task never
+cites, isolating branch staleness from the citation gate. Recorded as an authoring error, not a
+result, per the precedent in `compound-criterion-detection` fixture 2 and
+`gate-reads-the-evidence-artifact`'s negative-fixture correction.
+
+**Dispatch.** Per `docs/eval-protocol.md` — the clean-room `claude` process form *is* runnable
+from this session (`claude --setting-sources project --allowedTools ... --append-system-prompt
+<prose>`), so it was used rather than falling back to a subagent. Each of the 8 runs (4 variants x
+2 arms) executed inside `scripts/eval-sandbox <run-dir> -- claude -p ... < /dev/null`, with the
+fixture repo built fresh inside `<run-dir>` (outside the sandbox, since the sandbox's read
+allow-list does not cover this checkout's path under `~/.local/state`) before the confined `claude`
+process ran against it. One run per variant per arm (8 total), per this task's stated scope — not
+the multi-run-per-arm norm the protocol recommends for measuring inconsistency; a single run per
+cell is an anecdote about that run, not a statement about variance across runs. All 8 processes
+exited 0.
+
+**Baseline: `git show 93a83d42:.../execute.md`** (pre-change, no `### Workspace preflight`
+section). **Treatment: the worktree copy** (with the section added).
+
+| Variant | Baseline verdict | Treatment verdict |
+|---|---|---|
+| `behind` | PROCEED | **STOP** — `behind=3`, freshly-fetched base, fix (`git fetch origin && git rebase origin/main`) named |
+| `upstream-gone` | PROCEED | **STOP** — upstream gone (`origin/deleted-branch`), fix named |
+| `current` | PROCEED | PROCEED |
+| `fetch-failed` | PROCEED | PROCEED — fetch failure named in the report, verdict driven by the cached `origin/main` (`behind=0`) |
+
+**RED state (baseline), as expected.md predicted.** All four baseline runs PROCEED, including
+`behind` (`behind=3`) and `upstream-gone` — the pre-change document has no drift check, so nothing
+stops the run before the claim. This is the required RED state: conditions 1 and 2 of `expected.md`
+fail on baseline (as predicted), conditions 3 and 4 pass (there was never a stop to regress).
+
+**GREEN state (treatment), matching every condition in `expected.md`.** `behind` and
+`upstream-gone` STOP before any claim/dispatch, each naming the repo, the specific drift fact, and
+the fix command, and stating (unprompted, matching the prose's own wording) that execute does not
+rebase on its own because another session may hold the branch. `current` and `fetch-failed`
+PROCEED; `fetch-failed`'s report explicitly names the fetch failure and explains it read the
+cached ref rather than treating the fetch failure itself as a stop — exactly condition 4's
+distinction between "fetch failed" and "fetch failed and the base doesn't resolve".
+
+**Result: all 4 variants pass, at both arms, in full.** The pre-registered pass condition (the
+conjunction across all four variants) holds for the treatment arm; the pre-registered RED state
+holds for the baseline arm. No falsification.
+
+**Limitations, from `expected.md`, confirmed as run:** one run per variant per arm (no
+inconsistency measurement); the dispatch used the clean-room `claude` process form (this session
+could run it, so the subagent fallback in this task's own dispatch instructions was not needed);
+only the vanilla-usage enumeration branch is exercised — the `camp status --json` /
+camp-workspace branch is not covered by this fixture set.
+
+### Revision 2 runs
+
+Prose SHA `f095ad9f` (`fix(craft): make the workspace preflight unambiguous on resume, base
+remote, fetch failure and vanilla sources`) — a correctness review of `74b32bd0` returned
+`FIX_FIRST` on prose ambiguities (resumed runs, the fetch's remote, the contradictory
+fetch-failed rule, unstated vanilla branch/base sources, an undefined on-failure action for a
+value that fails the safe-value shape) and a `fetch-failed` fixture that could not discriminate
+"reported the failure and stopped on the cached ref" from "ignored drift because the fetch
+failed." The fixes and the revised `fetch-failed` fixture (cached `origin/main` now 2 commits
+ahead before the remote is repointed) are recorded as **Revision 2** in `expected.md`, written
+before any of these runs. Conditions 1–3 and their fixture variants are unchanged; only condition
+4 and the `fetch-failed` fixture changed.
+
+**Dispatch.** Same clean-room form as before: `scripts/eval-sandbox <run-dir> -- claude -p ...
+--setting-sources project --allowedTools "Bash,Read,Glob,Grep" --append-system-prompt <prose> <
+/dev/null`, fixture built fresh per run into a new `<run-dir>` (the script now refuses to
+overwrite an existing destination). One run per cell: treatment on all four variants against
+`f095ad9f`; baseline (`git show 93a83d42:.../execute.md`, unchanged) on `fetch-failed` only, per
+Revision 2's stated run plan. Two of the six dispatched processes (`treatment/behind` and
+`baseline/fetch-failed`, first attempts) returned a transient `API Error: 529 Overloaded` with no
+model output at all — an infra failure, not a run that went red or green — and were discarded and
+re-dispatched once each; both retries returned a normal verdict. The counted results below are
+one run per cell (8 dispatches: 2 discarded as infra errors, 6 counted results including the 2
+retries).
+
+A later commit (`d347b77b`) revised the section's wording after these runs — the base is pinned to
+the configured base rather than the branch's upstream, and the fix commands name the base's remote.
+The runs above are not repeated against it: every fixture variant is cut with
+`git checkout -b work origin/main`, so upstream and configured base coincide and no variant can
+tell the two wordings apart. A fixture whose branch tracks itself is what would.
+
+| Variant | Baseline (`93a83d42`) | Treatment (`f095ad9f`) |
+|---|---|---|
+| `behind` | — (not re-run; unaffected by Revision 2) | **STOP** |
+| `upstream-gone` | — (not re-run; unaffected by Revision 2) | **STOP** |
+| `current` | — (not re-run; unaffected by Revision 2) | **PROCEED** |
+| `fetch-failed` | **PROCEED** | **STOP** |
+
+**Verbatim stop lines:**
+
+- `behind` (treatment): "Workspace preflight failed — stopping before claiming the run. No task
+  status was written and no build agent was dispatched; `task/fixture-add-a-readme-line` is
+  untouched at `ready`." followed by "`repo` (branch `work`, base `origin/main`) — behind=3" and
+  the fix `git -C repo fetch origin && git -C repo rebase origin/main`.
+- `upstream-gone` (treatment): "Workspace preflight failed — stopping before claiming the run. No
+  dispatch was made and the task record `task/fixture-add-a-readme-line` is untouched (still
+  `ready`)." followed by "repo: branch `work`, behind=0, upstream gone (`origin/deleted-branch`
+  no longer exists on the remote; fetch succeeded)" and the fix
+  `git -C repo branch --unset-upstream` (explicitly not `camp rebase`, matching the prose's
+  revised fix for this case).
+- `fetch-failed` (treatment): "Workspace preflight failed — stopping before claiming the run;
+  nothing was written and no agent was dispatched." followed by "`repo` (branch `work`): behind=2,
+  fetch failed — `git fetch origin` exited 128 ... The base ref still resolved locally
+  (`origin/main` = `c0e3f95`), so drift was read against that cached ref: HEAD is 2 commits behind
+  it. Upstream is not gone (`[behind 2]`, not `[gone]`)." — both halves of revised condition 4
+  present in one report: the fetch failure named, and a stop derived from `behind=2` against the
+  cached ref, not from the fetch alone.
+- `current` (treatment): terse pass, `VERDICT: PROCEED / MESSAGE: none` — the `-p` dispatch format
+  requested exactly that shape on a pass, so no prose reasoning was captured for this cell (see
+  limitations below).
+- `fetch-failed` (baseline): `VERDICT: PROCEED / MESSAGE: none` — the pre-change prose has no
+  preflight step, so nothing in it inspects the fetch or the cached ref; this is the unchanged RED
+  expectation Revision 2 states for baseline.
+
+**Grading against Revision 2: full match, no falsification.** `behind` -> STOP behind=3;
+`upstream-gone` -> STOP with `[gone]` named and the `--unset-upstream` fix (not `camp rebase`);
+`current` -> PROCEED; `fetch-failed` (treatment) -> STOP behind=2 with the fetch failure named,
+satisfying the revised condition 4's full conjunction (reports the failure **and** stops with a
+`behind` count from the cached ref, not from the fetch alone); `fetch-failed` (baseline) ->
+PROCEED, matching Revision 2's unchanged baseline expectation.
+
+**The two side questions the dispatch asked about, honestly answered:**
+
+- **Does `current` rely on `[gone]`-only semantics for the upstream check?** Not independently
+  verifiable from this cell's own transcript: the `-p` dispatch format suppressed reasoning on a
+  clean PROCEED, so there is no quoted evidence of which upstream-track value `current`'s run saw
+  or how it read it. Inferred rather than observed: `current`'s fixture leaves the branch with a
+  normal (non-deleted) upstream, `upstream-gone`'s companion run in this same batch explicitly
+  quoted `[gone]` as the disqualifying value and treated `[behind N]` as non-disqualifying, and no
+  run in this corpus (this one or the original 8) has ever produced a false stop on a repo whose
+  `for-each-ref` output is empty or `[behind N]`. That is corroborating, not confirming, evidence
+  for `current` specifically — recorded as a limitation, not resolved as a fact.
+- **Does the treatment name the vanilla branch/base source it used?** Mixed across the three STOP
+  cells: `fetch-failed`'s report explicitly named the derivation ("base `origin/main` (the
+  branch's configured upstream)"), matching the prose's revised vanilla-sources rule; `behind`'s
+  and `upstream-gone`'s reports named the branch and base *values* (`work`, `origin/main`) but not
+  the derivation rule behind them. One of three counted STOP cells shows the source explicitly; the
+  other two are silent on it rather than wrong about it.
+
+**Limitations.** One run per cell (two cells needed a retry after an unrelated `529 Overloaded`
+infra error — the retries are the counted results, and the discarded first attempts produced no
+model output to grade either way). Per Revision 2's own stated run plan, `behind`, `upstream-gone`,
+and `current` were not re-run on baseline — that arm's expectation for those three variants is
+carried over unchanged from the original 8-run entry above, not re-measured here. The `current`
+cell's internal reasoning is unobserved for the reason stated above, which limits how strongly the
+`[gone]`-only-semantics question can be answered from this batch alone.
+
+### Revision 3 runs
+
+Extends this case to the design-doc-ownership task's new "design-doc check" sub-step of `###
+Workspace preflight` (`**The design-doc check.**`, `execute.md:304-313`), on the
+parent-with-children shape only. New fixture `fixtures/task-parent-design-doc.md` — a parent task
+with two children carrying `craft/design-doc=docs/design/fixture-slice.md` — plus two new
+`make-fixture-repo.sh` variants built on the same drift-free git state as `current`:
+`design-doc-untracked` (the labeled file written but never staged) and `design-doc-tracked` (the
+same file committed). Pre-registered in `expected.md`'s "Revision 3" before any run.
+
+**Dispatch.** Same clean-room form as Revisions 1-2: `scripts/eval-sandbox <run-dir> -- claude -p
+... --setting-sources project --allowedTools "Bash,Read,Glob,Grep" --append-system-prompt <prose>
+< /dev/null`, fixture repo built fresh inside each `<run-dir>` before the confined process ran. One
+run per cell (2 variants x 2 arms = 4). Baseline: `git show 5f41cef2:.../execute.md` (this task's
+stated base commit — it carries the `### Workspace preflight` section with the drift rules, and no
+design-doc check, so the arms differ in exactly that sub-step). Treatment: the worktree copy (with the design-doc check added). The dispatch
+told the agent it was evaluating only the design-doc check sub-step, with drift stipulated already
+clean, so the earlier branch/base check in the same section could not confound this measurement.
+All 4 processes exited 0; no discards.
+
+| Variant | Baseline (`5f41cef2`) | Treatment (worktree) |
+|---|---|---|
+| `design-doc-untracked` | PROCEED | **STOP** |
+| `design-doc-tracked` | PROCEED | PROCEED |
+
+**Verbatim verdict lines:**
+
+- `design-doc-untracked` (baseline): `VERDICT: PROCEED` / `MESSAGE: No "**The design-doc check.**"
+  paragraph exists in this copy's Workspace preflight (or anywhere in execute.md), so nothing there
+  reads craft/design-doc; with drift already passing, the run proceeds to the claim — though the
+  fixture's docs/design/fixture-slice.md is untracked (?? docs/) and would slip through to Phase
+  6's existence-only state-coverage gate.`
+- `design-doc-untracked` (treatment): `VERDICT: STOP` / `MESSAGE: Design-doc check fails —
+  docs/design/fixture-slice.md exists but is untracked in ./repo; commit it (plan's step 6.5 owns
+  that commit) before the run claims.` — full report quoted the paragraph's own disposition
+  ("Untracked — stop here, before the claim on a fresh run or before the next dispatch on a resumed
+  one") and the exact message it would emit: "Workspace preflight stopped: the parent's
+  craft/design-doc label names docs/design/fixture-slice.md, which exists in ./repo but is
+  untracked by git (git ls-files --error-unmatch exited 1; only README.md is tracked). Remedy:
+  commit it — plan's step 6.5 owns that commit; re-run it or commit by hand. Execute never commits
+  the design doc itself."
+- `design-doc-tracked` (baseline): `VERDICT: PROCEED` / `MESSAGE: No "**The design-doc check.**"
+  paragraph exists in ### Workspace preflight (only craft/design-doc mentions are in Phase 6's
+  close-time state-coverage gate), so no such check applies; with drift stipulated clean the run
+  proceeds to the claim — and incidentally the labeled path docs/design/fixture-slice.md is tracked
+  in ./repo, so the check would have passed even if present.`
+- `design-doc-tracked` (treatment): `VERDICT: PROCEED` / `MESSAGE: Design-doc label validated and
+  docs/design/fixture-slice.md is tracked (git ls-files --error-unmatch exit 0), so the check
+  passes and the run continues to the claim.`
+
+**RED state (baseline), as expected.md's Revision 3 predicted.** Both baseline runs PROCEED,
+including `design-doc-untracked` — `5f41cef2`'s `execute.md` carries the Workspace preflight
+section but nothing in it inspects `craft/design-doc` (the runs' own messages say so: "No ...
+paragraph exists in this copy's Workspace preflight").
+
+**Limitation, recorded after review:** the parent fixture carries the label as a body line rather
+than sidecar data, so neither arm exercises the label read the prose prescribes (`--json` →
+`.sidecar.labels`); the variants pin the git half of the check only. Condition 1 fails on baseline as predicted;
+condition 2 passes (there was never a stop to regress).
+
+**GREEN state (treatment), matching Revision 3 in full.** `design-doc-untracked` STOPs before the
+claim naming the path and the plan-step-6.5 remedy; `design-doc-tracked` PROCEEDs. Both conditions
+of Revision 3's pass condition hold.
+
+**Result: both variants pass, at both arms, in full.** No falsification.
+
+**Limitations.** One run per cell, no discards needed. Only the design-doc check sub-step was
+exercised in isolation (drift stipulated clean in the dispatch prompt) — the interaction between
+the branch/base drift check and the design-doc check running back to back in the same preflight
+pass is not covered by this corpus.
