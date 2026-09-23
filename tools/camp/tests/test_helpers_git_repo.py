@@ -13,10 +13,12 @@ helper's cheap path honest about what it produced.
 """
 from __future__ import annotations
 
+import os
+import shutil
 import subprocess
 from pathlib import Path
 
-from ._helpers import init_git_repo
+from ._helpers import _clone_template, init_git_repo
 
 
 def _git(repo: Path, *args: str) -> subprocess.CompletedProcess:
@@ -82,3 +84,38 @@ def test_two_repos_are_independent_histories_not_shared_state(tmp_path):
     assert _git(b, "rev-list", "--count", "HEAD").stdout.strip() == "1"
     assert not (b / "only-in-a.txt").exists()
     assert _git(b, "remote", "get-url", "origin").stdout.strip() == str(b)
+
+
+def test_clone_survives_a_lock_file_vanishing_mid_copy(tmp_path, monkeypatch):
+    """Regression test for a race between `_clone_template` and git's own
+    background maintenance.
+
+    Git can create and then remove a `.git/objects/maintenance.lock` file
+    while a copy of the template is in flight: the file is present when
+    `shutil.copytree` lists the directory but gone by the time it tries to
+    open it, which raises `shutil.Error` unless lock files are left out of
+    the copy. Simulate the vanish directly — a lock file that raises
+    `FileNotFoundError` the moment something tries to copy it — and confirm
+    the clone still succeeds with a fully working repo.
+    """
+    template = tmp_path / "template"
+    init_git_repo(template)
+    (template / ".git" / "objects" / "maintenance.lock").write_text("")
+
+    real_copy2 = shutil.copy2
+
+    def vanishing_copy2(src, dst, *args, **kwargs):
+        if os.fspath(src).endswith(".lock"):
+            raise FileNotFoundError(src)
+        return real_copy2(src, dst, *args, **kwargs)
+
+    # `_clone_template` passes `copy_function=shutil.copy2` explicitly (rather
+    # than relying on `copytree`'s own default) precisely so this patch is
+    # observable; see the comment at its call site.
+    monkeypatch.setattr(shutil, "copy2", vanishing_copy2)
+
+    dest = tmp_path / "clone"
+    _clone_template(template, dest)
+
+    assert not (dest / ".git" / "objects" / "maintenance.lock").exists()
+    assert _git(dest, "rev-parse", "HEAD").returncode == 0
