@@ -23,7 +23,10 @@ Inside that directory:
   that is what lets it sign with no agent and no tty.
 - :data:`ALLOWED_SIGNERS_FILENAME` (``allowed_signers``) — the allowed-signers
   file `gpg.ssh.allowedSignersFile` points at, written beside the key
-  configuration.
+  configuration. Each line carries a `namespaces="git"` option, restricting
+  the entry to the signature namespace git itself signs commits under, so it
+  can never also validate a signature made for an unrelated purpose with the
+  same key.
 
 Enabling and inspecting this configuration (``lore signing enable``/
 ``status``) is a separate module's job; this one only reads what is there.
@@ -31,10 +34,13 @@ Enabling and inspecting this configuration (``lore signing enable``/
 **The override contract.** :func:`apply_env_overrides` is the single function
 every signing call site uses. It returns *base_env* unchanged — same content,
 so a caller that always calls it sees no behavioral difference from not
-calling it at all — whenever :func:`load_key_path` returns ``None`` or the
-returned path does not name an existing file: a missing, absent, malformed, or
-dangling configuration means git runs exactly as it does with no configuration
-at all, honoring the adopter's own signing setup. When a usable key is
+calling it at all — whenever :func:`load_key_path` returns ``None``, the
+returned path does not name an existing regular file, or that file's mode is
+wider than ``0600``: a missing, absent, malformed, dangling, or over-wide
+configuration means git runs exactly as it does with no configuration at all,
+honoring the adopter's own signing setup — the same condition
+``describe_status`` already refuses with a ``chmod`` remedy, so this hot path
+must agree rather than sign with a key ``status`` calls broken. When a usable key is
 present, it appends five entries (``gpg.format=ssh``, ``user.signingkey=<key
 path>``, ``commit.gpgsign=true``, ``gpg.ssh.allowedSignersFile=<allowed-signers
 path>``, ``gpg.ssh.program=ssh-keygen``) after whatever ``GIT_CONFIG_*``
@@ -54,6 +60,16 @@ some ``i`` below the count) that is not actually present: git itself aborts
 every config read with "fatal: unable to parse command-line config" against
 such a gap, so trusting it would break every git call this module makes, not
 just signing.
+
+**A key must never live inside a vault.** ``lore sync``'s untracked-file
+allowlist auto-stages new content under a record-kind directory or ``sites/``
+inside any configured vault, so a key placed there would be committed and
+pushed, leaking it. :func:`validate_adoptable_key` refuses to adopt such a
+path (checked against the RESOLVED path, following symlinks), and
+:func:`describe_status` reports an already-configured key sitting inside a
+vault as failing, even though ``enable --key`` itself is the only path that
+would normally reach that state and already refuses it — a hand-edited
+configuration must be caught the same way.
 
 **A limit this module cannot fix.** A parent process that already invoked
 ``git -c key=value`` encodes that override in ``GIT_CONFIG_PARAMETERS``, a
@@ -157,9 +173,19 @@ def load_key_path(env: "dict | None" = None) -> "Path | None":
 
 
 def _override_entries(env: "dict | None" = None) -> "list[tuple[str, str]] | None":
-    """Return the four override entries, or ``None`` if no usable key exists."""
+    """Return the four override entries, or ``None`` if no usable key exists.
+
+    "Usable" requires mode no wider than ``0600`` in addition to existing as a
+    regular file: a key widened to, say, ``0644`` is exactly the state
+    ``describe_status`` already refuses with a ``chmod`` remedy, and this hot
+    path must agree — applying the override anyway would sign with a key
+    ``status`` calls broken, and silently succeeding would hide the drift
+    from the operator who never sees a failure to investigate.
+    """
     key_path = load_key_path(env)
     if key_path is None or not key_path.is_file():
+        return None
+    if stat.S_IMODE(key_path.stat().st_mode) & 0o077:
         return None
     allowed_signers = signing_dir(env) / ALLOWED_SIGNERS_FILENAME
     return [
@@ -175,8 +201,12 @@ def _inherited_git_config_count(base_env: dict) -> int:
     """Return the trustworthy inherited ``GIT_CONFIG_COUNT``, or ``0``.
 
     ``0`` covers "absent" as well as "malformed": non-numeric, negative, or
-    claiming an entry (some ``GIT_CONFIG_KEY_<i>`` for ``i`` below the count)
-    that is not actually present in *base_env*. That last case is not a
+    claiming an entry (some ``GIT_CONFIG_KEY_<i>`` or ``GIT_CONFIG_VALUE_<i>``
+    for ``i`` below the count) that is not actually present in *base_env*.
+    Both halves of the pair are checked — a count that claims a key with no
+    matching value is exactly as fatal to git's own parser as a missing key,
+    since it is the same "no entry at this index" gap either way. That last
+    case is not a
     theoretical nicety — git itself refuses to read ANY config, for this call
     or any other, against a ``GIT_CONFIG_COUNT`` with a gap in its indices
     ("fatal: unable to parse command-line config"), so an ungapped count is
@@ -195,7 +225,7 @@ def _inherited_git_config_count(base_env: dict) -> int:
     if count < 0:
         return 0
     for i in range(count):
-        if f"GIT_CONFIG_KEY_{i}" not in base_env:
+        if f"GIT_CONFIG_KEY_{i}" not in base_env or f"GIT_CONFIG_VALUE_{i}" not in base_env:
             return 0
     return count
 
@@ -277,6 +307,73 @@ def _fingerprint(path: Path) -> "str | None":
     return result.stdout.strip()
 
 
+def _configured_vault_roots(env: "dict | None" = None) -> "list[tuple[str, Path]]":
+    """Return ``[(vault name, vault root), …]`` for every vault this host
+    knows about — the vault-side equivalent of ``cli/common.py``'s
+    ``_resolve_all_vaults``, duplicated here rather than imported for the
+    same reason :func:`signing_dir` duplicates its own state-dir resolver:
+    this module lives under ``vault/`` and must not import from ``cli/``
+    (see the module docstring's note on the import direction).
+
+    Used only to refuse or flag a signing key that sits inside a vault
+    working tree: such a key is auto-staged by ``lore sync``'s untracked
+    allowlist (a record-kind directory, or ``sites/``) and pushed to the
+    vault's remote, leaking the private key.
+    """
+    from . import config as vault_config_mod
+
+    config_path = vault_config_mod._resolve_config_path(env=env)
+    floor = [("default", Path(vault_config_mod.resolve_active_vault(env=env)))]
+    if not config_path.exists():
+        return floor
+    try:
+        vaults = vault_config_mod.load_config(str(config_path), env=env)
+    except (vault_config_mod.VaultConfigError, OSError, ValueError):
+        return floor
+    return [(v.name, Path(v.path)) for v in vaults]
+
+
+def _vault_containing(path: Path, env: "dict | None" = None) -> "tuple[str, Path] | None":
+    """Return ``(vault name, resolved vault root)`` when *path* — resolved,
+    following symlinks — lies at or inside any configured vault's working
+    tree; ``None`` otherwise.
+
+    A segment-wise containment check (``Path.resolve()`` plus membership in
+    ``.parents``), never a string-prefix comparison: a vault rooted at
+    ``/data/vault`` must not treat ``/data/vault-other`` as contained within
+    it, which a naive ``str.startswith`` would.
+    """
+    resolved = path.resolve()
+    for name, root in _configured_vault_roots(env):
+        try:
+            root_resolved = root.resolve()
+        except OSError:
+            continue
+        if resolved == root_resolved or root_resolved in resolved.parents:
+            return name, root_resolved
+    return None
+
+
+def _classify_key_path(path: Path) -> str:
+    """Return ``"present"``, ``"missing"``, or ``"unreadable"`` for *path*.
+
+    ``Path.is_file()`` returns ``False`` both when *path* does not exist and
+    when a ``PermissionError`` prevents even stat'ing it (a behavior change
+    in Python 3.14) — collapsing "there is no key here" into "there is a key
+    here this process cannot see". Left uncorrected, an adopted key sitting
+    in a directory this process cannot read would look identical to no key
+    being configured at all, and a bare ``enable`` would silently fall back
+    to generating or switching to a different key instead of refusing.
+    """
+    try:
+        st = path.stat()
+    except FileNotFoundError:
+        return "missing"
+    except PermissionError:
+        return "unreadable"
+    return "present" if stat.S_ISREG(st.st_mode) else "missing"
+
+
 def _absolute_expanded(raw: "str | Path") -> Path:
     """Expand ``~`` and make *raw* absolute, without resolving symlinks.
 
@@ -287,21 +384,38 @@ def _absolute_expanded(raw: "str | Path") -> Path:
     return Path(os.path.abspath(expanded))
 
 
-def validate_adoptable_key(raw: "str | Path") -> Path:
+def validate_adoptable_key(raw: "str | Path", env: "dict | None" = None) -> Path:
     """Return *raw*, expanded/absolute, after confirming it is adoptable.
 
     Raises :class:`SigningEnableError` — naming the reason and the remedy —
-    for a path that is missing, not a regular file, readable by anyone but
-    its owner, or a key ``ssh-keygen`` cannot load with an empty passphrase
-    (including one that needs a real passphrase, which cannot sign with
-    nobody present on any platform). Performs no writes; a caller building
-    on this can validate before touching disk.
+    for a path that is missing, lies inside a configured vault's working
+    tree, is not a regular file, readable by anyone but its owner, or a key
+    ``ssh-keygen`` cannot load with an empty passphrase (including one that
+    needs a real passphrase, which cannot sign with nobody present on any
+    platform). Performs no writes; a caller building on this can validate
+    before touching disk.
+
+    The vault-containment check runs before every other check but existence:
+    it is checked against the RESOLVED path (following symlinks), separate
+    from the returned, unresolved *path* — this function deliberately does
+    not resolve symlinks in what it returns, so an operator pointing --key at
+    a symlink elsewhere on disk keeps working, but a key reachable via a
+    symlink placed inside a vault must not escape the refusal that way.
     """
     path = _absolute_expanded(raw)
     if not path.exists():
         raise SigningEnableError(
             f"{path} does not exist — point --key at an existing private key, "
             "or run `lore signing enable` with no argument to generate one"
+        )
+    contained = _vault_containing(path, env)
+    if contained is not None:
+        vault_name, vault_root = contained
+        raise SigningEnableError(
+            f"{path} is inside vault {vault_name!r} ({vault_root}) — a key "
+            "there gets staged and pushed by `lore sync`; move it outside "
+            "any configured vault, then run `lore signing enable --key "
+            "<new path>`"
         )
     if not path.is_file():
         raise SigningEnableError(
@@ -339,8 +453,26 @@ def _resolve_principal() -> str:
 
 
 def _ensure_signing_dir(directory: Path) -> None:
+    """Create *directory* at mode ``0700``, refusing a symlinked path.
+
+    ``directory.is_symlink()`` uses ``lstat`` (never follows), so a symlink
+    planted at the signing directory's own path is refused before this
+    function ever creates or chmods anything through it — creating through a
+    symlink would write and tighten permissions on whatever it points at
+    instead of a directory lore actually owns.
+    """
+    if directory.is_symlink():
+        raise SigningEnableError(
+            f"{directory} is a symlink — remove it and let lore create a "
+            "plain directory there"
+        )
     directory.mkdir(parents=True, exist_ok=True)
-    os.chmod(directory, 0o700)
+    try:
+        os.chmod(directory, 0o700)
+    except OSError as exc:
+        raise SigningEnableError(
+            f"cannot set permissions on {directory}: {exc}"
+        ) from exc
 
 
 def _write_configuration(directory: Path, key_path: Path, pub_line: str) -> None:
@@ -354,14 +486,15 @@ def _write_configuration(directory: Path, key_path: Path, pub_line: str) -> None
         json.dumps({KEY_PATH_FIELD: str(key_path)}, indent=2) + "\n",
     )
     write_temp_then_rename(
-        directory / ALLOWED_SIGNERS_FILENAME, f"{_resolve_principal()} {pub_line}\n"
+        directory / ALLOWED_SIGNERS_FILENAME,
+        f'{_resolve_principal()} namespaces="git" {pub_line}\n',
     )
 
 
 def _generate_key(dest: Path) -> None:
     subprocess.run(
         ["ssh-keygen", "-t", "ed25519", "-N", "", "-f", str(dest), "-C", socket.gethostname()],
-        check=True, capture_output=True, timeout=_SSH_KEYGEN_TIMEOUT,
+        check=True, capture_output=True, text=True, timeout=_SSH_KEYGEN_TIMEOUT,
         stdin=subprocess.DEVNULL,
     )
     os.chmod(dest, 0o600)
@@ -427,7 +560,7 @@ def enable(*, key: "str | Path | None" = None, env: "dict | None" = None) -> Ena
     directory = signing_dir(env)
 
     if key is not None:
-        resolved = validate_adoptable_key(key)
+        resolved = validate_adoptable_key(key, env=env)
         pub_line, _ = _probe_key(resolved)
         _write_configuration(directory, resolved, pub_line)
         return EnableResult(key_path=resolved, pub_line=pub_line, generated=False)
@@ -435,12 +568,20 @@ def enable(*, key: "str | Path | None" = None, env: "dict | None" = None) -> Ena
     _ensure_signing_dir(directory)
 
     existing = load_key_path(env)
-    if existing is not None and existing.is_file():
-        pub_line, refusal = _usable_pub_line_or_refusal(existing)
-        if pub_line is not None:
-            _write_configuration(directory, existing, pub_line)
-            return EnableResult(key_path=existing, pub_line=pub_line, generated=False)
-        raise SigningEnableError(refusal)
+    if existing is not None:
+        classification = _classify_key_path(existing)
+        if classification == "unreadable":
+            raise SigningEnableError(
+                f"cannot check {existing} — permission denied — fix its "
+                "permissions or its directory's, or point --key at a "
+                "different key"
+            )
+        if classification == "present":
+            pub_line, refusal = _usable_pub_line_or_refusal(existing)
+            if pub_line is not None:
+                _write_configuration(directory, existing, pub_line)
+                return EnableResult(key_path=existing, pub_line=pub_line, generated=False)
+            raise SigningEnableError(refusal)
 
     dest = directory / GENERATED_KEY_FILENAME
     if dest.exists():
@@ -475,9 +616,26 @@ def describe_status(env: "dict | None" = None) -> "tuple[bool, str]":
     key_path = load_key_path(env)
     if key_path is None:
         return False, "no signing key is configured — run `lore signing enable`"
-    if not key_path.is_file():
+
+    classification = _classify_key_path(key_path)
+    if classification == "unreadable":
+        return False, (
+            f"the configured key {key_path} cannot be read (permission "
+            "denied) — fix its permissions or its directory's, or run "
+            "`lore signing enable --key <path>` naming a different key"
+        )
+    if classification == "missing":
         return False, (
             f"the configured key {key_path} is missing — run `lore signing enable`"
+        )
+
+    contained = _vault_containing(key_path, env)
+    if contained is not None:
+        vault_name, vault_root = contained
+        return False, (
+            f"the configured key {key_path} is inside vault {vault_name!r} "
+            f"({vault_root}) — move it outside any configured vault, then "
+            "run `lore signing enable --key <new path>`"
         )
 
     mode = stat.S_IMODE(key_path.stat().st_mode)
@@ -492,19 +650,29 @@ def describe_status(env: "dict | None" = None) -> "tuple[bool, str]":
         if needs_passphrase:
             return False, (
                 "the configured key needs a passphrase, which cannot sign "
-                "with nobody present — run `lore signing enable`"
+                "with nobody present — replace it with a key that has none, "
+                "or run `lore signing enable --key <path>` naming one"
             )
         return False, (
             "the configured key is not a private key ssh-keygen can load — "
-            "run `lore signing enable`"
+            "replace it, or run `lore signing enable --key <path>` naming "
+            "one that is"
         )
 
     allowed_signers = signing_dir(env) / ALLOWED_SIGNERS_FILENAME
     if not allowed_signers.is_file():
         return False, "the allowed-signers file is missing — run `lore signing enable`"
 
+    try:
+        allowed_signers_text = allowed_signers.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return False, (
+            "the allowed-signers file does not match the configured key — "
+            "run `lore signing enable`"
+        )
+
     key_material = " ".join(pub_line.split(" ")[:2])
-    if key_material not in allowed_signers.read_text(encoding="utf-8"):
+    if key_material not in allowed_signers_text:
         return False, (
             "the allowed-signers file does not match the configured key — "
             "run `lore signing enable`"

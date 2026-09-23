@@ -127,7 +127,11 @@ prompt, and no hardware token in the loop to fall back on if the file
 permissions are ever widened. Treat this key the same way you would treat any
 other no-passphrase credential on the box: keep it per-host, never copy it to
 another machine, and never let it anywhere near a synced vault, a backup
-that leaves the host, or a dotfiles repo.
+that leaves the host, or a dotfiles repo. `enable --key` refuses a path
+inside any configured vault outright — such a key would be auto-staged and
+pushed by `lore sync`'s untracked-file allowlist — and `status` flags a
+configuration that already names one, the same way it flags any other
+broken configuration.
 
 ## How search works
 
