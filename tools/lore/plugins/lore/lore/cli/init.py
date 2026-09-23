@@ -384,7 +384,9 @@ def _report_signing_status() -> None:
 
     Delegates to ``vault/signing.py``'s ``describe_status`` so ``lore signing
     status`` and this line always agree; a failure carries the same
-    ``lore signing enable``/``chmod`` remedy `describe_status` names. An
+    ``lore signing enable``/``chmod`` remedy `describe_status` names. A host
+    with no key whose own git config does not sign commits is reported as
+    not configured, with no remedy, since its vault commits need none. An
     ``ssh-keygen`` call that itself errors out (a hang past its timeout, a
     permission denial reading the key) is degraded to a stderr line rather
     than taking down the rest of this report, matching the vault-drift
@@ -393,6 +395,12 @@ def _report_signing_status() -> None:
     """
     from ..vault import signing as signing_mod
 
+    if signing_mod.load_key_path() is None and not signing_mod.git_requires_signing():
+        print(
+            "lore: signing: not configured — vault commits follow your git "
+            "settings, which do not require signing"
+        )
+        return
     try:
         _, message = signing_mod.describe_status()
     except (OSError, subprocess.SubprocessError) as exc:
