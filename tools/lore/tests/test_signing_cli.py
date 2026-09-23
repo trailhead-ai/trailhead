@@ -319,7 +319,10 @@ def test_lore_status_shows_signing_passing_after_enable(tmp_path):
     assert "lore signing enable" not in r.stdout
 
 
-def test_lore_status_shows_signing_failing_with_remedy_when_key_absent(tmp_path):
+def test_lore_status_shows_signing_failing_with_remedy_when_git_requires_signing(tmp_path):
+    home = _isolated_home()
+    home.mkdir(parents=True, exist_ok=True)
+    (home / ".gitconfig").write_text("[commit]\n\tgpgsign = true\n")
     vault = make_git_vault(tmp_path / "vault")
     state = tmp_path / "state"
 
@@ -327,6 +330,21 @@ def test_lore_status_shows_signing_failing_with_remedy_when_key_absent(tmp_path)
     assert r.returncode == 0, r.stderr
     assert "signing" in r.stdout
     assert "lore signing enable" in r.stdout
+
+
+@pytest.mark.parametrize("gitconfig", ["[commit]\n\tgpgsign = false\n", None])
+def test_lore_status_reports_signing_as_not_configured_when_git_does_not_sign(tmp_path, gitconfig):
+    home = _isolated_home()
+    home.mkdir(parents=True, exist_ok=True)
+    if gitconfig is not None:
+        (home / ".gitconfig").write_text(gitconfig)
+    vault = make_git_vault(tmp_path / "vault")
+    state = tmp_path / "state"
+
+    r = run_cli(["status"], vault=vault, state_dir=state)
+    assert r.returncode == 0, r.stderr
+    assert "signing: not configured" in r.stdout, r.stdout
+    assert "lore signing enable" not in r.stdout, r.stdout
 
 
 def test_lore_status_degrades_the_signing_line_instead_of_crashing_the_report(tmp_path, monkeypatch):

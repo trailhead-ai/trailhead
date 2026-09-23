@@ -112,7 +112,10 @@ configured; `enable --key` always switches to the named key.
 
 `lore signing status` (and the "signing" line in `lore status`) reports
 whether this host is set up to sign unattended, or names the missing/broken
-piece and the exact command that fixes it.
+piece and the exact command that fixes it. On a host with no key whose own
+git config does not sign commits (`commit.gpgsign` unset or false), the
+`lore status` line reads "not configured" with no remedy: vault commits
+follow your git settings and publish unsigned, as they always have.
 
 There is no `disable` verb — deleting `state_dir("lore")/signing/` reverts a
 host to today's behavior (the adopter's own signing config), and `status`

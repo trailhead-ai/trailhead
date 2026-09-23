@@ -602,6 +602,29 @@ def enable(*, key: "str | Path | None" = None, env: "dict | None" = None) -> Ena
     return EnableResult(key_path=dest, pub_line=pub_line, generated=True)
 
 
+def git_requires_signing() -> bool:
+    """Whether this user's own git configuration signs every commit.
+
+    Reads ``commit.gpgsign`` from the system and global scopes (run from
+    ``/`` so no repository's local config answers). When the answer cannot
+    be read, assume signing is required, so the caller keeps pointing at
+    ``lore signing enable`` rather than reporting everything is fine.
+    """
+    try:
+        proc = subprocess.run(
+            ["git", "config", "--type=bool", "--get", "commit.gpgsign"],
+            cwd="/", capture_output=True, text=True,
+            stdin=subprocess.DEVNULL, timeout=_SSH_KEYGEN_TIMEOUT,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return True
+    if proc.returncode == 1 and not proc.stdout.strip():
+        return False
+    if proc.returncode != 0:
+        return True
+    return proc.stdout.strip() == "true"
+
+
 def describe_status(env: "dict | None" = None) -> "tuple[bool, str]":
     """Return ``(ok, message)`` describing whether this host signs unattended.
 
