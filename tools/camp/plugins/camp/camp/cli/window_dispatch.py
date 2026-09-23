@@ -34,10 +34,11 @@ task that added it:
    verb.** `run-shell` here has no attached tty of its own — an operator
    who pressed the key would see nothing from a bare exception. Every
    refusal branch below (missing marks, an invalid stored slug, an unknown
-   group, or `compose_window` itself refusing) forwards to
-   `Tmux.display_message` against the firing session, carrying the
-   refusal's own words verbatim — no redaction logic added on top, since
-   `WindowAtCredentialStore` already withholds its path by construction.
+   group, `compose_window` itself refusing, or a `LaunchError` out of the
+   account-binding resolver it calls) forwards to `Tmux.display_message`
+   against the firing session, carrying the refusal's own words verbatim —
+   no redaction logic added on top, since `WindowAtCredentialStore` already
+   withholds its path by construction.
 """
 
 from __future__ import annotations
@@ -48,6 +49,7 @@ from ..group.manifest import workspace_dir as _real_workspace_dir
 from ..group.resolve import GroupConfinementError, GroupResolutionError, validate_workspace_slug
 from ..group.resolve import resolve_group_override
 from ..group.window_record import WindowRecordError
+from ..launch.session import LaunchError
 from ..launch.window_compose import WindowComposeError, WindowRefused, compose_window as _real_compose_window
 
 #: The window name every camp-dispatched window is created under. Not yet
@@ -89,7 +91,12 @@ def dispatch_window(
 
     Every refusal path calls `tmux.display_message(session_id, ...)` and
     returns — never raises — since this runs detached from any run-shell
-    dispatch with no tty of its own to report a traceback to.
+    dispatch with no tty of its own to report a traceback to. A `LaunchError`
+    out of `compose` (the account-binding resolver's own refusal — a
+    declared account the harness will not bind, or a harness with no
+    scrub/binding support at all) folds into the same refusal path as
+    `WindowRefused`/`WindowComposeError`, so the operator sees the reason
+    instead of the key press silently doing nothing.
     """
 
     def _refuse(message: str) -> None:
@@ -125,7 +132,7 @@ def dispatch_window(
             tmux=tmux,
             env=env,
         )
-    except (WindowRefused, WindowComposeError) as exc:
+    except (WindowRefused, WindowComposeError, LaunchError) as exc:
         _refuse(str(exc))
     except (WindowRecordError, OSError) as exc:
         # compose_window creates the tmux window BEFORE it writes the

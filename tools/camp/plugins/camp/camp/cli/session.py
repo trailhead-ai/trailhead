@@ -1682,7 +1682,8 @@ def _cmd_kill_cli(args: list[str], env: dict[str, str] | None = None) -> None:
     print(
         f"camp kill: stopped session {candidate.session_id} "
         f"({candidate.derived_name}) — its memory is reclaimed; find its "
-        "workspace with `camp sessions` and reattach with `camp attach <slug>`",
+        "workspace with `camp sessions --recoverable` and reattach with "
+        "`camp attach <slug>`",
         file=sys.stderr,
     )
     _report_stop(candidate, outcome="stopped", as_json=as_json)
@@ -2152,6 +2153,7 @@ def _open_workspace_door(
     as_json: bool,
     interactive: bool,
     harness=None,
+    group: dict | None = None,
 ) -> None:
     """Create, connect, or resurrect the workspace `target` resolved to,
     then hand the terminal over — `camp attach`'s door.
@@ -2169,7 +2171,9 @@ def _open_workspace_door(
     a non-zero exit, where `camp new` reports a workspace-only success.
     `harness` is forwarded to the resurrection planner unchanged (`None`
     when the caller could not resolve one for the group) — it decides only
-    what a resurrected window's stub prints.
+    what a resurrected window's stub prints. `group` is forwarded alongside
+    it, so a resurrected conversation's resume line binds the same account
+    a live window would.
 
     Success prints the outcome line on stdout (or the `--json` object),
     then hands over. `attached` in that report is true on both handover
@@ -2195,7 +2199,8 @@ def _open_workspace_door(
     from ..launch.workspace_session import DoorState, create_or_connect_workspace_session
 
     probe = create_or_connect_workspace_session(
-        target.group, target.slug, target.path, env=resolved_env, tmux=tmux, harness=harness
+        target.group, target.slug, target.path, env=resolved_env, tmux=tmux, harness=harness,
+        group=group,
     )
 
     if probe.state is DoorState.TMUX_UNANSWERED:
@@ -2354,6 +2359,7 @@ def _cmd_attach_cli(args: list[str], env: dict[str, str] | None = None) -> None:
                     as_json=as_json,
                     interactive=interactive,
                     harness=harness_for(target_group),
+                    group=target_group,
                 )
             if isinstance(target, (RefusedNoTerminal, RefusedEmptyGroup)):
                 _die(refusal_message(target, group_name=group_name))
@@ -2425,8 +2431,8 @@ def _cmd_attach_cli(args: list[str], env: dict[str, str] | None = None) -> None:
     if isinstance(resolution, NotRunning):
         _die(
             f"camp attach: session {resolution.candidate.session_id} is not "
-            "running — find its workspace with `camp sessions` and reattach "
-            "with `camp attach <slug>`"
+            "running — find its workspace with `camp sessions --recoverable` "
+            "and reattach with `camp attach <slug>`"
         )
     if isinstance(resolution, Ambiguous):
         from ..launch.recovery import Ambiguous as _RecoveryAmbiguous

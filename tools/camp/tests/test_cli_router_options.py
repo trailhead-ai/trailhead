@@ -16,9 +16,9 @@ which it forwards whole to the handler it eventually picks.
 
 `read_group_option` is the separate, NON-consuming read of ``--group``.
 `main()` needs to see that flag to refuse it alongside a widening option, while
-still forwarding it to the handler — `camp launch --host h --group g` relays the
-group name to the far side, so consuming it here would strip the value the
-remote invocation is built from.
+still forwarding it to the handler — a group-aware verb declares ``--group``
+itself and reads it from the argv the router forwards whole, so consuming it
+here would strip the value that later read depends on.
 """
 
 from __future__ import annotations
@@ -139,11 +139,12 @@ def test_a_verbs_own_flags_pass_through_in_order() -> None:
 def test_group_is_left_in_the_rest_for_the_handler() -> None:
     """``--group`` is READ by the router but not consumed.
 
-    `camp launch --host h --group g` forwards the group name across to the far
-    side; a router that consumed it here would leave the handler with nothing to
-    forward. This is the one router-visible option that must survive the read.
+    A group-aware verb declares ``--group`` itself and reads it from the argv
+    the router forwards whole; a router that consumed it here would leave
+    the handler with nothing to read. This is the one router-visible option
+    that must survive the read.
     """
-    _parsed, rest = read_router_options("launch", ["--host", "h", "--group", "g"])
+    _parsed, rest = read_router_options("sessions", ["--host", "h", "--group", "g"])
     assert rest == ["--group", "g"]
 
 

@@ -5,8 +5,8 @@ questions the stop engine and reconciliation are built around (`has_session`,
 `pane_command`, `list_sessions`, `list_windows`) and owns every other tmux
 invocation camp performs — spawning a session with an explicit command and a
 scrubbed environment (`spawn_session`), starting a bare login-shell window over it
-(`new_session`), stating its environment (`set_environment`), reading its
-pane (`capture_pane`), and signalling it (`kill_session`). Nothing outside
+(`new_session`), stating its environment (`set_environment`), and signalling it
+(`kill_session`). Nothing outside
 this module builds a `["tmux", ...]` argv of its own; a caller that needs
 tmux constructs (or is handed) a `Tmux` and asks it.
 
@@ -24,7 +24,7 @@ qualified would prefix every session camp creates and make every later
 
 This is implemented as one property over targets, :func:`target`, called by
 every method below that takes a `-t` operand — `has_session`,
-`pane_command`, `kill_session`, `set_environment`, `capture_pane` — and by
+`pane_command`, `kill_session`, `set_environment` — and by
 `camp.host.handoff.local_argv`, the one tmux invocation that bypasses this
 class entirely (an interactive `exec`, which cannot go through
 `subprocess.run`). `spawn_session` is the one method that does NOT call
@@ -557,33 +557,6 @@ class Tmux:
         """
         return self._run(["kill-session", "-t", target(name)], timeout=timeout)
 
-    def kill_session_with_reason(
-        self, name: str, *, timeout: float | None = None
-    ) -> tuple[subprocess.CompletedProcess | None, str | None]:
-        """Same call :meth:`kill_session` makes, plus the exception's own
-        message when the call could not complete at all — *why* tmux could
-        not be asked, the one thing a plain ``None`` throws away.
-        """
-        return self._run_with_reason(["kill-session", "-t", target(name)], timeout=timeout)
-
-    def set_environment_with_reason(
-        self,
-        name: str,
-        operand: Sequence[str],
-        *,
-        env: Mapping[str, str] | None = None,
-        timeout: float | None = None,
-    ) -> tuple[subprocess.CompletedProcess | None, str | None]:
-        """Same call :meth:`set_environment` makes, plus the exception's own
-        message when the call could not complete at all, rather than a
-        synthesized "tmux did not answer".
-        """
-        return self._run_with_reason(
-            ["set-environment", "-t", target(name), *operand],
-            timeout=timeout,
-            env=env,
-        )
-
     def list_sessions(self) -> SessionListing | _Unanswered:
         """Every session tmux currently holds, or ``UNANSWERED``.
 
@@ -835,20 +808,6 @@ class Tmux:
         Returns ``None`` when tmux could not be asked at all.
         """
         return self._run(["switch-client", "-t", target(name)], timeout=timeout)
-
-    def capture_pane(
-        self, name: str, *, timeout: float | None = None
-    ) -> str | None:
-        """The raw text currently on session *name*'s pane, or ``None`` when
-        tmux could not answer or the session is already gone.
-
-        Returns tmux's stdout verbatim — sanitizing or bounding it for
-        display is the caller's business, not this seam's.
-        """
-        done = self._run(["capture-pane", "-p", "-t", target(name)], timeout=timeout)
-        if done is None or done.returncode != 0:
-            return None
-        return done.stdout
 
     def _pane_syntax_target(self, target: str) -> str:
         """Normalize *target* for a `set-option` / `show-options` call.

@@ -445,6 +445,71 @@ def test_the_tmux_request_still_carries_no_dash_e_with_account_bound(tmp_path):
     assert set(tmux.calls[0].keys()) == {"name", "cwd", "window_name", "command"}
 
 
+def _record_tmux_argv(monkeypatch):
+    """Patch `camp.launch.tmux`'s own `subprocess.run` with a recording
+    stand-in that answers a successful `new-window` — the same injection
+    point `test_launch_tmux.py` uses to pin the real seam's argv, applied
+    here through `compose_window` instead of calling `Tmux` directly."""
+    import subprocess as subprocess_module
+
+    import camp.launch.tmux as tmux_module
+
+    calls: list[list[str]] = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(list(argv))
+        return subprocess_module.CompletedProcess(
+            args=list(argv), returncode=0, stdout="@1 w1\n", stderr=""
+        )
+
+    monkeypatch.setattr(tmux_module.subprocess, "run", fake_run)
+    return calls
+
+
+@pytest.mark.parametrize(
+    "group, expected_assignment",
+    [
+        pytest.param(GROUP_ACCOUNT_A, "CLAUDE_CONFIG_DIR=/tmp/acct-a", id="account-bound"),
+        pytest.param(GROUP, None, id="no-account"),
+    ],
+)
+def test_ac60_holds_against_the_real_tmux_seam(tmp_path, monkeypatch, group, expected_assignment):
+    """AC60 pinned against the REAL `Tmux.new_window`, not `FakeTmux` — the
+    argv a real `subprocess.run` call would receive carries the scrub
+    inside the composed command, never as tmux's own `-e`, and never rides
+    a separate `set-environment` call. Varied across a group with an
+    account binding (the scrub's assignment tokens are present) and one
+    without (there is nothing to assign, but the shape holds all the
+    same)."""
+    import camp.launch.window_compose as wc
+    import camp.launch.tmux as tmux_module
+
+    ws_dir = tmp_path / "ws"
+    ws_dir.mkdir()
+
+    calls = _record_tmux_argv(monkeypatch)
+
+    wc.compose_window(
+        group, "slug", ws_dir, cwd=ws_dir, window_name="w1", tmux=tmux_module.Tmux(),
+        env={"HOME": str(tmp_path)},
+    )
+
+    assert len(calls) == 1, "compose_window must make exactly one tmux call"
+    argv = calls[0]
+
+    assert "-e" not in argv
+    assert not any(tok == "set-environment" for tok in argv)
+    assert argv[0] == "tmux"
+    assert "new-window" in argv
+
+    command = argv[argv.index("new-window") :]
+    assert "env" in command, "the scrub rides inside the composed command"
+    if expected_assignment is not None:
+        assert expected_assignment in command
+    else:
+        assert not any(tok.startswith("CLAUDE_CONFIG_DIR=") for tok in command)
+
+
 # ---------------------------------------------------------------------------
 # 8. Written before success is reported, exactly once
 # ---------------------------------------------------------------------------
@@ -576,10 +641,9 @@ def test_directory_outside_workspace_root_is_refused(tmp_path):
 
 # --- 2a. AC55 — a group's [launch] roots does not widen containment ------
 #
-# task/the-directory-allowlist-goes-and-roots-grants-nothing: a composed
-# window is rooted inside the workspace or refused, and no config value
-# widens that — including a group's [launch] roots naming the very directory
-# being refused.
+# A composed window is rooted inside the workspace or refused, and no
+# config value widens that — including a group's [launch] roots naming
+# the very directory being refused.
 # ---------------------------------------------------------------------------
 
 
@@ -858,4 +922,200 @@ def test_compose_never_enumerates_sessions_even_when_the_harness_would_raise(
     assert harness.enumerate_calls == []
     assert tmux.calls, "the window must still open"
     assert _recorded_entries(ws_dir), "the entry must still be recorded"
+    assert result.window_id == "@1"
+
+
+# ---------------------------------------------------------------------------
+# Fail-closed: a harness that refuses the resolver produces no tmux call and
+# no record entry (`resolve_launch_environment`'s two `LaunchError` branches,
+# reached through `compose_window`, the real consumer).
+# ---------------------------------------------------------------------------
+
+
+GROUP_RELATIVE_ACCOUNT = {
+    "group": {"name": "testgroup"},
+    "launch": {"account": "claude-levr"},
+}
+
+
+class _RefusingAccountHarness(FakeHarness):
+    """A harness whose `session_launch_env_set` refuses a DECLARED account —
+    the shape a relative `[launch] account` value produces against the real
+    `ClaudeCodeHarness` (accepted by config, refused by the harness)."""
+
+    name = "refusingharness"
+
+    def session_launch_env_set(self, account, *, env=None):
+        from trailhead.harness import HarnessError
+
+        if account is not None:
+            raise HarnessError(f"account {account!r} must be an absolute path")
+        return {}
+
+
+class _NoScrubHarness(FakeHarness):
+    """A harness whose `session_launch_env_unset()` answers `None` — no
+    scrub/binding support at all."""
+
+    name = "noscrubharness"
+
+    def session_launch_env_unset(self):
+        return None
+
+
+def test_a_declared_account_the_harness_refuses_makes_no_tmux_call(tmp_path, monkeypatch):
+    import camp.launch.window_compose as wc
+    from camp.launch.session import LaunchError
+
+    harness = _RefusingAccountHarness()
+    monkeypatch.setattr(wc, "harness_for", lambda group: harness)
+
+    ws_dir = tmp_path / "ws"
+    ws_dir.mkdir()
+    tmux = FakeTmux()
+
+    with pytest.raises(LaunchError):
+        wc.compose_window(
+            GROUP_RELATIVE_ACCOUNT, "slug", ws_dir, cwd=ws_dir, window_name="w1",
+            tmux=tmux, env=_empty_env(tmp_path),
+        )
+
+    assert tmux.calls == [], "a refused account must never reach tmux"
+    assert _recorded_entries(ws_dir) == (), "a refused account must record no window"
+
+
+def test_a_harness_with_no_scrub_support_makes_no_tmux_call(tmp_path, monkeypatch):
+    import camp.launch.window_compose as wc
+    from camp.launch.session import LaunchError
+
+    harness = _NoScrubHarness()
+    monkeypatch.setattr(wc, "harness_for", lambda group: harness)
+
+    ws_dir = tmp_path / "ws"
+    ws_dir.mkdir()
+    tmux = FakeTmux()
+
+    with pytest.raises(LaunchError):
+        wc.compose_window(
+            GROUP, "slug", ws_dir, cwd=ws_dir, window_name="w1",
+            tmux=tmux, env=_empty_env(tmp_path),
+        )
+
+    assert tmux.calls == [], "a harness with no scrub support must never reach tmux"
+    assert _recorded_entries(ws_dir) == (), "a harness with no scrub support must record no window"
+
+
+def test_a_declared_account_accepted_by_the_harness_still_composes_the_window(tmp_path, monkeypatch):
+    """Varies the refused case above: the SAME relative-looking declared
+    account, accepted this time by the harness, must still compose the
+    window — the refusal is the harness's call, not a blanket rejection of
+    any declared account."""
+    import camp.launch.window_compose as wc
+
+    harness = FakeHarness()
+    monkeypatch.setattr(wc, "harness_for", lambda group: harness)
+
+    ws_dir = tmp_path / "ws"
+    ws_dir.mkdir()
+    tmux = FakeTmux()
+
+    result = wc.compose_window(
+        GROUP_RELATIVE_ACCOUNT, "slug", ws_dir, cwd=ws_dir, window_name="w1",
+        tmux=tmux, env=_empty_env(tmp_path),
+    )
+
+    assert tmux.calls, "an accepted account must still compose the window"
+    assert result.window_id == "@1"
+
+
+# ---------------------------------------------------------------------------
+# A declared account with NO recognized harness (`harness_for` answering
+# `None` for an unknown binary) must refuse, exactly like a harness that
+# refuses to bind — never compose an unbound, unscrubbed window that
+# silently ignores the group's own declaration.
+# ---------------------------------------------------------------------------
+
+
+def test_declared_account_with_no_recognized_harness_refuses(tmp_path, monkeypatch):
+    import camp.launch.window_compose as wc
+    from camp.launch.session import LaunchError
+
+    monkeypatch.setattr(wc, "harness_for", lambda group: None)
+
+    ws_dir = tmp_path / "ws"
+    ws_dir.mkdir()
+    tmux = FakeTmux()
+
+    with pytest.raises(LaunchError):
+        wc.compose_window(
+            GROUP_ACCOUNT_A, "slug", ws_dir, cwd=ws_dir, window_name="w1",
+            tmux=tmux, env=_empty_env(tmp_path),
+        )
+
+    assert tmux.calls == [], "an unrecognized harness with a declared account must never reach tmux"
+    assert _recorded_entries(ws_dir) == (), "an unrecognized harness with a declared account must record no window"
+
+
+def test_no_declared_account_with_no_recognized_harness_still_composes(tmp_path, monkeypatch):
+    """The control case: no `[launch] account` declared at all — today's
+    behavior (compose unbound and unscrubbed) must be unchanged when there
+    is nothing declared to silently ignore."""
+    import camp.launch.window_compose as wc
+
+    monkeypatch.setattr(wc, "harness_for", lambda group: None)
+
+    ws_dir = tmp_path / "ws"
+    ws_dir.mkdir()
+    tmux = FakeTmux()
+
+    result = wc.compose_window(
+        GROUP, "slug", ws_dir, cwd=ws_dir, window_name="w1",
+        tmux=tmux, env=_empty_env(tmp_path),
+    )
+
+    assert tmux.calls, "no declared account and no harness must still compose the window"
+    assert result.window_id == "@1"
+
+
+# ---------------------------------------------------------------------------
+# Wording: a harness that refuses to resolve its own DEFAULT (no account
+# declared) warns and still composes — reached from `camp attach`/`camp new`
+# bring-up as well as this window path, neither of which has a "launch" verb
+# of its own to name.
+# ---------------------------------------------------------------------------
+
+
+class _RefusingDefaultHarness(FakeHarness):
+    """A harness that refuses to resolve a DEFAULT (no account declared),
+    the warn-and-continue branch of `_resolve_account_binding`."""
+
+    name = "refusingdefaultharness"
+
+    def session_launch_env_set(self, account, *, env=None):
+        from trailhead.harness import HarnessError
+
+        if account is None:
+            raise HarnessError("no default account resolves here")
+        return {self._account_var: account}
+
+
+def test_a_refused_default_warning_does_not_say_launching(tmp_path, monkeypatch, capsys):
+    import camp.launch.window_compose as wc
+
+    harness = _RefusingDefaultHarness()
+    monkeypatch.setattr(wc, "harness_for", lambda group: harness)
+
+    ws_dir = tmp_path / "ws"
+    ws_dir.mkdir()
+    tmux = FakeTmux()
+
+    result = wc.compose_window(
+        GROUP, "slug", ws_dir, cwd=ws_dir, window_name="w1",
+        tmux=tmux, env=_empty_env(tmp_path),
+    )
+
+    err = capsys.readouterr().err
+    assert "launching with" not in err
+    assert "NO account binding" in err
+    assert tmux.calls, "a refused DEFAULT must still compose the window, unbound"
     assert result.window_id == "@1"

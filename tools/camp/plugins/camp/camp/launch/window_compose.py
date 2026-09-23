@@ -107,7 +107,12 @@ def compose_window(
     fresh conversation id itself (`uuid.uuid4()`), composes `<binary>
     --session-id <id>` directly — no method on the harness seam composes
     the two flags AC56 forbids — wraps it in the harness's scrub, and
-    records the id with no command line.
+    records the id with no command line. A group whose configured binary
+    `harness_for` cannot name (`harness is None`) composes unbound and
+    unscrubbed UNLESS the group declares `[launch] account`, in which case
+    this raises :class:`~camp.launch.session.LaunchError` — an unrecognized
+    harness must never silently ignore a declared account the way it
+    silently skips a scrub it cannot express.
 
     *cwd* is resolved once, first thing: the directory floor (AC21) is
     checked against that resolved path, and the same resolved path is what
@@ -172,6 +177,13 @@ def compose_window(
                 harness, profile, group, resolved_env
             )
         else:
+            account = (group.get("launch") or {}).get("account")
+            if account is not None:
+                raise LaunchError(
+                    "camp: cannot bind an account — no harness is configured "
+                    f"for this group, so camp cannot bind the declared "
+                    f"account {account}"
+                )
             binding, scrub = {}, ()
         pane_command = ["env"]
         for var in scrub:

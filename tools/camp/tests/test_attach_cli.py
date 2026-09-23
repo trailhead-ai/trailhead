@@ -472,7 +472,7 @@ def test_ref_form_not_running_names_a_verb_camp_still_dispatches(
     err = capsys.readouterr().err
     assert code != 0
     assert "not running" in err
-    assert "camp sessions" in err
+    assert "camp sessions --recoverable" in err
     assert "camp attach" in err
     assert _UUID_A in err
 
@@ -857,7 +857,7 @@ def test_dash_a_ref_form_with_no_hosts_declared_still_reports_local_not_running(
     err = capsys.readouterr().err
     assert code != 0
     assert "not running" in err
-    assert "camp sessions" in err
+    assert "camp sessions --recoverable" in err
     assert "camp attach" in err
 
 

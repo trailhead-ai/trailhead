@@ -326,47 +326,6 @@ def test_group_configs_that_cannot_be_read_refuse_the_launch(home: Path) -> None
     assert "group config" in msg
 
 
-def test_a_readable_siblings_roots_does_not_change_the_deny_list_answer(
-    home: Path,
-) -> None:
-    """`roots` grants nothing, so a readable sibling group config carrying it
-    alongside a declared account must derive the exact same deny list as the
-    same sibling with no `roots` at all.
-
-    This assurance is fully derivative of `_parse_launch` never storing
-    `roots` in the parsed config (`group/config.py`'s own contract): by the
-    time `_declared_account_entries` reads a config, a `roots`-carrying and a
-    `roots`-free sibling are byte-for-byte identical `launch` dicts, since
-    `_declared_account_entries` reads only `.get("account")`. A mutation that
-    makes `_parse_launch` store `roots` again does not turn this test red —
-    confirmed directly — because eligibility.py has no code path that reads
-    the key at all; there is nothing here for `roots` to leak into. See
-    `test_group_configs_that_cannot_be_read_refuse_the_launch` for this
-    contract item's other half (the unreadable-sibling case), which does
-    fail closed."""
-    from camp.launch.eligibility import credential_deny_entries
-
-    with_roots_dir = home / "camp-config-a" / "groups"
-    with_roots_dir.mkdir(parents=True)
-    (with_roots_dir / "levr.toml").write_text(
-        f'[group]\nname = "levr"\n\n{_MEMBER_TOML}\n'
-        '[launch]\naccount = "~/.claude-levr"\nroots = ["~/code"]\n',
-        encoding="utf-8",
-    )
-    without_roots_dir = home / "camp-config-b" / "groups"
-    without_roots_dir.mkdir(parents=True)
-    (without_roots_dir / "levr.toml").write_text(
-        f'[group]\nname = "levr"\n\n{_MEMBER_TOML}\n'
-        '[launch]\naccount = "~/.claude-levr"\n',
-        encoding="utf-8",
-    )
-
-    env_with = {"HOME": str(home), "CAMP_CONFIG_DIR": str(home / "camp-config-a")}
-    env_without = {"HOME": str(home), "CAMP_CONFIG_DIR": str(home / "camp-config-b")}
-
-    assert credential_deny_entries(env=env_with) == credential_deny_entries(env=env_without)
-
-
 #: A TOML escape for an embedded NUL. Written as an escape because a raw control
 #: byte is not legal inside a basic string, and decoded by tomllib into the real
 #: character — so the parser downstream sees exactly what an operator's typo, or
@@ -445,3 +404,50 @@ def test_a_groups_directory_that_was_never_created_yields_the_floor(home: Path) 
 
     assert credential_deny_entries(env=env) == CREDENTIAL_DENY_ENTRIES
     assert "credential" in _refusal(home / ".claude", home, env=env)
+
+
+# ---------------------------------------------------------------------------
+# Wording: this gate is reached from the door (`camp attach`) and window
+# paths, neither of which has a "launch" verb of its own — "camp: cannot
+# launch —" reads like a launch-specific failure to an operator who typed
+# `camp attach`, not `camp launch`.
+# ---------------------------------------------------------------------------
+
+
+def test_credential_match_refusal_does_not_say_cannot_launch(home: Path) -> None:
+    msg = _refusal(home / ".ssh", home)
+    assert "cannot launch" not in msg
+
+
+def test_unreadable_group_config_refusal_does_not_say_cannot_launch(
+    home: Path, monkeypatch
+) -> None:
+    import camp.group.config as group_config
+
+    def _boom(_groups_dir):
+        raise OSError("permission denied")
+
+    monkeypatch.setattr(group_config, "load_all_groups", _boom)
+    target = home / "code"
+    target.mkdir()
+
+    msg = _refusal(target, home)
+    assert "cannot launch" not in msg
+    assert "cannot read the group configs" in msg
+
+
+def test_unresolvable_deny_entry_refusal_does_not_say_cannot_launch(
+    home: Path, monkeypatch
+) -> None:
+    from camp.launch import eligibility
+
+    monkeypatch.setattr(
+        eligibility,
+        "credential_deny_entries",
+        lambda *, env: ("/accounts/\x00levr",),
+    )
+    target = home / "code"
+    target.mkdir()
+
+    msg = _refusal(target, home)
+    assert "cannot launch" not in msg

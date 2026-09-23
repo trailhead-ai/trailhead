@@ -128,7 +128,7 @@ def _expand(entry: str, home: Path) -> Path:
         return candidate.resolve()
     except (ValueError, OSError) as exc:
         raise LaunchError(
-            "camp: cannot launch — camp cannot resolve the credential store "
+            "camp: cannot resolve the credential store "
             f"{entry!r}, so it cannot tell whether this directory is one: {exc}"
         ) from exc
 
@@ -163,7 +163,7 @@ def _declared_account_entries(env: Mapping[str, str] | None) -> tuple[str, ...]:
         configs = load_all_groups(groups_dir / "groups")
     except Exception as exc:
         raise LaunchError(
-            "camp: cannot launch — camp cannot read the group configs, so it "
+            "camp: cannot read the group configs, so it "
             "cannot tell which account directories are credential stores: "
             f"{exc}"
         ) from exc
@@ -220,8 +220,8 @@ def assert_not_a_credential_store(resolved: Path, *, env: Mapping[str, str] | No
         denied = _expand(entry, home)
         if matches_deny_entry(resolved, denied):
             raise LaunchError(
-                f"camp: cannot launch — directory {printable_path(resolved)} is at, "
-                f"under, or "
+                f"camp: cannot use directory {printable_path(resolved)} — it is "
+                f"at, under, or "
                 f"above the credential store {denied}, which camp will never "
                 "root a session at. This rule is fixed in camp and no group "
                 "configuration can permit it."

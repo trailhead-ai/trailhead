@@ -55,8 +55,9 @@ from ..group.window_record import (
 )
 from .eligibility import assert_not_a_credential_store
 from .naming import workspace_session_name
+from .profile import resolve_harness_profile
 from .recovery import printable_path
-from .session import LaunchError
+from .session import LaunchError, resolve_launch_environment
 from .tmux import DUPLICATE, UNANSWERED, NewSessionWindowFailure, NewWindowFailure, Tmux
 from .window_reconcile import RECONCILE_LOCK_TIMEOUT_SECONDS
 from .workspace_session import (
@@ -109,6 +110,7 @@ def plan_resurrection(
     *,
     env: Mapping[str, str] | None,
     harness,
+    group: dict | None,
 ) -> tuple[Decision, ...]:
     """Decide, per entry and in record order, whether it comes back.
 
@@ -116,10 +118,19 @@ def plan_resurrection(
     root → `Drop` naming the recorded path; at/under/above a credential
     store → `Drop` naming no path; not a directory → `Drop` naming the
     recorded path as no longer existing; otherwise `Restore` with the stub.
+
+    *group* is the group config `compose_window` itself resolves a binding
+    from — passed here so resurrection binds the SAME account through the
+    SAME `resolve_launch_environment` resolver (see `_resolve_binding`),
+    never a second, independent read of `[launch] account`. It is
+    required: a caller with genuinely no group config passes `None`
+    explicitly, which resolves no binding and produces a scrub-only stub.
     """
     resolved_ws_dir = Path(ws_dir).resolve()
     unset_vars = list(harness.session_launch_env_unset()) if harness is not None else []
-    script = _stub_script(unset_vars)
+    binding, refusal, bound_env = _resolve_binding(harness, group, env)
+    script = _stub_script(unset_vars, list(binding.keys()))
+    binding_values = list(binding.values())
 
     decisions: list[Decision] = []
     for entry in entries:
@@ -141,12 +152,61 @@ def plan_resurrection(
             decisions.append(Drop(entry, f"directory {entry.cwd} no longer exists"))
             continue
 
-        lines = _stub_lines(entry, resolved, env=env, harness=harness)
+        lines = _stub_lines(entry, resolved, env=bound_env, harness=harness, refusal=refusal)
         escaped_lines = [printable_path(line) for line in lines]
-        argv = ["sh", "-c", script, "camp-resurrect", *escaped_lines]
+        argv = ["sh", "-c", script, "camp-resurrect", *binding_values, *escaped_lines]
         decisions.append(Restore(entry, resolved, argv))
 
     return tuple(decisions)
+
+
+def _resolve_binding(
+    harness, group: dict | None, env: Mapping[str, str] | None
+) -> tuple[dict[str, str], str | None, Mapping[str, str] | None]:
+    """The account binding a resurrected window's stub carries, resolved
+    through the SAME `resolve_launch_environment` `compose_window` calls —
+    so the account a window runs on and the account its resurrection
+    resumes on cannot disagree.
+
+    `group is None` (a caller that cannot resolve one at all) answers no
+    binding, no refusal, and *env* unchanged — today's behavior. `harness is
+    None` with the group declaring no `[launch] account` answers the same
+    way: there is nothing declared for an absent harness to silently ignore.
+    `harness is None` while the group DOES declare an account fails closed
+    exactly like a harness that refuses the account: empty binding, a
+    refusal naming the declared account, *env* unchanged — never a resume
+    line composed against a window that came back unbound. A harness that
+    refuses the group's DECLARED account (`LaunchError`) fails closed the
+    same way: the returned binding is empty (the window still comes back
+    scrubbed, never bound), and *refusal* carries the harness's own reason —
+    `_stub_lines` prints it in place of a resume line, so camp never prints
+    a resume command that would run on the wrong (default) account. The
+    returned environment is the one a transcript lookup must use: the bound
+    one when a binding resolved, unchanged otherwise. `env=None` is forwarded
+    to `resolve_launch_environment` as `None`, never `{}` — `None` there
+    means "the process environment", and a caller that turned it into `{}`
+    would silently resolve every launch against an empty environment
+    instead.
+    """
+    if group is None:
+        return {}, None, env
+    account = (group.get("launch") or {}).get("account")
+    if harness is None:
+        if account is not None:
+            refusal = (
+                "camp: cannot bind an account — no harness is configured for "
+                f"this group, so camp cannot bind the declared account {account}"
+            )
+            return {}, refusal, env
+        return {}, None, env
+    profile = resolve_harness_profile(group)
+    try:
+        _account, binding, _scrub, launch_env = resolve_launch_environment(
+            harness, profile, group, dict(env) if env is not None else None
+        )
+    except LaunchError as exc:
+        return {}, str(exc), env
+    return dict(binding), None, launch_env
 
 
 #: The shell identifier shape every harness-supplied scrub name must match
@@ -158,28 +218,55 @@ def plan_resurrection(
 _SHELL_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
-def _stub_script(unset_vars: Sequence[str]) -> str:
-    """Splice the harness's env-unset vars into `STUB_SCRIPT`.
+def _stub_script(unset_vars: Sequence[str], binding_names: Sequence[str] = ()) -> str:
+    """Splice the harness's env-unset vars, and now the declared account's
+    binding NAMES, into `STUB_SCRIPT`.
 
-    Empty `unset_vars` returns `STUB_SCRIPT` itself, unchanged — the
-    identity a caller with no scrub (or no harness) can rely on. Every
-    name is validated against `_SHELL_IDENTIFIER_RE` first — see that
-    pattern's own docstring for why a mismatch raises rather than escapes
-    or drops the value. Raises `LaunchError`, not a bare `ValueError` —
-    this is a harness-contract violation, and the caller's refusal path
-    (`create_refused`) is meant to fold it cleanly rather than let it
-    surface as a traceback.
+    Only NAMES ever reach the script's text — every one of them
+    harness-declared (never operator/vault input, see
+    `_SHELL_IDENTIFIER_RE`'s own docstring), and validated against that
+    pattern before splicing. Binding VALUES never touch the script text:
+    they arrive as `sh -c`'s own trailing positional arguments (plain
+    argv elements, never shell-interpolated — see `plan_resurrection`,
+    which puts them ahead of the stub lines in the argv it builds), and
+    the generated script captures them into shell variables with plain
+    parameter expansion (`"${1}"`, `"${2}"`, ...) before `shift`ing them out of
+    `"$@"` — safe by construction even for a value carrying a space, a
+    quote, or a shell metacharacter, because parameter expansion never
+    re-parses the value as shell source.
+
+    Empty `unset_vars` AND empty `binding_names` returns `STUB_SCRIPT`
+    itself, unchanged — the identity a caller with no scrub, no binding
+    (or no harness) can rely on. Raises `LaunchError`, not a bare
+    `ValueError` — this is a harness-contract violation, and the caller's
+    refusal path is meant to fold it cleanly rather than let it surface as
+    a traceback.
     """
-    if not unset_vars:
-        return STUB_SCRIPT
-    for var in unset_vars:
+    for var in (*unset_vars, *binding_names):
         if not _SHELL_IDENTIFIER_RE.match(var):
             raise LaunchError(
-                f"camp: harness env-unset name {var!r} is not a valid shell "
-                "identifier — refusing to splice it into the resurrection stub script"
+                f"camp: harness env-unset/account-binding name {var!r} is not a "
+                "valid shell identifier — refusing to splice it into the "
+                "resurrection stub script"
             )
+
+    if not binding_names:
+        if not unset_vars:
+            return STUB_SCRIPT
+        flags = " ".join(f"-u {var}" for var in unset_vars)
+        return STUB_SCRIPT.replace('exec env "', f'exec env {flags} "')
+
+    n = len(binding_names)
+    captures = "; ".join(f'_camp_bind_{i + 1}="${{{i + 1}}}"' for i in range(n))
+    assigns = " ".join(
+        f'{name}="$_camp_bind_{i + 1}"' for i, name in enumerate(binding_names)
+    )
     flags = " ".join(f"-u {var}" for var in unset_vars)
-    return STUB_SCRIPT.replace('exec env "', f'exec env {flags} "')
+    env_cmd = " ".join(part for part in ("env", flags, assigns) if part)
+    return (
+        f'{captures}; shift {n}; printf \'%s\\n\' "$@"; '
+        f'exec {env_cmd} "${{SHELL:-sh}}"'
+    )
 
 
 def _stub_lines(
@@ -188,13 +275,28 @@ def _stub_lines(
     *,
     env: Mapping[str, str] | None,
     harness,
+    refusal: str | None = None,
 ) -> list[str]:
-    """The lines a surviving entry's stub prints, before escaping."""
+    """The lines a surviving entry's stub prints, before escaping.
+
+    *env* is the BOUND environment (see `_resolve_binding`) — the
+    transcript lookup below must run under the same account the window
+    itself will be bound to, or it will look for a transcript in the
+    wrong account's directory. *refusal* — the account-binding resolver's
+    own refusal, whether from a harness that refused a declared account or
+    from `_resolve_binding`'s own no-harness-but-declared-account branch —
+    takes priority over the generic no-harness line AND over any
+    transcript/resume lookup: the fail-closed line printed in its place,
+    never a resume command that would run on the wrong (or no) account.
+    """
     if entry.command_line is not None:
         return [f"camp: this window was opened with: {entry.command_line}"]
 
     conversation_id = entry.conversation_id
     id_line = f"camp: this window held conversation {conversation_id}"
+
+    if refusal is not None:
+        return [id_line, refusal]
 
     if harness is None:
         return [id_line, _NO_HARNESS_LINE]
@@ -311,6 +413,7 @@ def resurrect_workspace_session(
     env: Mapping[str, str] | None,
     tmux: Tmux,
     harness,
+    group: dict | None,
 ) -> "ResurrectionResult | DuplicateSession | CreateFailed":
     """Bring the workspace's session back up from *entries*, in record
     order, and re-stamp the record with what tmux actually created.
@@ -324,13 +427,17 @@ def resurrect_workspace_session(
     (`RECONCILE_LOCK_TIMEOUT_SECONDS`) — never entry by entry, so a caller
     who reads the record mid-resurrection never sees a partially-restamped
     one.
+
+    *group* is forwarded to `plan_resurrection` unchanged and is required
+    — a caller with genuinely no group config passes `None` explicitly,
+    which resurrects with no account binding, scrub only.
     """
     ws_dir = Path(ws_dir)
     assert_not_a_credential_store(ws_dir, env=env)
     name = workspace_session_name(group_name, slug)
     record_path = window_record_path_for(ws_dir)
 
-    decisions = plan_resurrection(entries, ws_dir, env=env, harness=harness)
+    decisions = plan_resurrection(entries, ws_dir, env=env, harness=harness, group=group)
     restores = [d for d in decisions if isinstance(d, Restore)]
     dropped = tuple(d for d in decisions if isinstance(d, Drop))
 

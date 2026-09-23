@@ -305,6 +305,7 @@ def create_or_connect_workspace_session(
     env: Mapping[str, str] | None = None,
     tmux: Tmux,
     harness=None,
+    group: dict | None,
 ) -> DoorProbe:
     """Probe for the workspace's session and create — or resurrect — it
     when there is none.
@@ -370,7 +371,10 @@ def create_or_connect_workspace_session(
     bypass it. *harness* is forwarded to the resurrection planner unchanged
     (`None` when a caller cannot resolve one for the group) — it decides
     only what a resurrected window's stub prints, never whether resurrection
-    happens at all.
+    happens at all. *group* is forwarded the same way, alongside *harness*
+    — the resurrection planner needs it to resolve the same account binding
+    `compose_window` binds a live window to, so a resurrected conversation's
+    resume line points at the account it actually ran under.
     """
     # Deferred: `resurrect.py` imports from this module at its own top
     # level (see the module-level comment above the import block), so this
@@ -418,6 +422,7 @@ def create_or_connect_workspace_session(
                 env=env,
                 tmux=tmux,
                 harness=harness,
+                group=group,
             )
         except LaunchError as exc:
             return _create_refused_probe(name, exc)

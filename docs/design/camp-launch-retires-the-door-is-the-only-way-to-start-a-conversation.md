@@ -115,7 +115,7 @@ The group config still reads `[launch] roots = ["~/code"]`. Every camp command f
 works and says once, on stderr:
 
 ```
-camp: [launch] roots in ~/.config/camp/groups/trailhead.toml is no longer used and grants nothing — remove it
+camp: [launch] roots in /Users/you/.config/camp/groups/trailhead.toml is no longer used and grants nothing — remove it
 ```
 
 A window rooted at `~/code/elsewhere`, a directory the allowlist names but outside the workspace,
@@ -131,7 +131,7 @@ camp: cannot open window — directory ~/code/elsewhere is outside the workspace
 $ camp launch --dir ~/code/elsewhere
 camp launch: this command has been replaced — use 'camp attach' instead.
 $ camp new scratch --launch
-camp new: error: unrecognized arguments: --launch
+camp new: unknown flag '--launch'
 ```
 
 No flag remaining on any camp verb names a directory for a conversation to be rooted at. The

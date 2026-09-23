@@ -106,8 +106,8 @@ def _move_module():
 def _session_cli_module():
     """Load `test_session_cli.py` by path, to reuse its `FakeHarness`
     registration source (`_SITECUSTOMIZE`) and its tmux stand-in
-    (`_TMUX_STUB`) rather than re-authoring the same real-`camp launch`
-    convention a second time. Importing it only reads module-level
+    (`_TMUX_STUB`) rather than re-authoring the same convention a second
+    time. Importing it only reads module-level
     definitions (functions, fixtures, classes) — nothing here executes any
     of its tests."""
     source = Path(__file__).resolve().parent / "test_session_cli.py"
@@ -1313,7 +1313,7 @@ def move_env(tmp_path: Path):
 # through `camp`'s own CLI rather than at the handler. Reuses `move_env`'s
 # real sender worktree + real peer subprocess, plus the `FakeHarness`/tmux
 # stand-in convention `test_session_cli.py`'s `cli_env` fixture already
-# establishes for running a real `camp launch`/`camp sessions` without a real
+# establishes for running a real `camp sessions` without a real
 # Claude Code install or a real tmux.
 # ---------------------------------------------------------------------------
 
@@ -3337,8 +3337,7 @@ class TestRenderConversationReleasesResumeLine:
     """`_render_conversation_releases` prints the harness's own resume
     command for each conversation, reusing the resurrection stub's
     rendering (`launch.resurrect`'s `shlex.join(harness.session_resume(id))`
-    and its "no harness" line) rather than a `camp launch --resume` literal
-    that no longer names a live verb."""
+    and its "no harness" line)."""
 
     def test_resume_line_follows_the_conversation_id_and_the_harness_argv(self) -> None:
         import io

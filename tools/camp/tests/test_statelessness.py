@@ -45,10 +45,9 @@ is the one `test_session_cli.py` builds, imported rather than rebuilt. The point
 of this module is that it drives the SAME commands those tests drive; a second,
 separately-maintained copy of the scaffolding could drift into driving something
 else and the cross-cutting guarantee would quietly stop covering the real flows.
-`camp launch` is retired, so a live session for the kill flows below is
-registered directly against the fake tmux double, in the resume shape
-`camp.launch.stop._owning_commands` still recognizes — nothing drives the CLI
-to compose that shape itself any more.
+A live session for the kill flows below is registered directly against the
+fake tmux double, in the resume shape `camp.launch.stop._owning_commands`
+recognizes, since no camp verb composes that shape on its own.
 
 A workspace that arrived by transfer looks, to `camp sessions --recoverable`,
 like any other workspace whose manifest names a foreign owner — ownership
@@ -133,8 +132,7 @@ _workspace_launch_dir = _cli._workspace_launch_dir
 def _register_resumable_session(cli_env, session_id: str, cwd: Path) -> None:
     """Register *session_id* as a live, `camp kill`-recognizable session
     rooted at *cwd* — directly against the fake tmux double, in the resume
-    shape `camp.launch.stop._owning_commands` still recognizes post-retirement.
-    `camp launch` no longer exists to compose that shape for us."""
+    shape `camp.launch.stop._owning_commands` recognizes."""
     groups = load_all_groups(Path(cli_env["config_dir"]) / "groups")
     component = derive_name_component(cwd, groups, env=cli_env["env"])
     tmux_name = f"camp-{component}-{session_id[:8]}"
@@ -287,8 +285,8 @@ def test_no_new_launch_flow_writes_anything_under_the_state_dir(cli_env) -> None
     _seed_transcript(cli_env, _ID_ARRIVED, arrived_workspace)
     _register_live(cli_env, _ID_LIVE, live_workspace)
 
-    # `camp launch` no longer bootstraps a live session for the kill flows
-    # below — registered directly, in the shape `camp kill` still recognizes.
+    # The kill flows below need a live session, registered directly in the
+    # shape `camp kill` recognizes.
     _register_resumable_session(cli_env, _ID_ROOTED, rooted)
     _register_resumable_session(cli_env, _ID_ARRIVED, arrived_workspace)
 

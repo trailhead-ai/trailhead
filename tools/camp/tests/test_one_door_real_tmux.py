@@ -1,8 +1,7 @@
-"""Real-tmux end-to-end proof for the one-door slice
-(task/one-door-proven-end-to-end-on-real-tmux) — `camp attach` is the only
-way a conversation window ever gets composed, `camp launch` is a dead
-redirect, and a group's stale `[launch] roots` key is tolerated with a
-one-time notice.
+"""Real-tmux end-to-end proof — `camp attach` is the only way a
+conversation window ever gets composed, `camp launch` is a dead redirect,
+and a group's stale `[launch] roots` key is tolerated with a notice on
+every `camp` invocation that reads it.
 
 Drives a REAL tmux 3.7c server on a throwaway `-L` socket, the same
 redirection trick `test_window_binding_end_to_end.py` and
@@ -81,6 +80,7 @@ from test_resurrect_real_tmux import (  # noqa: E402
     _FakeHarness,
     _capture_pane,
     _list_windows,
+    _wait_for_output,
     _wait_for_shell,
     _wire_workspace,
 )
@@ -224,8 +224,8 @@ def _press_the_key_and_wait(sock: str, session: str, ws_dir: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Delivers bullet 1/2: a declared (or absent) account, real key press,
-# real `camp window-dispatch` subprocess, real pane_start_command.
+# A declared (or absent) account, real key press, real
+# `camp window-dispatch` subprocess, real pane_start_command.
 # ---------------------------------------------------------------------------
 
 
@@ -308,8 +308,7 @@ def test_a_group_declaring_no_account_composes_the_pane_with_no_assignment(
 
 
 # ---------------------------------------------------------------------------
-# Delivers bullet 3: `camp launch` is a dead redirect that never touches
-# tmux.
+# `camp launch` is a dead redirect that never touches tmux.
 # ---------------------------------------------------------------------------
 
 
@@ -339,37 +338,50 @@ def test_camp_launch_redirects_and_leaves_the_socket_untouched(
 
 
 # ---------------------------------------------------------------------------
-# Delivers bullet 4: a stale `[launch] roots` key is tolerated, with a
-# one-time-per-config-path notice.
+# A stale `[launch] roots` key is tolerated, with one notice per `camp`
+# invocation.
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.skipif(_REAL_TMUX is None, reason="no tmux binary on PATH (captured at import time)")
-def test_roots_prints_the_notice_once_and_a_second_attach_does_not_repeat_it(
+def test_roots_prints_the_notice_exactly_once_on_every_separate_camp_invocation(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture, make_server
 ) -> None:
+    """What an operator sees: a group config carrying the stale `roots` key
+    gets the notice on `camp attach`, every time — not once ever. The
+    dedup in `camp.group.config._ROOTS_NOTICE_EMITTED` is scoped to a
+    single process's lifetime (one `camp doctor` run touching many group
+    configs prints each config's notice only once), never across separate
+    `camp` invocations — a real second `camp attach` is a fresh process
+    with an empty dedup set. `_run` here drives both attaches in this same
+    pytest process, so the dedup set is cleared between them to model that
+    fresh-process reality rather than the coincidence of sharing one."""
+    from camp.group.config import _ROOTS_NOTICE_EMITTED
+
     server = make_server(launch_block='[launch]\nroots = ["~/code"]\n')
     slug = "camp-cli"
     ws_dir = server.workspace_dir(slug)
     ws_dir.mkdir(parents=True)
     _wire_group_listing(monkeypatch, ws_dir=ws_dir, slug=slug)
 
+    notice = "is no longer used and grants nothing — remove it"
+
     code = _run(["attach", slug, "--group", server.group_name], monkeypatch)
     first = capsys.readouterr()
     assert code == 0, first.err
-
-    notice = "is no longer used and grants nothing — remove it"
     assert first.err.count(notice) == 1, first.err
+
+    _ROOTS_NOTICE_EMITTED.clear()
 
     code2 = _run(["attach", slug, "--group", server.group_name], monkeypatch)
     second = capsys.readouterr()
     assert code2 == 0, second.err
-    assert notice not in second.err, second.err
+    assert second.err.count(notice) == 1, second.err
 
 
 # ---------------------------------------------------------------------------
-# Also delivers: a transferred conversation's member subpath roots the
-# resurrected window there, varied across two members.
+# A transferred conversation's member subpath roots the resurrected
+# window there, varied across two members.
 # ---------------------------------------------------------------------------
 
 
@@ -446,3 +458,121 @@ def test_a_transferred_conversations_member_subpath_roots_the_resurrected_window
 
     after = read_window_record(window_record_path_for(ws_dir))
     assert {e.cwd for e in after.entries} == {"member-a", "member-b"}
+
+
+# ---------------------------------------------------------------------------
+# Finding 1: resurrection binds the same account compose_window binds — a
+# declared-account window's resurrected pane carries the binding in its
+# real, running environment, not just in a stub script string.
+# ---------------------------------------------------------------------------
+
+
+class _AccountBindingHarness(_FakeHarness):
+    """A `_FakeHarness` (borrowed from `test_resurrect_real_tmux.py`) that
+    also answers `session_launch_env_set` — the method
+    `resolve_launch_environment` calls to bind a declared account — so
+    resurrection has a real binding to resolve, not just a scrub."""
+
+    _ACCOUNT_VAR = "CLAUDE_CONFIG_DIR"
+
+    def session_launch_env_set(self, account, *, env=None):
+        if account is None:
+            return {}
+        return {self._ACCOUNT_VAR: account}
+
+
+def _wire_workspace_with_account(
+    monkeypatch: pytest.MonkeyPatch, *, ws_dir: Path, slug: str, group_name: str,
+    harness: _AccountBindingHarness, account_dir: str,
+) -> None:
+    """Like `test_resurrect_real_tmux.py`'s own `_wire_workspace`, except
+    the faked group declares `[launch] account = account_dir` — so
+    `create_or_connect_workspace_session`'s `group` reaches the
+    resurrection planner with an account to bind, exactly as `camp attach`
+    would resolve it from a real config file on disk."""
+    cli_session = importlib.import_module("camp.cli.session")
+    lifecycle = importlib.import_module("camp.provision.lifecycle")
+    profile = importlib.import_module("camp.launch.profile")
+
+    group = {"group": {"name": group_name}, "launch": {"account": account_dir}}
+    monkeypatch.setattr(cli_session, "_parsable_groups", lambda: [group])
+    monkeypatch.setattr(profile, "harness_for", lambda g: harness)
+
+    def fake_cmd_ls_group(g, *, env=None, tmux=None, **kw):
+        return lifecycle.GroupListing(
+            entries=[
+                {
+                    "slug": slug,
+                    "workspace_path": str(ws_dir),
+                    "state": None,
+                    "window_count": None,
+                }
+            ],
+            unmanaged=[],
+            unmanaged_count=0,
+            notice=None,
+        )
+
+    monkeypatch.setattr(lifecycle, "cmd_ls_group", fake_cmd_ls_group)
+
+
+@pytest.mark.skipif(_REAL_TMUX is None, reason="no tmux binary on PATH (captured at import time)")
+def test_a_declared_accounts_resurrected_pane_has_the_binding_in_its_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture, make_server
+) -> None:
+    """A group with a declared account whose window record has an entry but
+    no live tmux session (a "stopped" workspace) resurrects through the
+    door, and the resurrected pane's REAL, RUNNING environment — not just
+    the stub script's text — carries the bound account. Checked by sending
+    a real shell command into the resurrected pane and reading back what it
+    printed, since `#{pane_start_command}` on a resurrection's stub shows
+    the stub's own positional-argument shape (the binding VALUE as a bare
+    token), not the resolved environment the shell actually execs into."""
+    from camp.group.window_record import WindowEntry, write_window_record, window_record_path_for
+    from camp.launch.naming import workspace_session_name
+    from camp.launch.stop_workspace import _COMMON_SHELL_BASENAMES
+
+    account_dir = str(tmp_path / "acct-a")
+    server = make_server(group_name="onedoor-acct")
+    slug = "camp-cli"
+    group_name = server.group_name
+    session = workspace_session_name(group_name, slug)
+    ws_dir = server.workspace_dir(slug)
+    ws_dir.mkdir(parents=True)
+
+    conv = "8f2c1a3e-aaaa-bbbb-cccc-111122223333"
+    write_window_record(
+        window_record_path_for(ws_dir),
+        [WindowEntry(window_id="@400", name="conv-a", cwd=".", conversation_id=conv)],
+    )
+
+    harness = _AccountBindingHarness(
+        transcripts={conv: Path("/fake/transcripts") / f"{conv}.jsonl"},
+        resumes={conv: ["claude", "--resume", conv]},
+    )
+    _wire_workspace_with_account(
+        monkeypatch, ws_dir=ws_dir, slug=slug, group_name=group_name,
+        harness=harness, account_dir=account_dir,
+    )
+
+    code = _run(["attach", slug, "--group", group_name], monkeypatch)
+    captured = capsys.readouterr()
+    assert code == 0, captured.err
+
+    rows = _list_windows(server.sock, session)
+    assert len(rows) == 1, rows
+    window_id = rows[0][0]
+    _wait_for_shell(server.sock, window_id, _COMMON_SHELL_BASENAMES)
+
+    pane = _capture_pane(server.sock, window_id)
+    assert f"camp: resume it with: claude --resume {conv}" in pane, (
+        "an accepted account must still resurrect with a resume line", pane
+    )
+
+    marker = "camp-account-check"
+    _sock_run(
+        server.sock, "send-keys", "-t", window_id,
+        f'echo {marker}-"$CLAUDE_CONFIG_DIR"', "Enter",
+    )
+    output = _wait_for_output(server.sock, window_id, marker)
+    assert f"{marker}-{account_dir}" in output.replace("\n", ""), output
