@@ -45,6 +45,8 @@ _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
 if str(_PLUGIN_DIR) not in sys.path:
     sys.path.insert(0, str(_PLUGIN_DIR))
 
+from camp.launch.session import SessionEnvironment  # noqa: E402
+
 # Captured NOW, before conftest's _sandbox_tmux fixture prepends a stub to
 # PATH for every other test in the suite.
 _REAL_TMUX = shutil.which("tmux")
@@ -303,7 +305,7 @@ def test_creating_a_workspace_session_marks_it_and_a_plain_session_on_the_same_s
     ws_dir.mkdir(parents=True)
 
     result = create_workspace_session(
-        server.group_name, slug, ws_dir, env=server.env, tmux=Tmux()
+        server.group_name, slug, ws_dir, env=server.env, tmux=Tmux(), session_env=SessionEnvironment()
     )
     session_name = workspace_session_name(server.group_name, slug)
     assert result.session_name == session_name
@@ -331,7 +333,10 @@ def test_key_dispatches_only_on_the_marked_session_never_on_a_plain_or_forged_on
     slug = "feat-x"
     ws_dir = server.workspace_dir(slug)
     ws_dir.mkdir(parents=True)
-    create_workspace_session(server.group_name, slug, ws_dir, env=server.env, tmux=Tmux())
+    create_workspace_session(
+        server.group_name, slug, ws_dir, env=server.env, tmux=Tmux(),
+        session_env=SessionEnvironment(),
+    )
     camp_session = workspace_session_name(server.group_name, slug)
 
     _sock_run(server.sock, "new-session", "-d", "-s", "plainsess", "-x", "80", "-y", "24")
@@ -413,7 +418,10 @@ def test_pressing_the_key_in_the_camp_session_composes_a_real_window_and_records
     slug = "feat-x"
     ws_dir = server.workspace_dir(slug)
     ws_dir.mkdir(parents=True)
-    create_workspace_session(server.group_name, slug, ws_dir, env=server.env, tmux=Tmux())
+    create_workspace_session(
+        server.group_name, slug, ws_dir, env=server.env, tmux=Tmux(),
+        session_env=SessionEnvironment(),
+    )
     camp_session = workspace_session_name(server.group_name, slug)
 
     before = _sock_run(server.sock, "list-windows", "-t", camp_session).stdout.splitlines()
@@ -461,7 +469,10 @@ def test_a_stale_camp_binary_path_still_opens_a_window_instead_of_a_dead_key(ser
     slug = "feat-x"
     ws_dir = server.workspace_dir(slug)
     ws_dir.mkdir(parents=True)
-    create_workspace_session(server.group_name, slug, ws_dir, env=server.env, tmux=Tmux())
+    create_workspace_session(
+        server.group_name, slug, ws_dir, env=server.env, tmux=Tmux(),
+        session_env=SessionEnvironment(),
+    )
     camp_session = workspace_session_name(server.group_name, slug)
 
     # Overwrite the working binding just installed with one pointing at a
@@ -504,7 +515,10 @@ def test_the_first_install_on_a_server_notices_and_a_second_workspace_does_not(s
 
     ws_dir_a = server.workspace_dir("feat-a")
     ws_dir_a.mkdir(parents=True)
-    create_workspace_session(server.group_name, "feat-a", ws_dir_a, env=server.env, tmux=Tmux())
+    create_workspace_session(
+        server.group_name, "feat-a", ws_dir_a, env=server.env, tmux=Tmux(),
+        session_env=SessionEnvironment(),
+    )
     first_err = capsys.readouterr().err
     assert "installed" in first_err.lower()
 
@@ -512,7 +526,10 @@ def test_the_first_install_on_a_server_notices_and_a_second_workspace_does_not(s
 
     ws_dir_b = server.workspace_dir("feat-b")
     ws_dir_b.mkdir(parents=True)
-    create_workspace_session(server.group_name, "feat-b", ws_dir_b, env=server.env, tmux=Tmux())
+    create_workspace_session(
+        server.group_name, "feat-b", ws_dir_b, env=server.env, tmux=Tmux(),
+        session_env=SessionEnvironment(),
+    )
     second_err = capsys.readouterr().err
     assert "installed" not in second_err.lower(), (
         f"a second workspace on the SAME server must not re-notice: {second_err!r}"
@@ -540,12 +557,18 @@ def test_session_ids_never_collide_while_another_session_keeps_the_server_alive(
 
     ws_dir_a = server.workspace_dir("feat-a")
     ws_dir_a.mkdir(parents=True)
-    create_workspace_session(server.group_name, "feat-a", ws_dir_a, env=server.env, tmux=Tmux())
+    create_workspace_session(
+        server.group_name, "feat-a", ws_dir_a, env=server.env, tmux=Tmux(),
+        session_env=SessionEnvironment(),
+    )
     session_a = workspace_session_name(server.group_name, "feat-a")
 
     ws_dir_b = server.workspace_dir("feat-b")
     ws_dir_b.mkdir(parents=True)
-    create_workspace_session(server.group_name, "feat-b", ws_dir_b, env=server.env, tmux=Tmux())
+    create_workspace_session(
+        server.group_name, "feat-b", ws_dir_b, env=server.env, tmux=Tmux(),
+        session_env=SessionEnvironment(),
+    )
     session_b = workspace_session_name(server.group_name, "feat-b")
 
     first_id = _sock_run(
@@ -594,7 +617,10 @@ def test_killing_the_only_session_kills_the_server_and_a_recreate_restarts_the_i
     slug = "feat-x"
     ws_dir = server.workspace_dir(slug)
     ws_dir.mkdir(parents=True)
-    create_workspace_session(server.group_name, slug, ws_dir, env=server.env, tmux=Tmux())
+    create_workspace_session(
+        server.group_name, slug, ws_dir, env=server.env, tmux=Tmux(),
+        session_env=SessionEnvironment(),
+    )
     session_name = workspace_session_name(server.group_name, slug)
 
     first_id = _sock_run(
@@ -700,7 +726,10 @@ def test_unbind_stops_the_key_composing_in_the_camp_session_and_leaves_a_plain_o
     slug = "feat-x"
     ws_dir = server.workspace_dir(slug)
     ws_dir.mkdir(parents=True)
-    create_workspace_session(server.group_name, slug, ws_dir, env=server.env, tmux=Tmux())
+    create_workspace_session(
+        server.group_name, slug, ws_dir, env=server.env, tmux=Tmux(),
+        session_env=SessionEnvironment(),
+    )
     camp_session = workspace_session_name(server.group_name, slug)
 
     _sock_run(server.sock, "new-session", "-d", "-s", "plainsess", "-x", "80", "-y", "24")
@@ -765,7 +794,10 @@ def test_unbind_then_a_new_workspace_session_reinstalls_the_binding(server):
     slug = "feat-x"
     ws_dir = server.workspace_dir(slug)
     ws_dir.mkdir(parents=True)
-    create_workspace_session(server.group_name, slug, ws_dir, env=server.env, tmux=Tmux())
+    create_workspace_session(
+        server.group_name, slug, ws_dir, env=server.env, tmux=Tmux(),
+        session_env=SessionEnvironment(),
+    )
     camp_session = workspace_session_name(server.group_name, slug)
 
     _attach_and_send(
@@ -798,7 +830,10 @@ def test_unbind_does_not_kill_or_restart_the_server_and_every_session_survives(s
 
     ws_dir_a = server.workspace_dir("feat-a")
     ws_dir_a.mkdir(parents=True)
-    create_workspace_session(server.group_name, "feat-a", ws_dir_a, env=server.env, tmux=Tmux())
+    create_workspace_session(
+        server.group_name, "feat-a", ws_dir_a, env=server.env, tmux=Tmux(),
+        session_env=SessionEnvironment(),
+    )
 
     _sock_run(server.sock, "new-session", "-d", "-s", "plainsess", "-x", "80", "-y", "24")
 
@@ -830,7 +865,10 @@ def test_unbind_leaves_the_workspace_window_record_untouched(server):
     slug = "feat-x"
     ws_dir = server.workspace_dir(slug)
     ws_dir.mkdir(parents=True)
-    create_workspace_session(server.group_name, slug, ws_dir, env=server.env, tmux=Tmux())
+    create_workspace_session(
+        server.group_name, slug, ws_dir, env=server.env, tmux=Tmux(),
+        session_env=SessionEnvironment(),
+    )
     camp_session = workspace_session_name(server.group_name, slug)
 
     _attach_and_send(
@@ -902,7 +940,10 @@ def test_unbind_gives_the_operator_their_own_prefix_c_binding_back(server):
     slug = "feat-x"
     ws_dir = server.workspace_dir(slug)
     ws_dir.mkdir(parents=True)
-    create_workspace_session(server.group_name, slug, ws_dir, env=server.env, tmux=Tmux())
+    create_workspace_session(
+        server.group_name, slug, ws_dir, env=server.env, tmux=Tmux(),
+        session_env=SessionEnvironment(),
+    )
     camp_session = workspace_session_name(server.group_name, slug)
 
     during = _prefix_c_line(server.sock)
@@ -953,7 +994,10 @@ def test_a_second_workspace_does_not_overwrite_the_captured_operator_binding(ser
     for slug in ("feat-x", "feat-y"):
         ws_dir = server.workspace_dir(slug)
         ws_dir.mkdir(parents=True)
-        create_workspace_session(server.group_name, slug, ws_dir, env=server.env, tmux=Tmux())
+        create_workspace_session(
+            server.group_name, slug, ws_dir, env=server.env, tmux=Tmux(),
+            session_env=SessionEnvironment(),
+        )
 
     assert _run_camp_window_unbind(server).returncode == 0
     assert _prefix_c_line(server.sock) == before
@@ -974,7 +1018,10 @@ def test_unbind_leaves_the_key_unbound_when_the_operator_had_unbound_it(server):
 
     ws_dir = server.workspace_dir("feat-x")
     ws_dir.mkdir(parents=True)
-    create_workspace_session(server.group_name, "feat-x", ws_dir, env=server.env, tmux=Tmux())
+    create_workspace_session(
+        server.group_name, "feat-x", ws_dir, env=server.env, tmux=Tmux(),
+        session_env=SessionEnvironment(),
+    )
     assert _prefix_c_line(server.sock) is not None, "camp's install should have bound the key"
 
     assert _run_camp_window_unbind(server).returncode == 0

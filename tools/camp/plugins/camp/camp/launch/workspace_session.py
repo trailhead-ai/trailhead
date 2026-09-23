@@ -39,6 +39,18 @@ process won a create race) and `FAILED` write neither: a session this call
 did not create was either already marked by whoever did create it, or was
 never created at all.
 
+The same step states the session's own environment
+(:class:`~camp.launch.session.SessionEnvironment`): the harness's scrub as
+removals and the group's account binding as assignments, so every pane the
+session starts — including one the operator opens by hand — lands on the
+group's account, whatever the tmux server's global environment carries. The
+door resolves that environment before it creates anything, and refuses
+(`CREATE_REFUSED`) when it cannot bind a declared account. On the plain
+create path the first pane is restarted afterwards, because it started
+before the session could carry anything. A session tmux would not give its
+whole environment to is killed and reported FAILED, the same as one it
+would not mark.
+
 The server-global window-creation-key binding
 (:func:`~camp.launch.binding.install_window_key_binding`) is installed on
 every CREATED session too — idempotently; see that function's own
@@ -74,7 +86,7 @@ from ..group.window_record import read_window_record, window_record_path_for
 from .binding import install_window_key_binding
 from .eligibility import assert_not_a_credential_store
 from .naming import workspace_session_name
-from .session import LaunchError
+from .session import LaunchError, SessionEnvironment, resolve_session_environment
 from .tmux import DUPLICATE_SESSION_MARKER as _DUPLICATE_SESSION_MARKER
 from .tmux import Tmux, target
 from .window_reconcile import ReconcileOutcome, reconcile_workspace_record
@@ -126,8 +138,16 @@ def create_workspace_session(
     *,
     env: Mapping[str, str] | None = None,
     tmux: Tmux | None = None,
+    session_env: SessionEnvironment,
 ) -> WorkspaceSessionResult:
     """Create the tmux session for the workspace at *slug* in *group_name*.
+
+    *session_env* is stated on the session as part of marking it (see
+    :func:`_mark_and_bind`), and — when it states anything — the session's
+    first pane is then restarted so it too starts under that environment:
+    tmux started that pane's shell before the session existed to carry
+    anything, so without the restart it alone would keep whatever the tmux
+    server handed it.
 
     Raises :class:`~camp.launch.session.LaunchError` (via
     :func:`~camp.launch.eligibility.assert_not_a_credential_store`) before
@@ -149,9 +169,15 @@ def create_workspace_session(
     )
 
     if result.returncode == 0:
-        failure = _mark_and_bind(tmux, name, group_name, slug)
+        failure = _mark_and_bind(tmux, name, group_name, slug, session_env)
         if failure is not None:
             return failure
+        if session_env.removals or session_env.assignments:
+            answer = tmux.respawn_first_pane(name)
+            if answer is None or answer.returncode != 0:
+                return _abandon_half_marked_session(
+                    tmux, name, "restart the session's first pane", answer
+                )
         return WorkspaceSessionResult(WorkspaceSessionOutcome.CREATED, name)
 
     stderr = result.stderr or ""
@@ -161,10 +187,11 @@ def create_workspace_session(
 
 
 def _mark_and_bind(
-    tmux: Tmux, name: str, group_name: str, slug: str
+    tmux: Tmux, name: str, group_name: str, slug: str, session_env: SessionEnvironment
 ) -> WorkspaceSessionResult | None:
     """Mark a just-created session with the three `@camp_*` session-LOCAL
-    options and install the server-global window-creation-key binding.
+    options, state *session_env* on it — every removal, then every
+    assignment — and install the server-global window-creation-key binding.
 
     The one copy of this step, shared by `create_workspace_session`'s
     CREATED branch and resurrection's engine (`launch/resurrect.py`) after
@@ -174,8 +201,9 @@ def _mark_and_bind(
 
     Returns `None` on success. Returns the FAILED `WorkspaceSessionResult`
     from :func:`_abandon_half_marked_session` (session already killed) when
-    tmux refused to set one of the three options — the caller returns that
-    value as its own outcome rather than reporting CREATED.
+    tmux refused to set one of the three options or any part of the
+    environment — the caller returns that value as its own outcome rather
+    than reporting CREATED.
     """
     session_target = target(name)
     for key, value in (
@@ -185,16 +213,30 @@ def _mark_and_bind(
     ):
         answer = tmux.set_option(session_target, key, value)
         if answer is None or answer.returncode != 0:
-            return _abandon_half_marked_session(tmux, name, key, answer)
+            return _abandon_half_marked_session(
+                tmux, name, f"mark the session with {key}", answer
+            )
+    statements = [(var, ["-r", var]) for var in session_env.removals]
+    statements += [(var, [var, value]) for var, value in session_env.assignments]
+    for var, operand in statements:
+        answer = tmux.set_environment(name, operand)
+        if answer is None or answer.returncode != 0:
+            return _abandon_half_marked_session(
+                tmux, name, f"state {var} in the session environment", answer
+            )
     install_window_key_binding(tmux)
     return None
 
 
 def _abandon_half_marked_session(
-    tmux: Tmux, name: str, key: str, answer: object
+    tmux: Tmux, name: str, refused: str, answer: object
 ) -> WorkspaceSessionResult:
-    """Kill the session tmux just created but would not mark, and report
-    FAILED naming the option it refused.
+    """Kill the session tmux just created but would not finish making into
+    a workspace session, and report FAILED naming the step it *refused*.
+
+    The same holds for the session's environment: a session missing part
+    of it starts panes on the wrong account, or carrying a parent session's
+    markers, which is not a workspace session either.
 
     These three options are what MAKE a tmux session a camp workspace
     session — the key binding's `if-shell` guard dispatches on
@@ -223,7 +265,7 @@ def _abandon_half_marked_session(
     return WorkspaceSessionResult(
         WorkspaceSessionOutcome.FAILED,
         name,
-        error=f"camp: tmux refused to mark the session with {key} — {detail}",
+        error=f"camp: tmux refused to {refused} — {detail}",
     )
 
 
@@ -399,6 +441,13 @@ def create_or_connect_workspace_session(
     if present:
         return connected()
 
+    try:
+        session_env = resolve_session_environment(
+            harness, group, dict(env) if env is not None else None
+        )
+    except LaunchError as exc:
+        return _create_refused_probe(name, exc)
+
     record_path = window_record_path_for(workspace_dir)
     record = read_window_record(record_path)
     if record.status == "corrupt":
@@ -423,6 +472,7 @@ def create_or_connect_workspace_session(
                 tmux=tmux,
                 harness=harness,
                 group=group,
+                session_env=session_env,
             )
         except LaunchError as exc:
             return _create_refused_probe(name, exc)
@@ -435,7 +485,9 @@ def create_or_connect_workspace_session(
         return DoorProbe(DoorState.RESURRECTED, name, resurrection=resurrection)
 
     try:
-        result = create_workspace_session(group_name, slug, workspace_dir, env=env, tmux=tmux)
+        result = create_workspace_session(
+            group_name, slug, workspace_dir, env=env, tmux=tmux, session_env=session_env
+        )
     except LaunchError as exc:
         return _create_refused_probe(name, exc)
     except (OSError, subprocess.TimeoutExpired) as exc:

@@ -1,14 +1,13 @@
-"""Real-tmux end-to-end proof — `camp attach` is the only way a
-conversation window ever gets composed, `camp launch` is a dead redirect,
-and a group's stale `[launch] roots` key is tolerated with a notice on
-every `camp` invocation that reads it.
+"""Real-tmux end-to-end proof — `camp attach` brings up a workspace
+session whose every pane starts on the group's account, `camp launch` is a
+dead redirect, and a group's stale `[launch] roots` key is tolerated with a
+notice on every `camp` invocation that reads it.
 
 Drives a REAL tmux 3.7c server on a throwaway `-L` socket, the same
-redirection trick `test_window_binding_end_to_end.py` and
-`test_stop_workspace_real_tmux.py` use: `_REAL_TMUX` is captured by
-absolute path at import time, before the autouse `_sandbox_tmux` fixture in
-`conftest.py` rewrites `PATH` to a no-server stub for the rest of the
-suite, and a thin `tmux` wrapper first on `PATH` transparently redirects
+redirection trick `test_stop_workspace_real_tmux.py` uses: `_REAL_TMUX` is
+captured by absolute path at import time, before the autouse `_sandbox_tmux`
+fixture in `conftest.py` rewrites `PATH` to a no-server stub for the rest of
+the suite, and a thin `tmux` wrapper first on `PATH` transparently redirects
 every call camp's OWN production code makes onto the isolated socket.
 
 `camp attach` is driven through the REAL CLI entry point
@@ -24,36 +23,27 @@ boundary, faked there for the same reason `test_resurrect_real_tmux.py`
 fakes it: only the harness knows a transcript path and a resume argv, and
 nothing else about tmux is stood in for.
 
-The account-binding tests deliberately do NOT fake the harness. A group's
+The account tests deliberately do NOT fake the harness. A group's
 `[launch] account` is bound by the REAL `camp.launch.profile.harness_for`
 resolving the REAL `ClaudeCodeHarness` (the group's `[harness]` block is
 omitted, so `resolve_harness_profile` defaults `binary` to `"claude"`,
 which `trailhead.harness.get_harness` resolves unconditionally — a pure
-registry lookup, no filesystem check). That resolution happens in TWO
-places for one `camp attach` call: in-process, building the addressable
-pool `camp attach` reads before it ever reaches the door (harmless here,
-answered by a tiny `claude` stub binary on `PATH` that satisfies
-`ClaudeCodeHarness.session_enumerate`'s `claude agents --json …` call with
-an empty list); and — the one that matters — inside the REAL, SEPARATE
-`camp window-dispatch` subprocess the window-creation key's `run-shell`
-spawns when a real key is pressed through a genuine attached pty client
-(never `send-keys` — see `test_window_binding_end_to_end.py`'s module
-docstring for why that distinction is load-bearing). That subprocess reads
-the group's `[launch] account` from the REAL toml file on disk (the tmux
-SERVER's own environment, fixed at first start via `new_session(env=...)`,
-carries `CAMP_CONFIG_DIR` into it) and resolves the SAME real harness fresh
-— nothing in this test process reaches across that process boundary.
+registry lookup, no filesystem check). A tiny `claude` stub on `PATH`
+answers `ClaudeCodeHarness.session_enumerate`'s `claude agents --json …`
+call with an empty list, since `camp attach` builds its addressable pool
+before it reaches the door. What each test asserts on is the pane's OWN
+environment, dumped by the pane itself — never what camp reports it set.
 """
 
 from __future__ import annotations
 
 import importlib
 import os
-import shlex
 import shutil
 import stat
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -71,11 +61,7 @@ if str(_TESTS_DIR) not in sys.path:
 _REAL_TMUX = shutil.which("tmux")
 
 from test_stop_cli import _run  # noqa: E402
-from test_window_binding_end_to_end import (  # noqa: E402
-    _attach_and_send,
-    _record_entries_reach,
-    _sock_run,
-)
+from test_window_binding_end_to_end import _sock_run  # noqa: E402
 from test_resurrect_real_tmux import (  # noqa: E402
     _FakeHarness,
     _capture_pane,
@@ -203,108 +189,100 @@ def _wire_group_listing(monkeypatch: pytest.MonkeyPatch, *, ws_dir: Path, slug: 
     monkeypatch.setattr(lifecycle, "cmd_ls_group", fake_cmd_ls_group)
 
 
-def _pane_start_command(sock: str, window_id: str) -> str:
-    result = _sock_run(sock, "list-panes", "-t", window_id, "-F", "#{pane_start_command}")
-    assert result.returncode == 0, result.stderr
-    return result.stdout.strip()
+# ---------------------------------------------------------------------------
+# The session carries the account: every pane it starts — its first one, and
+# one the operator opens by hand — lands on the group's declared account with
+# the harness's scrub applied, even on a tmux server whose own global
+# environment carries a parent session's markers and a different account.
+# ---------------------------------------------------------------------------
 
 
-def _press_the_key_and_wait(sock: str, session: str, ws_dir: Path) -> None:
-    """Fires the real window-creation key through a genuine attached pty
-    client (never `send-keys` — see `test_window_binding_end_to_end.py`'s
-    module docstring on why that distinction is load-bearing) and waits for
-    the composed window's entry to land in the workspace's window record."""
-    _attach_and_send(
-        sock,
-        session,
-        b"\x02c",
-        settle=1.5,
-        until=_record_entries_reach(ws_dir, 1),
+def _pane_environment(tmp_path: Path, run) -> dict[str, str]:
+    """Have a pane dump its environment to a file via *run(path)*, wait for
+    it, and parse it — the pane's own view, not anything camp reports."""
+    dump = tmp_path / f"env-{len(list(tmp_path.glob('env-*')))}.txt"
+    run(dump)
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        if dump.exists() and dump.read_text(encoding="utf-8").endswith("\n"):
+            break
+        time.sleep(0.05)
+    lines = dump.read_text(encoding="utf-8").splitlines()
+    return dict(line.split("=", 1) for line in lines if "=" in line)
+
+
+def _first_pane_environment(tmp_path: Path, sock: str, session: str) -> dict[str, str]:
+    first = _list_windows(sock, session)[0][0]
+    _wait_for_shell(sock, first, frozenset({"sh", "bash", "zsh", "fish", "dash"}))
+    return _pane_environment(
+        tmp_path,
+        lambda dump: _sock_run(sock, "send-keys", "-t", first, f"env > {dump}", "Enter"),
     )
 
 
-# ---------------------------------------------------------------------------
-# A declared (or absent) account, real key press, real
-# `camp window-dispatch` subprocess, real pane_start_command.
-# ---------------------------------------------------------------------------
+def _hand_opened_window_environment(tmp_path: Path, sock: str, session: str) -> dict[str, str]:
+    return _pane_environment(
+        tmp_path,
+        lambda dump: _sock_run(sock, "new-window", "-t", f"={session}", f"env > {dump}; sleep 30"),
+    )
+
+
+def _attach_on_a_server_carrying_a_parent_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, make_server, *, launch_block: str
+):
+    """Start the workspace session through the real `camp attach` from a
+    process environment that carries a parent Claude session's marker and a
+    different account — exactly what a tmux server started from inside an
+    agent session inherits as its global environment."""
+    from camp.launch.naming import workspace_session_name
+
+    server = make_server(launch_block=launch_block)
+    monkeypatch.setenv("CLAUDECODE", "1")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "someone-elses-account"))
+    slug = "camp-cli"
+    ws_dir = server.workspace_dir(slug)
+    ws_dir.mkdir(parents=True)
+    _wire_group_listing(monkeypatch, ws_dir=ws_dir, slug=slug)
+
+    assert _run(["attach", slug, "--group", server.group_name], monkeypatch) == 0
+
+    session = workspace_session_name(server.group_name, slug)
+    global_env = _sock_run(server.sock, "show-environment", "-g").stdout
+    assert "CLAUDECODE=1" in global_env, "the server itself must carry the parent marker"
+    return server, session
 
 
 @pytest.mark.skipif(_REAL_TMUX is None, reason="no tmux binary on PATH (captured at import time)")
-def test_a_group_declaring_an_account_composes_the_pane_with_the_account_bound(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, make_server
+@pytest.mark.parametrize("pane", ["first", "hand-opened"])
+def test_a_declared_accounts_session_starts_every_pane_on_that_account(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, make_server, pane: str
 ) -> None:
-    from camp.launch.naming import workspace_session_name
-    from camp.group.window_record import read_window_record, window_record_path_for
-
     account_dir = str(tmp_path / "acct-a")
-    server = make_server(launch_block=f'[launch]\naccount = "{account_dir}"\n')
-    slug = "camp-cli"
-    ws_dir = server.workspace_dir(slug)
-    ws_dir.mkdir(parents=True)
-    _wire_group_listing(monkeypatch, ws_dir=ws_dir, slug=slug)
+    server, session = _attach_on_a_server_carrying_a_parent_session(
+        tmp_path, monkeypatch, make_server, launch_block=f'[launch]\naccount = "{account_dir}"\n'
+    )
 
-    code = _run(["attach", slug, "--group", server.group_name], monkeypatch)
-    assert code == 0
+    read = _first_pane_environment if pane == "first" else _hand_opened_window_environment
+    env = read(tmp_path, server.sock, session)
 
-    session = workspace_session_name(server.group_name, slug)
-    _press_the_key_and_wait(server.sock, session, ws_dir)
-
-    rows = _list_windows(server.sock, session)
-    assert len(rows) == 2, rows
-    composed_id = rows[1][0]
-
-    pane_command = _pane_start_command(server.sock, composed_id)
-    tokens = shlex.split(pane_command)
-
-    assignment = f"CLAUDE_CONFIG_DIR={account_dir}"
-    assert assignment in tokens, tokens
-    scrub_indices = [i for i, t in enumerate(tokens) if t == "-u"]
-    assert scrub_indices, tokens
-    assignment_index = tokens.index(assignment)
-    session_id_index = tokens.index("--session-id")
-    assert max(scrub_indices) < assignment_index < session_id_index, tokens
-    assert "--remote-control" not in tokens
-    assert "--name" not in tokens
-
-    record = read_window_record(window_record_path_for(ws_dir))
-    assert record.status == "ok"
-    assert len(record.entries) == 1, record
-    assert record.entries[0].conversation_id is not None
+    assert env.get("CLAUDE_CONFIG_DIR") == account_dir
+    assert "CLAUDECODE" not in env
 
 
 @pytest.mark.skipif(_REAL_TMUX is None, reason="no tmux binary on PATH (captured at import time)")
-def test_a_group_declaring_no_account_composes_the_pane_with_no_assignment(
-    monkeypatch: pytest.MonkeyPatch, make_server
+@pytest.mark.parametrize("pane", ["first", "hand-opened"])
+def test_a_group_declaring_no_account_starts_every_pane_on_the_default_account(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, make_server, pane: str
 ) -> None:
-    from camp.launch.naming import workspace_session_name
-
-    server = make_server(launch_block="")
-    slug = "camp-cli"
-    ws_dir = server.workspace_dir(slug)
-    ws_dir.mkdir(parents=True)
-    _wire_group_listing(monkeypatch, ws_dir=ws_dir, slug=slug)
-
-    code = _run(["attach", slug, "--group", server.group_name], monkeypatch)
-    assert code == 0
-
-    session = workspace_session_name(server.group_name, slug)
-    _press_the_key_and_wait(server.sock, session, ws_dir)
-
-    rows = _list_windows(server.sock, session)
-    assert len(rows) == 2, rows
-    composed_id = rows[1][0]
-
-    pane_command = _pane_start_command(server.sock, composed_id)
-    tokens = shlex.split(pane_command)
-
-    assert not any(t.startswith("CLAUDE_CONFIG_DIR=") for t in tokens), tokens
-    assert "CLAUDE_CONFIG_DIR" in tokens, (
-        "the default is still scrubbed even with no declared account",
-        tokens,
+    server, session = _attach_on_a_server_carrying_a_parent_session(
+        tmp_path, monkeypatch, make_server, launch_block=""
     )
-    assert "--session-id" in tokens
-    assert "--remote-control" not in tokens
-    assert "--name" not in tokens
+
+    read = _first_pane_environment if pane == "first" else _hand_opened_window_environment
+    env = read(tmp_path, server.sock, session)
+
+    assert "CLAUDE_CONFIG_DIR" not in env, "the inherited account must not leak into the pane"
+    assert "CLAUDECODE" not in env
 
 
 # ---------------------------------------------------------------------------

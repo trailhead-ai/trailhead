@@ -139,6 +139,8 @@ class _DoorTmux:
         self.switch_client_calls: list[str] = []
         self.set_option_calls: list[dict[str, object]] = []
         self.install_binding_calls: list[str] = []
+        self.set_environment_calls: list[tuple[str, tuple]] = []
+        self.respawn_calls: list[str] = []
         self.list_windows_calls: list[str] = []
 
     def has_session(self, name: str) -> bool | None:
@@ -180,6 +182,14 @@ class _DoorTmux:
 
     def set_option(self, target, key, value, *, timeout=None):
         self.set_option_calls.append({"target": target, "key": key, "value": value})
+        return subprocess.CompletedProcess(args=["tmux"], returncode=0, stdout="", stderr="")
+
+    def set_environment(self, name, operand, *, env=None, timeout=None):
+        self.set_environment_calls.append((name, tuple(operand)))
+        return subprocess.CompletedProcess(args=["tmux"], returncode=0, stdout="", stderr="")
+
+    def respawn_first_pane(self, name, *, timeout=None):
+        self.respawn_calls.append(name)
         return subprocess.CompletedProcess(args=["tmux"], returncode=0, stdout="", stderr="")
 
     def list_window_binding(self):

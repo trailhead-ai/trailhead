@@ -23,6 +23,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 
@@ -173,3 +174,64 @@ def resolve_launch_environment(
     launch_env = {k: v for k, v in env.items() if k not in scrub_set}
     launch_env.update(binding)
     return account, binding, tuple(scrub), launch_env
+
+
+@dataclass(frozen=True)
+class SessionEnvironment:
+    """The environment statements a workspace's tmux session carries, so
+    every pane it starts — the first one, and any the operator opens by
+    hand — begins on the group's account with the harness's scrub applied.
+
+    ``removals`` are names the session hides from every pane it starts
+    (``tmux set-environment -r``), even when the tmux server's own global
+    environment carries them. ``assignments`` are ``(name, value)`` pairs
+    it sets. A name is never in both: an assignment already replaces
+    whatever the pane would otherwise inherit.
+    """
+
+    removals: tuple[str, ...] = ()
+    assignments: tuple[tuple[str, str], ...] = ()
+
+
+def resolve_session_environment(
+    harness, group: dict | None, env: dict[str, str] | None = None
+) -> SessionEnvironment:
+    """The :class:`SessionEnvironment` a workspace session for *group*
+    carries — resolved through :func:`resolve_launch_environment`, the same
+    resolution every other account-binding surface reads, so the account a
+    hand-opened pane lands on and the account the workspace was trusted in
+    cannot disagree.
+
+    Why the session and not each command: a tmux pane inherits the tmux
+    SERVER's global environment, fixed by whichever process started that
+    server. A server started from inside a harness session carries that
+    session's markers and account into every pane opened on it. Stating the
+    scrub and the binding on the workspace session itself overrides that
+    for every pane the session starts, whoever started the server.
+
+    *group* ``None`` (a caller that could not resolve one) states nothing.
+    *harness* ``None`` states nothing when the group declares no account,
+    and raises :class:`LaunchError` when it does: an unrecognized harness
+    must never silently ignore a declared account.
+    """
+    if group is None:
+        return SessionEnvironment()
+    if harness is None:
+        account = (group.get("launch") or {}).get("account")
+        if account is not None:
+            raise LaunchError(
+                "camp: cannot bind an account — no harness is configured for "
+                f"this group, so camp cannot bind the declared account {account}"
+            )
+        return SessionEnvironment()
+
+    from .profile import resolve_harness_profile
+
+    profile = resolve_harness_profile(group)
+    _account, binding, scrub, _launch_env = resolve_launch_environment(
+        harness, profile, group, env
+    )
+    return SessionEnvironment(
+        removals=tuple(name for name in scrub if name not in binding),
+        assignments=tuple(binding.items()),
+    )
