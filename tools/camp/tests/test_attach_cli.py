@@ -53,7 +53,7 @@ from test_launch_stop import (  # noqa: E402
     _FakeTmux,
     _env,
     _group,
-    _launched_pane,
+    _resumed_pane,
     _record,
     _transcript,
     _workspace,
@@ -106,7 +106,7 @@ def _wire_local_session(monkeypatch, *, tmp_path: Path, live: bool = True):
     env = _env(state)
     harness = _Harness([_transcript(_UUID_A, ws)])
     derived = f"camp-feat-a-{_UUID_A[:8]}"
-    tmux = _FakeTmux({derived: _launched_pane(harness, _UUID_A, derived, ws)})
+    tmux = _FakeTmux({derived: _resumed_pane(harness, _UUID_A)})
 
     cli_session = _cli_session_module()
     launch_session = _launch_stop = _launch_session_module()
@@ -136,8 +136,8 @@ def _wire_local_ambiguous(monkeypatch, *, tmp_path: Path):
     derived_b = f"camp-feat-b-{_UUID_B[:8]}"
     tmux = _FakeTmux(
         {
-            derived_a: _launched_pane(harness, _UUID_A, derived_a, ws_a),
-            derived_b: _launched_pane(harness, _UUID_B, derived_b, ws_b),
+            derived_a: _resumed_pane(harness, _UUID_A),
+            derived_b: _resumed_pane(harness, _UUID_B),
         }
     )
 
@@ -456,6 +456,51 @@ def test_ref_form_ambiguous_match_prints_candidates_and_exits_2(
     assert f"camp-feat-a-{_UUID_A[:8]}" in captured.out
     assert f"camp-feat-b-{_UUID_B[:8]}" in captured.out
     assert "2 sessions" in captured.err
+
+
+def test_ref_form_not_running_names_a_verb_camp_still_dispatches(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The plain `camp attach <ref>` form's own `NotRunning` refusal (distinct
+    from the `-a` form's) must name a verb camp still dispatches, varied
+    across two session ids."""
+    _isolated_env(tmp_path, monkeypatch)
+    _wire_local_stopped_session(monkeypatch, tmp_path=tmp_path)
+
+    code = _run(["attach", _UUID_A[:8]], monkeypatch)
+
+    err = capsys.readouterr().err
+    assert code != 0
+    assert "not running" in err
+    assert "camp sessions" in err
+    assert "camp attach" in err
+    assert _UUID_A in err
+
+
+def test_ref_form_not_running_varies_with_the_session_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """Same refusal, a different session id: the message names the id it
+    actually resolved, not a fixed literal."""
+    _isolated_env(tmp_path, monkeypatch)
+    state = tmp_path / "state"
+    ws = _workspace(state, "g", "feat-b")
+    harness = _Harness([_transcript(_UUID_B, ws)])
+    tmux = _FakeTmux({})
+    cli_session = _cli_session_module()
+    launch_session = _launch_session_module()
+    stop_module = _launch_stop_module()
+    monkeypatch.setattr(cli_session, "_addressable_harnesses", lambda groups, **k: [harness])
+    monkeypatch.setattr(cli_session, "_parsable_groups", lambda: [_group("g")])
+    monkeypatch.setattr(launch_session, "enumerate_records", lambda h, ws_, env_: [])
+    monkeypatch.setattr(stop_module, "Tmux", lambda *a, **k: tmux)
+
+    code = _run(["attach", _UUID_B[:8]], monkeypatch)
+
+    err = capsys.readouterr().err
+    assert code != 0
+    assert _UUID_B in err
+    assert _UUID_A not in err
 
 
 def test_resolve_json_form_reaches_the_machine_readable_probe(
@@ -795,8 +840,8 @@ def test_dash_a_ref_form_with_no_hosts_declared_still_reports_a_local_ambiguity(
 def test_dash_a_ref_form_with_no_hosts_declared_still_reports_local_not_running(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
-    """A ref that resolves locally to a stopped session must refuse naming
-    `camp launch --resume`, not the generic 'no machine matches' wording —
+    """A ref that resolves locally to a stopped session must refuse naming a
+    verb camp still dispatches, not the generic 'no machine matches' wording —
     the same distinction `camp attach <ref>` (no `-a`) already draws."""
     _isolated_env(tmp_path, monkeypatch)
     _wire_local_stopped_session(monkeypatch, tmp_path=tmp_path)
@@ -812,7 +857,8 @@ def test_dash_a_ref_form_with_no_hosts_declared_still_reports_local_not_running(
     err = capsys.readouterr().err
     assert code != 0
     assert "not running" in err
-    assert "camp launch --resume" in err
+    assert "camp sessions" in err
+    assert "camp attach" in err
 
 
 def test_dash_a_ref_form_with_a_remote_not_running_state_hands_off_rather_than_a_generic_no_match(
@@ -822,9 +868,9 @@ def test_dash_a_ref_form_with_a_remote_not_running_state_hands_off_rather_than_a
     `not_running` state is a match (a session THAT machine holds, just
     stopped) — never the generic 'no session on any declared machine
     matches'. `--host`'s own posture applies: the far side resolves and
-    refuses in its own words (its own `camp launch --resume` hint), so the
-    local probe hands off rather than fabricating a message about a machine
-    it never fully resolved."""
+    refuses in its own words (its own not-running hint), so the local probe
+    hands off rather than fabricating a message about a machine it never
+    fully resolved."""
     _hosts_env(tmp_path, monkeypatch, "andromeda")
     _wire_local_session(monkeypatch, tmp_path=tmp_path)  # local: no match for this ref
     transport = _host_transport_module()

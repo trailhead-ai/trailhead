@@ -7,11 +7,11 @@ Test contract:
 - An ambiguous ref comes back as the resolver's own ``Ambiguous``, with no
   signal sent: park and resume share one resolver and one ambiguity contract.
 - Ownership is proven from the pane command, not from the name. A pane
-  occupying the derived name whose command is anything else is refused. BOTH
-  shapes camp composes are accepted — the launch shape and the resume shape —
-  because every session that has ever been resumed carries the second one, and
-  a check written against the launch shape alone would refuse the whole
-  steady-state population park creates.
+  occupying the derived name whose command is anything else is refused. Only
+  the resume shape is accepted — every session that has ever been resumed
+  carries it, which is the steady-state population park creates. A pane
+  carrying the retired launch composition (`--remote-control`/`--name`) is
+  refused: no method on the seam composes that shape any more.
 - The concierge anchor is refused by an explicit gate, proven with the anchor
   in the candidate pool AND owning a tmux session whose command matches — so
   the refusal is the gate's doing, not a side effect of the anchor happening to
@@ -110,17 +110,9 @@ def _record(session_id: str, cwd: Path):
 
 
 class _FakeHarness:
-    """Stand-in for the harness seam: the two launch shapes plus the scrub."""
+    """Stand-in for the harness seam: the resume shape plus the scrub."""
 
     name = "fakeharness"
-
-    def session_launch(
-        self, workspace, session_id, *, session_name=None, settings_path=None
-    ):
-        argv = ["fakeharness", "--control", "--sid", session_id]
-        if session_name is not None:
-            argv += ["--name", session_name]
-        return argv
 
     def session_resume(self, session_id):
         return ["fakeharness", "--reenter", session_id]
@@ -175,10 +167,12 @@ class _FakeTmux:
         )
 
 
-def _launched_pane(harness, session_id: str, derived_name: str, workspace: Path) -> str:
-    """The pane command camp composes for a fresh launch."""
+def _old_launch_pane(harness, session_id: str, derived_name: str) -> str:
+    """A pane command carrying `--remote-control` and `--name` — the shape no
+    method on the seam composes any more. Spelled as a literal argv, since
+    there is no method left to ask for it."""
     scrub = " ".join(f"-u {name}" for name in harness.session_launch_env_unset())
-    argv = harness.session_launch(workspace, session_id, session_name=derived_name)
+    argv = ["fakeharness", "--remote-control", "--session-id", session_id, "--name", derived_name]
     return f"env {scrub} " + " ".join(argv)
 
 
@@ -213,7 +207,7 @@ def _fixture(tmp_path: Path, *, slug: str = "feat-a", session_id: str = _UUID_A)
     env = _env(state)
     harness = _FakeHarness()
     derived = f"camp-{slug}-{session_id[:8]}"
-    tmux = _FakeTmux({derived: _launched_pane(harness, session_id, derived, ws)})
+    tmux = _FakeTmux({derived: _resumed_pane(harness, session_id)})
     return state, ws, env, harness, derived, tmux
 
 
@@ -303,26 +297,42 @@ def test_a_pane_holding_the_name_with_a_foreign_command_is_refused(tmp_path: Pat
     assert tmux.killed == []
 
 
-def test_a_resumed_panes_command_is_owned_too(tmp_path: Path) -> None:
-    """A resumed pane carries a DIFFERENT shape — and is the steady state park
-    creates. A check bound to the launch shape alone would refuse every session
-    that has ever been resumed."""
-    from camp.launch.stop import Stopped
+def test_the_old_launch_shape_is_refused_the_resume_shape_is_owned(
+    tmp_path: Path,
+) -> None:
+    """Two inputs, two answers. The old launch composition — a literal fixture
+    argv carrying `--remote-control` and `--name`, since no method on the seam
+    composes it any more — is refused. The resume shape, behind the same
+    scrub prefix, is owned: it is the steady state every parked-and-resumed
+    session carries."""
+    from camp.launch.stop import REFUSED_NOT_CAMP_LAUNCHED, Refused, Stopped
 
     state, ws, env, harness, derived, _tmux = _fixture(tmp_path)
-    tmux = _FakeTmux({derived: _resumed_pane(harness, _UUID_A)})
 
-    outcome = _stop(
+    old_shape_tmux = _FakeTmux({derived: _old_launch_pane(harness, _UUID_A, derived)})
+    old_shape_outcome = _stop(
         _UUID_A[:8],
-        tmux=tmux,
+        tmux=old_shape_tmux,
         transcripts=[_transcript(_UUID_A, ws)],
         live_records=[_record(_UUID_A, ws)],
         env=env,
         harness=harness,
     )
+    assert isinstance(old_shape_outcome, Refused)
+    assert old_shape_outcome.reason == REFUSED_NOT_CAMP_LAUNCHED
+    assert old_shape_tmux.killed == []
 
-    assert isinstance(outcome, Stopped)
-    assert tmux.killed == [derived]
+    resume_tmux = _FakeTmux({derived: _resumed_pane(harness, _UUID_A)})
+    resume_outcome = _stop(
+        _UUID_A[:8],
+        tmux=resume_tmux,
+        transcripts=[_transcript(_UUID_A, ws)],
+        live_records=[_record(_UUID_A, ws)],
+        env=env,
+        harness=harness,
+    )
+    assert isinstance(resume_outcome, Stopped)
+    assert resume_tmux.killed == [derived]
 
 
 def test_a_camp_shaped_pane_carrying_another_sessions_id_is_refused(tmp_path: Path) -> None:
@@ -368,7 +378,7 @@ def test_the_concierge_anchor_is_refused_even_when_it_owns_a_matching_session(
 
     harness = _FakeHarness()
     derived = f"camp-concierge-{_UUID_ANCHOR[:8]}"
-    tmux = _FakeTmux({derived: _launched_pane(harness, _UUID_ANCHOR, derived, ws)})
+    tmux = _FakeTmux({derived: _resumed_pane(harness, _UUID_ANCHOR)})
 
     outcome = _stop(
         _UUID_ANCHOR[:8],
@@ -434,7 +444,7 @@ def test_a_session_still_present_after_the_kill_is_not_a_success(tmp_path: Path)
 
     state, ws, env, harness, derived, _tmux = _fixture(tmp_path)
     tmux = _FakeTmux(
-        {derived: _launched_pane(harness, _UUID_A, derived, ws)}, undead=True
+        {derived: _resumed_pane(harness, _UUID_A)}, undead=True
     )
 
     outcome = _stop(
@@ -579,7 +589,7 @@ def test_a_tmux_that_never_answers_is_refused_rather_than_reported_stopped(
     from camp.launch.stop import REFUSED_TMUX_UNANSWERED, Refused
 
     state, ws, env, harness, derived, _tmux = _fixture(tmp_path)
-    tmux = _MuteTmux({derived: _launched_pane(harness, _UUID_A, derived, ws)})
+    tmux = _MuteTmux({derived: _resumed_pane(harness, _UUID_A)})
 
     outcome = _stop(
         _UUID_A[:8],
@@ -609,7 +619,7 @@ def test_a_tmux_that_stops_answering_after_the_kill_is_refused_not_stopped(
                 return None
             return super().has_session(name)
 
-    tmux = _GoesQuiet({derived: _launched_pane(harness, _UUID_A, derived, ws)})
+    tmux = _GoesQuiet({derived: _resumed_pane(harness, _UUID_A)})
 
     outcome = _stop(
         _UUID_A[:8],
@@ -647,7 +657,7 @@ def test_the_re_poll_is_bounded_in_wall_clock_not_in_sleep_time(tmp_path: Path) 
             clock["now"] += stop.TMUX_TIMEOUT_SECONDS
             return True
 
-    tmux = _SlowToAnswer({derived: _launched_pane(harness, _UUID_A, derived, ws)})
+    tmux = _SlowToAnswer({derived: _resumed_pane(harness, _UUID_A)})
 
     def _sleep(seconds: float) -> None:
         clock["now"] += seconds
@@ -692,7 +702,7 @@ def test_a_pane_question_tmux_never_answered_is_refused_as_unanswered(
         def pane_command(self, name: str):
             return stop.UNANSWERED
 
-    tmux = _QuietPane({derived: _launched_pane(harness, _UUID_A, derived, ws)})
+    tmux = _QuietPane({derived: _resumed_pane(harness, _UUID_A)})
 
     outcome = _stop(
         _UUID_A[:8],
@@ -763,12 +773,10 @@ def test_a_harness_that_raises_composing_the_scrub_refuses_rather_than_raising(
 # ---------------------------------------------------------------------------
 
 
-def _launched_pane_with_account(
-    harness, session_id: str, derived_name: str, workspace: Path, account_dir: str
-) -> str:
-    """The pane command camp composes when an account binding rides the pane."""
+def _resumed_pane_with_account(harness, session_id: str, account_dir: str) -> str:
+    """The pane command camp composes for a resume when an account binding rides the pane."""
     scrub = " ".join(f"-u {name}" for name in harness.session_launch_env_unset())
-    argv = harness.session_launch(workspace, session_id, session_name=derived_name)
+    argv = harness.session_resume(session_id)
     return f"env {scrub} {ACCOUNT_KEY}={account_dir} " + " ".join(argv)
 
 
@@ -784,8 +792,8 @@ def test_a_pane_carrying_the_account_binding_is_still_camp_launched(
     state, ws, env, harness, derived, _tmux = _fixture(tmp_path)
     tmux = _FakeTmux(
         {
-            derived: _launched_pane_with_account(
-                harness, _UUID_A, derived, ws, "/home/someone/.account-other"
+            derived: _resumed_pane_with_account(
+                harness, _UUID_A, "/home/someone/.account-other"
             )
         }
     )
@@ -811,8 +819,8 @@ def test_a_defaulted_pane_is_recognized_too(tmp_path: Path) -> None:
     state, ws, env, harness, derived, _tmux = _fixture(tmp_path)
     tmux = _FakeTmux(
         {
-            derived: _launched_pane_with_account(
-                harness, _UUID_A, derived, ws, env["HOME"]
+            derived: _resumed_pane_with_account(
+                harness, _UUID_A, env["HOME"]
             )
         }
     )
@@ -836,7 +844,7 @@ def test_an_unrecognized_extra_operand_is_still_not_camp_launched(tmp_path: Path
     never composed."""
     state, ws, env, harness, derived, _tmux = _fixture(tmp_path)
     scrub = " ".join(f"-u {n}" for n in harness.session_launch_env_unset())
-    argv = harness.session_launch(ws, _UUID_A, session_name=derived)
+    argv = harness.session_resume(_UUID_A)
     pane = f"env {scrub} SOMETHING_ELSE=/tmp " + " ".join(argv)
     tmux = _FakeTmux({derived: pane})
 
@@ -858,8 +866,8 @@ def test_a_relative_account_operand_is_not_camp_launched(tmp_path: Path) -> None
     state, ws, env, harness, derived, _tmux = _fixture(tmp_path)
     tmux = _FakeTmux(
         {
-            derived: _launched_pane_with_account(
-                harness, _UUID_A, derived, ws, "relative/.account"
+            derived: _resumed_pane_with_account(
+                harness, _UUID_A, "relative/.account"
             )
         }
     )
@@ -897,8 +905,8 @@ def test_a_declared_account_pane_is_owned_even_when_the_default_states_nothing(
     harness = _AbsentDefault()
     tmux = _FakeTmux(
         {
-            derived: _launched_pane_with_account(
-                harness, _UUID_A, derived, ws, "/home/someone/.account-other"
+            derived: _resumed_pane_with_account(
+                harness, _UUID_A, "/home/someone/.account-other"
             )
         }
     )
@@ -943,8 +951,8 @@ def test_a_stop_time_environment_cannot_cost_the_probe_its_keys(
     harness = _RefusesAConflictingEnv()
     tmux = _FakeTmux(
         {
-            derived: _launched_pane_with_account(
-                harness, _UUID_A, derived, ws, "/home/someone/.account-other"
+            derived: _resumed_pane_with_account(
+                harness, _UUID_A, "/home/someone/.account-other"
             )
         }
     )
@@ -979,7 +987,7 @@ def test_a_harness_that_raises_composing_the_binding_refuses_rather_than_raising
 
     broken = _BrokenBinding()
     tmux = _FakeTmux(
-        {derived: _launched_pane_with_account(broken, _UUID_A, derived, ws, env["HOME"])}
+        {derived: _resumed_pane_with_account(broken, _UUID_A, env["HOME"])}
     )
 
     outcome = _stop(
@@ -1386,7 +1394,7 @@ class TestStopPollBudget:
         root.mkdir()
         state, ws, env, harness, derived, _unused = _fixture(root)
         tmux = _CountingTmux(
-            {derived: _launched_pane(harness, _UUID_A, derived, ws)}, undead=True
+            {derived: _resumed_pane(harness, _UUID_A)}, undead=True
         )
 
         outcome = _stop(

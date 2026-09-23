@@ -13,28 +13,26 @@ re-exports it (`Tmux`, `TmuxSession`, `SessionListing`, `UNANSWERED`,
 unchanged. New code should import the seam from `camp.launch.tmux` directly.
 
 Resolution is `recovery.resolve_session_ref` unforked, so `camp kill` and
-`camp launch --resume` share one resolver and one ambiguity contract. An
+`camp attach` share one resolver and one ambiguity contract. An
 `Ambiguous` or `NoMatch` from that resolver is returned as-is rather than
 re-wrapped: a ref is never guessed, and the caller renders the same rows the
-resume surface already renders.
+attach surface already renders.
 
 Ownership, and what it is not
 -----------------------------
 A name match is not proof of ownership. Before signalling, camp reads the
-target pane's start command and requires it to be a command camp itself would
-have composed for THIS session — the seam's own argv, behind the seam's own
-`env -u` scrub. Two shapes qualify, and both must: `session_launch(...)` for a
-freshly launched pane and `session_resume(...)` for one that has been resumed.
-The second is not an edge case — every session that has ever been parked and
-brought back carries it, which is the steady-state population this verb
-creates, and a check bound to the launch shape alone would refuse all of them.
-The shapes are composed by asking the harness seam, never spelled here.
+target pane's start command and requires it to be the `session_resume(...)`
+argv camp itself would have composed for THIS session — the seam's own argv,
+behind the seam's own `env -u` scrub. Every session that has ever been parked
+and brought back carries this shape, which is the steady-state population
+this verb creates. The shape is composed by asking the harness seam, never
+spelled here.
 
-ACCEPTED RISK, CARRIED DELIBERATELY: both shapes are public and reproducible. A
+ACCEPTED RISK, CARRIED DELIBERATELY: the shape is public and reproducible. A
 process running as the same OS user that knows a target's derived name and
-session id can spawn a pane reproducing either one and pass this check. That
-narrows the exposure — an arbitrary process squatting the name is refused — but
-it does not close it, and this check is NOT an authorization boundary. Closing
+session id can spawn a pane reproducing it and pass this check. That narrows
+the exposure — an arbitrary process squatting the name is refused — but it
+does not close it, and this check is NOT an authorization boundary. Closing
 it properly needs verified process ancestry of the harness binary, which is a
 spec-level change and not this module's business. A later reader must not read
 the check as settling the provenance question.
@@ -68,7 +66,6 @@ import shlex
 import subprocess  # noqa: F401 — kept for `stop.subprocess.run` re-export, see below
 import time
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
 
 from .identity import current_session_id
@@ -250,11 +247,8 @@ def anchor_session_id(env: Mapping[str, str]) -> str | None:
 def _owning_commands(harness, candidate: SessionCandidate) -> tuple[tuple[str, ...], ...]:
     """Every pane command camp itself would have composed for this session.
 
-    Both shapes, asked of the seam rather than spelled here: the launch argv and
-    the resume argv, each behind the scrub camp applies at spawn time. The
-    workspace argument is the candidate's own root; a harness that roots a
-    launch on it gets the truth, and one that ignores it (Claude Code does) is
-    unaffected either way.
+    The resume argv, asked of the seam rather than spelled here, behind the
+    scrub camp applies at spawn time.
 
     Every call here is into third-party code, so every one of them is guarded:
     a harness that raises contributes no shape, and no shape means the pane is
@@ -268,20 +262,13 @@ def _owning_commands(harness, candidate: SessionCandidate) -> tuple[tuple[str, .
     for name in scrub:
         prefix += ["-u", name]
 
-    workspace = candidate.root if candidate.root is not None else Path("/")
     shapes: list[tuple[str, ...]] = []
-    for build in (
-        lambda: harness.session_launch(
-            workspace, candidate.session_id, session_name=candidate.derived_name
-        ),
-        lambda: harness.session_resume(candidate.session_id),
-    ):
-        try:
-            argv = build()
-        except Exception:
-            argv = None
-        if argv:
-            shapes.append(tuple(prefix) + tuple(argv))
+    try:
+        argv = harness.session_resume(candidate.session_id)
+    except Exception:
+        argv = None
+    if argv:
+        shapes.append(tuple(prefix) + tuple(argv))
     return tuple(shapes)
 
 
@@ -302,7 +289,7 @@ def _account_binding_keys(harness) -> tuple[str, ...]:
     BOTH an undeclared and a declared account are probed, because a harness may
     answer the undeclared one with an empty mapping: a default that no value
     expresses is stated as the variable's ABSENCE instead. Probing only that one
-    would learn no keys from such a harness, and every pane camp launched for a
+    would learn no keys from such a harness, and every pane camp composed for a
     group that DID declare an account would stop being recognized as camp's own.
 
     The probe carries NO environment. Only the keys are wanted, and they are

@@ -40,7 +40,6 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Literal
 
 
 class HarnessError(Exception):
@@ -54,20 +53,6 @@ class HarnessError(Exception):
 UNSUPPORTED_RULESET_NOTICE = (
     "trailhead: this harness has no user-level ruleset support; nothing was installed."
 )
-
-#: Closed modality vocabulary for how a launched session can be reached again.
-#: Callers compare against these constants, never against their own literal —
-#: the string values are caller-visible wire-ish vocabulary and are pinned by
-#: ``test_harness.py``.
-MODALITY_TTY_REQUIRED = "tty-required"
-MODALITY_DETACHED_GUI = "detached-gui"
-
-#: The closed set of valid :data:`Modality` values.
-MODALITIES: frozenset[str] = frozenset({MODALITY_TTY_REQUIRED, MODALITY_DETACHED_GUI})
-
-#: A session's launch modality: whether re-entering it requires a TTY the
-#: caller controls, or whether the harness owns its own detached GUI surface.
-Modality = Literal["tty-required", "detached-gui"]
 
 
 @dataclass(frozen=True)
@@ -549,112 +534,27 @@ class Harness(ABC):
         """
         return None
 
-    # -- session launch & enumeration ------------------------------------------
+    # -- session launch environment & enumeration -------------------------
     #
-    # Launching a session means starting a brand-new one (as opposed to resuming
-    # an existing one via ``session_resume``). Enumeration lists sessions already
-    # running. Both are CONCRETE with degrading defaults, following the same
-    # convention as ``session_resume`` above — ``None`` means "this harness has
-    # no such concept" for every method here EXCEPT ``session_launch`` (see its
-    # docstring for that deliberate divergence).
+    # A caller that composes a brand-new session (the workspace's new-window
+    # key, provisioning's trust seed) asks ``session_launch_env_unset`` for
+    # what to scrub and ``session_launch_env_set`` for what to assign, then
+    # applies them itself at spawn time, in that ORDER — scrub, then assign —
+    # so a harness can express a default as a name's absence and a declared
+    # value as an assignment of the same name. Neither composes or execs
+    # anything; the seam never sets a child's cwd either. Enumeration lists
+    # sessions already running.
     #
-    # The seam never execs and never sets a child's cwd: rooting the child at
-    # ``workspace``, applying the env scrub returned by
-    # ``session_launch_env_unset`` and applying the assignments returned by
-    # ``session_launch_env_set`` are the exec-owning caller's job, done at
-    # exec time, not here. Those two are applied in that ORDER — scrub, then
-    # assign — so a harness can express a default as a name's absence and a
-    # declared value as an assignment of the same name.
+    # Both are CONCRETE with degrading defaults, following the same
+    # convention as ``session_resume`` above: ``None`` means "this harness
+    # has no such concept".
     #
-    # Both-or-neither invariants (enforced by ``test_harness.py``, not by this
-    # class): a harness that overrides ``session_launch`` must override
-    # ``session_launch_modality``, ``session_launch_env_unset`` and
-    # ``session_launch_env_set`` too — all four non-``None`` together, or all
-    # four left at the base ``None`` together, never a partial quartet. A
-    # non-``None`` modality must additionally
-    # be a member of :data:`MODALITIES`, not merely non-``None``. Likewise,
-    # ``session_enumerate`` and ``parse_session_list`` must be overridden
-    # together or not at all. A half-implemented harness is worse than an
-    # unimplemented one: it advertises a capability it cannot actually honor.
-
-    def session_launch(
-        self,
-        workspace: Path,
-        session_id: str,
-        *,
-        session_name: str | None = None,
-        settings_path: Path | None = None,
-    ) -> list[str] | None:
-        """DIVERGES: raises :class:`HarnessError` on a malformed ``session_id``, where
-        ``session_resume`` returns ``None`` for the same input.
-
-        ``settings_path`` is a settings file the caller wants loaded IN ADDITION
-        to whatever the harness discovers for itself. It exists because a caller
-        may root a session where its own settings will not be found — a harness
-        that resolves settings by walking up from the launch directory can stop
-        short of them — and the alternative, writing settings into the directory
-        the session is rooted in, mutates a tree the caller does not own. Like
-        ``session_name`` it is a hint: a harness with no such concept ignores it.
-        A concrete override that honors it must validate it as an inert argv
-        token, since it lands in the same argv and is the same flag-injection
-        surface.
-
-        Returns the argv that starts a brand-new session, or ``None`` if the
-        harness cannot launch sessions at all.
-
-        ``session_name`` is the caller's requested human-visible name for the
-        session — the label a harness's own client surfaces (a companion app,
-        a web UI) display for it. It is a hint: a harness with no nameable
-        sessions ignores it, and ``None`` means the caller has no preference,
-        leaving the harness's own default naming in effect. A concrete
-        override that honors it must validate it as an inert argv token with
-        the same rigor as ``session_id`` and raise :class:`HarnessError` on a
-        malformed value rather than passing it through.
-
-        The divergence above is from the ``None``-on-malformed-input
-        convention used elsewhere in this module. A consumer who learned "check for ``None``, else
-        use the argv" from ``session_resume`` and applies that uniformly here
-        will hit an uncaught exception on their first bad id — most likely at
-        the call site that hands this method a freshly-generated, unvalidated
-        id. The raise guards path/argv safety (the id must be a safe token
-        before it reaches the launch argv), not id validity in any broader
-        sense — a non-UUID like ``"sess-1"`` passes this guard and only fails
-        later, at exec, if the harness's CLI itself rejects it. Elsewhere in
-        this module, ``None`` from any of these seams means
-        "the harness has no such concept" for a fixed, harness-level
-        capability; ``session_launch`` is the single exception to that rule.
-
-        ``session_launch`` is constant-valued per harness: for a given
-        harness it never returns ``None`` for a particular ``session_id`` —
-        ``None`` from a concrete override means only "this harness cannot
-        launch sessions at all," never "not for this argument."
-
-        Performs no filesystem validation of ``workspace`` — it does not
-        check that ``workspace`` exists, is a directory, or is writable.
-
-        A harness may legitimately ignore ``workspace`` entirely (Claude
-        Code does — it roots a launched session on the process's cwd at exec
-        time, not on any argument). Passing ``workspace=A`` while the caller
-        ends up exec'ing at cwd ``B`` then yields valid-looking argv for the
-        wrong location, with no error signal from this method. Every future
-        harness author must see this before deciding to honor or ignore
-        ``workspace``.
-
-        The seam does not exec: the returned argv still needs the caller to
-        root the child process at ``workspace`` and apply
-        :meth:`session_launch_env_unset` at spawn time.
-        """
-        return None
-
-    def session_launch_modality(self) -> Modality | None:
-        """The modality a launched session requires, or ``None`` if unsupported.
-
-        ``None`` means this harness has no launch concept at all — distinct
-        from a harness that launches but has no meaningful modality to
-        report (not currently possible in this vocabulary, but the ``None``
-        here is reserved for "unsupported", not "not applicable").
-        """
-        return None
+    # Both-or-neither invariants (enforced by ``test_harness.py``, not by
+    # this class): ``session_launch_env_unset`` and ``session_launch_env_set``
+    # must be overridden together or not at all. Likewise, ``session_enumerate``
+    # and ``parse_session_list`` must be overridden together or not at all. A
+    # half-implemented harness is worse than an unimplemented one: it
+    # advertises a capability it cannot actually honor.
 
     def session_launch_env_unset(self) -> list[str] | None:
         """Env var names a launching caller must scrub before spawning, or ``None``.
@@ -805,7 +705,7 @@ class Harness(ABC):
     def session_enumerate(self, workspace: Path | None = None) -> list[str] | None:
         """Return the argv that lists this harness's live sessions, or ``None``.
 
-        Like ``session_resume`` and ``session_launch``, the seam owns the
+        Like ``session_resume``, the seam owns the
         ARGV — this method never execs; a caller runs it and hands the
         output to :meth:`parse_session_list`.
 
@@ -817,9 +717,9 @@ class Harness(ABC):
         An implementation MAY raise :class:`HarnessError` on a ``workspace``
         that is unsafe to place in its argv — one whose string form begins
         with ``-`` reads as a flag in the value slot of whatever option
-        carries it. That is argv safety, not filesystem validation: like
-        :meth:`session_launch`, this method never checks that ``workspace``
-        exists. Note the asymmetry a caller must respect — ``session_id`` is
+        carries it. That is argv safety, not filesystem validation: this
+        method never checks that ``workspace`` exists. Note the asymmetry a
+        caller must respect — ``session_id`` is
         guard-checked wherever it reaches an argv, so it is provably free of
         shell-active characters; ``workspace`` is not. The returned argv is
         safe to EXEC; it is not guaranteed safe to hand to a shell.

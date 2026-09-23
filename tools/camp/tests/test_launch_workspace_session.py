@@ -96,11 +96,10 @@ class _FakeTmux:
 
 def test_the_create_call_carries_a_budget_wide_enough_to_start_a_tmux_server(tmp_path):
     """`new_session` is the one call that starts the tmux SERVER when none is
-    running yet — the same operation `camp launch`'s own spawn budgets 30s
-    for (`_SPAWN_TIMEOUT_SECONDS`, `launch/session.py`). The seam's own
-    default (`Tmux.__init__`'s 5s) is tuned for a quick existence probe, not
-    a server bring-up, so this call states its own wider timeout rather than
-    inheriting that default."""
+    running yet, which routinely takes longer than an existence probe. The
+    seam's own default (`Tmux.__init__`'s 5s) is tuned for a quick existence
+    probe, not a server bring-up, so this call states its own wider timeout
+    rather than inheriting that default."""
     from camp.launch.workspace_session import create_workspace_session
 
     ws_dir = tmp_path / "workspace"

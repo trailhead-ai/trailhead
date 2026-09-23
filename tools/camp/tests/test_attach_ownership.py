@@ -5,13 +5,13 @@ Test contract:
 - A session whose pane start command is foreign is not attachable — and the
   same fixture is one `camp kill` also disowns, asserted through the kill
   path rather than restated.
-- Both pane-command shapes the kill ownership check recognises are recognised
-  here too; a fixture matching only one of them does not silently pass.
+- The one pane-command shape the kill ownership check recognises — the resume
+  composition — is recognised here too; the retired launch composition is not.
 - A pane the multiplexer cannot describe at all is not attachable, and is
   distinguishable from a pane it describes as foreign.
 - Both halves of that distinction are cross-checked against the kill path,
   not just the foreign one.
-- Mutating what camp composes at launch changes this predicate's answer.
+- Mutating what camp composes for a resume changes this predicate's answer.
 
 The predicate is reached by driving `stop._is_camp_launched` — the exact
 check `camp kill` applies — never by restating its rule beside it. Every
@@ -34,7 +34,7 @@ if str(_TESTS_DIR) not in sys.path:
 from test_launch_stop import (  # noqa: E402
     _fixture,
     _group,
-    _launched_pane,
+    _old_launch_pane,
     _record,
     _resumed_pane,
     _stop,
@@ -93,15 +93,15 @@ def test_foreign_pane_is_not_attachable_cross_checked_with_kill(tmp_path: Path) 
     assert outcome.reason == REFUSED_NOT_CAMP_LAUNCHED
 
 
-def test_both_owning_shapes_are_recognised(tmp_path: Path) -> None:
-    from camp.attach.ownership import Owned, resolve_ownership
+def test_the_resume_shape_is_owned_the_old_launch_shape_is_not(tmp_path: Path) -> None:
+    from camp.attach.ownership import Foreign, Owned, resolve_ownership
 
     state, ws, env, harness, derived, _tmux, candidate = _candidate(tmp_path)
 
-    launched_tmux = _FakeTmux({derived: _launched_pane(harness, _UUID_A, derived, ws)})
+    old_launch_tmux = _FakeTmux({derived: _old_launch_pane(harness, _UUID_A, derived)})
     resumed_tmux = _FakeTmux({derived: _resumed_pane(harness, _UUID_A)})
 
-    assert isinstance(resolve_ownership(harness, launched_tmux, candidate), Owned)
+    assert isinstance(resolve_ownership(harness, old_launch_tmux, candidate), Foreign)
     assert isinstance(resolve_ownership(harness, resumed_tmux, candidate), Owned)
 
 
@@ -115,7 +115,7 @@ def test_undescribable_pane_is_distinct_from_foreign(tmp_path: Path) -> None:
         def pane_command(self, name: str):
             return stop.UNANSWERED
 
-    undescribable_tmux = _QuietPane({derived: _launched_pane(harness, _UUID_A, derived, ws)})
+    undescribable_tmux = _QuietPane({derived: _resumed_pane(harness, _UUID_A)})
     foreign_tmux = _FakeTmux({derived: "sleep 100000"})
 
     undescribable_answer = resolve_ownership(harness, undescribable_tmux, candidate)
@@ -141,7 +141,7 @@ def test_undescribable_and_foreign_are_cross_checked_against_kill(tmp_path: Path
         def pane_command(self, name: str):
             return stop.UNANSWERED
 
-    undescribable_tmux = _QuietPane({derived: _launched_pane(harness, _UUID_A, derived, ws)})
+    undescribable_tmux = _QuietPane({derived: _resumed_pane(harness, _UUID_A)})
     foreign_tmux = _FakeTmux({derived: "sleep 100000"})
 
     undescribable_outcome = _stop(
@@ -171,22 +171,19 @@ def test_undescribable_and_foreign_are_cross_checked_against_kill(tmp_path: Path
     assert isinstance(resolve_ownership(harness, foreign_tmux, candidate), Foreign)
 
 
-def test_mutating_composed_launch_argv_changes_the_answer(tmp_path: Path) -> None:
+def test_mutating_composed_resume_argv_changes_the_answer(tmp_path: Path) -> None:
     from camp.attach.ownership import Foreign, Owned, resolve_ownership
 
     state, ws, env, harness, derived, _tmux, candidate = _candidate(tmp_path)
 
-    original_tmux = _FakeTmux({derived: _launched_pane(harness, _UUID_A, derived, ws)})
+    original_tmux = _FakeTmux({derived: _resumed_pane(harness, _UUID_A)})
     assert isinstance(resolve_ownership(harness, original_tmux, candidate), Owned)
 
     class _MutatedHarness(_FakeHarness):
         """Composes an EXTRA flag camp did not compose before."""
 
-        def session_launch(self, workspace, session_id, *, session_name=None, settings_path=None):
-            argv = ["fakeharness", "--control", "--sid", session_id, "--mutated-flag"]
-            if session_name is not None:
-                argv += ["--name", session_name]
-            return argv
+        def session_resume(self, session_id):
+            return ["fakeharness", "--reenter", session_id, "--mutated-flag"]
 
     mutated_harness = _MutatedHarness()
 
@@ -194,7 +191,7 @@ def test_mutating_composed_launch_argv_changes_the_answer(tmp_path: Path) -> Non
     # pane no longer matches under the mutated harness.
     assert isinstance(resolve_ownership(mutated_harness, original_tmux, candidate), Foreign)
 
-    mutated_tmux = _FakeTmux({derived: _launched_pane(mutated_harness, _UUID_A, derived, ws)})
+    mutated_tmux = _FakeTmux({derived: _resumed_pane(mutated_harness, _UUID_A)})
     assert isinstance(resolve_ownership(mutated_harness, mutated_tmux, candidate), Owned)
     # And the old harness no longer recognises the newly-composed pane.
     assert isinstance(resolve_ownership(harness, mutated_tmux, candidate), Foreign)

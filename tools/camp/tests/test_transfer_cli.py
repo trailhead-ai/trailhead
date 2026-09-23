@@ -1532,10 +1532,6 @@ class TestTransferEndToEndThroughTheRealEntryPath:
         peer_rows = _recoverable_rows(c["peer_cli_env"])
         assert session_id in {row["session_id"] for row in peer_rows}, peer_rows
 
-        resume = _run_camp(c["peer_cli_env"], "launch", "--resume", session_id)
-        assert resume.returncode == 0, resume.stderr
-        assert resume.stdout.strip() == session_id, resume.stdout
-
         from camp.group.manifest import workspace_dir
         from trailhead.harness.claude_code import ClaudeCodeHarness
 
@@ -1560,7 +1556,7 @@ class TestTransferEndToEndThroughTheRealEntryPath:
 
         assert "ownership moved to 'host-b'" in result.stdout
         assert session_id in result.stdout
-        assert f"camp launch --resume {session_id}" in result.stdout
+        assert f"resume with: fake-resume {session_id}" in result.stdout
         assert "released from this host — archived at" in result.stdout
 
     def test_a_workspace_with_no_conversations_completes_the_handover_and_says_so(
@@ -1681,12 +1677,6 @@ class TestConversationResumesOnARealPeer:
         rows = _recoverable_rows(c["peer_cli_env"])
         assert session_id in {row["session_id"] for row in rows}, rows
 
-        # Observation 2: camp's own resume path accepts it — a separate
-        # invocation, never inferred from the listing above.
-        resume = _run_camp(c["peer_cli_env"], "launch", "--resume", session_id)
-        assert resume.returncode == 0, resume.stderr
-        assert resume.stdout.strip() == session_id, resume.stdout
-
         # The prior history travelled with it: the transcript the peer
         # resumed carries the exact content written before the move.
         from camp.group.manifest import workspace_dir
@@ -1700,36 +1690,6 @@ class TestConversationResumesOnARealPeer:
         assert peer_transcript is not None
         assert marker in peer_transcript.read_text()
 
-    def test_member_subdirectory_conversation_resumes_rooted_there(self, conv_env):
-        """A conversation started inside the `repo_a` member
-        subdirectory crosses and resumes ROOTED AT the peer's corresponding
-        subdirectory — asserted on the directory the resume actually spawned
-        into (the tmux pane's own `-c` launch directory), never on the
-        `subpath` recorded in the transcript."""
-        from pathlib import PurePosixPath
-
-        from camp.provision.reconcile import _worktree_path
-
-        c = conv_env
-        session_id = "22222222-2222-4222-8222-222222222222"
-        marker = "member-subdir-marker-a170"
-
-        _cross_one_conversation(
-            c, session_id=session_id, subpath=PurePosixPath("repo_a"), marker=marker
-        )
-
-        resume = _run_camp(c["peer_cli_env"], "launch", "--resume", session_id)
-        assert resume.returncode == 0, resume.stderr
-
-        session_cli = _session_cli_module()
-        spawned = session_cli._tmux_new_session_argv(c["peer_shim"])
-        assert len(spawned) == 1, spawned
-        launch_dir = session_cli._flag_value(spawned[0], "-c")
-
-        expected_member_dir = _worktree_path(
-            "testgroup", c["slug"], "repo_a", env=c["peer_env"]
-        ).resolve()
-        assert launch_dir == str(expected_member_dir)
 
     def test_arrived_conversation_is_listed_as_recoverable(self, conv_env):
         """A conversation that crossed is offered as something to bring back:
@@ -1755,26 +1715,6 @@ class TestConversationResumesOnARealPeer:
 
         assert session_id in {row["session_id"] for row in _recoverable_rows(c["peer_cli_env"])}
 
-    def test_every_recoverable_conversation_the_peer_lists_is_resumable(self, conv_env):
-        """The criterion forbidding a listed-but-unresumable conversation,
-        exercised as agreement: the session id fed to `--resume` is read
-        BACK OUT of the peer's own recoverable listing, never hand-written
-        into the test, so the listing and the resume path cannot drift apart
-        here either."""
-        from pathlib import PurePosixPath
-
-        c = conv_env
-        session_id = "44444444-4444-4444-8444-444444444444"
-
-        _cross_one_conversation(
-            c, session_id=session_id, subpath=PurePosixPath("."), marker="agreement-marker"
-        )
-
-        rows = _recoverable_rows(c["peer_cli_env"])
-        assert rows, "expected at least one recoverable row to test resume-agreement against"
-        for row in rows:
-            resume = _run_camp(c["peer_cli_env"], "launch", "--resume", row["session_id"])
-            assert resume.returncode == 0, resume.stderr
 
     def test_move_workspace_alone_claims_ownership_for_the_peer_but_leaves_release_and_the_flip_to_the_caller(
         self, conv_env
@@ -1808,10 +1748,6 @@ class TestConversationResumesOnARealPeer:
 
         sender_rows = _recoverable_rows(c["sender_cli_env"])
         assert session_id in {row["session_id"] for row in sender_rows}, sender_rows
-
-        resume = _run_camp(c["sender_cli_env"], "launch", "--resume", session_id)
-        assert resume.returncode == 0, resume.stderr
-        assert resume.stdout.strip() == session_id, resume.stdout
 
     def test_rerun_after_a_conversations_phase_failure_converges(self, conv_env):
         """A re-run after a `conversations`-phase failure lands the
@@ -1851,9 +1787,6 @@ class TestConversationResumesOnARealPeer:
         rows = _recoverable_rows(c["peer_cli_env"])
         matching = [row for row in rows if row["session_id"] == session_id]
         assert len(matching) == 1, rows
-
-        resume = _run_camp(c["peer_cli_env"], "launch", "--resume", session_id)
-        assert resume.returncode == 0, resume.stderr
 
 
 def _sender_locate(c: dict):
@@ -1909,9 +1842,6 @@ class TestReleaseOnARealPeer:
         sender_rows = _recoverable_rows(c["sender_cli_env"])
         assert session_id not in {row["session_id"] for row in sender_rows}, sender_rows
 
-        resume = _run_camp(c["sender_cli_env"], "launch", "--resume", session_id)
-        assert resume.returncode != 0, resume.stdout
-
     def test_archived_bytes_match_and_the_peer_is_unaffected(self, conv_env):
         """The peer's own copy (already pinned resumable by
         `TestConversationResumesOnARealPeer`) is untouched by the sender's
@@ -1945,8 +1875,6 @@ class TestReleaseOnARealPeer:
 
         peer_rows = _recoverable_rows(c["peer_cli_env"])
         assert session_id in {row["session_id"] for row in peer_rows}, peer_rows
-        resume = _run_camp(c["peer_cli_env"], "launch", "--resume", session_id)
-        assert resume.returncode == 0, resume.stderr
 
     def test_archive_sits_outside_the_workspace_tree_and_the_harness_store(self, conv_env):
         """Proven by running the two real sweeps that could otherwise pick
@@ -2097,9 +2025,6 @@ class TestReleaseOnARealPeer:
 
         sender_rows = _recoverable_rows(c["sender_cli_env"])
         assert session_id not in {row["session_id"] for row in sender_rows}, sender_rows
-
-        resume = _run_camp(c["sender_cli_env"], "launch", "--resume", session_id)
-        assert resume.returncode != 0, resume.stdout
 
 
 class TestMoveWorkspaceEndToEnd:
@@ -3354,8 +3279,10 @@ def test_completion_report_names_arrived_conversations_and_the_literal_resume_co
 ) -> None:
     """The operator reads this on the machine they just moved to, having
     forgotten where they left the work — an identifier they must turn into a
-    command themselves reintroduces exactly the recall `camp launch --resume`
-    exists to remove."""
+    command themselves reintroduces exactly the recall the harness's own
+    resume command exists to remove. The group here declares no `[harness]`
+    override, so the default `claude_code` harness's resume argv is what
+    prints."""
     from pathlib import PurePosixPath
 
     env = _Env(tmp_path)
@@ -3390,8 +3317,87 @@ def test_completion_report_names_arrived_conversations_and_the_literal_resume_co
     assert code == transfer.EXIT_RELEASE_INCOMPLETE
     out = capsys.readouterr().out
     assert session_id in out
-    assert f"camp launch --resume {session_id}" in out
+    assert f"resume with: claude --resume {session_id}" in out
     assert "no conversations are rooted in this workspace" not in out
+
+
+class _FakeResumeHarness:
+    """A minimal harness double whose `session_resume` returns whatever argv
+    the test hands it — the seam `_render_conversation_releases` reads
+    through, isolated from any real harness's own argv shape."""
+
+    def __init__(self, resume_argv: list[str] | None):
+        self._resume_argv = resume_argv
+
+    def session_resume(self, session_id: str) -> list[str] | None:
+        return self._resume_argv
+
+
+class TestRenderConversationReleasesResumeLine:
+    """`_render_conversation_releases` prints the harness's own resume
+    command for each conversation, reusing the resurrection stub's
+    rendering (`launch.resurrect`'s `shlex.join(harness.session_resume(id))`
+    and its "no harness" line) rather than a `camp launch --resume` literal
+    that no longer names a live verb."""
+
+    def test_resume_line_follows_the_conversation_id_and_the_harness_argv(self) -> None:
+        import io
+        from pathlib import PurePosixPath
+
+        transfer = _transfer_module()
+        move = _move_module()
+
+        first_id = "11111111-1111-4111-8111-111111111111"
+        conv = move.ConversationCrossed(session_id=first_id, subpath=PurePosixPath("."))
+        buf = io.StringIO()
+        transfer._render_conversation_releases(
+            [conv], [], harness=_FakeResumeHarness(["foo-cli", "--continue", first_id]), file=buf
+        )
+        assert f"resume with: foo-cli --continue {first_id}" in buf.getvalue()
+
+        second_id = "22222222-2222-4222-8222-222222222222"
+        conv2 = move.ConversationCrossed(session_id=second_id, subpath=PurePosixPath("."))
+        buf2 = io.StringIO()
+        transfer._render_conversation_releases(
+            [conv2], [], harness=_FakeResumeHarness(["claude", "--resume", second_id]), file=buf2
+        )
+        assert f"resume with: claude --resume {second_id}" in buf2.getvalue()
+
+    def test_no_harness_prints_the_resurrection_stubs_cannot_compose_line(self) -> None:
+        import io
+        from pathlib import PurePosixPath
+
+        from camp.launch.resurrect import _NO_HARNESS_LINE
+
+        transfer = _transfer_module()
+        move = _move_module()
+
+        session_id = "33333333-3333-4333-8333-333333333333"
+        conv = move.ConversationCrossed(session_id=session_id, subpath=PurePosixPath("."))
+        buf = io.StringIO()
+        transfer._render_conversation_releases([conv], [], harness=None, file=buf)
+        assert _NO_HARNESS_LINE in buf.getvalue()
+        assert "resume with:" not in buf.getvalue()
+
+    def test_harness_that_cannot_resume_this_id_prints_the_same_cannot_compose_line(
+        self,
+    ) -> None:
+        import io
+        from pathlib import PurePosixPath
+
+        from camp.launch.resurrect import _NO_HARNESS_LINE
+
+        transfer = _transfer_module()
+        move = _move_module()
+
+        session_id = "44444444-4444-4444-8444-444444444444"
+        conv = move.ConversationCrossed(session_id=session_id, subpath=PurePosixPath("."))
+        buf = io.StringIO()
+        transfer._render_conversation_releases(
+            [conv], [], harness=_FakeResumeHarness(None), file=buf
+        )
+        assert _NO_HARNESS_LINE in buf.getvalue()
+        assert "resume with:" not in buf.getvalue()
 
 
 def test_overwrite_needed_names_the_flag_with_its_own_exit_code(

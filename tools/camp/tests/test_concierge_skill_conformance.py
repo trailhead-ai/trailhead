@@ -263,17 +263,6 @@ def test_the_documented_json_flag_changes_the_output_to_json(groupless_env) -> N
     assert json.loads(as_json.stdout) == []
 
 
-def test_the_groupless_launch_exemption_is_narrow() -> None:
-    """A ref-addressed launch is routed before group resolution — and nothing
-    else is, or the document's `--group` guidance would contradict the CLI."""
-    from camp.cli.dispatch import _is_ref_addressed_launch
-
-    assert _is_ref_addressed_launch("launch", ["--resume", "camp-foo"])
-    assert not _is_ref_addressed_launch("launch", ["--dir", "/srv/work"])
-    assert not _is_ref_addressed_launch("launch", ["myslug"])
-    assert not _is_ref_addressed_launch("sessions", ["--resume", "camp-foo"])
-
-
 # ---------------------------------------------------------------------------
 # 2. Output-shape conformance
 # ---------------------------------------------------------------------------

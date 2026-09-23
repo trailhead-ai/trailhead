@@ -215,8 +215,8 @@ def _rooted_in(candidate: SessionCandidate, workspace: Path) -> bool:
 def render_block(slug: str, blocking: Sequence[SessionCandidate]) -> str:
     """Render the refusal, naming every session the removal would destroy.
 
-    Each row carries the derived name — the ref `camp kill` and `camp launch
-    --resume` both take — and the root, so the operator can tell two sessions
+    Each row carries the derived name — the ref `camp kill` and `camp attach`
+    both take — and the root, so the operator can tell two sessions
     apart without going looking for them.
     """
     count = len(blocking)

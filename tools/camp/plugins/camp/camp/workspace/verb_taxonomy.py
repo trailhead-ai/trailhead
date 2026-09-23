@@ -77,14 +77,10 @@ def resolve_verb(raw: str) -> tuple[str, str]:
 # `launch`, `resume`, and `bookmark` are retirements, not renames, and they
 # land here for the same reason the renames do: an operator who typed one of
 # them yesterday typed a VERB, and the bare-slug refusal answers a question
-# about slugs. `launch` is superseded by the door (`camp attach` reaches a
-# workspace's tmux session; the ordinary new-window key inside it starts a
-# conversation) rather than by another verb with the same shape, so its
-# target is `attach` with no flag to carry across. `resume` and `bookmark`
-# used to point at `launch --resume`, which is retired itself now that
-# `launch` is — chaining through it is unsupported, so they point at
-# `attach` directly: reaching the workspace's tmux session is how an
-# operator resumes a conversation today.
+# about slugs. All three point at `attach`, with no flag to carry across:
+# `camp attach` reaches a workspace's tmux session, and the ordinary
+# new-window key inside it starts a conversation — reaching the workspace is
+# how an operator resumes a conversation today.
 LEGACY_REDIRECTS: dict[str, str] = {
     "open": "new",
     "break": "remove",
@@ -106,7 +102,7 @@ LEGACY_REDIRECTS: dict[str, str] = {
 # and a ref is the thing you look up without knowing its group, so spine
 # serves them directly.
 NEEDS_GROUP_VERBS = frozenset(
-    {"new", "remove", "pwd", "activate", "setup", "launch", "sessions"}
+    {"new", "remove", "pwd", "activate", "setup", "sessions"}
 )
 
 _NEEDS_GROUP_CONFIGURE = frozenset({"new", "setup"})

@@ -81,8 +81,8 @@ in, and the two phases carry opposite obligations.
 
   "provision"   What a session needs to EXIST and behave correctly. Required
                 to be cheap — provision-phase tasks are on the path a session
-                start (or a blocking `camp new --launch`) waits on, so a slow
-                or hanging step there is felt as the tool being unresponsive.
+                start waits on, so a slow or hanging step there is felt as
+                the tool being unresponsive.
 
   "activate"    What a session needs to DO WORK. Never blocks a session start
                 — activate-phase tasks run through the detached provisioner,

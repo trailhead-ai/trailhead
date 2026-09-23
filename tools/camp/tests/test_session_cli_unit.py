@@ -1,26 +1,19 @@
 """Unit-level tests for camp.cli.session — collaborators mocked directly.
 
-Complements test_session_cli.py's end-to-end subprocess coverage with two
-seams that are awkward to exercise through the real CLI binary:
+Complements test_session_cli.py's end-to-end subprocess coverage with a seam
+that is awkward to exercise through the real CLI binary:
 
-- `wait_for_provisioning` degrading a corrupt/missing manifest (ManifestError)
-  into the same one-line refusal shape as any other provisioning failure,
-  rather than letting the exception escape as a raw traceback.
 - `camp sessions <slug>` scoping enumeration by the same resolved workspace
-  directory the launch engine spawns into, so a symlinked workspace root
-  doesn't make a just-launched session invisible to a slug-scoped query.
-- `_session_pool`'s two postures on a live probe that fails: the stop path needs
-  the answer (an unanswerable probe is a refusal), and the resume path does not
-  (a narrowed pool costs a candidate and nothing more).
-- `camp launch --json` emitting the launch engine's own `tmux_name` verbatim.
-  A sentinel name the derivation could never produce is the only way to tell
-  reading it apart from rebuilding `camp-<slug>-<uuid8>` at the print site,
-  which the end-to-end suite cannot inject.
+  directory a session is rooted in, so a symlinked workspace root doesn't
+  make a live session invisible to a slug-scoped query.
+- `_session_pool`'s two postures on a live probe that fails: the stop path
+  needs the answer (an unanswerable probe is a refusal), and its
+  `live_required=False` default does not (a narrowed pool costs a candidate
+  and nothing more).
 """
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
@@ -30,40 +23,6 @@ if str(_PLUGIN_DIR) not in sys.path:
     sys.path.insert(0, str(_PLUGIN_DIR))
 
 GROUP = {"group": {"name": "testgroup"}}
-
-
-class TestWaitForProvisioningManifestError:
-    def test_a_manifest_error_degrades_to_a_camp_launch_refusal_line(self, monkeypatch, capsys):
-        import camp.cli.session as cli_session
-        from camp.group.manifest import ManifestError
-
-        def boom(*a, **k):
-            raise ManifestError("manifest for 'feat-x' is corrupt: not valid JSON")
-
-        monkeypatch.setattr(
-            "camp.provision.lifecycle.wait_for_provisioning_ready", boom
-        )
-
-        result = cli_session.wait_for_provisioning(GROUP, "feat-x", env={})
-
-        assert result is False
-        err = capsys.readouterr().err
-        assert "camp launch:" in err
-        assert "not valid JSON" in err
-
-    def test_a_manifest_error_does_not_propagate_as_a_traceback(self, monkeypatch):
-        import camp.cli.session as cli_session
-        from camp.group.manifest import ManifestError
-
-        def boom(*a, **k):
-            raise ManifestError("no manifest found")
-
-        monkeypatch.setattr(
-            "camp.provision.lifecycle.wait_for_provisioning_ready", boom
-        )
-
-        # No exception should escape — the function returns a plain bool.
-        assert cli_session.wait_for_provisioning(GROUP, "feat-x", env={}) is False
 
 
 class TestSessionsSlugScopingResolvesTheWorkspace:
@@ -102,158 +61,6 @@ class TestSessionsSlugScopingResolvesTheWorkspace:
         assert seen["workspace"] != link
 
 
-class TestLaunchJsonCarriesTheEngineReportedTmuxName:
-    """`camp launch --json` must print the name the launch engine reported.
-
-    Rebuilding `camp-<slug>-<uuid8>` at the print site reproduces the engine's
-    own string, so only a name the derivation could never produce distinguishes
-    the two.
-    """
-
-    def test_tmux_name_in_json_output_is_the_engine_reported_value_verbatim(
-        self, monkeypatch, capsys
-    ):
-        import camp.cli.session as cli_session
-        from camp.launch.session import LaunchedSession
-
-        monkeypatch.setattr(
-            "camp.cli.dispatch._slug_from_name_or_cwd", lambda *a, **k: "feat-x"
-        )
-        monkeypatch.setattr(
-            cli_session,
-            "launch_and_confirm",
-            lambda *a, **k: LaunchedSession(
-                session_id="11111111-2222-3333-4444-555555555555",
-                tmux_name="not-a-derived-name-at-all",
-                launch_dir=Path("/tmp/wherever"),
-            ),
-        )
-
-        cli_session._cmd_launch_group_cli(["feat-x", "--json"], GROUP, {})
-
-        payload = json.loads(capsys.readouterr().out)
-        assert payload["tmux_name"] == "not-a-derived-name-at-all", (
-            "tmux_name must be the launch engine's reported value, not a "
-            "re-derivation of camp-<slug>-<uuid8> at the print site"
-        )
-        assert payload["session_id"] == "11111111-2222-3333-4444-555555555555"
-
-
-class TestLocalLaunchUnaffectedByHostLaunch:
-    """A local `camp launch` (no `--host`) must be byte-identical on stdout
-    AND stderr to before `--host` launch existed, for both the plain and
-    `--json` forms — pinned here because `_cmd_launch_host_cli` is a
-    brand-new sibling function and never touches `_cmd_launch_group_cli` /
-    `_report_launched`, so this contract holds unchanged."""
-
-    def test_plain_form_stdout_is_only_the_session_id_stderr_unaffected(
-        self, monkeypatch, capsys
-    ):
-        import camp.cli.session as cli_session
-        from camp.launch.session import LaunchedSession
-
-        monkeypatch.setattr(
-            "camp.cli.dispatch._slug_from_name_or_cwd", lambda *a, **k: "feat-x"
-        )
-        monkeypatch.setattr(
-            cli_session,
-            "launch_and_confirm",
-            lambda group, slug, *, env=None, **kwargs: (
-                print(
-                    "camp launch: launched session sid-local in /ws/feat-x\n"
-                    "  attach: tmux attach -t camp-feat-x-sid-loc",
-                    file=sys.stderr,
-                )
-                or print("camp launch: confirmed session sid-local", file=sys.stderr)
-                or LaunchedSession(
-                    session_id="sid-local",
-                    tmux_name="camp-feat-x-sid-loc",
-                    launch_dir=Path("/ws/feat-x"),
-                )
-            ),
-        )
-
-        cli_session._cmd_launch_group_cli(["feat-x"], GROUP, {})
-
-        captured = capsys.readouterr()
-        assert captured.out == "sid-local\n"
-        assert captured.err == (
-            "camp launch: launched session sid-local in /ws/feat-x\n"
-            "  attach: tmux attach -t camp-feat-x-sid-loc\n"
-            "camp launch: confirmed session sid-local\n"
-        )
-
-    def test_json_form_stdout_is_only_the_report_object(self, monkeypatch, capsys):
-        import camp.cli.session as cli_session
-        from camp.launch.session import LaunchedSession
-
-        monkeypatch.setattr(
-            "camp.cli.dispatch._slug_from_name_or_cwd", lambda *a, **k: "feat-x"
-        )
-        monkeypatch.setattr(
-            cli_session,
-            "launch_and_confirm",
-            lambda group, slug, *, env=None, **kwargs: LaunchedSession(
-                session_id="sid-local",
-                tmux_name="camp-feat-x-sid-loc",
-                launch_dir=Path("/ws/feat-x"),
-            ),
-        )
-
-        cli_session._cmd_launch_group_cli(["feat-x", "--json"], GROUP, {})
-
-        captured = capsys.readouterr()
-        payload = json.loads(captured.out)
-        assert payload == {
-            "workspace": "/ws/feat-x",
-            "session_id": "sid-local",
-            "tmux_name": "camp-feat-x-sid-loc",
-            "account": None,
-            "account_binding": {},
-        }
-        assert "host" not in payload
-        assert "certainty" not in payload
-
-
-class TestConfirmationReadsThePaneEnvironment:
-    """The confirmation reports which config file the launched session reads.
-
-    Handing it the CLI's own ambient environment makes that report answer from
-    the shell camp was invoked in — which is precisely what the launch scrubbed
-    off the pane. The pane's recorded environment is the only one that can name
-    the file the session actually opens.
-    """
-
-    def test_confirm_session_is_handed_the_pane_environment_not_the_ambient_one(
-        self, monkeypatch, capsys
-    ):
-        import camp.cli.session as cli_session
-        from camp.launch.session import LaunchedSession
-
-        pane_env = {"PATH": "/usr/bin", "HOME": "/home/pane"}
-        launched = LaunchedSession(
-            session_id="sess-1",
-            tmux_name="camp-feat-x-abcd1234",
-            launch_dir=Path("/tmp/ws"),
-            pane_env=pane_env,
-        )
-        seen: list[dict] = []
-        monkeypatch.setattr("camp.launch.profile.harness_for", lambda group: object())
-        monkeypatch.setattr(
-            "camp.launch.session.launch_session", lambda *a, **k: launched
-        )
-        monkeypatch.setattr(
-            "camp.launch.session.confirm_session",
-            lambda harness, _launched, env=None: seen.append(env),
-        )
-
-        cli_session.launch_and_confirm(
-            GROUP, "feat-x", env={"PATH": "/usr/bin", "HOME": "/home/ambient"}
-        )
-
-        assert seen == [pane_env]
-
-
 class TestSessionPoolLiveProbePosture:
     """A live probe that failed says NOTHING. Which branch that lands on is the
     caller's posture, and the two callers differ."""
@@ -280,8 +87,8 @@ class TestSessionPoolLiveProbePosture:
         monkeypatch.setattr(launch_session, "enumerate_records", lambda *a, **k: None)
         return cli_session._session_pool([], env={}, **kwargs)
 
-    def test_the_resume_path_degrades_to_a_narrower_pool(self, monkeypatch):
-        transcripts, live, answered, accounts = self._pool(monkeypatch, verb="launch")
+    def test_the_default_posture_degrades_to_a_narrower_pool(self, monkeypatch):
+        transcripts, live, answered, accounts = self._pool(monkeypatch, verb="sessions")
         assert live == []
         assert len(answered) == 1
 

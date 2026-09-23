@@ -11,19 +11,11 @@ Test contract (from
   — inject a raiser.
 - `camp new <slug> --no-session` creates the workspace, creates NO session,
   and reaches no exec seam. Assert the tmux seam saw no create call.
-- `camp new <slug> --launch` behaves identically to the bare form and
-  additionally prints the notice. Vary: with and without the flag, the
-  session outcome is the same and only stderr differs.
-- Without a terminal, all four forms create what they are meant to, report,
-  exit 0, and reach no exec seam.
-- `camp new <slug> --json` without `--launch` succeeds and emits the object,
-  where today it refuses. Pin it by asserting the object, not by asserting
-  an absence.
-- Stdout is exactly the path line on every form; the outcome line and the
-  notice are on stderr. Assert the two streams separately.
-- The concierge's exact invocation succeeds and emits an object carrying the
-  keys that skill reads, and `test_concierge_skill_conformance.py` stays
-  green (see that file's own `group_env`/`_FakeConciergeTmux` fixtures).
+- Without a terminal, every form creates what it is meant to, reports,
+  exit 0, and reaches no exec seam.
+- `camp new <slug> --json` succeeds and emits the object.
+- Stdout is exactly the path line on every form; the outcome line is on
+  stderr. Assert the two streams separately.
 
 No real tmux or exec is ever touched: the tmux seam
 (`camp.launch.stop.Tmux`, the same factory attribute
@@ -414,45 +406,6 @@ def test_no_session_creates_workspace_only_no_tmux_call_at_all(
     out = capsys.readouterr().out
     assert out.strip().endswith("/feat-x"), out
 
-
-# ---------------------------------------------------------------------------
-# --launch: identical outcome to bare, differs only on stderr
-# ---------------------------------------------------------------------------
-
-
-def test_launch_flag_behaves_identically_to_bare_form_only_stderr_differs(
-    camp_cli, group_env, monkeypatch, capsys
-):
-    g = group_env
-
-    tmux_bare = _DoorTmux(present=False)
-    _wire_tmux(monkeypatch, tmux_bare)
-    camp_cli._cmd_new_group_cli(
-        ["feat-bare", "--json"], g["group"], g["env"], dry_run=False
-    )
-    bare_captured = capsys.readouterr()
-    bare_payload = json.loads(bare_captured.out)
-
-    tmux_launch = _DoorTmux(present=False)
-    _wire_tmux(monkeypatch, tmux_launch)
-    camp_cli._cmd_new_group_cli(
-        ["feat-launch", "--launch", "--json"], g["group"], g["env"], dry_run=False
-    )
-    launch_captured = capsys.readouterr()
-    launch_payload = json.loads(launch_captured.out)
-
-    # Same session outcome shape (only the slug/derived name differ, since
-    # they are different slugs) — both "created", both unattached (no tty).
-    assert bare_payload["outcome"] == launch_payload["outcome"] == "created"
-    assert bare_payload["attached"] == launch_payload["attached"] is False
-    assert len(tmux_bare.new_session_calls) == len(tmux_launch.new_session_calls) == 1
-
-    assert "no longer needed" not in bare_captured.err
-    assert "no longer needed" in launch_captured.err, (
-        "only --launch prints the notice"
-    )
-
-
 # ---------------------------------------------------------------------------
 # Without a terminal: all four forms create what they're meant to, exit 0,
 # and never reach the exec seam.
@@ -461,8 +414,8 @@ def test_launch_flag_behaves_identically_to_bare_form_only_stderr_differs(
 
 @pytest.mark.parametrize(
     "extra_args",
-    [[], ["--no-attach"], ["--launch"], ["--json"]],
-    ids=["bare", "no-attach", "launch", "json"],
+    [[], ["--no-attach"], ["--json"]],
+    ids=["bare", "no-attach", "json"],
 )
 def test_non_interactive_forms_create_report_and_never_exec(
     camp_cli, group_env, monkeypatch, capsys, extra_args
@@ -501,7 +454,7 @@ def test_no_session_form_creates_workspace_and_no_exec_with_no_terminal(
 
 
 # ---------------------------------------------------------------------------
-# --json without --launch: succeeds and emits the object
+# --json: succeeds and emits the door object
 # ---------------------------------------------------------------------------
 
 
@@ -527,7 +480,7 @@ def test_json_without_launch_succeeds_and_emits_the_door_object(
 # ---------------------------------------------------------------------------
 
 
-def test_stdout_is_exactly_the_path_stderr_carries_outcome_and_notice(
+def test_stdout_is_exactly_the_path_stderr_carries_the_outcome_line(
     camp_cli, group_env, monkeypatch, capsys
 ):
     from camp.group.manifest import workspace_dir
@@ -537,7 +490,7 @@ def test_stdout_is_exactly_the_path_stderr_carries_outcome_and_notice(
     _wire_tmux(monkeypatch, tmux)
 
     camp_cli._cmd_new_group_cli(
-        ["feat-s", "--launch"], g["group"], g["env"], dry_run=False
+        ["feat-s"], g["group"], g["env"], dry_run=False
     )
 
     captured = capsys.readouterr()
@@ -545,45 +498,11 @@ def test_stdout_is_exactly_the_path_stderr_carries_outcome_and_notice(
     assert captured.out == f"{ws_dir}\n", "stdout must be exactly the path line"
     derived = _derived_name("g", "feat-s")
     assert f"created {derived}" in captured.err, "the outcome line belongs on stderr"
-    assert "no longer needed" in captured.err, "the --launch notice belongs on stderr"
 
 
 # ---------------------------------------------------------------------------
 # The concierge's exact invocation
 # ---------------------------------------------------------------------------
-
-
-def test_concierge_exact_invocation_succeeds_and_emits_expected_keys(
-    camp_cli, group_env, monkeypatch, capsys
-):
-    """Mirrors `test_concierge_skill_conformance.py`'s own coverage of this
-    exact call — reproduced here directly against the door dispatch, not
-    only through the skill-document conformance harness."""
-    g = group_env
-    tmux = _DoorTmux(present=False)
-    _wire_tmux(monkeypatch, tmux)
-
-    camp_cli._cmd_new_group_cli(
-        ["feat-concierge", "--launch", "--no-wait", "--json"],
-        g["group"],
-        g["env"],
-        dry_run=False,
-    )
-
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["ok"] is True
-    assert set(payload) == {
-        "ok",
-        "outcome",
-        "slug",
-        "group",
-        "workspace_path",
-        "tmux_session",
-        "attached",
-    }
-    assert payload["attached"] is False, "the concierge's call carries no terminal"
-
-
 # ---------------------------------------------------------------------------
 # Operator decision at Phase 1: `camp new` succeeds with a warning when its
 # session can't be created — the workspace is real and usable, so this is
@@ -954,30 +873,6 @@ def test_credential_store_and_transient_failure_emit_different_json_outcomes(
     assert refused_payload["attached"] is False
 
 
-def test_concierge_invocation_exits_zero_on_a_failure_arm_with_documented_keys(
-    camp_cli, group_env, monkeypatch, capsys
-):
-    """The concierge's exact documented invocation
-    (`skills/concierge/SKILL.md:120`) must still succeed and emit an object
-    when the session can't be created — the create path's deliverable is
-    the workspace, not the session."""
-    g = group_env
-    tmux = _DoorTmux(present=None)
-    _wire_tmux(monkeypatch, tmux)
-
-    code = _run_capturing_exit(
-        camp_cli._cmd_new_group_cli,
-        ["feat-concierge-fail", "--launch", "--no-wait", "--json"],
-        g["group"],
-        g["env"],
-        dry_run=False,
-    )
-
-    assert code == 0
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["ok"] is True
-    assert payload["outcome"] == "workspace-only"
-    assert "session_error" in payload
 
 
 # ---------------------------------------------------------------------------

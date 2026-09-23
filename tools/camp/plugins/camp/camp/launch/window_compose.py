@@ -8,13 +8,12 @@ itself assigned on that same creating call, never a value this module
 predicted — and writes the result into the workspace's window record before
 reporting success.
 
-One thing this module deliberately does NOT do, owned by an earlier slice:
+One thing this module deliberately does NOT do:
 
-- The remote-control and visible-name flags. `trailhead.harness.claude_code`
-  offers `session_launch`, but that method unconditionally adds
-  `--remote-control` and `--name` (AC56 forbids both here), so this module
-  never calls it — the composed argv is built directly from the harness
-  profile's bare binary name plus `--session-id`.
+- The remote-control and visible-name flags. No method on the harness seam
+  composes `--remote-control` or `--name` (AC56 forbids both here) — the
+  composed argv is built directly from the harness profile's bare binary
+  name plus `--session-id`.
 
 The directory floor (AC21) IS checked here, first thing, before the
 conversation id is minted or any tmux call is made: `cwd` is resolved once,
@@ -106,11 +105,10 @@ def compose_window(
     *command*, when given, is run verbatim and recorded as the window's
     command line — no conversation id, no scrub, no harness composition at
     all. *command* absent (the default) is the AC19 path: camp mints a
-    fresh conversation id itself (`uuid.uuid4()`, the same pattern
-    `launch/session.py` already applies), composes `<binary> --session-id
-    <id>` directly rather than through the harness's `session_launch` (which
-    unconditionally adds the two flags AC56 forbids), wraps it in the
-    harness's scrub, and records the id with no command line.
+    fresh conversation id itself (`uuid.uuid4()`), composes `<binary>
+    --session-id <id>` directly — no method on the harness seam composes
+    the two flags AC56 forbids — wraps it in the harness's scrub, and
+    records the id with no command line.
 
     *cwd* is resolved once, first thing: the directory floor (AC21) is
     checked against that resolved path, and the same resolved path is what

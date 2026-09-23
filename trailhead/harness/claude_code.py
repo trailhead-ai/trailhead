@@ -100,12 +100,10 @@ from pathlib import Path
 from typing import BinaryIO
 
 from trailhead.harness.base import (
-    MODALITY_TTY_REQUIRED,
     AccountAuthentication,
     AccountIdentity,
     Harness,
     HarnessError,
-    Modality,
     SessionRecord,
     SessionTranscript,
 )
@@ -1384,84 +1382,12 @@ class ClaudeCodeHarness(Harness):
         """The settings key a user raises to keep transcripts longer."""
         return _CLEANUP_PERIOD_KEY
 
-    # -- session launch & enumeration ------------------------------------------
+    # -- session launch environment & enumeration --------------------------
     #
     # ``claude agents --json`` lists this machine's Claude Code sessions.
     # ``--cwd`` is the CLI's native started-under PREFIX filter (verified
     # empirically 2026-08-14) — exactly the "rooted under" scoping the base
     # seam documents, so it is passed straight through rather than re-derived.
-    #
-    # ``claude --remote-control --session-id <id>`` starts a brand-new session
-    # under the caller-chosen id (confirmed by an operator TTY check on
-    # 2026-08-14: the CLI honors a supplied id and it enumerates under exactly
-    # that id in ``claude agents --json``; the CLI's own help text calls the
-    # flag "reattach", but a fresh id observably creates). ``--name <name>``
-    # sets the session's visible name — both the ``name`` field in
-    # ``claude agents --json`` and the label the claude.ai/code clients render
-    # (verified live 2026-08-19: both flags together create a new session
-    # under the supplied id carrying the supplied name). Without ``--name``,
-    # the derived name is the relay default (hostname-prefixed) on the client
-    # surface and the cwd basename plus two hex characters locally.
-    #
-    # Deliberately absent from the argv, each for a verified reason:
-    #
-    # - no ``--bg`` — it silently discards ``--remote-control`` and yields
-    #   ``kind: background`` instead of a controllable session.
-    # - no workspace path — Claude Code roots a launched session on the
-    #   process's cwd, which the exec-owning caller sets; ``workspace`` is
-    #   accepted for the seam signature and is unused here.
-
-    def session_launch(
-        self,
-        workspace: Path,
-        session_id: str,
-        *,
-        session_name: str | None = None,
-        settings_path: Path | None = None,
-    ) -> list[str]:
-        """Return ``["claude", "--remote-control", "--session-id", <session-id>]``,
-        plus ``["--name", <session-name>]`` when a name is requested, plus
-        ``["--settings", <path>]`` when settings are handed over.
-
-        ``--settings`` loads a file ADDITIONALLY: claude still discovers what it
-        would have found on its own, and hooks from the two sources merge rather
-        than replace each other. That is what makes it safe to hand a session the
-        settings its own launch directory would not lead it to.
-
-        Raises :class:`HarnessError` on a malformed ``session_id`` — see the
-        base contract's DIVERGES note: this is the one seam here that raises
-        instead of degrading to ``None`` on bad input, since launch is
-        constant-valued and ``None`` is reserved for "cannot launch at all".
-
-        ``session_name`` is held to the same inert-token predicate as
-        ``session_id``: it lands in the same argv, so a separator, an empty
-        string, or a leading dash is the same flag-injection surface and
-        raises the same way.
-        """
-        if not _is_session_id(session_id):
-            raise HarnessError(f"session_launch: invalid session_id: {session_id!r}")
-        argv = ["claude", "--remote-control", "--session-id", session_id]
-        if session_name is not None:
-            if not _is_session_id(session_name):
-                raise HarnessError(
-                    f"session_launch: invalid session_name: {session_name!r}"
-                )
-            argv += ["--name", session_name]
-        if settings_path is not None:
-            # Held to the same inert-token predicate as the two above: this is a
-            # path, so it is checked for the one shape that stops being a path
-            # once it reaches argv — a leading dash, which claude reads as a flag.
-            text = str(settings_path)
-            if not text or text.startswith("-"):
-                raise HarnessError(
-                    f"session_launch: invalid settings_path: {settings_path!r}"
-                )
-            argv += ["--settings", text]
-        return argv
-
-    def session_launch_modality(self) -> Modality:
-        """Claude Code launch requires a TTY (interactive terminal)."""
-        return MODALITY_TTY_REQUIRED
 
     def session_launch_env_unset(self) -> list[str]:
         """Env var names a launching caller must scrub before spawning.
@@ -1595,8 +1521,8 @@ class ClaudeCodeHarness(Harness):
         begins with ``-``: it would land in the value slot right after
         ``--cwd`` and read as a flag, silently unscoping the enumeration —
         or worse, being parsed as a real CLI flag. This is argv safety only,
-        NOT filesystem validation: a nonexistent workspace still returns argv,
-        matching :meth:`session_launch`. Beyond the leading dash the value is
+        NOT filesystem validation: a nonexistent workspace still returns argv.
+        Beyond the leading dash the value is
         passed through as given, so an argv from this seam is safe to exec but
         is NOT guaranteed free of shell-active characters the way a
         guard-checked ``session_id`` is — do not hand it to a shell.

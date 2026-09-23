@@ -533,19 +533,8 @@ def _assert_clean_refusal(result, *, needle: str, verb: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# camp help — the launch surface's addressing forms and exit-code contract.
-#
-# The help menu is the operator's index of what camp can do, and `camp launch`
-# now has three mutually exclusive addressing forms rather than one. These
-# assert against `cmd_help`'s own output (via the real binary) rather than
-# against a copy of the block, so editing the emitter is what moves them.
-#
-# The exit-code contract gets its own pin because `camp launch` grew a non-zero
-# that carries information: an ambiguous `--resume` ref exits 2 with the
-# candidates on stdout. A reader applying the ordinary "non-zero means it
-# broke" heuristic would report a resolvable ambiguity as a hard failure, so
-# the contract has to be stated where it is read. That the CLI actually returns
-# the codes named here is driven separately, in test_session_cli.py.
+# camp help — read against the real binary's `cmd_help` output rather than a
+# copy of the block, so editing the emitter is what moves these.
 # ---------------------------------------------------------------------------
 
 
@@ -554,38 +543,6 @@ def help_text() -> str:
     result = _run(["help"])
     assert result.returncode == 0, result.stderr
     return result.stdout
-
-
-def test_help_names_every_camp_launch_addressing_form(help_text: str) -> None:
-    """A slug, a directory, and a session reference — all three discoverable."""
-    assert "camp launch <slug>" in help_text
-    assert "camp launch --dir <path> --group <name>" in help_text
-    assert "camp launch --resume <ref>" in help_text
-
-
-def _launch_exit_code_contract(help_text: str) -> dict[int, str]:
-    """The exit codes `camp help` documents for `camp launch`, code → its prose.
-
-    Read out of the emitter rather than compared against a literal, so an added
-    or dropped code changes what these assertions see. test_session_cli.py reads
-    the same block for itself and drives every code it finds there, which is
-    what ties the documented contract to the one the binary honors.
-    """
-    heading = re.search(r"^Exit codes \(camp launch\):$", help_text, re.MULTILINE)
-    assert heading, f"no launch exit-code contract in:\n{help_text}"
-    block = help_text[heading.end() :]
-    block = block.split("\nFlags:", 1)[0]
-
-    contract: dict[int, str] = {}
-    current: int | None = None
-    for line in block.splitlines():
-        match = re.match(r"^\s{2}(\d+)\s{2,}(.*)$", line)
-        if match:
-            current = int(match.group(1))
-            contract[current] = match.group(2).strip()
-        elif current is not None and line.strip():
-            contract[current] += " " + line.strip()
-    return contract
 
 
 # ---------------------------------------------------------------------------
