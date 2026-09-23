@@ -1611,61 +1611,71 @@ def test_no_launch_block_omits_launch_key(tmp_path: Path) -> None:
     assert "launch" not in cfg
 
 
-def test_launch_roots_parsed_unexpanded(tmp_path: Path) -> None:
-    """roots entries are stored exactly as written — '~' is expanded at check
-    time against the injected environment, not at config-load time."""
+def test_launch_roots_present_loads_and_carries_no_allowlist(tmp_path: Path) -> None:
+    """`roots` still loads without error, but the parsed group carries no
+    allowlist at all — the key grants nothing now."""
     cfg = _write_and_load(tmp_path, '[launch]\nroots = ["~/code", "/srv/work"]\n')
-    assert cfg["launch"]["roots"] == ["~/code", "/srv/work"]
+    assert "roots" not in cfg["launch"]
 
 
-@pytest.mark.parametrize(
-    "roots_line",
-    [
-        "roots = []",
-        'roots = "x"',
-        "roots = [1]",
-        'roots = ["", "  "]',
-    ],
-)
-def test_launch_roots_invalid_raises(tmp_path: Path, roots_line: str) -> None:
-    """An empty list, a non-list, a non-string entry, or a blank entry each
-    raise GroupConfigError naming launch.roots."""
-    from camp.group.config import GroupConfigError
+def test_launch_roots_present_prints_the_retirement_notice_naming_this_path(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The notice names the config's own path and lands on stderr."""
+    f = tmp_path / "testgroup.toml"
+    f.write_text(
+        "[group]\nname = 'testgroup'\n\n"
+        "[[members]]\nname = 'myrepo'\nrepo_root = '/tmp/myrepo'\n\n"
+        '[launch]\nroots = ["~/code"]\n'
+    )
+    from camp.group.config import load_group
 
-    with pytest.raises(GroupConfigError) as exc_info:
-        _write_and_load(tmp_path, f"[launch]\n{roots_line}\n")
-    assert "launch.roots" in str(exc_info.value)
-
-
-@pytest.mark.parametrize(
-    "entry",
-    [
-        "code",
-        "./code",
-        "../code",
-        "~user/code",
-    ],
-)
-def test_launch_roots_rejects_entries_without_a_fixed_anchor(tmp_path: Path, entry: str) -> None:
-    """A roots entry must name a fixed location, not one relative to the caller.
-
-    A relative entry is resolved against whatever directory camp runs from, so
-    one config fences differently per invocation — and an unexpected working
-    directory widens the boundary rather than narrowing it. '~user' is rejected
-    alongside them: it reads as anchored but expands nowhere, leaving a literal
-    relative path with the same defect.
-    """
-    from camp.group.config import GroupConfigError
-
-    with pytest.raises(GroupConfigError) as exc_info:
-        _write_and_load(tmp_path, f'[launch]\nroots = ["{entry}"]\n')
-    assert "launch.roots" in str(exc_info.value)
+    load_group(f)
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert (
+        f"camp: [launch] roots in {f.resolve()} is no longer used and grants "
+        "nothing — remove it" in captured.err
+    )
 
 
-def test_launch_roots_accepts_absolute_and_home_anchored_entries(tmp_path: Path) -> None:
-    """The two anchored spellings both load: absolute, and '~'-anchored."""
-    cfg = _write_and_load(tmp_path, '[launch]\nroots = ["/srv/work", "~/code", "~"]\n')
-    assert cfg["launch"]["roots"] == ["/srv/work", "~/code", "~"]
+def test_launch_without_roots_prints_no_notice(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A group with no `roots` key never sees the retirement notice."""
+    _write_and_load(tmp_path, '[launch]\naccount = "~/.claude-levr"\n')
+    captured = capsys.readouterr()
+    assert "roots" not in captured.err
+
+
+def test_launch_roots_notice_fires_once_per_distinct_config_path(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Two configs that both carry `roots` each get their own notice; loading
+    the same config path twice in one process gets one notice total — "once"
+    means once per distinct resolved config path per process."""
+    from camp.group.config import load_group
+
+    first = tmp_path / "first.toml"
+    first.write_text(
+        "[group]\nname = 'first'\n\n"
+        "[[members]]\nname = 'myrepo'\nrepo_root = '/tmp/myrepo'\n\n"
+        '[launch]\nroots = ["~/code"]\n'
+    )
+    second = tmp_path / "second.toml"
+    second.write_text(
+        "[group]\nname = 'second'\n\n"
+        "[[members]]\nname = 'myrepo'\nrepo_root = '/tmp/myrepo'\n\n"
+        '[launch]\nroots = ["~/other"]\n'
+    )
+
+    load_group(first)
+    load_group(second)
+    load_group(first)
+
+    captured = capsys.readouterr()
+    assert captured.err.count(f"roots in {first.resolve()}") == 1
+    assert captured.err.count(f"roots in {second.resolve()}") == 1
 
 
 def test_launch_unknown_key_raises(tmp_path: Path) -> None:
@@ -1678,6 +1688,18 @@ def test_launch_unknown_key_raises(tmp_path: Path) -> None:
     msg = str(exc_info.value)
     assert "launch" in msg
     assert "rootz" in msg
+
+
+def test_launch_bogus_key_raises_naming_it(tmp_path: Path) -> None:
+    """A key other than `roots`/`account` is still refused outright, naming
+    itself — `roots` staying a known key does not widen what else is allowed."""
+    from camp.group.config import GroupConfigError
+
+    with pytest.raises(GroupConfigError) as exc_info:
+        _write_and_load(tmp_path, "[launch]\nbogus = 1\n")
+    msg = str(exc_info.value)
+    assert "launch" in msg
+    assert "bogus" in msg
 
 
 def test_launch_not_a_table_raises(tmp_path: Path) -> None:
@@ -1708,9 +1730,10 @@ def test_launch_account_absent_is_none_with_no_launch_block(tmp_path: Path) -> N
 
 
 def test_launch_account_absent_with_roots_present_is_none(tmp_path: Path) -> None:
-    """roots keeps working unchanged when account is not declared."""
+    """account stays absent when only roots is declared, and roots still
+    grants no allowlist."""
     cfg = _write_and_load(tmp_path, '[launch]\nroots = ["~/code"]\n')
-    assert cfg["launch"]["roots"] == ["~/code"]
+    assert "roots" not in cfg["launch"]
     assert "account" not in cfg["launch"]
 
 

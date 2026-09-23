@@ -128,25 +128,6 @@ Starting a harness conversation in a new workspace is still `camp launch
 <slug>` (above), run from inside the workspace `camp new` just opened, or
 directly by slug from anywhere.
 
-### Rooting a launch at a directory
-
-`camp launch --dir <path>` is **off by default**. A directory a launch may root
-at has to be allowlisted in the group's config first:
-
-```toml
-[launch]
-roots = ["~/code", "/srv/work"]
-```
-
-A target is eligible when it is one of those entries or sits under one — equal
-or under, so allowlisting `~/code` never allowlists `~`. With no `[launch]`
-block at all, no directory is eligible and camp says so rather than falling back
-to something permissive.
-
-`--dir` also **requires an explicit `--group`**. The allowlist is the containment
-boundary, so which group supplies it must never depend on the directory camp
-happened to be invoked from.
-
 ### Declaring a group's account
 
 `[launch]` also accepts an optional `account` key:
@@ -173,21 +154,20 @@ invoked from. The harness refuses to bind a session to a relative account in the
 first place, so such a value is a misconfiguration to fix, not a protection to
 rely on.
 
-**A credential deny list overrides the allowlist unconditionally.** `~/.ssh`,
+**A credential deny list applies unconditionally.** `~/.ssh`,
 `~/.gnupg`, `~/.aws`, `~/.azure`, `~/.kube`, `~/.docker`, `~/.config/gcloud`,
 `~/.netrc`, `~/.config/gh`, `~/.npmrc`, `~/.pypirc`, `~/.git-credentials`, and
 the harness's own credential stores `~/.claude` and `~/.claude.json` are fixed
 in camp's code as a floor. The rule denies a target that is at, under, **or
-above** any entry — so `roots = ["~"]` cannot launder a home directory full of
-credential stores past the gate in one line. The refusal names the credential
-rule and never mentions the allowlist, because editing the allowlist is not the
-fix.
+above** any entry — so rooting a window at the home directory itself cannot
+launder every credential store inside it past the gate. The refusal names the
+credential rule and no group configuration can permit it.
 
 **Every `account` any group declares is added to that deny list**, so a second
 account's credential directory is protected exactly like the first — including
-from a *different* group, whose `roots` would otherwise reach it. The derivation
-is additive only: a group config can extend the floor and can never remove,
-narrow, or shadow an entry, so no group config can permit a denied path.
+from a *different* group. The derivation is additive only: a group config can
+extend the floor and can never remove, narrow, or shadow an entry, so no group
+config can permit a denied path.
 
 ### Bringing a dead session back
 
@@ -494,6 +474,6 @@ camp group <name> --member NAME=PATH [--member NAME=PATH ...]
 Authors a group config TOML and wires SessionStart hooks into each member repo.
 
 Everything else in a group config is optional and off until you add it — including
-the `[launch] roots` allowlist that directory-rooted launches need, described under
-[Rooting a launch at a directory](#rooting-a-launch-at-a-directory). The full schema
+the `[launch] account` binding described under
+[Declaring a group's account](#declaring-a-groups-account). The full schema
 is documented on `camp.group.config`.
