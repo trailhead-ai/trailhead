@@ -19,11 +19,14 @@ directory, so what is asserted is the state git itself writes.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
+
+from conftest import _copy_git_tree
 
 
 def _load_common():
@@ -81,13 +84,40 @@ def _template(tmp_path_factory) -> Path:
 def repo(_template, tmp_path) -> Path:
     """A fresh copy of the template, on `side`, ready to rebase onto `main`."""
     path = tmp_path / "v"
-    shutil.copytree(_template, path, symlinks=True)
+    _copy_git_tree(_template, path)
     return path
 
 
 def _start_conflicted_rebase(path: Path) -> None:
     result = _git(path, "rebase", "main")
     assert result.returncode != 0, "the rebase was meant to stop on a conflict"
+
+
+def test_repo_fixture_survives_a_lock_file_vanishing_mid_copy(tmp_path, monkeypatch):
+    """`repo` copies `_template` with `_copy_git_tree`, which races git's own
+    background maintenance: a `.git/objects/maintenance.lock` file can be
+    present when `shutil.copytree` lists the source directory but gone by the
+    time it opens it. Simulate the vanish directly and confirm the copy still
+    produces a working repository rather than raising `shutil.Error`.
+    """
+    template = tmp_path / "template"
+    _build_repo_with_a_conflict_ahead(template)
+    (template / ".git" / "objects" / "maintenance.lock").write_text("")
+
+    real_copy2 = shutil.copy2
+
+    def vanishing_copy2(src, dst, *args, **kwargs):
+        if os.fspath(src).endswith(".lock"):
+            raise FileNotFoundError(src)
+        return real_copy2(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(shutil, "copy2", vanishing_copy2)
+
+    dest = tmp_path / "clone"
+    _copy_git_tree(template, dest)
+
+    assert not (dest / ".git" / "objects" / "maintenance.lock").exists()
+    assert _git(dest, "rev-parse", "HEAD").returncode == 0
 
 
 def test_a_vault_with_no_rebase_running_is_not_mid_rebase(repo):

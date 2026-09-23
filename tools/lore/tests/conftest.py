@@ -400,12 +400,19 @@ def _copy_git_tree(template: Path, path: Path) -> Path:
     while a copy is in flight, which raced `shutil.copytree` off a listing
     that already had the file. Lock files are ephemeral git-internal state
     that a fresh copy has no use for regardless, so they are excluded from
-    the copy outright rather than raced.
+    the copy outright rather than raced. `copy_function` is passed explicitly
+    rather than left to `copytree`'s own default, which binds to `copy2` at
+    `shutil`'s own definition time and would be immune to a test's monkeypatch.
     """
     import shutil
 
     shutil.copytree(
-        template, path, symlinks=True, dirs_exist_ok=True, ignore=shutil.ignore_patterns("*.lock")
+        template,
+        path,
+        symlinks=True,
+        dirs_exist_ok=True,
+        ignore=shutil.ignore_patterns("*.lock"),
+        copy_function=shutil.copy2,
     )
     return path
 
