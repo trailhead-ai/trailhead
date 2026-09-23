@@ -20,8 +20,6 @@ from trailhead.harness import (
 )
 from trailhead.harness.claude_code import _ERROR_EXCERPT_LIMIT
 from trailhead.harness.base import (
-    MODALITIES,
-    MODALITY_TTY_REQUIRED,
     UNSUPPORTED_RULESET_NOTICE,
     AccountAuthentication,
     AccountIdentity,
@@ -703,118 +701,6 @@ class TestClaudeCodeSessionResume:
         assert ClaudeCodeHarness().session_resume(None) is None
 
 
-class TestClaudeCodeSessionLaunch:
-    """Claude Code launches a brand-new session by caller-chosen id. The seam
-    OWNS the argv the same way ``session_resume`` does."""
-
-    def test_returns_launch_argv_for_the_session(self, tmp_path):
-        assert ClaudeCodeHarness().session_launch(tmp_path, "sess-1") == [
-            "claude",
-            "--remote-control",
-            "--session-id",
-            "sess-1",
-        ]
-
-    def test_argv_is_a_token_list_needing_no_shell(self, tmp_path):
-        """Every element is a separate token — nothing is pre-joined or quoted, so
-        an exec-style caller passes it through untouched."""
-        argv = ClaudeCodeHarness().session_launch(tmp_path, "sess-1")
-        assert all(isinstance(tok, str) for tok in argv)
-        assert not any(" " in tok for tok in argv)
-        # A shell-active character would have to be quoted before a shell saw it;
-        # its absence is what lets an exec-style caller skip quoting entirely.
-        shell_active = set("|&;<>()$`\\\"'\t\n*?[]{}#~")
-        assert not any(shell_active & set(tok) for tok in argv)
-
-    def test_malformed_id_raises_unlike_session_resume_which_returns_none(self, tmp_path):
-        """Pin the deliberate divergence: session_resume degrades to None on a bad
-        id, session_launch raises — a caller who learned "check for None" from
-        session_resume must not silently pass a malformed id through to argv."""
-        for bad in ("", "a b", "a;rm -rf /", "$(whoami)", "../escape", "a/b", "-x"):
-            assert ClaudeCodeHarness().session_resume(bad) is None, bad
-            with pytest.raises(HarnessError):
-                ClaudeCodeHarness().session_launch(tmp_path, bad)
-
-    def test_rejects_a_non_string_session_id(self, tmp_path):
-        with pytest.raises(HarnessError):
-            ClaudeCodeHarness().session_launch(tmp_path, None)
-
-    def test_rejects_a_leading_dash_session_id_as_flag_injection(self, tmp_path):
-        with pytest.raises(HarnessError):
-            ClaudeCodeHarness().session_launch(tmp_path, "--dangerously-skip-permissions")
-
-    def test_session_name_appends_the_name_flag(self, tmp_path):
-        assert ClaudeCodeHarness().session_launch(
-            tmp_path, "sess-1", session_name="camp-feat-x-abcd1234"
-        ) == [
-            "claude",
-            "--remote-control",
-            "--session-id",
-            "sess-1",
-            "--name",
-            "camp-feat-x-abcd1234",
-        ]
-
-    def test_no_session_name_means_no_name_flag(self, tmp_path):
-        assert "--name" not in ClaudeCodeHarness().session_launch(tmp_path, "sess-1")
-
-    def test_malformed_session_name_raises_like_a_malformed_id(self, tmp_path):
-        """The name lands in the same argv as the id, so it is held to the same
-        inert-token predicate — including the leading-dash flag-injection case."""
-        bads = ("", "a b", "a;rm -rf /", "$(whoami)", "../escape", "a/b", "-x", "--dangerously-skip-permissions")
-        for bad in bads:
-            with pytest.raises(HarnessError):
-                ClaudeCodeHarness().session_launch(tmp_path, "sess-1", session_name=bad)
-
-    def test_no_filesystem_validation_of_workspace(self, tmp_path):
-        missing = tmp_path / "does-not-exist"
-        assert ClaudeCodeHarness().session_launch(missing, "sess-1") == [
-            "claude",
-            "--remote-control",
-            "--session-id",
-            "sess-1",
-        ]
-
-
-    def test_session_launch_carries_a_settings_file(self, tmp_path):
-        """A launch rooted where the harness will not DISCOVER camp's settings can
-        still be handed them.
-
-        The harness resolves project settings by first-match-wins upward search
-        that stops at a git repository boundary, so a session rooted at a member
-        repo inside a workspace never finds the workspace's own hooks. `--settings`
-        loads them additionally, without anything being written into the repo the
-        session is rooted in.
-        """
-        settings = tmp_path / "settings.json"
-        argv = ClaudeCodeHarness().session_launch(
-            tmp_path, "sess-1", settings_path=settings
-        )
-        assert argv[-2:] == ["--settings", str(settings)]
-
-    def test_session_launch_omits_settings_when_not_asked(self, tmp_path):
-        assert "--settings" not in ClaudeCodeHarness().session_launch(tmp_path, "sess-1")
-
-    def test_session_launch_refuses_a_flag_shaped_settings_path(self, tmp_path):
-        """Same flag-injection surface as session_id and session_name.
-
-        A path that reads as a flag lands in the same argv and is refused there
-        for the same reason, rather than being passed to the harness to interpret.
-        """
-        with pytest.raises(HarnessError):
-            ClaudeCodeHarness().session_launch(
-                tmp_path, "sess-1", settings_path=Path("--dangerously-skip-permissions")
-            )
-
-
-class TestClaudeCodeSessionLaunchModality:
-    def test_returns_tty_required(self):
-        assert ClaudeCodeHarness().session_launch_modality() == MODALITY_TTY_REQUIRED
-
-    def test_is_a_member_of_modalities(self):
-        assert ClaudeCodeHarness().session_launch_modality() in MODALITIES
-
-
 class TestClaudeCodeSessionLaunchEnvUnset:
     def test_the_account_variable_is_scrubbed_so_the_default_is_absence(self):
         """The undeclared-account default is the variable being ABSENT, which only
@@ -904,16 +790,15 @@ class TestSessionRetentionSetting:
 
 
 class TestLaunchEnumerationBaseDefaults:
-    """The launch/enumeration seam is CONCRETE with degrading defaults: a harness
-    with no launch or enumeration concept answers None for all six, never
-    raises, and never requires implementing anything to instantiate."""
+    """The launch-environment/enumeration seam is CONCRETE with degrading
+    defaults: a harness with no launch or enumeration concept answers None
+    for all four, never raises, and never requires implementing anything to
+    instantiate."""
 
-    def test_bare_harness_instantiates_without_implementing_any_of_the_six(self, tmp_path):
-        """All six are non-abstract: subclassing Harness without overriding them
+    def test_bare_harness_instantiates_without_implementing_any_of_the_four(self, tmp_path):
+        """All four are non-abstract: subclassing Harness without overriding them
         must not raise TypeError at instantiation."""
         h = _BareHarness()
-        assert h.session_launch(tmp_path, "sess-1") is None
-        assert h.session_launch_modality() is None
         assert h.session_launch_env_unset() is None
         assert h.session_launch_env_set(None) is None
         assert h.session_launch_env_set("/somewhere") is None
@@ -968,48 +853,23 @@ class TestAccountIdentityForbidsControlCharacters:
         assert identity.has_config is False
 
 
-class _LaunchOnlyBrokenHarness(_BareHarness):
-    """Implements session_launch but not the other two launch-trio members —
-    the base defaults leave modality/env_unset at None, breaking the triple."""
+class _EnvUnsetOnlyBrokenHarness(_BareHarness):
+    """Implements session_launch_env_unset but not session_launch_env_set —
+    the base default leaves the other half at None, breaking the pair."""
 
-    name = "launch-only-broken"
-
-    def session_launch(self, workspace, session_id):
-        return ["fake", "argv"]
-
-
-class _BadModalityHarness(_BareHarness):
-    """Implements the full launch quartet, but the modality is spelled outside
-    MODALITIES — the membership assertion, not just non-None, must catch it."""
-
-    name = "bad-modality"
-
-    def session_launch(self, workspace, session_id):
-        return ["fake", "argv"]
-
-    def session_launch_modality(self):
-        return "headless"
+    name = "env-unset-only-broken"
 
     def session_launch_env_unset(self):
         return []
 
-    def session_launch_env_set(self, account, *, env=None):
-        return {"FAKE_ACCOUNT_DIR": account or "/default"}
-
 
 class _NoScrubListHarness(_BareHarness):
-    """Overrides the whole launch quartet but answers None for the scrub list —
-    so override-detection alone passes it. The value assertion must catch it:
-    a launch-capable harness with nothing to scrub returns [], and None here
-    would make a caller skip the credential scrub."""
+    """Overrides the whole launch-env pair but answers None for the scrub
+    list — so override-detection alone passes it. The value assertion must
+    catch it: a launch-capable harness with nothing to scrub returns [], and
+    None here would make a caller skip the credential scrub."""
 
     name = "no-scrub-list"
-
-    def session_launch(self, workspace, session_id):
-        return ["fake", "argv"]
-
-    def session_launch_modality(self):
-        return MODALITY_TTY_REQUIRED
 
     def session_launch_env_unset(self):
         return None
@@ -1019,19 +879,13 @@ class _NoScrubListHarness(_BareHarness):
 
 
 class _NoLaunchEnvSetHarness(_BareHarness):
-    """Overrides the whole launch quartet but answers None for the account
+    """Overrides the whole launch-env pair but answers None for the account
     binding — override-detection alone passes it. The value assertion must
     catch it: None there means 'launch unsupported', so a caller reading it as
     'nothing to set' would let the child inherit whichever account the ambient
     environment carried, which is precisely the defect this seam removes."""
 
     name = "no-launch-env-set"
-
-    def session_launch(self, workspace, session_id):
-        return ["fake", "argv"]
-
-    def session_launch_modality(self):
-        return MODALITY_TTY_REQUIRED
 
     def session_launch_env_unset(self):
         return []
@@ -1051,11 +905,10 @@ class _EnumerateOnlyBrokenHarness(_BareHarness):
 
 
 class TestBothOrNeitherInvariants:
-    """Both-or-neither contracts on the launch quartet and the enumeration pair.
+    """Both-or-neither contracts on the launch-env pair and the enumeration pair.
 
-    (a) session_launch / session_launch_modality / session_launch_env_unset /
-    session_launch_env_set must be non-None together or None together, and a
-    non-None modality must be a MEMBER of MODALITIES — not merely non-None.
+    (a) session_launch_env_unset / session_launch_env_set must be non-None
+    together or None together.
     (b) session_enumerate and parse_session_list must likewise be non-None
     together or None together.
 
@@ -1070,35 +923,21 @@ class TestBothOrNeitherInvariants:
     """
 
     @staticmethod
-    def _assert_launch_quartet(harness: Harness, *, env: dict[str, str] | None = None) -> None:
-        # Detects implementation by OVERRIDE, not by probing with a fixed
-        # session_id/workspace: a real harness's id guard may reject
-        # "sess-1" outright (raising HarnessError, not returning None),
-        # which would misreport a correctly-implemented trio as violating
-        # the invariant.
+    def _assert_launch_env_pair(harness: Harness, *, env: dict[str, str] | None = None) -> None:
         cls = type(harness)
         overrides = (
-            cls.session_launch is not Harness.session_launch,
-            cls.session_launch_modality is not Harness.session_launch_modality,
             cls.session_launch_env_unset is not Harness.session_launch_env_unset,
             cls.session_launch_env_set is not Harness.session_launch_env_set,
         )
         assert all(overrides) or not any(overrides), (
-            f"{type(harness).__name__}: session_launch/session_launch_modality/"
-            f"session_launch_env_unset/session_launch_env_set must be overridden "
-            f"together or not at all, got {overrides!r}"
+            f"{type(harness).__name__}: session_launch_env_unset/"
+            f"session_launch_env_set must be overridden together or not at "
+            f"all, got {overrides!r}"
         )
         if any(overrides):
-            modality = harness.session_launch_modality()
-            assert modality in MODALITIES, (
-                f"{type(harness).__name__}: session_launch_modality() returned "
-                f"{modality!r}, which is not a member of MODALITIES"
-            )
             # The VALUE half, not just the override half. A harness that
             # advertises launch but answers None here would have its caller
-            # skip the credential scrub entirely — and unlike session_launch,
-            # this takes no probe input, so the override-detection rationale
-            # above does not apply. `[]` is the honest "nothing to scrub".
+            # skip the credential scrub entirely.
             assert harness.session_launch_env_unset() is not None, (
                 f"{type(harness).__name__}: advertises launch but "
                 f"session_launch_env_unset() returned None; a harness with "
@@ -1132,39 +971,35 @@ class TestBothOrNeitherInvariants:
             f"must be overridden together or not at all, got {overrides!r}"
         )
 
-    def test_launch_only_broken_harness_fails_the_quartet_invariant(self):
+    def test_env_unset_only_broken_harness_fails_the_pair_invariant(self):
         with pytest.raises(AssertionError):
-            self._assert_launch_quartet(_LaunchOnlyBrokenHarness())
+            self._assert_launch_env_pair(_EnvUnsetOnlyBrokenHarness())
 
-    def test_modality_outside_vocabulary_fails_the_membership_assertion(self):
-        with pytest.raises(AssertionError):
-            self._assert_launch_quartet(_BadModalityHarness())
-
-    def test_no_scrub_list_harness_fails_the_quartet_invariant(self):
+    def test_no_scrub_list_harness_fails_the_pair_invariant(self):
         """Override detection alone would pass this one — the value half is what
         catches it, and the credential scrub is what's at stake."""
         with pytest.raises(AssertionError):
-            self._assert_launch_quartet(_NoScrubListHarness())
+            self._assert_launch_env_pair(_NoScrubListHarness())
 
-    def test_no_launch_env_set_harness_fails_the_quartet_invariant(self):
+    def test_no_launch_env_set_harness_fails_the_pair_invariant(self):
         """Override detection alone would pass this one too — what catches it is
         the value half, and an inherited account is what's at stake."""
         with pytest.raises(AssertionError):
-            self._assert_launch_quartet(_NoLaunchEnvSetHarness())
+            self._assert_launch_env_pair(_NoLaunchEnvSetHarness())
 
     def test_enumerate_only_broken_harness_fails_the_pair_invariant(self):
         with pytest.raises(AssertionError):
             self._assert_enumeration_pair(_EnumerateOnlyBrokenHarness())
 
     def test_bare_harness_with_neither_concept_passes_both_invariants(self):
-        self._assert_launch_quartet(_BareHarness())
+        self._assert_launch_env_pair(_BareHarness())
         self._assert_enumeration_pair(_BareHarness())
 
     def test_every_registered_harness_satisfies_both_invariants(self, tmp_path):
         assert len(_HARNESSES) >= 1
         for cls in _HARNESSES.values():
             harness = cls()
-            self._assert_launch_quartet(harness, env={"HOME": str(tmp_path)})
+            self._assert_launch_env_pair(harness, env={"HOME": str(tmp_path)})
             self._assert_enumeration_pair(harness)
 
 
@@ -1207,14 +1042,14 @@ class TestClaudeCodeSessionEnumerate:
     def test_rejects_a_flag_shaped_workspace(self):
         """A workspace beginning with '-' occupies --cwd's value slot and reads
         as a flag: enumeration silently unscopes, or the CLI parses it as a real
-        flag. Guard it the way session_launch guards its session_id."""
+        flag."""
         for bad in ("--dangerously-skip-permissions", "-x", "--cwd"):
             with pytest.raises(HarnessError):
                 ClaudeCodeHarness().session_enumerate(Path(bad))
 
     def test_no_filesystem_validation_of_workspace(self, tmp_path):
         """The guard above is argv safety, NOT existence checking — a missing
-        workspace still yields argv, matching session_launch."""
+        workspace still yields argv."""
         missing = tmp_path / "does-not-exist"
         assert ClaudeCodeHarness().session_enumerate(missing)[-1] == str(missing)
 

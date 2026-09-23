@@ -9,10 +9,8 @@ at the workspace directory, holding one login-shell window. No harness argv,
 no environment scrub, no account binding — see the created-session section
 of ``docs/design/the-door-creates-or-connects-a-workspace-session.md``.
 
-This is deliberately NOT :func:`~camp.launch.session.launch_session`: that
-function mints the retired `camp-<component>-<8hex>` name
-(`camp/launch/session.py:744-747`), never the workspace name, and composes a
-harness command this function must not.
+This is deliberately not a harness launch: the workspace session carries no
+harness command at all, only the workspace name and a login shell.
 
 Three outcomes, not two
 ------------------------
@@ -92,11 +90,10 @@ if TYPE_CHECKING:
     from .resurrect import ResurrectionResult
 
 #: This create is the one call that starts the tmux SERVER when none is
-#: running yet — the same operation `camp launch`'s own spawn budgets 30s for
-#: (`_SPAWN_TIMEOUT_SECONDS`, `launch/session.py`). `Tmux`'s own default
-#: (`TMUX_TIMEOUT_SECONDS`, 5s) is tuned for a quick existence probe, not a
-#: server bring-up, so this call states its own budget rather than
-#: inheriting that default.
+#: running yet, which routinely takes longer than an existence probe.
+#: `Tmux`'s own default (`TMUX_TIMEOUT_SECONDS`, 5s) is tuned for a quick
+#: existence probe, not a server bring-up, so this call states its own
+#: wider budget rather than inheriting that default.
 _CREATE_SESSION_TIMEOUT_SECONDS = 30
 
 
@@ -364,8 +361,9 @@ def create_or_connect_workspace_session(
     routes an unanswered tmux and an ordinary create failure there — but
     still distinguishes the two in what it reports.
     :func:`create_workspace_session` itself keeps raising for its OWN direct
-    callers (`launch_session`'s own gate, and the tests that exercise it
-    directly) — only this shared door step catches any of this.
+    callers (`create_or_connect_workspace_session`'s resurrection gate, and
+    the tests that exercise it directly) — only this shared door step
+    catches any of this.
 
     *tmux* is required, never defaulted: both callers inject the seam their
     own wiring resolved, and a default constructed here would silently

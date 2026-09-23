@@ -130,49 +130,25 @@ class TestNewSlug:
         assert execs == [], "the launch path is gone — no harness exec must be attempted"
 
 
-class TestJsonRequiresLaunchRefusesBeforeAnySideEffect:
-    """`--no-session --json` without `--launch` is a documented refusal —
-    `--no-session`'s whole point is to reproduce the pre-flip surface
-    exactly, and that surface never created a workspace or spawned a
-    provisioner just to then refuse. The refusal must happen before
-    `bring_up_workspace`, not after."""
+class TestNoSessionJsonCarriesOnlyTheWorkspacePath:
+    """`--no-session --json` no longer needs `--launch` to justify itself —
+    there is no launch flavor left for it to report on. It prints exactly
+    one key: the workspace path a caller would otherwise read off stdout."""
 
-    def test_refuses_before_bring_up_workspace_is_ever_called(
-        self, camp_cli, group_env, monkeypatch, capsys
-    ):
-        import camp.provision.provision as provision
-
-        g = group_env
-        calls: list[str] = []
-        monkeypatch.setattr(
-            provision, "bring_up_workspace", lambda *a, **k: calls.append("called")
-        )
-
-        with pytest.raises(SystemExit) as exc:
-            camp_cli._cmd_new_group_cli(
-                ["feat-refuse", "--no-session", "--json"], g["group"], g["env"], dry_run=False
-            )
-
-        assert exc.value.code == 1
-        assert calls == [], "bring_up_workspace must never run before the refusal"
-
-    def test_refusal_leaves_no_workspace_and_empty_stdout(
+    def test_prints_workspace_key_and_no_session_id(
         self, camp_cli, group_env, capsys
     ):
         g = group_env
 
-        with pytest.raises(SystemExit) as exc:
-            camp_cli._cmd_new_group_cli(
-                ["feat-refuse2", "--no-session", "--json"], g["group"], g["env"], dry_run=False
-            )
-
-        assert exc.value.code == 1
-        captured = capsys.readouterr()
-        assert captured.out == ""
-        assert "requires --launch" in captured.err
-        assert not _manifest_path(g["env"], "feat-refuse2").exists(), (
-            "no workspace may be seeded ahead of the refusal"
+        camp_cli._cmd_new_group_cli(
+            ["feat-json", "--no-session", "--json"], g["group"], g["env"], dry_run=False
         )
+
+        captured = capsys.readouterr()
+        payload = json.loads(captured.out)
+        ws = _workspace_dir(g["env"], "feat-json")
+        assert payload == {"workspace": str(ws)}
+        assert "session_id" not in payload
 
 
 class TestExistingWorkspace:
@@ -321,39 +297,27 @@ class TestBringUpInjectHook:
         )
 
 
-class TestLaunchJsonCarriesTheEngineReportedTmuxName:
-    """`camp new --no-session --launch --json` must carry the OLD launch
-    engine's own tmux_name — never reconstruct `camp-<slug>-<uuid8>` at the
-    print site. This is `--no-session`'s escape hatch keeping the pre-flip
-    launch engine reachable in full; the default (no `--no-session`) path
-    no longer starts a harness conversation at all — see
-    `test_new_workspace_door.py`."""
+class TestLaunchFlagIsUnrecognized:
+    """`--launch` is gone from `camp new`'s parser — argparse's own
+    unrecognized-argument handling refuses it, and no workspace is created."""
 
-    def test_tmux_name_in_json_output_is_the_engine_reported_value_verbatim(
-        self, camp_cli, group_env, monkeypatch, capsys
+    def test_launch_flag_is_refused_and_creates_no_workspace(
+        self, camp_cli, group_env, capsys
     ):
-        import camp.cli.session as cli_session
-        from camp.launch.session import LaunchedSession
-
         g = group_env
-        monkeypatch.setattr(cli_session, "wait_for_provisioning", lambda *a, **k: True)
-        fake_launched = LaunchedSession(
-            session_id="11111111-2222-3333-4444-555555555555",
-            tmux_name="not-a-derived-name-at-all",
-            launch_dir=Path("/tmp/wherever"),
-        )
-        monkeypatch.setattr(cli_session, "launch_and_confirm", lambda *a, **k: fake_launched)
 
-        camp_cli._cmd_new_group_cli(
-            ["feat-x", "--no-session", "--launch", "--json"], g["group"], g["env"], dry_run=False
-        )
+        with pytest.raises(SystemExit) as exc:
+            camp_cli._cmd_new_group_cli(
+                ["feat-launch-flag", "--launch"], g["group"], g["env"], dry_run=False
+            )
 
-        payload = json.loads(capsys.readouterr().out)
-        assert payload["tmux_name"] == "not-a-derived-name-at-all", (
-            "tmux_name must be the launch engine's reported value, not a "
-            "re-derivation of camp-<slug>-<uuid8> at the print site"
+        assert exc.value.code != 0
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert "--launch" in captured.err
+        assert not _manifest_path(g["env"], "feat-launch-flag").exists(), (
+            "an unrecognized flag must refuse before any workspace is seeded"
         )
-        assert payload["session_id"] == "11111111-2222-3333-4444-555555555555"
 
 
 class TestInputCharset:
@@ -581,17 +545,11 @@ class TestNewActivateFlag:
         assert err.strip() == "", f"queued path must not print the give-up signal, got: {err!r}"
 
     def test_activate_composes_with_no_wait(self, camp_cli, group_env, monkeypatch, capsys):
-        """--activate and --no-wait compose: --no-wait still skips the launch wait
-        and --activate still fires, independent of one another."""
+        """--activate and --no-wait compose: --no-wait propagates into the
+        activate trigger's own wait."""
         import camp.cli.session as cli_session
 
-        wait_calls = []
         trigger_calls = []
-        monkeypatch.setattr(
-            cli_session,
-            "wait_for_provisioning",
-            lambda *a, **k: wait_calls.append((a, k)) or True,
-        )
         monkeypatch.setattr(
             cli_session,
             "trigger_activate_phase_work",
@@ -600,15 +558,12 @@ class TestNewActivateFlag:
         g = group_env
 
         camp_cli._cmd_new_group_cli(
-            ["feat-both", "--no-session", "--launch", "--no-wait", "--activate"],
+            ["feat-both", "--no-session", "--no-wait", "--activate"],
             g["group"],
             g["env"],
             dry_run=False,
         )
 
-        err = capsys.readouterr().err
-        assert "camp new: --no-wait" in err
-        assert wait_calls == [], "--no-wait must still skip the bounded wait"
         assert trigger_calls == [("feat-both", False)], (
             "--activate must still fire alongside --no-wait, and --no-wait must "
             "propagate into the activate trigger's own wait too"

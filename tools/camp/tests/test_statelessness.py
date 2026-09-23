@@ -1,26 +1,22 @@
-"""camp's launch surface persists nothing: one snapshot over every new flow.
+"""camp's read/stop surface persists nothing: one snapshot over every flow.
 
-`camp launch --dir`, `camp launch --resume`, `camp sessions --recoverable`, and
-`camp kill` are stateless by contract — they read the harness's own transcript
-store and camp's group config, and they write nothing camp owns. Every session
-they can name already exists somewhere else, so there is no camp-side record to
-keep and none to go stale.
+`camp sessions --recoverable` and `camp kill` are stateless by contract — they
+read the harness's own transcript store and camp's group config, and they
+write nothing camp owns. Every session they can name already exists somewhere
+else, so there is no camp-side record to keep and none to go stale.
 
 `camp kill` is the sharpest case, and the reason this guard covers it. Stopping
 a session is exactly the moment a design would be tempted to leave a marker
-behind — a "parked" flag set on the stop and cleared on the resume — and the
-whole recoverability story depends on there being no such marker: a stopped
-session stays addressable by the same ref because the transcript the harness
-already keeps is the only record, and a flag camp wrote could go stale against
-it. Nothing is set on a stop and nothing is cleared on a resume, so the walk
-below drives a full stop-then-resume round trip and holds it to the same
-byte-level snapshot as every other flow.
+behind, and the whole recoverability story depends on there being no such
+marker: a stopped session stays addressable by the same ref because the
+transcript the harness already keeps is the only record. Nothing is set on a
+stop.
 
 The per-flow tests in `test_session_cli.py` each assert that for the one command
 they drive. That is not the same guarantee. A per-flow assertion passes as long
 as *that* command is clean, and stays passing while a sibling flow — or a helper
 they share — starts writing. This module closes that gap the only way it can be
-closed: it walks the WHOLE union of new flows, success and refusal alike, in one
+closed: it walks the WHOLE union of flows, success and refusal alike, in one
 process-sequence against one state directory, and compares a full recursive
 snapshot of `CAMP_STATE_DIR` — every path, every symlink target, and every byte
 of every file — taken before the walk against the same snapshot taken after each
@@ -35,32 +31,33 @@ Two things keep the walk honest:
 - The baseline is taken only once `camp new`'s BACKGROUND provisioner has stopped
   writing. Workspace creation is asynchronous; a snapshot taken while it is still
   moving would report the provisioner's writes as the flow-under-test's.
-- The walk asserts what it actually provoked — that it drove a launch that
-  happened (exit 0), a launch that was refused (exit 1), and an ambiguous
-  reference (exit 2). A walk in which every step failed early for some unrelated
-  reason would otherwise "prove" statelessness by never reaching the code. The
-  stop flows are held to the same rule, and two of them need more than an exit
-  code to satisfy it: a stop that reclaimed memory and a stop that found the
-  session already down are both successes, so the outcome line is what says
-  which of the two early-return branches actually ran.
+- The walk asserts what it actually provoked — a success (exit 0), a refusal
+  (exit 1), and an ambiguous reference (exit 2). A walk in which every step
+  failed early for some unrelated reason would otherwise "prove" statelessness
+  by never reaching the code. The stop flows are held to the same rule, and two
+  of them need more than an exit code to satisfy it: a stop that reclaimed
+  memory and a stop that found the session already down are both successes, so
+  the outcome line is what says which of the two early-return branches
+  actually ran.
 
 The world — a fake harness, a tmux stand-in, and the hermetic transcript store —
 is the one `test_session_cli.py` builds, imported rather than rebuilt. The point
 of this module is that it drives the SAME commands those tests drive; a second,
 separately-maintained copy of the scaffolding could drift into driving something
 else and the cross-cutting guarantee would quietly stop covering the real flows.
-HOME is redirected for every command here, so a launch that pre-seeds harness
-trust writes into a temporary home rather than the developer's own.
+`camp launch` is retired, so a live session for the kill flows below is
+registered directly against the fake tmux double, in the resume shape
+`camp.launch.stop._owning_commands` still recognizes — nothing drives the CLI
+to compose that shape itself any more.
 
-A workspace that arrived by transfer looks, to `camp launch --resume` and
-`camp sessions --recoverable`, like any other workspace whose manifest names a
-foreign owner — ownership never moves on arrival, so its central manifest keeps
-recording the sending host as owner even once the workspace is fully usable
-here. The walk below seeds exactly that: a workspace this host provisioned
-itself but whose manifest owner is overwritten to a name that is not this
-host's own, then resumes, stops, and re-resumes a session rooted in it, and
-lists it under `--recoverable`, the same way the rest of this file drives the
-non-transfer flows.
+A workspace that arrived by transfer looks, to `camp sessions --recoverable`,
+like any other workspace whose manifest names a foreign owner — ownership
+never moves on arrival, so its central manifest keeps recording the sending
+host as owner even once the workspace is fully usable here. The walk below
+seeds exactly that: a workspace this host provisioned itself but whose
+manifest owner is overwritten to a name that is not this host's own, then
+stops a session rooted in it, and lists it under `--recoverable`, the same
+way the rest of this file drives the non-transfer flows.
 
 `camp transfer-probe` and `camp transfer --dry-run` are the transfer
 preflight's two read-only surfaces — see `camp.cli.transfer`'s module
@@ -116,22 +113,39 @@ if str(_PLUGIN_DIR) not in sys.path:
     sys.path.insert(0, str(_PLUGIN_DIR))
 
 from camp.cli.transfer import EXIT_PEER_UNREACHABLE  # noqa: E402
+from camp.group.config import load_all_groups  # noqa: E402
 from camp.group.manifest import (  # noqa: E402
     manifest_path_for,
     owner_of,
     read_central_manifest,
     write_central_manifest,
 )
-
-from ._helpers import init_git_repo  # noqa: E402
+from camp.launch.recovery import derive_name_component  # noqa: E402
 
 _camp = _cli._camp
 _new_workspace = _cli._new_workspace
 _register_live = _cli._register_live
 _seed_transcript = _cli._seed_transcript
 _set_harness_binary = _cli._set_harness_binary
-_set_launch_roots = _cli._set_launch_roots
 _workspace_launch_dir = _cli._workspace_launch_dir
+
+
+def _register_resumable_session(cli_env, session_id: str, cwd: Path) -> None:
+    """Register *session_id* as a live, `camp kill`-recognizable session
+    rooted at *cwd* — directly against the fake tmux double, in the resume
+    shape `camp.launch.stop._owning_commands` still recognizes post-retirement.
+    `camp launch` no longer exists to compose that shape for us."""
+    groups = load_all_groups(Path(cli_env["config_dir"]) / "groups")
+    component = derive_name_component(cwd, groups, env=cli_env["env"])
+    tmux_name = f"camp-{component}-{session_id[:8]}"
+    result = subprocess.run(
+        ["tmux", "new-session", "-d", "-s", tmux_name, "-c", str(cwd),
+         "env", "fake-resume", session_id],
+        env=cli_env["env"],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
 #: Re-bound so pytest resolves the fixture from this module.
 cli_env = _cli.cli_env
 
@@ -231,25 +245,11 @@ def test_no_new_launch_flow_writes_anything_under_the_state_dir(cli_env) -> None
         encoding="utf-8",
     )
 
-    # A third group, harnessed like mygroup but with no [launch] roots at all —
-    # the "directory rooting is off by default" refusal needs a group that never
-    # turned it on, and the allowlist below can only be authored once per group.
-    third_repo = tmp_path / "repo_c"
-    init_git_repo(third_repo, origin=True)
-    result = _camp(cli_env, "group", "nolaunch", "--member", f"member={third_repo}")
-    assert result.returncode == 0, result.stderr
-    _set_harness_binary(cli_env["config_dir"], "nolaunch", "fakeharness")
-
     roots = tmp_path / "roots"
     rooted = roots / "projectx"
     rooted.mkdir(parents=True)
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
-    a_file = roots / "notes.txt"
-    a_file.write_text("not a directory\n", encoding="utf-8")
-    # "~" expands from the injected HOME below, so the credential-store flow can
-    # be allowlisted at the top level and still be refused on the deny rule.
-    _set_launch_roots(cli_env, roots, "~")
 
     workspace = _workspace_launch_dir(cli_env, "feat-stateless")
     amb_one = _workspace_launch_dir(cli_env, "feat-amb-one")
@@ -287,31 +287,13 @@ def test_no_new_launch_flow_writes_anything_under_the_state_dir(cli_env) -> None
     _seed_transcript(cli_env, _ID_ARRIVED, arrived_workspace)
     _register_live(cli_env, _ID_LIVE, live_workspace)
 
+    # `camp launch` no longer bootstraps a live session for the kill flows
+    # below — registered directly, in the shape `camp kill` still recognizes.
+    _register_resumable_session(cli_env, _ID_ROOTED, rooted)
+    _register_resumable_session(cli_env, _ID_ARRIVED, arrived_workspace)
+
     hermetic = {"HOME": str(home)}
     flows: list[tuple[str, list[str], Path | None]] = [
-        # --- camp launch --dir: the success and every refusal ---
-        ("--dir success", ["launch", "--dir", str(rooted), "--group", "mygroup"], None),
-        ("--dir with a slug", ["launch", "--dir", str(rooted), "feat-stateless", "--group", "mygroup"], None),
-        ("--dir with --resume", ["launch", "--dir", str(rooted), "--resume", _ID_WORKSPACE], None),
-        ("--dir without --group", ["launch", "--dir", str(rooted)], tmp_path),
-        ("--dir with no value", ["launch", "--dir=", "--group", "mygroup"], None),
-        ("--dir that does not exist", ["launch", "--dir", str(roots / "gone"), "--group", "mygroup"], None),
-        ("--dir naming a file", ["launch", "--dir", str(a_file), "--group", "mygroup"], None),
-        ("--dir outside the allowlist", ["launch", "--dir", str(elsewhere), "--group", "mygroup"], None),
-        ("--dir with no allowlist", ["launch", "--dir", str(rooted), "--group", "nolaunch"], None),
-        ("--dir at a credential store", ["launch", "--dir", str(home / ".ssh"), "--group", "mygroup"], None),
-        # --- camp launch --resume: the successes and every refusal ---
-        ("--resume a workspace session", ["launch", "--resume", _ID_WORKSPACE], tmp_path),
-        ("--resume an allowlisted root", ["launch", "--resume", _ID_ROOTED, "--group", "mygroup"], tmp_path),
-        ("--resume an ambiguous ref", ["launch", "--resume", "camp-feat-amb-"], tmp_path),
-        ("--resume a live session", ["launch", "--resume", _ID_LIVE], tmp_path),
-        ("--resume a vanished root", ["launch", "--resume", _ID_GONE, "--group", "mygroup"], tmp_path),
-        ("--resume an ineligible root", ["launch", "--resume", _ID_INELIGIBLE, "--group", "mygroup"], tmp_path),
-        ("--resume without a group", ["launch", "--resume", _ID_INELIGIBLE], tmp_path),
-        ("--resume an unreadable transcript", ["launch", "--resume", _ID_UNREADABLE], tmp_path),
-        ("--resume matching nothing", ["launch", "--resume", "nothing-matches-this"], tmp_path),
-        ("--resume with no value", ["launch", "--resume"], tmp_path),
-        ("--resume a transferred workspace session", ["launch", "--resume", _ID_ARRIVED], tmp_path),
         # --- camp sessions: every scope and every degradation ---
         ("--recoverable everywhere", ["sessions", "--recoverable", "--group", "mygroup"], None),
         ("--recoverable in a workspace", ["sessions", "--recoverable", "feat-stateless", "--group", "mygroup"], None),
@@ -330,21 +312,17 @@ def test_no_new_launch_flow_writes_anything_under_the_state_dir(cli_env) -> None
          ["sessions", "--recoverable", "--limit", "1", "--all", "--group", "mygroup"], None),
         ("--limit without --recoverable", ["sessions", "--limit", "1", "--group", "mygroup"], None),
         ("live listing under a directory", ["sessions", "--dir", str(roots), "--group", "mygroup"], None),
-        # --- camp kill: every outcome, ending on a park/resume round trip ---
-        # Ordered deliberately, and after the resume successes above: the stop
-        # needs a pane camp itself launched, and the already-down branch needs
-        # the name that stop just released.
-        ("kill a session camp launched", ["kill", _ID_ROOTED], tmp_path),
+        # --- camp kill: every outcome ---
+        # Ordered deliberately: the already-down branch needs the name the
+        # first kill just released.
+        ("kill a session registered live", ["kill", _ID_ROOTED], tmp_path),
         ("kill a session already down", ["kill", _ID_ROOTED], tmp_path),
         ("kill a live session owning no tmux session", ["kill", _ID_LIVE], tmp_path),
         ("kill an ambiguous ref", ["kill", "camp-feat-amb-"], tmp_path),
-        ("resume the stopped session", ["launch", "--resume", _ID_ROOTED, "--group", "mygroup"], tmp_path),
-        # The same park/resume round trip, on the transferred workspace's own
-        # session — the sharpest case for a foreign-owned workspace exactly as
-        # it is for an ordinary one: nothing may be set on the stop or cleared
-        # on the resume just because the manifest names another host as owner.
+        # The sharpest case for a foreign-owned workspace exactly as it is for
+        # an ordinary one: nothing may be set on the stop just because the
+        # manifest names another host as owner.
         ("kill the transferred workspace's session", ["kill", _ID_ARRIVED], tmp_path),
-        ("resume the transferred workspace after stop", ["launch", "--resume", _ID_ARRIVED], tmp_path),
     ]
 
     baseline = _settled_snapshot(state_dir)
@@ -366,12 +344,6 @@ def test_no_new_launch_flow_writes_anything_under_the_state_dir(cli_env) -> None
          ["sessions", "--recoverable", "--group", "mygroup"], {"CAMP_FAKE_ENUMERATE": "none"}),
         ("--recoverable on a harness that keeps no transcripts",
          ["sessions", "--recoverable", "--group", "mygroup"], {"CAMP_FAKE_TRANSCRIPTS": "none"}),
-        ("--resume on a harness that keeps no transcripts",
-         ["launch", "--resume", _ID_WORKSPACE], {"CAMP_FAKE_TRANSCRIPTS": "none"}),
-        ("--resume on a harness that cannot re-enter",
-         ["launch", "--resume", _ID_ROOTED, "--group", "mygroup"], {"CAMP_FAKE_RESUME": "none"}),
-        ("--resume that never confirms",
-         ["launch", "--resume", _ID_AMB_ONE], {"CAMP_FAKE_TMUX_NO_REGISTER": "1"}),
     ]
     for label, argv, extra in degradations:
         result = _camp(cli_env, *argv, extra_env={**hermetic, **extra}, cwd=tmp_path)
@@ -382,39 +354,30 @@ def test_no_new_launch_flow_writes_anything_under_the_state_dir(cli_env) -> None
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
-    # Non-vacuity: the walk reached real code on all three outcomes rather than
+    # Non-vacuity: the walk reached real code on every outcome rather than
     # bouncing off argument parsing everywhere and proving nothing.
-    assert codes["--dir success"] == 0, codes
-    assert codes["--resume a workspace session"] == 0, codes
-    assert codes["--resume an allowlisted root"] == 0, codes
-    assert codes["--resume an ambiguous ref"] == 2, codes
+    assert codes["--recoverable everywhere"] == 0, codes
+    assert codes["kill an ambiguous ref"] == 2, codes
     assert set(codes.values()) == {0, 1, 2}, codes
 
     # The stop flows, same rule. Two of them share exit 0, so for those the
     # exit code alone cannot say which branch ran and the outcome line is what
     # separates a stop that reclaimed memory from one that found nothing to do.
-    assert codes["kill a session camp launched"] == 0, errors["kill a session camp launched"]
-    assert "stopped session" in errors["kill a session camp launched"]
+    assert codes["kill a session registered live"] == 0, errors["kill a session registered live"]
+    assert "stopped session" in errors["kill a session registered live"]
     assert codes["kill a session already down"] == 0, errors["kill a session already down"]
     assert "already down" in errors["kill a session already down"]
     assert codes["kill a live session owning no tmux session"] == 1, codes
     assert codes["kill an ambiguous ref"] == 2, codes
-    assert codes["resume the stopped session"] == 0, errors["resume the stopped session"]
     refusals = [label for label, code in codes.items() if code == 1]
-    assert len(refusals) >= 15, refusals
+    assert len(refusals) >= 1, refusals
 
-    # The transferred-workspace round trip, same rule: each step actually ran
-    # rather than bouncing off argument parsing.
-    assert codes["--resume a transferred workspace session"] == 0, errors[
-        "--resume a transferred workspace session"
-    ]
+    # The transferred-workspace flow, same rule: it actually ran rather than
+    # bouncing off argument parsing.
     assert codes["kill the transferred workspace's session"] == 0, errors[
         "kill the transferred workspace's session"
     ]
     assert "stopped session" in errors["kill the transferred workspace's session"]
-    assert codes["resume the transferred workspace after stop"] == 0, errors[
-        "resume the transferred workspace after stop"
-    ]
     assert codes["--recoverable in a transferred workspace"] == 0, errors[
         "--recoverable in a transferred workspace"
     ]

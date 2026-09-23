@@ -44,7 +44,7 @@ from test_launch_stop import (  # noqa: E402
     _FakeTmux,
     _fixture,
     _group,
-    _launched_pane,
+    _resumed_pane,
     _record,
     _stop,
     _transcript,
@@ -141,8 +141,8 @@ def test_a_ref_matching_two_sessions_answers_ambiguous_naming_both(tmp_path: Pat
     derived_b = f"camp-feat-b-{_UUID_B[:8]}"
     tmux = _FakeTmux(
         {
-            derived_a: _launched_pane(harness, _UUID_A, derived_a, ws_a),
-            derived_b: _launched_pane(harness, _UUID_B, derived_b, ws_b),
+            derived_a: _resumed_pane(harness, _UUID_A),
+            derived_b: _resumed_pane(harness, _UUID_B),
         }
     )
 
@@ -208,7 +208,7 @@ def test_a_session_camp_does_not_own_answers_no_match(tmp_path: Path) -> None:
     live_records = [_record(_UUID_A, ws_a), _record(_UUID_B, ws_b)]
     tmux = _FakeTmux(
         {
-            derived_a: _launched_pane(harness, _UUID_A, derived_a, ws_a),
+            derived_a: _resumed_pane(harness, _UUID_A),
             derived_b: "sleep 100000",  # foreign — not one camp composed
         }
     )

@@ -671,7 +671,8 @@ class TestKillHostStoppedSuccess:
 
         err = capsys.readouterr().err
         assert "andromeda" in err
-        assert "camp launch --resume sess-1" in err
+        assert "camp sessions --host andromeda" in err
+        assert "camp attach --host andromeda" in err
 
     def test_already_down_exits_zero_and_json_preserves_the_outcome_field(
         self, monkeypatch, capsys: pytest.CaptureFixture
@@ -1222,6 +1223,9 @@ class TestKillHostLocalReRefusal:
 
         assert code != 0
         assert called == []
+        err = capsys.readouterr().err
+        assert "camp sessions" in err
+        assert "camp attach" in err
 
     def test_two_references_refuses_locally_without_reaching_the_relay(
         self, monkeypatch, capsys: pytest.CaptureFixture

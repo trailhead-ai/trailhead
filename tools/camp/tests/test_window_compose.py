@@ -774,3 +774,49 @@ def test_the_resolved_path_not_the_symlink_spelling_reaches_tmux(tmp_path):
 
     assert tmux.calls[0]["cwd"] == real_sub.resolve()
     assert tmux.calls[0]["cwd"] != link_sub
+
+
+# ---------------------------------------------------------------------------
+# AC57 — a composed conversation starts with no enumeration poll behind it
+# ---------------------------------------------------------------------------
+
+
+class _EnumerateSpyHarness(FakeHarness):
+    """A harness whose `session_enumerate` raises if ever called, and
+    records every call it gets — so a test can assert the number of calls
+    is exactly zero, not merely that no exception propagated."""
+
+    def __init__(self):
+        super().__init__()
+        self.enumerate_calls: list[object] = []
+
+    def session_enumerate(self, workspace=None):
+        self.enumerate_calls.append(workspace)
+        raise AssertionError("compose_window must never enumerate sessions")
+
+
+def test_compose_never_enumerates_sessions_even_when_the_harness_would_raise(
+    tmp_path, monkeypatch
+):
+    """AC57: `compose_window` opens the window and records the entry with no
+    enumeration poll behind it — a harness whose `session_enumerate` raises
+    must never be asked, so a window still opens even against a harness
+    whose enumeration is broken."""
+    import camp.launch.window_compose as wc
+
+    harness = _EnumerateSpyHarness()
+    monkeypatch.setattr(wc, "harness_for", lambda group: harness)
+
+    ws_dir = tmp_path / "ws"
+    ws_dir.mkdir()
+    tmux = FakeTmux()
+
+    result = wc.compose_window(
+        GROUP, "slug", ws_dir, cwd=ws_dir, window_name="w1",
+        tmux=tmux, env=_empty_env(tmp_path),
+    )
+
+    assert harness.enumerate_calls == []
+    assert tmux.calls, "the window must still open"
+    assert _recorded_entries(ws_dir), "the entry must still be recorded"
+    assert result.window_id == "@1"

@@ -123,8 +123,8 @@ _HOST_VERBS = frozenset({"list", "sessions", "attach", "kill"})
 #: other `_HOST_VERBS` member gets the generic refusal.
 #:
 #: This set drives ONLY the --all-hosts wording. "launch" is retired and
-#: absent — a `camp launch --all-hosts` is caught by the retired-verb
-#: redirect before this set is ever consulted.
+#: absent — `launch --all-hosts` is caught by the retired-verb redirect
+#: before this set is ever consulted.
 _STATE_CHANGING_HOST_VERBS = frozenset({"kill"})
 
 #: The subset of `_HOST_VERBS` for which `--host` requires an explicit
@@ -211,9 +211,9 @@ def read_group_option(args: list[str]) -> str | None:
     """Read ``--group``'s value from *args* WITHOUT consuming it.
 
     `main()` has to see this flag to refuse it alongside a widening option, but
-    must not take it: `camp launch --host <machine> --group <name>` forwards the
-    group name across to the far side, so a router that consumed it would strip
-    the value the remote invocation is assembled from. Every group-aware handler
+    must not take it: a `_GROUP_REQUIRED_HOST_VERBS` member forwards the group
+    name across to the far side, so a router that consumed it would strip the
+    value the remote invocation is assembled from. Every group-aware handler
     declares ``--group`` itself and ignores it.
 
     Returns None when the flag is absent and "" when it is present with no value
@@ -300,15 +300,6 @@ def _dispatch_host_command(
     process to an interactive `ssh -t` (`camp.host.handoff`) rather than
     relaying a JSON answer — see `cli/session.py`'s `_cmd_attach_host_cli`.
 
-    "launch" is accepted by `_HOST_VERBS` — and reaches here with `--group`
-    already required and present, per the `_GROUP_REQUIRED_HOST_VERBS`
-    handling above. Unlike "list"/"sessions" it is wired through
-    `camp.host.relay.answer_object_for_host` (the single-object relay shape),
-    not `relay_all_groups`: a launch answers with one session or nothing at
-    all, and its rendering carries its own certainty-aware exit-code and
-    stderr-ordering policy the generic rows relay does not provide — see
-    `cli/session.py`'s `_cmd_launch_host_cli`.
-
     "kill" reaches here with NO --group required or forwarded — it is
     state-changing (`_STATE_CHANGING_HOST_VERBS`) but not group-required
     (`_GROUP_REQUIRED_HOST_VERBS`): the reference alone names the session,
@@ -325,10 +316,6 @@ def _dispatch_host_command(
         from .session import _cmd_sessions_host_cli
 
         _cmd_sessions_host_cli(rest, host, host_name, connect_timeout=connect_timeout)
-    elif verb == "launch":
-        from .session import _cmd_launch_host_cli
-
-        _cmd_launch_host_cli(rest, host, host_name, connect_timeout=connect_timeout)
     elif verb == "kill":
         from .session import _cmd_kill_host_cli
 
@@ -455,22 +442,6 @@ def _slug_from_name_or_cwd(
             f"pass --name <slug> or run from inside a workspace directory"
         )
     return slug
-
-
-def _is_ref_addressed_launch(verb: str, rest: list[str]) -> bool:
-    """Is this a `camp launch --resume <ref>` — the one groupless launch flavor?
-
-    Classified from the raw argv, before any group is resolved, because the whole
-    point of the flavor is that it resolves without one. Reads the flag name from
-    the handler that parses it, so the router and the parser cannot disagree about
-    what spells a resume.
-    """
-    from .session import RESUME_FLAG
-
-    canonical, kind = _resolve_verb(verb)
-    if canonical != "launch" or kind != "live":
-        return False
-    return any(arg == RESUME_FLAG or arg.startswith(f"{RESUME_FLAG}=") for arg in rest)
 
 
 def _refuse_meta_route_surplus(verb: str, rest: list[str]) -> None:
@@ -899,18 +870,6 @@ def main() -> None:
             sys.exit(1)
         if group is not None:
             _dispatch_group_command(first, argv[1:], group, group_env, dry_run)
-            return
-        # `camp launch --resume <ref>` is ref-addressed: the reference names the
-        # session, and the session's own recorded root names the group. A resume into a camp workspace must therefore
-        # answer from a plain shell outside every group directory, so it is
-        # dispatched here rather than falling through to the needs-group refusal
-        # — which would demand a flag the workspace flavor is defined not to need.
-        # The handler still requires an explicit --group for any root that is NOT
-        # a workspace; that boundary is its call to make, not this router's.
-        if _is_ref_addressed_launch(first, argv[1:]):
-            from .session import _cmd_launch_group_cli
-
-            _cmd_launch_group_cli(argv[1:], None, None)
             return
 
     # Delegate everything else to the spine dispatcher (fallback / non-group cmds).
@@ -2056,7 +2015,8 @@ def _dispatch_attach_all_hosts(rest: list[str]) -> None:
             if isinstance(local_resolution, NotRunning):
                 _die(
                     f"camp attach: session {local_resolution.candidate.session_id} is "
-                    f"not running — bring it back with `camp launch --resume {ref}`"
+                    "not running — find its workspace with `camp sessions` and "
+                    "reattach with `camp attach <slug>`"
                 )
             assert isinstance(local_resolution, Resolved)
             warn_if_nested(resolved_env)
@@ -2291,11 +2251,10 @@ def _dispatch_group_command(
     if cmd == "pwd":
         _cmd_pwd_group_cli(rest, group, group_env)
         return
-    if cmd in ("launch", "sessions"):
-        from .session import _cmd_launch_group_cli, _cmd_sessions_group_cli
+    if cmd == "sessions":
+        from .session import _cmd_sessions_group_cli
 
-        handler = _cmd_launch_group_cli if cmd == "launch" else _cmd_sessions_group_cli
-        handler(rest, group, group_env)
+        _cmd_sessions_group_cli(rest, group, group_env)
         return
     if cmd == "transfer":
         _cmd_transfer_group_cli(rest, group, group_env, dry_run)

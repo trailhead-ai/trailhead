@@ -1,21 +1,18 @@
-"""The session command group: ``launch`` (start one) and ``sessions`` (list them).
+"""The session command group: ``sessions`` (list), ``kill`` (stop), and
+``attach`` (re-enter).
 
-Both are group-resolved like every other workspace verb. The engine lives in
-``camp.launch.session``; this module owns only the CLI's three jobs — flag
-parsing, the stdout/stderr split, and turning a :class:`LaunchError` into camp's
-one-line refusal.
-
-Two deliberately different postures:
-
-``launch`` is an ACTION, so every failure is a refusal — one ``camp launch: …``
-stderr line, empty stdout, non-zero exit. That includes a launch that spawned but
-never registered: an unconfirmable session is not a success with a caveat.
+``sessions`` is group-resolved like every other workspace verb; ``kill`` and
+``attach`` resolve a session by reference, from any cwd. Enumeration reads
+through ``camp.launch.session.enumerate_records``.
 
 ``sessions`` is a QUESTION, so most failures DEGRADE — a stderr notice, an empty
 list on stdout, exit 0. A caller asking what is running can act on "nothing" and
 on "I could not tell" the same way (there is nothing to attach to either way), and
 exiting non-zero for the second would make a read-only query a scripting hazard.
 An honestly-empty answer stays silent.
+
+``kill`` and ``attach`` are ACTIONS, so a failure that matters is a refusal —
+one ``camp <verb>: …`` stderr line, empty stdout, non-zero exit.
 
 The live listing asks every (harness, credential store) candidate in the pool —
 never only the group the invocation happened to resolve — and merges what comes
@@ -71,11 +68,6 @@ if TYPE_CHECKING:
 _PROVISION_POLL_INTERVAL_SECONDS = 1.0
 _PROVISION_POLL_TIMEOUT_SECONDS = 900.0
 
-#: The resume flavor's flag, named once. Held as a constant rather than spelled
-#: at each of its four reading sites so the router that decides a groupless
-#: invocation and the handler that parses it can never disagree about it.
-RESUME_FLAG = "--resume"
-
 #: Exit code for an ambiguous session reference. Deliberately NOT 1: an
 #: ambiguous ref is information — camp found the sessions and is showing them —
 #: and a consumer that reads every non-zero exit as breakage would report a
@@ -105,128 +97,6 @@ def _named_slug(parsed) -> str | None:
     return parsed.name if parsed.name is not None else parsed.slug
 
 
-def _refusal(exc: Exception) -> str:
-    """Re-prefix an engine refusal as a `camp launch:` line.
-
-    The engine raises pre-formatted `camp: …` messages because it is shared; the
-    CLI is the layer that knows which verb the user typed, so the verb name is
-    attached here rather than being baked into the engine's wording.
-    """
-    message = str(exc)
-    prefix = "camp: "
-    if message.startswith(prefix):
-        message = message[len(prefix) :]
-    return f"camp launch: {message}"
-
-
-def launch_and_confirm(
-    group: dict,
-    slug: str | None = None,
-    *,
-    env: dict[str, str] | None = None,
-    root: Path | None = None,
-    name_component: str | None = None,
-    trust_scope: Path | None = None,
-    resume_session_id: str | None = None,
-    camp_managed_root: bool = False,
-):
-    """Spawn a session — by workspace *slug* or at a named *root* — and confirm it.
-
-    The addressing arguments are the engine's own, forwarded whole: exactly one of
-    *slug* or the (*root*, *name_component*, *trust_scope*) triple, which the
-    engine enforces. *camp_managed_root* and *resume_session_id* ride on that
-    triple and on either flavor respectively. Everything after the spawn is
-    identical for all three flavors, so they report the same three stderr lines
-    and return the same :class:`LaunchedSession`.
-
-    Raises :class:`LaunchError` on refusal — including a spawn that never
-    confirmed, which the engine has already killed.
-    """
-    from ..launch.profile import harness_for
-    from ..launch.session import confirm_session, launch_session
-
-    launched = launch_session(
-        group,
-        slug,
-        env=env,
-        root=root,
-        name_component=name_component,
-        trust_scope=trust_scope,
-        resume_session_id=resume_session_id,
-        camp_managed_root=camp_managed_root,
-    )
-    print(
-        f"camp launch: launched session {launched.session_id} in {launched.launch_dir}\n"
-        f"  attach: tmux attach -t {launched.tmux_name}",
-        file=sys.stderr,
-    )
-    # The pane's own environment, not this process's: the confirmation reports
-    # which config file the session reads, and the ambient one the CLI was
-    # invoked with is exactly what the launch scrubbed.
-    confirm_session(harness_for(group), launched, env=launched.pane_env)
-    print(f"camp launch: confirmed session {launched.session_id}", file=sys.stderr)
-    return launched
-
-
-def launch_for_new(group: dict, slug: str, *, env: dict[str, str] | None = None):
-    """`camp new --launch`'s launch step: the LaunchedSession, or None on refusal.
-
-    Returning the whole :class:`LaunchedSession` — not just its session id — is
-    what lets `camp new --launch --json` report `tmux_name` alongside
-    `session_id` without reconstructing `camp-<slug>-<uuid8>` at the print site;
-    the caller carries the exact name the launch engine chose.
-
-    Returning None rather than exiting is the whole point: `camp new` already
-    created the workspace, and that success is what its exit code and its stdout
-    path report. A failed launch is reported on stderr in exactly the shape
-    `camp launch` uses, and leaves the caller with a usable workspace.
-    """
-    from ..launch.session import LaunchError
-
-    try:
-        return launch_and_confirm(group, slug, env=env)
-    except LaunchError as exc:
-        print(_refusal(exc), file=sys.stderr)
-        return None
-
-
-def wait_for_provisioning(group: dict, slug: str, *, env: dict[str, str] | None = None) -> bool:
-    """Block until *slug* is provisioned; False when the launch must be refused.
-
-    A workspace whose members are still being cloned is not a workspace a harness
-    can usefully be launched into, so `camp new --launch` waits by default. A
-    failed or timed-out provisioning refuses the launch rather than racing it —
-    the timeout report already names `camp status <slug>` as where the real state
-    is, so the refusal repeats it verbatim. A missing or corrupt manifest
-    (:class:`ManifestError`) is the same refusal shape, not a traceback — the
-    provisioner never got far enough to leave a readable state.
-    """
-    from ..group.manifest import ManifestError
-    from ..provision.lifecycle import wait_for_provisioning_ready
-
-    print(
-        f"camp new: waiting for provisioning of {slug!r} to finish before launching",
-        file=sys.stderr,
-    )
-    try:
-        outcome, report = wait_for_provisioning_ready(
-            group,
-            slug,
-            env=env,
-            interval=_PROVISION_POLL_INTERVAL_SECONDS,
-            timeout=_PROVISION_POLL_TIMEOUT_SECONDS,
-            sleep=time.sleep,
-        )
-    except ManifestError as exc:
-        print(f"camp launch: refusing to launch — {exc}", file=sys.stderr)
-        return False
-    if outcome == "ready":
-        return True
-    detail = report.get("message") or f"provisioning of workspace {slug!r} failed"
-    print(f"camp launch: refusing to launch — {detail}", file=sys.stderr)
-    return False
-
-
 def trigger_activate_phase_work(
     group: dict, slug: str, *, env: dict[str, str] | None = None, wait: bool = True
 ) -> None:
@@ -241,15 +111,12 @@ def trigger_activate_phase_work(
 
     An activate-phase task runs inside the member's worktree, which does not
     exist until the member reaches boot-readiness — so by default (wait=True)
-    this first waits, bounded, for boot-readiness (the identical poll
-    `wait_for_provisioning` uses) before spawning anything; a workspace that
-    never reaches boot-readiness triggers nothing, same as `--launch` refusing
-    rather than racing it. Blocking on boot-readiness is acceptable because
-    cheapness is a requirement of that phase — only the activate-phase work
-    itself never blocks. wait=False (`--no-wait`) skips even that: it spawns
-    immediately, racing the still-running provisioner exactly as
-    `--launch --no-wait` races the harness launch, the same accepted risk on
-    the same flag.
+    this first waits, bounded, for boot-readiness before spawning anything; a
+    workspace that never reaches boot-readiness triggers nothing. Blocking on
+    boot-readiness is acceptable because cheapness is a requirement of that
+    phase — only the activate-phase work itself never blocks. wait=False
+    (`--no-wait`) skips even that: it spawns immediately, racing the
+    still-running provisioner, an accepted risk on that flag.
 
     A member declaring no activate-phase task is skipped entirely — no
     subprocess is spawned for it — so a group with no activate-phase tasks
@@ -744,394 +611,6 @@ def _die_unresolved(
     )
 
 
-def _resolve_session_reference(ref: str, *, env: dict[str, str], as_json: bool):
-    """Resolve *ref* to one addressable session; return it with the group configs.
-
-    Both halves come back because the caller needs both, and loading the configs
-    a second time would let the name rule's two applications drift apart.
-
-    The pool is :func:`_session_pool`'s, and a ref that does not address exactly
-    one session refuses through :func:`_die_unresolved`, so resume and stop
-    answer a mistyped reference identically.
-    """
-    from ..group.config import load_all_groups
-    from ..launch.recovery import Resolved, resolve_session_ref
-    from .common import _groups_dir
-
-    groups = load_all_groups(_groups_dir())
-    transcripts, live, answered, accounts = _session_pool(groups, verb="launch", env=env)
-
-    outcome = resolve_session_ref(
-        ref, transcripts=transcripts, live_records=live, groups=groups, env=env
-    )
-
-    if isinstance(outcome, Resolved):
-        return outcome.candidate, groups
-
-    _die_unresolved(
-        outcome,
-        ref,
-        verb="launch",
-        harness=answered[0],
-        env=env,
-        as_json=as_json,
-        accounts=accounts,
-    )
-
-
-def _workspace_owner(root: Path, groups, *, env: dict[str, str]) -> dict | None:
-    """The group whose workspace holds *root*, or ``None`` for anywhere else.
-
-    The one question the resume flavor asks beyond the name rule. A session rooted
-    in a camp workspace belongs to the group camp provisioned that workspace for —
-    not to whichever group the operator happens to be standing in — so the answer
-    is read off the path, and a resume needs no ``--group`` to find it.
-
-    Asked one group at a time through :func:`is_workspace_root`, the boolean half
-    of the very rule that names the session, so the two can never disagree about
-    what counts as a workspace. ``None`` means *root* is not a camp workspace at
-    all, which is exactly the case the eligibility gate exists to fence.
-    """
-    from ..launch.recovery import is_workspace_root
-
-    for config in groups:
-        if is_workspace_root(root, [config], env=env):
-            return config
-    return None
-
-
-def _report_launched(launched, *, as_json: bool, extra: dict | None = None) -> None:
-    """The success report, identical for every launch flavor.
-
-    *extra* is merged into the JSON object for a flavor that has something more
-    to say about the launch it just made. It is deliberately absent from an
-    ordinary launch rather than present-and-null: the key set a caller already
-    parses stays exactly what it was, and a key that appears at all is a fact
-    worth reading. Only the resume flavor uses it today.
-    """
-    if as_json:
-        payload = {
-            "workspace": str(launched.launch_dir),
-            "session_id": launched.session_id,
-            "tmux_name": launched.tmux_name,
-            "account": launched.account,
-            "account_binding": dict(launched.account_binding),
-        }
-        payload.update(extra or {})
-        print(json.dumps(payload))
-        return
-    print(launched.session_id)
-
-
-def _history_restored(config, session_id: str, root: Path, env: dict[str, str]) -> bool:
-    """Will the resume about to run bring the conversation back with it?
-
-    False is the outcome a resume must never report as an ordinary success:
-    past the harness's retention window — or for a transcript that was never
-    resumable — the session comes back EMPTY and exits 0 doing it, which is
-    indistinguishable from a restored one and is exactly the silent degradation
-    a stop-and-resume cycle exists to prevent.
-
-    Read BEFORE the spawn, off the only thing that can answer it: the transcript
-    the harness would replay. An absent transcript and a zero-length one are the
-    same answer here — there is nothing to replay either way.
-
-    True whenever camp cannot tell. A harness camp cannot name, or a store it
-    cannot stat, knows nothing about retention either, and warning on every
-    resume it cannot answer for would train the operator to ignore the one
-    warning that matters.
-    """
-    from ..launch.profile import harness_for
-
-    harness = harness_for(config)
-    if harness is None:
-        return True
-    try:
-        path = harness.session_transcript_path(session_id, root, env=env)
-    except Exception:  # noqa: BLE001 — an advisory signal is never worth a traceback
-        return True
-    if path is None:
-        return False
-    try:
-        return path.stat().st_size > 0
-    except OSError:
-        return True
-
-
-def _launch_resume(
-    ref: str,
-    *,
-    group: dict | None,
-    explicit_group: str | None,
-    env: dict[str, str] | None,
-    as_json: bool,
-) -> None:
-    """Re-enter the session *ref* addresses, or refuse before anything spawns.
-
-    Every gate below runs ahead of the engine, in the order an operator can act
-    on, and each names a DIFFERENT situation. Two of them are easy to collapse
-    and must not be: a session camp cannot locate at all has no directory to
-    name, while a session whose directory was torn down has one — and the second
-    tells the operator where their work went while the first cannot. Neither
-    message may carry an internal absence marker; they are read verbatim off a
-    relayed stderr line, often on a phone.
-
-    A resume restores the CONVERSATION. Nothing here claims the work in flight
-    when the session died comes back with it.
-    """
-    from ..launch.recovery import derive_name_component, printable_path
-    from ..launch.session import LaunchError, already_running_error
-    from ..spine import _die
-
-    resolved_env = dict(env) if env is not None else dict(os.environ)
-    candidate, groups = _resolve_session_reference(
-        ref, env=resolved_env, as_json=as_json
-    )
-
-    if candidate.live:
-        _die(_refusal(already_running_error(candidate.session_id, candidate.derived_name)))
-
-    if candidate.unreadable:
-        _die(
-            f"camp launch: camp cannot tell which directory session "
-            f"{candidate.session_id} was started in, so there is nowhere to bring "
-            "it back up and it cannot be resumed"
-        )
-
-    root = Path(candidate.root).resolve()
-    if candidate.root_missing:
-        _die(
-            f"camp launch: session {candidate.session_id} was started in "
-            f"{printable_path(root)}, "
-            "which no longer exists — camp will not recreate a torn-down directory "
-            "to resume into it"
-        )
-
-    component = derive_name_component(root, groups, env=resolved_env)
-    owner = _workspace_owner(root, groups, env=resolved_env)
-
-    if owner is None:
-        # Anywhere but a camp workspace, the allowlist is the containment
-        # boundary — so the group supplying it is named explicitly, exactly as
-        # `--dir` requires, and never inferred from where camp was invoked.
-        if not explicit_group:
-            _die(
-                f"camp launch: session {candidate.session_id} was started in "
-                f"{printable_path(root)}, "
-                "which is not a camp workspace — re-run with an explicit --group "
-                "<name> whose [launch] roots allowlist covers it"
-            )
-        if group is None:
-            _die(f"camp launch: no camp group named {explicit_group!r} is configured")
-
-    config = group if owner is None else owner
-    restored = _history_restored(config, candidate.session_id, root, resolved_env)
-
-    try:
-        # The recorded root IS the launch directory, for a workspace session as
-        # much as for any other: a harness routinely starts BELOW the workspace
-        # root, and re-deriving the directory from the group's configuration would
-        # bring the session back up somewhere it never ran while still reporting
-        # success. Only two things differ between the branches — which group
-        # supplies the harness profile, and whether the eligibility gate has
-        # anything to fence, since camp built the workspace itself.
-        launched = launch_and_confirm(
-            config,
-            env=env,
-            root=root,
-            name_component=component,
-            trust_scope=root,
-            resume_session_id=candidate.session_id,
-            camp_managed_root=owner is not None,
-        )
-    except LaunchError as exc:
-        _die(_refusal(exc))
-        return
-
-    if not restored:
-        print(
-            f"camp launch: session {candidate.session_id} came back with NO PRIOR "
-            "HISTORY — its transcript is gone, so this is a fresh, empty session "
-            "under the old reference and the conversation did not come back",
-            file=sys.stderr,
-        )
-    _report_launched(
-        launched, as_json=as_json, extra=None if restored else {"history_restored": False}
-    )
-
-
-def _cmd_launch_group_cli(
-    args: list[str],
-    group: dict | None,
-    env: dict[str, str] | None,
-) -> None:
-    """camp launch <slug> | --dir <path> --group <name> | --resume <ref>, [--json].
-
-    Three addressing forms, one engine. A slug launches into the workspace camp
-    provisioned for it; `--dir` launches at a directory the operator names, fenced
-    by the group's `[launch] roots` allowlist; `--resume` re-enters a session the
-    harness already holds, rooted where that session recorded it started. All
-    three are mutually exclusive — a launch is rooted at a directory, at a
-    workspace, or re-enters an existing session, never two of the three.
-
-    `--dir` REQUIRES an explicit `--group`, and so does a `--resume` whose root is
-    NOT a camp workspace. The allowlist is the containment boundary for both, so
-    which group supplies it must never depend on the directory camp happened to be
-    invoked from — a boundary that moves with the caller is not a boundary. This
-    is why `--group` is read for its value here rather than merely dropped: the
-    value IS the signal that the operator named the group. A resume into a camp
-    workspace is the exception that proves it: camp built that directory itself,
-    reads the owning group off the path, and needs no flag at all.
-
-    *group* is therefore optional. A workspace resume must answer from a plain
-    shell outside every group directory — the ref names everything camp needs —
-    so the router hands this handler `None` on that path rather than refusing
-    upstream for want of a group nobody had to name.
-
-    Every flag is consumed BEFORE slug resolution. An unconsumed one would be
-    forwarded as a positional and die as a flag-shaped slug, which reports the
-    wrong problem.
-
-    Output contract, mirroring `camp pwd`: stdout carries ONLY the session id —
-    exactly one line — so a caller can capture it with `$(camp launch …)`. The
-    workspace, the tmux attach handle, and the confirmation all go to stderr. On
-    any refusal stdout is EMPTY and the exit code is non-zero, with one deliberate
-    exception: an ambiguous `--resume` ref prints its candidate rows to stdout and
-    exits `2`, because there the rows are the answer.
-    """
-    from ..group.config import load_all_groups
-    from ..launch.recovery import derive_name_component, is_workspace_root
-    from ..launch.session import LaunchError
-    from ..spine import _die
-    from .common import _groups_dir
-    from .dispatch import _slug_from_name_or_cwd
-
-    parser = group_verb_parser("launch")
-    parser.add_argument(RESUME_FLAG, metavar="REF")
-    parser.add_argument("--dir", metavar="PATH")
-    parser.add_argument("--json", action="store_true")
-    parser.add_argument("--name", metavar="SLUG")
-    parser.add_argument("slug", nargs="?")
-    parsed = parser.parse_args(args)
-
-    explicit_group = parsed.group
-    resume_ref = parsed.resume
-    directory = parsed.dir
-    as_json = parsed.json
-
-    named_slug = _named_slug(parsed)
-
-    if directory is not None and resume_ref is not None:
-        _die(
-            "camp launch: --dir and --resume are mutually exclusive — a launch "
-            "is rooted at a named directory or re-enters an existing session, "
-            "never both"
-        )
-
-    if resume_ref is not None:
-        if named_slug is not None:
-            _die(
-                "camp launch: --resume and a workspace slug are mutually exclusive "
-                "— a launch re-enters an existing session or starts a new one in a "
-                "workspace, never both"
-            )
-        if not resume_ref.strip():
-            _die("camp launch: --resume requires a session reference")
-        if resume_ref.startswith("-"):
-            # Same reason a slug may not be flag-shaped: this is what an
-            # unconsumed flag directly after `--resume` looks like, and reporting
-            # it as an unmatched reference would name the wrong problem.
-            _die(
-                f"camp launch: --resume: {resume_ref!r} looks like a flag, not a "
-                "session reference — a reference may not start with a dash"
-            )
-        _launch_resume(
-            resume_ref,
-            group=group,
-            explicit_group=explicit_group,
-            env=env,
-            as_json=as_json,
-        )
-        return
-
-    slug: str | None = None
-    root: Path | None = None
-    name_component: str | None = None
-    trust_scope: Path | None = None
-    camp_managed_root = False
-
-    if directory is not None:
-        if named_slug is not None:
-            _die(
-                "camp launch: --dir and a workspace slug are mutually exclusive — a "
-                "launch is rooted at a named directory or at a workspace, never both"
-            )
-        if not directory.strip():
-            _die("camp launch: --dir requires a directory path")
-        if not explicit_group:
-            _die(
-                "camp launch: --dir requires an explicit --group <name> — the "
-                "group's [launch] roots allowlist is what fences a directory-rooted "
-                "launch, so it must never depend on the directory camp was invoked "
-                "from"
-            )
-        # `~` expands here for the same reason it does in `camp sessions --dir`:
-        # a quoted `--dir '~/code'` reaches camp unexpanded, and resolving it
-        # against the current directory would refuse while naming a path that
-        # exists nowhere.
-        root = Path(directory).expanduser()
-        # The name component comes from the one name rule every flavor derives
-        # through, over the RESOLVED path — so `--dir .` and a trailing slash name
-        # the directory the session actually runs in, and a directory inside a camp
-        # workspace is named by its slug exactly as a later `--resume` of that same
-        # session reconstructs it. Two names for one session would mean the tmux
-        # duplicate-name claim could never fire for it, and that claim is the
-        # race-proof backstop. The trust scope is that same directory: a named root
-        # is its own confinement, which is exactly why the eligibility gate — not
-        # the trust pre-seed — is the boundary here.
-        name_component = derive_name_component(
-            root,
-            load_all_groups(_groups_dir()),
-            env=dict(env) if env is not None else dict(os.environ),
-        )
-        trust_scope = root
-        # The same claim the resume path makes for a workspace-rooted session:
-        # a directory inside a group's OWN workspace tree was chosen by camp, not
-        # by the operator, so the allowlist — which asks who chose it — has
-        # nothing left to answer. It is a claim, not a grant: the engine re-checks
-        # it against the name rule and falls back to the allowlist when it does
-        # not hold, and the credential rule runs on both branches regardless.
-        #
-        # Without this, rooting a worker at the member repo it owns would mean
-        # widening `[launch] roots` to cover camp's own state directory, which
-        # would also open every other workspace on the machine.
-        camp_managed_root = is_workspace_root(
-            root,
-            [group] if group is not None else [],
-            env=dict(env) if env is not None else dict(os.environ),
-        )
-    else:
-        slug = _slug_from_name_or_cwd(
-            group, verb="launch", name=parsed.name, positional=parsed.slug, env=env
-        )
-
-    try:
-        launched = launch_and_confirm(
-            group,
-            slug,
-            env=env,
-            root=root,
-            name_component=name_component,
-            trust_scope=trust_scope,
-            camp_managed_root=camp_managed_root,
-        )
-    except LaunchError as exc:
-        _die(_refusal(exc))
-        return
-
-    _report_launched(launched, as_json=as_json)
-
-
 def _attribute_session(cwd: Path, groups: list[dict], *, env: dict[str, str]) -> dict:
     """Resolve the group and declared account *cwd* belongs to.
 
@@ -1589,198 +1068,6 @@ def _cmd_sessions_host_cli(
     )
 
 
-#: Exit code for `camp launch --host` when certainty is unknown
-#: (`Certainty.UNKNOWN`) — either the connection completed and the
-#: invocation then exceeded its bound without answering, or a local
-#: producer feeding a streamed invocation failed after the remote already
-#: ran. Distinct from 0 (success) and from every certain-failure exit — the
-#: fixed `1` the five locally-classified transport failures reachable here
-#: share, or the far side's own exit code when the transport happens to
-#: propagate it — so a scripted caller can branch on "check before
-#: retrying" without parsing stderr
-#: (docs/design/a-session-starts-on-a-named-machine.md, "Added by council
-#: review (Critical)").
-_LAUNCH_HOST_UNKNOWN_EXIT_CODE = 3
-
-
-def _cmd_launch_host_cli(
-    args: list[str], host: "Host", host_name: str, *, connect_timeout: float | None = None
-) -> None:
-    """camp launch <slug> --host <name> --group <group> [--json].
-
-    Reached ONLY from `cli/dispatch.py`'s `--host` handling in
-    `_dispatch_host_command`, after `--group` has already been required and
-    validated present — a state-changing verb never infers it from this
-    machine's cwd (see `HOST_FLAG`'s own comment in dispatch.py).
-
-    ``connect_timeout`` is the operator's resolved value
-    (`camp.host.config.connect_timeout_seconds()`, read once by `main()`'s
-    ``--host`` handling and passed down); ``None`` (a direct call with no
-    caller-supplied value) falls back to the transport's own documented
-    default.
-
-    Relays through `camp.host.relay.answer_object_for_host` — the single-
-    object counterpart to the rows relay `_cmd_sessions_host_cli` and
-    `_cmd_ls_host_cli` use — rather than `relay_all_groups`: a launch answers
-    with one session or nothing at all, and the rendering below needs its
-    own exit-code and stderr-ordering policy the generic rows relay does not
-    provide.
-
-    `Certainty.HAPPENED` is necessary but not sufficient here: this peer's
-    SSH transport does not propagate the remote command's own exit status
-    (see `camp.host.transport`'s module docstring), so a far side that
-    refused, crashed, or could not resolve camp still classifies as
-    `Answered`/HAPPENED. `answer_object_for_host` already guards this —
-    `answer.answer` is `None` whenever the far side's stdout did not decode
-    as a JSON object — so THIS is what decides success, never the certainty
-    or the raw exit code alone.
-    """
-    from ..host.relay import Certainty, answer_object_for_host
-    from ..host.transport import DEFAULT_CONNECT_TIMEOUT_SECONDS
-    from ..spine import _die
-
-    if connect_timeout is None:
-        connect_timeout = DEFAULT_CONNECT_TIMEOUT_SECONDS
-
-    parser = CampParser(verb="launch")
-    parser.add_argument("--group")
-    parser.add_argument("--json", action="store_true")
-    parser.add_argument("slugs", nargs="*")
-    parsed = parser.parse_args(args)
-    as_json = parsed.json
-    group = parsed.group
-    rest = parsed.slugs
-    if group is None:
-        # Unreachable in practice — dispatch.py's --host handling already
-        # requires --group for a state-changing verb before this function is
-        # ever reached — but a CLI entry point never trusts a caller-
-        # enforced invariant it can cheaply re-check itself.
-        _die("camp launch: --host requires an explicit --group")
-    if len(rest) != 1:
-        _die(
-            f"camp launch: --host requires exactly one workspace slug, got "
-            f"{len(rest)}"
-        )
-    slug = rest[0]
-
-    answer = answer_object_for_host(
-        "launch",
-        host,
-        host_name,
-        ["launch", slug, "--group", group, "--json"],
-        connect_timeout=connect_timeout,
-    )
-
-    if answer.answer is not None:
-        _report_launch_host_success(answer.answer, host_name=host_name, as_json=as_json)
-        sys.exit(0)
-
-    if answer.certainty == Certainty.UNKNOWN:
-        # The instruction to check comes FIRST, before any explanation, and
-        # reads as an instruction naming the command to run — an operator
-        # who reads only this line must still do the right thing (design
-        # doc, "State — the connection drops after the launch was sent").
-        command = f"camp sessions --host {host_name} --group {group}"
-        print(
-            f"camp launch: check before retrying — run: {command}",
-            file=sys.stderr,
-        )
-        # UNKNOWN now covers two shapes (`Certainty.UNKNOWN`'s docstring at
-        # relay.py's Certainty enum) — a connection that stopped answering,
-        # or a local producer that failed after the remote already ran. This
-        # line names neither mechanism; `answer.notices` (printed next)
-        # already carries the outcome-specific sentence for whichever one it
-        # was.
-        print(
-            f"camp launch: camp does not know whether a session was started "
-            f"on host {host_name!r} — the outcome could not be confirmed",
-            file=sys.stderr,
-        )
-        for notice in answer.notices:
-            print(notice, file=sys.stderr)
-        if as_json:
-            print(json.dumps({
-                "ok": False,
-                "host": host_name,
-                "certainty": answer.certainty.value,
-                "reason": "outcome could not be confirmed",
-            }))
-        sys.exit(_LAUNCH_HOST_UNKNOWN_EXIT_CODE)
-
-    # A certain failure: either one of the five locally-classified transport
-    # states reachable here (host unreachable, no pinned key, ...) or a
-    # far-side refusal relayed in its own words. Either way nothing was
-    # started, so the same
-    # plain sentence closes the report for both — the far side's own words
-    # (when there are any) are relayed exactly as `answer.notices` already
-    # carries them, unwrapped, before it.
-    # Camp's own sentence leads, and the far side's words follow it.
-    #
-    # The order is load-bearing, not cosmetic. The first stderr line is what
-    # carries the certain/uncertain distinction to an operator who skims, and
-    # a line the far side authored cannot carry it: a declared host is trusted
-    # to run commands, not to write camp's most consequential sentence. Left
-    # in front, a refusal crafted to read like the check-before-retry
-    # instruction would send the operator hunting for a session that was never
-    # started — the exact confusion that wording exists to prevent.
-    #
-    # The refusal itself is still relayed in the far side's own words,
-    # unwrapped; only the leading position is camp's.
-    print(f"camp launch: no session was started on host {host_name!r}", file=sys.stderr)
-    for notice in answer.notices:
-        print(notice, file=sys.stderr)
-
-    # The far side's own status is passed through where it says something,
-    # but the uncertain code is RESERVED: a remote camp that happens to exit
-    # with that number would otherwise impersonate camp's own "I do not know",
-    # and the one signal a scripted caller can branch on without parsing prose
-    # would stop meaning what it says. A refusal is certain — nothing was
-    # started and there is nothing to check — so it collapses to the shared
-    # certain-failure code instead.
-    exit_code = answer.exit_code
-    if exit_code == 0 or exit_code == _LAUNCH_HOST_UNKNOWN_EXIT_CODE:
-        exit_code = 1
-    if as_json:
-        reason = answer.notices[-1] if answer.notices else "no session was started"
-        print(json.dumps({
-            "ok": False,
-            "host": host_name,
-            "certainty": answer.certainty.value,
-            "reason": reason,
-        }))
-    sys.exit(exit_code)
-
-
-def _report_launch_host_success(
-    answer: dict, *, host_name: str, as_json: bool
-) -> None:
-    """The success report for `camp launch --host` — the same stdout/stderr
-    split as a local launch (`_report_launched`): stdout carries ONLY the
-    session id, so `$(camp launch --host ...)` captures the same value
-    whichever machine ran it, and everything else — the machine, the
-    workspace, the attach handle — goes to stderr.
-
-    The attach hint names `camp attach --host`, not the local `tmux attach`
-    a same-machine launch prints: the session lives on `host_name`, not
-    here, and the design doc pairs this launch with the attach verb that
-    already reaches a named machine's session.
-    """
-    session_id = answer["session_id"]
-    workspace = answer["workspace"]
-    print(
-        f"camp launch: launched session {session_id} on host {host_name!r} "
-        f"in {workspace}\n  attach: camp attach {session_id} --host {host_name}",
-        file=sys.stderr,
-    )
-    if as_json:
-        payload = dict(answer)
-        payload["host"] = host_name
-        payload["certainty"] = "happened"
-        print(json.dumps(payload))
-        return
-    print(session_id)
-
-
 def _cmd_sessions_group_cli(
     args: list[str],
     group: dict | None,
@@ -1921,9 +1208,8 @@ def _cmd_sessions_group_cli(
         if slug:
             scope = workspace_dir(group["group"]["name"], slug, env=env)
             try:
-                # Mirror the launch engine's resolution (`_resolve_launch_dir`): a
-                # symlinked workspace dir must scope enumeration by the same
-                # resolved path a just-launched session registered under, or a
+                # A symlinked workspace dir must scope enumeration by the same
+                # resolved path a live session is rooted under, or a
                 # slug-scoped query never finds it.
                 scope = scope.resolve(strict=True)
             except OSError:
@@ -2265,7 +1551,7 @@ def _cmd_kill_cli(args: list[str], env: dict[str, str] | None = None) -> None:
     and working tree completely untouched — nothing is removed, cleaned, or
     marked, and camp persists nothing.
 
-    Fully groupless, like `camp launch --resume`: the reference names the
+    Fully groupless: the reference names the
     session and the session names everything else, so this answers from a plain
     shell outside every group directory. It is also the verb an operator reaches
     for when something is already broken, so the group configs are read
@@ -2281,7 +1567,7 @@ def _cmd_kill_cli(args: list[str], env: dict[str, str] | None = None) -> None:
     `camp.launch.stop`. This handler owns the CLI's four jobs: parsing, the
     stdout/stderr split, the exit code, and the wording.
 
-    Posture: kill is an ACTION, matching `camp launch`. Every failure is exactly
+    Posture: kill is an ACTION verb. Every failure is exactly
     one `camp kill: …` line on stderr with empty stdout and a non-zero exit —
     INCLUDING a session still present after the kill, which is a failure and not
     a success with a caveat: the memory was not reclaimed. The single deliberate
@@ -2314,7 +1600,7 @@ def _cmd_kill_cli(args: list[str], env: dict[str, str] | None = None) -> None:
     if not rest:
         _die(
             "camp kill: requires a session reference — an unambiguous prefix of a "
-            "session's name or id, as `camp sessions` and `camp launch --resume` "
+            "session's name or id, as `camp sessions` and `camp attach` "
             "use"
         )
     if len(rest) > 1:
@@ -2398,9 +1684,8 @@ def _cmd_kill_cli(args: list[str], env: dict[str, str] | None = None) -> None:
     # so here is what makes a stop read as recoverable rather than final.
     print(
         f"camp kill: stopped session {candidate.session_id} "
-        f"({candidate.derived_name}) — its memory is reclaimed; "
-        f"`camp launch --resume {candidate.session_id}` brings it back under "
-        "this same reference",
+        f"({candidate.derived_name}) — its memory is reclaimed; find its "
+        "workspace with `camp sessions` and reattach with `camp attach <slug>`",
         file=sys.stderr,
     )
     _report_stop(candidate, outcome="stopped", as_json=as_json)
@@ -2469,7 +1754,7 @@ def _cmd_kill_host_cli(
     if not rest:
         _die(
             "camp kill: requires a session reference — an unambiguous prefix of a "
-            "session's name or id, as `camp sessions` and `camp launch --resume` "
+            "session's name or id, as `camp sessions` and `camp attach` "
             "use"
         )
     if len(rest) > 1:
@@ -2520,8 +1805,9 @@ def _cmd_kill_host_cli(
             print(
                 f"camp kill: stopped session {printable_session_id} "
                 f"({printable_tmux_name}) on host {host_name!r} — its memory is "
-                f"reclaimed; `camp launch --resume {printable_session_id} --host "
-                f"{host_name}` brings it back under this same reference",
+                f"reclaimed; find its workspace with `camp sessions --host "
+                f"{host_name}` and reattach with `camp attach --host {host_name} "
+                "<slug>`",
                 file=sys.stderr,
             )
         for notice in answer.notices:
@@ -3142,7 +2428,8 @@ def _cmd_attach_cli(args: list[str], env: dict[str, str] | None = None) -> None:
     if isinstance(resolution, NotRunning):
         _die(
             f"camp attach: session {resolution.candidate.session_id} is not "
-            f"running — bring it back with `camp launch --resume {ref}`"
+            "running — find its workspace with `camp sessions` and reattach "
+            "with `camp attach <slug>`"
         )
     if isinstance(resolution, Ambiguous):
         from ..launch.recovery import Ambiguous as _RecoveryAmbiguous

@@ -311,17 +311,13 @@ def _cmd_new_group_cli(
     `--no-attach` creates the workspace and its session but never touches the
     exec or `switch-client` seam — `attached` is reported `false`.
 
-    `--no-session` is the escape hatch back to the pre-flip surface in full:
-    it skips the door entirely (no tmux session, no `--json` object built from
-    it) and reproduces exactly what `camp new` did before this task, including
-    `--launch` spawning a detached harness session through the old launch
-    engine and `--json` requiring `--launch` to mean anything.
+    `--no-session` skips the door entirely: no tmux session, and `--json`
+    prints only `{"workspace": <path>}` — there is no launch flavor left for
+    it to report on.
 
-    `--launch` is accepted and does nothing new outside `--no-session` — it
-    prints one notice on stderr and takes the same door path the bare form
-    already takes, so camp's own concierge skill and other existing callers
-    keep working. `--json` no longer requires `--launch`: the door's object is
-    the machine answer for the command itself.
+    There is no `--launch` flag: argparse's own unrecognized-argument
+    handling refuses it, since the door is now the only way `camp new`
+    starts a conversation.
 
     `--activate` triggers every member's activate-phase work at creation time —
     the non-interactive path to what `camp activate <member>` triggers
@@ -343,7 +339,6 @@ def _cmd_new_group_cli(
     from ..group.manifest import workspace_dir, manifest_path_for
 
     parser = group_verb_parser("new", dry_run=True)
-    parser.add_argument("--launch", action="store_true")
     parser.add_argument("--no-wait", action="store_true")
     parser.add_argument("--activate", action="store_true")
     parser.add_argument("--json", action="store_true")
@@ -352,15 +347,11 @@ def _cmd_new_group_cli(
     parser.add_argument("slug", nargs="?")
     parsed = parser.parse_args(args)
 
-    launch = parsed.launch
     no_wait = parsed.no_wait
     activate = parsed.activate
     as_json = parsed.json
     no_attach = parsed.no_attach
     no_session = parsed.no_session
-
-    if no_session and as_json and not launch:
-        _die("camp new: --json requires --launch")
 
     if parsed.slug is None:
         print("camp new: a slug is required\n  usage: camp new <slug>", file=sys.stderr)
@@ -408,57 +399,21 @@ def _cmd_new_group_cli(
     )
 
     if no_session:
-        # The escape hatch: reproduce exactly what `camp new` did before this
-        # task, including `--launch`'s old detached-harness behaviour and
-        # `--json`'s old dependency on it.
-        launched_session = None
-        if launch:
-            from .session import launch_for_new, wait_for_provisioning
-
-            if no_wait:
-                print(
-                    f"camp new: --no-wait — launching without waiting for provisioning; "
-                    f"a later provisioning failure surfaces in `camp status {slug}`",
-                    file=sys.stderr,
-                )
-                ready = True
-            else:
-                ready = wait_for_provisioning(group, slug, env=env)
-            if ready:
-                launched_session = launch_for_new(group, slug, env=env)
-
+        # The escape hatch: create the workspace without touching the door —
+        # no tmux session, no exec.
         if activate:
             from .session import trigger_activate_phase_work
 
             trigger_activate_phase_work(group, slug, env=env, wait=not no_wait)
 
         if as_json:
-            print(
-                json.dumps(
-                    {
-                        "workspace": str(ws_dir),
-                        "session_id": launched_session.session_id if launched_session else None,
-                        "tmux_name": launched_session.tmux_name if launched_session else None,
-                        "account": launched_session.account if launched_session else None,
-                        "account_binding": (
-                            dict(launched_session.account_binding) if launched_session else None
-                        ),
-                    }
-                )
-            )
+            print(json.dumps({"workspace": str(ws_dir)}))
             return
 
         # The workspace abs path is the ONLY thing on stdout: exactly one
         # line, no trailing whitespace (print() appends the single newline).
         print(str(ws_dir))
         return
-
-    if launch:
-        print(
-            "camp new: --launch is accepted but no longer needed — "
-            "creating and attaching is now the default",
-            file=sys.stderr,
-        )
 
     if activate:
         from .session import trigger_activate_phase_work

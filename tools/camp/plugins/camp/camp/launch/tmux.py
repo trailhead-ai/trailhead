@@ -694,8 +694,7 @@ class Tmux:
         docstring's target-vs-name property. Exceptions are NOT swallowed
         here (unlike :meth:`_run`'s tri-state methods): a caller that needs
         to reclaim the name after a timeout, or distinguish an unlaunchable
-        tmux from a refused spawn, reads them itself — see
-        ``launch/session.py``'s ``launch_session``.
+        tmux from a refused spawn, reads them itself.
         """
         argv = ["tmux", "new-session", "-d", "-s", name, "-c", str(cwd), *command]
         return subprocess.run(

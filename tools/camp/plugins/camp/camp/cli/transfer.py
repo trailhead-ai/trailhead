@@ -552,7 +552,7 @@ def _augment_missing_self_name_check(result, *, env: dict[str, str]):
 
 
 def _render_move_completion(
-    move_result, *, slug: str, peer_name: str, group_name: str, release_results
+    move_result, *, slug: str, peer_name: str, group_name: str, release_results, harness
 ) -> None:
     """The report printed once `move_workspace` returns successfully.
 
@@ -575,9 +575,9 @@ def _render_move_completion(
     no "could not be resolved" case for a *successful* move to render; see
     `camp.transfer.move.ConversationCrossed`.
 
-    Each arrived conversation gets the literal command that resumes it —
-    `camp launch --resume <session-id>`, the same reference-addressed resume
-    flavor `camp.cli.session._launch_resume` implements — rather than an
+    Each arrived conversation gets the literal command that resumes it — the
+    harness's own resume argv, rendered exactly as
+    `camp.launch.resurrect`'s resurrection stub renders it — rather than an
     identifier the operator would have to turn into a command themselves.
 
     *release_results* is `camp.transfer.release.release_conversations`'s own
@@ -607,25 +607,39 @@ def _render_move_completion(
     if not move_result.conversations:
         print("  no conversations are rooted in this workspace")
     else:
-        _render_conversation_releases(move_result.conversations, release_results)
+        _render_conversation_releases(move_result.conversations, release_results, harness=harness)
 
 
-def _render_conversation_releases(conversations, release_results, *, file=None) -> None:
+def _render_conversation_releases(
+    conversations, release_results, *, harness, file=None
+) -> None:
     """Print each crossed conversation's id, resume command, and release
     outcome — the per-conversation report `_render_move_completion`'s
     success path and the post-commit `finish`-failure branch both need,
     factored out so the two can never drift apart in what they report. See
     `_render_move_completion`'s own docstring for how a FAILED outcome's
     `archive_path` decides which of the two FAILED messages below applies.
+
+    The resume line reuses `camp.launch.resurrect`'s own rendering: the
+    harness's resume argv, `shlex.join`-escaped whole, or its "cannot
+    compose a resume command" line when *harness* is `None` or cannot
+    resume this particular conversation.
     """
+    import shlex
+
     from ..launch.recovery import printable_path
+    from ..launch.resurrect import _NO_HARNESS_LINE
     from ..transfer.release import ReleaseOutcome
 
     release_by_id = {r.session_id: r for r in release_results}
     for conversation in conversations:
         subpath = printable_path(conversation.subpath)
         print(f"    {conversation.session_id} @ {subpath}", file=file)
-        print(f"      resume with: camp launch --resume {conversation.session_id}", file=file)
+        resume_argv = harness.session_resume(conversation.session_id) if harness else None
+        if resume_argv is None:
+            print(f"      {_NO_HARNESS_LINE}", file=file)
+        else:
+            print(f"      resume with: {shlex.join(resume_argv)}", file=file)
         released = release_by_id.get(conversation.session_id)
         if released is None:
             continue
@@ -663,6 +677,7 @@ def _cmd_transfer_group_cli(
 
     from ..group.manifest import ManifestError, manifest_path_for, owner_of, read_central_manifest
     from ..host.config import HostConfigError, load_hosts, self_host_name
+    from ..launch.profile import harness_for
     from ..spine import _die
     from ..transfer.preflight import MemberDeclaration, Verdict, compose_preflight
     from ..transfer.probe import InvalidSlugForTransport, probe_peer
@@ -679,6 +694,7 @@ def _cmd_transfer_group_cli(
 
     as_json = parsed.json
     overwrite = parsed.overwrite
+    harness = harness_for(group)
     peer_name = parsed.to
 
     if not peer_name:
@@ -872,7 +888,7 @@ def _cmd_transfer_group_cli(
             )
             if e.conversations:
                 _render_conversation_releases(
-                    e.conversations, post_commit_release_results, file=sys.stderr
+                    e.conversations, post_commit_release_results, harness=harness, file=sys.stderr
                 )
             sys.exit(EXIT_PHASE_FAILED_POST_COMMIT)
         print(
@@ -921,6 +937,7 @@ def _cmd_transfer_group_cli(
         peer_name=peer_name,
         group_name=group_name,
         release_results=release_results,
+        harness=harness,
     )
 
     from ..transfer.release import ReleaseOutcome

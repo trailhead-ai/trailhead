@@ -38,7 +38,7 @@ from test_launch_stop import (  # noqa: E402
     _FakeTmux,
     _env,
     _group,
-    _launched_pane,
+    _resumed_pane,
     _record,
     _transcript,
     _workspace,
@@ -71,8 +71,8 @@ def _fixture_two(tmp_path: Path):
     derived_b = f"camp-feat-b-{_UUID_B[:8]}"
     tmux = _FakeTmux(
         {
-            derived_a: _launched_pane(harness, _UUID_A, derived_a, ws_a),
-            derived_b: _launched_pane(harness, _UUID_B, derived_b, ws_b),
+            derived_a: _resumed_pane(harness, _UUID_A),
+            derived_b: _resumed_pane(harness, _UUID_B),
         }
     )
 
