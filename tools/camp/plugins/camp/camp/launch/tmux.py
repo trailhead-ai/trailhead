@@ -178,10 +178,15 @@ UNANSWERED = _Unanswered()
 
 @dataclass(frozen=True)
 class TmuxSession:
-    """One session tmux reported, as its name and live window count."""
+    """One session tmux reported: its name, live window count, and the epoch
+    second tmux itself last recorded activity on it (`#{session_activity}`).
+    Every session :meth:`Tmux.list_sessions` parses carries ``activity``;
+    it is `None` only for a `TmuxSession` a caller builds directly without
+    one."""
 
     name: str
     windows: int
+    activity: int | None = None
 
 
 @dataclass(frozen=True)
@@ -560,10 +565,14 @@ class Tmux:
     def list_sessions(self) -> SessionListing | _Unanswered:
         """Every session tmux currently holds, or ``UNANSWERED``.
 
-        Reads ``#{session_windows}|#{session_name}`` — the count first,
-        because it is always digits and a session name may legitimately
-        contain the delimiter, so the name is parsed as the remainder after
-        the FIRST ``|`` and can never be misread as a name-first field.
+        Reads ``#{session_windows}|#{session_activity}|#{session_name}`` —
+        the two digit-only fields first, because a session name may
+        legitimately contain the delimiter, so the name is parsed as the
+        remainder after the FIRST TWO ``|``s and can never be misread as a
+        leading field. ``session_activity`` is tmux's own last-activity
+        timestamp (epoch seconds) for the session — read in this SAME call
+        rather than a second one, so `camp list`'s "last touched" column
+        costs no extra tmux round trip per workspace.
 
         Extends this seam's tri-state rather than reusing :meth:`has_session`'s
         contract: a general listing command's non-zero exit has no single
@@ -574,7 +583,9 @@ class Tmux:
         empty; every other non-zero exit, and an unanswerable ``_run``, is
         ``UNANSWERED``.
         """
-        done = self._run(["list-sessions", "-F", "#{session_windows}|#{session_name}"])
+        done = self._run(
+            ["list-sessions", "-F", "#{session_windows}|#{session_activity}|#{session_name}"]
+        )
         if done is None:
             return UNANSWERED
         if done.returncode != 0:
@@ -587,11 +598,17 @@ class Tmux:
         for line in done.stdout.splitlines():
             if not line:
                 continue
-            count, separator, name = line.partition("|")
+            count, separator, rest = line.partition("|")
             if not separator or not count.isdigit():
                 dropped += 1
                 continue
-            sessions.append(TmuxSession(name=name, windows=int(count)))
+            activity, separator, name = rest.partition("|")
+            if not separator or not activity.isdigit():
+                dropped += 1
+                continue
+            sessions.append(
+                TmuxSession(name=name, windows=int(count), activity=int(activity))
+            )
         return SessionListing(sessions=tuple(sessions), dropped=dropped)
 
     def list_windows(self, name: str) -> WindowListing | None | _Unanswered:

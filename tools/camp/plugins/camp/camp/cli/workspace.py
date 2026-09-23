@@ -7,7 +7,7 @@ workspace's resolved path. (Workspace *creation* — ``new`` — lives in ``grou
 from __future__ import annotations
 
 import sys
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 from .dispatch import _slug_from_name_or_cwd
 from .parser import CampParser, group_verb_parser
@@ -22,7 +22,7 @@ def _project_list_rows(entries: list[dict]) -> list[dict]:
     factored out so the `-a`/`--all-hosts` local answer below can build the
     same row shape without printing. An unmanaged entry's `slug` is `None`
     — passed through as-is, the same discriminator `render_workspace_list`
-    and `render_list_row_human` both key off of.
+    and `render_list_rows_human` both key off of.
     """
     return [
         {
@@ -39,57 +39,56 @@ def _project_list_rows(entries: list[dict]) -> list[dict]:
     ]
 
 
-def render_list_row_human(row: dict) -> str:
-    """One answered `camp list` row, human-rendered — the ``slug state
-    workspace_path`` line, from a JSON-shaped row rather than an entry.
+def render_list_rows_human(
+    rows: list[dict],
+    *,
+    show_group: bool,
+    on_missing: Callable[[str], None],
+    now: float | None = None,
+) -> list[str]:
+    """Answered `camp list` rows, human-rendered — the same table
+    `render_workspace_list` prints locally, from JSON-shaped rows rather than
+    entries, returned as lines for the caller to print or indent.
 
-    An unmanaged row (`slug` is `None`) prints its `tmux_session` in the
-    first column instead — the same rule `render_workspace_list` applies
-    locally, so a relayed or merged unmanaged row reads identically to one
-    rendered on this machine. A leftover-count row (`unmanaged_count`
-    present — the group-scoped answer's summary, which names no leftover)
-    renders that same summary line instead of a workspace line.
+    The one place a relayed or merged `camp list` answer is turned into its
+    human lines: `_cmd_ls_host_cli`'s `--host` callback renders a machine's
+    whole answer through it, and the `-a`/`--all-hosts` merged renderer in
+    `cli/dispatch.py` renders each machine's block through it. Cells come
+    from `camp.launch.inventory.workspace_row_cells`, which escapes every
+    peer-supplied field, so a relayed control character cannot forge a row.
 
-    The one place a relayed or merged `camp list` row is turned into its
-    human line: both `_cmd_ls_host_cli`'s `--host` callback and the
-    `-a`/`--all-hosts` merged renderer in `cli/dispatch.py` print one row at
-    a time through it. Raises `KeyError` on a row missing `slug` or
-    `workspace_path`, so a caller can degrade that one row — the same two
-    keys `render_workspace_list` indexes directly.
-
-    Every field in the row is peer-supplied — a declared host controls each
-    string in the JSON answer it sends back — so the WHOLE composed line
-    goes through `printable_path` rather than the two fields the local
-    renderer escapes individually. `state`, the `window_count`
-    interpolated into it, and a count row's `unmanaged_count` are as
-    forgeable as `slug` is: a newline in any of them reads as a second,
-    entirely fabricated row. Escaping the composed line rather than each
-    field keeps that closed by construction as fields are added, and is
-    idempotent (an escape sequence contains no control characters), so the
-    join's own literal spaces are the only thing it passes through
-    untouched.
-
-    `state` and `window_count` are read with the SAME fallbacks the local
-    renderer applies (`camp.launch.inventory.format_state`): a row relayed
-    by a camp predating the state column carries neither, and renders `-`
-    rather than taking the whole listing's stdout down with it. A `None`
-    `workspace_path` — an unmanaged row, which owns no path — renders `-`
-    for the same reason.
+    A leftover-count row (`unmanaged_count` present — the group-scoped
+    answer's summary, which names no leftover) renders as that summary line
+    after the table. A row missing `slug` or `workspace_path` is skipped,
+    with *on_missing* called with the missing key so the caller can say
+    which machine sent it; the well-formed rows around it still render.
+    *now* is the instant `last_touched` renders relative to; `None` reads
+    the real clock.
     """
+    import time
+
     from ..launch.inventory import (
-        format_path,
-        format_state,
+        WORKSPACE_TABLE_HEADERS,
+        WORKSPACE_TABLE_HEADERS_WITH_GROUP,
         format_unmanaged_summary,
+        workspace_row_cells,
     )
     from ..launch.recovery import printable_path
+    from ..launch.table import render_table
 
-    if "unmanaged_count" in row:
-        return printable_path(format_unmanaged_summary(row["unmanaged_count"]))
-
-    first = row["slug"] if row["slug"] is not None else row["tmux_session"]
-    state = format_state(row.get("state"), row.get("window_count"))
-    path = format_path(row["workspace_path"])
-    return printable_path(f"{first} {state} {path}")
+    resolved_now = now if now is not None else time.time()
+    cells: list[list[str]] = []
+    summaries: list[str] = []
+    for row in rows:
+        if "unmanaged_count" in row:
+            summaries.append(printable_path(format_unmanaged_summary(row["unmanaged_count"])))
+            continue
+        try:
+            cells.append(workspace_row_cells(row, now=resolved_now, show_group=show_group))
+        except KeyError as e:
+            on_missing(e.args[0])
+    headers = WORKSPACE_TABLE_HEADERS_WITH_GROUP if show_group else WORKSPACE_TABLE_HEADERS
+    return render_table(headers, cells) + summaries
 
 
 def _merged_widened_entries(
@@ -218,7 +217,7 @@ def _cmd_ls_group_cli(
 ) -> None:
     """camp list [--json]  (alias: ls)
 
-    Prints one 'slug state abs-path' line per workspace to stdout; exits 0.
+    Prints a WORKSPACE / SESSIONS / LAST TOUCHED table to stdout; exits 0.
     Empty group → no stdout, exit 0. Reads tmux (once, via `cmd_ls_group`) to
     annotate each row with its session state — a tmux read, not a harness
     exec or a state mutation.
@@ -291,14 +290,16 @@ def _cmd_ls_all_groups_cli(
 
     if not groups:
         print("camp list: no groups configured — nothing to list", file=sys.stderr)
-        render_workspace_list([], as_json=as_json, group_failures=unparsable)
+        render_workspace_list([], as_json=as_json, group_failures=unparsable, show_group=True)
         return
 
     entries, notices = _merged_widened_entries(groups, env=env, tmux=tmux)
     if notices:
         print(notices[0], file=sys.stderr)
 
-    render_workspace_list(entries, as_json=as_json, group_failures=unparsable)
+    render_workspace_list(
+        entries, as_json=as_json, group_failures=unparsable, show_group=True
+    )
 
 
 def _cmd_ls_host_cli(
@@ -338,25 +339,24 @@ def _cmd_ls_host_cli(
     as_json = parser.parse_args(args).json
 
     def _render_human_rows(rows: list[dict]) -> None:
-        for row in rows:
-            if not row.get("ok"):
-                continue
-            # Version skew across the operator's two machines is the
-            # expected steady state for this feature, not an edge case — a
-            # remote camp of a different version can answer with a row that
-            # omits a key this rendering depends on. Degrade that ONE row
-            # rather than let it take the whole answer down; the well-formed
-            # rows around it still print.
-            try:
-                rendered = render_list_row_human(row)
-            except KeyError as e:
-                print(
-                    f"camp list: host {host_name!r} sent a workspace row "
-                    f"missing {e.args[0]!r} — skipping",
-                    file=sys.stderr,
-                )
-                continue
-            print(rendered)
+        # Version skew across the operator's two machines is the expected
+        # steady state for this feature, not an edge case — a remote camp of
+        # a different version can answer with a row that omits a key this
+        # rendering depends on. That ONE row is skipped with a notice; the
+        # well-formed rows around it still print.
+        def _skip(key: str) -> None:
+            print(
+                f"camp list: host {host_name!r} sent a workspace row "
+                f"missing {key!r} — skipping",
+                file=sys.stderr,
+            )
+
+        # The far side always answers for every group, so the table names
+        # each row's group.
+        for line in render_list_rows_human(
+            [row for row in rows if row.get("ok")], show_group=True, on_missing=_skip
+        ):
+            print(line)
 
     relay_all_groups(
         "list",

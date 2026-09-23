@@ -27,7 +27,7 @@ camp new <slug>      # create or enter a workspace, then attach to its tmux sess
 camp new <slug> --no-attach  # create or enter + its session, leave this terminal alone
 camp new <slug> --no-session # create or enter the workspace only — no tmux session
 camp pwd <slug>      # print workspace path
-camp list            # list all worktrees (alias: ls)
+camp list            # table of workspaces: sessions, last touched (alias: ls)
 camp status          # show git + drift status
 camp sessions        # list the live harness sessions camp can see
 camp sessions --recoverable  # list the dead ones that could be brought back

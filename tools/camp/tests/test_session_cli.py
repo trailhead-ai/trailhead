@@ -333,12 +333,15 @@ elif args and args[0] == "list-sessions":
             windows = json.load(handle)
     for name in table:
         count = windows.get(name, 1)
-        # Window count first, name as the remainder, "|"-delimited to match
-        # what the real Tmux.list_sessions() seam asks tmux to format
-        # (`#{session_windows}|#{session_name}`) and parses on the FIRST
-        # "|" — a session name may legally carry one of its own, so the
-        # count is never read out of the name's tail.
-        print(f"{count}|{name}")
+        # Window count then activity first, name as the remainder,
+        # "|"-delimited to match what the real Tmux.list_sessions() seam
+        # asks tmux to format
+        # (`#{session_windows}|#{session_activity}|#{session_name}`) and
+        # parses on the FIRST TWO "|"s — a session name may legally carry
+        # one of its own, so neither leading field is ever read out of the
+        # name's tail. The activity value itself is a fixed stand-in
+        # (nothing in this stub tracks real per-session activity).
+        print(f"{count}|1700000000|{name}")
 '''
 
 
@@ -2727,8 +2730,8 @@ def test_list_distinguishes_outage_from_empty(cli_env) -> None:
         extra_env={"CAMP_FAKE_TMUX_LIST_SESSIONS_FAIL": "unsafe-permissions"},
     )
     assert outage.returncode == 0, outage.stderr
-    _, outage_state, _ = outage.stdout.strip().split(None, 2)
-    assert outage_state == "unknown"
+    outage_sessions = outage.stdout.strip().splitlines()[-1].split()[1]
+    assert outage_sessions == "?"
     assert outage.stderr.strip() != ""
 
     empty = _camp(
@@ -2736,8 +2739,8 @@ def test_list_distinguishes_outage_from_empty(cli_env) -> None:
         extra_env={"CAMP_FAKE_TMUX_LIST_SESSIONS_FAIL": "no-server"},
     )
     assert empty.returncode == 0, empty.stderr
-    _, empty_state, _ = empty.stdout.strip().split(None, 2)
-    assert empty_state == "none"
+    empty_sessions = empty.stdout.strip().splitlines()[-1].split()[1]
+    assert empty_sessions == "0"
     assert empty.stderr == ""
 
 

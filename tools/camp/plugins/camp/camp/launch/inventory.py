@@ -102,22 +102,30 @@ class WorkspaceSession:
 
     ``windows`` is populated only when ``state`` is :data:`STATE_RUNNING`;
     every other state carries ``None`` because there is no session to count
-    windows on.
+    windows on. ``activity`` mirrors that: the matched tmux session's own
+    ``#{session_activity}`` epoch second, `None` when there is no matched
+    session to read it from — the tmux half of a workspace's "last touched"
+    instant (see `camp.launch.lasttouched`, which combines it with the
+    caller's own worktree/manifest reads).
     """
 
     slug: str
     path: str
     state: str
     windows: int | None = None
+    activity: int | None = None
 
 
 @dataclass(frozen=True)
 class UnmanagedSession:
     """One leftover tmux session, claimed by no workspace. Carries only what
-    tmux itself reported — no slug, no path, because no workspace owns it."""
+    tmux itself reported — no slug, no path, because no workspace owns it.
+    ``activity`` is the session's own ``#{session_activity}``, same as
+    :attr:`WorkspaceSession.activity`."""
 
     name: str
     windows: int
+    activity: int | None = None
 
 
 @dataclass(frozen=True)
@@ -147,19 +155,20 @@ HUMAN_ABSENT = "-"
 
 
 def format_state(state: str | None, windows: int | None) -> str:
-    """The state field as a human row prints it.
+    """The state field as `camp attach`'s workspace picker prints it
+    (:class:`~camp.attach.door_target.WorkspaceCandidate.state_text`, built
+    from `cmd_ls_group`'s own entries).
 
     :data:`STATE_RUNNING` renders with its window count appended
     (``running:3``) — the count is the one piece of size information in the
-    row and the human row is the only surface an operator reads, so a bare
-    ``running`` drops it on the floor. A row with no state at all (the
-    no-group registry fallback, or a row relayed by a camp predating the
-    column) renders :data:`HUMAN_ABSENT`.
+    row. A row with no state at all (the no-group registry fallback, or a
+    row relayed by a camp predating the column) renders :data:`HUMAN_ABSENT`.
 
-    Shared by both renderers — ``render_workspace_list``'s local rows and
-    ``render_list_row_human``'s relayed or merged ones — so a row reads the
-    same whichever machine answered it. A relayed ``running`` row carrying
-    no count still renders bare, because there is no count to state.
+    `camp list`/`ls`'s own SESSIONS column renders through
+    :func:`format_sessions_cell` instead — a bare window count, since the
+    table already states a row's `STATE_RUNNING`-ness structurally (a
+    session row vs. a `0`/`?` one) rather than needing it spelled out in the
+    cell's own text.
     """
     if not state:
         return HUMAN_ABSENT
@@ -168,11 +177,102 @@ def format_state(state: str | None, windows: int | None) -> str:
     return state
 
 
-def format_path(path: str | None) -> str:
-    """The path field as a human row prints it — :data:`HUMAN_ABSENT` for a
-    row that owns no path (an unmanaged session). Shared by both renderers
-    for the same reason :func:`format_state` is."""
-    return HUMAN_ABSENT if path is None else path
+def format_sessions_cell(state: str | None, windows: int | None) -> str:
+    """`camp list`/`ls`'s SESSIONS column: the running (or unmanaged) session's
+    window count, ``0`` for a workspace with no session, and ``?`` when
+    nothing is known — tmux never answered (:data:`STATE_UNKNOWN`), or the
+    row carries no state at all (the no-group fallback, or a row relayed by
+    a camp predating the state column).
+
+    :data:`STATE_UNMANAGED` renders its window count exactly like
+    :data:`STATE_RUNNING` does — an unmanaged row IS a live tmux session,
+    just one no workspace claims, so its window count is exactly as known.
+    """
+    if not state or state == STATE_UNKNOWN:
+        return "?"
+    if state == STATE_NONE:
+        return "0"
+    if windows is None:
+        return "?"
+    return str(windows)
+
+
+def format_last_touched(ts: float | None, *, now: float) -> str:
+    """`camp list`/`ls`'s LAST TOUCHED column: a compact relative age against
+    *now* (injected so a test never depends on wall-clock time), or
+    :data:`HUMAN_ABSENT` when *ts* is `None` — nothing observable about this
+    workspace (see `camp.launch.lasttouched.workspace_last_touched`).
+
+    Buckets: under a minute is ``just now``; under an hour, whole minutes
+    (``5m ago``); under a day, whole hours (``3h ago``); under a week, whole
+    days (``2d ago``); otherwise whole weeks (``3w ago``). A *ts* in the
+    future (clock skew between two camp-answering machines) falls in the
+    first bucket, ``just now``, rather than printing a negative duration.
+    """
+    if ts is None:
+        return HUMAN_ABSENT
+    elapsed = now - ts
+    if elapsed < 60:
+        return "just now"
+    if elapsed < 3600:
+        return f"{int(elapsed // 60)}m ago"
+    if elapsed < 86400:
+        return f"{int(elapsed // 3600)}h ago"
+    if elapsed < 86400 * 7:
+        return f"{int(elapsed // 86400)}d ago"
+    return f"{int(elapsed // (86400 * 7))}w ago"
+
+
+#: `camp list`/`ls`'s table headers, local or narrow-scoped (no GROUP column).
+WORKSPACE_TABLE_HEADERS = ("WORKSPACE", "SESSIONS", "LAST TOUCHED")
+#: The same headers, widened with a GROUP column — the `--all-groups`/`-g`
+#: axis, and any `--host`/`--all-hosts` answer that spans groups.
+WORKSPACE_TABLE_HEADERS_WITH_GROUP = WORKSPACE_TABLE_HEADERS + ("GROUP",)
+
+
+def workspace_row_cells(row: dict, *, now: float, show_group: bool) -> list[str]:
+    """One `camp list`/`ls` row's table cells: WORKSPACE, SESSIONS, LAST
+    TOUCHED, and — when *show_group* — GROUP. The one place a workspace or
+    unmanaged row (local, relayed, or merged) is turned into its table
+    cells, so every human surface reads a row identically.
+
+    Every field here is peer-suppliable — a relayed row's `slug`,
+    `tmux_session`, `group`, and `last_touched` can be anything the far camp
+    chooses to send — so every cell is escaped with `printable_path` before
+    :func:`~camp.launch.table.render_table` ever sees it: a control
+    character in any one of them must never forge a second table row.
+
+    `last_touched` is read as either representation a caller may hold it in:
+    an epoch float (a local row, built straight from `cmd_ls_group`, never
+    round-tripped through JSON) or an ISO-8601 UTC string (a relayed or
+    merged row, read back from a `--json` answer) — `None`, or a string
+    that fails to parse (an older relayed row lacking the field), renders
+    :data:`HUMAN_ABSENT`.
+
+    Raises `KeyError` when `slug` or `workspace_path` is missing — the two
+    keys every row (local or relayed) is guaranteed to carry — so a caller
+    can degrade that one row rather than fail the whole listing.
+    `workspace_path` is required only as that same completeness check; the
+    path itself is never rendered — `camp pwd` and `--json` carry it.
+    """
+    from .lasttouched import from_iso_utc
+    from .recovery import printable_path
+
+    _ = row["workspace_path"]  # completeness check only — never rendered
+    first = row["slug"] if row["slug"] is not None else row["tmux_session"]
+
+    last_touched = row.get("last_touched")
+    if isinstance(last_touched, str):
+        last_touched = from_iso_utc(last_touched)
+
+    cells = [
+        printable_path(str(first)),
+        printable_path(format_sessions_cell(row.get("state"), row.get("window_count"))),
+        printable_path(format_last_touched(last_touched, now=now)),
+    ]
+    if show_group:
+        cells.append(printable_path(row.get("group") or HUMAN_ABSENT))
+    return cells
 
 
 def format_unmanaged_summary(count: int) -> str:
@@ -223,7 +323,11 @@ def classify_sessions(
             claimed.add(name)
             workspace_rows.append(
                 WorkspaceSession(
-                    slug=w.slug, path=w.path, state=STATE_RUNNING, windows=session.windows
+                    slug=w.slug,
+                    path=w.path,
+                    state=STATE_RUNNING,
+                    windows=session.windows,
+                    activity=session.activity,
                 )
             )
         else:
@@ -237,7 +341,9 @@ def classify_sessions(
             continue
         if not is_retired_session_name(session.name):
             continue
-        leftover_rows.append(UnmanagedSession(name=session.name, windows=session.windows))
+        leftover_rows.append(
+            UnmanagedSession(name=session.name, windows=session.windows, activity=session.activity)
+        )
 
     unmanaged = tuple(leftover_rows) if scope is DisclosureScope.WIDENED else ()
 

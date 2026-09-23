@@ -200,10 +200,27 @@ class TestCmdLsGroupWorkspacePath:
 
 
 class TestListOutput:
-    """_cmd_ls_group_cli prints one 'slug state abs-path' line per workspace
-    to stdout — state in the middle so the path stays the line's last field."""
+    """_cmd_ls_group_cli prints an aligned WORKSPACE/SESSIONS/LAST TOUCHED
+    table — one header row, then one row per workspace."""
 
     def test_single_workspace_stdout(self, camp_cli, tmp_path, capsys):
+        group = _make_group("listgrp")
+        env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
+        _seed_manifest("listgrp", "feat-x", env=env)
+
+        camp_cli._cmd_ls_group_cli([], group, env, tmux=_FakeTmux())
+
+        out = capsys.readouterr().out
+        lines = [ln for ln in out.splitlines() if ln]
+        assert len(lines) == 2, f"expected header + 1 row, got {len(lines)}: {lines!r}"
+        assert lines[0].split()[:2] == ["WORKSPACE", "SESSIONS"]
+        slug, sessions, *rest = lines[1].split()
+        assert slug == "feat-x", f"slug mismatch: {slug!r}"
+        assert sessions == "0", f"sessions mismatch: {sessions!r}"
+
+    def test_path_is_not_in_human_output(self, camp_cli, tmp_path, capsys):
+        """The human table carries no path — `camp pwd`/`--json` are the ways
+        to get a workspace's path."""
         group = _make_group("listgrp")
         env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
         ws = _seed_manifest("listgrp", "feat-x", env=env)
@@ -211,45 +228,25 @@ class TestListOutput:
         camp_cli._cmd_ls_group_cli([], group, env, tmux=_FakeTmux())
 
         out = capsys.readouterr().out
-        lines = [ln for ln in out.splitlines() if ln]
-        assert len(lines) == 1, f"expected 1 line, got {len(lines)}: {lines!r}"
-        slug, state, path = lines[0].split(None, 2)
-        assert slug == "feat-x", f"slug mismatch: {slug!r}"
-        assert state == "none", f"state mismatch: {state!r}"
-        assert path == str(ws), f"path mismatch: {path!r}"
+        assert str(ws) not in out
 
-    def test_path_in_output_is_absolute(self, camp_cli, tmp_path, capsys):
+    def test_multiple_workspaces_one_row_each(self, camp_cli, tmp_path, capsys):
         group = _make_group("listgrp")
         env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
-        _seed_manifest("listgrp", "feat-x", env=env)
-
-        camp_cli._cmd_ls_group_cli([], group, env, tmux=_FakeTmux())
-
-        out = capsys.readouterr().out
-        line = out.strip()
-        _, _, path = line.split(None, 2)
-        assert Path(path).is_absolute(), f"path in output must be absolute, got {path!r}"
-
-    def test_multiple_workspaces_one_line_each(self, camp_cli, tmp_path, capsys):
-        group = _make_group("listgrp")
-        env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
-        ws1 = _seed_manifest("listgrp", "alpha", env=env)
-        ws2 = _seed_manifest("listgrp", "beta", env=env)
+        _seed_manifest("listgrp", "alpha", env=env)
+        _seed_manifest("listgrp", "beta", env=env)
 
         camp_cli._cmd_ls_group_cli([], group, env, tmux=_FakeTmux())
 
         out = capsys.readouterr().out
         lines = [ln for ln in out.splitlines() if ln]
-        assert len(lines) == 2, f"expected 2 lines, got {len(lines)}: {lines!r}"
-        slugs = {ln.split(None, 2)[0] for ln in lines}
+        assert len(lines) == 3, f"expected header + 2 rows, got {len(lines)}: {lines!r}"
+        slugs = {ln.split()[0] for ln in lines[1:]}
         assert slugs == {"alpha", "beta"}
-        paths = {ln.split(None, 2)[2] for ln in lines}
-        assert str(ws1) in paths, f"{ws1} not in output paths {paths}"
-        assert str(ws2) in paths, f"{ws2} not in output paths {paths}"
 
-    def test_no_header_lines_in_output(self, camp_cli, tmp_path, capsys):
-        """stdout must contain only 'slug state path' lines — no table
-        headers. The state column adds no header of its own."""
+    def test_header_is_exactly_workspace_sessions_last_touched(self, camp_cli, tmp_path, capsys):
+        """No GROUP header on a single-group listing — that column only
+        appears once the listing spans groups (`--all-groups`/`-g`)."""
         group = _make_group("listgrp")
         env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
         _seed_manifest("listgrp", "feat-x", env=env)
@@ -257,11 +254,9 @@ class TestListOutput:
         camp_cli._cmd_ls_group_cli([], group, env, tmux=_FakeTmux())
 
         out = capsys.readouterr().out
-        assert "SLUG" not in out, "output must not contain a 'SLUG' header"
-        assert "BRANCH" not in out, "output must not contain a 'BRANCH' header"
-        assert "GROUP" not in out, "output must not contain a 'GROUP' header"
-        assert "STATE" not in out, "output must not contain a 'STATE' header"
-        assert "---" not in out, "output must not contain a separator line"
+        header = out.splitlines()[0]
+        assert header.split() == ["WORKSPACE", "SESSIONS", "LAST", "TOUCHED"]
+        assert "GROUP" not in header
 
 
 class TestListJson:
@@ -284,6 +279,7 @@ class TestListJson:
         "state",
         "window_count",
         "tmux_session",
+        "last_touched",
     }
 
     def test_json_carries_workspace_path(self, camp_cli, tmp_path, capsys):
@@ -331,6 +327,7 @@ class TestListJson:
             "state",
             "window_count",
             "tmux_session",
+            "last_touched",
         }
         assert "host" not in rows[0]
 
@@ -444,33 +441,24 @@ class TestListSubprocess:
             f"camp list must exit 0\nstdout: {r.stdout}\nstderr: {r.stderr}"
         )
 
-    def test_list_prints_slug_and_abs_path(self, list_cli_env):
+    def test_list_prints_slug_in_workspace_column(self, list_cli_env):
+        r = _camp(list_cli_env, "list", "--group", "listgroup")
+        assert r.returncode == 0
+        lines = [ln for ln in r.stdout.splitlines() if ln][1:]  # skip header
+        slugs = {ln.split()[0] for ln in lines}
+        assert "ws-alpha" in slugs, f"ws-alpha missing from output: {r.stdout!r}"
+        assert "ws-beta" in slugs, f"ws-beta missing from output: {r.stdout!r}"
+
+    def test_list_stdout_is_a_header_plus_one_row_per_workspace(self, list_cli_env):
+        """stdout is the WORKSPACE/SESSIONS/LAST TOUCHED table header, then
+        one row per workspace, and no path anywhere."""
         r = _camp(list_cli_env, "list", "--group", "listgroup")
         assert r.returncode == 0
         lines = [ln for ln in r.stdout.splitlines() if ln]
-        slugs = {ln.split(None, 2)[0] for ln in lines}
-        assert "ws-alpha" in slugs, f"ws-alpha missing from output: {r.stdout!r}"
-        assert "ws-beta" in slugs, f"ws-beta missing from output: {r.stdout!r}"
-        paths = {ln.split(None, 2)[2] for ln in lines}
-        assert str(list_cli_env["ws_alpha"]) in paths, (
-            f"ws_alpha path missing from output: {r.stdout!r}"
-        )
-        assert str(list_cli_env["ws_beta"]) in paths, (
-            f"ws_beta path missing from output: {r.stdout!r}"
-        )
-
-    def test_list_stdout_only_slug_path_lines(self, list_cli_env):
-        """stdout contains only 'slug state abs-path' lines, no headers or
-        noise."""
-        r = _camp(list_cli_env, "list", "--group", "listgroup")
-        assert r.returncode == 0
-        for line in r.stdout.splitlines():
-            if not line:
-                continue
-            parts = line.split(None, 2)
-            assert len(parts) == 3, f"line {line!r} is not 'slug state path'"
-            slug, state, path = parts
-            assert Path(path).is_absolute(), f"path {path!r} in output must be absolute"
+        assert lines[0].split()[:2] == ["WORKSPACE", "SESSIONS"]
+        assert len(lines) == 3, f"expected header + 2 rows, got {lines!r}"
+        assert str(list_cli_env["ws_alpha"]) not in r.stdout
+        assert str(list_cli_env["ws_beta"]) not in r.stdout
 
 
 class TestListAliasLs:
@@ -579,7 +567,7 @@ class TestListAllGroups:
             "--all-groups",
         )
         assert r.returncode == 0, f"stdout: {r.stdout}\nstderr: {r.stderr}"
-        lines = [ln for ln in r.stdout.splitlines() if ln]
+        lines = [ln for ln in r.stdout.splitlines() if ln][1:]  # skip header
         slugs = {ln.split(None, 2)[0] for ln in lines}
         assert slugs == {"ws-a", "ws-b"}
 
@@ -603,6 +591,7 @@ class TestListAllGroups:
             "state",
             "window_count",
             "tmux_session",
+            "last_touched",
         }
         assert rows[0]["ok"] is True
 
@@ -658,8 +647,9 @@ class TestListAllGroups:
         single-group `camp list` surface."""
         r = _camp(list_cli_env, "list", "--group", "listgroup")
         assert r.returncode == 0, r.stderr
-        lines = {ln.split(None, 2)[0] for ln in r.stdout.splitlines() if ln}
-        assert lines == {"ws-alpha", "ws-beta"}
+        lines = [ln for ln in r.stdout.splitlines() if ln][1:]  # skip header
+        slugs = {ln.split(None, 2)[0] for ln in lines}
+        assert slugs == {"ws-alpha", "ws-beta"}
 
     def test_all_groups_with_a_named_group_refuses(self, two_group_list_cli_env) -> None:
         r = _camp_from(
@@ -971,10 +961,11 @@ class TestUnmanagedRow:
 
         camp_cli._cmd_ls_all_groups_cli([], None, tmux=tmux)
         out = capsys.readouterr().out
-        first, state, path = out.strip().split(None, 2)
+        lines = [ln for ln in out.splitlines() if ln]
+        assert len(lines) == 2  # header + the one unmanaged row
+        first, sessions = lines[1].split()[:2]
         assert first == leftover
-        assert state == "unmanaged"
-        assert path == "-"
+        assert sessions == "5"
 
 
 class TestDisclosureBoundary:
@@ -1087,7 +1078,7 @@ class TestSessionNameEscaping:
         out = capsys.readouterr().out
         assert "\x07" not in out
         assert "\\x07" in out
-        assert len(out.splitlines()) == 1
+        assert len(out.splitlines()) == 2  # header + the one row
 
 
 class TestReviewRepairs:
@@ -1110,11 +1101,11 @@ class TestReviewRepairs:
 
         three = _FakeTmux(SessionListing(sessions=(TmuxSession(name=name, windows=3),)))
         camp_cli._cmd_ls_group_cli([], group, env, tmux=three)
-        assert capsys.readouterr().out.split()[1] == "running:3"
+        assert capsys.readouterr().out.splitlines()[1].split()[1] == "3"
 
         one = _FakeTmux(SessionListing(sessions=(TmuxSession(name=name, windows=1),)))
         camp_cli._cmd_ls_group_cli([], group, env, tmux=one)
-        assert capsys.readouterr().out.split()[1] == "running:1"
+        assert capsys.readouterr().out.splitlines()[1].split()[1] == "1"
 
     def test_window_count_is_zero_for_a_workspace_with_no_session(
         self, camp_cli, tmp_path, capsys
@@ -1152,7 +1143,35 @@ class TestReviewRepairs:
         assert rows[0]["workspace_path"] is None
 
         camp_cli._cmd_ls_all_groups_cli([], None, tmux=tmux)
-        assert capsys.readouterr().out.split() == [leftover, "unmanaged", "-"]
+        lines = [ln for ln in capsys.readouterr().out.splitlines() if ln]
+        # --all-groups shows the GROUP column too; the leftover has neither
+        # a group nor an observable last-touched instant.
+        assert lines[1].split() == [leftover, "5", "-", "-"]
+
+    def test_json_last_touched_is_the_sessions_tmux_activity_as_iso_utc(
+        self, camp_cli, tmp_path, capsys, monkeypatch
+    ):
+        """A leftover session's only observable activity is tmux's own; the
+        JSON row carries it as ISO-8601 UTC, and `null` when tmux gave none."""
+        from camp.launch.stop import SessionListing, TmuxSession
+
+        config_dir, state_dir = _write_config_group(tmp_path, "activitygrp")
+        monkeypatch.setenv("CAMP_CONFIG_DIR", str(config_dir))
+        monkeypatch.setenv("CAMP_STATE_DIR", str(state_dir))
+        tmux = _FakeTmux(
+            SessionListing(
+                sessions=(
+                    TmuxSession(name="camp-old-a1b2c3d4", windows=1, activity=1_700_000_000),
+                    TmuxSession(name="camp-quiet-b2c3d4e5", windows=1),
+                )
+            )
+        )
+
+        camp_cli._cmd_ls_all_groups_cli(["--json"], None, tmux=tmux)
+
+        rows = {r["tmux_session"]: r for r in json.loads(capsys.readouterr().out)}
+        assert rows["camp-old-a1b2c3d4"]["last_touched"] == "2023-11-14T22:13:20Z"
+        assert rows["camp-quiet-b2c3d4e5"]["last_touched"] is None
 
     def test_unmanaged_summary_line_agrees_in_number_with_its_count(
         self, camp_cli, tmp_path, capsys
@@ -1194,7 +1213,7 @@ class TestReviewRepairs:
         assert captured.err.strip() == (
             "camp list: tmux did not answer — session state is unknown"
         )
-        assert captured.out.split()[1] == "unknown"
+        assert captured.out.splitlines()[1].split()[1] == "?"
 
     def test_unmanaged_rows_sort_after_the_workspace_rows(
         self, camp_cli, tmp_path, capsys, monkeypatch
@@ -1212,7 +1231,7 @@ class TestReviewRepairs:
 
         camp_cli._cmd_ls_all_groups_cli([], None, tmux=tmux)
 
-        lines = [ln for ln in capsys.readouterr().out.splitlines() if ln]
+        lines = [ln for ln in capsys.readouterr().out.splitlines() if ln][1:]  # skip header
         assert [ln.split()[0] for ln in lines] == ["feat-s", leftover]
 
     def test_the_unmanaged_count_json_row_carries_the_full_key_set(
@@ -1235,13 +1254,13 @@ class TestReviewRepairs:
         assert len(summary) == 1
         assert summary[0]["unmanaged_count"] == 1
         for key in ("ok", "slug", "branch", "workspace_path", "group", "state",
-                    "window_count", "tmux_session"):
+                    "window_count", "tmux_session", "last_touched"):
             assert key in summary[0]
         assert summary[0]["slug"] is None
 
-    def test_a_no_group_fallback_entry_renders_a_dash_in_the_state_column(self, capsys):
+    def test_a_no_group_fallback_entry_renders_question_mark_in_sessions_column(self, capsys):
         """The legacy registry fallback has no group, so no session name is
-        derivable — the human row says so in the state column."""
+        derivable — the human row says so in the SESSIONS column."""
         from camp.provision.lifecycle import render_workspace_list
 
         render_workspace_list(
@@ -1249,7 +1268,8 @@ class TestReviewRepairs:
             as_json=False,
         )
 
-        assert capsys.readouterr().out.split() == ["s", "-", "/ws/s"]
+        lines = capsys.readouterr().out.splitlines()
+        assert lines[1].split() == ["s", "?", "-"]
 
 
 class TestListingNeverWritesTheWindowRecord:
@@ -1286,7 +1306,9 @@ class TestListingNeverWritesTheWindowRecord:
         camp_cli._cmd_ls_group_cli([], group, env, tmux=tmux)
 
         out = capsys.readouterr().out
-        assert out.split()[1] == "running:5", "the row reports tmux's own count, not the record's"
+        assert out.splitlines()[1].split()[1] == "5", (
+            "the row reports tmux's own count, not the record's"
+        )
         assert record_path.read_bytes() == before_bytes
         assert record_path.stat().st_mtime_ns == before_mtime_ns
 

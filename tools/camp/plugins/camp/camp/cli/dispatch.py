@@ -953,10 +953,22 @@ def _dispatch_all_hosts_command(
 
     if verb == "list":
         from .workspace import local_list_answer as local_answer_fn
-        from .workspace import render_list_row_human as render_row
+        from .workspace import render_list_rows_human
+
+        def render_rows(rows: list[dict], on_missing) -> list[str]:
+            return render_list_rows_human(rows, show_group=all_groups, on_missing=on_missing)
     else:
         from .session import local_sessions_answer as local_answer_fn
-        from .session import render_session_row_human as render_row
+        from .session import render_session_row_human
+
+        def render_rows(rows: list[dict], on_missing) -> list[str]:
+            lines = []
+            for row in rows:
+                try:
+                    lines.append(render_session_row_human(row))
+                except KeyError as e:
+                    on_missing(e.args[0])
+            return lines
 
     def _local_answer() -> tuple[list[dict], list[str], int]:
         return local_answer_fn(group, all_groups=all_groups)
@@ -1019,7 +1031,7 @@ def _dispatch_all_hosts_command(
 
         print(_json.dumps(rows))
     else:
-        _render_all_hosts_human(self_name, hosts, hosts_error, rows, render_row, verb)
+        _render_all_hosts_human(self_name, hosts, hosts_error, rows, render_rows, verb)
 
     sys.exit(exit_code)
 
@@ -2079,22 +2091,24 @@ def _render_all_hosts_human(
     hosts: dict,
     hosts_error: str | None,
     rows: list[dict],
-    render_row,
+    render_rows,
     verb: str,
 ) -> None:
     """Print the merged answer grouped by machine — local block first, then
     every declared host in `hosts.toml` declaration order (the same order
     `merge_all_hosts_answer` already merged the rows in). Every machine gets
     its header, even one with nothing beneath it; a machine whose only row
-    is a failure (`ok: false`) prints that row's `reason` in place of a
-    rendered row.
+    is a failure (`ok: false`) prints that row's `reason` in place of its
+    rendered rows.
 
+    *render_rows* turns one machine's ok rows into its indented block's
+    lines — a table for `list`, one line per session for `sessions` — and
+    calls its `on_missing` argument with the key a malformed row lacked.
     Version skew across the operator's declared machines is the expected
     steady state for this feature, not an edge case — a machine running a
-    different version can answer with a row that omits a key `render_row`
-    indexes directly (a remote row, or a local row from a mismatched local
-    answer function). Degrade that ONE row rather than let it take the
-    whole merged listing down, the same isolation the `--host` renderers
+    different version can answer with a row that omits a key the renderer
+    indexes directly. That ONE row is skipped with a notice naming the
+    machine, the same isolation the `--host` renderers
     (`workspace.py`'s `_cmd_ls_host_cli`, `session.py`'s
     `_cmd_sessions_host_cli`) already hold for their own single-machine
     case — every other row on this machine, and every other machine, still
@@ -2115,22 +2129,19 @@ def _render_all_hosts_human(
 
     for key, label in machines:
         print(label)
-        for row in rows:
-            if row.get("host") != key:
-                continue
+        machine_rows = [row for row in rows if row.get("host") == key]
+        for row in machine_rows:
             if not row.get("ok", True):
                 print(f"  {row.get('reason', 'unknown failure')}")
-                continue
-            try:
-                rendered = render_row(row)
-            except KeyError as e:
-                print(
-                    f"camp {verb}: {label} sent a row missing "
-                    f"{e.args[0]!r} — skipping",
-                    file=sys.stderr,
-                )
-                continue
-            print(f"  {rendered}")
+
+        def _skip(missing: str, label: str = label) -> None:
+            print(
+                f"camp {verb}: {label} sent a row missing {missing!r} — skipping",
+                file=sys.stderr,
+            )
+
+        for line in render_rows([row for row in machine_rows if row.get("ok", True)], _skip):
+            print(f"  {line}")
 
     # hosts.toml itself failed to parse: the declared hosts could never be
     # enumerated, so there is no declared-host header to attribute this row
