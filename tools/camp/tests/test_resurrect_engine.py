@@ -43,6 +43,8 @@ _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
 if str(_PLUGIN_DIR) not in sys.path:
     sys.path.insert(0, str(_PLUGIN_DIR))
 
+from camp.launch.session import SessionEnvironment  # noqa: E402
+
 from camp.group.window_record import (  # noqa: E402
     WindowEntry,
     read_window_record,
@@ -91,6 +93,8 @@ class _FakeTmux:
         self.new_session_calls: list[dict[str, object]] = []
         self.set_option_calls: list[dict[str, object]] = []
         self.install_binding_calls: list[str] = []
+        self.set_environment_calls: list[tuple[str, tuple]] = []
+        self.respawn_calls: list[str] = []
         self.killed: list[str] = []
 
     def new_session_with_window(self, name, *, cwd, window_name, command, env=None, timeout=None):
@@ -130,6 +134,14 @@ class _FakeTmux:
 
     def kill_session(self, name, *, timeout=None):
         self.killed.append(name)
+        return subprocess.CompletedProcess(args=["tmux"], returncode=0, stdout="", stderr="")
+
+    def set_environment(self, name, operand, *, env=None, timeout=None):
+        self.set_environment_calls.append((name, tuple(operand)))
+        return subprocess.CompletedProcess(args=["tmux"], returncode=0, stdout="", stderr="")
+
+    def respawn_first_pane(self, name, *, timeout=None):
+        self.respawn_calls.append(name)
         return subprocess.CompletedProcess(args=["tmux"], returncode=0, stdout="", stderr="")
 
     def list_window_binding(self):
@@ -180,7 +192,8 @@ def test_three_restorable_entries_ride_new_session_with_window_then_two_new_wind
     )
 
     result = resurrect_workspace_session(
-        "trailhead", "camp-cli", ws, [e1, e2, e3], env=_env(tmp_path), tmux=tmux, harness=None, group=None
+        "trailhead", "camp-cli", ws, [e1, e2, e3], env=_env(tmp_path), tmux=tmux, harness=None, group=None,
+        session_env=SessionEnvironment(),
     )
 
     assert isinstance(result, ResurrectionResult)
@@ -222,7 +235,8 @@ def test_the_record_holds_tmuxs_read_back_name_not_the_requested_one(tmp_path):
     )
 
     result = resurrect_workspace_session(
-        "trailhead", "camp-cli", ws, [e1, e2, e3], env=_env(tmp_path), tmux=tmux, harness=None, group=None
+        "trailhead", "camp-cli", ws, [e1, e2, e3], env=_env(tmp_path), tmux=tmux, harness=None, group=None,
+        session_env=SessionEnvironment(),
     )
 
     assert tmux.new_window_calls[0]["window_name"] == "two", "requested the recorded name"
@@ -253,7 +267,8 @@ def test_the_session_starting_call_gets_the_create_arms_thirty_second_budget(tmp
     )
 
     resurrect_workspace_session(
-        "trailhead", "camp-cli", ws, [e1, e2, e3], env=_env(tmp_path), tmux=tmux, harness=None, group=None
+        "trailhead", "camp-cli", ws, [e1, e2, e3], env=_env(tmp_path), tmux=tmux, harness=None, group=None,
+        session_env=SessionEnvironment(),
     )
 
     assert tmux.new_session_with_window_calls[0]["timeout"] == _CREATE_SESSION_TIMEOUT_SECONDS
@@ -277,7 +292,8 @@ def test_a_failed_window_is_isolated_and_the_rest_still_come_back(tmp_path, bad_
     )
 
     result = resurrect_workspace_session(
-        "trailhead", "camp-cli", ws, [e1, e2, e3], env=_env(tmp_path), tmux=tmux, harness=None, group=None
+        "trailhead", "camp-cli", ws, [e1, e2, e3], env=_env(tmp_path), tmux=tmux, harness=None, group=None,
+        session_env=SessionEnvironment(),
     )
 
     assert len(tmux.new_window_calls) == 2, "the third window must still be attempted"
@@ -311,7 +327,8 @@ def test_a_refused_windows_failure_line_carries_tmuxs_own_stderr(tmp_path):
     )
 
     result = resurrect_workspace_session(
-        "trailhead", "camp-cli", ws, [e1, e2, e3], env=_env(tmp_path), tmux=tmux, harness=None, group=None
+        "trailhead", "camp-cli", ws, [e1, e2, e3], env=_env(tmp_path), tmux=tmux, harness=None, group=None,
+        session_env=SessionEnvironment(),
     )
 
     lines = render_resurrection_lines(result)
@@ -343,7 +360,8 @@ def test_a_refused_windows_failure_line_strips_tmuxs_trailing_newline(tmp_path):
     )
 
     result = resurrect_workspace_session(
-        "trailhead", "camp-cli", ws, [e1, e2, e3], env=_env(tmp_path), tmux=tmux, harness=None, group=None
+        "trailhead", "camp-cli", ws, [e1, e2, e3], env=_env(tmp_path), tmux=tmux, harness=None, group=None,
+        session_env=SessionEnvironment(),
     )
 
     lines = render_resurrection_lines(result)
@@ -369,7 +387,8 @@ def test_every_entry_dropped_takes_the_create_arm_and_empties_the_record(tmp_pat
     tmux = _FakeTmux()
 
     result = resurrect_workspace_session(
-        "trailhead", "camp-cli", ws, [e1, e2, e3], env=_env(tmp_path), tmux=tmux, harness=None, group=None
+        "trailhead", "camp-cli", ws, [e1, e2, e3], env=_env(tmp_path), tmux=tmux, harness=None, group=None,
+        session_env=SessionEnvironment(),
     )
 
     assert isinstance(result, ResurrectionResult)
@@ -397,7 +416,8 @@ def test_duplicate_on_the_first_call_folds_to_duplicate_session_with_no_new_wind
     tmux = _FakeTmux(first_window=DUPLICATE)
 
     result = resurrect_workspace_session(
-        "trailhead", "camp-cli", ws, [e1, e2, e3], env=_env(tmp_path), tmux=tmux, harness=None, group=None
+        "trailhead", "camp-cli", ws, [e1, e2, e3], env=_env(tmp_path), tmux=tmux, harness=None, group=None,
+        session_env=SessionEnvironment(),
     )
 
     assert isinstance(result, DuplicateSession)
@@ -417,7 +437,8 @@ def test_a_failed_first_call_returns_create_failed_and_touches_the_record_not_at
     tmux = _FakeTmux(first_window=NewSessionWindowFailure(stderr="tmux: boom\n"))
 
     result = resurrect_workspace_session(
-        "trailhead", "camp-cli", ws, [e1, e2, e3], env=_env(tmp_path), tmux=tmux, harness=None, group=None
+        "trailhead", "camp-cli", ws, [e1, e2, e3], env=_env(tmp_path), tmux=tmux, harness=None, group=None,
+        session_env=SessionEnvironment(),
     )
 
     assert isinstance(result, CreateFailed)
@@ -444,7 +465,8 @@ def test_the_three_camp_options_and_the_binding_are_set_exactly_once_on_success(
     )
 
     resurrect_workspace_session(
-        "trailhead", "camp-cli", ws, [e1, e2, e3], env=_env(tmp_path), tmux=tmux, harness=None, group=None
+        "trailhead", "camp-cli", ws, [e1, e2, e3], env=_env(tmp_path), tmux=tmux, harness=None, group=None,
+        session_env=SessionEnvironment(),
     )
 
     options = {c["key"]: c["value"] for c in tmux.set_option_calls}
@@ -465,7 +487,8 @@ def test_a_refused_option_kills_the_session_and_returns_create_failed(tmp_path):
     )
 
     result = resurrect_workspace_session(
-        "trailhead", "camp-cli", ws, [e1, e2, e3], env=_env(tmp_path), tmux=tmux, harness=None, group=None
+        "trailhead", "camp-cli", ws, [e1, e2, e3], env=_env(tmp_path), tmux=tmux, harness=None, group=None,
+        session_env=SessionEnvironment(),
     )
 
     assert isinstance(result, CreateFailed)
@@ -603,7 +626,8 @@ def test_the_workspace_root_itself_is_checked_against_the_credential_floor(tmp_p
 
     with pytest.raises(LaunchError):
         resurrect_workspace_session(
-            "trailhead", "camp-cli", ws, [e1, e2, e3], env=env, tmux=tmux, harness=None, group=None
+            "trailhead", "camp-cli", ws, [e1, e2, e3], env=env, tmux=tmux, harness=None, group=None,
+            session_env=SessionEnvironment(),
         )
 
     assert tmux.new_session_with_window_calls == []
@@ -651,7 +675,8 @@ def test_a_restamp_failure_reports_not_restamped_but_keeps_the_restored_windows(
     )
 
     result = resurrect_workspace_session(
-        "trailhead", "camp-cli", ws, [e1, e2, e3], env=_env(tmp_path), tmux=tmux, harness=None, group=None
+        "trailhead", "camp-cli", ws, [e1, e2, e3], env=_env(tmp_path), tmux=tmux, harness=None, group=None,
+        session_env=SessionEnvironment(),
     )
 
     assert result.restamp is not_restamped
@@ -659,3 +684,44 @@ def test_a_restamp_failure_reports_not_restamped_but_keeps_the_restored_windows(
 
     lines = render_resurrection_lines(result)
     assert any("could not be re-stamped" in line for line in lines), lines
+
+
+@pytest.mark.parametrize(
+    "session_env",
+    [
+        SessionEnvironment(
+            removals=("CLAUDECODE",), assignments=(("CLAUDE_CONFIG_DIR", "/accounts/levr"),)
+        ),
+        SessionEnvironment(removals=("CLAUDECODE", "CLAUDE_CONFIG_DIR")),
+    ],
+)
+def test_a_resurrected_session_states_its_environment_without_restarting_a_window(
+    tmp_path, session_env
+):
+    """A pane the operator opens by hand in a resurrected session starts on
+    the group's account, same as in a freshly created one. The resurrected
+    windows carry their binding in their own command, so none is restarted
+    — restarting would kill the resume line the operator is about to read."""
+    from camp.launch.naming import workspace_session_name
+
+    ws = _mkws(tmp_path)
+    e1, e2, e3 = _entries()
+    write_window_record(window_record_path_for(ws), [e1, e2, e3])
+    tmux = _FakeTmux(
+        first_window=NewWindowResult(window_id="@10", window_name="one"),
+        window_answers=[
+            NewWindowResult(window_id="@11", window_name="two"),
+            NewWindowResult(window_id="@12", window_name="three"),
+        ],
+    )
+
+    resurrect_workspace_session(
+        "trailhead", "camp-cli", ws, [e1, e2, e3], env=_env(tmp_path), tmux=tmux,
+        harness=None, group=None, session_env=session_env,
+    )
+
+    name = workspace_session_name("trailhead", "camp-cli")
+    expected = [(name, ("-r", var)) for var in session_env.removals]
+    expected += [(name, (k, v)) for k, v in session_env.assignments]
+    assert tmux.set_environment_calls == expected
+    assert tmux.respawn_calls == []

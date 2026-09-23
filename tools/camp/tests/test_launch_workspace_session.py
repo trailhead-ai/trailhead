@@ -40,6 +40,8 @@ _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
 if str(_PLUGIN_DIR) not in sys.path:
     sys.path.insert(0, str(_PLUGIN_DIR))
 
+from camp.launch.session import SessionEnvironment  # noqa: E402
+
 
 class _FakeTmux:
     """Records every `new_session` call and answers with a fixed result."""
@@ -52,16 +54,24 @@ class _FakeTmux:
         existing_binding: str | None = None,
         failing_option: str | None = None,
         failing_option_answer: object = "non-zero",
+        failing_environment: str | None = None,
+        respawn_answer: object = "ok",
     ) -> None:
         self._returncode = returncode
         self._stderr = stderr
         self._existing_binding = existing_binding
         self._failing_option = failing_option
         self._failing_option_answer = failing_option_answer
+        self._failing_environment = failing_environment
+        self._respawn_answer = respawn_answer
         self.calls: list[dict[str, object]] = []
         self.set_option_calls: list[dict[str, object]] = []
         self.install_binding_calls: list[str] = []
         self.killed: list[str] = []
+        #: Every session-shaping call in the order it was made, so a test can
+        #: pin that the first pane restarts only AFTER the environment it must
+        #: start under has been stated.
+        self.events: list[tuple] = []
 
     def new_session(self, name, *, cwd, env=None, timeout=None):
         self.calls.append({"name": name, "cwd": cwd, "env": env, "timeout": timeout})
@@ -86,6 +96,24 @@ class _FakeTmux:
         self.killed.append(name)
         return subprocess.CompletedProcess(args=["tmux"], returncode=0, stdout="", stderr="")
 
+    def set_environment(self, name, operand, *, env=None, timeout=None):
+        self.events.append(("set_environment", name, tuple(operand)))
+        if self._failing_environment is not None and self._failing_environment in operand:
+            return subprocess.CompletedProcess(
+                args=["tmux"], returncode=1, stdout="", stderr="tmux: bad variable"
+            )
+        return subprocess.CompletedProcess(args=["tmux"], returncode=0, stdout="", stderr="")
+
+    def respawn_first_pane(self, name, *, timeout=None):
+        self.events.append(("respawn_first_pane", name))
+        if self._respawn_answer is None:
+            return None
+        if self._respawn_answer != "ok":
+            return subprocess.CompletedProcess(
+                args=["tmux"], returncode=1, stdout="", stderr=str(self._respawn_answer)
+            )
+        return subprocess.CompletedProcess(args=["tmux"], returncode=0, stdout="", stderr="")
+
     def list_window_binding(self):
         return self._existing_binding
 
@@ -106,7 +134,10 @@ def test_the_create_call_carries_a_budget_wide_enough_to_start_a_tmux_server(tmp
     ws_dir.mkdir()
     tmux = _FakeTmux()
 
-    create_workspace_session("g", "feat-x", ws_dir, env={"HOME": str(tmp_path)}, tmux=tmux)
+    create_workspace_session(
+        "g", "feat-x", ws_dir, env={"HOME": str(tmp_path)}, tmux=tmux,
+        session_env=SessionEnvironment(),
+    )
 
     assert len(tmux.calls) == 1
     assert tmux.calls[0]["timeout"] == 30
@@ -132,14 +163,14 @@ def test_creating_against_a_free_name_produces_a_session_at_that_name_rooted_at_
     ws_dir_a.mkdir()
     fake_a = _FakeTmux()
     result_a = create_workspace_session(
-        "trailhead", "camp-cli", ws_dir_a, env=env, tmux=fake_a
+        "trailhead", "camp-cli", ws_dir_a, env=env, tmux=fake_a, session_env=SessionEnvironment()
     )
 
     ws_dir_b = tmp_path / "workspace-b"
     ws_dir_b.mkdir()
     fake_b = _FakeTmux()
     result_b = create_workspace_session(
-        "trailhead", "camp-cli", ws_dir_b, env=env, tmux=fake_b
+        "trailhead", "camp-cli", ws_dir_b, env=env, tmux=fake_b, session_env=SessionEnvironment()
     )
 
     expected_name = workspace_session_name("trailhead", "camp-cli")
@@ -171,8 +202,8 @@ def test_the_derived_name_varies_with_the_group_and_creating_one_leaves_the_othe
     fake_a = _FakeTmux()
     fake_b = _FakeTmux()
 
-    create_workspace_session("group-a", "camp-cli", ws_dir, env=env, tmux=fake_a)
-    create_workspace_session("group-b", "camp-cli", ws_dir, env=env, tmux=fake_b)
+    create_workspace_session("group-a", "camp-cli", ws_dir, env=env, tmux=fake_a, session_env=SessionEnvironment())
+    create_workspace_session("group-b", "camp-cli", ws_dir, env=env, tmux=fake_b, session_env=SessionEnvironment())
 
     name_a = fake_a.calls[0]["name"]
     name_b = fake_b.calls[0]["name"]
@@ -200,7 +231,7 @@ def test_a_free_name_that_races_to_duplicate_reports_already_existed_not_created
     )
 
     result = create_workspace_session(
-        "trailhead", "camp-cli", ws_dir, env={"HOME": str(home)}, tmux=fake
+        "trailhead", "camp-cli", ws_dir, env={"HOME": str(home)}, tmux=fake, session_env=SessionEnvironment()
     )
 
     assert result.outcome is WorkspaceSessionOutcome.ALREADY_EXISTED
@@ -229,7 +260,7 @@ def test_a_create_failure_for_any_other_reason_returns_failed_with_tmuxs_stderr_
     fake = _FakeTmux(returncode=1, stderr=stderr)
 
     result = create_workspace_session(
-        "trailhead", "camp-cli", ws_dir, env={"HOME": str(home)}, tmux=fake
+        "trailhead", "camp-cli", ws_dir, env={"HOME": str(home)}, tmux=fake, session_env=SessionEnvironment()
     )
 
     assert result.outcome is WorkspaceSessionOutcome.FAILED
@@ -250,7 +281,7 @@ def test_a_workspace_directory_under_a_credential_store_is_refused_before_any_se
 
     with pytest.raises(LaunchError):
         create_workspace_session(
-            "trailhead", "camp-cli", ws_dir, env={"HOME": str(home)}, tmux=fake
+            "trailhead", "camp-cli", ws_dir, env={"HOME": str(home)}, tmux=fake, session_env=SessionEnvironment()
         )
 
     assert fake.calls == [], "no create attempt may reach tmux once the credential rule refuses"
@@ -295,6 +326,7 @@ class _FakeDoorTmux:
         self.new_window_calls: list[dict[str, object]] = []
         self.list_windows_calls: list[str] = []
         self.has_session_calls: list[str] = []
+        self.set_environment_calls: list[tuple[str, tuple]] = []
 
     def has_session_with_reason(self, name: str):
         return self._present, None
@@ -346,6 +378,13 @@ class _FakeDoorTmux:
         return self._window_answers.pop(0)
 
     def set_option(self, target, key, value, *, timeout=None):
+        return subprocess.CompletedProcess(args=["tmux"], returncode=0, stdout="", stderr="")
+
+    def set_environment(self, name, operand, *, env=None, timeout=None):
+        self.set_environment_calls.append((name, tuple(operand)))
+        return subprocess.CompletedProcess(args=["tmux"], returncode=0, stdout="", stderr="")
+
+    def respawn_first_pane(self, name, *, timeout=None):
         return subprocess.CompletedProcess(args=["tmux"], returncode=0, stdout="", stderr="")
 
     def list_window_binding(self):
@@ -511,12 +550,12 @@ def test_creating_a_session_marks_it_and_installs_the_window_binding(tmp_path):
     ws_dir_a = tmp_path / "workspace-a"
     ws_dir_a.mkdir()
     fake_a = _FakeTmux()
-    create_workspace_session("trailhead", "camp-cli", ws_dir_a, env=env, tmux=fake_a)
+    create_workspace_session("trailhead", "camp-cli", ws_dir_a, env=env, tmux=fake_a, session_env=SessionEnvironment())
 
     ws_dir_b = tmp_path / "workspace-b"
     ws_dir_b.mkdir()
     fake_b = _FakeTmux()
-    create_workspace_session("acme", "feat-x", ws_dir_b, env=env, tmux=fake_b)
+    create_workspace_session("acme", "feat-x", ws_dir_b, env=env, tmux=fake_b, session_env=SessionEnvironment())
 
     name_a = workspace_session_name("trailhead", "camp-cli")
     options_a = {c["key"]: c["value"] for c in fake_a.set_option_calls}
@@ -545,7 +584,10 @@ def test_an_already_existed_outcome_installs_no_new_options_or_binding(tmp_path)
     ws_dir.mkdir()
     fake = _FakeTmux(returncode=1, stderr="duplicate session: camp-trailhead-camp-cli\n")
 
-    create_workspace_session("trailhead", "camp-cli", ws_dir, env={"HOME": str(home)}, tmux=fake)
+    create_workspace_session(
+        "trailhead", "camp-cli", ws_dir, env={"HOME": str(home)}, tmux=fake,
+        session_env=SessionEnvironment(),
+    )
 
     assert fake.set_option_calls == []
     assert fake.install_binding_calls == []
@@ -560,7 +602,10 @@ def test_a_failed_create_installs_no_options_or_binding(tmp_path):
     ws_dir.mkdir()
     fake = _FakeTmux(returncode=1, stderr="error: unsafe socket directory\n")
 
-    create_workspace_session("trailhead", "camp-cli", ws_dir, env={"HOME": str(home)}, tmux=fake)
+    create_workspace_session(
+        "trailhead", "camp-cli", ws_dir, env={"HOME": str(home)}, tmux=fake,
+        session_env=SessionEnvironment(),
+    )
 
     assert fake.set_option_calls == []
     assert fake.install_binding_calls == []
@@ -596,7 +641,7 @@ def test_a_session_whose_mark_tmux_refused_is_not_reported_created(tmp_path):
             ws.mkdir(exist_ok=True)
 
             result = create_workspace_session(
-                "testgroup", "slug", ws, env={"HOME": str(tmp_path)}, tmux=tmux
+                "testgroup", "slug", ws, env={"HOME": str(tmp_path)}, tmux=tmux, session_env=SessionEnvironment()
             )
 
             assert result.outcome is WorkspaceSessionOutcome.FAILED, (key, answer)
@@ -619,7 +664,7 @@ def test_a_fully_marked_session_is_created_and_never_killed(tmp_path):
     ws.mkdir()
 
     result = create_workspace_session(
-        "testgroup", "slug", ws, env={"HOME": str(tmp_path)}, tmux=tmux
+        "testgroup", "slug", ws, env={"HOME": str(tmp_path)}, tmux=tmux, session_env=SessionEnvironment()
     )
 
     assert result.outcome is WorkspaceSessionOutcome.CREATED
@@ -1014,3 +1059,160 @@ class TestDoorReadsTheRecordBeforeCreating:
 
         assert probe.state is DoorState.CONNECTED
         assert probe.reconcile_outcome is not None
+
+
+# ---------------------------------------------------------------------------
+# The session's own environment: stated once at creation, so every pane it
+# starts — including one the operator opens by hand — carries the group's
+# account binding and the harness's scrub, whatever the tmux server's own
+# global environment holds.
+# ---------------------------------------------------------------------------
+
+
+def _levr_like():
+    from camp.launch.session import SessionEnvironment
+
+    return SessionEnvironment(
+        removals=("CLAUDECODE", "CLAUDE_CODE_SESSION_ID"),
+        assignments=(("CLAUDE_CONFIG_DIR", "/accounts/levr"),),
+    )
+
+
+def _removals_only():
+    from camp.launch.session import SessionEnvironment
+
+    return SessionEnvironment(removals=("CLAUDECODE", "CLAUDE_CONFIG_DIR"), assignments=())
+
+
+@pytest.mark.parametrize("stated", [_levr_like, _removals_only])
+def test_a_created_session_states_its_environment_then_restarts_its_first_pane(tmp_path, stated):
+    from camp.launch.naming import workspace_session_name
+    from camp.launch.workspace_session import WorkspaceSessionOutcome, create_workspace_session
+
+    session_env = stated()
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    tmux = _FakeTmux()
+
+    result = create_workspace_session(
+        "g", "slug", ws, env={"HOME": str(tmp_path)}, tmux=tmux, session_env=session_env
+    )
+
+    assert result.outcome is WorkspaceSessionOutcome.CREATED
+    name = workspace_session_name("g", "slug")
+    expected = [("set_environment", name, ("-r", var)) for var in session_env.removals]
+    expected += [("set_environment", name, (k, v)) for k, v in session_env.assignments]
+    expected.append(("respawn_first_pane", name))
+    assert tmux.events == expected
+
+
+def test_a_session_with_nothing_to_state_is_not_restarted(tmp_path):
+    """The first pane restarts only so it can start under the stated
+    environment; with nothing stated there is no reason to kill a shell."""
+    from camp.launch.session import SessionEnvironment
+    from camp.launch.workspace_session import WorkspaceSessionOutcome, create_workspace_session
+
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    tmux = _FakeTmux()
+
+    result = create_workspace_session(
+        "g", "slug", ws, env={"HOME": str(tmp_path)}, tmux=tmux, session_env=SessionEnvironment()
+    )
+
+    assert result.outcome is WorkspaceSessionOutcome.CREATED
+    assert tmux.events == []
+
+
+@pytest.mark.parametrize("refused", ["CLAUDECODE", "CLAUDE_CONFIG_DIR"])
+def test_a_session_whose_environment_tmux_refused_is_killed_and_reported_failed(tmp_path, refused):
+    """A session missing part of its environment is a session whose panes
+    start on the wrong account or with a parent session's markers — so it
+    is not a workspace session, exactly like one missing a mark."""
+    from camp.launch.workspace_session import WorkspaceSessionOutcome, create_workspace_session
+
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    tmux = _FakeTmux(failing_environment=refused)
+
+    result = create_workspace_session(
+        "g", "slug", ws, env={"HOME": str(tmp_path)}, tmux=tmux, session_env=_levr_like()
+    )
+
+    assert result.outcome is WorkspaceSessionOutcome.FAILED
+    assert refused in (result.error or "")
+    assert tmux.killed == [result.session_name]
+    assert ("respawn_first_pane", result.session_name) not in tmux.events
+
+
+@pytest.mark.parametrize("answer", ["tmux: can't find pane", None])
+def test_a_first_pane_tmux_would_not_restart_is_killed_and_reported_failed(tmp_path, answer):
+    """The first pane started before the environment was stated; left
+    running, it is the one pane in the session still carrying whatever the
+    server handed it."""
+    from camp.launch.workspace_session import WorkspaceSessionOutcome, create_workspace_session
+
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    tmux = _FakeTmux(respawn_answer=answer)
+
+    result = create_workspace_session(
+        "g", "slug", ws, env={"HOME": str(tmp_path)}, tmux=tmux, session_env=_levr_like()
+    )
+
+    assert result.outcome is WorkspaceSessionOutcome.FAILED
+    assert tmux.killed == [result.session_name]
+    if answer is not None:
+        assert answer in (result.error or "")
+
+
+def _claude():
+    from trailhead.harness import get_harness
+
+    return get_harness("claude")
+
+
+@pytest.mark.parametrize("account", ["acct-a", "acct-b"])
+def test_the_door_states_the_groups_account_on_the_session_it_creates(tmp_path, account):
+    from camp.launch.naming import workspace_session_name
+    from camp.launch.workspace_session import DoorState, create_or_connect_workspace_session
+
+    harness = _claude()
+    env = {"HOME": str(tmp_path)}
+    account_dir = str(tmp_path / account)
+    group = {"group": {"name": "g"}, "members": [], "launch": {"account": account_dir}}
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    tmux = _FakeDoorTmux(present=False)
+
+    probe = create_or_connect_workspace_session(
+        "g", "slug", ws, env=env, tmux=tmux, harness=harness, group=group
+    )
+
+    assert probe.state is DoorState.CREATED
+    name = workspace_session_name("g", "slug")
+    stated = dict(op for n, op in tmux.set_environment_calls if n == name and op[0] != "-r")
+    assert stated == harness.session_launch_env_set(account_dir, env=env)
+
+
+def test_the_door_refuses_before_creating_when_it_cannot_bind_the_declared_account(tmp_path):
+    from camp.launch.workspace_session import DoorState, create_or_connect_workspace_session
+
+    group = {
+        "group": {"name": "g"},
+        "members": [],
+        "launch": {"account": str(tmp_path / "acct")},
+        "harness": {"binary": "unknown-harness"},
+    }
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    tmux = _FakeDoorTmux(present=False)
+
+    probe = create_or_connect_workspace_session(
+        "g", "slug", ws, env={"HOME": str(tmp_path)}, tmux=tmux, harness=None, group=group
+    )
+
+    assert probe.state is DoorState.CREATE_REFUSED
+    assert "acct" in (probe.reason or "")
+    assert tmux.new_session_calls == []
+    assert tmux.new_session_with_window_calls == []

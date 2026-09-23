@@ -57,7 +57,7 @@ from .eligibility import assert_not_a_credential_store
 from .naming import workspace_session_name
 from .profile import resolve_harness_profile
 from .recovery import printable_path
-from .session import LaunchError, resolve_launch_environment
+from .session import LaunchError, SessionEnvironment, resolve_launch_environment
 from .tmux import DUPLICATE, UNANSWERED, NewSessionWindowFailure, NewWindowFailure, Tmux
 from .window_reconcile import RECONCILE_LOCK_TIMEOUT_SECONDS
 from .workspace_session import (
@@ -414,6 +414,7 @@ def resurrect_workspace_session(
     tmux: Tmux,
     harness,
     group: dict | None,
+    session_env: SessionEnvironment,
 ) -> "ResurrectionResult | DuplicateSession | CreateFailed":
     """Bring the workspace's session back up from *entries*, in record
     order, and re-stamp the record with what tmux actually created.
@@ -431,6 +432,12 @@ def resurrect_workspace_session(
     *group* is forwarded to `plan_resurrection` unchanged and is required
     — a caller with genuinely no group config passes `None` explicitly,
     which resurrects with no account binding, scrub only.
+
+    *session_env* is stated on the resurrected session as part of marking
+    it, so a pane the operator opens by hand afterwards starts on the same
+    account the resurrected windows were bound to. The resurrected windows
+    themselves carry their binding in their own command, so the first one
+    is not restarted.
     """
     ws_dir = Path(ws_dir)
     assert_not_a_credential_store(ws_dir, env=env)
@@ -442,7 +449,9 @@ def resurrect_workspace_session(
     dropped = tuple(d for d in decisions if isinstance(d, Drop))
 
     if not restores:
-        result = create_workspace_session(group_name, slug, ws_dir, env=env, tmux=tmux)
+        result = create_workspace_session(
+            group_name, slug, ws_dir, env=env, tmux=tmux, session_env=session_env
+        )
         if result.outcome is WorkspaceSessionOutcome.ALREADY_EXISTED:
             return DuplicateSession(session_name=result.session_name)
         if result.outcome is WorkspaceSessionOutcome.FAILED:
@@ -476,7 +485,7 @@ def resurrect_workspace_session(
     if isinstance(first_answer, NewSessionWindowFailure):
         return CreateFailed(session_name=name, error=first_answer.stderr)
 
-    mark_failure = _mark_and_bind(tmux, name, group_name, slug)
+    mark_failure = _mark_and_bind(tmux, name, group_name, slug, session_env)
     if mark_failure is not None:
         return CreateFailed(session_name=name, error=mark_failure.error or "")
 

@@ -805,6 +805,24 @@ class Tmux:
             env=env,
         )
 
+    def respawn_first_pane(
+        self, name: str, *, timeout: float | None = None
+    ) -> subprocess.CompletedProcess | None:
+        """Kill and restart the shell in session *name*'s only pane
+        (``tmux respawn-pane -k -t =<name>:``), so it starts again under the
+        session's CURRENT environment.
+
+        A pane's environment is fixed when its process starts; a
+        ``set-environment`` stated on the session afterwards reaches only
+        panes started later. Confirmed against real tmux 3.7c that the
+        restarted pane carries the session's assignments and not the names
+        it removes. The trailing ``:`` addresses the session's current
+        window and pane — the only one a session just created has.
+
+        Returns ``None`` when tmux could not be asked at all.
+        """
+        return self._run(["respawn-pane", "-k", "-t", f"{target(name)}:"], timeout=timeout)
+
     def switch_client(
         self, name: str, *, timeout: float | None = None
     ) -> subprocess.CompletedProcess | None:
