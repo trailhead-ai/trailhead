@@ -389,3 +389,168 @@ def test_host_claimed_names_narrows_only_the_leftovers_never_a_workspace_row():
         ),
     )
     assert result.unmanaged == ()
+
+
+def test_matched_workspace_row_carries_the_sessions_own_activity():
+    inventory, SessionListing, TmuxSession, _ = _import()
+
+    ws = inventory.Workspace(group="trailhead", slug="camp-cli", path="/w/camp-cli")
+    name = inventory_name(inventory, ws)
+    listing = SessionListing(sessions=(TmuxSession(name=name, windows=3, activity=1700000000),))
+
+    result = inventory.classify_sessions([ws], listing, scope=inventory.DisclosureScope.GROUP)
+
+    assert result.workspaces == (
+        inventory.WorkspaceSession(
+            slug="camp-cli",
+            path="/w/camp-cli",
+            state=inventory.STATE_RUNNING,
+            windows=3,
+            activity=1700000000,
+        ),
+    )
+
+
+def test_unmanaged_row_carries_the_sessions_own_activity():
+    inventory, SessionListing, TmuxSession, _ = _import()
+
+    ws = inventory.Workspace(group="trailhead", slug="alpha", path="/w/alpha")
+    leftover_name = "camp-somebody-deadbeef"
+    listing = SessionListing(
+        sessions=(TmuxSession(name=leftover_name, windows=4, activity=1600000000),)
+    )
+
+    result = inventory.classify_sessions([ws], listing, scope=inventory.DisclosureScope.WIDENED)
+
+    assert result.unmanaged == (
+        inventory.UnmanagedSession(name=leftover_name, windows=4, activity=1600000000),
+    )
+
+
+def test_format_sessions_cell_running_shows_window_count():
+    inventory, _, _, _ = _import()
+    assert inventory.format_sessions_cell(inventory.STATE_RUNNING, 3) == "3"
+
+
+def test_format_sessions_cell_none_state_shows_zero():
+    inventory, _, _, _ = _import()
+    assert inventory.format_sessions_cell(inventory.STATE_NONE, None) == "0"
+
+
+def test_format_sessions_cell_unknown_state_shows_question_mark():
+    inventory, _, _, _ = _import()
+    assert inventory.format_sessions_cell(inventory.STATE_UNKNOWN, None) == "?"
+
+
+def test_format_sessions_cell_absent_state_shows_question_mark():
+    inventory, _, _, _ = _import()
+    assert inventory.format_sessions_cell(None, None) == "?"
+
+
+def test_format_sessions_cell_unmanaged_shows_window_count():
+    inventory, _, _, _ = _import()
+    assert inventory.format_sessions_cell(inventory.STATE_UNMANAGED, 5) == "5"
+
+
+def test_format_last_touched_buckets_by_elapsed_time():
+    inventory, _, _, _ = _import()
+    now = 1_700_000_000.0
+    assert inventory.format_last_touched(now - 10, now=now) == "just now"
+    assert inventory.format_last_touched(now - 5 * 60, now=now) == "5m ago"
+    assert inventory.format_last_touched(now - 3 * 3600, now=now) == "3h ago"
+    assert inventory.format_last_touched(now - 2 * 86400, now=now) == "2d ago"
+    assert inventory.format_last_touched(now - 21 * 86400, now=now) == "3w ago"
+
+
+def test_format_last_touched_none_is_the_absent_marker():
+    inventory, _, _, _ = _import()
+    assert inventory.format_last_touched(None, now=1_700_000_000.0) == inventory.HUMAN_ABSENT
+
+
+def test_workspace_row_cells_local_row_epoch_last_touched():
+    inventory, _, _, _ = _import()
+    now = 1_700_000_000.0
+    row = {
+        "slug": "camp-cli",
+        "workspace_path": "/w/camp-cli",
+        "state": inventory.STATE_RUNNING,
+        "window_count": 3,
+        "last_touched": now - 60,
+    }
+    cells = inventory.workspace_row_cells(row, now=now, show_group=False)
+    assert cells == ["camp-cli", "3", "1m ago"]
+
+
+def test_workspace_row_cells_relayed_row_iso_last_touched():
+    """A relayed/merged row's `last_touched` arrives as an ISO string (the
+    `--json` wire shape), not an epoch float — the cell builder must read
+    either representation the same way."""
+    inventory, _, _, _ = _import()
+    now = 1_700_000_000.0
+    row = {
+        "slug": "camp-cli",
+        "workspace_path": "/w/camp-cli",
+        "state": inventory.STATE_RUNNING,
+        "window_count": 3,
+        "last_touched": inventory_to_iso(now - 3600),
+    }
+    cells = inventory.workspace_row_cells(row, now=now, show_group=False)
+    assert cells == ["camp-cli", "3", "1h ago"]
+
+
+def inventory_to_iso(ts):
+    from camp.launch.lasttouched import to_iso_utc
+
+    return to_iso_utc(ts)
+
+
+def test_workspace_row_cells_unmanaged_row_uses_tmux_session_as_workspace_cell():
+    inventory, _, _, _ = _import()
+    row = {
+        "slug": None,
+        "tmux_session": "camp-somebody-deadbeef",
+        "workspace_path": None,
+        "state": inventory.STATE_UNMANAGED,
+        "window_count": 2,
+        "last_touched": None,
+    }
+    cells = inventory.workspace_row_cells(row, now=1_700_000_000.0, show_group=False)
+    assert cells == ["camp-somebody-deadbeef", "2", inventory.HUMAN_ABSENT]
+
+
+def test_workspace_row_cells_show_group_appends_group_column():
+    inventory, _, _, _ = _import()
+    row = {
+        "slug": "camp-cli",
+        "workspace_path": "/w/camp-cli",
+        "state": inventory.STATE_NONE,
+        "window_count": 0,
+        "group": "trailhead",
+        "last_touched": None,
+    }
+    cells = inventory.workspace_row_cells(row, now=1_700_000_000.0, show_group=True)
+    assert cells == ["camp-cli", "0", inventory.HUMAN_ABSENT, "trailhead"]
+
+
+def test_workspace_row_cells_raises_keyerror_on_missing_workspace_path():
+    inventory, _, _, _ = _import()
+    row = {"slug": "camp-cli", "state": inventory.STATE_NONE}
+    import pytest
+
+    with pytest.raises(KeyError):
+        inventory.workspace_row_cells(row, now=1_700_000_000.0, show_group=False)
+
+
+def test_workspace_row_cells_escapes_a_control_character_in_a_peer_supplied_field():
+    inventory, _, _, _ = _import()
+    row = {
+        "slug": None,
+        "tmux_session": "camp-evil\nrow-deadbeef",
+        "workspace_path": None,
+        "state": inventory.STATE_UNMANAGED,
+        "window_count": 1,
+        "last_touched": None,
+    }
+    cells = inventory.workspace_row_cells(row, now=1_700_000_000.0, show_group=False)
+    assert "\n" not in cells[0]
+    assert "\\x0a" in cells[0]

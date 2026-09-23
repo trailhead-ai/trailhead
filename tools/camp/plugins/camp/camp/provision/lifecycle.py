@@ -36,10 +36,9 @@ from ..launch.inventory import (
     STATE_UNMANAGED,
     Workspace,
     classify_sessions,
-    format_path,
-    format_state,
     format_unmanaged_summary,
 )
+from ..launch.lasttouched import to_iso_utc, workspace_last_touched
 from ..launch.naming import workspace_session_name
 from ..launch.tmux import Tmux, _Unanswered
 
@@ -268,6 +267,8 @@ def cmd_ls_group(
     pairs = _list_group_worktrees(group, env=env)
     entries: list[dict[str, Any]] = []
     workspaces: list[Workspace] = []
+    member_paths_by_slug: dict[str, list[Path]] = {}
+    manifest_path_by_slug: dict[str, Path] = {}
     for slug_name, mpath in pairs:
         try:
             data = read_central_manifest(mpath)
@@ -288,6 +289,10 @@ def cmd_ls_group(
             }
         )
         workspaces.append(Workspace(group=group_name, slug=slug_name, path=ws_path))
+        member_paths_by_slug[slug_name] = [
+            Path(m["worktree_path"]) for m in data.get("members", [])
+        ]
+        manifest_path_by_slug[slug_name] = mpath
 
     listing = tmux.list_sessions()
     classification = classify_sessions(
@@ -306,6 +311,11 @@ def cmd_ls_group(
         # would only invite a caller to special-case it. An unknown row
         # keeps its null: nothing about that workspace was observed.
         e["window_count"] = 0 if row.state == STATE_NONE else row.windows
+        e["last_touched"] = workspace_last_touched(
+            tmux_activity=row.activity,
+            member_worktree_paths=member_paths_by_slug[e["slug"]],
+            manifest_path=manifest_path_by_slug[e["slug"]],
+        )
 
     unmanaged = [
         {
@@ -317,6 +327,7 @@ def cmd_ls_group(
             "state": STATE_UNMANAGED,
             "window_count": u.windows,
             "tmux_session": u.name,
+            "last_touched": float(u.activity) if u.activity is not None else None,
         }
         for u in classification.unmanaged
     ]
@@ -342,6 +353,7 @@ _LIST_JSON_KEYS = (
     "state",
     "window_count",
     "tmux_session",
+    "last_touched",
 )
 
 
@@ -369,26 +381,30 @@ def render_workspace_list(
     as_json: bool,
     group_failures: list[str] | None = None,
     unmanaged_count: int = 0,
+    show_group: bool = False,
+    now: float | None = None,
 ) -> None:
     """Single renderer for `camp list`/`ls` output — consulted by BOTH dispatchers
     (cli/camp's group-aware `_cmd_ls_group_cli` and spine.main's no-group `cmd_ls`)
     so the human + --json surface is identical regardless of cwd.
 
     Each entry must carry `slug` and `workspace_path`; `branch`, `group`,
-    `state`, `window_count`, and `tmux_session` are optional (`group` is
-    `None` for the standalone fallback, which has no group to derive a
-    session name from — those rows render `-` for `state`). An entry whose
-    `slug` is `None` is an unmanaged row: its `tmux_session` prints in the
-    slug column instead, and its `workspace_path` is `None`, which the
-    human rendering — and only the human rendering — states as `-`. Output:
-      - human: one `slug state workspace_path` line per entry (state in the
-        middle so the path stays the line's last field), with a running
-        session's window count in the state field (`running:3`, via
-        `format_state`); empty → no stdout. Every tmux-supplied name goes through `printable_path` so a
-        stray control character cannot forge a second line.
+    `state`, `window_count`, `tmux_session`, and `last_touched` are optional
+    (`group` is `None` for the standalone fallback, which has no group to
+    derive a session name from). An entry whose `slug` is `None` is an
+    unmanaged row: its `tmux_session` prints in the WORKSPACE column
+    instead, and its `workspace_path` is `None` (never rendered). Output:
+      - human: an aligned plain-text table — WORKSPACE, SESSIONS, LAST
+        TOUCHED, plus GROUP when *show_group* — one row per entry, via
+        `camp.launch.inventory.workspace_row_cells` and
+        `camp.launch.table.render_table`; empty → no stdout. Every
+        peer-suppliable field is escaped with `printable_path` (inside
+        `workspace_row_cells`) so a stray control character cannot forge a
+        second row.
       - --json: a list of {ok, slug, branch, workspace_path, group, state,
-        window_count, tmux_session} dicts (the fixed _LIST_JSON_KEYS
-        schema), every success row carrying `ok: true`; empty → `[]`.
+        window_count, tmux_session, last_touched} dicts (the fixed
+        _LIST_JSON_KEYS schema — `last_touched` an ISO-8601 UTC string or
+        `null`), every success row carrying `ok: true`; empty → `[]`.
 
     The renderer PROJECTS each entry onto the fixed schema (ignoring any
     source-specific extras like manifest_path), so the two data models — group
@@ -404,25 +420,39 @@ def render_workspace_list(
     alone, never by testing whether `row["slug"]` would raise — the same
     discriminator a failed credential store's row uses in
     `camp sessions --json`. Never rendered on the human path, which already
-    has the same information on stderr; folding it into the
-    `slug state workspace_path` lines would have nothing to print a slug or
-    path for.
+    has the same information on stderr; the table has nothing to print a
+    workspace or session cell for a config-load failure.
 
     *unmanaged_count* — the group-scoped leftover count
     (:attr:`GroupListing.unmanaged_count`), for a caller that did NOT fold
     the leftover sessions themselves into `entries` (a
     :data:`~camp.launch.inventory.DisclosureScope.GROUP` answer). When
-    positive: human output gains one extra summary line
+    positive: human output gains one extra summary line AFTER the table
     (`format_unmanaged_summary`); --json gains one extra row carrying the
     fixed key set with every field null, plus ``unmanaged_count`` — a
     consumer tells it from a workspace row by that key's presence, never by
     a key a workspace row would have had. Zero (the default, and always the caller's choice for
     a WIDENED answer where the rows already name the leftovers) adds
     nothing.
+
+    *show_group* adds the GROUP column — set by a caller whose listing spans
+    more than one group (`--all-groups`/`-g`); the single-group and
+    no-group-configured callers leave it `False`, since every row would
+    otherwise carry the same (or `None`) value.
+
+    *now* is the instant `last_touched` is rendered relative to — injected
+    so a test never depends on wall-clock time; `None` (the default) reads
+    the real clock.
     """
     import json as _json
+    import time
 
-    from ..launch.recovery import printable_path
+    from ..launch.inventory import (
+        WORKSPACE_TABLE_HEADERS,
+        WORKSPACE_TABLE_HEADERS_WITH_GROUP,
+        workspace_row_cells,
+    )
+    from ..launch.table import render_table
 
     if as_json:
         rows = [
@@ -435,6 +465,7 @@ def render_workspace_list(
                 "state": e.get("state"),
                 "window_count": e.get("window_count"),
                 "tmux_session": e.get("tmux_session"),
+                "last_touched": to_iso_utc(e.get("last_touched")),
             }
             for e in entries
         ]
@@ -447,11 +478,13 @@ def render_workspace_list(
         print(_json.dumps(rows))
         return
 
-    for e in entries:
-        first = e["slug"] if e.get("slug") is not None else e.get("tmux_session")
-        state = format_state(e.get("state"), e.get("window_count"))
-        path = format_path(e["workspace_path"])
-        print(f"{printable_path(first)} {state} {printable_path(path)}")
+    resolved_now = now if now is not None else time.time()
+    headers = WORKSPACE_TABLE_HEADERS_WITH_GROUP if show_group else WORKSPACE_TABLE_HEADERS
+    rows = [
+        workspace_row_cells(e, now=resolved_now, show_group=show_group) for e in entries
+    ]
+    for line in render_table(headers, rows):
+        print(line)
     if unmanaged_count:
         print(format_unmanaged_summary(unmanaged_count))
 

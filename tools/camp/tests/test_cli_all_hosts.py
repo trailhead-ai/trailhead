@@ -458,12 +458,46 @@ def test_human_output_grouped_by_machine_local_first_then_declared_order(
 
     lines = out.splitlines()
     assert lines[0] == "this machine"
-    assert lines[1].startswith("  ") and lines[1].split()[0] == "local-ws"
-    assert lines[2] == "andromeda"
-    assert lines[3] == "  remoteA none /r/a"
-    assert lines[4] == "lookout"
-    assert lines[5].strip() != ""  # the failure line lookout owes
-    assert "remoteA" not in lines[5]
+    assert lines[1].split() == ["WORKSPACE", "SESSIONS", "LAST", "TOUCHED"]
+    assert lines[2].startswith("  ") and lines[2].split()[0] == "local-ws"
+    assert lines[3] == "andromeda"
+    assert lines[4].split() == ["WORKSPACE", "SESSIONS", "LAST", "TOUCHED"]
+    assert lines[5].split() == ["remoteA", "0", "-"]
+    assert lines[6] == "lookout"
+    assert lines[7].strip() != ""  # the failure line lookout owes
+    assert "remoteA" not in lines[7]
+
+
+def test_every_group_every_host_human_tables_carry_the_group_column(
+    hosts_and_group_env, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """`-ag` spans groups, so each machine's table names the group per row;
+    the group-narrowed `-a` above leaves the column off."""
+    transport = _transport_module()
+
+    def fake_run_camp(host, remote_argv, **kw):
+        if host.ssh == "andromeda":
+            return _answered(
+                [
+                    {"ok": True, "slug": "one", "workspace_path": "/r/1", "group": "g1", "state": "none"},
+                    {"ok": True, "slug": "two", "workspace_path": "/r/2", "group": "g2", "state": "none"},
+                ]
+            )
+        return _answered([])
+
+    monkeypatch.setattr(transport, "run_camp", fake_run_camp)
+
+    code = _run(monkeypatch, ["list", "-ag"])
+    out = capsys.readouterr().out
+    assert code == 0
+
+    lines = out.splitlines()
+    block = lines[lines.index("andromeda") + 1 : lines.index("lookout")]
+    assert [ln.split() for ln in block] == [
+        ["WORKSPACE", "SESSIONS", "LAST", "TOUCHED", "GROUP"],
+        ["one", "0", "-", "g1"],
+        ["two", "0", "-", "g2"],
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -514,9 +548,9 @@ def test_self_name_colliding_with_a_declared_host_prints_the_machine_once(
     lines = out.splitlines()
     assert lines.count("andromeda") == 1
     assert lines[0] == "andromeda"
-    assert lines[1] == "  remote1 none /r/1"
-    assert lines[2] == "lookout"
-    assert lines[3] == "  remote1 none /r/1"
+    assert lines[2].split() == ["remote1", "0", "-"]
+    assert lines[3] == "lookout"
+    assert lines[5].split() == ["remote1", "0", "-"]
 
 
 def test_zero_state_prints_every_machines_header_with_nothing_beneath(
@@ -817,7 +851,7 @@ def test_list_merged_human_output_state_control_sequence_cannot_forge_a_second_l
     hosts_and_group_env, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     """The `-a` merged renderer prints every row through the same
-    `render_list_row_human` the `--host` axis uses, so a peer-supplied
+    `render_list_rows_human` the `--host` axis uses, so a peer-supplied
     `state` must not be able to forge an extra line under a machine's
     header here either."""
     transport = _transport_module()
@@ -847,10 +881,9 @@ def test_list_merged_human_output_state_control_sequence_cannot_forge_a_second_l
     assert code == 0
 
     lines = [ln for ln in out.splitlines() if ln]
-    # "this machine" / "andromeda" / the one row / "lookout" — never a fifth.
-    assert len(lines) == 4, f"state forged an extra merged line: {lines!r}"
-    assert "\\x0a" in lines[2]
-    assert "camp-forged-slug" in lines[2]
+    # "this machine" / "andromeda" / header / the one row / "lookout" — never a sixth.
+    assert len(lines) == 5, f"state forged an extra merged line: {lines!r}"
+    assert "camp-forged-slug" not in out
 
 
 def test_sessions_human_output_session_id_control_sequence_cannot_forge_a_second_line(
@@ -904,8 +937,8 @@ def test_sessions_human_output_session_id_control_sequence_cannot_forge_a_second
 
 # ---------------------------------------------------------------------------
 # Per-row failure isolation — a malformed row from one machine must not take
-# down the merged listing. `_render_all_hosts_human` calls `render_row`
-# directly on every row; the two `--host` siblings already wrap this same
+# down the merged listing. `_render_all_hosts_human` hands each machine's
+# rows to `render_rows`; the two `--host` siblings already wrap this same
 # per-row access in `try/except KeyError` (`workspace.py`'s
 # `_cmd_ls_host_cli` and `session.py`'s `_cmd_sessions_host_cli`), and this
 # pins the merged renderer to the same isolation guarantee.
@@ -965,7 +998,7 @@ def test_isolation_a_malformed_row_on_one_host_does_not_affect_another_hosts_row
     assert lines[0] == "this machine"
     assert lines[1] == "andromeda"
     assert lines[2] == "lookout"
-    assert lines[3] == "  beta none /ws/beta"
+    assert lines[4].split() == ["beta", "0", "-"]
 
 
 def test_exit_code_is_unaffected_by_a_malformed_remote_row(
@@ -3629,7 +3662,7 @@ _LEFTOVER_LOCAL = "camp-localleft-a1b2c3d4"
 _LEFTOVER_REMOTE = "camp-remoteleft-b2c3d4e5"
 
 _TMUX_ONE_LEFTOVER = (
-    'sys.stdout.write("2|' + _LEFTOVER_LOCAL + '\\n")\nsys.exit(0)\n'
+    'sys.stdout.write("2|1700000000|' + _LEFTOVER_LOCAL + '\\n")\nsys.exit(0)\n'
 )
 _TMUX_OUTAGE = (
     'sys.stderr.write("directory /private/tmp/bad has unsafe permissions\\n")\n'

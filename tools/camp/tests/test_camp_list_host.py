@@ -153,7 +153,45 @@ def test_many_rows_human_path_preserves_order(
     captured = capsys.readouterr()
     assert code == 0
     lines = [ln for ln in captured.out.splitlines() if ln]
-    assert lines == ["zeta none /z", "alpha none /a"]
+    assert [ln.split()[0] for ln in lines[1:]] == ["zeta", "alpha"]
+
+
+def test_human_answer_is_a_table_of_sessions_last_touched_and_group(
+    hosts_env, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """A relayed answer spans every group on the far machine, so its table
+    carries the GROUP column; the far side's `last_touched` renders as an
+    age, its window count as SESSIONS, and its path not at all."""
+    import time
+    from datetime import datetime, timezone
+
+    three_hours_ago = datetime.fromtimestamp(
+        time.time() - 3 * 3600 - 120, tz=timezone.utc
+    ).strftime("%Y-%m-%dT%H:%M:%SZ")
+    transport = _transport_module()
+    remote_rows = [
+        {
+            "ok": True, "slug": "alpha", "branch": "b", "workspace_path": "/remote/alpha",
+            "group": "g1", "state": "running", "window_count": 3,
+            "tmux_session": "camp-g1-alpha", "last_touched": three_hours_ago,
+        },
+        {
+            "ok": True, "slug": "beta", "branch": "b", "workspace_path": "/remote/beta",
+            "group": "g2", "state": "none", "last_touched": None,
+        },
+    ]
+    _rig(monkeypatch, transport.Answered(stdout=json.dumps(remote_rows), stderr="", exit_code=0))
+
+    code = _run(monkeypatch, ["list", "--host", "andromeda"])
+
+    out = capsys.readouterr().out
+    assert code == 0
+    lines = [ln for ln in out.splitlines() if ln]
+    assert lines[0].split() == ["WORKSPACE", "SESSIONS", "LAST", "TOUCHED", "GROUP"]
+    assert lines[1].split() == ["alpha", "3", "3h", "ago", "g1"]
+    assert lines[2].split() == ["beta", "0", "-", "g2"]
+    assert lines[1].index("3h") == lines[0].index("LAST")
+    assert "/remote" not in out
 
 
 def test_slug_control_sequence_cannot_forge_a_second_stdout_line(
@@ -179,9 +217,9 @@ def test_slug_control_sequence_cannot_forge_a_second_stdout_line(
     captured = capsys.readouterr()
     assert code == 0
     lines = [ln for ln in captured.out.splitlines() if ln]
-    assert len(lines) == 1
-    assert "\\x0a" in lines[0]
-    assert "forged-slug" in lines[0]
+    assert len(lines) == 2
+    assert "\\x0a" in lines[1]
+    assert "forged-slug" in lines[1]
 
 
 def test_state_control_sequence_cannot_forge_a_second_stdout_line(
@@ -213,9 +251,8 @@ def test_state_control_sequence_cannot_forge_a_second_stdout_line(
     captured = capsys.readouterr()
     assert code == 0
     lines = [ln for ln in captured.out.splitlines() if ln]
-    assert len(lines) == 1, f"state forged a second stdout line: {lines!r}"
-    assert "\\x0a" in lines[0]
-    assert "camp-forged-slug" in lines[0]
+    assert len(lines) == 2, f"state forged a second stdout line: {lines!r}"
+    assert "camp-forged-slug" not in captured.out
 
 
 def test_window_count_control_sequence_cannot_forge_a_second_stdout_line(
@@ -246,9 +283,9 @@ def test_window_count_control_sequence_cannot_forge_a_second_stdout_line(
     captured = capsys.readouterr()
     assert code == 0
     lines = [ln for ln in captured.out.splitlines() if ln]
-    assert len(lines) == 1, f"window_count forged a second stdout line: {lines!r}"
-    assert "\\x0a" in lines[0]
-    assert "camp-forged-slug" in lines[0]
+    assert len(lines) == 2, f"window_count forged a second stdout line: {lines!r}"
+    assert "\\x0a" in lines[1]
+    assert "camp-forged-slug" in lines[1]
 
 
 def test_unmanaged_count_control_sequence_cannot_forge_a_second_stdout_line(
@@ -354,7 +391,8 @@ def test_non_ascii_bytes_in_relayed_row_decode_and_render_unmangled(
 
     code = _run(monkeypatch, ["list", "--host", "andromeda"])
     out = capsys.readouterr().out
-    assert "café-projet none /répertoire/café" in out
+    assert "café-projet" in out
+    assert "gröup" in out
 
 
 # ---------------------------------------------------------------------------
@@ -719,7 +757,10 @@ def test_a_relayed_row_without_a_state_key_still_prints_its_workspace(
 
     captured = capsys.readouterr()
     assert code == 0
-    assert [ln for ln in captured.out.splitlines() if ln] == ["zeta - /z", "alpha - /a"]
+    assert [ln.split() for ln in captured.out.splitlines()[1:]] == [
+        ["zeta", "?", "-", "g"],
+        ["alpha", "?", "-", "g"],
+    ]
     assert "skipping" not in captured.err
 
 
@@ -727,7 +768,7 @@ def test_a_relayed_running_row_carries_its_window_count(
     hosts_env, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     """AC50 on the relayed axis: the window count reaches the operator here
-    too, in the same `running:<n>` field the local renderer prints."""
+    too, in the same SESSIONS column the local renderer prints."""
     transport = _transport_module()
     remote_rows = [
         {
@@ -740,12 +781,10 @@ def test_a_relayed_running_row_carries_its_window_count(
 
     _run(monkeypatch, ["list", "--host", "andromeda"])
 
-    assert [ln for ln in capsys.readouterr().out.splitlines() if ln] == [
-        "zeta running:4 /z"
-    ]
+    assert capsys.readouterr().out.splitlines()[1].split() == ["zeta", "4", "-", "g"]
 
 
-def test_a_relayed_unmanaged_row_prints_a_dash_for_its_null_path(
+def test_a_relayed_unmanaged_row_prints_its_session_and_a_dash_for_its_null_group(
     hosts_env, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     transport = _transport_module()
@@ -761,6 +800,6 @@ def test_a_relayed_unmanaged_row_prints_a_dash_for_its_null_path(
 
     _run(monkeypatch, ["list", "--host", "andromeda"])
 
-    assert [ln for ln in capsys.readouterr().out.splitlines() if ln] == [
-        "camp-oldproj-a1b2c3d4 unmanaged -"
+    assert capsys.readouterr().out.splitlines()[1].split() == [
+        "camp-oldproj-a1b2c3d4", "2", "-", "-"
     ]

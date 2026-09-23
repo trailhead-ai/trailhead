@@ -149,7 +149,7 @@ def test_spawn_session_names_with_s_never_carries_the_target_prefix(tmp_path, mo
         "    json.dump(table, open(table_path, 'w'))\n"
         "elif args and args[0] == 'list-sessions':\n"
         "    for name, windows in table.items():\n"
-        "        print(f'{windows}|{name}')\n"
+        "        print(f'{windows}|1700000000|{name}')\n"
         "sys.exit(0)\n",
         encoding="utf-8",
     )
@@ -287,6 +287,45 @@ def test_list_sessions_answers_session_listing_only_on_the_no_server_shape(monke
         lambda *a, **k: _completed(returncode=1, stderr="unsafe permissions\n"),
     )
     assert tmux_module.Tmux().list_sessions() is tmux_module.UNANSWERED
+
+
+def test_list_sessions_parses_activity_as_the_middle_field(monkeypatch):
+    """`#{session_windows}|#{session_activity}|#{session_name}` — activity is
+    read as the SECOND field (digits, like the count), so a session name
+    that itself carries a leading `|`-free run of digits is never misread as
+    the activity value: only the two leading digit-only fields, delimited by
+    the first two `|`s, are ever consumed as count/activity."""
+    import camp.launch.tmux as tmux_module
+
+    monkeypatch.setattr(
+        tmux_module.subprocess,
+        "run",
+        lambda *a, **k: _completed(returncode=0, stdout="3|1700000000|my-session\n"),
+    )
+    result = tmux_module.Tmux().list_sessions()
+
+    assert isinstance(result, tmux_module.SessionListing)
+    assert result.sessions == (
+        tmux_module.TmuxSession(name="my-session", windows=3, activity=1700000000),
+    )
+
+
+def test_list_sessions_drops_a_row_whose_activity_field_is_not_digits(monkeypatch):
+    """A row whose second field is not all-digits is unparseable — exactly
+    the same treatment a non-digit window count already gets — and is
+    counted in `dropped` rather than raising or being silently skipped."""
+    import camp.launch.tmux as tmux_module
+
+    monkeypatch.setattr(
+        tmux_module.subprocess,
+        "run",
+        lambda *a, **k: _completed(returncode=0, stdout="3|not-a-number|my-session\n"),
+    )
+    result = tmux_module.Tmux().list_sessions()
+
+    assert isinstance(result, tmux_module.SessionListing)
+    assert result.sessions == ()
+    assert result.dropped == 1
 
 
 def test_list_windows_carries_both_windows_in_order_including_a_special_name(monkeypatch):
