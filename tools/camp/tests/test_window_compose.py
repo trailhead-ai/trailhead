@@ -45,17 +45,35 @@ if str(_PLUGIN_DIR) not in sys.path:
     sys.path.insert(0, str(_PLUGIN_DIR))
 
 GROUP = {"group": {"name": "testgroup"}}
+GROUP_ACCOUNT_A = {
+    "group": {"name": "testgroup"},
+    "launch": {"account": "/tmp/acct-a"},
+}
+GROUP_ACCOUNT_B = {
+    "group": {"name": "testgroup"},
+    "launch": {"account": "/tmp/acct-b"},
+}
 
 
 class FakeHarness:
-    """Stand-in for the trailhead harness seam — only the scrub method this
-    verb reads."""
+    """Stand-in for the trailhead harness seam — the scrub method AND the
+    account-binding method `resolve_launch_environment` calls."""
 
-    def __init__(self, scrub=("SCRUB_ONE", "SCRUB_TWO")):
+    def __init__(
+        self,
+        scrub=("SCRUB_ONE", "SCRUB_TWO", "CLAUDE_CONFIG_DIR"),
+        account_var="CLAUDE_CONFIG_DIR",
+    ):
         self._scrub = tuple(scrub)
+        self._account_var = account_var
 
     def session_launch_env_unset(self):
         return list(self._scrub)
+
+    def session_launch_env_set(self, account, *, env=None):
+        if account is None:
+            return {}
+        return {self._account_var: account}
 
 
 class FakeTmux:
@@ -306,6 +324,125 @@ def test_scrub_rides_inside_the_command_tmux_runs(tmp_path):
     for var in ("SCRUB_ONE", "SCRUB_TWO"):
         idx = command.index(var)
         assert command[idx - 1] == "-u"
+
+
+# ---------------------------------------------------------------------------
+# 7b. Account binding — the group's declared account, from the one resolver
+# ---------------------------------------------------------------------------
+
+
+def test_two_groups_declaring_different_accounts_produce_different_assignments(
+    tmp_path,
+):
+    import camp.launch.window_compose as wc
+
+    ws_dir = tmp_path / "ws"
+    ws_dir.mkdir()
+
+    tmux_a = FakeTmux()
+    wc.compose_window(
+        GROUP_ACCOUNT_A, "slug", ws_dir, cwd=ws_dir, window_name="w1", tmux=tmux_a
+    )
+    tmux_b = FakeTmux()
+    wc.compose_window(
+        GROUP_ACCOUNT_B, "slug", ws_dir, cwd=ws_dir, window_name="w2", tmux=tmux_b
+    )
+
+    assert "CLAUDE_CONFIG_DIR=/tmp/acct-a" in tmux_a.calls[0]["command"]
+    assert "CLAUDE_CONFIG_DIR=/tmp/acct-b" in tmux_b.calls[0]["command"]
+
+
+def test_a_group_declaring_no_account_produces_no_assignment_but_still_scrubs_it(
+    tmp_path,
+):
+    import camp.launch.window_compose as wc
+
+    ws_dir = tmp_path / "ws"
+    ws_dir.mkdir()
+
+    tmux = FakeTmux()
+    wc.compose_window(GROUP, "slug", ws_dir, cwd=ws_dir, window_name="w1", tmux=tmux)
+
+    command = tmux.calls[0]["command"]
+    assert not any(token.startswith("CLAUDE_CONFIG_DIR=") for token in command)
+    idx = command.index("CLAUDE_CONFIG_DIR")
+    assert command[idx - 1] == "-u"
+
+
+def test_every_scrub_token_precedes_every_assignment_precedes_the_binary(tmp_path):
+    import camp.launch.window_compose as wc
+
+    ws_dir = tmp_path / "ws"
+    ws_dir.mkdir()
+
+    tmux = FakeTmux()
+    wc.compose_window(
+        GROUP_ACCOUNT_A, "slug", ws_dir, cwd=ws_dir, window_name="w1", tmux=tmux
+    )
+
+    command = tmux.calls[0]["command"]
+    assert command[0] == "env"
+    u_indices = [i for i, tok in enumerate(command) if tok == "-u"]
+    assignment_idx = command.index("CLAUDE_CONFIG_DIR=/tmp/acct-a")
+    binary_idx = command.index("--session-id") - 1
+    assert max(u_indices) < assignment_idx < binary_idx
+
+
+def test_the_bound_account_matches_resolve_launch_environment_and_ignores_ambient_env(
+    tmp_path,
+):
+    """The binding compose_window puts on the pane must equal what
+    `resolve_launch_environment` itself returns for the same group and env —
+    never a second, independent read of `[launch] account`. Setting an
+    ambient CLAUDE_CONFIG_DIR proves it never survives into the assignment:
+    it is scrubbed, and the assignment (when there is one) carries only the
+    declared account's value."""
+    import camp.launch.window_compose as wc
+    from camp.launch.session import resolve_launch_environment
+
+    ws_dir = tmp_path / "ws"
+    ws_dir.mkdir()
+
+    ambient_env = {
+        "HOME": str(tmp_path),
+        "CLAUDE_CONFIG_DIR": "/ambient/should-not-survive",
+    }
+
+    tmux = FakeTmux()
+    wc.compose_window(
+        GROUP_ACCOUNT_A, "slug", ws_dir, cwd=ws_dir, window_name="w1",
+        tmux=tmux, env=ambient_env,
+    )
+
+    harness = FakeHarness()
+    expected_account, expected_binding, _scrub, _launch_env = resolve_launch_environment(
+        harness, wc.resolve_harness_profile(GROUP_ACCOUNT_A), GROUP_ACCOUNT_A, ambient_env
+    )
+
+    command = tmux.calls[0]["command"]
+    for name, value in expected_binding.items():
+        assert f"{name}={value}" in command
+    assert not any(
+        token == "CLAUDE_CONFIG_DIR=/ambient/should-not-survive" for token in command
+    )
+    assert expected_account == "/tmp/acct-a"
+
+
+def test_the_tmux_request_still_carries_no_dash_e_with_account_bound(tmp_path):
+    import camp.launch.window_compose as wc
+    import inspect
+
+    ws_dir = tmp_path / "ws"
+    ws_dir.mkdir()
+
+    tmux = FakeTmux()
+    wc.compose_window(
+        GROUP_ACCOUNT_A, "slug", ws_dir, cwd=ws_dir, window_name="w1", tmux=tmux
+    )
+
+    sig = inspect.signature(tmux.new_window)
+    assert "env" not in sig.parameters
+    assert set(tmux.calls[0].keys()) == {"name", "cwd", "window_name", "command"}
 
 
 # ---------------------------------------------------------------------------

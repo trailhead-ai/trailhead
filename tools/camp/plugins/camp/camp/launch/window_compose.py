@@ -57,7 +57,7 @@ from .eligibility import assert_not_a_credential_store
 from .naming import workspace_session_name
 from .profile import harness_for, resolve_harness_profile
 from .recovery import printable_path
-from .session import LaunchError
+from .session import LaunchError, resolve_launch_environment
 from .tmux import UNANSWERED, Tmux
 
 
@@ -165,14 +165,22 @@ def compose_window(
         command_line = shlex.join(pane_command)
     else:
         conversation_id = str(uuid.uuid4())
-        binary = Path(resolve_harness_profile(group).binary).name
+        profile = resolve_harness_profile(group)
+        binary = Path(profile.binary).name
         claude_argv = [binary, "--session-id", conversation_id]
 
         harness = harness_for(group)
-        scrub = harness.session_launch_env_unset() if harness is not None else None
+        if harness is not None:
+            _account, binding, scrub, _launch_env = resolve_launch_environment(
+                harness, profile, group, resolved_env
+            )
+        else:
+            binding, scrub = {}, ()
         pane_command = ["env"]
-        for var in scrub or ():
+        for var in scrub:
             pane_command += ["-u", var]
+        for name, value in binding.items():
+            pane_command.append(f"{name}={value}")
         pane_command += claude_argv
 
     result = tmux.new_window(
