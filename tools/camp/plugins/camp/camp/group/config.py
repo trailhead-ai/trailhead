@@ -45,9 +45,9 @@ Schema:
                                          # prints a retirement notice once per
                                          # config path when this key is present
   account = "~/.claude-levr"             # optional; opaque harness-interpreted
-                                         # account binding for launched
-                                         # sessions. Also denied as a launch
-                                         # root, for every group, by the
+                                         # account binding for composed
+                                         # windows. Also denied as a window
+                                         # directory, for every group, by the
                                          # credential rule below
 
   [dev_env]                              # optional; warn-and-continue (deferred)

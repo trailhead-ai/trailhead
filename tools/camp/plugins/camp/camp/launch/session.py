@@ -79,9 +79,14 @@ def _unsupported_harness(harness, profile, what: str) -> LaunchError:
     harness does not bind an account or resolve a scrub — and one wording
     for both is what keeps them from reading as two different problems to an
     operator.
+
+    Worded without "launch" on purpose: this resolver is also reached from
+    the window-creation key's refusal path
+    (`cli/window_dispatch.py:dispatch_window`, via `compose_window`), which
+    has no launch verb of its own to name.
     """
     return LaunchError(
-        f"camp: refusing to launch — harness {harness.name or profile.binary!r} "
+        f"camp: cannot bind an account — harness {harness.name or profile.binary!r} "
         f"(configured binary {profile.binary!r}) {what}"
     )
 
@@ -118,19 +123,19 @@ def _resolve_account_binding(harness, profile, group: dict, env: dict[str, str])
     except HarnessError as exc:
         if account is not None:
             raise LaunchError(
-                f"camp: refusing to launch — harness "
+                f"camp: cannot bind an account — harness "
                 f"{harness.name or profile.binary!r} will not bind this session to "
                 f"the declared account {account}: {exc}"
             ) from exc
         print(
             f"camp: no account declared and harness "
             f"{harness.name or profile.binary!r} will not resolve a default here: "
-            f"{exc} — launching with NO account binding",
+            f"{exc} — continuing with NO account binding",
             file=sys.stderr,
         )
         return None, {}
     if binding is None:
-        raise _unsupported_harness(harness, profile, "cannot launch sessions")
+        raise _unsupported_harness(harness, profile, "supports no session binding at all")
     return account, dict(binding)
 
 
@@ -163,7 +168,7 @@ def resolve_launch_environment(
     account, binding = _resolve_account_binding(harness, profile, group, env)
     scrub = harness.session_launch_env_unset()
     if scrub is None:
-        raise _unsupported_harness(harness, profile, "cannot launch sessions")
+        raise _unsupported_harness(harness, profile, "supports no session binding at all")
     scrub_set = set(scrub)
     launch_env = {k: v for k, v in env.items() if k not in scrub_set}
     launch_env.update(binding)

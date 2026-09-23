@@ -17,8 +17,8 @@ camp's own code:
   and `-c` directory camp asked tmux for.
 - `_launched_session` registers a live session directly against these doubles,
   in the shape `camp.launch.stop._owning_commands` still recognizes (the
-  harness's resume composition) — `camp launch` is retired, so nothing drives
-  the CLI to compose that shape itself any more.
+  harness's resume composition); no camp verb composes that shape on its
+  own, so the fixture registers it directly.
 
 Test contract:
 - camp sessions: empty → empty stdout, exit 0; degraded (enumeration error /
@@ -2282,9 +2282,9 @@ def _launched_session(cli_env, slug: str = "feat-kill") -> str:
     """Create a workspace and register a live, camp-kill-recognizable session
     for it, and return the session id.
 
-    `camp launch` is retired, so this registers directly against the fake
-    tmux double rather than driving a launch through the CLI — but it
-    registers the SAME shape `camp kill` still recognizes post-retirement:
+    No camp verb composes a live session in this shape, so this registers
+    directly against the fake tmux double — in the SAME shape `camp kill`
+    recognizes:
     the harness's resume composition (`FakeHarness.session_resume`), scrubbed
     exactly as `camp.launch.stop._owning_commands` composes it.
     """
@@ -2311,7 +2311,7 @@ def _launched_session(cli_env, slug: str = "feat-kill") -> str:
 
 
 def test_camp_kill_stops_a_launched_session(cli_env) -> None:
-    """The whole verb: a ref camp launched is signalled and confirmed gone."""
+    """The whole verb: a ref to a camp-owned session is signalled and confirmed gone."""
     session_id = _launched_session(cli_env)
 
     result = _camp(cli_env, "kill", session_id[:8], cwd=cli_env["tmp_path"])
@@ -2322,7 +2322,7 @@ def test_camp_kill_stops_a_launched_session(cli_env) -> None:
     ]
     assert session_id in result.stderr
     assert "stopped" in result.stderr
-    assert "camp sessions" in result.stderr
+    assert "camp sessions --recoverable" in result.stderr
     assert "camp attach" in result.stderr
     assert result.stdout == f"{session_id}\n"  # stdout is the session id alone
 

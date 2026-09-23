@@ -125,7 +125,7 @@ spawn. A group with no `account` declared leaves the harness to resolve its own
 default.
 
 The **deny list** below is the one place camp does read the value as a path.
-Every group's `account` is denied as a launch root — including to groups that
+Every group's `account` is denied as a window root — including to groups that
 declared none — but only when it is absolute or `~`-anchored. A relative
 `account` names no fixed location, so it contributes no deny entry at all: it is
 skipped rather than resolved against whatever directory camp happens to be
@@ -218,7 +218,7 @@ refuses, rather than reporting "not found" for a session that does exist:
 
 ```
 camp attach: session <id> is not running — find its workspace with `camp
-sessions` and reattach with `camp attach <slug>`
+sessions --recoverable` and reattach with `camp attach <slug>`
 ```
 
 Exit status is the attaching multiplexer's own once the handoff happens, and

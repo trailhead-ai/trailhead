@@ -441,31 +441,6 @@ def _verbatim_notice(text: str) -> list[str]:
 
 
 @dataclass(frozen=True)
-class HostObjectAnswer:
-    """One machine's contribution to a per-host answer, for a verb whose
-    remote answer is one object rather than a list of rows.
-
-    ``answer`` is the remote's own parsed JSON object, with every string
-    value (including nested ones, e.g. inside ``account_binding``) run
-    through the same control-sequence strip a rows answer's stderr already
-    gets — the success path is the one an operator trusts most, so it is
-    the one worth spoofing. ``answer`` is ``None`` for every outcome that
-    is not a relayable object: the seven locally-classified transport
-    failures, and a remote answer whose stdout does not decode as a JSON
-    object.
-
-    ``certainty`` states whether the operation the verb asked for happened,
-    from :func:`classify_certainty` — the one piece of information a rows
-    answer has no use for and this shape exists to carry.
-    """
-
-    answer: dict[str, Any] | None
-    certainty: Certainty
-    notices: list[str] = field(default_factory=list)
-    exit_code: int = 0
-
-
-@dataclass(frozen=True)
 class HostPayloadAnswer:
     """One machine's contribution to a per-host answer, for a verb whose
     remote answer may come back as *either* shape — a stop answers with one
@@ -477,16 +452,17 @@ class HostPayloadAnswer:
     locally-classified transport failures, and a remote answer whose stdout
     decodes as neither a JSON object nor a JSON array of row objects.
 
-    ``obj`` is control-stripped the same way :attr:`HostObjectAnswer.answer`
-    is. ``rows`` are host-stamped the same way :func:`answer_for_host`
-    stamps them, and are control-stripped too — the far side's stderr and a
-    relayed object's fields already get that treatment, and a row's own
-    values (a session id, a multiplexer name) are the operator's next
-    decision just as much as either of those.
+    ``obj`` is control-stripped the same way a rows answer's stderr already
+    gets — the success path is the one an operator trusts most, so it is
+    the one worth spoofing. ``rows`` are host-stamped the same way
+    :func:`answer_for_host` stamps them, and are control-stripped too — the
+    far side's stderr and a relayed object's fields already get that
+    treatment, and a row's own values (a session id, a multiplexer name)
+    are the operator's next decision just as much as either of those.
 
     ``certainty`` states whether the operation the verb asked for happened,
-    from :func:`classify_certainty` — the same mapping
-    :class:`HostObjectAnswer` carries.
+    from :func:`classify_certainty` — the one piece of information a rows
+    answer has no use for and this shape exists to carry.
     """
 
     obj: dict[str, Any] | None
@@ -515,9 +491,8 @@ def answer_payload_for_host(
 
     Same transport, same six locally-classified failure states (shared via
     :func:`_classify_transport_failure`), and the same :class:`Certainty`
-    :func:`answer_object_for_host` carries — this is the general reader
-    :func:`answer_object_for_host` is re-expressed on top of. Never calls
-    ``sys.exit`` and never prints. Holds no state across calls.
+    mapping every state-changing verb reuses. Never calls ``sys.exit`` and
+    never prints. Holds no state across calls.
     """
     outcome = _transport.run_camp(host, remote_argv, connect_timeout=connect_timeout, runner=runner)
     certainty = classify_certainty(outcome)
@@ -565,39 +540,6 @@ def answer_payload_for_host(
         certainty=certainty,
         notices=notices,
         exit_code=outcome.exit_code,
-    )
-
-
-def answer_object_for_host(
-    verb: str,
-    host: Host,
-    host_name: str,
-    remote_argv: Sequence[str],
-    *,
-    connect_timeout: float = DEFAULT_CONNECT_TIMEOUT_SECONDS,
-    runner: Runner = default_runner,
-) -> HostObjectAnswer:
-    """Run *remote_argv* on *host* over the transport and return its
-    single-object answer.
-
-    ``connect_timeout`` is passed straight through to
-    :func:`answer_payload_for_host` — see its own docstring.
-
-    Re-expressed on top of :func:`answer_payload_for_host`: same transport,
-    same six locally-classified failure states, same :class:`Certainty` —
-    only the payload reader's ``obj`` field is exposed, so a rows-shaped
-    answer (including an array of row objects) still relays as
-    ``answer=None`` here. Never calls ``sys.exit`` and never prints. Holds
-    no state across calls.
-    """
-    payload = answer_payload_for_host(
-        verb, host, host_name, remote_argv, connect_timeout=connect_timeout, runner=runner
-    )
-    return HostObjectAnswer(
-        answer=payload.obj,
-        certainty=payload.certainty,
-        notices=payload.notices,
-        exit_code=payload.exit_code,
     )
 
 

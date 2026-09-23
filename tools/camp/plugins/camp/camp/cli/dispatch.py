@@ -1970,8 +1970,8 @@ def _dispatch_attach_all_hosts(rest: list[str]) -> None:
             if isinstance(local_resolution, NotRunning):
                 _die(
                     f"camp attach: session {local_resolution.candidate.session_id} is "
-                    "not running — find its workspace with `camp sessions` and "
-                    "reattach with `camp attach <slug>`"
+                    "not running — find its workspace with `camp sessions "
+                    "--recoverable` and reattach with `camp attach <slug>`"
                 )
             assert isinstance(local_resolution, Resolved)
             warn_if_nested(resolved_env)

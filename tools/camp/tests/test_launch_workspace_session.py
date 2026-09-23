@@ -377,7 +377,7 @@ def test_a_credential_store_launch_error_during_create_folds_into_create_refused
     tmux = _FakeDoorTmux(present=False)
 
     probe = create_or_connect_workspace_session(
-        "trailhead", "camp-cli", ws_dir, env={"HOME": str(home)}, tmux=tmux
+        "trailhead", "camp-cli", ws_dir, env={"HOME": str(home)}, tmux=tmux, group=None
     )
 
     assert probe.state is DoorState.CREATE_REFUSED
@@ -406,7 +406,7 @@ def test_a_credential_store_workspace_with_an_existing_session_is_connected_with
     tmux = _FakeDoorTmux(present=True)
 
     probe = create_or_connect_workspace_session(
-        "trailhead", "camp-cli", ws_dir, env={"HOME": str(home)}, tmux=tmux
+        "trailhead", "camp-cli", ws_dir, env={"HOME": str(home)}, tmux=tmux, group=None
     )
 
     assert probe.state is DoorState.CONNECTED
@@ -459,7 +459,7 @@ def test_a_create_call_that_raises_folds_into_create_failed_with_its_own_message
     tmux = _RaisingCreateTmux(present=False, exc=exc)
 
     probe = create_or_connect_workspace_session(
-        "trailhead", "camp-cli", ws_dir, env={"HOME": str(tmp_path)}, tmux=tmux
+        "trailhead", "camp-cli", ws_dir, env={"HOME": str(tmp_path)}, tmux=tmux, group=None
     )
 
     assert probe.state is DoorState.CREATE_FAILED
@@ -488,7 +488,7 @@ def test_tmux_unanswered_reason_carries_the_seams_own_words(tmp_path):
 
     for reason in ("[Errno 2] No such file or directory: 'tmux'", "timed out after 5 seconds"):
         probe = create_or_connect_workspace_session(
-            "trailhead", "camp-cli", ws_dir, env={"HOME": str(tmp_path)}, tmux=_UnansweredTmux(reason)
+            "trailhead", "camp-cli", ws_dir, env={"HOME": str(tmp_path)}, tmux=_UnansweredTmux(reason), group=None
         )
         assert probe.state is DoorState.TMUX_UNANSWERED
         assert reason in probe.reason
@@ -657,7 +657,7 @@ class TestConnectArmReconciliation:
         )
 
         probe = create_or_connect_workspace_session(
-            "trailhead", "camp-cli", ws_dir, env={"HOME": str(tmp_path)}, tmux=tmux
+            "trailhead", "camp-cli", ws_dir, env={"HOME": str(tmp_path)}, tmux=tmux, group=None
         )
 
         assert probe.state is DoorState.CONNECTED
@@ -697,7 +697,7 @@ class TestConnectArmReconciliation:
         )
 
         probe = create_or_connect_workspace_session(
-            "trailhead", "camp-cli", ws_dir, env={"HOME": str(tmp_path)}, tmux=tmux
+            "trailhead", "camp-cli", ws_dir, env={"HOME": str(tmp_path)}, tmux=tmux, group=None
         )
 
         assert probe.state is DoorState.CONNECTED
@@ -726,7 +726,7 @@ class TestConnectArmReconciliation:
         tmux = _FakeDoorTmux(present=True, list_windows_answer=WindowListing(windows=(), dropped=0))
 
         probe = create_or_connect_workspace_session(
-            "trailhead", "camp-cli", ws_dir, env={"HOME": str(tmp_path)}, tmux=tmux
+            "trailhead", "camp-cli", ws_dir, env={"HOME": str(tmp_path)}, tmux=tmux, group=None
         )
 
         assert probe.state is DoorState.CONNECTED
@@ -755,7 +755,7 @@ class TestConnectArmReconciliation:
         tmux = _FakeDoorTmux(present=True, list_windows_answer=UNANSWERED)
 
         probe = create_or_connect_workspace_session(
-            "trailhead", "camp-cli", ws_dir, env={"HOME": str(tmp_path)}, tmux=tmux
+            "trailhead", "camp-cli", ws_dir, env={"HOME": str(tmp_path)}, tmux=tmux, group=None
         )
 
         assert probe.state is DoorState.CONNECTED
@@ -773,7 +773,7 @@ class TestConnectArmReconciliation:
         tmux = _FakeDoorTmux(present=False, list_windows_raises=True)
 
         probe = create_or_connect_workspace_session(
-            "trailhead", "camp-cli", ws_dir, env={"HOME": str(tmp_path)}, tmux=tmux
+            "trailhead", "camp-cli", ws_dir, env={"HOME": str(tmp_path)}, tmux=tmux, group=None
         )
 
         assert probe.state is DoorState.CREATED
@@ -826,7 +826,7 @@ def test_a_resurrection_that_races_to_duplicate_reconciles_the_record_like_any_c
     tmux = _FakeDoorTmux(present=False, list_windows_answer=live, new_session_duplicate=True)
 
     probe = create_or_connect_workspace_session(
-        "trailhead", "camp-cli", ws_dir, env={"HOME": str(tmp_path)}, tmux=tmux
+        "trailhead", "camp-cli", ws_dir, env={"HOME": str(tmp_path)}, tmux=tmux, group=None
     )
 
     assert probe.state is DoorState.CONNECTED
@@ -870,7 +870,7 @@ def test_the_post_failed_create_re_probe_fold_reconciles_the_record_like_any_con
     )
 
     probe = create_or_connect_workspace_session(
-        "trailhead", "camp-cli", ws_dir, env={"HOME": str(tmp_path)}, tmux=tmux
+        "trailhead", "camp-cli", ws_dir, env={"HOME": str(tmp_path)}, tmux=tmux, group=None
     )
 
     assert probe.state is DoorState.CONNECTED
@@ -906,7 +906,7 @@ class TestDoorReadsTheRecordBeforeCreating:
         )
 
         probe = create_or_connect_workspace_session(
-            "trailhead", "camp-cli", ws_dir, env={"HOME": str(tmp_path)}, tmux=tmux, harness=None
+            "trailhead", "camp-cli", ws_dir, env={"HOME": str(tmp_path)}, tmux=tmux, harness=None, group=None
         )
 
         assert probe.state is DoorState.RESURRECTED
@@ -926,7 +926,7 @@ class TestDoorReadsTheRecordBeforeCreating:
         tmux = _FakeDoorTmux(present=False)
 
         probe = create_or_connect_workspace_session(
-            "trailhead", "camp-cli", ws_dir, env={"HOME": str(tmp_path)}, tmux=tmux, harness=None
+            "trailhead", "camp-cli", ws_dir, env={"HOME": str(tmp_path)}, tmux=tmux, harness=None, group=None
         )
 
         assert probe.state is DoorState.CREATED
@@ -946,7 +946,7 @@ class TestDoorReadsTheRecordBeforeCreating:
         tmux = _FakeDoorTmux(present=False)
 
         probe = create_or_connect_workspace_session(
-            "trailhead", "camp-cli", ws_dir, env={"HOME": str(tmp_path)}, tmux=tmux, harness=None
+            "trailhead", "camp-cli", ws_dir, env={"HOME": str(tmp_path)}, tmux=tmux, harness=None, group=None
         )
 
         assert probe.state is DoorState.CREATED
@@ -967,7 +967,7 @@ class TestDoorReadsTheRecordBeforeCreating:
         tmux = _FakeDoorTmux(present=False)
 
         probe = create_or_connect_workspace_session(
-            "trailhead", "camp-cli", ws_dir, env={"HOME": str(tmp_path)}, tmux=tmux, harness=None
+            "trailhead", "camp-cli", ws_dir, env={"HOME": str(tmp_path)}, tmux=tmux, harness=None, group=None
         )
 
         assert probe.state is DoorState.RECORD_UNREADABLE
@@ -989,7 +989,7 @@ class TestDoorReadsTheRecordBeforeCreating:
         tmux = _FakeDoorTmux(present=True)
 
         probe = create_or_connect_workspace_session(
-            "trailhead", "camp-cli", ws_dir, env={"HOME": str(tmp_path)}, tmux=tmux, harness=None
+            "trailhead", "camp-cli", ws_dir, env={"HOME": str(tmp_path)}, tmux=tmux, harness=None, group=None
         )
 
         assert probe.state is DoorState.CONNECTED
@@ -1009,7 +1009,7 @@ class TestDoorReadsTheRecordBeforeCreating:
         tmux = _FakeDoorTmux(present=False, new_session_duplicate=True)
 
         probe = create_or_connect_workspace_session(
-            "trailhead", "camp-cli", ws_dir, env={"HOME": str(tmp_path)}, tmux=tmux, harness=None
+            "trailhead", "camp-cli", ws_dir, env={"HOME": str(tmp_path)}, tmux=tmux, harness=None, group=None
         )
 
         assert probe.state is DoorState.CONNECTED

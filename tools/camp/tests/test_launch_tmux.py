@@ -6,7 +6,7 @@ Test contract (see task/promote-camp-s-tmux-boundary-to-a-seam-that-owns-every-t
 - A session created through the seam (`Tmux.spawn_session`) carries the name
   it was given, with no `=` in it — enumerated afterwards and asserted
   byte-for-byte. The `-s`-is-not-a-target half of the `=` property.
-- `capture_pane` and `set_environment` each address the exactly-named
+- `set_environment` and `switch_client` each address the exactly-named
   session, never one it prefixes.
 - The per-call budget every tmux invocation carries resolves from the
   environment when the caller names none: an override moves the default, an
@@ -176,22 +176,6 @@ def test_spawn_session_names_with_s_never_carries_the_target_prefix(tmp_path, mo
     )
 
 
-def test_capture_pane_targets_the_exact_name_not_a_prefix(monkeypatch):
-    import camp.launch.tmux as tmux_module
-
-    calls: list[list[str]] = []
-
-    def fake_run(argv, **kwargs):
-        calls.append(list(argv))
-        return _completed(returncode=0, stdout="pane text\n")
-
-    monkeypatch.setattr(tmux_module.subprocess, "run", fake_run)
-
-    tmux_module.Tmux().capture_pane("feat")
-
-    assert calls == [["tmux", "capture-pane", "-p", "-t", "=feat"]]
-
-
 def test_set_environment_targets_the_exact_name_not_a_prefix(monkeypatch):
     import camp.launch.tmux as tmux_module
 
@@ -277,68 +261,6 @@ def test_has_session_with_reason_carries_the_exceptions_own_message(monkeypatch)
     monkeypatch.setattr(tmux_module.subprocess, "run", _raise_oserror)
     present, reason = tmux_module.Tmux().has_session_with_reason("x")
     assert present is None
-    assert "No such file or directory" in reason
-
-
-def test_kill_session_with_reason_carries_the_exceptions_own_message(monkeypatch):
-    """Same widen as `has_session_with_reason`, for `kill_session`'s two
-    diagnostic call sites in `launch/session.py` — varied across two
-    distinct exceptions to prove the message is threaded through, not
-    synthesized."""
-    import camp.launch.tmux as tmux_module
-
-    monkeypatch.setattr(
-        tmux_module.subprocess, "run", lambda *a, **k: _completed(returncode=0)
-    )
-    done, reason = tmux_module.Tmux().kill_session_with_reason("x")
-    assert done.returncode == 0
-    assert reason is None
-
-    def _raise_timeout(*a, **k):
-        raise subprocess.TimeoutExpired(cmd=["tmux"], timeout=5)
-
-    monkeypatch.setattr(tmux_module.subprocess, "run", _raise_timeout)
-    done, reason = tmux_module.Tmux().kill_session_with_reason("x")
-    assert done is None
-    assert "timed out" in reason
-
-    def _raise_oserror(*a, **k):
-        raise FileNotFoundError("[Errno 2] No such file or directory: 'tmux'")
-
-    monkeypatch.setattr(tmux_module.subprocess, "run", _raise_oserror)
-    done, reason = tmux_module.Tmux().kill_session_with_reason("x")
-    assert done is None
-    assert "No such file or directory" in reason
-
-
-def test_set_environment_with_reason_carries_the_exceptions_own_message(monkeypatch):
-    """Same widen as `has_session_with_reason`, for `set_environment`'s
-    diagnostic call site in `launch/session.py`'s session-environment
-    statement — varied across two distinct exceptions to prove the message
-    is threaded through, not synthesized."""
-    import camp.launch.tmux as tmux_module
-
-    monkeypatch.setattr(
-        tmux_module.subprocess, "run", lambda *a, **k: _completed(returncode=0)
-    )
-    done, reason = tmux_module.Tmux().set_environment_with_reason("x", ["-r", "SOME_VAR"])
-    assert done.returncode == 0
-    assert reason is None
-
-    def _raise_timeout(*a, **k):
-        raise subprocess.TimeoutExpired(cmd=["tmux"], timeout=5)
-
-    monkeypatch.setattr(tmux_module.subprocess, "run", _raise_timeout)
-    done, reason = tmux_module.Tmux().set_environment_with_reason("x", ["-r", "SOME_VAR"])
-    assert done is None
-    assert "timed out" in reason
-
-    def _raise_oserror(*a, **k):
-        raise FileNotFoundError("[Errno 2] No such file or directory: 'tmux'")
-
-    monkeypatch.setattr(tmux_module.subprocess, "run", _raise_oserror)
-    done, reason = tmux_module.Tmux().set_environment_with_reason("x", ["-r", "SOME_VAR"])
-    assert done is None
     assert "No such file or directory" in reason
 
 

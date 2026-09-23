@@ -430,6 +430,7 @@ def _cmd_new_group_cli(
         as_json=as_json,
         interactive=interactive,
         harness=harness_for(group),
+        group=group,
     )
 
 
@@ -509,6 +510,7 @@ def _door_dispatch_for_new(
     as_json: bool,
     interactive: bool,
     harness=None,
+    group: dict | None = None,
 ) -> None:
     """Create, connect, or resurrect the workspace's tmux session and, when
     *interactive*, hand the terminal over — `camp new`'s own door dispatch.
@@ -523,7 +525,8 @@ def _door_dispatch_for_new(
     `launch.stop`'s re-export — the same factory attribute attach's own
     tests monkeypatch. `harness` is forwarded to the resurrection planner
     unchanged (`None` when the caller could not resolve one for the
-    group).
+    group); `group` alongside it, so a resurrected conversation's resume
+    line binds the same account a live window would.
 
     What is `camp new`'s alone, and stays here, is both halves of its
     reporting. The stream contract: the workspace path is the caller's only
@@ -550,7 +553,7 @@ def _door_dispatch_for_new(
     resolved_env = dict(env) if env is not None else dict(os.environ)
     tmux = Tmux()
     probe = create_or_connect_workspace_session(
-        group_name, slug, ws_dir, env=resolved_env, tmux=tmux, harness=harness
+        group_name, slug, ws_dir, env=resolved_env, tmux=tmux, harness=harness, group=group
     )
 
     if probe.state in (

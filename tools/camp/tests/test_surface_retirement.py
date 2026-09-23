@@ -1,19 +1,17 @@
 """`camp bookmark` / `camp resume` redirect to `camp attach`.
 
-`launch` is retired too, and its own retirement is covered by
-`test_verb_aliases.py` and `test_cli_dispatch_split.py`; this file keeps only
-the two redirects that used to point at `launch --resume` and now point at
-`attach` instead, plus the sessions/resume internal-harness regression that
-never involved dispatching `launch`.
+`launch`'s own redirect is covered by `test_verb_aliases.py` and
+`test_cli_dispatch_split.py`; this file covers `bookmark` and `resume`
+redirecting to `attach`, plus the sessions/attach internal-harness
+regression.
 
 Test contract:
 - Each retired spelling, run through the CLI, answers with `camp attach` —
   the replacement an operator who typed the retired verb yesterday needs —
   rather than the bare-slug refusal, which answers a question about slugs.
   The answer varies by which retired verb was typed.
-- The sessions and resume paths each resolve the same harness for the same
-  group — the specific regression the redirect risks. (The launch leg of
-  this pin is gone along with `camp launch` itself.)
+- The sessions and attach paths each resolve the same harness for the same
+  group — the specific regression the redirect risks.
 
 That the retired verbs are absent from the live verb table is not tested here:
 removal is not a behaviour, and such a test passes vacuously on any tree where
@@ -111,8 +109,10 @@ def test_sessions_path_resolves_addressable_harnesses(monkeypatch) -> None:
     assert seen == [group, {}]
 
 
-def test_resume_path_resolves_the_group_harness(monkeypatch) -> None:
-    """`camp launch --resume`'s pool asks the group's harness (cli.session:_session_pool)."""
+def test_attach_path_resolves_the_group_harness(monkeypatch) -> None:
+    """`camp attach`'s pool asks the group's harness (cli.session:_session_pool),
+    called with `verb="attach"` — the verb `_attach_session_context` actually
+    passes to it."""
     import camp.cli.session as cli_session
 
     harness = _FakeHarness()
@@ -130,7 +130,7 @@ def test_resume_path_resolves_the_group_harness(monkeypatch) -> None:
 
     group = {"group": {"name": "g"}}
     _transcripts, live, answered, _accounts = cli_session._session_pool(
-        [group], verb="launch", env={}
+        [group], verb="attach", env={}
     )
     assert live == [record]
     assert [store.harness for store in answered] == [harness]

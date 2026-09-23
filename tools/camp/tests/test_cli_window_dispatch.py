@@ -248,6 +248,41 @@ def test_an_oserror_from_the_record_write_also_does_not_escape(tmp_path):
     assert "camp:" in tmux.display_messages[0][1]
 
 
+def test_a_launch_error_out_of_compose_is_refused_with_no_compose_side_effects(tmp_path):
+    """`compose_window` can raise `camp.launch.session.LaunchError` (a
+    declared account the harness refuses, a `TRAILHEAD_CLAUDE_DIR`
+    conflict, or a harness whose scrub/binding answers `None`) — this must
+    fold into the same `display-message` refusal path as
+    `WindowRefused`/`WindowComposeError`, not escape and leave the key press
+    doing nothing."""
+    from camp.launch.session import LaunchError
+    from camp.cli.window_dispatch import dispatch_window
+
+    def _refusing_compose(group, slug, ws_dir, *, cwd, window_name, tmux=None, env=None, command=None):
+        raise LaunchError(
+            "camp: cannot bind an account — harness claude will not bind this "
+            "session to the declared account claude-levr: relative path"
+        )
+
+    tmux = _FakeTmux(options={"@camp_group": "testgroup", "@camp_slug": "feat-x"})
+
+    dispatch_window(
+        "$3",
+        tmux=tmux,
+        all_configs=[GROUP],
+        workspace_dir_fn=lambda g, s, env=None: tmp_path / "ws",
+        compose=_refusing_compose,
+    )
+
+    assert len(tmux.display_messages) == 1
+    target, message = tmux.display_messages[0]
+    assert target == "$3"
+    assert message == (
+        "camp: cannot bind an account — harness claude will not bind this "
+        "session to the declared account claude-levr: relative path"
+    )
+
+
 def test_camp_window_dispatch_verb_reaches_the_real_handler_end_to_end(tmp_path):
     """Proves the `dispatch.py` wiring, not just `dispatch_window`'s own
     logic: invokes the REAL `cli/camp` binary with `window-dispatch
