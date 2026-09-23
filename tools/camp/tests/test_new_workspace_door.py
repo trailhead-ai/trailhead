@@ -501,9 +501,6 @@ def test_stdout_is_exactly_the_path_stderr_carries_the_outcome_line(
 
 
 # ---------------------------------------------------------------------------
-# The concierge's exact invocation
-# ---------------------------------------------------------------------------
-# ---------------------------------------------------------------------------
 # Operator decision at Phase 1: `camp new` succeeds with a warning when its
 # session can't be created — the workspace is real and usable, so this is
 # not a refusal. Both failure arms (`has_session` unanswered, create failed)

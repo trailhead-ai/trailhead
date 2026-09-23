@@ -25,12 +25,10 @@ for the full install flow.
 camp groups          # list every configured group (any cwd)
 camp new <slug>      # create or enter a workspace, then attach to its tmux session
 camp new <slug> --no-attach  # create or enter + its session, leave this terminal alone
-camp new <slug> --no-session # create or enter the workspace only — no tmux session, unless --launch is also given
+camp new <slug> --no-session # create or enter the workspace only — no tmux session
 camp pwd <slug>      # print workspace path
 camp list            # list all worktrees (alias: ls)
 camp status          # show git + drift status
-camp launch <slug>   # start a detached harness session in a workspace
-camp launch --resume <ref>   # bring a dead session back where it started
 camp sessions        # list the live harness sessions camp can see
 camp sessions --recoverable  # list the dead ones that could be brought back
 camp kill <ref>      # stop one session and reclaim its memory
@@ -40,6 +38,12 @@ camp remove          # tear down a worktree (alias: rm)
 camp --help          # full command reference
 camp --version       # show version + resolved binary path
 ```
+
+A conversation starts in exactly one way: reach the workspace's tmux session
+with `camp attach <slug>` or `camp new <slug>`, then press the ordinary
+window-creation key (prefix+`c`) inside it. Resuming a dead conversation works
+the same way — reaching the workspace through the door brings its windows
+back, and each window that held a conversation says how to resume it.
 
 ## Shell integration
 
@@ -76,33 +80,19 @@ inert — use `cd "$(camp pwd <slug>)"`.
 `camp new` needs no such wrapper: it hands your terminal to a tmux session already
 rooted at the new workspace, so there is nowhere left to `cd`.
 
-## Detached sessions
-
-`camp launch <slug>` starts a harness session in a tmux pane rooted at the
-workspace and returns immediately — nothing is attached to your terminal. camp
-mints the session id itself, so it can hand it back on stdout (one line,
-`--json` for the machine shape) and report the workspace, the tmux name, and a
-paste-ready `tmux attach -t <name>` on stderr.
+## Sessions
 
 ```
-camp launch <slug> [--json]                 # start one; stdout is the session id
-camp launch --dir <path> --group <name>     # start one at a named directory
-camp launch --resume <ref> [--group <name>] # bring a dead one back
 camp sessions [<slug>] [--dir <path>] [--all-groups|-g] [--json]  # what is live
 camp sessions --recoverable [<slug>] [--dir <path>]         # what is dead
                           [--limit <n>|--all] [--json]
 ```
 
-`camp launch` has three addressing forms and they are mutually exclusive: a slug
-roots the session at that workspace, `--dir` roots it at a directory you name,
-and `--resume` re-enters a session the harness already has a transcript for,
-rooted wherever that session recorded it started. One launch is rooted one way.
-
-Its exit codes carry more than pass/fail. `0` means the session launched and
-stdout is its id. `1` means camp refused, nothing was started, and stdout is
-empty — the reason is on stderr. `2` means a `--resume` reference matched more
-than one session: the candidates are printed on stdout to choose between, so it
-is an answer to narrow, not a command that broke.
+`camp new <slug>` creates the workspace's tmux session (a bare shell, rooted at
+the workspace) and attaches to it, described above under "Quick start" and in
+"`camp remove` changes your shell's directory". Starting a harness conversation
+in a workspace is the ordinary window-creation key pressed inside that
+session, run from inside the workspace `camp new` or `camp attach` just opened.
 
 `camp list` and `camp sessions` both take `--all-groups` (short: `-g`), which
 answers for every configured group in one invocation instead of one — every
@@ -112,21 +102,10 @@ group with plain `camp sessions --group <name>` (or from inside a workspace)
 does the opposite, narrowing the live listing to that group's own rows rather
 than the ordinary cross-store answer.
 
-The launch is confirmed, not assumed: camp polls harness enumeration until the
-new session id appears and refuses (killing the pane) if it never does — a
-session stalled at an unanswered trust prompt is invisible to enumeration, so
-camp pre-seeds trust for the directory it is about to root the session at. The pane also drops the
-parent session's environment, so a launched session never inherits the
-credentials of the session that launched it.
-
-`camp new <slug>` no longer starts a harness conversation — it creates the
-workspace's tmux session (a bare shell, rooted at the workspace) and attaches
-to it, described above under "Quick start" and in "`camp remove` changes your
-shell's directory". `--launch` is still accepted, for callers that pass it
-today, and does nothing beyond printing a notice that it is no longer needed.
-Starting a harness conversation in a new workspace is still `camp launch
-<slug>` (above), run from inside the workspace `camp new` just opened, or
-directly by slug from anywhere.
+The pane a new window opens in drops the session's ambient credential
+variables and binds the group's declared account, so a window never inherits
+a different account's credentials — see
+[Declaring a group's account](#declaring-a-groups-account) below.
 
 ### Declaring a group's account
 
@@ -171,35 +150,20 @@ config can permit a denied path.
 
 ### Bringing a dead session back
 
-`camp launch --resume <ref>` re-enters a session from the harness's own
-transcript, from any directory. `<ref>` is an unambiguous prefix of either the
-derived session name (`camp-<slug>-<uuid8>`) or the session uuid — camp resolves
-it, and an ambiguous one lists the candidates and exits 2 rather than guessing.
+Resuming a dead conversation happens by reaching the workspace through the
+door — `camp attach <slug>` or `camp new <slug>`. If the workspace's tmux
+session itself is gone, reaching it that way brings its windows back: each
+window that held a conversation prints what it held and how to resume it —
+`camp: this window held conversation <id>` and `camp: resume it with: <the
+harness's own resume command>` — and the operator decides which conversations
+to resume, and when, from inside that shell. camp starts no conversation on
+the way back.
 
-A session that started inside a camp workspace needs no `--group`: camp built
-that directory and reads the owning group off the path. A session rooted
-anywhere else needs an explicit `--group` and is then held to that group's
-allowlist as it stands today, exactly like `--dir`.
-
-Refusals each name their own situation: the session is still running, its
-directory is gone, its start directory could not be read at all, its root is not
-eligible, or the reference matched nothing. camp never recreates a torn-down
-directory to resume into it.
-
-`camp sessions --recoverable` is how those references are discovered — every
-session the harness kept a transcript for, minus the ones running now, newest
-first and capped at the newest 20 with the total named (`--limit <n>` or `--all`
-widen it). A row whose directory no longer exists is listed and marked rather
-than hidden, since seeing it is how you learn why the resume will refuse.
-
-Both listings take the same scope: a slug scopes to that workspace, `--dir
-<path>` scopes to a directory and everything under it, and neither is
-eligibility-gated — the allowlist fences launching, not looking.
-
-Neither the launch flavors nor either listing writes anything camp keeps. Every
-session they can name already exists in the harness's own store, so there is no
-camp-side record to go stale — which is why a reference works from a plain shell
-that has never seen the session before.
+`camp sessions --recoverable` is how those conversations can be surveyed
+without reaching the workspace first — every session the harness kept a
+transcript for, minus the ones running now, newest first and capped at the
+newest 20 with the total named (`--limit <n>` or `--all` widen it). A row
+whose directory no longer exists is listed and marked rather than hidden.
 
 `camp sessions` degrades rather than failing: an enumeration error, an unknown
 harness, or an absent tmux prints a notice on stderr and an empty list on
@@ -226,9 +190,8 @@ camp attach <ref> -a
 With no reference, it offers a numbered picker over this machine's running,
 camp-owned sessions — most recently active first — and reads one choice;
 `-a` widens that picker across every declared machine too. `<ref>` is the
-same unambiguous prefix `camp kill` and `camp launch --resume` already
-accept, resolved by the identical rule so the three verbs never drift into
-three grammars.
+same unambiguous prefix `camp kill` already accepts, resolved by the
+identical rule so the two verbs never drift into two grammars.
 
 From inside a configured group (or with `--group`), `<ref>` is checked against that
 group's own workspace slugs first: a match creates or connects that workspace's
@@ -249,10 +212,14 @@ than guessing — the one place this surface departs from a plain listing,
 which can report an unreachable machine as a row and still succeed. Attach
 cannot, because the silent machine might have held the only match.
 
-Only a session camp itself launched is offered — the same ownership check
+Only a session camp itself started is offered — the same ownership check
 `camp kill` applies. A resolved session that is not currently running
-refuses and names `camp launch --resume <ref>` as the way to bring it back,
-rather than reporting "not found" for a session that does exist.
+refuses, rather than reporting "not found" for a session that does exist:
+
+```
+camp attach: session <id> is not running — find its workspace with `camp
+sessions` and reattach with `camp attach <slug>`
+```
 
 Exit status is the attaching multiplexer's own once the handoff happens, and
 camp's own before it: `1` for a refusal, `2` for a reference matching more
