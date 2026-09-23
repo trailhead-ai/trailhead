@@ -319,7 +319,7 @@ class TestConcurrentWriters:
         from camp.group.manifest import reconcile_lock
         from camp.group.window_record import (
             WindowEntry,
-            append_window_entry,
+            record_window_entry,
             read_window_record,
             window_record_path_for,
         )
@@ -330,7 +330,7 @@ class TestConcurrentWriters:
         second_done = threading.Event()
 
         def second_writer():
-            append_window_entry(
+            record_window_entry(
                 tmp_path,
                 WindowEntry(window_id="@2", name="b", cwd="repo_b", command_line="ls"),
             )
@@ -355,7 +355,7 @@ class TestConcurrentWriters:
     def test_both_entries_survive_a_concurrent_pair_of_writes(self, tmp_path):
         from camp.group.window_record import (
             WindowEntry,
-            append_window_entry,
+            record_window_entry,
             read_window_record,
             window_record_path_for,
         )
@@ -363,7 +363,7 @@ class TestConcurrentWriters:
         path = window_record_path_for(tmp_path)
 
         def writer(window_id, cwd):
-            append_window_entry(
+            record_window_entry(
                 tmp_path,
                 WindowEntry(
                     window_id=window_id, name=window_id, cwd=cwd, conversation_id="c"
@@ -394,7 +394,7 @@ class TestLockedUnlockedSplit:
         from camp.group.manifest import reconcile_lock
         from camp.group.window_record import (
             WindowEntry,
-            append_window_entry_unlocked,
+            record_window_entry_unlocked,
             read_window_record,
             window_record_path_for,
         )
@@ -405,7 +405,7 @@ class TestLockedUnlockedSplit:
         # An already-locked caller uses the unlocked entry point directly,
         # in the same thread, without re-acquiring — and it completes.
         with reconcile_lock(tmp_path):
-            append_window_entry_unlocked(path, entry)
+            record_window_entry_unlocked(path, entry)
 
         result = read_window_record(path)
         assert result.status == "ok"
@@ -415,14 +415,14 @@ class TestLockedUnlockedSplit:
         self, tmp_path
     ):
         # This is the deadlock the unlocked split exists to prevent: the
-        # locked entry point (append_window_entry) always re-acquires the
+        # locked entry point (record_window_entry) always re-acquires the
         # workspace lock, so a caller that reaches for it while ALREADY
         # holding that lock (from a different holder here, since re-testing
         # true same-thread reentrancy would hang the suite forever) blocks.
         from camp.group.manifest import reconcile_lock
         from camp.group.window_record import (
             WindowEntry,
-            append_window_entry,
+            record_window_entry,
         )
 
         blocked = threading.Event()
@@ -430,7 +430,7 @@ class TestLockedUnlockedSplit:
 
         def contender():
             blocked.set()
-            append_window_entry(
+            record_window_entry(
                 tmp_path,
                 WindowEntry(window_id="@2", name="b", cwd="repo_b", command_line="ls"),
             )
@@ -448,6 +448,86 @@ class TestLockedUnlockedSplit:
 
         t.join(timeout=10)
         assert finished.is_set()
+
+
+# ---------------------------------------------------------------------------
+# 6b. One entry per window: recording a window already in the record
+#     replaces its entry rather than adding a second one
+# ---------------------------------------------------------------------------
+
+
+class TestOneEntryPerWindow:
+    def test_a_window_already_recorded_is_replaced_in_place(self, tmp_path):
+        from camp.group.window_record import (
+            WindowEntry,
+            read_window_record,
+            record_window_entry,
+            window_record_path_for,
+            write_window_record,
+        )
+
+        path = window_record_path_for(tmp_path)
+        first = WindowEntry(window_id="@1", name="a", cwd="repo_a", conversation_id="old")
+        second = WindowEntry(window_id="@2", name="b", cwd="repo_b", conversation_id="c2")
+        write_window_record(path, [first, second])
+
+        replacement = WindowEntry(window_id="@1", name="a2", cwd=".", conversation_id="new")
+        record_window_entry(tmp_path, replacement)
+
+        assert read_window_record(path).entries == (replacement, second)
+
+    def test_a_window_not_yet_recorded_is_appended(self, tmp_path):
+        from camp.group.window_record import (
+            WindowEntry,
+            read_window_record,
+            record_window_entry,
+            window_record_path_for,
+            write_window_record,
+        )
+
+        path = window_record_path_for(tmp_path)
+        first = WindowEntry(window_id="@1", name="a", cwd="repo_a", conversation_id="c1")
+        write_window_record(path, [first])
+
+        added = WindowEntry(window_id="@3", name="c", cwd="repo_c", conversation_id="c3")
+        record_window_entry(tmp_path, added)
+
+        assert read_window_record(path).entries == (first, added)
+
+    def test_a_lock_it_cannot_take_in_time_times_out_and_leaves_the_record_alone(self, tmp_path):
+        from camp.group.manifest import LockTimeout, reconcile_lock
+        from camp.group.window_record import (
+            WindowEntry,
+            read_window_record,
+            record_window_entry,
+            window_record_path_for,
+            write_window_record,
+        )
+
+        path = window_record_path_for(tmp_path)
+        first = WindowEntry(window_id="@1", name="a", cwd="repo_a", conversation_id="c1")
+        write_window_record(path, [first])
+
+        result: list[object] = []
+
+        def contender():
+            try:
+                record_window_entry(
+                    tmp_path,
+                    WindowEntry(window_id="@1", name="a", cwd=".", conversation_id="c9"),
+                    lock_timeout=0.2,
+                )
+                result.append("recorded")
+            except LockTimeout as exc:
+                result.append(exc)
+
+        with reconcile_lock(tmp_path):
+            t = threading.Thread(target=contender)
+            t.start()
+            t.join(timeout=5)
+
+        assert len(result) == 1 and isinstance(result[0], LockTimeout), result
+        assert read_window_record(path).entries == (first,)
 
 
 # ---------------------------------------------------------------------------

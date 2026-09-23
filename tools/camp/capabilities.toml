@@ -1,7 +1,10 @@
 # camp — group worktree orchestration.
 # Selectable skills (skills/*/ with SKILL.md) are discovered on disk; no
-# subagents and no always-on base. The product surface is the CLI.
+# subagents and no always-on base. The product surface is the CLI, plus one
+# SessionStart hook that records each conversation against the camp
+# workspace window it started in.
 
 [tool]
 name = "camp"
 cli_bin = "bin/camp"
+hooks_json = "hooks/hooks.json"

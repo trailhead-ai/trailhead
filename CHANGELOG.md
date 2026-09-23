@@ -5,6 +5,26 @@ format described by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+- **Breaking:** camp no longer takes over tmux's prefix+`c`. Creating a
+  workspace session installs no key binding, so prefix+`c` opens an ordinary
+  shell window everywhere, and `camp window unbind` is gone with the binding it
+  removed. Start a conversation by running `claude` in any pane of the
+  workspace session: the camp plugin now ships a SessionStart hook that records
+  each conversation against the tmux window it started in (one per window — a
+  resume or `/clear` replaces the window's earlier one), so reaching the
+  workspace through the door after its session has died still brings every
+  recorded conversation's window back. A tmux server still carrying the old
+  binding keeps it until the server restarts, or until
+  `tmux bind-key -T prefix c new-window` puts the stock binding back.
+- Every pane in a workspace's tmux session now starts on the group's declared
+  `[launch] account` with the harness's parent-session variables removed —
+  the first pane and any pane opened by hand, not only the window prefix+`c`
+  used to compose. camp states the scrub and the account on the session itself
+  when it creates (or resurrects) it, overriding whatever the tmux server's
+  own environment carries, such as a server started from inside an agent
+  session. A group whose declared account camp cannot bind now refuses to
+  create the session instead of opening it on the wrong account.
+
 - **Breaking:** A record create, a record update, or a default `lore flush` no
   longer waits on a commit-and-push round trip — each schedules its own
   debounced, single-flight `lore publish --vault NAME` for the vault it wrote,

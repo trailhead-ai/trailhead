@@ -95,21 +95,20 @@ nothing to do with this design. The function keeps existing with one arm.
 
 ## What the created session holds
 
-One window, at the workspace root, running the operator's login shell. Nothing else.
+One window, at the workspace root, running the operator's login shell. No harness argv.
 
 ```
 tmux new-session -d -s camp-trailhead-camp-cli -c /…/worktrees/camp-cli
 ```
 
-No harness argv, no environment scrub, no account binding. A session window holding a
-composed Claude conversation is what the workspace's own window-creation binding produces,
-and that binding needs the window record to write the conversation id into — neither exists
-yet. Composing one here would create exactly the window the next slice has to learn to
-record, and it would be the one window in the workspace that no record describes.
+The session does carry an environment of its own: the harness's scrub as removals and the group's
+declared account as assignments, stated on the session right after it is created and marked, with
+the first pane restarted so it starts under them too. Every pane the session starts inherits that
+environment, so a conversation the operator starts in any pane runs on the group's account — see
+`the-window-record-camp-writes-down-what-is-inside-a-workspace-session.md` for why the environment
+lives on the session and how each conversation is recorded.
 
-This is a real reduction against `camp launch`, which starts a conversation. `camp launch` is
-untouched by this slice and still does. The door's job is to put the operator in the
-workspace; what they run there is theirs until the binding ships.
+The door's job is to put the operator in the workspace; what they run there is theirs.
 
 ## Creation cannot race into a second session
 

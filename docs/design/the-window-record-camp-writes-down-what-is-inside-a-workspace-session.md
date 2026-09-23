@@ -1,13 +1,11 @@
 # The window record — camp writes down what is inside a workspace session
 
-The rendered surface for the windows inside a workspace's tmux session: how one comes to exist,
-what camp writes down about it at the moment it does, and what the operator sees when any part of
-that fails.
+The rendered surface for the windows inside a workspace's tmux session: how a conversation in one
+comes to be recorded, what camp writes down about it at the moment it starts, and what the operator
+sees when any part of that fails.
 
-This is the first mutate phase of the consolidated session model. It writes the record and never
-corrects it. Nothing here reconciles the record against tmux, resurrects a window, or kills one —
-a window closed in tmux stays in the record until the reconciliation slice removes it, and that is
-the expected end state of this work rather than a defect to patch inside it.
+This document covers writing the record. Reconciling it against tmux, resurrecting a workspace from
+it, and stopping one are described in their own documents.
 
 ## The record is a second file beside the manifest
 
@@ -51,139 +49,116 @@ directory or an account name into a file that is later read, printed, or transfe
 
 `assert_not_a_credential_store` (`camp/launch/eligibility.py:268-294`) refuses a directory at,
 under, or above any credential-store entry, unconditionally and independent of any allowlist. It
-has three call sites today; recording a window is the fourth. The floor this slice applies is the
-conjunction of two checks (AC21): the directory must be inside the workspace root, and it must
-clear the credential store. A directory failing either one is refused and **no window is
-recorded** — the refusal is not a warning attached to a recorded window.
+applies to recording a window too. The floor is the conjunction of two checks (AC21): the
+directory must be inside the workspace root, and it must clear the credential store. A conversation
+whose directory fails either one is **not recorded** — never recorded with a warning attached.
 
-## camp chooses the conversation id, because it can never learn it later
+## camp records the conversation id when the harness starts it
 
 A conversation's id cannot be re-derived once its conversation stops running, and this model
 deliberately removes the enumeration that would otherwise answer the question. An id not captured
-when the window was created is not recoverable.
+while the conversation was starting is not recoverable.
 
-So camp mints the id and hands it to the harness rather than discovering it afterwards — the
-pattern `camp/launch/session.py:737` already follows, generating a UUID and passing it to
-`harness.session_launch`. Recording happens at creation for the same reason: there is no later
-moment at which the answer is still available.
+So camp learns the id at the one moment it is certain: when the harness starts the session. The
+camp plugin ships a session-start hook (`hooks/hooks.json`, declared in camp's
+`capabilities.toml`), so it fires for every session wherever the plugin is enabled, however the
+operator started it — a plain `claude` in any pane, a resume, a cleared context. The harness hands
+the hook a payload naming the session; only the harness knows that payload's shape, so camp asks
+the harness seam for the id (`session_start_hook_session_id`) and never parses it itself.
 
-**The composed command carries neither the remote-control flag nor the visible-name flag.** The
-existing composition at `trailhead/harness/claude_code.py:1414-1460` adds both. AC56 forbids both,
-and although retiring them everywhere belongs to a later slice, a *new* composition site built to
-add them would be building work that slice then has to undo. This slice composes without them.
+**The hook finds its window through tmux, never through a name.** tmux exports `TMUX_PANE` to every
+process in a pane, and the hook inherits it from the session that ran it. camp asks tmux where that
+pane sits, then reads the `@camp_*` session-local options workspace-session creation writes. Only a
+session carrying `@camp_workspace` is camp's; a pane in any other session, or no tmux at all,
+records nothing and costs one environment lookup.
 
-**The environment scrub is part of the command the window executes, never part of the tmux request
-that creates it** (AC60). This is not a stylistic choice: a tmux pane inherits the tmux *server's*
-environment, fixed when that server started, so a scrub applied to the request that creates the
-window does nothing at all. camp has already been burned by exactly this — a stale
-`CLAUDE_CONFIG_DIR` in a long-running tmux server's global environment sent every launched session
-to the wrong account's config while the caller's own shell looked correct.
+**The hook is silent.** It runs inside the start of every session on the machine, most of which have
+nothing to do with camp, so it never prints, never fails the session, and bounds every wait — a
+workspace lock it cannot take within a few seconds is given up on rather than waited for.
+
+## The session carries the account, not a composed command
+
+A tmux pane inherits the tmux *server's* environment, fixed by whichever process started the server.
+camp has already been burned by exactly this — a stale `CLAUDE_CONFIG_DIR` in a long-running tmux
+server's global environment sent every launched session to the wrong account's config while the
+caller's own shell looked correct — and a server started from inside an agent session hands every
+pane that session's markers as well.
+
+So the workspace session states its own environment when camp creates it: the harness's scrub as
+removals (`tmux set-environment -r`) and the group's declared account as assignments. A session's
+environment overrides the server's for every pane the session starts, so every pane — the first one,
+and any the operator opens by hand — starts on the group's account with the parent session's markers
+gone, whoever started the server. The first pane started before the session could carry anything,
+so camp restarts it once the environment is stated. A declared account camp cannot bind refuses the
+create; a session tmux will not give its whole environment to is killed rather than left running on
+the wrong account.
 
 ## The recorded window id is the one tmux reports
 
-camp does not predict a window id, it reads back the one tmux assigned (AC18), by asking for it on
-the same call that creates the window. A predicted id is a guess that silently diverges, and every
-later slice matches recorded windows to live ones on this id alone.
+camp does not predict a window id; it records the one tmux reports for the pane the conversation
+started in (AC18). A predicted id is a guess that silently diverges, and every later slice matches
+recorded windows to live ones on this id alone.
 
-## The binding takes over the operator's window-creation key
+## One conversation per window
 
-camp installs no tmux configuration today — no binding, no hook, no session option anywhere in the
-tree. This slice adds the first.
+A window holds one conversation at a time. A later conversation started in the same window — a
+resume, a cleared context, a fresh launch after the last one exited — replaces the window's entry
+rather than adding a second one: resurrecting both would bring back a window the operator had
+already moved on from.
 
-A tmux key binding is **server-global**, not per-session: there is no way to bind a key for one
-session and leave every other session on the server untouched. So the binding camp installs is
-conditional in its own body — inside a camp workspace session it runs camp's window composition,
-and anywhere else it does what the key has always done.
+## State — A conversation starts and is recorded
 
-**What counts as "a camp workspace session" is a mark camp sets, never a name it recognizes.**
-A session-local option camp writes when it creates the session is unforgeable by an unrelated
-session; a session-name pattern is not, and a personal session whose name happens to match would
-run camp's composition against a context its owner never intended. The spec accepts that the key
-behaves differently *inside* a camp workspace session. It does not accept changing the behaviour
-of the operator's own unrelated sessions, and those are the ones a name heuristic puts at risk.
-
-The binding is installed when camp creates a workspace session, and installing it is idempotent —
-re-running it over an existing binding is how a session created by an older camp comes into line
-rather than a special case. The first install in a server prints one line saying the key now means
-something new here, matching how camp already warns about a nested session's prefix conflict
-(`camp/attach/prefix_warning.py:34-37`) rather than inventing a second convention for the same
-surprise. It is not printed on every keypress.
-
-**The binding is installed through a stable dispatcher, never wired directly to a verb's argv.**
-A tmux server outlives camp's own versioning: a server started this morning keeps whatever binding
-it was given, so a binding naming today's argv shape keeps naming it after that shape changes or
-after this slice is rolled back. Binding to a stable entry point means the indirection absorbs
-those changes instead of the operator's window key breaking.
-
-## Taking the binding back
-
-Installing into state camp does not own creates an obligation to be able to undo it. The removal
-path is camp's, not a tmux incantation the operator has to be told: it restores the key's default
-behaviour without killing the server, because killing the server takes down every session on it —
-camp's and the operator's alike — which is the outcome the whole consolidated model exists to
-avoid.
-
-Removal is also how a broken binding is recovered. A dispatch that misfires takes the
-window-creation key with it, so the way back cannot itself be reached by opening a window.
-
-## State — A window opens and is recorded
-
-The ordinary case, and the only one the operator sees nothing for: the window simply opens.
+The ordinary case, and the only one the operator sees nothing for: the conversation simply starts.
 
 ```
-<operator presses the prefix key, then c, inside camp-trailhead-camp-cli>
-<a new window opens, rooted at the workspace, running a fresh conversation>
+<operator opens a window inside camp-trailhead-camp-cli and runs claude>
+<the conversation starts; nothing else happens>
 ```
 
-camp prints nothing on this path. The window is the feedback, and a line of output would land
-inside the new window rather than anywhere the operator was looking.
+camp prints nothing on this path — the hook is silent by construction (see above).
 
-What is written is a new entry carrying the id tmux reported, the window's name, the working
-directory relative to the workspace root, and the conversation id camp chose.
+What is written is an entry carrying the window id tmux reported, the window's name, the working
+directory relative to the workspace root, and the conversation id the harness reported.
 
 ## State — A window holding no Claude conversation
 
-A window opened to run something other than a conversation records the full command line it was
-created with instead of a conversation id (AC20).
+The record's other entry form carries a full command line instead of a conversation id (AC20), for
+a window that runs something other than a conversation. The two forms are exclusive: an entry
+carries a conversation id or a command line, never both and never neither. Resurrection brings such
+a window back as what it was, from the command line recorded.
 
-```
-<operator opens a window running a build, inside camp-trailhead-camp-cli>
-<the window opens and runs it>
-```
-
-The two forms are exclusive: an entry carries a conversation id or a command line, never both and
-never neither. A later slice brings such a window back as what it was, which it can only do from
-the command line recorded here.
+The session-start hook only ever writes the conversation form; nothing camp ships writes the
+command-line form today.
 
 **A recorded command line is scrubbed of credential-shaped material before it is written.** A
 command line is exactly where a token, a password flag, or a bearer header shows up, and recording
 one verbatim moves a secret out of a shell's volatile history and into a file that outlives the
 session. The file is `0o600`, which bounds who can read it but does nothing about how long it
-lasts or what else later copies it. Recording the shape of the command without its secrets is
-enough for a later slice to bring the window back.
+lasts or what else later copies it.
 
-## State — A working directory outside the workspace root
+## State — A conversation started outside the workspace root
 
 ```
-$ camp window new --cwd /etc
-camp: /etc is outside the workspace
+<operator runs claude from /etc in a pane of camp-trailhead-camp-cli>
+<the conversation starts; nothing is recorded>
 ```
 
-No window opens and no entry is written. The refusal names the directory, because the operator
-supplied it and needs to know which one was rejected.
+The window floor is the conjunction of two checks (AC21): the directory must be inside the workspace
+root, and it must clear the credential store. A conversation whose pane directory fails the first is
+not recorded. The conversation itself is untouched — camp has no business refusing a session the
+operator started, only declining to promise it can bring it back.
 
-## State — A working directory at or under a credential store
+## State — A conversation started at or under a credential store
 
 Distinct from the state above, and deliberately so: that one is a containment failure, this one is
 a policy refusal that would apply even to a directory inside the workspace.
 
 ```
-$ camp window new --cwd <a path under a declared credential store>
-camp: refusing to root a window at or under a credential store
+<operator runs claude from ~/.ssh inside the workspace>
+<the conversation starts; nothing is recorded>
 ```
 
-No window opens and no entry is written. The message does not echo the offending path back: the
-path is the thing the deny-list exists to keep out of output.
+Nothing is written, and nothing names the path.
 
 ## State — Two windows recorded at once
 
@@ -201,16 +176,16 @@ corrects — reconciliation removes windows tmux no longer has, and never restor
 
 ## State — The record cannot be written
 
-The directory is unwritable, the disk is full, or the rename fails.
+The directory is unwritable, the disk is full, the rename fails, or the workspace lock is held past
+the hook's bound (the background provisioner holds it across every member's `git worktree add`).
 
 ```
-$ camp window new
-camp: could not write the window record: <the reason>
+<the conversation starts; nothing is recorded>
 ```
 
-The window is **not** opened. The alternative — open the window and fail to record it — produces
-exactly the failure this whole slice exists to prevent: a live conversation whose id is now
-unrecoverable, because the only moment it could have been captured has passed.
+The conversation is not stopped — the hook runs after the harness has already started it, and a
+hook that failed the session would charge camp's problem to the operator's work. The id is lost for
+that conversation; the next conversation started in the window records normally.
 
 The partial temporary file is removed rather than left beside the record, matching
 `camp/group/manifest.py:159-176`.
@@ -255,32 +230,3 @@ bring up a session with no windows (AC33), and it matters as a matter of standin
 camp has repeatedly shipped bugs where a probe that could not answer returned the same value as a
 probe that answered "no", and the caller read that as permission. "Cannot tell" and "nothing
 there" are different answers and stay different values.
-
-## State — The binding is removed and the key goes back to what it was
-
-```
-$ camp window unbind
-camp: the window-creation key is back to the binding camp replaced
-```
-
-The key behaves as it did before camp touched it, in every session on the server, immediately and
-without restarting anything.
-
-prefix+`c` is a single server-global slot, and it is not camp's to spend. An operator who binds it
-in `.tmux.conf` — `new-window -c "#{pane_current_path}"` is a near-ubiquitous line — would
-otherwise lose that binding for the life of the tmux server, since tmux does not re-read the file.
-So camp captures the line it displaces when it first installs, and replays it here. A key the
-operator had deliberately left unbound goes back to unbound; "how it was" has to hold in both
-directions or camp is still imposing a binding.
-
-Where camp has nothing captured — it never installed on this server, or installed before it
-learned to capture — the key is reasserted to tmux's compiled-in default instead, and the message
-says so:
-
-```
-$ camp window unbind
-camp: the window-creation key is back to its tmux default
-```
-
-Running the verb when no binding is installed reports that same end state rather than an error:
-the operator asked for the key back, and it is.

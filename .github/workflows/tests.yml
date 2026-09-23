@@ -60,8 +60,8 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install tmux
-        # tmux is not on the ubuntu-latest runner image. camp's window-binding
-        # tests (tools/camp/tests/test_window_binding_end_to_end.py) drive a
+        # tmux is not on the ubuntu-latest runner image. camp's real-tmux
+        # tests (tools/camp/tests/test_*_real_tmux.py) drive a
         # real tmux server on a throwaway -L socket rather than substituting a
         # fake for the behavioural proof; without this step they'd silently
         # skip in CI (the tests carry their own skip guard for contributors

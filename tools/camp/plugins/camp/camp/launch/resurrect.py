@@ -27,7 +27,7 @@ against. Otherwise the first `Restore` rides
 name), reading the session and its first window's id back on that same
 call; a duplicate answer folds to :class:`DuplicateSession` (the caller's
 connect arm), any other failure to :class:`CreateFailed`. On success the
-session is marked and bound through `_mark_and_bind` — the same helper
+session is marked, and its environment stated, through `_mark_session` — the same helper
 `create_workspace_session`'s own CREATED branch uses, so there is one copy
 of what makes a session a camp workspace session, and one abandon path
 when tmux refuses to mark it. Each later `Restore` is one
@@ -63,7 +63,7 @@ from .window_reconcile import RECONCILE_LOCK_TIMEOUT_SECONDS
 from .workspace_session import (
     _CREATE_SESSION_TIMEOUT_SECONDS,
     WorkspaceSessionOutcome,
-    _mark_and_bind,
+    _mark_session,
     create_workspace_session,
 )
 
@@ -119,8 +119,8 @@ def plan_resurrection(
     store → `Drop` naming no path; not a directory → `Drop` naming the
     recorded path as no longer existing; otherwise `Restore` with the stub.
 
-    *group* is the group config `compose_window` itself resolves a binding
-    from — passed here so resurrection binds the SAME account through the
+    *group* is the group config the door resolves the session's own
+    environment from — passed here so resurrection binds the SAME account through the
     SAME `resolve_launch_environment` resolver (see `_resolve_binding`),
     never a second, independent read of `[launch] account`. It is
     required: a caller with genuinely no group config passes `None`
@@ -164,9 +164,9 @@ def _resolve_binding(
     harness, group: dict | None, env: Mapping[str, str] | None
 ) -> tuple[dict[str, str], str | None, Mapping[str, str] | None]:
     """The account binding a resurrected window's stub carries, resolved
-    through the SAME `resolve_launch_environment` `compose_window` calls —
-    so the account a window runs on and the account its resurrection
-    resumes on cannot disagree.
+    through the SAME `resolve_launch_environment` the workspace session's own
+    environment is resolved through — so the account a window ran on and the
+    account its resurrection resumes on cannot disagree.
 
     `group is None` (a caller that cannot resolve one at all) answers no
     binding, no refusal, and *env* unchanged — today's behavior. `harness is
@@ -359,7 +359,7 @@ class DuplicateSession:
 @dataclass(frozen=True)
 class CreateFailed:
     """The session-creating call failed outright, or came up but could not
-    be marked as a camp workspace session (the shared `_mark_and_bind`
+    be marked as a camp workspace session (the shared `_mark_session`
     abandon path) — *error* carries tmux's own words. The window record is
     touched in neither case."""
 
@@ -485,7 +485,7 @@ def resurrect_workspace_session(
     if isinstance(first_answer, NewSessionWindowFailure):
         return CreateFailed(session_name=name, error=first_answer.stderr)
 
-    mark_failure = _mark_and_bind(tmux, name, group_name, slug, session_env)
+    mark_failure = _mark_session(tmux, name, group_name, slug, session_env)
     if mark_failure is not None:
         return CreateFailed(session_name=name, error=mark_failure.error or "")
 

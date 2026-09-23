@@ -701,6 +701,33 @@ class TestClaudeCodeSessionResume:
         assert ClaudeCodeHarness().session_resume(None) is None
 
 
+class TestClaudeCodeSessionStartHookSessionId:
+    """Claude Code hands a SessionStart hook a JSON object on stdin naming the
+    session that just started. The seam reads the id out of it so a caller
+    never parses the harness's own payload shape."""
+
+    @pytest.mark.parametrize("session_id", ["0f6c2d1e-aaaa-4bbb-8ccc-123456789abc", "sess-2"])
+    def test_answers_the_session_id_the_payload_names(self, session_id):
+        payload = json.dumps(
+            {"session_id": session_id, "hook_event_name": "SessionStart", "source": "startup"}
+        )
+        assert ClaudeCodeHarness().session_start_hook_session_id(payload) == session_id
+
+    @pytest.mark.parametrize(
+        "payload",
+        ["", "not json", "[]", '"sess-1"', "{}", '{"session_id": null}', '{"session_id": 7}'],
+    )
+    def test_answers_none_for_a_payload_naming_no_session(self, payload):
+        assert ClaudeCodeHarness().session_start_hook_session_id(payload) is None
+
+    @pytest.mark.parametrize("bad", ["a b", "a;rm -rf /", "$(whoami)", "../escape", "a/b", "-x"])
+    def test_answers_none_for_an_id_that_is_not_a_plain_token(self, bad):
+        """The id is recorded and later handed back to a resume argv, so one
+        that could carry a path or an argument never leaves the seam."""
+        payload = json.dumps({"session_id": bad})
+        assert ClaudeCodeHarness().session_start_hook_session_id(payload) is None
+
+
 class TestClaudeCodeSessionLaunchEnvUnset:
     def test_the_account_variable_is_scrubbed_so_the_default_is_absence(self):
         """The undeclared-account default is the variable being ABSENT, which only

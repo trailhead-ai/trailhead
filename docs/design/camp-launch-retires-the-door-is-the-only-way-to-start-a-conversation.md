@@ -1,9 +1,10 @@
-# camp launch retires: the door is the only way to start a conversation
+# camp launch retires: the door is the only way into a workspace
 
 The rendered surface for retiring the launch verb family: `camp launch` in every flavor, the
-directory allowlist that fenced `--dir`, and the harness composition behind them. After this, a
-Claude conversation starts in exactly one way. The operator reaches the workspace's tmux session
-through the door, and presses the ordinary new-window key inside it.
+directory allowlist that fenced `--dir`, and the harness composition behind them. camp composes no
+conversation command. The operator reaches the workspace's tmux session through the door and starts
+a conversation in any pane of it; camp records it when it starts (see
+`the-window-record-camp-writes-down-what-is-inside-a-workspace-session.md`).
 
 This is the first cleanup slice of the consolidated session model. It retires the launch family.
 It does not retire `camp sessions`, its recoverable listing, or ref-prefix `camp kill` and
@@ -28,24 +29,23 @@ phone-driven sessions the spec gives up. Nothing is left for it to do.
 
 A group can declare the account its conversations run under, as `[launch] account`. `camp
 launch` honored it: the pane's environment dropped every ambient account variable and then
-assigned the declared one. The window key composed the first half of that and not the second,
-so a window opened in a group with a declared account ran on the default account instead.
+assigned the declared one.
 
-With `camp launch` gone the window key is the only way in, so it composes both halves. It asks the
-same resolver that workspace provisioning already asks when it seeds the account's trust entry,
-so the account a window runs on and the account its workspace was trusted in cannot disagree.
-The pane command is `env`, then one `-u` per scrubbed name, then one `NAME=value` per binding,
-then the conversation's argv. A group that declares no account gets no assignment, which is how
-the harness states its default.
+With `camp launch` gone, the workspace session itself carries both halves: the scrub as removals
+and the declared account as assignments, stated on the session when the door creates it, so every
+pane the session starts inherits them. The door asks the same resolver that workspace provisioning
+already asks when it seeds the account's trust entry, so the account a pane runs on and the account
+its workspace was trusted in cannot disagree. A group that declares no account gets no assignment,
+which is how the harness states its default.
 
 ## The allowlist goes, the floor stays
 
 `[launch] roots` answered one question: which directories an operator may name to `--dir`. With
-`--dir` gone nothing asks it. A composed window is rooted inside the workspace or refused, and no
-config value widens that.
+`--dir` gone nothing asks it. A conversation is recorded only when its directory is inside the
+workspace, and no config value widens that.
 
 The credential floor answers a different question, whether a directory is a credential store, and
-it stays on every path that roots a window. The window key already applies it directly.
+it stays on every path that roots or records a window.
 
 Existing group configs name `roots`, and `[launch]` refuses keys it does not know. Refusing
 `roots` outright would make every camp command fail for those groups until someone edited the
@@ -118,12 +118,8 @@ works and says once, on stderr:
 camp: [launch] roots in /Users/you/.config/camp/groups/trailhead.toml is no longer used and grants nothing — remove it
 ```
 
-A window rooted at `~/code/elsewhere`, a directory the allowlist names but outside the workspace,
-is refused exactly as it would be with no `roots` at all:
-
-```
-camp: cannot open window — directory ~/code/elsewhere is outside the workspace root ~/.local/state/camp/trailhead/worktrees/camp-cli; choose a directory inside the workspace
-```
+A conversation started in `~/code/elsewhere`, a directory the allowlist names but outside the
+workspace, is not recorded, exactly as it would not be with no `roots` at all.
 
 ## State — A flag naming a directory outside the workspace tree roots no session
 
@@ -134,30 +130,31 @@ $ camp new scratch --launch
 camp new: unknown flag '--launch'
 ```
 
-No flag remaining on any camp verb names a directory for a conversation to be rooted at. The
-window key's directory is the pane's own, and the floor above bounds it.
+No flag remaining on any camp verb names a directory for a conversation to be rooted at. A
+conversation's directory is its pane's own, and the floor above bounds what is recorded.
 
-## State — A window composed by the workspace key carries no remote-control or visible-name flag
+## State — camp composes no conversation command, so no remote-control or visible-name flag
 
-The window's start command, as tmux reports it:
+The operator runs the harness themselves, in a pane of the workspace session. There is no
+`--remote-control` and no `--name` in any command camp's harness seam can compose, because camp
+composes no command to start a conversation at all.
+
+## State — A recorded conversation has no enumeration poll behind it
+
+The record gains its entry when the harness starts the session and tells camp's session-start hook
+its id. camp never asks the harness to list its sessions to learn or confirm that id. A harness
+whose enumeration would fail or hang does not delay or fail the conversation.
+
+## State — A pane's environment scrub and account come from the session
+
+A pane in a group with a declared account, as the pane itself sees its environment:
 
 ```
-env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT -u CLAUDE_CONFIG_DIR … CLAUDE_CONFIG_DIR=/Users/tduffield/.claude-levr claude --session-id 3b0e…
+CLAUDE_CONFIG_DIR=/Users/tduffield/.claude-levr
 ```
 
-There is no `--remote-control` and no `--name`, in this command or in any command camp's
-harness seam can compose. For a group with no declared account there is no assignment, and the
-`-u` scrub is unchanged.
-
-## State — A composed conversation starts with no enumeration poll behind it
-
-The window opens and the record gains its entry, with the conversation id camp chose, in the same
-step. camp never asks the harness to list its sessions to learn or confirm that id. A harness
-whose enumeration would fail or hang does not delay or fail the window.
-
-## State — A composed window's environment scrub rides the command the window runs
-
-The scrub and the account assignment are both tokens of the pane's own command, shown above.
-The tmux request that creates the window carries no `-e` and no `set-environment`, because a
-pane inherits the tmux server's environment and a scrub applied to the request would do
-nothing.
+with none of the harness's scrubbed names present, whatever the tmux server's own global
+environment carries. For a group with no declared account there is no assignment, and the scrub
+is unchanged. The removals and the assignment are the workspace session's own environment
+(`tmux set-environment -r NAME` and `tmux set-environment NAME value` against that session), which
+overrides the server's for every pane the session starts.

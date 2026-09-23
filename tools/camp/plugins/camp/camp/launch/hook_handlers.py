@@ -1,7 +1,11 @@
-"""Hook handlers for camp: session-bootstrap and worktree-cleanup.
+"""Hook handlers for camp: session-bootstrap, record-conversation, and
+worktree-cleanup.
 
   SessionStart   → camp session-bootstrap   (wired by hooks_writer into member
                    .claude/settings.json)
+  SessionStart   → camp record-conversation (shipped in the camp plugin's own
+                   hooks/hooks.json, so it fires for every session wherever the
+                   plugin is enabled — see cmd_record_conversation)
   worktree-cleanup                            (retained + invocable, but NOT
                    auto-wired: the WorktreeRemove wiring was dropped — camp owns
                    teardown via `camp rm`. Kept for direct invocation / vanilla use.)
@@ -36,6 +40,7 @@ once that changes.
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -298,6 +303,41 @@ def cmd_session_bootstrap() -> None:
 
     _emit_capability_report(group, slug)
 
+    sys.exit(0)
+
+
+def cmd_record_conversation() -> None:
+    """camp record-conversation: record the session that just started
+    against the camp workspace window it is running in.
+
+    The harness hands the hook its session-start payload on stdin; tmux
+    hands it ``TMUX_PANE``. Everything else — whether the pane is in a camp
+    workspace session at all, which workspace, which conversation — is
+    decided by `camp.launch.conversation_capture.capture_conversation`.
+
+    Silent exit-0 always, including on a failure this function did not
+    anticipate: it fires for every session on the machine, and a session
+    that has nothing to do with camp must never see camp's output or pay
+    for camp's bug. Nothing is written to stdout, which a harness may read
+    as context for the session.
+    """
+    try:
+        payload = sys.stdin.read()
+        pane = os.environ.get("TMUX_PANE")
+        if not pane:
+            sys.exit(0)
+        group_configs = _load_groups_silently()
+        if not group_configs:
+            sys.exit(0)
+
+        from .conversation_capture import capture_conversation
+        from .tmux import Tmux
+
+        capture_conversation(
+            payload, pane=pane, tmux=Tmux(), all_configs=group_configs, env=os.environ
+        )
+    except Exception:
+        pass
     sys.exit(0)
 
 

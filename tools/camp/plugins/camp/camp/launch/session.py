@@ -7,13 +7,14 @@ asks the same question the same way.
 
 `resolve_launch_environment` is the one resolution of a group's declared
 account, the environment a pane binds it under, and the scrub that strips the
-ambient environment first — shared by workspace bring-up's trust pre-seed and
-the window-composition path that actually starts a conversation. A second,
+ambient environment first — shared by workspace bring-up's trust pre-seed,
+the workspace session's own environment (`resolve_session_environment`), and
+resurrection's resume stubs. A second,
 independent read of the same declaration is two answers that can disagree,
 and the disagreement is invisible until a workspace is trusted in one
 account's config file and started under another's.
 
-Refusal posture. Both entry points raise :class:`LaunchError` on a harness
+Refusal posture. Every resolution entry point raises :class:`LaunchError` on a harness
 seam that cannot answer what was asked of it — a harness camp cannot name, or
 one that cannot resolve an account binding it was explicitly given.
 """
@@ -82,9 +83,8 @@ def _unsupported_harness(harness, profile, what: str) -> LaunchError:
     operator.
 
     Worded without "launch" on purpose: this resolver is also reached from
-    the window-creation key's refusal path
-    (`cli/window_dispatch.py:dispatch_window`, via `compose_window`), which
-    has no launch verb of its own to name.
+    workspace-session creation (`resolve_session_environment`), which has no
+    launch verb of its own to name.
     """
     return LaunchError(
         f"camp: cannot bind an account — harness {harness.name or profile.binary!r} "

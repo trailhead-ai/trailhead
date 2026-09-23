@@ -78,9 +78,9 @@ def resolve_verb(raw: str) -> tuple[str, str]:
 # land here for the same reason the renames do: an operator who typed one of
 # them yesterday typed a VERB, and the bare-slug refusal answers a question
 # about slugs. All three point at `attach`, with no flag to carry across:
-# `camp attach` reaches a workspace's tmux session, and the ordinary
-# new-window key inside it starts a conversation — reaching the workspace is
-# how an operator resumes a conversation today.
+# `camp attach` reaches a workspace's tmux session, and a conversation is
+# started in any pane of it — reaching the workspace is how an operator
+# resumes a conversation today.
 LEGACY_REDIRECTS: dict[str, str] = {
     "open": "new",
     "break": "remove",

@@ -1273,6 +1273,25 @@ class ClaudeCodeHarness(Harness):
             return None
         return ["claude", "--resume", session_id]
 
+    def session_start_hook_session_id(self, payload: str) -> str | None:
+        """The ``session_id`` field of the JSON object Claude Code writes to a
+        SessionStart hook's stdin, or None.
+
+        The field is present for every SessionStart source — a new session, a
+        resume, ``/clear``, and a compaction — so a hook sees the id the
+        session is running under right now, including after ``/clear`` moves
+        it to a fresh one. The same plain-token guard :meth:`session_resume`
+        applies is applied here, so an id this answers is one it would resume.
+        """
+        try:
+            data = json.loads(payload)
+        except (json.JSONDecodeError, TypeError):
+            return None
+        if not isinstance(data, dict):
+            return None
+        session_id = data.get("session_id")
+        return session_id if _is_session_id(session_id) else None
+
     # -- session transcript enumeration ----------------------------------------
     #
     # Enumerates <claude-dir>/projects/*/*.jsonl — DEPTH 2 ONLY. Claude Code

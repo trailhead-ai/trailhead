@@ -39,11 +39,12 @@ camp --help          # full command reference
 camp --version       # show version + resolved binary path
 ```
 
-A conversation starts in exactly one way: reach the workspace's tmux session
-with `camp attach <slug>` or `camp new <slug>`, then press the ordinary
-window-creation key (prefix+`c`) inside it. Resuming a dead conversation works
-the same way — reaching the workspace through the door brings its windows
-back, and each window that held a conversation says how to resume it.
+Reach the workspace's tmux session with `camp attach <slug>` or
+`camp new <slug>`, then start a conversation however you like — run `claude`
+in any pane. camp records each conversation against the window it started in,
+so resuming a dead one works the same way: reaching the workspace through the
+door brings its windows back, and each window that held a conversation says
+how to resume it.
 
 ## Shell integration
 
@@ -90,9 +91,17 @@ camp sessions --recoverable [<slug>] [--dir <path>]         # what is dead
 
 `camp new <slug>` creates the workspace's tmux session (a bare shell, rooted at
 the workspace) and attaches to it, described above under "Quick start" and in
-"`camp remove` changes your shell's directory". Starting a harness conversation
-in a workspace is the ordinary window-creation key pressed inside that
-session, run from inside the workspace `camp new` or `camp attach` just opened.
+"`camp remove` changes your shell's directory". Windows and panes in that
+session are ordinary tmux ones — open them with your usual keys and run
+whatever you like in them.
+
+Starting a harness conversation in any pane of the session records it in the
+workspace's window record: the camp plugin ships a session-start hook that
+reads the new session's id and writes it against the tmux window it is
+running in, one conversation per window (a resume or a cleared context
+replaces the window's earlier one). A conversation started outside the
+workspace's own directory, or outside a camp workspace session, is not
+recorded.
 
 `camp list` and `camp sessions` both take `--all-groups` (short: `-g`), which
 answers for every configured group in one invocation instead of one — every
@@ -102,9 +111,10 @@ group with plain `camp sessions --group <name>` (or from inside a workspace)
 does the opposite, narrowing the live listing to that group's own rows rather
 than the ordinary cross-store answer.
 
-The pane a new window opens in drops the session's ambient credential
-variables and binds the group's declared account, so a window never inherits
-a different account's credentials — see
+Every pane in a workspace's tmux session — its first one, and any you open —
+starts without the harness's ambient session variables and on the group's
+declared account, whatever the tmux server's own environment carries, so a
+plain `claude` in any pane runs on the right account — see
 [Declaring a group's account](#declaring-a-groups-account) below.
 
 ### Declaring a group's account

@@ -90,7 +90,8 @@ saying `created` would hide that.
 Every window tmux created is then written back into the record with the id tmux assigned,
 replacing the id it had, under the workspace lock, as a read-modify-write: entries that were
 dropped or that failed to come back are removed, and an entry that appeared in the record while
-the windows were being created — the binding can fire the moment the session exists — is kept.
+the windows were being created — a conversation can start in a pane the moment the session
+exists — is kept.
 The record after resurrection is the workspace as it now is, so the reconciliation that runs on
 the next connect finds every window it lists and drops none of them.
 

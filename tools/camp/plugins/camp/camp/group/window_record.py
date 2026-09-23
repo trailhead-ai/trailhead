@@ -259,33 +259,48 @@ def read_window_record(path: Path) -> WindowRecordRead:
     return WindowRecordRead(status="ok", entries=tuple(entries))
 
 
-def append_window_entry_unlocked(path: Path, entry: WindowEntry) -> None:
-    """Read-modify-write one window entry into the record WITHOUT
-    acquiring the workspace lock.
+def record_window_entry_unlocked(path: Path, entry: WindowEntry) -> None:
+    """Read-modify-write *entry* into the record WITHOUT acquiring the
+    workspace lock: it replaces, in place, the entry already recorded for
+    the same `window_id`, or is appended when that window has none.
+
+    One entry per window, because a window holds one conversation at a
+    time — a new conversation started in it (a fresh launch, a resume, a
+    cleared context) supersedes the one recorded before, and resurrecting
+    both would bring back a window the operator had already moved on from.
 
     The caller MUST already hold the workspace's reconcile_lock — mirrors
     flip_member_state_unlocked's contract (camp/group/manifest.py:390-396).
     Re-acquiring flock on a second fd in the same process blocks forever,
-    so this unlocked primitive is the only append path available to a
+    so this unlocked primitive is the only write path available to a
     caller already inside `with reconcile_lock(ws_dir): ...`.
     """
     entries = _read_window_record_unlocked(path)
-    entries.append(entry)
+    for index, existing in enumerate(entries):
+        if existing.window_id == entry.window_id:
+            entries[index] = entry
+            break
+    else:
+        entries.append(entry)
     write_window_record(path, entries)
 
 
-def append_window_entry(ws_dir: Path, entry: WindowEntry) -> None:
-    """Acquire the workspace lock and append one window entry to its
-    record.
+def record_window_entry(
+    ws_dir: Path, entry: WindowEntry, *, lock_timeout: float | None = None
+) -> None:
+    """Acquire the workspace lock and record *entry* — see
+    :func:`record_window_entry_unlocked` for the one-entry-per-window rule.
 
     Serializes on the same workspace-scoped lock manifest mutations use
     (`reconcile_lock`), so a concurrent pair of writers under the same
-    ws_dir never race a read-modify-write and lose an entry.
+    ws_dir never race a read-modify-write and lose an entry. *lock_timeout*
+    bounds the wait for that lock; `LockTimeout` propagates when it runs
+    out, with the record untouched. ``None`` waits indefinitely.
     """
     ws_dir = Path(ws_dir)
     path = window_record_path_for(ws_dir)
-    with reconcile_lock(ws_dir):
-        append_window_entry_unlocked(path, entry)
+    with reconcile_lock(ws_dir, timeout=lock_timeout):
+        record_window_entry_unlocked(path, entry)
 
 
 @dataclass(frozen=True)
@@ -316,7 +331,7 @@ def restamp_window_entries(
 
     Knows nothing about resurrection itself — it is the record
     read-modify-write resurrection's engine calls once its per-window
-    plan is settled, mirroring append_window_entry's locked-wrapper shape.
+    plan is settled, mirroring record_window_entry's locked-wrapper shape.
 
     *mapping* is old `window_id` -> replacement `WindowEntry` (same
     logical entry, tmux's newly assigned id, and tmux's read-back name).
