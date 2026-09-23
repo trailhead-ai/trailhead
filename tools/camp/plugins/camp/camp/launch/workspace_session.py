@@ -132,8 +132,8 @@ def create_workspace_session(
     Raises :class:`~camp.launch.session.LaunchError` (via
     :func:`~camp.launch.eligibility.assert_not_a_credential_store`) before
     any tmux call this function makes, if *workspace_dir* is at, under, or
-    above a credential store — that rule is unconditional and independent
-    of the retired launch allowlist. It applies to every call that reaches
+    above a credential store — that rule is unconditional and no group
+    config widens it. It applies to every call that reaches
     THIS function, and only those: `create_or_connect_workspace_session`'s
     connect arm returns from its own `has_session` probe before this
     function is ever called, so an existing session at the derived name is

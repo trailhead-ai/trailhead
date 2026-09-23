@@ -414,7 +414,7 @@ def load_group(path: Path) -> dict[str, Any]:
     # --- [harness] section (optional) — harness profile config ---
     harness = _parse_harness(raw.get("harness"), path)
 
-    # --- [launch] section (optional) — account binding; roots is retired ---
+    # --- [launch] section (optional) — account binding; roots grants nothing ---
     launch = _parse_launch(raw.get("launch"), path)
 
     # --- [dev_env] section — warn-and-continue (deferred) ---
@@ -719,7 +719,7 @@ def _parse_harness(raw: Any, path: Path) -> dict[str, Any] | None:
 
 
 # ---------------------------------------------------------------------------
-# [launch] block — account binding; roots is a retired, no-op key
+# [launch] block — account binding; roots is a tolerated key that grants nothing
 # ---------------------------------------------------------------------------
 
 # Keys recognized inside [launch]. Anything else is a misconfiguration and is

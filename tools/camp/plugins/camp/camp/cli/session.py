@@ -1104,9 +1104,9 @@ def _cmd_sessions_group_cli(
     listings by the same argument, so the subtraction that produces the
     recoverable rows covers the same set on both sides.
 
-    `--dir` is NOT eligibility-gated. The allowlist fences launching, not
-    looking, and a listing that refused to describe a directory would tell the
-    operator nothing they could not learn by looking at it. The path need not
+    `--dir` is NOT gated by the credential floor. The floor fences rooting a
+    window, not looking, and a listing that refused to describe a directory
+    would tell the operator nothing they could not learn by looking at it. The path need not
     exist either: a torn-down root is precisely the scope a recovery listing is
     asked about.
 

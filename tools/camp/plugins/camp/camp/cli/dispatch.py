@@ -137,10 +137,9 @@ _STATE_CHANGING_HOST_VERBS = frozenset({"kill"})
 #: is state-changing — a stop names no group at all, so `--host` + `--group`
 #: together on "kill" takes the same collision refusal `list`/`sessions`/
 #: `attach` take, per `docs/design/stopping-a-session-on-a-named-machine.md`,
-#: "The reference names the session; the group is not asked for". "launch",
-#: this set's one-time member, is retired and never reaches here — the set
-#: is empty until a future state-changing, group-forwarding host verb needs
-#: it again.
+#: "The reference names the session; the group is not asked for". No host
+#: verb currently both changes state and forwards a group, so the set is
+#: empty.
 _GROUP_REQUIRED_HOST_VERBS: frozenset[str] = frozenset()
 
 

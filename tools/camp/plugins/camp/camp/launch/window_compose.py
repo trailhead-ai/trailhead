@@ -29,8 +29,8 @@ record is touched:
   needs to know which one was rejected.
 - :class:`WindowAtCredentialStore` — `cwd` resolves at, under, or above a
   declared credential store
-  (`camp.launch.eligibility.assert_not_a_credential_store`, unconditional
-  and independent of the retired launch allowlist). Its message deliberately does
+  (`camp.launch.eligibility.assert_not_a_credential_store`, unconditional;
+  no group config widens it). Its message deliberately does
   NOT echo the path back — unlike the containment refusal, a credential
   store's location is not information this module hands back over a
   channel an operator reads.
