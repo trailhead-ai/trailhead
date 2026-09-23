@@ -1128,11 +1128,13 @@ def test_single_host_list_threads_declared_connect_timeout_to_the_relay(
 def test_relay_route_verb_set_is_every_host_verb_except_attach():  # inert-gate: allow verb-set drift reminder
     """Pins the enumeration this parametrized test below drives against —
     `_HOST_VERBS` minus `attach` (which hands off interactively, with no
-    transport seam to assert at) is exactly {list, sessions, launch, kill}.
-    A verb added to `_HOST_VERBS` without a matching case below breaks this
-    test, not silently ships uncovered."""
+    transport seam to assert at) is exactly {list, sessions, kill}. `launch`
+    is retired and absent from `_HOST_VERBS` — a retired verb never reaches
+    this relay route at all, redirecting instead. A verb added to
+    `_HOST_VERBS` without a matching case below breaks this test, not
+    silently ships uncovered."""
     dispatch = _dispatch_module()
-    assert dispatch._HOST_VERBS - {"attach"} == {"list", "sessions", "launch", "kill"}
+    assert dispatch._HOST_VERBS - {"attach"} == {"list", "sessions", "kill"}
 
 
 @pytest.mark.parametrize(
@@ -1140,20 +1142,21 @@ def test_relay_route_verb_set_is_every_host_verb_except_attach():  # inert-gate:
     [
         ["list", "--host", "andromeda", "--json"],
         ["sessions", "--host", "andromeda", "--json"],
-        ["launch", "somews", "--host", "andromeda", "--group", "testgrp", "--json"],
         ["kill", "ref1", "--host", "andromeda", "--json"],
     ],
-    ids=["list", "sessions", "launch", "kill"],
+    ids=["list", "sessions", "kill"],
 )
 def test_every_relay_host_verb_threads_the_declared_connect_timeout(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture, argv: list[str]
 ) -> None:
     """Drives every member of `_HOST_VERBS` reachable through the single-
-    host `--host` relay (list, sessions, launch, kill — attach's `--host`
-    path hands off interactively and is covered separately, in
-    test_attach_cli.py's cross-host probe route). A verb left reading the
-    old constant instead of the resolved value fails this test rather than
-    shipping — the exact regression a sample of two verbs would let through."""
+    host `--host` relay (list, sessions, kill — attach's `--host` path hands
+    off interactively and is covered separately, in test_attach_cli.py's
+    cross-host probe route; `launch` is retired and redirects before ever
+    reaching this relay, covered in test_cli_dispatch_split.py). A verb left
+    reading the old constant instead of the resolved value fails this test
+    rather than shipping — the exact regression a sample of two verbs would
+    let through."""
     _hosts_and_group_env_with_connect_timeout(tmp_path, monkeypatch, "connect_timeout = 9\n")
     transport = _transport_module()
     seen: list[float] = []
