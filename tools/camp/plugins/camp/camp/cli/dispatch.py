@@ -105,12 +105,15 @@ _OPAQUE_PAYLOAD_VERBS = frozenset({"foreach"})
 #: the JSON relay transport `_dispatch_host_command` builds for "list"/
 #: "sessions" — see that function's own docstring.
 #:
-#: "launch" and "kill" are the two STATE-CHANGING members — see
-#: `_STATE_CHANGING_HOST_VERBS` below. "kill" is nonetheless groupless (see
-#: `_GROUP_REQUIRED_HOST_VERBS`'s own comment for why the two concerns no
-#: longer share one set).
+#: "launch" is retired (`LEGACY_REDIRECTS`) and absent from this set: the
+#: retired-verb redirect is classified and handled ahead of ALL host routing
+#: (both the --all-hosts branch and the --host branch below), so a retired
+#: verb never reaches this set's applicability check at all. "kill" is the
+#: remaining STATE-CHANGING member — see `_STATE_CHANGING_HOST_VERBS` below —
+#: and is nonetheless groupless (see `_GROUP_REQUIRED_HOST_VERBS`'s own
+#: comment for why the two concerns don't share one set).
 HOST_FLAG = "--host"
-_HOST_VERBS = frozenset({"list", "sessions", "attach", "launch", "kill"})
+_HOST_VERBS = frozenset({"list", "sessions", "attach", "kill"})
 
 #: The subset of `_HOST_VERBS` that changes state on the named machine,
 #: rather than merely reading from it. Held here, once, so the
@@ -119,14 +122,10 @@ _HOST_VERBS = frozenset({"list", "sessions", "attach", "launch", "kill"})
 #: changes state, not because it merely "has no meaning" — where every
 #: other `_HOST_VERBS` member gets the generic refusal.
 #:
-#: This set drives ONLY the --all-hosts wording. It used to also decide the
-#: --group requirement below, but "kill" joining it broke that coincidence:
-#: a stop is groupless (the reference names the session, and the far side
-#: resolves it against its own pool exactly as it would locally), so "kill"
-#: belongs here for the all-hosts refusal but must NOT pick up "launch"'s
-#: --group requirement — see `_GROUP_REQUIRED_HOST_VERBS` below, which holds
-#: only "launch".
-_STATE_CHANGING_HOST_VERBS = frozenset({"launch", "kill"})
+#: This set drives ONLY the --all-hosts wording. "launch" is retired and
+#: absent — a `camp launch --all-hosts` is caught by the retired-verb
+#: redirect before this set is ever consulted.
+_STATE_CHANGING_HOST_VERBS = frozenset({"kill"})
 
 #: The subset of `_HOST_VERBS` for which `--host` requires an explicit
 #: `--group <name>` rather than colliding with one the way every other
@@ -138,8 +137,11 @@ _STATE_CHANGING_HOST_VERBS = frozenset({"launch", "kill"})
 #: is state-changing — a stop names no group at all, so `--host` + `--group`
 #: together on "kill" takes the same collision refusal `list`/`sessions`/
 #: `attach` take, per `docs/design/stopping-a-session-on-a-named-machine.md`,
-#: "The reference names the session; the group is not asked for".
-_GROUP_REQUIRED_HOST_VERBS = frozenset({"launch"})
+#: "The reference names the session; the group is not asked for". "launch",
+#: this set's one-time member, is retired and never reaches here — the set
+#: is empty until a future state-changing, group-forwarding host verb needs
+#: it again.
+_GROUP_REQUIRED_HOST_VERBS: frozenset[str] = frozenset()
 
 
 def read_router_options(verb: str, args: list[str]) -> "tuple[Any, list[str]]":
@@ -657,6 +659,26 @@ def main() -> None:
     router_options, scan_rest = read_router_options(first or "camp", scan_rest)
     all_groups = router_options.all_groups
     all_hosts = router_options.all_hosts
+
+    # ---------------------------------------------------------------------------
+    # Retired-verb redirect — classified and handled here, BEFORE any host
+    # routing below (the --all-hosts branch and the --host branch alike). A
+    # retired verb (e.g. "launch") must never reach a live-host
+    # applicability check, an --all-hosts state-changing refusal, a
+    # hosts.toml load, or a forward to another machine that may still run
+    # pre-retirement code — it must redirect locally exactly as it does with
+    # no host flag at all. Without this check first, a retired verb removed
+    # from `_HOST_VERBS`/`_ALL_HOSTS_VERBS` would instead earn the generic
+    # "has no meaning here" refusal those checks give an inapplicable verb —
+    # a wrong answer about a flag, not the right answer that the verb itself
+    # is gone.
+    # ---------------------------------------------------------------------------
+    _legacy_canonical, _legacy_kind = _resolve_verb(first) if first else (first, "live")
+    if _legacy_kind == "legacy":
+        from ..spine import cmd_legacy_redirect
+
+        cmd_legacy_redirect(_legacy_canonical, _LEGACY_REDIRECTS[_legacy_canonical])
+        return
 
     # ---------------------------------------------------------------------------
     # --all-hosts / -a — read at the same early point as --all-groups, and

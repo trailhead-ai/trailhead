@@ -82,7 +82,7 @@ def test_canonical_verb_identity_for_non_aliases() -> None:
 
 
 @pytest.mark.parametrize(
-    "verb", ["new", "remove", "pwd", "activate", "setup", "launch", "sessions"]
+    "verb", ["new", "remove", "pwd", "activate", "setup", "sessions"]
 )
 def test_needs_group_verb_asks_for_a_group_rather_than_erroring_as_a_slug(
     verb: str, groupless_env: dict[str, str]
@@ -112,6 +112,39 @@ def test_kill_reaches_its_handler_from_a_cwd_where_no_group_resolves(
 
 
 # ---------------------------------------------------------------------------
+# cmd_legacy_redirect wording — "replaced", verbatim, for a retired verb and
+# for a renamed one alike (docs/design/camp-launch-retires-the-door-is-the-
+# only-way-to-start-a-conversation.md, the two "## State —" transcripts).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "typed_verb,rest,replacement",
+    [
+        ("launch", ["camp-cli"], "attach"),
+        ("resume", ["8f2c"], "attach"),
+        ("bookmark", [], "attach"),
+        ("open", [], "new"),
+    ],
+    ids=["launch", "resume", "bookmark", "open-renamed"],
+)
+def test_redirect_line_reads_replaced_for_retired_and_renamed_verbs(
+    typed_verb: str, rest: list[str], replacement: str, tmp_path: Path
+) -> None:
+    """The redirect line names 'replaced', never 'renamed' — one wording
+    shared by a retired verb (launch/resume/bookmark) and a renamed one
+    (open). The named replacement varies with the verb typed."""
+    result = _run([typed_verb, *rest], env={"CAMP_CONFIG_DIR": str(tmp_path)})
+    combined = result.stdout + result.stderr
+    assert result.returncode == 1, combined
+    assert (
+        f"camp {typed_verb}: this command has been replaced — use 'camp "
+        f"{replacement}' instead."
+    ) in combined, combined
+    assert "has been renamed" not in combined, combined
+
+
+# ---------------------------------------------------------------------------
 # LEGACY_REDIRECTS — direct, never chained
 # ---------------------------------------------------------------------------
 
@@ -129,20 +162,57 @@ def test_legacy_redirect_keys_classify_as_legacy() -> None:
         )
 
 
-def test_legacy_redirect_targets_resolve_live() -> None:
-    """Every redirect points at a verb the resolver reports as live — which is
+def test_legacy_redirect_targets_are_live_reserved_verbs() -> None:
+    """Every redirect points at a token in camp's real verb registry
+    (`spine.RESERVED`) that is neither itself retired nor disabled — which is
     what 'never chained' means operationally: follow the redirect once and you
-    land on something that dispatches."""
+    land on something that dispatches. `resolve_verb(head) == "live"` alone is
+    not enough: an unknown token (a typo, a would-be bare slug) also resolves
+    'live' by default, so it would pass a kind-only check while still failing
+    to dispatch anywhere."""
+    from camp.spine import RESERVED
     from camp.workspace.verb_taxonomy import LEGACY_REDIRECTS, resolve_verb
 
     for old_verb, target in LEGACY_REDIRECTS.items():
         head = target.split()[0]
+        assert head in RESERVED, (
+            f"{old_verb!r} redirects to {head!r}, which is not in camp's live "
+            "verb registry (spine.RESERVED) — it dispatches nowhere"
+        )
         canonical, kind = resolve_verb(head)
         assert kind == "live", (
             f"{old_verb!r} redirects to {head!r}, which resolves {kind!r} — the "
             "dispatcher does not support chained redirects; point it at a live verb"
         )
         assert canonical == head
+
+
+def test_legacy_redirect_target_check_rejects_a_retired_or_unknown_target() -> None:
+    """The target check must actually catch a bad target, not merely pass on
+    the real table: vary the head token across a live verb, a retired verb,
+    and an unknown token, and the checker's answer varies with it."""
+    from camp.spine import RESERVED
+    from camp.workspace.verb_taxonomy import resolve_verb
+
+    def target_is_valid(head: str) -> bool:
+        canonical, kind = resolve_verb(head)
+        return head in RESERVED and kind == "live" and canonical == head
+
+    assert target_is_valid("attach") is True
+    assert target_is_valid("launch") is False, "launch is retired — not a valid target"
+    assert target_is_valid("nosuchverb") is False, "unknown tokens are not valid targets"
+
+
+def test_launch_resume_and_bookmark_all_redirect_to_attach() -> None:
+    """`launch`, `resume`, and `bookmark` are all retired, and all three point
+    at the one verb that replaced them: `attach`."""
+    from camp.workspace.verb_taxonomy import LEGACY_REDIRECTS
+
+    for old_verb in ("launch", "resume", "bookmark"):
+        assert LEGACY_REDIRECTS[old_verb] == "attach", (
+            f"{old_verb!r} must redirect to 'attach', got "
+            f"{LEGACY_REDIRECTS[old_verb]!r}"
+        )
 
 
 # ---------------------------------------------------------------------------

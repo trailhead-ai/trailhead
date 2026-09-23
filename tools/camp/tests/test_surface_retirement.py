@@ -1,15 +1,19 @@
-"""`camp bookmark` / `camp resume` redirect, and the resume path still works.
+"""`camp bookmark` / `camp resume` redirect to `camp attach`.
 
-Re-entering a session is `camp launch --resume <ref>`, addressed by unambiguous
-prefix of the derived name or session id.
+`launch` is retired too, and its own retirement is covered by
+`test_verb_aliases.py` and `test_cli_dispatch_split.py`; this file keeps only
+the two redirects that used to point at `launch --resume` and now point at
+`attach` instead, plus the sessions/resume internal-harness regression that
+never involved dispatching `launch`.
 
 Test contract:
-- Each retired spelling, run through the CLI, answers with `camp launch
-  --resume` — the replacement an operator who typed the retired verb yesterday
-  needs — rather than the bare-slug refusal, which answers a question about
-  slugs. The answer varies by which retired verb was typed.
-- The launch, sessions, and resume paths each resolve the same harness for the
-  same group — the specific regression the redirect risks.
+- Each retired spelling, run through the CLI, answers with `camp attach` —
+  the replacement an operator who typed the retired verb yesterday needs —
+  rather than the bare-slug refusal, which answers a question about slugs.
+  The answer varies by which retired verb was typed.
+- The sessions and resume paths each resolve the same harness for the same
+  group — the specific regression the redirect risks. (The launch leg of
+  this pin is gone along with `camp launch` itself.)
 
 That the retired verbs are absent from the live verb table is not tested here:
 removal is not a behaviour, and such a test passes vacuously on any tree where
@@ -66,7 +70,7 @@ def test_camp_bookmark_points_at_the_replacement_verb(tmp_path: Path) -> None:
     result = _run(["bookmark"], env={"CAMP_CONFIG_DIR": str(tmp_path)})
     combined = result.stdout + result.stderr
     assert result.returncode != 0, result.stdout
-    assert "camp launch --resume" in combined
+    assert "camp attach" in combined
     assert "bare slug dispatch is no longer supported" not in combined
 
 
@@ -74,42 +78,13 @@ def test_camp_resume_points_at_the_replacement_verb(tmp_path: Path) -> None:
     result = _run(["resume", "some-ref"], env={"CAMP_CONFIG_DIR": str(tmp_path)})
     combined = result.stdout + result.stderr
     assert result.returncode != 0, result.stdout
-    assert "camp launch --resume" in combined
+    assert "camp attach" in combined
     assert "bare slug dispatch is no longer supported" not in combined
 
 
 # ---------------------------------------------------------------------------
-# the three consumers still resolve the same harness
+# the two remaining consumers still resolve the same harness
 # ---------------------------------------------------------------------------
-
-
-def test_launch_path_resolves_the_group_harness(monkeypatch) -> None:
-    """`camp launch`'s confirm step asks the group's harness (cli.session:launch_and_confirm)."""
-    import camp.cli.session as cli_session
-
-    harness = _FakeHarness()
-    seen: list[dict] = []
-    confirmed: list[object] = []
-
-    def fake_harness_for(group):
-        seen.append(group)
-        return harness
-
-    launched = type("LaunchedSession", (), {
-        "session_id": "sess-1", "launch_dir": "/tmp/ws", "tmux_name": "camp-ws-abc",
-        "pane_env": {},
-    })()
-    monkeypatch.setattr("camp.launch.profile.harness_for", fake_harness_for)
-    monkeypatch.setattr("camp.launch.session.launch_session", lambda *a, **k: launched)
-    monkeypatch.setattr(
-        "camp.launch.session.confirm_session",
-        lambda harness, _launched, env=None: confirmed.append(harness),
-    )
-
-    group = {"group": {"name": "g"}}
-    assert cli_session.launch_and_confirm(group, "ws", env={}) is launched
-    assert seen == [group]
-    assert confirmed == [harness]
 
 
 def test_sessions_path_resolves_addressable_harnesses(monkeypatch) -> None:

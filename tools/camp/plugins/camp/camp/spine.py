@@ -1555,9 +1555,15 @@ def cmd_disabled(verb: str) -> None:
 
 
 def cmd_legacy_redirect(old_verb: str, new_verb: str) -> None:
-    """Print a redirect message for a renamed verb and exit non-zero."""
+    """Print a redirect message for a retired verb and exit non-zero.
+
+    "Replaced" rather than "renamed": this message is shared by verbs that
+    were literally renamed (open, break, init, ai, enter) and verbs whose job
+    moved to a different verb entirely (launch, resume, bookmark → attach).
+    "Replaced" is true of both; "renamed" is not.
+    """
     print(
-        f"camp {old_verb}: this command has been renamed — use 'camp {new_verb}' instead.",
+        f"camp {old_verb}: this command has been replaced — use 'camp {new_verb}' instead.",
         file=sys.stderr,
     )
     sys.exit(1)

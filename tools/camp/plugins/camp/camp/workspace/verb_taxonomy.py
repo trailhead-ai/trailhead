@@ -18,8 +18,8 @@ Tables:
                      canonical verb; the dispatcher does not support chained
                      redirects, so no target may itself be a removed verb. A
                      target may carry the flags that make it the actual
-                     replacement (`launch --resume`), because what the operator
-                     needs is the command to type, not the verb it lives under.
+                     replacement, because what the operator needs is the
+                     command to type, not the verb it lives under.
   NEEDS_GROUP_VERBS — verbs whose real behavior lives on the group-aware path in
                       cli/camp; reaching them via spine.main means no group
                       resolved, so spine emits a "configure / pass --group" error.
@@ -74,18 +74,26 @@ def resolve_verb(raw: str) -> tuple[str, str]:
 # support chained redirects, so no target may be a removed verb (e.g.
 # ai/rm/enter are removed).
 #
-# `resume` and `bookmark` are retirements, not renames, and they land here for
-# the same reason the renames do: an operator who typed one of them yesterday
-# typed a VERB, and the bare-slug refusal answers a question about slugs. The
-# replacement carries a flag because that is what there is to type.
+# `launch`, `resume`, and `bookmark` are retirements, not renames, and they
+# land here for the same reason the renames do: an operator who typed one of
+# them yesterday typed a VERB, and the bare-slug refusal answers a question
+# about slugs. `launch` is superseded by the door (`camp attach` reaches a
+# workspace's tmux session; the ordinary new-window key inside it starts a
+# conversation) rather than by another verb with the same shape, so its
+# target is `attach` with no flag to carry across. `resume` and `bookmark`
+# used to point at `launch --resume`, which is retired itself now that
+# `launch` is — chaining through it is unsupported, so they point at
+# `attach` directly: reaching the workspace's tmux session is how an
+# operator resumes a conversation today.
 LEGACY_REDIRECTS: dict[str, str] = {
     "open": "new",
     "break": "remove",
     "init": "group",
     "ai": "new",
     "enter": "activate",
-    "resume": "launch --resume",
-    "bookmark": "launch --resume",
+    "launch": "attach",
+    "resume": "attach",
+    "bookmark": "attach",
 }
 
 # Verbs whose real implementation requires a resolved group (the group-aware path
