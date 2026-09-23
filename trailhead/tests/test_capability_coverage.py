@@ -26,9 +26,10 @@ import pytest
 from trailhead.capabilities import load_manifest
 from trailhead.compose import apply_plan, compose_plan
 
-# Matches a ${CLAUDE_PLUGIN_ROOT}/hooks/<script> reference inside a hooks.json
-# command string (script name stops at the closing quote / whitespace).
-_HOOK_SCRIPT_RE = re.compile(r"\$\{CLAUDE_PLUGIN_ROOT\}/(hooks/[^\"\s\\]+)")
+# Matches a ${CLAUDE_PLUGIN_ROOT}/<path> reference inside a hooks.json command
+# string — a sibling hooks/ script or the plugin's own CLI wrapper (the path
+# stops at a quote, an escaping backslash, or whitespace).
+_HOOK_SCRIPT_RE = re.compile(r"\$\{CLAUDE_PLUGIN_ROOT\}/([^\"\s\\]+)")
 
 _REPO_ROOT = Path(__file__).parent.parent.parent
 _TOOLS = ["lore", "camp", "craft", "portage", "outpost", "trailhead"]
@@ -112,11 +113,12 @@ def test_every_declared_capability_resolves_to_existing_src(tool: str, tmp_path:
 
 @pytest.mark.parametrize("tool", _TOOLS)
 def test_hooks_scripts_referenced_by_hooks_json_get_wired(tool: str, tmp_path: Path):
-    """Every script a hooks.json shells out to must land in the composed install.
+    """Every plugin file a hooks.json shells out to must land in the composed install.
 
     Regression guard: compose once wired only hooks.json (the file), stripping the
-    sibling scripts it invokes via ${CLAUDE_PLUGIN_ROOT}/hooks/<script>. Tools that
-    declare no hooks_json are a vacuous pass.
+    sibling scripts it invokes via ${CLAUDE_PLUGIN_ROOT}/hooks/<script>. The same
+    holds for any other plugin-root path a hook command names, such as the tool's
+    own CLI wrapper. Tools that declare no hooks_json are a vacuous pass.
     """
     manifest = load_manifest(_manifest_path(tool))
     if manifest.hooks_json is None:
@@ -125,7 +127,7 @@ def test_hooks_scripts_referenced_by_hooks_json_get_wired(tool: str, tmp_path: P
     hooks_json_src = manifest.plugin_root / manifest.hooks_json
     referenced = sorted(set(_HOOK_SCRIPT_RE.findall(hooks_json_src.read_text())))
     assert referenced, (
-        f"{tool}: hooks.json references no ${{CLAUDE_PLUGIN_ROOT}}/hooks/ scripts — "
+        f"{tool}: hooks.json references no ${{CLAUDE_PLUGIN_ROOT}}/ paths — "
         "either the regex drifted or hooks.json changed shape"
     )
 

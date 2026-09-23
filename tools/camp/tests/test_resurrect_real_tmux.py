@@ -227,10 +227,8 @@ def test_resurrection_brings_back_three_windows_and_reconciles_clean_on_the_next
 
     assert code == 0
     assert captured.out.strip() == f"resurrected {session} (3 windows)"
-    # The one-time key-binding notice fires on the first session a server
-    # ever creates, regardless of arm — unrelated to resurrection itself
-    # (see `launch/binding.py`); nothing that failed or was dropped is on
-    # stderr, which is what this window record's own report claims.
+    # Nothing that failed or was dropped is on stderr, which is what this
+    # window record's own report claims.
     assert "dropped" not in captured.err
     assert "did not come back" not in captured.err
 

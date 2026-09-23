@@ -13,7 +13,7 @@ whose name is untouched but whose id no longer exists.
 outside a test reaches for: it reads the record, asks the tmux seam what is
 live, calls the pure `reconcile`, and writes back only when something
 changed — mirroring the read-modify-write shape of
-`camp.group.window_record.append_window_entry_unlocked`, under the same
+`camp.group.window_record.record_window_entry_unlocked`, under the same
 `reconcile_lock`.
 
 `render_changes` turns the closed set of `Change` values into the lines the

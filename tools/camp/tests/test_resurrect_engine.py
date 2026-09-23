@@ -18,9 +18,9 @@ Test contract (task/the-resurrection-engine-creates-the-windows-in-order-and-iso
 4. `DUPLICATE` from the first call returns `DuplicateSession` and no
    `new_window` call is made; a failure returns `CreateFailed` carrying the
    stderr and touches the record not at all.
-5. The three `@camp_*` `set_option` calls and `install_window_binding` are
-   made exactly once on success; a refused `set_option` kills the session
-   and returns `CreateFailed`.
+5. The three `@camp_*` `set_option` calls are made exactly once on
+   success; a refused `set_option` kills the session and returns
+   `CreateFailed`.
 6. Restamp lock timeout: the result's restamp outcome is `NotRestamped` and
    the rendered lines include the could-not-be-re-stamped line, while
    `restored` still lists the windows.
@@ -92,7 +92,6 @@ class _FakeTmux:
         self.new_window_calls: list[dict[str, object]] = []
         self.new_session_calls: list[dict[str, object]] = []
         self.set_option_calls: list[dict[str, object]] = []
-        self.install_binding_calls: list[str] = []
         self.set_environment_calls: list[tuple[str, tuple]] = []
         self.respawn_calls: list[str] = []
         self.killed: list[str] = []
@@ -143,14 +142,6 @@ class _FakeTmux:
     def respawn_first_pane(self, name, *, timeout=None):
         self.respawn_calls.append(name)
         return subprocess.CompletedProcess(args=["tmux"], returncode=0, stdout="", stderr="")
-
-    def list_window_binding(self):
-        return None
-
-    def install_window_binding(self, true_command, *, timeout=None):
-        self.install_binding_calls.append(true_command)
-        return subprocess.CompletedProcess(args=["tmux"], returncode=0, stdout="", stderr="")
-
 
 def _mkws(tmp_path) -> Path:
     ws = tmp_path / "ws"
@@ -447,10 +438,10 @@ def test_a_failed_first_call_returns_create_failed_and_touches_the_record_not_at
     assert record.entries == (e1, e2, e3)
 
 
-# -- 5. mark-and-bind exactly once; a refused option kills and fails ---------
+# -- 5. marked exactly once; a refused option kills and fails ----------------
 
 
-def test_the_three_camp_options_and_the_binding_are_set_exactly_once_on_success(tmp_path):
+def test_the_three_camp_options_are_set_exactly_once_on_success(tmp_path):
     ws = _mkws(tmp_path)
     e1, e2, e3 = _entries()
     path = window_record_path_for(ws)
@@ -472,7 +463,6 @@ def test_the_three_camp_options_and_the_binding_are_set_exactly_once_on_success(
     options = {c["key"]: c["value"] for c in tmux.set_option_calls}
     assert options == {"@camp_workspace": "1", "@camp_group": "trailhead", "@camp_slug": "camp-cli"}
     assert len(tmux.set_option_calls) == 3, "each option must be set exactly once"
-    assert len(tmux.install_binding_calls) == 1
 
 
 def test_a_refused_option_kills_the_session_and_returns_create_failed(tmp_path):
@@ -581,8 +571,7 @@ def test_the_restamp_failure_line_strips_the_malformed_record_shape_too(tmp_path
 
 
 def _install_account(tmp_path, account_path):
-    """Mirrors `test_window_compose.py`'s `_install_account` and
-    `test_resurrect_plan.py`'s copy: declares a real `[launch] account`, so
+    """Mirrors `test_resurrect_plan.py`'s `_install_account`: declares a real `[launch] account`, so
     the credential-floor re-check on the workspace root is pinned against
     real detection rather than a monkeypatched gate."""
     groups_dir = tmp_path / "camp-config" / "groups"

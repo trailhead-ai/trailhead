@@ -1,0 +1,32 @@
+#!/bin/sh
+# SessionStart hook: record the session that just started against the camp
+# workspace window it is running in (`camp record-conversation`).
+#
+# Composition ships only this hooks/ directory — ${CLAUDE_PLUGIN_ROOT} is a
+# copy that carries no camp CLI — so the CLI is found where an operator's
+# machine keeps it: the shim `trailhead install` writes under
+# state_dir("trailhead")/bin (TRAILHEAD_STATE_DIR, else
+# $XDG_STATE_HOME/trailhead, else ~/.local/state/trailhead, mirroring
+# trailhead/paths.py), else a standalone `camp` on PATH.
+#
+# A session outside tmux has no window to record, so it pays for nothing
+# beyond this check. Every path exits 0 and prints nothing to stdout: this
+# runs at the start of every session on the machine.
+
+[ -n "${TMUX_PANE:-}" ] || exit 0
+
+if [ -n "${TRAILHEAD_STATE_DIR:-}" ]; then
+    state="$TRAILHEAD_STATE_DIR"
+elif [ -n "${XDG_STATE_HOME:-}" ]; then
+    state="$XDG_STATE_HOME/trailhead"
+else
+    state="${HOME:-}/.local/state/trailhead"
+fi
+
+camp="$state/bin/camp"
+if [ ! -x "$camp" ]; then
+    camp=$(command -v camp 2>/dev/null) || exit 0
+fi
+
+"$camp" record-conversation >/dev/null 2>&1
+exit 0

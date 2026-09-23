@@ -406,6 +406,23 @@ class Harness(ABC):
         """
         return None
 
+    def session_start_hook_session_id(self, payload: str) -> str | None:
+        """The id of the session a session-start hook fired for, read from the
+        *payload* the harness handed that hook, or ``None``.
+
+        A harness that runs a hook when a session starts tells the hook which
+        session it is; only the harness knows the payload's shape, so a caller
+        hands the raw payload over and never parses it itself. The answer is
+        the same id :meth:`session_resume` re-enters, so a caller can record it
+        at start and resume it later.
+
+        Returns ``None`` when the harness has no session-start hook, when the
+        payload names no session, or when the id it names is not a shape
+        :meth:`session_resume` would accept — an id a caller records is one it
+        will later hand to an argv.
+        """
+        return None
+
     # -- session transcript destination ---------------------------------------
     #
     # A transcript DESTINATION is where an arriving conversation's transcript

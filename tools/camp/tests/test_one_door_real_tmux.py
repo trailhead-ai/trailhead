@@ -61,7 +61,7 @@ if str(_TESTS_DIR) not in sys.path:
 _REAL_TMUX = shutil.which("tmux")
 
 from test_stop_cli import _run  # noqa: E402
-from test_window_binding_end_to_end import _sock_run  # noqa: E402
+from test_stop_workspace_real_tmux import _sock_run  # noqa: E402
 from test_resurrect_real_tmux import (  # noqa: E402
     _FakeHarness,
     _capture_pane,
@@ -85,10 +85,9 @@ _CLAUDE_STUB = (
 
 
 class _OneDoorServer:
-    """One throwaway tmux server plus a real, on-disk group config — so the
-    genuine `camp window-dispatch` subprocess the window-creation key's
-    `run-shell` spawns resolves `[launch] account` from a real file, exactly
-    as it would outside a test. `launch_block` is the raw `[launch] …` toml
+    """One throwaway tmux server plus a real, on-disk group config, so
+    `camp attach` resolves `[launch] account` from a real file, exactly as
+    it would outside a test. `launch_block` is the raw `[launch] …` toml
     text to append (empty string for none)."""
 
     def __init__(self, tmp_path: Path, *, launch_block: str = "", group_name: str = "onedoor") -> None:
@@ -439,7 +438,7 @@ def test_a_transferred_conversations_member_subpath_roots_the_resurrected_window
 
 
 # ---------------------------------------------------------------------------
-# Finding 1: resurrection binds the same account compose_window binds — a
+# Resurrection binds the same account the workspace session carries — a
 # declared-account window's resurrected pane carries the binding in its
 # real, running environment, not just in a stub script string.
 # ---------------------------------------------------------------------------

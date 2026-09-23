@@ -11,7 +11,7 @@ addresses a single conversation's session by reference and is a later slice's to
 ## Reconciliation corrects the record; it never extends it
 
 The record written when a window opens is right at that moment and drifts from then on: the
-operator closes a window, renames one, opens one by a means other than camp's binding. tmux is
+operator closes a window, renames one, opens one and never starts a conversation in it. tmux is
 authoritative while it is alive, so camp corrects the record to tmux at two moments — when the
 door connects to a running session, and immediately before a stop kills one — and never
 between them. The listing reads tmux and prints what it sees, and leaves the record alone: a

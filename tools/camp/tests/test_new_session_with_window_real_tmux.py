@@ -7,8 +7,7 @@ at import time, before the autouse `_sandbox_tmux` fixture in `conftest.py`
 rewrites `PATH` to a no-server stub for the rest of the suite — spawning by
 bare name after that rewrite would resolve against the stub instead, per
 `lesson/a-test-that-spawns-a-program-by-bare-name-resolves-it-against-the-path-it-hands-the-child`.
-Pattern copied from `test_window_binding_end_to_end.py` and
-`test_stop_workspace_real_tmux.py`: a thin `tmux` wrapper first on `PATH`
+Pattern copied from `test_stop_workspace_real_tmux.py`: a thin `tmux` wrapper first on `PATH`
 transparently redirects every call camp's OWN production code makes onto the
 isolated socket, and the server is killed in teardown.
 """

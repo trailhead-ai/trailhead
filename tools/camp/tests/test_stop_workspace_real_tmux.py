@@ -1,15 +1,13 @@
 """Real-tmux test for `stop_workspace` (task/stopping-a-workspace-reconciles-
 previews-kills-and-checks).
 
-Drives a REAL tmux 3.7c server on a throwaway `-L` socket, the same
-redirection trick `test_window_binding_end_to_end.py` uses: `_REAL_TMUX` is
+Drives a REAL tmux 3.7c server on a throwaway `-L` socket: `_REAL_TMUX` is
 captured by absolute path at import time, before the autouse `_sandbox_tmux`
 fixture in `conftest.py` rewrites `PATH` to a no-server stub for the rest of
 the suite, and a thin `tmux` wrapper on `PATH` transparently redirects every
 call `camp.launch.tmux.Tmux` makes onto the isolated socket.
 
-No pty is needed here (unlike the key-binding end-to-end suite) — nothing
-under test reads keystrokes; the two windows are created directly through
+No pty is needed here — nothing under test reads keystrokes; the two windows are created directly through
 tmux's own CLI before `stop_workspace` (production code, unmodified) is
 called against them.
 """
@@ -45,9 +43,8 @@ def redirected_tmux_socket(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, pref
     """A throwaway real tmux server, reached by every `tmux` call this
     process's production code makes (`Tmux._run(["tmux", ...])` resolves the
     bare name against `PATH`) — a wrapper first on `PATH` redirects it onto
-    an isolated `-L` socket named `<prefix>_<pid>_<id>`, exactly like
-    `test_window_binding_end_to_end.py`. Yields the socket name and kills the
-    server on the way out.
+    an isolated `-L` socket named `<prefix>_<pid>_<id>`. Yields the socket
+    name and kills the server on the way out.
 
     A generator the fixtures delegate to with `yield from`, so the
     redirection is spelled once for both real-tmux modules: this one and

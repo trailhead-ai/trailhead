@@ -131,8 +131,7 @@ def test_entry_through_symlink_outside_root_is_drop_naming_recorded_path(tmp_pat
 
 def _install_account(tmp_path, account_path):
     """Write a group config declaring `[launch] account = account_path`, and
-    return the env that points camp's config resolver at it — mirrors
-    `test_window_compose.py`'s `_install_account`, so AC41's re-check is
+    return the env that points camp's config resolver at it, so AC41's re-check is
     pinned against a REAL declared credential store, not a monkeypatched
     `assert_not_a_credential_store`."""
     groups_dir = tmp_path / "camp-config" / "groups"
@@ -366,9 +365,9 @@ def test_conversation_id_without_c1_byte_reaches_argv_unchanged(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# 9. Account binding — resurrection resolves the same binding compose does
+# 9. Account binding — resurrection resolves the same binding the session does
 #
-# task/finding-1: resurrection binds the SAME account compose_window binds,
+# Resurrection binds the SAME account the workspace session itself carries,
 # through the SAME `resolve_launch_environment` resolver, so a group with a
 # declared account resurrects a transcript stored under THAT account, and its
 # stub's `exec env` carries the binding — never a second, independent read of

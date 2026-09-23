@@ -66,7 +66,6 @@ class _FakeTmux:
         self._respawn_answer = respawn_answer
         self.calls: list[dict[str, object]] = []
         self.set_option_calls: list[dict[str, object]] = []
-        self.install_binding_calls: list[str] = []
         self.killed: list[str] = []
         #: Every session-shaping call in the order it was made, so a test can
         #: pin that the first pane restarts only AFTER the environment it must
@@ -113,14 +112,6 @@ class _FakeTmux:
                 args=["tmux"], returncode=1, stdout="", stderr=str(self._respawn_answer)
             )
         return subprocess.CompletedProcess(args=["tmux"], returncode=0, stdout="", stderr="")
-
-    def list_window_binding(self):
-        return self._existing_binding
-
-    def install_window_binding(self, true_command, *, timeout=None):
-        self.install_binding_calls.append(true_command)
-        return subprocess.CompletedProcess(args=["tmux"], returncode=0, stdout="", stderr="")
-
 
 def test_the_create_call_carries_a_budget_wide_enough_to_start_a_tmux_server(tmp_path):
     """`new_session` is the one call that starts the tmux SERVER when none is
@@ -387,13 +378,6 @@ class _FakeDoorTmux:
     def respawn_first_pane(self, name, *, timeout=None):
         return subprocess.CompletedProcess(args=["tmux"], returncode=0, stdout="", stderr="")
 
-    def list_window_binding(self):
-        return None
-
-    def install_window_binding(self, true_command, *, timeout=None):
-        return subprocess.CompletedProcess(args=["tmux"], returncode=0, stdout="", stderr="")
-
-
 def test_a_credential_store_launch_error_during_create_folds_into_create_refused_not_a_traceback(
     tmp_path,
 ):
@@ -534,10 +518,9 @@ def test_tmux_unanswered_reason_carries_the_seams_own_words(tmp_path):
         assert "camp list" in probe.reason
 
 
-def test_creating_a_session_marks_it_and_installs_the_window_binding(tmp_path):
-    """AC17's create-time wiring: a CREATED session gets three session-local
-    options — @camp_workspace, @camp_group, @camp_slug — and the
-    server-global window binding is installed, varied across two distinct
+def test_creating_a_session_marks_it_with_its_group_and_slug(tmp_path):
+    """A CREATED session gets three session-local options —
+    @camp_workspace, @camp_group, @camp_slug — varied across two distinct
     (group, slug) pairs so this is not a fixed-string echo."""
     from camp.launch.workspace_session import create_workspace_session
     from camp.launch.naming import workspace_session_name
@@ -561,21 +544,19 @@ def test_creating_a_session_marks_it_and_installs_the_window_binding(tmp_path):
     options_a = {c["key"]: c["value"] for c in fake_a.set_option_calls}
     assert options_a == {"@camp_workspace": "1", "@camp_group": "trailhead", "@camp_slug": "camp-cli"}
     assert all(c["target"] == tmux_target(name_a) for c in fake_a.set_option_calls)
-    assert len(fake_a.install_binding_calls) == 1
 
     name_b = workspace_session_name("acme", "feat-x")
     options_b = {c["key"]: c["value"] for c in fake_b.set_option_calls}
     assert options_b == {"@camp_workspace": "1", "@camp_group": "acme", "@camp_slug": "feat-x"}
     assert all(c["target"] == tmux_target(name_b) for c in fake_b.set_option_calls)
-    assert len(fake_b.install_binding_calls) == 1
 
     assert options_a != options_b, "must vary with the actual (group, slug), not a fixed pair"
 
 
-def test_an_already_existed_outcome_installs_no_new_options_or_binding(tmp_path):
+def test_an_already_existed_outcome_sets_no_new_options(tmp_path):
     """A duplicate-session race means another camp process's own create
-    already marked the session and installed the binding — this call must
-    not repeat that work against a session it never created."""
+    already marked the session — this call must not repeat that work
+    against a session it never created."""
     from camp.launch.workspace_session import create_workspace_session
 
     home = tmp_path / "home"
@@ -590,10 +571,9 @@ def test_an_already_existed_outcome_installs_no_new_options_or_binding(tmp_path)
     )
 
     assert fake.set_option_calls == []
-    assert fake.install_binding_calls == []
 
 
-def test_a_failed_create_installs_no_options_or_binding(tmp_path):
+def test_a_failed_create_sets_no_options(tmp_path):
     from camp.launch.workspace_session import create_workspace_session
 
     home = tmp_path / "home"
@@ -608,15 +588,14 @@ def test_a_failed_create_installs_no_options_or_binding(tmp_path):
     )
 
     assert fake.set_option_calls == []
-    assert fake.install_binding_calls == []
 
 
 def test_a_session_whose_mark_tmux_refused_is_not_reported_created(tmp_path):
     """The three session-local options are what MAKE a tmux session a camp
-    workspace session: the key binding's `if-shell` guard dispatches on
-    `@camp_workspace`, and `window-dispatch` reads `@camp_group`/`@camp_slug`
-    back to decide which workspace it is composing into. A session missing
-    any of them is a session the binding will never fire for.
+    workspace session: the session-start conversation capture records
+    nothing without `@camp_workspace`, and reads `@camp_group`/`@camp_slug`
+    back to decide which workspace's record to write. A session missing any
+    of them has its conversations silently go unrecorded.
 
     So a create whose marking tmux refused did not create a workspace
     session, and must not answer CREATED. It answers FAILED carrying tmux's
@@ -647,13 +626,12 @@ def test_a_session_whose_mark_tmux_refused_is_not_reported_created(tmp_path):
             assert result.outcome is WorkspaceSessionOutcome.FAILED, (key, answer)
             assert key in (result.error or ""), (key, answer, result.error)
             assert tmux.killed == [result.session_name], (key, answer)
-            assert tmux.install_binding_calls == [], (key, answer)
 
 
 def test_a_fully_marked_session_is_created_and_never_killed(tmp_path):
     """The other side of the branch above: when every option lands, the
-    session survives and the binding is installed — so the refusal path is
-    reached by the marking answer, not by the code path always running."""
+    session survives — so the refusal path is reached by the marking
+    answer, not by the code path always running."""
     from camp.launch.workspace_session import (
         WorkspaceSessionOutcome,
         create_workspace_session,
@@ -669,7 +647,6 @@ def test_a_fully_marked_session_is_created_and_never_killed(tmp_path):
 
     assert result.outcome is WorkspaceSessionOutcome.CREATED
     assert tmux.killed == []
-    assert len(tmux.install_binding_calls) == 1
 
 
 class TestConnectArmReconciliation:

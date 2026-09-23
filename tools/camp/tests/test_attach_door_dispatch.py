@@ -85,10 +85,10 @@ class _FakeTTY(io.StringIO):
 class _DoorTmux:
     """A tmux stand-in exposing the calls the door dispatch and
     `create_workspace_session` issue: `has_session`
-    (`has_session_with_reason`), `new_session`, `switch_client`, and —
-    since `create_workspace_session` now marks a CREATED session and
-    installs the window-creation-key binding — `set_option` and
-    `list_window_binding`/`install_window_binding`. Anything else the door
+    (`has_session_with_reason`), `new_session`, `switch_client`, and the
+    calls `create_workspace_session` makes to mark a CREATED session and
+    state its environment — `set_option`, `set_environment`,
+    `respawn_first_pane`. Anything else the door
     path must never reach (`list_sessions`, etc.) is deliberately absent,
     so a call that reaches it fails loudly with `AttributeError` rather
     than degrading silently.
@@ -138,7 +138,6 @@ class _DoorTmux:
         self.new_window_calls: list[dict[str, object]] = []
         self.switch_client_calls: list[str] = []
         self.set_option_calls: list[dict[str, object]] = []
-        self.install_binding_calls: list[str] = []
         self.set_environment_calls: list[tuple[str, tuple]] = []
         self.respawn_calls: list[str] = []
         self.list_windows_calls: list[str] = []
@@ -190,13 +189,6 @@ class _DoorTmux:
 
     def respawn_first_pane(self, name, *, timeout=None):
         self.respawn_calls.append(name)
-        return subprocess.CompletedProcess(args=["tmux"], returncode=0, stdout="", stderr="")
-
-    def list_window_binding(self):
-        return None
-
-    def install_window_binding(self, true_command, *, timeout=None):
-        self.install_binding_calls.append(true_command)
         return subprocess.CompletedProcess(args=["tmux"], returncode=0, stdout="", stderr="")
 
     def switch_client(self, name: str):

@@ -12,8 +12,8 @@ code makes onto the isolated socket. The CLI harness (`_isolated_env`,
 `_run` through the real entry point) is borrowed from `test_stop_cli.py`
 the same way.
 
-A window is opened through `compose_window` (production code, unmodified,
-with an explicit `command=` so no harness config is needed), then closed
+A window is opened directly in tmux and written into the workspace's
+window record (`record_window_entry`, production code), then closed
 directly in tmux — exactly the "a window closed in tmux since the record
 was last written" scenario the design doc's reconciliation states
 describe — before `camp stop <slug>` is driven through the REAL CLI entry
@@ -85,8 +85,12 @@ def test_camp_stop_kills_a_real_session_reports_the_dropped_window_and_updates_t
     real_tmux_socket: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     from camp.launch.naming import workspace_session_name
-    from camp.launch.window_compose import compose_window
-    from camp.group.window_record import read_window_record, window_record_path_for
+    from camp.group.window_record import (
+        WindowEntry,
+        read_window_record,
+        record_window_entry,
+        window_record_path_for,
+    )
 
     sock = real_tmux_socket
     group_name = "g"
@@ -103,18 +107,17 @@ def test_camp_stop_kills_a_real_session_reports_the_dropped_window_and_updates_t
     created = _sock_run(sock, "new-session", "-d", "-s", session, "-n", "shell")
     assert created.returncode == 0, created.stderr
 
-    # A second window, opened through `compose_window` (production code,
-    # unmodified) — an explicit command, so no harness config is needed —
-    # which records it into the workspace's window record.
-    entry = compose_window(
-        {"group": {"name": group_name}},
-        slug,
-        ws_dir,
-        cwd=ws_dir,
-        window_name="work",
-        command=["sleep", "100000"],
+    # A second window, recorded in the workspace's window record.
+    opened = _sock_run(
+        sock, "new-window", "-P", "-F", "#{window_id}", "-t", f"={session}", "-n", "work",
+        "-c", str(ws_dir), "sleep 100000",
     )
-    closed_window_id = entry.window_id
+    assert opened.returncode == 0, opened.stderr
+    closed_window_id = opened.stdout.strip()
+    record_window_entry(
+        ws_dir,
+        WindowEntry(window_id=closed_window_id, name="work", cwd=".", command_line="sleep 100000"),
+    )
 
     before = read_window_record(window_record_path_for(ws_dir))
     assert any(e.window_id == closed_window_id for e in before.entries)
