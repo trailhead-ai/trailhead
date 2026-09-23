@@ -364,9 +364,16 @@ def _write_config(signing, cfg_env: dict, content: str) -> Path:
 
 
 def _configure_fake_key(signing, cfg_env: dict, tmp_path: Path) -> "tuple[Path, Path]":
-    """Configure a key file that exists on disk; return ``(signing dir, key path)``."""
+    """Configure a key file that exists on disk; return ``(signing dir, key path)``.
+
+    Mode 0600 — the override machinery under test here now also gates on
+    mode (S2), so a fixture key at the platform's default (umask-widened)
+    mode would make every override-machinery test here look like a refused
+    key rather than exercising the override shape it means to test.
+    """
     key_path = tmp_path / "key"
     key_path.write_text("fake-key\n")
+    key_path.chmod(0o600)
     d = _write_config(signing, cfg_env, json.dumps({signing.KEY_PATH_FIELD: str(key_path)}))
     return d, key_path
 
@@ -618,3 +625,162 @@ def test_sweep_aborts_and_marks_failed_when_rebase_continue_times_out(tmp_path):
     marker = resolve_state.read_failed_marker(vault)
     assert marker is not None
     assert marker["vault"] == vault.name
+
+
+# ── security fix-pass: mode, symlink, namespace, and gap-count hardening ──
+
+
+def test_apply_env_overrides_ignores_a_key_wider_than_0600(tmp_path):
+    """S2: the signing hot path (``_override_entries``/``apply_env_overrides``)
+    must not apply a key whose mode is wider than 0600 — the same condition
+    ``describe_status`` already refuses with a chmod remedy."""
+    signing = load_script("lore.vault.signing")
+    state = tmp_path / "state"
+    home = tmp_path / "home"
+    key_path = _generate_key(tmp_path, "wide_key")
+    _enable_host_key(state, home, key_path)
+    key_path.chmod(0o644)
+
+    env = {"XDG_STATE_HOME": str(state), "HOME": str(home)}
+    result = signing.apply_env_overrides({}, env=env)
+    assert result == {}
+
+
+def test_sync_does_not_sign_when_the_configured_key_is_mode_0644(tmp_path):
+    """S2, end to end: with the configured key widened to 0644, the override
+    is skipped, so the hostile global config takes over and the sync commit
+    fails exactly as it does with no host key at all."""
+    home = _isolated_home()
+    _write_hostile_global_gitconfig(home)
+    vault = make_git_vault(tmp_path / "vault")
+    state = tmp_path / "state"
+    # The vault fixture's own local `commit.gpgsign=false` would otherwise beat
+    # the hostile GLOBAL config above (local outranks global) and mask the
+    # very failure this test exists to pin — see
+    # `test_sync_commit_fails_exactly_as_today_with_no_host_key`.
+    bad_gpg_program = tmp_path / "bad-local-gpg-program"
+    bad_gpg_program.write_text("#!/bin/sh\nexit 1\n")
+    bad_gpg_program.chmod(0o755)
+    for key, val in (("commit.gpgsign", "true"), ("gpg.format", "openpgp"),
+                     ("gpg.program", str(bad_gpg_program))):
+        _git(vault, "config", key, val)
+
+    key_path = _generate_key(tmp_path, "host_key")
+    _enable_host_key(state, home, key_path)
+    key_path.chmod(0o644)
+
+    r = run_cli(["record", "create", "--kind", "task", "--title", "T"],
+                vault=vault, state_dir=state, stdin_text="body\n")
+    assert r.returncode == 0, r.stderr
+
+    r = run_cli(["sync"], vault=vault, state_dir=state)
+    assert r.returncode != 0
+    assert "git commit failed" in r.stderr, r.stderr
+
+
+def test_ensure_signing_dir_refuses_a_symlinked_signing_directory(tmp_path):
+    """S3: the signing directory path must not be a symlink — refuse rather
+    than create/chmod through it, which would touch whatever it points at."""
+    import stat as stat_mod
+
+    signing = load_script("lore.vault.signing")
+    real_target = tmp_path / "elsewhere"
+    real_target.mkdir()
+    real_target.chmod(0o750)
+    mode_before = stat_mod.S_IMODE(real_target.stat().st_mode)
+    linked_dir = tmp_path / "signing-link"
+    linked_dir.symlink_to(real_target)
+
+    with pytest.raises(signing.SigningEnableError, match="symlink"):
+        signing._ensure_signing_dir(linked_dir)
+
+    assert stat_mod.S_IMODE(real_target.stat().st_mode) == mode_before
+
+
+def test_ensure_signing_dir_maps_a_chmod_failure_to_a_clean_error(tmp_path, monkeypatch):
+    """S3: a chmod ``OSError`` on the signing directory must surface as
+    :class:`SigningEnableError`, not an unguarded traceback."""
+    signing = load_script("lore.vault.signing")
+    directory = tmp_path / "signing"
+
+    def _boom(path, mode):
+        raise OSError(13, "Permission denied")
+
+    monkeypatch.setattr(signing.os, "chmod", _boom)
+
+    with pytest.raises(signing.SigningEnableError, match="Permission denied"):
+        signing._ensure_signing_dir(directory)
+
+
+def test_allowed_signers_line_restricts_to_the_git_namespace(tmp_path):
+    """S4: the written allowed-signers line restricts to the ``git``
+    namespace — proven behaviorally (a signature made under a different
+    namespace is rejected against it), not by grepping the file lore just
+    wrote for the string ``namespaces``."""
+    signing = load_script("lore.vault.signing")
+    home = tmp_path / "home"
+    home.mkdir()
+    state = tmp_path / "state"
+    key_path = _generate_key(tmp_path, "host_key")
+    env = {"XDG_STATE_HOME": str(state), "HOME": str(home)}
+
+    signing.enable(key=key_path, env=env)
+    allowed = signing.signing_dir(env=env) / signing.ALLOWED_SIGNERS_FILENAME
+    principal = allowed.read_text(encoding="utf-8").split(" ", 1)[0]
+
+    data_file = tmp_path / "payload.txt"
+    data_file.write_text("hello\n")
+
+    subprocess.run(
+        ["ssh-keygen", "-Y", "sign", "-n", "other", "-f", str(key_path), str(data_file)],
+        check=True, capture_output=True, text=True,
+    )
+    other_sig = Path(f"{data_file}.sig")
+    other_sig_saved = tmp_path / "other.sig"
+    other_sig.rename(other_sig_saved)
+
+    verify_other = subprocess.run(
+        ["ssh-keygen", "-Y", "verify", "-f", str(allowed), "-I", principal,
+         "-n", "other", "-s", str(other_sig_saved)],
+        input=data_file.read_text(), capture_output=True, text=True,
+    )
+    assert verify_other.returncode != 0, verify_other.stdout + verify_other.stderr
+
+    subprocess.run(
+        ["ssh-keygen", "-Y", "sign", "-n", "git", "-f", str(key_path), str(data_file)],
+        check=True, capture_output=True, text=True,
+    )
+    git_sig = Path(f"{data_file}.sig")
+    verify_git = subprocess.run(
+        ["ssh-keygen", "-Y", "verify", "-f", str(allowed), "-I", principal,
+         "-n", "git", "-s", str(git_sig)],
+        input=data_file.read_text(), capture_output=True, text=True,
+    )
+    assert verify_git.returncode == 0, verify_git.stdout + verify_git.stderr
+
+
+def test_inherited_git_config_count_rejects_a_gap_in_values(tmp_path):
+    """M2: a ``GIT_CONFIG_COUNT`` that claims an index whose ``KEY`` is
+    present but whose ``VALUE`` is missing is exactly as malformed as a
+    missing ``KEY`` — git itself fails to parse config with that gap."""
+    signing = load_script("lore.vault.signing")
+    base_env = {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "user.name"}
+    assert signing._inherited_git_config_count(base_env) == 0
+
+
+def test_apply_env_overrides_replaces_index_0_when_inherited_value_is_missing(tmp_path):
+    """M2, effect on the real override builder: a malformed inherited count
+    (key present, value missing) must not be trusted as a base index — lore's
+    own five entries are written starting at 0."""
+    signing = load_script("lore.vault.signing")
+    state = tmp_path / "state"
+    home = tmp_path / "home"
+    key_path = _generate_key(tmp_path, "host_key")
+    _enable_host_key(state, home, key_path)
+
+    base_env = {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "user.name"}
+    result = signing.apply_env_overrides(
+        base_env, env={"XDG_STATE_HOME": str(state), "HOME": str(home)}
+    )
+    assert result["GIT_CONFIG_COUNT"] == "5"
+    assert result["GIT_CONFIG_KEY_0"] == "gpg.format"

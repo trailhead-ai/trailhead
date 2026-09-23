@@ -10,6 +10,7 @@ proves ``enable``'s key won, not that nothing was configured to interfere
 
 from __future__ import annotations
 
+import json
 import os
 import stat
 import subprocess
@@ -632,6 +633,206 @@ def test_enable_prints_a_gh_command_with_no_process_substitution_for_a_generated
 
     key_path = _configured_key_path(state, _isolated_home())
     assert f"{key_path}.pub" in r.stdout, r.stdout
+
+
+##  Security fix-pass — S1, M1, M3, M4, M5, M6
+
+
+def test_enable_with_key_refuses_a_key_inside_a_vault_sites_dir(tmp_path):
+    """S1: an adopted key placed inside the configured vault's working tree
+    (here, its ``sites/`` free-write zone) gets auto-staged and pushed by
+    ``lore sync`` — refuse it and write nothing."""
+    vault = make_git_vault(tmp_path / "vault")
+    state = tmp_path / "state"
+    sites_dir = vault / "sites"
+    sites_dir.mkdir(parents=True, exist_ok=True)
+    key_path = _generate_key(sites_dir, "host-key")
+
+    r = _run_enable(vault, state, key=key_path)
+    _assert_refused_and_nothing_written(
+        r, state, "is inside vault", "move it outside any configured vault"
+    )
+
+
+def test_status_names_a_configured_key_that_lives_inside_a_vault(tmp_path):
+    """S1: ``describe_status`` must flag a configuration that names a key
+    inside a vault as failing, even though the operator could only reach
+    that state by hand-editing the config (``enable --key`` itself refuses
+    it) — a config written any other way must still be caught."""
+    home = _isolated_home()
+    vault = make_git_vault(tmp_path / "vault")
+    state = tmp_path / "state"
+
+    sites_dir = vault / "sites"
+    sites_dir.mkdir(parents=True, exist_ok=True)
+    key_path = _generate_key(sites_dir, "in-vault-key")
+
+    signing = _signing_module()
+    d = signing.signing_dir(env={"XDG_STATE_HOME": str(state), "HOME": str(home)})
+    d.mkdir(parents=True, exist_ok=True)
+    (d / signing.CONFIG_FILENAME).write_text(
+        json.dumps({signing.KEY_PATH_FIELD: str(key_path)})
+    )
+
+    r = _run_status(vault, state)
+    assert r.returncode != 0
+    assert "is inside vault" in r.stderr, r.stderr
+    assert "move it outside any configured vault" in r.stderr, r.stderr
+
+
+def test_enable_shows_generate_key_stderr_as_text_not_bytes(tmp_path):
+    """M1: ``_generate_key``'s ``subprocess.run`` must capture text, not
+    bytes — a bytes ``stderr`` prints as ``b'boom\\n'`` in the error line."""
+    vault = make_git_vault(tmp_path / "vault")
+    state = tmp_path / "state"
+
+    fake_bin = tmp_path / "fakebin"
+    fake_bin.mkdir()
+    fake_ssh_keygen = fake_bin / "ssh-keygen"
+    fake_ssh_keygen.write_text("#!/bin/sh\necho 'boom' >&2\nexit 7\n")
+    fake_ssh_keygen.chmod(0o755)
+
+    r = _run_enable(vault, state, extra_env={"PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}"})
+    assert r.returncode != 0
+    assert "boom" in r.stderr, r.stderr
+    assert "b'boom" not in r.stderr, r.stderr
+
+
+def test_following_the_passphrase_status_remedy_gets_status_to_pass(tmp_path):
+    """M3: the remedy printed for a passphrase-protected configured key must
+    actually work — bare ``lore signing enable`` refuses in that state, so
+    the remedy must name ``--key`` instead."""
+    home = _isolated_home()
+    vault = make_git_vault(tmp_path / "vault")
+    state = tmp_path / "state"
+    assert _run_enable(vault, state).returncode == 0
+
+    key_path = _configured_key_path(state, home)
+    passphrase_key = _generate_key(tmp_path, "replacement", passphrase="secret123")
+    key_path.write_bytes(passphrase_key.read_bytes())
+    key_path.chmod(0o600)
+
+    r = _run_status(vault, state)
+    assert r.returncode != 0
+    assert "--key" in r.stderr, r.stderr
+
+    new_key = _generate_key(tmp_path, "fresh_no_passphrase")
+    r2 = _run_enable(vault, state, key=new_key)
+    assert r2.returncode == 0, r2.stderr
+
+    r3 = _run_status(vault, state)
+    assert r3.returncode == 0, r3.stderr
+
+
+def test_status_reports_non_utf8_allowed_signers_as_mismatch_not_traceback(tmp_path):
+    """M4: a corrupted (non-UTF-8) allowed-signers file must not raise
+    ``UnicodeDecodeError`` up through ``lore signing status``."""
+    home = _isolated_home()
+    vault = make_git_vault(tmp_path / "vault")
+    state = tmp_path / "state"
+    assert _run_enable(vault, state).returncode == 0
+
+    _allowed_signers_path(state, home).write_bytes(b"\xff\xfe\x00bad-bytes")
+
+    r = _run_status(vault, state)
+    assert r.returncode != 0
+    assert "Traceback" not in r.stderr, r.stderr
+    assert "allowed-signers" in r.stderr, r.stderr
+    assert "lore signing enable" in r.stderr, r.stderr
+
+
+def test_lore_status_reports_non_utf8_allowed_signers_without_a_traceback(tmp_path):
+    """M4, ``lore status``'s per-host line: same corruption, same guard."""
+    home = _isolated_home()
+    vault = make_git_vault(tmp_path / "vault")
+    state = tmp_path / "state"
+    assert _run_enable(vault, state).returncode == 0
+    _allowed_signers_path(state, home).write_bytes(b"\xff\xfe\x00bad-bytes")
+
+    r = run_cli(["status"], vault=vault, state_dir=state)
+    assert r.returncode == 0, r.stderr
+    assert "Traceback" not in r.stdout and "Traceback" not in r.stderr
+
+
+def test_signing_status_guards_a_describe_status_crash(tmp_path, monkeypatch):
+    """M4: ``lore signing status`` must guard ``describe_status`` the same
+    way ``lore status`` already guards its own call — a timeout or
+    permission error becomes a clean ``lore:`` line, not a traceback."""
+    import lore.vault.signing as live_signing_mod
+
+    def _boom(env=None):
+        raise subprocess.TimeoutExpired(cmd=["ssh-keygen"], timeout=1)
+
+    monkeypatch.setattr(live_signing_mod, "describe_status", _boom)
+
+    vault = make_git_vault(tmp_path / "vault")
+    state = tmp_path / "state"
+    r = _run_status(vault, state)
+    assert r.returncode != 0
+    assert r.stderr.startswith("lore: "), r.stderr
+    assert "Traceback" not in r.stderr, r.stderr
+
+
+def test_enable_reports_the_real_error_when_ssh_keygen_is_on_path_but_filenotfound_anyway(tmp_path, monkeypatch):
+    """M5: only map ``FileNotFoundError`` to the "ssh-keygen is not on PATH"
+    message when ssh-keygen is genuinely missing — otherwise report the real
+    error, since ssh-keygen being present rules out that explanation."""
+    import lore.vault.signing as live_signing_mod
+
+    def _boom(*, key=None, env=None):
+        raise FileNotFoundError(2, "No such file or directory", "/some/other/path")
+
+    monkeypatch.setattr(live_signing_mod, "enable", _boom)
+
+    vault = make_git_vault(tmp_path / "vault")
+    state = tmp_path / "state"
+    r = _run_enable(vault, state)
+    assert r.returncode != 0
+    assert "ssh-keygen is not on PATH" not in r.stderr, r.stderr
+    assert "/some/other/path" in r.stderr, r.stderr
+
+
+def test_enable_refuses_rather_than_switches_when_the_existing_key_sits_in_an_unreadable_dir(tmp_path):
+    """M6: ``Path.is_file()`` can return ``False`` on a ``PermissionError``
+    (a directory this process cannot traverse), which must not be mistaken
+    for "no key configured" — that would let a bare ``enable`` silently fall
+    back to generating or switching to a different key."""
+    home = _isolated_home()
+    _write_hostile_global_gitconfig(home)
+    vault = make_git_vault(tmp_path / "vault")
+    state = tmp_path / "state"
+
+    restricted_dir = tmp_path / "restricted"
+    restricted_dir.mkdir()
+    key_path = _generate_key(restricted_dir, "adopted")
+    assert _run_enable(vault, state, key=key_path).returncode == 0
+
+    restricted_dir.chmod(0o000)
+    try:
+        r = _run_enable(vault, state)
+        assert r.returncode != 0
+        assert "permission" in r.stderr.lower(), r.stderr
+    finally:
+        restricted_dir.chmod(0o700)
+
+
+def test_status_names_permission_denied_for_a_configured_key_in_an_unreadable_dir(tmp_path):
+    """M6, the ``status`` side of the same fix."""
+    vault = make_git_vault(tmp_path / "vault")
+    state = tmp_path / "state"
+
+    restricted_dir = tmp_path / "restricted"
+    restricted_dir.mkdir()
+    key_path = _generate_key(restricted_dir, "adopted")
+    assert _run_enable(vault, state, key=key_path).returncode == 0
+
+    restricted_dir.chmod(0o000)
+    try:
+        r = _run_status(vault, state)
+        assert r.returncode != 0
+        assert "cannot be read" in r.stderr, r.stderr
+    finally:
+        restricted_dir.chmod(0o700)
 
 
 def test_enable_prints_a_gh_command_with_no_process_substitution_for_an_adopted_key_with_no_pub_file(tmp_path):

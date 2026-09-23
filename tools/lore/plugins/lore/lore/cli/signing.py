@@ -7,6 +7,7 @@ argument parsing, the ``lore: <message>`` error shape, and exit codes.
 """
 from __future__ import annotations
 
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -36,9 +37,15 @@ def _cmd_signing_enable(args) -> int:
     except signing_mod.SigningEnableError as exc:
         print(f"lore: {exc}", file=sys.stderr)
         return 1
-    except FileNotFoundError:
-        print("lore: ssh-keygen is not on PATH — install OpenSSH's client tools",
-              file=sys.stderr)
+    except FileNotFoundError as exc:
+        if shutil.which("ssh-keygen") is None:
+            print("lore: ssh-keygen is not on PATH — install OpenSSH's client tools",
+                  file=sys.stderr)
+        else:
+            # ssh-keygen IS on PATH, so this FileNotFoundError names some
+            # other missing path (e.g. a key file removed mid-operation) —
+            # report it verbatim rather than a canned, misleading message.
+            print(f"lore: {exc}", file=sys.stderr)
         return 1
     except subprocess.TimeoutExpired:
         print(
@@ -76,7 +83,11 @@ def _cmd_signing_enable(args) -> int:
 def _cmd_signing_status(args) -> int:
     from ..vault import signing as signing_mod
 
-    ok, message = signing_mod.describe_status()
+    try:
+        ok, message = signing_mod.describe_status()
+    except (OSError, subprocess.SubprocessError) as exc:
+        print(f"lore: {exc}", file=sys.stderr)
+        return 1
     if ok:
         print(f"lore: {message}")
         return 0
