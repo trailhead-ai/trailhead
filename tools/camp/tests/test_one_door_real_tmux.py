@@ -75,6 +75,7 @@ from test_stop_cli import _run  # noqa: E402
 from test_window_binding_end_to_end import (  # noqa: E402
     _attach_and_send,
     _record_entries_reach,
+    _sock_run,
 )
 from test_resurrect_real_tmux import (  # noqa: E402
     _FakeHarness,
@@ -85,12 +86,6 @@ from test_resurrect_real_tmux import (  # noqa: E402
 )
 
 pytestmark = pytest.mark.real_home  # this test intentionally talks to a real tmux server
-
-
-def _sock_run(sock: str, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        [_REAL_TMUX, "-L", sock, *args], capture_output=True, text=True, timeout=5
-    )
 
 
 _CLAUDE_STUB = (
@@ -112,7 +107,6 @@ class _OneDoorServer:
 
     def __init__(self, tmp_path: Path, *, launch_block: str = "", group_name: str = "onedoor") -> None:
         self.sock = f"camp_one_door_e2e_{os.getpid()}_{id(self)}"
-        self.tmp_path = tmp_path
         self.group_name = group_name
 
         bin_dir = tmp_path / "bin"
@@ -165,13 +159,21 @@ class _OneDoorServer:
         subprocess.run([_REAL_TMUX, "-L", self.sock, "kill-server"], capture_output=True, timeout=5)
 
 
-def _make_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, **kw) -> _OneDoorServer:
-    srv = _OneDoorServer(tmp_path, **kw)
-    for key, value in srv.env.items():
-        monkeypatch.setenv(key, value)
-    try:
-        yield srv
-    finally:
+@pytest.fixture
+def make_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Build a `_OneDoorServer`, export its environment, and kill every server
+    it built at teardown."""
+    servers: list[_OneDoorServer] = []
+
+    def _make(**kw) -> _OneDoorServer:
+        srv = _OneDoorServer(tmp_path, **kw)
+        for key, value in srv.env.items():
+            monkeypatch.setenv(key, value)
+        servers.append(srv)
+        return srv
+
+    yield _make
+    for srv in servers:
         srv.kill()
 
 
@@ -229,90 +231,80 @@ def _press_the_key_and_wait(sock: str, session: str, ws_dir: Path) -> None:
 
 @pytest.mark.skipif(_REAL_TMUX is None, reason="no tmux binary on PATH (captured at import time)")
 def test_a_group_declaring_an_account_composes_the_pane_with_the_account_bound(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, make_server
 ) -> None:
     from camp.launch.naming import workspace_session_name
     from camp.group.window_record import read_window_record, window_record_path_for
 
     account_dir = str(tmp_path / "acct-a")
-    server_gen = _make_server(
-        tmp_path, monkeypatch, launch_block=f'[launch]\naccount = "{account_dir}"\n'
-    )
-    server = next(server_gen)
-    try:
-        slug = "camp-cli"
-        ws_dir = server.workspace_dir(slug)
-        ws_dir.mkdir(parents=True)
-        _wire_group_listing(monkeypatch, ws_dir=ws_dir, slug=slug)
+    server = make_server(launch_block=f'[launch]\naccount = "{account_dir}"\n')
+    slug = "camp-cli"
+    ws_dir = server.workspace_dir(slug)
+    ws_dir.mkdir(parents=True)
+    _wire_group_listing(monkeypatch, ws_dir=ws_dir, slug=slug)
 
-        code = _run(["attach", slug, "--group", server.group_name], monkeypatch)
-        assert code == 0
+    code = _run(["attach", slug, "--group", server.group_name], monkeypatch)
+    assert code == 0
 
-        session = workspace_session_name(server.group_name, slug)
-        _press_the_key_and_wait(server.sock, session, ws_dir)
+    session = workspace_session_name(server.group_name, slug)
+    _press_the_key_and_wait(server.sock, session, ws_dir)
 
-        rows = _list_windows(server.sock, session)
-        assert len(rows) == 2, rows
-        composed_id = rows[1][0]
+    rows = _list_windows(server.sock, session)
+    assert len(rows) == 2, rows
+    composed_id = rows[1][0]
 
-        pane_command = _pane_start_command(server.sock, composed_id)
-        tokens = shlex.split(pane_command)
+    pane_command = _pane_start_command(server.sock, composed_id)
+    tokens = shlex.split(pane_command)
 
-        assignment = f"CLAUDE_CONFIG_DIR={account_dir}"
-        assert assignment in tokens, tokens
-        scrub_indices = [i for i, t in enumerate(tokens) if t == "-u"]
-        assert scrub_indices, tokens
-        assignment_index = tokens.index(assignment)
-        session_id_index = tokens.index("--session-id")
-        assert max(scrub_indices) < assignment_index < session_id_index, tokens
-        assert "--remote-control" not in tokens
-        assert "--name" not in tokens
+    assignment = f"CLAUDE_CONFIG_DIR={account_dir}"
+    assert assignment in tokens, tokens
+    scrub_indices = [i for i, t in enumerate(tokens) if t == "-u"]
+    assert scrub_indices, tokens
+    assignment_index = tokens.index(assignment)
+    session_id_index = tokens.index("--session-id")
+    assert max(scrub_indices) < assignment_index < session_id_index, tokens
+    assert "--remote-control" not in tokens
+    assert "--name" not in tokens
 
-        record = read_window_record(window_record_path_for(ws_dir))
-        assert record.status == "ok"
-        assert len(record.entries) == 1, record
-        assert record.entries[0].conversation_id is not None
-    finally:
-        next(server_gen, None)
+    record = read_window_record(window_record_path_for(ws_dir))
+    assert record.status == "ok"
+    assert len(record.entries) == 1, record
+    assert record.entries[0].conversation_id is not None
 
 
 @pytest.mark.skipif(_REAL_TMUX is None, reason="no tmux binary on PATH (captured at import time)")
 def test_a_group_declaring_no_account_composes_the_pane_with_no_assignment(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch, make_server
 ) -> None:
     from camp.launch.naming import workspace_session_name
 
-    server_gen = _make_server(tmp_path, monkeypatch, launch_block="")
-    server = next(server_gen)
-    try:
-        slug = "camp-cli"
-        ws_dir = server.workspace_dir(slug)
-        ws_dir.mkdir(parents=True)
-        _wire_group_listing(monkeypatch, ws_dir=ws_dir, slug=slug)
+    server = make_server(launch_block="")
+    slug = "camp-cli"
+    ws_dir = server.workspace_dir(slug)
+    ws_dir.mkdir(parents=True)
+    _wire_group_listing(monkeypatch, ws_dir=ws_dir, slug=slug)
 
-        code = _run(["attach", slug, "--group", server.group_name], monkeypatch)
-        assert code == 0
+    code = _run(["attach", slug, "--group", server.group_name], monkeypatch)
+    assert code == 0
 
-        session = workspace_session_name(server.group_name, slug)
-        _press_the_key_and_wait(server.sock, session, ws_dir)
+    session = workspace_session_name(server.group_name, slug)
+    _press_the_key_and_wait(server.sock, session, ws_dir)
 
-        rows = _list_windows(server.sock, session)
-        assert len(rows) == 2, rows
-        composed_id = rows[1][0]
+    rows = _list_windows(server.sock, session)
+    assert len(rows) == 2, rows
+    composed_id = rows[1][0]
 
-        pane_command = _pane_start_command(server.sock, composed_id)
-        tokens = shlex.split(pane_command)
+    pane_command = _pane_start_command(server.sock, composed_id)
+    tokens = shlex.split(pane_command)
 
-        assert not any(t.startswith("CLAUDE_CONFIG_DIR=") for t in tokens), tokens
-        assert "CLAUDE_CONFIG_DIR" in tokens, (
-            "the default is still scrubbed even with no declared account",
-            tokens,
-        )
-        assert "--session-id" in tokens
-        assert "--remote-control" not in tokens
-        assert "--name" not in tokens
-    finally:
-        next(server_gen, None)
+    assert not any(t.startswith("CLAUDE_CONFIG_DIR=") for t in tokens), tokens
+    assert "CLAUDE_CONFIG_DIR" in tokens, (
+        "the default is still scrubbed even with no declared account",
+        tokens,
+    )
+    assert "--session-id" in tokens
+    assert "--remote-control" not in tokens
+    assert "--name" not in tokens
 
 
 # ---------------------------------------------------------------------------
@@ -323,31 +315,27 @@ def test_a_group_declaring_no_account_composes_the_pane_with_no_assignment(
 
 @pytest.mark.skipif(_REAL_TMUX is None, reason="no tmux binary on PATH (captured at import time)")
 def test_camp_launch_redirects_and_leaves_the_socket_untouched(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture, make_server
 ) -> None:
-    server_gen = _make_server(tmp_path, monkeypatch)
-    server = next(server_gen)
-    try:
-        _sock_run(server.sock, "new-session", "-d", "-s", "plainsess", "-x", "80", "-y", "24")
-        before_sessions = _sock_run(server.sock, "list-sessions").stdout.splitlines()
-        before_windows = _sock_run(server.sock, "list-windows", "-t", "plainsess").stdout.splitlines()
+    server = make_server()
+    _sock_run(server.sock, "new-session", "-d", "-s", "plainsess", "-x", "80", "-y", "24")
+    before_sessions = _sock_run(server.sock, "list-sessions").stdout.splitlines()
+    before_windows = _sock_run(server.sock, "list-windows", "-t", "plainsess").stdout.splitlines()
 
-        code = _run(["launch", "camp-cli"], monkeypatch)
-        captured = capsys.readouterr()
+    code = _run(["launch", "camp-cli"], monkeypatch)
+    captured = capsys.readouterr()
 
-        assert code == 1
-        assert (
-            captured.err.strip()
-            == "camp launch: this command has been replaced — use 'camp attach' instead."
-        )
-        assert captured.out == ""
+    assert code == 1
+    assert (
+        captured.err.strip()
+        == "camp launch: this command has been replaced — use 'camp attach' instead."
+    )
+    assert captured.out == ""
 
-        after_sessions = _sock_run(server.sock, "list-sessions").stdout.splitlines()
-        after_windows = _sock_run(server.sock, "list-windows", "-t", "plainsess").stdout.splitlines()
-        assert after_sessions == before_sessions
-        assert after_windows == before_windows
-    finally:
-        next(server_gen, None)
+    after_sessions = _sock_run(server.sock, "list-sessions").stdout.splitlines()
+    after_windows = _sock_run(server.sock, "list-windows", "-t", "plainsess").stdout.splitlines()
+    assert after_sessions == before_sessions
+    assert after_windows == before_windows
 
 
 # ---------------------------------------------------------------------------
@@ -358,31 +346,25 @@ def test_camp_launch_redirects_and_leaves_the_socket_untouched(
 
 @pytest.mark.skipif(_REAL_TMUX is None, reason="no tmux binary on PATH (captured at import time)")
 def test_roots_prints_the_notice_once_and_a_second_attach_does_not_repeat_it(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture, make_server
 ) -> None:
-    server_gen = _make_server(
-        tmp_path, monkeypatch, launch_block='[launch]\nroots = ["~/code"]\n'
-    )
-    server = next(server_gen)
-    try:
-        slug = "camp-cli"
-        ws_dir = server.workspace_dir(slug)
-        ws_dir.mkdir(parents=True)
-        _wire_group_listing(monkeypatch, ws_dir=ws_dir, slug=slug)
+    server = make_server(launch_block='[launch]\nroots = ["~/code"]\n')
+    slug = "camp-cli"
+    ws_dir = server.workspace_dir(slug)
+    ws_dir.mkdir(parents=True)
+    _wire_group_listing(monkeypatch, ws_dir=ws_dir, slug=slug)
 
-        code = _run(["attach", slug, "--group", server.group_name], monkeypatch)
-        first = capsys.readouterr()
-        assert code == 0, first.err
+    code = _run(["attach", slug, "--group", server.group_name], monkeypatch)
+    first = capsys.readouterr()
+    assert code == 0, first.err
 
-        notice = "is no longer used and grants nothing — remove it"
-        assert first.err.count(notice) == 1, first.err
+    notice = "is no longer used and grants nothing — remove it"
+    assert first.err.count(notice) == 1, first.err
 
-        code2 = _run(["attach", slug, "--group", server.group_name], monkeypatch)
-        second = capsys.readouterr()
-        assert code2 == 0, second.err
-        assert notice not in second.err, second.err
-    finally:
-        next(server_gen, None)
+    code2 = _run(["attach", slug, "--group", server.group_name], monkeypatch)
+    second = capsys.readouterr()
+    assert code2 == 0, second.err
+    assert notice not in second.err, second.err
 
 
 # ---------------------------------------------------------------------------
@@ -393,7 +375,7 @@ def test_roots_prints_the_notice_once_and_a_second_attach_does_not_repeat_it(
 
 @pytest.mark.skipif(_REAL_TMUX is None, reason="no tmux binary on PATH (captured at import time)")
 def test_a_transferred_conversations_member_subpath_roots_the_resurrected_window_there(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture, make_server
 ) -> None:
     """`camp transfer` needs a second host to set up, so this seeds the
     received record the way `test_transfer_receive.py` does — writing a
@@ -407,64 +389,60 @@ def test_a_transferred_conversations_member_subpath_roots_the_resurrected_window
     from camp.group.window_record import WindowEntry, read_window_record, write_window_record, window_record_path_for
     from camp.launch.naming import workspace_session_name
 
-    server_gen = _make_server(tmp_path, monkeypatch)
-    server = next(server_gen)
-    try:
-        slug = "camp-cli"
-        group_name = server.group_name
-        session = workspace_session_name(group_name, slug)
-        ws_dir = server.workspace_dir(slug)
-        ws_dir.mkdir(parents=True)
-        (ws_dir / "member-a").mkdir()
-        (ws_dir / "member-b").mkdir()
+    server = make_server()
+    slug = "camp-cli"
+    group_name = server.group_name
+    session = workspace_session_name(group_name, slug)
+    ws_dir = server.workspace_dir(slug)
+    ws_dir.mkdir(parents=True)
+    (ws_dir / "member-a").mkdir()
+    (ws_dir / "member-b").mkdir()
 
-        conv_a = "8f2c1a3e-aaaa-bbbb-cccc-111122223333"
-        conv_b = "41aa7c02-aaaa-bbbb-cccc-222233334444"
-        write_window_record(
-            window_record_path_for(ws_dir),
-            [
-                WindowEntry(window_id="@300", name="member-a", cwd="member-a", conversation_id=conv_a),
-                WindowEntry(window_id="@301", name="member-b", cwd="member-b", conversation_id=conv_b),
-            ],
-        )
+    conv_a = "8f2c1a3e-aaaa-bbbb-cccc-111122223333"
+    conv_b = "41aa7c02-aaaa-bbbb-cccc-222233334444"
+    write_window_record(
+        window_record_path_for(ws_dir),
+        [
+            WindowEntry(window_id="@300", name="member-a", cwd="member-a", conversation_id=conv_a),
+            WindowEntry(window_id="@301", name="member-b", cwd="member-b", conversation_id=conv_b),
+        ],
+    )
 
-        harness = _FakeHarness(
-            transcripts={
-                conv_a: Path("/fake/transcripts") / f"{conv_a}.jsonl",
-                conv_b: Path("/fake/transcripts") / f"{conv_b}.jsonl",
-            },
-            resumes={
-                conv_a: ["claude", "--resume", conv_a],
-                conv_b: ["claude", "--resume", conv_b],
-            },
-        )
-        _wire_workspace(monkeypatch, ws_dir=ws_dir, slug=slug, group_name=group_name, harness=harness)
+    harness = _FakeHarness(
+        transcripts={
+            conv_a: Path("/fake/transcripts") / f"{conv_a}.jsonl",
+            conv_b: Path("/fake/transcripts") / f"{conv_b}.jsonl",
+        },
+        resumes={
+            conv_a: ["claude", "--resume", conv_a],
+            conv_b: ["claude", "--resume", conv_b],
+        },
+    )
+    _wire_workspace(monkeypatch, ws_dir=ws_dir, slug=slug, group_name=group_name, harness=harness)
 
-        code = _run(["attach", slug, "--group", group_name], monkeypatch)
-        captured = capsys.readouterr()
-        assert code == 0, captured.err
+    code = _run(["attach", slug, "--group", group_name], monkeypatch)
+    captured = capsys.readouterr()
+    assert code == 0, captured.err
 
-        rows = _list_windows(server.sock, session)
-        assert len(rows) == 2, rows
-        dirs = [row[2] for row in rows]
-        assert dirs == [
-            str((ws_dir / "member-a").resolve()),
-            str((ws_dir / "member-b").resolve()),
-        ]
-        assert dirs[0] != dirs[1], "the two members must root at two DIFFERENT directories"
+    rows = _list_windows(server.sock, session)
+    assert len(rows) == 2, rows
+    dirs = [row[2] for row in rows]
+    assert dirs == [
+        str((ws_dir / "member-a").resolve()),
+        str((ws_dir / "member-b").resolve()),
+    ]
+    assert dirs[0] != dirs[1], "the two members must root at two DIFFERENT directories"
 
-        window_ids = [row[0] for row in rows]
-        for window_id in window_ids:
-            _wait_for_shell(server.sock, window_id, frozenset({"sh", "bash", "zsh", "fish"}))
+    window_ids = [row[0] for row in rows]
+    for window_id in window_ids:
+        _wait_for_shell(server.sock, window_id, frozenset({"sh", "bash", "zsh", "fish"}))
 
-        pane_a = _capture_pane(server.sock, window_ids[0])
-        pane_b = _capture_pane(server.sock, window_ids[1])
-        assert f"camp: this window held conversation {conv_a}" in pane_a
-        assert f"camp: resume it with: claude --resume {conv_a}" in pane_a
-        assert f"camp: this window held conversation {conv_b}" in pane_b
-        assert f"camp: resume it with: claude --resume {conv_b}" in pane_b
+    pane_a = _capture_pane(server.sock, window_ids[0])
+    pane_b = _capture_pane(server.sock, window_ids[1])
+    assert f"camp: this window held conversation {conv_a}" in pane_a
+    assert f"camp: resume it with: claude --resume {conv_a}" in pane_a
+    assert f"camp: this window held conversation {conv_b}" in pane_b
+    assert f"camp: resume it with: claude --resume {conv_b}" in pane_b
 
-        after = read_window_record(window_record_path_for(ws_dir))
-        assert {e.cwd for e in after.entries} == {"member-a", "member-b"}
-    finally:
-        next(server_gen, None)
+    after = read_window_record(window_record_path_for(ws_dir))
+    assert {e.cwd for e in after.entries} == {"member-a", "member-b"}
