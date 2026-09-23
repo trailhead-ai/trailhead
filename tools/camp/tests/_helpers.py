@@ -78,8 +78,26 @@ def _build_git_repo(path: Path, *, origin: bool) -> None:
 
 
 def _clone_template(template: Path, path: Path) -> None:
-    """Copy *template* to *path*, repointing the paths git recorded inside it."""
-    shutil.copytree(template, path, symlinks=True, dirs_exist_ok=True)
+    """Copy *template* to *path*, repointing the paths git recorded inside it.
+
+    Git's own background maintenance can transiently create and remove lock
+    files (e.g. `.git/objects/maintenance.lock`) inside the shared template
+    while a copy is in flight, which races `shutil.copytree` off a listing
+    that already had the file. Lock files are ephemeral git-internal state
+    that a fresh copy has no use for regardless, so they are excluded from
+    the copy outright rather than raced.
+    """
+    shutil.copytree(
+        template,
+        path,
+        symlinks=True,
+        dirs_exist_ok=True,
+        ignore=shutil.ignore_patterns("*.lock"),
+        # Named explicitly, rather than left to copytree's own default, so a
+        # test can monkeypatch `shutil.copy2` and observe it: a default bound
+        # at `shutil`'s own definition time is immune to that patch.
+        copy_function=shutil.copy2,
+    )
 
     for name in _PATH_BEARING_GIT_FILES:
         recorded = path / ".git" / name
