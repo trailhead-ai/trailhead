@@ -28,20 +28,17 @@ every row (session or not) carries `"ok"`, so a parser sorts a mixed answer
 without touching stderr, and a total failure prints no array at all rather than
 an empty one a parser could read as complete.
 
-``camp new --launch`` reuses this module rather than re-deriving the flow, so a
-launch means the same thing and refuses the same way at both entry points.
+``kill`` and ``attach`` share one more CLI job: turning an operator's session
+reference into exactly one addressable session, or refusing. The resolution
+itself is pure and lives in ``camp.launch.recovery``; everything the operator
+SEES about it — the candidate rows, the exit codes, the wording of each refusal
+— is here, because a question answered on a terminal cannot also be answered
+identically from a test or a listing.
 
-The RESUME flavor adds one more CLI job: turning an operator's session reference
-into exactly one addressable session, or refusing. The resolution itself is pure
-and lives in ``camp.launch.recovery``; everything the operator SEES about it —
-the candidate rows, the exit codes, the wording of each refusal — is here,
-because a question answered on a terminal cannot also be answered identically
-from a test or a listing.
-
-``sessions --recoverable`` is the discovery half of that flavor, and the same
-division applies: the subtraction that produces the dead sessions is pure and
-lives beside the resolver, while the cap, the row rendering, the empty-state
-line and the harness-unsupported refusal are here. Its one hard rule is that
+``sessions --recoverable`` follows the same division: the subtraction that
+produces the dead sessions is pure and lives beside the resolver, while the
+cap, the row rendering, the empty-state line and the harness-unsupported
+refusal are here. Its one hard rule is that
 BOTH halves of the subtraction are scoped by the same argument — the transcript
 enumeration and the live enumeration alike — because scoping only one of them
 reports running sessions as recoverable.
@@ -61,9 +58,9 @@ if TYPE_CHECKING:
     from ..attach.door_target import ResolvedWorkspace
     from ..host.config import Host
 
-#: Bounds for `camp new --launch`'s provisioning wait. Provisioning clones and
-#: sets up every member repo, so the ceiling is generous; the floor is that this
-#: wait is BOUNDED at all — a killed provisioner leaves the manifest `pending`
+#: Bounds for `camp new --activate`'s boot-readiness wait. Provisioning clones
+#: and sets up every member repo, so the ceiling is generous; the floor is that
+#: this wait is BOUNDED at all — a killed provisioner leaves the manifest `pending`
 #: forever with no liveness signal, so an unbounded wait would hang the caller.
 _PROVISION_POLL_INTERVAL_SECONDS = 1.0
 _PROVISION_POLL_TIMEOUT_SECONDS = 900.0

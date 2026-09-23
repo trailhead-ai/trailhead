@@ -553,9 +553,7 @@ class Tmux:
 
         Most callers discard the result — the stop engine's own evidence of
         success is a re-poll of :meth:`has_session`, never this call's exit
-        status — but a caller that wants to explain a failed reclaim (see
-        ``launch/session.py``'s post-confirmation-timeout cleanup) can read
-        it.
+        status — but a caller that wants to explain a failure can read it.
         """
         return self._run(["kill-session", "-t", target(name)], timeout=timeout)
 
@@ -563,13 +561,8 @@ class Tmux:
         self, name: str, *, timeout: float | None = None
     ) -> tuple[subprocess.CompletedProcess | None, str | None]:
         """Same call :meth:`kill_session` makes, plus the exception's own
-        message when the call could not complete at all.
-
-        The consumer is `launch/session.py`'s confirmation-timeout cleanup,
-        which reports a failed reclaim on stderr and — unlike
-        :meth:`kill_session`'s other, best-effort callers, which discard the
-        result entirely — has an operator to tell *why* tmux could not be
-        asked, the one thing a plain ``None`` throws away.
+        message when the call could not complete at all — *why* tmux could
+        not be asked, the one thing a plain ``None`` throws away.
         """
         return self._run_with_reason(["kill-session", "-t", target(name)], timeout=timeout)
 
@@ -582,9 +575,8 @@ class Tmux:
         timeout: float | None = None,
     ) -> tuple[subprocess.CompletedProcess | None, str | None]:
         """Same call :meth:`set_environment` makes, plus the exception's own
-        message when the call could not complete at all — the piece of
-        information `launch/session.py`'s session-environment statement
-        reports on stderr instead of a synthesized "tmux did not answer".
+        message when the call could not complete at all, rather than a
+        synthesized "tmux did not answer".
         """
         return self._run_with_reason(
             ["set-environment", "-t", target(name), *operand],
@@ -813,8 +805,7 @@ class Tmux:
 
         *operand* is either a removal (``["-r", VAR]``) or an assignment
         (``[KEY, VALUE]``) — this method issues exactly one tmux call per
-        operand, the shape ``launch/session.py``'s session-environment
-        statement already builds each of its operands as. Returns ``None``
+        operand. Returns ``None``
         when tmux could not be asked; the caller decides what to do with a
         non-zero exit.
         """

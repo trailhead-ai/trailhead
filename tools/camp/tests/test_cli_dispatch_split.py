@@ -452,80 +452,12 @@ def test_group_verb_with_host_flag_refuses_instead_of_answering_locally(
 
 
 # ---------------------------------------------------------------------------
-# `launch` is retired (LEGACY_REDIRECTS) and absent from `_HOST_VERBS`,
-# `_STATE_CHANGING_HOST_VERBS`, and `_GROUP_REQUIRED_HOST_VERBS`. The
-# retired-verb redirect is classified and handled ahead of ALL host routing
-# — both the --all-hosts branch and the --host branch below — so a `camp
-# launch` under either flag prints the same redirect line every other
-# launch flavor prints, contacts no host, loads no hosts.toml, and never
-# reaches a live-host-verb applicability check.
+# A retired verb (`launch`, `resume`) is classified and handled ahead of ALL
+# host routing — both the --all-hosts branch and the --host branch — so under
+# either flag it prints the same redirect line it prints with no flag,
+# contacts no host, loads no hosts.toml, and never reaches a live-host-verb
+# applicability check.
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize("all_hosts_flag", ["--all-hosts", "-a"])
-def test_all_hosts_launch_redirects_and_never_calls_transport(
-    monkeypatch: pytest.MonkeyPatch, isolated_env: dict[str, str], tmp_path: Path, all_hosts_flag: str
-) -> None:
-    dispatch = _dispatch_module()
-    for k, v in isolated_env.items():
-        monkeypatch.setenv(k, v)
-    monkeypatch.chdir(tmp_path)
-
-    import importlib
-
-    transport = importlib.import_module("camp.host.transport")
-
-    def _boom(*args, **kwargs):
-        raise AssertionError("transport.run_camp must not be called for a retired launch")
-
-    monkeypatch.setattr(transport, "run_camp", _boom)
-    monkeypatch.setattr(sys, "argv", ["camp", "launch", all_hosts_flag, "myslug"])
-
-    with pytest.raises(SystemExit) as excinfo:
-        dispatch.main()
-    assert excinfo.value.code == 1
-
-
-def test_all_hosts_launch_prints_the_redirect_not_the_state_changing_wording(
-    isolated_env: dict[str, str], tmp_path: Path
-) -> None:
-    """`launch` is retired, so `camp launch --all-hosts` prints the same
-    redirect line every launch flavor prints — never the state-changing
-    "-a acts on one machine" wording a live host verb (kill) still gets, and
-    never the generic "has no meaning here" either."""
-    result = _run(["launch", "-a", "myslug"], env=isolated_env, cwd=tmp_path)
-    assert result.returncode == 1
-    assert (
-        "camp launch: this command has been replaced — use 'camp attach' instead."
-        in result.stderr
-    ), result.stderr
-    assert "changes state" not in result.stderr, result.stderr
-    assert "has no meaning here" not in result.stderr, result.stderr
-
-
-def test_host_launch_redirects_before_connecting_and_never_calls_transport(
-    monkeypatch: pytest.MonkeyPatch, hosts_env: dict[str, str], tmp_path: Path
-) -> None:
-    dispatch = _dispatch_module()
-    for k, v in hosts_env.items():
-        monkeypatch.setenv(k, v)
-    monkeypatch.chdir(tmp_path)
-
-    import importlib
-
-    transport = importlib.import_module("camp.host.transport")
-
-    def _boom(*args, **kwargs):
-        raise AssertionError(
-            "transport.run_camp must not be called for a retired launch under --host"
-        )
-
-    monkeypatch.setattr(transport, "run_camp", _boom)
-    monkeypatch.setattr(sys, "argv", ["camp", "launch", "--host", "andromeda", "myslug"])
-
-    with pytest.raises(SystemExit) as excinfo:
-        dispatch.main()
-    assert excinfo.value.code == 1
 
 
 @pytest.mark.parametrize(
@@ -565,10 +497,7 @@ def test_retired_verbs_under_host_redirect_locally_while_a_live_host_verb_reache
         return transport.Answered(stdout="[]", stderr="", exit_code=0)
 
     monkeypatch.setattr(transport, "run_camp", fake_run_camp)
-    argv = ["camp", verb, *rest, "--host", "andromeda"]
-    if verb == "launch":
-        argv += ["--group", "g"]
-    monkeypatch.setattr(sys, "argv", argv)
+    monkeypatch.setattr(sys, "argv", ["camp", verb, *rest, "--host", "andromeda"])
 
     with pytest.raises(SystemExit) as excinfo:
         dispatch.main()
@@ -584,15 +513,10 @@ def test_retired_verbs_under_host_redirect_locally_while_a_live_host_verb_reache
 
 
 # ---------------------------------------------------------------------------
-# `kill` joins `_HOST_VERBS` alongside `launch` — but the two verbs now split
-# across TWO different sets rather than one. Both are STATE-CHANGING (drives
-# the --all-hosts refusal wording), but only `launch` requires an explicit
-# --group: a stop is groupless, so `--host` + `--group` together on `kill`
-# takes the same collision refusal `list`/`sessions`/`attach` already take,
-# never the "requires an explicit --group" wording. Each test below runs the
-# SAME assertion against both verbs to prove the sets actually separated,
-# per `task/kill-joins-the-host-verbs-and-the-group-requirement-stops-riding-
-# on-state-changing`'s test contract.
+# `kill` is a STATE-CHANGING host verb (drives the --all-hosts refusal
+# wording) and groupless: the reference alone names the session, so a
+# `--host kill` needs no --group, and `--host` + `--group` together takes the
+# same collision refusal `list`/`sessions`/`attach` take.
 # ---------------------------------------------------------------------------
 
 
@@ -628,9 +552,8 @@ def test_host_kill_reaches_the_real_kill_handler_end_to_end(
     capsys: pytest.CaptureFixture,
 ) -> None:
     """`camp kill <ref> --host <name>` — with NO --group — must reach the real
-    routed handler and succeed, proving the dispatch wiring this task adds
-    (not a mocked `_dispatch_host_command`, unlike the routing tests above:
-    this is the end-to-end CLI reach the task's scope facts say is new)."""
+    routed handler and succeed (not a mocked `_dispatch_host_command`, unlike
+    the routing tests above), forwarding no group to the far side."""
     dispatch = _dispatch_module()
     for k, v in hosts_env.items():
         monkeypatch.setenv(k, v)
@@ -648,33 +571,7 @@ def test_host_kill_reaches_the_real_kill_handler_end_to_end(
     assert captured_argv == [("kill", ["kill", "sess-1", "--json"])]
 
 
-def test_kill_under_host_is_groupless_and_never_demands_an_explicit_group(
-    monkeypatch: pytest.MonkeyPatch,
-    hosts_env: dict[str, str],
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture,
-) -> None:
-    """`_GROUP_REQUIRED_HOST_VERBS` is empty now that `launch` (its one
-    member) is retired — `kill` was never in it, and this pins that a
-    `--host kill` with no `--group` still succeeds rather than picking up
-    a group requirement it never had."""
-    dispatch = _dispatch_module()
-    for k, v in hosts_env.items():
-        monkeypatch.setenv(k, v)
-    monkeypatch.chdir(tmp_path)
-
-    _rig_kill_relay(monkeypatch)
-    monkeypatch.setattr(sys, "argv", ["camp", "kill", "sess-1", "--host", "andromeda"])
-
-    with pytest.raises(SystemExit) as excinfo:
-        dispatch.main()
-
-    err = capsys.readouterr().err
-    assert excinfo.value.code == 0, err
-    assert "requires an explicit" not in err, err
-
-
-def test_kill_host_and_group_collision_takes_attachs_refusal_not_launchs(
+def test_kill_host_and_group_collision_takes_the_read_verbs_refusal(
     monkeypatch: pytest.MonkeyPatch,
     hosts_env: dict[str, str],
     tmp_path: Path,
@@ -682,9 +579,7 @@ def test_kill_host_and_group_collision_takes_attachs_refusal_not_launchs(
 ) -> None:
     """`camp kill <ref> --host <name> --group <g>` must refuse with the
     one-remote-host-and-one-local-group collision wording that `list` /
-    `sessions` / `attach` already take — NOT `launch`'s "requires an
-    explicit --group" wording, since a stop never needed --group in the
-    first place."""
+    `sessions` / `attach` take — a stop names no group."""
     dispatch = _dispatch_module()
     for k, v in hosts_env.items():
         monkeypatch.setenv(k, v)
@@ -711,7 +606,6 @@ def test_kill_host_and_group_collision_takes_attachs_refusal_not_launchs(
     err = capsys.readouterr().err
     assert "--host" in err and "--group" in err, err
     assert "one remote" in err, err
-    assert "requires an explicit" not in err, err
 
 
 @pytest.mark.parametrize("all_hosts_flag", ["--all-hosts", "-a"])
@@ -752,7 +646,7 @@ def test_all_hosts_wording_diverges_for_kill_and_launch(
     with pytest.raises(SystemExit) as excinfo:
         dispatch.main()
 
-    assert excinfo.value.code != 0
+    assert excinfo.value.code == 1
     err = capsys.readouterr().err
     if expect_state_changing_wording:
         assert "changes state" in err, err
@@ -769,7 +663,7 @@ def test_host_kill_with_no_value_reports_missing_value_not_no_meaning(
     isolated_env: dict[str, str], tmp_path: Path
 ) -> None:
     """`camp kill --host` with no following value must refuse for the missing
-    value — kill is now IN `_HOST_VERBS`, so the "has no meaning here" path
+    value — kill is IN `_HOST_VERBS`, so the "has no meaning here" path
     (reserved for a verb outside the set entirely) must not fire instead."""
     result = _run(["kill", "some-ref", "--host"], env=isolated_env, cwd=tmp_path)
 

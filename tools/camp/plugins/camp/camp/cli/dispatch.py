@@ -82,9 +82,8 @@ _ALL_GROUPS_VERBS = frozenset({"list", "sessions"})
 #: the row-merging shape `list`/`sessions` produce. Deliberately absent from
 #: `_HOST_VERBS` (below): `--host` (one named machine) has no meaning for a
 #: verb whose whole point under `-a` is asking every declared machine at
-#: once, and it stays out of `_STATE_CHANGING_HOST_VERBS` /
-#: `_GROUP_REQUIRED_HOST_VERBS` too — a health check reads, it never
-#: changes state, and it names no group.
+#: once, and it stays out of `_STATE_CHANGING_HOST_VERBS` too — a health
+#: check reads, it never changes state.
 ALL_HOSTS_FLAGS = ("--all-hosts", "-a")
 _ALL_HOSTS_VERBS = frozenset({"list", "sessions", "attach", "doctor"})
 
@@ -105,13 +104,13 @@ _OPAQUE_PAYLOAD_VERBS = frozenset({"foreach"})
 #: the JSON relay transport `_dispatch_host_command` builds for "list"/
 #: "sessions" — see that function's own docstring.
 #:
-#: "launch" is retired (`LEGACY_REDIRECTS`) and absent from this set: the
-#: retired-verb redirect is classified and handled ahead of ALL host routing
-#: (both the --all-hosts branch and the --host branch below), so a retired
-#: verb never reaches this set's applicability check at all. "kill" is the
-#: remaining STATE-CHANGING member — see `_STATE_CHANGING_HOST_VERBS` below —
-#: and is nonetheless groupless (see `_GROUP_REQUIRED_HOST_VERBS`'s own
-#: comment for why the two concerns don't share one set).
+#: A retired verb (`_LEGACY_REDIRECTS`) is classified and handled ahead of
+#: ALL host routing (both the --all-hosts branch and the --host branch
+#: below), so it never reaches this set's applicability check at all.
+#: "kill" is the STATE-CHANGING member — see `_STATE_CHANGING_HOST_VERBS`
+#: below. Every member is groupless under `--host`: `--host` together with
+#: `--group` is refused as a collision, because the reference alone names
+#: the session and no group is forwarded to the far side.
 HOST_FLAG = "--host"
 _HOST_VERBS = frozenset({"list", "sessions", "attach", "kill"})
 
@@ -122,25 +121,8 @@ _HOST_VERBS = frozenset({"list", "sessions", "attach", "kill"})
 #: changes state, not because it merely "has no meaning" — where every
 #: other `_HOST_VERBS` member gets the generic refusal.
 #:
-#: This set drives ONLY the --all-hosts wording. "launch" is retired and
-#: absent — `launch --all-hosts` is caught by the retired-verb redirect
-#: before this set is ever consulted.
+#: This set drives ONLY the --all-hosts wording.
 _STATE_CHANGING_HOST_VERBS = frozenset({"kill"})
-
-#: The subset of `_HOST_VERBS` for which `--host` requires an explicit
-#: `--group <name>` rather than colliding with one the way every other
-#: `_HOST_VERBS` member does. A state-changing verb that also needs to know
-#: WHICH group to act on remotely belongs here: `--group` is the value it
-#: forwards, never a value this side infers from its own cwd
-#: (`docs/design/a-session-starts-on-a-named-machine.md`, "The group is
-#: named, never inferred"). "kill" is deliberately excluded even though it
-#: is state-changing — a stop names no group at all, so `--host` + `--group`
-#: together on "kill" takes the same collision refusal `list`/`sessions`/
-#: `attach` take, per `docs/design/stopping-a-session-on-a-named-machine.md`,
-#: "The reference names the session; the group is not asked for". No host
-#: verb currently both changes state and forwards a group, so the set is
-#: empty.
-_GROUP_REQUIRED_HOST_VERBS: frozenset[str] = frozenset()
 
 
 def read_router_options(verb: str, args: list[str]) -> "tuple[Any, list[str]]":
@@ -209,11 +191,9 @@ def read_json_option(args: list[str], *, verb: str = "camp") -> bool:
 def read_group_option(args: list[str]) -> str | None:
     """Read ``--group``'s value from *args* WITHOUT consuming it.
 
-    `main()` has to see this flag to refuse it alongside a widening option, but
-    must not take it: a `_GROUP_REQUIRED_HOST_VERBS` member forwards the group
-    name across to the far side, so a router that consumed it would strip the
-    value the remote invocation is assembled from. Every group-aware handler
-    declares ``--group`` itself and ignores it.
+    `main()` has to see this flag to refuse it alongside a widening option or
+    ``--host``, but must not take it: every group-aware handler declares
+    ``--group`` itself and reads it from the argv the router forwards whole.
 
     Returns None when the flag is absent and "" when it is present with no value
     — the same absent-versus-valueless distinction `read_router_options` draws
@@ -291,7 +271,7 @@ def _dispatch_host_command(
     Reached ONLY after `--host` has resolved to a declared host and every
     refusal above has passed — `main()`'s `--host` block is this function's
     sole caller, and it refuses any verb outside `_HOST_VERBS` before
-    reaching here, so *verb* is always one of the five below.
+    reaching here, so *verb* is always one of the four below.
 
     "list" and "sessions" are wired to the SSH transport
     (`camp.host.transport.run_camp`, via `camp.host.relay.relay_all_groups`).
@@ -300,9 +280,8 @@ def _dispatch_host_command(
     relaying a JSON answer — see `cli/session.py`'s `_cmd_attach_host_cli`.
 
     "kill" reaches here with NO --group required or forwarded — it is
-    state-changing (`_STATE_CHANGING_HOST_VERBS`) but not group-required
-    (`_GROUP_REQUIRED_HOST_VERBS`): the reference alone names the session,
-    exactly as with "attach". It is wired through
+    state-changing (`_STATE_CHANGING_HOST_VERBS`), but the reference alone
+    names the session, exactly as with "attach". It is wired through
     `camp.host.relay.answer_payload_for_host` (the payload relay shape that
     accepts either a single object or candidate rows) — see `cli/session.py`'s
     `_cmd_kill_host_cli`.
@@ -661,13 +640,12 @@ def main() -> None:
     if all_hosts:
         canonical, _kind = _resolve_verb(first) if first else (first, "live")
         if canonical not in _ALL_HOSTS_VERBS:
-            # A state-changing verb (launch, kill) is refused for its OWN
+            # A state-changing verb (kill) is refused for its OWN
             # stated reason — the verb changes state, so it acts on one
             # named machine — never the generic "has no meaning here" a verb gets
             # when an option simply does not apply to it. The generic
             # wording would read as an oversight; this is a decision (design
-            # docs: launch's "Launching is never a broadcast", kill's
-            # "Stopping is never a broadcast"). The refusal names the
+            # doc: kill's "Stopping is never a broadcast"). The refusal names the
             # single-host form so the operator's real intent — do this over
             # there — is one option away.
             if canonical in _STATE_CHANGING_HOST_VERBS:
@@ -779,29 +757,7 @@ def main() -> None:
         if host_name == "":
             print(f"camp {first}: {HOST_FLAG} requires a value", file=sys.stderr)
             sys.exit(1)
-        if canonical in _GROUP_REQUIRED_HOST_VERBS:
-            # A state-changing verb sends --group across untouched — the far
-            # side resolves it there, exactly as a local invocation would.
-            # No group resolves on the far side from a non-interactive ssh
-            # cwd (it lands in a home directory belonging to no workspace),
-            # so unlike the read verbs above, --group is REQUIRED here
-            # rather than refused: camp never fills the gap from its own
-            # working directory, because a local directory deciding what
-            # runs on another machine is the exact substitution the host
-            # axis exists to prevent (design doc: "The group is named,
-            # never inferred"). Checked here, before hosts.toml is even
-            # read, so the refusal costs nothing and no connection is ever
-            # attempted.
-            if read_group_option(scan_rest) is None:
-                print(
-                    f"camp {canonical}: {HOST_FLAG} requires an explicit "
-                    "--group <name> — the far side resolves no group from "
-                    "its own working directory, so this machine's cwd must "
-                    "never decide what runs on another one",
-                    file=sys.stderr,
-                )
-                sys.exit(1)
-        elif read_group_option(scan_rest) is not None:
+        if read_group_option(scan_rest) is not None:
             print(
                 f"camp {canonical}: {HOST_FLAG} and --group name one remote "
                 "host and one local group at once — pass one or the other",

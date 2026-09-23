@@ -55,9 +55,9 @@ _NORMALIZE_RE = re.compile(r"[^a-z0-9-]+")
 # drift in EITHER half fails loudly rather than silently changing slug validation.
 _TAXONOMY_RESERVED = (
     set(VERB_ALIASES)  # alias keys: rm, ls
-    | set(LEGACY_REDIRECTS)  # legacy keys: open, break, init, ai, enter
+    | set(LEGACY_REDIRECTS)  # open, break, init, ai, enter, launch, resume, bookmark
     | set(DISABLED_VERBS)  # restock, sweep, code, fire
-    | set(NEEDS_GROUP_VERBS)  # new, remove, pwd, activate, setup
+    | set(NEEDS_GROUP_VERBS)  # new, remove, pwd, activate, setup, sessions
 )
 
 _STATIC_RESERVED = frozenset(

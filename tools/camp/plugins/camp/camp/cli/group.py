@@ -281,9 +281,9 @@ def _cmd_new_group_cli(
     env: dict[str, str] | None,
     dry_run: bool,
 ) -> None:
-    """camp new <slug> [--no-attach] [--no-session] [--launch] [--activate]
-    [--json] — create or re-enter a workspace, then go through the same
-    door `camp attach` opens onto its tmux session.
+    """camp new <slug> [--no-attach] [--no-session] [--activate] [--json] —
+    create or re-enter a workspace, then go through the same door `camp
+    attach` opens onto its tmux session.
 
     NEW slug: bring_up_workspace — synchronous seed (workspace dir + manifest with
     each member pending) + a DETACHED provisioner (camp setup --background) that runs
@@ -312,12 +312,11 @@ def _cmd_new_group_cli(
     exec or `switch-client` seam — `attached` is reported `false`.
 
     `--no-session` skips the door entirely: no tmux session, and `--json`
-    prints only `{"workspace": <path>}` — there is no launch flavor left for
-    it to report on.
+    prints only `{"workspace": <path>}`.
 
-    There is no `--launch` flag: argparse's own unrecognized-argument
-    handling refuses it, since the door is now the only way `camp new`
-    starts a conversation.
+    The door is the only way `camp new` starts a conversation: there is no
+    `--launch` flag, and argparse's own unrecognized-argument handling
+    refuses one.
 
     `--activate` triggers every member's activate-phase work at creation time —
     the non-interactive path to what `camp activate <member>` triggers
@@ -332,7 +331,7 @@ def _cmd_new_group_cli(
     work at all — only provision-phase tasks run at creation, which is what
     keeps an expensive activate-phase task (e.g. a knowledge-graph build) from
     firing for every member of every new workspace. `--no-wait` (read only by
-    `--activate` now — the door waits on nothing) skips its wait and says so.
+    `--activate` — the door waits on nothing) skips its wait and says so.
     """
     from ..spine import _resolve_slug, _die
     from ..provision.provision import bring_up_workspace
