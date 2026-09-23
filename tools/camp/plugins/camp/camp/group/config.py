@@ -37,15 +37,13 @@ Schema:
   [branch]
   pattern = "worktree-{slug}"            # optional; default "worktree-{slug}"
 
-  [launch]                               # optional; ABSENT MEANS OFF — with no
-                                         # [launch] block no directory is
-                                         # eligible, and camp refuses rather
-                                         # than falling back to a default root
-  roots = ["~/code", "/srv/work"]        # allowlist of directories a launch may
-                                         # root at (equal-or-under; "~/code"
-                                         # never allowlists "~"); entries stored
-                                         # unexpanded, so "~" resolves against
-                                         # the environment the launch runs under
+  [launch]                               # optional
+  roots = ["~/code", "/srv/work"]        # recognized but grants nothing; a
+                                         # composed window is rooted inside
+                                         # the workspace or refused, and no
+                                         # config value widens that; camp
+                                         # prints a retirement notice once per
+                                         # config path when this key is present
   account = "~/.claude-levr"             # optional; opaque harness-interpreted
                                          # account binding for launched
                                          # sessions. Also denied as a launch
@@ -63,18 +61,18 @@ Task steps, bootstrap, and hook commands are author-trusted local input. camp
 runs them list-mode (subprocess, shell=False). Sharing group configs from
 untrusted authors is explicitly out of scope.
 
-`[launch] roots` is an allowlist, not the whole boundary. camp also carries a
-credential-store deny list (`camp.launch.eligibility.credential_deny_entries`)
-that is checked after the allowlist and OVERRIDES IT UNCONDITIONALLY: no value of
-`roots` can make `~/.ssh` — or any directory at, under, or above a deny entry —
-an eligible launch root. Its floor
-(`camp.launch.eligibility.CREDENTIAL_DENY_ENTRIES`) lives in code precisely so it
-is not a config key; editing it is a change to a security boundary.
+camp carries a credential-store deny list
+(`camp.launch.eligibility.credential_deny_entries`) that a composed window's
+directory is checked against unconditionally: no config value can make
+`~/.ssh` — or any directory at, under, or above a deny entry — an eligible
+window root. Its floor (`camp.launch.eligibility.CREDENTIAL_DENY_ENTRIES`)
+lives in code precisely so it is not a config key; editing it is a change to a
+security boundary.
 
-Config feeds that list in one direction only: every `[launch] account` declared
-by ANY group is appended to it, so an account directory is never an eligible
-launch root for any group — not just for the group that declared it. Nothing in
-any group config subtracts from the floor.
+Config feeds that list in one direction only: every `[launch] account`
+declared by ANY group is appended to it, so an account directory is never an
+eligible window root for any group — not just for the group that declared it.
+Nothing in any group config subtracts from the floor.
 
 Phase contract: a task's `phase` picks which of the two moments its steps run
 in, and the two phases carry opposite obligations.
@@ -125,6 +123,8 @@ import sys
 import tomllib
 from pathlib import Path
 from typing import Any
+
+from ..launch.recovery import printable_path
 
 
 # ---------------------------------------------------------------------------
@@ -414,7 +414,7 @@ def load_group(path: Path) -> dict[str, Any]:
     # --- [harness] section (optional) — harness profile config ---
     harness = _parse_harness(raw.get("harness"), path)
 
-    # --- [launch] section (optional) — directory-launch roots allowlist ---
+    # --- [launch] section (optional) — account binding; roots is retired ---
     launch = _parse_launch(raw.get("launch"), path)
 
     # --- [dev_env] section — warn-and-continue (deferred) ---
@@ -719,14 +719,22 @@ def _parse_harness(raw: Any, path: Path) -> dict[str, Any] | None:
 
 
 # ---------------------------------------------------------------------------
-# [launch] directory-launch allowlist block
+# [launch] block — account binding; roots is a retired, no-op key
 # ---------------------------------------------------------------------------
 
 # Keys recognized inside [launch]. Anything else is a misconfiguration and is
 # rejected at load, so a typo fails loudly rather than being silently ignored.
-# `roots` configures a containment boundary; `account` is an opaque
-# harness-interpreted value camp passes through without inspecting it.
+# `roots` grants nothing (a window is rooted inside the workspace or refused,
+# and no config value widens that); it stays a known key, printing a
+# retirement notice on load, so existing group configs still load rather than
+# refusing until edited. `account` is an opaque harness-interpreted value camp
+# passes through without inspecting it.
 _LAUNCH_KEYS = frozenset({"roots", "account"})
+
+#: Config paths this process has already printed the `roots` retirement
+#: notice for — the notice fires once per distinct resolved config path per
+#: process, not once per `load_group` call.
+_ROOTS_NOTICE_EMITTED: set[Path] = set()
 
 #: Characters an account value may never carry: the C0 controls (NUL among
 #: them), DEL, and the C1 controls. camp does not interpret an account, but the
@@ -744,15 +752,15 @@ def _parse_launch(raw: Any, path: Path) -> dict[str, Any] | None:
     """Parse + validate the optional [launch] block. Returns None when absent.
 
     ABSENCE IS MEANINGFUL. No [launch] block returns None and the caller omits
-    the key entirely, so a consumer can distinguish "the operator configured no
-    launch roots" from "the operator configured an empty list" — the former is
-    the off-by-default posture for directory-rooted launches, and an empty
-    default would read as a configured-but-empty allowlist instead.
+    the key entirely.
 
-    `roots` entries are stored EXACTLY as written, including a leading "~".
-    Expansion and resolution belong to the eligibility check, which performs
-    them against the environment the launch actually runs under; expanding here
-    would bake the loading process's home directory into the boundary.
+    `roots` is still a recognized key — refusing it outright would make every
+    camp command fail for a group whose config still names it, until someone
+    edited the file — but nothing is stored from it: a composed window is
+    rooted inside the workspace or refused, and no config value widens that.
+    Its presence prints a one-line retirement notice on stderr, once per
+    distinct config path per process, so an operator sees it named for the
+    file that carries it.
     """
     if raw is None:
         return None
@@ -769,24 +777,14 @@ def _parse_launch(raw: Any, path: Path) -> dict[str, Any] | None:
     result: dict[str, Any] = {}
 
     if "roots" in raw:
-        roots = _validate_string_list_field(
-            raw["roots"], path=path, where="launch.roots", allow_empty_list=False
-        )
-        # Every entry must name a fixed location. A relative entry would be
-        # resolved against whatever directory the process happens to run from,
-        # so the same config would fence differently per invocation — and an
-        # unexpected cwd widens the boundary rather than narrowing it. An
-        # allowlist that moves with the caller is not a containment boundary.
-        # "~user" is rejected with the rest: it looks anchored but expands
-        # nowhere, leaving a literal relative path.
-        for entry in roots:
-            if not (entry.startswith("/") or entry == "~" or entry.startswith("~/")):
-                raise GroupConfigError(
-                    f"{path}: launch.roots entry {entry!r} must be an absolute path "
-                    "or start with '~/' — a relative entry would depend on the "
-                    "directory camp is invoked from"
-                )
-        result["roots"] = roots
+        resolved_path = path.resolve()
+        if resolved_path not in _ROOTS_NOTICE_EMITTED:
+            _ROOTS_NOTICE_EMITTED.add(resolved_path)
+            print(
+                f"camp: [launch] roots in {printable_path(resolved_path)} is no "
+                "longer used and grants nothing — remove it",
+                file=sys.stderr,
+            )
 
     if "account" in raw:
         account = raw["account"]

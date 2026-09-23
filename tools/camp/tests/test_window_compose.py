@@ -574,6 +574,45 @@ def test_directory_outside_workspace_root_is_refused(tmp_path):
     assert _recorded_entries(ws_dir) == ()
 
 
+# --- 2a. AC55 — a group's [launch] roots does not widen containment ------
+#
+# task/the-directory-allowlist-goes-and-roots-grants-nothing: a composed
+# window is rooted inside the workspace or refused, and no config value
+# widens that — including a group's [launch] roots naming the very directory
+# being refused.
+# ---------------------------------------------------------------------------
+
+
+def _group_with_roots(roots):
+    return {"group": {"name": "testgroup"}, "launch": {"roots": list(roots)}}
+
+
+def test_roots_naming_the_outside_directory_does_not_bypass_containment(tmp_path):
+    """A group whose `roots` names D, a directory outside the workspace, is
+    refused composing a window at D exactly as a group with no `roots` at
+    all — same exception type, same message."""
+    import camp.launch.window_compose as wc
+
+    ws_dir = tmp_path / "ws"
+    ws_dir.mkdir()
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+
+    with pytest.raises(wc.WindowOutsideWorkspace) as exc_info_no_roots:
+        wc.compose_window(
+            GROUP, "slug", ws_dir, cwd=outside, window_name="w1",
+            tmux=FakeTmux(), env=_empty_env(tmp_path),
+        )
+
+    with pytest.raises(wc.WindowOutsideWorkspace) as exc_info_with_roots:
+        wc.compose_window(
+            _group_with_roots([str(outside)]), "slug", ws_dir, cwd=outside,
+            window_name="w1", tmux=FakeTmux(), env=_empty_env(tmp_path),
+        )
+
+    assert str(exc_info_no_roots.value) == str(exc_info_with_roots.value)
+
+
 # --- 3. At / under / above a declared credential store ------------------
 
 

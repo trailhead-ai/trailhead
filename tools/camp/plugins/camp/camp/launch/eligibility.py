@@ -1,79 +1,57 @@
-"""The one gate camp asks before rooting a session at an operator-named directory.
+"""The credential-store floor camp checks before rooting a window at a directory.
 
-A workspace-rooted launch is fenced by construction: camp computed the directory
-itself, from a manifest it wrote — whether it was addressed by slug or by a path
-inside that workspace. A launch rooted at a directory the operator names has no
-such fence, so this module supplies it — and it is the *only* place that answers
-the question, for every launch rooted anywhere camp did not compute itself. A
-second answer somewhere else is a second boundary, and boundaries that disagree
-are holes.
+A directory a window is rooted at is fenced by construction: it is inside the
+workspace or the composition refuses outright. This module supplies the one
+other question that fence does not answer — is the directory a credential
+store — and it is the *only* place that answers it, for every directory that
+gets to root a window, whether camp computed that directory itself or an
+operator named it. A second answer somewhere else is a second boundary, and
+boundaries that disagree are holes.
 
-THE ORDER OF THE THREE CHECKS IS PART OF THE CONTRACT.
+**The credential-directory deny list wins regardless of configuration.**
+:data:`CREDENTIAL_DENY_ENTRIES` is the FLOOR, fixed in code, and
+:func:`credential_deny_entries` is the list actually checked: the floor plus
+one entry per account declared under ``[launch] account`` by ANY group camp
+knows about. Derivation is STRICTLY ADDITIVE — config can only append, and no
+value of any key removes, narrows, shadows, or reorders a floor entry. That is
+the sense in which no group config can relax the rule; it is not a default and
+not a suggestion, and there is no key that turns an entry off.
 
-1. **Nothing configured is a refusal, not a default.** A group with no
-   ``[launch] roots`` has no eligible directory at all. Directory rooting is off
-   until an operator turns it on, and the refusal names the missing allowlist so
-   turning it on is obvious.
+The union spans every group, not just the one whose window is being composed.
+An account is a credential store no matter which group declared it, and
+scoping the derivation to one group would leave a directory rooted in that
+group free to reach another group's OAuth store — the case the rule exists
+for. Camp cannot enumerate those declarations without reading the group
+configs, so a group config it cannot read is a refusal, not a smaller deny
+list.
 
-2. **The allowlist.** The target must be equal to, or under, one of the resolved
-   ``[launch] roots`` entries. Equal-or-under only — allowlisting ``~/code``
-   never allowlists ``~``. Both sides are FULLY RESOLVED before comparison, so a
-   symlink cannot smuggle a directory into the allowlist (nor out of it: a
-   symlink sitting inside an allowlisted root that points elsewhere is judged by
-   where it points).
+Matching denies a target that is equal to, under, **or an ancestor of** any
+entry. The ancestor direction is what makes the rule bite: without it, a
+window rooted at ``~`` would launder the entire home directory — and every
+credential store inside it — past the gate. It is also the only direction
+that can ever fire for the entries naming a FILE (``~/.netrc``, ``~/.npmrc``,
+``~/.pypirc``, ``~/.git-credentials``), since a window root is always a
+directory. Those entries stay in the list anyway: the enumerated list is the
+documentation of what camp considers a credential store, and a shorter list
+that happens to be equivalent today is a list that silently stops being
+equivalent the first time an entry moves.
 
-3. **The credential-directory deny list, checked last and winning regardless of
-   configuration.** :data:`CREDENTIAL_DENY_ENTRIES` is the FLOOR, fixed in code,
-   and :func:`credential_deny_entries` is the list actually checked: the floor
-   plus one entry per account declared under ``[launch] account`` by ANY group
-   camp knows about. Derivation is STRICTLY ADDITIVE — config can only append,
-   and no value of any key removes, narrows, shadows, or reorders a floor entry.
-   That is the sense in which no group config can relax the rule; it is not a
-   default and not a suggestion, and there is no key that turns an entry off.
+Entries are resolved NON-STRICTLY — a credential directory the operator has
+not created yet is still denied, so creating it later can never quietly widen
+what was already eligible.
 
-   The union spans every group, not the launching one. An account is a
-   credential store no matter which group declared it, and scoping the
-   derivation to the group being launched would leave a group with wide
-   ``roots`` free to root a session at another group's OAuth store — the case
-   the rule exists for. Camp cannot enumerate those declarations without reading
-   the group configs, so a group config it cannot read is a refusal, not a
-   smaller deny list.
+``~`` in deny entries expands from the injected environment's HOME, never from
+the process's own notion of home, so the boundary is a function of the
+environment the window actually runs under.
 
-   It is checked AFTER the allowlist precisely so that its refusal can be worded
-   as its own rule: an operator who reads "not under the allowlist" reasonably concludes
-   they can fix it by editing the allowlist, and for a credential directory that
-   conclusion must never be available. The deny refusal therefore names the
-   credential rule and says nothing about the allowlist at all.
-
-   Matching denies a target that is equal to, under, **or an ancestor of** any
-   entry. The ancestor direction is what makes the rule bite: without it,
-   ``roots = ["~"]`` would launder the entire home directory — and every
-   credential store inside it — past the gate in one line of config. It is also
-   the only direction that can ever fire for the entries naming a FILE
-   (``~/.netrc``, ``~/.npmrc``, ``~/.pypirc``, ``~/.git-credentials``), since a
-   launch root is always a directory. Those entries stay in the list anyway: the
-   enumerated list is the documentation of what camp considers a credential
-   store, and a shorter list that happens to be equivalent today is a list that
-   silently stops being equivalent the first time an entry moves.
-
-   Entries are resolved NON-STRICTLY — a credential directory the operator has
-   not created yet is still denied, so creating it later can never quietly widen
-   what was already eligible.
-
-``~`` in both roots entries and deny entries expands from the injected
-environment's HOME, never from the process's own notion of home, so the boundary
-is a function of the environment the launch will actually run under.
-
-Failure mode is :class:`~camp.launch.session.LaunchError` and nothing else, so
-this composes with the launch engine's guarantee that a refusal started no
-process. The gate itself is read-only: it resolves paths and answers.
+Failure mode is :class:`~camp.launch.session.LaunchError` and nothing else.
+The gate itself is read-only: it resolves paths and answers.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
 
 from .recovery import printable_path
 from .session import LaunchError
@@ -223,62 +201,19 @@ def matches_deny_entry(target: Path, entry: Path) -> bool:
     return target == entry or entry in target.parents or target in entry.parents
 
 
-def assert_launch_eligible(
-    target: Path,
-    *,
-    group: dict[str, Any],
-    env: Mapping[str, str] | None,
-) -> Path:
-    """Return the resolved `target`, or refuse the launch.
-
-    `group` is a loaded group config; `env` is the environment the launch will
-    run under, supplying HOME for every ``~`` expansion. Raises
-    :class:`~camp.launch.session.LaunchError` on any refusal.
-    """
-    home = _home_from_env(env)
-    resolved = Path(target).resolve()
-
-    group_name = (group.get("group") or {}).get("name", "?")
-    roots = (group.get("launch") or {}).get("roots") or []
-
-    if not roots:
-        raise LaunchError(
-            f"camp: cannot launch — group {group_name!r} configures no "
-            "[launch] roots allowlist, so no named directory is eligible; add "
-            "[launch] roots = [...] to the group config to enable "
-            "directory-rooted launches"
-        )
-
-    if not any(
-        resolved == root or root in resolved.parents
-        for root in (_expand(entry, home) for entry in roots)
-    ):
-        raise LaunchError(
-            f"camp: cannot launch — directory {printable_path(resolved)} is not "
-            f"at or under the "
-            f"[launch] roots allowlist for group {group_name!r}: "
-            f"{', '.join(roots)}"
-        )
-
-    assert_not_a_credential_store(resolved, env=env)
-
-    return resolved
-
-
 def assert_not_a_credential_store(resolved: Path, *, env: Mapping[str, str] | None) -> None:
-    """Refuse an already-resolved launch root that touches a credential store.
+    """Refuse an already-resolved window root that touches a credential store.
 
     The list is :func:`credential_deny_entries` — the fixed floor plus every
     account any group declares — so a store belonging to a group other than the
-    one launching is refused on the same terms as one of the floor entries.
+    one whose window is being composed is refused on the same terms as one of
+    the floor entries.
 
-    Split out of :func:`assert_launch_eligible` because this rule alone is
-    UNCONDITIONAL. The allowlist answers a question about a directory the
-    operator named, and a directory camp computed itself never had to answer it;
-    this rule answers a question about the directory itself, which is the same
-    question no matter who chose it. Every caller that roots a session anywhere
-    calls this, whether or not it calls the gate above — a branch that skips it
-    is a branch where "no group configuration can permit it" stops being true.
+    This rule is UNCONDITIONAL: it answers a question about the directory
+    itself, which is the same question no matter who chose it or how it was
+    reached. Every caller that roots a window anywhere calls this — a branch
+    that skips it is a branch where "no group configuration can permit it"
+    stops being true.
     """
     home = _home_from_env(env)
     for entry in credential_deny_entries(env=env):

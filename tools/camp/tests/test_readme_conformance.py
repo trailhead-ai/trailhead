@@ -116,7 +116,7 @@ def test_the_documented_account_key_is_the_spelling_the_parser_accepts() -> None
 def _deny_paragraph() -> str:
     """The prose block that enumerates the fixed deny entries."""
     text = README.read_text()
-    start = text.index("**A credential deny list overrides the allowlist")
+    start = text.index("**A credential deny list applies unconditionally")
     end = text.index("\n\n", text.index("fixed\nin camp's code", start))
     return text[start:end]
 
