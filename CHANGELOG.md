@@ -5,6 +5,20 @@ format described by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+- `trailhead update` now upgrades your Outpost too, when
+  `~/.config/outpost/config.toml` names a `checkout`. After the trailhead
+  upgrade it fast-forwards that checkout, reinstalls its dependencies
+  (`npm ci`), and rebuilds it, restarting the daemon if it is running. A dirty
+  or branchless Outpost checkout refuses the whole upgrade before anything
+  moves; an Outpost build or restart that fails rolls Outpost alone back to its
+  previous commit and build, keeps the trailhead upgrade, and exits nonzero.
+  `trailhead update --check` and the session-start notice also report how far
+  the Outpost checkout is behind its tracked branch (`--json` schema version 4
+  adds an `outpost` field).
+- A new [`INSTALL.md`](INSTALL.md) is written for an agent to follow with you:
+  point your agent at it and it walks you through choosing a harness and
+  plugins, installing, joining or creating lore vaults, and setting up Outpost.
+
 - **Breaking:** camp no longer takes over tmux's prefix+`c`. Creating a
   workspace session installs no key binding, so prefix+`c` opens an ordinary
   shell window everywhere, and `camp window unbind` is gone with the binding it
