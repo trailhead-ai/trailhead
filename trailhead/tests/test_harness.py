@@ -1677,6 +1677,85 @@ class TestClaudeCodeRewriteTranscriptWorkspace:
         assert json.loads(out_lines[1])["message"] == {"content": "hello world"}
         assert json.loads(out_lines[1])["ts"] == 42
 
+    @pytest.mark.parametrize("nested_subdir", ["member", "."])
+    def test_a_nested_cwd_ahead_of_the_top_level_one_does_not_hide_it(
+        self, tmp_path, nested_subdir
+    ):
+        """An assistant record can carry a nested object with its own ``cwd``
+        key (per-tool ingest context) serialized BEFORE the record's top-level
+        ``cwd``. The top-level root must still be relocated — whether the
+        nested value differs from it or equals it — and a nested value under
+        the old root moves with it, byte-identical everywhere else."""
+        old_root = tmp_path / "old-workspace"
+        old_root.mkdir()
+        new_root = tmp_path / "new-workspace"
+        nested_old = old_root / nested_subdir
+        line = json.dumps(
+            {
+                "type": "assistant",
+                "wireIngestContext": {"toolu_1": {"cwd": str(nested_old)}},
+                "cwd": str(old_root),
+                "sessionId": "abc-123",
+            }
+        )
+        source = self._write(tmp_path / "src.jsonl", [line])
+        destination = tmp_path / "dst.jsonl"
+
+        ClaudeCodeHarness().rewrite_transcript_workspace(
+            source, destination, old_root, new_root
+        )
+
+        record = json.loads(destination.read_text())
+        assert record["cwd"] == str(new_root)
+        assert record["wireIngestContext"]["toolu_1"]["cwd"] == str(new_root / nested_subdir)
+        expected = line.replace(json.dumps(str(nested_old)), json.dumps(str(new_root / nested_subdir)), 1)
+        expected = expected.replace(
+            f'"cwd": {json.dumps(str(old_root))}', f'"cwd": {json.dumps(str(new_root))}'
+        )
+        assert destination.read_text() == expected + "\n"
+
+    def test_a_top_level_cwd_the_byte_pattern_cannot_see_refuses(self, tmp_path):
+        """A key spelled with a JSON escape decodes to ``cwd`` but carries no
+        literal ``"cwd"`` bytes to substitute; leaving it un-relocated would
+        hand back a transcript still rooted on the sending host."""
+        old_root = tmp_path / "old-workspace"
+        old_root.mkdir()
+        line = '{"c\\u0077d": ' + json.dumps(str(old_root)) + "}"
+        source = self._write(tmp_path / "src.jsonl", [line])
+        destination = tmp_path / "dst.jsonl"
+
+        with pytest.raises(HarnessError, match="src.jsonl"):
+            ClaudeCodeHarness().rewrite_transcript_workspace(
+                source, destination, old_root, tmp_path / "new-workspace"
+            )
+        assert not destination.exists()
+
+    def test_a_nested_cwd_outside_the_old_root_is_left_untouched(self, tmp_path):
+        old_root = tmp_path / "old-workspace"
+        old_root.mkdir()
+        new_root = tmp_path / "new-workspace"
+        elsewhere = tmp_path / "elsewhere"
+        source = self._write(
+            tmp_path / "src.jsonl",
+            [
+                json.dumps(
+                    {
+                        "wireIngestContext": {"toolu_1": {"cwd": str(elsewhere)}},
+                        "cwd": str(old_root),
+                    }
+                )
+            ],
+        )
+        destination = tmp_path / "dst.jsonl"
+
+        ClaudeCodeHarness().rewrite_transcript_workspace(
+            source, destination, old_root, new_root
+        )
+
+        record = json.loads(destination.read_text())
+        assert record["cwd"] == str(new_root)
+        assert record["wireIngestContext"]["toolu_1"]["cwd"] == str(elsewhere)
+
     def test_the_rewrite_varies_with_the_new_root(self, tmp_path):
         old_root = tmp_path / "old-workspace"
         old_root.mkdir()
