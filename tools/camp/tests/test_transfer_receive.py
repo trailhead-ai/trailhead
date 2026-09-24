@@ -1500,6 +1500,102 @@ class TestConversationArchiveMemberConfinement:
 
         assert "../../etc/passwd" in str(exc_info.value)
 
+    def test_a_refused_archive_leaves_nothing_to_block_the_next_conversation(
+        self, one_member_group
+    ):
+        """The transcript member is extracted before a later member is
+        refused. Left in place, it still records the sender's root, and the
+        next conversation into this workspace collides with it."""
+        from camp.transfer import receive
+        from trailhead.harness.claude_code import ClaudeCodeHarness
+
+        g = one_member_group
+        ws_root = _seed_workspace(g, "feat-x")
+        env = _conversation_env(g)
+        refused_id = "66666666-6666-4666-8666-666666666666"
+        next_id = "77777777-7777-4777-8777-777777777777"
+
+        with pytest.raises(receive.ArchiveMemberRefused):
+            receive.conversations(
+                groups=[g["group"]],
+                group_name="testgroup",
+                slug="feat-x",
+                session_id=refused_id,
+                subpath=".",
+                archive_stream=io.BytesIO(
+                    _archive_bytes(
+                        json.dumps({"cwd": "/sender/root"}).encode() + b"\n",
+                        nested={"../../etc/passwd": b"pwned"},
+                    )
+                ),
+                env=env,
+            )
+
+        receive.conversations(
+            groups=[g["group"]],
+            group_name="testgroup",
+            slug="feat-x",
+            session_id=next_id,
+            subpath=".",
+            archive_stream=io.BytesIO(
+                _archive_bytes(json.dumps({"cwd": "/sender/root"}).encode() + b"\n")
+            ),
+            env=env,
+        )
+
+        ids = {row.session_id for row in ClaudeCodeHarness().session_transcripts(env=env)}
+        assert ids == {next_id}
+        found = ClaudeCodeHarness().session_transcript_path(next_id, ws_root, env=env)
+        assert json.loads(found.read_text())["cwd"] == str(ws_root)
+
+
+class TestConversationTruncatedArchive:
+    def test_a_cut_off_archive_leaves_nothing_to_block_the_next_conversation(
+        self, one_member_group
+    ):
+        """A connection dropped mid-stream ends the archive partway through a
+        later member, after the transcript member was already written."""
+        import tarfile
+
+        from camp.transfer import receive
+        from trailhead.harness.claude_code import ClaudeCodeHarness
+
+        g = one_member_group
+        _seed_workspace(g, "feat-x")
+        env = _conversation_env(g)
+        cut_id = "88888888-8888-4888-8888-888888888888"
+        next_id = "99999999-9999-4999-8999-999999999999"
+        full = _archive_bytes(
+            json.dumps({"cwd": "/sender/root"}).encode() + b"\n",
+            nested={"subagents/agent-1.jsonl": b"x" * 20_000},
+        )
+
+        with pytest.raises(tarfile.TarError):
+            receive.conversations(
+                groups=[g["group"]],
+                group_name="testgroup",
+                slug="feat-x",
+                session_id=cut_id,
+                subpath=".",
+                archive_stream=io.BytesIO(full[:4096]),
+                env=env,
+            )
+
+        receive.conversations(
+            groups=[g["group"]],
+            group_name="testgroup",
+            slug="feat-x",
+            session_id=next_id,
+            subpath=".",
+            archive_stream=io.BytesIO(
+                _archive_bytes(json.dumps({"cwd": "/sender/root"}).encode() + b"\n")
+            ),
+            env=env,
+        )
+
+        ids = {row.session_id for row in ClaudeCodeHarness().session_transcripts(env=env)}
+        assert ids == {next_id}
+
 
 class TestConversationNestedSubtreeRewrite:
     def test_nested_transcript_recorded_root_rewritten(self, one_member_group):

@@ -881,9 +881,9 @@ def claim(
 def _discard_conversation_artifacts(destination: Path, nested_dir: Path) -> None:
     """Remove everything `conversations` extracted for one conversation.
 
-    Called only when a step after extraction refuses — an unresolvable
-    recorded root, or a nested transcript recording a root outside the
-    workspace — so the destination is left exactly as it was before this
+    Called when extraction refuses a member partway, or when a step after
+    extraction refuses — an unresolvable recorded root, or a nested
+    transcript recording a root outside the workspace — so the destination is left exactly as it was before this
     call touched it, never holding an un-rewritten transcript that already
     passed the earlier confinement checks.
     """
@@ -968,10 +968,18 @@ def conversations(
 
     nested_dir = destination.parent / session_id
 
+    # The transcript member is written before a later member can be refused
+    # or the stream can end short, and it still records the sender's root —
+    # left behind, the next conversation into this workspace collides with it
+    # at the destination.
     try:
         extract_conversation_archive(archive_stream, destination, nested_dir)
     except ArchiveMemberEscaped as e:
+        _discard_conversation_artifacts(destination, nested_dir)
         raise ArchiveMemberRefused(e.name, str(e)) from e
+    except Exception:
+        _discard_conversation_artifacts(destination, nested_dir)
+        raise
 
     old_root = next(
         (
