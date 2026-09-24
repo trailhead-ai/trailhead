@@ -494,6 +494,11 @@ def send_workspace_conversations(
     Path | None` — so this module never learns the projects-directory munge
     rule itself; that stays the harness boundary's alone.
 
+    Rows are sent in order, and the first whose outcome is anything but
+    `Answered` is the last one sent: it ends the returned tuple, so a
+    transfer that has already failed never lands a further conversation on
+    the peer, and the caller reports the conversation that was refused.
+
     Raises:
         UnresolvedConversation: a row is UNRESOLVED. Raised before any
             further row is attempted, so a single unresolved conversation
@@ -534,6 +539,8 @@ def send_workspace_conversations(
             producer_spawn=producer_spawn,
         )
         results.append((conversation.session_id, outcome))
+        if not isinstance(outcome, Answered):
+            break
 
     return tuple(results)
 

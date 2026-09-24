@@ -510,6 +510,63 @@ class TestTornCopyDetection:
         assert isinstance(outcome, ProducerFailed)
 
 
+class TestStopsAtTheFirstRefusedConversation:
+    """A conversation the peer refuses ends the call: every later one would
+    land in a transfer that has already failed, and the error the operator
+    reads must name the conversation that was actually refused."""
+
+    def _two_rows(self, tmp_path: Path):
+        ws = tmp_path / "ws"
+        member = ws / "member"
+        member.mkdir(parents=True)
+        claude_dir = tmp_path / "home" / ".claude"
+        paths = {
+            _UUID_ROOT: _make_transcript_file(claude_dir, _munge(ws), _UUID_ROOT, ws),
+            _UUID_MEMBER: _make_transcript_file(claude_dir, _munge(member), _UUID_MEMBER, member),
+        }
+        rows = _rows(ws, transcripts=[_transcript(_UUID_ROOT, ws), _transcript(_UUID_MEMBER, member)])
+        assert len(rows) == 2
+        return ws, rows, paths
+
+    def _send(self, ws, rows, paths, spawn):
+        from camp.transfer.conversations import send_workspace_conversations
+
+        return send_workspace_conversations(
+            _host(),
+            group="g",
+            slug="s",
+            workspace=ws,
+            conversations=rows,
+            locate_transcript=lambda session_id, root: paths[session_id],
+            spawn=spawn,
+        )
+
+    def test_a_refused_conversation_is_the_last_one_sent(self, tmp_path: Path) -> None:
+        from camp.host.transport import Answered
+
+        ws, rows, paths = self._two_rows(tmp_path)
+        spawned: list[list[str]] = []
+
+        def _refusing(argv, env):
+            spawned.append(list(argv))
+            return _failing_stream_spawner(argv, env)
+
+        results = self._send(ws, rows, paths, _refusing)
+
+        assert len(spawned) == 1
+        assert [session_id for session_id, _ in results] == [rows[0].session_id]
+        assert not isinstance(results[0][1], Answered)
+
+    def test_every_conversation_is_sent_when_none_is_refused(self, tmp_path: Path) -> None:
+        ws, rows, paths = self._two_rows(tmp_path)
+        spawned: list[list[str]] = []
+
+        results = self._send(ws, rows, paths, _argv_capturing_stream_spawner(spawned))
+
+        assert len(spawned) == 2
+        assert {session_id for session_id, _ in results} == {_UUID_ROOT, _UUID_MEMBER}
+
+
 class TestProducerFailurePropagates:
     def test_producer_failure_is_not_reported_as_success(self, tmp_path: Path) -> None:
         from camp.host.transport import ProducerFailed
