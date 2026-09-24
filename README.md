@@ -36,9 +36,15 @@ exits non-zero — re-run with `--harness <name>` to install the plugins.
 
 ## Quick start (agents)
 
-If you're an agent setting trailhead up for a user: clone the repo, then run
-`./bin/trailhead install` with the flags below. Everything you need is here — no
-hidden interactive steps.
+**Humans:** you can hand the whole setup to your agent. Tell it:
+
+> Read https://github.com/trailhead-ai/trailhead/blob/main/INSTALL.md and set
+> trailhead up for me.
+
+**Agents:** [`INSTALL.md`](INSTALL.md) is your guide. It walks the user through
+prerequisites, choosing a harness and plugins, installing, PATH setup, joining
+or creating lore vaults, and setting up Outpost, then checks the result. The
+flags it uses are summarized here:
 
 - **Install everything into the detected harness:** `./bin/trailhead install`
 - **Target a specific harness:** `./bin/trailhead install --harness claude_code`
@@ -110,6 +116,15 @@ non-interactively) — nothing is ever pulled or re-wired without it. If a
 re-wire fails partway through, the checkout is rolled back to its pre-upgrade
 commit and re-wired again, so a failed upgrade is a no-op rather than a
 half-upgraded install.
+
+If Outpost is configured (its `~/.config/outpost/config.toml` names a
+`checkout`), `trailhead update` upgrades it in the same run, after trailhead
+itself: it fast-forwards the Outpost checkout, reinstalls its dependencies
+(`npm ci`), and rebuilds it, restarting the daemon if it is running. Both
+checkouts are checked before anything moves, so a dirty Outpost checkout
+refuses the whole upgrade. If the Outpost step fails, Outpost alone is rolled
+back to its previous commit and build, and the trailhead upgrade is kept.
+`--check` reports the Outpost checkout's gap on its own line.
 
 The `trailhead` plugin (installed by default alongside the others) carries a
 SessionStart hook that runs this same check at the start of a session and, if
