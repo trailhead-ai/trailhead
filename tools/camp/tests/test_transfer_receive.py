@@ -1634,8 +1634,78 @@ class TestConversationNestedSubtreeRewrite:
         assert record["type"] == "agent"
 
 
-class TestConversationNestedRootOutsideWorkspaceRefused:
-    def test_nested_transcript_foreign_root_refuses_and_leaves_nothing(self, one_member_group):
+class TestConversationNestedRootOutsideWorkspace:
+    def test_an_isolated_subagent_root_is_kept_and_the_conversation_lands(
+        self, one_member_group
+    ):
+        """A subagent dispatched into its own isolated worktree records that
+        worktree — outside the workspace — as its root. Its transcript lives
+        under the conversation's directory whatever it records, so the root
+        stays as recorded while everything under the workspace moves."""
+        from camp.transfer import receive
+        from trailhead.harness.claude_code import ClaudeCodeHarness
+
+        g = one_member_group
+        ws_root = _seed_workspace(g, "feat-x")
+        env = _conversation_env(g)
+        session_id = "88888888-8888-4888-8888-888888888888"
+        isolated = "/sender/repos/outpost/.claude/worktrees/agent-1"
+
+        archive = _archive_bytes(
+            json.dumps({"cwd": SENDER_ROOT}).encode() + b"\n",
+            nested={
+                "subagents/agent-isolated.jsonl": json.dumps({"cwd": isolated}).encode() + b"\n",
+                "subagents/agent-shared.jsonl": json.dumps({"cwd": SENDER_ROOT}).encode() + b"\n",
+            },
+        )
+
+        receive.conversations(
+            groups=[g["group"]],
+            group_name="testgroup",
+            slug="feat-x",
+            session_id=session_id,
+            subpath=".",
+            archive_stream=io.BytesIO(archive),
+            env=env,
+        )
+
+        destination = ClaudeCodeHarness().session_transcript_path(session_id, ws_root, env=env)
+        assert json.loads(destination.read_text())["cwd"] == str(ws_root)
+        subagents = destination.parent / session_id / "subagents"
+        assert json.loads((subagents / "agent-isolated.jsonl").read_text())["cwd"] == isolated
+        assert json.loads((subagents / "agent-shared.jsonl").read_text())["cwd"] == str(ws_root)
+
+    def test_a_top_level_root_outside_the_workspace_still_refuses(self, one_member_group):
+        """The top-level transcript's roots are what placement reconciles
+        against, so a foreign one there refuses — unlike a nested one."""
+        from camp.transfer import receive
+
+        g = one_member_group
+        _seed_workspace(g, "feat-x")
+        env = _conversation_env(g)
+        session_id = "88888888-8888-4888-8888-888888888888"
+
+        archive = _archive_bytes(
+            json.dumps({"cwd": SENDER_ROOT}).encode()
+            + b"\n"
+            + json.dumps({"cwd": "/sender/repos/outpost/.claude/worktrees/agent-1"}).encode()
+            + b"\n"
+        )
+
+        with pytest.raises(receive.ConversationDestinationRefused):
+            receive.conversations(
+                groups=[g["group"]],
+                group_name="testgroup",
+                slug="feat-x",
+                session_id=session_id,
+                subpath=".",
+                archive_stream=io.BytesIO(archive),
+                env=env,
+            )
+
+        assert list(Path(env["TRAILHEAD_CLAUDE_DIR"]).rglob(f"{session_id}*")) == []
+
+    def test_a_nested_transcript_that_refuses_leaves_nothing(self, one_member_group):
         from camp.transfer import receive
         from trailhead.harness.claude_code import ClaudeCodeHarness
 
@@ -1645,7 +1715,10 @@ class TestConversationNestedRootOutsideWorkspaceRefused:
         session_id = "88888888-8888-4888-8888-888888888888"
         sender_root = SENDER_ROOT
 
-        foreign_nested = json.dumps({"cwd": "/entirely/unrelated/root"}).encode() + b"\n"
+        # A key spelled with a JSON escape decodes to `cwd` but offers no
+        # literal bytes to relocate — refused after the top-level transcript
+        # was already staged.
+        foreign_nested = ('{"c\\u0077d": ' + json.dumps(sender_root) + "}\n").encode()
         archive = _archive_bytes(
             json.dumps({"cwd": sender_root}).encode() + b"\n",
             nested={"subagents/agent-1.jsonl": foreign_nested},

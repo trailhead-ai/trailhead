@@ -126,15 +126,17 @@ unhandled exception or a silent write.
 own top-level transcript.** A conversation that dispatched a subagent, or
 produced tool-result artifacts, owns a nested directory of its own
 (`camp.transfer.conversations`'s module docstring) containing further
-`.jsonl` files that each carry their own recorded root — a subagent runs in
-the same working directory as the conversation that dispatched it, so the
-same `old_root`/`new_root` pair this phase derives for the top-level
-transcript applies unchanged to every nested one. This phase walks the
+`.jsonl` files that each carry their own recorded root — a subagent usually
+runs in the same working directory as the conversation that dispatched it, so
+the same `old_root`/`new_root` pair this phase derives for the top-level
+transcript applies to every nested one. This phase walks the
 extracted subtree directly for `.jsonl` files rather than asking the harness
 to enumerate them — `session_transcripts` globs two levels deep by design and
-never sees this subtree at all. A nested transcript whose recorded root falls
-outside the recorded root this conversation was extracted under is refused by
-the transform itself, the same as the top-level file.
+never sees this subtree at all. A nested transcript's recorded root never
+decides where anything is placed, so one outside the recorded root this
+conversation was extracted under — a subagent dispatched into its own
+isolated worktree — is kept as recorded; the top-level transcript's is
+refused, since its root is what placement reconciles against.
 
 **Placement is all-or-nothing.** The recorded root this phase reconciles
 against comes from a scan of this host's own transcript store keyed by
@@ -144,8 +146,9 @@ cannot resolve at all is refused as `ConversationRootUnresolved` rather than
 silently leaving the transcript's sending-host path in place. Every
 transcript in the subtree is rewritten into a staged sibling file first, and
 none of them is moved into its final place until all have succeeded; a
-refusal at any point in the rewrite — an unresolvable root, or a nested
-transcript recording a foreign one — discards everything this phase
+refusal at any point in the rewrite — an unresolvable root, a top-level
+transcript recording a foreign one, or a root the transform cannot locate —
+discards everything this phase
 extracted for that conversation (the top-level file and the whole nested
 directory), so a refused placement never leaves an un-rewritten transcript,
 carrying a foreign host's absolute path, sitting in the correct projects-key
@@ -919,9 +922,10 @@ def conversations(
             placed transcript OR of any nested transcript in its extracted
             subtree — no transcript-destination concept, an unusable
             *session_id*, a projects-key collision with a transcript already
-            recorded for a different workspace, or a nested transcript
+            recorded for a different workspace, a top-level transcript
             recording a root outside the one this conversation was
-            extracted under. Nothing of the conversation is left at the
+            extracted under, or a recorded root the transform cannot
+            locate. Nothing of the conversation is left at the
             destination on this refusal.
         ConversationRootUnresolved: this host's own transcript store could
             not report a recorded root for *session_id* after extraction.
@@ -995,10 +999,13 @@ def conversations(
 
     if old_root.resolve() != conversation_root:
         # Every transcript in the extracted subtree — not only the top-level
-        # one — was written against the sender's root: a subagent runs in the
-        # same working directory as the conversation that dispatched it, so
-        # the same old_root/new_root pair applies unchanged to each nested
-        # file. Walked directly off disk rather than through
+        # one — was written against the sender's layout: a subagent usually
+        # runs in the working directory of the conversation that dispatched
+        # it, so the same old_root/new_root pair applies to each nested file.
+        # One dispatched into its own isolated worktree records a root
+        # outside the workspace; a nested transcript's root never decides
+        # where anything is placed, so that root is kept as recorded rather
+        # than refusing the conversation. Walked directly off disk rather than through
         # `session_transcripts` (depth-2 only, and blind to this subtree by
         # design).
         transcripts_to_rewrite = [destination]
@@ -1015,7 +1022,11 @@ def conversations(
             for transcript_path in transcripts_to_rewrite:
                 staged_path = transcript_path.parent / f".{transcript_path.name}.rewrite-staged"
                 harness.rewrite_transcript_workspace(
-                    transcript_path, staged_path, old_root, conversation_root
+                    transcript_path,
+                    staged_path,
+                    old_root,
+                    conversation_root,
+                    keep_foreign_roots=transcript_path != destination,
                 )
                 staged.append((transcript_path, staged_path))
         except HarnessError as e:

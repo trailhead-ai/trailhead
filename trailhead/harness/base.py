@@ -496,7 +496,13 @@ class Harness(ABC):
     # written to ``destination``.
 
     def rewrite_transcript_workspace(
-        self, source: Path, destination: Path, old_root: Path, new_root: Path
+        self,
+        source: Path,
+        destination: Path,
+        old_root: Path,
+        new_root: Path,
+        *,
+        keep_foreign_roots: bool = False,
     ) -> bool:
         """Rewrite ``source``'s recorded root from ``old_root`` to ``new_root``,
         streaming the result into ``destination``.
@@ -514,6 +520,11 @@ class Harness(ABC):
         records a root that is not under ``old_root`` — passing such a line
         through unrewritten would leave a foreign, sending-host path inside a
         relocated file. Nothing is written to ``destination`` on a refusal.
+
+        ``keep_foreign_roots`` copies such a line through verbatim instead of
+        refusing — for a transcript whose recorded root never decides where
+        it is placed, such as a subagent's that ran in its own isolated
+        worktree.
         """
         return False
 
