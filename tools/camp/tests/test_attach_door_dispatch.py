@@ -8,8 +8,8 @@ Test contract (from
 2026-09-17 once the handover unknown resolved):
 
 - `camp attach <slug> --resolve --json` and `camp attach --list --json`
-  issue no create call and never reach the exec seam — the regression that
-  must be red before the gate exists.
+  refuse with the retired-flag line, exit 1, and never reach the door's
+  create call or the exec seam.
 - Outside tmux, a successful invocation reaches the exec seam exactly once
   with `["tmux", "attach-session", "-t", "=<derived name>"]`.
 - Inside tmux, the same invocation reaches the `Tmux` seam with a
@@ -35,7 +35,8 @@ Test contract (from
   the report, exits 0, and never reaches the exec seam.
 - `--json` on created, connected, and each refusal emits an object, with
   `attached` true only on the two handover arms.
-- A slug naming no workspace still falls through to the retired ref path.
+- A slug naming no workspace refuses in the door's own words, naming the
+  slug and the group, never reaching the door's create call.
 
 No real tmux, ssh, or exec is ever touched: the tmux seam and the exec
 handoff seam are both injected fakes.
@@ -59,22 +60,7 @@ if str(_PLUGIN_DIR) not in sys.path:
 if str(_TESTS_DIR) not in sys.path:
     sys.path.insert(0, str(_TESTS_DIR))
 
-from test_launch_stop import (  # noqa: E402
-    _UUID_A,
-    _FakeHarness as _BaseFakeHarness,
-    _group,
-    _transcript,
-)
-
-
-class _Harness(_BaseFakeHarness):
-    """`_FakeHarness` plus the one extra method `_session_pool` needs."""
-
-    def __init__(self, transcripts: list) -> None:
-        self._transcripts = transcripts
-
-    def session_transcripts(self, workspace=None, *, env=None):
-        return self._transcripts
+from test_launch_stop import _group  # noqa: E402
 
 
 class _FakeTTY(io.StringIO):
@@ -232,10 +218,6 @@ def _cli_session_module():
     return importlib.import_module("camp.cli.session")
 
 
-def _launch_session_module():
-    return importlib.import_module("camp.launch.session")
-
-
 def _launch_stop_module():
     return importlib.import_module("camp.launch.stop")
 
@@ -278,22 +260,17 @@ def _wire_one_workspace(
     """Wires a resolvable `--group g` carrying exactly one workspace
     (`slug`), at a real, unique directory, and points every tmux call the
     door dispatch issues at `tmux` — the caller's own `_DoorTmux` (or
-    equivalent) — via the same `stop_module.Tmux` factory seam
-    `_attach_session_context` reads. *ws_dir* overrides the default
+    equivalent) — via the `stop_module.Tmux` factory seam `_cmd_attach_cli`
+    reads. *ws_dir* overrides the default
     location under `tmp_path/state` — used to land the workspace at, under,
     or above a credential store."""
     ws = ws_dir if ws_dir is not None else (tmp_path / "state" / group_name / "worktrees" / slug)
     ws.mkdir(parents=True, exist_ok=True)
-    harness = _Harness([_transcript(_UUID_A, ws)])
-
     cli_session = _cli_session_module()
-    launch_session = _launch_session_module()
     stop_module = _launch_stop_module()
     lifecycle = _lifecycle_module()
 
-    monkeypatch.setattr(cli_session, "_addressable_harnesses", lambda groups, **k: [harness])
     monkeypatch.setattr(cli_session, "_parsable_groups", lambda: [_group(group_name)])
-    monkeypatch.setattr(launch_session, "enumerate_records", lambda h, ws_, env_: [])
     monkeypatch.setattr(stop_module, "Tmux", lambda *a, **k: tmux)
 
     def fake_cmd_ls_group(group, *, env=None, tmux=None, **kw):
@@ -326,7 +303,7 @@ def _derived_name(group_name: str, slug: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def test_resolve_json_probe_never_creates_a_session(
+def test_resolve_json_probe_refuses_and_never_creates_a_session(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     _isolated_env(tmp_path, monkeypatch)
@@ -335,18 +312,15 @@ def test_resolve_json_probe_never_creates_a_session(
 
     code = _run(["attach", "camp-cli", "--resolve", "--json", "--group", "g"], monkeypatch)
 
-    assert code == 0
-    payload = json.loads(capsys.readouterr().out)
-    # The pre-existing `--resolve --json` answer shape (`_attach_resolve_
-    # payload`'s `state`-keyed object) — never the door's own JSON shape
-    # (`outcome`/`tmux_session`/`attached`), which would mean the probe
-    # wrongly reached workspace-slug precedence instead of staying on the
-    # retired ref-resolution path.
-    assert payload == {"ok": False, "state": "no_match"}
-    assert "outcome" not in payload
+    assert code == 1
+    err = capsys.readouterr().err
+    assert (
+        err == "camp attach: -a is retired — find the workspace with "
+        "'camp list -ag', then 'camp attach <slug> --host <name>'\n"
+    ), err
 
 
-def test_list_json_probe_never_creates_a_session(
+def test_list_json_probe_refuses_and_never_creates_a_session(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     _isolated_env(tmp_path, monkeypatch)
@@ -355,9 +329,12 @@ def test_list_json_probe_never_creates_a_session(
 
     code = _run(["attach", "--list", "--json", "--group", "g"], monkeypatch)
 
-    assert code == 0
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["ok"] is True
+    assert code == 1
+    err = capsys.readouterr().err
+    assert (
+        err == "camp attach: -a is retired — find the workspace with "
+        "'camp list -ag', then 'camp attach <slug> --host <name>'\n"
+    ), err
 
 
 # ---------------------------------------------------------------------------
@@ -1340,7 +1317,7 @@ def test_resurrection_arm_timeout_expired_folds_to_create_failed(
     assert out["outcome"] == "create_failed"
 
 
-def test_a_slug_naming_no_workspace_falls_through_to_the_retired_ref_path(
+def test_a_slug_naming_no_workspace_refuses_in_the_doors_own_words(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     tmux = _DoorTmux(present=False)
@@ -1350,7 +1327,10 @@ def test_a_slug_naming_no_workspace_falls_through_to_the_retired_ref_path(
     code = _run(["attach", "no-such-slug-at-all", "--group", "g"], monkeypatch)
     err = capsys.readouterr().err
 
-    assert code != 0
-    assert tmux.new_session_calls == [], "a fall-through ref must never reach the door's create"
-    assert "no session on this machine matches" in err, err
-    assert "no-such-slug-at-all" in err, err
+    assert code == 1
+    assert tmux.new_session_calls == [], "an unknown slug must never reach the door's create"
+    assert (
+        err
+        == "camp attach: no workspace named no-such-slug-at-all in group g — "
+        "'camp list' shows its workspaces\n"
+    ), err

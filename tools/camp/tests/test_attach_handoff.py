@@ -1,11 +1,12 @@
 """Tests for camp.host.handoff — the interactive attach handoff.
 
 Test contract:
-- The local argv names the resolved session's derived name, not the harness's
-  own name.
-- The remote argv requests a terminal and uses the host's declared camp
-  location, not the bare command name — a host declaring no location still
-  produces the documented default.
+- The door's own outside-tmux argv (`door_argv`) names the resolved
+  session's derived name, not the harness's own name.
+- The remote argv requests a terminal, carries the resolved group alongside
+  the ref, and uses the host's declared camp location, not the bare command
+  name — a host declaring no location still produces the documented
+  default.
 - The remote command is quoted by reusing the listing transport's own
   quote-and-join, never a second implementation of it. Tested with a battery
   of metacharacters, each asserted to reach the far side intact and
@@ -58,18 +59,18 @@ _DEFAULT_HOST = Host(ssh="andromeda", camp_bin="camp")
 
 
 # ---------------------------------------------------------------------------
-# Local argv — names the resolved session's derived name, not the harness's
+# Door argv — names the resolved session's derived name, not the harness's
 # own name.
 # ---------------------------------------------------------------------------
 
 
-def test_local_argv_names_the_derived_name_not_the_harness_name():
+def test_door_argv_names_the_derived_name_not_the_harness_name():
     candidate = _candidate("camp-my-session-abcd1234")
     harness_own_name = "claude-code-session-xyz"
 
-    argv = handoff.local_argv(candidate.derived_name)
+    argv = handoff.door_argv(candidate.derived_name)
 
-    assert argv == ["tmux", "attach", "-t", "=camp-my-session-abcd1234"]
+    assert argv == ["tmux", "attach-session", "-t", "=camp-my-session-abcd1234"]
     assert harness_own_name not in argv
 
 
@@ -79,20 +80,45 @@ def test_local_argv_names_the_derived_name_not_the_harness_name():
 
 
 def test_remote_argv_uses_the_hosts_declared_camp_bin():
-    argv = handoff.remote_argv(_HOST, "camp-my-session-abcd1234")
+    argv = handoff.remote_argv(_HOST, "camp-my-session-abcd1234", group="g")
     joined = argv[-1]
     assert shlex.split(joined)[0] == "/opt/camp/bin/camp"
 
 
 def test_remote_argv_uses_the_documented_default_when_host_declares_none():
-    argv = handoff.remote_argv(_DEFAULT_HOST, "camp-my-session-abcd1234")
+    argv = handoff.remote_argv(_DEFAULT_HOST, "camp-my-session-abcd1234", group="g")
     joined = argv[-1]
     assert shlex.split(joined)[0] == "camp"
 
 
 def test_remote_argv_requests_a_terminal():
-    argv = handoff.remote_argv(_HOST, "camp-my-session-abcd1234")
+    argv = handoff.remote_argv(_HOST, "camp-my-session-abcd1234", group="g")
     assert argv[:2] == ["ssh", "-t"]
+
+
+# ---------------------------------------------------------------------------
+# Remote argv — carries the resolved group alongside the ref.
+# ---------------------------------------------------------------------------
+
+
+def test_remote_argv_forwards_the_resolved_group():
+    argv = handoff.remote_argv(_HOST, "camp-my-session-abcd1234", group="trailhead")
+    joined = argv[-1]
+    assert shlex.split(joined) == [
+        "/opt/camp/bin/camp",
+        "attach",
+        "camp-my-session-abcd1234",
+        "--group",
+        "trailhead",
+    ]
+
+
+def test_remote_argv_forwards_a_different_group():
+    """The second of the two points that change the answer — proving the
+    group threads through rather than any nonempty value passing."""
+    argv = handoff.remote_argv(_HOST, "camp-my-session-abcd1234", group="levr")
+    joined = argv[-1]
+    assert shlex.split(joined)[-2:] == ["--group", "levr"]
 
 
 # ---------------------------------------------------------------------------
@@ -110,9 +136,9 @@ def test_remote_argv_reuses_the_transports_own_quote_and_join(monkeypatch):
 
     monkeypatch.setattr(handoff, "quote_and_join", spy)
 
-    handoff.remote_argv(_HOST, "some-ref")
+    handoff.remote_argv(_HOST, "some-ref", group="g")
 
-    assert calls == [(_HOST.camp_bin, ["attach", "some-ref"])]
+    assert calls == [(_HOST.camp_bin, ["attach", "some-ref", "--group", "g"])]
 
 
 # ---------------------------------------------------------------------------
@@ -155,7 +181,7 @@ def test_remote_argv_survives_a_local_shell_standing_in_for_the_far_side(
     fake_camp_bin.chmod(0o755)
 
     host = Host(ssh="andromeda", camp_bin=str(fake_camp_bin))
-    argv = handoff.remote_argv(host, hostile_ref)
+    argv = handoff.remote_argv(host, hostile_ref, group="g")
     joined = argv[-1]
 
     result = subprocess.run(
@@ -165,7 +191,7 @@ def test_remote_argv_survives_a_local_shell_standing_in_for_the_far_side(
     assert result.returncode == 0, result.stderr
 
     received = recording.read_bytes().split(b"\x00")[:-1]
-    assert received == [b"attach", hostile_ref.encode()]
+    assert received == [b"attach", hostile_ref.encode(), b"--group", b"g"]
 
 
 # ---------------------------------------------------------------------------
@@ -175,7 +201,7 @@ def test_remote_argv_survives_a_local_shell_standing_in_for_the_far_side(
 
 
 def test_remote_argv_carries_the_transports_fixed_connection_options():
-    argv = handoff.remote_argv(_HOST, "some-ref")
+    argv = handoff.remote_argv(_HOST, "some-ref", group="g")
     assert "-o" in argv
     joined = " ".join(argv)
     assert "-o BatchMode=yes" in joined
@@ -184,7 +210,7 @@ def test_remote_argv_carries_the_transports_fixed_connection_options():
 
 
 def test_remote_argv_honors_an_explicit_connect_timeout():
-    argv = handoff.remote_argv(_HOST, "some-ref", connect_timeout=5.0)
+    argv = handoff.remote_argv(_HOST, "some-ref", group="g", connect_timeout=5.0)
     assert "-o ConnectTimeout=5" in " ".join(argv)
 
 
@@ -288,6 +314,6 @@ def test_remote_argv_never_calls_the_listing_transports_run_camp(monkeypatch):
 
     monkeypatch.setattr(transport, "run_camp", _fail)
 
-    argv = handoff.remote_argv(_HOST, "some-ref")
+    argv = handoff.remote_argv(_HOST, "some-ref", group="g")
 
     assert argv[0] == "ssh"

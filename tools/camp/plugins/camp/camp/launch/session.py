@@ -1,9 +1,4 @@
-"""Session enumeration and launch-environment resolution shared across camp.
-
-`enumerate_records` is the one place camp asks a harness which sessions are
-live and parses the answer — `camp sessions`, and the ref-addressed lookup
-`kill`/`attach` share, all read live sessions through here, so every surface
-asks the same question the same way.
+"""Launch-environment resolution shared across camp.
 
 `resolve_launch_environment` is the one resolution of a group's declared
 account, the environment a pane binds it under, and the scrub that strips the
@@ -22,56 +17,12 @@ one that cannot resolve an account binding it was explicitly given.
 from __future__ import annotations
 
 import os
-import subprocess
 import sys
 from dataclasses import dataclass
-from pathlib import Path
-
-
-#: Seconds to wait on the enumeration probe/subprocess. Advisory only, so it
-#: must never be able to hold anything up indefinitely.
-_ENUMERATE_TIMEOUT_SECONDS = 10
 
 
 class LaunchError(Exception):
     """A launch-environment resolution camp refused."""
-
-
-def enumerate_records(
-    harness,
-    workspace: Path | None,
-    env: dict[str, str],
-    *,
-    cwd: Path | None = None,
-):
-    """Ask *harness* which sessions are live under *workspace*, and parse the answer.
-
-    The single enumeration mechanic in camp — `camp sessions`, and the
-    ref-addressed lookup `kill`/`attach` share, all read live sessions
-    through here, so every surface asks the same question the same way.
-
-    Returns the parsed records, or ``None`` when no answer could be obtained — the
-    harness has no enumeration concept, or the enumeration command failed. ``None``
-    is deliberately distinct from ``[]`` ("nothing is running"), which is an answer.
-
-    Exceptions propagate. What to DO about an unanswerable enumeration — degrade to
-    silence, tolerate it and keep polling, or degrade to a notice — is the caller's
-    posture, not this function's.
-    """
-    argv = harness.session_enumerate(workspace)
-    if not argv:
-        return None
-    completed = subprocess.run(
-        argv,
-        cwd=str(cwd) if cwd is not None else None,
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=_ENUMERATE_TIMEOUT_SECONDS,
-    )
-    if completed.returncode != 0:
-        return None
-    return harness.parse_session_list(completed.stdout)
 
 
 def _unsupported_harness(harness, profile, what: str) -> LaunchError:

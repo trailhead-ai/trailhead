@@ -55,9 +55,9 @@ _NORMALIZE_RE = re.compile(r"[^a-z0-9-]+")
 # drift in EITHER half fails loudly rather than silently changing slug validation.
 _TAXONOMY_RESERVED = (
     set(VERB_ALIASES)  # alias keys: rm, ls
-    | set(LEGACY_REDIRECTS)  # open, break, init, ai, enter, launch, resume, bookmark
+    | set(LEGACY_REDIRECTS)  # open, break, init, ai, enter, launch, resume, bookmark, sessions, kill
     | set(DISABLED_VERBS)  # restock, sweep, code, fire
-    | set(NEEDS_GROUP_VERBS)  # new, remove, pwd, activate, setup, sessions
+    | set(NEEDS_GROUP_VERBS)  # new, remove, pwd, activate, setup
 )
 
 _STATIC_RESERVED = frozenset(
@@ -92,16 +92,10 @@ _STATIC_RESERVED = frozenset(
         "path",
         "foreach",
         "doctor",
-        # Ref-addressed and fully groupless: a stop names its session, and the
-        # session names everything else. Reserved so a workspace slug called
-        # "kill" can never shadow the verb.
-        "kill",
-        # Same posture as "kill" — a reference names the session to attach to,
-        # so a workspace slug called "attach" can never shadow the verb.
+        # Both resolve their group internally (`_resolve_group_for_attach`)
+        # and are dispatched from spine — reserved so a workspace slug of
+        # either name can never shadow the verb.
         "attach",
-        # A stop resolves the group the same way "attach" does, and is
-        # dispatched beside it — reserved so a workspace slug called "stop"
-        # can never shadow the verb.
         "stop",
         # Meta verbs.
         "help",
@@ -500,73 +494,26 @@ def cmd_help(args: list[str]) -> None:
         "  camp status [--name <slug>]       Show worktree status (git + drift)\n"
         "  camp activate <member>            Activate a member and print its CLAUDE.md\n"
         "  camp setup                        Provision or retry member worktrees\n"
-        "  camp kill <ref> [--json]          Stop one session and reclaim its memory,\n"
-        "                                    from any cwd. The workspace, worktree,\n"
-        "                                    and working tree are untouched.\n"
-        "                                    Stopping one that is already down is\n"
-        "                                    success; a ref matching more than one\n"
-        "                                    session lists them on stdout and exits 2\n"
-        "  camp kill <ref> --host <name>     Stop a session on one declared remote\n"
-        "                                    machine, from any cwd; the far side\n"
-        "                                    resolves and refuses in its own words.\n"
-        "                                    No --group needed — the reference alone\n"
-        "                                    names the session. No --all-hosts form —\n"
-        "                                    kill acts on the one machine named by\n"
-        "                                    --host\n"
-        "  camp attach                      Numbered picker over this machine's\n"
-        "                                    running, camp-owned sessions; picking\n"
+        "  camp attach                      Numbered picker over the resolved\n"
+        "                                    group's own workspaces; picking\n"
         "                                    one hands it your terminal\n"
-        "  camp attach <ref>                 Attach directly, from any cwd, by\n"
-        "                                    unambiguous prefix of a session's name\n"
-        "                                    or id, like camp kill\n"
-        "  camp attach <slug>                From inside a configured group (or\n"
-        "                                    with --group), a reference naming one\n"
-        "                                    of its workspaces creates or connects\n"
-        "                                    that workspace's session instead —\n"
-        "                                    the door. A slug matching no\n"
-        "                                    workspace falls through to the ref\n"
-        "                                    form above\n"
-        "  camp attach <ref> --host <name>   Attach on one declared remote machine;\n"
-        "                                    the far side resolves and refuses in\n"
-        "                                    its own words\n"
-        "  camp attach -a | <ref> -a         Widen the picker, or the reference,\n"
-        "                                    across every declared machine; a ref\n"
-        "                                    matching on more than one machine\n"
-        "                                    refuses and names each one\n"
+        "  camp attach <slug>                Attach to one workspace directly,\n"
+        "                                    from inside a configured group (or\n"
+        "                                    with --group) — creating its\n"
+        "                                    session if nothing is running yet,\n"
+        "                                    joining it if something already is\n"
+        "  camp attach <slug> --host <name> [--group <name>]\n"
+        "                                    Attach on one declared remote machine;\n"
+        "                                    the group resolves locally (--group,\n"
+        "                                    else the cwd's group) and is forwarded,\n"
+        "                                    then the far side's own door decides\n"
+        "                                    and refuses in its own words\n"
         "  camp stop <slug> [--group <name>] [--json]\n"
         "                                    Reconcile, preview, then kill a\n"
         "                                    workspace's tmux session. No\n"
         "                                    picker — a missing slug refuses\n"
         "                                    outright. Stopping an already-down\n"
         "                                    workspace is success\n"
-        "  camp sessions [<slug>] [--dir <path>] [--all-groups|-g] [--json]\n"
-        "                                    List the LIVE harness sessions camp can\n"
-        "                                    see, scoped to a workspace or to a\n"
-        "                                    directory and everything under it;\n"
-        "                                    --all-groups/-g widens it to every\n"
-        "                                    configured group instead of narrowing\n"
-        "                                    it to one, and refuses alongside\n"
-        "                                    --group\n"
-        "  camp sessions --host <name> [--json]\n"
-        "                                    List every group's LIVE sessions on\n"
-        "                                    one declared remote machine, over\n"
-        "                                    SSH; refuses alongside --group,\n"
-        "                                    --recoverable, --all, --limit, --dir,\n"
-        "                                    and a positional workspace slug\n"
-        "  camp sessions --all-hosts|-a [--json]\n"
-        "                                    List this resolved group's LIVE\n"
-        "                                    sessions on every declared machine\n"
-        "                                    plus this one, merged into one\n"
-        "                                    answer; -ag (bundled -a -g) widens\n"
-        "                                    every group too. Refuses alongside\n"
-        "                                    --host\n"
-        "  camp sessions --recoverable [<slug>] [--dir <path>] [--limit <n>|--all] [--json]\n"
-        "                                    List the DEAD ones instead — every\n"
-        "                                    session the harness kept a transcript\n"
-        "                                    for, minus the live ones — newest first,\n"
-        "                                    capped at 20 with the total printed. A\n"
-        "                                    row whose directory is gone is listed and\n"
-        "                                    marked, never hidden\n"
         "  camp transfer <slug> --to <peer> [--dry-run] [--overwrite] [--json]\n"
         "                                    Move a workspace's committed history\n"
         "                                    and working-tree content directly to\n"
@@ -584,6 +531,18 @@ def cmd_help(args: list[str]) -> None:
         "\n"
         "Health:\n"
         "  camp doctor [--json]              Read-only workspace health check\n"
+        "\n"
+        "Retired (prints its replacement and exits nonzero):\n"
+        "  camp open       → camp new\n"
+        "  camp break      → camp remove\n"
+        "  camp init       → camp group\n"
+        "  camp ai         → camp new\n"
+        "  camp enter      → camp activate\n"
+        "  camp launch     → camp attach\n"
+        "  camp resume     → camp attach\n"
+        "  camp bookmark   → camp attach\n"
+        "  camp sessions   → camp list\n"
+        "  camp kill       → camp stop\n"
         "\n"
         "Exit codes (camp transfer):\n"
         "  0                Every check passed — a clean verdict, or (without\n"
@@ -614,27 +573,15 @@ def cmd_help(args: list[str]) -> None:
         "                   directly with `camp transfer-probe` before doing\n"
         "                   anything else\n"
         "\n"
-        "Exit codes (camp kill):\n"
-        "  0                Stopped, or already down — stdout is the session id\n"
-        "  1                Failed — stdout is empty and camp's reason is on stderr.\n"
-        "                   This INCLUDES a session still running after the stop:\n"
-        "                   the memory was not reclaimed, so the command failed.\n"
-        "                   On --host, this also covers a far side that refuses\n"
-        "                   in its own words\n"
-        "  2                The ref matched more than one session — the candidates\n"
-        "                   are on stdout to choose between, not a failure\n"
-        "  3                --host only: the outcome is unknown — camp could not\n"
-        "                   determine whether the stop happened. Read the printed\n"
-        "                   check command before retrying\n"
-        "\n"
         "Exit codes (camp attach):\n"
         "  0                camp's own part succeeded — the exit status becomes\n"
         "                   the attached multiplexer's own once the handoff happens\n"
         "  1                Refused — nothing was attached; camp's reason is on\n"
         "                   stderr\n"
-        "  2                The reference matched more than one session (one\n"
-        "                   machine, or more than one under -a) — refuses rather\n"
-        "                   than guessing which was meant\n"
+        "  2                Reached a resurrected session, but at least one\n"
+        "                   window did not come back — only when stdin or\n"
+        "                   stdout is not a terminal; an interactive attach\n"
+        "                   still hands the terminal over and exits 0\n"
         "\n"
         "Flags:\n"
         "  --name <slug>    Target a specific worktree from any cwd\n"
@@ -1236,10 +1183,11 @@ def _doctor_account_roster(env: dict[str, str] | None = None) -> list[dict[str, 
     authentication verdict — the value behind `DOCTOR_PROBE_ACCOUNTS_KEY`.
 
     Built from every group config THIS machine's own group-config directory
-    holds, fed into the same addressable-store pool `camp sessions`/`camp
-    kill`/etc already answer from (:func:`camp.cli.session._addressable_harnesses`,
-    read here, never rebuilt) — deduplicated by each store's RESOLVED
-    binding, not by the declared account string, so two groups spelling one
+    holds, fed into the same addressable-store pool `camp remove`'s
+    teardown guard and `camp transfer` already answer from
+    (:func:`camp.cli.session._addressable_harnesses`, read here, never
+    rebuilt) — deduplicated by each store's RESOLVED binding, not by the
+    declared account string, so two groups spelling one
     account differently still produce one entry. That pool always includes
     the default (no-account) store, so a machine with no declared accounts
     still yields one roster entry rather than an empty list.
@@ -1594,19 +1542,12 @@ def main() -> None:
         cmd_path(rest, dry_run=dry_run)
     elif first in ("help", "--help", "-h"):
         cmd_help(rest)
-    # A stop is ref-addressed: it names a session, not a group, so it must answer
-    # from any cwd — including one where no group resolves at all, which is the
-    # situation it exists to be usable in. Handled before the needs-group
-    # fallback below, which would otherwise refuse it.
-    elif first == "kill":
-        from .cli.session import _cmd_kill_cli
-
-        _cmd_kill_cli(rest)
-    # Attach is ref-addressed the same way a stop is: the reference names the
-    # session, so it must answer from any cwd too. `--host` and `-a` are
-    # intercepted earlier, in cli/dispatch.py, before spine is ever reached
-    # (see cli/session.py's "camp attach" section comment) — only the local
-    # forms (bare picker, `<ref>`, `<ref> --resolve --json`) land here.
+    # Attach resolves a workspace slug within one group — `--group` if given,
+    # else the group the cwd resolves to — and resolves that group itself
+    # (`_resolve_group_for_attach`), so the group-aware router skips it and it
+    # lands here. `--host` and `-a` are intercepted earlier, in
+    # cli/dispatch.py, before spine is ever reached — only the local forms
+    # (the bare picker over the group's workspaces, or `<slug>`) land here.
     elif first == "attach":
         from .cli.session import _cmd_attach_cli
 

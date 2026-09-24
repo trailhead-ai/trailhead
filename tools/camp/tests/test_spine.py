@@ -10,9 +10,12 @@ Test contract:
 
 from __future__ import annotations
 
+import io
 import os
+import re
 import subprocess
 import sys
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -1260,21 +1263,8 @@ def test_trailhead_paths_guard_succeeds_when_importable() -> None:
 
 
 # ---------------------------------------------------------------------------
-# camp kill — the reserved token
+# camp stop / camp attach — canonical, operator-typed verbs
 # ---------------------------------------------------------------------------
-
-
-def test_help_states_the_kill_exit_code_for_a_session_that_did_not_stop(capsys) -> None:
-    """A session still running after the stop is a FAILURE — the memory was not
-    reclaimed — so the help that documents kill's codes has to say so rather
-    than leave a reader to assume any non-zero exit is a broken command."""
-    from camp.spine import cmd_help
-
-    cmd_help([])
-    text = capsys.readouterr().out
-
-    assert "Exit codes (camp kill):" in text
-    assert "still running after the stop" in text
 
 
 def test_help_lists_camp_stop_beside_attach(capsys) -> None:
@@ -1441,3 +1431,45 @@ class TestCampPathWindowRecordDegradation:
             )
 
         assert_identical_across_record_states(results, verb="path")
+
+
+# ---------------------------------------------------------------------------
+# camp help — every LIVE verb it documents must be a reserved token the
+# dispatch tables still treat as live, never a retired one — checked
+# against spine.RESERVED and LEGACY_REDIRECTS, not a hardcoded verb list.
+# ---------------------------------------------------------------------------
+
+#: A `camp <verb> ...` usage line, excluding a retired-verb table row (which
+#: carries a `→` somewhere on the same line) — so a table entry naming a
+#: retired verb's replacement is never mistaken for a live command.
+_LIVE_VERB_LINE = re.compile(r"^ {2}camp ([a-z][a-z-]*)\b(?!.*→)", re.MULTILINE)
+
+
+def _help_text() -> str:
+    import camp.spine as spine
+
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        spine.cmd_help([])
+    return buf.getvalue()
+
+
+def _live_verbs(text: str) -> set[str]:
+    return set(_LIVE_VERB_LINE.findall(text))
+
+
+def test_every_live_verb_in_help_is_reserved_and_not_retired() -> None:
+    """Every verb `camp help` documents as a live command must be in
+    `spine.RESERVED` and absent from `LEGACY_REDIRECTS` — a retired verb
+    (`sessions`, `kill`, ...) is only ever named in the retired-verb
+    listing, never as a live command line."""
+    import camp.spine as spine
+    from camp.workspace.verb_taxonomy import LEGACY_REDIRECTS
+
+    live = _live_verbs(_help_text())
+    assert live, "camp help documents no live verbs — the extractor drifted"
+    for verb in sorted(live):
+        assert verb in spine.RESERVED, f"{verb!r} is documented but not RESERVED"
+        assert verb not in LEGACY_REDIRECTS, (
+            f"{verb!r} is documented as a live command but is a retired verb"
+        )

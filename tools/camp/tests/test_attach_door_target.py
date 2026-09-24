@@ -323,3 +323,19 @@ def test_refusal_message_empty_group_varies_with_group_name() -> None:
     assert '"trailhead"' in trailhead_message
     assert '"sibling"' in sibling_message
     assert trailhead_message != sibling_message
+
+
+def test_refusal_message_names_the_given_slug() -> None:
+    message = refusal_message(NotAWorkspace(ref="nosuch-zz"), group_name="trailhead")
+
+    assert "nosuch-zz" in message
+
+
+def test_refusal_message_escapes_a_control_character_in_the_slug() -> None:
+    """A slug reaches this refusal as an unvalidated CLI argument, not a
+    value camp derived — a raw ESC could otherwise inject a terminal escape
+    sequence into what reads as camp's own refusal line."""
+    message = refusal_message(NotAWorkspace(ref="evil\x1b[31m"), group_name="trailhead")
+
+    assert "\x1b" not in message
+    assert "\\x1b" in message

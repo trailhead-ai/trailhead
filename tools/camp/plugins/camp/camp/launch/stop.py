@@ -1,10 +1,4 @@
-"""The stop engine — decide and perform the stop of one addressed session.
-
-Given a ref, this module resolves it, verifies camp is the one who launched
-what holds the name, refuses the sessions that must never be stopped, kills the
-tmux session, and re-polls until the name is gone. It is data-to-data plus one
-injected `tmux` seam: nothing here prints, exits, or reads `os.environ`, and
-every test drives it with an in-memory tmux.
+"""The tmux seam's re-export point, plus the shared re-poll-until-gone wait.
 
 The tmux seam itself — `Tmux`, its tri-state answers, and the `=`-target
 property — lives in `camp.launch.tmux`, not here; this module imports and
@@ -12,64 +6,20 @@ re-exports it (`Tmux`, `TmuxSession`, `SessionListing`, `UNANSWERED`,
 `_Unanswered`) so every existing importer of `camp.launch.stop` keeps working
 unchanged. New code should import the seam from `camp.launch.tmux` directly.
 
-Resolution is `recovery.resolve_session_ref` unforked, so `camp kill` and
-`camp attach` share one resolver and one ambiguity contract. An
-`Ambiguous` or `NoMatch` from that resolver is returned as-is rather than
-re-wrapped: a ref is never guessed, and the caller renders the same rows the
-attach surface already renders.
-
-Ownership, and what it is not
------------------------------
-A name match is not proof of ownership. Before signalling, camp reads the
-target pane's start command and requires it to be the `session_resume(...)`
-argv camp itself would have composed for THIS session — the seam's own argv,
-behind the seam's own `env -u` scrub. Every session that has ever been parked
-and brought back carries this shape, which is the steady-state population
-this verb creates. The shape is composed by asking the harness seam, never
-spelled here.
-
-ACCEPTED RISK, CARRIED DELIBERATELY: the shape is public and reproducible. A
-process running as the same OS user that knows a target's derived name and
-session id can spawn a pane reproducing it and pass this check. That narrows
-the exposure — an arbitrary process squatting the name is refused — but it
-does not close it, and this check is NOT an authorization boundary. Closing
-it properly needs verified process ancestry of the harness binary, which is a
-spec-level change and not this module's business. A later reader must not read
-the check as settling the provenance question.
-
-The self gate carries the same caveat, and more sharply: the caller's own
-session id is read from the environment the harness published it into
-(`identity.current_session_id`). A caller-supplied environment variable is a
-CONVENIENCE CHECK, not an authorization boundary — anything able to set that
-variable can clear or forge it. It exists so an operator does not saw off the
-branch they are sitting on, not to stop anyone determined.
-
-The already-down oracle
------------------------
-Two readings disagree destructively, so exactly one is pinned here: a candidate
-that is not live AND owns no tmux session is already-down (success, idempotent);
-one that is live with no tmux session is refused as one camp did not launch;
-one whose tmux session exists but is not live is killed anyway, to release the
-name the resume path leans on as its collision backstop.
-
-Success is absence, not issuance. Both existing kill sites in camp discard
-their result without re-polling; this one polls the name until it is gone and
-reports a distinct failure if it never is. The whole verb is bounded in wall
-clock: every tmux call carries `TMUX_TIMEOUT_SECONDS` and the re-poll carries
-`POLL_TIMEOUT_SECONDS` on a monotonic clock, so the worst case an operator
-waits is a handful of seconds — a few calls, plus the budget, and no more.
+`poll_for_absence` is `camp.launch.stop_workspace.stop_workspace`'s
+re-poll-until-gone wait after a kill: tmux tears a session down server-side
+as the call returns, so this is a small budget for a busy server rather than
+a wait for a process to die. Success is absence, not issuance — a kill that
+returns is not proof the name is gone, so the caller polls until it is or the
+budget expires.
 """
 
 from __future__ import annotations
 
-import shlex
 import subprocess  # noqa: F401 — kept for `stop.subprocess.run` re-export, see below
 import time
-from dataclasses import dataclass
-from typing import Any, Callable, Iterable, Mapping
+from typing import Any, Callable
 
-from .identity import current_session_id
-from .recovery import Resolution, Resolved, SessionCandidate, resolve_session_ref
 from .tmux import (  # noqa: F401 — re-exported for this module's existing importers
     TMUX_TIMEOUT_SECONDS,
     UNANSWERED,
@@ -112,17 +62,6 @@ __all__ = [
 POLL_TIMEOUT_SECONDS = 5.0
 POLL_INTERVAL_SECONDS = 0.1
 
-#: Environment override for the budget above, in seconds, read by the `camp
-#: kill` CLI and passed in as `poll_timeout=`. This module deliberately reads
-#: no environment of its own (see the module docstring), so the name lives
-#: here — beside the budget it moves — and the edge does the reading.
-#:
-#: The budget is sized for a busy tmux server, so a test driving a session
-#: that never goes waits all of it before seeing the failure it is asserting.
-#: `camp kill` runs as a subprocess under test, so the `poll_timeout=`
-#: parameter alone cannot reach it.
-POLL_TIMEOUT_ENV = "CAMP_TEST_STOP_POLL_TIMEOUT_SECONDS"
-
 
 def poll_for_absence(
     tmux: Any,
@@ -144,10 +83,8 @@ def poll_for_absence(
     question must never be read as absence, and must never be conflated with
     "still present" either, since neither is what was observed.
 
-    Shared by `stop_session` (`camp kill`) and
-    `camp.launch.stop_workspace.stop_workspace` (`camp stop`) so the two
-    engines can never drift on how long an operator waits for a kill to be
-    confirmed: the budget is WALL CLOCK, measured on `monotonic` rather than
+    `camp.launch.stop_workspace.stop_workspace` (`camp stop`) is the sole
+    caller: the budget is WALL CLOCK, measured on `monotonic` rather than
     summed from the sleeps, because each `has_session` call may itself cost
     up to `TMUX_TIMEOUT_SECONDS` — counting only the sleeps would leave the
     time an operator actually waits unbounded.
@@ -162,272 +99,3 @@ def poll_for_absence(
         if monotonic() >= deadline:
             return False
         sleep(poll_interval)
-
-
-#: Where the concierge supervisor publishes the id of the anchor session,
-#: under its own state dir. camp reads it; camp never writes it. The directory
-#: is resolved through `trailhead.paths` (Axiom 4), which spells the same rule
-#: the supervisor itself applies: `CONCIERGE_STATE_DIR`, else
-#: `XDG_STATE_HOME/concierge`, else `~/.local/state/concierge`.
-ANCHOR_APP = "concierge"
-ANCHOR_SESSION_ID_FILENAME = "session_id"
-
-REFUSED_ANCHOR = "anchor"
-REFUSED_SELF = "self"
-REFUSED_NOT_CAMP_LAUNCHED = "not-camp-launched"
-#: tmux itself did not answer — a timed-out or unlaunchable call. Absence of
-#: the name is the ONLY evidence this engine accepts for a stop, so a question
-#: that came back with no answer can never be read as absence: that would turn
-#: a hung tmux into a reported success. Distinct from every other reason
-#: because nothing about the SESSION is known here, only about tmux.
-REFUSED_TMUX_UNANSWERED = "tmux-unanswered"
-
-#: Live, but owning no tmux session under its derived name — the second branch
-#: of the pinned oracle. Distinct from a foreign pane holding the name, because
-#: the operator's next move differs: there is nothing here for camp to signal.
-REFUSED_LIVE_WITHOUT_SESSION = "live-without-session"
-
-
-@dataclass(frozen=True)
-class StopOutcome:
-    """Base of the closed set of stop outcomes. Never returned itself."""
-
-
-@dataclass(frozen=True)
-class Stopped(StopOutcome):
-    """The session was killed and the name no longer enumerates."""
-
-    candidate: SessionCandidate
-
-
-@dataclass(frozen=True)
-class AlreadyDown(StopOutcome):
-    """Nothing to stop: not live, and owning no tmux session. Success."""
-
-    candidate: SessionCandidate
-
-
-@dataclass(frozen=True)
-class StillPresent(StopOutcome):
-    """The kill was issued and the name is still there. The memory was not reclaimed."""
-
-    candidate: SessionCandidate
-
-
-@dataclass(frozen=True)
-class Refused(StopOutcome):
-    """camp will not signal this candidate. ``reason`` is one of the REFUSED_* constants."""
-
-    candidate: SessionCandidate
-    reason: str
-
-
-def anchor_session_id(env: Mapping[str, str]) -> str | None:
-    """The concierge anchor's session id, as the supervisor recorded it.
-
-    The anchor is the operator's sole phone-side entry point and stopping it is
-    an unrecoverable lockout. It IS inside the resolution pool — every derived
-    name carries an unconditional `camp-` prefix — so the exclusion has to be a
-    gate camp performs, not a property it inherits from the anchor happening to
-    be unreachable.
-
-    Unreadable for any reason is ``None``: camp does not fabricate an id it
-    could not read, and the caller's other gates still apply.
-    """
-    from trailhead.paths import PathResolutionError, state_dir
-
-    try:
-        directory = state_dir(ANCHOR_APP, env=dict(env))
-        value = (directory / ANCHOR_SESSION_ID_FILENAME).read_text(encoding="utf-8").strip()
-    except (PathResolutionError, OSError):
-        return None
-    return value or None
-
-
-def _owning_commands(harness, candidate: SessionCandidate) -> tuple[tuple[str, ...], ...]:
-    """Every pane command camp itself would have composed for this session.
-
-    The resume argv, asked of the seam rather than spelled here, behind the
-    scrub camp applies at spawn time.
-
-    Every call here is into third-party code, so every one of them is guarded:
-    a harness that raises contributes no shape, and no shape means the pane is
-    refused rather than the verb blowing up with a traceback.
-    """
-    try:
-        scrub = harness.session_launch_env_unset() or ()
-    except Exception:  # noqa: BLE001 — a harness that cannot say owns nothing
-        return ()
-    prefix = ["env"]
-    for name in scrub:
-        prefix += ["-u", name]
-
-    shapes: list[tuple[str, ...]] = []
-    try:
-        argv = harness.session_resume(candidate.session_id)
-    except Exception:
-        argv = None
-    if argv:
-        shapes.append(tuple(prefix) + tuple(argv))
-    return tuple(shapes)
-
-
-#: A placeholder account for the key probe below. Absolute, because that is the
-#: only shape a harness can be asked to honor without knowing what it names.
-_KEY_PROBE_ACCOUNT = "/"
-
-
-def _account_binding_keys(harness) -> tuple[str, ...]:
-    """The variable NAMES the launch engine composes into a pane as assignments.
-
-    Asked of the harness rather than spelled here: only the harness knows which
-    variables express an account, and a name hardcoded in camp is the ambient
-    leak this whole path removes. The VALUES are ignored — they were resolved at
-    LAUNCH time from the launching group's declaration — but the keys are
-    constant for a harness, so any binding it composes reveals them.
-
-    BOTH an undeclared and a declared account are probed, because a harness may
-    answer the undeclared one with an empty mapping: a default that no value
-    expresses is stated as the variable's ABSENCE instead. Probing only that one
-    would learn no keys from such a harness, and every pane camp composed for a
-    group that DID declare an account would stop being recognized as camp's own.
-
-    The probe carries NO environment. Only the keys are wanted, and they are
-    constant for a harness, while a harness may legitimately REFUSE to compose a
-    binding against an environment that already states a config dir of its own.
-    Handing it the stop-time environment would make that launch-time refusal a
-    stop-time hazard: both probes raise, no keys are learned, and every pane camp
-    launched with an account assignment is refused as not camp's own — decided by
-    whichever shell the operator happened to run `camp stop` from.
-
-    Every failure degrades to no keys, which refuses the pane rather than
-    reclaiming one camp never composed: a third-party call that raises is the
-    stop engine's refusal, never its traceback.
-    """
-    keys: list[str] = []
-    for account in (None, _KEY_PROBE_ACCOUNT):
-        try:
-            binding = harness.session_launch_env_set(account, env={})
-        except Exception:  # noqa: BLE001 — third-party call; a refusal, not a traceback
-            continue
-        for key in binding or ():
-            if key not in keys:
-                keys.append(key)
-    return tuple(keys)
-
-
-def _without_account_binding(
-    observed: tuple[str, ...], keys: tuple[str, ...]
-) -> tuple[str, ...]:
-    """*observed* with the launch engine's account assignments removed.
-
-    The engine carries an account binding into the pane as ``env`` assignments,
-    so a pane camp composed no longer equals the scrub-only shape. Removing them
-    here rather than composing them into the owning shapes is deliberate: the
-    VALUE was resolved at LAUNCH time from the launching group's declaration, and
-    a session is routinely stopped from a shell — and a group — that would
-    resolve a different one, so an owning shape built at stop time would refuse
-    camp's own pane whenever the two disagree.
-
-    At most one token per key is removed, and only one matching the shape the
-    engine can actually compose — an absolute value. Anything else is left in
-    place, so it still fails the exact match and the pane is refused: the
-    tolerance cannot widen into reclaiming a pane camp never composed.
-    """
-    for key in keys:
-        prefix = f"{key}="
-        for index, token in enumerate(observed):
-            if token.startswith(prefix):
-                if token[len(prefix) :].startswith("/"):
-                    observed = observed[:index] + observed[index + 1 :]
-                break
-    return observed
-
-
-def _is_camp_launched(
-    harness, candidate: SessionCandidate, pane_command: str | None
-) -> bool:
-    if not pane_command:
-        return False
-    try:
-        observed = tuple(shlex.split(pane_command))
-    except ValueError:
-        return False
-    keys = _account_binding_keys(harness)
-    return _without_account_binding(observed, keys) in _owning_commands(harness, candidate)
-
-
-def stop_session(
-    ref: str,
-    *,
-    harness,
-    transcripts: Iterable[Any],
-    live_records: Iterable[Any],
-    groups: Iterable[dict[str, Any]],
-    env: Mapping[str, str],
-    tmux: Any | None = None,
-    now=None,
-    sleep: Callable[[float], None] = time.sleep,
-    monotonic: Callable[[], float] = time.monotonic,
-    poll_timeout: float = POLL_TIMEOUT_SECONDS,
-    poll_interval: float = POLL_INTERVAL_SECONDS,
-) -> Resolution | StopOutcome:
-    """Stop the one session *ref* addresses. See the module docstring.
-
-    Returns the resolver's own ``Ambiguous`` / ``NoMatch`` when the ref does not
-    address exactly one session, and otherwise one of the ``StopOutcome`` kinds.
-    """
-    tmux = tmux if tmux is not None else Tmux()
-
-    resolution = resolve_session_ref(
-        ref,
-        transcripts=transcripts,
-        live_records=live_records,
-        groups=groups,
-        env=env,
-        now=now,
-    )
-    if not isinstance(resolution, Resolved):
-        return resolution
-
-    candidate = resolution.candidate
-
-    if candidate.session_id == anchor_session_id(env):
-        return Refused(candidate, REFUSED_ANCHOR)
-
-    if candidate.session_id == current_session_id(dict(env)):
-        return Refused(candidate, REFUSED_SELF)
-
-    name = candidate.derived_name
-    present = tmux.has_session(name)
-    if present is None:
-        return Refused(candidate, REFUSED_TMUX_UNANSWERED)
-    if not present:
-        # The pinned oracle: absent tmux session AND not live is already-down;
-        # absent tmux session while still live is a session camp did not launch
-        # and must not be reported as reclaimed.
-        if candidate.live:
-            return Refused(candidate, REFUSED_LIVE_WITHOUT_SESSION)
-        return AlreadyDown(candidate)
-
-    pane = tmux.pane_command(name)
-    if isinstance(pane, _Unanswered):
-        return Refused(candidate, REFUSED_TMUX_UNANSWERED)
-    if not _is_camp_launched(harness, candidate, pane):
-        return Refused(candidate, REFUSED_NOT_CAMP_LAUNCHED)
-
-    tmux.kill_session(name)
-
-    result = poll_for_absence(
-        tmux,
-        name,
-        sleep=sleep,
-        monotonic=monotonic,
-        poll_timeout=poll_timeout,
-        poll_interval=poll_interval,
-    )
-    if result is None:
-        return Refused(candidate, REFUSED_TMUX_UNANSWERED)
-    if result:
-        return Stopped(candidate)
-    return StillPresent(candidate)

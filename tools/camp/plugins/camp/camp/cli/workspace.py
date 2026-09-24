@@ -149,8 +149,7 @@ def local_list_answer(
     here (never that helper) because a `sys.exit`-on-refusal is not
     something a value-returning answer this function's caller still needs to
     merge with other machines' answers can afford — the caller decides what
-    to do with a total failure, exactly as `_sessions_live_answer` already
-    does for `camp sessions`' own `-a` path.
+    to do with a total failure.
 
     Reads tmux at the scope the GROUP axis asked for: a leftover session
     belongs to no group — its name predates the group-qualified scheme and

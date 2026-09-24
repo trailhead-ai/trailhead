@@ -39,10 +39,10 @@ recorded here because both are tempting and both are wrong:
   is with an empty list. The analogy to the stop engine's tri-state
   `Tmux.has_session` does not carry: `tmux has-session -t =<name>` is an
   EXISTENCE QUERY whose nonzero exit specifically means the name does not
-  exist. Camp already reads this seam the strict way everywhere else —
-  :func:`launch.session.enumerate_records` returns ``None`` for "the
-  enumeration command failed" — and a guard that dissented on a shared seam
-  would be the one surface where a failed probe means "go ahead".
+  exist. A general enumeration command's nonzero exit carries no such
+  guarantee, so this probe reads it the strict way — "could not tell", not
+  "empty" — and a guard that dissented on that reading would be the one
+  surface where a failed probe means "go ahead".
 
 - A BINARY THAT IS NOT INSTALLED is not "nothing can be running" either. What
   the probe actually establishes is that the binary is not on PATH *in this
@@ -212,12 +212,20 @@ def _rooted_in(candidate: SessionCandidate, workspace: Path) -> bool:
     return resolved == workspace or resolved.is_relative_to(workspace)
 
 
-def render_block(slug: str, blocking: Sequence[SessionCandidate]) -> str:
+def render_block(slug: str, blocking: Sequence[SessionCandidate], *, group_name: str) -> str:
     """Render the refusal, naming every session the removal would destroy.
 
-    Each row carries the derived name — the ref `camp kill` and `camp attach`
-    both take — and the root, so the operator can tell two sessions
-    apart without going looking for them.
+    Each row carries the derived name and the root, so the operator can tell
+    two sessions apart without going looking for them — the derived name is
+    not itself a value any verb accepts; it is a label, not a target.
+
+    `camp stop <slug>` only ends a running process; it does not remove the
+    transcript `blocking_sessions` finds it by, so a session that was live
+    when this refusal was rendered blocks removal again, parked, the very
+    next time `camp remove` is retried. The remedy therefore never claims
+    `camp stop` clears the block by itself — it appears only as an optional
+    first step, addressed by the same `--group` the removal itself needs,
+    and `--force` is what every case actually requires.
     """
     count = len(blocking)
     noun = "session" if count == 1 else "sessions"
@@ -230,8 +238,17 @@ def render_block(slug: str, blocking: Sequence[SessionCandidate]) -> str:
         lines.append(
             f"  {candidate.derived_name}  {printable_path(candidate.root)}  ({state})"
         )
-    lines.append(
-        "  stop one with `camp kill <ref>`, or re-run with --force to remove the "
-        "workspace and its sessions"
-    )
+    force_cmd = f"camp remove {slug} --group {group_name} --force"
+    if any(candidate.live for candidate in blocking):
+        lines.append(
+            f"  a running one can be stopped first with `camp stop {slug} "
+            f"--group {group_name}`, but its parked transcript still blocks "
+            f"removal on its own — re-run `{force_cmd}` to remove the "
+            "workspace and its sessions"
+        )
+    else:
+        lines.append(
+            "  every listed session is parked, with nothing running to stop — "
+            f"re-run `{force_cmd}` to remove the workspace and its sessions"
+        )
     return "\n".join(lines)

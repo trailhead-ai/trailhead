@@ -418,9 +418,9 @@ def render_workspace_list(
     missing a group. Every row in the array carries `ok`, so a consumer
     distinguishes a workspace row from a failure row by that one field
     alone, never by testing whether `row["slug"]` would raise — the same
-    discriminator a failed credential store's row uses in
-    `camp sessions --json`. Never rendered on the human path, which already
-    has the same information on stderr; the table has nothing to print a
+    discriminator a failed credential store's row uses elsewhere in camp's
+    `--json` surfaces. Never rendered on the human path, which already has
+    the same information on stderr; the table has nothing to print a
     workspace or session cell for a config-load failure.
 
     *unmanaged_count* — the group-scoped leftover count
@@ -493,10 +493,10 @@ def load_answerable_groups(groups_dir: Path) -> tuple[list[dict[str, Any]], list
     """Load every ``*.toml`` in *groups_dir*, degrading a config that fails to
     parse instead of failing the whole load.
 
-    Shared by the two ``--all-groups`` verbs (`camp list`, `camp sessions`) so
-    a widened answer never falls back to zero rows over ONE sibling group's
-    broken config — mirrors `cli/group.py`'s `_cmd_groups_cli` degrade idiom,
-    generalized here since both cross-group callers need it.
+    Shared by the ``--all-groups`` verb (`camp list`) so a widened answer
+    never falls back to zero rows over ONE sibling group's broken config —
+    mirrors `cli/group.py`'s `_cmd_groups_cli` degrade idiom, generalized
+    here for every cross-group caller.
 
     Returns ``(groups, skipped)``: `groups` is every config that parsed, in
     filename order; `skipped` is one already-formatted ``"<path>: <detail>"``
@@ -537,10 +537,10 @@ def answerable_groups_or_refuse(
 ) -> tuple[list[dict[str, Any]], list[str]]:
     """:func:`load_answerable_groups`, plus the two notices a cross-group answer owes.
 
-    The cross-group verbs (`camp list`, `camp sessions`) narrow their answer
-    for the same reasons and must say so in the same words, so both the
-    per-config skip line and the every-config-unparsable refusal are stated
-    here once rather than at each verb:
+    The cross-group verb (`camp list`) narrows its answer for these reasons
+    and must say so in these words, so both the per-config skip line and the
+    every-config-unparsable refusal are stated here once rather than at each
+    verb:
 
     * one ``camp <verb>: <detail> — skipping`` line per config that failed to
       parse, naming it, while every group that DID parse still answers;

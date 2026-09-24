@@ -1,47 +1,23 @@
-"""The session command group: ``sessions`` (list), ``kill`` (stop), and
-``attach`` (re-enter).
+"""The ``attach`` verb (re-enter a workspace), plus the harness/store addressing
+helpers `camp remove`, `camp transfer` and `camp doctor` share.
 
-``sessions`` is group-resolved like every other workspace verb; ``kill`` and
-``attach`` resolve a session by reference, from any cwd. Enumeration reads
-through ``camp.launch.session.enumerate_records``.
+`camp attach` resolves a slug against exactly one group — `--group` if given,
+else the same `resolve_from_cwd` every other group-resolved verb uses — and
+hands the terminal to that workspace's door: create, connect, or resurrect. A
+slug that does not resolve is a refusal in the door's own words; a group that
+does not resolve is the standard needs-group refusal. `--host <name>` forwards
+the argv untouched to that machine, where it is that machine's own door.
 
-``sessions`` is a QUESTION, so most failures DEGRADE — a stderr notice, an empty
-list on stdout, exit 0. A caller asking what is running can act on "nothing" and
-on "I could not tell" the same way (there is nothing to attach to either way), and
-exiting non-zero for the second would make a read-only query a scripting hazard.
-An honestly-empty answer stays silent.
+`_addressable_harnesses` is the pool of (harness, credential store) pairs camp
+can ask about sessions at all — every configured group's harness, not only the
+one the invocation resolved, because a store camp cannot bind is a session it
+cannot see. `camp remove`'s teardown guard, `camp transfer`'s conversation
+listing and `camp doctor` all read this pool; `_parsable_groups` is the
+malformed-config-tolerant loader that feeds it.
 
-``kill`` and ``attach`` are ACTIONS, so a failure that matters is a refusal —
-one ``camp <verb>: …`` stderr line, empty stdout, non-zero exit.
-
-The live listing asks every (harness, credential store) candidate in the pool —
-never only the group the invocation happened to resolve — and merges what comes
-back (see ``_enumerate_live_sessions_pool``). A store that cannot be read
-degrades to a stderr notice naming the ACCOUNT it could not reach while the
-stores that answered still contribute their rows, exit 0 — the read-only,
-partial-information case above. But when EVERY addressable store fails, "nothing
-to attach to" is no longer true: something might well be running under a store
-camp simply could not ask, so that case is a REFUSAL — non-zero exit, no rows,
-a stated reason — never an empty answer indistinguishable from "nothing is
-running". The `--json` form carries the same partial/total distinction IN BAND:
-every row (session or not) carries `"ok"`, so a parser sorts a mixed answer
-without touching stderr, and a total failure prints no array at all rather than
-an empty one a parser could read as complete.
-
-``kill`` and ``attach`` share one more CLI job: turning an operator's session
-reference into exactly one addressable session, or refusing. The resolution
-itself is pure and lives in ``camp.launch.recovery``; everything the operator
-SEES about it — the candidate rows, the exit codes, the wording of each refusal
-— is here, because a question answered on a terminal cannot also be answered
-identically from a test or a listing.
-
-``sessions --recoverable`` follows the same division: the subtraction that
-produces the dead sessions is pure and lives beside the resolver, while the
-cap, the row rendering, the empty-state line and the harness-unsupported
-refusal are here. Its one hard rule is that
-BOTH halves of the subtraction are scoped by the same argument — the transcript
-enumeration and the live enumeration alike — because scoping only one of them
-reports running sessions as recoverable.
+`trigger_activate_phase_work` is `camp new --activate`'s non-interactive
+trigger for every member's activate-phase work, unrelated to attach or the
+harness pool above beyond sharing this module.
 """
 
 from __future__ import annotations
@@ -52,7 +28,7 @@ import sys
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn
-from .parser import CampParser, group_verb_parser
+from .parser import CampParser
 
 if TYPE_CHECKING:
     from ..attach.door_target import ResolvedWorkspace
@@ -64,34 +40,6 @@ if TYPE_CHECKING:
 #: forever with no liveness signal, so an unbounded wait would hang the caller.
 _PROVISION_POLL_INTERVAL_SECONDS = 1.0
 _PROVISION_POLL_TIMEOUT_SECONDS = 900.0
-
-#: Exit code for an ambiguous session reference. Deliberately NOT 1: an
-#: ambiguous ref is information — camp found the sessions and is showing them —
-#: and a consumer that reads every non-zero exit as breakage would report a
-#: solvable, one-more-character problem as a failure.
-_AMBIGUOUS_EXIT_CODE = 2
-
-#: How many recoverable rows `camp sessions --recoverable` prints before it
-#: starts saying "and N more". A real transcript store is mostly sessions that
-#: have nothing to do with camp, so an uncapped global listing is unreadable on
-#: the phone this listing exists to be read from. The total is always printed
-#: alongside, and `--limit <n>` / `--all` widen it.
-_RECOVERABLE_DEFAULT_LIMIT = 20
-
-
-def _named_slug(parsed) -> str | None:
-    """The workspace the operator named, in whichever of its two spellings.
-
-    A bare positional and ``--name <slug>`` are the same thing, so every check
-    that refuses a workspace alongside a rooting or widening flag must treat
-    them as one — naming only one spelling would let the other through
-    silently. Held here so the three such checks cannot drift apart.
-
-    Precedence matches `dispatch._slug_from_name_or_cwd`, which is what
-    actually resolves the workspace: ``--name`` first. A refusal that quoted the
-    other spelling would name a value the resolver would have discarded.
-    """
-    return parsed.name if parsed.name is not None else parsed.slug
 
 
 def trigger_activate_phase_work(
@@ -152,165 +100,10 @@ def trigger_activate_phase_work(
         _spawn_background_activation(group, slug, member["name"], env=env)
 
 
-def _candidate_payload(candidate) -> dict:
-    """One resolver candidate as JSON-ready data.
-
-    This key set is the candidate ROW SHAPE, shared by every surface that lists
-    candidates, so a consumer that learned it from one listing reads the other
-    unchanged. ``root`` and ``age_seconds`` are ``null`` rather than absent when
-    the harness could not tell camp them: a missing key and a known-absent value
-    are different facts, and only the second is answerable.
-
-    ``age_seconds`` is a whole number of seconds. The sub-second component is an
-    artifact of when the listing happened to run, not a fact about the session,
-    and emitting it would make two rows written in the same instant compare
-    unequal for every consumer that reads this field.
-    """
-    return {
-        "session_id": candidate.session_id,
-        "tmux_name": candidate.derived_name,
-        "root": str(candidate.root) if candidate.root is not None else None,
-        "age_seconds": (
-            int(candidate.age_seconds) if candidate.age_seconds is not None else None
-        ),
-        "root_missing": candidate.root_missing,
-        "unreadable": candidate.unreadable,
-    }
-
-
-def _format_age(seconds: float | None) -> str:
-    """A candidate's age as one compact, coarse duration — ``2d``, ``4h``, ``9m``.
-
-    Coarse on purpose. These rows are read on a phone to answer "which of these
-    is the one I was in", and a single unit at the largest scale that still has
-    a whole number answers that in fewer characters than a precise duration
-    would. ``None`` means there is no transcript to be aged — a session known
-    only from the live enumeration — and reads as ``live``.
-    """
-    if seconds is None:
-        return "live"
-    total = max(int(seconds), 0)
-    if total < 60:
-        return f"{total}s"
-    if total < 3600:
-        return f"{total // 60}m"
-    if total < 86400:
-        return f"{total // 3600}h"
-    return f"{total // 86400}d"
-
-
-def _candidate_line(candidate) -> str:
-    """One candidate as an operator-facing row: name, id, where, how old.
-
-    The three things that distinguish two candidates — a directory, its state,
-    and an age — are all here, because the operator picks between them by
-    reading this line and nothing else. One row shape serves both listings that
-    print candidates, so a consumer that learned it from the recoverable listing
-    reads an ambiguity listing unchanged.
-
-    A candidate with no extractable root says so rather than naming a location:
-    "somewhere camp cannot name" and "a directory that was torn down" are
-    different facts, and only the second has a path to print.
-    """
-    from ..launch.recovery import printable_path
-
-    if candidate.root is None:
-        where = "directory unknown"
-    elif candidate.root_missing:
-        where = f"{printable_path(candidate.root)} (gone)"
-    else:
-        where = printable_path(candidate.root)
-    return (
-        f"{candidate.derived_name}  {candidate.session_id}  {where}  "
-        f"{_format_age(candidate.age_seconds)}"
-    )
-
-
-def _candidate_row_line(row: dict) -> str:
-    """A relayed `--host` candidate row, human-rendered — the JSON-shaped
-    counterpart to :func:`_candidate_line`, from a `_candidate_payload`-shaped
-    dict (``session_id``, ``tmux_name``, ``root``, ``age_seconds``,
-    ``root_missing``) rather than a `Candidate` object, because a relayed
-    ambiguous answer's rows never carry the local resolver's own type.
-
-    A remote camp of a different version can omit a key this depends on;
-    that is a `KeyError` a caller degrades per row, exactly as
-    `render_session_row_human` does for a `sessions --host` row.
-
-    Every interpolated field — not just `root` — goes through
-    `printable_path`, which despite the name works on any relayed string:
-    `tmux_name` and `session_id` are as untrusted as `root` is, and control
-    sequences that `_strip_control_sequences` deliberately preserves
-    (newline, tab) can otherwise render one relayed row as two, forging a
-    candidate the far side never sent.
-    """
-    from ..launch.recovery import printable_path
-
-    root = row.get("root")
-    if root is None:
-        where = "directory unknown"
-    elif row.get("root_missing"):
-        where = f"{printable_path(root)} (gone)"
-    else:
-        where = printable_path(root)
-    return (
-        f"{printable_path(row['tmux_name'])}  {printable_path(row['session_id'])}  {where}  "
-        f"{_format_age(row.get('age_seconds'))}"
-    )
-
-
-def _print_candidates(candidates, *, as_json: bool) -> None:
-    """Print candidate rows on STDOUT — the one print site both listings use.
-
-    On stdout even when the exit code is non-zero: the rows ARE the answer to
-    what was asked, and a caller capturing stdout must get them. The one-line
-    explanation of why camp stopped — or the notice naming what was capped —
-    goes to stderr alongside, keeping the split every other camp verb uses.
-
-    Shared by the ambiguity listing and the recoverable listing so the two emit
-    the identical bytes for the identical candidate: a consumer that learned the
-    shape from one reads the other unchanged, which two print sites cannot
-    guarantee.
-    """
-    if as_json:
-        print(json.dumps([_candidate_payload(candidate) for candidate in candidates]))
-        return
-    for candidate in candidates:
-        print(_candidate_line(candidate))
-
-
-def _retention_hint(harness, env: dict[str, str]) -> str:
-    """Why an empty transcript pool is probably empty, in the harness's own terms.
-
-    Reached only when the harness reports NO sessions whatsoever, where retention
-    cleanup is the overwhelmingly likely explanation. Saying this for a pool that
-    merely failed to match would send an operator hunting for a session that is
-    sitting right there under a different reference.
-    """
-    try:
-        days = harness.session_retention_days(env=env)
-    except Exception:  # noqa: BLE001 — a hint is never worth a traceback
-        days = None
-    if days is None:
-        return (
-            "a transcript that has aged out of the harness's retention window is "
-            "no longer addressable"
-        )
-    return (
-        f"transcripts are removed after {days} days, so this one has most likely "
-        "aged out of that retention window"
-    )
-
-
 def _harness_display_name(harness) -> str:
     """The name to put in a refusal about *harness*."""
     underlying = getattr(harness, "harness", harness)
     return harness.name or type(underlying).__name__
-
-
-def _account_label(account: str | None) -> str:
-    """How to name *account* in operator-facing text — never a bare ``None``."""
-    return f"account {account!r}" if account is not None else "the default account"
 
 
 def _addressable_harnesses(
@@ -318,10 +111,9 @@ def _addressable_harnesses(
 ) -> list:
     """Every (harness, credential store) camp can ask about sessions.
 
-    A reference addresses a SESSION, not a group. Naming a group, or standing in
-    one, does not change which sessions exist, so the pool spans every configured
-    group's harness rather than whichever one the invocation happened to resolve
-    — the same reason a resume needs no ``--group`` in the first place.
+    Naming a group, or standing in one, does not change which sessions exist, so
+    the pool spans every configured group's harness rather than whichever one the
+    invocation happened to resolve.
 
     Keyed by (harness display name, declared account) — NOT by harness name
     alone. Two groups sharing a harness but declaring different accounts are
@@ -421,10 +213,10 @@ def _store_binding_key(store) -> tuple[tuple[str, str], ...]:
 def _parsable_groups() -> list[dict]:
     """Every group config camp can PARSE — a malformed sibling contributes nothing.
 
-    A session reference names a session, not a group, so one unreadable toml
-    elsewhere in the config directory must not make every session unaddressable.
-    That is precisely the situation a stop is reached for from a phone: something
-    is already broken, and the verb that reclaims memory has to still answer.
+    One unreadable toml elsewhere in the config directory must not make every
+    other group unaddressable. That is precisely the situation a stop is reached
+    for from a phone: something is already broken, and the verb that reclaims
+    memory has to still answer.
 
     Deliberately not the loader every group-resolved verb uses. Those verbs act
     ON a group and must refuse rather than act against a config camp misread;
@@ -446,1572 +238,12 @@ def _parsable_groups() -> list[dict]:
     return configs
 
 
-def _session_pool(
-    groups,
-    *,
-    verb: str,
-    env: dict[str, str],
-    live_required: bool = False,
-) -> tuple[list, list, list, dict[str, str | None]]:
-    """The addressable pool: (transcripts, live records, stores that answered,
-    session id -> declaring account).
-
-    Every addressable STORE's on-disk transcripts UNION its live sessions, each
-    queried under its OWN environment — a store whose declared account differs
-    from another's must be read from its own credential directory, never from
-    whichever store the pool happened to query first, or a session sitting in
-    the unqueried store is invisible to every reference that would otherwise
-    match it. A store with no transcript concept — or one camp cannot read at
-    all, which the seam contract forbids but a third-party harness may still do
-    — contributes no transcripts, and if NONE of them has one the reference is
-    unanswerable and camp refuses naming them: an unanswerable seam is a
-    refusal, never a permissive default, and never a traceback.
-
-    The live probe is the opposite posture BY DEFAULT — it only ever ADDS
-    candidates, so a probe that fails narrows what camp can offer without being
-    able to make camp address the wrong thing.
-
-    *live_required* flips that, and a DESTRUCTIVE caller must set it. A failed
-    probe does not say "nothing is live", it says nothing at all, and a caller
-    whose decision turns on liveness would read the silence as "not live": the
-    stop path's already-down oracle would then report a running session, still
-    holding its memory, as reclaimed. On that path an unanswerable probe is a
-    refusal, the same posture the teardown guard takes for the same reason.
-
-    *verb* is the name to put in either refusal, because both are read verbatim
-    off a relayed stderr line and have to name the command the operator typed.
-
-    The returned mapping is session id -> the account that store declared (or
-    ``None``), first-write-wins across stores. It exists so a refusal that
-    turns out ambiguous ACROSS stores can name the account each match came
-    from, without :class:`~camp.launch.recovery.SessionCandidate` — which is
-    shared by every session surface, not just the ref-addressed ones — having
-    to carry a field only this refusal reads.
-    """
-    from ..launch.session import enumerate_records
-    from ..spine import _die
-
-    harnesses = _addressable_harnesses(groups, env=env)
-    if not harnesses:
-        _die(
-            f"camp {verb}: camp cannot name a harness for any configured group, so "
-            "it cannot look up the session this reference addresses"
-        )
-
-    transcripts: list = []
-    live: list = []
-    answered: list = []
-    accounts: dict[str, str | None] = {}
-    for harness in harnesses:
-        store_env = getattr(harness, "env", env)
-        try:
-            records = enumerate_records(harness, None, store_env)
-        except Exception as exc:  # noqa: BLE001 — posture below, never a traceback
-            records = None
-            detail = str(exc)
-        else:
-            detail = "the enumeration could not be answered"
-        if records is None and live_required:
-            _die(
-                f"camp {verb}: camp could not ask harness "
-                f"{_harness_display_name(harness)} which of its sessions are "
-                f"live ({detail}), so it cannot tell whether this session is "
-                "already down or still holding its memory — re-run once the "
-                "harness answers"
-            )
-        for record in records or ():
-            accounts.setdefault(record.session_id, getattr(harness, "account", None))
-        live.extend(records or [])
-        try:
-            rows = harness.session_transcripts(env=store_env)
-        except Exception:  # noqa: BLE001 — a harness camp cannot read contributes nothing
-            rows = None
-        if rows is not None:
-            answered.append(harness)
-            for row in rows:
-                accounts.setdefault(row.session_id, getattr(harness, "account", None))
-            transcripts.extend(rows)
-
-    if not answered:
-        names = ", ".join(_harness_display_name(harness) for harness in harnesses)
-        _die(
-            f"camp {verb}: harness {names} keeps no session transcripts camp can "
-            "read, so its sessions cannot be addressed by reference"
-        )
-    return transcripts, live, answered, accounts
-
-
-def _die_unresolved(
-    outcome,
-    ref: str,
-    *,
-    verb: str,
-    harness,
-    env: dict[str, str],
-    as_json: bool,
-    accounts: dict[str, str | None] | None = None,
-) -> NoReturn:
-    """Refuse a *ref* that did not address exactly one session, in *verb*'s terms.
-
-    Three outcomes end in a refusal, and the wording of each is the whole point:
-
-    * MORE THAN ONE match prints the candidates and exits
-      :data:`_AMBIGUOUS_EXIT_CODE`, never guessing.
-    * NO match against a populated pool is a ref problem, and points at the
-      listing that shows what the refs are.
-    * NO match against an EMPTY pool is not a ref problem at all, and says so —
-      naming the harness's retention window instead of implying the operator
-      mistyped something.
-
-    Every ref-addressed verb refuses through here, so an operator who mistypes
-    the same reference at two of them is told the same thing and only the
-    command name differs. *verb* is that name, and *harness* is the one whose
-    retention window explains an empty pool.
-
-    An ambiguous match spanning more than one credential store is not a second
-    refusal shape — it is this same one, with *accounts* (session id -> the
-    account that store declared) letting the message name which store each
-    match came from, so an operator is never left guessing which of two
-    same-named sessions on different accounts a longer prefix would even
-    disambiguate. That detail is added ONLY when the matches actually span more
-    than one account — an ambiguity inside a single store names nothing new.
-    """
-    from ..launch.recovery import Ambiguous, NoMatch
-    from ..spine import _die
-
-    if isinstance(outcome, Ambiguous):
-        _print_candidates(outcome.candidates, as_json=as_json)
-        by_account = ""
-        if accounts:
-            matched_accounts = {accounts.get(c.session_id) for c in outcome.candidates}
-            if len(matched_accounts) > 1:
-                by_account = " — " + "; ".join(
-                    f"{candidate.derived_name} in "
-                    f"{_account_label(accounts.get(candidate.session_id))}"
-                    for candidate in outcome.candidates
-                )
-        _die(
-            f"camp {verb}: {ref!r} matches {len(outcome.candidates)} sessions "
-            f"(listed above){by_account} — re-run with a longer prefix naming "
-            "exactly one",
-            code=_AMBIGUOUS_EXIT_CODE,
-        )
-
-    if isinstance(outcome, NoMatch) and outcome.pool_size:
-        _die(
-            f"camp {verb}: no candidate matched `{ref}`; run "
-            "`camp sessions --recoverable` to see what camp can address"
-        )
-    _die(
-        f"camp {verb}: harness {_harness_display_name(harness)} reports no "
-        f"sessions at all — {_retention_hint(harness, env)}"
-    )
-
-
-def _attribute_session(cwd: Path, groups: list[dict], *, env: dict[str, str]) -> dict:
-    """Resolve the group and declared account *cwd* belongs to.
-
-    Uses :func:`camp.group.resolve.resolve_from_cwd` — the SAME resolver the
-    dispatcher applies to the invoking process's own cwd
-    (``cli/dispatch.py``'s ``_resolve_group_for_command``) — so a session
-    rooted in a member repository checkout attributes exactly like one rooted
-    in a workspace, and the group name returned here is spelled exactly as
-    ``--group`` accepts it and ``resolve_from_cwd`` returns it: a later filter
-    over these rows compares against this value directly, with no
-    normalization step of its own.
-
-    A *cwd* no configured group's resolver recognizes raises
-    ``GroupResolutionError`` from ``resolve_from_cwd`` — an ordinary, expected
-    outcome here, degraded to a null group and a null account rather than
-    propagated or dropping the row: enumeration already found and reported
-    this session, so a row naming no home is a real answer, not a failure.
-
-    ``account`` is the resolved group's ``[launch] account`` exactly as
-    declared — carried verbatim, like :class:`~camp.launch.profile.HarnessStore`'s
-    own ``account`` field, never expanded, normalized, or resolved — and
-    ``None`` wherever the group declares none.
-    """
-    from ..group.resolve import GroupResolutionError, resolve_from_cwd
-
-    try:
-        group_name, _slug = resolve_from_cwd(cwd, groups, env=env)
-    except GroupResolutionError:
-        return {"group": None, "account": None}
-
-    group = next((cfg for cfg in groups if cfg["group"]["name"] == group_name), None)
-    account = (group.get("launch") or {}).get("account") if group is not None else None
-    return {"group": group_name, "account": account}
-
-
-def _sessions_for_group(
-    attributed: list[tuple], group_name: str
-) -> list[tuple]:
-    """Narrow an attributed ``(record, attribution)`` set to one group's rows.
-
-    *attributed* is the whole cross-store, cross-group answer — every store's
-    records, each already paired with :func:`_attribute_session`'s result — so
-    this is a pure filter over an answer that already exists, never a second
-    enumeration. A row whose attribution has no group (an unresolvable *cwd*,
-    or a store-failure row this function never receives) never matches any
-    name and is dropped, never kept as "unattributed but maybe relevant".
-
-    This is the ONE seam a caller narrows the live answer through. Asking for
-    every group at once is a DIFFERENT caller of the same *attributed* set —
-    it bypasses this function rather than this function growing a condition
-    to widen through.
-    """
-    return [
-        (record, attribution)
-        for record, attribution in attributed
-        if attribution["group"] == group_name
-    ]
-
-
-def _session_payload(record, *, group: str | None, account: str | None) -> dict:
-    """One :class:`SessionRecord` as JSON-ready data — normalized fields only.
-
-    The seam already drops harness-native fields beyond the normalized set; this
-    keeps camp from re-widening the surface it just narrowed.
-
-    ``ok`` is ``True`` on every row this function builds. It exists so a
-    machine-readable consumer can tell a session row from a partial-failure
-    row (see :func:`_store_failure_payload`) with ONE field test, on every row
-    in the list, rather than by the row's shape or the absence of a key.
-
-    ``group`` and ``account`` come from :func:`_attribute_session`, resolved
-    from ``record.cwd`` — not from which credential store's enumeration
-    produced this record, which can differ from the group the session's
-    working directory actually belongs to.
-    """
-    return {
-        "ok": True,
-        "session_id": record.session_id,
-        "cwd": str(record.cwd),
-        "kind": record.kind,
-        "controllable": record.controllable,
-        "name": record.name,
-        "pid": record.pid,
-        "started_at": record.started_at.isoformat() if record.started_at else None,
-        "group": group,
-        "account": account,
-    }
-
-
-def _store_failure_payload(failure: dict) -> dict:
-    """One unreadable-store entry as JSON-ready data.
-
-    ``ok`` is ``False`` — the same field :func:`_session_payload` sets ``True``
-    on every session row, so a consumer tests one field to sort a mixed list
-    into rows it can use and rows it cannot. The row carries only what a
-    failed enumeration actually knows: which account it was asking about, and
-    why the answer never came back. It invents no session attribution — no
-    ``cwd``, no ``pid`` — because none was ever read.
-    """
-    return {"ok": False, "account": failure["account"], "reason": failure["reason"]}
-
-
-def _group_config_failure_payload(detail: str) -> dict:
-    """One unparsable-group-config entry as JSON-ready data.
-
-    ``ok`` is ``False`` — the same discriminator :func:`_store_failure_payload`
-    carries for a store that failed to answer, one level down. *detail* is
-    the same ``camp <verb>: <detail> — skipping`` text already printed to
-    stderr by :func:`~camp.provision.lifecycle.answerable_groups_or_refuse`
-    (naming the config file, since a config that failed to parse has no
-    reliable group name to attribute instead). No ``account`` — this group
-    never got far enough to declare one.
-    """
-    return {"ok": False, "group": None, "reason": detail}
-
-
-def _enumerate_live_sessions_pool(
-    scope: Path | None,
-    *,
-    env: dict[str, str] | None,
-    groups: list[dict],
-) -> tuple[list, list[dict], int]:
-    """Enumerate live sessions once per (harness, credential store) candidate.
-
-    A reference addresses a SESSION, not a group, and a session can be running
-    under any account any configured group declares — not only the account the
-    invoking group happens to bind. So this asks every candidate in
-    :func:`_addressable_harnesses`'s pool, scoped by *scope*, EACH UNDER ITS
-    OWN store's environment (``store.env``, never the caller's ambient one),
-    and merges what comes back. This is what makes a session launched under a
-    non-default credential store visible from a shell bound to the default
-    one.
-
-    Returns ``(records, failures, stores_total)``:
-
-    * ``records`` — every live :class:`~trailhead.harness.base.SessionRecord`
-      across every store that answered, in pool order.
-    * ``failures`` — one ``{"account": ..., "reason": ...}`` entry per store
-      whose enumeration could not be completed: an exception, a non-zero
-      exit, a missing enumeration concept, or the per-call timeout expiring
-      (:data:`camp.launch.session._ENUMERATE_TIMEOUT_SECONDS` bounds each
-      store in turn, so a hanging store degrades exactly like a failing one
-      rather than blocking the others). Never a silent omission — a store
-      that could not be read always contributes exactly one entry here.
-    * ``stores_total`` — how many candidates were queried. ``0`` means the
-      pool itself was empty (no configured group's harness could be named at
-      all); the caller's degrade for THAT case is unchanged from before this
-      merge existed. A caller distinguishes "every store failed" from "no
-      store was addressable" by comparing ``len(failures)`` to
-      ``stores_total``, not by ``stores_total`` alone.
-
-    Each store is asked exactly once — the pool is already deduplicated by
-    (harness, account) in :func:`_addressable_harnesses`, and this walks it
-    once, so no store is ever enumerated twice.
-
-    *groups* is supplied by the caller rather than loaded here, and is the SAME
-    list the caller attributes the returned records against — one load per
-    invocation, so the pool and the attribution can never be built from two
-    different readings of the config directory. It also lets a caller pass a
-    list that has already degraded (the `--all-groups` seam skips an unparsable
-    sibling BY NAME before calling), which a load performed in here would have
-    no way to report.
-    """
-    from ..launch.session import enumerate_records
-
-    resolved_env = dict(env) if env is not None else dict(os.environ)
-    stores = _addressable_harnesses(groups, env=resolved_env)
-
-    records: list = []
-    failures: list[dict] = []
-    for store in stores:
-        try:
-            rows = enumerate_records(store, scope, store.env)
-        except Exception:  # noqa: BLE001 — a store camp cannot read degrades, not fails
-            rows = None
-        if rows is None:
-            failures.append(
-                {
-                    "account": store.account,
-                    "reason": "sessions could not be enumerated for this credential store",
-                }
-            )
-            continue
-        records.extend(rows)
-    return records, failures, len(stores)
-
-
-def _list_recoverable(
-    scope: Path | None,
-    *,
-    env: dict[str, str] | None,
-    as_json: bool,
-    limit: int | None,
-    where: str,
-) -> None:
-    """Print the DEAD sessions in *scope* — enumerated transcripts minus the live set.
-
-    BOTH HALVES OF THE SUBTRACTION ARE SCOPED BY THE SAME ARGUMENT. *scope* goes
-    to the transcript enumeration and to the live enumeration unchanged, and the
-    seam defines both as "cwd equal to or under this path, on resolved paths".
-    Scoping one half and not the other would report live sessions as recoverable
-    — the one answer this listing must never give.
-
-    The pool spans every harness camp can name, not just the invoking group's:
-    what is recoverable is a property of the sessions that exist, and standing
-    in one group does not make another group's dead sessions disappear.
-
-    Three outcomes, deliberately distinct on the operator's terminal:
-
-    * NO harness keeps transcripts camp can read → a REFUSAL naming them. This is
-      the one non-degrading path on a question verb, because the answer is "camp
-      cannot do this here", not "nothing is recoverable", and an operator who
-      reads the second for the first stops looking for their session.
-    * The live set is UNDETERMINABLE → the live listing's own notice and an empty
-      list, exit 0. The unsubtracted pool is never printed: every row in it might
-      be a session running right now.
-    * Nothing is recoverable → an explicit line saying so, worded so it cannot be
-      mistaken for the refusal above.
-
-    Rows go to stdout and every notice to stderr, so a caller parsing stdout gets
-    rows and nothing else — including the empty JSON list, which is an answer.
-    """
-    from ..group.config import load_all_groups
-    from ..launch.recovery import recoverable_candidates
-    from ..launch.session import enumerate_records
-    from ..spine import _die
-    from .common import _groups_dir
-
-    resolved_env = dict(env) if env is not None else dict(os.environ)
-    groups = load_all_groups(_groups_dir())
-    harnesses = _addressable_harnesses(groups, env=resolved_env)
-    if not harnesses:
-        _die(
-            "camp sessions: camp cannot name a harness for any configured group, "
-            "so it cannot tell which sessions are recoverable"
-        )
-
-    transcripts: list = []
-    live: list = []
-    answered: list = []
-    live_known = True
-    for harness in harnesses:
-        store_env = getattr(harness, "env", resolved_env)
-        try:
-            rows = harness.session_transcripts(scope, env=store_env)
-        except Exception:  # noqa: BLE001 — a harness camp cannot read contributes nothing
-            rows = None
-        if rows is None:
-            continue
-        answered.append(harness)
-        transcripts.extend(rows)
-        try:
-            records = enumerate_records(harness, scope, store_env)
-        except Exception:  # noqa: BLE001 — an unanswerable probe is undeterminable, not empty
-            records = None
-        if records is None:
-            live_known = False
-        else:
-            live.extend(records)
-
-    if not answered:
-        names = ", ".join(_harness_display_name(harness) for harness in harnesses)
-        _die(
-            f"camp sessions: harness {names} keeps no session transcripts camp can "
-            "read, so camp cannot tell which of its sessions are recoverable"
-        )
-
-    candidates: tuple = ()
-    if live_known:
-        candidates = recoverable_candidates(
-            transcripts=transcripts,
-            live_records=live,
-            groups=groups,
-            env=resolved_env,
-        )
-
-    shown = candidates if limit is None else candidates[:limit]
-    _print_candidates(shown, as_json=as_json)
-
-    if not live_known:
-        print(
-            f"camp sessions: could not determine the live sessions{where} — "
-            "reporting none",
-            file=sys.stderr,
-        )
-    elif not candidates:
-        print(f"camp sessions: no recoverable sessions{where}", file=sys.stderr)
-    elif len(shown) < len(candidates):
-        print(
-            f"camp sessions: showing the {len(shown)} newest of {len(candidates)} "
-            f"recoverable sessions{where} — re-run with --limit <n> or --all "
-            "for the rest",
-            file=sys.stderr,
-        )
-
-
-def local_sessions_parser() -> CampParser:
-    """The parser for a LOCAL `camp sessions` — every option the verb offers.
-
-    ``--group`` rides along from the router; the rest are the verb's own. The
-    widened form below declares the same options so that each one can be refused
-    in its own words, rather than reaching the generic unknown-flag refusal that
-    would not say WHY the option stops meaning anything once the machine axis
-    widens.
-    """
-    parser = group_verb_parser("sessions")
-    parser.add_argument("--json", action="store_true")
-    parser.add_argument("--recoverable", action="store_true")
-    parser.add_argument("--all", action="store_true")
-    parser.add_argument("--dir", metavar="PATH")
-    parser.add_argument("--limit", metavar="COUNT")
-    parser.add_argument("--name", metavar="SLUG")
-    parser.add_argument("slug", nargs="?")
-    return parser
-
-
-def widened_sessions_parser() -> CampParser:
-    """The parser for a `camp sessions` whose machine axis has been widened.
-
-    Deliberately the SAME declaration as the local form: the options below are
-    not accepted here, but they must still PARSE here so that
-    `refuse_sessions_local_only_options` can refuse each one by name. A parser
-    that simply omitted them would answer every one with "unknown flag", which
-    is untrue — they are camp's options, they just have no meaning once the
-    question is asked of more than this machine.
-    """
-    return local_sessions_parser()
-
-
-def refuse_sessions_local_only_options(parsed, *, widening_flag: str) -> None:
-    """Refuse the five `camp sessions` options that narrow or reshape the
-    LOCAL question — meaningless once *widening_flag* (``--host`` or
-    ``--all-hosts``) has widened the machine axis to a remote or merged
-    answer: ``--recoverable``, ``--all``, ``--dir``, ``--limit``, and a
-    positional workspace slug.
-
-    Takes the namespace `widened_sessions_parser` produced, so the set of
-    options refused here is exactly the set that parser declares — the two
-    cannot drift into refusing something nothing accepts, or accepting
-    something nothing refuses.
-
-    Shared by `_cmd_sessions_host_cli` (``--host``) and the `-a`/
-    ``--all-hosts`` wiring in `cli/dispatch.py`, so both widening forms
-    refuse alike rather than one silently dropping what the other refuses.
-    """
-    from ..spine import _die
-
-    if parsed.recoverable:
-        _die(
-            f"camp sessions: --recoverable has no meaning with {widening_flag} "
-            "— a widened machine is always asked for its own live sessions"
-        )
-    if parsed.all:
-        _die(
-            "camp sessions: --all only widens --recoverable, which has no "
-            f"meaning with {widening_flag}"
-        )
-    if parsed.dir is not None:
-        _die(
-            f"camp sessions: --dir has no meaning with {widening_flag} — a "
-            "widened machine answers for every one of its own groups, not a "
-            "local directory"
-        )
-    if parsed.limit is not None:
-        _die(
-            "camp sessions: --limit only widens --recoverable, which has no "
-            f"meaning with {widening_flag}"
-        )
-    named_slug = _named_slug(parsed)
-    if named_slug is not None:
-        _die(
-            f"camp sessions: {widening_flag} widens the machine axis — a "
-            f"workspace slug ({named_slug!r}) has no meaning alongside it"
-        )
-
-
-def _cmd_sessions_host_cli(
-    args: list[str], host: "Host", host_name: str, *, connect_timeout: float | None = None
-) -> None:
-    """camp sessions --host <name> [--json] — every group's live sessions on
-    one declared remote machine, relayed through the SSH transport.
-
-    ``connect_timeout`` is the operator's resolved value
-    (`camp.host.config.connect_timeout_seconds()`, read once by `main()`'s
-    ``--host`` handling and passed down); ``None`` (a direct call with no
-    caller-supplied value) falls back to the transport's own documented
-    default.
-
-    Reached ONLY from ``cli/dispatch.py``'s ``--host`` handling in
-    ``_dispatch_host_command``, after the name has resolved to a declared
-    `Host` — the same shape ``_cmd_ls_host_cli`` is reached in for `list`.
-    The far side is ALWAYS invoked with the all-groups + ``--json`` form, the
-    same shape `_cmd_ls_host_cli` uses, so a remote answer always spans that
-    machine's groups.
-
-    Every other existing `sessions` option (``--group`` is already refused
-    together with ``--host`` upstream in `main()`; ``--recoverable``,
-    ``--all``, ``--dir``, ``--limit``, and a positional workspace slug are
-    refused HERE) narrows or reshapes the LOCAL question in a way that has no
-    meaning for "every group on that host" — narrowing to one directory, one
-    workspace, or the recoverable/dead listing all assume a single machine's
-    own state. Refusing rather than silently dropping them mirrors the
-    ``--all-groups``/``--group`` and ``--host``/``--group`` refusals already
-    beside this one.
-
-    Delegates everything downstream of "what argv to send" and "how to print
-    an ok row" to :func:`camp.host.relay.relay_all_groups` — the shared seam
-    every `--host` verb dispatches through. `_render_human_rows` below
-    renders each row through :func:`render_session_row_human`, the shared
-    per-row renderer, and never through the local `--all-groups` listing:
-    that one sorts its rows by group (see `_cmd_sessions_group_cli`'s
-    `all_groups` branch), and re-sorting is exactly what the design requires
-    a relayed answer never do.
-    """
-    from ..host.relay import relay_all_groups
-    from ..host.transport import DEFAULT_CONNECT_TIMEOUT_SECONDS
-
-    if connect_timeout is None:
-        connect_timeout = DEFAULT_CONNECT_TIMEOUT_SECONDS
-
-    parsed = widened_sessions_parser().parse_args(args)
-    as_json = parsed.json
-
-    refuse_sessions_local_only_options(parsed, widening_flag="--host")
-
-    def _render_human_rows(rows: list[dict]) -> None:
-        for row in rows:
-            if not row.get("ok"):
-                continue
-            # Version skew across the operator's two machines is the
-            # expected steady state for this feature, not an edge case — a
-            # remote camp of a different version can answer with a row that
-            # omits a key this rendering depends on. Degrade that ONE row
-            # rather than let it take the whole answer down; the well-formed
-            # rows around it still print.
-            try:
-                rendered = render_session_row_human(row)
-            except KeyError as e:
-                print(
-                    f"camp sessions: host {host_name!r} sent a session row "
-                    f"missing {e.args[0]!r} — skipping",
-                    file=sys.stderr,
-                )
-                continue
-            print(rendered)
-
-    relay_all_groups(
-        "sessions",
-        host,
-        host_name,
-        ["sessions", "--all-groups", "--json"],
-        as_json=as_json,
-        render_human_rows=_render_human_rows,
-        connect_timeout=connect_timeout,
-    )
-
-
-def _cmd_sessions_group_cli(
-    args: list[str],
-    group: dict | None,
-    env: dict[str, str] | None,
-    *,
-    all_groups: bool = False,
-) -> None:
-    """camp sessions [<slug>] [--dir <path>] [--recoverable [--limit <n>|--all]] [--json].
-
-    `all_groups=True` is the `--all-groups`/`-g` seam: reached only from
-    ``cli/dispatch.py``'s early handling of that option, with `group=None`
-    (there is no single resolved group to narrow by — `--all-groups` and
-    `--group` are refused together before this function is ever called). A
-    `--dir` scope still works unchanged (it never depended on `group`); with
-    no `--dir` and no positional slug it skips the cwd-relative slug
-    resolution `group` would otherwise be needed for and leaves `scope` (and
-    therefore the narrowing below) at `None` — the whole cross-store pool.
-
-    Under `all_groups=True`, group configs are loaded once through
-    :func:`~camp.provision.lifecycle.answerable_groups_or_refuse`, which degrades a
-    config camp cannot parse instead of failing the whole answer: one broken
-    sibling is skipped BY NAME on stderr while every other group still
-    answers, exit 0. Every group unparsable is a refusal (nonzero exit, a
-    stated reason) — never an answer that reads as "nothing configured". No
-    groups configured at all states that on stderr and answers with an empty
-    list, exit 0; it never falls through to the legacy standalone-worktree
-    source (that fallback belongs to `spine.main`'s no-group `cmd_ls`, which
-    `--all-groups` never reaches).
-
-    Two listings behind one verb, over the same scope. The LIVE listing answers
-    what is running; `--recoverable` answers what is dead and could be brought
-    back. Scope is the workspace when a slug is given or resolves from cwd, the
-    directory named by `--dir`, and everything otherwise — and it reaches both
-    listings by the same argument, so the subtraction that produces the
-    recoverable rows covers the same set on both sides.
-
-    `--dir` is NOT gated by the credential floor. The floor fences rooting a
-    window, not looking, and a listing that refused to describe a directory
-    would tell the operator nothing they could not learn by looking at it. The path need not
-    exist either: a torn-down root is precisely the scope a recovery listing is
-    asked about.
-
-    Always exits 0 with ONE exception each side of the split (plus, under
-    `all_groups=True`, every configured group failing to parse — see above).
-    This is a question, so "I could not tell" degrades to a stderr notice plus
-    an empty list rather than a failure a script has to special-case — but
-    malformed input (a `--limit` that cannot mean anything) and a harness that
-    keeps no transcripts at all are refusals, because neither has an empty
-    listing as its honest answer.
-
-    The LIVE listing's pool spans every configured group's store (see
-    :func:`_enumerate_live_sessions_pool`), so a BARE group-named query — no
-    `--dir`, no resolved workspace slug, i.e. `scope is None` — narrows that
-    cross-group answer to *group*'s own rows via :func:`_sessions_for_group`,
-    applied to every store's records ALREADY attributed by
-    :func:`_attribute_session`. A `--dir` or slug scope has already narrowed
-    the pool by PATH before this point (`_enumerate_live_sessions_pool` is
-    itself called with that scope), so this filter is not applied again on
-    top of it: a `--dir` scope answers about a directory, not a group, and is
-    not eligibility-gated by group membership either (see above) — narrowing
-    it further by group name would silently drop a session `--dir` was asked
-    to describe. A store-failure row carries no `cwd` and so no group; it is
-    never filtered by group name and is always included, because a group-named
-    answer must still tell the operator a store failed rather than silently
-    reading as complete.
-    """
-    from ..group.manifest import workspace_dir
-    from ..spine import _die
-    from .dispatch import _slug_from_name_or_cwd
-
-    # `--group` is declared and ignored: it was already resolved upstream to
-    # select `group`, and the resolved name (`group["group"]["name"]`) is what
-    # the live listing filters by below, never this raw flag value.
-    parsed = local_sessions_parser().parse_args(args)
-    as_json = parsed.json
-    recoverable = parsed.recoverable
-    show_all = parsed.all
-    directory = parsed.dir
-    limit_raw = parsed.limit
-
-    named_slug = _named_slug(parsed)
-
-    if not recoverable and (show_all or limit_raw is not None):
-        _die(
-            "camp sessions: --limit and --all widen the --recoverable listing; "
-            "the live listing is not capped, so there is nothing for them to widen"
-        )
-    if show_all and limit_raw is not None:
-        _die(
-            "camp sessions: --limit and --all are mutually exclusive — a listing "
-            "is capped at a count or not capped at all, never both"
-        )
-
-    limit = _RECOVERABLE_DEFAULT_LIMIT
-    if limit_raw is not None:
-        try:
-            limit = int(limit_raw)
-        except ValueError:
-            _die(f"camp sessions: --limit expects a whole number, not {limit_raw!r}")
-        if limit < 1:
-            _die(f"camp sessions: --limit expects a count of at least 1, not {limit}")
-
-    slug: str | None = None
-    scope: Path | None = None
-    if directory is not None:
-        if not directory.strip():
-            _die("camp sessions: --dir requires a directory path")
-        if named_slug is not None:
-            _die(
-                "camp sessions: --dir and a workspace slug are mutually exclusive "
-                "— a listing is scoped to a named directory or to a workspace, "
-                "never both"
-            )
-        # Non-strict: a directory that no longer exists is a scope worth asking
-        # about, and is the whole reason the recoverable listing marks rows
-        # root-missing rather than hiding them.
-        scope = Path(directory).expanduser().resolve()
-    elif all_groups:
-        # A leftover positional here is a workspace slug --all-groups never
-        # consumes (unlike the narrow path just below) — the same
-        # narrow-vs-widen contradiction `cli/dispatch.py` refuses for
-        # `--group` alongside `--all-groups`, refused here before a group is
-        # loaded or a store is read (both happen further down this function).
-        if named_slug is not None:
-            _die(
-                "camp sessions: --all-groups and a workspace slug name every "
-                "group and one workspace at once — pass one or the other"
-            )
-    else:
-        slug = _slug_from_name_or_cwd(
-            group,
-            verb="sessions",
-            name=parsed.name,
-            positional=parsed.slug,
-            allow_none=True,
-            env=env,
-        )
-        if slug:
-            scope = workspace_dir(group["group"]["name"], slug, env=env)
-            try:
-                # A symlinked workspace dir must scope enumeration by the same
-                # resolved path a live session is rooted under, or a
-                # slug-scoped query never finds it.
-                scope = scope.resolve(strict=True)
-            except OSError:
-                pass
-
-    if recoverable:
-        if slug:
-            where = f" in workspace {slug!r}"
-        elif directory is not None:
-            where = f" under {scope}"
-        else:
-            where = ""
-        _list_recoverable(
-            scope,
-            env=env,
-            as_json=as_json,
-            limit=None if show_all else limit,
-            where=where,
-        )
-        return
-
-    # NOT read on the `recoverable` path above (it returns before this
-    # point): `_list_recoverable` answers from its own strict
-    # `load_all_groups` rather than this degraded loader, so running this
-    # here for `--recoverable` would print a "— skipping" notice promising
-    # every other group still answers, immediately followed by
-    # `_list_recoverable` refusing outright on that very same broken
-    # config — a promise and its own contradiction in the same invocation.
-    def _described() -> str:
-        if slug:
-            return f"workspace {slug!r}"
-        if directory is not None:
-            return f"directory {str(scope)!r}"
-        if all_groups:
-            return "every configured group"
-        return f"group {group['group']['name']!r}"
-
-    rows, notices, exit_code = _sessions_live_answer(
-        scope, env=env, all_groups=all_groups, group=group, described=_described()
-    )
-    for notice in notices:
-        print(notice, file=sys.stderr)
-    if exit_code != 0:
-        sys.exit(exit_code)
-
-    if as_json:
-        print(json.dumps(rows))
-        return
-
-    for row in rows:
-        if not row.get("ok", True):
-            continue
-        print(render_session_row_human(row))
-
-
-def render_session_row_human(row: dict) -> str:
-    """One answered `camp sessions` row, human-rendered — the
-    ``session_id  kind  cwd (name)`` line, from a JSON-shaped row rather
-    than a `SessionRecord`.
-
-    The one place a local, relayed, or merged `camp sessions` row is turned
-    into its human line: `_cmd_sessions_group_cli`, `_cmd_sessions_host_cli`'s
-    `--host` callback, and the `-a`/`--all-hosts` merged renderer in
-    `cli/dispatch.py` all print through it. Raises `KeyError` on a row
-    missing a key it needs, so a caller can degrade that one row.
-    """
-    from ..launch.recovery import printable_path
-
-    label = f" ({printable_path(row['name'])})" if row.get("name") else ""
-    return (
-        f"{printable_path(row['session_id'])}  {printable_path(row['kind'])}  "
-        f"{printable_path(row['cwd'])}{label}"
-    )
-
-
-def local_sessions_answer(
-    group: dict | None, *, all_groups: bool
-) -> tuple[list[dict], list[str], int]:
-    """The value-returning local answer for `camp sessions`, reused by the
-    `-a`/`--all-hosts` wiring in `cli/dispatch.py`. `_sessions_live_answer`
-    already never prints or exits, so this is a thin wrapper supplying the
-    `scope=None` (the whole cross-store pool, exactly the `--all-groups`
-    scope already uses) and the `described` text `_cmd_sessions_group_cli`
-    would have computed itself for the same inputs.
-    """
-    described = (
-        "every configured group"
-        if all_groups
-        else f"group {group['group']['name']!r}"
-    )
-    return _sessions_live_answer(
-        None, env=None, all_groups=all_groups, group=group, described=described
-    )
-
-
-def _sessions_live_answer(
-    scope: Path | None,
-    *,
-    env: dict[str, str] | None,
-    all_groups: bool,
-    group: dict | None,
-    described: str,
-) -> tuple[list[dict], list[str], int]:
-    """The value-returning half of `camp sessions`' LIVE listing (never the
-    `--recoverable` listing, which stays its own answer through
-    `_list_recoverable`).
-
-    Enumerates every store's live sessions and returns ``(rows, notices,
-    exit_code)`` — never prints, never calls ``sys.exit``.
-    `_cmd_sessions_group_cli` is the renderer for BOTH the single-group and
-    the `--all-groups` entry points: it calls this, prints each notice to
-    stderr in order, prints the rows (`--json` or human), and exits with the
-    returned code.
-
-    *rows* is exactly the JSON-shaped payload `--json` already prints today
-    — one `_session_payload` dict per live session, then one
-    `_store_failure_payload` per credential store that failed to answer,
-    then one `_group_config_failure_payload` per unparsable sibling under
-    `--all-groups`, in that order.
-
-    *notices* carries every stderr line the printed form emits for this
-    listing, in the same order, INCLUDING `_addressable_harnesses`'s own
-    per-group credential-store-binding notice. That helper still prints it
-    directly by default (its `on_drop=None` posture stays unchanged — its
-    other callers, and the shipped unit test double standing in for
-    `_enumerate_live_sessions_pool`, both depend on that signature staying
-    as-is), so this function captures it with a temporary `sys.stderr`
-    redirect around the one call that can reach it, rather than threading a
-    new `on_drop` parameter through `_enumerate_live_sessions_pool`.
-
-    *exit_code* is 0 on every path except two refusals, each returned as a
-    ``1`` rather than raised: every credential store failed, and (under
-    `all_groups=True`) every configured group's TOML failed to parse. The
-    group-config refusal is reached through
-    :func:`~camp.provision.lifecycle.load_answerable_groups` — the
-    value-returning sibling of
-    :func:`~camp.provision.lifecycle.answerable_groups_or_refuse`, never that
-    helper — with its two notices turned into returned data here, so this
-    function never exits the process on that path either.
-
-    *described* is the caller's already-computed `_described()` text — this
-    function has no `slug`/`directory` of its own, only the *scope* they
-    already resolved to.
-    """
-    import io
-    from contextlib import redirect_stderr
-
-    notices: list[str] = []
-
-    all_groups_configs: list[dict] | None = None
-    all_groups_unparsable: list[str] = []
-    all_groups_no_groups_configured = False
-    if all_groups:
-        from ..provision.lifecycle import load_answerable_groups
-        from .common import _groups_dir
-
-        all_groups_configs, all_groups_unparsable = load_answerable_groups(_groups_dir())
-        for detail in all_groups_unparsable:
-            notices.append(f"camp sessions: {detail} — skipping")
-        if not all_groups_configs and all_groups_unparsable:
-            notices.append(
-                "camp sessions: could not answer for any configured group — "
-                "every group config failed to parse; fix a config above and re-run"
-            )
-            return [], notices, 1
-        all_groups_no_groups_configured = not all_groups_configs
-
-    # ONE reading of the config directory per invocation, shared by the
-    # enumeration pool below and by the attribution that pairs each returned
-    # record with a group: two loads could disagree about which groups exist,
-    # and a row would then be attributed against a different set than the pool
-    # that produced it.
-    if all_groups:
-        session_groups = all_groups_configs or []
-    else:
-        from ..group.config import load_all_groups
-        from .common import _groups_dir
-
-        session_groups = load_all_groups(_groups_dir())
-
-    already_notified_unanswerable = False
-    if all_groups_no_groups_configured:
-        notices.append("camp sessions: no groups configured — nothing to answer for")
-        records, failures = [], []
-    else:
-        capture = io.StringIO()
-        with redirect_stderr(capture):
-            records, failures, stores_total = _enumerate_live_sessions_pool(
-                scope, env=env, groups=session_groups
-            )
-        notices.extend(line for line in capture.getvalue().splitlines() if line)
-
-        if stores_total == 0:
-            notices.append(
-                f"camp sessions: could not determine the live sessions for {described} — "
-                "reporting none"
-            )
-            records = []
-            failures = []
-            already_notified_unanswerable = True
-        elif failures and len(failures) == stores_total:
-            accounts = ", ".join(_account_label(failure["account"]) for failure in failures)
-            notices.append(
-                f"camp sessions: could not enumerate live sessions for {described} — "
-                f"every credential store failed ({accounts}) — check each store's "
-                "credentials and re-run"
-            )
-            return [], notices, 1
-        else:
-            for failure in failures:
-                notices.append(
-                    "camp sessions: could not enumerate sessions for "
-                    f"{_account_label(failure['account'])}"
-                )
-
-    resolved_env = dict(env) if env is not None else dict(os.environ)
-    attributed = [
-        (record, _attribute_session(record.cwd, session_groups, env=resolved_env))
-        for record in records
-    ]
-    if scope is None:
-        if all_groups:
-            # Widened rather than narrowed: every store's rows, ordered by
-            # group so the merged answer is stable across invocations. A
-            # stable sort keeps each group's OWN rows in the enumeration
-            # order _enumerate_live_sessions_pool already produced them in.
-            attributed = sorted(attributed, key=lambda pair: pair[1]["group"] or "")
-        else:
-            attributed = _sessions_for_group(attributed, group["group"]["name"])
-            if not already_notified_unanswerable:
-                from ..launch.profile import StoreBindingError, harness_store_for
-
-                try:
-                    group_store_unaddressable = (
-                        harness_store_for(group, env=resolved_env) is None
-                    )
-                except StoreBindingError:
-                    group_store_unaddressable = True
-
-                if group_store_unaddressable:
-                    # This group's own credential store never entered the
-                    # pool at all — distinct from the pool answering with
-                    # zero rows for it, which is a legitimate empty listing.
-                    # An operator reading silence here as "nothing running"
-                    # is exactly the confident-wrong-answer this listing
-                    # exists to avoid.
-                    notices.append(
-                        f"camp sessions: could not determine the live sessions for "
-                        f"{described} — reporting none"
-                    )
-
-    rows = [_session_payload(record, **attribution) for record, attribution in attributed]
-    rows += [_store_failure_payload(failure) for failure in failures]
-    rows += [_group_config_failure_payload(detail) for detail in all_groups_unparsable]
-    return rows, notices, 0
-
-
 # ---------------------------------------------------------------------------
-# camp kill — stop one addressed session
+# camp attach's door — creates, connects, or resurrects the workspace
+# _resolve_group_for_attach resolved a slug against, then hands the terminal
+# over. Shared by _cmd_attach_cli below and camp new's own door dispatch
+# (cli/group.py's _door_dispatch_for_new).
 # ---------------------------------------------------------------------------
-
-def _report_stop(candidate, *, outcome: str, as_json: bool) -> None:
-    """The success report for a stop — one dict literal, one row shape.
-
-    ``outcome`` is what tells the two SUCCESSES apart. Both exit 0, so an exit
-    code cannot carry the difference, and a caller that has to know whether it
-    reclaimed anything reads it here rather than parsing prose off stderr.
-    """
-    if as_json:
-        print(
-            json.dumps(
-                {
-                    "session_id": candidate.session_id,
-                    "tmux_name": candidate.derived_name,
-                    "outcome": outcome,
-                }
-            )
-        )
-        return
-    print(candidate.session_id)
-
-
-def _stop_refusal(candidate, reason: str) -> str:
-    """The one `camp kill: …` line for a refusal, chosen by *reason*.
-
-    Every reason gets its own sentence because the operator's next move differs
-    for each, and a shared "camp will not stop this" would leave them with
-    nothing to act on. The two that are easiest to collapse are deliberately
-    apart: a session that is live while owning no tmux session has nothing for
-    camp to signal at all, while a foreign pane holding the name has something
-    running that camp did not start — the first is a session to investigate,
-    the second is a name to investigate.
-    """
-    from ..launch.stop import (
-        REFUSED_ANCHOR,
-        REFUSED_LIVE_WITHOUT_SESSION,
-        REFUSED_NOT_CAMP_LAUNCHED,
-        REFUSED_SELF,
-        REFUSED_TMUX_UNANSWERED,
-    )
-
-    session_id = candidate.session_id
-    name = candidate.derived_name
-    if reason == REFUSED_ANCHOR:
-        return (
-            f"camp kill: session {session_id} is the concierge anchor — stopping it "
-            "would take away the entry point every other session is started from"
-        )
-    if reason == REFUSED_SELF:
-        return (
-            f"camp kill: session {session_id} is the session camp is running in — a "
-            "session cannot stop itself; run this from another session"
-        )
-    if reason == REFUSED_LIVE_WITHOUT_SESSION:
-        return (
-            f"camp kill: session {session_id} is still running but owns no tmux "
-            f"session named {name}, so there is nothing here for camp to signal — "
-            "its memory cannot be reclaimed by stopping a session that is not there"
-        )
-    if reason == REFUSED_NOT_CAMP_LAUNCHED:
-        return (
-            f"camp kill: the tmux session {name} is held by a pane camp did not "
-            "launch, so camp will not signal it — a name match is not proof of "
-            "ownership"
-        )
-    if reason == REFUSED_TMUX_UNANSWERED:
-        return (
-            f"camp kill: tmux did not answer, so camp cannot tell whether session "
-            f"{session_id} was stopped — assume its memory was not reclaimed and "
-            "re-run once tmux responds"
-        )
-    return f"camp kill: camp will not stop session {session_id}"
-
-
-def _cmd_kill_cli(args: list[str], env: dict[str, str] | None = None) -> None:
-    """camp kill <ref> [--json].
-
-    Stop ONE session and reclaim its memory, leaving its workspace, worktree,
-    and working tree completely untouched — nothing is removed, cleaned, or
-    marked, and camp persists nothing.
-
-    Fully groupless: the reference names the
-    session and the session names everything else, so this answers from a plain
-    shell outside every group directory. It is also the verb an operator reaches
-    for when something is already broken, so the group configs are read
-    tolerantly rather than aborting the verb: a group camp cannot parse is
-    skipped, and its workspaces lose the slug component of their derived name.
-    That is a real cost, not a free one — a session whose name camp can no
-    longer derive is a session this verb can no longer address — but it is
-    borne by the unparsable group alone, and the alternative is a sibling
-    group's broken toml taking down the surface that reclaims memory.
-
-    All of the decision-making — resolution, the ownership check, the anchor and
-    self gates, the already-down oracle, and the re-poll for absence — lives in
-    `camp.launch.stop`. This handler owns the CLI's four jobs: parsing, the
-    stdout/stderr split, the exit code, and the wording.
-
-    Posture: kill is an ACTION verb. Every failure is exactly
-    one `camp kill: …` line on stderr with empty stdout and a non-zero exit —
-    INCLUDING a session still present after the kill, which is a failure and not
-    a success with a caveat: the memory was not reclaimed. The single deliberate
-    exception is an ambiguous ref, which prints its candidates on stdout and
-    exits 2, because there the rows are the answer.
-    """
-    from ..launch.recovery import Ambiguous, NoMatch
-    from ..launch.stop import (
-        POLL_TIMEOUT_ENV,
-        POLL_TIMEOUT_SECONDS,
-        AlreadyDown,
-        Refused,
-        StillPresent,
-        stop_session,
-    )
-    from ..launch.tmux import resolve_budget
-    from ..spine import _die
-
-    # `--group` is declared and ignored: a ref names the session outright, so
-    # no group is needed to resolve one. It stays declared because the router
-    # forwards it, and refusing the router's own flag would be a false error.
-    parser = CampParser(verb="kill")
-    parser.add_argument("--group")
-    parser.add_argument("--json", action="store_true")
-    parser.add_argument("refs", nargs="*")
-    parsed = parser.parse_args(args)
-    as_json = parsed.json
-    rest = parsed.refs
-
-    if not rest:
-        _die(
-            "camp kill: requires a session reference — an unambiguous prefix of a "
-            "session's name or id, as `camp sessions` and `camp attach` "
-            "use"
-        )
-    if len(rest) > 1:
-        _die(
-            f"camp kill: one session reference, not {len(rest)} — a stop addresses "
-            "exactly one session"
-        )
-    ref = rest[0]
-    if not ref.strip():
-        _die("camp kill: requires a session reference")
-    if ref.startswith("-"):
-        _die(
-            f"camp kill: {ref!r} looks like a flag, not a session reference — a "
-            "reference may not start with a dash"
-        )
-
-    resolved_env = dict(env) if env is not None else dict(os.environ)
-    groups = _parsable_groups()
-    transcripts, live, answered, accounts = _session_pool(
-        groups, verb="kill", env=resolved_env, live_required=True
-    )
-
-    outcome = stop_session(
-        ref,
-        # The engine reads no environment of its own, so the override on its
-        # re-poll budget is resolved here, from the env this verb already
-        # resolved, and passed in like any other caller's choice.
-        poll_timeout=resolve_budget(
-            POLL_TIMEOUT_ENV, POLL_TIMEOUT_SECONDS, resolved_env
-        ),
-        # The ownership check asks a harness which pane commands IT composes, so
-        # it needs one harness rather than the pool. Groups sharing a harness
-        # but declaring different accounts are now separate pool entries, so
-        # this picks the first store that answered — the composed commands are
-        # a property of the harness TYPE, not of which account it is bound to,
-        # so any answering store's shapes are the right ones to compare against
-        # on all but a mixed-harness machine, where a foreign harness's session
-        # is REFUSED rather than mis-signalled, the direction this check is
-        # supposed to fail in.
-        harness=answered[0],
-        transcripts=transcripts,
-        live_records=live,
-        groups=groups,
-        env=resolved_env,
-    )
-
-    if isinstance(outcome, (Ambiguous, NoMatch)):
-        _die_unresolved(
-            outcome,
-            ref,
-            verb="kill",
-            harness=answered[0],
-            env=resolved_env,
-            as_json=as_json,
-            accounts=accounts,
-        )
-
-    candidate = outcome.candidate
-
-    if isinstance(outcome, Refused):
-        _die(_stop_refusal(candidate, outcome.reason))
-
-    if isinstance(outcome, StillPresent):
-        _die(
-            f"camp kill: session {candidate.session_id} is still running as "
-            f"{candidate.derived_name} after the stop — its memory was not reclaimed"
-        )
-
-    if isinstance(outcome, AlreadyDown):
-        print(
-            f"camp kill: session {candidate.session_id} ({candidate.derived_name}) "
-            "was already down — nothing to stop",
-            file=sys.stderr,
-        )
-        _report_stop(candidate, outcome="already-down", as_json=as_json)
-        return
-
-    # The reference does not change across a stop: the harness preserves the
-    # session id through a resume, so the transcript, the derived name, and the
-    # ref an operator holds are all stable over arbitrarily many cycles. Saying
-    # so here is what makes a stop read as recoverable rather than final.
-    print(
-        f"camp kill: stopped session {candidate.session_id} "
-        f"({candidate.derived_name}) — its memory is reclaimed; find its "
-        "workspace with `camp sessions --recoverable` and reattach with "
-        "`camp attach <slug>`",
-        file=sys.stderr,
-    )
-    _report_stop(candidate, outcome="stopped", as_json=as_json)
-
-
-#: Exit code for `camp kill --host` when the connection completed and the
-#: invocation then exceeded its bound without answering (`Certainty.UNKNOWN`).
-#: Distinct from 0 (success), from `_AMBIGUOUS_EXIT_CODE` (the reference
-#: matched more than one session), and from every certain-failure exit — the
-#: fixed `1` the six locally-classified transport failures share, or the far
-#: side's own exit code when the transport happens to propagate it — so a
-#: scripted caller can branch on "check before retrying" without parsing
-#: stderr (docs/design/stopping-a-session-on-a-named-machine.md, "Two
-#: reserved exit codes, not one"). Both this and `_AMBIGUOUS_EXIT_CODE` are
-#: RESERVED against pass-through: a remote status landing on either
-#: collapses to 1 rather than being relayed unchanged.
-_KILL_HOST_UNKNOWN_EXIT_CODE = 3
-
-
-def _cmd_kill_host_cli(
-    args: list[str], host: "Host", host_name: str, *, connect_timeout: float | None = None
-) -> None:
-    """camp kill <ref> --host <name> [--json].
-
-    Reached ONLY from `cli/dispatch.py`'s `--host` handling for `kill`.
-    Fully groupless, exactly like the local `_cmd_kill_cli`: the reference
-    names the session and the session names everything else, so `--host`
-    carries the reference and nothing else.
-
-    ``connect_timeout`` is the operator's resolved value
-    (`camp.host.config.connect_timeout_seconds()`, read once by `main()`'s
-    ``--host`` handling and passed down); ``None`` (a direct call with no
-    caller-supplied value) falls back to the transport's own documented
-    default.
-
-    Relays through `camp.host.relay.answer_payload_for_host`, the payload
-    reader that accepts either shape a stop can answer with: one object
-    (stopped, or already down), or the candidate rows an ambiguous
-    reference produces — the same two shapes `camp kill` answers with
-    locally, now carried over the wire.
-
-    `Certainty.HAPPENED` is necessary but not sufficient here: this peer's
-    SSH transport does not propagate the remote command's own exit status
-    (see `camp.host.transport`'s module docstring), so a far side that
-    refused, crashed, or could not resolve camp still classifies as
-    `Answered`/HAPPENED. `answer.obj` / `answer.rows` being `None` is what
-    decides "nothing relayable came back" — never the certainty or the raw
-    exit code alone. Exit status is likewise decided from the payload's own
-    shape (`obj` vs `rows` vs neither) and never from `answer.exit_code`,
-    which the far side controls and does not even reliably reach this side.
-    """
-    from ..host.relay import Certainty, answer_payload_for_host
-    from ..host.transport import DEFAULT_CONNECT_TIMEOUT_SECONDS
-    from ..spine import _die
-
-    if connect_timeout is None:
-        connect_timeout = DEFAULT_CONNECT_TIMEOUT_SECONDS
-
-    parser = CampParser(verb="kill")
-    parser.add_argument("--json", action="store_true")
-    parser.add_argument("refs", nargs="*")
-    parsed = parser.parse_args(args)
-    as_json = parsed.json
-    rest = parsed.refs
-
-    if not rest:
-        _die(
-            "camp kill: requires a session reference — an unambiguous prefix of a "
-            "session's name or id, as `camp sessions` and `camp attach` "
-            "use"
-        )
-    if len(rest) > 1:
-        _die(
-            f"camp kill: one session reference, not {len(rest)} — a stop addresses "
-            "exactly one session"
-        )
-    ref = rest[0]
-    if not ref.strip():
-        _die("camp kill: requires a session reference")
-    if ref.startswith("-"):
-        _die(
-            f"camp kill: {ref!r} looks like a flag, not a session reference — a "
-            "reference may not start with a dash"
-        )
-
-    answer = answer_payload_for_host(
-        "kill", host, host_name, ["kill", ref, "--json"], connect_timeout=connect_timeout,
-    )
-
-    obj = answer.obj
-    # `obj is not None` alone is not sufficient: a differently-versioned
-    # remote, or an error object like `{"ok": false, "reason": "..."}`, is
-    # a JSON object too. Only an object carrying the fields the success
-    # report actually needs — a session id, and an outcome camp recognises
-    # — is a stop's success answer; anything else falls through to the same
-    # certain-failure path an unparsable answer takes, exactly as the
-    # empty-rows case does above.
-    if (
-        obj is not None
-        and obj.get("session_id") is not None
-        and obj.get("outcome") in ("stopped", "already-down")
-    ):
-        from ..launch.recovery import printable_path
-
-        session_id = obj.get("session_id")
-        tmux_name = obj.get("tmux_name")
-        outcome = obj.get("outcome")
-        printable_session_id = printable_path(session_id)
-        printable_tmux_name = printable_path(tmux_name)
-        if outcome == "already-down":
-            print(
-                f"camp kill: session {printable_session_id} ({printable_tmux_name}) "
-                f"on host {host_name!r} was already down — nothing to stop",
-                file=sys.stderr,
-            )
-        else:
-            print(
-                f"camp kill: stopped session {printable_session_id} "
-                f"({printable_tmux_name}) on host {host_name!r} — its memory is "
-                f"reclaimed; find its workspace with `camp sessions --host "
-                f"{host_name}` and reattach with `camp attach --host {host_name} "
-                "<slug>`",
-                file=sys.stderr,
-            )
-        for notice in answer.notices:
-            print(notice, file=sys.stderr)
-        if as_json:
-            payload = dict(answer.obj)
-            payload["host"] = host_name
-            print(json.dumps(payload))
-        else:
-            print(printable_session_id)
-        sys.exit(0)
-
-    if answer.rows:
-        # The rows ARE the answer to what was asked, so — mirroring
-        # `_print_candidates` — they print on stdout before camp's own line,
-        # never suppressed by a non-zero exit. Human mode gets the same
-        # per-candidate rendering `_print_candidates` gives a local
-        # ambiguity; `--json` relays the far side's own row shape verbatim.
-        if as_json:
-            print(json.dumps(answer.rows))
-        else:
-            for row in answer.rows:
-                try:
-                    rendered = _candidate_row_line(row)
-                except KeyError as e:
-                    print(
-                        f"camp kill: host {host_name!r} sent a candidate row "
-                        f"missing {e.args[0]!r} — skipping",
-                        file=sys.stderr,
-                    )
-                    continue
-                print(rendered)
-        print(
-            f"camp kill: {ref!r} matched more than one session on host "
-            f"{host_name!r} — re-run with a longer prefix naming exactly one",
-            file=sys.stderr,
-        )
-        for notice in answer.notices:
-            print(notice, file=sys.stderr)
-        sys.exit(_AMBIGUOUS_EXIT_CODE)
-
-    if answer.certainty == Certainty.UNKNOWN:
-        # The instruction to check comes FIRST, before any explanation, and
-        # reads as an instruction naming the command to run. The fallback —
-        # reach the machine directly — follows it and precedes the
-        # explanation: the machine the check would ask is, by construction,
-        # the one that just stopped answering, so a report naming only the
-        # check hands an operator a loop (design doc, "A retry is the
-        # dangerous move" / "State — the connection drops after the stop
-        # was sent").
-        command = f"camp sessions --host {host_name}"
-        print(
-            f"camp kill: check before retrying — run: {command}",
-            file=sys.stderr,
-        )
-        print(
-            f"camp kill: if that check cannot answer either, reach host "
-            f"{host_name!r} directly and look",
-            file=sys.stderr,
-        )
-        print(
-            f"camp kill: camp does not know whether session {ref!r} was stopped "
-            f"on host {host_name!r} — the connection stopped answering before "
-            "the far side reported back",
-            file=sys.stderr,
-        )
-        for notice in answer.notices:
-            print(notice, file=sys.stderr)
-        if as_json:
-            print(
-                json.dumps(
-                    {
-                        "ok": False,
-                        "host": host_name,
-                        "certainty": answer.certainty.value,
-                        "reason": "connection stopped answering before the far "
-                        "side reported back",
-                    }
-                )
-            )
-        sys.exit(_KILL_HOST_UNKNOWN_EXIT_CODE)
-
-    # A certain failure: either one of the six locally-classified transport
-    # states (host unreachable, no pinned key, ...), a far-side refusal
-    # relayed in its own words, or an answer camp could not parse. Either
-    # way nothing was stopped, and there is nothing to go check — camp's own
-    # sentence leads, unconditionally before the far side's relayed words.
-    print(f"camp kill: no session was stopped on host {host_name!r}", file=sys.stderr)
-    for notice in answer.notices:
-        print(notice, file=sys.stderr)
-
-    if as_json:
-        reason = answer.notices[-1] if answer.notices else "no session was stopped"
-        print(
-            json.dumps(
-                {
-                    "ok": False,
-                    "host": host_name,
-                    "certainty": answer.certainty.value,
-                    "reason": reason,
-                }
-            )
-        )
-
-    # Every certain failure is 1, full stop — never a pass-through of the
-    # remote's own exit code. The status is decided here, from the payload
-    # camp actually parsed: unreachable, unpinned or changed key, refused
-    # credentials, camp not resolvable there, a far-side refusal in its own
-    # words, or an answer camp could not parse are all the same outcome to a
-    # scripted caller. Passing an arbitrary remote code through would also
-    # let a remote camp that happens to exit 2 or 3 for its own reasons
-    # impersonate camp's own reserved "ambiguous" or "unknown" signal.
-    sys.exit(1)
-
-
-# ---------------------------------------------------------------------------
-# camp attach — hand the operator's terminal to a running session
-#
-# Fully groupless, exactly like `camp kill`: the reference names the session,
-# so the local forms below never resolve a group. Two forms never reach these
-# functions at all — `<ref> --host <name>` (`_cmd_attach_host_cli`) and
-# `-a` in either shape (`camp.cli.dispatch._dispatch_attach_all_hosts`) — both
-# are dispatched before `camp.spine`'s fallback is ever reached, per
-# `docs/design/attaching-reaches-a-running-session-on-any-machine.md`.
-# ---------------------------------------------------------------------------
-
-
-def _attach_session_context(
-    env: dict[str, str],
-) -> tuple[list[dict], list, list, "object", "object", str | None, dict[str, str | None]]:
-    """The addressable pool, the ownership seam, this machine's own name, and
-    the accounts each candidate came from — shared setup for every LOCAL
-    `camp attach` form (bare, `<ref>`, `--resolve --json`, `--list --json`).
-    Never used by the `--host` pass-through, which resolves nothing locally
-    by design.
-    """
-    from ..host.config import HostConfigError, self_host_name
-    from ..launch.stop import Tmux
-    from ..spine import _die
-
-    groups = _parsable_groups()
-    # `self_host_name` is a local hosts.toml read with no session pool
-    # involvement, so a malformed `self_name` must refuse here, before the
-    # pool ever asks a harness to enumerate live sessions — otherwise a
-    # config mistake surfaces as a harness-probe failure instead of camp's
-    # own, more actionable refusal naming `self_name`.
-    try:
-        machine = self_host_name(env)
-    except HostConfigError as exc:
-        _die(f"camp attach: {exc}")
-    transcripts, live, answered, accounts = _session_pool(
-        groups, verb="attach", env=env, live_required=True
-    )
-    harness = answered[0]
-    tmux = Tmux()
-    return groups, transcripts, live, harness, tmux, machine, accounts
-
-
-def _attach_resolve_payload(resolution) -> dict:
-    """`resolve_attach_ref`'s answer as JSON — the wire shape `--resolve --json`
-    prints and `camp attach -a` (ref form) parses back. Not a public API: its
-    sole consumer is camp's own `-a` probe, per the design doc's own framing
-    of `--resolve` as "reachable only through a flag that did not exist
-    before … its only consumer is `camp attach -a` itself"."""
-    from ..attach.resolve import Ambiguous, NoMatch, NotRunning, Resolved
-
-    if isinstance(resolution, Resolved):
-        candidate = resolution.candidate
-        return {
-            "ok": True,
-            "session_id": candidate.session_id,
-            "derived_name": candidate.derived_name,
-        }
-    if isinstance(resolution, NotRunning):
-        return {"ok": False, "state": "not_running", "session_id": resolution.candidate.session_id}
-    if isinstance(resolution, Ambiguous):
-        return {
-            "ok": False,
-            "state": "ambiguous",
-            "candidates": [_candidate_payload(c) for c in resolution.candidates],
-        }
-    assert isinstance(resolution, NoMatch)
-    return {"ok": False, "state": "no_match"}
-
-
-def _attach_pool_payload(pool) -> dict:
-    """A local picker pool as JSON — the wire shape `--list --json` prints and
-    the cross-host bare picker (`camp attach -a`, no reference) parses back.
-    Also internal-only, the bare-picker sibling of `_attach_resolve_payload`.
-    """
-    from ..attach.picker import PoolReady
-
-    if isinstance(pool, PoolReady):
-        return {
-            "ok": True,
-            "rows": [
-                {
-                    "session_id": row.candidate.session_id,
-                    "derived_name": row.candidate.derived_name,
-                    "group": row.group,
-                    "slug": row.slug,
-                }
-                for row in pool.rows
-            ],
-        }
-    return {"ok": False, "reason": pool.reason}
 
 
 def _resolve_group_for_attach(
@@ -2026,8 +258,8 @@ def _resolve_group_for_attach(
     resolves to no group, a cwd matching more than one, or a group config
     missing a key `resolve_from_cwd` needs — never raises. A sibling
     group's malformed config, or simply running `camp attach` from
-    somewhere no group claims, must never block an attach; the caller
-    degrades to the pre-existing, groupless behaviour, the same tolerance
+    somewhere no group claims, must never raise out of an attach; the caller
+    refuses with the standard needs-group line instead, the same tolerance
     `_parsable_groups` already applies to this same `groups` list.
     """
     from ..group.resolve import resolve_from_cwd, resolve_group_override
@@ -2235,37 +467,41 @@ def _open_workspace_door(
     hand_over_to_session(tmux, probe.session_name, env=resolved_env)
 
 
+# ---------------------------------------------------------------------------
+# camp attach — hand the operator's terminal to a workspace's session
+#
+# `<slug> --host <name>` (`_cmd_attach_host_cli`) is dispatched before
+# `camp.spine`'s fallback is ever reached — see that function's own
+# docstring. `-a`/`--all-hosts` in any form is refused directly by
+# `camp.cli.dispatch.main`'s `--all-hosts` handling, before a group is ever
+# resolved or this function is ever called.
+# ---------------------------------------------------------------------------
+
+
 def _cmd_attach_cli(args: list[str], env: dict[str, str] | None = None) -> None:
-    """camp attach [<ref>] [--resolve --json] [--list --json].
+    """camp attach [<slug>] [--group <name>].
 
-    The three forms this function itself answers — the numbered picker with
-    no reference, `camp attach <ref>`, and the machine-readable `<ref>
-    --resolve --json` probe sub-mode — all resolve against THIS machine's own
-    pool. `--host` and `-a` are intercepted earlier, in `cli/dispatch.py`,
-    and never reach this function (see the module-section comment above).
+    *<slug>* resolves against one group's own workspaces — `--group` if
+    given, else the group `resolve_from_cwd` finds for the working
+    directory (`_resolve_group_for_attach`, the same resolution `camp stop`
+    uses). No resolvable group refuses with the needs-group line every
+    other group-resolved verb prints, whether or not a slug was given. A
+    slug naming no workspace in the resolved group refuses in the door's
+    own words (`attach.door_target.refusal_message`'s `NotAWorkspace`
+    branch); a slug naming one opens the door
+    (`_open_workspace_door`). With no slug and a terminal, the door's own
+    numbered picker over the group's workspaces runs instead
+    (`attach.door_target.resolve_attach_target`'s bare form).
 
-    Posture matches `camp kill`: every refusal is one `camp attach: …` line on
-    stderr, empty stdout, non-zero exit — except an ambiguous reference, which
-    prints its candidates on stdout and exits 2, the same convention
-    `_die_unresolved` documents for every ref-addressed verb.
+    `--resolve` and `--list` are the two machine-readable probes the
+    retired cross-host picker (`camp attach -a`) used to issue against
+    every declared machine — refused here, before any group is resolved or
+    any workspace listing read, with the same retired-flag line
+    `cli/dispatch.py`'s `-a` handling prints for the flag itself.
     """
-    from ..attach.picker import NothingToOffer, Picked, PoolUnreadable, local_pool, pick_session
-    from ..attach.prefix_warning import warn_if_nested
-    from ..attach.resolve import Ambiguous, NoMatch, NotRunning, Resolved, resolve_attach_ref
-    from ..host.handoff import handoff, local_argv
     from ..spine import _die
+    from ..workspace.verb_taxonomy import needs_group_message
 
-    # `--group` was declared and ignored (a ref names the session outright)
-    # until this task: a workspace slug now takes precedence over the ref
-    # path, and resolving THAT needs a group — so `--group` is read below,
-    # the same way every other group-resolved verb reads it.
-    # `--json` is accepted on the plain `<ref>` form too (no `--resolve`/
-    # `--list`) — deliberately, not an oversight. It changes nothing about
-    # the success path (a handoff has no JSON shape to offer), and its only
-    # effect there is on `_die_unresolved`'s ambiguity listing, which already
-    # supports both a human and a machine-readable rendering for every
-    # ref-addressed verb. Refusing it here would make attach the one verb
-    # that treats a harmless, already-supported flag as an error.
     parser = CampParser(verb="attach")
     parser.add_argument("--group")
     parser.add_argument("--json", action="store_true")
@@ -2273,202 +509,93 @@ def _cmd_attach_cli(args: list[str], env: dict[str, str] | None = None) -> None:
     parser.add_argument("--list", action="store_true")
     parser.add_argument("refs", nargs="*")
     parsed = parser.parse_args(args)
-    as_json = parsed.json
-    resolve_only = parsed.resolve
-    list_only = parsed.list
-    rest = parsed.refs
 
+    if parsed.resolve or parsed.list:
+        # Refused ahead of every other check, including argument-shape
+        # validation below: neither probe is a spelling of an ordinary
+        # attach, and no group needs resolving, no workspace listing needs
+        # reading, and no tmux seam needs touching to answer it.
+        _die(
+            "camp attach: -a is retired — find the workspace with "
+            "'camp list -ag', then 'camp attach <slug> --host <name>'"
+        )
+
+    as_json = parsed.json
+    rest = parsed.refs
     if len(rest) > 1:
         _die(
-            f"camp attach: one session reference, not {len(rest)} — an attach "
-            "addresses exactly one session"
+            f"camp attach: one workspace slug, not {len(rest)} — an attach "
+            "addresses exactly one workspace"
         )
     ref = rest[0] if rest else None
     if ref is not None and not ref.strip():
-        _die("camp attach: requires a session reference")
+        _die("camp attach: requires a workspace slug")
     if ref is not None and ref.startswith("-"):
         _die(
-            f"camp attach: {ref!r} looks like a flag, not a session reference — "
-            "a reference may not start with a dash"
+            f"camp attach: {ref!r} looks like a flag, not a workspace slug — "
+            "a slug may not start with a dash"
         )
-    if resolve_only and ref is None:
-        _die("camp attach: --resolve requires a session reference")
-    if list_only and ref is not None:
-        _die("camp attach: --list takes no session reference")
-    if (resolve_only or list_only) and not as_json:
-        _die("camp attach: --resolve and --list are machine-readable only — pass --json")
 
     resolved_env = dict(env) if env is not None else dict(os.environ)
-    groups, transcripts, live, harness, tmux, machine, accounts = _attach_session_context(
-        resolved_env
+    groups = _parsable_groups()
+    target_group = _resolve_group_for_attach(groups, parsed.group, env=resolved_env)
+    if target_group is None:
+        _die(needs_group_message("attach"))
+
+    from ..attach.door_target import (
+        ResolvedWorkspace,
+        WorkspaceCandidate,
+        refusal_message,
+        resolve_attach_target,
+    )
+    from ..launch.inventory import format_state
+    from ..launch.profile import harness_for
+    from ..launch.stop import Tmux
+    from ..provision.lifecycle import cmd_ls_group
+
+    group_name = target_group["group"]["name"]
+    tmux = Tmux()
+
+    def _group_workspaces(
+        group=target_group, tmux=tmux, env=resolved_env
+    ) -> list["WorkspaceCandidate"]:
+        listing = cmd_ls_group(group, env=env, tmux=tmux)
+        return [
+            WorkspaceCandidate(
+                slug=e["slug"],
+                path=Path(e["workspace_path"]),
+                state_text=format_state(e.get("state"), e.get("window_count")),
+            )
+            for e in listing.entries
+        ]
+
+    interactive = sys.stdin.isatty() and sys.stdout.isatty()
+    target = resolve_attach_target(
+        ref,
+        group_name=group_name,
+        workspaces=_group_workspaces,
+        isatty=interactive,
+        stdin=sys.stdin,
+        stdout=sys.stdout,
     )
 
-    # `--list --json` and `--resolve --json` are read-only probes
-    # `camp attach -a` fires at every declared host — never routed through
-    # workspace-slug precedence, so a probe can never create a tmux session
-    # on a remote machine as a side effect of being asked a question (see
-    # `docs/design/the-door-creates-or-connects-a-workspace-session.md`,
-    # "The machine probes are outside the door entirely"). Gated off here,
-    # before either form is consulted at all.
-    if not resolve_only and not list_only:
-        target_group = _resolve_group_for_attach(groups, parsed.group, env=resolved_env)
-        if target_group is not None:
-            from ..attach.door_target import (
-                NotAWorkspace,
-                ResolvedWorkspace,
-                WorkspaceCandidate,
-                refusal_message,
-                resolve_attach_target,
-            )
-            from ..launch.door import RefusedEmptyGroup, RefusedNoTerminal
-            from ..launch.inventory import format_state
-            from ..provision.lifecycle import cmd_ls_group
-
-            group_name = target_group["group"]["name"]
-
-            def _group_workspaces(
-                group=target_group, tmux=tmux, env=resolved_env
-            ) -> list["WorkspaceCandidate"]:
-                listing = cmd_ls_group(group, env=env, tmux=tmux)
-                return [
-                    WorkspaceCandidate(
-                        slug=e["slug"],
-                        path=Path(e["workspace_path"]),
-                        state_text=format_state(e.get("state"), e.get("window_count")),
-                    )
-                    for e in listing.entries
-                ]
-
-            interactive = sys.stdin.isatty() and sys.stdout.isatty()
-            target = resolve_attach_target(
-                ref,
-                group_name=group_name,
-                workspaces=_group_workspaces,
-                isatty=interactive,
-                stdin=sys.stdin,
-                stdout=sys.stdout,
-            )
-
-            if isinstance(target, ResolvedWorkspace):
-                from ..launch.profile import harness_for
-
-                _open_workspace_door(
-                    target,
-                    tmux=tmux,
-                    resolved_env=resolved_env,
-                    as_json=as_json,
-                    interactive=interactive,
-                    harness=harness_for(target_group),
-                    group=target_group,
-                )
-            if isinstance(target, (RefusedNoTerminal, RefusedEmptyGroup)):
-                _die(refusal_message(target, group_name=group_name))
-            if isinstance(target, PoolUnreadable):
-                _die(f"camp attach: {target.reason}")
-            assert isinstance(target, NotAWorkspace)
-            # A slug that names no workspace in the resolved group is not
-            # the door's — it falls through to the retired ref path below,
-            # unchanged, which refuses in its own words. A bare form never
-            # reaches this assertion: `resolve_attach_target` only returns
-            # `NotAWorkspace` when a ref was given.
-
-    def _read_local_pool():
-        # The two reference-less forms read the identical pool: `--list
-        # --json` dumps it for the cross-host picker to merge, the bare form
-        # presents it. Read lazily, never before the workspace precedence
-        # above has had its say — a probe or a door invocation must not pay
-        # for a pool read it will not use.
-        return local_pool(
-            harness=harness,
+    if isinstance(target, ResolvedWorkspace):
+        _open_workspace_door(
+            target,
             tmux=tmux,
-            transcripts=transcripts,
-            live_records=live,
-            groups=groups,
-            env=resolved_env,
-            machine=machine,
+            resolved_env=resolved_env,
+            as_json=as_json,
+            interactive=interactive,
+            harness=harness_for(target_group),
+            group=target_group,
         )
-
-    if list_only:
-        print(json.dumps(_attach_pool_payload(_read_local_pool())))
-        sys.exit(0)
-
-    if ref is None:
-        # The workspace precedence above did not resolve a group (or the
-        # sibling `--group`/cwd resolution failed) — degrade to the
-        # pre-existing session picker rather than refuse outright, the same
-        # tolerance `_parsable_groups` already applies to a malformed
-        # sibling config.
-        pool = _read_local_pool()
-        result = pick_session(
-            pool,
-            stdin=sys.stdin,
-            stdout=sys.stdout,
-            isatty=sys.stdin.isatty() and sys.stdout.isatty(),
-        )
-        if isinstance(result, PoolUnreadable):
-            _die(f"camp attach: {result.reason}")
-        if isinstance(result, NothingToOffer):
-            _die("camp attach: no running session found on this machine")
-        assert isinstance(result, Picked)
-        warn_if_nested(resolved_env)
-        handoff(local_argv(result.row.candidate.derived_name))
         return
 
-    resolution = resolve_attach_ref(
-        ref,
-        harness=harness,
-        tmux=tmux,
-        transcripts=transcripts,
-        live_records=live,
-        groups=groups,
-        env=resolved_env,
-    )
-
-    if resolve_only:
-        print(json.dumps(_attach_resolve_payload(resolution)))
-        sys.exit(0)
-
-    if isinstance(resolution, NotRunning):
-        _die(
-            f"camp attach: session {resolution.candidate.session_id} is not "
-            "running — find its workspace with `camp sessions --recoverable` "
-            "and reattach with `camp attach <slug>`"
-        )
-    if isinstance(resolution, Ambiguous):
-        from ..launch.recovery import Ambiguous as _RecoveryAmbiguous
-
-        # attach's own Ambiguous (`camp.attach.resolve`) is never the SAME
-        # class `_die_unresolved` checks (`camp.launch.recovery`'s) —
-        # translated here so every ref-addressed verb refuses through that one
-        # shared helper and an operator gets the identical wording (including
-        # which account a cross-store ambiguity matched in) regardless of
-        # which verb they typed.
-        _die_unresolved(
-            _RecoveryAmbiguous(candidates=resolution.candidates),
-            ref,
-            verb="attach",
-            harness=harness,
-            env=resolved_env,
-            as_json=as_json,
-            accounts=accounts,
-        )
-    if isinstance(resolution, NoMatch):
-        # NOT routed through `_die_unresolved`: that helper's populated-pool
-        # wording points at `camp sessions --recoverable` — a listing of
-        # exactly the stopped sessions attach refuses to touch — which is
-        # the wrong next step for a verb that only ever offers live,
-        # camp-owned sessions. Attach names the pool IT searched instead
-        # (`## State — the named session was not found`), while keeping the
-        # empty-vs-populated-pool split `_die_unresolved` itself draws.
-        if resolution.pool_size:
-            _die(f"camp attach: no session on this machine matches {ref!r}")
-        _die(
-            f"camp attach: harness {_harness_display_name(harness)} reports no "
-            f"sessions at all — {_retention_hint(harness, resolved_env)}"
-        )
-    assert isinstance(resolution, Resolved)
-    warn_if_nested(resolved_env)
-    handoff(local_argv(resolution.candidate.derived_name))
+    # Every remaining outcome — NotAWorkspace, the two door refusals, or a
+    # PoolUnreadable EOF mid-picker — composes through refusal_message,
+    # which raises for anything it does not recognise rather than let an
+    # unhandled outcome print nothing and exit 0.
+    _die(refusal_message(target, group_name=group_name))
 
 
 def _cmd_attach_host_cli(
@@ -2479,14 +606,24 @@ def _cmd_attach_host_cli(
     *,
     connect_timeout: float | None = None,
 ) -> None:
-    """camp attach <ref> --host <name> — carry the reference across untouched.
+    """camp attach <slug> --host <name> [--group <g>] — carry the slug, and
+    the group it resolves to, across to the far side's own door.
 
-    Resolves nothing locally: the far side's own `camp attach <ref>` decides
-    and refuses in its own words (`docs/design/attaching-reaches-a-running-
-    session-on-any-machine.md`, "Resolution is not the same question on each
-    axis"). The nested-multiplexer warning is still decided from THIS
-    machine's own environment before the handoff — it is a property of the
-    local terminal, not of the target — per that same design doc's "The
+    The far side has no group axis of its own to resolve *ref* against — a
+    bare `camp attach <ref>` run over `ssh` sees `$HOME`, not the
+    operator's own cwd, so no group would ever resolve there. This
+    resolves the group LOCALLY instead, exactly the way a local attach
+    does (`_resolve_group_for_attach`: `--group` if given, else the group
+    `resolve_from_cwd` finds for the working directory this was invoked
+    from), then forwards the resolved name so the far side's own `camp
+    attach <ref> --group <g>` decides and refuses in its own words
+    (`docs/design/attaching-reaches-a-running-session-on-any-machine.md`,
+    "Resolution is not the same question on each axis"). No group
+    resolving locally is refused locally, with the same needs-group line
+    every other group-resolved verb prints — no machine is contacted. The
+    nested-multiplexer warning is still decided from THIS machine's own
+    environment before the handoff — it is a property of the local
+    terminal, not of the target — per that same design doc's "The
     key-prefix conflict warning is decided locally".
 
     ``connect_timeout`` is the operator's resolved value
@@ -2497,25 +634,61 @@ def _cmd_attach_host_cli(
     in hand.
     """
     from ..attach.prefix_warning import warn_if_nested
+    from ..group.resolve import (
+        validate_group_name,
+        resolve_group_override,
+        GroupConfinementError,
+        GroupResolutionError,
+    )
     from ..host.handoff import handoff, remote_argv
     from ..host.transport import DEFAULT_CONNECT_TIMEOUT_SECONDS
     from ..spine import _die
+    from ..workspace.verb_taxonomy import needs_group_message
 
     if connect_timeout is None:
         connect_timeout = DEFAULT_CONNECT_TIMEOUT_SECONDS
 
     parser = CampParser(verb="attach")
+    parser.add_argument("--group")
     parser.add_argument("refs", nargs="*")
-    rest = parser.parse_args(args).refs
+    parsed = parser.parse_args(args)
+    rest = parsed.refs
     if len(rest) != 1:
         _die(
-            f"camp attach: --host requires exactly one session reference, got "
+            f"camp attach: --host requires exactly one workspace slug, got "
             f"{len(rest)}"
         )
     ref = rest[0]
     if not ref.strip() or ref.startswith("-"):
-        _die(f"camp attach: {ref!r} is not a valid session reference")
+        _die(f"camp attach: {ref!r} is not a valid workspace slug")
 
     resolved_env = dict(env) if env is not None else dict(os.environ)
+    groups = _parsable_groups()
+    # An explicit `--group` naming a group this machine has no config for is
+    # a different failure than no group resolving from cwd at all —
+    # `_resolve_group_for_attach` folds both into the same `None`
+    # (its docstring: "Returns None on ANY failure"), which would otherwise
+    # tell the operator to pass a group they already passed. Calling
+    # `resolve_group_override` directly here, ahead of that fold, surfaces
+    # the distinct answer instead.
+    if parsed.group:
+        try:
+            target_group = resolve_group_override(parsed.group, groups)
+        except GroupResolutionError:
+            known = [g["group"]["name"] for g in groups]
+            _die(
+                f"camp attach: group {parsed.group!r} is not configured on "
+                f"this machine (known: {', '.join(known) or 'none'})"
+            )
+    else:
+        target_group = _resolve_group_for_attach(groups, None, env=resolved_env)
+        if target_group is None:
+            _die(needs_group_message("attach"))
+    group_name = target_group["group"]["name"]
+    try:
+        validate_group_name(group_name)
+    except GroupConfinementError as exc:
+        _die(str(exc))
+
     warn_if_nested(resolved_env)
-    handoff(remote_argv(host, ref, connect_timeout=connect_timeout))
+    handoff(remote_argv(host, ref, group=group_name, connect_timeout=connect_timeout))

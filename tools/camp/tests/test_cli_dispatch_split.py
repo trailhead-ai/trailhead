@@ -116,6 +116,7 @@ _SMOKE_INVOCATIONS = [
     ["ai"],
     ["enter"],
     ["launch"],
+    ["sessions"],
     ["kill"],
     ["stop"],
     ["bogusverb"],
@@ -267,18 +268,6 @@ def test_legacy_redirect_group_path_names_replacement(stub_group_env, tmp_path) 
     )
 
 
-def test_kill_is_routed_without_resolving_a_group(isolated_env, tmp_path) -> None:
-    """`camp kill` is ref-addressed, so it must answer from a cwd where no group
-    resolves — the situation it exists to be usable in. Reaching the needs-a-group
-    refusal or the bare-slug error would mean it never got routed at all."""
-    result = _run(["kill", "some-ref"], env=isolated_env, cwd=tmp_path)
-
-    combined = result.stdout + result.stderr
-    assert _TRACEBACK_MARKER not in combined
-    assert "camp kill: " in combined
-    assert "--group" not in combined
-
-
 # ---------------------------------------------------------------------------
 # --host <name> — the seam dispatch.main() hands a resolved Host through.
 #
@@ -309,7 +298,12 @@ def hosts_env(tmp_path: Path) -> dict[str, str]:
     return {"CAMP_CONFIG_DIR": str(cfg), "CAMP_STATE_DIR": str(tmp_path / "state")}
 
 
-@pytest.mark.parametrize("verb", ["list", "sessions"])
+#: `sessions` used to be parametrized here alongside `list` — both reached
+#: `_dispatch_host_command`. `sessions` is a retired verb now
+#: (LEGACY_REDIRECTS: sessions -> list), so it redirects before main() ever
+#: reaches the `--host` block this handler-swap drives against; `list` is
+#: the only member still exercised this way.
+@pytest.mark.parametrize("verb", ["list"])
 @pytest.mark.parametrize(
     "flag_argv",
     [["--host", "andromeda"], ["--host=andromeda"]],
@@ -396,7 +390,7 @@ def test_host_and_group_together_never_call_the_transport(
 
     monkeypatch.setattr(transport, "run_camp", _boom)
     monkeypatch.setattr(
-        sys, "argv", ["camp", "sessions", "--host", "andromeda", "--group", "testgrp"]
+        sys, "argv", ["camp", "list", "--host", "andromeda", "--group", "testgrp"]
     )
 
     with pytest.raises(SystemExit) as excinfo:
@@ -462,9 +456,9 @@ def test_group_verb_with_host_flag_refuses_instead_of_answering_locally(
     [
         ("launch", ["myslug"], True),
         ("resume", ["some-ref"], True),
-        ("sessions", [], False),
+        ("list", [], False),
     ],
-    ids=["launch-retired", "resume-retired", "sessions-live"],
+    ids=["launch-retired", "resume-retired", "list-live"],
 )
 def test_retired_verbs_under_host_redirect_locally_while_a_live_host_verb_reaches_the_stub(
     monkeypatch: pytest.MonkeyPatch,
@@ -476,9 +470,14 @@ def test_retired_verbs_under_host_redirect_locally_while_a_live_host_verb_reache
     expect_redirect: bool,
 ) -> None:
     """Vary the retired verb typed under --host (launch, resume): each
-    redirects locally with no forward. `sessions`, a live host verb, is the
+    redirects locally with no forward. `list`, a live host verb, is the
     control — it still reaches the transport stub, proving the retired-verb
-    check does not swallow --host routing for a verb that still uses it."""
+    check does not swallow --host routing for a verb that still uses it.
+    (`sessions` used to be the control here; it is a retired verb itself now
+    — LEGACY_REDIRECTS: sessions -> list — so it no longer reaches the
+    transport under `--host` either; its own redirect coverage lives in
+    `test_sessions_and_kill_host_redirect_before_reaching_the_relay` in
+    `test_cli_all_hosts.py`.)"""
     dispatch = _dispatch_module()
     for k, v in hosts_env.items():
         monkeypatch.setenv(k, v)
@@ -510,73 +509,59 @@ def test_retired_verbs_under_host_redirect_locally_while_a_live_host_verb_reache
 
 
 # ---------------------------------------------------------------------------
-# `kill` is a STATE-CHANGING host verb (drives the --all-hosts refusal
-# wording) and groupless: the reference alone names the session, so a
-# `--host kill` needs no --group, and `--host` + `--group` together takes the
-# same collision refusal `list`/`sessions`/`attach` take.
+# `kill` is a retired verb now (LEGACY_REDIRECTS: kill -> stop). It used to
+# be a STATE-CHANGING host verb, reaching a real routed handler under
+# `--host` with no --group required, and taking the same --host/--group
+# collision refusal `list`/`sessions`/`attach` take. The legacy check in
+# main() runs ahead of every host route, so none of that machinery is
+# reachable through the real CLI any more — both tests below now pin the
+# redirect firing first instead, in each of those two shapes.
 # ---------------------------------------------------------------------------
 
 
-def _rig_kill_relay(monkeypatch: pytest.MonkeyPatch, *, capture_argv: list | None = None):
-    """Point `camp.host.relay.answer_payload_for_host` at a canned "stopped"
-    answer so a `--host` kill can reach all the way through `dispatch.main()`
-    to `_cmd_kill_host_cli` without any real SSH transport running."""
-    import importlib
-
-    relay = importlib.import_module("camp.host.relay")
-
-    answer = relay.HostPayloadAnswer(
-        obj={"session_id": "sess-1", "tmux_name": "camp-feat-x-sess1", "outcome": "stopped"},
-        rows=None,
-        certainty=relay.Certainty.HAPPENED,
-        notices=[],
-        exit_code=0,
-    )
-
-    def fake_answer_payload_for_host(verb, host, host_name, remote_argv, **kwargs):
-        if capture_argv is not None:
-            capture_argv.append((verb, list(remote_argv)))
-        return answer
-
-    monkeypatch.setattr(relay, "answer_payload_for_host", fake_answer_payload_for_host)
-    return relay
-
-
-def test_host_kill_reaches_the_real_kill_handler_end_to_end(
+def test_host_kill_redirects_locally_with_no_group_required(
     monkeypatch: pytest.MonkeyPatch,
     hosts_env: dict[str, str],
     tmp_path: Path,
     capsys: pytest.CaptureFixture,
 ) -> None:
-    """`camp kill <ref> --host <name>` — with NO --group — must reach the real
-    routed handler and succeed (not a mocked `_dispatch_host_command`, unlike
-    the routing tests above), forwarding no group to the far side."""
+    """`camp kill <ref> --host <name>` — with NO --group — never reaches a
+    routed handler any more: the legacy check answers locally before host
+    resolution, exactly as it does with no --host at all."""
     dispatch = _dispatch_module()
     for k, v in hosts_env.items():
         monkeypatch.setenv(k, v)
     monkeypatch.chdir(tmp_path)
 
-    captured_argv: list = []
-    _rig_kill_relay(monkeypatch, capture_argv=captured_argv)
+    import importlib
+
+    transport = importlib.import_module("camp.host.transport")
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("transport.run_camp must not be reached for retired kill")
+
+    monkeypatch.setattr(transport, "run_camp", _boom)
     monkeypatch.setattr(sys, "argv", ["camp", "kill", "sess-1", "--host", "andromeda"])
 
     with pytest.raises(SystemExit) as excinfo:
         dispatch.main()
 
-    assert excinfo.value.code == 0
-    assert capsys.readouterr().out == "sess-1\n"
-    assert captured_argv == [("kill", ["kill", "sess-1", "--json"])]
+    assert excinfo.value.code == 1
+    assert capsys.readouterr().err == (
+        "camp kill: this command has been replaced — use 'camp stop' instead.\n"
+    )
 
 
-def test_kill_host_and_group_collision_takes_the_read_verbs_refusal(
+def test_kill_host_and_group_collision_redirects_before_the_collision_check(
     monkeypatch: pytest.MonkeyPatch,
     hosts_env: dict[str, str],
     tmp_path: Path,
     capsys: pytest.CaptureFixture,
 ) -> None:
-    """`camp kill <ref> --host <name> --group <g>` must refuse with the
-    one-remote-host-and-one-local-group collision wording that `list` /
-    `sessions` / `attach` take — a stop names no group."""
+    """`camp kill <ref> --host <name> --group <g>` used to refuse with the
+    one-remote-host-and-one-local-group collision wording `list`/`sessions`/
+    `attach` take. It redirects instead now, before that check ever runs —
+    neither flag changes the answer."""
     dispatch = _dispatch_module()
     for k, v in hosts_env.items():
         monkeypatch.setenv(k, v)
@@ -599,32 +584,36 @@ def test_kill_host_and_group_collision_takes_the_read_verbs_refusal(
     with pytest.raises(SystemExit) as excinfo:
         dispatch.main()
 
-    assert excinfo.value.code != 0
+    assert excinfo.value.code == 1
     err = capsys.readouterr().err
-    assert "--host" in err and "--group" in err, err
-    assert "one remote" in err, err
+    assert err == "camp kill: this command has been replaced — use 'camp stop' instead.\n"
+    assert "--group" not in err, err
+    assert "one remote" not in err, err
 
 
 @pytest.mark.parametrize("all_hosts_flag", ["--all-hosts", "-a"])
 @pytest.mark.parametrize(
-    "verb,ref_or_slug,expect_state_changing_wording",
-    [("kill", "sess-1", True), ("launch", "myslug", False)],
-    ids=["kill-changes-state", "launch-redirects"],
+    "verb,ref_or_slug,replacement",
+    [("kill", "sess-1", "stop"), ("launch", "myslug", "attach")],
+    ids=["kill-redirects", "launch-redirects"],
 )
-def test_all_hosts_wording_diverges_for_kill_and_launch(
+def test_all_hosts_redirects_kill_and_launch_the_same_way(
     monkeypatch: pytest.MonkeyPatch,
     isolated_env: dict[str, str],
     tmp_path: Path,
     capsys: pytest.CaptureFixture,
     verb: str,
     ref_or_slug: str,
+    replacement: str,
     all_hosts_flag: str,
-    expect_state_changing_wording: bool,
 ) -> None:
-    """`kill` is still a live, state-changing host verb, so `camp kill
-    --all-hosts` keeps the "changes state" refusal. `launch` is retired, so
-    `camp launch --all-hosts` redirects instead — two different verbs, two
-    different answers, from the one flag."""
+    """`kill` used to be a live, state-changing host verb, so `camp kill
+    --all-hosts` carried its own "changes state" refusal, distinct from the
+    generic redirect `camp launch --all-hosts` already got as a retired
+    verb. `kill` is retired now too (LEGACY_REDIRECTS: kill -> stop), so
+    both verbs answer the SAME way under either spelling of the flag — the
+    "changes state" wording (and the `_STATE_CHANGING_HOST_VERBS` table that
+    drove it) is gone, along with the divergence this test used to pin."""
     dispatch = _dispatch_module()
     for k, v in isolated_env.items():
         monkeypatch.setenv(k, v)
@@ -645,25 +634,89 @@ def test_all_hosts_wording_diverges_for_kill_and_launch(
 
     assert excinfo.value.code == 1
     err = capsys.readouterr().err
-    if expect_state_changing_wording:
-        assert "changes state" in err, err
-        assert "has no meaning here" not in err, err
-        assert "--host" in err, err
-        assert "this command has been replaced" not in err, err
-    else:
-        assert "this command has been replaced — use 'camp attach' instead." in err, err
-        assert "changes state" not in err, err
-        assert "has no meaning here" not in err, err
+    assert err == f"camp {verb}: this command has been replaced — use 'camp {replacement}' instead.\n"
+    assert "changes state" not in err, err
+    assert "has no meaning here" not in err, err
 
 
-def test_host_kill_with_no_value_reports_missing_value_not_no_meaning(
+def test_host_kill_with_no_value_still_redirects_rather_than_reporting_missing_value(
     isolated_env: dict[str, str], tmp_path: Path
 ) -> None:
-    """`camp kill --host` with no following value must refuse for the missing
-    value — kill is IN `_HOST_VERBS`, so the "has no meaning here" path
-    (reserved for a verb outside the set entirely) must not fire instead."""
+    """`camp kill --host` with no following value used to refuse for the
+    missing value specifically (kill IN `_HOST_VERBS`, so never the generic
+    "has no meaning here" a verb outside the set gets). `kill` is retired
+    now, so the legacy check answers before the value is ever read — the
+    malformed flag never gets its own refusal at all."""
     result = _run(["kill", "some-ref", "--host"], env=isolated_env, cwd=tmp_path)
 
-    assert result.returncode != 0
-    assert "requires a value" in result.stderr, result.stderr
+    assert result.returncode == 1
+    assert result.stderr == (
+        "camp kill: this command has been replaced — use 'camp stop' instead.\n"
+    )
+    assert "requires a value" not in result.stderr, result.stderr
     assert "has no meaning here" not in result.stderr, result.stderr
+
+
+# ---------------------------------------------------------------------------
+# sessions/kill under every route (bare, --host, -a, -g) never reach the
+# engine behind them — a tmux double whose `kill_session` raises is wired in
+# so an accidental fall-through to a live handler would blow up loudly
+# instead of quietly answering wrong.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "argv,replacement",
+    [
+        (["sessions"], "list"),
+        (["sessions", "--all-hosts"], "list"),
+        (["sessions", "-a"], "list"),
+        (["sessions", "--all-groups"], "list"),
+        (["sessions", "-g"], "list"),
+        (["kill", "some-ref"], "stop"),
+        (["kill", "some-ref", "--all-hosts"], "stop"),
+        (["kill", "some-ref", "-a"], "stop"),
+        (["kill", "some-ref", "--all-groups"], "stop"),
+        (["kill", "some-ref", "-g"], "stop"),
+    ],
+    ids=[
+        "sessions-bare", "sessions-all-hosts", "sessions-a",
+        "sessions-all-groups", "sessions-g",
+        "kill-bare", "kill-all-hosts", "kill-a", "kill-all-groups", "kill-g",
+    ],
+)
+def test_sessions_and_kill_never_reach_a_raising_tmux_double(
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_env: dict[str, str],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture,
+    argv: list[str],
+    replacement: str,
+) -> None:
+    """Every form of the retired verbs — bare and each widening flag — must
+    redirect without ever calling the tmux-kill engine behind it. Wiring it
+    to raise turns an accidental fall-through into a loud failure instead of
+    a quietly wrong answer."""
+    for k, v in isolated_env.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.chdir(tmp_path)
+
+    import importlib
+
+    tmux_module = importlib.import_module("camp.launch.tmux")
+
+    def _boom_kill(*args, **kwargs):
+        raise AssertionError("tmux kill_session must not be reached for a retired verb")
+
+    monkeypatch.setattr(tmux_module.Tmux, "kill_session", _boom_kill)
+    monkeypatch.setattr(sys, "argv", ["camp", *argv])
+
+    dispatch = _dispatch_module()
+    with pytest.raises(SystemExit) as excinfo:
+        dispatch.main()
+
+    verb = argv[0]
+    assert excinfo.value.code == 1
+    assert capsys.readouterr().err == (
+        f"camp {verb}: this command has been replaced — use 'camp {replacement}' instead.\n"
+    )

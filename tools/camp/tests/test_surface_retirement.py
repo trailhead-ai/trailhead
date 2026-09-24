@@ -2,16 +2,18 @@
 
 `launch`'s own redirect is covered by `test_verb_aliases.py` and
 `test_cli_dispatch_split.py`; this file covers `bookmark` and `resume`
-redirecting to `attach`, plus the sessions/attach internal-harness
-regression.
+redirecting to `attach`, plus `_addressable_harnesses`'s own harness
+resolution.
 
 Test contract:
 - Each retired spelling, run through the CLI, answers with `camp attach` —
   the replacement an operator who typed the retired verb yesterday needs —
   rather than the bare-slug refusal, which answers a question about slugs.
   The answer varies by which retired verb was typed.
-- The sessions and attach paths each resolve the same harness for the same
-  group — the specific regression the redirect risks.
+- `_addressable_harnesses` resolves a declared group's harness, plus the
+  always-probed default store, deduping when both resolve the same harness —
+  the pool `camp remove`'s teardown guard, `camp transfer` and `camp doctor`
+  all read.
 
 That the retired verbs are absent from the live verb table is not tested here:
 removal is not a behaviour, and such a test passes vacuously on any tree where
@@ -81,12 +83,13 @@ def test_camp_resume_points_at_the_replacement_verb(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# the two remaining consumers still resolve the same harness
+# the harness-pool helper still resolves a group's harness
 # ---------------------------------------------------------------------------
 
 
-def test_sessions_path_resolves_addressable_harnesses(monkeypatch) -> None:
-    """`camp sessions` builds its harness pool via cli.session:_addressable_harnesses."""
+def test_addressable_harnesses_resolves_a_groups_harness(monkeypatch) -> None:
+    """`cli.session._addressable_harnesses` builds the harness pool `camp
+    remove`, `camp transfer` and `camp doctor` all read."""
     import camp.cli.session as cli_session
 
     harness = _FakeHarness()
@@ -106,35 +109,4 @@ def test_sessions_path_resolves_addressable_harnesses(monkeypatch) -> None:
     # every declared group's store — it dedupes against `group`'s own
     # store here because `fake_harness_for` answers the SAME harness
     # for both calls, so `stores` still holds exactly one entry.
-    assert seen == [group, {}]
-
-
-def test_attach_path_resolves_the_group_harness(monkeypatch) -> None:
-    """`camp attach`'s pool asks the group's harness (cli.session:_session_pool),
-    called with `verb="attach"` — the verb `_attach_session_context` actually
-    passes to it."""
-    import camp.cli.session as cli_session
-
-    harness = _FakeHarness()
-    seen: list[dict] = []
-    record = type("SessionRecord", (), {"session_id": "sess-1"})()
-
-    def fake_harness_for(group):
-        seen.append(group)
-        return harness
-
-    monkeypatch.setattr("camp.launch.profile.harness_for", fake_harness_for)
-    monkeypatch.setattr(
-        "camp.launch.session.enumerate_records", lambda h, ws, env: [record]
-    )
-
-    group = {"group": {"name": "g"}}
-    _transcripts, live, answered, _accounts = cli_session._session_pool(
-        [group], verb="attach", env={}
-    )
-    assert live == [record]
-    assert [store.harness for store in answered] == [harness]
-    # Same dedupe as above: the always-probed default store collapses
-    # into `group`'s own entry since `fake_harness_for` answers the
-    # same harness for both.
     assert seen == [group, {}]

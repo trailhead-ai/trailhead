@@ -17,7 +17,6 @@ Contract (post-rename surface):
 from __future__ import annotations
 
 import os
-import re
 import subprocess
 import sys
 from pathlib import Path
@@ -212,8 +211,10 @@ def test_disabled_verb_stabilizes_message(verb: str) -> None:
         # chaining through the verb that itself was removed.
         (["open", "my-slug"], "camp new", "camp ai"),
         (["break", "--name", "dummy"], "camp remove", None),
+        (["sessions"], "camp list", None),
+        (["kill", "some-ref"], "camp stop", None),
     ],
-    ids=["ai", "cd", "enter", "init", "open", "break"],
+    ids=["ai", "cd", "enter", "init", "open", "break", "sessions", "kill"],
 )
 def test_a_retired_verb_exits_nonzero_and_names_its_replacement(argv, names, forbids) -> None:
     """Every retired verb refuses and points at the verb that replaced it.
@@ -395,16 +396,20 @@ def corrupt_sibling_env(tmp_path: Path) -> dict[str, str]:
     return {"CAMP_CONFIG_DIR": str(tmp_path), "CAMP_STATE_DIR": str(tmp_path / "state")}
 
 
-def test_kill_reaches_its_handler_despite_a_corrupt_sibling_group_toml(
+def test_kill_redirects_despite_a_corrupt_sibling_group_toml(
     corrupt_sibling_env: dict[str, str],
 ) -> None:
-    """`camp kill` is what an operator reaches for when something is already
-    wrong, so a sibling group's malformed config must not abort it."""
+    """`camp kill` used to be what an operator reaches for when something is
+    already wrong; it is retired now (LEGACY_REDIRECTS: kill -> stop), and
+    the redirect fires before group config is ever loaded — a sibling
+    group's malformed config still must not abort it."""
     result = _run(["kill", "no-such-ref"], env=corrupt_sibling_env)
     combined = result.stdout + result.stderr
     assert "config error" not in combined, combined
-    assert "camp kill:" in combined
-    assert result.returncode != 0
+    assert combined == (
+        "camp kill: this command has been replaced — use 'camp stop' instead.\n"
+    ), combined
+    assert result.returncode == 1
 
 
 def test_a_group_taking_verb_still_surfaces_the_corrupt_sibling_group_toml(
@@ -433,18 +438,23 @@ def test_a_group_taking_verb_still_surfaces_the_corrupt_sibling_group_toml(
 def test_all_groups_and_a_named_group_refuse_before_any_config_loads(
     corrupt_sibling_env: dict[str, str],
 ) -> None:
+    """Vehicle: `list`, not `sessions` — `sessions` is a retired verb now
+    (LEGACY_REDIRECTS: sessions -> list) and redirects before this refusal
+    ever runs (see `test_sessions_all_groups_and_named_group_redirect_
+    ignoring_both_flags` below); `list` is still a live `_ALL_GROUPS_VERBS`
+    member that reaches this ordering."""
     result = _run(
-        ["sessions", "--all-groups", "--group", "testgrp"], env=corrupt_sibling_env
+        ["list", "--all-groups", "--group", "testgrp"], env=corrupt_sibling_env
     )
-    _assert_clean_refusal(result, needle="--all-groups", verb="sessions")
+    _assert_clean_refusal(result, needle="--all-groups", verb="list")
     assert "config error" not in (result.stdout + result.stderr)
 
 
 def test_all_groups_short_spelling_and_a_named_group_also_refuse(
     corrupt_sibling_env: dict[str, str],
 ) -> None:
-    result = _run(["sessions", "-g", "--group", "testgrp"], env=corrupt_sibling_env)
-    _assert_clean_refusal(result, needle="--all-groups", verb="sessions")
+    result = _run(["list", "-g", "--group", "testgrp"], env=corrupt_sibling_env)
+    _assert_clean_refusal(result, needle="--all-groups", verb="list")
     assert "config error" not in (result.stdout + result.stderr)
 
 
@@ -546,94 +556,26 @@ def help_text() -> str:
 
 
 # ---------------------------------------------------------------------------
-# camp help — the remote stop's addressing form and its exit-code contract.
+# camp help — the remote attach's addressing form.
 #
-# `camp kill <ref> --host <name>` is a fifth `--host` verb. The help menu is
+# `camp attach <slug> --host <name>` is a `--host` verb. The help menu is
 # the operator's index of what camp can do, so a verb reachable only by
-# reading the source is not shipped — these assert against the real binary's
+# reading the source is not shipped — this asserts against the real binary's
 # `camp help` output, not against a copy of the block.
 # ---------------------------------------------------------------------------
 
 
-def _exit_code_contract(help_text: str, verb: str) -> dict[int, str]:
-    """The exit codes `camp help` documents for `camp <verb>`, code → its prose.
-
-    Read out of the emitter rather than compared against a literal, so an
-    added or dropped code changes what these assertions see. Blocks end at
-    the next blank line, since another "Exit codes (camp ...)" heading (or
-    "Flags:") follows immediately after.
-    """
-    heading = re.search(rf"^Exit codes \(camp {verb}\):$", help_text, re.MULTILINE)
-    assert heading, f"no {verb} exit-code contract in:\n{help_text}"
-    block = help_text[heading.end() :]
-    block = block.split("\n\n", 1)[0]
-
-    contract: dict[int, str] = {}
-    current: int | None = None
-    for line in block.splitlines():
-        match = re.match(r"^\s{2}(\d+)\s{2,}(.*)$", line)
-        if match:
-            current = int(match.group(1))
-            contract[current] = match.group(2).strip()
-        elif current is not None and line.strip():
-            contract[current] += " " + line.strip()
-    return contract
-
-
-def _session_cli_module():
-    sys.path.insert(0, str(_PLUGIN_DIR))
-    from camp.cli import session
-
-    return session
-
-
-def test_help_states_the_remote_kill_exit_code_contract(help_text: str) -> None:
-    """The design doc's closed four-value set, as documented for `camp kill`:
-    0 for a stop that happened or a session already down (told apart by the
-    answer's own outcome field, never by status), the module's own
-    `_AMBIGUOUS_EXIT_CODE` for an ambiguous reference with candidates
-    listed, its `_KILL_HOST_UNKNOWN_EXIT_CODE` for an outcome camp could not
-    determine, and 1 for every certain failure — including a far side that
-    refuses in its own words.
-
-    The ambiguous and unknown codes are read from the handler's own
-    constants rather than retyped as literals, so a changed constant that
-    drifted from the documented prose would fail this test instead of
-    passing it silently — `_AMBIGUOUS_EXIT_CODE` and
-    `_KILL_HOST_UNKNOWN_EXIT_CODE` are asserted apart to prove the drift is
-    caught on either one alone.
-    """
-    contract = _exit_code_contract(help_text, "kill")
-    session = _session_cli_module()
-
-    assert 0 in contract
-    assert "already down" in contract[0]
-
-    assert session._AMBIGUOUS_EXIT_CODE in contract
-    assert "more than one session" in contract[session._AMBIGUOUS_EXIT_CODE]
-
-    assert session._KILL_HOST_UNKNOWN_EXIT_CODE in contract
-    assert "outcome" in contract[session._KILL_HOST_UNKNOWN_EXIT_CODE].lower()
-    assert (
-        "could not" in contract[session._KILL_HOST_UNKNOWN_EXIT_CODE].lower()
-        or "unknown" in contract[session._KILL_HOST_UNKNOWN_EXIT_CODE].lower()
-    )
-
-    assert 1 in contract
-    assert "refuses" in contract[1].lower() or "own words" in contract[1].lower()
-
-
-def test_help_names_the_remote_kill_addressing_form(help_text: str) -> None:
-    """`camp kill <ref> --host <name>` is discoverable alongside the plain
-    `camp kill <ref>` form already documented, using the SAME flag name the
-    CLI actually parses — derived from `HOST_FLAG`, the constant the
+def test_help_names_the_remote_attach_addressing_form(help_text: str) -> None:
+    """`camp attach <slug> --host <name>` is discoverable alongside the plain
+    `camp attach <slug>` form already documented, using the SAME flag name
+    the CLI actually parses — derived from `HOST_FLAG`, the constant the
     flag-parsing code shares, rather than retyped. A help edit that mangles
     the addressing form, or a `--host` rename that the help text is not
     updated to match, turns this red."""
     sys.path.insert(0, str(_PLUGIN_DIR))
     from camp.cli.dispatch import HOST_FLAG
 
-    assert f"camp kill <ref> {HOST_FLAG} <name>" in help_text
+    assert f"camp attach <slug> {HOST_FLAG} <name>" in help_text
 
 
 # ---------------------------------------------------------------------------
@@ -676,8 +618,12 @@ def test_host_named_with_no_hosts_toml_at_all_points_at_the_file(
 ) -> None:
     """With no hosts.toml at all, the refusal names no host list and points
     at the file to declare one in instead — the trailing clause an operator
-    reads to know he's declared nothing yet, not merely mistyped a name."""
-    result = _run(["sessions", "--host", "nope"], env=corrupt_sibling_env)
+    reads to know he's declared nothing yet, not merely mistyped a name.
+
+    Vehicle: `list`, not `sessions` — `sessions` is a retired verb now and
+    redirects before the hosts.toml lookup ever runs; `list` is still a
+    live `_HOST_VERBS` member that reaches it."""
+    result = _run(["list", "--host", "nope"], env=corrupt_sibling_env)
     combined = result.stdout + result.stderr
     assert result.returncode != 0
     assert result.stdout == ""
@@ -691,12 +637,14 @@ def test_host_and_group_refuse_before_any_config_loads(
     corrupt_sibling_env_with_hosts: dict[str, str],
 ) -> None:
     """`--host` and `--group` name a remote machine and a local group at
-    once — refused, mirroring --all-groups + --group's existing shape."""
+    once — refused, mirroring --all-groups + --group's existing shape.
+
+    Vehicle: `list`, not `sessions` — see the two tests above for why."""
     result = _run(
-        ["sessions", "--host", "andromeda", "--group", "testgrp"],
+        ["list", "--host", "andromeda", "--group", "testgrp"],
         env=corrupt_sibling_env_with_hosts,
     )
-    _assert_clean_refusal(result, needle="--host", verb="sessions")
+    _assert_clean_refusal(result, needle="--host", verb="list")
     combined = result.stdout + result.stderr
     assert "--group" in combined, combined
     assert "config error" not in combined
@@ -790,17 +738,23 @@ def test_all_groups_and_host_refuse_for_list(
     assert "config error" not in combined
 
 
-def test_all_groups_and_host_refuse_for_sessions(
+def test_sessions_with_host_and_all_groups_redirects_ignoring_both_flags(
     corrupt_sibling_env_with_hosts: dict[str, str],
 ) -> None:
-    """Same defect, `camp sessions` path."""
+    """`camp sessions --host <name> --all-groups` used to take the same
+    --all-groups/--host collision refusal `camp list` still takes above.
+    `sessions` is a retired verb now (LEGACY_REDIRECTS: sessions -> list),
+    so the legacy check answers before either flag is ever read — the
+    redirect fires the same as a bare `camp sessions` would."""
     result = _run(
         ["sessions", "--host", "andromeda", "--all-groups"],
         env=corrupt_sibling_env_with_hosts,
     )
-    _assert_clean_refusal(result, needle="--all-groups", verb="sessions")
     combined = result.stdout + result.stderr
-    assert "--host" in combined, combined
+    assert result.returncode == 1
+    assert combined == (
+        "camp sessions: this command has been replaced — use 'camp list' instead.\n"
+    ), combined
     assert "config error" not in combined
 
 

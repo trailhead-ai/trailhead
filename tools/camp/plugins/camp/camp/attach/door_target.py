@@ -10,12 +10,10 @@ session.md``'s "Enumerated states" section, the "Slug resolution:" half.
 
 Precedence, not pattern. A slug that names a workspace in the resolved
 group resolves to that workspace outright (:class:`ResolvedWorkspace`). A
-slug that names no workspace is NOT a refusal this module owns — it falls
-through to the retired ref path unchanged, represented here by
-:class:`NotAWorkspace`, exactly as `docs/design/the-door-creates-or-
-connects-a-workspace-session.md`'s "A slug naming no workspace in the
-group" state describes: "camp creates no workspace here … it falls through
-to the retired ref resolver, which refuses in its own words."
+slug that names no workspace refuses here, in the door's own words
+(:class:`NotAWorkspace`, carrying the slug so :func:`refusal_message` can
+name it): "camp attach: no workspace named <slug> in group <group> —
+'camp list' shows its workspaces".
 
 *workspaces* is a zero-argument callable, not a list, so the terminal check
 for the bare (no-slug) form can run BEFORE anything enumerates the group —
@@ -25,9 +23,9 @@ slug-given call never even calls *workspaces* lazily-for-terminal reasons
 (a slug always needs the list to check against), but the bare form calls it
 only after the terminal is confirmed present.
 
-Refusal mapping, settled here rather than left to the next task. Slug
-resolution reaches exactly two of `camp.launch.door`'s five refusal members
-— :class:`~camp.launch.door.RefusedNoTerminal` and
+Refusal mapping. Slug resolution reaches exactly two of
+`camp.launch.door`'s five refusal members —
+:class:`~camp.launch.door.RefusedNoTerminal` and
 :class:`~camp.launch.door.RefusedEmptyGroup` — constructed from that module
 rather than a second vocabulary defined here, per that module's own
 docstring ("the slug-resolution refusals are constructed by the task that
@@ -38,11 +36,10 @@ the terminal is ever consulted, and a slug absent WITH a terminal goes to
 the picker, never a refusal for the terminal alone), and its own text calls
 this "the no-terminal refusal" verbatim — so it maps to
 ``RefusedNoTerminal``. ``RefusedNoWorkspace`` is UNREACHABLE from this
-module: its docstring ("The given slug names no workspace in the resolved
-group") reads as a perfect fit for the fall-through state, but the design
-doc is explicit that state falls through to the retired ref path instead —
-"Once the retirement slice removes the ref path, this refusal becomes the
-door's own" — so it belongs to that later slice, not this one.
+module: a slug naming no workspace refuses through :class:`NotAWorkspace`
+instead, composed by :func:`refusal_message` here rather than by that
+`camp.launch.door` type, so every unknown-slug refusal reads in one voice
+regardless of which caller (`camp attach` or `camp stop`) hits it.
 
 The picker's re-prompt loop is `camp.attach.picker`'s own
 (:func:`~camp.attach.picker._prompt_for_index`), generalized there and
@@ -56,6 +53,7 @@ from pathlib import Path
 from typing import IO, Callable, Sequence
 
 from ..launch.door import DoorOutcome, RefusedEmptyGroup, RefusedNoTerminal
+from ..launch.recovery import printable_path
 from .picker import PoolUnreadable, _prompt_for_index
 
 
@@ -85,13 +83,15 @@ class ResolvedWorkspace:
 
 @dataclass(frozen=True)
 class NotAWorkspace:
-    """The given slug names no workspace in the resolved group.
+    """The given slug names no workspace in the resolved group — the
+    door's own refusal, in the door's own words (:func:`refusal_message`).
 
-    Not a refusal of the door's — the caller falls through to the retired
-    ref path unchanged, which refuses in its own words. See this module's
-    docstring for why this is deliberately not
+    *ref* is the slug that was given, carried here so the refusal can name
+    it. See this module's docstring for why this is deliberately not
     :class:`~camp.launch.door.RefusedNoWorkspace`.
     """
+
+    ref: str
 
 
 #: What :func:`resolve_attach_target` can answer with.
@@ -126,7 +126,7 @@ def resolve_attach_target(
         for candidate in workspaces():
             if candidate.slug == ref:
                 return ResolvedWorkspace(group=group_name, slug=ref, path=candidate.path)
-        return NotAWorkspace()
+        return NotAWorkspace(ref=ref)
 
     if not isatty:
         return RefusedNoTerminal()
@@ -148,13 +148,20 @@ def resolve_attach_target(
     return ResolvedWorkspace(group=group_name, slug=chosen.slug, path=chosen.path)
 
 
-def refusal_message(outcome: DoorOutcome | PoolUnreadable, *, group_name: str) -> str:
+def refusal_message(
+    outcome: NotAWorkspace | DoorOutcome | PoolUnreadable, *, group_name: str
+) -> str:
     """The `camp attach: …` line for a slug-resolution refusal.
 
     Composed here, not read back out of `camp.launch.door` — that module's
     own docstring is explicit that a refusal's message is composed by the
     code that constructs the refusal, never by the outcome type itself.
     """
+    if isinstance(outcome, NotAWorkspace):
+        return (
+            f"camp attach: no workspace named {printable_path(outcome.ref)} in group "
+            f"{group_name} — 'camp list' shows its workspaces"
+        )
     if isinstance(outcome, RefusedNoTerminal):
         return "camp attach: no workspace named — pass a slug"
     if isinstance(outcome, RefusedEmptyGroup):

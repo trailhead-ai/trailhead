@@ -25,7 +25,7 @@ qualified would prefix every session camp creates and make every later
 This is implemented as one property over targets, :func:`target`, called by
 every method below that takes a `-t` operand — `has_session`,
 `pane_command`, `kill_session`, `set_environment` — and by
-`camp.host.handoff.local_argv`, the one tmux invocation that bypasses this
+`camp.host.handoff.door_argv`, the one tmux invocation that bypasses this
 class entirely (an interactive `exec`, which cannot go through
 `subprocess.run`). `spawn_session` is the one method that does NOT call
 `target` — it names a session with `-s`, never targets one.

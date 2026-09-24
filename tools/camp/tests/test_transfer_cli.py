@@ -1313,7 +1313,7 @@ def move_env(tmp_path: Path):
 # through `camp`'s own CLI rather than at the handler. Reuses `move_env`'s
 # real sender worktree + real peer subprocess, plus the `FakeHarness`/tmux
 # stand-in convention `test_session_cli.py`'s `cli_env` fixture already
-# establishes for running a real `camp sessions` without a real
+# establishes for running a real `camp` subprocess without a real
 # Claude Code install or a real tmux.
 # ---------------------------------------------------------------------------
 
@@ -1513,7 +1513,7 @@ class TestTransferEndToEndThroughTheRealEntryPath:
         sender_manifest = manifest_path_for("testgroup", c["slug"], env=c["sender_env"])
         assert owner_of(read_central_manifest(sender_manifest)) == "host-b"
 
-        sender_rows = _recoverable_rows(c["sender_cli_env"])
+        sender_rows = _recoverable_rows(c["sender_cli_env"], c["slug"])
         assert session_id not in {row["session_id"] for row in sender_rows}, sender_rows
 
     def test_the_same_run_leaves_the_conversation_resumable_on_the_peer_with_its_prior_history(
@@ -1529,7 +1529,7 @@ class TestTransferEndToEndThroughTheRealEntryPath:
         )
         assert result.returncode == 0, result.stderr
 
-        peer_rows = _recoverable_rows(c["peer_cli_env"])
+        peer_rows = _recoverable_rows(c["peer_cli_env"], c["slug"])
         assert session_id in {row["session_id"] for row in peer_rows}, peer_rows
 
         from camp.group.manifest import workspace_dir
@@ -1639,8 +1639,57 @@ def _cross_one_conversation(
     return result, phases, dest
 
 
-def _recoverable_rows(env: dict[str, str]) -> list[dict]:
-    result = _run_camp(env, "sessions", "--group", "testgroup", "--recoverable", "--all", "--json")
+def _recoverable_rows_script(slug: str) -> str:
+    """A standalone script that drives the SURVIVING engine directly:
+    `camp.cli.transfer._gather_conversations`, the same wiring `camp
+    transfer`'s own preflight and the teardown guard read
+    (`camp.launch.recovery.session_candidates` scoped to the workspace by
+    `camp.transfer.conversations.workspace_conversations`). There is no CLI
+    listing left to invoke — `camp sessions` is retired — so this reaches the
+    engine the way every other real-process check in this file already
+    does: as a real subprocess under the caller's own env, matching the
+    sitecustomize-registered harness store `_run_camp` invocations rely on."""
+    return textwrap.dedent(
+        f"""
+        import json
+        import os
+        import sys
+        sys.path.insert(0, {str(_PLUGIN_DIR)!r})
+        from camp.cli.session import _parsable_groups
+        from camp.cli.transfer import _gather_conversations
+
+        conversations = _gather_conversations(
+            group_name="testgroup",
+            slug={slug!r},
+            session_groups=_parsable_groups(),
+            resolved_env=dict(os.environ),
+        )
+        if conversations is None:
+            print(
+                "camp: could not enumerate this workspace's conversations",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        rows = [
+            {{"session_id": conversation.session_id}}
+            for conversation in conversations
+            if not conversation.live
+        ]
+        print(json.dumps(rows))
+        """
+    )
+
+
+def _recoverable_rows(env: dict[str, str], slug: str) -> list[dict]:
+    """The non-live conversations rooted in *slug*'s workspace, as reported
+    by the surviving engine — never through a CLI "recoverable listing",
+    which no longer exists."""
+    result = subprocess.run(
+        [sys.executable, "-c", _recoverable_rows_script(slug)],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
     assert result.returncode == 0, result.stderr
     return json.loads(result.stdout)
 
@@ -1674,7 +1723,7 @@ class TestConversationResumesOnARealPeer:
         assert result.conversations[0].session_id == session_id
 
         # Observation 1: it is listed among the recoverable conversations.
-        rows = _recoverable_rows(c["peer_cli_env"])
+        rows = _recoverable_rows(c["peer_cli_env"], c["slug"])
         assert session_id in {row["session_id"] for row in rows}, rows
 
         # The prior history travelled with it: the transcript the peer
@@ -1713,7 +1762,7 @@ class TestConversationResumesOnARealPeer:
             c, session_id=session_id, subpath=PurePosixPath("."), marker="live-vs-dead-marker"
         )
 
-        assert session_id in {row["session_id"] for row in _recoverable_rows(c["peer_cli_env"])}
+        assert session_id in {row["session_id"] for row in _recoverable_rows(c["peer_cli_env"], c["slug"])}
 
 
     def test_move_workspace_alone_claims_ownership_for_the_peer_but_leaves_release_and_the_flip_to_the_caller(
@@ -1746,7 +1795,7 @@ class TestConversationResumesOnARealPeer:
         peer_manifest = manifest_path_for("testgroup", c["slug"], env=c["peer_env"])
         assert owner_of(read_central_manifest(peer_manifest)) == "host-b"
 
-        sender_rows = _recoverable_rows(c["sender_cli_env"])
+        sender_rows = _recoverable_rows(c["sender_cli_env"], c["slug"])
         assert session_id in {row["session_id"] for row in sender_rows}, sender_rows
 
     def test_rerun_after_a_conversations_phase_failure_converges(self, conv_env):
@@ -1784,7 +1833,7 @@ class TestConversationResumesOnARealPeer:
             overwrite=True,
         )
 
-        rows = _recoverable_rows(c["peer_cli_env"])
+        rows = _recoverable_rows(c["peer_cli_env"], c["slug"])
         matching = [row for row in rows if row["session_id"] == session_id]
         assert len(matching) == 1, rows
 
@@ -1839,7 +1888,7 @@ class TestReleaseOnARealPeer:
         )
         assert release_results[0].outcome is ReleaseOutcome.ARCHIVED
 
-        sender_rows = _recoverable_rows(c["sender_cli_env"])
+        sender_rows = _recoverable_rows(c["sender_cli_env"], c["slug"])
         assert session_id not in {row["session_id"] for row in sender_rows}, sender_rows
 
     def test_archived_bytes_match_and_the_peer_is_unaffected(self, conv_env):
@@ -1873,7 +1922,7 @@ class TestReleaseOnARealPeer:
         assert release_results[0].outcome is ReleaseOutcome.ARCHIVED
         assert release_results[0].archive_path.read_bytes() == before_bytes
 
-        peer_rows = _recoverable_rows(c["peer_cli_env"])
+        peer_rows = _recoverable_rows(c["peer_cli_env"], c["slug"])
         assert session_id in {row["session_id"] for row in peer_rows}, peer_rows
 
     def test_archive_sits_outside_the_workspace_tree_and_the_harness_store(self, conv_env):
@@ -2010,7 +2059,7 @@ class TestReleaseOnARealPeer:
         # Leg 2: the round trip's return, B -> A — a fresh, live, resumable
         # copy lands back on the sender's own harness store.
         _seed_conversation(c, session_id=session_id, marker="round-trip-leg-2-returned")
-        assert session_id in {row["session_id"] for row in _recoverable_rows(c["sender_cli_env"])}
+        assert session_id in {row["session_id"] for row in _recoverable_rows(c["sender_cli_env"], c["slug"])}
 
         # Leg 3: outbound A -> B again.
         second = release_conversations(
@@ -2023,7 +2072,7 @@ class TestReleaseOnARealPeer:
         )
         assert second[0].outcome is ReleaseOutcome.ARCHIVED
 
-        sender_rows = _recoverable_rows(c["sender_cli_env"])
+        sender_rows = _recoverable_rows(c["sender_cli_env"], c["slug"])
         assert session_id not in {row["session_id"] for row in sender_rows}, sender_rows
 
 

@@ -27,7 +27,6 @@ each verb's own renderer's job (for `list`, that's
 """
 from __future__ import annotations
 
-import enum
 import json
 import re
 import sys
@@ -84,59 +83,6 @@ class HostAnswer:
     notices: list[str] = field(default_factory=list)
     exit_code: int = 0
     answered: bool = False
-
-
-class Certainty(enum.Enum):
-    """Whether a state-changing operation happened, for one transport
-    outcome — the mapping every state-changing (non-rows) verb states once
-    rather than re-deriving. Closed over :class:`~camp.host.transport.
-    TransportOutcome`'s nine-member set; see :func:`classify_certainty`.
-    """
-
-    #: The far side never ran camp at all (the five locally-classified
-    #: transport failures), or it ran and declined (`RemoteRefusal`). Either
-    #: way, the operation certainly did not happen.
-    DID_NOT_HAPPEN = "did_not_happen"
-
-    #: The far side ran camp and it answered. The operation certainly
-    #: happened.
-    HAPPENED = "happened"
-
-    #: Two shapes: the connection completed and the invocation then exceeded
-    #: its execution bound without answering (`StoppedResponding`) — camp
-    #: cannot tell whether the far side's camp finished before or after the
-    #: bound expired; or the local producer feeding a streamed invocation
-    #: exited non-zero (`ProducerFailed`) — the remote may have completed
-    #: and even reported success, but on a stream that may be truncated or
-    #: corrupt, so that report cannot be trusted either way.
-    UNKNOWN = "unknown"
-
-
-def classify_certainty(outcome: _transport.TransportOutcome) -> Certainty:
-    """Map one transport outcome to whether the operation it carried
-    certainly happened, certainly did not, or is unknown.
-
-    Verb-agnostic and stated once: every state-changing verb that rides
-    this transport reuses this mapping rather than re-deriving it per verb.
-    A rows-shaped (read-only) verb has no use for it — nothing changed
-    either way, so certainty is not a question a listing asks.
-    """
-    if isinstance(outcome, (StoppedResponding, ProducerFailed)):
-        return Certainty.UNKNOWN
-    if isinstance(outcome, Answered):
-        return Certainty.HAPPENED
-    assert isinstance(
-        outcome,
-        (
-            Unreachable,
-            IdentityUnknown,
-            IdentityChanged,
-            CampNotResolvable,
-            CredentialsRefused,
-            RemoteRefusal,
-        ),
-    )
-    return Certainty.DID_NOT_HAPPEN
 
 
 @dataclass(frozen=True)
@@ -246,9 +192,8 @@ def _classify_transport_failure(
     if isinstance(outcome, ProducerFailed):
         # `run_camp` never returns this today — only `stream_camp` does, for
         # a streamed invocation no named-host verb currently relays through
-        # here. Handled anyway so this function and `classify_certainty`
-        # stay exhaustive over `TransportOutcome` together, for whenever a
-        # stream-fed relay caller lands.
+        # here. Handled anyway so this function stays exhaustive over
+        # `TransportOutcome`, for whenever a stream-fed relay caller lands.
         return _TransportFailure(
             notices=[
                 f"camp {verb}: host {host_name!r}'s local producer exited "
@@ -438,124 +383,6 @@ def _verbatim_notice(text: str) -> list[str]:
     if not stripped:
         return []
     return [stripped]
-
-
-@dataclass(frozen=True)
-class HostPayloadAnswer:
-    """One machine's contribution to a per-host answer, for a verb whose
-    remote answer may come back as *either* shape — a stop answers with one
-    object until the reference is ambiguous, at which point it answers with
-    an array of candidate rows.
-
-    Exactly one of ``obj`` / ``rows`` is set for a relayable answer; both are
-    ``None`` for every state that carries no payload — the six
-    locally-classified transport failures, and a remote answer whose stdout
-    decodes as neither a JSON object nor a JSON array of row objects.
-
-    ``obj`` is control-stripped the same way a rows answer's stderr already
-    gets — the success path is the one an operator trusts most, so it is
-    the one worth spoofing. ``rows`` are host-stamped the same way
-    :func:`answer_for_host` stamps them, and are control-stripped too — the
-    far side's stderr and a relayed object's fields already get that
-    treatment, and a row's own values (a session id, a multiplexer name)
-    are the operator's next decision just as much as either of those.
-
-    ``certainty`` states whether the operation the verb asked for happened,
-    from :func:`classify_certainty` — the one piece of information a rows
-    answer has no use for and this shape exists to carry.
-    """
-
-    obj: dict[str, Any] | None
-    rows: list[dict[str, Any]] | None
-    certainty: Certainty
-    notices: list[str] = field(default_factory=list)
-    exit_code: int = 0
-
-
-def answer_payload_for_host(
-    verb: str,
-    host: Host,
-    host_name: str,
-    remote_argv: Sequence[str],
-    *,
-    connect_timeout: float = DEFAULT_CONNECT_TIMEOUT_SECONDS,
-    runner: Runner = default_runner,
-) -> HostPayloadAnswer:
-    """Run *remote_argv* on *host* over the transport and return whichever
-    payload shape it answered with — one object, an array of rows, or
-    nothing camp could parse.
-
-    ``connect_timeout`` is passed straight through to
-    :func:`camp.host.transport.run_camp` — see :func:`answer_for_host`'s
-    docstring for the same contract.
-
-    Same transport, same six locally-classified failure states (shared via
-    :func:`_classify_transport_failure`), and the same :class:`Certainty`
-    mapping every state-changing verb reuses. Never calls ``sys.exit`` and
-    never prints. Holds no state across calls.
-    """
-    outcome = _transport.run_camp(host, remote_argv, connect_timeout=connect_timeout, runner=runner)
-    certainty = classify_certainty(outcome)
-
-    failure = _classify_transport_failure(
-        verb, host, host_name, outcome, connect_timeout=connect_timeout
-    )
-    if failure is not None:
-        return HostPayloadAnswer(
-            obj=None,
-            rows=None,
-            certainty=certainty,
-            notices=failure.notices,
-            exit_code=failure.exit_code,
-        )
-
-    assert isinstance(outcome, (Answered, RemoteRefusal))
-    notices = _verbatim_notice(outcome.stderr)
-
-    parsed_obj = _try_parse_object(outcome.stdout)
-    if parsed_obj is not None:
-        return HostPayloadAnswer(
-            obj=_strip_control_sequences_deep(parsed_obj),
-            rows=None,
-            certainty=certainty,
-            notices=notices,
-            exit_code=outcome.exit_code,
-        )
-
-    parsed_rows = _try_parse_rows(outcome.stdout)
-    if parsed_rows is not None:
-        for row in parsed_rows:
-            row["host"] = host_name
-        return HostPayloadAnswer(
-            obj=None,
-            rows=_strip_control_sequences_deep(parsed_rows),
-            certainty=certainty,
-            notices=notices,
-            exit_code=outcome.exit_code,
-        )
-
-    return HostPayloadAnswer(
-        obj=None,
-        rows=None,
-        certainty=certainty,
-        notices=notices,
-        exit_code=outcome.exit_code,
-    )
-
-
-def _try_parse_object(stdout: str) -> dict[str, Any] | None:
-    """The single-object counterpart to :func:`_try_parse_rows`: the far
-    side's stdout must decode as a JSON *object*, not an array — a launch
-    answers with one session, never a list of them. An array (even of rows)
-    is not a relayable object here, mirroring how a bare object is not a
-    relayable row through :func:`_try_parse_rows`."""
-    try:
-        data = json.loads(stdout)
-    except ValueError:
-        return None
-    if not isinstance(data, dict):
-        return None
-    return data
 
 
 def _strip_control_sequences_deep(value: Any) -> Any:

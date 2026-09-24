@@ -61,31 +61,29 @@ _TRAILHEAD_PATHS_OK = False
 #: reader `main()` consults for every verb) and its applicability check can
 #: never drift against each other.
 ALL_GROUPS_FLAGS = ("--all-groups", "-g")
-_ALL_GROUPS_VERBS = frozenset({"list", "sessions"})
+_ALL_GROUPS_VERBS = frozenset({"list"})
 
 #: The two spellings of the widen-to-every-machine option, and the only
 #: verbs it has any meaning for. Held here, once, alongside
 #: `ALL_GROUPS_FLAGS` above, so the two independent axes (groups, machines)
 #: can never drift against each other on spelling or applicability.
 #:
-#: "attach" is here alongside "list"/"sessions", but it is dispatched
-#: through its own `_dispatch_attach_all_hosts` — never through
-#: `_dispatch_all_hosts_command`, whose resolved-group, row-merging shape
-#: does not apply to a ref-addressed, groupless verb (see
-#: `docs/design/attaching-reaches-a-running-session-on-any-machine.md`,
-#: "Why -a probes rather than reading the merged listing").
+#: "attach" is NOT a member: it resolves a slug in one group now, and
+#: `-a`/`--all-hosts` has no meaning for a single-group resolution — every
+#: form refuses with the retired-flag line (`main()`'s `all_hosts` branch,
+#: the `canonical == "attach"` special case ahead of this set's own
+#: "has no meaning here" check) before this set is even consulted.
 #:
-#: "doctor" is here too, and is likewise dispatched through its own
+#: "doctor" is here, and is dispatched through its own
 #: `_dispatch_doctor_all_hosts` rather than `_dispatch_all_hosts_command`:
 #: doctor is groupless (no group axis for `-a` to narrow) and its answer is
 #: a health report — `{"pass", "checks"}` plus a `"hosts"` section — never
-#: the row-merging shape `list`/`sessions` produce. Deliberately absent from
+#: the row-merging shape `list` produces. Deliberately absent from
 #: `_HOST_VERBS` (below): `--host` (one named machine) has no meaning for a
 #: verb whose whole point under `-a` is asking every declared machine at
-#: once, and it stays out of `_STATE_CHANGING_HOST_VERBS` too — a health
-#: check reads, it never changes state.
+#: once.
 ALL_HOSTS_FLAGS = ("--all-hosts", "-a")
-_ALL_HOSTS_VERBS = frozenset({"list", "sessions", "attach", "doctor"})
+_ALL_HOSTS_VERBS = frozenset({"list", "doctor"})
 
 #: Verbs whose trailing argv is an opaque payload forwarded to something else
 #: — never camp's own flags. `camp foreach <cmd…>` forwards everything after
@@ -100,29 +98,20 @@ _OPAQUE_PAYLOAD_VERBS = frozenset({"foreach"})
 #: drift against each other — the same shape as `ALL_GROUPS_FLAGS` /
 #: `_ALL_GROUPS_VERBS` above.
 #:
-#: "attach" carries its reference across untouched rather than going through
-#: the JSON relay transport `_dispatch_host_command` builds for "list"/
-#: "sessions" — see that function's own docstring.
+#: "attach" carries its slug (plus the group it resolved locally) across
+#: untouched rather than going through the JSON relay transport
+#: `_dispatch_host_command` builds for "list" — see that function's own
+#: docstring.
 #:
 #: A retired verb (`_LEGACY_REDIRECTS`) is classified and handled ahead of
 #: ALL host routing (both the --all-hosts branch and the --host branch
 #: below), so it never reaches this set's applicability check at all.
-#: "kill" is the STATE-CHANGING member — see `_STATE_CHANGING_HOST_VERBS`
-#: below. Every member is groupless under `--host`: `--host` together with
-#: `--group` is refused as a collision, because the reference alone names
-#: the session and no group is forwarded to the far side.
+#: "list" is groupless under `--host`: `--host` together with `--group` is
+#: refused as a collision for it, because no group is forwarded to the far
+#: side — the far side resolves its own. "attach" is the one exception —
+#: see the `canonical != "attach"` guard ahead of that refusal below.
 HOST_FLAG = "--host"
-_HOST_VERBS = frozenset({"list", "sessions", "attach", "kill"})
-
-#: The subset of `_HOST_VERBS` that changes state on the named machine,
-#: rather than merely reading from it. Held here, once, so the
-#: `--all-hosts`/`-a` refusal below stays in lockstep with this set: a
-#: member gets its own wording — the option is refused because the verb
-#: changes state, not because it merely "has no meaning" — where every
-#: other `_HOST_VERBS` member gets the generic refusal.
-#:
-#: This set drives ONLY the --all-hosts wording.
-_STATE_CHANGING_HOST_VERBS = frozenset({"kill"})
+_HOST_VERBS = frozenset({"list", "attach"})
 
 
 def read_router_options(verb: str, args: list[str]) -> "tuple[Any, list[str]]":
@@ -271,33 +260,18 @@ def _dispatch_host_command(
     Reached ONLY after `--host` has resolved to a declared host and every
     refusal above has passed — `main()`'s `--host` block is this function's
     sole caller, and it refuses any verb outside `_HOST_VERBS` before
-    reaching here, so *verb* is always one of the four below.
+    reaching here, so *verb* is always one of the two below.
 
-    "list" and "sessions" are wired to the SSH transport
-    (`camp.host.transport.run_camp`, via `camp.host.relay.relay_all_groups`).
-    "attach" is not: it carries the reference across untouched and hands this
-    process to an interactive `ssh -t` (`camp.host.handoff`) rather than
-    relaying a JSON answer — see `cli/session.py`'s `_cmd_attach_host_cli`.
-
-    "kill" reaches here with NO --group required or forwarded — it is
-    state-changing (`_STATE_CHANGING_HOST_VERBS`), but the reference alone
-    names the session, exactly as with "attach". It is wired through
-    `camp.host.relay.answer_payload_for_host` (the payload relay shape that
-    accepts either a single object or candidate rows) — see `cli/session.py`'s
-    `_cmd_kill_host_cli`.
+    "list" is wired to the SSH transport (`camp.host.transport.run_camp`, via
+    `camp.host.relay.relay_all_groups`). "attach" is not: it carries the
+    slug across untouched and hands this process to an interactive
+    `ssh -t` (`camp.host.handoff`) rather than relaying a JSON answer — see
+    `cli/session.py`'s `_cmd_attach_host_cli`.
     """
     if verb == "list":
         from .workspace import _cmd_ls_host_cli
 
         _cmd_ls_host_cli(rest, host, host_name, connect_timeout=connect_timeout)
-    elif verb == "sessions":
-        from .session import _cmd_sessions_host_cli
-
-        _cmd_sessions_host_cli(rest, host, host_name, connect_timeout=connect_timeout)
-    elif verb == "kill":
-        from .session import _cmd_kill_host_cli
-
-        _cmd_kill_host_cli(rest, host, host_name, connect_timeout=connect_timeout)
     else:
         assert verb == "attach"
         from .session import _cmd_attach_host_cli
@@ -624,24 +598,23 @@ def main() -> None:
     # ---------------------------------------------------------------------------
     if all_hosts:
         canonical, _kind = _resolve_verb(first) if first else (first, "live")
+        # "attach" is checked ahead of the `_ALL_HOSTS_VERBS` membership
+        # check below rather than through it: `-a`/`--all-hosts` is retired
+        # for attach, and gets its own line naming the replacement rather
+        # than the generic "has no meaning here" a verb with no all-hosts
+        # story at all gets. No machine is contacted — this returns before
+        # `hosts.toml` is ever read.
+        if canonical == "attach":
+            print(
+                "camp attach: -a is retired — find the workspace with "
+                "'camp list -ag', then 'camp attach <slug> --host <name>'",
+                file=sys.stderr,
+            )
+            sys.exit(1)
         if canonical not in _ALL_HOSTS_VERBS:
-            # A state-changing verb (kill) is refused for its OWN
-            # stated reason — the verb changes state, so it acts on one
-            # named machine — never the generic "has no meaning here" a verb gets
-            # when an option simply does not apply to it. The generic
-            # wording would read as an oversight; this is a decision (design
-            # doc: kill's "Stopping is never a broadcast"). The refusal names the
-            # single-host form so the operator's real intent — do this over
-            # there — is one option away.
-            if canonical in _STATE_CHANGING_HOST_VERBS:
-                print(
-                    f"camp {canonical}: --all-hosts changes state on every "
-                    f"declared machine at once — {canonical} acts on the one "
-                    f"machine you name with {HOST_FLAG} <name>",
-                    file=sys.stderr,
-                )
-            else:
-                print(f"camp {first}: --all-hosts has no meaning here", file=sys.stderr)
+            # No `_ALL_HOSTS_VERBS` member changes state on the named
+            # machine, so every refusal here gets the same generic wording.
+            print(f"camp {first}: --all-hosts has no meaning here", file=sys.stderr)
             sys.exit(1)
         # --host names one declared machine; --all-hosts names every declared
         # machine plus this one. Refused like the --all-groups/--host
@@ -653,22 +626,7 @@ def main() -> None:
                 file=sys.stderr,
             )
             sys.exit(1)
-        # attach is groupless — it has no group axis for --all-groups/-g to
-        # widen — and is dispatched through its own probe-then-refuse
-        # function rather than the row-merging `_dispatch_all_hosts_command`
-        # every other `_ALL_HOSTS_VERBS` member uses (see that flag's own
-        # comment above ALL_HOSTS_FLAGS).
-        if canonical == "attach":
-            if all_groups:
-                print(
-                    "camp attach: --all-groups has no meaning here — attach "
-                    "addresses a session by reference, not a group",
-                    file=sys.stderr,
-                )
-                sys.exit(1)
-            _dispatch_attach_all_hosts(scan_rest)
-            return
-        # doctor is groupless too — same reasoning as attach above, but
+        # doctor is groupless too — same reasoning attach used to carry, but
         # doctor's shape is a health report, not a merged row set, so it
         # gets its own dispatch rather than `_dispatch_all_hosts_command`.
         if canonical == "doctor":
@@ -742,7 +700,15 @@ def main() -> None:
         if host_name == "":
             print(f"camp {first}: {HOST_FLAG} requires a value", file=sys.stderr)
             sys.exit(1)
-        if read_group_option(scan_rest) is not None:
+        # "attach" is the one exception to the --host/--group collision:
+        # a cross-host attach resolves its group LOCALLY, the same way a
+        # local attach does (`--group`, else the cwd's group), and forwards
+        # the resolved name to the far side — so `--group` alongside
+        # `--host` is the normal, expected shape for it rather than a
+        # collision. `_cmd_attach_host_cli` does that resolution itself;
+        # every other `_HOST_VERBS` member forwards no group at all, so the
+        # collision refusal still applies to it.
+        if canonical != "attach" and read_group_option(scan_rest) is not None:
             print(
                 f"camp {canonical}: {HOST_FLAG} and --group name one remote "
                 "host and one local group at once — pass one or the other",
@@ -788,13 +754,9 @@ def main() -> None:
         "help", "--help", "-h", "doctor",
         "foreach", "path", "which",
         "--version", "version",
-        # Fully groupless, and for a stronger reason than convenience: a stop
-        # is what an operator reaches for when something is already wrong, so
-        # resolving a group first would let a sibling group's malformed config
-        # abort the verb that reclaims the memory.
-        "kill",
-        # Same reasoning as "kill" — a reference names the session, and a
-        # sibling group's malformed config must never block an attach.
+        # Resolves its own group (`_resolve_group_for_attach`) over only the
+        # configs that parse, so resolving a group here first would let a
+        # sibling group's malformed config block an attach.
         "attach",
         # A stop resolves the group internally, the same way "attach" does
         # (`_resolve_group_for_attach`) — so it must never let the
@@ -820,23 +782,20 @@ def main() -> None:
 
 
 def _dispatch_all_groups_command(verb: str, rest: list[str]) -> None:
-    """Answer `list` or `sessions` for every configured group in one invocation.
+    """Answer `list` for every configured group in one invocation.
 
     Reached ONLY from `main()`'s early `--all-groups`/`-g` handling, before any
     single group is resolved — the whole point of the option is an answer with
     no one group to resolve against, and refusing a named group alongside it
     (in `main()`, before this function ever runs) is what keeps that true.
-    `verb` is already the canonicalized verb name.
+    `verb` is always `"list"` — the only `_ALL_GROUPS_VERBS` member the legacy
+    redirect check above does not already intercept.
     """
     from ..group.config import GroupConfigError
-    from .session import _cmd_sessions_group_cli
     from .workspace import _cmd_ls_all_groups_cli
 
     try:
-        if verb == "list":
-            _cmd_ls_all_groups_cli(rest, env=None)
-        else:
-            _cmd_sessions_group_cli(rest, None, None, all_groups=True)
+        _cmd_ls_all_groups_cli(rest, env=None)
     except GroupConfigError as e:
         print(f"camp: config error: {e}", file=sys.stderr)
         sys.exit(1)
@@ -845,17 +804,12 @@ def _dispatch_all_groups_command(verb: str, rest: list[str]) -> None:
 def widened_answer_parser(verb: str) -> "CampParser":
     """The parser a widened (``--all-hosts``) answer is read through.
 
-    Deliberately the SAME declaration as the verb's narrow form, for the reason
-    `session.widened_sessions_parser` already gives: widening the machine axis
-    changes which MACHINES answer, never which flags exist. A widened form that
-    declared fewer options would refuse a flag its narrow spelling accepts; one
-    that parsed nothing at all — which is what the merged `list` and `doctor`
-    answers used to do — silently ignores a flag its narrow spelling refuses.
-    Both are the same defect, in opposite directions.
-
-    `sessions` is not handled here: it declares the same options but refuses
-    several of them BY NAME once widened, which `refuse_sessions_local_only_options`
-    does with the namespace `session.widened_sessions_parser` produces.
+    Deliberately the SAME declaration as the verb's narrow form: widening the
+    machine axis changes which MACHINES answer, never which flags exist. A
+    widened form that declared fewer options would refuse a flag its narrow
+    spelling accepts; one that parsed nothing at all silently ignores a flag
+    its narrow spelling refuses. Both are the same defect, in opposite
+    directions.
     """
     from .parser import CampParser, group_verb_parser
     from ..spine import DOCTOR_PROBE_FLAG
@@ -876,9 +830,9 @@ def widened_answer_parser(verb: str) -> "CampParser":
 def _dispatch_all_hosts_command(
     verb: str, rest: list[str], *, all_groups: bool, argv: list[str]
 ) -> None:
-    """Answer `list` or `sessions` for the resolved group — or, under
-    `-ag`/`-ga`, every group — on every declared machine plus this one,
-    merged into one ordered answer.
+    """Answer `list` for the resolved group — or, under `-ag`/`-ga`, every
+    group — on every declared machine plus this one, merged into one
+    ordered answer.
 
     Reached ONLY from `main()`'s early `--all-hosts`/`-a` handling, before
     any single group is resolved for the machine axis itself — the group
@@ -904,17 +858,7 @@ def _dispatch_all_hosts_command(
         )
         sys.exit(1)
 
-    if verb == "sessions":
-        from .session import (
-            refuse_sessions_local_only_options,
-            widened_sessions_parser,
-        )
-
-        refuse_sessions_local_only_options(
-            widened_sessions_parser().parse_args(rest), widening_flag="--all-hosts"
-        )
-    else:
-        widened_answer_parser(verb).parse_args(rest)
+    widened_answer_parser(verb).parse_args(rest)
 
     as_json = read_json_option(rest, verb=verb)
 
@@ -936,24 +880,11 @@ def _dispatch_all_hosts_command(
             sys.exit(1)
         narrow_group = group["group"]["name"]
 
-    if verb == "list":
-        from .workspace import local_list_answer as local_answer_fn
-        from .workspace import render_list_rows_human
+    from .workspace import local_list_answer as local_answer_fn
+    from .workspace import render_list_rows_human
 
-        def render_rows(rows: list[dict], on_missing) -> list[str]:
-            return render_list_rows_human(rows, show_group=all_groups, on_missing=on_missing)
-    else:
-        from .session import local_sessions_answer as local_answer_fn
-        from .session import render_session_row_human
-
-        def render_rows(rows: list[dict], on_missing) -> list[str]:
-            lines = []
-            for row in rows:
-                try:
-                    lines.append(render_session_row_human(row))
-                except KeyError as e:
-                    on_missing(e.args[0])
-            return lines
+    def render_rows(rows: list[dict], on_missing) -> list[str]:
+        return render_list_rows_human(rows, show_group=all_groups, on_missing=on_missing)
 
     def _local_answer() -> tuple[list[dict], list[str], int]:
         return local_answer_fn(group, all_groups=all_groups)
@@ -1692,385 +1623,6 @@ def _dispatch_doctor_all_hosts(rest: list[str]) -> None:
     sys.exit(exit_code)
 
 
-def _attach_probe_object(outcome) -> dict | None:
-    """One host's answer to an attach probe, decoded — or `None` if the host
-    did not answer the question at all.
-
-    `None` covers every way an answer can fail to be one: the transport never
-    reached a running camp, the far side exited non-zero, its stdout was not
-    JSON, or it was JSON that is not an object. Both probe sub-modes
-    (`--resolve --json` and `--list --json`) ask their own question of the
-    decoded object; this decides only whether there is an object to ask.
-    """
-    import json as _json
-
-    from ..host.transport import Answered
-
-    if not isinstance(outcome, Answered) or outcome.exit_code != 0:
-        return None
-    try:
-        data = _json.loads(outcome.stdout)
-    except ValueError:
-        return None
-    if not isinstance(data, dict):
-        return None
-    return data
-
-
-def _attach_resolve_answer(outcome) -> tuple[bool, str | None, str | None] | None:
-    """Classify one host's `<camp_bin> attach <ref> --resolve --json` answer.
-
-    Returns `(matched, session_id, state)`:
-
-    - `matched` is the far side's own `ok` field — it resolved, or it
-      definitely did not.
-    - `session_id` is the session the far side named, when it named one (a
-      `Resolved` match, or a `NotRunning` state — both carry `session_id` in
-      `_attach_resolve_payload`). `None` otherwise.
-    - `state` is the far side's own `state` field (`"not_running"`,
-      `"ambiguous"`, or `"no_match"`), present only when `matched` is False.
-
-    `None` overall means the host did not answer a resolvable question at
-    all (unreachable, timed out, refused credentials, answered with
-    something that is not the JSON this probe expects) — the "declared host
-    did not answer" state the design doc requires `-a` to refuse on rather
-    than silently treat as "didn't match".
-    """
-    data = _attach_probe_object(outcome)
-    if data is None or "ok" not in data:
-        return None
-    return bool(data["ok"]), data.get("session_id"), data.get("state")
-
-
-def _attach_list_answer(outcome) -> list[dict] | None:
-    """Classify one host's `<camp_bin> attach --list --json` answer — the
-    bare cross-host picker's sibling of `_attach_resolve_answer` above.
-    `None` on anything short of a well-formed row list; a host this fails
-    for is dropped from the picker with a stderr notice rather than
-    aborting the whole widened picker (see `_dispatch_attach_all_hosts`).
-    """
-    data = _attach_probe_object(outcome)
-    if data is None or not data.get("ok"):
-        return None
-    rows = data.get("rows")
-    if not isinstance(rows, list) or not all(isinstance(r, dict) for r in rows):
-        return None
-    return rows
-
-
-def _reject_self_named_host(hosts: dict, self_name: str | None) -> None:
-    """Refuse when a declared host shares this machine's own `self_name`.
-
-    Nothing in `host/config.py` rejects that collision at declaration time —
-    `self_host_name`'s own docstring says detecting it "belongs to the first
-    code that has both names in hand", which is here: `_dispatch_attach_all_hosts`
-    is the one place that loads `hosts.toml` AND resolves `self_name` for the
-    same invocation. Left unguarded, a row for that host reaches the local
-    branch of a handoff decision (`row.machine == self_name`) carrying a
-    `_RemoteAttachCandidate`, which has no `derived_name` — an `AttributeError`
-    instead of a camp refusal.
-    """
-    from ..spine import _die
-
-    if self_name is not None and self_name in hosts:
-        _die(
-            f"camp attach: hosts.toml declares {self_name!r} as a remote host — "
-            "the same name this machine's own self_name uses; rename one so "
-            "camp attach can tell them apart"
-        )
-
-
-class _RemoteAttachCandidate:
-    """A remote picker row's identity — just enough for a handoff.
-
-    Never a `camp.launch.recovery.SessionCandidate`: that dataclass carries
-    fields (`root`, `age_seconds`, `root_missing`, `unreadable`) this side has
-    no way to learn about a session on another machine, and nothing downstream
-    reads them for a row this module never treats as local. A picked remote
-    row is always handed off via `camp.host.handoff.remote_argv(host,
-    session_id)` — the far side resolves and re-derives everything else
-    itself, the same "carry the reference across untouched" posture `--host`
-    uses. `session_id` is the only field a handoff needs; the wire payload's
-    `derived_name` is never read here.
-    """
-
-    def __init__(self, session_id: str) -> None:
-        self.session_id = session_id
-
-
-def _dispatch_attach_all_hosts(rest: list[str]) -> None:
-    """`camp attach -a` and `camp attach <ref> -a` — probe every declared
-    machine rather than merge rows.
-
-    Reached ONLY from `main()`'s `--all-hosts`/`-a` handling, for the
-    `"attach"` verb specifically — never through `_dispatch_all_hosts_command`
-    above, whose resolved-group, row-merging shape is for `list`/`sessions`
-    and does not apply to a ref-addressed, groupless verb (see
-    `docs/design/attaching-reaches-a-running-session-on-any-machine.md`,
-    "Why -a probes rather than reading the merged listing").
-
-    Two shapes, by whether *rest* carries a reference:
-
-    - `<ref> -a`: resolves *ref* locally AND asks every declared host to
-      resolve it too, concurrently (`<camp_bin> attach <ref> --resolve
-      --json`, classified by `_attach_resolve_answer`). A host that does not
-      answer refuses the whole probe — the match count is unknown, and
-      proceeding on the machines that did answer could attach to the wrong
-      session or report no match when one exists. Otherwise: zero matches
-      refuses naming every machine asked; exactly one hands off to that
-      machine (locally, or via the untouched-reference `--host` pass-through
-      `camp.host.handoff.remote_argv` builds); more than one refuses naming
-      every match.
-    - `-a` bare: widens the numbered picker across every declared machine,
-      by the same probe-and-classify shape applied to `<camp_bin> attach
-      --list --json` (`_attach_list_answer`) instead — this is a listing,
-      not a resolution, so a silent host is dropped with a notice rather
-      than refusing the whole picker (mirrors `camp sessions -a`'s own
-      per-machine degradation, not the reference form's stricter posture).
-    """
-    import concurrent.futures
-
-    from ..attach.picker import (
-        NothingToOffer,
-        Picked,
-        PoolReady,
-        PoolUnreadable,
-        Row,
-        local_pool,
-        pick_session,
-    )
-    from ..attach.prefix_warning import warn_if_nested
-    from ..attach.resolve import Ambiguous, NotRunning, Resolved, resolve_attach_ref
-    from ..host import transport as _transport
-    from ..host.config import HostConfigError, load_hosts
-    from ..host.handoff import handoff, local_argv, remote_argv
-    from ..spine import _die
-    from .session import _AMBIGUOUS_EXIT_CODE, _attach_session_context, _print_candidates
-
-    if len(rest) > 1:
-        _die(
-            f"camp attach: one session reference, not {len(rest)} — an attach "
-            "addresses exactly one session"
-        )
-    ref = rest[0] if rest else None
-    if ref is not None and (not ref.strip() or ref.startswith("-")):
-        _die(f"camp attach: {ref!r} is not a valid session reference")
-
-    try:
-        hosts = load_hosts()
-    except HostConfigError as exc:
-        print(f"camp attach: {exc}", file=sys.stderr)
-        sys.exit(1)
-    host_items = list(hosts.items())
-
-    connect_timeout = _resolve_connect_timeout("attach")
-
-    resolved_env = dict(os.environ)
-
-    if ref is not None:
-        groups, transcripts, live, harness, tmux, self_name, _accounts = _attach_session_context(
-            resolved_env
-        )
-        _reject_self_named_host(hosts, self_name)
-        local_resolution = resolve_attach_ref(
-            ref,
-            harness=harness,
-            tmux=tmux,
-            transcripts=transcripts,
-            live_records=live,
-            groups=groups,
-            env=resolved_env,
-        )
-
-        def _probe(item: tuple[str, "Host"]):
-            name, host = item
-            try:
-                outcome = _transport.run_camp(
-                    host, ["attach", ref, "--resolve", "--json"], connect_timeout=connect_timeout
-                )
-            except Exception:
-                # A bug in this code, or a missing local `ssh`, must never
-                # render as a host that failed to answer via a traceback out
-                # of `pool.map` — see `host/merge.py`'s `_answer_one_host`.
-                return name, None
-            return name, _attach_resolve_answer(outcome)
-
-        probed: list[tuple[str, tuple[bool, str | None, str | None] | None]] = []
-        if host_items:
-            with concurrent.futures.ThreadPoolExecutor(
-                max_workers=len(host_items)
-            ) as pool:
-                probed = list(pool.map(_probe, host_items))
-
-        silent = [name for name, answer in probed if answer is None]
-        if silent:
-            named = ", ".join(sorted(silent))
-            _die(
-                f"camp attach: {named} did not answer while resolving {ref!r} — "
-                "the match count is unknown, so camp will not guess; re-run "
-                f"with --host <name> to attach without waiting on "
-                f"{'it' if len(silent) == 1 else 'them'}"
-            )
-
-        self_label = self_name or "this machine"
-
-        # Every machine holding a session the ref addresses counts as a
-        # match — including one that is ambiguous or stopped there. A local
-        # `Ambiguous`/`NotRunning` is itself evidence this machine matched;
-        # folding it into "no local match" would let a same-ref match
-        # elsewhere silently win the handoff even though this machine also
-        # holds (an ambiguous, or a stopped) session the ref names — exactly
-        # the wrong-guess risk `## State — the named session matches on more
-        # than one machine` exists to refuse. A remote `not_running` is the
-        # same fact on the far side, and is deliberately handed off rather
-        # than resolved here: the far side's own `camp attach <ref>` refuses
-        # in its own words when it is the sole match (mirrors `--host`).
-        matches: list[tuple[str, str]] = []
-        if isinstance(local_resolution, Resolved):
-            matches.append((self_label, local_resolution.candidate.session_id))
-        elif isinstance(local_resolution, Ambiguous):
-            matches.append(
-                (self_label, ", ".join(c.session_id for c in local_resolution.candidates))
-            )
-        elif isinstance(local_resolution, NotRunning):
-            matches.append((self_label, local_resolution.candidate.session_id))
-        for name, answer in probed:
-            if answer is None:
-                continue
-            ok, session_id, state = answer
-            if ok or state == "not_running":
-                matches.append((name, session_id or "matched"))
-
-        if not matches:
-            asked = ", ".join([self_label] + [n for n, _ in host_items])
-            _die(f"camp attach: no session on any declared machine matches {ref!r} (asked: {asked})")
-
-        if len(matches) > 1:
-            named = "; ".join(f"{machine} ({session})" for machine, session in matches)
-            _die(
-                f"camp attach: {ref!r} matches on more than one machine "
-                f"({named}) — re-run with --host <name> naming "
-                "the one you mean",
-                code=_AMBIGUOUS_EXIT_CODE,
-            )
-
-        winner = matches[0][0]
-        if winner == self_label:
-            if isinstance(local_resolution, Ambiguous):
-                _print_candidates(local_resolution.candidates, as_json=False)
-                _die(
-                    f"camp attach: {ref!r} matches {len(local_resolution.candidates)} "
-                    "sessions on this machine — re-run with a longer prefix naming "
-                    "exactly one",
-                    code=_AMBIGUOUS_EXIT_CODE,
-                )
-            if isinstance(local_resolution, NotRunning):
-                _die(
-                    f"camp attach: session {local_resolution.candidate.session_id} is "
-                    "not running — find its workspace with `camp sessions "
-                    "--recoverable` and reattach with `camp attach <slug>`"
-                )
-            assert isinstance(local_resolution, Resolved)
-            warn_if_nested(resolved_env)
-            handoff(local_argv(local_resolution.candidate.derived_name))
-            return
-
-        warn_if_nested(resolved_env)
-        handoff(remote_argv(hosts[winner], ref))
-        return
-
-    # Bare cross-host picker.
-    groups, transcripts, live, harness, tmux, self_name, _accounts = _attach_session_context(
-        resolved_env
-    )
-    _reject_self_named_host(hosts, self_name)
-    local_result = local_pool(
-        harness=harness,
-        tmux=tmux,
-        transcripts=transcripts,
-        live_records=live,
-        groups=groups,
-        env=resolved_env,
-        machine=self_name,
-    )
-    if isinstance(local_result, PoolUnreadable):
-        _die(f"camp attach: {local_result.reason}")
-
-    def _probe_list(item: tuple[str, "Host"]):
-        name, host = item
-        try:
-            outcome = _transport.run_camp(
-                host, ["attach", "--list", "--json"], connect_timeout=connect_timeout
-            )
-        except Exception as exc:
-            # Same posture as the ref-form probe above: a raise out of this
-            # code must render as a host that did not answer, not a
-            # traceback out of `pool.map`.
-            outcome = _transport.Unreachable(reason=str(exc))
-        return name, host, outcome
-
-    probed_list: list[tuple[str, "Host", object]] = []
-    if host_items:
-        with concurrent.futures.ThreadPoolExecutor(
-            max_workers=len(host_items)
-        ) as pool:
-            probed_list = list(pool.map(_probe_list, host_items))
-
-    rows = list(local_result.rows)
-    remote_hosts: dict[str, "Host"] = {}
-    for name, host, outcome in probed_list:
-        parsed = _attach_list_answer(outcome)
-        if parsed is None:
-            print(
-                f"camp attach: {name} did not answer — omitted from the picker",
-                file=sys.stderr,
-            )
-            continue
-        remote_hosts[name] = host
-        for row in parsed:
-            try:
-                session_id = row["session_id"]
-            except KeyError as e:
-                print(
-                    f"camp attach: {name} sent a row missing {e.args[0]!r} — "
-                    "skipping",
-                    file=sys.stderr,
-                )
-                continue
-            rows.append(
-                Row(
-                    machine=name,
-                    group=row.get("group"),
-                    slug=row.get("slug", ""),
-                    candidate=_RemoteAttachCandidate(session_id),
-                )
-            )
-
-    result = pick_session(
-        PoolReady(rows=tuple(rows)),
-        stdin=sys.stdin,
-        stdout=sys.stdout,
-        isatty=sys.stdin.isatty() and sys.stdout.isatty(),
-    )
-    if isinstance(result, PoolUnreadable):
-        _die(f"camp attach: {result.reason}")
-    if isinstance(result, NothingToOffer):
-        omitted = sorted(name for name, _ in host_items if name not in remote_hosts)
-        if omitted:
-            _die(
-                "camp attach: no running session found on this machine or any "
-                f"declared machine that answered — {', '.join(omitted)} did not "
-                "answer and could not be checked"
-            )
-        _die("camp attach: no running session found on this machine or any declared machine")
-    assert isinstance(result, Picked)
-    warn_if_nested(resolved_env)
-    if result.row.machine == self_name:
-        handoff(local_argv(result.row.candidate.derived_name))
-    else:
-        handoff(remote_argv(remote_hosts[result.row.machine], result.row.candidate.session_id))
-
-
 def _render_all_hosts_human(
     self_name: str | None,
     hosts: dict,
@@ -2087,17 +1639,14 @@ def _render_all_hosts_human(
     rendered rows.
 
     *render_rows* turns one machine's ok rows into its indented block's
-    lines — a table for `list`, one line per session for `sessions` — and
-    calls its `on_missing` argument with the key a malformed row lacked.
-    Version skew across the operator's declared machines is the expected
-    steady state for this feature, not an edge case — a machine running a
-    different version can answer with a row that omits a key the renderer
-    indexes directly. That ONE row is skipped with a notice naming the
-    machine, the same isolation the `--host` renderers
-    (`workspace.py`'s `_cmd_ls_host_cli`, `session.py`'s
-    `_cmd_sessions_host_cli`) already hold for their own single-machine
-    case — every other row on this machine, and every other machine, still
-    renders.
+    lines — a table for `list` — and calls its `on_missing` argument with
+    the key a malformed row lacked. Version skew across the operator's
+    declared machines is the expected steady state for this feature, not an
+    edge case — a machine running a different version can answer with a row
+    that omits a key the renderer indexes directly. That ONE row is skipped
+    with a notice naming the machine, the same isolation `workspace.py`'s
+    `_cmd_ls_host_cli` already holds for its own single-machine case — every
+    other row on this machine, and every other machine, still renders.
     """
     # Nothing in host/config.py checks a declared host name for uniqueness
     # against self_name (by design — see the module docstring), so the same
@@ -2201,11 +1750,6 @@ def _dispatch_group_command(
         return
     if cmd == "pwd":
         _cmd_pwd_group_cli(rest, group, group_env)
-        return
-    if cmd == "sessions":
-        from .session import _cmd_sessions_group_cli
-
-        _cmd_sessions_group_cli(rest, group, group_env)
         return
     if cmd == "transfer":
         _cmd_transfer_group_cli(rest, group, group_env, dry_run)
