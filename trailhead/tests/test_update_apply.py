@@ -36,6 +36,9 @@ def _env(tmp_path: Path) -> dict[str, str]:
         **os.environ,
         "TRAILHEAD_STATE_DIR": str(tmp_path / "state"),
         "HOME": str(home),
+        # Outpost is unconfigured unless a test writes a config here — never
+        # the developer's real outpost config.
+        "OUTPOST_CONFIG_DIR": str(tmp_path / "outpost-config"),
     }
 
 
@@ -828,3 +831,505 @@ class TestCheckoutAheadOfItsRemote:
         rc = update.run_update_apply(env=env, runner=runner, assume_yes=True)
 
         assert rc == 1
+
+
+# ---------------------------------------------------------------------------
+# Outpost — a configured outpost checkout is upgraded after the install
+# ---------------------------------------------------------------------------
+
+_OUTPOST_OLD = "c" * 40
+_OUTPOST_NEW = "d" * 40
+
+
+def _outpost_checkout(tmp_path: Path) -> Path:
+    path = tmp_path / "home" / "outpost"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _configure_outpost(env: dict[str, str], checkout: Path | str) -> None:
+    cfg = Path(env["OUTPOST_CONFIG_DIR"])
+    cfg.mkdir(parents=True, exist_ok=True)
+    (cfg / "config.toml").write_text(f'checkout = "{checkout}"\n')
+
+
+def _outpost_runner(
+    outpost_checkout: Path,
+    *,
+    trailhead_kw: dict | None = None,
+    status_stdout: str = "",
+    head: str = _OUTPOST_OLD,
+    remote: str = _OUTPOST_NEW,
+    remote_is_ancestor_rc: int = 1,
+    ancestor_rc: int = 0,
+    merge_rc: int = 0,
+    reset_rc: int = 0,
+):
+    """Route git calls by target checkout: the install's go to `_make_runner`,
+    outpost's to a stateful stub whose HEAD moves on a successful merge and
+    back on a successful reset."""
+    trailhead_runner, _ = _make_runner(**(trailhead_kw or {}))
+    calls: list[list[str]] = []
+    state = {"head": head}
+
+    def runner(args, **kw):
+        calls.append(list(args))
+        assert isinstance(args, list)
+        assert kw.get("shell") is not True
+        if args[2] != str(outpost_checkout):
+            return trailhead_runner(args, **kw)
+        sub = args[3]
+        if sub == "status":
+            return subprocess.CompletedProcess(args, 0, stdout=status_stdout, stderr="")
+        if sub == "fetch":
+            return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+        if sub == "rev-parse":
+            if args[4] == "--abbrev-ref":
+                return subprocess.CompletedProcess(args, 0, stdout=_BRANCH + "\n", stderr="")
+            if args[4] == "HEAD":
+                return subprocess.CompletedProcess(args, 0, stdout=state["head"] + "\n", stderr="")
+            return subprocess.CompletedProcess(args, 0, stdout=remote + "\n", stderr="")
+        if sub == "merge-base":
+            if args[5] == "--":
+                return subprocess.CompletedProcess(args, remote_is_ancestor_rc, stdout="", stderr="")
+            return subprocess.CompletedProcess(args, ancestor_rc, stdout="", stderr="")
+        if sub == "merge":
+            if merge_rc == 0:
+                state["head"] = remote
+            return subprocess.CompletedProcess(args, merge_rc, stdout="", stderr="merge boom")
+        if sub == "reset":
+            if reset_rc == 0:
+                state["head"] = args[-1]
+            return subprocess.CompletedProcess(args, reset_rc, stdout="", stderr="reset boom")
+        raise AssertionError(f"unexpected git invocation against outpost: {args}")
+
+    return runner, calls, state
+
+
+class _OutpostSpy:
+    """Records the outpost lifecycle steps apply drives, in order, and the
+    outpost HEAD each ran against. `fail` names steps that raise, and on which
+    call (1-based) — so a rollback's retry can be made to succeed or fail."""
+
+    def __init__(self, monkeypatch, state, *, running=False, fail=None):
+        self.steps: list[tuple[str, str]] = []
+        self._fail = fail or {}
+        self._counts: dict[str, int] = {}
+
+        def _step(name):
+            def run(*a, **kw):
+                self.steps.append((name, state["head"]))
+                self._counts[name] = self._counts.get(name, 0) + 1
+                if self._counts[name] in self._fail.get(name, ()):
+                    raise update.OutpostLifecycleError(f"{name} exploded")
+                return 0
+
+            return run
+
+        monkeypatch.setattr(update.outpost_lifecycle, "install_dependencies", _step("deps"))
+        monkeypatch.setattr(update.outpost_lifecycle, "build", _step("build"))
+        monkeypatch.setattr(update.outpost_lifecycle, "restart", _step("restart"))
+        monkeypatch.setattr(update.outpost_lifecycle, "is_answering", lambda *a, **k: running)
+
+    @property
+    def names(self) -> list[str]:
+        return [n for n, _ in self.steps]
+
+
+def _outpost_calls(calls, outpost_checkout: Path):
+    return [c for c in calls if c[2] == str(outpost_checkout)]
+
+
+def _patch_wire(monkeypatch) -> list[int]:
+    wired: list[int] = []
+    monkeypatch.setattr(update, "resolve_config_for_env", lambda e: _FakeCfg())
+    monkeypatch.setattr(update, "wire_all_harnesses", lambda *a, **k: wired.append(1))
+    return wired
+
+
+class TestOutpostUpgrade:
+    def test_unconfigured_outpost_is_never_touched(self, tmp_path, monkeypatch):
+        env = _env(tmp_path)
+        _install_stamp(tmp_path, env)
+        outpost = _outpost_checkout(tmp_path)
+        runner, calls, state = _outpost_runner(
+            outpost, trailhead_kw={"remote_branch_sha": _NEW_SHA, "probe_sha": _NEW_SHA}
+        )
+        spy = _OutpostSpy(monkeypatch, state)
+        _patch_wire(monkeypatch)
+
+        rc = update.run_update_apply(env=env, runner=runner, assume_yes=True)
+
+        assert rc == 0
+        assert _outpost_calls(calls, outpost) == []
+        assert spy.steps == []
+
+    def test_behind_outpost_is_fast_forwarded_installed_and_built_when_not_running(
+        self, tmp_path, monkeypatch
+    ):
+        env = _env(tmp_path)
+        _install_stamp(tmp_path, env)
+        outpost = _outpost_checkout(tmp_path)
+        _configure_outpost(env, outpost)
+        runner, calls, state = _outpost_runner(
+            outpost, trailhead_kw={"remote_branch_sha": _NEW_SHA, "probe_sha": _NEW_SHA}
+        )
+        spy = _OutpostSpy(monkeypatch, state, running=False)
+        _patch_wire(monkeypatch)
+
+        rc = update.run_update_apply(env=env, runner=runner, assume_yes=True)
+
+        assert rc == 0
+        assert [c[3] for c in _outpost_calls(calls, outpost)].count("merge") == 1
+        assert spy.steps == [("deps", _OUTPOST_NEW), ("build", _OUTPOST_NEW)]
+        assert read_stamp(env=env)["sha"] == _NEW_SHA
+
+    def test_a_running_daemon_is_restarted_rather_than_just_built(self, tmp_path, monkeypatch):
+        env = _env(tmp_path)
+        _install_stamp(tmp_path, env)
+        outpost = _outpost_checkout(tmp_path)
+        _configure_outpost(env, outpost)
+        runner, _calls, state = _outpost_runner(
+            outpost, trailhead_kw={"remote_branch_sha": _NEW_SHA, "probe_sha": _NEW_SHA}
+        )
+        spy = _OutpostSpy(monkeypatch, state, running=True)
+        _patch_wire(monkeypatch)
+
+        rc = update.run_update_apply(env=env, runner=runner, assume_yes=True)
+
+        assert rc == 0
+        assert spy.names == ["deps", "restart"]
+
+    def test_outpost_is_upgraded_even_when_the_install_is_already_current(
+        self, tmp_path, monkeypatch
+    ):
+        env = _env(tmp_path)
+        _install_stamp(tmp_path, env, sha=_OLD_SHA)
+        outpost = _outpost_checkout(tmp_path)
+        _configure_outpost(env, outpost)
+        runner, calls, state = _outpost_runner(
+            outpost,
+            trailhead_kw={"remote_branch_sha": _OLD_SHA, "head_sha": _OLD_SHA},
+        )
+        spy = _OutpostSpy(monkeypatch, state)
+        wired = _patch_wire(monkeypatch)
+
+        rc = update.run_update_apply(env=env, runner=runner, assume_yes=True)
+
+        assert rc == 0
+        assert wired == []
+        assert spy.names == ["deps", "build"]
+        assert state["head"] == _OUTPOST_NEW
+
+    def test_a_level_outpost_is_left_alone(self, tmp_path, monkeypatch):
+        env = _env(tmp_path)
+        _install_stamp(tmp_path, env)
+        outpost = _outpost_checkout(tmp_path)
+        _configure_outpost(env, outpost)
+        runner, calls, state = _outpost_runner(
+            outpost,
+            trailhead_kw={"remote_branch_sha": _NEW_SHA, "probe_sha": _NEW_SHA},
+            head=_OUTPOST_NEW,
+            remote=_OUTPOST_NEW,
+        )
+        spy = _OutpostSpy(monkeypatch, state)
+        _patch_wire(monkeypatch)
+
+        rc = update.run_update_apply(env=env, runner=runner, assume_yes=True)
+
+        assert rc == 0
+        assert "merge" not in [c[3] for c in _outpost_calls(calls, outpost)]
+        assert spy.steps == []
+
+    def test_a_dirty_outpost_refuses_the_whole_upgrade_before_any_mutation(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        env = _env(tmp_path)
+        _install_stamp(tmp_path, env)
+        outpost = _outpost_checkout(tmp_path)
+        _configure_outpost(env, outpost)
+        runner, calls, state = _outpost_runner(
+            outpost,
+            trailhead_kw={"remote_branch_sha": _NEW_SHA, "probe_sha": _NEW_SHA},
+            status_stdout=" M server/index.ts\n",
+        )
+        spy = _OutpostSpy(monkeypatch, state)
+        wired = _patch_wire(monkeypatch)
+
+        rc = update.run_update_apply(env=env, runner=runner, assume_yes=True)
+
+        assert rc == 1
+        assert not any(c[3] in ("fetch", "merge", "reset") for c in calls)
+        assert wired == [] and spy.steps == []
+        assert read_stamp(env=env)["sha"] == _OLD_SHA
+        err = capsys.readouterr().err
+        assert err.startswith("trailhead: ")
+        assert str(outpost) in err
+
+    def test_an_unusable_outpost_config_refuses_before_any_git_runs(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        env = _env(tmp_path)
+        _install_stamp(tmp_path, env)
+        _configure_outpost(env, "relative/outpost")
+        runner, calls, state = _outpost_runner(_outpost_checkout(tmp_path))
+        _OutpostSpy(monkeypatch, state)
+        _patch_wire(monkeypatch)
+
+        rc = update.run_update_apply(env=env, runner=runner, assume_yes=True)
+
+        assert rc == 1
+        assert calls == []
+        assert "absolute" in capsys.readouterr().err
+
+    def test_a_diverged_outpost_keeps_the_install_upgrade_and_reports_failure(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        env = _env(tmp_path)
+        _install_stamp(tmp_path, env)
+        outpost = _outpost_checkout(tmp_path)
+        _configure_outpost(env, outpost)
+        runner, calls, state = _outpost_runner(
+            outpost,
+            trailhead_kw={"remote_branch_sha": _NEW_SHA, "probe_sha": _NEW_SHA},
+            ancestor_rc=1,
+        )
+        spy = _OutpostSpy(monkeypatch, state)
+        _patch_wire(monkeypatch)
+
+        rc = update.run_update_apply(env=env, runner=runner, assume_yes=True)
+
+        assert rc == 1
+        assert read_stamp(env=env)["sha"] == _NEW_SHA
+        assert "merge" not in [c[3] for c in _outpost_calls(calls, outpost)]
+        assert spy.steps == []
+        err = capsys.readouterr().err
+        assert "diverged" in err and str(outpost) in err
+
+    def test_a_failed_build_rolls_outpost_back_and_rebuilds_the_prior_version(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        env = _env(tmp_path)
+        _install_stamp(tmp_path, env)
+        outpost = _outpost_checkout(tmp_path)
+        _configure_outpost(env, outpost)
+        runner, calls, state = _outpost_runner(
+            outpost, trailhead_kw={"remote_branch_sha": _NEW_SHA, "probe_sha": _NEW_SHA}
+        )
+        spy = _OutpostSpy(monkeypatch, state, fail={"build": (1,)})
+        _patch_wire(monkeypatch)
+
+        rc = update.run_update_apply(env=env, runner=runner, assume_yes=True)
+
+        assert rc == 1
+        assert state["head"] == _OUTPOST_OLD
+        assert spy.steps == [
+            ("deps", _OUTPOST_NEW),
+            ("build", _OUTPOST_NEW),
+            ("deps", _OUTPOST_OLD),
+            ("build", _OUTPOST_OLD),
+        ]
+        assert read_stamp(env=env)["sha"] == _NEW_SHA, "the install upgrade is kept"
+        err = capsys.readouterr().err
+        assert "build exploded" in err
+        assert "restored" in err
+
+    def test_a_failed_restart_rolls_back_and_restarts_the_prior_version(
+        self, tmp_path, monkeypatch
+    ):
+        env = _env(tmp_path)
+        _install_stamp(tmp_path, env)
+        outpost = _outpost_checkout(tmp_path)
+        _configure_outpost(env, outpost)
+        runner, _calls, state = _outpost_runner(
+            outpost, trailhead_kw={"remote_branch_sha": _NEW_SHA, "probe_sha": _NEW_SHA}
+        )
+        spy = _OutpostSpy(monkeypatch, state, running=True, fail={"restart": (1,)})
+        _patch_wire(monkeypatch)
+
+        rc = update.run_update_apply(env=env, runner=runner, assume_yes=True)
+
+        assert rc == 1
+        assert spy.steps[-2:] == [("deps", _OUTPOST_OLD), ("restart", _OUTPOST_OLD)]
+
+    def test_a_rollback_whose_rebuild_also_fails_says_so(self, tmp_path, monkeypatch, capsys):
+        env = _env(tmp_path)
+        _install_stamp(tmp_path, env)
+        outpost = _outpost_checkout(tmp_path)
+        _configure_outpost(env, outpost)
+        runner, _calls, state = _outpost_runner(
+            outpost, trailhead_kw={"remote_branch_sha": _NEW_SHA, "probe_sha": _NEW_SHA}
+        )
+        _OutpostSpy(monkeypatch, state, fail={"build": (1, 2)})
+        _patch_wire(monkeypatch)
+
+        rc = update.run_update_apply(env=env, runner=runner, assume_yes=True)
+
+        assert rc == 1
+        assert state["head"] == _OUTPOST_OLD
+        err = capsys.readouterr().err
+        assert "could NOT be rebuilt" in err
+        assert "restored" not in err
+
+    def test_a_rollback_whose_reset_fails_names_the_manual_repair(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        env = _env(tmp_path)
+        _install_stamp(tmp_path, env)
+        outpost = _outpost_checkout(tmp_path)
+        _configure_outpost(env, outpost)
+        runner, _calls, state = _outpost_runner(
+            outpost,
+            trailhead_kw={"remote_branch_sha": _NEW_SHA, "probe_sha": _NEW_SHA},
+            reset_rc=1,
+        )
+        spy = _OutpostSpy(monkeypatch, state, fail={"deps": (1,)})
+        _patch_wire(monkeypatch)
+
+        rc = update.run_update_apply(env=env, runner=runner, assume_yes=True)
+
+        assert rc == 1
+        assert spy.names == ["deps"], "nothing is rebuilt on top of a failed reset"
+        err = capsys.readouterr().err
+        assert f"git -C {outpost} reset --hard {_OUTPOST_OLD}" in err
+
+    def test_dry_run_names_outpost_and_mutates_nothing(self, tmp_path, monkeypatch, capsys):
+        env = _env(tmp_path)
+        _install_stamp(tmp_path, env)
+        outpost = _outpost_checkout(tmp_path)
+        _configure_outpost(env, outpost)
+        runner, calls, state = _outpost_runner(outpost)
+        spy = _OutpostSpy(monkeypatch, state)
+        wired = _patch_wire(monkeypatch)
+
+        rc = update.run_update_apply(env=env, runner=runner, dry_run=True)
+
+        assert rc == 0
+        assert not any(c[3] in ("fetch", "merge", "reset") for c in calls)
+        assert wired == [] and spy.steps == []
+        assert str(outpost) in capsys.readouterr().out
+
+    def test_the_confirmation_prompt_names_the_outpost_checkout(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        env = _env(tmp_path)
+        _install_stamp(tmp_path, env)
+        outpost = _outpost_checkout(tmp_path)
+        _configure_outpost(env, outpost)
+        runner, calls, state = _outpost_runner(outpost)
+        _OutpostSpy(monkeypatch, state)
+        _patch_wire(monkeypatch)
+        monkeypatch.setattr(sys, "stdin", StringIO("n\n"))
+
+        rc = update.run_update_apply(env=env, runner=runner, is_tty=lambda: True)
+
+        assert rc == 0
+        assert calls == []
+        assert str(outpost) in capsys.readouterr().out
+
+
+class TestRealOutpostRollback:
+    def test_a_failed_outpost_build_restores_the_real_checkout(self, tmp_path, monkeypatch):
+        env = _env(tmp_path)
+        _origin, checkout, old_sha, new_sha = _init_real_repo_pair(tmp_path)
+        from trailhead import provenance
+
+        provenance._atomic_write_json(
+            provenance.stamp_path(env=env),
+            {"checkout": str(checkout), "sha": new_sha, "wired_at": "2026-01-01T00:00:00Z", "last_check": None},
+        )
+        _run_git_real(checkout, "merge", "--ff-only", "origin/main")
+
+        outpost_root = tmp_path / "outpost-repos"
+        outpost_root.mkdir()
+        _o_origin, outpost, o_old, o_new = _init_real_repo_pair(outpost_root)
+        _configure_outpost(env, outpost)
+
+        built_at: list[str] = []
+
+        def _build(*a, **kw):
+            head = _run_git_real(outpost, "rev-parse", "HEAD").stdout.strip()
+            built_at.append(head)
+            if head == o_new:
+                raise update.OutpostLifecycleError("tsc failed")
+
+        monkeypatch.setattr(update.outpost_lifecycle, "install_dependencies", lambda *a, **k: None)
+        monkeypatch.setattr(update.outpost_lifecycle, "build", _build)
+        monkeypatch.setattr(update.outpost_lifecycle, "is_answering", lambda *a, **k: False)
+        _patch_wire(monkeypatch)
+
+        rc = update.run_update_apply(env=env, runner=_real_runner, assume_yes=True)
+
+        assert rc == 1
+        assert _run_git_real(outpost, "rev-parse", "HEAD").stdout.strip() == o_old
+        assert built_at == [o_new, o_old]
+
+
+class TestOutpostWaitsOnTheInstall:
+    def test_a_failed_install_upgrade_never_touches_outpost(self, tmp_path, monkeypatch):
+        env = _env(tmp_path)
+        _install_stamp(tmp_path, env)
+        outpost = _outpost_checkout(tmp_path)
+        _configure_outpost(env, outpost)
+        runner, calls, state = _outpost_runner(
+            outpost, trailhead_kw={"remote_branch_sha": _NEW_SHA, "probe_sha": _NEW_SHA}
+        )
+        spy = _OutpostSpy(monkeypatch, state)
+        monkeypatch.setattr(update, "resolve_config_for_env", lambda e: _FakeCfg())
+
+        def _failing_wire(*a, **k):
+            raise WireError(tool="craft", stage="register", cause=RuntimeError("boom"))
+
+        monkeypatch.setattr(update, "wire_all_harnesses", _failing_wire)
+
+        rc = update.run_update_apply(env=env, runner=runner, assume_yes=True)
+
+        assert rc == 1
+        assert not any(c[3] in ("fetch", "merge", "reset") for c in _outpost_calls(calls, outpost))
+        assert spy.steps == []
+
+    def test_an_upstreamless_outpost_names_the_config_escape_hatch(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        env = _env(tmp_path)
+        _install_stamp(tmp_path, env)
+        outpost = _outpost_checkout(tmp_path)
+        _configure_outpost(env, outpost)
+        inner, calls, state = _outpost_runner(outpost)
+        _OutpostSpy(monkeypatch, state)
+        wired = _patch_wire(monkeypatch)
+
+        def runner(args, **kw):
+            if args[2] == str(outpost) and args[3] == "rev-parse" and args[4] == "--abbrev-ref":
+                calls.append(list(args))
+                return subprocess.CompletedProcess(args, 128, stdout="", stderr="no upstream")
+            return inner(args, **kw)
+
+        rc = update.run_update_apply(env=env, runner=runner, assume_yes=True)
+
+        assert rc == 1
+        assert wired == []
+        assert not any(c[3] in ("fetch", "merge") for c in calls)
+        assert "'checkout' key in the outpost config" in capsys.readouterr().err
+
+    def test_an_outpost_fetch_failure_keeps_the_install_upgrade(self, tmp_path, monkeypatch):
+        env = _env(tmp_path)
+        _install_stamp(tmp_path, env)
+        outpost = _outpost_checkout(tmp_path)
+        _configure_outpost(env, outpost)
+        inner, _calls, state = _outpost_runner(
+            outpost, trailhead_kw={"remote_branch_sha": _NEW_SHA, "probe_sha": _NEW_SHA}
+        )
+        spy = _OutpostSpy(monkeypatch, state)
+        _patch_wire(monkeypatch)
+
+        def runner(args, **kw):
+            if args[2] == str(outpost) and args[3] == "fetch":
+                return subprocess.CompletedProcess(args, 128, stdout="", stderr="denied")
+            return inner(args, **kw)
+
+        rc = update.run_update_apply(env=env, runner=runner, assume_yes=True)
+
+        assert rc == 1
+        assert read_stamp(env=env)["sha"] == _NEW_SHA
+        assert spy.steps == []

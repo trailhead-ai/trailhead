@@ -29,6 +29,7 @@ from pathlib import Path
 from trailhead.tests.fixtures.update_check_schema import (
     BEHIND_EXAMPLE,
     OK_EXAMPLE,
+    OUTPOST_BEHIND_EXAMPLE,
     UNANSWERABLE_NO_STAMP_EXAMPLE,
 )
 
@@ -712,3 +713,87 @@ class TestNullInstallGapStillNotifies:
         assert out is not None
         assert "checkout is 2 commits behind" in out
         assert "install is" not in out
+
+
+class TestOutpostGap:
+    """A configured outpost checkout behind its tracked branch is reported
+    alongside the install's own gaps — including when the install itself is
+    current, since `trailhead update` is also what brings outpost forward."""
+
+    def _render(self, tmp_path, result):
+        env = _env(tmp_path)
+        _write_stamp(tmp_path, env, _checkout(tmp_path))
+        runner, _ = _spy_runner(result)
+        return hook.check_and_render(env=env, runner=runner)
+
+    def test_outpost_alone_behind_notifies_with_its_gap_and_the_offer(self, tmp_path):
+        out = self._render(tmp_path, OUTPOST_BEHIND_EXAMPLE)
+
+        assert out is not None
+        assert "Outpost checkout is 2 commits behind its tracked branch" in out
+        assert "install is" not in out
+        assert "trailhead update" in out
+
+    def test_install_and_outpost_gaps_are_both_named(self, tmp_path):
+        out = self._render(
+            tmp_path, {**_BEHIND, "outpost": OUTPOST_BEHIND_EXAMPLE["outpost"]}
+        )
+
+        assert "source checkout is 3 commits behind" in out
+        assert "Outpost checkout is 2 commits behind" in out
+
+    def test_outpost_ok_with_a_current_install_stays_quiet(self, tmp_path):
+        result = {
+            **OK_EXAMPLE,
+            "outpost": {"outcome": "ok", "commits_behind": 0, "reason": None},
+        }
+        assert self._render(tmp_path, result) is None
+
+    def test_unanswerable_outpost_with_a_current_install_stays_quiet(self, tmp_path):
+        result = {
+            **OK_EXAMPLE,
+            "outpost": {"outcome": "unanswerable", "commits_behind": None, "reason": "x"},
+        }
+        assert self._render(tmp_path, result) is None
+
+    def test_a_non_integer_outpost_count_is_ignored(self, tmp_path):
+        result = {
+            **OK_EXAMPLE,
+            "outpost": {"outcome": "behind", "commits_behind": "2; rm -rf ~", "reason": None},
+        }
+        assert self._render(tmp_path, result) is None
+
+    def test_a_producer_predating_the_outpost_field_still_notifies_for_the_install(
+        self, tmp_path
+    ):
+        legacy = {k: v for k, v in _BEHIND.items() if k != "outpost"}
+        legacy["schema_version"] = 3
+
+        out = self._render(tmp_path, legacy)
+
+        assert out is not None
+        assert "source checkout is 3 commits behind" in out
+        assert "Outpost" not in out
+
+
+class TestOutpostOnlyNoticeCarriesNoChangelogBlock:
+    """The changelog delta describes the install's gap. A notice raised only
+    by outpost has no install gap, so it must not present a delta block as if
+    it explained one."""
+
+    def test_outpost_only_notice_has_no_fence(self, tmp_path):
+        env = _env(tmp_path)
+        _write_stamp(tmp_path, env, _checkout(tmp_path))
+        runner, _ = _spy_runner(OUTPOST_BEHIND_EXAMPLE)
+
+        out = hook.check_and_render(env=env, runner=runner)
+
+        assert out is not None
+        assert "```" not in out
+
+    def test_install_gap_notice_keeps_its_fence(self, tmp_path):
+        env = _env(tmp_path)
+        _write_stamp(tmp_path, env, _checkout(tmp_path))
+        runner, _ = _spy_runner(_BEHIND)
+
+        assert "```" in hook.check_and_render(env=env, runner=runner)
