@@ -247,10 +247,12 @@ def _stream_rest_of_overlong_line(f_in: BinaryIO, f_out: BinaryIO) -> None:
             return
 
 
-#: Matches a top-level ``"cwd"`` object key and its JSON string value in a
-#: transcript line's raw bytes. Group 1 is the key, colon, and any
-#: surrounding whitespace, preserved verbatim; group 2 is the value's raw
-#: (still-escaped) content between the quotes.
+#: Matches a ``"cwd"`` object key and its JSON string value in a transcript
+#: line's raw bytes, at any nesting depth — a record can carry nested objects
+#: with their own ``cwd`` key (per-tool ingest context on an assistant
+#: record), serialized ahead of the record's top-level one. Group 1 is the
+#: key, colon, and any surrounding whitespace, preserved verbatim; group 2 is
+#: the value's raw (still-escaped) content between the quotes.
 #:
 #: An occurrence of ``cwd`` inside escaped JSON-string *content* — free prose
 #: quoting another record, e.g. ``\"cwd\":\"...\"`` — does not match: the
@@ -271,8 +273,8 @@ def _rewrite_transcript_line(
     root, so none of them are this transform's business.
 
     The rewrite is a targeted byte substitution, not a re-serialization: only
-    the bytes of the ``cwd`` value's own JSON string literal are replaced
-    (via :data:`_CWD_FIELD_RE`), so every other byte on the line — separator
+    the bytes of ``cwd`` values' own JSON string literals are replaced (via
+    :data:`_CWD_FIELD_RE`), so every other byte on the line — separator
     spacing, key order, other fields' escaping and number formatting — is
     untouched. This is required, not cosmetic:
     ``Harness.rewrite_transcript_workspace``'s contract is byte-identical
@@ -281,12 +283,17 @@ def _rewrite_transcript_line(
     Python's own JSON spacing, silently breaking that contract on a real,
     compactly-written transcript.
 
-    Raises :class:`HarnessError`, naming ``source``, when ``cwd`` IS an
-    absolute path but is not under ``old_root`` — a foreign, sending-host root
-    this transform must refuse rather than relocate — and also when ``cwd``
-    was decoded from the line but this pattern cannot locate its own literal
-    bytes to substitute, which would otherwise force a fall back to
-    re-serialization.
+    Every ``cwd`` key on the line whose value lies under ``old_root`` moves —
+    the top-level root and any nested one, since both record the same
+    sending host's layout; a nested value elsewhere is left as it is. The
+    substituted line is decoded again to prove its top-level ``cwd`` is the
+    relocated root, so a nested key can never be rewritten in its place.
+
+    Raises :class:`HarnessError`, naming ``source``, when the top-level
+    ``cwd`` IS an absolute path but is not under ``old_root`` — a foreign,
+    sending-host root this transform must refuse rather than relocate — and
+    also when the substitution does not leave the top-level ``cwd`` relocated,
+    which would otherwise force a fall back to re-serialization.
     """
     ends_in_newline = chunk.endswith(b"\n")
     body = chunk[:-1] if ends_in_newline else chunk
@@ -312,16 +319,30 @@ def _rewrite_transcript_line(
             f"({cwd_path}) outside {old_root}; refusing to rewrite the "
             "transcript rather than pass a foreign root through unrewritten"
         )
-    match = _CWD_FIELD_RE.search(body)
-    if match is None or json.loads(b'"' + match.group(2) + b'"') != cwd:
+
+    def relocate(match: re.Match[bytes]) -> bytes:
+        try:
+            value = json.loads(b'"' + match.group(2) + b'"')
+        except ValueError:
+            return match.group(0)
+        value_path = Path(value)
+        if not value_path.is_absolute() or not value_path.is_relative_to(old_root):
+            return match.group(0)
+        new_value = str(new_root / value_path.relative_to(old_root))
+        return match.group(1) + json.dumps(new_value).encode("utf-8")
+
+    new_body = _CWD_FIELD_RE.sub(relocate, body)
+    expected = str(new_root / cwd_path.relative_to(old_root))
+    try:
+        relocated = json.loads(new_body)
+    except ValueError:
+        relocated = None
+    if not isinstance(relocated, dict) or relocated.get("cwd") != expected:
         raise HarnessError(
             f"rewrite_transcript_workspace: {source.name} records a cwd this "
             "transform cannot byte-preservingly locate; refusing rather than "
             "falling back to re-serializing the line"
         )
-    new_value = str(new_root / cwd_path.relative_to(old_root))
-    replacement = match.group(1) + json.dumps(new_value).encode("utf-8")
-    new_body = body[: match.start()] + replacement + body[match.end() :]
     return new_body + b"\n" if ends_in_newline else new_body
 
 
