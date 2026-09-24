@@ -306,6 +306,45 @@ class TestNestedSubtree:
         for name in members:
             assert not Path(name).is_absolute()
 
+    def test_a_linked_subagent_transcript_arrives_as_its_content(self, tmp_path: Path) -> None:
+        """A continued session's own directory can hold absolute symlinks to
+        subagent transcripts that live under the session it continued from.
+        The link means nothing on the peer, whose extraction refuses a link
+        pointing outside the conversation — so the file's content crosses,
+        and the peer places it as a regular file."""
+        from camp.transfer.conversations import (
+            build_conversation_archive_argv,
+            extract_conversation_archive,
+        )
+
+        project_dir = tmp_path / "projects" / "munged"
+        earlier = project_dir / _UUID_MEMBER / "subagents"
+        earlier.mkdir(parents=True)
+        linked_target = earlier / "agent-deadbeef.jsonl"
+        linked_target.write_text('{"cwd": "/ws", "from": "earlier session"}\n')
+
+        transcript_path = project_dir / f"{_UUID_ROOT}.jsonl"
+        transcript_path.write_text('{"cwd": "/ws"}\n')
+        nested_dir = project_dir / _UUID_ROOT
+        (nested_dir / "subagents").mkdir(parents=True)
+        (nested_dir / "subagents" / "agent-deadbeef.jsonl").symlink_to(linked_target)
+
+        proc = subprocess.run(
+            build_conversation_archive_argv(transcript_path, nested_dir),
+            capture_output=True,
+            check=True,
+        )
+
+        peer = tmp_path / "peer"
+        peer.mkdir()
+        extract_conversation_archive(
+            io.BytesIO(proc.stdout), peer / f"{_UUID_ROOT}.jsonl", peer / _UUID_ROOT
+        )
+
+        placed = peer / _UUID_ROOT / "subagents" / "agent-deadbeef.jsonl"
+        assert not placed.is_symlink()
+        assert placed.read_text() == linked_target.read_text()
+
     def test_conversation_with_no_subtree_streams_just_its_own_transcript(
         self, tmp_path: Path
     ) -> None:
