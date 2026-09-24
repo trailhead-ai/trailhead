@@ -1823,8 +1823,10 @@ class TestConversationAccountBinding:
         g["group"]["launch"] = {"account": str(account_dir)}
         session_id = "55555555-5555-4555-8555-555555555555"
 
+        nested_line = json.dumps({"cwd": SENDER_ROOT, "type": "agent"}).encode() + b"\n"
         archive = _archive_bytes(
-            json.dumps({"cwd": SENDER_ROOT, "type": "summary"}).encode() + b"\n"
+            json.dumps({"cwd": SENDER_ROOT, "type": "summary"}).encode() + b"\n",
+            nested={"subagents/agent-1.jsonl": nested_line},
         )
 
         result = receive.conversations(
@@ -1845,6 +1847,17 @@ class TestConversationAccountBinding:
         assert found is not None
         record = json.loads(found.read_text().splitlines()[0])
         assert record["cwd"] == str(ws_root)
+
+        # The nested subagent tree the conversation carried must land under
+        # the same declared-account store as the top-level transcript, not
+        # the default one — derived from the account-bound transcript's own
+        # location, exactly as `test_nested_transcript_recorded_root_rewritten`
+        # derives it from the default store's.
+        nested_path = found.parent / session_id / "subagents" / "agent-1.jsonl"
+        assert nested_path.is_file()
+        nested_record = json.loads(nested_path.read_text().splitlines()[0])
+        assert nested_record["cwd"] == str(ws_root)
+        assert nested_record["type"] == "agent"
 
         default_claude_dir = default_home / ".claude"
         assert not default_claude_dir.exists()
