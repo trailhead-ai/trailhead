@@ -23,6 +23,10 @@ Test contract (all must RED before implementation, GREEN after):
   end when the peer reported such a commit.
 - a basis commit that is not a plausible git object-id shape is refused with
   a clear message before it reaches git's own argv parsing.
+- a branch the peer already fully holds — its tip IS the basis, or an
+  ancestor of it (a workspace with no commits of its own, or one whose base
+  moved on past it) — still bundles and lands at that tip, including when
+  the tip is a root commit.
 """
 
 from __future__ import annotations
@@ -306,6 +310,68 @@ class TestBundleNegatived:
 
         assert full_landed == g["tip"]
         assert neg_landed == g["tip"]
+
+
+def _commit(repo: Path, name: str) -> str:
+    (repo / name).write_text(f"{name}\n")
+    _git(repo, "add", name)
+    _git(repo, "-c", "user.email=t@t.com", "-c", "user.name=t", "commit", "-m", name, "--no-gpg-sign")
+    return _git_out(repo, "rev-parse", "HEAD")
+
+
+class TestBranchAlreadyHeldByPeer:
+    """The peer's basis already contains the branch tip, so negativing
+    against it leaves nothing to bundle — the transfer must still land the
+    branch at its tip rather than fail on git's "Refusing to create empty
+    bundle"."""
+
+    def _land(self, tmp_path: Path, sender_repo: Path, branch: str, basis: str) -> str:
+        from camp.transfer import receive
+
+        bundle = _bundle_bytes(sender_repo, branch, basis_commit=basis)
+        peer_repo = tmp_path / "peer_repo_a"
+        subprocess.run(
+            ["git", "clone", "--quiet", "--branch", "main", str(sender_repo), str(peer_repo)],
+            check=True,
+            capture_output=True,
+        )
+        receive.history(
+            groups=[_member_group(peer_repo)],
+            group_name="testgroup",
+            slug="feat-x",
+            member="repo_a",
+            bundle_bytes=bundle,
+            env=camp_state_env(tmp_path / "peer-state"),
+        )
+        return _git_out(peer_repo, "rev-parse", f"refs/heads/{branch}")
+
+    def test_branch_with_no_commits_of_its_own_lands_at_its_tip(self, tmp_path: Path):
+        sender_repo = tmp_path / "sender"
+        init_git_repo(sender_repo, origin=True)
+        tip = _commit(sender_repo, "second.txt")
+        branch = "worktree-feat-x"
+        _git(sender_repo, "branch", branch)
+
+        assert self._land(tmp_path, sender_repo, branch, basis=tip) == tip
+
+    def test_branch_behind_the_peer_basis_lands_at_its_tip(self, tmp_path: Path):
+        sender_repo = tmp_path / "sender"
+        init_git_repo(sender_repo, origin=True)
+        tip = _commit(sender_repo, "second.txt")
+        branch = "worktree-feat-x"
+        _git(sender_repo, "branch", branch)
+        basis = _commit(sender_repo, "third.txt")
+
+        assert self._land(tmp_path, sender_repo, branch, basis=basis) == tip
+
+    def test_branch_at_a_root_commit_the_peer_holds_lands_at_its_tip(self, tmp_path: Path):
+        sender_repo = tmp_path / "sender"
+        init_git_repo(sender_repo, origin=True)
+        tip = _git_out(sender_repo, "rev-parse", "HEAD")
+        branch = "worktree-feat-x"
+        _git(sender_repo, "branch", branch)
+
+        assert self._land(tmp_path, sender_repo, branch, basis=tip) == tip
 
 
 class TestMissingPrerequisite:

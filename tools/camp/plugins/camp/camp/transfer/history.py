@@ -110,8 +110,29 @@ def build_bundle_argv(repo_root: Path, ref: str, *, basis_commit: str | None) ->
         if not _BASIS_COMMIT_RE.match(basis_commit):
             raise InvalidBasisCommit(basis_commit)
         if _sender_holds_commit(repo_root, basis_commit):
-            argv += ["--not", basis_commit]
+            argv += _negation_for(repo_root, ref, basis_commit)
     return argv
+
+
+def _negation_for(repo_root: Path, ref: str, basis_commit: str) -> list[str]:
+    """The `--not` tail that shrinks *ref*'s bundle against *basis_commit*.
+
+    When *basis_commit* already contains *ref*'s tip — a workspace branch
+    with no commits of its own, or one its base has since moved past —
+    negativing against it leaves nothing to bundle, and git refuses an empty
+    bundle outright. The branch still has to cross (the peer creates it from
+    the bundle's named tip), so negative against the tip's parents instead:
+    the bundle then carries the tip commit alone, whose prerequisites the
+    peer holds because *basis_commit* contains them. A root-commit tip has no
+    parent to negative against, so it goes as a full bundle — one commit.
+    """
+    from ..gitutil import _git, _git_out
+
+    contained = _git(repo_root, "merge-base", "--is-ancestor", ref, basis_commit).returncode == 0
+    if not contained:
+        return ["--not", basis_commit]
+    parents = _git_out(repo_root, "rev-list", "--parents", "-n", "1", ref).split()[1:]
+    return ["--not", *parents] if parents else []
 
 
 def send_history(
