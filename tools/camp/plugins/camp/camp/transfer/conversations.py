@@ -383,8 +383,15 @@ def write_conversation_archive(
     top-level transcript as `transcript.jsonl`, then every file under
     *nested_dir*, whatever its extension, named by its path relative to
     *nested_dir*. See the module docstring for the exact member-naming
-    contract."""
-    with tarfile.open(fileobj=fileobj, mode="w|") as tf:
+    contract.
+
+    A symlink is archived as the file it points to. A continued session's
+    own directory links subagent transcripts that live under the session it
+    continued from, by absolute path on this host — a link that means
+    nothing on the peer, whose extraction refuses a target outside the
+    conversation. The content is what the conversation owns, so the content
+    crosses."""
+    with tarfile.open(fileobj=fileobj, mode="w|", dereference=True) as tf:
         for name, path in _conversation_files(transcript_path, nested_dir):
             tf.add(str(path), arcname=name)
 
