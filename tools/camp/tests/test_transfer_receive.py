@@ -52,6 +52,14 @@ Test contract (all must RED before implementation, GREEN after):
 - an unresolvable recorded root (the peer cannot determine where the
   conversation ran) refuses by name rather than silently landing an
   un-rewritten transcript, and nothing of the conversation is left behind.
+- a group declaring `[launch] account` lands the arriving conversation under
+  that account's own store, not the default one, and the default store stays
+  untouched.
+- the same conversation into a group with no declared account still lands in
+  the default store.
+- a group whose declared account cannot be bound is refused as
+  `ConversationDestinationRefused`, naming the harness's own binding reason,
+  and neither store gains a file.
 """
 
 from __future__ import annotations
@@ -1780,3 +1788,132 @@ class TestConversationUnknownRootRefused:
         # them: a leftover would be an un-rewritten transcript surviving a
         # refusal under a name nothing else looks for.
         assert list(claude_dir.rglob("*rewrite-staged*")) == []
+
+
+# ---------------------------------------------------------------------------
+# conversations — the group's declared [launch] account, not the default
+# store, decides where an arriving conversation lands
+# ---------------------------------------------------------------------------
+
+
+def _account_env(g: dict, *, home: Path) -> dict[str, str]:
+    """*g*'s own `camp_state_env`, plus an explicit `HOME` this test controls
+    (never the real one — Axiom 6) and deliberately NO `TRAILHEAD_CLAUDE_DIR`:
+    that seam and a declared `[launch] account` resolving to a different
+    directory are a real conflict `session_launch_env_set` refuses, so a test
+    exercising account binding must let `HOME` alone decide the default
+    store's location."""
+    env = dict(g["env"])
+    env["HOME"] = str(home)
+    return env
+
+
+class TestConversationAccountBinding:
+    def test_declared_account_lands_conversation_there_and_default_store_stays_untouched(
+        self, one_member_group
+    ):
+        from camp.transfer import receive
+        from trailhead.harness.claude_code import ClaudeCodeHarness
+
+        g = one_member_group
+        ws_root = _seed_workspace(g, "feat-x")
+        default_home = g["tmp_path"] / "default-home"
+        account_dir = g["tmp_path"] / "declared-account"
+        env = _account_env(g, home=default_home)
+        g["group"]["launch"] = {"account": str(account_dir)}
+        session_id = "55555555-5555-4555-8555-555555555555"
+
+        archive = _archive_bytes(
+            json.dumps({"cwd": SENDER_ROOT, "type": "summary"}).encode() + b"\n"
+        )
+
+        result = receive.conversations(
+            groups=[g["group"]],
+            group_name="testgroup",
+            slug="feat-x",
+            session_id=session_id,
+            subpath=".",
+            archive_stream=io.BytesIO(archive),
+            env=env,
+        )
+
+        assert result["session_id"] == session_id
+
+        account_env = {**env, "CLAUDE_CONFIG_DIR": str(account_dir)}
+        harness = ClaudeCodeHarness()
+        found = harness.session_transcript_path(session_id, ws_root, env=account_env)
+        assert found is not None
+        record = json.loads(found.read_text().splitlines()[0])
+        assert record["cwd"] == str(ws_root)
+
+        default_claude_dir = default_home / ".claude"
+        assert not default_claude_dir.exists()
+
+    def test_no_declared_account_still_lands_in_the_default_store(self, one_member_group):
+        """The branch that must not move: a group with no `[launch] account`
+        keeps landing in the default store, exactly as before this binding
+        was introduced."""
+        from camp.transfer import receive
+        from trailhead.harness.claude_code import ClaudeCodeHarness
+
+        g = one_member_group
+        ws_root = _seed_workspace(g, "feat-x")
+        env = _conversation_env(g)
+        session_id = "66666666-6666-4666-8666-666666666666"
+
+        archive = _archive_bytes(
+            json.dumps({"cwd": SENDER_ROOT, "type": "summary"}).encode() + b"\n"
+        )
+
+        result = receive.conversations(
+            groups=[g["group"]],
+            group_name="testgroup",
+            slug="feat-x",
+            session_id=session_id,
+            subpath=".",
+            archive_stream=io.BytesIO(archive),
+            env=env,
+        )
+
+        assert result["session_id"] == session_id
+
+        harness = ClaudeCodeHarness()
+        found = harness.session_transcript_path(session_id, ws_root, env=env)
+        assert found is not None
+        record = json.loads(found.read_text().splitlines()[0])
+        assert record["cwd"] == str(ws_root)
+
+    def test_unbindable_account_refuses_named_and_leaves_both_stores_empty(
+        self, one_member_group
+    ):
+        from camp.transfer import receive
+
+        g = one_member_group
+        _seed_workspace(g, "feat-x")
+        default_home = g["tmp_path"] / "default-home"
+        env = _account_env(g, home=default_home)
+        # A relative account is exactly what `session_launch_env_set` raises
+        # `HarnessError` on — see `_account_dir` in claude_code.py.
+        g["group"]["launch"] = {"account": "relative/account/path"}
+        session_id = "77777777-7777-4777-8777-777777777777"
+
+        archive = _archive_bytes(
+            json.dumps({"cwd": SENDER_ROOT, "type": "summary"}).encode() + b"\n"
+        )
+
+        with pytest.raises(receive.ConversationDestinationRefused) as exc_info:
+            receive.conversations(
+                groups=[g["group"]],
+                group_name="testgroup",
+                slug="feat-x",
+                session_id=session_id,
+                subpath=".",
+                archive_stream=io.BytesIO(archive),
+                env=env,
+            )
+
+        assert exc_info.value.session_id == session_id
+        assert "is not an absolute path" in str(exc_info.value)
+
+        default_claude_dir = default_home / ".claude"
+        assert not default_claude_dir.exists()
