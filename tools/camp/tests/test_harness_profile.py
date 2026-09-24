@@ -369,3 +369,46 @@ class TestHarnessStoreForBindingFailures:
         monkeypatch.setattr(profile, "harness_for", lambda group: None)
 
         assert profile.harness_store_for({"group": {"name": "g"}}, env={}) is None
+
+
+# ---------------------------------------------------------------------------
+# HarnessStore.session_transcript_destination — bound like session_transcripts
+# ---------------------------------------------------------------------------
+
+
+class _DestinationAwareHarness:
+    """A harness whose composed destination reveals which `env` it actually
+    ran under, by reading the account it names rather than a canned value."""
+
+    name = "destinationaware"
+
+    def session_launch_env_set(self, account, *, env=None):
+        if account is None:
+            return {}
+        return {"CLAUDE_CONFIG_DIR": account}
+
+    def session_launch_env_unset(self):
+        return ["CLAUDE_CONFIG_DIR"]
+
+    def session_transcript_destination(self, session_id, workspace, *, env=None):
+        account_dir = (env or {}).get("CLAUDE_CONFIG_DIR", "unbound")
+        return Path(account_dir) / f"{session_id}.jsonl"
+
+
+class TestHarnessStoreSessionTranscriptDestinationBinding:
+    def test_answers_its_own_accounts_destination_whatever_env_the_caller_passes(
+        self, monkeypatch
+    ):
+        import camp.launch.profile as profile
+
+        monkeypatch.setattr(profile, "harness_for", lambda group: _DestinationAwareHarness())
+
+        store = profile.harness_store_for(
+            {"group": {"name": "g"}, "launch": {"account": "/acct/a"}}, env={}
+        )
+
+        dest = store.session_transcript_destination(
+            "sess-1", Path("/ws"), env={"CLAUDE_CONFIG_DIR": "/some-other-acct"}
+        )
+
+        assert dest == Path("/acct/a/sess-1.jsonl")
