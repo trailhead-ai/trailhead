@@ -1720,3 +1720,117 @@ def test_supervised_restart_raises_when_reported_pid_dies_within_settle_window(
             dying.wait(timeout=5)
         except (subprocess.TimeoutExpired, ChildProcessError):
             pass
+
+
+# ---------------------------------------------------------------------------
+# Seams `trailhead update` drives: configured_checkout / install_dependencies /
+# build / is_answering
+# ---------------------------------------------------------------------------
+
+
+def _cfg_env(tmp_path: Path, body: str | None) -> dict[str, str]:
+    cfg = tmp_path / "cfg"
+    cfg.mkdir(exist_ok=True)
+    if body is not None:
+        (cfg / "config.toml").write_text(body)
+    return {"OUTPOST_CONFIG_DIR": str(cfg), "OUTPOST_STATE_DIR": str(tmp_path / "state")}
+
+
+class TestConfiguredCheckout:
+    def test_no_config_file_means_not_configured(self, tmp_path):
+        assert outpost_lifecycle.configured_checkout(env=_cfg_env(tmp_path, None)) is None
+
+    def test_config_without_a_checkout_key_means_not_configured(self, tmp_path):
+        env = _cfg_env(tmp_path, '[daemon]\nauthor = "someone"\n')
+        assert outpost_lifecycle.configured_checkout(env=env) is None
+
+    def test_checkout_key_resolves_to_the_canonical_directory(self, tmp_path):
+        checkout = tmp_path / "outpost"
+        checkout.mkdir()
+        env = _cfg_env(tmp_path, f'checkout = "{checkout}"\n')
+        assert outpost_lifecycle.configured_checkout(env=env) == checkout.resolve()
+
+    def test_relative_checkout_is_a_named_error(self, tmp_path):
+        env = _cfg_env(tmp_path, 'checkout = "outpost"\n')
+        with pytest.raises(OutpostLifecycleError, match="absolute"):
+            outpost_lifecycle.configured_checkout(env=env)
+
+    def test_missing_checkout_directory_is_a_named_error(self, tmp_path):
+        env = _cfg_env(tmp_path, f'checkout = "{tmp_path / "gone"}"\n')
+        with pytest.raises(OutpostLifecycleError, match="does not exist"):
+            outpost_lifecycle.configured_checkout(env=env)
+
+    def test_malformed_config_is_a_named_error(self, tmp_path):
+        env = _cfg_env(tmp_path, "checkout = \n")
+        with pytest.raises(OutpostLifecycleError, match="unreadable"):
+            outpost_lifecycle.configured_checkout(env=env)
+
+
+def _marker_cmd(tmp_path: Path, name: str, exit_code: int = 0) -> list[str]:
+    """A command that records its cwd into <cwd>/<name>.ran, then exits."""
+    script = tmp_path / f"{name}.py"
+    script.write_text(
+        "import os, pathlib, sys\n"
+        f"pathlib.Path({name!r} + '.ran').write_text(os.getcwd())\n"
+        "print('diagnostic on stdout')\n"
+        f"sys.exit({exit_code})\n"
+    )
+    return [sys.executable, str(script)]
+
+
+class TestInstallDependenciesAndBuild:
+    def _env(self, tmp_path):
+        checkout = tmp_path / "outpost"
+        checkout.mkdir()
+        return checkout, _cfg_env(tmp_path, f'checkout = "{checkout}"\n')
+
+    def test_install_dependencies_runs_in_the_checkout(self, tmp_path):
+        checkout, env = self._env(tmp_path)
+        outpost_lifecycle.install_dependencies(env=env, install_cmd=_marker_cmd(tmp_path, "deps"))
+        assert (checkout / "deps.ran").read_text() == str(checkout.resolve())
+
+    def test_install_dependencies_failure_is_a_named_error_with_diagnostics(self, tmp_path):
+        _checkout, env = self._env(tmp_path)
+        with pytest.raises(OutpostLifecycleError, match="diagnostic on stdout"):
+            outpost_lifecycle.install_dependencies(
+                env=env, install_cmd=_marker_cmd(tmp_path, "deps", exit_code=2)
+            )
+
+    def test_install_dependencies_missing_tool_is_a_named_error(self, tmp_path):
+        _checkout, env = self._env(tmp_path)
+        with pytest.raises(OutpostLifecycleError, match="could not be run"):
+            outpost_lifecycle.install_dependencies(
+                env=env, install_cmd=[str(tmp_path / "no-such-npm")]
+            )
+
+    def test_build_runs_in_the_checkout(self, tmp_path):
+        checkout, env = self._env(tmp_path)
+        outpost_lifecycle.build(env=env, build_cmd=_marker_cmd(tmp_path, "build"))
+        assert (checkout / "build.ran").read_text() == str(checkout.resolve())
+
+    def test_build_failure_is_a_named_error(self, tmp_path):
+        _checkout, env = self._env(tmp_path)
+        with pytest.raises(OutpostLifecycleError, match="build failed"):
+            outpost_lifecycle.build(env=env, build_cmd=_marker_cmd(tmp_path, "build", exit_code=1))
+
+
+class TestIsAnswering:
+    def test_a_port_serving_health_is_answering(self, outpost):
+        assert _start(outpost) == 0
+        assert _wait_until(lambda: _health_reachable(outpost.port), timeout=5.0)
+        assert outpost_lifecycle.is_answering(port=outpost.port) is True
+
+    def test_a_closed_port_is_not_answering(self):
+        assert outpost_lifecycle.is_answering(port=_free_port(), timeout=0.2) is False
+
+
+class TestConfiguredCheckoutNeverRaisesAnUnnamedError:
+    def test_a_non_string_checkout_is_a_named_error(self, tmp_path):
+        env = _cfg_env(tmp_path, "checkout = 1\n")
+        with pytest.raises(OutpostLifecycleError, match="absolute path"):
+            outpost_lifecycle.configured_checkout(env=env)
+
+    def test_an_unresolvable_config_dir_is_a_named_error(self, tmp_path):
+        env = {"OUTPOST_CONFIG_DIR": "relative/dir"}
+        with pytest.raises(OutpostLifecycleError):
+            outpost_lifecycle.configured_checkout(env=env)

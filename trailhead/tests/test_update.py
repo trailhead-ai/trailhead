@@ -24,6 +24,7 @@ from trailhead import update
 from trailhead.tests.fixtures.update_check_schema import (
     BEHIND_EXAMPLE,
     OK_EXAMPLE,
+    OUTPOST_BEHIND_EXAMPLE,
     UNANSWERABLE_NO_STAMP_EXAMPLE,
 )
 
@@ -43,6 +44,9 @@ def _env(tmp_path: Path) -> dict[str, str]:
         **os.environ,
         "TRAILHEAD_STATE_DIR": str(tmp_path / "state"),
         "HOME": str(home),
+        # Outpost is unconfigured unless a test writes a config here — never
+        # the developer's real outpost config.
+        "OUTPOST_CONFIG_DIR": str(tmp_path / "outpost-config"),
     }
 
 
@@ -591,6 +595,7 @@ class TestChangelogDeltaUnavailableOnDiffError:
             "installed_sha",
             "reason",
             "changelog_delta",
+            "outpost",
         }
 
 
@@ -1060,3 +1065,256 @@ class TestSecondHopFailureKeepsTheFirstHopVerdict:
         assert result["outcome"] == "behind"
         assert result["commits_behind"] == 2
         assert result["install_commits_behind"] is None
+
+
+# ---------------------------------------------------------------------------
+# Outpost — a configured outpost checkout is probed alongside the install
+# ---------------------------------------------------------------------------
+
+
+def _configure_outpost(env: dict[str, str], checkout: Path | str) -> None:
+    cfg = Path(env["OUTPOST_CONFIG_DIR"])
+    cfg.mkdir(parents=True, exist_ok=True)
+    (cfg / "config.toml").write_text(f'checkout = "{checkout}"\n')
+
+
+def _two_checkout_runner(
+    outpost_checkout: Path,
+    *,
+    trailhead_count: str = "0",
+    outpost_count: str = "2",
+    outpost_fetch_rc: int = 0,
+    outpost_fetch_stderr: str = "",
+):
+    """Dispatch on the checkout each git call targets: calls against the
+    outpost checkout get outpost's answers, everything else the install's."""
+    trailhead_runner, _ = _make_runner(count=trailhead_count)
+    calls: list[list[str]] = []
+
+    def runner(args, **kw):
+        calls.append(list(args))
+        assert isinstance(args, list)
+        assert kw.get("shell") is not True
+        if args[2] != str(outpost_checkout):
+            return trailhead_runner(args, **kw)
+        sub = args[3]
+        if sub == "rev-parse":
+            return subprocess.CompletedProcess(args, 0, stdout=_BRANCH + "\n", stderr="")
+        if sub == "fetch":
+            return subprocess.CompletedProcess(
+                args, outpost_fetch_rc, stdout="", stderr=outpost_fetch_stderr
+            )
+        if sub == "rev-list":
+            return subprocess.CompletedProcess(args, 0, stdout=outpost_count + "\n", stderr="")
+        raise AssertionError(f"unexpected git invocation against outpost: {args}")
+
+    return runner, calls
+
+
+def _outpost_calls(calls: list[list[str]], outpost_checkout: Path) -> list[list[str]]:
+    return [c for c in calls if c[2] == str(outpost_checkout)]
+
+
+class TestOutpostCheck:
+    def test_unconfigured_outpost_reports_null_and_is_never_probed(self, tmp_path):
+        env = _env(tmp_path)
+        _install_stamp(tmp_path, env)
+        outpost_checkout = _checkout(tmp_path, "outpost")
+        runner, calls = _two_checkout_runner(outpost_checkout)
+
+        result = update.check_for_update(env=env, runner=runner)
+
+        assert result["outpost"] is None
+        assert _outpost_calls(calls, outpost_checkout) == []
+
+    def test_behind_outpost_matches_the_pinned_fixture(self, tmp_path):
+        env = _env(tmp_path)
+        _install_stamp(tmp_path, env)
+        outpost_checkout = _checkout(tmp_path, "outpost")
+        _configure_outpost(env, outpost_checkout)
+        runner, _ = _two_checkout_runner(outpost_checkout, outpost_count="2")
+
+        result = update.check_for_update(env=env, runner=runner)
+
+        assert result == OUTPOST_BEHIND_EXAMPLE
+
+    def test_level_outpost_is_ok(self, tmp_path):
+        env = _env(tmp_path)
+        _install_stamp(tmp_path, env)
+        outpost_checkout = _checkout(tmp_path, "outpost")
+        _configure_outpost(env, outpost_checkout)
+        runner, _ = _two_checkout_runner(outpost_checkout, outpost_count="0")
+
+        result = update.check_for_update(env=env, runner=runner)
+
+        assert result["outpost"] == {"outcome": "ok", "commits_behind": 0, "reason": None}
+
+    def test_outpost_verdict_is_independent_of_the_install_verdict(self, tmp_path):
+        env = _env(tmp_path)
+        _install_stamp(tmp_path, env)
+        outpost_checkout = _checkout(tmp_path, "outpost")
+        _configure_outpost(env, outpost_checkout)
+        runner, _ = _two_checkout_runner(
+            outpost_checkout, trailhead_count="3", outpost_count="0"
+        )
+
+        result = update.check_for_update(env=env, runner=runner)
+
+        assert result["outcome"] == "behind"
+        assert result["commits_behind"] == 3
+        assert result["outpost"]["outcome"] == "ok"
+
+    def test_failed_outpost_fetch_is_unanswerable_without_touching_the_install_verdict(
+        self, tmp_path
+    ):
+        env = _env(tmp_path)
+        _install_stamp(tmp_path, env)
+        outpost_checkout = _checkout(tmp_path, "outpost")
+        _configure_outpost(env, outpost_checkout)
+        runner, _ = _two_checkout_runner(
+            outpost_checkout,
+            trailhead_count="3",
+            outpost_fetch_rc=128,
+            outpost_fetch_stderr="fatal: https://user:hunter2@example.com unreachable",
+        )
+
+        result = update.check_for_update(env=env, runner=runner)
+
+        assert result["outcome"] == "behind"
+        assert result["outpost"]["outcome"] == "unanswerable"
+        assert result["outpost"]["commits_behind"] is None
+        assert "unreachable" in result["outpost"]["reason"]
+        assert "hunter2" not in result["outpost"]["reason"]
+
+    def test_invalid_outpost_config_is_unanswerable_and_runs_no_git(self, tmp_path):
+        env = _env(tmp_path)
+        _install_stamp(tmp_path, env)
+        _configure_outpost(env, "relative/outpost")
+        outpost_checkout = _checkout(tmp_path, "outpost")
+        runner, calls = _two_checkout_runner(outpost_checkout)
+
+        result = update.check_for_update(env=env, runner=runner)
+
+        assert result["outpost"]["outcome"] == "unanswerable"
+        assert "absolute" in result["outpost"]["reason"]
+        assert _outpost_calls(calls, outpost_checkout) == []
+
+    def test_outpost_is_reported_even_without_an_install_stamp(self, tmp_path):
+        env = _env(tmp_path)
+        outpost_checkout = _checkout(tmp_path, "outpost")
+        _configure_outpost(env, outpost_checkout)
+        runner, _ = _two_checkout_runner(outpost_checkout, outpost_count="4")
+
+        result = update.check_for_update(env=env, runner=runner)
+
+        assert result["outcome"] == "unanswerable"
+        assert result["outpost"]["outcome"] == "behind"
+        assert result["outpost"]["commits_behind"] == 4
+
+    def test_a_fresh_fetch_stamp_throttles_the_outpost_fetch_too(self, tmp_path):
+        env = _env(tmp_path)
+        _install_stamp(tmp_path, env)
+        outpost_checkout = _checkout(tmp_path, "outpost")
+        _configure_outpost(env, outpost_checkout)
+        _fresh_freshness_stamp(tmp_path, env, iso=update._now_iso())
+        runner, calls = _two_checkout_runner(outpost_checkout, outpost_count="2")
+
+        result = update.check_for_update(env=env, runner=runner)
+
+        assert not any(c[3] == "fetch" for c in calls)
+        assert result["outpost"]["commits_behind"] == 2
+
+    def test_the_outpost_probe_is_read_only(self, tmp_path):
+        env = _env(tmp_path)
+        _install_stamp(tmp_path, env)
+        outpost_checkout = _checkout(tmp_path, "outpost")
+        _configure_outpost(env, outpost_checkout)
+        runner, calls = _two_checkout_runner(outpost_checkout)
+
+        update.check_for_update(env=env, runner=runner)
+
+        outpost_subs = {c[3] for c in _outpost_calls(calls, outpost_checkout)}
+        assert outpost_subs and outpost_subs <= _READ_ONLY_SUBCOMMANDS
+
+    def test_cli_human_output_names_the_outpost_gap(self, tmp_path, monkeypatch):
+        env = _env(tmp_path)
+        _install_stamp(tmp_path, env)
+        outpost_checkout = _checkout(tmp_path, "outpost")
+        _configure_outpost(env, outpost_checkout)
+        runner, _ = _two_checkout_runner(outpost_checkout, outpost_count="2")
+        monkeypatch.setattr(update, "_default_runner", lambda: runner)
+
+        exit_code, out, _err = _run_cli(["update", "--check"], env=env)
+
+        assert exit_code == 0
+        assert "outpost: checkout is 2 commit(s) behind its tracked branch" in out
+
+    def test_cli_human_output_is_silent_about_an_unconfigured_outpost(
+        self, tmp_path, monkeypatch
+    ):
+        env = _env(tmp_path)
+        _install_stamp(tmp_path, env)
+        runner, _ = _make_runner(count="0")
+        monkeypatch.setattr(update, "_default_runner", lambda: runner)
+
+        exit_code, out, _err = _run_cli(["update", "--check"], env=env)
+
+        assert exit_code == 0
+        assert "outpost" not in out
+
+
+class TestOutpostCheckNeverMasksTheInstallVerdict:
+    def test_a_non_string_outpost_checkout_is_unanswerable_not_a_crash(self, tmp_path):
+        env = _env(tmp_path)
+        _install_stamp(tmp_path, env)
+        cfg = Path(env["OUTPOST_CONFIG_DIR"])
+        cfg.mkdir(parents=True)
+        (cfg / "config.toml").write_text("checkout = 1\n")
+        runner, _ = _make_runner(count="3")
+
+        result = update.check_for_update(env=env, runner=runner)
+
+        assert result["outcome"] == "behind"
+        assert result["outpost"]["outcome"] == "unanswerable"
+
+    def test_an_upstreamless_outpost_checkout_is_unanswerable(self, tmp_path):
+        env = _env(tmp_path)
+        _install_stamp(tmp_path, env)
+        outpost_checkout = _checkout(tmp_path, "outpost")
+        _configure_outpost(env, outpost_checkout)
+        inner, _ = _two_checkout_runner(outpost_checkout)
+
+        def runner(args, **kw):
+            if args[2] == str(outpost_checkout) and args[3] == "rev-parse":
+                return subprocess.CompletedProcess(args, 128, stdout="", stderr="no upstream")
+            return inner(args, **kw)
+
+        result = update.check_for_update(env=env, runner=runner)
+
+        assert result["outcome"] == "ok"
+        assert result["outpost"]["outcome"] == "unanswerable"
+        assert "no upstream" in result["outpost"]["reason"]
+
+
+class TestCheckFetchesNeverPrompt:
+    """The check runs unattended (a SessionStart hook), so a fetch that needs
+    credentials must fail fast rather than prompt on the terminal."""
+
+    def test_every_check_mode_fetch_disables_the_terminal_prompt(self, tmp_path):
+        env = _env(tmp_path)
+        _install_stamp(tmp_path, env)
+        outpost_checkout = _checkout(tmp_path, "outpost")
+        _configure_outpost(env, outpost_checkout)
+        inner, _ = _two_checkout_runner(outpost_checkout)
+        fetch_envs: list = []
+
+        def runner(args, **kw):
+            if args[3] == "fetch":
+                fetch_envs.append(kw.get("env"))
+            return inner(args, **kw)
+
+        update.check_for_update(env=env, runner=runner)
+
+        assert len(fetch_envs) == 2
+        for fetch_env in fetch_envs:
+            assert fetch_env is not None and fetch_env.get("GIT_TERMINAL_PROMPT") == "0"

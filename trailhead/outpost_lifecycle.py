@@ -11,7 +11,10 @@ Contract & invariants
   that address. It never assumes macOS — process control goes through stdlib
   ``os``/``signal`` primitives that also map onto Windows.
 * **Config-resolved daemon location.** The outpost checkout is read from
-  ``config_dir("outpost")/config.toml`` (key ``checkout``, an absolute path). The
+  ``config_dir("outpost")/config.toml`` (key ``checkout``, an absolute path).
+  :func:`configured_checkout` is the one reader: ``None`` when no config file
+  or no ``checkout`` key exists (nothing for trailhead to manage), a named
+  error when the key is set but unusable. The
   daemon entrypoint is the built dist file at ``<checkout>/dist/server/index.js``.
   Before any spawn the entrypoint is canonicalized and validated: it must resolve
   INSIDE the configured checkout, must exist, and must be a regular file. Any
@@ -50,6 +53,10 @@ Contract & invariants
   already a no-op, ``restart`` also serves as "build and start" when nothing is
   running. On success it prints the hashed web bundle filenames found under
   ``<checkout>/dist-web/assets/`` so a stale-looking UI is diagnosable at a glance.
+  The build step is :func:`build` on its own, and :func:`install_dependencies`
+  (default ``npm ci``) refreshes the checkout's pinned dependencies — the two
+  steps ``trailhead update`` runs after fast-forwarding the checkout, with
+  :func:`is_answering` deciding whether it rebuilds through ``restart``.
   ``restart`` does not trust ``start``'s return value alone: it polls ``/health``
   briefly afterward (allowing for startup latency), proving *some* process is
   answering on the port, and then confirms the pid ``start()`` recorded is
@@ -118,7 +125,7 @@ import webbrowser
 from dataclasses import dataclass
 from pathlib import Path
 
-from trailhead.paths import config_dir, ensure_dir, state_dir
+from trailhead.paths import PathResolutionError, config_dir, ensure_dir, state_dir
 
 APP = "outpost"
 CONFIG_FILENAME = "config.toml"
@@ -135,6 +142,11 @@ DAEMON_PORT = 7313
 # `npm run build` chains build:web + tsc + the migrations copy, producing both the
 # compiled dist/server/index.js entrypoint and the dist-web/ static bundle.
 DEFAULT_BUILD_CMD = ["npm", "run", "build"]
+
+# `npm ci` installs exactly what package-lock.json pins and never rewrites the
+# lockfile, so refreshing dependencies after an upgrade cannot leave the
+# checkout dirty (a dirty checkout is one `trailhead update` refuses to touch).
+DEFAULT_INSTALL_CMD = ["npm", "ci"]
 
 # vite emits content-hashed asset filenames under this directory relative to the
 # checkout root; printing them after a build makes staleness visible at a glance.
@@ -167,22 +179,24 @@ def _pidfile(env: dict[str, str] | None) -> Path:
     return state_dir(APP, env=env) / PIDFILE_NAME
 
 
-def _resolve_checkout(env: dict[str, str] | None) -> Path:
-    """Read the outpost config and resolve+validate just the checkout directory.
+def configured_checkout(env: dict[str, str] | None = None) -> Path | None:
+    """Return the canonical outpost checkout trailhead manages, or ``None``.
 
-    Returns the canonicalized checkout path. Raises OutpostLifecycleError if the
-    config is missing/malformed or the checkout key is absent, not absolute, or
-    not an existing directory. Does not touch the built entrypoint — callers that
-    need it (e.g. before spawning) should go through :func:`_resolve_entrypoint`;
-    callers that are about to *build* it (e.g. ``restart``) should not require it
-    to already exist.
+    Outpost counts as configured exactly when ``config_dir("outpost")/config.toml``
+    exists and carries a ``checkout`` key. No config file, or a config with no
+    ``checkout`` key (a daemon someone runs by hand from its own checkout), is
+    ``None`` — nothing for trailhead to manage. A ``checkout`` key that is set
+    but unusable — malformed TOML, a relative path, a path that is not an
+    existing directory — raises :class:`OutpostLifecycleError`: the operator
+    asked for a managed checkout and it cannot be found, which is an error to
+    name, never a silent "not configured".
     """
-    config_path = config_dir(APP, env=env) / CONFIG_FILENAME
+    try:
+        config_path = config_dir(APP, env=env) / CONFIG_FILENAME
+    except PathResolutionError as exc:
+        raise OutpostLifecycleError(f"outpost config directory could not be resolved: {exc}")
     if not config_path.is_file():
-        raise OutpostLifecycleError(
-            f"outpost config not found at {config_path}. "
-            "Create it with a 'checkout' key pointing at your outpost checkout."
-        )
+        return None
 
     try:
         with config_path.open("rb") as f:
@@ -192,21 +206,44 @@ def _resolve_checkout(env: dict[str, str] | None) -> Path:
 
     checkout_value = config.get("checkout")
     if not checkout_value:
-        raise OutpostLifecycleError(
-            f"outpost config at {config_path} is missing the required 'checkout' key "
-            "(absolute path to your outpost checkout)."
-        )
-    checkout = Path(checkout_value)
-    if not checkout.is_absolute():
+        return None
+    if not isinstance(checkout_value, str) or not Path(checkout_value).is_absolute():
         raise OutpostLifecycleError(
             f"outpost 'checkout' must be an absolute path, got {checkout_value!r}."
         )
+    checkout = Path(checkout_value)
     if not checkout.is_dir():
         raise OutpostLifecycleError(
             f"outpost checkout {checkout} does not exist or is not a directory."
         )
 
     return checkout.resolve()
+
+
+def _resolve_checkout(env: dict[str, str] | None) -> Path:
+    """Resolve+validate the checkout directory, requiring it to be configured.
+
+    Returns the canonicalized checkout path. Raises OutpostLifecycleError if the
+    config is missing/malformed or the checkout key is absent, not absolute, or
+    not an existing directory. Does not touch the built entrypoint — callers that
+    need it (e.g. before spawning) should go through :func:`_resolve_entrypoint`;
+    callers that are about to *build* it (e.g. ``restart``) should not require it
+    to already exist.
+    """
+    checkout = configured_checkout(env)
+    if checkout is not None:
+        return checkout
+
+    config_path = config_dir(APP, env=env) / CONFIG_FILENAME
+    if not config_path.is_file():
+        raise OutpostLifecycleError(
+            f"outpost config not found at {config_path}. "
+            "Create it with a 'checkout' key pointing at your outpost checkout."
+        )
+    raise OutpostLifecycleError(
+        f"outpost config at {config_path} is missing the required 'checkout' key "
+        "(absolute path to your outpost checkout)."
+    )
 
 
 def _resolve_entrypoint(env: dict[str, str] | None) -> tuple[Path, Path]:
@@ -286,6 +323,11 @@ def _probe_health(port: int, timeout: float) -> dict | None:
             return json.loads(resp.read())
     except (urllib.error.URLError, OSError, ValueError):
         return None
+
+
+def is_answering(port: int = DAEMON_PORT, timeout: float = 1.0) -> bool:
+    """True when something answers ``/health`` on the loopback daemon port."""
+    return _probe_health(port, timeout) is not None
 
 
 def _wait_for_health(port: int, total_timeout: float, poll_interval: float = 0.1) -> dict | None:
@@ -982,6 +1024,60 @@ def open_ui(
     return 0
 
 
+def _run_in_checkout(checkout: Path, cmd: list[str], *, what: str) -> None:
+    """Run *cmd* with ``cwd=<checkout>``; raise a named error on any failure.
+
+    Both stdout and stderr go into the error, since npm/tsc/vite diagnostics
+    land on stdout. A missing tool (no ``npm`` on PATH) is wrapped rather than
+    propagated as a raw ``FileNotFoundError``.
+    """
+    try:
+        result = subprocess.run(cmd, cwd=str(checkout), capture_output=True, text=True)
+    except (FileNotFoundError, PermissionError) as exc:
+        raise OutpostLifecycleError(
+            f"outpost {what} command {cmd!r} could not be run: {exc}. "
+            "Is npm installed and on PATH?"
+        )
+    if result.returncode != 0:
+        raise OutpostLifecycleError(
+            f"outpost {what} failed (exit {result.returncode}): {' '.join(cmd)}\n"
+            f"{result.stdout.strip()}\n"
+            f"{result.stderr.strip()}"
+        )
+
+
+def install_dependencies(
+    *, env: dict[str, str] | None = None, install_cmd: list[str] | None = None
+) -> None:
+    """Install the outpost checkout's pinned dependencies (default ``npm ci``).
+
+    Raises OutpostLifecycleError when outpost is not configured, or the command
+    cannot run or exits nonzero.
+    """
+    checkout = _resolve_checkout(env)
+    cmd = install_cmd if install_cmd is not None else list(DEFAULT_INSTALL_CMD)
+    _run_in_checkout(checkout, cmd, what="dependency install")
+
+
+def build(*, env: dict[str, str] | None = None, build_cmd: list[str] | None = None) -> None:
+    """Build the outpost checkout (default ``npm run build``) without touching
+    any running daemon, then print the hashed web bundle filenames.
+
+    Raises OutpostLifecycleError when outpost is not configured, or the build
+    cannot run or exits nonzero.
+    """
+    checkout = _resolve_checkout(env)
+    cmd = build_cmd if build_cmd is not None else list(DEFAULT_BUILD_CMD)
+    _run_in_checkout(checkout, cmd, what="build")
+
+    assets_dir = checkout.joinpath(*WEB_ASSETS_DIR_PARTS)
+    asset_names = sorted(p.name for p in assets_dir.glob("*") if p.is_file()) if assets_dir.is_dir() else []
+    if asset_names:
+        print(f"outpost build ok; web bundle: {', '.join(asset_names)}")
+    else:
+        print(f"outpost build ok; no assets found under {assets_dir}.")
+
+
 def restart(
     *,
     env: dict[str, str] | None = None,
@@ -1031,34 +1127,7 @@ def restart(
     with ``restart_health_timeout`` (see :func:`_resolve_pid_settle_timeout`);
     pass it explicitly to widen the window on a machine known to be slow.
     """
-    checkout = _resolve_checkout(env)
-    cmd = build_cmd if build_cmd is not None else list(DEFAULT_BUILD_CMD)
-
-    try:
-        result = subprocess.run(
-            cmd,
-            cwd=str(checkout),
-            capture_output=True,
-            text=True,
-        )
-    except FileNotFoundError as exc:
-        raise OutpostLifecycleError(
-            f"outpost build command {cmd!r} could not be run: {exc}. "
-            "Is npm installed and on PATH?"
-        )
-    if result.returncode != 0:
-        raise OutpostLifecycleError(
-            f"outpost build failed (exit {result.returncode}): {' '.join(cmd)}\n"
-            f"{result.stdout.strip()}\n"
-            f"{result.stderr.strip()}"
-        )
-
-    assets_dir = checkout.joinpath(*WEB_ASSETS_DIR_PARTS)
-    asset_names = sorted(p.name for p in assets_dir.glob("*") if p.is_file()) if assets_dir.is_dir() else []
-    if asset_names:
-        print(f"outpost build ok; web bundle: {', '.join(asset_names)}")
-    else:
-        print(f"outpost build ok; no assets found under {assets_dir}.")
+    build(env=env, build_cmd=build_cmd)
 
     if _is_supervised(env, platform=platform, supervisor_dir=supervisor_dir):
         return _supervised_restart(

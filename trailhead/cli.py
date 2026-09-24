@@ -152,6 +152,18 @@ def _cmd_update(args: argparse.Namespace) -> int:
         print(f"trailhead: {'; '.join(gaps)} (installed {short_sha})")
     else:
         print(f"trailhead: update check inconclusive: {result['reason']}")
+
+    outpost = result.get("outpost")
+    if outpost is not None:
+        if outpost["outcome"] == "ok":
+            print("outpost: up to date")
+        elif outpost["outcome"] == "behind":
+            print(
+                f"outpost: checkout is {outpost['commits_behind']} commit(s) behind "
+                "its tracked branch"
+            )
+        else:
+            print(f"outpost: update check inconclusive: {outpost['reason']}")
     return 0
 
 
@@ -281,7 +293,10 @@ def _build_parser() -> argparse.ArgumentParser:
 
     update_p = subparsers.add_parser(
         "update",
-        help="Upgrade the install (or check with --check) against its source checkout's remote.",
+        help=(
+            "Upgrade the install and a configured outpost checkout (or check with "
+            "--check) against their tracked branches."
+        ),
     )
     update_p.add_argument(
         "--check",

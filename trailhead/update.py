@@ -34,14 +34,24 @@ The outcome is recorded back onto the provenance stamp via
 discoverable (`trailhead doctor`) rather than silently indistinguishable
 from "up to date".
 
-The `--json` output is a pinned schema (schema_version 3) — the producer
+The `--json` output is a pinned schema (schema_version 4) — the producer
 contract a SessionStart hook consumes:
 
-    {"schema_version": 3, "outcome": "ok"|"behind"|"unanswerable",
+    {"schema_version": 4, "outcome": "ok"|"behind"|"unanswerable",
      "commits_behind": <int|null>, "install_commits_behind": <int|null>,
      "installed_sha": <str|null>, "reason": <str|null>,
      "changelog_delta": {"available": <bool>, "lines": [<str>, ...],
-                          "truncated": <bool>}}
+                          "truncated": <bool>},
+     "outpost": null | {"outcome": "ok"|"behind"|"unanswerable",
+                        "commits_behind": <int|null>, "reason": <str|null>}}
+
+`outpost` reports the outpost checkout named by `config_dir("outpost")/
+config.toml`'s `checkout` key (see `outpost_lifecycle.configured_checkout`):
+`null` when none is configured, otherwise how far that checkout is behind its
+own tracked branch, probed with the same read-only git calls and the same
+fetch throttle window as the install. It is independent of the top-level
+verdict, which stays the install's alone — an unanswerable outpost check never
+masks the install's answer, nor the reverse.
 
 `changelog_delta` is the ADDED lines of `git diff <installed_sha>
 <tracked_branch> -- CHANGELOG.md` — no markdown parsing, no version scheme,
@@ -65,13 +75,20 @@ even when the delta extraction itself fails.
 `run_update_apply` (`trailhead update`, no `--check`) performs the upgrade:
 fast-forwards the checkout when it is behind, then re-wires via
 `trailhead.install.wire_all_harnesses` — the same wire entrypoint `trailhead
-install` uses — and refreshes the provenance stamp. Consent is a technical
+install` uses — and refreshes the provenance stamp. When an outpost checkout
+is configured it is upgraded next: fast-forwarded, its dependencies
+reinstalled (`npm ci`), and rebuilt — through `outpost_lifecycle.restart`
+when the daemon is answering, `outpost_lifecycle.build` when it is not. Consent is a technical
 gate: apply mode requires an interactive TTY confirmation or an explicit
 `--yes`; a non-interactive invocation without it refuses before any git
-invocation runs. Nothing is read from the checkout before that gate, its
+invocation runs. Nothing is read from either checkout before that gate, its
 tracked upstream branch included — so a checkout with no upstream configured
-is confirmed and only then refused, rather than probed ahead of consent. A
-dirty checkout is refused before anything is fetched.
+is confirmed and only then refused, rather than probed ahead of consent. Only
+outpost's config file is read ahead of it, so the prompt can name the outpost
+checkout it will touch, and an unusable outpost config refuses right there.
+Both checkouts are preflighted — upstream branch resolvable, working tree
+clean — before anything is fetched: a problem with either refuses the whole
+upgrade while nothing has moved.
 The fetch, the fast-forward, and the re-wire all run
 under one acquisition of `trailhead.wire.wire_lock`, so a concurrent install
 can never interleave with an in-flight upgrade; the config that drives the
@@ -90,6 +107,16 @@ triggers the rollback. Every refusal and failure prints a `trailhead:
 <message>` line on stderr naming a concrete recovery command, and the
 rollback's own message reports truthfully whether the reset and re-wire it
 attempted actually succeeded.
+
+The outpost upgrade runs only after the install upgrade has completed, under
+the same lock, and never undoes it: the two are independent, so a failure on
+the outpost side keeps the upgraded install and exits nonzero. A failed
+dependency install, build, or restart resets the outpost checkout to its HEAD
+from immediately before its fast-forward and reinstalls + rebuilds (or
+restarts) from there; as with the install, the message reports truthfully
+whether that reset and rebuild worked and names the manual repair when not.
+`restart` builds before it stops anything, so a failed build never takes a
+running daemon down.
 """
 
 from __future__ import annotations
@@ -102,7 +129,9 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+from trailhead import outpost_lifecycle
 from trailhead.install import resolve_config_for_env, wire_all_harnesses
+from trailhead.outpost_lifecycle import OutpostLifecycleError
 from trailhead.paths import state_dir
 
 # State-file plumbing is shared with `trailhead.provenance` rather than
@@ -119,7 +148,7 @@ from trailhead.provenance import (
 )
 from trailhead.wire import LockError, wire_lock
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 FRESHNESS_WINDOW_SECONDS = 24 * 60 * 60
 FRESHNESS_STAMP_FILENAME = "update-check.json"
 
@@ -202,16 +231,25 @@ def _stamp_fetch_attempt(env: dict[str, str]) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _run_git(checkout: Path, *args: str, runner, timeout: int):
+def _run_git(checkout: Path, *args: str, runner, timeout: int, env: dict[str, str] | None = None):
+    kw = {"env": env} if env is not None else {}
     try:
         return runner(
             ["git", "-C", str(checkout), *args],
             capture_output=True,
             text=True,
             timeout=timeout,
+            **kw,
         )
     except (subprocess.TimeoutExpired, OSError, UnicodeDecodeError):
         return None
+
+
+def _unattended_git_env(env: dict[str, str]) -> dict[str, str]:
+    """The environment for a fetch nobody is watching (the check runs from a
+    SessionStart hook): a remote that needs credentials must fail fast, never
+    stop to prompt on the terminal."""
+    return {**env, "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "", "SSH_ASKPASS": ""}
 
 
 def _proc_stderr(proc) -> str:
@@ -356,6 +394,7 @@ def _finish(
         "installed_sha": installed_sha,
         "reason": redacted_reason,
         "changelog_delta": changelog_delta if changelog_delta is not None else _unavailable_delta(),
+        "outpost": None,
     }
 
 
@@ -367,15 +406,87 @@ def check_for_update(
     window: int = FRESHNESS_WINDOW_SECONDS,
     confine_root: Path | str | None = None,
 ) -> dict:
-    """Check whether the stamped checkout is behind its tracked remote branch.
+    """Check whether the stamped checkout is behind its tracked remote branch,
+    and whether a configured outpost checkout is behind its own.
 
     Returns the pinned `{"schema_version", "outcome", "commits_behind",
-    "install_commits_behind", "installed_sha", "reason", "changelog_delta"}`
-    shape (see the module docstring). Never raises for a git-side failure —
-    those all collapse to `outcome == "unanswerable"`.
+    "install_commits_behind", "installed_sha", "reason", "changelog_delta",
+    "outpost"}` shape (see the module docstring). Never raises for a git-side
+    failure — those all collapse to `outcome == "unanswerable"`, for the
+    install and for outpost independently.
     """
     _env = env if env is not None else dict(os.environ)
     _runner = runner if runner is not None else _default_runner()
+
+    # One throttle window covers both checkouts' fetches.
+    fetch_due = not _fetch_is_fresh(_env, window)
+    result = _check_install(
+        env=_env, runner=_runner, timeout=timeout, fetch_due=fetch_due, confine_root=confine_root
+    )
+    result["outpost"] = _check_outpost(
+        env=_env, runner=_runner, timeout=timeout, fetch_due=fetch_due
+    )
+    return result
+
+
+def _outpost_verdict(outcome: str, commits_behind: int | None, reason: str | None) -> dict:
+    return {
+        "outcome": outcome,
+        "commits_behind": commits_behind,
+        "reason": redact_credentials(reason) if reason else None,
+    }
+
+
+def _check_outpost(*, env: dict[str, str], runner, timeout: int, fetch_due: bool) -> dict | None:
+    """How far the configured outpost checkout is behind its tracked branch.
+
+    `None` when no outpost checkout is configured. An outpost config that names
+    a checkout trailhead cannot use is "unanswerable" with the reason, and no
+    git runs against it. Read-only, like the install probe: `rev-parse`,
+    `fetch`, `rev-list` only.
+    """
+    try:
+        checkout = outpost_lifecycle.configured_checkout(env)
+    except OutpostLifecycleError as exc:
+        return _outpost_verdict("unanswerable", None, str(exc))
+    if checkout is None:
+        return None
+
+    branch, branch_error = _resolve_upstream_branch(checkout, runner=runner, timeout=timeout)
+    if branch is None:
+        return _outpost_verdict("unanswerable", None, branch_error)
+
+    if fetch_due:
+        _stamp_fetch_attempt(env)
+        fetch_proc = _run_git(
+            checkout, "fetch", "--quiet", "--", _remote_name(branch),
+            runner=runner, timeout=timeout, env=_unattended_git_env(env),
+        )
+        if fetch_proc is None or fetch_proc.returncode != 0:
+            return _outpost_verdict(
+                "unanswerable", None, f"git fetch failed: {_proc_stderr(fetch_proc)}"
+            )
+
+    commits_behind, error = _count_commits(
+        checkout, f"HEAD..{branch}", runner=runner, timeout=timeout
+    )
+    if commits_behind is None:
+        return _outpost_verdict("unanswerable", None, error)
+    return _outpost_verdict("ok" if commits_behind == 0 else "behind", commits_behind, None)
+
+
+def _check_install(
+    *,
+    env: dict[str, str],
+    runner,
+    timeout: int,
+    fetch_due: bool,
+    confine_root: Path | str | None,
+) -> dict:
+    """The install's half of `check_for_update`: the stamped checkout against
+    its tracked branch, and the wired install against that checkout."""
+    _env = env
+    _runner = runner
 
     stamp, rejected_reason = read_stamp_with_reason(env=_env, confine_root=confine_root)
     if stamp is None:
@@ -395,13 +506,14 @@ def check_for_update(
 
     remote_name = _remote_name(branch)
 
-    if not _fetch_is_fresh(_env, window):
+    if fetch_due:
         _stamp_fetch_attempt(_env)
         # `--` ends option parsing before the remote name. The name is derived
         # from git's own upstream ref, which can never begin with `-`; the
         # guard costs nothing and holds the invariant at the call site.
         fetch_proc = _run_git(
-            checkout, "fetch", "--quiet", "--", remote_name, runner=_runner, timeout=timeout
+            checkout, "fetch", "--quiet", "--", remote_name,
+            runner=_runner, timeout=timeout, env=_unattended_git_env(_env),
         )
         if fetch_proc is None or fetch_proc.returncode != 0:
             return _finish(
@@ -475,7 +587,8 @@ def run_update_apply(
     confine_root: Path | str | None = None,
     is_tty=None,
 ) -> int:
-    """Perform the upgrade: fast-forward the stamped checkout, then re-wire.
+    """Perform the upgrade: fast-forward the stamped checkout, then re-wire,
+    then upgrade a configured outpost checkout.
 
     The checkout may already be level with its tracked remote while the
     install behind it is not — an install snapshots the plugin trees rather
@@ -499,8 +612,12 @@ def run_update_apply(
     written ONLY after a re-wire actually completes, so it never claims a sha
     that was never fully wired.
 
+    Outpost is preflighted with the install and refused together with it, but
+    upgraded after it and rolled back on its own (see the module docstring).
+
     Returns 0 on success or a genuine no-op (already up to date); 1 on any
-    refusal or failure.
+    refusal or failure, including an outpost failure after a kept install
+    upgrade.
     """
     _env = env if env is not None else dict(os.environ)
     _runner = runner if runner is not None else _default_runner()
@@ -525,6 +642,16 @@ def run_update_apply(
     checkout = Path(stamp["checkout"])
     pre_sha = stamp["sha"]
 
+    # Reading outpost's config is not reading either checkout, so it may run
+    # ahead of consent — which lets the prompt name everything it will touch.
+    try:
+        outpost_checkout = outpost_lifecycle.configured_checkout(_env)
+    except OutpostLifecycleError as exc:
+        print(
+            f"trailhead: {exc} Fix the outpost config, then re-run: trailhead update",
+            file=sys.stderr,
+        )
+        return 1
 
     # ------------------------------------------------------------------
     # Consent gate — technical, not a courtesy. Nothing below this point may
@@ -533,10 +660,17 @@ def run_update_apply(
     # ------------------------------------------------------------------
     if not dry_run and not assume_yes:
         if _is_tty():
+            outpost_note = (
+                f" It then fast-forwards the outpost checkout at {outpost_checkout}, "
+                f"reinstalls its dependencies, and rebuilds it (restarting the "
+                f"daemon if it is running)."
+                if outpost_checkout is not None
+                else ""
+            )
             print(
                 f"This upgrades the trailhead install from {checkout}: "
                 f"fetches its tracked upstream branch, fast-forwards, and "
-                f"re-wires every configured plugin.\n"
+                f"re-wires every configured plugin.{outpost_note}\n"
             )
             if not _confirm("Proceed? [y/N] "):
                 print("aborted — nothing was changed")
@@ -550,48 +684,51 @@ def run_update_apply(
             )
             return 1
 
-    branch, branch_error = _resolve_upstream_branch(checkout, runner=_runner, timeout=timeout)
-    if branch is None:
-        print(
-            f"trailhead: {branch_error}. Inspect directly: "
-            f"git -C {checkout} rev-parse --abbrev-ref --symbolic-full-name @{{u}}",
-            file=sys.stderr,
-        )
-        return 1
-    remote_name = _remote_name(branch)
-
     # ------------------------------------------------------------------
-    # Dirty-checkout guard — refuse before mutating anything.
+    # Preflight — both checkouts, before mutating either. A problem with the
+    # outpost checkout refuses the whole upgrade here, while nothing has moved.
     # ------------------------------------------------------------------
-    status_proc = _run_git(checkout, "status", "--porcelain", runner=_runner, timeout=timeout)
-    if status_proc is None or status_proc.returncode != 0:
-        print(
-            f"trailhead: could not read the checkout's working-tree status: "
-            f"{_proc_stderr(status_proc)}. Inspect it directly: "
-            f"git -C {checkout} status",
-            file=sys.stderr,
-        )
-        return 1
-    if (status_proc.stdout or "").strip():
-        print(
-            f"trailhead: refusing to upgrade — {checkout} has uncommitted "
-            f"changes. Commit or stash them, then re-run: trailhead update",
-            file=sys.stderr,
-        )
-        return 1
+    preflight = [(checkout, "")]
+    if outpost_checkout is not None:
+        preflight.append((outpost_checkout, "outpost "))
+    branches: dict[Path, str] = {}
+    for target, label in preflight:
+        branch, branch_error = _resolve_upstream_branch(target, runner=_runner, timeout=timeout)
+        if branch is None:
+            escape = (
+                " To upgrade trailhead without outpost, remove or re-point the "
+                "'checkout' key in the outpost config."
+                if target == outpost_checkout
+                else ""
+            )
+            print(
+                f"trailhead: {label}{branch_error}. Inspect directly: "
+                f"git -C {target} rev-parse --abbrev-ref --symbolic-full-name @{{u}}.{escape}",
+                file=sys.stderr,
+            )
+            return 1
+        if not _is_clean(target, runner=_runner, timeout=timeout):
+            return 1
+        branches[target] = branch
 
     if dry_run:
+        outpost_note = (
+            f" Would then fast-forward {outpost_checkout} to {branches[outpost_checkout]} "
+            f"if possible and rebuild outpost."
+            if outpost_checkout is not None
+            else ""
+        )
         print(
-            f"trailhead: dry run — would fetch {remote_name}, fast-forward "
-            f"{checkout} to {branch} if possible, then re-wire. "
+            f"trailhead: dry run — would fetch {_remote_name(branches[checkout])}, fast-forward "
+            f"{checkout} to {branches[checkout]} if possible, then re-wire.{outpost_note} "
             f"No changes made."
         )
         return 0
 
     # ------------------------------------------------------------------
-    # Everything from here mutates the checkout and/or the composed trees —
-    # held under the shared wire lock so a concurrent install can never
-    # interleave with an in-flight upgrade.
+    # Everything from here mutates the checkouts and/or the composed trees —
+    # held under the shared wire lock so a concurrent install or upgrade can
+    # never interleave with an in-flight one.
     # ------------------------------------------------------------------
     try:
         with wire_lock(env=_env):
@@ -600,155 +737,284 @@ def run_update_apply(
             # with nothing left to roll it back.
             cfg = resolve_config_for_env(_env)
 
-            # `--` ends option parsing before the remote name. The name is
-            # derived from git's own upstream ref, which can never begin with
-            # `-`; the guard costs nothing and holds the invariant here too.
-            fetch_proc = _run_git(
-                checkout, "fetch", "--quiet", "--", remote_name, runner=_runner, timeout=timeout
-            )
-            if fetch_proc is None or fetch_proc.returncode != 0:
-                print(
-                    f"trailhead: git fetch failed: {_proc_stderr(fetch_proc)}. "
-                    f"Retry: trailhead update, or inspect directly: "
-                    f"git -C {checkout} fetch {remote_name}",
-                    file=sys.stderr,
-                )
+            if not _upgrade_install(
+                checkout, pre_sha, branches[checkout], cfg, env=_env, runner=_runner, timeout=timeout
+            ):
                 return 1
-
-            # `git rev-parse -- <rev>` does NOT mean "end of options" — rev-parse
-            # echoes a literal `--` back as one of its outputs, corrupting the
-            # single-sha stdout this call depends on. The branch is read from
-            # git's own upstream ref, which can never begin with `-`, so there
-            # is nothing option-shaped for a guard to stop here.
-            remote_sha_proc = _run_git(
-                checkout, "rev-parse", branch, runner=_runner, timeout=timeout
-            )
-            remote_sha = (remote_sha_proc.stdout or "").strip() if remote_sha_proc else ""
-            if remote_sha_proc is None or remote_sha_proc.returncode != 0 or not remote_sha:
-                print(
-                    f"trailhead: could not resolve {branch}: "
-                    f"{_proc_stderr(remote_sha_proc)}. Inspect directly: "
-                    f"git -C {checkout} rev-parse {branch}",
-                    file=sys.stderr,
-                )
+            if outpost_checkout is not None and not _upgrade_outpost(
+                outpost_checkout, branches[outpost_checkout], env=_env, runner=_runner, timeout=timeout
+            ):
                 return 1
-
-            # Captured immediately before any mutation, NOT read from the
-            # stamp: a checkout manually advanced past its wired sha must roll
-            # back to where it actually was, not below it.
-            pre_merge_proc = _run_git(checkout, "rev-parse", "HEAD", runner=_runner, timeout=timeout)
-            pre_merge_head = (pre_merge_proc.stdout or "").strip() if pre_merge_proc else ""
-            if pre_merge_proc is None or pre_merge_proc.returncode != 0 or not pre_merge_head:
-                print(
-                    f"trailhead: could not resolve HEAD before fast-forwarding: "
-                    f"{_proc_stderr(pre_merge_proc)}. Inspect directly: "
-                    f"git -C {checkout} status",
-                    file=sys.stderr,
-                )
-                return 1
-
-            # A checkout carrying local commits is AHEAD of its tracked
-            # branch, not diverged from it: there is nothing to fetch down,
-            # and refusing it would name a merge that does nothing.
-            remote_is_behind = remote_sha != pre_merge_head and _run_git(
-                checkout,
-                "merge-base",
-                "--is-ancestor",
-                "--",
-                branch,
-                "HEAD",
-                runner=_runner,
-                timeout=timeout,
-            )
-            nothing_to_pull = remote_sha == pre_merge_head or (
-                remote_is_behind is not None and remote_is_behind.returncode == 0
-            )
-
-            # Two independent hops. The checkout may have nothing to pull while
-            # the install behind it is stale — an install snapshots the plugin
-            # trees — in which case the re-wire below still runs.
-            if nothing_to_pull and pre_merge_head == pre_sha:
-                print(f"trailhead: already up to date (installed {pre_sha[:8]})")
-                return 0
-
-            if not nothing_to_pull:
-                ancestor_proc = _run_git(
-                    checkout,
-                    "merge-base",
-                    "--is-ancestor",
-                    "HEAD",
-                    "--",
-                    branch,
-                    runner=_runner,
-                    timeout=timeout,
-                )
-                if ancestor_proc is None or ancestor_proc.returncode != 0:
-                    print(
-                        f"trailhead: refusing to upgrade — {checkout}'s HEAD has "
-                        f"diverged from {branch} and cannot be "
-                        f"fast-forwarded. Resolve it yourself, e.g.: "
-                        f"git -C {checkout} merge {branch}",
-                        file=sys.stderr,
-                    )
-                    return 1
-
-                print(f"trailhead: fast-forwarding {checkout} to {branch}…")
-                merge_proc = _run_git(
-                    checkout, "merge", "--ff-only", "--", branch, runner=_runner, timeout=timeout
-                )
-                if merge_proc is None or merge_proc.returncode != 0:
-                    print(
-                        f"trailhead: fast-forward failed: {_proc_stderr(merge_proc)}. "
-                        f"The checkout was not changed. Inspect directly: "
-                        f"git -C {checkout} status",
-                        file=sys.stderr,
-                    )
-                    return 1
-
-            print("trailhead: re-wiring plugins…")
-            try:
-                wire_all_harnesses(cfg, env=_env, runner=_runner, quiet=True)
-            except Exception as exc:
-                reset_proc = _run_git(
-                    checkout, "reset", "--hard", pre_merge_head, runner=_runner, timeout=timeout
-                )
-                reset_ok = reset_proc is not None and reset_proc.returncode == 0
-                rewired_ok = False
-                if reset_ok:
-                    try:
-                        wire_all_harnesses(cfg, env=_env, runner=_runner, quiet=True)
-                        rewired_ok = True
-                    except Exception:
-                        pass  # best-effort restore; the error below still stands
-                if reset_ok and rewired_ok:
-                    print(
-                        f"trailhead: upgrade failed while re-wiring ({exc}); rolled "
-                        f"the checkout back to {pre_merge_head[:8]} and restored the "
-                        f"prior wiring. Re-run: trailhead update",
-                        file=sys.stderr,
-                    )
-                elif reset_ok:
-                    print(
-                        f"trailhead: upgrade failed while re-wiring ({exc}); rolled "
-                        f"the checkout back to {pre_merge_head[:8]} but the prior "
-                        f"wiring could NOT be restored automatically. Re-wire "
-                        f"manually: trailhead install",
-                        file=sys.stderr,
-                    )
-                else:
-                    print(
-                        f"trailhead: upgrade failed while re-wiring ({exc}); the "
-                        f"checkout could NOT be rolled back to {pre_merge_head[:8]}. "
-                        f"Inspect and repair manually: "
-                        f"git -C {checkout} reset --hard {pre_merge_head}",
-                        file=sys.stderr,
-                    )
-                return 1
-
-            write_stamp(checkout, env=_env, runner=_runner)
     except LockError as exc:
         print(str(exc), file=sys.stderr)
         return 1
 
-    print(f"trailhead: upgraded to {remote_sha[:8]}")
     return 0
+
+
+def _is_clean(checkout: Path, *, runner, timeout: int) -> bool:
+    """True when *checkout* has no uncommitted changes. Prints the named
+    refusal and returns False otherwise, or when the status is unreadable."""
+    status_proc = _run_git(checkout, "status", "--porcelain", runner=runner, timeout=timeout)
+    if status_proc is None or status_proc.returncode != 0:
+        print(
+            f"trailhead: could not read the checkout's working-tree status: "
+            f"{_proc_stderr(status_proc)}. Inspect it directly: "
+            f"git -C {checkout} status",
+            file=sys.stderr,
+        )
+        return False
+    if (status_proc.stdout or "").strip():
+        print(
+            f"trailhead: refusing to upgrade — {checkout} has uncommitted "
+            f"changes. Commit or stash them, then re-run: trailhead update",
+            file=sys.stderr,
+        )
+        return False
+    return True
+
+
+def _fast_forward(checkout: Path, branch: str, *, runner, timeout: int):
+    """Fetch *branch*'s remote and fast-forward *checkout* onto it.
+
+    Returns ``(status, pre_head, remote_sha)`` where status is ``"advanced"``
+    (the checkout moved), ``"current"`` (nothing to pull — level with, or
+    carrying local commits ahead of, the branch), or ``"failed"`` (a named
+    error was printed and the checkout was not changed). ``pre_head`` is HEAD
+    read immediately before any mutation — the rollback target.
+    """
+    remote_name = _remote_name(branch)
+    # `--` ends option parsing before the remote name. The name is derived
+    # from git's own upstream ref, which can never begin with `-`; the guard
+    # costs nothing and holds the invariant here too.
+    fetch_proc = _run_git(
+        checkout, "fetch", "--quiet", "--", remote_name, runner=runner, timeout=timeout
+    )
+    if fetch_proc is None or fetch_proc.returncode != 0:
+        print(
+            f"trailhead: git fetch failed: {_proc_stderr(fetch_proc)}. "
+            f"Retry: trailhead update, or inspect directly: "
+            f"git -C {checkout} fetch {remote_name}",
+            file=sys.stderr,
+        )
+        return "failed", "", ""
+
+    # `git rev-parse -- <rev>` does NOT mean "end of options" — rev-parse
+    # echoes a literal `--` back as one of its outputs, corrupting the
+    # single-sha stdout this call depends on. The branch is read from git's
+    # own upstream ref, which can never begin with `-`, so there is nothing
+    # option-shaped for a guard to stop here.
+    remote_sha_proc = _run_git(checkout, "rev-parse", branch, runner=runner, timeout=timeout)
+    remote_sha = (remote_sha_proc.stdout or "").strip() if remote_sha_proc else ""
+    if remote_sha_proc is None or remote_sha_proc.returncode != 0 or not remote_sha:
+        print(
+            f"trailhead: could not resolve {branch}: "
+            f"{_proc_stderr(remote_sha_proc)}. Inspect directly: "
+            f"git -C {checkout} rev-parse {branch}",
+            file=sys.stderr,
+        )
+        return "failed", "", ""
+
+    # Captured immediately before any mutation, NOT read from a stamp: a
+    # checkout manually advanced past its wired sha must roll back to where
+    # it actually was, not below it.
+    pre_merge_proc = _run_git(checkout, "rev-parse", "HEAD", runner=runner, timeout=timeout)
+    pre_head = (pre_merge_proc.stdout or "").strip() if pre_merge_proc else ""
+    if pre_merge_proc is None or pre_merge_proc.returncode != 0 or not pre_head:
+        print(
+            f"trailhead: could not resolve HEAD before fast-forwarding: "
+            f"{_proc_stderr(pre_merge_proc)}. Inspect directly: "
+            f"git -C {checkout} status",
+            file=sys.stderr,
+        )
+        return "failed", "", ""
+
+    # A checkout carrying local commits is AHEAD of its tracked branch, not
+    # diverged from it: there is nothing to fetch down, and refusing it would
+    # name a merge that does nothing.
+    remote_is_behind = remote_sha != pre_head and _run_git(
+        checkout,
+        "merge-base",
+        "--is-ancestor",
+        "--",
+        branch,
+        "HEAD",
+        runner=runner,
+        timeout=timeout,
+    )
+    nothing_to_pull = remote_sha == pre_head or (
+        remote_is_behind is not None and remote_is_behind.returncode == 0
+    )
+    if nothing_to_pull:
+        return "current", pre_head, remote_sha
+
+    ancestor_proc = _run_git(
+        checkout,
+        "merge-base",
+        "--is-ancestor",
+        "HEAD",
+        "--",
+        branch,
+        runner=runner,
+        timeout=timeout,
+    )
+    if ancestor_proc is None or ancestor_proc.returncode != 0:
+        print(
+            f"trailhead: refusing to upgrade — {checkout}'s HEAD has "
+            f"diverged from {branch} and cannot be "
+            f"fast-forwarded. Resolve it yourself, e.g.: "
+            f"git -C {checkout} merge {branch}",
+            file=sys.stderr,
+        )
+        return "failed", pre_head, remote_sha
+
+    print(f"trailhead: fast-forwarding {checkout} to {branch}…")
+    merge_proc = _run_git(
+        checkout, "merge", "--ff-only", "--", branch, runner=runner, timeout=timeout
+    )
+    if merge_proc is None or merge_proc.returncode != 0:
+        print(
+            f"trailhead: fast-forward failed: {_proc_stderr(merge_proc)}. "
+            f"The checkout was not changed. Inspect directly: "
+            f"git -C {checkout} status",
+            file=sys.stderr,
+        )
+        return "failed", pre_head, remote_sha
+    return "advanced", pre_head, remote_sha
+
+
+def _upgrade_install(
+    checkout: Path, pre_sha: str, branch: str, cfg, *, env: dict[str, str], runner, timeout: int
+) -> bool:
+    """Fast-forward the install's checkout and re-wire, rolling back on a
+    failed re-wire. Returns True on success or a genuine no-op; False after
+    printing a named failure. Caller holds the wire lock."""
+    status, pre_merge_head, remote_sha = _fast_forward(checkout, branch, runner=runner, timeout=timeout)
+    if status == "failed":
+        return False
+
+    # Two independent hops. The checkout may have nothing to pull while the
+    # install behind it is stale — an install snapshots the plugin trees — in
+    # which case the re-wire below still runs.
+    if status == "current" and pre_merge_head == pre_sha:
+        print(f"trailhead: already up to date (installed {pre_sha[:8]})")
+        return True
+
+    print("trailhead: re-wiring plugins…")
+    try:
+        wire_all_harnesses(cfg, env=env, runner=runner, quiet=True)
+    except Exception as exc:
+        reset_proc = _run_git(
+            checkout, "reset", "--hard", pre_merge_head, runner=runner, timeout=timeout
+        )
+        reset_ok = reset_proc is not None and reset_proc.returncode == 0
+        rewired_ok = False
+        if reset_ok:
+            try:
+                wire_all_harnesses(cfg, env=env, runner=runner, quiet=True)
+                rewired_ok = True
+            except Exception:
+                pass  # best-effort restore; the error below still stands
+        if reset_ok and rewired_ok:
+            print(
+                f"trailhead: upgrade failed while re-wiring ({exc}); rolled "
+                f"the checkout back to {pre_merge_head[:8]} and restored the "
+                f"prior wiring. Re-run: trailhead update",
+                file=sys.stderr,
+            )
+        elif reset_ok:
+            print(
+                f"trailhead: upgrade failed while re-wiring ({exc}); rolled "
+                f"the checkout back to {pre_merge_head[:8]} but the prior "
+                f"wiring could NOT be restored automatically. Re-wire "
+                f"manually: trailhead install",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                f"trailhead: upgrade failed while re-wiring ({exc}); the "
+                f"checkout could NOT be rolled back to {pre_merge_head[:8]}. "
+                f"Inspect and repair manually: "
+                f"git -C {checkout} reset --hard {pre_merge_head}",
+                file=sys.stderr,
+            )
+        return False
+
+    write_stamp(checkout, env=env, runner=runner)
+    print(f"trailhead: upgraded to {remote_sha[:8]}")
+    return True
+
+
+def _refresh_outpost(env: dict[str, str], *, restart: bool) -> None:
+    """Install outpost's pinned dependencies, then build it — through
+    ``restart`` when the daemon is running, which builds before it stops
+    anything, so a failed build never takes a running daemon down."""
+    outpost_lifecycle.install_dependencies(env=env)
+    if restart:
+        outpost_lifecycle.restart(env=env)
+    else:
+        outpost_lifecycle.build(env=env)
+
+
+def _upgrade_outpost(
+    checkout: Path, branch: str, *, env: dict[str, str], runner, timeout: int
+) -> bool:
+    """Fast-forward the outpost checkout, reinstall its dependencies, and
+    rebuild it (restarting the daemon if it was answering). Runs only after
+    the install upgrade succeeded, and never undoes it: a failure here rolls
+    back outpost alone — reset to its pre-upgrade HEAD, then reinstalled and
+    rebuilt/restarted from there — and reports truthfully whether that
+    restore worked. Returns True on success or a no-op; False after printing
+    a named failure."""
+    status, pre_head, remote_sha = _fast_forward(checkout, branch, runner=runner, timeout=timeout)
+    if status == "failed":
+        print(
+            "trailhead: outpost was not upgraded; the trailhead install is unaffected.",
+            file=sys.stderr,
+        )
+        return False
+    if status == "current":
+        print(f"trailhead: outpost already up to date ({pre_head[:8]})")
+        return True
+
+    was_running = outpost_lifecycle.is_answering()
+    try:
+        _refresh_outpost(env, restart=was_running)
+    except Exception as exc:
+        reset_proc = _run_git(checkout, "reset", "--hard", pre_head, runner=runner, timeout=timeout)
+        reset_ok = reset_proc is not None and reset_proc.returncode == 0
+        restored = False
+        if reset_ok:
+            try:
+                _refresh_outpost(env, restart=was_running)
+                restored = True
+            except Exception:
+                pass  # best-effort restore; the error below still stands
+        if reset_ok and restored:
+            print(
+                f"trailhead: outpost upgrade failed ({exc}); rolled {checkout} back "
+                f"to {pre_head[:8]} and restored the prior build. The trailhead "
+                f"install is unaffected. Re-run: trailhead update",
+                file=sys.stderr,
+            )
+        elif reset_ok:
+            then_restart = ", then: trailhead outpost restart" if was_running else ""
+            print(
+                f"trailhead: outpost upgrade failed ({exc}); rolled {checkout} back "
+                f"to {pre_head[:8]} but the prior build could NOT be rebuilt "
+                f"automatically. Repair manually: cd {checkout} && npm ci && "
+                f"npm run build{then_restart}",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                f"trailhead: outpost upgrade failed ({exc}); {checkout} could NOT "
+                f"be rolled back to {pre_head[:8]}. Inspect and repair manually: "
+                f"git -C {checkout} reset --hard {pre_head}",
+                file=sys.stderr,
+            )
+        return False
+
+    restarted = " and restarted the daemon" if was_running else ""
+    print(f"trailhead: upgraded outpost to {remote_sha[:8]}{restarted}")
+    return True

@@ -1,4 +1,4 @@
-"""Pinned schema for `trailhead update --check --json` (schema v3).
+"""Pinned schema for `trailhead update --check --json` (schema v4).
 
 This is the producer contract the SessionStart hook delivery slice consumes:
 its tests import these examples rather than re-deriving the shape. Each
@@ -15,9 +15,15 @@ bool}`. `available` is false whenever the delta could
 not be computed (no stamp, no resolvable remote, an errored diff invocation)
 — the verdict fields (`outcome`, `commits_behind`) stay independently correct
 even then, so a caller never sees a partial delta mistaken for a complete one.
+
+`outpost` is `null` when no outpost checkout is configured, else
+`{"outcome": "ok"|"behind"|"unanswerable", "commits_behind": int|null,
+"reason": str|null}` — how far the configured outpost checkout is behind its
+own tracked branch. It is independent of the top-level verdict, which is the
+trailhead install's alone.
 """
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 _SHA = "a" * 40
 
@@ -32,6 +38,7 @@ BEHIND_EXAMPLE = {
     "installed_sha": _SHA,
     "reason": None,
     "changelog_delta": _EMPTY_DELTA,
+    "outpost": None,
 }
 
 OK_EXAMPLE = {
@@ -42,6 +49,7 @@ OK_EXAMPLE = {
     "installed_sha": _SHA,
     "reason": None,
     "changelog_delta": _EMPTY_DELTA,
+    "outpost": None,
 }
 
 UNANSWERABLE_NO_STAMP_EXAMPLE = {
@@ -52,4 +60,10 @@ UNANSWERABLE_NO_STAMP_EXAMPLE = {
     "installed_sha": None,
     "reason": "no install provenance stamp found",
     "changelog_delta": _NO_DELTA,
+    "outpost": None,
+}
+
+OUTPOST_BEHIND_EXAMPLE = {
+    **OK_EXAMPLE,
+    "outpost": {"outcome": "behind", "commits_behind": 2, "reason": None},
 }
