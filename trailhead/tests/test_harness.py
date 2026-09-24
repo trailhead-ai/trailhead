@@ -1463,7 +1463,7 @@ class TestClaudeCodeSessionTranscripts:
         )
         assert ClaudeCodeHarness().session_transcripts(env=self._env(claude_dir)) == []
 
-    def test_no_cwd_in_first_12_lines_yields_a_row_with_cwd_none(self, tmp_path):
+    def test_no_cwd_in_any_leading_line_yields_a_row_with_cwd_none(self, tmp_path):
         claude_dir = tmp_path / ".claude"
         lines = [json.dumps({"type": "system", "n": i}) for i in range(12)]
         self._write(claude_dir, "proj", "sess-nocwd", lines)
@@ -1532,13 +1532,38 @@ class TestClaudeCodeSessionTranscripts:
         # Stepping over the corrupt record must not cost the line after it.
         assert rows[0].cwd == ws.resolve()
 
+    def test_cwd_after_a_long_metadata_header_is_found(self, tmp_path):
+        """A resumed session's transcript opens with metadata records that carry
+        no cwd — titles, mode changes, file-history snapshots, queued prompts —
+        and its first cwd-bearing message can sit well past line 12. Measured
+        on real stores: line 13 and line 22."""
+        claude_dir = tmp_path / ".claude"
+        ws = tmp_path / "resumed-workspace"
+        ws.mkdir()
+        header = [
+            json.dumps({"type": "custom-title", "customTitle": "t"}),
+            json.dumps({"type": "ai-title", "aiTitle": "t"}),
+            json.dumps({"type": "mode", "mode": "normal"}),
+            json.dumps({"type": "permission-mode", "permissionMode": "auto"}),
+        ] + [
+            json.dumps({"type": "queue-operation", "operation": "enqueue", "n": i})
+            for i in range(18)
+        ]
+        first_message = json.dumps({"type": "user", "cwd": str(ws)})
+        self._write(claude_dir, "proj", "sess-resumed", header + [first_message])
+
+        rows = ClaudeCodeHarness().session_transcripts(env=self._env(claude_dir))
+        assert rows[0].cwd == ws.resolve()
+
     def test_cwd_past_the_scan_bound_is_not_found(self, tmp_path):
-        """Pins the 12-line bound as CONTRACT: a cwd sitting on line 13 must not
-        be found, even though nothing about it is malformed."""
+        """The scan is bounded: a cwd on the line just past the bound must not be
+        found, even though nothing about it is malformed."""
+        from trailhead.harness import claude_code as cc
+
         claude_dir = tmp_path / ".claude"
         ws = tmp_path / "late-workspace"
         ws.mkdir()
-        filler = [json.dumps({"type": "system", "n": i}) for i in range(12)]
+        filler = [json.dumps({"type": "system", "n": i}) for i in range(cc._CWD_SCAN_MAX_LINES)]
         sentinel = json.dumps({"cwd": str(ws)})
         self._write(claude_dir, "proj", "sess-late", filler + [sentinel])
 
@@ -1726,13 +1751,18 @@ class TestClaudeCodeRewriteTranscriptWorkspace:
         assert not destination.exists()
 
     def test_the_refusal_is_not_weakened_by_the_head_scan_bound(self, tmp_path):
-        """A foreign recorded root past line 12 must still refuse — the 12-line
+        """A foreign recorded root past the first lines must still refuse — the
         head-scan bound governs cheaply *reading* a root for enumeration, and
         must not be inherited here."""
+        from trailhead.harness import claude_code as cc
+
         old_root = tmp_path / "old-workspace"
         old_root.mkdir()
         foreign_root = tmp_path / "someone-elses-workspace"
-        filler = [json.dumps({"cwd": str(old_root), "n": i}) for i in range(20)]
+        filler = [
+            json.dumps({"cwd": str(old_root), "n": i})
+            for i in range(cc._CWD_SCAN_MAX_LINES + 8)
+        ]
         source = self._write(
             tmp_path / "conversation-late.jsonl",
             filler + [json.dumps({"cwd": str(foreign_root)})],
@@ -1807,12 +1837,16 @@ class TestClaudeCodeRewriteTranscriptWorkspace:
         assert destination.read_text() == ""
 
     def test_a_root_recorded_only_past_the_reading_scan_bound_is_still_rewritten(self, tmp_path):
-        """The existing 12-line head-scan bound governs cheaply reading a root
+        """The head-scan bound governs cheaply reading a root
         for enumeration; applying it here would leave a stale absolute path in
         a relocated file."""
+        from trailhead.harness import claude_code as cc
+
         old_root = tmp_path / "old-workspace"
         old_root.mkdir()
-        filler = [json.dumps({"type": "system", "n": i}) for i in range(20)]
+        filler = [
+            json.dumps({"type": "system", "n": i}) for i in range(cc._CWD_SCAN_MAX_LINES + 8)
+        ]
         real_line = json.dumps({"cwd": str(old_root)})
         source = self._write(tmp_path / "src.jsonl", filler + [real_line])
         destination = tmp_path / "dst.jsonl"

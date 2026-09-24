@@ -161,7 +161,13 @@ def _projects_key(resolved: Path) -> str:
 #: ``_CWD_SCAN_MAX_LINES`` bounds how many leading records are inspected, and
 #: ``_CWD_SCAN_MAX_LINE_BYTES`` skips any single record too large to be a
 #: plausible cwd-bearing header line rather than paying to decode it.
-_CWD_SCAN_MAX_LINES = 12
+#:
+#: The first cwd-bearing record is a session's first message, and a resumed
+#: session's transcript opens with metadata records ahead of it (titles, mode
+#: changes, file-history snapshots, queued prompts) — measured on real stores
+#: at up to 21 leading records. The line bound sits an order of magnitude
+#: above that; the scan still stops at the first cwd it finds.
+_CWD_SCAN_MAX_LINES = 200
 _CWD_SCAN_MAX_LINE_BYTES = 1_000_000
 
 
