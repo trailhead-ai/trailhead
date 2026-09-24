@@ -263,7 +263,7 @@ _CWD_FIELD_RE = re.compile(rb'("cwd"\s*:\s*)"((?:\\.|[^"\\])*)"')
 
 
 def _rewrite_transcript_line(
-    chunk: bytes, old_root: Path, new_root: Path, source: Path
+    chunk: bytes, old_root: Path, new_root: Path, source: Path, *, keep_foreign_roots: bool
 ) -> bytes:
     """Rewrite one already cap-sized transcript line's ``cwd`` in place, or
     pass it through verbatim.
@@ -314,6 +314,8 @@ def _rewrite_transcript_line(
     if not cwd_path.is_absolute():
         return chunk
     if not cwd_path.is_relative_to(old_root):
+        if keep_foreign_roots:
+            return chunk
         raise HarnessError(
             f"rewrite_transcript_workspace: {source.name} records a root "
             f"({cwd_path}) outside {old_root}; refusing to rewrite the "
@@ -1222,7 +1224,13 @@ class ClaudeCodeHarness(Harness):
     # never a partial or unrewritten file left where a caller might read it.
 
     def rewrite_transcript_workspace(
-        self, source: Path, destination: Path, old_root: Path, new_root: Path
+        self,
+        source: Path,
+        destination: Path,
+        old_root: Path,
+        new_root: Path,
+        *,
+        keep_foreign_roots: bool = False,
     ) -> bool:
         """Rewrite every ``cwd`` in ``source`` from ``old_root`` to ``new_root``,
         streaming the result into ``destination``.
@@ -1242,7 +1250,8 @@ class ClaudeCodeHarness(Harness):
 
         A line whose ``cwd`` is absolute but not under ``old_root`` raises
         :class:`HarnessError` naming ``source``, and nothing is written to
-        ``destination``.
+        ``destination`` — unless ``keep_foreign_roots``, which copies that
+        line through verbatim instead.
 
         ``destination``'s parent directory must already exist — creating it
         is the caller's responsibility, not this transform's.
@@ -1266,7 +1275,9 @@ class ClaudeCodeHarness(Harness):
                         if not chunk.endswith(b"\n"):
                             _stream_rest_of_overlong_line(f_in, f_out)
                         continue
-                    rewritten = _rewrite_transcript_line(chunk, old_root, new_root, source)
+                    rewritten = _rewrite_transcript_line(
+                        chunk, old_root, new_root, source, keep_foreign_roots=keep_foreign_roots
+                    )
                     f_out.write(rewritten)
         except BaseException:
             os.unlink(tmp_name)

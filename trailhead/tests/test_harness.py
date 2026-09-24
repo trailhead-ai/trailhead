@@ -1856,6 +1856,32 @@ class TestClaudeCodeRewriteTranscriptWorkspace:
 
         assert not destination.exists()
 
+    def test_keeping_foreign_roots_passes_them_through_and_still_relocates(self, tmp_path):
+        """Asked to keep foreign roots, the transform leaves a line recording a
+        root outside ``old_root`` byte-identical and still relocates the rest;
+        without the flag the same transcript is refused."""
+        old_root = tmp_path / "old-workspace"
+        old_root.mkdir()
+        new_root = tmp_path / "new-workspace"
+        foreign_line = json.dumps({"cwd": str(tmp_path / "isolated-worktree"), "n": 1})
+        source = self._write(
+            tmp_path / "src.jsonl",
+            [foreign_line, json.dumps({"cwd": str(old_root / "member"), "n": 2})],
+        )
+
+        with pytest.raises(HarnessError):
+            ClaudeCodeHarness().rewrite_transcript_workspace(
+                source, tmp_path / "strict.jsonl", old_root, new_root
+            )
+
+        destination = tmp_path / "dst.jsonl"
+        ClaudeCodeHarness().rewrite_transcript_workspace(
+            source, destination, old_root, new_root, keep_foreign_roots=True
+        )
+        out = destination.read_text().splitlines()
+        assert out[0] == foreign_line
+        assert json.loads(out[1])["cwd"] == str(new_root / "member")
+
     def test_the_refusal_is_not_weakened_by_the_head_scan_bound(self, tmp_path):
         """A foreign recorded root past the first lines must still refuse — the
         head-scan bound governs cheaply *reading* a root for enumeration, and
