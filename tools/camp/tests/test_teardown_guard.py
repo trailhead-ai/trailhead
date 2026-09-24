@@ -386,13 +386,66 @@ def test_the_refusal_names_every_blocking_session(tmp_path: Path) -> None:
         groups=[_group("g")],
         env=env,
     )
-    rendered = render_block("ws", blocking)
+    rendered = render_block("ws", blocking, group_name="g")
     assert "ws" in rendered
     for candidate in blocking:
         assert candidate.derived_name in rendered
         assert str(candidate.root) in rendered
     assert "--force" in rendered
-    assert "camp kill" in rendered
+    assert "--group g" in rendered
+
+
+def test_the_refusal_names_camp_stop_when_a_blocking_session_is_running(
+    tmp_path: Path,
+) -> None:
+    """A running session can actually be stopped — the remedy names the live
+    verb that does it, addressed by the workspace's own slug."""
+    from camp.launch.teardown_guard import render_block
+
+    env = _env(tmp_path)
+    ws = _workspace(tmp_path, "g", "ws")
+    blocking = _blocking(
+        ws,
+        transcripts=[],
+        live_records=[_record(_UUID_A, ws)],
+        groups=[_group("g")],
+        env=env,
+    )
+    assert blocking[0].live is True
+
+    rendered = render_block("ws", blocking, group_name="g")
+
+    assert "camp stop ws --group g" in rendered
+    # Stopping the live process leaves the transcript parked, and a parked
+    # transcript still blocks removal — the remedy must not read as though
+    # `camp stop` alone clears the block; `--force` is still required.
+    assert "--force" in rendered
+    assert "--group g" in rendered
+
+
+def test_the_refusal_does_not_offer_camp_stop_when_every_blocking_session_is_parked(
+    tmp_path: Path,
+) -> None:
+    """A parked transcript has no running process — `camp stop` would do
+    nothing, so the refusal must not point the operator at it as a remedy."""
+    from camp.launch.teardown_guard import render_block
+
+    env = _env(tmp_path)
+    ws = _workspace(tmp_path, "g", "ws")
+    blocking = _blocking(
+        ws,
+        transcripts=[_transcript(_UUID_B, ws)],
+        live_records=[],
+        groups=[_group("g")],
+        env=env,
+    )
+    assert blocking[0].live is False
+
+    rendered = render_block("ws", blocking, group_name="g")
+
+    assert "camp stop" not in rendered
+    assert "--force" in rendered
+    assert "--group g" in rendered
 
 
 def test_the_refusal_escapes_a_control_character_in_a_root(tmp_path: Path) -> None:
@@ -410,7 +463,7 @@ def test_the_refusal_escapes_a_control_character_in_a_root(tmp_path: Path) -> No
         root_missing=False,
         unreadable=False,
     )
-    rendered = render_block("ws", (candidate,))
+    rendered = render_block("ws", (candidate,), group_name="g")
     assert "evil\nx" not in rendered
     assert "\\x0a" in rendered
 

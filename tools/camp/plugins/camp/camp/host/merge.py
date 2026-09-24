@@ -2,9 +2,9 @@
 
 This is the pure merge `docs/design/the-all-hosts-answer-merges-every-declared-machine.md`
 fixes: given the local answer (already computed by the caller — `camp
-list`'s or `camp sessions`' own value-returning local path) and the remote
-answers already collected per declared host (`camp.host.relay.HostAnswer`,
-one per host, in `hosts.toml` declaration order), it returns one merged
+list`'s own value-returning local path) and the remote answers already
+collected per declared host (`camp.host.relay.HostAnswer`, one per host, in
+`hosts.toml` declaration order), it returns one merged
 `(rows, notices, exit_code)` with:
 
   - the local block first, then each declared host's rows in the order the
@@ -67,9 +67,8 @@ def merge_all_hosts_answer(
 
     Args:
         local_rows: The local answer's own rows (from `cmd_ls_group`'s
-            entries projected onto the list schema, or from
-            `_sessions_live_answer`'s rows) — untouched beyond the `host`
-            stamp this function adds.
+            entries projected onto the list schema) — untouched beyond the
+            `host` stamp this function adds.
         local_notices: The local answer's own stderr notices, in order.
         local_exit_code: The local answer's own exit code — becomes the
             merged answer's exit code unconditionally.
@@ -98,10 +97,9 @@ def merge_all_hosts_answer(
         local answer already returns.
     """
     # The local answer arrives already narrowed to the resolved group by its
-    # own caller (`local_list_answer`/`local_sessions_answer`) — it is never
-    # re-filtered here. Only remote rows carry groups this side never asked
-    # for (every remote invocation is the all-groups form), so only remote
-    # rows are narrowed.
+    # own caller (`local_list_answer`) — it is never re-filtered here. Only
+    # remote rows carry groups this side never asked for (every remote
+    # invocation is the all-groups form), so only remote rows are narrowed.
     rows: list[dict[str, Any]] = [
         {**row, "host": self_name} for row in local_rows
     ]
@@ -159,16 +157,15 @@ def answer_all_hosts_concurrently(
     Args:
         local_answer: Zero-argument callable returning the local
             `(rows, notices, exit_code)` — the caller's own value-returning
-            local path (`cmd_ls_group`'s projection, or
-            `_sessions_live_answer`).
+            local path (`cmd_ls_group`'s projection).
         hosts: One `(host_name, Host)` pair per declared host, in
             `hosts.toml` declaration order. The pool starts a worker for
             each entry, but the returned `host_answers` is always in this
             same declared order regardless of which worker finished first —
             completion order never leaks into the result.
         verb: Passed through to the default worker's `answer_for_host` call
-            (`"list"` or `"sessions"`) and used to word the internal-fault
-            notice when any worker raises.
+            (`"list"`) and used to word the internal-fault notice when any
+            worker raises.
         remote_argv: Passed through to the default worker's
             `answer_for_host` call — the same all-groups, JSON remote
             command every `--host` verb already builds. Unused when

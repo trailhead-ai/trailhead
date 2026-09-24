@@ -528,28 +528,11 @@ class Harness(ABC):
         """
         return False
 
-    # -- session retention ----------------------------------------------------
+    # -- session retention setting -----------------------------------------
     #
-    # Harnesses delete their own session transcripts on a schedule.  A caller
-    # that offers to bring a dead session back needs the window to say why one is
-    # no longer there — expressed here in days and read from wherever the harness
-    # configures it (that location, and the setting's name, are harness knowledge
-    # and stay in the harness module).
-    #
-    # Same degrading default as the two seams above: ``None`` means "this harness
-    # has no retention window to report".  A caller must then skip its warning
-    # silently — a guessed window would warn about deletions that never come.
-
-    def session_retention_days(self, *, env: dict[str, str] | None = None) -> int | None:
-        """Days a session transcript survives before the harness cleans it up.
-
-        Returns ``None`` when the harness does not expire transcripts or cannot
-        report the window.  Implementations return their own documented default
-        when the setting is simply unset, and never raise for an unreadable or
-        malformed config — a retention hint is advisory, and crashing a report
-        over it is worse than not showing it.
-        """
-        return None
+    # Harnesses delete their own session transcripts on a schedule, on a
+    # setting whose spelling is harness knowledge and stays in the harness
+    # module.
 
     def session_retention_setting(self) -> str | None:
         """Name of the setting controlling the retention window, or ``None``.

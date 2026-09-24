@@ -29,10 +29,7 @@ camp new <slug> --no-session # create or enter the workspace only — no tmux se
 camp pwd <slug>      # print workspace path
 camp list            # table of workspaces: sessions, last touched (alias: ls)
 camp status          # show git + drift status
-camp sessions        # list the live harness sessions camp can see
-camp sessions --recoverable  # list the dead ones that could be brought back
-camp kill <ref>      # stop one session and reclaim its memory
-camp attach <ref>    # hand your terminal to a running session
+camp attach <slug>   # hand your terminal to a running session
 camp stop <slug>     # preview, then kill a workspace's whole tmux session
 camp remove          # tear down a worktree (alias: rm)
 camp --help          # full command reference
@@ -83,12 +80,6 @@ rooted at the new workspace, so there is nowhere left to `cd`.
 
 ## Sessions
 
-```
-camp sessions [<slug>] [--dir <path>] [--all-groups|-g] [--json]  # what is live
-camp sessions --recoverable [<slug>] [--dir <path>]         # what is dead
-                          [--limit <n>|--all] [--json]
-```
-
 `camp new <slug>` creates the workspace's tmux session (a bare shell, rooted at
 the workspace) and attaches to it, described above under "Quick start" and in
 "`camp remove` changes your shell's directory". Windows and panes in that
@@ -103,13 +94,9 @@ replaces the window's earlier one). A conversation started outside the
 workspace's own directory, or outside a camp workspace session, is not
 recorded.
 
-`camp list` and `camp sessions` both take `--all-groups` (short: `-g`), which
-answers for every configured group in one invocation instead of one — every
-group's worktrees for `list`, every group's stores for `sessions` — ordered by
-group. It refuses alongside a named group rather than picking one; naming a
-group with plain `camp sessions --group <name>` (or from inside a workspace)
-does the opposite, narrowing the live listing to that group's own rows rather
-than the ordinary cross-store answer.
+`camp list` takes `--all-groups` (short: `-g`), which answers for every
+configured group's worktrees in one invocation instead of one, ordered by
+group. It refuses alongside a named group rather than picking one.
 
 Every pane in a workspace's tmux session — its first one, and any you open —
 starts without the harness's ambient session variables and on the group's
@@ -169,91 +156,48 @@ harness's own resume command>` — and the operator decides which conversations
 to resume, and when, from inside that shell. camp starts no conversation on
 the way back.
 
-`camp sessions --recoverable` is how those conversations can be surveyed
-without reaching the workspace first — every session the harness kept a
-transcript for, minus the ones running now, newest first and capped at the
-newest 20 with the total named (`--limit <n>` or `--all` widen it). A row
-whose directory no longer exists is listed and marked rather than hidden.
-
-`camp sessions` degrades rather than failing: an enumeration error, an unknown
-harness, or an absent tmux prints a notice on stderr and an empty list on
-stdout, exit 0. `--recoverable` degrades the same way when the live set cannot
-be determined — it reports none rather than printing an unsubtracted pool that
-might include sessions running right now. It has two refusals instead, because
-neither has an empty listing as an honest answer: camp cannot name a harness for
-any configured group, or the harnesses it can name keep no transcripts it can
-read. An unusable `--limit` refuses too.
-
 ## Attach
 
-`camp attach` hands your terminal to a running session, on this machine or a
-declared one, without working out which machine it's on first:
+`camp attach` hands your terminal to a running session, reached by the
+workspace's own slug — on this machine or a declared one:
 
 ```
 camp attach
-camp attach -a
-camp attach <ref>
-camp attach <ref> --host <name>
-camp attach <ref> -a
+camp attach <slug>
+camp attach <slug> --host <name>
 ```
 
-With no reference, it offers a numbered picker over this machine's running,
-camp-owned sessions — most recently active first — and reads one choice;
-`-a` widens that picker across every declared machine too. `<ref>` is the
-same unambiguous prefix `camp kill` already accepts, resolved by the
-identical rule so the two verbs never drift into two grammars.
+With no slug, it offers a numbered picker over the resolved group's own
+workspaces — from inside a configured group, or with `--group` — and reads
+one choice.
 
-From inside a configured group (or with `--group`), `<ref>` is checked against that
-group's own workspace slugs first: a match creates or connects that workspace's
-tmux session — creating it if nothing is running yet, joining it if something
-already is — and hands you the terminal the same way. A `<ref>` matching no
-workspace falls through to the session-reference form below, unchanged. Outside
-tmux this attaches directly; from inside an existing tmux session it moves your
-client there instead of nesting, so hopping between workspaces never tears down
-the one you came from.
-
-`<ref> --host <name>` carries the reference across untouched: the named
-machine's own camp resolves it and refuses in its own words, exactly as if
-you had run `camp attach <ref>` there yourself. `<ref> -a` instead asks
-every declared machine to resolve the reference and counts how many did:
-none is no match, more than one refuses and names every machine that
-matched, and a machine that did not answer refuses the whole attempt rather
-than guessing — the one place this surface departs from a plain listing,
-which can report an unreachable machine as a row and still succeed. Attach
-cannot, because the silent machine might have held the only match.
-
-Only a session camp itself started is offered — the same ownership check
-`camp kill` applies. A resolved session that is not currently running
-refuses, rather than reporting "not found" for a session that does exist:
+`<slug>` is checked against the resolved group's own workspace slugs: a
+match creates or connects that workspace's tmux session — creating it if
+nothing is running yet, joining it if something already is — and hands you
+the terminal. A slug matching no workspace refuses:
 
 ```
-camp attach: session <id> is not running — find its workspace with `camp
-sessions --recoverable` and reattach with `camp attach <slug>`
+camp attach: no workspace named <slug> in group <group> — 'camp list' shows
+its workspaces
 ```
+
+Outside tmux this attaches directly; from inside an existing tmux session it
+moves your client there instead of nesting, so hopping between workspaces
+never tears down the one you came from.
+
+`<slug> --host <name>` resolves the group locally — `--group` if given,
+else the group your cwd resolves to, the same as a local attach — and
+carries the slug plus that resolved group across to the named machine's own
+camp, which resolves and refuses in its own words, exactly as if you had run
+`camp attach <slug> --group <group>` there yourself. No group resolving
+locally refuses locally, with the same needs-group line above, and no
+machine is contacted.
 
 Exit status is the attaching multiplexer's own once the handoff happens, and
-camp's own before it: `1` for a refusal, `2` for a reference matching more
-than one session (one machine, or more than one under `-a`), matching `camp
-kill`.
-
-`camp attach <ref> --resolve --json` is machine-readable and never attaches
-anything — it just answers whether `<ref>` resolves here, as JSON. Its only
-consumer is `camp attach <ref> -a` itself, probing every declared machine
-this same way before deciding where to hand the terminal.
-
-```
-camp attach <ref> --resolve --json
-```
-
-`camp attach --list --json` is `--resolve --json`'s reference-less sibling: it
-dumps this machine's own picker pool as JSON instead of prompting. Its only
-consumer is `camp attach -a` itself (the bare, no-reference form), merging
-every declared machine's own pool before presenting one combined numbered
-list.
-
-```
-camp attach --list --json
-```
+camp's own before it: `1` for a refusal, `2` when the workspace was
+resurrected but at least one window did not come back — only when stdin or
+stdout is not a terminal; an interactive attach still hands the terminal
+over and exits `0`.
 
 ## Remote hosts
 
@@ -292,36 +236,20 @@ only ever compared for equality — pick names that cannot collide, the way
 ```
 camp list --host <name>
 camp list --host <name> --json
-camp sessions --host <name>
-camp sessions --host <name> --json
 ```
 
 Both connect over `BatchMode=yes` SSH and answer for every configured group
 on that machine in one call. `--host` refuses alongside `--group` and
-`--all-groups`; `camp sessions --host <name>` additionally refuses
-`--recoverable`, `--all`, `--limit`, `--dir`, and a positional workspace
-slug, since each of those narrows or reshapes a single machine's own local
-question rather than "every group on that host". A host name not declared
-in `hosts.toml` is refused the same way.
+`--all-groups`. A host name not declared in `hosts.toml` is refused the same
+way.
 
-Stopping a session on a declared machine is the one state-changing form of
-this shape:
-
-```
-camp kill <ref> --host <name>
-camp kill <ref> --host <name> --json
-```
-
-The reference alone names the session, so no `--group` is needed — the far
-side resolves it against its own pool exactly as it would locally, and
-refuses in its own words. There is no `--all-hosts` form: a stop acts on the
-one machine you name. Its exit status is its own four-value contract, so a
-script can branch without reading prose — `0` stopped (or already down,
-told apart by the answer's `outcome` field), `2` the reference matched more
-than one session and the candidates are on stdout, `3` the outcome could not
-be determined, `1` every certain failure including a far-side refusal. `2`
-and `3` are reserved: a remote exiting on either collapses to `1` rather
-than impersonating camp's own signal.
+`--host` also forwards a slug, plus the group it resolves to locally, to
+that machine's door — `camp attach <slug> --host <name>` — described under
+[Attach](#attach) above. There is no cross-machine `camp stop`: stopping a
+workspace on another machine is `camp attach <slug> --host <name>`
+followed by `camp stop <slug>` run there, or `ssh <name> camp stop <slug>
+--group <group>` directly — `camp stop` also needs a group from that
+machine's own `$HOME`, which `ssh` never resolves on its own.
 
 A failure to connect, authenticate, or run camp on the far side is its own
 rendered outcome rather than a crash: unreachable, connected but stalled
@@ -330,26 +258,23 @@ resolvable on that host (declare `camp_bin`), every credential offered
 refused, or the remote camp's own refusal relayed verbatim.
 
 `--host <name>` names one machine and answers for every group on it.
-`camp list`/`camp sessions` also take `--all-hosts` (short: `-a`), which is
-the opposite shape: **this resolved group, on every declared machine plus
-the one you're typing on** — the asymmetry an operator otherwise has to
-learn the hard way, so it is stated here rather than left implicit. `-ag`
-(the bundled short form of `-a -g`) widens the group axis too, for every
-group on every machine; `-a --group <name>` composes to ask for one named
-group on machines generally, without needing a resolvable cwd.
+`camp list` also takes `--all-hosts` (short: `-a`), which is the opposite
+shape: **this resolved group, on every declared machine plus the one
+you're typing on** — the asymmetry an operator otherwise has to learn the
+hard way, so it is stated here rather than left implicit. `-ag` (the
+bundled short form of `-a -g`) widens the group axis too, for every group
+on every machine; `-a --group <name>` composes to ask for one named group
+on machines generally, without needing a resolvable cwd.
 
 ```
 camp list -a --group <name>
 camp list --all-hosts --group <name> --json
 camp list -ag --json
-camp sessions -a --group <name>
-camp sessions --all-hosts --group <name> --json
-camp sessions -ag --json
 ```
 
 (`-a`/`--all-hosts` also resolve the group from cwd, the same as plain
-`camp list`/`camp sessions` — `--group <name>` is shown explicitly above only
-so each form is runnable from any cwd.)
+`camp list` — `--group <name>` is shown explicitly above only so each form
+is runnable from any cwd.)
 
 Declared hosts are contacted concurrently, and the merged answer is grouped
 by machine on the human path — the local machine first (named by
@@ -442,6 +367,28 @@ camp transfer transfer-receive --to <peer> --dry-run --group <name>
 The first previews a workspace literally named `transfer`; the second
 answers for one named `transfer-probe`; the third previews one named
 `transfer-receive`.
+
+## Retired verbs
+
+A retired verb prints its replacement and exits nonzero rather than doing
+anything:
+
+```
+camp <retired verb>: this command has been replaced — use 'camp <replacement>' instead.
+```
+
+| Retired | Replacement |
+|---|---|
+| `camp open` | `camp new` |
+| `camp break` | `camp remove` |
+| `camp init` | `camp group` |
+| `camp ai` | `camp new` |
+| `camp enter` | `camp activate` |
+| `camp launch` | `camp attach` |
+| `camp resume` | `camp attach` |
+| `camp bookmark` | `camp attach` |
+| `camp sessions` | `camp list` |
+| `camp kill` | `camp stop` |
 
 ## Group setup
 

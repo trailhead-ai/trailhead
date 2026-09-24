@@ -211,8 +211,8 @@ def _refuse_on_dropped_store(config: dict, error: Exception) -> None:
     session guard passes: a store camp cannot bind is a session it cannot
     see, so it must be raised into the SAME fail-closed refusal
     `gather_pool` reaches on a store it cannot READ — never degraded to a
-    notice-and-continue the way a fail-open listing (`camp sessions`,
-    `camp kill`) is allowed to.
+    notice-and-continue the way a fail-open listing (`camp list`) is
+    allowed to.
     """
     from ..launch import teardown_guard
 
@@ -402,7 +402,12 @@ def _cmd_remove_group_cli(
                 "to remove it anyway"
             )
         if holding:
-            print(teardown_guard.render_block(slug, holding), file=sys.stderr)
+            print(
+                teardown_guard.render_block(
+                    slug, holding, group_name=group["group"]["name"]
+                ),
+                file=sys.stderr,
+            )
             sys.exit(1)
 
     if dry_run:

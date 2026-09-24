@@ -11,8 +11,8 @@ twelfth, "host not declared", is refused before a host is ever resolved and
 never reaches this seam — see the task report for the enumeration), plus
 `ProducerFailed` — not reachable through `run_camp` (only `stream_camp`
 returns it, for a streamed invocation no named-host verb relays through
-this seam today) but exercised here anyway so `classify_certainty` and
-`_classify_transport_failure` stay exhaustive over every `TransportOutcome`.
+this seam today) but exercised here anyway so `_classify_transport_failure`
+stays exhaustive over every `TransportOutcome`.
 """
 from __future__ import annotations
 
@@ -102,9 +102,8 @@ def test_answered_ok_row_not_touched_beyond_host_stamp(monkeypatch) -> None:
 
 
 def test_answered_row_value_strips_ansi_cursor_control_sequence(monkeypatch) -> None:
-    """`answer_for_host` serves `camp list --host` and `camp sessions --host`
-    — a row value carrying a control sequence must come back stripped, the
-    same as `answer_payload_for_host`'s row path already does."""
+    """`answer_for_host` serves `camp list --host` — a row value carrying a
+    control sequence must come back stripped."""
     transport = _transport_module()
     stdout = json.dumps([{"ok": True, "slug": "ws-a\x1b[2Kghost"}])
     answer = _answer(monkeypatch, transport.Answered(stdout=stdout, stderr="", exit_code=0))
@@ -285,121 +284,8 @@ def test_well_formed_empty_rows_answer_still_exits_zero(monkeypatch) -> None:
 
 
 # ---------------------------------------------------------------------------
-# `classify_certainty` — the outcome-certainty mapping every state-changing
-# verb reuses, called directly (it is a pure function of the outcome type).
+# Object-shaped remote answers, through `answer_for_host` itself
 # ---------------------------------------------------------------------------
-
-
-def test_certainty_answered_is_happened() -> None:
-    transport = _transport_module()
-    relay = _relay_module()
-    outcome = transport.Answered(stdout="{}", stderr="", exit_code=0)
-    assert relay.classify_certainty(outcome) == relay.Certainty.HAPPENED
-
-
-def test_certainty_stopped_responding_is_unknown() -> None:
-    transport = _transport_module()
-    relay = _relay_module()
-    outcome = transport.StoppedResponding(execution_timeout=60.0)
-    assert relay.classify_certainty(outcome) == relay.Certainty.UNKNOWN
-
-
-def test_certainty_unreachable_is_did_not_happen() -> None:
-    transport = _transport_module()
-    relay = _relay_module()
-    outcome = transport.Unreachable(reason="Connection timed out")
-    assert relay.classify_certainty(outcome) == relay.Certainty.DID_NOT_HAPPEN
-
-
-def test_certainty_identity_unknown_is_did_not_happen() -> None:
-    transport = _transport_module()
-    relay = _relay_module()
-    assert relay.classify_certainty(transport.IdentityUnknown()) == relay.Certainty.DID_NOT_HAPPEN
-
-
-def test_certainty_identity_changed_is_did_not_happen() -> None:
-    transport = _transport_module()
-    relay = _relay_module()
-    assert relay.classify_certainty(transport.IdentityChanged()) == relay.Certainty.DID_NOT_HAPPEN
-
-
-def test_certainty_credentials_refused_is_did_not_happen() -> None:
-    transport = _transport_module()
-    relay = _relay_module()
-    outcome = transport.CredentialsRefused()
-    assert relay.classify_certainty(outcome) == relay.Certainty.DID_NOT_HAPPEN
-
-
-def test_certainty_camp_not_resolvable_is_did_not_happen() -> None:
-    transport = _transport_module()
-    relay = _relay_module()
-    outcome = transport.CampNotResolvable()
-    assert relay.classify_certainty(outcome) == relay.Certainty.DID_NOT_HAPPEN
-
-
-def test_certainty_remote_refusal_is_did_not_happen() -> None:
-    transport = _transport_module()
-    relay = _relay_module()
-    outcome = transport.RemoteRefusal(stdout="", stderr="camp launch: no such group\n", exit_code=1)
-    assert relay.classify_certainty(outcome) == relay.Certainty.DID_NOT_HAPPEN
-
-
-def test_certainty_producer_failed_is_unknown() -> None:
-    transport = _transport_module()
-    relay = _relay_module()
-    assert relay.classify_certainty(transport.ProducerFailed(exit_code=2)) == relay.Certainty.UNKNOWN
-
-
-def test_exactly_stopped_responding_and_producer_failed_are_unknown() -> None:
-    """Enumerates every transport outcome type by reflection, so a later
-    outcome added to `camp.host.transport` without a certainty mapping
-    entry fails this test rather than silently defaulting to certain."""
-    transport = _transport_module()
-    relay = _relay_module()
-
-    sample_outcomes = {
-        transport.Answered: transport.Answered(stdout="{}", stderr="", exit_code=0),
-        transport.Unreachable: transport.Unreachable(reason="x"),
-        transport.StoppedResponding: transport.StoppedResponding(execution_timeout=60.0),
-        transport.IdentityUnknown: transport.IdentityUnknown(),
-        transport.IdentityChanged: transport.IdentityChanged(),
-        transport.CampNotResolvable: transport.CampNotResolvable(),
-        transport.CredentialsRefused: transport.CredentialsRefused(),
-        transport.RemoteRefusal: transport.RemoteRefusal(stdout="", stderr="", exit_code=1),
-        transport.ProducerFailed: transport.ProducerFailed(exit_code=2),
-    }
-    subclasses = set(transport.TransportOutcome.__subclasses__())
-    assert subclasses == set(sample_outcomes), (
-        "a transport outcome type was added or removed without updating this "
-        "test's enumeration"
-    )
-
-    unknown_types = {
-        outcome_type
-        for outcome_type, outcome in sample_outcomes.items()
-        if relay.classify_certainty(outcome) == relay.Certainty.UNKNOWN
-    }
-    assert unknown_types == {transport.StoppedResponding, transport.ProducerFailed}
-
-
-# ---------------------------------------------------------------------------
-# `answer_payload_for_host` — the payload reader that carries either shape,
-# the one production entry point every state-changing verb relays through.
-# ---------------------------------------------------------------------------
-
-
-def _payload_answer(monkeypatch, outcome, *, verb: str = "kill"):
-    relay = _relay_module()
-    transport = _transport_module()
-
-    def fake_run_camp(host, remote_argv, **kwargs):
-        return outcome
-
-    monkeypatch.setattr(transport, "run_camp", fake_run_camp)
-
-    return relay.answer_payload_for_host(
-        verb, _host(), "andromeda", [verb, "ws-a", "--json"],
-    )
 
 
 _LAUNCH_ANSWER_STDOUT = (
@@ -409,192 +295,10 @@ _LAUNCH_ANSWER_STDOUT = (
 
 
 def test_same_object_payload_does_not_relay_through_rows_relay(monkeypatch) -> None:
-    """An object-shaped remote answer is not a rows answer — the rows-only
-    relay (`answer_for_host`) treats it as unparsable, distinct from
-    `answer_payload_for_host`, which relays it as `obj`."""
+    """An object-shaped remote answer is not a rows answer — `answer_for_host`
+    treats it as unparsable rather than relaying its fields."""
     transport = _transport_module()
     answer = _answer(monkeypatch, transport.Answered(stdout=_LAUNCH_ANSWER_STDOUT, stderr="", exit_code=0))
     assert answer.rows == [
         {"ok": False, "host": "andromeda", "reason": "remote answer could not be parsed"}
     ]
-
-
-_STOP_ANSWER_STDOUT = '{"session_id": "s1", "tmux_name": "t1", "outcome": "stopped"}'
-
-
-def test_payload_object_answer_is_relayed_as_obj_with_no_rows(monkeypatch) -> None:
-    transport = _transport_module()
-    answer = _payload_answer(
-        monkeypatch, transport.Answered(stdout=_STOP_ANSWER_STDOUT, stderr="", exit_code=0)
-    )
-    assert answer.obj == {"session_id": "s1", "tmux_name": "t1", "outcome": "stopped"}
-    assert answer.rows is None
-
-
-def test_payload_object_answer_strips_control_sequences_top_level_and_nested(monkeypatch) -> None:
-    """The success path is the one an operator trusts most — control
-    sequences must be stripped from every field, top-level and nested
-    alike, not only refusal text."""
-    transport = _transport_module()
-    poisoned = json.dumps(
-        {
-            "session_id": "s1\x1b[31m",
-            "outcome": "stopped",
-            "detail": {"note": "ok\x1b[2Jdone"},
-        }
-    )
-    answer = _payload_answer(monkeypatch, transport.Answered(stdout=poisoned, stderr="", exit_code=0))
-    assert answer.obj["session_id"] == "s1[31m"
-    assert answer.obj["detail"] == {"note": "ok[2Jdone"}
-
-
-def test_payload_object_answer_exit_code_propagates_nonzero_alongside_well_formed_answer(
-    monkeypatch,
-) -> None:
-    """A well-formed answer is relayed even when the far side's own exit
-    code is non-zero — the exit code is carried unchanged, not coerced."""
-    transport = _transport_module()
-    answer = _payload_answer(
-        monkeypatch, transport.Answered(stdout=_STOP_ANSWER_STDOUT, stderr="", exit_code=9)
-    )
-    assert answer.obj is not None
-    assert answer.exit_code == 9
-
-
-
-
-def test_payload_rows_answer_stamped_with_host_in_emitted_order(monkeypatch) -> None:
-    transport = _transport_module()
-    stdout = '[{"session_id": "zeta"}, {"session_id": "alpha"}]'
-    answer = _payload_answer(monkeypatch, transport.Answered(stdout=stdout, stderr="", exit_code=0))
-    assert answer.obj is None
-    assert [row["session_id"] for row in answer.rows] == ["zeta", "alpha"]
-    assert all(row["host"] == "andromeda" for row in answer.rows)
-
-
-def test_payload_rows_answer_no_field_otherwise_touched(monkeypatch) -> None:
-    transport = _transport_module()
-    stdout = '[{"session_id": "s1", "tmux_name": "t1", "account": "work"}]'
-    answer = _payload_answer(monkeypatch, transport.Answered(stdout=stdout, stderr="", exit_code=0))
-    assert answer.rows == [
-        {"session_id": "s1", "tmux_name": "t1", "account": "work", "host": "andromeda"}
-    ]
-
-
-def test_payload_row_value_strips_ansi_cursor_control_sequence(monkeypatch) -> None:
-    """The row path is the one that is unprotected today — assert on a row
-    value, not only on a nested object value."""
-    transport = _transport_module()
-    stdout = json.dumps([{"session_id": "s1\x1b[2Kghost"}])
-    answer = _payload_answer(monkeypatch, transport.Answered(stdout=stdout, stderr="", exit_code=0))
-    assert answer.rows[0]["session_id"] == "s1[2Kghost"
-
-
-def test_payload_row_value_keeps_newline_and_tab(monkeypatch) -> None:
-    """Matches the existing strip's own carve-out for newline and tab."""
-    transport = _transport_module()
-    stdout = json.dumps([{"session_id": "s1\nline\ttwo"}])
-    answer = _payload_answer(monkeypatch, transport.Answered(stdout=stdout, stderr="", exit_code=0))
-    assert answer.rows[0]["session_id"] == "s1\nline\ttwo"
-
-
-def test_payload_array_of_non_objects_is_unparseable(monkeypatch) -> None:
-    transport = _transport_module()
-    answer = _payload_answer(
-        monkeypatch, transport.Answered(stdout='["oops", "not", "objects"]', stderr="", exit_code=0)
-    )
-    assert answer.obj is None
-    assert answer.rows is None
-
-
-def test_payload_bare_json_scalar_is_unparseable(monkeypatch) -> None:
-    transport = _transport_module()
-    answer = _payload_answer(monkeypatch, transport.Answered(stdout="42", stderr="", exit_code=0))
-    assert answer.obj is None
-    assert answer.rows is None
-
-
-def test_payload_non_json_stdout_is_unparseable_even_though_answered(monkeypatch) -> None:
-    """`Answered` alone does not guarantee a relayable payload — over a
-    transport that does not propagate the remote's own exit status, it
-    also covers camp-not-installed and camp-crashed, whose stdout is not
-    JSON at all. A non-parseable stdout on an `Answered` outcome still
-    yields `obj=None`/`rows=None` even though the certainty is `HAPPENED`."""
-    transport = _transport_module()
-    relay = _relay_module()
-    answer = _payload_answer(
-        monkeypatch, transport.Answered(stdout="not json at all", stderr="", exit_code=0)
-    )
-    assert answer.obj is None
-    assert answer.rows is None
-    assert answer.certainty == relay.Certainty.HAPPENED
-
-
-def test_payload_each_transport_failure_yields_no_payload_and_exit_1(monkeypatch) -> None:
-    transport = _transport_module()
-    failures = {
-        "unreachable": transport.Unreachable(reason="Connection timed out"),
-        "stopped_responding": transport.StoppedResponding(execution_timeout=60.0),
-        "identity_unknown": transport.IdentityUnknown(),
-        "identity_changed": transport.IdentityChanged(),
-        "camp_not_resolvable": transport.CampNotResolvable(),
-        "credentials_refused": transport.CredentialsRefused(),
-    }
-    for name, outcome in failures.items():
-        answer = _payload_answer(monkeypatch, outcome)
-        assert answer.obj is None, name
-        assert answer.rows is None, name
-        assert answer.exit_code == 1, name
-        assert answer.notices, name
-
-
-def test_payload_certainty_answered_is_happened(monkeypatch) -> None:
-    transport = _transport_module()
-    relay = _relay_module()
-    answer = _payload_answer(
-        monkeypatch, transport.Answered(stdout=_STOP_ANSWER_STDOUT, stderr="", exit_code=0)
-    )
-    assert answer.certainty == relay.Certainty.HAPPENED
-
-
-def test_payload_certainty_stopped_responding_is_unknown(monkeypatch) -> None:
-    transport = _transport_module()
-    relay = _relay_module()
-    answer = _payload_answer(monkeypatch, transport.StoppedResponding(execution_timeout=60.0))
-    assert answer.certainty == relay.Certainty.UNKNOWN
-
-
-def test_payload_certainty_remote_refusal_is_did_not_happen(monkeypatch) -> None:
-    transport = _transport_module()
-    relay = _relay_module()
-    answer = _payload_answer(
-        monkeypatch,
-        transport.RemoteRefusal(stdout="", stderr="camp kill: no such session\n", exit_code=1),
-    )
-    assert answer.certainty == relay.Certainty.DID_NOT_HAPPEN
-    assert answer.obj is None
-    assert answer.rows is None
-
-
-def test_payload_answer_carries_verbatim_stderr_notice(monkeypatch) -> None:
-    transport = _transport_module()
-    answer = _payload_answer(
-        monkeypatch,
-        transport.Answered(stdout=_STOP_ANSWER_STDOUT, stderr="camp kill: a stderr note\n", exit_code=0),
-    )
-    assert answer.notices == ["camp kill: a stderr note"]
-
-
-def test_payload_notice_strips_control_sequences_on_a_refusal(monkeypatch) -> None:
-    transport = _transport_module()
-    stderr = "camp kill: \x1b[31mno such session\x1b[0m: 'nope'\n"
-    answer = _payload_answer(monkeypatch, transport.RemoteRefusal(stdout="", stderr=stderr, exit_code=1))
-    assert answer.notices == ["camp kill: [31mno such session[0m: 'nope'"]
-
-
-def test_payload_exit_code_propagates_unchanged_on_a_refusal(monkeypatch) -> None:
-    transport = _transport_module()
-    answer = _payload_answer(
-        monkeypatch, transport.RemoteRefusal(stdout="", stderr="refused\n", exit_code=17)
-    )
-    assert answer.exit_code == 17

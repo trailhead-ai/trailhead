@@ -421,13 +421,11 @@ _LAUNCH_ENV_UNSET = [
     "CLAUDE_CONFIG_DIR",
 ]
 
-#: The user-level settings file under the Claude dir, and the top-level key in it
-#: that sets how many days a session transcript is kept before cleanup.  Claude
-#: Code's own default when the key is absent is 30 days (minimum accepted: 1).
-_SETTINGS_FILENAME = "settings.json"
+#: The top-level settings key that sets how many days a session transcript is
+#: kept before cleanup — named here so a caller can point a user at the
+#: right setting without this module handing out a file path to edit.
 _CONFIG_FILENAME = ".claude.json"
 _CLEANUP_PERIOD_KEY = "cleanupPeriodDays"
-_DEFAULT_CLEANUP_PERIOD_DAYS = 30
 
 #: The OAuth credentials file inside an account's config dir — the
 #: authentication signal :meth:`ClaudeCodeHarness.session_launch_account_authentication`
@@ -1402,38 +1400,12 @@ class ClaudeCodeHarness(Harness):
 
         return rows
 
-    # -- session retention ----------------------------------------------------
+    # -- session retention setting ------------------------------------------
     #
     # Claude Code deletes transcripts older than the top-level
-    # ``cleanupPeriodDays`` settings key (minimum 1); when the key is unset its
-    # own default is 30 days.  The key may also appear in project, local, and
-    # managed settings, which override the user file — but those are per-project
-    # and this seam is asked machine-globally (`camp sessions --recoverable` spans
-    # every workspace), so the USER settings file is the one source read
-    # here.  A project that shortens its own window is therefore reported
-    # optimistically; the warning is advisory, and over-warning every project
-    # from one project's setting would be worse.
-
-    def session_retention_days(self, *, env: dict[str, str] | None = None) -> int | None:
-        """Return the transcript-retention window in days (never ``None``).
-
-        Anything unreadable, absent, or not a positive int falls back to Claude
-        Code's documented 30-day default: a caller asking for a retention hint
-        must not be handed an exception, and "no setting" genuinely means 30.
-        """
-        _env = env if env is not None else dict(os.environ)
-        settings = _claude_dir(_env) / _SETTINGS_FILENAME
-        try:
-            data = json.loads(settings.read_text())
-        except (OSError, ValueError):
-            return _DEFAULT_CLEANUP_PERIOD_DAYS
-        if not isinstance(data, dict):
-            return _DEFAULT_CLEANUP_PERIOD_DAYS
-        value = data.get(_CLEANUP_PERIOD_KEY)
-        # bool is an int subclass — `true` is a malformed value, not a 1-day window.
-        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
-            return _DEFAULT_CLEANUP_PERIOD_DAYS
-        return value
+    # ``cleanupPeriodDays`` settings key; naming it here is what lets a caller
+    # point a user at the right setting without this module handing out a
+    # file path to edit.
 
     def session_retention_setting(self) -> str | None:
         """The settings key a user raises to keep transcripts longer."""

@@ -1,8 +1,13 @@
-"""Tests for `camp list -a` / `--all-hosts` and `camp sessions -a` —
-the operator-facing wiring of the two-axis merged answer per
+"""Tests for `camp list -a` / `--all-hosts` — the operator-facing wiring of
+the two-axis merged answer per
 `docs/design/the-all-hosts-answer-merges-every-declared-machine.md` and
 `task/wire-the-all-hosts-option-and-render-the-merged-answer`'s test
 contract.
+
+`camp sessions -a` redirects to `camp list` before ever reaching this
+wiring (LEGACY_REDIRECTS) — its own coverage lives in
+`test_sessions_and_kill_host_redirect_before_reaching_the_relay` below and
+in `test_verb_aliases.py` / `test_cli_surface.py`.
 
 Drives `camp.cli.dispatch.main()` in-process (sys.argv/env monkeypatched,
 the same style `test_cli_dispatch_split.py` and `test_camp_list_host.py`
@@ -684,169 +689,6 @@ def test_plain_host_flag_behaves_exactly_as_before(
     assert json.loads(out) == []
 
 
-# ---------------------------------------------------------------------------
-# `camp sessions -a` — the second verb this wiring must cover; a different
-# local value function (`_sessions_live_answer`) and a different row shape
-# from `list` above.
-# ---------------------------------------------------------------------------
-
-
-def test_sessions_a_and_all_hosts_flag_produce_the_same_answer(
-    hosts_and_group_env, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
-) -> None:
-    transport = _transport_module()
-    import camp.launch.session as launch_session
-
-    monkeypatch.setattr(launch_session, "enumerate_records", lambda *a, **k: [])
-    remote_rows = [
-        {
-            "ok": True,
-            "session_id": "sess-1",
-            "cwd": "/remote/cwd",
-            "kind": "claude",
-            "controllable": True,
-            "name": None,
-            "pid": 123,
-            "started_at": None,
-            "group": "testgrp",
-            "account": None,
-        }
-    ]
-    monkeypatch.setattr(transport, "run_camp", lambda host, remote_argv, **kw: _answered(remote_rows))
-
-    code_a = _run(monkeypatch, ["sessions", "-a", "--group", "testgrp", "--json"])
-    out_a = capsys.readouterr().out
-
-    code_b = _run(monkeypatch, ["sessions", "--all-hosts", "--group", "testgrp", "--json"])
-    out_b = capsys.readouterr().out
-
-    assert (code_a, out_a) == (code_b, out_b)
-    assert code_a == 0
-    rows = json.loads(out_a)
-    assert {r["host"] for r in rows} == {"andromeda", "lookout"}
-
-
-# ---------------------------------------------------------------------------
-# CRITICAL 2 — `sessions -a` must refuse the same five local-only options
-# `_cmd_sessions_host_cli` already refuses for `--host`, rather than
-# silently answering the live listing.
-# ---------------------------------------------------------------------------
-
-
-def test_sessions_a_and_recoverable_refuses(
-    hosts_and_group_env, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
-) -> None:
-    transport = _transport_module()
-
-    def _boom(*args, **kwargs):
-        raise AssertionError("a refused sessions -a must never contact the transport")
-
-    monkeypatch.setattr(transport, "run_camp", _boom)
-
-    code = _run(monkeypatch, ["sessions", "-a", "--group", "testgrp", "--recoverable"])
-    err = capsys.readouterr().err
-    assert code != 0
-    assert "own live sessions" in err
-
-
-def test_sessions_a_and_all_refuses(
-    hosts_and_group_env, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
-) -> None:
-    transport = _transport_module()
-    monkeypatch.setattr(transport, "run_camp", lambda *a, **kw: (_ for _ in ()).throw(
-        AssertionError("a refused sessions -a must never contact the transport")
-    ))
-
-    code = _run(monkeypatch, ["sessions", "-a", "--group", "testgrp", "--all"])
-    err = capsys.readouterr().err
-    assert code != 0
-    assert "only widens --recoverable" in err
-
-
-def test_sessions_a_and_dir_refuses(
-    hosts_and_group_env, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
-) -> None:
-    transport = _transport_module()
-    monkeypatch.setattr(transport, "run_camp", lambda *a, **kw: (_ for _ in ()).throw(
-        AssertionError("a refused sessions -a must never contact the transport")
-    ))
-
-    code = _run(monkeypatch, ["sessions", "-a", "--group", "testgrp", "--dir", "/tmp/somewhere"])
-    err = capsys.readouterr().err
-    assert code != 0
-    assert "not a local directory" in err
-
-
-def test_sessions_a_and_limit_refuses(
-    hosts_and_group_env, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
-) -> None:
-    transport = _transport_module()
-    monkeypatch.setattr(transport, "run_camp", lambda *a, **kw: (_ for _ in ()).throw(
-        AssertionError("a refused sessions -a must never contact the transport")
-    ))
-
-    code = _run(monkeypatch, ["sessions", "-a", "--group", "testgrp", "--limit", "5"])
-    err = capsys.readouterr().err
-    assert code != 0
-    assert "only widens --recoverable" in err
-
-
-def test_sessions_a_and_positional_slug_refuses(
-    hosts_and_group_env, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
-) -> None:
-    transport = _transport_module()
-    monkeypatch.setattr(transport, "run_camp", lambda *a, **kw: (_ for _ in ()).throw(
-        AssertionError("a refused sessions -a must never contact the transport")
-    ))
-
-    code = _run(monkeypatch, ["sessions", "-a", "--group", "testgrp", "feat-x"])
-    err = capsys.readouterr().err
-    assert code != 0
-    assert "feat-x" in err
-    assert "workspace slug" in err
-
-
-def test_sessions_human_output_renders_answered_rows_under_their_machine(
-    hosts_and_group_env, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
-) -> None:
-    transport = _transport_module()
-    import camp.launch.session as launch_session
-
-    monkeypatch.setattr(launch_session, "enumerate_records", lambda *a, **k: [])
-
-    def fake_run_camp(host, remote_argv, **kw):
-        if host.ssh == "andromeda":
-            return _answered(
-                [
-                    {
-                        "ok": True,
-                        "session_id": "sess-remote",
-                        "cwd": "/remote/cwd",
-                        "kind": "claude",
-                        "controllable": True,
-                        "name": None,
-                        "pid": 42,
-                        "started_at": None,
-                        "group": "testgrp",
-                        "account": None,
-                    }
-                ]
-            )
-        return _answered([])
-
-    monkeypatch.setattr(transport, "run_camp", fake_run_camp)
-
-    code = _run(monkeypatch, ["sessions", "-a", "--group", "testgrp"])
-    out = capsys.readouterr().out
-    assert code == 0
-
-    lines = out.splitlines()
-    assert lines[0] == "this machine"
-    assert lines[1] == "andromeda"
-    assert "sess-remote" in lines[2]
-    assert lines[3] == "lookout"
-
-
 def test_list_merged_human_output_state_control_sequence_cannot_forge_a_second_line(
     hosts_and_group_env, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
@@ -886,62 +728,15 @@ def test_list_merged_human_output_state_control_sequence_cannot_forge_a_second_l
     assert "camp-forged-slug" not in out
 
 
-def test_sessions_human_output_session_id_control_sequence_cannot_forge_a_second_line(
-    hosts_and_group_env, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
-) -> None:
-    """`render_session_row_human` (`cli/session.py`) escapes only `cwd`
-    today; `session_id`, `kind`, and the `name` label reach this f-string
-    raw. Any of them can carry a relayed embedded newline and must not
-    split one row into a forged second one — the same argument
-    `printable_path` already makes for `root` and for `cwd` here."""
-    transport = _transport_module()
-    import camp.launch.session as launch_session
-
-    monkeypatch.setattr(launch_session, "enumerate_records", lambda *a, **k: [])
-
-    forged_id = "sess-real\nandromeda    FORGED-999  claude  /evil (forged-name)"
-
-    def fake_run_camp(host, remote_argv, **kw):
-        if host.ssh == "andromeda":
-            return _answered(
-                [
-                    {
-                        "ok": True,
-                        "session_id": forged_id,
-                        "cwd": "/remote/cwd",
-                        "kind": "claude",
-                        "controllable": True,
-                        "name": None,
-                        "pid": 42,
-                        "started_at": None,
-                        "group": "testgrp",
-                        "account": None,
-                    }
-                ]
-            )
-        return _answered([])
-
-    monkeypatch.setattr(transport, "run_camp", fake_run_camp)
-
-    code = _run(monkeypatch, ["sessions", "-a", "--group", "testgrp"])
-    out = capsys.readouterr().out
-    assert code == 0
-
-    lines = [ln for ln in out.splitlines() if ln]
-    # "this machine" / "andromeda" / the one row / "lookout" — never a fifth
-    # line forged out of the embedded newline in session_id.
-    assert len(lines) == 4
-    assert "\\x0a" in lines[2]
-    assert "FORGED-999" in lines[2]
 
 
 # ---------------------------------------------------------------------------
 # Per-row failure isolation — a malformed row from one machine must not take
 # down the merged listing. `_render_all_hosts_human` hands each machine's
-# rows to `render_rows`; the two `--host` siblings already wrap this same
+# rows to `render_rows`; the `--host` sibling already wraps this same
 # per-row access in `try/except KeyError` (`workspace.py`'s
-# `_cmd_ls_host_cli` and `session.py`'s `_cmd_sessions_host_cli`), and this
-# pins the merged renderer to the same isolation guarantee.
+# `_cmd_ls_host_cli`), and this pins the merged renderer to the same
+# isolation guarantee.
 # ---------------------------------------------------------------------------
 
 
@@ -1118,9 +913,6 @@ def test_all_hosts_fanout_uses_the_transports_default_when_connect_timeout_absen
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     _hosts_and_group_env_with_connect_timeout(tmp_path, monkeypatch, "")
-    import camp.launch.session as launch_session
-
-    monkeypatch.setattr(launch_session, "enumerate_records", lambda *a, **k: [])
     transport = _transport_module()
     seen: list[float] = []
 
@@ -1130,7 +922,7 @@ def test_all_hosts_fanout_uses_the_transports_default_when_connect_timeout_absen
 
     monkeypatch.setattr(transport, "run_camp", fake_run_camp)
 
-    code = _run(monkeypatch, ["sessions", "-a", "--group", "testgrp", "--json"])
+    code = _run(monkeypatch, ["list", "-a", "--group", "testgrp", "--json"])
     capsys.readouterr()
     assert code == 0
     assert seen == [
@@ -1159,37 +951,38 @@ def test_single_host_list_threads_declared_connect_timeout_to_the_relay(
 
 
 def test_relay_route_verb_set_is_every_host_verb_except_attach():  # inert-gate: allow verb-set drift reminder
-    """Pins the enumeration this parametrized test below drives against —
-    `_HOST_VERBS` minus `attach` (which hands off interactively, with no
-    transport seam to assert at) is exactly {list, sessions, kill}. `launch`
-    is retired and absent from `_HOST_VERBS` — a retired verb never reaches
-    this relay route at all, redirecting instead. A verb added to
-    `_HOST_VERBS` without a matching case below breaks this test, not
-    silently ships uncovered."""
+    """Pins the enumeration the parametrized test below drives against.
+    `_HOST_VERBS` carries {list, attach} — `attach` (interactive hand-off,
+    no transport seam) is the only member the parametrized relay test below
+    excludes for its own reason; `list` is the only member left, and it is
+    the one that actually reaches the relay. `sessions`/`kill`/`launch` are
+    retired and absent from `_HOST_VERBS` entirely — a retired verb never
+    reaches this relay route at all, redirecting instead
+    (LEGACY_REDIRECTS), before main() ever reaches the `--host` block that
+    reads this set."""
     dispatch = _dispatch_module()
-    assert dispatch._HOST_VERBS - {"attach"} == {"list", "sessions", "kill"}
+    assert dispatch._HOST_VERBS - {"attach"} == {"list"}
 
 
 @pytest.mark.parametrize(
     "argv",
     [
         ["list", "--host", "andromeda", "--json"],
-        ["sessions", "--host", "andromeda", "--json"],
-        ["kill", "ref1", "--host", "andromeda", "--json"],
     ],
-    ids=["list", "sessions", "kill"],
+    ids=["list"],
 )
 def test_every_relay_host_verb_threads_the_declared_connect_timeout(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture, argv: list[str]
 ) -> None:
-    """Drives every member of `_HOST_VERBS` reachable through the single-
-    host `--host` relay (list, sessions, kill — attach's `--host` path hands
-    off interactively and is covered separately, in test_attach_cli.py's
-    cross-host probe route; `launch` is retired and redirects before ever
-    reaching this relay, covered in test_cli_dispatch_split.py). A verb left
-    reading the old constant instead of the resolved value fails this test
-    rather than shipping — the exact regression a sample of two verbs would
-    let through."""
+    """Drives every member of `_HOST_VERBS` that still actually reaches the
+    single-host `--host` relay — only `list` today (`sessions`/`kill` now
+    redirect before dispatch ever reaches this relay, covered by
+    `test_sessions_and_kill_host_redirect_before_reaching_the_relay` below;
+    `attach`'s `--host` path hands off interactively and is covered
+    separately, in test_attach_cli.py's cross-host probe route; `launch` is
+    retired and redirects before ever reaching this relay, covered in
+    test_cli_dispatch_split.py). A verb left reading the old constant
+    instead of the resolved value fails this test rather than shipping."""
     _hosts_and_group_env_with_connect_timeout(tmp_path, monkeypatch, "connect_timeout = 9\n")
     transport = _transport_module()
     seen: list[float] = []
@@ -1204,6 +997,49 @@ def test_every_relay_host_verb_threads_the_declared_connect_timeout(
     capsys.readouterr()
 
     assert seen == [9.0]
+
+
+@pytest.mark.parametrize(
+    "argv,replaced,target",
+    [
+        (["sessions", "--host", "andromeda", "--json"], "sessions", "list"),
+        (["kill", "ref1", "--host", "andromeda", "--json"], "kill", "stop"),
+    ],
+    ids=["sessions", "kill"],
+)
+def test_sessions_and_kill_host_redirect_before_reaching_the_relay(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture,
+    argv: list[str],
+    replaced: str,
+    target: str,
+) -> None:
+    """`sessions`/`kill` are absent from `_HOST_VERBS`
+    (`test_relay_route_verb_set_is_every_host_verb_except_attach` above) —
+    the legacy check in `main()` runs ahead of every host route, so typing
+    either with `--host` never reaches `_dispatch_host_command` or the
+    transport at all — it prints the same local redirect a bare invocation
+    does, and forwards nothing."""
+    _hosts_and_group_env_with_connect_timeout(tmp_path, monkeypatch, "connect_timeout = 9\n")
+    transport = _transport_module()
+    calls: list[tuple] = []
+
+    def fake_run_camp(host, remote_argv, **kw):
+        calls.append((host, remote_argv, kw))
+        return transport.Unreachable(reason="Connection timed out")
+
+    monkeypatch.setattr(transport, "run_camp", fake_run_camp)
+
+    code = _run(monkeypatch, argv)
+    captured = capsys.readouterr()
+
+    assert code == 1
+    assert captured.out == ""
+    assert captured.err == (
+        f"camp {replaced}: this command has been replaced — use 'camp {target}' instead.\n"
+    )
+    assert calls == [], f"the transport must never be reached, got {calls!r}"
 
 
 # ---------------------------------------------------------------------------

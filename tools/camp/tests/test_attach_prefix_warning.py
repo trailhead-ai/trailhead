@@ -68,7 +68,7 @@ _REMOTE_ATTACH_SCRIPT = textwrap.dedent(
     host = Host(ssh="andromeda", camp_bin="/opt/camp/bin/camp")
 
     prefix_warning.warn_if_nested(env=local_env)
-    argv = handoff.remote_argv(host, "some-session-ref")
+    argv = handoff.remote_argv(host, "some-session-ref", group="g")
     handoff.handoff(["echo", "REMOTE-HANDOFF-RAN"], exec_seam=lambda a: print("EXEC:", a))
     """
 )

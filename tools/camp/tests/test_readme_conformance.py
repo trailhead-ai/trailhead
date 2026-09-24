@@ -30,20 +30,47 @@ _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
 if str(_PLUGIN_DIR) not in sys.path:
     sys.path.insert(0, str(_PLUGIN_DIR))
 
+from camp.cli.dispatch import _ALL_GROUPS_VERBS, _ALL_HOSTS_VERBS, _HOST_VERBS  # noqa: E402
 from camp.group.config import _parse_launch  # noqa: E402
 from camp.host.config import load_hosts  # noqa: E402
 from camp.launch.eligibility import CREDENTIAL_DENY_ENTRIES  # noqa: E402
 from camp.spine import cmd_help  # noqa: E402
+from camp.workspace.verb_taxonomy import LEGACY_REDIRECTS  # noqa: E402
 
 README = Path(__file__).resolve().parents[1] / "README.md"
 
 _TOML_BLOCK = re.compile(r"```toml\n(.*?)```", re.DOTALL)
 
+
+def _live_host_verbs(table: frozenset[str]) -> list[str]:
+    """The verbs from *table* (`_HOST_VERBS` or `_ALL_HOSTS_VERBS`) that still
+    document a `camp <verb> --host <name> [--json]`-shaped invocation — the
+    group-listing family `_ALL_GROUPS_VERBS` names — with every retired verb
+    (`LEGACY_REDIRECTS`) excluded.
+
+    Structural, not a hardcoded name list: `attach`/`kill`/`doctor` are
+    excluded because none of them is in `_ALL_GROUPS_VERBS` (`attach`'s
+    `--host` form carries a `<slug>` and answers a different shape
+    entirely, each covered by its own conformance check), not because this
+    function names them.
+    """
+    return sorted((table & _ALL_GROUPS_VERBS) - LEGACY_REDIRECTS.keys())
+
+
+def _verb_alternation(table: frozenset[str]) -> str:
+    """A regex alternation over every verb in *table*, sorted for a
+    deterministic pattern. Deliberately the WHOLE table, not the narrower
+    `_live_host_verbs` answer — so a help text or README line that (wrongly)
+    still documents a retired verb's `--host`/`--all-hosts` form is still
+    matched, and the mismatch against `_live_host_verbs` is what catches it."""
+    return "|".join(re.escape(verb) for verb in sorted(table))
+
+
 #: The exact invocation lines the README's "Remote hosts" section documents,
 #: one call form per line, no trailing comment — chosen so each is directly
 #: executable rather than needing bracket-notation interpretation.
 _HOST_INVOCATION = re.compile(
-    r"^camp (?:list|sessions) --host <name>(?: --json)?$", re.MULTILINE
+    rf"^camp (?:{_verb_alternation(_HOST_VERBS)}) --host <name>(?: --json)?$", re.MULTILINE
 )
 
 #: The exact invocation lines the README's "Remote hosts" section documents
@@ -52,18 +79,42 @@ _HOST_INVOCATION = re.compile(
 #: the group placeholder the README uses alongside `-a`/`--all-hosts` (never
 #: alongside `-ag`, which needs no group).
 _ALL_HOSTS_INVOCATION = re.compile(
-    r"^camp (?:list|sessions) (?:(?:-a|--all-hosts) --group <name>|-ag)(?: --json)?$",
+    rf"^camp (?:{_verb_alternation(_ALL_HOSTS_VERBS)}) "
+    r"(?:(?:-a|--all-hosts) --group <name>|-ag)(?: --json)?$",
     re.MULTILINE,
 )
 
 
+def _documented_host_verbs(text: str, table: frozenset[str]) -> list[str]:
+    """Every verb in *table* documented with `--host <name>` in *text* — the
+    exact extraction `test_help_documents_host_option_that_the_dispatcher_
+    actually_treats_as_recognized` runs against the real `camp --help`
+    output. Shared rather than re-built per test, so a pattern that stops
+    matching what the real help text prints breaks every caller, not just
+    the one against real output."""
+    pattern = re.compile(rf"camp ({_verb_alternation(table)}) --host <name>")
+    return sorted(set(pattern.findall(text)))
+
+
+def test_documented_host_verbs_tracks_the_dispatch_tables_not_a_hardcoded_pair() -> None:
+    """`_live_host_verbs` answers from the dispatch tables, not a fixed
+    `["list", "sessions"]` literal — proven by feeding two different help
+    texts through the real `_documented_host_verbs` extraction. A text
+    that (wrongly) still documents the retired `sessions --host` form
+    disagrees with the derived answer; one documenting only the live `list
+    --host` form agrees."""
+    stale = _documented_host_verbs("camp sessions --host <name> [--json]\n", _HOST_VERBS)
+    assert stale != _live_host_verbs(_HOST_VERBS)
+
+    live = _documented_host_verbs("camp list --host <name> [--json]\n", _HOST_VERBS)
+    assert live == _live_host_verbs(_HOST_VERBS)
+
+
 #: The exact invocation lines the README's "Attach" section documents — the
-#: six forms `task/wire-camp-attach-into-the-cli-with-host-and-all-hosts`
-#: names, plus `--list --json` (the reference-less, machine-readable sibling
-#: of `--resolve --json`, equally operator-reachable but originally
-#: undocumented), one call form per line.
+#: bare picker, a slug, and a slug forwarded to a declared host — one call
+#: form per line.
 _ATTACH_INVOCATION = re.compile(
-    r"^camp attach(?: -a| --list --json| <ref>(?: --host <name>| -a| --resolve --json)?)?$",
+    r"^camp attach(?: <slug>(?: --host <name>)?)?$",
     re.MULTILINE,
 )
 
@@ -169,18 +220,19 @@ def test_the_documented_hosts_toml_block_parses_under_the_real_loader(
 def test_help_documents_host_option_that_the_dispatcher_actually_treats_as_recognized(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
-    """`camp --help` must document `--host` for `list` and `sessions` only
-    where the dispatcher truly treats it as a recognized option — proven by
-    contrast against a genuinely unrecognized flag, which this dispatcher
-    silently ignores rather than refusing."""
+    """`camp --help` must document `--host` for exactly the verbs
+    `_HOST_VERBS` still lives for — today just `list`, since `sessions` is
+    retired — proven by contrast against a genuinely unrecognized flag, which
+    this dispatcher silently ignores rather than refusing."""
     buf = io.StringIO()
     with redirect_stdout(buf):
         cmd_help([])
     help_text = buf.getvalue()
 
-    documented = sorted(set(re.findall(r"camp (list|sessions) --host <name>", help_text)))
-    assert documented == ["list", "sessions"], (
-        "camp --help no longer documents --host for both list and sessions"
+    documented = _documented_host_verbs(help_text, _HOST_VERBS)
+    assert documented == _live_host_verbs(_HOST_VERBS), (
+        "camp --help documents --host for a verb the dispatch tables no "
+        "longer name as live"
     )
 
     dispatch = importlib.import_module("camp.cli.dispatch")
@@ -259,19 +311,20 @@ def test_documented_host_invocation_forms_produce_an_answer_against_a_stub_trans
 def test_help_documents_all_hosts_option_that_the_dispatcher_actually_treats_as_recognized(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
-    """`camp --help` must document `--all-hosts` for `list` and `sessions`
-    only where the dispatcher truly treats it as recognized — proven by
-    contrast against a genuinely unrecognized flag."""
+    """`camp --help` must document `--all-hosts` for exactly the verbs
+    `_ALL_HOSTS_VERBS` still lives for in the group-listing shape — today
+    just `list`, since `sessions` is retired — proven by contrast against a
+    genuinely unrecognized flag."""
     buf = io.StringIO()
     with redirect_stdout(buf):
         cmd_help([])
     help_text = buf.getvalue()
 
-    documented = sorted(
-        set(re.findall(r"camp (list|sessions) --all-hosts\|-a", help_text))
-    )
-    assert documented == ["list", "sessions"], (
-        "camp --help no longer documents --all-hosts for both list and sessions"
+    pattern = re.compile(rf"camp ({_verb_alternation(_ALL_HOSTS_VERBS)}) --all-hosts\|-a")
+    documented = sorted(set(pattern.findall(help_text)))
+    assert documented == _live_host_verbs(_ALL_HOSTS_VERBS), (
+        "camp --help documents --all-hosts for a verb the dispatch tables no "
+        "longer name as live"
     )
 
     dispatch = importlib.import_module("camp.cli.dispatch")
@@ -329,10 +382,6 @@ def test_documented_all_hosts_invocation_forms_produce_an_answer_against_a_stub_
     outcome = transport.Answered(stdout="[]", stderr="", exit_code=0)
     monkeypatch.setattr(transport, "run_camp", lambda host, remote_argv, **kw: outcome)
 
-    import camp.launch.session as launch_session
-
-    monkeypatch.setattr(launch_session, "enumerate_records", lambda *a, **k: [])
-
     for line in lines:
         argv = shlex.split(line.replace("<name>", "andromeda"))
         assert argv[0] == "camp"
@@ -363,12 +412,11 @@ def test_every_documented_attach_form_dispatches_through_the_real_entry_point(
     README would otherwise produce silently."""
     lines = _attach_invocation_lines()
     assert lines, "README no longer documents a camp attach invocation form"
-    assert len(lines) == 7, f"expected all seven documented forms — {lines!r}"
+    assert len(lines) == 3, f"expected all three documented forms — {lines!r}"
 
     dispatch = importlib.import_module("camp.cli.dispatch")
     transport = importlib.import_module("camp.host.transport")
     handoff = importlib.import_module("camp.host.handoff")
-    launch_session = importlib.import_module("camp.launch.session")
 
     cfg = tmp_path / "config"
     cfg.mkdir()
@@ -376,7 +424,6 @@ def test_every_documented_attach_form_dispatches_through_the_real_entry_point(
     monkeypatch.setenv("CAMP_CONFIG_DIR", str(cfg))
     monkeypatch.setenv("CAMP_STATE_DIR", str(tmp_path / "state"))
 
-    monkeypatch.setattr(launch_session, "enumerate_records", lambda *a, **k: [])
     monkeypatch.setattr(
         transport,
         "run_camp",
@@ -388,7 +435,7 @@ def test_every_documented_attach_form_dispatches_through_the_real_entry_point(
 
     for line in lines:
         argv = shlex.split(
-            line.replace("<ref>", "no-such-ref").replace("<name>", "andromeda")
+            line.replace("<slug>", "no-such-slug").replace("<name>", "andromeda")
         )
         assert argv[0] == "camp"
         monkeypatch.setattr(sys, "argv", argv)
@@ -399,3 +446,50 @@ def test_every_documented_attach_form_dispatches_through_the_real_entry_point(
         err = capsys.readouterr().err
         assert "bare slug dispatch is no longer supported" not in err, (line, err)
         assert "camp: bare slug" not in err, (line, err)
+
+
+# ---------------------------------------------------------------------------
+# The retired-verb table — the README's one place a retired verb is named,
+# checked against LEGACY_REDIRECTS itself rather than a copy of it.
+# ---------------------------------------------------------------------------
+
+_RETIRED_ROW = re.compile(r"^\| `camp (\S+)` \| `camp (\S+)` \|$", re.MULTILINE)
+
+
+def _retired_rows(text: str) -> list[tuple[str, str]]:
+    return _RETIRED_ROW.findall(text)
+
+
+def _check_retired_verb_table(text: str) -> None:
+    """Every row *text*'s retired-verb table lists must name a verb
+    `LEGACY_REDIRECTS` actually retires, mapped to the exact target the
+    module holds for it — read from the module, not retyped here. Raises
+    `AssertionError` on the first row that disagrees, so a caller can run
+    this against both the real README and a deliberately wrong fixture."""
+    rows = _retired_rows(text)
+    assert rows, "no retired-verb table found"
+    for old, new in rows:
+        assert old in LEGACY_REDIRECTS, f"{old!r} is not a retired verb"
+        assert new == LEGACY_REDIRECTS[old], (
+            f"table maps {old!r} to {new!r}, but LEGACY_REDIRECTS holds "
+            f"{LEGACY_REDIRECTS[old]!r}"
+        )
+
+
+def test_readme_retired_verb_table_matches_legacy_redirects() -> None:
+    """The README's own retired-verb table passes the real check."""
+    _check_retired_verb_table(README.read_text())
+
+
+def test_readme_retired_verb_table_check_catches_a_wrong_target() -> None:
+    """The real check above must fail against a table whose `kill` row names
+    `attach` instead of `stop` — run through `_check_retired_verb_table`
+    itself, not a re-derivation of its logic, so a break in that function
+    (not just a bad README) turns this red too."""
+    fixture = "| Retired | Replacement |\n|---|---|\n| `camp kill` | `camp attach` |\n"
+    assert LEGACY_REDIRECTS.get("kill") != "attach", (
+        "fixture's wrong target must disagree with LEGACY_REDIRECTS for the "
+        "real check to catch it"
+    )
+    with pytest.raises(AssertionError):
+        _check_retired_verb_table(fixture)

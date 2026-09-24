@@ -342,8 +342,8 @@ def test_group_filter_drops_an_ok_row_missing_the_group_key_entirely():
 
 def test_group_filter_is_never_applied_to_local_rows():
     # IMPORTANT 4 — the local answer arrives already narrowed by
-    # local_list_answer/local_sessions_answer; re-filtering it drops a
-    # workspace whose manifest group is "" or absent.
+    # local_list_answer; re-filtering it drops a workspace whose manifest
+    # group is "" or absent.
     merge = _merge_module()
     local_rows = [
         {"ok": True, "slug": "local-empty-group", "group": ""},

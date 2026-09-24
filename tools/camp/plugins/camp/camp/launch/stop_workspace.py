@@ -378,9 +378,7 @@ def stop_workspace(
     before `tmux.kill_session` is ever called: a caller streaming *emit*
     straight to a terminal sees exactly what a kill is about to cost before
     it happens, matching the design doc's transcripts. Only then is the
-    session killed and `poll_for_absence` (shared with `stop_session`, so
-    `camp stop` and `camp kill` can never drift on how long an operator
-    waits) polled to confirm it is gone.
+    session killed and `poll_for_absence` polled to confirm it is gone.
 
     The record is written at most once, during reconciliation, and never
     again — a stop that ends in `StillPresent` or `RefusedTmuxUnanswered`

@@ -12,8 +12,9 @@ Contract:
   no group resolves, and `kill` reaches its own handler there instead — it
   addresses a session by ref and is served from any cwd.
 - LEGACY_REDIRECTS points directly at the renamed canonicals (open→new,
-  break→remove, init→group, ai→new, enter→activate) — never at a removed verb
-  (the dispatcher does not support chained redirects).
+  break→remove, init→group, ai→new, enter→activate, sessions→list, kill→stop)
+  — never at a removed verb (the dispatcher does not support chained
+  redirects).
 - The repo carries no live `camp ai`/`camp enter`/`camp cd` invocation strings in
   README/hook templates.
 """
@@ -82,7 +83,7 @@ def test_canonical_verb_identity_for_non_aliases() -> None:
 
 
 @pytest.mark.parametrize(
-    "verb", ["new", "remove", "pwd", "activate", "setup", "sessions"]
+    "verb", ["new", "remove", "pwd", "activate", "setup"]
 )
 def test_needs_group_verb_asks_for_a_group_rather_than_erroring_as_a_slug(
     verb: str, groupless_env: dict[str, str]
@@ -90,25 +91,33 @@ def test_needs_group_verb_asks_for_a_group_rather_than_erroring_as_a_slug(
     """Run from a cwd where no group resolves, each canonical verb must reach the
     needs-group path. The bare-slug error means the dispatcher did not recognise
     it as a verb at all — which is the failure NEEDS_GROUP_VERBS exists to
-    prevent."""
+    prevent.
+    """
     combined = _run([verb], env=groupless_env)
     text = (combined.stdout + combined.stderr).lower()
     assert "group" in text, f"{verb!r} did not reach the needs-group path: {text!r}"
 
 
-def test_kill_reaches_its_handler_from_a_cwd_where_no_group_resolves(
-    groupless_env,
+@pytest.mark.parametrize(
+    "argv,replacement",
+    [(["kill", "no-such-ref"], "stop"), (["sessions"], "list")],
+    ids=["kill", "sessions"],
+)
+def test_retired_session_verb_redirects_from_a_cwd_where_no_group_resolves(
+    argv: list[str], replacement: str, groupless_env
 ) -> None:
-    """`camp kill <ref>` names a session, and the session names everything else,
-    so a group resolving from cwd is not a precondition. Driven through the CLI:
-    the two ways this breaks — a needs-group refusal, or falling through to the
-    bare-slug error — are both invisible to a table-membership assertion.
-    """
-    out = _run(["kill", "no-such-ref"], env=groupless_env)
+    """`camp kill` and `camp sessions` are retired verbs (LEGACY_REDIRECTS),
+    so a group resolving from cwd is not a precondition for their redirect —
+    each must print its replacement line, not a needs-group refusal or the
+    bare-slug error, from a cwd where no group resolves."""
+    out = _run(argv, env=groupless_env)
     combined = out.stdout + out.stderr
     assert "bare slug dispatch is no longer supported" not in combined, combined
     assert "no camp group" not in combined and "no group resolved" not in combined, combined
-    assert combined.startswith("camp kill:"), combined
+    assert combined == (
+        f"camp {argv[0]}: this command has been replaced — use 'camp {replacement}' instead.\n"
+    ), combined
+    assert out.returncode == 1
 
 
 # ---------------------------------------------------------------------------
@@ -127,8 +136,18 @@ def test_kill_reaches_its_handler_from_a_cwd_where_no_group_resolves(
         ("resume", ["8f2c"], "attach"),
         ("bookmark", [], "attach"),
         ("open", [], "new"),
+        ("sessions", [], "list"),
+        ("sessions", ["--recoverable"], "list"),
+        ("sessions", ["some-slug", "--json"], "list"),
+        ("sessions", ["--dir", "/tmp/x", "--limit", "5"], "list"),
+        ("kill", ["some-ref"], "stop"),
+        ("kill", ["a1b2c3d4a1b2c3d4a1b2c3d4a1b2c3d4"], "stop"),
     ],
-    ids=["launch", "launch-resume-flavor", "launch-dir-flavor", "resume", "bookmark", "open-renamed"],
+    ids=[
+        "launch", "launch-resume-flavor", "launch-dir-flavor", "resume", "bookmark", "open-renamed",
+        "sessions", "sessions-recoverable-flavor", "sessions-slug-json-flavor", "sessions-dir-limit-flavor",
+        "kill-ref", "kill-full-id",
+    ],
 )
 def test_redirect_line_reads_replaced_for_retired_and_renamed_verbs(
     typed_verb: str, rest: list[str], replacement: str, tmp_path: Path
@@ -210,6 +229,8 @@ def test_legacy_redirect_target_check_rejects_a_retired_or_unknown_target() -> N
     assert _redirect_target_is_valid("attach") is True
     assert _redirect_target_is_valid("launch") is False, "launch is retired — not a valid target"
     assert _redirect_target_is_valid("nosuchverb") is False, "unknown tokens are not valid targets"
+
+
 
 
 # ---------------------------------------------------------------------------

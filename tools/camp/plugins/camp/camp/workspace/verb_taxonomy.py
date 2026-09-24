@@ -81,6 +81,12 @@ def resolve_verb(raw: str) -> tuple[str, str]:
 # `camp attach` reaches a workspace's tmux session, and a conversation is
 # started in any pane of it — reaching the workspace is how an operator
 # resumes a conversation today.
+#
+# `sessions` and `kill` are retirements too, for the same reason: a workspace
+# is addressed by its slug and nothing else now, so enumerating sessions and
+# killing one by reference have no place left to stand. `sessions` points at
+# `list`, which enumerates workspaces instead; `kill` points at `stop`, which
+# addresses the one session a workspace can have by that workspace's slug.
 LEGACY_REDIRECTS: dict[str, str] = {
     "open": "new",
     "break": "remove",
@@ -90,6 +96,8 @@ LEGACY_REDIRECTS: dict[str, str] = {
     "launch": "attach",
     "resume": "attach",
     "bookmark": "attach",
+    "sessions": "list",
+    "kill": "stop",
 }
 
 # Verbs whose real implementation requires a resolved group (the group-aware path
@@ -98,12 +106,12 @@ LEGACY_REDIRECTS: dict[str, str] = {
 # wording: "new"/"setup" point the user at configuring a group; the rest emit the
 # standard "pass --group" error.
 #
-# `kill` and `attach` are deliberately ABSENT: both address a session by ref,
-# and a ref is the thing you look up without knowing its group, so spine
-# serves them directly.
-NEEDS_GROUP_VERBS = frozenset(
-    {"new", "remove", "pwd", "activate", "setup", "sessions"}
-)
+# `attach` and `stop` are deliberately ABSENT: each resolves its own group
+# (`cli/session.py`'s `_resolve_group_for_attach`) and prints this same
+# needs-group message itself when none resolves, so spine dispatches them
+# directly. A `LEGACY_REDIRECTS` key never belongs here either — `resolve_verb`
+# classifies it `"legacy"` before this set is consulted.
+NEEDS_GROUP_VERBS = frozenset({"new", "remove", "pwd", "activate", "setup"})
 
 _NEEDS_GROUP_CONFIGURE = frozenset({"new", "setup"})
 

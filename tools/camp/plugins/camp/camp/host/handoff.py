@@ -1,19 +1,22 @@
 """The interactive attach handoff: replaces this process, local or remote.
 
-Local: ``tmux attach -t =<derived name>`` — `=`-qualified through
+Local: the door's own outside-tmux handover (`door_argv`, ``tmux
+attach-session -t =<derived name>``) — `=`-qualified through
 :func:`camp.launch.tmux.target`, the one tmux invocation in camp that
 bypasses the `Tmux` class itself (an interactive `exec`, which cannot go
 through `subprocess.run`) but still routes its target through the seam's
 own normalization. Remote: ``ssh -t <destination>
-<camp_bin> attach <ref>``, carrying the per-host camp location the host
-declaration already holds and the same fixed connection options the listing
-transport pins (``host/transport.py``) — non-interactive authentication,
-strict host-identity checking, the connection timeout — differing only by
-requesting a terminal. The remote command reuses that module's own
-quote-and-join (:func:`camp.host.transport.quote_and_join`), never a second
-implementation of it: ssh joins trailing argv elements with a space and hands
-the result to the far side's login shell, so an unquoted reference is remote
-code execution.
+<camp_bin> attach <ref> --group <group>``, carrying the per-host camp
+location the host declaration already holds and the group the operator's
+own machine resolved the slug against — the far side has no group axis of
+its own to resolve it from — and the same fixed connection options the
+listing transport pins (``host/transport.py``) — non-interactive
+authentication, strict host-identity checking, the connection timeout —
+differing only by requesting a terminal. The remote command reuses that
+module's own quote-and-join (:func:`camp.host.transport.quote_and_join`),
+never a second implementation of it: ssh joins trailing argv elements with
+a space and hands the result to the far side's login shell, so an unquoted
+argument is remote code execution.
 
 This module never calls :func:`camp.host.transport.run_camp` — the listing
 transport captures a remote invocation's output through an injected runner;
@@ -29,10 +32,10 @@ never observe — by construction — is that the real exec actually replaces
 the process image or that a pty genuinely reaches the far side; that half is
 the operator's own attestation.
 
-Security: like the listing transport, the assembled ssh argv carries slugs,
-session references, and the host's camp location as plain command-line
-arguments — readable via ``ps`` by other local users on a multi-user
-machine.
+Security: like the listing transport, the assembled ssh argv carries the
+slug, the group it resolved against, and the host's camp location as plain
+command-line arguments — readable via ``ps`` by other local users on a
+multi-user machine.
 """
 from __future__ import annotations
 
@@ -51,27 +54,15 @@ from .transport import DEFAULT_CONNECT_TIMEOUT_SECONDS, quote_and_join
 ExecSeam = Callable[[Sequence[str]], None]
 
 
-def local_argv(derived_name: str) -> list[str]:
-    """argv for the local handoff: ``tmux attach -t <derived_name>``.
-
-    ``derived_name`` must be the resolved session's own derived name (see
-    :class:`camp.launch.recovery.SessionCandidate`) — never the harness's own
-    session name, which addresses nothing in tmux.
-    """
-    return ["tmux", "attach", "-t", target(derived_name)]
-
-
 def door_argv(derived_name: str) -> list[str]:
     """argv for the door's outside-tmux handover: ``tmux attach-session -t
     =<derived_name>``.
 
-    Distinct from :func:`local_argv` (``tmux attach``, the retired ref
-    path's own spelling): the door composes the full ``attach-session``
-    subcommand name, matching the transcript
-    ``docs/design/the-door-creates-or-connects-a-workspace-session.md``'s
-    "Handing over the terminal" section pins, since it names both calls —
-    ``attach-session`` and ``switch-client`` — by their full names side by
-    side.
+    Composes the full ``attach-session`` subcommand name, matching the
+    transcript ``docs/design/the-door-creates-or-connects-a-workspace-
+    session.md``'s "Handing over the terminal" section pins, since it names
+    both calls — ``attach-session`` and ``switch-client`` — by their full
+    names side by side.
 
     ``derived_name`` must be the resolved workspace session's own derived
     name (:func:`~camp.launch.naming.workspace_session_name`) — never the
@@ -84,10 +75,18 @@ def remote_argv(
     host: Host,
     ref: str,
     *,
+    group: str,
     connect_timeout: float = DEFAULT_CONNECT_TIMEOUT_SECONDS,
 ) -> list[str]:
     """argv for the remote handoff: an interactive ``ssh -t <dest> <camp_bin>
-    attach <ref>``.
+    attach <ref> --group <group>``.
+
+    ``group`` is the name the operator's own machine already resolved the
+    slug against (`cli/session.py`'s `_cmd_attach_host_cli`, via the same
+    `_resolve_group_for_attach` a local attach uses) — the far side has no
+    group axis of its own to resolve *ref* from, so the caller forwards the
+    name it already has rather than leaving the far side to guess one from
+    its own `$HOME`.
 
     Mirrors :func:`camp.host.transport.run_camp`'s own ssh argv assembly —
     the same three fixed options (``BatchMode``, ``StrictHostKeyChecking``,
@@ -95,7 +94,7 @@ def remote_argv(
     since the attaching operator needs an interactive pty where the listing
     transport deliberately does not take one.
     """
-    remote_command = quote_and_join(host.camp_bin, ["attach", ref])
+    remote_command = quote_and_join(host.camp_bin, ["attach", ref, "--group", group])
     return [
         "ssh",
         "-t",
