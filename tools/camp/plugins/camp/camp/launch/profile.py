@@ -184,12 +184,13 @@ class HarnessStore:
     actually use. See :func:`harness_store_for`, which is the only place this
     is built.
 
-    Every ``Harness`` method BUT ``session_transcripts`` is proxied straight
-    through to ``harness`` via ``__getattr__``, so a caller holding one of
-    these needs no isinstance check to use it as a harness. That one is the
-    exception because it takes its own ``env`` keyword, and a caller iterating
-    a pool of stores must get THIS store's binding no matter what it passes —
-    that is the one property this type exists to guarantee.
+    Every ``Harness`` method BUT ``session_transcripts`` and
+    ``session_transcript_destination`` is proxied straight through to
+    ``harness`` via ``__getattr__``, so a caller holding one of these needs no
+    isinstance check to use it as a harness. Those two are the exceptions
+    because both take their own ``env`` keyword, and a caller iterating a pool
+    of stores must get THIS store's binding no matter what it passes — that is
+    the one property this type exists to guarantee.
     """
 
     harness: Any
@@ -201,6 +202,11 @@ class HarnessStore:
 
     def session_transcripts(self, workspace: Path | None = None, *, env: dict[str, str] | None = None):
         return self.harness.session_transcripts(workspace, env=self.env)
+
+    def session_transcript_destination(
+        self, session_id: str, workspace: Path, *, env: dict[str, str] | None = None
+    ) -> Path | None:
+        return self.harness.session_transcript_destination(session_id, workspace, env=self.env)
 
 
 class StoreBindingError(Exception):

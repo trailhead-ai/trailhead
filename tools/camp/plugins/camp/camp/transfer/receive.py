@@ -106,7 +106,15 @@ extraction reads it one archive member at a time.
 stdin, and places it on this host through the harness boundary
 (`trailhead.harness.base.Harness.session_transcript_destination` /
 `rewrite_transcript_workspace`) — never by composing a destination path of
-its own. `--subpath` names a location WITHIN this host's OWN resolved
+its own. It resolves the group's declared credential store through
+`camp.launch.profile.harness_store_for` and uses that store's own `env` for
+both the destination and the recorded-root lookup that follows, so a
+transcript lands under the store the group's `[launch] account` names, not
+whatever ambient account this process happens to be running under; a group
+with no declared account still resolves the default store. A `StoreBindingError`
+(the harness resolves but the declared account cannot be bound) surfaces as
+`ConversationDestinationRefused`, naming the harness's own reason, before
+anything is written. `--subpath` names a location WITHIN this host's OWN resolved
 workspace (`camp.group.manifest.workspace_dir`, keyed only by
 `--group`/`--slug`), never a path to resolve against anything else; an
 absolute `--subpath`, one carrying a `..` segment, or one that would resolve
@@ -366,9 +374,10 @@ class ConversationDestinationRefused(ReceiveRefused):
     root of, an arriving conversation's destination — see
     `trailhead.harness.base.Harness.session_transcript_destination` and
     `rewrite_transcript_workspace`: a harness with no such concept, a
-    `session_id` that is not a usable path component, or a projects-key
+    `session_id` that is not a usable path component, a projects-key
     collision with a transcript already recorded for a different
-    workspace."""
+    workspace, or the group's declared `[launch] account` failing to bind
+    (`camp.launch.profile.StoreBindingError`, unwrapped to its own message)."""
 
     def __init__(self, session_id: str, detail: str) -> None:
         super().__init__(f"conversation {session_id!r}: {detail}")
@@ -917,7 +926,8 @@ def conversations(
         ConversationSubpathRefused: *subpath* is absolute, carries a `..`
             segment, or resolves outside the workspace — refused before
             anything is written.
-        ConversationDestinationRefused: the harness boundary refused to
+        ConversationDestinationRefused: the group's declared `[launch] account`
+            could not be bound, or the harness boundary refused to
             compose a destination, or to rewrite the recorded root of the
             placed transcript OR of any nested transcript in its extracted
             subtree — no transcript-destination concept, an unusable
@@ -937,7 +947,7 @@ def conversations(
     from trailhead.harness.base import HarnessError
 
     from ..group.manifest import workspace_dir
-    from ..launch.profile import harness_for
+    from ..launch.profile import StoreBindingError, harness_store_for
     from .conversations import (
         ConversationSubpathEscaped,
         extract_conversation_archive,
@@ -953,15 +963,18 @@ def conversations(
     except ConversationSubpathEscaped as e:
         raise ConversationSubpathRefused(subpath, e.reason) from e
 
-    harness = harness_for(group)
-    if harness is None:
+    try:
+        store = harness_store_for(group, env=env)
+    except StoreBindingError as e:
+        raise ConversationDestinationRefused(session_id, str(e)) from e
+    if store is None:
         raise ConversationDestinationRefused(
             session_id, "this group's harness has no transcript-destination concept"
         )
 
     try:
-        destination = harness.session_transcript_destination(
-            session_id, conversation_root, env=env
+        destination = store.session_transcript_destination(
+            session_id, conversation_root, env=store.env
         )
     except HarnessError as e:
         raise ConversationDestinationRefused(session_id, str(e)) from e
@@ -988,7 +1001,7 @@ def conversations(
     old_root = next(
         (
             row.cwd
-            for row in (harness.session_transcripts(env=env) or ())
+            for row in (store.session_transcripts(env=store.env) or ())
             if row.session_id == session_id
         ),
         None,
@@ -1021,7 +1034,7 @@ def conversations(
         try:
             for transcript_path in transcripts_to_rewrite:
                 staged_path = transcript_path.parent / f".{transcript_path.name}.rewrite-staged"
-                harness.rewrite_transcript_workspace(
+                store.rewrite_transcript_workspace(
                     transcript_path,
                     staged_path,
                     old_root,
