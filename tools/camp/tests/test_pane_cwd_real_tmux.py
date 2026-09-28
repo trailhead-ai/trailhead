@@ -1,8 +1,12 @@
 """Real-tmux tests: every pane camp spawns lands in its requested directory
 even when the tmux SERVER's own working directory has been deleted.
 
-tmux ignores `-c <dir>` once the server's cwd is gone and starts the pane in
-the deleted directory, so the seam's pane command changes directory itself.
+Measured on tmux 3.7c, tmux ignores `-c <dir>` once the server's cwd is gone
+and starts the pane in the deleted directory (tmux 3.4 honours it), so the
+seam's pane command changes directory itself. The tests run through a PATH
+shim that strips `-c` to model 3.7c on any tmux version; see the
+`stale_server` fixture. Only the exact-argv unit tests in
+`test_launch_tmux.py` pin that `-c` is still passed.
 Every test here starts a real server on a private `-L` socket from a temp
 directory, deletes that directory, then calls the `Tmux` method under test.
 Nothing here ever touches the default tmux socket.
