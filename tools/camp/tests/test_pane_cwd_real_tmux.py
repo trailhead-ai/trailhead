@@ -1,12 +1,13 @@
 """Real-tmux tests: every pane camp spawns lands in its requested directory
 even when the tmux SERVER's own working directory has been deleted.
 
-Measured on tmux 3.7c, tmux ignores `-c <dir>` once the server's cwd is gone
-and starts the pane in the deleted directory (tmux 3.4 honours it), so the
-seam's pane command changes directory itself. The tests run through a PATH
-shim that strips `-c` to model 3.7c on any tmux version; see the
-`stale_server` fixture. Only the exact-argv unit tests in
-`test_launch_tmux.py` pin that `-c` is still passed.
+These tests pin that the pane enters its directory itself, without relying on
+tmux's `-c`. They run through a PATH shim that strips `-c`; on tmux 3.4 a
+pre-fix pane then lands in `$HOME` (the client falls back to home when its cwd
+is unreadable), so the shim is what makes the tests bite. That the bug is
+real on tmux 3.7c (which ignores `-c` once the server's cwd is gone) rests on
+the manual reproduction in the task record, not on these tests. Only the
+exact-argv unit tests in `test_launch_tmux.py` pin that `-c` is still passed.
 Every test here starts a real server on a private `-L` socket from a temp
 directory, deletes that directory, then calls the `Tmux` method under test.
 Nothing here ever touches the default tmux socket.
@@ -70,12 +71,13 @@ def _clean_env(**extra: str) -> dict[str, str]:
 @pytest.fixture()
 def stale_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """A real server on a private socket whose own cwd has been deleted, fronted
-    by a `tmux` shim that models tmux 3.7c ignoring `-c` in that state: for
-    `new-session`/`new-window` the shim drops the first `-c <dir>` and runs the
-    real client from a deleted directory, so the ONLY thing that can put a pane
-    in the requested directory is the pane command itself. (tmux 3.4, the
-    version on Linux dev boxes, still honors `-c` here, so the bug cannot be
-    provoked without the shim.)
+    by a `tmux` shim that drops `-c`: for `new-session`/`new-window` the shim
+    drops the first `-c <dir>` and runs the real client from a deleted
+    directory, so the ONLY thing that can put a pane in the requested
+    directory is the pane command itself. On tmux 3.4 a pre-fix pane then
+    lands in `$HOME` (the client falls back to home); deleting the server's
+    own cwd has no effect there. The tmux 3.7c link rests on the manual
+    reproduction in the task record.
 
     The server is started (by a `starter` session running `sleep`) from a temp
     dir that is then removed. Yields `(sock, start_server_with_env)`.
@@ -225,7 +227,7 @@ def test_a_missing_dir_never_runs_the_command_and_leaves_no_pane(
     """`new_window` is the spawn path whose tmux client does not itself start in
     *cwd*, so a missing directory reaches the pane command (the session-creating
     paths fail earlier, in `subprocess.run(cwd=...)`)."""
-    from camp.launch.tmux import Tmux
+    from camp.launch.tmux import NewWindowResult, Tmux
 
     sock, start = stale_server
     start()
@@ -237,6 +239,7 @@ def test_a_missing_dir_never_runs_the_command_and_leaves_no_pane(
         "starter", cwd=missing, window_name="doomed", command=command, timeout=5
     )
 
+    assert isinstance(answer, NewWindowResult), answer
     names = _wait_until(
         lambda: _sock_run(sock, "list-windows", "-t", "=starter", "-F", "#{window_name}").stdout.split(),
         lambda names: "doomed" not in names,
@@ -268,3 +271,23 @@ def test_empty_command_pane_runs_tmux_default_shell_not_the_starters_shell(
         lambda comm: comm == "bash",
     )
     assert comm == "bash"
+
+
+@pytest.mark.skipif(not os.path.exists("/bin/bash"), reason="needs /bin/bash")
+def test_empty_command_pane_is_a_login_shell(stale_server, tmp_path: Path) -> None:
+    sock, start = stale_server
+    start()
+    set_shell = _sock_run(sock, "set", "-g", "default-shell", "/bin/bash")
+    assert set_shell.returncode == 0, set_shell.stderr
+    want = tmp_path / "ws"
+    want.mkdir()
+    marker = tmp_path / "login"
+
+    pid = _spawn("new_session", sock, "camp-t", want)
+    assert _await_cwd(pid, want) == str(want)
+    sent = _sock_run(
+        sock, "send-keys", "-t", "=camp-t:", f"shopt -q login_shell && touch '{marker}'", "Enter"
+    )
+    assert sent.returncode == 0, sent.stderr
+
+    assert _wait_until(marker.exists, bool), "the empty-command pane's shell is not a login shell"

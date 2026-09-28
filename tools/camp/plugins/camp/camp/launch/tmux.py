@@ -328,9 +328,15 @@ def _pane_argv(cwd: object, command: Sequence[str]) -> list[str]:
     `camp:` line naming the directory and exits non-zero — the pane dies
     rather than surviving as a shell somewhere else.
 
-    An empty *command* execs `${SHELL:-sh} -l`: inside a pane `$SHELL` is
-    tmux's own `default-shell`, never the shell of whoever started the
-    server, and `-l` keeps the login-shell semantics tmux gives a bare pane.
+    An empty *command* execs `${SHELL:-sh} -l`: the pane is `default-shell`
+    as a login shell (inside a pane `$SHELL` is tmux's own `default-shell`,
+    never the shell of whoever started the server). tmux's `default-command`
+    option is not consulted, and `default-shell` is assumed to accept `-l`
+    (true for bash, zsh, fish, dash, tcsh).
+
+    A failed `cd` writes its `camp:` line into a pane that dies at once, while
+    tmux still reports the spawn as successful, so the failure is visible only
+    as the window vanishing.
     """
     tail = 'exec "${SHELL:-sh}" -l' if not command else 'exec "$@"'
     return ["sh", "-c", _CD_PRELUDE + tail, "camp-cwd", str(cwd), *command]
@@ -803,8 +809,8 @@ class Tmux:
         A thin wrapper over :meth:`spawn_session` with *command* empty: an
         empty command makes :func:`_pane_argv` end the wrapper in
         `exec "${SHELL:-sh}" -l`, and a pane's `$SHELL` is tmux's
-        `default-shell`. This keeps
-        the `new-session` argv built in exactly one place — this method
+        `default-shell`; tmux's `default-command` option is not consulted.
+        This keeps the `new-session` argv built in exactly one place — this method
         composes none of its own. *env* defaults to the current process
         environment, unmodified: the workspace door scrubs nothing.
         """
