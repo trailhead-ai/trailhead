@@ -14,7 +14,7 @@ the whole camp state directory across the call (no write), the captured
 stdout and stderr (no rendering), and every process-spawning entry point in
 `subprocess` made to raise (no process).
 
-THE CHECKS, IN ORDER, AND WHY ELEVEN. Each of the eleven checks below reports
+THE CHECKS, IN ORDER, AND WHY TWELVE. Each of the twelve checks below reports
 independently — one failing check never suppresses the rest, because the
 operator reaches for this while tired and moving between machines, and a
 preflight that stops at the first problem turns one round trip into several.
@@ -33,6 +33,7 @@ Every check produces exactly one :class:`Check`, in this fixed order:
 9. the slug is free on the peer, or present there and owned by this host
 10. every member declares an excluded set
 11. the conversations rooted here are enumerated
+12. no member's worktree carries a link escaping its root
 
 THREE STATES, NEVER TWO. Every :class:`Check` carries a :class:`CheckStatus`
 of PASSED, FAILED, or INDETERMINATE. Checks 5-9 depend on the peer's answer,
@@ -77,6 +78,7 @@ __all__ = [
     "Verdict",
     "Check",
     "MemberDeclaration",
+    "MemberWorktreeWalk",
     "PreflightResult",
     "compose_preflight",
 ]
@@ -127,6 +129,23 @@ class MemberDeclaration:
 
     name: str
     excluded: tuple[str, ...] | None
+
+
+@dataclass(frozen=True)
+class MemberWorktreeWalk:
+    """One member's sender-side confinement walk
+    (`camp.transfer.worktree.escaping_members`), handed to
+    `compose_preflight` as data — the composition performs no walk of its
+    own, exactly like the local reads every other check consumes.
+
+    ``escaped`` mirrors the ``conversations`` handoff's own three-valued
+    story: `None` means this member's worktree could not be walked at all
+    (never treated as PASSED for that), and a tuple — possibly empty — names
+    every archive-member path the shared confinement gate would refuse.
+    """
+
+    name: str
+    escaped: tuple[str, ...] | None
 
 
 @dataclass(frozen=True)
@@ -232,6 +251,27 @@ def _peer_group_unconfigured(name: str, probe_result: ProbeAnswer) -> Check | No
     )
 
 
+_MAX_ESCAPES_SHOWN_PER_MEMBER = 10
+
+
+def _escape_detail_for_member(member_name: str, escaped: tuple[str, ...]) -> str:
+    """The FAILED detail fragment for one member's offending paths: names the
+    member, every offending path capped at
+    :data:`_MAX_ESCAPES_SHOWN_PER_MEMBER` (then "and N more"), and the
+    remedy — add that path itself, or an enclosing directory, to the
+    member's declared `excluded` (the operator's own answer; never a
+    computed common ancestor, never git's own ignored-directory listing)."""
+    shown = escaped[:_MAX_ESCAPES_SHOWN_PER_MEMBER]
+    remainder = len(escaped) - len(shown)
+    paths = ", ".join(repr(p) for p in shown)
+    if remainder > 0:
+        paths += f", and {remainder} more"
+    return (
+        f"member {member_name!r} carries a link escaping its root: {paths} — "
+        "add that path (or an enclosing directory) to the member's excluded"
+    )
+
+
 def compose_preflight(
     *,
     self_name: str | None,
@@ -244,8 +284,9 @@ def compose_preflight(
     members: tuple[MemberDeclaration, ...],
     slug: str,
     conversations: tuple[WorkspaceConversation, ...] | None,
+    worktree_escapes: tuple[MemberWorktreeWalk, ...],
 ) -> PreflightResult:
-    """Compose the eleven checks and the resolved verdict, as pure data.
+    """Compose the twelve checks and the resolved verdict, as pure data.
 
     Every argument is already the result of a read the caller performed —
     this function does no I/O of its own. See the module docstring for the
@@ -503,6 +544,30 @@ def compose_preflight(
                 "the conversations rooted here are enumerated",
                 CheckStatus.PASSED,
                 f"{len(conversations)} conversation(s) enumerated",
+            )
+        )
+
+    # 12. no member's worktree carries a link escaping its root
+    walked_names = {w.name for w in worktree_escapes}
+    unwalkable = [w.name for w in worktree_escapes if w.escaped is None]
+    unwalkable.extend(m.name for m in members if m.name not in walked_names)
+    offending = [(w.name, w.escaped) for w in worktree_escapes if w.escaped]
+    if unwalkable or offending:
+        fragments = [_escape_detail_for_member(name_, paths) for name_, paths in offending]
+        fragments.extend(f"member {name_!r} could not be walked" for name_ in unwalkable)
+        checks.append(
+            Check(
+                "no member's worktree carries a link escaping its root",
+                CheckStatus.FAILED,
+                "; ".join(fragments),
+            )
+        )
+    else:
+        checks.append(
+            Check(
+                "no member's worktree carries a link escaping its root",
+                CheckStatus.PASSED,
+                "no member's worktree carries a link escaping its root",
             )
         )
 

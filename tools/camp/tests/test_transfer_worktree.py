@@ -687,3 +687,844 @@ class TestWorktreeCliDispatch:
         assert payload["member"] == "repo_a"
         assert (wt_path / "tracked.txt").read_text() == "edited but not committed\n"
         assert not (wt_path / "secrets.env").exists()
+
+
+# ---------------------------------------------------------------------------
+# escaping_members() — the sender-side walk that finds, before anything
+# crosses, exactly what the peer's confinement gate would refuse.
+# ---------------------------------------------------------------------------
+
+
+class TestEscapingMembersWalk:
+    def test_absolute_symlink_target_outside_root_is_named(self, tmp_path: Path):
+        from camp.transfer.worktree import escaping_members
+
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (wt / "escape-link").symlink_to(outside)
+
+        result = escaping_members(wt, ())
+
+        assert result == ("escape-link",)
+
+    def test_same_symlink_under_a_declared_excluded_directory_is_clean(self, tmp_path: Path):
+        from camp.transfer.worktree import escaping_members
+
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (wt / "nested").mkdir()
+        (wt / "nested" / "escape-link").symlink_to(outside)
+
+        result = escaping_members(wt, ("nested",))
+
+        assert result == ()
+
+    def test_relative_symlink_resolving_inside_the_worktree_is_clean(self, tmp_path: Path):
+        from camp.transfer.worktree import escaping_members
+
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        (wt / "target.txt").write_text("hi\n")
+        (wt / "inside-link").symlink_to("target.txt")
+
+        result = escaping_members(wt, ())
+
+        assert result == ()
+
+    def test_relative_symlink_climbing_out_via_dotdot_is_named(self, tmp_path: Path):
+        from camp.transfer.worktree import escaping_members
+
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        (tmp_path / "evil.txt").write_text("evil\n")
+        (wt / "climb-link").symlink_to("../evil.txt")
+
+        result = escaping_members(wt, ())
+
+        assert result == ("climb-link",)
+
+    def test_absolute_symlink_target_inside_the_worktree_is_still_refused(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """An absolute target that happens to sit inside the sender's own
+        worktree is still refused: the walk evaluates the gate against an
+        empty scratch root (never the worktree's own resolved root), so
+        this absolute path resolves outside that scratch regardless of
+        where it points on the sender's real disk. That means `_check_member`
+        alone (not merely `data_filter`) refuses it, so the refusal holds on
+        every interpreter — including 3.11.0-3.11.3, which never had
+        `data_filter` at all. Sender and peer agree: `extract_archive` also
+        refuses the archive `write_archive` produces from this worktree."""
+        from camp.transfer.worktree import (
+            ArchiveMemberEscaped,
+            escaping_members,
+            extract_archive,
+            write_archive,
+        )
+
+        _simulate_interpreter_without_data_filter(monkeypatch)
+
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        (wt / "target.txt").write_text("hi\n")
+        (wt / "abs-inside-link").symlink_to(wt / "target.txt")
+
+        result = escaping_members(wt, ())
+
+        assert result == ("abs-inside-link",)
+
+        buf = io.BytesIO()
+        write_archive(wt, (), buf)
+        peer_wt = tmp_path / "peer-wt"
+        peer_wt.mkdir()
+        with pytest.raises(ArchiveMemberEscaped):
+            extract_archive(io.BytesIO(buf.getvalue()), peer_wt)
+
+    def test_worktree_passing_the_walk_round_trips_with_no_escape(self, tmp_path: Path):
+        """Sender and peer agree in the clean direction: a worktree
+        `escaping_members` reports clean crosses through the real
+        `write_archive` -> `extract_archive` pair with no
+        `ArchiveMemberEscaped`."""
+        from camp.transfer.worktree import escaping_members, extract_archive, write_archive
+
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        (wt / "target.txt").write_text("hi\n")
+        (wt / "inside-link").symlink_to("target.txt")
+
+        assert escaping_members(wt, ()) == ()
+
+        buf = io.BytesIO()
+        write_archive(wt, (), buf)
+        peer_wt = tmp_path / "peer-wt"
+        peer_wt.mkdir()
+        extract_archive(io.BytesIO(buf.getvalue()), peer_wt)  # must not raise
+
+        assert (peer_wt / "inside-link").is_symlink()
+
+    def test_worktree_failing_the_walk_is_also_refused_by_extract_archive(self, tmp_path: Path):
+        """Sender and peer agree in the failing direction: a worktree
+        `escaping_members` names is refused by the real `extract_archive`
+        when it receives the archive `write_archive` produced from it."""
+        from camp.transfer.worktree import (
+            ArchiveMemberEscaped,
+            escaping_members,
+            extract_archive,
+            write_archive,
+        )
+
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        (tmp_path / "evil.txt").write_text("evil\n")
+        (wt / "climb-link").symlink_to("../evil.txt")
+
+        assert escaping_members(wt, ()) == ("climb-link",)
+
+        buf = io.BytesIO()
+        write_archive(wt, (), buf)
+        peer_wt = tmp_path / "peer-wt"
+        peer_wt.mkdir()
+        with pytest.raises(ArchiveMemberEscaped):
+            extract_archive(io.BytesIO(buf.getvalue()), peer_wt)
+
+    @pytest.mark.skipif(
+        os.geteuid() == 0, reason="root ignores the chmod(0o000) permission bit"
+    )
+    def test_excluded_directory_made_unreadable_is_never_descended_into(self, tmp_path: Path):
+        from camp.transfer.worktree import escaping_members
+
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        blocked = wt / "blocked"
+        blocked.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (blocked / "escape-link").symlink_to(outside)
+        blocked.chmod(0o000)
+        try:
+            result = escaping_members(wt, ("blocked",))
+        finally:
+            blocked.chmod(0o755)
+
+        assert result == ()
+
+    def test_missing_worktree_directory_is_reported_unwalkable_not_clean(self, tmp_path: Path):
+        from camp.transfer.worktree import escaping_members
+
+        result = escaping_members(tmp_path / "does-not-exist", ())
+
+        assert result is None
+
+    def test_more_than_ten_offenders_are_all_named(self, tmp_path: Path):
+        from camp.transfer.worktree import escaping_members
+
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        for i in range(12):
+            (wt / f"escape-link-{i}").symlink_to(outside)
+
+        result = escaping_members(wt, ())
+
+        assert len(result) == 12
+        assert set(result) == {f"escape-link-{i}" for i in range(12)}
+
+    def test_fifo_is_reported_and_refused_on_the_archive_it_writes(self, tmp_path: Path):
+        """`write_archive` emits a FIFO as a real archive member (`tarfile`
+        adds it by type, never by reading its contents), and the peer's gate
+        (`_check_member`'s `_UNSAFE_TYPES`) refuses a device or special
+        file. The sender must catch that ahead of time too — not only a
+        symlink."""
+        from camp.transfer.worktree import (
+            ArchiveMemberEscaped,
+            escaping_members,
+            extract_archive,
+            write_archive,
+        )
+
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        os.mkfifo(wt / "a-fifo")
+
+        result = escaping_members(wt, ())
+
+        assert result == ("a-fifo",)
+
+        buf = io.BytesIO()
+        write_archive(wt, (), buf)
+        peer_wt = tmp_path / "peer-wt"
+        peer_wt.mkdir()
+        with pytest.raises(ArchiveMemberEscaped):
+            extract_archive(io.BytesIO(buf.getvalue()), peer_wt)
+
+    def test_fifo_under_an_excluded_directory_is_never_walked(self, tmp_path: Path):
+        from camp.transfer.worktree import escaping_members
+
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        (wt / "blocked").mkdir()
+        os.mkfifo(wt / "blocked" / "a-fifo")
+
+        result = escaping_members(wt, ("blocked",))
+
+        assert result == ()
+
+    def test_relative_symlink_climbing_out_one_level_stays_inside_and_is_clean(
+        self, tmp_path: Path
+    ):
+        """`sub/up -> ..` lexically resolves back to the worktree root
+        itself under the scratch-root evaluation — the sender must not
+        follow this on-disk link back through its own real worktree, which
+        would otherwise walk past the root into the parent of `tmp_path`
+        and (depending on layout) refuse a link the peer would accept.
+        Sender and peer agree: both accept."""
+        from camp.transfer.worktree import escaping_members, extract_archive, write_archive
+
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        (wt / "sub").mkdir()
+        (wt / "sub" / "up").symlink_to("..")
+
+        assert escaping_members(wt, ()) == ()
+
+        buf = io.BytesIO()
+        write_archive(wt, (), buf)
+        peer_wt = tmp_path / "peer-wt"
+        peer_wt.mkdir()
+        extract_archive(io.BytesIO(buf.getvalue()), peer_wt)  # must not raise
+
+    def test_self_referential_symlink_is_evaluated_the_same_on_both_ends(self, tmp_path: Path):
+        """`self -> .` — whatever the peer does with it, the sender's
+        evaluation must agree, because the sender's own on-disk copy of
+        `self` already exists and resolving through it (rather than against
+        an empty scratch root) would make the sender see something the peer
+        — extracting into a tree that does not yet contain `self` — never
+        sees."""
+        from camp.transfer.worktree import escaping_members, extract_archive, write_archive
+
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        (wt / "self").symlink_to(".")
+
+        sender_verdict = escaping_members(wt, ())
+
+        buf = io.BytesIO()
+        write_archive(wt, (), buf)
+        peer_wt = tmp_path / "peer-wt"
+        peer_wt.mkdir()
+        if sender_verdict == ():
+            extract_archive(io.BytesIO(buf.getvalue()), peer_wt)  # must not raise
+        else:
+            from camp.transfer.worktree import ArchiveMemberEscaped
+
+            with pytest.raises(ArchiveMemberEscaped):
+                extract_archive(io.BytesIO(buf.getvalue()), peer_wt)
+
+    def test_excluded_venv_chained_absolute_link_is_clean_for_both_ends(self, tmp_path: Path):
+        """A top-level link (`py -> .venv/bin/python`) that is itself
+        emitted must not be evaluated by following it all the way through
+        `.venv`'s own (excluded, never-crossed) further symlink hop to
+        wherever that ultimately points — the peer never extracts `.venv`
+        at all, so it only ever sees the literal one-hop target `py`
+        declares. An implementation that resolves against the real
+        worktree root would find the chain lands outside and wrongly
+        refuse a link the peer accepts."""
+        from camp.transfer.worktree import escaping_members, extract_archive, write_archive
+
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        (wt / ".venv" / "bin").mkdir(parents=True)
+        outside = tmp_path / "outside-interpreter"
+        outside.write_text("#!/bin/sh\n")
+        (wt / ".venv" / "bin" / "python").symlink_to(outside)
+        (wt / "py").symlink_to(".venv/bin/python")
+
+        result = escaping_members(wt, (".venv",))
+
+        assert result == ()
+
+        buf = io.BytesIO()
+        write_archive(wt, (".venv",), buf)
+        peer_wt = tmp_path / "peer-wt"
+        peer_wt.mkdir()
+        extract_archive(io.BytesIO(buf.getvalue()), peer_wt)  # must not raise
+
+    @pytest.mark.skipif(
+        os.geteuid() == 0, reason="root ignores the chmod(0o000) permission bit"
+    )
+    def test_unreadable_non_excluded_directory_is_reported_unwalkable(self, tmp_path: Path):
+        from camp.transfer.worktree import escaping_members
+
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        blocked = wt / "blocked"
+        blocked.mkdir()
+        (blocked / "inner.txt").write_text("hi\n")
+        blocked.chmod(0o000)
+        try:
+            result = escaping_members(wt, ())
+        finally:
+            blocked.chmod(0o755)
+
+        assert result is None
+
+    def test_chained_link_through_an_already_accepted_sibling_is_named(self, tmp_path: Path):
+        """`sub/up -> ..` alone resolves back to the worktree root and is
+        accepted — but once that link is standing, a later sibling `z` whose
+        own target routes back through it (`sub/up/..`) lands one level
+        above the root. The walk must evaluate `z` against the state left by
+        `sub/up` already having been accepted, exactly as the peer does when
+        it extracts `sub/up` before it ever reaches `z`. Sender and peer
+        agree: both refuse `z`."""
+        from camp.transfer.worktree import (
+            ArchiveMemberEscaped,
+            escaping_members,
+            extract_archive,
+            write_archive,
+        )
+
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        (wt / "sub").mkdir()
+        (wt / "sub" / "up").symlink_to("..")
+        (wt / "z").symlink_to("sub/up/..")
+
+        result = escaping_members(wt, ())
+
+        assert "z" in result
+
+        buf = io.BytesIO()
+        write_archive(wt, (), buf)
+        peer_wt = tmp_path / "peer-wt"
+        peer_wt.mkdir()
+        with pytest.raises(ArchiveMemberEscaped):
+            extract_archive(io.BytesIO(buf.getvalue()), peer_wt)
+
+    def test_chained_link_through_a_self_referential_sibling_is_named(self, tmp_path: Path):
+        """`a -> .` alone resolves to the worktree root and is accepted, but
+        `b -> a/..` — evaluated after `a` already stands — routes one level
+        above the root through it. Sender and peer agree: both refuse `b`."""
+        from camp.transfer.worktree import (
+            ArchiveMemberEscaped,
+            escaping_members,
+            extract_archive,
+            write_archive,
+        )
+
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        (wt / "a").symlink_to(".")
+        (wt / "b").symlink_to("a/..")
+
+        result = escaping_members(wt, ())
+
+        assert "b" in result
+
+        buf = io.BytesIO()
+        write_archive(wt, (), buf)
+        peer_wt = tmp_path / "peer-wt"
+        peer_wt.mkdir()
+        with pytest.raises(ArchiveMemberEscaped):
+            extract_archive(io.BytesIO(buf.getvalue()), peer_wt)
+
+    def test_chained_link_two_levels_deep_through_an_accepted_sibling_is_named(
+        self, tmp_path: Path
+    ):
+        """`a/b/up -> ../..` alone resolves exactly to the worktree root
+        (still accepted), but `z -> a/b/up/../../..` — evaluated after
+        `a/b/up` already stands — climbs three levels above the root through
+        it. Sender and peer agree: both refuse `z`."""
+        from camp.transfer.worktree import (
+            ArchiveMemberEscaped,
+            escaping_members,
+            extract_archive,
+            write_archive,
+        )
+
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        (wt / "a" / "b").mkdir(parents=True)
+        (wt / "a" / "b" / "up").symlink_to("../..")
+        (wt / "z").symlink_to("a/b/up/../../..")
+
+        result = escaping_members(wt, ())
+
+        assert "z" in result
+
+        buf = io.BytesIO()
+        write_archive(wt, (), buf)
+        peer_wt = tmp_path / "peer-wt"
+        peer_wt.mkdir()
+        with pytest.raises(ArchiveMemberEscaped):
+            extract_archive(io.BytesIO(buf.getvalue()), peer_wt)
+
+    def test_link_that_sorts_before_the_link_it_routes_through_is_clean_in_order(
+        self, tmp_path: Path
+    ):
+        """`link -> self/..` sorts before `self -> .`. At the moment `link`
+        is checked, `self` has not been materialized in the replay yet, so
+        `link`'s target is evaluated literally (a not-yet-existing path
+        component) and stays inside the root — the same thing the peer sees,
+        since it extracts in this same order and `self` is not on its disk
+        yet either. Reversing the replay order would materialize `self`
+        first (itself accepted, a real symlink to the root), and `link`
+        would then resolve THROUGH it and climb one level above the root —
+        proof that the clean verdict here depends on the order itself, not
+        just on each link's own target. Sender and peer agree: both accept.
+        Replaces the removed `test_reversed_traversal_order_would_miss_the_chained_escape`,
+        which asserted only `sorted(("sub", "z")) == ["sub", "z"]` — a
+        restated constant, not a run of the walk."""
+        from camp.transfer.worktree import escaping_members, extract_archive, write_archive
+
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        (wt / "link").symlink_to("self/..")
+        (wt / "self").symlink_to(".")
+
+        assert escaping_members(wt, ()) == ()
+
+        buf = io.BytesIO()
+        write_archive(wt, (), buf)
+        peer_wt = tmp_path / "peer-wt"
+        peer_wt.mkdir()
+        extract_archive(io.BytesIO(buf.getvalue()), peer_wt)  # must not raise
+
+    def test_symlink_loop_is_named_an_offender_not_a_crash(self, tmp_path: Path):
+        """A symlink loop already standing before a later member routes
+        through it must be treated as an offender — a `RuntimeError` from
+        `Path.resolve()` crashing the whole walk would leave every other
+        member's status unreported."""
+        from camp.transfer.worktree import escaping_members
+
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        (wt / "loop").symlink_to("loop")
+        (wt / "victim").symlink_to("loop")
+
+        result = escaping_members(wt, ())
+
+        assert result == ("victim",)
+
+    def test_excluding_the_escaping_symlink_by_its_own_exact_path_is_clean(self, tmp_path: Path):
+        """The remedy the FAILED detail names — `excluded` carrying the
+        offending path itself, not just an enclosing directory."""
+        from camp.transfer.worktree import escaping_members
+
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (wt / "bin").mkdir()
+        (wt / "bin" / "python").symlink_to(outside)
+
+        result = escaping_members(wt, ("bin/python",))
+
+        assert result == ()
+
+
+# ---------------------------------------------------------------------------
+# escaping_members()'s scratch root is named after the worktree's own
+# basename — a relative link that climbs out and re-enters by that name must
+# be judged the way a real peer (whose own root carries that same name)
+# judges it.
+# ---------------------------------------------------------------------------
+
+
+class TestScratchRootBasenameMatchesTheWorktree:
+    def test_relative_link_reentering_by_the_worktrees_own_basename_is_clean(
+        self, tmp_path: Path
+    ):
+        """`docs/x -> ../../member/README` climbs two levels above `docs`
+        and back down into a directory named `member` — the worktree's own
+        basename. On the real peer, whose extraction root is *also* named
+        `member` (whatever its parent path), that same climb lands back
+        inside its own root. A scratch root with a random name would put
+        that reentry point nowhere real, reading as an escape the peer never
+        sees."""
+        from camp.transfer.worktree import escaping_members, extract_archive, write_archive
+
+        sender_root = tmp_path / "sender-parent" / "member"
+        sender_root.mkdir(parents=True)
+        (sender_root / "docs").mkdir()
+        (sender_root / "README").write_text("hi\n")
+        (sender_root / "docs" / "x").symlink_to("../../member/README")
+
+        assert escaping_members(sender_root, ()) == ()
+
+        buf = io.BytesIO()
+        write_archive(sender_root, (), buf)
+        peer_root = tmp_path / "peer-parent" / "member"
+        peer_root.mkdir(parents=True)
+        extract_archive(io.BytesIO(buf.getvalue()), peer_root)  # must not raise
+
+        assert (peer_root / "docs" / "x").is_symlink()
+
+
+# ---------------------------------------------------------------------------
+# escaping_members()'s optional `tip` seeds the scratch root from the tree
+# the peer's `history` phase has already checked out before its `worktree`
+# phase ever runs — the peer never extracts into an empty root, and these
+# prove the sender now agrees with what a REAL git checkout produces.
+# ---------------------------------------------------------------------------
+
+
+def _commit_all(repo: Path, message: str) -> str:
+    _git(repo, "add", "-A")
+    _git(
+        repo,
+        "-c", "commit.gpgsign=false",
+        "-c", "user.email=t@t.com",
+        "-c", "user.name=t",
+        "commit", "-m", message, "--no-gpg-sign",
+    )
+    return _git(repo, "rev-parse", "HEAD").stdout.strip()
+
+
+def _worktree_at_tip(repo: Path, dest: Path, tip: str) -> None:
+    """A real linked git worktree of *repo*, checked out detached at *tip* —
+    exactly the shape `_add_worktree_for_member` leaves for the peer's
+    `history` phase to have already produced before `worktree` extracts."""
+    _git(repo, "worktree", "add", "-q", "--detach", str(dest), tip)
+
+
+class TestEscapingMembersAgreesWithARealCheckout:
+    def test_tracked_self_reentering_link_is_refused_once_the_checkout_already_holds_it(
+        self, tmp_path: Path
+    ):
+        """`sub/up -> ..` alone is accepted against an empty root — but the
+        peer's checkout ALREADY has `sub/up` standing before the archive
+        even lands, so re-extracting the very same member resolves its own
+        NAME back to the destination root itself (`tarfile`'s "resolves to
+        the destination itself" guard) and the peer refuses it. Sender and
+        peer agree once seeded from the real tip; against an empty root
+        (`tip=None`) they would disagree — this is the reported gap."""
+        from camp.transfer.worktree import (
+            ArchiveMemberEscaped,
+            escaping_members,
+            extract_archive,
+            write_archive,
+        )
+
+        repo = tmp_path / "repo"
+        init_git_repo(repo)
+        (repo / "sub").mkdir()
+        (repo / "sub" / "up").symlink_to("..")
+        tip = _commit_all(repo, "add sub/up")
+
+        peer = tmp_path / "peer"
+        _worktree_at_tip(repo, peer, tip)
+
+        assert escaping_members(repo, (), tip) == ("sub/up",)
+
+        buf = io.BytesIO()
+        write_archive(repo, (), buf)
+        with pytest.raises(ArchiveMemberEscaped):
+            extract_archive(io.BytesIO(buf.getvalue()), peer)
+
+    def test_tracked_self_referential_link_is_refused_once_the_checkout_already_holds_it(
+        self, tmp_path: Path
+    ):
+        """Same shape as `sub/up -> ..`, for the simpler `self -> .`."""
+        from camp.transfer.worktree import (
+            ArchiveMemberEscaped,
+            escaping_members,
+            extract_archive,
+            write_archive,
+        )
+
+        repo = tmp_path / "repo"
+        init_git_repo(repo)
+        (repo / "self").symlink_to(".")
+        tip = _commit_all(repo, "add self")
+
+        peer = tmp_path / "peer"
+        _worktree_at_tip(repo, peer, tip)
+
+        assert escaping_members(repo, (), tip) == ("self",)
+
+        buf = io.BytesIO()
+        write_archive(repo, (), buf)
+        with pytest.raises(ArchiveMemberEscaped):
+            extract_archive(io.BytesIO(buf.getvalue()), peer)
+
+    def test_tracked_chained_link_through_an_already_checked_out_sibling_is_named(
+        self, tmp_path: Path
+    ):
+        """`a -> b/..` sorts before `b -> .` — over an empty root both would
+        be accepted (the ordering tests above). But the peer's checkout
+        already has `b` standing before `a` is even checked, so `a` resolves
+        through it and climbs one level above the root. Sender and peer
+        agree: both refuse `a`."""
+        from camp.transfer.worktree import (
+            ArchiveMemberEscaped,
+            escaping_members,
+            extract_archive,
+            write_archive,
+        )
+
+        repo = tmp_path / "repo"
+        init_git_repo(repo)
+        (repo / "a").symlink_to("b/..")
+        (repo / "b").symlink_to(".")
+        tip = _commit_all(repo, "add a and b")
+
+        peer = tmp_path / "peer"
+        _worktree_at_tip(repo, peer, tip)
+
+        result = escaping_members(repo, (), tip)
+
+        assert "a" in result
+
+        buf = io.BytesIO()
+        write_archive(repo, (), buf)
+        with pytest.raises(ArchiveMemberEscaped):
+            extract_archive(io.BytesIO(buf.getvalue()), peer)
+
+    def test_link_routing_through_a_locally_deleted_but_still_checked_out_sibling_is_named(
+        self, tmp_path: Path
+    ):
+        """`zz -> .` is committed, then deleted from the sender's own
+        working tree (uncommitted) — `write_archive` never emits it, since
+        it enumerates the real worktree, not git's history. But the peer's
+        checkout still has it (the `history` phase materializes *tip*'s
+        tree regardless of what the sender's working tree currently holds),
+        so a NEW link `a -> zz/..` still routes through it and escapes."""
+        from camp.transfer.worktree import (
+            ArchiveMemberEscaped,
+            escaping_members,
+            extract_archive,
+            write_archive,
+        )
+
+        repo = tmp_path / "repo"
+        init_git_repo(repo)
+        (repo / "zz").symlink_to(".")
+        tip = _commit_all(repo, "add zz")
+
+        peer = tmp_path / "peer"
+        _worktree_at_tip(repo, peer, tip)
+
+        (repo / "zz").unlink()  # uncommitted deletion — tip still has it
+        (repo / "a").symlink_to("zz/..")
+
+        result = escaping_members(repo, (), tip)
+
+        assert "a" in result
+
+        buf = io.BytesIO()
+        write_archive(repo, (), buf)
+        with pytest.raises(ArchiveMemberEscaped):
+            extract_archive(io.BytesIO(buf.getvalue()), peer)
+
+    def test_clean_worktree_over_a_real_checkout_is_accepted_by_both(self, tmp_path: Path):
+        """The control case: nothing escaping, seeded from a real tip — both
+        ends still agree clean."""
+        from camp.transfer.worktree import escaping_members, extract_archive, write_archive
+
+        repo = tmp_path / "repo"
+        init_git_repo(repo)
+        (repo / "inside-link").symlink_to("README.md")
+        tip = _commit_all(repo, "add inside-link")
+
+        peer = tmp_path / "peer"
+        _worktree_at_tip(repo, peer, tip)
+
+        assert escaping_members(repo, (), tip) == ()
+
+        buf = io.BytesIO()
+        write_archive(repo, (), buf)
+        extract_archive(io.BytesIO(buf.getvalue()), peer)  # must not raise
+
+    def test_unresolvable_tip_is_reported_unwalkable_not_clean(self, tmp_path: Path):
+        """A git failure reading *tip* (here: not a git repository at all)
+        must never read as clean."""
+        from camp.transfer.worktree import escaping_members
+
+        wt = tmp_path / "wt"
+        wt.mkdir()
+
+        assert escaping_members(wt, (), "deadbeef") is None
+
+
+# ---------------------------------------------------------------------------
+# Every replayed member type — directory and regular file, not only symlink
+# and special — must go through the confinement gate before any filesystem
+# mutation, and a mutation itself must never be able to reach outside the
+# scratch root through a symlink an earlier replayed member left standing.
+# ---------------------------------------------------------------------------
+
+
+class TestEveryMemberTypeIsGatedBeforeMutation:
+    def test_directory_replacing_a_tracked_escaping_symlink_never_writes_outside_it(
+        self, tmp_path: Path
+    ):
+        """The tip tracks `sub` as a symlink escaping the repo; the sender's
+        working tree has since replaced `sub` with a real directory holding
+        a nested dangling symlink and an empty subdirectory. The seed step
+        stands the tracked symlink up in the scratch root first, exactly as
+        the peer's already-checked-out worktree would have it — replaying
+        the worktree's real directory over that seeded symlink must never
+        mkdir/unlink/symlink THROUGH it into the outside location the
+        symlink points at."""
+        from camp.transfer.worktree import escaping_members
+
+        repo = tmp_path / "repo"
+        init_git_repo(repo)
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "nested_dir").mkdir()
+        (outside / "nested_dir" / "victim").write_text("original\n")
+
+        (repo / "sub").symlink_to(outside)
+        tip = _commit_all(repo, "track sub as an escaping symlink")
+
+        (repo / "sub").unlink()
+        (repo / "sub").mkdir()
+        (repo / "sub" / "nested_dir").mkdir()
+        (repo / "sub" / "nested_dir" / "victim").symlink_to("/nowhere/attacker")
+        (repo / "sub" / "newdir").mkdir()
+
+        before_listing = sorted(p.name for p in outside.iterdir())
+
+        result = escaping_members(repo, (), tip)
+
+        assert result is not None
+        assert len(result) >= 1
+
+        after_listing = sorted(p.name for p in outside.iterdir())
+        assert after_listing == before_listing
+
+        victim = outside / "nested_dir" / "victim"
+        assert not victim.is_symlink()
+        assert victim.read_text() == "original\n"
+        assert not (outside / "newdir").exists()
+
+    def test_plain_directory_and_file_under_a_tracked_escaping_link_is_flagged_and_refused_by_a_real_peer(
+        self, tmp_path: Path
+    ):
+        """A member type that was never gated before this fix — a plain
+        directory, and the regular file inside it — replacing a tracked
+        symlink that escapes the repo. The sender must flag it, and a real
+        peer (a genuine `git worktree add` checkout at *tip*, then the real
+        `extract_archive`) must refuse the archive `write_archive` produces."""
+        from camp.transfer.worktree import ArchiveMemberEscaped, escaping_members, extract_archive, write_archive
+
+        repo = tmp_path / "repo"
+        init_git_repo(repo)
+        outside_target = tmp_path / "outside-target"
+        outside_target.mkdir()
+        (repo / "sub").symlink_to(outside_target)
+        tip = _commit_all(repo, "track sub as an escaping symlink")
+
+        peer = tmp_path / "peer"
+        _worktree_at_tip(repo, peer, tip)
+
+        (repo / "sub").unlink()
+        (repo / "sub").mkdir()
+        (repo / "sub" / "file.txt").write_text("hi\n")
+
+        result = escaping_members(repo, (), tip)
+
+        assert result is not None
+        assert len(result) >= 1
+
+        buf = io.BytesIO()
+        write_archive(repo, (), buf)
+        with pytest.raises(ArchiveMemberEscaped):
+            extract_archive(io.BytesIO(buf.getvalue()), peer)
+
+    def test_directory_replacing_a_tracked_link_that_points_inside_the_root_agrees_with_the_peer(
+        self, tmp_path: Path
+    ):
+        """The mirror of the escaping case: the tip tracks `sub -> other`
+        where `other/` is itself tracked and stays inside the root. The
+        sender's working tree has since replaced `sub` with a real
+        directory. Sender and peer must agree — whichever way the peer
+        actually resolves it — and nothing may be written outside the
+        scratch root while the sender evaluates it."""
+        from camp.transfer.worktree import ArchiveMemberEscaped, escaping_members, extract_archive, write_archive
+
+        repo = tmp_path / "repo"
+        init_git_repo(repo)
+        (repo / "other").mkdir()
+        (repo / "other" / "file.txt").write_text("hi\n")
+        (repo / "sub").symlink_to("other")
+        tip = _commit_all(repo, "track sub->other and other/")
+
+        peer = tmp_path / "peer"
+        _worktree_at_tip(repo, peer, tip)
+
+        (repo / "sub").unlink()
+        (repo / "sub").mkdir()
+        (repo / "sub" / "newfile.txt").write_text("stuff\n")
+
+        sender_verdict = escaping_members(repo, (), tip)
+        assert sender_verdict is not None
+
+        buf = io.BytesIO()
+        write_archive(repo, (), buf)
+        if sender_verdict == ():
+            extract_archive(io.BytesIO(buf.getvalue()), peer)  # must not raise
+        else:
+            with pytest.raises(ArchiveMemberEscaped):
+                extract_archive(io.BytesIO(buf.getvalue()), peer)
+
+    def test_worktree_root_symlink_loop_is_reported_unwalkable_not_a_crash(
+        self, tmp_path: Path
+    ):
+        """The worktree path itself resolving through a symlink loop must
+        read as unwalkable, not crash the walk with an uncaught
+        `RuntimeError` from `Path.resolve()`."""
+        from camp.transfer.worktree import escaping_members
+
+        (tmp_path / "loopA").symlink_to("loopB")
+        (tmp_path / "loopB").symlink_to("loopA")
+
+        result = escaping_members(tmp_path / "loopA", ())
+
+        assert result is None

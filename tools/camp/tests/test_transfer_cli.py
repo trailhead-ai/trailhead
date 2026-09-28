@@ -182,6 +182,29 @@ class _Env:
         from camp.group.manifest import write_central_manifest
 
         write_central_manifest(self.manifest_path(group, slug), {"owner": owner})
+        self.write_worktree(group, slug)
+
+    def write_worktree(self, group="trailhead", slug="feat-x") -> Path:
+        """The real, on-disk worktree directory `camp transfer`'s check 12
+        now walks at `_worktree_path(group, slug, "repo_a")` — every test
+        that expects a clean preflight (or drives the move) needs one, since
+        an unwalkable member fails that check rather than passing it. A
+        real linked git worktree (not a plain directory) checked out on the
+        branch `_cmd_transfer_group_cli` now resolves as the seed tip for
+        check 12's escape walk — an unwalkable member fails that check too,
+        so `self.repo` becomes a real repo the first time this runs.
+        Idempotent: a second call (this method is also invoked internally
+        by `write_manifest`) recognizes the worktree already exists and
+        does nothing further."""
+        from camp.provision.reconcile import _worktree_path
+
+        wt = _worktree_path(group, slug, "repo_a", env=self.env)
+        if (wt / ".git").exists():
+            return wt
+        if not (self.repo / ".git").exists():
+            init_git_repo(self.repo)
+        _git(self.repo, "worktree", "add", "-q", "-b", f"worktree-{slug}", str(wt))
+        return wt
 
     @property
     def env(self) -> dict[str, str]:
@@ -417,7 +440,7 @@ def test_clean_verdict_prints_ordered_checks_and_exits_zero(
     assert code == transfer.EXIT_WOULD_TRANSFER
     out = capsys.readouterr().out
     assert re.search(r"\x1b\[", out) is None, "human output must carry no ANSI escapes"
-    # Every one of the eleven checks is printed, in order.
+    # Every one of the twelve checks is printed, in order.
     for name in (
         "this host has declared a name",
         "the workspace exists here",
@@ -430,9 +453,50 @@ def test_clean_verdict_prints_ordered_checks_and_exits_zero(
         "the slug is free on the peer, or present there and owned by this host",
         "every member declares an excluded set",
         "the conversations rooted here are enumerated",
+        "no member's worktree carries a link escaping its root",
     ):
         assert name in out
     assert "verdict — would transfer" in out
+
+
+def test_a_member_worktree_carrying_an_escaping_symlink_fails_check_12_through_the_real_cli(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The whole point of this check: driven through the real
+    `camp transfer --dry-run` entry point, a member worktree carrying a
+    symlink that escapes its root renders a FAIL row naming the path, exits
+    `EXIT_NOT_CLEAN`, and never calls `move_workspace`."""
+    env = _Env(tmp_path)
+    env.write_group(excluded={"repo_a": []})
+    env.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
+    env.write_manifest(owner="host-a")
+    wt = env.write_worktree()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (wt / "escape-link").symlink_to(outside)
+    env.apply(monkeypatch)
+    transfer = _transfer_module()
+
+    _fake_probe(monkeypatch, _clean_probe_answer())
+    _no_conversations(monkeypatch)
+
+    move = _move_module()
+
+    def _boom(**kw):
+        raise AssertionError("move_workspace must not be called on a NOT_CLEAN preflight")
+
+    monkeypatch.setattr(move, "move_workspace", _boom)
+
+    code = _run(
+        monkeypatch,
+        ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead", "--dry-run"],
+    )
+
+    out = capsys.readouterr().out
+    assert code == transfer.EXIT_NOT_CLEAN
+    assert "[FAIL] no member's worktree carries a link escaping its root" in out
+    assert "escape-link" in out
+    assert "verdict — not clean" in out
 
 
 def test_clean_verdict_json_carries_every_check_and_the_ok_discriminator(
@@ -465,7 +529,7 @@ def test_clean_verdict_json_carries_every_check_and_the_ok_discriminator(
     assert code == 0
     assert payload["ok"] is True
     assert payload["verdict"] == "would_transfer"
-    assert len(payload["checks"]) == 11
+    assert len(payload["checks"]) == 12
     for row in payload["checks"]:
         assert row["ok"] is (row["status"] == "passed")
     assert all(row["ok"] for row in payload["checks"])

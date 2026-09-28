@@ -28,6 +28,7 @@ from __future__ import annotations
 import importlib
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -48,6 +49,14 @@ if str(_PLUGIN_DIR) not in sys.path:
 import _bootstrap  # noqa: E402
 
 _bootstrap.ensure_trailhead_importable()
+
+from ._helpers import init_git_repo  # noqa: E402
+
+
+def _git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", "-C", str(repo), *args], capture_output=True, text=True, check=True
+    )
 
 
 def _dispatch_module():
@@ -130,8 +139,19 @@ class _Env:
 
     def write_manifest(self, owner: str | None, group="trailhead", slug="feat-x"):
         from camp.group.manifest import write_central_manifest
+        from camp.provision.reconcile import _worktree_path
 
         write_central_manifest(self.manifest_path(group, slug), {"owner": owner})
+        # The real, on-disk worktree directory `camp transfer`'s check 12 now
+        # walks — an unwalkable member fails that check rather than passing
+        # it, so every test here expecting a clean preflight needs one. A
+        # real linked git worktree (not a plain directory), checked out on
+        # the branch check 12's escape walk now resolves as its seed tip.
+        wt = _worktree_path(group, slug, "repo_a", env=self.env)
+        if not (wt / ".git").exists():
+            if not (self.repo / ".git").exists():
+                init_git_repo(self.repo)
+            _git(self.repo, "worktree", "add", "-q", "-b", f"worktree-{slug}", str(wt))
 
     @property
     def env(self) -> dict[str, str]:
@@ -244,6 +264,7 @@ def test_compose_preflight_reports_never_declared_state_without_raising() -> Non
         members=members,
         slug="feat-x",
         conversations=(),
+        worktree_escapes=(preflight.MemberWorktreeWalk(name="repo_a", escaped=()),),
     )
 
     check = next(c for c in result.checks if c.name == "every member declares an excluded set")
