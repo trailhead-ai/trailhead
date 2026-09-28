@@ -973,9 +973,7 @@ def conversations(
         )
 
     try:
-        destination = store.session_transcript_destination(
-            session_id, conversation_root, env=store.env
-        )
+        destination = store.session_transcript_destination(session_id, conversation_root)
     except HarnessError as e:
         raise ConversationDestinationRefused(session_id, str(e)) from e
     if destination is None:
@@ -1001,7 +999,7 @@ def conversations(
     old_root = next(
         (
             row.cwd
-            for row in (store.session_transcripts(env=store.env) or ())
+            for row in (store.session_transcripts() or ())
             if row.session_id == session_id
         ),
         None,
