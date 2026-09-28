@@ -318,8 +318,9 @@ _CD_PRELUDE = (
 def _pane_argv(cwd: object, command: Sequence[str]) -> list[str]:
     """The pane's argv: change into *cwd* itself, then exec *command*.
 
-    tmux ignores `-c <dir>` when the server's own working directory has been
-    deleted and starts the pane there instead, so every spawn site hands tmux
+    Measured on tmux 3.7c: `-c <dir>` is ignored when the server's own
+    working directory has been deleted, and the pane starts there instead
+    (tmux 3.4 honours `-c` in that state). So every spawn site hands tmux
     this `sh -c` wrapper as well (keeping `-c`, which is still right on a
     healthy server). The directory and every command element travel as
     positional arguments, never spliced into the script, so no directory name
@@ -691,7 +692,7 @@ class Tmux:
     ) -> subprocess.CompletedProcess:
         """Start a detached session named *name*, running *command* in its
         first pane, wrapped by :func:`_pane_argv` so the pane changes into
-        *cwd* itself (tmux ignores `-c` once the server's cwd is deleted).
+        *cwd* itself (on tmux 3.7c `-c` is ignored once the server's cwd is deleted).
 
         ``-s`` names the new session — never `=`-qualified, see the module
         docstring's target-vs-name property. Exceptions are NOT swallowed
