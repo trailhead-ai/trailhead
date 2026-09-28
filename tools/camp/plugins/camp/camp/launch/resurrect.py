@@ -84,7 +84,8 @@ class Restore:
     """One entry that comes back as a shell window, never a live process.
 
     `directory` is the resolved absolute path the window is rooted at.
-    `argv` is the full `sh -c ...` command tmux is asked to run.
+    `argv` is the command the tmux seam wraps in its pane wrapper, which enters
+    `directory` and then execs it.
     """
 
     entry: WindowEntry
