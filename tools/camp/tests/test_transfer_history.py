@@ -559,6 +559,57 @@ class TestHistoryCliDispatch:
         landed = _git_out(peer_repo, "rev-parse", f"refs/heads/{branch}")
         assert landed == tip
 
+    def test_history_with_empty_branch_flag_refused_not_treated_as_absent(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+    ) -> None:
+        """`--branch ""` must reach validation and be refused as
+        `InvalidBranchName` — not be treated as though `--branch` was never
+        given at all, which would silently land the slug branch and report
+        `ok`."""
+        sender_repo = tmp_path / "sender"
+        init_git_repo(sender_repo, origin=True)
+        branch = "worktree-feat-cli3"
+        _git(sender_repo, "checkout", "-b", branch)
+        bundle = _bundle_bytes(sender_repo, branch)
+
+        peer_repo = tmp_path / "peer_cli3_repo_a"
+        init_git_repo(peer_repo, origin=False)
+
+        cfg = tmp_path / "config"
+        (cfg / "groups").mkdir(parents=True)
+        _write_group_toml(cfg / "groups", "testgroup", [("repo_a", str(peer_repo))])
+
+        monkeypatch.setenv("CAMP_CONFIG_DIR", str(cfg))
+        monkeypatch.setenv("CAMP_STATE_DIR", str(tmp_path / "state"))
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "camp",
+                "transfer-receive",
+                "history",
+                "--group",
+                "testgroup",
+                "--slug",
+                "feat-cli3",
+                "--member",
+                "repo_a",
+                "--branch",
+                "",
+            ],
+        )
+
+        _feed_stdin(monkeypatch, bundle)
+
+        with pytest.raises(SystemExit) as exc_info:
+            _dispatch_module().main()
+        assert exc_info.value.code != 0
+        err = capsys.readouterr().err
+        assert "refused" in err
+
+        refs = _git(peer_repo, "for-each-ref", "--format=%(refname)")
+        assert f"refs/heads/{branch}" not in refs.stdout
+
 
 # ---------------------------------------------------------------------------
 # send_history() — sender-side producer + stream_camp wiring, full round trip
@@ -926,6 +977,91 @@ class TestMalformedExtraBranchName:
         refs = _git(g["peer_repo"], "for-each-ref", "--format=%(refname)")
         assert f"refs/heads/{g['slug_branch']}" not in refs.stdout
         assert f"refs/heads/{bad_branch}" not in refs.stdout
+
+
+class TestRefPathShapedBranchNameRefused:
+    """`git check-ref-format --branch` exits 0 for a ref-path-shaped name
+    like `heads/x` or `refs/heads/x` — it is checking well-formedness of a
+    ref PATH, not that the value is a bare branch shortname. Left
+    unvalidated, a sender could send `--branch heads/x` (or
+    `refs/heads/x`, `refs/tags/x`) and the peer would create
+    `refs/heads/heads/x` — a permanently ambiguous short name different git
+    commands resolve to different commits. Refused by first path segment
+    (`refs`/`heads`) or an exact/prefixed match on `HEAD`, before any ref
+    is written."""
+
+    @pytest.mark.parametrize(
+        "bad_branch",
+        ["heads/x", "refs/heads/x", "refs/tags/x", "HEAD"],
+        ids=["heads-prefix", "refs-heads-prefix", "refs-tags-prefix", "bare-head"],
+    )
+    def test_refused_before_any_ref_is_written(self, sender_and_peer_extra_branch, bad_branch):
+        from camp.transfer import receive
+
+        g = sender_and_peer_extra_branch
+
+        with pytest.raises(receive.InvalidBranchName) as exc_info:
+            _land_extra_branch(g, bad_branch)
+        assert "repo_a" in str(exc_info.value)
+        assert bad_branch in str(exc_info.value)
+
+        refs = _git(g["peer_repo"], "for-each-ref", "--format=%(refname)")
+        assert f"refs/heads/{g['slug_branch']}" not in refs.stdout
+        assert f"refs/heads/{bad_branch}" not in refs.stdout
+
+    def test_nested_name_boundary_still_accepted(self, sender_and_peer_extra_branch):
+        """`feature/extra` has a first path segment of neither `refs` nor
+        `heads` — the boundary the refusal above must not overreach past."""
+        g = sender_and_peer_extra_branch
+        _land_extra_branch(g)
+
+        extra_landed = _git_out(g["peer_repo"], "rev-parse", f"refs/heads/{g['extra_branch']}")
+        assert extra_landed == g["extra_tip"]
+
+
+class TestWorktreeRegistryUnreadableFailsClosed:
+    """`_branch_checked_out_elsewhere` reads `git worktree list --porcelain`
+    to guard against `update-ref` moving a branch out from under another
+    checkout. An unreadable registry (the subprocess call itself exiting
+    non-zero) must refuse the phase rather than silently reporting "no
+    conflict" — fail-open on this guard is what let a branch get moved out
+    from under a checkout the peer failed to even see."""
+
+    def test_history_refuses_when_worktree_list_fails(
+        self, sender_and_peer_extra_branch, monkeypatch: pytest.MonkeyPatch
+    ):
+        from camp.transfer import receive
+
+        g = sender_and_peer_extra_branch
+        bundle = _bundle_bytes(g["sender_repo"], g["slug_branch"], extra_ref=g["extra_branch"])
+
+        real_run = subprocess.run
+
+        def _fake_run(argv, *args, **kwargs):
+            if "worktree" in argv and "list" in argv and "--porcelain" in argv:
+                return subprocess.CompletedProcess(
+                    argv, returncode=128, stdout="", stderr="fatal: not a git repository\n"
+                )
+            return real_run(argv, *args, **kwargs)
+
+        monkeypatch.setattr(receive.subprocess, "run", _fake_run)
+
+        with pytest.raises(receive.ReceiveRefused) as exc_info:
+            receive.history(
+                groups=[g["group"]],
+                group_name="testgroup",
+                slug="feat-x",
+                member="repo_a",
+                bundle_bytes=bundle,
+                branch=g["extra_branch"],
+                env=g["env"],
+            )
+        assert "repo_a" in str(exc_info.value)
+        assert g["extra_branch"] in str(exc_info.value)
+
+        refs = _git(g["peer_repo"], "for-each-ref", "--format=%(refname)")
+        assert f"refs/heads/{g['slug_branch']}" not in refs.stdout
+        assert f"refs/heads/{g['extra_branch']}" not in refs.stdout
 
 
 class TestBranchCheckedOutElsewhereOnPeer:

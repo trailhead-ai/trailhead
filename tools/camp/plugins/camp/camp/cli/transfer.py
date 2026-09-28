@@ -280,7 +280,7 @@ def _cmd_transfer_receive_cli(args: list[str]) -> None:
         phase_kwargs = {"member": parsed.member}
         if phase == "history":
             phase_kwargs["bundle_bytes"] = sys.stdin.buffer.read()
-            if parsed.branch:
+            if parsed.branch is not None:
                 phase_kwargs["branch"] = parsed.branch
         else:
             phase_kwargs["archive_stream"] = sys.stdin.buffer
