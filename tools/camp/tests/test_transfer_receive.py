@@ -1862,6 +1862,52 @@ class TestConversationAccountBinding:
         default_claude_dir = default_home / ".claude"
         assert not default_claude_dir.exists()
 
+    def test_home_relative_account_lands_under_its_own_home_not_the_default_store(
+        self, one_member_group
+    ):
+        """The account shape the bug was actually observed with —
+        `account = "~/.claude-levr"` — expands against the injected `HOME`
+        (see `_account_dir` in claude_code.py), not the machine's real one, and
+        the transcript lands under `<HOME>/.claude-levr/projects/<key>/`
+        rather than the default `<HOME>/.claude`."""
+        from camp.transfer import receive
+        from trailhead.harness.claude_code import ClaudeCodeHarness
+
+        g = one_member_group
+        ws_root = _seed_workspace(g, "feat-x")
+        env_home = g["tmp_path"] / "env-home"
+        env = _account_env(g, home=env_home)
+        g["group"]["launch"] = {"account": "~/.claude-levr"}
+        session_id = "88888888-8888-4888-8888-888888888888"
+
+        archive = _archive_bytes(
+            json.dumps({"cwd": SENDER_ROOT, "type": "summary"}).encode() + b"\n"
+        )
+
+        result = receive.conversations(
+            groups=[g["group"]],
+            group_name="testgroup",
+            slug="feat-x",
+            session_id=session_id,
+            subpath=".",
+            archive_stream=io.BytesIO(archive),
+            env=env,
+        )
+
+        assert result["session_id"] == session_id
+
+        account_dir = env_home / ".claude-levr"
+        account_env = {**env, "CLAUDE_CONFIG_DIR": str(account_dir)}
+        harness = ClaudeCodeHarness()
+        found = harness.session_transcript_path(session_id, ws_root, env=account_env)
+        assert found is not None
+        assert found.parent.parent == account_dir / "projects"
+        record = json.loads(found.read_text().splitlines()[0])
+        assert record["cwd"] == str(ws_root)
+
+        default_claude_dir = env_home / ".claude"
+        assert not default_claude_dir.exists()
+
     def test_no_declared_account_still_lands_in_the_default_store(self, one_member_group):
         """The branch that must not move: a group with no `[launch] account`
         keeps landing in the default store, exactly as before this binding
@@ -1930,3 +1976,7 @@ class TestConversationAccountBinding:
 
         default_claude_dir = default_home / ".claude"
         assert not default_claude_dir.exists()
+        # Neither store — not just the default one — may gain a file: a
+        # transcript written to some other location under this refusal would
+        # pass the check above while still leaking the conversation somewhere.
+        assert not list(g["tmp_path"].rglob("*.jsonl"))
