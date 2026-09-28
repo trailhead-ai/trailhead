@@ -19,8 +19,8 @@ workspace's own slug branch — the channel this docstring's next paragraph
 describes exists precisely so a commit on that branch, never pushed
 anywhere, still crosses too, rather than being silently collapsed into an
 uncommitted diff on the peer. `send_history` forwards the branch's name to
-`camp transfer-receive history` as `--branch`; when absent, the peer's
-behavior is exactly what it was before this second ref existed.
+`camp transfer-receive history` as `--branch`; when absent, the peer lands
+and checks out the slug branch alone.
 
 No git remote is ever contacted on this path — `git bundle create` reads only
 this host's local object store, and the transport is `stream_camp`'s direct
@@ -198,8 +198,8 @@ def send_history(
     `camp transfer-receive history` on *host* — plus *extra_ref*, the
     sender's own checked-out branch when it differs from *ref* (the
     workspace's slug branch), carried in the SAME bundle and named to the
-    peer via `--branch`. `None` (the default) reproduces the exact wire
-    shape this function sent before *extra_ref* existed.
+    peer via `--branch`. `None` (the default) bundles *ref* alone and sends
+    no `--branch`.
 
     Returns whatever `stream_camp` classifies the invocation as — a failed
     `git bundle create` (the producer) surfaces as `ProducerFailed`, never as

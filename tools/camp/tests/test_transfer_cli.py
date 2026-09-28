@@ -1244,6 +1244,57 @@ def _move_group(sender_repo: Path) -> dict:
     }
 
 
+def _move_peer(tmp_path: Path) -> dict:
+    """The peer half every move-level fixture shares: a real,
+    freshly-initialized peer repo with its own isolated config/state, and the
+    runner/spawner that reach it as a real subprocess."""
+    from camp.host.config import Host
+
+    peer_repo = tmp_path / "peer_repo_a"
+    init_git_repo(peer_repo, origin=False)
+    peer_cfg = tmp_path / "peer-config"
+    (peer_cfg / "groups").mkdir(parents=True)
+    _write_group_toml(peer_cfg / "groups", "testgroup", [("repo_a", str(peer_repo))])
+    # `finish` runs only after `claim`, and `claim` refuses when the peer has
+    # no declared self_name — every move-level test drives a real `finish`,
+    # so the peer needs one.
+    _write_hosts_toml(peer_cfg, self_name="host-b")
+    peer_state = tmp_path / "peer-state"
+    peer_claude_dir = tmp_path / "peer-claude"
+    return {
+        "host": Host(ssh="fake-peer", camp_bin="/opt/camp/bin/camp"),
+        "peer_repo": peer_repo,
+        "peer_cfg": peer_cfg,
+        "peer_state": peer_state,
+        "peer_claude_dir": peer_claude_dir,
+        "peer_env": {
+            "CAMP_CONFIG_DIR": str(peer_cfg),
+            "CAMP_STATE_DIR": str(peer_state),
+            "TRAILHEAD_CLAUDE_DIR": str(peer_claude_dir),
+        },
+        "run": _peer_runner(peer_cfg, peer_state, peer_claude_dir),
+        "stream_spawn": _peer_stream_spawn(peer_cfg, peer_state, peer_claude_dir),
+    }
+
+
+def _move_from(g: dict):
+    """`move_workspace` driven against *g*'s real sender and peer, with no
+    overwrite and no phase callback."""
+    from camp.transfer.move import move_workspace
+
+    return move_workspace(
+        host=g["host"],
+        group=g["group"],
+        group_name="testgroup",
+        slug=g["slug"],
+        sender_name="host-a",
+        overwrite=False,
+        env=g["sender_env"],
+        run=g["run"],
+        stream_spawn=g["stream_spawn"],
+    )
+
+
 @pytest.fixture()
 def move_env(tmp_path: Path):
     """A real sender worktree (an unpushed commit plus an untracked file)
@@ -1251,7 +1302,6 @@ def move_env(tmp_path: Path):
     config/state — everything `move_workspace` needs to actually move
     content, with the peer reached as a real subprocess rather than a fake
     return value."""
-    from camp.host.config import Host
     from camp.provision.reconcile import _worktree_path
 
     slug = "feat-move"
@@ -1272,39 +1322,15 @@ def move_env(tmp_path: Path):
     )
     (wt_path / "untracked.txt").write_text("never committed\n")
 
-    peer_repo = tmp_path / "peer_repo_a"
-    init_git_repo(peer_repo, origin=False)
-    peer_cfg = tmp_path / "peer-config"
-    (peer_cfg / "groups").mkdir(parents=True)
-    _write_group_toml(peer_cfg / "groups", "testgroup", [("repo_a", str(peer_repo))])
-    # `finish` now runs only after `claim`, and `claim` refuses when the peer
-    # has no declared self_name — every move_env-based test drives a real
-    # `finish`, so the peer needs one.
-    _write_hosts_toml(peer_cfg, self_name="host-b")
-    peer_state = tmp_path / "peer-state"
-    peer_claude_dir = tmp_path / "peer-claude"
-    peer_env = {
-        "CAMP_CONFIG_DIR": str(peer_cfg),
-        "CAMP_STATE_DIR": str(peer_state),
-        "TRAILHEAD_CLAUDE_DIR": str(peer_claude_dir),
-    }
-
     return {
         "slug": slug,
         "branch": branch,
         "group": _move_group(sender_repo),
-        "host": Host(ssh="fake-peer", camp_bin="/opt/camp/bin/camp"),
         "sender_env": sender_env,
         "sender_repo": sender_repo,
         "wt_path": wt_path,
         "tmp_path": tmp_path,
-        "peer_repo": peer_repo,
-        "peer_cfg": peer_cfg,
-        "peer_state": peer_state,
-        "peer_claude_dir": peer_claude_dir,
-        "peer_env": peer_env,
-        "run": _peer_runner(peer_cfg, peer_state, peer_claude_dir),
-        "stream_spawn": _peer_stream_spawn(peer_cfg, peer_state, peer_claude_dir),
+        **_move_peer(tmp_path),
     }
 
 
@@ -1313,7 +1339,6 @@ def move_env_extra_branch(tmp_path: Path):
     """Like `move_env`, but the sender's worktree is checked out on a SECOND
     branch — not the workspace's own slug branch — with two commits never
     pushed anywhere, reproducing the captured incident's shape."""
-    from camp.host.config import Host
     from camp.provision.reconcile import _worktree_path
 
     slug = "feat-move2"
@@ -1337,38 +1362,17 @@ def move_env_extra_branch(tmp_path: Path):
         )
     sender_tip = _git_out(wt_path, "rev-parse", "HEAD")
 
-    peer_repo = tmp_path / "peer_repo_a"
-    init_git_repo(peer_repo, origin=False)
-    peer_cfg = tmp_path / "peer-config"
-    (peer_cfg / "groups").mkdir(parents=True)
-    _write_group_toml(peer_cfg / "groups", "testgroup", [("repo_a", str(peer_repo))])
-    _write_hosts_toml(peer_cfg, self_name="host-b")
-    peer_state = tmp_path / "peer-state"
-    peer_claude_dir = tmp_path / "peer-claude"
-    peer_env = {
-        "CAMP_CONFIG_DIR": str(peer_cfg),
-        "CAMP_STATE_DIR": str(peer_state),
-        "TRAILHEAD_CLAUDE_DIR": str(peer_claude_dir),
-    }
-
     return {
         "slug": slug,
         "branch": branch,
         "other_branch": other_branch,
         "sender_tip": sender_tip,
         "group": _move_group(sender_repo),
-        "host": Host(ssh="fake-peer", camp_bin="/opt/camp/bin/camp"),
         "sender_env": sender_env,
         "sender_repo": sender_repo,
         "wt_path": wt_path,
         "tmp_path": tmp_path,
-        "peer_repo": peer_repo,
-        "peer_cfg": peer_cfg,
-        "peer_state": peer_state,
-        "peer_claude_dir": peer_claude_dir,
-        "peer_env": peer_env,
-        "run": _peer_runner(peer_cfg, peer_state, peer_claude_dir),
-        "stream_spawn": _peer_stream_spawn(peer_cfg, peer_state, peer_claude_dir),
+        **_move_peer(tmp_path),
     }
 
 
@@ -1395,21 +1399,10 @@ def move_env_extra_branch(tmp_path: Path):
 class TestNonSlugBranchCrossesWithItsCommits:
     def test_peer_worktree_lands_on_the_same_named_branch_clean(self, move_env_extra_branch):
         from camp.provision.reconcile import _worktree_path
-        from camp.transfer.move import move_workspace
 
         g = move_env_extra_branch
 
-        result = move_workspace(
-            host=g["host"],
-            group=g["group"],
-            group_name="testgroup",
-            slug=g["slug"],
-            sender_name="host-a",
-            overwrite=False,
-            env=g["sender_env"],
-            run=g["run"],
-            stream_spawn=g["stream_spawn"],
-        )
+        result = _move_from(g)
         assert result.members == ("repo_a",)
 
         peer_wt = _worktree_path("testgroup", g["slug"], "repo_a", env=g["peer_env"])
@@ -1432,22 +1425,11 @@ class TestNonSlugBranchCrossesWithItsCommits:
         self, move_env_extra_branch
     ):
         from camp.provision.reconcile import _worktree_path
-        from camp.transfer.move import move_workspace
 
         g = move_env_extra_branch
         (g["wt_path"] / "first.txt").write_text("first.txt content\nedited on sender\n")
 
-        move_workspace(
-            host=g["host"],
-            group=g["group"],
-            group_name="testgroup",
-            slug=g["slug"],
-            sender_name="host-a",
-            overwrite=False,
-            env=g["sender_env"],
-            run=g["run"],
-            stream_spawn=g["stream_spawn"],
-        )
+        _move_from(g)
 
         peer_wt = _worktree_path("testgroup", g["slug"], "repo_a", env=g["peer_env"])
         assert (peer_wt / "first.txt").read_text() == "first.txt content\nedited on sender\n"
@@ -1459,22 +1441,11 @@ class TestNonSlugBranchCrossesWithItsCommits:
         self, move_env_extra_branch
     ):
         from camp.provision.reconcile import _worktree_path
-        from camp.transfer.move import move_workspace
 
         g = move_env_extra_branch
         _git(g["sender_repo"], "remote", "set-url", "origin", "https://nonexistent.invalid.example/repo.git")
 
-        result = move_workspace(
-            host=g["host"],
-            group=g["group"],
-            group_name="testgroup",
-            slug=g["slug"],
-            sender_name="host-a",
-            overwrite=False,
-            env=g["sender_env"],
-            run=g["run"],
-            stream_spawn=g["stream_spawn"],
-        )
+        result = _move_from(g)
         assert result.members == ("repo_a",)
 
         peer_wt = _worktree_path("testgroup", g["slug"], "repo_a", env=g["peer_env"])
@@ -1486,23 +1457,13 @@ class TestDetachedHeadOnSender:
     def test_detached_at_a_commit_not_on_the_slug_branch_fails_with_check_out_a_branch_message(
         self, move_env_extra_branch
     ):
-        from camp.transfer.move import PhaseFailed, move_workspace
+        from camp.transfer.move import PhaseFailed
 
         g = move_env_extra_branch
         _git(g["wt_path"], "checkout", "--detach", "HEAD")
 
         with pytest.raises(PhaseFailed) as exc_info:
-            move_workspace(
-                host=g["host"],
-                group=g["group"],
-                group_name="testgroup",
-                slug=g["slug"],
-                sender_name="host-a",
-                overwrite=False,
-                env=g["sender_env"],
-                run=g["run"],
-                stream_spawn=g["stream_spawn"],
-            )
+            _move_from(g)
 
         assert exc_info.value.phase == "history (repo_a)"
         assert "check out a branch" in exc_info.value.detail
@@ -1511,22 +1472,11 @@ class TestDetachedHeadOnSender:
         """`move_env`'s sender worktree is checked out directly on the SLUG
         branch — detaching HEAD there lands on a commit that IS reachable
         from the slug branch, so the move must proceed exactly as today."""
-        from camp.transfer.move import move_workspace
 
         g = move_env
         _git(g["wt_path"], "checkout", "--detach", "HEAD")
 
-        result = move_workspace(
-            host=g["host"],
-            group=g["group"],
-            group_name="testgroup",
-            slug=g["slug"],
-            sender_name="host-a",
-            overwrite=False,
-            env=g["sender_env"],
-            run=g["run"],
-            stream_spawn=g["stream_spawn"],
-        )
+        result = _move_from(g)
         assert result.members == ("repo_a",)
 
 

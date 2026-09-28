@@ -101,8 +101,8 @@ worktree is then materialized through
 `camp.provision.reconcile._add_worktree_for_member`, checked out on the
 extra branch when one was given (reusing that already-present local branch —
 `_branch_exists_locally` — rather than branching a fresh one off `base`), or
-on the slug branch exactly as before when `--branch` was not given — an
-older sender against a newer peer is therefore unchanged.
+on the slug branch when `--branch` was not given — the shape a sender that
+never sends `--branch` relies on.
 
 **worktree** receives one member's working-tree content, sent by
 `camp.transfer.worktree.send_worktree` as a stdlib `tarfile` stream on
@@ -759,8 +759,8 @@ def history(
     section for the full sequence.
 
     *branch*, when given, names a SECOND ref riding the same bundle — the
-    sender's own checked-out branch. `None` reproduces the exact behavior
-    this function had before *branch* existed.
+    sender's own checked-out branch. `None` lands and checks out the slug
+    branch alone.
 
     Raises:
         GroupNotConfigured: *group_name* is not configured on this host.
@@ -784,7 +784,6 @@ def history(
     from ..provision.reconcile import (
         DEFAULT_BASE,
         _add_worktree_for_member,
-        _branch_exists_locally,
         _branch_name,
         _worktree_path,
     )
@@ -822,15 +821,16 @@ def history(
         extra_tip_sha = tips.get(extra_ref)
         if extra_tip_sha is None:
             raise BundleRefUnresolved(member, extra_ref)
-        if _branch_exists_locally(repo_root, branch):
-            existing_sha = subprocess.run(
-                ["git", "-C", str(repo_root), "rev-parse", extra_ref],
-                capture_output=True,
-                text=True,
-                check=False,
-            ).stdout.strip()
-            if existing_sha and not _fast_forwardable(repo_root, existing_sha, extra_tip_sha):
-                raise DivergentBranchRefused(member, branch)
+        existing = subprocess.run(
+            ["git", "-C", str(repo_root), "rev-parse", "--verify", "--quiet", extra_ref],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if existing.returncode == 0 and not _fast_forwardable(
+            repo_root, existing.stdout.strip(), extra_tip_sha
+        ):
+            raise DivergentBranchRefused(member, branch)
 
     update_result = subprocess.run(
         ["git", "-C", str(repo_root), "update-ref", ref, tip_sha],
