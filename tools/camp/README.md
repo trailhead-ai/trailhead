@@ -297,8 +297,11 @@ Moves a workspace's committed history, working-tree content, and every
 conversation rooted in it directly to a declared peer host (see [Remote
 hosts](#remote-hosts) for declaring one) — and, as the transfer's last step,
 ownership itself: the peer becomes the recorded owner, and this host stops
-offering the conversations that just crossed. `--dry-run` previews the same
-checks without moving anything. A workspace already present on the peer and
+offering the conversations that just crossed. A conversation that cannot
+cross — its transcript is unreadable or gone, it changed mid-stream, or the
+peer refused it — never blocks the transfer: the rest still moves, and the
+verb ends in an error (exit 13) naming each one left behind, still resumable
+on this host. `--dry-run` previews the same checks without moving anything. A workspace already present on the peer and
 owned by this host needs `--overwrite` to be replaced.
 
 Each member's regenerable state — build output, installed dependencies,
@@ -345,6 +348,9 @@ Exit codes:
 12 whether ownership moved is genuinely unknown, even after re-probing the
    peer — check the peer directly with `camp transfer-probe` before doing
    anything else
+13 the transfer completed and ownership moved, but at least one conversation
+   did not cross — each is named with why, and is still resumable on this
+   host (11 takes precedence when a release also failed)
 ```
 
 `transfer` and `transfer-probe` (the wire-level answer `--dry-run` reads

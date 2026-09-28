@@ -103,22 +103,19 @@ from ..host.transport import (
     DEFAULT_CONNECT_TIMEOUT_SECONDS,
     DEFAULT_SERVER_ALIVE_COUNT_MAX,
     DEFAULT_SERVER_ALIVE_INTERVAL_SECONDS,
-    ProducerFailed,
     ProducerSpawner,
     RemoteRefusal,
     Runner,
     StoppedResponding,
     StreamSpawner,
-    TransportOutcome,
     default_producer_spawn,
     default_runner,
     default_stream_spawner,
+    outcome_detail,
     run_camp,
 )
 from .conversations import (
-    TranscriptChanged,
-    TranscriptUnavailable,
-    UnresolvedConversation,
+    ConversationDropped,
     WorkspaceConversation,
     send_workspace_conversations,
 )
@@ -177,10 +174,10 @@ class PhaseFailed(MoveRefused):
     `indeterminate` are `None`/empty/`False` for every phase failure known
     NOT to have landed (`begin`, `history`, `worktree`, `conversations`, or a
     `claim` explicitly refused or never reaching the peer at all);
-    `claimed_owner`/`conversations` carry the exact values `MoveResult` would
-    have carried on success — the peer's own declared name and the pool of
-    conversations that already crossed — whenever a landed `claim` is
-    confirmed, so the caller can still archive what already crossed without
+    `claimed_owner`/`conversations`/`dropped` carry the exact values
+    `MoveResult` would have carried on success — the peer's own declared name,
+    the pool of conversations that already crossed, and those that were
+    dropped — whenever a landed `claim` is confirmed, so the caller can still archive what already crossed without
     flipping this host's own ownership record, which stays correctly stale
     until the two hosts' manifests are reconciled by hand.
     """
@@ -192,6 +189,7 @@ class PhaseFailed(MoveRefused):
         *,
         claimed_owner: str | None = None,
         conversations: tuple[ConversationCrossed, ...] = (),
+        dropped: tuple[ConversationDropped, ...] = (),
         indeterminate: bool = False,
     ) -> None:
         super().__init__(f"{phase}: {detail}")
@@ -199,6 +197,7 @@ class PhaseFailed(MoveRefused):
         self.detail = detail
         self.claimed_owner = claimed_owner
         self.conversations = conversations
+        self.dropped = dropped
         self.indeterminate = indeterminate
 
 
@@ -206,8 +205,9 @@ class PhaseFailed(MoveRefused):
 class ConversationCrossed:
     """One conversation `move_workspace` streamed to the peer and the peer
     placed successfully — never a row that was UNRESOLVED or that failed in
-    transit, since either of those raises `PhaseFailed` before this is
-    built. `subpath` is always resolved (never `None`) for the same reason."""
+    transit, since each of those is dropped instead
+    (`camp.transfer.conversations.ConversationDropped`). `subpath` is always
+    resolved (never `None`) for the same reason."""
 
     session_id: str
     subpath: PurePosixPath
@@ -222,11 +222,18 @@ class MoveResult:
     `camp.transfer.receive.claim`). Always populated once `move_workspace`
     returns; `None` only for a `MoveResult` a test constructs directly
     without driving `claim`.
+
+    `dropped` names each conversation that could not cross, with why. A drop
+    never blocks the move — see `camp.transfer.conversations` — so a result
+    with a non-empty `dropped` is a completed move the caller must still
+    report as an error. A dropped conversation's transcript is never
+    released, so it stays resumable on this host.
     """
 
     members: tuple[str, ...]
     conversations: tuple[ConversationCrossed, ...] = ()
     claimed_owner: str | None = None
+    dropped: tuple[ConversationDropped, ...] = ()
 
 
 def _extra_branch_or_refuse(wt_path: Path, slug_branch: str, *, member: str) -> str | None:
@@ -291,31 +298,6 @@ def _extra_branch_or_refuse(wt_path: Path, slug_branch: str, *, member: str) -> 
     return None
 
 
-def _outcome_detail(outcome: TransportOutcome) -> str:
-    """A human-legible detail string for a non-`Answered` outcome.
-
-    `RemoteRefusal` carries the remote's own stderr verbatim — the peer's
-    `camp transfer-receive: <refusal message>` line — since that message
-    already names the specific reason (an unconfigured group, a malformed
-    owner, a refused bundle, an escaping archive member, and — see
-    `OverwriteNeeded` above — the one case the caller inspects itself).
-    Every other outcome kind is transport-level rather than remote-refused,
-    so it gets a shape-specific line instead.
-    """
-    if isinstance(outcome, RemoteRefusal):
-        return outcome.stderr.strip()
-    if isinstance(outcome, ProducerFailed):
-        return f"the local producer exited {outcome.exit_code} before the stream completed"
-    kind = type(outcome).__name__
-    reason = getattr(outcome, "reason", None)
-    if reason is not None:
-        return f"{kind}: {reason}"
-    execution_timeout = getattr(outcome, "execution_timeout", None)
-    if execution_timeout is not None:
-        return f"{kind}: no response within {execution_timeout}s"
-    return kind
-
-
 def _run_camp_phase(
     host: Host,
     remote_argv: list[str],
@@ -348,7 +330,7 @@ def _run_camp_phase(
         return outcome
     if promote_overwrite and isinstance(outcome, RemoteRefusal) and _OVERWRITE_MARKER in outcome.stderr:
         raise OverwriteNeeded(outcome.stderr.strip())
-    raise PhaseFailed(remote_argv[1] if len(remote_argv) > 1 else remote_argv[0], _outcome_detail(outcome))
+    raise PhaseFailed(remote_argv[1] if len(remote_argv) > 1 else remote_argv[0], outcome_detail(outcome))
 
 
 def _reprobe_claim(
@@ -457,10 +439,12 @@ def move_workspace(
             exists on the peer, owned by the sender, and *overwrite* is
             False. Nothing crossed.
         PhaseFailed: any other phase refused or the transport failed. A
-            conversation that was UNRESOLVED, whose transcript could not be
-            located, whose content changed mid-stream, or whose transport
-            failed is reported as phase `"conversations"` — the same
-            re-runnable shape every other phase failure uses. A peer that
+            conversation that cannot cross — UNRESOLVED, no transcript
+            located, changed mid-stream, refused by the peer — never raises:
+            it is dropped into `MoveResult.dropped` and the move continues.
+            Only a failure of the connection itself while streaming
+            conversations is reported as phase `"conversations (<id>)"` —
+            the same re-runnable shape every other phase failure uses. A peer that
             does not recognize the `claim` subcommand at all (an older camp
             build) refuses it the same way any unrecognized phase refuses,
             surfacing here as `PhaseFailed("claim", ...)` with no
@@ -471,15 +455,15 @@ def move_workspace(
             answer body that will not parse — is never assumed either way:
             it is resolved by re-probing the peer (`camp.transfer.probe`)
             before raising, so the resulting `PhaseFailed` carries
-            `claimed_owner` (and `conversations`) when the probe confirms
+            `claimed_owner` (and `conversations`, `dropped`) when the probe confirms
             the claim landed, carries neither when the probe confirms it did
             not, and carries `indeterminate=True` when the probe itself
             could not tell — see `PhaseFailed`'s own docstring for the full
             three-way split. Nothing after the failing phase was attempted
             in any of these cases. A `finish` failure is the other case that
             carries `claimed_owner`: it runs after `claim` has already
-            answered, so the raised `PhaseFailed` carries `claimed_owner`
-            and `conversations` populated exactly as a successful
+            answered, so the raised `PhaseFailed` carries `claimed_owner`,
+            `conversations`, and `dropped` populated exactly as a successful
             `MoveResult` would — see `PhaseFailed`'s own docstring for what
             that changes for the caller.
     """
@@ -546,7 +530,7 @@ def move_workspace(
             producer_spawn=history_producer_spawn,
         )
         if not isinstance(outcome, Answered):
-            raise PhaseFailed(f"history ({name})", _outcome_detail(outcome))
+            raise PhaseFailed(f"history ({name})", outcome_detail(outcome))
 
     for member in members:
         name = member["name"]
@@ -567,36 +551,35 @@ def move_workspace(
             producer_spawn=worktree_producer_spawn,
         )
         if not isinstance(outcome, Answered):
-            raise PhaseFailed(f"worktree ({name})", _outcome_detail(outcome))
+            raise PhaseFailed(f"worktree ({name})", outcome_detail(outcome))
 
     conversations = tuple(conversations)
     crossed: list[ConversationCrossed] = []
+    dropped: tuple[ConversationDropped, ...] = ()
     if conversations:
         on_phase("conversations")
         from ..group.manifest import workspace_dir
 
         assert locate_transcript is not None  # required whenever conversations is non-empty
-        try:
-            outcomes = send_workspace_conversations(
-                host,
-                group=group_name,
-                slug=slug,
-                workspace=workspace_dir(group_name, slug, env=env),
-                conversations=conversations,
-                locate_transcript=locate_transcript,
-                connect_timeout=connect_timeout,
-                server_alive_interval=server_alive_interval,
-                server_alive_count_max=server_alive_count_max,
-                spawn=stream_spawn,
-                producer_spawn=conversation_producer_spawn,
-            )
-        except (UnresolvedConversation, TranscriptUnavailable, TranscriptChanged) as e:
-            raise PhaseFailed("conversations", str(e)) from e
+        sent = send_workspace_conversations(
+            host,
+            group=group_name,
+            slug=slug,
+            workspace=workspace_dir(group_name, slug, env=env),
+            conversations=conversations,
+            locate_transcript=locate_transcript,
+            connect_timeout=connect_timeout,
+            server_alive_interval=server_alive_interval,
+            server_alive_count_max=server_alive_count_max,
+            spawn=stream_spawn,
+            producer_spawn=conversation_producer_spawn,
+        )
 
+        dropped = sent.dropped
         by_id = {c.session_id: c for c in conversations}
-        for session_id, outcome in outcomes:
+        for session_id, outcome in sent.sent:
             if not isinstance(outcome, Answered):
-                raise PhaseFailed(f"conversations ({session_id})", _outcome_detail(outcome))
+                raise PhaseFailed(f"conversations ({session_id})", outcome_detail(outcome))
             subpath = by_id[session_id].subpath
             assert subpath is not None  # unresolved rows never reach here
             crossed.append(ConversationCrossed(session_id=session_id, subpath=subpath))
@@ -640,7 +623,11 @@ def move_workspace(
             detail = f"peer answered but the response body was not usable: {e}"
             if landed:
                 raise PhaseFailed(
-                    "claim", detail, claimed_owner=owner, conversations=tuple(crossed)
+                    "claim",
+                    detail,
+                    claimed_owner=owner,
+                    conversations=tuple(crossed),
+                    dropped=dropped,
                 ) from e
             if landed is False:
                 raise PhaseFailed("claim", detail) from e
@@ -661,9 +648,15 @@ def move_workspace(
             execution_timeout=execution_timeout,
             remote_confirmed_exited=False,
         )
-        detail = _outcome_detail(claim_outcome)
+        detail = outcome_detail(claim_outcome)
         if landed:
-            raise PhaseFailed("claim", detail, claimed_owner=owner, conversations=tuple(crossed))
+            raise PhaseFailed(
+                "claim",
+                detail,
+                claimed_owner=owner,
+                conversations=tuple(crossed),
+                dropped=dropped,
+            )
         if landed is False:
             raise PhaseFailed("claim", detail)
         raise PhaseFailed("claim", detail, indeterminate=True)
@@ -684,9 +677,15 @@ def move_workspace(
             execution_timeout=execution_timeout,
             remote_confirmed_exited=True,
         )
-        detail = _outcome_detail(claim_outcome)
+        detail = outcome_detail(claim_outcome)
         if landed:
-            raise PhaseFailed("claim", detail, claimed_owner=owner, conversations=tuple(crossed))
+            raise PhaseFailed(
+                "claim",
+                detail,
+                claimed_owner=owner,
+                conversations=tuple(crossed),
+                dropped=dropped,
+            )
         if landed is False:
             raise PhaseFailed("claim", detail)
         raise PhaseFailed("claim", detail, indeterminate=True)
@@ -697,7 +696,7 @@ def move_workspace(
         # itself never completed, so `claim` never ran on the peer at all:
         # the ordinary, safe-to-retry shape, with no need to re-probe (a
         # probe would only fail to connect the same way).
-        raise PhaseFailed("claim", _outcome_detail(claim_outcome))
+        raise PhaseFailed("claim", outcome_detail(claim_outcome))
 
     on_phase("finish")
     finish_argv = ["transfer-receive", "finish", "--group", group_name, "--slug", slug]
@@ -712,11 +711,16 @@ def move_workspace(
         # would have carried on success so the caller can still archive what
         # already crossed without treating the handover as unconfirmed.
         raise PhaseFailed(
-            e.phase, e.detail, claimed_owner=claimed_owner, conversations=tuple(crossed)
+            e.phase,
+            e.detail,
+            claimed_owner=claimed_owner,
+            conversations=tuple(crossed),
+            dropped=dropped,
         ) from e
 
     return MoveResult(
         members=tuple(m["name"] for m in members),
         conversations=tuple(crossed),
         claimed_owner=claimed_owner,
+        dropped=dropped,
     )

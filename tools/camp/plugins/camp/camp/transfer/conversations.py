@@ -25,12 +25,24 @@ Each row is a :class:`WorkspaceConversation`, one of exactly three outcomes:
   ``PurePosixPath`` — ``PurePosixPath(".")`` when the root IS the workspace
   root. ``unresolved`` is ``False``.
 - UNRESOLVED — the harness could not tell camp where the session ran at all
-  (:attr:`SessionCandidate.unreadable`). ``subpath`` is ``None`` and
-  ``unresolved`` is ``True``. Never conflated with "rooted here": a caller
-  cannot report where an unresolved conversation sits, only that it exists.
-- EXCLUDED — the recorded root lies outside the workspace. This outcome has no
-  row at all; a caller counts what is absent from the result, not a third
-  field on it.
+  (:attr:`SessionCandidate.unreadable`), but its transcript is stored under
+  the workspace root or one of its immediate member directories. ``subpath``
+  is ``None`` and ``unresolved`` is ``True``. Never conflated with "rooted
+  here": a caller cannot report where an unresolved conversation sits, only
+  that it exists.
+- EXCLUDED — the recorded root lies outside the workspace, or there is no
+  recorded root and the transcript is stored under neither the workspace root
+  nor a member directory. This outcome has no row at all; a caller counts
+  what is absent from the result, not a third field on it.
+
+An unreadable candidate is attributed by where the harness stores its
+transcript, asked through *locate_transcript* (shaped like
+`Harness.session_transcript_path`), because its contents name no root. It is
+never attributed to every workspace: one unreadable transcript anywhere on the
+host would then block the transfer of every workspace on it. The probe covers
+the workspace root and its immediate subdirectories — where camp starts
+sessions — so an unreadable conversation started deeper inside a member is
+not attributed and does not cross.
 
 ``live`` carries the candidate's own liveness flag unchanged, so a still-running
 session is never collapsed into "would cross" without saying it is live.
@@ -44,11 +56,20 @@ module does not re-derive the dedupe itself.
 The second half of this module is the SENDER side of the conversations
 transfer channel: :func:`send_conversation` streams one conversation's
 transcript, and :func:`send_workspace_conversations` drives it over every row
-:func:`workspace_conversations` reported ROOTED HERE. The selection is never
-re-derived — it iterates exactly the rows it is handed, so an EXCLUDED
-conversation (no row at all) is never even visible to it, and an UNRESOLVED
-row is refused by name (:class:`UnresolvedConversation`) rather than silently
-dropped, so a workspace never half-crosses without saying so.
+:func:`workspace_conversations` reported. The selection is never re-derived —
+it iterates exactly the rows it is handed, so an EXCLUDED conversation (no row
+at all) is never even visible to it.
+
+**A conversation that cannot cross is dropped by name, never blocking the
+rest.** An UNRESOLVED row, a transcript that can no longer be located, a
+transcript that changed mid-stream, a peer refusal, or a failed local producer
+drops that one conversation into :attr:`WorkspaceSend.dropped` with its
+reason, and the next row is still sent. The caller surfaces every drop as an
+error once the transfer completes; a dropped conversation's transcript is
+never released, so it stays resumable on the sending host. A failure of the
+connection itself is different: it is not about one conversation, every later
+row would fail the same way, and it ends the call as the last entry in
+:attr:`WorkspaceSend.sent` for the caller to fail the phase on.
 
 **Wire posture — carries no path from the sending host.** The remote argv
 `send_conversation` invokes (`camp transfer-receive conversations ...`) names
@@ -180,11 +201,14 @@ from ..host.transport import (
     DEFAULT_SERVER_ALIVE_COUNT_MAX,
     DEFAULT_SERVER_ALIVE_INTERVAL_SECONDS,
     Answered,
+    ProducerFailed,
     ProducerSpawner,
+    RemoteRefusal,
     StreamSpawner,
     TransportOutcome,
     default_producer_spawn,
     default_stream_spawner,
+    outcome_detail,
     stream_camp,
 )
 from ..launch.recovery import session_candidates
@@ -194,8 +218,8 @@ __all__ = [
     "WorkspaceConversation",
     "workspace_conversations",
     "EnumerationUnavailable",
-    "UnresolvedConversation",
-    "TranscriptUnavailable",
+    "ConversationDropped",
+    "WorkspaceSend",
     "TranscriptChanged",
     "build_conversation_archive_argv",
     "write_conversation_archive",
@@ -234,9 +258,11 @@ def workspace_conversations(
     live_records: Iterable[Any] | None,
     groups: Iterable[dict[str, Any]],
     env: Mapping[str, str],
+    locate_transcript: Callable[[str, Path], Path | None],
     now: datetime | None = None,
 ) -> tuple[WorkspaceConversation, ...]:
-    """Every conversation rooted in *workspace*, plus every unresolved one.
+    """Every conversation rooted in *workspace*, plus every unresolved one
+    whose transcript *locate_transcript* finds stored under it.
 
     ``None`` for either pool is the unanswerable case and raises
     :class:`EnumerationUnavailable`; it is never read as an empty pool — the
@@ -250,6 +276,7 @@ def workspace_conversations(
         )
 
     root = Path(workspace).resolve()
+    probe_roots = [root, *sorted(p for p in root.iterdir() if p.is_dir())] if root.is_dir() else [root]
     rows: list[WorkspaceConversation] = []
     for candidate in session_candidates(
         transcripts=transcripts,
@@ -259,6 +286,11 @@ def workspace_conversations(
         now=now,
     ):
         if candidate.unreadable:
+            if not any(
+                locate_transcript(candidate.session_id, probe) is not None
+                for probe in probe_roots
+            ):
+                continue
             rows.append(
                 WorkspaceConversation(
                     session_id=candidate.session_id,
@@ -294,34 +326,24 @@ def workspace_conversations(
 # ---------------------------------------------------------------------------
 
 
-class UnresolvedConversation(Exception):
-    """The enumeration reported this conversation UNRESOLVED — its recorded
-    root could not be read at all — so it is refused by name rather than
-    silently skipped: a workspace must never half-cross without saying so."""
+@dataclass(frozen=True)
+class ConversationDropped:
+    """A conversation that did not cross, and why — *detail* is the
+    operator-readable reason. Its transcript was never released, so it is
+    still resumable on the sending host."""
 
-    def __init__(self, session_id: str) -> None:
-        super().__init__(
-            f"conversation {session_id} is unresolved (its recorded root "
-            "could not be read) and cannot be transferred; refusing rather "
-            "than silently leaving it behind"
-        )
-        self.session_id = session_id
+    session_id: str
+    detail: str
 
 
-class TranscriptUnavailable(Exception):
-    """*locate_transcript* returned ``None`` for a conversation the
-    enumeration reported as rooted here. Distinct from
-    :class:`UnresolvedConversation`: the enumeration found a readable root,
-    but the transcript file it named is gone by the time the sender looked
-    for it — a race with retention cleanup, not an unreadable root."""
+@dataclass(frozen=True)
+class WorkspaceSend:
+    """What :func:`send_workspace_conversations` did with every row it was
+    handed. *sent* holds each streamed conversation's transport outcome, in
+    order; *dropped* names each conversation that did not cross."""
 
-    def __init__(self, session_id: str) -> None:
-        super().__init__(
-            f"conversation {session_id}'s transcript could not be located "
-            "on disk though its root was resolved; refusing rather than "
-            "silently skipping it"
-        )
-        self.session_id = session_id
+    sent: tuple[tuple[str, TransportOutcome], ...]
+    dropped: tuple[ConversationDropped, ...]
 
 
 class TranscriptChanged(Exception):
@@ -489,7 +511,7 @@ def send_workspace_conversations(
     extra_ssh_options: Sequence[str] = (),
     spawn: StreamSpawner = default_stream_spawner,
     producer_spawn: ProducerSpawner = default_producer_spawn,
-) -> tuple[tuple[str, TransportOutcome], ...]:
+) -> WorkspaceSend:
     """Stream every row of *conversations* that is rooted here — exactly the
     rows :func:`workspace_conversations` reported, never re-derived: an
     EXCLUDED conversation has no row and is therefore never visited, and a
@@ -501,23 +523,24 @@ def send_workspace_conversations(
     Path | None` — so this module never learns the projects-directory munge
     rule itself; that stays the harness boundary's alone.
 
-    Rows are sent in order, and the first whose outcome is anything but
-    `Answered` is the last one sent: it ends the returned tuple, so a
-    transfer that has already failed never lands a further conversation on
-    the peer, and the caller reports the conversation that was refused.
-
-    Raises:
-        UnresolvedConversation: a row is UNRESOLVED. Raised before any
-            further row is attempted, so a single unresolved conversation
-            blocks the whole call rather than the workspace half-crossing.
-        TranscriptUnavailable: *locate_transcript* named no file for a row
-            the enumeration reported as rooted here.
+    Rows are sent in order. A row that cannot cross — UNRESOLVED, no
+    transcript located, changed mid-stream, refused by the peer
+    (`RemoteRefusal`), or a failed local producer (`ProducerFailed`) — is
+    added to `dropped` and the next row is still sent. Any other non-`Answered`
+    outcome is a failure of the connection itself: it is the last entry in
+    `sent`, and no further row is attempted.
     """
     root = Path(workspace).resolve()
     results: list[tuple[str, TransportOutcome]] = []
+    dropped: list[ConversationDropped] = []
     for conversation in conversations:
         if conversation.unresolved:
-            raise UnresolvedConversation(conversation.session_id)
+            dropped.append(
+                ConversationDropped(
+                    conversation.session_id, "its recorded root could not be read"
+                )
+            )
+            continue
 
         assert conversation.subpath is not None  # unresolved is False here
         conversation_root = (
@@ -527,29 +550,47 @@ def send_workspace_conversations(
         )
         transcript_path = locate_transcript(conversation.session_id, conversation_root)
         if transcript_path is None:
-            raise TranscriptUnavailable(conversation.session_id)
+            dropped.append(
+                ConversationDropped(
+                    conversation.session_id, "its transcript could not be located on this host"
+                )
+            )
+            continue
 
         nested_dir = transcript_path.parent / conversation.session_id
-        outcome = send_conversation(
-            host,
-            group=group,
-            slug=slug,
-            session_id=conversation.session_id,
-            subpath=conversation.subpath,
-            transcript_path=transcript_path,
-            nested_dir=nested_dir if nested_dir.is_dir() else None,
-            connect_timeout=connect_timeout,
-            server_alive_interval=server_alive_interval,
-            server_alive_count_max=server_alive_count_max,
-            extra_ssh_options=extra_ssh_options,
-            spawn=spawn,
-            producer_spawn=producer_spawn,
-        )
+        try:
+            outcome = send_conversation(
+                host,
+                group=group,
+                slug=slug,
+                session_id=conversation.session_id,
+                subpath=conversation.subpath,
+                transcript_path=transcript_path,
+                nested_dir=nested_dir if nested_dir.is_dir() else None,
+                connect_timeout=connect_timeout,
+                server_alive_interval=server_alive_interval,
+                server_alive_count_max=server_alive_count_max,
+                extra_ssh_options=extra_ssh_options,
+                spawn=spawn,
+                producer_spawn=producer_spawn,
+            )
+        except TranscriptChanged:
+            dropped.append(
+                ConversationDropped(
+                    conversation.session_id,
+                    "its transcript changed while it was being streamed, so the "
+                    "peer may hold an incomplete copy",
+                )
+            )
+            continue
+        if isinstance(outcome, (RemoteRefusal, ProducerFailed)):
+            dropped.append(ConversationDropped(conversation.session_id, outcome_detail(outcome)))
+            continue
         results.append((conversation.session_id, outcome))
         if not isinstance(outcome, Answered):
             break
 
-    return tuple(results)
+    return WorkspaceSend(sent=tuple(results), dropped=tuple(dropped))
 
 
 # ---------------------------------------------------------------------------

@@ -395,6 +395,41 @@ def test_the_gathered_conversations_are_threaded_into_move_workspace(
     assert callable(calls[0]["locate_transcript"])
 
 
+def test_dry_run_says_which_conversations_will_not_be_transferred(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """An unreadable conversation will be dropped rather than block the
+    transfer, so the preview says so on that row, and only on that row."""
+    from pathlib import PurePosixPath
+
+    env = _Env(tmp_path)
+    env.write_group(excluded={"repo_a": []})
+    env.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
+    env.write_manifest(owner="host-a")
+    env.apply(monkeypatch)
+    transfer = _transfer_module()
+    conversations_mod = _conversations_module()
+
+    _fake_probe(monkeypatch, _clean_probe_answer())
+    readable = "55555555-5555-4555-8555-555555555555"
+    unreadable = "66666666-6666-4666-8666-666666666666"
+    gathered = (
+        conversations_mod.WorkspaceConversation(readable, PurePosixPath("."), False, False),
+        conversations_mod.WorkspaceConversation(unreadable, None, False, True),
+    )
+    monkeypatch.setattr(transfer, "_gather_conversations", lambda **kw: gathered)
+
+    code = _run(
+        monkeypatch,
+        ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead", "--dry-run"],
+    )
+
+    assert code == transfer.EXIT_WOULD_TRANSFER
+    lines = capsys.readouterr().out.splitlines()
+    assert "will not be transferred" in next(l for l in lines if unreadable in l)
+    assert "will not be transferred" not in next(l for l in lines if readable in l)
+
+
 # ---------------------------------------------------------------------------
 # --to is required
 # ---------------------------------------------------------------------------
@@ -936,7 +971,9 @@ def test_gather_conversations_wires_the_gathered_pool_into_workspace_conversatio
     captured = {}
     sentinel = (conversations_mod.WorkspaceConversation("sid", None, False, True),)
 
-    def _fake_workspace_conversations(workspace, *, transcripts, live_records, groups, env):
+    def _fake_workspace_conversations(
+        workspace, *, transcripts, live_records, groups, env, locate_transcript
+    ):
         captured["call"] = (workspace, transcripts, live_records, groups, env)
         return sentinel
 
@@ -967,7 +1004,9 @@ def test_gather_conversations_returns_a_different_answer_for_a_different_pool(
 
     monkeypatch.setattr(session_mod, "_addressable_harnesses", lambda groups, **kw: [])
 
-    def _fake_workspace_conversations(workspace, *, transcripts, live_records, groups, env):
+    def _fake_workspace_conversations(
+        workspace, *, transcripts, live_records, groups, env, locate_transcript
+    ):
         return tuple(transcripts)
 
     monkeypatch.setattr(conversations_mod, "workspace_conversations", _fake_workspace_conversations)
@@ -984,6 +1023,56 @@ def test_gather_conversations_returns_a_different_answer_for_a_different_pool(
     )
 
     assert first != second
+
+
+def test_gather_conversations_scopes_unreadable_conversations_by_where_the_store_keeps_them(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unreadable conversation is this workspace's only when the harness
+    store keeps its transcript under it; one kept elsewhere must not surface
+    here, or it would block every workspace's transfer."""
+    from datetime import datetime, timezone
+
+    from trailhead.harness.base import SessionTranscript
+
+    transfer = _transfer_module()
+    teardown_guard = importlib.import_module("camp.launch.teardown_guard")
+    session_mod = importlib.import_module("camp.cli.session")
+    manifest = importlib.import_module("camp.group.manifest")
+
+    resolved_env = _hermetic_env(tmp_path)
+    ws = manifest.workspace_dir("g", "s", env=resolved_env)
+    ws.mkdir(parents=True)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    here_id = "aaaaaaaa-1111-4111-8111-111111111111"
+    other_id = "bbbbbbbb-2222-4222-8222-222222222222"
+    stored_under = {here_id: ws.resolve(), other_id: elsewhere.resolve()}
+
+    class _Store:
+        env = resolved_env
+
+        def session_transcript_path(self, session_id, root, *, env=None):
+            if stored_under.get(session_id) == Path(root).resolve():
+                return Path(root) / f"{session_id}.jsonl"
+            return None
+
+    monkeypatch.setattr(session_mod, "_addressable_harnesses", lambda groups, **kw: [_Store()])
+    modified = datetime.now(timezone.utc)
+    monkeypatch.setattr(
+        teardown_guard,
+        "gather_pool",
+        lambda harnesses, *, env: (
+            [SessionTranscript(sid, None, modified) for sid in (here_id, other_id)],
+            [],
+        ),
+    )
+
+    rows = transfer._gather_conversations(
+        group_name="g", slug="s", session_groups=[], resolved_env=resolved_env
+    )
+
+    assert [(r.session_id, r.unresolved) for r in rows] == [(here_id, True)]
 
 
 # ---------------------------------------------------------------------------
@@ -2209,13 +2298,14 @@ class TestConversationResumesOnARealPeer:
         sender_rows = _recoverable_rows(c["sender_cli_env"], c["slug"])
         assert session_id in {row["session_id"] for row in sender_rows}, sender_rows
 
-    def test_rerun_after_a_conversations_phase_failure_converges(self, conv_env):
-        """A re-run after a `conversations`-phase failure lands the
-        conversation exactly once and leaves it resumable — never duplicating
-        the row, and never refusing forever."""
+    def test_a_conversation_the_peer_refuses_is_dropped_and_the_move_still_completes(
+        self, conv_env
+    ):
+        """A conversation the peer refuses to place is dropped by name rather
+        than blocking the transfer: ownership still moves, the refused
+        conversation never lands on the peer, and the result names it so the
+        caller can report the drop as an error."""
         from pathlib import PurePosixPath
-
-        from camp.transfer.move import PhaseFailed
 
         c = conv_env
         session_id = "66666666-6666-4666-8666-666666666666"
@@ -2226,27 +2316,20 @@ class TestConversationResumesOnARealPeer:
                 stdout=subprocess.PIPE,
             )
 
-        with pytest.raises(PhaseFailed) as exc_info:
-            _cross_one_conversation(
-                c,
-                session_id=session_id,
-                subpath=PurePosixPath("."),
-                marker="rerun-converges-marker",
-                conversation_producer_spawn=_corrupt_conversation_producer,
-            )
-        assert exc_info.value.phase.startswith("conversations")
-
-        _cross_one_conversation(
+        result, phases, _dest = _cross_one_conversation(
             c,
             session_id=session_id,
             subpath=PurePosixPath("."),
-            marker="rerun-converges-marker",
-            overwrite=True,
+            marker="refused-is-dropped-marker",
+            conversation_producer_spawn=_corrupt_conversation_producer,
         )
 
+        assert phases[-2:] == ["claim", "finish"]
+        assert result.claimed_owner == "host-b"
+        assert result.conversations == ()
+        assert [d.session_id for d in result.dropped] == [session_id]
         rows = _recoverable_rows(c["peer_cli_env"], c["slug"])
-        matching = [row for row in rows if row["session_id"] == session_id]
-        assert len(matching) == 1, rows
+        assert session_id not in {row["session_id"] for row in rows}, rows
 
 
 def _sender_locate(c: dict):
@@ -2691,39 +2774,43 @@ class TestMoveWorkspaceEndToEnd:
         assert record["cwd"] == str(peer_ws_root.resolve())
         assert record["type"] == "summary"
 
-    def test_unresolved_conversation_fails_the_named_conversations_phase(self, move_env):
-        """A row the enumeration reported UNRESOLVED must never reach the
-        completion report — it fails the `conversations` phase by name,
-        the same re-runnable shape every other phase failure uses, rather
-        than silently completing the move without it."""
+    def test_unresolved_conversation_is_dropped_and_the_move_still_completes(self, move_env):
+        """A row the enumeration reported UNRESOLVED cannot cross, but it
+        must not block the workspace: the move completes and names the
+        conversation as dropped, never as crossed."""
         from camp.transfer.conversations import WorkspaceConversation
-        from camp.transfer.move import PhaseFailed, move_workspace
+        from camp.transfer.move import move_workspace
 
         g = move_env
+        session_id = "22222222-2222-4222-8222-222222222222"
         conversation = WorkspaceConversation(
-            session_id="22222222-2222-4222-8222-222222222222",
+            session_id=session_id,
             subpath=None,
             live=False,
             unresolved=True,
         )
 
-        with pytest.raises(PhaseFailed) as exc_info:
-            move_workspace(
-                host=g["host"],
-                group=g["group"],
-                group_name="testgroup",
-                slug=g["slug"],
-                sender_name="host-a",
-                overwrite=False,
-                env=g["sender_env"],
-                run=g["run"],
-                stream_spawn=g["stream_spawn"],
-                conversations=(conversation,),
-                locate_transcript=lambda sid, root: None,
-            )
+        phases: list[str] = []
+        result = move_workspace(
+            host=g["host"],
+            group=g["group"],
+            group_name="testgroup",
+            slug=g["slug"],
+            sender_name="host-a",
+            overwrite=False,
+            on_phase=phases.append,
+            env=g["sender_env"],
+            run=g["run"],
+            stream_spawn=g["stream_spawn"],
+            conversations=(conversation,),
+            locate_transcript=lambda sid, root: None,
+        )
 
-        assert exc_info.value.phase == "conversations"
-        assert "22222222-2222-4222-8222-222222222222" in exc_info.value.detail
+        assert phases[-2:] == ["claim", "finish"]
+        assert result.conversations == ()
+        assert [(d.session_id, d.detail) for d in result.dropped] == [
+            (session_id, "its recorded root could not be read")
+        ]
 
     def test_finish_failure_after_a_successful_claim_carries_the_claimed_owner(
         self, move_env
@@ -3819,6 +3906,173 @@ def test_completion_report_names_arrived_conversations_and_the_literal_resume_co
     assert session_id in out
     assert f"resume with: claude --resume {session_id}" in out
     assert "no conversations are rooted in this workspace" not in out
+
+
+def _dropped_move_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    env = _Env(tmp_path)
+    env.write_group(excluded={"repo_a": []})
+    env.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
+    env.write_manifest(owner="host-a")
+    env.apply(monkeypatch)
+    _fake_probe(monkeypatch, _clean_probe_answer())
+    _no_conversations(monkeypatch)
+    return env
+
+
+def test_a_completed_move_that_dropped_conversations_exits_with_its_own_code_naming_each(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """Dropping a conversation never blocks the transfer, but it is an error:
+    the verb exits with a code of its own and names each dropped
+    conversation, its reason, and that it is still on this host."""
+    from camp.transfer.conversations import ConversationDropped
+
+    _dropped_move_env(tmp_path, monkeypatch)
+    transfer = _transfer_module()
+    move = _move_module()
+    dropped = (
+        ConversationDropped("aaaaaaaa-1111-4111-8111-111111111111", "its recorded root could not be read"),
+        ConversationDropped("bbbbbbbb-2222-4222-8222-222222222222", "peer said no"),
+    )
+    monkeypatch.setattr(
+        move,
+        "move_workspace",
+        lambda **kw: move.MoveResult(
+            members=("repo_a",), claimed_owner="host-b-declared", dropped=dropped
+        ),
+    )
+
+    code = _run(monkeypatch, ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead"])
+
+    assert code == transfer.EXIT_CONVERSATIONS_DROPPED
+    assert code not in {
+        transfer.EXIT_WOULD_TRANSFER,
+        transfer.EXIT_RELEASE_INCOMPLETE,
+        transfer.EXIT_PHASE_FAILED,
+    }
+    captured = capsys.readouterr()
+    assert "ownership moved to 'host-b-declared'" in captured.out
+    for d in dropped:
+        line = next(l for l in captured.err.splitlines() if d.session_id in l)
+        assert d.detail in line
+    assert "still resumable on this host" in captured.err
+
+
+def test_a_completed_move_with_no_drops_still_exits_clean(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    _dropped_move_env(tmp_path, monkeypatch)
+    transfer = _transfer_module()
+    move = _move_module()
+    monkeypatch.setattr(
+        move,
+        "move_workspace",
+        lambda **kw: move.MoveResult(members=("repo_a",), claimed_owner="host-b-declared"),
+    )
+
+    code = _run(monkeypatch, ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead"])
+
+    assert code == transfer.EXIT_WOULD_TRANSFER
+    assert "dropped" not in capsys.readouterr().err
+
+
+def test_a_failed_release_outranks_dropped_conversations_in_the_exit_code(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """A failed release may leave a second resumable copy of a conversation
+    the peer now owns — the more urgent thing to check by hand — so its code
+    wins, while the drops are still named."""
+    from pathlib import PurePosixPath
+
+    from camp.transfer.conversations import ConversationDropped
+
+    _dropped_move_env(tmp_path, monkeypatch)
+    transfer = _transfer_module()
+    move = _move_module()
+    dropped_id = "bbbbbbbb-2222-4222-8222-222222222222"
+    monkeypatch.setattr(
+        move,
+        "move_workspace",
+        lambda **kw: move.MoveResult(
+            members=("repo_a",),
+            claimed_owner="host-b-declared",
+            conversations=(
+                move.ConversationCrossed(
+                    session_id="33333333-3333-4333-8333-333333333333", subpath=PurePosixPath(".")
+                ),
+            ),
+            dropped=(ConversationDropped(dropped_id, "peer said no"),),
+        ),
+    )
+
+    code = _run(monkeypatch, ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead"])
+
+    # The real release runs against this test's empty harness store, cannot
+    # locate the crossed conversation, and reports FAILED.
+    assert code == transfer.EXIT_RELEASE_INCOMPLETE
+    assert dropped_id in capsys.readouterr().err
+
+
+def test_a_post_commit_failure_still_names_the_dropped_conversations(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    from camp.transfer.conversations import ConversationDropped
+
+    _dropped_move_env(tmp_path, monkeypatch)
+    transfer = _transfer_module()
+    move = _move_module()
+    dropped_id = "aaaaaaaa-1111-4111-8111-111111111111"
+
+    def _fail(**kw):
+        raise move.PhaseFailed(
+            "finish",
+            "peer bring-up crashed",
+            claimed_owner="host-b-declared",
+            dropped=(ConversationDropped(dropped_id, "its recorded root could not be read"),),
+        )
+
+    monkeypatch.setattr(move, "move_workspace", _fail)
+    release = _release_module()
+    monkeypatch.setattr(release, "release_conversations", lambda **kw: ())
+
+    code = _run(monkeypatch, ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead"])
+
+    assert code == transfer.EXIT_PHASE_FAILED_POST_COMMIT
+    err = capsys.readouterr().err
+    line = next(l for l in err.splitlines() if dropped_id in l)
+    assert "its recorded root could not be read" in line
+
+
+def test_an_interrupted_local_handover_still_names_the_dropped_conversations(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    from camp.transfer.conversations import ConversationDropped
+
+    _dropped_move_env(tmp_path, monkeypatch)
+    transfer = _transfer_module()
+    move = _move_module()
+    dropped_id = "aaaaaaaa-1111-4111-8111-111111111111"
+    monkeypatch.setattr(
+        move,
+        "move_workspace",
+        lambda **kw: move.MoveResult(
+            members=("repo_a",),
+            claimed_owner="host-b-declared",
+            dropped=(ConversationDropped(dropped_id, "peer said no"),),
+        ),
+    )
+    release = _release_module()
+
+    def _boom_flip(**kw):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(release, "flip_sender_ownership", _boom_flip)
+
+    code = _run(monkeypatch, ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead"])
+
+    assert code == transfer.EXIT_RELEASE_INCOMPLETE
+    line = next(l for l in capsys.readouterr().err.splitlines() if dropped_id in l)
+    assert "peer said no" in line
 
 
 class _FakeResumeHarness:

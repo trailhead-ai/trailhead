@@ -1240,11 +1240,11 @@ class ClaudeCodeHarness(Harness):
         this method reaches only conversations camp has already resolved a
         root for. ``session_transcripts`` collapses a relative recorded ``cwd``
         to ``cwd=None`` (`trailhead/harness/claude_code.py:1150-1154`), which
-        marks the conversation unresolved, and the sender refuses an
-        unresolved conversation outright before it ever streams a transcript
-        here (`tools/camp/plugins/camp/camp/transfer/conversations.py:266`).
+        marks the conversation unresolved, and the sender drops an
+        unresolved conversation before it ever streams a transcript here
+        (`camp.transfer.conversations.send_workspace_conversations`).
         A non-camp caller of this harness-boundary method directly, without
-        that same refusal in front of it, would not have that guarantee.
+        that same guard in front of it, would not have that guarantee.
 
         A line whose ``cwd`` is absolute but not under ``old_root`` raises
         :class:`HarnessError` naming ``source``, and nothing is written to

@@ -685,6 +685,31 @@ def test_every_producible_exit_code_appears_in_the_documented_table(
         _run(monkeypatch, ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead"])
     )
 
+    # 13 EXIT_CONVERSATIONS_DROPPED — the move completed and ownership
+    # moved, but a conversation did not cross, driven through a real
+    # `MoveResult` carrying a dropped conversation.
+    env13 = _Env(tmp_path / "dropped")
+    env13.write_group(excluded={"repo_a": []})
+    env13.write_hosts(self_name="host-a", peers={"host-b": "host-b"})
+    env13.write_manifest(owner="host-a")
+    env13.apply(monkeypatch)
+    _fake_probe(monkeypatch, _clean_probe_answer())
+    _no_conversations(monkeypatch)
+    conversations13 = importlib.import_module("camp.transfer.conversations")
+    monkeypatch.setattr(
+        move,
+        "move_workspace",
+        lambda **kw: move.MoveResult(
+            members=("repo_a",),
+            claimed_owner="host-b",
+            dropped=(conversations13.ConversationDropped("sess-13", "peer said no"),),
+        ),
+    )
+    monkeypatch.setattr(release11, "release_conversations", lambda **kw: ())
+    produced.add(
+        _run(monkeypatch, ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead"])
+    )
+
     documented = _readme_exit_codes()
-    assert produced == {0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}
+    assert produced == {0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13}
     assert documented == produced
