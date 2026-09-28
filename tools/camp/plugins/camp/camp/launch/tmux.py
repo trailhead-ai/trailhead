@@ -310,6 +310,31 @@ def target(name: str) -> str:
     return f"={name}"
 
 
+_CD_PRELUDE = (
+    'cd -- "$1" || { printf \'camp: cannot enter directory %s\\n\' "$1" >&2; exit 1; }; shift; '
+)
+
+
+def _pane_argv(cwd: object, command: Sequence[str]) -> list[str]:
+    """The pane's argv: change into *cwd* itself, then exec *command*.
+
+    tmux ignores `-c <dir>` when the server's own working directory has been
+    deleted and starts the pane there instead, so every spawn site hands tmux
+    this `sh -c` wrapper as well (keeping `-c`, which is still right on a
+    healthy server). The directory and every command element travel as
+    positional arguments, never spliced into the script, so no directory name
+    or command element is ever re-parsed by a shell. A failed `cd` prints a
+    `camp:` line naming the directory and exits non-zero — the pane dies
+    rather than surviving as a shell somewhere else.
+
+    An empty *command* execs `${SHELL:-sh} -l`: inside a pane `$SHELL` is
+    tmux's own `default-shell`, never the shell of whoever started the
+    server, and `-l` keeps the login-shell semantics tmux gives a bare pane.
+    """
+    tail = 'exec "${SHELL:-sh}" -l' if not command else 'exec "$@"'
+    return ["sh", "-c", _CD_PRELUDE + tail, "camp-cwd", str(cwd), *command]
+
+
 class Tmux:
     """Every tmux invocation camp performs, behind one seam."""
 
@@ -482,7 +507,9 @@ class Tmux:
         command: Sequence[str],
         timeout: float | None = None,
     ) -> NewWindowResult | NewWindowFailure | _Unanswered:
-        """Same call :meth:`new_window` makes, plus tmux's own stderr,
+        """Same call :meth:`new_window` makes (the pane command is the
+        :func:`_pane_argv` wrapper; an empty *command* is a login shell in
+        *cwd*), plus tmux's own stderr,
         verbatim, when the call answers with a non-zero exit — the piece of
         information :meth:`new_window` throws away, needed by a caller (the
         resurrection engine) that reports tmux's own words on a failed
@@ -505,7 +532,7 @@ class Tmux:
                 window_name,
                 "-c",
                 str(cwd),
-                *command,
+                *_pane_argv(cwd, command),
             ],
             timeout=timeout,
         )
@@ -663,7 +690,8 @@ class Tmux:
         timeout: float,
     ) -> subprocess.CompletedProcess:
         """Start a detached session named *name*, running *command* in its
-        first pane.
+        first pane, wrapped by :func:`_pane_argv` so the pane changes into
+        *cwd* itself (tmux ignores `-c` once the server's cwd is deleted).
 
         ``-s`` names the new session — never `=`-qualified, see the module
         docstring's target-vs-name property. Exceptions are NOT swallowed
@@ -671,7 +699,16 @@ class Tmux:
         to reclaim the name after a timeout, or distinguish an unlaunchable
         tmux from a refused spawn, reads them itself.
         """
-        argv = ["tmux", "new-session", "-d", "-s", name, "-c", str(cwd), *command]
+        argv = [
+            "tmux",
+            "new-session",
+            "-d",
+            "-s",
+            name,
+            "-c",
+            str(cwd),
+            *_pane_argv(cwd, command),
+        ]
         return subprocess.run(
             argv,
             cwd=str(cwd),
@@ -694,7 +731,8 @@ class Tmux:
         timeout: float | None = None,
     ) -> NewWindowResult | _DuplicateSession | NewSessionWindowFailure:
         """Start a detached session named *name*, whose first window is
-        named *window_name*, rooted at *cwd*, and runs *command* — reading
+        named *window_name*, rooted at *cwd*, and runs *command* (through the
+        :func:`_pane_argv` wrapper, which enters *cwd* itself) — reading
         that window's id and name back on the SAME creating call, exactly
         the way :meth:`new_window` reads a later window's back: `-P -F
         '#{window_id} #{window_name}'`, parsed on the FIRST space only, so
@@ -728,7 +766,7 @@ class Tmux:
             "-P",
             "-F",
             "#{window_id} #{window_name}",
-            *command,
+            *_pane_argv(cwd, command),
         ]
         done = subprocess.run(
             argv,
@@ -759,11 +797,12 @@ class Tmux:
         timeout: float | None = None,
     ) -> subprocess.CompletedProcess:
         """Start a detached session named *name*, holding one window running
-        the environment's default shell — no command, no environment scrub.
+        tmux's `default-shell` as a login shell — no environment scrub.
 
         A thin wrapper over :meth:`spawn_session` with *command* empty: an
-        empty command leaves tmux to start whatever shell it is configured
-        with in the pane, which is exactly a login-shell window. This keeps
+        empty command makes :func:`_pane_argv` end the wrapper in
+        `exec "${SHELL:-sh}" -l`, and a pane's `$SHELL` is tmux's
+        `default-shell`. This keeps
         the `new-session` argv built in exactly one place — this method
         composes none of its own. *env* defaults to the current process
         environment, unmodified: the workspace door scrubs nothing.
