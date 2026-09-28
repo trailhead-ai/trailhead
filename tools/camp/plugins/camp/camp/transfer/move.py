@@ -20,7 +20,7 @@ each member's `history` phase, this module reads that member's SENDER-side
 worktree (`camp.provision.reconcile._worktree_path`, keyed by this host's
 own `env`) to see what branch it is actually on. Checked out on the
 workspace's own slug branch (or a detached HEAD already reachable from it),
-behavior is unchanged. Checked out on any OTHER branch, that branch's name
+only the slug branch crosses. Checked out on any OTHER branch, that branch's name
 is passed to `camp.transfer.history.send_history` as `extra_ref` and rides
 the SAME bundle as the slug branch — never a second transfer, never through
 the group's shared remote — so the peer's worktree for that member ends up
@@ -232,7 +232,7 @@ class MoveResult:
 def _extra_branch_or_refuse(wt_path: Path, slug_branch: str, *, member: str) -> str | None:
     """The sender's own checked-out branch for *wt_path*, to carry alongside
     *slug_branch* in the same bundle — or `None` when the worktree is
-    checked out on *slug_branch* itself (today's behavior, unchanged).
+    checked out on *slug_branch* itself (only the slug branch crosses).
 
     A detached HEAD is refused here, before the bundle is ever built, UNLESS
     the detached commit is already reachable from *slug_branch* — a commit

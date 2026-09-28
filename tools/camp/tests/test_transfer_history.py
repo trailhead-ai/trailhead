@@ -83,24 +83,15 @@ def _member_group(sender_repo: Path, name: str = "repo_a") -> dict:
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture()
-def sender_and_peer(tmp_path: Path):
-    """A sender repo with a workspace branch carrying one unpushed commit, and
-    a bare-bones peer repo (no origin) the phase will land content into."""
-    sender_repo = tmp_path / "sender"
-    init_git_repo(sender_repo, origin=True)
-    branch = "worktree-feat-x"
-    _git(sender_repo, "checkout", "-b", branch)
-    (sender_repo / "unpushed.txt").write_text("only on the sender\n")
-    _git(sender_repo, "add", "unpushed.txt")
-    _git(sender_repo, "-c", "user.email=t@t.com", "-c", "user.name=t", "commit", "-m", "unpushed", "--no-gpg-sign")
-    tip = _git_out(sender_repo, "rev-parse", "HEAD")
+def _unrelated_peer_repo(tmp_path: Path) -> Path:
+    """A bare-bones peer repo (no origin) with its own distinct root commit.
 
-    # A distinct root commit (own content), never `init_git_repo`'s fixed
-    # README/message/identity — with those held identical, a peer built the
-    # same way as the sender can coincidentally hash to the SAME sha as the
-    # sender's own root commit, which would make TestMissingPrerequisite's
-    # "peer lacks the prerequisite" premise false by accident.
+    Own content, never `init_git_repo`'s fixed README/message/identity — with
+    those held identical, a peer built the same way as the sender can
+    coincidentally hash to the SAME sha as the sender's own root commit,
+    which would make TestMissingPrerequisite's "peer lacks the prerequisite"
+    premise false by accident.
+    """
     peer_repo = tmp_path / "peer_repo_a"
     peer_repo.mkdir(parents=True)
     _git(peer_repo, "init", "-q", "-b", "main")
@@ -117,7 +108,23 @@ def sender_and_peer(tmp_path: Path):
         "peer init",
         "--no-gpg-sign",
     )
+    return peer_repo
 
+
+@pytest.fixture()
+def sender_and_peer(tmp_path: Path):
+    """A sender repo with a workspace branch carrying one unpushed commit, and
+    a bare-bones peer repo (no origin) the phase will land content into."""
+    sender_repo = tmp_path / "sender"
+    init_git_repo(sender_repo, origin=True)
+    branch = "worktree-feat-x"
+    _git(sender_repo, "checkout", "-b", branch)
+    (sender_repo / "unpushed.txt").write_text("only on the sender\n")
+    _git(sender_repo, "add", "unpushed.txt")
+    _git(sender_repo, "-c", "user.email=t@t.com", "-c", "user.name=t", "commit", "-m", "unpushed", "--no-gpg-sign")
+    tip = _git_out(sender_repo, "rev-parse", "HEAD")
+
+    peer_repo = _unrelated_peer_repo(tmp_path)
     env = camp_state_env(tmp_path)
     group = _member_group(peer_repo)
     return {
@@ -131,10 +138,12 @@ def sender_and_peer(tmp_path: Path):
     }
 
 
-def _bundle_bytes(repo: Path, ref: str, *, basis_commit: str | None = None) -> bytes:
+def _bundle_bytes(
+    repo: Path, ref: str, *, basis_commit: str | None = None, extra_ref: str | None = None
+) -> bytes:
     from camp.transfer.history import build_bundle_argv
 
-    argv = build_bundle_argv(repo, ref, basis_commit=basis_commit)
+    argv = build_bundle_argv(repo, ref, basis_commit=basis_commit, extra_ref=extra_ref)
     result = subprocess.run(argv, capture_output=True, check=True)
     return result.stdout
 
@@ -462,6 +471,19 @@ def _dispatch_module():
     return importlib.import_module("camp.cli.dispatch")
 
 
+def _feed_stdin(monkeypatch: pytest.MonkeyPatch, payload: bytes) -> None:
+    """Stand *payload* in for `sys.stdin.buffer`, which the dispatcher reads."""
+
+    class _FakeStdinBuffer:
+        def read(self) -> bytes:
+            return payload
+
+    class _FakeStdin:
+        buffer = _FakeStdinBuffer()
+
+    monkeypatch.setattr(sys, "stdin", _FakeStdin())
+
+
 def _write_group_toml(groups_dir: Path, name: str, members: list[tuple[str, str]]) -> None:
     groups_dir.mkdir(parents=True, exist_ok=True)
     member_tables = "\n\n".join(
@@ -526,14 +548,7 @@ class TestHistoryCliDispatch:
             ],
         )
 
-        class _FakeStdinBuffer:
-            def read(self) -> bytes:
-                return bundle
-
-        class _FakeStdin:
-            buffer = _FakeStdinBuffer()
-
-        monkeypatch.setattr(sys, "stdin", _FakeStdin())
+        _feed_stdin(monkeypatch, bundle)
 
         _dispatch_module().main()  # success path returns normally, no SystemExit
 
@@ -794,18 +809,7 @@ def sender_and_peer_extra_branch(tmp_path: Path):
     extra_tip = _git_out(sender_repo, "rev-parse", "HEAD")
     slug_tip = _git_out(sender_repo, "rev-parse", slug_branch)
 
-    peer_repo = tmp_path / "peer_repo_a"
-    peer_repo.mkdir(parents=True)
-    _git(peer_repo, "init", "-q", "-b", "main")
-    (peer_repo / "peer-only.md").write_text("# peer's own unrelated history\n")
-    _git(peer_repo, "add", "peer-only.md")
-    _git(
-        peer_repo,
-        "-c", "user.email=peer@test.com",
-        "-c", "user.name=Peer",
-        "commit", "-m", "peer init", "--no-gpg-sign",
-    )
-
+    peer_repo = _unrelated_peer_repo(tmp_path)
     env = camp_state_env(tmp_path)
     group = _member_group(peer_repo)
     return {
@@ -821,33 +825,30 @@ def sender_and_peer_extra_branch(tmp_path: Path):
     }
 
 
-def _extra_bundle_bytes(g: dict) -> bytes:
-    from camp.transfer.history import build_bundle_argv
+def _land_extra_branch(g: dict, branch: str | None = None) -> None:
+    """Bundle *g*'s slug branch plus its extra branch, and land that bundle on
+    *g*'s peer naming *branch* (default: the extra branch itself) as the
+    `--branch` the sender reported."""
+    from camp.transfer import receive
 
-    argv = build_bundle_argv(
-        g["sender_repo"], g["slug_branch"], basis_commit=None, extra_ref=g["extra_branch"]
+    bundle = _bundle_bytes(g["sender_repo"], g["slug_branch"], extra_ref=g["extra_branch"])
+    receive.history(
+        groups=[g["group"]],
+        group_name="testgroup",
+        slug="feat-x",
+        member="repo_a",
+        bundle_bytes=bundle,
+        branch=g["extra_branch"] if branch is None else branch,
+        env=g["env"],
     )
-    result = subprocess.run(argv, capture_output=True, check=True)
-    return result.stdout
 
 
 class TestExtraBranchLandsAndChecksOutOnPeer:
     def test_peer_worktree_checked_out_on_extra_branch_at_its_tip(self, sender_and_peer_extra_branch):
         from camp.provision.reconcile import _worktree_path
-        from camp.transfer import receive
 
         g = sender_and_peer_extra_branch
-        bundle = _extra_bundle_bytes(g)
-
-        receive.history(
-            groups=[g["group"]],
-            group_name="testgroup",
-            slug="feat-x",
-            member="repo_a",
-            bundle_bytes=bundle,
-            branch=g["extra_branch"],
-            env=g["env"],
-        )
+        _land_extra_branch(g)
 
         # The slug branch still crosses and is force-updated exactly as today.
         slug_landed = _git_out(g["peer_repo"], "rev-parse", f"refs/heads/{g['slug_branch']}")
@@ -875,7 +876,6 @@ class TestMalformedExtraBranchName:
         from camp.transfer import receive
 
         g = sender_and_peer_extra_branch
-        bundle = _extra_bundle_bytes(g)
 
         # Asserting the SPECIFIC subclass (not just `ReceiveRefused`) matters
         # here: `bad_branch` never matches the bundle's actual ref name
@@ -884,15 +884,7 @@ class TestMalformedExtraBranchName:
         # comes from name validation itself, before the bundle is even
         # consulted for that ref.
         with pytest.raises(receive.InvalidBranchName) as exc_info:
-            receive.history(
-                groups=[g["group"]],
-                group_name="testgroup",
-                slug="feat-x",
-                member="repo_a",
-                bundle_bytes=bundle,
-                branch=bad_branch,
-                env=g["env"],
-            )
+            _land_extra_branch(g, bad_branch)
         assert "repo_a" in str(exc_info.value)
         assert bad_branch in str(exc_info.value)
 
@@ -902,20 +894,6 @@ class TestMalformedExtraBranchName:
 
 
 class TestPreExistingPeerBranch:
-    def _land_once(self, g: dict) -> None:
-        from camp.transfer import receive
-
-        bundle = _extra_bundle_bytes(g)
-        receive.history(
-            groups=[g["group"]],
-            group_name="testgroup",
-            slug="feat-x",
-            member="repo_a",
-            bundle_bytes=bundle,
-            branch=g["extra_branch"],
-            env=g["env"],
-        )
-
     def test_ancestor_peer_branch_is_fast_forwarded_and_checked_out(self, sender_and_peer_extra_branch):
         from camp.provision.reconcile import _worktree_path
 
@@ -935,7 +913,7 @@ class TestPreExistingPeerBranch:
         parent = _git_out(g["sender_repo"], "rev-parse", f"{g['extra_branch']}^")
         _git(g["peer_repo"], "update-ref", f"refs/heads/{g['extra_branch']}", parent)
 
-        self._land_once(g)
+        _land_extra_branch(g)
 
         extra_landed = _git_out(g["peer_repo"], "rev-parse", f"refs/heads/{g['extra_branch']}")
         assert extra_landed == g["extra_tip"]
@@ -964,7 +942,7 @@ class TestPreExistingPeerBranch:
         diverged_sha = _git_out(g["peer_repo"], "rev-parse", g["extra_branch"])
 
         with pytest.raises(receive.ReceiveRefused) as exc_info:
-            self._land_once(g)
+            _land_extra_branch(g)
 
         assert "repo_a" in str(exc_info.value)
         assert g["extra_branch"] in str(exc_info.value)
@@ -979,7 +957,6 @@ class TestPreExistingPeerBranch:
 
 class TestExtraBranchWithNoCommitsBeyondBasis:
     def test_still_produces_non_empty_bundle_and_lands_at_its_tip(self, tmp_path: Path):
-        from camp.transfer.history import build_bundle_argv
         from camp.transfer import receive
 
         sender_repo = tmp_path / "sender"
@@ -993,9 +970,7 @@ class TestExtraBranchWithNoCommitsBeyondBasis:
         _git(sender_repo, "checkout", "-b", slug_branch)
         tip = _commit(sender_repo, "slugwork.txt")
 
-        argv = build_bundle_argv(sender_repo, slug_branch, basis_commit=basis, extra_ref=extra_branch)
-        result = subprocess.run(argv, capture_output=True, check=True)
-        bundle = result.stdout
+        bundle = _bundle_bytes(sender_repo, slug_branch, basis_commit=basis, extra_ref=extra_branch)
         assert bundle, "bundle must not be empty even though the extra branch has no new commits"
 
         peer_repo = tmp_path / "peer_repo_a"
@@ -1036,11 +1011,7 @@ class TestExtraBranchCliDispatch:
         _git(sender_repo, "add", "via-cli.txt")
         _git(sender_repo, "-c", "user.email=t@t.com", "-c", "user.name=t", "commit", "-m", "via cli", "--no-gpg-sign")
         extra_tip = _git_out(sender_repo, "rev-parse", "HEAD")
-
-        from camp.transfer.history import build_bundle_argv
-
-        argv = build_bundle_argv(sender_repo, slug_branch, basis_commit=None, extra_ref=extra_branch)
-        bundle = subprocess.run(argv, capture_output=True, check=True).stdout
+        bundle = _bundle_bytes(sender_repo, slug_branch, extra_ref=extra_branch)
 
         peer_repo = tmp_path / "peer_cli2_repo_a"
         init_git_repo(peer_repo, origin=False)
@@ -1069,14 +1040,7 @@ class TestExtraBranchCliDispatch:
             ],
         )
 
-        class _FakeStdinBuffer:
-            def read(self) -> bytes:
-                return bundle
-
-        class _FakeStdin:
-            buffer = _FakeStdinBuffer()
-
-        monkeypatch.setattr(sys, "stdin", _FakeStdin())
+        _feed_stdin(monkeypatch, bundle)
 
         _dispatch_module().main()
 
