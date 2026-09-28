@@ -6,8 +6,12 @@ Test contract:
 - A conversation rooted in a member subdirectory is reported at that relative
   subpath, not at the root.
 - A conversation whose recorded root is outside the workspace is excluded.
-- A conversation with no readable recorded root is reported as unresolved, and
+- A conversation with no readable recorded root is reported as unresolved when
+  its transcript is stored under the workspace root or a member directory, and
   is distinguishable from both "rooted here" and "excluded".
+- A conversation with no readable recorded root whose transcript is stored
+  under neither is excluded, so another workspace's unreadable conversation
+  never blocks this one.
 - A live conversation is reported live; a stopped one is reported stopped.
 - A workspace with no conversations rooted in it returns an empty result,
   distinguishable from a failure to read.
@@ -115,7 +119,20 @@ def _record(session_id: str, cwd: Path):
     )
 
 
-def _rows(workspace: Path, *, transcripts, live_records, groups, env):
+def _locator(stored_under: dict[str, Path]):
+    """A `locate_transcript` fake: *session_id* has a transcript on disk
+    only when looked up under the root *stored_under* names for it."""
+
+    def _locate(session_id: str, root: Path) -> Path | None:
+        stored = stored_under.get(session_id)
+        if stored is not None and Path(root).resolve() == stored.resolve():
+            return stored / f"{session_id}.jsonl"
+        return None
+
+    return _locate
+
+
+def _rows(workspace: Path, *, transcripts, live_records, groups, env, stored_under=None):
     from camp.transfer.conversations import workspace_conversations
 
     return workspace_conversations(
@@ -124,6 +141,7 @@ def _rows(workspace: Path, *, transcripts, live_records, groups, env):
         live_records=live_records,
         groups=groups,
         env=env,
+        locate_transcript=_locator(stored_under or {}),
         now=_NOW,
     )
 
@@ -191,12 +209,50 @@ def test_conversation_with_unreadable_root_reported_unresolved(tmp_path: Path) -
         live_records=[],
         groups=[_group("g")],
         env=env,
+        stored_under={_UUID_A: ws},
     )
     assert len(rows) == 1
     assert rows[0].unresolved is True
     assert rows[0].subpath is None
     # Distinguishable from "rooted here" (subpath would be PurePosixPath(".")).
     assert rows[0].subpath != PurePosixPath(".")
+
+
+def test_unreadable_conversation_stored_under_a_member_reported_unresolved(
+    tmp_path: Path,
+) -> None:
+    env = _env(tmp_path)
+    ws = _workspace(tmp_path, "g", "ws")
+    member = ws / "repo_a"
+    member.mkdir()
+    rows = _rows(
+        ws,
+        transcripts=[_transcript(_UUID_A, None)],
+        live_records=[],
+        groups=[_group("g")],
+        env=env,
+        stored_under={_UUID_A: member},
+    )
+    assert [(r.session_id, r.unresolved) for r in rows] == [(_UUID_A, True)]
+
+
+def test_unreadable_conversation_stored_under_another_workspace_excluded(
+    tmp_path: Path,
+) -> None:
+    """Another workspace's unreadable transcript is not this workspace's to
+    account for — reporting it here would block every transfer on the host."""
+    env = _env(tmp_path)
+    ws = _workspace(tmp_path, "g", "ws")
+    other = _workspace(tmp_path, "g", "other")
+    rows = _rows(
+        ws,
+        transcripts=[_transcript(_UUID_A, None), _transcript(_UUID_B, None)],
+        live_records=[],
+        groups=[_group("g")],
+        env=env,
+        stored_under={_UUID_A: other, _UUID_B: ws},
+    )
+    assert [(r.session_id, r.unresolved) for r in rows] == [(_UUID_B, True)]
 
 
 # ---------------------------------------------------------------------------

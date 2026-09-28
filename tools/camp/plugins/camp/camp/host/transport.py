@@ -542,3 +542,26 @@ def stream_camp(
     stderr = b"".join(stderr_chunks).decode("utf-8", errors="surrogateescape")
     raw = RawResult(stdout=stdout, stderr=stderr, exit_code=child.returncode)
     return _classify(raw)
+
+
+def outcome_detail(outcome: TransportOutcome) -> str:
+    """A human-legible detail string for a non-`Answered` outcome.
+
+    `RemoteRefusal` carries the remote's own stderr verbatim — for a
+    transfer phase, the peer's `camp transfer-receive: <refusal message>`
+    line — since that message already names the specific reason.
+    Every other outcome kind is transport-level rather than remote-refused,
+    so it gets a shape-specific line instead.
+    """
+    if isinstance(outcome, RemoteRefusal):
+        return outcome.stderr.strip()
+    if isinstance(outcome, ProducerFailed):
+        return f"the local producer exited {outcome.exit_code} before the stream completed"
+    kind = type(outcome).__name__
+    reason = getattr(outcome, "reason", None)
+    if reason is not None:
+        return f"{kind}: {reason}"
+    execution_timeout = getattr(outcome, "execution_timeout", None)
+    if execution_timeout is not None:
+        return f"{kind}: no response within {execution_timeout}s"
+    return kind

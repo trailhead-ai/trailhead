@@ -73,7 +73,7 @@ def _transcript(session_id: str, cwd, *, age_seconds: float = 60.0):
     )
 
 
-def _rows(workspace: Path, *, transcripts):
+def _rows(workspace: Path, *, transcripts, locate_transcript=lambda session_id, root: None):
     from camp.transfer.conversations import workspace_conversations
 
     return workspace_conversations(
@@ -82,6 +82,7 @@ def _rows(workspace: Path, *, transcripts):
         live_records=[],
         groups=[{"group": {"name": "g"}}],
         env={"CAMP_STATE_DIR": str(workspace)},
+        locate_transcript=locate_transcript,
         now=_NOW,
     )
 
@@ -192,7 +193,7 @@ class TestSelectionVariesWithEnumeration:
             spawn=_consuming_stream_spawner,
         )
 
-        assert [r[0] for r in results] == [_UUID_ROOT]
+        assert [r[0] for r in results.sent] == [_UUID_ROOT]
         assert seen_subpaths == [ws.resolve()]
 
     def test_excluded_conversation_never_streamed(self, tmp_path: Path) -> None:
@@ -234,30 +235,68 @@ class TestSelectionVariesWithEnumeration:
         assert called_with == [_UUID_ROOT]
         assert _UUID_OUTSIDE not in called_with
 
-    def test_unresolved_conversation_refused_by_name(self, tmp_path: Path) -> None:
-        from camp.transfer.conversations import UnresolvedConversation, send_workspace_conversations
+    def test_unresolved_conversation_is_dropped_by_name_and_the_rest_still_cross(
+        self, tmp_path: Path
+    ) -> None:
+        from camp.transfer.conversations import send_workspace_conversations
 
         ws = tmp_path / "ws"
         ws.mkdir()
+        claude_dir = tmp_path / "home" / ".claude"
+        root_transcript = _make_transcript_file(claude_dir, _munge(ws), _UUID_ROOT, ws)
 
-        rows = _rows(ws, transcripts=[_transcript(_UUID_UNRESOLVED, None)])
-        assert rows[0].unresolved is True
+        rows = _rows(
+            ws,
+            transcripts=[_transcript(_UUID_UNRESOLVED, None), _transcript(_UUID_ROOT, ws)],
+            locate_transcript=lambda session_id, root: ws / f"{session_id}.jsonl",
+        )
+        assert {r.session_id: r.unresolved for r in rows} == {
+            _UUID_UNRESOLVED: True,
+            _UUID_ROOT: False,
+        }
 
-        def _locate(session_id, root):
-            raise AssertionError("must not be called for an unresolved row")
+        result = send_workspace_conversations(
+            _host(),
+            group="g",
+            slug="s",
+            workspace=ws,
+            conversations=rows,
+            locate_transcript=lambda session_id, root: root_transcript,
+            spawn=_consuming_stream_spawner,
+        )
 
-        with pytest.raises(UnresolvedConversation) as exc_info:
-            send_workspace_conversations(
-                _host(),
-                group="g",
-                slug="s",
-                workspace=ws,
-                conversations=rows,
-                locate_transcript=_locate,
-                spawn=_consuming_stream_spawner,
-            )
+        assert [session_id for session_id, _ in result.sent] == [_UUID_ROOT]
+        assert [d.session_id for d in result.dropped] == [_UUID_UNRESOLVED]
+        assert "could not be read" in result.dropped[0].detail
 
-        assert _UUID_UNRESOLVED in str(exc_info.value)
+    def test_conversation_whose_transcript_is_gone_is_dropped_and_the_rest_still_cross(
+        self, tmp_path: Path
+    ) -> None:
+        from camp.transfer.conversations import send_workspace_conversations
+
+        ws = tmp_path / "ws"
+        member = ws / "member"
+        member.mkdir(parents=True)
+        claude_dir = tmp_path / "home" / ".claude"
+        member_transcript = _make_transcript_file(claude_dir, _munge(member), _UUID_MEMBER, member)
+        rows = _rows(
+            ws, transcripts=[_transcript(_UUID_ROOT, ws), _transcript(_UUID_MEMBER, member)]
+        )
+        located = {_UUID_MEMBER: member_transcript}
+
+        result = send_workspace_conversations(
+            _host(),
+            group="g",
+            slug="s",
+            workspace=ws,
+            conversations=rows,
+            locate_transcript=lambda session_id, root: located.get(session_id),
+            spawn=_consuming_stream_spawner,
+        )
+
+        assert [session_id for session_id, _ in result.sent] == [_UUID_MEMBER]
+        assert [d.session_id for d in result.dropped] == [_UUID_ROOT]
+        assert "could not be located" in result.dropped[0].detail
 
     def test_empty_workspace_streams_nothing_and_raises_nothing(self, tmp_path: Path) -> None:
         from camp.transfer.conversations import send_workspace_conversations
@@ -280,7 +319,8 @@ class TestSelectionVariesWithEnumeration:
             spawn=_consuming_stream_spawner,
         )
 
-        assert results == ()
+        assert results.sent == ()
+        assert results.dropped == ()
 
 
 class TestNestedSubtree:
@@ -519,6 +559,45 @@ class TestTornCopyDetection:
 
         assert _UUID_ROOT in str(exc_info.value)
 
+    def test_conversation_changed_mid_stream_is_dropped_and_the_rest_still_cross(
+        self, tmp_path: Path
+    ) -> None:
+        from camp.transfer.conversations import send_workspace_conversations
+
+        ws = tmp_path / "ws"
+        member = ws / "member"
+        member.mkdir(parents=True)
+        claude_dir = tmp_path / "home" / ".claude"
+        paths = {
+            _UUID_ROOT: _make_transcript_file(claude_dir, _munge(ws), _UUID_ROOT, ws),
+            _UUID_MEMBER: _make_transcript_file(claude_dir, _munge(member), _UUID_MEMBER, member),
+        }
+        rows = _rows(ws, transcripts=[_transcript(_UUID_ROOT, ws), _transcript(_UUID_MEMBER, member)])
+
+        def _producer_that_appends_to_the_root_transcript(argv):
+            if str(paths[_UUID_ROOT]) in argv:
+                with paths[_UUID_ROOT].open("a") as f:
+                    f.write('{"cwd": "/ws", "n": 2}\n')
+            return subprocess.Popen(
+                [sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'data')"],
+                stdout=subprocess.PIPE,
+            )
+
+        result = send_workspace_conversations(
+            _host(),
+            group="g",
+            slug="s",
+            workspace=ws,
+            conversations=rows,
+            locate_transcript=lambda session_id, root: paths[session_id],
+            spawn=_consuming_stream_spawner,
+            producer_spawn=_producer_that_appends_to_the_root_transcript,
+        )
+
+        assert [session_id for session_id, _ in result.sent] == [_UUID_MEMBER]
+        assert [d.session_id for d in result.dropped] == [_UUID_ROOT]
+        assert "changed while it was being streamed" in result.dropped[0].detail
+
     def test_producer_failure_surfaces_as_producer_failure_even_if_content_also_changed(
         self, tmp_path: Path
     ) -> None:
@@ -549,10 +628,11 @@ class TestTornCopyDetection:
         assert isinstance(outcome, ProducerFailed)
 
 
-class TestStopsAtTheFirstRefusedConversation:
-    """A conversation the peer refuses ends the call: every later one would
-    land in a transfer that has already failed, and the error the operator
-    reads must name the conversation that was actually refused."""
+class TestARefusedConversationIsDroppedButALostConnectionStops:
+    """A conversation the peer refuses, or whose local producer fails, is
+    dropped by name and the rest still cross. A failure of the connection
+    itself ends the call: every later conversation would fail the same way,
+    and the caller must fail the phase rather than report drops."""
 
     def _two_rows(self, tmp_path: Path):
         ws = tmp_path / "ws"
@@ -580,30 +660,61 @@ class TestStopsAtTheFirstRefusedConversation:
             spawn=spawn,
         )
 
-    def test_a_refused_conversation_is_the_last_one_sent(self, tmp_path: Path) -> None:
+    def test_a_refused_conversation_is_dropped_and_the_next_still_crosses(
+        self, tmp_path: Path
+    ) -> None:
         from camp.host.transport import Answered
 
         ws, rows, paths = self._two_rows(tmp_path)
         spawned: list[list[str]] = []
 
-        def _refusing(argv, env):
+        def _refuse_first(argv, env):
             spawned.append(list(argv))
-            return _failing_stream_spawner(argv, env)
+            if len(spawned) == 1:
+                return _failing_stream_spawner(argv, env)
+            return _consuming_stream_spawner(argv, env)
 
-        results = self._send(ws, rows, paths, _refusing)
+        result = self._send(ws, rows, paths, _refuse_first)
+
+        assert len(spawned) == 2
+        assert [d.session_id for d in result.dropped] == [rows[0].session_id]
+        assert [session_id for session_id, _ in result.sent] == [rows[1].session_id]
+        assert isinstance(result.sent[0][1], Answered)
+
+    def test_a_lost_connection_is_the_last_one_sent(self, tmp_path: Path) -> None:
+        ws, rows, paths = self._two_rows(tmp_path)
+        spawned: list[list[str]] = []
+
+        def _unreachable(argv, env):
+            spawned.append(list(argv))
+            return subprocess.Popen(
+                [
+                    sys.executable,
+                    "-c",
+                    "import sys; sys.stdin.buffer.read(); "
+                    "sys.stderr.write('ssh: connect to host fake-peer port 22: "
+                    "Connection refused\\n'); sys.exit(255)",
+                ],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        result = self._send(ws, rows, paths, _unreachable)
 
         assert len(spawned) == 1
-        assert [session_id for session_id, _ in results] == [rows[0].session_id]
-        assert not isinstance(results[0][1], Answered)
+        assert [session_id for session_id, _ in result.sent] == [rows[0].session_id]
+        assert result.dropped == ()
 
     def test_every_conversation_is_sent_when_none_is_refused(self, tmp_path: Path) -> None:
         ws, rows, paths = self._two_rows(tmp_path)
         spawned: list[list[str]] = []
 
-        results = self._send(ws, rows, paths, _argv_capturing_stream_spawner(spawned))
+        result = self._send(ws, rows, paths, _argv_capturing_stream_spawner(spawned))
 
         assert len(spawned) == 2
-        assert {session_id for session_id, _ in results} == {_UUID_ROOT, _UUID_MEMBER}
+        assert {session_id for session_id, _ in result.sent} == {_UUID_ROOT, _UUID_MEMBER}
+        assert result.dropped == ()
 
 
 class TestProducerFailurePropagates:

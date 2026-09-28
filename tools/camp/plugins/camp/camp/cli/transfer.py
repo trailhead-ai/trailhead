@@ -95,6 +95,18 @@ inputs are checked:
                                nor the post-commit one is asserted; the
                                operator must check the peer by hand
                                (`camp transfer-probe`) before doing anything.
+ 13  EXIT_CONVERSATIONS_DROPPED the transfer completed and ownership moved,
+                               but at least one conversation did not cross —
+                               its root could not be read, its transcript
+                               could not be located, it changed mid-stream,
+                               or the peer refused it. Each is named with its
+                               reason; none was released, so each is still
+                               resumable on this host. A drop never blocks
+                               the transfer. When a release also failed,
+                               `EXIT_RELEASE_INCOMPLETE` is returned instead
+                               (a possible second resumable copy is the more
+                               urgent thing to check), and the drops are
+                               still named.
 
 Code 2 is absent from the set deliberately: it is never produced, and it is
 held unused rather than reassigned, so a script that checks for it
@@ -315,6 +327,7 @@ EXIT_PHASE_FAILED = 9
 EXIT_PHASE_FAILED_POST_COMMIT = 10
 EXIT_RELEASE_INCOMPLETE = 11
 EXIT_PHASE_INDETERMINATE = 12
+EXIT_CONVERSATIONS_DROPPED = 13
 
 #: Check name -> exit code, for the checks that get their own. Looked up by
 #: `_exit_code_for` while walking `PreflightResult.checks` in order; a check
@@ -439,7 +452,10 @@ def _render_human(result, *, slug: str, peer_name: str) -> None:
     else:
         for conversation in result.conversations:
             if conversation.unresolved:
-                print(f"    ? {conversation.session_id} — root could not be resolved")
+                print(
+                    f"    ? {conversation.session_id} — root could not be read; "
+                    "will not be transferred"
+                )
             else:
                 live_tag = " (live)" if conversation.live else ""
                 subpath = printable_path(conversation.subpath)
@@ -464,7 +480,8 @@ def _gather_conversations(*, group_name: str, slug: str, session_groups, resolve
     verbatim: `_addressable_harnesses` for the pool of harnesses camp can ask,
     `teardown_guard.gather_pool` to read it (or raise), then
     `camp.transfer.conversations.workspace_conversations` to scope the pool to
-    this workspace. `None` here becomes check 11's own FAILED report in
+    this workspace — with `_locate_transcript` over the same stores, so an
+    unreadable conversation is attributed by where its transcript is kept. `None` here becomes check 11's own FAILED report in
     `compose_preflight` — never a crash and never a silent empty answer.
     """
     from ..group.manifest import workspace_dir
@@ -486,6 +503,7 @@ def _gather_conversations(*, group_name: str, slug: str, session_groups, resolve
             live_records=live,
             groups=session_groups,
             env=resolved_env,
+            locate_transcript=_locate_transcript(session_groups, resolved_env),
         )
     except (teardown_guard.EnumerationUnavailable, EnumerationUnavailable):
         return None
@@ -572,13 +590,11 @@ def _render_move_completion(
     for credential-shaped content — untracked files routinely carry them and
     the peer now holds a cleartext copy.
 
-    *move_result* is `move.MoveResult`, not the preflight preview: it names
-    only conversations the `conversations` phase actually placed on the
-    peer. A row the preflight showed as UNRESOLVED never reaches this
-    function at all — `move_workspace`'s `conversations` phase raises
-    `PhaseFailed` on such a row before `move_workspace` returns, so there is
-    no "could not be resolved" case for a *successful* move to render; see
-    `camp.transfer.move.ConversationCrossed`.
+    *move_result* is `move.MoveResult`, not the preflight preview: its
+    `conversations` names only those the `conversations` phase actually
+    placed on the peer. A conversation that did not cross is in
+    `move_result.dropped` instead, reported as an error by
+    `_render_dropped_conversations`, never here.
 
     Each arrived conversation gets the literal command that resumes it — the
     harness's own resume argv, rendered exactly as
@@ -613,6 +629,30 @@ def _render_move_completion(
         print("  no conversations are rooted in this workspace")
     else:
         _render_conversation_releases(move_result.conversations, release_results, harness=harness)
+
+
+def _render_dropped_conversations(dropped, *, file=None) -> None:
+    """Name each conversation that did not cross, with why, as an error.
+
+    Every path on which ownership has moved reports drops through here, so
+    none of them can omit one. The reason may carry a peer's own stderr, so
+    it goes through `printable_path`, as every other string camp does not
+    author does.
+    """
+    from ..launch.recovery import printable_path
+
+    if not dropped:
+        return
+    print(
+        f"camp transfer: {len(dropped)} conversation(s) did not cross and are "
+        "still resumable on this host:",
+        file=file,
+    )
+    for conversation in dropped:
+        print(
+            f"    {conversation.session_id} — {printable_path(conversation.detail)}",
+            file=file,
+        )
 
 
 def _render_conversation_releases(
@@ -918,6 +958,7 @@ def _cmd_transfer_group_cli(
                 _render_conversation_releases(
                     e.conversations, post_commit_release_results, harness=harness, file=sys.stderr
                 )
+            _render_dropped_conversations(e.dropped, file=sys.stderr)
             sys.exit(EXIT_PHASE_FAILED_POST_COMMIT)
         print(
             f"camp transfer: phase {e.phase!r} failed — {e.detail}. This is a "
@@ -957,6 +998,7 @@ def _cmd_transfer_group_cli(
             "retrying the transfer.",
             file=sys.stderr,
         )
+        _render_dropped_conversations(move_result.dropped, file=sys.stderr)
         sys.exit(EXIT_RELEASE_INCOMPLETE)
 
     _render_move_completion(
@@ -970,6 +1012,7 @@ def _cmd_transfer_group_cli(
 
     from ..transfer.release import ReleaseOutcome
 
+    _render_dropped_conversations(move_result.dropped, file=sys.stderr)
     failed_releases = [r for r in release_results if r.outcome is ReleaseOutcome.FAILED]
     if failed_releases:
         if any(r.archive_path is None for r in failed_releases):
@@ -995,4 +1038,6 @@ def _cmd_transfer_group_cli(
                 file=sys.stderr,
             )
         sys.exit(EXIT_RELEASE_INCOMPLETE)
+    if move_result.dropped:
+        sys.exit(EXIT_CONVERSATIONS_DROPPED)
     sys.exit(EXIT_WOULD_TRANSFER)

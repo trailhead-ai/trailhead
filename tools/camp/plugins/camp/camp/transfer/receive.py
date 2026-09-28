@@ -512,10 +512,9 @@ class ConversationRootUnresolved(ReceiveRefused):
     """`conversations` could not determine the arriving transcript's recorded
     root from this host's own transcript store after extraction.
 
-    The sender already refuses an UNRESOLVED conversation before it ever
-    streams one (`camp.transfer.conversations.UnresolvedConversation`,
-    raised in `send_workspace_conversations`), so a caller that goes through
-    that path never reaches this refusal. This phase is directly callable
+    The sender already drops an UNRESOLVED conversation before it ever
+    streams one (`camp.transfer.conversations.send_workspace_conversations`),
+    so a caller that goes through that path never reaches this refusal. This phase is directly callable
     and directly tested independent of that caller, though, so it does not
     rely on an upstream guard it cannot see — an unresolvable root is refused
     here too, fail-closed, rather than silently landing a transcript that
