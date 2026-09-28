@@ -13,6 +13,15 @@ the ref to bundle: `git bundle create` accepts a REF NAME, and a bare rev
 misleading "early EOF" — so *ref* below is always a branch name, never
 resolved to a sha first.
 
+**A second, optional ref** (`extra_ref`) rides the SAME bundle when the
+sender's worktree for this member is checked out on a branch other than the
+workspace's own slug branch — the channel this docstring's next paragraph
+describes exists precisely so a commit on that branch, never pushed
+anywhere, still crosses too, rather than being silently collapsed into an
+uncommitted diff on the peer. `send_history` forwards the branch's name to
+`camp transfer-receive history` as `--branch`; when absent, the peer's
+behavior is exactly what it was before this second ref existed.
+
 No git remote is ever contacted on this path — `git bundle create` reads only
 this host's local object store, and the transport is `stream_camp`'s direct
 ssh pipe, never a fetch or push through the group's shared remote. That is
@@ -87,8 +96,17 @@ def _sender_holds_commit(repo_root: Path, basis_commit: str) -> bool:
     return result.returncode == 0
 
 
-def build_bundle_argv(repo_root: Path, ref: str, *, basis_commit: str | None) -> list[str]:
-    """The exact `git bundle create -` argv for one member's *ref*.
+def build_bundle_argv(
+    repo_root: Path,
+    ref: str,
+    *,
+    basis_commit: str | None,
+    extra_ref: str | None = None,
+) -> list[str]:
+    """The exact `git bundle create -` argv for one member's *ref*, and
+    optionally a SECOND ref (*extra_ref*) in the same bundle — the sender's
+    non-slug checked-out branch, carried alongside the slug branch rather
+    than in a separate transfer.
 
     Negatived against *basis_commit* when given AND actually held by this
     host's own object store at *repo_root* (the peer already holds it —
@@ -98,41 +116,65 @@ def build_bundle_argv(repo_root: Path, ref: str, *, basis_commit: str | None) ->
     direction). Full history otherwise — negativing is an optimization,
     never a correctness requirement, so a basis commit this host cannot
     resolve is silently dropped rather than hard-failing the bundle git
-    itself cannot build. *ref* must be a branch name, never a bare
-    revision — see the module docstring's gotcha.
+    itself cannot build. *ref* and *extra_ref* must each be a branch name,
+    never a bare revision — see the module docstring's gotcha.
 
     Raises:
         InvalidBasisCommit: *basis_commit* is not `None` and not a
             plausible git object-id shape.
     """
-    argv = ["git", "-C", str(repo_root), "bundle", "create", "-", ref]
+    refs = [ref] if extra_ref is None else [ref, extra_ref]
+    argv = ["git", "-C", str(repo_root), "bundle", "create", "-", *refs]
     if basis_commit:
         if not _BASIS_COMMIT_RE.match(basis_commit):
             raise InvalidBasisCommit(basis_commit)
         if _sender_holds_commit(repo_root, basis_commit):
-            argv += _negation_for(repo_root, ref, basis_commit)
+            argv += _negation_for(repo_root, refs, basis_commit)
     return argv
 
 
-def _negation_for(repo_root: Path, ref: str, basis_commit: str) -> list[str]:
-    """The `--not` tail that shrinks *ref*'s bundle against *basis_commit*.
+def _negation_for(repo_root: Path, refs: Sequence[str], basis_commit: str) -> list[str]:
+    """The `--not` tail that shrinks *refs*' combined bundle against
+    *basis_commit*.
 
-    When *basis_commit* already contains *ref*'s tip — a workspace branch
-    with no commits of its own, or one its base has since moved past —
-    negativing against it leaves nothing to bundle, and git refuses an empty
-    bundle outright. The branch still has to cross (the peer creates it from
-    the bundle's named tip), so negative against the tip's parents instead:
-    the bundle then carries the tip commit alone, whose prerequisites the
-    peer holds because *basis_commit* contains them. A root-commit tip has no
-    parent to negative against, so it goes as a full bundle — one commit.
+    When *basis_commit* already contains one of *refs*' tips — a workspace
+    branch with no commits of its own, or one whose base has since moved
+    past it — negativing that ref's bundle against *basis_commit* directly
+    leaves nothing to bundle for it, and `git bundle create` DROPS that ref
+    from the bundle's own ref list entirely rather than erroring (proven
+    empirically: a positive ref fully reachable from `--not` simply never
+    appears in `git bundle create`'s stdout, and `git bundle unbundle`
+    then reports no tip for it) — the peer would receive a bundle that
+    silently lacks the very ref it must create. So the moment ANY of
+    *refs* is already fully contained in *basis_commit*, this negatives
+    against those ref(s)' own immediate parents instead of *basis_commit* —
+    for EVERY ref in the bundle, not just the contained one(s), since a
+    single `--not` set applies uniformly across every positive ref in one
+    `git bundle create` invocation. This keeps every ref's tip commit in
+    the bundle at the cost of not shrinking a not-yet-contained ref's
+    history as aggressively as it could be — negativing is an optimization,
+    never a correctness requirement (see `build_bundle_argv`'s own
+    docstring), so a less-than-maximal shrink here is acceptable. Only when
+    NONE of *refs* is contained does negativing the whole bundle against
+    *basis_commit* stay safe for every ref at once. A root-commit tip has no
+    parent to negative against, so it (and everything negatived only
+    against it) goes as a full bundle — one commit.
     """
     from ..gitutil import _git, _git_out
 
-    contained = _git(repo_root, "merge-base", "--is-ancestor", ref, basis_commit).returncode == 0
-    if not contained:
+    contained_parents: list[str] = []
+    any_contained = False
+    for ref in refs:
+        contained = _git(repo_root, "merge-base", "--is-ancestor", ref, basis_commit).returncode == 0
+        if not contained:
+            continue
+        any_contained = True
+        parents = _git_out(repo_root, "rev-list", "--parents", "-n", "1", ref).split()[1:]
+        contained_parents.extend(parents)
+
+    if not any_contained:
         return ["--not", basis_commit]
-    parents = _git_out(repo_root, "rev-list", "--parents", "-n", "1", ref).split()[1:]
-    return ["--not", *parents] if parents else []
+    return ["--not", *contained_parents] if contained_parents else []
 
 
 def send_history(
@@ -144,6 +186,7 @@ def send_history(
     repo_root: Path,
     ref: str,
     basis_commit: str | None,
+    extra_ref: str | None = None,
     connect_timeout: float = DEFAULT_CONNECT_TIMEOUT_SECONDS,
     server_alive_interval: float = DEFAULT_SERVER_ALIVE_INTERVAL_SECONDS,
     server_alive_count_max: int = DEFAULT_SERVER_ALIVE_COUNT_MAX,
@@ -152,7 +195,11 @@ def send_history(
     producer_spawn: ProducerSpawner = default_producer_spawn,
 ) -> TransportOutcome:
     """Stream one member's *ref*, bundled from *repo_root*, into
-    `camp transfer-receive history` on *host*.
+    `camp transfer-receive history` on *host* — plus *extra_ref*, the
+    sender's own checked-out branch when it differs from *ref* (the
+    workspace's slug branch), carried in the SAME bundle and named to the
+    peer via `--branch`. `None` (the default) reproduces the exact wire
+    shape this function sent before *extra_ref* existed.
 
     Returns whatever `stream_camp` classifies the invocation as — a failed
     `git bundle create` (the producer) surfaces as `ProducerFailed`, never as
@@ -168,7 +215,11 @@ def send_history(
         "--member",
         member,
     ]
-    producer = producer_spawn(build_bundle_argv(repo_root, ref, basis_commit=basis_commit))
+    if extra_ref is not None:
+        remote_argv += ["--branch", extra_ref]
+    producer = producer_spawn(
+        build_bundle_argv(repo_root, ref, basis_commit=basis_commit, extra_ref=extra_ref)
+    )
     return stream_camp(
         host,
         remote_argv,

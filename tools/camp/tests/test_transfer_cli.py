@@ -1308,6 +1308,228 @@ def move_env(tmp_path: Path):
     }
 
 
+@pytest.fixture()
+def move_env_extra_branch(tmp_path: Path):
+    """Like `move_env`, but the sender's worktree is checked out on a SECOND
+    branch — not the workspace's own slug branch — with two commits never
+    pushed anywhere, reproducing the captured incident's shape."""
+    from camp.host.config import Host
+    from camp.provision.reconcile import _worktree_path
+
+    slug = "feat-move2"
+    branch = f"worktree-{slug}"
+    other_branch = "feature/unpushed-work"
+
+    sender_repo = tmp_path / "sender"
+    init_git_repo(sender_repo, origin=True)
+    sender_env = camp_state_env(tmp_path / "sender")
+    wt_path = _worktree_path("testgroup", slug, "repo_a", env=sender_env)
+    _git(sender_repo, "worktree", "add", str(wt_path), "-b", branch)
+    _git(wt_path, "checkout", "-b", other_branch)
+    for name in ("first.txt", "second.txt"):
+        (wt_path / name).write_text(f"{name} content\n")
+        _git(wt_path, "add", name)
+        _git(
+            wt_path,
+            "-c", "user.email=t@t.com",
+            "-c", "user.name=t",
+            "commit", "-m", name, "--no-gpg-sign",
+        )
+    sender_tip = _git_out(wt_path, "rev-parse", "HEAD")
+
+    peer_repo = tmp_path / "peer_repo_a"
+    init_git_repo(peer_repo, origin=False)
+    peer_cfg = tmp_path / "peer-config"
+    (peer_cfg / "groups").mkdir(parents=True)
+    _write_group_toml(peer_cfg / "groups", "testgroup", [("repo_a", str(peer_repo))])
+    _write_hosts_toml(peer_cfg, self_name="host-b")
+    peer_state = tmp_path / "peer-state"
+    peer_claude_dir = tmp_path / "peer-claude"
+    peer_env = {
+        "CAMP_CONFIG_DIR": str(peer_cfg),
+        "CAMP_STATE_DIR": str(peer_state),
+        "TRAILHEAD_CLAUDE_DIR": str(peer_claude_dir),
+    }
+
+    return {
+        "slug": slug,
+        "branch": branch,
+        "other_branch": other_branch,
+        "sender_tip": sender_tip,
+        "group": _move_group(sender_repo),
+        "host": Host(ssh="fake-peer", camp_bin="/opt/camp/bin/camp"),
+        "sender_env": sender_env,
+        "sender_repo": sender_repo,
+        "wt_path": wt_path,
+        "tmp_path": tmp_path,
+        "peer_repo": peer_repo,
+        "peer_cfg": peer_cfg,
+        "peer_state": peer_state,
+        "peer_claude_dir": peer_claude_dir,
+        "peer_env": peer_env,
+        "run": _peer_runner(peer_cfg, peer_state, peer_claude_dir),
+        "stream_spawn": _peer_stream_spawn(peer_cfg, peer_state, peer_claude_dir),
+    }
+
+
+# ---------------------------------------------------------------------------
+# camp.transfer.move — the checked-out branch crosses with its commits and
+# its name (a sender worktree on a non-slug branch). See move.py's module
+# docstring and history.py's `extra_ref` for the mechanism.
+#
+# Test contract (all must RED before implementation, GREEN after):
+# - a sender worktree on a non-slug branch with two never-pushed commits →
+#   the peer worktree's current branch has that name, its tip equals the
+#   sender's tip, and `git status` on the peer is clean (the regression from
+#   the captured incident).
+# - same, plus an uncommitted edit on the sender → the peer shows exactly
+#   that edit as its diff.
+# - sender origin pointed at an unreachable URL → the non-slug branch still
+#   crosses (AC22).
+# - sender worktree with detached HEAD at a commit not on the slug branch →
+#   the move fails that member's history phase with a check-out-a-branch
+#   message; detached at a commit already on the slug branch → proceeds.
+# ---------------------------------------------------------------------------
+
+
+class TestNonSlugBranchCrossesWithItsCommits:
+    def test_peer_worktree_lands_on_the_same_named_branch_clean(self, move_env_extra_branch):
+        from camp.provision.reconcile import _worktree_path
+        from camp.transfer.move import move_workspace
+
+        g = move_env_extra_branch
+
+        result = move_workspace(
+            host=g["host"],
+            group=g["group"],
+            group_name="testgroup",
+            slug=g["slug"],
+            sender_name="host-a",
+            overwrite=False,
+            env=g["sender_env"],
+            run=g["run"],
+            stream_spawn=g["stream_spawn"],
+        )
+        assert result.members == ("repo_a",)
+
+        peer_wt = _worktree_path("testgroup", g["slug"], "repo_a", env=g["peer_env"])
+        peer_branch = _git_out(peer_wt, "rev-parse", "--abbrev-ref", "HEAD")
+        assert peer_branch == g["other_branch"]
+
+        peer_tip = _git_out(peer_wt, "rev-parse", "HEAD")
+        assert peer_tip == g["sender_tip"]
+
+        peer_status = _git(peer_wt, "status", "--porcelain").stdout
+        assert peer_status == ""
+
+        # The slug branch still crosses and is still force-updated exactly
+        # as today.
+        slug_landed = _git_out(g["peer_repo"], "rev-parse", f"refs/heads/{g['branch']}")
+        sender_slug_tip = _git_out(g["sender_repo"], "rev-parse", g["branch"])
+        assert slug_landed == sender_slug_tip
+
+    def test_uncommitted_edit_on_sender_shows_as_exactly_that_diff_on_peer(
+        self, move_env_extra_branch
+    ):
+        from camp.provision.reconcile import _worktree_path
+        from camp.transfer.move import move_workspace
+
+        g = move_env_extra_branch
+        (g["wt_path"] / "first.txt").write_text("first.txt content\nedited on sender\n")
+
+        move_workspace(
+            host=g["host"],
+            group=g["group"],
+            group_name="testgroup",
+            slug=g["slug"],
+            sender_name="host-a",
+            overwrite=False,
+            env=g["sender_env"],
+            run=g["run"],
+            stream_spawn=g["stream_spawn"],
+        )
+
+        peer_wt = _worktree_path("testgroup", g["slug"], "repo_a", env=g["peer_env"])
+        assert (peer_wt / "first.txt").read_text() == "first.txt content\nedited on sender\n"
+        status = _git(peer_wt, "status", "--porcelain").stdout.strip()
+        assert status.endswith("M first.txt")
+        assert "second.txt" not in status
+
+    def test_non_slug_branch_still_crosses_with_sender_origin_unreachable(
+        self, move_env_extra_branch
+    ):
+        from camp.provision.reconcile import _worktree_path
+        from camp.transfer.move import move_workspace
+
+        g = move_env_extra_branch
+        _git(g["sender_repo"], "remote", "set-url", "origin", "https://nonexistent.invalid.example/repo.git")
+
+        result = move_workspace(
+            host=g["host"],
+            group=g["group"],
+            group_name="testgroup",
+            slug=g["slug"],
+            sender_name="host-a",
+            overwrite=False,
+            env=g["sender_env"],
+            run=g["run"],
+            stream_spawn=g["stream_spawn"],
+        )
+        assert result.members == ("repo_a",)
+
+        peer_wt = _worktree_path("testgroup", g["slug"], "repo_a", env=g["peer_env"])
+        peer_tip = _git_out(peer_wt, "rev-parse", "HEAD")
+        assert peer_tip == g["sender_tip"]
+
+
+class TestDetachedHeadOnSender:
+    def test_detached_at_a_commit_not_on_the_slug_branch_fails_with_check_out_a_branch_message(
+        self, move_env_extra_branch
+    ):
+        from camp.transfer.move import PhaseFailed, move_workspace
+
+        g = move_env_extra_branch
+        _git(g["wt_path"], "checkout", "--detach", "HEAD")
+
+        with pytest.raises(PhaseFailed) as exc_info:
+            move_workspace(
+                host=g["host"],
+                group=g["group"],
+                group_name="testgroup",
+                slug=g["slug"],
+                sender_name="host-a",
+                overwrite=False,
+                env=g["sender_env"],
+                run=g["run"],
+                stream_spawn=g["stream_spawn"],
+            )
+
+        assert exc_info.value.phase == "history (repo_a)"
+        assert "check out a branch" in exc_info.value.detail
+
+    def test_detached_at_a_commit_already_on_the_slug_branch_proceeds(self, move_env):
+        """`move_env`'s sender worktree is checked out directly on the SLUG
+        branch — detaching HEAD there lands on a commit that IS reachable
+        from the slug branch, so the move must proceed exactly as today."""
+        from camp.transfer.move import move_workspace
+
+        g = move_env
+        _git(g["wt_path"], "checkout", "--detach", "HEAD")
+
+        result = move_workspace(
+            host=g["host"],
+            group=g["group"],
+            group_name="testgroup",
+            slug=g["slug"],
+            sender_name="host-a",
+            overwrite=False,
+            env=g["sender_env"],
+            run=g["run"],
+            stream_spawn=g["stream_spawn"],
+        )
+        assert result.members == ("repo_a",)
+
+
 # ---------------------------------------------------------------------------
 # camp.transfer.move — proving a crossed conversation resumes on a real peer,
 # through `camp`'s own CLI rather than at the handler. Reuses `move_env`'s

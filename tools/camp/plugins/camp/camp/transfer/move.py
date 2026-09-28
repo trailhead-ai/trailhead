@@ -15,6 +15,22 @@ before `finish` because `finish` triggers a manifest rebuild that only
 carries an owner forward, never sets one; a claim not yet durable on disk
 when that rebuild runs would not be preserved.
 
+**The checked-out branch crosses with its commits and its name.** Before
+each member's `history` phase, this module reads that member's SENDER-side
+worktree (`camp.provision.reconcile._worktree_path`, keyed by this host's
+own `env`) to see what branch it is actually on. Checked out on the
+workspace's own slug branch (or a detached HEAD already reachable from it),
+behavior is unchanged. Checked out on any OTHER branch, that branch's name
+is passed to `camp.transfer.history.send_history` as `extra_ref` and rides
+the SAME bundle as the slug branch — never a second transfer, never through
+the group's shared remote — so the peer's worktree for that member ends up
+checked out on a branch of that same name, at that same tip, and the
+`worktree` phase's archive then lands only genuinely uncommitted edits as a
+diff there. A detached HEAD at a commit NOT reachable from the slug branch
+fails that member's `history` phase (`PhaseFailed`, naming the member and
+telling the operator to check out a branch) before any bundle for that
+member is built.
+
 Once `move_workspace` returns (every phase, including `finish`, has
 answered), the CLI layer (`camp.cli.transfer._cmd_transfer_group_cli`) drives
 two more, purely local steps this module does not perform itself, in a fixed
@@ -211,6 +227,43 @@ class MoveResult:
     members: tuple[str, ...]
     conversations: tuple[ConversationCrossed, ...] = ()
     claimed_owner: str | None = None
+
+
+def _extra_branch_or_refuse(wt_path: Path, slug_branch: str, *, member: str) -> str | None:
+    """The sender's own checked-out branch for *wt_path*, to carry alongside
+    *slug_branch* in the same bundle — or `None` when the worktree is
+    checked out on *slug_branch* itself (today's behavior, unchanged).
+
+    A detached HEAD is refused here, before the bundle is ever built, UNLESS
+    the detached commit is already reachable from *slug_branch* — a commit
+    genuinely on the slug branch never needs an extra ref to cross.
+
+    Raises:
+        PhaseFailed: the worktree has a detached HEAD at a commit not
+            reachable from *slug_branch* — carrying commits that would
+            otherwise be silently collapsed into an uncommitted diff on the
+            peer, exactly the captured incident this module's docstring
+            describes.
+    """
+    from ..gitutil import _git, _git_out
+
+    head_branch = _git_out(wt_path, "rev-parse", "--abbrev-ref", "HEAD")
+    if head_branch == "HEAD":
+        head_sha = _git_out(wt_path, "rev-parse", "HEAD")
+        on_slug_branch = _git(
+            wt_path, "merge-base", "--is-ancestor", head_sha, slug_branch
+        ).returncode == 0
+        if not on_slug_branch:
+            raise PhaseFailed(
+                f"history ({member})",
+                f"worktree at {wt_path} has a detached HEAD at {head_sha} "
+                "not reachable from the workspace branch — check out a "
+                "branch before transferring",
+            )
+        return None
+    if head_branch == slug_branch:
+        return None
+    return head_branch
 
 
 def _outcome_detail(outcome: TransportOutcome) -> str:
@@ -450,6 +503,8 @@ def move_workspace(
         name = member["name"]
         on_phase(f"history: {name}")
         repo_root = Path(member["repo_root"])
+        wt_path = _worktree_path(group_name, slug, name, env=env)
+        extra_ref = _extra_branch_or_refuse(wt_path, branch, member=name)
         outcome = send_history(
             host,
             group=group_name,
@@ -457,6 +512,7 @@ def move_workspace(
             member=name,
             repo_root=repo_root,
             ref=branch,
+            extra_ref=extra_ref,
             basis_commit=basis_by_member.get(name),
             connect_timeout=connect_timeout,
             server_alive_interval=server_alive_interval,

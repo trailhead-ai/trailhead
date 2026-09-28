@@ -205,6 +205,8 @@ def _build_receive_parser(phase: str) -> CampParser:
         parser.add_argument("--subpath")
     if phase in ("history", "worktree"):
         parser.add_argument("--member")
+    if phase == "history":
+        parser.add_argument("--branch")
     return parser
 
 
@@ -278,6 +280,8 @@ def _cmd_transfer_receive_cli(args: list[str]) -> None:
         phase_kwargs = {"member": parsed.member}
         if phase == "history":
             phase_kwargs["bundle_bytes"] = sys.stdin.buffer.read()
+            if parsed.branch:
+                phase_kwargs["branch"] = parsed.branch
         else:
             phase_kwargs["archive_stream"] = sys.stdin.buffer
 
