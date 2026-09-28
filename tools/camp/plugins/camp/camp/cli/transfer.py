@@ -107,9 +107,10 @@ is not PASSED — the same order the checks themselves are evaluated and
 rendered in, so the exit code always names the FIRST thing an operator would
 read as wrong, never a later one that happens to sort first some other way.
 `EXIT_NOT_CLEAN` is the deliberate shared code for every check this table does
-not call out by name: check 1 (self-declared name) and checks 6-11 (peer name
-collision, peer group/account/slug checks, the excluded-set declaration, and
-conversation enumeration) do not need their own operator-visible exit code —
+not call out by name: check 1 (self-declared name) and checks 6-12 (peer name
+collision, peer group/account/slug checks, the excluded-set declaration,
+conversation enumeration, and the worktree escape walk) do not need their own
+operator-visible exit code —
 their distinguishing detail is carried in the rendered check text and (for
 `--json`) in the check's own `status`/`detail`/`transport_outcome` fields, not
 in the process exit code. `EXIT_OVERWRITE_REQUIRED`, `EXIT_PHASE_FAILED`, and
@@ -320,7 +321,7 @@ EXIT_PHASE_INDETERMINATE = 12
 #: name absent from this table (or present but not the qualifying status)
 #: falls through to `EXIT_NOT_CLEAN`. Keyed on the exact `Check.name` strings
 #: `camp.transfer.preflight.compose_preflight` produces — those strings are
-#: this module's only handle on which of the eleven checks is which, since
+#: this module's only handle on which of the twelve checks is which, since
 #: `Check` itself carries no separate machine-readable id.
 _EXIT_BY_CHECK_NAME = {
     "the workspace exists here": EXIT_UNKNOWN_SLUG,
@@ -682,9 +683,16 @@ def _cmd_transfer_group_cli(
     from ..group.manifest import ManifestError, manifest_path_for, owner_of, read_central_manifest
     from ..host.config import HostConfigError, load_hosts, self_host_name
     from ..launch.profile import harness_for
+    from ..provision.reconcile import _branch_name, _worktree_path
     from ..spine import _die
-    from ..transfer.preflight import MemberDeclaration, Verdict, compose_preflight
+    from ..transfer.preflight import (
+        MemberDeclaration,
+        MemberWorktreeWalk,
+        Verdict,
+        compose_preflight,
+    )
     from ..transfer.probe import InvalidSlugForTransport, probe_peer
+    from ..transfer.worktree import escaping_members
     from .dispatch import _slug_from_name_or_cwd
     from .session import _parsable_groups
 
@@ -747,6 +755,21 @@ def _cmd_transfer_group_cli(
         for m in group["members"]
     )
 
+    branch_pattern: str = group.get("branch_pattern", "worktree-{slug}")
+    branch = _branch_name(slug, branch_pattern)
+
+    worktree_escapes = tuple(
+        MemberWorktreeWalk(
+            name=m["name"],
+            escaped=escaping_members(
+                _worktree_path(group_name, slug, m["name"], env=resolved_env),
+                m.get("excluded") or (),
+                branch,
+            ),
+        )
+        for m in group["members"]
+    )
+
     session_groups = _parsable_groups()
     conversations = _gather_conversations(
         group_name=group_name, slug=slug, session_groups=session_groups, resolved_env=resolved_env
@@ -761,6 +784,7 @@ def _cmd_transfer_group_cli(
         peer_declared=peer_declared,
         probe_result=probe_result,
         members=members,
+        worktree_escapes=worktree_escapes,
         slug=slug,
         conversations=conversations,
     )

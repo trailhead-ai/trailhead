@@ -129,12 +129,15 @@ def _compose(
     members: tuple = (),
     slug: str = "my-slug",
     conversations: tuple | None = (),
+    worktree_escapes: Any = _UNSET,
 ):
     preflight = _preflight_module()
     if probe_result is _UNSET:
         probe_result = _probe_answer()
     if not members:
         members = (_member("repo-a", ("build/",)),)
+    if worktree_escapes is _UNSET:
+        worktree_escapes = tuple(_walk(m.name, ()) for m in members)
     return preflight.compose_preflight(
         self_name=self_name,
         self_account=self_account,
@@ -146,6 +149,7 @@ def _compose(
         members=members,
         slug=slug,
         conversations=conversations,
+        worktree_escapes=worktree_escapes,
     )
 
 
@@ -427,6 +431,121 @@ def test_unenumerable_conversations_fail_that_check_and_uncleans_the_verdict():
     check = _check(result, "the conversations rooted here are enumerated")
     assert check.status is preflight.CheckStatus.FAILED
     assert result.verdict is preflight.Verdict.NOT_CLEAN
+
+
+# ---------------------------------------------------------------------------
+# Check 12 — no member's worktree carries a link escaping its root
+# ---------------------------------------------------------------------------
+
+_CHECK_12 = "no member's worktree carries a link escaping its root"
+
+
+def _walk(name: str, escaped) -> Any:
+    preflight = _preflight_module()
+    return preflight.MemberWorktreeWalk(name=name, escaped=escaped)
+
+
+def test_no_escaping_members_is_a_clean_pass():
+    preflight = _preflight_module()
+    result = _compose(owner="host-a", worktree_escapes=(_walk("repo-a", ()),))
+    check = _check(result, _CHECK_12)
+    assert check.status is preflight.CheckStatus.PASSED
+    assert result.verdict is preflight.Verdict.WOULD_TRANSFER
+
+
+def test_an_escaping_member_fails_naming_member_path_and_remedy():
+    preflight = _preflight_module()
+    result = _compose(
+        owner="host-a",
+        worktree_escapes=(_walk("repo-a", ("tools/camp/.venv/bin/python",)),),
+    )
+    check = _check(result, _CHECK_12)
+    assert check.status is preflight.CheckStatus.FAILED
+    assert "repo-a" in check.detail
+    assert "tools/camp/.venv/bin/python" in check.detail
+    assert "excluded" in check.detail
+    assert result.verdict is preflight.Verdict.NOT_CLEAN
+
+
+def test_an_unwalkable_member_fails_never_passes():
+    preflight = _preflight_module()
+    result = _compose(owner="host-a", worktree_escapes=(_walk("repo-a", None),))
+    check = _check(result, _CHECK_12)
+    assert check.status is preflight.CheckStatus.FAILED
+    assert "repo-a" in check.detail
+    assert "could not be walked" in check.detail
+    assert result.verdict is preflight.Verdict.NOT_CLEAN
+
+
+def test_a_declared_member_with_no_walk_entry_is_treated_as_unwalkable():
+    """A member the caller declared but never handed a walk result for must
+    fail this check by name, exactly like a member the walk itself could not
+    read — never silently skipped, which would let the check pass having
+    observed nothing about that member at all."""
+    preflight = _preflight_module()
+    result = _compose(
+        owner="host-a",
+        members=(
+            _member("repo-a", ("build/",)),
+            _member("repo-b", ("build/",)),
+        ),
+        worktree_escapes=(_walk("repo-a", ()),),
+    )
+    check = _check(result, _CHECK_12)
+    assert check.status is preflight.CheckStatus.FAILED
+    assert "repo-b" in check.detail
+    assert "could not be walked" in check.detail
+    assert result.verdict is preflight.Verdict.NOT_CLEAN
+
+
+def test_worktree_escapes_empty_still_fails_a_declared_member_as_unwalkable():
+    """`worktree_escapes=()` must still fail check 12 by name for a declared
+    member the caller handed back no walk entry for — the same "never
+    silently PASSED having observed nothing" property as the omitted-kwarg
+    case, but exercised as real behaviour: an empty tuple is a legitimate
+    value the CLI layer can hand in (e.g. every member excluded), and the
+    check must not read that as clean."""
+    preflight = _preflight_module()
+    result = _compose(
+        owner="host-a",
+        members=(_member("repo-a", ("build/",)),),
+        worktree_escapes=(),
+    )
+    check = _check(result, _CHECK_12)
+    assert check.status is preflight.CheckStatus.FAILED
+    assert "repo-a" in check.detail
+    assert "could not be walked" in check.detail
+    assert result.verdict is preflight.Verdict.NOT_CLEAN
+
+
+def test_more_than_ten_offenders_are_capped_with_a_count():
+    preflight = _preflight_module()
+    paths = tuple(f"path-{i}" for i in range(13))
+    result = _compose(owner="host-a", worktree_escapes=(_walk("repo-a", paths),))
+    check = _check(result, _CHECK_12)
+    assert check.status is preflight.CheckStatus.FAILED
+    for path in paths[:10]:
+        assert path in check.detail
+    for path in paths[10:]:
+        assert path not in check.detail
+    assert "and 3 more" in check.detail
+
+
+def test_offenders_in_two_members_both_named():
+    preflight = _preflight_module()
+    result = _compose(
+        owner="host-a",
+        worktree_escapes=(
+            _walk("repo-a", ("a-link",)),
+            _walk("repo-b", ("b-link",)),
+        ),
+    )
+    check = _check(result, _CHECK_12)
+    assert check.status is preflight.CheckStatus.FAILED
+    assert "repo-a" in check.detail
+    assert "a-link" in check.detail
+    assert "repo-b" in check.detail
+    assert "b-link" in check.detail
 
 
 # ---------------------------------------------------------------------------
