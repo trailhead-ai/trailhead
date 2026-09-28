@@ -477,13 +477,6 @@ def test_list_windows_argv_is_exact_and_target_is_qualified(monkeypatch):
     assert "my-workspace" not in tmux_module._LIST_WINDOWS_FORMAT
 
 
-def _wrapper_operands(tail):
-    """Split a `sh -c <script> camp-cwd <dir> <command...>` pane argv into
-    `(dir, command)`; asserts the wrapper's fixed shape on the way."""
-    assert tail[0] == "sh" and tail[1] == "-c" and tail[3] == "camp-cwd"
-    return tail[4], tail[5:]
-
-
 def test_new_session_composes_no_command_and_no_argv_of_its_own(monkeypatch):
     """`new_session` is a thin wrapper over `spawn_session` with an empty
     command — it must not build a second `new-session` argv of its own.
@@ -504,10 +497,22 @@ def test_new_session_composes_no_command_and_no_argv_of_its_own(monkeypatch):
         "my-ws", cwd="/tmp/ws", env={"FOO": "bar"}, timeout=5
     )
 
-    assert len(calls) == 1
-    head, wrapper = calls[0][:8], calls[0][8:]
-    assert head == ["tmux", "new-session", "-d", "-s", "my-ws", "-c", "/tmp/ws", "sh"]
-    assert _wrapper_operands(["sh", *wrapper]) == ("/tmp/ws", [])
+    assert calls == [
+        [
+            "tmux",
+            "new-session",
+            "-d",
+            "-s",
+            "my-ws",
+            "-c",
+            "/tmp/ws",
+            "sh",
+            "-c",
+            calls[0][9],
+            "camp-cwd",
+            "/tmp/ws",
+        ]
+    ]
 
 
 def test_new_session_names_with_s_unprefixed_while_a_target_in_the_same_flow_is_qualified(
@@ -641,7 +646,6 @@ def test_new_window_argv_carries_target_cwd_and_command_with_qualified_target(
             "30",
         ]
     ]
-    assert _wrapper_operands(calls[0][11:]) == ("/tmp/ws", ["sleep", "30"])
 
 
 def test_new_window_targeting_a_strict_prefix_of_another_live_session_does_not_resolve_to_it(
@@ -921,7 +925,6 @@ def test_new_session_with_window_argv_carries_every_operand_in_order(monkeypatch
             "30",
         ]
     ]
-    assert _wrapper_operands(calls[0][12:]) == ("/tmp/ws", ["sleep", "30"])
 
 
 def test_new_session_with_window_a_name_holding_spaces_round_trips_whole(monkeypatch):

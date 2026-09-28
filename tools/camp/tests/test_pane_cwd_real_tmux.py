@@ -127,13 +127,19 @@ def _cwd_of(pid: str) -> str:
     return names[0] if names else ""
 
 
-def _await_cwd(pid: str, expected: Path) -> str:
-    deadline = time.monotonic() + _WAIT_SECONDS
-    seen = _cwd_of(pid)
-    while seen != str(expected) and time.monotonic() < deadline:
+def _wait_until(probe, done, timeout: float = _WAIT_SECONDS):
+    """Call *probe* until *done* accepts its answer or *timeout* passes; return
+    the last answer."""
+    deadline = time.monotonic() + timeout
+    seen = probe()
+    while not done(seen) and time.monotonic() < deadline:
         time.sleep(0.05)
-        seen = _cwd_of(pid)
+        seen = probe()
     return seen
+
+
+def _await_cwd(pid: str, expected: Path) -> str:
+    return _wait_until(lambda: _cwd_of(pid), lambda seen: seen == str(expected))
 
 
 def _pane_pid(sock: str, target: str) -> str:
@@ -202,19 +208,13 @@ def test_respawn_first_pane_restarts_in_the_requested_dir_when_the_server_cwd_is
     start()
     want = tmp_path / "ws"
     want.mkdir()
-    done = Tmux().new_session("camp-t", cwd=want, timeout=5)
-    assert done.returncode == 0, done.stderr
-    old_pid = _pane_pid(sock, "=camp-t:")
+    old_pid = _spawn("new_session", sock, "camp-t", want)
     assert _await_cwd(old_pid, want) == str(want)
 
     answer = Tmux().respawn_first_pane("camp-t", timeout=5)
     assert answer is not None and answer.returncode == 0, answer
 
-    deadline = time.monotonic() + _WAIT_SECONDS
-    new_pid = _pane_pid(sock, "=camp-t:")
-    while new_pid == old_pid and time.monotonic() < deadline:
-        time.sleep(0.05)
-        new_pid = _pane_pid(sock, "=camp-t:")
+    new_pid = _wait_until(lambda: _pane_pid(sock, "=camp-t:"), lambda pid: pid != old_pid)
     assert new_pid != old_pid, "respawn-pane -k must start a new process"
     assert _await_cwd(new_pid, want) == str(want)
 
@@ -237,12 +237,11 @@ def test_a_missing_dir_never_runs_the_command_and_leaves_no_pane(
         "starter", cwd=missing, window_name="doomed", command=command, timeout=5
     )
 
-    deadline = time.monotonic() + 2.0
-    names = ["doomed"]
-    while "doomed" in names and time.monotonic() < deadline:
-        time.sleep(0.05)
-        listed = _sock_run(sock, "list-windows", "-t", "=starter", "-F", "#{window_name}")
-        names = listed.stdout.split()
+    names = _wait_until(
+        lambda: _sock_run(sock, "list-windows", "-t", "=starter", "-F", "#{window_name}").stdout.split(),
+        lambda names: "doomed" not in names,
+        timeout=2.0,
+    )
     assert "doomed" not in names, (answer, names)
     assert not marker.exists(), "the wrapped command must not run when the cd fails"
 
@@ -253,8 +252,6 @@ def test_a_missing_dir_never_runs_the_command_and_leaves_no_pane(
 def test_empty_command_pane_runs_tmux_default_shell_not_the_starters_shell(
     stale_server, tmp_path: Path
 ) -> None:
-    from camp.launch.tmux import Tmux
-
     sock, start = stale_server
     start(_clean_env(SHELL="/bin/sh"))
     set_shell = _sock_run(sock, "set", "-g", "default-shell", "/bin/bash")
@@ -262,15 +259,12 @@ def test_empty_command_pane_runs_tmux_default_shell_not_the_starters_shell(
     want = tmp_path / "ws"
     want.mkdir()
 
-    done = Tmux().new_session("camp-t", cwd=want, timeout=5)
-    assert done.returncode == 0, done.stderr
-    pid = _pane_pid(sock, "=camp-t:")
+    pid = _spawn("new_session", sock, "camp-t", want)
 
-    deadline = time.monotonic() + _WAIT_SECONDS
-    comm = ""
-    while comm != "bash" and time.monotonic() < deadline:
-        time.sleep(0.05)
-        comm = subprocess.run(
+    comm = _wait_until(
+        lambda: subprocess.run(
             ["ps", "-o", "comm=", "-p", pid], capture_output=True, text=True, timeout=5
-        ).stdout.strip()
+        ).stdout.strip(),
+        lambda comm: comm == "bash",
+    )
     assert comm == "bash"
