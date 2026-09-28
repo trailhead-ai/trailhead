@@ -238,32 +238,57 @@ def _extra_branch_or_refuse(wt_path: Path, slug_branch: str, *, member: str) -> 
     the detached commit is already reachable from *slug_branch* — a commit
     genuinely on the slug branch never needs an extra ref to cross.
 
+    Reads HEAD via `git symbolic-ref -q HEAD` (the full `refs/heads/<name>`
+    form, never `--short`) rather than `git rev-parse --abbrev-ref HEAD`:
+    the latter disambiguates against a same-named ref elsewhere in the
+    namespace (a tag sharing the branch's name is enough) by reporting
+    `heads/<name>` instead of `<name>` — carrying that spurious `heads/`
+    prefix as far as the peer's `--branch` would silently ask it to check
+    out a branch that does not exist. `symbolic-ref`'s full form names
+    exactly what HEAD points at, with no such disambiguation to strip.
+
     Raises:
         PhaseFailed: the worktree has a detached HEAD at a commit not
             reachable from *slug_branch* — carrying commits that would
             otherwise be silently collapsed into an uncommitted diff on the
             peer, exactly the captured incident this module's docstring
-            describes.
+            describes. Also raised when HEAD cannot be read at all — a
+            missing or unborn worktree — rather than falling through with
+            an empty branch name.
     """
     from ..gitutil import _git, _git_out
 
-    head_branch = _git_out(wt_path, "rev-parse", "--abbrev-ref", "HEAD")
-    if head_branch == "HEAD":
-        head_sha = _git_out(wt_path, "rev-parse", "HEAD")
-        on_slug_branch = _git(
-            wt_path, "merge-base", "--is-ancestor", head_sha, slug_branch
-        ).returncode == 0
-        if not on_slug_branch:
+    symbolic = _git(wt_path, "symbolic-ref", "-q", "HEAD")
+    if symbolic.returncode == 0:
+        raw_ref = symbolic.stdout.strip()
+        head_branch = raw_ref.removeprefix("refs/heads/")
+        if not head_branch:
             raise PhaseFailed(
                 f"history ({member})",
-                f"worktree at {wt_path} has a detached HEAD at {head_sha} "
-                "not reachable from the workspace branch — check out a "
-                "branch before transferring",
+                f"could not read HEAD at {wt_path} — missing or unborn "
+                "worktree",
             )
-        return None
-    if head_branch == slug_branch:
-        return None
-    return head_branch
+        if head_branch == slug_branch:
+            return None
+        return head_branch
+
+    head_sha = _git_out(wt_path, "rev-parse", "HEAD")
+    if not head_sha:
+        raise PhaseFailed(
+            f"history ({member})",
+            f"could not read HEAD at {wt_path} — missing or unborn worktree",
+        )
+    on_slug_branch = _git(
+        wt_path, "merge-base", "--is-ancestor", head_sha, slug_branch
+    ).returncode == 0
+    if not on_slug_branch:
+        raise PhaseFailed(
+            f"history ({member})",
+            f"worktree at {wt_path} has a detached HEAD at {head_sha} "
+            "not reachable from the workspace branch — check out a "
+            "branch before transferring",
+        )
+    return None
 
 
 def _outcome_detail(outcome: TransportOutcome) -> str:

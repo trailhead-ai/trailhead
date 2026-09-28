@@ -1453,6 +1453,152 @@ class TestNonSlugBranchCrossesWithItsCommits:
         assert peer_tip == g["sender_tip"]
 
 
+class TestRealNonNullBasisEndToEnd:
+    """The captured incident's shape, end to end through `move_workspace` —
+    but with a REAL non-null basis (the peer already holds it, resolved
+    through the member's own declared `base`), not the `no-such-base`
+    forced-null shape every other move-level fixture in this file uses.
+    The slug branch sits exactly at that basis — no commits of its own —
+    while the extra branch is two commits ahead, exercising
+    `_negation_for`'s contained-ref path through the whole pipeline rather
+    than only at the bundle-building unit level."""
+
+    def test_extra_branch_two_commits_ahead_of_a_real_basis_lands_at_its_tip(
+        self, tmp_path: Path
+    ):
+        from camp.provision.reconcile import _worktree_path
+        from camp.transfer.move import move_workspace
+
+        slug = "feat-basis"
+        slug_branch = f"worktree-{slug}"
+        extra_branch = "feature/two-ahead"
+
+        sender_repo = tmp_path / "sender"
+        init_git_repo(sender_repo, origin=True)
+        # A commit before branching gives the basis a PARENT to negative
+        # against — `init_git_repo`'s lone commit is a root commit, which
+        # `_negation_for` can never negative against (no parent exists), so
+        # branching there would make every bundle a full one regardless of
+        # whether the real basis was actually used.
+        (sender_repo / "basis-parent.txt").write_text("gives the basis a parent\n")
+        _git(sender_repo, "add", "basis-parent.txt")
+        _git(
+            sender_repo,
+            "-c", "user.email=t@t.com",
+            "-c", "user.name=t",
+            "commit", "-m", "basis parent", "--no-gpg-sign",
+        )
+        _git(sender_repo, "branch", slug_branch)
+
+        sender_env = camp_state_env(tmp_path / "sender")
+        wt_path = _worktree_path("testgroup", slug, "repo_a", env=sender_env)
+        _git(sender_repo, "worktree", "add", str(wt_path), slug_branch)
+        _git(wt_path, "checkout", "-b", extra_branch)
+        for name in ("first.txt", "second.txt"):
+            (wt_path / name).write_text(f"{name} content\n")
+            _git(wt_path, "add", name)
+            _git(
+                wt_path,
+                "-c", "user.email=t@t.com",
+                "-c", "user.name=t",
+                "commit", "-m", name, "--no-gpg-sign",
+            )
+        extra_tip = _git_out(wt_path, "rev-parse", "HEAD")
+
+        group = {
+            "group": {"name": "testgroup"},
+            "members": [
+                {
+                    "name": "repo_a",
+                    "repo_root": str(sender_repo),
+                    "tasks": [],
+                    "base": "origin/main",
+                    "excluded": [],
+                }
+            ],
+            "branch_pattern": "worktree-{slug}",
+        }
+
+        peer = _move_peer(tmp_path)
+        basis = _git_out(sender_repo, "rev-parse", "main")
+        subprocess.run(
+            [
+                "git", "-C", str(peer["peer_repo"]), "fetch", str(sender_repo),
+                "main:refs/remotes/origin/main",
+            ],
+            check=True,
+            capture_output=True,
+        )
+        assert _git_out(peer["peer_repo"], "rev-parse", "origin/main") == basis
+
+        # Beyond the landed content: prove the REAL basis was actually used
+        # to negative the bundle — a wiring bug that silently dropped the
+        # basis (treating it as null) would still land the same final
+        # content, since a full bundle carries every ref's tip too, so the
+        # end state alone cannot tell the two apart.
+        captured_argv: list[str] = []
+
+        def _capturing_producer_spawn(argv):
+            captured_argv.extend(argv)
+            return subprocess.Popen(list(argv), stdout=subprocess.PIPE)
+
+        result = move_workspace(
+            host=peer["host"],
+            group=group,
+            group_name="testgroup",
+            slug=slug,
+            sender_name="host-a",
+            overwrite=False,
+            env=sender_env,
+            run=peer["run"],
+            stream_spawn=peer["stream_spawn"],
+            history_producer_spawn=_capturing_producer_spawn,
+        )
+        assert result.members == ("repo_a",)
+        assert "--not" in captured_argv, captured_argv
+
+        peer_wt = _worktree_path("testgroup", slug, "repo_a", env=peer["peer_env"])
+        assert _git_out(peer_wt, "rev-parse", "--abbrev-ref", "HEAD") == extra_branch
+        assert _git_out(peer_wt, "rev-parse", "HEAD") == extra_tip
+
+        slug_landed = _git_out(peer["peer_repo"], "rev-parse", f"refs/heads/{slug_branch}")
+        assert slug_landed == basis
+
+
+class TestExtraBranchOrRefuseHeadRead:
+    """`_extra_branch_or_refuse`'s HEAD read, tested directly against a
+    plain git repo (no camp worktree machinery needed)."""
+
+    def test_tag_sharing_the_branch_name_does_not_yield_a_heads_prefixed_name(
+        self, tmp_path: Path
+    ):
+        from camp.transfer.move import _extra_branch_or_refuse
+
+        repo = tmp_path / "repo"
+        init_git_repo(repo, origin=False)
+        slug_branch = "worktree-feat-x"
+        _git(repo, "branch", slug_branch)
+        _git(repo, "checkout", "-b", "task")
+        # An annotated tag of the SAME name as the checked-out branch is
+        # what makes `git rev-parse --abbrev-ref HEAD` ambiguous and forces
+        # it to disambiguate as `heads/task` instead of `task`.
+        _git(repo, "tag", "-m", "test tag", "--no-sign", "task")
+
+        result = _extra_branch_or_refuse(repo, slug_branch, member="repo_a")
+
+        assert result == "task"
+
+    def test_missing_worktree_raises_phase_failed_naming_the_member(self, tmp_path: Path):
+        from camp.transfer.move import PhaseFailed, _extra_branch_or_refuse
+
+        missing = tmp_path / "does-not-exist"
+
+        with pytest.raises(PhaseFailed) as exc_info:
+            _extra_branch_or_refuse(missing, "worktree-feat-x", member="repo_a")
+
+        assert exc_info.value.phase == "history (repo_a)"
+
+
 class TestDetachedHeadOnSender:
     def test_detached_at_a_commit_not_on_the_slug_branch_fails_with_check_out_a_branch_message(
         self, move_env_extra_branch
@@ -1746,6 +1892,35 @@ class TestTransferEndToEndThroughTheRealEntryPath:
 
         peer_manifest = manifest_path_for("testgroup", c["slug"], env=c["peer_env"])
         assert owner_of(read_central_manifest(peer_manifest)) == "host-b"
+
+
+class TestDetachedHeadRefusalThroughTheRealCli:
+    def test_exits_phase_failed_and_the_peer_receives_no_bundle_or_refs(self, e2e_env):
+        """A sender worktree with a detached HEAD at a commit not reachable
+        from the slug branch, driven through the real `camp transfer`
+        entry path — the exit code and the peer's own repository state are
+        each asserted separately."""
+        c = e2e_env
+        transfer = _transfer_module()
+
+        _git(c["wt_path"], "checkout", "--detach", "HEAD")
+        (c["wt_path"] / "orphan.txt").write_text("never reachable from the slug branch\n")
+        _git(c["wt_path"], "add", "orphan.txt")
+        _git(
+            c["wt_path"],
+            "-c", "user.email=t@t.com",
+            "-c", "user.name=t",
+            "commit", "-m", "orphan", "--no-gpg-sign",
+        )
+
+        result = _run_camp(
+            c["sender_cli_env"], "transfer", c["slug"], "--to", "host-b", "--group", "testgroup"
+        )
+
+        assert result.returncode == transfer.EXIT_PHASE_FAILED
+
+        refs = _git(c["peer_repo"], "for-each-ref", "--format=%(refname)")
+        assert f"refs/heads/{c['branch']}" not in refs.stdout
 
 
 def _cross_one_conversation(
@@ -2248,6 +2423,22 @@ class TestReleaseOnARealPeer:
         assert session_id not in {row["session_id"] for row in sender_rows}, sender_rows
 
 
+class TestSenderOnSlugBranchLandsOnSlugBranch:
+    def test_peer_worktree_is_on_the_slug_branch(self, move_env):
+        """`move_env`'s sender worktree is checked out directly on the slug
+        branch — no extra branch rides along, so the peer worktree must end
+        up on the slug branch too, exactly like today."""
+        from camp.provision.reconcile import _worktree_path
+
+        g = move_env
+
+        result = _move_from(g)
+        assert result.members == ("repo_a",)
+
+        peer_wt = _worktree_path("testgroup", g["slug"], "repo_a", env=g["peer_env"])
+        assert _git_out(peer_wt, "rev-parse", "--abbrev-ref", "HEAD") == g["branch"]
+
+
 class TestMoveWorkspaceEndToEnd:
     def test_content_crosses_in_phase_order_against_a_real_peer(self, move_env):
         from camp.provision.reconcile import _worktree_path
@@ -2577,6 +2768,7 @@ def test_move_workspace_reports_each_phase_before_a_slow_one_completes():
         with phases_lock:
             phases.append(phase)
 
+    _seed_sender_worktree("feat-slow")
     group = {
         "group": {"name": "testgroup"},
         "members": [{"name": "repo_a", "repo_root": "/nonexistent", "excluded": []}],
@@ -2685,6 +2877,7 @@ def test_conversations_phase_announced_before_its_own_slow_transport_completes()
         with phases_lock:
             phases.append(phase)
 
+    _seed_sender_worktree("feat-slow-conv")
     group = {
         "group": {"name": "testgroup"},
         "members": [{"name": "repo_a", "repo_root": "/nonexistent", "excluded": []}],
@@ -2748,9 +2941,31 @@ def test_conversations_phase_announced_before_its_own_slow_transport_completes()
     ]
 
 
-def _claim_fixture_group_and_host():
+def _seed_sender_worktree(slug: str, member: str = "repo_a") -> None:
+    """A minimal real git worktree, checked out on `worktree-<slug>`, at the
+    exact path `_extra_branch_or_refuse` reads the sender's HEAD from for
+    *slug*/*member*.
+
+    Every claim/phase-ordering fixture below drives `move_workspace` with a
+    deliberately fake `repo_root` (`/nonexistent`) — their `run` and
+    `*_producer_spawn` fakes never shell out to it for real — but
+    `_extra_branch_or_refuse` reads the sender's OWN worktree for real,
+    independent of `repo_root`. Without a real worktree there, it now
+    correctly refuses a missing/unborn one (`PhaseFailed`) rather than
+    silently treating a failed HEAD read as "no extra branch", so these
+    fixtures need one.
+    """
+    from camp.provision.reconcile import _worktree_path
+
+    wt_path = _worktree_path("testgroup", slug, member)
+    init_git_repo(wt_path, origin=False)
+    _git(wt_path, "checkout", "-b", f"worktree-{slug}")
+
+
+def _claim_fixture_group_and_host(slug: str):
     from camp.host.config import Host
 
+    _seed_sender_worktree(slug)
     group = {
         "group": {"name": "testgroup"},
         "members": [{"name": "repo_a", "repo_root": "/nonexistent", "excluded": []}],
@@ -2822,7 +3037,7 @@ def test_claim_phase_announced_before_its_own_network_call_completes():
         with phases_lock:
             phases.append(phase)
 
-    group, host = _claim_fixture_group_and_host()
+    group, host = _claim_fixture_group_and_host("feat-slow-x")
 
     result_box: dict = {}
 
@@ -2907,7 +3122,7 @@ def test_claim_phase_failure_is_named_and_never_swallowed_into_success():
             stderr=subprocess.PIPE,
         )
 
-    group, host = _claim_fixture_group_and_host()
+    group, host = _claim_fixture_group_and_host("feat-fail-x")
 
     with pytest.raises(PhaseFailed) as exc_info:
         move_workspace(
@@ -2983,7 +3198,7 @@ def test_claim_phase_fails_closed_against_a_peer_that_does_not_know_the_subcomma
             stderr=subprocess.PIPE,
         )
 
-    group, host = _claim_fixture_group_and_host()
+    group, host = _claim_fixture_group_and_host("feat-oldpeer-x")
 
     with pytest.raises(PhaseFailed) as exc_info:
         move_workspace(
@@ -3060,7 +3275,7 @@ def test_a_finish_refusal_whose_stderr_mentions_overwrite_is_not_promoted_to_ove
             stderr=subprocess.PIPE,
         )
 
-    group, host = _claim_fixture_group_and_host()
+    group, host = _claim_fixture_group_and_host("feat-lastphase-overwrite-x")
 
     with pytest.raises(PhaseFailed) as exc_info:
         move_workspace(
@@ -3129,7 +3344,7 @@ def test_claim_failure_detail_distinguishes_a_timeout_from_an_explicit_refusal()
             stderr=subprocess.PIPE,
         )
 
-    group, host = _claim_fixture_group_and_host()
+    group, host = _claim_fixture_group_and_host("feat-detail-x")
 
     def _drive(run):
         with pytest.raises(PhaseFailed) as exc_info:
@@ -3208,7 +3423,7 @@ def _make_claim_timeout_run(*, probe_answer_kwargs: dict | None):
 def _drive_claim_timeout(run):
     from camp.transfer.move import PhaseFailed, move_workspace
 
-    group, host = _claim_fixture_group_and_host()
+    group, host = _claim_fixture_group_and_host("feat-indoubt-x")
 
     def _tiny_producer(argv):
         return subprocess.Popen(
@@ -3424,7 +3639,7 @@ def test_a_malformed_begin_answer_raises_the_ordinary_pre_commit_phase_failure()
     from camp.host.transport import RawResult
     from camp.transfer.move import PhaseFailed, move_workspace
 
-    group, host = _claim_fixture_group_and_host()
+    group, host = _claim_fixture_group_and_host("feat-badbegin-x")
 
     def _run(argv, execution_timeout, env):
         remote_command = argv[-1]
