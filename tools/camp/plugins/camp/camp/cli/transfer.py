@@ -481,7 +481,8 @@ def _gather_conversations(*, group_name: str, slug: str, session_groups, resolve
     `teardown_guard.gather_pool` to read it (or raise), then
     `camp.transfer.conversations.workspace_conversations` to scope the pool to
     this workspace — with `_locate_transcript` over the same stores, so an
-    unreadable conversation is attributed by where its transcript is kept. `None` here becomes check 11's own FAILED report in
+    unreadable conversation is attributed by where its transcript is kept.
+    `None` here becomes check 11's own FAILED report in
     `compose_preflight` — never a crash and never a silent empty answer.
     """
     from ..group.manifest import workspace_dir

@@ -426,8 +426,8 @@ def test_dry_run_says_which_conversations_will_not_be_transferred(
 
     assert code == transfer.EXIT_WOULD_TRANSFER
     lines = capsys.readouterr().out.splitlines()
-    assert "will not be transferred" in next(l for l in lines if unreadable in l)
-    assert "will not be transferred" not in next(l for l in lines if readable in l)
+    assert "will not be transferred" in next(ln for ln in lines if unreadable in ln)
+    assert "will not be transferred" not in next(ln for ln in lines if readable in ln)
 
 
 # ---------------------------------------------------------------------------
@@ -3953,7 +3953,7 @@ def test_a_completed_move_that_dropped_conversations_exits_with_its_own_code_nam
     captured = capsys.readouterr()
     assert "ownership moved to 'host-b-declared'" in captured.out
     for d in dropped:
-        line = next(l for l in captured.err.splitlines() if d.session_id in l)
+        line = next(ln for ln in captured.err.splitlines() if d.session_id in ln)
         assert d.detail in line
     assert "still resumable on this host" in captured.err
 
@@ -4039,7 +4039,7 @@ def test_a_post_commit_failure_still_names_the_dropped_conversations(
 
     assert code == transfer.EXIT_PHASE_FAILED_POST_COMMIT
     err = capsys.readouterr().err
-    line = next(l for l in err.splitlines() if dropped_id in l)
+    line = next(ln for ln in err.splitlines() if dropped_id in ln)
     assert "its recorded root could not be read" in line
 
 
@@ -4071,7 +4071,7 @@ def test_an_interrupted_local_handover_still_names_the_dropped_conversations(
     code = _run(monkeypatch, ["transfer", "feat-x", "--to", "host-b", "--group", "trailhead"])
 
     assert code == transfer.EXIT_RELEASE_INCOMPLETE
-    line = next(l for l in capsys.readouterr().err.splitlines() if dropped_id in l)
+    line = next(ln for ln in capsys.readouterr().err.splitlines() if dropped_id in ln)
     assert "peer said no" in line
 
 
