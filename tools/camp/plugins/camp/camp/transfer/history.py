@@ -150,15 +150,27 @@ def _negation_for(repo_root: Path, refs: Sequence[str], basis_commit: str) -> li
     against those ref(s)' own immediate parents instead of *basis_commit* —
     for EVERY ref in the bundle, not just the contained one(s), since a
     single `--not` set applies uniformly across every positive ref in one
-    `git bundle create` invocation. This keeps every ref's tip commit in
-    the bundle at the cost of not shrinking a not-yet-contained ref's
-    history as aggressively as it could be — negativing is an optimization,
-    never a correctness requirement (see `build_bundle_argv`'s own
-    docstring), so a less-than-maximal shrink here is acceptable. Only when
-    NONE of *refs* is contained does negativing the whole bundle against
-    *basis_commit* stay safe for every ref at once. A root-commit tip has no
-    parent to negative against, so it (and everything negatived only
-    against it) goes as a full bundle — one commit.
+    `git bundle create` invocation.
+
+    A candidate parent is dropped from the `--not` set entirely, though,
+    when negativing against it would ALSO exclude another ref in *refs* —
+    which happens whenever that other ref is itself reachable from the
+    candidate (an ancestor of it, or equal to it): with two refs on the
+    same line of history (e.g. the slug branch an ancestor of the extra
+    branch, or the mirror), the parent of the LATER ref is the EARLIER
+    ref's own tip, and negativing against it would drop the earlier ref
+    from the bundle exactly the way negativing against *basis_commit*
+    itself would. Every candidate is checked against every ref in *refs*
+    for this before being kept, so this stays correct regardless of which
+    ref is the ancestor. This keeps every ref's tip commit in the bundle at
+    the cost of not shrinking a not-yet-contained ref's history as
+    aggressively as it could be — negativing is an optimization, never a
+    correctness requirement (see `build_bundle_argv`'s own docstring), so a
+    less-than-maximal shrink here is acceptable. Only when NONE of *refs*
+    is contained does negativing the whole bundle against *basis_commit*
+    stay safe for every ref at once. A root-commit tip has no parent to
+    negative against, so it (and everything negatived only against it)
+    goes as a full bundle — one commit.
     """
     from ..gitutil import _git, _git_out
 
@@ -174,7 +186,16 @@ def _negation_for(repo_root: Path, refs: Sequence[str], basis_commit: str) -> li
 
     if not any_contained:
         return ["--not", basis_commit]
-    return ["--not", *contained_parents] if contained_parents else []
+
+    safe_parents = [
+        parent
+        for parent in dict.fromkeys(contained_parents)
+        if not any(
+            _git(repo_root, "merge-base", "--is-ancestor", ref, parent).returncode == 0
+            for ref in refs
+        )
+    ]
+    return ["--not", *safe_parents] if safe_parents else []
 
 
 def send_history(

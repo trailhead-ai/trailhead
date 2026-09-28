@@ -243,6 +243,8 @@ __all__ = [
     "BundleRefUnresolved",
     "InvalidBranchName",
     "DivergentBranchRefused",
+    "BranchCheckedOutElsewhere",
+    "WorktreeBranchMismatchRefused",
     "ArchiveMemberRefused",
     "ConversationSubpathRefused",
     "ConversationDestinationRefused",
@@ -386,6 +388,45 @@ class DivergentBranchRefused(ReceiveRefused):
         )
         self.member = member
         self.branch = branch
+
+
+class BranchCheckedOutElsewhere(ReceiveRefused):
+    """`history`'s `--branch` names a branch that is already checked out in
+    ANOTHER worktree of this host's clone (including the peer's own primary
+    checkout) — refused before EITHER bundle ref is written. `git
+    update-ref` moves a branch's ref unconditionally, even while another
+    worktree has it checked out: that worktree's HEAD keeps pointing at the
+    branch whose tip has now moved out from under it, leaving its working
+    tree looking like a staged revert of every changed file — this refusal
+    exists so that never happens."""
+
+    def __init__(self, member: str, branch: str, worktree_path: str) -> None:
+        super().__init__(
+            f"member {member!r}: branch {branch!r} is already checked out "
+            f"elsewhere on this host, at {worktree_path!r} — refusing to "
+            "move it out from under that worktree"
+        )
+        self.member = member
+        self.branch = branch
+        self.worktree_path = worktree_path
+
+
+class WorktreeBranchMismatchRefused(ReceiveRefused):
+    """`history`'s peer worktree already existed, checked out on a branch
+    other than the one this call requested, and it carries uncommitted
+    changes — refused rather than reporting `ok` while the worktree stays
+    on the wrong branch. A clean pre-existing worktree is switched instead
+    of refused; see `_ensure_worktree_on_branch`."""
+
+    def __init__(self, member: str, requested: str, actual: str) -> None:
+        super().__init__(
+            f"member {member!r}: worktree is checked out on {actual!r}, not "
+            f"the requested branch {requested!r}, and carries uncommitted "
+            "changes — refusing to switch it"
+        )
+        self.member = member
+        self.requested = requested
+        self.actual = actual
 
 
 class ArchiveMemberRefused(ReceiveRefused):
@@ -743,6 +784,90 @@ def _fast_forwardable(repo_root: Path, old_tip: str, new_tip: str) -> bool:
     return result.returncode == 0
 
 
+def _branch_checked_out_elsewhere(repo_root: Path, branch: str, wt_path: Path) -> str | None:
+    """The path of another worktree in *repo_root*'s registry that already
+    has *branch* checked out, or `None` when the branch is free — or is
+    checked out only at *wt_path* itself, the idempotent re-run shape
+    `_add_worktree_for_member`'s own existence-guard already handles.
+
+    Reads `git worktree list --porcelain` directly rather than going
+    through `camp.provision.reconcile`'s own worktree-path helpers, since
+    this needs the BRANCH each registered worktree has checked out, not
+    merely its path.
+    """
+    result = subprocess.run(
+        ["git", "-C", str(repo_root), "worktree", "list", "--porcelain"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return None
+
+    target_ref = f"refs/heads/{branch}"
+    try:
+        wt_resolved = wt_path.resolve()
+    except OSError:
+        wt_resolved = wt_path
+
+    current_path: str | None = None
+    for line in result.stdout.splitlines():
+        if line.startswith("worktree "):
+            current_path = line[len("worktree ") :].strip()
+        elif line.startswith("branch ") and current_path is not None:
+            if line[len("branch ") :].strip() == target_ref:
+                try:
+                    if Path(current_path).resolve() != wt_resolved:
+                        return current_path
+                except OSError:
+                    return current_path
+            current_path = None
+    return None
+
+
+def _ensure_worktree_on_branch(member: str, wt_path: Path, checkout_branch: str) -> None:
+    """After `_add_worktree_for_member` returns, confirm the member's peer
+    worktree is actually checked out on *checkout_branch* — its
+    existence-guard is a no-op for a worktree that was already present, so a
+    worktree left over from an earlier transfer to a DIFFERENT branch is
+    otherwise silently reported `ok` while still sitting on the old one.
+
+    A mismatch is switched in place when the worktree is clean; a dirty
+    mismatch refuses by name rather than discarding uncommitted work.
+    """
+    current = subprocess.run(
+        ["git", "-C", str(wt_path), "symbolic-ref", "--short", "-q", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    current_branch = current.stdout.strip() if current.returncode == 0 else None
+    if current_branch == checkout_branch:
+        return
+
+    dirty = subprocess.run(
+        ["git", "-C", str(wt_path), "status", "--porcelain"],
+        capture_output=True,
+        text=True,
+        check=False,
+    ).stdout.strip()
+    if dirty:
+        raise WorktreeBranchMismatchRefused(
+            member, checkout_branch, current_branch or "a detached HEAD"
+        )
+
+    switch = subprocess.run(
+        ["git", "-C", str(wt_path), "checkout", checkout_branch],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if switch.returncode != 0:
+        raise WorktreeBranchMismatchRefused(
+            member, checkout_branch, current_branch or "a detached HEAD"
+        )
+
+
 def history(
     *,
     groups: list[dict[str, Any]],
@@ -775,6 +900,11 @@ def history(
         DivergentBranchRefused: *branch* names a local branch this host
             already has, and the incoming tip neither fast-forwards it nor
             matches it — raised before EITHER branch's ref is touched.
+        BranchCheckedOutElsewhere: *branch* is already checked out in
+            another worktree of this host's clone (including the peer's
+            primary checkout) — raised before EITHER branch's ref is
+            touched, so a `git update-ref` never moves a branch out from
+            under a checkout that has it open.
     """
     group = _require_group(groups, group_name)
 
@@ -796,6 +926,13 @@ def history(
     if branch is not None:
         _validate_branch_name(member, branch, slug_branch)
     extra_ref = f"refs/heads/{branch}" if branch is not None else None
+
+    wt_path = _worktree_path(group_name, slug, member, env=env)
+
+    if branch is not None:
+        conflict = _branch_checked_out_elsewhere(repo_root, branch, wt_path)
+        if conflict is not None:
+            raise BranchCheckedOutElsewhere(member, branch, conflict)
 
     result = subprocess.run(
         ["git", "-C", str(repo_root), "bundle", "unbundle", "-"],
@@ -854,9 +991,9 @@ def history(
             )
 
     checkout_branch = branch if branch is not None else slug_branch
-    wt_path = _worktree_path(group_name, slug, member, env=env)
     base = member_cfg.get("base") or DEFAULT_BASE
     _add_worktree_for_member(member_cfg, wt_path, checkout_branch, repo_root, base=base, slug=slug)
+    _ensure_worktree_on_branch(member, wt_path, checkout_branch)
 
     ws_dir = workspace_dir(group_name, slug, env=env)
     append_marker(ws_dir, phase="history", outcome="ok")

@@ -601,6 +601,41 @@ def _peer_process_spawn(peer_cfg_dir: Path, peer_state_dir: Path):
     return _spawn
 
 
+class TestSenderOnSlugBranchForwardsNoBranchFlag:
+    """`send_history` with `extra_ref=None` — the sender's worktree checked
+    out on the slug branch itself — must never append `--branch` to the
+    remote argv; `None` is what lands and checks out the slug branch alone
+    (see `history`'s own docstring)."""
+
+    def test_remote_argv_carries_no_branch_flag(self, sender_and_peer, monkeypatch):
+        from camp.host.config import Host
+        from camp.host.transport import Answered
+        from camp.transfer import history as history_mod
+
+        g = sender_and_peer
+        captured: dict = {}
+
+        def fake_stream_camp(host, remote_argv, producer, **kwargs):
+            captured["argv"] = remote_argv
+            producer.wait()
+            return Answered(stdout="{}", stderr="", exit_code=0)
+
+        monkeypatch.setattr(history_mod, "stream_camp", fake_stream_camp)
+
+        history_mod.send_history(
+            Host(ssh="fake-peer", camp_bin="/opt/camp/bin/camp"),
+            group="testgroup",
+            slug="feat-x",
+            member="repo_a",
+            repo_root=g["sender_repo"],
+            ref=g["branch"],
+            basis_commit=None,
+            extra_ref=None,
+        )
+
+        assert "--branch" not in captured["argv"]
+
+
 class TestSendHistoryEndToEnd:
     def test_send_history_lands_commit_on_a_spawned_real_peer_process(self, tmp_path: Path):
         from camp.host.config import Host
@@ -893,6 +928,48 @@ class TestMalformedExtraBranchName:
         assert f"refs/heads/{bad_branch}" not in refs.stdout
 
 
+class TestBranchCheckedOutElsewhereOnPeer:
+    """The captured reproduction: the extra branch is already checked out
+    in ANOTHER worktree on the peer — here, the peer's own primary
+    checkout, standing in for a peer main clone — at an ancestor of the
+    incoming tip, so the incoming bundle would fast-forward it. Must refuse
+    by name before either bundle ref is written, never move the branch out
+    from under that checkout."""
+
+    def test_refused_by_name_before_any_ref_is_written(self, sender_and_peer_extra_branch):
+        from camp.transfer import receive
+
+        g = sender_and_peer_extra_branch
+
+        subprocess.run(
+            [
+                "git", "-C", str(g["peer_repo"]), "fetch", str(g["sender_repo"]),
+                f"{g['extra_branch']}:refs/heads/{g['extra_branch']}",
+            ],
+            check=True,
+            capture_output=True,
+        )
+        parent = _git_out(g["sender_repo"], "rev-parse", f"{g['extra_branch']}^")
+        _git(g["peer_repo"], "checkout", g["extra_branch"])
+        _git(g["peer_repo"], "reset", "--hard", parent)
+        status_before = _git(g["peer_repo"], "status", "--porcelain").stdout
+
+        with pytest.raises(receive.BranchCheckedOutElsewhere) as exc_info:
+            _land_extra_branch(g)
+
+        assert "repo_a" in str(exc_info.value)
+        assert g["extra_branch"] in str(exc_info.value)
+
+        # Neither ref moved — the slug branch never crossed either, since
+        # the refusal happens before ANY ref is touched.
+        assert _git_out(g["peer_repo"], "rev-parse", g["extra_branch"]) == parent
+        refs = _git(g["peer_repo"], "for-each-ref", "--format=%(refname)")
+        assert f"refs/heads/{g['slug_branch']}" not in refs.stdout
+
+        # The peer's own checked-out worktree shows no staged revert.
+        assert _git(g["peer_repo"], "status", "--porcelain").stdout == status_before
+
+
 class TestPreExistingPeerBranch:
     def test_ancestor_peer_branch_is_fast_forwarded_and_checked_out(self, sender_and_peer_extra_branch):
         from camp.provision.reconcile import _worktree_path
@@ -955,6 +1032,44 @@ class TestPreExistingPeerBranch:
         assert f"refs/heads/{g['slug_branch']}" not in slug_refs.stdout
 
 
+class TestPeerWorktreePreExistingOnWrongBranch:
+    """A member's peer worktree already exists (from an earlier transfer
+    that never sent `--branch`) on the workspace's slug branch — a later
+    transfer requesting an extra branch must not report `ok` while silently
+    leaving that worktree on the slug branch; `_add_worktree_for_member`'s
+    own existence-guard is a no-op once the worktree is present, so this is
+    exactly the shape that guard cannot catch on its own."""
+
+    def test_worktree_ends_on_the_requested_branch_not_silently_on_the_slug_branch(
+        self, sender_and_peer_extra_branch
+    ):
+        from camp.provision.reconcile import _worktree_path
+        from camp.transfer import receive
+
+        g = sender_and_peer_extra_branch
+
+        # First land WITHOUT --branch: the peer worktree is created on the
+        # slug branch alone — today's shape.
+        bundle = _bundle_bytes(g["sender_repo"], g["slug_branch"])
+        receive.history(
+            groups=[g["group"]],
+            group_name="testgroup",
+            slug="feat-x",
+            member="repo_a",
+            bundle_bytes=bundle,
+            env=g["env"],
+        )
+        wt_path = _worktree_path("testgroup", "feat-x", "repo_a", env=g["env"])
+        assert _git_out(wt_path, "rev-parse", "--abbrev-ref", "HEAD") == g["slug_branch"]
+
+        # Re-run WITH --branch — the worktree already exists, so the
+        # existence-guard alone would skip straight past it.
+        _land_extra_branch(g)
+
+        assert _git_out(wt_path, "rev-parse", "--abbrev-ref", "HEAD") == g["extra_branch"]
+        assert _git_out(wt_path, "rev-parse", "HEAD") == g["extra_tip"]
+
+
 class TestExtraBranchWithNoCommitsBeyondBasis:
     def test_still_produces_non_empty_bundle_and_lands_at_its_tip(self, tmp_path: Path):
         from camp.transfer import receive
@@ -995,6 +1110,106 @@ class TestExtraBranchWithNoCommitsBeyondBasis:
         assert extra_landed == basis
         slug_landed = _git_out(peer_repo, "rev-parse", f"refs/heads/{slug_branch}")
         assert slug_landed == tip
+
+
+class TestNegationDoesNotDropAContainedRef:
+    """Both refs' tips are contained in the peer's basis — negativing
+    against both tips' parents uniformly must never drop a tip that is
+    itself reachable from the OTHER ref's parent (see `_negation_for`'s
+    docstring). Covers both orderings: the slug branch an ancestor of the
+    extra branch, and the mirror."""
+
+    def _list_heads(self, bundle: bytes, tmp_path: Path, name: str) -> set[str]:
+        bundle_path = tmp_path / name
+        bundle_path.write_bytes(bundle)
+        result = subprocess.run(
+            ["git", "bundle", "list-heads", str(bundle_path)],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return {line.split()[1] for line in result.stdout.splitlines() if line.strip()}
+
+    def test_slug_ancestor_of_extra_both_within_basis(self, tmp_path: Path):
+        from camp.transfer import receive
+
+        sender_repo = tmp_path / "sender"
+        init_git_repo(sender_repo, origin=True)
+        slug_branch = "worktree-feat-x"
+        extra_branch = "feature/extra"
+
+        slug_tip = _commit(sender_repo, "slug-tip.txt")
+        _git(sender_repo, "branch", slug_branch)
+        extra_tip = _commit(sender_repo, "extra-tip.txt")
+        _git(sender_repo, "branch", extra_branch)
+        basis = _commit(sender_repo, "basis.txt")
+
+        bundle = _bundle_bytes(sender_repo, slug_branch, basis_commit=basis, extra_ref=extra_branch)
+        heads = self._list_heads(bundle, tmp_path, "a.bundle")
+        assert f"refs/heads/{slug_branch}" in heads
+        assert f"refs/heads/{extra_branch}" in heads
+
+        peer_repo = tmp_path / "peer_repo_a"
+        subprocess.run(
+            ["git", "clone", "--quiet", "--branch", "main", str(sender_repo), str(peer_repo)],
+            check=True,
+            capture_output=True,
+        )
+        env = camp_state_env(tmp_path / "peer-state")
+
+        receive.history(
+            groups=[_member_group(peer_repo)],
+            group_name="testgroup",
+            slug="feat-x",
+            member="repo_a",
+            bundle_bytes=bundle,
+            branch=extra_branch,
+            env=env,
+        )
+
+        assert _git_out(peer_repo, "rev-parse", f"refs/heads/{slug_branch}") == slug_tip
+        assert _git_out(peer_repo, "rev-parse", f"refs/heads/{extra_branch}") == extra_tip
+
+    def test_extra_ancestor_of_slug_both_within_basis(self, tmp_path: Path):
+        from camp.transfer import receive
+
+        sender_repo = tmp_path / "sender"
+        init_git_repo(sender_repo, origin=True)
+        slug_branch = "worktree-feat-x"
+        extra_branch = "feature/extra"
+
+        # Mirror ordering: the EXTRA branch is the ancestor this time.
+        extra_tip = _commit(sender_repo, "extra-tip.txt")
+        _git(sender_repo, "branch", extra_branch)
+        slug_tip = _commit(sender_repo, "slug-tip.txt")
+        _git(sender_repo, "branch", slug_branch)
+        basis = _commit(sender_repo, "basis.txt")
+
+        bundle = _bundle_bytes(sender_repo, slug_branch, basis_commit=basis, extra_ref=extra_branch)
+        heads = self._list_heads(bundle, tmp_path, "b.bundle")
+        assert f"refs/heads/{slug_branch}" in heads
+        assert f"refs/heads/{extra_branch}" in heads
+
+        peer_repo = tmp_path / "peer_repo_a"
+        subprocess.run(
+            ["git", "clone", "--quiet", "--branch", "main", str(sender_repo), str(peer_repo)],
+            check=True,
+            capture_output=True,
+        )
+        env = camp_state_env(tmp_path / "peer-state")
+
+        receive.history(
+            groups=[_member_group(peer_repo)],
+            group_name="testgroup",
+            slug="feat-x",
+            member="repo_a",
+            bundle_bytes=bundle,
+            branch=extra_branch,
+            env=env,
+        )
+
+        assert _git_out(peer_repo, "rev-parse", f"refs/heads/{slug_branch}") == slug_tip
+        assert _git_out(peer_repo, "rev-parse", f"refs/heads/{extra_branch}") == extra_tip
 
 
 class TestExtraBranchCliDispatch:
