@@ -755,3 +755,333 @@ class TestMalformedBasisCommitShape:
             build_bundle_argv(sender_repo, branch, basis_commit="--not-a-sha; rm -rf")
 
         assert "--not-a-sha; rm -rf" in str(exc_info.value)
+
+
+# ---------------------------------------------------------------------------
+# The extra (non-slug) branch — carried alongside the slug branch in the SAME
+# bundle when the sender's worktree is checked out somewhere else.
+#
+# Test contract (all must RED before implementation, GREEN after):
+# - the peer's worktree ends up checked out on the extra branch, at its tip.
+# - a hostile/malformed branch name is refused before any ref is written.
+# - a pre-existing peer branch that is an ancestor of the incoming tip is
+#   fast-forwarded and checked out.
+# - a pre-existing peer branch that has diverged refuses by name, naming the
+#   member and the branch, before any ref (including the slug branch) moves.
+# - an extra branch with no commits beyond the peer's basis still produces a
+#   non-empty bundle and lands at its tip.
+# - reachable through the real `camp transfer-receive history` dispatcher,
+#   not only by calling `history()` directly.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def sender_and_peer_extra_branch(tmp_path: Path):
+    """Like `sender_and_peer`, but the sender's checked-out branch is a SECOND
+    branch (`feature/extra`), distinct from the workspace's slug branch
+    (`worktree-feat-x`), which itself carries no commits of its own — the
+    shape the captured incident's sender worktree was actually in."""
+    sender_repo = tmp_path / "sender"
+    init_git_repo(sender_repo, origin=True)
+    slug_branch = "worktree-feat-x"
+    _git(sender_repo, "branch", slug_branch)
+
+    extra_branch = "feature/extra"
+    _git(sender_repo, "checkout", "-b", extra_branch)
+    (sender_repo / "unpushed.txt").write_text("only on the sender\n")
+    _git(sender_repo, "add", "unpushed.txt")
+    _git(sender_repo, "-c", "user.email=t@t.com", "-c", "user.name=t", "commit", "-m", "unpushed", "--no-gpg-sign")
+    extra_tip = _git_out(sender_repo, "rev-parse", "HEAD")
+    slug_tip = _git_out(sender_repo, "rev-parse", slug_branch)
+
+    peer_repo = tmp_path / "peer_repo_a"
+    peer_repo.mkdir(parents=True)
+    _git(peer_repo, "init", "-q", "-b", "main")
+    (peer_repo / "peer-only.md").write_text("# peer's own unrelated history\n")
+    _git(peer_repo, "add", "peer-only.md")
+    _git(
+        peer_repo,
+        "-c", "user.email=peer@test.com",
+        "-c", "user.name=Peer",
+        "commit", "-m", "peer init", "--no-gpg-sign",
+    )
+
+    env = camp_state_env(tmp_path)
+    group = _member_group(peer_repo)
+    return {
+        "sender_repo": sender_repo,
+        "peer_repo": peer_repo,
+        "slug_branch": slug_branch,
+        "extra_branch": extra_branch,
+        "extra_tip": extra_tip,
+        "slug_tip": slug_tip,
+        "env": env,
+        "group": group,
+        "tmp_path": tmp_path,
+    }
+
+
+def _extra_bundle_bytes(g: dict) -> bytes:
+    from camp.transfer.history import build_bundle_argv
+
+    argv = build_bundle_argv(
+        g["sender_repo"], g["slug_branch"], basis_commit=None, extra_ref=g["extra_branch"]
+    )
+    result = subprocess.run(argv, capture_output=True, check=True)
+    return result.stdout
+
+
+class TestExtraBranchLandsAndChecksOutOnPeer:
+    def test_peer_worktree_checked_out_on_extra_branch_at_its_tip(self, sender_and_peer_extra_branch):
+        from camp.provision.reconcile import _worktree_path
+        from camp.transfer import receive
+
+        g = sender_and_peer_extra_branch
+        bundle = _extra_bundle_bytes(g)
+
+        receive.history(
+            groups=[g["group"]],
+            group_name="testgroup",
+            slug="feat-x",
+            member="repo_a",
+            bundle_bytes=bundle,
+            branch=g["extra_branch"],
+            env=g["env"],
+        )
+
+        # The slug branch still crosses and is force-updated exactly as today.
+        slug_landed = _git_out(g["peer_repo"], "rev-parse", f"refs/heads/{g['slug_branch']}")
+        assert slug_landed == g["slug_tip"]
+
+        # The extra branch also lands, at its own tip.
+        extra_landed = _git_out(g["peer_repo"], "rev-parse", f"refs/heads/{g['extra_branch']}")
+        assert extra_landed == g["extra_tip"]
+
+        wt_path = _worktree_path("testgroup", "feat-x", "repo_a", env=g["env"])
+        wt_branch = _git_out(wt_path, "rev-parse", "--abbrev-ref", "HEAD")
+        assert wt_branch == g["extra_branch"]
+        wt_head = _git_out(wt_path, "rev-parse", "HEAD")
+        assert wt_head == g["extra_tip"]
+        assert (wt_path / "unpushed.txt").read_text() == "only on the sender\n"
+
+
+class TestMalformedExtraBranchName:
+    @pytest.mark.parametrize(
+        "bad_branch",
+        ["-x", "has space", "a..b", "worktree-feat-x"],
+        ids=["leading-dash", "whitespace", "double-dot", "equal-to-slug-branch"],
+    )
+    def test_refused_before_any_ref_is_written(self, sender_and_peer_extra_branch, bad_branch):
+        from camp.transfer import receive
+
+        g = sender_and_peer_extra_branch
+        bundle = _extra_bundle_bytes(g)
+
+        # Asserting the SPECIFIC subclass (not just `ReceiveRefused`) matters
+        # here: `bad_branch` never matches the bundle's actual ref name
+        # either, so a validation-less implementation would still raise
+        # `BundleRefUnresolved` by coincidence — this pins that the refusal
+        # comes from name validation itself, before the bundle is even
+        # consulted for that ref.
+        with pytest.raises(receive.InvalidBranchName) as exc_info:
+            receive.history(
+                groups=[g["group"]],
+                group_name="testgroup",
+                slug="feat-x",
+                member="repo_a",
+                bundle_bytes=bundle,
+                branch=bad_branch,
+                env=g["env"],
+            )
+        assert "repo_a" in str(exc_info.value)
+        assert bad_branch in str(exc_info.value)
+
+        refs = _git(g["peer_repo"], "for-each-ref", "--format=%(refname)")
+        assert f"refs/heads/{g['slug_branch']}" not in refs.stdout
+        assert f"refs/heads/{bad_branch}" not in refs.stdout
+
+
+class TestPreExistingPeerBranch:
+    def _land_once(self, g: dict) -> None:
+        from camp.transfer import receive
+
+        bundle = _extra_bundle_bytes(g)
+        receive.history(
+            groups=[g["group"]],
+            group_name="testgroup",
+            slug="feat-x",
+            member="repo_a",
+            bundle_bytes=bundle,
+            branch=g["extra_branch"],
+            env=g["env"],
+        )
+
+    def test_ancestor_peer_branch_is_fast_forwarded_and_checked_out(self, sender_and_peer_extra_branch):
+        from camp.provision.reconcile import _worktree_path
+
+        g = sender_and_peer_extra_branch
+        # Peer already holds an OLDER commit of the extra branch (an ancestor
+        # of the incoming tip): fetch the sender's whole object store into
+        # the peer first, then point the peer's own copy of the branch
+        # backward to the parent commit, so the ancestor relationship is
+        # exercised honestly rather than assumed.
+        subprocess.run(
+            ["git", "-C", str(g["peer_repo"]), "fetch", str(g["sender_repo"]),
+             f"{g['extra_branch']}:refs/heads/{g['extra_branch']}"],
+            check=True, capture_output=True,
+        )
+        # Roll the peer's copy of the branch back to its parent, simulating a
+        # peer that already has an OLDER tip of this same branch.
+        parent = _git_out(g["sender_repo"], "rev-parse", f"{g['extra_branch']}^")
+        _git(g["peer_repo"], "update-ref", f"refs/heads/{g['extra_branch']}", parent)
+
+        self._land_once(g)
+
+        extra_landed = _git_out(g["peer_repo"], "rev-parse", f"refs/heads/{g['extra_branch']}")
+        assert extra_landed == g["extra_tip"]
+
+        wt_path = _worktree_path("testgroup", "feat-x", "repo_a", env=g["env"])
+        wt_branch = _git_out(wt_path, "rev-parse", "--abbrev-ref", "HEAD")
+        assert wt_branch == g["extra_branch"]
+
+    def test_diverged_peer_branch_refuses_by_name_and_leaves_both_branches_untouched(
+        self, sender_and_peer_extra_branch
+    ):
+        from camp.transfer import receive
+
+        g = sender_and_peer_extra_branch
+        # Peer already has a DIFFERENT, diverged commit under the same branch
+        # name — its own local commit unrelated to the sender's history.
+        (g["peer_repo"] / "diverged.txt").write_text("peer's own diverged commit\n")
+        _git(g["peer_repo"], "add", "diverged.txt")
+        _git(
+            g["peer_repo"],
+            "-c", "user.email=peer@test.com",
+            "-c", "user.name=Peer",
+            "commit", "-m", "diverged", "--no-gpg-sign",
+        )
+        _git(g["peer_repo"], "branch", g["extra_branch"])
+        diverged_sha = _git_out(g["peer_repo"], "rev-parse", g["extra_branch"])
+
+        with pytest.raises(receive.ReceiveRefused) as exc_info:
+            self._land_once(g)
+
+        assert "repo_a" in str(exc_info.value)
+        assert g["extra_branch"] in str(exc_info.value)
+
+        # Neither branch moved — the slug branch never crossed either, since
+        # the refusal happens before ANY ref is touched.
+        still_diverged = _git_out(g["peer_repo"], "rev-parse", g["extra_branch"])
+        assert still_diverged == diverged_sha
+        slug_refs = _git(g["peer_repo"], "for-each-ref", "--format=%(refname)")
+        assert f"refs/heads/{g['slug_branch']}" not in slug_refs.stdout
+
+
+class TestExtraBranchWithNoCommitsBeyondBasis:
+    def test_still_produces_non_empty_bundle_and_lands_at_its_tip(self, tmp_path: Path):
+        from camp.transfer.history import build_bundle_argv
+        from camp.transfer import receive
+
+        sender_repo = tmp_path / "sender"
+        init_git_repo(sender_repo, origin=True)
+        slug_branch = "worktree-feat-x"
+        extra_branch = "feature/extra"
+        # The extra branch is exactly the peer's basis — no commits of its
+        # own — while the slug branch carries a genuine new commit.
+        basis = _git_out(sender_repo, "rev-parse", "HEAD")
+        _git(sender_repo, "branch", extra_branch, basis)
+        _git(sender_repo, "checkout", "-b", slug_branch)
+        tip = _commit(sender_repo, "slugwork.txt")
+
+        argv = build_bundle_argv(sender_repo, slug_branch, basis_commit=basis, extra_ref=extra_branch)
+        result = subprocess.run(argv, capture_output=True, check=True)
+        bundle = result.stdout
+        assert bundle, "bundle must not be empty even though the extra branch has no new commits"
+
+        peer_repo = tmp_path / "peer_repo_a"
+        subprocess.run(
+            ["git", "clone", "--quiet", "--branch", "main", str(sender_repo), str(peer_repo)],
+            check=True, capture_output=True,
+        )
+        env = camp_state_env(tmp_path / "peer-state")
+        group = _member_group(peer_repo)
+
+        receive.history(
+            groups=[group],
+            group_name="testgroup",
+            slug="feat-x",
+            member="repo_a",
+            bundle_bytes=bundle,
+            branch=extra_branch,
+            env=env,
+        )
+
+        extra_landed = _git_out(peer_repo, "rev-parse", f"refs/heads/{extra_branch}")
+        assert extra_landed == basis
+        slug_landed = _git_out(peer_repo, "rev-parse", f"refs/heads/{slug_branch}")
+        assert slug_landed == tip
+
+
+class TestExtraBranchCliDispatch:
+    def test_history_with_branch_flag_reachable_through_real_dispatcher_end_to_end(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+    ) -> None:
+        sender_repo = tmp_path / "sender"
+        init_git_repo(sender_repo, origin=True)
+        slug_branch = "worktree-feat-cli2"
+        _git(sender_repo, "branch", slug_branch)
+        extra_branch = "feature/cli-extra"
+        _git(sender_repo, "checkout", "-b", extra_branch)
+        (sender_repo / "via-cli.txt").write_text("cli extra path\n")
+        _git(sender_repo, "add", "via-cli.txt")
+        _git(sender_repo, "-c", "user.email=t@t.com", "-c", "user.name=t", "commit", "-m", "via cli", "--no-gpg-sign")
+        extra_tip = _git_out(sender_repo, "rev-parse", "HEAD")
+
+        from camp.transfer.history import build_bundle_argv
+
+        argv = build_bundle_argv(sender_repo, slug_branch, basis_commit=None, extra_ref=extra_branch)
+        bundle = subprocess.run(argv, capture_output=True, check=True).stdout
+
+        peer_repo = tmp_path / "peer_cli2_repo_a"
+        init_git_repo(peer_repo, origin=False)
+
+        cfg = tmp_path / "config"
+        (cfg / "groups").mkdir(parents=True)
+        _write_group_toml(cfg / "groups", "testgroup", [("repo_a", str(peer_repo))])
+
+        monkeypatch.setenv("CAMP_CONFIG_DIR", str(cfg))
+        monkeypatch.setenv("CAMP_STATE_DIR", str(tmp_path / "state"))
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "camp",
+                "transfer-receive",
+                "history",
+                "--group",
+                "testgroup",
+                "--slug",
+                "feat-cli2",
+                "--member",
+                "repo_a",
+                "--branch",
+                extra_branch,
+            ],
+        )
+
+        class _FakeStdinBuffer:
+            def read(self) -> bytes:
+                return bundle
+
+        class _FakeStdin:
+            buffer = _FakeStdinBuffer()
+
+        monkeypatch.setattr(sys, "stdin", _FakeStdin())
+
+        _dispatch_module().main()
+
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["contract_version"] == 1
+
+        landed = _git_out(peer_repo, "rev-parse", f"refs/heads/{extra_branch}")
+        assert landed == extra_tip

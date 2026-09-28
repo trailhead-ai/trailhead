@@ -84,11 +84,25 @@ either success or failure, so there is no ref to roll back. On success the
 member's slug branch (the same `branch_pattern`-derived name
 `camp.provision.reconcile` uses) is force-updated with `git update-ref` to
 the bundle's reported tip — unconditional, so re-running `history` against a
-branch this host already has moves it rather than refusing — and the
-member's worktree is then materialized through
-`camp.provision.reconcile._add_worktree_for_member`, which reuses that
-already-present local branch (`_branch_exists_locally`) rather than
-branching a fresh one off `base`.
+branch this host already has moves it rather than refusing.
+
+An optional `--branch` names a SECOND branch riding the same bundle — the
+sender's own checked-out branch, when it is not the slug branch. The name is
+validated before anything touches disk (`_validate_branch_name`: git's own
+`check-ref-format --branch`, a `^[A-Za-z0-9._/-]+$` safe-value shape, and an
+explicit refusal of a leading `-` or a name equal to the slug branch —
+`InvalidBranchName`). A pre-existing local branch of that name is updated
+only when the incoming tip fast-forwards it (or is the same commit);
+otherwise the phase refuses by name (`DivergentBranchRefused`, naming the
+member and the branch) before EITHER branch's ref is touched — the slug
+branch is not force-updated either, so a refusal here never leaves the two
+branches in an inconsistent relationship to each other. The member's
+worktree is then materialized through
+`camp.provision.reconcile._add_worktree_for_member`, checked out on the
+extra branch when one was given (reusing that already-present local branch —
+`_branch_exists_locally` — rather than branching a fresh one off `base`), or
+on the slug branch exactly as before when `--branch` was not given — an
+older sender against a newer peer is therefore unchanged.
 
 **worktree** receives one member's working-tree content, sent by
 `camp.transfer.worktree.send_worktree` as a stdlib `tarfile` stream on
@@ -227,6 +241,8 @@ __all__ = [
     "MemberNotConfigured",
     "BundleUnbundleFailed",
     "BundleRefUnresolved",
+    "InvalidBranchName",
+    "DivergentBranchRefused",
     "ArchiveMemberRefused",
     "ConversationSubpathRefused",
     "ConversationDestinationRefused",
@@ -344,6 +360,32 @@ class BundleRefUnresolved(ReceiveRefused):
         )
         self.member = member
         self.ref = ref
+
+
+class InvalidBranchName(ReceiveRefused):
+    """`history`'s optional `--branch` is hostile or malformed — refused
+    before the bundle's second ref is ever resolved to a tip, let alone
+    written as a local branch."""
+
+    def __init__(self, member: str, branch: str, detail: str) -> None:
+        super().__init__(f"member {member!r}: branch {branch!r} refused: {detail}")
+        self.member = member
+        self.branch = branch
+
+
+class DivergentBranchRefused(ReceiveRefused):
+    """`history`'s `--branch` names a local branch this host already has,
+    and the incoming tip neither fast-forwards it nor matches it — refused
+    before EITHER branch's ref is touched, so the slug branch and the named
+    branch are never left in an inconsistent relationship to each other."""
+
+    def __init__(self, member: str, branch: str) -> None:
+        super().__init__(
+            f"member {member!r}: branch {branch!r} already exists here and "
+            "has diverged from the incoming tip — refusing to overwrite it"
+        )
+        self.member = member
+        self.branch = branch
 
 
 class ArchiveMemberRefused(ReceiveRefused):
@@ -651,6 +693,56 @@ def finish(
     }
 
 
+#: The safe-value shape `history`'s optional `--branch` must match, on top
+#: of git's own `check-ref-format --branch` — the same defend-before-use
+#: posture `camp.transfer.history._BASIS_COMMIT_RE` applies to a basis
+#: commit arriving from the peer, applied here to a branch NAME arriving
+#: from the sender.
+_SAFE_BRANCH_RE = re.compile(r"^[A-Za-z0-9._/-]+\Z")
+
+
+def _validate_branch_name(member: str, branch: str, slug_branch: str) -> None:
+    """Refuse *branch* before it is ever resolved to a tip or written as a
+    ref — a leading `-` (option-injection shape), any character outside the
+    safe-value charset, a shape git's own `check-ref-format` rejects, or a
+    name equal to the workspace's own slug branch.
+
+    Raises:
+        InvalidBranchName: *branch* fails any of the above.
+    """
+    if branch.startswith("-"):
+        raise InvalidBranchName(member, branch, "must not begin with '-'")
+    if not _SAFE_BRANCH_RE.match(branch):
+        raise InvalidBranchName(
+            member, branch, "contains characters outside [A-Za-z0-9._/-]"
+        )
+    if branch == slug_branch:
+        raise InvalidBranchName(
+            member, branch, "must not equal the workspace's own slug branch"
+        )
+    check = subprocess.run(
+        ["git", "check-ref-format", "--branch", branch],
+        capture_output=True,
+        check=False,
+    )
+    if check.returncode != 0:
+        raise InvalidBranchName(member, branch, "not a valid git branch name")
+
+
+def _fast_forwardable(repo_root: Path, old_tip: str, new_tip: str) -> bool:
+    """True when *new_tip* is *old_tip* itself, or *old_tip* is an ancestor
+    of it — the two shapes `history`'s `--branch` update is allowed to make
+    to a peer branch that already exists."""
+    if old_tip == new_tip:
+        return True
+    result = subprocess.run(
+        ["git", "-C", str(repo_root), "merge-base", "--is-ancestor", old_tip, new_tip],
+        capture_output=True,
+        check=False,
+    )
+    return result.returncode == 0
+
+
 def history(
     *,
     groups: list[dict[str, Any]],
@@ -658,6 +750,7 @@ def history(
     slug: str,
     member: str,
     bundle_bytes: bytes,
+    branch: str | None = None,
     env: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Land one member's bundled history, sent by
@@ -665,26 +758,45 @@ def history(
     no git remote is ever contacted. See the module docstring's `history`
     section for the full sequence.
 
+    *branch*, when given, names a SECOND ref riding the same bundle — the
+    sender's own checked-out branch. `None` reproduces the exact behavior
+    this function had before *branch* existed.
+
     Raises:
         GroupNotConfigured: *group_name* is not configured on this host.
         MemberNotConfigured: *member* is not declared in that group here.
+        InvalidBranchName: *branch* is hostile or malformed — raised before
+            the bundle's second ref is resolved to a tip.
         BundleUnbundleFailed: `git bundle unbundle` refused the bundle (most
             commonly a missing prerequisite commit) — raised before any ref
             is touched.
         BundleRefUnresolved: the bundle unbundled cleanly but named no tip
-            for the branch this host expected.
+            for a ref this host expected (the slug branch, or *branch*).
+        DivergentBranchRefused: *branch* names a local branch this host
+            already has, and the incoming tip neither fast-forwards it nor
+            matches it — raised before EITHER branch's ref is touched.
     """
     group = _require_group(groups, group_name)
 
     member_cfg = _require_member(group, group_name, member)
 
     from ..group.manifest import workspace_dir
-    from ..provision.reconcile import DEFAULT_BASE, _add_worktree_for_member, _branch_name, _worktree_path
+    from ..provision.reconcile import (
+        DEFAULT_BASE,
+        _add_worktree_for_member,
+        _branch_exists_locally,
+        _branch_name,
+        _worktree_path,
+    )
 
     repo_root = Path(member_cfg["repo_root"])
     branch_pattern: str = group.get("branch_pattern", "worktree-{slug}")
-    branch = _branch_name(slug, branch_pattern)
-    ref = f"refs/heads/{branch}"
+    slug_branch = _branch_name(slug, branch_pattern)
+    ref = f"refs/heads/{slug_branch}"
+
+    if branch is not None:
+        _validate_branch_name(member, branch, slug_branch)
+    extra_ref = f"refs/heads/{branch}" if branch is not None else None
 
     result = subprocess.run(
         ["git", "-C", str(repo_root), "bundle", "unbundle", "-"],
@@ -695,14 +807,30 @@ def history(
     if result.returncode != 0:
         raise BundleUnbundleFailed(member, result.stderr.decode("utf-8", errors="replace"))
 
-    tip_sha: str | None = None
+    tips: dict[str, str] = {}
     for line in result.stdout.decode("utf-8", errors="replace").splitlines():
         parts = line.split(None, 1)
-        if len(parts) == 2 and parts[1].strip() == ref:
-            tip_sha = parts[0]
-            break
+        if len(parts) == 2:
+            tips[parts[1].strip()] = parts[0]
+
+    tip_sha = tips.get(ref)
     if tip_sha is None:
         raise BundleRefUnresolved(member, ref)
+
+    extra_tip_sha: str | None = None
+    if extra_ref is not None:
+        extra_tip_sha = tips.get(extra_ref)
+        if extra_tip_sha is None:
+            raise BundleRefUnresolved(member, extra_ref)
+        if _branch_exists_locally(repo_root, branch):
+            existing_sha = subprocess.run(
+                ["git", "-C", str(repo_root), "rev-parse", extra_ref],
+                capture_output=True,
+                text=True,
+                check=False,
+            ).stdout.strip()
+            if existing_sha and not _fast_forwardable(repo_root, existing_sha, extra_tip_sha):
+                raise DivergentBranchRefused(member, branch)
 
     update_result = subprocess.run(
         ["git", "-C", str(repo_root), "update-ref", ref, tip_sha],
@@ -714,9 +842,21 @@ def history(
             member, update_result.stderr.decode("utf-8", errors="replace")
         )
 
+    if extra_ref is not None:
+        extra_update_result = subprocess.run(
+            ["git", "-C", str(repo_root), "update-ref", extra_ref, extra_tip_sha],
+            capture_output=True,
+            check=False,
+        )
+        if extra_update_result.returncode != 0:
+            raise BundleUnbundleFailed(
+                member, extra_update_result.stderr.decode("utf-8", errors="replace")
+            )
+
+    checkout_branch = branch if branch is not None else slug_branch
     wt_path = _worktree_path(group_name, slug, member, env=env)
     base = member_cfg.get("base") or DEFAULT_BASE
-    _add_worktree_for_member(member_cfg, wt_path, branch, repo_root, base=base, slug=slug)
+    _add_worktree_for_member(member_cfg, wt_path, checkout_branch, repo_root, base=base, slug=slug)
 
     ws_dir = workspace_dir(group_name, slug, env=env)
     append_marker(ws_dir, phase="history", outcome="ok")
@@ -724,7 +864,7 @@ def history(
     return {
         "contract_version": RECEIVE_CONTRACT_VERSION,
         "member": member,
-        "branch": branch,
+        "branch": slug_branch,
         "commit": tip_sha,
     }
 
