@@ -88,21 +88,42 @@ branch this host already has moves it rather than refusing.
 
 An optional `--branch` names a SECOND branch riding the same bundle — the
 sender's own checked-out branch, when it is not the slug branch. The name is
-validated before anything touches disk (`_validate_branch_name`: git's own
-`check-ref-format --branch`, a `^[A-Za-z0-9._/-]+$` safe-value shape, and an
-explicit refusal of a leading `-` or a name equal to the slug branch —
-`InvalidBranchName`). A pre-existing local branch of that name is updated
+validated before anything touches disk (`_validate_branch_name`): git's own
+`check-ref-format --branch`, a `^[A-Za-z0-9._/-]+$` safe-value shape, an
+explicit refusal of a leading `-` or a name equal to the slug branch, and a
+refusal of any REF-PATH-shaped name — a first path segment of `refs` or
+`heads`, or a name equal to or nested under `HEAD` — since
+`check-ref-format --branch` alone accepts those (`heads/x`, `refs/heads/x`,
+`refs/tags/x` all pass it) and landing one unvalidated would create a
+permanently ambiguous `refs/heads/heads/x`-shaped ref. Any of the above
+raises `InvalidBranchName`, naming the member and the branch, before the
+bundle's second ref is ever resolved to a tip.
+
+Past name validation, a pre-existing local branch of that name is updated
 only when the incoming tip fast-forwards it (or is the same commit);
 otherwise the phase refuses by name (`DivergentBranchRefused`, naming the
 member and the branch) before EITHER branch's ref is touched — the slug
 branch is not force-updated either, so a refusal here never leaves the two
-branches in an inconsistent relationship to each other. The member's
-worktree is then materialized through
+branches in an inconsistent relationship to each other. Before either ref is
+touched, this host also checks whether `--branch` is already checked out in
+ANOTHER worktree of its clone (`_branch_checked_out_elsewhere`, via `git
+worktree list --porcelain`) — a hit refuses by name
+(`BranchCheckedOutElsewhere`), and a registry this host cannot even READ
+(the `git worktree list` call itself exiting non-zero) refuses too
+(`WorktreeRegistryUnreadable`) rather than being read as "no conflict"; both
+guard the same hazard, `git update-ref` moving a branch's ref out from under
+a checkout that still has it open.
+
+The member's worktree is then materialized through
 `camp.provision.reconcile._add_worktree_for_member`, checked out on the
 extra branch when one was given (reusing that already-present local branch —
 `_branch_exists_locally` — rather than branching a fresh one off `base`), or
 on the slug branch when `--branch` was not given — the shape a sender that
-never sends `--branch` relies on.
+never sends `--branch` relies on. `_ensure_worktree_on_branch` then confirms
+the worktree actually landed on the requested branch — a clean pre-existing
+worktree on the wrong branch is switched in place; a dirty one refuses by
+name (`WorktreeBranchMismatchRefused`) rather than discarding uncommitted
+work or silently reporting `ok` while still on the old branch.
 
 **worktree** receives one member's working-tree content, sent by
 `camp.transfer.worktree.send_worktree` as a stdlib `tarfile` stream on
@@ -244,6 +265,7 @@ __all__ = [
     "InvalidBranchName",
     "DivergentBranchRefused",
     "BranchCheckedOutElsewhere",
+    "WorktreeRegistryUnreadable",
     "WorktreeBranchMismatchRefused",
     "ArchiveMemberRefused",
     "ConversationSubpathRefused",
@@ -409,6 +431,25 @@ class BranchCheckedOutElsewhere(ReceiveRefused):
         self.member = member
         self.branch = branch
         self.worktree_path = worktree_path
+
+
+class WorktreeRegistryUnreadable(ReceiveRefused):
+    """`history`'s `--branch` guard against a branch already checked out
+    elsewhere (`_branch_checked_out_elsewhere`) could not read this host's
+    worktree registry — `git worktree list --porcelain` itself exited
+    non-zero. Refused rather than treating an unreadable registry as "no
+    conflict": that fail-open reading is exactly what would let
+    `git update-ref` move a branch's ref out from under a checkout this
+    host failed to even see. Raised before EITHER bundle ref is touched."""
+
+    def __init__(self, member: str, branch: str, detail: str) -> None:
+        super().__init__(
+            f"member {member!r}: could not read this host's worktree "
+            f"registry to check whether branch {branch!r} is checked out "
+            f"elsewhere, so the check could not be completed: {detail.strip()}"
+        )
+        self.member = member
+        self.branch = branch
 
 
 class WorktreeBranchMismatchRefused(ReceiveRefused):
@@ -745,8 +786,18 @@ _SAFE_BRANCH_RE = re.compile(r"^[A-Za-z0-9._/-]+\Z")
 def _validate_branch_name(member: str, branch: str, slug_branch: str) -> None:
     """Refuse *branch* before it is ever resolved to a tip or written as a
     ref — a leading `-` (option-injection shape), any character outside the
-    safe-value charset, a shape git's own `check-ref-format` rejects, or a
-    name equal to the workspace's own slug branch.
+    safe-value charset, a shape git's own `check-ref-format` rejects, a name
+    equal to the workspace's own slug branch, or a ref-path-shaped name.
+
+    `git check-ref-format --branch` validates that a value is a well-formed
+    REF PATH, not that it is a bare branch shortname — `heads/x`,
+    `refs/heads/x`, and `refs/tags/x` all pass it. Landed unvalidated, any of
+    those would make this host create `refs/heads/heads/x` (or
+    `refs/heads/refs/heads/x`), a permanently ambiguous short name different
+    git commands resolve to different commits. A first path segment of
+    `refs` or `heads`, or a name equal to (or nested under) `HEAD`, is
+    refused here for exactly that reason, before check-ref-format is even
+    consulted.
 
     Raises:
         InvalidBranchName: *branch* fails any of the above.
@@ -761,6 +812,13 @@ def _validate_branch_name(member: str, branch: str, slug_branch: str) -> None:
         raise InvalidBranchName(
             member, branch, "must not equal the workspace's own slug branch"
         )
+    first_segment = branch.split("/", 1)[0]
+    if first_segment in ("refs", "heads"):
+        raise InvalidBranchName(
+            member, branch, f"must not begin with the ref-path segment {first_segment!r}"
+        )
+    if branch == "HEAD" or branch.startswith("HEAD/"):
+        raise InvalidBranchName(member, branch, "must not be or begin with 'HEAD'")
     check = subprocess.run(
         ["git", "check-ref-format", "--branch", branch],
         capture_output=True,
@@ -784,7 +842,9 @@ def _fast_forwardable(repo_root: Path, old_tip: str, new_tip: str) -> bool:
     return result.returncode == 0
 
 
-def _branch_checked_out_elsewhere(repo_root: Path, branch: str, wt_path: Path) -> str | None:
+def _branch_checked_out_elsewhere(
+    member: str, repo_root: Path, branch: str, wt_path: Path
+) -> str | None:
     """The path of another worktree in *repo_root*'s registry that already
     has *branch* checked out, or `None` when the branch is free — or is
     checked out only at *wt_path* itself, the idempotent re-run shape
@@ -794,6 +854,10 @@ def _branch_checked_out_elsewhere(repo_root: Path, branch: str, wt_path: Path) -
     through `camp.provision.reconcile`'s own worktree-path helpers, since
     this needs the BRANCH each registered worktree has checked out, not
     merely its path.
+
+    Raises:
+        WorktreeRegistryUnreadable: the registry itself could not be read —
+            refused rather than silently treated as "no conflict".
     """
     result = subprocess.run(
         ["git", "-C", str(repo_root), "worktree", "list", "--porcelain"],
@@ -802,7 +866,7 @@ def _branch_checked_out_elsewhere(repo_root: Path, branch: str, wt_path: Path) -
         check=False,
     )
     if result.returncode != 0:
-        return None
+        raise WorktreeRegistryUnreadable(member, branch, result.stderr)
 
     target_ref = f"refs/heads/{branch}"
     try:
@@ -905,6 +969,9 @@ def history(
             primary checkout) — raised before EITHER branch's ref is
             touched, so a `git update-ref` never moves a branch out from
             under a checkout that has it open.
+        WorktreeRegistryUnreadable: this host's worktree registry could not
+            be read while checking for the above — refused rather than
+            treated as "no conflict".
     """
     group = _require_group(groups, group_name)
 
@@ -930,7 +997,7 @@ def history(
     wt_path = _worktree_path(group_name, slug, member, env=env)
 
     if branch is not None:
-        conflict = _branch_checked_out_elsewhere(repo_root, branch, wt_path)
+        conflict = _branch_checked_out_elsewhere(member, repo_root, branch, wt_path)
         if conflict is not None:
             raise BranchCheckedOutElsewhere(member, branch, conflict)
 
