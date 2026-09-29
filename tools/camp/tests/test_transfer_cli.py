@@ -972,7 +972,8 @@ def test_gather_conversations_wires_the_gathered_pool_into_workspace_conversatio
     sentinel = (conversations_mod.WorkspaceConversation("sid", None, False, True),)
 
     def _fake_workspace_conversations(
-        workspace, *, transcripts, live_records, groups, env, locate_transcript
+        workspace, *, transcripts, live_records, groups, env, locate_transcript,
+        transcript_stored_under,
     ):
         captured["call"] = (workspace, transcripts, live_records, groups, env)
         return sentinel
@@ -1005,7 +1006,8 @@ def test_gather_conversations_returns_a_different_answer_for_a_different_pool(
     monkeypatch.setattr(session_mod, "_addressable_harnesses", lambda groups, **kw: [])
 
     def _fake_workspace_conversations(
-        workspace, *, transcripts, live_records, groups, env, locate_transcript
+        workspace, *, transcripts, live_records, groups, env, locate_transcript,
+        transcript_stored_under,
     ):
         return tuple(transcripts)
 
@@ -1055,6 +1057,9 @@ def test_gather_conversations_scopes_unreadable_conversations_by_where_the_store
         def session_transcript_path(self, session_id, root, *, env=None):
             if stored_under.get(session_id) == Path(root).resolve():
                 return Path(root) / f"{session_id}.jsonl"
+            return None
+
+        def session_transcript_stored_under(self, session_id, root, *, env=None):
             return None
 
     monkeypatch.setattr(session_mod, "_addressable_harnesses", lambda groups, **kw: [_Store()])
@@ -5278,3 +5283,105 @@ def test_after_a_completed_transfer_this_hosts_own_preflight_refuses_naming_the_
     out = capsys.readouterr().out
     assert "host-b-declared" in out
     assert "run this preflight from" in out
+
+
+def _unreadable_rows(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stores_for):
+    """`_gather_conversations` over unreadable conversations `_DEEP_ID` and
+    `_ELSEWHERE_ID`, with the pool of stores `stores_for(env)` builds."""
+    from datetime import datetime, timezone
+
+    from trailhead.harness.base import SessionTranscript
+
+    transfer = _transfer_module()
+    teardown_guard = importlib.import_module("camp.launch.teardown_guard")
+    session_mod = importlib.import_module("camp.cli.session")
+    manifest = importlib.import_module("camp.group.manifest")
+
+    resolved_env = _hermetic_env(tmp_path)
+    ws = manifest.workspace_dir("g", "s", env=resolved_env)
+    ws.mkdir(parents=True)
+    modified = datetime.now(timezone.utc)
+    monkeypatch.setattr(
+        session_mod, "_addressable_harnesses", lambda groups, **kw: stores_for(resolved_env)
+    )
+    monkeypatch.setattr(
+        teardown_guard,
+        "gather_pool",
+        lambda harnesses, *, env: (
+            [SessionTranscript(sid, None, modified) for sid in (_DEEP_ID, _ELSEWHERE_ID)],
+            [],
+        ),
+    )
+    return transfer._gather_conversations(
+        group_name="g", slug="s", session_groups=[], resolved_env=resolved_env
+    )
+
+
+_DEEP_ID = "aaaaaaaa-1111-4111-8111-111111111111"
+_ELSEWHERE_ID = "bbbbbbbb-2222-4222-8222-222222222222"
+
+
+class _AnsweringStore:
+    """A store answering `session_transcript_stored_under` from a fixed table."""
+
+    def __init__(self, env, answers):
+        self.env = env
+        self._answers = answers
+
+    def session_transcript_path(self, session_id, root, *, env=None):
+        return None
+
+    def session_transcript_stored_under(self, session_id, root, *, env=None):
+        return self._answers.get(session_id)
+
+
+def test_gather_conversations_reports_an_unreadable_conversation_a_store_places_under_the_workspace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rows = _unreadable_rows(
+        tmp_path,
+        monkeypatch,
+        lambda env: [_AnsweringStore(env, {_DEEP_ID: True, _ELSEWHERE_ID: False})],
+    )
+
+    assert [(r.session_id, r.unresolved) for r in rows] == [(_DEEP_ID, True)]
+
+
+def test_gather_conversations_lets_one_store_saying_true_outweigh_another_saying_false(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rows = _unreadable_rows(
+        tmp_path,
+        monkeypatch,
+        lambda env: [
+            _AnsweringStore(env, {_DEEP_ID: False, _ELSEWHERE_ID: False}),
+            _AnsweringStore(env, {_DEEP_ID: True}),
+        ],
+    )
+
+    assert [(r.session_id, r.unresolved) for r in rows] == [(_DEEP_ID, True)]
+
+
+def test_gather_conversations_lets_a_false_outweigh_another_store_having_no_answer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One store with no concept must not turn another's `False` into a probe
+    that would attribute the conversation."""
+    ws_probe_hit = []
+
+    class _ProbingNoConcept(_AnsweringStore):
+        def session_transcript_path(self, session_id, root, *, env=None):
+            ws_probe_hit.append(session_id)
+            return Path(root) / f"{session_id}.jsonl"
+
+    rows = _unreadable_rows(
+        tmp_path,
+        monkeypatch,
+        lambda env: [
+            _ProbingNoConcept(env, {}),
+            _AnsweringStore(env, {_DEEP_ID: False, _ELSEWHERE_ID: False}),
+        ],
+    )
+
+    assert rows == ()
+    assert ws_probe_hit == []

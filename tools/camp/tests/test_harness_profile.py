@@ -412,3 +412,38 @@ class TestHarnessStoreSessionTranscriptDestinationBinding:
         )
 
         assert dest == Path("/acct/a/sess-1.jsonl")
+
+
+class _StoredUnderAwareHarness(_DestinationAwareHarness):
+    def session_transcript_stored_under(self, session_id, root, *, env=None):
+        return (env or {}).get("CLAUDE_CONFIG_DIR", "unbound") == "/acct/a"
+
+
+class TestHarnessStoreSessionTranscriptStoredUnderBinding:
+    def _store(self, monkeypatch, account):
+        import camp.launch.profile as profile
+
+        monkeypatch.setattr(profile, "harness_for", lambda group: _StoredUnderAwareHarness())
+        return profile.harness_store_for(
+            {"group": {"name": "g"}, "launch": {"account": account}}, env={}
+        )
+
+    def test_answers_against_its_own_account_whatever_env_the_caller_passes(self, monkeypatch):
+        store = self._store(monkeypatch, "/acct/a")
+
+        assert (
+            store.session_transcript_stored_under(
+                "sess-1", Path("/ws"), env={"CLAUDE_CONFIG_DIR": "/some-other-acct"}
+            )
+            is True
+        )
+
+    def test_a_different_account_binds_a_different_answer(self, monkeypatch):
+        store = self._store(monkeypatch, "/acct/b")
+
+        assert (
+            store.session_transcript_stored_under(
+                "sess-1", Path("/ws"), env={"CLAUDE_CONFIG_DIR": "/acct/a"}
+            )
+            is False
+        )

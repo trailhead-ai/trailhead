@@ -505,6 +505,7 @@ def _gather_conversations(*, group_name: str, slug: str, session_groups, resolve
             groups=session_groups,
             env=resolved_env,
             locate_transcript=_locate_transcript(session_groups, resolved_env),
+            transcript_stored_under=_transcript_stored_under(session_groups, resolved_env),
         )
     except (teardown_guard.EnumerationUnavailable, EnumerationUnavailable):
         return None
@@ -531,6 +532,31 @@ def _locate_transcript(session_groups, resolved_env):
         return None
 
     return _locate
+
+
+def _transcript_stored_under(session_groups, resolved_env):
+    """A `transcript_stored_under` callable shaped like
+    `Harness.session_transcript_stored_under`, over the same pool of stores
+    `_gather_conversations` reads: `True` when any store says the transcript is
+    kept at or below the root, else `False` when any store says it is not,
+    else `None` (no store has the concept).
+    """
+    from .session import _addressable_harnesses
+
+    stores = _addressable_harnesses(session_groups, env=resolved_env)
+
+    def _stored_under(session_id: str, root):
+        answers = [
+            store.session_transcript_stored_under(session_id, root, env=store.env)
+            for store in stores
+        ]
+        if any(a is True for a in answers):
+            return True
+        if any(a is False for a in answers):
+            return False
+        return None
+
+    return _stored_under
 
 
 _MISSING_SELF_NAME_CHECK = "this host has declared a name"

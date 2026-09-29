@@ -7,11 +7,14 @@ Test contract:
   subpath, not at the root.
 - A conversation whose recorded root is outside the workspace is excluded.
 - A conversation with no readable recorded root is reported as unresolved when
-  its transcript is stored under the workspace root or a member directory, and
-  is distinguishable from both "rooted here" and "excluded".
-- A conversation with no readable recorded root whose transcript is stored
-  under neither is excluded, so another workspace's unreadable conversation
-  never blocks this one.
+  the harness says its transcript is stored at or below the workspace root, at
+  any depth, and is distinguishable from both "rooted here" and "excluded".
+- A conversation with no readable recorded root that the harness says is stored
+  elsewhere is excluded, so another workspace's unreadable conversation never
+  blocks this one.
+- When the harness has no such concept, the transcript is probed under the
+  workspace root and its immediate member directories: found there is
+  unresolved, found deeper or nowhere is excluded.
 - A live conversation is reported live; a stopped one is reported stopped.
 - A workspace with no conversations rooted in it returns an empty result,
   distinguishable from a failure to read.
@@ -132,7 +135,26 @@ def _locator(stored_under: dict[str, Path]):
     return _locate
 
 
-def _rows(workspace: Path, *, transcripts, live_records, groups, env, stored_under=None):
+def _harness_answers(answers: dict[str, bool | None]):
+    """A `transcript_stored_under` fake: what the harness says for each session
+    id, `None` (no such concept) for any id it is not told about."""
+
+    def _answer(session_id: str, root: Path) -> bool | None:
+        return answers.get(session_id)
+
+    return _answer
+
+
+def _rows(
+    workspace: Path,
+    *,
+    transcripts,
+    live_records,
+    groups,
+    env,
+    stored_under=None,
+    harness_answers=None,
+):
     from camp.transfer.conversations import workspace_conversations
 
     return workspace_conversations(
@@ -142,6 +164,7 @@ def _rows(workspace: Path, *, transcripts, live_records, groups, env, stored_und
         groups=groups,
         env=env,
         locate_transcript=_locator(stored_under or {}),
+        transcript_stored_under=_harness_answers(harness_answers or {}),
         now=_NOW,
     )
 
@@ -253,6 +276,80 @@ def test_unreadable_conversation_stored_under_another_workspace_excluded(
         stored_under={_UUID_A: other, _UUID_B: ws},
     )
     assert [(r.session_id, r.unresolved) for r in rows] == [(_UUID_B, True)]
+
+
+def test_unreadable_conversation_the_harness_places_under_the_workspace_reported_unresolved(
+    tmp_path: Path,
+) -> None:
+    """Started below a member, so no probe of the root or a member finds it."""
+    env = _env(tmp_path)
+    ws = _workspace(tmp_path, "g", "ws")
+    (ws / "repo_a" / "tools").mkdir(parents=True)
+    rows = _rows(
+        ws,
+        transcripts=[_transcript(_UUID_A, None)],
+        live_records=[],
+        groups=[_group("g")],
+        env=env,
+        stored_under={_UUID_A: ws / "repo_a" / "tools"},
+        harness_answers={_UUID_A: True},
+    )
+    assert [(r.session_id, r.subpath, r.unresolved) for r in rows] == [(_UUID_A, None, True)]
+
+
+def test_unreadable_conversation_the_harness_places_elsewhere_excluded_despite_the_probe(
+    tmp_path: Path,
+) -> None:
+    env = _env(tmp_path)
+    ws = _workspace(tmp_path, "g", "ws")
+    rows = _rows(
+        ws,
+        transcripts=[_transcript(_UUID_A, None)],
+        live_records=[],
+        groups=[_group("g")],
+        env=env,
+        stored_under={_UUID_A: ws},
+        harness_answers={_UUID_A: False},
+    )
+    assert rows == ()
+
+
+def test_harness_without_the_concept_falls_back_to_the_probe_at_a_member(
+    tmp_path: Path,
+) -> None:
+    env = _env(tmp_path)
+    ws = _workspace(tmp_path, "g", "ws")
+    member = ws / "repo_a"
+    member.mkdir()
+    rows = _rows(
+        ws,
+        transcripts=[_transcript(_UUID_A, None)],
+        live_records=[],
+        groups=[_group("g")],
+        env=env,
+        stored_under={_UUID_A: member},
+        harness_answers={_UUID_A: None},
+    )
+    assert [(r.session_id, r.unresolved) for r in rows] == [(_UUID_A, True)]
+
+
+def test_harness_without_the_concept_falls_back_to_the_probe_and_misses_below_a_member(
+    tmp_path: Path,
+) -> None:
+    env = _env(tmp_path)
+    ws = _workspace(tmp_path, "g", "ws")
+    deep = ws / "repo_a" / "tools"
+    deep.mkdir(parents=True)
+    rows = _rows(
+        ws,
+        transcripts=[_transcript(_UUID_A, None)],
+        live_records=[],
+        groups=[_group("g")],
+        env=env,
+        stored_under={_UUID_A: deep},
+        harness_answers={_UUID_A: None},
+    )
+    assert rows == ()
 
 
 # ---------------------------------------------------------------------------
