@@ -25,24 +25,26 @@ Each row is a :class:`WorkspaceConversation`, one of exactly three outcomes:
   ``PurePosixPath`` — ``PurePosixPath(".")`` when the root IS the workspace
   root. ``unresolved`` is ``False``.
 - UNRESOLVED — the harness could not tell camp where the session ran at all
-  (:attr:`SessionCandidate.unreadable`), but its transcript is stored under
-  the workspace root or one of its immediate member directories. ``subpath``
+  (:attr:`SessionCandidate.unreadable`), but its transcript is stored at or
+  below the workspace root, at any depth. ``subpath``
   is ``None`` and ``unresolved`` is ``True``. Never conflated with "rooted
   here": a caller cannot report where an unresolved conversation sits, only
   that it exists.
 - EXCLUDED — the recorded root lies outside the workspace, or there is no
-  recorded root and the transcript is stored under neither the workspace root
-  nor a member directory. This outcome has no row at all; a caller counts
+  recorded root and the transcript is not stored at or below the workspace
+  root. This outcome has no row at all; a caller counts
   what is absent from the result, not a third field on it.
 
 An unreadable candidate is attributed by where the harness stores its
-transcript, asked through *locate_transcript* (shaped like
-`Harness.session_transcript_path`), because its contents name no root. It is
-never attributed to every workspace: one unreadable transcript anywhere on the
-host would then block the transfer of every workspace on it. The probe covers
-the workspace root and its immediate subdirectories — where camp starts
-sessions — so an unreadable conversation started deeper inside a member is
-not attributed and does not cross.
+transcript, because its contents name no root. It is never attributed to every
+workspace: one unreadable transcript anywhere on the host would then block the
+transfer of every workspace on it. *transcript_stored_under* (shaped like
+`Harness.session_transcript_stored_under`) answers for a start directory at any
+depth: ``True`` attributes the conversation here, ``False`` excludes it. When it
+answers ``None`` the harness has no such concept, and the transcript is instead
+probed through *locate_transcript* (shaped like
+`Harness.session_transcript_path`) under the workspace root and its immediate
+subdirectories, where camp starts sessions.
 
 ``live`` carries the candidate's own liveness flag unchanged, so a still-running
 session is never collapsed into "would cross" without saying it is live.
@@ -259,10 +261,15 @@ def workspace_conversations(
     groups: Iterable[dict[str, Any]],
     env: Mapping[str, str],
     locate_transcript: Callable[[str, Path], Path | None],
+    transcript_stored_under: Callable[[str, Path], bool | None] | None = None,
     now: datetime | None = None,
 ) -> tuple[WorkspaceConversation, ...]:
     """Every conversation rooted in *workspace*, plus every unresolved one
-    whose transcript *locate_transcript* finds stored under it.
+    whose transcript is stored at or below it.
+
+    An unreadable candidate is attributed by *transcript_stored_under* when it
+    answers ``True`` / ``False``, and by probing *locate_transcript* when it
+    answers ``None`` (or is not given).
 
     ``None`` for either pool is the unanswerable case and raises
     :class:`EnumerationUnavailable`; it is never read as an empty pool — the
@@ -286,10 +293,17 @@ def workspace_conversations(
         now=now,
     ):
         if candidate.unreadable:
-            if not any(
-                locate_transcript(candidate.session_id, probe) is not None
-                for probe in probe_roots
-            ):
+            stored = (
+                transcript_stored_under(candidate.session_id, root)
+                if transcript_stored_under is not None
+                else None
+            )
+            if stored is None:
+                stored = any(
+                    locate_transcript(candidate.session_id, probe) is not None
+                    for probe in probe_roots
+                )
+            if not stored:
                 continue
             rows.append(
                 WorkspaceConversation(
