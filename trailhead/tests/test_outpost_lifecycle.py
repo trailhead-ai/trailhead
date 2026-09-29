@@ -779,7 +779,11 @@ def test_restart_hands_the_derived_window_to_the_liveness_check(monkeypatch, tmp
     seen: list[float] = []
     _stub_restart_up_to_the_pid_check(monkeypatch, tmp_path, seen)
 
-    outpost_lifecycle.restart(build_cmd=["true"], restart_health_timeout=30.0)
+    outpost_lifecycle.restart(
+        build_cmd=["true"],
+        restart_health_timeout=30.0,
+        supervisor_dir=tmp_path / "supervisor",
+    )
 
     assert seen == [pytest.approx(30.0 * outpost_lifecycle._PID_SETTLE_FRACTION)]
 
@@ -789,7 +793,10 @@ def test_restart_hands_an_explicit_window_to_the_liveness_check(monkeypatch, tmp
     _stub_restart_up_to_the_pid_check(monkeypatch, tmp_path, seen)
 
     outpost_lifecycle.restart(
-        build_cmd=["true"], restart_health_timeout=30.0, pid_settle_timeout=7.5
+        build_cmd=["true"],
+        restart_health_timeout=30.0,
+        pid_settle_timeout=7.5,
+        supervisor_dir=tmp_path / "supervisor",
     )
 
     assert seen == [7.5]
