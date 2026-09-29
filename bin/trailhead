@@ -8,13 +8,18 @@
 # interpreter far below the floor (e.g. macOS system Python 3.9 when Homebrew's
 # is not on that PATH). The floor is read from <repo_root>/pyproject.toml, one
 # level above bin/, where this launcher's own declaration lives, and every
-# `python3` on PATH is searched in PATH order for one that satisfies it. There is
-# no upward search: a pyproject.toml above the repo is a stranger's, and letting
-# it set the floor would silently move which interpreter trailhead accepts.
+# absolute `python3` on PATH is searched in PATH order for one that satisfies it;
+# relative entries (`.`, `bin`) are skipped, and entries are never glob-expanded.
+# There is no upward search: a pyproject.toml above the repo is a stranger's, and
+# letting it set the floor would silently move which interpreter trailhead accepts.
 # Mirrors tools/camp/plugins/camp/bin/camp; camp's copy ships inside the camp
 # plugin tree and cannot be shared from here.
 
 set -euo pipefail
+
+# An exported CDPATH makes `cd` echo the directory it resolved to, which would
+# put a second line into every `$(cd ... && pwd)` capture below.
+unset CDPATH
 
 # Symlink-safe self-resolution (macOS does not ship GNU readlink -f).
 SOURCE="${BASH_SOURCE[0]}"
@@ -59,23 +64,27 @@ _select_python() {
     local floor="$1"
     CHOSEN_PYTHON=""
     LAST_FOUND_VERSION=""
-    local dir interp v
+    local dir interp v noglob_was_set=0
+    case $- in *f*) noglob_was_set=1 ;; esac
     local saved_ifs="$IFS"
+    set -f
     IFS=':'
     for dir in $PATH; do
         IFS="$saved_ifs"
-        [ -n "$dir" ] || continue
+        case "$dir" in /*) ;; *) IFS=':'; continue ;; esac
         interp="$dir/python3"
-        [ -x "$interp" ] || continue
-        v="$(_interpreter_version "$interp")" || continue
-        LAST_FOUND_VERSION="$v"
-        if _version_ge "$v" "$floor"; then
-            CHOSEN_PYTHON="$interp"
-            return 0
+        if [ -x "$interp" ] && v="$(_interpreter_version "$interp")"; then
+            LAST_FOUND_VERSION="$v"
+            if _version_ge "$v" "$floor"; then
+                CHOSEN_PYTHON="$interp"
+                [ "$noglob_was_set" -eq 1 ] || set +f
+                return 0
+            fi
         fi
         IFS=':'
     done
     IFS="$saved_ifs"
+    [ "$noglob_was_set" -eq 1 ] || set +f
     return 1
 }
 
