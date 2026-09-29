@@ -406,7 +406,7 @@ class TestBinTrailheadRegeneratesShellenv:
     # emits the one-arm function; no input varies its answer.
     def test_shellenv_output_contains_the_one_arm_function(self) -> None:
         proc = subprocess.run(
-            [sys.executable, str(_BIN_TRAILHEAD), "shellenv", "--shell", "bash"],
+            [str(_BIN_TRAILHEAD), "shellenv", "--shell", "bash"],
             capture_output=True,
             text=True,
         )

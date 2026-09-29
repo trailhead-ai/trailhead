@@ -1,26 +1,93 @@
-#!/usr/bin/env python3
-"""bin/trailhead — git-only CLI entry point for the trailhead management tool.
+#!/usr/bin/env bash
+# bin/trailhead — git-only CLI entry point for the trailhead management tool.
+#
+# Works on a fresh git clone with no pip install: picks a python3 that meets the
+# repo's declared requires-python floor and execs bin/_trailhead.py on it.
+#
+# Interpreter selection — a bare `python3` on a stripped PATH can resolve to an
+# interpreter far below the floor (e.g. macOS system Python 3.9 when Homebrew's
+# is not on that PATH). The floor is read from <repo_root>/pyproject.toml, one
+# level above bin/, where this launcher's own declaration lives, and every
+# `python3` on PATH is searched in PATH order for one that satisfies it. There is
+# no upward search: a pyproject.toml above the repo is a stranger's, and letting
+# it set the floor would silently move which interpreter trailhead accepts.
+# Mirrors tools/camp/plugins/camp/bin/camp; camp's copy ships inside the camp
+# plugin tree and cannot be shared from here.
 
-Works on a fresh git clone with no pip install. Puts the repo root on sys.path
-so that `import trailhead` resolves self-relatively, then invokes trailhead.cli.main().
+set -euo pipefail
 
-Resolution: this file lives at <repo_root>/bin/trailhead, so the repo root is
-one level up from dirname(__file__).
+# Symlink-safe self-resolution (macOS does not ship GNU readlink -f).
+SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE" ]; do
+    DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+    SOURCE="$(readlink "$SOURCE")"
+    # Handle relative symlinks.
+    [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+BIN_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+REPO_ROOT="$(cd -P "$BIN_DIR/.." && pwd)"
+SHIM="$BIN_DIR/_trailhead.py"
 
-[project.scripts] trailhead = "trailhead.cli:main" in pyproject.toml is kept
-for optional local dev convenience, but nothing depends on it.
-"""
-from __future__ import annotations
+_read_requires_python_floor() {
+    local pyproject="$1"
+    [ -f "$pyproject" ] || return 1
+    local line
+    line="$(grep -m1 '^requires-python' "$pyproject" || true)"
+    [ -n "$line" ] || return 1
+    FLOOR="$(printf '%s' "$line" | grep -oE '[0-9]+\.[0-9]+' | head -1)"
+    [ -n "$FLOOR" ]
+}
 
-import sys
-from pathlib import Path
+_interpreter_version() {
+    local interp="$1" out
+    out="$("$interp" --version 2>&1)" || return 1
+    printf '%s' "$out" | grep -oE '[0-9]+\.[0-9]+' | head -1
+}
 
-# Put the repo root on sys.path so `import trailhead` resolves without pip.
-_REPO_ROOT = Path(__file__).resolve().parent.parent
-if str(_REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT))
+_version_ge() {
+    local c_major="${1%%.*}" c_minor="${1#*.}" f_major="${2%%.*}" f_minor="${2#*.}"
+    if [ "$c_major" -gt "$f_major" ]; then return 0; fi
+    if [ "$c_major" -lt "$f_major" ]; then return 1; fi
+    [ "$c_minor" -ge "$f_minor" ]
+}
 
-from trailhead.cli import main  # noqa: E402
+# Search every `python3` on PATH (PATH order) for one meeting FLOOR. Sets
+# CHOSEN_PYTHON on success; sets LAST_FOUND_VERSION regardless, for the error
+# message when nothing satisfies. Walks PATH directories directly rather than
+# `command -v -a`, which not every `command` builtin supports.
+_select_python() {
+    local floor="$1"
+    CHOSEN_PYTHON=""
+    LAST_FOUND_VERSION=""
+    local dir interp v
+    local saved_ifs="$IFS"
+    IFS=':'
+    for dir in $PATH; do
+        IFS="$saved_ifs"
+        [ -n "$dir" ] || continue
+        interp="$dir/python3"
+        [ -x "$interp" ] || continue
+        v="$(_interpreter_version "$interp")" || continue
+        LAST_FOUND_VERSION="$v"
+        if _version_ge "$v" "$floor"; then
+            CHOSEN_PYTHON="$interp"
+            return 0
+        fi
+        IFS=':'
+    done
+    IFS="$saved_ifs"
+    return 1
+}
 
-if __name__ == "__main__":
-    sys.exit(main())
+if _read_requires_python_floor "$REPO_ROOT/pyproject.toml"; then
+    if _select_python "$FLOOR"; then
+        exec "$CHOSEN_PYTHON" "$SHIM" "$@"
+    else
+        echo "trailhead: requires Python >=${FLOOR}, found Python ${LAST_FOUND_VERSION:-none}" >&2
+        exit 1
+    fi
+else
+    echo "trailhead: could not determine the required Python version (no requires-python in $REPO_ROOT/pyproject.toml); proceeding with whatever python3 resolves to" >&2
+fi
+
+exec python3 "$SHIM" "$@"
