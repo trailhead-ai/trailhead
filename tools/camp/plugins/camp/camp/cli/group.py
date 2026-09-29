@@ -283,10 +283,9 @@ def _cmd_new_host_cli(
     args: list[str],
     host: "Host",
     host_name: str,
-    env: dict[str, str] | None = None,
     *,
-    dry_run: bool = False,
-    connect_timeout: float | None = None,
+    dry_run: bool,
+    connect_timeout: float,
 ) -> None:
     """camp new <slug> --host <name> [--group <g>] [--dry-run] — hand the
     terminal to the far side's own `camp new`.
@@ -304,20 +303,16 @@ def _cmd_new_host_cli(
     """
     from ..attach.prefix_warning import warn_if_nested
     from ..host.handoff import handoff, remote_camp_argv
-    from ..host.transport import DEFAULT_CONNECT_TIMEOUT_SECONDS
     from .session import require_one_raw_slug, resolve_cross_host_group
-
-    if connect_timeout is None:
-        connect_timeout = DEFAULT_CONNECT_TIMEOUT_SECONDS
 
     parser = group_verb_parser("new", dry_run=True)
     parser.add_argument("slugs", nargs="*")
     parsed = parser.parse_args(args)
     slug = require_one_raw_slug("new", parsed.slugs)
-    resolved_env = dict(env) if env is not None else dict(os.environ)
-    group_name = resolve_cross_host_group("new", parsed.group, resolved_env)
+    env = dict(os.environ)
+    group_name = resolve_cross_host_group("new", parsed.group, env)
 
-    warn_if_nested(resolved_env)
+    warn_if_nested(env)
     camp_args = ["new", slug, "--group", group_name]
     if dry_run:
         camp_args.append("--dry-run")
