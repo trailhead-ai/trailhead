@@ -20,6 +20,9 @@ set -euo pipefail
 # An exported CDPATH makes `cd` echo the directory it resolved to, which would
 # put a second line into every `$(cd ... && pwd)` capture below.
 unset CDPATH
+# Nothing here globs; with globbing off, a PATH entry like `/opt/*/bin` is
+# searched literally instead of expanding into directories the user never named.
+set -f
 
 # Symlink-safe self-resolution (macOS does not ship GNU readlink -f).
 SOURCE="${BASH_SOURCE[0]}"
@@ -64,10 +67,8 @@ _select_python() {
     local floor="$1"
     CHOSEN_PYTHON=""
     LAST_FOUND_VERSION=""
-    local dir interp v noglob_was_set=0
-    case $- in *f*) noglob_was_set=1 ;; esac
+    local dir interp v
     local saved_ifs="$IFS"
-    set -f
     IFS=':'
     for dir in $PATH; do
         IFS="$saved_ifs"
@@ -77,14 +78,12 @@ _select_python() {
             LAST_FOUND_VERSION="$v"
             if _version_ge "$v" "$floor"; then
                 CHOSEN_PYTHON="$interp"
-                [ "$noglob_was_set" -eq 1 ] || set +f
                 return 0
             fi
         fi
         IFS=':'
     done
     IFS="$saved_ifs"
-    [ "$noglob_was_set" -eq 1 ] || set +f
     return 1
 }
 
