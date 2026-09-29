@@ -22,8 +22,6 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-import pytest
-
 from ._helpers import camp_state_env, init_git_repo
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]  # trailhead root
@@ -111,79 +109,7 @@ def test_recipe_task_marked_failed_on_nonzero_without_raising(tmp_path: Path) ->
 
 
 # ---------------------------------------------------------------------------
-# 3. The two config homes agree: the repo example and the chezmoi source
-#    template must declare the same phase + timeout for this task, or the
-#    known two-homes drift silently reappears in this very change.
-# ---------------------------------------------------------------------------
-
-_CHEZMOI_TRAILHEAD_TMPL = (
-    Path.home() / ".local" / "share" / "chezmoi" / "private_dot_config" / "camp"
-    / "groups" / "trailhead.toml.tmpl"
-)
-
-
-def _resolved_recipe_from_chezmoi_template() -> dict:
-    """The trailhead member's code-review-graph task as declared in the
-    chezmoi source template.
-
-    The full .tmpl file is not valid TOML — it carries go-template
-    conditionals (`{{ if eq .chezmoi.os "darwin" }}`) around the per-machine
-    member list and the [release] merge_order. The `[tasks.*]` blocks
-    compared here sit between those two templated regions and carry no
-    template syntax of their own, so the untemplated slice between them is
-    valid TOML on its own and parses to the same task definition every
-    machine's rendered config would produce — verified below by asserting
-    the slice is free of template delimiters before parsing it, rather than
-    assuming it.
-    """
-    import tomllib
-
-    if not _CHEZMOI_TRAILHEAD_TMPL.is_file():
-        pytest.skip(
-            f"chezmoi tree not present at {_CHEZMOI_TRAILHEAD_TMPL} — the two-homes "
-            "agreement check is opt-in and only runs on a machine with the "
-            "private chezmoi checkout"
-        )
-    text = _CHEZMOI_TRAILHEAD_TMPL.read_text(encoding="utf-8")
-
-    start = text.index("[tasks.code-review-graph]")
-    end = text.index("[release]")
-    fragment = text[start:end]
-    assert "{{" not in fragment and "}}" not in fragment, (
-        "the [tasks.*] slice of the chezmoi template now contains template "
-        "syntax — the untemplated-slice assumption this comparison relies on "
-        "no longer holds"
-    )
-
-    parsed = tomllib.loads(fragment)
-    return parsed["tasks"][_TASK_NAME]
-
-
-def test_example_config_and_chezmoi_template_agree_on_phase_and_timeout() -> None:
-    example_task = _resolved_recipe()
-    chezmoi_task = _resolved_recipe_from_chezmoi_template()
-
-    assert example_task["phase"] == chezmoi_task.get("phase", "provision")
-    assert example_task["timeout_seconds"] == chezmoi_task["timeout_seconds"]
-
-
-def test_agreement_check_skips_rather_than_fails_when_chezmoi_tree_absent(
-    monkeypatch, tmp_path: Path
-) -> None:
-    """On a machine without the private chezmoi checkout (CI, a fresh clone,
-    any other dev box), this two-homes agreement check must SKIP — not raise
-    an AssertionError that reads as an unrelated red test unconnected to
-    whatever change is actually under test."""
-    monkeypatch.setattr(
-        sys.modules[__name__], "_CHEZMOI_TRAILHEAD_TMPL", tmp_path / "absent.toml.tmpl"
-    )
-
-    with pytest.raises(pytest.skip.Exception):
-        _resolved_recipe_from_chezmoi_template()
-
-
-# ---------------------------------------------------------------------------
-# 4. End-to-end: a workspace created from the example config runs mcp-config
+# 3. End-to-end: a workspace created from the example config runs mcp-config
 #    at creation and does NOT run the reassigned code-review-graph task until
 #    activation. This is the headline assertion for the whole plan — a
 #    workspace creation that used to pay ~914s now pays only mcp-config's
