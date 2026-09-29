@@ -258,17 +258,17 @@ def _dispatch_host_command(
     host_name: str,
     rest: list[str],
     connect_timeout: float,
-    dry_run: bool = False,
+    dry_run: bool,
 ) -> None:
     """Hand a resolved remote `Host` off to its verb handler.
 
     ``connect_timeout`` is the operator's resolved value
     (`camp.host.config.connect_timeout_seconds()`, read once by `main()`'s
-    `--host` handling above), threaded to every verb below that reaches the
-    transport — "attach" hands off interactively instead and has no use for
-    it. ``dry_run`` is the router's single dry-run answer (the
-    ``CAMP_DRY_RUN`` env switch or an explicit ``--dry-run``), consumed only
-    by "new", which forwards it to the far side.
+    `--host` handling above), threaded to every verb below: "list" uses it on
+    the transport, and "attach" and "new" put it in the interactive ssh
+    invocation's `-o ConnectTimeout`. ``dry_run`` is the router's single
+    dry-run answer (the ``CAMP_DRY_RUN`` env switch or an explicit
+    ``--dry-run``), consumed only by "new", which forwards it to the far side.
 
     Reached ONLY after `--host` has resolved to a declared host and every
     refusal above has passed — `main()`'s `--host` block is this function's

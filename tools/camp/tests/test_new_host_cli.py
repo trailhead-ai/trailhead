@@ -251,6 +251,23 @@ def test_group_failing_confinement_refuses(env: Env, monkeypatch, capsys) -> Non
     assert err.strip() == str(exc.value)
 
 
+def test_dash_leading_group_via_flag_refuses_as_flag_shaped(
+    env: Env, monkeypatch, capsys
+) -> None:
+    env.group("-x")
+    code = _run(["new", "ws1", "--host", "andromeda", "--group=-x"], monkeypatch)
+    _refused(env, capsys, code, "camp new: group '-x' begins with '-'")
+
+
+def test_dash_leading_group_from_cwd_refuses_as_flag_shaped(
+    env: Env, monkeypatch, capsys
+) -> None:
+    env.group("-x")
+    env.cwd_in("-x")
+    code = _run(["new", "ws1", "--host", "andromeda"], monkeypatch)
+    _refused(env, capsys, code, "camp new: group '-x' begins with '-'")
+
+
 @pytest.mark.parametrize(
     "slug_argv, needle",
     [
