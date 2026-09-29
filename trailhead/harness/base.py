@@ -378,6 +378,24 @@ class Harness(ABC):
         """
         return None
 
+    def session_transcript_stored_under(
+        self, session_id: str, root: Path, *, env: dict[str, str] | None = None
+    ) -> bool | None:
+        """Whether ``session_id``'s stored transcript belongs to ``root`` or a
+        directory beneath it, or ``None`` when this harness cannot say.
+
+        Unlike :meth:`session_transcript_path`, which probes one exact start
+        directory, this answers for ANY start directory at or below ``root`` — a
+        session started deep inside a workspace is still that workspace's.
+
+        ``None`` means the harness has no such concept, and is constant per
+        harness.  ``False`` means it does and the session is not stored under
+        ``root`` — including an unusable ``session_id`` or no stored transcript.
+
+        ``env`` overrides the process environment; ``None`` means ``os.environ``.
+        """
+        return None
+
     # -- session resume -------------------------------------------------------
     #
     # Resuming a session means re-entering it as a fresh foreground process.  The
