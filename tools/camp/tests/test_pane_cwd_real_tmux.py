@@ -268,9 +268,9 @@ def test_empty_command_pane_runs_tmux_default_shell_not_the_starters_shell(
         lambda: subprocess.run(
             ["ps", "-o", "comm=", "-p", pid], capture_output=True, text=True, timeout=5
         ).stdout.strip(),
-        lambda comm: comm == "bash",
+        lambda comm: os.path.basename(comm) == "bash",
     )
-    assert comm == "bash"
+    assert os.path.basename(comm) == "bash"
 
 
 @pytest.mark.skipif(not os.path.exists("/bin/bash"), reason="needs /bin/bash")
