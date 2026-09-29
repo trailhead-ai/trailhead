@@ -273,6 +273,76 @@ def _resolve_group_for_attach(
         return None
 
 
+def require_one_raw_slug(verb: str, slugs: list[str]) -> str:
+    """The single workspace slug a cross-host *verb* forwards, exactly as typed.
+
+    Checked on the RAW value: an empty or whitespace-only slug, or one
+    beginning with `-` (which the far side's parser would take for a flag),
+    is refused with a `camp <verb>: …` line. The raw value is returned
+    unstripped — that is what gets forwarded.
+    """
+    from ..spine import _die
+
+    if len(slugs) != 1:
+        _die(
+            f"camp {verb}: --host requires exactly one workspace slug, got "
+            f"{len(slugs)}"
+        )
+    ref = slugs[0]
+    if not ref.strip() or ref.startswith("-"):
+        _die(f"camp {verb}: {ref!r} is not a valid workspace slug")
+    return ref
+
+
+def resolve_cross_host_group(
+    verb: str, group_override: str | None, env: dict[str, str]
+) -> str:
+    """The group NAME a cross-host *verb* forwards to the far side, resolved
+    and confinement-checked locally, or a `camp <verb>: …` refusal (exit 1).
+
+    An explicit `--group` naming a group this machine has no config for is a
+    different failure than no group resolving from cwd at all —
+    `_resolve_group_for_attach` folds both into the same `None`, which would
+    tell the operator to pass a group they already passed. So an explicit
+    value goes through `resolve_group_override` ahead of that fold. Groups are
+    read through this module's `_parsable_groups`, looked up at call time.
+    """
+    from ..group.resolve import (
+        GroupConfinementError,
+        GroupResolutionError,
+        resolve_group_override,
+        validate_group_name,
+    )
+    from ..spine import _die
+    from ..workspace.verb_taxonomy import needs_group_message
+
+    groups = _parsable_groups()
+    if group_override:
+        try:
+            target_group = resolve_group_override(group_override, groups)
+        except GroupResolutionError:
+            known = [g["group"]["name"] for g in groups]
+            _die(
+                f"camp {verb}: group {group_override!r} is not configured on "
+                f"this machine (known: {', '.join(known) or 'none'})"
+            )
+    else:
+        target_group = _resolve_group_for_attach(groups, None, env=env)
+        if target_group is None:
+            _die(needs_group_message(verb))
+    group_name = target_group["group"]["name"]
+    try:
+        validate_group_name(group_name)
+    except GroupConfinementError as exc:
+        _die(str(exc))
+    if group_name.startswith("-"):
+        _die(
+            f"camp {verb}: group {group_name!r} begins with '-' and would be "
+            "read as a flag on the far side"
+        )
+    return group_name
+
+
 def _refuse_door(outcome, reason: str, *, as_json: bool) -> NoReturn:
     """One refusal for `_open_workspace_door`: `camp attach: <reason>` on
     stderr under the plain form, or `{"ok": false, "outcome": <word or
@@ -634,16 +704,8 @@ def _cmd_attach_host_cli(
     in hand.
     """
     from ..attach.prefix_warning import warn_if_nested
-    from ..group.resolve import (
-        validate_group_name,
-        resolve_group_override,
-        GroupConfinementError,
-        GroupResolutionError,
-    )
     from ..host.handoff import handoff, remote_argv
     from ..host.transport import DEFAULT_CONNECT_TIMEOUT_SECONDS
-    from ..spine import _die
-    from ..workspace.verb_taxonomy import needs_group_message
 
     if connect_timeout is None:
         connect_timeout = DEFAULT_CONNECT_TIMEOUT_SECONDS
@@ -652,43 +714,9 @@ def _cmd_attach_host_cli(
     parser.add_argument("--group")
     parser.add_argument("refs", nargs="*")
     parsed = parser.parse_args(args)
-    rest = parsed.refs
-    if len(rest) != 1:
-        _die(
-            f"camp attach: --host requires exactly one workspace slug, got "
-            f"{len(rest)}"
-        )
-    ref = rest[0]
-    if not ref.strip() or ref.startswith("-"):
-        _die(f"camp attach: {ref!r} is not a valid workspace slug")
-
+    ref = require_one_raw_slug("attach", parsed.refs)
     resolved_env = dict(env) if env is not None else dict(os.environ)
-    groups = _parsable_groups()
-    # An explicit `--group` naming a group this machine has no config for is
-    # a different failure than no group resolving from cwd at all —
-    # `_resolve_group_for_attach` folds both into the same `None`
-    # (its docstring: "Returns None on ANY failure"), which would otherwise
-    # tell the operator to pass a group they already passed. Calling
-    # `resolve_group_override` directly here, ahead of that fold, surfaces
-    # the distinct answer instead.
-    if parsed.group:
-        try:
-            target_group = resolve_group_override(parsed.group, groups)
-        except GroupResolutionError:
-            known = [g["group"]["name"] for g in groups]
-            _die(
-                f"camp attach: group {parsed.group!r} is not configured on "
-                f"this machine (known: {', '.join(known) or 'none'})"
-            )
-    else:
-        target_group = _resolve_group_for_attach(groups, None, env=resolved_env)
-        if target_group is None:
-            _die(needs_group_message("attach"))
-    group_name = target_group["group"]["name"]
-    try:
-        validate_group_name(group_name)
-    except GroupConfinementError as exc:
-        _die(str(exc))
+    group_name = resolve_cross_host_group("attach", parsed.group, resolved_env)
 
     warn_if_nested(resolved_env)
     handoff(remote_argv(host, ref, group=group_name, connect_timeout=connect_timeout))
