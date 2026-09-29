@@ -98,8 +98,8 @@ _OPAQUE_PAYLOAD_VERBS = frozenset({"foreach"})
 #: drift against each other — the same shape as `ALL_GROUPS_FLAGS` /
 #: `_ALL_GROUPS_VERBS` above.
 #:
-#: "attach" carries its slug (plus the group it resolved locally) across
-#: untouched rather than going through the JSON relay transport
+#: "attach" and "new" carry their slug (plus the group each resolved locally)
+#: across untouched rather than going through the JSON relay transport
 #: `_dispatch_host_command` builds for "list" — see that function's own
 #: docstring.
 #:
@@ -108,10 +108,16 @@ _OPAQUE_PAYLOAD_VERBS = frozenset({"foreach"})
 #: below), so it never reaches this set's applicability check at all.
 #: "list" is groupless under `--host`: `--host` together with `--group` is
 #: refused as a collision for it, because no group is forwarded to the far
-#: side — the far side resolves its own. "attach" is the one exception —
-#: see the `canonical != "attach"` guard ahead of that refusal below.
+#: side — the far side resolves its own. "attach" and "new" are the
+#: exceptions — see the `canonical not in _HOST_GROUP_VERBS` guard ahead of
+#: that refusal below.
 HOST_FLAG = "--host"
-_HOST_VERBS = frozenset({"list", "attach"})
+_HOST_VERBS = frozenset({"list", "attach", "new"})
+
+#: The `_HOST_VERBS` members that resolve a group LOCALLY and forward its
+#: name, so `--group` alongside `--host` is their normal shape rather than a
+#: collision. Every other member forwards no group at all.
+_HOST_GROUP_VERBS = frozenset({"attach", "new"})
 
 
 def read_router_options(verb: str, args: list[str]) -> "tuple[Any, list[str]]":
@@ -247,7 +253,12 @@ def _resolve_connect_timeout(verb: str, *, hosts_error: str | None = None) -> fl
 
 
 def _dispatch_host_command(
-    verb: str, host: "Host", host_name: str, rest: list[str], connect_timeout: float
+    verb: str,
+    host: "Host",
+    host_name: str,
+    rest: list[str],
+    connect_timeout: float,
+    dry_run: bool = False,
 ) -> None:
     """Hand a resolved remote `Host` off to its verb handler.
 
@@ -255,28 +266,38 @@ def _dispatch_host_command(
     (`camp.host.config.connect_timeout_seconds()`, read once by `main()`'s
     `--host` handling above), threaded to every verb below that reaches the
     transport — "attach" hands off interactively instead and has no use for
-    it.
+    it. ``dry_run`` is the router's single dry-run answer (the
+    ``CAMP_DRY_RUN`` env switch or an explicit ``--dry-run``), consumed only
+    by "new", which forwards it to the far side.
 
     Reached ONLY after `--host` has resolved to a declared host and every
     refusal above has passed — `main()`'s `--host` block is this function's
     sole caller, and it refuses any verb outside `_HOST_VERBS` before
-    reaching here, so *verb* is always one of the two below.
+    reaching here, so *verb* is always one of the three below.
 
     "list" is wired to the SSH transport (`camp.host.transport.run_camp`, via
     `camp.host.relay.relay_all_groups`). "attach" is not: it carries the
     slug across untouched and hands this process to an interactive
     `ssh -t` (`camp.host.handoff`) rather than relaying a JSON answer — see
-    `cli/session.py`'s `_cmd_attach_host_cli`.
+    `cli/session.py`'s `_cmd_attach_host_cli`. "new" hands off the same way,
+    to the far side's own `camp new` — see `cli/group.py`'s
+    `_cmd_new_host_cli`.
     """
     if verb == "list":
         from .workspace import _cmd_ls_host_cli
 
         _cmd_ls_host_cli(rest, host, host_name, connect_timeout=connect_timeout)
-    else:
-        assert verb == "attach"
+    elif verb == "attach":
         from .session import _cmd_attach_host_cli
 
         _cmd_attach_host_cli(rest, host, host_name, connect_timeout=connect_timeout)
+    else:
+        assert verb == "new"
+        from .group import _cmd_new_host_cli
+
+        _cmd_new_host_cli(
+            rest, host, host_name, dry_run=dry_run, connect_timeout=connect_timeout
+        )
 
 
 def _not_on_path_warning() -> None:
@@ -700,15 +721,16 @@ def main() -> None:
         if host_name == "":
             print(f"camp {first}: {HOST_FLAG} requires a value", file=sys.stderr)
             sys.exit(1)
-        # "attach" is the one exception to the --host/--group collision:
-        # a cross-host attach resolves its group LOCALLY, the same way a
-        # local attach does (`--group`, else the cwd's group), and forwards
-        # the resolved name to the far side — so `--group` alongside
-        # `--host` is the normal, expected shape for it rather than a
-        # collision. `_cmd_attach_host_cli` does that resolution itself;
-        # every other `_HOST_VERBS` member forwards no group at all, so the
-        # collision refusal still applies to it.
-        if canonical != "attach" and read_group_option(scan_rest) is not None:
+        # "attach" and "new" are the exceptions to the --host/--group
+        # collision: a cross-host attach or new resolves its group LOCALLY,
+        # the same way the local verb does (`--group`, else the cwd's
+        # group), and forwards the resolved name to the far side — so
+        # `--group` alongside `--host` is the normal, expected shape for
+        # them rather than a collision. `_cmd_attach_host_cli` and
+        # `_cmd_new_host_cli` do that resolution themselves; every other
+        # `_HOST_VERBS` member forwards no group at all, so the collision
+        # refusal still applies to it.
+        if canonical not in _HOST_GROUP_VERBS and read_group_option(scan_rest) is not None:
             print(
                 f"camp {canonical}: {HOST_FLAG} and --group name one remote "
                 "host and one local group at once — pass one or the other",
@@ -743,7 +765,12 @@ def main() -> None:
             sys.exit(1)
 
         _dispatch_host_command(
-            canonical, host, host_name, scan_rest, _resolve_connect_timeout(canonical)
+            canonical,
+            host,
+            host_name,
+            scan_rest,
+            _resolve_connect_timeout(canonical),
+            dry_run,
         )
         return
 

@@ -13,9 +13,13 @@ from __future__ import annotations
 import json
 import os
 import sys
+from typing import TYPE_CHECKING
 
 from .dispatch import _BIN_DIR
 from .parser import CampParser, group_verb_parser
+
+if TYPE_CHECKING:
+    from ..host.config import Host
 
 
 _GROUP_HELP = """\
@@ -273,6 +277,51 @@ def _cmd_groups_cli(args: list[str]) -> None:
 
     for entry in entries:
         print(f"{entry['name']}: {', '.join(entry['members'])}")
+
+
+def _cmd_new_host_cli(
+    args: list[str],
+    host: "Host",
+    host_name: str,
+    env: dict[str, str] | None = None,
+    *,
+    dry_run: bool = False,
+    connect_timeout: float | None = None,
+) -> None:
+    """camp new <slug> --host <name> [--group <g>] [--dry-run] — hand the
+    terminal to the far side's own `camp new`.
+
+    Everything answerable on THIS machine is decided here, before any
+    machine is contacted: the slug shape (`require_one_raw_slug`), the group
+    (`resolve_cross_host_group`: `--group`, else the cwd's group, confinement
+    checked) and the argument shape — the parser declares only `--group`,
+    `--dry-run` and the slug, so every creation flag is refused. The nested
+    multiplexer notice is decided from this machine's terminal. The far side
+    then decides whether the workspace can be created, in its own words.
+
+    *dry_run* is the router's single dry-run answer; the handler ignores its
+    own parsed `--dry-run` and never reads the environment for it.
+    """
+    from ..attach.prefix_warning import warn_if_nested
+    from ..host.handoff import handoff, remote_camp_argv
+    from ..host.transport import DEFAULT_CONNECT_TIMEOUT_SECONDS
+    from .session import require_one_raw_slug, resolve_cross_host_group
+
+    if connect_timeout is None:
+        connect_timeout = DEFAULT_CONNECT_TIMEOUT_SECONDS
+
+    parser = group_verb_parser("new", dry_run=True)
+    parser.add_argument("slugs", nargs="*")
+    parsed = parser.parse_args(args)
+    slug = require_one_raw_slug("new", parsed.slugs)
+    resolved_env = dict(env) if env is not None else dict(os.environ)
+    group_name = resolve_cross_host_group("new", parsed.group, resolved_env)
+
+    warn_if_nested(resolved_env)
+    camp_args = ["new", slug, "--group", group_name]
+    if dry_run:
+        camp_args.append("--dry-run")
+    handoff(remote_camp_argv(host, camp_args, connect_timeout=connect_timeout))
 
 
 def _cmd_new_group_cli(
