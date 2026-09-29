@@ -8,6 +8,7 @@ gives the terminal to another machine, and it behaves the way that one does.
 ```
 camp new <slug> --host andromeda                   # group from this directory; created there
 camp new <slug> --host andromeda --group trailhead # group named explicitly
+camp new <slug> --host andromeda --no-attach       # any flag local creation accepts rides along
 camp new <slug> -a                                 # refused: creation is not a broadcast
 ```
 
@@ -22,7 +23,7 @@ at it.
 The invocation camp hands off to is
 
 ```
-ssh -t <destination> <camp_bin> new <slug> --group <group> [--dry-run]
+ssh -t <destination> <camp_bin> new <slug> --group <group> [<creation flags>] [--dry-run]
 ```
 
 carrying the host's declared destination and camp location, and the same fixed connection options
@@ -31,6 +32,12 @@ connect timeout, and a requested terminal. The command is composed by the one bu
 cross-host verbs share, through the transport's own quote-and-join, so the slug, the group, and the
 camp location each arrive as a single literal argument — a metacharacter in any of them is carried,
 never run by the far side's shell.
+
+The creation flags are the ones local creation declares, read from that one declaration rather than
+a list of its own: every on/off switch `camp new` accepts on this machine, `camp new --host`
+accepts and carries across. A declared flag of any other shape — one that takes a value, or one
+that is on unless passed — makes cross-host creation stop with an error before any connection is
+made.
 
 Slug normalisation, the group's member list, whether the workspace already exists, provisioning,
 the ownership stamp, and the door onto the new session are all the far side's. Camp does not
@@ -147,11 +154,58 @@ backtick, `|`, `;`, `&`, control character, or `..` — because that rule runs o
 after its login shell has parsed the command string, which is too late. Slug normalisation and
 every other slug check remain the far side's.
 
-## State — a creation flag is passed
+## State — a creation flag local creation accepts is forwarded after the slug and group
 
-Only `--group` and `--dry-run` are carried across. Any other flag — including local creation's own
-`--no-attach`, `--no-session`, `--activate`, and `--json` — is refused by camp's argument parser,
-naming the flag, before any connection.
+The operator passed one or more of local creation's own flags — `--no-wait`, `--activate`,
+`--json`, `--no-attach`, `--no-session`. Each is carried to the far side after the slug and the group,
+in the order local creation declares them, and ahead of `--dry-run` when that is forwarded too:
+
+```
+camp new ws1 --host andromeda --no-attach --json
+  → <camp_bin> new ws1 --group trailhead --json --no-attach
+```
+
+What each flag then does is the far side's to decide, exactly as if the operator had typed it
+there:
+
+- `--activate` starts the far machine's own activate-phase tasks for each member that declares
+  one — the far side's group configuration decides what runs, not this machine's. They run
+  detached in the background on the far machine, writing to a per-member log in the workspace
+  there, so their output never reaches the operator's terminal and they can outlive the connection.
+- `--no-attach` and `--no-session` still open the connection with a terminal; they change what the
+  far side does inside it, and the connection closes when the far side finishes.
+- `--json` is not machine-readable across hosts: under the requested terminal the far side's stderr
+  and stdout reach the operator on one stream, with terminal line endings, as they would under a
+  hand-typed `ssh -t`.
+
+A far side running an older camp may not know a flag this machine accepts. It refuses the flag
+after the handoff, in its own words, before it creates anything.
+
+## State — a flag passed more than once or in an alternate spelling is forwarded once, in canonical spelling
+
+The operator repeated a flag. It is carried once. Creation flags are switches with one spelling
+each — camp's parser takes no abbreviations — so the canonical spelling is the declared one, and
+`--group=trailhead` and `--group trailhead` both forward as `--group trailhead`. What is forwarded
+is what the parse decided, never the tokens as typed.
+
+## State — no creation flag passed forwards none
+
+The operator passed only the slug, the host, and perhaps `--group`. The far side's command line
+carries the slug and the group and nothing else (apart from `--dry-run`, when requested), so the far
+side does what local creation does with no flags: create or re-enter, then open the workspace
+session.
+
+## State — a flag local creation does not accept is refused
+
+A flag local creation does not declare is refused by camp's own argument parser, naming the flag,
+before any connection:
+
+```
+camp new: unknown flag '--launch'
+```
+
+It is refused here because the declaration both verbs share is what decides it, so a flag this
+machine's `camp new` would refuse is never sent to be refused again on the far side.
 
 ## State — every host requested at once
 
