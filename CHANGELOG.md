@@ -5,10 +5,11 @@ format described by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-- `bin/trailhead` now runs on the first `python3` on your PATH that meets the
-  repo's declared `requires-python`, as `bin/camp` already did, instead of
-  crashing on a too-old `python3` (e.g. macOS system Python 3.9 when Homebrew's
-  is not on PATH). When none qualifies it exits 1 with
+- `bin/trailhead` now runs on the first `python3` in an absolute PATH entry
+  that meets the repo's declared `requires-python`, instead of crashing on a
+  too-old `python3` (e.g. macOS system Python 3.9 ahead of Homebrew's on PATH).
+  Relative PATH entries such as `.` or `.venv/bin` are no longer searched. When
+  none qualifies it exits 1 with
   `trailhead: requires Python >=3.11, found Python <version>`.
 - camp panes now start in their workspace directory even when the tmux
   server's own working directory has been deleted (seen on tmux 3.7c). camp's

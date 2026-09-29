@@ -297,15 +297,12 @@ def test_absolute_entry_after_a_skipped_relative_one_still_wins(tmp_path: Path) 
     assert not touched.exists(), "relative PATH entry's python3 was invoked"
 
 
-@pytest.mark.parametrize("entry_kind", ["relative-glob", "absolute-glob"])
-def test_glob_characters_in_a_path_entry_are_not_expanded(
-    tmp_path: Path, entry_kind: str
-) -> None:
+def test_glob_characters_in_a_path_entry_are_not_expanded(tmp_path: Path) -> None:
     launcher = _fixture(tmp_path, requires_python=">=3.11")
     low = _stub(tmp_path / "low-bin", version="3.9.6", marker="low").parent
     touched = tmp_path / "glob-touched"
     _probe_stub(tmp_path / "gl", version="3.99", marker="glob", touched=touched)
-    entry = "g*" if entry_kind == "relative-glob" else f"{tmp_path}/g*"
+    entry = f"{tmp_path}/g*"
 
     result = _run_in(launcher, [str(low), entry], tmp_path=tmp_path, cwd=tmp_path)
 
