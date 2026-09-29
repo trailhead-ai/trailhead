@@ -122,17 +122,26 @@ pass `--group`.
 
 ## State — resolved group fails the name-confinement check
 
-The resolved group's name fails camp's group-name confinement check. Refused with that check's own
-message before the name is ever placed on a command line, as cross-host attach refuses it.
+The resolved group's name fails camp's group-name confinement check, or begins with `-` — a name
+the far side's parser would read as a flag. Refused with the check's own message before the name is
+ever placed on a command line, by the same shared step cross-host attach refuses it with.
 
 ## State — slug missing, empty, or whitespace only
 
-No slug was given, or the one given has nothing in it. Refused locally: there is nothing to forward.
+No slug was given, more than one was, or the one given has nothing in it. Refused locally, in the
+shared slug guard's words, because there is nothing to forward:
+
+```
+camp new: --host requires exactly one workspace slug, got 0
+camp new: '   ' is not a valid workspace slug
+```
 
 ## State — slug begins with a dash
 
 A slug beginning with `-` would reach the far side's argument parser as a flag. Refused locally, so
-it never can. Every other slug check is the far side's.
+it never can — including one passed after `--`. The check reads the slug exactly as typed, and that
+same raw value is what is forwarded, so the value checked and the value sent can never differ.
+Every other slug check is the far side's.
 
 ## State — a creation flag is passed
 
@@ -142,7 +151,11 @@ naming the flag, before any connection.
 
 ## State — every host requested at once
 
-`camp new -a`, or `--all-hosts` in any form, is refused before any hosts file is read.
+`camp new -a`, or `--all-hosts` in any form, is refused before any hosts file is read:
+
+```
+camp new: --all-hosts has no meaning here
+```
 
 ## State — the far side answers in its own words
 
@@ -150,3 +163,9 @@ After the handoff, whatever the far side says is what the operator sees: its ref
 group there, a missing member checkout), its re-entry of a workspace that already exists, or ssh's
 own failure when the connection cannot be made — an unreachable host, a changed host key, no loaded
 key. Camp adds nothing to any of them, because camp is no longer running.
+
+What the operator can rely on when reading them: when ssh reports that it could not connect, no
+camp ran on the far side and nothing was created. When the connection drops after the far side
+started, re-running the same command is safe — it re-enters the workspace if one was created rather
+than creating a second — and a workspace left with members still pending shows as such in
+`camp status <slug>` run on that machine, and `camp setup` there finishes it.
