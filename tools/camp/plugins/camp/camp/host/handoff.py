@@ -39,8 +39,9 @@ Security: like the listing transport, the assembled ssh argv carries every
 forwarded argument — the slug, the group it resolved against, ``--dry-run``,
 and the host's camp location — as plain command-line arguments, readable via
 ``ps`` by other local users on a multi-user machine. Every forwarded value
-goes through the one quote-and-join, so none is interpreted by the far side's
-shell.
+goes through the one quote-and-join, which quotes for a POSIX shell only; a
+slug is therefore also refused locally (`cli/session.py`'s
+`require_one_raw_slug`) when the far side's slug rule would refuse it.
 """
 from __future__ import annotations
 

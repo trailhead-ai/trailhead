@@ -164,3 +164,31 @@ def test_slug_guard_wording_for_count_and_shape(capsys) -> None:
 @pytest.mark.parametrize("raw", [" -x", "a", " a "])
 def test_slug_guard_returns_the_raw_value_unstripped(raw) -> None:
     assert _session().require_one_raw_slug("new", [raw]) == raw
+
+
+_FAR_SIDE_REFUSED = [
+    "a/b",
+    "a\\b",
+    "a$b",
+    "a`b",
+    "a|b",
+    "a;b",
+    "a&b",
+    "a\nb",
+    "a\x00b",
+    "a..b",
+]
+
+
+@pytest.mark.parametrize("verb", ["new", "attach"])
+@pytest.mark.parametrize("raw", _FAR_SIDE_REFUSED, ids=repr)
+def test_slug_guard_refuses_what_the_far_slug_rule_refuses(verb, raw, capsys) -> None:
+    err = _refusal(capsys, lambda: _session().require_one_raw_slug(verb, [raw]))
+    assert err.startswith(f"camp {verb}: ")
+    assert repr(raw) in err
+
+
+@pytest.mark.parametrize("verb", ["new", "attach"])
+@pytest.mark.parametrize("raw", ["abc", "a-b", "A B", " -x"], ids=repr)
+def test_slug_guard_passes_slugs_the_far_side_normalizes_raw(verb, raw) -> None:
+    assert _session().require_one_raw_slug(verb, [raw]) == raw

@@ -278,10 +278,13 @@ def require_one_raw_slug(verb: str, slugs: list[str]) -> str:
 
     Checked on the RAW value: an empty or whitespace-only slug, or one
     beginning with `-` (which the far side's parser would take for a flag),
-    is refused with a `camp <verb>: …` line. The raw value is returned
+    is refused with a `camp <verb>: …` line. So is a slug the far side's own
+    slug rule (`spine._RAW_DANGEROUS_RE`) would refuse: that rule runs only
+    after the far login shell has parsed the ssh command string, which is too
+    late to keep the slug out of that shell. The raw value is returned
     unstripped — that is what gets forwarded.
     """
-    from ..spine import _die
+    from ..spine import _RAW_DANGEROUS_RE, _die
 
     if len(slugs) != 1:
         _die(
@@ -289,7 +292,7 @@ def require_one_raw_slug(verb: str, slugs: list[str]) -> str:
             f"{len(slugs)}"
         )
     ref = slugs[0]
-    if not ref.strip() or ref.startswith("-"):
+    if not ref.strip() or ref.startswith("-") or _RAW_DANGEROUS_RE.search(ref):
         _die(f"camp {verb}: {ref!r} is not a valid workspace slug")
     return ref
 
