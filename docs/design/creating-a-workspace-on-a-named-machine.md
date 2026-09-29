@@ -73,8 +73,8 @@ the workspace everywhere at once, so it stays refused.
 
 ## Exit status
 
-Camp's own before the handoff, ssh's after it. Every local refusal is a single
-`camp new: <message>` line on stderr and exit `1`, with no connection made.
+Camp's own before the handoff, ssh's after it. Every local refusal goes to stderr in camp's own
+words and exits `1`, with no connection made.
 
 ## State — handed off to the far side's creation
 
