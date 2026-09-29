@@ -331,7 +331,8 @@ def test_host_option_both_spellings_hand_the_same_clean_argv_downstream(
         pytest.fail(f"unexpected exit {exc.code} before reaching the handler")
 
     assert len(calls) == 1, calls
-    canonical, host, host_name, rest, _connect_timeout = calls[0]
+    canonical, host, host_name, rest, _connect_timeout, dry_run = calls[0]
+    assert dry_run is False
     assert canonical == verb
     assert host_name == "andromeda"
     assert host.ssh == "andromeda"

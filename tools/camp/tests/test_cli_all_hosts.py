@@ -950,18 +950,18 @@ def test_single_host_list_threads_declared_connect_timeout_to_the_relay(
     assert seen == [7.0]
 
 
-def test_relay_route_verb_set_is_every_host_verb_except_attach():  # inert-gate: allow verb-set drift reminder
+def test_relay_route_verb_set_is_every_host_verb_except_handoff_verbs():  # inert-gate: allow verb-set drift reminder
     """Pins the enumeration the parametrized test below drives against.
-    `_HOST_VERBS` carries {list, attach} — `attach` (interactive hand-off,
-    no transport seam) is the only member the parametrized relay test below
-    excludes for its own reason; `list` is the only member left, and it is
-    the one that actually reaches the relay. `sessions`/`kill`/`launch` are
-    retired and absent from `_HOST_VERBS` entirely — a retired verb never
-    reaches this relay route at all, redirecting instead
-    (LEGACY_REDIRECTS), before main() ever reaches the `--host` block that
-    reads this set."""
+    `_HOST_VERBS` carries {list, attach, new} — `attach` and `new`
+    (interactive hand-offs, no transport seam) are the members the
+    parametrized relay test below excludes for their own reason; `list` is
+    the only member left, and it is the one that actually reaches the relay.
+    `sessions`/`kill`/`launch` are retired and absent from `_HOST_VERBS`
+    entirely — a retired verb never reaches this relay route at all,
+    redirecting instead (LEGACY_REDIRECTS), before main() ever reaches the
+    `--host` block that reads this set."""
     dispatch = _dispatch_module()
-    assert dispatch._HOST_VERBS - {"attach"} == {"list"}
+    assert dispatch._HOST_VERBS - {"attach", "new"} == {"list"}
 
 
 @pytest.mark.parametrize(
@@ -978,8 +978,9 @@ def test_every_relay_host_verb_threads_the_declared_connect_timeout(
     single-host `--host` relay — only `list` today (`sessions`/`kill` now
     redirect before dispatch ever reaches this relay, covered by
     `test_sessions_and_kill_host_redirect_before_reaching_the_relay` below;
-    `attach`'s `--host` path hands off interactively and is covered
-    separately, in test_attach_cli.py's cross-host probe route; `launch` is
+    `attach`'s and `new`'s `--host` paths hand off interactively and are
+    covered separately, in test_attach_cli.py's cross-host probe route and
+    test_new_host_cli.py; `launch` is
     retired and redirects before ever reaching this relay, covered in
     test_cli_dispatch_split.py). A verb left reading the old constant
     instead of the resolved value fails this test rather than shipping."""
@@ -1016,7 +1017,7 @@ def test_sessions_and_kill_host_redirect_before_reaching_the_relay(
     target: str,
 ) -> None:
     """`sessions`/`kill` are absent from `_HOST_VERBS`
-    (`test_relay_route_verb_set_is_every_host_verb_except_attach` above) —
+    (`test_relay_route_verb_set_is_every_host_verb_except_handoff_verbs` above) —
     the legacy check in `main()` runs ahead of every host route, so typing
     either with `--host` never reaches `_dispatch_host_command` or the
     transport at all — it prints the same local redirect a bare invocation
