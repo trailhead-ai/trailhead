@@ -9,11 +9,14 @@ part of what is under test. Real Python is never on the synthetic PATH.
 
 from __future__ import annotations
 
+import os
 import shutil
 import stat
 import subprocess
 import textwrap
 from pathlib import Path
+
+import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _REAL_BIN = _REPO_ROOT / "bin"
@@ -161,3 +164,60 @@ def test_first_interpreter_meeting_the_floor_wins_over_a_later_one(tmp_path: Pat
     assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
     assert "RAN:high:" in result.stdout, result.stdout
     assert "RAN:low:" not in result.stdout, result.stdout
+
+
+def _broken_stub(dir_: Path) -> Path:
+    dir_.mkdir(parents=True, exist_ok=True)
+    stub = dir_ / "python3"
+    stub.write_text("#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then exit 1; fi\necho \"RAN:broken:$@\"\n")
+    stub.chmod(stub.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+    return stub
+
+
+@pytest.mark.parametrize("link_kind", ["absolute", "relative"])
+def test_launcher_invoked_through_a_symlink_resolves_the_real_shim(
+    tmp_path: Path, link_kind: str
+) -> None:
+    launcher = _fixture(tmp_path, requires_python=">=3.11")
+    high = _stub(tmp_path / "high-bin", version="3.14.0", marker="high").parent
+    link_dir = tmp_path / "elsewhere" / "links"
+    link_dir.mkdir(parents=True)
+    link = link_dir / "trailhead-link"
+    target = launcher if link_kind == "absolute" else Path(os.path.relpath(launcher, link_dir))
+    link.symlink_to(target)
+
+    result = _run(link, [high], tmp_path=tmp_path)
+
+    assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
+    shim = launcher.parent / "_trailhead.py"
+    assert f"RAN:high:{shim} --flag arg" in result.stdout, result.stdout
+
+
+def test_interpreter_whose_version_probe_fails_is_skipped_not_recorded(tmp_path: Path) -> None:
+    launcher = _fixture(tmp_path, requires_python=">=3.11")
+    low = _stub(tmp_path / "low-bin", version="3.9.6", marker="low").parent
+    broken = _broken_stub(tmp_path / "broken-bin").parent
+
+    refused = _run(launcher, [low, broken], tmp_path=tmp_path)
+
+    assert refused.returncode == 1, f"stdout: {refused.stdout}\nstderr: {refused.stderr}"
+    assert refused.stderr.strip() == "trailhead: requires Python >=3.11, found Python 3.9", (
+        refused.stderr
+    )
+
+    high = _stub(tmp_path / "high-bin", version="3.14.0", marker="high").parent
+    accepted = _run(launcher, [broken, high], tmp_path=tmp_path)
+
+    assert accepted.returncode == 0, f"stdout: {accepted.stdout}\nstderr: {accepted.stderr}"
+    assert "RAN:high:" in accepted.stdout, accepted.stdout
+    assert "RAN:broken:" not in accepted.stdout, accepted.stdout
+
+
+def test_higher_major_version_satisfies_a_floor_with_a_higher_minor(tmp_path: Path) -> None:
+    launcher = _fixture(tmp_path, requires_python=">=3.11")
+    four = _stub(tmp_path / "four-bin", version="4.0.0", marker="four").parent
+
+    result = _run(launcher, [four], tmp_path=tmp_path)
+
+    assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
+    assert "RAN:four:" in result.stdout, result.stdout
