@@ -141,7 +141,11 @@ camp new: '   ' is not a valid workspace slug
 A slug beginning with `-` would reach the far side's argument parser as a flag. Refused locally, so
 it never can — including one passed after `--`. The check reads the slug exactly as typed, and that
 same raw value is what is forwarded, so the value checked and the value sent can never differ.
-Every other slug check is the far side's.
+
+The same local check refuses any slug the far side's own slug rule refuses — a `/`, `\`, `$`,
+backtick, `|`, `;`, `&`, control character, or `..` — because that rule runs on the far side only
+after its login shell has parsed the command string, which is too late. Slug normalisation and
+every other slug check remain the far side's.
 
 ## State — a creation flag is passed
 

@@ -418,3 +418,26 @@ def test_far_side_main_accepts_exactly_what_is_forwarded(
     assert code == 0, err
     assert "[dry-run] would seed" in err
     assert not (env.state / "g" / "ws1").exists()
+
+
+@pytest.mark.parametrize(
+    "slug", ["\\'\\' ; echo INJECTED #", "a\\b"], ids=["fish-exploit", "backslash"]
+)
+def test_slug_the_far_rule_would_refuse_never_reaches_the_handoff(
+    env: Env, monkeypatch, capsys, slug
+) -> None:
+    code = _run(["new", slug, "--host", "andromeda", "--group", "g"], monkeypatch)
+    _refused(env, capsys, code, repr(slug))
+
+
+def test_ordinary_slug_still_reaches_the_handoff(env: Env, monkeypatch) -> None:
+    code = _run(["new", "good-slug", "--host", "andromeda", "--group", "g"], monkeypatch)
+    assert code == 0
+    assert shlex.split(_remote_tail(env)) == ["camp", "new", "good-slug", "--group", "g"]
+
+
+def test_attach_ref_the_far_rule_would_refuse_never_reaches_the_handoff(
+    env: Env, monkeypatch, capsys
+) -> None:
+    code = _run(["attach", "a;b", "--host", "andromeda", "--group", "g"], monkeypatch)
+    _refused(env, capsys, code, "'a;b'", prefix="camp attach: ")
