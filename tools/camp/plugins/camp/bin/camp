@@ -19,6 +19,13 @@
 
 set -euo pipefail
 
+# An exported CDPATH makes `cd` echo the directory it resolved to, which would
+# put a second line into every `$(cd ... && pwd)` capture below.
+unset CDPATH
+# Nothing here globs; with globbing off, a PATH entry like `/opt/*/bin` is
+# searched literally instead of expanding into directories the user never named.
+set -f
+
 # Symlink-safe self-resolution (macOS does not ship GNU readlink -f).
 SOURCE="${BASH_SOURCE[0]}"
 while [ -L "$SOURCE" ]; do
@@ -37,7 +44,9 @@ CLI="$PLUGIN_DIR/cli/camp"
 # from the nearest ancestor pyproject.toml declaring `requires-python`,
 # searching upward from PLUGIN_DIR (bounded, so it can never drift into an
 # unbounded walk), so it can never drift from the declared value either, and
-# search every `python3` on PATH (in PATH order) for one that satisfies it.
+# search every absolute `python3` on PATH (in PATH order) for one that
+# satisfies it; relative entries (`.`, `bin`) are skipped, so the directory camp
+# happens to be run from never supplies the interpreter.
 # In an installed plugin, PLUGIN_DIR may carry no pyproject.toml in any
 # ancestor within the bound: an install copies the plugin directory whole, and
 # this repo's declaration sits at tools/camp/, two levels above the copied
@@ -110,14 +119,14 @@ _select_python() {
     IFS=':'
     for dir in $PATH; do
         IFS="$saved_ifs"
-        [ -n "$dir" ] || continue
+        case "$dir" in /*) ;; *) IFS=':'; continue ;; esac
         interp="$dir/python3"
-        [ -x "$interp" ] || continue
-        v="$(_interpreter_version "$interp")" || continue
-        LAST_FOUND_VERSION="$v"
-        if _version_ge "$v" "$floor"; then
-            CHOSEN_PYTHON="$interp"
-            return 0
+        if [ -x "$interp" ] && v="$(_interpreter_version "$interp")"; then
+            LAST_FOUND_VERSION="$v"
+            if _version_ge "$v" "$floor"; then
+                CHOSEN_PYTHON="$interp"
+                return 0
+            fi
         fi
         IFS=':'
     done

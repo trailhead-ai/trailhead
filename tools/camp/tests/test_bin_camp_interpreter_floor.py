@@ -19,11 +19,14 @@ for version selection — only `bash` and the stub scripts run.
 
 from __future__ import annotations
 
+import os
 import shutil
 import stat
 import subprocess
 import textwrap
 from pathlib import Path
+
+import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]  # trailhead root
 _REAL_BIN_CAMP = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp" / "bin" / "camp"
@@ -352,3 +355,166 @@ def test_declaration_far_above_the_plugin_root_is_not_adopted_as_the_floor(
     )
     assert "could not determine" in result.stderr.lower(), result.stderr
     assert "RAN:present:" in result.stdout, f"stdout: {result.stdout}\nstderr: {result.stderr}"
+
+
+def _broken_stub(dir_: Path) -> Path:
+    dir_.mkdir(parents=True, exist_ok=True)
+    stub = dir_ / "python3"
+    stub.write_text("#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then exit 1; fi\necho \"RAN:broken:$@\"\n")
+    stub.chmod(stub.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+    return stub
+
+
+def _probe_stub(dir_: Path, *, version: str, marker: str, touched: Path) -> Path:
+    """A stub that records any invocation, --version included, by creating ``touched``."""
+    dir_.mkdir(parents=True, exist_ok=True)
+    stub = dir_ / "python3"
+    stub.write_text(
+        textwrap.dedent(
+            f"""\
+            #!/bin/sh
+            : > "{touched}"
+            if [ "$1" = "--version" ]; then
+                echo "Python {version}"
+                exit 0
+            fi
+            echo "RAN:{marker}:$@"
+            exit 0
+            """
+        )
+    )
+    stub.chmod(stub.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+    return stub
+
+
+def _run_in(
+    bin_camp: Path | str,
+    path_entries: list[str],
+    *,
+    coreutils_root: Path,
+    cwd: Path,
+    extra_env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    path = ":".join([*path_entries, str(_coreutils_dir(coreutils_root))])
+    return subprocess.run(
+        [_BASH, str(bin_camp), "--help"],
+        capture_output=True,
+        text=True,
+        cwd=cwd,
+        env={"PATH": path, **(extra_env or {})},
+    )
+
+
+_REFUSED_39 = "camp: requires Python >=3.11, found Python 3.9"
+
+
+@pytest.mark.parametrize("link_kind", ["absolute", "relative"])
+def test_launcher_invoked_through_a_symlink_resolves_the_real_cli(
+    tmp_path: Path, link_kind: str
+) -> None:
+    bin_camp, _ = _build_fixture(tmp_path, requires_python=">=3.11")
+    high = _write_stub_interpreter(tmp_path / "high-bin", version="3.14.0", marker="high").parent
+    link_dir = tmp_path / "elsewhere" / "links"
+    link_dir.mkdir(parents=True)
+    link = link_dir / "camp-link"
+    target = bin_camp if link_kind == "absolute" else Path(os.path.relpath(bin_camp, link_dir))
+    link.symlink_to(target)
+
+    result = _run(link, [high], coreutils_root=tmp_path)
+
+    assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
+    cli = bin_camp.parent.parent / "cli" / "camp"
+    assert f"RAN:high:{cli} --help" in result.stdout, result.stdout
+
+
+def test_interpreter_whose_version_probe_fails_is_skipped_not_recorded(tmp_path: Path) -> None:
+    bin_camp, _ = _build_fixture(tmp_path, requires_python=">=3.11")
+    low = _write_stub_interpreter(tmp_path / "low-bin", version="3.9.6", marker="low").parent
+    broken = _broken_stub(tmp_path / "broken-bin").parent
+
+    refused = _run(bin_camp, [low, broken], coreutils_root=tmp_path)
+
+    assert refused.returncode == 1, f"stdout: {refused.stdout}\nstderr: {refused.stderr}"
+    assert refused.stderr.strip() == _REFUSED_39, refused.stderr
+
+    high = _write_stub_interpreter(tmp_path / "high-bin", version="3.14.0", marker="high").parent
+    accepted = _run(bin_camp, [broken, high], coreutils_root=tmp_path)
+
+    assert accepted.returncode == 0, f"stdout: {accepted.stdout}\nstderr: {accepted.stderr}"
+    assert "RAN:high:" in accepted.stdout, accepted.stdout
+    assert "RAN:broken:" not in accepted.stdout, accepted.stdout
+
+
+def test_higher_major_version_satisfies_a_floor_with_a_higher_minor(tmp_path: Path) -> None:
+    bin_camp, _ = _build_fixture(tmp_path, requires_python=">=3.11")
+    four = _write_stub_interpreter(tmp_path / "four-bin", version="4.0.0", marker="four").parent
+
+    result = _run(bin_camp, [four], coreutils_root=tmp_path)
+
+    assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
+    assert "RAN:four:" in result.stdout, result.stdout
+
+
+def test_relative_path_entry_is_never_probed_or_run(tmp_path: Path) -> None:
+    bin_camp, _ = _build_fixture(tmp_path, requires_python=">=3.11")
+    low = _write_stub_interpreter(tmp_path / "low-bin", version="3.9.6", marker="low").parent
+    cwd = tmp_path / "cwd"
+    touched = tmp_path / "rel-touched"
+    _probe_stub(cwd, version="3.99", marker="rel", touched=touched)
+
+    result = _run_in(bin_camp, [str(low), "."], coreutils_root=tmp_path, cwd=cwd)
+
+    assert result.returncode == 1, f"stdout: {result.stdout}\nstderr: {result.stderr}"
+    assert result.stderr.strip() == _REFUSED_39, result.stderr
+    assert "RAN:rel:" not in result.stdout, result.stdout
+    assert not touched.exists(), "relative PATH entry's python3 was invoked"
+
+
+def test_absolute_entry_after_a_skipped_relative_one_still_wins(tmp_path: Path) -> None:
+    bin_camp, _ = _build_fixture(tmp_path, requires_python=">=3.11")
+    low = _write_stub_interpreter(tmp_path / "low-bin", version="3.9.6", marker="low").parent
+    high = _write_stub_interpreter(tmp_path / "high-bin", version="3.14.0", marker="high").parent
+    cwd = tmp_path / "cwd"
+    touched = tmp_path / "rel-touched"
+    _probe_stub(cwd, version="3.99", marker="rel", touched=touched)
+
+    result = _run_in(bin_camp, [str(low), ".", str(high)], coreutils_root=tmp_path, cwd=cwd)
+
+    assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
+    assert "RAN:high:" in result.stdout, result.stdout
+    assert "RAN:rel:" not in result.stdout, result.stdout
+    assert not touched.exists(), "relative PATH entry's python3 was invoked"
+
+
+def test_glob_characters_in_a_path_entry_are_not_expanded(tmp_path: Path) -> None:
+    bin_camp, _ = _build_fixture(tmp_path, requires_python=">=3.11")
+    low = _write_stub_interpreter(tmp_path / "low-bin", version="3.9.6", marker="low").parent
+    touched = tmp_path / "glob-touched"
+    _probe_stub(tmp_path / "gl", version="3.99", marker="glob", touched=touched)
+    entry = f"{tmp_path}/g*"
+
+    result = _run_in(bin_camp, [str(low), entry], coreutils_root=tmp_path, cwd=tmp_path)
+
+    assert result.returncode == 1, f"stdout: {result.stdout}\nstderr: {result.stderr}"
+    assert result.stderr.strip() == _REFUSED_39, result.stderr
+    assert "RAN:glob:" not in result.stdout, result.stdout
+    assert not touched.exists(), "glob-expanded PATH entry's python3 was invoked"
+
+
+def test_exported_cdpath_does_not_break_relative_invocation(tmp_path: Path) -> None:
+    bin_camp, _ = _build_fixture(tmp_path, requires_python=">=3.11")
+    high = _write_stub_interpreter(tmp_path / "high-bin", version="3.14.0", marker="high").parent
+    plugin_dir = bin_camp.parent.parent
+
+    result = _run_in(
+        "bin/camp",
+        [str(high)],
+        coreutils_root=tmp_path,
+        cwd=plugin_dir,
+        extra_env={"CDPATH": "."},
+    )
+
+    assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
+    assert "cd:" not in result.stderr, result.stderr
+    cli = plugin_dir / "cli" / "camp"
+    assert f"RAN:high:{cli} --help" in result.stdout, result.stdout
