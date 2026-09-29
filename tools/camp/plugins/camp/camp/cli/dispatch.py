@@ -721,15 +721,9 @@ def main() -> None:
         if host_name == "":
             print(f"camp {first}: {HOST_FLAG} requires a value", file=sys.stderr)
             sys.exit(1)
-        # "attach" and "new" are the exceptions to the --host/--group
-        # collision: a cross-host attach or new resolves its group LOCALLY,
-        # the same way the local verb does (`--group`, else the cwd's
-        # group), and forwards the resolved name to the far side — so
-        # `--group` alongside `--host` is the normal, expected shape for
-        # them rather than a collision. `_cmd_attach_host_cli` and
-        # `_cmd_new_host_cli` do that resolution themselves; every other
-        # `_HOST_VERBS` member forwards no group at all, so the collision
-        # refusal still applies to it.
+        # `_HOST_GROUP_VERBS` resolve their group locally and forward it, so
+        # `--group` is their normal shape; for every other `_HOST_VERBS`
+        # member no group is forwarded, and `--group` is a collision.
         if canonical not in _HOST_GROUP_VERBS and read_group_option(scan_rest) is not None:
             print(
                 f"camp {canonical}: {HOST_FLAG} and --group name one remote "
