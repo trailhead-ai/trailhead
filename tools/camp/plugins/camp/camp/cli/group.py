@@ -10,6 +10,7 @@ acts on an already-created workspace lives in ``workspace`` / ``lifecycle``.
 """
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import sys
@@ -279,6 +280,20 @@ def _cmd_groups_cli(args: list[str]) -> None:
         print(f"{entry['name']}: {', '.join(entry['members'])}")
 
 
+def _declare_creation_switches(parser: argparse.ArgumentParser) -> list[argparse.Action]:
+    """Add local creation's switches to *parser*, in declaration order, and
+    return the actions added. `camp new` and `camp new --host` both build
+    their parser through this one declaration, so a switch declared here is
+    accepted by both and forwarded cross-host."""
+    return [
+        parser.add_argument("--no-wait", action="store_true"),
+        parser.add_argument("--activate", action="store_true"),
+        parser.add_argument("--json", action="store_true"),
+        parser.add_argument("--no-attach", action="store_true"),
+        parser.add_argument("--no-session", action="store_true"),
+    ]
+
+
 def _cmd_new_host_cli(
     args: list[str],
     host: "Host",
@@ -287,16 +302,20 @@ def _cmd_new_host_cli(
     dry_run: bool,
     connect_timeout: float,
 ) -> None:
-    """camp new <slug> --host <name> [--group <g>] [--dry-run] — hand the
-    terminal to the far side's own `camp new`.
+    """camp new <slug> --host <name> [--group <g>] [creation flags] [--dry-run]
+    — hand the terminal to the far side's own `camp new`.
 
     Everything answerable on THIS machine is decided here, before any
     machine is contacted: the slug shape (`require_one_raw_slug`), the group
     (`resolve_cross_host_group`: `--group`, else the cwd's group, confinement
-    checked) and the argument shape — the parser declares only `--group`,
-    `--dry-run` and the slug, so every creation flag is refused. The nested
-    multiplexer notice is decided from this machine's terminal. The far side
-    then decides whether the workspace can be created, in its own words.
+    checked) and the argument shape — the parser declares `--group`,
+    `--dry-run`, the slug and the same creation switches local `camp new`
+    declares, so any other flag is refused. Each switch the operator set is
+    forwarded once, in declaration order, after the group and ahead of
+    `--dry-run`; a declared action that is not a `store_true` switch raises,
+    naming it, before anything is contacted. The nested multiplexer notice
+    is decided from this machine's terminal. The far side then decides
+    whether the workspace can be created, in its own words.
 
     *dry_run* is the router's single dry-run answer; the handler ignores its
     own parsed `--dry-run` and never reads the environment for it.
@@ -306,6 +325,13 @@ def _cmd_new_host_cli(
     from .session import require_one_raw_slug, resolve_cross_host_group
 
     parser = group_verb_parser("new", dry_run=True)
+    switches = _declare_creation_switches(parser)
+    for action in switches:
+        if not isinstance(action, argparse._StoreTrueAction):
+            raise TypeError(
+                f"camp new --host: creation flag {action.option_strings[0]!r} "
+                "is not a store_true switch and cannot be forwarded"
+            )
     parser.add_argument("slugs", nargs="*")
     parsed = parser.parse_args(args)
     slug = require_one_raw_slug("new", parsed.slugs)
@@ -314,6 +340,11 @@ def _cmd_new_host_cli(
 
     warn_if_nested(env)
     camp_args = ["new", slug, "--group", group_name]
+    camp_args += [
+        action.option_strings[0]
+        for action in switches
+        if getattr(parsed, action.dest)
+    ]
     if dry_run:
         camp_args.append("--dry-run")
     handoff(remote_camp_argv(host, camp_args, connect_timeout=connect_timeout))
@@ -382,11 +413,7 @@ def _cmd_new_group_cli(
     from ..group.manifest import workspace_dir, manifest_path_for
 
     parser = group_verb_parser("new", dry_run=True)
-    parser.add_argument("--no-wait", action="store_true")
-    parser.add_argument("--activate", action="store_true")
-    parser.add_argument("--json", action="store_true")
-    parser.add_argument("--no-attach", action="store_true")
-    parser.add_argument("--no-session", action="store_true")
+    _declare_creation_switches(parser)
     parser.add_argument("slug", nargs="?")
     parsed = parser.parse_args(args)
 

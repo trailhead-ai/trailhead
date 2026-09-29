@@ -31,6 +31,10 @@ def _transport_module():
     return importlib.import_module("camp.host.transport")
 
 
+def _group_module():
+    return importlib.import_module("camp.cli.group")
+
+
 def _run(argv: list[str], monkeypatch: pytest.MonkeyPatch) -> int:
     monkeypatch.setattr(sys, "argv", ["camp", *argv])
     try:
@@ -322,14 +326,128 @@ def test_double_dash_before_host_never_reaches_handoff_or_creates_anything(
     }
 
 
-@pytest.mark.parametrize(
-    "flag", ["--no-attach", "--no-session", "--activate", "--json"]
-)
-def test_creation_flags_are_refused(env: Env, monkeypatch, capsys, flag) -> None:
+_SWITCHES = ["--no-wait", "--activate", "--json", "--no-attach", "--no-session"]
+
+
+@pytest.mark.parametrize("flag", _SWITCHES)
+def test_each_creation_switch_is_forwarded_after_the_group(
+    env: Env, monkeypatch, flag
+) -> None:
+    # --json under the forced terminal merges the far side's streams; that is
+    # settled behaviour of the forwarded form, not a defect.
     code = _run(
         ["new", "ws1", "--host", "andromeda", "--group", "g", flag], monkeypatch
     )
-    _refused(env, capsys, code, flag)
+    assert code == 0
+    assert _remote_tail(env) == f"camp new ws1 --group g {flag}"
+
+
+def test_switches_forward_in_declaration_order_before_dry_run(
+    env: Env, monkeypatch
+) -> None:
+    monkeypatch.setenv("CAMP_DRY_RUN", "1")
+    code = _run(
+        ["new", "ws1", "--host", "andromeda", "--group", "g",
+         "--no-session", "--json", "--activate", "--no-wait", "--no-attach"],
+        monkeypatch,
+    )
+    assert code == 0
+    assert _remote_tail(env) == (
+        "camp new ws1 --group g --no-wait --activate --json --no-attach "
+        "--no-session --dry-run"
+    )
+
+
+def test_a_switch_typed_twice_is_forwarded_once(env: Env, monkeypatch) -> None:
+    code = _run(
+        ["new", "ws1", "--host", "andromeda", "--group", "g",
+         "--activate", "--activate"],
+        monkeypatch,
+    )
+    assert code == 0
+    assert _remote_tail(env) == "camp new ws1 --group g --activate"
+
+
+def test_a_switch_before_the_slug_forwards_the_same_argv(
+    env: Env, monkeypatch
+) -> None:
+    code = _run(
+        ["new", "--activate", "ws1", "--host", "andromeda", "--group", "g"],
+        monkeypatch,
+    )
+    assert code == 0
+    assert _remote_tail(env) == "camp new ws1 --group g --activate"
+
+
+@pytest.mark.parametrize("flag", ["--launch", "--bogus"])
+def test_an_undeclared_flag_is_refused_before_any_handoff(
+    env: Env, monkeypatch, capsys, flag
+) -> None:
+    code = _run(
+        ["new", "ws1", "--host", "andromeda", "--group", "g", flag], monkeypatch
+    )
+    _refused(env, capsys, code, f"camp new: unknown flag '{flag}'")
+
+
+def _declare_with_extra(extra):
+    real = _group_module()._declare_creation_switches
+
+    def declare(parser):
+        actions = list(real(parser))
+        actions.append(extra(parser))
+        return actions
+
+    return declare
+
+
+def test_a_switch_added_to_the_shared_declaration_is_accepted_locally_and_forwarded(
+    env: Env, monkeypatch, capsys
+) -> None:
+    monkeypatch.setattr(
+        _group_module(),
+        "_declare_creation_switches",
+        _declare_with_extra(
+            lambda p: p.add_argument("--extra-switch", action="store_true")
+        ),
+    )
+    assert _run(["new", "ws1", "--host", "andromeda", "--group", "g",
+                 "--extra-switch"], monkeypatch) == 0
+    assert _remote_tail(env) == "camp new ws1 --group g --extra-switch"
+
+    monkeypatch.setenv("CAMP_DRY_RUN", "1")
+    assert _run(["new", "ws1", "--group", "g", "--extra-switch"], monkeypatch) == 0
+    assert "[dry-run] would seed" in capsys.readouterr().err
+    assert len(env.handoffs) == 1
+
+
+def test_without_the_added_switch_both_forms_refuse_it(
+    env: Env, monkeypatch, capsys
+) -> None:
+    code = _run(["new", "ws1", "--host", "andromeda", "--group", "g",
+                 "--extra-switch"], monkeypatch)
+    _refused(env, capsys, code, "camp new: unknown flag '--extra-switch'")
+    monkeypatch.setenv("CAMP_DRY_RUN", "1")
+    code = _run(["new", "ws1", "--group", "g", "--extra-switch"], monkeypatch)
+    _refused(env, capsys, code, "camp new: unknown flag '--extra-switch'")
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [{}, {"action": "store_false"}],
+    ids=["value-taking", "store-false"],
+)
+def test_a_declared_action_that_is_not_a_store_true_switch_fails_before_handoff(
+    env: Env, monkeypatch, kwargs
+) -> None:
+    monkeypatch.setattr(
+        _group_module(),
+        "_declare_creation_switches",
+        _declare_with_extra(lambda p: p.add_argument("--odd-flag", **kwargs)),
+    )
+    with pytest.raises(TypeError, match="--odd-flag"):
+        _run(["new", "ws1", "--host", "andromeda", "--group", "g",
+              "--odd-flag"], monkeypatch)
+    assert env.handoffs == []
 
 
 def test_dash_leading_ssh_destination_is_refused_by_the_hosts_loader(
@@ -396,9 +514,9 @@ def test_the_form_documented_in_camp_help_dispatches_to_the_handoff(
         argv.append(
             {"<slug>": "ws1", "<name>": "andromeda"}.get(tok, tok)
         )
-    argv += ["--group", "g"]
+    argv += ["--group", "g", "--activate"]
     assert _run(argv, monkeypatch) == 0
-    assert env.handoffs[0][-1] == "camp new ws1 --group g"
+    assert env.handoffs[0][-1] == "camp new ws1 --group g --activate"
 
 
 # far side --------------------------------------------------------------
@@ -408,10 +526,10 @@ def test_far_side_main_accepts_exactly_what_is_forwarded(
     env: Env, monkeypatch, capsys
 ) -> None:
     monkeypatch.setenv("CAMP_DRY_RUN", "1")
-    _run(["new", "ws1", "--host", "andromeda", "--group", "g"], monkeypatch)
+    _run(["new", "ws1", "--host", "andromeda", "--group", "g", *_SWITCHES], monkeypatch)
     forwarded = shlex.split(env.handoffs[0][-1])
     monkeypatch.delenv("CAMP_DRY_RUN")
-    assert forwarded[1:] == ["new", "ws1", "--group", "g", "--dry-run"]
+    assert forwarded[1:] == ["new", "ws1", "--group", "g", *_SWITCHES, "--dry-run"]
 
     code = _run(forwarded[1:], monkeypatch)
     err = capsys.readouterr().err
