@@ -1,12 +1,15 @@
-"""The interactive attach handoff: replaces this process, local or remote.
+"""The interactive handoff: replaces this process, local or remote.
 
 Local: the door's own outside-tmux handover (`door_argv`, ``tmux
 attach-session -t =<derived name>``) — `=`-qualified through
 :func:`camp.launch.tmux.target`, the one tmux invocation in camp that
 bypasses the `Tmux` class itself (an interactive `exec`, which cannot go
 through `subprocess.run`) but still routes its target through the seam's
-own normalization. Remote: ``ssh -t <destination>
-<camp_bin> attach <ref> --group <group>``, carrying the per-host camp
+own normalization. Remote: one general builder,
+:func:`remote_camp_argv`, composes ``ssh -t <destination> <camp_bin>
+<camp args...>`` for any camp argument list and serves both cross-host door
+verbs — attach (:func:`remote_argv`, ``attach <ref> --group <group>``) and
+creation (``new <slug> --group <group> [--dry-run]``). It carries the per-host camp
 location the host declaration already holds and the group the operator's
 own machine resolved the slug against — the far side has no group axis of
 its own to resolve it from — and the same fixed connection options the
@@ -32,10 +35,12 @@ never observe — by construction — is that the real exec actually replaces
 the process image or that a pty genuinely reaches the far side; that half is
 the operator's own attestation.
 
-Security: like the listing transport, the assembled ssh argv carries the
-slug, the group it resolved against, and the host's camp location as plain
-command-line arguments — readable via ``ps`` by other local users on a
-multi-user machine.
+Security: like the listing transport, the assembled ssh argv carries every
+forwarded argument — the slug, the group it resolved against, ``--dry-run``,
+and the host's camp location — as plain command-line arguments, readable via
+``ps`` by other local users on a multi-user machine. Every forwarded value
+goes through the one quote-and-join, so none is interpreted by the far side's
+shell.
 """
 from __future__ import annotations
 
@@ -71,30 +76,25 @@ def door_argv(derived_name: str) -> list[str]:
     return ["tmux", "attach-session", "-t", target(derived_name)]
 
 
-def remote_argv(
+def remote_camp_argv(
     host: Host,
-    ref: str,
+    camp_args: Sequence[str],
     *,
-    group: str,
     connect_timeout: float = DEFAULT_CONNECT_TIMEOUT_SECONDS,
 ) -> list[str]:
-    """argv for the remote handoff: an interactive ``ssh -t <dest> <camp_bin>
-    attach <ref> --group <group>``.
-
-    ``group`` is the name the operator's own machine already resolved the
-    slug against (`cli/session.py`'s `_cmd_attach_host_cli`, via the same
-    `_resolve_group_for_attach` a local attach uses) — the far side has no
-    group axis of its own to resolve *ref* from, so the caller forwards the
-    name it already has rather than leaving the far side to guess one from
-    its own `$HOME`.
+    """argv for an interactive remote camp invocation: ``ssh -t <dest>
+    <camp_bin> <camp_args...>``, for any camp argument list.
 
     Mirrors :func:`camp.host.transport.run_camp`'s own ssh argv assembly —
     the same three fixed options (``BatchMode``, ``StrictHostKeyChecking``,
     ``ConnectTimeout``) — differing only by requesting a terminal (``-t``),
-    since the attaching operator needs an interactive pty where the listing
-    transport deliberately does not take one.
+    since the operator needs an interactive pty where the listing transport
+    deliberately does not take one. The remote command is composed by
+    :func:`camp.host.transport.quote_and_join`, so every element of
+    *camp_args* and the host's camp location reach the far side as one
+    literal word each.
     """
-    remote_command = quote_and_join(host.camp_bin, ["attach", ref, "--group", group])
+    remote_command = quote_and_join(host.camp_bin, camp_args)
     return [
         "ssh",
         "-t",
@@ -104,6 +104,28 @@ def remote_argv(
         host.ssh,
         remote_command,
     ]
+
+
+def remote_argv(
+    host: Host,
+    ref: str,
+    *,
+    group: str,
+    connect_timeout: float = DEFAULT_CONNECT_TIMEOUT_SECONDS,
+) -> list[str]:
+    """argv for the remote attach handoff: ``ssh -t <dest> <camp_bin> attach
+    <ref> --group <group>``, via :func:`remote_camp_argv`.
+
+    ``group`` is the name the operator's own machine already resolved the
+    slug against (`cli/session.py`'s `_cmd_attach_host_cli`, via the same
+    `_resolve_group_for_attach` a local attach uses) — the far side has no
+    group axis of its own to resolve *ref* from, so the caller forwards the
+    name it already has rather than leaving the far side to guess one from
+    its own `$HOME`.
+    """
+    return remote_camp_argv(
+        host, ["attach", ref, "--group", group], connect_timeout=connect_timeout
+    )
 
 
 def default_exec_seam(argv: Sequence[str]) -> None:
