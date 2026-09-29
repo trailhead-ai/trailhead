@@ -5,6 +5,10 @@ format described by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+- camp panes now start in their workspace directory even when the tmux
+  server's own working directory has been deleted (seen on tmux 3.7c). camp's
+  workspace login-shell window now runs tmux's `default-shell` as a login shell
+  and no longer consults tmux's `default-command` option.
 - `trailhead update` now upgrades your Outpost too, when
   `~/.config/outpost/config.toml` names a `checkout`. After the trailhead
   upgrade it fast-forwards that checkout, reinstalls its dependencies
