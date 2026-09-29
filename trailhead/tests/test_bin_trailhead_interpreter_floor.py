@@ -221,3 +221,113 @@ def test_higher_major_version_satisfies_a_floor_with_a_higher_minor(tmp_path: Pa
 
     assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
     assert "RAN:four:" in result.stdout, result.stdout
+
+
+def _probe_stub(dir_: Path, *, version: str, marker: str, touched: Path) -> Path:
+    """A stub that records any invocation, --version included, by creating ``touched``."""
+    dir_.mkdir(parents=True, exist_ok=True)
+    stub = dir_ / "python3"
+    stub.write_text(
+        textwrap.dedent(
+            f"""\
+            #!/bin/sh
+            : > "{touched}"
+            if [ "$1" = "--version" ]; then
+                echo "Python {version}"
+                exit 0
+            fi
+            echo "RAN:{marker}:$@"
+            exit 0
+            """
+        )
+    )
+    stub.chmod(stub.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+    return stub
+
+
+def _run_in(
+    launcher: Path | str,
+    path_entries: list[str],
+    *,
+    tmp_path: Path,
+    cwd: Path,
+    extra_env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    path = ":".join([*path_entries, str(_tools_dir(tmp_path))])
+    return subprocess.run(
+        [str(launcher), "--flag", "arg"],
+        capture_output=True,
+        text=True,
+        cwd=cwd,
+        env={"PATH": path, **(extra_env or {})},
+    )
+
+
+_REFUSED_39 = "trailhead: requires Python >=3.11, found Python 3.9"
+
+
+def test_relative_path_entry_is_never_probed_or_run(tmp_path: Path) -> None:
+    launcher = _fixture(tmp_path, requires_python=">=3.11")
+    low = _stub(tmp_path / "low-bin", version="3.9.6", marker="low").parent
+    cwd = tmp_path / "cwd"
+    touched = tmp_path / "rel-touched"
+    _probe_stub(cwd, version="3.99", marker="rel", touched=touched)
+
+    result = _run_in(launcher, [str(low), "."], tmp_path=tmp_path, cwd=cwd)
+
+    assert result.returncode == 1, f"stdout: {result.stdout}\nstderr: {result.stderr}"
+    assert result.stderr.strip() == _REFUSED_39, result.stderr
+    assert "RAN:rel:" not in result.stdout, result.stdout
+    assert not touched.exists(), "relative PATH entry's python3 was invoked"
+
+
+def test_absolute_entry_after_a_skipped_relative_one_still_wins(tmp_path: Path) -> None:
+    launcher = _fixture(tmp_path, requires_python=">=3.11")
+    low = _stub(tmp_path / "low-bin", version="3.9.6", marker="low").parent
+    high = _stub(tmp_path / "high-bin", version="3.14.0", marker="high").parent
+    cwd = tmp_path / "cwd"
+    touched = tmp_path / "rel-touched"
+    _probe_stub(cwd, version="3.99", marker="rel", touched=touched)
+
+    result = _run_in(launcher, [str(low), ".", str(high)], tmp_path=tmp_path, cwd=cwd)
+
+    assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
+    assert "RAN:high:" in result.stdout, result.stdout
+    assert "RAN:rel:" not in result.stdout, result.stdout
+    assert not touched.exists(), "relative PATH entry's python3 was invoked"
+
+
+@pytest.mark.parametrize("entry_kind", ["relative-glob", "absolute-glob"])
+def test_glob_characters_in_a_path_entry_are_not_expanded(
+    tmp_path: Path, entry_kind: str
+) -> None:
+    launcher = _fixture(tmp_path, requires_python=">=3.11")
+    low = _stub(tmp_path / "low-bin", version="3.9.6", marker="low").parent
+    touched = tmp_path / "glob-touched"
+    _probe_stub(tmp_path / "gl", version="3.99", marker="glob", touched=touched)
+    entry = "g*" if entry_kind == "relative-glob" else f"{tmp_path}/g*"
+
+    result = _run_in(launcher, [str(low), entry], tmp_path=tmp_path, cwd=tmp_path)
+
+    assert result.returncode == 1, f"stdout: {result.stdout}\nstderr: {result.stderr}"
+    assert result.stderr.strip() == _REFUSED_39, result.stderr
+    assert "RAN:glob:" not in result.stdout, result.stdout
+    assert not touched.exists(), "glob-expanded PATH entry's python3 was invoked"
+
+
+def test_exported_cdpath_does_not_break_relative_invocation(tmp_path: Path) -> None:
+    launcher = _fixture(tmp_path, requires_python=">=3.11")
+    high = _stub(tmp_path / "high-bin", version="3.14.0", marker="high").parent
+
+    result = _run_in(
+        "bin/trailhead",
+        [str(high)],
+        tmp_path=tmp_path,
+        cwd=launcher.parent.parent,
+        extra_env={"CDPATH": "."},
+    )
+
+    assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
+    assert "cd:" not in result.stderr, result.stderr
+    shim = launcher.parent / "_trailhead.py"
+    assert f"RAN:high:{shim} --flag arg" in result.stdout, result.stdout
