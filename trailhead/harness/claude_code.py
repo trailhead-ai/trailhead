@@ -87,6 +87,7 @@ subprocess or reports installed state refuses instead of guessing
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import os
@@ -153,6 +154,59 @@ def _projects_key(resolved: Path) -> str:
     projects-dir path calls through here rather than re-deriving it.
     """
     return str(resolved).replace("/", "-").replace(".", "-")
+
+
+def _directories_munging_to(key: str) -> list[Path]:
+    """Every existing, resolved directory whose :func:`_projects_key` is ``key``.
+
+    Walks down from ``/`` one directory at a time, following an entry only when
+    its own key is a leading run of ``key``, so the lossy munge is settled by
+    what is actually on disk.  A directory that cannot be listed is skipped, and
+    so is a single entry whose type cannot be determined or that cannot be
+    resolved.
+
+    What lies below a directory depends only on that directory's identity and
+    the key consumed to reach it, so each such state is explored once per call.
+    Symlinked directories are followed, and the visited set is what keeps a
+    symlink alias from multiplying the paths explored.
+    """
+    if not key.startswith("-"):
+        return []
+    found: list[Path] = []
+    visited: set[tuple[int, int, str]] = set()
+
+    def walk(directory: Path) -> None:
+        try:
+            st = os.stat(directory)
+        except OSError:
+            return
+        state = (st.st_dev, st.st_ino, _projects_key(directory))
+        if state in visited:
+            return
+        visited.add(state)
+        children: list[Path] = []
+        try:
+            with os.scandir(directory) as entries:
+                for e in entries:
+                    try:
+                        if e.is_dir():
+                            children.append(Path(e.path))
+                    except OSError:
+                        continue
+        except OSError:
+            return
+        for path in children:
+            path_key = _projects_key(path)
+            if path_key == key:
+                try:
+                    found.append(path.resolve())
+                except (OSError, RuntimeError):
+                    continue
+            elif key.startswith(path_key + "-"):
+                walk(path)
+
+    walk(Path("/"))
+    return found
 
 
 #: Bounded head-scan limits for extracting a session's start cwd out of a
@@ -1146,6 +1200,63 @@ class ClaudeCodeHarness(Harness):
         munged = _projects_key(Path(workspace).resolve())
         candidate = _claude_dir(_env) / _PROJECTS_SUBDIR / munged / f"{session_id}.jsonl"
         return candidate if candidate.is_file() else None
+
+    def session_transcript_stored_under(
+        self, session_id: str, root: Path, *, env: dict[str, str] | None = None
+    ) -> bool | None:
+        """Whether the top-level transcript for ``session_id`` is stored under
+        the projects key of ``root`` or of any directory beneath it.
+
+        The stored key is a lossy munge, so it is first resolved against the
+        directories that exist on disk: when any claims it, the answer is
+        whether one of them is ``root`` or beneath it, which keeps a sibling like
+        ``<parent>/ws-2`` out.  Only when none exists (the start directory was
+        removed, or could not be listed) does the answer fall back to comparing
+        the key against ``root``'s own.  A key that is neither ``root``'s own nor
+        extends it with ``-`` cannot be stored under ``root`` and answers False
+        without walking the filesystem.  A transcript keyed through a symlink
+        alias from outside ``root`` therefore answers False.
+
+        Known limit: a start directory under ``root`` that has since been removed
+        can still answer False when an existing directory outside ``root`` munges
+        to the same key (the session started in ``ws/2``, that directory was
+        removed, and a sibling ``ws-2`` exists): the claimant rule wins and the
+        fallback does not run.  A root that cannot be resolved (a symlink loop)
+        answers False without that fallback.  Read-only; never raises.
+        """
+        if not _is_session_id(session_id):
+            return False
+        _env = env if env is not None else dict(os.environ)
+        projects_dir = _claude_dir(_env) / _PROJECTS_SUBDIR
+        try:
+            resolved_root = Path(root).resolve()
+            # Python 3.13 resolves a symlink loop without raising; a stat
+            # surfaces it (ELOOP) while a merely-missing root still
+            # falls through to the key comparison.
+            try:
+                resolved_root.stat()
+            except OSError as exc:
+                if exc.errno == errno.ELOOP:
+                    return False
+        except (OSError, RuntimeError):
+            return False
+        root_key = _projects_key(resolved_root)
+        try:
+            keys = [
+                t.parent.name for t in projects_dir.glob(f"*/{session_id}.jsonl") if t.is_file()
+            ]
+        except OSError:
+            return False
+        for key in keys:
+            if key != root_key and not key.startswith(root_key + "-"):
+                continue
+            claimants = _directories_munging_to(key)
+            if claimants:
+                if any(c.is_relative_to(resolved_root) for c in claimants):
+                    return True
+            else:
+                return True
+        return False
 
     # -- session transcript destination ----------------------------------------
     #

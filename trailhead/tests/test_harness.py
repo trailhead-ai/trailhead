@@ -18,7 +18,7 @@ from trailhead.harness import (
     get_harness,
     known_harness_names,
 )
-from trailhead.harness.claude_code import _ERROR_EXCERPT_LIMIT
+from trailhead.harness.claude_code import _ERROR_EXCERPT_LIMIT, _projects_key
 from trailhead.harness.base import (
     UNSUPPORTED_RULESET_NOTICE,
     AccountAuthentication,
@@ -581,6 +581,274 @@ class TestClaudeCodeSessionTranscriptPath:
             "sess-1", ws, env={"TRAILHEAD_CLAUDE_DIR": str(claude_dir)}
         )
         assert got is None
+
+
+class TestClaudeCodeSessionTranscriptStoredUnder:
+    """Whether a session's transcript is stored under the projects key of ``root``
+    or any directory beneath it.  The munge is lossy, so the stored key is resolved
+    against the directories that exist on disk before any prefix comparison."""
+
+    def _env(self, claude_dir):
+        return {"TRAILHEAD_CLAUDE_DIR": str(claude_dir), "HOME": str(claude_dir.parent)}
+
+    def _seed_key(self, claude_dir, key, session_id):
+        d = claude_dir / "projects" / key
+        d.mkdir(parents=True, exist_ok=True)
+        (d / f"{session_id}.jsonl").write_text("{}\n")
+
+    def _seed(self, claude_dir, directory, session_id):
+        self._seed_key(claude_dir, _projects_key(directory.resolve()), session_id)
+
+    def _stored_under(self, tmp_path, session_id, root, claude_dir=None):
+        claude_dir = claude_dir or tmp_path / ".claude"
+        return ClaudeCodeHarness().session_transcript_stored_under(
+            session_id, root, env=self._env(claude_dir)
+        )
+
+    def test_true_for_a_directory_two_levels_below_a_member(self, tmp_path):
+        ws = tmp_path.resolve() / "ws"
+        deep = ws / "member" / "tools" / "camp"
+        deep.mkdir(parents=True)
+        self._seed(tmp_path / ".claude", deep, "sess-1")
+        assert self._stored_under(tmp_path, "sess-1", ws) is True
+
+    def test_true_for_the_root_itself(self, tmp_path):
+        ws = tmp_path.resolve() / "ws"
+        ws.mkdir()
+        self._seed(tmp_path / ".claude", ws, "sess-1")
+        assert self._stored_under(tmp_path, "sess-1", ws) is True
+
+    def test_false_for_an_existing_sibling_whose_name_extends_root_with_a_dash(self, tmp_path):
+        base = tmp_path.resolve()
+        ws = base / "ws"
+        ws.mkdir()
+        sibling = base / "ws-2"
+        sibling.mkdir()
+        self._seed(tmp_path / ".claude", sibling, "sess-1")
+        assert self._stored_under(tmp_path, "sess-1", ws) is False
+
+    def test_false_for_an_existing_sibling_whose_name_extends_root_with_a_dot(self, tmp_path):
+        base = tmp_path.resolve()
+        ws = base / "ws"
+        ws.mkdir()
+        sibling = base / "ws.bak"
+        sibling.mkdir()
+        self._seed(tmp_path / ".claude", sibling, "sess-1")
+        assert self._stored_under(tmp_path, "sess-1", ws) is False
+
+    def test_true_when_no_directory_exists_but_key_extends_roots_key(self, tmp_path):
+        ws = tmp_path.resolve() / "ws"
+        ws.mkdir()
+        gone = ws / "member" / "removed"  # never created
+        self._seed(tmp_path / ".claude", gone, "sess-1")
+        assert self._stored_under(tmp_path, "sess-1", ws) is True
+
+    def test_false_when_no_directory_exists_and_key_lacks_roots_prefix(self, tmp_path):
+        base = tmp_path.resolve()
+        ws = base / "ws"
+        ws.mkdir()
+        gone = base / "elsewhere" / "removed"  # never created
+        self._seed(tmp_path / ".claude", gone, "sess-1")
+        assert self._stored_under(tmp_path, "sess-1", ws) is False
+
+    def test_false_when_no_directory_exists_and_key_extends_roots_without_a_separator(self, tmp_path):
+        base = tmp_path.resolve()
+        ws = base / "ws"
+        ws.mkdir()
+        gone = base / "wsx" / "removed"  # never created
+        self._seed(tmp_path / ".claude", gone, "sess-1")
+        assert self._stored_under(tmp_path, "sess-1", ws) is False
+
+    def test_false_when_the_session_is_only_a_nested_subagent_file(self, tmp_path):
+        ws = tmp_path.resolve() / "ws"
+        ws.mkdir()
+        claude_dir = tmp_path / ".claude"
+        nested = claude_dir / "projects" / _projects_key(ws) / "other-id" / "subagents"
+        nested.mkdir(parents=True)
+        (nested / "sess-1.jsonl").write_text("{}\n")
+        assert self._stored_under(tmp_path, "sess-1", ws) is False
+
+    def test_false_when_a_directory_named_like_roots_key_holds_the_transcript_below_depth_two(
+        self, tmp_path
+    ):
+        ws = tmp_path.resolve() / "ws"
+        ws.mkdir()
+        deeper = tmp_path / ".claude" / "projects" / "-unrelated" / _projects_key(ws)
+        deeper.mkdir(parents=True)
+        (deeper / "sess-1.jsonl").write_text("{}\n")
+        assert self._stored_under(tmp_path, "sess-1", ws) is False
+
+    def test_false_for_a_glob_pattern_id_that_would_match_a_stored_transcript(self, tmp_path):
+        ws = tmp_path.resolve() / "ws"
+        ws.mkdir()
+        self._seed(tmp_path / ".claude", ws, "sess-1")
+        assert self._stored_under(tmp_path, "*", ws) is False
+
+    def test_false_for_an_unusable_session_id(self, tmp_path):
+        ws = tmp_path.resolve() / "ws"
+        ws.mkdir()
+        (tmp_path / ".claude" / "projects" / _projects_key(ws)).mkdir(parents=True)
+        (tmp_path / ".claude" / "projects" / "escape.jsonl").write_text("{}\n")
+        assert self._stored_under(tmp_path, "../escape", ws) is False
+
+    def test_false_when_the_session_has_no_stored_transcript(self, tmp_path):
+        ws = tmp_path.resolve() / "ws"
+        ws.mkdir()
+        self._seed(tmp_path / ".claude", ws, "other-sess")
+        assert self._stored_under(tmp_path, "sess-1", ws) is False
+
+    def test_honors_claude_config_dir_env(self, tmp_path):
+        ws = tmp_path.resolve() / "ws"
+        ws.mkdir()
+        relocated = tmp_path / "elsewhere"
+        self._seed(relocated, ws, "sess-1")
+        got = ClaudeCodeHarness().session_transcript_stored_under(
+            "sess-1", ws, env={"CLAUDE_CONFIG_DIR": str(relocated), "HOME": str(tmp_path)}
+        )
+        assert got is True
+        assert self._stored_under(tmp_path, "sess-1", ws) is False
+
+    def test_unrelated_key_answers_false_without_listing_directories_outside_roots_ancestry(
+        self, tmp_path, monkeypatch
+    ):
+        base = tmp_path.resolve()
+        ws = base / "ws"
+        ws.mkdir()
+        claude_dir = tmp_path / ".claude"
+        other = base / "other" / "deep"
+        other.mkdir(parents=True)
+        self._seed(claude_dir, other, "sess-1")
+        listed = []
+        real_scandir = os.scandir
+
+        def recording(path="."):
+            listed.append(Path(path))
+            return real_scandir(path)
+
+        monkeypatch.setattr(os, "scandir", recording)
+        assert self._stored_under(tmp_path, "sess-1", ws) is False
+        stray = [
+            p
+            for p in listed
+            if p != ws
+            and p not in ws.parents
+            and not p.is_relative_to(claude_dir)
+        ]
+        assert stray == []
+
+    @pytest.mark.skipif(os.geteuid() == 0, reason="root ignores mode 000")
+    def test_a_listing_error_on_one_entry_does_not_discard_the_real_claimants(self, tmp_path):
+        base = tmp_path.resolve()
+        parent = base / "parent"
+        ws = parent / "ws"
+        ws.mkdir(parents=True)
+        sibling = parent / "ws-2"
+        sibling.mkdir()
+        locked = base / "locked"
+        (locked / "child").mkdir(parents=True)
+        (parent / "denied-link").symlink_to(locked / "child")
+        self._seed(tmp_path / ".claude", sibling, "sess-1")
+        locked.chmod(0)
+        try:
+            assert self._stored_under(tmp_path, "sess-1", ws) is False
+        finally:
+            locked.chmod(0o700)
+
+    def test_a_symlinked_claimant_resolving_inside_root_is_true(self, tmp_path):
+        base = tmp_path.resolve()
+        parent = base / "parent"
+        ws = parent / "ws"
+        (ws / "sub").mkdir(parents=True)
+        link = parent / "ws-link"
+        link.symlink_to(ws / "sub")
+        self._seed_key(tmp_path / ".claude", _projects_key(link), "sess-1")
+        assert self._stored_under(tmp_path, "sess-1", ws) is True
+
+    def test_a_symlinked_claimant_resolving_outside_root_is_false(self, tmp_path):
+        base = tmp_path.resolve()
+        parent = base / "parent"
+        ws = parent / "ws"
+        ws.mkdir(parents=True)
+        outside = base / "elsewhere"
+        outside.mkdir()
+        link = parent / "ws-2"
+        link.symlink_to(outside)
+        self._seed_key(tmp_path / ".claude", _projects_key(link), "sess-1")
+        assert self._stored_under(tmp_path, "sess-1", ws) is False
+
+    @pytest.mark.skipif(os.geteuid() == 0, reason="root ignores mode 000")
+    def test_an_unlistable_directory_on_the_keys_path_falls_back_to_the_key_comparison(
+        self, tmp_path
+    ):
+        base = tmp_path.resolve()
+        ws = base / "ws"
+        locked = ws / "locked"
+        (locked / "inner").mkdir(parents=True)
+        self._seed(tmp_path / ".claude", locked / "inner", "sess-1")
+        locked.chmod(0)
+        try:
+            assert self._stored_under(tmp_path, "sess-1", ws) is True
+        finally:
+            locked.chmod(0o700)
+
+    def test_symlink_aliases_do_not_multiply_the_paths_explored(self, tmp_path, monkeypatch):
+        base = tmp_path.resolve()
+        ws = base / "ws"
+        depth = 20
+        here = ws
+        here.mkdir()
+        (here / "a-a").symlink_to(".")
+        for _ in range(depth):
+            here = here / "a"
+            here.mkdir()
+            (here / "a-a").symlink_to(".")
+        self._seed(tmp_path / ".claude", here, "sess-1")
+        calls = []
+        real_scandir = os.scandir
+
+        def counting(path="."):
+            calls.append(path)
+            return real_scandir(path)
+
+        monkeypatch.setattr(os, "scandir", counting)
+        assert self._stored_under(tmp_path, "sess-1", ws) is True
+        # One scandir per distinct (directory, consumed key) state: each of the
+        # depth+1 directories is reached with at most depth+1 distinct consumed
+        # keys, plus the ancestors of ws and the projects-dir glob.  Unbounded
+        # aliasing explores well over 10k paths at this depth.
+        ancestors = len(ws.parents)
+        assert len(calls) <= 2 * (depth + 1) ** 2 + ancestors + 10
+
+    def test_a_root_that_is_a_symlink_loop_answers_false(self, tmp_path):
+        base = tmp_path.resolve()
+        loop = base / "loop"
+        loop.symlink_to("loop")
+        self._seed_key(tmp_path / ".claude", _projects_key(loop), "sess-1")
+        assert self._stored_under(tmp_path, "sess-1", loop) is False
+
+    def test_a_root_that_does_not_exist_falls_back_to_key_comparison(self, tmp_path):
+        gone = tmp_path.resolve() / "removed-ws"
+        self._seed_key(tmp_path / ".claude", _projects_key(gone), "sess-1")
+        assert self._stored_under(tmp_path, "sess-1", gone) is True
+
+    def test_a_claimant_that_cannot_be_resolved_is_skipped_and_the_real_one_decides(
+        self, tmp_path, monkeypatch
+    ):
+        base = tmp_path.resolve()
+        ws = base / "ws"
+        (ws / "x.y").mkdir(parents=True)
+        (ws / "x-y").mkdir()
+        (ws / "x-y-loop").symlink_to("x-y-loop")
+        self._seed_key(tmp_path / ".claude", _projects_key(ws / "x-y"), "sess-1")
+        real_resolve = Path.resolve
+
+        def resolving(self, strict=False):
+            if self.name == "x.y":
+                raise RuntimeError(f"Symlink loop from {self}")
+            return real_resolve(self, strict=strict)
+
+        monkeypatch.setattr(Path, "resolve", resolving)
+        assert self._stored_under(tmp_path, "sess-1", ws) is True
 
 
 class TestClaudeCodeSessionTranscriptDestination:
