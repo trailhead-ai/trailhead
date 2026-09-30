@@ -129,7 +129,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from trailhead import outpost_lifecycle
+from trailhead import doctor, outpost_lifecycle
 from trailhead.install import resolve_config_for_env, wire_all_harnesses
 from trailhead.outpost_lifecycle import OutpostLifecycleError
 from trailhead.paths import state_dir
@@ -615,6 +615,11 @@ def run_update_apply(
     Outpost is preflighted with the install and refused together with it, but
     upgraded after it and rolled back on its own (see the module docstring).
 
+    A successful run ends by printing the host-readiness verdict line from
+    :func:`trailhead.doctor.build_readiness`, so a host that is not ready says
+    so without the operator running ``trailhead doctor``.  A readiness check
+    that raises is reported and never changes the outcome.
+
     Returns 0 on success or a genuine no-op (already up to date); 1 on any
     refusal or failure, including an outpost failure after a kept install
     upgrade.
@@ -749,6 +754,19 @@ def run_update_apply(
         print(str(exc), file=sys.stderr)
         return 1
 
+    print("trailhead: checking host readiness…")
+    try:
+        verdict = doctor.build_readiness(env=_env)["verdict"]
+    except Exception as exc:
+        print(
+            f"trailhead: host readiness could not be checked ({exc}); "
+            "run `trailhead doctor` to see it",
+            file=sys.stderr,
+        )
+        return 0
+    print(verdict)
+    if verdict.startswith("HOST NOT READY"):
+        print("trailhead: run `trailhead doctor` for the fixes")
     return 0
 
 
