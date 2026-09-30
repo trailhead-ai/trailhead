@@ -1661,6 +1661,7 @@ def cmd_sync(args) -> int:
         print(f"notice: error releasing a vault lock after sync: {exc}", file=sys.stderr)
 
     failed: list[str] = []
+    held: list[str] = []
     total_pulled = 0
     for name, vault in targets:
         if outcomes.get(name) == SYNC_IN_PROGRESS:
@@ -1703,6 +1704,11 @@ def cmd_sync(args) -> int:
                 )
             rc_one = 1 if holding else 0
             outcomes[name] = "holding" if holding else "converged"
+            if holding:
+                # A held vault is healthy, not broken: it exits 1 but is named in
+                # its own summary line rather than in the "failed to sync" one.
+                held.append(name)
+                rc_one = 0
         else:
             shared = str(Path(vault).resolve()) in _shared_vault_paths()
             rc_one, pulled, ending, published = _pull_and_push_one(
@@ -1756,7 +1762,7 @@ def cmd_sync(args) -> int:
         else:
             print(f"  Reindexed {count} record(s) after pull.")
 
-    rc_final = 1 if failed else 0
+    rc_final = 1 if failed or held else 0
 
     if bool(getattr(args, "json", False)):
         # Printed LAST and unconditionally — an addition to the prose above,
@@ -1778,6 +1784,12 @@ def cmd_sync(args) -> int:
         print(
             f"error: {len(failed)} of {len(targets)} vault(s) failed to sync: "
             f"{', '.join(failed)}",
+            file=sys.stderr,
+        )
+    if held:
+        print(
+            f"notice: {len(held)} of {len(targets)} vault(s) holding unpublished work: "
+            f"{', '.join(held)}",
             file=sys.stderr,
         )
     return rc_final

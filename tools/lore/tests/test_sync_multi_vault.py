@@ -3656,7 +3656,7 @@ def test_pull_only_holding_notice_never_carries_the_remote_url(tmp_path):
     _commit_locally(vault)
 
     err = _pull_only_stderr(tmp_path, vault)
-    holding = [line for line in err.splitlines() if "holding unpublished work" in line]
+    holding = [line for line in err.splitlines() if "holding unpublished work (" in line]
     assert len(holding) == 1
     assert str(remote) not in holding[0]
     assert str(tmp_path) not in holding[0]
@@ -3669,3 +3669,67 @@ def test_pull_only_holding_notice_leaves_json_stdout_to_the_report(tmp_path):
     r, entry = _pull_only_report(tmp_path, vault)
     assert entry["outcome"] == "holding"
     assert "holding unpublished work" not in r.stdout
+
+
+def _pull_only_multi(tmp_path, vaults):
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    scopes = ["default", "product", "repo"]
+    write_vault_config(
+        config_home, [(name, scopes[i], path) for i, (name, path) in enumerate(vaults)]
+    )
+    return run_cli(["sync", "--pull-only"], config_home=config_home, state_dir=state_dir)
+
+
+def _wired_named_vault(tmp_path, name):
+    vault = _make_vault(tmp_path / f"v-{name}", dirty=False)
+    remote = _make_bare_remote(tmp_path / f"{name}-remote.git")
+    _wire_remote(vault, remote)
+    return vault
+
+
+def test_pull_only_held_vault_is_summarized_as_holding_not_as_failed(tmp_path):
+    vault, _remote = _wired_vault(tmp_path, dirty=False)
+    _commit_locally(vault)
+
+    r = _pull_only_multi(tmp_path, [("default", vault)])
+
+    assert r.returncode == 1, r.stderr
+    assert "failed to sync" not in r.stderr
+    assert "notice: 1 of 1 vault(s) holding unpublished work: default" in r.stderr
+
+
+def test_pull_only_holding_summary_names_only_the_held_vault(tmp_path):
+    held = _wired_named_vault(tmp_path, "held")
+    _commit_locally(held)
+    clean = _wired_named_vault(tmp_path, "clean")
+
+    r = _pull_only_multi(tmp_path, [("held", held), ("clean", clean)])
+
+    assert r.returncode == 1, r.stderr
+    assert "failed to sync" not in r.stderr
+    assert "notice: 1 of 2 vault(s) holding unpublished work: held" in r.stderr
+    assert "holding unpublished work: held, clean" not in r.stderr
+
+
+def test_pull_only_converged_run_prints_neither_summary(tmp_path):
+    vault, _remote = _wired_vault(tmp_path, dirty=False)
+
+    r = _pull_only_multi(tmp_path, [("default", vault)])
+
+    assert r.returncode == 0, r.stderr
+    assert "failed to sync" not in r.stderr
+    assert "vault(s) holding unpublished work" not in r.stderr
+
+
+def test_pull_only_real_failure_and_held_vault_each_get_their_own_summary(tmp_path):
+    held = _wired_named_vault(tmp_path, "held")
+    _commit_locally(held)
+    missing = tmp_path / "no-such-vault"
+
+    r = _pull_only_multi(tmp_path, [("held", held), ("gone", missing)])
+
+    assert r.returncode == 1, r.stderr
+    assert "error: 1 of 2 vault(s) failed to sync: gone" in r.stderr
+    assert "notice: 1 of 2 vault(s) holding unpublished work: held" in r.stderr
