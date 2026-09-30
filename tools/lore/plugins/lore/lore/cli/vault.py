@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -347,6 +348,9 @@ def _cmd_vault_config(args) -> int:
     take effect.
     """
     config_path = _resolve_config_path()
+    answer = getattr(args, "makes_vault_content", None)
+    if answer is not None:
+        return _set_makes_vault_content(config_path, answer == "yes")
     if not config_path.exists():
         print("No vault config found; run 'lore init' to seed one.", file=sys.stderr)
         return 1
@@ -361,6 +365,57 @@ def _cmd_vault_config(args) -> int:
         "Note: run 'lore reindex' for any scope or shared change to take effect "
         "(the index is derived from config)."
     )
+    return 0
+
+
+def _set_makes_vault_content(config_path: Path, value: bool) -> int:
+    """Set the top-level ``makes_vault_content`` bool, leaving every other key intact.
+
+    Refuses, writing nothing, when there is no config or the result would not pass
+    lore's own validation: a file lore cannot load is worse than no answer.
+
+    The replacement file keeps the original's permission mode (0600 when there was
+    none). ``write_config_atomic`` creates its temp file under the process umask, so
+    the umask is narrowed for the write to make that file land with the right mode
+    from the start rather than being widened-then-chmodded.
+    """
+    from ..vault import config as vault_config_mod
+
+    if not config_path.exists():
+        print(
+            f"lore: no config at {config_path}; run 'lore init' first",
+            file=sys.stderr,
+        )
+        return 1
+    try:
+        config = _read_raw_config(config_path)
+    except (OSError, ValueError) as exc:
+        print(f"lore: cannot read {config_path}: {exc}", file=sys.stderr)
+        return 1
+    if not isinstance(config, dict):
+        print(f"lore: {config_path} is not a JSON object; refusing to edit it", file=sys.stderr)
+        return 1
+
+    mode = stat.S_IMODE(config_path.stat().st_mode)
+    config["makes_vault_content"] = value
+    try:
+        vault_config_mod.validate_config(config)
+    except vault_config_mod.VaultConfigError as exc:
+        print(
+            f"lore: {config_path} would not be a valid lore config ({exc}); "
+            "run 'lore init' first",
+            file=sys.stderr,
+        )
+        return 1
+    old_umask = os.umask(~mode & 0o777)
+    try:
+        vault_config_mod.write_config_atomic(config_path, config)
+    except (OSError, ValueError) as exc:
+        print(f"lore: failed to write config: {exc}", file=sys.stderr)
+        return 1
+    finally:
+        os.umask(old_umask)
+    print(f"Recorded makes_vault_content = {str(value).lower()} in {config_path}.")
     return 0
 
 
@@ -611,7 +666,14 @@ def add_vault_subparser(sub) -> None:
     p_vault_ls = p_vault_sub.add_parser("ls", help="List configured vaults")
     p_vault_ls.set_defaults(func=cmd_vault)
 
-    p_vault_config = p_vault_sub.add_parser("config", help="Edit config.json in $EDITOR")
+    p_vault_config = p_vault_sub.add_parser(
+        "config",
+        help="Edit config.json in $EDITOR, or record this host's role with --makes-vault-content",
+    )
+    p_vault_config.add_argument(
+        "--makes-vault-content", choices=("yes", "no"), default=None,
+        help="Record whether this host makes vault content (writes config.json, no editor)",
+    )
     p_vault_config.set_defaults(func=cmd_vault)
 
     p_vault_resolve = p_vault_sub.add_parser(
