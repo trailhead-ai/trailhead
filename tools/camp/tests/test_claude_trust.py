@@ -670,10 +670,8 @@ def _target_for(env: dict[str, str]) -> Path:
 class TestRelocation:
     """Camp writes trust to the file the launched session will actually read.
 
-    The environment table below is the contract shared with the harness resolver
-    (and, by hand, with the concierge's `claude_config_path` in the dotfiles repo,
-    which cannot import it): CLAUDE_CONFIG_DIR relocates the file, TRAILHEAD_CLAUDE_DIR
-    never does.
+    The environment table below is the contract shared with the harness resolver:
+    CLAUDE_CONFIG_DIR relocates the file, TRAILHEAD_CLAUDE_DIR never does.
     """
 
     def _envs(self, tmp_path):
@@ -833,8 +831,7 @@ class TestRelativeOverrideIsRefused:
 
     camp's cwd is not the launched session's, so a relative override would put the
     trust key somewhere Claude never looks — and `mkdir(parents=True)` would happily
-    build that tree and report success. Same posture as the concierge's own
-    `_absolute_override`: overrides must be absolute.
+    build that tree and report success. Overrides must be absolute.
     """
 
     def test_a_relative_override_aborts_without_writing(self, tmp_path, capsys, monkeypatch):
