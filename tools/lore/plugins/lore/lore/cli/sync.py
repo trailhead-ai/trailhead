@@ -1451,21 +1451,34 @@ def _select_targets(vault_filter: str | None) -> tuple[list, int]:
     return selected, 0
 
 
-def _pull_only_unpublished(vault: Path) -> bool:
-    """Return ``True`` iff ``vault`` has commits that exist on no remote ref.
+def _pull_only_unpublished_count(vault: Path) -> int:
+    """Return how many commits of ``vault`` exist on no remote ref (``0`` if none).
 
     Purely local. Measured against :func:`_vault_upstream_ref` rather than
     :func:`_vault_unpushed`, which treats a missing upstream as unpushed: a
     pull-only run never sets one, so the vault it leaves at ``origin/<branch>``
-    would otherwise read as unpublished forever.
+    would otherwise read as unpublished forever. With no remote ref at all,
+    every commit is unpublished.
     """
     if not _vault_has_commits(vault):
-        return False
+        return 0
     ref = _vault_upstream_ref(vault)
-    if ref is None:
-        return True
-    rc, count, _ = _git(vault, "rev-list", "--count", f"{ref}..HEAD")
-    return rc == 0 and count.strip() not in ("", "0")
+    rev_range = "HEAD" if ref is None else f"{ref}..HEAD"
+    rc, count, _ = _git(vault, "rev-list", "--count", rev_range)
+    if rc != 0 or not count.strip().isdigit():
+        return 0
+    return int(count.strip())
+
+
+def _holding_reasons(*, dirty: bool, unpublished: int, conflict: bool) -> list[str]:
+    reasons = []
+    if dirty:
+        reasons.append("uncommitted changes")
+    if unpublished:
+        reasons.append(f"{unpublished} commit(s) not yet published")
+    if conflict:
+        reasons.append("a conflict that could not be integrated")
+    return reasons
 
 
 def cmd_sync(args) -> int:
@@ -1678,9 +1691,16 @@ def cmd_sync(args) -> int:
             # not need the network. A vault with no `origin` has nowhere to
             # publish and is converged regardless, as in the full loop.
             has_origin = _git(Path(vault), "remote", "get-url", "origin")[0] == 0
-            holding = state == PULL_FAILED or (
-                has_origin and (_vault_is_dirty(Path(vault)) or _pull_only_unpublished(Path(vault)))
-            )
+            conflict = state == PULL_FAILED
+            dirty = has_origin and _vault_is_dirty(Path(vault))
+            unpublished = _pull_only_unpublished_count(Path(vault)) if has_origin else 0
+            holding = conflict or dirty or unpublished > 0
+            if holding:
+                reasons = _holding_reasons(dirty=dirty, unpublished=unpublished, conflict=conflict)
+                say_err(
+                    f"notice: holding unpublished work ({'; '.join(reasons)}) — "
+                    "run `lore sync` to publish"
+                )
             rc_one = 1 if holding else 0
             outcomes[name] = "holding" if holding else "converged"
         else:

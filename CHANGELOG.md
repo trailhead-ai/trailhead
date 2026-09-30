@@ -5,6 +5,10 @@ format described by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+- `lore sync --pull-only` now prints one stderr notice per held vault naming why it
+  is holding unpublished work (uncommitted changes, N commit(s) not yet published,
+  a conflict that could not be integrated) and pointing at `lore sync`; `--json`
+  stdout is unchanged.
 - `lore sync --pull-only` now reports a vault holding unpublished work as
   `holding` and exits 1, matching the full sync: a vault whose tree is dirty or
   that has commits not on its upstream (or, with no upstream set, not on
