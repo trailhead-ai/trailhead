@@ -171,9 +171,9 @@ def pretrust_workspace(
     # A relative config file resolves against camp's cwd rather than the launched
     # session's, and the write below creates its parent tree — so a relocation
     # override that is not absolute would build an arbitrary directory and report
-    # success on a trust key Claude never reads. Refused, matching the concierge's
-    # own absolute-override rule. The resolved path is what is checked, not the
-    # variable behind it: only the harness knows which variable that is.
+    # success on a trust key Claude never reads. Refused: an override path must be
+    # absolute. The resolved path is what is checked, not the variable behind it:
+    # only the harness knows which variable that is.
     if not claude_json_path.is_absolute():
         print(
             f"camp: pretrust skipped — the harness config file resolves to "
