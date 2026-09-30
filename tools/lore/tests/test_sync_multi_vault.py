@@ -3584,3 +3584,88 @@ def test_a_converged_run_clears_the_failure_marker_it_finds(tmp_path):
     assert resolve_state_mod.read_failed_marker(vault) is None, (
         "the vault converged, so the failure it once had is over"
     )
+
+
+def _pull_only_stderr(tmp_path, vault) -> str:
+    r, _entry = _pull_only_report(tmp_path, vault)
+    return r.stderr
+
+
+def test_pull_only_holding_notice_counts_one_unpublished_commit(tmp_path):
+    vault, _remote = _wired_vault(tmp_path, dirty=False)
+    _commit_locally(vault)
+
+    err = _pull_only_stderr(tmp_path, vault)
+    assert "notice: holding unpublished work (1 commit(s) not yet published)" in err
+    assert "run `lore sync` to publish" in err
+    assert "dirty" not in err
+
+
+def test_pull_only_holding_notice_counts_two_unpublished_commits(tmp_path):
+    vault, _remote = _wired_vault(tmp_path, dirty=False)
+    _commit_locally(vault, "one.md")
+    _commit_locally(vault, "two.md")
+
+    err = _pull_only_stderr(tmp_path, vault)
+    assert "notice: holding unpublished work (2 commit(s) not yet published)" in err
+
+
+def test_pull_only_holding_notice_names_a_dirty_tree(tmp_path):
+    vault, _remote = _wired_vault(tmp_path, dirty=True)
+
+    err = _pull_only_stderr(tmp_path, vault)
+    assert "notice: holding unpublished work (uncommitted changes)" in err
+    assert "not yet published" not in err
+
+
+def test_pull_only_holding_notice_names_every_reason_that_applies(tmp_path):
+    vault, _remote = _wired_vault(tmp_path, dirty=False)
+    _commit_locally(vault)
+    (vault / "scratch.md").write_text("# uncommitted\n")
+
+    err = _pull_only_stderr(tmp_path, vault)
+    assert "uncommitted changes; 1 commit(s) not yet published" in err
+
+
+def test_pull_only_holding_notice_names_an_unintegrable_conflict(tmp_path):
+    vault, remote = _wired_vault(tmp_path, dirty=False)
+    other = tmp_path / "device-b"
+    subprocess.run(["git", "clone", str(remote), str(other)], check=True, capture_output=True)
+    for key, val in (("user.email", "b@e.st"), ("user.name", "B"), ("commit.gpgsign", "false")):
+        _git(other, "config", key, val)
+    (other / "clash.md").write_text("device b\n")
+    _git(other, "add", "-A")
+    _git(other, "commit", "-m", "b")
+    _git(other, "push", "origin")
+    _commit_locally(vault, "clash.md")
+
+    err = _pull_only_stderr(tmp_path, vault)
+    assert "a conflict that could not be integrated" in err
+    assert "1 commit(s) not yet published" in err
+
+
+def test_pull_only_converged_vault_prints_no_holding_notice(tmp_path):
+    vault, _remote = _wired_vault(tmp_path, dirty=False)
+
+    err = _pull_only_stderr(tmp_path, vault)
+    assert "holding unpublished work" not in err
+
+
+def test_pull_only_holding_notice_never_carries_the_remote_url(tmp_path):
+    vault, remote = _wired_vault(tmp_path, dirty=False)
+    _commit_locally(vault)
+
+    err = _pull_only_stderr(tmp_path, vault)
+    holding = [line for line in err.splitlines() if "holding unpublished work" in line]
+    assert len(holding) == 1
+    assert str(remote) not in holding[0]
+    assert str(tmp_path) not in holding[0]
+
+
+def test_pull_only_holding_notice_leaves_json_stdout_to_the_report(tmp_path):
+    vault, _remote = _wired_vault(tmp_path, dirty=False)
+    _commit_locally(vault)
+
+    r, entry = _pull_only_report(tmp_path, vault)
+    assert entry["outcome"] == "holding"
+    assert "holding unpublished work" not in r.stdout
