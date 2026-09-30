@@ -21,6 +21,7 @@ import re
 import shutil
 import subprocess
 import sys
+import textwrap
 import time
 from pathlib import Path
 from typing import IO, Any, NoReturn
@@ -449,6 +450,22 @@ def cmd_ls(args: list[str]) -> None:
     render_workspace_list(entries, as_json=as_json)
 
 
+_HELP_USAGE_WIDTH = 77
+
+
+def _wrap_usage(head: str, flags: list[str]) -> str:
+    """One help usage entry — *head* then each flag in brackets — wrapped to
+    the menu's width, continuation lines indented under the verb."""
+    return textwrap.fill(
+        " ".join([head, *(f"[{flag}]" for flag in flags)]),
+        width=_HELP_USAGE_WIDTH,
+        initial_indent="  ",
+        subsequent_indent="      ",
+        break_long_words=False,
+        break_on_hyphens=False,
+    ) + "\n"
+
+
 def cmd_help(args: list[str]) -> None:
     """Print the curated grouped help menu, refusing any token given to it.
 
@@ -457,6 +474,7 @@ def cmd_help(args: list[str]) -> None:
     otherwise discard while still exiting 0 — reporting success for a request
     it did not answer.
     """
+    from .cli import group as group_module
     from .cli.parser import CampParser
 
     CampParser(verb="help").parse_args(args)
@@ -464,11 +482,14 @@ def cmd_help(args: list[str]) -> None:
         "camp — group worktree orchestration\n"
         "\n"
         "Usage:\n"
-        "  camp new <slug> [--no-attach] [--no-session] [--json]\n"
-        "                                    Create or enter a workspace for a slug,\n"
+        + _wrap_usage("camp new <slug>", group_module.creation_switch_flags())
+        + "                                    Create or enter a workspace for a slug,\n"
         "                                    then create/connect its tmux session and\n"
         "                                    attach (unless --no-attach); --no-session\n"
-        "                                    reproduces the pre-attach behaviour\n"
+        "                                    reproduces the pre-attach behaviour;\n"
+        "                                    --activate spawns the activate-phase\n"
+        "                                    tasks in the background, first waiting\n"
+        "                                    for boot-readiness unless --no-wait\n"
         "  camp pwd <slug>                   Print workspace path\n"
         "\n"
         "Setup:\n"

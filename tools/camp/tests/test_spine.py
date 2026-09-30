@@ -1280,6 +1280,127 @@ def test_help_lists_camp_stop_beside_attach(capsys) -> None:
 
 
 # ---------------------------------------------------------------------------
+# camp help's local `camp new` line is built from the creation declaration.
+# ---------------------------------------------------------------------------
+
+_MENU_WIDTH = 80
+_EXPLANATION_COLUMN = 36
+
+
+def _new_block(capsys) -> list[str]:
+    from camp.spine import cmd_help
+
+    cmd_help([])
+    lines = capsys.readouterr().out.splitlines()
+    start = next(i for i, ln in enumerate(lines) if ln.startswith("  camp new <slug> ["))
+    end = next(i for i, ln in enumerate(lines) if i > start and ln.startswith("  camp "))
+    return lines[start:end]
+
+
+def _listed_switches(block: list[str]) -> list[str]:
+    usage = " ".join(
+        ln.strip() for ln in block if not ln.startswith(" " * _EXPLANATION_COLUMN)
+    )
+    return re.findall(r"\[(--[\w-]+)\]", usage)
+
+
+def _declared_switches() -> list[str]:
+    import argparse
+
+    from camp.cli import group
+
+    parser = argparse.ArgumentParser()
+    return [a.option_strings[0] for a in group._declare_creation_switches(parser)]
+
+
+def _declare_with(extra_flags):
+    from camp.cli import group
+
+    real = group._declare_creation_switches
+
+    def declare(parser):
+        actions = list(real(parser))
+        actions.extend(parser.add_argument(f, action="store_true") for f in extra_flags)
+        return actions
+
+    return declare
+
+
+def test_help_new_line_lists_exactly_the_declared_creation_switches(capsys) -> None:
+    assert _listed_switches(_new_block(capsys)) == _declared_switches()
+
+
+def test_help_new_line_follows_the_declaration_when_a_switch_is_added(
+    capsys, monkeypatch
+) -> None:
+    from camp.cli import group
+
+    monkeypatch.setattr(group, "_declare_creation_switches", _declare_with(["--extra-one"]))
+    assert "--extra-one" in _listed_switches(_new_block(capsys))
+
+
+def test_help_new_line_follows_the_declaration_when_a_switch_is_dropped(
+    capsys, monkeypatch
+) -> None:
+    from camp.cli import group
+
+    real = group._declare_creation_switches
+
+    def fewer(parser):
+        return real(parser)[:-1]
+
+    monkeypatch.setattr(group, "_declare_creation_switches", fewer)
+    listed = _listed_switches(_new_block(capsys))
+    assert "--no-session" not in listed
+    assert "--no-attach" in listed
+
+
+def test_every_switch_on_the_help_line_is_accepted_by_local_creation(
+    capsys, monkeypatch, tmp_path
+) -> None:
+    from camp.cli import dispatch
+    from camp.host import handoff as handoff_mod
+
+    switches = _listed_switches(_new_block(capsys))
+    assert switches
+    cfg = tmp_path / "config"
+    (cfg / "groups").mkdir(parents=True)
+    (cfg / "groups" / "g.toml").write_text(
+        '[group]\nname = "g"\n\n'
+        '[[members]]\nname = "member-a"\nrepo_root = "/tmp/fake-member-a"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CAMP_CONFIG_DIR", str(cfg))
+    monkeypatch.setenv("CAMP_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.setenv("CAMP_DRY_RUN", "1")
+    monkeypatch.delenv("TMUX", raising=False)
+    monkeypatch.setattr(handoff_mod, "handoff", lambda argv: None)
+    monkeypatch.chdir(tmp_path)
+
+    for switch in switches:
+        monkeypatch.setattr(sys, "argv", ["camp", "new", "ws1", "--group", "g", switch])
+        try:
+            dispatch.main()
+        except SystemExit as exc:
+            assert exc.code in (0, None), (switch, capsys.readouterr().err)
+        err = capsys.readouterr().err
+        assert "unknown flag" not in err, (switch, err)
+
+
+def test_wrapped_new_block_stays_within_the_menu_width(capsys, monkeypatch) -> None:
+    from camp.cli import group
+
+    extras = [f"--extra-switch-number-{n}" for n in range(6)]
+    expected = _declared_switches() + extras
+    monkeypatch.setattr(group, "_declare_creation_switches", _declare_with(extras))
+    block = _new_block(capsys)
+    usage = [ln for ln in block if not ln.startswith(" " * _EXPLANATION_COLUMN)]
+    assert len(usage) > 1, "the derived list must wrap for this to bind"
+    assert all(len(ln) <= _MENU_WIDTH for ln in block), block
+    assert _listed_switches(block) == expected
+
+
+# ---------------------------------------------------------------------------
 # foreach's opaque payload survives spine's own --dry-run handling.
 # ---------------------------------------------------------------------------
 
