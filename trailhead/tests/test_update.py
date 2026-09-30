@@ -1318,3 +1318,125 @@ class TestCheckFetchesNeverPrompt:
         assert len(fetch_envs) == 2
         for fetch_env in fetch_envs:
             assert fetch_env is not None and fetch_env.get("GIT_TERMINAL_PROMPT") == "0"
+
+
+class TestUpdatePrintsHostVerdict:
+    """`trailhead update` ends its summary with the doctor's readiness verdict."""
+
+    @staticmethod
+    def _apply(tmp_path, monkeypatch, *, remote_sha):
+        from trailhead import doctor
+        from trailhead.tests.test_update_apply import _FakeCfg, _make_runner
+        from trailhead.tests.test_update_apply import _env as apply_env
+        from trailhead.tests.test_update_apply import _install_stamp as apply_stamp
+
+        env = apply_env(tmp_path)
+        apply_stamp(tmp_path, env)
+        runner, _ = _make_runner(remote_branch_sha=remote_sha)
+        monkeypatch.setattr(update, "resolve_config_for_env", lambda env: _FakeCfg())
+        monkeypatch.setattr(update, "wire_all_harnesses", lambda *a, **kw: {})
+        return env, runner, doctor
+
+    def test_the_ready_verdict_is_the_last_line_of_an_upgrade(self, tmp_path, monkeypatch, capsys):
+        env, runner, doctor = self._apply(tmp_path, monkeypatch, remote_sha="b" * 40)
+        seen = []
+        monkeypatch.setattr(
+            doctor,
+            "build_readiness",
+            lambda **kw: seen.append(kw) or {"verdict": "HOST READY", "items": []},
+        )
+
+        exit_code = update.run_update_apply(env=env, runner=runner, assume_yes=True)
+
+        assert exit_code == 0
+        out = capsys.readouterr().out.splitlines()
+        assert out[-1] == "HOST READY"
+        assert seen and seen[0]["env"] == env
+
+    def test_a_not_ready_verdict_is_followed_by_the_pointer_to_doctor(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        verdict = "HOST NOT READY: 1 missing, 2 could not be checked"
+        env, runner, doctor = self._apply(tmp_path, monkeypatch, remote_sha="b" * 40)
+        monkeypatch.setattr(
+            doctor, "build_readiness", lambda **kw: {"verdict": verdict, "items": []}
+        )
+
+        exit_code = update.run_update_apply(env=env, runner=runner, assume_yes=True)
+
+        assert exit_code == 0
+        out = capsys.readouterr().out.splitlines()
+        at = out.index(verdict)
+        assert "trailhead doctor" in out[at + 1]
+
+    def test_a_ready_verdict_gets_no_pointer_to_doctor(self, tmp_path, monkeypatch, capsys):
+        env, runner, doctor = self._apply(tmp_path, monkeypatch, remote_sha="b" * 40)
+        monkeypatch.setattr(
+            doctor, "build_readiness", lambda **kw: {"verdict": "HOST READY", "items": []}
+        )
+
+        update.run_update_apply(env=env, runner=runner, assume_yes=True)
+
+        assert "trailhead doctor" not in capsys.readouterr().out
+
+    def test_a_progress_line_is_printed_before_readiness_is_built(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        env, runner, doctor = self._apply(tmp_path, monkeypatch, remote_sha="b" * 40)
+        printed_before_call = []
+
+        def build(**kw):
+            printed_before_call.append(capsys.readouterr().out)
+            return {"verdict": "HOST READY", "items": []}
+
+        monkeypatch.setattr(doctor, "build_readiness", build)
+
+        update.run_update_apply(env=env, runner=runner, assume_yes=True)
+
+        assert "checking host readiness" in printed_before_call[0]
+
+    def test_a_readiness_failure_is_reported_and_leaves_the_update_successful(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        env, runner, doctor = self._apply(tmp_path, monkeypatch, remote_sha="b" * 40)
+
+        def build(**kw):
+            raise PermissionError("unreadable")
+
+        monkeypatch.setattr(doctor, "build_readiness", build)
+
+        exit_code = update.run_update_apply(env=env, runner=runner, assume_yes=True)
+
+        captured = capsys.readouterr()
+        assert exit_code == 0
+        said = captured.out + captured.err
+        assert "could not be checked" in said and "trailhead doctor" in said
+        assert "HOST" not in said
+
+    def test_the_verdict_is_also_printed_when_already_up_to_date(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        env, runner, doctor = self._apply(tmp_path, monkeypatch, remote_sha="a" * 40)
+        monkeypatch.setattr(
+            doctor, "build_readiness", lambda **kw: {"verdict": "HOST READY", "items": []}
+        )
+
+        exit_code = update.run_update_apply(env=env, runner=runner, assume_yes=True)
+
+        out = capsys.readouterr().out.splitlines()
+        assert exit_code == 0
+        assert "already up to date" in "\n".join(out)
+        assert out[-1] == "HOST READY"
+
+    def test_a_refused_update_prints_no_verdict(self, tmp_path, monkeypatch, capsys):
+        env, runner, doctor = self._apply(tmp_path, monkeypatch, remote_sha="b" * 40)
+        monkeypatch.setattr(
+            doctor, "build_readiness", lambda **kw: {"verdict": "HOST READY", "items": []}
+        )
+
+        exit_code = update.run_update_apply(
+            env=env, runner=runner, assume_yes=False, is_tty=lambda: False
+        )
+
+        assert exit_code == 1
+        assert "HOST READY" not in capsys.readouterr().out

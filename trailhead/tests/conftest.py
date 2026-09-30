@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 
+from trailhead import doctor
+
 
 @pytest.fixture(autouse=True)
 def _redirect_claude_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -91,3 +93,20 @@ def _forbid_real_home(request, monkeypatch: pytest.MonkeyPatch) -> None:
         )
 
     monkeypatch.setattr(Path, "home", staticmethod(_refuse))
+
+
+@pytest.fixture(autouse=True)
+def _no_real_lore(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make doctor's default lore probe behave like a host with no `lore`.
+
+    `doctor._default_lore_runner` spawns the real `lore status --json`, which on a
+    developer host can probe live vault remotes. Any test reaching it through
+    `run_doctor` / `run_update_apply` without injecting a `lore_runner` gets
+    `FileNotFoundError` instead — the failure an absent `lore` produces. A test that
+    means to exercise lore passes its own `lore_runner`, which bypasses this.
+    """
+
+    def refuse(argv, timeout):
+        raise FileNotFoundError("lore")
+
+    monkeypatch.setattr(doctor, "_default_lore_runner", refuse)

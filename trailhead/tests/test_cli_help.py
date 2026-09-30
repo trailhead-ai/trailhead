@@ -6,6 +6,7 @@ Output hygiene: bare `trailhead` and `--help` print a curated grouped menu, neve
 raw argparse dump; main() returns an int exit code.
 """
 
+import os
 import sys
 from io import StringIO
 
@@ -42,10 +43,24 @@ class TestSubcommandHelp:
 
 class TestDoctorRuns:
     def test_doctor_exits_zero_with_empty_state(self, tmp_path, monkeypatch):
+        home = tmp_path / "home"
+        home.mkdir()
+        nolore = tmp_path / "bin"
+        nolore.mkdir()
+        stub = nolore / "lore"
+        stub.write_text("#!/bin/sh\nexit 127\n")
+        stub.chmod(0o755)
         monkeypatch.setenv("TRAILHEAD_STATE_DIR", str(tmp_path / "state"))
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-config"))
+        monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "xdg-state"))
+        monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg-data"))
+        monkeypatch.setenv("OUTPOST_CONFIG_DIR", str(tmp_path / "outpost-config"))
+        monkeypatch.setenv("PATH", f"{nolore}{os.pathsep}{os.environ['PATH']}")
         ec, out, _ = _run(["doctor"])
         assert ec == 0
         assert "doctor" in out.lower()
+        assert str(tmp_path / "outpost-config" / "config.toml") in out
 
 
 class TestShellenv:
