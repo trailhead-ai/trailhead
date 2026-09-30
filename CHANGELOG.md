@@ -7,8 +7,9 @@ format described by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - `lore sync --pull-only` now reports a vault holding unpublished work as
   `holding` and exits 1, matching the full sync: a vault whose tree is dirty or
-  that has commits not on its upstream is `holding`, even when `origin` is
-  unreachable, and any other vault is `converged`. An unreachable `origin` used
+  that has commits not on its upstream (or, with no upstream set, not on
+  `origin/<branch>`) is `holding`, even when `origin` is unreachable, and any
+  other vault is `converged`. An unreachable `origin` used
   to leave the vault out of the `--json` report; it now gets an entry. A vault
   with no `origin` remote is unchanged.
 - `bin/trailhead` now runs on the first `python3` in an absolute PATH entry
