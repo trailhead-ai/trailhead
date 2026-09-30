@@ -5,6 +5,12 @@ format described by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+- `lore sync --pull-only` now reports a vault holding unpublished work as
+  `holding` and exits 1, matching the full sync: a vault whose tree is dirty or
+  that has commits not on its upstream is `holding`, even when `origin` is
+  unreachable, and any other vault is `converged`. An unreachable `origin` used
+  to leave the vault out of the `--json` report; it now gets an entry. A vault
+  with no `origin` remote is unchanged.
 - `bin/trailhead` now runs on the first `python3` in an absolute PATH entry
   that meets the repo's declared `requires-python`, instead of crashing on a
   too-old `python3` (e.g. macOS system Python 3.9 ahead of Homebrew's on PATH).

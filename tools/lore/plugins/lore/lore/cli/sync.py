@@ -42,7 +42,11 @@ integrates origin's commits and does nothing else: no staging, no commit, no
 push. Integration is further gated on a CLEAN working tree — the full sync may
 rebase a dirty vault only because it commits first, and a pull-only run has no
 such commit to rebase onto. A dirty vault is therefore fetched (which touches no
-file) and reported as "N commit(s) behind", never rebased. That is what makes it
+file) and reported as "N commit(s) behind", never rebased. The ``--json`` outcome
+is ``holding`` (exit 1) when the tree is dirty, a conflict was not integrated, or
+commits exist nowhere else, and ``converged`` (exit 0) otherwise — offline
+included, since unpublished work is judged from local state; a vault with no
+``origin`` has nowhere to publish and is ``converged``. That is what makes it
 safe to run implicitly, which is exactly what :func:`implicit_pull` does: every
 lore write path calls it first, throttled to one fetch ATTEMPT per vault per
 :data:`FRESHNESS_WINDOW_SECONDS`, reporting on stderr only, and unable to fail
@@ -1645,25 +1649,19 @@ def cmd_sync(args) -> int:
         say, say_err = _make_emitters(name, width)
         if pull_only:
             state, pulled = _pull_only_one(Path(vault), say, say_err)
-            # `--pull-only` never publishes, so there are three reachable
-            # outcomes, not two: the pre-existing "holding" shape
-            # (`PULL_FAILED` — a conflict this run could not integrate, vault
-            # left clean and diverged); a NEW "holding" shape (`PULL_DIRTY` —
-            # the tree had something uncommitted this run deliberately did not
-            # touch, so it is not converged either, exactly the same exit-code
-            # rule as a refused vault: a person must run the full sync);
-            # "converged" (`PULL_OK` — fetched and, if anything was behind,
-            # integrated cleanly); and `PULL_OFFLINE`, which gets NO entry at
-            # all — the loop could not determine an outcome, so it must not
-            # claim one, and the exit code for this vault stays 0.
-            if state == PULL_OFFLINE:
-                rc_one = 0
-            elif state in (PULL_FAILED, PULL_DIRTY):
-                rc_one = 1
-                outcomes[name] = "holding"
-            else:
-                rc_one = 0
-                outcomes[name] = "converged"
+            # `--pull-only` never publishes, so a vault that holds unpublished
+            # work is reported exactly as the full loop would leave it:
+            # "holding" when a conflict could not be integrated, the tree is
+            # dirty, or commits exist nowhere else; "converged" otherwise.
+            # Offline is no exception — the work is local, so the verdict does
+            # not need the network. A vault with no `origin` has nowhere to
+            # publish and is converged regardless, as in the full loop.
+            has_origin = _git(Path(vault), "remote", "get-url", "origin")[0] == 0
+            holding = state == PULL_FAILED or (
+                has_origin and (_vault_is_dirty(Path(vault)) or _vault_unpushed(Path(vault)))
+            )
+            rc_one = 1 if holding else 0
+            outcomes[name] = "holding" if holding else "converged"
         else:
             shared = str(Path(vault).resolve()) in _shared_vault_paths()
             rc_one, pulled, ending, published = _pull_and_push_one(

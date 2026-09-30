@@ -59,7 +59,7 @@ import sys
 import time
 from pathlib import Path
 
-from conftest import make_bare_remote, write_vault_config
+from conftest import load_script, make_bare_remote, write_vault_config
 from test_vault_write_lock import _spawn_holder
 
 sync_mod = importlib.import_module("lore.cli.sync")
@@ -2801,26 +2801,124 @@ def test_json_outcome_converged_offline_with_nothing_to_publish(tmp_path):
     assert entry["outcome"] == "converged"
 
 
-def test_json_pull_only_offline_gets_no_outcome_entry(tmp_path):
-    """`--pull-only` never publishes, so an offline fetch there can never be
-    hoarding anything — the loop could not determine an outcome at all, so it
-    must claim none: no entry in the report, and this vault's own exit stays
-    0."""
+def _pull_only_report(tmp_path, vault):
     config_home = tmp_path / "config"
     state_dir = tmp_path / "state"
-    state_dir.mkdir(parents=True)
-    default = _make_vault(tmp_path / "v-default", dirty=False)
-    remote = _make_bare_remote(tmp_path / "remote.git")
-    _wire_remote(default, remote)
-    _git(default, "remote", "set-url", "origin", str(tmp_path / "gone.git"))
-
-    write_vault_config(config_home, [("default", "default", default)])
+    state_dir.mkdir(parents=True, exist_ok=True)
+    write_vault_config(config_home, [("default", "default", vault)])
     r = run_cli(["sync", "--pull-only", "--json"], config_home=config_home, state_dir=state_dir)
+    return r, _vault_outcome(_extract_json_report(r.stdout), "default")
+
+
+def _commit_locally(vault: Path, name: str = "local.md") -> None:
+    (vault / name).write_text("# local\n")
+    _git(vault, "add", "-A")
+    _git(vault, "commit", "-m", f"local: {name}")
+
+
+def _wired_vault(tmp_path, *, dirty: bool = False):
+    vault = _make_vault(tmp_path / "v-default", dirty=dirty)
+    remote = _make_bare_remote(tmp_path / "remote.git")
+    _wire_remote(vault, remote)
+    return vault, remote
+
+
+def test_json_pull_only_ahead_of_upstream_is_holding_until_pushed(tmp_path):
+    """A clean vault whose commit exists nowhere else has unpublished work, so
+    `--pull-only` reports it held (exit 1), the same verdict the full loop
+    gives; once the commit is pushed the vault is converged."""
+    vault, _remote = _wired_vault(tmp_path, dirty=False)
+    _commit_locally(vault)
+
+    r, entry = _pull_only_report(tmp_path, vault)
+    assert entry["outcome"] == "holding"
+    assert r.returncode == 1, r.stderr
+
+    _git(vault, "push", "origin")
+    r, entry = _pull_only_report(tmp_path, vault)
+    assert entry["outcome"] == "converged"
     assert r.returncode == 0, r.stderr
 
-    doc = _extract_json_report(r.stdout)
-    matches = [v for v in doc["vaults"] if v["vault"] == "default"]
-    assert matches == [], f"an offline pull-only vault must get no outcome entry: {matches}"
+
+def test_json_pull_only_dirty_tree_is_holding_when_online(tmp_path):
+    vault, _remote = _wired_vault(tmp_path, dirty=True)
+
+    r, entry = _pull_only_report(tmp_path, vault)
+    assert entry["outcome"] == "holding"
+    assert r.returncode == 1, r.stderr
+
+
+def test_json_pull_only_unintegrable_conflict_is_holding(tmp_path):
+    vault, remote = _wired_vault(tmp_path, dirty=False)
+    other = tmp_path / "device-b"
+    subprocess.run(["git", "clone", str(remote), str(other)], check=True, capture_output=True)
+    for key, val in (("user.email", "b@e.st"), ("user.name", "B"), ("commit.gpgsign", "false")):
+        _git(other, "config", key, val)
+    (other / "clash.md").write_text("device b\n")
+    _git(other, "add", "-A")
+    _git(other, "commit", "-m", "b")
+    _git(other, "push", "origin")
+    _commit_locally(vault, "clash.md")
+
+    r, entry = _pull_only_report(tmp_path, vault)
+    assert entry["outcome"] == "holding"
+    assert r.returncode == 1, r.stderr
+    _assert_no_mid_rebase(vault)
+
+
+def test_json_pull_only_offline_with_unpushed_commits_is_holding(tmp_path):
+    vault, _remote = _wired_vault(tmp_path, dirty=False)
+    _commit_locally(vault)
+    _git(vault, "remote", "set-url", "origin", str(tmp_path / "gone.git"))
+
+    r, entry = _pull_only_report(tmp_path, vault)
+    assert entry["outcome"] == "holding"
+    assert r.returncode == 1, r.stderr
+
+
+def test_json_pull_only_offline_with_dirty_tree_is_holding(tmp_path):
+    vault, _remote = _wired_vault(tmp_path, dirty=True)
+    _git(vault, "remote", "set-url", "origin", str(tmp_path / "gone.git"))
+
+    r, entry = _pull_only_report(tmp_path, vault)
+    assert entry["outcome"] == "holding"
+    assert r.returncode == 1, r.stderr
+
+
+def test_json_pull_only_offline_with_nothing_unpublished_is_converged(tmp_path):
+    """An unreachable origin with nothing unpublished still gets an entry, and
+    it is converged: there is no work for the operator to rescue."""
+    vault, _remote = _wired_vault(tmp_path, dirty=False)
+    _git(vault, "remote", "set-url", "origin", str(tmp_path / "gone.git"))
+
+    r, entry = _pull_only_report(tmp_path, vault)
+    assert entry["outcome"] == "converged"
+    assert r.returncode == 0, r.stderr
+
+
+def test_json_pull_only_without_origin_stays_converged_despite_unpushed_commits(tmp_path):
+    """A vault with no `origin` has nowhere to publish; the full loop reports
+    it converged and pull-only must agree rather than newly flag it."""
+    vault = _make_vault(tmp_path / "v-default", dirty=False)
+    _commit_locally(vault)
+
+    r, entry = _pull_only_report(tmp_path, vault)
+    assert entry["outcome"] == "converged"
+    assert r.returncode == 0, r.stderr
+
+
+def test_pull_only_one_states_are_independent_of_unpushed_work(tmp_path):
+    """`implicit_pull` consumes `_pull_only_one`'s states directly: an ahead
+    vault is still PULL_OK and an unreachable origin still PULL_OFFLINE."""
+    sync = load_script("lore.cli.sync")
+    vault, _remote = _wired_vault(tmp_path, dirty=False)
+    _commit_locally(vault)
+    quiet = lambda _t: None  # noqa: E731
+
+    assert sync._pull_only_one(vault, quiet, quiet) == (sync.PULL_OK, 0)
+
+    _git(vault, "remote", "set-url", "origin", str(tmp_path / "gone.git"))
+    assert sync._pull_only_one(vault, quiet, quiet) == (sync.PULL_OFFLINE, 0)
 
 
 def test_json_lock_acquisition_failure_gets_no_outcome_entry(tmp_path):
