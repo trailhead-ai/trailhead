@@ -2,20 +2,13 @@
 from __future__ import annotations
 
 import json
-import subprocess
 import sys
 from pathlib import Path
 
+from . import readiness as readiness_mod
 from .common import (
-    DRIFT_MISSING,
-    DRIFT_NOT_GIT,
-    DRIFT_NO_REMOTE,
-    DRIFT_RESOLVING,
-    DRIFT_SYNC_FIXABLE,
-    _resolve_all_vaults,
     _resolve_config_path,
     _resolve_lore_state_dir,
-    _vault_drift,
 )
 
 # Finds its sibling plugin root (and the plugin-root-level _bootstrap module) so
@@ -23,7 +16,7 @@ from .common import (
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent.parent
 
 #: The lore user-level ruleset name (namespaced under trailhead).
-_RULESET_NAME = "trailhead" "-lore"  # noqa: implicit-concat avoids marketplace-grep guard
+_RULESET_NAME = "trailhead" "-lore"  # implicit-concat avoids marketplace-grep guard
 
 
 def _detect_harnesses():
@@ -320,6 +313,11 @@ def cmd_init(args) -> int:
     return 0
 
 
+def _print_item(item) -> None:
+    if item.line is not None:
+        print(item.line, file=sys.stderr if item.line_to_stderr else sys.stdout)
+
+
 def _report_vault_drift() -> None:
     """Report every configured vault whose records are not fully backed up.
 
@@ -331,82 +329,33 @@ def _report_vault_drift() -> None:
     vault being clean says nothing about the product vault the session actually
     wrote to.
 
-    Findings are observations (see ``_vault_drift``); the remedy — ``lore sync``,
-    or wiring a remote — is attached here.
+    Renders the ``vault:<name>`` items from :mod:`.readiness`, whose findings
+    are observations with the remedy attached.
     """
-    vaults, error = _resolve_all_vaults()
-    if error is not None:
-        print(f"lore: vault config unreadable — {error}", file=sys.stderr)
-        return
-
-    for name, path in vaults:
-        findings = _vault_drift(Path(path))
-        if not findings:
-            print(f"lore: vault {name}: synced")
-            continue
-        codes = {code for code, _ in findings}
-        descriptions = "; ".join(desc for _, desc in findings)
-        print(f"lore: vault {name}: {descriptions} — {_drift_remedy(name, codes)}")
-
-
-def _drift_remedy(name: str, codes: set) -> str:
-    """Return the remedy line for a vault's drift ``codes``.
-
-    Keyed on the stable ``DRIFT_*`` tokens, never on the human phrasing, so
-    rewording a finding cannot silently mis-route its remedy.
-
-    ``DRIFT_RESOLVING`` outranks everything: while a rebase is stopped mid-flight
-    no other remedy is even safe to attempt, and ``lore sync`` would abort the
-    resolution rather than finish it.
-
-    Ordered by what actually unblocks the operator: if ANY finding is one
-    ``lore sync`` resolves, that is the remedy even when a standing condition
-    (no remote) sits beside it — committing the records is the step that reduces
-    the exposure. Only when nothing is sync-fixable does the standing condition
-    become the ask, and a remedy is never offered that would simply fail.
-    """
-    if DRIFT_RESOLVING in codes:
-        return f"run `lore resolve {name}`"
-    if codes & DRIFT_SYNC_FIXABLE:
-        return f"run `lore sync --vault {name}`"
-    if DRIFT_MISSING in codes:
-        return "create the directory, or correct its path in config.json"
-    if DRIFT_NOT_GIT in codes:
-        return "run `git init` in the vault directory"
-    if DRIFT_NO_REMOTE in codes:
-        return "add an origin remote"
-    return "inspect the vault"
+    vaults, error = readiness_mod.collect_vaults()
+    for item in readiness_mod.build_vault_items(vaults, error):
+        _print_item(item)
 
 
 def _report_signing_status() -> None:
     """Report this host's unattended vault-commit signing state — one line,
     not one per vault, since the host key signs every vault the same way.
 
-    Delegates to ``vault/signing.py``'s ``describe_status`` so ``lore signing
-    status`` and this line always agree; a failure carries the same
-    ``lore signing enable``/``chmod`` remedy `describe_status` names. A host
-    with no key whose own git config does not sign commits is reported as
-    not configured, with no remedy, since its vault commits need none. An
-    ``ssh-keygen`` call that itself errors out (a hang past its timeout, a
+    Renders the ``signing`` item, which delegates to ``vault/signing.py``'s
+    ``describe_status`` so ``lore signing status`` and this line always agree.
+    An ``ssh-keygen`` call that itself errors out (a hang past its timeout, a
     permission denial reading the key) is degraded to a stderr line rather
     than taking down the rest of this report, matching the vault-drift
     section's own "an unreadable config downgrades a section to a stderr
     line" contract.
     """
-    from ..vault import signing as signing_mod
+    _print_item(readiness_mod.build_signing_item())
 
-    if signing_mod.load_key_path() is None and not signing_mod.git_requires_signing():
-        print(
-            "lore: signing: not configured — vault commits follow your git "
-            "settings, which do not require signing"
-        )
-        return
-    try:
-        _, message = signing_mod.describe_status()
-    except (OSError, subprocess.SubprocessError) as exc:
-        print(f"lore: signing: error — {exc}", file=sys.stderr)
-        return
-    print(f"lore: signing: {message}")
+
+def _report_author() -> None:
+    """Report this host's ``makes_vault_content`` declaration when it is missing
+    or malformed; a declared answer, either way, has no line to print."""
+    _print_item(readiness_mod.build_author_item())
 
 
 def cmd_status(args) -> int:
@@ -423,13 +372,22 @@ def cmd_status(args) -> int:
     stale ruleset is a real coverage hole worth surfacing.
 
     Then :func:`_report_signing_status` reports this host's unattended
-    vault-commit signing state (one line, per host, not per vault), and
-    :func:`_report_vault_drift` reports each configured vault's backup state.
+    vault-commit signing state (one line, per host, not per vault),
+    :func:`_report_vault_drift` reports each configured vault's backup state,
+    and :func:`_report_author` adds a line only when this host's
+    ``makes_vault_content`` declaration is undeclared or malformed.
+
+    ``--json`` prints the whole readiness item list (see :mod:`.readiness`),
+    including the per-vault forge probe, instead of the lines above.
 
     Exit code stays 0 for drift: this is a report, and every section prints its
     own remedy. Only an unreadable config downgrades a section to a stderr line.
     """
     from ..config import agent_ruleset as agent_ruleset_mod
+
+    if getattr(args, "json", False):
+        print(readiness_mod.render_json(readiness_mod.build_readiness_items()))
+        return 0
 
     content = agent_ruleset_mod.render_ruleset_content()
     for h in _detect_harnesses():
@@ -449,6 +407,7 @@ def cmd_status(args) -> int:
 
     _report_signing_status()
     _report_vault_drift()
+    _report_author()
     return 0
 
 
@@ -463,5 +422,9 @@ def add_init_subparsers(sub) -> None:
     p_lore_status = sub.add_parser(
         "status",
         help="Show lore installation status and surface rules-file drift",
+    )
+    p_lore_status.add_argument(
+        "--json", action="store_true",
+        help="Print the host readiness items as JSON (schema 1) instead of lines",
     )
     p_lore_status.set_defaults(func=cmd_status)

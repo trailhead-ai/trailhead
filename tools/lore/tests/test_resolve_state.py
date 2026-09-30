@@ -199,8 +199,8 @@ def test_mid_rebase_vault_drifts_as_resolving(tmp_path, common):
 
 
 def test_resolving_remedy_names_lore_resolve(tmp_path, common):
-    init_mod = load_script("lore.cli.init")
-    remedy = init_mod._drift_remedy("product", {common.DRIFT_RESOLVING})
+    readiness = load_script("lore.cli.readiness")
+    remedy = readiness._drift_remedy("product", {common.DRIFT_RESOLVING})
     assert "lore resolve product" in remedy
 
 
