@@ -26,6 +26,7 @@ camp groups          # list every configured group (any cwd)
 camp new <slug>      # create or enter a workspace, then attach to its tmux session
 camp new <slug> --no-attach  # create or enter + its session, leave this terminal alone
 camp new <slug> --no-session # create or enter the workspace only — no tmux session
+camp new <slug> --host <name>  # create or enter it on a declared machine, then attach there
 camp pwd <slug>      # print workspace path
 camp list            # table of workspaces: sessions, last touched (alias: ls)
 camp status          # show git + drift status
@@ -244,12 +245,16 @@ on that machine in one call. `--host` refuses alongside `--group` and
 way.
 
 `--host` also forwards a slug, plus the group it resolves to locally, to
-that machine's door — `camp attach <slug> --host <name>` — described under
-[Attach](#attach) above. There is no cross-machine `camp stop`: stopping a
-workspace on another machine is `camp attach <slug> --host <name>`
-followed by `camp stop <slug>` run there, or `ssh <name> camp stop <slug>
---group <group>` directly — `camp stop` also needs a group from that
-machine's own `$HOME`, which `ssh` never resolves on its own.
+that machine's door: `camp attach <slug> --host <name>`, described under
+[Attach](#attach) above, and `camp new <slug> --host <name>`, described
+under [Creating a workspace on another machine](#creating-a-workspace-on-another-machine)
+below. There is no cross-machine `camp stop`: stopping a workspace on
+another machine is `camp attach <slug> --host <name>` followed by
+`camp stop <slug>` run there, or `ssh <destination> <camp_bin> stop <slug> --group <group>`
+directly (placeholders as defined under
+[Creating a workspace on another machine](#creating-a-workspace-on-another-machine)
+below) — `camp stop` also needs a group from that machine's own `$HOME`,
+which `ssh` never resolves on its own.
 
 A failure to connect, authenticate, or run camp on the far side is its own
 rendered outcome rather than a crash: unreachable, connected but stalled
@@ -263,17 +268,17 @@ shape: **this resolved group, on every declared machine plus the one
 you're typing on** — the asymmetry an operator otherwise has to learn the
 hard way, so it is stated here rather than left implicit. `-ag` (the
 bundled short form of `-a -g`) widens the group axis too, for every group
-on every machine; `-a --group <name>` composes to ask for one named group
+on every machine; `-a --group <group>` composes to ask for one named group
 on machines generally, without needing a resolvable cwd.
 
 ```
-camp list -a --group <name>
-camp list --all-hosts --group <name> --json
+camp list -a --group <group>
+camp list --all-hosts --group <group> --json
 camp list -ag --json
 ```
 
 (`-a`/`--all-hosts` also resolve the group from cwd, the same as plain
-`camp list` — `--group <name>` is shown explicitly above only so each form
+`camp list` — `--group <group>` is shown explicitly above only so each form
 is runnable from any cwd.)
 
 Declared hosts are contacted concurrently, and the merged answer is grouped
@@ -284,8 +289,77 @@ machine's line printed under its own header rather than aborting the rest.
 The `--json` path is one flat array in the same order, every row carrying
 `host`. `-a` refuses alongside `--host` (they name a machine's worth of
 groups and a group's worth of machines at once) and, with no group resolved
-from cwd or `--group`, refuses naming `-ag` or `--group <name>` as the ways
+from cwd or `--group`, refuses naming `-ag` or `--group <group>` as the ways
 forward — it never falls back to the legacy standalone-worktree source.
+
+### Creating a workspace on another machine
+
+```
+camp new <slug> --host <name>
+camp new <slug> --host <name> --group <group>
+camp new <slug> --host <name> --no-attach
+camp new <slug> --host <name> --no-session --group <group>
+```
+
+`camp new <slug> --host <name>` hands your terminal to the named machine's
+own `camp new`, over `ssh -t`. Without `--group`, the group is the one your
+cwd resolves to; with it, the group you name. Either way the group resolves
+**on this machine** and is forwarded to the far side by name, exactly as
+`camp attach <slug> --host <name>` does. Creation flags you give
+(`--no-attach`, `--no-session`, `--no-wait`, `--activate`, `--json`) ride
+along to the far side; any other flag is refused.
+
+Everything answerable here is refused here, before any connection: a
+malformed slug, a `<name>` not declared in `hosts.toml`, a group that does not
+resolve, a flag creation does not accept. No machine is contacted for any of
+them.
+
+Before the first run, the far side needs: `camp` reachable at that host's
+`camp_bin`, a group configured under the same name, each of that group's
+member repos already cloned at that host's own repo roots, `tmux` installed
+(unless you pass `--no-session`), and a `self_name` declared in its own
+`hosts.toml` — without one the workspace is still created, but with no
+recorded owner.
+The far side's own `camp new` says what it lacks, in its own words, and
+prints its provisioning guidance.
+
+After the handoff, the terminal and the exit status are ssh's: the far
+side prints its created line, you land in its tmux session, and detaching
+returns you to this shell with the status the far side ended with
+(`0` for a normal detach). Running the same line again re-enters the
+workspace rather than creating a second one. A dry run requested through the
+environment (`CAMP_DRY_RUN=1`) is forwarded as `--dry-run`, and the far side
+answers with its own dry-run line and creates nothing — as it does for
+`--dry-run` given on the command line, including together with `--no-attach`.
+
+If the connection fails or drops, what you see is ssh's own error; check
+where things stand with `camp list --host <name>` (or, on the far side,
+`ssh <destination> <camp_bin> status --group <group> --name <slug>` — a fresh
+login sits in `$HOME`, where no group resolves on its own), and run the same
+line again — it re-enters.
+A host-key mismatch is fixed by verifying the new key and updating
+`known_hosts`, never by relaxing the host-key checks. The far side's camp
+may be older than this one and refuse a flag in its own words after the
+handoff. `--json` under the requested terminal merges the far side's streams,
+and `--no-attach` still opens a connection.
+
+There is no cross-host remove. Tearing a remote workspace down is two
+commands on the far side, because `camp remove` does not end the workspace's
+tmux session — stop it first, preview the removal, then remove:
+
+```
+ssh <destination> <camp_bin> stop <slug> --group <group>
+ssh <destination> <camp_bin> remove --group <group> --name <slug> --dry-run
+ssh <destination> <camp_bin> remove --group <group> --name <slug>
+```
+
+`<destination>` is the host's `ssh` destination from `hosts.toml` (the table
+key when no `ssh` is declared), `<camp_bin>` the `camp_bin` declared for it in
+`hosts.toml` (or `camp` when none is), `<group>` the group the workspace was
+created under, and `<slug>` the workspace's slug. `camp remove` leaves the
+workspace's branch in each far-side member repo — `worktree-<slug>` unless the
+group's `[branch] pattern` says otherwise; deleting those is your call. The far side's login shell may not be POSIX, so keep any `ssh <destination> …`
+follow-up you compose yourself shell-neutral (no `$?`).
 
 ## Transferring a workspace
 
