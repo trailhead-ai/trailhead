@@ -75,12 +75,12 @@ _HOST_INVOCATION = re.compile(
 
 #: The exact invocation lines the README's "Remote hosts" section documents
 #: for the `-a`/`--all-hosts`/`-ag` widen-every-machine option — the same
-#: shape as `_HOST_INVOCATION` above, one call form per line. `<name>` is
+#: shape as `_HOST_INVOCATION` above, one call form per line. `<group>` is
 #: the group placeholder the README uses alongside `-a`/`--all-hosts` (never
 #: alongside `-ag`, which needs no group).
 _ALL_HOSTS_INVOCATION = re.compile(
     rf"^camp (?:{_verb_alternation(_ALL_HOSTS_VERBS)}) "
-    r"(?:(?:-a|--all-hosts) --group <name>|-ag)(?: --json)?$",
+    r"(?:(?:-a|--all-hosts) --group <group>|-ag)(?: --json)?$",
     re.MULTILINE,
 )
 
@@ -383,7 +383,7 @@ def test_documented_all_hosts_invocation_forms_produce_an_answer_against_a_stub_
     monkeypatch.setattr(transport, "run_camp", lambda host, remote_argv, **kw: outcome)
 
     for line in lines:
-        argv = shlex.split(line.replace("<name>", "andromeda"))
+        argv = shlex.split(line.replace("<group>", "andromeda"))
         assert argv[0] == "camp"
         monkeypatch.setattr(sys, "argv", argv)
         try:
@@ -446,6 +446,295 @@ def test_every_documented_attach_form_dispatches_through_the_real_entry_point(
         err = capsys.readouterr().err
         assert "bare slug dispatch is no longer supported" not in err, (line, err)
         assert "camp: bare slug" not in err, (line, err)
+
+
+# ---------------------------------------------------------------------------
+# camp new --host — every documented line reaches the handoff with the far
+# side's own `camp new` argv, and the prescribed far-side teardown parses under
+# the real remove / stop parsers.
+# ---------------------------------------------------------------------------
+
+#: A README code line carrying `camp new <slug> … --host <name> …`, with any
+#: trailing `# comment` (the Quick start's) stripped.
+_NEW_HOST_INVOCATION = re.compile(
+    r"^(camp new <slug>[^\n#]*--host <name>[^\n#]*?)[ \t]*(?:#[^\n]*)?$",
+    re.MULTILINE,
+)
+
+#: A README teardown line: `ssh <destination> <camp_bin> <camp argv…>`.
+_TEARDOWN_INVOCATION = re.compile(r"^ssh <destination> <camp_bin> (.+)$", re.MULTILINE)
+
+#: The far-side status check the README prescribes inline:
+#: `ssh <destination> <camp_bin> status …`.
+_FAR_STATUS_INVOCATION = re.compile(r"`ssh <destination> <camp_bin> (status [^`]+)`")
+
+_DOC_GROUP = "docgroup"
+_ARGV_MISMATCH = "far-side argv mismatch"
+
+#: The ssh destination the fixture declares for `andromeda` — deliberately unlike
+#: the table key, so a handoff aimed at the key is told apart from one aimed at it.
+_DOC_SSH_DESTINATION = "andromeda.example.test"
+
+#: The Quick start line plus the "Creating a workspace on another machine"
+#: forms.
+EXPECTED_NEW_HOST_LINES = 5
+
+
+def _new_host_invocation_lines() -> list[str]:
+    return _NEW_HOST_INVOCATION.findall(README.read_text())
+
+
+def _teardown_invocation_lines() -> list[str]:
+    return _TEARDOWN_INVOCATION.findall(README.read_text())
+
+
+def _far_status_lines() -> list[str]:
+    return _FAR_STATUS_INVOCATION.findall(README.read_text())
+
+
+def _documented_group_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A `hosts.toml` declaring `andromeda` and a group config named
+    `_DOC_GROUP`, under injected config/state dirs. Returns a directory inside
+    the group's worktrees, for lines that rely on cwd."""
+    cfg = tmp_path / "config"
+    (cfg / "groups").mkdir(parents=True)
+    (cfg / "hosts.toml").write_text(
+        f'[hosts.andromeda]\nssh = "{_DOC_SSH_DESTINATION}"\n', encoding="utf-8"
+    )
+    (cfg / "groups" / f"{_DOC_GROUP}.toml").write_text(
+        f'[group]\nname = "{_DOC_GROUP}"\n\n'
+        '[[members]]\nname = "member-a"\nrepo_root = "/tmp/fake-member-a"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CAMP_CONFIG_DIR", str(cfg))
+    monkeypatch.setenv("CAMP_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.delenv("CAMP_DRY_RUN", raising=False)
+    monkeypatch.delenv("TMUX", raising=False)
+    inside = tmp_path / "state" / _DOC_GROUP / "worktrees" / "tree"
+    inside.mkdir(parents=True)
+    return inside
+
+
+def _check_new_host_lines(
+    lines: list[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Dispatch every line through `dispatch.main()` with the handoff stubbed.
+    Each must reach the handoff exactly once — a `SystemExit` is a failure, not
+    something to swallow — and the far-side argv it carries must be
+    `new <slug> --group <group>` followed by every flag the line names."""
+    assert lines, "no camp new --host line to check"
+    dispatch = importlib.import_module("camp.cli.dispatch")
+    handoff = importlib.import_module("camp.host.handoff")
+    inside = _documented_group_env(tmp_path, monkeypatch)
+
+    handoffs: list[list[str]] = []
+    monkeypatch.setattr(handoff, "handoff", lambda argv: handoffs.append(list(argv)))
+
+    for line in lines:
+        concrete = (
+            line.replace("<slug>", "ws1")
+            .replace("<name>", "andromeda")
+            .replace("<group>", _DOC_GROUP)
+        )
+        argv = shlex.split(concrete)
+        assert argv[:2] == ["camp", "new"], line
+        monkeypatch.chdir(inside)
+        monkeypatch.setattr(sys, "argv", argv)
+        handoffs.clear()
+        try:
+            dispatch.main()
+        except SystemExit as exc:
+            raise AssertionError(
+                f"{line!r} exited {exc.code} instead of reaching the handoff"
+            ) from exc
+        assert len(handoffs) == 1, f"{line!r} did not reach the handoff exactly once"
+
+        assert handoffs[0][:2] == ["ssh", "-t"], (line, handoffs[0])
+        assert handoffs[0][-2] == _DOC_SSH_DESTINATION, (line, handoffs[0])
+        remote = shlex.split(handoffs[0][-1])
+        assert remote[0] == "camp", (line, remote)
+        assert remote[1:5] == ["new", "ws1", "--group", _DOC_GROUP], (line, remote)
+        named = {tok for tok in argv[2:] if tok.startswith("--")} - {"--host", "--group"}
+        assert sorted(remote[5:]) == sorted(named), (
+            f"{_ARGV_MISMATCH}: {line!r} handed {remote!r}"
+        )
+
+
+def test_every_documented_new_host_form_reaches_the_handoff_with_the_far_side_argv(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every `camp new … --host <name>` line the README documents is dispatched
+    through the real entry point; none may be refused locally, and the argv
+    handed to the far side carries the slug, the resolved group, and each
+    creation flag the line names."""
+    lines = _new_host_invocation_lines()
+    assert lines, "README no longer documents a camp new --host line"
+    assert len(lines) == EXPECTED_NEW_HOST_LINES, (
+        f"expected exactly {EXPECTED_NEW_HOST_LINES} documented lines — {lines!r}"
+    )
+    _check_new_host_lines(lines, tmp_path, monkeypatch)
+
+
+def test_the_new_host_check_fails_on_a_flag_local_creation_does_not_accept(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The checker above, fed a line carrying `--launch` (which local creation
+    does not accept), must fail — proving it can go red."""
+    with pytest.raises(AssertionError) as excinfo:
+        _check_new_host_lines(
+            ["camp new <slug> --host <name> --launch"], tmp_path, monkeypatch
+        )
+    refusal = excinfo.value.__cause__
+    assert isinstance(refusal, SystemExit) and refusal.code not in (0, None), (
+        "the checker failed for a reason other than a refused dispatch",
+        excinfo.value,
+    )
+    assert "--launch" in capsys.readouterr().err, (
+        "the refusal was not about --launch as an unknown flag"
+    )
+
+
+def test_the_new_host_check_fails_when_the_captured_argv_drops_a_named_flag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A line naming a flag the handoff argv lacks fails the argv comparison:
+    `--no-wait` is accepted locally, but the stubbed handoff here drops it."""
+    handoff = importlib.import_module("camp.host.handoff")
+    real_remote = handoff.remote_camp_argv
+
+    def _drop_flags(host, camp_args, **kw):
+        return real_remote(host, [a for a in camp_args if not a.startswith("--no-")], **kw)
+
+    monkeypatch.setattr(handoff, "remote_camp_argv", _drop_flags)
+    with pytest.raises(AssertionError) as excinfo:
+        _check_new_host_lines(
+            ["camp new <slug> --host <name> --no-wait"], tmp_path, monkeypatch
+        )
+    assert excinfo.value.__cause__ is None, "the line was refused locally, not compared"
+    assert str(excinfo.value).startswith(_ARGV_MISMATCH), excinfo.value
+    assert "'--no-wait'" not in str(excinfo.value).split("handed")[1].splitlines()[0]
+
+
+#: The parenthesised list after "Creation flags you give" in the README's
+#: remote-creation section.
+_FORWARDED_FLAGS_SENTENCE = re.compile(r"Creation flags you give\s*\(([^)]*)\)")
+
+
+def _readme_forwarded_creation_flags(text: str) -> set[str]:
+    match = _FORWARDED_FLAGS_SENTENCE.search(text)
+    assert match, "README no longer lists the forwarded creation flags"
+    return set(re.findall(r"`(--[a-z-]+)`", match.group(1)))
+
+
+def test_the_readme_lists_exactly_the_creation_flags_the_code_declares() -> None:
+    group_module = importlib.import_module("camp.cli.group")
+    declared = set(group_module.creation_switch_flags())
+    assert declared, "creation declares no switches"
+    assert _readme_forwarded_creation_flags(README.read_text()) == declared
+
+
+def test_the_creation_flag_comparison_goes_red_when_the_readme_list_and_declaration_disagree() -> None:
+    group_module = importlib.import_module("camp.cli.group")
+    declared = set(group_module.creation_switch_flags())
+    text = README.read_text()
+    assert _readme_forwarded_creation_flags(text) == declared
+    dropped = text.replace("`--activate`, ", "", 1)
+    assert _readme_forwarded_creation_flags(dropped) == declared - {"--activate"}
+    assert _readme_forwarded_creation_flags(dropped) != declared
+    extra = text.replace("(`--no-attach`,", "(`--no-attach`, `--bogus`,", 1)
+    assert _readme_forwarded_creation_flags(extra) == declared | {"--bogus"}
+
+
+def test_the_prescribed_far_side_teardown_argv_parses_under_the_real_remove_and_stop_parsers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The camp argv of each teardown line — the part after `ssh <name>
+    <camp_bin>` — is run through the real dispatcher: `remove` under dry run
+    (its documented preview form, and the real form with `--dry-run` added so
+    nothing is removed), `stop` with the stop engine stubbed so no session is
+    touched. Only the camp argv is pinned, not the ssh wrapping — the
+    teardown is not composed through the handoff."""
+    lines = _teardown_invocation_lines()
+    assert lines, "README no longer documents a far-side teardown line"
+    verbs = sorted(shlex.split(line)[0] for line in lines)
+    assert verbs == ["remove", "remove", "stop"], lines
+
+    dispatch = importlib.import_module("camp.cli.dispatch")
+    cli_session = importlib.import_module("camp.cli.session")
+    lifecycle = importlib.import_module("camp.provision.lifecycle")
+    stop_cli = importlib.import_module("camp.cli.stop")
+    stop_workspace = importlib.import_module("camp.launch.stop_workspace")
+    _documented_group_env(tmp_path, monkeypatch)
+    monkeypatch.chdir(tmp_path)
+
+    ws = tmp_path / "state" / _DOC_GROUP / "worktrees" / "ws1"
+    ws.mkdir(parents=True)
+    monkeypatch.setattr(
+        cli_session, "_parsable_groups", lambda: [{"group": {"name": _DOC_GROUP}}]
+    )
+    monkeypatch.setattr(stop_cli, "Tmux", lambda *a, **k: object())
+    monkeypatch.setattr(
+        lifecycle,
+        "cmd_ls_group",
+        lambda group, **kw: lifecycle.GroupListing(
+            entries=[
+                {"slug": "ws1", "workspace_path": str(ws), "state": None, "window_count": None}
+            ],
+            unmanaged=[],
+            unmanaged_count=0,
+            notice=None,
+        ),
+    )
+    stopped: list[tuple[str, str]] = []
+
+    def _fake_stop(group, slug, ws_dir, **kw):
+        stopped.append((group, slug))
+        return stop_workspace.NotRunning(slug=slug, group=group, tmux_session="s")
+
+    monkeypatch.setattr(stop_cli, "stop_workspace", _fake_stop)
+    # The session guard shells out to the harness binary, which CI hosts lack;
+    # this test pins argv parsing, so hand the guard an empty, readable pool.
+    teardown_guard = importlib.import_module("camp.launch.teardown_guard")
+    monkeypatch.setattr(teardown_guard, "gather_pool", lambda harnesses, *, env: ([], []))
+
+    for line in lines:
+        argv = shlex.split(
+            line.replace("<slug>", "ws1").replace("<group>", _DOC_GROUP)
+        )
+        if argv[0] == "remove" and "--dry-run" not in argv:
+            argv.append("--dry-run")
+        monkeypatch.setattr(sys, "argv", ["camp", *argv])
+        try:
+            dispatch.main()
+        except SystemExit as exc:
+            assert exc.code in (0, None), (
+                f"{line!r} refused: exit {exc.code}, stderr={capsys.readouterr().err!r}"
+            )
+        err = capsys.readouterr().err
+        if argv[0] == "remove":
+            assert f"[dry-run] would remove worktree 'ws1' for group '{_DOC_GROUP}'" in err, (
+                line,
+                err,
+            )
+    assert stopped == [(_DOC_GROUP, "ws1")]
+
+    status_lines = _far_status_lines()
+    assert len(status_lines) == 1, status_lines
+    checked: list[tuple[str, str]] = []
+
+    def _fake_status(group, slug, **kw):
+        checked.append((group["group"]["name"], slug))
+        return 0, {"code": 0, "work_code": 0, "members": []}
+
+    monkeypatch.setattr(lifecycle, "provision_status_code", _fake_status)
+    argv = shlex.split(
+        status_lines[0].replace("<slug>", "ws1").replace("<group>", _DOC_GROUP)
+    )
+    monkeypatch.setattr(sys, "argv", ["camp", *argv])
+    with pytest.raises(SystemExit) as status_exit:
+        dispatch.main()
+    assert status_exit.value.code in (0, None), capsys.readouterr().err
+    assert checked == [(_DOC_GROUP, "ws1")], checked
 
 
 # ---------------------------------------------------------------------------
