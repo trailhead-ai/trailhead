@@ -41,10 +41,13 @@ exits non-zero — re-run with `--harness <name>` to install the plugins.
 > Read https://github.com/trailhead-ai/trailhead/blob/main/INSTALL.md and set
 > trailhead up for me.
 
-**Agents:** [`INSTALL.md`](INSTALL.md) is your guide. It walks the user through
-prerequisites, choosing a harness and plugins, installing, PATH setup, joining
-or creating lore vaults, and setting up Outpost, then checks the result. The
-flags it uses are summarized here:
+**Agents:** [`INSTALL.md`](INSTALL.md) is your guide. It is eight idempotent
+steps that prepare the computer as a host: install trailhead, a forge
+credential, Outpost, the lore vault copies, unattended commit signing, whether
+this host makes vault content, and the supervisor entry that keeps Outpost
+running. It ends by running `trailhead doctor`, and the host is prepared only
+when doctor's last line reads `HOST READY`. The flags step 1 uses are
+summarized here:
 
 - **Install everything into the detected harness:** `./bin/trailhead install`
 - **Target a specific harness:** `./bin/trailhead install --harness claude_code`
