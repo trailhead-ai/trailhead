@@ -959,14 +959,17 @@ _OUTPOST_STATES = {
 }
 
 
-_SHELLS = [
-    "sh",
-    "bash",
-    pytest.param(
-        "fish",
-        marks=pytest.mark.skipif(shutil.which("fish") is None, reason="fish is not installed"),
-    ),
-]
+def _shell_param(name: str) -> object:
+    # The shells run under a restricted PATH, so each is resolved against the host PATH here.
+    path = shutil.which(name)
+    return pytest.param(
+        path or name,
+        id=name,
+        marks=pytest.mark.skipif(path is None, reason=f"{name} is not installed"),
+    )
+
+
+_SHELLS = [_shell_param(name) for name in ("sh", "bash", "fish")]
 
 
 def _parses(shell: str, fix: str) -> subprocess.CompletedProcess:
