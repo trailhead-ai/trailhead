@@ -2840,6 +2840,42 @@ def test_json_pull_only_ahead_of_upstream_is_holding_until_pushed(tmp_path):
     assert r.returncode == 0, r.stderr
 
 
+def _untracked_vault(tmp_path):
+    """A clean vault whose HEAD is on ``origin/<branch>`` but whose branch has no
+    upstream — what adopting an existing remote onto a fresh device leaves."""
+    vault, remote = _wired_vault(tmp_path, dirty=False)
+    _git(vault, "branch", "--unset-upstream")
+    return vault, remote
+
+
+def test_json_pull_only_no_upstream_but_equal_to_origin_branch_is_converged(tmp_path):
+    """Pull-only never sets an upstream, so a vault that adopted origin's history
+    has none; its HEAD being on `origin/<branch>` means nothing is unpublished."""
+    vault, _remote = _untracked_vault(tmp_path)
+
+    r, entry = _pull_only_report(tmp_path, vault)
+    assert entry["outcome"] == "converged"
+    assert r.returncode == 0, r.stderr
+
+
+def test_json_pull_only_no_upstream_with_commit_past_origin_branch_is_holding(tmp_path):
+    vault, _remote = _untracked_vault(tmp_path)
+    _commit_locally(vault)
+
+    r, entry = _pull_only_report(tmp_path, vault)
+    assert entry["outcome"] == "holding"
+    assert r.returncode == 1, r.stderr
+
+
+def test_json_pull_only_never_pushed_commits_without_origin_ref_is_holding(tmp_path):
+    vault = _make_vault(tmp_path / "v-default", dirty=False)
+    _wire_remote(vault, _make_bare_remote(tmp_path / "remote.git"), track=False)
+
+    r, entry = _pull_only_report(tmp_path, vault)
+    assert entry["outcome"] == "holding"
+    assert r.returncode == 1, r.stderr
+
+
 def test_json_pull_only_dirty_tree_is_holding_when_online(tmp_path):
     vault, _remote = _wired_vault(tmp_path, dirty=True)
 

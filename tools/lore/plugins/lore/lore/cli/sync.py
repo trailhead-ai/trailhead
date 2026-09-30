@@ -109,6 +109,7 @@ from .common import (
     _resolve_all_vaults,
     _resolve_lore_state_dir,
     _shared_vault_paths,
+    _vault_has_commits,
     _vault_has_upstream,
     _vault_head_branch,
     _vault_is_git_toplevel,
@@ -1450,6 +1451,23 @@ def _select_targets(vault_filter: str | None) -> tuple[list, int]:
     return selected, 0
 
 
+def _pull_only_unpublished(vault: Path) -> bool:
+    """Return ``True`` iff ``vault`` has commits that exist on no remote ref.
+
+    Purely local. Measured against :func:`_vault_upstream_ref` rather than
+    :func:`_vault_unpushed`, which treats a missing upstream as unpushed: a
+    pull-only run never sets one, so the vault it leaves at ``origin/<branch>``
+    would otherwise read as unpublished forever.
+    """
+    if not _vault_has_commits(vault):
+        return False
+    ref = _vault_upstream_ref(vault)
+    if ref is None:
+        return True
+    rc, count, _ = _git(vault, "rev-list", "--count", f"{ref}..HEAD")
+    return rc == 0 and count.strip() not in ("", "0")
+
+
 def cmd_sync(args) -> int:
     """Sync every configured vault, or just ``--vault <name>``.
 
@@ -1653,12 +1671,15 @@ def cmd_sync(args) -> int:
             # work is reported exactly as the full loop would leave it:
             # "holding" when a conflict could not be integrated, the tree is
             # dirty, or commits exist nowhere else; "converged" otherwise.
+            # "Commits exist nowhere else" is measured against `@{u}`, else
+            # `origin/<branch>`: pull-only never sets an upstream, so a vault that
+            # adopted origin's history has none and is still in step with it.
             # Offline is no exception — the work is local, so the verdict does
             # not need the network. A vault with no `origin` has nowhere to
             # publish and is converged regardless, as in the full loop.
             has_origin = _git(Path(vault), "remote", "get-url", "origin")[0] == 0
             holding = state == PULL_FAILED or (
-                has_origin and (_vault_is_dirty(Path(vault)) or _vault_unpushed(Path(vault)))
+                has_origin and (_vault_is_dirty(Path(vault)) or _pull_only_unpublished(Path(vault)))
             )
             rc_one = 1 if holding else 0
             outcomes[name] = "holding" if holding else "converged"
