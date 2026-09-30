@@ -294,6 +294,18 @@ def _declare_creation_switches(parser: argparse.ArgumentParser) -> list[argparse
     ]
 
 
+def creation_switch_flags() -> list[str]:
+    """The option strings local creation declares, in declaration order —
+    read from `_declare_creation_switches` so a listing of them cannot drift
+    from what `camp new` accepts."""
+    parser = argparse.ArgumentParser(add_help=False)
+    return [
+        flag
+        for action in _declare_creation_switches(parser)
+        for flag in action.option_strings[:1]
+    ]
+
+
 def _cmd_new_host_cli(
     args: list[str],
     host: "Host",
