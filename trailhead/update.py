@@ -34,16 +34,29 @@ The outcome is recorded back onto the provenance stamp via
 discoverable (`trailhead doctor`) rather than silently indistinguishable
 from "up to date".
 
-The `--json` output is a pinned schema (schema_version 4) — the producer
+The `--json` output is a pinned schema (schema_version 5) — the producer
 contract a SessionStart hook consumes:
 
-    {"schema_version": 4, "outcome": "ok"|"behind"|"unanswerable",
+    {"schema_version": 5, "outcome": "ok"|"behind"|"unanswerable",
      "commits_behind": <int|null>, "install_commits_behind": <int|null>,
      "installed_sha": <str|null>, "reason": <str|null>,
      "changelog_delta": {"available": <bool>, "lines": [<str>, ...],
                           "truncated": <bool>},
+     "apply_preflight": <null|{"verdict": "clear"|"refused"|"unknown",
+                               "refusal": null|"no_upstream"|"local_changes"|"diverged"}>,
      "outpost": null | {"outcome": "ok"|"behind"|"unanswerable",
-                        "commits_behind": <int|null>, "reason": <str|null>}}
+                        "commits_behind": <int|null>, "reason": <str|null>,
+                        "apply_preflight": <null|{...as above}>}}
+
+`apply_preflight` says whether `trailhead update` would refuse that part. It is
+`null` unless the part's outcome is `behind` (no extra git on the common path).
+Otherwise `verdict` is `refused` (with the `refusal` apply would hit: no
+tracked upstream, uncommitted changes, or a HEAD diverged from its upstream;
+being only ahead of the upstream is not a refusal), `clear`, or `unknown`
+when a git call could not answer — never `clear` on an error. The predicates
+are the ones apply itself runs, evaluated in apply's order, so a dirty and
+diverged checkout reports `local_changes`. The outpost part's
+`apply_preflight` is carried only when `outpost` is not `null`.
 
 `outpost` reports the outpost checkout named by `config_dir("outpost")/
 config.toml`'s `checkout` key (see `outpost_lifecycle.configured_checkout`):
@@ -148,7 +161,7 @@ from trailhead.provenance import (
 )
 from trailhead.wire import LockError, wire_lock
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 FRESHNESS_WINDOW_SECONDS = 24 * 60 * 60
 FRESHNESS_STAMP_FILENAME = "update-check.json"
 
@@ -372,6 +385,74 @@ def _count_commits(checkout: Path, rev_range: str, *, runner, timeout: int) -> t
         return None, "unexpected rev-list output"
 
 
+# ---------------------------------------------------------------------------
+# Refusal predicates — shared by the check's `apply_preflight` and by apply
+# ---------------------------------------------------------------------------
+
+# `--no-optional-locks` stops `status` rewriting `.git/index` to refresh its
+# stat cache; `core.fsmonitor=false` stops it launching a repo-configured
+# fsmonitor program. Both are needed for a probe that changes nothing on disk
+# and runs no hook. It does NOT stop repo-configured clean/smudge filter
+# drivers, which `status` can still run on a stat-dirty file; that exposure is
+# the same one apply's cleanliness check has always carried and is owned by the
+# confinement decision for the outpost checkout path, not by this probe.
+_STATUS_ARGS = ("--no-optional-locks", "-c", "core.fsmonitor=false", "status", "--porcelain")
+
+
+def _working_tree_state(checkout: Path, *, env: dict[str, str], runner, timeout: int):
+    """Return (state, proc): state is "clean", "dirty", or "unknown" when git
+    could not answer. *proc* is the status invocation, for error rendering."""
+    proc = _run_git(
+        checkout, *_STATUS_ARGS, runner=runner, timeout=timeout, env=_unattended_git_env(env)
+    )
+    if proc is None or proc.returncode != 0:
+        return "unknown", proc
+    return ("dirty" if (proc.stdout or "").strip() else "clean"), proc
+
+
+def _divergence(checkout: Path, branch: str, *, runner, timeout: int) -> str:
+    """How HEAD relates to *branch*: "current" (level with it, or carrying
+    local commits ahead of it — nothing to pull), "behind" (fast-forwardable),
+    "diverged", or "unknown" when git could not answer."""
+    upstream_in_head = _run_git(
+        checkout, "merge-base", "--is-ancestor", "--", branch, "HEAD", runner=runner, timeout=timeout
+    )
+    if upstream_in_head is None or upstream_in_head.returncode not in (0, 1):
+        return "unknown"
+    if upstream_in_head.returncode == 0:
+        return "current"
+    head_in_upstream = _run_git(
+        checkout, "merge-base", "--is-ancestor", "HEAD", "--", branch, runner=runner, timeout=timeout
+    )
+    if head_in_upstream is None or head_in_upstream.returncode not in (0, 1):
+        return "unknown"
+    return "behind" if head_in_upstream.returncode == 0 else "diverged"
+
+
+def _apply_preflight(checkout: Path, *, env: dict[str, str], runner, timeout: int) -> dict:
+    """Whether `trailhead update` would refuse *checkout*, evaluated in apply's
+    order: upstream resolution, working-tree cleanliness, divergence. A
+    predicate git cannot answer yields "unknown", never "clear"."""
+
+    def verdict(verdict: str, refusal: str | None = None) -> dict:
+        return {"verdict": verdict, "refusal": refusal}
+
+    branch, _error = _resolve_upstream_branch(checkout, runner=runner, timeout=timeout)
+    if branch is None:
+        return verdict("refused", "no_upstream")
+    state, _proc = _working_tree_state(checkout, env=env, runner=runner, timeout=timeout)
+    if state == "dirty":
+        return verdict("refused", "local_changes")
+    if state == "unknown":
+        return verdict("unknown")
+    divergence = _divergence(checkout, branch, runner=runner, timeout=timeout)
+    if divergence == "diverged":
+        return verdict("refused", "diverged")
+    if divergence == "unknown":
+        return verdict("unknown")
+    return verdict("clear")
+
+
 def _finish(
     outcome: str,
     commits_behind: int | None,
@@ -380,6 +461,7 @@ def _finish(
     env: dict[str, str],
     changelog_delta: dict | None = None,
     install_commits_behind: int | None = None,
+    apply_preflight: dict | None = None,
 ) -> dict:
     """Record the check outcome onto the provenance stamp and return the
     pinned result. Every `check_for_update` exit goes through here, so no
@@ -394,6 +476,7 @@ def _finish(
         "installed_sha": installed_sha,
         "reason": redacted_reason,
         "changelog_delta": changelog_delta if changelog_delta is not None else _unavailable_delta(),
+        "apply_preflight": apply_preflight,
         "outpost": None,
     }
 
@@ -411,7 +494,7 @@ def check_for_update(
 
     Returns the pinned `{"schema_version", "outcome", "commits_behind",
     "install_commits_behind", "installed_sha", "reason", "changelog_delta",
-    "outpost"}` shape (see the module docstring). Never raises for a git-side
+    "apply_preflight", "outpost"}` shape (see the module docstring). Never raises for a git-side
     failure — those all collapse to `outcome == "unanswerable"`, for the
     install and for outpost independently.
     """
@@ -429,11 +512,17 @@ def check_for_update(
     return result
 
 
-def _outpost_verdict(outcome: str, commits_behind: int | None, reason: str | None) -> dict:
+def _outpost_verdict(
+    outcome: str,
+    commits_behind: int | None,
+    reason: str | None,
+    apply_preflight: dict | None = None,
+) -> dict:
     return {
         "outcome": outcome,
         "commits_behind": commits_behind,
         "reason": redact_credentials(reason) if reason else None,
+        "apply_preflight": apply_preflight,
     }
 
 
@@ -472,7 +561,10 @@ def _check_outpost(*, env: dict[str, str], runner, timeout: int, fetch_due: bool
     )
     if commits_behind is None:
         return _outpost_verdict("unanswerable", None, error)
-    return _outpost_verdict("ok" if commits_behind == 0 else "behind", commits_behind, None)
+    if commits_behind == 0:
+        return _outpost_verdict("ok", 0, None)
+    preflight = _apply_preflight(checkout, env=env, runner=runner, timeout=timeout)
+    return _outpost_verdict("behind", commits_behind, None, preflight)
 
 
 def _check_install(
@@ -552,9 +644,11 @@ def _check_install(
         checkout, installed_sha, branch, runner=_runner, timeout=timeout
     )
 
-    outcome = "ok" if commits_behind == 0 and not install_behind else "behind"
+    if commits_behind == 0 and not install_behind:
+        return _finish("ok", commits_behind, installed_sha, None, _env, changelog_delta, install_behind)
+    preflight = _apply_preflight(checkout, env=_env, runner=_runner, timeout=timeout)
     return _finish(
-        outcome, commits_behind, installed_sha, None, _env, changelog_delta, install_behind
+        "behind", commits_behind, installed_sha, None, _env, changelog_delta, install_behind, preflight
     )
 
 
@@ -712,7 +806,7 @@ def run_update_apply(
                 file=sys.stderr,
             )
             return 1
-        if not _is_clean(target, runner=_runner, timeout=timeout):
+        if not _is_clean(target, env=_env, runner=_runner, timeout=timeout):
             return 1
         branches[target] = branch
 
@@ -770,11 +864,11 @@ def run_update_apply(
     return 0
 
 
-def _is_clean(checkout: Path, *, runner, timeout: int) -> bool:
+def _is_clean(checkout: Path, *, env: dict[str, str], runner, timeout: int) -> bool:
     """True when *checkout* has no uncommitted changes. Prints the named
     refusal and returns False otherwise, or when the status is unreadable."""
-    status_proc = _run_git(checkout, "status", "--porcelain", runner=runner, timeout=timeout)
-    if status_proc is None or status_proc.returncode != 0:
+    state, status_proc = _working_tree_state(checkout, env=env, runner=runner, timeout=timeout)
+    if state == "unknown":
         print(
             f"trailhead: could not read the checkout's working-tree status: "
             f"{_proc_stderr(status_proc)}. Inspect it directly: "
@@ -782,7 +876,7 @@ def _is_clean(checkout: Path, *, runner, timeout: int) -> bool:
             file=sys.stderr,
         )
         return False
-    if (status_proc.stdout or "").strip():
+    if state == "dirty":
         print(
             f"trailhead: refusing to upgrade — {checkout} has uncommitted "
             f"changes. Commit or stash them, then re-run: trailhead update",
@@ -850,33 +944,12 @@ def _fast_forward(checkout: Path, branch: str, *, runner, timeout: int):
     # A checkout carrying local commits is AHEAD of its tracked branch, not
     # diverged from it: there is nothing to fetch down, and refusing it would
     # name a merge that does nothing.
-    remote_is_behind = remote_sha != pre_head and _run_git(
-        checkout,
-        "merge-base",
-        "--is-ancestor",
-        "--",
-        branch,
-        "HEAD",
-        runner=runner,
-        timeout=timeout,
-    )
-    nothing_to_pull = remote_sha == pre_head or (
-        remote_is_behind is not None and remote_is_behind.returncode == 0
-    )
-    if nothing_to_pull:
+    if remote_sha == pre_head:
         return "current", pre_head, remote_sha
-
-    ancestor_proc = _run_git(
-        checkout,
-        "merge-base",
-        "--is-ancestor",
-        "HEAD",
-        "--",
-        branch,
-        runner=runner,
-        timeout=timeout,
-    )
-    if ancestor_proc is None or ancestor_proc.returncode != 0:
+    divergence = _divergence(checkout, branch, runner=runner, timeout=timeout)
+    if divergence == "current":
+        return "current", pre_head, remote_sha
+    if divergence != "behind":
         print(
             f"trailhead: refusing to upgrade — {checkout}'s HEAD has "
             f"diverged from {branch} and cannot be "

@@ -15,16 +15,32 @@ import os
 import subprocess
 import sys
 import threading
+import time
 from io import StringIO
 from pathlib import Path
 
 import pytest
 
 from trailhead import update
+from trailhead.tests.test_update_apply import (
+    _catch_up,
+    _commit_locally,
+    _dirty,
+    _git,
+    _git_sub,
+    _init_real_repo_pair,
+    _real_runner,
+)
 from trailhead.tests.fixtures.update_check_schema import (
     BEHIND_EXAMPLE,
+    CLEAR_PREFLIGHT,
+    DIVERGED_PREFLIGHT,
+    LOCAL_CHANGES_PREFLIGHT,
+    NO_UPSTREAM_PREFLIGHT,
+    UNKNOWN_PREFLIGHT,
     OK_EXAMPLE,
     OUTPOST_BEHIND_EXAMPLE,
+    OUTPOST_OK_EXAMPLE,
     UNANSWERABLE_NO_STAMP_EXAMPLE,
 )
 
@@ -34,7 +50,7 @@ _BRANCH = "origin/main"
 
 # The only git subcommands the check path may ever invoke — a mutation adding
 # any other subcommand (e.g. "pull") must fail item 14's assertion.
-_READ_ONLY_SUBCOMMANDS = {"rev-parse", "fetch", "rev-list", "diff"}
+_READ_ONLY_SUBCOMMANDS = {"rev-parse", "fetch", "rev-list", "diff", "status", "merge-base"}
 
 
 def _env(tmp_path: Path) -> dict[str, str]:
@@ -86,6 +102,12 @@ def _make_runner(
     diff_rc: int = 0,
     diff_raises: Exception | None = None,
     kwargs_log: list[dict] | None = None,
+    status_stdout: str = "",
+    status_rc: int = 0,
+    upstream_in_head_rc: int = 1,
+    head_in_upstream_rc: int = 0,
+    raising_subs: frozenset[str] = frozenset(),
+    upstream_vanishes_after_first_resolve: bool = False,
 ):
     """A recording git-command stub: dispatches on the git subcommand.
 
@@ -94,19 +116,31 @@ def _make_runner(
     `shell=True` or a pre-joined command string.
     """
     calls: list[list[str]] = []
+    resolves = []
 
     def runner(args, **kw):
         calls.append(list(args))
+        if _git_sub(args) in raising_subs:
+            raise OSError("git unavailable")
         if kwargs_log is not None:
             kwargs_log.append(dict(kw))
         assert isinstance(args, list), f"argv must be a list, not interpolated: {args!r}"
         assert kw.get("shell") is not True, "git must never be invoked with shell=True"
         assert args[0] == "git"
-        sub = args[3]
+        sub = _git_sub(args)
         if sub == "rev-parse":
+            resolves.append(1)
+            rc = 128 if upstream_vanishes_after_first_resolve and len(resolves) > 1 else branch_rc
             return subprocess.CompletedProcess(
-                args, branch_rc, stdout=(branch + "\n") if branch_rc == 0 else "", stderr=""
+                args, rc, stdout=(branch + "\n") if rc == 0 else "", stderr=""
             )
+        if sub == "status":
+            return subprocess.CompletedProcess(args, status_rc, stdout=status_stdout, stderr="")
+        if sub == "merge-base":
+            # `-- <branch> HEAD`: is the upstream already in HEAD (level/ahead)?
+            # `HEAD -- <branch>`: can HEAD fast-forward onto the upstream?
+            rc = upstream_in_head_rc if args[5] == "--" else head_in_upstream_rc
+            return subprocess.CompletedProcess(args, rc, stdout="", stderr="")
         if sub == "fetch":
             if fetch_raises is not None:
                 raise fetch_raises
@@ -127,6 +161,17 @@ def _make_runner(
         raise AssertionError(f"unexpected git invocation: {args}")
 
     return runner, calls
+
+
+def _clear_preflight(args):
+    """Answer the apply-preflight probes for a hand-rolled stub: a clean
+    working tree, behind-only (fast-forwardable). None for any other call."""
+    sub = _git_sub(args)
+    if sub == "status":
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+    if sub == "merge-base":
+        return subprocess.CompletedProcess(args, 1 if args[5] == "--" else 0, stdout="", stderr="")
+    return None
 
 
 def _fresh_freshness_stamp(tmp_path: Path, env: dict[str, str], *, iso: str) -> None:
@@ -236,7 +281,7 @@ class TestFreshnessThrottle:
 
         update.check_for_update(env=env, runner=runner, window=86400)
 
-        assert not any(c[3] == "fetch" for c in calls)
+        assert not any(_git_sub(c) == "fetch" for c in calls)
 
     def test_outside_window_one_fetch_and_stamp_advances(self, tmp_path):
         env = _env(tmp_path)
@@ -247,7 +292,7 @@ class TestFreshnessThrottle:
 
         update.check_for_update(env=env, runner=runner, window=86400)
 
-        fetch_calls = [c for c in calls if c[3] == "fetch"]
+        fetch_calls = [c for c in calls if _git_sub(c) == "fetch"]
         assert len(fetch_calls) == 1
         new_stamp = json.loads(update.freshness_stamp_path(env=env).read_text(encoding="utf-8"))
         assert new_stamp["attempted_at"] != stale_iso
@@ -388,7 +433,7 @@ class TestNoMutation:
 
         assert calls, "expected at least one git invocation"
         for call in calls:
-            assert call[3] in _READ_ONLY_SUBCOMMANDS, f"non-read-only invocation: {call}"
+            assert _git_sub(call) in _READ_ONLY_SUBCOMMANDS, f"non-read-only invocation: {call}"
 
 
 _DIFF_WITH_ADDED_AND_REMOVED = (
@@ -559,7 +604,7 @@ class TestChangelogDeltaNoShellInterpolation:
 
         update.check_for_update(env=env, runner=runner)
 
-        diff_calls = [c for c in calls if c[3] == "diff"]
+        diff_calls = [c for c in calls if _git_sub(c) == "diff"]
         assert len(diff_calls) == 1
         diff_call = diff_calls[0]
         assert diff_call == [
@@ -587,16 +632,7 @@ class TestChangelogDeltaUnavailableOnDiffError:
         assert result["outcome"] == "behind"
         assert result["commits_behind"] == 3
         assert result["changelog_delta"] == {"available": False, "lines": [], "truncated": False}
-        assert set(result.keys()) == {
-            "schema_version",
-            "outcome",
-            "commits_behind",
-            "install_commits_behind",
-            "installed_sha",
-            "reason",
-            "changelog_delta",
-            "outpost",
-        }
+        assert set(result) == set(BEHIND_EXAMPLE)
 
 
 class TestJsonSchemaAndHumanOutput:
@@ -842,7 +878,7 @@ class TestDerivedBranchAndTwoHopVerdict:
 
         def runner(args, **kw):
             calls.append(list(args))
-            sub = args[3]
+            sub = _git_sub(args)
             if sub == "rev-parse":
                 return subprocess.CompletedProcess(args, 0, stdout=branch + "\n", stderr="")
             if sub == "fetch":
@@ -853,6 +889,8 @@ class TestDerivedBranchAndTwoHopVerdict:
                 return subprocess.CompletedProcess(args, 0, stdout=out + "\n", stderr="")
             if sub == "diff":
                 return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+            if (answer := _clear_preflight(args)) is not None:
+                return answer
             raise AssertionError(f"unexpected git invocation: {args}")
 
         return runner, calls
@@ -880,7 +918,7 @@ class TestDerivedBranchAndTwoHopVerdict:
         update.check_for_update(env=env, runner=runner)
 
         assert ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"] == calls[0][3:]
-        assert any(c[3] == "fetch" and c[-1] == "upstream" for c in calls)
+        assert any(_git_sub(c) == "fetch" and c[-1] == "upstream" for c in calls)
 
     def test_origin_url_is_never_probed_or_compared(self, tmp_path):
         env = _env(tmp_path)
@@ -889,7 +927,7 @@ class TestDerivedBranchAndTwoHopVerdict:
 
         update.check_for_update(env=env, runner=runner)
 
-        assert not any(c[3] == "remote" for c in calls)
+        assert not any(_git_sub(c) == "remote" for c in calls)
 
     def test_install_behind_checkout_reports_behind_even_when_checkout_is_current(
         self, tmp_path
@@ -919,7 +957,7 @@ class TestDerivedBranchAndTwoHopVerdict:
         self._stamp(tmp_path, env)
 
         def runner(args, **kw):
-            if args[3] == "rev-parse":
+            if _git_sub(args) == "rev-parse":
                 return subprocess.CompletedProcess(args, 128, stdout="", stderr="fatal: no upstream")
             raise AssertionError(f"unexpected git invocation after failure: {args}")
 
@@ -1045,7 +1083,7 @@ class TestSecondHopFailureKeepsTheFirstHopVerdict:
         _install_stamp(tmp_path, env)
 
         def runner(args, **kw):
-            sub = args[3]
+            sub = _git_sub(args)
             if sub == "rev-parse":
                 return subprocess.CompletedProcess(args, 0, stdout=_BRANCH + "\n", stderr="")
             if sub == "fetch":
@@ -1058,6 +1096,8 @@ class TestSecondHopFailureKeepsTheFirstHopVerdict:
                 return subprocess.CompletedProcess(args, 0, stdout="2\n", stderr="")
             if sub == "diff":
                 return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+            if (answer := _clear_preflight(args)) is not None:
+                return answer
             raise AssertionError(f"unexpected git invocation: {args}")
 
         result = update.check_for_update(env=env, runner=runner)
@@ -1065,6 +1105,203 @@ class TestSecondHopFailureKeepsTheFirstHopVerdict:
         assert result["outcome"] == "behind"
         assert result["commits_behind"] == 2
         assert result["install_commits_behind"] is None
+
+
+# ---------------------------------------------------------------------------
+# apply_preflight — would `trailhead update` refuse this part?
+# ---------------------------------------------------------------------------
+
+
+def _preflight_env(tmp_path: Path, *, setup=None):
+    """A real install checkout one commit behind its origin, stamped at its
+    own old sha (so the install is stale even when the checkout is level)."""
+    env = _env(tmp_path)
+    origin, checkout, old_sha, _new = _init_real_repo_pair(tmp_path)
+    _install_stamp(tmp_path, env, sha=old_sha)
+    if setup is not None:
+        setup(checkout)
+    return env, checkout
+
+
+class TestApplyPreflight:
+    def test_a_clean_checkout_behind_its_upstream_is_clear(self, tmp_path):
+        env, _ = _preflight_env(tmp_path)
+
+        result = update.check_for_update(env=env, runner=_real_runner)
+
+        assert result["outcome"] == "behind"
+        assert result["apply_preflight"] == CLEAR_PREFLIGHT
+
+    def test_a_part_that_is_not_behind_carries_null_and_runs_no_preflight_git(self, tmp_path):
+        env = _env(tmp_path)
+        _install_stamp(tmp_path, env)
+        runner, calls = _make_runner(count="0")
+
+        result = update.check_for_update(env=env, runner=runner)
+
+        assert result["outcome"] == "ok"
+        assert result["apply_preflight"] is None
+        assert not any(_git_sub(c) in ("status", "merge-base") for c in calls)
+
+    def test_an_outpost_that_is_not_behind_runs_no_preflight_git_against_it(self, tmp_path):
+        env = _env(tmp_path)
+        _install_stamp(tmp_path, env)
+        outpost = _checkout(tmp_path, "outpost")
+        _configure_outpost(env, outpost)
+        runner, calls = _two_checkout_runner(outpost, trailhead_count="3", outpost_count="0")
+
+        result = update.check_for_update(env=env, runner=runner)
+
+        assert result["apply_preflight"] == CLEAR_PREFLIGHT
+        assert result["outpost"]["apply_preflight"] is None
+        assert not any(_git_sub(c) in ("status", "merge-base") for c in _outpost_calls(calls, outpost))
+
+    def test_uncommitted_changes_are_refused_as_local_changes(self, tmp_path):
+        env, _ = _preflight_env(tmp_path, setup=_dirty)
+
+        result = update.check_for_update(env=env, runner=_real_runner)
+
+        assert result["apply_preflight"] == LOCAL_CHANGES_PREFLIGHT
+
+    def test_the_outpost_part_is_judged_independently_of_the_install(self, tmp_path):
+        env, _ = _preflight_env(tmp_path)
+        outpost_root = tmp_path / "outpost-root"
+        outpost_root.mkdir()
+        _o_origin, outpost, _o_old, _o_new = _init_real_repo_pair(outpost_root)
+        _dirty(outpost)
+        _configure_outpost(env, outpost)
+
+        result = update.check_for_update(env=env, runner=_real_runner)
+
+        assert result["apply_preflight"] == CLEAR_PREFLIGHT
+        assert result["outpost"]["outcome"] == "behind"
+        assert result["outpost"]["apply_preflight"] == LOCAL_CHANGES_PREFLIGHT
+
+    def test_a_checkout_with_a_local_and_an_upstream_commit_is_refused_as_diverged(self, tmp_path):
+        env, _ = _preflight_env(tmp_path, setup=_commit_locally)
+
+        result = update.check_for_update(env=env, runner=_real_runner)
+
+        assert result["apply_preflight"] == DIVERGED_PREFLIGHT
+
+    def test_a_checkout_only_ahead_of_its_upstream_is_clear(self, tmp_path):
+        def ahead(checkout):
+            _catch_up(checkout)
+            _commit_locally(checkout)
+
+        env, _ = _preflight_env(tmp_path, setup=ahead)
+
+        result = update.check_for_update(env=env, runner=_real_runner)
+
+        assert result["commits_behind"] == 0
+        assert result["outcome"] == "behind"
+        assert result["apply_preflight"] == CLEAR_PREFLIGHT
+
+    def test_dirty_and_diverged_reports_local_changes_as_apply_would(self, tmp_path):
+        def both(checkout):
+            _commit_locally(checkout)
+            _dirty(checkout)
+
+        env, _ = _preflight_env(tmp_path, setup=both)
+
+        result = update.check_for_update(env=env, runner=_real_runner)
+
+        assert result["apply_preflight"] == LOCAL_CHANGES_PREFLIGHT
+
+    def test_a_checkout_with_no_tracking_upstream_is_refused_as_no_upstream(self, tmp_path):
+        env, checkout = _preflight_env(tmp_path)
+        _git(checkout, "branch", "--unset-upstream")
+
+        verdict = update._apply_preflight(
+            checkout, env=env, runner=_real_runner, timeout=10
+        )
+
+        assert verdict == NO_UPSTREAM_PREFLIGHT
+
+    def test_an_upstream_that_stops_resolving_during_the_check_is_refused_as_no_upstream(
+        self, tmp_path
+    ):
+        env = _env(tmp_path)
+        _install_stamp(tmp_path, env)
+        runner, _ = _make_runner(count="3", upstream_vanishes_after_first_resolve=True)
+
+        result = update.check_for_update(env=env, runner=runner)
+
+        assert result["outcome"] == "behind"
+        assert result["apply_preflight"] == NO_UPSTREAM_PREFLIGHT
+
+    @pytest.mark.parametrize("failing_sub", ["status", "merge-base"])
+    def test_a_predicate_git_cannot_answer_is_unknown_never_clear(self, tmp_path, failing_sub):
+        env = _env(tmp_path)
+        _install_stamp(tmp_path, env)
+        runner, _ = _make_runner(count="3", raising_subs=frozenset({failing_sub}))
+
+        result = update.check_for_update(env=env, runner=runner)
+
+        assert result["outcome"] == "behind"
+        assert result["apply_preflight"] == UNKNOWN_PREFLIGHT
+
+    def test_a_merge_base_error_exit_is_unknown_not_diverged(self, tmp_path):
+        env = _env(tmp_path)
+        _install_stamp(tmp_path, env)
+        runner, _ = _make_runner(count="3", upstream_in_head_rc=128)
+
+        result = update.check_for_update(env=env, runner=runner)
+
+        assert result["apply_preflight"] == UNKNOWN_PREFLIGHT
+
+
+def _stat_dirty_repo_with_fsmonitor_hook(tmp_path: Path):
+    """A behind checkout with a modified tracked file, a stale stat cache, and
+    an fsmonitor program that records every run in a sentinel file. Its fetch
+    is already done and the fetch throttle is fresh, so the check runs only
+    its read probes: `git fetch` itself runs a configured fsmonitor program,
+    which is the existing fetch probe's exposure, not the preflight's."""
+    env, checkout = _preflight_env(tmp_path)
+    _git(checkout, "fetch", "origin")
+    _fresh_freshness_stamp(tmp_path, env, iso=update._now_iso())
+    sentinel = tmp_path / "fsmonitor-ran"
+    hook = tmp_path / "fsmonitor.sh"
+    hook.write_text(f"#!/bin/sh\necho ran >> {sentinel}\nprintf '\\0'\n")
+    hook.chmod(0o755)
+    _git(checkout, "config", "core.fsmonitor", str(hook))
+    time.sleep(1.1)  # racy-git: the edit must be older than the index to be stat-dirty
+    os.utime(checkout / "file.txt", None)
+    _dirty(checkout)
+    sentinel.unlink(missing_ok=True)  # setup git calls ran the hook
+    return env, checkout, sentinel
+
+
+class TestCheckLeavesTheCheckoutUntouched:
+    def test_the_check_does_not_rewrite_the_index_or_take_a_lock(self, tmp_path):
+        env, checkout, _sentinel = _stat_dirty_repo_with_fsmonitor_hook(tmp_path)
+        index = checkout / ".git" / "index"
+        before = (index.read_bytes(), index.stat().st_mtime_ns)
+
+        result = update.check_for_update(env=env, runner=_real_runner)
+
+        assert result["apply_preflight"] == LOCAL_CHANGES_PREFLIGHT
+        assert (index.read_bytes(), index.stat().st_mtime_ns) == before
+        assert not (checkout / ".git" / "index.lock").exists()
+
+    def test_the_check_runs_no_fsmonitor_program(self, tmp_path):
+        env, _checkout_path, sentinel = _stat_dirty_repo_with_fsmonitor_hook(tmp_path)
+
+        result = update.check_for_update(env=env, runner=_real_runner)
+
+        assert result["apply_preflight"] == LOCAL_CHANGES_PREFLIGHT
+        assert not sentinel.exists()
+
+    def test_the_status_probe_runs_under_the_unattended_environment(self, tmp_path):
+        env = _env(tmp_path)
+        _install_stamp(tmp_path, env)
+        kwargs_log: list[dict] = []
+        runner, calls = _make_runner(count="3", kwargs_log=kwargs_log)
+
+        update.check_for_update(env=env, runner=runner)
+
+        status_envs = [kw["env"] for c, kw in zip(calls, kwargs_log) if _git_sub(c) == "status"]
+        assert status_envs and all(e["GIT_TERMINAL_PROMPT"] == "0" for e in status_envs)
 
 
 # ---------------------------------------------------------------------------
@@ -1097,7 +1334,7 @@ def _two_checkout_runner(
         assert kw.get("shell") is not True
         if args[2] != str(outpost_checkout):
             return trailhead_runner(args, **kw)
-        sub = args[3]
+        sub = _git_sub(args)
         if sub == "rev-parse":
             return subprocess.CompletedProcess(args, 0, stdout=_BRANCH + "\n", stderr="")
         if sub == "fetch":
@@ -1106,6 +1343,8 @@ def _two_checkout_runner(
             )
         if sub == "rev-list":
             return subprocess.CompletedProcess(args, 0, stdout=outpost_count + "\n", stderr="")
+        if (answer := _clear_preflight(args)) is not None:
+            return answer
         raise AssertionError(f"unexpected git invocation against outpost: {args}")
 
     return runner, calls
@@ -1147,7 +1386,7 @@ class TestOutpostCheck:
 
         result = update.check_for_update(env=env, runner=runner)
 
-        assert result["outpost"] == {"outcome": "ok", "commits_behind": 0, "reason": None}
+        assert result == OUTPOST_OK_EXAMPLE
 
     def test_outpost_verdict_is_independent_of_the_install_verdict(self, tmp_path):
         env = _env(tmp_path)
@@ -1221,7 +1460,7 @@ class TestOutpostCheck:
 
         result = update.check_for_update(env=env, runner=runner)
 
-        assert not any(c[3] == "fetch" for c in calls)
+        assert not any(_git_sub(c) == "fetch" for c in calls)
         assert result["outpost"]["commits_behind"] == 2
 
     def test_the_outpost_probe_is_read_only(self, tmp_path):
@@ -1233,7 +1472,7 @@ class TestOutpostCheck:
 
         update.check_for_update(env=env, runner=runner)
 
-        outpost_subs = {c[3] for c in _outpost_calls(calls, outpost_checkout)}
+        outpost_subs = {_git_sub(c) for c in _outpost_calls(calls, outpost_checkout)}
         assert outpost_subs and outpost_subs <= _READ_ONLY_SUBCOMMANDS
 
     def test_cli_human_output_names_the_outpost_gap(self, tmp_path, monkeypatch):
@@ -1285,7 +1524,7 @@ class TestOutpostCheckNeverMasksTheInstallVerdict:
         inner, _ = _two_checkout_runner(outpost_checkout)
 
         def runner(args, **kw):
-            if args[2] == str(outpost_checkout) and args[3] == "rev-parse":
+            if args[2] == str(outpost_checkout) and _git_sub(args) == "rev-parse":
                 return subprocess.CompletedProcess(args, 128, stdout="", stderr="no upstream")
             return inner(args, **kw)
 
@@ -1309,7 +1548,7 @@ class TestCheckFetchesNeverPrompt:
         fetch_envs: list = []
 
         def runner(args, **kw):
-            if args[3] == "fetch":
+            if _git_sub(args) == "fetch":
                 fetch_envs.append(kw.get("env"))
             return inner(args, **kw)
 
