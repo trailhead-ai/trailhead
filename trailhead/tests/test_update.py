@@ -23,12 +23,14 @@ import pytest
 
 from trailhead import update
 from trailhead.tests.test_update_apply import (
-    _catch_up,
+    _ahead_only,
     _commit_locally,
     _dirty,
+    _dirty_and_diverged,
     _git,
     _git_sub,
     _init_real_repo_pair,
+    _real_install_behind,
     _real_runner,
 )
 from trailhead.tests.fixtures.update_check_schema import (
@@ -1113,20 +1115,9 @@ class TestSecondHopFailureKeepsTheFirstHopVerdict:
 # ---------------------------------------------------------------------------
 
 
-def _preflight_env(tmp_path: Path, *, setup=None):
-    """A real install checkout one commit behind its origin, stamped at its
-    own old sha (so the install is stale even when the checkout is level)."""
-    env = _env(tmp_path)
-    origin, checkout, old_sha, _new = _init_real_repo_pair(tmp_path)
-    _install_stamp(tmp_path, env, sha=old_sha)
-    if setup is not None:
-        setup(checkout)
-    return env, checkout
-
-
 class TestApplyPreflight:
     def test_a_clean_checkout_behind_its_upstream_is_clear(self, tmp_path):
-        env, _ = _preflight_env(tmp_path)
+        env, _ = _real_install_behind(tmp_path)
 
         result = update.check_for_update(env=env, runner=_real_runner)
 
@@ -1158,14 +1149,14 @@ class TestApplyPreflight:
         assert not any(_git_sub(c) in ("status", "merge-base") for c in _outpost_calls(calls, outpost))
 
     def test_uncommitted_changes_are_refused_as_local_changes(self, tmp_path):
-        env, _ = _preflight_env(tmp_path, setup=_dirty)
+        env, _ = _real_install_behind(tmp_path, setup=_dirty)
 
         result = update.check_for_update(env=env, runner=_real_runner)
 
         assert result["apply_preflight"] == LOCAL_CHANGES_PREFLIGHT
 
     def test_the_outpost_part_is_judged_independently_of_the_install(self, tmp_path):
-        env, _ = _preflight_env(tmp_path)
+        env, _ = _real_install_behind(tmp_path)
         outpost_root = tmp_path / "outpost-root"
         outpost_root.mkdir()
         _o_origin, outpost, _o_old, _o_new = _init_real_repo_pair(outpost_root)
@@ -1179,18 +1170,14 @@ class TestApplyPreflight:
         assert result["outpost"]["apply_preflight"] == LOCAL_CHANGES_PREFLIGHT
 
     def test_a_checkout_with_a_local_and_an_upstream_commit_is_refused_as_diverged(self, tmp_path):
-        env, _ = _preflight_env(tmp_path, setup=_commit_locally)
+        env, _ = _real_install_behind(tmp_path, setup=_commit_locally)
 
         result = update.check_for_update(env=env, runner=_real_runner)
 
         assert result["apply_preflight"] == DIVERGED_PREFLIGHT
 
     def test_a_checkout_only_ahead_of_its_upstream_is_clear(self, tmp_path):
-        def ahead(checkout):
-            _catch_up(checkout)
-            _commit_locally(checkout)
-
-        env, _ = _preflight_env(tmp_path, setup=ahead)
+        env, _ = _real_install_behind(tmp_path, setup=_ahead_only)
 
         result = update.check_for_update(env=env, runner=_real_runner)
 
@@ -1199,18 +1186,14 @@ class TestApplyPreflight:
         assert result["apply_preflight"] == CLEAR_PREFLIGHT
 
     def test_dirty_and_diverged_reports_local_changes_as_apply_would(self, tmp_path):
-        def both(checkout):
-            _commit_locally(checkout)
-            _dirty(checkout)
-
-        env, _ = _preflight_env(tmp_path, setup=both)
+        env, _ = _real_install_behind(tmp_path, setup=_dirty_and_diverged)
 
         result = update.check_for_update(env=env, runner=_real_runner)
 
         assert result["apply_preflight"] == LOCAL_CHANGES_PREFLIGHT
 
     def test_a_checkout_with_no_tracking_upstream_is_refused_as_no_upstream(self, tmp_path):
-        env, checkout = _preflight_env(tmp_path)
+        env, checkout = _real_install_behind(tmp_path)
         _git(checkout, "branch", "--unset-upstream")
 
         verdict = update._apply_preflight(
@@ -1258,7 +1241,7 @@ def _stat_dirty_repo_with_fsmonitor_hook(tmp_path: Path):
     is already done and the fetch throttle is fresh, so the check runs only
     its read probes: `git fetch` itself runs a configured fsmonitor program,
     which is the existing fetch probe's exposure, not the preflight's."""
-    env, checkout = _preflight_env(tmp_path)
+    env, checkout = _real_install_behind(tmp_path)
     _git(checkout, "fetch", "origin")
     _fresh_freshness_stamp(tmp_path, env, iso=update._now_iso())
     sentinel = tmp_path / "fsmonitor-ran"

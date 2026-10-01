@@ -38,7 +38,7 @@ from trailhead.tests.fixtures.update_check_schema import (
     OUTPOST_BEHIND_REFUSED_EXAMPLE,
     UNANSWERABLE_NO_STAMP_EXAMPLE,
 )
-from trailhead.tests.test_update_apply import _dirty, _git, _init_real_repo_pair
+from trailhead.tests.test_update_apply import _dirty, _git, _init_real_repo_pair, _run_git_real
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _HOOK_PATH = (
@@ -81,14 +81,14 @@ def _checkout(tmp_path: Path, name: str = "checkout") -> Path:
     return path
 
 
-def _write_stamp(tmp_path: Path, env: dict[str, str], checkout: Path) -> None:
+def _write_stamp(tmp_path: Path, env: dict[str, str], checkout: Path, *, sha: str = _SHA) -> None:
     state = Path(env["TRAILHEAD_STATE_DIR"])
     state.mkdir(parents=True, exist_ok=True)
     (state / "provenance.json").write_text(
         json.dumps(
             {
                 "checkout": str(checkout),
-                "sha": _SHA,
+                "sha": sha,
                 "wired_at": "2026-01-01T00:00:00Z",
                 "last_check": None,
             }
@@ -870,24 +870,12 @@ def _real_trailhead_checkout_behind_and_dirty(tmp_path: Path) -> Path:
     checkout = tmp_path / "home" / "checkout"
     checkout.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(["git", "clone", str(origin), str(checkout)], check=True, capture_output=True)
-    sha = subprocess.run(
-        ["git", "-C", str(checkout), "rev-parse", "HEAD"], check=True, capture_output=True, text=True
-    ).stdout.strip()
+    sha = _run_git_real(checkout, "rev-parse", "HEAD").stdout.strip()
     (origin / "file.txt").write_text("two\n")
     _git(origin, "commit", "-am", "second")
     _dirty(checkout)
-    _write_stamp_at(tmp_path, checkout, sha)
+    _write_stamp(tmp_path, _env(tmp_path), checkout, sha=sha)
     return checkout
-
-
-def _write_stamp_at(tmp_path: Path, checkout: Path, sha: str) -> None:
-    state = tmp_path / "state"
-    state.mkdir(parents=True, exist_ok=True)
-    (state / "provenance.json").write_text(
-        json.dumps(
-            {"checkout": str(checkout), "sha": sha, "wired_at": "2026-01-01T00:00:00Z", "last_check": None}
-        )
-    )
 
 
 class TestRealHookOverRealCheck:
