@@ -1383,11 +1383,20 @@ def _dirty_and_diverged(checkout: Path) -> None:
     _dirty(checkout)
 
 
-def _apply_on_real_repo(tmp_path: Path, monkeypatch, setup):
+def _real_install_behind(tmp_path: Path, *, setup=None):
+    """A real install checkout one commit behind its origin, stamped at its
+    own old sha (so the install is stale even when the checkout is level),
+    with *setup* applied to the checkout. Returns (env, checkout)."""
     env = _env(tmp_path)
     _origin, checkout, old_sha, _new = _init_real_repo_pair(tmp_path)
     _install_stamp(tmp_path, env, sha=old_sha)
-    setup(checkout)
+    if setup is not None:
+        setup(checkout)
+    return env, checkout
+
+
+def _apply_on_real_repo(tmp_path: Path, monkeypatch, setup):
+    env, checkout = _real_install_behind(tmp_path, setup=setup)
     monkeypatch.setattr(update, "resolve_config_for_env", lambda e: _FakeCfg())
     monkeypatch.setattr(update, "wire_all_harnesses", lambda *a, **k: {})
     return env, checkout
