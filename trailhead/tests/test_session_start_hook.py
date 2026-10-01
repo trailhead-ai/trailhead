@@ -20,18 +20,25 @@ import importlib.util
 import io
 import json
 import os
+import shutil
 import stat
+import subprocess
 import sys
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
+
 from trailhead.tests.fixtures.update_check_schema import (
     BEHIND_EXAMPLE,
+    BEHIND_REFUSED_EXAMPLE,
     OK_EXAMPLE,
     OUTPOST_BEHIND_EXAMPLE,
+    OUTPOST_BEHIND_REFUSED_EXAMPLE,
     UNANSWERABLE_NO_STAMP_EXAMPLE,
 )
+from trailhead.tests.test_update_apply import _dirty, _git, _init_real_repo_pair
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _HOOK_PATH = (
@@ -797,3 +804,123 @@ class TestOutpostOnlyNoticeCarriesNoChangelogBlock:
         runner, _ = _spy_runner(_BEHIND)
 
         assert "```" in hook.check_and_render(env=env, runner=runner)
+
+
+# ---------------------------------------------------------------------------
+# schema 5 — the hook ignores `apply_preflight`
+# ---------------------------------------------------------------------------
+
+
+def _as_schema_4(report: dict) -> dict:
+    """The report a schema-4 producer would have emitted for the same state."""
+    v4 = {k: v for k, v in report.items() if k != "apply_preflight"}
+    v4["schema_version"] = 4
+    if isinstance(v4.get("outpost"), dict):
+        v4["outpost"] = {k: v for k, v in v4["outpost"].items() if k != "apply_preflight"}
+    return v4
+
+
+class TestSchemaFiveReport:
+    @pytest.mark.parametrize(
+        "report",
+        [BEHIND_EXAMPLE, BEHIND_REFUSED_EXAMPLE, OUTPOST_BEHIND_REFUSED_EXAMPLE],
+        ids=["clear", "install-refused", "outpost-refused"],
+    )
+    def test_a_schema_5_report_produces_the_same_notice_as_its_schema_4_equivalent(
+        self, tmp_path, report
+    ):
+        # `OUTPOST_*` examples are level at the install; give that one an
+        # install gap so a notice is emitted at all.
+        report = {**report, "commits_behind": 3, "outcome": "behind"}
+        notices = []
+        for name, shape in (("v5", report), ("v4", _as_schema_4(report))):
+            case = tmp_path / name
+            case.mkdir()
+            env = _env(case)
+            _write_stamp(case, env, _checkout(case))
+            runner, _ = _spy_runner(shape)
+            notices.append(hook.check_and_render(env=env, runner=runner))
+
+        assert notices[0] is not None
+        assert notices[0] == notices[1]
+
+
+# ---------------------------------------------------------------------------
+# Real seam — the real hook over the real bin/trailhead, behind and dirty repos
+# ---------------------------------------------------------------------------
+
+
+def _real_trailhead_checkout_behind_and_dirty(tmp_path: Path) -> Path:
+    """A real trailhead checkout (this repo's bin/ + package, cloned from a
+    throwaway origin that has since moved on) with an uncommitted edit."""
+    origin = tmp_path / "origin"
+    shutil.copytree(
+        _REPO_ROOT / "trailhead",
+        origin / "trailhead",
+        ignore=shutil.ignore_patterns("tests", "__pycache__"),
+    )
+    shutil.copytree(_REPO_ROOT / "bin", origin / "bin", ignore=shutil.ignore_patterns("__pycache__"))
+    shutil.copy(_REPO_ROOT / "pyproject.toml", origin / "pyproject.toml")
+    (origin / "file.txt").write_text("one\n")
+    subprocess.run(["git", "init", "--initial-branch=main", str(origin)], check=True, capture_output=True)
+    for key, value in (("user.email", "a@example.com"), ("user.name", "Test")):
+        _git(origin, "config", key, value)
+    _git(origin, "add", "-A")
+    _git(origin, "commit", "-m", "first")
+    checkout = tmp_path / "home" / "checkout"
+    checkout.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "clone", str(origin), str(checkout)], check=True, capture_output=True)
+    sha = subprocess.run(
+        ["git", "-C", str(checkout), "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+    ).stdout.strip()
+    (origin / "file.txt").write_text("two\n")
+    _git(origin, "commit", "-am", "second")
+    _dirty(checkout)
+    _write_stamp_at(tmp_path, checkout, sha)
+    return checkout
+
+
+def _write_stamp_at(tmp_path: Path, checkout: Path, sha: str) -> None:
+    state = tmp_path / "state"
+    state.mkdir(parents=True, exist_ok=True)
+    (state / "provenance.json").write_text(
+        json.dumps(
+            {"checkout": str(checkout), "sha": sha, "wired_at": "2026-01-01T00:00:00Z", "last_check": None}
+        )
+    )
+
+
+class TestRealHookOverRealCheck:
+    def test_behind_and_dirty_repos_still_notify_within_the_hook_cap(self, tmp_path, monkeypatch):
+        checkout = _real_trailhead_checkout_behind_and_dirty(tmp_path)
+        outpost_root = tmp_path / "outpost-root"
+        outpost_root.mkdir()
+        _o_origin, outpost, _o_old, _o_new = _init_real_repo_pair(outpost_root)
+        _dirty(outpost)
+        config = tmp_path / "outpost-config"
+        config.mkdir()
+        (config / "config.toml").write_text(f'checkout = "{outpost}"\n')
+        monkeypatch.setenv("TRAILHEAD_STATE_DIR", str(tmp_path / "state"))
+        monkeypatch.setenv("HOME", str(tmp_path / "home"))
+        monkeypatch.setenv("OUTPOST_CONFIG_DIR", str(config))
+
+        start = time.monotonic()
+        notice = hook.check_and_render(env=dict(os.environ))
+        elapsed = time.monotonic() - start
+
+        assert notice is not None
+        assert "outpost" in notice.lower()
+        assert elapsed < hook.DEFAULT_EXEC_TIMEOUT_SECONDS
+        report = json.loads(
+            subprocess.run(
+                [str(checkout / "bin" / "trailhead"), "update", "--check", "--json"],
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout
+        )
+        assert report["apply_preflight"] == {"verdict": "refused", "refusal": "local_changes"}
+        assert report["outpost"]["apply_preflight"] == {
+            "verdict": "refused",
+            "refusal": "local_changes",
+        }

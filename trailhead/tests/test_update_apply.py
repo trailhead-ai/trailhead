@@ -29,6 +29,16 @@ _ORIGIN_URL = "https://example.com/r.git"
 _BRANCH = "origin/main"
 
 
+def _git_sub(argv) -> str:
+    """The git subcommand of a `["git", "-C", path, <global flags>, sub, ...]`
+    argv, skipping the global flags (`--no-optional-locks`, `-c k=v`) that
+    precede it."""
+    i = 3
+    while argv[i].startswith("-"):
+        i += 2 if argv[i] == "-c" else 1
+    return argv[i]
+
+
 def _env(tmp_path: Path) -> dict[str, str]:
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
@@ -101,7 +111,7 @@ def _make_runner(
         assert isinstance(args, list), f"argv must be a list, not interpolated: {args!r}"
         assert kw.get("shell") is not True, "git must never be invoked with shell=True"
         assert args[0] == "git"
-        sub = args[3]
+        sub = _git_sub(args)
         if sub == "status":
             return subprocess.CompletedProcess(args, status_rc, stdout=status_stdout, stderr="")
         if sub == "fetch":
@@ -183,7 +193,7 @@ class TestConsentGate:
 
         assert exit_code == 0
         assert wire_calls, "an accepted confirmation must proceed to the wire"
-        assert any(c[3] == "fetch" for c in calls)
+        assert any(_git_sub(c) == "fetch" for c in calls)
 
     def test_interactive_tty_confirmation_declined_aborts_and_mutates_nothing(
         self, tmp_path, monkeypatch
@@ -223,7 +233,7 @@ class TestDirtyCheckout:
         exit_code = update.run_update_apply(env=env, runner=runner, assume_yes=True)
 
         assert exit_code != 0
-        assert not any(c[3] in ("fetch", "merge", "reset") for c in calls)
+        assert not any(_git_sub(c) in ("fetch", "merge", "reset") for c in calls)
         assert not wire_calls
         stamp = read_stamp(env=env)
         assert stamp["sha"] == _OLD_SHA
@@ -256,7 +266,7 @@ class TestDiverged:
         exit_code = update.run_update_apply(env=env, runner=runner, assume_yes=True)
 
         assert exit_code != 0
-        assert not any(c[3] == "merge" for c in calls)
+        assert not any(_git_sub(c) == "merge" for c in calls)
         assert not wire_calls
         stamp = read_stamp(env=env)
         assert stamp["sha"] == _OLD_SHA
@@ -276,7 +286,7 @@ class TestAlreadyUpToDate:
         exit_code = update.run_update_apply(env=env, runner=runner, assume_yes=True)
 
         assert exit_code == 0
-        assert not any(c[3] == "merge" for c in calls)
+        assert not any(_git_sub(c) == "merge" for c in calls)
         assert not wire_calls
         stamp = read_stamp(env=env)
         assert stamp["sha"] == _OLD_SHA
@@ -299,7 +309,7 @@ class TestCleanUpgrade:
 
         assert exit_code == 0
         assert len(wire_calls) == 1
-        merge_calls = [c for c in calls if c[3] == "merge"]
+        merge_calls = [c for c in calls if _git_sub(c) == "merge"]
         assert len(merge_calls) == 1
         stamp = read_stamp(env=env)
         assert stamp["sha"] == _NEW_SHA
@@ -321,7 +331,7 @@ class TestDryRun:
         )
 
         assert exit_code == 0
-        assert not any(c[3] in ("fetch", "merge", "reset") for c in calls)
+        assert not any(_git_sub(c) in ("fetch", "merge", "reset") for c in calls)
         assert not wire_calls
         stamp = read_stamp(env=env)
         assert stamp["sha"] == _OLD_SHA
@@ -341,7 +351,7 @@ class TestWireLock:
             exit_code = update.run_update_apply(env=env, runner=runner, assume_yes=True)
 
         assert exit_code != 0
-        assert not any(c[3] == "fetch" for c in calls), (
+        assert not any(_git_sub(c) == "fetch" for c in calls), (
             "the fetch must never run while a concurrent operation holds the wire lock"
         )
         stamp = read_stamp(env=env)
@@ -522,6 +532,29 @@ def _real_runner(args, **kw):
     return subprocess.run(args, **kw)
 
 
+def _git(checkout: Path, *args: str) -> None:
+    subprocess.run(
+        ["git", "-C", str(checkout), "-c", "commit.gpgsign=false", *args],
+        check=True,
+        capture_output=True,
+    )
+
+
+def _dirty(checkout: Path) -> None:
+    (checkout / "file.txt").write_text("uncommitted\n")
+
+
+def _commit_locally(checkout: Path) -> None:
+    (checkout / "local.txt").write_text("mine\n")
+    _git(checkout, "add", "local.txt")
+    _git(checkout, "commit", "-m", "local")
+
+
+def _catch_up(checkout: Path) -> None:
+    _git(checkout, "fetch", "origin")
+    _git(checkout, "merge", "--ff-only", "origin/main")
+
+
 class TestTrueNoOpOnWireFailure:
     def test_rollback_restores_checkout_sha_and_prior_wiring_on_wire_failure(
         self, tmp_path, monkeypatch, capsys
@@ -684,7 +717,7 @@ class TestApplyDerivesBranchAndReWiresAStaleInstall:
 
         def runner(args, **kw):
             calls.append(list(args))
-            sub = args[3]
+            sub = _git_sub(args)
             if sub == "status":
                 return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
             if sub == "fetch":
@@ -710,7 +743,7 @@ class TestApplyDerivesBranchAndReWiresAStaleInstall:
 
         update.run_update_apply(env=env, runner=runner, assume_yes=True)
 
-        assert not any(c[3] == "remote" for c in calls)
+        assert not any(_git_sub(c) == "remote" for c in calls)
 
     def test_current_checkout_with_a_stale_stamp_re_wires(self, tmp_path, monkeypatch):
         env = _env(tmp_path)
@@ -724,7 +757,7 @@ class TestApplyDerivesBranchAndReWiresAStaleInstall:
 
         assert rc == 0
         assert wired == [1]
-        assert not any(c[3] == "merge" for c in calls)
+        assert not any(_git_sub(c) == "merge" for c in calls)
         assert read_stamp(env=env)["sha"] == _NEW_SHA
 
     def test_everything_level_is_a_true_no_op(self, tmp_path, monkeypatch):
@@ -739,7 +772,7 @@ class TestApplyDerivesBranchAndReWiresAStaleInstall:
 
         assert rc == 0
         assert wired == []
-        assert not any(c[3] in ("merge", "merge-base") for c in calls)
+        assert not any(_git_sub(c) in ("merge", "merge-base") for c in calls)
 
 
 class TestCheckoutAheadOfItsRemote:
@@ -768,7 +801,7 @@ class TestCheckoutAheadOfItsRemote:
 
         def runner(args, **kw):
             calls.append(list(args))
-            sub = args[3]
+            sub = _git_sub(args)
             if sub == "status":
                 return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
             if sub == "fetch":
@@ -804,7 +837,7 @@ class TestCheckoutAheadOfItsRemote:
 
         assert rc == 0
         assert wired == [1]
-        assert not any(c[3] == "merge" for c in calls)
+        assert not any(_git_sub(c) == "merge" for c in calls)
 
     def test_level_install_on_an_ahead_checkout_is_a_no_op(self, tmp_path, monkeypatch):
         env = _env(tmp_path)
@@ -878,7 +911,7 @@ def _outpost_runner(
         assert kw.get("shell") is not True
         if args[2] != str(outpost_checkout):
             return trailhead_runner(args, **kw)
-        sub = args[3]
+        sub = _git_sub(args)
         if sub == "status":
             return subprocess.CompletedProcess(args, 0, stdout=status_stdout, stderr="")
         if sub == "fetch":
@@ -980,7 +1013,7 @@ class TestOutpostUpgrade:
         rc = update.run_update_apply(env=env, runner=runner, assume_yes=True)
 
         assert rc == 0
-        assert [c[3] for c in _outpost_calls(calls, outpost)].count("merge") == 1
+        assert [_git_sub(c) for c in _outpost_calls(calls, outpost)].count("merge") == 1
         assert spy.steps == [("deps", _OUTPOST_NEW), ("build", _OUTPOST_NEW)]
         assert read_stamp(env=env)["sha"] == _NEW_SHA
 
@@ -1038,7 +1071,7 @@ class TestOutpostUpgrade:
         rc = update.run_update_apply(env=env, runner=runner, assume_yes=True)
 
         assert rc == 0
-        assert "merge" not in [c[3] for c in _outpost_calls(calls, outpost)]
+        assert "merge" not in [_git_sub(c) for c in _outpost_calls(calls, outpost)]
         assert spy.steps == []
 
     def test_a_dirty_outpost_refuses_the_whole_upgrade_before_any_mutation(
@@ -1059,7 +1092,7 @@ class TestOutpostUpgrade:
         rc = update.run_update_apply(env=env, runner=runner, assume_yes=True)
 
         assert rc == 1
-        assert not any(c[3] in ("fetch", "merge", "reset") for c in calls)
+        assert not any(_git_sub(c) in ("fetch", "merge", "reset") for c in calls)
         assert wired == [] and spy.steps == []
         assert read_stamp(env=env)["sha"] == _OLD_SHA
         err = capsys.readouterr().err
@@ -1101,7 +1134,7 @@ class TestOutpostUpgrade:
 
         assert rc == 1
         assert read_stamp(env=env)["sha"] == _NEW_SHA
-        assert "merge" not in [c[3] for c in _outpost_calls(calls, outpost)]
+        assert "merge" not in [_git_sub(c) for c in _outpost_calls(calls, outpost)]
         assert spy.steps == []
         err = capsys.readouterr().err
         assert "diverged" in err and str(outpost) in err
@@ -1205,7 +1238,7 @@ class TestOutpostUpgrade:
         rc = update.run_update_apply(env=env, runner=runner, dry_run=True)
 
         assert rc == 0
-        assert not any(c[3] in ("fetch", "merge", "reset") for c in calls)
+        assert not any(_git_sub(c) in ("fetch", "merge", "reset") for c in calls)
         assert wired == [] and spy.steps == []
         assert str(outpost) in capsys.readouterr().out
 
@@ -1285,7 +1318,7 @@ class TestOutpostWaitsOnTheInstall:
         rc = update.run_update_apply(env=env, runner=runner, assume_yes=True)
 
         assert rc == 1
-        assert not any(c[3] in ("fetch", "merge", "reset") for c in _outpost_calls(calls, outpost))
+        assert not any(_git_sub(c) in ("fetch", "merge", "reset") for c in _outpost_calls(calls, outpost))
         assert spy.steps == []
 
     def test_an_upstreamless_outpost_names_the_config_escape_hatch(
@@ -1300,7 +1333,7 @@ class TestOutpostWaitsOnTheInstall:
         wired = _patch_wire(monkeypatch)
 
         def runner(args, **kw):
-            if args[2] == str(outpost) and args[3] == "rev-parse" and args[4] == "--abbrev-ref":
+            if args[2] == str(outpost) and _git_sub(args) == "rev-parse" and args[4] == "--abbrev-ref":
                 calls.append(list(args))
                 return subprocess.CompletedProcess(args, 128, stdout="", stderr="no upstream")
             return inner(args, **kw)
@@ -1309,7 +1342,7 @@ class TestOutpostWaitsOnTheInstall:
 
         assert rc == 1
         assert wired == []
-        assert not any(c[3] in ("fetch", "merge") for c in calls)
+        assert not any(_git_sub(c) in ("fetch", "merge") for c in calls)
         assert "'checkout' key in the outpost config" in capsys.readouterr().err
 
     def test_an_outpost_fetch_failure_keeps_the_install_upgrade(self, tmp_path, monkeypatch):
@@ -1324,7 +1357,7 @@ class TestOutpostWaitsOnTheInstall:
         _patch_wire(monkeypatch)
 
         def runner(args, **kw):
-            if args[2] == str(outpost) and args[3] == "fetch":
+            if args[2] == str(outpost) and _git_sub(args) == "fetch":
                 return subprocess.CompletedProcess(args, 128, stdout="", stderr="denied")
             return inner(args, **kw)
 
@@ -1333,3 +1366,100 @@ class TestOutpostWaitsOnTheInstall:
         assert rc == 1
         assert read_stamp(env=env)["sha"] == _NEW_SHA
         assert spy.steps == []
+
+
+# ---------------------------------------------------------------------------
+# Real repos — apply refuses exactly what the check's apply_preflight predicts
+# ---------------------------------------------------------------------------
+
+
+def _ahead_only(checkout: Path) -> None:
+    _catch_up(checkout)
+    _commit_locally(checkout)
+
+
+def _dirty_and_diverged(checkout: Path) -> None:
+    _commit_locally(checkout)
+    _dirty(checkout)
+
+
+def _apply_on_real_repo(tmp_path: Path, monkeypatch, setup):
+    env = _env(tmp_path)
+    _origin, checkout, old_sha, _new = _init_real_repo_pair(tmp_path)
+    _install_stamp(tmp_path, env, sha=old_sha)
+    setup(checkout)
+    monkeypatch.setattr(update, "resolve_config_for_env", lambda e: _FakeCfg())
+    monkeypatch.setattr(update, "wire_all_harnesses", lambda *a, **k: {})
+    return env, checkout
+
+
+class TestApplyRefusesRealRepos:
+    def test_a_real_dirty_checkout_is_refused_with_the_existing_message(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        env, checkout = _apply_on_real_repo(tmp_path, monkeypatch, _dirty)
+        head = _run_git_real(checkout, "rev-parse", "HEAD").stdout
+
+        rc = update.run_update_apply(env=env, runner=_real_runner, assume_yes=True)
+
+        assert rc == 1
+        err = capsys.readouterr().err
+        assert f"trailhead: refusing to upgrade — {checkout} has uncommitted changes." in err
+        assert "Commit or stash them, then re-run: trailhead update" in err
+        assert _run_git_real(checkout, "rev-parse", "HEAD").stdout == head
+
+    def test_a_real_diverged_checkout_is_refused_with_the_existing_message(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        env, checkout = _apply_on_real_repo(tmp_path, monkeypatch, _commit_locally)
+        head = _run_git_real(checkout, "rev-parse", "HEAD").stdout
+
+        rc = update.run_update_apply(env=env, runner=_real_runner, assume_yes=True)
+
+        assert rc == 1
+        err = capsys.readouterr().err
+        assert f"trailhead: refusing to upgrade — {checkout}'s HEAD has diverged from origin/main" in err
+        assert "cannot be fast-forwarded" in err
+        assert _run_git_real(checkout, "rev-parse", "HEAD").stdout == head
+
+    @pytest.mark.parametrize(
+        "setup, refusal, apply_says",
+        [
+            (lambda checkout: None, None, None),
+            (_ahead_only, None, None),
+            (_dirty, "local_changes", "has uncommitted changes"),
+            (_commit_locally, "diverged", "has diverged from origin/main"),
+            (_dirty_and_diverged, "local_changes", "has uncommitted changes"),
+        ],
+        ids=["behind-only", "ahead-only", "dirty", "diverged", "dirty-and-diverged"],
+    )
+    def test_the_check_verdict_equals_what_apply_does_on_the_same_repo(
+        self, tmp_path, monkeypatch, capsys, setup, refusal, apply_says
+    ):
+        env, _checkout_path = _apply_on_real_repo(tmp_path, monkeypatch, setup)
+
+        preflight = update.check_for_update(env=env, runner=_real_runner)["apply_preflight"]
+        rc = update.run_update_apply(env=env, runner=_real_runner, assume_yes=True)
+
+        err = capsys.readouterr().err
+        if refusal is None:
+            assert preflight == {"verdict": "clear", "refusal": None}
+            assert rc == 0, err
+        else:
+            assert preflight == {"verdict": "refused", "refusal": refusal}
+            assert rc == 1
+            assert apply_says in err
+
+    def test_no_upstream_is_refused_by_both_the_preflight_and_apply(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        env, checkout = _apply_on_real_repo(
+            tmp_path, monkeypatch, lambda c: _git(c, "branch", "--unset-upstream")
+        )
+
+        preflight = update._apply_preflight(checkout, env=env, runner=_real_runner, timeout=10)
+        rc = update.run_update_apply(env=env, runner=_real_runner, assume_yes=True)
+
+        assert preflight == {"verdict": "refused", "refusal": "no_upstream"}
+        assert rc == 1
+        assert "could not resolve the tracked upstream branch" in capsys.readouterr().err
