@@ -1202,17 +1202,31 @@ class TestApplyPreflight:
 
         assert verdict == NO_UPSTREAM_PREFLIGHT
 
-    def test_an_upstream_that_stops_resolving_during_the_check_is_refused_as_no_upstream(
-        self, tmp_path
-    ):
+    def test_the_check_reuses_the_branch_it_resolved_instead_of_asking_git_again(self, tmp_path):
         env = _env(tmp_path)
         _install_stamp(tmp_path, env)
-        runner, _ = _make_runner(count="3", upstream_vanishes_after_first_resolve=True)
+        runner, calls = _make_runner(count="3", upstream_vanishes_after_first_resolve=True)
 
         result = update.check_for_update(env=env, runner=runner)
 
+        upstream_lookups = [c for c in calls if "rev-parse" in c and "@{u}" in c]
+        assert len(upstream_lookups) == 1
         assert result["outcome"] == "behind"
-        assert result["apply_preflight"] == NO_UPSTREAM_PREFLIGHT
+        assert result["apply_preflight"] == CLEAR_PREFLIGHT
+
+    @pytest.mark.parametrize(
+        "runner_kwargs",
+        [{"raising_subs": frozenset({"rev-parse"})}, {"branch_rc": 128}],
+        ids=["git-unavailable", "git-error-exit"],
+    )
+    def test_an_upstream_lookup_that_errors_is_unknown_not_no_upstream(self, tmp_path, runner_kwargs):
+        runner, _ = _make_runner(**runner_kwargs)
+
+        verdict = update._apply_preflight(
+            tmp_path, env=_env(tmp_path), runner=runner, timeout=10
+        )
+
+        assert verdict == UNKNOWN_PREFLIGHT
 
     @pytest.mark.parametrize("failing_sub", ["status", "merge-base"])
     def test_a_predicate_git_cannot_answer_is_unknown_never_clear(self, tmp_path, failing_sub):
@@ -1672,6 +1686,7 @@ _CONFIGS = {
     "false": "session_start_update_check = false\n",
     "key-absent": 'other_key = "x"\n',
     "malformed": "session_start_update_check = = =\n",
+    "non-utf8": b'session_start_update_check = false\n# \xff\xfe\n',
     "no-file": None,
 }
 
@@ -1682,7 +1697,10 @@ def _write_config(checkout: Path, config: str) -> None:
     if body is None:
         return
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(body, encoding="utf-8")
+    if isinstance(body, bytes):
+        path.write_bytes(body)
+    else:
+        path.write_text(body, encoding="utf-8")
 
 
 def _automatic_env(tmp_path, monkeypatch, *, config: str, disable_var: str | None):
@@ -1801,6 +1819,14 @@ class TestAutomaticCheckHonoursTheOptOut:
 
         assert exit_code == 0
         assert json.loads(out) == UNANSWERABLE_NO_STAMP_EXAMPLE
+
+    def test_a_config_that_is_not_utf8_leaves_the_check_on(self, tmp_path, monkeypatch):
+        env, _, _ = _automatic_env(tmp_path, monkeypatch, config="non-utf8", disable_var=None)
+
+        exit_code, out, _ = _run_cli(["update", "--check", "--json", "--automatic"], env=env)
+
+        assert exit_code == 0
+        assert json.loads(out) == BEHIND_EXAMPLE
 
     @pytest.mark.parametrize("config", list(_CONFIGS))
     @pytest.mark.parametrize("disable_var", [None, "1", "0"])
