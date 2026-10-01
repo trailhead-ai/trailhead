@@ -272,6 +272,31 @@ class TestDiverged:
         assert stamp["sha"] == _OLD_SHA
 
 
+class TestDivergenceUnknown:
+    @pytest.mark.parametrize(
+        "runner_kwargs",
+        [{"remote_is_ancestor_rc": 128}, {"ancestor_rc": 128}],
+        ids=["first-merge-base-errors", "second-merge-base-errors"],
+    )
+    def test_a_merge_base_error_is_refused_without_claiming_divergence(
+        self, tmp_path, monkeypatch, capsys, runner_kwargs
+    ):
+        env = _env(tmp_path)
+        _install_stamp(tmp_path, env)
+        runner, calls = _make_runner(**runner_kwargs)
+        monkeypatch.setattr(update, "resolve_config_for_env", lambda env: _FakeCfg())
+        monkeypatch.setattr(update, "wire_all_harnesses", lambda *a, **kw: {})
+
+        exit_code = update.run_update_apply(env=env, runner=runner, assume_yes=True)
+
+        err = capsys.readouterr().err
+        assert exit_code == 1
+        assert not any(_git_sub(c) == "merge" for c in calls)
+        assert "could not determine whether" in err
+        assert "diverged" not in err
+        assert err.count("\n") == 1
+
+
 class TestAlreadyUpToDate:
     def test_up_to_date_is_a_noop_and_exits_zero_without_changing_the_sha(self, tmp_path, monkeypatch):
         env = _env(tmp_path)

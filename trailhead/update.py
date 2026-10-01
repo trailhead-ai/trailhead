@@ -273,7 +273,7 @@ def automatic_check_disabled(*, env: dict[str, str] | None = None) -> bool:
     try:
         with open(Path(stamp["checkout"]) / "config" / "default.toml", "rb") as fh:
             data = tomllib.load(fh)
-    except (OSError, tomllib.TOMLDecodeError):
+    except (OSError, ValueError):
         return False
     return data.get(DISABLE_CONFIG_KEY, True) is False
 
@@ -382,8 +382,12 @@ def _extract_changelog_delta(
     return {"available": True, "lines": added, "truncated": truncated}
 
 
-def _resolve_upstream_branch(checkout: Path, *, runner, timeout: int) -> tuple[str | None, str]:
-    """Return (tracked upstream branch, error) for *checkout*, read live.
+def _probe_upstream(checkout: Path, *, runner, timeout: int) -> tuple[str | None, str, str]:
+    """Return (tracked upstream branch, error, kind) for *checkout*, read live.
+
+    *kind* is "ok", "none" (git answered: no usable upstream is configured),
+    or "error" (git could not answer — a timeout, a failed spawn, or an
+    unrecognised failure).
 
     The branch is the value every later git call takes as a ref positional,
     and several of those call sites (`diff`, `rev-parse`) have no `--`
@@ -405,10 +409,21 @@ def _resolve_upstream_branch(checkout: Path, *, runner, timeout: int) -> tuple[s
     )
     branch = (proc.stdout or "").strip() if proc else ""
     if proc is None or proc.returncode != 0 or not branch:
-        return None, (f"could not resolve the tracked upstream branch: {_proc_stderr(proc)}")
+        message = f"could not resolve the tracked upstream branch: {_proc_stderr(proc)}"
+        stderr = ((proc.stderr or "") if proc is not None else "").lower()
+        answered_none = proc is not None and proc.returncode != 0 and (
+            "no upstream" in stderr or "does not point to a branch" in stderr
+        )
+        return None, message, "none" if answered_none else "error"
     if branch.startswith("-"):
-        return None, "the tracked upstream branch is option-shaped; refusing to pass it to git"
-    return branch, ""
+        return None, "the tracked upstream branch is option-shaped; refusing to pass it to git", "none"
+    return branch, "", "ok"
+
+
+def _resolve_upstream_branch(checkout: Path, *, runner, timeout: int) -> tuple[str | None, str]:
+    """Return (tracked upstream branch, error) for *checkout*; see `_probe_upstream`."""
+    branch, error, _kind = _probe_upstream(checkout, runner=runner, timeout=timeout)
+    return branch, error
 
 
 def _count_commits(checkout: Path, rev_range: str, *, runner, timeout: int) -> tuple[int | None, str]:
@@ -468,17 +483,22 @@ def _divergence(checkout: Path, branch: str, *, runner, timeout: int) -> str:
     return "behind" if head_in_upstream.returncode == 0 else "diverged"
 
 
-def _apply_preflight(checkout: Path, *, env: dict[str, str], runner, timeout: int) -> dict:
+def _apply_preflight(
+    checkout: Path, *, env: dict[str, str], runner, timeout: int, branch: str | None = None
+) -> dict:
     """Whether `trailhead update` would refuse *checkout*, evaluated in apply's
     order: upstream resolution, working-tree cleanliness, divergence. A
-    predicate git cannot answer yields "unknown", never "clear"."""
+    predicate git cannot answer yields "unknown", never "clear". A caller that
+    has already resolved the tracked *branch* passes it, sparing a second
+    lookup."""
 
     def verdict(verdict: str, refusal: str | None = None) -> dict:
         return {"verdict": verdict, "refusal": refusal}
 
-    branch, _error = _resolve_upstream_branch(checkout, runner=runner, timeout=timeout)
     if branch is None:
-        return verdict("refused", "no_upstream")
+        branch, _error, kind = _probe_upstream(checkout, runner=runner, timeout=timeout)
+        if branch is None:
+            return verdict("refused", "no_upstream") if kind == "none" else verdict("unknown")
     state, _proc = _working_tree_state(checkout, env=env, runner=runner, timeout=timeout)
     if state == "dirty":
         return verdict("refused", "local_changes")
@@ -602,7 +622,7 @@ def _check_outpost(*, env: dict[str, str], runner, timeout: int, fetch_due: bool
         return _outpost_verdict("unanswerable", None, error)
     if commits_behind == 0:
         return _outpost_verdict("ok", 0, None)
-    preflight = _apply_preflight(checkout, env=env, runner=runner, timeout=timeout)
+    preflight = _apply_preflight(checkout, env=env, runner=runner, timeout=timeout, branch=branch)
     return _outpost_verdict("behind", commits_behind, None, preflight)
 
 
@@ -685,7 +705,7 @@ def _check_install(
 
     if commits_behind == 0 and not install_behind:
         return _finish("ok", commits_behind, installed_sha, None, _env, changelog_delta, install_behind)
-    preflight = _apply_preflight(checkout, env=_env, runner=_runner, timeout=timeout)
+    preflight = _apply_preflight(checkout, env=_env, runner=_runner, timeout=timeout, branch=branch)
     return _finish(
         "behind", commits_behind, installed_sha, None, _env, changelog_delta, install_behind, preflight
     )
@@ -988,6 +1008,14 @@ def _fast_forward(checkout: Path, branch: str, *, runner, timeout: int):
     divergence = _divergence(checkout, branch, runner=runner, timeout=timeout)
     if divergence == "current":
         return "current", pre_head, remote_sha
+    if divergence == "unknown":
+        print(
+            f"trailhead: refusing to upgrade — could not determine whether "
+            f"{checkout} can be fast-forwarded to {branch}. Inspect directly: "
+            f"git -C {checkout} merge-base --is-ancestor HEAD -- {branch}",
+            file=sys.stderr,
+        )
+        return "failed", pre_head, remote_sha
     if divergence != "behind":
         print(
             f"trailhead: refusing to upgrade — {checkout}'s HEAD has "

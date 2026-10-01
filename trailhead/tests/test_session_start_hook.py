@@ -879,7 +879,7 @@ def _real_trailhead_checkout_behind_and_dirty(tmp_path: Path) -> Path:
 
 
 class TestRealHookOverRealCheck:
-    def test_behind_and_dirty_repos_still_notify_within_the_hook_cap(self, tmp_path, monkeypatch):
+    def test_behind_and_dirty_repos_still_notify_within_the_hook_cap(self, tmp_path):
         checkout = _real_trailhead_checkout_behind_and_dirty(tmp_path)
         outpost_root = tmp_path / "outpost-root"
         outpost_root.mkdir()
@@ -888,20 +888,33 @@ class TestRealHookOverRealCheck:
         config = tmp_path / "outpost-config"
         config.mkdir()
         (config / "config.toml").write_text(f'checkout = "{outpost}"\n')
-        monkeypatch.setenv("TRAILHEAD_STATE_DIR", str(tmp_path / "state"))
-        monkeypatch.setenv("HOME", str(tmp_path / "home"))
-        monkeypatch.setenv("OUTPOST_CONFIG_DIR", str(config))
+        hook_env = {
+            **os.environ,
+            "TRAILHEAD_STATE_DIR": str(tmp_path / "state"),
+            "HOME": str(tmp_path / "home"),
+            "OUTPOST_CONFIG_DIR": str(config),
+        }
 
         start = time.monotonic()
-        notice = hook.check_and_render(env=dict(os.environ))
+        proc = subprocess.run(
+            [sys.executable, str(_HOOK_PATH)],
+            input="{}",
+            env=hook_env,
+            capture_output=True,
+            text=True,
+            timeout=hook.DEFAULT_EXEC_TIMEOUT_SECONDS * 3,
+        )
         elapsed = time.monotonic() - start
 
-        assert notice is not None
-        assert "outpost" in notice.lower()
+        assert proc.returncode == 0, proc.stderr
+        output = json.loads(proc.stdout)
+        assert output["hookSpecificOutput"]["hookEventName"] == "SessionStart"
+        assert "outpost" in output["hookSpecificOutput"]["additionalContext"].lower()
         assert elapsed < hook.DEFAULT_EXEC_TIMEOUT_SECONDS
         report = json.loads(
             subprocess.run(
                 [str(checkout / "bin" / "trailhead"), "update", "--check", "--json"],
+                env=hook_env,
                 capture_output=True,
                 text=True,
                 check=True,

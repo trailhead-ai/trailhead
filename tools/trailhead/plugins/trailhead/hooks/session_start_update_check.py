@@ -176,7 +176,7 @@ def _update_check_disabled(checkout: Path, env: dict[str, str]) -> bool:
     try:
         with open(config_path, "rb") as fh:
             data = tomllib.load(fh)
-    except (OSError, tomllib.TOMLDecodeError):
+    except (OSError, ValueError):
         return False
     return data.get(CONFIG_KEY, True) is False
 
