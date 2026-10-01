@@ -40,7 +40,13 @@ from trailhead.outpost_supervisor import enable as supervisor_enable
 from trailhead.pathint import PathIntegrationError, shellenv_lines
 from trailhead.paths import PathResolutionError
 from trailhead.uninstall import run_uninstall
-from trailhead.update import FRESHNESS_WINDOW_SECONDS, check_for_update, run_update_apply
+from trailhead.update import (
+    FRESHNESS_WINDOW_SECONDS,
+    SCHEMA_VERSION as UPDATE_SCHEMA_VERSION,
+    automatic_check_disabled,
+    check_for_update,
+    run_update_apply,
+)
 from trailhead.wire import LockError, WireError
 
 # Named error family — maps to a clean 'trailhead: <message>' line.
@@ -119,12 +125,25 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
 
 
 def _cmd_update(args: argparse.Namespace) -> int:
+    if args.automatic and not args.check:
+        print("trailhead: --automatic requires --check", file=sys.stderr)
+        return 1
+
     if not args.check:
         return run_update_apply(
             assume_yes=args.yes,
             dry_run=args.dry_run,
             timeout=args.timeout,
         )
+
+    if args.automatic and automatic_check_disabled():
+        if args.json:
+            import json
+
+            print(json.dumps({"schema_version": UPDATE_SCHEMA_VERSION, "automatic_check": "off"}))
+        else:
+            print("trailhead: automatic update checks are off")
+        return 0
 
     result = check_for_update(timeout=args.timeout, window=args.window)
 
@@ -303,6 +322,15 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         default=False,
         help="Run the read-only freshness check instead of upgrading.",
+    )
+    update_p.add_argument(
+        "--automatic",
+        action="store_true",
+        default=False,
+        help=(
+            "Mark the check as unattended (requires --check): honour the update-check "
+            "opt-out and print only an off marker when it is set."
+        ),
     )
     update_p.add_argument(
         "--yes",

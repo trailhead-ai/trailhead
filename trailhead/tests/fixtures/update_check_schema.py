@@ -29,6 +29,10 @@ unless the part's outcome is `behind`; otherwise `{"verdict":
 null|"no_upstream"|"local_changes"|"diverged"}` with `refusal` non-null
 exactly when `verdict` is `refused`. A part that is `ok` or `unanswerable`
 carries `null`; an `outpost` of `null` has no preflight at all.
+
+With `--automatic` and the update-check opt-out set, the output is not this
+report at all but `{"schema_version": 5, "automatic_check": "off"}`
+(`AUTOMATIC_OFF_EXAMPLE`): the check ran no git and wrote no stamp.
 """
 
 SCHEMA_VERSION = 5
@@ -110,4 +114,11 @@ OUTPOST_OK_EXAMPLE = {
         "reason": None,
         "apply_preflight": None,
     },
+}
+
+# What `trailhead update --check --json --automatic` prints, and nothing else,
+# when the update-check opt-out is set: no git ran and no stamp was written.
+AUTOMATIC_OFF_EXAMPLE = {
+    "schema_version": SCHEMA_VERSION,
+    "automatic_check": "off",
 }
