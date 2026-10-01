@@ -32,6 +32,7 @@ from trailhead.tests.test_update_apply import (
     _real_runner,
 )
 from trailhead.tests.fixtures.update_check_schema import (
+    AUTOMATIC_OFF_EXAMPLE,
     BEHIND_EXAMPLE,
     CLEAR_PREFLIGHT,
     DIVERGED_PREFLIGHT,
@@ -1679,3 +1680,158 @@ class TestUpdatePrintsHostVerdict:
 
         assert exit_code == 1
         assert "HOST READY" not in capsys.readouterr().out
+
+
+_DISABLE_VAR = "TRAILHEAD_DISABLE_UPDATE_CHECK"
+
+_CONFIGS = {
+    "true": "session_start_update_check = true\n",
+    "false": "session_start_update_check = false\n",
+    "key-absent": 'other_key = "x"\n',
+    "malformed": "session_start_update_check = = =\n",
+    "no-file": None,
+}
+
+
+def _write_config(checkout: Path, config: str) -> None:
+    body = _CONFIGS[config]
+    path = checkout / "config" / "default.toml"
+    if body is None:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(body, encoding="utf-8")
+
+
+def _automatic_env(tmp_path, monkeypatch, *, config: str, disable_var: str | None):
+    """A stamped install with the given config and env var, behind by 3."""
+    env = _env(tmp_path)
+    env.pop(_DISABLE_VAR, None)
+    if disable_var is not None:
+        env[_DISABLE_VAR] = disable_var
+    checkout = _install_stamp(tmp_path, env)
+    _write_config(checkout, config)
+    runner, calls = _make_runner(count="3")
+    monkeypatch.setattr(update, "_default_runner", lambda: runner)
+    return env, calls, checkout
+
+
+class TestAutomaticCheckHonoursTheOptOut:
+    def test_env_truthy_with_config_enabling_is_off_with_no_git_and_no_stamp(
+        self, tmp_path, monkeypatch
+    ):
+        env, calls, _ = _automatic_env(tmp_path, monkeypatch, config="true", disable_var="1")
+
+        exit_code, out, err = _run_cli(["update", "--check", "--json", "--automatic"], env=env)
+
+        assert exit_code == 0
+        assert json.loads(out) == AUTOMATIC_OFF_EXAMPLE
+        assert calls == []
+        assert not update.freshness_stamp_path(env=env).exists()
+
+    def test_the_off_line_is_exactly_the_pinned_fixture_bytes(self, tmp_path, monkeypatch):
+        env, _, _ = _automatic_env(tmp_path, monkeypatch, config="true", disable_var="yes")
+
+        _, out, _ = _run_cli(["update", "--check", "--json", "--automatic"], env=env)
+
+        assert out == json.dumps(AUTOMATIC_OFF_EXAMPLE) + "\n"
+
+    def test_off_does_not_touch_the_provenance_last_check(self, tmp_path, monkeypatch):
+        from trailhead import provenance
+
+        env, _, _ = _automatic_env(tmp_path, monkeypatch, config="false", disable_var=None)
+        before = provenance.stamp_path(env=env).read_bytes()
+
+        exit_code, out, _ = _run_cli(["update", "--check", "--json", "--automatic"], env=env)
+
+        assert exit_code == 0
+        assert json.loads(out) == AUTOMATIC_OFF_EXAMPLE
+        assert provenance.stamp_path(env=env).read_bytes() == before
+
+    def test_env_falsy_overrides_a_config_that_disables(self, tmp_path, monkeypatch):
+        env, _, _ = _automatic_env(tmp_path, monkeypatch, config="false", disable_var="0")
+
+        exit_code, out, _ = _run_cli(["update", "--check", "--json", "--automatic"], env=env)
+
+        assert exit_code == 0
+        assert json.loads(out) == BEHIND_EXAMPLE
+
+    def test_env_absent_and_config_false_is_off(self, tmp_path, monkeypatch):
+        env, calls, _ = _automatic_env(tmp_path, monkeypatch, config="false", disable_var=None)
+
+        exit_code, out, _ = _run_cli(["update", "--check", "--json", "--automatic"], env=env)
+
+        assert exit_code == 0
+        assert json.loads(out) == AUTOMATIC_OFF_EXAMPLE
+        assert calls == []
+
+    @pytest.mark.parametrize("config", ["true", "key-absent", "malformed", "no-file"])
+    def test_env_absent_and_config_not_disabling_runs_the_full_report(
+        self, tmp_path, monkeypatch, config
+    ):
+        env, _, _ = _automatic_env(tmp_path, monkeypatch, config=config, disable_var=None)
+
+        exit_code, out, _ = _run_cli(["update", "--check", "--json", "--automatic"], env=env)
+
+        assert exit_code == 0
+        assert json.loads(out) == BEHIND_EXAMPLE
+
+    def test_a_manual_check_ignores_the_opt_out(self, tmp_path, monkeypatch):
+        env, _, _ = _automatic_env(tmp_path, monkeypatch, config="false", disable_var="1")
+
+        exit_code, out, _ = _run_cli(["update", "--check", "--json"], env=env)
+
+        assert exit_code == 0
+        assert json.loads(out) == BEHIND_EXAMPLE
+
+    def test_automatic_without_check_is_a_one_line_usage_error(self, tmp_path, monkeypatch):
+        env, calls, _ = _automatic_env(tmp_path, monkeypatch, config="true", disable_var=None)
+
+        exit_code, out, err = _run_cli(["update", "--automatic"], env=env)
+
+        assert exit_code != 0
+        assert out == ""
+        assert err == "trailhead: --automatic requires --check\n"
+        assert calls == []
+
+    def test_human_output_when_off_is_one_plain_line(self, tmp_path, monkeypatch):
+        env, calls, _ = _automatic_env(tmp_path, monkeypatch, config="true", disable_var="1")
+
+        exit_code, out, _ = _run_cli(["update", "--check", "--automatic"], env=env)
+
+        assert exit_code == 0
+        assert out == "trailhead: automatic update checks are off\n"
+        assert calls == []
+
+    def test_human_output_when_on_is_the_ordinary_report(self, tmp_path, monkeypatch):
+        env, _, _ = _automatic_env(tmp_path, monkeypatch, config="true", disable_var=None)
+
+        _, out, _ = _run_cli(["update", "--check", "--automatic"], env=env)
+
+        assert "commit(s) behind" in out
+
+    def test_without_a_stamp_the_check_is_on(self, tmp_path, monkeypatch):
+        env = _env(tmp_path)
+        runner, _ = _make_runner()
+        monkeypatch.setattr(update, "_default_runner", lambda: runner)
+
+        exit_code, out, _ = _run_cli(["update", "--check", "--json", "--automatic"], env=env)
+
+        assert exit_code == 0
+        assert json.loads(out) == UNANSWERABLE_NO_STAMP_EXAMPLE
+
+    @pytest.mark.parametrize("config", list(_CONFIGS))
+    @pytest.mark.parametrize("disable_var", [None, "1", "0"])
+    def test_agrees_with_the_session_start_hook_on_every_row(
+        self, tmp_path, monkeypatch, config, disable_var
+    ):
+        from trailhead.tests.test_session_start_hook import _load_hook
+
+        env, _, checkout = _automatic_env(
+            tmp_path, monkeypatch, config=config, disable_var=disable_var
+        )
+        hook_env = {_DISABLE_VAR: disable_var} if disable_var is not None else {}
+        hook_says_off = _load_hook()._update_check_disabled(checkout, hook_env)
+
+        _, out, _ = _run_cli(["update", "--check", "--json", "--automatic"], env=env)
+
+        assert (json.loads(out) == AUTOMATIC_OFF_EXAMPLE) is hook_says_off

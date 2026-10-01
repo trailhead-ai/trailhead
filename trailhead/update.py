@@ -34,6 +34,11 @@ The outcome is recorded back onto the provenance stamp via
 discoverable (`trailhead doctor`) rather than silently indistinguishable
 from "up to date".
 
+With `--automatic` (see `automatic_check_disabled`), the opt-out is resolved
+before anything else: when it is set the check runs no git, writes no stamp,
+and `--json` prints exactly `{"schema_version": 5, "automatic_check": "off"}`
+instead of the report below. Without `--automatic` the opt-out is ignored.
+
 The `--json` output is a pinned schema (schema_version 5) — the producer
 contract a SessionStart hook consumes:
 
@@ -139,6 +144,7 @@ import os
 import re
 import subprocess
 import sys
+import tomllib
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -162,6 +168,8 @@ from trailhead.provenance import (
 from trailhead.wire import LockError, wire_lock
 
 SCHEMA_VERSION = 5
+DISABLE_ENV_VAR = "TRAILHEAD_DISABLE_UPDATE_CHECK"
+DISABLE_CONFIG_KEY = "session_start_update_check"
 FRESHNESS_WINDOW_SECONDS = 24 * 60 * 60
 FRESHNESS_STAMP_FILENAME = "update-check.json"
 
@@ -237,6 +245,37 @@ def _stamp_fetch_attempt(env: dict[str, str]) -> None:
     _atomic_write_json(
         freshness_stamp_path(env=env), {"attempted_at": _now_iso()}, prefix=".update-check-"
     )
+
+
+# ---------------------------------------------------------------------------
+# Automatic-check opt-out
+# ---------------------------------------------------------------------------
+
+
+def automatic_check_disabled(*, env: dict[str, str] | None = None) -> bool:
+    """True if the update-check opt-out is set, by the SessionStart hook's rule.
+
+    `TRAILHEAD_DISABLE_UPDATE_CHECK`, when present in the environment, decides
+    outright in either direction by its truthiness (`1/true/yes/on`).
+    Otherwise the check is off only if `session_start_update_check = false` in
+    `<install checkout>/config/default.toml` — the checkout from the
+    provenance stamp. No stamp, or an absent/unreadable/malformed config,
+    leaves the check on.
+    """
+    _env = env if env is not None else dict(os.environ)
+    raw = _env.get(DISABLE_ENV_VAR)
+    if raw is not None:
+        return raw.strip().lower() in ("1", "true", "yes", "on")
+
+    stamp, _ = read_stamp_with_reason(env=_env)
+    if stamp is None:
+        return False
+    try:
+        with open(Path(stamp["checkout"]) / "config" / "default.toml", "rb") as fh:
+            data = tomllib.load(fh)
+    except (OSError, tomllib.TOMLDecodeError):
+        return False
+    return data.get(DISABLE_CONFIG_KEY, True) is False
 
 
 # ---------------------------------------------------------------------------
