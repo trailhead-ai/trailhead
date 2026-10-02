@@ -13,8 +13,11 @@ uses for "is a host supervisor managing Outpost" (``_is_supervised``):
 * Supervised, Linux: ``systemd-run --user --unit=trailhead-update-<id>
   --collect``. The job lives in its own cgroup under the user manager, so
   restarting ``outpost.service`` does not touch it. A transient unit does NOT
-  inherit the caller's environment, so every caller variable is forwarded as one
-  ``--setenv=NAME=VALUE`` argv element. The working directory is the checkout
+  inherit the caller's environment, so every caller variable is forwarded as a
+  name-only ``--setenv=NAME`` argv element and ``systemd-run`` itself runs with
+  the caller's environment, from which it reads each value. No environment
+  value appears in any argv element, so none is visible in the process table.
+  The working directory is the checkout
   (``--working-directory``), not the manager's ``$HOME``. ``--collect`` removes
   the unit after it exits; the run lock and ``update-result.json`` are the
   record of the run, never the unit.
@@ -80,7 +83,7 @@ def _systemd_argv(env: dict[str, str], checkout: Path, log: Path, run_id: str) -
         f"--working-directory={checkout}",
         f"--property=StandardOutput=append:{log}",
         f"--property=StandardError=append:{log}",
-        *[f"--setenv={name}={value}" for name, value in env.items()],
+        *[f"--setenv={name}" for name in env],
         "--",
         *_update_argv(checkout, run_id),
     ]
@@ -109,8 +112,12 @@ def _write_private(path: Path, data: bytes) -> None:
         os.close(fd)
 
 
-def _start_systemd(argv: list[str], run) -> bool:
-    return run(argv).returncode == 0
+def _run_with_env(argv: list[str], env: dict[str, str]) -> subprocess.CompletedProcess:
+    return subprocess.run(argv, env=env, capture_output=True, text=True)
+
+
+def _start_systemd(argv: list[str], env: dict[str, str], run) -> bool:
+    return run(argv, env=env).returncode == 0
 
 
 def _start_launchd(
@@ -182,11 +189,12 @@ def detach(
         if outpost_lifecycle._is_supervised(
             environ, platform=platform, supervisor_dir=supervisor_dir
         ):
-            run = runner if runner is not None else outpost_supervisor.default_runner
             if outpost_supervisor._platform_kind(platform) == "darwin":
+                run = runner if runner is not None else outpost_supervisor.default_runner
                 ok = _start_launchd(environ, checkout, log, run_id, run, uid)
             else:
-                ok = _start_systemd(_systemd_argv(environ, checkout, log, run_id), run)
+                run = runner if runner is not None else _run_with_env
+                ok = _start_systemd(_systemd_argv(environ, checkout, log, run_id), environ, run)
         else:
             ok = _start_unsupervised(environ, checkout, log, run_id)
     except OSError as exc:

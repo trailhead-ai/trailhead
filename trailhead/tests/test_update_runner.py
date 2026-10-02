@@ -65,13 +65,15 @@ class FakeRunner:
 
     def __init__(self, *, rc=0, on_start=None, raises=None):
         self.calls: list[list[str]] = []
+        self.envs: list[dict | None] = []
         self.rc = rc
         self.on_start = on_start
         self.raises = raises
         self.locks: list[int] = []
 
-    def __call__(self, argv):
+    def __call__(self, argv, env=None):
         self.calls.append(list(argv))
+        self.envs.append(env)
         if self.raises:
             raise self.raises
         if self.on_start:
@@ -142,9 +144,10 @@ def test_systemd_argv_is_fixed_and_carries_user_collect_unit_setenv(world):
         str(checkout / "bin" / "trailhead"), "update", "--yes", "--run-id", run_id,
     ]
     setenvs = [a for a in argv if a.startswith("--setenv=")]
-    assert setenvs.count("--setenv=TH_CALLER_VAR=caller-value") == 1
-    assert f"--setenv=TH_HOSTILE={HOSTILE}" in setenvs
-    assert len(setenvs) == len(env)
+    assert setenvs.count("--setenv=TH_CALLER_VAR") == 1
+    assert sorted(setenvs) == sorted(f"--setenv={name}" for name in env)
+    assert not any(value in a for a in argv for value in ("caller-value", HOSTILE))
+    assert runner.envs == [env]
     assert isinstance(argv, list) and all(isinstance(a, str) for a in argv)
 
 
@@ -160,9 +163,29 @@ def test_systemd_job_gets_every_caller_variable(world):
     finally:
         runner.close()
     (argv,) = runner.calls
-    got = {a[len("--setenv="):].split("=", 1)[0] for a in argv if a.startswith("--setenv=")}
+    got = {a[len("--setenv="):] for a in argv if a.startswith("--setenv=")}
     assert got == set(env)
-    assert "--setenv=PATH=/opt/node/bin:/usr/bin" in argv
+    assert "--setenv=PATH" in argv
+    assert runner.envs[0]["PATH"] == "/opt/node/bin:/usr/bin"
+    assert not any("/opt/node/bin" in a for a in argv)
+
+
+def test_systemd_no_shell_hostile_value_in_no_argv_element_and_env_unchanged(world):
+    tmp_path, env = world
+    env["TH_HOSTILE"] = HOSTILE
+    runner = FakeRunner(on_start=_takes_lock(env))
+    try:
+        update_runner.detach(
+            env=env, platform="linux", supervisor_dir=_sup_dir(tmp_path, kind="linux"),
+            runner=runner, wait_seconds=2, poll_interval=0.01,
+        )
+    finally:
+        runner.close()
+    (argv,) = runner.calls
+    assert "--setenv=TH_HOSTILE" in argv
+    for fragment in ("$(", "`", ";", "\n", "PWNED", "second-line"):
+        assert not any(fragment in a for a in argv)
+    assert runner.envs[0]["TH_HOSTILE"] == HOSTILE
 
 
 # --------------------------------------------------------------- launchd path
@@ -419,11 +442,13 @@ def test_default_runner_execs_systemd_run_argv_without_a_shell(world, monkeypatc
     fakebin.mkdir()
     fake = fakebin / "systemd-run"
     fake.write_text(
-        f"#!{sys.executable}\nimport json, sys\n"
-        f"json.dump(sys.argv[1:], open({str(tmp_path / 'fake-argv.json')!r}, 'w'))\n"
+        f"#!{sys.executable}\nimport json, os, sys\n"
+        f"json.dump({{'argv': sys.argv[1:], 'env': dict(os.environ)}},"
+        f" open({str(tmp_path / 'fake-record.json')!r}, 'w'))\n"
     )
     fake.chmod(0o755)
     monkeypatch.setenv("PATH", f"{fakebin}:{os.environ['PATH']}")
+    env["PATH"] = os.environ["PATH"]
     cwd = tmp_path / "cwd"
     cwd.mkdir()
     monkeypatch.chdir(cwd)
@@ -432,8 +457,12 @@ def test_default_runner_execs_systemd_run_argv_without_a_shell(world, monkeypatc
         wait_seconds=0.2, poll_interval=0.01,
     )
     assert out["error"] == "could_not_start"
-    argv = json.loads((tmp_path / "fake-argv.json").read_text())
-    assert f"--setenv=TH_HOSTILE={HOSTILE}" in argv
+    record = json.loads((tmp_path / "fake-record.json").read_text())
+    argv = record["argv"]
+    assert "--setenv=TH_HOSTILE" in argv
+    assert not any(HOSTILE in a or "caller-value" in a for a in argv)
+    assert record["env"]["TH_HOSTILE"] == HOSTILE
+    assert record["env"]["TH_CALLER_VAR"] == "caller-value"
     assert list(cwd.iterdir()) == []
 
 
