@@ -929,6 +929,10 @@ def _combined_outcome(install: HalfResult, outpost: HalfResult | None) -> tuple[
         return "refused", install.refusal
     if install.status in ("failed_restored", "failed_not_restored"):
         return install.status, None
+    if outpost is not None and outpost.status == "refused":
+        if install.status == "advanced":
+            return "outpost_restored", None
+        return "refused", outpost.refusal
     if outpost is None or outpost.status in ("advanced", "current"):
         moved = "advanced" in (install.status, outpost.status if outpost else None)
         return ("updated" if moved else "already_current"), None
@@ -1296,7 +1300,7 @@ def _upgrade_outpost(
     restore worked. Returns how the half ended (see :class:`HalfResult`),
     printing a named failure for any that is not ``advanced`` or ``current``.
     A rebuild of a stale build counts as ``advanced``."""
-    status, pre_head, remote_sha, _refusal = _fast_forward(
+    status, pre_head, remote_sha, refusal = _fast_forward(
         checkout, branch, runner=runner, timeout=timeout, run=run
     )
     if status == "failed":
@@ -1304,6 +1308,8 @@ def _upgrade_outpost(
             "trailhead: outpost was not upgraded; the trailhead install is unaffected.",
             file=sys.stderr,
         )
+        if refusal is not None:
+            return HalfResult("refused", refusal)
         return HalfResult("failed_restored")
     stale_build = status == "current" and outpost_lifecycle.built_sha(env=env) != pre_head
     if status == "current" and not stale_build:

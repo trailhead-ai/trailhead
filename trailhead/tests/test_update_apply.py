@@ -1725,10 +1725,11 @@ class TestApplyRefusesRealRepos:
 #     [install-no-upstream] [outpost-no-upstream] [install-git-error]
 #     [install-dirty] [outpost-dirty] [install-status-unreadable]
 #     [install-diverged] [install-divergence-unknown]
+#     [outpost-diverged-install-current] [outpost-divergence-unknown-install-current]
 #   failed_restored (nothing changed on this machine):
 #     [wire-lock-held] [config-resolve-error] [install-fetch-fails]
 #     [install-merge-blocked] [install-rewire-fails-rolled-back]
-#     [outpost-diverged-install-current] [outpost-fetch-fails-install-current]
+#     [outpost-fetch-fails-install-current]
 #     [outpost-merge-blocked-install-current]
 #     [outpost-build-fails-install-current] [outpost-stale-rebuild-fails-install-current]
 #     [interrupt-before-any-change]
@@ -1897,6 +1898,10 @@ _ROWS = [
        setup=lambda w, t, m, s: _commit_locally(w.checkout)),
     _r("install-divergence-unknown", install="behind", outcome="refused", refusal="unknown",
        runner=_merge_base_fails_runner),
+    _r("outpost-diverged-install-current", install="current", outpost="behind", outcome="refused",
+       refusal="diverged", setup=lambda w, t, m, s: _commit_locally(w.outpost)),
+    _r("outpost-divergence-unknown-install-current", install="current", outpost="behind",
+       outcome="refused", refusal="unknown", runner=_merge_base_fails_runner),
     # --- failed_restored -------------------------------------------------
     _r("wire-lock-held", install="behind", outcome="failed_restored",
        setup=lambda w, t, m, s: s.enter_context(wire_lock(env=w.env))),
@@ -1907,8 +1912,6 @@ _ROWS = [
     _r("install-merge-blocked", install="behind", outcome="failed_restored",
        setup=lambda w, t, m, s: _lock_repo(w.checkout)),
     _r("install-rewire-fails-rolled-back", install="behind", outcome="failed_restored", wire_fail=(1,)),
-    _r("outpost-diverged-install-current", install="current", outpost="behind", outcome="failed_restored",
-       setup=lambda w, t, m, s: _commit_locally(w.outpost)),
     _r("outpost-fetch-fails-install-current", install="current", outpost="behind", outcome="failed_restored",
        setup=lambda w, t, m, s: _fetch_fails(w.outpost, t)),
     _r("outpost-merge-blocked-install-current", install="current", outpost="behind",
