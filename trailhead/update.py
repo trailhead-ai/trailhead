@@ -1275,6 +1275,16 @@ def _refresh_outpost(env: dict[str, str], *, restart: bool) -> None:
         outpost_lifecycle.build(env=env)
 
 
+def _retry_refresh(env: dict[str, str], was_running: bool) -> bool:
+    """One best-effort re-run of :func:`_refresh_outpost` to put a failed
+    rebuild's prior state back; whether it worked."""
+    try:
+        _refresh_outpost(env, restart=was_running)
+    except Exception:
+        return False
+    return True
+
+
 def _upgrade_outpost(
     checkout: Path, branch: str, *, env: dict[str, str], runner, timeout: int, run: _RunState
 ) -> HalfResult:
@@ -1306,12 +1316,23 @@ def _upgrade_outpost(
         try:
             _refresh_outpost(env, restart=was_running)
         except Exception as exc:
+            if _retry_refresh(env, was_running):
+                print(
+                    f"trailhead: outpost rebuild failed ({exc}); the checkout is "
+                    f"unchanged at {pre_head[:8]} and the prior build is back. "
+                    f"Re-run: trailhead update",
+                    file=sys.stderr,
+                )
+                return HalfResult("failed_restored")
+            then_restart = ", then: trailhead outpost restart" if was_running else ""
             print(
                 f"trailhead: outpost rebuild failed ({exc}); the checkout is "
-                f"unchanged at {pre_head[:8]}. Re-run: trailhead update",
+                f"unchanged at {pre_head[:8]} but the build could NOT be restored "
+                f"automatically. Repair manually: cd {checkout} && npm ci && "
+                f"npm run build{then_restart}",
                 file=sys.stderr,
             )
-            return HalfResult("failed_restored")
+            return HalfResult("failed_not_restored")
         restarted = " and restarted the daemon" if was_running else ""
         print(f"trailhead: rebuilt outpost at {pre_head[:8]}{restarted}")
         return HalfResult("advanced")
@@ -1321,13 +1342,7 @@ def _upgrade_outpost(
     except Exception as exc:
         reset_proc = _run_git(checkout, "reset", "--hard", pre_head, runner=runner, timeout=timeout)
         reset_ok = reset_proc is not None and reset_proc.returncode == 0
-        restored = False
-        if reset_ok:
-            try:
-                _refresh_outpost(env, restart=was_running)
-                restored = True
-            except Exception:
-                pass  # best-effort restore; the error below still stands
+        restored = reset_ok and _retry_refresh(env, was_running)
         if reset_ok and restored:
             print(
                 f"trailhead: outpost upgrade failed ({exc}); rolled {checkout} back "

@@ -1485,6 +1485,41 @@ class TestOutpostBuildStamp:
         assert _run_git_real(outpost, "rev-parse", "HEAD").stdout.strip() == head
         assert "tsc failed" in capsys.readouterr().err
 
+    @pytest.mark.parametrize(
+        ("restore_works", "outcome", "daemon_up"),
+        [(True, "failed_restored", True), (False, "failed_not_restored", False)],
+        ids=["the-restore-brings-the-daemon-back", "the-restore-fails-too"],
+    )
+    def test_a_stale_rebuild_whose_restart_fails_after_stopping_the_daemon_restores_before_claiming_nothing_changed(
+        self, tmp_path, monkeypatch, capsys, restore_works, outcome, daemon_up
+    ):
+        env, outpost, _o_old, _o_new = _real_outpost_world(tmp_path, monkeypatch, outpost_behind=False)
+        head = _run_git_real(outpost, "rev-parse", "HEAD").stdout.strip()
+        state = {"daemon_up": True, "restarts": 0}
+        monkeypatch.setattr(update.outpost_lifecycle, "install_dependencies", lambda *a, **k: None)
+        monkeypatch.setattr(update.outpost_lifecycle, "managed_outpost", lambda *a, **k: {"pid": 1, "checkout": str(outpost)})
+
+        def _restart(*a, **k):
+            # The build has succeeded; the managed daemon is stopped; the new one never answers.
+            state["restarts"] += 1
+            state["daemon_up"] = False
+            if state["restarts"] == 1 or not restore_works:
+                raise update.OutpostLifecycleError("/health never answered")
+            state["daemon_up"] = True
+
+        monkeypatch.setattr(update.outpost_lifecycle, "restart", _restart)
+
+        rc = update.run_update_apply(env=env, runner=_real_runner, assume_yes=True, run_id=RUN_ID)
+
+        assert rc == 1
+        assert state["restarts"] == 2, "one restore is attempted at the unchanged checkout"
+        assert state["daemon_up"] is daemon_up
+        assert _read_record(tmp_path)["outcome"] == outcome
+        assert _run_git_real(outpost, "rev-parse", "HEAD").stdout.strip() == head
+        err = capsys.readouterr().err
+        assert "/health never answered" in err
+        assert ("could NOT be restored" in err) is (not restore_works)
+
     def test_an_advance_records_its_build_so_the_next_update_is_current(self, tmp_path, monkeypatch, capsys):
         env, _outpost, _o_old, o_new = _real_outpost_world(tmp_path, monkeypatch, outpost_behind=True)
         monkeypatch.setattr(update.outpost_lifecycle, "DEFAULT_INSTALL_CMD", [sys.executable, "-c", "pass"])
@@ -1704,6 +1739,7 @@ class TestApplyRefusesRealRepos:
 #   failed_not_restored:
 #     [install-rewire-and-reset-fail] [install-rewire-fails-twice]
 #     [outpost-rollback-rebuild-fails] [outpost-reset-fails]
+#     [outpost-stale-rebuild-and-restore-fail-install-current]
 #     [interrupt-after-a-change] [unexpected-exception-after-a-change]
 #     [unexpected-exception-after-rewiring-a-level-checkout] [interrupt-during-a-stale-rebuild]
 #   updated:
@@ -1880,7 +1916,7 @@ _ROWS = [
     _r("outpost-build-fails-install-current", install="current", outpost="behind",
        outcome="failed_restored", npm_fail=(2,)),
     _r("outpost-stale-rebuild-fails-install-current", install="current", outpost="unbuilt",
-       outcome="failed_restored", npm_fail="all"),
+       outcome="failed_restored", npm_fail=(1,)),
     _r("interrupt-before-any-change", install="behind", outcome="failed_restored", raises=KeyboardInterrupt,
        setup=lambda w, t, m, s: m.setattr(update, "resolve_config_for_env", _interrupt(KeyboardInterrupt()))),
     # --- outpost_restored ------------------------------------------------
@@ -1893,12 +1929,14 @@ _ROWS = [
     _r("outpost-build-fails-install-advanced", install="behind", outpost="behind",
        outcome="outpost_restored", npm_fail=(2,)),
     _r("outpost-stale-rebuild-fails-install-advanced", install="behind", outpost="unbuilt",
-       outcome="outpost_restored", npm_fail="all"),
+       outcome="outpost_restored", npm_fail=(1,)),
     # --- failed_not_restored ---------------------------------------------
     _r("install-rewire-and-reset-fail", install="behind", outcome="failed_not_restored", wire_fail=(1,),
        setup=lambda w, t, m, s: setattr(w, "wire_locks_checkout", True)),
     _r("install-rewire-fails-twice", install="behind", outcome="failed_not_restored", wire_fail="all"),
     _r("outpost-rollback-rebuild-fails", install="behind", outpost="behind",
+       outcome="failed_not_restored", npm_fail="all"),
+    _r("outpost-stale-rebuild-and-restore-fail-install-current", install="current", outpost="unbuilt",
        outcome="failed_not_restored", npm_fail="all"),
     _r("outpost-reset-fails", install="behind", outpost="behind", outcome="failed_not_restored",
        npm_fail=(1,), npm_lock="outpost"),
