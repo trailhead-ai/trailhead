@@ -142,9 +142,11 @@ from __future__ import annotations
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import tomllib
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -774,6 +776,13 @@ def run_update_apply(
     so without the operator running ``trailhead doctor``.  A readiness check
     that raises is reported and never changes the outcome.
 
+    Every apply that takes the run lock ends by writing the result record
+    (:func:`trailhead.update_run.write_result`) on every exit path, including
+    an escaping exception and SIGTERM: ``updated``, ``refused`` (with its
+    reason), ``outpost_restored``, ``failed_restored``, ``failed_not_restored``
+    or ``already_current``. A dry run, a declined or refused consent and a
+    lost lock contention write nothing.
+
     Returns 0 on success or a genuine no-op (already up to date); 1 on any
     refusal or failure, including an outpost failure after a kept install
     upgrade.
@@ -859,22 +868,73 @@ def run_update_apply(
     # The run lock is taken only once consent has passed, before preflight or
     # any change, and held until this process is done.
     run_id = run_id if run_id is not None else update_run.new_run_id()
+    # SIGTERM becomes an exception so the result is recorded and the lock
+    # released on the way out, like any other exit.
+    previous_handler = signal.signal(signal.SIGTERM, _raise_terminated)
     try:
-        lock_fd = update_run.acquire_run_lock(run_id, env=_env)
-    except update_run.RunLockHeld:
-        print(
-            "trailhead: an update is already running — wait for it to finish, "
-            "then re-run: trailhead update",
-            file=sys.stderr,
-        )
-        return 1
-    try:
-        return _apply_after_consent(
-            checkout, pre_sha, outpost_checkout,
-            env=_env, runner=_runner, timeout=timeout, dry_run=False, run_id=run_id,
-        )
+        try:
+            lock_fd = update_run.acquire_run_lock(run_id, env=_env)
+        except update_run.RunLockHeld:
+            print(
+                "trailhead: an update is already running — wait for it to finish, "
+                "then re-run: trailhead update",
+                file=sys.stderr,
+            )
+            return 1
+        try:
+            return _apply_after_consent(
+                checkout, pre_sha, outpost_checkout,
+                env=_env, runner=_runner, timeout=timeout, dry_run=False, run_id=run_id,
+            )
+        finally:
+            update_run.release_run_lock(lock_fd)
     finally:
-        update_run.release_run_lock(lock_fd)
+        signal.signal(signal.SIGTERM, previous_handler)
+
+
+class UpdateTerminated(SystemExit):
+    """SIGTERM delivered to an apply holding the run lock."""
+
+
+def _raise_terminated(signum, frame):
+    raise UpdateTerminated(128 + signum)
+
+
+@dataclass(frozen=True)
+class HalfResult:
+    """How one half of the apply ended: ``advanced`` (it moved something),
+    ``current`` (nothing to do), ``refused`` (with the ``refusal`` reason),
+    ``failed_restored`` (it failed and the machine is as it was) or
+    ``failed_not_restored`` (it failed and could not be put back)."""
+
+    status: str
+    refusal: str | None = None
+
+
+class _RunState:
+    """What the apply has done so far and how it ended, for the result record."""
+
+    def __init__(self) -> None:
+        self.changed = False
+        self.outcome: str | None = None
+        self.refusal: str | None = None
+
+    def end(self, outcome: str, refusal: str | None = None) -> None:
+        self.outcome, self.refusal = outcome, refusal
+
+
+def _combined_outcome(install: HalfResult, outpost: HalfResult | None) -> tuple[str, str | None]:
+    """The one outcome the result record carries, from the halves that ran."""
+    if install.status == "refused":
+        return "refused", install.refusal
+    if install.status in ("failed_restored", "failed_not_restored"):
+        return install.status, None
+    if outpost is None or outpost.status in ("advanced", "current"):
+        moved = "advanced" in (install.status, outpost.status if outpost else None)
+        return ("updated" if moved else "already_current"), None
+    if outpost.status == "failed_not_restored":
+        return "failed_not_restored", None
+    return ("outpost_restored" if install.status == "advanced" else "failed_restored"), None
 
 
 def _apply_after_consent(
@@ -888,7 +948,38 @@ def _apply_after_consent(
     dry_run: bool,
     run_id: str | None,
 ) -> int:
-    """Preflight, then upgrade — everything past the consent gate and the run lock."""
+    """Preflight, then upgrade — everything past the consent gate and the run
+    lock — and record how it ended. A dry run holds no lock and records nothing."""
+    if dry_run:
+        return _apply_steps(
+            checkout, pre_sha, outpost_checkout,
+            env=env, runner=runner, timeout=timeout, dry_run=True, run=_RunState(),
+        )
+    run = _RunState()
+    try:
+        return _apply_steps(
+            checkout, pre_sha, outpost_checkout,
+            env=env, runner=runner, timeout=timeout, dry_run=False, run=run,
+        )
+    except BaseException:
+        if run.outcome is None:
+            run.end("failed_not_restored" if run.changed else "failed_restored")
+        raise
+    finally:
+        update_run.write_result(run_id, run.outcome, run.refusal, env=env)
+
+
+def _apply_steps(
+    checkout: Path,
+    pre_sha: str,
+    outpost_checkout: Path | None,
+    *,
+    env: dict[str, str],
+    runner,
+    timeout: int,
+    dry_run: bool,
+    run: _RunState,
+) -> int:
     _env, _runner = env, runner
 
     # ------------------------------------------------------------------
@@ -900,8 +991,9 @@ def _apply_after_consent(
         preflight.append((outpost_checkout, "outpost "))
     branches: dict[Path, str] = {}
     for target, label in preflight:
-        branch, branch_error = _resolve_upstream_branch(target, runner=_runner, timeout=timeout)
+        branch, branch_error, branch_kind = _probe_upstream(target, runner=_runner, timeout=timeout)
         if branch is None:
+            run.end("refused", "no_upstream" if branch_kind == "none" else "unknown")
             escape = (
                 " To upgrade trailhead without outpost, remove or re-point the "
                 "'checkout' key in the outpost config."
@@ -914,7 +1006,9 @@ def _apply_after_consent(
                 file=sys.stderr,
             )
             return 1
-        if not _is_clean(target, env=_env, runner=_runner, timeout=timeout):
+        refusal = _local_changes_refusal(target, env=_env, runner=_runner, timeout=timeout)
+        if refusal is not None:
+            run.end("refused", refusal)
             return 1
         branches[target] = branch
 
@@ -944,15 +1038,21 @@ def _apply_after_consent(
             # with nothing left to roll it back.
             cfg = resolve_config_for_env(_env)
 
-            if not _upgrade_install(
-                checkout, pre_sha, branches[checkout], cfg, env=_env, runner=_runner, timeout=timeout
-            ):
-                return 1
-            if outpost_checkout is not None and not _upgrade_outpost(
-                outpost_checkout, branches[outpost_checkout], env=_env, runner=_runner, timeout=timeout
-            ):
+            install_result = _upgrade_install(
+                checkout, pre_sha, branches[checkout], cfg,
+                env=_env, runner=_runner, timeout=timeout, run=run,
+            )
+            outpost_result = None
+            if install_result.status in ("advanced", "current") and outpost_checkout is not None:
+                outpost_result = _upgrade_outpost(
+                    outpost_checkout, branches[outpost_checkout],
+                    env=_env, runner=_runner, timeout=timeout, run=run,
+                )
+            run.end(*_combined_outcome(install_result, outpost_result))
+            if run.outcome not in ("updated", "already_current"):
                 return 1
     except LockError as exc:
+        run.end("failed_restored")
         print(str(exc), file=sys.stderr)
         return 1
 
@@ -972,9 +1072,12 @@ def _apply_after_consent(
     return 0
 
 
-def _is_clean(checkout: Path, *, env: dict[str, str], runner, timeout: int) -> bool:
-    """True when *checkout* has no uncommitted changes. Prints the named
-    refusal and returns False otherwise, or when the status is unreadable."""
+def _local_changes_refusal(
+    checkout: Path, *, env: dict[str, str], runner, timeout: int
+) -> str | None:
+    """None when *checkout* has no uncommitted changes. Otherwise prints the
+    named refusal and returns its reason: ``local_changes``, or ``unknown``
+    when the status is unreadable."""
     state, status_proc = _working_tree_state(checkout, env=env, runner=runner, timeout=timeout)
     if state == "unknown":
         print(
@@ -983,25 +1086,27 @@ def _is_clean(checkout: Path, *, env: dict[str, str], runner, timeout: int) -> b
             f"git -C {checkout} status",
             file=sys.stderr,
         )
-        return False
+        return "unknown"
     if state == "dirty":
         print(
             f"trailhead: refusing to upgrade — {checkout} has uncommitted "
             f"changes. Commit or stash them, then re-run: trailhead update",
             file=sys.stderr,
         )
-        return False
-    return True
+        return "local_changes"
+    return None
 
 
-def _fast_forward(checkout: Path, branch: str, *, runner, timeout: int):
+def _fast_forward(checkout: Path, branch: str, *, runner, timeout: int, run: _RunState):
     """Fetch *branch*'s remote and fast-forward *checkout* onto it.
 
-    Returns ``(status, pre_head, remote_sha)`` where status is ``"advanced"``
-    (the checkout moved), ``"current"`` (nothing to pull — level with, or
-    carrying local commits ahead of, the branch), or ``"failed"`` (a named
-    error was printed and the checkout was not changed). ``pre_head`` is HEAD
-    read immediately before any mutation — the rollback target.
+    Returns ``(status, pre_head, remote_sha, refusal)`` where status is
+    ``"advanced"`` (the checkout moved), ``"current"`` (nothing to pull — level
+    with, or carrying local commits ahead of, the branch), or ``"failed"`` (a
+    named error was printed and the checkout was not changed). ``pre_head`` is
+    HEAD read immediately before any mutation — the rollback target. *refusal*
+    is ``diverged`` or ``unknown`` when the failure was a refusal to merge,
+    else None. *run* is marked changed just before the merge.
     """
     remote_name = _remote_name(branch)
     # `--` ends option parsing before the remote name. The name is derived
@@ -1017,7 +1122,7 @@ def _fast_forward(checkout: Path, branch: str, *, runner, timeout: int):
             f"git -C {checkout} fetch {remote_name}",
             file=sys.stderr,
         )
-        return "failed", "", ""
+        return "failed", "", "", None
 
     # `git rev-parse -- <rev>` does NOT mean "end of options" — rev-parse
     # echoes a literal `--` back as one of its outputs, corrupting the
@@ -1033,7 +1138,7 @@ def _fast_forward(checkout: Path, branch: str, *, runner, timeout: int):
             f"git -C {checkout} rev-parse {branch}",
             file=sys.stderr,
         )
-        return "failed", "", ""
+        return "failed", "", "", None
 
     # Captured immediately before any mutation, NOT read from a stamp: a
     # checkout manually advanced past its wired sha must roll back to where
@@ -1047,16 +1152,16 @@ def _fast_forward(checkout: Path, branch: str, *, runner, timeout: int):
             f"git -C {checkout} status",
             file=sys.stderr,
         )
-        return "failed", "", ""
+        return "failed", "", "", None
 
     # A checkout carrying local commits is AHEAD of its tracked branch, not
     # diverged from it: there is nothing to fetch down, and refusing it would
     # name a merge that does nothing.
     if remote_sha == pre_head:
-        return "current", pre_head, remote_sha
+        return "current", pre_head, remote_sha, None
     divergence = _divergence(checkout, branch, runner=runner, timeout=timeout)
     if divergence == "current":
-        return "current", pre_head, remote_sha
+        return "current", pre_head, remote_sha, None
     if divergence == "unknown":
         print(
             f"trailhead: refusing to upgrade — could not determine whether "
@@ -1064,7 +1169,7 @@ def _fast_forward(checkout: Path, branch: str, *, runner, timeout: int):
             f"git -C {checkout} merge-base --is-ancestor HEAD -- {branch}",
             file=sys.stderr,
         )
-        return "failed", pre_head, remote_sha
+        return "failed", pre_head, remote_sha, "unknown"
     if divergence != "behind":
         print(
             f"trailhead: refusing to upgrade — {checkout}'s HEAD has "
@@ -1073,9 +1178,10 @@ def _fast_forward(checkout: Path, branch: str, *, runner, timeout: int):
             f"git -C {checkout} merge {branch}",
             file=sys.stderr,
         )
-        return "failed", pre_head, remote_sha
+        return "failed", pre_head, remote_sha, "diverged"
 
     print(f"trailhead: fast-forwarding {checkout} to {branch}…")
+    run.changed = True
     merge_proc = _run_git(
         checkout, "merge", "--ff-only", "--", branch, runner=runner, timeout=timeout
     )
@@ -1086,28 +1192,42 @@ def _fast_forward(checkout: Path, branch: str, *, runner, timeout: int):
             f"git -C {checkout} status",
             file=sys.stderr,
         )
-        return "failed", pre_head, remote_sha
-    return "advanced", pre_head, remote_sha
+        return "failed", pre_head, remote_sha, None
+    return "advanced", pre_head, remote_sha, None
 
 
 def _upgrade_install(
-    checkout: Path, pre_sha: str, branch: str, cfg, *, env: dict[str, str], runner, timeout: int
-) -> bool:
+    checkout: Path,
+    pre_sha: str,
+    branch: str,
+    cfg,
+    *,
+    env: dict[str, str],
+    runner,
+    timeout: int,
+    run: _RunState,
+) -> HalfResult:
     """Fast-forward the install's checkout and re-wire, rolling back on a
-    failed re-wire. Returns True on success or a genuine no-op; False after
-    printing a named failure. Caller holds the wire lock."""
-    status, pre_merge_head, remote_sha = _fast_forward(checkout, branch, runner=runner, timeout=timeout)
+    failed re-wire. Returns how the half ended (see :class:`HalfResult`),
+    printing a named failure for any that is not ``advanced`` or ``current``.
+    Caller holds the wire lock."""
+    status, pre_merge_head, remote_sha, refusal = _fast_forward(
+        checkout, branch, runner=runner, timeout=timeout, run=run
+    )
     if status == "failed":
-        return False
+        if refusal is not None:
+            return HalfResult("refused", refusal)
+        return HalfResult("failed_restored")
 
     # Two independent hops. The checkout may have nothing to pull while the
     # install behind it is stale — an install snapshots the plugin trees — in
     # which case the re-wire below still runs.
     if status == "current" and pre_merge_head == pre_sha:
         print(f"trailhead: already up to date (installed {pre_sha[:8]})")
-        return True
+        return HalfResult("current")
 
     print("trailhead: re-wiring plugins…")
+    run.changed = True
     try:
         wire_all_harnesses(cfg, env=env, runner=runner, quiet=True)
     except Exception as exc:
@@ -1145,11 +1265,11 @@ def _upgrade_install(
                 f"git -C {checkout} reset --hard {pre_merge_head}",
                 file=sys.stderr,
             )
-        return False
+        return HalfResult("failed_restored" if rewired_ok else "failed_not_restored")
 
     write_stamp(checkout, env=env, runner=runner)
     print(f"trailhead: upgraded to {remote_sha[:8]}")
-    return True
+    return HalfResult("advanced")
 
 
 def _refresh_outpost(env: dict[str, str], *, restart: bool) -> None:
@@ -1164,29 +1284,33 @@ def _refresh_outpost(env: dict[str, str], *, restart: bool) -> None:
 
 
 def _upgrade_outpost(
-    checkout: Path, branch: str, *, env: dict[str, str], runner, timeout: int
-) -> bool:
+    checkout: Path, branch: str, *, env: dict[str, str], runner, timeout: int, run: _RunState
+) -> HalfResult:
     """Fast-forward the outpost checkout, reinstall its dependencies, and
     rebuild it (restarting the daemon if it is the managed one). Runs only after
     the install upgrade succeeded, and never undoes it: a failure here rolls
     back outpost alone — reset to its pre-upgrade HEAD, then reinstalled and
     rebuilt/restarted from there — and reports truthfully whether that
-    restore worked. Returns True on success or a no-op; False after printing
-    a named failure."""
-    status, pre_head, remote_sha = _fast_forward(checkout, branch, runner=runner, timeout=timeout)
+    restore worked. Returns how the half ended (see :class:`HalfResult`),
+    printing a named failure for any that is not ``advanced`` or ``current``.
+    A rebuild of a stale build counts as ``advanced``."""
+    status, pre_head, remote_sha, _refusal = _fast_forward(
+        checkout, branch, runner=runner, timeout=timeout, run=run
+    )
     if status == "failed":
         print(
             "trailhead: outpost was not upgraded; the trailhead install is unaffected.",
             file=sys.stderr,
         )
-        return False
+        return HalfResult("failed_restored")
     stale_build = status == "current" and outpost_lifecycle.built_sha(env=env) != pre_head
     if status == "current" and not stale_build:
         print(f"trailhead: outpost already up to date ({pre_head[:8]})")
-        return True
+        return HalfResult("current")
 
     was_running = outpost_lifecycle.managed_outpost(env=env) is not None
     if stale_build:
+        run.changed = True
         try:
             _refresh_outpost(env, restart=was_running)
         except Exception as exc:
@@ -1195,10 +1319,10 @@ def _upgrade_outpost(
                 f"unchanged at {pre_head[:8]}. Re-run: trailhead update",
                 file=sys.stderr,
             )
-            return False
+            return HalfResult("failed_restored")
         restarted = " and restarted the daemon" if was_running else ""
         print(f"trailhead: rebuilt outpost at {pre_head[:8]}{restarted}")
-        return True
+        return HalfResult("advanced")
 
     try:
         _refresh_outpost(env, restart=was_running)
@@ -1235,8 +1359,8 @@ def _upgrade_outpost(
                 f"git -C {checkout} reset --hard {pre_head}",
                 file=sys.stderr,
             )
-        return False
+        return HalfResult("failed_restored" if restored else "failed_not_restored")
 
     restarted = " and restarted the daemon" if was_running else ""
     print(f"trailhead: upgraded outpost to {remote_sha[:8]}{restarted}")
-    return True
+    return HalfResult("advanced")

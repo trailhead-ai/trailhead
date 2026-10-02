@@ -411,3 +411,175 @@ class TestStatus:
         rc = main()
         assert rc != 0
         assert capsys.readouterr().err.startswith("trailhead: ")
+
+
+def _result_file(tmp_path: Path) -> Path:
+    return tmp_path / "state" / "update-result.json"
+
+
+def _write_record(tmp_path: Path, **overrides) -> dict:
+    record = {
+        "result_schema_version": 1,
+        "run_id": RUN_A,
+        "finished_at": "2026-03-04T05:06:07Z",
+        "outcome": "updated",
+        "refusal": None,
+        **overrides,
+    }
+    _result_file(tmp_path).parent.mkdir(parents=True, exist_ok=True)
+    _result_file(tmp_path).write_text(json.dumps(record))
+    return record
+
+
+def _last(capsys, monkeypatch, tmp_path):
+    rc, cap = _status(capsys, monkeypatch, tmp_path)
+    assert rc == 0
+    return json.loads(cap.out)["last_result"]
+
+
+class TestStatusReadsTheRecordBack:
+    def test_a_valid_record_is_returned_without_its_schema_version(self, capsys, monkeypatch, tmp_path):
+        _write_record(tmp_path, outcome="refused", refusal="diverged", run_id=RUN_B)
+        assert _last(capsys, monkeypatch, tmp_path) == {
+            "run_id": RUN_B, "outcome": "refused", "refusal": "diverged",
+            "finished_at": "2026-03-04T05:06:07Z",
+        }
+
+    @pytest.mark.parametrize(
+        "outcome,refusal",
+        [
+            ("updated", None), ("refused", "local_changes"), ("refused", "diverged"),
+            ("refused", "no_upstream"), ("refused", "unknown"), ("outpost_restored", None),
+            ("failed_restored", None), ("failed_not_restored", None), ("already_current", None),
+        ],
+    )
+    def test_every_outcome_and_refusal_the_apply_writes_reads_back(
+        self, capsys, monkeypatch, tmp_path, outcome, refusal
+    ):
+        _write_record(tmp_path, outcome=outcome, refusal=refusal)
+        last = _last(capsys, monkeypatch, tmp_path)
+        assert (last["outcome"], last["refusal"]) == (outcome, refusal)
+
+    def test_no_record_is_null(self, capsys, monkeypatch, tmp_path):
+        assert _last(capsys, monkeypatch, tmp_path) is None
+
+    @pytest.mark.parametrize(
+        "overrides",
+        [
+            {"outcome": "interrupted"},
+            {"outcome": "exploded"},
+            {"outcome": None},
+            {"refusal": "because"},
+            {"result_schema_version": 2},
+            {"result_schema_version": None},
+            {"run_id": 7},
+            {"finished_at": None},
+        ],
+        ids=["interrupted-never-stored", "unknown-outcome", "null-outcome", "unknown-refusal",
+             "unknown-schema", "no-schema", "run-id-not-text", "no-finish-time"],
+    )
+    def test_a_record_the_closed_vocabulary_rejects_reads_as_null(
+        self, capsys, monkeypatch, tmp_path, overrides
+    ):
+        _write_record(tmp_path, **overrides)
+        assert _last(capsys, monkeypatch, tmp_path) is None
+
+    @pytest.mark.parametrize("body", ["{not json", "[]", '"updated"', "", "{}"])
+    def test_a_malformed_body_reads_as_null(self, capsys, monkeypatch, tmp_path, body):
+        _result_file(tmp_path).parent.mkdir(parents=True, exist_ok=True)
+        _result_file(tmp_path).write_text(body)
+        assert _last(capsys, monkeypatch, tmp_path) is None
+
+    def test_an_unreadable_record_reads_as_null(self, capsys, monkeypatch, tmp_path):
+        _result_file(tmp_path).parent.mkdir(parents=True, exist_ok=True)
+        _result_file(tmp_path).mkdir()
+        assert _last(capsys, monkeypatch, tmp_path) is None
+
+
+_INTERRUPTED = {"run_id": RUN_B, "outcome": "interrupted", "refusal": None, "finished_at": None}
+
+
+def _freed_lock(tmp_path, run_id):
+    update_run.release_run_lock(update_run.acquire_run_lock(run_id, env=_env(tmp_path)))
+
+
+class TestInterruptedIsDerivedByStatus:
+    def test_a_free_lock_naming_a_run_with_no_record_is_interrupted(self, capsys, monkeypatch, tmp_path):
+        _freed_lock(tmp_path, RUN_B)
+        assert _last(capsys, monkeypatch, tmp_path) == _INTERRUPTED
+
+    def test_a_free_lock_naming_a_run_the_record_does_not_carry_is_interrupted(
+        self, capsys, monkeypatch, tmp_path
+    ):
+        _write_record(tmp_path, run_id=RUN_A)
+        _freed_lock(tmp_path, RUN_B)
+        assert _last(capsys, monkeypatch, tmp_path) == _INTERRUPTED
+
+    def test_a_free_lock_naming_the_run_the_record_carries_is_just_that_record(
+        self, capsys, monkeypatch, tmp_path
+    ):
+        _write_record(tmp_path, run_id=RUN_B, outcome="failed_restored")
+        _freed_lock(tmp_path, RUN_B)
+        last = _last(capsys, monkeypatch, tmp_path)
+        assert (last["run_id"], last["outcome"]) == (RUN_B, "failed_restored")
+
+    def test_deriving_it_writes_nothing(self, capsys, monkeypatch, tmp_path):
+        _freed_lock(tmp_path, RUN_B)
+        _last(capsys, monkeypatch, tmp_path)
+        assert not _result_file(tmp_path).exists()
+        _write_record(tmp_path, run_id=RUN_A)
+        before = _result_file(tmp_path).read_text()
+        _last(capsys, monkeypatch, tmp_path)
+        assert _result_file(tmp_path).read_text() == before
+
+    @pytest.mark.parametrize("with_record", [False, True], ids=["no-record", "older-record"])
+    def test_a_held_lock_never_reads_as_interrupted(
+        self, capsys, monkeypatch, tmp_path, holders, with_record
+    ):
+        if with_record:
+            _write_record(tmp_path, run_id=RUN_A)
+        holders(tmp_path, run_id=RUN_B)
+        last = _last(capsys, monkeypatch, tmp_path)
+        assert last is None or last["outcome"] != "interrupted"
+        assert (last or {}).get("run_id") == (RUN_A if with_record else None)
+
+    def test_no_lock_file_means_no_derivation(self, capsys, monkeypatch, tmp_path):
+        _write_record(tmp_path, run_id=RUN_A)
+        assert _last(capsys, monkeypatch, tmp_path)["run_id"] == RUN_A
+
+    @pytest.mark.parametrize("body", ["not json", "{}", '{"run_id": 3}', ""])
+    def test_an_unreadable_lock_file_means_no_derivation(self, capsys, monkeypatch, tmp_path, body):
+        _write_record(tmp_path, run_id=RUN_A)
+        _lock_file(tmp_path).write_text(body)
+        assert _last(capsys, monkeypatch, tmp_path)["outcome"] == "updated"
+
+
+class TestContentionAndDeclineWriteNothing:
+    def test_a_losing_apply_leaves_the_previous_record_byte_for_byte(
+        self, holders, tmp_path, monkeypatch
+    ):
+        env = _apply_kit(tmp_path, monkeypatch)
+        _write_record(tmp_path, run_id=RUN_A)
+        before = _result_file(tmp_path).read_text()
+        holders(tmp_path, run_id=RUN_B)
+        runner, calls = _make_runner()
+
+        rc = update.run_update_apply(env=env, runner=runner, assume_yes=True, run_id="e" * 32)
+
+        assert rc == 1 and not calls
+        assert _result_file(tmp_path).read_text() == before
+
+    def test_a_losing_apply_writes_no_record_when_there_is_none(self, holders, tmp_path, monkeypatch):
+        env = _apply_kit(tmp_path, monkeypatch)
+        holders(tmp_path, run_id=RUN_B)
+        runner, _calls = _make_runner()
+        assert update.run_update_apply(env=env, runner=runner, assume_yes=True) == 1
+        assert not _result_file(tmp_path).exists()
+
+    def test_a_declined_tty_prompt_writes_nothing(self, tmp_path, monkeypatch):
+        env = _apply_kit(tmp_path, monkeypatch)
+        monkeypatch.setattr(sys, "stdin", __import__("io").StringIO("n\n"))
+        runner, calls = _make_runner()
+        assert update.run_update_apply(env=env, runner=runner, is_tty=lambda: True) == 0
+        assert not calls
+        assert not _result_file(tmp_path).exists()

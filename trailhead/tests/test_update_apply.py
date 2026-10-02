@@ -10,15 +10,20 @@ state rather than mocked calls.
 
 from __future__ import annotations
 
+import json
 import os
+import signal
 import subprocess
 import sys
+import time
+from contextlib import ExitStack
+from datetime import datetime
 from io import StringIO
 from pathlib import Path
 
 import pytest
 
-from trailhead import update
+from trailhead import update, update_run
 from trailhead.install_config import ResolvedConfig, ResolvedHarness, ResolvedPlugin
 from trailhead.provenance import read_stamp
 from trailhead.wire import WireError, wire_lock
@@ -1668,3 +1673,560 @@ class TestApplyRefusesRealRepos:
         assert preflight == {"verdict": "refused", "refusal": "no_upstream"}
         assert rc == 1
         assert "could not resolve the tracked upstream branch" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# The result record: every apply that holds the run lock records how it ended.
+#
+# Exit-path audit of run_update_apply / _apply_after_consent. Each row is one
+# way the apply can end and the record it must leave; the rows are the
+# parametrisation below (ids in brackets), produced on real throwaway repos
+# with real failures.
+#
+#   no record (never held the lock, or took nothing):
+#     missing stamp, unusable outpost config, malformed --run-id, TTY decline,
+#     non-interactive refusal, dry run, lock contention  (TestNoRecordIsWritten)
+#   refused:
+#     [install-no-upstream] [outpost-no-upstream] [install-git-error]
+#     [install-dirty] [outpost-dirty] [install-status-unreadable]
+#     [install-diverged] [install-divergence-unknown]
+#   failed_restored (nothing changed on this machine):
+#     [wire-lock-held] [config-resolve-error] [install-fetch-fails]
+#     [install-merge-blocked] [install-rewire-fails-rolled-back]
+#     [outpost-diverged-install-current] [outpost-fetch-fails-install-current]
+#     [outpost-merge-blocked-install-current]
+#     [outpost-build-fails-install-current] [outpost-stale-rebuild-fails-install-current]
+#     [interrupt-before-any-change]
+#   outpost_restored (install advanced, outpost left as it was):
+#     [outpost-diverged-install-advanced] [outpost-fetch-fails-install-advanced]
+#     [outpost-merge-blocked-install-advanced]
+#     [outpost-build-fails-install-advanced] [outpost-stale-rebuild-fails-install-advanced]
+#   failed_not_restored:
+#     [install-rewire-and-reset-fail] [install-rewire-fails-twice]
+#     [outpost-rollback-rebuild-fails] [outpost-reset-fails]
+#     [interrupt-after-a-change] [unexpected-exception-after-a-change]
+#     [unexpected-exception-after-rewiring-a-level-checkout] [interrupt-during-a-stale-rebuild]
+#   updated:
+#     [install-advanced] [install-rewired-checkout-level] [outpost-advanced-install-current]
+#     [outpost-stale-rebuild-install-current] [readiness-check-raises]
+#   already_current:
+#     [nothing-behind-no-outpost] [nothing-behind-outpost-built]
+#   SIGTERM / SIGKILL to a real apply process: TestRealSignals
+# ---------------------------------------------------------------------------
+
+RUN_ID = "c" * 32
+RUN_OLD = "d" * 32
+_OK_OUTCOMES = ("updated", "already_current")
+
+
+def _result_file(tmp_path: Path) -> Path:
+    return tmp_path / "state" / "update-result.json"
+
+
+def _lock_file(tmp_path: Path) -> Path:
+    return tmp_path / "state" / "update-run.lock"
+
+
+def _read_record(tmp_path: Path) -> dict:
+    return json.loads(_result_file(tmp_path).read_text())
+
+
+def _last_result(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(update_run.outpost_lifecycle, "managed_outpost", lambda *a, **k: None)
+    return update_run.build_status(env=_env(tmp_path))["last_result"]
+
+
+def _stub_npm(tmp_path: Path, monkeypatch, *, fail_on=(), lock: Path | None = None) -> Path:
+    """A real `npm` executable on PATH that exits 1 on the listed call numbers
+    (or on every call with ``"all"``), optionally taking a git index lock
+    first. Returns the call-counter file."""
+    bin_dir = tmp_path / "stub-bin"
+    bin_dir.mkdir(exist_ok=True)
+    counter = tmp_path / "npm-calls"
+    fail = "all" if fail_on == "all" else " ".join(str(n) for n in fail_on)
+    take_lock = f'touch "{lock}"' if lock is not None else ":"
+    script = bin_dir / "npm"
+    script.write_text(
+        "#!/bin/sh\n"
+        f'n=$(( $(cat "{counter}" 2>/dev/null || echo 0) + 1 ))\n'
+        f'echo $n > "{counter}"\n'
+        f'case " {fail} " in *" all "*|*" $n "*) {take_lock}; echo "stub npm failing" >&2; exit 1;; esac\n'
+        "exit 0\n"
+    )
+    script.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    return counter
+
+
+class _World:
+    pass
+
+
+def _world(tmp_path: Path, monkeypatch, *, install: str, outpost: str | None, wire_fail=()):
+    """Real install checkout and (optionally) real Outpost checkout.
+
+    install: "behind" (checkout behind its origin, stamped old), "stale"
+    (checkout level, install stamped at an older sha), "current".
+    outpost: None (unconfigured), "behind", "built" (level, build stamp
+    matches), "unbuilt" (level, no build stamp).
+    wire_fail: call numbers of wire_all_harnesses that raise ("all" for every
+    call); a raise leaves `.git/index.lock` in the checkout when
+    ``w.wire_locks_checkout``.
+    """
+    w = _World()
+    env = _env(tmp_path)
+    env["OUTPOST_STATE_DIR"] = str(tmp_path / "outpost-state")
+    _origin, checkout, old_sha, new_sha = _init_real_repo_pair(tmp_path)
+    if install == "behind" or install == "stale":
+        _install_stamp(tmp_path, env, sha=old_sha)
+    else:
+        _install_stamp(tmp_path, env, sha=new_sha)
+    if install != "behind":
+        _catch_up(checkout)
+    w.env, w.checkout, w.old_sha, w.new_sha = env, checkout, old_sha, new_sha
+    w.outpost = None
+    if outpost is not None:
+        root = tmp_path / "outpost-repos"
+        root.mkdir()
+        _oo, w.outpost, w.o_old, w.o_new = _init_real_repo_pair(root)
+        if outpost != "behind":
+            _catch_up(w.outpost)
+        _configure_outpost(env, w.outpost)
+        if outpost == "built":
+            update.outpost_lifecycle.build(env=env, build_cmd=[sys.executable, "-c", "pass"])
+    w.wire_calls = []
+    w.wire_locks_checkout = False
+
+    def _wire(cfg, *a, **k):
+        w.wire_calls.append(1)
+        if wire_fail == "all" or len(w.wire_calls) in wire_fail:
+            if w.wire_locks_checkout:
+                (w.checkout / ".git" / "index.lock").write_text("")
+            raise WireError(tool="craft", stage="register", cause=RuntimeError("boom"))
+        return {}
+
+    monkeypatch.setattr(update, "resolve_config_for_env", lambda e: _FakeCfg())
+    monkeypatch.setattr(update, "wire_all_harnesses", _wire)
+    monkeypatch.setattr(update.outpost_lifecycle, "managed_outpost", lambda *a, **k: None)
+    w.npm = _stub_npm(tmp_path, monkeypatch)
+    return w
+
+
+def _lock_repo(repo: Path) -> None:
+    (repo / ".git" / "index.lock").write_text("")
+
+
+def _merge_base_fails_runner(args, **kw):
+    if "merge-base" in args:
+        return subprocess.CompletedProcess(args, 128, stdout="", stderr="fatal: boom")
+    return subprocess.run(args, **kw)
+
+
+def _fetch_fails(repo: Path, tmp_path: Path) -> None:
+    _git(repo, "remote", "set-url", "origin", str(tmp_path / "gone"))
+
+
+def _interrupt(exc: BaseException):
+    def raiser(*a, **k):
+        raise exc
+
+    return raiser
+
+
+def _r(id, *, install, outpost=None, outcome, refusal=None, setup=None, **kw):
+    return pytest.param(
+        dict(install=install, outpost=outpost, outcome=outcome, refusal=refusal, setup=setup, **kw),
+        id=id,
+    )
+
+
+def _corrupt_head(w, tmp_path, monkeypatch, stack):
+    (w.checkout / ".git" / "HEAD").write_text("garbage\n")
+
+
+_ROWS = [
+    # --- refused ---------------------------------------------------------
+    _r("install-no-upstream", install="behind", outcome="refused", refusal="no_upstream",
+       setup=lambda w, t, m, s: _git(w.checkout, "branch", "--unset-upstream")),
+    _r("outpost-no-upstream", install="behind", outpost="behind", outcome="refused", refusal="no_upstream",
+       setup=lambda w, t, m, s: _git(w.outpost, "branch", "--unset-upstream")),
+    _r("install-git-error", install="behind", outcome="refused", refusal="unknown", setup=_corrupt_head),
+    _r("install-dirty", install="behind", outcome="refused", refusal="local_changes",
+       setup=lambda w, t, m, s: _dirty(w.checkout)),
+    _r("outpost-dirty", install="behind", outpost="behind", outcome="refused", refusal="local_changes",
+       setup=lambda w, t, m, s: _dirty(w.outpost)),
+    _r("install-status-unreadable", install="behind", outcome="refused", refusal="unknown",
+       setup=lambda w, t, m, s: (w.checkout / ".git" / "index").write_bytes(b"garbage")),
+    _r("install-diverged", install="behind", outcome="refused", refusal="diverged",
+       setup=lambda w, t, m, s: _commit_locally(w.checkout)),
+    _r("install-divergence-unknown", install="behind", outcome="refused", refusal="unknown",
+       runner=_merge_base_fails_runner),
+    # --- failed_restored -------------------------------------------------
+    _r("wire-lock-held", install="behind", outcome="failed_restored",
+       setup=lambda w, t, m, s: s.enter_context(wire_lock(env=w.env))),
+    _r("config-resolve-error", install="behind", outcome="failed_restored", raises=RuntimeError,
+       setup=lambda w, t, m, s: m.setattr(update, "resolve_config_for_env", _interrupt(RuntimeError("bad cfg")))),
+    _r("install-fetch-fails", install="behind", outcome="failed_restored",
+       setup=lambda w, t, m, s: _fetch_fails(w.checkout, t)),
+    _r("install-merge-blocked", install="behind", outcome="failed_restored",
+       setup=lambda w, t, m, s: _lock_repo(w.checkout)),
+    _r("install-rewire-fails-rolled-back", install="behind", outcome="failed_restored", wire_fail=(1,)),
+    _r("outpost-diverged-install-current", install="current", outpost="behind", outcome="failed_restored",
+       setup=lambda w, t, m, s: _commit_locally(w.outpost)),
+    _r("outpost-fetch-fails-install-current", install="current", outpost="behind", outcome="failed_restored",
+       setup=lambda w, t, m, s: _fetch_fails(w.outpost, t)),
+    _r("outpost-merge-blocked-install-current", install="current", outpost="behind",
+       outcome="failed_restored", setup=lambda w, t, m, s: _lock_repo(w.outpost)),
+    _r("outpost-build-fails-install-current", install="current", outpost="behind",
+       outcome="failed_restored", npm_fail=(2,)),
+    _r("outpost-stale-rebuild-fails-install-current", install="current", outpost="unbuilt",
+       outcome="failed_restored", npm_fail="all"),
+    _r("interrupt-before-any-change", install="behind", outcome="failed_restored", raises=KeyboardInterrupt,
+       setup=lambda w, t, m, s: m.setattr(update, "resolve_config_for_env", _interrupt(KeyboardInterrupt()))),
+    # --- outpost_restored ------------------------------------------------
+    _r("outpost-diverged-install-advanced", install="behind", outpost="behind", outcome="outpost_restored",
+       setup=lambda w, t, m, s: _commit_locally(w.outpost)),
+    _r("outpost-fetch-fails-install-advanced", install="behind", outpost="behind", outcome="outpost_restored",
+       setup=lambda w, t, m, s: _fetch_fails(w.outpost, t)),
+    _r("outpost-merge-blocked-install-advanced", install="behind", outpost="behind",
+       outcome="outpost_restored", setup=lambda w, t, m, s: _lock_repo(w.outpost)),
+    _r("outpost-build-fails-install-advanced", install="behind", outpost="behind",
+       outcome="outpost_restored", npm_fail=(2,)),
+    _r("outpost-stale-rebuild-fails-install-advanced", install="behind", outpost="unbuilt",
+       outcome="outpost_restored", npm_fail="all"),
+    # --- failed_not_restored ---------------------------------------------
+    _r("install-rewire-and-reset-fail", install="behind", outcome="failed_not_restored", wire_fail=(1,),
+       setup=lambda w, t, m, s: setattr(w, "wire_locks_checkout", True)),
+    _r("install-rewire-fails-twice", install="behind", outcome="failed_not_restored", wire_fail="all"),
+    _r("outpost-rollback-rebuild-fails", install="behind", outpost="behind",
+       outcome="failed_not_restored", npm_fail="all"),
+    _r("outpost-reset-fails", install="behind", outpost="behind", outcome="failed_not_restored",
+       npm_fail=(1,), npm_lock="outpost"),
+    _r("interrupt-after-a-change", install="behind", outpost="behind", outcome="failed_not_restored",
+       raises=KeyboardInterrupt,
+       setup=lambda w, t, m, s: m.setattr(update.outpost_lifecycle, "install_dependencies", _interrupt(KeyboardInterrupt()))),
+    _r("unexpected-exception-after-a-change", install="behind", outcome="failed_not_restored",
+       raises=RuntimeError,
+       setup=lambda w, t, m, s: m.setattr(update, "write_stamp", _interrupt(RuntimeError("stamp exploded")))),
+    _r("unexpected-exception-after-rewiring-a-level-checkout", install="stale", outcome="failed_not_restored",
+       raises=RuntimeError,
+       setup=lambda w, t, m, s: m.setattr(update, "write_stamp", _interrupt(RuntimeError("stamp exploded")))),
+    _r("interrupt-during-a-stale-rebuild", install="current", outpost="unbuilt", outcome="failed_not_restored",
+       raises=KeyboardInterrupt,
+       setup=lambda w, t, m, s: m.setattr(update.outpost_lifecycle, "install_dependencies", _interrupt(KeyboardInterrupt()))),
+    # --- updated ---------------------------------------------------------
+    _r("install-advanced", install="behind", outcome="updated"),
+    _r("install-rewired-checkout-level", install="stale", outcome="updated"),
+    _r("outpost-advanced-install-current", install="current", outpost="behind", outcome="updated"),
+    _r("outpost-stale-rebuild-install-current", install="current", outpost="unbuilt", outcome="updated"),
+    _r("readiness-check-raises", install="behind", outcome="updated",
+       setup=lambda w, t, m, s: m.setattr(update.doctor, "build_readiness", _interrupt(RuntimeError("doctor down")))),
+    # --- already_current -------------------------------------------------
+    _r("nothing-behind-no-outpost", install="current", outcome="already_current"),
+    _r("nothing-behind-outpost-built", install="current", outpost="built", outcome="already_current"),
+]
+
+
+class TestEveryExitPathRecordsHowItEnded:
+    @pytest.mark.parametrize("row", _ROWS)
+    def test_the_record_and_status_carry_the_outcome(self, tmp_path, monkeypatch, row):
+        w = _world(tmp_path, monkeypatch, install=row["install"], outpost=row["outpost"],
+                   wire_fail=row.get("wire_fail", ()))
+        if row.get("npm_fail"):
+            lock = (w.outpost / ".git" / "index.lock") if row.get("npm_lock") == "outpost" else None
+            w.npm = _stub_npm(tmp_path, monkeypatch, fail_on=row["npm_fail"], lock=lock)
+        with ExitStack() as stack:
+            if row["setup"] is not None:
+                row["setup"](w, tmp_path, monkeypatch, stack)
+            runner = row.get("runner", _real_runner)
+            call = lambda: update.run_update_apply(  # noqa: E731
+                env=w.env, runner=runner, assume_yes=True, run_id=RUN_ID
+            )
+            if row.get("raises"):
+                with pytest.raises(row["raises"]):
+                    call()
+                rc = None
+            else:
+                rc = call()
+
+        rec = _read_record(tmp_path)
+        assert rec["outcome"] == row["outcome"]
+        assert rec["refusal"] == row["refusal"]
+        assert rec["result_schema_version"] == 1
+        assert rec["run_id"] == RUN_ID
+        assert datetime.strptime(rec["finished_at"], "%Y-%m-%dT%H:%M:%SZ")
+        assert set(rec) == {"result_schema_version", "run_id", "finished_at", "outcome", "refusal"}
+        if rc is not None:
+            assert rc == (0 if row["outcome"] in _OK_OUTCOMES else 1)
+        assert update_run.current_holder(env=w.env) is None, "the lock is released on every exit path"
+        assert _last_result(tmp_path, monkeypatch) == {
+            k: rec[k] for k in ("run_id", "outcome", "refusal", "finished_at")
+        }
+
+
+class TestNoRecordIsWritten:
+    """Runs that never held the run lock leave no record, and a previous
+    record survives them untouched."""
+
+    @staticmethod
+    def _previous_record(tmp_path: Path) -> str:
+        path = _result_file(tmp_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        text = json.dumps(
+            {"result_schema_version": 1, "run_id": RUN_OLD, "finished_at": "2026-01-01T00:00:00Z",
+             "outcome": "updated", "refusal": None}
+        )
+        path.write_text(text)
+        return text
+
+    def _run(self, name, w, monkeypatch, tmp_path):
+        env = w.env
+        if name == "tty-decline":
+            monkeypatch.setattr(sys, "stdin", StringIO("n\n"))
+            return update.run_update_apply(env=env, runner=_real_runner, is_tty=lambda: True)
+        if name == "non-interactive-refusal":
+            return update.run_update_apply(env=env, runner=_real_runner, is_tty=lambda: False)
+        if name == "dry-run":
+            return update.run_update_apply(env=env, runner=_real_runner, dry_run=True)
+        if name == "malformed-run-id":
+            return update.run_update_apply(env=env, runner=_real_runner, assume_yes=True, run_id="nope")
+        if name == "unusable-outpost-config":
+            (Path(env["OUTPOST_CONFIG_DIR"]) / "config.toml").write_text("checkout = [not toml")
+            return update.run_update_apply(env=env, runner=_real_runner, assume_yes=True)
+        if name == "missing-stamp":
+            from trailhead import provenance
+
+            provenance.stamp_path(env=env).unlink()
+            return update.run_update_apply(env=env, runner=_real_runner, assume_yes=True)
+        raise AssertionError(name)
+
+    @pytest.mark.parametrize(
+        "name",
+        ["tty-decline", "non-interactive-refusal", "dry-run", "malformed-run-id",
+         "unusable-outpost-config", "missing-stamp"],
+    )
+    @pytest.mark.parametrize("had_previous", [False, True], ids=["no-previous", "previous-record"])
+    def test_the_run_writes_nothing_and_keeps_the_previous_record(
+        self, tmp_path, monkeypatch, name, had_previous
+    ):
+        w = _world(tmp_path, monkeypatch, install="behind", outpost="behind")
+        previous = self._previous_record(tmp_path) if had_previous else None
+
+        self._run(name, w, monkeypatch, tmp_path)
+
+        if had_previous:
+            assert _result_file(tmp_path).read_text() == previous
+        else:
+            assert not _result_file(tmp_path).exists()
+
+
+class TestSigtermHandlerIsScopedToTheApply:
+    def test_the_previous_sigterm_handler_is_back_after_the_apply(self, tmp_path, monkeypatch):
+        w = _world(tmp_path, monkeypatch, install="behind", outpost=None)
+        sentinel = lambda signum, frame: None  # noqa: E731
+        previous = signal.signal(signal.SIGTERM, sentinel)
+        try:
+            assert update.run_update_apply(env=w.env, runner=_real_runner, assume_yes=True) == 0
+            assert signal.getsignal(signal.SIGTERM) is sentinel
+        finally:
+            signal.signal(signal.SIGTERM, previous)
+
+    def test_the_handler_is_back_after_a_refused_apply_too(self, tmp_path, monkeypatch):
+        w = _world(tmp_path, monkeypatch, install="behind", outpost=None)
+        _dirty(w.checkout)
+        sentinel = lambda signum, frame: None  # noqa: E731
+        previous = signal.signal(signal.SIGTERM, sentinel)
+        try:
+            assert update.run_update_apply(env=w.env, runner=_real_runner, assume_yes=True) == 1
+            assert signal.getsignal(signal.SIGTERM) is sentinel
+        finally:
+            signal.signal(signal.SIGTERM, previous)
+
+
+class TestRecordFile:
+    def test_the_record_is_owner_only_and_replaced_through_a_temp_file_in_its_directory(
+        self, tmp_path, monkeypatch
+    ):
+        w = _world(tmp_path, monkeypatch, install="behind", outpost=None)
+        result = _result_file(tmp_path)
+        result.parent.mkdir(parents=True, exist_ok=True)
+        result.write_text("{}")
+        os.chmod(result, 0o644)
+        replaced: list[tuple[str, str]] = []
+        real_replace = os.replace
+
+        def spy(src, dst, *a, **k):
+            replaced.append((str(src), str(dst)))
+            return real_replace(src, dst, *a, **k)
+
+        monkeypatch.setattr(os, "replace", spy)
+        old_umask = os.umask(0)
+        try:
+            rc = update.run_update_apply(env=w.env, runner=_real_runner, assume_yes=True, run_id=RUN_ID)
+        finally:
+            os.umask(old_umask)
+
+        assert rc == 0
+        assert (result.stat().st_mode & 0o777) == 0o600
+        ours = [(s, d) for s, d in replaced if d == str(result)]
+        assert len(ours) == 1
+        src, dst = ours[0]
+        assert Path(src).parent == result.parent and src != dst
+        assert not Path(src).exists()
+        assert _read_record(tmp_path)["run_id"] == RUN_ID
+
+    def test_a_later_run_replaces_the_previous_record(self, tmp_path, monkeypatch):
+        w = _world(tmp_path, monkeypatch, install="behind", outpost=None)
+        assert update.run_update_apply(env=w.env, runner=_real_runner, assume_yes=True, run_id=RUN_OLD) == 0
+        assert _read_record(tmp_path)["outcome"] == "updated"
+        assert update.run_update_apply(env=w.env, runner=_real_runner, assume_yes=True, run_id=RUN_ID) == 0
+        rec = _read_record(tmp_path)
+        assert (rec["run_id"], rec["outcome"]) == (RUN_ID, "already_current")
+
+
+# ---------------------------------------------------------------------------
+# A real apply process, signalled mid-run.
+# ---------------------------------------------------------------------------
+
+_APPLY_DRIVER = """
+import sys
+from trailhead import cli, update, outpost_lifecycle
+class _Cfg:
+    harnesses = []
+update.resolve_config_for_env = lambda e: _Cfg()
+update.wire_all_harnesses = lambda *a, **k: {}
+outpost_lifecycle.managed_outpost = lambda *a, **k: None
+run_id = sys.argv[1]
+sys.argv = ["trailhead", "update", "--yes", "--run-id", run_id]
+sys.exit(cli.main())
+"""
+
+
+class _ApplyProcess:
+    """`trailhead update --yes --run-id <id>` as a real process, blocked at a
+    real seam: a `sleep` standing in for `git fetch`'s upload-pack, or for
+    `npm`. Every process it caused is reaped on close."""
+
+    def __init__(self, tmp_path: Path, w, *, block: str):
+        self.tmp_path = tmp_path
+        self.marker = tmp_path / "blocked.pid"
+        blocker = tmp_path / "block.sh"
+        blocker.write_text(f'#!/bin/sh\necho $$ > "{self.marker}"\nexec sleep 120\n')
+        blocker.chmod(0o755)
+        env = dict(w.env)
+        if block == "fetch":
+            _git(w.checkout, "config", "remote.origin.uploadpack", str(blocker))
+        else:
+            bin_dir = tmp_path / "proc-bin"
+            bin_dir.mkdir()
+            shim = bin_dir / "npm"
+            shim.write_text(f'#!/bin/sh\nexec "{blocker}"\n')
+            shim.chmod(0o755)
+            env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
+        self.log = (tmp_path / "apply.log").open("w")
+        self.proc = subprocess.Popen(
+            [sys.executable, "-c", _APPLY_DRIVER, RUN_ID],
+            env=env, stdout=self.log, stderr=subprocess.STDOUT,
+        )
+        deadline = time.monotonic() + 30
+        while not self.marker.exists() or not self.marker.read_text().strip():
+            assert self.proc.poll() is None, f"apply exited early: {(tmp_path / 'apply.log').read_text()}"
+            assert time.monotonic() < deadline, "apply never reached the blocking seam"
+            time.sleep(0.05)
+        self.blocked_pid = int(self.marker.read_text())
+
+    def signal_and_wait(self, sig) -> int:
+        self.proc.send_signal(sig)
+        return self.proc.wait(timeout=30)
+
+    def close(self):
+        if self.proc.poll() is None:
+            self.proc.kill()
+        self.proc.wait(timeout=10)
+        self.log.close()
+        try:
+            os.kill(self.blocked_pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
+@pytest.fixture()
+def apply_process():
+    made: list[_ApplyProcess] = []
+
+    def make(tmp_path, w, *, block):
+        p = _ApplyProcess(tmp_path, w, block=block)
+        made.append(p)
+        return p
+
+    yield make
+    for p in made:
+        p.close()
+
+
+class TestRealSignals:
+    def test_sigterm_after_a_change_began_records_failed_not_restored_and_frees_the_lock(
+        self, tmp_path, monkeypatch, apply_process
+    ):
+        w = _world(tmp_path, monkeypatch, install="current", outpost="behind")
+        p = apply_process(tmp_path, w, block="npm")
+
+        assert update_run.current_holder(env=w.env)["run_id"] == RUN_ID
+        assert p.signal_and_wait(signal.SIGTERM) == 143
+
+        rec = _read_record(tmp_path)
+        assert rec["outcome"] == "failed_not_restored"
+        assert rec["refusal"] is None
+        assert rec["run_id"] == RUN_ID
+        assert update_run.current_holder(env=w.env) is None
+        assert _last_result(tmp_path, monkeypatch)["outcome"] == "failed_not_restored"
+        assert _run_git_real(w.outpost, "rev-parse", "HEAD").stdout.strip() == w.o_new
+
+    def test_sigterm_before_any_change_records_failed_restored(
+        self, tmp_path, monkeypatch, apply_process
+    ):
+        w = _world(tmp_path, monkeypatch, install="behind", outpost=None)
+        p = apply_process(tmp_path, w, block="fetch")
+
+        assert p.signal_and_wait(signal.SIGTERM) == 143
+
+        rec = _read_record(tmp_path)
+        assert (rec["outcome"], rec["run_id"]) == ("failed_restored", RUN_ID)
+        assert update_run.current_holder(env=w.env) is None
+        assert _run_git_real(w.checkout, "rev-parse", "HEAD").stdout.strip() == w.old_sha
+
+    @pytest.mark.parametrize("older", [False, True], ids=["no-record", "older-record"])
+    def test_sigkill_after_the_lock_reads_interrupted_until_the_next_run_replaces_it(
+        self, tmp_path, monkeypatch, apply_process, older
+    ):
+        w = _world(tmp_path, monkeypatch, install="behind", outpost=None)
+        old_record = {"result_schema_version": 1, "run_id": RUN_OLD, "finished_at": "2026-01-01T00:00:00Z",
+                      "outcome": "updated", "refusal": None}
+        if older:
+            _result_file(tmp_path).parent.mkdir(parents=True, exist_ok=True)
+            _result_file(tmp_path).write_text(json.dumps(old_record))
+        p = apply_process(tmp_path, w, block="fetch")
+
+        held = _last_result(tmp_path, monkeypatch)
+        assert held == ({k: old_record[k] for k in ("run_id", "outcome", "refusal", "finished_at")} if older else None), (
+            "a held lock never reads as interrupted"
+        )
+
+        p.signal_and_wait(signal.SIGKILL)
+
+        assert update_run.current_holder(env=w.env) is None
+        assert _last_result(tmp_path, monkeypatch) == {
+            "run_id": RUN_ID, "outcome": "interrupted", "refusal": None, "finished_at": None,
+        }
+        on_disk = json.loads(_result_file(tmp_path).read_text()) if older else None
+        assert on_disk == (old_record if older else None), "interrupted is derived, never written"
+        if not older:
+            assert not _result_file(tmp_path).exists()
+
+        _git(w.checkout, "config", "--unset", "remote.origin.uploadpack")
+        # The wire lock has no liveness: a killed apply leaves it behind and the
+        # next run names it for the operator to remove.
+        (tmp_path / "state" / "trailhead.lock").unlink()
+        assert update.run_update_apply(env=w.env, runner=_real_runner, assume_yes=True, run_id=RUN_OLD) == 0
+        last = _last_result(tmp_path, monkeypatch)
+        assert (last["run_id"], last["outcome"]) == (RUN_OLD, "updated")

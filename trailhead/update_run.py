@@ -12,6 +12,12 @@ lock alive after the apply exits.
 Three readers sit on the file: :func:`current_holder` (who holds it right now,
 by a shared non-blocking lock attempt), :func:`read_lock_record` (what the
 file last recorded, held or not) and :func:`build_status` (``--status --json``).
+
+Every apply that holds the lock also leaves ``update-result.json`` beside it
+(:func:`write_result`), naming the run and how it ended. A run that dies
+without writing it (SIGKILL, power loss) is told apart by :func:`build_status`:
+the lock is free and its file names a run id the result does not carry, which
+reads as ``interrupted``. That outcome is derived on read and never stored.
 """
 
 from __future__ import annotations
@@ -27,11 +33,23 @@ from pathlib import Path
 
 from trailhead import outpost_lifecycle
 from trailhead.paths import ensure_dir, state_dir
+from trailhead.provenance import _atomic_write_json, _now_iso
 
 RUN_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 STATUS_SCHEMA_VERSION = 1
+RESULT_SCHEMA_VERSION = 1
+OUTCOMES = (
+    "updated",
+    "refused",
+    "outpost_restored",
+    "failed_restored",
+    "failed_not_restored",
+    "already_current",
+)
+REFUSALS = ("local_changes", "diverged", "no_upstream", "unknown")
 
 _LOCK_FILENAME = "update-run.lock"
+_RESULT_FILENAME = "update-result.json"
 _RECORD_WAIT_SECONDS = 1.0
 
 
@@ -137,12 +155,74 @@ def current_holder(*, env: dict[str, str] | None = None) -> dict | None:
         os.close(fd)
 
 
+def _result_path(env: dict[str, str] | None) -> Path:
+    return state_dir("trailhead", env=env) / _RESULT_FILENAME
+
+
+def write_result(
+    run_id: str, outcome: str, refusal: str | None, *, env: dict[str, str] | None = None
+) -> None:
+    """Record how run *run_id* ended, atomically and owner-only."""
+    _atomic_write_json(
+        _result_path(env),
+        {
+            "result_schema_version": RESULT_SCHEMA_VERSION,
+            "run_id": run_id,
+            "finished_at": _now_iso(),
+            "outcome": outcome,
+            "refusal": refusal,
+        },
+        prefix=".update-result-",
+    )
+
+
+def read_result(*, env: dict[str, str] | None = None) -> dict | None:
+    """The last result as ``{run_id, outcome, refusal, finished_at}``, or
+    ``None`` when the record is absent, unreadable, or outside the closed
+    vocabulary."""
+    try:
+        data = json.loads(_result_path(env).read_text())
+    except (OSError, ValueError):
+        return None
+    if (
+        isinstance(data, dict)
+        and data.get("result_schema_version") == RESULT_SCHEMA_VERSION
+        and isinstance(data.get("run_id"), str)
+        and isinstance(data.get("finished_at"), str)
+        and data.get("outcome") in OUTCOMES
+        and (data.get("refusal") is None or data.get("refusal") in REFUSALS)
+    ):
+        return {k: data[k] for k in ("run_id", "outcome", "refusal", "finished_at")}
+    return None
+
+
 def build_status(*, env: dict[str, str] | None = None) -> dict:
     """The ``trailhead update --status --json`` object (status schema 1).
-    Read-only: no git, no network."""
+    Read-only: no git, no network.
+
+    ``last_result`` is the stored result, or ``interrupted`` when the lock is
+    free and its file names a run the stored result does not carry. The three
+    reads are ordered lock file, holder probe, result: a run that was holding
+    the lock when its file was read has either finished and written its result
+    by the time the probe finds the lock free, or is still holding it.
+    """
+    lock_record = read_lock_record(env=env)
+    holder = current_holder(env=env)
+    last_result = read_result(env=env)
+    if (
+        holder is None
+        and lock_record is not None
+        and (last_result is None or last_result["run_id"] != lock_record["run_id"])
+    ):
+        last_result = {
+            "run_id": lock_record["run_id"],
+            "outcome": "interrupted",
+            "refusal": None,
+            "finished_at": None,
+        }
     return {
         "status_schema_version": STATUS_SCHEMA_VERSION,
         "managed_outpost": outpost_lifecycle.managed_outpost(env=env),
-        "running": current_holder(env=env),
-        "last_result": None,
+        "running": holder,
+        "last_result": last_result,
     }
