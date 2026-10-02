@@ -1381,11 +1381,21 @@ class TestOutpostRestartFollowsOwnership:
     ):
         env, _outpost, _o_old, _o_new = _real_outpost_world(tmp_path, monkeypatch, outpost_behind=True)
         steps = _Steps(monkeypatch, managed=False)
+        # The real ownership predicate decides here: no supervisor entry under
+        # the isolated HOME and no pidfile, while a development copy answers
+        # /health on the daemon port. The probe is faked rather than binding
+        # 7313, which a live Outpost on the host may already hold.
+        monkeypatch.setattr(update.outpost_lifecycle, "managed_outpost", self._real_managed_outpost)
+        monkeypatch.setattr(
+            update.outpost_lifecycle, "_probe_health", lambda port, timeout: {"status": "ok"}
+        )
 
         rc = update.run_update_apply(env=env, runner=_real_runner, assume_yes=True)
 
         assert rc == 0
         assert steps.names == ["deps", "build"]
+
+    _real_managed_outpost = staticmethod(update.outpost_lifecycle.managed_outpost)
 
     def test_behind_with_nothing_running_builds_without_starting_anything(self, tmp_path, monkeypatch):
         env, _outpost, _o_old, _o_new = _real_outpost_world(tmp_path, monkeypatch, outpost_behind=True)
