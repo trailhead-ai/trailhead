@@ -39,7 +39,11 @@ uses for "is a host supervisor managing Outpost" (``_is_supervised``):
   submit``, which cannot carry an environment. The plist is not in
   ``~/Library/LaunchAgents``, so nothing re-runs it at login. Cleanup: the next
   detach first runs ``launchctl bootout gui/<uid>/com.trailhead.update`` for the
-  previous run's finished job. UNPROVEN on a real Mac (task K2): this path is
+  previous run's finished job (by label, which needs no file). The definition
+  is written through a temp file in the same directory and renamed into place,
+  so a symlink at its path is replaced rather than followed, and it is removed
+  as soon as ``launchctl bootstrap`` returns: launchd has parsed it by then,
+  and it must not leave the caller's environment on disk. UNPROVEN on a real Mac (task K2): this path is
   only exercised against an injected runner.
 * Unsupervised: a child in its own session (``start_new_session=True``), stdio
   detached, output appended to ``state_dir("trailhead")/update-run.log``.
@@ -60,6 +64,7 @@ import plistlib
 import re
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -124,12 +129,19 @@ def _launchd_plist(
 
 
 def _write_private(path: Path, data: bytes) -> None:
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    """Write *data* to *path*, owner-only, through a new temp file in the same
+    directory renamed over it: a symlink already at *path* is replaced, never
+    followed, and a reader sees the old file or the whole new one."""
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}-")
     try:
-        os.fchmod(fd, 0o600)
-        os.write(fd, data)
-    finally:
-        os.close(fd)
+        with os.fdopen(fd, "wb") as out:
+            out.write(data)
+            out.flush()
+            os.fsync(out.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
 
 
 def _run_with_env(argv: list[str], env: dict[str, str]) -> subprocess.CompletedProcess:
@@ -146,8 +158,11 @@ def _start_launchd(
     domain = outpost_supervisor.launchd_domain(uid)
     plist = ensure_dir(log.parent) / _PLIST_NAME
     _write_private(plist, _launchd_plist(env, checkout, log, run_id, start_by))
-    run(["launchctl", "bootout", f"{domain}/{LAUNCHD_LABEL}"])
-    return run(["launchctl", "bootstrap", domain, str(plist)]).returncode == 0
+    try:
+        run(["launchctl", "bootout", f"{domain}/{LAUNCHD_LABEL}"])
+        return run(["launchctl", "bootstrap", domain, str(plist)]).returncode == 0
+    finally:
+        plist.unlink(missing_ok=True)
 
 
 def _start_unsupervised(

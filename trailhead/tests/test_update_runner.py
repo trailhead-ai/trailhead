@@ -282,6 +282,107 @@ def test_launchd_plist_is_owner_only(world):
     assert modes == [0o600]
 
 
+def _state_files_holding(tmp_path: Path, needle: str) -> list[Path]:
+    return [
+        f for f in _state(tmp_path).rglob("*")
+        if f.is_file() and not f.is_symlink() and needle.encode() in f.read_bytes()
+    ]
+
+
+@pytest.mark.parametrize("bootstrap_rc", [0, 5], ids=["bootstrapped", "bootstrap-failed"])
+def test_launchd_job_definition_does_not_outlive_the_bootstrap(world, bootstrap_rc):
+    tmp_path, env = world
+    env["TH_SECRET"] = "s3cret-token-xyz"
+    seen = []
+
+    def start(argv, runner):
+        if argv[:2] == ["launchctl", "bootstrap"]:
+            seen.append(_state_files_holding(tmp_path, "s3cret-token-xyz"))
+            if bootstrap_rc == 0:
+                runner.locks.append(update_run.acquire_run_lock(
+                    _run_id_from(plistlib.loads(Path(argv[3]).read_bytes())["ProgramArguments"]), env=env))
+
+    runner = FakeRunner(rc=0, on_start=start)
+    real_call = runner.__call__
+
+    def call(argv, env=None):
+        result = real_call(argv, env=env)
+        if argv[:2] == ["launchctl", "bootstrap"] and bootstrap_rc:
+            return CompletedProcess(argv, bootstrap_rc, "", "")
+        return result
+
+    try:
+        update_runner.detach(
+            env=env, platform="darwin", supervisor_dir=_sup_dir(tmp_path, kind="darwin"),
+            runner=call, uid=501, wait_seconds=1, poll_interval=0.01,
+        )
+    finally:
+        runner.close()
+    assert len(seen[0]) == 1, "the definition carries the environment while launchd loads it"
+    assert _state_files_holding(tmp_path, "s3cret-token-xyz") == []
+
+
+def test_launchd_job_definition_is_written_without_following_a_symlink_at_its_path(world):
+    tmp_path, env = world
+    victim = tmp_path / "victim.txt"
+    victim.write_text("precious")
+    _state(tmp_path).mkdir(parents=True, exist_ok=True)
+    (_state(tmp_path) / "update-job.plist").symlink_to(victim)
+    at_bootstrap = {}
+
+    def start(argv, runner):
+        if argv[:2] == ["launchctl", "bootstrap"]:
+            path = Path(argv[3])
+            at_bootstrap.update(
+                symlink=path.is_symlink(), mode=path.stat().st_mode & 0o777,
+                plist=plistlib.loads(path.read_bytes()),
+            )
+            runner.locks.append(update_run.acquire_run_lock(
+                _run_id_from(at_bootstrap["plist"]["ProgramArguments"]), env=env))
+
+    runner = FakeRunner(on_start=start)
+    try:
+        out = update_runner.detach(
+            env=env, platform="darwin", supervisor_dir=_sup_dir(tmp_path, kind="darwin"),
+            runner=runner, uid=501, wait_seconds=1, poll_interval=0.01,
+        )
+    finally:
+        runner.close()
+    assert out["started"] is True
+    assert victim.read_text() == "precious"
+    assert at_bootstrap["symlink"] is False
+    assert at_bootstrap["mode"] == 0o600
+    assert at_bootstrap["plist"]["EnvironmentVariables"] == env
+
+
+def test_launchd_job_definition_replaces_its_path_through_a_temp_file_in_the_same_directory(
+    world, monkeypatch
+):
+    tmp_path, env = world
+    replaced = []
+    real_replace = os.replace
+
+    def spy(src, dst, *a, **k):
+        replaced.append((str(src), str(dst), os.stat(src).st_mode & 0o777))
+        return real_replace(src, dst, *a, **k)
+
+    monkeypatch.setattr(update_runner.os, "replace", spy)
+    runner = _launchd_runner(env, [])
+    try:
+        update_runner.detach(
+            env=env, platform="darwin", supervisor_dir=_sup_dir(tmp_path, kind="darwin"),
+            runner=runner, uid=501, wait_seconds=1, poll_interval=0.01,
+        )
+    finally:
+        runner.close()
+    dest = str(_state(tmp_path) / "update-job.plist")
+    ours = [(src, mode) for src, dst, mode in replaced if dst == dest]
+    assert len(ours) == 1
+    src, mode = ours[0]
+    assert Path(src).parent == _state(tmp_path) and src != dest
+    assert mode == 0o600
+
+
 def test_launchd_replaces_the_previous_job_before_bootstrapping(world):
     tmp_path, env = world
     plists: list[dict] = []
@@ -694,10 +795,12 @@ def test_a_job_that_takes_the_lock_just_before_the_start_by_is_seen_as_started(s
     tmp_path, env, pids = stub
     env["STUB_MODE"] = "at"
     env["STUB_OFFSET"] = "-0.05"
-    time.sleep(1.05 - time.time() % 1)  # the next whole second is then ~0.95 s away
+    # Just past a whole second, a 1.2 s wait puts start_by on the second after
+    # next: the job takes the lock ~1.9 s in, well after the wait itself ends.
+    time.sleep(1.05 - time.time() % 1)
     out = update_runner.detach(
         env=env, platform="linux", supervisor_dir=_sup_dir(tmp_path, kind=None),
-        wait_seconds=0.2, poll_interval=0.02,
+        wait_seconds=1.2, poll_interval=0.02,
     )
     assert _wait_for(tmp_path / "stub-out.json")
     _stub_out(tmp_path, pids)
