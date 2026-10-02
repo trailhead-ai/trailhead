@@ -12,6 +12,7 @@ import re
 import signal
 import subprocess
 import sys
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -45,6 +46,34 @@ else:
     print("ready", flush=True)
 sys.stdin.readline()
 """
+
+
+_PROBE = """
+import fcntl, os, sys, time
+fd = os.open(sys.argv[1], os.O_RDONLY)
+fcntl.flock(fd, fcntl.LOCK_SH)
+print("probing", flush=True)
+time.sleep(float(sys.argv[2]))
+"""
+
+_SLOW_WRITER = """
+import fcntl, json, os, sys
+fd = os.open(sys.argv[1], os.O_RDWR)
+fcntl.flock(fd, fcntl.LOCK_EX)
+print("locked", flush=True)
+sys.stdin.readline()
+os.ftruncate(fd, 0)
+os.write(fd, json.dumps({"run_id": sys.argv[2], "pid": os.getpid(),
+                         "started_at": "2026-10-02T00:00:00+00:00"}).encode())
+print("written", flush=True)
+sys.stdin.readline()
+"""
+
+
+def _dead_pid() -> int:
+    done = subprocess.Popen([sys.executable, "-c", "pass"])
+    done.wait()
+    return done.pid
 
 
 class _Holder:
@@ -174,6 +203,28 @@ class TestAcquire:
         assert _lock_file(tmp_path).read_text() == before
         assert json.loads(before)["run_id"] == RUN_A
 
+    def test_a_probe_holding_the_lock_briefly_does_not_make_the_acquire_fail(self, tmp_path):
+        env = _env(tmp_path)
+        update_run.release_run_lock(update_run.acquire_run_lock(RUN_A, env=env))
+        probe = subprocess.Popen(
+            [sys.executable, "-c", _PROBE, str(_lock_file(tmp_path)), "0.4"],
+            stdout=subprocess.PIPE, text=True,
+        )
+        try:
+            assert probe.stdout.readline().strip() == "probing"
+            fd = update_run.acquire_run_lock(RUN_B, env=env)
+        finally:
+            probe.wait(timeout=10)
+        update_run.release_run_lock(fd)
+        assert update_run.read_lock_record(env=env)["run_id"] == RUN_B
+
+    def test_a_real_holder_still_blocks_the_acquire_after_a_bounded_wait(self, holders, tmp_path):
+        holders(tmp_path, run_id=RUN_A)
+        t0 = time.monotonic()
+        with pytest.raises(update_run.RunLockHeld):
+            update_run.acquire_run_lock(RUN_B, env=_env(tmp_path))
+        assert time.monotonic() - t0 < 2.5
+
     def test_a_longer_stale_record_is_fully_replaced_by_the_next_holder(self, tmp_path):
         lock = _lock_file(tmp_path)
         lock.parent.mkdir(parents=True)
@@ -200,6 +251,26 @@ class TestHolderProbe:
         holder = update_run.current_holder(env=_env(tmp_path))
         assert holder["run_id"] == RUN_A
         assert holder["pid"] == h.proc.pid
+
+    def test_a_holder_that_has_not_yet_written_is_not_reported_as_the_previous_run(self, tmp_path):
+        env = _env(tmp_path)
+        _lock_file(tmp_path).parent.mkdir(parents=True, exist_ok=True)
+        _lock_file(tmp_path).write_text(
+            json.dumps({"run_id": RUN_A, "pid": _dead_pid(), "started_at": "2026-01-01T00:00:00+00:00"})
+        )
+        writer = subprocess.Popen(
+            [sys.executable, "-c", _SLOW_WRITER, str(_lock_file(tmp_path)), RUN_B],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True,
+        )
+        try:
+            assert writer.stdout.readline().strip() == "locked"
+            threading.Timer(0.3, lambda: (writer.stdin.write("go\n"), writer.stdin.flush())).start()
+            holder = update_run.current_holder(env=env)
+            assert holder is not None and holder["run_id"] == RUN_B
+            assert holder["pid"] == writer.pid
+        finally:
+            writer.kill()
+            writer.wait()
 
     def test_probe_does_not_disturb_the_holder_or_block_a_later_acquire(self, tmp_path):
         env = _env(tmp_path)

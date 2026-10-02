@@ -52,6 +52,8 @@ REFUSALS = ("local_changes", "diverged", "no_upstream", "unknown")
 _LOCK_FILENAME = "update-run.lock"
 _RESULT_FILENAME = "update-result.json"
 _RECORD_WAIT_SECONDS = 1.0
+_ACQUIRE_WAIT_SECONDS = 1.0
+_ACQUIRE_POLL_SECONDS = 0.02
 
 
 class RunLockHeld(Exception):
@@ -79,6 +81,21 @@ def _lock_path(env: dict[str, str] | None) -> Path:
     return state_dir("trailhead", env=env) / _LOCK_FILENAME
 
 
+def _flock_exclusive(fd: int, path: Path) -> None:
+    """Take the exclusive lock without blocking, retrying for a short bound: a
+    status probe holds a shared lock for an instant, and must not make a real
+    run read as "already running". A genuine holder outlasts the bound."""
+    deadline = time.monotonic() + _ACQUIRE_WAIT_SECONDS
+    while True:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return
+        except BlockingIOError:
+            if time.monotonic() >= deadline:
+                raise RunLockHeld(str(path)) from None
+        time.sleep(_ACQUIRE_POLL_SECONDS)
+
+
 def acquire_run_lock(
     run_id: str, *, env: dict[str, str] | None = None, start_by: int | None = None
 ) -> int:
@@ -96,10 +113,7 @@ def acquire_run_lock(
     fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
     try:
         os.set_inheritable(fd, False)
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            raise RunLockHeld(str(path)) from None
+        _flock_exclusive(fd, path)
         if start_by is not None and time.time() >= start_by:
             raise RunLockExpired(str(path))
         record = {
@@ -145,11 +159,24 @@ def read_lock_record(*, env: dict[str, str] | None = None) -> dict | None:
     return _parse_record(raw)
 
 
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
 def current_holder(*, env: dict[str, str] | None = None) -> dict | None:
     """The record of the process holding the run lock right now, or ``None``.
 
     Probes with a shared non-blocking lock attempt, so a lock file left behind
-    by a killed process reads as unheld.
+    by a killed process reads as unheld. While the lock is held the record is
+    read until it names a live process: the holder takes the lock before it
+    replaces the previous run's record, so a record whose pid is gone is that
+    earlier run's, not the holder's.
     """
     try:
         fd = os.open(_lock_path(env), os.O_RDONLY)
@@ -165,8 +192,10 @@ def current_holder(*, env: dict[str, str] | None = None) -> dict | None:
         deadline = time.monotonic() + _RECORD_WAIT_SECONDS
         while True:
             record = read_lock_record(env=env)
-            if record is not None or time.monotonic() >= deadline:
+            if record is not None and _pid_alive(record["pid"]):
                 return record
+            if time.monotonic() >= deadline:
+                return None
             time.sleep(0.02)
     finally:
         os.close(fd)
