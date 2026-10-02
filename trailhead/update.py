@@ -148,7 +148,7 @@ import tomllib
 from datetime import datetime, timezone
 from pathlib import Path
 
-from trailhead import doctor, outpost_lifecycle
+from trailhead import doctor, outpost_lifecycle, update_run
 from trailhead.install import resolve_config_for_env, wire_all_harnesses
 from trailhead.outpost_lifecycle import OutpostLifecycleError
 from trailhead.paths import state_dir
@@ -739,6 +739,7 @@ def run_update_apply(
     timeout: int = 10,
     confine_root: Path | str | None = None,
     is_tty=None,
+    run_id: str | None = None,
 ) -> int:
     """Perform the upgrade: fast-forward the stamped checkout, then re-wire,
     then upgrade a configured outpost checkout.
@@ -780,6 +781,13 @@ def run_update_apply(
     _env = env if env is not None else dict(os.environ)
     _runner = runner if runner is not None else _default_runner()
     _is_tty = is_tty if is_tty is not None else _default_is_tty
+
+    if run_id is not None and not update_run.validate_run_id(run_id):
+        print(
+            "trailhead: --run-id must be 32 lowercase hex characters",
+            file=sys.stderr,
+        )
+        return 1
 
     stamp, rejected_reason = read_stamp_with_reason(env=_env, confine_root=confine_root)
     if stamp is None:
@@ -841,6 +849,47 @@ def run_update_apply(
                 file=sys.stderr,
             )
             return 1
+
+    if dry_run:
+        return _apply_after_consent(
+            checkout, pre_sha, outpost_checkout,
+            env=_env, runner=_runner, timeout=timeout, dry_run=True, run_id=run_id,
+        )
+
+    # The run lock is taken only once consent has passed, before preflight or
+    # any change, and held until this process is done.
+    run_id = run_id if run_id is not None else update_run.new_run_id()
+    try:
+        lock_fd = update_run.acquire_run_lock(run_id, env=_env)
+    except update_run.RunLockHeld:
+        print(
+            "trailhead: an update is already running — wait for it to finish, "
+            "then re-run: trailhead update",
+            file=sys.stderr,
+        )
+        return 1
+    try:
+        return _apply_after_consent(
+            checkout, pre_sha, outpost_checkout,
+            env=_env, runner=_runner, timeout=timeout, dry_run=False, run_id=run_id,
+        )
+    finally:
+        update_run.release_run_lock(lock_fd)
+
+
+def _apply_after_consent(
+    checkout: Path,
+    pre_sha: str,
+    outpost_checkout: Path | None,
+    *,
+    env: dict[str, str],
+    runner,
+    timeout: int,
+    dry_run: bool,
+    run_id: str | None,
+) -> int:
+    """Preflight, then upgrade — everything past the consent gate and the run lock."""
+    _env, _runner = env, runner
 
     # ------------------------------------------------------------------
     # Preflight — both checkouts, before mutating either. A problem with the

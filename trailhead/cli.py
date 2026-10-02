@@ -47,6 +47,7 @@ from trailhead.update import (
     check_for_update,
     run_update_apply,
 )
+from trailhead.update_run import build_status
 from trailhead.wire import LockError, WireError
 
 # Named error family — maps to a clean 'trailhead: <message>' line.
@@ -129,11 +130,21 @@ def _cmd_update(args: argparse.Namespace) -> int:
         print("trailhead: --automatic requires --check", file=sys.stderr)
         return 1
 
+    if args.status:
+        if not args.json:
+            print("trailhead: --status requires --json", file=sys.stderr)
+            return 1
+        import json
+
+        print(json.dumps(build_status()))
+        return 0
+
     if not args.check:
         return run_update_apply(
             assume_yes=args.yes,
             dry_run=args.dry_run,
             timeout=args.timeout,
+            run_id=args.run_id,
         )
 
     if args.automatic and automatic_check_disabled():
@@ -322,6 +333,18 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         default=False,
         help="Run the read-only freshness check instead of upgrading.",
+    )
+    update_p.add_argument(
+        "--status",
+        action="store_true",
+        default=False,
+        help="Report whether an update is running and the managed Outpost (requires --json; read-only).",
+    )
+    update_p.add_argument(
+        "--run-id",
+        default=None,
+        metavar="ID",
+        help="Run id to record for this update: 32 lowercase hex characters (apply mode only).",
     )
     update_p.add_argument(
         "--automatic",
