@@ -20,9 +20,12 @@ uses for "is a host supervisor managing Outpost" (``_is_supervised``):
 * Supervised, Linux: ``systemd-run --user --unit=trailhead-update-<id>
   --collect``. The job lives in its own cgroup under the user manager, so
   restarting ``outpost.service`` does not touch it. A transient unit does NOT
-  inherit the caller's environment, so every caller variable is forwarded as a
-  name-only ``--setenv=NAME`` argv element and ``systemd-run`` itself runs with
-  the caller's environment, from which it reads each value. No environment
+  inherit the caller's environment, so every caller variable whose name
+  ``systemd-run`` accepts (``[A-Za-z_][A-Za-z0-9_]*``; an exported bash
+  function's ``BASH_FUNC_x%%`` is one it rejects, and would fail every start)
+  is forwarded as a name-only ``--setenv=NAME`` argv element and
+  ``systemd-run`` itself runs with the caller's environment, from which it
+  reads each value. A rejected name reaches nothing. No environment
   value appears in any argv element, so none is visible in the process table.
   The working directory is the checkout
   (``--working-directory``), not the manager's ``$HOME``. ``--collect`` removes
@@ -54,6 +57,7 @@ from __future__ import annotations
 import math
 import os
 import plistlib
+import re
 import subprocess
 import sys
 import time
@@ -68,6 +72,7 @@ POLL_SECONDS = 0.1
 LAUNCHD_LABEL = "com.trailhead.update"
 _LOG_NAME = "update-run.log"
 _PLIST_NAME = "update-job.plist"
+_SETENV_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
 def _could_not_start() -> dict:
@@ -96,7 +101,7 @@ def _systemd_argv(
         f"--working-directory={checkout}",
         f"--property=StandardOutput=append:{log}",
         f"--property=StandardError=append:{log}",
-        *[f"--setenv={name}" for name in env],
+        *[f"--setenv={name}" for name in env if _SETENV_NAME_RE.fullmatch(name)],
         "--",
         *_update_argv(checkout, run_id, start_by),
     ]

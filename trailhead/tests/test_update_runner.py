@@ -172,6 +172,30 @@ def test_systemd_job_gets_every_caller_variable(world):
     assert not any("/opt/node/bin" in a for a in argv)
 
 
+@pytest.mark.parametrize(
+    "bad", ["BASH_FUNC_x%%", "1STARTS_WITH_DIGIT", "HAS-DASH", "HAS SPACE", "\u00c9NV"]
+)
+def test_an_environment_name_systemd_would_reject_is_not_forwarded_and_the_rest_are(world, bad):
+    tmp_path, env = world
+    env[bad] = "() { :; }"
+    env["_UNDERSCORE_OK"] = "1"
+    runner = FakeRunner(on_start=_takes_lock(env))
+    try:
+        out = update_runner.detach(
+            env=env, platform="linux", supervisor_dir=_sup_dir(tmp_path, kind="linux"),
+            runner=runner, wait_seconds=2, poll_interval=0.01,
+        )
+    finally:
+        runner.close()
+    assert out["started"] is True
+    (argv,) = runner.calls
+    setenvs = [a for a in argv if a.startswith("--setenv=")]
+    assert f"--setenv={bad}" not in setenvs
+    assert "--setenv=_UNDERSCORE_OK" in setenvs
+    assert "--setenv=TH_CALLER_VAR" in setenvs
+    assert len(setenvs) == len(env) - 1
+
+
 def test_systemd_no_shell_hostile_value_in_no_argv_element_and_env_unchanged(world):
     tmp_path, env = world
     env["TH_HOSTILE"] = HOSTILE
