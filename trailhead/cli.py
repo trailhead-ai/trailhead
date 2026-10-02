@@ -47,7 +47,7 @@ from trailhead.update import (
     check_for_update,
     run_update_apply,
 )
-from trailhead.update_run import build_status
+from trailhead.update_run import build_status, validate_run_id
 from trailhead.wire import LockError, WireError
 
 # Named error family — maps to a clean 'trailhead: <message>' line.
@@ -128,6 +128,10 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
 def _cmd_update(args: argparse.Namespace) -> int:
     if args.automatic and not args.check:
         print("trailhead: --automatic requires --check", file=sys.stderr)
+        return 1
+
+    if args.run_id is not None and not validate_run_id(args.run_id):
+        print("trailhead: --run-id must be 32 lowercase hex characters", file=sys.stderr)
         return 1
 
     if args.status:

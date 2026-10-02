@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from trailhead import update, update_run
+from trailhead import cli, update, update_run
 from trailhead.cli import main
 from trailhead.tests.test_update_apply import (
     _FakeCfg,
@@ -337,6 +337,24 @@ class TestRunIdFlag:
         assert "run-id" in capsys.readouterr().err
         assert not calls
         assert not _lock_file(tmp_path).exists()
+
+    @pytest.mark.parametrize(
+        "mode", [["--status", "--json"], ["--check", "--json"]], ids=["status", "check"]
+    )
+    def test_malformed_run_id_is_refused_in_every_mode(self, tmp_path, monkeypatch, capsys, mode):
+        _pin(monkeypatch, tmp_path)
+        ran: list[str] = []
+        monkeypatch.setattr(cli, "build_status", lambda *a, **k: ran.append("status") or {})
+        monkeypatch.setattr(cli, "check_for_update", lambda *a, **k: ran.append("check"))
+        monkeypatch.setattr(sys, "argv", ["trailhead", "update", *mode, "--run-id", "A" * 32])
+
+        rc = main()
+
+        cap = capsys.readouterr()
+        assert rc == 1
+        assert "run-id" in cap.err
+        assert cap.out == ""
+        assert ran == []
 
 
 class TestStatus:
