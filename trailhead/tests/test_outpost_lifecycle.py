@@ -1731,7 +1731,7 @@ def test_supervised_restart_raises_when_reported_pid_dies_within_settle_window(
 
 # ---------------------------------------------------------------------------
 # Seams `trailhead update` drives: configured_checkout / install_dependencies /
-# build / is_answering
+# build / managed_outpost
 # ---------------------------------------------------------------------------
 
 
@@ -1821,14 +1821,215 @@ class TestInstallDependenciesAndBuild:
             outpost_lifecycle.build(env=env, build_cmd=_marker_cmd(tmp_path, "build", exit_code=1))
 
 
-class TestIsAnswering:
-    def test_a_port_serving_health_is_answering(self, outpost):
-        assert _start(outpost) == 0
-        assert _wait_until(lambda: _health_reachable(outpost.port), timeout=5.0)
-        assert outpost_lifecycle.is_answering(port=outpost.port) is True
+@pytest.fixture()
+def live_child():
+    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    yield proc
+    proc.kill()
+    proc.wait()
 
-    def test_a_closed_port_is_not_answering(self):
-        assert outpost_lifecycle.is_answering(port=_free_port(), timeout=0.2) is False
+
+@pytest.fixture()
+def dead_pid():
+    proc = subprocess.Popen([sys.executable, "-c", "pass"])
+    proc.wait()
+    return proc.pid
+
+
+def _managed(outpost, *, platform, runner=None):
+    return outpost_lifecycle.managed_outpost(
+        env=outpost.env,
+        platform=platform,
+        supervisor_dir=outpost.supervisor_dir,
+        runner=runner,
+        uid=501,
+    )
+
+
+class TestManagedOutpost:
+    def test_supervised_with_a_live_main_pid_is_that_pid_and_the_configured_checkout(
+        self, outpost, live_child
+    ):
+        _write_supervisor_entry(outpost, "linux")
+        runner = _RecordingRunner(
+            stdout_by_prefix={("systemctl", "--user", "show"): _systemd_show(main_pid=str(live_child.pid))}
+        )
+
+        assert _managed(outpost, platform="linux", runner=runner) == {
+            "pid": live_child.pid,
+            "checkout": str(outpost.checkout.resolve()),
+        }
+
+    def test_supervised_darwin_reads_the_launchctl_pid(self, outpost, live_child):
+        _write_supervisor_entry(outpost, "darwin")
+        runner = _RecordingRunner(
+            stdout_by_prefix={("launchctl", "print"): f"service = x\n\tpid = {live_child.pid}\n"}
+        )
+
+        managed = _managed(outpost, platform="darwin", runner=runner)
+
+        assert managed is not None and managed["pid"] == live_child.pid
+
+    def test_supervised_with_main_pid_zero_is_not_managed(self, outpost):
+        _write_supervisor_entry(outpost, "linux")
+        runner = _RecordingRunner(
+            stdout_by_prefix={("systemctl", "--user", "show"): _systemd_show(main_pid="0")}
+        )
+
+        assert _managed(outpost, platform="linux", runner=runner) is None
+
+    def test_supervised_darwin_with_pid_zero_is_not_managed(self, outpost):
+        _write_supervisor_entry(outpost, "darwin")
+        runner = _RecordingRunner(stdout_by_prefix={("launchctl", "print"): "\tpid = 0\n"})
+
+        assert _managed(outpost, platform="darwin", runner=runner) is None
+
+    def test_supervised_with_a_dead_main_pid_is_not_managed(self, outpost, dead_pid):
+        _write_supervisor_entry(outpost, "linux")
+        runner = _RecordingRunner(
+            stdout_by_prefix={("systemctl", "--user", "show"): _systemd_show(main_pid=str(dead_pid))}
+        )
+
+        assert _managed(outpost, platform="linux", runner=runner) is None
+
+    def test_supervised_ignores_a_live_pidfile_pid(self, outpost, live_child):
+        _write_supervisor_entry(outpost, "linux")
+        outpost.state_dir.mkdir(parents=True, exist_ok=True)
+        (outpost.state_dir / "outpost.pid").write_text(f"{live_child.pid}\n")
+        runner = _RecordingRunner(
+            stdout_by_prefix={("systemctl", "--user", "show"): _systemd_show(main_pid="0")}
+        )
+
+        assert _managed(outpost, platform="linux", runner=runner) is None
+
+    def test_unsupervised_with_a_live_pidfile_pid_is_that_pid(self, outpost, live_child):
+        outpost.state_dir.mkdir(parents=True, exist_ok=True)
+        (outpost.state_dir / "outpost.pid").write_text(f"{live_child.pid}\n")
+        runner = _RecordingRunner()
+
+        assert _managed(outpost, platform="linux", runner=runner) == {
+            "pid": live_child.pid,
+            "checkout": str(outpost.checkout.resolve()),
+        }
+        assert runner.calls == []
+
+    def test_a_pidfile_naming_a_dead_pid_is_not_managed(self, outpost, dead_pid):
+        outpost.state_dir.mkdir(parents=True, exist_ok=True)
+        (outpost.state_dir / "outpost.pid").write_text(f"{dead_pid}\n")
+
+        assert _managed(outpost, platform="linux", runner=_RecordingRunner()) is None
+
+    def test_no_pidfile_is_not_managed(self, outpost):
+        assert _managed(outpost, platform="linux", runner=_RecordingRunner()) is None
+
+    def test_a_listener_answering_health_that_is_neither_supervised_nor_in_the_pidfile_is_not_managed(
+        self, outpost, health_server
+    ):
+        health_server.start()
+        assert _health_reachable(outpost.port)
+
+        assert _managed(outpost, platform="linux", runner=_RecordingRunner()) is None
+
+    def test_an_unconfigured_outpost_is_not_managed(self, tmp_path, live_child):
+        state = tmp_path / "state"
+        state.mkdir()
+        (state / "outpost.pid").write_text(f"{live_child.pid}\n")
+        env = {
+            "OUTPOST_CONFIG_DIR": str(tmp_path / "no-config"),
+            "OUTPOST_STATE_DIR": str(state),
+            "HOME": str(tmp_path / "home"),
+        }
+
+        assert (
+            outpost_lifecycle.managed_outpost(
+                env=env, platform="linux", supervisor_dir=tmp_path / "sup", runner=_RecordingRunner()
+            )
+            is None
+        )
+
+
+def _git_repo(path: Path) -> str:
+    path.mkdir(exist_ok=True)
+    for args in (
+        ["init", "--initial-branch=main"],
+        ["config", "user.email", "a@example.com"],
+        ["config", "user.name", "T"],
+        ["config", "commit.gpgsign", "false"],
+        ["commit", "--allow-empty", "-m", "one"],
+    ):
+        subprocess.run(["git", "-C", str(path), *args], check=True, capture_output=True)
+    return subprocess.run(
+        ["git", "-C", str(path), "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+
+class TestBuildStamp:
+    def _repo_env(self, tmp_path):
+        checkout = tmp_path / "outpost"
+        head = _git_repo(checkout)
+        return checkout, head, _cfg_env(tmp_path, f'checkout = "{checkout}"\n')
+
+    def test_a_successful_build_records_the_head_it_built(self, tmp_path):
+        _checkout, head, env = self._repo_env(tmp_path)
+        assert outpost_lifecycle.built_sha(env=env) is None
+
+        outpost_lifecycle.build(env=env, build_cmd=_marker_cmd(tmp_path, "build"))
+
+        assert outpost_lifecycle.built_sha(env=env) == head
+
+    def test_the_stamp_follows_head_across_builds(self, tmp_path):
+        checkout, head, env = self._repo_env(tmp_path)
+        outpost_lifecycle.build(env=env, build_cmd=_marker_cmd(tmp_path, "build"))
+        subprocess.run(
+            ["git", "-C", str(checkout), "commit", "--allow-empty", "-m", "two"],
+            check=True,
+            capture_output=True,
+        )
+        newer = subprocess.run(
+            ["git", "-C", str(checkout), "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+        ).stdout.strip()
+        assert newer != head
+
+        outpost_lifecycle.build(env=env, build_cmd=_marker_cmd(tmp_path, "build"))
+
+        assert outpost_lifecycle.built_sha(env=env) == newer
+
+    def test_the_stamp_file_is_owner_only(self, tmp_path):
+        _checkout, _head, env = self._repo_env(tmp_path)
+        outpost_lifecycle.build(env=env, build_cmd=_marker_cmd(tmp_path, "build"))
+
+        stamp = Path(env["OUTPOST_STATE_DIR"]) / "build.json"
+        assert stamp.stat().st_mode & 0o777 == 0o600
+
+    def test_a_failed_build_writes_no_stamp(self, tmp_path):
+        _checkout, _head, env = self._repo_env(tmp_path)
+
+        with pytest.raises(OutpostLifecycleError, match="build failed"):
+            outpost_lifecycle.build(env=env, build_cmd=_marker_cmd(tmp_path, "build", exit_code=1))
+
+        assert outpost_lifecycle.built_sha(env=env) is None
+
+    def test_a_failed_build_leaves_the_previous_stamp_alone(self, tmp_path):
+        checkout, head, env = self._repo_env(tmp_path)
+        outpost_lifecycle.build(env=env, build_cmd=_marker_cmd(tmp_path, "build"))
+        subprocess.run(
+            ["git", "-C", str(checkout), "commit", "--allow-empty", "-m", "two"],
+            check=True,
+            capture_output=True,
+        )
+
+        with pytest.raises(OutpostLifecycleError):
+            outpost_lifecycle.build(env=env, build_cmd=_marker_cmd(tmp_path, "build", exit_code=1))
+
+        assert outpost_lifecycle.built_sha(env=env) == head
+
+    def test_a_garbled_stamp_reads_as_no_stamp(self, tmp_path):
+        _checkout, _head, env = self._repo_env(tmp_path)
+        state = Path(env["OUTPOST_STATE_DIR"])
+        state.mkdir()
+        (state / "build.json").write_text("{not json")
+
+        assert outpost_lifecycle.built_sha(env=env) is None
 
 
 class TestConfiguredCheckoutNeverRaisesAnUnnamedError:

@@ -1,9 +1,10 @@
 """Lifecycle management for the outpost daemon: ``trailhead outpost start|stop|status|restart|open``.
 
 Outpost is a long-running local Node/TS daemon (loopback only, port 7313) plus a
-web UI. There is no supervisor (no launchd/systemd) in this version — these
-verbs ARE the stable management interface. A supervised backend can slot in behind
-the same verbs later.
+web UI. These verbs are the stable management interface: they drive a host
+supervisor (launchd on macOS, systemd --user on Linux) when one is registered
+(see "Host-supervisor awareness"), and otherwise spawn and track the daemon
+themselves through a pidfile.
 
 Contract & invariants
 ---------------------
@@ -56,7 +57,7 @@ Contract & invariants
   The build step is :func:`build` on its own, and :func:`install_dependencies`
   (default ``npm ci``) refreshes the checkout's pinned dependencies — the two
   steps ``trailhead update`` runs after fast-forwarding the checkout, with
-  :func:`is_answering` deciding whether it rebuilds through ``restart``.
+  :func:`managed_outpost` deciding whether it rebuilds through ``restart``.
   ``restart`` does not trust ``start``'s return value alone: it polls ``/health``
   briefly afterward (allowing for startup latency), proving *some* process is
   answering on the port, and then confirms the pid ``start()`` recorded is
@@ -65,6 +66,17 @@ Contract & invariants
   is raised if either check fails — otherwise a doomed spawn (e.g. dying on
   EADDRINUSE against a not-yet-dead old daemon) would be reported as a
   successful restart while the old daemon keeps serving stale content.
+
+* **Ownership, not answering.** :func:`managed_outpost` is the one predicate for
+  "the Outpost trailhead manages is running": the supervisor's main pid when a
+  supervisor entry is registered, else the pidfile pid — either only when that
+  process is alive — together with the configured checkout. Whether something
+  answers ``/health`` on the port never decides it, so a development copy
+  holding the port is never mistaken for the managed daemon.
+* **Build stamp.** A successful :func:`build` records the checkout's HEAD sha in
+  ``build.json`` under ``state_dir("outpost")`` (:func:`built_sha` reads it), so
+  a checkout whose build does not match its HEAD can be told apart from one that
+  is current. A failed build leaves the previous stamp untouched.
 
 status exit codes (structured, so callers/tests can branch on state):
     EXIT_RUNNING    (0)  pid alive, /health answers (or, under supervision,
@@ -126,11 +138,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from trailhead.paths import PathResolutionError, config_dir, ensure_dir, state_dir
+from trailhead.provenance import _atomic_write_json
 
 APP = "outpost"
 CONFIG_FILENAME = "config.toml"
 PIDFILE_NAME = "outpost.pid"
 LOG_NAME = "outpost.log"
+BUILD_STAMP_NAME = "build.json"
 
 # The built daemon entrypoint, relative to the outpost checkout root. The outpost
 # build compiles server/index.ts to this path (tsc outDir=dist, rootDir=repo root).
@@ -323,11 +337,6 @@ def _probe_health(port: int, timeout: float) -> dict | None:
             return json.loads(resp.read())
     except (urllib.error.URLError, OSError, ValueError):
         return None
-
-
-def is_answering(port: int = DAEMON_PORT, timeout: float = 1.0) -> bool:
-    """True when something answers ``/health`` on the loopback daemon port."""
-    return _probe_health(port, timeout) is not None
 
 
 def _wait_for_health(port: int, total_timeout: float, poll_interval: float = 0.1) -> dict | None:
@@ -529,6 +538,56 @@ def _probe_supervisor(osup, run, kind: str, uid: int | None) -> _SupervisorProbe
     if kind == "darwin":
         return _probe_darwin(run, osup.launchd_service(uid))
     return _probe_linux(run, osup.SYSTEMD_UNIT_NAME)
+
+
+def _supervised_main_pid(
+    env: dict[str, str] | None, *, platform: str | None, runner, uid: int | None
+) -> int | None:
+    from trailhead import outpost_supervisor as osup
+
+    kind = osup._platform_kind(platform)
+    run = runner if runner is not None else osup.default_runner
+    pid = _probe_supervisor(osup, run, kind, uid).pid
+    if not pid:
+        return None
+    return pid if _pid_alive(pid) else None
+
+
+def _pidfile_live_pid(env: dict[str, str] | None) -> int | None:
+    pid = _read_pid(_pidfile(env))
+    if pid is None:
+        return None
+    return pid if _pid_alive(pid) else None
+
+
+def managed_outpost(
+    env: dict[str, str] | None = None,
+    *,
+    platform: str | None = None,
+    supervisor_dir: Path | None = None,
+    runner=None,
+    uid: int | None = None,
+) -> dict | None:
+    """The Outpost process trailhead manages, as ``{"pid": int, "checkout": str}``,
+    or ``None`` when none is running.
+
+    Supervised (a supervisor entry is registered): the supervisor's main pid,
+    only when non-zero and alive. Unsupervised: the pidfile pid, only when
+    alive. ``checkout`` is always the configured Outpost checkout; an
+    unconfigured Outpost is never managed. Nothing here probes the port, so an
+    unrelated process answering ``/health`` is not the managed Outpost.
+    Read-only: unlike the supervised verbs it never removes a leftover pidfile.
+    """
+    checkout = configured_checkout(env)
+    if checkout is None:
+        return None
+    if _is_supervised(env, platform=platform, supervisor_dir=supervisor_dir):
+        pid = _supervised_main_pid(env, platform=platform, runner=runner, uid=uid)
+    else:
+        pid = _pidfile_live_pid(env)
+    if pid is None:
+        return None
+    return {"pid": pid, "checkout": str(checkout)}
 
 
 def _supervised_start(
@@ -1059,9 +1118,39 @@ def install_dependencies(
     _run_in_checkout(checkout, cmd, what="dependency install")
 
 
+def _build_stamp_path(env: dict[str, str] | None) -> Path:
+    return state_dir(APP, env=env) / BUILD_STAMP_NAME
+
+
+def built_sha(*, env: dict[str, str] | None = None) -> str | None:
+    """The checkout HEAD sha the last successful :func:`build` recorded, or
+    ``None`` when there is no usable record."""
+    try:
+        data = json.loads(_build_stamp_path(env).read_text())
+    except (OSError, ValueError):
+        return None
+    sha = data.get("sha") if isinstance(data, dict) else None
+    return sha if isinstance(sha, str) and sha else None
+
+
+def _checkout_head(checkout: Path) -> str | None:
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(checkout), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    sha = proc.stdout.strip()
+    return sha if proc.returncode == 0 and sha else None
+
+
 def build(*, env: dict[str, str] | None = None, build_cmd: list[str] | None = None) -> None:
     """Build the outpost checkout (default ``npm run build``) without touching
-    any running daemon, then print the hashed web bundle filenames.
+    any running daemon, record the HEAD sha it built in ``build.json``, then
+    print the hashed web bundle filenames.
 
     Raises OutpostLifecycleError when outpost is not configured, or the build
     cannot run or exits nonzero.
@@ -1069,6 +1158,10 @@ def build(*, env: dict[str, str] | None = None, build_cmd: list[str] | None = No
     checkout = _resolve_checkout(env)
     cmd = build_cmd if build_cmd is not None else list(DEFAULT_BUILD_CMD)
     _run_in_checkout(checkout, cmd, what="build")
+
+    head = _checkout_head(checkout)
+    if head is not None:
+        _atomic_write_json(_build_stamp_path(env), {"sha": head}, prefix=".build-")
 
     assets_dir = checkout.joinpath(*WEB_ASSETS_DIR_PARTS)
     asset_names = sorted(p.name for p in assets_dir.glob("*") if p.is_file()) if assets_dir.is_dir() else []

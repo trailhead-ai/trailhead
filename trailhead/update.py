@@ -1118,7 +1118,7 @@ def _upgrade_outpost(
     checkout: Path, branch: str, *, env: dict[str, str], runner, timeout: int
 ) -> bool:
     """Fast-forward the outpost checkout, reinstall its dependencies, and
-    rebuild it (restarting the daemon if it was answering). Runs only after
+    rebuild it (restarting the daemon if it is the managed one). Runs only after
     the install upgrade succeeded, and never undoes it: a failure here rolls
     back outpost alone — reset to its pre-upgrade HEAD, then reinstalled and
     rebuilt/restarted from there — and reports truthfully whether that
@@ -1131,11 +1131,26 @@ def _upgrade_outpost(
             file=sys.stderr,
         )
         return False
-    if status == "current":
+    stale_build = status == "current" and outpost_lifecycle.built_sha(env=env) != pre_head
+    if status == "current" and not stale_build:
         print(f"trailhead: outpost already up to date ({pre_head[:8]})")
         return True
 
-    was_running = outpost_lifecycle.is_answering()
+    was_running = outpost_lifecycle.managed_outpost(env=env) is not None
+    if stale_build:
+        try:
+            _refresh_outpost(env, restart=was_running)
+        except Exception as exc:
+            print(
+                f"trailhead: outpost rebuild failed ({exc}); the checkout is "
+                f"unchanged at {pre_head[:8]}. Re-run: trailhead update",
+                file=sys.stderr,
+            )
+            return False
+        restarted = " and restarted the daemon" if was_running else ""
+        print(f"trailhead: rebuilt outpost at {pre_head[:8]}{restarted}")
+        return True
+
     try:
         _refresh_outpost(env, restart=was_running)
     except Exception as exc:

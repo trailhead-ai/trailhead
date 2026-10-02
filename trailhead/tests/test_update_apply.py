@@ -987,7 +987,8 @@ class _OutpostSpy:
         monkeypatch.setattr(update.outpost_lifecycle, "install_dependencies", _step("deps"))
         monkeypatch.setattr(update.outpost_lifecycle, "build", _step("build"))
         monkeypatch.setattr(update.outpost_lifecycle, "restart", _step("restart"))
-        monkeypatch.setattr(update.outpost_lifecycle, "is_answering", lambda *a, **k: running)
+        managed = {"pid": 4242, "checkout": "/outpost"} if running else None
+        monkeypatch.setattr(update.outpost_lifecycle, "managed_outpost", lambda *a, **k: managed)
 
     @property
     def names(self) -> list[str]:
@@ -1091,6 +1092,7 @@ class TestOutpostUpgrade:
             remote=_OUTPOST_NEW,
         )
         spy = _OutpostSpy(monkeypatch, state)
+        monkeypatch.setattr(update.outpost_lifecycle, "built_sha", lambda *a, **k: _OUTPOST_NEW)
         _patch_wire(monkeypatch)
 
         rc = update.run_update_apply(env=env, runner=runner, assume_yes=True)
@@ -1313,7 +1315,7 @@ class TestRealOutpostRollback:
 
         monkeypatch.setattr(update.outpost_lifecycle, "install_dependencies", lambda *a, **k: None)
         monkeypatch.setattr(update.outpost_lifecycle, "build", _build)
-        monkeypatch.setattr(update.outpost_lifecycle, "is_answering", lambda *a, **k: False)
+        monkeypatch.setattr(update.outpost_lifecycle, "managed_outpost", lambda *a, **k: None)
         _patch_wire(monkeypatch)
 
         rc = update.run_update_apply(env=env, runner=_real_runner, assume_yes=True)
@@ -1321,6 +1323,165 @@ class TestRealOutpostRollback:
         assert rc == 1
         assert _run_git_real(outpost, "rev-parse", "HEAD").stdout.strip() == o_old
         assert built_at == [o_new, o_old]
+
+
+def _real_outpost_world(tmp_path: Path, monkeypatch, *, outpost_behind: bool):
+    """A level, stamped real install plus a real outpost checkout (behind its
+    origin, or caught up to it), configured as the outpost checkout. Returns
+    (env, outpost, old_sha, new_sha)."""
+    env = _env(tmp_path)
+    env["OUTPOST_STATE_DIR"] = str(tmp_path / "outpost-state")
+    _origin, checkout, _old, new_sha = _init_real_repo_pair(tmp_path)
+    _install_stamp(tmp_path, env, sha=new_sha)
+    _catch_up(checkout)
+
+    outpost_root = tmp_path / "outpost-repos"
+    outpost_root.mkdir()
+    _o_origin, outpost, o_old, o_new = _init_real_repo_pair(outpost_root)
+    if not outpost_behind:
+        _catch_up(outpost)
+    _configure_outpost(env, outpost)
+    monkeypatch.setattr(update, "resolve_config_for_env", lambda e: _FakeCfg())
+    monkeypatch.setattr(update, "wire_all_harnesses", lambda *a, **k: {})
+    return env, outpost, o_old, o_new
+
+
+class _Steps:
+    """Records the outpost lifecycle steps apply drives, against real repos."""
+
+    def __init__(self, monkeypatch, *, managed: bool):
+        self.names: list[str] = []
+        self.real_build = update.outpost_lifecycle.build
+        for name in ("install_dependencies", "build", "restart"):
+            monkeypatch.setattr(
+                update.outpost_lifecycle,
+                name,
+                lambda *a, _n={"install_dependencies": "deps"}.get(name, name), **k: self.names.append(_n),
+            )
+        info = {"pid": 4242, "checkout": "/outpost"} if managed else None
+        monkeypatch.setattr(update.outpost_lifecycle, "managed_outpost", lambda *a, **k: info)
+
+
+def _stamp_build_at_head(env, outpost) -> None:
+    update.outpost_lifecycle.build(env=env, build_cmd=[sys.executable, "-c", "pass"])
+
+
+class TestOutpostRestartFollowsOwnership:
+    def test_behind_with_a_managed_daemon_running_restarts(self, tmp_path, monkeypatch):
+        env, _outpost, _o_old, _o_new = _real_outpost_world(tmp_path, monkeypatch, outpost_behind=True)
+        steps = _Steps(monkeypatch, managed=True)
+
+        rc = update.run_update_apply(env=env, runner=_real_runner, assume_yes=True)
+
+        assert rc == 0
+        assert steps.names == ["deps", "restart"]
+
+    def test_behind_with_a_foreign_listener_on_the_port_builds_without_restarting(
+        self, tmp_path, monkeypatch
+    ):
+        env, _outpost, _o_old, _o_new = _real_outpost_world(tmp_path, monkeypatch, outpost_behind=True)
+        steps = _Steps(monkeypatch, managed=False)
+
+        rc = update.run_update_apply(env=env, runner=_real_runner, assume_yes=True)
+
+        assert rc == 0
+        assert steps.names == ["deps", "build"]
+
+    def test_behind_with_nothing_running_builds_without_starting_anything(self, tmp_path, monkeypatch):
+        env, _outpost, _o_old, _o_new = _real_outpost_world(tmp_path, monkeypatch, outpost_behind=True)
+        steps = _Steps(monkeypatch, managed=False)
+
+        rc = update.run_update_apply(env=env, runner=_real_runner, assume_yes=True)
+
+        assert rc == 0
+        assert steps.names == ["deps", "build"]
+
+
+class TestOutpostBuildStamp:
+    def test_level_with_the_remote_and_a_matching_stamp_is_current_and_builds_nothing(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        env, outpost, _o_old, _o_new = _real_outpost_world(tmp_path, monkeypatch, outpost_behind=False)
+        _stamp_build_at_head(env, outpost)
+        steps = _Steps(monkeypatch, managed=True)
+        capsys.readouterr()
+
+        rc = update.run_update_apply(env=env, runner=_real_runner, assume_yes=True)
+
+        assert rc == 0
+        assert steps.names == []
+        assert "outpost already up to date" in capsys.readouterr().out
+
+    def test_level_with_a_different_stamp_rebuilds_and_reports_an_advance(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        env, outpost, o_old, _o_new = _real_outpost_world(tmp_path, monkeypatch, outpost_behind=False)
+        _stamp_build_at_head(env, outpost)
+        _run_git_real(outpost, "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-m", "local")
+        steps = _Steps(monkeypatch, managed=False)
+        capsys.readouterr()
+
+        rc = update.run_update_apply(env=env, runner=_real_runner, assume_yes=True)
+
+        out = capsys.readouterr().out
+        assert rc == 0
+        assert steps.names == ["deps", "build"]
+        assert "outpost already up to date" not in out
+        assert "rebuilt outpost" in out
+
+    def test_level_with_a_different_stamp_restarts_when_the_managed_daemon_is_running(
+        self, tmp_path, monkeypatch
+    ):
+        env, outpost, _o_old, _o_new = _real_outpost_world(tmp_path, monkeypatch, outpost_behind=False)
+        _stamp_build_at_head(env, outpost)
+        _run_git_real(outpost, "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-m", "local")
+        steps = _Steps(monkeypatch, managed=True)
+
+        rc = update.run_update_apply(env=env, runner=_real_runner, assume_yes=True)
+
+        assert rc == 0
+        assert steps.names == ["deps", "restart"]
+
+    def test_level_with_no_stamp_rebuilds(self, tmp_path, monkeypatch, capsys):
+        env, _outpost, _o_old, _o_new = _real_outpost_world(tmp_path, monkeypatch, outpost_behind=False)
+        steps = _Steps(monkeypatch, managed=False)
+
+        rc = update.run_update_apply(env=env, runner=_real_runner, assume_yes=True)
+
+        assert rc == 0
+        assert steps.names == ["deps", "build"]
+        assert "rebuilt outpost" in capsys.readouterr().out
+
+    def test_a_stale_rebuild_that_fails_is_reported_and_leaves_the_checkout_alone(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        env, outpost, o_old, _o_new = _real_outpost_world(tmp_path, monkeypatch, outpost_behind=False)
+        head = _run_git_real(outpost, "rev-parse", "HEAD").stdout.strip()
+        _Steps(monkeypatch, managed=False)
+
+        def _boom(*a, **k):
+            raise update.OutpostLifecycleError("tsc failed")
+
+        monkeypatch.setattr(update.outpost_lifecycle, "build", _boom)
+
+        rc = update.run_update_apply(env=env, runner=_real_runner, assume_yes=True)
+
+        assert rc == 1
+        assert _run_git_real(outpost, "rev-parse", "HEAD").stdout.strip() == head
+        assert "tsc failed" in capsys.readouterr().err
+
+    def test_an_advance_records_its_build_so_the_next_update_is_current(self, tmp_path, monkeypatch, capsys):
+        env, _outpost, _o_old, o_new = _real_outpost_world(tmp_path, monkeypatch, outpost_behind=True)
+        monkeypatch.setattr(update.outpost_lifecycle, "DEFAULT_INSTALL_CMD", [sys.executable, "-c", "pass"])
+        monkeypatch.setattr(update.outpost_lifecycle, "DEFAULT_BUILD_CMD", [sys.executable, "-c", "pass"])
+        monkeypatch.setattr(update.outpost_lifecycle, "managed_outpost", lambda *a, **k: None)
+
+        assert update.run_update_apply(env=env, runner=_real_runner, assume_yes=True) == 0
+        assert update.outpost_lifecycle.built_sha(env=env) == o_new
+        capsys.readouterr()
+
+        assert update.run_update_apply(env=env, runner=_real_runner, assume_yes=True) == 0
+        assert "outpost already up to date" in capsys.readouterr().out
 
 
 class TestOutpostWaitsOnTheInstall:
