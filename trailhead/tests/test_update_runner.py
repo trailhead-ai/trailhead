@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 import plistlib
+import signal
 import subprocess
 import sys
 import textwrap
@@ -392,12 +393,16 @@ def test_unsupervised_child_survives_caller_exit_and_sigterm(stub):
     caller = subprocess.Popen(
         [sys.executable, "-c", code, str(_sup_dir(tmp_path, kind=None))],
         env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True,
+        # The caller leads its own process group, as a daemon that runs
+        # --detach under a process-group timeout does; SIGTERM goes to that
+        # whole group, so only a job in its own session survives it.
+        start_new_session=True,
     )
     try:
         caller_pid = int(caller.stdout.readline())
         assert caller.stdout.readline().strip() == "True"
         child = _stub_out(tmp_path, pids)["pid"]
-        caller.terminate()
+        os.killpg(caller_pid, signal.SIGTERM)
         caller.wait(timeout=10)
         time.sleep(0.2)
         os.kill(child, 0)
