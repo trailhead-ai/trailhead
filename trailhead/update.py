@@ -860,9 +860,9 @@ def run_update_apply(
             return 1
 
     if dry_run:
-        return _apply_after_consent(
+        return _apply_steps(
             checkout, pre_sha, outpost_checkout,
-            env=_env, runner=_runner, timeout=timeout, dry_run=True, run_id=run_id,
+            env=_env, runner=_runner, timeout=timeout, dry_run=True, run=_RunState(),
         )
 
     # The run lock is taken only once consent has passed, before preflight or
@@ -884,7 +884,7 @@ def run_update_apply(
         try:
             return _apply_after_consent(
                 checkout, pre_sha, outpost_checkout,
-                env=_env, runner=_runner, timeout=timeout, dry_run=False, run_id=run_id,
+                env=_env, runner=_runner, timeout=timeout, run_id=run_id,
             )
         finally:
             update_run.release_run_lock(lock_fd)
@@ -945,16 +945,10 @@ def _apply_after_consent(
     env: dict[str, str],
     runner,
     timeout: int,
-    dry_run: bool,
-    run_id: str | None,
+    run_id: str,
 ) -> int:
     """Preflight, then upgrade — everything past the consent gate and the run
-    lock — and record how it ended. A dry run holds no lock and records nothing."""
-    if dry_run:
-        return _apply_steps(
-            checkout, pre_sha, outpost_checkout,
-            env=env, runner=runner, timeout=timeout, dry_run=True, run=_RunState(),
-        )
+    lock — and record how it ended."""
     run = _RunState()
     try:
         return _apply_steps(
@@ -980,8 +974,6 @@ def _apply_steps(
     dry_run: bool,
     run: _RunState,
 ) -> int:
-    _env, _runner = env, runner
-
     # ------------------------------------------------------------------
     # Preflight — both checkouts, before mutating either. A problem with the
     # outpost checkout refuses the whole upgrade here, while nothing has moved.
@@ -991,7 +983,7 @@ def _apply_steps(
         preflight.append((outpost_checkout, "outpost "))
     branches: dict[Path, str] = {}
     for target, label in preflight:
-        branch, branch_error, branch_kind = _probe_upstream(target, runner=_runner, timeout=timeout)
+        branch, branch_error, branch_kind = _probe_upstream(target, runner=runner, timeout=timeout)
         if branch is None:
             run.end("refused", "no_upstream" if branch_kind == "none" else "unknown")
             escape = (
@@ -1006,7 +998,7 @@ def _apply_steps(
                 file=sys.stderr,
             )
             return 1
-        refusal = _local_changes_refusal(target, env=_env, runner=_runner, timeout=timeout)
+        refusal = _local_changes_refusal(target, env=env, runner=runner, timeout=timeout)
         if refusal is not None:
             run.end("refused", refusal)
             return 1
@@ -1032,21 +1024,21 @@ def _apply_steps(
     # never interleave with an in-flight one.
     # ------------------------------------------------------------------
     try:
-        with wire_lock(env=_env):
+        with wire_lock(env=env):
             # Resolved BEFORE any mutation: a config error must refuse cleanly,
             # never surface after the checkout has already been fast-forwarded
             # with nothing left to roll it back.
-            cfg = resolve_config_for_env(_env)
+            cfg = resolve_config_for_env(env)
 
             install_result = _upgrade_install(
                 checkout, pre_sha, branches[checkout], cfg,
-                env=_env, runner=_runner, timeout=timeout, run=run,
+                env=env, runner=runner, timeout=timeout, run=run,
             )
             outpost_result = None
             if install_result.status in ("advanced", "current") and outpost_checkout is not None:
                 outpost_result = _upgrade_outpost(
                     outpost_checkout, branches[outpost_checkout],
-                    env=_env, runner=_runner, timeout=timeout, run=run,
+                    env=env, runner=runner, timeout=timeout, run=run,
                 )
             run.end(*_combined_outcome(install_result, outpost_result))
             if run.outcome not in ("updated", "already_current"):
@@ -1058,7 +1050,7 @@ def _apply_steps(
 
     print("trailhead: checking host readiness…")
     try:
-        verdict = doctor.build_readiness(env=_env)["verdict"]
+        verdict = doctor.build_readiness(env=env)["verdict"]
     except Exception as exc:
         print(
             f"trailhead: host readiness could not be checked ({exc}); "

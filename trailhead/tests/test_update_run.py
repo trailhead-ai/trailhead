@@ -23,7 +23,9 @@ from trailhead.tests.test_update_apply import (
     _FakeCfg,
     _env,
     _install_stamp,
+    _lock_file,
     _make_runner,
+    _result_file,
 )
 
 RUN_A = "a" * 32
@@ -42,10 +44,6 @@ else:
     print("ready", flush=True)
 sys.stdin.readline()
 """
-
-
-def _lock_file(tmp_path: Path) -> Path:
-    return tmp_path / "state" / "update-run.lock"
 
 
 class _Holder:
@@ -411,10 +409,6 @@ class TestStatus:
         rc = main()
         assert rc != 0
         assert capsys.readouterr().err.startswith("trailhead: ")
-
-
-def _result_file(tmp_path: Path) -> Path:
-    return tmp_path / "state" / "update-result.json"
 
 
 def _write_record(tmp_path: Path, **overrides) -> dict:

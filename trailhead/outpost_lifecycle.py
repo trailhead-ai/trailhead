@@ -540,9 +540,7 @@ def _probe_supervisor(osup, run, kind: str, uid: int | None) -> _SupervisorProbe
     return _probe_linux(run, osup.SYSTEMD_UNIT_NAME)
 
 
-def _supervised_main_pid(
-    env: dict[str, str] | None, *, platform: str | None, runner, uid: int | None
-) -> int | None:
+def _supervised_main_pid(*, platform: str | None, runner, uid: int | None) -> int | None:
     from trailhead import outpost_supervisor as osup
 
     kind = osup._platform_kind(platform)
@@ -582,7 +580,7 @@ def managed_outpost(
     if checkout is None:
         return None
     if _is_supervised(env, platform=platform, supervisor_dir=supervisor_dir):
-        pid = _supervised_main_pid(env, platform=platform, runner=runner, uid=uid)
+        pid = _supervised_main_pid(platform=platform, runner=runner, uid=uid)
     else:
         pid = _pidfile_live_pid(env)
     if pid is None:
