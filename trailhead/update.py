@@ -1336,18 +1336,26 @@ def _upgrade_outpost(
         except Exception as exc:
             if _retry_refresh(env, was_running):
                 print(
+                    f"trailhead: outpost rebuild failed ({exc}); the retry at the "
+                    f"unchanged checkout {pre_head[:8]} succeeded and the new build "
+                    f"is live.",
+                    file=sys.stderr,
+                )
+                return HalfResult("advanced")
+            daemon_lost = was_running and outpost_lifecycle.managed_outpost(env=env) is None
+            if not daemon_lost:
+                print(
                     f"trailhead: outpost rebuild failed ({exc}); the checkout is "
-                    f"unchanged at {pre_head[:8]} and the prior build is back. "
+                    f"unchanged at {pre_head[:8]} and the daemon was left as it was. "
                     f"Re-run: trailhead update",
                     file=sys.stderr,
                 )
                 return HalfResult("failed_restored")
-            then_restart = ", then: trailhead outpost restart" if was_running else ""
             print(
                 f"trailhead: outpost rebuild failed ({exc}); the checkout is "
                 f"unchanged at {pre_head[:8]} but the build could NOT be restored "
                 f"automatically. Repair manually: cd {checkout} && npm ci && "
-                f"npm run build{then_restart}",
+                f"npm run build, then: trailhead outpost restart",
                 file=sys.stderr,
             )
             return HalfResult("failed_not_restored")

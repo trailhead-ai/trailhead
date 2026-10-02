@@ -1486,39 +1486,68 @@ class TestOutpostBuildStamp:
         assert "tsc failed" in capsys.readouterr().err
 
     @pytest.mark.parametrize(
-        ("restore_works", "outcome", "daemon_up"),
-        [(True, "failed_restored", True), (False, "failed_not_restored", False)],
-        ids=["the-restore-brings-the-daemon-back", "the-restore-fails-too"],
+        ("restart_calls_that_fail", "daemon_up_after", "rc", "outcome", "stderr_has"),
+        [
+            ((1,), True, 0, "updated", "the new build is live"),
+            ((1, 2), False, 1, "failed_not_restored", "could NOT be restored"),
+            ((), True, 0, "updated", "rebuilt outpost"),
+        ],
+        ids=[
+            "the-retry-brings-the-new-build-and-daemon-up-so-it-is-an-update",
+            "the-retry-fails-and-the-daemon-is-down-so-nothing-was-restored",
+            "the-first-rebuild-succeeds-so-it-is-an-update",
+        ],
     )
-    def test_a_stale_rebuild_whose_restart_fails_after_stopping_the_daemon_restores_before_claiming_nothing_changed(
-        self, tmp_path, monkeypatch, capsys, restore_works, outcome, daemon_up
+    def test_a_stale_rebuild_whose_restart_fails_after_stopping_the_daemon_reports_what_is_live(
+        self, tmp_path, monkeypatch, capsys, restart_calls_that_fail, daemon_up_after, rc, outcome, stderr_has
     ):
         env, outpost, _o_old, _o_new = _real_outpost_world(tmp_path, monkeypatch, outpost_behind=False)
         head = _run_git_real(outpost, "rev-parse", "HEAD").stdout.strip()
         state = {"daemon_up": True, "restarts": 0}
         monkeypatch.setattr(update.outpost_lifecycle, "install_dependencies", lambda *a, **k: None)
-        monkeypatch.setattr(update.outpost_lifecycle, "managed_outpost", lambda *a, **k: {"pid": 1, "checkout": str(outpost)})
+        monkeypatch.setattr(
+            update.outpost_lifecycle,
+            "managed_outpost",
+            lambda *a, **k: {"pid": 1, "checkout": str(outpost)} if state["daemon_up"] else None,
+        )
 
         def _restart(*a, **k):
-            # The build has succeeded; the managed daemon is stopped; the new one never answers.
             state["restarts"] += 1
             state["daemon_up"] = False
-            if state["restarts"] == 1 or not restore_works:
+            if state["restarts"] in restart_calls_that_fail:
                 raise update.OutpostLifecycleError("/health never answered")
             state["daemon_up"] = True
 
         monkeypatch.setattr(update.outpost_lifecycle, "restart", _restart)
 
+        assert update.run_update_apply(env=env, runner=_real_runner, assume_yes=True, run_id=RUN_ID) == rc
+        assert state["daemon_up"] is daemon_up_after
+        assert _read_record(tmp_path)["outcome"] == outcome
+        assert _run_git_real(outpost, "rev-parse", "HEAD").stdout.strip() == head
+        captured = capsys.readouterr()
+        assert stderr_has in (captured.err + captured.out)
+        assert "the prior build is back" not in captured.err
+
+    def test_a_stale_rebuild_that_fails_twice_with_the_daemon_still_up_is_restored(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        env, outpost, _o_old, _o_new = _real_outpost_world(tmp_path, monkeypatch, outpost_behind=False)
+        monkeypatch.setattr(update.outpost_lifecycle, "install_dependencies", lambda *a, **k: None)
+        monkeypatch.setattr(
+            update.outpost_lifecycle, "managed_outpost", lambda *a, **k: {"pid": 1, "checkout": str(outpost)}
+        )
+
+        def _boom(*a, **k):
+            raise update.OutpostLifecycleError("tsc failed")
+
+        monkeypatch.setattr(update.outpost_lifecycle, "build", _boom)
+        monkeypatch.setattr(update.outpost_lifecycle, "restart", _boom)
+
         rc = update.run_update_apply(env=env, runner=_real_runner, assume_yes=True, run_id=RUN_ID)
 
         assert rc == 1
-        assert state["restarts"] == 2, "one restore is attempted at the unchanged checkout"
-        assert state["daemon_up"] is daemon_up
-        assert _read_record(tmp_path)["outcome"] == outcome
-        assert _run_git_real(outpost, "rev-parse", "HEAD").stdout.strip() == head
-        err = capsys.readouterr().err
-        assert "/health never answered" in err
-        assert ("could NOT be restored" in err) is (not restore_works)
+        assert _read_record(tmp_path)["outcome"] == "failed_restored"
+        assert "could NOT be restored" not in capsys.readouterr().err
 
     def test_an_advance_records_its_build_so_the_next_update_is_current(self, tmp_path, monkeypatch, capsys):
         env, _outpost, _o_old, o_new = _real_outpost_world(tmp_path, monkeypatch, outpost_behind=True)
@@ -1877,6 +1906,16 @@ def _r(id, *, install, outpost=None, outcome, refusal=None, setup=None, **kw):
     )
 
 
+def _up_once_then_down(outpost):
+    calls = []
+
+    def _managed(*a, **k):
+        calls.append(1)
+        return {"pid": 1, "checkout": str(outpost)} if len(calls) == 1 else None
+
+    return _managed
+
+
 def _corrupt_head(w, tmp_path, monkeypatch, stack):
     (w.checkout / ".git" / "HEAD").write_text("garbage\n")
 
@@ -1918,8 +1957,6 @@ _ROWS = [
        outcome="failed_restored", setup=lambda w, t, m, s: _lock_repo(w.outpost)),
     _r("outpost-build-fails-install-current", install="current", outpost="behind",
        outcome="failed_restored", npm_fail=(2,)),
-    _r("outpost-stale-rebuild-fails-install-current", install="current", outpost="unbuilt",
-       outcome="failed_restored", npm_fail=(1,)),
     _r("interrupt-before-any-change", install="behind", outcome="failed_restored", raises=KeyboardInterrupt,
        setup=lambda w, t, m, s: m.setattr(update, "resolve_config_for_env", _interrupt(KeyboardInterrupt()))),
     # --- outpost_restored ------------------------------------------------
@@ -1931,16 +1968,18 @@ _ROWS = [
        outcome="outpost_restored", setup=lambda w, t, m, s: _lock_repo(w.outpost)),
     _r("outpost-build-fails-install-advanced", install="behind", outpost="behind",
        outcome="outpost_restored", npm_fail=(2,)),
-    _r("outpost-stale-rebuild-fails-install-advanced", install="behind", outpost="unbuilt",
-       outcome="outpost_restored", npm_fail=(1,)),
     # --- failed_not_restored ---------------------------------------------
     _r("install-rewire-and-reset-fail", install="behind", outcome="failed_not_restored", wire_fail=(1,),
        setup=lambda w, t, m, s: setattr(w, "wire_locks_checkout", True)),
     _r("install-rewire-fails-twice", install="behind", outcome="failed_not_restored", wire_fail="all"),
     _r("outpost-rollback-rebuild-fails", install="behind", outpost="behind",
        outcome="failed_not_restored", npm_fail="all"),
-    _r("outpost-stale-rebuild-and-restore-fail-install-current", install="current", outpost="unbuilt",
-       outcome="failed_not_restored", npm_fail="all"),
+    _r("outpost-stale-rebuild-and-restore-fail-daemon-down-install-current", install="current",
+       outpost="unbuilt", outcome="failed_not_restored", npm_fail="all",
+       setup=lambda w, t, m, s: m.setattr(
+           update.outpost_lifecycle, "managed_outpost", _up_once_then_down(w.outpost))),
+    _r("outpost-stale-rebuild-fails-twice-no-daemon-install-current", install="current", outpost="unbuilt",
+       outcome="failed_restored", npm_fail="all"),
     _r("outpost-reset-fails", install="behind", outpost="behind", outcome="failed_not_restored",
        npm_fail=(1,), npm_lock="outpost"),
     _r("interrupt-after-a-change", install="behind", outpost="behind", outcome="failed_not_restored",
@@ -1960,6 +1999,10 @@ _ROWS = [
     _r("install-rewired-checkout-level", install="stale", outcome="updated"),
     _r("outpost-advanced-install-current", install="current", outpost="behind", outcome="updated"),
     _r("outpost-stale-rebuild-install-current", install="current", outpost="unbuilt", outcome="updated"),
+    _r("outpost-stale-rebuild-retry-succeeds-install-current", install="current", outpost="unbuilt",
+       outcome="updated", npm_fail=(1,)),
+    _r("outpost-stale-rebuild-retry-succeeds-install-advanced", install="behind", outpost="unbuilt",
+       outcome="updated", npm_fail=(1,)),
     _r("readiness-check-raises", install="behind", outcome="updated",
        setup=lambda w, t, m, s: m.setattr(update.doctor, "build_readiness", _interrupt(RuntimeError("doctor down")))),
     # --- already_current -------------------------------------------------
