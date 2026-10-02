@@ -462,6 +462,14 @@ _STUB = textwrap.dedent(
         time.sleep(60)
     elif mode == "never":
         time.sleep(60)
+    elif mode == "gate":
+        while not os.path.exists(os.environ["STUB_OUT"] + ".gate"):
+            time.sleep(0.01)
+        start_by = int(sys.argv[sys.argv.index("--start-by") + 1])
+        update_run.acquire_run_lock(sys.argv[sys.argv.index("--run-id") + 1],
+                                    env=dict(os.environ), start_by=start_by)
+        open(os.environ["STUB_OUT"] + ".ran", "w").close()
+        time.sleep(60)
     elif mode == "at":
         start_by = int(sys.argv[sys.argv.index("--start-by") + 1])
         time.sleep(max(0.0, start_by + float(os.environ["STUB_OFFSET"]) - time.time()))
@@ -814,18 +822,39 @@ def test_a_job_that_takes_the_lock_after_the_start_by_does_not_run(stub):
     assert update_run.read_lock_record(env=env) is None
 
 
-def test_a_job_that_takes_the_lock_just_before_the_start_by_is_seen_as_started(stub):
+class _DeadlineClock:
+    """update_runner's clock: real time until the job has started, then the
+    first reading of it jumps past the start-by deadline, and only after the job
+    has taken the lock (holding it from before that deadline), so the outcome
+    cannot depend on how fast the job process starts."""
+
+    def __init__(self, tmp_path: Path):
+        self._out = tmp_path / "stub-out.json"
+        self._fired = False
+
+    def __getattr__(self, name):
+        return getattr(time, name)
+
+    def time(self) -> float:
+        if self._fired or not self._out.exists():
+            return time.time()
+        self._fired = True
+        start_by = int(json.loads(self._out.read_text())["argv"][-1])
+        Path(str(self._out) + ".gate").touch()
+        assert _wait_for(Path(str(self._out) + ".ran")), "the job never took the lock"
+        return start_by + 1.0
+
+
+def test_a_job_that_takes_the_lock_before_the_start_by_is_seen_as_started_even_if_the_deadline_passes_while_it_does(
+    stub, monkeypatch
+):
     tmp_path, env, pids = stub
-    env["STUB_MODE"] = "at"
-    env["STUB_OFFSET"] = "-0.05"
-    # Just past a whole second, a 1.2 s wait puts start_by on the second after
-    # next: the job takes the lock ~1.9 s in, well after the wait itself ends.
-    time.sleep(1.05 - time.time() % 1)
+    env["STUB_MODE"] = "gate"
+    monkeypatch.setattr(update_runner, "time", _DeadlineClock(tmp_path))
     out = update_runner.detach(
         env=env, platform="linux", supervisor_dir=_sup_dir(tmp_path, kind=None),
-        wait_seconds=1.2, poll_interval=0.02,
+        wait_seconds=10, poll_interval=0.02,
     )
-    assert _wait_for(tmp_path / "stub-out.json")
     _stub_out(tmp_path, pids)
     assert out.get("started") is True, out
     assert (tmp_path / "stub-out.json.ran").exists()
