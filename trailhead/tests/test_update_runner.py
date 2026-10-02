@@ -261,6 +261,26 @@ def test_launchd_job_definition_built_with_plistlib(world):
     assert not any("kickstart" in c or "submit" in c for c in runner.calls)
 
 
+def test_an_environment_value_a_plist_cannot_carry_is_not_forwarded_and_the_update_starts(world):
+    tmp_path, env = world
+    env["TH_ESC"] = "a\x1b[31mb"
+    env["TH_NEWLINE"] = "a\nb"
+    env["TH_TAB"] = "a\tb"
+    plists: list[dict] = []
+    runner = _launchd_runner(env, plists)
+    try:
+        out = update_runner.detach(
+            env=env, platform="darwin", supervisor_dir=_sup_dir(tmp_path, kind="darwin"),
+            runner=runner, uid=501, wait_seconds=2, poll_interval=0.01,
+        )
+    finally:
+        runner.close()
+    assert out["started"] is True
+    (plist,) = plists
+    assert "TH_ESC" not in plist["EnvironmentVariables"]
+    assert plist["EnvironmentVariables"] == {k: v for k, v in env.items() if k != "TH_ESC"}
+
+
 def test_launchd_plist_is_owner_only(world):
     tmp_path, env = world
     modes = []
@@ -584,6 +604,7 @@ def test_unsupervised_hostile_env_and_checkout_path_reach_the_child_unexecuted(s
 def test_default_runner_execs_systemd_run_argv_without_a_shell(world, monkeypatch):
     tmp_path, env = world
     env["TH_HOSTILE"] = HOSTILE
+    env["TH_ESC"] = "a\x1b[31mb"
     fakebin = tmp_path / "fakebin"
     fakebin.mkdir()
     fake = fakebin / "systemd-run"
@@ -608,6 +629,8 @@ def test_default_runner_execs_systemd_run_argv_without_a_shell(world, monkeypatc
     assert "--setenv=TH_HOSTILE" in argv
     assert not any(HOSTILE in a or "caller-value" in a for a in argv)
     assert record["env"]["TH_HOSTILE"] == HOSTILE
+    assert "--setenv=TH_ESC" in argv
+    assert record["env"]["TH_ESC"] == "a\x1b[31mb"
     assert record["env"]["TH_CALLER_VAR"] == "caller-value"
     assert list(cwd.iterdir()) == []
 

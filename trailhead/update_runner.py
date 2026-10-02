@@ -112,6 +112,14 @@ def _systemd_argv(
     ]
 
 
+def _plist_can_carry(name: str, value: str) -> bool:
+    try:
+        plistlib.dumps({name: value})
+    except ValueError:
+        return False
+    return True
+
+
 def _launchd_plist(
     env: dict[str, str], checkout: Path, log: Path, run_id: str, start_by: int
 ) -> bytes:
@@ -119,7 +127,7 @@ def _launchd_plist(
         {
             "Label": LAUNCHD_LABEL,
             "ProgramArguments": _update_argv(checkout, run_id, start_by),
-            "EnvironmentVariables": dict(env),
+            "EnvironmentVariables": {k: v for k, v in env.items() if _plist_can_carry(k, v)},
             "WorkingDirectory": str(checkout),
             "RunAtLoad": True,
             "StandardOutPath": str(log),
