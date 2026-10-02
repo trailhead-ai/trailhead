@@ -7,6 +7,13 @@ read first, so a request during a running update starts nothing; after the
 start the lock is read again for up to ``wait_seconds`` to learn what became
 of the job. The checkout is the install checkout the provenance stamp names.
 
+The job is also given ``--start-by <unix-seconds>``, the first whole second at
+or after ``wait_seconds`` from now. A job that takes the run lock at or after
+that moment releases it and exits having changed and recorded nothing, and the
+last lock read is made only after that moment, so "could not start" is never
+answered for a job that then runs: one that took the lock earlier is seen
+holding it, and one that took it later does nothing.
+
 Three ways to start the job, chosen with the predicate the Outpost lifecycle
 uses for "is a host supervisor managing Outpost" (``_is_supervised``):
 
@@ -44,6 +51,7 @@ The answer is one of ``{"started": true, "run_id"}``,
 
 from __future__ import annotations
 
+import math
 import os
 import plistlib
 import subprocess
@@ -70,11 +78,16 @@ def _running(holder: dict) -> dict:
     return {"started": False, "running": True, "run_id": holder["run_id"]}
 
 
-def _update_argv(checkout: Path, run_id: str) -> list[str]:
-    return [str(checkout / "bin" / "trailhead"), "update", "--yes", "--run-id", run_id]
+def _update_argv(checkout: Path, run_id: str, start_by: int) -> list[str]:
+    return [
+        str(checkout / "bin" / "trailhead"), "update", "--yes", "--run-id", run_id,
+        "--start-by", str(start_by),
+    ]
 
 
-def _systemd_argv(env: dict[str, str], checkout: Path, log: Path, run_id: str) -> list[str]:
+def _systemd_argv(
+    env: dict[str, str], checkout: Path, log: Path, run_id: str, start_by: int
+) -> list[str]:
     return [
         "systemd-run",
         "--user",
@@ -85,15 +98,17 @@ def _systemd_argv(env: dict[str, str], checkout: Path, log: Path, run_id: str) -
         f"--property=StandardError=append:{log}",
         *[f"--setenv={name}" for name in env],
         "--",
-        *_update_argv(checkout, run_id),
+        *_update_argv(checkout, run_id, start_by),
     ]
 
 
-def _launchd_plist(env: dict[str, str], checkout: Path, log: Path, run_id: str) -> bytes:
+def _launchd_plist(
+    env: dict[str, str], checkout: Path, log: Path, run_id: str, start_by: int
+) -> bytes:
     return plistlib.dumps(
         {
             "Label": LAUNCHD_LABEL,
-            "ProgramArguments": _update_argv(checkout, run_id),
+            "ProgramArguments": _update_argv(checkout, run_id, start_by),
             "EnvironmentVariables": dict(env),
             "WorkingDirectory": str(checkout),
             "RunAtLoad": True,
@@ -121,20 +136,22 @@ def _start_systemd(argv: list[str], env: dict[str, str], run) -> bool:
 
 
 def _start_launchd(
-    env: dict[str, str], checkout: Path, log: Path, run_id: str, run, uid: int | None
+    env: dict[str, str], checkout: Path, log: Path, run_id: str, start_by: int, run, uid: int | None
 ) -> bool:
     domain = outpost_supervisor.launchd_domain(uid)
     plist = ensure_dir(log.parent) / _PLIST_NAME
-    _write_private(plist, _launchd_plist(env, checkout, log, run_id))
+    _write_private(plist, _launchd_plist(env, checkout, log, run_id, start_by))
     run(["launchctl", "bootout", f"{domain}/{LAUNCHD_LABEL}"])
     return run(["launchctl", "bootstrap", domain, str(plist)]).returncode == 0
 
 
-def _start_unsupervised(env: dict[str, str], checkout: Path, log: Path, run_id: str) -> bool:
+def _start_unsupervised(
+    env: dict[str, str], checkout: Path, log: Path, run_id: str, start_by: int
+) -> bool:
     ensure_dir(log.parent)
     with open(log, "ab") as out:
         subprocess.Popen(
-            _update_argv(checkout, run_id),
+            _update_argv(checkout, run_id, start_by),
             cwd=checkout,
             env=env,
             stdin=subprocess.DEVNULL,
@@ -146,16 +163,19 @@ def _start_unsupervised(env: dict[str, str], checkout: Path, log: Path, run_id: 
     return True
 
 
-def _await_lock(run_id: str, env: dict[str, str], wait_seconds: float, poll: float) -> dict:
-    deadline = time.monotonic() + wait_seconds
+def _await_lock(run_id: str, env: dict[str, str], start_by: int, poll: float) -> dict:
+    """Read the lock until the job shows up, or until the last read made after
+    the *start_by* deadline finds nothing. A job takes the lock before that
+    deadline or exits without running, so the last read settles which."""
     while True:
+        past_deadline = time.time() >= start_by
         holder = update_run.current_holder(env=env)
         record = update_run.read_lock_record(env=env)
         if record is not None and record["run_id"] == run_id:
             return {"started": True, "run_id": run_id}
         if holder is not None:
             return _running(holder)
-        if time.monotonic() >= deadline:
+        if past_deadline:
             return _could_not_start()
         time.sleep(poll)
 
@@ -184,6 +204,7 @@ def detach(
     checkout = Path(stamp["checkout"])
     log = state_dir("trailhead", env=environ) / _LOG_NAME
     run_id = update_run.new_run_id()
+    start_by = math.ceil(time.time() + wait_seconds)
 
     try:
         if outpost_lifecycle._is_supervised(
@@ -191,15 +212,17 @@ def detach(
         ):
             if outpost_supervisor._platform_kind(platform) == "darwin":
                 run = runner if runner is not None else outpost_supervisor.default_runner
-                ok = _start_launchd(environ, checkout, log, run_id, run, uid)
+                ok = _start_launchd(environ, checkout, log, run_id, start_by, run, uid)
             else:
                 run = runner if runner is not None else _run_with_env
-                ok = _start_systemd(_systemd_argv(environ, checkout, log, run_id), environ, run)
+                ok = _start_systemd(
+                    _systemd_argv(environ, checkout, log, run_id, start_by), environ, run
+                )
         else:
-            ok = _start_unsupervised(environ, checkout, log, run_id)
+            ok = _start_unsupervised(environ, checkout, log, run_id, start_by)
     except OSError as exc:
         print(f"trailhead: could not start the update job: {exc}", file=sys.stderr)
         return _could_not_start()
     if not ok:
         return _could_not_start()
-    return _await_lock(run_id, environ, wait_seconds, poll_interval)
+    return _await_lock(run_id, environ, start_by, poll_interval)

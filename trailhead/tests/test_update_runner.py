@@ -141,9 +141,10 @@ def test_systemd_argv_is_fixed_and_carries_user_collect_unit_setenv(world):
     ]
     assert f"--property=StandardOutput=append:{log}" in argv
     assert f"--property=StandardError=append:{log}" in argv
-    assert argv[argv.index("--") + 1:] == [
+    assert argv[argv.index("--") + 1:][:5] == [
         str(checkout / "bin" / "trailhead"), "update", "--yes", "--run-id", run_id,
     ]
+    assert argv[-2] == "--start-by" and update_run.validate_start_by(argv[-1])
     setenvs = [a for a in argv if a.startswith("--setenv=")]
     assert setenvs.count("--setenv=TH_CALLER_VAR") == 1
     assert sorted(setenvs) == sorted(f"--setenv={name}" for name in env)
@@ -197,7 +198,7 @@ def _launchd_runner(env, plists):
         if argv[:2] == ["launchctl", "bootstrap"]:
             plists.append(plistlib.loads(Path(argv[3]).read_bytes()))
             runner.locks.append(update_run.acquire_run_lock(
-                plists[-1]["ProgramArguments"][-1], env=env))
+                _run_id_from(plists[-1]["ProgramArguments"]), env=env))
 
     return FakeRunner(on_start=start)
 
@@ -217,9 +218,11 @@ def test_launchd_job_definition_built_with_plistlib(world):
     assert out["started"] is True
     (plist,) = plists
     checkout = _checkout(tmp_path)
-    assert plist["ProgramArguments"] == [
+    assert plist["ProgramArguments"][:5] == [
         str(checkout / "bin" / "trailhead"), "update", "--yes", "--run-id", out["run_id"],
     ]
+    assert plist["ProgramArguments"][5] == "--start-by"
+    assert update_run.validate_start_by(plist["ProgramArguments"][6])
     assert plist["EnvironmentVariables"] == env
     assert plist["EnvironmentVariables"]["TH_HOSTILE"] == HOSTILE
     assert plist["Label"] != outpost_supervisor.LAUNCHD_LABEL
@@ -242,7 +245,7 @@ def test_launchd_plist_is_owner_only(world):
         if argv[:2] == ["launchctl", "bootstrap"]:
             modes.append(Path(argv[3]).stat().st_mode & 0o777)
             runner.locks.append(update_run.acquire_run_lock(
-                plistlib.loads(Path(argv[3]).read_bytes())["ProgramArguments"][-1], env=env))
+                _run_id_from(plistlib.loads(Path(argv[3]).read_bytes())["ProgramArguments"]), env=env))
 
     runner = FakeRunner(on_start=start)
     try:
@@ -314,6 +317,17 @@ _STUB = textwrap.dedent(
         time.sleep(60)
     elif mode == "never":
         time.sleep(60)
+    elif mode == "at":
+        start_by = int(sys.argv[sys.argv.index("--start-by") + 1])
+        time.sleep(max(0.0, start_by + float(os.environ["STUB_OFFSET"]) - time.time()))
+        try:
+            update_run.acquire_run_lock(sys.argv[sys.argv.index("--run-id") + 1],
+                                        env=dict(os.environ), start_by=start_by)
+        except update_run.RunLockExpired:
+            open(os.environ["STUB_OUT"] + ".expired", "w").close()
+            sys.exit(1)
+        open(os.environ["STUB_OUT"] + ".ran", "w").close()
+        time.sleep(60)
     """
 )
 
@@ -358,7 +372,9 @@ def test_unsupervised_spawns_a_real_child_in_a_new_session(stub):
     )
     data = _stub_out(tmp_path, pids)
     assert out == {"started": True, "run_id": out["run_id"]}
-    assert data["argv"] == ["update", "--yes", "--run-id", out["run_id"]]
+    assert data["argv"][:4] == ["update", "--yes", "--run-id", out["run_id"]]
+    assert data["argv"][4] == "--start-by" and len(data["argv"]) == 6
+    assert update_run.validate_start_by(data["argv"][5])
     assert data["sid"] == data["pid"] != os.getsid(0)
     assert data["cwd"] == str(_checkout(tmp_path))
     assert data["var"] == "caller-value"
@@ -592,6 +608,77 @@ def test_job_that_never_takes_the_lock_is_could_not_start_after_the_wait(world):
     assert out == {"started": False, "running": False, "error": "could_not_start"}
     assert 0.4 <= elapsed < 3
     assert len(runner.calls) == 1
+
+
+def _start_by(argv) -> int:
+    return int(argv[argv.index("--start-by") + 1])
+
+
+def test_the_job_is_told_to_start_by_a_whole_second_just_after_the_wait(world):
+    tmp_path, env = world
+    runner = FakeRunner(on_start=_takes_lock(env))
+    before = time.time()
+    try:
+        update_runner.detach(
+            env=env, platform="linux", supervisor_dir=_sup_dir(tmp_path, kind="linux"),
+            runner=runner, wait_seconds=3, poll_interval=0.01,
+        )
+    finally:
+        runner.close()
+    start_by = _start_by(runner.calls[0])
+    assert before + 3 <= start_by <= before + 4.5
+
+
+def test_could_not_start_is_never_answered_before_the_start_by_has_passed(world):
+    tmp_path, env = world
+    runner = FakeRunner()
+    out = update_runner.detach(
+        env=env, platform="linux", supervisor_dir=_sup_dir(tmp_path, kind="linux"),
+        runner=runner, wait_seconds=0.2, poll_interval=0.02,
+    )
+    assert out == {"started": False, "running": False, "error": "could_not_start"}
+    assert time.time() >= _start_by(runner.calls[0])
+
+
+def _wait_for(path: Path, timeout: float = 10.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if path.exists():
+            return True
+        time.sleep(0.02)
+    return False
+
+
+def test_a_job_that_takes_the_lock_after_the_start_by_does_not_run(stub):
+    tmp_path, env, pids = stub
+    env["STUB_MODE"] = "at"
+    env["STUB_OFFSET"] = "0.3"
+    out = update_runner.detach(
+        env=env, platform="linux", supervisor_dir=_sup_dir(tmp_path, kind=None),
+        wait_seconds=0.3, poll_interval=0.02,
+    )
+    assert _wait_for(tmp_path / "stub-out.json")
+    _stub_out(tmp_path, pids)
+    assert out == {"started": False, "running": False, "error": "could_not_start"}
+    assert _wait_for(tmp_path / "stub-out.json.expired"), "the late job never exited"
+    assert not (tmp_path / "stub-out.json.ran").exists()
+    assert update_run.current_holder(env=env) is None
+    assert update_run.read_lock_record(env=env) is None
+
+
+def test_a_job_that_takes_the_lock_just_before_the_start_by_is_seen_as_started(stub):
+    tmp_path, env, pids = stub
+    env["STUB_MODE"] = "at"
+    env["STUB_OFFSET"] = "-0.05"
+    time.sleep(1.05 - time.time() % 1)  # the next whole second is then ~0.95 s away
+    out = update_runner.detach(
+        env=env, platform="linux", supervisor_dir=_sup_dir(tmp_path, kind=None),
+        wait_seconds=0.2, poll_interval=0.02,
+    )
+    assert _wait_for(tmp_path / "stub-out.json")
+    _stub_out(tmp_path, pids)
+    assert out.get("started") is True, out
+    assert (tmp_path / "stub-out.json.ran").exists()
 
 
 def test_no_install_stamp_is_could_not_start_and_starts_nothing(tmp_path):

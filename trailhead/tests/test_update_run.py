@@ -12,6 +12,7 @@ import re
 import signal
 import subprocess
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -353,6 +354,71 @@ class TestRunIdFlag:
         assert "run-id" in cap.err
         assert cap.out == ""
         assert ran == []
+
+
+_JOB = """
+import sys
+from trailhead import cli
+sys.argv = ["trailhead", "update", "--yes", "--run-id", sys.argv[1], "--start-by", sys.argv[2]]
+sys.exit(cli.main())
+"""
+
+
+def _job(tmp_path, start_by: int) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, "-c", _JOB, RUN_B, str(start_by)],
+        env=_env(tmp_path), capture_output=True, text=True, timeout=60,
+    )
+
+
+class TestStartBy:
+    @pytest.mark.parametrize("bad", ["abc", "-1", "1.5", "+5", "1e3", "", " 5", "0x10", "\u0665"])
+    def test_a_start_by_that_is_not_an_integer_is_refused_before_anything_runs(
+        self, tmp_path, monkeypatch, capsys, bad
+    ):
+        _apply_kit(tmp_path, monkeypatch)
+        _pin(monkeypatch, tmp_path)
+        runner, calls = _make_runner()
+        monkeypatch.setattr(update, "_default_runner", lambda: runner)
+        monkeypatch.setattr(sys, "argv", ["trailhead", "update", "--yes", "--run-id", RUN_B, f"--start-by={bad}"])
+
+        rc = main()
+
+        assert rc == 1
+        assert "start-by" in capsys.readouterr().err
+        assert not calls
+        assert not _lock_file(tmp_path).exists()
+
+    def test_a_start_by_without_a_run_id_is_refused_before_anything_runs(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        _apply_kit(tmp_path, monkeypatch)
+        _pin(monkeypatch, tmp_path)
+        runner, calls = _make_runner()
+        monkeypatch.setattr(update, "_default_runner", lambda: runner)
+        monkeypatch.setattr(sys, "argv", ["trailhead", "update", "--yes", "--start-by", "4102444800"])
+
+        assert main() == 1
+        assert "--run-id" in capsys.readouterr().err
+        assert not calls
+        assert not _lock_file(tmp_path).exists()
+
+    def test_a_job_past_its_start_by_exits_having_changed_and_recorded_nothing(self, tmp_path):
+        _install_stamp(tmp_path, _env(tmp_path))
+
+        done = _job(tmp_path, int(time.time()) - 5)
+
+        assert done.returncode == 1
+        assert update_run.read_lock_record(env=_env(tmp_path)) is None
+        assert not _result_file(tmp_path).exists()
+        assert update_run.current_holder(env=_env(tmp_path)) is None
+
+    def test_a_job_within_its_start_by_runs_and_records_its_end(self, tmp_path):
+        _install_stamp(tmp_path, _env(tmp_path))
+
+        _job(tmp_path, int(time.time()) + 600)
+
+        assert update_run.read_result(env=_env(tmp_path))["run_id"] == RUN_B
 
 
 class TestStatus:

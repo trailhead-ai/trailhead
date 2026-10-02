@@ -48,7 +48,7 @@ from trailhead.update import (
     check_for_update,
     run_update_apply,
 )
-from trailhead.update_run import build_status, validate_run_id
+from trailhead.update_run import build_status, validate_run_id, validate_start_by
 from trailhead.wire import LockError, WireError
 
 # Named error family — maps to a clean 'trailhead: <message>' line.
@@ -135,6 +135,14 @@ def _cmd_update(args: argparse.Namespace) -> int:
         print("trailhead: --run-id must be 32 lowercase hex characters", file=sys.stderr)
         return 1
 
+    if args.start_by is not None:
+        if args.run_id is None:
+            print("trailhead: --start-by requires --run-id", file=sys.stderr)
+            return 1
+        if not validate_start_by(args.start_by):
+            print("trailhead: --start-by must be whole unix seconds", file=sys.stderr)
+            return 1
+
     if args.detach:
         if not args.json or args.check or args.status or args.dry_run or args.run_id is not None:
             print(
@@ -163,6 +171,7 @@ def _cmd_update(args: argparse.Namespace) -> int:
             dry_run=args.dry_run,
             timeout=args.timeout,
             run_id=args.run_id,
+            start_by=int(args.start_by) if args.start_by is not None else None,
         )
 
     if args.automatic and automatic_check_disabled():
@@ -372,6 +381,16 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="ID",
         help="Run id to record for this update: 32 lowercase hex characters (apply mode only).",
+    )
+    update_p.add_argument(
+        "--start-by",
+        default=None,
+        metavar="UNIX_SECONDS",
+        help=(
+            "Deadline for taking the run lock, as whole unix seconds; a job that "
+            "gets the lock later exits having changed nothing (requires --run-id; "
+            "apply mode only)."
+        ),
     )
     update_p.add_argument(
         "--automatic",

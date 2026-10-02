@@ -36,6 +36,7 @@ from trailhead.paths import ensure_dir, state_dir
 from trailhead.provenance import _atomic_write_json, _now_iso
 
 RUN_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+START_BY_RE = re.compile(r"^[0-9]{1,15}$", re.ASCII)
 STATUS_SCHEMA_VERSION = 1
 RESULT_SCHEMA_VERSION = 1
 OUTCOMES = (
@@ -57,6 +58,10 @@ class RunLockHeld(Exception):
     """Another process holds the update run lock."""
 
 
+class RunLockExpired(Exception):
+    """The lock was free, but only after the run's start-by deadline."""
+
+
 def new_run_id() -> str:
     return secrets.token_hex(16)
 
@@ -65,16 +70,26 @@ def validate_run_id(run_id: str) -> bool:
     return RUN_ID_RE.fullmatch(run_id) is not None
 
 
+def validate_start_by(value: str) -> bool:
+    """Whole unix seconds, ASCII digits only."""
+    return START_BY_RE.fullmatch(value) is not None
+
+
 def _lock_path(env: dict[str, str] | None) -> Path:
     return state_dir("trailhead", env=env) / _LOCK_FILENAME
 
 
-def acquire_run_lock(run_id: str, *, env: dict[str, str] | None = None) -> int:
+def acquire_run_lock(
+    run_id: str, *, env: dict[str, str] | None = None, start_by: int | None = None
+) -> int:
     """Take the run lock and record ``{run_id, pid, started_at}``.
 
     Returns the lock descriptor; closing it (see :func:`release_run_lock`)
     drops the lock. Raises :class:`RunLockHeld` without touching the file's
-    contents when another process holds it.
+    contents when another process holds it. With *start_by* (unix seconds), a
+    lock taken at or after that moment is released at once and
+    :class:`RunLockExpired` is raised, again leaving the file's contents alone:
+    the requester has already been told the run did not start.
     """
     path = _lock_path(env)
     ensure_dir(path.parent)
@@ -85,6 +100,8 @@ def acquire_run_lock(run_id: str, *, env: dict[str, str] | None = None) -> int:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             raise RunLockHeld(str(path)) from None
+        if start_by is not None and time.time() >= start_by:
+            raise RunLockExpired(str(path))
         record = {
             "run_id": run_id,
             "pid": os.getpid(),

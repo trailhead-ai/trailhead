@@ -742,6 +742,7 @@ def run_update_apply(
     confine_root: Path | str | None = None,
     is_tty=None,
     run_id: str | None = None,
+    start_by: int | None = None,
 ) -> int:
     """Perform the upgrade: fast-forward the stamped checkout, then re-wire,
     then upgrade a configured outpost checkout.
@@ -782,6 +783,10 @@ def run_update_apply(
     reason), ``outpost_restored``, ``failed_restored``, ``failed_not_restored``
     or ``already_current``. A dry run, a declined or refused consent and a
     lost lock contention write nothing.
+
+    *start_by* (unix seconds) is the deadline by which the run lock must have
+    been taken; a run that gets it later exits 1 having changed and recorded
+    nothing.
 
     Returns 0 on success or a genuine no-op (already up to date); 1 on any
     refusal or failure, including an outpost failure after a kept install
@@ -873,7 +878,14 @@ def run_update_apply(
     previous_handler = signal.signal(signal.SIGTERM, _raise_terminated)
     try:
         try:
-            lock_fd = update_run.acquire_run_lock(run_id, env=_env)
+            lock_fd = update_run.acquire_run_lock(run_id, env=_env, start_by=start_by)
+        except update_run.RunLockExpired:
+            print(
+                "trailhead: this update was asked to start by a deadline that has "
+                "passed; nothing was changed. Request it again.",
+                file=sys.stderr,
+            )
+            return 1
         except update_run.RunLockHeld:
             print(
                 "trailhead: an update is already running — wait for it to finish, "
