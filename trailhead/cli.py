@@ -39,6 +39,7 @@ from trailhead.outpost_supervisor import disable as supervisor_disable
 from trailhead.outpost_supervisor import enable as supervisor_enable
 from trailhead.pathint import PathIntegrationError, shellenv_lines
 from trailhead.paths import PathResolutionError
+from trailhead import update_runner
 from trailhead.uninstall import run_uninstall
 from trailhead.update import (
     FRESHNESS_WINDOW_SECONDS,
@@ -133,6 +134,19 @@ def _cmd_update(args: argparse.Namespace) -> int:
     if args.run_id is not None and not validate_run_id(args.run_id):
         print("trailhead: --run-id must be 32 lowercase hex characters", file=sys.stderr)
         return 1
+
+    if args.detach:
+        if not args.json or args.check or args.status or args.dry_run or args.run_id is not None:
+            print(
+                "trailhead: --detach requires --json and cannot combine with "
+                "--check, --status, --dry-run or --run-id",
+                file=sys.stderr,
+            )
+            return 1
+        import json
+
+        print(json.dumps(update_runner.detach()))
+        return 0
 
     if args.status:
         if not args.json:
@@ -343,6 +357,15 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         default=False,
         help="Report whether an update is running and the managed Outpost (requires --json; read-only).",
+    )
+    update_p.add_argument(
+        "--detach",
+        action="store_true",
+        default=False,
+        help=(
+            "Start the update as its own background job and print one JSON line "
+            "(requires --json): started, already running, or could not start."
+        ),
     )
     update_p.add_argument(
         "--run-id",
