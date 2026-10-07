@@ -583,6 +583,17 @@ def main() -> None:
         _site_export_cli(argv[1:])
         return
 
+    # 'site-fetch' is the local half of a site fetch: it pulls one remote
+    # site through the host transport into a fresh directory. It names its
+    # remote with --from (camp's own --host is intercepted before any verb
+    # runs), and is dispatched before group resolution because it names its
+    # group explicitly. Its stdout is one JSON object on every path.
+    if first == "site-fetch":
+        _refuse_host_flag_if_present(first, argv[1:])
+        from ..sites.fetch import run_cli as _site_fetch_cli
+        _site_fetch_cli(argv[1:])
+        return
+
     if first == "init":
         from ..spine import cmd_legacy_redirect
         cmd_legacy_redirect("init", "group")
