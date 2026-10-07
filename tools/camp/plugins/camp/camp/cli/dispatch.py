@@ -573,6 +573,16 @@ def main() -> None:
         _cmd_transfer_receive_cli(argv[1:])
         return
 
+    # 'site-export' is the remote half of a site fetch: it writes a tar to
+    # binary stdout on the host that owns the workspace, dispatched before group
+    # resolution because it names its workspace explicitly. --host has no
+    # meaning here — it is run on the far side, never routed to it by camp.
+    if first == "site-export":
+        _refuse_host_flag_if_present(first, argv[1:])
+        from ..sites.export import run_cli as _site_export_cli
+        _site_export_cli(argv[1:])
+        return
+
     if first == "init":
         from ..spine import cmd_legacy_redirect
         cmd_legacy_redirect("init", "group")

@@ -79,6 +79,9 @@ _STATIC_RESERVED = frozenset(
         "transfer-probe",
         # The peer side of a workspace move (begin/finish).
         "transfer-receive",
+        # The remote half of a site fetch (dispatched pre-group-resolve in
+        # cli/camp): writes one workspace site's tar to binary stdout.
+        "site-export",
         # The operator-facing dry-run verb. Needs a resolved group (self host,
         # workspace ownership, peer declaration) — unlike "transfer-probe" and
         # "groups" above, it is NOT intercepted before group resolution;
