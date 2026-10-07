@@ -39,6 +39,7 @@ import tempfile
 from typing import NoReturn
 
 from ..host import transport
+from .export import EXIT_NOT_FOUND, GROUP_RE, SITE_RE, SLUG_RE
 
 #: Exit status for every ``ok: false`` outcome.
 EXIT_FAILURE = 1
@@ -52,9 +53,6 @@ MAX_ARCHIVE_BYTES = 64 * 1024 * 1024
 _UNKNOWN_VERB_TEXT = "bare slug dispatch is no longer supported"
 
 _HOST_RE = re.compile(r"[a-z0-9][a-z0-9-]*")
-_GROUP_RE = re.compile(r"[a-z0-9-]+")
-_SLUG_RE = re.compile(r"[a-z0-9-]+")
-_SITE_RE = re.compile(r"[a-z0-9][a-z0-9._-]*")
 
 _TAR_BLOCK = 512
 _END_MARKER_BYTES = 2 * _TAR_BLOCK
@@ -91,9 +89,9 @@ def _parse(args: list[str]) -> argparse.Namespace:
 def _validate(ns: argparse.Namespace) -> float:
     for label, value, rx in (
         ("host", getattr(ns, "from"), _HOST_RE),
-        ("group", ns.group, _GROUP_RE),
-        ("slug", ns.slug, _SLUG_RE),
-        ("site", ns.site, _SITE_RE),
+        ("group", ns.group, GROUP_RE),
+        ("slug", ns.slug, SLUG_RE),
+        ("site", ns.site, SITE_RE),
     ):
         if not rx.fullmatch(value):
             raise _Failure("invalid-name", f"{label} {value!r} is not a valid name")
@@ -132,8 +130,6 @@ def _check_dest(dest: str) -> str:
 
 
 def _map_outcome(outcome: transport.TransportOutcome) -> None:
-    from .export import EXIT_NOT_FOUND
-
     if isinstance(outcome, transport.Delivered):
         return
     if isinstance(outcome, transport.TooLarge):
