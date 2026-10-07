@@ -326,6 +326,77 @@ def test_a_crafted_member_refuses_the_whole_archive_and_writes_nothing(tmp_path,
     assert not (tmp_path / "abs-escape.txt").exists()
 
 
+def _realsize_overlap(count: int = 20, claimed: int = 4000, data_len: int = 100) -> bytes:
+    # Each member carries a lone GNU.sparse.realsize: tarfile adopts it as the
+    # member size (type stays REGTYPE, issparse() False) while the next header's
+    # offset still comes from the small ustar size, so the claimed data runs into
+    # the members that follow.
+    members = []
+    for n in range(count):
+        info, data = _file(f"f{n}.bin", bytes([n]) * data_len)
+        if n < count - 3:
+            info.pax_headers = {"GNU.sparse.realsize": str(claimed)}
+        members.append((info, data))
+    return _tar_bytes(members)
+
+
+def _tree_bytes(root: Path) -> int:
+    return sum(p.stat().st_size for p in root.rglob("*") if p.is_file())
+
+
+def test_overlapping_realsize_members_are_refused_and_nothing_is_written(tmp_path, env, monkeypatch, capfd):
+    dest = env / "gen"
+    archive = _realsize_overlap()
+
+    code, doc, _, _ = _run(monkeypatch, capfd, _argv(dest), _serve_bytes(tmp_path, archive))
+
+    _assert_failure(code, doc, "refused-archive", env)
+    assert not dest.exists()
+
+
+def test_a_lone_gnu_sparse_realsize_header_refuses_even_when_it_equals_the_true_size(
+    tmp_path, env, monkeypatch, capfd
+):
+    info, data = _file("index.html", b"x" * 100)
+    info.pax_headers = {"GNU.sparse.realsize": "100"}
+    dest = env / "gen"
+
+    code, doc, _, _ = _run(monkeypatch, capfd, _argv(dest), _serve_bytes(tmp_path, _tar_bytes([(info, data)])))
+
+    _assert_failure(code, doc, "refused-archive", env)
+    assert not dest.exists()
+
+
+def _two_files(sizes=(10, 6)) -> bytes:
+    return _tar_bytes([_file(f"f{n}.bin", b"a" * size) for n, size in enumerate(sizes)])
+
+
+def test_a_declared_total_exactly_at_the_ceiling_extracts(tmp_path):
+    fetch = _fetch_module()
+    archive = tmp_path / "a.tar"
+    archive.write_bytes(_two_files((10, 6)))
+    into = tmp_path / "out"
+    into.mkdir()
+
+    fetch._extract(str(archive), str(into), max_extracted_bytes=16)
+
+    assert _tree_bytes(into) == 16
+
+
+def test_a_declared_total_one_byte_over_the_ceiling_is_refused_and_writes_nothing(tmp_path):
+    fetch = _fetch_module()
+    archive = tmp_path / "a.tar"
+    archive.write_bytes(_two_files((10, 6)))
+    into = tmp_path / "out"
+    into.mkdir()
+
+    with pytest.raises(fetch._Failure) as exc:
+        fetch._extract(str(archive), str(into), max_extracted_bytes=15)
+
+    assert exc.value.reason == "refused-archive"
+    assert os.listdir(into) == []
+
+
 def _symlink_in_tree():
     i = tarfile.TarInfo("link")
     i.type = tarfile.SYMTYPE

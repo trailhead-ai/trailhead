@@ -20,7 +20,8 @@ Contract:
 - The archive is untrusted. Only members whose type is exactly a regular file
   or a directory are accepted, with relative names whose segments are never
   empty, ``.``, ``..`` or backslash-bearing; any other member refuses the whole
-  archive before a byte is extracted. Extraction then uses tarfile's ``data``
+  archive before a byte is extracted, as does any GNU sparse PAX header and a
+  declared total of member data above the archive byte cap. Extraction then uses tarfile's ``data``
   filter as a second layer. A stream that is short, lacks the end-of-archive
   marker, or came from an exporter that exited non-zero is ``transfer-failed``.
 """
@@ -158,6 +159,8 @@ def _check_member(member: tarfile.TarInfo) -> None:
 
     if member.type not in (tarfile.REGTYPE, tarfile.DIRTYPE) or member.issparse():
         refuse("it holds a member that is neither a plain file nor a directory")
+    if any(key.startswith("GNU.sparse.") for key in member.pax_headers):
+        refuse("it holds a member with GNU sparse headers")
     name = member.name
     if not name or name.startswith("/") or "\\" in name or "\0" in name:
         refuse("it holds a member with an unsafe name")
@@ -175,7 +178,7 @@ def _has_end_marker(archive: str) -> bool:
         return not any(fh.read(_END_MARKER_BYTES))
 
 
-def _extract(archive: str, into: str) -> None:
+def _extract(archive: str, into: str, max_extracted_bytes: int = MAX_ARCHIVE_BYTES) -> None:
     try:
         with tarfile.open(archive, mode="r:") as tar:
             members = tar.getmembers()
@@ -183,6 +186,8 @@ def _extract(archive: str, into: str) -> None:
                 _check_member(member)
             if not _has_end_marker(archive):
                 raise _Failure("transfer-failed", "the site archive ended early")
+            if sum(m.size for m in members if m.isreg()) > max_extracted_bytes:
+                raise _Failure("refused-archive", "the archive was refused: its members declare more data than it can hold")
             for member in members:
                 tar.extract(member, into, filter="data")
     except _Failure:
