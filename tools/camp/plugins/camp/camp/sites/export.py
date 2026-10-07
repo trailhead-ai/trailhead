@@ -39,9 +39,11 @@ from typing import BinaryIO, Callable
 #: so a caller can tell "nothing there" from "bad invocation".
 EXIT_NOT_FOUND = 4
 
-_GROUP_RE = re.compile(r"[a-z0-9-]+")
-_SLUG_RE = re.compile(r"[a-z0-9-]+")
-_SITE_RE = re.compile(r"[a-z0-9][a-z0-9._-]*")
+#: The name grammars for a site's group, workspace slug and site, matched with
+#: ``re.fullmatch``. `camp site-fetch` validates against the same grammars.
+GROUP_RE = re.compile(r"[a-z0-9-]+")
+SLUG_RE = re.compile(r"[a-z0-9-]+")
+SITE_RE = re.compile(r"[a-z0-9][a-z0-9._-]*")
 
 _DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
 _FILE_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
@@ -57,9 +59,9 @@ class SiteNotFoundError(Exception):
 
 def _validate(group: str, slug: str, site: str) -> None:
     for label, value, rx in (
-        ("group", group, _GROUP_RE),
-        ("slug", slug, _SLUG_RE),
-        ("site", site, _SITE_RE),
+        ("group", group, GROUP_RE),
+        ("slug", slug, SLUG_RE),
+        ("site", site, SITE_RE),
     ):
         if not isinstance(value, str) or not rx.fullmatch(value):
             raise SiteExportUsageError(f"{label} {value!r} is not a valid name")
