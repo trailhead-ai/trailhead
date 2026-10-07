@@ -307,6 +307,33 @@ def test_a_crafted_member_refuses_the_whole_archive_and_writes_nothing(tmp_path,
     assert not os.path.exists("/tmp/abs-escape.txt")
 
 
+def _symlink_in_tree():
+    i = tarfile.TarInfo("link")
+    i.type = tarfile.SYMTYPE
+    i.linkname = "index.html"
+    return _tar_bytes([_file("index.html", b"ok"), (i, None)])
+
+
+def _hardlink_in_tree():
+    i = tarfile.TarInfo("hard")
+    i.type = tarfile.LNKTYPE
+    i.linkname = "index.html"
+    return _tar_bytes([_file("index.html", b"ok"), (i, None)])
+
+
+@pytest.mark.parametrize("builder", [_symlink_in_tree, _hardlink_in_tree], ids=lambda f: f.__name__.strip("_"))
+def test_a_link_member_with_an_in_tree_target_is_refused_by_the_member_check_itself(
+    tmp_path, env, monkeypatch, capfd, builder
+):
+    # tarfile's extraction filter accepts these, so only the member check can refuse them.
+    dest = env / "gen"
+
+    code, doc, _, _ = _run(monkeypatch, capfd, _argv(dest), _serve_bytes(tmp_path, builder()))
+
+    _assert_failure(code, doc, "refused-archive", env)
+    assert not dest.exists()
+
+
 # ---------------------------------------------------------------- truncated streams
 
 
@@ -628,3 +655,63 @@ def test_the_rename_succeeds_when_dest_is_on_a_different_filesystem_from_the_sys
     finally:
         shutil.rmtree(parent, ignore_errors=True)
         tempfile.tempdir = None
+
+
+# ---------------------------------------------------------------- catch-all and scratch lifecycle
+
+
+def _run_capturing_escape(monkeypatch, capfd, argv, spawner):
+    """Run the real main(); return (escaped exception or None, exit code, raw stdout)."""
+    fetch = _fetch_module()
+    monkeypatch.setattr(fetch, "_spawn", spawner)
+    dispatch = importlib.import_module("camp.cli.dispatch")
+    monkeypatch.setattr(sys, "argv", ["camp", *argv])
+    escaped = None
+    code = 0
+    try:
+        dispatch.main()
+    except SystemExit as exc:
+        code = exc.code if isinstance(exc.code, int) else (0 if exc.code is None else 1)
+    except Exception as exc:  # noqa: BLE001 - recorded so the test can assert it never escapes
+        escaped = exc
+    return escaped, code, capfd.readouterr().out
+
+
+def test_an_unexpected_exception_still_yields_one_transfer_failed_json_object(tmp_path, env, monkeypatch, capfd):
+    fetch = _fetch_module()
+    dest = env / "gen"
+
+    def boom(archive, into):
+        raise RuntimeError("unexpected")
+
+    monkeypatch.setattr(fetch, "_extract", boom)
+
+    escaped, code, out = _run_capturing_escape(monkeypatch, capfd, _argv(dest), _serve_bytes(tmp_path, _good_tar()))
+
+    assert escaped is None, "the exception escaped run_cli"
+    doc = json.loads(out)
+    assert doc["ok"] is False
+    assert doc["reason"] == "transfer-failed"
+    assert code != 0
+    assert not dest.exists()
+    assert os.listdir(env) == []
+
+
+@pytest.mark.parametrize("failing", ["mkdtemp", "mkstemp"])
+def test_a_failure_creating_scratch_leaves_no_scratch_behind(tmp_path, env, monkeypatch, capfd, failing):
+    fetch = _fetch_module()
+    dest = env / "gen"
+
+    def boom(*args, **kwargs):
+        raise OSError("no space")
+
+    monkeypatch.setattr(fetch.tempfile, failing, boom)
+
+    escaped, code, out = _run_capturing_escape(monkeypatch, capfd, _argv(dest), _serve_bytes(tmp_path, _good_tar()))
+
+    assert escaped is None
+    doc = json.loads(out)
+    assert doc["ok"] is False
+    assert doc["reason"] == "transfer-failed"
+    assert code != 0
+    assert os.listdir(env) == [], "scratch left behind"

@@ -203,9 +203,10 @@ def fetch(ns: argparse.Namespace, timeout: float) -> str:
     dest = _check_dest(ns.dest)
     parent = os.path.dirname(dest)
 
-    fd, archive = tempfile.mkstemp(prefix=".site-fetch-", suffix=".tar", dir=parent)
-    scratch = tempfile.mkdtemp(prefix=".site-fetch-", dir=parent)
+    scratch = archive = None
     try:
+        scratch = tempfile.mkdtemp(prefix=".site-fetch-", dir=parent)
+        fd, archive = tempfile.mkstemp(prefix=".site-fetch-", suffix=".tar", dir=parent)
         remote_argv = ["site-export", f"--group={ns.group}", f"--slug={ns.slug}", f"--site={ns.site}"]
         with os.fdopen(fd, "wb") as out:
             outcome = transport.fetch_camp_bytes(
@@ -224,11 +225,13 @@ def fetch(ns: argparse.Namespace, timeout: float) -> str:
         os.rename(scratch, dest)
         return dest
     finally:
-        shutil.rmtree(scratch, ignore_errors=True)
-        try:
-            os.unlink(archive)
-        except FileNotFoundError:
-            pass
+        if scratch is not None:
+            shutil.rmtree(scratch, ignore_errors=True)
+        if archive is not None:
+            try:
+                os.unlink(archive)
+            except FileNotFoundError:
+                pass
 
 
 def run_cli(args: list[str]) -> None:
