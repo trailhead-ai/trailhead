@@ -293,17 +293,13 @@ def test_cli_refuses_the_host_flag(tmp_path, site, monkeypatch, capfdbinary):
     assert b"--host has no meaning here" in cap.err
 
 
-def test_site_export_is_reserved_as_a_workspace_slug_while_a_neighbour_is_not():
-    from camp.spine import RESERVED
-
-    assert "site-export" in RESERVED
-    assert "site-exports" not in RESERVED
-    assert "site-fetch" not in RESERVED
-
-
-def test_workspace_slug_named_site_export_is_never_dispatched_as_a_bare_slug(tmp_path, monkeypatch, capfdbinary):
-    code = _run_main(monkeypatch, tmp_path, ["site-export"])
+@pytest.mark.parametrize(
+    ("token", "is_verb"),
+    [("site-export", True), ("site-exports", False)],
+)
+def test_only_the_exact_site_export_token_is_dispatched_as_the_verb(tmp_path, monkeypatch, capfdbinary, token, is_verb):
+    code = _run_main(monkeypatch, tmp_path, [token])
     err = capfdbinary.readouterr().err.decode()
-    assert "bare slug dispatch" not in err
     assert code == 1
-    assert "camp site-export:" in err
+    assert ("bare slug dispatch" not in err) is is_verb
+    assert ("camp site-export:" in err) is is_verb
