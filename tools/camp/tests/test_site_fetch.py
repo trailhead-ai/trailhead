@@ -279,8 +279,25 @@ def _sparse():
     return _tar_bytes([_file("index.html", b"ok"), (i, None)])
 
 
-def _absolute():
-    return _tar_bytes([_file("index.html", b"ok"), _file("/tmp/abs-escape.txt", b"x")])
+def _pax_sparse():
+    # A PAX 1.0 sparse member keeps the ordinary regular-file type flag; only its
+    # GNU.sparse.* headers say it expands to a far larger file on extraction.
+    map_block = b"0\n".ljust(512, b"\0")
+    i = tarfile.TarInfo("GNU.sparseFile.0/big.bin")
+    i.type = tarfile.REGTYPE
+    i.mode = 0o644
+    i.pax_headers = {
+        "GNU.sparse.major": "1",
+        "GNU.sparse.minor": "0",
+        "GNU.sparse.name": "big.bin",
+        "GNU.sparse.realsize": str(10 * 1024 * 1024),
+    }
+    i.size = len(map_block)
+    return _tar_bytes([_file("index.html", b"ok"), (i, map_block)])
+
+
+def _absolute(tmp_path):
+    return _tar_bytes([_file("index.html", b"ok"), _file(str(tmp_path / "abs-escape.txt"), b"x")])
 
 
 def _dotdot():
@@ -293,18 +310,20 @@ def _dotdot_inside():
 
 @pytest.mark.parametrize(
     "builder",
-    [_symlink, _hardlink, _device, _fifo, _contiguous, _sparse, _absolute, _dotdot, _dotdot_inside],
+    [_symlink, _hardlink, _device, _fifo, _contiguous, _sparse, _pax_sparse, _absolute, _dotdot, _dotdot_inside],
     ids=lambda f: f.__name__.strip("_"),
 )
 def test_a_crafted_member_refuses_the_whole_archive_and_writes_nothing(tmp_path, env, monkeypatch, capfd, builder):
     dest = env / "gen"
     sentinel = tmp_path / "escape.txt"
+    archive = builder(tmp_path) if builder is _absolute else builder()
 
-    code, doc, _, _ = _run(monkeypatch, capfd, _argv(dest), _serve_bytes(tmp_path, builder()))
+    code, doc, _, _ = _run(monkeypatch, capfd, _argv(dest), _serve_bytes(tmp_path, archive))
 
     _assert_failure(code, doc, "refused-archive", env)
+    assert not dest.exists()
     assert not sentinel.exists()
-    assert not os.path.exists("/tmp/abs-escape.txt")
+    assert not (tmp_path / "abs-escape.txt").exists()
 
 
 def _symlink_in_tree():
