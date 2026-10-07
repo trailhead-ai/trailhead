@@ -139,3 +139,20 @@ def test_other_nonzero_exit_is_remote_refusal_with_stderr_text():
     assert isinstance(outcome, transport.RemoteRefusal)
     assert outcome.exit_code == 4
     assert outcome.stderr == "site not found: café"
+
+
+def test_a_completed_transfer_is_delivered_even_when_the_timer_fires_after_the_child_exited():
+    # The child writes its payload and exits 0, but a grandchild keeps stderr open
+    # past the execution timeout, so the timer fires after EOF and exit.
+    code = (
+        "import subprocess, sys\n"
+        "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(2)'],"
+        " stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL)\n"
+        "sys.stdout.buffer.write(b'payload')\n"
+    )
+    out = io.BytesIO()
+
+    outcome = _fetch(_Spawner(code), out, execution_timeout=0.5)
+
+    assert outcome == transport.Delivered(bytes_written=7)
+    assert out.getvalue() == b"payload"

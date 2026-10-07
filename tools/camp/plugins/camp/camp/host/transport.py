@@ -672,10 +672,10 @@ def fetch_camp_bytes(
 
     if too_large:
         return TooLarge(max_bytes=max_bytes)
-    if timed_out.is_set():
-        return StoppedResponding(execution_timeout=execution_timeout)
     if returncode == 0:
         return Delivered(bytes_written=written)
+    if timed_out.is_set():
+        return StoppedResponding(execution_timeout=execution_timeout)
     stderr = b"".join(stderr_chunks).decode("utf-8", errors="surrogateescape")
     return _classify(RawResult(stdout="", stderr=stderr, exit_code=returncode))
 

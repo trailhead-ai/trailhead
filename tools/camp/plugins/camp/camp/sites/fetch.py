@@ -156,7 +156,7 @@ def _check_member(member: tarfile.TarInfo) -> None:
     def refuse(why: str) -> NoReturn:
         raise _Failure("refused-archive", f"the archive was refused: {why}")
 
-    if member.type not in (tarfile.REGTYPE, tarfile.DIRTYPE):
+    if member.type not in (tarfile.REGTYPE, tarfile.DIRTYPE) or member.issparse():
         refuse("it holds a member that is neither a plain file nor a directory")
     name = member.name
     if not name or name.startswith("/") or "\\" in name or "\0" in name:
