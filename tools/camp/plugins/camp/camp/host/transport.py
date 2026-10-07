@@ -84,7 +84,7 @@ import subprocess
 import threading
 import time
 from dataclasses import dataclass
-from typing import Callable, Mapping, Sequence
+from typing import BinaryIO, Callable, Mapping, Sequence
 
 from .config import Host
 
@@ -217,6 +217,22 @@ class ProducerFailed(TransportOutcome):
 
 
 @dataclass(frozen=True)
+class Delivered(TransportOutcome):
+    """:func:`fetch_camp_bytes` finished: the remote verb exited 0 and all
+    ``bytes_written`` bytes of its stdout are in the caller's handle."""
+
+    bytes_written: int
+
+
+@dataclass(frozen=True)
+class TooLarge(TransportOutcome):
+    """:func:`fetch_camp_bytes` killed the child because its stdout exceeded
+    ``max_bytes``. The handle holds at most ``max_bytes`` bytes."""
+
+    max_bytes: int
+
+
+@dataclass(frozen=True)
 class RawResult:
     """What a :data:`Runner` hands back from one completed invocation."""
 
@@ -293,6 +309,21 @@ def _fixed_ssh_options(connect_timeout: float) -> list[str]:
     ]
 
 
+def _ssh_argv(
+    host: Host,
+    remote_argv: Sequence[str],
+    connect_timeout: float,
+    extra_ssh_options: Sequence[str] = (),
+) -> list[str]:
+    """The full ``ssh`` argv for one remote camp invocation — shared by
+    :func:`run_camp` and :func:`fetch_camp_bytes`."""
+    ssh_argv: list[str] = ["ssh", *_fixed_ssh_options(connect_timeout)]
+    for option in extra_ssh_options:
+        ssh_argv += ["-o", option]
+    ssh_argv += [host.ssh, quote_and_join(host.camp_bin, remote_argv)]
+    return ssh_argv
+
+
 def run_camp(
     host: Host,
     remote_argv: Sequence[str],
@@ -309,11 +340,7 @@ def run_camp(
     ``ConnectTimeout``) — the seam tests use to point ``UserKnownHostsFile`` at
     a throwaway file; production callers pass none.
     """
-    remote_command = quote_and_join(host.camp_bin, remote_argv)
-    ssh_argv: list[str] = ["ssh", *_fixed_ssh_options(connect_timeout)]
-    for option in extra_ssh_options:
-        ssh_argv += ["-o", option]
-    ssh_argv += [host.ssh, remote_command]
+    ssh_argv = _ssh_argv(host, remote_argv, connect_timeout, extra_ssh_options)
 
     env = {**os.environ, "LC_ALL": "C"}
 
@@ -542,6 +569,115 @@ def stream_camp(
     stderr = b"".join(stderr_chunks).decode("utf-8", errors="surrogateescape")
     raw = RawResult(stdout=stdout, stderr=stderr, exit_code=child.returncode)
     return _classify(raw)
+
+
+# -----------------------------------------------------------------------
+# fetch_camp_bytes — a remote verb's stdout, verbatim, into a binary handle.
+# -----------------------------------------------------------------------
+
+#: The injected seam for :func:`fetch_camp_bytes`: argv and env in, a running
+#: binary-mode ``Popen`` with ``stdout`` and ``stderr`` piped out.
+FetchSpawner = Callable[[Sequence[str], Mapping[str, str]], "subprocess.Popen[bytes]"]
+
+_FETCH_CHUNK_BYTES = 64 * 1024
+_FETCH_STDERR_LIMIT_BYTES = 64 * 1024
+
+
+def default_fetch_spawner(
+    argv: Sequence[str], env: Mapping[str, str]
+) -> "subprocess.Popen[bytes]":
+    """Spawn ``argv`` in binary mode with no stdin, stdout and stderr piped."""
+    return subprocess.Popen(
+        list(argv),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=dict(env),
+    )
+
+
+def fetch_camp_bytes(
+    host: Host,
+    remote_argv: Sequence[str],
+    out: "BinaryIO",
+    *,
+    max_bytes: int,
+    execution_timeout: float,
+    connect_timeout: float = DEFAULT_CONNECT_TIMEOUT_SECONDS,
+    spawner: FetchSpawner = default_fetch_spawner,
+    extra_ssh_options: Sequence[str] = (),
+) -> TransportOutcome:
+    """Run ``camp <remote_argv...>`` on ``host`` and write its stdout, as raw
+    bytes, to ``out`` in chunks — never decoded, never newline-translated,
+    never held whole in memory.
+
+    Returns :class:`Delivered` on exit 0; :class:`TooLarge` (child killed, at
+    most ``max_bytes`` written) when stdout exceeds the cap;
+    :class:`StoppedResponding` (child killed) when ``execution_timeout``
+    elapses; otherwise the same classification as :func:`run_camp`, with the
+    child's stderr as text (a :class:`RemoteRefusal` carries an empty
+    ``stdout`` — the bytes went to ``out``).
+    """
+    ssh_argv = _ssh_argv(host, remote_argv, connect_timeout, extra_ssh_options)
+    env = {**os.environ, "LC_ALL": "C"}
+    process = spawner(ssh_argv, env)
+
+    timed_out = threading.Event()
+
+    def _on_timeout() -> None:
+        timed_out.set()
+        process.kill()
+
+    stderr_chunks: list[bytes] = []
+
+    def _drain_stderr() -> None:
+        kept = 0
+        while True:
+            chunk = process.stderr.read1(_FETCH_CHUNK_BYTES)
+            if not chunk:
+                return
+            if kept < _FETCH_STDERR_LIMIT_BYTES:
+                stderr_chunks.append(chunk[: _FETCH_STDERR_LIMIT_BYTES - kept])
+                kept += len(chunk)
+
+    timer = threading.Timer(execution_timeout, _on_timeout)
+    stderr_thread = threading.Thread(target=_drain_stderr, daemon=True)
+    written = 0
+    too_large = False
+    try:
+        timer.start()
+        stderr_thread.start()
+        while True:
+            chunk = process.stdout.read1(_FETCH_CHUNK_BYTES)
+            if not chunk:
+                break
+            room = max_bytes - written
+            if len(chunk) > room:
+                out.write(chunk[:room])
+                written += room
+                too_large = True
+                process.kill()
+                break
+            out.write(chunk)
+            written += len(chunk)
+        returncode = process.wait()
+        stderr_thread.join(timeout=5)
+    except BaseException:
+        _kill(process)
+        raise
+    finally:
+        timer.cancel()
+        if process.poll() is None:
+            _kill(process)
+
+    if too_large:
+        return TooLarge(max_bytes=max_bytes)
+    if timed_out.is_set():
+        return StoppedResponding(execution_timeout=execution_timeout)
+    if returncode == 0:
+        return Delivered(bytes_written=written)
+    stderr = b"".join(stderr_chunks).decode("utf-8", errors="surrogateescape")
+    return _classify(RawResult(stdout="", stderr=stderr, exit_code=returncode))
 
 
 def outcome_detail(outcome: TransportOutcome) -> str:
