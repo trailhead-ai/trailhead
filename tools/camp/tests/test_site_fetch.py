@@ -1021,7 +1021,7 @@ def test_directories_count_toward_the_member_cap(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "key", ["comment", "size", "linkpath", "mtime", "uid", "gid", "uname", "gname", "atime", "hdrcharset", "GNU.sparse.realsize"]
+    "key", ["comment", "size", "linkpath", "uid", "gid", "uname", "gname", "atime", "hdrcharset", "GNU.sparse.realsize"]
 )
 def test_a_pax_key_outside_the_allowlist_is_refused(tmp_path, key):
     raw = _x_header(_pax_record(key, "1")) + _empty_file() + _END
@@ -1218,3 +1218,123 @@ def test_a_gnu_sparse_member_with_extension_blocks_is_refused_not_crashed(tmp_pa
     reason, _ = _extract_expecting(tmp_path, bytes(header))
 
     assert reason == "refused-archive"
+
+
+def _negative_size_field(value: int) -> bytes:
+    return b"\xff" + (256**11 + value).to_bytes(11, "big")
+
+
+def test_a_regular_member_with_a_negative_base_256_size_is_refused_and_writes_nothing(tmp_path):
+    raw = _raw_header(b"f", b"0", 0, size_field=_negative_size_field(-512)) + _empty_file(b"g") + _END
+
+    reason, into = _extract_expecting(tmp_path, raw)
+
+    assert reason == "refused-archive"
+    assert os.listdir(into) == []
+
+
+def _hook_member(monkeypatch, limits, *, size: int, offset_data: int, typeflag=tarfile.REGTYPE):
+    """Run the real `_proc_member` hook with tarfile's own parse stubbed to hand back a chosen member.
+
+    The stub stands in for an interpreter whose tarfile has no negative-size or
+    offset guard, so the hook's own refusal is the only thing under test.
+    """
+    fetch = _fetch_module()
+
+    def stub(self, tar):
+        self.offset_data = offset_data
+        return self
+
+    monkeypatch.setattr(tarfile.TarInfo, "_proc_member", stub)
+    info = fetch._limited_tarinfo(limits)("f")
+    info.type = typeflag
+    info.size = size
+    return info._proc_member(None)
+
+
+def _hook_limits(**over):
+    fetch = _fetch_module()
+    kwargs = dict(extended_header=8192, extended_total=1 << 20, chain=2, members=100, archive_size=10_000, complete=True)
+    kwargs.update(over)
+    return fetch._Limits(**kwargs)
+
+
+@pytest.mark.parametrize("typeflag", [tarfile.REGTYPE, tarfile.DIRTYPE, tarfile.XHDTYPE, tarfile.GNUTYPE_LONGNAME])
+def test_the_hook_refuses_a_negative_size_whatever_the_interpreter_does_with_it(monkeypatch, typeflag):
+    fetch = _fetch_module()
+
+    with pytest.raises(fetch._Failure) as exc:
+        _hook_member(monkeypatch, _hook_limits(), size=-512, offset_data=1024, typeflag=typeflag)
+
+    assert exc.value.reason == "refused-archive"
+
+
+def test_the_hook_accepts_a_zero_size_member(monkeypatch):
+    assert _hook_member(monkeypatch, _hook_limits(), size=0, offset_data=512).size == 0
+
+
+def test_the_hook_refuses_data_that_starts_at_or_before_the_previous_members_data(monkeypatch):
+    fetch = _fetch_module()
+    limits = _hook_limits()
+    _hook_member(monkeypatch, limits, size=100, offset_data=1024)
+
+    with pytest.raises(fetch._Failure) as same:
+        _hook_member(monkeypatch, limits, size=100, offset_data=1024)
+    with pytest.raises(fetch._Failure) as back:
+        _hook_member(monkeypatch, limits, size=100, offset_data=512)
+
+    assert same.value.reason == back.value.reason == "refused-archive"
+
+
+def test_the_hook_accepts_data_that_starts_one_byte_after_the_previous_members_data(monkeypatch):
+    limits = _hook_limits()
+    _hook_member(monkeypatch, limits, size=100, offset_data=1024)
+
+    assert _hook_member(monkeypatch, limits, size=100, offset_data=1025).offset_data == 1025
+
+
+def test_the_hook_refuses_a_regular_members_data_range_past_the_end_of_a_complete_archive(monkeypatch):
+    fetch = _fetch_module()
+
+    with pytest.raises(fetch._Failure) as exc:
+        _hook_member(monkeypatch, _hook_limits(archive_size=10_000), size=9_000, offset_data=1_001)
+
+    assert exc.value.reason == "refused-archive"
+
+
+def test_the_hook_accepts_a_regular_members_data_range_ending_exactly_at_the_end_of_the_file(monkeypatch):
+    assert _hook_member(monkeypatch, _hook_limits(archive_size=10_000), size=9_000, offset_data=1_000).size == 9_000
+
+
+def test_a_complete_archive_whose_member_declares_more_data_than_the_file_holds_is_refused(tmp_path):
+    raw = _raw_header(b"f", b"0", 5000) + b"x" * 512 + _END
+
+    reason, into = _extract_expecting(tmp_path, raw)
+
+    assert reason == "refused-archive"
+    assert os.listdir(into) == []
+
+
+def _export_round_trip(tmp_path: Path, mtime: int):
+    export = importlib.import_module("camp.sites.export")
+    fetch = _fetch_module()
+    site = tmp_path / "state" / GROUP / "worktrees" / SLUG / "sites" / SITE
+    site.mkdir(parents=True)
+    page = site / "index.html"
+    page.write_bytes(b"<h1>hi</h1>")
+    os.utime(page, (mtime, mtime))
+    buf = io.BytesIO()
+    export.export_site(GROUP, SLUG, SITE, buf, env={"CAMP_STATE_DIR": str(tmp_path / "state"), "HOME": str(tmp_path)})
+    archive = tmp_path / "a.tar"
+    archive.write_bytes(buf.getvalue())
+    into = tmp_path / "out"
+    into.mkdir()
+    fetch._extract(str(archive), str(into))
+    return into
+
+
+@pytest.mark.parametrize("mtime", [-86400 * 365, 9_000_000_000])
+def test_an_export_of_a_file_with_an_extreme_mtime_round_trips_byte_identical(tmp_path, mtime):
+    into = _export_round_trip(tmp_path, mtime)
+
+    assert (into / "index.html").read_bytes() == b"<h1>hi</h1>"
