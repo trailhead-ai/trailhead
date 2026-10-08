@@ -508,7 +508,8 @@ def test_a_stream_exactly_at_the_byte_cap_is_accepted(tmp_path, env, monkeypatch
         (255, b"WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!\n", "auth-refused"),
         (
             1,
-            b"camp: bare slug dispatch is no longer supported.\n  Use 'camp new site-export' to create or enter a workspace.\n",
+            b"camp: bare slug dispatch is no longer supported.\n"
+            b"  Use 'camp new site-export' to create or enter a workspace.\n",
             "remote-camp-outdated",
         ),
         (1, b"camp site-export: something else went wrong\n", "transfer-failed"),
@@ -832,7 +833,9 @@ def _extract_expecting(tmp_path, data: bytes, **caps):
     return None, into
 
 
-def _raw_header(name: bytes, typeflag: bytes, size: int, *, checksum_ok: bool = True, size_field: bytes | None = None) -> bytes:
+def _raw_header(
+    name: bytes, typeflag: bytes, size: int, *, checksum_ok: bool = True, size_field: bytes | None = None
+) -> bytes:
     block = bytearray(512)
     block[0 : len(name)] = name
     block[100:108] = b"0000644\0"
@@ -970,7 +973,8 @@ def test_a_chain_of_two_extension_headers_extracts_and_three_is_refused(tmp_path
 
 
 def test_the_extension_chain_resets_after_each_member(tmp_path):
-    raw = b"".join(_long_name(bytes([97 + i]) * 120) + _long_name(bytes([65 + i]) * 120) + _empty_file() for i in range(3)) + _END
+    members = (_long_name(bytes([97 + i]) * 120) + _long_name(bytes([65 + i]) * 120) + _empty_file() for i in range(3))
+    raw = b"".join(members) + _END
 
     reason, into = _extract_expecting(tmp_path, raw)
 
@@ -1254,7 +1258,9 @@ def _hook_member(monkeypatch, limits, *, size: int, offset_data: int, typeflag=t
 
 def _hook_limits(**over):
     fetch = _fetch_module()
-    kwargs = dict(extended_header=8192, extended_total=1 << 20, chain=2, members=100, archive_size=10_000, complete=True)
+    kwargs = dict(
+        extended_header=8192, extended_total=1 << 20, chain=2, members=100, archive_size=10_000, complete=True
+    )
     kwargs.update(over)
     return fetch._Limits(**kwargs)
 
