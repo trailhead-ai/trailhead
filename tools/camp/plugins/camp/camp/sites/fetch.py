@@ -304,7 +304,10 @@ def _extract(
             if not _has_end_marker(archive):
                 raise _Failure("transfer-failed", "the site archive ended early")
             if sum(m.size for m in members if m.isreg()) > max_extracted_bytes:
-                raise _Failure("refused-archive", "the archive was refused: its members declare more data than it can hold")
+                raise _Failure(
+                    "refused-archive",
+                    "the archive was refused: its members declare more data than it can hold",
+                )
             for member in members:
                 tar.extract(member, into, filter="data")
     except _Failure:
