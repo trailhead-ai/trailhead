@@ -309,17 +309,36 @@ def _fixed_ssh_options(connect_timeout: float) -> list[str]:
     ]
 
 
+#: Extra ``-o`` pairs only the raw-bytes fetch carries: it needs no tty, no
+#: forwarding of any kind, and no local command, so none is left available.
+_FETCH_HARDENING_OPTIONS = (
+    "ForwardAgent=no",
+    "ForwardX11=no",
+    "ClearAllForwardings=yes",
+    "PermitLocalCommand=no",
+    "RequestTTY=no",
+)
+
+
 def _ssh_argv(
     host: Host,
     remote_argv: Sequence[str],
     connect_timeout: float,
     extra_ssh_options: Sequence[str] = (),
+    *,
+    hardened: bool = False,
 ) -> list[str]:
     """The full ``ssh`` argv for one remote camp invocation — shared by
-    :func:`run_camp` and :func:`fetch_camp_bytes`."""
-    ssh_argv: list[str] = ["ssh", *_fixed_ssh_options(connect_timeout)]
-    for option in extra_ssh_options:
+    :func:`run_camp` and :func:`fetch_camp_bytes`. ``hardened`` adds ``-T``,
+    the no-forwarding options, and ``--`` before the destination."""
+    ssh_argv: list[str] = ["ssh"]
+    if hardened:
+        ssh_argv.append("-T")
+    ssh_argv += _fixed_ssh_options(connect_timeout)
+    for option in (*(_FETCH_HARDENING_OPTIONS if hardened else ()), *extra_ssh_options):
         ssh_argv += ["-o", option]
+    if hardened:
+        ssh_argv.append("--")
     ssh_argv += [host.ssh, quote_and_join(host.camp_bin, remote_argv)]
     return ssh_argv
 
@@ -618,7 +637,7 @@ def fetch_camp_bytes(
     child's stderr as text (a :class:`RemoteRefusal` carries an empty
     ``stdout`` — the bytes went to ``out``).
     """
-    ssh_argv = _ssh_argv(host, remote_argv, connect_timeout, extra_ssh_options)
+    ssh_argv = _ssh_argv(host, remote_argv, connect_timeout, extra_ssh_options, hardened=True)
     env = {**os.environ, "LC_ALL": "C"}
     process = spawner(ssh_argv, env)
 

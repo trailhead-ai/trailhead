@@ -114,6 +114,51 @@ def test_argv_carries_fixed_options_destination_and_quoted_remote_command_per_ho
         assert shlex.split(argv[-1]) == [host.camp_bin, "site-export", "--slug=a b"]
 
 
+_HARDENING_OPTIONS = ("ForwardAgent=no", "ForwardX11=no", "ClearAllForwardings=yes", "PermitLocalCommand=no", "RequestTTY=no")
+_TWO_HOSTS = [
+    Host(ssh="andromeda", camp_bin="/opt/camp/bin/camp"),
+    Host(ssh="mac.local", camp_bin="/Users/me/my tools/camp"),
+]
+
+
+def _option_values(argv):
+    return [argv[i + 1] for i, a in enumerate(argv[:-1]) if a == "-o"]
+
+
+def test_fetch_argv_disables_tty_forwarding_and_local_commands_per_host():
+    for host in _TWO_HOSTS:
+        spawner = _Spawner("pass")
+        _fetch(spawner, io.BytesIO(), host=host)
+        argv = spawner.argv
+        assert "-T" in argv
+        for option in _HARDENING_OPTIONS:
+            assert option in _option_values(argv), option
+
+
+def test_fetch_argv_ends_options_with_double_dash_immediately_before_the_destination():
+    for host in _TWO_HOSTS:
+        spawner = _Spawner("pass")
+        _fetch(spawner, io.BytesIO(), host=host)
+        argv = spawner.argv
+        assert argv[-3:-1] == ["--", host.ssh]
+
+
+def test_run_camp_argv_is_unchanged_for_the_same_hosts():
+    for host in _TWO_HOSTS:
+        seen = []
+
+        def runner(argv, timeout, env):
+            seen.append(list(argv))
+            return transport.RawResult(stdout="", stderr="", exit_code=0)
+
+        transport.run_camp(host, ["list"], connect_timeout=7.0, runner=runner)
+
+        assert seen == [[
+            "ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "-o", "ConnectTimeout=7",
+            host.ssh, transport.quote_and_join(host.camp_bin, ["list"]),
+        ]]
+
+
 def test_exit_255_is_unreachable():
     code = "import sys\nsys.stderr.write('ssh: connect to host x: Connection refused')\nsys.exit(255)\n"
     assert isinstance(_fetch(_Spawner(code), io.BytesIO()), transport.Unreachable)

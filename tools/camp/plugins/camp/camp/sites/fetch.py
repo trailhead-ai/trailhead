@@ -21,8 +21,13 @@ Contract:
   or a directory are accepted, with relative names whose segments are never
   empty, ``.``, ``..`` or backslash-bearing; any other member refuses the whole
   archive before a byte is extracted, as does any GNU sparse PAX header and a
-  declared total of member data above the archive byte cap. Extraction then uses tarfile's ``data``
-  filter as a second layer. A stream that is short, lacks the end-of-archive
+  declared total of member data above the archive byte cap. Before tarfile
+  parses anything, a block-level pre-scan refuses a global PAX header, an
+  extended header over `MAX_EXTENDED_HEADER_BYTES`, a PAX ``size`` override, a
+  GNU sparse member, and more than `MAX_ARCHIVE_MEMBERS` members (all
+  ``refused-archive``); a bad header checksum or a size running past the end
+  of the file is ``transfer-failed``. Extraction then uses tarfile's ``data``
+  filter as a second layer. The fetched directory is mode 0700. A stream that is short, lacks the end-of-archive
   marker, or came from an exporter that exited non-zero is ``transfer-failed``.
 """
 
@@ -52,6 +57,13 @@ MAX_ARCHIVE_BYTES = 64 * 1024 * 1024
 #: What a remote camp older than ``site-export`` prints for it: the dispatcher's
 #: bare-slug refusal.
 _UNKNOWN_VERB_TEXT = "bare slug dispatch is no longer supported"
+
+#: The most data an extended header (PAX ``x``, GNU long name ``L`` / link
+#: ``K``) may carry. A larger one is refused before tarfile parses it.
+MAX_EXTENDED_HEADER_BYTES = 64 * 1024
+
+#: The most members an archive may hold.
+MAX_ARCHIVE_MEMBERS = 20_000
 
 _HOST_RE = re.compile(r"[a-z0-9][a-z0-9-]*")
 
@@ -169,6 +181,86 @@ def _check_member(member: tarfile.TarInfo) -> None:
         refuse("it holds a member with an unsafe name")
 
 
+def _tar_number(field: bytes) -> int:
+    if field[0] in (0o200, 0o377):
+        n = int.from_bytes(field[1:], "big")
+        return n - (1 << (8 * (len(field) - 1))) if field[0] == 0o377 else n
+    return int(field.strip(b"\0 ") or b"0", 8)
+
+
+def _pax_overrides_size(data: bytes) -> bool:
+    pos = 0
+    while pos < len(data):
+        space = data.find(b" ", pos)
+        length = int(data[pos:space])
+        record = data[space + 1 : pos + length]
+        if length <= 0 or record[-1:] != b"\n":
+            raise ValueError("malformed pax record")
+        if record.partition(b"=")[0] == b"size":
+            return True
+        pos += length
+    return False
+
+
+def _prescan(archive: str, max_extended_header_bytes: int, max_members: int) -> None:
+    """Walk the 512-byte headers using each size field, without tarfile, so
+    nothing hostile reaches tarfile's PAX processing."""
+
+    def refuse(why: str) -> NoReturn:
+        raise _Failure("refused-archive", f"the archive was refused: {why}")
+
+    def truncated() -> NoReturn:
+        raise _Failure("transfer-failed", "the site archive could not be read")
+
+    total = os.path.getsize(archive)
+    members = 0
+    pos = 0
+    with open(archive, "rb") as fh:
+        while pos < total:
+            header = fh.read(_TAR_BLOCK)
+            if len(header) < _TAR_BLOCK:
+                truncated()
+            if not any(header):
+                return
+            try:
+                stored = int(header[148:156].strip(b"\0 "), 8)
+                size = _tar_number(header[124:136])
+            except ValueError:
+                truncated()
+            unsigned = sum(header[:148]) + 8 * 32 + sum(header[156:])
+            signed = sum(b - 256 if b > 127 else b for b in header[:148]) + 8 * 32
+            signed += sum(b - 256 if b > 127 else b for b in header[156:])
+            if stored not in (unsigned, signed) or size < 0:
+                truncated()
+            kind = header[156:157]
+            if kind == tarfile.XGLTYPE:
+                refuse("it holds a global extended header")
+            if kind == tarfile.GNUTYPE_SPARSE:
+                refuse("it holds a member with GNU sparse headers")
+            extended = kind in (tarfile.XHDTYPE, tarfile.SOLARIS_XHDTYPE, tarfile.GNUTYPE_LONGNAME, tarfile.GNUTYPE_LONGLINK)
+            if extended and size > max_extended_header_bytes:
+                refuse("it holds an oversized extended header")
+            if extended or kind in tarfile.REGULAR_TYPES or kind not in tarfile.SUPPORTED_TYPES:
+                span = -(-size // _TAR_BLOCK) * _TAR_BLOCK
+                if pos + _TAR_BLOCK + size > total:
+                    truncated()
+                if kind in (tarfile.XHDTYPE, tarfile.SOLARIS_XHDTYPE):
+                    try:
+                        overrides = _pax_overrides_size(fh.read(size))
+                    except ValueError:
+                        refuse("it holds a malformed extended header")
+                    if overrides:
+                        refuse("it holds an extended header that overrides a member size")
+                fh.seek(pos + _TAR_BLOCK + span)
+                pos += _TAR_BLOCK + span
+            else:
+                pos += _TAR_BLOCK
+            if not extended:
+                members += 1
+                if members > max_members:
+                    refuse("it holds too many members")
+
+
 def _has_end_marker(archive: str) -> bool:
     size = os.path.getsize(archive)
     if size % _TAR_BLOCK or size < _END_MARKER_BYTES:
@@ -178,8 +270,15 @@ def _has_end_marker(archive: str) -> bool:
         return not any(fh.read(_END_MARKER_BYTES))
 
 
-def _extract(archive: str, into: str, max_extracted_bytes: int = MAX_ARCHIVE_BYTES) -> None:
+def _extract(
+    archive: str,
+    into: str,
+    max_extracted_bytes: int = MAX_ARCHIVE_BYTES,
+    max_extended_header_bytes: int = MAX_EXTENDED_HEADER_BYTES,
+    max_members: int = MAX_ARCHIVE_MEMBERS,
+) -> None:
     try:
+        _prescan(archive, max_extended_header_bytes, max_members)
         with tarfile.open(archive, mode="r:") as tar:
             members = tar.getmembers()
             for member in members:
@@ -220,7 +319,7 @@ def fetch(ns: argparse.Namespace, timeout: float) -> str:
             )
         _map_outcome(outcome)
         _extract(archive, scratch)
-        os.chmod(scratch, 0o755)
+        os.chmod(scratch, 0o700)
         if os.path.lexists(dest):
             raise _Failure("dest-exists", "the destination already exists")
         os.rename(scratch, dest)
