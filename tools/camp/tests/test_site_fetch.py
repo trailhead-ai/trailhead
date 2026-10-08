@@ -805,3 +805,206 @@ def test_a_failure_creating_scratch_leaves_no_scratch_behind(tmp_path, env, monk
     assert doc["reason"] == "transfer-failed"
     assert code != 0
     assert os.listdir(env) == [], "scratch left behind"
+
+
+# ---------------------------------------------------------------- header pre-scan and permissions
+
+
+def test_the_fetched_site_is_readable_by_its_owner_only(tmp_path, env, monkeypatch, capfd):
+    dest = env / "gen"
+
+    code, doc, _, _ = _run(monkeypatch, capfd, _argv(dest), _serve_bytes(tmp_path, _good_tar()))
+
+    assert code == 0 and doc["ok"] is True
+    assert (os.stat(dest).st_mode & 0o777) == 0o700
+
+
+def _guard_tarfile_open(monkeypatch):
+    """Fails the test if tarfile is asked to parse the archive."""
+    fetch = _fetch_module()
+    reached = []
+    real = tarfile.open
+
+    def spy(*args, **kwargs):
+        reached.append(args)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(fetch.tarfile, "open", spy)
+    return reached
+
+
+def _extract_expecting(tmp_path, data: bytes, **caps):
+    fetch = _fetch_module()
+    archive = tmp_path / "a.tar"
+    archive.write_bytes(data)
+    into = tmp_path / "out"
+    into.mkdir()
+    try:
+        fetch._extract(str(archive), str(into), **caps)
+    except fetch._Failure as exc:
+        return exc.reason, into
+    return None, into
+
+
+def _raw_header(name: bytes, typeflag: bytes, size: int, *, checksum_ok: bool = True) -> bytes:
+    block = bytearray(512)
+    block[0 : len(name)] = name
+    block[100:108] = b"0000644\0"
+    block[124:136] = b"%011o\0" % size
+    block[148:156] = b" " * 8
+    block[156:157] = typeflag
+    block[257:263] = b"ustar\0"
+    total = sum(block) + (0 if checksum_ok else 1)
+    block[148:156] = b"%06o\0 " % total
+    return bytes(block)
+
+
+def _padded(data: bytes) -> bytes:
+    return data + b"\0" * (-len(data) % 512)
+
+
+_END = b"\0" * 1024
+
+
+def _global_header_tar() -> bytes:
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w", format=tarfile.PAX_FORMAT, pax_headers={"comment": "g"}) as tar:
+        info, data = _file("index.html", b"hi")
+        tar.addfile(info, io.BytesIO(data))
+    return buf.getvalue()
+
+
+def _extended_header_tar(comment: str) -> tuple[bytes, int]:
+    """A tar whose only member carries an `x` header holding *comment*; returns it and the x data size."""
+    info, data = _file("index.html", b"hi")
+    info.pax_headers = {"comment": comment}
+    raw = _tar_bytes([(info, data)])
+    assert raw[156:157] == b"x"
+    return raw, int(raw[124:136].strip(b"\0 "), 8)
+
+
+def test_a_global_extended_header_is_refused_before_tarfile_parses_anything(tmp_path, monkeypatch):
+    raw = _global_header_tar()
+    reached = _guard_tarfile_open(monkeypatch)
+
+    reason, into = _extract_expecting(tmp_path, raw)
+
+    assert reason == "refused-archive"
+    assert reached == []
+    assert os.listdir(into) == []
+
+
+def test_an_extended_header_one_byte_over_the_cap_is_refused_and_at_the_cap_passes(tmp_path, monkeypatch):
+    raw, size = _extended_header_tar("v" * 40)
+    reached = _guard_tarfile_open(monkeypatch)
+
+    reason, into = _extract_expecting(tmp_path, raw, max_extended_header_bytes=size - 1)
+    assert reason == "refused-archive"
+    assert reached == []
+    assert os.listdir(into) == []
+
+    (tmp_path / "ok").mkdir()
+    reason, into = _extract_expecting(tmp_path / "ok", raw, max_extended_header_bytes=size)
+    assert reason is None
+    assert (into / "index.html").read_bytes() == b"hi"
+
+
+@pytest.mark.parametrize("typeflag", [b"L", b"K"])
+def test_a_gnu_long_name_or_link_header_over_the_cap_is_refused(tmp_path, monkeypatch, typeflag):
+    data = _padded(b"n" * 200 + b"\0")
+    raw = _raw_header(b"././@LongLink", typeflag, 201) + data + _raw_header(b"f", b"0", 0) + _END
+    reached = _guard_tarfile_open(monkeypatch)
+
+    reason, _ = _extract_expecting(tmp_path, raw, max_extended_header_bytes=200)
+
+    assert reason == "refused-archive"
+    assert reached == []
+
+
+def test_a_pax_header_that_overrides_size_is_refused_because_it_would_desync_the_scan(tmp_path, monkeypatch):
+    info, data = _file("index.html", b"hi")
+    info.pax_headers = {"size": "2"}
+    raw = _tar_bytes([(info, data)])
+    reached = _guard_tarfile_open(monkeypatch)
+
+    reason, _ = _extract_expecting(tmp_path, raw)
+
+    assert reason == "refused-archive"
+    assert reached == []
+
+
+def _n_files(n: int) -> bytes:
+    return _tar_bytes([_file(f"f{i}", b"x") for i in range(n)])
+
+
+def test_a_member_count_at_the_cap_extracts_and_one_over_is_refused(tmp_path, monkeypatch):
+    reason, into = _extract_expecting(tmp_path, _n_files(3), max_members=3)
+    assert reason is None
+    assert sorted(os.listdir(into)) == ["f0", "f1", "f2"]
+
+    (tmp_path / "over").mkdir()
+    over = _n_files(4)
+    reached = _guard_tarfile_open(monkeypatch)
+    reason, into = _extract_expecting(tmp_path / "over", over, max_members=3)
+    assert reason == "refused-archive"
+    assert reached == []
+    assert os.listdir(into) == []
+
+
+def test_directories_count_toward_the_member_cap(tmp_path, monkeypatch):
+    d = tarfile.TarInfo("sub")
+    d.type = tarfile.DIRTYPE
+    d.mode = 0o755
+    raw = _tar_bytes([(d, None), _file("sub/a", b"x")])
+    reached = _guard_tarfile_open(monkeypatch)
+
+    reason, _ = _extract_expecting(tmp_path, raw, max_members=1)
+
+    assert reason == "refused-archive"
+    assert reached == []
+
+
+def test_a_header_with_a_corrupted_checksum_is_transfer_failed(tmp_path, monkeypatch):
+    raw = _raw_header(b"f", b"0", 0, checksum_ok=False) + _END
+    reached = _guard_tarfile_open(monkeypatch)
+
+    reason, _ = _extract_expecting(tmp_path, raw)
+
+    assert reason == "transfer-failed"
+    assert reached == []
+
+
+def test_a_valid_checksum_on_the_same_header_is_accepted(tmp_path):
+    reason, into = _extract_expecting(tmp_path, _raw_header(b"f", b"0", 0) + _END)
+
+    assert reason is None
+    assert os.listdir(into) == ["f"]
+
+
+def test_a_size_field_that_runs_past_the_end_of_the_file_is_transfer_failed(tmp_path, monkeypatch):
+    raw = _raw_header(b"f", b"0", 5000) + b"x" * 512
+    reached = _guard_tarfile_open(monkeypatch)
+
+    reason, _ = _extract_expecting(tmp_path, raw)
+
+    assert reason == "transfer-failed"
+    assert reached == []
+
+
+def test_a_size_field_ending_exactly_at_the_end_of_the_data_blocks_is_not_a_truncation(tmp_path):
+    raw = _raw_header(b"f", b"0", 600) + _padded(b"x" * 600) + _END
+
+    reason, into = _extract_expecting(tmp_path, raw)
+
+    assert reason is None
+    assert (into / "f").stat().st_size == 600
+
+
+def test_a_gnu_sparse_member_is_refused_before_tarfile_parses_anything(tmp_path, monkeypatch):
+    raw = _raw_header(b"f", b"S", 0) + _END
+    reached = _guard_tarfile_open(monkeypatch)
+
+    reason, _ = _extract_expecting(tmp_path, raw)
+
+    assert reason == "refused-archive"
+    assert reached == []
