@@ -807,7 +807,7 @@ def test_a_failure_creating_scratch_leaves_no_scratch_behind(tmp_path, env, monk
     assert os.listdir(env) == [], "scratch left behind"
 
 
-# ---------------------------------------------------------------- header pre-scan and permissions
+# ---------------------------------------------------------------- archive limits and permissions
 
 
 def test_the_fetched_site_is_readable_by_its_owner_only(tmp_path, env, monkeypatch, capfd):
@@ -819,26 +819,12 @@ def test_the_fetched_site_is_readable_by_its_owner_only(tmp_path, env, monkeypat
     assert (os.stat(dest).st_mode & 0o777) == 0o700
 
 
-def _guard_tarfile_open(monkeypatch):
-    """Fails the test if tarfile is asked to parse the archive."""
-    fetch = _fetch_module()
-    reached = []
-    real = tarfile.open
-
-    def spy(*args, **kwargs):
-        reached.append(args)
-        return real(*args, **kwargs)
-
-    monkeypatch.setattr(fetch.tarfile, "open", spy)
-    return reached
-
-
 def _extract_expecting(tmp_path, data: bytes, **caps):
     fetch = _fetch_module()
     archive = tmp_path / "a.tar"
     archive.write_bytes(data)
     into = tmp_path / "out"
-    into.mkdir()
+    into.mkdir(exist_ok=True)
     try:
         fetch._extract(str(archive), str(into), **caps)
     except fetch._Failure as exc:
@@ -846,11 +832,11 @@ def _extract_expecting(tmp_path, data: bytes, **caps):
     return None, into
 
 
-def _raw_header(name: bytes, typeflag: bytes, size: int, *, checksum_ok: bool = True) -> bytes:
+def _raw_header(name: bytes, typeflag: bytes, size: int, *, checksum_ok: bool = True, size_field: bytes | None = None) -> bytes:
     block = bytearray(512)
     block[0 : len(name)] = name
     block[100:108] = b"0000644\0"
-    block[124:136] = b"%011o\0" % size
+    block[124:136] = size_field if size_field is not None else b"%011o\0" % size
     block[148:156] = b" " * 8
     block[156:157] = typeflag
     block[257:263] = b"ustar\0"
@@ -866,6 +852,28 @@ def _padded(data: bytes) -> bytes:
 _END = b"\0" * 1024
 
 
+def _pax_record(key: str, value: str) -> bytes:
+    body = f" {key}={value}\n".encode()
+    length = len(body) + 1
+    while len(str(length)) + len(body) != length:
+        length = len(str(length)) + len(body)
+    return str(length).encode() + body
+
+
+def _x_header(*records: bytes, padding_records: bytes = b"") -> bytes:
+    payload = b"".join(records)
+    return _raw_header(b"PaxHeader", b"x", len(payload)) + _padded(payload + padding_records)
+
+
+def _long_name(name: bytes) -> bytes:
+    data = name + b"\0"
+    return _raw_header(b"././@LongLink", b"L", len(data)) + _padded(data)
+
+
+def _empty_file(name: bytes = b"f") -> bytes:
+    return _raw_header(name, b"0", 0)
+
+
 def _global_header_tar() -> bytes:
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w", format=tarfile.PAX_FORMAT, pax_headers={"comment": "g"}) as tar:
@@ -874,104 +882,240 @@ def _global_header_tar() -> bytes:
     return buf.getvalue()
 
 
-def _extended_header_tar(comment: str) -> tuple[bytes, int]:
-    """A tar whose only member carries an `x` header holding *comment*; returns it and the x data size."""
-    info, data = _file("index.html", b"hi")
-    info.pax_headers = {"comment": comment}
-    raw = _tar_bytes([(info, data)])
-    assert raw[156:157] == b"x"
-    return raw, int(raw[124:136].strip(b"\0 "), 8)
+def test_a_global_extended_header_is_refused(tmp_path):
+    reason, into = _extract_expecting(tmp_path, _global_header_tar())
+
+    assert reason == "refused-archive"
+    assert os.listdir(into) == []
 
 
-def test_a_global_extended_header_is_refused_before_tarfile_parses_anything(tmp_path, monkeypatch):
-    raw = _global_header_tar()
-    reached = _guard_tarfile_open(monkeypatch)
+def test_a_global_extended_header_is_refused_before_its_records_are_parsed(tmp_path):
+    # A parse of this payload raises InvalidHeaderError, which the extractor reports as transfer-failed.
+    garbage = b"this is not a pax record\n"
+    raw = _raw_header(b"g", b"g", len(garbage)) + _padded(garbage) + _empty_file() + _END
 
     reason, into = _extract_expecting(tmp_path, raw)
 
     assert reason == "refused-archive"
-    assert reached == []
     assert os.listdir(into) == []
 
 
-def test_an_extended_header_one_byte_over_the_cap_is_refused_and_at_the_cap_passes(tmp_path, monkeypatch):
-    raw, size = _extended_header_tar("v" * 40)
-    reached = _guard_tarfile_open(monkeypatch)
+def _long_path_tar(count: int = 1, length: int = 150) -> tuple[bytes, int]:
+    """A tar of *count* files with long names (each gets an `x` header); returns it and one x header's data size."""
+    members = [_file(f"{i}".ljust(length, "n"), b"hi") for i in range(count)]
+    raw = _tar_bytes(members)
+    assert raw[156:157] == b"x"
+    return raw, int(raw[124:136].strip(b"\0 "), 8)
+
+
+def test_an_extended_header_one_byte_over_the_cap_is_refused_and_at_the_cap_passes(tmp_path):
+    raw, size = _long_path_tar()
 
     reason, into = _extract_expecting(tmp_path, raw, max_extended_header_bytes=size - 1)
     assert reason == "refused-archive"
-    assert reached == []
     assert os.listdir(into) == []
 
     (tmp_path / "ok").mkdir()
     reason, into = _extract_expecting(tmp_path / "ok", raw, max_extended_header_bytes=size)
     assert reason is None
-    assert (into / "index.html").read_bytes() == b"hi"
+    assert os.listdir(into) == ["0".ljust(150, "n")]
 
 
-@pytest.mark.parametrize("typeflag", [b"L", b"K"])
-def test_a_gnu_long_name_or_link_header_over_the_cap_is_refused(tmp_path, monkeypatch, typeflag):
-    data = _padded(b"n" * 200 + b"\0")
-    raw = _raw_header(b"././@LongLink", typeflag, 201) + data + _raw_header(b"f", b"0", 0) + _END
-    reached = _guard_tarfile_open(monkeypatch)
+def test_a_gnu_long_name_header_one_byte_over_the_cap_is_refused_and_at_the_cap_passes(tmp_path):
+    raw = _long_name(b"n" * 200) + _empty_file() + _END
+
+    reason, _ = _extract_expecting(tmp_path, raw, max_extended_header_bytes=200)
+    assert reason == "refused-archive"
+
+    (tmp_path / "ok").mkdir()
+    reason, into = _extract_expecting(tmp_path / "ok", raw, max_extended_header_bytes=201)
+    assert reason is None
+    assert os.listdir(into) == ["n" * 200]
+
+
+def test_a_gnu_long_link_header_over_the_cap_is_refused(tmp_path):
+    data = b"n" * 200 + b"\0"
+    raw = _raw_header(b"././@LongLink", b"K", len(data)) + _padded(data) + _empty_file() + _END
 
     reason, _ = _extract_expecting(tmp_path, raw, max_extended_header_bytes=200)
 
     assert reason == "refused-archive"
-    assert reached == []
 
 
-def test_a_pax_header_that_overrides_size_is_refused_because_it_would_desync_the_scan(tmp_path, monkeypatch):
-    info, data = _file("index.html", b"hi")
-    info.pax_headers = {"size": "2"}
-    raw = _tar_bytes([(info, data)])
-    reached = _guard_tarfile_open(monkeypatch)
+def test_total_extended_header_bytes_at_the_cap_extract_and_one_over_is_refused(tmp_path):
+    raw, size = _long_path_tar(count=3)
 
-    reason, _ = _extract_expecting(tmp_path, raw)
-
+    reason, into = _extract_expecting(tmp_path, raw, max_extended_total_bytes=3 * size - 1)
     assert reason == "refused-archive"
-    assert reached == []
+    assert os.listdir(into) == []
+
+    (tmp_path / "ok").mkdir()
+    reason, into = _extract_expecting(tmp_path / "ok", raw, max_extended_total_bytes=3 * size)
+    assert reason is None
+    assert len(os.listdir(into)) == 3
+
+
+def test_a_chain_of_two_extension_headers_extracts_and_three_is_refused(tmp_path):
+    two = _long_name(b"a" * 120) + _long_name(b"b" * 120) + _empty_file() + _END
+    three = _long_name(b"a" * 120) + two
+
+    reason, into = _extract_expecting(tmp_path, two)
+    assert reason is None
+    assert os.listdir(into) == ["a" * 120]
+
+    (tmp_path / "over").mkdir()
+    reason, into = _extract_expecting(tmp_path / "over", three)
+    assert reason == "refused-archive"
+    assert os.listdir(into) == []
+
+
+def test_the_extension_chain_resets_after_each_member(tmp_path):
+    raw = b"".join(_long_name(bytes([97 + i]) * 120) + _long_name(bytes([65 + i]) * 120) + _empty_file() for i in range(3)) + _END
+
+    reason, into = _extract_expecting(tmp_path, raw)
+
+    assert reason is None
+    assert len(os.listdir(into)) == 3
 
 
 def _n_files(n: int) -> bytes:
     return _tar_bytes([_file(f"f{i}", b"x") for i in range(n)])
 
 
-def test_a_member_count_at_the_cap_extracts_and_one_over_is_refused(tmp_path, monkeypatch):
+def test_a_member_count_at_the_cap_extracts_and_one_over_is_refused(tmp_path):
     reason, into = _extract_expecting(tmp_path, _n_files(3), max_members=3)
     assert reason is None
     assert sorted(os.listdir(into)) == ["f0", "f1", "f2"]
 
     (tmp_path / "over").mkdir()
-    over = _n_files(4)
-    reached = _guard_tarfile_open(monkeypatch)
-    reason, into = _extract_expecting(tmp_path / "over", over, max_members=3)
+    reason, into = _extract_expecting(tmp_path / "over", _n_files(4), max_members=3)
     assert reason == "refused-archive"
-    assert reached == []
     assert os.listdir(into) == []
 
 
-def test_directories_count_toward_the_member_cap(tmp_path, monkeypatch):
+def test_the_member_cap_refuses_at_the_first_member_over_without_reading_further(tmp_path, monkeypatch):
+    read = []
+    real = tarfile.TarInfo._proc_builtin
+
+    def counting(self, tarfile_):
+        read.append(self.name)
+        return real(self, tarfile_)
+
+    monkeypatch.setattr(tarfile.TarInfo, "_proc_builtin", counting)
+
+    reason, _ = _extract_expecting(tmp_path, _n_files(50), max_members=3)
+
+    assert reason == "refused-archive"
+    assert read == ["f0", "f1", "f2"]
+
+
+def test_directories_count_toward_the_member_cap(tmp_path):
     d = tarfile.TarInfo("sub")
     d.type = tarfile.DIRTYPE
     d.mode = 0o755
     raw = _tar_bytes([(d, None), _file("sub/a", b"x")])
-    reached = _guard_tarfile_open(monkeypatch)
 
     reason, _ = _extract_expecting(tmp_path, raw, max_members=1)
 
     assert reason == "refused-archive"
-    assert reached == []
 
 
-def test_a_header_with_a_corrupted_checksum_is_transfer_failed(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    "key", ["comment", "size", "linkpath", "mtime", "uid", "gid", "uname", "gname", "atime", "hdrcharset", "GNU.sparse.realsize"]
+)
+def test_a_pax_key_outside_the_allowlist_is_refused(tmp_path, key):
+    raw = _x_header(_pax_record(key, "1")) + _empty_file() + _END
+
+    reason, into = _extract_expecting(tmp_path, raw)
+
+    assert reason == "refused-archive"
+    assert os.listdir(into) == []
+
+
+def test_the_path_pax_key_is_allowed_and_names_the_member(tmp_path):
+    raw = _x_header(_pax_record("path", "renamed.html")) + _raw_header(b"orig", b"0", 0) + _END
+
+    reason, into = _extract_expecting(tmp_path, raw)
+
+    assert reason is None
+    assert os.listdir(into) == ["renamed.html"]
+
+
+def test_a_pax_key_hidden_in_an_inner_header_of_a_chain_is_still_refused(tmp_path):
+    # tarfile applies the inner header's attributes to the member and then overwrites its pax_headers
+    # with the outer's, so a check on the finished member would never see the inner key.
+    raw = _x_header(_pax_record("path", "a.html")) + _x_header(_pax_record("size", "0")) + _empty_file() + _END
+
+    reason, into = _extract_expecting(tmp_path, raw)
+
+    assert reason == "refused-archive"
+    assert os.listdir(into) == []
+
+
+def _vector1(hidden: bytes, blocks: int) -> bytes:
+    # The size field starts with NUL: tarfile reads it as 0, a parser stripping NULs reads the digits.
+    carrier = _raw_header(b"carrier", b"0", 0, size_field=b"\0" + b"%011o" % (512 * blocks))
+    return carrier + hidden + _empty_file(b"index.html") + _END
+
+
+def _vector2(hidden: bytes, blocks: int) -> bytes:
+    # A NUL type with a trailing slash is a directory to tarfile (no data); its size field is not skipped.
+    carrier = _raw_header(b"decoy/", b"\0", 512 * blocks)
+    return carrier + hidden + _empty_file(b"index.html") + _END
+
+
+def _vector3(hidden: bytes, blocks: int) -> bytes:
+    # The size=0 record sits in the padding after the x header's declared data; tarfile parses the whole block.
+    x = _x_header(_pax_record("path", "carrier"), padding_records=_pax_record("size", "0"))
+    return x + _raw_header(b"c", b"0", 512 * blocks) + hidden + _empty_file(b"index.html") + _END
+
+
+_VECTORS = [_vector1, _vector2, _vector3]
+_G_HEADER = _raw_header(b"g", b"g", 0)
+
+
+@pytest.mark.parametrize("vector", _VECTORS, ids=lambda f: f.__name__.strip("_"))
+def test_a_global_header_hidden_behind_a_header_desync_is_still_refused(tmp_path, vector):
+    reason, into = _extract_expecting(tmp_path, vector(_G_HEADER, 1))
+
+    assert reason == "refused-archive"
+    assert os.listdir(into) == []
+
+
+@pytest.mark.parametrize("vector", _VECTORS, ids=lambda f: f.__name__.strip("_"))
+def test_members_hidden_behind_a_header_desync_still_count_toward_the_cap(tmp_path, vector):
+    hidden = b"".join(_empty_file(f"h{i}".encode()) for i in range(5))
+
+    reason, into = _extract_expecting(tmp_path, vector(hidden, 5), max_members=3)
+
+    assert reason == "refused-archive"
+    assert os.listdir(into) == []
+
+
+def test_the_same_desync_archives_with_nothing_hostile_hidden_extract(tmp_path):
+    hidden = b"".join(_empty_file(f"h{i}".encode()) for i in range(2))
+    for n, vector in enumerate((_vector1, _vector2)):
+        (tmp_path / str(n)).mkdir()
+        reason, into = _extract_expecting(tmp_path / str(n), vector(hidden, 2), max_members=10)
+        assert reason is None
+        assert {"h0", "h1", "index.html"} <= set(os.listdir(into))
+
+
+def test_a_size_pax_record_in_block_padding_is_refused_even_with_nothing_hidden(tmp_path):
+    raw = _vector3(b"", 0)
+
+    reason, into = _extract_expecting(tmp_path, raw)
+
+    assert reason == "refused-archive"
+    assert os.listdir(into) == []
+
+
+def test_a_header_with_a_corrupted_checksum_is_transfer_failed(tmp_path):
     raw = _raw_header(b"f", b"0", 0, checksum_ok=False) + _END
-    reached = _guard_tarfile_open(monkeypatch)
 
     reason, _ = _extract_expecting(tmp_path, raw)
 
     assert reason == "transfer-failed"
-    assert reached == []
 
 
 def test_a_valid_checksum_on_the_same_header_is_accepted(tmp_path):
@@ -981,14 +1125,21 @@ def test_a_valid_checksum_on_the_same_header_is_accepted(tmp_path):
     assert os.listdir(into) == ["f"]
 
 
-def test_a_size_field_that_runs_past_the_end_of_the_file_is_transfer_failed(tmp_path, monkeypatch):
-    raw = _raw_header(b"f", b"0", 5000) + b"x" * 512
-    reached = _guard_tarfile_open(monkeypatch)
+def test_a_malformed_pax_payload_that_tarfile_rejects_is_transfer_failed(tmp_path):
+    garbage = b"this is not a pax record\n"
+    raw = _raw_header(b"PaxHeader", b"x", len(garbage)) + _padded(garbage) + _empty_file() + _END
 
     reason, _ = _extract_expecting(tmp_path, raw)
 
     assert reason == "transfer-failed"
-    assert reached == []
+
+
+def test_a_size_field_that_runs_past_the_end_of_the_file_is_transfer_failed(tmp_path):
+    raw = _raw_header(b"f", b"0", 5000) + b"x" * 512
+
+    reason, _ = _extract_expecting(tmp_path, raw)
+
+    assert reason == "transfer-failed"
 
 
 def test_a_size_field_ending_exactly_at_the_end_of_the_data_blocks_is_not_a_truncation(tmp_path):
@@ -1000,11 +1151,70 @@ def test_a_size_field_ending_exactly_at_the_end_of_the_data_blocks_is_not_a_trun
     assert (into / "f").stat().st_size == 600
 
 
-def test_a_gnu_sparse_member_is_refused_before_tarfile_parses_anything(tmp_path, monkeypatch):
-    raw = _raw_header(b"f", b"S", 0) + _END
-    reached = _guard_tarfile_open(monkeypatch)
-
-    reason, _ = _extract_expecting(tmp_path, raw)
+def test_a_gnu_sparse_member_is_refused(tmp_path):
+    reason, _ = _extract_expecting(tmp_path, _raw_header(b"f", b"S", 0) + _END)
 
     assert reason == "refused-archive"
-    assert reached == []
+
+
+def test_an_archive_missing_its_end_marker_is_transfer_failed(tmp_path):
+    reason, _ = _extract_expecting(tmp_path, _raw_header(b"f", b"0", 0))
+
+    assert reason == "transfer-failed"
+
+
+def test_a_real_export_with_a_long_nested_path_a_non_ascii_name_and_a_large_file_round_trips(
+    tmp_path, env, monkeypatch, capfd
+):
+    state = tmp_path / "remotestate"
+    site = state / GROUP / "worktrees" / SLUG / "sites" / SITE
+    deep = site.joinpath(*["d" * 40] * 5, "n" * 22)
+    deep.mkdir(parents=True)
+    assert len(str(deep.relative_to(site) / "x.txt")) == 233
+    (deep / "x.txt").write_bytes(b"deep")
+    (site / "index.html").write_bytes(b"i")
+    (site / "café-日本.html").write_bytes(b"unicode")
+    big = os.urandom(3_000_000)
+    (site / "big.bin").write_bytes(big)
+    dest = env / "gen"
+
+    code, doc, _, _ = _run(monkeypatch, capfd, _argv(dest), _serve_real_export(state))
+
+    assert code == 0 and doc["ok"] is True
+    assert (dest / deep.relative_to(site) / "x.txt").read_bytes() == b"deep"
+    assert (dest / "café-日本.html").read_bytes() == b"unicode"
+    assert (dest / "big.bin").read_bytes() == big
+
+
+def _sparse_x_header(*records: bytes) -> bytes:
+    return _x_header(*records) + _raw_header(b"f", b"0", 512) + b"garbage!" * 64 + _END
+
+
+@pytest.mark.parametrize(
+    "records",
+    [
+        [("GNU.sparse.major", "1"), ("GNU.sparse.minor", "0")],
+        [("GNU.sparse.map", "x,y")],
+        [("GNU.sparse.size", "9"), ("GNU.sparse.offset", "x"), ("GNU.sparse.numbytes", "y")],
+    ],
+    ids=["sparse-1.0", "sparse-0.1", "sparse-0.0"],
+)
+def test_gnu_sparse_pax_headers_are_refused_before_tarfile_interprets_them(tmp_path, records):
+    # Each shape sends tarfile into its sparse interpreter, which raises a non-tar error on this garbage.
+    raw = _sparse_x_header(*(_pax_record(k, v) for k, v in records))
+
+    reason, into = _extract_expecting(tmp_path, raw)
+
+    assert reason == "refused-archive"
+    assert os.listdir(into) == []
+
+
+def test_a_gnu_sparse_member_with_extension_blocks_is_refused_not_crashed(tmp_path):
+    header = bytearray(_raw_header(b"f", b"S", 0))
+    header[482] = 1
+    header[148:156] = b"        "
+    header[148:156] = b"%06o\0 " % sum(header)
+
+    reason, _ = _extract_expecting(tmp_path, bytes(header))
+
+    assert reason == "refused-archive"
