@@ -71,11 +71,12 @@ MAX_EXTENDED_TOTAL_BYTES = 4 * 1024 * 1024
 #: The most extension headers that may run in a row before a real member.
 MAX_EXTENSION_CHAIN = 2
 
-#: The PAX keys an archive may carry. ``camp site-export`` emits only ``path``
-#: (for names tarfile cannot fit in the ustar name field); every other key,
-#: including ``size`` and ``GNU.sparse.*``, changes how tarfile frames or
-#: expands a member and is refused.
-_ALLOWED_PAX_KEYS = frozenset({"path"})
+#: The PAX keys an archive may carry. ``camp site-export`` emits ``path`` (for
+#: names tarfile cannot fit in the ustar name field) and ``mtime`` (for a file
+#: time the ustar field cannot hold); every other key, including ``size`` and
+#: ``GNU.sparse.*``, changes how tarfile frames or expands a member and is
+#: refused.
+_ALLOWED_PAX_KEYS = frozenset({"path", "mtime"})
 
 _EXTENSION_TYPES = (tarfile.XHDTYPE, tarfile.SOLARIS_XHDTYPE, tarfile.GNUTYPE_LONGNAME, tarfile.GNUTYPE_LONGLINK)
 
@@ -200,7 +201,12 @@ def _check_member(member: tarfile.TarInfo) -> None:
 class _Limits:
     """The caps one extraction enforces, and the running totals it checks them against."""
 
-    def __init__(self, extended_header: int, extended_total: int, chain: int, members: int) -> None:
+    def __init__(
+        self, extended_header: int, extended_total: int, chain: int, members: int, archive_size: int, complete: bool
+    ) -> None:
+        self.archive_size = archive_size
+        self.complete = complete
+        self.last_data = -1
         self.extended_header = extended_header
         self.extended_total = extended_total
         self.chain = chain
@@ -221,6 +227,8 @@ def _limited_tarinfo(limits: _Limits) -> type[tarfile.TarInfo]:
     class LimitedTarInfo(tarfile.TarInfo):
         def _proc_member(self, tar):
             kind = self.type
+            if self.size < 0:
+                _refuse("it holds a member with a negative size")
             if kind == tarfile.XGLTYPE:
                 _refuse("it holds a global extended header")
             if kind == tarfile.GNUTYPE_SPARSE:
@@ -239,6 +247,13 @@ def _limited_tarinfo(limits: _Limits) -> type[tarfile.TarInfo]:
                 limits.seen += 1
                 if limits.seen > limits.members:
                     _refuse("it holds too many members")
+                member = super()._proc_member(tar)
+                if member.offset_data <= limits.last_data:
+                    _refuse("it holds a member whose data does not start after the previous member's")
+                limits.last_data = member.offset_data
+                if limits.complete and member.isreg() and member.offset_data + member.size > limits.archive_size:
+                    _refuse("it holds a member whose data runs past the end of the archive")
+                return member
             return super()._proc_member(tar)
 
         def _apply_pax_info(self, pax_headers, encoding, errors):
@@ -272,7 +287,14 @@ def _extract(
     max_extension_chain: int = MAX_EXTENSION_CHAIN,
     max_members: int = MAX_ARCHIVE_MEMBERS,
 ) -> None:
-    limits = _Limits(max_extended_header_bytes, max_extended_total_bytes, max_extension_chain, max_members)
+    limits = _Limits(
+        max_extended_header_bytes,
+        max_extended_total_bytes,
+        max_extension_chain,
+        max_members,
+        os.path.getsize(archive),
+        _has_end_marker(archive),
+    )
     try:
         with tarfile.open(archive, mode="r:", tarinfo=_limited_tarinfo(limits)) as tar:
             members = []
