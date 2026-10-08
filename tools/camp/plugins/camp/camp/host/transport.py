@@ -317,6 +317,7 @@ _FETCH_HARDENING_OPTIONS = (
     "ClearAllForwardings=yes",
     "PermitLocalCommand=no",
     "RequestTTY=no",
+    "Tunnel=no",
 )
 
 

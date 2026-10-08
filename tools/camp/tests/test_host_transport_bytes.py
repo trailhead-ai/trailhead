@@ -114,7 +114,7 @@ def test_argv_carries_fixed_options_destination_and_quoted_remote_command_per_ho
         assert shlex.split(argv[-1]) == [host.camp_bin, "site-export", "--slug=a b"]
 
 
-_HARDENING_OPTIONS = ("ForwardAgent=no", "ForwardX11=no", "ClearAllForwardings=yes", "PermitLocalCommand=no", "RequestTTY=no")
+_HARDENING_OPTIONS = ("ForwardAgent=no", "ForwardX11=no", "ClearAllForwardings=yes", "PermitLocalCommand=no", "RequestTTY=no", "Tunnel=no")
 _TWO_HOSTS = [
     Host(ssh="andromeda", camp_bin="/opt/camp/bin/camp"),
     Host(ssh="mac.local", camp_bin="/Users/me/my tools/camp"),

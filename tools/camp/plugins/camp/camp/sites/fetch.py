@@ -21,14 +21,17 @@ Contract:
   or a directory are accepted, with relative names whose segments are never
   empty, ``.``, ``..`` or backslash-bearing; any other member refuses the whole
   archive before a byte is extracted, as does any GNU sparse PAX header and a
-  declared total of member data above the archive byte cap. Before tarfile
-  parses anything, a block-level pre-scan refuses a global PAX header, an
-  extended header over `MAX_EXTENDED_HEADER_BYTES`, a PAX ``size`` override, a
-  GNU sparse member, and more than `MAX_ARCHIVE_MEMBERS` members (all
-  ``refused-archive``); a bad header checksum or a size running past the end
-  of the file is ``transfer-failed``. Extraction then uses tarfile's ``data``
-  filter as a second layer. The fetched directory is mode 0700. A stream that is short, lacks the end-of-archive
-  marker, or came from an exporter that exited non-zero is ``transfer-failed``.
+  declared total of member data above the archive byte cap. The limits are
+  enforced inside tarfile's own header parse (a `TarInfo` subclass, members read
+  one at a time), so each header is judged by exactly the parse that uses it:
+  a global PAX header, an oversized or over-numerous extended header, a run of
+  more than `MAX_EXTENSION_CHAIN` extension headers, a PAX key outside
+  ``_ALLOWED_PAX_KEYS`` and more than `MAX_ARCHIVE_MEMBERS` members are all
+  ``refused-archive``; a header tarfile itself cannot read is
+  ``transfer-failed``. Extraction then uses tarfile's ``data`` filter as a
+  second layer. The fetched directory is mode 0700. A stream that is short,
+  lacks the end-of-archive marker, or came from an exporter that exited
+  non-zero is ``transfer-failed``.
 """
 
 from __future__ import annotations
@@ -58,9 +61,23 @@ MAX_ARCHIVE_BYTES = 64 * 1024 * 1024
 #: bare-slug refusal.
 _UNKNOWN_VERB_TEXT = "bare slug dispatch is no longer supported"
 
-#: The most data an extended header (PAX ``x``, GNU long name ``L`` / link
-#: ``K``) may carry. A larger one is refused before tarfile parses it.
-MAX_EXTENDED_HEADER_BYTES = 64 * 1024
+#: The most data one extended header (PAX ``x``, GNU long name ``L`` / link
+#: ``K``) may carry.
+MAX_EXTENDED_HEADER_BYTES = 8 * 1024
+
+#: The most extended-header data an archive may carry in total.
+MAX_EXTENDED_TOTAL_BYTES = 4 * 1024 * 1024
+
+#: The most extension headers that may run in a row before a real member.
+MAX_EXTENSION_CHAIN = 2
+
+#: The PAX keys an archive may carry. ``camp site-export`` emits only ``path``
+#: (for names tarfile cannot fit in the ustar name field); every other key,
+#: including ``size`` and ``GNU.sparse.*``, changes how tarfile frames or
+#: expands a member and is refused.
+_ALLOWED_PAX_KEYS = frozenset({"path"})
+
+_EXTENSION_TYPES = (tarfile.XHDTYPE, tarfile.SOLARIS_XHDTYPE, tarfile.GNUTYPE_LONGNAME, tarfile.GNUTYPE_LONGLINK)
 
 #: The most members an archive may hold.
 MAX_ARCHIVE_MEMBERS = 20_000
@@ -165,100 +182,76 @@ def _map_outcome(outcome: transport.TransportOutcome) -> None:
     raise _Failure("transfer-failed", "the site could not be fetched from the remote host")
 
 
-def _check_member(member: tarfile.TarInfo) -> None:
-    def refuse(why: str) -> NoReturn:
-        raise _Failure("refused-archive", f"the archive was refused: {why}")
+def _refuse(why: str) -> NoReturn:
+    raise _Failure("refused-archive", f"the archive was refused: {why}")
 
+
+def _check_member(member: tarfile.TarInfo) -> None:
     if member.type not in (tarfile.REGTYPE, tarfile.DIRTYPE) or member.issparse():
-        refuse("it holds a member that is neither a plain file nor a directory")
-    if any(key.startswith("GNU.sparse.") for key in member.pax_headers):
-        refuse("it holds a member with GNU sparse headers")
+        _refuse("it holds a member that is neither a plain file nor a directory")
     name = member.name
     if not name or name.startswith("/") or "\\" in name or "\0" in name:
-        refuse("it holds a member with an unsafe name")
+        _refuse("it holds a member with an unsafe name")
     segments = name[:-1].split("/") if name.endswith("/") else name.split("/")
     if any(seg in ("", ".", "..") for seg in segments):
-        refuse("it holds a member with an unsafe name")
+        _refuse("it holds a member with an unsafe name")
 
 
-def _tar_number(field: bytes) -> int:
-    if field[0] in (0o200, 0o377):
-        n = int.from_bytes(field[1:], "big")
-        return n - (1 << (8 * (len(field) - 1))) if field[0] == 0o377 else n
-    return int(field.strip(b"\0 ") or b"0", 8)
+class _Limits:
+    """The caps one extraction enforces, and the running totals it checks them against."""
+
+    def __init__(self, extended_header: int, extended_total: int, chain: int, members: int) -> None:
+        self.extended_header = extended_header
+        self.extended_total = extended_total
+        self.chain = chain
+        self.members = members
+        self.extended_bytes = 0
+        self.run = 0
+        self.seen = 0
 
 
-def _pax_overrides_size(data: bytes) -> bool:
-    pos = 0
-    while pos < len(data):
-        space = data.find(b" ", pos)
-        length = int(data[pos:space])
-        record = data[space + 1 : pos + length]
-        if length <= 0 or record[-1:] != b"\n":
-            raise ValueError("malformed pax record")
-        if record.partition(b"=")[0] == b"size":
-            return True
-        pos += length
-    return False
+def _limited_tarinfo(limits: _Limits) -> type[tarfile.TarInfo]:
+    """A `TarInfo` that judges each header inside tarfile's own parse.
 
+    tarfile calls `_proc_member` on every header with the fields it will itself
+    act on, before it reads that header's payload, so a refusal happens as the
+    bytes are reached and cannot disagree with the parse that follows.
+    """
 
-def _prescan(archive: str, max_extended_header_bytes: int, max_members: int) -> None:
-    """Walk the 512-byte headers using each size field, without tarfile, so
-    nothing hostile reaches tarfile's PAX processing."""
-
-    def refuse(why: str) -> NoReturn:
-        raise _Failure("refused-archive", f"the archive was refused: {why}")
-
-    def truncated() -> NoReturn:
-        raise _Failure("transfer-failed", "the site archive could not be read")
-
-    total = os.path.getsize(archive)
-    members = 0
-    pos = 0
-    with open(archive, "rb") as fh:
-        while pos < total:
-            header = fh.read(_TAR_BLOCK)
-            if len(header) < _TAR_BLOCK:
-                truncated()
-            if not any(header):
-                return
-            try:
-                stored = int(header[148:156].strip(b"\0 "), 8)
-                size = _tar_number(header[124:136])
-            except ValueError:
-                truncated()
-            unsigned = sum(header[:148]) + 8 * 32 + sum(header[156:])
-            signed = sum(b - 256 if b > 127 else b for b in header[:148]) + 8 * 32
-            signed += sum(b - 256 if b > 127 else b for b in header[156:])
-            if stored not in (unsigned, signed) or size < 0:
-                truncated()
-            kind = header[156:157]
+    class LimitedTarInfo(tarfile.TarInfo):
+        def _proc_member(self, tar):
+            kind = self.type
             if kind == tarfile.XGLTYPE:
-                refuse("it holds a global extended header")
+                _refuse("it holds a global extended header")
             if kind == tarfile.GNUTYPE_SPARSE:
-                refuse("it holds a member with GNU sparse headers")
-            extended = kind in (tarfile.XHDTYPE, tarfile.SOLARIS_XHDTYPE, tarfile.GNUTYPE_LONGNAME, tarfile.GNUTYPE_LONGLINK)
-            if extended and size > max_extended_header_bytes:
-                refuse("it holds an oversized extended header")
-            if extended or kind in tarfile.REGULAR_TYPES or kind not in tarfile.SUPPORTED_TYPES:
-                span = -(-size // _TAR_BLOCK) * _TAR_BLOCK
-                if pos + _TAR_BLOCK + size > total:
-                    truncated()
-                if kind in (tarfile.XHDTYPE, tarfile.SOLARIS_XHDTYPE):
-                    try:
-                        overrides = _pax_overrides_size(fh.read(size))
-                    except ValueError:
-                        refuse("it holds a malformed extended header")
-                    if overrides:
-                        refuse("it holds an extended header that overrides a member size")
-                fh.seek(pos + _TAR_BLOCK + span)
-                pos += _TAR_BLOCK + span
+                _refuse("it holds a member with GNU sparse headers")
+            if kind in _EXTENSION_TYPES:
+                limits.run += 1
+                if limits.run > limits.chain:
+                    _refuse("it holds too long a run of extension headers")
+                if self.size > limits.extended_header:
+                    _refuse("it holds an oversized extended header")
+                limits.extended_bytes += self.size
+                if limits.extended_bytes > limits.extended_total:
+                    _refuse("it holds too much extended header data")
             else:
-                pos += _TAR_BLOCK
-            if not extended:
-                members += 1
-                if members > max_members:
-                    refuse("it holds too many members")
+                limits.run = 0
+                limits.seen += 1
+                if limits.seen > limits.members:
+                    _refuse("it holds too many members")
+            return super()._proc_member(tar)
+
+        def _apply_pax_info(self, pax_headers, encoding, errors):
+            if any(key not in _ALLOWED_PAX_KEYS for key in pax_headers):
+                _refuse("it holds an extended header key camp does not accept")
+            super()._apply_pax_info(pax_headers, encoding, errors)
+
+        def _proc_gnusparse_00(self, *args):
+            _refuse("it holds a member with GNU sparse headers")
+
+        _proc_gnusparse_01 = _proc_gnusparse_10 = _proc_gnusparse_00
+
+    return LimitedTarInfo
 
 
 def _has_end_marker(archive: str) -> bool:
@@ -275,14 +268,17 @@ def _extract(
     into: str,
     max_extracted_bytes: int = MAX_ARCHIVE_BYTES,
     max_extended_header_bytes: int = MAX_EXTENDED_HEADER_BYTES,
+    max_extended_total_bytes: int = MAX_EXTENDED_TOTAL_BYTES,
+    max_extension_chain: int = MAX_EXTENSION_CHAIN,
     max_members: int = MAX_ARCHIVE_MEMBERS,
 ) -> None:
+    limits = _Limits(max_extended_header_bytes, max_extended_total_bytes, max_extension_chain, max_members)
     try:
-        _prescan(archive, max_extended_header_bytes, max_members)
-        with tarfile.open(archive, mode="r:") as tar:
-            members = tar.getmembers()
-            for member in members:
+        with tarfile.open(archive, mode="r:", tarinfo=_limited_tarinfo(limits)) as tar:
+            members = []
+            while (member := tar.next()) is not None:
                 _check_member(member)
+                members.append(member)
             if not _has_end_marker(archive):
                 raise _Failure("transfer-failed", "the site archive ended early")
             if sum(m.size for m in members if m.isreg()) > max_extracted_bytes:
@@ -293,7 +289,7 @@ def _extract(
         raise
     except tarfile.FilterError:
         raise _Failure("refused-archive", "the archive was refused: a member failed the extraction filter") from None
-    except (tarfile.TarError, EOFError, OSError):
+    except (tarfile.TarError, EOFError, OSError, RecursionError):
         raise _Failure("transfer-failed", "the site archive could not be read") from None
 
 
