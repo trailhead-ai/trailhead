@@ -7,8 +7,10 @@ whole judgment call:
   running their own local Outpost can open it; "deploy" is a vault commit +
   sync, no build step and no hosting service. Reviewed, committed, durable.
 - **A camp workspace's `sites/` tree** — scoped to one piece of work. Syncs
-  nowhere, is visible only on this machine, and **dies when the workspace is
-  torn down**. That lifetime is the point, not a limitation.
+  nowhere, is never shared with teammates, and **dies when the workspace is
+  torn down**. That lifetime is the point, not a limitation. On a host with a
+  camp host identity its link opens on every host that declares that host in
+  its camp hosts file; with no identity it opens only on this host.
 
 **Default rule:** when you produce an HTML deliverable meant to be *looked at*
 — a report, dashboard, design doc, mockup, runbook, analysis write-up,
@@ -54,10 +56,18 @@ Read the skill for the full contract; the shape is:
 - **Vault result:** `http://127.0.0.1:<sites-port>/<vault>/<slug>/`, printed
   only when the sync actually succeeded. A publish that could not sync is local
   to you — never tell a teammate it is live.
-- **Workspace result:** `http://127.0.0.1:<sites-port>/<group>-<slug>/<site-slug>/`.
-  No sync runs, because there is nothing to share. It is local to this machine
-  and dies with the workspace — say so when you hand back the link, rather than
-  letting it read like a vault URL someone else can open.
+- **Workspace result:** with a camp host identity,
+  `http://127.0.0.1:<sites-port>/@<self>/<group>/<slug>/<site-slug>/` followed by
+  a caveat line. It opens on every host whose camp hosts file declares the
+  publisher as `<self>`, dies with the workspace, and is never shared with
+  teammates. With no identity it is
+  `http://127.0.0.1:<sites-port>/<group>-<slug>/<site-slug>/` plus a notice that
+  it is local to this machine only. No sync runs, because there is nothing to
+  share. Hand back the link with the printed caveat or notice, relay any probe
+  warning verbatim, and name the publishing host, rather than letting it read
+  like a vault URL anyone can open. If the link 404s on a viewing host, check
+  that host's camp hosts file first: it must declare the publisher under that
+  name.
 
 Removal is a plain `rm -rf` of the site's directory under the target's
 `sites/`, followed — for a vault only — by a sync of that vault.
