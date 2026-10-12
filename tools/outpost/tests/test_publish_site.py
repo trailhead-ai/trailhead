@@ -1400,7 +1400,28 @@ def test_publish_blocks_on_the_lock_camp_itself_takes(tmp_path):
 # a hand-mirror of camp's `self_host_name`; the golden table below ties the two
 # together, deriving every expected value by calling camp.
 
-_UNSET = object()
+_GOLDEN_SPECS = [
+    ("valid", 'self_name = "andromeda"\n', {}),
+    ("no-file", None, {}),
+    ("no-key", 'other = "x"\n', {}),
+    ("non-string", "self_name = 5\n", {}),
+    ("empty", 'self_name = ""\n', {}),
+    ("uppercase", 'self_name = "Andromeda"\n', {}),
+    ("leading-hyphen", 'self_name = "-x"\n', {}),
+    ("underscore", 'self_name = "a_b"\n', {}),
+    ("slash", 'self_name = "a/b"\n', {}),
+    ("at-sign", 'self_name = "@a"\n', {}),
+    ("trailing-newline", 'self_name = "andromeda\\n"\n', {}),
+    ("malformed-toml", "self_name = \n", {}),
+    ("bad-utf8", b'self_name = "\xff\xfe"\n', {}),
+    ("camp-config-dir", 'self_name = "viaconfigdir"\n', {"layout": "camp_dir"}),
+    ("camp-config-dir-relative", 'self_name = "rel"\n', {"layout": "relative"}),
+    ("xdg-config-home", 'self_name = "viaxdg"\n', {"layout": "xdg"}),
+    ("home-only", 'self_name = "viahome"\n', {}),
+    ("empty-camp-config-dir-falls-through", 'self_name = "fall"\n', {"env_extra": {"CAMP_CONFIG_DIR": ""}}),
+]
+
+_GOLDEN_IDS = [case_id for case_id, _content, _opts in _GOLDEN_SPECS]
 
 
 def _golden_cases(tmp_path: Path):
@@ -1432,33 +1453,9 @@ def _golden_cases(tmp_path: Path):
             env.update(env_extra)
         cases.append((case_id, env))
 
-    case("valid", 'self_name = "andromeda"\n')
-    case("no-file")
-    case("no-key", 'other = "x"\n')
-    case("non-string", "self_name = 5\n")
-    case("empty", 'self_name = ""\n')
-    case("uppercase", 'self_name = "Andromeda"\n')
-    case("leading-hyphen", 'self_name = "-x"\n')
-    case("underscore", 'self_name = "a_b"\n')
-    case("slash", 'self_name = "a/b"\n')
-    case("at-sign", 'self_name = "@a"\n')
-    case("trailing-newline", 'self_name = "andromeda\\n"\n')
-    case("malformed-toml", "self_name = \n")
-    case("bad-utf8", b'self_name = "\xff\xfe"\n')
-    case("camp-config-dir", 'self_name = "viaconfigdir"\n', layout="camp_dir")
-    case("camp-config-dir-relative", 'self_name = "rel"\n', layout="relative")
-    case("xdg-config-home", 'self_name = "viaxdg"\n', layout="xdg")
-    case("home-only", 'self_name = "viahome"\n')
-    case("empty-camp-config-dir-falls-through", 'self_name = "fall"\n', env_extra={"CAMP_CONFIG_DIR": ""})
+    for case_id, content, opts in _GOLDEN_SPECS:
+        case(case_id, content, **opts)
     return cases
-
-
-_GOLDEN_IDS = [
-    "valid", "no-file", "no-key", "non-string", "empty", "uppercase", "leading-hyphen",
-    "underscore", "slash", "at-sign", "trailing-newline", "malformed-toml", "bad-utf8",
-    "camp-config-dir", "camp-config-dir-relative", "xdg-config-home", "home-only",
-    "empty-camp-config-dir-falls-through",
-]
 
 
 @pytest.mark.parametrize("case_id", _GOLDEN_IDS)
@@ -1509,14 +1506,13 @@ def _first_stdout_line(result) -> str:
     return result.stdout.splitlines()[0]
 
 
-def _workspace_publish(tmp_path, *extra, group="acme", slug="feat-x"):
+def _workspace_publish(tmp_path, *extra, env_extra=None):
     camp_state = tmp_path / "camp-state"
-    ws = _make_workspace(camp_state, group=group, slug=slug)
+    ws = _make_workspace(camp_state)
     source = _write_site(tmp_path / "src", {"index.html": "<html>v1</html>"})
-    result = _run(
-        [str(source), "docs", "--workspace-path", str(ws), *extra],
-        _env(tmp_path, camp_state_dir=camp_state),
-    )
+    env = _env(tmp_path, camp_state_dir=camp_state)
+    env.update(env_extra or {})
+    result = _run([str(source), "docs", "--workspace-path", str(ws), *extra], env)
     return result, ws
 
 
@@ -1587,13 +1583,9 @@ def test_malformed_hosts_file_still_publishes_and_names_the_read_problem(tmp_pat
 
 
 def test_relative_camp_config_dir_does_not_fail_the_publish(tmp_path):
-    camp_state = tmp_path / "camp-state"
-    ws = _make_workspace(camp_state)
-    source = _write_site(tmp_path / "src", {"index.html": "<html></html>"})
-    env = _env(tmp_path, camp_state_dir=camp_state)
-    env["CAMP_CONFIG_DIR"] = "relative-dir"
-
-    result = _run([str(source), "docs", "--workspace-path", str(ws), "--sites-port", "1"], env)
+    result, _ws = _workspace_publish(
+        tmp_path, "--sites-port", "1", env_extra={"CAMP_CONFIG_DIR": "relative-dir"}
+    )
 
     assert result.returncode == 0, result.stderr
     assert _first_stdout_line(result) == "http://127.0.0.1:1/acme-feat-x/docs/"

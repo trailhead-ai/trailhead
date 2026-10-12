@@ -206,8 +206,6 @@ http://127.0.0.1:<sites-port>/@<self>/<group>/<slug>/<site-slug>/
 Opens on any host whose camp hosts file declares self_name = "<self>"; dies with the <group>-<slug> workspace; never shared with teammates.
 ```
 
-That link opens on every host whose camp hosts file declares the publisher as
-`<self>`, still dies with the workspace, and is never shared with teammates.
 The script then probes the link once on this host. A non-200 answer adds a
 warning line carrying the link that works here, and a connection failure adds a
 "couldn't check" note; neither changes the exit code:
