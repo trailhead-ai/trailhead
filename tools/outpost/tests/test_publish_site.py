@@ -1389,3 +1389,352 @@ def test_publish_blocks_on_the_lock_camp_itself_takes(tmp_path):
 
     assert result_holder["cp"].returncode == 0, result_holder["cp"].stderr
     assert (ws / "sites" / "mysite" / "index.html").exists()
+
+
+# ---------------------------------------------------------------------------
+# Host-qualified workspace link
+# ---------------------------------------------------------------------------
+#
+# The workspace link is `/@<self>/<group>/<slug>/<site-slug>/` when this host
+# declares `self_name` in camp's hosts.toml. The script reads that identity with
+# a hand-mirror of camp's `self_host_name`; the golden table below ties the two
+# together, deriving every expected value by calling camp.
+
+_UNSET = object()
+
+
+def _golden_cases(tmp_path: Path):
+    """(id, env) pairs; each env is fully populated on disk under tmp_path."""
+    cases = []
+
+    def case(case_id, content=None, *, layout="home", env_extra=None):
+        root = tmp_path / case_id
+        home = root / "home"
+        home.mkdir(parents=True)
+        env = {"HOME": str(home)}
+        if layout == "home":
+            cfg = home / ".config" / "camp"
+        elif layout == "xdg":
+            cfg = root / "xdg" / "camp"
+            env["XDG_CONFIG_HOME"] = str(root / "xdg")
+        elif layout == "camp_dir":
+            cfg = root / "camp-cfg"
+            env["CAMP_CONFIG_DIR"] = str(cfg)
+            env["XDG_CONFIG_HOME"] = str(root / "ignored-xdg")
+        elif layout == "relative":
+            cfg = root / "relative-cfg"
+            env["CAMP_CONFIG_DIR"] = "relative-cfg"
+        if content is not None:
+            cfg.mkdir(parents=True, exist_ok=True)
+            data = content if isinstance(content, bytes) else content.encode()
+            (cfg / "hosts.toml").write_bytes(data)
+        if env_extra:
+            env.update(env_extra)
+        cases.append((case_id, env))
+
+    case("valid", 'self_name = "andromeda"\n')
+    case("no-file")
+    case("no-key", 'other = "x"\n')
+    case("non-string", "self_name = 5\n")
+    case("empty", 'self_name = ""\n')
+    case("uppercase", 'self_name = "Andromeda"\n')
+    case("leading-hyphen", 'self_name = "-x"\n')
+    case("underscore", 'self_name = "a_b"\n')
+    case("slash", 'self_name = "a/b"\n')
+    case("at-sign", 'self_name = "@a"\n')
+    case("trailing-newline", 'self_name = "andromeda\\n"\n')
+    case("malformed-toml", "self_name = \n")
+    case("bad-utf8", b'self_name = "\xff\xfe"\n')
+    case("camp-config-dir", 'self_name = "viaconfigdir"\n', layout="camp_dir")
+    case("camp-config-dir-relative", 'self_name = "rel"\n', layout="relative")
+    case("xdg-config-home", 'self_name = "viaxdg"\n', layout="xdg")
+    case("home-only", 'self_name = "viahome"\n')
+    case("empty-camp-config-dir-falls-through", 'self_name = "fall"\n', env_extra={"CAMP_CONFIG_DIR": ""})
+    return cases
+
+
+_GOLDEN_IDS = [
+    "valid", "no-file", "no-key", "non-string", "empty", "uppercase", "leading-hyphen",
+    "underscore", "slash", "at-sign", "trailing-newline", "malformed-toml", "bad-utf8",
+    "camp-config-dir", "camp-config-dir-relative", "xdg-config-home", "home-only",
+    "empty-camp-config-dir-falls-through",
+]
+
+
+@pytest.mark.parametrize("case_id", _GOLDEN_IDS)
+def test_self_host_name_agrees_with_camps_own_reader(tmp_path, case_id):
+    """Same name, same None, and 'unreadable' exactly where camp raises. The
+    expected outcome is DERIVED by calling camp's reader, never retyped."""
+    from camp.host.config import self_host_name
+
+    env = dict(_golden_cases(tmp_path))[case_id]
+    mod = _load_module()
+
+    try:
+        expected = ("ok", self_host_name(env=dict(env)))
+    except Exception:
+        expected = ("raises", None)
+
+    try:
+        actual = ("ok", mod._self_host_name(dict(env)))
+    except mod._HostIdentityError:
+        actual = ("raises", None)
+
+    assert actual == expected, case_id
+
+
+def test_golden_table_exercises_both_outcomes_and_every_branch(tmp_path):
+    """Guard against a vacuous golden table: it must include names, None and raises."""
+    from camp.host.config import self_host_name
+
+    outcomes = set()
+    for _case_id, env in _golden_cases(tmp_path):
+        try:
+            value = self_host_name(env=dict(env))
+            outcomes.add("none" if value is None else "name")
+        except Exception:
+            outcomes.add("raises")
+    assert outcomes == {"name", "none", "raises"}
+
+
+def _write_hosts(tmp_path: Path, text: str) -> Path:
+    cfg = tmp_path / "home" / ".config" / "camp"
+    cfg.mkdir(parents=True, exist_ok=True)
+    path = cfg / "hosts.toml"
+    path.write_text(text)
+    return path
+
+
+def _first_stdout_line(result) -> str:
+    return result.stdout.splitlines()[0]
+
+
+def _workspace_publish(tmp_path, *extra, group="acme", slug="feat-x"):
+    camp_state = tmp_path / "camp-state"
+    ws = _make_workspace(camp_state, group=group, slug=slug)
+    source = _write_site(tmp_path / "src", {"index.html": "<html>v1</html>"})
+    result = _run(
+        [str(source), "docs", "--workspace-path", str(ws), *extra],
+        _env(tmp_path, camp_state_dir=camp_state),
+    )
+    return result, ws
+
+
+def test_workspace_publish_with_identity_prints_host_qualified_link_first(tmp_path):
+    _write_hosts(tmp_path, 'self_name = "andromeda"\n')
+
+    result, _ws = _workspace_publish(tmp_path, "--sites-port", "1")
+
+    assert result.returncode == 0, result.stderr
+    assert _first_stdout_line(result) == "http://127.0.0.1:1/@andromeda/acme/feat-x/docs/"
+
+
+def test_workspace_link_follows_the_declared_name_and_the_port(tmp_path):
+    _write_hosts(tmp_path, 'self_name = "macbook"\n')
+
+    result, _ws = _workspace_publish(tmp_path, "--sites-port", "9001")
+
+    assert _first_stdout_line(result) == "http://127.0.0.1:9001/@macbook/acme/feat-x/docs/"
+
+
+def test_identity_caveat_names_the_host_and_the_workspace(tmp_path):
+    _write_hosts(tmp_path, 'self_name = "andromeda"\n')
+
+    result, _ws = _workspace_publish(tmp_path, "--sites-port", "1")
+
+    caveat = result.stdout.splitlines()[1]
+    assert caveat == (
+        'Opens on any host whose camp hosts file declares self_name = "andromeda"; '
+        "dies with the acme-feat-x workspace; never shared with teammates."
+    )
+
+
+def test_no_hosts_file_prints_unprefixed_link_and_only_on_this_host_notice(tmp_path):
+    result, ws = _workspace_publish(tmp_path, "--sites-port", "1")
+
+    hosts_path = tmp_path / "home" / ".config" / "camp" / "hosts.toml"
+    assert result.returncode == 0, result.stderr
+    assert _first_stdout_line(result) == "http://127.0.0.1:1/acme-feat-x/docs/"
+    notice = result.stdout.splitlines()[1]
+    assert "only on this host" in notice
+    assert str(hosts_path) in notice
+    assert "Opens on any host" not in result.stdout
+    assert (ws / "sites" / "docs" / "index.html").exists()
+
+
+def test_hosts_file_without_self_name_prints_the_same_unprefixed_link(tmp_path):
+    _write_hosts(tmp_path, '[hosts.other]\nssh = "o"\n')
+
+    result, _ws = _workspace_publish(tmp_path, "--sites-port", "1")
+
+    assert _first_stdout_line(result) == "http://127.0.0.1:1/acme-feat-x/docs/"
+    assert "only on this host" in result.stdout
+
+
+def test_malformed_hosts_file_still_publishes_and_names_the_read_problem(tmp_path):
+    hosts_path = _write_hosts(tmp_path, 'self_name = "Not Valid"\n')
+
+    result, ws = _workspace_publish(tmp_path, "--sites-port", "1")
+
+    assert result.returncode == 0, result.stderr
+    assert (ws / "sites" / "docs" / "index.html").read_text() == "<html>v1</html>"
+    assert _first_stdout_line(result) == "http://127.0.0.1:1/acme-feat-x/docs/"
+    notice = result.stdout.splitlines()[1]
+    assert "only on this host" in notice
+    assert "no usable camp host identity" in notice
+    assert str(hosts_path) in notice
+    assert "self_name" in notice
+
+
+def test_relative_camp_config_dir_does_not_fail_the_publish(tmp_path):
+    camp_state = tmp_path / "camp-state"
+    ws = _make_workspace(camp_state)
+    source = _write_site(tmp_path / "src", {"index.html": "<html></html>"})
+    env = _env(tmp_path, camp_state_dir=camp_state)
+    env["CAMP_CONFIG_DIR"] = "relative-dir"
+
+    result = _run([str(source), "docs", "--workspace-path", str(ws), "--sites-port", "1"], env)
+
+    assert result.returncode == 0, result.stderr
+    assert _first_stdout_line(result) == "http://127.0.0.1:1/acme-feat-x/docs/"
+    assert "CAMP_CONFIG_DIR" in result.stdout.splitlines()[1]
+
+
+class _Outpost:
+    """A throwaway stdlib HTTP server standing in for Outpost's sites listener."""
+
+    def __init__(self, status: int):
+        import http.server
+
+        outer = self
+        self.paths: list[str] = []
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                outer.paths.append(self.path)
+                if self.path == "/followed/":
+                    self.send_response(200)
+                else:
+                    self.send_response(status)
+                    if 300 <= status < 400:
+                        self.send_header("Location", "/followed/")
+                self.end_headers()
+
+            def log_message(self, *args):
+                pass
+
+        self.server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+        self.port = self.server.server_address[1]
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+
+    def __enter__(self):
+        self.thread.start()
+        return self
+
+    def __exit__(self, *exc):
+        self.server.shutdown()
+        self.server.server_close()
+
+
+def _free_port() -> int:
+    import socket
+
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def test_probe_answering_200_adds_no_warning(tmp_path):
+    _write_hosts(tmp_path, 'self_name = "andromeda"\n')
+
+    with _Outpost(200) as outpost:
+        result, _ws = _workspace_publish(tmp_path, "--sites-port", str(outpost.port))
+
+    assert result.returncode == 0, result.stderr
+    assert outpost.paths == ["/@andromeda/acme/feat-x/docs/"]
+    assert len(result.stdout.splitlines()) == 2
+    assert "warning" not in result.stdout.lower()
+    assert "couldn't" not in result.stdout
+
+
+def test_probe_answering_404_warns_and_offers_the_unprefixed_link(tmp_path):
+    _write_hosts(tmp_path, 'self_name = "andromeda"\n')
+
+    with _Outpost(404) as outpost:
+        result, _ws = _workspace_publish(tmp_path, "--sites-port", str(outpost.port))
+
+    port = outpost.port
+    assert result.returncode == 0, result.stderr
+    assert outpost.paths == ["/@andromeda/acme/feat-x/docs/"]
+    assert _first_stdout_line(result) == f"http://127.0.0.1:{port}/@andromeda/acme/feat-x/docs/"
+    warning = [line for line in result.stdout.splitlines() if line.startswith("warning:")]
+    assert len(warning) == 1
+    assert "404" in warning[0]
+    assert f"http://127.0.0.1:{port}/acme-feat-x/docs/" in warning[0]
+
+
+def test_probe_does_not_follow_redirects(tmp_path):
+    _write_hosts(tmp_path, 'self_name = "andromeda"\n')
+
+    with _Outpost(302) as outpost:
+        result, _ws = _workspace_publish(tmp_path, "--sites-port", str(outpost.port))
+
+    assert result.returncode == 0, result.stderr
+    assert outpost.paths == ["/@andromeda/acme/feat-x/docs/"]
+    assert "warning:" in result.stdout
+    assert "302" in result.stdout
+
+
+def test_probe_with_nothing_listening_notes_it_could_not_check(tmp_path):
+    _write_hosts(tmp_path, 'self_name = "andromeda"\n')
+    port = _free_port()
+
+    result, _ws = _workspace_publish(tmp_path, "--sites-port", str(port))
+
+    assert result.returncode == 0, result.stderr
+    assert _first_stdout_line(result) == f"http://127.0.0.1:{port}/@andromeda/acme/feat-x/docs/"
+    notes = [line for line in result.stdout.splitlines() if "couldn't check" in line]
+    assert len(notes) == 1
+    assert str(port) in notes[0]
+    assert "warning:" not in result.stdout
+
+
+def test_probe_never_runs_without_an_identity(tmp_path):
+    with _Outpost(404) as outpost:
+        result, _ws = _workspace_publish(tmp_path, "--sites-port", str(outpost.port))
+
+    assert result.returncode == 0, result.stderr
+    assert outpost.paths == []
+    assert "warning:" not in result.stdout
+    assert "couldn't check" not in result.stdout
+
+
+def test_probe_never_runs_when_hosts_file_is_malformed(tmp_path):
+    _write_hosts(tmp_path, "self_name = \n")
+
+    with _Outpost(404) as outpost:
+        result, _ws = _workspace_publish(tmp_path, "--sites-port", str(outpost.port))
+
+    assert result.returncode == 0, result.stderr
+    assert outpost.paths == []
+
+
+def test_vault_publish_prints_the_same_link_with_or_without_identity(tmp_path):
+    vault = _make_vault(tmp_path, name="acme")
+    source = _write_site(tmp_path / "src", {"index.html": "<html></html>"})
+    bin_dir = tmp_path / "bin"
+    _write_lore_stub(bin_dir, exit_code=0)
+    env = _env(tmp_path, path=f"{bin_dir}:/usr/bin:/bin")
+    args = [str(source), "docs", "--vault-path", str(vault), "--vault", "acme", "--overwrite"]
+
+    with _Outpost(404) as outpost:
+        args += ["--sites-port", str(outpost.port)]
+        without = _run(args, env)
+        _write_hosts(tmp_path, 'self_name = "andromeda"\n')
+        with_identity = _run(args, env)
+
+    assert without.returncode == 0 and with_identity.returncode == 0
+    assert _url_lines(without.stdout) == _url_lines(with_identity.stdout)
+    assert _url_lines(with_identity.stdout) == [f"http://127.0.0.1:{outpost.port}/acme/docs/"]
+    assert with_identity.stdout == without.stdout
+    assert outpost.paths == []
