@@ -216,6 +216,103 @@ def test_a_field_moved_on_one_side_only_auto_takes_that_side(resolve):
     assert merged["title"] == "Remote Title", "remote moved title alone"
 
 
+def _hist(at: str, reason: str) -> dict:
+    return {"at": at, "by": "t@example.com", "initiated-by": "operator",
+            "reason": reason, "diff": ""}
+
+
+def test_change_history_moved_on_both_sides_merges_ordered_by_at(resolve):
+    e1 = _hist("2026-06-18T09:00:00Z", "e1")
+    e2 = _hist("2026-06-18T11:00:00Z", "e2")
+    e3 = _hist("2026-06-18T10:00:00Z", "e3")
+    base = {"kind": "task", "change-history": [e1]}
+    remote = {"kind": "task", "change-history": [e1, e3]}
+    local = {"kind": "task", "change-history": [e1, e2]}
+
+    merged, conflicts = resolve.merge_sidecars(base, remote, local)
+
+    assert conflicts == [], "change-history is merged, never parked"
+    assert merged["change-history"] == [e1, e3, e2]
+
+
+def test_change_history_moved_on_one_side_only_takes_that_side_without_conflict(resolve):
+    e1 = _hist("2026-06-18T09:00:00Z", "e1")
+    e2 = _hist("2026-06-18T11:00:00Z", "e2")
+    base = {"kind": "task", "change-history": [e1]}
+    remote = {"kind": "task", "change-history": [e1]}
+    local = {"kind": "task", "change-history": [e1, e2]}
+
+    merged, conflicts = resolve.merge_sidecars(base, remote, local)
+
+    assert conflicts == []
+    assert merged["change-history"] == [e1, e2]
+
+
+def test_an_identical_change_history_entry_on_both_sides_appears_once(resolve):
+    e1 = _hist("2026-06-18T09:00:00Z", "e1")
+    shared = _hist("2026-06-18T10:00:00Z", "shared")
+    e2 = _hist("2026-06-18T11:00:00Z", "e2")
+    e3 = _hist("2026-06-18T12:00:00Z", "e3")
+    base = {"kind": "task", "change-history": [e1]}
+    remote = {"kind": "task", "change-history": [e1, shared, e3]}
+    local = {"kind": "task", "change-history": [e1, shared, e2]}
+
+    merged, conflicts = resolve.merge_sidecars(base, remote, local)
+
+    assert conflicts == []
+    assert merged["change-history"] == [e1, shared, e2, e3]
+
+
+def test_change_history_ties_on_at_keep_ours_then_theirs(resolve):
+    e0 = _hist("2026-06-18T09:00:00Z", "e0")
+    ours = _hist("2026-06-18T10:00:00Z", "ours")
+    theirs = _hist("2026-06-18T10:00:00Z", "theirs")
+    base = {"kind": "task", "change-history": [e0]}
+
+    merged, _ = resolve.merge_sidecars(
+        base,
+        {"kind": "task", "change-history": [e0, theirs]},
+        {"kind": "task", "change-history": [e0, ours]},
+    )
+
+    assert merged["change-history"] == [e0, ours, theirs]
+
+
+def test_change_history_merge_keeps_each_sides_own_order_when_a_side_is_out_of_at_order(
+    resolve,
+):
+    from lore.record import store
+
+    a = _hist("2026-06-18T12:00:00Z", "a")
+    b = _hist("2026-06-18T10:00:00Z", "b-skewed")
+    c = _hist("2026-06-18T11:00:00Z", "c")
+    base = {"kind": "task", "change-history": [a]}
+    local = {"kind": "task", "change-history": [a, b]}
+    remote = {"kind": "task", "change-history": [a, c]}
+
+    merged, conflicts = resolve.merge_sidecars(base, remote, local)
+
+    assert conflicts == []
+    assert store.check_change_history_append_only(
+        merged, [local["change-history"], remote["change-history"]]
+    ) == [], "each side stays an order-preserving subsequence"
+    assert sorted(e["reason"] for e in merged["change-history"]) == ["a", "b-skewed", "c"]
+
+
+def test_a_conflicting_change_history_does_not_merge_other_conflicting_fields(resolve):
+    e1 = _hist("2026-06-18T09:00:00Z", "e1")
+    e2 = _hist("2026-06-18T10:00:00Z", "e2")
+    e3 = _hist("2026-06-18T11:00:00Z", "e3")
+    base = {"kind": "task", "status": "open", "change-history": [e1]}
+    remote = {"kind": "task", "status": "done", "change-history": [e1, e3]}
+    local = {"kind": "task", "status": "ready", "change-history": [e1, e2]}
+
+    merged, conflicts = resolve.merge_sidecars(base, remote, local)
+
+    assert [c["slot"] for c in conflicts] == ["status"]
+    assert merged["change-history"] == [e1, e2, e3]
+
+
 def test_a_field_moved_on_both_sides_parks_a_judgment_conflict(resolve):
     base = {"kind": "task", "status": "open"}
     remote = {"kind": "task", "status": "done"}
