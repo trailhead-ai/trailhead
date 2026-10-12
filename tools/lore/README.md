@@ -78,6 +78,7 @@ lore status               Report ruleset drift, host signing state, and any vaul
 lore search <query>       Query all records (KQL-subset: field:value, full-text, and/or/not)
 lore record show <id>     Read a record's body (add --json for the sidecar)
 lore record amend <id>    Correct a record's body in place, even a frozen adr's, recording who/why/diff in its change-history (--reason, --initiated-by operator|agent, body on stdin or --diff)
+lore record history <id>  Print a record's change history, newest first (what amend recorded: when, by whom, who asked, why, the diff)
 lore areas                List the area profiles across every configured non-shared vault
 lore signing enable       Generate (or adopt with --key) a no-passphrase SSH key this host signs vault commits with
 lore signing status       Report whether this host signs vault commits unattended, or what's missing
@@ -113,6 +114,23 @@ identical to the stored one, a missing record, and any `session` record.
 - **Older lore.** A record carrying `change-history` needs a lore new enough to know
   the field. An older lore refuses to write such a record with
   `unsupported key 'change-history'`; pull trailhead to fix it.
+
+### Reading a record's history: `lore record history`
+
+```sh
+lore record history adr/some-decision [--vault NAME]
+```
+
+Prints the record's `change-history` newest first: each entry's date, `by`,
+`initiated-by` and reason, then its diff. A record that was never amended prints
+one line saying so and exits 0; a missing record is a `lore:` error. In a shared
+vault the listing is wrapped in the same `<external-memory>` fence `record show`
+uses, with the reason and diff entity-escaped.
+
+- **`record show --json`** carries the history in `sidecar["change-history"]`.
+- **Plain `record show`** keeps stdout exactly the body. When the record has
+  history it adds one stderr line, ``amended N times; see `lore record history <id>` ``,
+  so a reader knows the body was corrected while piped consumers see no change.
 
 ## Unattended vault-commit signing
 

@@ -394,7 +394,7 @@ def _vault_name_for_root(vault_root) -> str | None:
 
 
 def cmd_record(args) -> int:
-    """Dispatch ``lore record <action>`` — create / update / delete.
+    """Dispatch ``lore record <action>`` — create / update / amend / delete / show / history / rename.
 
     Thin shell over ``record_store``. Routes to the appropriate handler
     by ``record_action``; all handlers are argv→library adapters with no
@@ -411,19 +411,26 @@ def cmd_record(args) -> int:
         return _cmd_record_delete(args)
     if action == "show":
         return _cmd_record_show(args)
+    if action == "history":
+        return _cmd_record_history(args)
     if action == "rename":
         return _cmd_record_rename(args)
     print(
         f"lore record: unknown action {action!r}. "
         f"Use 'lore record create', 'lore record update', "
-        f"'lore record amend', 'lore record rename', 'lore record delete', or 'lore record show'.",
+        f"'lore record amend', 'lore record rename', 'lore record delete', 'lore record history', or 'lore record show'.",
         file=sys.stderr,
     )
     return 1
 
 
 def _render_record(
-    record_id: str, vault_root: str, as_json: bool, *, error_prefix: str = "error: "
+    record_id: str,
+    vault_root: str,
+    as_json: bool,
+    *,
+    error_prefix: str = "error: ",
+    history_note: bool = False,
 ) -> int:
     """Locate ``record_id`` in ``vault_root`` and print it; shared by the readers.
 
@@ -460,6 +467,13 @@ def _render_record(
     index is a record rendered untrusted here. Path-aliased config entries that
     disagree about it refuse to render rather than pick one — a wrong guess
     would hand shared content over as the operator's own.
+
+    **The history note.** ``--json`` already carries ``change-history`` inside
+    ``sidecar`` (entity-escaped in a shared vault with the rest of it). Plain
+    mode keeps stdout exactly as it was; with ``history_note`` (``record show``
+    sets it, ``session show`` does not) a record that has been amended also gets
+    one stderr line, ``amended N times; see `lore record history <id>```, so a
+    reader knows the body was corrected while a piped consumer sees no change.
     """
     from ..record import store as record_store_mod
     from ..search import xml_escape
@@ -517,6 +531,102 @@ def _render_record(
         )
     else:
         sys.stdout.write(body)
+    if history_note and not as_json:
+        count = len(_read_change_history(loc.sidecar_path))
+        if count:
+            print(
+                f"amended {count} times; see `lore record history {record_id}`",
+                file=sys.stderr,
+            )
+    return 0
+
+
+def _read_change_history(sidecar_path) -> list:
+    """The raw ``change-history`` list of a sidecar file; ``[]`` if absent or unreadable."""
+    if not sidecar_path.exists():
+        return []
+    try:
+        history = json.loads(sidecar_path.read_text(encoding="utf-8")).get(
+            "change-history"
+        )
+    except (OSError, ValueError, AttributeError):
+        return []
+    return history if isinstance(history, list) else []
+
+
+def _format_history(record_id: str, history: list) -> list[str]:
+    """Lines of the newest-first listing: each entry's header, then its diff."""
+    if not history:
+        return [f"{record_id} has no change history."]
+    lines: list[str] = []
+    for entry in reversed(history):
+        if not isinstance(entry, dict):
+            continue
+        if lines:
+            lines.append("")
+        lines.append(f"at: {entry.get('at', '')}")
+        lines.append(f"by: {entry.get('by', '')}")
+        lines.append(f"initiated-by: {entry.get('initiated-by', '')}")
+        lines.append(f"reason: {entry.get('reason', '')}")
+        lines.append("diff:")
+        lines.extend(str(entry.get("diff", "")).rstrip("\n").split("\n"))
+    return lines
+
+
+def _cmd_record_history(args) -> int:
+    """``lore record history <kind>/<name> [--vault NAME]`` — a record's change history.
+
+    Prints the ``change-history`` ``record amend`` appends, newest first: each
+    entry's ``at``, ``by``, ``initiated-by`` and ``reason``, then its diff. A
+    record with no history prints one line saying so and exits 0. A malformed id
+    or missing record → non-zero + ``lore: <msg>`` on stderr, no traceback.
+    ``--vault NAME`` is resolved by :func:`_resolve_named_vault` exactly as
+    ``record show --vault`` does; omitting it scans like ``record show``.
+
+    **Shared-layer fence.** In a shared vault the reason and the diff are text
+    this operator did not author, so the whole listing travels through
+    ``xml_escape.wrap_shared`` — the channel ``record show`` uses — which
+    entity-escapes it and cannot be closed early by a ``</external-memory>``
+    inside an entry. Trust comes from :func:`_vault_trust`.
+    """
+    from ..record import store as record_store_mod
+    from ..search import xml_escape
+
+    record_id = _require_record_id(args)
+    if record_id is None:
+        return 1
+
+    vault_name = getattr(args, "vault", None)
+    if vault_name:
+        named_vault = _resolve_named_vault(vault_name)
+        if named_vault is None:
+            return 1
+        vault_root = str(named_vault.path)
+    else:
+        vault_root = _resolve_record_op_vault(record_id, args)
+
+    try:
+        loc = record_store_mod.locate_record(record_id, vault_root=vault_root)
+    except (
+        record_store_mod.RecordNotFoundError,
+        record_store_mod.InvalidRecordIdError,
+    ) as exc:
+        print(f"lore: {exc}", file=sys.stderr)
+        return 1
+    except Exception as exc:
+        print(f"lore: record history failed: {exc}", file=sys.stderr)
+        return 1
+
+    try:
+        trust_name, shared_flag = _vault_trust(vault_root)
+    except _AliasedTrustConflict as exc:
+        print(f"lore: {exc}", file=sys.stderr)
+        return 1
+
+    lines = _format_history(record_id, _read_change_history(loc.sidecar_path))
+    if shared_flag != 0:
+        lines = xml_escape.wrap_shared(trust_name, lines)
+    sys.stdout.write("\n".join(lines) + "\n")
     return 0
 
 
@@ -555,11 +665,15 @@ def _cmd_record_show(args) -> int:
         if named_vault is None:
             return 1
         return _render_record(
-            record_id, str(named_vault.path), as_json, error_prefix="lore: "
+            record_id,
+            str(named_vault.path),
+            as_json,
+            error_prefix="lore: ",
+            history_note=True,
         )
 
     vault_root = _resolve_record_op_vault(record_id, args)
-    return _render_record(record_id, vault_root, as_json)
+    return _render_record(record_id, vault_root, as_json, history_note=True)
 
 
 def _cmd_record_delete(args) -> int:
@@ -2283,6 +2397,28 @@ def add_record_subparser(sub) -> None:
              "referring records are listed.",
     )
     p_record_delete.set_defaults(func=cmd_record)
+
+    p_record_history = p_record_sub.add_parser(
+        "history",
+        help="Print a record's change history, newest first",
+        description="Print the change-history 'record amend' appends to a record, "
+                    "newest first: when, by whom, who asked, why, and the diff.",
+    )
+    p_record_history.add_argument(
+        "record_id",
+        metavar="RECORD_ID",
+        help="The record ID to read (<kind>/<name>)",
+    )
+    p_record_history.add_argument(
+        "--vault", dest="vault", default=None, metavar="NAME",
+        help="Read the record from exactly this configured vault by name, "
+             "instead of scanning every vault in config order.",
+    )
+    p_record_history.add_argument("--repo", default=None, help=argparse.SUPPRESS)
+    p_record_history.add_argument("--product", default=None, help=argparse.SUPPRESS)
+    p_record_history.add_argument("--suite", default=None, help=argparse.SUPPRESS)
+    p_record_history.add_argument("--team", default=None, help=argparse.SUPPRESS)
+    p_record_history.set_defaults(func=cmd_record)
 
     p_record_show = p_record_sub.add_parser(
         "show",
