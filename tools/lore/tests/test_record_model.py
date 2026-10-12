@@ -632,10 +632,25 @@ def _kql_module():
 
 
 def test_reserved_label_keys_is_a_frozenset_union_of_both_sources():
-    """The reserved set is exactly ``KINDS | VALID_FIELDS`` — derived, not listed."""
+    """The reserved set is exactly ``KINDS | VALID_FIELDS`` plus the sidecar-only
+    ``change-history`` field — derived, not listed."""
     mod = rm()
     assert isinstance(mod.RESERVED_LABEL_KEYS, frozenset)
-    assert mod.RESERVED_LABEL_KEYS == mod.KINDS | frozenset(_kql_module().VALID_FIELDS)
+    assert mod.RESERVED_LABEL_KEYS == (
+        mod.KINDS | frozenset(_kql_module().VALID_FIELDS) | {"change-history"}
+    )
+
+
+@pytest.mark.parametrize("field", ["labels", "annotations"])
+def test_change_history_map_key_is_refused_pointing_at_amend(field):
+    result = rm().validate(_base_sidecar_with(**{field: {"change-history": "x"}}))
+    assert len(result.errors) == 1
+    assert "change-history" in result.errors[0]
+    assert "lore record amend" in result.errors[0]
+
+
+def test_other_annotation_keys_stay_legal():
+    assert rm().validate(_base_sidecar_with(annotations={"area": "x"})).errors == []
 
 
 def test_every_record_kind_is_reserved_as_a_label_key():
@@ -788,6 +803,7 @@ _EXECUTABLE_ALTERNATIVES = (
     "--status ",
     "--keyword ",
     "--annotation ",
+    "lore record amend",
 )
 
 

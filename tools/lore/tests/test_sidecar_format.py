@@ -511,3 +511,20 @@ def test_reformat_leaves_json_outside_the_kind_directories_alone(tmp_path):
 
     assert r.returncode == 0, r.stderr
     assert foreign.read_text() == raw, "a non-record JSON file is not lore's to rewrite"
+
+
+def test_reformat_preserves_change_history_entries_and_order(tmp_path):
+    vault, state = _seeded_vault(tmp_path)
+    history = [
+        {"at": f"2026-06-18T09:0{i}:00Z", "by": "t@example.com", "initiated-by": "agent",
+         "reason": f"reason {i}", "diff": "--- a\n+++ b\n"}
+        for i in range(2)
+    ]
+    path = next(vault.glob("spec/alpha-rec.json"))
+    sidecar = json.loads(path.read_text())
+    sidecar["change-history"] = history
+    path.write_text(json.dumps(sidecar, sort_keys=True, separators=(",", ":")))
+
+    assert run_cli(["vault", "reformat"], vault=vault, state_dir=state).returncode == 0
+
+    assert json.loads(path.read_text())["change-history"] == history

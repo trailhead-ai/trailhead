@@ -52,6 +52,17 @@ the index no longer resolves — the *safe* direction (no data loss; the new cop
 durable and indexed), self-healing via ``lore reindex``. Callers holding the old
 ID must re-read.
 
+**Append-only amendment history.** A sidecar's ``change-history`` only grows:
+:func:`validate_stamp_neutralize` — the pre-write step every sidecar writer runs
+(``validate_and_write``, the scope-relocation update and rename before
+``move_record``, and ``lore resolve``'s settle) — calls
+:func:`check_change_history_append_only` and raises
+:class:`RecordValidationError` when a prior list is not an order-preserving
+subsequence of the new one, before any file is touched. The prior is the stored
+sidecar, read under the vault write lock; ``prior_histories`` overrides it for
+``lore resolve``, which passes both sides' histories. ``lore vault reformat`` and
+the session store never change the field.
+
 **Amendment diffs.** :func:`make_unified_diff` produces the ``diff`` string stored
 in a sidecar ``change-history`` entry (see ``record.model`` for the field's
 contract); it is the exact inverse of :func:`apply_unified_diff`.
@@ -726,10 +737,57 @@ def index_transaction():
 # ---------------------------------------------------------------------------
 
 
+def _change_history_of(sidecar: object) -> list[Any]:
+    """The ``change-history`` list of a parsed sidecar; ``[]`` if absent or not a list."""
+    if not isinstance(sidecar, dict):
+        return []
+    history = sidecar.get("change-history")
+    return history if isinstance(history, list) else []
+
+
+def _read_stored_change_history(sidecar_path: Path) -> list[Any]:
+    """The history on disk at *sidecar_path*; ``[]`` for a missing or unparseable file."""
+    try:
+        existing = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    return _change_history_of(existing)
+
+
+def _is_subsequence(prior: list[Any], new: list[Any]) -> bool:
+    remaining = iter(new)
+    return all(any(entry == candidate for candidate in remaining) for entry in prior)
+
+
+def check_change_history_append_only(
+    new_sidecar: dict[str, Any],
+    prior_histories: list[list[Any]],
+) -> list[str]:
+    """Refusals (empty when fine) for a ``change-history`` that loses a prior entry.
+
+    The rule: every list in *prior_histories* must be an order-preserving
+    subsequence of the new list — each prior entry survives byte-identical and
+    in its relative order; new entries may land anywhere. A sidecar with no
+    prior entries is unconstrained. Pure; the caller decides where the priors
+    come from (the stored sidecar for an ordinary write, both sides for a
+    ``lore resolve`` settle).
+    """
+    new = _change_history_of(new_sidecar)
+    for prior in prior_histories:
+        if _is_subsequence(prior, new):
+            continue
+        return [
+            "key 'change-history' is append-only: a prior entry was dropped, edited"
+            " or reordered — use `lore record amend` to add an entry"
+        ]
+    return []
+
+
 def validate_stamp_neutralize(
     location: RecordLocation,
     sidecar: dict[str, Any],
     body: str,
+    prior_histories: list[list[Any]] | None = None,
 ) -> tuple[dict[str, Any], str]:
     """Validate + provenance-stamp the sidecar and neutralize the body's fences.
 
@@ -747,6 +805,16 @@ def validate_stamp_neutralize(
          sidecar at ``location`` otherwise), ``updated-at``/``-by`` re-stamped.
       4. Neutralize ``<external-memory>`` fences in the body.
 
+    **``change-history`` is append-only**, enforced here because every sidecar
+    writer passes through this step before touching a file:
+    :func:`check_change_history_append_only` refuses a new history that does not
+    keep each prior list as an order-preserving subsequence. The prior is the
+    sidecar stored at ``location`` unless *prior_histories* names the baselines
+    explicitly — ``lore resolve`` does, because its on-disk sidecar may be the
+    conflicted working-tree file and the settled record must keep both sides'
+    entries. A refusal raises :class:`RecordValidationError` before any file is
+    touched.
+
     Returns ``(stamped_sidecar, safe_body)``.
     """
     # 1 — validation (pure; never raises).
@@ -754,6 +822,15 @@ def validate_stamp_neutralize(
     if result.errors:
         raise RecordValidationError(list(result.errors))
     normalized = result.sidecar
+
+    priors = (
+        prior_histories
+        if prior_histories is not None
+        else [_read_stored_change_history(location.sidecar_path)]
+    )
+    history_errors = check_change_history_append_only(normalized, priors)
+    if history_errors:
+        raise RecordValidationError(history_errors)
 
     # 2 — provenance is required and cannot be defaulted.
     email = resolve_committer_email()
@@ -831,13 +908,16 @@ def validate_and_write(
     Returns the vault-relative ``RecordId``.
     """
     _assert_session_destination(location, env)
-    stamped, safe_body = validate_stamp_neutralize(location, sidecar, body)
 
-    # Steps 5-6 are the destination vault's critical section: a concurrent writer
-    # must not interleave between the text write and the index upsert. Reentrant,
-    # so a caller already holding this vault's lock (``record create``, which also
-    # needs the preceding ``place_record`` inside it) is not blocked by itself.
+    # Validation reads the stored sidecar (the append-only baseline), so it runs
+    # inside the destination vault's critical section with the writes: a
+    # concurrent writer must not interleave between the check, the text write and
+    # the index upsert. Reentrant, so a caller already holding this vault's lock
+    # (``record create``, which also needs the preceding ``place_record`` inside
+    # it) is not blocked by itself.
     with locking.vault_write_lock(location.vault_root):
+        stamped, safe_body = validate_stamp_neutralize(location, sidecar, body)
+
         # 5 — durable text first (atomic). Body before sidecar; both atomic.
         sidecar_text = sidecar_format.dumps(stamped)
         write_temp_then_rename(location.body_path, safe_body)
