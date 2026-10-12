@@ -78,7 +78,7 @@ def _refused(vault, state, rid, r, *needles):
 
 
 # ---------------------------------------------------------------------------
-# AC: amend writes the body, past the ADR freeze
+# Amend writes the body, past the ADR freeze
 # ---------------------------------------------------------------------------
 
 
@@ -151,7 +151,7 @@ def test_amend_with_diff_applies_the_diff_to_the_stored_body(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# AC: the change-history entries
+# The change-history entries
 # ---------------------------------------------------------------------------
 
 
@@ -212,7 +212,7 @@ def test_diff_is_computed_between_the_stored_fence_neutralized_bodies(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# AC: refusals — non-zero, a message naming the fix, nothing written
+# Refusals — non-zero, a message naming the fix, nothing written
 # ---------------------------------------------------------------------------
 
 
@@ -324,7 +324,7 @@ def test_session_record_is_refused(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# AC: every other guard still runs
+# Every other guard still runs
 # ---------------------------------------------------------------------------
 
 
