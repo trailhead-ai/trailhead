@@ -19,7 +19,11 @@ exactly one side → that side is taken silently; moved on neither / to the same
 value → no decision to make; moved on BOTH sides → a judgment conflict keyed
 ``(record-id, slot)``. The one exception is the volatile ``updated-at`` /
 ``updated-by`` pair, which always takes the newer ``updated-at`` with
-``updated-by`` following it, and is never reported. ``labels`` and ``related``
+``updated-by`` following it, and is never reported. ``change-history`` is the one
+list that IS merged when both sides moved it: an append-only log has no
+judgment to make, so the result is the union of both sides' entries, each once,
+ordered by ``at`` (ours before theirs on a tie) — see ``_merge_change_history``.
+``labels`` and ``related``
 are NOT special-cased into a union — a both-sides edit there is judgment like any
 other, because a union invents a state neither device asked for.
 
@@ -312,6 +316,8 @@ def merge_sidecars(
             winner = loc  # local moved alone
         elif loc == b:
             winner = r  # remote moved alone
+        elif key == "change-history" and isinstance(r, list) and isinstance(loc, list):
+            winner = _merge_change_history(ours=loc, theirs=r)
         else:
             conflicts.append({
                 "slot": key,
@@ -324,6 +330,33 @@ def merge_sidecars(
         if winner is not _ABSENT:
             merged[key] = winner
     return merged, conflicts
+
+
+def _merge_change_history(ours: list, theirs: list) -> list:
+    """Union two ``change-history`` lists, ordered by ``at``, ours before theirs on a tie.
+
+    A stable two-way merge that walks each list in its own order, so each side
+    stays an order-preserving subsequence of the result even when its own
+    entries are not monotonic in ``at`` — the property the append-only check
+    enforces on the write. An entry exactly equal to one already emitted is
+    collapsed.
+    """
+
+    def at(entry: Any) -> str:
+        return str(entry.get("at", "")) if isinstance(entry, dict) else ""
+
+    merged: list = []
+    i = j = 0
+    while i < len(ours) or j < len(theirs):
+        if j >= len(theirs) or (i < len(ours) and at(ours[i]) <= at(theirs[j])):
+            entry = ours[i]
+            i += 1
+        else:
+            entry = theirs[j]
+            j += 1
+        if entry not in merged:
+            merged.append(entry)
+    return merged
 
 
 def _merge_volatile(base: dict | None, remote: dict, local: dict) -> dict:
