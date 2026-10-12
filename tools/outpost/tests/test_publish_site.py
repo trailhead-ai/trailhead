@@ -1558,7 +1558,7 @@ def test_no_hosts_file_prints_unprefixed_link_and_only_on_this_host_notice(tmp_p
     notice = result.stdout.splitlines()[1]
     assert "only on this host" in notice
     assert str(hosts_path) in notice
-    assert "Opens on any host" not in result.stdout
+    assert "any host" not in result.stdout.lower()
     assert (ws / "sites" / "docs" / "index.html").exists()
 
 
