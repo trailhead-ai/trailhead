@@ -18,14 +18,23 @@ successful publish this target runs ``lore sync`` — see below.
 
 **Workspace target** (``--workspace-path``): the resolved path must be
 ``<campStateRoot>/<group>/worktrees/<slug>``. The site is addressed as
-``/<group>-<slug>/<site-slug>/``, runs no ``lore sync`` (there is nothing to
+``/@<self>/<group>/<slug>/<site-slug>/`` when this host declares a camp
+identity (``self_name`` in camp's ``hosts.toml``), else ``/<group>-<slug>/<site-slug>/``;
+it runs no ``lore sync`` (there is nothing to
 share — a workspace syncs nowhere and disappears with the workspace), and
 takes camp's own per-slug ``fcntl.flock`` lock around the write so a publish
 can never race a `camp remove` teardown into a half-swapped or resurrected
-``sites/`` tree. Its success output names the workspace the link dies with and
-states the link is local to this machine — sharing happens by copying printed
-terminal text, not from a cockpit badge, so a workspace link must never look
-like a vault one.
+``sites/`` tree. With an identity, stdout is the host-qualified link followed by
+a caveat line (the link opens on any host declaring ``<self>``, dies with the
+workspace, is never shared with teammates), and the script then probes that
+link once on loopback (about 2 s, no redirects): a non-200 adds a warning with
+the un-prefixed link that works here, a connection error or timeout adds a
+"couldn't check" note, and the exit code is never affected. With no identity
+(or an unreadable or malformed ``hosts.toml``, which never fails the publish)
+it prints the un-prefixed link plus a notice that the link works only on this
+host, naming the ``hosts.toml`` path or the read problem; no probe runs.
+Sharing happens by copying printed terminal text, not from a cockpit badge, so
+a workspace link must never look like a vault one.
 
 Publish is atomic, and so is a replace: staging happens off to the side, and
 an existing site is renamed aside before the staged tree is renamed into its
@@ -59,10 +68,12 @@ Python package, or on ``trailhead``: the vaults-root check mirrors lore's own
 environment-only fallback (``$XDG_STATE_HOME/lore/vaults``, or
 ``$HOME/.local/state/lore/vaults``) and the camp-state-root check mirrors
 ``trailhead.paths.state_dir("camp")`` (``CAMP_STATE_DIR``, else
-``$XDG_STATE_HOME/camp``, else ``$HOME/.local/state/camp``) — both hand-mirrors
+``$XDG_STATE_HOME/camp``, else ``$HOME/.local/state/camp``), and the host
+identity read mirrors ``trailhead.paths.config_dir("camp")`` plus camp's
+``self_host_name`` — all hand-mirrors
 so this script runs standalone wherever ``python3`` and the ``lore`` CLI do.
 This is a deliberate, pinned duplication: importing camp or trailhead is not
-an option (see above), so the two resolvers are kept honest by a golden
+an option (see above), so the resolvers are kept honest by a golden
 agreement test in this skill's test suite instead of a shared import — a
 silent divergence would not fail loudly, it would publish into a directory
 nothing scans.
@@ -79,11 +90,16 @@ import stat
 import subprocess
 import sys
 import tempfile
+import tomllib
+import urllib.error
+import urllib.request
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Callable, Mapping
 
 _SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
+_HOST_NAME_RE = re.compile(r"[a-z0-9][a-z0-9-]*")
+_PROBE_TIMEOUT_SECONDS = 2.0
 _WARN_BYTES = 5 * 1024 * 1024
 _DEFAULT_SITES_PORT = 7314
 
@@ -177,6 +193,59 @@ def _camp_state_root(env: Mapping[str, str]) -> Path:
         return Path(base) / "camp"
     home = env.get("HOME") or str(Path.home())
     return Path(home) / ".local" / "state" / "camp"
+
+
+class _HostIdentityError(Exception):
+    """This host's camp identity could not be read from hosts.toml."""
+
+
+def _camp_config_dir(env: Mapping[str, str]) -> Path:
+    """Return the camp config dir implied by *env*.
+
+    A hand mirror of ``trailhead.paths.config_dir("camp", env=env)``: an
+    absolute ``CAMP_CONFIG_DIR`` wins, else ``XDG_CONFIG_HOME/camp``, else
+    ``$HOME/.config/camp``. A non-empty relative override is refused, exactly
+    as trailhead refuses it, and so is a missing ``HOME``.
+    """
+    for var in ("CAMP_CONFIG_DIR", "XDG_CONFIG_HOME"):
+        value = env.get(var, "")
+        if not value:
+            continue
+        if not Path(value).is_absolute():
+            raise _HostIdentityError(f"{var} is a relative path ({value!r}); it must be absolute")
+        return Path(value) if var == "CAMP_CONFIG_DIR" else Path(value) / "camp"
+    home = env.get("HOME")
+    if not home:
+        raise _HostIdentityError("HOME is not set, so the camp config directory cannot be resolved")
+    return Path(home) / ".config" / "camp"
+
+
+def _self_host_name(env: Mapping[str, str]) -> str | None:
+    """Return this host's declared ``self_name``, or None if it has none.
+
+    A hand mirror of camp's ``self_host_name`` (``camp/host/config.py``),
+    pinned by a golden agreement test: no file or no ``self_name`` key is None;
+    anything camp raises on raises ``_HostIdentityError`` here. The name is
+    matched with ``fullmatch`` so a trailing newline is refused.
+    """
+    path = _camp_config_dir(env) / "hosts.toml"
+    if not path.is_file():
+        return None
+    try:
+        raw = tomllib.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError) as exc:
+        raise _HostIdentityError(f"{path}: cannot read file — {exc}") from exc
+    except (tomllib.TOMLDecodeError, RecursionError) as exc:
+        raise _HostIdentityError(f"{path}: TOML parse error — {exc}") from exc
+    if "self_name" not in raw:
+        return None
+    name = raw["self_name"]
+    if not isinstance(name, str) or not _HOST_NAME_RE.fullmatch(name):
+        raise _HostIdentityError(
+            f"{path}: field 'self_name' must be a non-empty string of lowercase "
+            f"letters, digits and hyphens, not starting with a hyphen (got {name!r})"
+        )
+    return name
 
 
 def _parse_workspace_path(workspace_path: Path, camp_root: Path) -> tuple[str, str]:
@@ -721,6 +790,17 @@ def _publish_to_workspace(
         print(f"error: {exc}", file=sys.stderr)
         return 1
 
+    identity: str | None = None
+    try:
+        identity = _self_host_name(env)
+        if identity is None:
+            identity_problem = (
+                "no camp host identity: no self_name in "
+                f"{_camp_config_dir(env) / 'hosts.toml'}"
+            )
+    except _HostIdentityError as exc:
+        identity_problem = f"no usable camp host identity: {exc}"
+
     workspace_path = args.workspace_path.resolve()
     sites_dir = workspace_path / "sites"
     target_dir = sites_dir / args.slug
@@ -760,9 +840,54 @@ def _publish_to_workspace(
             print(f"error: publish failed: {exc}", file=sys.stderr)
             return 1
 
-    print(f"http://127.0.0.1:{args.sites_port}/{key}/{args.slug}/")
-    print(f"Local to this machine only — this link dies with the {key} workspace.")
+    base = f"http://127.0.0.1:{args.sites_port}"
+    plain_link = f"{base}/{key}/{args.slug}/"
+    if identity is None:
+        print(plain_link)
+        print(
+            "Local to this machine only — this link works only on this host "
+            f"({identity_problem}) and dies with the {key} workspace."
+        )
+        return 0
+
+    qualified_link = f"{base}/@{identity}/{group}/{ws_slug}/{args.slug}/"
+    print(qualified_link)
+    print(
+        f'Opens on any host whose camp hosts file declares self_name = "{identity}"; '
+        f"dies with the {key} workspace; never shared with teammates."
+    )
+    _probe_own_link(qualified_link, plain_link, args.sites_port)
     return 0
+
+
+def _probe_own_link(qualified_link: str, plain_link: str, port: int) -> None:
+    """Check once that this host's Outpost serves the link just printed.
+
+    Best-effort: it only adds a line, never changes the exit code. Redirects
+    are not followed, so a 3xx counts as not served.
+    """
+
+    class _NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *args, **kwargs):
+            return None
+
+    opener = urllib.request.build_opener(_NoRedirect)
+    try:
+        with opener.open(qualified_link, timeout=_PROBE_TIMEOUT_SECONDS) as response:
+            status = response.status
+    except urllib.error.HTTPError as exc:
+        status = exc.code
+    except (urllib.error.URLError, OSError):
+        print(
+            f"note: couldn't check the link above — Outpost isn't answering on port {port}."
+        )
+        return
+    if status != 200:
+        print(
+            f"warning: this host's Outpost answered {status} for the link above, so it may "
+            "predate host-qualified links or read a different camp config dir. "
+            f"The link that works here: {plain_link}"
+        )
 
 
 def main(argv: list[str] | None = None, *, env: Mapping[str, str] | None = None) -> int:
