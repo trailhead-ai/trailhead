@@ -2270,6 +2270,22 @@ def test_update_body_change_against_active_adr_rejected_body_unchanged_on_disk(t
     assert _find_body(vault, rid) == body
 
 
+def test_update_active_adr_refusal_is_the_guard_message_and_points_at_amend(tmp_path):
+    vault, state = _make_vault(tmp_path)
+    body = "# Decision\n\nOriginal text.\n"
+    edited = "# Decision\n\nEdited text.\n"
+    rid = _create_adr(vault, state, title="Pointed Decision", status="active", body=body)
+    name = rid.split("/", 1)[1]
+
+    r = _run(["record", "update", rid], vault=vault, state_dir=state, stdin_text=edited)
+
+    emitted = load_script("lore.record.guards").check_active_adr_body_immutable(
+        kind="adr", name=name, prior_status="active", prior_body=body, new_body=edited,
+    )
+    assert f"lore record amend {rid!r}" in emitted
+    assert emitted in r.stderr
+
+
 def test_update_body_change_against_draft_adr_succeeds(tmp_path):
     vault, state = _make_vault(tmp_path)
     rid = _create_adr(vault, state, title="Draft Decision", status="draft",

@@ -1169,6 +1169,55 @@ def test_active_adr_immutable_check_rejects_body_change_not_matching_allowed_exe
     assert "[adr-active-immutable]" in msg
 
 
+def test_active_adr_immutable_message_names_amend_beside_supersession():
+    g = _guards()
+    msg = g.check_active_adr_body_immutable(
+        kind="adr", name="foo", prior_status="active",
+        prior_body="old body", new_body="new body",
+    )
+    assert "lore record amend 'adr/foo'" in msg
+    assert "--supersedes adr/" in msg
+    assert msg.startswith("graph-guard [adr-active-immutable]: ")
+    assert "\n" not in msg
+
+
+def test_graph_dispatcher_threads_allowed_body_into_the_adr_freeze(tmp_path):
+    g = _guards()
+    common = dict(
+        kind="adr", name="foo", sidecar={"kind": "adr", "status": "active"},
+        body="new body", vault_root=str(tmp_path), status_set=None,
+        prior_status="active", prior_body="old body",
+    )
+    allowed, _ = g.evaluate_graph_guards(**common, allowed_body="new body")
+    assert not any("[adr-active-immutable]" in e for e in allowed)
+    other, _ = g.evaluate_graph_guards(**common, allowed_body="some other body")
+    assert any("[adr-active-immutable]" in e for e in other)
+
+
+def test_design_dispatcher_threads_allowed_body_into_the_adr_freeze(tmp_path):
+    g = _guards()
+    common = dict(
+        kind="adr", name="foo", sidecar={"kind": "adr", "status": "active"},
+        body="new body", vault_root=str(tmp_path), status_set=None,
+        prior_status="active", prior_body="old body",
+    )
+    allowed, _ = g.evaluate_design_guards(**common, allowed_body="new body")
+    assert not any("[adr-active-immutable]" in e for e in allowed)
+    other, _ = g.evaluate_design_guards(**common, allowed_body="some other body")
+    assert any("[adr-active-immutable]" in e for e in other)
+
+
+def test_allowed_body_does_not_lift_any_other_graph_guard(tmp_path):
+    g = _guards()
+    errors, _ = g.evaluate_graph_guards(
+        kind="adr", name="foo",
+        sidecar={"kind": "adr", "status": "active", "supersedes": ["adr/foo"]},
+        body="new body", vault_root=str(tmp_path), status_set=None,
+        prior_status="active", prior_body="old body", allowed_body="new body",
+    )
+    assert any("[supersedes-self-edge]" in e for e in errors)
+
+
 def test_compute_stem_rewrite_only_rewrites_the_wikilink():
     g = _guards()
     out = g.compute_stem_rewrite("see [[old-thing]] and other text", "spec", "old-thing", "new-thing")
