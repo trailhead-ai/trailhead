@@ -710,12 +710,8 @@ def write_record(vault: Path, record_id: str, sidecar: dict, body: str) -> None:
     # so the append-only baseline is each side's history as the index stages hold
     # them. A side that is absent or unreadable constrains nothing.
     side_histories = [
-        history
+        store_mod.change_history_of(_load_json_stage(vault, stage, f"{record_id}.json"))
         for stage in (2, 3)
-        for parsed in (_load_json_stage(vault, stage, f"{record_id}.json"),)
-        if isinstance(parsed, dict)
-        for history in (parsed.get("change-history"),)
-        if isinstance(history, list)
     ]
     try:
         stamped, safe_body = store_mod.validate_stamp_neutralize(

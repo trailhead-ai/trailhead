@@ -532,26 +532,13 @@ def _render_record(
     else:
         sys.stdout.write(body)
     if history_note and not as_json:
-        count = len(_read_change_history(loc.sidecar_path))
+        count = len(record_store_mod.read_change_history(loc.sidecar_path))
         if count:
             print(
                 f"amended {count} times; see `lore record history {record_id}`",
                 file=sys.stderr,
             )
     return 0
-
-
-def _read_change_history(sidecar_path) -> list:
-    """The raw ``change-history`` list of a sidecar file; ``[]`` if absent or unreadable."""
-    if not sidecar_path.exists():
-        return []
-    try:
-        history = json.loads(sidecar_path.read_text(encoding="utf-8")).get(
-            "change-history"
-        )
-    except (OSError, ValueError, AttributeError):
-        return []
-    return history if isinstance(history, list) else []
 
 
 def _format_history(record_id: str, history: list) -> list[str]:
@@ -623,7 +610,9 @@ def _cmd_record_history(args) -> int:
         print(f"lore: {exc}", file=sys.stderr)
         return 1
 
-    lines = _format_history(record_id, _read_change_history(loc.sidecar_path))
+    lines = _format_history(
+        record_id, record_store_mod.read_change_history(loc.sidecar_path)
+    )
     if shared_flag != 0:
         lines = xml_escape.wrap_shared(trust_name, lines)
     sys.stdout.write("\n".join(lines) + "\n")
@@ -1976,9 +1965,6 @@ def _cmd_record_update(args) -> int:
     return 0
 
 
-_AMEND_INITIATORS = ("operator", "agent")
-
-
 def _cmd_record_amend(args) -> int:
     """``lore record amend RECORD_ID --reason R --initiated-by operator|agent`` — thin shell.
 
@@ -2018,6 +2004,7 @@ def _cmd_record_amend(args) -> int:
     from contextlib import ExitStack
 
     from .. import locking as locking_mod
+    from ..record import model as record_model_mod
     from ..record import store as record_store_mod
     from . import resolve_state as resolve_state_mod
 
@@ -2043,7 +2030,7 @@ def _cmd_record_amend(args) -> int:
             file=sys.stderr,
         )
         return 1
-    if initiated_by not in _AMEND_INITIATORS:
+    if initiated_by not in record_model_mod.CHANGE_HISTORY_INITIATORS:
         print(
             f"error: --initiated-by must be operator or agent, got {initiated_by!r}",
             file=sys.stderr,
