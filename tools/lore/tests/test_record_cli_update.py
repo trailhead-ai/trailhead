@@ -395,6 +395,24 @@ def test_update_diff_clean_apply_updates_body_and_index(tmp_path):
     assert rows[0][1] == modified
 
 
+def test_update_diff_editing_a_dash_dash_body_line_applies(tmp_path):
+    """A body line starting ``-- `` is body content in a hunk, not a file header."""
+    vault, state = _make_vault(tmp_path)
+    original = "a\n-- old comment\nb\n"
+    record_id = _create(vault, state, body=original)
+
+    modified = "a\n-- new comment\nb\n"
+    r = _run(
+        ["record", "update", record_id, "--diff"],
+        vault=vault,
+        state_dir=state,
+        stdin_text=_make_diff(original, modified),
+    )
+
+    assert r.returncode == 0, r.stderr
+    assert _find_body(vault, record_id) == modified
+
+
 # ===========================================================================
 # CLI: --diff stale hunk → atomic reject
 # ===========================================================================

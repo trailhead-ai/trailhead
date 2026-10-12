@@ -248,12 +248,25 @@ def _validate_hunk_counts(hunk: _Hunk) -> None:
         )
 
 
+def _hunk_is_open(hunk: _Hunk) -> bool:
+    """True while *hunk* still expects body lines per its header counts.
+
+    Only outside an open hunk does a ``--- `` / ``+++ `` line mean a file header;
+    inside one it is a deleted or added body line that itself begins ``-- `` /
+    ``++ ``.
+    """
+    old_seen = sum(1 for ln in hunk.lines if ln and ln[0] in (" ", "-"))
+    new_seen = sum(1 for ln in hunk.lines if ln and ln[0] in (" ", "+"))
+    return old_seen < hunk.old_count or new_seen < hunk.new_count
+
+
 def _parse_hunks(diff: str) -> list[_Hunk]:
     """Parse a unified diff into ``_Hunk`` objects, line endings kept verbatim.
 
     Uses ``diff.splitlines(keepends=True)`` so each hunk line retains its original
     line ending (``\\n`` / ``\\r\\n`` / none). File-header (``--- ``/``+++ ``) lines
-    are skipped. Raises :class:`DiffFormatError` on the concatenated-no-newline
+    before the first hunk and between hunks are skipped; inside a hunk the header
+    counts decide where the body ends, so a body line beginning ``-- `` or ``++ `` is kept. Raises :class:`DiffFormatError` on the concatenated-no-newline
     edge case (via :func:`_validate_hunk_counts`) and on a bare hunk header — see
     :class:`DiffFormatError` for both triggers.
     """
@@ -283,7 +296,7 @@ def _parse_hunks(diff: str) -> list[_Hunk]:
                 f"ranges."
             )
         elif current is not None:
-            if raw_stripped.startswith(("--- ", "+++ ")):
+            if not _hunk_is_open(current) and raw_stripped.startswith(("--- ", "+++ ")):
                 continue
             if raw_stripped.startswith("\\"):
                 # GNU-diff "\ No newline at end of file" marker: applies to the
