@@ -472,7 +472,7 @@ def _render_record(
     ``sidecar`` (entity-escaped in a shared vault with the rest of it). Plain
     mode keeps stdout exactly as it was; with ``history_note`` (``record show``
     sets it, ``session show`` does not) a record that has been amended also gets
-    one stderr line, ``amended N times; see `lore record history <id>```, so a
+    one stderr line, ``amended once; see `lore record history <id>``` (``amended N times; ...`` from two on), so a
     reader knows the body was corrected while a piped consumer sees no change.
     """
     from ..record import store as record_store_mod
@@ -534,8 +534,9 @@ def _render_record(
     if history_note and not as_json:
         count = len(record_store_mod.read_change_history(loc.sidecar_path))
         if count:
+            times = "once" if count == 1 else f"{count} times"
             print(
-                f"amended {count} times; see `lore record history {record_id}`",
+                f"amended {times}; see `lore record history {record_id}`",
                 file=sys.stderr,
             )
     return 0

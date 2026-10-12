@@ -129,7 +129,8 @@ uses, with the reason and diff entity-escaped.
 
 - **`record show --json`** carries the history in `sidecar["change-history"]`.
 - **Plain `record show`** keeps stdout exactly the body. When the record has
-  history it adds one stderr line, ``amended N times; see `lore record history <id>` ``,
+  history it adds one stderr line, ``amended once; see `lore record history <id>` ``
+  (``amended N times; ...`` from two amends on),
   so a reader knows the body was corrected while piped consumers see no change.
 
 ## Unattended vault-commit signing
