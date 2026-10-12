@@ -705,3 +705,30 @@ def test_a_change_history_that_contains_the_other_sides_resolves_to_the_superset
     assert r.returncode == 0, r.stderr
     assert json.loads(r.stdout)["conflicts"] == []
     assert fx.sidecar(record_id)["change-history"] == superset
+
+
+def test_a_settle_that_would_drop_an_entry_the_local_side_holds_is_refused(tmp_path):
+    fx = _Fixture(tmp_path)
+    record_id = fx.create("task", "A Task")
+    e1, e2 = _entry("e1"), _entry("e2", "2026-06-18T10:00:00Z")
+    _set_history(fx.vault, record_id, [e1, e2])
+    fx.publish()
+    fx.clone_device_b()
+
+    path = fx.other / f"{record_id}.json"
+    sidecar = json.loads(path.read_text(encoding="utf-8"))
+    sidecar["change-history"] = [e1]
+    sidecar["status"] = "done"
+    path.write_text(json.dumps(sidecar, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    fx.push_device_b()
+
+    fx.cli(["record", "update", record_id, "--title", "Local Title"], stdin_text="")
+    _commit(fx.vault, "device A edit")
+
+    r = fx.cli(["resolve", "default"])
+
+    assert r.returncode != 0, r.stdout
+    assert "change-history" in r.stderr + r.stdout
+    local_stage = json.loads(_git(fx.vault, "show", f":3:{record_id}.json").stdout)
+    assert [e["reason"] for e in local_stage["change-history"]] == ["e1", "e2"]
+    assert (fx.vault / ".git" / "rebase-merge").exists(), "the rebase was left open, not completed"
