@@ -2765,3 +2765,70 @@ def test_update_refuses_malformed_change_history_naming_the_field(tmp_path):
 
     assert r.returncode != 0
     assert "change-history" in r.stderr
+
+
+# ---------------------------------------------------------------------------
+# change-history is append-only across every update path
+# ---------------------------------------------------------------------------
+
+
+def _two_entry_history():
+    return [dict(_HIST_ENTRY, reason=f"reason {i}") for i in range(2)]
+
+
+def _seeded_with_history(tmp_path):
+    vault, state = _make_vault(tmp_path)
+    record_id = _create(vault, state)
+    history = _two_entry_history()
+    _seed_history(vault, record_id, history)
+    return vault, state, record_id, history
+
+
+def test_full_body_update_keeps_both_history_entries(tmp_path):
+    vault, state, record_id, history = _seeded_with_history(tmp_path)
+
+    r = _run(["record", "update", record_id], vault=vault, state_dir=state,
+             stdin_text="a replaced body\n")
+
+    assert r.returncode == 0, r.stderr
+    assert _find_body(vault, record_id) == "a replaced body\n"
+    assert _find_sidecar(vault, record_id)["change-history"] == history
+
+
+def test_status_and_label_update_keeps_both_history_entries(tmp_path):
+    vault, state, record_id, history = _seeded_with_history(tmp_path)
+
+    r = _run(["record", "update", record_id, "--status", "ready", "--label", "ns/x=1"],
+             vault=vault, state_dir=state)
+
+    assert r.returncode == 0, r.stderr
+    sidecar = _find_sidecar(vault, record_id)
+    assert sidecar["status"] == "ready" and sidecar["labels"] == {"ns/x": "1"}
+    assert sidecar["change-history"] == history
+
+
+def test_scope_relocation_keeps_both_history_entries(tmp_path):
+    vault_a, vault_b, state, config_home = _two_team_config(tmp_path)
+    rid = _create_routed(vault_a, state, config_home, scope_args=["--team", "alpha"])
+    history = _two_entry_history()
+    _seed_history(vault_a, rid, history)
+
+    r = _run_cfg(["record", "update", rid, "--team", "beta"], vault=vault_a, state=state,
+                 config_home=config_home, stdin_text="")
+
+    assert r.returncode == 0, r.stderr
+    assert _find_sidecar(vault_b, rid)["team"] == "beta"
+    assert _find_sidecar(vault_b, rid)["change-history"] == history
+
+
+@pytest.mark.parametrize("flag", ["--label", "--annotation"])
+def test_update_cannot_set_change_history_through_a_map_flag(tmp_path, flag):
+    vault, state, record_id, history = _seeded_with_history(tmp_path)
+    before = (vault / "spec" / f"{record_id.split('/')[1]}.json").read_bytes()
+
+    r = _run(["record", "update", record_id, flag, "change-history=x"],
+             vault=vault, state_dir=state)
+
+    assert r.returncode != 0
+    assert "change-history" in r.stderr and "lore record amend" in r.stderr
+    assert (vault / "spec" / f"{record_id.split('/')[1]}.json").read_bytes() == before

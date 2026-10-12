@@ -608,3 +608,77 @@ def test_a_non_ascii_sites_path_is_auto_settled(tmp_path):
 
     assert r.returncode == 0, r.stderr
     assert (fx.vault / rel).read_text() == "<p>remote</p>\n"
+
+
+# ── change-history is append-only through a settle ────────────────────────
+
+
+def _entry(reason: str) -> dict:
+    return {"at": "2026-06-18T09:00:00Z", "by": "t@example.com",
+            "initiated-by": "operator", "reason": reason, "diff": ""}
+
+
+def _set_history(vault: Path, record_id: str, history: list) -> None:
+    path = vault / f"{record_id}.json"
+    sidecar = json.loads(path.read_text(encoding="utf-8"))
+    sidecar["change-history"] = history
+    path.write_text(json.dumps(sidecar, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _diverge_on_history(fx: _Fixture) -> tuple[str, list, list]:
+    """Both devices move ``change-history`` from the same base entry.
+
+    Device A (the vault under resolution) ends with ``[e0, e1, e2]``; device B
+    with ``[e0, e1b]``. Neither is a subsequence of the other, so the merge is a
+    real conflict, and either side taken alone would lose entries.
+    """
+    record_id = fx.create("task", "A Task")
+    _set_history(fx.vault, record_id, [_entry("e0")])
+    fx.publish()
+    fx.clone_device_b()
+
+    remote = [_entry("e0"), _entry("e1b")]
+    _set_history(fx.other, record_id, remote)
+    fx.push_device_b()
+
+    local = [_entry("e0"), _entry("e1"), _entry("e2")]
+    _set_history(fx.vault, record_id, local)
+    _commit(fx.vault, "device A edit")
+    return record_id, local, remote
+
+
+def test_settling_change_history_toward_either_side_is_refused_and_loses_nothing(tmp_path):
+    fx = _Fixture(tmp_path)
+    record_id, _, _ = _diverge_on_history(fx)
+    report = fx.cli(["resolve", "default", "--json"])
+    assert report.returncode == 0, report.stderr
+    assert [c["slot"] for c in json.loads(report.stdout)["conflicts"]] == ["change-history"]
+
+    for side in ("--remote", "--local"):
+        r = fx.cli(["resolve", "take", record_id, "--slot", "change-history", side])
+
+        assert r.returncode != 0, side
+        assert "change-history" in r.stderr and "append-only" in r.stderr
+        on_disk = (fx.vault / f"{record_id}.json").read_text(encoding="utf-8")
+        assert "e2" in on_disk and "e1b" in on_disk, "both sides' entries are still on disk"
+
+
+def test_settling_change_history_toward_a_side_that_contains_the_other_lands(tmp_path):
+    fx = _Fixture(tmp_path)
+    record_id = fx.create("task", "A Task")
+    base = [_entry("e0")]
+    _set_history(fx.vault, record_id, base)
+    fx.publish()
+    fx.clone_device_b()
+
+    _set_history(fx.other, record_id, [_entry("e0"), _entry("e1")])
+    fx.push_device_b()
+    superset = [_entry("e0"), _entry("e1"), _entry("e2")]
+    _set_history(fx.vault, record_id, superset)
+    _commit(fx.vault, "device A edit")
+    assert fx.cli(["resolve", "default"]).returncode == 0
+
+    r = fx.cli(["resolve", "take", record_id, "--slot", "change-history", "--local"])
+
+    assert r.returncode == 0, r.stderr
+    assert fx.sidecar(record_id)["change-history"] == superset

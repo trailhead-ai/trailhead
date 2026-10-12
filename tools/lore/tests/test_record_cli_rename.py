@@ -1320,3 +1320,55 @@ def test_rename_path_body_change_not_pure_substitution_against_active_adr_is_rej
 
     stored = (vault / "adr" / "referencing-decision.md").read_text(encoding="utf-8")
     assert stored == "see [[spec/old-thing]] here"
+
+
+# ---------------------------------------------------------------------------
+# change-history survives a rename and the reference sweep
+# ---------------------------------------------------------------------------
+
+
+def _history(n):
+    return [
+        {
+            "at": f"2026-06-18T09:0{i}:00Z",
+            "by": "tester@example.com",
+            "initiated-by": "operator",
+            "reason": f"reason {i}",
+            "diff": "",
+        }
+        for i in range(n)
+    ]
+
+
+def _seed_history(install, vault, record_id, history):
+    kind, name = record_id.split("/", 1)
+    path = install.roots[vault] / kind / f"{name}.json"
+    sidecar = json.loads(path.read_text(encoding="utf-8"))
+    sidecar["change-history"] = history
+    path.write_text(json.dumps(sidecar, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def test_rename_keeps_the_renamed_records_history(install):
+    old_id = install.create("default", "adr", "ADR-001: Old Name", body="x")
+    _seed_history(install, "default", old_id, _history(2))
+
+    proc = install.cli(["record", "rename", old_id, "--title", "Old Name"])
+
+    assert proc.returncode == 0, proc.stderr
+    assert install.sidecar("default", "adr/old-name")["change-history"] == _history(2)
+
+
+def test_rename_keeps_the_history_of_a_record_linking_to_it(install):
+    adr_id = install.create("default", "adr", "ADR-001: Old Name", body="x")
+    ref_id = install.create(
+        "other", "spec", "Related Ref", body="see [[adr-001-old-name]]",
+        extra=["--related", "adr=adr-001-old-name"],
+    )
+    _seed_history(install, "other", ref_id, _history(2))
+
+    proc = install.cli(["record", "rename", adr_id, "--title", "Old Name"])
+
+    assert proc.returncode == 0, proc.stderr
+    swept = install.sidecar("other", ref_id)
+    assert swept["related"]["adr"] == ["old-name"], "the sweep did rewrite the linking record"
+    assert swept["change-history"] == _history(2)

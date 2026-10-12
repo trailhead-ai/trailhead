@@ -673,8 +673,21 @@ def write_record(vault: Path, record_id: str, sidecar: dict, body: str) -> None:
         ) from None
     if errors:
         raise ResolveError(f"{record_id}: {'; '.join(errors)}")
+    # The sidecar on disk is the conflicted working-tree file, not a clean prior,
+    # so the append-only baseline is each side's history as the index stages hold
+    # them. A side that is absent or unreadable constrains nothing.
+    side_histories = [
+        history
+        for stage in (2, 3)
+        for parsed in (_load_json_stage(vault, stage, f"{record_id}.json"),)
+        if isinstance(parsed, dict)
+        for history in (parsed.get("change-history"),)
+        if isinstance(history, list)
+    ]
     try:
-        stamped, safe_body = store_mod.validate_stamp_neutralize(location, sidecar, body)
+        stamped, safe_body = store_mod.validate_stamp_neutralize(
+            location, sidecar, body, prior_histories=side_histories
+        )
     except (store_mod.RecordValidationError, store_mod.ProvenanceError) as exc:
         raise ResolveError(f"{record_id}: {exc}") from None
 

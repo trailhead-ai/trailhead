@@ -875,3 +875,87 @@ def test_validate_and_write_refuses_malformed_change_history_and_writes_nothing(
         _write(rs, index, tmp_path, _sidecar(**{"change-history": bad}))
     assert "change-history" in str(exc.value)
     assert not (tmp_path / "vault" / "spec").exists() or not list((tmp_path / "vault" / "spec").glob("*.json"))
+
+
+# ---------------------------------------------------------------------------
+# change-history is append-only through validate_and_write
+# ---------------------------------------------------------------------------
+
+
+def _rewrite(rs, index, tmp_path, loc, sidecar, body="body\n"):
+    fake_state = tmp_path / "xdg-state"
+    conn = index.open_index(env={**os.environ, "XDG_STATE_HOME": str(fake_state)})
+    try:
+        return rs.validate_and_write(loc, sidecar, body, conn)
+    finally:
+        conn.close()
+
+
+def _seeded_history(rs, index, tmp_path, n=2):
+    loc = _write(rs, index, tmp_path, _sidecar(**{"change-history": _history(n)}))
+    return loc
+
+
+def _refused_leaves_files_untouched(rs, index, tmp_path, new_history):
+    loc = _seeded_history(rs, index, tmp_path)
+    before = (loc.body_path.read_bytes(), loc.sidecar_path.read_bytes())
+    with pytest.raises(rs.RecordValidationError) as exc:
+        _rewrite(rs, index, tmp_path, loc, _sidecar(**{"change-history": new_history}), body="new body\n")
+    assert (loc.body_path.read_bytes(), loc.sidecar_path.read_bytes()) == before
+    return str(exc.value)
+
+
+def test_write_dropping_a_history_entry_is_refused_and_files_stay_byte_identical(rs, index, tmp_path):
+    message = _refused_leaves_files_untouched(rs, index, tmp_path, _history(2)[:1])
+    assert "change-history" in message and "append-only" in message
+
+
+def test_write_dropping_the_whole_history_is_refused(rs, index, tmp_path):
+    loc = _seeded_history(rs, index, tmp_path)
+    before = loc.sidecar_path.read_bytes()
+    with pytest.raises(rs.RecordValidationError) as exc:
+        _rewrite(rs, index, tmp_path, loc, _sidecar())
+    assert "change-history" in str(exc.value)
+    assert loc.sidecar_path.read_bytes() == before
+
+
+def test_write_editing_an_entry_reason_is_refused(rs, index, tmp_path):
+    edited = _history(2)
+    edited[1]["reason"] = "rewritten after the fact"
+    message = _refused_leaves_files_untouched(rs, index, tmp_path, edited)
+    assert "change-history" in message and "append-only" in message
+
+
+def test_write_reordering_entries_is_refused(rs, index, tmp_path):
+    message = _refused_leaves_files_untouched(rs, index, tmp_path, list(reversed(_history(2))))
+    assert "change-history" in message and "append-only" in message
+
+
+def test_write_appending_an_entry_is_accepted(rs, index, tmp_path):
+    loc = _seeded_history(rs, index, tmp_path)
+    _rewrite(rs, index, tmp_path, loc, _sidecar(**{"change-history": _history(3)}))
+    assert json.loads(loc.sidecar_path.read_text(encoding="utf-8"))["change-history"] == _history(3)
+
+
+def test_write_inserting_an_entry_between_existing_ones_is_accepted(rs, index, tmp_path):
+    loc = _seeded_history(rs, index, tmp_path)
+    old = _history(2)
+    middle = dict(_history(3)[2], at="2026-06-18T09:00:30Z", reason="inserted by a merge")
+    merged = [old[0], middle, old[1]]
+    _rewrite(rs, index, tmp_path, loc, _sidecar(**{"change-history": merged}))
+    assert json.loads(loc.sidecar_path.read_text(encoding="utf-8"))["change-history"] == merged
+
+
+def test_first_history_on_a_record_without_one_is_accepted(rs, index, tmp_path):
+    loc = _write(rs, index, tmp_path, _sidecar())
+    _rewrite(rs, index, tmp_path, loc, _sidecar(**{"change-history": _history(1)}))
+    assert json.loads(loc.sidecar_path.read_text(encoding="utf-8"))["change-history"] == _history(1)
+
+
+def test_explicit_prior_histories_replace_the_stored_sidecar_as_the_baseline(rs, index, tmp_path):
+    loc = _seeded_history(rs, index, tmp_path)
+    ok = _sidecar(**{"change-history": _history(2)})
+    rs.validate_stamp_neutralize(loc, ok, "b", prior_histories=[_history(2)])
+    with pytest.raises(rs.RecordValidationError) as exc:
+        rs.validate_stamp_neutralize(loc, ok, "b", prior_histories=[_history(2), _history(3)])
+    assert "append-only" in str(exc.value)

@@ -58,6 +58,10 @@ Invariants:
   produced by ``record.store.make_unified_diff``). A malformed entry is refused
   naming ``change-history`` and the entry's index. An unsupported key is refused
   naming the key and pointing at a newer lore as the likely cause.
+  The list is append-only; ``record.store`` enforces that on every write, and
+  ``change-history`` is a reserved map key (a ``labels`` or ``annotations`` key of
+  that name is refused, pointing at ``lore record amend``) so no ``record update``
+  flag can set it.
 - ``created-by``/``updated-by`` are plaintext provenance PII (e.g. a git email),
   git-tracked, exactly as the legacy YAML frontmatter already stored. They are
   **never** an authz/authn signal — self-asserted and spoofable. Data
@@ -390,7 +394,7 @@ def _derive_reserved_label_keys() -> frozenset[str]:
     Kept callable so what a test exercises when a source grows is the derivation
     itself rather than a hand-maintained copy of its result.
     """
-    return KINDS | frozenset(kql.VALID_FIELDS)
+    return KINDS | frozenset(kql.VALID_FIELDS) | {_CHANGE_HISTORY}
 
 
 #: Bare ``labels`` keys that shadow a first-class record concept: every record
@@ -466,6 +470,11 @@ def _reserved_key_alternative(map_key: str) -> str:
         f"use `--annotation {map_key}=<value>` for a free attribute, or a"
         f" namespaced key (`<ns>/{map_key}`)"
     )
+    if map_key == _CHANGE_HISTORY:
+        return (
+            f"`{map_key}` is the append-only amendment history — it is written only by"
+            " `lore record amend`."
+        )
     if map_key == "related":
         return f"`{map_key}` names a relation — use `--related KIND=NAME`."
     if map_key.startswith(_RELATED_KEY_PREFIX):
@@ -580,6 +589,8 @@ def _check_map_str_str(key: str, value: object) -> list[str]:
             continue
         if key == "labels" and _is_reserved_label_key(map_key):
             errors.append(_reserved_label_key_error(key, map_key))
+        elif key == "annotations" and map_key == _CHANGE_HISTORY:
+            errors.append(f"{key}: {_reserved_key_alternative(map_key)}")
     return errors
 
 
