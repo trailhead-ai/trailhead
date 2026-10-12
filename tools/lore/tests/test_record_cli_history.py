@@ -8,29 +8,20 @@ content really arrives (authored elsewhere, carried in by a sync).
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 from conftest import make_vault as _make_vault, run_cli as _run
+from test_record_cli_amend import AMENDED as V2, BODY, _body, _sidecar
+from test_record_cli_amend import _amend as _run_amend, _create as _create_record
 
-BODY = "# Decision\n\nline one\nline two\nline three\n"
-V2 = "# Decision\n\nline one\nline TWO\nline three\n"
 V3 = "# Decision\n\nline one\nline TWO\nline 3 changed\n"
 
 
-def _create(vault, state, kind="adr", title="Pick A Thing", body=BODY):
-    r = _run(
-        ["record", "create", "--kind", kind, "--title", title, "--keyword", "k"],
-        vault=vault, state_dir=state, stdin_text=body,
-    )
-    assert r.returncode == 0, r.stderr
-    return r.stdout.strip()
+def _create(vault, state, title="Pick A Thing"):
+    return _create_record(vault, state, "adr", title)
 
 
 def _amend(vault, state, rid, body, *, reason, initiated_by):
-    r = _run(
-        ["record", "amend", rid, "--reason", reason, "--initiated-by", initiated_by],
-        vault=vault, state_dir=state, stdin_text=body,
-    )
+    r = _run_amend(vault, state, rid, body, reason=reason, initiated_by=initiated_by)
     assert r.returncode == 0, r.stderr
 
 
@@ -48,16 +39,6 @@ def _history(vault, state, rid, *extra):
 
 def _show(vault, state, rid, *extra):
     return _run(["record", "show", rid, *extra], vault=vault, state_dir=state)
-
-
-def _sidecar(vault, rid):
-    kind, name = rid.split("/", 1)
-    return json.loads((vault / kind / f"{name}.json").read_text(encoding="utf-8"))
-
-
-def _body(vault, rid):
-    kind, name = rid.split("/", 1)
-    return (vault / kind / f"{name}.md").read_text(encoding="utf-8")
 
 
 def test_history_lists_entries_newest_first(tmp_path):

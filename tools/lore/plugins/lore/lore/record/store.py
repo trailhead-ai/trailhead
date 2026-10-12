@@ -737,7 +737,7 @@ def index_transaction():
 # ---------------------------------------------------------------------------
 
 
-def _change_history_of(sidecar: object) -> list[Any]:
+def change_history_of(sidecar: object) -> list[Any]:
     """The ``change-history`` list of a parsed sidecar; ``[]`` if absent or not a list."""
     if not isinstance(sidecar, dict):
         return []
@@ -745,13 +745,13 @@ def _change_history_of(sidecar: object) -> list[Any]:
     return history if isinstance(history, list) else []
 
 
-def _read_stored_change_history(sidecar_path: Path) -> list[Any]:
+def read_change_history(sidecar_path: Path) -> list[Any]:
     """The history on disk at *sidecar_path*; ``[]`` for a missing or unparseable file."""
     try:
         existing = json.loads(sidecar_path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return []
-    return _change_history_of(existing)
+    return change_history_of(existing)
 
 
 def _is_subsequence(prior: list[Any], new: list[Any]) -> bool:
@@ -772,7 +772,7 @@ def check_change_history_append_only(
     come from (the stored sidecar for an ordinary write, both sides for a
     ``lore resolve`` settle).
     """
-    new = _change_history_of(new_sidecar)
+    new = change_history_of(new_sidecar)
     for prior in prior_histories:
         if _is_subsequence(prior, new):
             continue
@@ -826,7 +826,7 @@ def validate_stamp_neutralize(
     priors = (
         prior_histories
         if prior_histories is not None
-        else [_read_stored_change_history(location.sidecar_path)]
+        else [read_change_history(location.sidecar_path)]
     )
     history_errors = check_change_history_append_only(normalized, priors)
     if history_errors:

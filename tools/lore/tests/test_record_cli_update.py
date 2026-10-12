@@ -2751,6 +2751,10 @@ _HIST_ENTRY = {
 }
 
 
+def _history(n):
+    return [dict(_HIST_ENTRY, reason=f"reason {i}") for i in range(n)]
+
+
 def _seed_history(vault, record_id, history):
     kind, name = record_id.split("/", 1)
     path = vault / kind / f"{name}.json"
@@ -2763,7 +2767,7 @@ def _seed_history(vault, record_id, history):
 def test_update_preserves_change_history_unchanged(tmp_path, n):
     vault, state = _make_vault(tmp_path)
     record_id = _create(vault, state)
-    history = [dict(_HIST_ENTRY, reason=f"reason {i}") for i in range(n)]
+    history = _history(n)
     _seed_history(vault, record_id, history)
 
     r = _run(["record", "update", record_id, "--keyword", "bar"], vault=vault, state_dir=state)
@@ -2788,14 +2792,12 @@ def test_update_refuses_malformed_change_history_naming_the_field(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def _two_entry_history():
-    return [dict(_HIST_ENTRY, reason=f"reason {i}") for i in range(2)]
 
 
 def _seeded_with_history(tmp_path):
     vault, state = _make_vault(tmp_path)
     record_id = _create(vault, state)
-    history = _two_entry_history()
+    history = _history(2)
     _seed_history(vault, record_id, history)
     return vault, state, record_id, history
 
@@ -2826,7 +2828,7 @@ def test_status_and_label_update_keeps_both_history_entries(tmp_path):
 def test_scope_relocation_keeps_both_history_entries(tmp_path):
     vault_a, vault_b, state, config_home = _two_team_config(tmp_path)
     rid = _create_routed(vault_a, state, config_home, scope_args=["--team", "alpha"])
-    history = _two_entry_history()
+    history = _history(2)
     _seed_history(vault_a, rid, history)
 
     r = _run_cfg(["record", "update", rid, "--team", "beta"], vault=vault_a, state=state,

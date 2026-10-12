@@ -510,7 +510,7 @@ def _reserved_label_key_error(field: str, map_key: str) -> str:
 
 
 _CHANGE_HISTORY_ENTRY_KEYS: frozenset[str] = frozenset({"at", "by", "initiated-by", "reason", "diff"})
-_CHANGE_HISTORY_INITIATORS: tuple[str, ...] = ("operator", "agent")
+CHANGE_HISTORY_INITIATORS: tuple[str, ...] = ("operator", "agent")
 
 
 def _check_change_history_entry(key: str, index: int, entry: object) -> list[str]:
@@ -526,9 +526,9 @@ def _check_change_history_entry(key: str, index: int, entry: object) -> list[str
         errors.append(f"{where} field 'at' must be an ISO-8601 UTC datetime string")
     if "by" in entry and not (isinstance(entry["by"], str) and entry["by"]):
         errors.append(f"{where} field 'by' must be a non-empty string")
-    if "initiated-by" in entry and entry["initiated-by"] not in _CHANGE_HISTORY_INITIATORS:
+    if "initiated-by" in entry and entry["initiated-by"] not in CHANGE_HISTORY_INITIATORS:
         errors.append(
-            f"{where} field 'initiated-by' must be one of {list(_CHANGE_HISTORY_INITIATORS)}"
+            f"{where} field 'initiated-by' must be one of {list(CHANGE_HISTORY_INITIATORS)}"
         )
     if "reason" in entry:
         reason = entry["reason"]
