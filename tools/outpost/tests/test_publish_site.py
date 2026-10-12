@@ -1540,7 +1540,7 @@ def test_identity_caveat_names_the_host_and_the_workspace(tmp_path):
 
     caveat = result.stdout.splitlines()[1]
     assert caveat == (
-        'Opens on any host whose camp hosts file declares self_name = "andromeda"; '
+        'Opens on any host whose camp hosts file declares [hosts.andromeda]; '
         "dies with the acme-feat-x workspace; never shared with teammates."
     )
 
@@ -1689,6 +1689,74 @@ def test_probe_with_nothing_listening_notes_it_could_not_check(tmp_path):
     assert len(notes) == 1
     assert str(port) in notes[0]
     assert "warning:" not in result.stdout
+
+
+def test_probe_with_a_non_http_listener_notes_it_could_not_check(tmp_path):
+    import socket
+
+    _write_hosts(tmp_path, 'self_name = "andromeda"\n')
+    server = socket.socket()
+    server.bind(("127.0.0.1", 0))
+    server.listen(1)
+    port = server.getsockname()[1]
+
+    def serve():
+        conn, _addr = server.accept()
+        conn.recv(4096)
+        conn.sendall(b"SSH-2.0-OpenSSH_9\r\n")
+        conn.close()
+
+    thread = threading.Thread(target=serve, daemon=True)
+    thread.start()
+    try:
+        result, _ws = _workspace_publish(tmp_path, "--sites-port", str(port))
+    finally:
+        server.close()
+
+    assert result.returncode == 0, result.stderr
+    assert "Traceback" not in result.stderr
+    notes = [line for line in result.stdout.splitlines() if "couldn't check" in line]
+    assert len(notes) == 1
+    assert "warning:" not in result.stdout
+
+
+def test_probe_ignores_proxy_environment(tmp_path):
+    _write_hosts(tmp_path, 'self_name = "andromeda"\n')
+    dead = f"http://127.0.0.1:{_free_port()}"
+
+    with _Outpost(200) as outpost:
+        result, _ws = _workspace_publish(
+            tmp_path,
+            "--sites-port",
+            str(outpost.port),
+            env_extra={"http_proxy": dead, "HTTP_PROXY": dead},
+        )
+
+    assert result.returncode == 0, result.stderr
+    assert outpost.paths == ["/@andromeda/acme/feat-x/docs/"]
+    assert len(result.stdout.splitlines()) == 2
+    assert "couldn't" not in result.stdout
+    assert "warning:" not in result.stdout
+
+
+def test_unreadable_config_dir_prints_unprefixed_link_and_exits_zero(tmp_path):
+    hosts_path = _write_hosts(tmp_path, 'self_name = "andromeda"\n')
+    cfg = hosts_path.parent
+    cfg.chmod(0o000)
+    try:
+        with _Outpost(404) as outpost:
+            result, ws = _workspace_publish(tmp_path, "--sites-port", str(outpost.port))
+    finally:
+        cfg.chmod(0o755)
+
+    assert result.returncode == 0, result.stderr
+    assert "Traceback" not in result.stderr
+    assert _first_stdout_line(result) == f"http://127.0.0.1:{outpost.port}/acme-feat-x/docs/"
+    notice = result.stdout.splitlines()[1]
+    assert "only on this host" in notice
+    assert str(hosts_path) in notice
+    assert outpost.paths == []
+    assert (ws / "sites" / "docs" / "index.html").exists()
 
 
 def test_probe_never_runs_without_an_identity(tmp_path):

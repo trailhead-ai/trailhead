@@ -83,6 +83,7 @@ from __future__ import annotations
 
 import argparse
 import fcntl
+import http.client
 import os
 import re
 import shutil
@@ -229,9 +230,9 @@ def _self_host_name(env: Mapping[str, str]) -> str | None:
     matched with ``fullmatch`` so a trailing newline is refused.
     """
     path = _camp_config_dir(env) / "hosts.toml"
-    if not path.is_file():
-        return None
     try:
+        if not path.is_file():
+            return None
         raw = tomllib.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError) as exc:
         raise _HostIdentityError(f"{path}: cannot read file — {exc}") from exc
@@ -853,7 +854,7 @@ def _publish_to_workspace(
     qualified_link = f"{base}/@{identity}/{group}/{ws_slug}/{args.slug}/"
     print(qualified_link)
     print(
-        f'Opens on any host whose camp hosts file declares self_name = "{identity}"; '
+        f'Opens on any host whose camp hosts file declares [hosts.{identity}]; '
         f"dies with the {key} workspace; never shared with teammates."
     )
     _probe_own_link(qualified_link, plain_link, args.sites_port)
@@ -871,13 +872,13 @@ def _probe_own_link(qualified_link: str, plain_link: str, port: int) -> None:
         def redirect_request(self, *args, **kwargs):
             return None
 
-    opener = urllib.request.build_opener(_NoRedirect)
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect)
     try:
         with opener.open(qualified_link, timeout=_PROBE_TIMEOUT_SECONDS) as response:
             status = response.status
     except urllib.error.HTTPError as exc:
         status = exc.code
-    except (urllib.error.URLError, OSError):
+    except (urllib.error.URLError, http.client.HTTPException, OSError):
         print(
             f"note: couldn't check the link above — Outpost isn't answering on port {port}."
         )

@@ -203,7 +203,7 @@ With an identity, the output is the host-qualified link and its caveat line:
 
 ```
 http://127.0.0.1:<sites-port>/@<self>/<group>/<slug>/<site-slug>/
-Opens on any host whose camp hosts file declares self_name = "<self>"; dies with the <group>-<slug> workspace; never shared with teammates.
+Opens on any host whose camp hosts file declares [hosts.<self>]; dies with the <group>-<slug> workspace; never shared with teammates.
 ```
 
 The script then probes the link once on this host. A non-200 answer adds a
