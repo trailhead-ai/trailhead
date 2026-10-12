@@ -793,3 +793,85 @@ def test_index_transaction_closes_and_propagates_on_error(rs, tmp_path, monkeypa
             raise RuntimeError("boom")
     with pytest.raises(sqlite3.ProgrammingError):
         captured["conn"].execute("SELECT 1")
+
+
+# ---------------------------------------------------------------------------
+# make_unified_diff: exact inverse of apply_unified_diff
+# ---------------------------------------------------------------------------
+
+_DIFF_PAIRS = {
+    "edited-middle": ("a\nb\nc\n", "a\nB\nc\n"),
+    "appended": ("a\nb\n", "a\nb\nc\n"),
+    "deleted": ("a\nb\nc\n", "a\nc\n"),
+    "old-no-trailing-newline": ("a\nb", "a\nb\nc\n"),
+    "new-no-trailing-newline": ("a\nb\n", "a\nb\nc"),
+    "both-no-trailing-newline": ("a\nb", "a\nB"),
+    "empty-old": ("", "a\nb\n"),
+    "empty-new": ("a\nb\n", ""),
+    "single-line-edit-no-newline": ("a", "b"),
+    "far-apart-edits": (
+        "".join(f"l{i}\n" for i in range(40)),
+        "".join(f"L{i}\n" if i in (2, 37) else f"l{i}\n" for i in range(40)),
+    ),
+}
+
+
+@pytest.mark.parametrize("old,new", list(_DIFF_PAIRS.values()), ids=list(_DIFF_PAIRS))
+def test_make_unified_diff_round_trips_through_apply(rs, old, new):
+    diff = rs.make_unified_diff(old, new)
+    assert diff != ""
+    assert rs.apply_unified_diff(old, diff) == (new, [])
+
+
+@pytest.mark.parametrize("body", ["", "a\n", "a\nb", "a\r\nb\r\n"])
+def test_make_unified_diff_of_identical_bodies_is_empty(rs, body):
+    assert rs.make_unified_diff(body, body) == ""
+
+
+# ---------------------------------------------------------------------------
+# change-history through the real write path
+# ---------------------------------------------------------------------------
+
+
+def _history(n):
+    return [
+        {
+            "at": f"2026-06-18T09:0{i}:00Z",
+            "by": "tester@example.com",
+            "initiated-by": "operator",
+            "reason": f"reason {i}",
+            "diff": "",
+        }
+        for i in range(n)
+    ]
+
+
+def _write(rs, index, tmp_path, sidecar):
+    vault = tmp_path / "vault"
+    vault.mkdir(exist_ok=True)
+    fake_state = tmp_path / "xdg-state"
+    fake_state.mkdir(exist_ok=True)
+    conn = index.open_index(env={**os.environ, "XDG_STATE_HOME": str(fake_state)})
+    try:
+        loc = rs.place_record("Hist", "spec", None, str(vault))
+        rs.validate_and_write(loc, sidecar, "body\n", conn)
+    finally:
+        conn.close()
+    return loc
+
+
+@pytest.mark.parametrize("n", [0, 1, 2])
+def test_validate_and_write_round_trips_change_history(rs, index, tmp_path, n):
+    extra = {"change-history": _history(n)} if n else {}
+    loc = _write(rs, index, tmp_path, _sidecar(**extra))
+    on_disk = json.loads(loc.sidecar_path.read_text(encoding="utf-8"))
+    assert on_disk.get("change-history") == (_history(n) if n else None)
+
+
+def test_validate_and_write_refuses_malformed_change_history_and_writes_nothing(rs, index, tmp_path):
+    bad = _history(1)
+    bad[0]["reason"] = ""
+    with pytest.raises(rs.RecordValidationError) as exc:
+        _write(rs, index, tmp_path, _sidecar(**{"change-history": bad}))
+    assert "change-history" in str(exc.value)
+    assert not (tmp_path / "vault" / "spec").exists() or not list((tmp_path / "vault" / "spec").glob("*.json"))

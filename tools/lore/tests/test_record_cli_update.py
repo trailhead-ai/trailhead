@@ -2720,3 +2720,48 @@ def test_create_and_update_emit_the_identical_url_line_format(tmp_path):
     assert update_r.returncode == 0, update_r.stderr
     update_url = record_url_mod.build_record_url("default", kind, name)
     assert record_cli._RECORD_URL_LINE_FORMAT.format(url=update_url) in update_r.stderr.splitlines()
+
+
+# ---------------------------------------------------------------------------
+# change-history survives and is validated by a real ``record update``
+# ---------------------------------------------------------------------------
+
+_HIST_ENTRY = {
+    "at": "2026-06-18T09:00:00Z",
+    "by": "tester@example.com",
+    "initiated-by": "agent",
+    "reason": "tighten wording",
+    "diff": "--- a\n+++ b\n@@ -1 +1 @@\n-x\n+y\n",
+}
+
+
+def _seed_history(vault, record_id, history):
+    kind, name = record_id.split("/", 1)
+    path = vault / kind / f"{name}.json"
+    sidecar = json.loads(path.read_text(encoding="utf-8"))
+    sidecar["change-history"] = history
+    path.write_text(json.dumps(sidecar, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+@pytest.mark.parametrize("n", [1, 2])
+def test_update_preserves_change_history_unchanged(tmp_path, n):
+    vault, state = _make_vault(tmp_path)
+    record_id = _create(vault, state)
+    history = [dict(_HIST_ENTRY, reason=f"reason {i}") for i in range(n)]
+    _seed_history(vault, record_id, history)
+
+    r = _run(["record", "update", record_id, "--keyword", "bar"], vault=vault, state_dir=state)
+
+    assert r.returncode == 0, r.stderr
+    assert _find_sidecar(vault, record_id)["change-history"] == history
+
+
+def test_update_refuses_malformed_change_history_naming_the_field(tmp_path):
+    vault, state = _make_vault(tmp_path)
+    record_id = _create(vault, state)
+    _seed_history(vault, record_id, [dict(_HIST_ENTRY, **{"initiated-by": "robot"})])
+
+    r = _run(["record", "update", record_id, "--keyword", "bar"], vault=vault, state_dir=state)
+
+    assert r.returncode != 0
+    assert "change-history" in r.stderr

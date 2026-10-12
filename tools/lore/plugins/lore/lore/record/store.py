@@ -52,12 +52,17 @@ the index no longer resolves — the *safe* direction (no data loss; the new cop
 durable and indexed), self-healing via ``lore reindex``. Callers holding the old
 ID must re-read.
 
+**Amendment diffs.** :func:`make_unified_diff` produces the ``diff`` string stored
+in a sidecar ``change-history`` entry (see ``record.model`` for the field's
+contract); it is the exact inverse of :func:`apply_unified_diff`.
+
 Pure stdlib (``json``, ``sqlite3`` via ``index_store``, ``os``/``pathlib``,
 ``subprocess`` for git identity, ``datetime``).
 """
 
 from __future__ import annotations
 
+import difflib
 import hashlib
 import json
 import os
@@ -287,6 +292,30 @@ def _parse_hunks(diff: str) -> list[_Hunk]:
         hunks.append(current)
 
     return hunks
+
+
+def make_unified_diff(old_body: str, new_body: str) -> str:
+    """Return the unified diff that :func:`apply_unified_diff` turns *old_body* into *new_body*.
+
+    The exact inverse of the applier: ``apply_unified_diff(old, make_unified_diff(old, new))``
+    is ``(new, [])`` for every pair, and identical bodies give ``""``. ``difflib``
+    emits a line without its terminator when a body lacks a trailing newline, which
+    would run into the next diff line; each such line is closed and followed by the
+    GNU ``\\ No newline at end of file`` marker the applier reads.
+    """
+    diff = difflib.unified_diff(
+        old_body.splitlines(keepends=True),
+        new_body.splitlines(keepends=True),
+        fromfile="a",
+        tofile="b",
+    )
+    out: list[str] = []
+    for line in diff:
+        if line.endswith("\n"):
+            out.append(line)
+        else:
+            out.append(line + "\n\\ No newline at end of file\n")
+    return "".join(out)
 
 
 def apply_unified_diff(body: str, diff: str) -> tuple[str, list[str]]:

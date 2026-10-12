@@ -51,6 +51,13 @@ Invariants:
   ``lore record create``/``update`` — and nothing else: ``search.index``'s
   ``upsert_row`` (reached from the session store and ``rebuild``) writes label
   rows without consulting this module.
+- ``change-history`` is an optional list of entries, one per amendment, each an
+  object of exactly the keys ``at`` (ISO-8601 UTC datetime), ``by`` (non-empty
+  string), ``initiated-by`` (``operator`` or ``agent``), ``reason`` (non-empty,
+  single line) and ``diff`` (string; the unified diff from the prior body, as
+  produced by ``record.store.make_unified_diff``). A malformed entry is refused
+  naming ``change-history`` and the entry's index. An unsupported key is refused
+  naming the key and pointing at a newer lore as the likely cause.
 - ``created-by``/``updated-by`` are plaintext provenance PII (e.g. a git email),
   git-tracked, exactly as the legacy YAML frontmatter already stored. They are
   **never** an authz/authn signal — self-asserted and spoofable. Data
@@ -152,6 +159,7 @@ _LIST_STR = "list[str]"
 _DATETIME = "datetime"
 _RELATED_MAP = "related-map"
 _MAP_STR_STR = "map[str,str]"
+_CHANGE_HISTORY = "change-history"
 
 #: Keys that are ``required`` in the field table but never operator-supplied:
 #: ``status`` and ``version`` are defaulted by the validator when omitted.
@@ -184,6 +192,7 @@ FIELDS_V1: dict[str, FieldSpec] = {
     "depends-on": FieldSpec(required=False, type_tag=_LIST_STR),
     "parent": FieldSpec(required=False, type_tag=_STR),
     "supersedes": FieldSpec(required=False, type_tag=_LIST_STR),
+    "change-history": FieldSpec(required=False, type_tag=_CHANGE_HISTORY),
 }
 
 #: Schema registry keyed by version (only ``v1`` exists today).
@@ -491,6 +500,47 @@ def _reserved_label_key_error(field: str, map_key: str) -> str:
     )
 
 
+_CHANGE_HISTORY_ENTRY_KEYS: frozenset[str] = frozenset({"at", "by", "initiated-by", "reason", "diff"})
+_CHANGE_HISTORY_INITIATORS: tuple[str, ...] = ("operator", "agent")
+
+
+def _check_change_history_entry(key: str, index: int, entry: object) -> list[str]:
+    where = f"key {key!r} entry [{index}]"
+    if not isinstance(entry, dict):
+        return [f"{where} must be an object"]
+    errors: list[str] = []
+    for field in sorted(entry.keys() - _CHANGE_HISTORY_ENTRY_KEYS):
+        errors.append(f"{where} has unsupported field {field!r}")
+    for field in sorted(_CHANGE_HISTORY_ENTRY_KEYS - entry.keys()):
+        errors.append(f"{where} is missing field {field!r}")
+    if "at" in entry and not _is_iso8601_utc(entry["at"]):
+        errors.append(f"{where} field 'at' must be an ISO-8601 UTC datetime string")
+    if "by" in entry and not (isinstance(entry["by"], str) and entry["by"]):
+        errors.append(f"{where} field 'by' must be a non-empty string")
+    if "initiated-by" in entry and entry["initiated-by"] not in _CHANGE_HISTORY_INITIATORS:
+        errors.append(
+            f"{where} field 'initiated-by' must be one of {list(_CHANGE_HISTORY_INITIATORS)}"
+        )
+    if "reason" in entry:
+        reason = entry["reason"]
+        if not (isinstance(reason, str) and reason.strip()) or "\n" in reason or "\r" in reason:
+            errors.append(f"{where} field 'reason' must be a non-empty single-line string")
+    if "diff" in entry and not isinstance(entry["diff"], str):
+        errors.append(f"{where} field 'diff' must be a string")
+    return errors
+
+
+def _check_change_history(key: str, value: object) -> list[str]:
+    """Validate the ``change-history`` list: each entry an object of exactly the
+    five documented fields, each of the right type."""
+    if not isinstance(value, list):
+        return [f"key {key!r} must be a list of entries"]
+    errors: list[str] = []
+    for index, entry in enumerate(value):
+        errors.extend(_check_change_history_entry(key, index, entry))
+    return errors
+
+
 def _check_map_str_str(key: str, value: object) -> list[str]:
     """Validate a ``map[str,str]`` sidecar field (``labels`` or ``annotations``).
 
@@ -539,6 +589,7 @@ _TYPE_CHECKS = {
     _DATETIME: _check_datetime,
     _RELATED_MAP: _check_related,
     _MAP_STR_STR: _check_map_str_str,
+    _CHANGE_HISTORY: _check_change_history,
 }
 
 
@@ -580,7 +631,10 @@ def validate(sidecar: dict, kind: str | None = None) -> ValidationResult:
     # --- unsupported keys (kind-independent in v1). --------------------------
     for key in sidecar:
         if key not in schema:
-            errors.append(f"unsupported key {key!r}")
+            errors.append(
+                f"unsupported key {key!r}: this record may have been written by a newer"
+                " lore; update trailhead"
+            )
 
     # --- required operator keys present. -------------------------------------
     for key in required_operator_keys(version):

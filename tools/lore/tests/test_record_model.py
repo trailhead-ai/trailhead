@@ -1201,3 +1201,80 @@ def test_supersedes_absent_when_omitted():
     sidecar = _base_sidecar_with()
     result = rm().validate(sidecar)
     assert "supersedes" not in result.sidecar
+
+
+# --- change-history sidecar field -----------------------------------------
+
+
+def _history_entry(**over):
+    entry = {
+        "at": "2026-06-18T09:00:00Z",
+        "by": "tester@example.com",
+        "initiated-by": "operator",
+        "reason": "correct the scope",
+        "diff": "--- a\n+++ b\n@@ -1 +1 @@\n-x\n+y\n",
+    }
+    entry.update(over)
+    return entry
+
+
+def _without(entry, key):
+    return {k: v for k, v in entry.items() if k != key}
+
+
+@pytest.mark.parametrize(
+    "history",
+    [
+        [_history_entry()],
+        [_history_entry(), _history_entry(by="agent-1", **{"initiated-by": "agent", "diff": ""})],
+    ],
+    ids=["one-entry", "two-entries"],
+)
+def test_change_history_well_formed_validates_and_is_preserved(history):
+    result = rm().validate(_base_sidecar_with(**{"change-history": history}))
+    assert result.errors == []
+    assert result.sidecar["change-history"] == history
+
+
+def test_sidecar_without_change_history_validates():
+    assert rm().validate(_base_sidecar_with()).errors == []
+
+
+@pytest.mark.parametrize(
+    "bad_history, index",
+    [
+        ([_without(_history_entry(), "reason")], 0),
+        ([_history_entry(reason="")], 0),
+        ([_history_entry(), _history_entry(reason="two\nlines")], 1),
+        ([_history_entry(**{"initiated-by": "robot"})], 0),
+        ("not-a-list", None),
+        ([_history_entry(), "not-an-object"], 1),
+    ],
+    ids=["missing-reason", "empty-reason", "newline-reason", "robot", "non-list", "non-object"],
+)
+def test_change_history_malformed_is_refused_naming_field(bad_history, index):
+    result = rm().validate(_base_sidecar_with(**{"change-history": bad_history}))
+    assert result.errors
+    assert all("change-history" in e for e in result.errors)
+    if index is not None:
+        assert all(f"[{index}]" in e for e in result.errors)
+
+
+@pytest.mark.parametrize("key", ["at", "by", "initiated-by", "diff"])
+def test_change_history_each_other_entry_key_is_required(key):
+    result = rm().validate(_base_sidecar_with(**{"change-history": [_without(_history_entry(), key)]}))
+    assert any("change-history" in e and key in e for e in result.errors)
+
+
+def test_change_history_bad_datetime_and_extra_key_are_refused():
+    bad_at = rm().validate(_base_sidecar_with(**{"change-history": [_history_entry(at="yesterday")]}))
+    assert any("change-history" in e and "at" in e for e in bad_at.errors)
+    extra = rm().validate(_base_sidecar_with(**{"change-history": [_history_entry(extra="x")]}))
+    assert any("change-history" in e and "extra" in e for e in extra.errors)
+
+
+def test_unsupported_key_refusal_names_key_and_update_remedy():
+    result = rm().validate(_base_sidecar_with(**{"from-the-future": 1}))
+    [msg] = result.errors
+    assert "from-the-future" in msg
+    assert "this record may have been written by a newer lore; update trailhead" in msg
