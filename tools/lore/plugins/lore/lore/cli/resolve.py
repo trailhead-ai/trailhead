@@ -22,7 +22,10 @@ value → no decision to make; moved on BOTH sides → a judgment conflict keyed
 ``updated-by`` following it, and is never reported. ``change-history`` is the one
 list that IS merged when both sides moved it: an append-only log has no
 judgment to make, so the result is the union of both sides' entries, each once,
-ordered by ``at`` (ours before theirs on a tie) — see ``_merge_change_history``.
+placed around the entries both sides share, which keep their order, and ordered by
+``at`` between them (ours before theirs on a tie) — see ``_merge_change_history``.
+Two sides that hold their shared entries in contradictory orders have no
+order-preserving union; that parks as an ordinary conflict.
 ``labels`` and ``related``
 are NOT special-cased into a union — a both-sides edit there is judgment like any
 other, because a union invents a state neither device asked for.
@@ -318,6 +321,15 @@ def merge_sidecars(
             winner = r  # remote moved alone
         elif key == "change-history" and isinstance(r, list) and isinstance(loc, list):
             winner = _merge_change_history(ours=loc, theirs=r)
+            if winner is None:
+                conflicts.append({
+                    "slot": key,
+                    "local": loc,
+                    "local-absent": False,
+                    "remote": r,
+                    "remote-absent": False,
+                })
+                continue
         else:
             conflicts.append({
                 "slot": key,
@@ -332,30 +344,50 @@ def merge_sidecars(
     return merged, conflicts
 
 
-def _merge_change_history(ours: list, theirs: list) -> list:
-    """Union two ``change-history`` lists, ordered by ``at``, ours before theirs on a tie.
+def _merge_change_history(ours: list, theirs: list) -> list | None:
+    """Union two ``change-history`` lists, or ``None`` when no order-preserving union exists.
 
-    A stable two-way merge that walks each list in its own order, so each side
-    stays an order-preserving subsequence of the result even when its own
-    entries are not monotonic in ``at`` — the property the append-only check
-    enforces on the write. An entry exactly equal to one already emitted is
-    collapsed.
+    Entries present on BOTH sides are fixed anchors and keep their shared
+    relative order. Between consecutive anchors, each side's own entries form a
+    run; the two runs are merged by ``at`` (ours before theirs on a tie), each
+    run staying in its own order. The result therefore contains each side as an
+    order-preserving subsequence — the property the append-only check enforces on
+    the write — whatever the entries' ``at`` values do.
+
+    When the two sides hold their shared entries in contradictory relative orders
+    no such union exists; ``None`` is returned and the caller parks
+    ``change-history`` as an ordinary conflict rather than write a list the
+    append-only check would refuse.
     """
 
     def at(entry: Any) -> str:
         return str(entry.get("at", "")) if isinstance(entry, dict) else ""
 
+    anchors_ours = [e for e in ours if e in theirs]
+    if anchors_ours != [e for e in theirs if e in ours]:
+        return None
+
+    def runs(side: list) -> list[list]:
+        out: list[list] = [[]]
+        for entry in side:
+            if entry in anchors_ours:
+                out.append([])
+            else:
+                out[-1].append(entry)
+        return out
+
     merged: list = []
-    i = j = 0
-    while i < len(ours) or j < len(theirs):
-        if j >= len(theirs) or (i < len(ours) and at(ours[i]) <= at(theirs[j])):
-            entry = ours[i]
-            i += 1
-        else:
-            entry = theirs[j]
-            j += 1
-        if entry not in merged:
-            merged.append(entry)
+    for k, (mine, theirs_run) in enumerate(zip(runs(ours), runs(theirs))):
+        i = j = 0
+        while i < len(mine) or j < len(theirs_run):
+            if j >= len(theirs_run) or (i < len(mine) and at(mine[i]) <= at(theirs_run[j])):
+                merged.append(mine[i])
+                i += 1
+            else:
+                merged.append(theirs_run[j])
+                j += 1
+        if k < len(anchors_ours):
+            merged.append(anchors_ours[k])
     return merged
 
 

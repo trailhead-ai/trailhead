@@ -299,6 +299,100 @@ def test_change_history_merge_keeps_each_sides_own_order_when_a_side_is_out_of_a
     assert sorted(e["reason"] for e in merged["change-history"]) == ["a", "b-skewed", "c"]
 
 
+def _min(minute: int, reason: str) -> dict:
+    return _hist(f"2026-06-18T10:{minute:02d}:00Z", reason)
+
+
+def test_change_history_keeps_a_shared_entry_where_the_other_side_has_it(resolve):
+    from lore.record import store
+
+    a = _hist("2026-06-18T10:00:00Z", "a")
+    b = _hist("2026-06-18T10:00:00Z", "b")
+    a2 = _hist("2026-06-18T10:05:00Z", "a2")
+    base = {"kind": "task", "change-history": [a]}
+    remote = {"kind": "task", "change-history": [b, a]}
+    local = {"kind": "task", "change-history": [a, a2]}
+
+    merged, conflicts = resolve.merge_sidecars(base, remote, local)
+
+    assert conflicts == []
+    assert merged["change-history"] == [b, a, a2]
+    assert store.check_change_history_append_only(
+        merged, [local["change-history"], remote["change-history"]]
+    ) == []
+
+
+def test_change_history_merge_survives_clock_skew_on_the_other_side(resolve):
+    from lore.record import store
+
+    e = {n: _min(m, str(n)) for n, m in {1: 20, 9: 1, 4: 17, 6: 13, 10: 13}.items()}
+    theirs = [e[1], e[9], e[4], e[6]]
+    ours = [e[1], e[4], e[6], e[10]]
+    base = {"kind": "task", "change-history": [e[1]]}
+
+    merged, conflicts = resolve.merge_sidecars(
+        base, {"kind": "task", "change-history": theirs},
+        {"kind": "task", "change-history": ours},
+    )
+
+    assert conflicts == []
+    assert sorted(x["reason"] for x in merged["change-history"]) == sorted(
+        ["1", "9", "4", "6", "10"]
+    )
+    assert store.check_change_history_append_only(merged, [ours, theirs]) == []
+
+
+def test_change_history_shared_entries_in_contradictory_order_park_a_conflict(resolve):
+    x = _min(0, "x")
+    y = _min(1, "y")
+    base = {"kind": "task", "change-history": []}
+    remote = {"kind": "task", "change-history": [y, x]}
+    local = {"kind": "task", "change-history": [x, y]}
+
+    merged, conflicts = resolve.merge_sidecars(base, remote, local)
+
+    assert [c["slot"] for c in conflicts] == ["change-history"]
+    assert conflicts[0]["local"] == [x, y]
+    assert conflicts[0]["remote"] == [y, x]
+    assert "change-history" not in merged
+
+
+def test_change_history_merge_is_a_passing_union_or_a_parked_conflict_for_any_interleaving(
+    resolve,
+):
+    import random
+
+    from lore.record import store
+
+    rng = random.Random(20260618)
+    for _ in range(400):
+        pool = [_min(rng.randrange(60), f"p{i}") for i in range(rng.randrange(1, 7))]
+        sides = []
+        for tag in ("o", "t"):
+            picked = [e for e in pool if rng.random() < 0.6]
+            if rng.random() < 0.3:
+                rng.shuffle(picked)
+            extra = [_min(rng.randrange(60), f"{tag}{i}") for i in range(rng.randrange(3))]
+            seq = picked + extra
+            for e in extra:
+                seq.insert(rng.randrange(len(seq) + 1), seq.pop(seq.index(e)))
+            sides.append(seq)
+        ours, theirs = sides
+        if ours == theirs or not ours or not theirs:
+            continue
+        merged, conflicts = resolve.merge_sidecars(
+            {"kind": "task", "change-history": []},
+            {"kind": "task", "change-history": theirs},
+            {"kind": "task", "change-history": ours},
+        )
+        if conflicts:
+            assert [c["slot"] for c in conflicts] == ["change-history"]
+            continue
+        assert store.check_change_history_append_only(
+            merged, [ours, theirs]
+        ) == [], (ours, theirs, merged["change-history"])
+
+
 def test_a_conflicting_change_history_does_not_merge_other_conflicting_fields(resolve):
     e1 = _hist("2026-06-18T09:00:00Z", "e1")
     e2 = _hist("2026-06-18T10:00:00Z", "e2")
