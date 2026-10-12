@@ -131,7 +131,7 @@ def test_plain_show_note_names_the_count_and_the_history_command(tmp_path):
     one = _show(vault, state, rid).stderr
     _amend(vault, state, rid, V3, reason="two", initiated_by="operator")
     two = _show(vault, state, rid).stderr
-    assert one.strip() == f"amended 1 times; see `lore record history {rid}`"
+    assert one.strip() == f"amended once; see `lore record history {rid}`"
     assert two.strip() == f"amended 2 times; see `lore record history {rid}`"
 
 
@@ -234,4 +234,4 @@ def test_plain_show_of_shared_record_keeps_fenced_stdout_and_adds_stderr_note(tm
     assert r.stdout.startswith('<external-memory layer="shared" source="team-notes">\n')
     assert "body\n" in r.stdout
     assert "history" not in r.stdout
-    assert f"amended 1 times; see `lore record history {rid}`" in r.stderr
+    assert f"amended once; see `lore record history {rid}`" in r.stderr
