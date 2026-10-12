@@ -15,8 +15,10 @@ A site that belongs to one piece of in-flight work — a scratch analysis, a
 one-off review guide, a throwaway check — can publish into a **camp
 workspace** instead: it serves from `<workspace>/sites/<slug>/`, syncs
 nowhere, is never a vault record, and disappears the moment the workspace
-does. Vault is the default target for anything meant to be shared beyond the
-workspace; a workspace publish is opt-in.
+does. On a host with a camp host identity its link also opens on every other
+host that declares this host in its camp hosts file; it is still never shared
+with teammates. Vault is the default target for anything meant to be shared
+beyond the workspace; a workspace publish is opt-in.
 
 This skill has two parts: **you** resolve which target the site belongs in and
 call the bundled script; the script (`publish_site.py`, stdlib-only) does the
@@ -191,17 +193,55 @@ when `--vault` (the sync-scoping name) was omitted for the default floor.
 
 **A workspace publish's success output is shaped differently on purpose** —
 sharing happens by copying printed terminal text, with no cockpit badge in
-the picture, so the two must never look alike:
+the picture, so a workspace link must never look like a vault one. The shape
+depends on whether this host has a camp host identity (`self_name` in
+`<camp config dir>/hosts.toml`). `<group>-<slug>` and `<group>/<slug>` come
+from the resolved workspace path (`<campStateRoot>/<group>/worktrees/<slug>`) —
+never pass them separately.
+
+With an identity, the output is the host-qualified link and its caveat line:
+
+```
+http://127.0.0.1:<sites-port>/@<self>/<group>/<slug>/<site-slug>/
+Opens on any host whose camp hosts file declares self_name = "<self>"; dies with the <group>-<slug> workspace; never shared with teammates.
+```
+
+That link opens on every host whose camp hosts file declares the publisher as
+`<self>`, still dies with the workspace, and is never shared with teammates.
+The script then probes the link once on this host. A non-200 answer adds a
+warning line carrying the link that works here, and a connection failure adds a
+"couldn't check" note; neither changes the exit code:
+
+```
+warning: this host's Outpost answered <status> for the link above, so it may predate host-qualified links or read a different camp config dir. The link that works here: http://127.0.0.1:<sites-port>/<group>-<slug>/<site-slug>/
+note: couldn't check the link above — Outpost isn't answering on port <sites-port>.
+```
+
+With no identity (no `hosts.toml`, or none with a `self_name`), the output is
+the un-prefixed link and a notice that it works only on this host:
 
 ```
 http://127.0.0.1:<sites-port>/<group>-<slug>/<site-slug>/
-Local to this machine only — this link dies with the <group>-<slug> workspace.
+Local to this machine only — this link works only on this host (no camp host identity: no self_name in <config-dir>/hosts.toml) and dies with the <group>-<slug> workspace.
 ```
 
-`<group>-<slug>` is derived from the resolved workspace path
-(`<campStateRoot>/<group>/worktrees/<slug>`) — never pass it separately. Pass
-that link along with the caveat sentence, not the bare URL alone, since a
-teammate it was pasted to would otherwise expect it to resolve.
+An unreadable or malformed `hosts.toml` prints the same link, with the
+parenthetical reading `(no usable camp host identity: <problem>)`. No probe
+runs in either case.
+
+When you hand a workspace link back:
+
+- Pass the link along with the caveat or notice line the script printed, not
+  the bare URL alone, since someone it was pasted to would otherwise expect it
+  to resolve.
+- Relay verbatim any notice or probe warning the script printed.
+- Name the publishing host (the `<self>` in the link), so the reader knows
+  which host the link points through.
+- If the host-qualified link 404s on a viewing host, check that host's camp
+  hosts file first: it must declare the publisher under that exact name.
+
+The Outpost console shows a workspace site's un-prefixed link, which works only
+on the publishing host; it does not show the host-qualified link.
 
 **If the operator moved the sites port, pass it** — otherwise the printed URL
 points at a port nothing is listening on. The daemon resolves its sites port
