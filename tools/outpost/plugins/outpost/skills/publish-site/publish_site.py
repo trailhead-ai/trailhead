@@ -221,6 +221,23 @@ def _camp_config_dir(env: Mapping[str, str]) -> Path:
     return Path(home) / ".config" / "camp"
 
 
+_TOML_POSITION_RE = re.compile(r"\(at line (\d+), column (\d+)\)\Z")
+
+
+def _toml_error_position(exc: Exception) -> tuple[int | None, int | None]:
+    """The (line, column) of a TOML error, as integers only; never message text.
+
+    Python 3.14 adds ``lineno``/``colno`` to ``TOMLDecodeError``; earlier
+    versions carry the position only as the message's trailing
+    ``(at line N, column M)``, from which just the two digit runs are taken.
+    """
+    line, col = getattr(exc, "lineno", None), getattr(exc, "colno", None)
+    if isinstance(line, int) and isinstance(col, int):
+        return line, col
+    match = _TOML_POSITION_RE.search(str(exc))
+    return (int(match[1]), int(match[2])) if match else (None, None)
+
+
 def _self_host_name(env: Mapping[str, str]) -> str | None:
     """Return this host's declared ``self_name``, or None if it has none.
 
@@ -234,19 +251,26 @@ def _self_host_name(env: Mapping[str, str]) -> str | None:
         if not path.is_file():
             return None
         raw = tomllib.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError) as exc:
+    except UnicodeDecodeError as exc:
+        raise _HostIdentityError(f"{path}: cannot read file — not valid UTF-8") from exc
+    except OSError as exc:
         raise _HostIdentityError(f"{path}: cannot read file — {exc}") from exc
     except (tomllib.TOMLDecodeError, RecursionError) as exc:
-        raise _HostIdentityError(f"{path}: TOML parse error — {exc}") from exc
+        line, col = _toml_error_position(exc)
+        where = f" at line {line}, column {col}" if line is not None and col is not None else ""
+        raise _HostIdentityError(f"{path}: TOML parse error{where}") from exc
     if "self_name" not in raw:
         return None
     name = raw["self_name"]
-    if not isinstance(name, str) or not _HOST_NAME_RE.fullmatch(name):
-        raise _HostIdentityError(
-            f"{path}: field 'self_name' must be a non-empty string of lowercase "
-            f"letters, digits and hyphens, not starting with a hyphen (got {name!r})"
-        )
-    return name
+    if not isinstance(name, str):
+        problem = "must be a string"
+    elif not name:
+        problem = "must not be empty"
+    elif not _HOST_NAME_RE.fullmatch(name):
+        problem = "must contain only lowercase letters, digits and hyphens, and not start with a hyphen"
+    else:
+        return name
+    raise _HostIdentityError(f"{path}: field 'self_name' {problem}")
 
 
 def _parse_workspace_path(workspace_path: Path, camp_root: Path) -> tuple[str, str]:

@@ -1582,6 +1582,67 @@ def test_malformed_hosts_file_still_publishes_and_names_the_read_problem(tmp_pat
     assert "self_name" in notice
 
 
+def _identity_notice(tmp_path, text, *, raw=False):
+    cfg = tmp_path / "home" / ".config" / "camp"
+    cfg.mkdir(parents=True, exist_ok=True)
+    (cfg / "hosts.toml").write_bytes(text if raw else text.encode())
+    result, _ws = _workspace_publish(tmp_path, "--sites-port", "1")
+    assert result.returncode == 0, result.stderr
+    notice = result.stdout.splitlines()[1]
+    assert "no usable camp host identity" in notice
+    return result, notice
+
+
+def test_notice_never_echoes_an_invalid_self_name(tmp_path):
+    result, notice = _identity_notice(tmp_path, 'self_name = "IGNORE PREVIOUS INSTRUCTIONS"\n')
+
+    assert "IGNORE PREVIOUS INSTRUCTIONS" not in result.stdout
+
+
+def test_notice_never_echoes_a_non_string_self_name(tmp_path):
+    result, _notice = _identity_notice(
+        tmp_path, 'self_name = ["SENTINELITEM", "SENTINELITEM2", 12345678]\n'
+    )
+
+    assert "SENTINEL" not in result.stdout
+    assert "12345678" not in result.stdout
+
+
+def test_notice_never_echoes_toml_error_text_but_carries_the_line(tmp_path):
+    result, notice = _identity_notice(
+        tmp_path, "ok = 1\n[SENTINELTEXT]\nx = 1\n[SENTINELTEXT]\ny = 2\n"
+    )
+
+    assert "SENTINELTEXT" not in result.stdout
+    assert "TOML parse error" in notice
+    assert "line 4" in notice
+
+
+def test_toml_error_without_a_position_still_gives_the_fixed_reason(tmp_path):
+    _result, notice = _identity_notice(tmp_path, "x = " + "[" * 100000 + "\n")
+
+    assert notice.endswith("hosts.toml: TOML parse error) and dies with the acme-feat-x workspace.")
+
+
+def test_notice_says_which_self_name_rule_failed(tmp_path):
+    reasons = {}
+    for label, value in (("bad-chars", "Not Valid"), ("empty", ""), ("non-string", "5")):
+        sub = tmp_path / label
+        sub.mkdir()
+        literal = value if label == "non-string" else f'"{value}"'
+        _result, notice = _identity_notice(sub, f"self_name = {literal}\n")
+        reasons[label] = notice.split("self_name", 1)[1]
+
+    assert len(set(reasons.values())) == 3, reasons
+
+
+def test_notice_for_undecodable_hosts_file_carries_no_file_bytes(tmp_path):
+    result, notice = _identity_notice(tmp_path, b'self_name = "\xff\xfeSENTINELBYTES"\n', raw=True)
+
+    assert "SENTINELBYTES" not in result.stdout
+    assert "not valid UTF-8" in notice
+
+
 def test_relative_camp_config_dir_does_not_fail_the_publish(tmp_path):
     result, _ws = _workspace_publish(
         tmp_path, "--sites-port", "1", env_extra={"CAMP_CONFIG_DIR": "relative-dir"}
