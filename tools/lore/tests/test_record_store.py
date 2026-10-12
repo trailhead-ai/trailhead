@@ -809,6 +809,13 @@ _DIFF_PAIRS = {
     "empty-old": ("", "a\nb\n"),
     "empty-new": ("a\nb\n", ""),
     "single-line-edit-no-newline": ("a", "b"),
+    "delete-a-dash-dash-line": ("a\n-- old comment\nb\n", "a\nb\n"),
+    "edit-a-dash-dash-line": ("a\n-- old comment\nb\n", "a\n-- new comment\nb\n"),
+    "add-a-plus-plus-line": ("a\nb\n", "a\n++ i;\nb\n"),
+    "delete-a-plus-plus-line": ("a\n++ i;\nb\n", "a\nb\n"),
+    "delete-a-line-of-only-dashes-and-space": ("a\n-- \nb\n", "a\nb\n"),
+    "add-a-line-of-only-pluses-and-space": ("a\nb\n", "a\n++ \nb\n"),
+    "delete-a-triple-dash-body-line": ("a\n--- x\nb\n", "a\nb\n"),
     "far-apart-edits": (
         "".join(f"l{i}\n" for i in range(40)),
         "".join(f"L{i}\n" if i in (2, 37) else f"l{i}\n" for i in range(40)),
