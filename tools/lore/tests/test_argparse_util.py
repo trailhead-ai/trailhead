@@ -20,6 +20,7 @@ def test_leaf_parsers_covers_real_cli_leaves():
 
     assert set(leaves) == {
         "search",
+        "record amend",
         "record create",
         "record delete",
         "record rename",

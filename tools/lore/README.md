@@ -77,12 +77,42 @@ lore sync                 Stage, commit, pull, and push every configured vault (
 lore status               Report ruleset drift, host signing state, and any vault holding unsynced records (--json: the same host prerequisites as data, which `trailhead doctor` reads)
 lore search <query>       Query all records (KQL-subset: field:value, full-text, and/or/not)
 lore record show <id>     Read a record's body (add --json for the sidecar)
+lore record amend <id>    Correct a record's body in place, even a frozen adr's, recording who/why/diff in its change-history (--reason, --initiated-by operator|agent, body on stdin or --diff)
 lore areas                List the area profiles across every configured non-shared vault
 lore signing enable       Generate (or adopt with --key) a no-passphrase SSH key this host signs vault commits with
 lore signing status       Report whether this host signs vault commits unattended, or what's missing
 ```
 
 Run `lore <subcommand> --help` for full options.
+
+### Amending a record: `lore record amend`
+
+`lore record update` refuses to change the body of an `adr` once it is `active`
+(or `superseded` / `dropped`): supersede it with a new adr for a material change.
+To correct the body in place instead (a typo, a wrong link), pipe the corrected
+body to amend:
+
+```sh
+lore record amend adr/some-decision --reason "fix the cited ticket number" --initiated-by operator < corrected.md
+lore record amend adr/some-decision --reason "drop a stale sentence" --initiated-by agent --diff < change.diff
+```
+
+Amend writes the new body (a full replacement, or with `--diff` a unified diff
+applied to the stored body), keeps the record's id, kind, status, labels and links,
+and appends one entry to the record's `change-history`: when, by whom (the
+committer identity), who asked, why, and the diff. Every other guard still runs.
+It refuses, writing nothing, a missing or multi-line `--reason`, a missing or
+invalid `--initiated-by`, empty stdin, a `--diff` that does not apply, a body
+identical to the stored one, a missing record, and any `session` record.
+
+- **`--initiated-by`** says who asked for the edit. `operator` means a human
+  instructed this edit in the current session; `agent` means the agent proposed it.
+- **Attested, not verified.** The value is recorded as stated; lore cannot check it.
+- **Permanent.** The reason and the diff are kept for good, so amend is not a way
+  to scrub text: the removed body stays in the diff and in the vault's git history.
+- **Older lore.** A record carrying `change-history` needs a lore new enough to know
+  the field. An older lore refuses to write such a record with
+  `unsupported key 'change-history'`; pull trailhead to fix it.
 
 ## Unattended vault-commit signing
 

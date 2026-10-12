@@ -640,7 +640,11 @@ def check_active_adr_body_immutable(
     presence of a flag: the caller must independently derive it (see
     :func:`compute_stem_rewrite`) and it is checked with the same equality
     rigor as *prior_body*, so a change that happens to differ from both is
-    still rejected.
+    still rejected. ``lore record amend`` is the other caller: it passes its own
+    resolved new body, which is the one write that is allowed to change a frozen
+    body because it records the change durably in the record's
+    ``change-history``. Only this check reads *allowed_body*; every other guard
+    judges an amend exactly as it judges an update.
     """
     if kind != "adr":
         return None
@@ -657,9 +661,12 @@ def check_active_adr_body_immutable(
     return graph_mod.format_guard_message(
         "adr-active-immutable",
         f"{graph_mod.format_node(f'{kind}/{name}')} is {prior_status} — its body is "
-        "immutable. Supersede it; do not edit it directly. Flip --status "
-        "superseded with --supersedes adr/<successor> naming the record that "
-        "replaces it.",
+        "immutable. Do not edit it directly. For a material change, supersede "
+        "it: flip --status superseded with --supersedes adr/<successor> naming "
+        "the record that replaces it. To correct the body in place (a typo, a "
+        f"wrong link), run `lore record amend {graph_mod.format_node(f'{kind}/{name}')} --reason \"<why>\" "
+        "--initiated-by operator|agent` with the corrected body on stdin; the "
+        "reason and the diff are kept in the record's change-history.",
     )
 
 
@@ -755,6 +762,7 @@ def evaluate_design_guards(
     body: str = "",
     prior_status: str | None = None,
     prior_body: str | None = None,
+    allowed_body: str | None = None,
 ) -> tuple[list[str], list[str]]:
     """Evaluate the design graph guards for a spec/adr create/update/delete.
 
@@ -822,6 +830,7 @@ def evaluate_design_guards(
         prior_status=prior_status,
         prior_body=prior_body,
         new_body=body,
+        allowed_body=allowed_body,
     )
     if immutable_msg:
         return [immutable_msg], []
@@ -891,6 +900,7 @@ def evaluate_graph_guards(
     parent_supplied: bool = True,
     prior_body: str | None = None,
     prior_status: str | None = None,
+    allowed_body: str | None = None,
 ) -> tuple[list[str], list[str]]:
     """Route a create/update/delete to the graph guards for its *kind*.
 
@@ -911,6 +921,10 @@ def evaluate_graph_guards(
     them in (a fresh create, or a seam with no natural "prior" to read) gets no
     enforcement, never a false rejection, on that seam. See
     :func:`check_active_adr_body_immutable`.
+
+    *allowed_body* is the one body a frozen ``adr`` may change to (the amend
+    verb's own resolved new body); it is forwarded to that check and to nothing
+    else, so every other guard runs unchanged.
     """
     supersedes_errors = evaluate_supersedes_guard(
         kind=kind, name=name, sidecar=sidecar, vault_root=vault_root
@@ -938,6 +952,7 @@ def evaluate_graph_guards(
             deleting=deleting,
             prior_status=prior_status,
             prior_body=prior_body,
+            allowed_body=allowed_body,
         )
     else:
         errors, notices = [], []

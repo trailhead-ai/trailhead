@@ -1,4 +1,11 @@
-"""``lore record`` — create / update / delete / show vault records."""
+"""``lore record`` — create / update / amend / delete / show vault records.
+
+``update`` and ``amend`` share one read / resolve-body / apply / guard step
+(:func:`_read_apply_and_guard`) so a body is resolved and guarded identically by
+both. ``amend`` is the only write that may change a frozen ``adr`` body: it hands
+its own resolved new body to the guard's ``allowed_body`` seam and records the
+change in the record's ``change-history``.
+"""
 from __future__ import annotations
 
 import argparse
@@ -398,6 +405,8 @@ def cmd_record(args) -> int:
         return _cmd_record_create(args)
     if action == "update":
         return _cmd_record_update(args)
+    if action == "amend":
+        return _cmd_record_amend(args)
     if action == "delete":
         return _cmd_record_delete(args)
     if action == "show":
@@ -407,7 +416,7 @@ def cmd_record(args) -> int:
     print(
         f"lore record: unknown action {action!r}. "
         f"Use 'lore record create', 'lore record update', "
-        f"'lore record rename', 'lore record delete', or 'lore record show'.",
+        f"'lore record amend', 'lore record rename', 'lore record delete', or 'lore record show'.",
         file=sys.stderr,
     )
     return 1
@@ -1335,6 +1344,155 @@ class _UpdateAborted(Exception):
         self.code = code
 
 
+def _read_apply_and_guard(
+    location,
+    *,
+    stdin_text: str,
+    use_diff: bool,
+    has_stdin: bool,
+    notice_shown: set[str],
+    apply_flags=None,
+    status_set: str | None = None,
+    supplied_depends_on: list[str] | None = None,
+    parent_supplied: bool = False,
+    allow_new_body: bool = False,
+) -> tuple[dict, str, list[str], str]:
+    """The read / resolve-body / apply / guard half of a record read-modify-write.
+
+    Shared by ``record update`` and ``record amend`` so the two verbs cannot drift
+    apart on how a body is resolved (full stdin, ``--diff``, or unchanged) or which
+    guards judge the result. Returns ``(sidecar, new_body, notices, existing_body)``;
+    raises :class:`_UpdateAborted` when a step has already reported its own error.
+
+    MUST be called with the record's vault write lock held.
+
+    *apply_flags*, when given, maps the in-memory sidecar through the caller's
+    per-field mutations (``update``'s flags); ``amend`` has none. *allow_new_body*
+    hands the resolved new body to the ADR body freeze as the one value it may
+    become (``amend``); every other guard runs identically either way.
+    """
+    import json
+
+    from ..record import guards as guards_mod
+    from ..record import store as record_store_mod
+
+    # Load the existing sidecar so the field flags mutate the live record.
+    existing_sidecar: dict = {}
+    if location.sidecar_path.exists():
+        try:
+            existing_sidecar = json.loads(
+                location.sidecar_path.read_text(encoding="utf-8")
+            )
+        except (OSError, ValueError):
+            existing_sidecar = {}
+    if not isinstance(existing_sidecar, dict):
+        existing_sidecar = {}
+
+    existing_body = (
+        location.body_path.read_text(encoding="utf-8")
+        if location.body_path.exists()
+        else ""
+    )
+
+    # --- resolve the new body -------------------------------------
+    if use_diff:
+        # stdin is a unified diff applied to the existing body.
+        try:
+            new_body, _ = record_store_mod.apply_unified_diff(existing_body, stdin_text)
+        except record_store_mod.DiffRejectError as exc:
+            # Atomic reject: body byte-for-byte unchanged, no
+            # index update. Parseable one-line-per-hunk stderr for retry.
+            for header, reason in exc.rejected:
+                print(f"rejected hunk {header}: {reason}", file=sys.stderr)
+            raise _UpdateAborted() from None
+        except record_store_mod.DiffFormatError as exc:
+            print(f"error: unparseable diff: {exc}", file=sys.stderr)
+            raise _UpdateAborted() from None
+    elif has_stdin:
+        # Full-body replace.
+        new_body = stdin_text
+    else:
+        # Metadata-only: body unchanged. Emit the notice to
+        # stderr — exit stays 0. Printed once even when this runs
+        # twice (the relocation path's re-read).
+        new_body = existing_body
+        if "metadata-only" not in notice_shown:
+            notice_shown.add("metadata-only")
+            print(
+                "note: no stdin — body unchanged, metadata-only update",
+                file=sys.stderr,
+            )
+
+    sidecar = dict(existing_sidecar)
+    if apply_flags is not None:
+        sidecar = apply_flags(sidecar)
+
+    # Graph guards run against the record's CURRENT vault (where its
+    # parent/depends-on relatives live), with the mutated record
+    # overlaid. Blocking errors → nothing written; notices are held
+    # for the success path. A no-op for every kind that carries
+    # neither graph.
+    #
+    # ``--depends-on`` values are threaded in separately so the
+    # task-edge form check judges only what THIS invocation adds:
+    # an entry stored before that check existed must not block an
+    # unrelated update (a ``--status`` flip) to the record holding
+    # it, nor the ``--unset-depends-on`` that removes it.
+    #
+    # ``prior_status`` / ``prior_body`` are the on-disk values read
+    # above, BEFORE this call's mutations — keyed on what the
+    # record WAS, not what this write sets, so a ``--status
+    # superseded`` flip is judged as "was this active adr's body
+    # left alone", never as "is the record still active after".
+    guard_errors, notices = guards_mod.evaluate_graph_guards(
+        kind=location.kind,
+        name=location.name,
+        sidecar=sidecar,
+        body=new_body,
+        vault_root=location.vault_root,
+        status_set=status_set,
+        supplied_depends_on=list(supplied_depends_on or []),
+        parent_supplied=parent_supplied,
+        prior_status=existing_sidecar.get("status"),
+        prior_body=existing_body,
+        allowed_body=new_body if allow_new_body else None,
+    )
+    if guard_errors:
+        raise _UpdateAborted(_fail(guard_errors))
+
+    return sidecar, new_body, notices, existing_body
+
+
+def _pull_before_write(record_id: str, named_vault) -> None:
+    """Converge on the other devices' records before an existing record is rewritten.
+
+    The throttled, stderr-only, non-fatal implicit pull ``record create`` runs,
+    shared by ``update`` and ``amend``. It has to happen BEFORE the index
+    transaction and the write lock open: the pull fetches over the network and may
+    reindex, and neither belongs inside the read-modify-write's critical section.
+    That means locating the record twice — once here, unlocked, only to name the
+    vault to pull, and again authoritatively under the transaction. A record this
+    device has never seen simply gets no pull; the write then fails not-found as it
+    always did.
+    """
+    from . import resolve_state as resolve_state_mod
+
+    pull_target = Path(named_vault.path) if named_vault is not None else None
+    if pull_target is None:
+        try:
+            pull_target = Path(_find_current_record_location(record_id).vault_root)
+        except Exception:  # noqa: BLE001 — advisory: the real locate runs below
+            pull_target = None
+    if pull_target is not None and not resolve_state_mod.vault_is_resolving(pull_target):
+        from . import publish as publish_mod
+        from . import sync as sync_mod
+
+        sync_mod.implicit_pull(pull_target)
+        # Beside the freshness note: a stale automatic publish from a PRIOR
+        # write is surfaced here too, before this write's own trigger below.
+        publish_mod.warn_stale_publish(pull_target)
+
+
 def _cmd_record_update(args) -> int:
     """``lore record update RECORD_ID`` (with auto-move) — thin shell.
 
@@ -1414,6 +1572,11 @@ def _cmd_record_update(args) -> int:
     only ever a config-declared vault root, and ``move_record`` confines it too).
 
     Invalid/nonexistent RECORD_ID → non-zero.
+
+    A body change to a frozen ``adr`` is refused here (``[adr-active-immutable]``);
+    the refusal names ``lore record amend`` as the in-place correction path.
+    The read / body-resolve / guard step is :func:`_read_apply_and_guard`, shared
+    with ``record amend``.
     """
     import json
     from contextlib import ExitStack
@@ -1453,29 +1616,8 @@ def _cmd_record_update(args) -> int:
         return 1
     has_stdin = stdin_text != ""
 
-    # Converge on the other devices' records before writing — same throttled,
-    # stderr-only, non-fatal implicit pull ``record create`` runs. It has to
-    # happen HERE, before the index transaction and the write lock open below:
-    # the pull fetches over the network and may reindex, and neither belongs
-    # inside the read-modify-write's critical section. That means locating the
-    # record twice — once now, unlocked, only to name the vault to pull, and
-    # again authoritatively under the transaction. A record this device has
-    # never seen simply gets no pull; the update then fails not-found as it
-    # always did.
-    pull_target = Path(named_vault.path) if named_vault is not None else None
-    if pull_target is None:
-        try:
-            pull_target = Path(_find_current_record_location(record_id).vault_root)
-        except Exception:  # noqa: BLE001 — advisory: the real locate runs below
-            pull_target = None
-    if pull_target is not None and not resolve_state_mod.vault_is_resolving(pull_target):
-        from . import publish as publish_mod
-        from . import sync as sync_mod
-
-        sync_mod.implicit_pull(pull_target)
-        # Beside the freshness note: a stale automatic publish from a PRIOR
-        # write is surfaced here too, before this write's own trigger below.
-        publish_mod.warn_stale_publish(pull_target)
+    # Converge on the other devices' records before writing (see the helper).
+    _pull_before_write(record_id, named_vault)
 
     guard_notices: list[str] = []
     notice_shown: set[str] = set()
@@ -1526,114 +1668,46 @@ def _cmd_record_update(args) -> int:
                 source+destination lock pair, so a write that landed while it was
                 between locks is picked up instead of overwritten.
                 """
-                # Load the existing sidecar so the field flags mutate the live record.
-                existing_sidecar: dict = {}
-                if location.sidecar_path.exists():
-                    try:
-                        existing_sidecar = json.loads(
-                            location.sidecar_path.read_text(encoding="utf-8")
-                        )
-                    except (OSError, ValueError):
-                        existing_sidecar = {}
-                if not isinstance(existing_sidecar, dict):
-                    existing_sidecar = {}
 
-                existing_body = (
-                    location.body_path.read_text(encoding="utf-8")
-                    if location.body_path.exists()
-                    else ""
-                )
+                def apply_flags(sidecar: dict) -> dict:
+                    # (2) --- apply ALL field mutations to the sidecar IN MEMORY ----
+                    # Scope flags (--team etc.) become field-setters that drive the
+                    # merged scope; the non-scope per-field flags (--status /
+                    # --title / --keyword / --related-*) reuse the shared applier.
+                    # --title is optional here.
+                    for flag in _SCOPE_FLAGS:
+                        val = getattr(args, flag, None)
+                        if val:
+                            sidecar[flag] = val
 
-                # --- resolve the new body -------------------------------------
-                if use_diff:
-                    # stdin is a unified diff applied to the existing body.
-                    try:
-                        new_body, _ = record_store_mod.apply_unified_diff(
-                            existing_body, stdin_text
-                        )
-                    except record_store_mod.DiffRejectError as exc:
-                        # Atomic reject: body byte-for-byte unchanged, no
-                        # index update. Parseable one-line-per-hunk stderr for retry.
-                        for header, reason in exc.rejected:
-                            print(f"rejected hunk {header}: {reason}", file=sys.stderr)
-                        raise _UpdateAborted() from None
-                    except record_store_mod.DiffFormatError as exc:
-                        print(f"error: unparseable diff: {exc}", file=sys.stderr)
-                        raise _UpdateAborted() from None
-                elif has_stdin:
-                    # Full-body replace.
-                    new_body = stdin_text
-                else:
-                    # Metadata-only: body unchanged. Emit the notice to
-                    # stderr — exit stays 0. Printed once even when this runs
-                    # twice (the relocation path's re-read).
-                    new_body = existing_body
-                    if "metadata-only" not in notice_shown:
-                        notice_shown.add("metadata-only")
-                        print(
-                            "note: no stdin — body unchanged, metadata-only update",
-                            file=sys.stderr,
-                        )
+                    sidecar, field_errors = fields_mod.apply_record_fields(sidecar, args)
+                    if field_errors:
+                        raise _UpdateAborted(_fail(field_errors))
 
-                # (2) --- apply ALL field mutations to the sidecar IN MEMORY ----
-                # Scope flags (--team etc.) become field-setters that drive the merged
-                # scope; the non-scope per-field flags (--status / --title / --keyword
-                # / --related-*) reuse the shared applier. --title is optional here.
-                sidecar = dict(existing_sidecar)
-                for flag in _SCOPE_FLAGS:
-                    val = getattr(args, flag, None)
-                    if val:
-                        sidecar[flag] = val
+                    # Apply --label / --annotation / --unset-label / --unset-annotation.
+                    return fields_mod.apply_map_labels_annotations(
+                        sidecar,
+                        label_pairs=list(getattr(args, "label_pairs", None) or []),
+                        annotation_pairs=list(
+                            getattr(args, "annotation_pairs", None) or []
+                        ),
+                        unset_labels=list(getattr(args, "unset_labels", None) or []),
+                        unset_annotations=list(
+                            getattr(args, "unset_annotations", None) or []
+                        ),
+                    )
 
-                sidecar, field_errors = fields_mod.apply_record_fields(sidecar, args)
-                if field_errors:
-                    raise _UpdateAborted(_fail(field_errors))
-
-                # Apply --label / --annotation / --unset-label / --unset-annotation.
-                sidecar = fields_mod.apply_map_labels_annotations(
-                    sidecar,
-                    label_pairs=list(getattr(args, "label_pairs", None) or []),
-                    annotation_pairs=list(
-                        getattr(args, "annotation_pairs", None) or []
-                    ),
-                    unset_labels=list(getattr(args, "unset_labels", None) or []),
-                    unset_annotations=list(
-                        getattr(args, "unset_annotations", None) or []
-                    ),
-                )
-
-                # Graph guards run against the record's CURRENT vault (where its
-                # parent/depends-on relatives live), with the mutated record
-                # overlaid. Blocking errors → nothing written; notices are held
-                # for the success path. A no-op for every kind that carries
-                # neither graph.
-                #
-                # ``--depends-on`` values are threaded in separately so the
-                # task-edge form check judges only what THIS invocation adds:
-                # an entry stored before that check existed must not block an
-                # unrelated update (a ``--status`` flip) to the record holding
-                # it, nor the ``--unset-depends-on`` that removes it.
-                #
-                # ``prior_status`` / ``prior_body`` are the on-disk values read
-                # above, BEFORE this call's mutations — keyed on what the
-                # record WAS, not what this write sets, so a ``--status
-                # superseded`` flip is judged as "was this active adr's body
-                # left alone", never as "is the record still active after".
-                guard_errors, notices = guards_mod.evaluate_graph_guards(
-                    kind=location.kind,
-                    name=location.name,
-                    sidecar=sidecar,
-                    body=new_body,
-                    vault_root=location.vault_root,
+                sidecar, new_body, notices, _ = _read_apply_and_guard(
+                    location,
+                    stdin_text=stdin_text,
+                    use_diff=use_diff,
+                    has_stdin=has_stdin,
+                    notice_shown=notice_shown,
+                    apply_flags=apply_flags,
                     status_set=getattr(args, "status", None),
                     supplied_depends_on=list(getattr(args, "depends_on", None) or []),
                     parent_supplied=getattr(args, "parent", None) is not None,
-                    prior_status=existing_sidecar.get("status"),
-                    prior_body=existing_body,
                 )
-                if guard_errors:
-                    raise _UpdateAborted(_fail(guard_errors))
-
                 return sidecar, new_body, notices
 
             sidecar, new_body, guard_notices = read_apply_and_guard()
@@ -1788,6 +1862,189 @@ def _cmd_record_update(args) -> int:
     return 0
 
 
+_AMEND_INITIATORS = ("operator", "agent")
+
+
+def _cmd_record_amend(args) -> int:
+    """``lore record amend RECORD_ID --reason R --initiated-by operator|agent`` — thin shell.
+
+    Rewrites an existing record's body and appends one ``change-history`` entry
+    recording when (``at``), by whom (``by``, the committer identity every write is
+    stamped with), who asked for it (``initiated-by``), why (``reason``) and what
+    changed (``diff``, the unified diff between the stored — fence-neutralized —
+    bodies, so ``apply_unified_diff(stored_before, diff)`` reproduces the stored
+    body exactly). It is the one write that may change a frozen ``adr`` body: the
+    ADR body freeze accepts amend's own resolved new body through the guard's
+    ``allowed_body`` seam, and every other guard runs exactly as it does for
+    ``record update``.
+
+    The new body comes from stdin: a full replacement, or with ``--diff`` a unified
+    diff applied to the stored body (the same resolution ``record update`` uses —
+    :func:`_read_apply_and_guard`). Unlike ``update`` there is no metadata-only
+    mode: empty stdin is a refusal, never a quiet no-op. Nothing but the body and
+    the history changes — the record's id, kind, status, labels and links are
+    kept, and no other record is created or touched.
+
+    **Attested, not verified.** ``--initiated-by`` is recorded as stated:
+    ``operator`` means a human instructed this edit in the current session,
+    ``agent`` means the agent proposed it. Lore cannot check either claim.
+    **Not a scrub path.** The reason and the diff are permanent; the removed text
+    stays in the diff and in vault git history.
+
+    **Refusals** (each prints an ``error: ...`` line naming the input to fix, exits
+    non-zero, and writes nothing): a missing, empty or multi-line ``--reason``; a
+    missing or invalid ``--initiated-by``; empty stdin; a ``--diff`` that does not
+    apply; a body identical (after fence neutralization) to the stored one; a
+    record that does not exist; a ``session`` record, which ``record update`` and
+    flush write under the session lock.
+
+    ``--vault NAME`` locates the record in exactly that configured vault, as it
+    does for ``update``. The read-modify-write runs under the vault's write lock.
+    """
+    from contextlib import ExitStack
+
+    from .. import locking as locking_mod
+    from ..record import store as record_store_mod
+    from . import resolve_state as resolve_state_mod
+
+    record_id = _require_record_id(args)
+    if record_id is None:
+        return 1
+
+    reason = getattr(args, "reason", None)
+    if reason is None or not reason.strip():
+        print(
+            "error: --reason is required: give a non-empty one-line reason for the amendment",
+            file=sys.stderr,
+        )
+        return 1
+    if "\n" in reason or "\r" in reason:
+        print("error: --reason must be one line: remove the line breaks", file=sys.stderr)
+        return 1
+    initiated_by = getattr(args, "initiated_by", None)
+    if initiated_by is None:
+        print(
+            "error: --initiated-by is required: pass operator (a human instructed "
+            "this edit) or agent (the agent proposed it)",
+            file=sys.stderr,
+        )
+        return 1
+    if initiated_by not in _AMEND_INITIATORS:
+        print(
+            f"error: --initiated-by must be operator or agent, got {initiated_by!r}",
+            file=sys.stderr,
+        )
+        return 1
+    if record_id.split("/", 1)[0] == "session":
+        print(
+            "error: a session record cannot be amended: lore record update and "
+            "lore flush write it under the session lock",
+            file=sys.stderr,
+        )
+        return 1
+
+    named_vault = None
+    vault_name = getattr(args, "vault", None)
+    if vault_name:
+        named_vault = _resolve_named_vault(vault_name)
+        if named_vault is None:
+            return 1
+
+    use_diff = bool(getattr(args, "diff", False))
+    try:
+        stdin_text = _read_stdin_body()
+    except StdinSilentError as exc:
+        print(f"lore: {exc}", file=sys.stderr)
+        return 1
+    if stdin_text == "":
+        print(
+            "error: no body on stdin: pipe the new body, or pass --diff with a unified diff",
+            file=sys.stderr,
+        )
+        return 1
+
+    _pull_before_write(record_id, named_vault)
+
+    guard_notices: list[str] = []
+    try:
+        with record_store_mod.index_transaction() as conn, ExitStack() as locks:
+            if named_vault is not None:
+                location = record_store_mod.locate_record(
+                    record_id, vault_root=str(named_vault.path)
+                )
+            else:
+                location = _find_current_record_location(record_id)
+
+            if resolve_state_mod.vault_is_resolving(location.vault_root):
+                print(
+                    resolve_state_mod.refusal_notice(location.vault_root, "record amend"),
+                    file=sys.stderr,
+                )
+                raise _UpdateAborted()
+
+            locks.enter_context(locking_mod.vault_write_lock(location.vault_root))
+
+            sidecar, new_body, guard_notices, existing_body = _read_apply_and_guard(
+                location,
+                stdin_text=stdin_text,
+                use_diff=use_diff,
+                has_stdin=True,
+                notice_shown=set(),
+                allow_new_body=True,
+            )
+
+            stored_before = record_store_mod.neutralize_fences(existing_body)
+            stored_after = record_store_mod.neutralize_fences(new_body)
+            if stored_after == stored_before:
+                print(
+                    "error: the new body is identical to the stored body: nothing to amend",
+                    file=sys.stderr,
+                )
+                raise _UpdateAborted()
+
+            by = record_store_mod.resolve_committer_email()
+            if not by:
+                raise record_store_mod.ProvenanceError(
+                    "set git config user.email; *-by provenance is required "
+                    "and cannot be defaulted"
+                )
+            entry = {
+                "at": record_store_mod._now_utc_z(),
+                "by": by,
+                "initiated-by": initiated_by,
+                "reason": reason,
+                "diff": record_store_mod.make_unified_diff(stored_before, stored_after),
+            }
+            sidecar["change-history"] = [*sidecar.get("change-history", []), entry]
+
+            dest_root, dest_shared = _resolve_current_vault_shared(location)
+            new_id = record_store_mod.validate_and_write(
+                location=location, sidecar=sidecar, body=new_body, conn=conn,
+                shared=dest_shared,
+            )
+            conn.commit()
+    except _UpdateAborted as aborted:
+        return aborted.code
+    except (
+        record_store_mod.RecordNotFoundError,
+        record_store_mod.InvalidRecordIdError,
+    ) as exc:
+        prefix = "lore: " if named_vault is not None else "error: "
+        print(f"{prefix}{exc}", file=sys.stderr)
+        return 1
+    except Exception as exc:
+        return _handle_write_error(exc, "amend")
+
+    _print_guard_notices(guard_notices)
+    _print_record_url(dest_root, new_id)
+
+    from . import publish as publish_mod
+
+    publish_mod.request_publish(dest_root)
+    print(new_id)
+    return 0
+
+
 # Stated once per parser description instead of restated in every --unset-<field>
 # help string: the removers are a mechanical family, and repeating the same
 # sentence a dozen times is what made these two help outputs the most expensive
@@ -1912,6 +2169,57 @@ def add_record_subparser(sub) -> None:
     # Map flags (labels/annotations): dedicated branch.
     _add_map_field_flags(p_record_update)
     p_record_update.set_defaults(func=cmd_record)
+
+    # ``lore record amend RECORD_ID --reason R --initiated-by operator|agent``.
+    # --reason and --initiated-by are validated by the handler (not argparse's
+    # ``required``) so a missing or invalid value gets one message naming the fix.
+    p_record_amend = p_record_sub.add_parser(
+        "amend",
+        help="Amend a record's body in place (even a frozen adr), recording why",
+        usage="lore record amend RECORD_ID --reason REASON --initiated-by "
+              "{operator,agent} [--diff] [--vault NAME]",
+        description="Replace a record's body with the one piped on stdin (or, with "
+                    "--diff, apply a unified diff to it) and append a "
+                    "change-history entry: when, by whom, who asked, why, and the "
+                    "diff. This is the way to correct a frozen adr's body in "
+                    "place; plain 'record update' refuses it. The record's id, "
+                    "kind, status, labels and links are kept.",
+        epilog="--initiated-by: 'operator' means a human instructed this edit in "
+               "the current session; 'agent' means the agent proposed it. The "
+               "value is recorded as stated, not verified. The reason and the "
+               "diff are permanent: amend never scrubs text, because the removed "
+               "body stays in the diff and in vault git history. A record "
+               "carrying change-history needs a lore new enough to know the "
+               "field: an older lore refuses to write it (unsupported key "
+               "'change-history'); pull trailhead to fix that.",
+    )
+    p_record_amend.add_argument(
+        "record_id",
+        metavar="RECORD_ID",
+        help="The vault-relative record ID to amend (<kind>/<name>).",
+    )
+    p_record_amend.add_argument(
+        "--reason", default=None,
+        help="One line saying why the body is being amended (kept permanently).",
+    )
+    p_record_amend.add_argument(
+        "--initiated-by", dest="initiated_by", default=None,
+        metavar="{operator,agent}",
+        help="Who asked for the edit: 'operator' (a human instructed it in the "
+             "current session) or 'agent' (the agent proposed it). Recorded as "
+             "stated, not verified.",
+    )
+    p_record_amend.add_argument(
+        "--diff", action="store_true",
+        help="Treat piped stdin as a unified diff against the stored body "
+             "instead of the full new body.",
+    )
+    p_record_amend.add_argument(
+        "--vault", dest="vault", default=None, metavar="NAME",
+        help="Look for the record only in this configured vault, instead of "
+             "scanning every vault in config order.",
+    )
+    p_record_amend.set_defaults(func=cmd_record)
 
     # ``lore record rename RECORD_ID --title "<new title>"``.
     p_record_rename = p_record_sub.add_parser(
