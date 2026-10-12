@@ -93,7 +93,7 @@ Run `lore <subcommand> --help` for full options.
 To correct the body in place instead (a typo, a wrong link), pipe the corrected
 body to amend:
 
-```sh
+```
 lore record amend adr/some-decision --reason "fix the cited ticket number" --initiated-by operator < corrected.md
 lore record amend adr/some-decision --reason "drop a stale sentence" --initiated-by agent --diff < change.diff
 ```
@@ -117,7 +117,7 @@ identical to the stored one, a missing record, and any `session` record.
 
 ### Reading a record's history: `lore record history`
 
-```sh
+```
 lore record history adr/some-decision [--vault NAME]
 ```
 
