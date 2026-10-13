@@ -28,6 +28,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from conftest import CLI_PATH, write_vault_config
 from test_resolve_core import _Fixture, _commit, _diverge_on_status, _git, _init_vault
 
@@ -732,3 +734,77 @@ def test_a_settle_that_would_drop_an_entry_the_local_side_holds_is_refused(tmp_p
     local_stage = json.loads(_git(fx.vault, "show", f":3:{record_id}.json").stdout)
     assert [e["reason"] for e in local_stage["change-history"]] == ["e1", "e2"]
     assert (fx.vault / ".git" / "rebase-merge").exists(), "the rebase was left open, not completed"
+
+
+# ── a change-history no side can settle is held whole ─────────────────────
+
+
+def _diverge_on_contradictory_history(fx: _Fixture) -> str:
+    record_id = fx.create("task", "A Task")
+    a, b = _entry("a", "2026-06-18T08:00:00Z"), _entry("b", "2026-06-18T09:00:00Z")
+    c = _entry("c", "2026-06-18T10:00:00Z")
+    _set_history(fx.vault, record_id, [a, b])
+    fx.publish()
+    fx.clone_device_b()
+
+    _set_history(fx.other, record_id, [b, a])
+    fx.push_device_b()
+
+    _set_history(fx.vault, record_id, [a, b, c])
+    _commit(fx.vault, "device A edit")
+    return record_id
+
+
+def test_a_contradictory_change_history_is_reported_as_held_not_as_a_slot_to_settle(tmp_path):
+    fx = _Fixture(tmp_path)
+    record_id = _diverge_on_contradictory_history(fx)
+
+    r = fx.cli(["resolve", "default"])
+
+    assert r.returncode == 0, r.stderr
+    assert record_id in r.stdout and "change-history" in r.stdout
+    assert "held" in r.stdout
+    assert "--abort" in r.stdout
+    assert "Settle each" not in r.stdout
+    conflicts = json.loads(fx.cli(["resolve", "default", "--json"]).stdout)["conflicts"]
+    assert [(c["slot"], c["reason"]) for c in conflicts] == [("change-history", "unsettleable-change-history")]
+
+
+@pytest.mark.parametrize("side", ["--local", "--remote"])
+def test_taking_a_side_of_a_held_change_history_names_abort_and_repair(tmp_path, side):
+    fx = _Fixture(tmp_path)
+    record_id = _diverge_on_contradictory_history(fx)
+    fx.cli(["resolve", "default"])
+    staged_before = _git(fx.vault, "ls-files", "-s", "--", f"{record_id}.json").stdout
+
+    r = fx.cli(["resolve", "take", record_id, "--slot", "change-history", side])
+
+    assert r.returncode != 0
+    out = r.stderr + r.stdout
+    assert "lore resolve --abort" in out
+    assert "lore record amend" not in out
+    assert _git(fx.vault, "ls-files", "-s", "--", f"{record_id}.json").stdout == staged_before
+
+
+def test_a_settle_refused_by_the_append_only_baseline_names_abort_not_amend(tmp_path):
+    fx = _Fixture(tmp_path)
+    record_id = fx.create("task", "A Task")
+    e1, e2 = _entry("e1"), _entry("e2", "2026-06-18T10:00:00Z")
+    _set_history(fx.vault, record_id, [e1, e2])
+    fx.publish()
+    fx.clone_device_b()
+    path = fx.other / f"{record_id}.json"
+    sidecar = json.loads(path.read_text(encoding="utf-8"))
+    sidecar["change-history"] = [e1]
+    sidecar["status"] = "done"
+    path.write_text(json.dumps(sidecar, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    fx.push_device_b()
+    fx.cli(["record", "update", record_id, "--title", "Local Title"], stdin_text="")
+    _commit(fx.vault, "device A edit")
+
+    r = fx.cli(["resolve", "default"])
+
+    assert r.returncode != 0
+    out = r.stderr + r.stdout
+    assert "lore resolve --abort" in out
+    assert "lore record amend" not in out

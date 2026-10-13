@@ -966,3 +966,41 @@ def test_explicit_prior_histories_replace_the_stored_sidecar_as_the_baseline(rs,
     with pytest.raises(rs.RecordValidationError) as exc:
         rs.validate_stamp_neutralize(loc, ok, "b", prior_histories=[_history(2), _history(3)])
     assert "append-only" in str(exc.value)
+
+
+# ---------------------------------------------------------------------------
+# apply_unified_diff: file headers between hunks, and parse cost
+# ---------------------------------------------------------------------------
+
+
+def test_a_file_header_after_a_closed_hunk_is_skipped_not_read_as_a_deletion(rs):
+    body = "a\nb\nc\nd\ne\nf\n"
+    diff = (
+        "--- a/one\n+++ b/one\n"
+        "@@ -1,2 +1,2 @@\n a\n-b\n+B\n"
+        "--- a/two\n+++ b/two\n"
+        "@@ -5,1 +5,1 @@\n-e\n+E\n"
+    )
+
+    assert rs.apply_unified_diff(body, diff) == ("a\nB\nc\nd\nE\nf\n", [])
+
+
+def test_parsing_a_large_hunk_visits_each_line_a_bounded_number_of_times(rs, monkeypatch):
+    visits = 0
+
+    class _Counting(list):
+        def __iter__(self):
+            nonlocal visits
+            for item in super().__iter__():
+                visits += 1
+                yield item
+
+    real = rs._Hunk
+    monkeypatch.setattr(rs, "_Hunk", lambda **kw: real(**{**kw, "lines": _Counting()}))
+    n = 2000
+    old = "".join(f"old {i}\n" for i in range(n))
+    new = "".join(f"new {i}\n" for i in range(n))
+
+    rs._parse_hunks(rs.make_unified_diff(old, new))
+
+    assert visits < 6 * n, f"{visits} line visits for a {2 * n}-line hunk is not linear"
