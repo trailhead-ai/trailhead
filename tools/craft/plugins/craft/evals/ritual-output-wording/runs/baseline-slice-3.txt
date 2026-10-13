@@ -1,0 +1,15 @@
+**Chosen slice:** The override slice, from `spec/overdue-handling` (chosen as smallest-next above the value floor).
+
+**Value claim:** A librarian can lift a fee block for a borrower who is stuck at the desk, with a record of who did it and why, so the block stops being a dead end for the borrower.
+
+**Visual surface:** This slice touches no visual surface beyond the desk screen an earlier slice already covers, so no enumerated states apply and the parent task will carry no `## Enumerated states` section.
+
+**Makes fully green:**
+- **AC3** — the checkout block above ten pounds in late fees, with the librarian override.
+- **AC4** — the record of who granted an override and why, shown in the borrower's history.
+
+**Makes only partially green:** none. This slice claims no partial coverage.
+
+The parent task `task/the-override-slice` has not been written yet, and nothing has been handed to `/craft:plan`. If you want to reject or adjust this claim, now is the time.
+
+AC3, AC4

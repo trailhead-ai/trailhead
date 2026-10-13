@@ -1,0 +1,10 @@
+Six of the seven criteria still have work left; only AC2 (per-category fee with the replacement-price cap) is fully done.
+
+- **AC1 – overdue flag within one minute:** the flag does appear, but it was only checked "the morning after" a midnight rollover, so the one-minute timing is still to be demonstrated (and fixed if it isn't met).
+- **AC3 – checkout block over ten pounds:** the block and clearing by payment work, but lifting the block by librarian override is not built.
+- **AC4 – override recording:** not started; it needs to record who granted it and why, and show in the borrower's history.
+- **AC5 – same-day fee stop on return:** not started, including the case where the return is scanned after closing.
+- **AC6 – reminders:** the day-after message is sent, but the three-days-before message is not built, and nothing in the note confirms that no other automatic messages go out for the same loan.
+- **AC7 – monthly fees report:** not started; it needs per-category charged and waived totals that reconcile with the per-borrower ledgers.
+
+AC1 and AC3 are my reading rather than the note's: the note presents both as done, but what it describes falls short of the spec's wording.
