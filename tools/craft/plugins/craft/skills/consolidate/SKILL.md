@@ -307,6 +307,15 @@ lore record update <referrer-id> --vault <name> \
 
 A body-only update leaves the stale edge in place, and Step 6 then counts it as dangling.
 
+**A referrer in a frozen status takes its body rewrite or annotation through `amend`.** An ADR or
+spec past `draft`, any decision, and a task that is `done`, `dropped` or `superseded` refuse a plain
+body update. Repoint or annotate such a referrer with
+`lore record amend <referrer-id> --vault <name> --diff --reason "<fold>" --initiated-by agent`,
+piping a unified diff against the stored body; the reason names the fold ("fold
+`lesson/<folded-name>` into `lesson/<survivor-name>`"), and the change lands in the record's change
+history. A reason and its diff are permanent vault text, so no secret goes in either. The sidecar
+edge pair above is metadata and lands on a frozen record as it is.
+
 **History** — a statement about what a past pass produced ("this postmortem wrote `lesson/<name>`"),
 in a record a person or an agent authored. The statement is true about a record that no longer
 exists, and substituting the survivor's name makes it false: that is not the lesson that pass wrote.
@@ -341,17 +350,19 @@ A ledger entry is an audit fact about a moment, not a pointer a reader follows. 
 sites in the Step 6 numbers and move on** — they are not dangling references, because they were
 never references.
 
-**A referrer the CLI refuses to write is a fourth disposition: report it, and do not delete.** The
-clearest case is a **body** reference inside an `adr` past `draft`: lore freezes that body outright,
-and the exemption the rename sweep uses to rewrite links through a freeze is not available to
-`record update`. The freeze is keyed on the body alone, so a sidecar-only edge repoint on the same
-frozen record still lands — check which one you are holding before concluding the referrer is
-unwritable. Do not force it, and do not work around it by leaving the reference to dangle: a folded
-record with an unwritable referrer stays **unfolded**, its survivor keeps the merged content, and
-the pass reports the site and the record it could not retire. Discovering this while holding delete
-authority is the moment to stop, not to improvise.
+**A referrer that `amend` itself refuses is a fourth disposition: report it, and do not delete.** A
+frozen navigation or history referrer is repointed or annotated through `amend`, as above, so this
+disposition is what remains: a referrer `amend` cannot write, such as a `session` record (a
+tool-managed log this ritual never writes). Check which write you are holding before concluding a
+referrer is unwritable: a frozen body takes `amend`, and the freeze is keyed on the body alone, so a
+sidecar-only edge repoint lands on the same record regardless. Do not force it, and do not work
+around it by leaving the reference to dangle: a folded record with an unwritable referrer stays
+**unfolded**, its survivor keeps the merged content, and the pass reports the site and the record it
+could not retire. Discovering this while holding delete authority is the moment to stop, not to
+improvise.
 
-Every rewrite and every annotation is a `lore record update` call. None of them is a file write.
+Every rewrite and every annotation is a `lore record update` call, or `lore record amend` for a
+frozen referrer's body. None of them is a file write.
 
 **Verify by counting, not by re-querying.** Do not re-run the facet query and expect nothing — it is
 symmetric, and its reverse rows survive a delete until the next `lore reindex`, so "returns nothing"

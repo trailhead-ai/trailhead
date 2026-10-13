@@ -935,10 +935,10 @@ published: scan everything not already on the remote instead, with
 `git log HEAD --not --remotes=origin -p`. That form needs no upstream, lists the full outgoing
 history, and goes empty on its own once the branch is pushed.
 
-On a match, do **not** push that repo. Take the blocked path instead —
-`lore record update task/<parent-name> --vault <elected-vault> --status blocked --diff`, piping a
-unified diff that **appends** the blocked note — and name the remediation in the report: rotate the
-credential, then rewrite history before attempting the push again.
+On a match, do **not** push that repo. Take the blocked path instead — [Blocked-Path
+Write](#blocked-path-write) against `task/<parent-name>`, which appends the blocked note — and name
+the remediation in the report: rotate the credential, then rewrite history before attempting the
+push again.
 
 **This scan gates every push, the blocked path's included.** Each escalation site's "(if commits
 exist)" push routes through this phase, so it inherits the scan: a run blocked *because* the scan
@@ -980,15 +980,20 @@ makes every later resume skip-and-report. Run any raw git stderr through the cre
 scrub before it enters report or record text.
 
 **Close the run.** With every child terminal, the flow-out checklist ticked, and every repo's push
-settled, set the parent `done`:
-`lore record update task/<parent-name> --vault <elected-vault> --status done`, re-asserting
-`--label craft/branch=<bare-branch>` at close. The completion guard refuses this while any child is
-non-terminal (it names them); the closing session evaluates the state-coverage gate and the
-observation gate before issuing the completion update, composing with that guard and with each other
-— all three fire on the same close and none shadows another's refusal, and a parent carrying no
-`## Enumerated states` or no `**Covers:**` field closes exactly as it does today. A parent closed
-without a `## Flow-out` section gets a non-blocking flow-out reminder — treat that reminder as a
-sign the ritual above was skipped, not as a nuisance.
+settled, set the parent `done`. `done` freezes the parent's body, so the close is one write that
+carries everything the run still owes the body: the final `## End Phases` tick, the
+`craft/phase-boundary` label, and the `## Run Metrics` run-total row (see Run Metrics totals below)
+are written by the same
+`lore record update task/<parent-name> --vault <elected-vault> --status done --diff --label craft/branch=<bare-branch> --label craft/phase-boundary=<sha>`
+invocation that closes the parent, piping the unified diff that ticks the line and appends the row.
+Nothing is written to the parent body after it: a later body write is refused with the freeze's
+amend message, and the close is never followed by a separate tick, row, or label write. The
+completion guard refuses this while any child is non-terminal (it names them); the closing session
+evaluates the state-coverage gate and the observation gate before issuing the completion update,
+composing with that guard and with each other — all three fire on the same close and none shadows
+another's refusal, and a parent carrying no `## Enumerated states` or no `**Covers:**` field closes
+exactly as it does today. A parent closed without a `## Flow-out` section gets a non-blocking
+flow-out reminder — treat that reminder as a sign the ritual above was skipped, not as a nuisance.
 
 **The state-coverage gate.** A parent carrying `## Enumerated states` is refused `done` while any
 enumerated state has no matching section in the design doc named by the parent's `craft/design-doc`
@@ -1100,13 +1105,14 @@ the spec settles as `automated-assertion` can still close on a recorded `manual-
 gate certifies it regardless. Do not over-read a clean exit as pinning that the *right* method was
 used per criterion; it pins only that *a* sanctioned method was recorded.
 
-**Run Metrics totals.** At close, total the `## Run Metrics` block's rows into a final run-total
-row: tasks, total dispatches, dispatches-per-task, end-to-end wall clock from the first dispatch to
-the last terminal status, lessons written this run (or `write-failed` when the postmortem lost a
-write), and the retrieval outcome (lessons loaded, `empty`, or `error`) from the claim-time lesson
-query — both taken from the `## End Phases` carry-forward note Phase 5 wrote, so a resume between
-the phases still has them. That row carries its own columns, distinct from the per-task ones above
-it: `| Run total | Tasks | Dispatches | Dispatches/task | Wall clock | Lessons | Retrieval |`. The
+**Run Metrics totals.** Before the close write, total the `## Run Metrics` block's rows into a final
+run-total row; that row rides the close write's diff, never a write of its own. It carries tasks,
+total dispatches, dispatches-per-task, end-to-end wall clock from the first dispatch to the last
+terminal status, lessons written this run (or `write-failed` when the postmortem lost a write), and
+the retrieval outcome (lessons loaded, `empty`, or `error`) from the claim-time lesson query — both
+taken from the `## End Phases` carry-forward note Phase 5 wrote, so a resume between the phases
+still has them. That row carries its own columns, distinct from the per-task ones above it:
+`| Run total | Tasks | Dispatches | Dispatches/task | Wall clock | Lessons | Retrieval |`. The
 completion report's metrics line names lessons written and lessons consumed this run — consumed is
 the claim-time loaded count this row's `Retrieval` column carries, rendered as `error` when the
 query errored rather than as a zero — alongside the existing per-phase outcomes, so the operator
@@ -1164,6 +1170,14 @@ persistent failure here escalates immediately rather than being logged and carri
 the postmortem's own lesson-write failure is at [Phase 5](#phase-5-flow-out). A phase is never
 reported ticked while its boundary write has failed.
 
+**Phase 6's tick is the one exception to "a write of its own".** `done` freezes the parent body, so
+the final tick, the `craft/phase-boundary` label, and the `## Run Metrics` run-total row are written
+by the same
+`lore record update … --status done --diff --label craft/branch=<bare-branch> --label craft/phase-boundary=<sha>`
+invocation that closes the parent, and nothing is written to the parent body after it. If that close
+is refused, the parent stays `in-progress` with nothing ticked, so the next resume re-enters Phase
+6.
+
 **Re-entering a resume branch requires a clean-working-tree precondition, but which guarantee is
 available differs by branch — the two `in-progress` cases at [Determine the task
 shape](#determine-the-task-shape):**
@@ -1217,10 +1231,21 @@ something — a task or the parent plan — takes `blocked`. Each one writes it 
 whichever record the escalation is against —
 `lore record update task/<name> --vault <elected-vault> --status blocked --diff`, piping a unified
 diff that **appends** the blocked note (bare stdin is a full-body replace and would destroy the
-record) — plus the credential-pattern scrub and, if commits exist, the [Phase
-6](#phase-6-close-and-completion-report) blocked-path push and its standalone `craft/branch` write;
-body-content contract and full rules govern this write, exactly as they govern every other status
-write.
+record).
+
+**A record already `done` is the exception: reopen it, then write the note.** `done` freezes the
+body, and the freeze judges the status *before* the write, so the one-step form is refused when the
+record is `done` — the case drive's post-build push escalation reaches, with the parent closed
+before the push or PR tail failed. Reopen it with a status-only write,
+`lore record update task/<name> --vault <elected-vault> --status blocked`, then write the note with
+`lore record update task/<name> --vault <elected-vault> --diff` against the now-`blocked` record. A
+`blocked` task is not frozen, so that second write is never refused for the freeze. If the note
+write fails, retry it against the `blocked` record (re-read the body first) rather than reverting
+the status: the status-only write already landed, and the retry is the whole recovery. Any other
+record takes the one-step form above. Either way the write carries the credential-pattern scrub and,
+if commits exist, is followed by the [Phase 6](#phase-6-close-and-completion-report) blocked-path
+push and its standalone `craft/branch` write; the `blocked` body-content contract and full rules
+govern this write, exactly as they govern every other status write.
 
 ## Model Selection
 
@@ -1259,7 +1284,10 @@ troubleshooting, architecture) where fresh eyes matter.
    planning: dispatch the `planner` subagent (isolated, Opus) or invoke the `planning` skill inline.
    Do NOT use `EnterPlanMode` — plan mode blocks writes to the plan vault.
 3. **Drop the task** — the feature doesn't need this part. Reshape the child task record to
-   `superseded` (or `dropped`) via `lore record update`, note why, continue with remaining tasks.
+   `superseded` (or `dropped`) via `lore record update`, with the why-note in the **same
+   invocation** as the flip (`--status superseded --diff`, piping the diff that appends the note),
+   running the note through the credential-pattern scrub first. `superseded` freezes the body, so a
+   note written after the flip is refused. Continue with remaining tasks.
 
 **If the run ends here** (none of the above resolves it in-session): write `blocked` on the plan
 (`task/<parent-name>`) — see [Blocked-Path Write](#blocked-path-write).

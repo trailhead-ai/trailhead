@@ -176,6 +176,13 @@ clear it, and the next action.
 the two flags combine in one invocation. Piping the note over bare stdin instead is a **full-body
 replace**: it silently destroys everything the task record already held.
 
+**A task already `done` takes the note in two steps.** `done` freezes the body, and the freeze
+judges the status before the write, so the one-step form above is refused. Reopen the task with a
+status-only write, `lore record update task/<name> --status blocked`, then append the note with
+`lore record update task/<name> --diff` against the now-`blocked` task, which is not frozen. If the
+note write fails, retry it against the `blocked` task; do not revert the status. Every other task
+takes the one-step form.
+
 If commits exist when a task goes `blocked`, they are pushed on the task's branch (same
 `--set-upstream` rule as `done`) and `craft/branch` is (re-)written with its own
 `lore record update task/<name> --label craft/branch=<bare-branch>` — never the close command, which
