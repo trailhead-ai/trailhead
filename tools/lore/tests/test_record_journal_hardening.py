@@ -303,3 +303,39 @@ def test_a_record_inside_the_vault_is_still_written_and_recovered(tmp_path):
 
     assert _paths(vault, rid)[0].read_text() == BODY
     assert _history(vault, rid) == []
+
+
+REMEDY = "inspect it, then remove"
+
+
+def test_a_journal_blocked_by_an_escaping_kind_directory_names_the_file_and_the_remedy(tmp_path):
+    vault, state = _make_vault(tmp_path)
+    rid = _create(vault, state)
+    _crash_amend(vault, state, rid)
+    jfile = next(iter(_jdir(vault, state).iterdir()))
+    _escape_kind_dir(vault, tmp_path, rid)
+
+    r = _run(
+        ["record", "create", "--kind", "lesson", "--title", "Other", "--keyword", "k"],
+        vault=vault, state_dir=state, stdin_text=BODY,
+    )
+
+    assert r.returncode != 0
+    assert str(jfile) in r.stderr, r.stderr
+    assert "blocks" in r.stderr, r.stderr
+    assert REMEDY in r.stderr, r.stderr
+
+
+def test_an_unsafe_journal_directory_names_the_directory_and_the_remedy(tmp_path):
+    vault, state = _make_vault(tmp_path)
+    rid = _create(vault, state)
+    _crash_amend(vault, state, rid)
+    jdir = _jdir(vault, state)
+    jdir.chmod(0o750)
+
+    r = _run(["record", "show", rid], vault=vault, state_dir=state)
+
+    assert r.returncode != 0
+    assert str(jdir) in r.stderr, r.stderr
+    assert "blocks" in r.stderr, r.stderr
+    assert REMEDY in r.stderr, r.stderr
