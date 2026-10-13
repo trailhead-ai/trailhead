@@ -1307,3 +1307,27 @@ def test_freeze_check_never_loads_the_vault_graph(tmp_path, monkeypatch, kind, s
     assert same == []
     assert any("[frozen-body]" in e for e in refused)
     assert calls == []
+
+
+@pytest.mark.parametrize(
+    "prior,new,expected",
+    [
+        ("a\nb\n", "a\r\nb\r\n", "authored-content line 1 differs only in its line terminator"),
+        ("a\nb\n", "a\nb\rc\n", "authored-content line 2 differs only in its line terminator"),
+        ("a\n", "a\x0c\n", "authored-content line 1 is now 'a\\x0c'"),
+        ("a\n", "a \n", "authored-content line 1 is now 'a\\u2028'"),
+        ("a\nb", "a\nb\n", "authored-content line 2 differs only in its line terminator"),
+        ("", "a\n", "authored-content line 1 was added: 'a'"),
+        ("a\n", "", "authored-content line 1 was removed: 'a'"),
+        ("a\n", "\n", "authored-content line 1 is now ''"),
+        ("a\n", "a\nb\n", "authored-content line 2 was added: 'b'"),
+        ("a\nb\n", "a\n", "authored-content line 2 was removed: 'b'"),
+    ],
+)
+def test_frozen_body_describes_the_first_differing_line_on_commonmark_boundaries(prior, new, expected):
+    g = _guards()
+    msg = g.check_frozen_body(
+        kind="decision", name="foo", prior_status="active", prior_body=prior, new_body=new,
+    )
+    assert msg is not None
+    assert expected in msg

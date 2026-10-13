@@ -328,10 +328,11 @@ the next reader — human or the next pass — finds the stop recorded rather th
 silence. The spec is `ready`, so its body is frozen and a plain `lore record update` of the note is
 refused; the note goes through `amend`, as a separate write from the label:
 `lore record amend spec/<spec-name> --reason "<why the loop stopped>" --initiated-by agent --base <revision>`,
-piping the whole body with the note added. Read the spec fresh immediately before this write — the
-`revision` from that read is the `--base`, so a body that changed in between is refused rather than
-overwritten — and run the note through the credential-scrub first. A reason and the amended body
-stay in the vault's change history permanently, so no secret goes in either.
+piping the whole body with the note added. The reason is one line, at most 500 characters; the
+detail goes in the body. Read the spec fresh immediately before this write — the `revision` from
+that read is the `--base`, so a body that changed in between is refused rather than overwritten —
+and run the note through the credential-scrub first. A reason and the amended body stay in the
+vault's change history permanently, so no secret goes in either.
 
 ### 7. Choose the next slice
 

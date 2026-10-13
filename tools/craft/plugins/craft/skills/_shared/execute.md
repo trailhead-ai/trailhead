@@ -982,18 +982,19 @@ scrub before it enters report or record text.
 **Close the run.** With every child terminal, the flow-out checklist ticked, and every repo's push
 settled, set the parent `done`. `done` freezes the parent's body, so the close is one write that
 carries everything the run still owes the body: the final `## End Phases` tick, the
-`craft/phase-boundary` label, and the `## Run Metrics` run-total row (see Run Metrics totals below)
-are written by the same
+`craft/phase-boundary` label, the `## Run Metrics` run-total row (see Run Metrics totals below), and
+the `## Measurement tally` section (see Measurement tally below) are written by the same
 `lore record update task/<parent-name> --vault <elected-vault> --status done --diff --label craft/branch=<bare-branch> --label craft/phase-boundary=<sha>`
-invocation that closes the parent, piping the unified diff that ticks the line and appends the row.
-Nothing is written to the parent body after it: a later body write is refused with the freeze's
-amend message, and the close is never followed by a separate tick, row, or label write. The
-completion guard refuses this while any child is non-terminal (it names them); the closing session
-evaluates the state-coverage gate and the observation gate before issuing the completion update,
-composing with that guard and with each other — all three fire on the same close and none shadows
-another's refusal, and a parent carrying no `## Enumerated states` or no `**Covers:**` field closes
-exactly as it does today. A parent closed without a `## Flow-out` section gets a non-blocking
-flow-out reminder — treat that reminder as a sign the ritual above was skipped, not as a nuisance.
+invocation that closes the parent, piping the unified diff that ticks the line and appends the row
+and the tally section. Nothing is written to the parent body after it: a later body write is refused
+with the freeze's amend message, and the close is never followed by a separate tick, row, tally, or
+label write. The completion guard refuses this while any child is non-terminal (it names them); the
+closing session evaluates the state-coverage gate and the observation gate before issuing the
+completion update, composing with that guard and with each other — all three fire on the same close
+and none shadows another's refusal, and a parent carrying no `## Enumerated states` or no
+`**Covers:**` field closes exactly as it does today. A parent closed without a `## Flow-out` section
+gets a non-blocking flow-out reminder — treat that reminder as a sign the ritual above was skipped,
+not as a nuisance.
 
 **The state-coverage gate.** A parent carrying `## Enumerated states` is refused `done` while any
 enumerated state has no matching section in the design doc named by the parent's `craft/design-doc`
@@ -1106,12 +1107,13 @@ gate certifies it regardless. Do not over-read a clean exit as pinning that the 
 used per criterion; it pins only that *a* sanctioned method was recorded.
 
 **Run Metrics totals.** Before the close write, total the `## Run Metrics` block's rows into a final
-run-total row; that row rides the close write's diff, never a write of its own. It carries tasks,
-total dispatches, dispatches-per-task, end-to-end wall clock from the first dispatch to the last
-terminal status, lessons written this run (or `write-failed` when the postmortem lost a write), and
-the retrieval outcome (lessons loaded, `empty`, or `error`) from the claim-time lesson query — both
-taken from the `## End Phases` carry-forward note Phase 5 wrote, so a resume between the phases
-still has them. That row carries its own columns, distinct from the per-task ones above it:
+run-total row; that row rides the close write's diff, never a write of its own, and so does the
+`## Measurement tally` section below. It carries tasks, total dispatches, dispatches-per-task,
+end-to-end wall clock from the first dispatch to the last terminal status, lessons written this run
+(or `write-failed` when the postmortem lost a write), and the retrieval outcome (lessons loaded,
+`empty`, or `error`) from the claim-time lesson query — both taken from the `## End Phases`
+carry-forward note Phase 5 wrote, so a resume between the phases still has them. That row carries
+its own columns, distinct from the per-task ones above it:
 `| Run total | Tasks | Dispatches | Dispatches/task | Wall clock | Lessons | Retrieval |`. The
 completion report's metrics line names lessons written and lessons consumed this run — consumed is
 the claim-time loaded count this row's `Retrieval` column carries, rendered as `error` when the
@@ -1141,6 +1143,10 @@ defect only visible across task boundaries), and the citation must be spot-check
 section, not just the digit. **Revisit condition:** if more than 2 local-to-one-task Criticals
 accrue across the first 5 executed plans post-rollout, restore the per-task quality charter. This is
 a stated, not-yet-mechanically-enforced condition — record the tally each plan; do not auto-restore.
+Total it before the close write and append it to the parent body as a `## Measurement tally` section
+in that write's diff, in the same `--status done --diff` that carries the final tick and the
+run-total row; `done` freezes the body, so a tally appended after the close is refused. The
+completion report repeats the tally.
 
 ### Phase progress and resumability
 
@@ -1235,9 +1241,10 @@ record).
 
 **A record already `done` is the exception: reopen it, then write the note.** `done` freezes the
 body, and the freeze judges the status *before* the write, so the one-step form is refused when the
-record is `done` — the case drive reaches when, after a PR-tail escalation, its in-flight push hits
-the [Phase 6](#phase-6-close-and-completion-report) pre-push scan with the parent already closed at
-slice close. Reopen it with a status-only write,
+record is `done` — the case drive reaches when an escalation fires after the build phase's own
+[Phase 6](#phase-6-close-and-completion-report) close has already set the parent `done` — for
+example a PR-tail escalation whose in-flight push hits the pre-push scan on that closed parent.
+Reopen it with a status-only write,
 `lore record update task/<name> --vault <elected-vault> --status blocked`, then write the note with
 `lore record update task/<name> --vault <elected-vault> --diff` against the now-`blocked` record. A
 `blocked` task is not frozen, so that second write is never refused for the freeze. If the note

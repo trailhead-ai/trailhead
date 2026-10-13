@@ -590,16 +590,26 @@ def _is_frozen(kind: str, prior_status: str | None) -> bool:
 
 
 def _first_differing_line(prior: str, new: str) -> str:
-    """Name the first authored line where *new* departs from *prior*."""
-    prior_lines = prior.splitlines()
-    new_lines = new.splitlines()
+    """Name the first authored-content line where *new* departs from *prior*.
+
+    Lines are split on the CommonMark boundaries :mod:`sections` uses, with
+    their terminators kept, so a change confined to a line ending is named as
+    such rather than skipped.
+    """
+    prior_lines = sections_mod._split_lines(prior)
+    new_lines = sections_mod._split_lines(new)
     for n, (old_line, new_line) in enumerate(zip(prior_lines, new_lines), start=1):
-        if old_line != new_line:
-            return f"authored line {n} is now {_clip(new_line)}"
+        if old_line == new_line:
+            continue
+        old_text = sections_mod._content(old_line)
+        new_text = sections_mod._content(new_line)
+        if old_text == new_text:
+            return f"authored-content line {n} differs only in its line terminator"
+        return f"authored-content line {n} is now {_clip(new_text)}"
     n = min(len(prior_lines), len(new_lines)) + 1
     if len(new_lines) > len(prior_lines):
-        return f"authored line {n} was added: {_clip(new_lines[n - 1])}"
-    return f"authored line {n} was removed: {_clip(prior_lines[n - 1])}"
+        return f"authored-content line {n} was added: {_clip(sections_mod._content(new_lines[n - 1]))}"
+    return f"authored-content line {n} was removed: {_clip(sections_mod._content(prior_lines[n - 1]))}"
 
 
 def _clip(line: str) -> str:

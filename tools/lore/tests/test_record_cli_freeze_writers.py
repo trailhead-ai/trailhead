@@ -10,7 +10,7 @@ writer meets; a writer with no test below is a writer nothing pins.
 Writer inventory (the parent's Given Axioms):
 
 1. drive checkpoints          -> ``--diff`` append of ``## Driver run`` on a ``done`` task
-2. execute close              -> one ``--status done --diff`` carrying tick + run-total row
+2. execute close              -> one ``--status done --diff`` carrying tick + run-total row + measurement tally
 3. execute INVALIDATED note   -> note rides ``--status superseded`` on the child
 4. drive / slice drop remedy  -> note rides ``--status dropped`` on the slice parent
 5. execute blocked note       -> on a ``done`` parent: status-only reopen, then the note
@@ -83,6 +83,7 @@ PARENT_CLOSED = (
     PARENT_OPEN.replace("- [ ] Phase 6: Close", "- [x] Phase 6: Close")
     + "| Run total | 1 | 1 | 1.0 |\n"
 )
+MEASUREMENT_TALLY = "\n## Measurement tally\n\n- correctness Important: 1, local-to-one-task (task 2)\n"
 CLOSE_FLAGS = ["--status", "done", "--diff", "--label", "craft/branch=feature",
                "--label", "craft/phase-boundary=abc1234"]
 
@@ -111,6 +112,32 @@ def test_execute_close_carries_the_last_tick_and_run_total_in_the_done_write(tmp
     assert side["status"] == "done"
     assert side["labels"]["craft/phase-boundary"] == "abc1234"
     assert side["labels"]["craft/branch"] == "feature"
+
+
+def test_execute_close_carries_the_measurement_tally_in_the_done_write(tmp_path):
+    """The tally section rides the same ``--status done --diff`` close write."""
+    vault, state = _make_vault(tmp_path)
+    rid = _create(vault, state, "task", "in-progress", PARENT_OPEN, "Plan parent")
+    closed = PARENT_CLOSED + MEASUREMENT_TALLY
+
+    r = _update(vault, state, rid, _diff(PARENT_OPEN, closed), *CLOSE_FLAGS)
+
+    assert r.returncode == 0, r.stderr
+    assert _md(vault, rid) == closed
+    assert _sidecar(vault, rid)["status"] == "done"
+
+
+def test_execute_measurement_tally_appended_after_the_done_close_is_refused(tmp_path):
+    """Why the tally joined the close write: a later ``--diff`` append hits the freeze."""
+    vault, state = _make_vault(tmp_path)
+    rid = _create(vault, state, "task", "in-progress", PARENT_OPEN, "Plan parent")
+    assert _update(vault, state, rid, _diff(PARENT_OPEN, PARENT_CLOSED), *CLOSE_FLAGS).returncode == 0
+
+    r = _update(vault, state, rid, _diff(PARENT_CLOSED, PARENT_CLOSED + MEASUREMENT_TALLY), "--diff")
+
+    assert r.returncode != 0
+    assert "[frozen-body]" in r.stderr
+    assert _md(vault, rid) == PARENT_CLOSED
 
 
 def test_execute_tick_written_after_the_done_close_is_refused(tmp_path):
