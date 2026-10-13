@@ -408,6 +408,60 @@ def reverse_unified_diff(body: str, diff: str) -> str:
     return _replay_hunks(body, _parse_hunks(diff), reverse=True)
 
 
+class ReconstructError(RecordStoreError):
+    """A body cannot be rebuilt from a record's change history.
+
+    ``kind`` is ``"no-history"``, ``"out-of-range"``, ``"malformed"`` or
+    ``"does-not-reverse"``; ``entry`` is the 1-based number (oldest first) of the
+    history entry that failed, ``None`` for the first two kinds.
+    """
+
+    def __init__(self, kind: str, message: str, entry: "int | None" = None) -> None:
+        self.kind = kind
+        self.entry = entry
+        super().__init__(message)
+
+
+def reconstruct_body_before(body: str, history: list, n: int) -> str:
+    """The body as it stood before change-history entry *n* (1 is the oldest).
+
+    Reverse-applies entries ``len(history)`` down to *n* against *body*, the
+    record's stored body. An edit made outside amend that overlaps no amend hunk
+    is kept; one that does makes that entry fail to reverse. Raises
+    :class:`ReconstructError`; nothing is returned partially.
+    """
+    total = len(history)
+    if total == 0:
+        raise ReconstructError("no-history", "has no change history")
+    if not 1 <= n <= total:
+        raise ReconstructError(
+            "out-of-range",
+            f"{n} is out of range: this record has {total} change-history "
+            f"entries (1 to {total})",
+        )
+    current = body
+    for number in range(total, n - 1, -1):
+        entry = history[number - 1]
+        diff = entry.get("diff") if isinstance(entry, dict) else None
+        if not isinstance(diff, str):
+            raise ReconstructError(
+                "malformed", f"entry {number} has no stored diff", number
+            )
+        try:
+            current = reverse_unified_diff(current, diff)
+        except DiffRejectError as exc:
+            raise ReconstructError(
+                "does-not-reverse",
+                f"entry {number} no longer reverses against the current body ({exc})",
+                number,
+            ) from exc
+        except DiffFormatError as exc:
+            raise ReconstructError(
+                "malformed", f"entry {number} has a malformed stored diff: {exc}", number
+            ) from exc
+    return current
+
+
 def _replay_hunks(body: str, hunks: list[_Hunk], *, reverse: bool) -> str:
     """Verify every hunk against *body*, then replace; the shared two-phase core.
 

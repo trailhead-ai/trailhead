@@ -589,11 +589,13 @@ def _format_history(record_id: str, history: list) -> list[str]:
     if not history:
         return [f"{record_id} has no change history."]
     lines: list[str] = []
-    for entry in reversed(history):
+    total = len(history)
+    for number, entry in reversed(list(enumerate(history, start=1))):
         if not isinstance(entry, dict):
             continue
         if lines:
             lines.append("")
+        lines.append(f"entry: {number} of {total}")
         lines.append(f"at: {_neutral(entry.get('at', ''))}")
         lines.append(f"by: {_neutral(entry.get('by', ''))}")
         lines.append(f"initiated-by: {_neutral(entry.get('initiated-by', ''))}")
@@ -601,6 +603,50 @@ def _format_history(record_id: str, history: list) -> list[str]:
         lines.append("diff:")
         lines.extend(_neutral(entry.get("diff", "")).rstrip("\n").split("\n"))
     return lines
+
+
+def _parse_entry_number(raw: str, flag: str) -> "int | None":
+    """*raw* as a history entry number, or ``None`` after printing the refusal."""
+    try:
+        return int(raw)
+    except ValueError:
+        print(f"lore: {flag} must be an integer, got {raw!r}", file=sys.stderr)
+        return None
+
+
+def _reconstruct_refusal(exc, location, flag: str) -> str:
+    """The ``lore:`` message for a failed reconstruction, with the git fallback."""
+    if exc.kind == "no-history":
+        return f"lore: {location.record_id} has no change history: nothing to reconstruct"
+    if exc.kind == "out-of-range":
+        return f"lore: {flag} {exc}"
+    return (
+        f"lore: {location.record_id}: {exc}. Nothing was written. To see what "
+        f"changed, run: git -C {location.vault_root} log -p -- "
+        f"{location.kind}/{location.name}.md"
+    )
+
+
+def _reconstruct_from_stored(location, n: int, flag: str) -> "str | None":
+    """The stored body rebuilt to before entry *n*, or ``None`` after printing why not.
+
+    Works from the bytes on disk and the sidecar's own ``change-history`` —
+    never from rendered or escaped text — so the result is exactly what an amend
+    would write back.
+    """
+    from ..record import store as record_store_mod
+
+    body = (
+        location.body_path.read_text(encoding="utf-8")
+        if location.body_path.exists()
+        else ""
+    )
+    history = record_store_mod.read_change_history(location.sidecar_path)
+    try:
+        return record_store_mod.reconstruct_body_before(body, history, n)
+    except record_store_mod.ReconstructError as exc:
+        print(_reconstruct_refusal(exc, location, flag), file=sys.stderr)
+        return None
 
 
 def _cmd_record_history(args) -> int:
@@ -658,6 +704,20 @@ def _cmd_record_history(args) -> int:
     except _AliasedTrustConflict as exc:
         print(f"lore: {exc}", file=sys.stderr)
         return 1
+
+    body_before = getattr(args, "body_before", None)
+    if body_before is not None:
+        n = _parse_entry_number(body_before, "--body-before")
+        if n is None:
+            return 1
+        rebuilt = _reconstruct_from_stored(loc, n, "--body-before")
+        if rebuilt is None:
+            return 1
+        safe = record_store_mod.neutralize_fences(rebuilt)
+        if shared_flag != 0:
+            safe = "\n".join(xml_escape.wrap_shared(trust_name, safe.split("\n"))) + "\n"
+        sys.stdout.write(safe)
+        return 0
 
     lines = _format_history(
         record_id, record_store_mod.read_change_history(loc.sidecar_path)
@@ -2177,12 +2237,32 @@ def _cmd_record_amend(args) -> int:
             return 1
 
     use_diff = bool(getattr(args, "diff", False))
+    revert_raw = getattr(args, "revert_to", None)
+    revert_to = None
+    if revert_raw is not None:
+        if use_diff:
+            print(
+                "error: --revert-to cannot be combined with --diff: it computes "
+                "the body itself from the record's history",
+                file=sys.stderr,
+            )
+            return 1
+        revert_to = _parse_entry_number(revert_raw, "--revert-to")
+        if revert_to is None:
+            return 1
     try:
         stdin_text = _read_stdin_body()
     except StdinSilentError as exc:
         print(f"lore: {exc}", file=sys.stderr)
         return 1
-    if stdin_text == "":
+    if revert_to is not None and stdin_text != "":
+        print(
+            "error: --revert-to takes no body on stdin: lore computes the body "
+            "from the record's history, so nothing is read from stdin",
+            file=sys.stderr,
+        )
+        return 1
+    if stdin_text == "" and revert_to is None:
         print(
             "error: no body on stdin: pipe the new body, or pass --diff with a unified diff",
             file=sys.stderr,
@@ -2217,6 +2297,11 @@ def _cmd_record_amend(args) -> int:
             _check_base_revision(
                 location, getattr(args, "base", None), required=not use_diff
             )
+
+            if revert_to is not None:
+                stdin_text = _reconstruct_from_stored(location, revert_to, "--revert-to")
+                if stdin_text is None:
+                    raise _UpdateAborted()
 
             sidecar, new_body, guard_notices, existing_body = _read_apply_and_guard(
                 location,
@@ -2422,7 +2507,7 @@ def add_record_subparser(sub) -> None:
         "amend",
         help="Amend a record's body in place (even a frozen adr), recording why",
         usage="lore record amend RECORD_ID --reason REASON --initiated-by "
-              "{operator,agent} [--base REVISION] [--diff] [--vault NAME]",
+              "{operator,agent} [--base REVISION] [--diff | --revert-to N] [--vault NAME]",
         description="Replace a record's body with the one piped on stdin (or, with "
                     "--diff, apply a unified diff to it) and append a "
                     "change-history entry: when, by whom, who asked, why, and the "
@@ -2477,6 +2562,16 @@ def add_record_subparser(sub) -> None:
              "'revision' in --json, 'revision: <hex>' on stderr). Required with a "
              "full-body stdin; optional with --diff. The amend is refused, "
              "writing nothing, if the stored body's revision differs.",
+    )
+    p_record_amend.add_argument(
+        "--revert-to", dest="revert_to", default=None, metavar="N",
+        help="Revert to the body before change-history entry N (1 = oldest; see "
+             "'lore record history ... --body-before N' to preview it). Lore "
+             "computes the body from the stored body and history, and writes it "
+             "as an ordinary amend with its own history entry. Needs --base; stdin "
+             "must be empty and --diff is refused. A change made outside amend "
+             "that overlaps no amend hunk is kept; an entry that no longer "
+             "reverses refuses.",
     )
     p_record_amend.add_argument(
         "--vault", dest="vault", default=None, metavar="NAME",
@@ -2563,6 +2658,17 @@ def add_record_subparser(sub) -> None:
         "--vault", dest="vault", default=None, metavar="NAME",
         help="Read the record from exactly this configured vault by name, "
              "instead of scanning every vault in config order.",
+    )
+    p_record_history.add_argument(
+        "--body-before", dest="body_before", default=None, metavar="N",
+        help="Print, read-only, the body as it stood before change-history entry "
+             "N (entries are numbered 1 = oldest, as the listing shows) instead of "
+             "the listing: entries newest to N are reverse-applied to the current "
+             "body. N=1 is the body before any amend. A change made outside amend "
+             "that overlaps no amend hunk is kept in the output; one that overlaps "
+             "makes that entry refuse, with the git command to inspect it. The "
+             "preview is never written back; to revert, use 'lore record amend "
+             "--revert-to N'.",
     )
     p_record_history.add_argument("--repo", default=None, help=argparse.SUPPRESS)
     p_record_history.add_argument("--product", default=None, help=argparse.SUPPRESS)

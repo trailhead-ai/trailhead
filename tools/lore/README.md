@@ -78,7 +78,7 @@ lore status               Report ruleset drift, host signing state, and any vaul
 lore search <query>       Query all records (KQL-subset: field:value, full-text, and/or/not)
 lore record show <id>     Read a record's body (add --json for the sidecar)
 lore record amend <id>    Correct a record's body in place, even a frozen adr's, recording who/why/diff in its change-history (--reason, --initiated-by operator|agent, body on stdin or --diff)
-lore record history <id>  Print a record's change history, newest first (what amend recorded: when, by whom, who asked, why, the diff)
+lore record history <id>  Print a record's change history, newest first, entries numbered (what amend recorded: when, by whom, who asked, why, the diff); --body-before N previews the body before entry N
 lore areas                List the area profiles across every configured non-shared vault
 lore signing enable       Generate (or adopt with --key) a no-passphrase SSH key this host signs vault commits with
 lore signing status       Report whether this host signs vault commits unattended, or what's missing
@@ -147,6 +147,40 @@ Prints the record's `change-history` newest first: each entry's date, `by`,
 one line saying so and exits 0; a missing record is a `lore:` error. In a shared
 vault the listing is wrapped in the same `<external-memory>` fence `record show`
 uses, with the reason and diff entity-escaped.
+
+Each entry is numbered `entry: N of M`, where 1 is the oldest; the listing stays
+newest first, so the numbers descend down the page.
+
+#### Previewing an earlier body: `--body-before N`
+
+```
+lore record history adr/some-decision --body-before 2 [--vault NAME]
+```
+
+Prints to stdout, as a read-only preview, the body as it stood before entry N:
+entries M down to N are reverse-applied to the record's current body.
+`--body-before 1` is the body before any amend. Nothing is written. **A change made
+outside amend that overlaps no amend hunk is kept in the output**; one that
+overlaps an amend hunk makes that entry no longer reverse, and the command refuses.
+The preview is fence-neutralized, and wrapped in a shared vault, exactly as the
+listing is. It exits non-zero with a `lore:` message and empty stdout for an N that
+is out of range or not an integer, a record with no history, a malformed stored
+diff, and an entry that no longer reverses (the message names the entry by number
+and gives the exact `git -C <vault root> log -p -- <kind>/<name>.md` to run).
+
+#### Reverting: `lore record amend --revert-to N`
+
+```
+lore record amend adr/some-decision --revert-to 2 --base REVISION --reason "..." --initiated-by operator
+```
+
+Computes the same reconstruction inside lore, from the stored body and history
+(never from the escaped or wrapped preview text), and writes it as an ordinary
+amend with its own `change-history` entry. Preview it first with `--body-before`.
+Stdin must be empty, and `--revert-to` with a piped body or with `--diff` is
+refused. Every amend refusal applies: `--base` is required and a stale one refuses,
+a reconstruction identical to the current body refuses, and so does an entry that
+no longer reverses.
 
 - **`record show --json`** carries the history in `sidecar["change-history"]`.
 - **Plain `record show`** keeps stdout exactly the body. When the record has

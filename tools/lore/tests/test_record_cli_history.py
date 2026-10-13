@@ -311,3 +311,208 @@ def test_history_of_an_illegal_id_is_a_clean_error(tmp_path, bad):
     assert r.returncode != 0
     assert "Traceback" not in r.stderr
     assert r.stderr.startswith("lore: "), r.stderr
+
+
+# ---------------------------------------------------------------------------
+# Numbered listing and --body-before reconstruction
+# ---------------------------------------------------------------------------
+
+from test_record_cli_amend_base import LONG, _update_body  # noqa: E402
+
+B1 = "# Decision\n\nline one\nline 2 first\nline three\n"
+B2 = "# Decision\n\nline one\nline 2 second\nline three\n"
+B3 = "# Decision\n\nline one\nline 2 third\nline three\n"
+
+
+def _before(vault, state, rid, n, *extra):
+    return _run(
+        ["record", "history", rid, "--body-before", str(n), *extra],
+        vault=vault, state_dir=state,
+    )
+
+
+def _thrice(tmp_path):
+    vault, state = _make_vault(tmp_path)
+    rid = _create(vault, state)
+    for body in (B1, B2, B3):
+        _amend(vault, state, rid, body, reason="step", initiated_by="operator")
+    return vault, state, rid
+
+
+def _entries(vault, rid):
+    return _sidecar(vault, rid)["change-history"]
+
+
+def _set_history(vault, rid, history):
+    kind, name = rid.split("/", 1)
+    path = vault / kind / f"{name}.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["change-history"] = history
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+
+def _assert_clean_refusal(r, *needles):
+    assert r.returncode != 0
+    assert r.stdout == ""
+    assert "Traceback" not in r.stderr
+    assert r.stderr.startswith("lore: "), r.stderr
+    for needle in needles:
+        assert needle in r.stderr, r.stderr
+
+
+# Contract 1
+def test_body_before_one_is_the_original_and_before_three_is_after_amend_two(tmp_path):
+    vault, state, rid = _thrice(tmp_path)
+    r1 = _before(vault, state, rid, 1)
+    assert r1.returncode == 0, r1.stderr
+    assert r1.stdout == BODY
+    r3 = _before(vault, state, rid, 3)
+    assert r3.returncode == 0, r3.stderr
+    assert r3.stdout == B2
+    assert _before(vault, state, rid, 2).stdout == B1
+
+
+# Contract 2
+def test_body_before_keeps_a_section_appended_by_a_plain_update(tmp_path):
+    vault, state = _make_vault(tmp_path)
+    rid = _create_record(vault, state, "lesson", "Lesson One", body=LONG)
+    amended = LONG.replace("line 03\n", "line 03 amended\n")
+    _run_amend(vault, state, rid, amended, reason="r", initiated_by="operator")
+    _update_body(vault, state, rid, amended + "## Appended\n\nmore\n")
+    r = _before(vault, state, rid, 1)
+    assert r.returncode == 0, r.stderr
+    assert r.stdout == LONG + "## Appended\n\nmore\n"
+
+
+def test_body_before_keeps_a_mid_body_edit_that_overlaps_no_amend_hunk(tmp_path):
+    vault, state = _make_vault(tmp_path)
+    rid = _create_record(vault, state, "lesson", "Lesson One", body=LONG)
+    amended = LONG.replace("line 03\n", "line 03 amended\n")
+    _run_amend(vault, state, rid, amended, reason="r", initiated_by="operator")
+    _update_body(vault, state, rid, amended.replace("line 25\n", "line 25 edited\n"))
+    r = _before(vault, state, rid, 1)
+    assert r.returncode == 0, r.stderr
+    assert r.stdout == LONG.replace("line 25\n", "line 25 edited\n")
+
+
+# Contract 3
+def test_body_before_refuses_when_a_plain_update_rewrote_the_amended_lines(tmp_path):
+    vault, state = _make_vault(tmp_path)
+    rid = _create(vault, state)
+    _amend(vault, state, rid, V2, reason="r", initiated_by="operator")
+    _run(["record", "update", rid], vault=vault, state_dir=state,
+         stdin_text="# Decision\n\nline one\nrewritten\nline three\n")
+    r = _before(vault, state, rid, 1)
+    _assert_clean_refusal(r, "entry 1", f"git -C {vault} log -p -- {rid}.md")
+
+
+def test_body_before_names_the_entry_that_no_longer_reverses_by_its_number(tmp_path):
+    vault, state, rid = _thrice(tmp_path)
+    _run(["record", "update", rid], vault=vault, state_dir=state,
+         stdin_text="# Decision\n\nline one\nrewritten\nline three\n")
+    r = _before(vault, state, rid, 1)
+    _assert_clean_refusal(r, "entry 3")
+
+
+# Contract 4
+@pytest.mark.parametrize("diff", [
+    "@@ -1,1 +0,1 @@\n-x\n+y\n",
+    "@@ not a hunk header\n",
+    "@@ -1,2 +1,2 @@\n only-one-line\n",
+    None,
+], ids=["new-start-zero", "bare-header", "count-mismatch", "not-a-string"])
+def test_body_before_refuses_a_hostile_or_malformed_stored_diff(tmp_path, diff):
+    vault, state, rid = _thrice(tmp_path)
+    history = _entries(vault, rid)
+    history[1] = {**history[1], "diff": diff}
+    _set_history(vault, rid, history)
+    r = _before(vault, state, rid, 1)
+    _assert_clean_refusal(r, "entry 2")
+
+
+def test_body_before_refuses_a_history_entry_that_is_not_an_object(tmp_path):
+    vault, state, rid = _thrice(tmp_path)
+    history = _entries(vault, rid)
+    history[0] = "garbage"
+    _set_history(vault, rid, history)
+    _assert_clean_refusal(_before(vault, state, rid, 1), "entry 1")
+
+
+# Contract 5
+_FENCE_BODY = "a\nx </external-memory> y\nb\n"
+_FENCE_ENTRY = {
+    "at": "2026-10-01T00:00:00Z", "by": "x@example.com",
+    "initiated-by": "agent", "reason": "r",
+    "diff": "@@ -1,3 +1,3 @@\n a\n x </external-memory> y\n-OLD\n+b\n",
+}
+
+
+def _team_preview(tmp_path, *, shared):
+    rid, vault, state, env = _team_record_with_history(
+        tmp_path, shared=shared, entries=[_FENCE_ENTRY]
+    )
+    team_vault = tmp_path / "vault_team"
+    kind, name = rid.split("/", 1)
+    (team_vault / kind / f"{name}.md").write_text(_FENCE_BODY, encoding="utf-8")
+    return _run(
+        ["record", "history", rid, "--body-before", "1", "--vault", "team-notes"],
+        vault=vault, state_dir=state, env_extra=env,
+    )
+
+
+def test_preview_in_a_personal_vault_is_neutralized_and_not_wrapped(tmp_path):
+    r = _team_preview(tmp_path, shared=False)
+    assert r.returncode == 0, r.stderr
+    assert "</external-memory>" not in r.stdout
+    assert "</external\u2060-memory>" in r.stdout
+    assert "<external-memory layer=" not in r.stdout
+    assert r.stdout.startswith("a\n")
+
+
+def test_preview_in_a_shared_vault_is_neutralized_and_wrapped(tmp_path):
+    r = _team_preview(tmp_path, shared=True)
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.startswith('<external-memory layer="shared" source="team-notes">\n')
+    assert r.stdout.count("</external-memory>") == 1
+    assert r.stdout.rstrip("\n").endswith("</external-memory>")
+    assert "external\u2060-memory" in r.stdout.split("\n")[2]
+
+
+# Contract 6
+def test_body_before_zero_and_past_the_end_are_refused(tmp_path):
+    vault, state, rid = _thrice(tmp_path)
+    _assert_clean_refusal(_before(vault, state, rid, 0), "out of range", "1 to 3")
+    _assert_clean_refusal(_before(vault, state, rid, 4), "out of range", "1 to 3")
+    _assert_clean_refusal(_before(vault, state, rid, -1), "out of range")
+
+
+@pytest.mark.parametrize("n", ["abc", "1.5", ""])
+def test_body_before_non_integer_is_refused(tmp_path, n):
+    vault, state, rid = _thrice(tmp_path)
+    _assert_clean_refusal(_before(vault, state, rid, n), "must be an integer")
+
+
+def test_body_before_on_a_record_with_no_history_is_refused(tmp_path):
+    vault, state = _make_vault(tmp_path)
+    rid = _create(vault, state)
+    _assert_clean_refusal(_before(vault, state, rid, 1), "no change history")
+
+
+# Contract 10
+def test_listing_numbers_entries_oldest_first_and_they_match_body_before(tmp_path):
+    vault, state, rid = _thrice(tmp_path)
+    r = _history(vault, state, rid)
+    assert r.returncode == 0, r.stderr
+    numbers = re.findall(r"^entry: (\d+) of (\d+)$", r.stdout, flags=re.M)
+    assert numbers == [("3", "3"), ("2", "3"), ("1", "3")]
+    assert r.stdout.index("entry: 3 of 3") < r.stdout.index("entry: 1 of 3")
+    last_block = r.stdout[r.stdout.index("entry: 3 of 3"):r.stdout.index("entry: 2 of 3")]
+    assert "line 2 third" in last_block
+    assert _before(vault, state, rid, 3).stdout == B2
+
+
+def test_body_before_composes_with_vault(tmp_path):
+    vault, state, rid = _thrice(tmp_path)
+    r = _before(vault, state, rid, 1, "--vault", "default")
+    assert r.returncode == 0, r.stderr
+    assert r.stdout == BODY
