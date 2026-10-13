@@ -1233,8 +1233,8 @@ the postmortem's own lesson-write failure is at [Phase 5](#phase-5-flow-out). A 
 reported ticked while its boundary write has failed.
 
 **Phase 6's tick is the one exception to "a write of its own".** `done` freezes the parent body, so
-the final tick, the `craft/phase-boundary` label, and the `## Run Metrics` run-total row are written
-by the same
+the final tick, the `craft/phase-boundary` label, the `## Run Metrics` run-total row, and the
+`## Measurement tally` section are written by the same
 `lore record update … --status done --diff --label craft/branch=<bare-branch> --label craft/phase-boundary=<sha>`
 invocation that closes the parent, and nothing is written to the parent body after it. If that close
 is refused, the parent stays `in-progress` with nothing ticked, so the next resume re-enters Phase
