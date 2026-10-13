@@ -431,3 +431,65 @@ def test_show_of_an_illegal_id_is_a_clean_error(tmp_path, bad):
     assert r.returncode != 0
     assert "Traceback" not in r.stderr
     assert r.stderr.startswith("lore: "), r.stderr
+
+
+# ---------------------------------------------------------------------------
+# revision: derived from the same bytes the body is printed from
+# ---------------------------------------------------------------------------
+
+def _replace_body_after_first_read(monkeypatch, body_path, replacement: bytes):
+    """Rewrite *body_path* right after the first read of it, by any reader."""
+    orig_text, orig_bytes = Path.read_text, Path.read_bytes
+    state = {"swapped": False}
+
+    def _swap_after(path, result):
+        if path == body_path and not state["swapped"]:
+            state["swapped"] = True
+            body_path.write_bytes(replacement)
+        return result
+
+    monkeypatch.setattr(
+        Path, "read_text",
+        lambda self, *a, **k: _swap_after(self, orig_text(self, *a, **k)),
+    )
+    monkeypatch.setattr(
+        Path, "read_bytes",
+        lambda self, *a, **k: _swap_after(self, orig_bytes(self, *a, **k)),
+    )
+
+
+def test_show_revision_matches_printed_body_when_body_changes_mid_read(tmp_path, monkeypatch):
+    import hashlib
+    vault, state = _make_vault(tmp_path)
+    rid = _create_record(vault, state, kind="decision", body="first body\n")
+    kind, name = rid.split("/", 1)
+    body_path = vault / kind / f"{name}.md"
+    _replace_body_after_first_read(monkeypatch, body_path, b"second body, longer\n")
+    r = _run(["record", "show", rid], vault=vault, state_dir=state)
+    assert r.returncode == 0, r.stderr
+    revision = next(
+        ln.split(": ", 1)[1] for ln in r.stderr.splitlines() if ln.startswith("revision: ")
+    )
+    assert hashlib.sha256(r.stdout.encode("utf-8")).hexdigest() == revision
+
+
+def test_show_json_revision_matches_body_when_body_changes_mid_read(tmp_path, monkeypatch):
+    import hashlib
+    vault, state = _make_vault(tmp_path)
+    rid = _create_record(vault, state, kind="decision", body="first body\n")
+    kind, name = rid.split("/", 1)
+    body_path = vault / kind / f"{name}.md"
+    _replace_body_after_first_read(monkeypatch, body_path, b"second body, longer\n")
+    r = _run(["record", "show", rid, "--json"], vault=vault, state_dir=state)
+    assert r.returncode == 0, r.stderr
+    payload = json.loads(r.stdout)
+    assert hashlib.sha256(payload["body"].encode("utf-8")).hexdigest() == payload["revision"]
+
+
+def test_show_prints_crlf_body_with_normalized_newlines(tmp_path):
+    vault, state = _make_vault(tmp_path)
+    rid = _create_record(vault, state, kind="decision", body="x\n")
+    kind, name = rid.split("/", 1)
+    (vault / kind / f"{name}.md").write_bytes(b"a\r\nb\rc\n")
+    r = _run(["record", "show", rid], vault=vault, state_dir=state)
+    assert r.stdout == "a\nb\nc\n"
