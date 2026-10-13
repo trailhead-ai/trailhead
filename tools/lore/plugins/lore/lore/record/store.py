@@ -218,6 +218,7 @@ class _Hunk(NamedTuple):
 
     header: str  # raw ``@@ -L,N +L,M @@`` line (for error reporting)
     old_start: int  # 1-based line number in the original body
+    new_start: int  # 1-based line number in the patched body
     old_count: int
     new_count: int
     lines: list[str]  # hunk lines WITH leading marker AND original line ending
@@ -276,6 +277,7 @@ def _parse_hunks(diff: str) -> list[_Hunk]:
             current = _Hunk(
                 header=raw_stripped,
                 old_start=int(m.group(1)),
+                new_start=int(m.group(3)),
                 old_count=int(m.group(2)) if m.group(2) is not None else 1,
                 new_count=int(m.group(4)) if m.group(4) is not None else 1,
                 lines=[],
@@ -296,12 +298,13 @@ def _parse_hunks(diff: str) -> list[_Hunk]:
             if raw_stripped.startswith("\\"):
                 # GNU-diff "\ No newline at end of file" marker: applies to the
                 # immediately preceding hunk line, telling us that line's
-                # trailing newline (kept when we appended it above) isn't
-                # really there. Strip it so Phase 1's verbatim comparison and
+                # trailing newline (the "\n" the producer appended) isn't
+                # really there. Strip only that "\n" — a "\r" before it is
+                # content. Strip it so Phase 1's verbatim comparison and
                 # Phase 2's replacement both reflect the no-newline body/hunk
                 # side instead of a spurious extra "\n".
                 if current.lines:
-                    current.lines[-1] = current.lines[-1].rstrip("\r\n")
+                    current.lines[-1] = current.lines[-1].removesuffix("\n")
                 continue
             if raw and raw[0] in (" ", "-", "+"):
                 current.lines.append(raw)
@@ -354,71 +357,81 @@ def apply_unified_diff(body: str, diff: str) -> tuple[str, list[str]]:
         ``offset = Σ(new_count − old_count)`` of prior hunks so each hunk indexes
         the evolving result correctly.
 
+    A hunk whose start line is below 1 is refused, except a pure insertion into an
+    empty body (``@@ -0,0 +1,n @@``).
+
     Raises :class:`DiffRejectError` on stale context (body unmodified) and
     :class:`DiffFormatError` on the concatenated-no-newline format. The returned
     list is always empty on success (rejections raise — never partial).
     """
-    original_body = body
-    body_lines = body.splitlines(keepends=True)
-    hunks = _parse_hunks(diff)
+    return _replay_hunks(body, _parse_hunks(diff), reverse=False), []
 
-    # --- Phase 1: verify every hunk against the original body -------------------
+
+def reverse_unified_diff(body: str, diff: str) -> str:
+    """Undo a unified *diff* on *body*, returning the body the diff was made from.
+
+    The mirror of :func:`apply_unified_diff` over the same parsed hunks, with the
+    ``+`` / ``-`` roles and the old/new ranges swapped: *body* must be the diff's
+    post-image, verified verbatim, or :class:`DiffRejectError` is raised with
+    nothing changed. ``reverse_unified_diff(new, make_unified_diff(old, new))`` is
+    *old*.
+    """
+    return _replay_hunks(body, _parse_hunks(diff), reverse=True)
+
+
+def _replay_hunks(body: str, hunks: list[_Hunk], *, reverse: bool) -> str:
+    """Verify every hunk against *body*, then replace; the shared two-phase core.
+
+    Forward replaces each hunk's ``" "``/``"-"`` lines with its ``" "``/``"+"``
+    lines located by ``old_start``; *reverse* swaps the roles and locates by
+    ``new_start``.
+    """
+    keep_markers = (" ", "+") if reverse else (" ", "-")
+    put_markers = (" ", "-") if reverse else (" ", "+")
+    body_lines = body.splitlines(keepends=True)
+
     rejected: list[tuple[str, str]] = []
     for hunk in hunks:
-        ctx_lines: list[str] = []
-        for hl in hunk.lines:
-            if hl[0] in (" ", "-"):
-                ctx_lines.append(hl[1:])  # strip marker; keep line ending
+        start = hunk.new_start if reverse else hunk.old_start
+        ctx_lines = [hl[1:] for hl in hunk.lines if hl[0] in keep_markers]
+        if start < 1:
+            if start == 0 and not ctx_lines and not body_lines:
+                continue
+            rejected.append((hunk.header, f"hunk starts at line {start}, below line 1"))
+            continue
 
-        start_0 = hunk.old_start - 1
+        start_0 = start - 1
         end_0 = start_0 + len(ctx_lines)
         if end_0 > len(body_lines):
             rejected.append(
                 (
                     hunk.header,
                     f"context overruns body (body has {len(body_lines)} lines, "
-                    f"hunk starts at line {hunk.old_start} and expects "
+                    f"hunk starts at line {start} and expects "
                     f"{len(ctx_lines)} context/deletion lines)",
                 )
             )
             continue
 
-        mismatch_line: Optional[int] = None
         for i, expected in enumerate(ctx_lines):
             if body_lines[start_0 + i] != expected:
-                mismatch_line = hunk.old_start + i
+                rejected.append((hunk.header, f"context mismatch at body line {start + i}"))
                 break
-        if mismatch_line is not None:
-            rejected.append(
-                (
-                    hunk.header,
-                    f"context mismatch at body line {mismatch_line}",
-                )
-            )
 
     if rejected:
-        raise DiffRejectError(original_body=original_body, rejected=rejected)
+        raise DiffRejectError(original_body=body, rejected=rejected)
 
-    # --- Phase 2: apply all hunks (all verified) -------------------------------
     result_lines = list(body_lines)
     offset = 0
     for hunk in hunks:
-        old_slice: list[str] = []
-        new_slice: list[str] = []
-        for hl in hunk.lines:
-            marker, content = hl[0], hl[1:]
-            if marker == " ":
-                old_slice.append(content)
-                new_slice.append(content)
-            elif marker == "-":
-                old_slice.append(content)
-            elif marker == "+":
-                new_slice.append(content)
-        start_0 = hunk.old_start - 1 + offset
+        start = hunk.new_start if reverse else hunk.old_start
+        old_slice = [hl[1:] for hl in hunk.lines if hl[0] in keep_markers]
+        new_slice = [hl[1:] for hl in hunk.lines if hl[0] in put_markers]
+        start_0 = max(start - 1, 0) + offset
         result_lines[start_0 : start_0 + len(old_slice)] = new_slice
         offset += len(new_slice) - len(old_slice)
 
-    return "".join(result_lines), []
+    return "".join(result_lines)
 
 
 # ---------------------------------------------------------------------------
