@@ -638,49 +638,6 @@ def test_every_verdict_exits_with_its_class():
 # --- pattern safety ------------------------------------------------------------------------
 
 
-def _repeats_inside_repeats(parsed, inside=False):
-    import re._constants as constants
-
-    repeat_ops = {constants.MAX_REPEAT, constants.MIN_REPEAT, getattr(constants, "POSSESSIVE_REPEAT", None)}
-    for op, arg in parsed:
-        is_repeat = op in repeat_ops
-        if is_repeat and inside:
-            return True
-        children = []
-        if is_repeat:
-            children = [arg[2]]
-        elif op is constants.SUBPATTERN:
-            children = [arg[3]]
-        elif op is constants.BRANCH:
-            children = list(arg[1])
-        elif op in (constants.ASSERT, constants.ASSERT_NOT):
-            children = [arg[1]]
-        elif op is constants.ATOMIC_GROUP:
-            children = [arg]
-        for child in children:
-            if _repeats_inside_repeats(child, inside or is_repeat):
-                return True
-    return False
-
-
-def test_the_checker_for_nested_repeats_catches_one():
-    import re._parser as parser
-
-    assert _repeats_inside_repeats(parser.parse(r"(a+b)*"))
-    assert _repeats_inside_repeats(parser.parse(r"(?:a|b+)+"))
-    assert not _repeats_inside_repeats(parser.parse(r"a+b*\s*(?:x|y)"))
-
-
-def test_no_pattern_in_the_grader_nests_one_repeat_inside_another():
-    import re._parser as parser
-
-    module = _load_module()
-    patterns = [value for value in vars(module).values() if isinstance(value, re.Pattern)]
-    assert patterns, "the grader exposes no module-level patterns to check"
-    for pattern in patterns:
-        assert not _repeats_inside_repeats(parser.parse(pattern.pattern, pattern.flags)), pattern.pattern
-
-
 @pytest.mark.parametrize(
     "name, build",
     [

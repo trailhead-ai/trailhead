@@ -325,6 +325,10 @@ removed: a different label, a label anywhere but the start of the line, a backti
 carries criterion text or brackets are all still `off-shape`. A line that is the label and nothing else is
 `off-shape` too, since it contains no value.
 
+**A repeated number.** A value that names the same criterion number twice, such as `AC3, AC3`, is `off-shape`. The
+pattern quoted in "The covered-criteria value" would match it, but the covers gate refuses it, and the check asks the
+gate. No baseline run produced one; this is stated so the document and the gate agree before any treated run.
+
 **Why.** The guard exists to catch the wording section rewording a value that a script reads as bare numbers. The
 label is not part of that value: the covers gate is handed the list alone. Under the rule as first written, the
 unchanged baseline fails the guard in one run of three, so a treated run failing it would say nothing about the
