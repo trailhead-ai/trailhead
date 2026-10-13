@@ -2546,8 +2546,9 @@ def add_record_subparser(sub) -> None:
              "computes the body from the stored body and history, and writes it "
              "as an ordinary amend with its own history entry. Needs --base; stdin "
              "must be empty and --diff is refused. A change made outside amend "
-             "that overlaps no amend hunk is kept; an entry that no longer "
-             "reverses refuses.",
+             "is kept when it overlaps no amend hunk and shifts no lines above "
+             "one; otherwise that entry refuses, with the git command to inspect "
+             "it.",
     )
     p_record_amend.add_argument(
         "--vault", dest="vault", default=None, metavar="NAME",
@@ -2641,8 +2642,9 @@ def add_record_subparser(sub) -> None:
              "N (entries are numbered 1 = oldest, as the listing shows) instead of "
              "the listing: entries newest to N are reverse-applied to the current "
              "body. N=1 is the body before any amend. A change made outside amend "
-             "that overlaps no amend hunk is kept in the output; one that overlaps "
-             "makes that entry refuse, with the git command to inspect it. The "
+             "is kept in the output when it overlaps no amend hunk and shifts no "
+             "lines above one; otherwise that entry refuses, with the git command "
+             "to inspect it. The "
              "preview is never written back; to revert, use 'lore record amend "
              "--revert-to N'.",
     )

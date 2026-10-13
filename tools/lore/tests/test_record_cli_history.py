@@ -14,7 +14,7 @@ import pytest
 from conftest import make_vault as _make_vault, run_cli as _run
 from test_record_cli_amend import AMENDED as V2, BODY, LONG, _body, _sidecar
 from test_record_cli_amend import _amend as _run_amend, _create as _create_record
-from test_record_cli_amend import _set_history, _snapshot
+from test_record_cli_amend import _revert, _set_history, _snapshot
 
 V3 = "# Decision\n\nline one\nline TWO\nline 3 changed\n"
 
@@ -450,6 +450,39 @@ def test_body_before_refuses_a_history_entry_that_is_not_an_object(tmp_path):
     history[0] = "garbage"
     _set_history(vault, rid, history)
     _assert_clean_refusal(_before(vault, state, rid, 1), "entry 1")
+
+
+def test_body_before_refuses_a_stored_diff_whose_hunks_overlap(tmp_path):
+    vault, state, rid = _thrice(tmp_path)
+    history = _entries(vault, rid)
+    history[2] = {**history[2], "diff": (
+        "--- a\n+++ b\n@@ -1,3 +1,3 @@\n # Decision\n \n line one\n"
+        "@@ -2,3 +2,3 @@\n \n line one\n line 2 third\n"
+    )}
+    _set_history(vault, rid, history)
+    before = _snapshot(vault)
+    r = _before(vault, state, rid, 1)
+    _assert_clean_refusal(r, "entry 3", "overlaps")
+    assert _revert(vault, state, rid, 1).returncode != 0
+    assert _snapshot(vault) == before
+
+
+# Pins the documented limit: reverse locates each hunk at its recorded line, so
+# a plain update that shifts the lines above an amend hunk makes that entry refuse.
+def test_body_before_and_revert_refuse_when_an_outside_edit_shifts_lines_above_a_hunk(tmp_path):
+    vault, state = _make_vault(tmp_path)
+    rid = _create_record(vault, state, "lesson", "Lesson One", body=LONG)
+    amended = LONG.replace("line 25\n", "line 25 amended\n")
+    _run_amend(vault, state, rid, amended, reason="r", initiated_by="operator")
+    _update_body(vault, state, rid, amended.replace("line 03\n", "line 03\ninserted\n"))
+    before = _snapshot(vault)
+    pointer = f"git -C {vault} log -p -- {rid}.md"
+    r = _before(vault, state, rid, 1)
+    _assert_clean_refusal(r, "entry 1", "no longer reverses", pointer)
+    revert = _revert(vault, state, rid, 1)
+    assert revert.returncode != 0
+    assert "entry 1" in revert.stderr and pointer in revert.stderr, revert.stderr
+    assert _snapshot(vault) == before
 
 
 # Contract 5

@@ -117,8 +117,8 @@ identical to the stored one, a missing record, and any `session` record.
   `lore record history` when the change was an amend, and the remedy: re-read with
   `lore record show`, reapply the correction, amend again. A full-body amend
   without `--base` is refused with the same pointer. **`--diff` may omit `--base`**:
-  a diff whose context still matches overwrites nobody's change, and a
-  non-overlapping edit made since the read is kept; with a stale `--base` it is
+  a diff whose context still matches overwrites nobody's change, and an edit made
+  since the read is kept when it overlaps no hunk and shifts no lines above one; with a stale `--base` it is
   refused even if it would apply. The revision covers the body only, so a label or
   status change after the read neither changes it nor is overwritten.
 - **`--initiated-by`** says who asked for the edit. `operator` means a human
@@ -160,8 +160,10 @@ lore record history adr/some-decision --body-before 2 [--vault NAME]
 Prints to stdout, as a read-only preview, the body as it stood before entry N:
 entries M down to N are reverse-applied to the record's current body.
 `--body-before 1` is the body before any amend. Nothing is written. **A change made
-outside amend that overlaps no amend hunk is kept in the output**; one that
-overlaps an amend hunk makes that entry no longer reverse, and the command refuses.
+outside amend is kept in the output when it overlaps no amend hunk and shifts no
+lines above one**; otherwise that entry no longer reverses and the command refuses.
+Each hunk is located at its recorded line, with no offset search, so a plain update
+that inserts or removes lines above an amend hunk makes the entry refuse.
 The preview is fence-neutralized, and wrapped in a shared vault, exactly as the
 listing is. It exits non-zero with a `lore:` message and empty stdout for an N that
 is out of range or not an integer, a record with no history, a malformed stored
