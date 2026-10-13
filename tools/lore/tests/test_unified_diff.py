@@ -119,3 +119,39 @@ STORED = [
 def test_previously_stored_diffs_apply_and_reverse(old, new, diff):
     assert rs.apply_unified_diff(old, diff) == (new, [])
     assert rs.reverse_unified_diff(new, diff) == old
+
+
+# Context-only hunks match the body on both the old and the new side, so each
+# passes its own verbatim check and only the relation between hunks can refuse it.
+_LINES10 = "".join(f"l{i}\n" for i in range(1, 11))
+_OVERLAPPING = (
+    "--- a\n+++ b\n@@ -2,3 +2,3 @@\n l2\n l3\n l4\n@@ -3,3 +3,3 @@\n l3\n l4\n l5\n"
+)
+_OUT_OF_ORDER = (
+    "--- a\n+++ b\n@@ -5,2 +5,2 @@\n l5\n l6\n@@ -2,2 +2,2 @@\n l2\n l3\n"
+)
+_ADJACENT = (
+    "--- a\n+++ b\n@@ -2,2 +2,2 @@\n l2\n l3\n@@ -4,2 +4,2 @@\n l4\n l5\n"
+)
+
+
+@pytest.mark.parametrize("replay", [rs.apply_unified_diff, rs.reverse_unified_diff])
+def test_overlapping_hunks_are_refused(replay):
+    with pytest.raises(rs.DiffRejectError) as exc:
+        replay(_LINES10, _OVERLAPPING)
+    assert [h for h, _ in exc.value.rejected] == ["@@ -3,3 +3,3 @@"]
+    assert "overlaps" in exc.value.rejected[0][1]
+
+
+@pytest.mark.parametrize("replay", [rs.apply_unified_diff, rs.reverse_unified_diff])
+def test_out_of_order_hunks_are_refused(replay):
+    with pytest.raises(rs.DiffRejectError) as exc:
+        replay(_LINES10, _OUT_OF_ORDER)
+    assert [h for h, _ in exc.value.rejected] == ["@@ -2,2 +2,2 @@"]
+    assert "out of order" in exc.value.rejected[0][1]
+
+
+@pytest.mark.parametrize("replay", [rs.apply_unified_diff, rs.reverse_unified_diff])
+def test_touching_hunks_are_not_overlapping(replay):
+    result = replay(_LINES10, _ADJACENT)
+    assert (result[0] if isinstance(result, tuple) else result) == _LINES10

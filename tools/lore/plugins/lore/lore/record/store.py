@@ -398,7 +398,8 @@ def apply_unified_diff(body: str, diff: str) -> tuple[str, list[str]]:
         the evolving result correctly.
 
     A hunk whose start line is below 1 is refused, except a pure insertion into an
-    empty body (``@@ -0,0 +1,n @@``).
+    empty body (``@@ -0,0 +1,n @@``). So is a hunk that starts before the previous
+    hunk does, or inside the lines it covers: hunks must be ascending and disjoint.
 
     Raises :class:`DiffRejectError` on stale context (body unmodified) and
     :class:`DiffFormatError` on the concatenated-no-newline format. The returned
@@ -435,8 +436,9 @@ def reconstruct_body_before(body: str, history: Any, n: int) -> str:
     """The body as it stood before change-history entry *n* (1 is the oldest).
 
     Reverse-applies entries ``len(history)`` down to *n* against *body*, the
-    record's stored body. An edit made outside amend that overlaps no amend hunk
-    is kept; one that does makes that entry fail to reverse. Raises
+    record's stored body. Each hunk is located at its recorded line, with no offset
+    search, so an edit made outside amend is kept only when it overlaps no amend
+    hunk and shifts no lines above one; otherwise that entry fails to reverse. Raises
     :class:`ReconstructError`; nothing is returned partially. A *history* that is
     not a list, or an entry whose diff has no hunk, is ``malformed``.
     """
@@ -492,6 +494,7 @@ def _replay_hunks(body: str, hunks: list[_Hunk], *, reverse: bool) -> str:
     body_lines = body.splitlines(keepends=True)
 
     rejected: list[tuple[str, str]] = []
+    prev_start_0 = prev_end_0 = 0
     for hunk in hunks:
         start = hunk.new_start if reverse else hunk.old_start
         ctx_lines = [hl[1:] for hl in hunk.lines if hl[0] in keep_markers]
@@ -503,6 +506,13 @@ def _replay_hunks(body: str, hunks: list[_Hunk], *, reverse: bool) -> str:
 
         start_0 = start - 1
         end_0 = start_0 + len(ctx_lines)
+        if start_0 < prev_start_0:
+            rejected.append((hunk.header, "hunk is out of order: it starts before the previous hunk"))
+            continue
+        if start_0 < prev_end_0:
+            rejected.append((hunk.header, "hunk overlaps the previous hunk"))
+            continue
+        prev_start_0, prev_end_0 = start_0, end_0
         if end_0 > len(body_lines):
             rejected.append(
                 (
