@@ -55,11 +55,7 @@ cannot finish its repair raises :class:`VaultRecoveryError`, deliberately not an
 already in progress" or a lock failure. A hook must stay within its own vault: it
 may re-enter that vault's lock but never takes another's.
 
-Guarantee and boundary: lore's own readers and writers never observe a torn
-record, because every writer recovers first and a reader that finds a pending
-journal takes the lock to recover before reading. A reader outside lore (Outpost
-reading files) can see the torn pair between a hard crash and the next lore
-operation on that vault.
+What recovery does and does not guarantee is stated once, in ``record.journal``.
 
 **Threat model: single-user, local vault.** The lock file is opened by path with
 no symlink guard (CWE-59), so a local attacker who can pre-create

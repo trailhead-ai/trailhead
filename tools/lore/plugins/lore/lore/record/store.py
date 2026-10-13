@@ -48,10 +48,9 @@ land a *live* fence on disk, even via a future ``--diff`` path.
 **Pair write.** ``validate_and_write`` (and ``lore resolve``'s settle) write a
 record's body and sidecar through :func:`journal.write_pair`: an undo journal makes
 the two renames one unit, and the next lore operation on the vault rolls back a
-crashed one. Guarantee: lore's own readers and writers never observe a torn
-record. Boundary: a reader outside lore (Outpost reading files) can see the torn
-pair between a hard crash and the next lore operation on that vault. See
-``record.journal`` for the mechanism and the rollback path. ``write_temp_then_rename``
+crashed one. See ``record.journal`` for the mechanism, the rollback path, and what
+the guarantee does and does not cover (a concurrent lock-free reader can see the
+window between the two renames). ``write_temp_then_rename``
 remains the single-file primitive; ``move_record``'s cross-vault copy keeps its
 two renames.
 
