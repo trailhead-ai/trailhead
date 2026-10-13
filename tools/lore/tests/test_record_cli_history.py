@@ -12,9 +12,9 @@ import re
 
 import pytest
 from conftest import make_vault as _make_vault, run_cli as _run
-from test_record_cli_amend import AMENDED as V2, BODY, _body, _sidecar
+from test_record_cli_amend import AMENDED as V2, BODY, LONG, _body, _sidecar
 from test_record_cli_amend import _amend as _run_amend, _create as _create_record
-from test_record_cli_amend import _snapshot
+from test_record_cli_amend import _set_history, _snapshot
 
 V3 = "# Decision\n\nline one\nline TWO\nline 3 changed\n"
 
@@ -317,7 +317,7 @@ def test_history_of_an_illegal_id_is_a_clean_error(tmp_path, bad):
 # Numbered listing and --body-before reconstruction
 # ---------------------------------------------------------------------------
 
-from test_record_cli_amend_base import LONG, _update_body  # noqa: E402
+from test_record_cli_amend_base import _update_body  # noqa: E402
 
 B1 = "# Decision\n\nline one\nline 2 first\nline three\n"
 B2 = "# Decision\n\nline one\nline 2 second\nline three\n"
@@ -341,14 +341,6 @@ def _thrice(tmp_path):
 
 def _entries(vault, rid):
     return _sidecar(vault, rid)["change-history"]
-
-
-def _set_history(vault, rid, history):
-    kind, name = rid.split("/", 1)
-    path = vault / kind / f"{name}.json"
-    data = json.loads(path.read_text(encoding="utf-8"))
-    data["change-history"] = history
-    path.write_text(json.dumps(data), encoding="utf-8")
 
 
 def _assert_clean_refusal(r, *needles):
