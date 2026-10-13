@@ -254,7 +254,8 @@ def _parse_hunks(diff: str) -> list[_Hunk]:
     Uses ``diff.splitlines(keepends=True)`` so each hunk line retains its original
     line ending (``\\n`` / ``\\r\\n`` / none). File-header (``--- ``/``+++ ``) lines
     before the first hunk and between hunks are skipped; inside a hunk the header
-    counts decide where the body ends, so a body line beginning ``-- `` or ``++ `` is kept. Raises :class:`DiffFormatError` on the concatenated-no-newline
+    counts decide where the body ends, so a body line beginning ``-- `` or ``++ ``
+    is kept. Raises :class:`DiffFormatError` on the concatenated-no-newline
     edge case (via :func:`_validate_hunk_counts`) and on a bare hunk header — see
     :class:`DiffFormatError` for both triggers.
     """
