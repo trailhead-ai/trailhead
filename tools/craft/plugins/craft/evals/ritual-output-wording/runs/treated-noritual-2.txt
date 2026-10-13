@@ -1,0 +1,13 @@
+Five criteria are still open, and one more is only partly demonstrated. Only the per-category late fee capped at the replacement price (AC2) is fully done.
+
+**Still to do**
+
+- **A borrower over ten pounds in late fees is blocked from checkout until the balance is cleared or a librarian overrides (AC3):** the block and the clear-on-payment work, but the note doesn't mention the override route for lifting the block.
+- **A librarian override records who granted it and why, and shows in the borrower's history (AC4):** not started.
+- **Returning an overdue item stops the fee growing the same day, even if scanned after closing (AC5):** not started.
+- **One reminder three days before the due date, one the day after, and no other automatic messages about the loan (AC6):** the day-after message is sent, but the three-days-before message is not built. Nothing in the note says the "no other messages" part has been checked.
+- **The monthly fees report lists each category's total charged and waived, reconciling with the per-borrower ledgers (AC7):** not touched.
+
+**Not yet shown to be met**
+
+- **An overdue loan shows on the desk screen within one minute of the date rolling over (AC1):** the flag was only seen the morning after a midnight rollover. The one-minute timing still needs to be checked, and fixed if it doesn't hold.

@@ -1,0 +1,15 @@
+## Findings
+
+- [Critical] No task carries a test contract: the plan's own note (after-closing returns stamped next morning) makes the return-time fee run charge an extra day, breaking same-day fee stop (AC5), and nothing would catch it. Suggested: add per-task failing-first tests, starting with a 23:00 return and fee-cap boundaries (AC2).
+- [Critical] First nightly run is an ungated, irreversible backfill: every historically overdue loan is flagged and charged at once, so borrowers are blocked at the desk next morning with no undo. Suggested: dry-run mode reporting would-be charges, an explicit cutover date, and fees as append-only ledger entries that can be reversed.
+- [Important] Nightly job failure is invisible (Critical-class, capped): a crashed or skipped run leaves flags and balances stale and the desk screen shows them as current. Suggested: record last-success time, alert on a missed run, and show staleness on the desk screen.
+- [Important] Fee charging is not idempotent (Critical-class, capped): a job retry, or the nightly run plus a return-time run on the same day, double-charges. Suggested: key charges on (loan, date) with a unique constraint.
+- [Important] 00:05 schedule misses the overdue-within-one-minute requirement (AC1) by four minutes. Suggested: derive overdue at read time from the due date, or run at 00:00.
+- [Important] Override stored as a free-text borrower note does not record who granted it (AC4). Suggested: structured override record with librarian id and reason, shown in history.
+- [Important] Reminders (AC6) and the monthly fees report (AC7) have no tasks, and there is no waiver or ledger model to reconcile against. Suggested: add tasks or explicitly defer them.
+- [Important] No rollback path or feature flag for the checkout guard; a bad balance blocks all lending. Suggested: kill switch that fails open and logs.
+- [Minor] "Local time" is undefined across DST changes; the job may run twice or be skipped.
+- [Minor] Guard boundary at exactly ten pounds is unspecified in the plan ("exceeds" vs the spec's "more than").
+
+## Confidence
+High on plan-versus-spec gaps (plan.md:6-11, spec.md:7-19); medium on runtime behaviour, since no code exists to inspect.

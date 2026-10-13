@@ -1,0 +1,14 @@
+## Findings
+
+- [Critical] No task carries a test contract: nothing pins the over-ten-pounds checkout block (AC3), the replacement-price cap (AC2), or the after-closing return (AC5), so wrong fees ship unnoticed. Suggested: add red-first tests per task for £10.00 vs £10.01, the cap, a 23:59 vs 00:01 due date, and an after-closing return.
+- [Critical] Fee charging is irreversible, non-idempotent and silent: the calculator runs nightly and again on return, so a return day or a job retry double-charges, with no ledger entry to reverse and no failure signal. Suggested: append-only ledger keyed on (loan, date), a dry-run mode, and an alert on job failure or a missed run.
+- [Important] (Critical-class, capped) First run has no backfill plan: loans already overdue get flagged and may be charged retroactively in one unreviewed pass. Suggested: gated, replayable backfill with a preview and a stated charge-from date.
+- [Important] (Critical-class, capped) No rollback for the new loan-table flag or for charged balances. Suggested: feature flag plus reversible migration.
+- [Important] The plan's after-closing note contradicts the spec: stamping the return with the next morning's date adds a day's fee, where the fee must stop the same day (AC5). Suggested: stamp with the business date.
+- [Important] The 00:05 job misses the one-minute overdue window (AC1), and a failed night has no catch-up. Suggested: derive overdue at read time and make the job catch up on missed dates.
+- [Important] The override note records the reason but not who granted it (AC4), and a balance-only store cannot produce charged/waived totals that reconcile (AC7). Suggested: structured override record and ledger.
+- [Important] Reminder messages (AC6) and the monthly fees report (AC7) have no task, so the "one reminder only" guarantee has no dedupe design.
+- [Minor] 00:05 local time is skipped or repeated on a timezone change; concurrent return and nightly run race on the balance.
+
+## Confidence
+Medium — the gaps are explicit in plan.md:6-11 against spec.md:7-19, but there is no codebase to check for existing ledger, alerting or migration tooling.
