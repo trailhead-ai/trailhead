@@ -418,7 +418,8 @@ def cmd_record(args) -> int:
     print(
         f"lore record: unknown action {action!r}. "
         f"Use 'lore record create', 'lore record update', "
-        f"'lore record amend', 'lore record rename', 'lore record delete', 'lore record history', or 'lore record show'.",
+        f"'lore record amend', 'lore record rename', 'lore record delete', "
+        f"'lore record history', or 'lore record show'.",
         file=sys.stderr,
     )
     return 1
@@ -1699,12 +1700,10 @@ def _cmd_record_update(args) -> int:
     The read / body-resolve / guard step is :func:`_read_apply_and_guard`, shared
     with ``record amend``.
     """
-    import json
     from contextlib import ExitStack
 
     from .. import locking as locking_mod
     from ..record import fields as fields_mod
-    from ..record import guards as guards_mod
     from ..record import store as record_store_mod
     from . import resolve_state as resolve_state_mod
 
