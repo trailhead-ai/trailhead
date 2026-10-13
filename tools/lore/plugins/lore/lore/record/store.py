@@ -45,6 +45,16 @@ before the write.
 contract). Write-time neutralization is the structural backstop: a body can never
 land a *live* fence on disk, even via a future ``--diff`` path.
 
+**Pair write.** ``validate_and_write`` (and ``lore resolve``'s settle) write a
+record's body and sidecar through :func:`journal.write_pair`: an undo journal makes
+the two renames one unit, and the next lore operation on the vault rolls back a
+crashed one. Guarantee: lore's own readers and writers never observe a torn
+record. Boundary: a reader outside lore (Outpost reading files) can see the torn
+pair between a hard crash and the next lore operation on that vault. See
+``record.journal`` for the mechanism and the rollback path. ``write_temp_then_rename``
+remains the single-file primitive; ``move_record``'s cross-vault copy keeps its
+two renames.
+
 **Move safety.** :func:`move_record` copies the new artifacts →
 repoints the index → deletes the old copy **in that order**. A crash after the
 index repoint but before the old delete leaves a stranded old artifact whose ID
@@ -86,6 +96,7 @@ from typing import Any, NamedTuple, Optional
 from .. import locking
 from ..search import index as index_store
 from ..vault import vault as vault_mod
+from . import journal
 from . import model as record_model
 from . import sidecar as sidecar_format
 
@@ -923,8 +934,9 @@ def validate_and_write(
          :func:`validate_stamp_neutralize` (the shared pre-write step). Non-empty
          validation errors → :class:`RecordValidationError`, an empty committer
          email → :class:`ProvenanceError` — **nothing written** in either case.
-      5. Atomically write body then sidecar via ``write_temp_then_rename`` —
-         always succeeds, clobbering any existing target (the create/update/move
+      5. Write body and sidecar together via ``journal.write_pair`` — both land
+         or neither does, even across a hard crash — always succeeding by
+         clobbering any existing target (the create/update/move
          semantics every kind relies on; ``place_record``'s collision suffix is
          what keeps a create from landing on an occupied stem in the first
          place).
@@ -949,10 +961,9 @@ def validate_and_write(
     with locking.vault_write_lock(location.vault_root):
         stamped, safe_body = validate_stamp_neutralize(location, sidecar, body)
 
-        # 5 — durable text first (atomic). Body before sidecar; both atomic.
+        # 5 — durable text first: body and sidecar land together or not at all.
         sidecar_text = sidecar_format.dumps(stamped)
-        write_temp_then_rename(location.body_path, safe_body)
-        write_temp_then_rename(location.sidecar_path, sidecar_text)
+        journal.write_pair(location.vault_root, location.record_id, safe_body, sidecar_text)
 
         # 6 — index last; on failure the text already won (no rollback).
         # ``shared`` is the resolved vault's trust flag: default 0 (own/trusted)

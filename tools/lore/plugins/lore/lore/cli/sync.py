@@ -1638,6 +1638,12 @@ def cmd_sync(args) -> int:
                     say(f"sync already in progress for {name!r} — skipped")
                     outcomes[name] = SYNC_IN_PROGRESS
                     continue
+                except locking.VaultRecoveryError as exc:
+                    # Not an OSError on purpose: the lock was acquired, the
+                    # rollback of an interrupted write failed. Say so, by record.
+                    say_map[name][1](f"{exc} — skipped")
+                    commit_rc[name] = 1
+                    continue
                 except OSError as exc:
                     say_err = say_map[name][1]
                     say_err(f"error: failed to acquire vault lock: {exc} — skipped")

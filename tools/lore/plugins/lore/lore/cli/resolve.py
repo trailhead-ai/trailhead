@@ -162,6 +162,7 @@ from pathlib import Path
 from typing import Any
 
 from .. import locking
+from ..record import journal as journal_mod
 from ..record import model as record_model
 from ..record import sidecar as sidecar_format
 from ..search import xml_escape
@@ -809,8 +810,9 @@ def write_record(vault: Path, record_id: str, sidecar: dict, body: str) -> None:
     except (store_mod.RecordValidationError, store_mod.ProvenanceError) as exc:
         raise ResolveError(f"{record_id}: {exc}") from None
 
-    store_mod.write_temp_then_rename(location.body_path, safe_body)
-    store_mod.write_temp_then_rename(location.sidecar_path, sidecar_format.dumps(stamped))
+    journal_mod.write_pair(
+        location.vault_root, location.record_id, safe_body, sidecar_format.dumps(stamped)
+    )
 
     for rel in (f"{record_id}.md", f"{record_id}.json"):
         rc, _, err = _git(vault, "add", "--", rel)

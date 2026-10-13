@@ -273,12 +273,16 @@ def _handle_write_error(exc: Exception, op: str) -> int:
     ``update``'s ``RecordNotFoundError``/``InvalidRecordIdError`` clause is NOT
     routed here — it is update-specific and caught before this handler.
     """
+    from .. import locking
     from ..record import store as record_store_mod
 
     if isinstance(exc, record_store_mod.RecordValidationError):
         return _fail(exc.errors, prefix="error: ")
     if isinstance(exc, record_store_mod.ProvenanceError):
         print(f"error: {exc}", file=sys.stderr)
+        return 1
+    if isinstance(exc, locking.VaultRecoveryError):
+        print(exc, file=sys.stderr)
         return 1
     print(f"error: record {op} failed: {exc}", file=sys.stderr)
     return 1
@@ -425,6 +429,24 @@ def cmd_record(args) -> int:
     return 1
 
 
+def _recover_pending_write(vault_root: str) -> bool:
+    """Roll back an interrupted write in *vault_root* before a reader looks at it.
+
+    Takes the vault lock only when a journal is pending, so readers stay
+    lock-free otherwise. The recovery line goes to stderr. Returns False (after
+    printing the named ``lore:`` message) when the rollback itself failed.
+    """
+    from .. import locking
+    from ..record import journal
+
+    try:
+        journal.recover_if_pending(vault_root)
+    except locking.VaultRecoveryError as exc:
+        print(exc, file=sys.stderr)
+        return False
+    return True
+
+
 def _render_record(
     record_id: str,
     vault_root: str,
@@ -479,6 +501,8 @@ def _render_record(
     from ..record import store as record_store_mod
     from ..search import xml_escape
 
+    if not _recover_pending_write(vault_root):
+        return 1
     try:
         loc = record_store_mod.locate_record(record_id, vault_root=vault_root)
     except (
@@ -605,6 +629,8 @@ def _cmd_record_history(args) -> int:
             print(f"lore: {exc}", file=sys.stderr)
             return 1
 
+    if not _recover_pending_write(vault_root):
+        return 1
     try:
         loc = record_store_mod.locate_record(record_id, vault_root=vault_root)
     except (
