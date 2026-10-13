@@ -307,3 +307,35 @@ or `absent` run fails the guard, whatever the criterion-mention result.
 - `criterion 3` and other forms without the letters `AC` are not read as criterion numbers.
 - Three runs per arm resolve only a large effect.
 - Runs are read-only (`--allowedTools "Read"`) and start from empty directories; behaviour with tools is not measured.
+
+## Amendment, 2026-10-13 — the covered-criteria value may carry its own field label
+
+Committed after the nine baseline captures and before any treated or shipped-state arm file exists or has been run.
+Nothing above this heading is rewritten; where this section and "The covered-criteria value" disagree, this section
+is the rule the grader implements.
+
+**What the baseline showed.** One of the three baseline slice runs, `baseline-slice-1`, wrote its final line as the
+field label followed by the list. The other two wrote the list alone. The slice fixture asks for the value "exactly
+as it would be written in the record", and the record's line carries that label, so both answers follow the
+fixture. The prose under test was the same in all three runs.
+
+**What changes.** Before matching, `covers-field` removes one leading `**Covers:**` label, and any spaces after it,
+from the last non-blank line. What is left must match the same grammar, whole. That one label is the only thing
+removed: a different label, a label anywhere but the start of the line, a backtick-wrapped list, and a value that
+carries criterion text or brackets are all still `off-shape`. A line that is the label and nothing else is
+`off-shape` too, since it contains no value.
+
+**Why.** The guard exists to catch the wording section rewording a value that a script reads as bare numbers. The
+label is not part of that value: the covers gate is handed the list alone. Under the rule as first written, the
+unchanged baseline fails the guard in one run of three, so a treated run failing it would say nothing about the
+wording section.
+
+**Effect on the baseline.** `baseline-slice-1` is `gate-shape` under this rule and `off-shape` under the rule as
+first written. The results record both readings.
+
+**What does not change.** The fixtures, the baseline captures, the `criterion-mention` grammar, the rule that the
+slice site's last line is left out of the statement when it contains a criterion number, every pass condition and
+every run rule.
+
+**Limit.** This amendment was written with baseline output in hand. No treated output existed when it was
+committed.
