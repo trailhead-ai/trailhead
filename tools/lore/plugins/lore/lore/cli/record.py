@@ -542,6 +542,13 @@ def _render_record(
     return 0
 
 
+def _neutral(value: object) -> str:
+    """*value* as text with any ``external-memory`` fence token made inert."""
+    from ..record import store as record_store_mod
+
+    return record_store_mod.neutralize_fences(str(value))
+
+
 def _format_history(record_id: str, history: list) -> list[str]:
     """Lines of the newest-first listing: each entry's header, then its diff."""
     if not history:
@@ -552,12 +559,12 @@ def _format_history(record_id: str, history: list) -> list[str]:
             continue
         if lines:
             lines.append("")
-        lines.append(f"at: {entry.get('at', '')}")
-        lines.append(f"by: {entry.get('by', '')}")
-        lines.append(f"initiated-by: {entry.get('initiated-by', '')}")
-        lines.append(f"reason: {entry.get('reason', '')}")
+        lines.append(f"at: {_neutral(entry.get('at', ''))}")
+        lines.append(f"by: {_neutral(entry.get('by', ''))}")
+        lines.append(f"initiated-by: {_neutral(entry.get('initiated-by', ''))}")
+        lines.append(f"reason: {_neutral(entry.get('reason', ''))}")
         lines.append("diff:")
-        lines.extend(str(entry.get("diff", "")).rstrip("\n").split("\n"))
+        lines.extend(_neutral(entry.get("diff", "")).rstrip("\n").split("\n"))
     return lines
 
 
@@ -591,7 +598,11 @@ def _cmd_record_history(args) -> int:
             return 1
         vault_root = str(named_vault.path)
     else:
-        vault_root = _resolve_record_op_vault(record_id, args)
+        try:
+            vault_root = _resolve_record_op_vault(record_id, args)
+        except record_store_mod.InvalidRecordIdError as exc:
+            print(f"lore: {exc}", file=sys.stderr)
+            return 1
 
     try:
         loc = record_store_mod.locate_record(record_id, vault_root=vault_root)
@@ -644,6 +655,8 @@ def _cmd_record_show(args) -> int:
     ``update`` uses. Omitting ``--vault`` preserves
     :func:`_resolve_record_op_vault`'s scan exactly as before.
     """
+    from ..record import store as record_store_mod
+
     record_id = _require_record_id(args)
     if record_id is None:
         return 1
@@ -662,7 +675,11 @@ def _cmd_record_show(args) -> int:
             history_note=True,
         )
 
-    vault_root = _resolve_record_op_vault(record_id, args)
+    try:
+        vault_root = _resolve_record_op_vault(record_id, args)
+    except record_store_mod.InvalidRecordIdError as exc:
+        print(f"lore: {exc}", file=sys.stderr)
+        return 1
     return _render_record(record_id, vault_root, as_json, history_note=True)
 
 
@@ -1966,6 +1983,12 @@ def _cmd_record_update(args) -> int:
     return 0
 
 
+_SESSION_AMEND_REFUSAL = (
+    "error: a session record cannot be amended: lore record update and "
+    "lore flush write it under the session lock"
+)
+
+
 def _cmd_record_amend(args) -> int:
     """``lore record amend RECORD_ID --reason R --initiated-by operator|agent`` — thin shell.
 
@@ -2020,8 +2043,9 @@ def _cmd_record_amend(args) -> int:
             file=sys.stderr,
         )
         return 1
-    if "\n" in reason or "\r" in reason:
-        print("error: --reason must be one line: remove the line breaks", file=sys.stderr)
+    problem = record_model_mod.change_history_reason_problem(reason)
+    if problem:
+        print(f"error: --reason {problem}", file=sys.stderr)
         return 1
     initiated_by = getattr(args, "initiated_by", None)
     if initiated_by is None:
@@ -2038,11 +2062,7 @@ def _cmd_record_amend(args) -> int:
         )
         return 1
     if record_id.split("/", 1)[0] == "session":
-        print(
-            "error: a session record cannot be amended: lore record update and "
-            "lore flush write it under the session lock",
-            file=sys.stderr,
-        )
+        print(_SESSION_AMEND_REFUSAL, file=sys.stderr)
         return 1
 
     named_vault = None
@@ -2076,6 +2096,10 @@ def _cmd_record_amend(args) -> int:
                 )
             else:
                 location = _find_current_record_location(record_id)
+
+            if location.kind.casefold() == "session":
+                print(_SESSION_AMEND_REFUSAL, file=sys.stderr)
+                raise _UpdateAborted()
 
             if resolve_state_mod.vault_is_resolving(location.vault_root):
                 print(
@@ -2117,7 +2141,18 @@ def _cmd_record_amend(args) -> int:
                 "reason": reason,
                 "diff": record_store_mod.make_unified_diff(stored_before, stored_after),
             }
-            sidecar["change-history"] = [*sidecar.get("change-history", []), entry]
+            stored_history = sidecar.get("change-history", [])
+            if not isinstance(stored_history, list):
+                print(
+                    f"error: {location.record_id} has a malformed change-history "
+                    f"(stored as {type(stored_history).__name__}, not a list): "
+                    "amending would reset the log. Restore the field from the "
+                    "record's vault git history (git log -p -- "
+                    f"{location.kind}/{location.name}.json), then amend again",
+                    file=sys.stderr,
+                )
+                raise _UpdateAborted()
+            sidecar["change-history"] = [*stored_history, entry]
 
             dest_root, dest_shared = _resolve_current_vault_shared(location)
             new_id = record_store_mod.validate_and_write(
@@ -2288,7 +2323,9 @@ def add_record_subparser(sub) -> None:
                     "kind, status, labels and links are kept.",
         epilog="--initiated-by: 'operator' means a human instructed this edit in "
                "the current session; 'agent' means the agent proposed it. The "
-               "value is recorded as stated, not verified. The reason and the "
+               "value is recorded as stated, not verified: initiated-by and by "
+               "(the unauthenticated git committer identity or LORE_EMAIL) are "
+               "audit labels, not permission checks. The reason and the "
                "diff are permanent: amend never scrubs text, because the removed "
                "body stays in the diff and in vault git history. A record "
                "carrying change-history needs a lore new enough to know the "

@@ -3108,3 +3108,35 @@ def test_the_detail_a_failure_withholds_from_the_owner_reaches_the_marker(
         "git's own account is kept where a person debugging goes for it"
     )
     assert "fatal:" not in "\n".join(lines), "and nowhere the owner reads"
+
+
+class _CountedEntry(dict):
+    """A history entry that counts every equality comparison made against it."""
+
+    comparisons = 0
+
+    def __eq__(self, other):
+        type(self).comparisons += 1
+        return dict.__eq__(self, other)
+
+    __hash__ = None
+
+
+def _count_merge_comparisons(resolve, n):
+    _CountedEntry.comparisons = 0
+
+    def side(tag):
+        shared = [_CountedEntry(_min(i % 60, f"s{i}")) for i in range(n)]
+        own = [_CountedEntry(_min(i % 60, f"{tag}{i}")) for i in range(n)]
+        return shared + own
+
+    ours, theirs = side("o"), side("t")
+    merged = resolve._merge_change_history(ours, theirs)
+    assert merged is not None and len(merged) == 3 * n
+    return _CountedEntry.comparisons
+
+
+def test_change_history_merge_work_grows_linearly_with_the_entry_count(resolve):
+    n = 800
+    comparisons = _count_merge_comparisons(resolve, n)
+    assert comparisons <= 10 * n, comparisons

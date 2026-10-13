@@ -1294,3 +1294,29 @@ def test_unsupported_key_refusal_names_key_and_update_remedy():
     [msg] = result.errors
     assert "from-the-future" in msg
     assert "this record may have been written by a newer lore; update trailhead" in msg
+
+
+@pytest.mark.parametrize(
+    "reason",
+    ["ansi \x1b[2J", "vtab\x0b", "nel\x85", "ls ", "ps ", "del\x7f", "nul\x00", "tab\t"],
+    ids=["ansi", "vtab", "nel", "line-sep", "para-sep", "del", "nul", "tab"],
+)
+def test_change_history_reason_with_control_or_line_break_character_is_refused(reason):
+    result = rm().validate(_base_sidecar_with(**{"change-history": [_history_entry(reason=reason)]}))
+    assert result.errors
+    assert all("change-history" in e and "reason" in e for e in result.errors)
+
+
+@pytest.mark.parametrize("length, ok", [(500, True), (501, False)])
+def test_change_history_reason_length_is_capped_at_500(length, ok):
+    result = rm().validate(
+        _base_sidecar_with(**{"change-history": [_history_entry(reason="r" * length)]})
+    )
+    assert (result.errors == []) is ok
+
+
+@pytest.mark.parametrize("by", ["a\x1b[2J@x", "a\nb@x", "a\x00b", "a\x85b"])
+def test_change_history_by_with_a_control_character_is_refused(by):
+    result = rm().validate(_base_sidecar_with(**{"change-history": [_history_entry(by=by)]}))
+    assert result.errors
+    assert all("change-history" in e and "'by'" in e for e in result.errors)

@@ -666,7 +666,9 @@ def check_active_adr_body_immutable(
         "the record that replaces it. To correct the body in place (a typo, a "
         f"wrong link), run `lore record amend {graph_mod.format_node(f'{kind}/{name}')} --reason \"<why>\" "
         "--initiated-by operator|agent` with the corrected body on stdin; the "
-        "reason and the diff are kept in the record's change-history.",
+        "reason and the diff are kept in the record's change-history. Pass "
+        "`--initiated-by operator` only for an edit a human instructed: it is "
+        "an audit label, not a permission check.",
     )
 
 

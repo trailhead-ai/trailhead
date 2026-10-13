@@ -361,3 +361,74 @@ def test_amend_with_unknown_vault_is_refused_writing_nothing(tmp_path):
     r = _amend(vault, state, rid, AMENDED, extra=["--vault", "nope"])
     assert r.returncode != 0
     assert _snapshot(vault) == before
+
+
+# ---------------------------------------------------------------------------
+# A session record cannot be reached by spelling its kind differently
+# ---------------------------------------------------------------------------
+
+
+def test_session_record_under_a_case_variant_kind_dir_is_refused(tmp_path):
+    vault, state = _make_vault(tmp_path)
+    sess = vault / "SESSION"
+    sess.mkdir()
+    (sess / "s1.md").write_text("log\n", encoding="utf-8")
+    (sess / "s1.json").write_text(
+        json.dumps({"kind": "session", "title": "S1", "status": "dirty"}), encoding="utf-8"
+    )
+    before = _snapshot(vault)
+    r = _amend(vault, state, "SESSION/s1", "log\nmore\n")
+    _refused(vault, state, "SESSION/s1", r, "session record cannot be amended")
+    assert _snapshot(vault) == before
+
+
+# ---------------------------------------------------------------------------
+# --reason is one line of printable text, at most 500 characters
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "reason",
+    ["ansi \x1b[2J clear", "vtab\x0bhere", "nel\x85here", "ls here", "ps here",
+     "del\x7fhere", "nul\x00here", "tab\there"],
+    ids=["ansi", "vtab", "nel", "line-sep", "para-sep", "del", "nul", "tab"],
+)
+def test_reason_with_a_control_or_line_break_character_is_refused(tmp_path, reason):
+    vault, state, rid = _adr(tmp_path)
+    before = _snapshot(vault)
+    r = _amend(vault, state, rid, AMENDED, reason=reason)
+    _refused(vault, state, rid, r, "--reason", "control")
+    assert _snapshot(vault) == before
+
+
+def test_reason_of_500_characters_is_accepted(tmp_path):
+    vault, state, rid = _adr(tmp_path)
+    r = _amend(vault, state, rid, AMENDED, reason="r" * 500)
+    assert r.returncode == 0, r.stderr
+    assert _sidecar(vault, rid)["change-history"][0]["reason"] == "r" * 500
+
+
+def test_reason_of_501_characters_is_refused(tmp_path):
+    vault, state, rid = _adr(tmp_path)
+    before = _snapshot(vault)
+    r = _amend(vault, state, rid, AMENDED, reason="r" * 501)
+    _refused(vault, state, rid, r, "--reason", "500")
+    assert _snapshot(vault) == before
+
+
+# ---------------------------------------------------------------------------
+# A stored change-history that is not a list is never reset or exploded
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("stored", ["abc", None, 7], ids=["string", "null", "int"])
+def test_amend_over_a_non_list_change_history_is_refused(tmp_path, stored):
+    vault, state, rid = _adr(tmp_path)
+    path = vault / "adr" / f"{rid.split('/', 1)[1]}.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["change-history"] = stored
+    path.write_text(json.dumps(data), encoding="utf-8")
+    before = _snapshot(vault)
+    r = _amend(vault, state, rid, AMENDED)
+    _refused(vault, state, rid, r, "change-history", "git")
+    assert _snapshot(vault) == before

@@ -102,13 +102,19 @@ Amend writes the new body (a full replacement, or with `--diff` a unified diff
 applied to the stored body), keeps the record's id, kind, status, labels and links,
 and appends one entry to the record's `change-history`: when, by whom (the
 committer identity), who asked, why, and the diff. Every other guard still runs.
-It refuses, writing nothing, a missing or multi-line `--reason`, a missing or
+It refuses, writing nothing, a missing, multi-line, control-character or over-long `--reason`, a missing or
 invalid `--initiated-by`, empty stdin, a `--diff` that does not apply, a body
 identical to the stored one, a missing record, and any `session` record.
 
 - **`--initiated-by`** says who asked for the edit. `operator` means a human
   instructed this edit in the current session; `agent` means the agent proposed it.
 - **Attested, not verified.** The value is recorded as stated; lore cannot check it.
+  `initiated-by` and `by` are audit labels, not permission checks: `by` is the
+  unauthenticated git committer identity (or `LORE_EMAIL`), so anyone who can
+  write the vault can claim any value. Use `--initiated-by operator` only for an
+  edit a human instructed.
+- **Reason limits.** `--reason` is one line of printable text, at most 500
+  characters; control characters and Unicode line breaks are refused.
 - **Permanent.** The reason and the diff are kept for good, so amend is not a way
   to scrub text: the removed body stays in the diff and in the vault's git history.
 - **Older lore.** A record carrying `change-history` needs a lore new enough to know
