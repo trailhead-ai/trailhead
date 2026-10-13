@@ -23,8 +23,13 @@ _TRAIL_NEWLINES_RE = re.compile(r"(?:\r\n|\r|\n)(?:[ \t]*(?:\r\n|\r|\n))*[ \t]*\
 
 
 class Section(NamedTuple):
-    heading_re: re.Pattern[str]
+    heading: str
     repeatable: bool
+
+    @property
+    def heading_re(self) -> re.Pattern[str]:
+        """The heading line, matched case-insensitively."""
+        return re.compile(re.escape(self.heading), re.IGNORECASE)
 
 
 # A section is a block the craft pipeline writes onto a record after its author
@@ -37,8 +42,8 @@ class Section(NamedTuple):
 #   - ``## Driver run`` (task): the drive checkpoint, one block appended at
 #     each phase boundary by ``craft:drive``.
 PIPELINE_SECTIONS: dict[str, tuple[Section, ...]] = {
-    "spec": (Section(re.compile(r"## Slices", re.IGNORECASE), repeatable=False),),
-    "task": (Section(re.compile(r"## Driver run", re.IGNORECASE), repeatable=True),),
+    "spec": (Section("## Slices", repeatable=False),),
+    "task": (Section("## Driver run", repeatable=True),),
 }
 
 
