@@ -18,10 +18,12 @@ matches neither was changed outside lore after the crash and is left alone with 
 warning. Rolling back is the "not at all" outcome: a crashed command never
 reported success.
 
-**Guarantee and boundary.** After a crash, lore's next operation on the vault,
-reader or writer, restores the pair before anything is read or written: every
-writer recovers on taking the lock, and ``record show`` / ``record history`` take
-the lock to recover when a journal is pending. The guarantee stops there. A
+**Guarantee and boundary.** After a crash, lore's next operation that is a writer
+or one of the ``record show``, ``record history`` and ``session show`` readers
+restores the pair before anything is read or written: every writer recovers on
+taking the lock, and those readers take the lock to recover when a journal is
+pending. The guarantee stops there. Other read paths (``lore vault add``'s index
+scan, for one) take no lock and can see a torn pair until the next writer runs. A
 concurrent reader with no journal pending takes no lock and can run between the
 two renames and see the new body beside the old sidecar, and a reader outside lore
 (Outpost reading files) can see the torn pair from a hard crash until the next lore
@@ -30,8 +32,13 @@ keeps its two renames.
 
 **Where it lives.** ``state_dir("lore")/journal/<sha256 of the resolved vault
 root>/<sha256 of the record id>.json``, outside the vault tree so sync can never
-commit it; directory 0700, files 0600. The journal stores the record id only;
-paths are re-derived from it at recovery, symlinked record files are refused
+commit it; directory 0700, files 0600. A journal directory that is a symlink, is
+not owned by the current user, or (for the per-vault directory) has any group or
+other mode bits is refused, for writes and for recovery alike, with a named
+``VaultRecoveryError``; journal files are opened ``O_NOFOLLOW``, must be owned by
+the current user, and are discarded as unreadable above a fixed size. The journal
+stores the record id only; paths are re-derived from it, must resolve inside the
+vault root (writing and recovering), symlinked record files are refused
 (``O_NOFOLLOW``), and a journal recorded for a different root is skipped.
 
 **Rollback path.** Reverting the commits that introduced this module restores
@@ -45,7 +52,6 @@ This module imports nothing from ``lore.record``; it depends only on
 from __future__ import annotations
 
 import base64
-import binascii
 import hashlib
 import glob
 import json
@@ -55,8 +61,65 @@ import sys
 from pathlib import Path
 
 from .. import locking
+from ..confine import realpath_is_descendant
 
 _FILES = ("body", "sidecar")
+
+_MAX_JOURNAL_BYTES = 64 * 1024 * 1024
+
+
+def _is_mine(st: os.stat_result) -> bool:
+    return st.st_uid == os.geteuid()
+
+
+def _unsafe(what: Path, why: str) -> locking.VaultRecoveryError:
+    return locking.VaultRecoveryError(
+        f"lore: refusing to use the write journal {what}: {why}; "
+        "fix it (or remove it) and re-run — nothing was written through it"
+    )
+
+
+def _check_dir(path: Path, *, owner_only_mode: bool) -> None:
+    """Refuse *path* unless it is a real directory this user owns (and, if asked, 0700)."""
+    try:
+        st = os.lstat(path)
+    except FileNotFoundError:
+        raise
+    except OSError as exc:
+        raise _unsafe(path, str(exc)) from exc
+    if stat.S_ISLNK(st.st_mode):
+        raise _unsafe(path, "it is a symlink")
+    if not stat.S_ISDIR(st.st_mode):
+        raise _unsafe(path, "it is not a directory")
+    if not _is_mine(st):
+        raise _unsafe(path, "it is not owned by the current user")
+    if owner_only_mode and st.st_mode & 0o077:
+        raise _unsafe(
+            path, f"its mode {stat.S_IMODE(st.st_mode):04o} lets other users in (expected 0700)"
+        )
+
+
+def _prepare_journal_dir(jdir: Path) -> None:
+    """Create (if needed) and vet the journal directory and its parent for a write."""
+    parent = jdir.parent
+    parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    _check_dir(parent, owner_only_mode=False)
+    os.chmod(parent, 0o700)
+    try:
+        jdir.mkdir(mode=0o700)
+    except FileExistsError:
+        pass
+    _check_dir(jdir, owner_only_mode=True)
+
+
+def _vet_existing_journal_dir(jdir: Path) -> bool:
+    """False when there is no journal directory; raises when one exists but is unsafe."""
+    try:
+        _check_dir(jdir.parent, owner_only_mode=False)
+        _check_dir(jdir, owner_only_mode=True)
+    except FileNotFoundError:
+        return False
+    return True
 
 
 def _sha(data: bytes) -> str:
@@ -90,7 +153,17 @@ def _check_id(record_id: str) -> tuple[str, str]:
 
 def _record_paths(root: Path, record_id: str) -> dict[str, Path]:
     kind, name = _check_id(record_id)
-    return {"body": root / kind / f"{name}.md", "sidecar": root / kind / f"{name}.json"}
+    paths = {"body": root / kind / f"{name}.md", "sidecar": root / kind / f"{name}.json"}
+    root_real = os.path.realpath(root)
+    # The directory chain is confined; a symlinked record file itself is never
+    # followed (O_NOFOLLOW on read, os.replace swaps the link rather than its target).
+    for p in paths.values():
+        if not realpath_is_descendant(p.parent, root_real):
+            raise locking.VaultRecoveryError(
+                f"lore: {record_id} resolves outside the vault ({root}); "
+                "a symlinked kind directory is not followed — nothing was written"
+            )
+    return paths
 
 
 def _read_nofollow(path: Path) -> bytes | None | str:
@@ -152,9 +225,6 @@ def _journal_file(root: Path, record_id: str) -> Path:
 
 def _write_journal(jfile: Path, payload: dict) -> None:
     jdir = jfile.parent
-    jdir.mkdir(parents=True, exist_ok=True)
-    os.chmod(jdir.parent, 0o700)
-    os.chmod(jdir, 0o700)
     fd = os.open(jfile, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as fh:
         json.dump(payload, fh)
@@ -176,6 +246,7 @@ def write_pair(vault_root: str | Path, record_id: str, body: str, sidecar: str) 
     """
     root = Path(vault_root).resolve()
     paths = _record_paths(root, record_id)
+    _prepare_journal_dir(journal_dir(root))
     new = {"body": body.encode("utf-8"), "sidecar": sidecar.encode("utf-8")}
 
     staged: dict[str, Path] = {}
@@ -217,10 +288,26 @@ def _warn(msg: str) -> None:
     print(msg, file=sys.stderr)
 
 
+def _read_journal(jfile: Path) -> str:
+    """The journal's text; ``OSError`` for a symlink, a stranger's file or one over the cap."""
+    fd = os.open(jfile, os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or not _is_mine(st):
+            raise OSError(f"{jfile} is not a regular file owned by this user")
+        with os.fdopen(fd, "rb", closefd=False) as fh:
+            data = fh.read(_MAX_JOURNAL_BYTES + 1)
+    finally:
+        os.close(fd)
+    if len(data) > _MAX_JOURNAL_BYTES:
+        raise OSError(f"{jfile} is larger than {_MAX_JOURNAL_BYTES} bytes")
+    return data.decode("utf-8")
+
+
 def _parse(jfile: Path):
     """The parsed journal, or ``None`` when it is unreadable or malformed."""
     try:
-        data = json.loads(jfile.read_text(encoding="utf-8"))
+        data = json.loads(_read_journal(jfile))
         root, rid, files = data["root"], data["id"], data["files"]
         if not isinstance(root, str) or not isinstance(rid, str):
             return None
@@ -240,7 +327,7 @@ def _parse(jfile: Path):
                 return None
             parsed[which] = (before, before_sha, after_sha)
         return root, rid, parsed
-    except (OSError, ValueError, KeyError, TypeError, binascii.Error):
+    except Exception:
         return None
 
 
@@ -325,6 +412,8 @@ def recover_vault(vault_root: str | Path) -> None:
     """Roll back every interrupted write journalled for *vault_root*."""
     root = Path(vault_root).resolve()
     jdir = journal_dir(root)
+    if not _vet_existing_journal_dir(jdir):
+        return
     try:
         jfiles = sorted(jdir.iterdir())
     except OSError:
