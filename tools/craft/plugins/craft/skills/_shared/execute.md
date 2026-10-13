@@ -1235,8 +1235,9 @@ record).
 
 **A record already `done` is the exception: reopen it, then write the note.** `done` freezes the
 body, and the freeze judges the status *before* the write, so the one-step form is refused when the
-record is `done` — the case drive's post-build push escalation reaches, with the parent closed
-before the push or PR tail failed. Reopen it with a status-only write,
+record is `done` — the case drive reaches when, after a PR-tail escalation, its in-flight push hits
+the [Phase 6](#phase-6-close-and-completion-report) pre-push scan with the parent already closed at
+slice close. Reopen it with a status-only write,
 `lore record update task/<name> --vault <elected-vault> --status blocked`, then write the note with
 `lore record update task/<name> --vault <elected-vault> --diff` against the now-`blocked` record. A
 `blocked` task is not frozen, so that second write is never refused for the freeze. If the note
