@@ -401,7 +401,9 @@ def test_amend_with_unknown_vault_is_refused_writing_nothing(tmp_path):
 
 def test_session_record_under_a_case_variant_kind_dir_is_refused(tmp_path):
     vault, state = _make_vault(tmp_path)
-    sess = vault / "SESSION"
+    # The id's kind is canonicalized before lookup, so the record is found where a
+    # case-folding filesystem would resolve "SESSION" to: the lowercase directory.
+    sess = vault / "session"
     sess.mkdir()
     (sess / "s1.md").write_text("log\n", encoding="utf-8")
     (sess / "s1.json").write_text(

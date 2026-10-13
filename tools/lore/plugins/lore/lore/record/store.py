@@ -706,10 +706,19 @@ def _confine_record_id(record_id: RecordId, root: str) -> tuple[str, str, Path, 
     catching symlinked ``kind`` dirs). This is the library-boundary guard so every
     RECORD_ID-bearing caller (``update`` via :func:`locate_record`, ``delete`` via
     :func:`delete_record`) is confined symmetrically.
+
+    A ``kind`` that differs from a known kind (``record_model.KINDS``) only in
+    case is returned as the canonical lowercase kind, and the paths are built
+    from it.
     """
     if not record_id or "\x00" in record_id or "/" not in record_id:
         raise InvalidRecordIdError(f"malformed RECORD_ID: {record_id!r}")
     kind, name = record_id.split("/", 1)
+    # A known kind is canonical lowercase everywhere downstream (guards, history,
+    # index keys); a different casing must neither miss a kind-keyed guard nor
+    # reach a case-insensitive filesystem under its own spelling.
+    if kind.casefold() in record_model.KINDS:
+        kind = kind.casefold()
     # Reject absolute components and any degenerate / traversal segment in EITHER
     # half. Path(...).parts surfaces every segment; an absolute path yields a
     # leading "/" part, and "."/".." are caught explicitly (Path(".").parts == ()).
@@ -810,7 +819,7 @@ def locate_record(
         vault_root=root,
         kind=kind,
         name=name,
-        record_id=record_id,
+        record_id=f"{kind}/{name}",
         body_path=body_path,
         sidecar_path=sidecar_path,
     )
