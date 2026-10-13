@@ -422,14 +422,21 @@ class ReconstructError(RecordStoreError):
         super().__init__(message)
 
 
-def reconstruct_body_before(body: str, history: list, n: int) -> str:
+def reconstruct_body_before(body: str, history: Any, n: int) -> str:
     """The body as it stood before change-history entry *n* (1 is the oldest).
 
     Reverse-applies entries ``len(history)`` down to *n* against *body*, the
     record's stored body. An edit made outside amend that overlaps no amend hunk
     is kept; one that does makes that entry fail to reverse. Raises
-    :class:`ReconstructError`; nothing is returned partially.
+    :class:`ReconstructError`; nothing is returned partially. A *history* that is
+    not a list, or an entry whose diff has no hunk, is ``malformed``.
     """
+    if not isinstance(history, list):
+        raise ReconstructError(
+            "malformed",
+            f"has a malformed change-history (stored as {type(history).__name__}, "
+            "not a list)",
+        )
     total = len(history)
     if total == 0:
         raise ReconstructError("no-history", "has no change history")
@@ -448,6 +455,12 @@ def reconstruct_body_before(body: str, history: list, n: int) -> str:
                 "malformed", f"entry {number} has no stored diff", number
             )
         try:
+            if not _parse_hunks(diff):
+                raise ReconstructError(
+                    "malformed",
+                    f"entry {number} has a malformed stored diff: it contains no hunk",
+                    number,
+                )
             current = reverse_unified_diff(current, diff)
         except DiffRejectError as exc:
             raise ReconstructError(
@@ -851,6 +864,21 @@ def change_history_of(sidecar: object) -> list[Any]:
         return []
     history = sidecar.get("change-history")
     return history if isinstance(history, list) else []
+
+
+def read_stored_change_history(sidecar_path: Path) -> Any:
+    """The ``change-history`` value as stored, whatever its shape.
+
+    ``[]`` for a missing or unparseable file or an absent key; a present value
+    that is not a list is returned as is so a caller can refuse it.
+    """
+    try:
+        existing = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    if not isinstance(existing, dict):
+        return []
+    return existing.get("change-history", [])
 
 
 def read_change_history(sidecar_path: Path) -> list[Any]:
