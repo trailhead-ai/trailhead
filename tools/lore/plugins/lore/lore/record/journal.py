@@ -18,12 +18,15 @@ matches neither was changed outside lore after the crash and is left alone with 
 warning. Rolling back is the "not at all" outcome: a crashed command never
 reported success.
 
-**Guarantee and boundary.** lore's own readers and writers never observe a torn
-record: every writer recovers before touching the vault, and ``record show`` /
-``record history`` take the lock to recover when a journal is pending. A reader
-outside lore (Outpost reading files) can see the torn pair between a hard crash
-and the next lore operation on that vault. ``move_record``'s cross-vault copy is
-out of scope and keeps its two renames.
+**Guarantee and boundary.** After a crash, lore's next operation on the vault,
+reader or writer, restores the pair before anything is read or written: every
+writer recovers on taking the lock, and ``record show`` / ``record history`` take
+the lock to recover when a journal is pending. The guarantee stops there. A
+concurrent reader with no journal pending takes no lock and can run between the
+two renames and see the new body beside the old sidecar, and a reader outside lore
+(Outpost reading files) can see the torn pair from a hard crash until the next lore
+operation on that vault. ``move_record``'s cross-vault copy is out of scope and
+keeps its two renames.
 
 **Where it lives.** ``state_dir("lore")/journal/<sha256 of the resolved vault
 root>/<sha256 of the record id>.json``, outside the vault tree so sync can never
