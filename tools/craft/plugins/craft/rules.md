@@ -229,3 +229,15 @@ it.
 - Keep a test alive because deleting it would lower a coverage number. A test that
   cannot fail for a real reason is not coverage; it is a maintenance cost that
   reads as safety.
+
+## Output wording
+
+This governs only what you print for the person reading the session. A report to
+the agent that dispatched you, a field or line a script reads, a plan file, and
+commit and pull request text keep the form their own instructions give.
+
+When you mention an acceptance criterion, say the criterion itself and put its
+number after it in round brackets, as in "Orders over the limit are held for
+review (AC6)". The sentence must still make sense with the number deleted, and
+no nickname stands in for the text. When it comes up again, point back in words
+("that same hold for large orders"), with the number still trailing.

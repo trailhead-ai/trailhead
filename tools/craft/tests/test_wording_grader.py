@@ -684,6 +684,15 @@ CAPTURE_EXPECTATIONS = {
         ("reviewer-report", [], "template-shape"),
         ("criterion-mention", [], "bare"),
     ],
+    "treated-noritual": [("criterion-mention", [], "text-with-number")],
+    "treated-slice-rules-only": [
+        ("criterion-mention", ["--drop-value-line"], "text-with-number"),
+        ("covers-field", [], "gate-shape"),
+    ],
+    "treated-reviewer": [
+        ("reviewer-report", [], "template-shape"),
+        ("criterion-mention", [], "nickname"),
+    ],
 }
 
 CAPTURES = sorted(p for p in RUNS.glob("*.txt") if not p.name.endswith(".stderr.txt"))

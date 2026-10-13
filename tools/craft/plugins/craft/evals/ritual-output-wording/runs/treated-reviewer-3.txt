@@ -1,0 +1,15 @@
+## Findings
+
+- [Critical] No task carries a test contract: all four tasks ship with nothing pinning fee maths, the block threshold or date rollover, so a wrong rate or cap charges real borrowers undetected. Suggested: add failing-first tests per task — fee on either side of the replacement-price cap, balance at £10.00 vs £10.01, loan due yesterday vs today.
+- [Critical] Nightly fee charging is irreversible, non-replayable and silent: a crashed 00:05 run charges nothing and nobody is told, while a retried or double run charges the day twice, with no ledger to reverse it. Suggested: write fees as ledger rows keyed (loan, date), add a dry-run mode, and alert on a missed or failed run.
+- [Important] First run is an ungated backfill: every already-overdue loan gets flagged, charged and possibly blocked overnight. Suggested: decide the retroactive policy, then preview counts before enabling.
+- [Important] After-closing returns are stamped with the next morning's date, so the return-time calculation charges an extra day, breaking the rule that a return stops the fee growing the same day (AC5). Suggested: stamp the actual scan time and compute fees from it.
+- [Important] The 00:05 schedule cannot show a borrower as overdue within one minute of the date rolling over (AC1). Suggested: derive overdue from the due date at read time; keep the job for fees only.
+- [Important] The nightly job and the return-time calculation can both charge the same loan-day when they overlap. Suggested: the same (loan, date) uniqueness key.
+- [Important] Reminder messages (AC6) and the monthly fees report (AC7) have no task; the report needs waived amounts, which nothing records. Suggested: add tasks or descope explicitly.
+- [Important] The override is stored as a free-text borrower note, with no field for who granted it (AC4). Suggested: a structured override record with actor, reason and timestamp.
+- [Minor] "Local time" is undefined across DST changes; the 00:05 job may skip or repeat.
+- [Minor] A stale desk screen can show a clear balance while the checkout guard refuses.
+
+## Confidence
+Medium — findings follow directly from the plan and spec text; no codebase was available to check existing ledger, scheduler or alerting support.

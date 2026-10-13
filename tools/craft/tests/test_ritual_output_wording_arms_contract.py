@@ -35,6 +35,9 @@ ARM_SOURCES: dict[str, list[Source]] = {
     "baseline-noritual.md": [(RULES, BASELINE_REVISION)],
     "baseline-slice.md": [(SLICE_SKILL, BASELINE_REVISION), (RULES, BASELINE_REVISION)],
     "baseline-reviewer.md": [(RELIABILITY_AGENT, BASELINE_REVISION), (RULES, BASELINE_REVISION)],
+    "treated-noritual.md": [(RULES, None)],
+    "treated-slice-rules-only.md": [(SLICE_SKILL, BASELINE_REVISION), (RULES, None)],
+    "treated-reviewer.md": [(RELIABILITY_AGENT, None), (RULES, None)],
 }
 
 
