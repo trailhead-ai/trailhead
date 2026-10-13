@@ -1,0 +1,54 @@
+{
+  "spec-first-ledger-at-end": {
+    "expected": "pipeline",
+    "kind": "spec"
+  },
+  "spec-first-ledger-before-another-section": {
+    "expected": "pipeline",
+    "kind": "spec"
+  },
+  "spec-ledger-append-with-authored-blank-edit": {
+    "expected": "authored",
+    "kind": "spec"
+  },
+  "spec-ledger-append-with-prose-edit-above": {
+    "expected": "authored",
+    "kind": "spec"
+  },
+  "spec-ledger-covers-backfill": {
+    "expected": "pipeline",
+    "kind": "spec"
+  },
+  "spec-ledger-entry-appended-at-end": {
+    "expected": "pipeline",
+    "kind": "spec"
+  },
+  "spec-ledger-then-section-entry-appended": {
+    "expected": "pipeline",
+    "kind": "spec"
+  },
+  "spec-prose-added-under-section-after-ledger": {
+    "expected": "authored",
+    "kind": "spec"
+  },
+  "task-driver-run-appended-with-plan-edit": {
+    "expected": "authored",
+    "kind": "task"
+  },
+  "task-first-driver-run": {
+    "expected": "pipeline",
+    "kind": "task"
+  },
+  "task-plan-edit-between-driver-runs": {
+    "expected": "authored",
+    "kind": "task"
+  },
+  "task-second-driver-run-appended": {
+    "expected": "pipeline",
+    "kind": "task"
+  },
+  "task-three-driver-runs-with-plan-between": {
+    "expected": "pipeline",
+    "kind": "task"
+  }
+}
