@@ -1802,6 +1802,7 @@ def _cmd_record_update(args) -> int:
 
     from .. import locking as locking_mod
     from ..record import fields as fields_mod
+    from ..record import guards as guards_mod
     from ..record import store as record_store_mod
     from . import resolve_state as resolve_state_mod
 
@@ -2026,6 +2027,31 @@ def _cmd_record_update(args) -> int:
                         body_path=dest_body_path,
                         sidecar_path=dest_sidecar_path,
                     )
+                    # A destination id that already exists is overwritten by the
+                    # move, so a frozen one is judged exactly as an in-place write
+                    # would be: its on-disk status and body against the moved
+                    # record's resulting ones, read under the pair held above.
+                    if dest_body_path.exists() or dest_sidecar_path.exists():
+                        dest_prior = (
+                            json.loads(dest_sidecar_path.read_text(encoding="utf-8"))
+                            if dest_sidecar_path.exists()
+                            else {}
+                        )
+                        dest_prior_body = (
+                            dest_body_path.read_text(encoding="utf-8")
+                            if dest_body_path.exists()
+                            else ""
+                        )
+                        frozen_refusal = guards_mod.check_frozen_record(
+                            kind=dest_kind,
+                            name=dest_name,
+                            prior_status=dest_prior.get("status"),
+                            prior_body=dest_prior_body,
+                            new_body=safe_body,
+                            status_set=stamped.get("status"),
+                        )
+                        if frozen_refusal:
+                            raise _UpdateAborted(_fail([frozen_refusal]))
                     new_id = record_store_mod.move_record(
                         old_id=location.record_id,
                         new_location=dest_location,
