@@ -543,6 +543,39 @@ def test_revert_of_an_entry_that_no_longer_reverses_is_refused_and_writes_nothin
     assert _snapshot(vault) == before
 
 
+def _set_history(vault, rid, history):
+    kind, name = rid.split("/", 1)
+    path = vault / kind / f"{name}.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["change-history"] = history
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+
+@pytest.mark.parametrize("which", [1, 2], ids=["oldest", "newest"])
+@pytest.mark.parametrize("diff", ["", "garbage no hunks\n"], ids=["empty", "no-hunk-garbage"])
+def test_revert_over_a_zero_hunk_entry_is_refused_and_writes_nothing(tmp_path, diff, which):
+    vault, state, rid = _twice_amended(tmp_path)
+    history = _sidecar(vault, rid)["change-history"]
+    history[which - 1] = {**history[which - 1], "diff": diff}
+    _set_history(vault, rid, history)
+    before = _snapshot(vault)
+    r = _revert(vault, state, rid, 1)
+    _refused(vault, state, rid, r, f"entry {which}", "malformed")
+    assert r.stdout == ""
+    assert _snapshot(vault) == before
+
+
+@pytest.mark.parametrize("stored", [{"a": 1}, "abc"], ids=["mapping", "string"])
+def test_revert_over_a_non_list_change_history_is_refused_on_its_shape(tmp_path, stored):
+    vault, state, rid = _twice_amended(tmp_path)
+    _set_history(vault, rid, stored)
+    before = _snapshot(vault)
+    r = _revert(vault, state, rid, 1)
+    _refused(vault, state, rid, r, "malformed change-history", "not a list")
+    assert "no change history" not in r.stderr
+    assert _snapshot(vault) == before
+
+
 @pytest.mark.parametrize("n,needle", [
     ("0", "out of range"), ("3", "out of range"), ("-1", "out of range"),
     ("abc", "must be an integer"), ("1.5", "must be an integer"),

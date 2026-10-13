@@ -420,7 +420,10 @@ def test_body_before_names_the_entry_that_no_longer_reverses_by_its_number(tmp_p
     "@@ not a hunk header\n",
     "@@ -1,2 +1,2 @@\n only-one-line\n",
     None,
-], ids=["new-start-zero", "bare-header", "count-mismatch", "not-a-string"])
+    "",
+    "garbage no hunks\n",
+], ids=["new-start-zero", "bare-header", "count-mismatch", "not-a-string",
+        "empty", "no-hunk-garbage"])
 def test_body_before_refuses_a_hostile_or_malformed_stored_diff(tmp_path, diff):
     vault, state, rid = _thrice(tmp_path)
     history = _entries(vault, rid)
@@ -428,6 +431,25 @@ def test_body_before_refuses_a_hostile_or_malformed_stored_diff(tmp_path, diff):
     _set_history(vault, rid, history)
     r = _before(vault, state, rid, 1)
     _assert_clean_refusal(r, "entry 2")
+
+
+@pytest.mark.parametrize("diff", ["", "garbage no hunks\n"], ids=["empty", "no-hunk-garbage"])
+def test_body_before_refuses_a_zero_hunk_entry_between_target_and_newest(tmp_path, diff):
+    vault, state, rid = _thrice(tmp_path)
+    history = _entries(vault, rid)
+    history[2] = {**history[2], "diff": diff}
+    _set_history(vault, rid, history)
+    r = _before(vault, state, rid, 1)
+    _assert_clean_refusal(r, "entry 3", "malformed")
+
+
+@pytest.mark.parametrize("stored", [{"a": 1}, "abc"], ids=["mapping", "string"])
+def test_body_before_refuses_a_non_list_change_history_on_its_shape(tmp_path, stored):
+    vault, state, rid = _thrice(tmp_path)
+    _set_history(vault, rid, stored)
+    r = _before(vault, state, rid, 1)
+    _assert_clean_refusal(r, "malformed change-history", "not a list")
+    assert "no change history" not in r.stderr
 
 
 def test_body_before_refuses_a_history_entry_that_is_not_an_object(tmp_path):

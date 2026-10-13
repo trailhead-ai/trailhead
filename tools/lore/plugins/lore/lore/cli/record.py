@@ -641,7 +641,7 @@ def _reconstruct_from_stored(location, n: int, flag: str) -> "str | None":
         if location.body_path.exists()
         else ""
     )
-    history = record_store_mod.read_change_history(location.sidecar_path)
+    history = record_store_mod.read_stored_change_history(location.sidecar_path)
     try:
         return record_store_mod.reconstruct_body_before(body, history, n)
     except record_store_mod.ReconstructError as exc:
