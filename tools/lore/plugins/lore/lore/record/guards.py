@@ -577,10 +577,6 @@ FROZEN_STATUSES: dict[str, frozenset[str]] = {
 #: reopened; a decision has no ``draft`` to return to.
 _NO_RETURN_TO_DRAFT: frozenset[str] = frozenset({"adr", "spec"})
 
-#: The pipeline-maintained section a plain update may still change, per kind
-#: (see :mod:`record.sections`), named in the refusal.
-_PLAIN_UPDATE_SECTION: dict[str, str] = {"spec": "## Slices", "task": "## Driver run"}
-
 _SUPERSESSION_RECIPE = (
     "For a material change, supersede it: flip --status superseded with "
     "--supersedes adr/<successor> naming the record that replaces it."
@@ -703,10 +699,12 @@ def check_frozen_body(
     if prior_authored == new_authored:
         return None
     node = graph_mod.format_node(f"{kind}/{name}")
-    section = _PLAIN_UPDATE_SECTION.get(kind)
+    plain_update_sections = " or ".join(
+        section.heading for section in sections_mod.PIPELINE_SECTIONS.get(kind, ())
+    )
     sections_clause = (
-        f"Only {section} passes a plain update."
-        if section
+        f"Only {plain_update_sections} passes a plain update."
+        if plain_update_sections
         else "No section passes a plain update."
     )
     if kind == "adr":
@@ -846,10 +844,6 @@ def evaluate_design_guards(
     vault_root: str,
     status_set: str | None,
     deleting: bool = False,
-    body: str = "",
-    prior_status: str | None = None,
-    prior_body: str | None = None,
-    allowed_body: str | None = None,
 ) -> tuple[list[str], list[str]]:
     """Evaluate the design graph guards for a spec/adr create/update/delete.
 
@@ -857,7 +851,8 @@ def evaluate_design_guards(
     does, and is likewise a no-op — ``([], [])`` — for every kind outside
     :data:`graph.DESIGN_KINDS`:
 
-      - ``errors`` block the operation (nothing is written): every ``depends-on`` entry that fails the ``kind/name[@stage]`` grammar
+      - ``errors`` block the operation (nothing is written): every
+        ``depends-on`` entry that fails the ``kind/name[@stage]`` grammar
         (a name carrying its own ``/`` included — the grammar is one level) or
         the target kind's stage vocabulary, an entry whose name breaks vault
         confinement, and a stage-blind dependency cycle over the qualified-id
@@ -975,17 +970,17 @@ def evaluate_graph_guards(
     same ``([], [])`` no-op both of those return on their own — no kind carries
     two graphs, so exactly one policy ever runs. ``body`` is consumed by the
     task policy (the flow-out ritual reminder has no design counterpart) and by
-    the freeze check. *supplied_depends_on*
-    and *parent_supplied* are task-only: the task-edge form check is the one
-    guard that grandfathers already-stored edges, because it is the one guard
-    whose rule postdates the data it reads. Every design ``depends-on`` entry on disk was written
-    under the design grammar, so that policy judges the merged record whole.
+    the freeze check. *supplied_depends_on* and *parent_supplied* are
+    task-only: the task-edge form check is the one guard that grandfathers
+    already-stored edges, because it is the one guard whose rule postdates the
+    data it reads. Every design ``depends-on`` entry on disk was written under
+    the design grammar, so that policy judges the merged record whole.
 
     *prior_body* / *prior_status* are the record's on-disk values BEFORE this
-    write — consumed only by the freeze check, and both default to ``None``: a caller that has not been taught to thread
-    them in (a fresh create, or a seam with no natural "prior" to read) gets no
-    enforcement, never a false rejection, on that seam. See
-    :func:`check_frozen_body`.
+    write — consumed only by the freeze check, and both default to ``None``: a
+    caller that has not been taught to thread them in (a fresh create, or a
+    seam with no natural "prior" to read) gets no enforcement, never a false
+    rejection, on that seam. See :func:`check_frozen_body`.
 
     *allowed_body* is the one body a frozen record may change to (the amend
     verb's own resolved new body); it is forwarded to that check and to nothing
@@ -1023,13 +1018,9 @@ def evaluate_graph_guards(
             kind=kind,
             name=name,
             sidecar=sidecar,
-            body=body,
             vault_root=vault_root,
             status_set=status_set,
             deleting=deleting,
-            prior_status=prior_status,
-            prior_body=prior_body,
-            allowed_body=allowed_body,
         )
     else:
         errors, notices = [], []

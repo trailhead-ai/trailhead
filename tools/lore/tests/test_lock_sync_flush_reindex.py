@@ -672,7 +672,8 @@ class TestCmdSyncBatchedLockPhase:
 
 
 def _write_routed_config(config_home: Path, vault_a: Path, vault_b: Path) -> None:
-    """Config routing ``decision`` records to A for ``team:alpha``, B for ``team:beta``."""
+    """Config routing ``decision`` and ``lesson`` records to A for ``team:alpha``,
+    B for ``team:beta``."""
     lore_cfg = config_home / "lore"
     lore_cfg.mkdir(parents=True, exist_ok=True)
     (lore_cfg / "config.json").write_text(
