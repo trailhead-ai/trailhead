@@ -248,18 +248,6 @@ def _validate_hunk_counts(hunk: _Hunk) -> None:
         )
 
 
-def _hunk_is_open(hunk: _Hunk) -> bool:
-    """True while *hunk* still expects body lines per its header counts.
-
-    Only outside an open hunk does a ``--- `` / ``+++ `` line mean a file header;
-    inside one it is a deleted or added body line that itself begins ``-- `` /
-    ``++ ``.
-    """
-    old_seen = sum(1 for ln in hunk.lines if ln and ln[0] in (" ", "-"))
-    new_seen = sum(1 for ln in hunk.lines if ln and ln[0] in (" ", "+"))
-    return old_seen < hunk.old_count or new_seen < hunk.new_count
-
-
 def _parse_hunks(diff: str) -> list[_Hunk]:
     """Parse a unified diff into ``_Hunk`` objects, line endings kept verbatim.
 
@@ -272,6 +260,10 @@ def _parse_hunks(diff: str) -> list[_Hunk]:
     """
     hunks: list[_Hunk] = []
     current: Optional[_Hunk] = None
+    # Running old/new line counts of *current*, so "is the hunk still open" is
+    # O(1) per line. Only outside an open hunk does a ``--- `` / ``+++ `` line
+    # mean a file header; inside one it is a body line beginning ``-- `` / ``++ ``.
+    old_seen = new_seen = 0
 
     for raw in diff.splitlines(keepends=True):
         raw_stripped = raw.rstrip("\r\n")
@@ -287,6 +279,7 @@ def _parse_hunks(diff: str) -> list[_Hunk]:
                 new_count=int(m.group(4)) if m.group(4) is not None else 1,
                 lines=[],
             )
+            old_seen = new_seen = 0
         elif raw_stripped.startswith("@@"):
             raise DiffFormatError(
                 f"hunk header missing line ranges: {raw_stripped!r} — expected "
@@ -296,7 +289,8 @@ def _parse_hunks(diff: str) -> list[_Hunk]:
                 f"ranges."
             )
         elif current is not None:
-            if not _hunk_is_open(current) and raw_stripped.startswith(("--- ", "+++ ")):
+            hunk_is_open = old_seen < current.old_count or new_seen < current.new_count
+            if not hunk_is_open and raw_stripped.startswith(("--- ", "+++ ")):
                 continue
             if raw_stripped.startswith("\\"):
                 # GNU-diff "\ No newline at end of file" marker: applies to the
@@ -310,6 +304,10 @@ def _parse_hunks(diff: str) -> list[_Hunk]:
                 continue
             if raw and raw[0] in (" ", "-", "+"):
                 current.lines.append(raw)
+                if raw[0] != "+":
+                    old_seen += 1
+                if raw[0] != "-":
+                    new_seen += 1
 
     if current is not None:
         _validate_hunk_counts(current)
@@ -775,6 +773,7 @@ def _is_subsequence(prior: list[Any], new: list[Any]) -> bool:
 def check_change_history_append_only(
     new_sidecar: dict[str, Any],
     prior_histories: list[list[Any]],
+    remedy: str = "use `lore record amend` to add an entry",
 ) -> list[str]:
     """Refusals (empty when fine) for a ``change-history`` that loses a prior entry.
 
@@ -783,7 +782,7 @@ def check_change_history_append_only(
     in its relative order; new entries may land anywhere. A sidecar with no
     prior entries is unconstrained. Pure; the caller decides where the priors
     come from (the stored sidecar for an ordinary write, both sides for a
-    ``lore resolve`` settle).
+    ``lore resolve`` settle), and *remedy* is the way out it names.
     """
     new = change_history_of(new_sidecar)
     for prior in prior_histories:
@@ -791,7 +790,7 @@ def check_change_history_append_only(
             continue
         return [
             "key 'change-history' is append-only: a prior entry was dropped, edited"
-            " or reordered — use `lore record amend` to add an entry"
+            f" or reordered — {remedy}"
         ]
     return []
 
@@ -801,6 +800,7 @@ def validate_stamp_neutralize(
     sidecar: dict[str, Any],
     body: str,
     prior_histories: list[list[Any]] | None = None,
+    history_remedy: str | None = None,
 ) -> tuple[dict[str, Any], str]:
     """Validate + provenance-stamp the sidecar and neutralize the body's fences.
 
@@ -841,7 +841,11 @@ def validate_stamp_neutralize(
         if prior_histories is not None
         else [read_change_history(location.sidecar_path)]
     )
-    history_errors = check_change_history_append_only(normalized, priors)
+    history_errors = (
+        check_change_history_append_only(normalized, priors, history_remedy)
+        if history_remedy is not None
+        else check_change_history_append_only(normalized, priors)
+    )
     if history_errors:
         raise RecordValidationError(history_errors)
 

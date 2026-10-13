@@ -241,6 +241,19 @@ class StageStatus(Enum):
 #: UNREADABLE_SIDECAR`` rather than parsing prose.
 UNREADABLE_SIDECAR = "unreadable-sidecar"
 
+#: The reason literal for a record held because its two ``change-history``
+#: lists keep their shared entries in contradictory orders. No order-preserving
+#: union exists and no single side may be taken without dropping the other's
+#: entries, so it has no settleable slot — the way out is ``--abort`` and a repair.
+UNSETTLEABLE_CHANGE_HISTORY = "unsettleable-change-history"
+
+#: What a refused change-history settle tells the operator. ``lore record amend``
+#: cannot run mid-resolution, so the remedy is to leave and repair.
+CHANGE_HISTORY_REMEDY = (
+    "run `lore resolve --abort`, repair the record's change-history from the "
+    "vault's git history so both devices agree, then sync again"
+)
+
 
 # ---------------------------------------------------------------------------
 # host_is_author
@@ -324,6 +337,7 @@ def merge_sidecars(
             if winner is None:
                 conflicts.append({
                     "slot": key,
+                    "reason": UNSETTLEABLE_CHANGE_HISTORY,
                     "local": loc,
                     "local-absent": False,
                     "remote": r,
@@ -549,6 +563,12 @@ def _resolve_one_record(
         merged, raw_conflicts = merge_sidecars(
             None if isinstance(base, StageStatus) else base, remote, local
         )
+        if any(c.get("reason") == UNSETTLEABLE_CHANGE_HISTORY for c in raw_conflicts):
+            return _hold_unsettleable_history(
+                record_id, kind, sidecar_path, body_path,
+                next(c for c in raw_conflicts if c.get("reason") == UNSETTLEABLE_CHANGE_HISTORY),
+                local_label, remote_label,
+            )
     else:
         merged = _read_worktree_json(vault / sidecar_path)
         if merged is None:
@@ -652,6 +672,36 @@ def _hold_unreadable_sidecar(
     return pending, conflicts
 
 
+def _hold_unsettleable_history(
+    record_id: str, kind: str, sidecar_path: str, body_path: str,
+    conflict: dict, local_label: dict, remote_label: dict,
+) -> tuple[dict, list[dict]]:
+    """Park *record_id* whole because its ``change-history`` has no order-preserving union.
+
+    Same shape and guarantee as :func:`_hold_unreadable_sidecar`: the one
+    returned conflict carries the reason, so :func:`_take_targets` refuses every
+    ``take`` and :func:`write_record` is never reached.
+    """
+    conflicts = [{
+        "record-id": record_id,
+        "kind": kind,
+        "slot": conflict["slot"],
+        "reason": UNSETTLEABLE_CHANGE_HISTORY,
+        "local": {**local_label, "value": conflict["local"], "absent": False},
+        "remote": {**remote_label, "value": conflict["remote"], "absent": False},
+    }]
+    pending = {
+        "kind": kind,
+        "sidecar-path": sidecar_path,
+        "body-path": body_path,
+        "reason": UNSETTLEABLE_CHANGE_HISTORY,
+        "sidecar": {},
+        "body": None,
+        "settled": [],
+    }
+    return pending, conflicts
+
+
 def _load_json_stage(vault: Path, stage: int, path: str) -> dict | StageStatus:
     """Return the parsed sidecar object at one index stage.
 
@@ -747,7 +797,8 @@ def write_record(vault: Path, record_id: str, sidecar: dict, body: str) -> None:
     ]
     try:
         stamped, safe_body = store_mod.validate_stamp_neutralize(
-            location, sidecar, body, prior_histories=side_histories
+            location, sidecar, body, prior_histories=side_histories,
+            history_remedy=CHANGE_HISTORY_REMEDY,
         )
     except (store_mod.RecordValidationError, store_mod.ProvenanceError) as exc:
         raise ResolveError(f"{record_id}: {exc}") from None
@@ -892,6 +943,9 @@ def _render_prose(say, vault_name: str, conflicts: list[dict], files: list[dict]
         if reason == UNREADABLE_SIDECAR:
             say(f"  held — {reason}: no part of this record was written; "
                 "repair the file by hand, then re-run resolve.")
+        elif reason == UNSETTLEABLE_CHANGE_HISTORY:
+            say(f"  held — {reason}: no part of this record was written; "
+                f"{CHANGE_HISTORY_REMEDY}.")
         for side in ("local", "remote"):
             label = c[side]
             sha = (label.get("sha") or "")[:7]
@@ -904,7 +958,10 @@ def _render_prose(say, vault_name: str, conflicts: list[dict], files: list[dict]
             say(f"  --{side:<6} {sha} {label.get('date', '')}: {text}")
     for f in files:
         say(f"{f['path']} — {f['reason']}")
-    say(f"Settle each, then re-run `lore resolve {vault_name}`.")
+    if conflicts and not files and all(c.get("reason") for c in conflicts):
+        say("Nothing here can be settled with `take`.")
+    else:
+        say(f"Settle each, then re-run `lore resolve {vault_name}`.")
 
 
 def _one_line(value: Any, limit: int = 120) -> str:
@@ -1603,6 +1660,12 @@ def _take_targets(marker: dict, record_id: str, *, slot: str | None,
         raise ResolveError(
             f"{record_id} is held — {UNREADABLE_SIDECAR}: no side of it parsed, so "
             "there is nothing to take. Repair the file by hand, then re-run resolve."
+        )
+    if any(c.get("reason") == UNSETTLEABLE_CHANGE_HISTORY for c in mine):
+        raise ResolveError(
+            f"{record_id} is held — {UNSETTLEABLE_CHANGE_HISTORY}: neither side's "
+            f"change-history can be taken without dropping the other's entries. "
+            f"{CHANGE_HISTORY_REMEDY[0].upper()}{CHANGE_HISTORY_REMEDY[1:]}."
         )
     if all_slots:
         return mine
