@@ -36,6 +36,13 @@ def _amended_twice(tmp_path):
     return vault, state, rid
 
 
+def _stderr_sans_revision(r):
+    """Stderr with the ``revision:`` line removed (that line is asserted elsewhere)."""
+    return "".join(
+        ln for ln in r.stderr.splitlines(keepends=True) if not ln.startswith("revision: ")
+    )
+
+
 def _history(vault, state, rid, *extra):
     return _run(["record", "history", rid, *extra], vault=vault, state_dir=state)
 
@@ -124,16 +131,16 @@ def test_plain_show_notes_history_on_stderr_only_when_it_exists(tmp_path):
     vault, state, rid = _amended_twice(tmp_path)
     plain_rid = _create(vault, state, title="Never Amended")
     assert "amended" in _show(vault, state, rid).stderr
-    assert _show(vault, state, plain_rid).stderr == ""
+    assert _stderr_sans_revision(_show(vault, state, plain_rid)) == ""
 
 
 def test_plain_show_note_names_the_count_and_the_history_command(tmp_path):
     vault, state = _make_vault(tmp_path)
     rid = _create(vault, state)
     _amend(vault, state, rid, V2, reason="one", initiated_by="operator")
-    one = _show(vault, state, rid).stderr
+    one = _stderr_sans_revision(_show(vault, state, rid))
     _amend(vault, state, rid, V3, reason="two", initiated_by="operator")
-    two = _show(vault, state, rid).stderr
+    two = _stderr_sans_revision(_show(vault, state, rid))
     assert one.strip() == f"amended once; see `lore record history {rid}`"
     assert two.strip() == f"amended 2 times; see `lore record history {rid}`"
 

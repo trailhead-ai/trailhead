@@ -91,10 +91,11 @@ Run `lore <subcommand> --help` for full options.
 `lore record update` refuses to change the body of an `adr` once it is `active`
 (or `superseded` / `dropped`): supersede it with a new adr for a material change.
 To correct the body in place instead (a typo, a wrong link), pipe the corrected
-body to amend:
+body to amend (read its revision first):
 
 ```
-lore record amend adr/some-decision --reason "fix the cited ticket number" --initiated-by operator < corrected.md
+lore record show adr/some-decision > /dev/null                   # stderr: revision: <hex>
+lore record amend adr/some-decision --reason "fix the cited ticket number" --initiated-by operator --base <revision> < corrected.md
 lore record amend adr/some-decision --reason "drop a stale sentence" --initiated-by agent --diff < change.diff
 ```
 
@@ -106,6 +107,20 @@ It refuses, writing nothing, a missing, multi-line, control-character or over-lo
 invalid `--initiated-by`, empty stdin, a `--diff` that does not apply, a body
 identical to the stored one, a missing record, and any `session` record.
 
+- **`--base REVISION`** is the stale-write handshake. A record's revision is the
+  SHA-256 of its stored body; `lore record show --json` carries it as `revision`,
+  and plain `lore record show` prints `revision: <hex>` on stderr (stdout stays the
+  body, byte for byte). A full-body amend must pass the revision it composed
+  against. Under the vault lock, after the implicit pull, amend compares it with the
+  stored body's revision and, on a mismatch, exits non-zero and writes nothing; the
+  message gives both revisions, who last changed the record and when, a pointer to
+  `lore record history` when the change was an amend, and the remedy: re-read with
+  `lore record show`, reapply the correction, amend again. A full-body amend
+  without `--base` is refused with the same pointer. **`--diff` may omit `--base`**:
+  a diff whose context still matches overwrites nobody's change, and a
+  non-overlapping edit made since the read is kept; with a stale `--base` it is
+  refused even if it would apply. The revision covers the body only, so a label or
+  status change after the read neither changes it nor is overwritten.
 - **`--initiated-by`** says who asked for the edit. `operator` means a human
   instructed this edit in the current session; `agent` means the agent proposed it.
 - **Attested, not verified.** The value is recorded as stated; lore cannot check it.

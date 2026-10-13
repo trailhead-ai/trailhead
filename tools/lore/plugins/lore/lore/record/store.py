@@ -331,6 +331,24 @@ def _parse_hunks(diff: str) -> list[_Hunk]:
     return hunks
 
 
+def body_revision(body: "str | bytes") -> str:
+    """A record body's revision: the SHA-256 hex of its stored bytes.
+
+    The handshake token ``record show`` hands out and ``record amend --base``
+    compares. A string is taken as the UTF-8 text of the stored body.
+    """
+    data = body.encode("utf-8") if isinstance(body, str) else body
+    return hashlib.sha256(data).hexdigest()
+
+
+def stored_body_revision(body_path: Path) -> str:
+    """:func:`body_revision` of the bytes on disk (the empty body when absent)."""
+    try:
+        return body_revision(body_path.read_bytes())
+    except FileNotFoundError:
+        return body_revision(b"")
+
+
 def make_unified_diff(old_body: str, new_body: str) -> str:
     """Return the unified diff that :func:`apply_unified_diff` turns *old_body* into *new_body*.
 
