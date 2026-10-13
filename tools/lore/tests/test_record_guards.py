@@ -1090,6 +1090,38 @@ def test_active_adr_immutable_check_message_parses_and_names_the_remedy():
     assert "--supersedes adr/" in msg
 
 
+@pytest.mark.parametrize("kind,status", [("decision", "active"), ("task", "done")])
+def test_frozen_body_refusal_prints_pasteable_commands_for_a_shell_safe_id(kind, status):
+    g = _guards()
+    msg = g.check_frozen_body(
+        kind=kind, name="a-safe.name_1", prior_status=status,
+        prior_body="old body", new_body="new body",
+    )
+    assert f"lore record amend '{kind}/a-safe.name_1' --reason" in msg
+    if kind == "task":
+        assert f"lore record update '{kind}/a-safe.name_1' --status" in msg
+
+
+@pytest.mark.parametrize("kind,status", [("decision", "active"), ("task", "done")])
+@pytest.mark.parametrize("name", ["a'b$(cmd)", "a b", "a;b", "a`b`", "a\nb"])
+def test_frozen_body_refusal_withholds_the_command_for_a_hostile_id(kind, status, name):
+    g = _guards()
+    msg = g.check_frozen_body(
+        kind=kind, name=name, prior_status=status,
+        prior_body="old body", new_body="new body",
+    )
+    assert msg.startswith("graph-guard [frozen-body]: ")
+    assert "\n" not in msg
+    assert "lore record amend <" not in msg
+    assert "lore record amend '" not in msg
+    assert 'lore record amend "' not in msg
+    assert "lore record update" not in msg
+    assert "not shell-safe" in msg
+    assert "use `lore record amend` with a reason" in msg
+    assert f"a {kind} at {status}" in msg
+    assert "authored-content line" in msg
+
+
 def test_active_adr_immutable_check_allows_unchanged_body():
     g = _guards()
     msg = g.check_frozen_body(

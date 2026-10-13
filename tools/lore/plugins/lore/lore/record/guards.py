@@ -585,6 +585,9 @@ _SUPERSESSION_RECIPE = (
 _DIFF_LINE_LIMIT = 80
 
 
+_SHELL_SAFE_ID_RE = re.compile(r"[A-Za-z0-9._/-]+")
+
+
 def _is_frozen(kind: str, prior_status: str | None) -> bool:
     return prior_status in FROZEN_STATUSES.get(kind, frozenset())
 
@@ -721,10 +724,27 @@ def check_frozen_body(
         scope_clause = _SUPERSESSION_RECIPE
     else:
         scope_clause = "A change of scope is a supersession."
+    shell_safe = _SHELL_SAFE_ID_RE.fullmatch(f"{kind}/{name}") is not None
+    if shell_safe:
+        amend_clause = (
+            f"To correct the body in place, run `lore record amend {node} "
+            '--reason "<why>" --initiated-by agent|operator --base <revision>` with '
+            "the corrected body on stdin (<revision> is in `lore record show "
+            f"{node}`; pass --diff with a unified diff instead of --base); the "
+            "reason and the diff are kept in the record's change-history."
+        )
+    else:
+        amend_clause = (
+            "To correct the body in place, use `lore record amend` with a reason, "
+            "the corrected body on stdin, and --base <revision> (or --diff with a "
+            "unified diff); the reason and the diff are kept in the record's "
+            "change-history. This record's id is not shell-safe, so no command is "
+            "printed for it: quote the id by hand."
+        )
     reopen_clause = (
         f" Reopening the task with a status-only update (`lore record update {node} "
         "--status <status>`, no stdin) is the other route."
-        if kind == "task"
+        if kind == "task" and shell_safe
         else ""
     )
     return graph_mod.format_guard_message(
@@ -732,11 +752,7 @@ def check_frozen_body(
         f"{node} is a {kind} at {prior_status} — its authored content is frozen "
         f"({_first_differing_line(prior_authored, new_authored)}). "
         f"Do not edit it directly. {sections_clause} {scope_clause} "
-        f"To correct the body in place, run `lore record amend {node} "
-        '--reason "<why>" --initiated-by agent|operator --base <revision>` with '
-        "the corrected body on stdin (<revision> is in `lore record show "
-        f"{node}`; pass --diff with a unified diff instead of --base); the "
-        "reason and the diff are kept in the record's change-history. An agent "
+        f"{amend_clause} An agent "
         "always passes `--initiated-by agent`; `operator` is for an edit a human "
         f"instructed, and is an audit label, not a permission check.{reopen_clause}",
     )

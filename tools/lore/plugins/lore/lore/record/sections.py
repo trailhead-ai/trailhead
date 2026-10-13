@@ -18,8 +18,6 @@ _LINE_RE = re.compile(r"\r\n|\r|\n")
 _FENCE_START_RE = re.compile(r"^(`{3,}|~{3,})")
 _HTML_COMMENT_START_RE = re.compile(r"^<!--")
 _ATX_HEADING_RE = re.compile(r"^ {0,3}#{1,6}(?:[ \t]|\Z)")
-_BLANK_LEAD_RE = re.compile(r"\A(?:[ \t]*(?:\r\n|\r|\n))+")
-_TRAIL_NEWLINES_RE = re.compile(r"(?:\r\n|\r|\n)(?:[ \t]*(?:\r\n|\r|\n))*[ \t]*\Z")
 
 
 class Section(NamedTuple):

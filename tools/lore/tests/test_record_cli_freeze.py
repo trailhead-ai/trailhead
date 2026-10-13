@@ -423,6 +423,95 @@ def test_move_path_with_a_changed_body_against_a_frozen_record_is_refused(tmp_pa
     assert not (vault_b / "decision").exists() or not list((vault_b / "decision").iterdir())
 
 
+# --- a cross-vault move onto an existing destination id honours its freeze ---
+
+SOURCE_BODY = "# Same\n\nSOURCE BODY\n"
+DEST_BODY = "# Same\n\nFROZEN DEST BODY\n"
+
+
+def _two_routed_vaults(tmp_path):
+    vault_a, state = _make_vault(tmp_path)
+    vault_b = tmp_path / "vault_b"
+    vault_b.mkdir()
+    cfg = tmp_path / "config"
+    (cfg / "lore").mkdir(parents=True)
+    kinds = ["decision", "spec", "task"]
+    (cfg / "lore" / "config.json").write_text(json.dumps({"vaults": [
+        {"name": "default", "scope": "default", "path": str(vault_a)},
+        {"name": "alpha", "scope": "team", "records": kinds, "path": str(vault_a)},
+        {"name": "beta", "scope": "team", "records": kinds, "path": str(vault_b)},
+    ]}), encoding="utf-8")
+    return vault_a, vault_b, state, {"env_extra": {"XDG_CONFIG_HOME": str(cfg)}}
+
+
+def _create_in_team(vault, state, extra, kind, status, team, body):
+    r = _run(["record", "create", "--kind", kind, "--title", "Same", "--keyword", "k",
+              "--status", status, "--team", team],
+             vault=vault, state_dir=state, stdin_text=body, **extra)
+    assert r.returncode == 0, r.stderr
+    return r.stdout.strip()
+
+
+MOVE_ONTO_FROZEN = [
+    ("decision", "active", "active"),
+    ("spec", "ready", "ready"),
+    ("task", "in-progress", "done"),
+]
+
+
+@pytest.mark.parametrize("kind,source_status,dest_status", MOVE_ONTO_FROZEN)
+def test_move_onto_a_frozen_destination_id_is_refused_and_both_vaults_are_unchanged(
+    tmp_path, kind, source_status, dest_status
+):
+    vault_a, vault_b, state, extra = _two_routed_vaults(tmp_path)
+    rid = _create_in_team(vault_a, state, extra, kind, source_status, "alpha", SOURCE_BODY)
+    assert _create_in_team(vault_b, state, extra, kind, dest_status, "beta", DEST_BODY) == rid
+    before_a, before_b = _snapshot(vault_a), _snapshot(vault_b)
+
+    r = _run(["record", "update", rid, "--team", "beta"], vault=vault_a, state_dir=state, **extra)
+
+    assert r.returncode != 0
+    assert "[frozen-body]" in r.stderr
+    assert _snapshot(vault_a) == before_a
+    assert _snapshot(vault_b) == before_b
+
+
+def test_move_back_to_draft_onto_a_frozen_destination_is_refused_as_frozen_status(tmp_path):
+    vault_a, vault_b, state, extra = _two_routed_vaults(tmp_path)
+    rid = _create_in_team(vault_a, state, extra, "spec", "draft", "alpha", DEST_BODY)
+    _create_in_team(vault_b, state, extra, "spec", "ready", "beta", DEST_BODY)
+    before_a, before_b = _snapshot(vault_a), _snapshot(vault_b)
+
+    r = _run(["record", "update", rid, "--team", "beta"], vault=vault_a, state_dir=state, **extra)
+
+    assert r.returncode != 0
+    assert "[frozen-status]" in r.stderr
+    assert _snapshot(vault_a) == before_a
+    assert _snapshot(vault_b) == before_b
+
+
+def test_move_onto_a_non_frozen_destination_id_still_overwrites_it(tmp_path):
+    vault_a, vault_b, state, extra = _two_routed_vaults(tmp_path)
+    rid = _create_in_team(vault_a, state, extra, "task", "in-progress", "alpha", SOURCE_BODY)
+    _create_in_team(vault_b, state, extra, "task", "in-progress", "beta", DEST_BODY)
+
+    r = _run(["record", "update", rid, "--team", "beta"], vault=vault_a, state_dir=state, **extra)
+
+    assert r.returncode == 0, r.stderr
+    assert _paths(vault_b, rid)[0].read_text(encoding="utf-8") == SOURCE_BODY
+    assert not _paths(vault_a, rid)[0].exists()
+
+
+def test_move_onto_an_absent_destination_id_lands(tmp_path):
+    vault_a, vault_b, state, extra = _two_routed_vaults(tmp_path)
+    rid = _create_in_team(vault_a, state, extra, "decision", "active", "alpha", SOURCE_BODY)
+
+    r = _run(["record", "update", rid, "--team", "beta"], vault=vault_a, state_dir=state, **extra)
+
+    assert r.returncode == 0, r.stderr
+    assert _paths(vault_b, rid)[0].read_text(encoding="utf-8") == SOURCE_BODY
+
+
 # --- line-terminator-only differences still refuse with the amend route -----
 
 TERMINATOR_CASES = [
