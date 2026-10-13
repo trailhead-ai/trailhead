@@ -85,6 +85,7 @@ from __future__ import annotations
 
 import difflib
 import hashlib
+import io
 import json
 import os
 import re
@@ -331,17 +332,32 @@ def _parse_hunks(diff: str) -> list[_Hunk]:
     return hunks
 
 
+def _read_body_bytes(body_path: Path) -> bytes:
+    try:
+        return body_path.read_bytes()
+    except FileNotFoundError:
+        return b""
+
+
+def read_stored_body(body_path: Path) -> tuple[str, str]:
+    """A record body and its revision, both taken from one read of the file.
+
+    Returns ``(text, revision)``: *text* is the body decoded as text-mode reads
+    do (UTF-8, newlines translated to ``\\n``), *revision* the SHA-256 hex of the
+    very bytes that were decoded. An absent body file is the empty body.
+    """
+    data = _read_body_bytes(body_path)
+    text = io.TextIOWrapper(io.BytesIO(data), encoding="utf-8").read()
+    return text, hashlib.sha256(data).hexdigest()
+
+
 def stored_body_revision(body_path: Path) -> str:
     """A record body's revision: the SHA-256 hex of its bytes on disk.
 
     The handshake token ``record show`` hands out and ``record amend --base``
     compares. An absent body file is the empty body.
     """
-    try:
-        data = body_path.read_bytes()
-    except FileNotFoundError:
-        data = b""
-    return hashlib.sha256(data).hexdigest()
+    return hashlib.sha256(_read_body_bytes(body_path)).hexdigest()
 
 
 def make_unified_diff(old_body: str, new_body: str) -> str:

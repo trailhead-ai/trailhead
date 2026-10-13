@@ -510,13 +510,7 @@ def _render_record(
         return 1
     shared = shared_flag != 0
 
-    body = (
-        loc.body_path.read_text(encoding="utf-8")
-        if loc.body_path.exists()
-        else ""
-    )
-
-    revision = record_store_mod.stored_body_revision(loc.body_path)
+    body, revision = record_store_mod.read_stored_body(loc.body_path)
 
     if as_json:
         sidecar: dict[str, Any] = {}
