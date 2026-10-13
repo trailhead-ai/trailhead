@@ -220,10 +220,12 @@ repos) and count its `members` array.
   draft-PR push — is defined once in that contract, not restated here. The multi-repo question
   itself has no answer inside this ritual's scope — this driver does not decide which repo a slice
   belongs to. Remedy: this parent cannot be driven to completion by this ritual — the operator drops
-  it explicitly
-  (`lore record update task/<slice-parent-name> --status dropped --vault <elected-vault>`, recording
-  why), once the multi-repo question is resolved elsewhere, freeing `../slice/SKILL.md`'s own guard
-  to select the next slice; the driver names this remedy but does not perform it.
+  it explicitly, once the multi-repo question is resolved elsewhere. The why-note rides the flip, in
+  the same invocation, on the parent being dropped
+  (`lore record update task/<slice-parent-name> --status dropped --diff --vault <elected-vault>`,
+  piping a unified diff that appends the note), so the record is never left flipped with the why
+  unwritten. This frees `../slice/SKILL.md`'s own guard to select the next slice; the driver names
+  this remedy but does not perform it.
 
 ### 6. Report the outcome
 

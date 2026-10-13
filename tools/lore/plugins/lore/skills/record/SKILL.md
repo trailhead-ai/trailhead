@@ -186,6 +186,13 @@ prior body, with no diff and no warning. Read the record back first with
 `lore record show` and confirm the text you are about to pipe is the complete
 current export, never a delta.
 
+A frozen record (an ADR or spec past `draft`, any decision, a `done`, `dropped` or `superseded`
+task) refuses that
+plain update. Correct it with `lore record amend <record-id> --reason "<why>" --initiated-by agent --base <revision>`,
+piping the whole corrected body, where `<revision>` is the `revision` from the `lore record show`
+read. A reason and the amended body stay in the vault's change history permanently, so no secret
+goes in either.
+
 **A transcript imported in error comes out with `lore record delete`.** That
 removes it from the working copy only — git history retains every imported
 byte, so deleting after the fact does not unsay it. This is why redaction
