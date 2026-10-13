@@ -2284,7 +2284,7 @@ def test_update_body_change_against_active_adr_rejected_body_unchanged_on_disk(t
         vault=vault, state_dir=state, stdin_text="# Decision\n\nEdited text.\n",
     )
     assert r.returncode != 0
-    assert "[adr-active-immutable]" in r.stderr
+    assert "[frozen-body]" in r.stderr
     assert _find_body(vault, rid) == body
 
 
@@ -2297,7 +2297,7 @@ def test_update_active_adr_refusal_is_the_guard_message_and_points_at_amend(tmp_
 
     r = _run(["record", "update", rid], vault=vault, state_dir=state, stdin_text=edited)
 
-    emitted = load_script("lore.record.guards").check_active_adr_body_immutable(
+    emitted = load_script("lore.record.guards").check_frozen_body(
         kind="adr", name=name, prior_status="active", prior_body=body, new_body=edited,
     )
     assert f"lore record amend {rid!r}" in emitted
@@ -2398,11 +2398,11 @@ def test_update_body_change_with_wellformed_backedge_against_active_adr_still_re
         vault=vault, state_dir=state, stdin_text="# Decision\n\nEdited text.\n",
     )
     assert r.returncode != 0
-    assert "[adr-active-immutable]" in r.stderr
+    assert "[frozen-body]" in r.stderr
     assert _find_body(vault, rid) == body
 
 
-def test_update_body_change_against_active_non_adr_kind_is_unaffected(tmp_path):
+def test_update_body_change_against_active_decision_is_refused_and_body_unchanged(tmp_path):
     vault, state = _make_vault(tmp_path)
     r = _run(
         ["record", "create", "--kind", "decision", "--title", "Some Decision",
@@ -2416,8 +2416,9 @@ def test_update_body_change_against_active_non_adr_kind_is_unaffected(tmp_path):
         ["record", "update", rid],
         vault=vault, state_dir=state, stdin_text="edited\n",
     )
-    assert r2.returncode == 0, r2.stderr
-    assert _find_body(vault, rid) == "edited\n"
+    assert r2.returncode != 0
+    assert "[frozen-body]" in r2.stderr
+    assert _find_body(vault, rid) == "original\n"
 
 
 def test_update_guard_message_parses_and_names_the_remedy(tmp_path):
@@ -2433,8 +2434,8 @@ def test_update_guard_message_parses_and_names_the_remedy(tmp_path):
         vault=vault, state_dir=state, stdin_text="# Decision\n\nEdited text.\n",
     )
     assert r.returncode != 0
-    line = next(ln for ln in r.stderr.splitlines() if "[adr-active-immutable]" in ln)
-    assert line.startswith("graph-guard [adr-active-immutable]: ")
+    line = next(ln for ln in r.stderr.splitlines() if "[frozen-body]" in ln)
+    assert line.startswith("graph-guard [frozen-body]: ")
     assert "supersede" in line.lower()
     assert "do not edit" in line.lower()
     assert "--status superseded" in line
@@ -2475,7 +2476,7 @@ def test_update_move_path_rejects_body_changing_write_against_active_adr(tmp_pat
         stdin_text="# Decision\n\nEdited text.\n",
     )
     assert r2.returncode != 0
-    assert "[adr-active-immutable]" in r2.stderr
+    assert "[frozen-body]" in r2.stderr
     assert _find_body(vault_a, rid) == body
     assert not (vault_b / kind / f"{name}.md").exists()
     assert not (vault_b / kind / f"{name}.json").exists()
@@ -2541,7 +2542,7 @@ def test_update_status_launder_to_draft_against_active_adr_rejected(tmp_path):
         vault=vault, state_dir=state,
     )
     assert launder.returncode != 0, launder.stdout
-    assert "[adr-frozen-status]" in launder.stderr
+    assert "[frozen-status]" in launder.stderr
     assert _find_sidecar(vault, rid)["status"] == "active"
 
     edit = _run(
@@ -2571,7 +2572,7 @@ def test_update_body_change_against_superseded_adr_rejected(tmp_path):
         vault=vault, state_dir=state, stdin_text="# Decision\n\nHacked.\n",
     )
     assert edit.returncode != 0
-    assert "[adr-active-immutable]" in edit.stderr
+    assert "[frozen-body]" in edit.stderr
     assert _find_body(vault, rid) == body
 
 
@@ -2594,7 +2595,7 @@ def test_update_body_change_against_dropped_adr_rejected(tmp_path):
         vault=vault, state_dir=state, stdin_text="# Decision\n\nHacked.\n",
     )
     assert edit.returncode != 0
-    assert "[adr-active-immutable]" in edit.stderr
+    assert "[frozen-body]" in edit.stderr
     assert _find_body(vault, rid) == body
 
 
@@ -2617,7 +2618,7 @@ def test_update_status_draft_flip_against_superseded_adr_rejected(tmp_path):
         vault=vault, state_dir=state,
     )
     assert launder.returncode != 0
-    assert "[adr-frozen-status]" in launder.stderr
+    assert "[frozen-status]" in launder.stderr
     assert _find_sidecar(vault, rid)["status"] == "superseded"
 
 

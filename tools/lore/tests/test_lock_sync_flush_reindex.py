@@ -682,11 +682,11 @@ def _write_routed_config(config_home: Path, vault_a: Path, vault_b: Path) -> Non
                     {"name": "default", "scope": "default", "path": str(vault_a)},
                     {
                         "name": "alpha", "scope": "team",
-                        "records": ["decision"], "path": str(vault_a),
+                        "records": ["decision", "lesson"], "path": str(vault_a),
                     },
                     {
                         "name": "beta", "scope": "team",
-                        "records": ["decision"], "path": str(vault_b),
+                        "records": ["decision", "lesson"], "path": str(vault_b),
                     },
                 ]
             },
@@ -712,7 +712,7 @@ class TestSyncVsCrossVaultMove:
             _write_routed_config(config_home, vault_a, vault_b)
 
             r = run_cli(
-                ["record", "create", "--kind", "decision", "--title", f"mover {it}",
+                ["record", "create", "--kind", "lesson", "--title", f"mover {it}",
                  "--team", "alpha"],
                 vault=vault_a, state_dir=state, stdin_text="orig body\n",
                 env_extra={"XDG_CONFIG_HOME": str(config_home)},

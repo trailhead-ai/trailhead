@@ -17,11 +17,11 @@ over a **closed set of nine kinds**:
 | Kind | What it records |
 |---|---|
 | `decision` | Non-obvious architectural choices and their reasoning |
-| `adr` | A more formal architecture decision record — convention treats an `active` adr as immutable |
+| `adr` | A more formal architecture decision record — frozen once it leaves `draft` (see the freeze table below) |
 | `lesson` | A mistake plus a concrete prevention check |
 | `task` | Anything worth seeing through to completion — implementation work, a deferred item, an abandoned approach, or an external thing to watch — distinguished by `status` (`open` / `ready` / `in-progress` / `blocked` / `done` / `dropped` / `superseded`) |
 | `area` | Mental model of a codebase area (files, gotchas, conventions) |
-| `spec` | Frozen specification artifacts |
+| `spec` | Specification artifacts — frozen once they leave `draft` (see the freeze table below) |
 | `collaboration` | Working-style preferences and conventions |
 | `blob` | Freeform capture that doesn't fit another kind |
 | `session` | One note per working session — the running log |
@@ -77,7 +77,7 @@ lore sync                 Stage, commit, pull, and push every configured vault (
 lore status               Report ruleset drift, host signing state, and any vault holding unsynced records (--json: the same host prerequisites as data, which `trailhead doctor` reads)
 lore search <query>       Query all records (KQL-subset: field:value, full-text, and/or/not)
 lore record show <id>     Read a record's body (add --json for the sidecar)
-lore record amend <id>    Correct a record's body in place, even a frozen adr's, recording who/why/diff in its change-history (--reason, --initiated-by operator|agent, body on stdin or --diff)
+lore record amend <id>    Correct a record's body in place, even a frozen record's, recording who/why/diff in its change-history (--reason, --initiated-by operator|agent, body on stdin or --diff)
 lore record history <id>  Print a record's change history, newest first, entries numbered (what amend recorded: when, by whom, who asked, why, the diff); --body-before N previews the body before entry N
 lore areas                List the area profiles across every configured non-shared vault
 lore signing enable       Generate (or adopt with --key) a no-passphrase SSH key this host signs vault commits with
@@ -88,10 +88,26 @@ Run `lore <subcommand> --help` for full options.
 
 ### Amending a record: `lore record amend`
 
-`lore record update` refuses to change the body of an `adr` once it is `active`
-(or `superseded` / `dropped`): supersede it with a new adr for a material change.
-To correct the body in place instead (a typo, a wrong link), pipe the corrected
-body to amend (read its revision first):
+`lore record update` refuses to change the authored body of a frozen record. What
+is frozen is judged on the record's status **before** the write:
+
+| Kind | Frozen statuses | Plain update still allowed |
+|---|---|---|
+| `adr` | `active`, `superseded`, `dropped` | metadata only |
+| `spec` | `ready`, `planned`, `complete`, `superseded`, `dropped` | metadata, and changes confined to `## Slices` |
+| `decision` | every status | metadata only |
+| `task` | `done`, `dropped`, `superseded` | metadata, and changes confined to `## Driver run` blocks |
+
+`lesson`, `area`, `collaboration`, `blob` and `session` are never frozen. Authored
+content is the body minus the kind's pipeline-maintained sections, so the slice
+ledger and the driver checkpoint stay writable. The refusal is
+`graph-guard [frozen-body]`; it names the first authored line that differs and the
+exact amend command for that record. An `adr` or `spec` also cannot leave a frozen
+status for `draft` (`graph-guard [frozen-status]`); a `task` can be reopened with a
+status-only update. A material change to an `adr` is a supersession with a new adr;
+for any other kind a change of scope is a supersession too. To correct the body in
+place (a typo, a wrong link), pipe the corrected body to amend (read its revision
+first). An agent always passes `--initiated-by agent`:
 
 ```
 lore record show adr/some-decision > /dev/null                   # stderr: revision: <hex>
@@ -290,7 +306,7 @@ The kind set is closed — nine kinds:
 - `session` — one note per working session (the running log)
 - `area` — mental models of codebase areas
 - `decision` — lightweight ADRs
-- `adr` — a more formal architecture decision record (convention-immutable once `active`)
+- `adr` — a more formal architecture decision record (body frozen once it leaves `draft`)
 - `lesson` — mistakes plus prevention checks
 - `task` — work to track to completion: implementation work, deferred items, abandoned approaches, things to watch (status: open/ready/in-progress/blocked/done/dropped/superseded)
 - `collaboration` — working-style preferences
