@@ -75,7 +75,8 @@ def _is_mine(st: os.stat_result) -> bool:
 def _unsafe(what: Path, why: str) -> locking.VaultRecoveryError:
     return locking.VaultRecoveryError(
         f"lore: refusing to use the write journal {what}: {why}; "
-        "fix it (or remove it) and re-run — nothing was written through it"
+        "this is what blocks the vault: inspect it, then remove it to clear the block "
+        "once the layout is fixed, and re-run — nothing was written through it"
     )
 
 
@@ -347,15 +348,22 @@ def _recover_one(root: Path, jfile: Path, *, quiet: bool = False) -> None:
     parsed = _parse(jfile)
     if parsed is None:
         _warn(
-            f"lore: discarded an unreadable write journal ({jfile.name}); "
-            "the interrupted write had not started renaming, so nothing was left half-written"
+            f"lore: discarded an unreadable write journal ({jfile.name}) without "
+            "restoring anything; if it named a record, check that record for a "
+            "half-finished write"
         )
         _unlink(jfile)
         return
     recorded_root, rid, files = parsed
     if recorded_root != str(root):
         return
-    paths = _record_paths(root, rid)
+    try:
+        paths = _record_paths(root, rid)
+    except locking.VaultRecoveryError as exc:
+        raise locking.VaultRecoveryError(
+            f"{exc}; the pending write journal {jfile} is what blocks this vault: "
+            "inspect it, then remove that file to clear the block once the layout is fixed"
+        ) from exc
 
     current = {which: _read_nofollow(paths[which]) for which in _FILES}
     for which in _FILES:

@@ -563,9 +563,20 @@ def _neutral(value: object) -> str:
 _STAMP_MAX = 120
 
 
+def _printable(text: str, *, keep: str = "") -> str:
+    """*text* with every non-printable character (ESC, BEL, ...) escaped to a backslash sequence.
+
+    Characters in *keep* pass through, so a multi-line field can keep its newlines.
+    """
+    return "".join(
+        ch if ch.isprintable() or ch in keep else ch.encode("unicode_escape").decode("ascii")
+        for ch in text
+    )
+
+
 def _inert_stamp(value: object) -> str:
-    """*value* as one capped line with any ``external-memory`` fence token made inert."""
-    line = " ".join(str(value).split())
+    """*value* as one capped printable line with any ``external-memory`` fence token made inert."""
+    line = _printable(" ".join(str(value).split()))
     if len(line) > _STAMP_MAX:
         line = line[:_STAMP_MAX] + "…"
     return _neutral(line)
@@ -583,13 +594,14 @@ def _format_history(record_id: str, history: list) -> list[str]:
         if lines:
             lines.append("")
         lines.append(f"entry: {number} of {total}")
-        lines.append(f"at: {_neutral(entry.get('at', ''))}")
-        lines.append(f"by: {_neutral(entry.get('by', ''))}")
-        lines.append(f"initiated-by: {_neutral(entry.get('initiated-by', ''))}")
-        lines.append(f"reason: {_neutral(entry.get('reason', ''))}")
+        lines.append(f"at: {_neutral(_printable(str(entry.get('at', ''))))}")
+        lines.append(f"by: {_neutral(_printable(str(entry.get('by', ''))))}")
+        lines.append(f"initiated-by: {_neutral(_printable(str(entry.get('initiated-by', ''))))}")
+        lines.append(f"reason: {_neutral(_printable(str(entry.get('reason', '')), keep=chr(10)))}")
         lines.append("diff:")
-        lines.extend(_neutral(entry.get("diff", "")).rstrip("\n").split("\n"))
-    return lines
+        diff = _printable(str(entry.get("diff", "")), keep="\n\t")
+        lines.extend(_neutral(diff).rstrip("\n").split("\n"))
+    return _neutral("\n".join(lines)).split("\n")
 
 
 def _parse_entry_number(raw: str, flag: str) -> "int | None":
@@ -2129,7 +2141,7 @@ def _check_base_revision(location, base: str | None, *, required: bool) -> None:
             "Who last changed it and when is withheld because this vault is shared."
         )
     else:
-        last_changed = f"It was last changed by {updated_by} at {updated_at}."
+        last_changed = _neutral(f"It was last changed by {updated_by} at {updated_at}.")
     print(
         f"error: {location.record_id} changed after you read it: --base is "
         f"{base} but the stored body's revision is {current}. "
