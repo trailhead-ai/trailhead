@@ -15,6 +15,12 @@ from .. import locking
 from . import areas, flush, init, pipeline, publish, record, resolve, search, session, signing, sync, task, vault
 from ..argparse_util import find_subparsers_action
 
+# Importing the journal module registers its crash-recovery hook with ``locking``.
+# Every command takes its vault lock after this module loads, so doing it here
+# makes recovery part of every lore command rather than a side effect of whichever
+# command module happens to import ``record.journal`` first.
+from ..record import journal as _journal  # noqa: E402,F401
+
 
 # Table mapping removed/renamed commands to their replacements.
 # The ``recall`` command was retired and its call sites rewired to
