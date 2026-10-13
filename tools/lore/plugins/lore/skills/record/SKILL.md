@@ -190,8 +190,10 @@ A frozen record (an ADR or spec past `draft`, any decision, a `done`, `dropped` 
 task) refuses that
 plain update. Correct it with `lore record amend <record-id> --reason "<why>" --initiated-by agent --base <revision>`,
 piping the whole corrected body, where `<revision>` is the `revision` from the `lore record show`
-read. A reason and the amended body stay in the vault's change history permanently, so no secret
-goes in either.
+read. The reason and the diff, removed lines included, stay in the vault's change history
+permanently and sync to the team, so put no tokens, keys, passwords or key-shaped strings in the
+reason or the new text. Amend cannot remove a secret already in the record: rotate the credential,
+then escalate to the operator for a history rewrite; never amend it out.
 
 **A transcript imported in error comes out with `lore record delete`.** That
 removes it from the working copy only — git history retains every imported
