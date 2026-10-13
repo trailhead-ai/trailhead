@@ -377,14 +377,20 @@ def _merge_change_history(ours: list, theirs: list) -> list | None:
     def at(entry: Any) -> str:
         return str(entry.get("at", "")) if isinstance(entry, dict) else ""
 
-    anchors_ours = [e for e in ours if e in theirs]
-    if anchors_ours != [e for e in theirs if e in ours]:
+    def key(entry: Any) -> str:
+        return json.dumps(entry, sort_keys=True, separators=(",", ":"))
+
+    ours_keys = [key(e) for e in ours]
+    theirs_keys = [key(e) for e in theirs]
+    shared = set(ours_keys) & set(theirs_keys)
+    anchors_ours = [e for e, k in zip(ours, ours_keys) if k in shared]
+    if [k for k in ours_keys if k in shared] != [k for k in theirs_keys if k in shared]:
         return None
 
     def runs(side: list) -> list[list]:
         out: list[list] = [[]]
         for entry in side:
-            if entry in anchors_ours:
+            if key(entry) in shared:
                 out.append([])
             else:
                 out[-1].append(entry)

@@ -422,3 +422,12 @@ def test_show_refuses_when_path_aliased_vault_entries_disagree_on_shared(tmp_pat
     assert r.stderr.startswith("lore: ")
     assert "Traceback" not in r.stderr
     assert "'trusting'" in r.stderr and "'wary'" in r.stderr
+
+
+@pytest.mark.parametrize("bad", ["adr/../x", "./adr/x", "adr//x", "/etc/passwd"])
+def test_show_of_an_illegal_id_is_a_clean_error(tmp_path, bad):
+    vault, state = _make_vault(tmp_path)
+    r = _run(["record", "show", bad], vault=vault, state_dir=state)
+    assert r.returncode != 0
+    assert "Traceback" not in r.stderr
+    assert r.stderr.startswith("lore: "), r.stderr

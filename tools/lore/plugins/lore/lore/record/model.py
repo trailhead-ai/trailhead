@@ -511,6 +511,28 @@ def _reserved_label_key_error(field: str, map_key: str) -> str:
 
 _CHANGE_HISTORY_ENTRY_KEYS: frozenset[str] = frozenset({"at", "by", "initiated-by", "reason", "diff"})
 CHANGE_HISTORY_INITIATORS: tuple[str, ...] = ("operator", "agent")
+CHANGE_HISTORY_REASON_MAX = 500
+_CONTROL_CHARS = re.compile("[\x00-\x1f\x7f-\x9f]")
+_LINE_BREAK_CHARS = re.compile("[\x00-\x1f\x7f-\x9f\u2028\u2029]")
+
+
+def change_history_reason_problem(reason: object) -> str | None:
+    """Why *reason* cannot be a ``change-history`` reason, or ``None`` when it can.
+
+    One line of printable text, at most :data:`CHANGE_HISTORY_REASON_MAX`
+    characters: any C0 or C1 control character, or a Unicode line break, would let
+    a stored reason rewrite a terminal or split a listing.
+    """
+    if not (isinstance(reason, str) and reason.strip()):
+        return "must be a non-empty single-line string"
+    if _LINE_BREAK_CHARS.search(reason):
+        return "must be one line of printable text: remove line breaks and control characters"
+    if len(reason) > CHANGE_HISTORY_REASON_MAX:
+        return (
+            f"must be at most {CHANGE_HISTORY_REASON_MAX} characters, got {len(reason)}: "
+            "shorten it"
+        )
+    return None
 
 
 def _check_change_history_entry(key: str, index: int, entry: object) -> list[str]:
@@ -526,14 +548,16 @@ def _check_change_history_entry(key: str, index: int, entry: object) -> list[str
         errors.append(f"{where} field 'at' must be an ISO-8601 UTC datetime string")
     if "by" in entry and not (isinstance(entry["by"], str) and entry["by"]):
         errors.append(f"{where} field 'by' must be a non-empty string")
+    elif "by" in entry and _CONTROL_CHARS.search(entry["by"]):
+        errors.append(f"{where} field 'by' must not contain control characters")
     if "initiated-by" in entry and entry["initiated-by"] not in CHANGE_HISTORY_INITIATORS:
         errors.append(
             f"{where} field 'initiated-by' must be one of {list(CHANGE_HISTORY_INITIATORS)}"
         )
     if "reason" in entry:
-        reason = entry["reason"]
-        if not (isinstance(reason, str) and reason.strip()) or "\n" in reason or "\r" in reason:
-            errors.append(f"{where} field 'reason' must be a non-empty single-line string")
+        problem = change_history_reason_problem(entry["reason"])
+        if problem:
+            errors.append(f"{where} field 'reason' {problem}")
     if "diff" in entry and not isinstance(entry["diff"], str):
         errors.append(f"{where} field 'diff' must be a string")
     return errors
