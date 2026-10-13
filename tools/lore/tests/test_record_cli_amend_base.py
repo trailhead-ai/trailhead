@@ -8,10 +8,8 @@ import json
 
 from conftest import load_script, make_vault as _make_vault, run_cli as _run
 from test_record_cli_amend import (
-    AMENDED, BODY, _amend, _body, _create, _revision, _sidecar, _snapshot,
+    AMENDED, BODY, LONG, _amend, _body, _create, _revision, _sidecar, _snapshot,
 )
-
-LONG = "".join(f"line {i:02d}\n" for i in range(1, 31))
 
 
 def _adr(tmp_path, body=BODY):

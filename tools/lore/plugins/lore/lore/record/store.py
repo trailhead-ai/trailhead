@@ -331,22 +331,17 @@ def _parse_hunks(diff: str) -> list[_Hunk]:
     return hunks
 
 
-def body_revision(body: "str | bytes") -> str:
-    """A record body's revision: the SHA-256 hex of its stored bytes.
+def stored_body_revision(body_path: Path) -> str:
+    """A record body's revision: the SHA-256 hex of its bytes on disk.
 
     The handshake token ``record show`` hands out and ``record amend --base``
-    compares. A string is taken as the UTF-8 text of the stored body.
+    compares. An absent body file is the empty body.
     """
-    data = body.encode("utf-8") if isinstance(body, str) else body
-    return hashlib.sha256(data).hexdigest()
-
-
-def stored_body_revision(body_path: Path) -> str:
-    """:func:`body_revision` of the bytes on disk (the empty body when absent)."""
     try:
-        return body_revision(body_path.read_bytes())
+        data = body_path.read_bytes()
     except FileNotFoundError:
-        return body_revision(b"")
+        data = b""
+    return hashlib.sha256(data).hexdigest()
 
 
 def make_unified_diff(old_body: str, new_body: str) -> str:
@@ -412,13 +407,11 @@ class ReconstructError(RecordStoreError):
     """A body cannot be rebuilt from a record's change history.
 
     ``kind`` is ``"no-history"``, ``"out-of-range"``, ``"malformed"`` or
-    ``"does-not-reverse"``; ``entry`` is the 1-based number (oldest first) of the
-    history entry that failed, ``None`` for the first two kinds.
+    ``"does-not-reverse"``.
     """
 
-    def __init__(self, kind: str, message: str, entry: "int | None" = None) -> None:
+    def __init__(self, kind: str, message: str) -> None:
         self.kind = kind
-        self.entry = entry
         super().__init__(message)
 
 
@@ -451,26 +444,22 @@ def reconstruct_body_before(body: str, history: Any, n: int) -> str:
         entry = history[number - 1]
         diff = entry.get("diff") if isinstance(entry, dict) else None
         if not isinstance(diff, str):
-            raise ReconstructError(
-                "malformed", f"entry {number} has no stored diff", number
-            )
+            raise ReconstructError("malformed", f"entry {number} has no stored diff")
         try:
             if not _parse_hunks(diff):
                 raise ReconstructError(
                     "malformed",
                     f"entry {number} has a malformed stored diff: it contains no hunk",
-                    number,
                 )
             current = reverse_unified_diff(current, diff)
         except DiffRejectError as exc:
             raise ReconstructError(
                 "does-not-reverse",
                 f"entry {number} no longer reverses against the current body ({exc})",
-                number,
             ) from exc
         except DiffFormatError as exc:
             raise ReconstructError(
-                "malformed", f"entry {number} has a malformed stored diff: {exc}", number
+                "malformed", f"entry {number} has a malformed stored diff: {exc}"
             ) from exc
     return current
 
@@ -882,12 +871,10 @@ def read_stored_change_history(sidecar_path: Path) -> Any:
 
 
 def read_change_history(sidecar_path: Path) -> list[Any]:
-    """The history on disk at *sidecar_path*; ``[]`` for a missing or unparseable file."""
-    try:
-        existing = json.loads(sidecar_path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return []
-    return change_history_of(existing)
+    """The history on disk at *sidecar_path*; ``[]`` for a missing or unparseable file
+    or a stored value that is not a list."""
+    history = read_stored_change_history(sidecar_path)
+    return history if isinstance(history, list) else []
 
 
 def _is_subsequence(prior: list[Any], new: list[Any]) -> bool:

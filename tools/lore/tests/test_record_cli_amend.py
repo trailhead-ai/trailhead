@@ -21,6 +21,7 @@ from conftest import (  # noqa: F401
 
 BODY = "# Decision\n\nline one\nline two\nline three\n"
 AMENDED = "# Decision\n\nline one\nline TWO\nline three\n"
+LONG = "".join(f"line {i:02d}\n" for i in range(1, 31))
 
 
 def _create(vault, state, kind, title, *, status=None, body=BODY, extra=None):
@@ -55,6 +56,11 @@ def _snapshot(vault: Path) -> dict[str, bytes]:
 _AUTO = object()
 
 
+def _vault_name(extra):
+    """The ``--vault`` value in *extra*, or ``None``."""
+    return extra[extra.index("--vault") + 1] if extra and "--vault" in extra else None
+
+
 def _revision(vault, state, rid, *, vault_name=None):
     """The record's current body revision, read the way a caller reads it."""
     extra = ["--vault", vault_name] if vault_name else []
@@ -83,10 +89,8 @@ def _amend(vault, state, rid, body, *, reason="fix wording", initiated_by="opera
     if base is _AUTO:
         base = None
         if not diff:
-            vault_flag = (
-                ["--vault", extra[extra.index("--vault") + 1]]
-                if extra and "--vault" in extra else []
-            )
+            name = _vault_name(extra)
+            vault_flag = ["--vault", name] if name else []
             shown = _run(["record", "show", rid, "--json", *vault_flag],
                          vault=vault, state_dir=state)
             if shown.returncode == 0:
@@ -478,11 +482,7 @@ def _revert(vault, state, rid, n, *, base=_AUTO, reason="undo it", initiated_by=
         args += ["--initiated-by", initiated_by]
     args += extra or []
     if base is _AUTO:
-        vault_flag = (
-            ["--vault", extra[extra.index("--vault") + 1]]
-            if extra and "--vault" in extra else []
-        )
-        base = _revision(vault, state, rid, vault_name=vault_flag[1] if vault_flag else None)
+        base = _revision(vault, state, rid, vault_name=_vault_name(extra))
     if base is not None:
         args += ["--base", base]
     return _run(args, vault=vault, state_dir=state, stdin_text=stdin_text)
@@ -520,16 +520,15 @@ def test_revert_to_the_first_entry_restores_the_original(tmp_path):
 
 def test_revert_keeps_a_non_overlapping_outside_edit(tmp_path):
     vault, state = _make_vault(tmp_path)
-    long_body = "".join(f"line {i:02d}\n" for i in range(1, 31))
-    rid = _create(vault, state, "lesson", "Lesson Long", body=long_body)
-    amended = long_body.replace("line 03\n", "line 03 amended\n")
+    rid = _create(vault, state, "lesson", "Lesson Long", body=LONG)
+    amended = LONG.replace("line 03\n", "line 03 amended\n")
     assert _amend(vault, state, rid, amended).returncode == 0
     edited = amended.replace("line 25\n", "line 25 edited\n")
     r = _run(["record", "update", rid], vault=vault, state_dir=state, stdin_text=edited)
     assert r.returncode == 0, r.stderr
     r = _revert(vault, state, rid, 1)
     assert r.returncode == 0, r.stderr
-    assert _body(vault, rid) == long_body.replace("line 25\n", "line 25 edited\n")
+    assert _body(vault, rid) == LONG.replace("line 25\n", "line 25 edited\n")
 
 
 def test_revert_of_an_entry_that_no_longer_reverses_is_refused_and_writes_nothing(tmp_path):

@@ -429,24 +429,6 @@ def cmd_record(args) -> int:
     return 1
 
 
-def _recover_pending_write(vault_root: str) -> bool:
-    """Roll back an interrupted write in *vault_root* before a reader looks at it.
-
-    Takes the vault lock only when a journal is pending, so readers stay
-    lock-free otherwise. The recovery line goes to stderr. Returns False (after
-    printing the named ``lore:`` message) when the rollback itself failed.
-    """
-    from .. import locking
-    from ..record import journal
-
-    try:
-        journal.recover_if_pending(vault_root)
-    except locking.VaultRecoveryError as exc:
-        print(exc, file=sys.stderr)
-        return False
-    return True
-
-
 def _render_record(
     record_id: str,
     vault_root: str,
@@ -504,11 +486,11 @@ def _render_record(
     ``revision: <hex>`` on stderr (before the amended note), so stdout stays the
     body byte for byte.
     """
+    from ..record import journal
     from ..record import store as record_store_mod
     from ..search import xml_escape
 
-    if not _recover_pending_write(vault_root):
-        return 1
+    journal.recover_if_pending(vault_root)
     try:
         loc = record_store_mod.locate_record(record_id, vault_root=vault_root)
     except (
@@ -665,6 +647,7 @@ def _cmd_record_history(args) -> int:
     entity-escapes it and cannot be closed early by a ``</external-memory>``
     inside an entry. Trust comes from :func:`_vault_trust`.
     """
+    from ..record import journal
     from ..record import store as record_store_mod
     from ..search import xml_escape
 
@@ -685,8 +668,7 @@ def _cmd_record_history(args) -> int:
             print(f"lore: {exc}", file=sys.stderr)
             return 1
 
-    if not _recover_pending_write(vault_root):
-        return 1
+    journal.recover_if_pending(vault_root)
     try:
         loc = record_store_mod.locate_record(record_id, vault_root=vault_root)
     except (
