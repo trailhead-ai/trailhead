@@ -111,9 +111,18 @@ def _journals(state, vault):
     return sorted(d.glob("*")) if d.exists() else []
 
 
+def _amend_argv(vault, state, rid):
+    """The full-body amend argv, naming the record's current revision as ``--base``."""
+    shown = _run(["record", "show", rid, "--json"], vault=vault, state_dir=state)
+    assert shown.returncode == 0, shown.stderr
+    base = json.loads(shown.stdout)["revision"]
+    return ["record", "amend", rid, "--reason", "r", "--initiated-by", "operator",
+            "--base", base]
+
+
 def _crash_amend(vault, state, rid):
     return _crash_cli(
-        ["record", "amend", rid, "--reason", "r", "--initiated-by", "operator"],
+        _amend_argv(vault, state, rid),
         vault=vault, state=state, stdin_text=AMENDED,
     )
 
@@ -171,7 +180,7 @@ def test_failure_at_each_step_never_leaves_a_mixed_record(tmp_path, monkeypatch,
         monkeypatch.setattr(os, "replace", replace)
 
     r = _run(
-        ["record", "amend", rid, "--reason", "r", "--initiated-by", "operator"],
+        _amend_argv(vault, state, rid),
         vault=vault, state_dir=state, stdin_text=AMENDED,
     )
     monkeypatch.undo()
@@ -238,12 +247,13 @@ def test_hard_crash_create_leaves_no_record_after_recovery(tmp_path):
 def test_truncated_journal_is_removed_with_a_warning_and_the_next_write_proceeds(tmp_path):
     vault, state = _make_vault(tmp_path)
     rid = _create(vault, state)
+    argv = _amend_argv(vault, state, rid)
     jdir = journal.journal_dir(vault, env={"XDG_STATE_HOME": str(state)})
     jdir.mkdir(parents=True, mode=0o700, exist_ok=True)
     (jdir / "deadbeef.json").write_text('{"root": "' + str(vault.resolve()) + '", "id": "decis')
 
     r = _run(
-        ["record", "amend", rid, "--reason", "r", "--initiated-by", "operator"],
+        argv,
         vault=vault, state_dir=state, stdin_text=AMENDED,
     )
 
@@ -350,12 +360,13 @@ def test_a_restore_that_cannot_write_fails_the_operation_and_keeps_the_journal(t
 def test_a_writer_whose_recovery_fails_exits_with_a_named_lore_message(tmp_path):
     vault, state = _make_vault(tmp_path)
     rid = _create(vault, state)
+    argv = _amend_argv(vault, state, rid)
     _crash_amend(vault, state, rid)
     kind_dir = _paths(vault, rid)[0].parent
     kind_dir.chmod(0o555)
     try:
         r = _run_sub(
-            ["record", "amend", rid, "--reason", "r", "--initiated-by", "operator"],
+            argv,
             vault=vault, state_dir=state, stdin_text=AMENDED,
         )
     finally:

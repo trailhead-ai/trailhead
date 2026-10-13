@@ -52,11 +52,25 @@ def _snapshot(vault: Path) -> dict[str, bytes]:
     }
 
 
+_AUTO = object()
+
+
+def _revision(vault, state, rid, *, vault_name=None):
+    """The record's current body revision, read the way a caller reads it."""
+    extra = ["--vault", vault_name] if vault_name else []
+    r = _run(["record", "show", rid, "--json", *extra], vault=vault, state_dir=state)
+    assert r.returncode == 0, r.stderr
+    return json.loads(r.stdout)["revision"]
+
+
 def _amend(vault, state, rid, body, *, reason="fix wording", initiated_by="operator",
-           diff=False, extra=None):
+           diff=False, extra=None, base=_AUTO):
     """Run ``lore record amend`` with *body* on stdin.
 
-    Pass ``reason=None`` / ``initiated_by=None`` to leave the flag off.
+    Pass ``reason=None`` / ``initiated_by=None`` to leave the flag off. A full-body
+    amend names the record's current revision as ``--base`` by default (the
+    handshake every caller performs); ``base=None`` omits it and ``base="<hex>"``
+    passes that value. ``--diff`` never gets a default ``--base``.
     """
     args = ["record", "amend", rid]
     if reason is not None:
@@ -66,6 +80,19 @@ def _amend(vault, state, rid, body, *, reason="fix wording", initiated_by="opera
     if diff:
         args.append("--diff")
     args += extra or []
+    if base is _AUTO:
+        base = None
+        if not diff:
+            vault_flag = (
+                ["--vault", extra[extra.index("--vault") + 1]]
+                if extra and "--vault" in extra else []
+            )
+            shown = _run(["record", "show", rid, "--json", *vault_flag],
+                         vault=vault, state_dir=state)
+            if shown.returncode == 0:
+                base = json.loads(shown.stdout)["revision"]
+    if base is not None:
+        args += ["--base", base]
     return _run(args, vault=vault, state_dir=state, stdin_text=body)
 
 

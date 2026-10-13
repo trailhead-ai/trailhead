@@ -497,6 +497,12 @@ def _render_record(
     sets it, ``session show`` does not) a record that has been amended also gets
     one stderr line, ``amended once; see `lore record history <id>``` (``amended N times; ...`` from two on), so a
     reader knows the body was corrected while a piped consumer sees no change.
+
+    **The revision.** The SHA-256 hex of the stored body bytes (computed before
+    any shared-vault escaping), the token ``record amend --base`` compares.
+    ``--json`` carries it as top-level ``revision``; plain ``record show`` prints
+    ``revision: <hex>`` on stderr (before the amended note), so stdout stays the
+    body byte for byte.
     """
     from ..record import store as record_store_mod
     from ..search import xml_escape
@@ -528,6 +534,8 @@ def _render_record(
         else ""
     )
 
+    revision = record_store_mod.stored_body_revision(loc.body_path)
+
     if as_json:
         sidecar: dict[str, Any] = {}
         if loc.sidecar_path.exists():
@@ -548,6 +556,7 @@ def _render_record(
             ),
             "sidecar": sidecar,
             "body": body,
+            "revision": revision,
         }
         print(json.dumps(payload, indent=2, sort_keys=True))
     elif shared:
@@ -557,6 +566,7 @@ def _render_record(
     else:
         sys.stdout.write(body)
     if history_note and not as_json:
+        print(f"revision: {revision}", file=sys.stderr)
         count = len(record_store_mod.read_change_history(loc.sidecar_path))
         if count:
             times = "once" if count == 1 else f"{count} times"
@@ -2014,6 +2024,66 @@ _SESSION_AMEND_REFUSAL = (
 )
 
 
+def _check_base_revision(location, base: str | None, *, required: bool) -> None:
+    """Refuse a write composed against a body that is no longer the stored one.
+
+    MUST be called with the record's vault write lock held, after the implicit
+    pull, so the comparison is against the body the write would replace. *base*
+    is the revision the caller read (``lore record show``); *required* is true
+    when the new body is a full replacement, which would otherwise silently
+    overwrite a change made after the read. Raises :class:`_UpdateAborted` after
+    printing the refusal; returns when the write may proceed.
+    """
+    from ..record import store as record_store_mod
+
+    show_hint = (
+        f"read the current revision with `lore record show {location.record_id}` "
+        "(`--json` carries it as `revision`; plain show prints `revision: <hex>` "
+        "on stderr)"
+    )
+    if base is None:
+        if required:
+            print(
+                "error: --base is required with a full-body amend: pass the "
+                f"revision of the body you composed against. {show_hint}, then "
+                "amend with --base <revision>. (A --diff amend may omit it: a "
+                "diff whose context still matches overwrites nobody's change.)",
+                file=sys.stderr,
+            )
+            raise _UpdateAborted()
+        return
+
+    current = record_store_mod.stored_body_revision(location.body_path)
+    if base == current:
+        return
+
+    updated_by = updated_at = "unknown"
+    has_history = False
+    if location.sidecar_path.exists():
+        try:
+            side = json.loads(location.sidecar_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            side = {}
+        if isinstance(side, dict):
+            updated_by = str(side.get("updated-by", updated_by))
+            updated_at = str(side.get("updated-at", updated_at))
+            has_history = bool(side.get("change-history"))
+    history_hint = (
+        f" If that change was an amend, `lore record history {location.record_id}` "
+        "lists it."
+        if has_history else ""
+    )
+    print(
+        f"error: {location.record_id} changed after you read it: --base is "
+        f"{base} but the stored body's revision is {current}. It was last "
+        f"changed by {updated_by} at {updated_at}.{history_hint} Nothing was "
+        f"written. To proceed: {show_hint}, reapply your correction to what "
+        "you read, and amend again.",
+        file=sys.stderr,
+    )
+    raise _UpdateAborted()
+
+
 def _cmd_record_amend(args) -> int:
     """``lore record amend RECORD_ID --reason R --initiated-by operator|agent`` — thin shell.
 
@@ -2046,6 +2116,15 @@ def _cmd_record_amend(args) -> int:
     apply; a body identical (after fence neutralization) to the stored one; a
     record that does not exist; a ``session`` record, which ``record update`` and
     flush write under the session lock.
+
+    **The revision handshake.** ``--base REVISION`` (the SHA-256 of the body as
+    ``record show`` printed it) is required with a full-body stdin and optional
+    with ``--diff``. Under the write lock, after the implicit pull, it is compared
+    with the stored body's revision by :func:`_check_base_revision`; a mismatch
+    refuses the amend and writes nothing. A diff may omit it because its hunk
+    context already refuses an overlapping concurrent edit, while a
+    non-overlapping one is kept. The revision covers the body only, so a label or
+    status change made after the read is neither overwritten nor a refusal.
 
     ``--vault NAME`` locates the record in exactly that configured vault, as it
     does for ``update``. The read-modify-write runs under the vault's write lock.
@@ -2134,6 +2213,10 @@ def _cmd_record_amend(args) -> int:
                 raise _UpdateAborted()
 
             locks.enter_context(locking_mod.vault_write_lock(location.vault_root))
+
+            _check_base_revision(
+                location, getattr(args, "base", None), required=not use_diff
+            )
 
             sidecar, new_body, guard_notices, existing_body = _read_apply_and_guard(
                 location,
@@ -2339,14 +2422,24 @@ def add_record_subparser(sub) -> None:
         "amend",
         help="Amend a record's body in place (even a frozen adr), recording why",
         usage="lore record amend RECORD_ID --reason REASON --initiated-by "
-              "{operator,agent} [--diff] [--vault NAME]",
+              "{operator,agent} [--base REVISION] [--diff] [--vault NAME]",
         description="Replace a record's body with the one piped on stdin (or, with "
                     "--diff, apply a unified diff to it) and append a "
                     "change-history entry: when, by whom, who asked, why, and the "
                     "diff. This is the way to correct a frozen adr's body in "
                     "place; plain 'record update' refuses it. The record's id, "
                     "kind, status, labels and links are kept.",
-        epilog="--initiated-by: 'operator' means a human instructed this edit in "
+        epilog="--base: the stale-write handshake. 'lore record show' gives the "
+               "body's revision (SHA-256 of the stored body: 'revision' in "
+               "--json, 'revision: <hex>' on stderr). A full-body amend must "
+               "pass it as --base, and is refused, writing nothing, if the "
+               "record's body changed after you read it (the message names who "
+               "changed it and when; re-read, reapply, amend again). --diff "
+               "may omit --base because a diff whose context still matches "
+               "overwrites nobody's change, and a non-overlapping concurrent "
+               "edit is kept; with --base it is refused when stale. A label or "
+               "status change does not alter the revision. "
+               "--initiated-by: 'operator' means a human instructed this edit in "
                "the current session; 'agent' means the agent proposed it. The "
                "value is recorded as stated, not verified: initiated-by and by "
                "(the unauthenticated git committer identity or LORE_EMAIL) are "
@@ -2377,6 +2470,13 @@ def add_record_subparser(sub) -> None:
         "--diff", action="store_true",
         help="Treat piped stdin as a unified diff against the stored body "
              "instead of the full new body.",
+    )
+    p_record_amend.add_argument(
+        "--base", dest="base", default=None, metavar="REVISION",
+        help="The body revision you composed against (from 'lore record show': "
+             "'revision' in --json, 'revision: <hex>' on stderr). Required with a "
+             "full-body stdin; optional with --diff. The amend is refused, "
+             "writing nothing, if the stored body's revision differs.",
     )
     p_record_amend.add_argument(
         "--vault", dest="vault", default=None, metavar="NAME",
