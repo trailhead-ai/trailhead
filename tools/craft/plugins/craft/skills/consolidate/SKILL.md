@@ -313,9 +313,12 @@ body update. Repoint or annotate such a referrer with
 `lore record amend <referrer-id> --vault <name> --diff --reason "<fold>" --initiated-by agent`,
 piping a unified diff against the stored body; the reason names the fold ("fold
 `lesson/<folded-name>` into `lesson/<survivor-name>`") on one line of at most 500 characters, and
-the change lands in the record's change history. A reason and its diff are permanent vault text, so
-no secret goes in either. The sidecar edge pair above is metadata and lands on a frozen record as it
-is.
+the change lands in the record's change history. The reason and the diff, removed lines included,
+are permanent, team-synced vault history: run the reason and the added lines through the
+credential-pattern scrub in `../_shared/security.md` before writing. Amend cannot remove a secret
+that is already in a record — rotate the credential and escalate to the operator for a history
+rewrite; never amend it out. The sidecar edge pair above is metadata and lands on a frozen record as
+it is.
 
 **History** — a statement about what a past pass produced ("this postmortem wrote `lesson/<name>`"),
 in a record a person or an agent authored. The statement is true about a record that no longer

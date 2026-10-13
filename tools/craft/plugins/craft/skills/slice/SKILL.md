@@ -274,7 +274,10 @@ If this returns any task, refuse to select a second one — name the open slice 
 id, and name both ways forward: resume it (continue running `/craft:plan` or `/craft:execute`
 against that existing parent task) or drop it explicitly
 (`lore record update <task-id> --status dropped --diff`, piping a unified diff that appends the why
-as a note, in the same invocation as the flip, on the record being dropped). A crashed or
+as a note, in the same invocation as the flip, on the record being dropped). The note becomes record
+text and the diff stays in permanent, team-synced vault history: run it through the
+credential-pattern scrub in `../_shared/security.md` first, and never use a drop to take out a
+secret already in the record — rotate the credential and escalate to the operator. A crashed or
 interrupted run must be resumed or explicitly dropped, never silently duplicated by a second
 invocation of this skill.
 
@@ -331,8 +334,10 @@ refused; the note goes through `amend`, as a separate write from the label:
 piping the whole body with the note added. The reason is one line, at most 500 characters; the
 detail goes in the body. Read the spec fresh immediately before this write — the `revision` from
 that read is the `--base`, so a body that changed in between is refused rather than overwritten —
-and run the note through the credential-scrub first. A reason and the amended body stay in the
-vault's change history permanently, so no secret goes in either.
+and run the note through the credential-scrub first. The reason and the diff, removed lines
+included, stay in the vault's change history permanently, team-synced, so no secret goes in either.
+Amend cannot remove a secret already in the spec — rotate the credential and escalate to the
+operator for a history rewrite; never amend it out.
 
 ### 7. Choose the next slice
 

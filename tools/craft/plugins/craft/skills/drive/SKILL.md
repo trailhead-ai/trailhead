@@ -224,8 +224,11 @@ repos) and count its `members` array.
   the same invocation, on the parent being dropped
   (`lore record update task/<slice-parent-name> --status dropped --diff --vault <elected-vault>`,
   piping a unified diff that appends the note), so the record is never left flipped with the why
-  unwritten. This frees `../slice/SKILL.md`'s own guard to select the next slice; the driver names
-  this remedy but does not perform it.
+  unwritten. The note becomes record text and the diff stays in permanent, team-synced vault
+  history: the operator runs it through the credential-pattern scrub in `../_shared/security.md`
+  first, and never uses the drop to take out a secret already in the record — rotate the credential
+  and escalate for a history rewrite. This frees `../slice/SKILL.md`'s own guard to select the next
+  slice; the driver names this remedy but does not perform it.
 
 ### 6. Report the outcome
 
