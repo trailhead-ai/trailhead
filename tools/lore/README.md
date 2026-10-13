@@ -113,7 +113,8 @@ identical to the stored one, a missing record, and any `session` record.
   body, byte for byte). A full-body amend must pass the revision it composed
   against. Under the vault lock, after the implicit pull, amend compares it with the
   stored body's revision and, on a mismatch, exits non-zero and writes nothing; the
-  message gives both revisions, who last changed the record and when, a pointer to
+  message gives both revisions, who last changed the record and when (withheld in a
+  shared vault, where that text is not the operator's own), a pointer to
   `lore record history` when the change was an amend, and the remedy: re-read with
   `lore record show`, reapply the correction, amend again. A full-body amend
   without `--base` is refused with the same pointer. **`--diff` may omit `--base`**:
@@ -164,7 +165,8 @@ outside amend is kept in the output when it overlaps no amend hunk and shifts no
 lines above one**; otherwise that entry no longer reverses and the command refuses.
 Each hunk is located at its recorded line, with no offset search, so a plain update
 that inserts or removes lines above an amend hunk makes the entry refuse.
-The preview is fence-neutralized, and wrapped in a shared vault, exactly as the
+A body whose CRLF line endings were written outside lore is reconstructed with LF
+line endings. The preview is fence-neutralized, and wrapped in a shared vault, exactly as the
 listing is. It exits non-zero with a `lore:` message and empty stdout for an N that
 is out of range or not an integer, a record with no history, a malformed stored
 diff, and an entry that no longer reverses (the message names the entry by number
@@ -179,6 +181,7 @@ lore record amend adr/some-decision --revert-to 2 --base REVISION --reason "..."
 Computes the same reconstruction inside lore, from the stored body and history
 (never from the escaped or wrapped preview text), and writes it as an ordinary
 amend with its own `change-history` entry. Preview it first with `--body-before`.
+A body whose CRLF line endings were written outside lore is reverted to LF line endings.
 Stdin must be empty, and `--revert-to` with a piped body or with `--diff` is
 refused. Every amend refusal applies: `--base` is required and a stale one refuses,
 a reconstruction identical to the current body refuses, and so does an entry that

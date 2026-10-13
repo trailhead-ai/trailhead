@@ -94,6 +94,7 @@ from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
 from .. import locking
+from ..confine import realpath_is_descendant
 from ..search import index as index_store
 from ..vault import vault as vault_mod
 from . import journal
@@ -689,17 +690,9 @@ def _unique_stem(kind_dir: Path, base: str) -> str:
     return f"{base}-{counter}"
 
 
-def _realpath_is_descendant(target: str | Path, root_real: str) -> bool:
-    """True iff ``realpath(target)`` is ``root_real`` itself or strictly within it.
-
-    The single-source realpath-descendant guard shared by every path-confinement
-    check (record IDs and blob paths). The explicit ``+ os.sep`` guard stops a
-    sibling dir sharing a name prefix (root ``/a/blob`` vs target ``/a/blob2/x``)
-    from satisfying the check; resolving via realpath catches symlink escapes.
-    ``root_real`` must already be a realpath.
-    """
-    target_real = os.path.realpath(target)
-    return target_real == root_real or target_real.startswith(root_real + os.sep)
+_realpath_is_descendant = realpath_is_descendant
+"""The single-source realpath-descendant guard shared by every path-confinement
+check (record IDs, blob paths, the write journal); see :mod:`lore.confine`."""
 
 
 def _confine_record_id(record_id: RecordId, root: str) -> tuple[str, str, Path, Path]:

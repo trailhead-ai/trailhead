@@ -2180,7 +2180,8 @@ def _cmd_record_amend(args) -> int:
     with the stored body's revision by :func:`_check_base_revision`; a mismatch
     refuses the amend and writes nothing. A diff may omit it because its hunk
     context already refuses an overlapping concurrent edit, while a
-    non-overlapping one is kept. The revision covers the body only, so a label or
+    non-overlapping one is kept only when it shifts no lines above the hunk
+    (hunks are located at their recorded line, with no offset search). The revision covers the body only, so a label or
     status change made after the read is neither overwritten nor a refusal.
 
     ``--vault NAME`` locates the record in exactly that configured vault, as it
@@ -2518,8 +2519,9 @@ def add_record_subparser(sub) -> None:
                "record's body changed after you read it (the message names who "
                "changed it and when; re-read, reapply, amend again). --diff "
                "may omit --base because a diff whose context still matches "
-               "overwrites nobody's change, and a non-overlapping concurrent "
-               "edit is kept; with --base it is refused when stale. A label or "
+               "overwrites nobody's change, and a concurrent edit is kept only "
+               "when it overlaps no hunk and shifts no lines above one; with "
+               "--base it is refused when stale. A label or "
                "status change does not alter the revision. "
                "--initiated-by: 'operator' means a human instructed this edit in "
                "the current session; 'agent' means the agent proposed it. The "
@@ -2569,7 +2571,8 @@ def add_record_subparser(sub) -> None:
              "must be empty and --diff is refused. A change made outside amend "
              "is kept when it overlaps no amend hunk and shifts no lines above "
              "one; otherwise that entry refuses, with the git command to inspect "
-             "it.",
+             "it. A body whose CRLF line endings were written outside lore is "
+             "reconstructed with LF line endings.",
     )
     p_record_amend.add_argument(
         "--vault", dest="vault", default=None, metavar="NAME",
@@ -2665,7 +2668,8 @@ def add_record_subparser(sub) -> None:
              "body. N=1 is the body before any amend. A change made outside amend "
              "is kept in the output when it overlaps no amend hunk and shifts no "
              "lines above one; otherwise that entry refuses, with the git command "
-             "to inspect it. The "
+             "to inspect it. A body whose CRLF line endings were written outside "
+             "lore is reconstructed with LF line endings. The "
              "preview is never written back; to revert, use 'lore record amend "
              "--revert-to N'.",
     )
