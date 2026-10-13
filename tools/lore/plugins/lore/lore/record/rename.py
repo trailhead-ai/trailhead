@@ -604,29 +604,29 @@ def _write_rewrite(
 ) -> None:
     """Write one rewritten record, holding the session lock for session bodies.
 
-    Guarded against widening the reference sweep into a bypass of ``active``-adr
-    immutability: an ``adr`` this rewrite touches is only ever a wikilink-only
-    substitution (the sweep never edits any other body), but the check is
-    independent of that guarantee rather than trusting it — see
-    :func:`guards.check_active_adr_body_immutable` and
-    :func:`guards.compute_stem_rewrite`.
+    Guarded against widening the reference sweep into a bypass of the freeze: a
+    referrer in a frozen status (any kind in :data:`guards.FROZEN_STATUSES`) is
+    only written when its new body equals :func:`guards.compute_stem_rewrite` of
+    its prior body, the pure wikilink substitution. The check is independent of
+    what the sweep's own rewrite produces, judged through
+    :func:`guards.check_frozen_body`; a refusal raises and is reported as a
+    failed rewrite while the sweep continues.
     """
-    if rec_kind == "adr":
-        from . import guards as guards_mod
+    from . import guards as guards_mod
 
-        _, name = record_id.split("/", 1)
-        msg = guards_mod.check_active_adr_body_immutable(
-            kind=rec_kind,
-            name=name,
-            prior_status=prior_sidecar.get("status"),
-            prior_body=prior_body,
-            new_body=new_body,
-            allowed_body=guards_mod.compute_stem_rewrite(
-                prior_body, link_kind, old_stem, new_stem
-            ),
-        )
-        if msg:
-            raise RuntimeError(msg)
+    _, name = record_id.split("/", 1)
+    msg = guards_mod.check_frozen_body(
+        kind=rec_kind,
+        name=name,
+        prior_status=prior_sidecar.get("status"),
+        prior_body=prior_body,
+        new_body=new_body,
+        allowed_body=guards_mod.compute_stem_rewrite(
+            prior_body, link_kind, old_stem, new_stem
+        ),
+    )
+    if msg:
+        raise RuntimeError(msg)
 
     location = store.locate_record(record_id, vault_root=str(vault.root))
     shared = 1 if vault.shared else 0

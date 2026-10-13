@@ -757,10 +757,6 @@ def check_frozen_record(
     )
 
 
-#: The rename sweep's stem-rewrite exemption calls the body check by this name.
-check_active_adr_body_immutable = check_frozen_body
-
-
 def _split_supersedes_entry(entry: object) -> tuple[str, str] | None:
     """Split one ``supersedes`` entry into ``(kind, name)``; ``None`` when malformed.
 

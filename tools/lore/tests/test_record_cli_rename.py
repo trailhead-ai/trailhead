@@ -1322,6 +1322,90 @@ def test_rename_path_body_change_not_pure_substitution_against_active_adr_is_rej
     assert stored == "see [[spec/old-thing]] here"
 
 
+def test_rename_rewrites_the_link_in_every_frozen_kind(install):
+    """The pure stem substitution passes the freeze for done tasks, decisions and
+    ready specs, not only active adrs."""
+    lesson_id = install.create("default", "lesson", "Old Lesson", body="x")
+    referrers = {
+        "task": install.create(
+            "default", "task", "Done Referrer", body="see [[lesson/old-lesson]]",
+            extra=["--status", "done"],
+        ),
+        "decision": install.create(
+            "default", "decision", "Decided Referrer", body="see [[lesson/old-lesson]]",
+            extra=["--status", "active"],
+        ),
+        "spec": install.create(
+            "default", "spec", "Ready Referrer", body="see [[lesson/old-lesson]]",
+            extra=["--status", "ready"],
+        ),
+    }
+
+    proc = install.cli(["record", "rename", lesson_id, "--title", "New Lesson"])
+    assert proc.returncode == 0, proc.stderr
+    for rid in referrers.values():
+        assert install.body("default", rid) == "see [[lesson/new-lesson]]", rid
+
+
+def _rename_with_widened_sweep(tmp_path, monkeypatch, referrers):
+    """Rename ``lesson/old-lesson`` with the sweep's rewrite also changing a word.
+
+    ``referrers`` is ``[(kind, title, status)]``, each linking to the lesson.
+    Returns ``(report, vault)``.
+    """
+    rename = load_script("lore.record.rename")
+    store = rename.store
+    index = load_script("lore.search.index")
+    vault = _single_vault_install(tmp_path, monkeypatch)
+    conn = index.open_index()
+    try:
+        for kind, title, status in referrers:
+            loc = store.place_record(title, kind, None, str(vault))
+            store.validate_and_write(
+                loc, {"kind": kind, "title": title, "status": status},
+                "see [[lesson/old-lesson]] here", conn,
+            )
+        loc = store.place_record("Old Lesson", "lesson", None, str(vault))
+        store.validate_and_write(
+            loc, {"kind": "lesson", "title": "Old Lesson", "status": "active"}, "x", conn,
+        )
+        conn.commit()
+
+        real = rename.rewrite_body
+        monkeypatch.setattr(
+            rename, "rewrite_body",
+            lambda body, kind, old, new: real(body, kind, old, new).replace("here", "there"),
+        )
+        report = rename.rename_record("lesson/old-lesson", "New Lesson", conn)
+        conn.commit()
+    finally:
+        conn.close()
+    return report, vault
+
+
+def test_widened_sweep_is_refused_for_a_done_task_but_written_for_an_in_progress_one(
+    tmp_path, monkeypatch
+):
+    report, vault = _rename_with_widened_sweep(
+        tmp_path, monkeypatch,
+        [("task", "Done Referrer", "done"), ("task", "Live Referrer", "in-progress")],
+    )
+    by_id = {rw.record_id: rw for rw in report.rewrites}
+
+    done = by_id["task/done-referrer"]
+    assert done.error is not None
+    assert "[frozen-body]" in done.error
+    assert (vault / "task" / "done-referrer.md").read_text(encoding="utf-8") == (
+        "see [[lesson/old-lesson]] here"
+    )
+
+    live = by_id["task/live-referrer"]
+    assert live.error is None
+    assert (vault / "task" / "live-referrer.md").read_text(encoding="utf-8") == (
+        "see [[lesson/new-lesson]] there"
+    )
+
+
 # ---------------------------------------------------------------------------
 # change-history survives a rename and the reference sweep
 # ---------------------------------------------------------------------------
