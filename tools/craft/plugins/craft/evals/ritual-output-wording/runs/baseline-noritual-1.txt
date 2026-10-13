@@ -1,0 +1,10 @@
+Six of the seven still have something open; only AC2 (per-category fees with the replacement-price cap) is fully done.
+
+- **AC1 (overdue flag within one minute):** the flag works, but it was only checked the morning after a midnight rollover, so the one-minute timing still needs to be verified.
+- **AC3 (checkout block over ten pounds):** the block and clearing on payment work, but the note doesn't mention the librarian-override route to unblock, so that still needs building or confirming.
+- **AC4 (override recording):** not started — who granted it, the reason, and showing it in the borrower's history are all left.
+- **AC5 (same-day fee stop on return):** not started, including the after-closing scan case.
+- **AC6 (reminders):** the day-after message is sent, but the three-days-before message isn't built, and nothing confirms that no other automatic messages go out for the same loan.
+- **AC7 (monthly fees report):** not touched — per-category charged and waived totals, and reconciliation with the borrower ledgers, are all left.
+
+AC1 and AC3 are my reading of gaps in the note rather than things it flags as outstanding: it lists both as done, but what was demonstrated doesn't cover the full criterion.

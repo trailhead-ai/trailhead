@@ -1,0 +1,14 @@
+## Findings
+
+- [Critical] No task carries a test contract: the plan's note that after-closing returns are stamped with the next morning's date makes the 00:05 job charge one more day, violating AC5, and nothing would catch it. Suggested: add a failing-first test per task, starting with a return scanned after closing accruing no fee for that day, and the cap at replacement price.
+- [Critical] Fee charging is non-idempotent, irreversible and silent: the calculator runs nightly and again on return, so a retried or overlapping run double-charges, and the first run bills every already-overdue loan with no preview. Suggested: key charges on (loan, date) in an append-only ledger, add a dry-run mode and a gated replayable backfill, and alert on job failure or a missed run.
+- [Important] Rollback is undefined (Critical under the production mapping; downgraded only by the two-Critical cap): no way to reverse wrongly written flags or fees. Suggested: reversing ledger entries plus a feature flag on the checkout guard.
+- [Important] AC1 is unmet by design: a 00:05 job cannot flag within one minute of rollover. Suggested: derive overdue from the due date at read time.
+- [Important] A crashed job fails open: no flags and no fees, so the guard passes everyone and the desk screen looks healthy. Suggested: show a last-successful-run time on the desk screen.
+- [Important] The AC4 override is stored as a free-text note: the granting librarian is not recorded, and its scope (one checkout or standing) is undefined. Suggested: a structured override record, tested through the history view.
+- [Important] AC6 (reminders) and AC7 (reconciling report) have no task, and the plan has no ledger or waiver record for AC7 to reconcile against.
+- [Minor] "Local time" at 00:05 is unpinned for DST and server timezone.
+- [Minor] The boundary at exactly £10.00, and the fee across the cap, need explicit tests.
+
+## Confidence
+Medium — the findings follow directly from the plan and spec text (plan line 11 against AC5, line 7 against AC2), but there is no codebase to check for existing idempotency or alerting, and no knowledge-vault pass was run.

@@ -1,0 +1,15 @@
+## Findings
+
+- [Critical] No task carries a test contract: the plan's own note (after-closing returns stamped next morning) makes the fee grow one more day, violating AC5, and nothing would go red. Suggested: add failing-first tests per task, starting with a return scanned after closing, a fee on either side of the cap, and a balance of £10.00 versus £10.01.
+- [Critical] Nightly fee job writes money with no failure signal, idempotency or rollback: a crashed 00:05 run silently charges nothing and leaves flags stale, while a rerun (or the nightly-plus-return double invocation) charges the same day twice. Suggested: key charges on (loan, date) in an append-only ledger, add a dry-run mode, and alert on a missing or failed run.
+- [Important] AC1 is unmeetable as planned: a 00:05 job flags loans five minutes after rollover, not within one minute. Suggested: derive overdue from due date at read time, or run at 00:00.
+- [Important] Loan-table flag has no migration or rollback plan: the new column and its backfill of existing overdue loans are unspecified, and other readers of the table are unassessed. Suggested: additive nullable column, gated replayable backfill, documented down-path.
+- [Important] Stored flag goes stale: a loan returned or renewed mid-day stays overdue until the next night. Suggested: clear it on return and renewal, and test that.
+- [Important] AC4 is partly unmet: the override note stores the reason but not who granted it. Suggested: record the librarian ID and test that it shows in the borrower's history.
+- [Important] AC6 and AC7 have no tasks: reminders, waivers and the reconciling report are absent, and a bare balance cannot reconcile. Suggested: add the tasks or descope explicitly.
+- [Important] Return racing the nightly run can double-charge or drop a day. Suggested: per-loan lock, plus a concurrent test.
+- [Minor] "Local time" at 00:05 is undefined for DST and server-timezone drift.
+- [Minor] Desk screen has no stated behaviour when the balance lookup fails.
+
+## Confidence
+High on the gaps, which are read directly from `plan.md:6-11` against `spec.md:7-19`; no codebase existed to check for existing jobs, schema or tests.
