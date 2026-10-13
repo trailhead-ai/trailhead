@@ -173,6 +173,43 @@ def test_ac9_non_task_refusal_does_not_offer_a_reopen_route(tmp_path):
     assert "reopen" not in r.stderr.lower()
 
 
+@pytest.mark.parametrize("kind,status,passes,not_passes", [
+    ("spec", "ready", ["## Slices"], ["## Driver run"]),
+    ("task", "done", ["## Driver run"], ["## Slices"]),
+    ("decision", "active", [], ["## Slices", "## Driver run"]),
+])
+def test_ac9_refusal_names_only_the_kinds_own_plain_update_section(
+    tmp_path, kind, status, passes, not_passes
+):
+    """The refusal tells the writer which section of THIS kind a plain update may
+    still change, and never offers a section another kind owns."""
+    vault, state = _make_vault(tmp_path)
+    rid = _create(vault, state, kind, status)
+
+    r = _update(vault, state, rid, EDITED)
+
+    assert "[frozen-body]" in r.stderr
+    for section in passes:
+        assert f"Only {section} passes a plain update" in r.stderr
+    for section in not_passes:
+        assert section not in r.stderr
+    if not passes:
+        assert "No section passes a plain update" in r.stderr
+
+
+@pytest.mark.parametrize("kind,status", [("spec", "ready"), ("decision", "active"), ("task", "done")])
+def test_ac9_refusal_tells_an_agent_to_pass_initiated_by_agent(tmp_path, kind, status):
+    """The amend command offers ``agent|operator``; the refusal must also say which
+    one an agent picks, so an agent cannot read the choice as its own to make."""
+    vault, state = _make_vault(tmp_path)
+    rid = _create(vault, state, kind, status)
+
+    r = _update(vault, state, rid, EDITED)
+
+    assert "[frozen-body]" in r.stderr
+    assert "An agent always passes `--initiated-by agent`" in r.stderr
+
+
 def test_ac9_adr_refusal_keeps_the_supersession_recipe(tmp_path):
     vault, state = _make_vault(tmp_path)
     rid = _create(vault, state, "adr", "active")
