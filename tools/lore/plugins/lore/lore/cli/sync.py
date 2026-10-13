@@ -1686,7 +1686,12 @@ def cmd_sync(args) -> int:
         # continuation instead of a new labeled block (see `_make_emitters`).
         say, say_err = _make_emitters(name, width)
         if pull_only:
-            state, pulled = _pull_only_one(Path(vault), say, say_err)
+            try:
+                state, pulled = _pull_only_one(Path(vault), say, say_err)
+            except locking.VaultRecoveryError as exc:
+                say_err(f"{exc} — skipped")
+                failed.append(name)
+                continue
             # `--pull-only` never publishes, so a vault that holds unpublished
             # work is reported exactly as the full loop would leave it:
             # "holding" when a conflict could not be integrated, the tree is

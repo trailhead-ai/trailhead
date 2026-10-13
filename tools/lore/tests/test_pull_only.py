@@ -28,6 +28,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from conftest import load_script, make_bare_remote, make_git_vault, write_vault_config
 
 REPO_ROOT = Path(__file__).parent.parent
@@ -216,6 +218,48 @@ def test_pull_only_reindexes_what_it_integrated(tmp_path):
     assert "from-b" in s.stdout, (
         f"an integrating pull must refresh the index; stdout={s.stdout!r}"
     )
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores directory permissions")
+def test_pull_only_reports_one_vaults_failed_recovery_and_still_pulls_the_next(tmp_path):
+    from test_record_pair_write import AMENDED, BODY, _crash_pair, _journals
+
+    config_home = tmp_path / "config"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    first = _make_vault(tmp_path / "v-first")
+    (first / "task").mkdir()
+    (first / "task" / "x.md").write_text(BODY)
+    (first / "task" / "x.json").write_text("{}\n")
+    _git(first, "add", "-A")
+    _git(first, "commit", "-m", "seed task")
+    second = _make_vault(tmp_path / "v-second")
+    vaults = []
+    for name, vault in (("first", first), ("second", second)):
+        remote = _make_bare_remote(tmp_path / f"{name}.git")
+        _wire_remote(vault, remote)
+        other = _clone_as_second_device(remote, tmp_path / f"{name}-b")
+        _push_from_device_b(other, f"theirs-{name}.md", "# device B\n")
+        vaults.append((name, vault))
+    write_vault_config(config_home, [("first", "default", first), ("second", "product", second)])
+    _crash_pair(first, state_dir, "task/x", AMENDED, '{"changed": true}\n')
+    with (first / ".git" / "info" / "exclude").open("a") as fh:
+        fh.write("*.tmp\n")
+    _git(first, "add", "-A")
+    _git(first, "commit", "-m", "crashed write's first rename")
+
+    (first / "task").chmod(0o555)
+    try:
+        r = _run_cli(["sync", "--pull-only"], config_home=config_home, state_dir=state_dir)
+    finally:
+        (first / "task").chmod(0o755)
+
+    assert "Traceback" not in r.stderr, r.stderr
+    assert "task/x" in r.stderr and "roll back" in r.stderr, r.stderr
+    assert r.returncode == 1, r.stderr
+    assert (second / "theirs-second.md").exists(), "the vault after the failure must still pull"
+    assert not (first / "theirs-first.md").exists()
+    assert len(_journals(state_dir, first)) == 1
 
 
 # ── implicit pull on the write paths ───────────────────────────────────────
