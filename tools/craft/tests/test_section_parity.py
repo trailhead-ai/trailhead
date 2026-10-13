@@ -102,11 +102,16 @@ def test_lore_and_craft_agree_where_slices_starts(name):
     assert starts == ([] if expected is None else [expected])
 
 
-def test_corpus_exercises_start_duplicate_and_absent_outcomes():
-    outcomes = set()
-    for body in CORPUS.values():
-        try:
-            outcomes.add("absent" if _craft_start(body) is None else "start")
-        except covers_gate.DuplicateHeadingError:
-            outcomes.add("duplicate")
-    assert outcomes == {"absent", "start", "duplicate"}
+def _craft_outcome(body: str) -> str:
+    try:
+        return "absent" if _craft_start(body) is None else "start"
+    except covers_gate.DuplicateHeadingError:
+        return "duplicate"
+
+
+@pytest.mark.parametrize(
+    "name,outcome",
+    [("plain", "start"), ("none", "absent"), ("duplicate", "duplicate")],
+)
+def test_craft_finder_reaches_each_outcome_the_parity_corpus_relies_on(name, outcome):
+    assert _craft_outcome(CORPUS[name]) == outcome

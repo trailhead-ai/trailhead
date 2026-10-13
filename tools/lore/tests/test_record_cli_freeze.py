@@ -421,3 +421,40 @@ def test_move_path_with_a_changed_body_against_a_frozen_record_is_refused(tmp_pa
     assert "[frozen-body]" in r2.stderr
     assert _paths(vault_a, rid)[0].read_text(encoding="utf-8") == PLAIN
     assert not (vault_b / "decision").exists() or not list((vault_b / "decision").iterdir())
+
+
+# --- line-terminator-only differences still refuse with the amend route -----
+
+TERMINATOR_CASES = [
+    ("no-trailing-newline", "# T\n\nline one\n", "# T\n\nline one"),
+    ("extra-trailing-newline", "# T\n\nline one\n", "# T\n\nline one\n\n"),
+    ("form-feed", "# T\n\nline one\n", "# T\n\nline one\x0c\n"),
+    ("u2028", "# T\n\nline one\n", "# T\n\nline one \n"),
+    ("empty-prior", "", "# T\n"),
+    ("only-newline-new", "# T\n", "\n"),
+    ("prefix-longer-new", "# T\n", "# T\n\nmore\n"),
+    ("prefix-shorter-new", "# T\n\nmore\n", "# T\n"),
+]
+
+
+@pytest.mark.parametrize("kind", ["adr", "decision"])
+@pytest.mark.parametrize("label,prior,new", TERMINATOR_CASES, ids=[c[0] for c in TERMINATOR_CASES])
+def test_terminator_only_difference_is_refused_with_amend_route(tmp_path, kind, label, prior, new):
+    vault, state = _make_vault(tmp_path)
+    rid = _create(vault, state, kind, "active", body=prior)
+    md, _ = _paths(vault, rid)
+    before = md.read_bytes()
+    r = _update(vault, state, rid, body=new)
+    assert r.returncode != 0
+    assert "record update failed" not in r.stderr
+    assert "Traceback" not in r.stderr
+    assert "graph-guard [frozen-body]" in r.stderr
+    assert f"lore record amend '{rid}'" in r.stderr
+    assert md.read_bytes() == before
+
+
+def test_terminator_only_difference_names_the_terminator(tmp_path):
+    vault, state = _make_vault(tmp_path)
+    rid = _create(vault, state, "decision", "active", body="# T\n\nline one\n")
+    r = _update(vault, state, rid, body="# T\n\nline one")
+    assert "authored-content line 3 differs only in its line terminator" in r.stderr
