@@ -11,6 +11,7 @@ import argparse
 import difflib
 import sys
 
+from .. import locking
 from . import areas, flush, init, pipeline, publish, record, resolve, search, session, signing, sync, task, vault
 from ..argparse_util import find_subparsers_action
 
@@ -165,4 +166,10 @@ def main(argv: list[str] | None = None) -> int:
                 tail = f"Run '{prog} --help' for a list of actions."
             print(f"{label} {tail}", file=sys.stderr)
         raise
-    return args.func(args)
+    try:
+        return args.func(args)
+    except locking.VaultRecoveryError as exc:
+        # Any command that takes a vault lock can trip the on-acquire recovery
+        # hook; the message is already user-facing (``lore: …``, names the record).
+        print(exc, file=sys.stderr)
+        return 1
