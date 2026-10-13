@@ -273,8 +273,10 @@ flight keeps blocking them.
 If this returns any task, refuse to select a second one — name the open slice by its title and task
 id, and name both ways forward: resume it (continue running `/craft:plan` or `/craft:execute`
 against that existing parent task) or drop it explicitly
-(`lore record update <task-id> --status dropped`, recording why). A crashed or interrupted run must
-be resumed or explicitly dropped, never silently duplicated by a second invocation of this skill.
+(`lore record update <task-id> --status dropped --diff`, piping a unified diff that appends the why
+as a note, in the same invocation as the flip, on the record being dropped). A crashed or
+interrupted run must be resumed or explicitly dropped, never silently duplicated by a second
+invocation of this skill.
 
 **The query is scoped to labelled slice parents — `has:label.craft.slice-parent`, the marker step 9
 writes at materialization.** A task linked to the spec that is not a slice parent does not block
@@ -321,10 +323,15 @@ next slice without breaking the quality bar — take this early-stop path instea
 
 Stopping early, with the spec's acceptance criteria still unmet, is a first-class recorded outcome —
 never a silent abandonment. State which criteria remain and why the loop stops here anyway, then
-write `lore record update spec/<spec-name> --label craft/slice-loop=stopped` plus a body note — read
-the spec fresh immediately before this write too, through the same credential-scrub, full-body write
-step 9 below documents — so the next reader — human or the next pass — finds the stop recorded
-rather than discovering only silence.
+write `lore record update spec/<spec-name> --label craft/slice-loop=stopped` plus a body note, so
+the next reader — human or the next pass — finds the stop recorded rather than discovering only
+silence. The spec is `ready`, so its body is frozen and a plain `lore record update` of the note is
+refused; the note goes through `amend`, as a separate write from the label:
+`lore record amend spec/<spec-name> --reason "<why the loop stopped>" --initiated-by agent --base <revision>`,
+piping the whole body with the note added. Read the spec fresh immediately before this write — the
+`revision` from that read is the `--base`, so a body that changed in between is refused rather than
+overwritten — and run the note through the credential-scrub first. A reason and the amended body
+stay in the vault's change history permanently, so no secret goes in either.
 
 ### 7. Choose the next slice
 
