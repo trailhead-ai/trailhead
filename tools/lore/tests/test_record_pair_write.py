@@ -466,3 +466,27 @@ def test_sync_reports_a_failed_recovery_by_record_not_as_a_lock_failure(tmp_path
     assert "failed to acquire vault lock" not in r.stderr
     assert "already in progress" not in r.stderr
     assert len(_journals(state, vault)) == 1
+
+
+# ---------------------------------------------------------------------------
+# the lore binary registers recovery before any command takes a vault lock
+# ---------------------------------------------------------------------------
+
+
+def test_the_lore_binary_recovers_a_pending_journal_when_sync_takes_the_vault_lock(tmp_path):
+    from test_sync_multi_vault import _make_vault as make_git_vault
+
+    state = tmp_path / "state"
+    state.mkdir()
+    vault = make_git_vault(tmp_path / "v", dirty=False)
+    (vault / "task" / "x.md").write_text(BODY)
+    (vault / "task" / "x.json").write_text("{}\n")
+    _crash_pair(vault, state, "task/x", AMENDED, '{"changed": true}\n')
+    assert len(_journals(state, vault)) == 1
+
+    r = _run_sub(["sync"], vault=vault, state_dir=state)
+
+    assert "Traceback" not in r.stderr, r.stderr
+    assert (vault / "task" / "x.md").read_text() == BODY
+    assert (vault / "task" / "x.json").read_text() == "{}\n"
+    assert _journals(state, vault) == []
