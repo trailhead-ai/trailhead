@@ -41,6 +41,26 @@ Semantics (matching the session-store idiom this replaces):
     The depth map is thread-local, so two threads in one process still exclude
     each other through the kernel exactly as two processes do.
 
+**On-acquire hook (crash recovery).** A fresh, outermost ``vault``-scope
+acquisition runs every hook registered with :func:`register_on_acquire`, once the
+flock is held and before the caller's critical section starts, passing the
+(unresolved) vault root. ``record.journal`` registers the hook that rolls back an
+interrupted body+sidecar pair write, so every lore writer that takes a vault lock
+repairs a torn record before it touches the vault. The hook does NOT run on a
+reentrant nested entry, for ``session`` scope, or when a ``blocking=False``
+acquisition raised on contention (it is never reached). A hook that raises
+releases the flock and the depth entry through the ordinary ``finally``; one that
+cannot finish its repair raises :class:`VaultRecoveryError`, deliberately not an
+``OSError``, so ``lore sync`` reports it as a failed recovery and not as "sync
+already in progress" or a lock failure. A hook must stay within its own vault: it
+may re-enter that vault's lock but never takes another's.
+
+Guarantee and boundary: lore's own readers and writers never observe a torn
+record, because every writer recovers first and a reader that finds a pending
+journal takes the lock to recover before reading. A reader outside lore (Outpost
+reading files) can see the torn pair between a hard crash and the next lore
+operation on that vault.
+
 **Threat model: single-user, local vault.** The lock file is opened by path with
 no symlink guard (CWE-59), so a local attacker who can pre-create
 ``<vault_root>/.lore.lock`` as a symlink can redirect the (empty) lock file
@@ -63,7 +83,7 @@ import threading
 import time
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
-from typing import Iterator
+from typing import Callable, Iterator
 
 #: The vault-root lock file. ``*.lock`` is gitignore-scaffolded into every vault
 #: (``config.installer``), but ``sync``'s stage+commit does not rely on that —
@@ -78,6 +98,31 @@ LOCK_WAIT_NOTICE_SECONDS = 2.0
 #: How often to re-try a non-blocking acquisition while waiting for the notice
 #: threshold. Small enough to be invisible, large enough not to spin hot.
 _POLL_SECONDS = 0.01
+
+class VaultRecoveryError(Exception):
+    """A vault-scope on-acquire hook could not finish repairing the vault.
+
+    Not an ``OSError``: ``lore sync`` reads any ``OSError`` from a lock
+    acquisition as a lock failure, and a failed recovery is a different
+    condition with a different remedy. The message is user-facing and starts
+    with ``lore:``.
+    """
+
+
+# Re-executing this module in place (``importlib.reload``) keeps the registered
+# hooks: the registrant (``record.journal``) is imported once and would not
+# register again.
+_on_acquire: list[Callable[[Path], None]] = globals().get("_on_acquire", [])
+
+
+def register_on_acquire(hook: Callable[[Path], None]) -> None:
+    """Run *hook(vault_root)* on every fresh, outermost vault-scope acquisition.
+
+    Idempotent: registering the same callable twice installs it once.
+    """
+    if hook not in _on_acquire:
+        _on_acquire.append(hook)
+
 
 # Per-thread reentrancy depth, keyed by resolved lock path. See the module
 # docstring: thread-local, NOT process-global, so sibling threads still contend.
@@ -181,6 +226,9 @@ def _flock(
     depths[key] = 1
     try:
         _acquire(lock_fd, scope, label, notice_after, blocking=blocking)
+        if scope == "vault":
+            for hook in tuple(_on_acquire):
+                hook(lock_path.parent)
         yield
     finally:
         depths[key] -= 1
@@ -255,6 +303,34 @@ def vault_write_locks(
         yield
 
 
+def lore_state_dir(*, env: dict[str, str] | None = None) -> Path:
+    """Return the machine-local ``state_dir("lore")`` (never synced).
+
+    Uses the same lazy-import resolver pattern as ``search.index``'s
+    ``_resolve_index_path`` and ``vault.config``'s ``_resolve_vaults_root``:
+    lazy-import ``_bootstrap`` + ``trailhead.paths``, catch
+    ``(ImportError, SystemExit)`` and fall back to the XDG default directly.
+    *env* is the injectable environment for test isolation (``XDG_STATE_HOME``);
+    ``None`` reads ``os.environ``.
+    """
+    try:
+        import _bootstrap
+
+        _bootstrap.ensure_trailhead_importable()
+        import trailhead.paths as _paths
+
+        # ``state_dir`` already treats ``env=None`` as "read os.environ", so the
+        # injected dict is passed straight through.
+        base = _paths.state_dir("lore", env=env)
+    except (ImportError, SystemExit):
+        raw = (os.environ if env is None else env).get("XDG_STATE_HOME", "")
+        if raw and os.path.isabs(raw):
+            base = Path(raw) / "lore"
+        else:
+            base = Path.home() / ".local" / "state" / "lore"
+    return base
+
+
 def lock_root_for_vault(vault_root: str | Path, *, env: dict[str, str] | None = None) -> Path:
     """Return ``state_dir("lore")/locks/<vault>`` for *vault_root*.
 
@@ -281,21 +357,7 @@ def lock_root_for_vault(vault_root: str | Path, *, env: dict[str, str] | None = 
         env: Optional environment dict for test isolation (``XDG_STATE_HOME``).
              When ``None``, ``os.environ`` is used.
     """
-    try:
-        import _bootstrap
-
-        _bootstrap.ensure_trailhead_importable()
-        import trailhead.paths as _paths
-
-        # ``state_dir`` already treats ``env=None`` as "read os.environ", so the
-        # injected dict is passed straight through.
-        base = _paths.state_dir("lore", env=env)
-    except (ImportError, SystemExit):
-        raw = (os.environ if env is None else env).get("XDG_STATE_HOME", "")
-        if raw and os.path.isabs(raw):
-            base = Path(raw) / "lore"
-        else:
-            base = Path.home() / ".local" / "state" / "lore"
+    base = lore_state_dir(env=env)
     return base / "locks" / Path(vault_root).name
 
 
