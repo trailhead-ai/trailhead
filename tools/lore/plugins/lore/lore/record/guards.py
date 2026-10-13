@@ -19,6 +19,16 @@ runs unconditionally alongside that dispatch, for every kind: unlike
 ``depends-on``/``parent``, ``supersedes`` is ungated and carries no cycle guard
 of its own — only format and self-edge are checked here.
 
+The freeze: :func:`check_frozen_record` runs from :func:`evaluate_graph_guards`
+for every kind, ahead of the kind-specific policy, so a refused write never pays
+for a graph load. It judges the record's PRIOR status against the per-kind table
+:data:`FROZEN_STATUSES` (adr ``active``/``superseded``/``dropped``; spec
+``ready`` and later; every decision status; task ``done``/``dropped``/``superseded``)
+and compares authored content — the body minus a spec's ``## Slices`` and a
+task's ``## Driver run`` — so only those sections pass a plain update. Refusals
+are ``[frozen-body]`` and ``[frozen-status]`` and name ``lore record amend``,
+the one write that may change a frozen body.
+
 Guard-message shape: every line — blocking error, non-blocking warning, ritual
 reminder — is formatted through :func:`graph.format_guard_message` so agents
 parse one machine-parseable ``graph-guard [<guard>]: <message>`` shape off stderr.
@@ -69,6 +79,7 @@ from pathlib import Path
 
 from . import graph as graph_mod
 from . import model as record_model
+from . import sections as sections_mod
 from . import store as record_store_mod
 
 # A ``## Flow-out`` markdown heading (the completion-ritual section). Matched
@@ -546,52 +557,100 @@ def compute_stem_rewrite(body: str, kind: str, old_stem: str, new_stem: str) -> 
     )
 
 
-#: The ``adr`` statuses under which the body is frozen. ``draft`` is the only
-#: status an adr can hold while its body is still editable; every other status
-#: in :data:`model.STATUS_VOCAB` is reachable only by activating the record or
-#: by an exit from ``active``, so the whole set carries a decision that has been
-#: committed. Freezing the exits, not just ``active``, is what makes the freeze
-#: hold: enforcement keyed on ``active`` alone is defeated by first moving the
-#: record out of ``active`` and then editing it under the unenforced status.
-FROZEN_ADR_STATUSES: frozenset[str] = frozenset({"active", "superseded", "dropped"})
+#: Per kind, the statuses under which the authored body is frozen. ``draft`` is
+#: the only editable status an adr or spec can hold; every other status is
+#: reachable only by activating the record or by an exit from it, so the whole
+#: set carries a decision that has been committed. Freezing the exits, not just
+#: the first frozen status, is what makes the freeze hold: enforcement keyed on
+#: ``active`` alone is defeated by first moving the record out of ``active`` and
+#: then editing it under the unenforced status. A decision has no editable
+#: status, so every status in its vocabulary is frozen. A kind absent from the
+#: table is never frozen.
+FROZEN_STATUSES: dict[str, frozenset[str]] = {
+    "adr": frozenset({"active", "superseded", "dropped"}),
+    "spec": frozenset({"ready", "planned", "complete", "superseded", "dropped"}),
+    "decision": frozenset(record_model.STATUS_VOCAB["decision"]),
+    "task": frozenset({"done", "dropped", "superseded"}),
+}
+
+#: Kinds whose frozen statuses cannot be left for ``draft``. A task may be
+#: reopened; a decision has no ``draft`` to return to.
+_NO_RETURN_TO_DRAFT: frozenset[str] = frozenset({"adr", "spec"})
+
+#: The pipeline-maintained section a plain update may still change, per kind
+#: (see :mod:`record.sections`), named in the refusal.
+_PLAIN_UPDATE_SECTION: dict[str, str] = {"spec": "## Slices", "task": "## Driver run"}
+
+_SUPERSESSION_RECIPE = (
+    "For a material change, supersede it: flip --status superseded with "
+    "--supersedes adr/<successor> naming the record that replaces it."
+)
+
+_DIFF_LINE_LIMIT = 80
 
 
-def check_frozen_adr_status_transition(
+def _is_frozen(kind: str, prior_status: str | None) -> bool:
+    return prior_status in FROZEN_STATUSES.get(kind, frozenset())
+
+
+def _first_differing_line(prior: str, new: str) -> str:
+    """Name the first authored line where *new* departs from *prior*."""
+    prior_lines = prior.splitlines()
+    new_lines = new.splitlines()
+    for n, (old_line, new_line) in enumerate(zip(prior_lines, new_lines), start=1):
+        if old_line != new_line:
+            return f"authored line {n} is now {_clip(new_line)}"
+    n = min(len(prior_lines), len(new_lines)) + 1
+    if len(new_lines) > len(prior_lines):
+        return f"authored line {n} was added: {_clip(new_lines[n - 1])}"
+    return f"authored line {n} was removed: {_clip(prior_lines[n - 1])}"
+
+
+def _clip(line: str) -> str:
+    shown = line if len(line) <= _DIFF_LINE_LIMIT else line[:_DIFF_LINE_LIMIT] + "..."
+    return repr(shown)
+
+
+def check_frozen_status(
     *,
     kind: str,
     name: str,
     prior_status: str | None,
     status_set: str | None,
 ) -> str | None:
-    """Block an ``adr`` in a frozen status (:data:`FROZEN_ADR_STATUSES`) being
-    flipped back to ``draft`` — the other half of body immutability.
+    """Block an ``adr`` or ``spec`` in a frozen status being flipped back to ``draft``.
 
     Freezing the body under every frozen status is not sufficient on its own:
     ``draft`` is editable by design, so a write that returns a frozen record to
     ``draft`` would launder the enforcement away and re-open the body to the
-    very next write. Blocking that one transition closes the set: ``draft`` is
-    the only exit from the frozen statuses, so with it blocked a record that has
-    left ``draft`` can never re-enter it, and its body is frozen for good.
+    very next write. Blocking that one transition closes the set. A task may
+    leave ``done`` / ``dropped`` / ``superseded`` for any status, and a decision
+    has no ``draft`` to return to, so neither is checked.
 
-    Every other transition stays open — ``active`` → ``superseded`` / ``dropped``
+    Every other transition stays open — ``active`` -> ``superseded`` / ``dropped``
     is the supersession flow, and the target status has no bearing on the body
     freeze, which is keyed on the PRIOR status alone.
     """
-    if kind != "adr":
+    if kind not in _NO_RETURN_TO_DRAFT:
         return None
-    if prior_status not in FROZEN_ADR_STATUSES:
+    if not _is_frozen(kind, prior_status):
         return None
     if status_set != "draft":
         return None
+    node = graph_mod.format_node(f"{kind}/{name}")
+    tail = (
+        "Write a new adr and supersede this one instead."
+        if kind == "adr"
+        else "A change of scope is a supersession."
+    )
     return graph_mod.format_guard_message(
-        "adr-frozen-status",
-        f"{graph_mod.format_node(f'{kind}/{name}')} is {prior_status} — it cannot "
-        "return to draft. Its body is immutable and reopening the record would "
-        "lift that. Write a new adr and supersede this one instead.",
+        "frozen-status",
+        f"{node} is {prior_status} — a {kind} cannot return to draft. Its body "
+        f"is frozen and reopening the record would lift that. {tail}",
     )
 
 
-def check_active_adr_body_immutable(
+def check_frozen_body(
     *,
     kind: str,
     name: str,
@@ -600,55 +659,36 @@ def check_active_adr_body_immutable(
     new_body: str,
     allowed_body: str | None = None,
 ) -> str | None:
-    """Block a body-changing write against an ``adr`` whose PRIOR on-disk status
-    was one of :data:`FROZEN_ADR_STATUSES` — the structural counterpart to the
-    "convention-enforced, not CLI-enforced" immutability that used to be
-    documented and nowhere checked.
+    """Block a write that changes the authored content of a frozen record.
 
-    The frozen set is every status but ``draft``, not ``active`` alone: a
-    supersession or a drop is a legitimate exit from ``active``, and a record
-    that took one still holds a decision that was committed. Enforcing only
-    while the record sits in ``active`` would make each exit a laundering path —
-    take it, then edit the frozen body under a status nothing enforces. Paired
-    with :func:`check_frozen_adr_status_transition` (which blocks the return to
-    ``draft``), the set is closed and the body freeze is permanent.
+    The frozen statuses are per kind (:data:`FROZEN_STATUSES`), judged on the
+    record's PRIOR on-disk status — never the status this write applies, so a
+    ``--status superseded`` flip that changes nothing else succeeds and a body
+    change riding the same flip is refused. Authored content is the body minus
+    the kind's pipeline-maintained sections (:func:`sections.authored_content`),
+    so a change confined to ``## Slices`` (spec) or ``## Driver run`` (task)
+    passes a plain update.
 
     Returns a formatted ``graph-guard`` message, or ``None`` when the write may
-    proceed. A ``None`` *prior_body* is the no-enforcement default: the caller
-    is a seam with nothing prior to compare against (a fresh create, or a seam
-    that has not been taught to thread its prior body in), and enforcing
-    immutability against a record that does not yet exist would be nonsensical.
+    proceed. A ``None`` *prior_body* is the no-enforcement default: the caller is
+    a seam with nothing prior to compare against (a fresh create, or a seam that
+    has not been taught to thread its prior body in).
 
-    Keyed on the record's PRIOR status, never the status this write applies —
-    a ``--status superseded`` flip that changes nothing else must still
-    succeed, and a body change riding the same flip must still be rejected: the
-    freeze belongs to the record's committed state, not to whatever status the
-    write happens to set.
-
-    Both bodies are compared through :func:`store.neutralize_fences` before the
-    equality check — the same normalization :func:`store.validate_stamp_neutralize`
-    always applies before anything reaches disk. Comparing the raw, pre-write
-    values would let a metadata-only write's body argument diverge textually
-    from the stored body (e.g. resupplying content with a live
-    ``<external-memory>`` fence that neutralizes to what is already stored)
-    while still landing as a byte-for-byte no-op; comparing post-neutralization
-    values judges exactly what will actually reach disk.
+    Both bodies go through :func:`store.neutralize_fences` before comparison —
+    the normalization every write applies before anything reaches disk — so the
+    comparison judges exactly what will land. The section strip runs after it.
 
     *allowed_body*, when given, is a second value the normalized *new_body* may
-    match instead of *prior_body* — the rename sweep's narrow exemption (a pure
-    stem-substitution rewrite is not an edit). It is deliberately not the mere
-    presence of a flag: the caller must independently derive it (see
-    :func:`compute_stem_rewrite`) and it is checked with the same equality
-    rigor as *prior_body*, so a change that happens to differ from both is
-    still rejected. ``lore record amend`` is the other caller: it passes its own
-    resolved new body, which is the one write that is allowed to change a frozen
-    body because it records the change durably in the record's
-    ``change-history``. Only this check reads *allowed_body*; every other guard
-    judges an amend exactly as it judges an update.
+    match instead of the prior content. The caller must derive it independently:
+    ``lore record amend`` passes its own resolved new body (the one write allowed
+    to change a frozen body, because it records the change in the record's
+    ``change-history``), and the rename sweep passes a pure stem substitution
+    (see :func:`compute_stem_rewrite`). Only this check reads it.
+
+    This reads the prior status and the two bodies only; it never loads the
+    vault graph.
     """
-    if kind != "adr":
-        return None
-    if prior_status not in FROZEN_ADR_STATUSES:
+    if not _is_frozen(kind, prior_status):
         return None
     if prior_body is None:
         return None
@@ -658,18 +698,67 @@ def check_active_adr_body_immutable(
         return None
     if allowed_body is not None and new_norm == record_store_mod.neutralize_fences(allowed_body):
         return None
-    return graph_mod.format_guard_message(
-        "adr-active-immutable",
-        f"{graph_mod.format_node(f'{kind}/{name}')} is {prior_status} — its body is "
-        "immutable. Do not edit it directly. For a material change, supersede "
-        "it: flip --status superseded with --supersedes adr/<successor> naming "
-        "the record that replaces it. To correct the body in place (a typo, a "
-        f"wrong link), run `lore record amend {graph_mod.format_node(f'{kind}/{name}')} --reason \"<why>\" "
-        "--initiated-by operator|agent` with the corrected body on stdin; the "
-        "reason and the diff are kept in the record's change-history. Pass "
-        "`--initiated-by operator` only for an edit a human instructed: it is "
-        "an audit label, not a permission check.",
+    prior_authored = sections_mod.authored_content(kind, prior_norm)
+    new_authored = sections_mod.authored_content(kind, new_norm)
+    if prior_authored == new_authored:
+        return None
+    node = graph_mod.format_node(f"{kind}/{name}")
+    section = _PLAIN_UPDATE_SECTION.get(kind)
+    sections_clause = (
+        f"Only {section} passes a plain update."
+        if section
+        else "No section passes a plain update."
     )
+    if kind == "adr":
+        scope_clause = _SUPERSESSION_RECIPE
+    else:
+        scope_clause = "A change of scope is a supersession."
+    reopen_clause = (
+        f" Reopening the task with a status-only update (`lore record update {node} "
+        "--status <status>`, no stdin) is the other route."
+        if kind == "task"
+        else ""
+    )
+    return graph_mod.format_guard_message(
+        "frozen-body",
+        f"{node} is a {kind} at {prior_status} — its authored content is frozen "
+        f"({_first_differing_line(prior_authored, new_authored)}). "
+        f"Do not edit it directly. {sections_clause} {scope_clause} "
+        f"To correct the body in place, run `lore record amend {node} "
+        '--reason "<why>" --initiated-by agent|operator --base <revision>` with '
+        "the corrected body on stdin (<revision> is in `lore record show "
+        f"{node}`; pass --diff with a unified diff instead of --base); the "
+        "reason and the diff are kept in the record's change-history. An agent "
+        "always passes `--initiated-by agent`; `operator` is for an edit a human "
+        f"instructed, and is an audit label, not a permission check.{reopen_clause}",
+    )
+
+
+def check_frozen_record(
+    *,
+    kind: str,
+    name: str,
+    prior_status: str | None,
+    prior_body: str | None,
+    new_body: str,
+    status_set: str | None,
+    allowed_body: str | None = None,
+) -> str | None:
+    """The freeze for every kind: the status check, then the body check."""
+    return check_frozen_status(
+        kind=kind, name=name, prior_status=prior_status, status_set=status_set
+    ) or check_frozen_body(
+        kind=kind,
+        name=name,
+        prior_status=prior_status,
+        prior_body=prior_body,
+        new_body=new_body,
+        allowed_body=allowed_body,
+    )
+
+
+#: The rename sweep's stem-rewrite exemption calls the body check by this name.
+check_active_adr_body_immutable = check_frozen_body
 
 
 def _split_supersedes_entry(entry: object) -> tuple[str, str] | None:
@@ -772,11 +861,7 @@ def evaluate_design_guards(
     does, and is likewise a no-op — ``([], [])`` — for every kind outside
     :data:`graph.DESIGN_KINDS`:
 
-      - ``errors`` block the operation (nothing is written): the frozen-adr
-        body-immutability check (see :func:`check_active_adr_body_immutable`)
-        and the frozen-adr return-to-``draft`` check that keeps it from being
-        laundered away (see :func:`check_frozen_adr_status_transition`);
-        every ``depends-on`` entry that fails the ``kind/name[@stage]`` grammar
+      - ``errors`` block the operation (nothing is written): every ``depends-on`` entry that fails the ``kind/name[@stage]`` grammar
         (a name carrying its own ``/`` included — the grammar is one level) or
         the target kind's stage vocabulary, an entry whose name breaks vault
         confinement, and a stage-blind dependency cycle over the qualified-id
@@ -816,26 +901,6 @@ def evaluate_design_guards(
         return [], notices
 
     errors: list[str] = []
-
-    transition_msg = check_frozen_adr_status_transition(
-        kind=kind,
-        name=name,
-        prior_status=prior_status,
-        status_set=status_set,
-    )
-    if transition_msg:
-        return [transition_msg], []
-
-    immutable_msg = check_active_adr_body_immutable(
-        kind=kind,
-        name=name,
-        prior_status=prior_status,
-        prior_body=prior_body,
-        new_body=body,
-        allowed_body=allowed_body,
-    )
-    if immutable_msg:
-        return [immutable_msg], []
 
     # Every entry is parsed, kind-validated and confined before the graph is
     # built — a malformed or traversal-shaped value must never reach disk, and
@@ -906,31 +971,45 @@ def evaluate_graph_guards(
 ) -> tuple[list[str], list[str]]:
     """Route a create/update/delete to the graph guards for its *kind*.
 
+    The freeze (:func:`check_frozen_record`) runs first, for every kind, ahead of
+    the kind-specific policy: a refused write never pays for a graph load.
+
     One signature for every caller: ``task`` goes to :func:`evaluate_task_guards`,
     a design kind to :func:`evaluate_design_guards`, and any other kind is the
     same ``([], [])`` no-op both of those return on their own — no kind carries
     two graphs, so exactly one policy ever runs. ``body`` is consumed by the
-    task policy (the flow-out ritual reminder has no design counterpart) and,
-    for an ``adr``, by the ``active``-immutability check. *supplied_depends_on*
+    task policy (the flow-out ritual reminder has no design counterpart) and by
+    the freeze check. *supplied_depends_on*
     and *parent_supplied* are task-only: the task-edge form check is the one
     guard that grandfathers already-stored edges, because it is the one guard
     whose rule postdates the data it reads. Every design ``depends-on`` entry on disk was written
     under the design grammar, so that policy judges the merged record whole.
 
     *prior_body* / *prior_status* are the record's on-disk values BEFORE this
-    write — consumed only by the design policy's ``active``-immutability check,
-    and both default to ``None``: a caller that has not been taught to thread
+    write — consumed only by the freeze check, and both default to ``None``: a caller that has not been taught to thread
     them in (a fresh create, or a seam with no natural "prior" to read) gets no
     enforcement, never a false rejection, on that seam. See
-    :func:`check_active_adr_body_immutable`.
+    :func:`check_frozen_body`.
 
-    *allowed_body* is the one body a frozen ``adr`` may change to (the amend
+    *allowed_body* is the one body a frozen record may change to (the amend
     verb's own resolved new body); it is forwarded to that check and to nothing
     else, so every other guard runs unchanged.
     """
     supersedes_errors = evaluate_supersedes_guard(
         kind=kind, name=name, sidecar=sidecar, vault_root=vault_root
     )
+    if not deleting:
+        frozen_msg = check_frozen_record(
+            kind=kind,
+            name=name,
+            prior_status=prior_status,
+            prior_body=prior_body,
+            new_body=body,
+            status_set=status_set,
+            allowed_body=allowed_body,
+        )
+        if frozen_msg:
+            return supersedes_errors + [frozen_msg], []
     if kind == "task":
         errors, notices = evaluate_task_guards(
             kind=kind,

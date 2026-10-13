@@ -89,7 +89,7 @@ from ..search import kql
 #: anything worth tracking to completion, ordered via ``depends-on``/``parent``.
 #: ``adr`` is an immutable architecture decision record once ``active`` — a
 #: body-changing write against an ``active`` adr is rejected structurally at
-#: the record-write path (see ``record.guards.check_active_adr_body_immutable``);
+#: the record-write path (see ``record.guards.check_frozen_body``);
 #: it uses no ``task``-only gated field.
 KINDS: frozenset[str] = frozenset(
     {

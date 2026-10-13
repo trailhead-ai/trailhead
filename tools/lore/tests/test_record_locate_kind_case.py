@@ -106,5 +106,5 @@ def test_update_of_a_frozen_adr_by_case_variant_id_is_refused_and_writes_nothing
 
     assert r.returncode != 0
     assert "Traceback" not in r.stderr
-    assert "[adr-active-immutable]" in r.stderr
+    assert "[frozen-body]" in r.stderr
     assert _snapshot(vault) == before

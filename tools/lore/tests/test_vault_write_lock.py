@@ -187,7 +187,7 @@ class TestConcurrentUpdates:
         ids = []
         for i in range(self.WORKERS):
             r = run_cli(
-                ["record", "create", "--kind", "decision", "--title", f"target {i}"],
+                ["record", "create", "--kind", "lesson", "--title", f"target {i}"],
                 vault=vault, state_dir=state, stdin_text="seed\n",
             )
             assert r.returncode == 0, r.stderr
@@ -216,7 +216,7 @@ class TestConcurrentUpdates:
                 name = rid.split("/", 1)[1]
                 row = conn.execute(
                     "SELECT body FROM record_fts WHERE rowid = "
-                    "(SELECT rowid FROM records WHERE kind='decision' AND name=?)",
+                    "(SELECT rowid FROM records WHERE kind='lesson' AND name=?)",
                     (name,),
                 ).fetchone()
                 assert row is not None, f"{rid}: no index row after update"

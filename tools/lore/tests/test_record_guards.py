@@ -1065,12 +1065,12 @@ def test_supersedes_ordinary_name_survives_confinement(tmp_path):
 
 def test_active_adr_immutable_check_blocks_body_change_against_active_status():
     g = _guards()
-    msg = g.check_active_adr_body_immutable(
+    msg = g.check_frozen_body(
         kind="adr", name="foo", prior_status="active",
         prior_body="old body", new_body="new body",
     )
     assert msg is not None
-    assert "[adr-active-immutable]" in msg
+    assert "[frozen-body]" in msg
 
 
 def test_active_adr_immutable_check_message_parses_and_names_the_remedy():
@@ -1078,11 +1078,11 @@ def test_active_adr_immutable_check_message_parses_and_names_the_remedy():
     ``--related``, the see-also edge this task's supersedes-writer replaces
     for exactly this case (an ADR naming its own successor)."""
     g = _guards()
-    msg = g.check_active_adr_body_immutable(
+    msg = g.check_frozen_body(
         kind="adr", name="foo", prior_status="active",
         prior_body="old body", new_body="new body",
     )
-    assert msg.startswith("graph-guard [adr-active-immutable]: ")
+    assert msg.startswith("graph-guard [frozen-body]: ")
     assert "\n" not in msg
     assert "supersede" in msg.lower()
     assert "do not edit" in msg.lower()
@@ -1092,7 +1092,7 @@ def test_active_adr_immutable_check_message_parses_and_names_the_remedy():
 
 def test_active_adr_immutable_check_allows_unchanged_body():
     g = _guards()
-    msg = g.check_active_adr_body_immutable(
+    msg = g.check_frozen_body(
         kind="adr", name="foo", prior_status="active",
         prior_body="same body", new_body="same body",
     )
@@ -1101,7 +1101,7 @@ def test_active_adr_immutable_check_allows_unchanged_body():
 
 def test_active_adr_immutable_check_keys_on_status_not_kind_alone_draft_allows():
     g = _guards()
-    msg = g.check_active_adr_body_immutable(
+    msg = g.check_frozen_body(
         kind="adr", name="foo", prior_status="draft",
         prior_body="old body", new_body="new body",
     )
@@ -1110,7 +1110,7 @@ def test_active_adr_immutable_check_keys_on_status_not_kind_alone_draft_allows()
 
 def test_active_adr_immutable_check_ignores_non_adr_kind():
     g = _guards()
-    msg = g.check_active_adr_body_immutable(
+    msg = g.check_frozen_body(
         kind="spec", name="foo", prior_status="active",
         prior_body="old body", new_body="new body",
     )
@@ -1119,7 +1119,7 @@ def test_active_adr_immutable_check_ignores_non_adr_kind():
 
 def test_active_adr_immutable_check_default_prior_body_none_is_a_noop():
     g = _guards()
-    msg = g.check_active_adr_body_immutable(
+    msg = g.check_frozen_body(
         kind="adr", name="foo", prior_status="active",
         prior_body=None, new_body="anything",
     )
@@ -1137,7 +1137,7 @@ def test_active_adr_immutable_check_compares_after_fence_neutralization():
     raw = "See <external-memory>note</external-memory> here.\n"
     stored = store.neutralize_fences(raw)
     assert stored != raw  # sanity: neutralization actually changed something
-    msg = g.check_active_adr_body_immutable(
+    msg = g.check_frozen_body(
         kind="adr", name="foo", prior_status="active",
         prior_body=stored, new_body=raw,
     )
@@ -1146,7 +1146,7 @@ def test_active_adr_immutable_check_compares_after_fence_neutralization():
 
 def test_active_adr_immutable_check_allowed_body_exemption_permits_exact_match():
     g = _guards()
-    msg = g.check_active_adr_body_immutable(
+    msg = g.check_frozen_body(
         kind="adr", name="foo", prior_status="active",
         prior_body="see [[old-thing]] here", new_body="see [[new-thing]] here",
         allowed_body="see [[new-thing]] here",
@@ -1160,24 +1160,24 @@ def test_active_adr_immutable_check_rejects_body_change_not_matching_allowed_exe
     even though an *allowed_body* was supplied.
     """
     g = _guards()
-    msg = g.check_active_adr_body_immutable(
+    msg = g.check_frozen_body(
         kind="adr", name="foo", prior_status="active",
         prior_body="see [[old-thing]] here", new_body="see [[old-thing]] here PLUS EXTRA",
         allowed_body="see [[new-thing]] here",
     )
     assert msg is not None
-    assert "[adr-active-immutable]" in msg
+    assert "[frozen-body]" in msg
 
 
 def test_active_adr_immutable_message_names_amend_beside_supersession():
     g = _guards()
-    msg = g.check_active_adr_body_immutable(
+    msg = g.check_frozen_body(
         kind="adr", name="foo", prior_status="active",
         prior_body="old body", new_body="new body",
     )
     assert "lore record amend 'adr/foo'" in msg
     assert "--supersedes adr/" in msg
-    assert msg.startswith("graph-guard [adr-active-immutable]: ")
+    assert msg.startswith("graph-guard [frozen-body]: ")
     assert "\n" not in msg
 
 
@@ -1189,22 +1189,9 @@ def test_graph_dispatcher_threads_allowed_body_into_the_adr_freeze(tmp_path):
         prior_status="active", prior_body="old body",
     )
     allowed, _ = g.evaluate_graph_guards(**common, allowed_body="new body")
-    assert not any("[adr-active-immutable]" in e for e in allowed)
+    assert not any("[frozen-body]" in e for e in allowed)
     other, _ = g.evaluate_graph_guards(**common, allowed_body="some other body")
-    assert any("[adr-active-immutable]" in e for e in other)
-
-
-def test_design_dispatcher_threads_allowed_body_into_the_adr_freeze(tmp_path):
-    g = _guards()
-    common = dict(
-        kind="adr", name="foo", sidecar={"kind": "adr", "status": "active"},
-        body="new body", vault_root=str(tmp_path), status_set=None,
-        prior_status="active", prior_body="old body",
-    )
-    allowed, _ = g.evaluate_design_guards(**common, allowed_body="new body")
-    assert not any("[adr-active-immutable]" in e for e in allowed)
-    other, _ = g.evaluate_design_guards(**common, allowed_body="some other body")
-    assert any("[adr-active-immutable]" in e for e in other)
+    assert any("[frozen-body]" in e for e in other)
 
 
 def test_allowed_body_does_not_lift_any_other_graph_guard(tmp_path):
@@ -1231,7 +1218,7 @@ def test_dispatcher_threads_prior_body_and_status_into_adr_immutability_check(tm
         body="new body", vault_root=str(tmp_path), status_set=None,
         prior_status="active", prior_body="old body",
     )
-    assert any("[adr-active-immutable]" in e for e in errors)
+    assert any("[frozen-body]" in e for e in errors)
 
 
 def test_dispatcher_default_prior_body_none_does_not_enforce_immutability(tmp_path):
@@ -1240,7 +1227,7 @@ def test_dispatcher_default_prior_body_none_does_not_enforce_immutability(tmp_pa
         kind="adr", name="foo", sidecar={"kind": "adr", "status": "active"},
         body="new body", vault_root=str(tmp_path), status_set=None,
     )
-    assert not any("[adr-active-immutable]" in e for e in errors)
+    assert not any("[frozen-body]" in e for e in errors)
 
 
 # ---------------------------------------------------------------------------
@@ -1251,43 +1238,43 @@ def test_dispatcher_default_prior_body_none_does_not_enforce_immutability(tmp_pa
 @pytest.mark.parametrize("prior_status", ["active", "superseded", "dropped"])
 def test_adr_body_immutable_for_every_frozen_prior_status(prior_status):
     g = _guards()
-    msg = g.check_active_adr_body_immutable(
+    msg = g.check_frozen_body(
         kind="adr", name="foo", prior_status=prior_status,
         prior_body="old body", new_body="new body",
     )
     assert msg is not None
-    assert "[adr-active-immutable]" in msg
+    assert "[frozen-body]" in msg
 
 
 @pytest.mark.parametrize("prior_status", ["active", "superseded", "dropped"])
 def test_adr_frozen_status_transition_blocks_return_to_draft(prior_status):
     g = _guards()
-    msg = g.check_frozen_adr_status_transition(
+    msg = g.check_frozen_status(
         kind="adr", name="foo", prior_status=prior_status, status_set="draft",
     )
     assert msg is not None
-    assert msg.startswith("graph-guard [adr-frozen-status]: ")
+    assert msg.startswith("graph-guard [frozen-status]: ")
     assert "\n" not in msg
 
 
 @pytest.mark.parametrize("status_set", [None, "active", "superseded", "dropped"])
 def test_adr_frozen_status_transition_permits_every_non_draft_target(status_set):
     g = _guards()
-    assert g.check_frozen_adr_status_transition(
+    assert g.check_frozen_status(
         kind="adr", name="foo", prior_status="active", status_set=status_set,
     ) is None
 
 
 def test_adr_frozen_status_transition_permits_draft_to_draft():
     g = _guards()
-    assert g.check_frozen_adr_status_transition(
+    assert g.check_frozen_status(
         kind="adr", name="foo", prior_status="draft", status_set="draft",
     ) is None
 
 
 def test_adr_frozen_status_transition_ignores_non_adr_kind():
     g = _guards()
-    assert g.check_frozen_adr_status_transition(
+    assert g.check_frozen_status(
         kind="spec", name="foo", prior_status="active", status_set="draft",
     ) is None
 
@@ -1299,4 +1286,24 @@ def test_dispatcher_blocks_frozen_adr_status_launder(tmp_path):
         body="old body", vault_root=str(tmp_path), status_set="draft",
         prior_status="active", prior_body="old body",
     )
-    assert any("[adr-frozen-status]" in e for e in errors)
+    assert any("[frozen-status]" in e for e in errors)
+
+
+@pytest.mark.parametrize("kind,status", [("adr", "active"), ("spec", "ready"), ("decision", "active"), ("task", "done")])
+def test_freeze_check_never_loads_the_vault_graph(tmp_path, monkeypatch, kind, status):
+    """The freeze reads the prior status and two bodies only — an unchanged-body
+    write and a refused write both leave the vault-wide loaders untouched."""
+    g = _guards()
+    calls: list[str] = []
+    for loader in ("load_task_sidecars", "load_design_sidecars"):
+        original = getattr(g, loader)
+        monkeypatch.setattr(g, loader, lambda vr, _o=original: calls.append(vr) or _o(vr))
+    common = dict(
+        kind=kind, name="foo", sidecar={"kind": kind, "status": status},
+        vault_root=str(tmp_path), status_set=None, prior_status=status, prior_body="old\n",
+    )
+    same, _ = g.evaluate_graph_guards(**common, body="old\n")
+    refused, _ = g.evaluate_graph_guards(**common, body="new\n")
+    assert same == []
+    assert any("[frozen-body]" in e for e in refused)
+    assert calls == []

@@ -142,7 +142,7 @@ def test_plain_update_of_the_same_active_adr_is_refused_and_names_amend(tmp_path
     r = _run(["record", "update", rid], vault=vault, state_dir=state, stdin_text=AMENDED)
 
     assert r.returncode != 0
-    assert "[adr-active-immutable]" in r.stderr
+    assert "[frozen-body]" in r.stderr
     assert "lore record amend" in r.stderr
     assert _snapshot(vault) == before
 

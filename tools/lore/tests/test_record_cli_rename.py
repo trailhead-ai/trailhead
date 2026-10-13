@@ -1316,7 +1316,7 @@ def test_rename_path_body_change_not_pure_substitution_against_active_adr_is_rej
 
     adr_rewrite = next(rw for rw in report.rewrites if rw.record_id == adr_id)
     assert adr_rewrite.error is not None
-    assert "[adr-active-immutable]" in adr_rewrite.error
+    assert "[frozen-body]" in adr_rewrite.error
 
     stored = (vault / "adr" / "referencing-decision.md").read_text(encoding="utf-8")
     assert stored == "see [[spec/old-thing]] here"

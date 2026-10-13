@@ -2,7 +2,8 @@
 
 ``update`` and ``amend`` share one read / resolve-body / apply / guard step
 (:func:`_read_apply_and_guard`) so a body is resolved and guarded identically by
-both. ``amend`` is the only write that may change a frozen ``adr`` body: it hands
+both. ``amend`` is the only write that may change a frozen record's authored
+body (adr, spec, decision or task, per the guards' per-kind freeze): it hands
 its own resolved new body to the guard's ``allowed_body`` seam and records the
 change in the record's ``change-history``.
 """
@@ -1790,8 +1791,10 @@ def _cmd_record_update(args) -> int:
 
     Invalid/nonexistent RECORD_ID → non-zero.
 
-    A body change to a frozen ``adr`` is refused here (``[adr-active-immutable]``);
-    the refusal names ``lore record amend`` as the in-place correction path.
+    A change to the authored body of a frozen adr, spec, decision or task is
+    refused here (``[frozen-body]``), and an adr or spec cannot return to
+    ``draft`` (``[frozen-status]``); the refusal names ``lore record amend`` as
+    the in-place correction path.
     The read / body-resolve / guard step is :func:`_read_apply_and_guard`, shared
     with ``record amend``.
     """
@@ -2161,8 +2164,8 @@ def _cmd_record_amend(args) -> int:
     stamped with), who asked for it (``initiated-by``), why (``reason``) and what
     changed (``diff``, the unified diff between the stored — fence-neutralized —
     bodies, so ``apply_unified_diff(stored_before, diff)`` reproduces the stored
-    body exactly). It is the one write that may change a frozen ``adr`` body: the
-    ADR body freeze accepts amend's own resolved new body through the guard's
+    body exactly). It is the one write that may change a frozen record's body: the
+    freeze accepts amend's own resolved new body through the guard's
     ``allowed_body`` seam, and every other guard runs exactly as it does for
     ``record update``.
 
@@ -2515,13 +2518,13 @@ def add_record_subparser(sub) -> None:
     # ``required``) so a missing or invalid value gets one message naming the fix.
     p_record_amend = p_record_sub.add_parser(
         "amend",
-        help="Amend a record's body in place (even a frozen adr), recording why",
+        help="Amend a record's body in place (even a frozen record), recording why",
         usage="lore record amend RECORD_ID --reason REASON --initiated-by "
               "{operator,agent} [--base REVISION] [--diff | --revert-to N] [--vault NAME]",
         description="Replace a record's body with the one piped on stdin (or, with "
                     "--diff, apply a unified diff to it) and append a "
                     "change-history entry: when, by whom, who asked, why, and the "
-                    "diff. This is the way to correct a frozen adr's body in "
+                    "diff. This is the way to correct a frozen record's body in "
                     "place; plain 'record update' refuses it. The record's id, "
                     "kind, status, labels and links are kept.",
         epilog="--base: the stale-write handshake. 'lore record show' gives the "
