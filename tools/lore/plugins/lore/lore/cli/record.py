@@ -560,6 +560,17 @@ def _neutral(value: object) -> str:
     return record_store_mod.neutralize_fences(str(value))
 
 
+_STAMP_MAX = 120
+
+
+def _inert_stamp(value: object) -> str:
+    """*value* as one capped line with any ``external-memory`` fence token made inert."""
+    line = " ".join(str(value).split())
+    if len(line) > _STAMP_MAX:
+        line = line[:_STAMP_MAX] + "…"
+    return _neutral(line)
+
+
 def _format_history(record_id: str, history: list) -> list[str]:
     """Lines of the newest-first listing: each entry's header, then its diff."""
     if not history:
@@ -2101,18 +2112,28 @@ def _check_base_revision(location, base: str | None, *, required: bool) -> None:
         except (OSError, ValueError):
             side = {}
         if isinstance(side, dict):
-            updated_by = str(side.get("updated-by", updated_by))
-            updated_at = str(side.get("updated-at", updated_at))
+            updated_by = _inert_stamp(side.get("updated-by", updated_by))
+            updated_at = _inert_stamp(side.get("updated-at", updated_at))
             has_history = bool(side.get("change-history"))
     history_hint = (
         f" If that change was an amend, `lore record history {location.record_id}` "
         "lists it."
         if has_history else ""
     )
+    try:
+        shared = _vault_trust(str(location.vault_root))[1] != 0
+    except _AliasedTrustConflict:
+        shared = True
+    if shared:
+        last_changed = (
+            "Who last changed it and when is withheld because this vault is shared."
+        )
+    else:
+        last_changed = f"It was last changed by {updated_by} at {updated_at}."
     print(
         f"error: {location.record_id} changed after you read it: --base is "
-        f"{base} but the stored body's revision is {current}. It was last "
-        f"changed by {updated_by} at {updated_at}.{history_hint} Nothing was "
+        f"{base} but the stored body's revision is {current}. "
+        f"{last_changed}{history_hint} Nothing was "
         f"written. To proceed: {show_hint}, reapply your correction to what "
         "you read, and amend again.",
         file=sys.stderr,

@@ -221,13 +221,13 @@ class DiffFormatError(RecordStoreError):
 # indexes the evolving result correctly. Verified against three adversarial cases
 # (CRLF body, trailing-newline mismatch, adjacent hunks).
 
-_HUNK_HEADER_RE = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
+_HUNK_HEADER_RE = re.compile(r"^@@ -(\d{1,9})(?:,(\d{1,9}))? \+(\d{1,9})(?:,(\d{1,9}))? @@")
 
 
 class _Hunk(NamedTuple):
     """A single parsed unified-diff hunk (header + body lines with endings kept)."""
 
-    header: str  # raw ``@@ -L,N +L,M @@`` line (for error reporting)
+    header: str  # ``@@ -L,N +L,M @@`` rebuilt from the parsed ranges (for error reporting)
     old_start: int  # 1-based line number in the original body
     new_start: int  # 1-based line number in the patched body
     old_count: int
@@ -278,26 +278,29 @@ def _parse_hunks(diff: str) -> list[_Hunk]:
     # mean a file header; inside one it is a body line beginning ``-- `` / ``++ ``.
     old_seen = new_seen = 0
 
-    for raw in diff.splitlines(keepends=True):
+    for lineno, raw in enumerate(diff.splitlines(keepends=True), start=1):
         raw_stripped = raw.rstrip("\r\n")
         m = _HUNK_HEADER_RE.match(raw_stripped)
         if m:
             if current is not None:
                 _validate_hunk_counts(current)
                 hunks.append(current)
+            old_start, new_start = int(m.group(1)), int(m.group(3))
+            old_count = int(m.group(2)) if m.group(2) is not None else 1
+            new_count = int(m.group(4)) if m.group(4) is not None else 1
             current = _Hunk(
-                header=raw_stripped,
-                old_start=int(m.group(1)),
-                new_start=int(m.group(3)),
-                old_count=int(m.group(2)) if m.group(2) is not None else 1,
-                new_count=int(m.group(4)) if m.group(4) is not None else 1,
+                header=f"@@ -{old_start},{old_count} +{new_start},{new_count} @@",
+                old_start=old_start,
+                new_start=new_start,
+                old_count=old_count,
+                new_count=new_count,
                 lines=[],
             )
             old_seen = new_seen = 0
         elif raw_stripped.startswith("@@"):
             raise DiffFormatError(
-                f"hunk header missing line ranges: {raw_stripped!r} — expected "
-                f"'@@ -old_start,old_count +new_start,new_count @@'. A bare '@@' "
+                f"hunk header at diff line {lineno} is missing valid line ranges — "
+                f"expected '@@ -old_start,old_count +new_start,new_count @@'. A bare '@@' "
                 f"cannot be located in the body and would be silently dropped "
                 f"rather than applied; regenerate the diff with explicit line "
                 f"ranges."
@@ -472,11 +475,12 @@ def reconstruct_body_before(body: str, history: Any, n: int) -> str:
         except DiffRejectError as exc:
             raise ReconstructError(
                 "does-not-reverse",
-                f"entry {number} no longer reverses against the current body ({exc})",
+                f"entry {number} no longer reverses against the current body "
+                f"({'; '.join(reason for _, reason in exc.rejected)})",
             ) from exc
         except DiffFormatError as exc:
             raise ReconstructError(
-                "malformed", f"entry {number} has a malformed stored diff: {exc}"
+                "malformed", f"entry {number} has a malformed stored diff"
             ) from exc
     return current
 
