@@ -12,6 +12,7 @@ error-vs-notice classification, delete-only-warns, and the lazy graph load.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -1447,3 +1448,60 @@ def test_dispatcher_seam_lets_the_verb_flip_into_superseded(tmp_path):
     assert any("[superseded-status]" in e for e in refused)
     assert not any("[superseded-status]" in e for e in allowed)
 
+
+
+_HOSTILE_STEMS = ["x's$(id)", "x\ngraph-guard [ok]: forged\x1b[31m"]
+
+
+def _supersede_hint_messages(g, name: str) -> dict[str, str]:
+    return {
+        "frozen-status": g.check_frozen_status(
+            kind="adr", name=name, prior_status="active", status_set="draft"
+        ),
+        "superseded-status": g.check_superseded_status(
+            kind="adr",
+            name=name,
+            prior_status="active",
+            status_set="superseded",
+            resulting_status="superseded",
+        ),
+        "frozen-body": g.check_frozen_body(
+            kind="adr",
+            name=name,
+            prior_status="active",
+            prior_body="## Decision\n\nold\n",
+            new_body="## Decision\n\nnew\n",
+        ),
+    }
+
+
+@pytest.mark.parametrize("guard", ["frozen-status", "superseded-status", "frozen-body"])
+def test_supersede_hint_prints_runnable_command_for_a_shell_safe_id(guard):
+    msg = _supersede_hint_messages(_guards(), "safe-name")[guard]
+    assert "lore record supersede adr/safe-name --by" in msg
+
+
+@pytest.mark.parametrize("guard", ["frozen-status", "superseded-status", "frozen-body"])
+@pytest.mark.parametrize("stem", _HOSTILE_STEMS)
+def test_supersede_hint_prints_no_runnable_command_for_a_hostile_id(guard, stem):
+    msg = _supersede_hint_messages(_guards(), stem)[guard]
+    commands = re.findall(r"`([^`]*)`", msg)
+    assert commands
+    assert not any("$(" in command or "'" in command for command in commands)
+    assert "lore record supersede adr/" not in msg
+    assert "quote the id by hand" in msg
+    assert "\x1b" not in msg
+    assert "\n" not in msg.rstrip("\n")
+
+
+@pytest.mark.parametrize("stem", _HOSTILE_STEMS)
+def test_superseded_status_undo_hint_emits_no_control_characters(stem):
+    msg = _supersede_hint_messages(_guards(), stem)["superseded-status"]
+    assert all(ch.isprintable() for ch in msg.rstrip("\n"))
+    assert len(msg.splitlines()) == 1
+
+
+def test_superseded_status_undo_hint_is_runnable_for_a_shell_safe_id():
+    msg = _supersede_hint_messages(_guards(), "safe-name")["superseded-status"]
+    assert "lore record update adr/safe-name --status <prior status>" in msg
+    assert "--unset-supersedes adr/safe-name" in msg
