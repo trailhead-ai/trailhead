@@ -394,7 +394,10 @@ def test_refuses_a_dropped_predecessor(env):
 def test_refuses_a_dead_successor(env, status):
     vault, state = env
     task = _create(vault, state, "task", "open", "Old")
-    heir = _create(vault, state, "task", status, "Dead heir")
+    heir = _create(vault, state, "task", "open" if status == "superseded" else status, "Dead heir")
+    if status == "superseded":
+        heir_successor = _create(vault, state, "task", "open", "Dead heir successor")
+        assert _supersede(vault, state, heir, heir_successor).returncode == 0
     _refused(env, task, heir, "supersede-dead-successor")
 
 

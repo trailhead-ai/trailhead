@@ -885,7 +885,7 @@ def test_design_and_task_cycle_tags_are_distinguishable(tmp_path):
 
 
 def _dispatch(g, tmp_path, *, kind, name="a", sidecar=None, body="",
-              status_set=None, deleting=False):
+              status_set=None, deleting=False, **extra):
     return g.evaluate_graph_guards(
         kind=kind,
         name=name,
@@ -894,6 +894,7 @@ def _dispatch(g, tmp_path, *, kind, name="a", sidecar=None, body="",
         vault_root=str(tmp_path),
         status_set=status_set,
         deleting=deleting,
+        **extra,
     )
 
 
@@ -926,7 +927,7 @@ def test_dispatcher_is_a_noop_for_an_unrelated_kind(tmp_path):
         _write_task(tmp_path, "b", {"status": "open", "depends-on": ["a"]})
         assert _dispatch(
             g, tmp_path, kind=kind, sidecar={"depends-on": ["spec/b"]},
-            body="", status_set="superseded",
+            body="", status_set="superseded", allow_superseded_status=True,
         ) == ([], [])
 
 
@@ -1074,9 +1075,8 @@ def test_active_adr_immutable_check_blocks_body_change_against_active_status():
 
 
 def test_active_adr_immutable_check_message_parses_and_names_the_remedy():
-    """The remedy names ``--supersedes`` — the typed supersession edge — not
-    ``--related``, the see-also edge this task's supersedes-writer replaces
-    for exactly this case (an ADR naming its own successor)."""
+    """The remedy is the supersede verb with the refused adr as the predecessor,
+    not the raw ``--supersedes`` edge flag."""
     g = _guards()
     msg = g.check_frozen_body(
         kind="adr", name="foo", prior_status="active",
@@ -1086,8 +1086,7 @@ def test_active_adr_immutable_check_message_parses_and_names_the_remedy():
     assert "\n" not in msg
     assert "supersede" in msg.lower()
     assert "do not edit" in msg.lower()
-    assert "--status superseded" in msg
-    assert "--supersedes adr/" in msg
+    assert "lore record supersede adr/foo --by adr/<successor>" in msg
 
 
 @pytest.mark.parametrize("kind,status", [("decision", "active"), ("task", "done")])
@@ -1208,7 +1207,7 @@ def test_active_adr_immutable_message_names_amend_beside_supersession():
         prior_body="old body", new_body="new body",
     )
     assert "lore record amend 'adr/foo'" in msg
-    assert "--supersedes adr/" in msg
+    assert "lore record supersede adr/foo --by adr/<successor>" in msg
     assert msg.startswith("graph-guard [frozen-body]: ")
     assert "\n" not in msg
 
@@ -1366,3 +1365,86 @@ def test_frozen_body_describes_the_first_differing_line_on_commonmark_boundaries
     )
     assert msg is not None
     assert expected in msg
+
+
+# ---------------------------------------------------------------------------
+# superseded-status: `superseded` is reachable only through `lore record supersede`
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "status_set,prior_status,resulting_status,refused",
+    [
+        ("superseded", None, None, True),
+        ("superseded", "open", "superseded", True),
+        ("superseded", "superseded", "superseded", True),
+        ("dropped", "open", "dropped", False),
+        (None, "superseded", "superseded", False),
+        (None, "open", "superseded", True),
+        (None, None, "superseded", False),
+        (None, None, None, False),
+    ],
+)
+def test_refuses_superseded_write_follows_the_transition_rule(
+    status_set, prior_status, resulting_status, refused
+):
+    g = _guards()
+    assert g.refuses_superseded_write(
+        status_set, prior_status, resulting_status
+    ) is refused
+
+
+def _superseded_write(g, tmp_path, *, kind="task", name="x", status_set,
+                      prior_status, resulting, **extra):
+    return g.evaluate_graph_guards(
+        kind=kind, name=name, sidecar={"kind": kind, "status": resulting},
+        body="", vault_root=str(tmp_path), status_set=status_set,
+        prior_status=prior_status, **extra,
+    )
+
+
+@pytest.mark.parametrize("kind,name", [("task", "alpha"), ("adr", "beta-2")])
+def test_dispatcher_refuses_a_superseded_write_with_the_runnable_verb(tmp_path, kind, name):
+    g = _guards()
+    errors, _ = _superseded_write(
+        g, tmp_path, kind=kind, name=name, status_set="superseded",
+        prior_status="open", resulting="superseded",
+    )
+    [msg] = [e for e in errors if "[superseded-status]" in e]
+    assert f"lore record supersede {kind}/{name} --by <successor-id>" in msg
+    assert "successor" in msg and "supersedes" in msg
+    assert f"lore record update {kind}/{name} --status <prior status>" in msg
+    assert "--unset-supersedes" in msg
+
+
+def test_dispatcher_refuses_a_task_moving_into_superseded_from_open(tmp_path):
+    g = _guards()
+    errors, _ = _superseded_write(
+        g, tmp_path, status_set=None, prior_status="open", resulting="superseded",
+    )
+    assert any("[superseded-status]" in e for e in errors)
+
+
+@pytest.mark.parametrize("prior_status", ["superseded", None])
+def test_dispatcher_lets_an_already_superseded_record_keep_its_status(tmp_path, prior_status):
+    """``superseded`` -> the update/amend shape; ``None`` -> the conflict-settle
+    shape, which judges a merged record with no prior status to read."""
+    g = _guards()
+    errors, _ = _superseded_write(
+        g, tmp_path, status_set=None, prior_status=prior_status, resulting="superseded",
+    )
+    assert not any("[superseded-status]" in e for e in errors)
+
+
+def test_dispatcher_seam_lets_the_verb_flip_into_superseded(tmp_path):
+    g = _guards()
+    refused, _ = _superseded_write(
+        g, tmp_path, status_set="superseded", prior_status="open", resulting="superseded",
+    )
+    allowed, _ = _superseded_write(
+        g, tmp_path, status_set="superseded", prior_status="open", resulting="superseded",
+        allow_superseded_status=True,
+    )
+    assert any("[superseded-status]" in e for e in refused)
+    assert not any("[superseded-status]" in e for e in allowed)
+

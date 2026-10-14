@@ -106,7 +106,12 @@ ledger and the driver checkpoint stay writable. The refusal is
 exact amend command for that record. An `adr` or `spec` also cannot leave a frozen
 status for `draft` (`graph-guard [frozen-status]`); a `task` can be reopened with a
 status-only update. A material change to an `adr` is a supersession with a new adr;
-for any other kind a change of scope is a supersession too. To correct the body in
+for any other kind a change of scope is a supersession too. Record a supersession
+with `lore record supersede <predecessor-id> --by <successor-id>`: it writes the
+`supersedes` edge on the successor and flips the predecessor to `superseded` in one
+step, and it is the only way to reach `superseded` — `lore record create` and
+`lore record update` refuse `--status superseded` (`graph-guard [superseded-status]`).
+To correct the body in
 place (a typo, a wrong link), pipe the corrected body to amend (read its revision
 first). An agent always passes `--initiated-by agent`:
 

@@ -641,7 +641,7 @@ def test_update_no_scope_change_stays_in_place_no_moved_line(tmp_path):
     kind, name = rid.split("/", 1)
 
     r = _run_cfg(
-        ["record", "update", rid, "--status", "superseded"],
+        ["record", "update", rid, "--status", "dropped"],
         vault=vault_a,
         state=state,
         config_home=config_home,
@@ -651,7 +651,7 @@ def test_update_no_scope_change_stays_in_place_no_moved_line(tmp_path):
 
     assert (vault_a / kind / f"{name}.md").exists()
     assert not (vault_b / kind / f"{name}.md").exists()
-    assert _find_sidecar(vault_a, rid)["status"] == "superseded"
+    assert _find_sidecar(vault_a, rid)["status"] == "dropped"
     assert "moved:" not in r.stdout
     assert "moved:" not in r.stderr
 
@@ -1927,7 +1927,10 @@ def test_terminal_children_satisfy_completion_guard(tmp_path):
     parent = _mk_task(vault, state, "parent")
     _mk_task(vault, state, "kid-done", extra=["--parent", "parent", "--status", "done"])
     _mk_task(vault, state, "kid-dropped", extra=["--parent", "parent", "--status", "dropped"])
-    _mk_task(vault, state, "kid-sup", extra=["--parent", "parent", "--status", "superseded"])
+    kid_sup = _mk_task(vault, state, "kid-sup", extra=["--parent", "parent"])
+    heir = _mk_task(vault, state, "kid-sup-heir")
+    assert _run(["record", "supersede", kid_sup, "--by", heir],
+                vault=vault, state_dir=state).returncode == 0
     u = _run(["record", "update", parent, "--status", "done"], vault=vault, state_dir=state)
     assert u.returncode == 0, u.stderr
     assert _find_sidecar(vault, parent)["status"] == "done"
@@ -2218,7 +2221,7 @@ def test_update_refuses_conflicting_shared_flags_on_aliased_path(tmp_path):
     assert _index_shared(state, vault_b, kind, name) == [1]
 
     r = _run_cfg(
-        ["record", "update", rid, "--status", "superseded"],
+        ["record", "update", rid, "--status", "dropped"],
         vault=vault_a,
         state=state,
         config_home=config_home,
@@ -2247,7 +2250,7 @@ def test_update_allows_aliased_path_when_shared_flags_agree(tmp_path):
     kind, name = rid.split("/", 1)
 
     r = _run_cfg(
-        ["record", "update", rid, "--status", "superseded"],
+        ["record", "update", rid, "--status", "dropped"],
         vault=vault_a,
         state=state,
         config_home=config_home,
@@ -2255,7 +2258,7 @@ def test_update_allows_aliased_path_when_shared_flags_agree(tmp_path):
     )
 
     assert r.returncode == 0, r.stderr
-    assert _find_sidecar(vault_b, rid)["status"] == "superseded"
+    assert _find_sidecar(vault_b, rid)["status"] == "dropped"
     assert _index_shared(state, vault_b, kind, name) == [1]
 
 
@@ -2272,6 +2275,14 @@ def _create_adr(vault: Path, state: Path, *, title: str, status: str, body: str)
     )
     assert r.returncode == 0, r.stderr
     return r.stdout.strip()
+
+
+def _supersede_adr(vault: Path, state: Path, rid: str, *, heir_title: str) -> str:
+    """Supersede *rid* through the verb by a fresh active adr; return the heir's id."""
+    heir = _create_adr(vault, state, title=heir_title, status="active", body="# Heir\n")
+    r = _run(["record", "supersede", rid, "--by", heir], vault=vault, state_dir=state)
+    assert r.returncode == 0, r.stderr
+    return heir
 
 
 def test_update_body_change_against_active_adr_rejected_body_unchanged_on_disk(tmp_path):
@@ -2333,13 +2344,26 @@ def test_update_related_only_against_active_adr_succeeds(tmp_path):
     assert _find_body(vault, rid) == body
 
 
-def test_update_status_superseded_flip_against_active_adr_succeeds(tmp_path):
+def test_supersede_flip_against_active_adr_succeeds(tmp_path):
     vault, state = _make_vault(tmp_path)
     body = "# Decision\n\nOriginal text.\n"
     rid = _create_adr(vault, state, title="Original Decision Three", status="active", body=body)
 
+    _supersede_adr(vault, state, rid, heir_title="Heir Decision Three")
+
+    assert _find_body(vault, rid) == body
+    assert _find_sidecar(vault, rid)["status"] == "superseded"
+
+
+def test_related_backedge_on_a_superseded_adr_succeeds(tmp_path):
+    vault, state = _make_vault(tmp_path)
+    body = "# Decision\n\nOriginal text.\n"
+    rid = _create_adr(vault, state, title="Original Decision Four", status="active", body=body)
+    successor = _supersede_adr(vault, state, rid, heir_title="Successor Decision Four")
+    successor_name = successor.split("/", 1)[1]
+
     r = _run(
-        ["record", "update", rid, "--status", "superseded"],
+        ["record", "update", rid, "--related", f"adr={successor_name}"],
         vault=vault, state_dir=state,
     )
     assert r.returncode == 0, r.stderr
@@ -2347,24 +2371,7 @@ def test_update_status_superseded_flip_against_active_adr_succeeds(tmp_path):
     assert _find_sidecar(vault, rid)["status"] == "superseded"
 
 
-def test_update_status_superseded_with_backedge_same_call_succeeds(tmp_path):
-    vault, state = _make_vault(tmp_path)
-    body = "# Decision\n\nOriginal text.\n"
-    rid = _create_adr(vault, state, title="Original Decision Four", status="active", body=body)
-    successor = _create_adr(vault, state, title="Successor Decision Four", status="draft",
-                             body="# Successor\n")
-    successor_name = successor.split("/", 1)[1]
-
-    r = _run(
-        ["record", "update", rid, "--status", "superseded",
-         "--related", f"adr={successor_name}"],
-        vault=vault, state_dir=state,
-    )
-    assert r.returncode == 0, r.stderr
-    assert _find_body(vault, rid) == body
-
-
-def test_update_status_superseded_with_dangling_backedge_still_succeeds_body_unchanged(tmp_path):
+def test_dangling_backedge_on_a_superseded_adr_still_succeeds_body_unchanged(tmp_path):
     """The exception is keyed on the body being unchanged, never on the edge
     resolving — a dangling ``--related adr=`` target is a valid write on its
     own (design edges are not existence-checked) and must not block the flip.
@@ -2372,14 +2379,15 @@ def test_update_status_superseded_with_dangling_backedge_still_succeeds_body_unc
     vault, state = _make_vault(tmp_path)
     body = "# Decision\n\nOriginal text.\n"
     rid = _create_adr(vault, state, title="Original Decision Five", status="active", body=body)
+    _supersede_adr(vault, state, rid, heir_title="Successor Decision Five")
 
     r = _run(
-        ["record", "update", rid, "--status", "superseded",
-         "--related", "adr=does-not-exist"],
+        ["record", "update", rid, "--related", "adr=does-not-exist"],
         vault=vault, state_dir=state,
     )
     assert r.returncode == 0, r.stderr
     assert _find_body(vault, rid) == body
+    assert _find_sidecar(vault, rid)["status"] == "superseded"
 
 
 def test_update_body_change_with_wellformed_backedge_against_active_adr_still_rejected(tmp_path):
@@ -2422,9 +2430,7 @@ def test_update_body_change_against_active_decision_is_refused_and_body_unchange
 
 
 def test_update_guard_message_parses_and_names_the_remedy(tmp_path):
-    """The remedy names ``--supersedes`` — the typed supersession edge — not
-    ``--related``, the see-also edge this task's supersedes-writer replaces
-    for exactly this case (an ADR naming its own successor)."""
+    """The remedy is the supersede verb with the refused adr as the predecessor."""
     vault, state = _make_vault(tmp_path)
     body = "# Decision\n\nOriginal text.\n"
     rid = _create_adr(vault, state, title="Original Decision Seven", status="active", body=body)
@@ -2438,8 +2444,8 @@ def test_update_guard_message_parses_and_names_the_remedy(tmp_path):
     assert line.startswith("graph-guard [frozen-body]: ")
     assert "supersede" in line.lower()
     assert "do not edit" in line.lower()
-    assert "--status superseded" in line
-    assert "--supersedes adr/" in line
+    assert f"lore record supersede {rid} --by" in line
+    assert "adr/<successor>" in line
 
 
 def test_update_move_path_rejects_body_changing_write_against_active_adr(tmp_path):
@@ -2561,11 +2567,8 @@ def test_update_body_change_against_superseded_adr_rejected(tmp_path):
     body = "# Decision\n\nOriginal text.\n"
     rid = _create_adr(vault, state, title="Superseded Target", status="active", body=body)
 
-    flip = _run(
-        ["record", "update", rid, "--status", "superseded"],
-        vault=vault, state_dir=state,
-    )
-    assert flip.returncode == 0, flip.stderr
+    _supersede_adr(vault, state, rid, heir_title="Superseded Target Heir")
+    assert _find_sidecar(vault, rid)["status"] == "superseded"
 
     edit = _run(
         ["record", "update", rid],
@@ -2607,11 +2610,8 @@ def test_update_status_draft_flip_against_superseded_adr_rejected(tmp_path):
     body = "# Decision\n\nOriginal text.\n"
     rid = _create_adr(vault, state, title="Chained Launder Target", status="active", body=body)
 
-    flip = _run(
-        ["record", "update", rid, "--status", "superseded"],
-        vault=vault, state_dir=state,
-    )
-    assert flip.returncode == 0, flip.stderr
+    _supersede_adr(vault, state, rid, heir_title="Chained Launder Heir")
+    assert _find_sidecar(vault, rid)["status"] == "superseded"
 
     launder = _run(
         ["record", "update", rid, "--status", "draft"],
@@ -2622,20 +2622,18 @@ def test_update_status_draft_flip_against_superseded_adr_rejected(tmp_path):
     assert _find_sidecar(vault, rid)["status"] == "superseded"
 
 
-def test_update_supersession_flip_with_backedge_still_permitted_after_freeze(tmp_path):
-    """The required supersession flow — predecessor flipped to ``superseded``
-    with a back-edge naming its successor, body untouched — must stay open.
+def test_supersession_with_backedge_still_permitted_after_freeze(tmp_path):
+    """The required supersession flow — predecessor superseded by the verb, then
+    a back-edge naming its successor, body untouched — must stay open.
     """
     vault, state = _make_vault(tmp_path)
     body = "# Decision\n\nOriginal text.\n"
     rid = _create_adr(vault, state, title="Freeze Regression Guard", status="active", body=body)
-    successor = _create_adr(vault, state, title="Freeze Regression Successor",
-                            status="draft", body="# Successor\n")
+    successor = _supersede_adr(vault, state, rid, heir_title="Freeze Regression Successor")
     successor_name = successor.split("/", 1)[1]
 
     r = _run(
-        ["record", "update", rid, "--status", "superseded",
-         "--related", f"adr={successor_name}"],
+        ["record", "update", rid, "--related", f"adr={successor_name}"],
         vault=vault, state_dir=state,
     )
     assert r.returncode == 0, r.stderr
@@ -2869,3 +2867,148 @@ def test_update_cannot_set_change_history_through_a_map_flag(tmp_path, flag):
     assert r.returncode != 0
     assert "change-history" in r.stderr and "lore record amend" in r.stderr
     assert (vault / "spec" / f"{record_id.split('/')[1]}.json").read_bytes() == before
+
+
+# ---------------------------------------------------------------------------
+# `superseded` is reachable only through `lore record supersede`
+# ---------------------------------------------------------------------------
+
+
+def _mk_record(vault, state, kind, status, title, body="# T\n\nbody\n"):
+    r = _run(
+        ["record", "create", "--kind", kind, "--title", title, "--keyword", "k",
+         "--status", status],
+        vault=vault, state_dir=state, stdin_text=body,
+    )
+    assert r.returncode == 0, r.stderr
+    return r.stdout.strip().splitlines()[-1]
+
+
+def _vault_snapshot(vault: Path) -> dict[str, bytes]:
+    return {
+        str(p.relative_to(vault)): p.read_bytes()
+        for p in sorted(vault.rglob("*"))
+        if p.is_file() and p.suffix in (".md", ".json")
+    }
+
+
+REFUSED_SUPERSEDED = [
+    ("task", "open"),
+    ("adr", "active"),
+    ("spec", "ready"),
+    ("decision", "active"),
+]
+
+
+@pytest.mark.parametrize("kind,status", REFUSED_SUPERSEDED)
+def test_update_status_superseded_is_refused_naming_the_verb(tmp_path, kind, status):
+    vault, state = _make_vault(tmp_path)
+    rid = _mk_record(vault, state, kind, status, "Subject")
+    before = _vault_snapshot(vault)
+
+    r = _run(["record", "update", rid, "--status", "superseded"],
+             vault=vault, state_dir=state, stdin_text="")
+
+    assert r.returncode != 0
+    assert "graph-guard [superseded-status]" in r.stderr
+    assert f"lore record supersede {rid} --by <successor-id>" in r.stderr
+    assert _vault_snapshot(vault) == before
+
+
+@pytest.mark.parametrize("kind,status", REFUSED_SUPERSEDED)
+def test_update_status_dropped_still_lands_on_the_same_records(tmp_path, kind, status):
+    vault, state = _make_vault(tmp_path)
+    rid = _mk_record(vault, state, kind, status, "Subject")
+
+    r = _run(["record", "update", rid, "--status", "dropped"],
+             vault=vault, state_dir=state, stdin_text="")
+
+    assert r.returncode == 0, r.stderr
+    assert _find_sidecar(vault, rid)["status"] == "dropped"
+
+
+def _supersede_pair(vault, state):
+    old = _mk_record(vault, state, "adr", "active", "Old")
+    new = _mk_record(vault, state, "adr", "active", "New")
+    r = _run(["record", "supersede", old, "--by", new], vault=vault, state_dir=state)
+    assert r.returncode == 0, r.stderr
+    return old, new
+
+
+def test_metadata_update_on_an_already_superseded_record_lands(tmp_path):
+    vault, state = _make_vault(tmp_path)
+    old, _ = _supersede_pair(vault, state)
+
+    r = _run(["record", "update", old, "--label", "x/y=z"],
+             vault=vault, state_dir=state, stdin_text="")
+
+    assert r.returncode == 0, r.stderr
+    sidecar = _find_sidecar(vault, old)
+    assert sidecar["status"] == "superseded"
+    assert sidecar["labels"] == {"x/y": "z"}
+
+
+def test_amend_on_an_already_superseded_record_lands(tmp_path):
+    vault, state = _make_vault(tmp_path)
+    old, _ = _supersede_pair(vault, state)
+    rev = json.loads(_run(["record", "show", old, "--json"],
+                          vault=vault, state_dir=state).stdout)["revision"]
+
+    r = _run(["record", "amend", old, "--reason", "fix", "--initiated-by", "agent",
+              "--base", rev], vault=vault, state_dir=state,
+             stdin_text="# T\n\namended body\n")
+
+    assert r.returncode == 0, r.stderr
+    assert _find_sidecar(vault, old)["status"] == "superseded"
+    assert "amended body" in _find_body(vault, old)
+
+
+def test_rename_of_a_superseded_referrer_still_lands(tmp_path):
+    vault, state = _make_vault(tmp_path)
+    target = _mk_record(vault, state, "adr", "draft", "Target", body="# Target\n")
+    referrer = _mk_record(vault, state, "adr", "active", "Referrer",
+                          body="# R\n\nsee [[adr/target]]\n")
+    heir = _mk_record(vault, state, "adr", "active", "Heir")
+    assert _run(["record", "supersede", referrer, "--by", heir],
+                vault=vault, state_dir=state).returncode == 0
+
+    r = _run(["record", "rename", target, "--title", "Renamed Target"],
+             vault=vault, state_dir=state)
+
+    assert r.returncode == 0, r.stderr
+    assert _find_sidecar(vault, referrer)["status"] == "superseded"
+    assert "adr/renamed-target" in _find_body(vault, referrer)
+
+
+@pytest.mark.parametrize(
+    "kind,status,pred_title",
+    [("adr", "active", "Frozen adr"), ("spec", "ready", "Frozen spec"),
+     ("decision", "active", "Frozen decision"), ("task", "done", "Frozen task")],
+)
+def test_frozen_body_refusal_names_the_verb_for_this_record(
+    tmp_path, kind, status, pred_title
+):
+    vault, state = _make_vault(tmp_path)
+    rid = _mk_record(vault, state, kind, status, pred_title)
+
+    r = _run(["record", "update", rid], vault=vault, state_dir=state,
+             stdin_text="# T\n\nedited\n")
+
+    assert r.returncode != 0
+    assert "[frozen-body]" in r.stderr
+    assert f"lore record supersede {rid} --by" in r.stderr
+
+
+@pytest.mark.parametrize(
+    "kind,status", [("adr", "active"), ("spec", "ready")]
+)
+def test_frozen_status_refusal_names_the_verb_for_this_record(tmp_path, kind, status):
+    vault, state = _make_vault(tmp_path)
+    rid = _mk_record(vault, state, kind, status, "Frozen thing")
+
+    r = _run(["record", "update", rid, "--status", "draft"],
+             vault=vault, state_dir=state, stdin_text="")
+
+    assert r.returncode != 0
+    assert "[frozen-status]" in r.stderr
+    assert f"lore record supersede {rid} --by" in r.stderr

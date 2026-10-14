@@ -31,7 +31,15 @@ for a graph load. It judges the record's PRIOR status against the per-kind table
 and compares authored content — the body minus a spec's ``## Slices`` and a
 task's ``## Driver run`` — so only those sections pass a plain update. Refusals
 are ``[frozen-body]`` and ``[frozen-status]`` and name ``lore record amend``,
-the one write that may change a frozen body.
+the one write that may change a frozen body, and ``lore record supersede`` for a
+change of scope.
+
+The supersession door: ``superseded`` is reached only through ``lore record
+supersede``. :func:`check_superseded_status` runs from :func:`evaluate_graph_guards`
+and refuses (``[superseded-status]``) a write the predicate
+:func:`refuses_superseded_write` flags — one that sets ``superseded``, or leaves a
+record ``superseded`` that was not. The verb passes ``allow_superseded_status=True``
+from Python; no flag, environment variable or config key reaches that parameter.
 
 Guard-message shape: every line — blocking error, non-blocking warning, ritual
 reminder — is formatted through :func:`graph.format_guard_message` so agents
@@ -582,10 +590,25 @@ FROZEN_STATUSES: dict[str, frozenset[str]] = {
 #: reopened; a decision has no ``draft`` to return to.
 _NO_RETURN_TO_DRAFT: frozenset[str] = frozenset({"adr", "spec"})
 
-_SUPERSESSION_RECIPE = (
-    "For a material change, supersede it: flip --status superseded with "
-    "--supersedes adr/<successor> naming the record that replaces it."
-)
+
+def _supersede_command(kind: str, name: str, successor: str = "<successor-id>") -> str:
+    """The runnable ``lore record supersede`` template with *kind*/*name* as the predecessor.
+
+    A record id whose characters a shell would reinterpret is printed in its
+    neutralized quoted form instead, which the reader must quote by hand.
+    """
+    record_id = f"{kind}/{name}"
+    shown = record_id if _SHELL_SAFE_ID_RE.fullmatch(record_id) else graph_mod.format_node(record_id)
+    return f"lore record supersede {shown} --by {successor}"
+
+
+def _supersession_recipe(kind: str, name: str) -> str:
+    successor = "adr/<successor>" if kind == "adr" else "<successor-id>"
+    return (
+        f"For a material change, supersede it: write the successor, then run "
+        f"`{_supersede_command(kind, name, successor)}`."
+    )
+
 
 _DIFF_LINE_LIMIT = 80
 
@@ -653,10 +676,10 @@ def check_frozen_status(
         return None
     node = graph_mod.format_node(f"{kind}/{name}")
     tail = (
-        "Write a new adr and supersede this one instead."
+        "Write a new adr and supersede this one instead: "
         if kind == "adr"
-        else "A change of scope is a supersession."
-    )
+        else "A change of scope is a supersession: "
+    ) + f"`{_supersede_command(kind, name)}`."
     return graph_mod.format_guard_message(
         "frozen-status",
         f"{node} is {prior_status} — a {kind} cannot return to draft. Its body "
@@ -726,9 +749,11 @@ def check_frozen_body(
         else "No section passes a plain update."
     )
     if kind == "adr":
-        scope_clause = _SUPERSESSION_RECIPE
+        scope_clause = _supersession_recipe(kind, name)
     else:
-        scope_clause = "A change of scope is a supersession."
+        scope_clause = (
+            f"A change of scope is a supersession: `{_supersede_command(kind, name)}`."
+        )
     shell_safe = _SHELL_SAFE_ID_RE.fullmatch(f"{kind}/{name}") is not None
     if shell_safe:
         amend_clause = (
@@ -783,6 +808,62 @@ def check_frozen_record(
         prior_body=prior_body,
         new_body=new_body,
         allowed_body=allowed_body,
+    )
+
+
+def refuses_superseded_write(
+    status_set: str | None,
+    prior_status: str | None,
+    resulting_status: str | None = None,
+) -> bool:
+    """Whether a create/update write into ``superseded`` must be refused.
+
+    ``superseded`` is reached only through ``lore record supersede``, which
+    records the successor's edge alongside the flip. A write is refused when it
+    asks for the status (*status_set* is ``superseded``) — which is also how a
+    create is judged, it having no prior — or when the record is known to have
+    been something else and would end up ``superseded`` (*resulting_status*
+    against a *prior_status* that is neither ``superseded`` nor unknown).
+
+    A record that is already ``superseded`` and receives an unrelated write (a
+    label, an amend) is not asking for the status, and a caller with no prior
+    status to read — a conflict-settle judging a merged record — cannot say the
+    record moved at all; both are left alone, which is why the resulting status
+    alone is never the test.
+
+    Pure: the guard in :func:`evaluate_graph_guards` and any caller that must
+    predict the guard's verdict from a parsed command line both call this.
+    """
+    if status_set == "superseded":
+        return True
+    return (
+        resulting_status == "superseded"
+        and prior_status is not None
+        and prior_status != "superseded"
+    )
+
+
+def check_superseded_status(
+    *,
+    kind: str,
+    name: str,
+    prior_status: str | None,
+    status_set: str | None,
+    resulting_status: str | None,
+) -> str | None:
+    """Refuse a create/update write into ``superseded`` and print the verb to use."""
+    if not refuses_superseded_write(status_set, prior_status, resulting_status):
+        return None
+    node = graph_mod.format_node(f"{kind}/{name}")
+    return graph_mod.format_guard_message(
+        "superseded-status",
+        f"{node} cannot be set to superseded by create or update — a supersession "
+        f"is recorded in one step with `{_supersede_command(kind, name)}`, which "
+        "writes the supersedes edge on the successor (the edge lands on the "
+        "successor, not on this record) and flips this record's status together. "
+        f"To undo a supersession made by mistake: `lore record update {kind}/{name} "
+        "--status <prior status>`, then `lore record update <successor-id> "
+        f"--unset-supersedes {kind}/{name}`.",
     )
 
 
@@ -1091,6 +1172,7 @@ def evaluate_graph_guards(
     prior_body: str | None = None,
     prior_status: str | None = None,
     allowed_body: str | None = None,
+    allow_superseded_status: bool = False,
 ) -> tuple[list[str], list[str]]:
     """Route a create/update/delete to the graph guards for its *kind*.
 
@@ -1117,11 +1199,26 @@ def evaluate_graph_guards(
     *allowed_body* is the one body a frozen record may change to (the amend
     verb's own resolved new body); it is forwarded to that check and to nothing
     else, so every other guard runs unchanged.
+
+    *allow_superseded_status* lifts the ``superseded-status`` refusal
+    (:func:`check_superseded_status`) and nothing else. Only the supersede verb
+    passes it, from Python; no command-line flag, environment variable or
+    config key reaches it, so create and update can never set ``superseded``.
     """
     supersedes_errors = evaluate_supersedes_guard(
         kind=kind, name=name, sidecar=sidecar, vault_root=vault_root
     )
     if not deleting:
+        if not allow_superseded_status:
+            superseded_msg = check_superseded_status(
+                kind=kind,
+                name=name,
+                prior_status=prior_status,
+                status_set=status_set,
+                resulting_status=sidecar.get("status"),
+            )
+            if superseded_msg:
+                return supersedes_errors + [superseded_msg], []
         frozen_msg = check_frozen_record(
             kind=kind,
             name=name,
