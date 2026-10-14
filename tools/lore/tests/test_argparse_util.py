@@ -27,6 +27,7 @@ def test_leaf_parsers_covers_real_cli_leaves():
         "record criteria",
         "record rename",
         "record show",
+        "record supersede",
         "record update",
         "session candidate",
         "session referenced",
