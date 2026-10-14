@@ -6,7 +6,6 @@ disk; the model-validation cases run ``validate`` on a sidecar carrying the fiel
 
 from __future__ import annotations
 
-import json
 
 import pytest
 from conftest import make_vault as _make_vault, run_cli as _run
