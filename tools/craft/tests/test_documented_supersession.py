@@ -293,7 +293,9 @@ def vault(tmp_path):
 
 
 def test_distill_adr_route_retires_decision_then_adr_and_a_rerun_is_a_noop(vault):
-    """distill steps 1, 3, 4: ADR created `active`; the verb retires an absorbed decision and the old ADR; re-running changes nothing."""
+    """distill steps 1, 3, 4: ADR created `active`; the verb retires an absorbed decision and the old
+    ADR; re-running changes nothing.
+    """
     decision = vault.create("decision", "active", "Absorbed decision")
     old = vault.create("adr", "active", "Old ADR")
     new = vault.create("adr", "active", "New ADR")
@@ -322,7 +324,9 @@ def test_distill_raw_status_flip_of_the_old_adr_is_refused(vault):
 
 
 def test_gauntlet_route_refuses_a_draft_successor_then_lands_after_the_ready_flip_and_clears_the_label(vault):
-    """gauntlet ready step: label on the draft successor; the verb waits for `--status ready`, then `--unset-label craft/supersedes`."""
+    """gauntlet ready step: label on the draft successor; the verb waits for `--status ready`, then
+    `--unset-label craft/supersedes`.
+    """
     old = vault.create("spec", "ready", "Old spec")
     new = vault.create("spec", "draft", "New spec", "--label", f"craft/supersedes={old}")
 
@@ -341,7 +345,9 @@ def test_gauntlet_route_refuses_a_draft_successor_then_lands_after_the_ready_fli
 
 
 def test_gauntlet_torn_route_is_listed_by_the_stranded_query_until_the_verb_and_unset_complete(vault):
-    """gauntlet ready step, interrupted after the flip: the documented query lists the spec; finishing the route empties it."""
+    """gauntlet ready step, interrupted after the flip: the documented query lists the spec; finishing
+    the route empties it.
+    """
     old = vault.create("spec", "ready", "Old spec")
     new = vault.create("spec", "draft", "New spec", "--label", f"craft/supersedes={old}")
     other = vault.create("spec", "ready", "Unlabelled spec")
@@ -359,7 +365,9 @@ def test_gauntlet_torn_route_is_listed_by_the_stranded_query_until_the_verb_and_
 
 @pytest.mark.parametrize("closing_kind", ["spec", "task"])
 def test_routed_task_close_supersedes_the_source_by_the_verb_then_clears_the_route_label(vault, closing_kind):
-    """brainstorm (successor spec) and plan (successor parent task) routed-task close: the verb, then a separate `--unset-label route`."""
+    """brainstorm (successor spec) and plan (successor parent task) routed-task close: the verb, then a
+    separate `--unset-label route`.
+    """
     source = vault.create("task", "open", "Routed source", "--label", "route=brainstorm")
     successor = vault.create(closing_kind, "draft" if closing_kind == "spec" else "in-progress", "Successor")
 
@@ -374,7 +382,9 @@ def test_routed_task_close_supersedes_the_source_by_the_verb_then_clears_the_rou
 
 
 def test_execute_split_gives_every_child_the_supersedes_edge_to_the_original(vault):
-    """execute 'Splitting and appending tasks': the verb once per new child; the original is `superseded` and both children carry the edge."""
+    """execute 'Splitting and appending tasks': the verb once per new child; the original is
+    `superseded` and both children carry the edge.
+    """
     original = vault.create("task", "ready", "Too large")
     kids = [vault.create("task", "open", f"Part {n}") for n in (1, 2)]
 
@@ -387,7 +397,9 @@ def test_execute_split_gives_every_child_the_supersedes_edge_to_the_original(vau
 
 
 def test_execute_drop_lands_dropped_with_its_note_from_in_progress(vault):
-    """execute INVALIDATED 'Drop the task': no successor, so `--status dropped --diff` carries the note in the one write."""
+    """execute INVALIDATED 'Drop the task': no successor, so `--status dropped --diff` carries the note
+    in the one write.
+    """
     rid = vault.create("task", "in-progress", "Invalidated child")
     note = BODY + "\nDropped: the premise was invalidated.\n"
     diff = "".join(difflib.unified_diff(BODY.splitlines(True), note.splitlines(True), "a", "b"))
