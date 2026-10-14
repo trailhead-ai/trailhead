@@ -604,9 +604,13 @@ def _format_history(record_id: str, history: list) -> list[str]:
         criteria = entry.get("criteria")
         removed = criteria.get("removed") if isinstance(criteria, dict) else None
         if isinstance(removed, list) and removed:
-            lines.append(
-                "removed criteria: " + ", ".join(_neutral(_printable(str(i))) for i in removed)
+            from ..record.criteria import _canonical
+
+            shown = (
+                i if isinstance(i, str) and _canonical(i) else "<non-canonical id>"
+                for i in removed
             )
+            lines.append("removed criteria: " + ", ".join(shown))
         lines.append("diff:")
         diff = _printable(str(entry.get("diff", "")), keep="\n\t")
         lines.extend(_neutral(diff).rstrip("\n").split("\n"))
