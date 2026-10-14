@@ -1396,10 +1396,9 @@ def test_refuses_superseded_write_follows_the_transition_rule(
 
 def _superseded_write(g, tmp_path, *, kind="task", name="x", status_set,
                       prior_status, resulting, **extra):
-    return g.evaluate_graph_guards(
-        kind=kind, name=name, sidecar={"kind": kind, "status": resulting},
-        body="", vault_root=str(tmp_path), status_set=status_set,
-        prior_status=prior_status, **extra,
+    return _dispatch(
+        g, tmp_path, kind=kind, name=name, sidecar={"status": resulting},
+        status_set=status_set, prior_status=prior_status, **extra,
     )
 
 

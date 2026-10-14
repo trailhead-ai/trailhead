@@ -602,14 +602,6 @@ def _supersede_command(kind: str, name: str, successor: str = "<successor-id>") 
     return f"lore record supersede {shown} --by {successor}"
 
 
-def _supersession_recipe(kind: str, name: str) -> str:
-    successor = "adr/<successor>" if kind == "adr" else "<successor-id>"
-    return (
-        f"For a material change, supersede it: write the successor, then run "
-        f"`{_supersede_command(kind, name, successor)}`."
-    )
-
-
 _DIFF_LINE_LIMIT = 80
 
 
@@ -749,7 +741,10 @@ def check_frozen_body(
         else "No section passes a plain update."
     )
     if kind == "adr":
-        scope_clause = _supersession_recipe(kind, name)
+        scope_clause = (
+            "For a material change, supersede it: write the successor, then run "
+            f"`{_supersede_command(kind, name, 'adr/<successor>')}`."
+        )
     else:
         scope_clause = (
             f"A change of scope is a supersession: `{_supersede_command(kind, name)}`."
