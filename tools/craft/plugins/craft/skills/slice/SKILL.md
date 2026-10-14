@@ -222,31 +222,51 @@ consistently defeats append-only undetected — cryptographic provenance would c
 of scope for a markdown section in a git-backed vault. Neither limit is a defect to fix here; both
 are named so a future reader does not mistake either gate for more than it certifies.
 
-Only now — with the ledger reconciled and certified — is the candidate set derived. Pipe the
-freshly-read spec body through the candidate-set gate:
+Only now — with the ledger reconciled and certified — is the candidate set derived. First read the
+spec's declared and removed criteria into a temp file, fail-closed:
 
 ```sh
-lore record show spec/<spec-name> | ${CLAUDE_PLUGIN_ROOT}/scripts/candidate_set.py
+STATE=$(mktemp)
+lore record criteria spec/<spec-name> > "$STATE"
+```
+
+Never a predictable path. A non-zero exit refuses this pass, as a failed reconcile search does. When
+the failure is lore not recognising the `criteria` subcommand, the installed lore predates it: the
+remedy is to update lore (`trailhead update`) and re-run. Then pipe the freshly-read spec body
+through the candidate-set gate with that state:
+
+```sh
+lore record show spec/<spec-name> | ${CLAUDE_PLUGIN_ROOT}/scripts/candidate_set.py --criteria-state <path-to-temp-criteria-state.json>
 ```
 
 Its `candidates:` token, on exit 0, is the candidate set; its `complete-eligible:` token feeds step
 6's termination guard below. Print the basis this pass derived the candidate set from, before
 continuing — `termination basis: gate-certified` on this exit-0 path — so an operator reading the
 pass's output always knows which guarantee produced the answer. Surface the gate's `partial:` token
-as part of that same printed basis, whether it lists identifiers or reads `none` — without it, a
-criterion this ledger already covers in part and one no slice has ever touched read identically on
-`candidates:`, and step 7's selection can't tell them apart.
+and its `void:` token as part of that same printed basis, whether each lists identifiers or reads
+`none` — without `partial:`, a criterion this ledger already covers in part and one no slice has
+ever touched read identically on `candidates:`, and step 7's selection can't tell them apart;
+`void:` names the ledger coverage of a criterion since removed by amend, which no longer counts
+toward anything.
 
 A non-zero exit refuses this pass, in the same shape steps 3, 5, and 9 already use for their own
 refusals: name the remedy the gate's own `reason-code:` stderr token identifies, scoped to what the
 exit actually names. On exit 1 (`reason-code: undeclared-covered-identifier`), the gate's own stderr
-names the identifier a ledger line attests coverage for that the spec never declares — report it,
-and that the fix is to correct that ledger line or the spec's declared criteria before re-running.
-On exit 2 with `reason-code: malformed-coverage-token`, the gate's own stderr names the malformed
-coverage token itself — report it, and that the fix is to correct that ledger entry's trailing
-parenthetical before re-running. Every other exit-2 reason (empty or non-UTF-8 stdin, no
-`## Acceptance Criteria` heading) names no identifier or line at all — the spec itself is unreadable
-or malformed, so the remedy is to fix the spec record, not a ledger line, before re-running.
+names the identifier a ledger line attests coverage for that the spec never declares — report it.
+The remedy depends on why: when the criterion was removed by amend, pass the criteria state (it
+declares the removal) and re-run, and never edit the ledger; when the ledger line is genuinely
+wrong, correct that ledger line or the spec's declared criteria before re-running. On exit 2 with
+`reason-code: malformed-coverage-token`, the gate's own stderr names the malformed coverage token
+itself — report it, and that the fix is to correct that ledger entry's trailing parenthetical before
+re-running. On exit 2 with `reason-code: malformed-criteria-state` or
+`reason-code: criteria-state-contradicts-body`, the state file is unreadable or disagrees with the
+spec body it was read beside: re-read both from the same pass (the `lore record criteria` call and
+the `lore record show`) and re-run, and never hand-edit the state file. On exit 2 with
+`reason-code: duplicate-slices-heading` or `reason-code: duplicate-acceptance-criteria-heading`, the
+spec carries that heading twice — fix the spec record before re-running. Every other exit-2 reason
+(empty or non-UTF-8 stdin, no `## Acceptance Criteria` heading) names no identifier or line at all —
+the spec itself is unreadable or malformed, so the remedy is to fix the spec record, not a ledger
+line, before re-running.
 
 **A spec predating the `**ACn.**` convention is a legacy carve-out, not a refusal.** The carve-out
 keys on a single machine-readable signal and nothing else: when the spec declares zero criterion
