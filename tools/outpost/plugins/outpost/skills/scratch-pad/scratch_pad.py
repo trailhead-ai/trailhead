@@ -16,7 +16,7 @@ Contract
   Exactly one option per question carries ``"pick": true``. An unknown key is
   refused with the allowed keys listed. What is inside ``layout`` is never
   inspected here.
-* The pad slug matches ``^[a-z0-9][a-z0-9._-]*$``.
+* The pad slug matches ``^[a-z0-9][a-z0-9._-]*$`` and is at most 64 characters.
 * Pads live in ``<state>/pads/<slug>/`` where ``<state>`` is
   ``$OUTPOST_STATE_DIR``, else ``$XDG_STATE_HOME/outpost``, else
   ``~/.local/state/outpost``. A pad folder that already exists is refused.
@@ -40,8 +40,9 @@ JSON string literal holding the round's JSON (so a ``__proto__`` key arrives as
 data, which an object literal would not give) with every non-ASCII character
 escaped, and never into HTML. The top-level ``index.html`` carries no round
 text. Round text echoed into an error line is escaped so an escape sequence
-cannot drive the terminal. The pads root and the temp folder are created
-owner-only (0700); a pads root that is a symlink is refused. A first run that
+cannot drive the terminal. The pads folder and the pad's temp folder
+(which becomes the pad folder) are created owner-only (0700); ``round-1/`` and
+its files follow the umask, shielded by that 0700 parent. A pads root that is a symlink is refused. A first run that
 loses the race to create the pads root to a concurrent run inspects what that
 run left with the same checks. Input that cannot be read as a round (not UTF-8,
 nested deeper than the interpreter will parse) is a refusal, never a traceback.
@@ -63,6 +64,7 @@ from pathlib import Path
 DEFAULT_KIT_DIR = Path(__file__).resolve().parent / "kit"
 
 _SLUG = re.compile(r"[a-z0-9][a-z0-9._-]*")
+_MAX_SLUG = 64
 _MAX_OPTIONS = 26
 _ROUND_KEYS = ("title", "intro", "questions")
 _QUESTION_KEYS = ("prompt", "options")
@@ -228,6 +230,8 @@ def _check_option(option: object, where: str, problems: list[str]) -> int:
 
 
 def _check_slug(pad: str) -> list[str]:
+    if len(pad) > _MAX_SLUG and _SLUG.fullmatch(pad):
+        return [_line("--pad", f"the pad name is too long ({len(pad)} characters) — the limit is {_MAX_SLUG}")]
     if _SLUG.fullmatch(pad):
         return []
     return [

@@ -559,6 +559,26 @@ def test_bad_pad_slug_is_refused_before_anything_is_written(skill, tmp_path, sta
     assert not (tmp_path / "x").exists()
 
 
+def test_a_slug_of_the_maximum_length_builds(skill, tmp_path, state):
+    slug = "a" * 64
+    rp = _write_round(tmp_path, _round(1))
+    proc = _run(skill, tmp_path, state, slug, rp)
+    assert proc.returncode == 0, proc.stderr
+    assert (state / "pads" / slug / "index.html").is_file()
+
+
+@pytest.mark.parametrize("length", [65, 300])
+def test_an_over_long_slug_is_refused_before_anything_is_written(skill, tmp_path, state, length):
+    rp = _write_round(tmp_path, _round(1))
+    proc = _run(skill, tmp_path, state, "a" * length, rp)
+    assert proc.returncode != 0
+    assert proc.stderr.startswith("scratch-pad: --pad: ")
+    assert "too long" in proc.stderr
+    assert "64" in proc.stderr
+    assert "Traceback" not in proc.stderr
+    assert not state.exists()
+
+
 def test_a_bad_slug_and_a_bad_round_are_reported_together(skill, tmp_path, state):
     data = _round(1)
     data["title"] = ""
