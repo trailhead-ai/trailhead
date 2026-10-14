@@ -38,13 +38,13 @@ Security posture
 Round text is untrusted data. It is written only into ``round.js``, as a
 JSON string literal holding the round's JSON (so a ``__proto__`` key arrives as
 data, which an object literal would not give) with every non-ASCII character
-escaped, and never into HTML. The top-level
-``index.html`` carries no round text. Round text echoed into an error line is
-escaped so an escape sequence cannot drive the terminal. The pads root and the
-temp folder are created owner-only (0700); a pads root that is a symlink is
-refused. A first run that loses the race to create the pads root to a concurrent
-run inspects what that run left with the same checks. Input that cannot be read as a round (not UTF-8, nested deeper than
-the interpreter will parse) is a refusal, never a traceback.
+escaped, and never into HTML. The top-level ``index.html`` carries no round
+text. Round text echoed into an error line is escaped so an escape sequence
+cannot drive the terminal. The pads root and the temp folder are created
+owner-only (0700); a pads root that is a symlink is refused. A first run that
+loses the race to create the pads root to a concurrent run inspects what that
+run left with the same checks. Input that cannot be read as a round (not UTF-8,
+nested deeper than the interpreter will parse) is a refusal, never a traceback.
 """
 
 from __future__ import annotations
