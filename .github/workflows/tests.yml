@@ -85,13 +85,16 @@ jobs:
         # a failure instead of a skip.
         run: |
           set -euo pipefail
-          # Bumping this version is a deliberate change, made when the tests have been run against the new one.
+          # Version, URL and SHA-256 are pinned together; bumping them is deliberate, made when the
+          # tests have been run against the new build. To recompute the hash, download the zip for the
+          # new version from the Chrome for Testing storage bucket and run `sha256sum` on it.
           chrome_version="151.0.7922.34"
+          url="https://storage.googleapis.com/chrome-for-testing-public/${chrome_version}/linux64/chrome-headless-shell-linux64.zip"
+          sha256="3cfc2bd00d1bafcf8a68dc74c9c92bb7150ddc8d26ade948a776316e1cec4f14"
           dest="$RUNNER_TEMP/chrome-headless-shell"
           mkdir -p "$dest"
-          url=$(curl -fsSL https://googlechromelabs.github.io/chrome-for-testing/known-good-versions-with-downloads.json \
-            | CHROME_VERSION="$chrome_version" python3 -c 'import json,os,sys; v=os.environ["CHROME_VERSION"]; d=next(x for x in json.load(sys.stdin)["versions"] if x["version"]==v)["downloads"]["chrome-headless-shell"]; print(next(x["url"] for x in d if x["platform"]=="linux64"))')
-          curl -fsSL -o "$dest/shell.zip" "$url"
+          curl --proto '=https' --tlsv1.2 -fsSL -o "$dest/shell.zip" "$url"
+          echo "$sha256  $dest/shell.zip" | sha256sum -c -
           unzip -q "$dest/shell.zip" -d "$dest"
           bin=$(find "$dest" -type f -name chrome-headless-shell | head -n 1)
           chmod +x "$bin"
