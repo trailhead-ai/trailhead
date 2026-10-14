@@ -535,12 +535,29 @@ def change_history_reason_problem(reason: object) -> str | None:
     return None
 
 
+_CRITERION_ID = re.compile(r"AC[1-9][0-9]*")
+
+
+def _criteria_problem(criteria: object) -> str | None:
+    """Why *criteria* is not ``{"removed": [<unique AC ids>]}``, or ``None`` when it is."""
+    if not isinstance(criteria, dict) or set(criteria) != {"removed"}:
+        return "must be an object with exactly the key 'removed'"
+    removed = criteria["removed"]
+    if not isinstance(removed, list) or not removed:
+        return "'removed' must be a non-empty list of criterion identifiers"
+    if not all(isinstance(i, str) and _CRITERION_ID.fullmatch(i) for i in removed):
+        return "'removed' must hold identifiers of the form AC1, AC2, ... (no leading zeros)"
+    if len(set(removed)) != len(removed):
+        return "'removed' must not repeat an identifier"
+    return None
+
+
 def _check_change_history_entry(key: str, index: int, entry: object) -> list[str]:
     where = f"key {key!r} entry [{index}]"
     if not isinstance(entry, dict):
         return [f"{where} must be an object"]
     errors: list[str] = []
-    for field in sorted(entry.keys() - _CHANGE_HISTORY_ENTRY_KEYS):
+    for field in sorted(entry.keys() - _CHANGE_HISTORY_ENTRY_KEYS - {"criteria"}):
         errors.append(f"{where} has unsupported field {field!r}")
     for field in sorted(_CHANGE_HISTORY_ENTRY_KEYS - entry.keys()):
         errors.append(f"{where} is missing field {field!r}")
@@ -560,6 +577,10 @@ def _check_change_history_entry(key: str, index: int, entry: object) -> list[str
             errors.append(f"{where} field 'reason' {problem}")
     if "diff" in entry and not isinstance(entry["diff"], str):
         errors.append(f"{where} field 'diff' must be a string")
+    if "criteria" in entry:
+        problem = _criteria_problem(entry["criteria"])
+        if problem:
+            errors.append(f"{where} field 'criteria' {problem}")
     return errors
 
 

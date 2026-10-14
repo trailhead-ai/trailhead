@@ -264,6 +264,16 @@ def test_reusing_removed_highest_id_is_refused_naming_next_unused():
     assert removed == []
     assert len(refusals) == 1 and "AC5" in refusals[0] and "AC6" in refusals[0]
     assert "reused" in refusals[0]
+    assert "--revert-to 1" in refusals[0]
+
+
+def test_reuse_refusal_names_the_entry_that_recorded_the_removal():
+    old = spec(ac(1), ac(3))
+    new = spec(ac(1), ac(2), ac(3))
+    _, refusals = check_criteria_amend(old, new, hist(["AC9"], ["AC2"]))
+    assert len(refusals) == 1
+    assert "--revert-to 2" in refusals[0]
+    assert "--revert-to 1" not in refusals[0]
 
 
 def test_reusing_removed_interior_id_is_refused():
@@ -281,6 +291,9 @@ def test_shift_renumber_is_refused():
     assert removed == ["AC5"]
     assert refusals
     assert any("AC2" in r for r in refusals)
+    renumber = [r for r in refusals if "AC2" in r]
+    assert all("never relabelled" in r for r in renumber)
+    assert all("remove one" in r and "AC6" in r for r in renumber)
 
 
 def test_swapping_text_between_ids_is_refused():
