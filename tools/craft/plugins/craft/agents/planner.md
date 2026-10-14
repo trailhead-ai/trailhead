@@ -158,7 +158,9 @@ Restate the idea in one paragraph using your own words. Confirm with the user be
 - Identify touched subsystems (cross-reference your vault's area profiles, if present —
   `lore search 'kind:area'`)
 - Pull related prior art for reference only: specs, decisions, and dropped tasks in your vault
-- Never modify a prior spec — if this supersedes one, link it from the new spec's `Related` section
+- Never modify a prior spec — if this supersedes one, create the new spec with
+  `--label craft/supersedes=spec/<predecessor>` and never flip the predecessor here; the gauntlet's
+  ready step retires it
 
 **Resolve maturity for every repository the work touches, before Poke at Edges begins** — the same
 enumeration and resolution `brainstorm/SKILL.md` step 1 runs, so step 5 below has a real resolution

@@ -101,8 +101,9 @@ reads as an ordinary result, which is exactly the wrong report for a name that c
   was decided, tried, or left as an open task?"). Otherwise read vault records directly — specs,
   decisions, tasks, and active lessons for the touched areas, where each lesson's prevention check
   should shape acceptance criteria or non-goals.
-- Never modify a prior spec. If this work supersedes one, link it from the new spec's `Related`
-  section.
+- Never modify a prior spec. If this work supersedes one, create the new spec with
+  `--label craft/supersedes=spec/<predecessor>` and never flip the predecessor here: it stays live
+  until the successor reaches `ready`, when the gauntlet's ready step retires it.
 
 **Resolve maturity for every repository the work touches, before grilling begins.** Enumerate those
 repositories the same way `_shared/execute.md`'s push mechanics and `drive/SKILL.md` step 5 already
@@ -525,10 +526,11 @@ printf '%s' "$BODY" | lore record create --kind spec --title "<topic>" --status 
 **If this brainstorm consumed a routed task** — the entry point was a `task` record carrying
 refine's `route=brainstorm` sidecar label (and its `## Refine — unresolved` section) — close the
 loop on the source record after the spec is written:
-`lore record update task/<source-name> --status superseded --related spec=<spec-name> --unset-label route`
-— one write. The routing has been acted on: the spec is now the canonical statement of the what/why,
-the `related` edge preserves the source's captured context, and a superseded source stops rendering
-a stale routed chip or next-step affordance on task boards. Never leave the consumed source `open`.
+`lore record supersede task/<source-name> --by spec/<spec-name>`, then
+`lore record update task/<source-name> --unset-label route`. The routing has been acted on: the spec
+is now the canonical statement of the what/why, the verb's `supersedes` edge preserves the source's
+captured context, and a superseded source stops rendering a stale routed chip or next-step
+affordance on task boards. Never leave the consumed source `open`.
 
 ### 7. Exit Gate
 

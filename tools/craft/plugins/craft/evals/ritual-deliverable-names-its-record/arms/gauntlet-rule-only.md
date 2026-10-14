@@ -249,7 +249,11 @@ disposition, and the same parts minus the table on a run that produced none (`di
      is positioned to make. Making it is movement two's whole job; the shared contract names what
      stays forbidden.
 2. **The recommended outcome**, on its own line — whether the record advances this round, or which
-   revise round it continues into (`dispositions.md`'s "Advancing, revise rounds, and runs").
+   revise round it continues into (`dispositions.md`'s "Advancing, revise rounds, and runs"). When
+   the spec carries a `craft/supersedes` label, the same line names the predecessor the ready step
+   will retire — its id, title and current status, read fresh with `lore record show <label value>`
+   rather than recalled. A labelled spec is not flipped `ready` without that line in front of the
+   operator: the label is vault-sourced and can name an unrelated spec.
 3. **The per-Critical table** — supporting detail, not the explanation. The synthesis has already
    said what the findings mean and what you propose doing; the table is the row-level view for
    checking that against the findings, and the handle the operator names to override — into
@@ -478,7 +482,21 @@ first. Once every Critical carries a final disposition, and none is `revise`:
 lore record update <spec-id> --status ready
 ```
 
-and hand off to the slice loop. Do not enter it from inside the gauntlet — let the user invoke
+**Then, if the spec carries a `craft/supersedes` label, retire its predecessor.** The label value is
+vault-sourced, so validate it against `^[A-Za-z0-9._/-]+$` before substituting it into a command; a
+value that fails is refused loudly and never substituted. Once it passes, run the verb, and only
+after the verb succeeds clear the label:
+
+```
+lore record supersede <label value> --by <spec-id>
+lore record update <spec-id> --unset-label craft/supersedes
+```
+
+A refused or failed verb stops here with the label left in place. Report the exact re-run command
+and the query that lists every spec stranded this way:
+`lore search 'kind:spec status:ready has:label.craft.supersedes'`.
+
+Then hand off to the slice loop. Do not enter it from inside the gauntlet — let the user invoke
 `/craft:slice` so it loads cleanly; this is the loop's only wired entry point, so its own
 `/craft:plan spec/<id>` handoff would create a second, unlinked parent and strand the spec outside
 the loop. End the wrap-up with the handoff command **fully formed** — the real spec-id, never a

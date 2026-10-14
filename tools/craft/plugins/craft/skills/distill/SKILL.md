@@ -208,8 +208,8 @@ Reconstitute the candidates into **logical design changes — M specs ↔ N ADRs
 - **`related` edges** between specs, and between specs and tasks.
 - **Shared areas** — specs whose work landed in the same area are usually one design change.
 - **Superseded chains** — a spec the operator superseded and the one that replaced it are one
-  thread. Superseded specs are never distilled individually; they enter **only as chain context**
-  for the surviving spec.
+  thread, read from the `supersedes:` and `superseded-by:` fields. Superseded specs are never
+  distilled individually; they enter **only as chain context** for the surviving spec.
 - **Judgment**, where the graph is thin. Name the judgment when you present the cluster.
 
 Execution-convenience splits (one design change cut into three specs so it could ship in pieces)
@@ -293,13 +293,13 @@ claims `complete` until everything behind it landed.
 1. **ADR records are created first.** One
    `lore record create --kind adr --status active --product <scope>` (or `--team <scope>`) per
    approved draft, carrying its provenance as edges: `--related spec=<member>` for each member spec,
-   `--related decision=<absorbed>` for each absorbed decision, and — when this ADR supersedes an
-   existing one — `--related adr=<predecessor>`. The scope flag is not optional here either — on
-   create it selects the destination vault, so an unscoped create can land the ADR in the wrong
-   vault. No ADR routes through `/craft:gauntlet`; this disposition owns every ADR's flip. This
-   create is distill's only route to `active`: no other write in this document sets that flag on an
-   ADR, and it is reachable at authorship — no condition on the status of the specs the ADR derives
-   from gates it.
+   and `--related decision=<absorbed>` for each absorbed decision. A predecessor this ADR supersedes
+   is not recorded here: steps 3 and 4 do it with `lore record supersede`. The scope flag is not
+   optional here either — on create it selects the destination vault, so an unscoped create can land
+   the ADR in the wrong vault. No ADR routes through `/craft:gauntlet`; this disposition owns every
+   ADR's flip. This create is distill's only route to `active`: no other write in this document sets
+   that flag on an ADR, and it is reachable at authorship — no condition on the status of the specs
+   the ADR derives from gates it.
 
 2. Then **absorbed `draft` ADRs are retired** — each `draft` ADR Step 1 surfaced as candidate
    material and Step 2's proposal listed for disposition is flipped `--status dropped`, carrying a
@@ -308,22 +308,20 @@ claims `complete` until everything behind it landed.
    lingering draft ADR has: an absorbed draft that never gets this write simply lingers `draft`
    forever, undispositioned by anyone.
 
-3. Then **absorbed `decision` records are flipped `superseded` with a `related: adr=` edge** back to
-   the ADR that subsumed them, so no competing owner of the same decision is left `active`.
+3. Then **absorbed `decision` records are retired** with
+   `lore record supersede decision/<d> --by adr/<new>` — once per absorbed decision, so no competing
+   owner of the same decision is left `active`.
 
-4. Then **superseded ADRs are flipped, both edge directions written** — the predecessor gains
-   `--status superseded` and `--related adr=<successor>`. This bidirectional metadata write is the
-   **sole metadata exception to active-ADR immutability**: a reader landing on a superseded ADR must
-   see its successor without waiting for a reindex.
+4. Then **superseded ADRs are retired** with `lore record supersede adr/<old> --by adr/<new>`. The
+   verb writes the successor's `supersedes` edge and flips the predecessor to `superseded` in one
+   call. That is the **sole metadata exception to active-ADR immutability**: a reader landing on a
+   superseded ADR must see its successor (`superseded-by:`) without waiting for a reindex.
 
-The two directions are **two CLI writes, not a transaction**, so their internal order is fixed: the
-successor's `related: adr=<predecessor>` edge is written at ADR creation; the predecessor's
-`superseded` flip and its `related: adr=<successor>` back-edge are written second. That ordering is
-the recoverable one — the surviving artifact of a crash is an `active` successor pointing at a
-still-`active` predecessor, which is detectable. *An interruption between the two is healed by the
-resume rule: the re-run detects the successor's edge and completes the predecessor's write.* This
-metadata-only repair is **licensed as part of the supersession exception** — it is the same write,
-finished late, not a new edit to an immutable record.
+Each verb call is idempotent and completes a torn pair, so an interrupted run is healed by running
+the same verb again: *the re-run finds the successor ADR by its provenance edges and repeats steps 3
+and 4.* Re-running a call that already landed changes nothing, and the repair is **licensed as part
+of the supersession exception** — it is the same write, finished late, not a new edit to an
+immutable record.
 
 5. Then **touched `area` profiles are re-synthesized** to the sections of
    `${CLAUDE_PLUGIN_ROOT}/templates/area.md`, citing the new ADRs inline as `[[wikilinks]]`. Areas
