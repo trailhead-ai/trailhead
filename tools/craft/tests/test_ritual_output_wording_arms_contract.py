@@ -194,16 +194,19 @@ TEMPLATE_FIXTURES = [
 ]
 
 
+def _index_after_anchor(lines: list[str]) -> int:
+    assert lines.count(TEMPLATE_ANCHOR) == 1, f"anchor appears {lines.count(TEMPLATE_ANCHOR)} times"
+    return lines.index(TEMPLATE_ANCHOR) + 1
+
+
 def line_after_anchor(text: str) -> str:
     lines = text.splitlines()
-    assert lines.count(TEMPLATE_ANCHOR) == 1, f"anchor appears {lines.count(TEMPLATE_ANCHOR)} times"
-    return lines[lines.index(TEMPLATE_ANCHOR) + 1]
+    return lines[_index_after_anchor(lines)]
 
 
 def with_line_inserted_after_anchor(text: str, line: str) -> str:
     lines = text.splitlines()
-    assert lines.count(TEMPLATE_ANCHOR) == 1, f"anchor appears {lines.count(TEMPLATE_ANCHOR)} times"
-    at = lines.index(TEMPLATE_ANCHOR) + 1
+    at = _index_after_anchor(lines)
     return "\n".join([*lines[:at], line, *lines[at:]]) + "\n"
 
 
