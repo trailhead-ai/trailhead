@@ -18,12 +18,17 @@ from pathlib import Path
 # same ones the gate's own suite drives, so a change to either the invocation
 # or the token block reaches both suites from one place.
 from test_candidate_set import (
+    candidate_set,
     FULL_COVERAGE_WITH_LEGACY_LINE,
     MALFORMED_TOKEN,
     UNDECLARED_COVERAGE,
     ZERO_CRITERIA_SPEC,
     _run,
     _tokens,
+)
+
+DUPLICATE_AC_HEADING_SPEC = (
+    "## Acceptance Criteria\n\n**AC1.** a\n\n## Acceptance Criteria\n\n**AC2.** b\n"
 )
 
 CRAFT = Path(__file__).parent.parent / "plugins" / "craft"
@@ -137,11 +142,18 @@ def test_skill_documented_reason_codes_are_exactly_the_real_gates_reason_codes()
     step4 = _step("### 4. Reconcile the `## Slices` ledger, then derive the candidate set")
     documented = set(re.findall(r"reason-code:\s*([a-z0-9-]+)", step4))
 
-    real = {
+    exercised = {
         _reason_code(_run(MALFORMED_TOKEN).stderr),
         _reason_code(_run(UNDECLARED_COVERAGE).stderr),
         _reason_code(_run(ZERO_CRITERIA_SPEC).stderr),
+        _reason_code(_run(DUPLICATE_AC_HEADING_SPEC).stderr),
     }
+    real = {
+        getattr(candidate_set, name)
+        for name in dir(candidate_set)
+        if name.startswith("_") and name.endswith("_REASON_CODE")
+    } | exercised
+    assert exercised <= real, f"the gate printed reason codes {exercised - real} it has no constant for"
 
     assert documented == real, (
         f"slice/SKILL.md step 4 documents reason codes {documented} but the real "
