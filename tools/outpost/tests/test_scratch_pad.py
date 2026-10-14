@@ -29,7 +29,8 @@ KIT_FILES = {
     "ArchitectsDaughter-Regular.ttf": bytes(range(256)) * 4,
 }
 
-ROUND_JS_PREFIX = "window.PAD_ROUND = "
+ROUND_JS_PREFIX = "window.PAD_ROUND = JSON.parse("
+ROUND_JS_SUFFIX = ");\n"
 
 
 def _option(name="Split", cost="One more component", pick=False, layout=None):
@@ -125,8 +126,9 @@ def _snapshot(root: Path):
 
 def _load_round_js(path: Path):
     text = path.read_text(encoding="utf-8")
-    assert text.startswith(ROUND_JS_PREFIX) and text.endswith(";\n")
-    return json.loads(text[len(ROUND_JS_PREFIX) : -2])
+    assert text.startswith(ROUND_JS_PREFIX) and text.endswith(ROUND_JS_SUFFIX)
+    inner = json.loads(text[len(ROUND_JS_PREFIX) : -len(ROUND_JS_SUFFIX)])
+    return json.loads(inner)
 
 
 # ---------------------------------------------------------------------------
@@ -159,7 +161,7 @@ def test_valid_round_builds_the_pad(skill, tmp_path, state, n_questions, pad):
     assert [p.name for p in (state / "pads").iterdir()] == [pad]
 
 
-def test_round_js_is_exactly_the_assignment_of_ascii_json(skill, tmp_path, state):
+def test_round_js_is_exactly_the_parse_of_a_double_encoded_ascii_string(skill, tmp_path, state):
     data = _round(1)
     data["title"] = "café \U0001f600"
     rp = _write_round(tmp_path, data)
@@ -167,15 +169,15 @@ def test_round_js_is_exactly_the_assignment_of_ascii_json(skill, tmp_path, state
     assert _run(skill, tmp_path, state, "p", rp).returncode == 0
 
     text = (state / "pads" / "p" / "round-1" / "round.js").read_text(encoding="utf-8")
-    assert text == ROUND_JS_PREFIX + json.dumps(data, ensure_ascii=True) + ";\n"
+    assert text == ROUND_JS_PREFIX + json.dumps(json.dumps(data, ensure_ascii=True)) + ROUND_JS_SUFFIX
     assert text.isascii()
 
 
 def test_script_tags_and_line_separators_round_trip_through_round_js(skill, tmp_path, state):
     data = _round(1)
     data["title"] = "</script><script>alert(1)</script>"
-    data["intro"] = "a b c"
-    data["questions"][0]["options"][0]["layout"] = {"text": "</SCRIPT> "}
+    data["intro"] = "a\u2028b\u2029c \" \\ d"
+    data["questions"][0]["options"][0]["layout"] = {"text": "</SCRIPT>", "__proto__": {"text": "x"}}
     rp = _write_round(tmp_path, data)
 
     assert _run(skill, tmp_path, state, "p", rp).returncode == 0
@@ -183,7 +185,7 @@ def test_script_tags_and_line_separators_round_trip_through_round_js(skill, tmp_
     js = state / "pads" / "p" / "round-1" / "round.js"
     assert _load_round_js(js) == data
     raw = js.read_text(encoding="utf-8")
-    assert " " not in raw and " " not in raw
+    assert "\u2028" not in raw and "\u2029" not in raw and raw.isascii()
 
 
 def test_top_level_page_carries_no_round_text(skill, tmp_path, state):

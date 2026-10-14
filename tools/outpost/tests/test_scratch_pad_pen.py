@@ -356,16 +356,26 @@ def test_names_the_pen_does_not_own_are_unknown_kinds(tmp_path, key):
     assert not got["failure"] and got["ready"]
 
 
-def test_a_proto_key_in_a_layout_is_an_unknown_kind(tmp_path):
-    js = """
+@pytest.mark.parametrize("value", ["x", {"text": "INHERITED"}], ids=["string", "object"])
+def test_a_proto_key_in_a_layout_is_an_unknown_kind(tmp_path, value):
+    data = _round([{"__proto__": value}, box(button("fine"))])
+    js = STATE + """
     await settle();
-    const {panel, d} = bareDrawing();
-    const question = JSON.parse('{"options": [{"layout": {"__proto__": "x"}}]}');
-    await window.PadPen.drawQuestion(panel, question, 9);
-    return messageOf(d);
+    return {
+      ...state,
+      message: messageOf(d0),
+      svgs: d0.querySelectorAll('svg').length,
+      lettering: [...d0.querySelectorAll('svg text')].map((t) => t.textContent),
+      sibling: marksOf(d1).length,
+    };
     """
-    got = _run(tmp_path, _round([box(button("fine"))]), js)
-    assert got == ["Can't draw this layout:", '{"__proto__": "x"}', '"__proto__" is not a block kind.']
+    got = _run(tmp_path, data, js)
+    quoted = json.dumps({"__proto__": value})
+    assert got["message"] == ["Can't draw this layout:", quoted, '"__proto__" is not a block kind.']
+    assert got["svgs"] == 0
+    assert got["lettering"] == []
+    assert got["sibling"] == 2
+    assert not got["failure"] and got["ready"]
 
 
 def test_an_unexpected_error_while_building_shows_the_message_in_that_drawing(tmp_path):
