@@ -5,12 +5,15 @@ ledger, BEFORE a caller decides whether to select another slice or stop.
 
 Usage:
     lore record show spec/<name> | candidate_set.py
+    lore record show spec/<name> | candidate_set.py --criteria-state state.json
 
-The spec body arrives on stdin; there is no flag. This is the opposite CLI
-convention from `covers_gate.py`: a gate that certifies a caller-drafted value
-takes a flag, a gate that derives a value from a document alone reads stdin
-only. A third gate here should pick the convention that matches which of the
-two it is doing, not copy either example blindly.
+The spec body arrives on stdin. The one optional flag, `--criteria-state`,
+names a file holding the JSON that `lore record criteria spec/<name>` prints;
+it supplies the one fact the body cannot — which criteria an amend removed
+(see "Removed criteria" below). `--help` answers before stdin is read. This
+is the opposite CLI convention from `covers_gate.py`, whose flags carry a
+caller-drafted value to certify: this gate still derives its answer from the
+document, and the flag only adds context to read it by.
 
 Criterion identifiers, the CommonMark line splitter, the fenced-block-and
 -HTML-comment masker, and the heading-uniqueness check are all imported from
@@ -110,6 +113,27 @@ because both go through the shared `parse_covers`: fail-closed as a
 malformed coverage token, not silently deduplicated. This applies to the
 `partially covers` field identically.
 
+Removed criteria (`--criteria-state <path>`): an amend can remove a criterion
+from a spec whose `## Slices` ledger already records coverage of it, and the
+ledger is append-only. The state file is a JSON object with exactly the keys
+`record` (a string), `declared` and `removed` (each a list of unique
+`^AC[1-9][0-9]*$` identifiers, either possibly empty). A `covers` or
+`partially covers` token naming an identifier in `removed` is void: it is not
+counted as covered or partial, is not an undeclared identifier, and does not
+change `complete-eligible` (the entry still carries a coverage token). With the
+flag, a sixth line `void:` is printed LAST, after `complete-eligible:` — one
+`<id> (removed by amend)` per void identifier the ledger named, deduplicated
+and in numeric order, or `none`. Without the flag the five lines above are the
+whole output, unchanged. An identifier that is neither declared nor removed
+still fails `undeclared-covered-identifier`; without the flag that refusal's
+reason hints that a criterion removed by amend needs `--criteria-state`.
+`record` is not compared against anything: the body on stdin does not name its
+spec. The file is opened once with `O_NOFOLLOW` (a symlink at the path is
+refused), must be a regular file of at most 1 MiB, and only identifiers that
+match the grammar above are ever echoed. It is read after the body's criteria
+are parsed and before the ledger is read, and its `declared` list must equal
+the body's declared criteria in order, with no identifier also in `removed`.
+
 A `reason:` line printed to stderr may echo raw ledger prose read from the
 spec body. It is for a human reading stderr and is never persisted — only the
 bounded `reason-code:` token below it may be copied into a record, a task
@@ -129,13 +153,22 @@ Exit codes:
        unmasked `## Slices` heading
        (`reason-code: duplicate-slices-heading`); or a `covers` or
        `partially covers` token that does not parse as an identifier list
-       (`reason-code: malformed-coverage-token`). NEVER exits 0 when the
-       derivation could not be certified.
+       (`reason-code: malformed-coverage-token`); with `--criteria-state`, a
+       state file that is unreadable, a symlink, not a regular file, over
+       1 MiB, not JSON, or not the shape above
+       (`reason-code: malformed-criteria-state`); or a state whose `declared`
+       list differs from the body's, or whose `removed` list intersects its
+       `declared` list (`reason-code: criteria-state-contradicts-body`).
+       NEVER exits 0 when the derivation could not be certified.
 """
 
 from __future__ import annotations
 
+import argparse
+import json
+import os
 import re
+import stat
 import sys
 from pathlib import Path
 from typing import NamedTuple
@@ -166,6 +199,12 @@ _LEDGER_TASK_ID_RE = re.compile(r"^`task/([^`]+)`")
 _UNDECLARED_REASON_CODE = "undeclared-covered-identifier"
 _MALFORMED_TOKEN_REASON_CODE = "malformed-coverage-token"
 _DUPLICATE_SLICES_HEADING_REASON_CODE = "duplicate-slices-heading"
+_MALFORMED_CRITERIA_STATE_REASON_CODE = "malformed-criteria-state"
+_CRITERIA_STATE_CONTRADICTS_BODY_REASON_CODE = "criteria-state-contradicts-body"
+
+_CRITERIA_STATE_MAX_BYTES = 1024 * 1024
+_CRITERIA_STATE_KEYS = frozenset({"record", "declared", "removed"})
+_CRITERION_ID_RE = re.compile(r"AC[1-9][0-9]*")
 
 
 class UndeclaredCoverageError(ValueError):
@@ -302,6 +341,18 @@ def parse_ledger(
     names an identifier not in `criteria`, or MalformedCoverageTokenError if
     either does not parse as an ACn identifier list.
     """
+    covered, partial, eligible, _ = parse_ledger_voiding(spec_body, criteria, frozenset())
+    return covered, partial, eligible
+
+
+def parse_ledger_voiding(
+    spec_body: str, criteria: list[str], removed: frozenset[str]
+) -> tuple[list[str], list[str], bool, list[str]]:
+    """`parse_ledger` with every `covers`/`partially covers` token naming an
+    identifier in `removed` voided: dropped from the covered and partial
+    sets, not checked against `criteria`, and returned as the fourth element
+    (deduplicated, numeric order). A voided token still counts as the entry's
+    coverage token, so it never changes `eligible`."""
     lines = _COMMONMARK_LINE_RE.split(spec_body)
     fenced = _mask_fenced_lines(lines)
 
@@ -309,12 +360,13 @@ def parse_ledger(
         lines, fenced, _SLICES_HEADING_RE, _SLICES_HEADING, _DUPLICATE_SLICES_HEADING_REASON_CODE
     )
     if start is None:
-        return [], [], True
+        return [], [], True, []
 
     # Insertion-ordered sets: a dict keeps first-seen order while making the
     # repeat check O(1), so neither list needs a parallel `seen` set beside it.
     covered: dict[str, None] = {}
     partial: dict[str, None] = {}
+    voided: set[str] = set()
     eligible = True
 
     def _parse_field(value: str) -> list[str]:
@@ -322,10 +374,15 @@ def parse_ledger(
             identifiers = parse_covers(value, flag="ledger coverage token")
         except ValueError as e:
             raise MalformedCoverageTokenError(str(e)) from e
+        live = []
         for identifier in identifiers:
-            if identifier not in criteria:
+            if identifier in removed:
+                voided.add(identifier)
+            elif identifier not in criteria:
                 raise UndeclaredCoverageError(identifier)
-        return identifiers
+            else:
+                live.append(identifier)
+        return live
 
     for kind, block_lines in _iter_ledger_entries(lines, fenced, start):
         if kind == "noncanonical":
@@ -353,7 +410,12 @@ def parse_ledger(
         if partial_value is not None:
             partial.update(dict.fromkeys(_parse_field(partial_value)))
 
-    return list(covered), [i for i in partial if i not in covered], eligible
+    return (
+        list(covered),
+        [i for i in partial if i not in covered],
+        eligible,
+        sorted(voided, key=lambda i: int(i[2:])),
+    )
 
 
 def _select_structured_span(
@@ -543,8 +605,76 @@ def find_unclaimed_ledger_lines(spec_body: str) -> list[int]:
     return unclaimed
 
 
+class CriteriaStateError(ValueError):
+    """The `--criteria-state` file is unreadable or not the documented shape."""
+
+
+def _is_id_list(value: object) -> bool:
+    return (
+        isinstance(value, list)
+        and all(isinstance(v, str) and _CRITERION_ID_RE.fullmatch(v) for v in value)
+        and len(set(value)) == len(value)
+    )
+
+
+def load_criteria_state(path: str) -> tuple[list[str], list[str]]:
+    """Return `(declared, removed)` from the `lore record criteria` JSON at
+    `path`. Opens the path exactly once, refusing a symlink (`O_NOFOLLOW`) and
+    anything but a regular file of at most `_CRITERIA_STATE_MAX_BYTES`; raises
+    CriteriaStateError, whose message never carries file content."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError as e:
+        raise CriteriaStateError(f"cannot open the state file: {e.strerror}") from e
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise CriteriaStateError("the state path is not a regular file")
+        with os.fdopen(fd, "rb", closefd=False) as f:
+            raw = f.read(_CRITERIA_STATE_MAX_BYTES + 1)
+    except OSError as e:
+        raise CriteriaStateError(f"cannot read the state file: {e.strerror}") from e
+    finally:
+        os.close(fd)
+    if len(raw) > _CRITERIA_STATE_MAX_BYTES:
+        raise CriteriaStateError("the state file is over 1 MiB")
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except (ValueError, RecursionError) as e:
+        raise CriteriaStateError("the state file is not valid UTF-8 JSON") from e
+    if not isinstance(data, dict) or set(data) != _CRITERIA_STATE_KEYS:
+        raise CriteriaStateError(
+            "the state file must be an object with exactly the keys record, declared, removed"
+        )
+    if not isinstance(data["record"], str):
+        raise CriteriaStateError("the state file's record must be a string")
+    if not _is_id_list(data["declared"]) or not _is_id_list(data["removed"]):
+        raise CriteriaStateError(
+            "the state file's declared and removed must each be a list of unique ACn identifiers"
+        )
+    return data["declared"], data["removed"]
+
+
+def _parse_args(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        prog="candidate_set.py",
+        description=(
+            "Derive a spec's candidate set and termination eligibility from the spec body "
+            "on stdin: lore record show spec/<name> | candidate_set.py"
+        ),
+    )
+    parser.add_argument(
+        "--criteria-state",
+        metavar="PATH",
+        help=(
+            "JSON printed by `lore record criteria spec/<name>`; ledger coverage of a "
+            "criterion it lists as removed is void, and a final `void:` line is printed"
+        ),
+    )
+    return parser.parse_args(argv)
+
+
 def main(argv: list[str]) -> int:
-    del argv  # no flags — the whole interface is stdin
+    args = _parse_args(argv)
 
     try:
         spec_body = sys.stdin.buffer.read().decode("utf-8")
@@ -575,8 +705,26 @@ def main(argv: list[str]) -> int:
         _err(f"reason-code: {_ZERO_CRITERIA_REASON_CODE}")
         return 2
 
+    removed: frozenset[str] = frozenset()
+    if args.criteria_state is not None:
+        try:
+            state_declared, state_removed = load_criteria_state(args.criteria_state)
+        except CriteriaStateError as e:
+            _err(f"reason: {e}")
+            _err(f"reason-code: {_MALFORMED_CRITERIA_STATE_REASON_CODE}")
+            return 2
+        if state_declared != criteria or set(state_removed) & set(state_declared):
+            _err(
+                "reason: the criteria state's declared list differs from the spec body's, "
+                "or lists a declared criterion as removed — the state file is stale or "
+                "belongs to another spec"
+            )
+            _err(f"reason-code: {_CRITERIA_STATE_CONTRADICTS_BODY_REASON_CODE}")
+            return 2
+        removed = frozenset(state_removed)
+
     try:
-        covered, partial, eligible = parse_ledger(spec_body, criteria)
+        covered, partial, eligible, voided = parse_ledger_voiding(spec_body, criteria, removed)
     except DuplicateHeadingError as e:
         _err(f"reason: {e}")
         _err(f"reason-code: {e.reason_code}")
@@ -586,7 +734,13 @@ def main(argv: list[str]) -> int:
         _err(f"reason-code: {_MALFORMED_TOKEN_REASON_CODE}")
         return 2
     except UndeclaredCoverageError as e:
-        _err(f"reason: ledger names an identifier the spec does not declare: {e}")
+        hint = (
+            ""
+            if args.criteria_state is not None
+            else " (if an amend removed a criterion the ledger still names, pass "
+            "--criteria-state with the output of `lore record criteria`)"
+        )
+        _err(f"reason: ledger names an identifier the spec does not declare: {e}{hint}")
         _err(f"reason-code: {_UNDECLARED_REASON_CODE}")
         return 1
 
@@ -597,6 +751,8 @@ def main(argv: list[str]) -> int:
     print(f"candidates: {', '.join(candidates) if candidates else 'none'}")
     print(f"partial: {', '.join(partial) if partial else 'none'}")
     print(f"complete-eligible: {'yes' if eligible else 'no'}")
+    if args.criteria_state is not None:
+        print(f"void: {', '.join(f'{i} (removed by amend)' for i in voided) if voided else 'none'}")
     return 0
 
 

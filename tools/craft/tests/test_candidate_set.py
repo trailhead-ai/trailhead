@@ -1090,3 +1090,403 @@ def test_select_structured_span_blank_run_lookahead_is_linear_not_quadratic():
     assert len(entries) == 1, entries
     assert entries[0].task_id == "alpha", entries[0]
     assert elapsed < 2.0, f"parse_ledger_entries took {elapsed:.3f}s on 20,000 blanks — still quadratic?"
+
+
+# ---- 20. `--criteria-state`: ledger coverage of a removed criterion is void --
+
+
+import json  # noqa: E402
+import os  # noqa: E402
+
+import pytest  # noqa: E402
+
+_NO_FLAG_BASELINE = {
+    "spec_candidate_two_lines_two_covered.md": (
+        "criteria: AC1, AC2, AC3, AC4, AC5, AC6, AC7, AC8, AC9\n"
+        "covered: AC1, AC2\n"
+        "candidates: AC3, AC4, AC5, AC6, AC7, AC8, AC9\n"
+        "partial: none\n"
+        "complete-eligible: yes\n"
+    ),
+    "spec_candidate_full_coverage.md": (
+        "criteria: AC1, AC2, AC3, AC4, AC5, AC6, AC7, AC8, AC9\n"
+        "covered: AC1, AC2, AC3, AC4, AC5, AC6, AC7, AC8, AC9\n"
+        "candidates: none\n"
+        "partial: none\n"
+        "complete-eligible: yes\n"
+    ),
+    "spec_candidate_union_disjoint.md": (
+        "criteria: AC1, AC2, AC3, AC4, AC5, AC6, AC7, AC8, AC9\n"
+        "covered: AC1, AC3, AC2, AC4\n"
+        "candidates: AC5, AC6, AC7, AC8, AC9\n"
+        "partial: none\n"
+        "complete-eligible: yes\n"
+    ),
+    "spec_candidate_partial_then_full.md": (
+        "criteria: AC1, AC2, AC3, AC4, AC5, AC6, AC7, AC8, AC9\n"
+        "covered: AC2\n"
+        "candidates: AC1, AC3, AC4, AC5, AC6, AC7, AC8, AC9\n"
+        "partial: none\n"
+        "complete-eligible: yes\n"
+    ),
+}
+
+
+def _spec(declared: list[str], ledger: list[str]) -> str:
+    criteria = "\n".join(f"- **{c}.** A criterion." for c in declared)
+    entries = "\n".join(ledger)
+    return f"# Spec\n\n## Acceptance Criteria\n\n{criteria}\n\n## Slices\n\n{entries}\n"
+
+
+def _entry(n: int, fields: str) -> str:
+    return f"- **Slice {n}** — a value claim. (`task/s{n}`, closed 2026-01-0{n}, {fields})"
+
+
+def _state(tmp_path: Path, declared, removed, record="spec/x") -> Path:
+    path = tmp_path / "state.json"
+    path.write_text(
+        json.dumps({"record": record, "declared": declared, "removed": removed}),
+        encoding="utf-8",
+    )
+    return path
+
+
+def _run_flag(spec_body: str, state_path, *extra: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, str(GATE), "--criteria-state", str(state_path), *extra],
+        input=spec_body,
+        capture_output=True,
+        text=True,
+    )
+
+
+def _reason_code(stderr: str) -> str | None:
+    for line in stderr.splitlines():
+        if line.startswith("candidate-set: reason-code: "):
+            return line[len("candidate-set: reason-code: "):]
+    return None
+
+
+VOID_BODY = _spec(["AC1", "AC3"], [_entry(1, "covers AC1, AC2, AC3")])
+
+
+@pytest.mark.parametrize("fixture", sorted(_NO_FLAG_BASELINE))
+def test_no_flag_stdout_is_byte_identical_to_the_pre_change_output(fixture):
+    r = _run((FIXTURES / fixture).read_text(encoding="utf-8"))
+    assert r.returncode == 0, r.stderr
+    assert r.stdout == _NO_FLAG_BASELINE[fixture]
+
+
+def test_removed_criterion_coverage_is_void_and_the_rest_is_derived(tmp_path):
+    r = _run_flag(VOID_BODY, _state(tmp_path, ["AC1", "AC3"], ["AC2"]))
+    assert r.returncode == 0, r.stderr
+    tokens = _tokens(r.stdout)
+    assert tokens["criteria"] == "AC1, AC3"
+    assert tokens["covered"] == "AC1, AC3"
+    assert tokens["candidates"] == "none"
+    assert tokens["partial"] == "none"
+    assert tokens["complete-eligible"] == "yes"
+    assert tokens["void"] == "AC2 (removed by amend)"
+
+
+def test_void_is_the_last_stdout_line_and_the_five_lines_keep_their_positions(tmp_path):
+    r = _run_flag(VOID_BODY, _state(tmp_path, ["AC1", "AC3"], ["AC2"]))
+    lines = r.stdout.splitlines()
+    assert [ln.split(":")[0] for ln in lines] == [
+        "criteria", "covered", "candidates", "partial", "complete-eligible", "void",
+    ]
+    assert lines[:5] == _run(_spec(["AC1", "AC3"], [_entry(1, "covers AC1, AC3")])).stdout.splitlines()
+
+
+def test_the_same_input_without_the_flag_is_undeclared_with_a_hint_naming_the_flag():
+    r = _run(VOID_BODY)
+    assert r.returncode == 1
+    assert _reason_code(r.stderr) == "undeclared-covered-identifier"
+    assert "--criteria-state" in r.stderr
+
+
+def test_the_hint_is_absent_when_the_flag_is_given_and_an_id_is_still_undeclared(tmp_path):
+    body = _spec(["AC1", "AC3"], [_entry(1, "covers AC1, AC9")])
+    r = _run_flag(body, _state(tmp_path, ["AC1", "AC3"], ["AC2"]))
+    assert r.returncode == 1
+    assert _reason_code(r.stderr) == "undeclared-covered-identifier"
+    assert "--criteria-state" not in r.stderr
+
+
+def test_an_id_that_is_neither_declared_nor_removed_still_exits_1_with_the_flag(tmp_path):
+    body = _spec(["AC1", "AC3"], [_entry(1, "covers AC1, AC2, AC9")])
+    r = _run_flag(body, _state(tmp_path, ["AC1", "AC3"], ["AC2"]))
+    assert r.returncode == 1
+    assert _reason_code(r.stderr) == "undeclared-covered-identifier"
+    assert r.stdout == ""
+
+
+def test_a_partial_token_on_a_removed_id_is_void_and_not_listed_as_partial(tmp_path):
+    body = _spec(["AC1", "AC3"], [_entry(1, "covers AC1, partially covers AC2")])
+    r = _run_flag(body, _state(tmp_path, ["AC1", "AC3"], ["AC2"]))
+    assert r.returncode == 0, r.stderr
+    tokens = _tokens(r.stdout)
+    assert tokens["partial"] == "none"
+    assert tokens["covered"] == "AC1"
+    assert tokens["candidates"] == "AC3"
+    assert tokens["void"] == "AC2 (removed by amend)"
+
+
+def test_a_partial_token_on_a_declared_id_is_not_voided(tmp_path):
+    body = _spec(["AC1", "AC3"], [_entry(1, "covers AC1, partially covers AC3")])
+    r = _run_flag(body, _state(tmp_path, ["AC1", "AC3"], ["AC2"]))
+    assert r.returncode == 0, r.stderr
+    tokens = _tokens(r.stdout)
+    assert tokens["partial"] == "AC3"
+    assert tokens["void"] == "none"
+
+
+def test_an_entry_whose_only_coverage_is_void_still_counts_as_a_modern_entry(tmp_path):
+    body = _spec(["AC1", "AC3"], [_entry(1, "covers AC2")])
+    r = _run_flag(body, _state(tmp_path, ["AC1", "AC3"], ["AC2"]))
+    assert r.returncode == 0, r.stderr
+    tokens = _tokens(r.stdout)
+    assert tokens["complete-eligible"] == "yes"
+    assert tokens["covered"] == "none"
+    assert tokens["void"] == "AC2 (removed by amend)"
+
+
+def test_a_legacy_entry_still_makes_complete_eligible_no_with_the_flag(tmp_path):
+    legacy = "- **Old** — a value claim. (`task/old`, closed 2026-01-01)"
+    body = _spec(["AC1", "AC3"], [_entry(1, "covers AC2"), legacy])
+    r = _run_flag(body, _state(tmp_path, ["AC1", "AC3"], ["AC2"]))
+    assert r.returncode == 0, r.stderr
+    assert _tokens(r.stdout)["complete-eligible"] == "no"
+
+
+def test_void_ids_are_deduplicated_and_in_numeric_order(tmp_path):
+    body = _spec(
+        ["AC1", "AC3"],
+        [_entry(1, "covers AC10, AC2"), _entry(2, "partially covers AC2, AC10"), _entry(3, "covers AC1")],
+    )
+    r = _run_flag(body, _state(tmp_path, ["AC1", "AC3"], ["AC2", "AC10"]))
+    assert r.returncode == 0, r.stderr
+    assert _tokens(r.stdout)["void"] == "AC2 (removed by amend), AC10 (removed by amend)"
+
+
+def test_empty_removed_with_a_matching_declared_prints_void_none(tmp_path):
+    r = _run_flag(FULL_COVERAGE, _state(tmp_path, [f"AC{i}" for i in range(1, 10)], []))
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.splitlines()[-1] == "void: none"
+    assert r.stdout.splitlines()[:5] == _NO_FLAG_BASELINE["spec_candidate_full_coverage.md"].splitlines()
+
+
+def test_a_declared_id_is_never_voided_even_when_the_state_lists_it_as_removed(tmp_path):
+    r = _run_flag(VOID_BODY, _state(tmp_path, ["AC1", "AC3"], ["AC1"]))
+    assert r.returncode == 2
+    assert _reason_code(r.stderr) == "criteria-state-contradicts-body"
+
+
+def test_a_state_declaring_a_different_set_than_the_body_contradicts_it(tmp_path):
+    r = _run_flag(VOID_BODY, _state(tmp_path, ["AC1", "AC3", "AC4"], ["AC2"]))
+    assert r.returncode == 2
+    assert _reason_code(r.stderr) == "criteria-state-contradicts-body"
+    assert r.stdout == ""
+
+
+def test_a_state_captured_before_a_further_removal_contradicts_the_body(tmp_path):
+    body = _spec(["AC1"], [_entry(1, "covers AC1, AC2, AC3")])
+    r = _run_flag(body, _state(tmp_path, ["AC1", "AC3"], ["AC2"]))
+    assert r.returncode == 2
+    assert _reason_code(r.stderr) == "criteria-state-contradicts-body"
+
+
+def test_a_state_declaring_the_same_ids_in_a_different_order_contradicts_the_body(tmp_path):
+    r = _run_flag(VOID_BODY, _state(tmp_path, ["AC3", "AC1"], ["AC2"]))
+    assert r.returncode == 2
+    assert _reason_code(r.stderr) == "criteria-state-contradicts-body"
+
+
+def _write(tmp_path: Path, content: bytes) -> Path:
+    path = tmp_path / "state.json"
+    path.write_bytes(content)
+    return path
+
+
+_VALID = {"record": "spec/x", "declared": ["AC1", "AC3"], "removed": ["AC2"]}
+
+
+def _variant(**overrides) -> bytes:
+    data = {**_VALID, **overrides}
+    for key, value in list(data.items()):
+        if value is _DROP:
+            del data[key]
+    return json.dumps(data).encode()
+
+
+_DROP = object()
+
+_MALFORMED_CONTENTS = {
+    "empty-file": b"",
+    "not-json": b"{nope",
+    "array": b'["AC2"]',
+    "string": b'"AC2"',
+    "null": b"null",
+    "number": b"7",
+    "missing-removed": _variant(removed=_DROP),
+    "missing-declared": _variant(declared=_DROP),
+    "missing-record": _variant(record=_DROP),
+    "extra-key": _variant(extra=1),
+    "removed-as-string": _variant(removed="AC2"),
+    "declared-as-string": _variant(declared="AC1"),
+    "removed-duplicate": _variant(removed=["AC2", "AC2"]),
+    "declared-duplicate": _variant(declared=["AC1", "AC1"]),
+    "removed-zero": _variant(removed=["AC0"]),
+    "removed-leading-zero": _variant(removed=["AC02"]),
+    "removed-wrong-prefix": _variant(removed=["X1"]),
+    "removed-lowercase": _variant(removed=["ac2"]),
+    "removed-trailing-newline": _variant(removed=["AC2\n"]),
+    "removed-integer": _variant(removed=[1]),
+    "removed-null-entry": _variant(removed=[None]),
+    "declared-bad-entry": _variant(declared=["AC1", "nope"]),
+    "record-integer": _variant(record=7),
+    "record-null": _variant(record=None),
+    "invalid-utf8": b'{"record": "\xff"}',
+    "over-one-mib": b'{"record": "' + b"a" * (1024 * 1024) + b'", "declared": [], "removed": []}',
+}
+
+
+@pytest.mark.parametrize("name", sorted(_MALFORMED_CONTENTS))
+def test_a_malformed_state_file_is_refused_as_malformed_criteria_state(tmp_path, name):
+    r = _run_flag(VOID_BODY, _write(tmp_path, _MALFORMED_CONTENTS[name]))
+    assert r.returncode == 2, r.stderr
+    assert _reason_code(r.stderr) == "malformed-criteria-state"
+    assert r.stdout == ""
+
+
+def test_a_state_file_exactly_at_the_size_limit_is_read(tmp_path):
+    prefix = b'{"record": "'
+    suffix = b'", "declared": ["AC1", "AC3"], "removed": ["AC2"]}'
+    pad = 1024 * 1024 - len(prefix) - len(suffix)
+    r = _run_flag(VOID_BODY, _write(tmp_path, prefix + b"a" * pad + suffix))
+    assert r.returncode == 0, r.stderr
+
+
+def test_a_nonexistent_state_path_is_malformed(tmp_path):
+    r = _run_flag(VOID_BODY, tmp_path / "missing.json")
+    assert r.returncode == 2
+    assert _reason_code(r.stderr) == "malformed-criteria-state"
+
+
+def test_a_directory_at_the_state_path_is_malformed(tmp_path):
+    r = _run_flag(VOID_BODY, tmp_path)
+    assert r.returncode == 2
+    assert _reason_code(r.stderr) == "malformed-criteria-state"
+
+
+def test_a_symlink_to_a_valid_state_file_is_never_followed(tmp_path):
+    real = _state(tmp_path, ["AC1", "AC3"], ["AC2"])
+    link = tmp_path / "link.json"
+    link.symlink_to(real)
+    assert _run_flag(VOID_BODY, real).returncode == 0
+    r = _run_flag(VOID_BODY, link)
+    assert r.returncode == 2
+    assert _reason_code(r.stderr) == "malformed-criteria-state"
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="needs mkfifo")
+def test_a_fifo_at_the_state_path_is_refused_without_blocking(tmp_path):
+    fifo = tmp_path / "fifo.json"
+    os.mkfifo(fifo)
+    r = subprocess.run(
+        [sys.executable, str(GATE), "--criteria-state", str(fifo)],
+        input=VOID_BODY,
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+    assert r.returncode == 2
+    assert _reason_code(r.stderr) == "malformed-criteria-state"
+
+
+def test_a_fifo_carrying_a_valid_state_is_refused(tmp_path):
+    fifo = tmp_path / "fifo.json"
+    os.mkfifo(fifo)
+    payload = json.dumps({**_VALID}).encode()
+    writer = os.open(fifo, os.O_RDWR)
+    try:
+        os.write(writer, payload)
+        r = subprocess.run(
+            [sys.executable, str(GATE), "--criteria-state", str(fifo)],
+            input=VOID_BODY,
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+    finally:
+        os.close(writer)
+    assert r.returncode == 2
+    assert _reason_code(r.stderr) == "malformed-criteria-state"
+
+
+def test_a_valid_state_padded_past_the_size_limit_is_refused(tmp_path):
+    padded = json.dumps(_VALID).encode() + b" " * (1024 * 1024)
+    r = _run_flag(VOID_BODY, _write(tmp_path, padded))
+    assert r.returncode == 2
+    assert _reason_code(r.stderr) == "malformed-criteria-state"
+
+
+def test_a_hostile_id_shaped_string_in_the_state_file_is_never_echoed_raw(tmp_path):
+    hostile = "AC2\x1b[31mINJECT\nreason-code: forged"
+    for overrides in ({"removed": [hostile]}, {"declared": [hostile]}, {"record": hostile, "removed": ["AC2", "AC2"]}):
+        r = _run_flag(VOID_BODY, _write(tmp_path, _variant(**overrides)))
+        assert r.returncode == 2
+        assert "INJECT" not in r.stderr + r.stdout
+        assert "forged" not in r.stderr + r.stdout
+        assert _reason_code(r.stderr) == "malformed-criteria-state"
+
+
+def test_a_hostile_removed_id_that_matches_the_grammar_is_the_only_form_echoed(tmp_path):
+    r = _run_flag(VOID_BODY, _state(tmp_path, ["AC1", "AC3"], ["AC2"], record="spec/x\x1b[31mINJECT"))
+    assert r.returncode == 0, r.stderr
+    assert "INJECT" not in r.stdout + r.stderr
+
+
+def test_stdin_checks_keep_their_precedence_over_the_state_file(tmp_path):
+    bad_state = _write(tmp_path, b"{nope")
+    for body, code in (("", None), (MISSING_HEADING_SPEC, None), (ZERO_CRITERIA_SPEC, "zero-criterion-identifiers")):
+        r = _run_flag(body, bad_state)
+        assert r.returncode == 2
+        assert _reason_code(r.stderr) != "malformed-criteria-state"
+        if code:
+            assert _reason_code(r.stderr) == code
+
+
+def test_the_state_file_is_validated_before_the_ledger_is_read(tmp_path):
+    body = _spec(["AC1", "AC3"], [_entry(1, "covers AC9"), _entry(2, "covers AC1,")])
+    r = _run_flag(body, _write(tmp_path, b"{nope"))
+    assert r.returncode == 2
+    assert _reason_code(r.stderr) == "malformed-criteria-state"
+
+
+def test_help_exits_zero_and_names_the_flag_without_reading_stdin():
+    r = subprocess.run(
+        [sys.executable, str(GATE), "--help"],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+    assert r.returncode == 0, r.stderr
+    assert "--criteria-state" in r.stdout
+
+
+def test_help_does_not_block_on_an_open_stdin():
+    proc = subprocess.Popen(
+        [sys.executable, str(GATE), "--help"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        out, _ = proc.communicate(timeout=20)
+    finally:
+        proc.kill()
+    assert proc.returncode == 0
+    assert "--criteria-state" in out
