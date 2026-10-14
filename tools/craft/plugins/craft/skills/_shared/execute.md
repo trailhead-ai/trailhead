@@ -683,8 +683,9 @@ The graph is not frozen at plan time — reshape it as reality demands:
 
 - **Split** — a task turns out too large or has an internal ordering. Create the new child tasks
   (`lore record create --kind task … --parent <parent-name>`), wire `--depends-on` edges between
-  them and to the original's dependents, then set the original task `superseded` (or `dropped`) so
-  it drops out of the runnable set. Note why in the parent body.
+  them and to the original's dependents, then retire the original with
+  `lore record supersede task/<original> --by task/<child>`, run once per new child (the original
+  gains each child's edge), so it drops out of the runnable set. Note why in the parent body.
 - **Append** — new work surfaces mid-execution. Create a fresh child task under the parent with the
   right `--depends-on` edges; the ordering sequences it automatically.
 
@@ -1292,10 +1293,10 @@ troubleshooting, architecture) where fresh eyes matter.
    planning: dispatch the `planner` subagent (isolated, Opus) or invoke the `planning` skill inline.
    Do NOT use `EnterPlanMode` — plan mode blocks writes to the plan vault.
 3. **Drop the task** — the feature doesn't need this part. Reshape the child task record to
-   `superseded` (or `dropped`) via `lore record update`, with the why-note in the **same
-   invocation** as the flip (`--status superseded --diff`, piping the diff that appends the note),
-   running the note through the credential-pattern scrub first. `superseded` freezes the body, so a
-   note written after the flip is refused. Continue with remaining tasks.
+   `dropped` via `lore record update`, with the why-note in the **same invocation** as the flip
+   (`--status dropped --diff`, piping the diff that appends the note), running the note through the
+   credential-pattern scrub first. No successor exists, so this is not a supersession. `dropped`
+   freezes the body, so a note written after the flip is refused. Continue with remaining tasks.
 
 **If the run ends here** (none of the above resolves it in-session): write `blocked` on the plan
 (`task/<parent-name>`) — see [Blocked-Path Write](#blocked-path-write).

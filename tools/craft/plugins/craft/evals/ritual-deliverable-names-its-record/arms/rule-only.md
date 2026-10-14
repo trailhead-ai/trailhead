@@ -71,7 +71,9 @@ selection. Each refusal names a remedy: a `planned` spec has already been planne
 `/craft:plan`'s still-live topic-rooted path — look up its plan parent
 (`lore search "kind:task related-spec:<spec-name>"`) and continue with `/craft:execute` against it
 rather than slicing here. A `superseded` or `dropped` spec shares the remedy the complete guard
-below states.
+below states. A `ready` spec that still carries a `craft/supersedes` label was flipped but its
+predecessor never retired; the query that lists every spec stranded this way is
+`lore search 'kind:spec status:ready has:label.craft.supersedes'`.
 
 If the spec's status is already `complete`, report that the slice loop for this spec has already
 closed out and stop — do not choose another slice. Its remedy: if further work belongs here, it

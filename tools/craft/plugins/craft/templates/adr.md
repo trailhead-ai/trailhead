@@ -5,9 +5,10 @@ Keep the whole record to roughly one screenful: a decision that doesn't fit a sc
 usually two decisions.
 
 Provenance never goes in prose:
-- Source/derived specs, absorbed decisions, and a superseded predecessor are recorded via
-  `related:` metadata (e.g. `--related spec=<name>`, `--related decision=<name>`,
-  `--related adr=<predecessor-adr>`), never described here. -->
+- Source/derived specs and absorbed decisions are recorded via `related:` metadata (e.g.
+  `--related spec=<name>`, `--related decision=<name>`), never described here. A superseded
+  predecessor is recorded by distill's `lore record supersede adr/<old> --by adr/<new>`, not by a
+  `related:` edge. -->
 
 ## Context
 <!-- 2-4 sentences: the forces at play that made a decision necessary. -->

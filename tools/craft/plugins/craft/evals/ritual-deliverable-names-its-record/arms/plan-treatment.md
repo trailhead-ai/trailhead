@@ -414,12 +414,12 @@ canonical "what / why" doc; the plan is the "how".
 **If this plan consumed a routed task** — the argument was a `task` record carrying refine's
 `route=plan` sidecar label (and its `## Refine — unresolved` section) — close the loop on the source
 record after the plan is written:
-`lore record update task/<source-name> --status superseded --related task=<parent-name> --unset-label route`
-— one write. The routing has been acted on: the new parent task is the live work item, the `related`
-edge preserves the source's captured payload, and a superseded source stops rendering a stale routed
-chip or next-step affordance on task boards. Never leave the consumed source `open` — two
-authoritative-looking open statements of the same intent is exactly the drift refine's
-promotion-clear rule exists to prevent.
+`lore record supersede task/<source-name> --by task/<parent-name>`, then
+`lore record update task/<source-name> --unset-label route`. The routing has been acted on: the new
+parent task is the live work item, the verb's `supersedes` edge preserves the source's captured
+payload, and a superseded source stops rendering a stale routed chip or next-step affordance on task
+boards. Never leave the consumed source `open` — two authoritative-looking open statements of the
+same intent is exactly the drift refine's promotion-clear rule exists to prevent.
 
 The parent-task body template (`${CLAUDE_PLUGIN_ROOT}/templates/plan.md`) carries these canonical
 sections — fill each in:
