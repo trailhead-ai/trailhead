@@ -34,6 +34,10 @@ SECOND_WORDING_REVISION = "06a3aa22"
 # report-citation bullet. Every third-wording arm and the fixture-derivation check read from it.
 THIRD_WORDING_REVISION = "2de62373"
 
+# The commit that carries slice step 8 with the instruction to name covered criteria by
+# identifier removed. The shipped-slice arm pins its slice skill and rules file to it.
+STEP8_REVISION = "b599c254"
+
 RULES = "tools/craft/plugins/craft/rules.md"
 SLICE_SKILL = "tools/craft/plugins/craft/skills/slice/SKILL.md"
 RELIABILITY_AGENT = "tools/craft/plugins/craft/agents/breaker.md"
@@ -65,6 +69,7 @@ ARM_SOURCES: dict[str, list[Source]] = {
         (RELIABILITY_AGENT, THIRD_WORDING_REVISION),
         (RULES, THIRD_WORDING_REVISION),
     ],
+    "shipped-slice.md": [(SLICE_SKILL, STEP8_REVISION), (RULES, STEP8_REVISION)],
     "baseline-advocate.md": [(ADVOCATE_AGENT, BASELINE_REVISION), (RULES, BASELINE_REVISION)],
     "third-advocate.md": [
         (ADVOCATE_AGENT, THIRD_WORDING_REVISION),

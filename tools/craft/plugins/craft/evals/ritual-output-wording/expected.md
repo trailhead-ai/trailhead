@@ -566,3 +566,19 @@ code reviewer are not measured. A manual re-run of this case is the signal to ta
 
 Two no-ritual runs, `third-noritual-2` and `-3`, were issued in one tool message and may have overlapped in time;
 each used its own throwaway directories. The other runs were dispatched one at a time.
+
+## Result, 2026-10-14 — the shipped-state slice arm passes both its conditions; step 8's edit is kept
+
+`shipped-slice` reads the slice skill and the rules file both at `b599c254`, the commit that carries slice step 8
+with the instruction to name covered criteria by identifier removed (the manifest constant `STEP8_REVISION`). The
+rules file at that commit is the third wording, unchanged since `2de62373`. Three runs, dispatched one at a time;
+every run exited 0 and none was excluded.
+
+| Prefix | Check | Grader's count | Condition | Holds |
+|---|---|---|---|---|
+| `shipped-slice` | `criterion-mention` over the statement | `text-with-number` 3 of 3 | clean majority `text-with-number` | yes |
+| `shipped-slice` | `covers-field` | `gate-shape` 3 of 3 | every graded run `gate-shape` | yes |
+
+Read by eye, each statement lists the two covered criteria by their own text with the number trailing, and the final
+line is the bare list (`AC3, AC4`; one run wrote it behind the `**Covers:**` label, which the amendment above
+strips). The `partially covers` line said none in all three. The step 8 edit stays.

@@ -707,6 +707,10 @@ CAPTURE_EXPECTATIONS = {
         ("criterion-mention", ["--drop-value-line"], "text-with-number"),
         ("covers-field", [], "gate-shape"),
     ],
+    "shipped-slice": [
+        ("criterion-mention", ["--drop-value-line"], "text-with-number"),
+        ("covers-field", [], "gate-shape"),
+    ],
     "third-reviewer-rules-only": [
         ("reviewer-report", [], "template-shape"),
         ("criterion-mention", [], "nickname"),
