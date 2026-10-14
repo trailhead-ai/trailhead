@@ -599,6 +599,12 @@ def _format_history(record_id: str, history: list) -> list[str]:
         lines.append(f"by: {_neutral(_printable(str(entry.get('by', ''))))}")
         lines.append(f"initiated-by: {_neutral(_printable(str(entry.get('initiated-by', ''))))}")
         lines.append(f"reason: {_neutral(_printable(str(entry.get('reason', '')), keep=chr(10)))}")
+        criteria = entry.get("criteria")
+        removed = criteria.get("removed") if isinstance(criteria, dict) else None
+        if isinstance(removed, list) and removed:
+            lines.append(
+                "removed criteria: " + ", ".join(_neutral(_printable(str(i))) for i in removed)
+            )
         lines.append("diff:")
         diff = _printable(str(entry.get("diff", "")), keep="\n\t")
         lines.extend(_neutral(diff).rstrip("\n").split("\n"))
@@ -2215,6 +2221,23 @@ def _cmd_record_amend(args) -> int:
     record that does not exist; a ``session`` record, which ``record update`` and
     flush write under the session lock.
 
+    **Criterion numbering (spec records, any status).** A spec's ``**ACn.**``
+    criteria keep their numbers for good. An amend may remove criteria, edit text
+    in place, and add criteria from the next unused number upward; it is refused,
+    writing nothing, if it skips a number, reuses a removed number, relabels a
+    criterion's text under another number, or leaves the body without exactly one
+    ``## Acceptance Criteria`` heading. Each removal is recorded in the entry as
+    ``criteria: {"removed": [...]}`` and printed as ``removed criteria: ...`` so a
+    removal you did not intend (a mangled ``**ACn.**`` marker reads as one) is
+    visible at once; ``lore record amend --revert-to N`` restores it. ``--revert-to``
+    skips the numbering checks (it restores a body that already existed) but still
+    records what it removes. Named limits: renumber detection matches criterion
+    text, so a relabel that also rewords escapes it; a criterion removed outside
+    amend (for example while the spec was a draft) is not recorded, so its number
+    is not protected; and an older lore build refuses writes to a spec once an
+    entry carries ``criteria`` (reads are unaffected), the only recovery being to
+    update lore.
+
     **The revision handshake.** ``--base REVISION`` (the SHA-256 of the body as
     ``record show`` printed it) is required with a full-body stdin and optional
     with ``--diff``. Under the write lock, after the implicit pull, it is compared
@@ -2231,6 +2254,7 @@ def _cmd_record_amend(args) -> int:
     from contextlib import ExitStack
 
     from .. import locking as locking_mod
+    from ..record import criteria as criteria_mod
     from ..record import model as record_model_mod
     from ..record import store as record_store_mod
     from . import resolve_state as resolve_state_mod
@@ -2384,6 +2408,30 @@ def _cmd_record_amend(args) -> int:
                     file=sys.stderr,
                 )
                 raise _UpdateAborted()
+
+            removed_now: list[str] = []
+            if location.kind.casefold() == "spec":
+                try:
+                    removed_now, refusals = criteria_mod.check_criteria_amend(
+                        stored_before, stored_after, stored_history
+                    )
+                except criteria_mod.CriteriaError as exc:
+                    print(
+                        f"error: {location.record_id} has a malformed change-history "
+                        f"criteria record ({exc}): amending would lose track of removed "
+                        "criteria. Restore the field from the record's vault git history "
+                        f"(git log -p -- {location.kind}/{location.name}.json), then "
+                        "amend again",
+                        file=sys.stderr,
+                    )
+                    raise _UpdateAborted()
+                if refusals and revert_to is None:
+                    for refusal in refusals:
+                        print(f"error: {refusal}", file=sys.stderr)
+                    print("nothing was written", file=sys.stderr)
+                    raise _UpdateAborted()
+            if removed_now:
+                entry["criteria"] = {"removed": removed_now}
             sidecar["change-history"] = [*stored_history, entry]
 
             dest_root, dest_shared = _resolve_current_vault_shared(location)
@@ -2410,6 +2458,8 @@ def _cmd_record_amend(args) -> int:
     from . import publish as publish_mod
 
     publish_mod.request_publish(dest_root)
+    if removed_now:
+        print("removed criteria: " + ", ".join(removed_now))
     print(new_id)
     return 0
 
@@ -2573,7 +2623,18 @@ def add_record_subparser(sub) -> None:
                "body stays in the diff and in vault git history. A record "
                "carrying change-history needs a lore new enough to know the "
                "field: an older lore refuses to write it (unsupported key "
-               "'change-history'); pull trailhead to fix that.",
+               "'change-history'); pull trailhead to fix that. "
+               "Spec criteria keep their numbers: an amend may remove criteria, "
+               "edit them in place, and add the next unused number, and is "
+               "refused (nothing written) if it skips a number, reuses a "
+               "removed one or relabels a criterion; --revert-to skips those "
+               "checks. Removals are recorded and printed as 'removed "
+               "criteria: ...'. Limits: renumber detection matches criterion "
+               "text, so a relabel that also rewords escapes it; a criterion "
+               "removed outside amend (e.g. in a draft) is not recorded, so "
+               "its number is not protected; an older lore refuses writes to a "
+               "spec once an entry carries 'criteria' (reads still work), and "
+               "only updating lore recovers it.",
     )
     p_record_amend.add_argument(
         "record_id",

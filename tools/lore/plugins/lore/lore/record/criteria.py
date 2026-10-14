@@ -200,6 +200,11 @@ def check_criteria_amend(
 
     removed_now = sorted((i for i in old_set - new_set if _canonical(i)), key=_number)
 
+    removed_in: dict[str, int] = {}
+    for number, entry in enumerate(history or [], start=1):
+        for ident in entry.get("criteria", {}).get("removed", []):
+            removed_in.setdefault(ident, number)
+
     ever = [_number(i) for i in old_set | recorded if _canonical(i)]
     next_unused = f"AC{max(ever, default=0) + 1}"
 
@@ -223,7 +228,9 @@ def check_criteria_amend(
     for ident in added:
         if ident in recorded:
             refusals.append(
-                f"{ident} was removed earlier and cannot be reused; the next unused number is {next_unused}"
+                f"{ident} was removed earlier and cannot be reused; the next unused number is "
+                f"{next_unused}. If it was removed by mistake, restore it with "
+                f"`lore record amend --revert-to {removed_in[ident]}`"
             )
         else:
             fresh.append(ident)
@@ -249,6 +256,9 @@ def check_criteria_amend(
         owners = old_text_ids.get(_body_text(text))
         if owners and ident not in owners:
             flagged.add(ident)
-            refusals.append(f"{ident} carries text that belongs to a different criterion; criteria are not renumbered")
+            refusals.append(
+                f"{ident} carries text that belongs to a different criterion; criteria are never "
+                f"relabelled: remove one and add the next number ({next_unused}) instead"
+            )
 
     return removed_now, refusals

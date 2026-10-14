@@ -195,6 +195,8 @@ permanently and sync to the team, so put no tokens, keys, passwords or key-shape
 reason or the new text. Amend cannot remove a secret already in the record: rotate the credential,
 then escalate to the operator for a history rewrite; never amend it out.
 
+On a `spec`, amend keeps `**ACn.**` criterion numbers stable and records removals: it refuses (writing nothing) a skipped, reused or relabelled number, prints `removed criteria: ...` for each removal, and `--revert-to` restores one; its limits are that a relabel which also rewords escapes detection, a criterion removed outside amend (e.g. in a draft) is unprotected, and an older lore refuses writes to a spec once an entry carries the new `criteria` field, so only updating lore recovers it.
+
 **A transcript imported in error comes out with `lore record delete`.** That
 removes it from the working copy only — git history retains every imported
 byte, so deleting after the fact does not unsay it. This is why redaction
