@@ -222,21 +222,36 @@ consistently defeats append-only undetected — cryptographic provenance would c
 of scope for a markdown section in a git-backed vault. Neither limit is a defect to fix here; both
 are named so a future reader does not mistake either gate for more than it certifies.
 
-Only now — with the ledger reconciled and certified — is the candidate set derived. First read the
-spec's declared and removed criteria into a temp file, fail-closed:
+Only now — with the ledger reconciled and certified — is the candidate set derived. Each Bash call
+is a fresh shell, so no shell variable survives from one to the next: carry the state file's path
+between calls as the literal value `mktemp` printed. First create the file and read the path it
+prints:
 
 ```sh
-STATE=$(mktemp)
-lore record criteria spec/<spec-name> > "$STATE"
+mktemp
 ```
 
-Never a predictable path. A non-zero exit refuses this pass, as a failed reconcile search does. When
-the failure is lore not recognising the `criteria` subcommand, the installed lore predates it: the
-remedy is to update lore (`trailhead update`) and re-run. Then pipe the freshly-read spec body
-through the candidate-set gate with that state:
+Never a predictable path. Then read the spec's declared and removed criteria into exactly that path,
+fail-closed (substitute the printed path for `<state-path>`):
 
 ```sh
-lore record show spec/<spec-name> | ${CLAUDE_PLUGIN_ROOT}/scripts/candidate_set.py --criteria-state <path-to-temp-criteria-state.json>
+lore record criteria spec/<spec-name> > <state-path>
+```
+
+A non-zero exit refuses this pass, as a failed reconcile search does. When the failure is lore not
+recognising the `criteria` subcommand, the installed lore predates it: the remedy is to update lore
+(`trailhead update`) and re-run. Then pipe the freshly-read spec body through the candidate-set gate
+with that same path:
+
+```sh
+lore record show spec/<spec-name> | ${CLAUDE_PLUGIN_ROOT}/scripts/candidate_set.py --criteria-state <state-path>
+```
+
+Once the gate has run — whether it passed or refused — remove the state file, then act on the gate's
+result:
+
+```sh
+rm -f <state-path>
 ```
 
 Its `candidates:` token, on exit 0, is the candidate set; its `complete-eligible:` token feeds step
