@@ -1,0 +1,12 @@
+## Findings
+- [Critical] None of the four tasks has a test contract: nothing pins AC2's replacement-price cap, AC3's ten-pound threshold, or AC5's same-day stop, so the build can ship with any of them broken. Suggested: give each task failing-first tests. Task 2: for each category, a fee one day either side of the cap. Task 3: balances of £9.99, £10.00 and £10.01, plus the override path. Task 2/5: a return scanned at 22:00 against a run at 00:05.
+- [Critical] The nightly job (tasks 1 and 2) can fail without anyone seeing it, and it can't be safely re-run: if the 00:05 run crashes or is skipped, no loans are flagged and no fees accrue, and nothing alerts anyone. A manual re-run, or the return-time run in task 2, can also charge the same day twice. Suggested: key fee charges on (loan, date) so a re-run changes nothing. Record the last successful run date, catch up on missed days, and alert when a run is missing or fails.
+- [Important] The plan contradicts AC5. A return scanned after closing is stamped with the next morning's date, so the 00:05 run still sees the loan as open and charges one more day. Suggested: stamp the business day the return is scanned in. Add a test for an after-hours return across the 00:05 run.
+- [Important] AC1 can't be met. Overdue flags are written at 00:05, outside the one-minute window, and the desk screen only refreshes when it loads. Suggested: work out overdue status from the due date when the screen is read, or move the job to 00:00 and add a test that checks the time.
+- [Important] Task 3 stores the override reason but not who granted it, and a note may not show up as history (AC4). Suggested: write an override record with the librarian's ID, the reason and the time, and test that it appears in the borrower's history.
+- [Important] There's no fee ledger, only a balance. Without per-charge and per-waiver entries, AC7's reconciliation can't be built or checked, and wrong charges can't be found or reversed. Suggested: an append-only ledger with the balance derived from it.
+- [Important] Nothing in the plan covers AC6 (reminders, sent at most once) or AC7 (the monthly report).
+- [Minor] The plan doesn't say what happens around clock changes (00:05 local time on daylight-saving days) or what happens when an item is already at its cap.
+
+## Confidence
+High: the plan and spec are short and complete, and each finding comes straight from what they say.
