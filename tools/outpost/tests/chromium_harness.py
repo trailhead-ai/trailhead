@@ -1,10 +1,13 @@
 """Run a page folder in a real headless browser and read back a probe's JSON.
 
-``run_probe(page_dir, probe_js)`` copies the page folder to a temp dir, injects a
-wrapper into the copy's ``index.html`` that waits for ``document.fonts.ready`` and
-for ``data-pad-ready`` on ``<html>``, runs ``probe_js`` (the body of an async
+``run_probe(page_dir, probe_js)`` copies the page folder to a temp dir and adds a
+probe script file beside the copy's ``index.html``, loaded through a plain
+``<script src>`` so a page whose policy forbids inline script still runs it. The
+probe waits for ``document.fonts.ready`` and for ``data-pad-ready`` on ``<html>``, runs ``probe_js`` (the body of an async
 function that ``return``s a JSON-serialisable value, and may ``await``), and
-dumps the DOM from a headless browser. The wrapper writes the outcome into
+dumps the DOM from a headless browser. ``entry`` names the file the browser opens and
+``inject_into`` the file that gets the probe (default: the entry), so a test can open a
+page that redirects and probe the page it lands on. The wrapper writes the outcome into
 ``<pre id="probe-result">``; the value is parsed back out and returned.
 
 Browser lookup (``find_browser``): ``$OUTPOST_TEST_BROWSER``, then
@@ -42,8 +45,9 @@ MAC_APP_BUNDLES = (
 _FULL_CHROME_NAMES = ("google-chrome", "google-chrome-stable", "chromium", "chromium-browser")
 _RESULT_RE = re.compile(r'<pre id="probe-result"[^>]*>(.*?)</pre>', re.DOTALL)
 
-_WRAPPER = """<script>
-(function () {
+PROBE_FILE = "pad-probe.js"
+
+_WRAPPER = """(function () {
   function report(payload) {
     var pre = document.createElement("pre");
     pre.id = "probe-result";
@@ -70,7 +74,6 @@ _WRAPPER = """<script>
       function (error) { report({ ok: false, error: String((error && error.message) || error) }); }
     );
 })();
-</script>
 """
 
 
@@ -170,8 +173,8 @@ def _launch(argv: list[str], browser: Browser, timeout: float, env: Mapping[str,
     return stdout
 
 
-def _inject(index_html: str, probe_js: str) -> str:
-    wrapper = _WRAPPER % probe_js
+def _inject(index_html: str) -> str:
+    wrapper = f'<script src="{PROBE_FILE}"></script>\n'
     pos = index_html.lower().rfind("</body>")
     if pos == -1:
         return index_html + wrapper
@@ -187,6 +190,8 @@ def run_probe(
     virtual_time_budget: int = 5000,
     env: Mapping[str, str] | None = None,
     lookup: Callable[[], Browser | None] | None = None,
+    entry: str = "index.html",
+    inject_into: str | None = None,
 ):
     env = os.environ if env is None else env
     browser = (lookup or (lambda: find_browser(env)))()
@@ -200,8 +205,10 @@ def run_probe(
     with tempfile.TemporaryDirectory(prefix="chromium-harness-") as tmp:
         page = Path(tmp) / "page"
         shutil.copytree(page_dir, page)
-        index = page / "index.html"
-        index.write_text(_inject(index.read_text(), probe_js))
+        target = page / (inject_into or entry)
+        target.write_text(_inject(target.read_text()))
+        (target.parent / PROBE_FILE).write_text(_WRAPPER % probe_js)
+        index = page / entry
 
         argv = [str(browser.path)]
         if not browser.is_headless_shell:
