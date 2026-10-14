@@ -176,7 +176,7 @@ def test_a_revert_that_restores_a_removed_criterion_empties_removed(tmp_path):
         "record": rid, "declared": ["AC1", "AC2", "AC3"], "removed": []}
 
 
-def test_criteria_help_is_reachable_from_the_parser(tmp_path):  # inert-gate: allow seam smoke: the subcommand is wired into the real parser
+def test_criteria_help_is_reachable_from_the_parser(tmp_path):  # inert-gate: allow seam smoke: wired into parser
     vault, state = _make_vault(tmp_path)
     r = _run(["record", "criteria", "--help"], vault=vault, state_dir=state)
     assert r.returncode == 0, r.stderr
