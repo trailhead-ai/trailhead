@@ -591,3 +591,15 @@ edit (`template-shape` and `bare`; `template-shape` and `nickname`).
 After the `shipped-slice` runs, slice step 8 was re-wrapped to the prose column the wrap gate enforces. The change
 is whitespace only, so the shipped step differs from the text the `shipped-slice` arm measured (pinned at
 `b599c254`) in line breaks alone.
+
+## Note, 2026-10-14 — two departures from what the results above read as
+
+The `shipped-slice` arm was registered above as reading the slice skill and the rules file "both from the working
+tree". It was built pinned at `b599c254`, as the child task specified. The working tree matched that commit's content
+when the runs happened, so the measurement is the same; the arm is pinned, not live.
+
+The two `third-reviewer-rules-only` runs the grader reads as `bare` (1 and 3) are not reports in the baseline's form
+when read. Run 1 puts the number first with the criterion's quoted text after it (for example `AC5, "returning an
+overdue i…`). Run 3 mixes text-before-number mentions with a short label (`the reminder messages (AC6)`). The grader's
+precedence returns `bare` for both, so "2 bare" understates how far the arm moved without the bullet. The keep
+decision for the bullet is unchanged: the fuller reading only strengthens it.
