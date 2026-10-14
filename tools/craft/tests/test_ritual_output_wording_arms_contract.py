@@ -30,9 +30,15 @@ FIRST_WORDING_REVISION = "b2a8affc"
 # The commit that carries the second wording of the rules section.
 SECOND_WORDING_REVISION = "06a3aa22"
 
+# The commit that carries the third wording of the rules section and the council template's
+# report-citation bullet. Every third-wording arm and the fixture-derivation check read from it.
+THIRD_WORDING_REVISION = "2de62373"
+
 RULES = "tools/craft/plugins/craft/rules.md"
 SLICE_SKILL = "tools/craft/plugins/craft/skills/slice/SKILL.md"
 RELIABILITY_AGENT = "tools/craft/plugins/craft/agents/breaker.md"
+ADVOCATE_AGENT = "tools/craft/plugins/craft/agents/advocate.md"
+COUNCIL_TEMPLATE = "tools/craft/plugins/craft/skills/_shared/council.md"
 
 # A source is (repo-relative path, revision). A revision of None reads the working tree.
 Source = tuple[str, str | None]
@@ -50,6 +56,20 @@ ARM_SOURCES: dict[str, list[Source]] = {
     "second-noritual.md": [(RULES, SECOND_WORDING_REVISION)],
     "second-slice-rules-only.md": [(SLICE_SKILL, BASELINE_REVISION), (RULES, SECOND_WORDING_REVISION)],
     "second-reviewer.md": [(RELIABILITY_AGENT, None), (RULES, SECOND_WORDING_REVISION)],
+    "third-noritual.md": [(RULES, THIRD_WORDING_REVISION)],
+    "third-slice-rules-only.md": [
+        (SLICE_SKILL, BASELINE_REVISION),
+        (RULES, THIRD_WORDING_REVISION),
+    ],
+    "third-reviewer.md": [
+        (RELIABILITY_AGENT, THIRD_WORDING_REVISION),
+        (RULES, THIRD_WORDING_REVISION),
+    ],
+    "baseline-advocate.md": [(ADVOCATE_AGENT, BASELINE_REVISION), (RULES, BASELINE_REVISION)],
+    "third-advocate.md": [
+        (ADVOCATE_AGENT, THIRD_WORDING_REVISION),
+        (RULES, THIRD_WORDING_REVISION),
+    ],
 }
 
 
@@ -158,3 +178,38 @@ def test_a_manifest_entry_with_no_file_is_reported(tmp_path: Path):
 def test_a_directory_matching_its_manifest_reports_nothing(tmp_path: Path):
     (tmp_path / "declared.md").write_text("a")
     assert manifest_mismatches({"declared.md": []}, tmp_path) == (set(), set())
+
+
+FIXTURES_DIR = ARMS_DIR.parent / "fixtures"
+TEMPLATE_ANCHOR = "- One-line Confidence at the end"
+
+TEMPLATE_FIXTURES = [
+    ("prompt-reviewer.md", "prompt-reviewer-template.md"),
+    ("prompt-advocate.md", "prompt-advocate-template.md"),
+]
+
+
+def line_after_anchor(text: str) -> str:
+    lines = text.splitlines()
+    assert lines.count(TEMPLATE_ANCHOR) == 1, f"anchor appears {lines.count(TEMPLATE_ANCHOR)} times"
+    return lines[lines.index(TEMPLATE_ANCHOR) + 1]
+
+
+def with_line_inserted_after_anchor(text: str, line: str) -> str:
+    lines = text.splitlines()
+    assert lines.count(TEMPLATE_ANCHOR) == 1, f"anchor appears {lines.count(TEMPLATE_ANCHOR)} times"
+    at = lines.index(TEMPLATE_ANCHOR) + 1
+    return "\n".join([*lines[:at], line, *lines[at:]]) + "\n"
+
+
+@pytest.mark.parametrize("plain,template", TEMPLATE_FIXTURES, ids=[t for _, t in TEMPLATE_FIXTURES])
+def test_template_fixture_is_its_plain_prompt_plus_the_line_the_council_template_carries(
+    plain: str, template: str
+):
+    shipped_line = line_after_anchor(read_source(COUNCIL_TEMPLATE, THIRD_WORDING_REVISION))
+    plain_text = (FIXTURES_DIR / plain).read_text(encoding="utf-8")
+    template_text = (FIXTURES_DIR / template).read_text(encoding="utf-8")
+    assert template_text == with_line_inserted_after_anchor(plain_text, shipped_line), (
+        f"{template} is not {plain} with the council template's line after "
+        f"{TEMPLATE_ANCHOR!r} at {THIRD_WORDING_REVISION} inserted at that position"
+    )
