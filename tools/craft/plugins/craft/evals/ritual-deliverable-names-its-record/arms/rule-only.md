@@ -399,11 +399,11 @@ take the early-stop path described in step 6 above.
 **Before the parent task record is written and before any planning is invoked**, state the chosen
 slice and its value claim — or, on the enabler path, its written justification — and its
 visual-surface call, either the enumerated states or an explicit statement that this slice touches
-no visual surface, to the operator — and, on the same footing as those two, by identifier, which
-spec acceptance criteria the chosen slice makes green; the call is never left unstated. On a spec
+no visual surface, to the operator — and, on the same footing as those two, which spec
+acceptance criteria the chosen slice makes green; the call is never left unstated. On a spec
 predating the `**ACn.**` convention — one declaring no criterion identifiers at all — there is
-nothing to state by identifier; say so plainly instead, rather than inventing one. On the enabler
-path, there is also nothing to state by identifier — an enabler makes no criterion green by
+nothing to name; say so plainly instead, rather than inventing one. On the enabler
+path, there is also nothing to name — an enabler makes no criterion green by
 definition — so state that plainly too, on the same footing as the legacy case, rather than naming a
 criterion it does not cover. Whether the slice touches a visual surface is judged against
 `_shared/slice.md`'s state-coverage reference, a judgment call this skill states rather than derives
@@ -414,12 +414,12 @@ asked to accept. Nothing in this procedure writes the parent task record or hand
 `/craft:plan` ahead of that statement: the claim is stated while it is still cheap to reject, not
 discovered after the parent task already exists.
 
-**On the same footing as the full-coverage call above, and never conflated with it,** state by
-identifier which spec acceptance criteria the chosen slice makes only partially green — never left
+**On the same footing as the full-coverage call above, and never conflated with it,** state which
+spec acceptance criteria the chosen slice makes only partially green — never left
 unstated, and never folded into the full-coverage list as though the slice finished them. A slice
 claiming no partial coverage states that plainly too, rather than leaving the omission ambiguous. On
-a spec predating the `**ACn.**` convention, or on the enabler path, there is nothing to state by
-identifier here either — say so plainly, on the same footing as the legacy and enabler cases above,
+a spec predating the `**ACn.**` convention, or on the enabler path, there is nothing to name
+here either — say so plainly, on the same footing as the legacy and enabler cases above,
 rather than inventing one.
 
 The value claim is this skill's own summary of why the slice matters — **never a verbatim excerpt of
