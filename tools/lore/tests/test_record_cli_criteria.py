@@ -181,3 +181,15 @@ def test_criteria_help_is_reachable_from_the_parser(tmp_path):  # inert-gate: al
     r = _run(["record", "criteria", "--help"], vault=vault, state_dir=state)
     assert r.returncode == 0, r.stderr
     assert "record criteria" in r.stdout.split("\n\n")[0]
+
+
+@pytest.mark.parametrize(
+    "content",
+    ['<<<<<<< HEAD\n{"kind": "spec"}\n=======\n{"kind": "spec"}\n>>>>>>> other\n', "[1, 2]"],
+    ids=["conflict-markers", "not-an-object"],
+)
+def test_an_unreadable_sidecar_is_refused_instead_of_printing_empty_removed(tmp_path, content):
+    vault, state, rid = _make_spec(tmp_path, range(1, 4))
+    kind, name = rid.split("/", 1)
+    (vault / kind / f"{name}.json").write_text(content, encoding="utf-8")
+    _assert_clean_refusal(_criteria(vault, state, rid))

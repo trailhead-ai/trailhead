@@ -535,7 +535,9 @@ def change_history_reason_problem(reason: object) -> str | None:
     return None
 
 
-_CRITERION_ID = re.compile(r"AC[1-9][0-9]*")
+_NEWER_LORE_HINT = "this record may have been written by a newer lore; update trailhead"
+
+_CRITERION_ID = re.compile(r"AC[1-9][0-9]{0,8}")
 
 
 def _criteria_problem(criteria: object) -> str | None:
@@ -546,7 +548,7 @@ def _criteria_problem(criteria: object) -> str | None:
     if not isinstance(removed, list) or not removed:
         return "'removed' must be a non-empty list of criterion identifiers"
     if not all(isinstance(i, str) and _CRITERION_ID.fullmatch(i) for i in removed):
-        return "'removed' must hold identifiers of the form AC1, AC2, ... (no leading zeros)"
+        return "'removed' must hold identifiers of the form AC1, AC2, ... (no leading zeros, at most nine digits)"
     if len(set(removed)) != len(removed):
         return "'removed' must not repeat an identifier"
     return None
@@ -558,7 +560,7 @@ def _check_change_history_entry(key: str, index: int, entry: object) -> list[str
         return [f"{where} must be an object"]
     errors: list[str] = []
     for field in sorted(entry.keys() - _CHANGE_HISTORY_ENTRY_KEYS - {"criteria"}):
-        errors.append(f"{where} has unsupported field {field!r}")
+        errors.append(f"{where} has unsupported field {field!r}: {_NEWER_LORE_HINT}")
     for field in sorted(_CHANGE_HISTORY_ENTRY_KEYS - entry.keys()):
         errors.append(f"{where} is missing field {field!r}")
     if "at" in entry and not _is_iso8601_utc(entry["at"]):
@@ -688,8 +690,7 @@ def validate(sidecar: dict, kind: str | None = None) -> ValidationResult:
     for key in sidecar:
         if key not in schema:
             errors.append(
-                f"unsupported key {key!r}: this record may have been written by a newer"
-                " lore; update trailhead"
+                f"unsupported key {key!r}: {_NEWER_LORE_HINT}"
             )
 
     # --- required operator keys present. -------------------------------------

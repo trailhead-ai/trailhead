@@ -797,9 +797,12 @@ def _cmd_record_criteria(args) -> int:
     body = (
         loc.body_path.read_text(encoding="utf-8") if loc.body_path.exists() else ""
     )
-    history = record_store_mod.read_stored_change_history(loc.sidecar_path)
     try:
+        history = record_store_mod.read_stored_change_history_strict(loc.sidecar_path)
         state = criteria_mod.criteria_state(body, history)
+    except record_store_mod.SidecarUnreadableError as exc:
+        print(f"lore: {loc.record_id}: {exc}", file=sys.stderr)
+        return 1
     except criteria_mod.CriteriaError as exc:
         print(f"lore: {loc.record_id}: {exc}", file=sys.stderr)
         return 1

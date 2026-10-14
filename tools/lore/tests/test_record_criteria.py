@@ -293,7 +293,7 @@ def test_shift_renumber_is_refused():
     assert any("AC2" in r for r in refusals)
     renumber = [r for r in refusals if "AC2" in r]
     assert all("never relabelled" in r for r in renumber)
-    assert all("remove one" in r and "AC6" in r for r in renumber)
+    assert all("two amends" in r and "AC6" in r for r in renumber)
 
 
 def test_swapping_text_between_ids_is_refused():
@@ -405,3 +405,93 @@ def test_refusals_never_contain_criterion_text():
     assert len(refusals) >= 3
     for r in refusals:
         assert "ZZTOP" not in r
+
+
+# ------------------------------------------------ reverting to a duplicated heading
+
+
+def test_duplicate_heading_in_new_body_records_no_removals():
+    new = five() + "\n## Acceptance Criteria\n" + ac(6) + "\n"
+    removed, refusals = check_criteria_amend(five(), new, None)
+    assert removed == []
+    assert refusals
+
+
+def test_deleted_heading_in_new_body_still_records_every_old_id():
+    removed, refusals = check_criteria_amend(five(), "# Spec\nno section\n", None)
+    assert removed == [f"AC{n}" for n in range(1, 6)]
+    assert refusals
+
+
+# ------------------------------------------------ identifiers too long to be canonical
+
+
+def big(digits, lead="1"):
+    return "AC" + lead + "0" * (digits - 1)
+
+
+def test_nine_digit_id_is_canonical_and_ten_digit_is_not():
+    nine, ten = big(9), big(10)
+    old = spec(ac(1))
+    _, ok = check_criteria_amend(old, spec(ac(1), f"- **{nine}.** t"), None)
+    assert not any("non-canonical" in r for r in ok)
+    _, bad = check_criteria_amend(old, spec(ac(1), f"- **{ten}.** t"), None)
+    assert any("non-canonical" in r and "added" in r for r in bad)
+    assert not any(ten in r for r in bad)
+
+
+@pytest.mark.parametrize("digits", [10, 5000])
+def test_over_long_id_added_removed_or_repeated_is_refused_without_raising_or_echo(digits):
+    long_id = big(digits)
+    with_long = spec(ac(1), f"- **{long_id}.** t")
+    added = check_criteria_amend(spec(ac(1)), with_long, None)[1]
+    removed_ = check_criteria_amend(with_long, spec(ac(1)), None)[1]
+    repeated = check_criteria_amend(
+        with_long, spec(ac(1), f"- **{long_id}.** t", f"- **{long_id}.** u"), None
+    )[1]
+    for refusals in (added, removed_, repeated):
+        assert refusals
+        assert not any(long_id in r for r in refusals)
+    assert any("added" in r for r in added)
+    assert any("removed" in r for r in removed_)
+
+
+@pytest.mark.parametrize("digits", [10, 5000])
+def test_over_long_id_carried_over_unchanged_is_left_alone(digits):
+    body = spec(ac(1), f"- **{big(digits)}.** t")
+    assert check_criteria_amend(body, body, None) == ([], [])
+
+
+def test_a_nine_digit_id_carried_over_sets_the_next_unused_number_without_raising():
+    old = spec(ac(1), f"- **{big(9, '9')}.** t")
+    _, refusals = check_criteria_amend(old, old + ac(2) + "\n", None)
+    assert any("AC2 is not the next unused number; the next unused is AC900000001" in r for r in refusals)
+
+
+@pytest.mark.parametrize("digits", [10, 5000])
+def test_stored_history_with_an_over_long_removed_id_is_a_criteria_error(digits):
+    with pytest.raises(CriteriaError):
+        criteria_state(spec(ac(1)), hist([big(digits)]))
+    with pytest.raises(CriteriaError):
+        check_criteria_amend(spec(ac(1)), spec(ac(1)), hist([big(digits)]))
+
+
+# ------------------------------------------------ renumber and reuse messages
+
+
+def test_a_remove_and_re_add_in_one_amend_is_told_to_split_into_two_amends():
+    old = spec(ac(1), ac(2), ac(3))
+    new = spec(ac(1), ac(3), ac(4, "criterion number 2 text"))
+    _, refusals = check_criteria_amend(old, new, None)
+    moved = [r for r in refusals if "AC4" in r]
+    assert len(moved) == 1
+    assert "two amends" in moved[0]
+    assert "remove" in moved[0] and "criterion number" not in moved[0]
+
+
+def test_reuse_refusal_names_the_most_recent_entry_that_recorded_the_removal():
+    old = spec(ac(1), ac(3))
+    new = spec(ac(1), ac(2), ac(3))
+    _, refusals = check_criteria_amend(old, new, hist(["AC2"], ["AC9"], ["AC2"]))
+    assert "--revert-to 3" in refusals[0]
+    assert "--revert-to 1" not in refusals[0]

@@ -26,7 +26,9 @@ Invariants:
   :class:`CriteriaError`. Silently dropping a malformed entry would let a
   removed identifier be reused.
 - Error and refusal strings echo only canonical identifiers (``AC`` followed by
-  a positive integer without leading zeros), never body text.
+  a positive integer of at most nine digits without leading zeros), never body
+  text. Anything longer is non-canonical, so no integer conversion ever sees an
+  unbounded string.
 
 Lore carries its own copy of the criterion walk: plugins stand alone, so this
 module must not import craft. A parity test in craft's suite holds the walk in
@@ -42,7 +44,7 @@ from lore.record.sections import _content, _mask, _split_lines
 
 _HEADING_RE = re.compile(r"## Acceptance Criteria", re.IGNORECASE)
 _CRITERION_RE = re.compile(r"^-\s+\*\*(AC\d+)\.\*\*")
-_CANONICAL_RE = re.compile(r"AC[1-9][0-9]*")
+_CANONICAL_RE = re.compile(r"AC[1-9][0-9]{0,8}")
 
 
 class CriteriaError(ValueError):
@@ -120,7 +122,7 @@ def declared_criteria(body: str) -> list[tuple[str, str]]:
 
 def _recorded_removals(history: Any) -> dict[str, int]:
     """Each identifier *history* records as removed, mapped to the 1-based number
-    of the first entry that recorded it."""
+    of the most recent entry that recorded it."""
     if history is None:
         return {}
     if not isinstance(history, list):
@@ -142,7 +144,7 @@ def _recorded_removals(history: Any) -> dict[str, int]:
         for ident in ids:
             if not isinstance(ident, str) or not _canonical(ident):
                 raise CriteriaError("a change-history entry's criteria.removed holds a non-canonical identifier")
-            removed.setdefault(ident, number)
+            removed[ident] = number
     return removed
 
 
@@ -199,7 +201,11 @@ def check_criteria_amend(
     elif new_status == "none" and old_status != "none":
         refusals.append("the new body has no '## Acceptance Criteria' heading")
 
-    removed_now = sorted((i for i in old_set - new_set if _canonical(i)), key=_number)
+    removed_now = (
+        []
+        if new_status == "duplicate"
+        else sorted((i for i in old_set - new_set if _canonical(i)), key=_number)
+    )
 
     ever = [_number(i) for i in old_set | recorded.keys() if _canonical(i)]
     base = max(ever, default=0) + 1
@@ -209,7 +215,7 @@ def check_criteria_amend(
     repeated: set[str] = set()
     for ident in new_ids:
         (repeated if ident in seen else seen).add(ident)
-    for ident in sorted(repeated, key=lambda s: (not _canonical(s), _number(s))):
+    for ident in sorted(repeated, key=lambda s: (0, _number(s)) if _canonical(s) else (1, 0)):
         if _canonical(ident):
             refusals.append(f"{ident} is declared more than once")
         else:
@@ -254,7 +260,8 @@ def check_criteria_amend(
             flagged.add(ident)
             refusals.append(
                 f"{ident} carries text that belongs to a different criterion; criteria are never "
-                f"relabelled: remove one and add the next number ({next_unused}) instead"
+                f"relabelled: moving text to a new number takes two amends, first remove the "
+                f"old criterion, then add the next number ({next_unused})"
             )
 
     return removed_now, refusals

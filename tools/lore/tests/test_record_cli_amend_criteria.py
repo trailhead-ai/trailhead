@@ -116,7 +116,7 @@ def test_a_shift_renumber_is_refused_with_the_remove_one_guidance(tmp_path):
     edits = {n: f"criterion number {n + 1} text" for n in range(5, 42)}
     before = _snapshot(vault)
     r = _amend(vault, state, rid, _spec(range(1, 42), edits=edits))
-    _refused(vault, state, rid, r, "error:", "never relabelled", "remove one", "AC43")
+    _refused(vault, state, rid, r, "error:", "never relabelled", "two amends", "AC43")
     assert _snapshot(vault) == before
 
 
@@ -260,3 +260,31 @@ def test_model_refuses_a_malformed_criteria_field_naming_the_entry(bad):
     errors = record_model.validate(_sidecar_with(bad)).errors
     assert errors
     assert any("change-history" in e and "[0]" in e and "criteria" in e for e in errors)
+
+
+def test_reuse_after_remove_revert_remove_again_names_the_latest_recording_entry(tmp_path):
+    vault, state, rid = _make_spec(tmp_path, range(1, 4))
+    assert _amend(vault, state, rid, _spec([1, 2])).returncode == 0
+    assert _revert(vault, state, rid, 1).returncode == 0
+    assert _amend(vault, state, rid, _spec([1, 2])).returncode == 0
+    assert len(_sidecar(vault, rid)["change-history"]) == 3
+    r = _amend(vault, state, rid, _spec([1, 2, 3], edits={3: "brand new text"}))
+    _refused(vault, state, rid, r, "error:", "AC3", "AC4", "lore record amend --revert-to 3")
+    assert "--revert-to 1" not in r.stderr
+
+
+def test_model_names_the_newer_lore_when_a_history_entry_has_an_unknown_field():
+    sidecar = _sidecar_with({"removed": ["AC2"]})
+    sidecar["change-history"][0]["from-the-future"] = 1
+    errors = record_model.validate(sidecar).errors
+    assert any("from-the-future" in e and "newer lore" in e and "update trailhead" in e
+               for e in errors)
+    clean = record_model.validate(_sidecar_with({"removed": ["AC2"]})).errors
+    assert not any("update trailhead" in e for e in clean)
+
+
+def test_model_refuses_an_over_long_removed_id_and_takes_nine_digits():
+    assert record_model.validate(_sidecar_with({"removed": ["AC" + "9" * 9]})).errors == []
+    for long_id in ("AC" + "1" * 10, "AC1" + "0" * 4999):
+        errors = record_model.validate(_sidecar_with({"removed": [long_id]})).errors
+        assert any("change-history" in e and "criteria" in e for e in errors)
