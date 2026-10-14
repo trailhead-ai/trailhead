@@ -103,7 +103,10 @@ reads as an ordinary result, which is exactly the wrong report for a name that c
   should shape acceptance criteria or non-goals.
 - Never modify a prior spec. If this work supersedes one, create the new spec with
   `--label craft/supersedes=spec/<predecessor>` and never flip the predecessor here: it stays live
-  until the successor reaches `ready`, when the gauntlet's ready step retires it.
+  until the successor reaches `ready`, when the gauntlet's ready step retires it. The predecessor
+  name comes from a `lore search` result, so at label-write time it must match the full-string
+  pattern `^spec/[A-Za-z0-9._-]+$` (no whitespace or newline); a name that fails is refused and
+  reported, never substituted, quoted or escaped into the label.
 
 **Resolve maturity for every repository the work touches, before grilling begins.** Enumerate those
 repositories the same way `_shared/execute.md`'s push mechanics and `drive/SKILL.md` step 5 already
