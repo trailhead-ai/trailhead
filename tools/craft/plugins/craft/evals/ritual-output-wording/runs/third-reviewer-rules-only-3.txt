@@ -1,0 +1,13 @@
+## Findings
+- [Critical] None of the four tasks has a test contract: nothing pins the fee cap, the £10 threshold, or the return-day stop, so the fee calculator could charge past the replacement price or block a borrower owing exactly £10.00 and still ship as "done". Suggested: give each task failing-first tests on its deciding boundaries, including a balance of £10.00 against £10.01, a fee one day before and one day past the cap, a return before and after closing time, and the override path.
+- [Critical] The first nightly run on production is an unpreviewed backfill: on night one, every loan that is already past due gets flagged and charged at once, possibly for every day it has been late. That could block checkouts for a large share of borrowers, and the plan gives no dry run and no way to reverse it. Suggested: add a dry-run mode that reports who would be flagged, charged and blocked. Decide the start date for charging existing overdue loans, and record charges as ledger rows tagged with the job run so a bad run can be reversed.
+- [Important] The fee job is not safe to run twice. If it is retried, or the 00:05 run overlaps a return, the same day gets charged twice. Suggested: key each charge on (loan, date) with a unique constraint.
+- [Important] A failed or skipped nightly run is invisible. Fees and flags go stale without anything showing it, and the next run does not catch up. Suggested: record the last successful run, alert when it is missing, and have each run charge every day not yet charged.
+- [Important] The plan contradicts its own spec. Stamping after-closing returns with the next morning's date lets the 00:05 job charge one more day. That breaks "returning an overdue item stops the fee from growing the same day, even if the return is scanned after closing time" (AC5).
+- [Important] A job at 00:05 cannot meet "a borrower whose loan passes its due date is shown as overdue on the desk screen within one minute of the date rolling over" (AC1).
+- [Important] The override note stores only the reason, not who granted it. AC4 requires the override to record who granted it as well as the reason given (AC4).
+- [Important] No task covers the reminder messages (AC6) or the monthly fees report (AC7). That includes the check that each category's charged and waived totals match the per-borrower ledgers (AC7).
+- [Minor] It is unclear which clock and time zone "local time" means. Clock-change nights could skip a run or run it twice.
+
+## Confidence
+High. The gaps come straight from reading the plan against the spec. The backfill risk assumes some loans are already overdue when this goes live.

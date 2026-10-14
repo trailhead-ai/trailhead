@@ -702,6 +702,27 @@ CAPTURE_EXPECTATIONS = {
         ("reviewer-report", [], "template-shape"),
         ("criterion-mention", [], "nickname"),
     ],
+    "third-noritual": [("criterion-mention", [], "text-with-number")],
+    "third-slice-rules-only": [
+        ("criterion-mention", ["--drop-value-line"], "text-with-number"),
+        ("covers-field", [], "gate-shape"),
+    ],
+    "third-reviewer-rules-only": [
+        ("reviewer-report", [], "template-shape"),
+        ("criterion-mention", [], "nickname"),
+    ],
+    "third-reviewer": [
+        ("reviewer-report", [], "template-shape"),
+        ("criterion-mention", [], "bare"),
+    ],
+    "baseline-advocate": [
+        ("reviewer-report", [], "template-shape"),
+        ("criterion-mention", [], "bare"),
+    ],
+    "third-advocate": [
+        ("reviewer-report", [], "template-shape"),
+        ("criterion-mention", [], "bare"),
+    ],
 }
 
 # A capture whose verdict differs from its prefix's is listed here by stem, with the verdict per check.
@@ -715,6 +736,8 @@ CAPTURE_OVERRIDES = {
     "second-noritual-6": {"criterion-mention": "nickname"},
     "second-reviewer-3": {"criterion-mention": "bare"},
     "second-reviewer-4": {"criterion-mention": "bare"},
+    "third-reviewer-rules-only-1": {"criterion-mention": "bare"},
+    "third-reviewer-rules-only-3": {"criterion-mention": "bare"},
 }
 
 CAPTURES = sorted(p for p in RUNS.glob("*.txt") if not p.name.endswith(".stderr.txt"))

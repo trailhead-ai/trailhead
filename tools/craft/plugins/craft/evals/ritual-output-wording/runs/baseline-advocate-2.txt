@@ -1,0 +1,12 @@
+## Findings
+- [Critical] After-hours returns keep accruing fees, against AC5: a book returned at 19:00 is stamped with the next morning's date, so the 00:05 job still treats the loan as open and charges another day. The borrower is billed for a day they had already returned the item, and that extra charge can push them over £10 so the desk refuses their next checkout. Suggested: record the actual scan time and stop fees as of the closing date, whatever date the return is processed under.
+- [Critical] The plan doesn't say what happens to loans that are already overdue on launch day (migration/backfill). If the first nightly run charges fees back to the original due dates, many borrowers will start the next day over £10 with no warning, and the desk will block them for fees they never saw build up. Suggested: decide and document a start date for fees (charge from launch, or backfill with a waiver), and dry-run the first job against production data before it goes live.
+- [Important] Borrower reminders (AC6) are missing from the plan. Without the 3-days-before and day-after messages, the first a borrower hears of a fee is a refused checkout at the desk. Suggested: add a reminder task with a check that each loan gets at most one message of each kind.
+- [Important] The override note doesn't record who granted it (AC4). It's a free-text note on the borrower, with no librarian ID and no entry in the borrower's history, so the AC7 waiver totals can't be reconciled. Suggested: store the override as a structured history record with librarian ID, timestamp and reason.
+- [Important] There is no way to waive or reverse a wrong fee (rollback). Staff can only override a block, not correct the balance, so a calculator bug sticks to borrowers. Suggested: add a librarian action to waive or adjust a fee, recorded in the ledger.
+- [Important] The checkout refusal message isn't specified. It should show the balance, which items it comes from, and the override option. Otherwise the librarian has no way to explain the refusal to the borrower in front of them.
+- [Minor] AC1 asks for the flag within one minute of rollover, but the job runs at 00:05, and a desk screen left open never reloads.
+- [Minor] The fee is calculated both at return and in the nightly job, and the plan doesn't say how a return day avoids being charged twice.
+
+## Confidence
+Medium. The findings come straight from the plan and spec text. I had no product code or UI precedent to check them against.
