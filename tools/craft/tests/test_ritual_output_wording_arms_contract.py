@@ -25,10 +25,10 @@ ARMS_DIR = (
 BASELINE_REVISION = "9458af4e"
 
 # The commit that added the first wording of the rules section.
-FIRST_WORDING_REVISION = "200b5269"
+FIRST_WORDING_REVISION = "b2a8affc"
 
 # The commit that carries the second wording of the rules section.
-SECOND_WORDING_REVISION = "5e0db468"
+SECOND_WORDING_REVISION = "06a3aa22"
 
 RULES = "tools/craft/plugins/craft/rules.md"
 SLICE_SKILL = "tools/craft/plugins/craft/skills/slice/SKILL.md"
