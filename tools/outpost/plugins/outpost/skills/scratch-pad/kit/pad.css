@@ -75,3 +75,17 @@ button { font: inherit; color: inherit; }
 
 .pad-drawing { position: relative; min-height: 8rem; }
 .pad-ink { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+
+.pen-layout { position: relative; padding: 0.75rem; }
+.pen-block { display: flex; flex-direction: column; gap: 0.5rem; }
+.pen-box { padding: 0.6rem; }
+.pen-row { flex-direction: row; flex-wrap: wrap; align-items: center; }
+.pen-text, .pen-button, .pen-pill { display: block; align-self: flex-start; }
+.pen-button { padding: 0.3rem 1rem; }
+.pen-pill { padding: 0.2rem 1rem; }
+.pen-field { gap: 0.25rem; }
+.pen-input { height: 2rem; }
+.pen-image { min-height: 5rem; align-items: center; justify-content: center; }
+.pen-rule { height: 1rem; width: 100%; }
+.pen-message { padding: 0.75rem; border: 1px solid var(--rule); background: var(--paper); }
+.pen-message p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
