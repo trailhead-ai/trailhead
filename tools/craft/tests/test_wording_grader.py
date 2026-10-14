@@ -673,7 +673,8 @@ def test_long_covers_line_grades_promptly():
 # Each capture prefix names its checks. An entry is (check, extra arguments, expected verdict);
 # `--drop-value-line` is how a capture that ends in the covered-criteria value is graded without that final line.
 # Every check runs with `--criteria` set to the case's spec fixture.
-# The verdicts were read by eye from the captures, not taken from the grader's output.
+# A verdict is the grader's reading of a capture under the thresholds fixed before any run; where a capture read by eye
+# differs, CAPTURE_OVERRIDES records the grader's verdict.
 CAPTURE_EXPECTATIONS = {
     "baseline-noritual": [("criterion-mention", [], "bare")],
     "baseline-slice": [
@@ -730,8 +731,8 @@ CAPTURE_EXPECTATIONS = {
 }
 
 # A capture whose verdict differs from its prefix's is listed here by stem, with the verdict per check.
-# These two were read by eye as `text-with-number`; the grader reads both as `nickname` under the
-# word-share threshold fixed before any run, and that threshold is the one that counts.
+# Each entry records the grader's verdict, under the thresholds fixed before any run, and those thresholds are the ones
+# that count; read by eye, a capture may look like `text-with-number` or a mix of forms instead.
 CAPTURE_OVERRIDES = {
     "treated-noritual-1": {"criterion-mention": "nickname"},
     "treated-noritual-2": {"criterion-mention": "nickname"},
