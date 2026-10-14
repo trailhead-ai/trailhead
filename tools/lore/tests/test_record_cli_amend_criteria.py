@@ -27,9 +27,9 @@ def _spec(numbers, *, edits=None):
     return f"# Spec\n\nintro\n\n## Acceptance Criteria\n\n{bullets}\n"
 
 
-def _make_spec(tmp_path, numbers, *, status="ready"):
+def _make_spec(tmp_path, numbers=(1, 2, 3), *, status="ready", body=None):
     vault, state = _make_vault(tmp_path)
-    rid = _create(vault, state, "spec", "A Spec", status=status, body=_spec(numbers))
+    rid = _create(vault, state, "spec", "A Spec", status=status, body=body or _spec(numbers))
     return vault, state, rid
 
 

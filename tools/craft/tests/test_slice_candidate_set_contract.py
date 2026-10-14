@@ -26,6 +26,7 @@ from test_candidate_set import (
     _run,
     _tokens,
 )
+from test_slice_candidate_reason_codes import _emitted_reason_codes
 
 DUPLICATE_AC_HEADING_SPEC = (
     "## Acceptance Criteria\n\n**AC1.** a\n\n## Acceptance Criteria\n\n**AC2.** b\n"
@@ -148,11 +149,7 @@ def test_skill_documented_reason_codes_are_exactly_the_real_gates_reason_codes()
         _reason_code(_run(ZERO_CRITERIA_SPEC).stderr),
         _reason_code(_run(DUPLICATE_AC_HEADING_SPEC).stderr),
     }
-    real = {
-        getattr(candidate_set, name)
-        for name in dir(candidate_set)
-        if name.startswith("_") and name.endswith("_REASON_CODE")
-    } | exercised
+    real = _emitted_reason_codes(candidate_set) | exercised
     assert exercised <= real, f"the gate printed reason codes {exercised - real} it has no constant for"
 
     assert documented == real, (

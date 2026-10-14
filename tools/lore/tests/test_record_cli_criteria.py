@@ -12,21 +12,7 @@ import json
 import pytest
 from conftest import make_vault as _make_vault, run_cli as _run
 from test_record_cli_amend import _amend, _create, _revert, _set_history
-
-
-def _ac(n):
-    return f"- **AC{n}.** criterion number {n} text"
-
-
-def _spec(numbers):
-    bullets = "\n".join(_ac(n) for n in numbers)
-    return f"# Spec\n\nintro\n\n## Acceptance Criteria\n\n{bullets}\n"
-
-
-def _make_spec(tmp_path, numbers=(1, 2, 3), *, body=None):
-    vault, state = _make_vault(tmp_path)
-    rid = _create(vault, state, "spec", "A Spec", status="ready", body=body or _spec(numbers))
-    return vault, state, rid
+from test_record_cli_amend_criteria import _ac, _make_spec, _spec
 
 
 def _criteria(vault, state, rid, *extra, env_extra=None):

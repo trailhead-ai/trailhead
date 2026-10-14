@@ -43,7 +43,6 @@ from lore.record.sections import _content, _mask, _split_lines
 _HEADING_RE = re.compile(r"## Acceptance Criteria", re.IGNORECASE)
 _CRITERION_RE = re.compile(r"^-\s+\*\*(AC\d+)\.\*\*")
 _CANONICAL_RE = re.compile(r"AC[1-9][0-9]*")
-_MARKER_RE = re.compile(r"^-\s+\*\*AC\d+\.\*\*")
 
 
 class CriteriaError(ValueError):
@@ -119,13 +118,15 @@ def declared_criteria(body: str) -> list[tuple[str, str]]:
     return [(ident, text) for ident, text in _entries(body) if ident is not None]
 
 
-def _recorded_removals(history: Any) -> set[str]:
+def _recorded_removals(history: Any) -> dict[str, int]:
+    """Each identifier *history* records as removed, mapped to the 1-based number
+    of the first entry that recorded it."""
     if history is None:
-        return set()
+        return {}
     if not isinstance(history, list):
         raise CriteriaError("change-history is not a list")
-    removed: set[str] = set()
-    for entry in history:
+    removed: dict[str, int] = {}
+    for number, entry in enumerate(history, start=1):
         if not isinstance(entry, dict):
             raise CriteriaError("a change-history entry is not an object")
         if "criteria" not in entry:
@@ -141,7 +142,7 @@ def _recorded_removals(history: Any) -> set[str]:
         for ident in ids:
             if not isinstance(ident, str) or not _canonical(ident):
                 raise CriteriaError("a change-history entry's criteria.removed holds a non-canonical identifier")
-        removed.update(ids)
+            removed.setdefault(ident, number)
     return removed
 
 
@@ -154,7 +155,7 @@ def criteria_state(body: str, history: list | None) -> dict:
     """
     recorded = _recorded_removals(history)
     declared = [ident for ident, _ in declared_criteria(body)]
-    gone = recorded - set(declared)
+    gone = recorded.keys() - set(declared)
     return {"declared": declared, "removed": sorted(gone, key=_number)}
 
 
@@ -171,7 +172,7 @@ def _safe_entries(body: str) -> tuple[str, list[tuple[str | None, str]]]:
 
 
 def _body_text(text: str) -> str:
-    return " ".join(_MARKER_RE.sub("", text, count=1).split())
+    return " ".join(_CRITERION_RE.sub("", text, count=1).split())
 
 
 def check_criteria_amend(
@@ -200,13 +201,9 @@ def check_criteria_amend(
 
     removed_now = sorted((i for i in old_set - new_set if _canonical(i)), key=_number)
 
-    removed_in: dict[str, int] = {}
-    for number, entry in enumerate(history or [], start=1):
-        for ident in entry.get("criteria", {}).get("removed", []):
-            removed_in.setdefault(ident, number)
-
-    ever = [_number(i) for i in old_set | recorded if _canonical(i)]
-    next_unused = f"AC{max(ever, default=0) + 1}"
+    ever = [_number(i) for i in old_set | recorded.keys() if _canonical(i)]
+    base = max(ever, default=0) + 1
+    next_unused = f"AC{base}"
 
     seen: set[str] = set()
     repeated: set[str] = set()
@@ -230,11 +227,10 @@ def check_criteria_amend(
             refusals.append(
                 f"{ident} was removed earlier and cannot be reused; the next unused number is "
                 f"{next_unused}. If it was removed by mistake, restore it with "
-                f"`lore record amend --revert-to {removed_in[ident]}`"
+                f"`lore record amend --revert-to {recorded[ident]}`"
             )
         else:
             fresh.append(ident)
-    base = int(next_unused[2:])
     expected = {f"AC{base + k}" for k in range(len(fresh))}
     gap = base
     while f"AC{gap}" in fresh:
