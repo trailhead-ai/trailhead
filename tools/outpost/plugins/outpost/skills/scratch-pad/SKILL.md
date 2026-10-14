@@ -98,7 +98,7 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/scratch-pad/scratch_pad.py \
   --pad <slug> --round <path-to-round.json>
 ```
 
-- `<slug>` names the pad and matches `^[a-z0-9][a-z0-9._-]*$`. A pad that
+- `<slug>` names the pad and matches `^[a-z0-9][a-z0-9._-]*$` and is at most 64 characters. A pad that
   already exists is refused, so pick a new slug for a new pad.
 - On success, line 1 of stdout is the `file://` link and line 2 is
   `pad folder: <path>`.
