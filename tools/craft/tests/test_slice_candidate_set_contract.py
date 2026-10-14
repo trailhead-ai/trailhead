@@ -149,7 +149,7 @@ def test_skill_documented_reason_codes_are_exactly_the_real_gates_reason_codes()
         _reason_code(_run(ZERO_CRITERIA_SPEC).stderr),
         _reason_code(_run(DUPLICATE_AC_HEADING_SPEC).stderr),
     }
-    real = _emitted_reason_codes(candidate_set) | exercised
+    real = _emitted_reason_codes(candidate_set)
     assert exercised <= real, f"the gate printed reason codes {exercised - real} it has no constant for"
 
     assert documented == real, (
