@@ -594,11 +594,12 @@ _NO_RETURN_TO_DRAFT: frozenset[str] = frozenset({"adr", "spec"})
 def _supersede_command(kind: str, name: str, successor: str = "<successor-id>") -> str:
     """The runnable ``lore record supersede`` template with *kind*/*name* as the predecessor.
 
-    A record id whose characters a shell would reinterpret is printed in its
-    neutralized quoted form instead, which the reader must quote by hand.
+    A record id whose characters a shell would reinterpret is never printed
+    inside a command: the template carries a placeholder and the reader must
+    quote the id by hand.
     """
     record_id = f"{kind}/{name}"
-    shown = record_id if _SHELL_SAFE_ID_RE.fullmatch(record_id) else graph_mod.format_node(record_id)
+    shown = record_id if _SHELL_SAFE_ID_RE.fullmatch(record_id) else _UNSAFE_ID_PLACEHOLDER
     return f"lore record supersede {shown} --by {successor}"
 
 
@@ -616,6 +617,8 @@ _DIFF_LINE_LIMIT = 80
 
 
 _SHELL_SAFE_ID_RE = re.compile(r"[A-Za-z0-9._/-]+")
+
+_UNSAFE_ID_PLACEHOLDER = "<record-id: not shell-safe, quote the id by hand>"
 
 
 def _is_frozen(kind: str, prior_status: str | None) -> bool:
@@ -866,15 +869,17 @@ def check_superseded_status(
     if not refuses_superseded_write(status_set, prior_status, resulting_status):
         return None
     node = graph_mod.format_node(f"{kind}/{name}")
+    record_id = f"{kind}/{name}"
+    shown = record_id if _SHELL_SAFE_ID_RE.fullmatch(record_id) else _UNSAFE_ID_PLACEHOLDER
     return graph_mod.format_guard_message(
         "superseded-status",
         f"{node} cannot be set to superseded by create or update — a supersession "
         f"is recorded in one step with `{_supersede_command(kind, name)}`, which "
         "writes the supersedes edge on the successor (the edge lands on the "
         "successor, not on this record) and flips this record's status together. "
-        f"To undo a supersession made by mistake: `lore record update {kind}/{name} "
+        f"To undo a supersession made by mistake: `lore record update {shown} "
         "--status <prior status>`, then `lore record update <successor-id> "
-        f"--unset-supersedes {kind}/{name}`.",
+        f"--unset-supersedes {shown}`.",
     )
 
 
