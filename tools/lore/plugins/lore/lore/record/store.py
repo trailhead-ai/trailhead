@@ -901,6 +901,29 @@ def read_stored_change_history(sidecar_path: Path) -> Any:
     return existing.get("change-history", [])
 
 
+class SidecarUnreadableError(ValueError):
+    """A sidecar that exists but is not a JSON object."""
+
+
+def read_stored_change_history_strict(sidecar_path: Path) -> Any:
+    """Like :func:`read_stored_change_history`, but a sidecar that exists and cannot
+    be read or is not a JSON object raises :class:`SidecarUnreadableError`; only a
+    missing file or an absent key means "no history"."""
+    try:
+        text = sidecar_path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return []
+    except (OSError, ValueError) as exc:
+        raise SidecarUnreadableError(f"the sidecar cannot be read: {exc.__class__.__name__}") from exc
+    try:
+        existing = json.loads(text)
+    except ValueError as exc:
+        raise SidecarUnreadableError("the sidecar is not valid JSON") from exc
+    if not isinstance(existing, dict):
+        raise SidecarUnreadableError("the sidecar is not a JSON object")
+    return existing.get("change-history", [])
+
+
 def read_change_history(sidecar_path: Path) -> list[Any]:
     """The history on disk at *sidecar_path*; ``[]`` for a missing or unparseable file
     or a stored value that is not a list."""
