@@ -1335,7 +1335,6 @@ _MALFORMED_CONTENTS = {
     "removed-as-string": _variant(removed="AC2"),
     "declared-as-string": _variant(declared="AC1"),
     "removed-duplicate": _variant(removed=["AC2", "AC2"]),
-    "declared-duplicate": _variant(declared=["AC1", "AC1"]),
     "removed-zero": _variant(removed=["AC0"]),
     "removed-leading-zero": _variant(removed=["AC02"]),
     "removed-wrong-prefix": _variant(removed=["X1"]),
@@ -1490,3 +1489,38 @@ def test_help_does_not_block_on_an_open_stdin():
         proc.kill()
     assert proc.returncode == 0
     assert "--criteria-state" in out
+
+
+# ---- 21. `declared` is the body's own list; `removed` is strict ---------------
+
+
+def test_a_declared_list_with_a_duplicate_and_a_non_canonical_id_is_accepted(tmp_path):
+    ids = ["AC1", "AC2", "AC2", "AC007"]
+    body = _spec(ids, [_entry(1, "covers AC1")])
+    r = _run_flag(body, _state(tmp_path, ids, []))
+    assert r.returncode == 0, r.stderr
+    assert "covered: AC1" in r.stdout.splitlines()
+
+
+@pytest.mark.parametrize("bad", ["ac1", "AC", "AC1x", "AC1\n", "A1", ""], ids=repr)
+def test_a_declared_entry_that_is_not_an_ac_digits_string_is_still_malformed(tmp_path, bad):
+    r = _run_flag(VOID_BODY, _state(tmp_path, ["AC1", bad], []))
+    assert r.returncode == 2
+    assert _reason_code(r.stderr) == "malformed-criteria-state"
+
+
+@pytest.mark.parametrize(
+    "removed",
+    [["AC2", "AC2"], ["AC007"], ["AC" + "1" * 10], ["AC1" + "0" * 4999]],
+    ids=["duplicate", "non-canonical", "ten-digits", "5000-digits"],
+)
+def test_removed_stays_strict_unique_canonical_and_bounded(tmp_path, removed):
+    r = _run_flag(VOID_BODY, _state(tmp_path, ["AC1", "AC3"], removed))
+    assert r.returncode == 2
+    assert _reason_code(r.stderr) == "malformed-criteria-state"
+
+
+def test_a_nine_digit_removed_id_is_accepted(tmp_path):
+    big = "AC" + "9" * 9
+    r = _run_flag(VOID_BODY, _state(tmp_path, ["AC1", "AC3"], ["AC2", big]))
+    assert r.returncode == 0, r.stderr

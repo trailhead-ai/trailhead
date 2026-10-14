@@ -107,3 +107,45 @@ def test_amended_away_criterion_is_void_through_the_real_lore_cli(  # inert-gate
     assert "covered: AC1" in lines
     assert "candidates: AC3" in lines
     assert lines[-1] == "void: AC2 (removed by amend)"
+
+
+BODY_DUPLICATED = """# Seam spec
+
+## Acceptance Criteria
+
+- **AC1.** One.
+- **AC2.** Two.
+- **AC2.** Two again.
+- **AC007.** Seven.
+- **AC8.** Eight.
+
+## Slices
+
+- **First** — a value claim. (`task/first`, closed 2026-01-01, covers AC1)
+"""
+
+
+def test_a_body_with_a_repeated_and_a_non_canonical_id_passes_the_gate_with_lores_state(  # inert-gate: allow seam smoke
+    isolated_lore_env, tmp_path
+):
+    vault, state = isolated_lore_env
+
+    def lore(*args, stdin_text=None):
+        r = run_cli(list(args), vault=vault, state_dir=state, stdin_text=stdin_text)
+        assert r.returncode == 0, r.stderr
+        return r.stdout
+
+    record_id = lore(
+        "record", "create", "--kind", "spec", "--title", "Seam dup", "--keyword", "seam",
+        "--status", "ready", stdin_text=BODY_DUPLICATED,
+    ).strip()
+    printed = json.loads(lore("record", "criteria", record_id))
+    assert printed["declared"] == ["AC1", "AC2", "AC2", "AC007", "AC8"]
+
+    state_file = tmp_path / "criteria.json"
+    state_file.write_text(json.dumps(printed), encoding="utf-8")
+    shown = lore("record", "show", record_id)
+
+    assert _gate("candidate_set.py", shown).returncode == 0
+    gate = _gate("candidate_set.py", shown, "--criteria-state", str(state_file))
+    assert gate.returncode == 0, gate.stderr
