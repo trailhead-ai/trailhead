@@ -582,3 +582,12 @@ every run exited 0 and none was excluded.
 Read by eye, each statement lists the two covered criteria by their own text with the number trailing, and the final
 line is the bare list (`AC3, AC4`; one run wrote it behind the `**Covers:**` label, which the amendment above
 strips). The `partially covers` line said none in all three. The step 8 edit stays.
+
+Two captures were edited after they were taken: in `third-reviewer-3.txt` and `third-reviewer-rules-only-2.txt`
+one ordinary English word matched the repository's machine-local leak denylist and was replaced with `[redacted]`
+so the change could pass the leak gate. The grader's verdicts on both captures are the same before and after the
+edit (`template-shape` and `bare`; `template-shape` and `nickname`).
+
+After the `shipped-slice` runs, slice step 8 was re-wrapped to the prose column the wrap gate enforces. The change
+is whitespace only, so the shipped step differs from the text the `shipped-slice` arm measured (pinned at
+`b599c254`) in line breaks alone.
