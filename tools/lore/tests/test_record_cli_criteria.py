@@ -11,7 +11,7 @@ import json
 
 import pytest
 from conftest import make_vault as _make_vault, run_cli as _run
-from test_record_cli_amend import _amend, _create, _set_history
+from test_record_cli_amend import _amend, _create, _revert, _set_history
 
 
 def _ac(n):
@@ -177,3 +177,21 @@ def test_vault_picks_the_record_in_the_named_vault_when_two_hold_the_same_name(t
     in_default = _criteria(default_vault, state, rid, "--vault", "default", env_extra=env)
     assert json.loads(in_other.stdout)["declared"] == ["AC7", "AC8", "AC9"]
     assert json.loads(in_default.stdout)["declared"] == ["AC1", "AC2"]
+
+
+def test_a_revert_that_restores_a_removed_criterion_empties_removed(tmp_path):
+    vault, state, rid = _make_spec(tmp_path, range(1, 4))
+    assert _amend(vault, state, rid, _spec([1, 3])).returncode == 0
+    assert json.loads(_criteria(vault, state, rid).stdout) == {
+        "record": rid, "declared": ["AC1", "AC3"], "removed": ["AC2"]}
+    r = _revert(vault, state, rid, 1)
+    assert r.returncode == 0, r.stderr
+    assert json.loads(_criteria(vault, state, rid).stdout) == {
+        "record": rid, "declared": ["AC1", "AC2", "AC3"], "removed": []}
+
+
+def test_criteria_help_is_reachable_from_the_parser(tmp_path):  # inert-gate: allow seam smoke: the subcommand is wired into the real parser
+    vault, state = _make_vault(tmp_path)
+    r = _run(["record", "criteria", "--help"], vault=vault, state_dir=state)
+    assert r.returncode == 0, r.stderr
+    assert "record criteria" in r.stdout.split("\n\n")[0]
