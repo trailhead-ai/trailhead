@@ -530,3 +530,39 @@ and exclusion rule above.
 
 **Limit.** This extension was written with first- and second-wording output in hand. No third-wording output
 existed when it was committed.
+
+## Result, 2026-10-14 — the third wording and the council report bullet pass; both are kept
+
+Counted by the grader against the pass conditions in the third-wording extension above. The third-wording revision is
+`2de62373`; every `third-*` arm pins its rules file and agent definition to it. Every run exited 0 and none was
+excluded. `baseline-advocate` is pinned to `9458af4e`.
+
+| Prefix | Check | Grader's count | Condition | Holds |
+|---|---|---|---|---|
+| `third-noritual` | `criterion-mention` | `text-with-number` 3 of 3 | clean majority `text-with-number` | yes |
+| `third-slice-rules-only` | `covers-field` | `gate-shape` 3 of 3 | every graded run `gate-shape` | yes |
+| `third-slice-rules-only` | `criterion-mention` over the statement | `text-with-number` 3 of 3 | observed only | n/a |
+| `third-reviewer` | `reviewer-report` | `template-shape` 3 of 3 | every run `template-shape` | yes |
+| `third-reviewer` | `criterion-mention` | `bare` 3 of 3 | majority equals baseline's (`bare`) | yes |
+| `baseline-advocate` | `reviewer-report`; `criterion-mention` | `template-shape` 3 of 3; `bare` 3 of 3 | sets the comparison | n/a |
+| `third-advocate` | `reviewer-report` | `template-shape` 3 of 3 | every run `template-shape` | yes |
+| `third-advocate` | `criterion-mention` | `bare` 3 of 3 | majority equals `baseline-advocate`'s (`bare`) | yes |
+| `third-reviewer-rules-only` | `reviewer-report` | `template-shape` 6 of 6 | none | n/a |
+| `third-reviewer-rules-only` | `criterion-mention` | `bare` 2, `nickname` 4 (first three: 2 `bare`, 1 `nickname`, re-run to six) | bullet's own effect: `bare` in a clean majority drops the bullet | not clean, so the bullet shows an effect and is kept |
+
+`third-advocate-rules-only` was not run: it exists only if the bullet is dropped.
+
+The criterion-mention criterion (AC1) has its no-ritual condition met. The reviewer-report criterion (AC16) has both
+reviewer conditions met, reliability and advocate. Both edits stay on the branch: the `## Output wording` section in
+`tools/craft/plugins/craft/rules.md` and the bullet in `tools/craft/plugins/craft/skills/_shared/council.md`. The
+`shipped-slice` arm and its registered conditions are left to the next task.
+
+What the captures show, read by eye. The bullet carries the reviewer result: without it, under the third wording
+alone, the reliability reviewer moved to nickname-plus-number in 4 of 6 runs; with it, 3 of 3 cite bare numbers as the
+baseline does. Residuals: a clean majority at three runs still allows a minority of runs to shorten a criterion; the
+no-ritual runs gave each criterion's own words in full including the closing line the second wording shortened; the
+rule reaches the arms through `--append-system-prompt`, not the harness's rules loading; the executor, drift gate and
+code reviewer are not measured. A manual re-run of this case is the signal to take if real sessions disagree.
+
+Two no-ritual runs, `third-noritual-2` and `-3`, were issued in one tool message and may have overlapped in time;
+each used its own throwaway directories. The other runs were dispatched one at a time.
