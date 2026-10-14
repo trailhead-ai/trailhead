@@ -25,7 +25,9 @@ Contract
 
       <pad>/index.html            sends the browser to round-1/index.html
       <pad>/round-1/<kit files>
-      <pad>/round-1/round.js      ``window.PAD_ROUND = <round as JSON>;``
+      <pad>/round-1/round.js      ``window.PAD_ROUND = JSON.parse(<s>);``
+                                  where ``<s>`` is the round's ASCII JSON
+                                  encoded once more as a string literal
 
 * Every refusal prints ``scratch-pad: <where>: <what>`` lines on stderr -- every
   problem found in one pass -- exits non-zero, and leaves the state directory
@@ -33,8 +35,10 @@ Contract
 
 Security posture
 ----------------
-Round text is untrusted data. It is written only into ``round.js``, as JSON
-with every non-ASCII character escaped, and never into HTML. The top-level
+Round text is untrusted data. It is written only into ``round.js``, as a
+JSON string literal holding the round's JSON (so a ``__proto__`` key arrives as
+data, which an object literal would not give) with every non-ASCII character
+escaped, and never into HTML. The top-level
 ``index.html`` carries no round text. Round text echoed into an error line is
 escaped so an escape sequence cannot drive the terminal. The pads root and the
 temp folder are created owner-only (0700); a pads root that is a symlink is
@@ -62,7 +66,7 @@ _MAX_OPTIONS = 26
 _ROUND_KEYS = ("title", "intro", "questions")
 _QUESTION_KEYS = ("prompt", "options")
 _OPTION_KEYS = ("name", "cost", "pick", "layout")
-_ROUND_JS_PREFIX = "window.PAD_ROUND = "
+_ROUND_JS_PREFIX = "window.PAD_ROUND = JSON.parse("
 _PAD_INDEX = (
     "<!doctype html>\n"
     '<meta charset="utf-8">\n'
@@ -282,7 +286,7 @@ def build_pad(
         raise Refusal(problems)
 
     try:
-        round_js = _ROUND_JS_PREFIX + json.dumps(data, ensure_ascii=True) + ";\n"
+        round_js = _ROUND_JS_PREFIX + json.dumps(json.dumps(data, ensure_ascii=True)) + ");\n"
     except RecursionError:
         raise Refusal([_line(_q(str(round_path)), "nested too deeply to write")])
     if not kit_dir.is_dir():
