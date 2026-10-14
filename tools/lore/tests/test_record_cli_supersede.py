@@ -232,12 +232,157 @@ def test_a_failed_flip_is_loud_and_the_printed_command_completes_it(env, monkeyp
     assert r.returncode != 0
     assert _sidecar(vault, new)["supersedes"] == [old]
     assert _sidecar(vault, old)["status"] == "active"
+    assert f"after {new} was written" in r.stderr
     rerun = r.stderr.strip().splitlines()[-1]
     assert rerun == f"lore record supersede {old} --by {new}"
 
     fixed = _run(shlex.split(rerun)[1:], vault=vault, state_dir=state)
     assert fixed.returncode == 0, fixed.stderr
     assert _sidecar(vault, old)["status"] == "superseded"
+
+
+def _fail_nth_write(monkeypatch, nth):
+    from lore.record import store
+
+    real = store.validate_and_write
+    calls = []
+
+    def flaky(*args, **kwargs):
+        calls.append(1)
+        if len(calls) == nth:
+            raise OSError("disk full")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(store, "validate_and_write", flaky)
+    return lambda: monkeypatch.setattr(store, "validate_and_write", real)
+
+
+def test_a_failing_flip_after_the_edge_was_already_present_claims_no_write(env, monkeypatch):
+    vault, state = env
+    old = _create(vault, state, "adr", "active", "Old")
+    new = _create(vault, state, "adr", "active", "New")
+    assert _run(["record", "update", new, "--supersedes", old],
+                vault=vault, state_dir=state).returncode == 0
+    before = _snapshot(vault)
+    restore = _fail_nth_write(monkeypatch, 1)
+
+    r = _supersede(vault, state, old, new)
+    restore()
+
+    assert r.returncode != 0
+    assert "was written" not in r.stderr and "incomplete" not in r.stderr
+    assert f"writing {old} failed" in r.stderr
+    assert _snapshot(vault) == before
+    rerun = r.stderr.strip().splitlines()[-1]
+    assert rerun == f"lore record supersede {old} --by {new}"
+    assert _run(shlex.split(rerun)[1:], vault=vault, state_dir=state).returncode == 0
+    assert _sidecar(vault, old)["status"] == "superseded"
+
+
+def test_a_failing_first_write_says_nothing_landed_and_leaves_both_sidecars(env, monkeypatch):
+    vault, state = env
+    old = _create(vault, state, "adr", "active", "Old")
+    new = _create(vault, state, "adr", "active", "New")
+    before = _snapshot(vault)
+    restore = _fail_nth_write(monkeypatch, 1)
+
+    r = _supersede(vault, state, old, new)
+    restore()
+
+    assert r.returncode != 0
+    assert "was written" not in r.stderr and "incomplete" not in r.stderr
+    assert f"writing {new} failed" in r.stderr
+    assert _snapshot(vault) == before
+    rerun = r.stderr.strip().splitlines()[-1]
+    assert _run(shlex.split(rerun)[1:], vault=vault, state_dir=state).returncode == 0
+    assert _sidecar(vault, old)["status"] == "superseded"
+
+
+def _break_sidecar(vault, rid, **fields):
+    path = _paths(vault, rid)[1]
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data.update(fields)
+    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+
+def test_a_predecessor_that_fails_validation_leaves_both_records_untouched(env):
+    vault, state = env
+    old = _create(vault, state, "adr", "active", "Old")
+    new = _create(vault, state, "adr", "active", "New")
+    _break_sidecar(vault, old, keywords=5)
+    before = _snapshot(vault)
+
+    r = _supersede(vault, state, old, new)
+
+    assert r.returncode != 0
+    assert "keywords" in r.stderr
+    assert "incomplete" not in r.stderr and "lore record supersede" not in r.stderr
+    assert _snapshot(vault) == before
+
+
+def test_an_aliased_trust_conflict_on_the_predecessor_vault_writes_nothing(tmp_path):
+    default, state = _make_vault(tmp_path)
+    old = _create(default, state, "adr", "active", "Old")
+    new = _create(default, state, "adr", "active", "New")
+    cfg = tmp_path / "config"
+    lore_cfg = cfg / "lore"
+    lore_cfg.mkdir(parents=True)
+    (lore_cfg / "config.json").write_text(json.dumps({"vaults": [
+        {"name": "default", "scope": "default", "path": str(default), "shared": False},
+        {"name": "twin", "scope": "team", "records": ["decision"], "path": str(default),
+         "shared": True},
+    ]}), encoding="utf-8")
+    before = _snapshot(default)
+
+    r = _run(["record", "supersede", old, "--by", new], vault=default, state_dir=state,
+             env_extra={"XDG_CONFIG_HOME": str(cfg)})
+
+    assert r.returncode != 0
+    assert "disagree" in r.stderr
+    assert "incomplete" not in r.stderr and "lore record supersede" not in r.stderr
+    assert _snapshot(default) == before
+
+
+def test_every_step_is_judged_before_the_first_write_lands(env, monkeypatch):
+    from lore.record import guards
+
+    vault, state = env
+    old = _create(vault, state, "adr", "active", "Old")
+    new = _create(vault, state, "adr", "active", "New")
+    before = _snapshot(vault)
+    real = guards.evaluate_graph_guards
+
+    def refuse_the_flip(**kwargs):
+        if kwargs.get("status_set") == "superseded":
+            return ["graph-guard [test-refusal] the flip is refused"], []
+        return real(**kwargs)
+
+    monkeypatch.setattr(guards, "evaluate_graph_guards", refuse_the_flip)
+    r = _supersede(vault, state, old, new)
+
+    assert r.returncode != 0
+    assert "[test-refusal]" in r.stderr
+    assert _snapshot(vault) == before
+
+
+@pytest.mark.parametrize("edges", [
+    {"depends-on": ["task/base"]}, {"parent": "task/par"}, {},
+])
+def test_a_stored_task_edge_does_not_block_the_verb(env, edges):
+    vault, state = env
+    _create(vault, state, "task", "open", "Base")
+    _create(vault, state, "task", "open", "Par")
+    old = _create(vault, state, "task", "open", "Old")
+    new = _create(vault, state, "task", "open", "New")
+    _break_sidecar(vault, old, **edges)
+
+    labelled = _run(["record", "update", old, "--label", "k=v"], vault=vault, state_dir=state)
+    r = _supersede(vault, state, old, new)
+
+    assert labelled.returncode == 0, labelled.stderr
+    assert r.returncode == 0, r.stderr
+    assert _sidecar(vault, old)["status"] == "superseded"
+    assert _sidecar(vault, new)["supersedes"] == [old]
 
 
 def test_the_documented_undo_restores_both_records(env):

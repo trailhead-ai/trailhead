@@ -602,6 +602,16 @@ def _supersede_command(kind: str, name: str, successor: str = "<successor-id>") 
     return f"lore record supersede {shown} --by {successor}"
 
 
+def _dropped_remedy(kind: str) -> str:
+    """What to do about a ``dropped`` record: the supersede verb refuses it.
+
+    A dropped record was abandoned, so ``lore record supersede`` will not name
+    it as a predecessor (``[supersede-dropped-predecessor]``); the work, if it
+    is wanted again, is a new record.
+    """
+    return f"A dropped {kind} has no successor; write a new {kind} instead."
+
+
 _DIFF_LINE_LIMIT = 80
 
 
@@ -667,11 +677,14 @@ def check_frozen_status(
     if status_set != "draft":
         return None
     node = graph_mod.format_node(f"{kind}/{name}")
-    tail = (
-        "Write a new adr and supersede this one instead: "
-        if kind == "adr"
-        else "A change of scope is a supersession: "
-    ) + f"`{_supersede_command(kind, name)}`."
+    if prior_status == "dropped":
+        tail = _dropped_remedy(kind)
+    else:
+        tail = (
+            "Write a new adr and supersede this one instead: "
+            if kind == "adr"
+            else "A change of scope is a supersession: "
+        ) + f"`{_supersede_command(kind, name)}`."
     return graph_mod.format_guard_message(
         "frozen-status",
         f"{node} is {prior_status} — a {kind} cannot return to draft. Its body "
@@ -692,8 +705,9 @@ def check_frozen_body(
 
     The frozen statuses are per kind (:data:`FROZEN_STATUSES`), judged on the
     record's PRIOR on-disk status — never the status this write applies, so a
-    ``--status superseded`` flip that changes nothing else succeeds and a body
-    change riding the same flip is refused. Authored content is the body minus
+    status-only write passes this check and a body change riding the same write
+    is refused. (A flip into ``superseded`` is refused by
+    :func:`check_superseded_status`, not here.) Authored content is the body minus
     the kind's pipeline-maintained sections (:func:`sections.authored_content`),
     so a change confined to ``## Slices`` (spec) or ``## Driver run`` (task)
     passes a plain update.
@@ -740,7 +754,9 @@ def check_frozen_body(
         if plain_update_sections
         else "No section passes a plain update."
     )
-    if kind == "adr":
+    if prior_status == "dropped":
+        scope_clause = _dropped_remedy(kind)
+    elif kind == "adr":
         scope_clause = (
             "For a material change, supersede it: write the successor, then run "
             f"`{_supersede_command(kind, name, 'adr/<successor>')}`."

@@ -3008,3 +3008,44 @@ def test_frozen_status_refusal_names_the_verb_for_this_record(tmp_path, kind, st
     assert r.returncode != 0
     assert "[frozen-status]" in r.stderr
     assert f"lore record supersede {rid} --by" in r.stderr
+
+
+# ---------------------------------------------------------------------------
+# Relocation onto an existing same-id record: the superseded-status rule
+# ---------------------------------------------------------------------------
+
+
+def _json_at(vault: Path, rid: str) -> dict:
+    kind, name = rid.split("/", 1)
+    return json.loads((vault / kind / f"{name}.json").read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize("source_superseded", [True, False])
+def test_relocating_onto_an_active_same_id_record_cannot_write_superseded(tmp_path, source_superseded):
+    vault_a, vault_b, state, config_home = _two_team_config(tmp_path)
+
+    def cli(args, stdin_text=""):
+        return _run_cfg(args, vault=vault_a, state=state, config_home=config_home,
+                        stdin_text=stdin_text)
+
+    mover = _create_routed(vault_a, state, config_home, scope_args=["--team", "alpha"])
+    twin = _create_routed(vault_a, state, config_home, scope_args=["--team", "beta"])
+    assert mover == twin
+    if source_superseded:
+        heir = cli(["record", "create", "--kind", "adr", "--title", "Heir", "--keyword", "k",
+                    "--status", "active"], "heir body\n").stdout.strip()
+        assert cli(["record", "supersede", mover, "--by", heir]).returncode == 0
+    kind, name = mover.split("/", 1)
+    twin_before = (vault_b / kind / f"{name}.json").read_bytes()
+
+    r = cli(["record", "update", mover, "--team", "beta"])
+
+    if source_superseded:
+        assert r.returncode != 0
+        assert "[superseded-status]" in r.stderr
+        assert (vault_b / kind / f"{name}.json").read_bytes() == twin_before
+        assert _json_at(vault_b, twin)["status"] == "active"
+    else:
+        assert r.returncode == 0, r.stderr
+        assert not (vault_a / kind / f"{name}.json").exists()
+        assert _json_at(vault_b, twin)["status"] == "active"
