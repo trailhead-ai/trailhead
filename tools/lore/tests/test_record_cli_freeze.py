@@ -244,6 +244,37 @@ def test_ac9_non_adr_refusal_calls_a_scope_change_a_supersession_and_names_the_v
     assert f"lore record supersede {rid} --by <successor-id>" in r.stderr
 
 
+@pytest.mark.parametrize("kind,live,dead", [
+    ("adr", "active", "dropped"), ("spec", "ready", "dropped"),
+    ("decision", "active", "dropped"), ("task", "done", "dropped"),
+])
+def test_a_frozen_body_refusal_names_the_verb_only_where_it_can_run(tmp_path, kind, live, dead):
+    vault, state = _make_vault(tmp_path)
+    live_rid = _create(vault, state, kind, live, title="Live one")
+    dead_rid = _create(vault, state, kind, dead, title="Dead one")
+
+    live_msg = _update(vault, state, live_rid, EDITED).stderr
+    dead_msg = _update(vault, state, dead_rid, EDITED).stderr
+
+    assert "[frozen-body]" in live_msg and "[frozen-body]" in dead_msg
+    assert f"lore record supersede {live_rid} " in live_msg
+    assert "lore record supersede" not in dead_msg
+
+
+@pytest.mark.parametrize("kind,live", [("adr", "active"), ("spec", "ready")])
+def test_a_frozen_status_refusal_names_the_verb_only_where_it_can_run(tmp_path, kind, live):
+    vault, state = _make_vault(tmp_path)
+    live_rid = _create(vault, state, kind, live, title="Live one")
+    dead_rid = _create(vault, state, kind, "dropped", title="Dead one")
+
+    live_msg = _update(vault, state, live_rid, None, ["--status", "draft"]).stderr
+    dead_msg = _update(vault, state, dead_rid, None, ["--status", "draft"]).stderr
+
+    assert "[frozen-status]" in live_msg and "[frozen-status]" in dead_msg
+    assert f"lore record supersede {live_rid} " in live_msg
+    assert "lore record supersede" not in dead_msg
+
+
 # --- AC10: leaving a frozen status ------------------------------------------
 
 

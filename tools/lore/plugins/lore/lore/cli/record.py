@@ -1757,9 +1757,10 @@ def _read_apply_and_guard(
     #
     # ``prior_status`` / ``prior_body`` are the on-disk values read
     # above, BEFORE this call's mutations — keyed on what the
-    # record WAS, not what this write sets, so a ``--status
-    # superseded`` flip is judged as "was this active adr's body
-    # left alone", never as "is the record still active after".
+    # record WAS, not what this write sets, so the freeze judges
+    # "was this active adr's body left alone", never "is the
+    # record still active after". A write into ``superseded`` is
+    # refused separately by ``[superseded-status]``.
     guard_errors, notices = guards_mod.evaluate_graph_guards(
         kind=location.kind,
         name=location.name,
@@ -2126,9 +2127,11 @@ def _cmd_record_update(args) -> int:
                         sidecar_path=dest_sidecar_path,
                     )
                     # A destination id that already exists is overwritten by the
-                    # move, so a frozen one is judged exactly as an in-place write
-                    # would be: its on-disk status and body against the moved
-                    # record's resulting ones, read under the pair held above.
+                    # move, so it is refused exactly as an in-place write would be:
+                    # the freeze, and the rule that ``superseded`` is reached only
+                    # through the verb, each judged on the destination's on-disk
+                    # status and body against the moved record's resulting ones,
+                    # read under the pair held above.
                     if dest_body_path.exists() or dest_sidecar_path.exists():
                         dest_prior = (
                             json.loads(dest_sidecar_path.read_text(encoding="utf-8"))
@@ -2147,6 +2150,12 @@ def _cmd_record_update(args) -> int:
                             prior_body=dest_prior_body,
                             new_body=safe_body,
                             status_set=stamped.get("status"),
+                        ) or guards_mod.check_superseded_status(
+                            kind=dest_kind,
+                            name=dest_name,
+                            prior_status=dest_prior.get("status"),
+                            status_set=None,
+                            resulting_status=stamped.get("status"),
                         )
                         if frozen_refusal:
                             raise _UpdateAborted(_fail([frozen_refusal]))
@@ -2235,10 +2244,15 @@ def _cmd_record_supersede(args) -> int:
     it. A predecessor that is already ``superseded`` gains the new successor's
     edge and keeps its status (a split names each child this way).
 
-    A failure of the second write exits nonzero with the exact re-run command on
-    stderr, the successor's edge already on disk. Refusals are the
-    ``supersede-...`` guards of ``guards.evaluate_supersede_pairing`` plus
-    ``[supersede-missing]``; they write nothing. Neither body is ever changed.
+    Every check — the pairing guards, the graph guards, trust resolution and
+    schema validation — runs for every step before the first write lands, so a
+    refusal or a failed check writes nothing. Only a write itself can tear the
+    pair: a failure exits nonzero with the exact re-run command on stderr and
+    names the records that did land (the successor's edge, when the flip is the
+    write that failed) or says nothing landed. Refusals are the ``supersede-...``
+    guards of ``guards.evaluate_supersede_pairing`` plus ``[supersede-missing]``.
+    The task-edge form check does not judge edges the verb did not supply. Neither
+    body is ever changed.
     ``--vault NAME`` locates both records in that one vault.
     """
     import shlex
@@ -2344,15 +2358,19 @@ def _cmd_record_supersede(args) -> int:
                 new_pred["status"] = "superseded"
                 steps.append((pred_loc, new_pred, pred_body, pred_sidecar.get("status"), "superseded"))
 
-            # Every write is judged before the first lands, so a guard refusal
-            # can never leave the edge written and the flip refused. Neither body
+            # Every write is judged before the first lands: the graph guards, the
+            # trust resolution and the schema validation all run for every step
+            # here, so only an actual write failure can tear the pair. Neither body
             # changes, so the body read under the lock is also the prior body the
-            # freeze compares against.
+            # freeze compares against. The verb supplies no depends-on or parent,
+            # so the task-edge form check leaves stored edges alone, as it does for
+            # any update that does not touch them.
             errors: list[str] = []
             for loc, sidecar, body, prior_status, status_set in steps:
                 step_errors, step_notices = guards_mod.evaluate_graph_guards(
                     kind=loc.kind, name=loc.name, sidecar=sidecar, body=body,
                     vault_root=loc.vault_root, status_set=status_set,
+                    supplied_depends_on=[], parent_supplied=False,
                     prior_status=prior_status, prior_body=body,
                     allow_superseded_status=True,
                 )
@@ -2361,26 +2379,40 @@ def _cmd_record_supersede(args) -> int:
             if errors:
                 return _fail(errors)
 
+            trust: dict[str, int] = {}
+            for loc, sidecar, body, _prior, _set in steps:
+                _, trust[loc.record_id] = _resolve_current_vault_shared(loc)
+                record_store_mod.validate_stamp_neutralize(loc, sidecar, body)
+
+            landed: list[str] = []
             for loc, sidecar, body, _prior, _set in steps:
                 try:
-                    _, shared = _resolve_current_vault_shared(loc)
                     record_store_mod.validate_and_write(
-                        location=loc, sidecar=sidecar, body=body, conn=conn, shared=shared,
+                        location=loc, sidecar=sidecar, body=body, conn=conn,
+                        shared=trust[loc.record_id],
                     )
                 except Exception as exc:  # noqa: BLE001 — reported below with the re-run command
                     conn.commit()
-                    if written_roots:
-                        for root in dict.fromkeys(written_roots):
-                            publish_mod.request_publish(root)
-                    print(
-                        f"error: supersession incomplete — writing {loc.record_id} failed"
-                        f" after {steps[0][0].record_id} was written: {exc}\n"
-                        "Run this to finish it:\n" + rerun,
-                        file=sys.stderr,
-                    )
+                    for root in dict.fromkeys(written_roots):
+                        publish_mod.request_publish(root)
+                    if landed:
+                        outcome_line = (
+                            f"error: supersession incomplete — writing {loc.record_id} failed"
+                            f" after {', '.join(landed)} was written: {exc}\n"
+                            "Run this to finish it:\n"
+                        )
+                    else:
+                        outcome_line = (
+                            f"error: supersession not recorded — writing {loc.record_id} failed,"
+                            f" nothing landed: {exc}\nRun this to retry:\n"
+                        )
+                    print(outcome_line + rerun, file=sys.stderr)
                     return 1
+                landed.append(loc.record_id)
                 written_roots.append(loc.vault_root)
             conn.commit()
+    except _UpdateAborted as aborted:
+        return aborted.code
     except Exception as exc:
         return _handle_write_error(exc, "supersede")
 
