@@ -300,3 +300,37 @@ def test_question_entries_are_buttons_and_ink_layer_is_hidden_from_assistive_tec
     assert got["current"] == 1
     assert got["inks"] == [{"tag": "svg", "hidden": "true", "inDrawing": True}] * 2
     assert got["drawings"] == [["0", "0"], ["0", "1"]]
+
+
+MESSAGE_JS = """
+return {
+  messages: [...document.querySelectorAll('.pad-drawing .pen-message')].map((m) => m.textContent),
+  drawings: document.querySelectorAll('.pad-drawing').length,
+  names: cards.map((c) => c.name),
+  picks: cards.map((c) => c.pick),
+  failure: text(failure),
+  ready: document.documentElement.hasAttribute('data-pad-ready'),
+};
+"""
+
+
+def _delete_pen(round_dir):
+    (round_dir / "pen.js").unlink()
+
+
+def test_missing_pen_shows_the_cant_draw_message_in_every_drawing_and_keeps_the_cards(tmp_path):
+    got = _run(tmp_path, _round(1), MESSAGE_JS, mutate=_delete_pen)
+    assert got["drawings"] == 2
+    assert len(got["messages"]) == 2
+    assert all(m.startswith("Can't draw this layout") and "sketch pen did not load" in m for m in got["messages"])
+    assert got["names"] == ["Q0 opt 0", "Q0 opt 1"]
+    assert got["picks"] == [True, False]
+    assert got["failure"] is None
+    assert got["ready"]
+
+
+def test_loaded_pen_shows_no_cant_draw_message_for_a_readable_layout(tmp_path):
+    got = _run(tmp_path, _round(1), MESSAGE_JS)
+    assert got["messages"] == []
+    assert got["names"] == ["Q0 opt 0", "Q0 opt 1"]
+    assert got["ready"]
