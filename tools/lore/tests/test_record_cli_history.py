@@ -563,3 +563,26 @@ def test_body_before_composes_with_vault(tmp_path):
     r = _before(vault, state, rid, 1, "--vault", "default")
     assert r.returncode == 0, r.stderr
     assert r.stdout == BODY
+
+
+def _history_with_removed(tmp_path, removed):
+    vault, state = _make_vault(tmp_path)
+    rid = _create(vault, state)
+    _amend(vault, state, rid, V2, reason="fix", initiated_by="operator")
+    history = _sidecar(vault, rid)["change-history"]
+    history[0]["criteria"] = {"removed": removed}
+    _set_history(vault, rid, history)
+    return _history(vault, state, rid)
+
+
+def test_history_prints_a_fixed_placeholder_for_every_non_canonical_removed_id(tmp_path):
+    long_id = "ZQ" * 2500
+    r = _history_with_removed(tmp_path, ["AC2", long_id, ["nested"]])
+    assert r.returncode == 0, r.stderr
+    assert "removed criteria: AC2, <non-canonical id>, <non-canonical id>\n" in r.stdout
+    assert "ZQ" not in r.stdout and "nested" not in r.stdout
+
+
+def test_history_prints_canonical_removed_ids_unchanged(tmp_path):
+    r = _history_with_removed(tmp_path, ["AC1", "AC10", "AC999999999"])
+    assert "removed criteria: AC1, AC10, AC999999999\n" in r.stdout
