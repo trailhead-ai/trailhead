@@ -1,4 +1,4 @@
-"""``lore record`` — create / update / amend / delete / show vault records.
+"""``lore record`` — create / update / amend / supersede / delete / show vault records.
 
 ``update`` and ``amend`` share one read / resolve-body / apply / guard step
 (:func:`_read_apply_and_guard`) so a body is resolved and guarded identically by
@@ -6,6 +6,13 @@ both. ``amend`` is the only write that may change a frozen record's authored
 body (adr, spec, decision or task, per the guards' per-kind freeze): it hands
 its own resolved new body to the guard's ``allowed_body`` seam and records the
 change in the record's ``change-history``.
+
+``supersede`` records a supersession in one verb: the successor's ``supersedes``
+edge, then the predecessor's flip to ``superseded``, both under both vaults'
+write locks with both records read inside them. Both writes go through the same
+guard and write pipeline ``update`` uses (:func:`_supersede_guard` →
+``validate_and_write``); the pair itself is judged by
+``guards.evaluate_supersede_pairing``.
 """
 from __future__ import annotations
 
@@ -412,6 +419,8 @@ def cmd_record(args) -> int:
         return _cmd_record_update(args)
     if action == "amend":
         return _cmd_record_amend(args)
+    if action == "supersede":
+        return _cmd_record_supersede(args)
     if action == "delete":
         return _cmd_record_delete(args)
     if action == "show":
@@ -425,7 +434,7 @@ def cmd_record(args) -> int:
     print(
         f"lore record: unknown action {action!r}. "
         f"Use 'lore record create', 'lore record update', "
-        f"'lore record amend', 'lore record rename', 'lore record delete', "
+        f"'lore record amend', 'lore record supersede', 'lore record rename', 'lore record delete', "
         f"'lore record history', 'lore record criteria', or 'lore record show'.",
         file=sys.stderr,
     )
@@ -2193,6 +2202,223 @@ def _cmd_record_update(args) -> int:
     return 0
 
 
+def _supersede_guard(
+    location, sidecar: dict, *, prior_body: str, body: str, prior_status, status_set
+):
+    """Run the shared graph guards over one of the supersede verb's two writes.
+
+    The verb's single ``evaluate_graph_guards`` call site: both the successor's
+    edge write and the predecessor's flip are judged here, so a guard keyword the
+    verb must pass is added in exactly one place. *prior_body* is the body as
+    read under the lock and *body* what the write would leave, so the freeze
+    refuses any write that would change one.
+    """
+    from ..record import guards as guards_mod
+
+    return guards_mod.evaluate_graph_guards(
+        kind=location.kind,
+        name=location.name,
+        sidecar=sidecar,
+        body=body,
+        vault_root=location.vault_root,
+        status_set=status_set,
+        prior_status=prior_status,
+        prior_body=prior_body,
+    )
+
+
+def _read_sidecar_and_body(location) -> tuple[dict, str]:
+    sidecar = json.loads(location.sidecar_path.read_text(encoding="utf-8"))
+    body = (
+        location.body_path.read_text(encoding="utf-8")
+        if location.body_path.exists()
+        else ""
+    )
+    return sidecar, body
+
+
+def _supersede_refusal(message: str) -> int:
+    from ..record import graph as graph_mod
+
+    print(graph_mod.format_guard_message("supersede-missing", message), file=sys.stderr)
+    return 1
+
+
+def _cmd_record_supersede(args) -> int:
+    """``lore record supersede PREDECESSOR --by SUCCESSOR`` — record a supersession.
+
+    Resolves both records, then — inside both vaults' write locks, with both
+    read after the locks are held — appends PREDECESSOR to the successor's
+    ``supersedes`` list and sets the predecessor's status to ``superseded``, in
+    that order. The edge goes first so an interrupted run leaves a state the verb
+    itself completes. ``superseded-by`` on the predecessor is derived at reindex.
+
+    Idempotent: each half is skipped when already in place, so re-running a
+    finished pair writes nothing, and re-running after a failed flip completes
+    it. A predecessor that is already ``superseded`` gains the new successor's
+    edge and keeps its status (a split names each child this way).
+
+    A failure of the second write exits nonzero with the exact re-run command on
+    stderr, the successor's edge already on disk. Refusals are the
+    ``supersede-...`` guards of ``guards.evaluate_supersede_pairing`` plus
+    ``[supersede-missing]``; they write nothing. Neither body is ever changed.
+    ``--vault NAME`` locates both records in that one vault.
+    """
+    import shlex
+    from contextlib import ExitStack
+
+    from .. import locking as locking_mod
+    from ..record import guards as guards_mod
+    from ..record import store as record_store_mod
+    from . import publish as publish_mod
+    from . import resolve_state as resolve_state_mod
+
+    pred_id = _require_record_id(args)
+    if pred_id is None:
+        return 1
+    succ_id = getattr(args, "by", None)
+    if not succ_id or "/" not in succ_id:
+        print(f"error: invalid --by {succ_id!r}; expected '<kind>/<name>'", file=sys.stderr)
+        return 1
+    if pred_id == succ_id:
+        return _fail(
+            guards_mod.evaluate_supersede_pairing(
+                predecessor_id=pred_id, predecessor={}, successor_id=succ_id,
+                successor={}, load_sidecar=lambda _id: None,
+            )
+        )
+
+    named_vault = None
+    if getattr(args, "vault", None):
+        named_vault = _resolve_named_vault(args.vault)
+        if named_vault is None:
+            return 1
+
+    for rid in (pred_id, succ_id):
+        _pull_before_write(rid, named_vault)
+
+    def locate(rid: str):
+        if named_vault is not None:
+            return record_store_mod.locate_record(rid, vault_root=str(named_vault.path))
+        return _find_current_record_location(rid)
+
+    def load_sidecar(rid: str) -> dict | None:
+        try:
+            return _read_sidecar_and_body(locate(rid))[0]
+        except (record_store_mod.RecordNotFoundError, record_store_mod.InvalidRecordIdError,
+                OSError, ValueError):
+            return None
+
+    rerun = f"lore record supersede {shlex.quote(pred_id)} --by {shlex.quote(succ_id)}"
+    if named_vault is not None:
+        rerun += f" --vault {shlex.quote(named_vault.name)}"
+
+    written_roots: list[str] = []
+    try:
+        with record_store_mod.index_transaction() as conn, ExitStack() as stack:
+            try:
+                pred_loc, succ_loc = locate(pred_id), locate(succ_id)
+            except (record_store_mod.RecordNotFoundError,
+                    record_store_mod.InvalidRecordIdError) as exc:
+                return _supersede_refusal(str(exc))
+            for loc in (pred_loc, succ_loc):
+                if resolve_state_mod.vault_is_resolving(loc.vault_root):
+                    print(
+                        resolve_state_mod.refusal_notice(loc.vault_root, "record supersede"),
+                        file=sys.stderr,
+                    )
+                    return 1
+            stack.enter_context(
+                locking_mod.vault_write_locks(pred_loc.vault_root, succ_loc.vault_root)
+            )
+
+            # Both records are read only now, with the locks held.
+            try:
+                pred_sidecar, pred_body = _read_sidecar_and_body(pred_loc)
+                succ_sidecar, succ_body = _read_sidecar_and_body(succ_loc)
+            except (OSError, ValueError):
+                return _supersede_refusal(
+                    f"cannot read {pred_id} or {succ_id}: record is missing or unreadable"
+                )
+            refusal = guards_mod.evaluate_supersede_pairing(
+                predecessor_id=pred_id, predecessor=pred_sidecar,
+                successor_id=succ_id, successor=succ_sidecar, load_sidecar=load_sidecar,
+            )
+            if refusal:
+                return _fail(refusal)
+
+            edge_present = pred_id in (succ_sidecar.get("supersedes") or [])
+            flip_needed = pred_sidecar.get("status") != "superseded"
+            if edge_present and not flip_needed:
+                outcome = "already recorded"
+            elif flip_needed:
+                outcome = "superseded"
+            else:
+                outcome = "edge added"
+
+            steps = []
+            notices: list[str] = []
+            if not edge_present:
+                new_succ = dict(succ_sidecar)
+                new_succ["supersedes"] = [*(succ_sidecar.get("supersedes") or []), pred_id]
+                steps.append((succ_loc, new_succ, succ_body, succ_body, succ_sidecar.get("status"), None))
+            if flip_needed:
+                new_pred = dict(pred_sidecar)
+                new_pred["status"] = "superseded"
+                steps.append((pred_loc, new_pred, pred_body, pred_body,
+                              pred_sidecar.get("status"), "superseded"))
+
+            # Every write is judged before the first lands, so a guard refusal
+            # can never leave the edge written and the flip refused.
+            errors: list[str] = []
+            for loc, sidecar, prior_body, body, prior_status, status_set in steps:
+                step_errors, step_notices = _supersede_guard(
+                    loc, sidecar, prior_body=prior_body, body=body,
+                    prior_status=prior_status, status_set=status_set,
+                )
+                errors.extend(step_errors)
+                notices.extend(step_notices)
+            if errors:
+                return _fail(errors)
+
+            for loc, sidecar, _prior_body, body, _prior, _set in steps:
+                try:
+                    _, shared = _resolve_current_vault_shared(loc)
+                    record_store_mod.validate_and_write(
+                        location=loc, sidecar=sidecar, body=body, conn=conn, shared=shared,
+                    )
+                except Exception as exc:  # noqa: BLE001 — reported below with the re-run command
+                    conn.commit()
+                    if written_roots:
+                        for root in dict.fromkeys(written_roots):
+                            publish_mod.request_publish(root)
+                    print(
+                        f"error: supersession incomplete — writing {loc.record_id} failed"
+                        f" after {steps[0][0].record_id} was written: {exc}\n"
+                        "Run this to finish it:\n" + rerun,
+                        file=sys.stderr,
+                    )
+                    return 1
+                written_roots.append(loc.vault_root)
+            conn.commit()
+    except _UpdateAborted as aborted:
+        return aborted.code
+    except Exception as exc:
+        return _handle_write_error(exc, "supersede")
+
+    _print_guard_notices(notices)
+    for root in dict.fromkeys(written_roots):
+        publish_mod.request_publish(root)
+    verb = {
+        "superseded": f"superseded: {pred_id} is superseded by {succ_id}",
+        "edge added": f"edge added: {succ_id} now supersedes {pred_id} (already superseded)",
+        "already recorded": f"already recorded: {pred_id} is superseded by {succ_id}",
+    }[outcome]
+    print(verb)
+    print(f"note: superseded-by on {pred_id} appears in search after 'lore reindex'")
+    return 0
+
+
 _SESSION_AMEND_REFUSAL = (
     "error: a session record cannot be amended: lore record update and "
     "lore flush write it under the session lock"
@@ -2669,6 +2895,43 @@ def add_record_subparser(sub) -> None:
     # Map flags (labels/annotations): dedicated branch.
     _add_map_field_flags(p_record_update)
     p_record_update.set_defaults(func=cmd_record)
+
+    # ``lore record supersede PREDECESSOR --by SUCCESSOR``.
+    p_record_supersede = p_record_sub.add_parser(
+        "supersede",
+        help="Record that one record supersedes another, in one step",
+        usage="lore record supersede PREDECESSOR --by SUCCESSOR [--vault NAME]",
+        description="Record a supersession: adds PREDECESSOR to SUCCESSOR's "
+                    "supersedes list, then sets PREDECESSOR's status to "
+                    "superseded. The edge lives on the successor (supersedes); "
+                    "superseded-by on the predecessor is derived at reindex and "
+                    "the edge is kind/name only, so the two may sit in different "
+                    "vaults. An adr, spec or decision may only be superseded by a "
+                    "record in a frozen status (an active adr, a ready spec — "
+                    "not a draft); a task takes any live successor. Re-running a "
+                    "finished pair changes nothing, and a predecessor that is "
+                    "already superseded gains the extra successor's edge, which "
+                    "is how a split names each child. Neither body changes. If "
+                    "the second write fails, the exit is nonzero and the exact "
+                    "command to finish it is printed.",
+        epilog="To undo a supersession: lore record update PREDECESSOR --status "
+               "<prior status>, then lore record update SUCCESSOR "
+               "--unset-supersedes PREDECESSOR.",
+    )
+    p_record_supersede.add_argument(
+        "record_id", metavar="PREDECESSOR",
+        help="The record being superseded (<kind>/<name>).",
+    )
+    p_record_supersede.add_argument(
+        "--by", required=True, metavar="SUCCESSOR",
+        help="The record that replaces it (<kind>/<name>).",
+    )
+    p_record_supersede.add_argument(
+        "--vault", dest="vault", default=None, metavar="NAME",
+        help="Look for both records only in this configured vault, instead of "
+             "scanning every vault in config order.",
+    )
+    p_record_supersede.set_defaults(func=cmd_record)
 
     # ``lore record amend RECORD_ID --reason R --initiated-by operator|agent``.
     # --reason and --initiated-by are validated by the handler (not argparse's

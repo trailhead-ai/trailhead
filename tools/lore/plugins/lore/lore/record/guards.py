@@ -18,6 +18,10 @@ carries both, so exactly one policy ever runs. :func:`evaluate_supersedes_guard`
 runs unconditionally alongside that dispatch, for every kind: unlike
 ``depends-on``/``parent``, ``supersedes`` is ungated and carries no cycle guard
 of its own — only format and self-edge are checked here.
+:func:`evaluate_supersede_pairing` is the verb-level counterpart: it judges a whole
+predecessor/successor pair (kind has a ``superseded`` status, neither side dead,
+no cycle through ``supersedes`` edges, frozen-to-frozen for adr/spec/decision) for
+``lore record supersede`` and is not part of the per-write dispatch.
 
 The freeze: :func:`check_frozen_record` runs from :func:`evaluate_graph_guards`
 for every kind, ahead of the kind-specific policy, so a refused write never pays
@@ -75,6 +79,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from collections.abc import Callable
 from pathlib import Path
 
 from . import graph as graph_mod
@@ -860,6 +865,107 @@ def evaluate_supersedes_guard(*, kind: str, name: str, sidecar: dict, vault_root
                 )
             )
     return errors
+
+
+#: Kinds whose supersession must name a record that is itself committed: an
+#: adr, spec or decision retired in favour of a draft would leave nothing
+#: authoritative in its place. A task carries no such commitment.
+_FROZEN_PREDECESSOR_KINDS: frozenset[str] = frozenset({"adr", "spec", "decision"})
+
+#: Upper bound on records visited while walking ``supersedes`` edges for a
+#: cycle, so a malformed or enormous chain cannot make the verb run unbounded.
+_SUPERSEDE_CHAIN_LIMIT = 256
+
+
+def _supersede_refusal(guard: str, message: str) -> list[str]:
+    return [graph_mod.format_guard_message(guard, message)]
+
+
+def _supersedes_reaches(
+    start: dict, target_id: str, load_sidecar: Callable[[str], dict | None]
+) -> bool:
+    """Whether following ``supersedes`` edges from *start* arrives at *target_id*.
+
+    Breadth-first over resolved records, visiting each at most once and at most
+    :data:`_SUPERSEDE_CHAIN_LIMIT` in all; an entry that does not resolve ends
+    that branch.
+    """
+    queue = list(start.get("supersedes") or [])
+    seen: set[str] = set()
+    while queue and len(seen) < _SUPERSEDE_CHAIN_LIMIT:
+        entry = queue.pop(0)
+        if not isinstance(entry, str) or entry in seen:
+            continue
+        if entry == target_id:
+            return True
+        seen.add(entry)
+        sidecar = load_sidecar(entry)
+        if sidecar:
+            queue.extend(sidecar.get("supersedes") or [])
+    return False
+
+
+def evaluate_supersede_pairing(
+    *,
+    predecessor_id: str,
+    predecessor: dict,
+    successor_id: str,
+    successor: dict,
+    load_sidecar: Callable[[str], dict | None],
+) -> list[str]:
+    """Judge whether *successor* may be recorded as superseding *predecessor*.
+
+    Returns the first applicable refusal as a one-element list of
+    ``graph-guard [supersede-...]`` lines, or ``[]`` when the pair is fine.
+    The checks run in a fixed order so a pair that breaks several rules is
+    reported by the most basic one: same record, a predecessor kind with no
+    ``superseded`` status, a ``dropped`` predecessor, a ``superseded`` or
+    ``dropped`` successor, a cycle through ``supersedes`` edges, and finally the
+    frozen pairing (an adr, spec or decision predecessor needs a successor in a
+    frozen status; a task predecessor takes any live successor).
+
+    *load_sidecar* resolves a ``kind/name`` to its sidecar (``None`` when it does
+    not resolve); only the cycle walk uses it. Each edge is ``kind/name`` with no
+    vault, so a pair may span vaults.
+    """
+    pred_kind = predecessor_id.partition("/")[0]
+    succ_kind = successor_id.partition("/")[0]
+    pred_node = graph_mod.format_node(predecessor_id)
+    succ_node = graph_mod.format_node(successor_id)
+    if predecessor_id == successor_id:
+        return _supersede_refusal(
+            "supersede-self", f"{pred_node} cannot be superseded by itself"
+        )
+    if "superseded" not in record_model.STATUS_VOCAB.get(pred_kind, ()):
+        return _supersede_refusal(
+            "supersede-no-superseded-status",
+            f"a {pred_kind} has no superseded status, so {pred_node} cannot be superseded",
+        )
+    if predecessor.get("status") == "dropped":
+        return _supersede_refusal(
+            "supersede-dropped-predecessor",
+            f"{pred_node} is dropped — a dropped record has no successor to name",
+        )
+    if successor.get("status") in ("superseded", "dropped"):
+        return _supersede_refusal(
+            "supersede-dead-successor",
+            f"{succ_node} is {successor.get('status')} and cannot replace {pred_node}",
+        )
+    if _supersedes_reaches(predecessor, successor_id, load_sidecar):
+        return _supersede_refusal(
+            "supersede-cycle",
+            f"{pred_node} already supersedes {succ_node}, directly or through a chain of"
+            " supersedes edges — recording the reverse would make a cycle",
+        )
+    if pred_kind in _FROZEN_PREDECESSOR_KINDS and successor.get("status") not in (
+        FROZEN_STATUSES.get(succ_kind, frozenset())
+    ):
+        return _supersede_refusal(
+            "supersede-unfrozen-successor",
+            f"{pred_node} is a {pred_kind}; its successor {succ_node} is "
+            f"{successor.get('status')!r}, not a frozen status — settle the successor first",
+        )
+    return []
 
 
 def evaluate_design_guards(
