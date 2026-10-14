@@ -53,14 +53,21 @@ One JSON file, written anywhere you can read back (a temp file is fine):
 }
 ```
 
-- `title` is required; `intro` is optional.
-- `questions` holds at least one question. Each has a `prompt` and 1 to 26
-  `options` (lettered A to Z in order).
-- Each option has a `name`, a `cost` (a line or two on what choosing it
-  costs), a `layout`, and `pick`. Exactly one option per question has
-  `"pick": true`: your own recommendation.
+- `title` is required and non-empty; `intro` is optional (a string).
+- `questions` holds at least one question. Each has a non-empty `prompt` and
+  1 to 26 `options` (lettered A to Z in order).
+- Each option has a non-empty `name`, a non-empty `cost` (a line or two on what
+  choosing it costs), and a `layout`. `pick` is optional on each option, but
+  exactly one option per question carries `"pick": true`: your own
+  recommendation.
 - An unknown key in this outer shape is refused, so a misspelt key is caught
   rather than dropped.
+- Numbers anywhere in the round must be finite; one too large to write is refused.
+
+The script checks only this outer shape. It does not look inside `layout`, so
+a bad block still builds a pad (exit 0), and that drawing shows "Can't draw this
+layout" in its place. Get the blocks right yourself, and check the pad if the
+layouts matter.
 
 A `layout` is a tree of blocks. Each block is an object with exactly one key
 naming its kind:
@@ -77,10 +84,12 @@ naming its kind:
 | `image` | a string caption in a crossed box |
 | `rule` | `true` |
 
+Each block has exactly one key, a known kind from the table, with the value
+type shown. Layouts nest at most 24 deep, counting the outermost block as the
+first level.
+
 Keep drawings schematic: a few blocks per option, enough to show how the
-options differ. Every string is shown as text, never as markup. The full
-contract, including how a layout the pen cannot read is shown, is in
-`docs/design/a-round-of-layout-sketches-opens-from-disk-as-a-pad.md`.
+options differ. Every string is shown as text, never as markup.
 
 ## Build the pad
 
