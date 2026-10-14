@@ -399,7 +399,7 @@ def _vault_name_for_root(vault_root) -> str | None:
 
 
 def cmd_record(args) -> int:
-    """Dispatch ``lore record <action>`` — create / update / amend / delete / show / history / rename.
+    """Dispatch ``lore record <action>`` — create / update / amend / delete / show / history / criteria / rename.
 
     Thin shell over ``record_store``. Routes to the appropriate handler
     by ``record_action``; all handlers are argv→library adapters with no
@@ -418,13 +418,15 @@ def cmd_record(args) -> int:
         return _cmd_record_show(args)
     if action == "history":
         return _cmd_record_history(args)
+    if action == "criteria":
+        return _cmd_record_criteria(args)
     if action == "rename":
         return _cmd_record_rename(args)
     print(
         f"lore record: unknown action {action!r}. "
         f"Use 'lore record create', 'lore record update', "
         f"'lore record amend', 'lore record rename', 'lore record delete', "
-        f"'lore record history', or 'lore record show'.",
+        f"'lore record history', 'lore record criteria', or 'lore record show'.",
         file=sys.stderr,
     )
     return 1
@@ -731,6 +733,78 @@ def _cmd_record_history(args) -> int:
     if shared_flag != 0:
         lines = xml_escape.wrap_shared(trust_name, lines)
     sys.stdout.write("\n".join(lines) + "\n")
+    return 0
+
+
+def _cmd_record_criteria(args) -> int:
+    """``lore record criteria <spec-id> [--vault NAME]`` — a spec's criteria state.
+
+    Prints one JSON object, ``{"record": "spec/<name>", "declared": [...],
+    "removed": [...]}``, computed by :func:`lore.record.criteria.criteria_state`
+    from the stored body and the sidecar's ``change-history``: ``declared`` is the
+    identifiers the body declares in document order, ``removed`` the identifiers a
+    history entry recorded as removed in numeric order. A spec whose criteria
+    section declares no identifiers prints two empty lists.
+
+    Read-only: it takes no vault lock and writes no journal entry, so it follows
+    ``record history``'s read path, including ``--vault`` resolution. A record
+    that is not a spec, a missing record or malformed id, a missing or duplicated
+    criteria heading, or a stored history that is not a list or whose
+    ``criteria.removed`` is malformed → non-zero + ``lore: <msg>`` on stderr, no
+    traceback, nothing on stdout. A stored sidecar is validated only on the write
+    path, so this command fails closed on a hand-corrupted one.
+    """
+    from ..record import criteria as criteria_mod
+    from ..record import journal
+    from ..record import store as record_store_mod
+
+    record_id = args.record_id
+
+    vault_name = getattr(args, "vault", None)
+    if vault_name:
+        named_vault = _resolve_named_vault(vault_name)
+        if named_vault is None:
+            return 1
+        vault_root = str(named_vault.path)
+    else:
+        try:
+            vault_root = _resolve_record_op_vault(record_id, args)
+        except record_store_mod.InvalidRecordIdError as exc:
+            print(f"lore: {exc}", file=sys.stderr)
+            return 1
+
+    journal.recover_if_pending(vault_root)
+    try:
+        loc = record_store_mod.locate_record(record_id, vault_root=vault_root)
+    except (
+        record_store_mod.RecordNotFoundError,
+        record_store_mod.InvalidRecordIdError,
+    ) as exc:
+        print(f"lore: {exc}", file=sys.stderr)
+        return 1
+    except Exception as exc:
+        print(f"lore: record criteria failed: {exc}", file=sys.stderr)
+        return 1
+
+    if loc.kind != "spec":
+        print(
+            f"lore: {loc.record_id} is a {loc.kind}, not a spec: only a spec "
+            "declares acceptance criteria",
+            file=sys.stderr,
+        )
+        return 1
+
+    body = (
+        loc.body_path.read_text(encoding="utf-8") if loc.body_path.exists() else ""
+    )
+    history = record_store_mod.read_stored_change_history(loc.sidecar_path)
+    try:
+        state = criteria_mod.criteria_state(body, history)
+    except criteria_mod.CriteriaError as exc:
+        print(f"lore: {loc.record_id}: {exc}", file=sys.stderr)
+        return 1
+
+    sys.stdout.write(json.dumps({"record": loc.record_id, **state}) + "\n")
     return 0
 
 
@@ -2780,6 +2854,30 @@ def add_record_subparser(sub) -> None:
     p_record_history.add_argument("--suite", default=None, help=argparse.SUPPRESS)
     p_record_history.add_argument("--team", default=None, help=argparse.SUPPRESS)
     p_record_history.set_defaults(func=cmd_record)
+
+    p_record_criteria = p_record_sub.add_parser(
+        "criteria",
+        help="Print a spec's declared and removed acceptance criteria as JSON",
+        description="Print one JSON object, {\"record\", \"declared\", \"removed\"}: "
+                    "the criterion identifiers a spec's body declares (document "
+                    "order) and the ones its change-history recorded as removed "
+                    "(numeric order). Read-only.",
+    )
+    p_record_criteria.add_argument(
+        "record_id",
+        metavar="RECORD_ID",
+        help="The spec ID to read (spec/<name>)",
+    )
+    p_record_criteria.add_argument(
+        "--vault", dest="vault", default=None, metavar="NAME",
+        help="Read the record from exactly this configured vault by name, "
+             "instead of scanning every vault in config order.",
+    )
+    p_record_criteria.add_argument("--repo", default=None, help=argparse.SUPPRESS)
+    p_record_criteria.add_argument("--product", default=None, help=argparse.SUPPRESS)
+    p_record_criteria.add_argument("--suite", default=None, help=argparse.SUPPRESS)
+    p_record_criteria.add_argument("--team", default=None, help=argparse.SUPPRESS)
+    p_record_criteria.set_defaults(func=cmd_record)
 
     p_record_show = p_record_sub.add_parser(
         "show",
