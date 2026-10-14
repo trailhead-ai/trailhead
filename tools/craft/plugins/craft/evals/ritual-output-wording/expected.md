@@ -427,3 +427,106 @@ section did not hold a dispatched reviewer to its prior form.
 One capture was edited after it was taken: in `second-reviewer-1.txt` one ordinary English word matched the
 repository's machine-local leak denylist and was replaced with `[redacted]` so the commit could pass the leak gate.
 The grader's verdicts on that capture are the same before and after the edit.
+
+## Extension, 2026-10-14 — a third wording and the council report bullet, the last of each this case will measure
+
+Committed before either edit and before any third-wording run. Nothing above this heading is rewritten; the
+grammar, the 0.5 word-share threshold, the verdict words, the run, split, floor and exclusion rules, the no-mention
+rule and the capture naming above apply unchanged to every arm named here.
+
+**Authorization.** The operator decided on 2026-10-14, after the second wording's result above, to keep the rule in
+craft's always-loaded text, to add a counter-instruction to the council prompt template, and to authorize one more
+wording under a fresh dated extension. Moving the rule to an output style and relaxing the reviewer criterion were
+both considered and declined.
+
+**The third wording.** Appended to `tools/craft/plugins/craft/rules.md` as the `## Output wording` section, verbatim
+(it is the second wording plus one sentence, "That holds for every first mention, a closing summary line
+included."):
+
+```
+## Output wording
+
+This section is for text a person will read in the session. If another agent
+dispatched you, or your instructions fix the format of what you return, it does
+not apply: write that output exactly as you would without this section. It also
+leaves alone any field or line a script reads, plan files, and commit and pull
+request text.
+
+When you mention an acceptance criterion to the person reading, give the
+criterion's own words, in full or close to it, and put its number after them in
+round brackets, as in "Orders over the limit are held for review (AC6)". That
+holds for every first mention, a closing summary line included. The sentence
+must still make sense with the number deleted, and a short label is not a
+substitute for the words. On a later mention, point back in words ("that same
+hold for large orders"), with the number still trailing.
+```
+
+**The template bullet.** Inserted into `tools/craft/plugins/craft/skills/_shared/council.md`, in the template's text
+block, immediately after the line `- One-line Confidence at the end`, verbatim:
+
+```
+- This report goes to the agent that dispatched you, not to a person: cite an acceptance criterion by its number alone, as the spec writes it (for example AC5); the output-wording section in your rules does not apply to it
+```
+
+Neither text is adjusted after any run. This is the last wording and the only template sentence this case measures.
+
+**The third-wording revision.** The one commit that carries both edits. Every `third-*` arm pins its rules file and
+its agent definition to it in the manifest, and the fixture-derivation check reads `council.md` at it, so that
+reverting the edits on the branch later leaves the recorded arms rebuilding. The commit's SHA is recorded in the
+manifest constant `THIRD_WORDING_REVISION` and in the Result section below. `baseline-advocate` pins to `9458af4e`.
+
+**New fixtures.** `fixtures/prompt-reviewer-template.md` is `fixtures/prompt-reviewer.md` with the bullet inserted
+after its `- One-line Confidence at the end` line and nothing else changed. `fixtures/prompt-advocate.md` is the
+council template at `9458af4e` hand-filled for the Advocate lens against the same plan and spec, with the plan-level
+Advocate Critical bars and the same maturity block as `prompt-reviewer.md`.
+`fixtures/prompt-advocate-template.md` is `prompt-advocate.md` with the bullet inserted the same way.
+
+**Arms and prompts.** Every variable that differs between arms:
+
+| Capture prefix | Arm file (system prompt) | Slice skill | Agent definition | Rules file | Prompt | Checks |
+|---|---|---|---|---|---|---|
+| `third-noritual-<n>` | `third-noritual.md` | none | none | third-wording revision | `prompt-noritual.md` | `criterion-mention` |
+| `third-slice-rules-only-<n>` | `third-slice-rules-only.md` | `9458af4e` | none | third-wording revision | `prompt-slice.md` | `criterion-mention` over the statement; `covers-field` |
+| `third-reviewer-rules-only-<n>` | `third-reviewer.md` | none | reliability, third-wording revision | third-wording revision | `prompt-reviewer.md` | `reviewer-report`; `criterion-mention` |
+| `third-reviewer-<n>` | `third-reviewer.md` (same file) | none | reliability, third-wording revision | third-wording revision | `prompt-reviewer-template.md` | `reviewer-report`; `criterion-mention` |
+| `baseline-advocate-<n>` | `baseline-advocate.md` | none | advocate, `9458af4e` | `9458af4e` | `prompt-advocate.md` | `reviewer-report`; `criterion-mention` |
+| `third-advocate-<n>` | `third-advocate.md` | none | advocate, third-wording revision | third-wording revision | `prompt-advocate-template.md` | `reviewer-report`; `criterion-mention` |
+| `third-advocate-rules-only-<n>` (only if the bullet is dropped) | `third-advocate.md` (same file) | none | advocate, third-wording revision | third-wording revision | `prompt-advocate.md` | `reviewer-report`; `criterion-mention` |
+| `shipped-slice-<n>` (run by a later task, not here) | `shipped-slice.md` | working tree | none | working tree | `prompt-slice.md` | `criterion-mention` over the statement; `covers-field` |
+
+The two reliability reviewer prefixes share one system prompt and differ in the prompt alone (the bullet); the two
+advocate prefixes likewise. `third-reviewer-rules-only` and `baseline-reviewer` differ in the rules file and agent
+definition's revision only, as do the other pairs the tables above name. Three runs per prefix, run exactly as
+`## Dispatch` above describes; splits re-run to six by the rule above.
+
+**Pass conditions.**
+
+- `third-noritual`: a clean majority of `text-with-number`.
+- `third-slice-rules-only`: every graded run `gate-shape` for `covers-field`. Its `criterion-mention` verdict is
+  observed only.
+- `third-reviewer` (the shipped state): every graded run `template-shape`, and the majority `criterion-mention`
+  verdict equals `baseline-reviewer`'s majority verdict (`bare`).
+- `third-advocate`: every graded run `template-shape`, and the majority `criterion-mention` verdict equals
+  `baseline-advocate`'s majority verdict. If no verdict holds more than half of either arm's graded runs, the
+  result is `AMBIGUOUS`, which is not a pass.
+- The bullet's own effect: if `third-reviewer-rules-only` is `bare` in a clean majority (3 of 3, or at least 5 of
+  6), the bullet showed no effect of its own. It is reverted, and both reviewer conditions are read on rules-only
+  arms instead (`third-reviewer-rules-only`, plus `third-advocate-rules-only` run on `prompt-advocate.md`). Any
+  other count keeps the bullet.
+- The criterion-mention criterion (AC1) needs the no-ritual condition. The reviewer-report criterion (AC16) needs
+  both reviewer conditions, reliability and advocate. Either failing stops the run.
+
+**The `shipped-slice` arm, registered here for the next task.** Slice skill and rules both from the working tree,
+prompt `prompt-slice.md`, checks as in the table. Its conditions, fixed now so they are fixed before any edit: a
+clean majority of `text-with-number` over the statement, and every graded run `gate-shape` for `covers-field`. The
+arm is added and run by the task after this one; it is not created here.
+
+**Stop rule.** This is the last wording and the last template bullet. If a pass condition fails, the arms are
+confirmed pinned, both edits are reverted on the branch in a new commit, the extension, arms, prompts and captures
+stay as a recorded result, a Result section is written, and the run stops and is reported. Nothing is reworded.
+
+**What does not change.** The grammar, the 0.5 word-share threshold, the verdict words, and every run, split, floor
+and exclusion rule above.
+
+**Limit.** This extension was written with first- and second-wording output in hand. No third-wording output
+existed when it was committed.
