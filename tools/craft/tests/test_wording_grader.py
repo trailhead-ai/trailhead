@@ -732,7 +732,7 @@ CAPTURE_EXPECTATIONS = {
 
 # A capture whose verdict differs from its prefix's is listed here by stem, with the verdict per check.
 # Each entry records the grader's verdict, under the thresholds fixed before any run, and those thresholds are the ones
-# that count; read by eye, a capture may look like `text-with-number` or a mix of forms instead.
+# that count; read by eye, a capture may look like `text-with-number` or a combination of forms instead.
 CAPTURE_OVERRIDES = {
     "treated-noritual-1": {"criterion-mention": "nickname"},
     "treated-noritual-2": {"criterion-mention": "nickname"},
