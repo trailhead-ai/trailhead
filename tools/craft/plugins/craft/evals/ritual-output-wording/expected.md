@@ -343,3 +343,56 @@ every run rule.
 
 **Limit.** This amendment was written with baseline output in hand. No treated output existed when it was
 committed.
+
+## Extension, 2026-10-14 — the second wording, the last this case will measure
+
+Committed after the nine first-wording captures (commit `200b5269`) and before any second-wording arm has been run.
+Nothing above this heading is rewritten; the grammar, thresholds, verdict words, run rules, floor and exclusion
+rules, split rule and pass conditions above apply unchanged to the arms named here.
+
+**The first wording's result, as counted by the grader.** Three runs per arm.
+
+| Arm | Check | Grader's count |
+|---|---|---|
+| `treated-noritual` | `criterion-mention` | `text-with-number` 1, `nickname` 2 |
+| `treated-slice-rules-only` | `criterion-mention` over the statement | `text-with-number` 3 |
+| `treated-slice-rules-only` | `covers-field` | `gate-shape` 3 |
+| `treated-reviewer` | `reviewer-report` | `template-shape` 3 |
+| `treated-reviewer` | `criterion-mention` | `nickname` 3 (baseline: `bare` 3) |
+
+The no-ritual arm is a 2-1 split under the grader and was not re-run. Reading by eye, `treated-noritual-1` and
+`treated-noritual-2` each give a criterion's text with its number trailing, so by eye the arm is 3 of 3
+`text-with-number`; the grader reads both as `nickname` because the words before the bracket fall under the
+pre-registered 0.5 word share. The threshold set before any run is the one that counts, so the capture mapping
+holds the grader's verdict for both, and the by-eye reading is logged here as a disagreement and not mapped. The
+reviewer arm's majority `criterion-mention` verdict differs from the baseline's, so the reviewer comparison above
+failed for the first wording.
+
+**The second wording.** The text of the `## Output wording` section now at the end of
+`tools/craft/plugins/craft/rules.md` is the second wording, recorded in the task record this work was built from.
+It is the last wording this case will measure. It is measured exactly as it stands and is not adjusted after any
+second-wording run. If a pass condition fails, the section is reverted on the branch by the operator and the run
+stops.
+
+**Second-wording arms.** Each is a file under `arms/`, listed in the same manifest, with the rules file read from
+the working tree and the other source combined as the first-wording treated arms combine it. The names start with
+`second-` so they cannot be confused with the first wording's `treated-` arms.
+
+| Arm | Site | Slice skill | Reliability agent definition | Rules file | Wording section |
+|---|---|---|---|---|---|
+| `second-noritual` | no-ritual | none | none | working tree | second wording |
+| `second-slice-rules-only` | slice | `9458af4e` | none | working tree | second wording |
+| `second-reviewer` | reviewer | none | working tree | working tree | second wording |
+
+Capture prefixes are the arm names, each followed by `-<n>` from 1. `second-noritual` is read with
+`criterion-mention`; `second-slice-rules-only` with `criterion-mention` over the statement and `covers-field`;
+`second-reviewer` with `reviewer-report` and `criterion-mention`. Each of the pass conditions above that names a
+`treated-` arm is read, for the second wording, against the `second-` arm at the same site: a clean majority of
+`text-with-number` for `second-noritual`; every graded `second-reviewer` run `template-shape` and the same majority
+`criterion-mention` verdict as `baseline-reviewer`; every graded `second-slice-rules-only` run `gate-shape`.
+
+**The first wording stays as recorded.** The `treated-` arms and their captures are a recorded result. They are not
+re-graded under any rule added here, and their arm files stay reproducible by pinning the rules file to `200b5269`.
+
+**Limit.** This extension was written with first-wording output in hand. No second-wording output existed when it
+was committed.

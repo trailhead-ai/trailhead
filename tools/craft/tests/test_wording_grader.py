@@ -695,6 +695,14 @@ CAPTURE_EXPECTATIONS = {
     ],
 }
 
+# A capture whose verdict differs from its prefix's is listed here by stem, with the verdict per check.
+# These two were read by eye as `text-with-number`; the grader reads both as `nickname` under the
+# word-share threshold fixed before any run, and that threshold is the one that counts.
+CAPTURE_OVERRIDES = {
+    "treated-noritual-1": {"criterion-mention": "nickname"},
+    "treated-noritual-2": {"criterion-mention": "nickname"},
+}
+
 CAPTURES = sorted(p for p in RUNS.glob("*.txt") if not p.name.endswith(".stderr.txt"))
 
 
@@ -707,6 +715,7 @@ def test_every_capture_grades_to_the_verdict_its_prefix_is_mapped_to(capture):
     prefix = _prefix(capture)
     assert prefix in CAPTURE_EXPECTATIONS, f"{capture.name} has no mapped prefix {prefix!r}"
     for check, extra, verdict in CAPTURE_EXPECTATIONS[prefix]:
+        verdict = CAPTURE_OVERRIDES.get(capture.stem, {}).get(check, verdict)
         args = ["--check", check, "--criteria", str(SPEC), *extra]
         result = run_grader(args, capture.read_bytes())
         assert result.stdout.decode("utf-8") == f"{check}: {verdict}\n", (capture.name, result.stderr)
