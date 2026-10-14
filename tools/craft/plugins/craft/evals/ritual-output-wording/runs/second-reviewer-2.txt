@@ -1,0 +1,13 @@
+## Findings
+- [Critical] None of the four tasks has a test contract: the fee cap, the ten-pound threshold, the return-after-close date, and the override can all ship with nothing pinning them. That puts a test-free change into a fines system that charges money in production. Suggested: give each task a failing test written first, covering at least these: a balance of £10.00 versus £10.01, a fee that reaches the replacement price, a return scanned at 23:30, and a second run of the job on the same date.
+- [Critical] Fee charging can't safely run twice, and a run can't be undone: the job runs at night and again on return, so one item returned on the same day it is charged, or a job retried after a crash, gets charged twice. Nothing lets anyone preview or reverse those charges. Suggested: write charges to a ledger with a key of (loan, date) so a repeat run changes nothing, and add a dry-run mode that can be run again and checked against the totals.
+- [Important] (Critical-class, downgraded to stay within two) Nobody would see the nightly job fail: there's no health check, alert or count of runs. If it dies, nothing gets flagged overdue and the checkout guard blocks or clears borrowers on old balances. Suggested: record a heartbeat, count rows processed, and alert when a run is missing.
+- [Important] (Critical-class) Schema change with no migration: adding the overdue flag to the loan table has no migration or backfill for loans that are already overdue, and no way to roll it back.
+- [Important] The plan contradicts the spec: stamping a late return with the next morning's date makes the fee grow for another day, which breaks "Returning an overdue item stops the fee from growing the same day, even if the return is scanned after closing time" (AC5).
+- [Important] A job at 00:05 can't meet "shown as overdue on the desk screen within one minute of the date rolling over" (AC1). Clock changes and time zones are also left unspecified.
+- [Important] The override note holds only the reason. "Records who granted it and the reason given, and shows in the borrower's history" (AC4) also needs who granted it and a history entry.
+- [Important] Nothing in the plan covers the reminder messages and their dedup (AC6) or the monthly fees report that must reconcile with the ledgers (AC7).
+- [Minor] It's unclear whether the cap applies to the total fee or to each day's charge, and what happens when a return and the job run at the same moment.
+
+## Confidence
+High: the plan is short and the gaps can be checked directly against plan.md lines 6–11 and the spec's acceptance criteria.

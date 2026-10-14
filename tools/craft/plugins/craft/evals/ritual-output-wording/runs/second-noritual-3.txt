@@ -1,0 +1,10 @@
+Going only by the status note, five of the seven criteria are still open, and one more is only partly done:
+
+- **A borrower whose loan passes its due date is shown as overdue on the desk screen within one minute of the date rolling over (AC1):** The flag works, but it was only checked the morning after. Someone still needs to show that it appears within a minute of midnight.
+- **A borrower owing more than ten pounds cannot check out further items until the balance is cleared or a librarian overrides (AC3):** The block and the clear-on-payment are done. The note doesn't say whether a librarian can override the block yet, and since override recording hasn't started, that part probably isn't built.
+- **A librarian override records who granted it and the reason given, and shows in the borrower's history (AC4):** Not started. All of it is left.
+- **Returning an overdue item stops the fee from growing the same day, even if scanned after closing time (AC5):** Not started. All of it is left, including the after-closing case.
+- **A borrower gets one reminder three days before the due date and one the day after, and no other automatic messages about the same loan (AC6):** The day-after message is sent. The three-days-before message isn't built, and nothing yet checks that no other messages go out.
+- **The monthly fees report lists each category's total charged and total waived, and these reconcile with the per-borrower ledgers (AC7):** Not touched. All of it is left.
+
+The only criterion fully done is the per-category daily fee capped at the item's replacement price (AC2). It was tried on the rare atlas.

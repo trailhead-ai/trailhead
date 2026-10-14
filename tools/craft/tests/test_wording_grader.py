@@ -693,6 +693,15 @@ CAPTURE_EXPECTATIONS = {
         ("reviewer-report", [], "template-shape"),
         ("criterion-mention", [], "nickname"),
     ],
+    "second-noritual": [("criterion-mention", [], "text-with-number")],
+    "second-slice-rules-only": [
+        ("criterion-mention", ["--drop-value-line"], "text-with-number"),
+        ("covers-field", [], "gate-shape"),
+    ],
+    "second-reviewer": [
+        ("reviewer-report", [], "template-shape"),
+        ("criterion-mention", [], "nickname"),
+    ],
 }
 
 # A capture whose verdict differs from its prefix's is listed here by stem, with the verdict per check.
@@ -701,6 +710,11 @@ CAPTURE_EXPECTATIONS = {
 CAPTURE_OVERRIDES = {
     "treated-noritual-1": {"criterion-mention": "nickname"},
     "treated-noritual-2": {"criterion-mention": "nickname"},
+    "second-noritual-2": {"criterion-mention": "nickname"},
+    "second-noritual-3": {"criterion-mention": "nickname"},
+    "second-noritual-6": {"criterion-mention": "nickname"},
+    "second-reviewer-3": {"criterion-mention": "bare"},
+    "second-reviewer-4": {"criterion-mention": "bare"},
 }
 
 CAPTURES = sorted(p for p in RUNS.glob("*.txt") if not p.name.endswith(".stderr.txt"))

@@ -1,0 +1,11 @@
+## Findings
+- [Critical] None of the four tasks has a test contract. Concretely, task 2 and the plan's note break AC5. A return scanned after closing is stamped with the next morning's date. The 00:05 run then charges one more day, though AC5 says "Returning an overdue item stops the fee from growing the same day, even if the return is scanned after closing time." Nothing would catch it. Suggested: give each task a failing-first test contract. The first one returns an item at 18:30 after closing and asserts no fee is charged at the 00:05 run. Then test the fee cap at, just under and just over the replacement price (AC2), and the override at £10.00 and £10.01 (AC3).
+- [Critical] The nightly job writes fees to the money records with nothing to make it safe or visible. Concretely, if it fails, is rerun, or overlaps the fee run at return time, a day is charged twice or not at all, and no one is alerted. Its first production run also charges every loan that is already overdue, with no dry run. Suggested: key each charge on (loan, date) so a rerun cannot double it. Log or alert on each run's success and the count of loans it touched. Before go-live, do a dry run that prints the first run's charges for a person to approve.
+- [Important] The 00:05 job misses AC1's one-minute window ("shown as overdue on the desk screen within one minute of the date rolling over"). Suggested: work out overdue from the due date when the screen loads, or run the job at 00:00.
+- [Important] The override note does not record who granted it (AC4). A free-text note also cannot be reliably counted in reports. Suggested: store each override as its own record with the librarian's ID.
+- [Important] Nothing covers AC6 (one reminder three days before the due date and one the day after, no other messages) or AC7 (the monthly report, whose totals must match the per-borrower records). Waivers have no place to be stored, so the report cannot balance.
+- [Minor] Local midnight is undefined on clock-change days, so the 00:05 run may be skipped or run twice.
+- [Minor] Nothing guards against two librarians checking out to the same borrower at once and both passing the £10 balance check.
+
+## Confidence
+High. The AC5 contradiction and the gaps are taken straight from plan.md line 11 against spec.md AC1, AC4, AC5, AC6 and AC7. No code exists yet to check against.

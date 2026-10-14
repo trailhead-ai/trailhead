@@ -1,0 +1,12 @@
+## Findings
+- [Critical] None of the four tasks has a test contract: the fee cap (AC2), the £10 threshold (AC3) and the after-hours return (AC5) can all ship wrong, and nothing would catch it. Suggested: give each task failing-first tests. Cover a fee at the cap and one [redacted] over, a balance of exactly £10.00 and £10.01, and a return scanned at 23:30.
+- [Critical] The nightly job writes money with no dry run, no idempotency key and no signal that it ran. It double-charges if it is rerun or overlaps with a return-time recompute. It silently skips a day's fees if 00:05 fails. On its first run it backdates fees onto every historically overdue loan, all at once. Suggested: make the job idempotent per loan per day using a ledger row with a unique key. Add a preview mode and a gated backfill for existing loans. Emit a "last run, rows charged" health check that alerts if it goes stale.
+- [Important] Stamping after-hours returns with the next morning's date adds an extra fee day. That breaks "returning an overdue item stops the fee from growing the same day, even if the return is scanned after closing time" (AC5). Suggested: record the real scan time and stop the fee from that time.
+- [Important] A job at 00:05 can't meet "shown as overdue on the desk screen within one minute of the date rolling over" (AC1). Suggested: work out the overdue status from the due date each time the screen loads, so it doesn't depend on the stored flag.
+- [Important] The override note keeps only the reason, not who granted it, so it misses the requirement that the override "records who granted it" (AC4).
+- [Important] The plan has no task at all for the reminder messages (AC6) or the monthly fees report (AC7). It also gives no way to record waivers, so the report's waived totals have nothing to reconcile against.
+- [Important] There is no switch to turn off the checkout guard. If the fee calculation goes wrong, every affected borrower is blocked at the desk until someone deploys a fix. Suggested: put the guard behind a flag.
+- [Minor] Loans due on days the library is closed, and midnight on daylight-saving change dates, are undefined for both the 00:05 schedule and the per-day fee count.
+
+## Confidence
+High: the plan and spec are short and were read in full. These findings come from conflicts between the plan's text and the acceptance criteria, not from guesses about code.
