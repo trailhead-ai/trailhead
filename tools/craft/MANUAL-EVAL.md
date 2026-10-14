@@ -2276,3 +2276,30 @@ could not affect the baseline, which never signs.
 member is chosen among several worktrees, is not exercised. Resume-side branch switching (a
 labelled run whose repo is on another branch) is not exercised. The parent's label is a body line,
 not sidecar data.
+
+## Case: ritual-output-wording
+
+`plugins/craft/evals/ritual-output-wording/` — fixtures, arms, captures and `expected.md` carrying the pass
+conditions, written before any arm was run; graded by `plugins/craft/scripts/wording_grader.py`.
+
+**Under test:** an `## Output wording` section at the end of craft's always-loaded `rules.md`, telling a session to
+mention an acceptance criterion by its own text with the number trailing in round brackets, and stating that the
+rule does not govern a report to a dispatching agent or a field a script reads.
+
+**Dispatch.** Each arm is its own `claude -p` process from an empty directory, with `--setting-sources project`,
+the arm passed by `--append-system-prompt`, and `--allowedTools "Read"`. Three sites: a session with no ritual
+loaded, slice choice's statement of what a slice covers plus the covered-criteria value it drafts, and one council
+reviewer (reliability lens).
+
+**Result, 2026-10-14: neither of two wordings passes, and the section was removed.** Under both wordings the
+reviewer's criterion mentions changed from bare numbers to a short label with the number trailing (first wording
+3 of 3, second 4 of 6), failing the condition that a reviewer's report to its caller keeps its form. The no-ritual
+session moved off bare numbers but did not reach a clean majority of the criterion's own text (first wording 1 of
+3; second 3 of 6), because one criterion was usually shortened. The slice site moved fully to the criterion's text
+(3 of 3 under each wording) and its covered-criteria value stayed a bare list in every run. Per-arm counts are in
+the case's `expected.md`, under its Result section.
+
+**Limitations.** The section was appended to the system prompt rather than loaded by the harness's own rules
+directory. One model tier. Three runs per arm, six where a 2-1 split was re-run. The reviewer's form was measured
+for one lens only; the executor, drift gate and code reviewer were not run. The word-share proxy for "the
+criterion's own text" is stricter than a reading by eye on paraphrases.
