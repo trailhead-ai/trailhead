@@ -1,0 +1,15 @@
+Going by the status note, five of the seven criteria still have work left, and two more are only partly shown.
+
+**Not started or partly built:**
+
+- A librarian override records who granted it and the reason given, and shows in the borrower's history (AC4). This hasn't been started, so all of it is left.
+- Returning an overdue item stops the fee from growing the same day, even if the return is scanned after closing time (AC5). This hasn't been started, so all of it is left, including the after-closing case.
+- A borrower gets one reminder three days before a due date, one the day after, and no other automatic messages about the same loan (AC6). The three-days-before reminder still needs building. Nobody has checked that no other messages go out.
+- The monthly fees report lists each category's total charged and total waived, and these reconcile with the per-borrower ledgers (AC7). This hasn't been touched, so all of it is left.
+
+**Reported as done, but not fully demonstrated:**
+
+- A borrower over ten pounds in late fees can't check out until the balance is cleared or a librarian overrides (AC3). The block and clearing it by paying both work. The override way out isn't mentioned, and it can't work until the override recording (AC4) exists.
+- An overdue borrower shows on the desk screen within one minute of the date rolling over (AC1). The note only says the flag was there "the morning after". Someone still needs to check it appears within a minute of midnight.
+
+Fees per category with the cap at the replacement price (AC2) are the only thing that looks fully done. Even there, the test was a single rare atlas, so it hasn't been tried on more than one category.

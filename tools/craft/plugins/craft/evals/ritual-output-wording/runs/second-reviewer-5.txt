@@ -1,0 +1,12 @@
+## Findings
+- [Critical] None of the four tasks has a test contract: the plan names no test for any task. Concretely, a capped-fee bug or an override that never takes effect ships with nothing able to catch it. Suggested: give each task a failing-first test. Test the fee calculator either side of the replacement-price cap. Test the checkout guard at a £10.00 balance and at £10.01. Run the nightly job twice on the same date and assert the ledger holds one charge.
+- [Critical] The nightly fee job is not idempotent, has no failure signal and has no first-run plan. A rerun after a crash, or the job and a return scan touching the same loan, charges a day's fee twice. A job that fails silently charges nothing, and nobody finds out until the monthly report fails to reconcile (AC7). On its first run in production, every loan already past due takes all its back-fees at once, with no preview. Suggested: key each charge by (loan, date) and make it unique. Log a count of loans processed and fees charged, and raise an alert when the job doesn't run. Before the first live run, do a dry run that reports the back-fees it would charge, and have someone sign it off.
+- [Important] Returns scanned after closing are stamped with the next morning's date, so the 00:05 job charges one more day first. That breaks "returning an overdue item stops the fee from growing the same day, even if scanned after closing" (AC5). Suggested: stamp these returns with the business day, and test a late scan against the job running at 00:05.
+- [Important] A job at 00:05 can't show a loan as overdue "within one minute of the date rolling over" (AC1). Clock changes also break any rule based on "local time." Suggested: work out overdue status when the desk screen reads it, not from a stored flag.
+- [Important] The cap must apply to the total of all fees on a loan, not to each charge. Charges from the nightly job and from the return can add up past the replacement price (AC2).
+- [Important] The override is stored as a free-text note, so nothing records who granted it (AC4). There's also no audit trail to reverse an override.
+- [Important] No task covers the reminder messages (AC6) or the monthly report (AC7). The reminders also need protection against sending twice when a job retries.
+- [Minor] Fees need a defined pence rounding. The plan doesn't say how to roll back the new overdue column.
+
+## Confidence
+Medium. The plan and spec are short and unambiguous, but there's no codebase to check the existing ledger or job setup against.

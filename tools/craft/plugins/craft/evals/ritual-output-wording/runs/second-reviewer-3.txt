@@ -1,0 +1,12 @@
+## Findings
+- [Critical] The nightly overdue/fee job (Tasks 1–2) writes money with no idempotency, no signal and no gated first run: if the job is rerun after a crash, or fees are recalculated on return after that night's run, the same day gets charged twice. If the job silently fails to run, no fees are charged and nobody is told. The first run also acts as an unreviewed backfill: it charges back-fees on every historic overdue loan in one go. Suggested: key each charge on (loan, date) with a unique constraint so a repeat run adds nothing. Log and alert each run's success, row count and total charged. Gate the first run behind a dry-run that produces a report a librarian signs off.
+- [Critical] No task has a test contract: nothing pins the case where an item returned after closing is stamped with the next morning's date. The fee then grows by an extra day, which breaks "Returning an overdue item stops the fee from growing the same day, even if the return is scanned after closing time" (AC5). Suggested: give each task a failing test written first. For fees, use a fixed clock and vary the return time before and after closing, the category rate, and amounts either side of the replacement-price cap and of the ten-pound threshold.
+
+- [Important] A job at 00:05 cannot meet "shown as overdue on the desk screen within one minute of the date rolling over" (AC1), and refreshing only on screen load leaves an open screen out of date. Suggested: work out overdue at read time from the due date rather than from the nightly flag.
+- [Important] The override note keeps only the reason. It misses "records who granted it… and shows in the borrower's history" (AC4). Suggested: write an audit record that includes the librarian's ID.
+- [Important] The plan doesn't say what the checkout guard does when it can't read the balance (block or allow). Suggested: block the checkout, show a visible error, and let the librarian override.
+- [Important] With only a balance figure and no per-charge ledger, the waived/charged reconciliation in the monthly report can't be done (AC7). The reminder messages (AC6) have no task at all.
+- [Minor] Midnight in local time around clock changes, and leap days, are untested for the daily fee.
+
+## Confidence
+Medium-high: the AC5 conflict and the missing test contracts are in the plan text (plan.md:2, 7, 11). The idempotency risk comes from how the job is described, not from code.

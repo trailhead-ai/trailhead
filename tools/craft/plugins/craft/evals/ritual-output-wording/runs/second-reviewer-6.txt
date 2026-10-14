@@ -1,0 +1,14 @@
+## Findings
+- [Critical] None of the four tasks has a test contract: there is no failing test for overdue marking, fee calculation, the guard threshold or the return-day stop. **What concretely fails:** a fee calculator that ignores the replacement-price cap, or a guard that blocks at exactly £10 instead of only above it, ships green. "Never exceeds the replacement price of the item (AC2)" and "owing more than ten pounds (AC3)" are both boundaries that nothing pins. Suggested: give each task tests that vary the input around its decision point: at, below and above the cap, £9.99/£10.00/£10.01, a return before and after closing, and a job run at 23:59 and at 00:05.
+- [Critical] The first nightly run is an unpreviewed, irreversible backfill. **What concretely fails:** on the night it ships, every loan already past due is flagged and charged in one pass. The plan doesn't say whether it back-charges accrued days, and either answer hits real borrowers at once: some are blocked at the desk the next morning, with no dry run and no way to reverse the charges. Suggested: add a dry-run mode that reports which loans would be flagged, the fee totals and the borrowers who would be blocked. Gate the first live run on review of that report, and record which run wrote each fee so a run can be reversed.
+
+## Findings (Important)
+- [Important] (Critical under the production calibration, moved down by the two-Critical cap) If the nightly job fails, nobody sees it. A crashed or skipped run leaves flags stale, fees uncharged and the guard open. Suggested: record a last-successful-run timestamp, alert when it is older than 25h, and show it on the desk screen.
+- [Important] Fee charging isn't idempotent. A job retry, or the nightly run plus the return-time run on the same day, can charge the same day twice. Suggested: one fee row per loan per day, unique on (loan, date).
+- [Important] Stamping late returns with the next morning's date directly contradicts "returning an overdue item stops the fee from growing the same day, even if the return is scanned after closing time (AC5)". The borrower is charged one extra day.
+- [Important] A job at 00:05 can't meet "shown as overdue on the desk screen within one minute of the date rolling over (AC1)".
+- [Important] Storing the override as a free-text note leaves out who granted it, which "records who granted it and the reason given (AC4)" requires.
+- [Important] No task covers the reminders (AC6) or the monthly reconciliation report (AC7), so nothing tests them.
+
+## Confidence
+High: every finding comes straight from the plan and spec text. No codebase was available to check against.

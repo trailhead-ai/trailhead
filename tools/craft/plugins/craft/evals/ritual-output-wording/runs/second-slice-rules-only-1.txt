@@ -1,0 +1,15 @@
+The next slice for `spec/overdue-handling` is **the override slice**. It's the smallest next step that still clears the value floor.
+
+**Value claim:** A borrower who is stuck at the desk behind a fee block can have a librarian lift that block, and the system records who lifted it and why. The block is no longer a dead end for the borrower.
+
+**Visual surface:** This slice doesn't touch any visual surface beyond the desk screen, which an earlier slice already covers. So it has no states to enumerate and its parent task will have no `## Enumerated states` section.
+
+**Fully green after this slice:**
+- A borrower owing more than ten pounds in late fees cannot check out further items until the balance is cleared or a librarian overrides (AC3).
+- A librarian override records who granted it and the reason given, and shows in the borrower's history (AC4).
+
+**Partially green after this slice:** none. It finishes both of those criteria and touches no others.
+
+The parent task `task/the-override-slice` hasn't been written yet. If this slice and its claim are acceptable, the next step is to check this coverage list against the spec, then create the parent task with it.
+
+**Covers:** AC3, AC4
