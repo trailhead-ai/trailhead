@@ -100,7 +100,13 @@ A short title and introduction across the top. The list of questions on the left
 at a time in the middle, chosen by clicking its entry. Each option is a card: its letter, its
 name, a "my pick" tag on the session's choice, one or two lines on what it costs, then the
 drawing. All lettering is Architects Daughter, loaded from the font file inside the round's
-folder.
+folder. If that font has not loaded once the page settles, a visible notice says so rather than
+letting the drawings fall back to a finished-looking system font.
+
+The page opens on a "Loading round…" line, which the rendered round replaces. Question entries
+are buttons, the shown one marked current; the "my pick" tag is text; the ink layer is hidden from
+assistive technology, so the real lettering carries the content. When the window is resized or
+zoomed, the shown question's drawings are traced again to match their new boxes.
 
 ## On disk
 
@@ -115,9 +121,10 @@ folder.
 
 The pad slug matches `^[a-z0-9][a-z0-9._-]*$`. The pads live under Outpost's state directory as
 trailhead resolves it on every OS — `$OUTPOST_STATE_DIR`, else `$XDG_STATE_HOME/outpost`, else
-`~/.local/state/outpost` — never inside the current project. The pad is built in a temporary folder beside its final place and
-renamed in at the end, so a failure leaves no partial pad. A pad whose folder already exists is
-refused.
+`~/.local/state/outpost` — never inside the current project. The pads folder is readable by its
+owner only, and a pads folder that is a symlink is refused. The pad is built in a `.tmp-`
+prefixed folder beside its final place and renamed in at the end, so a failure leaves no partial
+pad. A pad whose folder already exists is refused.
 
 The round's data ships as its own script file assigning a JSON value. A page opened from disk
 cannot fetch a JSON file, and keeping the data out of the HTML means round text never passes
@@ -138,7 +145,8 @@ question is first shown, so every drawing is measured at its real size.
 ## State — A drawing that cannot be drawn
 
 A layout the pen cannot read — a block with no key or more than one, a kind it does not know, a
-value of the wrong type — shows a plain message in the drawing's place instead of an empty box:
+value of the wrong type, a kind name the pen does not own such as `__proto__` — shows a plain
+message in the drawing's place instead of an empty box:
 
 ```
 ┌ C  Sidebar ──────────────────────────────┐
@@ -153,19 +161,30 @@ value of the wrong type — shows a plain message in the drawing's place instead
 
 The message names the block that broke by its position in the tree and quotes it, as text. The
 option's letter, name, pick tag and cost still show, and every other drawing on the page is drawn
-as usual.
+as usual. Anything else that goes wrong while one drawing is built or traced shows the same
+message for that drawing alone.
+
+When the whole page cannot be drawn — the round's data file is missing or broken, or the page
+itself fails — the loading line is replaced by one plain line, never a blank page:
+
+```
+This pad could not be drawn: the round's data did not load.
+```
 
 ## State — Round refused before writing
 
-A round whose outer shape is wrong never becomes a page. The script prints one line naming what
-is wrong and where, exits non-zero, and writes nothing:
+A round whose outer shape is wrong never becomes a page. The script prints one line per problem,
+every problem in one pass, each naming what is wrong and where; exits non-zero; and writes
+nothing. Round text quoted in these lines has control characters escaped:
 
 ```
 scratch-pad: questions[0].options[1]: no "cost" — every option states what it costs
 scratch-pad: questions[2]: no option has "pick": true — mark the session's own pick
 scratch-pad: questions: empty — a round asks at least one question
-scratch-pad: pad "settings-header" already exists
+scratch-pad: questions[1].options[0]: unknown key "costs" — allowed: name, cost, pick, layout
+scratch-pad: pad "settings-header" already exists — choose another --pad name
 ```
 
 A round with no questions, an option with no cost, and a question with no pick (or more than one)
-all land here, as do unreadable JSON, an unknown key, and a bad pad slug.
+all land here, as do unreadable JSON (with its line and column), input that is not UTF-8 or is
+nested too deeply to read, an unknown key, and a bad pad slug.
