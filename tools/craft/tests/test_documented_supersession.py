@@ -80,6 +80,22 @@ def _runnable_lines(text: str) -> list[str]:
     return found
 
 
+def _invocations(text: str) -> list[str]:
+    """Every complete `lore record …` invocation: fenced lines plus inline spans. An inline
+    span spelling a synopsis (`[`), an elision (`…`, `...`), or no record id after the
+    verb (`lore record update --diff`) is a mention, not typed as written."""
+    spans = [
+        s.strip()
+        for s in _INLINE.findall(text)
+        if s.startswith("lore record ")
+        and any("/" in token for token in s.split()[3:])
+        and "[" not in s
+        and "…" not in s
+        and "..." not in s
+    ]
+    return [*_runnable_lines(text), *spans]
+
+
 def _record_writes(text: str) -> list[str]:
     """Every `lore record create|update` invocation: fenced lines, inline spans, and
     bare flag spans (`--status …`) read as the update they are the flags of."""
@@ -106,7 +122,7 @@ def _argv(command: str) -> list[str]:
 def _unparseable(documents: dict[str, str]) -> list[tuple[str, str]]:
     bad = []
     for name, text in documents.items():
-        for command in _runnable_lines(text):
+        for command in _invocations(text):
             try:
                 with contextlib.redirect_stderr(io.StringIO()):
                     build_parser().parse_args(_argv(command))
@@ -171,6 +187,46 @@ def test_the_checks_report_exactly_the_invocations_they_should(snippet, refused,
     docs = {"skills/injected/SKILL.md": snippet}
     assert bool(_refused_superseded_writes(docs)) is refused
     assert bool(_raw_edge_recipes(docs)) is raw
+
+
+@pytest.mark.parametrize(
+    "snippet,unparseable",
+    [
+        ("`lore record supersede adr/old --bye adr/new`", True),
+        ("`lore record supersede adr/old --by adr/new`", False),
+        ("```\nlore record supersede adr/old --bye adr/new\n```", True),
+        ("`lore record supersede <old> --by <new>`", False),
+        ("`lore record supersede [adr/old] --bye adr/new`", False),
+        ("`lore record supersede adr/old --bye ...`", False),
+        ("`lore record update`", False),
+        ("`lore record update adr/old --bye`", True),
+        ("`lore record update --bye`", False),
+        ("`lore record update adr/x --bye`", True),
+        ("`lore new`", False),
+        ("`lore search x --vault y`", False),
+        ("then `--bye` is wrong but a bare flag span is not an invocation", False),
+    ],
+)
+def test_check_a_parses_inline_spans_as_well_as_fenced_lines(snippet, unparseable):
+    docs = {"skills/injected/SKILL.md": snippet}
+    assert bool(_unparseable(docs)) is unparseable
+
+
+def _supersede_sites() -> list[tuple[str, str]]:
+    return [
+        (name, span)
+        for name, text in _documents().items()
+        for span in _INLINE.findall(text)
+        if span.startswith("lore record supersede ") and len(span.split()) > 3
+    ]
+
+
+@pytest.mark.parametrize("name,span", _supersede_sites(), ids=lambda v: v)
+def test_corrupting_a_documented_supersede_flag_is_reported_by_check_a(name, span):
+    text = _documents()[name]
+    corrupted = text.replace(f"`{span}`", f"`{span.replace('--by', '--bye', 1)}`", 1)
+    assert corrupted != text
+    assert (name, span.replace("--by", "--bye", 1)) in _unparseable({name: corrupted})
 
 
 def test_the_raw_edge_allowlist_exempts_only_consolidate():
