@@ -19,14 +19,20 @@ CRAFT = Path(__file__).parent.parent / "plugins" / "craft"
 SLICE_SKILL = CRAFT / "skills" / "slice" / "SKILL.md"
 sys.path.insert(0, str(CRAFT / "scripts"))
 import candidate_set  # noqa: E402
+import covers_gate  # noqa: E402
 
 
 def _emitted_reason_codes(module) -> set[str]:
-    return {
+    codes = {
         getattr(module, name)
         for name in dir(module)
         if name.startswith("_") and name.endswith("_REASON_CODE")
     }
+    # The duplicate-heading code reaches the gate's stderr through the
+    # DuplicateHeadingError it catches, not through a name candidate_set binds.
+    if module is candidate_set:
+        codes.add(covers_gate._DUPLICATE_AC_HEADING_REASON_CODE)
+    return codes
 
 
 def _unnamed_by(skill_text: str, module) -> list[str]:
