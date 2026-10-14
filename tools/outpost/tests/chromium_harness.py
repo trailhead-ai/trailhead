@@ -3,11 +3,12 @@
 ``run_probe(page_dir, probe_js)`` copies the page folder to a temp dir and adds a
 probe script file beside the copy's ``index.html``, loaded through a plain
 ``<script src>`` so a page whose policy forbids inline script still runs it. The
-probe waits for ``document.fonts.ready`` and for ``data-pad-ready`` on ``<html>``, runs ``probe_js`` (the body of an async
-function that ``return``s a JSON-serialisable value, and may ``await``), and
-dumps the DOM from a headless browser. ``entry`` names the file the browser opens and
-``inject_into`` the file that gets the probe (default: the entry), so a test can open a
-page that redirects and probe the page it lands on. The wrapper writes the outcome into
+probe waits for ``document.fonts.ready`` and for ``data-pad-ready`` on
+``<html>``, runs ``probe_js`` (the body of an async function that ``return``s a
+JSON-serialisable value, and may ``await``), and dumps the DOM from a headless
+browser. ``entry`` names the file the browser opens and ``inject_into`` the file
+that gets the probe (default: the entry), so a test can open a page that
+redirects and probe the page it lands on. The wrapper writes the outcome into
 ``<pre id="probe-result">``; the value is parsed back out and returned.
 
 Browser lookup (``find_browser``): ``$OUTPOST_TEST_BROWSER``, then

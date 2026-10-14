@@ -101,7 +101,9 @@ def test_clicking_an_entry_shows_only_that_question_and_marks_it_current(tmp_pat
     document.querySelectorAll('nav button')[2].click();
     await new Promise((r) => setTimeout(r, 0));
     const after = [...document.querySelectorAll('nav button')].map((b) => b.getAttribute('aria-current'));
-    const cardsNow = [...document.querySelectorAll('.pad-card')].filter(shown).map((c) => text(c.querySelector('.pad-name')));
+    const cardsNow = [...document.querySelectorAll('.pad-card')]
+      .filter(shown)
+      .map((c) => text(c.querySelector('.pad-name')));
     return {after, cardsNow};
     """
     got = _run(tmp_path, _round(3), js)

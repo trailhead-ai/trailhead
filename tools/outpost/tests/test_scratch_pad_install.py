@@ -55,7 +55,14 @@ def _run_installed(installed_skill: Path, tmp_path: Path, state_dir: Path):
     round_path.write_text(json.dumps(ROUND))
     env = {**os.environ, "OUTPOST_STATE_DIR": str(state_dir)}
     return subprocess.run(
-        [sys.executable, str(installed_skill / "scratch_pad.py"), "--pad", "settings-header", "--round", str(round_path)],
+        [
+            sys.executable,
+            str(installed_skill / "scratch_pad.py"),
+            "--pad",
+            "settings-header",
+            "--round",
+            str(round_path),
+        ],
         capture_output=True,
         text=True,
         env=env,

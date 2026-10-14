@@ -58,8 +58,6 @@ const marksOf = (d) =>
       element: rel(targetOf(d, index), d),
     };
   });
-const gap = (a, b) =>
-  Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y), Math.abs(a.w - b.w), Math.abs(a.h - b.h));
 const corner = (mark) => {
   const e = mark.element;
   return Math.min(
@@ -324,7 +322,9 @@ const state = {
 """
 
 
-@pytest.mark.parametrize(("bad", "quoted", "reason"), BAD_BLOCKS, ids=["kind", "two-keys", "value-type", "list-type", "empty"])
+@pytest.mark.parametrize(
+    ("bad", "quoted", "reason"), BAD_BLOCKS, ids=["kind", "two-keys", "value-type", "list-type", "empty"]
+)
 def test_an_unreadable_block_replaces_only_its_options_drawing_with_a_message(tmp_path, bad, quoted, reason):
     data = _round([box({"text": "a"}, {"text": "b"}, bad), box(button("fine"))])
     js = STATE + """
@@ -446,7 +446,10 @@ def test_a_width_change_retraces_the_boxes_and_keeps_the_strokes_the_same_shape(
     got = _run(tmp_path, data, RESIZE, virtual_time_budget=120000, timeout=120.0)
     assert got["narrow"][0]["element"]["w"] < got["before"][0]["element"]["w"] - 50
     for mark in got["narrow"]:
-        want = mark["element"] if mark["kind"] != "rule" else {**mark["box"], "x": mark["element"]["x"], "w": mark["element"]["w"]}
+        if mark["kind"] == "rule":
+            want = {**mark["box"], "x": mark["element"]["x"], "w": mark["element"]["w"]}
+        else:
+            want = mark["element"]
         assert gap(mark["box"], want) <= TOL, mark
     assert got["restored"] == got["before"]
 
