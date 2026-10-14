@@ -149,3 +149,41 @@ def test_a_body_with_a_repeated_and_a_non_canonical_id_passes_the_gate_with_lore
     assert _gate("candidate_set.py", shown).returncode == 0
     gate = _gate("candidate_set.py", shown, "--criteria-state", str(state_file))
     assert gate.returncode == 0, gate.stderr
+
+
+BODY_UNICODE_DIGIT = """# Seam spec
+
+## Acceptance Criteria
+
+- **AC1.** One.
+- **AC٢.** Two.
+
+## Slices
+
+- **First** — a value claim. (`task/first`, closed 2026-01-01, covers AC1)
+"""
+
+
+def test_a_body_declaring_a_unicode_digit_id_passes_the_gate_with_lores_state(  # inert-gate: allow seam smoke
+    isolated_lore_env, tmp_path
+):
+    vault, state = isolated_lore_env
+
+    def lore(*args, stdin_text=None):
+        r = run_cli(list(args), vault=vault, state_dir=state, stdin_text=stdin_text)
+        assert r.returncode == 0, r.stderr
+        return r.stdout
+
+    record_id = lore(
+        "record", "create", "--kind", "spec", "--title", "Seam unicode", "--keyword", "seam",
+        "--status", "ready", stdin_text=BODY_UNICODE_DIGIT,
+    ).strip()
+    printed = json.loads(lore("record", "criteria", record_id))
+    assert printed["declared"] == ["AC1", "AC٢"]
+
+    state_file = tmp_path / "criteria.json"
+    state_file.write_text(json.dumps(printed), encoding="utf-8")
+    shown = lore("record", "show", record_id)
+
+    gate = _gate("candidate_set.py", shown, "--criteria-state", str(state_file))
+    assert gate.returncode == 0, gate.stderr
