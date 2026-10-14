@@ -1321,7 +1321,10 @@ def test_dispatcher_blocks_frozen_adr_status_launder(tmp_path):
     assert any("[frozen-status]" in e for e in errors)
 
 
-@pytest.mark.parametrize("kind,status", [("adr", "active"), ("spec", "ready"), ("decision", "active"), ("task", "done")])
+@pytest.mark.parametrize(
+    "kind,status",
+    [("adr", "active"), ("spec", "ready"), ("decision", "active"), ("task", "done")],
+)
 def test_freeze_check_never_loads_the_vault_graph(tmp_path, monkeypatch, kind, status):
     """The freeze reads the prior status and two bodies only — an unchanged-body
     write and a refused write both leave the vault-wide loaders untouched."""
