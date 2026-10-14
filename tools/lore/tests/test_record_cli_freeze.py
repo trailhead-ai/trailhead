@@ -364,7 +364,10 @@ def test_ac14_metadata_only_update_of_a_frozen_record_is_allowed(tmp_path, kind,
 # --- amend, move path, round-trip -------------------------------------------
 
 
-@pytest.mark.parametrize("kind,status", [("spec", "ready"), ("decision", "active"), ("task", "done"), ("adr", "active")])
+@pytest.mark.parametrize(
+    "kind,status",
+    [("spec", "ready"), ("decision", "active"), ("task", "done"), ("adr", "active")],
+)
 def test_amend_still_lands_on_every_frozen_kind_and_records_history(tmp_path, kind, status):
     vault, state = _make_vault(tmp_path)
     rid = _create(vault, state, kind, status)
