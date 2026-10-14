@@ -75,6 +75,28 @@ jobs:
         # for reproducible CI runs (matches the lint job's pinned ruff).
         run: python -m pip install --upgrade pip "pytest==9.0.3" "pytest-xdist==3.8.0"
 
+      - name: Install chrome-headless-shell
+        # The outpost kit-layout tests measure real layout in a headless browser.
+        # Chrome for Testing's stable chrome-headless-shell is installed here
+        # (stdlib tooling only, no repo dependency) rather than relying on
+        # whatever full Chrome the runner image carries: the full binary can hang
+        # under --headless=new --dump-dom, the shell does not. The override env var
+        # points the harness at it; the require flag turns a missing browser into
+        # a failure instead of a skip.
+        run: |
+          set -euo pipefail
+          dest="$RUNNER_TEMP/chrome-headless-shell"
+          mkdir -p "$dest"
+          url=$(curl -fsSL https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json \
+            | python3 -c 'import json,sys; d=json.load(sys.stdin)["channels"]["Stable"]["downloads"]["chrome-headless-shell"]; print(next(x["url"] for x in d if x["platform"]=="linux64"))')
+          curl -fsSL -o "$dest/shell.zip" "$url"
+          unzip -q "$dest/shell.zip" -d "$dest"
+          bin=$(find "$dest" -type f -name chrome-headless-shell | head -n 1)
+          chmod +x "$bin"
+          "$bin" --version
+          echo "OUTPOST_TEST_BROWSER=$bin" >> "$GITHUB_ENV"
+          echo "OUTPOST_REQUIRE_BROWSER=1" >> "$GITHUB_ENV"
+
       - name: Run the test suite
         # Invoked as `python -m pytest` so the repo root is on sys.path and the
         # `trailhead` package imports without an editable install (the checkout IS
