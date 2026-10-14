@@ -396,3 +396,34 @@ re-graded under any rule added here, and their arm files stay reproducible by pi
 
 **Limit.** This extension was written with first-wording output in hand. No second-wording output existed when it
 was committed.
+
+## Result, 2026-10-14 — neither wording passes; the section is removed
+
+Counted by the grader against the pass conditions above. Baseline, three runs per site: no-ritual `bare` 3 of 3;
+slice statement `bare` 3 of 3 and covered-criteria value `gate-shape` 3 of 3; reviewer `template-shape` 3 of 3 and
+criterion mention `bare` 3 of 3.
+
+| Pass condition | First wording (`treated-`) | Second wording (`second-`) |
+|---|---|---|
+| No-ritual arm reaches a clean majority of `text-with-number` | 1 of 3, 2 `nickname`; not re-run (the reviewer condition had already failed) | 3 of 6, 3 `nickname`: AMBIGUOUS, fails |
+| Every treated reviewer run is `template-shape` | 3 of 3, holds | 6 of 6, holds |
+| Treated reviewer's majority `criterion-mention` matches the baseline's (`bare`) | `nickname` 3 of 3, fails | `nickname` 4 of 6, `bare` 2 of 6, fails |
+| Every treated slice run's covered-criteria value is `gate-shape` | 3 of 3, holds | 3 of 3, holds |
+| No treated arm stops mentioning criteria | holds | holds |
+
+At the slice site, with the rule only, the statement was `text-with-number` 3 of 3 under both wordings.
+
+Neither criterion this case measures closes. The section was removed from `tools/craft/plugins/craft/rules.md` on
+the branch, as stated in the second wording's extension, and the shipped-state slice arm was not built or run. The
+arm files stay reproducible from their pinned revisions: `200b5269` for the first wording, `5e0db468` for the
+second.
+
+What the captures show, read by eye: the no-ritual nicknames each come from one criterion shortened below the word
+share (the late fee capped at the replacement price), with the other mentions giving the criterion's text in full.
+The reviewer, told in its prompt that it was dispatched as one lens of a panel, still moved criterion numbers into
+trailing brackets after a short label in most runs under both wordings. A limit stated inside the always-loaded
+section did not hold a dispatched reviewer to its prior form.
+
+One capture was edited after it was taken: in `second-reviewer-1.txt` one ordinary English word matched the
+repository's machine-local leak denylist and was replaced with `[redacted]` so the commit could pass the leak gate.
+The grader's verdicts on that capture are the same before and after the edit.

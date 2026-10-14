@@ -229,18 +229,3 @@ it.
 - Keep a test alive because deleting it would lower a coverage number. A test that
   cannot fail for a real reason is not coverage; it is a maintenance cost that
   reads as safety.
-
-## Output wording
-
-This section is for text a person will read in the session. If another agent
-dispatched you, or your instructions fix the format of what you return, it does
-not apply: write that output exactly as you would without this section. It also
-leaves alone any field or line a script reads, plan files, and commit and pull
-request text.
-
-When you mention an acceptance criterion to the person reading, give the
-criterion's own words, in full or close to it, and put its number after them in
-round brackets, as in "Orders over the limit are held for review (AC6)". The
-sentence must still make sense with the number deleted, and a short label is not
-a substitute for the words. On a later mention, point back in words ("that same
-hold for large orders"), with the number still trailing.
