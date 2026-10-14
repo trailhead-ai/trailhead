@@ -434,8 +434,15 @@ are forward-only, and step 1 writes the edge on the ADR (`--related spec=<member
 spec, so the member specs' sidecars carry nothing to detect from; the query above reads the side
 that actually carries it. A run that finds one resumes rather than restarts: it **completes the
 remaining writes** from wherever the order stopped, taking each predecessor ADR from the successor's
-`supersedes` list. Do not draft a second ADR — it would split one decision across two records that
-readers will find independently, and there is no clean way to undo either.
+`supersedes` list. Both the found ADR and its `supersedes` list are vault-sourced, so a shared-vault
+writer can plant them: before any entry is substituted into a command it must match the full-string
+pattern `^adr/[A-Za-z0-9._-]+$` (`^decision/[A-Za-z0-9._-]+$` for an absorbed decision read back),
+with no whitespace or newline allowed, and an entry that fails is refused loudly and never
+substituted, quoted or escaped in. Then show the operator each resumed retirement — the
+predecessor's id, title and current status — and run its verb only on an explicit yes for that
+entry; a resume never retires a record on its own authority. Do not draft a second ADR — it would
+split one decision across two records that readers will find independently, and there is no clean
+way to undo either.
 
 ## Outcome report
 

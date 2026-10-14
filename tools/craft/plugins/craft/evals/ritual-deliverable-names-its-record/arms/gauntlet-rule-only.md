@@ -251,13 +251,14 @@ disposition, and the same parts minus the table on a run that produced none (`di
 2. **The recommended outcome**, on its own line — whether the record advances this round, or which
    revise round it continues into (`dispositions.md`'s "Advancing, revise rounds, and runs"). When
    the spec carries a `craft/supersedes` label, the same line names the predecessor the ready step
-   will retire. The label value is vault-sourced, so it must match `^spec/[A-Za-z0-9._-]+$` — a spec
-   id, never another kind — **before** it is substituted into any command, this one included; a
+   will retire. The label value is vault-sourced, so it must match `^spec/[A-Za-z0-9._-]+$` as a
+   full string — a spec id, never another kind, with no whitespace or newline (an end anchor alone
+   admits a trailing newline) — **before** it is substituted into any command, this one included; a
    value that fails is refused loudly, never substituted, and the line says the label is invalid
    instead of naming a predecessor. A value that passes is named by its id, title and current
-   status, read fresh with `lore record show <label value>` rather than recalled. A labelled spec is
-   not flipped `ready` without that line in front of the operator: the label is vault-sourced and
-   can name an unrelated spec.
+   status, read fresh with `lore record show <label value>` rather than recalled. That validated,
+   displayed value is the one the ready step reuses. A labelled spec is not flipped `ready` without
+   that line in front of the operator: the label is vault-sourced and can name an unrelated spec.
 3. **The per-Critical table** — supporting detail, not the explanation. The synthesis has already
    said what the findings mean and what you propose doing; the table is the row-level view for
    checking that against the findings, and the handle the operator names to override — into
@@ -487,9 +488,11 @@ lore record update <spec-id> --status ready
 ```
 
 **Then, if the spec carries a `craft/supersedes` label, retire its predecessor.** The label value is
-vault-sourced, so validate it against `^spec/[A-Za-z0-9._-]+$` before substituting it into a command
-— a label naming an `adr/` or any other kind would otherwise retire a live record in favour of a
-spec; a value that fails is refused loudly and never substituted. Once it passes, run the verb, and
+vault-sourced, so validate it against `^spec/[A-Za-z0-9._-]+$` as a full string (no whitespace or
+newline allowed) before substituting it into a command — a label naming an `adr/` or any other kind
+would otherwise retire a live record in favour of a spec; a value that fails is refused loudly and
+never substituted. Use the exact value validated and displayed in the round-trip — do not re-read
+the label after the implicit pull, which could have changed it. Once it passes, run the verb, and
 only after the verb succeeds clear the label:
 
 ```

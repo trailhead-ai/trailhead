@@ -160,7 +160,9 @@ Restate the idea in one paragraph using your own words. Confirm with the user be
 - Pull related prior art for reference only: specs, decisions, and dropped tasks in your vault
 - Never modify a prior spec — if this supersedes one, create the new spec with
   `--label craft/supersedes=spec/<predecessor>` and never flip the predecessor here; the gauntlet's
-  ready step retires it
+  ready step retires it. The predecessor name comes from a `lore search` result, so at label-write
+  time it must match the full-string pattern `^spec/[A-Za-z0-9._-]+$` (no whitespace or newline); a
+  name that fails is refused and reported, never substituted, quoted or escaped into the label
 
 **Resolve maturity for every repository the work touches, before Poke at Edges begins** — the same
 enumeration and resolution `brainstorm/SKILL.md` step 1 runs, so step 5 below has a real resolution
