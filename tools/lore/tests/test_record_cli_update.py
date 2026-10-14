@@ -2927,17 +2927,15 @@ def test_update_status_dropped_still_lands_on_the_same_records(tmp_path, kind, s
     assert _find_sidecar(vault, rid)["status"] == "dropped"
 
 
-def _supersede_pair(vault, state):
+def _superseded_adr(vault, state):
     old = _mk_record(vault, state, "adr", "active", "Old")
-    new = _mk_record(vault, state, "adr", "active", "New")
-    r = _run(["record", "supersede", old, "--by", new], vault=vault, state_dir=state)
-    assert r.returncode == 0, r.stderr
-    return old, new
+    _supersede_adr(vault, state, old, heir_title="New")
+    return old
 
 
 def test_metadata_update_on_an_already_superseded_record_lands(tmp_path):
     vault, state = _make_vault(tmp_path)
-    old, _ = _supersede_pair(vault, state)
+    old = _superseded_adr(vault, state)
 
     r = _run(["record", "update", old, "--label", "x/y=z"],
              vault=vault, state_dir=state, stdin_text="")
@@ -2950,7 +2948,7 @@ def test_metadata_update_on_an_already_superseded_record_lands(tmp_path):
 
 def test_amend_on_an_already_superseded_record_lands(tmp_path):
     vault, state = _make_vault(tmp_path)
-    old, _ = _supersede_pair(vault, state)
+    old = _superseded_adr(vault, state)
     rev = json.loads(_run(["record", "show", old, "--json"],
                           vault=vault, state_dir=state).stdout)["revision"]
 
@@ -2968,9 +2966,7 @@ def test_rename_of_a_superseded_referrer_still_lands(tmp_path):
     target = _mk_record(vault, state, "adr", "draft", "Target", body="# Target\n")
     referrer = _mk_record(vault, state, "adr", "active", "Referrer",
                           body="# R\n\nsee [[adr/target]]\n")
-    heir = _mk_record(vault, state, "adr", "active", "Heir")
-    assert _run(["record", "supersede", referrer, "--by", heir],
-                vault=vault, state_dir=state).returncode == 0
+    _supersede_adr(vault, state, referrer, heir_title="Heir")
 
     r = _run(["record", "rename", target, "--title", "Renamed Target"],
              vault=vault, state_dir=state)

@@ -10,7 +10,7 @@ change in the record's ``change-history``.
 ``supersede`` records a supersession in one verb: the successor's ``supersedes``
 edge, then the predecessor's flip to ``superseded``, both under both vaults'
 write locks with both records read inside them. Both writes go through the same
-guard and write pipeline ``update`` uses (:func:`_supersede_guard` →
+guard and write pipeline ``update`` uses (``evaluate_graph_guards`` →
 ``validate_and_write``); the pair itself is judged by
 ``guards.evaluate_supersede_pairing``. The verb is the only caller that passes
 the guards' ``allow_superseded_status`` seam: ``create`` and ``update`` refuse
@@ -2204,32 +2204,6 @@ def _cmd_record_update(args) -> int:
     return 0
 
 
-def _supersede_guard(
-    location, sidecar: dict, *, prior_body: str, body: str, prior_status, status_set
-):
-    """Run the shared graph guards over one of the supersede verb's two writes.
-
-    The verb's single ``evaluate_graph_guards`` call site: both the successor's
-    edge write and the predecessor's flip are judged here, so a guard keyword the
-    verb must pass is added in exactly one place. *prior_body* is the body as
-    read under the lock and *body* what the write would leave, so the freeze
-    refuses any write that would change one.
-    """
-    from ..record import guards as guards_mod
-
-    return guards_mod.evaluate_graph_guards(
-        kind=location.kind,
-        name=location.name,
-        sidecar=sidecar,
-        body=body,
-        vault_root=location.vault_root,
-        status_set=status_set,
-        prior_status=prior_status,
-        prior_body=prior_body,
-        allow_superseded_status=True,
-    )
-
-
 def _read_sidecar_and_body(location) -> tuple[dict, str]:
     sidecar = json.loads(location.sidecar_path.read_text(encoding="utf-8"))
     body = (
@@ -2364,27 +2338,30 @@ def _cmd_record_supersede(args) -> int:
             if not edge_present:
                 new_succ = dict(succ_sidecar)
                 new_succ["supersedes"] = [*(succ_sidecar.get("supersedes") or []), pred_id]
-                steps.append((succ_loc, new_succ, succ_body, succ_body, succ_sidecar.get("status"), None))
+                steps.append((succ_loc, new_succ, succ_body, succ_sidecar.get("status"), None))
             if flip_needed:
                 new_pred = dict(pred_sidecar)
                 new_pred["status"] = "superseded"
-                steps.append((pred_loc, new_pred, pred_body, pred_body,
-                              pred_sidecar.get("status"), "superseded"))
+                steps.append((pred_loc, new_pred, pred_body, pred_sidecar.get("status"), "superseded"))
 
             # Every write is judged before the first lands, so a guard refusal
-            # can never leave the edge written and the flip refused.
+            # can never leave the edge written and the flip refused. Neither body
+            # changes, so the body read under the lock is also the prior body the
+            # freeze compares against.
             errors: list[str] = []
-            for loc, sidecar, prior_body, body, prior_status, status_set in steps:
-                step_errors, step_notices = _supersede_guard(
-                    loc, sidecar, prior_body=prior_body, body=body,
-                    prior_status=prior_status, status_set=status_set,
+            for loc, sidecar, body, prior_status, status_set in steps:
+                step_errors, step_notices = guards_mod.evaluate_graph_guards(
+                    kind=loc.kind, name=loc.name, sidecar=sidecar, body=body,
+                    vault_root=loc.vault_root, status_set=status_set,
+                    prior_status=prior_status, prior_body=body,
+                    allow_superseded_status=True,
                 )
                 errors.extend(step_errors)
                 notices.extend(step_notices)
             if errors:
                 return _fail(errors)
 
-            for loc, sidecar, _prior_body, body, _prior, _set in steps:
+            for loc, sidecar, body, _prior, _set in steps:
                 try:
                     _, shared = _resolve_current_vault_shared(loc)
                     record_store_mod.validate_and_write(
@@ -2404,8 +2381,6 @@ def _cmd_record_supersede(args) -> int:
                     return 1
                 written_roots.append(loc.vault_root)
             conn.commit()
-    except _UpdateAborted as aborted:
-        return aborted.code
     except Exception as exc:
         return _handle_write_error(exc, "supersede")
 
