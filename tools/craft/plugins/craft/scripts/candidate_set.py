@@ -207,7 +207,7 @@ _CRITERIA_STATE_CONTRADICTS_BODY_REASON_CODE = "criteria-state-contradicts-body"
 _CRITERIA_STATE_MAX_BYTES = 1024 * 1024
 _CRITERIA_STATE_KEYS = frozenset({"record", "declared", "removed"})
 _CRITERION_ID_RE = re.compile(r"AC[1-9][0-9]{0,8}")
-_DECLARED_ID_RE = re.compile(r"AC[0-9]+")
+_DECLARED_ID_RE = re.compile(r"AC\d+")
 
 
 class UndeclaredCoverageError(ValueError):
@@ -632,7 +632,7 @@ def load_criteria_state(path: str) -> tuple[list[str], list[str]]:
     anything but a regular file of at most `_CRITERIA_STATE_MAX_BYTES`; raises
     CriteriaStateError, whose message never carries file content."""
     try:
-        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_NOCTTY)
     except OSError as e:
         raise CriteriaStateError(f"cannot open the state file: {e.strerror}") from e
     try:
