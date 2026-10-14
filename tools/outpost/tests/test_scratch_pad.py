@@ -586,6 +586,102 @@ def test_loser_of_the_final_rename_is_refused_and_leaves_no_temp_folder(tmp_path
     assert (state / "pads" / "race" / "winner").read_text() == "w"
 
 
+def _lose_the_pads_root_race(mod, monkeypatch, other_run):
+    """Make this run's create of the pads folder lose to ``other_run``, which lands first."""
+    real_mkdir = Path.mkdir
+
+    def mkdir(self, mode=0o777, parents=False, exist_ok=False):
+        if self.name == "pads" and not parents and not exist_ok:
+            other_run(self)
+            raise FileExistsError(17, "File exists", str(self))
+        return real_mkdir(self, mode=mode, parents=parents, exist_ok=exist_ok)
+
+    monkeypatch.setattr(mod.Path, "mkdir", mkdir)
+
+
+def test_pads_folder_created_by_another_run_mid_create_is_used(tmp_path, state, monkeypatch):
+    mod = _load_module()
+    kit = _write_kit(tmp_path / "kit")
+    rp = _write_round(tmp_path, _round(1))
+    env = {"OUTPOST_STATE_DIR": str(state)}
+    _lose_the_pads_root_race(mod, monkeypatch, lambda p: os.mkdir(p, 0o700))
+
+    index, folder = mod.build_pad(rp, "fresh", kit_dir=kit, env=env)
+
+    assert folder == state / "pads" / "fresh"
+    assert index.is_file()
+    assert [p.name for p in (state / "pads").iterdir()] == ["fresh"]
+
+
+def test_pads_folder_that_became_a_symlink_mid_create_is_refused(tmp_path, state, monkeypatch):
+    mod = _load_module()
+    kit = _write_kit(tmp_path / "kit")
+    rp = _write_round(tmp_path, _round(1))
+    env = {"OUTPOST_STATE_DIR": str(state)}
+    target = tmp_path / "elsewhere"
+    target.mkdir()
+    _lose_the_pads_root_race(mod, monkeypatch, lambda p: p.symlink_to(target))
+
+    with pytest.raises(mod.Refusal) as exc:
+        mod.build_pad(rp, "fresh", kit_dir=kit, env=env)
+
+    assert "is a symlink" in "\n".join(exc.value.lines)
+    assert list(target.iterdir()) == []
+
+
+def test_pads_folder_that_became_a_file_mid_create_is_refused(tmp_path, state, monkeypatch):
+    mod = _load_module()
+    kit = _write_kit(tmp_path / "kit")
+    rp = _write_round(tmp_path, _round(1))
+    env = {"OUTPOST_STATE_DIR": str(state)}
+    _lose_the_pads_root_race(mod, monkeypatch, lambda p: p.write_text("x"))
+
+    with pytest.raises(mod.Refusal) as exc:
+        mod.build_pad(rp, "fresh", kit_dir=kit, env=env)
+
+    assert "not a directory" in "\n".join(exc.value.lines)
+
+
+def test_other_failures_creating_the_pads_folder_stay_refusals(tmp_path, state, monkeypatch):
+    mod = _load_module()
+    kit = _write_kit(tmp_path / "kit")
+    rp = _write_round(tmp_path, _round(1))
+    env = {"OUTPOST_STATE_DIR": str(state)}
+    real_mkdir = Path.mkdir
+
+    def mkdir(self, mode=0o777, parents=False, exist_ok=False):
+        if self.name == "pads" and not parents and not exist_ok:
+            real_mkdir(self, mode=mode)
+            raise PermissionError(13, "Permission denied", str(self))
+        return real_mkdir(self, mode=mode, parents=parents, exist_ok=exist_ok)
+
+    monkeypatch.setattr(mod.Path, "mkdir", mkdir)
+
+    with pytest.raises(mod.Refusal) as exc:
+        mod.build_pad(rp, "fresh", kit_dir=kit, env=env)
+
+    assert "cannot create the pads folder: Permission denied" in "\n".join(exc.value.lines)
+
+
+def test_concurrent_first_runs_with_different_slugs_both_succeed(skill, tmp_path):
+    rp = _write_round(tmp_path, _round(1))
+    for attempt in range(8):
+        state = tmp_path / f"state{attempt}"
+        results = {}
+
+        def go(slug):
+            results[slug] = _run(skill, tmp_path, state, slug, rp)
+
+        threads = [threading.Thread(target=go, args=(s,)) for s in ("alpha", "beta")]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert [r.returncode for r in results.values()] == [0, 0], {k: r.stderr for k, r in results.items()}
+        assert sorted(p.name for p in (state / "pads").iterdir()) == ["alpha", "beta"]
+
+
 # ---------------------------------------------------------------------------
 # Pads root: symlink, permissions
 # ---------------------------------------------------------------------------

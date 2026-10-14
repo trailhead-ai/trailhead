@@ -42,7 +42,8 @@ escaped, and never into HTML. The top-level
 ``index.html`` carries no round text. Round text echoed into an error line is
 escaped so an escape sequence cannot drive the terminal. The pads root and the
 temp folder are created owner-only (0700); a pads root that is a symlink is
-refused. Input that cannot be read as a round (not UTF-8, nested deeper than
+refused. A first run that loses the race to create the pads root to a concurrent
+run inspects what that run left with the same checks. Input that cannot be read as a round (not UTF-8, nested deeper than
 the interpreter will parse) is a refusal, never a traceback.
 """
 
@@ -246,9 +247,15 @@ def _ensure_pads_root(pads_root: Path) -> None:
         try:
             pads_root.parent.mkdir(parents=True, exist_ok=True)
             pads_root.mkdir(mode=0o700)
+            return
+        except FileExistsError:
+            pass
         except OSError as exc:
             raise Refusal([_line(where, f"cannot create the pads folder: {exc.strerror or exc}")])
-        return
+        try:
+            st = os.lstat(pads_root)
+        except OSError as exc:
+            raise Refusal([_line(where, f"cannot inspect the pads folder: {exc.strerror or exc}")])
     except OSError as exc:
         raise Refusal([_line(where, f"cannot inspect the pads folder: {exc.strerror or exc}")])
     if stat.S_ISLNK(st.st_mode):
