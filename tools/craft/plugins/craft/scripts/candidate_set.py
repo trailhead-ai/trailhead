@@ -116,8 +116,10 @@ malformed coverage token, not silently deduplicated. This applies to the
 Removed criteria (`--criteria-state <path>`): an amend can remove a criterion
 from a spec whose `## Slices` ledger already records coverage of it, and the
 ledger is append-only. The state file is a JSON object with exactly the keys
-`record` (a string), `declared` and `removed` (each a list of unique
-`^AC[1-9][0-9]*$` identifiers, either possibly empty). A `covers` or
+`record` (a string), `declared` (a list of `^AC[0-9]+$` strings exactly as the
+body declares them, so repeats and non-canonical forms such as `AC007` are
+allowed) and `removed` (a list of unique canonical `^AC[1-9][0-9]{0,8}$`
+identifiers); either list may be empty. A `covers` or
 `partially covers` token naming an identifier in `removed` is void: it is not
 counted as covered or partial, is not an undeclared identifier, and does not
 change `complete-eligible` (the entry still carries a coverage token). With the
@@ -204,7 +206,8 @@ _CRITERIA_STATE_CONTRADICTS_BODY_REASON_CODE = "criteria-state-contradicts-body"
 
 _CRITERIA_STATE_MAX_BYTES = 1024 * 1024
 _CRITERIA_STATE_KEYS = frozenset({"record", "declared", "removed"})
-_CRITERION_ID_RE = re.compile(r"AC[1-9][0-9]*")
+_CRITERION_ID_RE = re.compile(r"AC[1-9][0-9]{0,8}")
+_DECLARED_ID_RE = re.compile(r"AC[0-9]+")
 
 
 class UndeclaredCoverageError(ValueError):
@@ -609,7 +612,13 @@ class CriteriaStateError(ValueError):
     """The `--criteria-state` file is unreadable or not the documented shape."""
 
 
-def _is_id_list(value: object) -> bool:
+def _is_declared_list(value: object) -> bool:
+    return isinstance(value, list) and all(
+        isinstance(v, str) and _DECLARED_ID_RE.fullmatch(v) for v in value
+    )
+
+
+def _is_removed_list(value: object) -> bool:
     return (
         isinstance(value, list)
         and all(isinstance(v, str) and _CRITERION_ID_RE.fullmatch(v) for v in value)
@@ -647,9 +656,10 @@ def load_criteria_state(path: str) -> tuple[list[str], list[str]]:
         )
     if not isinstance(data["record"], str):
         raise CriteriaStateError("the state file's record must be a string")
-    if not _is_id_list(data["declared"]) or not _is_id_list(data["removed"]):
+    if not _is_declared_list(data["declared"]) or not _is_removed_list(data["removed"]):
         raise CriteriaStateError(
-            "the state file's declared and removed must each be a list of unique ACn identifiers"
+            "the state file's declared must be a list of ACn identifiers and its removed "
+            "a list of unique canonical ACn identifiers"
         )
     return data["declared"], data["removed"]
 
