@@ -24,6 +24,9 @@ ARMS_DIR = (
 # The last revision before the wording section existed on the main branch.
 BASELINE_REVISION = "9458af4e"
 
+# The commit that added the first wording of the rules section.
+FIRST_WORDING_REVISION = "200b5269"
+
 RULES = "tools/craft/plugins/craft/rules.md"
 SLICE_SKILL = "tools/craft/plugins/craft/skills/slice/SKILL.md"
 RELIABILITY_AGENT = "tools/craft/plugins/craft/agents/breaker.md"
@@ -35,9 +38,15 @@ ARM_SOURCES: dict[str, list[Source]] = {
     "baseline-noritual.md": [(RULES, BASELINE_REVISION)],
     "baseline-slice.md": [(SLICE_SKILL, BASELINE_REVISION), (RULES, BASELINE_REVISION)],
     "baseline-reviewer.md": [(RELIABILITY_AGENT, BASELINE_REVISION), (RULES, BASELINE_REVISION)],
-    "treated-noritual.md": [(RULES, None)],
-    "treated-slice-rules-only.md": [(SLICE_SKILL, BASELINE_REVISION), (RULES, None)],
-    "treated-reviewer.md": [(RELIABILITY_AGENT, None), (RULES, None)],
+    "treated-noritual.md": [(RULES, FIRST_WORDING_REVISION)],
+    "treated-slice-rules-only.md": [
+        (SLICE_SKILL, BASELINE_REVISION),
+        (RULES, FIRST_WORDING_REVISION),
+    ],
+    "treated-reviewer.md": [(RELIABILITY_AGENT, None), (RULES, FIRST_WORDING_REVISION)],
+    "second-noritual.md": [(RULES, None)],
+    "second-slice-rules-only.md": [(SLICE_SKILL, BASELINE_REVISION), (RULES, None)],
+    "second-reviewer.md": [(RELIABILITY_AGENT, None), (RULES, None)],
 }
 
 
