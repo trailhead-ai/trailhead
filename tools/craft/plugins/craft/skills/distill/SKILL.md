@@ -293,13 +293,16 @@ claims `complete` until everything behind it landed.
 1. **ADR records are created first.** One
    `lore record create --kind adr --status active --product <scope>` (or `--team <scope>`) per
    approved draft, carrying its provenance as edges: `--related spec=<member>` for each member spec,
-   and `--related decision=<absorbed>` for each absorbed decision. A predecessor this ADR supersedes
-   is not recorded here: steps 3 and 4 do it with `lore record supersede`. The scope flag is not
-   optional here either — on create it selects the destination vault, so an unscoped create can land
-   the ADR in the wrong vault. No ADR routes through `/craft:gauntlet`; this disposition owns every
-   ADR's flip. This create is distill's only route to `active`: no other write in this document sets
-   that flag on an ADR, and it is reachable at authorship — no condition on the status of the specs
-   the ADR derives from gates it.
+   and `--related decision=<absorbed>` for each absorbed decision. The scope flag is not optional
+   here either — on create it selects the destination vault, so an unscoped create can land the ADR
+   in the wrong vault. No ADR routes through `/craft:gauntlet`; this disposition owns every ADR's
+   flip. This create is distill's only route to `active`: no other write in this document sets that
+   flag on an ADR, and it is reachable at authorship — no condition on the status of the specs the
+   ADR derives from gates it. When the new ADR supersedes an earlier one, run
+   `lore record supersede adr/<old> --by adr/<new>` **immediately after that create** — the new ADR
+   is already `active`, so the verb's pairing check passes. The successor's `supersedes` edge is
+   then the durable pointer to `adr/<old>`: a resume that knows only the new ADR reads it from
+   there.
 
 2. Then **absorbed `draft` ADRs are retired** — each `draft` ADR Step 1 surfaced as candidate
    material and Step 2's proposal listed for disposition is flipped `--status dropped`, carrying a
@@ -312,16 +315,20 @@ claims `complete` until everything behind it landed.
    `lore record supersede decision/<d> --by adr/<new>` — once per absorbed decision, so no competing
    owner of the same decision is left `active`.
 
-4. Then **superseded ADRs are retired** with `lore record supersede adr/<old> --by adr/<new>`. The
-   verb writes the successor's `supersedes` edge and flips the predecessor to `superseded` in one
-   call. That is the **sole metadata exception to active-ADR immutability**: a reader landing on a
-   superseded ADR must see its successor (`superseded-by:`) without waiting for a reindex.
+4. Then **superseded ADRs are confirmed retired**: run step 1's verb again, once per ADR the new ADR
+   supersedes — `lore record supersede adr/<old> --by adr/<new>`. Step 1's call already did the
+   work, so this writes nothing when it landed and finishes it when it was interrupted. The verb
+   writes the successor's `supersedes` edge and flips the predecessor to `superseded` in one call.
+   That is the **sole metadata exception to active-ADR immutability**: a reader landing on a
+   superseded ADR finds its successor in `superseded-by:` once `lore reindex` has run, and in the
+   successor's `supersedes` list at once.
 
 Each verb call is idempotent and completes a torn pair, so an interrupted run is healed by running
-the same verb again: *the re-run finds the successor ADR by its provenance edges and repeats steps 3
-and 4.* Re-running a call that already landed changes nothing, and the repair is **licensed as part
-of the supersession exception** — it is the same write, finished late, not a new edit to an
-immutable record.
+the same verb again: *the re-run finds the successor ADR by its provenance edges, reads the
+predecessor ADRs from the successor's `supersedes` list, and repeats step 1's verb and steps 3 and
+4.* Re-running a call that already landed changes nothing, and the repair is **licensed as part of
+the supersession exception** — it is the same write, finished late, not a new edit to an immutable
+record.
 
 5. Then **touched `area` profiles are re-synthesized** to the sections of
    `${CLAUDE_PLUGIN_ROOT}/templates/area.md`, citing the new ADRs inline as `[[wikilinks]]`. Areas
@@ -426,9 +433,9 @@ forward `related-spec` facet** — `lore search "kind:adr related-spec:<spec-nam
 are forward-only, and step 1 writes the edge on the ADR (`--related spec=<member>`), never on the
 spec, so the member specs' sidecars carry nothing to detect from; the query above reads the side
 that actually carries it. A run that finds one resumes rather than restarts: it **completes the
-remaining writes** from wherever the order stopped. Do not draft a second ADR — it would split one
-decision across two records that readers will find independently, and there is no clean way to undo
-either.
+remaining writes** from wherever the order stopped, taking each predecessor ADR from the successor's
+`supersedes` list. Do not draft a second ADR — it would split one decision across two records that
+readers will find independently, and there is no clean way to undo either.
 
 ## Outcome report
 

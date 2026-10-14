@@ -292,26 +292,62 @@ def vault(tmp_path):
     return Vault(tmp_path)
 
 
-def test_distill_adr_route_retires_decision_then_adr_and_a_rerun_is_a_noop(vault):
-    """distill steps 1, 3, 4: ADR created `active`; the verb retires an absorbed decision and the old
-    ADR; re-running changes nothing.
+def test_distill_adr_route_retires_old_adr_at_create_then_decision_and_a_rerun_is_a_noop(vault):
+    """distill steps 1, 3, 4: the new ADR is created `active` and the verb retires the old ADR
+    immediately; the absorbed decision follows; step 4's confirming re-run and a full repeat change
+    nothing.
     """
     decision = vault.create("decision", "active", "Absorbed decision")
     old = vault.create("adr", "active", "Old ADR")
     new = vault.create("adr", "active", "New ADR")
 
-    for pred in (decision, old):
-        r = vault.run("record", "supersede", pred, "--by", new)
-        assert r.returncode == 0, r.stderr
-    assert vault.status(decision) == "superseded"
+    first = vault.run("record", "supersede", old, "--by", new)
+    assert first.returncode == 0, first.stderr
     assert vault.status(old) == "superseded"
+    assert vault.sidecar(new)["supersedes"] == [old]
+    assert vault.status(decision) == "active"
+
+    r = vault.run("record", "supersede", decision, "--by", new)
+    assert r.returncode == 0, r.stderr
+    assert vault.status(decision) == "superseded"
     assert set(vault.sidecar(new)["supersedes"]) == {decision, old}
 
     before = (vault.sidecar(decision), vault.sidecar(old), vault.sidecar(new))
-    for pred in (decision, old):
+    for pred in (old, decision):
         r = vault.run("record", "supersede", pred, "--by", new)
         assert r.returncode == 0, r.stderr
     assert (vault.sidecar(decision), vault.sidecar(old), vault.sidecar(new)) == before
+
+
+@pytest.mark.parametrize("verb_landed", [True, False])
+def test_distill_resume_knowing_only_the_new_adr_finds_the_old_adr_through_its_supersedes_edge(vault, verb_landed):
+    """distill 'Resuming an interrupted run': a run interrupted after step 1 leaves the new ADR
+    findable through `related-spec`; the old ADR is read from the new ADR's `supersedes` edge, and
+    step 4's verb re-run completes a half-landed pair or changes nothing for a finished one.
+    """
+    spec_name = vault.create("spec", "planned", "Member spec").split("/", 1)[1]
+    old = vault.create("adr", "active", "Old ADR")
+    new = vault.create("adr", "active", "New ADR", "--related", f"spec={spec_name}")
+    if verb_landed:
+        assert vault.run("record", "supersede", old, "--by", new).returncode == 0
+    else:
+        assert vault.run("record", "update", new, "--supersedes", old).returncode == 0
+    assert vault.run("reindex").returncode == 0
+
+    found = vault.run("search", f"kind:adr related-spec:{spec_name}")
+    assert found.returncode == 0, found.stderr
+    assert new in found.stdout
+    predecessors = [p for p in vault.sidecar(new).get("supersedes", []) if p.startswith("adr/")]
+    assert predecessors == [old]
+
+    before = (vault.sidecar(old), vault.sidecar(new))
+    for pred in predecessors:
+        r = vault.run("record", "supersede", pred, "--by", new)
+        assert r.returncode == 0, r.stderr
+    assert vault.status(old) == "superseded"
+    assert vault.sidecar(new)["supersedes"] == [old]
+    if verb_landed:
+        assert (vault.sidecar(old), vault.sidecar(new)) == before
 
 
 def test_distill_raw_status_flip_of_the_old_adr_is_refused(vault):
