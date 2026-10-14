@@ -23,12 +23,27 @@ TASK_RUN = "## Driver run\n\n- built\n"
 TASK = "# Task\n\nintro text\n"
 
 
+_LIVE_STATUS = {"adr": "active", "spec": "ready", "decision": "active", "task": "open"}
+
+
 def _create(vault, state, kind, status, body=PLAIN, title=None, extra=None):
-    args = ["record", "create", "--kind", kind, "--title", title or f"A {kind} at {status}",
-            "--keyword", "k", "--status", status, *(extra or [])]
+    """Create a record at *status*; ``superseded`` is reached through the verb."""
+    title = title or f"A {kind} at {status}"
+    args = ["record", "create", "--kind", kind, "--title", title,
+            "--keyword", "k", "--status",
+            _LIVE_STATUS[kind] if status == "superseded" else status, *(extra or [])]
     r = _run(args, vault=vault, state_dir=state, stdin_text=body)
     assert r.returncode == 0, r.stderr
-    return r.stdout.strip()
+    rid = r.stdout.strip()
+    if status == "superseded":
+        heir = _run(["record", "create", "--kind", "adr", "--title", f"Heir of {title}",
+                     "--keyword", "k", "--status", "active"],
+                    vault=vault, state_dir=state, stdin_text=PLAIN)
+        assert heir.returncode == 0, heir.stderr
+        done = _run(["record", "supersede", rid, "--by", heir.stdout.strip()],
+                    vault=vault, state_dir=state)
+        assert done.returncode == 0, done.stderr
+    return rid
 
 
 def _paths(vault: Path, rid: str):
@@ -210,23 +225,23 @@ def test_ac9_refusal_tells_an_agent_to_pass_initiated_by_agent(tmp_path, kind, s
     assert "An agent always passes `--initiated-by agent`" in r.stderr
 
 
-def test_ac9_adr_refusal_keeps_the_supersession_recipe(tmp_path):
+def test_ac9_adr_refusal_names_the_supersede_verb_for_this_record(tmp_path):
     vault, state = _make_vault(tmp_path)
     rid = _create(vault, state, "adr", "active")
 
     r = _update(vault, state, rid, EDITED)
 
-    assert "flip --status superseded with --supersedes adr/<successor>" in r.stderr
+    assert f"lore record supersede {rid} --by adr/<successor>" in r.stderr
 
 
-def test_ac9_non_adr_refusal_calls_a_scope_change_a_supersession_without_a_recipe(tmp_path):
+def test_ac9_non_adr_refusal_calls_a_scope_change_a_supersession_and_names_the_verb(tmp_path):
     vault, state = _make_vault(tmp_path)
     rid = _create(vault, state, "spec", "ready")
 
     r = _update(vault, state, rid, EDITED)
 
     assert "supersession" in r.stderr
-    assert "--supersedes" not in r.stderr
+    assert f"lore record supersede {rid} --by <successor-id>" in r.stderr
 
 
 # --- AC10: leaving a frozen status ------------------------------------------
@@ -346,7 +361,7 @@ def test_ac13_session_takes_a_body_update(tmp_path):
 @pytest.mark.parametrize("kind,status,flag", [
     ("task", "done", ["--label", "craft/team=core"]),
     ("task", "done", ["--related", "area=somewhere"]),
-    ("task", "done", ["--status", "superseded"]),
+    ("task", "done", ["--status", "dropped"]),
     ("spec", "ready", ["--label", "craft/team=core"]),
     ("spec", "ready", ["--related", "area=somewhere"]),
     ("spec", "ready", ["--status", "planned"]),

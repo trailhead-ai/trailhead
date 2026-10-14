@@ -11,7 +11,7 @@ Writer inventory (the parent's Given Axioms):
 
 1. drive checkpoints          -> ``--diff`` append of ``## Driver run`` on a ``done`` task
 2. execute close              -> one ``--status done --diff`` carrying tick + run-total row + measurement tally
-3. execute INVALIDATED note   -> note rides ``--status superseded`` on the child
+3. execute INVALIDATED note   -> note rides ``--status dropped`` on the child
 4. drive / slice drop remedy  -> note rides ``--status dropped`` on the slice parent
 5. execute blocked note       -> on a ``done`` parent: status-only reopen, then the note
 6. slice ledger append        -> full-body ``## Slices`` append on a ``ready`` spec
@@ -170,24 +170,30 @@ def test_execute_refused_close_leaves_the_parent_in_progress_with_nothing_ticked
     assert "craft/phase-boundary" not in side.get("labels", {})
 
 
-def test_execute_invalidated_note_rides_the_supersede_flip(tmp_path):
-    """execute 'Handling Assumption-Prover Status' option 3: note and ``--status superseded`` together."""
+def test_execute_invalidated_note_rides_the_dropped_flip(tmp_path):
+    """execute 'Handling Assumption-Prover Status' option 3: note and ``--status dropped`` together.
+
+    ``superseded`` is reachable only through ``lore record supersede``, which writes
+    no body, so a note that must land with the flip rides ``dropped``."""
     vault, state = _make_vault(tmp_path)
     rid = _create(vault, state, "task", "ready", TASK, "Invalidated child")
     note = TASK + "\nSuperseded: the prover invalidated the premise.\n"
 
-    r = _update(vault, state, rid, _diff(TASK, note), "--status", "superseded", "--diff")
+    r = _update(vault, state, rid, _diff(TASK, note), "--status", "dropped", "--diff")
 
     assert r.returncode == 0, r.stderr
-    assert _sidecar(vault, rid)["status"] == "superseded"
+    assert _sidecar(vault, rid)["status"] == "dropped"
     assert _md(vault, rid) == note
 
 
 def test_note_written_after_the_supersede_flip_is_refused(tmp_path):
-    """The old shape: flip to ``superseded``, then note as a separate ``--diff``."""
+    """The old shape: supersede the child, then note as a separate ``--diff``."""
     vault, state = _make_vault(tmp_path)
     rid = _create(vault, state, "task", "ready", TASK, "Invalidated child")
-    assert _update(vault, state, rid, "", "--status", "superseded").returncode == 0
+    heir = _create(vault, state, "task", "open", TASK, "Invalidated child heir")
+    assert _run(["record", "supersede", rid, "--by", heir],
+                vault=vault, state_dir=state).returncode == 0
+    assert _sidecar(vault, rid)["status"] == "superseded"
 
     r = _update(vault, state, rid, _diff(TASK, TASK + "\nwhy\n"), "--diff")
 

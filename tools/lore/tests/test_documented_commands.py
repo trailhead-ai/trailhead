@@ -235,3 +235,56 @@ def test_every_documented_kind_is_a_real_record_kind():
         f"lore docs spell `--kind` values that are not record kinds: {unknown} "
         f"(kinds: {sorted(KINDS)})"
     )
+
+
+# ---------------------------------------------------------------------------
+# `superseded` is reachable only through `lore record supersede`.
+# ---------------------------------------------------------------------------
+
+_RECORD_WRITE = re.compile(r"^lore\s+record\s+(?:create|update)\b")
+
+
+def _documented_record_writes() -> list[tuple[str, str]]:
+    """Every documented `lore record create|update` invocation, fenced or inline."""
+    found = list(_runnable_documented_lines())
+    for md in sorted(_PLUGIN_ROOT.rglob("*.md")):
+        for span in _INLINE.findall(md.read_text(encoding="utf-8")):
+            if "[" not in span:
+                found.append((md.name, span.strip()))
+    return [(doc, cmd) for doc, cmd in found if _RECORD_WRITE.match(cmd)]
+
+
+def _superseded_writes(lines: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """The invocations among *lines* the guard would refuse, by the guard's own predicate."""
+    from lore.record.guards import refuses_superseded_write
+
+    refused = []
+    for doc, command in lines:
+        argv = shlex.split(_ANGLE_PLACEHOLDER.sub("X", command))[1:]
+        try:
+            args = build_parser().parse_args(argv)
+        except SystemExit:
+            continue  # an unparseable line is reported by the parse test above
+        if refuses_superseded_write(getattr(args, "status", None), None):
+            refused.append((doc, command))
+    return refused
+
+
+def test_no_documented_create_or_update_writes_superseded():
+    """The verb is the only door into `superseded`; a recipe that spells the
+    refused write teaches an agent a command that fails."""
+    assert _superseded_writes(_documented_record_writes()) == []
+
+
+@pytest.mark.parametrize(
+    "command,reported",
+    [
+        ("lore record update task/x --status superseded", True),
+        ("lore record create --kind task --title T --status superseded", True),
+        ("lore record update task/x --status dropped", False),
+        ("lore record update task/x --label a/b=c", False),
+        ("lore record supersede task/x --by adr/y", False),
+    ],
+)
+def test_superseded_write_check_reports_exactly_the_refused_invocations(command, reported):
+    assert bool(_superseded_writes([("injected.md", command)])) is reported

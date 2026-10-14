@@ -12,7 +12,9 @@ edge, then the predecessor's flip to ``superseded``, both under both vaults'
 write locks with both records read inside them. Both writes go through the same
 guard and write pipeline ``update`` uses (:func:`_supersede_guard` →
 ``validate_and_write``); the pair itself is judged by
-``guards.evaluate_supersede_pairing``.
+``guards.evaluate_supersede_pairing``. The verb is the only caller that passes
+the guards' ``allow_superseded_status`` seam: ``create`` and ``update`` refuse
+any write into ``superseded``.
 """
 from __future__ import annotations
 
@@ -188,7 +190,7 @@ def _add_record_field_flags(parser) -> None:
     parser.add_argument(
         "--supersedes", dest="supersedes", action="append", default=[],
         metavar="KIND/NAME",
-        help="Append a supersession edge: this record supersedes KIND/NAME.",
+        help="Raw edge edit: add KIND/NAME.",
     )
     parser.add_argument(
         "--unset-supersedes", dest="unset_supersedes", action="append", default=[],
@@ -2224,6 +2226,7 @@ def _supersede_guard(
         status_set=status_set,
         prior_status=prior_status,
         prior_body=prior_body,
+        allow_superseded_status=True,
     )
 
 
@@ -2777,11 +2780,12 @@ def _cmd_record_amend(args) -> int:
 # in the CLI.
 _UNSET_PAIRING_RULE = (
     "The --keyword/--related*/--depends-on/--label/--annotation setters repeat; "
-    "each has an --unset-<field> remover taking the value shown "
-    "beside it: it drops every matching entry, and a value that is not present "
-    "is a silent no-op. --unset-depends-on reads specially — it matches the "
-    "stored value byte-for-byte, so an unqualified entry never matches a staged "
-    "KIND/NAME@STAGE one."
+    "each has an --unset-<field> remover taking the value shown beside it: it "
+    "drops every matching entry; an absent value is a silent no-op. --unset-depends-on "
+    "matches the stored value byte-for-byte, so an "
+    "unqualified entry never matches a staged KIND/NAME@STAGE one. "
+    "--supersedes/--unset-supersedes edit the raw edge; record a "
+    "supersession with `lore record supersede`."
 )
 
 # Shared by both ``record create`` and ``record update`` --help epilogs: the two

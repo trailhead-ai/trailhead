@@ -69,8 +69,9 @@ the repeatable list flags `--keyword` / `--related-file` / `--related-url` /
 `--related-phase` (each with a matching `--unset-<field> VALUE` that removes
 every matching entry), `--related KIND=NAME` (with `--unset-related
 KIND=NAME` to remove it) for a see-also edge, and `--supersedes KIND/NAME`
-(with `--unset-supersedes KIND/NAME` to remove it) for the typed supersession
-edge — see the next section for when to reach for which — and route to a
+(with `--unset-supersedes KIND/NAME` to remove it) to edit the raw supersession
+edge — see the next section for when to reach for which; to *record* a
+supersession use `lore record supersede` instead — and route to a
 specific vault with the routing flags (`--repo`, `--product`, `--suite`,
 `--team`):
 
@@ -89,10 +90,15 @@ habit:
 
 - **The value names another record as a supersession** — this record replaces
   that one, and the old one should be found from the new one and vice versa —
-  it's a **typed edge**. Use `--supersedes KIND/NAME` (`--unset-supersedes
-  KIND/NAME` to remove it). This is what marking a decision, ADR, or task
-  `superseded` is *for*: flip `--status superseded` and pair it with
-  `--supersedes` naming the successor, not a plain `--related`.
+  it's a **typed edge**, and `superseded` is reached only through the verb:
+  `lore record supersede <predecessor-id> --by <successor-id>` writes the
+  `supersedes` edge on the *successor* and flips the *predecessor* to
+  `superseded` in one step. `lore record create` and `lore record update`
+  refuse `--status superseded` (`graph-guard [superseded-status]`).
+  `--supersedes KIND/NAME` / `--unset-supersedes KIND/NAME` edit the raw edge
+  only. To undo a supersession made by mistake, move the predecessor back with
+  `lore record update <predecessor-id> --status <prior status>`, then remove the
+  edge with `lore record update <successor-id> --unset-supersedes <predecessor-id>`.
 - **The value names another record as a see-also** — related, but not a
   replacement — it's an **edge**, not an attribute. Use `--related KIND=NAME`.
 - **The value is a free attribute** with no natural-key collision (e.g.

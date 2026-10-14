@@ -1371,7 +1371,7 @@ def test_adr_create_defaults_status_to_draft(tmp_path):
     assert sidecar["status"] == "draft"
 
 
-@pytest.mark.parametrize("status", ["active", "superseded", "dropped"])
+@pytest.mark.parametrize("status", ["active", "dropped"])
 def test_adr_create_accepts_each_vocab_status(tmp_path, status):
     vault, state = _make_vault(tmp_path)
     r = _run(
@@ -1959,7 +1959,7 @@ def test_existing_numbered_adr_record_remains_readable_and_updatable(tmp_path):
             "update",
             "adr/adr-001-legacy-decision",
             "--status",
-            "superseded",
+            "dropped",
         ],
         vault=vault,
         state_dir=state,
@@ -1967,7 +1967,7 @@ def test_existing_numbered_adr_record_remains_readable_and_updatable(tmp_path):
     )
     assert update.returncode == 0, update.stderr
     sidecar = _find_sidecar(vault, "adr/adr-001-legacy-decision")
-    assert sidecar["status"] == "superseded"
+    assert sidecar["status"] == "dropped"
 
 
 # ---------------------------------------------------------------------------
@@ -2357,3 +2357,28 @@ def test_create_survives_an_unparseable_base_with_its_stdout_contract_intact(tmp
     assert len(lines) == 1
     assert lines[0].startswith("spec/")
     assert "Traceback" not in r.stderr
+
+
+# ---------------------------------------------------------------------------
+# `superseded` is reachable only through `lore record supersede`
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("kind", ["task", "adr", "spec", "decision"])
+def test_create_with_status_superseded_is_refused_and_creates_nothing(tmp_path, kind):
+    vault, state = _make_vault(tmp_path)
+    def records():
+        return sorted(p.name for p in vault.rglob("*") if p.suffix in (".md", ".json"))
+
+    before = records()
+
+    r = _run(
+        ["record", "create", "--kind", kind, "--title", "Born superseded",
+         "--keyword", "k", "--status", "superseded"],
+        vault=vault, state_dir=state, stdin_text="# T\n\nbody\n",
+    )
+
+    assert r.returncode != 0
+    assert "graph-guard [superseded-status]" in r.stderr
+    assert f"lore record supersede {kind}/born-superseded --by <successor-id>" in r.stderr
+    assert records() == before

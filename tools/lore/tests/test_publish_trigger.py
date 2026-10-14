@@ -359,7 +359,7 @@ class TestRecordUpdateTriggersPublish:
         calls = _record_spawner(monkeypatch)
 
         r = _run_cfg(
-            ["record", "update", rid, "--status", "superseded"],
+            ["record", "update", rid, "--status", "dropped"],
             vault=vault_a, state=state, config_home=config_home, stdin_text="",
         )
         assert r.returncode == 0, r.stderr
