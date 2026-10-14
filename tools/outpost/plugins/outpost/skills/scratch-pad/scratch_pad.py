@@ -30,8 +30,8 @@ Contract
                                   encoded once more as a string literal
 
 * Every refusal prints ``scratch-pad: <where>: <what>`` lines on stderr -- every
-  problem found in one pass -- exits non-zero, and leaves the state directory
-  as it was.
+  problem found in one pass -- and exits non-zero. No pad and no temp folder
+  are left behind; a pads folder this run had to create may remain, empty.
 
 Security posture
 ----------------
@@ -293,7 +293,9 @@ def build_pad(
         raise Refusal(problems)
 
     try:
-        round_js = _ROUND_JS_PREFIX + json.dumps(json.dumps(data, ensure_ascii=True)) + ");\n"
+        round_js = _ROUND_JS_PREFIX + json.dumps(json.dumps(data, ensure_ascii=True, allow_nan=False)) + ");\n"
+    except ValueError:
+        raise Refusal([_line(_q(str(round_path)), "a number is too large to write — numbers must be finite")])
     except RecursionError:
         raise Refusal([_line(_q(str(round_path)), "nested too deeply to write")])
     if not kit_dir.is_dir():

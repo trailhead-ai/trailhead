@@ -161,7 +161,7 @@ def test_valid_round_builds_the_pad(skill, tmp_path, state, n_questions, pad):
     assert [p.name for p in (state / "pads").iterdir()] == [pad]
 
 
-def test_round_js_is_exactly_the_parse_of_a_double_encoded_ascii_string(skill, tmp_path, state):
+def test_round_js_is_ascii_and_parses_back_to_the_round(skill, tmp_path, state):
     data = _round(1)
     data["title"] = "café \U0001f600"
     rp = _write_round(tmp_path, data)
@@ -169,7 +169,8 @@ def test_round_js_is_exactly_the_parse_of_a_double_encoded_ascii_string(skill, t
     assert _run(skill, tmp_path, state, "p", rp).returncode == 0
 
     text = (state / "pads" / "p" / "round-1" / "round.js").read_text(encoding="utf-8")
-    assert text == ROUND_JS_PREFIX + json.dumps(json.dumps(data, ensure_ascii=True)) + ROUND_JS_SUFFIX
+    assert text.startswith(ROUND_JS_PREFIX) and text.endswith(ROUND_JS_SUFFIX)
+    assert _load_round_js(state / "pads" / "p" / "round-1" / "round.js") == data
     assert text.isascii()
 
 
@@ -209,6 +210,24 @@ def test_layout_contents_are_never_inspected(skill, tmp_path, state):
         assert p.returncode == 0, (value, p.stderr)
 
 
+@pytest.mark.parametrize("number", ["1e400", "-1e400"])
+@pytest.mark.parametrize("where", ["layout", "nested-layout-list"])
+def test_a_number_too_large_for_json_is_refused_and_nothing_is_written(skill, tmp_path, state, number, where):
+    layout = f'{{"text": {number}}}' if where == "layout" else f'{{"row": [{{"rule": true}}, {{"box": [{number}]}}]}}'
+    text = json.dumps(_round(1)).replace('{"rule": true}', layout, 1)
+    assert number in text
+    rp = _write_round(tmp_path, text)
+    before = _snapshot(state)
+
+    proc = _run(skill, tmp_path, state, "p", rp)
+
+    assert proc.returncode != 0
+    assert proc.stderr.startswith("scratch-pad: ")
+    assert "too large" in proc.stderr
+    assert "Traceback" not in proc.stderr
+    assert _snapshot(state) == before
+
+
 def test_twenty_six_options_is_accepted(skill, tmp_path, state):
     data = _round(1)
     data["questions"][0] = _question("Q", n_options=26)
@@ -229,7 +248,7 @@ def test_runs_as_a_subprocess_from_an_empty_cwd(skill, tmp_path, state):
     assert (state / "pads" / "p" / "index.html").is_file()
 
 
-def test_main_builds_in_process_with_an_injected_env_and_kit(tmp_path, state, capsys):
+def test_build_pad_takes_an_injected_env_and_kit(tmp_path, state):
     mod = _load_module()
     kit = _write_kit(tmp_path / "other-kit")
     (kit / "extra.css").write_text("x{}")
@@ -240,6 +259,47 @@ def test_main_builds_in_process_with_an_injected_env_and_kit(tmp_path, state, ca
     assert pad_dir == state / "pads" / "p"
     assert index == pad_dir / "index.html"
     assert (pad_dir / "round-1" / "extra.css").read_text() == "x{}"
+
+
+def _isolated_env(state, tmp_path):
+    return {"OUTPOST_STATE_DIR": str(state), "HOME": str(tmp_path / "home"), "XDG_STATE_HOME": str(tmp_path / "xdg")}
+
+
+def _fence_process_env(monkeypatch, tmp_path):
+    """Point the process's own state lookups at a decoy so a `main` that ignores `env` cannot touch real state."""
+    monkeypatch.setenv("OUTPOST_STATE_DIR", str(tmp_path / "decoy"))
+    monkeypatch.setenv("HOME", str(tmp_path / "decoy-home"))
+    monkeypatch.delenv("XDG_STATE_HOME", raising=False)
+
+
+def test_main_builds_in_process_under_the_injected_env(tmp_path, state, capsys, monkeypatch):
+    _fence_process_env(monkeypatch, tmp_path)
+    mod = _load_module()
+    rp = _write_round(tmp_path, _round(1))
+
+    code = mod.main(["--pad", "p", "--round", str(rp)], env=_isolated_env(state, tmp_path))
+
+    out = capsys.readouterr().out.splitlines()
+    pad_dir = state / "pads" / "p"
+    assert code == 0
+    assert out[0] == (pad_dir / "index.html").as_uri()
+    assert out[1] == f"pad folder: {pad_dir}"
+    assert (pad_dir / "round-1" / "round.js").is_file()
+    assert not (tmp_path / "home").exists() and not (tmp_path / "xdg").exists()
+
+
+def test_main_refuses_in_process_with_a_nonzero_code_and_writes_nothing(tmp_path, state, capsys, monkeypatch):
+    _fence_process_env(monkeypatch, tmp_path)
+    mod = _load_module()
+    rp = _write_round(tmp_path, _without(_round(1), "title"))
+
+    code = mod.main(["--pad", "p", "--round", str(rp)], env=_isolated_env(state, tmp_path))
+
+    captured = capsys.readouterr()
+    assert code != 0
+    assert captured.out == ""
+    assert captured.err.startswith("scratch-pad: ")
+    assert not state.exists()
 
 
 # ---------------------------------------------------------------------------
@@ -766,21 +826,27 @@ def test_failure_partway_through_the_build_leaves_no_pad_and_no_temp_folder(tmp_
     assert _snapshot(state) == before
 
 
-def test_failure_while_writing_round_js_leaves_nothing_behind(tmp_path, state, monkeypatch):
+@pytest.mark.parametrize("failure", [RuntimeError("boom"), KeyboardInterrupt()], ids=["exception", "interrupt"])
+def test_failure_after_the_temp_folder_exists_leaves_no_pad_and_no_temp_folder(tmp_path, state, monkeypatch, failure):
     mod = _load_module()
     kit = _write_kit(tmp_path / "kit")
     rp = _write_round(tmp_path, _round(1))
     (state / "pads").mkdir(parents=True, mode=0o700)
     before = _snapshot(state)
+    seen = {}
 
-    def boom(*a, **k):
-        raise KeyboardInterrupt
+    def boom(src, dst, *a, **k):
+        seen["tmp_existed"] = Path(dst).parent.is_dir()
+        Path(dst).mkdir()
+        (Path(dst) / "half").write_text("x")
+        raise failure
 
-    monkeypatch.setattr(mod.json, "dumps", boom)
+    monkeypatch.setattr(mod.shutil, "copytree", boom)
 
-    with pytest.raises(KeyboardInterrupt):
+    with pytest.raises(type(failure)):
         mod.build_pad(rp, "p", kit_dir=kit, env={"OUTPOST_STATE_DIR": str(state)})
 
+    assert seen["tmp_existed"]
     assert _snapshot(state) == before
 
 
