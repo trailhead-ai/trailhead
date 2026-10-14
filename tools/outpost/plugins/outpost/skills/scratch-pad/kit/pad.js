@@ -58,6 +58,15 @@
     if (window.PadPen && typeof window.PadPen.drawQuestion === "function") {
       return window.PadPen.drawQuestion(panel, question, qIndex);
     }
+    var drawings = panel.querySelectorAll(".pad-drawing");
+    for (var i = 0; i < drawings.length; i++) {
+      var box = el("div", "pen-message");
+      ["Can't draw this layout:", "The sketch pen did not load."].forEach(function (line) {
+        box.appendChild(el("p", null, line));
+      });
+      drawings[i].textContent = "";
+      drawings[i].appendChild(box);
+    }
     return undefined;
   }
 
