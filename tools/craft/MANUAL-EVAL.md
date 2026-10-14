@@ -2303,3 +2303,35 @@ the case's `expected.md`, under its Result section.
 directory. One model tier. Three runs per arm, six where a 2-1 split was re-run. The reviewer's form was measured
 for one lens only; the executor, drift gate and code reviewer were not run. The word-share proxy for "the
 criterion's own text" is stricter than a reading by eye on paraphrases.
+
+**Result, 2026-10-14 (later the same day): the third wording and the council report bullet pass and are kept, and slice step 8 no longer names criteria by identifier.** The paragraph above stands for the first two wordings. Counts below are the grader's, taken from the committed captures; every run exited 0 and none was excluded.
+
+| Site and arm | Runs | `criterion-mention` | `reviewer-report` / `covers-field` |
+|---|---|---|---|
+| no-ritual, `baseline-noritual` | 3 | `bare` 3 | none |
+| no-ritual, `third-noritual` | 3 | `text-with-number` 3 | none |
+| slice, `baseline-slice` (statement) | 3 | `bare` 3 | `covers-field` `gate-shape` 3 |
+| slice, `third-slice-rules-only` (statement, observed only) | 3 | `text-with-number` 3 | `covers-field` `gate-shape` 3 |
+| slice, `shipped-slice` (statement) | 3 | `text-with-number` 3 | `covers-field` `gate-shape` 3 |
+| reviewer (reliability), `baseline-reviewer` | 3 | `bare` 3 | `template-shape` 3 |
+| reviewer (reliability), `third-reviewer` (with the template bullet) | 3 | `bare` 3 | `template-shape` 3 |
+| reviewer (reliability), `third-reviewer-rules-only` (no bullet) | 6 | `bare` 2, `nickname` 4 | `template-shape` 6 |
+| reviewer (advocate), `baseline-advocate` | 3 | `bare` 3 | `template-shape` 3 |
+| reviewer (advocate), `third-advocate` (with the template bullet) | 3 | `bare` 3 | `template-shape` 3 |
+
+**Verdict against the pass conditions.**
+- Criterion mention (AC1): the no-ritual arm reached a clean majority of `text-with-number` (3 of 3, baseline `bare` 3 of 3, so there was headroom), and so did the shipped-state slice arm (3 of 3, baseline `bare` 3 of 3). Both conditions are met.
+- Covered-criteria value guard: every graded `third-slice-rules-only` and `shipped-slice` run was `gate-shape` (3 of 3 each), so step 8's edit is not reverted.
+- Reviewer report (AC16): every graded `third-reviewer` and `third-advocate` run was `template-shape`, and both arms' majority `criterion-mention` verdict (`bare`) equals their baseline's. Both lenses hold.
+
+**Three wordings and the template bullet.** The first wording (`treated-`) and the second (`second-`) failed and are recorded above; the section was removed after them. The third wording, which adds "That holds for every first mention, a closing summary line included.", is the `## Output wording` section now in `rules.md`, pinned at `2de62373`, and is kept. The bullet added to the council template (`skills/_shared/council.md`), telling a reviewer to cite a criterion by its number alone, is kept: without it the reliability reviewer moved to a short label with the number trailing in 4 of 6 runs (`third-reviewer-rules-only`), with it 3 of 3 cited bare numbers as the baseline does. The slice step 8 edit, pinned at `b599c254`, removes the instruction to state covered and partially covered criteria "by identifier" and leaves the `**Covers:**` and `**Partially covers:**` fields, their shape checks and the gate invocations as they were; it is kept.
+
+**Limits.** The wording section reaches the arms through `--append-system-prompt`, not the harness's own rules loading. One model tier (the process default) at one Claude Code version. Three runs per arm, six where a 2-1 split was re-run, so only a large effect resolves; a clean majority at three runs still allows a minority of runs to shorten a criterion. The slice runs start at step 8 with the earlier steps stubbed. The word-share proxy for "the criterion's own text" cannot tell a faithful paraphrase from a nickname that shares many words. Runs are read-only and start from empty directories. Two no-ritual runs (`third-noritual-2` and `-3`) were issued in one tool message and may have overlapped in time; the others were dispatched one at a time.
+
+**Unmeasured.** The reviewer-report result holds for a council reviewer, and only the reliability (breaker) and advocate lenses were run; the builder and attacker lenses were not. Other dispatched agents were not run: the executor, the drift gate and the code reviewer. The wording of every other ritual's output to the operator (brainstorm, gauntlet, plan, execute, distill, review) is outside this case; only no-ritual and slice-choice step 8 are measured.
+
+**Interim cost.** Until the counting criteria of the spec are built, a slice that covers many criteria prints each covered criterion's text with its number after it, where the old step 8 printed a bare list of numbers. The statement is longer for a slice covering many criteria; this is the price of the wording and is accepted until a count can stand in for the list.
+
+**Record-link case.** The `ritual-deliverable-names-its-record` case's captures predate the step 8 edit. The edit changes a step that case does not measure, and its two live arms (`baseline.md`, `rule-only.md`) were rebuilt from the edited skill so their byte-identity test holds; its frozen arms and captures are untouched.
+
+**Manual re-run trigger.** There is no recurring runner. Re-run this case's treated arms (`third-noritual`, `third-slice-rules-only`, `shipped-slice`, `third-reviewer`, `third-advocate`) whenever the `## Output wording` section of `rules.md`, the council template, or slice step 8 changes, until one exists; also take a disagreement between real sessions and these counts as the signal to re-run.
