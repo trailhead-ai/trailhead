@@ -2530,3 +2530,5 @@ vault, no camp workspace. The arm keeps the real `HOME`, fenced by the sandbox r
 environment. The shortlist is a judgment, so the pass condition bounds it rather than fixing its
 membership. AC8, AC10 and AC11's completeness, freshness and fail-closed guarantees rest on the
 script's own tests, not on this case.
+
+**A discrepancy in `expected.md`, not reworded.** Its Limitations say the pass condition fixes "the two security items in". The pass condition and the fixture both have three, and the treatment was graded against three.
