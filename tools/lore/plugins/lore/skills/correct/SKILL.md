@@ -1,0 +1,107 @@
+---
+name: correct
+description: Correct a record that is already frozen — decide whether the fix is an in-place amend or a supersession, then do it. Use when the operator says a record is wrong or out of date, or asks to fix, correct, change, update or revise an ADR, a spec, a decision, or a finished task ("this ADR is wrong", "fix this spec", "correct that decision", "that criterion is off", "change what the ADR says"). Also use for /lore:correct.
+---
+
+# /lore:correct — Correct a frozen record: amend in scope, supersede on a material change
+
+A frozen record is corrected in place when the correction stays inside what the record
+already decides, and replaced by a successor when the change moves that scope. This skill
+makes that call and carries out either route.
+
+## Step 1: Check the record's status first
+
+```bash
+lore record show <kind>/<name>
+```
+
+- **Not frozen** (a `draft` ADR or spec, a lesson, an area, an open or in-progress task):
+  nothing to amend. Edit it with a plain `lore record update` (read it back first and pipe the
+  whole corrected body, never a delta). Stop here.
+- **Frozen** (an ADR or spec past `draft`, any decision, a `done`, `dropped` or `superseded`
+  task): go to Step 2. Note the `revision` the read prints; the amend needs it.
+
+## Step 2: Apply the materiality test
+
+Decide by what the correction does to the record's **scope**, not by how the request is
+phrased. "Small tweak" and "completely wrong" are both just wording; read the change.
+
+**In scope — amend in place:**
+- a wrong fact (a number, a name, a path, a date)
+- a clause that drifted from what actually shipped
+- a mechanism detail inside the same decision
+- wording
+- new supporting evidence
+- narrowing a spec acceptance criterion
+
+**Material — supersede:**
+- reversing a decision
+- adding or removing a decision
+- widening or narrowing what an ADR covers, including carving out an exception
+- leaving a spec objective with nothing delivering it
+
+**The two "narrowing" items route opposite ways, and the reason is the same:** narrowing a
+spec criterion is an amend, because a spec's scope is its objectives and the criterion only
+sizes the delivery. Narrowing what an ADR covers is a supersession, because an ADR's scope is
+exactly what it covers. Before amending a spec criterion, read the spec's objectives and
+confirm none is left with nothing delivering it; if one is, the change is material and
+supersedes.
+
+## Step 3a: In scope — amend
+
+```bash
+lore record amend <kind>/<name> --reason "<why the text was wrong>" --initiated-by operator --base <revision>
+```
+
+Give the body on stdin as a heredoc: end that command line with `<<'EOF'`, put the complete
+corrected body on the lines that follow, and close it with a line holding only `EOF`. Run it as
+that one command, with no pipe and nothing chained after it.
+
+- `--initiated-by operator` when the operator asked for the correction; `agent` when you
+  noticed it and proposed it yourself.
+- `--base` is the `revision` from the `lore record show` read, and stdin is the **whole**
+  corrected body, never a delta.
+- **Replace the wrong text.** It must not survive anywhere in the body, beside its correction
+  or otherwise. Add no blockquote banner and no "revised", "amended" or "corrected" note to the
+  body. The why belongs in `--reason`; the reason and the diff, removed lines included, stay in
+  the vault's change history permanently.
+- The reason and the new text sync to the team: put no tokens, keys, passwords or key-shaped
+  strings in either. Amend cannot remove a secret already in the record: rotate the credential,
+  then escalate to the operator for a history rewrite; never amend it out.
+- On a `spec`, amend keeps `**ACn.**` criterion numbers stable and records removals: it refuses
+  (writing nothing) a skipped, reused or relabelled number, prints `removed criteria: ...` for
+  each removal, and `--revert-to N` restores one. A relabel that also rewords escapes
+  detection, and a criterion removed outside amend (for example in a draft) is unprotected.
+- `--reopen ACn` makes the slice loop offer a criterion again by voiding the coverage of the
+  ledger entries stored at that moment (a later slice's coverage counts). `--close ACn` counts
+  it as done even without a slice fully covering it; a close needs some slice coverage already
+  naming the criterion, and it undoes a mistaken reopen. Neither edits the ledger, and the
+  reason is permanent and must never hold secrets.
+
+## Step 3b: Material — supersede
+
+Write the successor first, then record the supersession in one step. `lore record supersede`
+adds the predecessor to the successor's `supersedes` list and flips the predecessor's status.
+
+- **Decision:** create a new decision, then
+  `lore record supersede decision/<old> --by decision/<new>`.
+- **Spec:** create a new spec, take it to `ready`, and only then
+  `lore record supersede spec/<old> --by spec/<new>`. A predecessor is flipped only once its
+  successor is `ready`.
+- **ADR:** never amended for a material change, and never superseded directly by a hand-made
+  ADR. The route is a new spec, then distill, then a successor ADR. **Stop after drafting the
+  new spec** and hand the next step (the gauntlet on that spec, then distill) to the operator.
+- **Task:** `lore record supersede task/<old> --by task/<new>`.
+
+Draft the successor with the correction applied and the unchanged parts carried over, so it
+stands alone.
+
+## Step 4: Close with one line
+
+End with a single line telling the operator the route taken and why. For a supersession add
+what is still live (the predecessor stays in force until its successor is in place) and the
+next step.
+
+Amend: `Amended adr/<name> in place: the stated port was a wrong fact, scope unchanged.`
+
+Supersession: `Routed to supersession: the change reverses the storage choice. The old decision stays live until decision/<new> is recorded and superseded; next, review the new decision.`
