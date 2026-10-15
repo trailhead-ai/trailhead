@@ -424,3 +424,122 @@ def test_scaffold_pattern_seeds_a_vault_and_wrapper_from_a_copied_case_dir(sandb
 
     assert result.returncode == 0, result.stderr
     assert show(sandbox, "adr/use-the-fixture-queue")["body"] == ADR["body"]
+
+
+def test_dangling_gitconfig_symlink_refuses_and_writes_nothing_through_it(sandbox):
+    outside = sandbox / "outside"
+    outside.mkdir()
+    target = outside / "stolen-gitconfig"
+    (sandbox / "home" / ".gitconfig").symlink_to(target)
+
+    result = seed(sandbox, [ADR])
+
+    assert result.returncode != 0
+    assert result.stderr.startswith("seed-eval-vault: ")
+    assert not target.exists()
+    assert snapshot(sandbox / "cwd") == {}
+    assert not (sandbox / "home" / ".config").exists()
+
+
+def test_live_gitconfig_symlink_refuses_and_leaves_its_target_unchanged(sandbox):
+    outside = sandbox / "outside"
+    outside.mkdir()
+    target = outside / "real-gitconfig"
+    target.write_text("[user]\n\temail = someone@example.invalid\n")
+    (sandbox / "home" / ".gitconfig").symlink_to(target)
+
+    result = seed(sandbox, [ADR])
+
+    assert result.returncode != 0
+    assert result.stderr.startswith("seed-eval-vault: ")
+    assert target.read_text() == "[user]\n\temail = someone@example.invalid\n"
+    assert snapshot(sandbox / "cwd") == {}
+
+
+def test_nonempty_lore_state_dir_refuses_and_leaves_it_unchanged(sandbox):
+    state = sandbox / "home" / "lore-state"
+    (state / "vaults" / "live").mkdir(parents=True)
+    (state / "vaults" / "live" / "keep").write_text("mine")
+    before = snapshot(sandbox / "home")
+
+    result = seed(sandbox, [ADR], env=clean_env(sandbox, LORE_STATE_DIR=str(state)))
+
+    assert result.returncode != 0
+    assert result.stderr.startswith("seed-eval-vault: ")
+    assert snapshot(sandbox / "home") == before
+    assert snapshot(sandbox / "cwd") == {}
+
+
+def test_empty_lore_state_dir_seeds(sandbox):
+    state = sandbox / "home" / "lore-state"
+    state.mkdir()
+
+    result = seed(sandbox, [ADR], env=clean_env(sandbox, LORE_STATE_DIR=str(state)))
+
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize("var", ["LORE_CONFIG_DIR", "LORE_STATE_DIR"])
+def test_lore_dir_symlinked_outside_home_refuses_and_leaves_the_target_unchanged(sandbox, var):
+    outside = sandbox / "outside"
+    outside.mkdir()
+    (outside / "keep").write_text("mine")
+    link = sandbox / "home" / "lore-link"
+    link.symlink_to(outside)
+    before = snapshot(outside)
+
+    result = seed(sandbox, [ADR], env=clean_env(sandbox, **{var: str(link)}))
+
+    assert result.returncode != 0
+    assert result.stderr.startswith("seed-eval-vault: ")
+    assert "outside HOME" in result.stderr
+    assert snapshot(outside) == before
+    assert snapshot(sandbox / "cwd") == {}
+
+
+def test_default_config_dir_symlinked_outside_home_refuses(sandbox):
+    outside = sandbox / "outside"
+    outside.mkdir()
+    config_parent = sandbox / "home" / ".config"
+    config_parent.mkdir()
+    (config_parent / "lore").symlink_to(outside)
+
+    result = seed(sandbox, [ADR])
+
+    assert result.returncode != 0
+    assert "outside HOME" in result.stderr
+    assert snapshot(outside) == {}
+    assert snapshot(sandbox / "cwd") == {}
+
+
+@pytest.mark.parametrize("name", ["lore", "trailhead"])
+def test_existing_cwd_entry_is_refused_untouched(sandbox, name):
+    (sandbox / "cwd" / name).write_text("mine")
+
+    result = seed(sandbox, [ADR])
+
+    assert result.returncode != 0
+    assert result.stderr.startswith("seed-eval-vault: ")
+    assert snapshot(sandbox / "cwd") == {name: b"mine"}
+    assert snapshot(sandbox / "home") == {}
+
+
+@pytest.mark.parametrize("kind,status", [("adr", "done"), ("task", "active"), ("spec", "bogus")])
+def test_status_outside_the_kinds_vocabulary_refuses_before_creating_a_vault(sandbox, kind, status):
+    result = seed(sandbox, [{**ADR, "kind": kind, "status": status}])
+
+    assert result.returncode != 0
+    assert result.stderr.startswith("seed-eval-vault: ")
+    assert status in result.stderr
+    assert snapshot(sandbox / "cwd") == {}
+    assert snapshot(sandbox / "home") == {}
+
+
+def test_home_reached_through_a_symlink_still_seeds(sandbox):
+    link = sandbox / "home-link"
+    link.symlink_to(sandbox / "home")
+
+    result = seed(sandbox, [ADR], env=clean_env(sandbox, HOME=str(link)))
+
+    assert result.returncode == 0, result.stderr
+    assert (sandbox / "home" / ".config" / "lore" / "config.json").is_file()

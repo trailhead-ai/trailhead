@@ -21,7 +21,8 @@ record's name is the slug lore derives from its title (``Use the queue`` ->
    wrapper puts the copy on ``PYTHONPATH`` and execs this checkout's lore CLI
    under the symlink-resolved interpreter that ran this script.
 
-Nothing is written unless every refusal check passes. It refuses (stderr
+Nothing is written unless every refusal check passes, and every record's status is
+checked against its kind's vocabulary up front. It refuses (stderr
 ``seed-eval-vault: <message>``, non-zero exit) when ``records.json`` is missing
 or malformed, when lore's config or state directory — resolved through
 ``trailhead/paths.py``, exactly as lore resolves them, overrides included — is
@@ -50,7 +51,7 @@ PLUGIN_ROOT = LORE_CLI.parent.parent
 
 sys.path[:0] = [str(REPO_ROOT), str(PLUGIN_ROOT)]
 
-from lore.record.model import KINDS  # noqa: E402
+from lore.record.model import KINDS, permitted_statuses  # noqa: E402
 from trailhead import paths  # noqa: E402
 
 
@@ -83,6 +84,11 @@ def load_records(path: Path) -> list[dict[str, str]]:
         for field in ("title", "status"):
             if not record[field].strip():
                 raise Refusal(f"{where} field {field!r} must not be empty")
+        vocab = permitted_statuses(record["kind"]) or ()
+        if record["status"] not in vocab:
+            raise Refusal(
+                f"{where} status {record['status']!r} is not a {record['kind']} status: {', '.join(vocab)}"
+            )
     return records
 
 
@@ -104,6 +110,10 @@ def check_environment(cwd: Path) -> None:
             )
     if (config / "config.json").exists():
         raise Refusal(f"a lore config already exists at {config / 'config.json'}")
+    if state.exists() and any(state.iterdir()):
+        raise Refusal(f"lore's state directory {state} already holds data")
+    if (home / ".gitconfig").is_symlink():
+        raise Refusal(f"{home / '.gitconfig'} is a symlink; refusing to write through it")
     if (home / ".gitconfig").exists():
         email = subprocess.run(
             ["git", "config", "--global", "user.email"], capture_output=True, text=True
