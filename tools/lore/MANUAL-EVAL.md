@@ -328,6 +328,12 @@ the `criteria` field). It also changes the subject of the closing supersession e
 overlapped in topic with the `supersede-reversed-decision` fixture. Neither change touches the
 routing rules, and that case was green at baseline, so the arms were not re-run.
 
+Two later edits to the skill are post-treatment and were not measured: the `--initiated-by agent`
+branch now asks the operator one yes/no question before an agent-proposed amend (AC31), and the spec
+route creates the successor with `--label craft/supersedes=spec/<old>` and states that the gauntlet
+performs the supersession when the successor reaches `ready`. Neither touches operator-requested
+routing, and every case here is operator-requested.
+
 #### Read-back before the treatment run (authoring error, fixed)
 
 The skill was read against each case's `expected.md` only. Five cases routed as registered. One did
@@ -346,7 +352,7 @@ runner's list-price estimate for three runs.
 |---|---|---|---|---|---|---|
 | amend-wrong-fact-in-active-adr | 1.00 / 1.00 / 1.00 | green | 1.00 / 1.00 / 1.00 | $0.424 | green | none (already green) |
 | amend-narrow-one-criterion-in-ready-spec | 1.00 / 1.00 / 1.00 | green | 1.00 / 1.00 / 1.00 | $0.482 | green | none |
-| amend-drifted-mechanism-detail-phrased-as-serious-error | 1.00 / 0.667 / 1.00 | green (2 of 3) | 1.00 / 1.00 / 1.00 | $0.424 | green | 2 of 3 to 3 of 3 (baseline's miss was a sandbox denial of the amend call) |
+| amend-drifted-mechanism-detail-phrased-as-serious-error | 1.00 / 0.667 / 1.00 | green (2 of 3) | 1.00 / 1.00 / 1.00 | $0.424 | green | 2 of 3 to 3 of 3: a harness artefact, not a classification gain (see below) |
 | supersede-reversed-decision | 1.00 / 1.00 / 1.00 | green | 1.00 / 1.00 / 1.00 | $0.576 | green | none (already green) |
 | supersede-adr-exception-phrased-as-small-tweak | 0.667 / 0.667 / 0.667 | red | 1.00 / 1.00 / 1.00 | $0.670 | green | red to green |
 | supersede-spec-change-orphaning-an-objective-phrased-as-small-tweak | 0.714 / 0.714 / 0.714 | red | 1.00 / 1.00 / 1.00 | $0.616 | green | red to green |
@@ -355,6 +361,9 @@ Model `claude-opus-5-5`; treatment total $3.191 for 18 runs. 18 of 18 runs score
 rerun. Four cases were already green at baseline, so the measured gain is the two red cases (the agent
 now acts instead of asking) plus a steadier drifted-mechanism case. With only three runs per case the
 2-of-3 bar tolerates one miss in three; it does not show a rate.
+
+The drifted-mechanism delta is a harness artefact. The baseline miss was a sandbox permission denial
+of a piped amend, scored as a graded fail; the skill's heredoc instruction avoids that denial.
 
 #### U4: did the agent invoke the `correct` skill?
 
@@ -374,9 +383,18 @@ first and after the last treatment run. Changed: `index.sqlite` (a derived index
 under `locks/default/session/`, and the session notes `session/ca0e7928-...` (new) and
 `session/c90dc77c-...` (appended) in the `default` vault. Both session notes hold other sessions'
 candidate captures on unrelated work and carry none of the fixture vocabulary. No record, config or
-vault file the evals could reach changed. Attribution caveat: those session files were still
-uncommitted in the vault, so the attribution rests on their content and timestamps, not on a vault
-commit.
+vault file the evals could reach changed. Attribution: both session notes have since been committed
+to the `default` vault (`git -C ~/.local/state/lore/vaults/default log --oneline -10`, read-only).
+`c90dc77c` appears in `ab327f43` and `8f86baf5`, and `ca0e7928` in `8f86baf5`, both "lore: andromeda
+published N item(s)" publish commits. The notes (`.md` and `.json`) contain none of the six fixture
+record titles and none of the fixture vocabulary checked (`dedupe`, `sequence number`,
+`duplicate inbound`), so they are not eval output.
+
+#### Known gap: `successor-spec-exists`
+
+`supersede-spec-change-orphaning-an-objective-phrased-as-small-tweak/graders/successor-spec-exists`
+passes any `draft` spec. It does not check that the spec supersedes the predecessor or that it drops
+AC3. The grader stays frozen, since both arms were scored with it.
 
 When the next case lands, record it here as:
 
