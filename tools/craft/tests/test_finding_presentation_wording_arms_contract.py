@@ -46,7 +46,7 @@ PRECAL_REVISION = "f98d25850e9a770fd4a14ac585e5029931782ac8"
 
 # The commit carrying the calibration prose edit: the `cal-consult` arm reads `council.md` and
 # `consult/SKILL.md` from here and every other source from the baseline.
-CAL_REVISION = "06bb03b13130a6929d61a1b675a1f3bc404639a7"
+CAL_REVISION = "df65828beb59d1814735a6926f4982eb30a1a087"
 
 PLUGIN = "tools/craft/plugins/craft"
 RULES = f"{PLUGIN}/rules.md"
