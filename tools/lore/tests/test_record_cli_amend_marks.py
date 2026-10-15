@@ -235,3 +235,43 @@ def test_two_racing_marks_only_closes_write_one_entry_and_refuse_the_second(tmp_
     entries = _sidecar(vault, rid)["change-history"]
     assert len(entries) == 1
     assert entries[0]["criteria"] == {"closed": ["AC3"]}
+
+
+def test_a_ledger_naming_a_task_twice_snapshots_it_once_in_first_seen_order(tmp_path):
+    vault, state, rid = _make(
+        tmp_path,
+        _slice("b", covers=["AC1"]),
+        _slice("a", covers=["AC2"]),
+        _slice("b", covers=["AC3"]),
+    )
+    r = _marks(vault, state, rid, "--reopen", "AC2")
+    assert r.returncode == 0, r.stderr
+    [entry] = _sidecar(vault, rid)["change-history"]
+    assert entry["criteria"] == {"reopened": ["AC2"], "ledger": ["b", "a"]}
+    assert "reopened criteria: AC2 (voids coverage from task/a)" in r.stdout
+
+
+def test_duplicate_entries_all_naming_the_reopened_id_void_each_task_once(tmp_path):
+    vault, state, rid = _make(
+        tmp_path,
+        _slice("b", covers=["AC2"]),
+        _slice("a", covers=["AC2"]),
+        _slice("b", covers=["AC2"]),
+    )
+    r = _marks(vault, state, rid, "--reopen", "AC2")
+    assert r.returncode == 0, r.stderr
+    [entry] = _sidecar(vault, rid)["change-history"]
+    assert entry["criteria"]["ledger"] == ["b", "a"]
+    assert "voids coverage from task/b, task/a)" in r.stdout
+    assert r.stdout.count("task/b") == 1
+
+
+def test_a_body_change_plus_reopen_dedupes_the_stored_ledger_snapshot(tmp_path):
+    ledger = (_slice("b", covers=["AC1"]), _slice("a", covers=["AC2"]), _slice("b", covers=["AC3"]))
+    vault, state, rid = _make(tmp_path, *ledger)
+    new = _spec_body(*ledger, _slice("forged", covers=["AC2"])).replace("intro", "intro, reworded")
+    r = _amend(vault, state, rid, new, extra=["--reopen", "AC2"])
+    assert r.returncode == 0, r.stderr
+    [entry] = _sidecar(vault, rid)["change-history"]
+    assert entry["criteria"]["ledger"] == ["b", "a"]
+    assert "reworded" in entry["diff"]
