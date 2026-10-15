@@ -143,6 +143,8 @@ env -u LORE_CONFIG_DIR -u LORE_STATE_DIR -u XDG_CONFIG_HOME -u XDG_STATE_HOME \
 ```
 
 - `--scaffold` is required; the runner skips `scaffold_script` without it.
+- `--output-dir` also keeps `trailhead/tests/test_eval_corpus.py` green: without it the runner
+  writes `evals/results/<ts>/`, which the corpus test treats as a case with no `expected.md`.
 - `--allow-tools` is variadic and takes every following value until the next
   flag, so keep it before another flag, as above.
 - `--ablation none` runs the with-plugin arm only. The default, `with-without`,

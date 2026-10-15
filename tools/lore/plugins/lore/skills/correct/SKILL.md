@@ -58,7 +58,9 @@ corrected body on the lines that follow, and close it with a line holding only `
 that one command, with no pipe and nothing chained after it.
 
 - `--initiated-by operator` when the operator asked for the correction; `agent` when you
-  noticed it and proposed it yourself.
+  noticed it and proposed it yourself. An amend you propose yourself first asks the operator one
+  yes/no question and writes nothing until the answer is yes; an amend the operator asked for
+  proceeds with no further confirmation.
 - `--base` is the `revision` from the `lore record show` read, and stdin is the **whole**
   corrected body, never a delta.
 - **Replace the wrong text.** It must not survive anywhere in the body, beside its correction
@@ -87,10 +89,11 @@ adds the predecessor to the successor's `supersedes` list and flips the predeces
 
 - **Decision:** create a new decision, then
   `lore record supersede decision/<old> --by decision/<new>`.
-- **Spec:** create the successor spec as a `draft` and leave the predecessor untouched, still
-  live. The successor goes through the gauntlet to `ready`; only then
-  `lore record supersede spec/<old> --by spec/<new>` flips the predecessor. Stop after drafting
-  and hand the gauntlet to the operator.
+- **Spec:** create the successor spec as a `draft` with `--label craft/supersedes=spec/<old>`
+  and leave the predecessor untouched, still live. The successor goes through the gauntlet to
+  `ready`; the gauntlet's ready step sees the label and performs
+  `lore record supersede spec/<old> --by spec/<new>`, flipping the predecessor only once the
+  successor is `ready`. Stop after drafting and hand the gauntlet to the operator.
 - **ADR:** never amended for a material change, and never superseded directly by a hand-made
   ADR. The route is a new spec, then distill, then a successor ADR. **Stop after drafting the
   new spec** and hand the next step (the gauntlet on that spec, then distill) to the operator.
