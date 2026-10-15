@@ -184,3 +184,41 @@ def test_no_browser_fails_naming_the_flag_when_require_flag_set(bare):
         ch.run_probe(FIXTURES / "widths-narrow", "return {};", env=env, lookup=_lookup(env, home))
     assert outcome.type is pytest.fail.Exception
     assert ch.ENV_REQUIRE in str(outcome.value)
+
+
+def _fetch(url):
+    import urllib.request
+
+    return urllib.request.urlopen(url)
+
+
+def test_served_folder_sends_outposts_headers_and_the_content_type_of_each_extension(tmp_path):
+    for name in ("a.html", "a.js", "a.css", "a.ttf", "a.woff2"):
+        (tmp_path / name).write_bytes(b"x")
+    with ch.serve_folder(tmp_path) as base:
+        types = {name: _fetch(f"{base}/{name}") for name in ("a.html", "a.js", "a.css", "a.ttf", "a.woff2")}
+    assert {n: r.headers["Content-Type"] for n, r in types.items()} == {
+        "a.html": "text/html; charset=utf-8",
+        "a.js": "text/javascript; charset=utf-8",
+        "a.css": "text/css; charset=utf-8",
+        "a.ttf": "font/ttf",
+        "a.woff2": "font/woff2",
+    }
+    for r in types.values():
+        assert r.headers["X-Content-Type-Options"] == "nosniff"
+        assert "script-src 'self' 'unsafe-inline'" in r.headers["Content-Security-Policy"]
+        assert r.headers["Content-Security-Policy"].endswith("frame-ancestors 'none'")
+
+
+def test_served_folder_serves_only_the_folder_it_was_given(tmp_path):
+    (tmp_path / "secret.txt").write_text("s")
+    site = tmp_path / "site"
+    site.mkdir()
+    (site / "index.html").write_text("ok")
+    import urllib.error
+
+    with ch.serve_folder(site) as base:
+        assert _fetch(f"{base}/").read() == b"ok"
+        with pytest.raises(urllib.error.HTTPError) as err:
+            _fetch(f"{base}/../secret.txt")
+    assert err.value.code == 404

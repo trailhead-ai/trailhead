@@ -11,6 +11,10 @@ that gets the probe (default: the entry), so a test can open a page that
 redirects and probe the page it lands on. The wrapper writes the outcome into
 ``<pre id="probe-result">``; the value is parsed back out and returned.
 
+With ``serve=True`` the copy is served over HTTP on a loopback port (``serve_folder``)
+and ``entry`` is a URL path under it rather than a file; a server that cannot start
+raises ``ServerStartError`` before the browser launches.
+
 Browser lookup (``find_browser``): ``$OUTPOST_TEST_BROWSER``, then
 ``chrome-headless-shell`` on PATH, then the Playwright cache's headless shell,
 and only then full Chrome/Chromium (launched with ``--headless=new``). Every
@@ -20,15 +24,19 @@ is skipped, or failed when ``$OUTPOST_REQUIRE_BROWSER`` is set.
 
 from __future__ import annotations
 
+import contextlib
 import html
 import json
 import os
 import re
+import http.server
 import shutil
 import signal
 import subprocess
 import tempfile
-from collections.abc import Callable, Mapping
+import threading
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -86,12 +94,64 @@ class BrowserLaunchError(HarnessError):
     """The browser binary could not be run to completion."""
 
 
+class ServerStartError(HarnessError):
+    """The loopback server for an HTTP-mode probe could not be started."""
+
+
 class ProbeNotReported(HarnessError):
     """The page was dumped but its probe never wrote a result."""
 
 
 class ProbeFailed(HarnessError):
     """The probe ran and threw."""
+
+
+# Copied from Outpost's sites handler (outpost: server/sites/static.ts: SITES_CSP,
+# MIME_BY_EXT and the nosniff header). This is a snapshot, not a link: a later change
+# to Outpost's headers will not turn a test that serves pages here red.
+SITES_CSP = (
+    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self'; "
+    "object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+)
+_MIME_BY_EXT = {
+    ".html": "text/html; charset=utf-8",
+    ".js": "text/javascript; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".ttf": "font/ttf",
+    ".woff2": "font/woff2",
+}
+
+
+class _SitesHandler(http.server.SimpleHTTPRequestHandler):
+    def guess_type(self, path):
+        return _MIME_BY_EXT.get(Path(path).suffix.lower(), "application/octet-stream")
+
+    def end_headers(self):
+        self.send_header("Content-Security-Policy", SITES_CSP)
+        self.send_header("X-Content-Type-Options", "nosniff")
+        super().end_headers()
+
+    def log_message(self, format, *args):
+        pass
+
+
+@contextmanager
+def serve_folder(root: Path, *, port: int = 0) -> Iterator[str]:
+    """Serve ``root`` on a loopback port under Outpost's sites headers; yield the base URL."""
+    handler = lambda *a, **kw: _SitesHandler(*a, directory=str(root), **kw)  # noqa: E731
+    try:
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", port), handler)
+    except OSError as err:
+        raise ServerStartError(f"could not start the loopback server on 127.0.0.1:{port}: {err}") from err
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_address[1]}"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
 
 
 @dataclass(frozen=True)
@@ -193,6 +253,8 @@ def run_probe(
     lookup: Callable[[], Browser | None] | None = None,
     entry: str = "index.html",
     inject_into: str | None = None,
+    serve: bool = False,
+    serve_port: int = 0,
 ):
     env = os.environ if env is None else env
     browser = (lookup or (lambda: find_browser(env)))()
@@ -221,9 +283,14 @@ def run_probe(
             f"--window-size={window_size[0]},{window_size[1]}",
             f"--virtual-time-budget={virtual_time_budget}",
             "--dump-dom",
-            index.as_uri(),
         ]
-        dom = _launch(argv, browser, timeout, env)
+        with contextlib.ExitStack() as stack:
+            if serve:
+                base = stack.enter_context(serve_folder(page, port=serve_port))
+                argv.append(f"{base}/{entry}")
+            else:
+                argv.append(index.as_uri())
+            dom = _launch(argv, browser, timeout, env)
 
     match = _RESULT_RE.search(dom)
     if match is None:
