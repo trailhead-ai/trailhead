@@ -6,10 +6,15 @@ Usage:
     cat capture.txt | wording_grader.py --check criterion-mention --criteria spec.md --drop-value-line
     cat capture.txt | wording_grader.py --check covers-field
     cat capture.txt | wording_grader.py --check reviewer-report
+    cat capture.txt | wording_grader.py --check severity-name --reports reports-lenses.md
+    cat capture.txt | wording_grader.py --check reviewer-name --reports reports-lenses.md
+    cat capture.txt | wording_grader.py --check persisted-levels
 
-The capture arrives on stdin. The grammar each check implements is the one the
-ritual-output-wording eval case fixes in its `expected.md`, read together with
-that file's dated amendment.
+The capture arrives on stdin. The grammar of `criterion-mention`, `covers-field`
+and `reviewer-report` is the one the ritual-output-wording eval case fixes in its
+`expected.md`, read together with that file's dated amendment; the grammar of
+`severity-name`, `reviewer-name` and `persisted-levels` is the one the
+finding-presentation-wording case fixes in its `expected.md`.
 
 `criterion-mention` reads every acceptance-criterion number in the capture and
 says whether each is a criterion's own words followed by its number in round
@@ -28,15 +33,27 @@ least one severity-tagged finding line, the confidence heading and text after
 it. Verdicts: `template-shape`, `off-shape`; an `off-shape` verdict names the
 missing element on stderr as `missing: <element>`.
 
+`severity-name` and `reviewer-name` read the capture's reader-facing text: its
+logical lines without any fenced block and without a line that quotes a reviewer
+report verbatim. `--reports` names a canned report file (repeatable) that supplies
+those quotations. Verdicts: `plain`, `internal`, `none`. `internal` when a
+severity level or reviewer role is named in the working vocabulary, else `plain`
+when a plain reading appears, else `none`.
+
+`persisted-levels` reads only the first fenced block that holds a `## Council Review`
+line, for the three italic level labels and a Critical list that is not empty or
+`none`. Verdicts: `kept`, `changed`, `missing`. It reads no `--reports`.
+
 stdout carries exactly the line `<check>: <verdict>`.
 
 Exit codes:
-    0  a passing verdict (text-with-number, template-shape, gate-shape)
+    0  a passing verdict (text-with-number, template-shape, gate-shape, plain, kept)
     1  any other verdict
     2  could not grade: nothing on stdout, a `reason-code:` line on stderr —
        bad-arguments, missing-check, unknown-check, option-not-applicable,
        missing-criteria, criteria-unreadable, criteria-not-utf8,
-       no-criteria-found, duplicate-criterion, empty-input, input-too-large,
+       no-criteria-found, duplicate-criterion, missing-reports,
+       reports-unreadable, reports-not-utf8, empty-input, input-too-large,
        not-utf8. Zero bytes of stdin is `empty-input`; input that is only
        whitespace is a capture and is graded.
 
@@ -68,8 +85,11 @@ VERDICT_WORDS = {
     "criterion-mention": ("text-with-number", "nickname", "bare", "no-mention"),
     "reviewer-report": ("template-shape", "off-shape"),
     "covers-field": ("gate-shape", "off-shape", "absent"),
+    "severity-name": ("plain", "internal", "none"),
+    "reviewer-name": ("plain", "internal", "none"),
+    "persisted-levels": ("kept", "changed", "missing"),
 }
-PASSING = frozenset({"text-with-number", "template-shape", "gate-shape"})
+PASSING = frozenset({"text-with-number", "template-shape", "gate-shape", "plain", "kept"})
 
 _TOKEN_RE = re.compile(r"(?<![A-Za-z0-9])AC(\d+)")
 _DIGITS_RE = re.compile(r"(\d+)")
@@ -82,6 +102,42 @@ _LIST_ITEM_RE = re.compile(r"[ \t]*(?:[-*+]|\d+[.)])[ ]")
 _CRITERION_LINE_RE = re.compile(r"[ \t]*(?:[-*+] )?[ \t]*\*\*AC(\d+)\.\*\*(.*)")
 _FINDING_TAG_RE = re.compile(r"[ \t]*[-*]?[ \t]*(?:\*\*)?\[(?:Critical|Important|Minor)\]")
 _COVERS_LABEL_RE = re.compile(r"\*\*Covers:\*\* *")
+
+# A whole word is not adjacent to a letter, a digit or a hyphen; `_` is deleted before matching.
+_BEFORE = r"(?<![^\W_]|-)"
+_AFTER = r"(?![^\W_]|-)"
+_WS_RE = re.compile(r"\s+")
+_LEADING_MARKER_RE = re.compile(r"[ \t]*(?:[-*+]|\d+[.)]) ")
+_FINDING_WORDS = r"(?:findings?|issues?)"
+_COUNT = r"[(\[]\d+[)\]]"
+_SEVERITY_PATTERNS = (
+    re.compile(rf"{_BEFORE}Criticals?{_AFTER}"),
+    re.compile(rf"{_BEFORE}critical {_FINDING_WORDS}{_AFTER}"),
+    re.compile(rf"{_BEFORE}(?:Important|Minor){_AFTER} *(?:[:\])]|{_COUNT})"),
+    re.compile(rf"(?<=\d ){_BEFORE}(?:Important|Minor){_AFTER}"),
+    re.compile(rf"{_BEFORE}(?:Important|Minor) {_FINDING_WORDS}{_AFTER}"),
+)
+_LEVEL_ONLY_RE = re.compile(rf"(?:Important|Minor)(?: *{_COUNT})?")
+_PLAIN_SEVERITY_RE = re.compile(
+    rf"{_BEFORE}(?:needs your decision|worth fixing|nothing to decide){_AFTER}", re.IGNORECASE
+)
+_INTERNAL_REVIEWER_PATTERNS = (
+    re.compile(
+        rf"{_BEFORE}(?:builder|breaker|attacker|advocate|premise-attacker|consistency-auditor|divergence-prober){_AFTER}",
+        re.IGNORECASE,
+    ),
+    re.compile(rf"{_BEFORE}(?:Builder|Reliability|Advocate|Premise|Consistency|Divergence){_AFTER}"),
+    re.compile(rf"{_BEFORE}fact[ -]verification{_AFTER}", re.IGNORECASE),
+)
+_PLAIN_REVIEWER_RE = re.compile(
+    rf"{_BEFORE}(?:buildability|failure cases|right problem|self-consistency|left undecided|ease of use|fact check"
+    rf"|security){_AFTER}",
+    re.IGNORECASE,
+)
+_FINDING_TAGS = ("[Critical]", "[Important]", "[Minor]")
+_QUOTE_MIN_CHARS = 30
+_LABELS = ("*Critical:*", "*Important:*", "*Minor:*")
+_NONE_ENTRY_RE = re.compile(r"none\.?", re.IGNORECASE)
 
 _STRIPPED_TAIL = " \t.,;:!?\"'-–—"
 _TERMINATORS = ".!?;"
@@ -338,6 +394,179 @@ def reviewer_report_gap(text: str) -> str | None:
     return None
 
 
+# --- severity-name and reviewer-name ---------------------------------------------------------
+
+
+def _fence_run(line: str) -> tuple[str, int] | None:
+    """The fence character and run length when the trimmed line begins with three or more of it."""
+    stripped = line.strip()
+    for char in ("`", "~"):
+        if stripped.startswith(char * 3):
+            return char, len(stripped) - len(stripped.lstrip(char))
+    return None
+
+
+def _fenced_blocks(physical: list[str]) -> list[tuple[int, int]]:
+    """The fenced blocks as (first, last) line indexes, fence lines included; an unclosed one runs to the end."""
+    blocks: list[tuple[int, int]] = []
+    start = -1
+    opening: tuple[str, int] = ("", 0)
+    for index, line in enumerate(physical):
+        run = _fence_run(line)
+        if start < 0:
+            if run is not None:
+                start, opening = index, run
+        elif run is not None and run[0] == opening[0] and run[1] >= opening[1]:
+            if line.strip() == run[0] * len(line.strip()):
+                blocks.append((start, index))
+                start = -1
+    if start >= 0:
+        blocks.append((start, len(physical) - 1))
+    return blocks
+
+
+def _fenced_flags(physical: list[str]) -> list[bool]:
+    flags = [False] * len(physical)
+    for first, last in _fenced_blocks(physical):
+        for index in range(first, last + 1):
+            flags[index] = True
+    return flags
+
+
+def _normalise(text: str) -> str:
+    return _WS_RE.sub(" ", _MARKUP_RE.sub("", text)).strip()
+
+
+def _outside_fences(physical: list[str]) -> list[tuple[str, bool]]:
+    """The logical lines outside fenced blocks as (text, is_heading) pairs; a block ends the line before it."""
+    grouped: list[tuple[str, bool]] = []
+    joinable = False
+    for raw, fenced in zip(physical, _fenced_flags(physical)):
+        stripped = raw.strip()
+        if fenced:
+            joinable = False
+            continue
+        if not stripped:
+            joinable = False
+            continue
+        starts_own = raw.startswith("#") or stripped.startswith("|") or _LIST_ITEM_RE.match(raw) is not None
+        if joinable and not starts_own:
+            text, heading = grouped[-1]
+            grouped[-1] = (text + " " + stripped, heading)
+        else:
+            grouped.append((stripped, raw.startswith("#")))
+        joinable = True
+
+    lines: list[tuple[str, bool]] = []
+    for text, heading in grouped:
+        if text.startswith("|"):
+            lines.extend((cell, False) for cell in text.split("|") if cell.strip())
+        else:
+            lines.append((text, heading))
+    return lines
+
+
+def _tagged_text(normalised: str) -> tuple[str, str] | None:
+    """(tag, text after the tag) when the line, minus one `>` and a list marker, begins with a finding tag."""
+    text = normalised
+    if text.startswith(">"):
+        text = text[1:]
+    marker = _LEADING_MARKER_RE.match(text)
+    if marker:
+        text = text[marker.end() :]
+    text = text.strip()
+    for tag in _FINDING_TAGS:
+        if text.startswith(tag):
+            return tag, text[len(tag) :].strip()
+    return None
+
+
+def _report_quotations(reports_text: str) -> dict[str, list[str]]:
+    by_tag: dict[str, list[str]] = {tag: [] for tag in _FINDING_TAGS}
+    for text, _ in _outside_fences(_split_lines(reports_text)):
+        tagged = _tagged_text(_normalise(text))
+        if tagged:
+            by_tag[tagged[0]].append(tagged[1])
+    return by_tag
+
+
+def _is_verbatim_quotation(normalised: str, quotations: dict[str, list[str]]) -> bool:
+    tagged = _tagged_text(normalised)
+    if tagged is None or len(tagged[1]) < _QUOTE_MIN_CHARS:
+        return False
+    return any(source.startswith(tagged[1]) for source in quotations[tagged[0]])
+
+
+def _reader_facing(text: str, quotations: dict[str, list[str]]) -> list[tuple[str, bool]]:
+    """Normalised reader-facing logical lines as (text, is_heading) pairs."""
+    kept = []
+    for line, heading in _outside_fences(_split_lines(text)):
+        normalised = _normalise(line)
+        if not _is_verbatim_quotation(normalised, quotations):
+            kept.append((normalised, heading))
+    return kept
+
+
+def _is_level_label_line(text: str, heading: bool) -> bool:
+    if heading:
+        text = text.lstrip("#").strip()
+    return _LEVEL_ONLY_RE.fullmatch(text) is not None
+
+
+def grade_severity_name(text: str, quotations: dict[str, list[str]]) -> str:
+    lines = _reader_facing(text, quotations)
+    for line, heading in lines:
+        if any(pattern.search(line) for pattern in _SEVERITY_PATTERNS) or _is_level_label_line(line, heading):
+            return "internal"
+    return "plain" if any(_PLAIN_SEVERITY_RE.search(line) for line, _ in lines) else "none"
+
+
+def grade_reviewer_name(text: str, quotations: dict[str, list[str]]) -> str:
+    lines = _reader_facing(text, quotations)
+    for line, _ in lines:
+        if any(pattern.search(line) for pattern in _INTERNAL_REVIEWER_PATTERNS):
+            return "internal"
+    return "plain" if any(_PLAIN_REVIEWER_RE.search(line) for line, _ in lines) else "none"
+
+
+# --- persisted-levels ------------------------------------------------------------------------
+
+
+def _council_review_block(physical: list[str]) -> list[str] | None:
+    for first, last in _fenced_blocks(physical):
+        block = physical[first : last + 1]
+        if any(line.strip() == "## Council Review" for line in block):
+            return block
+    return None
+
+
+def grade_persisted_levels(text: str) -> str:
+    block = _council_review_block(_split_lines(text))
+    if block is None:
+        return "missing"
+    entries: dict[str, list[str]] = {}
+    current: str | None = None
+    for line in block:
+        trimmed = line.strip()
+        marker = _LEADING_MARKER_RE.match(trimmed)
+        listed = marker is not None
+        body = trimmed[marker.end() :].strip() if marker else trimmed
+        label = next((name for name in _LABELS if body.startswith(name)), None)
+        if label is not None:
+            current = label
+            entries.setdefault(label, [])
+            rest = body[len(label) :].strip()
+            if rest:
+                entries[label].append(rest)
+        elif listed and current is not None and body:
+            entries[current].append(body)
+    if any(label not in entries for label in _LABELS):
+        return "changed"
+    if all(_NONE_ENTRY_RE.fullmatch(entry) for entry in entries["*Critical:*"]):
+        return "changed"
+    return "kept"
+
+
 # --- command line ----------------------------------------------------------------------------
 
 
@@ -373,10 +602,29 @@ def _read_criteria(path: str) -> dict[int, list[str]]:
     return criteria
 
 
+def _read_reports(paths: list[str] | None) -> dict[str, list[str]]:
+    if not paths:
+        raise CouldNotGrade("missing-reports", "the naming checks need --reports")
+    merged: dict[str, list[str]] = {tag: [] for tag in _FINDING_TAGS}
+    for path in paths:
+        try:
+            data = Path(path).read_bytes()
+        except OSError as exc:
+            raise CouldNotGrade("reports-unreadable", f"cannot read {path}: {exc}") from exc
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise CouldNotGrade("reports-not-utf8", f"{path} is not UTF-8: {exc}") from exc
+        for tag, quoted in _report_quotations(text).items():
+            merged[tag].extend(quoted)
+    return merged
+
+
 def run(argv: list[str]) -> tuple[str, str]:
     parser = _Parser(description="Grade one captured output for one wording check.")
     parser.add_argument("--check")
     parser.add_argument("--criteria")
+    parser.add_argument("--reports", action="append")
     parser.add_argument("--drop-value-line", action="store_true")
     args = parser.parse_args(argv)
 
@@ -391,6 +639,7 @@ def run(argv: list[str]) -> tuple[str, str]:
         if args.criteria is None:
             raise CouldNotGrade("missing-criteria", "criterion-mention needs --criteria")
         criteria = _read_criteria(args.criteria)
+    quotations = _read_reports(args.reports) if args.check in ("severity-name", "reviewer-name") else None
     text = _read_stdin()
 
     if args.check == "criterion-mention":
@@ -398,6 +647,12 @@ def run(argv: list[str]) -> tuple[str, str]:
         gap = ""
     elif args.check == "covers-field":
         verdict, gap = grade_covers_field(text), ""
+    elif args.check == "severity-name":
+        verdict, gap = grade_severity_name(text, quotations), ""
+    elif args.check == "reviewer-name":
+        verdict, gap = grade_reviewer_name(text, quotations), ""
+    elif args.check == "persisted-levels":
+        verdict, gap = grade_persisted_levels(text), ""
     else:
         found = reviewer_report_gap(text)
         verdict, gap = ("template-shape", "") if found is None else ("off-shape", found)

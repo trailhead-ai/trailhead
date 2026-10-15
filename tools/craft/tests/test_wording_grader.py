@@ -24,9 +24,9 @@ GRADER = CRAFT_ROOT / "plugins" / "craft" / "scripts" / "wording_grader.py"
 CASE = CRAFT_ROOT / "plugins" / "craft" / "evals" / "ritual-output-wording"
 SPEC = CASE / "fixtures" / "spec.md"
 RUNS = CASE / "runs"
-EXPECTED_MD = CASE / "expected.md"
+EVALS = CASE.parent
 
-PASSING = {"text-with-number", "template-shape", "gate-shape"}
+PASSING = {"text-with-number", "template-shape", "gate-shape", "plain", "kept"}
 
 AC4 = "A librarian override records who granted it and the reason given, and shows in the borrower's history"
 
@@ -767,11 +767,494 @@ def test_every_capture_grades_to_the_verdict_its_prefix_is_mapped_to(capture):
 # --- the verdict words document ------------------------------------------------------------
 
 
-def test_expected_md_names_every_verdict_word_the_script_can_print():
-    words = _load_module().VERDICT_WORDS
-    section = EXPECTED_MD.read_text(encoding="utf-8").split("## Verdict words", 1)[1].split("\n## ", 1)[0]
-    for check, verdicts in words.items():
-        line = next(ln for ln in section.splitlines() if ln.startswith(f"- `{check}`:"))
-        named = set(re.findall(r"`([a-z-]+)`", line.split(":", 1)[1]))
-        assert named == set(verdicts), (check, named)
-    assert len(words) == 3
+def _documented_verdict_words():
+    """Map each check to the verdict words the one eval case documenting it lists, plus that case's name."""
+    documented = {}
+    for expected in sorted(EVALS.glob("*/expected.md")):
+        text = expected.read_text(encoding="utf-8")
+        if "## Verdict words" not in text:
+            continue
+        section = text.split("## Verdict words", 1)[1].split("\n## ", 1)[0]
+        for line in section.splitlines():
+            found = re.match(r"- `([a-z-]+)`:(.*)", line)
+            if found:
+                documented.setdefault(found.group(1), []).append(
+                    (expected.parent.name, set(re.findall(r"`([a-z-]+)`", found.group(2))))
+                )
+    return documented
+
+
+def test_each_check_is_documented_in_exactly_one_case_with_the_words_the_script_can_print():
+    documented = _documented_verdict_words()
+    for check, verdicts in _load_module().VERDICT_WORDS.items():
+        cases = documented.get(check, [])
+        assert len(cases) == 1, (check, [name for name, _ in cases])
+        assert cases[0][1] == set(verdicts), (check, cases[0][0], cases[0][1])
+
+
+# --- severity-name, reviewer-name and persisted-levels ---------------------------------------
+#
+# The grammar is the one the finding-presentation-wording case fixes in its `expected.md`.
+
+FINDING_CASE = EVALS / "finding-presentation-wording"
+FINDING_RUNS = FINDING_CASE / "runs"
+
+REPORTS = (
+    "### Builder\n\n## Findings\n"
+    "- [Critical] Two tenants can each agree a swap for the same plot with different partners;\n"
+    "  both swaps go through. Suggested: keep one table.\n"
+    "- [Important] A swap form needs both tenants to confirm and nothing says what happens next.\n"
+    "- [Minor] Short one.\n"
+    "\n## Confidence\nhigh\n"
+)
+QUOTED = "Two tenants can each agree a swap for the same plot with different partners"
+QUOTED_WRAPPED = "Two tenants can each agree a swap for the same plot with different partners; both swaps go through."
+
+
+@pytest.fixture
+def reports(tmp_path):
+    path = tmp_path / "reports.md"
+    path.write_text(REPORTS, encoding="utf-8")
+    return path
+
+
+def name_grade(check, text, reports):
+    """Run a naming check against `reports`; return the verdict word, exit code agreeing with it."""
+    result = run_grader(["--check", check, "--reports", str(reports)], text.encode("utf-8"))
+    stdout = result.stdout.decode("utf-8")
+    match = re.fullmatch(rf"{re.escape(check)}: ([a-z-]+)\n", stdout)
+    assert match, (stdout, result.stderr)
+    word = match.group(1)
+    assert result.returncode == (0 if word in PASSING else 1), (word, result.returncode)
+    return word
+
+
+def severity(text, reports):
+    return name_grade("severity-name", text, reports)
+
+
+def reviewer(text, reports):
+    return name_grade("reviewer-name", text, reports)
+
+
+def levels(text):
+    result = run_grader(["--check", "persisted-levels"], text.encode("utf-8"))
+    word = result.stdout.decode("utf-8").removeprefix("persisted-levels: ").strip()
+    assert result.returncode == (0 if word == "kept" else 1), (word, result.returncode, result.stderr)
+    return word
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Critical",
+        "The Critical is the import.",
+        "Three Criticals remain.",
+        "These are critical findings.",
+        "One critical issue.",
+        "critical issues",
+        "Important: the link accepts on open.",
+        "[Important] the link accepts on open",
+        "(Important) the link",
+        "Minor (2)",
+        "Minor [3] items",
+        "Important (8), logged only",
+        "**Minor**",
+        "## Important",
+        "### Minor (4)",
+        "**Important**",
+        "3 Important items",
+        "Minor findings follow",
+        "two Important issues",
+    ],
+)
+def test_internal_severity_forms_make_a_capture_internal(text, reports):
+    assert severity(text, reports) == "internal"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "This is an important point.",
+        "A minor edit to the form.",
+        "Important to note that the link accepts.",
+        "critical thinking about the plan",
+        "a critical moment",
+        "CRITICAL",
+        "Criticality is high.",
+        "A non-Critical item and a Critical-path item.",
+        "Importance and Minority are different words.",
+        "Minorfindings",
+    ],
+)
+def test_ordinary_english_and_non_matching_forms_do_not_count(text, reports):
+    assert severity(text, reports) == "none"
+
+
+def test_important_followed_by_findings_is_internal_but_lowercase_critical_alone_is_not(reports):
+    assert severity("Important findings", reports) == "internal"
+    assert severity("a critical moment", reports) == "none"
+
+
+def test_the_severity_match_is_case_sensitive(reports):
+    assert severity("a CRITICAL finding and critical FINDINGS", reports) == "none"
+    assert severity("Critical", reports) == "internal"
+
+
+def test_a_heading_group_label_is_internal_only_when_it_is_the_whole_heading(reports):
+    assert severity("## Important", reports) == "internal"
+    assert severity("## Important things to know", reports) == "none"
+
+
+def test_a_table_cell_that_is_a_bare_level_is_internal(reports):
+    assert severity("| level | n |\n|---|---|\n| Minor | 4 |\n", reports) == "internal"
+    assert severity("| level | n |\n|---|---|\n| a minor one | 4 |\n", reports) == "none"
+
+
+def test_physical_lines_of_one_paragraph_join_into_one_logical_line(reports):
+    assert severity("The Minor\n(2) items\n", reports) == "internal"
+    assert severity("The Minor\n\n(2) items\n", reports) == "none"
+
+
+@pytest.mark.parametrize(
+    "text, verdict",
+    [
+        ("This needs your decision.", "plain"),
+        ("Needs Your Decision", "plain"),
+        ("It is worth fixing.", "plain"),
+        ("There is nothing to decide here.", "plain"),
+        ("Needs your decisions", "none"),
+        ("worth fixings", "none"),
+        ("Plain prose with nothing in it.", "none"),
+        ("It needs your decision. Critical is the import.", "internal"),
+    ],
+)
+def test_plain_severity_readings_decide_plain_unless_an_internal_form_is_present(text, verdict, reports):
+    assert severity(text, reports) == verdict
+
+
+def test_a_critical_inside_a_fenced_block_is_ignored(reports):
+    assert severity("Fine.\n\n```markdown\n*Critical:*\n- Important: x\n```\n", reports) == "none"
+    assert severity("Fine.\n\n```\nCritical\n```\nCritical\n", reports) == "internal"
+
+
+def test_a_tilde_fence_and_an_unclosed_fence_hide_what_follows(reports):
+    assert severity("~~~\nCritical\n~~~\n", reports) == "none"
+    assert severity("```\nCritical\n", reports) == "none"
+
+
+def test_a_fence_closes_only_on_the_same_character_and_at_least_as_many(reports):
+    assert severity("````\n```\nCritical\n````\n", reports) == "none"
+    assert severity("```\n~~~\nCritical\n```\nCritical\n", reports) == "internal"
+    assert severity("```\n```x\nCritical\n```\nCritical\n", reports) == "internal"
+
+
+def test_text_right_after_a_closing_fence_is_read(reports):
+    assert severity("```\nx\n```\nCritical", reports) == "internal"
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        f"- [Critical] {QUOTED}",
+        f"**[Critical]** {QUOTED}",
+        f"> [Critical] {QUOTED}",
+        f"1. [Critical] {QUOTED_WRAPPED}",
+        f"[Critical] {QUOTED}; both swaps go\nthrough. Suggested: keep one table.",
+    ],
+)
+def test_a_line_quoting_a_report_verbatim_is_not_read(line, reports):
+    assert severity(line + "\n", reports) == "none"
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "- [Critical] Two tenants can each agree a swap for the same plot but different partners",
+        "- [Important] Two tenants can each agree a swap for the same plot with different partners",
+        "- Two tenants can each agree a swap for the same plot with different partners, Critical",
+        "- [Critical] Short one.",
+        "- [Critical] each agree a swap for the same plot with different partners",
+    ],
+)
+def test_a_reworded_retagged_or_short_line_is_read(line, reports):
+    assert severity(line + "\n", reports) == "internal"
+
+
+def test_a_quotation_must_reach_thirty_characters(reports):
+    thirty = "A swap form needs both tenants"
+    assert len(thirty) == 30
+    assert severity(f"- [Important] {thirty}\n", reports) == "none"
+    assert severity(f"- [Important] {thirty[:29]}\n", reports) == "internal"
+
+
+def test_a_quoted_line_does_not_hide_the_unquoted_line_beside_it(reports):
+    assert severity(f"- [Critical] {QUOTED}\n\nCritical\n", reports) == "internal"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Builder", "a builder", "BREAKER", "the Attacker", "advocate", "premise-attacker",
+        "consistency-auditor", "divergence-prober", "Reliability", "Advocate", "Premise",
+        "Consistency", "Divergence", "Fact verification", "the fact-verification pass", "FACT VERIFICATION",
+        "### Builder",
+    ],
+)
+def test_internal_reviewer_names_make_a_capture_internal(text, reports):
+    assert reviewer(text, reports) == "internal"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "reliability of the queue", "premise of the spec", "consistency check", "divergent views",
+        "advocates", "rebuilder", "Self-consistency", "factverification", "fact  checked", "nothing here",
+    ],
+)
+def test_other_forms_are_not_internal_reviewer_names(text, reports):
+    assert reviewer(text, reports) in ("none", "plain")
+    assert reviewer(text, reports) != "internal"
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["buildability", "Failure cases", "the right problem", "self-consistency", "left undecided",
+     "ease of use", "fact check", "Security", "security"],
+)
+def test_each_plain_reviewer_label_reads_plain(text, reports):
+    assert reviewer(text, reports) == "plain"
+
+
+def test_security_alone_is_plain_and_never_makes_a_capture_internal(reports):
+    assert reviewer("### Security", reports) == "plain"
+    assert reviewer("Security and buildability", reports) == "plain"
+
+
+def test_a_plain_reading_beside_one_internal_name_is_internal(reports):
+    assert reviewer("buildability, failure cases and Advocate", reports) == "internal"
+
+
+def test_a_reviewer_name_in_a_fence_or_a_verbatim_quote_is_ignored(reports):
+    assert reviewer("```\nBuilder\n```\n", reports) == "none"
+    assert reviewer(f"- [Critical] {QUOTED}\n", reports) == "none"
+    reworded = "- [Critical] Two tenants can each agree a swap for the same plot, Builder says\n"
+    assert reviewer(reworded, reports) == "internal"
+
+
+BLOCK = (
+    "Section:\n\n```markdown\n## Council Review\n\n*Reviewed at:* today\n\n"
+    "*Critical:*\n- the import has no undo\n\n*Important:*\n- a thing\n\n*Minor:*\n- a nit\n```\n"
+)
+
+
+def test_a_block_with_all_three_labels_and_a_listed_critical_is_kept():
+    assert levels(BLOCK) == "kept"
+
+
+@pytest.mark.parametrize(
+    "critical",
+    ["*Critical:*\n- none", "*Critical:*\n- None.", "*Critical:* none", "*Critical:* NONE.", "*Critical:*\n\n"],
+)
+def test_a_critical_list_that_reads_none_is_changed(critical):
+    text = BLOCK.replace("*Critical:*\n- the import has no undo", critical)
+    assert levels(text) == "changed"
+
+
+@pytest.mark.parametrize(
+    "critical",
+    ["*Critical:* the import has no undo", "- *Critical:* the import has no undo", "*Critical:*\n- none\n- a real one",
+     "*Critical:*\n1. a real one", "*Critical:* (none)"],
+)
+def test_a_critical_list_with_any_real_entry_is_kept(critical):
+    text = BLOCK.replace("*Critical:*\n- the import has no undo", critical)
+    assert levels(text) == "kept"
+
+
+@pytest.mark.parametrize(
+    "label_line",
+    [
+        ("*Important:*", "*Should fix:*"),
+        ("*Minor:*", "*Small:*"),
+        ("*Critical:*", "*Needs your decision:*"),
+        ("*Important:*", "**Important:**"),
+        ("*Minor:*", "Minor:"),
+        ("*Important:*", "*important:*"),
+    ],
+)
+def test_a_label_that_is_absent_or_replaced_is_changed(label_line):
+    old, new = label_line
+    assert levels(BLOCK.replace(old, new)) == "changed"
+
+
+def test_text_with_no_fenced_block_is_missing():
+    assert levels("## Council Review\n\n*Critical:*\n- x\n*Important:*\n- y\n*Minor:*\n- z\n") == "missing"
+
+
+def test_a_fenced_block_without_the_council_review_heading_is_missing():
+    assert levels("```\n*Critical:*\n- x\n*Important:*\n- y\n*Minor:*\n- z\n```\n") == "missing"
+
+
+def test_the_first_block_holding_the_heading_is_the_one_read():
+    first_none = BLOCK.replace("- the import has no undo", "- none")
+    assert levels("```\nother\n```\n" + first_none + BLOCK) == "changed"
+    assert levels("```\nother\n```\n" + BLOCK + first_none) == "kept"
+
+
+def test_labels_outside_the_block_are_not_read():
+    outside = "*Critical:*\n- x\n*Important:*\n- y\n*Minor:*\n- z\n\n"
+    bare = "```markdown\n## Council Review\n```\n"
+    assert levels(outside + bare) == "changed"
+
+
+def test_a_critical_entry_after_the_next_label_does_not_belong_to_critical():
+    text = BLOCK.replace("*Critical:*\n- the import has no undo\n", "*Critical:*\n")
+    assert levels(text.replace("- a thing", "- a thing\n- a real critical")) == "changed"
+
+
+def test_an_unclosed_block_runs_to_the_end_of_the_capture():
+    assert levels(BLOCK.rsplit("```", 1)[0]) == "kept"
+
+
+def test_persisted_levels_reads_only_fences_not_reader_text():
+    assert levels("Critical: everything\n" + BLOCK) == "kept"
+
+
+def test_the_persisted_levels_check_needs_no_reports_and_ignores_them(tmp_path):
+    result = run_grader(["--check", "persisted-levels", "--reports", str(tmp_path / "gone.md")], BLOCK.encode())
+    assert result.stdout == b"persisted-levels: kept\n"
+
+
+NEW_CHECKS = ("severity-name", "reviewer-name", "persisted-levels")
+
+
+def test_every_new_verdict_exits_with_its_class(reports):
+    assert run_grader(["--check", "severity-name", "--reports", str(reports)], b"needs your decision").returncode == 0
+    assert run_grader(["--check", "severity-name", "--reports", str(reports)], b"Critical").returncode == 1
+    assert run_grader(["--check", "severity-name", "--reports", str(reports)], b"hello").returncode == 1
+    assert run_grader(["--check", "persisted-levels"], BLOCK.encode()).returncode == 0
+    assert run_grader(["--check", "persisted-levels"], b"x").returncode == 1
+
+
+@pytest.mark.parametrize("check", NEW_CHECKS)
+def test_empty_stdin_could_not_grade_for_each_new_check(check, reports):
+    could_not_grade(["--check", check, "--reports", str(reports)], b"", "empty-input")
+
+
+@pytest.mark.parametrize("check", NEW_CHECKS)
+def test_non_utf8_stdin_could_not_grade_for_each_new_check(check, reports):
+    could_not_grade(["--check", check, "--reports", str(reports)], b"Critical \xff\xfe", "not-utf8")
+
+
+@pytest.mark.parametrize("check", NEW_CHECKS)
+def test_oversized_stdin_could_not_grade_for_each_new_check(check, reports):
+    limit = _load_module().MAX_INPUT_BYTES
+    could_not_grade(["--check", check, "--reports", str(reports)], b"a" * (limit + 1), "input-too-large")
+
+
+@pytest.mark.parametrize("check", NEW_CHECKS)
+def test_drop_value_line_is_not_applicable_to_each_new_check(check, reports):
+    could_not_grade(["--check", check, "--reports", str(reports), "--drop-value-line"], b"x\n", "option-not-applicable")
+
+
+@pytest.mark.parametrize("check", ("severity-name", "reviewer-name"))
+def test_a_naming_check_needs_a_reports_argument(check):
+    could_not_grade(["--check", check], b"x\n", "missing-reports")
+
+
+@pytest.mark.parametrize("check", ("severity-name", "reviewer-name"))
+def test_reports_that_cannot_be_read_could_not_grade(check, tmp_path):
+    could_not_grade(["--check", check, "--reports", str(tmp_path / "gone.md")], b"x\n", "reports-unreadable")
+    could_not_grade(["--check", check, "--reports", str(tmp_path)], b"x\n", "reports-unreadable")
+
+
+@pytest.mark.parametrize("check", ("severity-name", "reviewer-name"))
+def test_reports_that_are_not_utf8_could_not_grade(check, tmp_path):
+    path = tmp_path / "r.md"
+    path.write_bytes(b"- [Critical] caf\xe9\n")
+    could_not_grade(["--check", check, "--reports", str(path)], b"x\n", "reports-not-utf8")
+
+
+def test_every_reports_file_given_can_supply_a_quotation(reports, tmp_path):
+    second = tmp_path / "more.md"
+    second.write_text("- [Critical] A second report line that is long enough to quote here\n", encoding="utf-8")
+    line = "- [Critical] A second report line that is long enough to quote here\n"
+    both = ["--check", "severity-name", "--reports", str(reports), "--reports", str(second)]
+    result = run_grader(both, line.encode())
+    assert result.stdout == b"severity-name: none\n"
+    assert severity(line, reports) == "internal"
+
+
+@pytest.mark.parametrize(
+    "name, build",
+    [
+        pytest.param("digit-run", lambda n: "1" * n, id="digit-run"),
+        pytest.param("digit-spaces", lambda n: "1 " * (n // 2), id="digit-spaces"),
+        pytest.param("important-spaces", lambda n: "Important " * (n // 10), id="important-spaces"),
+        pytest.param("minor-brackets", lambda n: "Minor (" * (n // 7), id="minor-brackets"),
+        pytest.param("tagged-line", lambda n: "- [Critical] " + "x" * n, id="tagged-line"),
+        pytest.param("many-tagged", lambda n: "- [Critical] Two tenants can each agree a swap x\n" * (n // 50)),
+        pytest.param("hyphens", lambda n: "Critical-" * (n // 9), id="hyphens"),
+        pytest.param("fence-lines", lambda n: "```\n" * (n // 4), id="fences"),
+        pytest.param("unclosed-fences", lambda n: "```` ``` ~~~ " * (n // 14), id="inline-fences"),
+        pytest.param("cells", lambda n: "|" + "Minor |" * (n // 7), id="cells"),
+        pytest.param("blank-wrapped", lambda n: "a\n" * (n // 2), id="wrapped"),
+    ],
+)
+@pytest.mark.parametrize("check", NEW_CHECKS)
+def test_hostile_input_at_the_size_bound_grades_promptly_for_the_new_checks(check, name, build, reports):
+    limit = _load_module().MAX_INPUT_BYTES
+    text = build(limit)[:limit].encode("utf-8")
+    result = run_grader(["--check", check, "--reports", str(reports)], text, timeout=30)
+    assert result.returncode in (0, 1), (name, result.stderr)
+    assert result.stdout.startswith(f"{check}: ".encode())
+
+
+# --- the finding-presentation-wording baseline captures --------------------------------------
+
+REPORT_FILES = {
+    "consult": "reports-consult.md",
+    "plan": "reports-lenses.md",
+    "specreview": "reports-spec-review.md",
+    "driver": "reports-lenses.md",
+}
+SITE_CHECKS = {
+    "consult": ("severity-name", "reviewer-name"),
+    "plan": ("severity-name", "reviewer-name", "persisted-levels"),
+    "specreview": ("severity-name", "reviewer-name"),
+    "driver": ("severity-name", "reviewer-name", "persisted-levels"),
+}
+
+# One row per committed capture: the verdict of each check the site runs. The pre-registered expectation for a
+# baseline is internal on both naming checks; a capture whose graded verdict differs is a finding the results
+# section of `expected.md` records.
+FINDING_CAPTURE_VERDICTS = {
+    "baseline-consult-1": {"severity-name": "internal", "reviewer-name": "internal"},
+    "baseline-consult-2": {"severity-name": "internal", "reviewer-name": "internal"},
+    "baseline-consult-3": {"severity-name": "internal", "reviewer-name": "internal"},
+    "baseline-plan-1": {"severity-name": "internal", "reviewer-name": "internal", "persisted-levels": "kept"},
+    "baseline-plan-2": {"severity-name": "internal", "reviewer-name": "internal", "persisted-levels": "kept"},
+    "baseline-plan-3": {"severity-name": "internal", "reviewer-name": "internal", "persisted-levels": "kept"},
+    "baseline-specreview-1": {"severity-name": "internal", "reviewer-name": "internal"},
+    "baseline-specreview-2": {"severity-name": "internal", "reviewer-name": "internal"},
+    "baseline-specreview-3": {"severity-name": "internal", "reviewer-name": "internal"},
+    "baseline-driver-1": {"severity-name": "internal", "reviewer-name": "internal", "persisted-levels": "kept"},
+    "baseline-driver-2": {"severity-name": "internal", "reviewer-name": "internal", "persisted-levels": "kept"},
+    "baseline-driver-3": {"severity-name": "internal", "reviewer-name": "internal", "persisted-levels": "kept"},
+}
+
+FINDING_CAPTURES = sorted(p for p in FINDING_RUNS.glob("*.txt") if not p.name.endswith(".stderr.txt"))
+
+
+@pytest.mark.parametrize("capture", FINDING_CAPTURES, ids=lambda p: p.stem)
+def test_every_finding_capture_grades_to_its_mapped_verdicts_against_its_sites_reports(capture):
+    assert capture.stem in FINDING_CAPTURE_VERDICTS, f"{capture.name} is not in the capture-to-verdict table"
+    site = capture.stem.split("-")[1]
+    assert set(FINDING_CAPTURE_VERDICTS[capture.stem]) == set(SITE_CHECKS[site])
+    for check, verdict in FINDING_CAPTURE_VERDICTS[capture.stem].items():
+        args = ["--check", check]
+        if check != "persisted-levels":
+            args += ["--reports", str(FINDING_CASE / "fixtures" / REPORT_FILES[site])]
+        result = run_grader(args, capture.read_bytes())
+        assert result.stdout.decode("utf-8") == f"{check}: {verdict}\n", (capture.name, result.stderr)
+        assert result.returncode == (0 if verdict in PASSING else 1)
