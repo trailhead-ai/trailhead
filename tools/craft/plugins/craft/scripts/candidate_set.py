@@ -124,15 +124,34 @@ non-empty object from canonical identifier to a list, possibly empty, of unique
 task ids matching `^[a-z0-9][a-z0-9._-]*$`) and `closed` (a non-empty list of
 unique canonical identifiers), each present only when non-empty; an identifier
 in `removed`, or in both `reopened` and `closed`, is malformed, and one the
-body does not declare contradicts it. The gate validates these marks and does
-not yet act on them. A `covers` or
+body does not declare contradicts it. A `covers` or
 `partially covers` token naming an identifier in `removed` is void: it is not
 counted as covered or partial, is not an undeclared identifier, and does not
 change `complete-eligible` (the entry still carries a coverage token). With the
-flag, a sixth line `void:` is printed LAST, after `complete-eligible:` — one
-`<id> (removed by amend)` per void identifier the ledger named, deduplicated
-and in numeric order, or `none`. Without the flag the five lines above are the
-whole output, unchanged. An identifier that is neither declared nor removed
+flag, three more lines follow `complete-eligible:`, in this order: `void:`,
+`closed:` and `closed-uncounted:`. Without the flag the five lines above are
+the whole output, unchanged.
+
+`reopened` maps an identifier to the snapshot of ledger task ids that covered
+it when an amend reopened it. A `covers` or `partially covers` token naming a
+reopened identifier is void when its ledger entry's task id is in that
+identifier's snapshot: it is neither covered nor partial, and it does not
+change `complete-eligible` (the entry still carries a coverage token). An
+entry outside the snapshot — one appended after the reopen — counts normally,
+a reopened identifier with an empty snapshot is unaffected, and a snapshot id
+no longer in the ledger changes nothing. `void:` lists every void identifier
+the ledger named, deduplicated and in numeric order, merging the two causes as
+`<id> (removed by amend)` and `<id> (reopened by amend)`, or `none`.
+
+`closed` names identifiers an amend closed. A closed identifier counts as
+covered — for `covered:`, `candidates:` and therefore termination — when any
+ledger entry names it in either field, and it then leaves `partial:`.
+`closed:` lists the closed identifiers so counted, in numeric order, and
+`closed-uncounted:` those no ledger entry names, which stay candidates; each
+prints `none` when empty. The state's producer folds history so an identifier
+is never both reopened and closed: a close after a reopen leaves only the
+close, which counts the identifier covered again, tokens the reopen voided
+included. An identifier that is neither declared nor removed
 still fails `undeclared-covered-identifier`; without the flag that refusal's
 reason hints that a criterion removed by amend needs `--criteria-state`.
 `record` is not compared against anything: the body on stdin does not name its
@@ -195,6 +214,13 @@ from covers_gate import (  # noqa: E402
     parse_covers,
     parse_criteria,
 )
+
+# Stdout line keys: the first five always, the last three only with
+# `--criteria-state`. A consumer derives the output grammar from these.
+STDOUT_LINE_KEYS = ("criteria", "covered", "candidates", "partial", "complete-eligible")
+CRITERIA_STATE_LINE_KEYS = ("void", "closed", "closed-uncounted")
+VOID_REMOVED_ANNOTATION = "removed by amend"
+VOID_REOPENED_ANNOTATION = "reopened by amend"
 
 _SLICES_HEADING = "## Slices"
 _SLICES_HEADING_RE = re.compile(r"^## Slices$", re.IGNORECASE)
@@ -353,18 +379,27 @@ def parse_ledger(
     names an identifier not in `criteria`, or MalformedCoverageTokenError if
     either does not parse as an ACn identifier list.
     """
-    covered, partial, eligible, _ = parse_ledger_voiding(spec_body, criteria, frozenset())
+    covered, partial, eligible, _, _ = parse_ledger_voiding(spec_body, criteria, frozenset())
     return covered, partial, eligible
 
 
 def parse_ledger_voiding(
-    spec_body: str, criteria: list[str], removed: frozenset[str]
-) -> tuple[list[str], list[str], bool, list[str]]:
-    """`parse_ledger` with every `covers`/`partially covers` token naming an
-    identifier in `removed` voided: dropped from the covered and partial
-    sets, not checked against `criteria`, and returned as the fourth element
-    (deduplicated, numeric order). A voided token still counts as the entry's
-    coverage token, so it never changes `eligible`."""
+    spec_body: str,
+    criteria: list[str],
+    removed: frozenset[str],
+    reopened: dict[str, list[str]] | None = None,
+    closed: frozenset[str] = frozenset(),
+) -> tuple[list[str], list[str], bool, list[tuple[str, str]], list[str]]:
+    """`parse_ledger` with every `covers`/`partially covers` token voided that
+    names an identifier in `removed`, or a `reopened` identifier whose entry's
+    task id is in that identifier's snapshot: dropped from the covered and
+    partial sets, not checked against `criteria`, and returned as the fourth
+    element (`(identifier, annotation)` pairs, deduplicated, numeric order). A
+    voided token still counts as the entry's coverage token, so it never
+    changes `eligible`. A `closed` identifier that any live token names, in
+    either field, is added to the covered set and returned, in numeric order,
+    as the fifth element."""
+    reopened = reopened or {}
     lines = _COMMONMARK_LINE_RE.split(spec_body)
     fenced = _mask_fenced_lines(lines)
 
@@ -372,16 +407,17 @@ def parse_ledger_voiding(
         lines, fenced, _SLICES_HEADING_RE, _SLICES_HEADING, _DUPLICATE_SLICES_HEADING_REASON_CODE
     )
     if start is None:
-        return [], [], True, []
+        return [], [], True, [], []
 
     # Insertion-ordered sets: a dict keeps first-seen order while making the
     # repeat check O(1), so neither list needs a parallel `seen` set beside it.
     covered: dict[str, None] = {}
     partial: dict[str, None] = {}
-    voided: set[str] = set()
+    voided: dict[str, str] = {}
+    named: set[str] = set()
     eligible = True
 
-    def _parse_field(value: str) -> list[str]:
+    def _parse_field(value: str, task_id: str | None) -> list[str]:
         try:
             identifiers = parse_covers(value, flag="ledger coverage token")
         except ValueError as e:
@@ -389,10 +425,13 @@ def parse_ledger_voiding(
         live = []
         for identifier in identifiers:
             if identifier in removed:
-                voided.add(identifier)
+                voided[identifier] = VOID_REMOVED_ANNOTATION
             elif identifier not in criteria:
                 raise UndeclaredCoverageError(identifier)
+            elif task_id is not None and task_id in reopened.get(identifier, ()):
+                voided[identifier] = VOID_REOPENED_ANNOTATION
             else:
+                named.add(identifier)
                 live.append(identifier)
         return live
 
@@ -406,6 +445,8 @@ def parse_ledger_voiding(
             eligible = False
             continue
         paren_text = paren.group(1)
+        task_match = _LEDGER_TASK_ID_RE.match(paren_text)
+        task_id = task_match.group(1) if task_match else None
         partial_match = _LEDGER_PARTIAL_SPLIT_RE.search(paren_text)
         if partial_match is not None:
             partial_value = partial_match.group("partial")
@@ -418,15 +459,18 @@ def parse_ledger_voiding(
             eligible = False
             continue
         if fields.group("covers") is not None:
-            covered.update(dict.fromkeys(_parse_field(fields.group("covers"))))
+            covered.update(dict.fromkeys(_parse_field(fields.group("covers"), task_id)))
         if partial_value is not None:
-            partial.update(dict.fromkeys(_parse_field(partial_value)))
+            partial.update(dict.fromkeys(_parse_field(partial_value, task_id)))
 
+    counted = sorted(closed & named, key=lambda i: int(i[2:]))
+    covered.update(dict.fromkeys(counted))
     return (
         list(covered),
         [i for i in partial if i not in covered],
         eligible,
-        sorted(voided, key=lambda i: int(i[2:])),
+        [(i, voided[i]) for i in sorted(voided, key=lambda i: int(i[2:]))],
+        counted,
     )
 
 
@@ -739,7 +783,8 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         metavar="PATH",
         help=(
             "JSON printed by `lore record criteria spec/<name>`; ledger coverage of a "
-            "criterion it lists as removed is void, and a final `void:` line is printed"
+            "criterion it lists as removed, or as reopened for a snapshot task, is void, "
+            "and the `void:`, `closed:` and `closed-uncounted:` lines are printed"
         ),
     )
     return parser.parse_args(argv)
@@ -778,6 +823,8 @@ def main(argv: list[str]) -> int:
         return 2
 
     removed: frozenset[str] = frozenset()
+    reopened: dict[str, list[str]] = {}
+    closed: list[str] = []
     if args.criteria_state is not None:
         try:
             state_declared, state_removed, state_reopened, state_closed = load_criteria_state(
@@ -800,9 +847,13 @@ def main(argv: list[str]) -> int:
             _err(f"reason-code: {_CRITERIA_STATE_CONTRADICTS_BODY_REASON_CODE}")
             return 2
         removed = frozenset(state_removed)
+        reopened = state_reopened
+        closed = state_closed
 
     try:
-        covered, partial, eligible, voided = parse_ledger_voiding(spec_body, criteria, removed)
+        covered, partial, eligible, voided, closed_counted = parse_ledger_voiding(
+            spec_body, criteria, removed, reopened, frozenset(closed)
+        )
     except DuplicateHeadingError as e:
         _err(f"reason: {e}")
         _err(f"reason-code: {e.reason_code}")
@@ -824,13 +875,17 @@ def main(argv: list[str]) -> int:
 
     candidates = [c for c in criteria if c not in covered]
 
-    print(f"criteria: {', '.join(criteria)}")
-    print(f"covered: {', '.join(covered) if covered else 'none'}")
-    print(f"candidates: {', '.join(candidates) if candidates else 'none'}")
-    print(f"partial: {', '.join(partial) if partial else 'none'}")
-    print(f"complete-eligible: {'yes' if eligible else 'no'}")
+    print(f"{STDOUT_LINE_KEYS[0]}: {', '.join(criteria)}")
+    print(f"{STDOUT_LINE_KEYS[1]}: {', '.join(covered) if covered else 'none'}")
+    print(f"{STDOUT_LINE_KEYS[2]}: {', '.join(candidates) if candidates else 'none'}")
+    print(f"{STDOUT_LINE_KEYS[3]}: {', '.join(partial) if partial else 'none'}")
+    print(f"{STDOUT_LINE_KEYS[4]}: {'yes' if eligible else 'no'}")
     if args.criteria_state is not None:
-        print(f"void: {', '.join(f'{i} (removed by amend)' for i in voided) if voided else 'none'}")
+        void_key, closed_key, uncounted_key = CRITERIA_STATE_LINE_KEYS
+        uncounted = sorted(set(closed) - set(closed_counted), key=lambda i: int(i[2:]))
+        print(f"{void_key}: {', '.join(f'{i} ({why})' for i, why in voided) if voided else 'none'}")
+        print(f"{closed_key}: {', '.join(closed_counted) if closed_counted else 'none'}")
+        print(f"{uncounted_key}: {', '.join(uncounted) if uncounted else 'none'}")
     return 0
 
 

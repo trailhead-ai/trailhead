@@ -1189,12 +1189,14 @@ def test_removed_criterion_coverage_is_void_and_the_rest_is_derived(tmp_path):
     assert tokens["void"] == "AC2 (removed by amend)"
 
 
-def test_void_is_the_last_stdout_line_and_the_five_lines_keep_their_positions(tmp_path):
+def test_the_five_lines_keep_their_positions_and_void_and_the_two_close_lines_follow(tmp_path):
     r = _run_flag(VOID_BODY, _state(tmp_path, ["AC1", "AC3"], ["AC2"]))
     lines = r.stdout.splitlines()
     assert [ln.split(":")[0] for ln in lines] == [
         "criteria", "covered", "candidates", "partial", "complete-eligible", "void",
+        "closed", "closed-uncounted",
     ]
+    assert lines[-2:] == ["closed: none", "closed-uncounted: none"]
     assert lines[:5] == _run(_spec(["AC1", "AC3"], [_entry(1, "covers AC1, AC3")])).stdout.splitlines()
 
 
@@ -1272,7 +1274,7 @@ def test_void_ids_are_deduplicated_and_in_numeric_order(tmp_path):
 def test_empty_removed_with_a_matching_declared_prints_void_none(tmp_path):
     r = _run_flag(FULL_COVERAGE, _state(tmp_path, [f"AC{i}" for i in range(1, 10)], []))
     assert r.returncode == 0, r.stderr
-    assert r.stdout.splitlines()[-1] == "void: none"
+    assert r.stdout.splitlines()[5] == "void: none"
     assert r.stdout.splitlines()[:5] == _NO_FLAG_BASELINE["spec_candidate_full_coverage.md"].splitlines()
 
 
@@ -1536,14 +1538,21 @@ def _marked(tmp_path: Path, **extra) -> Path:
     return _write(tmp_path, json.dumps({**_MARKED_BASE, **extra}).encode())
 
 
-def test_a_state_carrying_both_marks_exits_zero_with_the_stdout_of_the_same_state_without_them(tmp_path):
-    plain = _run_flag(_MARKED_BODY, _marked(tmp_path))
-    marked = _run_flag(
-        _MARKED_BODY, _marked(tmp_path, reopened={"AC2": ["first"], "AC3": []}, closed=["AC1"])
+def test_a_state_carrying_both_marks_exits_zero_and_acts_on_them(tmp_path):
+    r = _run_flag(
+        _MARKED_BODY, _marked(tmp_path, reopened={"AC2": ["s1"], "AC3": []}, closed=["AC1"])
     )
-    assert plain.returncode == 0, plain.stderr
-    assert marked.returncode == 0, marked.stderr
-    assert marked.stdout == plain.stdout
+    assert r.returncode == 0, r.stderr
+    assert _tokens(r.stdout) == {
+        "criteria": "AC1, AC2, AC3",
+        "covered": "AC1",
+        "candidates": "AC2, AC3",
+        "partial": "none",
+        "complete-eligible": "yes",
+        "void": "AC2 (reopened by amend)",
+        "closed": "AC1",
+        "closed-uncounted": "none",
+    }
 
 
 def test_a_reopened_id_may_carry_an_empty_snapshot_list(tmp_path):
@@ -1613,3 +1622,134 @@ def test_a_hostile_mark_value_is_never_echoed_raw(tmp_path):
         assert "INJECT" not in r.stderr + r.stdout
         assert "forged" not in r.stderr + r.stdout
         assert _reason_code(r.stderr) == "malformed-criteria-state"
+
+
+# ---- 23. `reopened` voids a snapshot task's tokens; `closed` counts coverage ---
+
+_REOPEN_DECL = ["AC1", "AC2", "AC3"]
+
+
+def _marked_run(tmp_path, ledger, declared=_REOPEN_DECL, removed=(), **marks):
+    state = {"record": "spec/x", "declared": declared, "removed": list(removed), **marks}
+    path = _write(tmp_path, json.dumps(state).encode())
+    r = _run_flag(_spec(declared, ledger), path)
+    assert r.returncode == 0, r.stderr
+    return _tokens(r.stdout)
+
+
+def test_a_reopened_ids_full_coverage_by_a_snapshot_task_is_void_and_it_is_a_candidate(tmp_path):
+    t = _marked_run(tmp_path, [_entry(1, "covers AC1, AC2")], reopened={"AC2": ["s1"]})
+    assert t["covered"] == "AC1"
+    assert t["candidates"] == "AC2, AC3"
+    assert t["void"] == "AC2 (reopened by amend)"
+    assert t["complete-eligible"] == "yes"
+
+
+def test_a_later_entry_outside_the_snapshot_covers_the_reopened_id_again(tmp_path):
+    t = _marked_run(
+        tmp_path,
+        [_entry(1, "covers AC1, AC2"), _entry(2, "covers AC2")],
+        reopened={"AC2": ["s1"]},
+    )
+    assert t["covered"] == "AC1, AC2"
+    assert t["candidates"] == "AC3"
+    assert t["void"] == "AC2 (reopened by amend)"
+
+
+def test_a_reopened_ids_partial_coverage_by_a_snapshot_task_is_void(tmp_path):
+    t = _marked_run(tmp_path, [_entry(1, "covers AC1, partially covers AC2")], reopened={"AC2": ["s1"]})
+    assert t["partial"] == "none"
+    assert t["candidates"] == "AC2, AC3"
+    assert t["void"] == "AC2 (reopened by amend)"
+
+
+def test_a_later_entry_outside_the_snapshot_partially_covers_the_reopened_id_again(tmp_path):
+    t = _marked_run(
+        tmp_path,
+        [_entry(1, "partially covers AC2"), _entry(2, "partially covers AC2")],
+        reopened={"AC2": ["s1"]},
+    )
+    assert t["partial"] == "AC2"
+    assert t["void"] == "AC2 (reopened by amend)"
+
+
+def test_an_entry_whose_only_token_is_void_by_reopen_still_keeps_the_ledger_eligible(tmp_path):
+    t = _marked_run(tmp_path, [_entry(1, "covers AC2")], reopened={"AC2": ["s1"]})
+    assert t["complete-eligible"] == "yes"
+    assert t["covered"] == "none"
+
+
+def test_a_snapshot_task_s_tokens_on_other_ids_are_not_void(tmp_path):
+    t = _marked_run(tmp_path, [_entry(1, "covers AC1, AC2, AC3")], reopened={"AC2": ["s1"]})
+    assert t["covered"] == "AC1, AC3"
+
+
+def test_a_reopened_id_with_an_empty_snapshot_changes_nothing(tmp_path):
+    t = _marked_run(tmp_path, [_entry(1, "covers AC1, AC2")], reopened={"AC2": []})
+    assert t["covered"] == "AC1, AC2"
+    assert t["void"] == "none"
+
+
+def test_a_snapshot_naming_a_task_no_longer_in_the_ledger_changes_nothing(tmp_path):
+    t = _marked_run(tmp_path, [_entry(1, "covers AC1, AC2")], reopened={"AC2": ["gone"]})
+    assert t["covered"] == "AC1, AC2"
+    assert t["void"] == "none"
+
+
+def test_reopened_and_removed_voids_are_merged_in_numeric_order(tmp_path):
+    declared = ["AC1", "AC2", "AC3"]
+    t = _marked_run(
+        tmp_path,
+        [_entry(1, "covers AC1, AC2, AC10")],
+        declared=declared,
+        removed=["AC10"],
+        reopened={"AC2": ["s1"]},
+    )
+    assert t["void"] == "AC2 (reopened by amend), AC10 (removed by amend)"
+
+
+def test_a_closed_ids_partial_coverage_counts_as_covered_and_leaves_partial(tmp_path):
+    t = _marked_run(
+        tmp_path, [_entry(1, "covers AC1, AC2, partially covers AC3")], closed=["AC3"]
+    )
+    assert t["covered"] == "AC1, AC2, AC3"
+    assert t["partial"] == "none"
+    assert t["candidates"] == "none"
+    assert t["complete-eligible"] == "yes"
+    assert t["closed"] == "AC3"
+    assert t["closed-uncounted"] == "none"
+
+
+def test_a_closed_id_no_entry_names_stays_a_candidate_and_is_uncounted(tmp_path):
+    t = _marked_run(tmp_path, [_entry(1, "covers AC1, AC2")], closed=["AC3"])
+    assert t["candidates"] == "AC3"
+    assert t["closed"] == "none"
+    assert t["closed-uncounted"] == "AC3"
+
+
+def test_a_closed_ids_full_coverage_counts_as_covered_the_undo_path(tmp_path):
+    t = _marked_run(tmp_path, [_entry(1, "covers AC1, AC2")], closed=["AC2"])
+    assert t["covered"] == "AC1, AC2"
+    assert t["closed"] == "AC2"
+
+
+def test_closed_ids_are_split_between_the_two_lines_in_numeric_order(tmp_path):
+    declared = ["AC1", "AC2", "AC3", "AC10"]
+    t = _marked_run(
+        tmp_path,
+        [_entry(1, "covers AC10, partially covers AC2")],
+        declared=declared,
+        closed=["AC10", "AC3", "AC2", "AC1"],
+    )
+    assert t["closed"] == "AC2, AC10"
+    assert t["closed-uncounted"] == "AC1, AC3"
+
+
+def test_the_state_flag_lines_are_emitted_under_the_named_module_constants(tmp_path):
+    r = _run_flag(_MARKED_BODY, _marked(tmp_path))
+    keys = [ln.split(":")[0] for ln in r.stdout.splitlines()]
+    assert keys == list(candidate_set.STDOUT_LINE_KEYS + candidate_set.CRITERIA_STATE_LINE_KEYS)
+    reopened = _run_flag(_MARKED_BODY, _marked(tmp_path, reopened={"AC2": ["s1"]}))
+    assert f"({candidate_set.VOID_REOPENED_ANNOTATION})" in reopened.stdout
+    removed = _run_flag(VOID_BODY, _state(tmp_path, ["AC1", "AC3"], ["AC2"]))
+    assert f"({candidate_set.VOID_REMOVED_ANNOTATION})" in removed.stdout

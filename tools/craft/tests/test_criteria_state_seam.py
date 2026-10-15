@@ -106,7 +106,7 @@ def test_amended_away_criterion_is_void_through_the_real_lore_cli(  # inert-gate
     lines = gate.stdout.splitlines()
     assert "covered: AC1" in lines
     assert "candidates: AC3" in lines
-    assert lines[-1] == "void: AC2 (removed by amend)"
+    assert lines[5] == "void: AC2 (removed by amend)"
 
 
 BODY_DUPLICATED = """# Seam spec
@@ -196,13 +196,28 @@ BODY_LEDGER = BODY_BEFORE.replace(
 BODY_NO_LEDGER = BODY_BEFORE.split("## Slices")[0].rstrip() + "\n"
 
 
+_SNAPSHOT_OF_TWO_STDOUT = (
+    "criteria: AC1, AC2, AC3\n"
+    "covered: AC1\n"
+    "candidates: AC2, AC3\n"
+    "partial: none\n"
+    "complete-eligible: yes\n"
+    "void: AC2 (reopened by amend)\n"
+    "closed: AC1\n"
+    "closed-uncounted: none\n"
+)
+
+
 @pytest.mark.parametrize(
-    ("body", "reopened", "closed"),
-    [(BODY_LEDGER, {"AC2": ["first", "second"]}, ["AC1"]), (BODY_NO_LEDGER, {"AC2": []}, [])],
+    ("body", "reopened", "closed", "expected_stdout"),
+    [
+        (BODY_LEDGER, {"AC2": ["first", "second"]}, ["AC1"], _SNAPSHOT_OF_TWO_STDOUT),
+        (BODY_NO_LEDGER, {"AC2": []}, [], None),
+    ],
     ids=["snapshot-of-two-tasks", "empty-snapshot"],
 )
 def test_lores_reopen_and_close_marks_are_accepted_by_the_gate(  # inert-gate: allow seam smoke
-    isolated_lore_env, tmp_path, body, reopened, closed
+    isolated_lore_env, tmp_path, body, reopened, closed, expected_stdout
 ):
     vault, state = isolated_lore_env
 
@@ -236,4 +251,109 @@ def test_lores_reopen_and_close_marks_are_accepted_by_the_gate(  # inert-gate: a
     marked = _gate("candidate_set.py", shown, "--criteria-state", str(marked_file))
     plain = _gate("candidate_set.py", shown, "--criteria-state", str(plain_file))
     assert marked.returncode == 0, marked.stderr
-    assert marked.stdout == plain.stdout
+    if expected_stdout is None:
+        assert marked.stdout == plain.stdout
+    else:
+        assert marked.stdout == expected_stdout
+
+
+BODY_THREE_ENTRIES_BASE = """# Seam spec
+
+## Acceptance Criteria
+
+- **AC1.** One.
+- **AC2.** Two.
+- **AC3.** Three.
+
+## Slices
+
+- **First** — a value claim. (`task/first`, closed 2026-01-01, covers AC1)
+- **Second** — more. (`task/second`, closed 2026-01-02, partially covers AC2)
+"""
+
+
+def _ledger_gate_with_parents(body: str, tmp_path: Path, parents: dict) -> subprocess.CompletedProcess:
+    parents_file = tmp_path / "parents.json"
+    parents_file.write_text(json.dumps(parents), encoding="utf-8")
+    return _gate("ledger_gate.py", body, "--parent-coverage", str(parents_file))
+
+
+def test_reopen_then_recover_then_close_flows_through_the_real_cli_and_gates(  # inert-gate: allow seam smoke
+    isolated_lore_env, tmp_path
+):
+    vault, state = isolated_lore_env
+
+    def lore(*args, stdin_text=None):
+        r = run_cli(list(args), vault=vault, state_dir=state, stdin_text=stdin_text)
+        assert r.returncode == 0, r.stderr
+        return r.stdout
+
+    record_id = lore(
+        "record", "create", "--kind", "spec", "--title", "Seam flow", "--keyword", "seam",
+        "--status", "ready", stdin_text=BODY_THREE_ENTRIES_BASE,
+    ).strip()
+    lore(
+        "record", "amend", record_id, "--reason", "reopen AC1",
+        "--initiated-by", "operator", "--reopen", "AC1", stdin_text="",
+    )
+
+    third = "- **Third** — recovers AC1. (`task/third`, closed 2026-01-03, covers AC1)\n"
+    lore("record", "update", record_id, stdin_text=BODY_THREE_ENTRIES_BASE + third)
+    shown = lore("record", "show", record_id)
+    assert "task/third" in shown
+
+    parents = {
+        "first": {"covers": "AC1"},
+        "second": {"partially covers": "AC2"},
+        "third": {"covers": "AC1"},
+    }
+    certified = _ledger_gate_with_parents(shown, tmp_path, parents)
+    assert certified.returncode == 0, certified.stderr
+
+    lore(
+        "record", "amend", record_id, "--reason", "close AC2",
+        "--initiated-by", "operator", "--close", "AC2", stdin_text="",
+    )
+    shown = lore("record", "show", record_id)
+    state_file = tmp_path / "criteria.json"
+    state_file.write_text(lore("record", "criteria", record_id), encoding="utf-8")
+
+    gate = _gate("candidate_set.py", shown, "--criteria-state", str(state_file))
+    assert gate.returncode == 0, gate.stderr
+    lines = gate.stdout.splitlines()
+    assert "covered: AC1, AC2" in lines
+    assert "candidates: AC3" in lines
+    assert "partial: none" in lines
+    assert "void: AC1 (reopened by amend)" in lines
+    assert "closed: AC2" in lines
+    assert "closed-uncounted: none" in lines
+
+
+def test_a_stale_snapshot_task_does_not_fail_the_gate_through_lores_state(  # inert-gate: allow seam smoke
+    isolated_lore_env, tmp_path
+):
+    vault, state = isolated_lore_env
+
+    def lore(*args, stdin_text=None):
+        r = run_cli(list(args), vault=vault, state_dir=state, stdin_text=stdin_text)
+        assert r.returncode == 0, r.stderr
+        return r.stdout
+
+    record_id = lore(
+        "record", "create", "--kind", "spec", "--title", "Seam stale", "--keyword", "seam",
+        "--status", "ready", stdin_text=BODY_LEDGER,
+    ).strip()
+    lore(
+        "record", "amend", record_id, "--reason", "reopen AC2",
+        "--initiated-by", "operator", "--reopen", "AC2", stdin_text="",
+    )
+    shown = lore("record", "show", record_id)
+    without_second = "\n".join(
+        ln for ln in shown.split("\n") if "task/second" not in ln
+    )
+    state_file = tmp_path / "criteria.json"
+    state_file.write_text(lore("record", "criteria", record_id), encoding="utf-8")
+
+    gate = _gate("candidate_set.py", without_second, "--criteria-state", str(state_file))
+    assert gate.returncode == 0, gate.stderr
+    assert "void: AC2 (reopened by amend)" in gate.stdout.splitlines()
