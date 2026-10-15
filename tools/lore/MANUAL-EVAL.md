@@ -328,7 +328,9 @@ the `criteria` field). It also changes the subject of the closing supersession e
 overlapped in topic with the `supersede-reversed-decision` fixture. Neither change touches the
 routing rules, and that case was green at baseline, so the arms were not re-run.
 
-Two later edits to the skill are post-treatment and were not measured: the `--initiated-by agent`
+Three later edits to the skill are post-treatment and were not measured. One is a line in Step 3b
+saying a successor never carries a secret forward from its predecessor (L7); it touches no routing.
+The other two: the `--initiated-by agent`
 branch now asks the operator one yes/no question before an agent-proposed amend (AC31), and the spec
 route creates the successor with `--label craft/supersedes=spec/<old>` and states that the gauntlet
 performs the supersession when the successor reaches `ready`. Neither touches operator-requested
