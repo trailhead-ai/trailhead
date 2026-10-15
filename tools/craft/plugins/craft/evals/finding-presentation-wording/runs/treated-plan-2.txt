@@ -1,0 +1,98 @@
+**Council review: allotment waiting list, first build**
+
+`maturity: production (basis: stamp)`. No concerns were stood down and no waivers were attempted.
+
+**What the passes found.** The plan breaks in two places. First, it keeps each person's place in the queue as a stored number and rewrites every later number when someone leaves. If a leave happens while the 02:00 offer job is running, two people can be offered the same plot, which breaks the promise that a freed plot goes to the person at the front of that site's queue (AC2). Second, the one-off import of the paper list (Task 4) has no preview, no undo and no record of how far it got. There are also several smaller gaps. Nothing tells anyone when the nightly job fails to run. A plot given out of turn leaves the person in the queue. The offer link can be accepted by something other than the person it was sent to. And the emails don't tell people what happens to them: that ignoring an offer sends them to the back, or that leaving actually worked.
+
+**Whether it holds.** The buildability and failure-case reviewers found the renumbering race separately, and both traced it to a step the plan writes out in Task 1, so it is real. The import finding is real too. At production maturity, migration and backfill concerns rate at the top level, and this is exactly the unrepeatable one-shot load that bar exists for. I moved one finding up a level. The failure-case reviewer marked the silent nightly job as "worth fixing" only because their report allows two top-level findings and both were used. Production maturity rates production failure visibility at the top level, and the failure is concrete. I moved one finding down. The ease-of-use reviewer's "people may find the queue confusing" names no moment where anyone gets stuck, so it is speculation. Their other findings, about the offer email and leave confirmation, are specific and sound. The security reviewer marked their own confidence as medium because no sign-in design exists yet. Their offer-link finding stands even so, because mail scanners following links is a known behaviour, not a guess.
+
+**What to do about it.** Change Task 1 to order the queue by a stored sort key instead of a place number. Work out a person's place when it is shown or emailed. To send someone to the back, reset their sort key, which still satisfies the rule that a lapsed person goes to the back of the queue (AC3). Rebuild Task 4 as a batched import with a preview first and removal of a whole batch. Add a run report and a missed-run alert to the nightly job. The rest are small edits to Tasks 2, 3 and 4 and to the email wording, and you can decide each one separately.
+
+---
+
+**Would build the wrong thing, needs your decision**
+
+- **Should the queue stop storing place numbers? I recommend yes. Otherwise one plot can go to two people.**
+  Worst case: someone at place 2 leaves at 02:00 while the offer job is reading the queue. Task 1 subtracts one from every later place, and for a moment two rows both hold place 1. Both people get an offer for the one freed plot, and the society has promised it twice.
+  Fix: store a sort key (the join time, reset to "now" when an offer lapses) and order by it. Work out the place number only when showing or emailing it. Leaving then just closes that person's row, so people behind them move up one place (AC5) without anything being rewritten.
+  *Raised by: buildability, failure cases*
+
+- **Should the paper-list import get a preview and a way to undo it? I recommend yes. As written, one mistaken run damages the real list for all ~340 people.**
+  Worst case: the warden runs the import, it seems to hang, and they run it again. Every person now has two rows and gets two offers. Or a run stops halfway and nobody can tell which rows made it in.
+  Fix: tag every imported row with a batch id, show a preview (row count, duplicates, bad emails) before writing anything, and add a command that removes a whole batch. Note that "writes nothing else" also means imported people get no join entry in the history, which conflicts with the history listing every join (AC6). Decide whether the import should write one.
+  *Raised by: failure cases*
+
+- **Should the nightly offer job tell someone it ran, and raise an alarm when it didn't? I recommend yes. Without that, offers can stop for weeks with nobody noticing.**
+  Worst case: the 02:00 job fails quietly after a server change. Freed plots sit unoffered until people waiting for them write in to complain.
+  Fix: email the warden a short summary each time the job finishes, and send an alert if it hasn't finished by 03:00.
+  *Raised by: failure cases (moved up from "worth fixing": at production maturity, production failure visibility rates at this level)*
+
+**Would cause trouble later, worth fixing, your call**
+
+- **Should an out-of-turn grant also take the person off the queue? I recommend yes. Otherwise they get offered a second plot.**
+  Worst case: the warden gives a plot to someone out of turn (Task 3). That person keeps their queue row, reaches the front a month later, and is offered another plot.
+  Fix: have the grant close the person's queue row and write the grant to the history in the same step.
+  *Raised by: buildability*
+
+- **Should opening the offer link ask the person to confirm, rather than accept on the spot? I recommend yes. A link scanner or a forwarded email can accept a plot for someone.**
+  Worst case: a corporate mail scanner opens every link in the offer email. The plot is marked accepted for someone who never saw it, and the next person in line is skipped.
+  Fix: make the link open a page with an "Accept this plot" button, and accept only when that button is pressed.
+  *Raised by: security*
+
+- **Should the offer email say up front that ignoring it sends you to the back? I recommend yes. Otherwise people lose their place without knowing why.**
+  Worst case: someone is on holiday for two weeks, the offer lapses, and they come back to find they've gone from first to last with no warning.
+  Fix: put the 14-day deadline and its consequence in the email's first paragraph.
+  *Raised by: ease of use*
+
+- **Should leaving the queue show and email a confirmation? I recommend yes. A mistaken click leaves people unsure whether they're still on the list.**
+  Worst case: someone taps "leave" by accident, sees nothing change, and either rejoins at the back or carries on believing they're still waiting.
+  Fix: show and email a one-line confirmation that they have left.
+  *Raised by: ease of use*
+
+- **Should Task 4 say what happens to the spreadsheet afterwards? I recommend deleting it once the import is checked. It holds about 340 names and email addresses on a personal laptop.**
+  Worst case: the laptop is lost or shared, and the whole waiting list's contact details go with it.
+  Fix: add "delete the spreadsheet once the import is verified" to Task 4's steps.
+  *Raised by: security*
+
+- **Should there be a help page? Probably not on this evidence. The concern names no point where anyone gets stuck.**
+  Worst case: none is named. The worry is only that the online queue "may be confusing".
+  Fix: leave it out unless the plan's screens show a specific place where people get stuck. The two email fixes above cover the concrete cases.
+  *Raised by: ease of use (moved down from "needs your decision": speculative, no concrete user moment named)*
+
+**Rough edges, nothing to decide**
+
+- Add a test for an offer that is exactly 14 days old, so the lapse boundary is pinned. *Raised by: failure cases*
+- The warden's out-of-turn reason appears on the history page for every committee member to read. Ask wardens to keep personal detail out of it. *Raised by: security*
+- "Lapse" on the history page reads as jargon. Use "Offer expired". *Raised by: ease of use*
+- Tasks 2 and 5 both format dates. Share one helper. *Raised by: buildability*
+
+---
+
+The three findings under "needs your decision" each need a disposition before this can go to build: `resolved`, `bounced-back-to-spec`, `accepted-as-risk: <reason>` or `disputed: <reason>`.
+
+```markdown
+## Council Review
+
+*Reviewed at:* 2026-10-15
+*Members dispatched:* builder, breaker, attacker, advocate
+*Maturity:* production (basis: stamp)
+
+*Critical:*
+- Task 1 stores `place` and renumbers it on leave; a leave during the 02:00 offer run leaves two rows at place 1 and one plot is offered to two people — order by a stored sort key (reset on lapse) and derive place at read time (raised by: Builder, Reliability) — *Disposition:* pending
+- Task 4 imports ~340 rows in one run with no dry run, no batch marker and no undo; a repeat run duplicates every row and a partial run is untraceable; importer also writes no join event, against AC6 (raised by: Reliability) — *Disposition:* pending
+- No signal when the 02:00 offer job fails to run; offers stop silently until people write in — send a run summary and a 03:00 missed-run alert (raised by: Reliability) (raised to Critical from Important: production maturity rates production failure visibility Critical; reviewer's two-Critical cap had pushed it down) — *Disposition:* pending
+
+*Important:*
+- Task 3 out-of-turn grant does not close the person's queue row, so the nightly job offers them a second plot (raised by: Builder)
+- Offer link accepts on open with nothing tying it to the recipient; a forwarded email or a link-following mail scanner accepts the plot (raised by: Security)
+- Offer email does not state that ignoring it for 14 days sends the person to the back of the queue (raised by: Advocate)
+- Leaving the queue gives no on-screen or email confirmation (raised by: Advocate)
+- Task 4 spreadsheet of ~340 names and emails left on the warden's laptop; task should require deletion once the import is verified (raised by: Security)
+- Queue may be confusing online; add a help page (raised by: Advocate) (downgraded from Critical: speculative — no concrete user moment named)
+
+*Minor:*
+- No test covers an offer exactly 14 days old (raised by: Reliability)
+- Out-of-turn grant reason is visible to all committee members on the history page and may carry personal detail (raised by: Security)
+- "Lapse" on the history page reads as jargon (raised by: Advocate)
+- Tasks 2 and 5 both format dates for display; share one helper (raised by: Builder)
+```

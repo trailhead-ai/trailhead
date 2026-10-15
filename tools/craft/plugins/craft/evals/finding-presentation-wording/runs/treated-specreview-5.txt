@@ -1,0 +1,30 @@
+# Gauntlet: allotment waiting list spec, round 1
+
+`maturity: production (basis: stamp)`, no stand-downs. Fact check: 2 of 4 claims confirmed, 1 refuted, 1 unverifiable.
+
+**What the passes found.** Two problems would build the wrong thing. First, the spec never says how the existing paper list gets online. Joining requires an email address, and the spec offers no other way in. That leaves no route for the 412 people already waiting, some of whom may have no email, and no rule that their paper order carries over. (The spec says about 340; the committee minutes of 3 March record 412.) Second, the whole offer process depends on email arriving. Under the rule that an offer not accepted within 14 days passes on and the person goes to the back of the queue (AC3), a mistyped or full mailbox costs someone years of waiting, and they are never told. Smaller gaps sit around these two. Nothing says who reports that a plot has come free. Nothing says how a person checks their place after the first email, though the Objectives promise it. And a few choices can be built either way: one queue per person or several, and whether the 14 days count from sending or from opening.
+
+**Whether it holds.** The failure-cases and ease-of-use passes found the email problem separately, so it is the best-supported finding in the run. I merged them into C2. The right-problem pass's point about people without email holds, but its evidence is thin: nobody knows how many there are. What makes it firm is the issue under it. At production maturity, moving the existing list is a migration and backfill concern rated "needs your decision", and nothing in the spec covers it. The right-problem pass overreached when it said only the history matters: the Problem explicitly says nobody can see where they stand. Self-consistency and ease of use both caught the missing way to see your place. That gap is real, but an edit fixes it and it doesn't change the design. Security found no serious problem. Its point that out-of-turn grants have nobody watching is fair, but it isn't a blocker.
+
+**What to do.** Add two criteria for moving the list over, with a phone-only route run by the warden. Rewrite the lapse rule so that a bounced email is caught at once and a person is warned before their offer lapses. While rewriting it, settle that the 14 days count from when the offer is sent. Log the rest. All edits are drafted and land in one write.
+
+**Recommended outcome:** advance to `ready` this round. No row needs a revise round.
+
+| id | finding | proposed disposition | proposed edit |
+|---|---|---|---|
+| C1 | The paper list has no route online: order isn't kept, and people without email can't join | `resolved` | Correct the Problem to 412 (minutes, 3 March). Add AC7: every paper-list person is entered in paper order before online joining opens. Add AC8: a warden can add a person with a phone number instead of email, make their offers by phone, and record each offer and answer in the history |
+| C2 | An offer that never arrives silently sends the person to the back of the queue | `resolved` | Rewrite AC3 so the 14 days count from sending. Add AC9: a reminder email on day 10, and a lapse email saying where the person now stands. Add AC10: a bounced offer passes on at once, the person keeps their place and gets no more offers until a warden fixes the address, and the warden is told |
+
+**Would cause trouble later, worth fixing, your call: 7.**
+- Buildability: nothing marks a plot as freed, so the rule that the person at the front of the queue is sent an offer when a plot is freed (AC2) has no trigger.
+- Buildability: the spec doesn't say whether a place is stored or worked out from join order.
+- Failure cases: no behaviour is set for a freed plot whose site queue is empty.
+- Security: an out-of-turn grant is checked only by its written reason, and nobody is told when one happens.
+- Ease of use and self-consistency (raised by both): the Objectives promise a person can see their place, but no criterion delivers it after the confirmation email.
+- Self-consistency: the history lists acceptances and departures, but the criteria that create them don't say they are recorded.
+- Left undecided: can a person be on more than one site's queue?
+- (Right problem's suggestion to narrow the Objectives to checking the order is logged, but I disagree with it, for the reason above.)
+
+**Rough edges, nothing to decide: 4.** What time of day an offer ends; who can see the history; whether a stated place in the queue reveals too much; "a few times a month" is never relied on. I dropped three wording-only notes.
+
+Reply **"go"** to accept. To override a row, name its id with your reason, for example "dispute C2: …", "accept C1 as risk: …" or "answer C1: …". I can also show the full detail or the drafted edit text for any row.

@@ -1,0 +1,26 @@
+**Gauntlet: allotment waiting list. Round 1.** Maturity: production (basis: stamp). No stand-downs. Fact check: 2 of 4 facts confirmed, 1 refuted, 1 unverifiable.
+
+The eight passes kept coming back to one weak point: what happens to people the email channel doesn't reach. One case is the people already on the paper list. Joining by name, email and site (AC1) is the only way onto the new list, and nothing carries the existing list across. The other case is a freed plot offered by email (AC2) that never arrives. Under the lapse rule (AC3) the plot then sits empty for 14 days and the person is sent to the back of the queue without being told. Smaller gaps cluster around the promise that a person can "see their place". Nothing after the first confirmation email delivers it. The spec also never says who marks a plot as freed, what happens when a site's queue is empty, or whether one person may be on several sites' queues. The fact check found the list holds 412 names (committee minutes, 3 March), not "about 340".
+
+The failure-cases and ease-of-use reviewers reached the lost-offer problem separately, and it is the strongest finding of the run. The right-problem reviewer's finding about people without email holds, but not for the reason it gave. How many members have no email is unknown, and that reviewer said so itself. The real defect holds whatever that number is. Retiring the paper list without a carry-over path makes everyone rejoin and throws away years of waiting order. At production maturity, migration and backfill is a "needs your decision" concern. The same reviewer's second point, that the build is bigger than the complaint, overreaches: joining and seeing your place are stated objectives, not scope creep. The security reviewer's note that the confirmation email reveals your place describes the feature working as intended. The self-consistency and left-undecided findings are real but small.
+
+Both decisions can be fixed by editing the spec. C1 adds a carry-over in paper-list order, lets a warden enter a person with a phone number, and corrects the head count. C2 makes a bounced offer pass on at once without costing the person their place, and tells the person before and after a lapse. The rest is logged, not decided now.
+
+**Recommended outcome:** advance to `ready` this round. Both decisions are fixed by edits, and nothing needs `revise`.
+
+| id | finding | proposed disposition | proposed edit |
+|---|---|---|---|
+| C1 | The existing paper list has no path online, and people without email can't join | `resolved` | Problem says 412 (minutes, 3 March). New AC7: the paper list is carried over in its order before it is retired. New AC8: a warden can enter a person with a phone number instead of an email, and that person gets offers by phone, recorded in the history |
+| C2 | An offer that never arrives leaves the plot empty for 14 days and sends the person to the back without a word | `resolved` | AC2 counts the 14 days from the day the offer is sent. AC3 adds an email telling the person their offer lapsed. New AC9: a bounced offer passes on at once, the person keeps their place, and the warden is told. New AC10: a reminder goes out on day 10 |
+
+**Would cause trouble later, worth fixing, your call (8).**
+- **Seeing your place:** the objectives promise a person can see their place, but no criterion delivers it after the first email (raised by ease of use and self-consistency).
+- **Missing triggers and states:** nobody is named as marking a plot freed, nothing covers an empty queue, and it's unclear whether a place is stored or worked out from join order.
+- **Unpinned choices:** one queue or several per person.
+- **History gaps:** acceptances and departures aren't stated as recorded.
+- **Grant oversight:** an out-of-turn grant is seen only when someone reads the history.
+- **Framing:** a suggestion to narrow the objectives, which I judged an overreach.
+
+**Rough edges, nothing to decide (4).** Wording and visibility: the time of day the 14 days end, "lapse" vs "expired", who can see the history, and the place shown in the confirmation email.
+
+The full drafted text for each edit is ready ("show me C1"). Reply **go** to accept. To override a row, name its id with a reason (`disputed`, `accepted-as-risk`, or `answered` if you know something the passes didn't).

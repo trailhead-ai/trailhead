@@ -1,0 +1,118 @@
+The council found three problems serious enough that the plan shouldn't go to build yet. The run stops here under the `plan-critical` trigger so you can decide what to do about them.
+
+**What the reviewers found.** The serious problems sit in three places in the plan:
+
+- **How a queue position is stored (Task 1).** Each row holds a `place` number, and every later number is renumbered when someone leaves.
+- **The one-off import of the paper list (Task 4).**
+- **The nightly offer job (Task 2).** If it stops running, nobody finds out.
+
+Below those are several smaller problems:
+
+- The offer email and its accept-on-open link: what the email fails to tell people, and what the link does when a scanner or a forwarded email opens it.
+- A warden's out-of-turn grant leaves the person in the queue.
+- Leaving the queue sends no confirmation.
+- The spreadsheet of 340 names stays on the warden's laptop after the import.
+
+**Whether it holds.** The buildability and failure-cases reviewers both found the renumbering problem on their own. It follows directly from what Task 1 and Task 2 say, so it is real. The failure-cases reviewer's import finding is also concrete, and it is about migration, which this spec's production maturity makes a must-decide item.
+
+That reviewer rated the silent nightly job as worth fixing. I moved it up to needs your decision, because this spec is stamped production and production failure visibility is rated at that level for production work.
+
+The ease-of-use reviewer's top item ("people may find the queue confusing; add a help page") names no concrete failure, so I moved it down to worth fixing. Their two email and confirmation points are the useful ones.
+
+One gap none of the reviewers raised: "The queue's history lists every join, offer, acceptance, lapse, out-of-turn grant and departure, newest first, with the date" (AC6). The plan has a history page, but no task says that joining, offering, accepting, lapsing, granting or leaving writes a history event. The importer also "writes nothing else", so the 340 people already on the paper list would have no join recorded. I've recorded this as worth fixing and noted that it came from the synthesis rather than a reviewer.
+
+**What to do about it.** The three serious items each have a narrow fix, and two of them reinforce each other:
+
+- Order each queue by join time instead of storing a place number.
+- Import the paper list under a batch id, with a preview first and a way to remove a bad run whole.
+- Have the nightly job tell the warden whether it ran.
+
+How to handle each of the three is your call. I haven't drafted any verdicts.
+
+### Would build the wrong thing, needs your decision
+
+**1. Should a queue position be a stored number that gets renumbered, or worked out from join time?** I'd raise this before build because, as planned, one freed plot can be offered to two people.
+If someone leaves while the 02:00 job is running, Task 1 is partway through renumbering, so two rows can briefly both hold `place` 1. The job then emails both of them an offer for the same plot.
+Fix: store each person's join time, order the queue by it, and never store a place number. A person's place is then counted when it's needed, for the confirmation email and their own view.
+*Raised by: buildability, failure cases*
+
+**2. Should the one-off import of 340 people get a preview and a way to undo it?** As planned, a mistaken run can't be cleanly reversed.
+If the import is run twice, every person on the paper list ends up in the queue twice. If it stops halfway, nothing shows where it stopped. Either way the live queue that offers are sent from is wrong, with no clean way back.
+Fix: tag every imported row with a batch id, show a preview before writing anything, and let a bad batch be removed whole. (Migration and backfill, rated at this spec's production maturity.)
+*Raised by: failure cases*
+
+**3. Should the nightly offer job report whether it ran?** As planned, offers can quietly stop and the first anyone hears of it is a complaint.
+If the 02:00 job fails or never starts, no freed plot is offered, no 14-day offer lapses, and the queue stops moving without anyone noticing.
+Fix: email the warden when the job finishes, and send a separate alert if it hasn't finished by 03:00. (Production failure visibility. The reviewer rated this worth fixing; I raised it to needs your decision because this spec is stamped production.)
+*Raised by: failure cases*
+
+### Would cause trouble later, worth fixing, your call
+
+**4. The offer link accepts a plot just by being opened.** I'd make it lead to a confirmation page instead. A mail scanner that follows links, or a forwarded email, could accept a plot for someone who never decided.
+Fix: have the link open a page that asks the person to confirm.
+*Raised by: security*
+
+**5. A warden's out-of-turn grant doesn't take the person off the queue.** Task 3 records the grant only, so the nightly job could later offer that same person a second plot.
+Fix: have the grant close that person's queue row.
+*Raised by: buildability*
+
+**6. The offer email doesn't warn that ignoring it costs the person their place.** "The person who did not answer goes to the back of the queue" (AC3), but nothing tells them so. People will lose their place without knowing why.
+Fix: say it in the first paragraph of the offer email.
+*Raised by: ease of use*
+
+**7. Leaving the queue gives no confirmation.** Someone who clicked by mistake can't tell whether they're still on the list.
+Fix: show and email a one-line confirmation.
+*Raised by: ease of use*
+
+**8. The spreadsheet of 340 names and email addresses stays on the warden's laptop after the import.**
+Fix: delete it once the import is checked, and say so in Task 4.
+*Raised by: security*
+
+**9. No task records the events the history page is supposed to show.** As noted above, AC6 can't be met as planned, and imported people would have no join recorded.
+Fix: name in each task which history event it writes, and have the importer write a join event for each imported row.
+*Raised in synthesis; no reviewer raised it*
+
+**10. A help page for the queue.** The reviewer flagged this as needing your decision, but it names no specific way someone gets stuck, so I moved it down.
+Fix: decide after items 6 and 7, which cover the concrete confusion points.
+*Raised by: ease of use. Moved down because the claim was speculative.*
+
+### Rough edges, nothing to decide
+
+- Calling an expired offer a "lapse" on the history page reads as jargon. Use "offer expired". *(ease of use)*
+- Out-of-turn grant reasons show to every committee member and may carry personal detail. Add a line on the warden screen telling wardens to keep reasons free of personal detail. *(security)*
+- No test covers an offer that is exactly 14 days old. Add a boundary test. *(failure cases)*
+- Tasks 2 and 5 both format dates for display. Share one helper. *(buildability)*
+
+**Escalation.** The run escalates under the `plan-critical` trigger. Before writing the escalation record, the driver writes the `## Driver run` checkpoint recording `**Phase:** plan`.
+
+The escalation record is a `blocked` child task of the slice parent. It points at the three items above in this plan's `## Council Review` section, and its task id is assigned when it's written.
+
+Your decision on items 1–3 lives in that section. When those are dealt with, re-run `/craft:drive` against this spec to resume from the build phase. I haven't been given this spec's record name, so I can't give you the full command with the name filled in. It comes from the argument this run was started with.
+
+```markdown
+## Council Review
+
+*Reviewed at:* 2026-10-15
+*Members dispatched:* builder, breaker, attacker, advocate
+*Maturity:* production (basis: stamp)
+
+*Critical:*
+- Queue position stored as `place` and renumbered on leave (Task 1); a leave during the 02:00 offer run (Task 2) leaves two rows at place 1 and one freed plot is offered to two people. Suggested: order by join time, store no place number. [builder, breaker]
+- Task 4 import (~340 rows) has no preview and no undo: a second run duplicates every row, a partial run leaves no marker. Migration and backfill — Critical at this spec's production maturity. Suggested: import under a batch id with a preview, removable whole. [breaker]
+- No signal when the 02:00 offer job fails to run; offers stop silently. Production failure visibility — raised from Important to Critical in synthesis by this spec's production maturity. Suggested: email the warden on completion, alert if not done by 03:00. [breaker]
+
+*Important:*
+- Offer link accepts on open with nothing tying it to the recipient; a mail scanner or forwarded email accepts the plot. Suggested: link opens a confirm page. [attacker]
+- Out-of-turn grant (Task 3) does not close the granted person's queue row; the nightly job may offer them a second plot. Suggested: grant closes the row. [builder]
+- Offer email does not state that 14 days' silence sends the person to the back of the queue (AC3). Suggested: state it in the first paragraph. [advocate]
+- Leaving the queue gives no confirmation. Suggested: show and email a one-line confirmation. [advocate]
+- Import spreadsheet with 340 names and emails left on the warden's laptop. Suggested: delete once import is verified; state it in Task 4. [attacker]
+- No task names the history events it writes, and the importer "writes nothing else", so imported people have no join event; AC6 unmet as planned. Suggested: each task names its event; importer writes a join per row. [synthesis — not raised by a reviewer]
+- Queue may be confusing online; add a help page. Downgraded from Critical in synthesis: speculative, no concrete failure named. [advocate]
+
+*Minor:*
+- History page labels an expired offer "lapse" — jargon. [advocate]
+- Out-of-turn grant reason is visible to all committee members and may carry personal detail. [attacker]
+- No test for an offer exactly 14 days old. [breaker]
+- Tasks 2 and 5 both format display dates; share one helper. [builder]
+```

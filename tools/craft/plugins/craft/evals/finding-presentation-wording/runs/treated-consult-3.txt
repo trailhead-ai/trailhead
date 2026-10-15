@@ -1,0 +1,74 @@
+**Maturity:** `maturity: production (basis: requested)`. No stand-downs and no unrecognised waivers.
+
+### What the panel found
+
+The panel agrees that direct swaps are buildable but not safe as described. A form where two tenants each confirm can apply two swaps that name the same plot, so one tenant arrives to find a stranger on the plot they thought was theirs. Two further themes follow from moving swaps off the warden's desk. First, the waiting list loses protection: a tenant could take payment for a good plot and call it a swap, which breaks the committee's rule that nobody on the list of 340 is passed over. Second, the swap leaves gaps around it: nothing says what happens to a swap only one tenant has confirmed, no history is kept to settle a later dispute, and tenants who are mostly not online lose the route that works for them today.
+
+### Whether it holds, and where it came from
+
+The double-swap finding is solid. The buildability and failure-case reviewers reached it separately, and both proposed the same fix: check, at the moment of the second confirmation, that both tenants still hold the plots named. At six swaps a year the clash will be rare, but when it happens the harm is concrete and the fix is cheap, so it stays in the top group.
+
+The security reviewer's plot-sale concern is the one that ties back to the committee's own rule. Its suggested fix, warden approval when a tenant moves "to a different site", assumes several sites, and the question never mentions any. The idea behind it (the warden signs off on swaps) holds, but its trigger needs restating.
+
+The ease-of-use reviewer flagged as top severity that tenants "might feel" the process is unfair. That guesses at how tenants will react and names nothing concrete that fails, so I moved it from "would build the wrong thing, needs your decision" down to "would cause trouble later, worth fixing, your call". The same reviewer's point that the current process works at this volume is the most useful framing the panel gave.
+
+### What to do about it
+
+Keep the warden route and add the form beside it, not in its place. Before the form goes live:
+
+- keep one record of who holds which plot, and apply a swap only if both holdings still match when the second tenant confirms;
+- let half-confirmed swaps expire after a stated period, with the reason for that period written down;
+- log every swap in the waiting list's history;
+- have the warden approve a swap before it takes effect, at least when the two plots differ in ways that would make a sale worth arranging.
+
+The waiting-list spec currently sets swaps aside in its Non-Goals. Bringing them in means updating that spec rather than building on the side.
+
+---
+
+### Would build the wrong thing, needs your decision
+
+**1. Decide whether the form checks plot holdings at the final confirmation. I recommend it does; otherwise two swaps can hand out the same plot.**
+Worst case: tenant A agrees to swap with B, and C agrees to swap with A for the same plot. Each swap was checked only against what the tenant saw when they started, so both go through, and one tenant turns up to find someone else on the plot they were promised.
+Fix: keep a single record of who holds which plot, and apply a swap only if both tenants still hold the plots named when the second one confirms.
+*Raised by: buildability, failure cases (2 reviewers)*
+
+### Would cause trouble later, worth fixing, your call
+
+**2. Decide whether the warden must approve swaps. I recommend yes, because otherwise a "swap" can be a sale that skips the waiting list.**
+Worst case: a tenant takes payment from another tenant for a good plot and records it as a swap. Someone on the list of 340 who should have been offered that plot is passed over, against the committee's stated rule.
+Fix: require the warden's sign-off before a swap takes effect. The reviewer's trigger ("moves a tenant to a different site") assumes several sites, which the question doesn't establish, so restate it to fit how Hawthorn Lane is actually laid out.
+*Raised by: security*
+
+**3. Keep the warden route and add the form as a second option, rather than replacing the warden.**
+Worst case: the hand process handles about six swaps a year without trouble. Making the form the only route shuts out tenants who are mostly not online.
+Fix: offer the form alongside the warden, not instead of the warden.
+*Raised by: ease of use*
+
+**4. Decide what happens to a swap only one tenant has confirmed. I recommend it expires.**
+Worst case: a half-confirmed swap sits open indefinitely, and a tenant can't tell whether their plot is spoken for.
+Fix: expire unconfirmed swaps after a set period. Seven days was suggested, but the failure-case reviewer noted it is arbitrary, so pick a number and write down why.
+*Raised by: buildability, failure cases (2 reviewers)*
+
+**5. Keep a history of swaps so a dispute can be settled later.**
+Worst case: a year on, two tenants disagree about who agreed to what, and no record exists to settle it.
+Fix: write every swap into the same history the waiting list already keeps.
+*Raised by: failure cases*
+
+**6. Explain on the society's site how swaps work and how they protect the waiting list.**
+Worst case: people on the waiting list see plots changing hands and assume they are being skipped, even where they aren't. This was downgraded from the top group because it guesses at how people will feel rather than naming a concrete failure.
+Fix: publish a short explanation of the swap process next to the form.
+*Raised by: ease of use*
+
+### Rough edges, nothing to decide
+
+**7. The swap confirmation email should name both plots**, so a tenant can tell a genuine request from a fake one.
+Fix: include both plot identifiers in the email.
+*Raised by: security*
+
+**8. The form could reuse the waiting list's email templates**, which saves building new ones.
+Fix: reuse the existing templates.
+*Raised by: buildability*
+
+**9. Label the form "swap my plot" rather than "reallocate"**, using the words tenants already use.
+Fix: rename the form.
+*Raised by: ease of use*

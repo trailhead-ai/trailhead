@@ -1,0 +1,46 @@
+# Spec review: a waiting list for allotment plots
+
+`maturity: production (basis: stamp)`. No concerns were waived.
+
+**What the passes found.** The criteria describe the queue mechanics clearly, but two kinds of people can quietly lose their place. The first is anyone whose offer email never reaches them. AC2 and AC3 treat a bounced or unseen offer like a refusal: the plot sits empty for 14 days and then the person goes to the back. The second group is the people already on the paper list. Every criterion assumes someone joins by giving an email address, and nothing says how the existing list moves online in its current order. Around these two problems there are smaller gaps:
+- Nobody is named as the person who marks a plot freed.
+- The objective that people can "see their place" is only met by the first email.
+- Several choices are left open, such as whether someone can be on more than one site's queue and when the 14 days start.
+- The Problem's headcount is wrong. The committee minutes of 3 March record 412 names, not about 340.
+
+**Whether it holds.** The undelivered-offer problem is the strongest finding. The failure-cases and ease-of-use passes reached it separately, could not see each other's work, and described the same event. The right-problem pass's point about people without email is real, but its claim that "a large part" of the list has no email is a guess. I checked the spec myself and the underlying gap is wider than email: no criterion moves the paper list online at all. At production maturity, moving the existing data over is a decision-level concern, so I kept this finding as needing your decision. I based it on that missing step, not on the guessed share. Its other point, that AC1–AC5 are more than the complaint needs, is reasonable framing advice and not a defect. The security pass found nothing that would build the wrong thing. "Name the mail provider" and the "queue's history" wording note are editorial, so I dropped them.
+
+**What to do.** Make two edits to the criteria, then advance. First, tighten AC2 and AC3 so that:
+- an offer that can't be delivered passes on straight away and the person keeps their place;
+- a reminder goes out on day 10;
+- a lapse is reported to the person.
+
+Second, add a criterion for moving the paper list over in its existing order, with phone-only entries that the warden handles. The smaller gaps below are worth a pass while the spec is still a draft, but none of them blocks it.
+
+**Recommended outcome:** apply C1 and C2 as `resolved`, then advance the spec to `ready` this round.
+
+| id | finding | proposed disposition | proposed edit |
+|---|---|---|---|
+| C1 | An offer email that never arrives sends the person to the back after holding the plot empty for 14 days | `resolved` | AC2: an offer that can't be delivered passes on at once and the person keeps their place. AC3: reminder email on day 10, and an email when the offer lapses giving the new place |
+| C2 | The paper list has no way onto the online queue, and people without email can't be on it at all | `resolved` | New AC7: before the paper list is retired, the warden enters it in its existing order. An entry may have a phone number instead of an email, and the warden makes and records phone offers |
+
+**Would cause trouble later, worth fixing, your call (9):**
+- Visibility: "see their place" has no criterion after the first email. Both the self-consistency and ease-of-use passes raised this.
+- The wrong headcount (412, not 340).
+- Triggers and states:
+  - No one is named as marking a plot freed.
+  - Nothing says what happens when a plot frees up and its queue is empty.
+- Choices left open:
+  - Whether a place is stored or worked out from join order.
+  - One queue per person or one per site.
+  - Whether the 14 days count from sending or from opening.
+- Wardens can give plots out of turn without anyone else being told.
+- AC2 and AC5 don't say that their events get recorded.
+
+**Rough edges, nothing to decide (6):**
+- Wording: "lapse" reads as jargon.
+- Precision: the time of day the 14 days end, and the plot-freeing rate (31 a year).
+- Things nobody can check yet: whether the warden really rings people in order.
+- Privacy: whether everyone can see the history, and the confirmation email showing how many people are ahead.
+
+Reply **"go"** to accept. To override a row, name its id and give your reason, for example "dispute C2: …", "accept C1 as risk: …" or "answer C2: …". Ask for the detail on any row if you want it first.

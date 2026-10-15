@@ -1,0 +1,50 @@
+# Spec review: a waiting list for allotment plots
+
+maturity: production (basis: stamp). No stand-downs.
+
+**What the reviewers found.** The reviewers kept returning to one weakness: the spec only works for people who can be reached by email and who actually see that email. A person joins "by giving a name, an email address and the site they want" (AC1). A freed plot is offered "by email, and the offer stays open for 14 days" (AC2). An unanswered offer sends the person "to the back of the queue" (AC3). A second, smaller group of points concerns things the spec leaves open:
+- The objective says a person can "see their place", but that only happens once, in the email they get when they join.
+- Nothing says who records that a plot has come free.
+- Nothing says whether one person may join the queues of several sites.
+- Nothing says whether the 14 days start when the offer is sent or when it is opened.
+
+**Which of those hold up.** The failure-cases and ease-of-use reviewers each found the undelivered-offer problem without seeing each other's work, so it is the most reliable finding here. If an offer goes to a mistyped address, the plot sits empty for two weeks and the person loses years of waiting without ever seeing it. The right-problem reviewer was right that people without email are shut out, but the real gap is wider than that. The spec has no step for moving the existing paper list online with its order kept, and at production maturity that kind of migration is a decision for you. People without email are just the hardest case of it. How many people lack email is a guess, so I've kept this finding as one that needs your decision because the migration step is missing, not because of the guess. The fact check found that the society's minutes record 412 names, not about 340. That doesn't change any criterion, but it makes the migration bigger. The right-problem reviewer also suggested building only the history. That is a scoping opinion, not a defect, and I've treated it as worth fixing at your call. I dropped two remarks as purely editorial: naming the mail provider, and the "queue's history" wording, which is the same term in both places.
+
+**What I recommend.** Make two edits, both inside the spec:
+- Add a criterion that moves the paper list online, in its current order, before the paper list is retired. A warden can enter someone with a phone number instead of an email address, and makes that person's offers by phone.
+- Add criteria for offers that fail: an undeliverable offer passes on at once without costing the person their place, a reminder goes out on day 10, and a person whose offer runs out is told so. These also settle that the 14 days start when the offer is sent.
+
+With those two edits made, the spec can advance.
+
+**Recommended outcome:** advance to `ready` this round, with C1 and C2 applied as below.
+
+| id | finding | proposed disposition | proposed edit |
+|---|---|---|---|
+| C1 | No way to move the paper list online in order; people without email drop off | `resolved` | add AC7: the paper list moves online in order, and phone-only entries get their offers by phone |
+| C2 | An undelivered offer costs the person their place without them ever seeing it | `resolved` | add AC8 and AC9: undeliverable offers pass on, plus a day-10 reminder and a notice when an offer runs out |
+
+The drafted text, which would be applied word for word:
+- **AC7.** Everyone on the paper waiting list is placed on the online queue for their site, in their existing order, before the paper list is retired. A warden can enter a person with a phone number instead of an email address. That person's offers are made by the warden by phone, and each offer and its answer are recorded in the queue's history.
+- **AC8.** An offer the mail system reports as undeliverable passes at once to the next person. The person it was meant for keeps their place, and the warden is told.
+- **AC9.** An offer's 14 days count from when it is sent. A person with an open offer is sent a reminder on day 10. A person whose offer runs out is told by email that they have moved to the back of the queue.
+
+**Would cause trouble later, worth fixing, your call (9).** These are logged and need no decision:
+- After joining, a person has no way to see their current place. The ease-of-use and self-consistency reviewers both raised this.
+- Nothing says who marks a plot as freed.
+- Nothing says whether a person's place is stored or worked out from join order.
+- Nothing says what happens when a site's queue is empty.
+- Nobody besides the warden finds out about an out-of-turn grant until someone reads the history.
+- Two criteria never say that acceptances and departures are recorded (AC2 and AC5).
+- Nothing says whether a person can join more than one site's queue.
+- Nothing says whether the 14 days start when the offer is sent or when it is opened. AC9 settles this.
+- The right-problem reviewer suggests the objective should be checking the order, not putting the whole list online.
+
+**Rough edges, nothing to decide (6).**
+- The list has 412 names, not about 340.
+- Nothing says at what time of day the 14 days end.
+- The joining email reveals how many people are ahead of you.
+- "Lapse" in the history reads as jargon.
+- Nothing says who may see the history.
+- "A few times a month" isn't relied on anywhere.
+
+Reply **go** to accept, or override by id. For example, "dispute C2 because…, otherwise go".

@@ -1,0 +1,39 @@
+**maturity: production (basis: requested)**. No concerns were waived.
+
+**What the reviewers found.** The panel agreed the form could work, but only if two gaps are closed. First, the society needs one record of who holds which plot, checked when the second tenant confirms. Without it, two swaps can claim the same plot at the same time and both go through. Second, the committee has promised that nobody on the 340-person waiting list will be passed over. A direct swap is a quiet way round that promise: two tenants can agree a payment for a good plot and call it a swap. The smaller points are about running the form day to day: what happens to a swap only one tenant has confirmed, keeping a history of swaps for later disputes, and whether tenants who are mostly offline can use a form at all.
+
+**Whether it holds, and where it came from.** The buildability and failure-cases reviewers each found the double-claimed plot on their own, and they are right. It follows directly from a design where each tenant confirms separately. At six swaps a year it will be rare, but the fix is cheap and the harm is a stranger on someone's plot, so it stays in the top group. The security reviewer's point about disguised plot sales is the most important finding for this question, because it speaks directly to the committee's promise. Its proposed fix, warden approval only for moves "to a different site", doesn't fit what was described: nothing in the question says there is more than one site. The ease-of-use reviewer marked "tenants might feel it is unfair" as top severity. That names no concrete failure, so I moved it from "would build the wrong thing, needs your decision" to "would cause trouble later, worth fixing, your call" and folded it into the security point. The real unfairness is the mechanism, and explaining the process on the website doesn't fix that. The same reviewer's practical point is a good one. The warden's manual route works at six a year, and many tenants aren't online.
+
+**What to do about it.** Keep the warden route. If the society wants the form, add it as a second way to swap, not a replacement. Build it on a single record of plot holders, and only apply a swap if both tenants still hold the named plots when the second one confirms. Let a swap that only one tenant has confirmed expire, and write every swap to the waiting list's history. Have the warden sign off each form swap before it takes effect, so a paid "swap" can't jump the waiting list. At six a year that costs the warden very little. One more thing: the waiting-list spec currently lists plot swaps under Non-Goals. Adding the form means bringing swaps into that spec's scope first, not building them alongside it.
+
+---
+
+### Would build the wrong thing, needs your decision
+
+**Two swaps can claim the same plot, and both go through.** Decide whether the form checks plot ownership at the moment the second tenant confirms. I recommend it does, because otherwise a tenant can lose a plot without warning. Here is the worst case. Tenant A agrees to swap with B, and separately with C, for the same plot. Each swap is checked only against what the tenants saw when they started, so both are applied, and one tenant turns up to find a stranger on the plot they thought was theirs.
+Fix: keep one table of plot holders, and apply a swap only if both tenants still hold the named plots when the second confirmation arrives.
+*Raised by: buildability, failure cases (2 reviewers)*
+
+### Would cause trouble later, worth fixing, your call
+
+**A direct swap can hide a sale and pass over the waiting list.** Decide whether every form swap needs the warden's sign-off. I recommend it does, because this is the committee's own promise at stake. Here is the worst case. A tenant with a poor plot pays a tenant with a good one, they call it a swap, and the good plot never reaches anyone on the 340-person list. Explaining the process on the website, as one reviewer suggested, doesn't stop this.
+Fix: the warden approves every swap made through the form before it takes effect. Drop the "different site" condition, since nothing described suggests there is more than one site.
+*Raised by: security, ease of use (2 reviewers). The ease-of-use finding was moved down from the top group because "tenants might feel it is unfair" named no concrete failure.*
+
+**Replacing the warden would shut out tenants who aren't online.** Decide whether the form replaces the warden or sits beside them. I recommend it sits beside them. Here is the worst case. An offline tenant can no longer swap, or has to get someone else to fill in the form, for a process that worked fine by hand at six a year.
+Fix: keep the warden route and add the form as a second way to swap.
+*Raised by: ease of use*
+
+**A swap only one tenant has confirmed has no end state.** Decide how long a half-confirmed swap stays open. I recommend seven days, with the reason written down. Here is the worst case. One tenant confirms, the other never does, and the pending swap sits open for months. It can then be completed long after both tenants have forgotten it, or the plot is meanwhile promised in another swap.
+Fix: expire half-confirmed swaps after a fixed period, and write down why that period was chosen.
+*Raised by: buildability, failure cases (2 reviewers)*
+
+**Without a swap history, disputes can't be settled.** Decide whether swaps are recorded. I recommend they are. Here is the worst case. A year on, two tenants disagree about who agreed to what, and nothing exists to settle it.
+Fix: write every swap to the same history the waiting list already keeps.
+*Raised by: failure cases*
+
+### Rough edges, nothing to decide
+
+- **The swap confirmation email should name both plots,** so a tenant can tell a real request from a fake one. *Raised by: security*
+- **The form can reuse the waiting list's email templates** rather than adding new ones. *Raised by: buildability*
+- **Call the form "swap my plot", not "reallocate".** *Raised by: ease of use*
