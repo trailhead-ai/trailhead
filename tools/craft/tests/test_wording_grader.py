@@ -1493,6 +1493,10 @@ FINDING_CAPTURE_VERDICTS.update(
         f"precal-consult-{n}": {"calibration-level": "internal", "severity-name": "plain", "reviewer-name": "plain"}
         for n in (1, 2, 3)
     }
+    | {
+        f"cal-consult-{n}": {"calibration-level": "plain", "severity-name": "plain", "reviewer-name": "plain"}
+        for n in (1, 2, 3)
+    }
 )
 
 
