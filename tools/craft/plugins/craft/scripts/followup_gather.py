@@ -24,8 +24,8 @@ Stdout on exit 0 is one JSON object:
 - `followups`: `{name, title, status}` items sorted by `name`. `name` is the
   bare task slug (no `task/` prefix) and has passed the shape check above, so
   it can be substituted into `lore record show --json --vault <vault>
-  task/<name>`. `title` has control characters stripped and credential spans
-  redacted;
+  task/<name>`; it is a record slug and is not credential-scrubbed. `title`
+  has control characters stripped and credential spans redacted;
 - the basis: `slice-basis` (`labelled` or `linked-parents`), `slices` (their
   names), `child-count`, `candidates-read`, `kept`, `excluded-by-label`
   (`{count, names}`) and `skipped-edges`.
@@ -41,9 +41,13 @@ marked `craft/followup-parent` stand in (`linked-parents`). Children come from
 the live `lore task list`. Links are discovered with `lore search` using
 `related-spec:(...)` and `related-task:(...)` disjunctions of at most
 QUERY_BATCH_SIZE quoted values (a longer one overflows SQLite's parser), and
-every candidate is confirmed by a complete `record show` read. A `related`
-value or record name that fails the shape check, or an edge naming a task that
-does not exist, is skipped and counted in `skipped-edges`.
+a search hit is kept only when its own complete `record show` read names the
+spec, a slice or a child, or when an outbound edge read from the spec, a slice
+or a child names it; a hit with neither is dropped (visible as `candidates-read`
+exceeding `kept`). A `related` value or record name that fails the shape check,
+or an edge naming a task that does not exist, is skipped and counted in
+`skipped-edges`. A vault name that fails the shape check is skipped, never
+queried and never emitted.
 
 Exit codes:
     0  the slice loop has ended; the JSON object is on stdout.
@@ -85,8 +89,6 @@ from pathlib import Path
 _SCRIPT_DIR = Path(__file__).resolve().parent
 if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
-
-import capture_scan  # noqa: E402
 
 REASON_CODES = frozenset(
     {
@@ -157,7 +159,7 @@ def _vault_rows(runner) -> list[list[str]]:
     if done.returncode != 0:
         raise GatherError("lore-failed")
     rows = [[c.strip() for c in line.split("\t")] for line in done.stdout.splitlines()]
-    rows = [r for r in rows if r[0]]
+    rows = [r for r in rows if r[0] and _shape_ok(r[0])]
     if not rows:
         raise GatherError("no-vaults")
     return rows
@@ -242,6 +244,8 @@ def _call_json(runner, argv: list[str]):
 
 
 def sanitize_title(title: str) -> str:
+    import capture_scan
+
     clean = _CONTROL_RE.sub("", title)
     spans = {
         f.text
@@ -259,6 +263,19 @@ def _shape_ok(name: str) -> bool:
         and not name.startswith("-")
         and ".." not in name.split("/")
     )
+
+
+def _related(sidecar: dict, kind: str) -> set[str]:
+    related = sidecar.get("related")
+    values = related.get(kind) if isinstance(related, dict) else None
+    return {
+        v.removeprefix(f"{kind}/") for v in values if isinstance(v, str)
+    } if isinstance(values, list) else set()
+
+
+def _names_any(sidecar: dict, spec: str, anchors: list[str]) -> bool:
+    """Whether the task's own `related` edges name the spec or any anchor task."""
+    return spec in _related(sidecar, "spec") or bool(_related(sidecar, "task") & set(anchors))
 
 
 class _Gatherer:
@@ -379,9 +396,16 @@ def gather_followups(runner, vault: str, spec: str, spec_sidecar: dict) -> dict:
         pool |= g.outbound(g.read(name))
     pool -= set(slices) | set(children)
 
+    anchors = [*slices, *children]
+    named_by_edge = g.outbound(spec_sidecar)
+    for name in anchors:
+        named_by_edge |= g.outbound(g.read(name))
+
     followups, excluded = [], []
     for name in sorted(pool):
         sc = g.read(name)
+        if name not in named_by_edge and not _names_any(sc, spec, anchors):
+            continue
         if sc["status"] not in OPEN_STATUSES or sc.get("parent"):
             continue
         if SLICE_LABEL in _labels(sc) or FOLLOWUP_PARENT_LABEL in _labels(sc):
