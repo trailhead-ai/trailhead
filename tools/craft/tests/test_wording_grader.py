@@ -892,6 +892,28 @@ def test_a_heading_group_label_is_internal_only_when_it_is_the_whole_heading(rep
     assert severity("## Important things to know", reports) == "none"
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "  ## Important",
+        "   ### Minor (4)",
+        "\tMinor findings follow\n\n  ## Minor",
+        "  ## Important \u2014 later",
+        "  ## Minor (worth a look)",
+    ],
+)
+def test_an_indented_heading_is_read_like_a_heading_at_the_margin(text, reports):
+    assert severity(text, reports) == "internal"
+
+
+def test_an_indented_heading_with_more_words_is_not_a_level_label(reports):
+    assert severity("  ## Important things to know", reports) == "none"
+
+
+def test_an_indented_heading_starts_its_own_line_and_does_not_join_the_line_above(reports):
+    assert severity("Notes for the reader\n  ## Important", reports) == "internal"
+
+
 def test_a_table_cell_that_is_a_bare_level_is_internal(reports):
     assert severity("| level | n |\n|---|---|\n| Minor | 4 |\n", reports) == "internal"
     assert severity("| level | n |\n|---|---|\n| a minor one | 4 |\n", reports) == "none"
@@ -1205,6 +1227,28 @@ def test_reports_that_are_not_utf8_could_not_grade(check, tmp_path):
     path = tmp_path / "r.md"
     path.write_bytes(b"- [Critical] caf\xe9\n")
     could_not_grade(["--check", check, "--reports", str(path)], b"x\n", "reports-not-utf8")
+
+
+@pytest.mark.parametrize("check", ("severity-name", "reviewer-name"))
+def test_a_reports_file_over_the_cap_could_not_grade_and_one_at_the_cap_is_read(check, tmp_path):
+    cap = _load_module().MAX_INPUT_BYTES
+    at_cap = tmp_path / "at.md"
+    at_cap.write_bytes(b"x" * cap)
+    over = tmp_path / "over.md"
+    over.write_bytes(b"x" * (cap + 1))
+    assert run_grader(["--check", check, "--reports", str(at_cap)], b"x\n").returncode == 1
+    could_not_grade(["--check", check, "--reports", str(over)], b"x\n", "reports-too-large")
+
+
+def test_a_criteria_file_over_the_cap_could_not_grade_and_one_at_the_cap_is_read(tmp_path):
+    cap = _load_module().MAX_INPUT_BYTES
+    head = b"**AC1.** alpha beta gamma delta\n\n"
+    at_cap = tmp_path / "at.md"
+    at_cap.write_bytes(head + b"x" * (cap - len(head)))
+    over = tmp_path / "over.md"
+    over.write_bytes(head + b"x" * (cap + 1 - len(head)))
+    assert run_grader(["--check", "criterion-mention", "--criteria", str(at_cap)], b"x\n").returncode == 1
+    could_not_grade(["--check", "criterion-mention", "--criteria", str(over)], b"x\n", "criteria-too-large")
 
 
 def test_every_reports_file_given_can_supply_a_quotation(reports, tmp_path):

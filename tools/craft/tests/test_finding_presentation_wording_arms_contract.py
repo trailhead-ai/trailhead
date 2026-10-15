@@ -4,15 +4,16 @@ Every arm is the concatenation of source documents, each read at a pinned git re
 The manifest below names those sources per arm. These tests pin that each committed arm
 file is exactly what its manifest composes, that composing from a different revision of a
 pinned source does not give the same bytes, that the manifest and the directory list the
-same files, and that every reviewer label a canned report carries is one the case's
-pre-registered grammar names.
+same files, and that the grader reads every reviewer label a canned report carries as the
+case's pre-registered grammar classes it.
 
 Nothing here asserts the eval's measured result; that is decided by dispatched runs.
 """
 
 from __future__ import annotations
 
-import re
+import subprocess
+import sys
 
 import pytest
 from test_ritual_output_wording_arms_contract import (
@@ -30,7 +31,7 @@ CASE_DIR = (
 )
 ARMS_DIR = CASE_DIR / "arms"
 FIXTURES_DIR = CASE_DIR / "fixtures"
-EXPECTED_MD = CASE_DIR / "expected.md"
+GRADER = GIT_ROOT / "tools" / "craft" / "plugins" / "craft" / "scripts" / "wording_grader.py"
 
 # origin/main when the case was cut: every baseline arm reads every source here.
 BASELINE_REVISION = "f68200933f69e0c00bc79634fb4758b8fa039c1c"
@@ -151,33 +152,26 @@ def report_labels(text: str) -> list[str]:
     return labels
 
 
-def grammar_labels(expected_text: str) -> set[str]:
-    """The first-column labels of the `### Reviewer labels` table in expected.md."""
-    section = expected_text.split("### Reviewer labels", 1)[1].split("\n#", 1)[0]
-    return {
-        match.group(1)
-        for line in section.splitlines()
-        if (match := re.match(r"\|\s*`([^`]+)`\s*\|", line))
-    }
-
-
 def test_report_labels_reads_headings_and_skips_fenced_ones():
     text = "# T\n### Builder\nbody\n```\n### Fenced\n```\n### Security\n"
     assert report_labels(text) == ["Builder", "Security"]
-
-
-def test_grammar_labels_reads_the_first_column_of_the_labels_table():
-    text = "### Reviewer labels\n\n| Label | Class |\n|---|---|\n| `A` | x |\n| `B b` | y |\n\n### Next\n| `C` | z |\n"
-    assert grammar_labels(text) == {"A", "B b"}
 
 
 REPORT_FILES = ["reports-lenses.md", "reports-consult.md", "reports-spec-review.md"]
 
 
 @pytest.mark.parametrize("report_file", REPORT_FILES)
-def test_every_label_in_a_canned_report_is_one_the_grammar_names(report_file: str):
-    known = grammar_labels(EXPECTED_MD.read_text(encoding="utf-8"))
-    labels = report_labels((FIXTURES_DIR / report_file).read_text(encoding="utf-8"))
+def test_the_grader_reads_every_label_a_canned_report_carries_as_the_grammar_implies(report_file: str):
+    path = FIXTURES_DIR / report_file
+    labels = report_labels(path.read_text(encoding="utf-8"))
     assert labels, f"{report_file} carries no `### <label>` heading"
-    unknown = [label for label in labels if label not in known]
-    assert not unknown, f"{report_file} has label(s) the grammar does not name: {unknown}"
+    for label in labels:
+        result = subprocess.run(
+            [sys.executable, str(GRADER), "--check", "reviewer-name", "--reports", str(path)],
+            input=f"{label} found nothing that blocks the work.\n".encode(),
+            capture_output=True,
+            timeout=60,
+        )
+        expected = "plain" if label == "Security" else "internal"
+        verdict = f"reviewer-name: {expected}\n".encode()
+        assert result.stdout == verdict, (report_file, label, result.stdout, result.stderr)

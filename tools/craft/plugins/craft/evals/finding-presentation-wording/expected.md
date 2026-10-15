@@ -916,3 +916,30 @@ recorded. No file was added under `runs/`.
 - The live run needed a `CLAUDE.md` and a narrow `Bash` grant that the dispatch's command did not give; the finding
   above is about the skill's own preflight.
 - The finding-order reading is by an agent and is unmeasured by the protocol's own terms.
+
+## Review notes (2026-10-15)
+
+Appended after the whole-change review. Nothing above this heading is rewritten, and the grammar and its amendment
+stand as written.
+
+**(a) The lowercase `minor` leak and what the treated results do not cover.** The live consult's lowercase "minor"
+comes from two instructions in `council.md`: the maturity-calibration paragraph (lines 202-205), which tells the
+reader-facing text to restate a downgraded finding as "migration and backfill — Minor, downgraded by…", and the
+stand-down restatement instruction (lines 237-240), whose rendered lines end "would rate Critical"
+(`scripts/maturity_bars.py:490-491`). No fixture staged prototype maturity or a stand-down: every reports fixture is
+production with "No stand-downs". So the treated results do not exercise that path, and AC22 is not closable on them
+alone. A follow-up measurement on this branch covers it.
+
+**(b) The specreview "no change" finding-order reading.** The spec's settled point is that the spec review's opening
+summary keeps one row per finding that needs a decision, and that AC17 to AC21 govern a finding printed in full, on
+request or saved. The staged step is the opening summary, so a table row with no opening sentence is what that step
+is settled to produce and is not a miss against those criteria. The in-scope surface for them, the full detail on
+request (`gauntlet/SKILL.md:317-320`), was never captured, so the staged step is not the surface those criteria
+govern there. "No change" is a reading of the summary rows only.
+
+**(c) Limits.** `persisted-levels` reads `*Critical:* (none)` and `*Critical:* — none` as `kept`. That is faithful to
+the frozen grammar, and it is the failure shape the guard exists for: a Critical entry emptied while the label stays.
+No treated block had it. Separately, the grader now reads an indented heading line (`  ## Important — later`) the
+way the amendment's S4 and S6 say, removing the leading `#`s from the line before testing; before this it read such a
+line as `none`. All 33 committed captures (12 baseline, 21 treated) were graded again on all three checks (99 verdicts),
+and no verdict changed.

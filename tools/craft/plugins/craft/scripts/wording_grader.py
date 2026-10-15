@@ -53,11 +53,13 @@ Exit codes:
        bad-arguments, missing-check, unknown-check, option-not-applicable,
        missing-criteria, criteria-unreadable, criteria-not-utf8,
        no-criteria-found, duplicate-criterion, missing-reports,
-       reports-unreadable, reports-not-utf8, empty-input, input-too-large,
-       not-utf8. Zero bytes of stdin is `empty-input`; input that is only
-       whitespace is a capture and is graded.
+       reports-unreadable, reports-not-utf8, criteria-too-large,
+       reports-too-large, empty-input, input-too-large, not-utf8. Zero bytes of stdin is `empty-input`;
+       input that is only whitespace is a capture and is graded.
 
-Input is capped at MAX_INPUT_BYTES. Every pattern is linear and none nests one
+Stdin, each `--criteria` file and each `--reports` file are capped at MAX_INPUT_BYTES: a
+file over the cap is never read past it and could not be graded (`criteria-too-large`,
+`reports-too-large`). Every pattern is linear and none nests one
 repeat inside another; the scans that need a window walk the line by index.
 A range wider than MAX_RANGE_SPAN is not expanded: it can name no criterion the
 criteria file defines and counts as no earlier mention.
@@ -440,22 +442,30 @@ def _normalise(text: str) -> str:
 def _outside_fences(physical: list[str]) -> list[tuple[str, bool]]:
     """The logical lines outside fenced blocks as (text, is_heading) pairs; a block ends the line before it."""
     grouped: list[tuple[str, bool]] = []
+    parts: list[str] = []
+    heading_line = False
     joinable = False
+    def close() -> None:
+        if parts:
+            grouped.append((" ".join(parts), heading_line))
+            parts.clear()
+
     for raw, fenced in zip(physical, _fenced_flags(physical)):
         stripped = raw.strip()
-        if fenced:
+        if fenced or not stripped:
+            close()
             joinable = False
             continue
-        if not stripped:
-            joinable = False
-            continue
-        starts_own = raw.startswith("#") or stripped.startswith("|") or _LIST_ITEM_RE.match(raw) is not None
+        is_heading = stripped.startswith("#")
+        starts_own = is_heading or stripped.startswith("|") or _LIST_ITEM_RE.match(raw) is not None
         if joinable and not starts_own:
-            text, heading = grouped[-1]
-            grouped[-1] = (text + " " + stripped, heading)
+            parts.append(stripped)
         else:
-            grouped.append((stripped, raw.startswith("#")))
+            close()
+            parts.append(stripped)
+            heading_line = is_heading
         joinable = True
+    close()
 
     lines: list[tuple[str, bool]] = []
     for text, heading in grouped:
@@ -593,11 +603,14 @@ def _read_stdin() -> str:
 
 
 def _read_utf8(path: str, kind: str) -> str:
-    """The file's text; `<kind>-unreadable` or `<kind>-not-utf8` when it cannot be had."""
+    """The file's text; `<kind>-unreadable`, `<kind>-too-large` or `<kind>-not-utf8` when it cannot be had."""
     try:
-        data = Path(path).read_bytes()
+        with open(path, "rb") as handle:
+            data = handle.read(MAX_INPUT_BYTES + 1)
     except OSError as exc:
         raise CouldNotGrade(f"{kind}-unreadable", f"cannot read {path}: {exc}") from exc
+    if len(data) > MAX_INPUT_BYTES:
+        raise CouldNotGrade(f"{kind}-too-large", f"{path} is over {MAX_INPUT_BYTES} bytes")
     try:
         return data.decode("utf-8")
     except UnicodeDecodeError as exc:
