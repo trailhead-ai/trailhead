@@ -265,10 +265,11 @@ printed basis, whether each lists identifiers or reads `none` — without `parti
 ledger already covers in part and one no slice has ever touched read identically on `candidates:`,
 and step 7's selection can't tell them apart. `void:` names the ledger coverage of a criterion that
 no longer counts toward anything: `(removed by amend)` marks a criterion since removed, and
-`(reopened by amend)` marks one an operator reopened, which is offered again as a candidate.
-`closed:` lists the criteria counted as done by an operator's close. `closed-uncounted:` lists a
-close with no slice coverage behind it; amend refuses that, so it means the history was edited
-outside lore — investigate it, and never edit the ledger.
+`(reopened by amend)` marks one an operator reopened, so the coverage recorded before the reopen no
+longer counts; `candidates:` stays the authority on what is offered, since a later slice can cover
+the criterion again. `closed:` lists the criteria counted as done by an operator's close.
+`closed-uncounted:` lists a close with no slice coverage behind it; amend refuses that, so it means
+the history was edited outside lore — investigate it, and never edit the ledger.
 
 A non-zero exit refuses this pass, in the same shape steps 3, 5, and 9 already use for their own
 refusals: name the remedy the gate's own `reason-code:` stderr token identifies, scoped to what the
