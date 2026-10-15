@@ -1438,12 +1438,14 @@ REPORT_FILES = {
     "plan": "reports-lenses.md",
     "specreview": "reports-spec-review.md",
     "driver": "reports-lenses.md",
+    "consult-calibrated": "reports-calibrated.md",
 }
 SITE_CHECKS = {
     "consult": ("severity-name", "reviewer-name"),
     "plan": ("severity-name", "reviewer-name", "persisted-levels"),
     "specreview": ("severity-name", "reviewer-name"),
     "driver": ("severity-name", "reviewer-name", "persisted-levels"),
+    "consult-calibrated": ("calibration-level", "severity-name", "reviewer-name"),
 }
 
 # One row per committed capture: the verdict of each check the site runs. The pre-registered expectation for a
@@ -1486,13 +1488,26 @@ FINDING_CAPTURE_VERDICTS = {
     "treated-driver-6": {"severity-name": "plain", "reviewer-name": "plain", "persisted-levels": "kept"},
 }
 
+FINDING_CAPTURE_VERDICTS.update(
+    {
+        f"precal-consult-{n}": {"calibration-level": "internal", "severity-name": "plain", "reviewer-name": "plain"}
+        for n in (1, 2, 3)
+    }
+)
+
+
+def _site(stem):
+    """The site a capture belongs to: the calibrated consult's arms are `precal-` and `cal-`, no site segment."""
+    return "consult-calibrated" if stem.startswith(("precal-", "cal-")) else stem.split("-")[1]
+
+
 FINDING_CAPTURES = sorted(p for p in FINDING_RUNS.glob("*.txt") if not p.name.endswith(".stderr.txt"))
 
 
 @pytest.mark.parametrize("capture", FINDING_CAPTURES, ids=lambda p: p.stem)
 def test_every_finding_capture_grades_to_its_mapped_verdicts_against_its_sites_reports(capture):
     assert capture.stem in FINDING_CAPTURE_VERDICTS, f"{capture.name} is not in the capture-to-verdict table"
-    site = capture.stem.split("-")[1]
+    site = _site(capture.stem)
     assert set(FINDING_CAPTURE_VERDICTS[capture.stem]) == set(SITE_CHECKS[site])
     for check, verdict in FINDING_CAPTURE_VERDICTS[capture.stem].items():
         args = ["--check", check]
