@@ -130,3 +130,34 @@ def test_reply_is_a_json_fence_with_two_space_indents(tmp_path):
 @pytest.mark.parametrize(("index", "letter"), [(0, "A"), (25, "Z")])
 def test_the_letter_function_maps_an_index_to_its_letter(tmp_path, index, letter):
     assert _probe(tmp_path, _round(), f"return window.PadReply.letter({index});") == letter
+
+
+INVISIBLES = ["​", "‮", "⁦", "﻿", " ", " ", "\u0085", "\U000e0001"]
+INVISIBLE_TEXT = "a" + "".join(INVISIBLES) + "z"
+
+
+@pytest.mark.parametrize("char", INVISIBLES, ids=lambda c: f"U+{ord(c):04X}")
+def test_invisible_and_direction_characters_are_escaped_in_the_reply_text(tmp_path, char):
+    data = _round(prompts=(INVISIBLE_TEXT,), title=INVISIBLE_TEXT)
+    text = _text(tmp_path, data, [_answer(note=INVISIBLE_TEXT)])
+    assert char not in text
+
+
+def test_invisible_characters_round_trip_through_the_escapes(tmp_path):
+    data = _round(prompts=(INVISIBLE_TEXT,), title=INVISIBLE_TEXT)
+    got = _reply(tmp_path, data, [_answer(note=INVISIBLE_TEXT)])
+    assert got["pad"] == INVISIBLE_TEXT
+    assert got["answers"][0]["question"] == INVISIBLE_TEXT
+    assert got["answers"][0]["note"] == INVISIBLE_TEXT
+
+
+def test_astral_format_character_is_escaped_as_its_surrogate_pair(tmp_path):
+    text = _text(tmp_path, _round(), [_answer(note="\U000e0001")])
+    assert "\\udb40\\udc01" in text
+
+
+def test_ordinary_non_ascii_text_stays_raw(tmp_path):
+    note = "é 中文 \U0001f600"
+    text = _text(tmp_path, _round(), [_answer(note=note)])
+    assert note in text
+    assert _body(text)["answers"][0]["note"] == note
