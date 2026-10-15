@@ -425,6 +425,21 @@ def test_a_publisher_that_raises_leaves_no_temp_folder_and_no_site(rig):
     assert not (rig.ws / "sites").exists()
 
 
+def test_a_publisher_that_cannot_be_started_is_refused_under_publish_not_as_a_site_build_failure(rig, capsys):
+    def missing(cmd, env, timeout):
+        raise FileNotFoundError(2, "No such file or directory")
+
+    assert rig.run(publish_runner=missing) == 1
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err.splitlines() == [
+        "scratch-pad: publish: could not start the publisher: No such file or directory"
+    ]
+    assert rig.leftovers() == []
+    assert not (rig.ws / "sites").exists()
+
+
 def test_a_failure_filling_the_temp_folder_is_a_refusal_and_leaves_nothing(rig, capsys, monkeypatch):
     def full_disk(folder, kit_dir, round_js):
         (folder / "half-written").write_text("x")
@@ -606,4 +621,38 @@ def test_the_publisher_gets_a_private_prefixed_build_outside_the_workspace(rig):
     assert seen["mode"] == 0o700
     assert seen["index"] and seen["round"] == _round()
     assert seen["kit"] == (SKILL_DIR / "kit" / "index.html").read_bytes()
+    assert rig.leftovers() == []
+
+
+UNDECODABLE_OK = (
+    "import sys\n"
+    "sys.stdout.buffer.write(b'http://127.0.0.1:7314/x/\\xff/\\n')\n"
+)
+UNDECODABLE_FAIL = (
+    "import sys\n"
+    "sys.stderr.buffer.write(b'error: bad \\xff byte\\n')\n"
+    "sys.exit(3)\n"
+)
+
+
+def test_a_publisher_line_with_undecodable_bytes_is_relayed_escaped_without_a_traceback(rig, capsys):
+    mod = _load("scratch_pad_badbytes_ok", _skill_tree(rig.tmp_path, UNDECODABLE_OK))
+
+    code = mod.main(rig.argv(), env=rig.env, cwd=rig.member)
+
+    captured = capsys.readouterr()
+    assert code == 0
+    assert captured.out.splitlines()[0] == "http://127.0.0.1:7314/x/\\xff/"
+    assert "Traceback" not in captured.err
+    assert rig.leftovers() == []
+
+
+def test_a_publisher_failure_with_undecodable_stderr_is_refused_cleanly(rig, capsys):
+    mod = _load("scratch_pad_badbytes_fail", _skill_tree(rig.tmp_path, UNDECODABLE_FAIL))
+
+    code = mod.main(rig.argv(), env=rig.env, cwd=rig.member)
+
+    captured = capsys.readouterr()
+    assert code == 1
+    assert captured.err.splitlines() == ["scratch-pad: publish: error: bad \\\\xff byte"]
     assert rig.leftovers() == []
