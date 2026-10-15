@@ -23,7 +23,8 @@ Contract
   ``$CAMP_STATE_DIR`` verbatim, else ``$XDG_STATE_HOME/camp``, else
   ``~/.local/state/camp``). When its parts are ``<group>/worktrees/<slug>/...``
   at any depth the result is ``<state root>/<group>/worktrees/<slug>``;
-  otherwise ``None``.
+  otherwise ``None``. A working directory that cannot be read counts as outside
+  any workspace, so the pad builds on disk.
 * Inside a camp workspace (``enclosing_workspace`` of the working directory),
   the pad is not built under Outpost's state directory. The round and pad
   name are checked as above; a pad name with anything at
@@ -33,7 +34,10 @@ Contract
   run as ``<python> <publish_site.py> <tmp> <pad> --workspace-path <ws>``
   under a wall-clock timeout. On success stdout is the publisher's stdout
   verbatim, then ``pad folder: <ws>/sites/<pad>``. A non-zero publisher exit is
-  refused with each of its stderr lines as ``scratch-pad: publish: <line>``. On
+  refused with each of its stderr lines as ``scratch-pad: publish: <line>``;
+  output bytes that are not valid in the locale encoding are shown as
+  backslash escapes rather than failing. A publisher that cannot be started
+  is refused as ``scratch-pad: publish: could not start the publisher: <why>``. On
   timeout the publisher is killed and the outcome is read from disk: a
   ``<ws>/sites/<pad>/index.html`` gives a ``note:`` that the pad was published
   but not confirmed (exit 0), otherwise a refusal. The temp folder is removed
@@ -326,7 +330,9 @@ class Built(NamedTuple):
 
 def _run_publisher(cmd: Sequence[str], env: Mapping[str, str], timeout: float):
     """Run the publisher; raises ``subprocess.TimeoutExpired`` after killing it."""
-    return subprocess.run(list(cmd), env=dict(env), capture_output=True, text=True, timeout=timeout)
+    return subprocess.run(
+        list(cmd), env=dict(env), capture_output=True, text=True, errors="backslashreplace", timeout=timeout
+    )
 
 
 def _esc(text: str) -> str:
@@ -398,6 +404,8 @@ def _publish_to_workspace(
         cmd = [sys.executable, str(PUBLISHER_PATH), str(tmp), pad, "--workspace-path", str(workspace)]
         try:
             result = runner(cmd, env, timeout)
+        except OSError as exc:
+            raise Refusal([_line("publish", f"could not start the publisher: {exc.strerror or exc}")])
         except subprocess.TimeoutExpired:
             if (final / "index.html").is_file():
                 note = "note: the pad was published but the publisher did not confirm it in time"
