@@ -203,7 +203,7 @@ then escalate to the operator for a history rewrite; never amend it out.
 
 On a `spec`, amend keeps `**ACn.**` criterion numbers stable and records removals: it refuses (writing nothing) a skipped, reused or relabelled number, prints `removed criteria: ...` for each removal, and `--revert-to` restores one; its limits are that a relabel which also rewords escapes detection, a criterion removed outside amend (e.g. in a draft) is unprotected, and an older lore refuses writes to a spec once an entry carries the new `criteria` field, so only updating lore recovers it.
 
-`--reopen ACn` makes the slice loop offer a criterion again by voiding the coverage of the ledger entries stored at that moment (a later slice's coverage counts), and `--close ACn` makes it count as done; a close needs some slice coverage already naming the criterion, a close undoes a mistaken reopen, neither edits the ledger, and the reason is permanent and must never hold secrets.
+`--reopen ACn` makes the slice loop offer a criterion again by voiding the coverage of the ledger entries stored at that moment (a later slice's coverage counts), and `--close ACn` counts it as done even without a slice fully covering it; a close needs some slice (full or partial) coverage already naming the criterion, a close undoes a mistaken reopen, neither edits the ledger, and the reason is permanent and must never hold secrets.
 
 **A transcript imported in error comes out with `lore record delete`.** That
 removes it from the working copy only — git history retains every imported
