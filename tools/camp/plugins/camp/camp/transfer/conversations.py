@@ -211,6 +211,7 @@ from ..host.transport import (
     default_producer_spawn,
     default_stream_spawner,
     outcome_detail,
+    require_answer,
     stream_camp,
 )
 from ..launch.recovery import session_candidates
@@ -504,6 +505,7 @@ def send_conversation(
         extra_ssh_options=extra_ssh_options,
         spawn=spawn,
     )
+    outcome = require_answer(outcome)
     if isinstance(outcome, Answered):
         after = _digest_conversation(transcript_path, nested_dir)
         if after != before:

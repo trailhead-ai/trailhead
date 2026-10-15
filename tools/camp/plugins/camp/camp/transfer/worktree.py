@@ -70,6 +70,7 @@ from ..host.transport import (
     TransportOutcome,
     default_producer_spawn,
     default_stream_spawner,
+    require_answer,
     stream_camp,
 )
 
@@ -165,7 +166,7 @@ def send_worktree(
         member,
     ]
     producer = producer_spawn(build_archive_argv(worktree, excluded))
-    return stream_camp(
+    outcome = stream_camp(
         host,
         remote_argv,
         producer,
@@ -175,6 +176,7 @@ def send_worktree(
         extra_ssh_options=extra_ssh_options,
         spawn=spawn,
     )
+    return require_answer(outcome)
 
 
 # ---------------------------------------------------------------------------

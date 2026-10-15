@@ -101,10 +101,15 @@ def _munge(path: Path) -> str:
 
 def _consuming_stream_spawner(argv, env):
     """A `StreamSpawner` standing in for the peer: reads the whole producer
-    stream to completion and exits 0, without any real ssh or receiving
-    phase — that half is a separate task's build."""
+    stream to completion, answers the way a receiving phase does on success,
+    and exits 0, without any real ssh or receiving phase."""
     return subprocess.Popen(
-        [sys.executable, "-c", "import sys; sys.stdin.buffer.read(); sys.stdout.buffer.write(b'ok')"],
+        [
+            sys.executable,
+            "-c",
+            "import sys; sys.stdin.buffer.read(); "
+            "sys.stdout.buffer.write(b'{\"contract_version\": 1}')",
+        ],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -123,7 +128,7 @@ def _capturing_stream_spawner(capture_path: Path):
                 sys.executable,
                 "-c",
                 "import sys; open(sys.argv[1], 'wb').write(sys.stdin.buffer.read()); "
-                "sys.stdout.buffer.write(b'ok')",
+                "sys.stdout.buffer.write(b'{\"contract_version\": 1}')",
                 str(capture_path),
             ],
             stdin=subprocess.PIPE,
