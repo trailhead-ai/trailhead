@@ -318,7 +318,6 @@ def _ensure_pads_root(pads_root: Path) -> None:
 
 
 class Built(NamedTuple):
-    index: Path
     folder: Path
     lines: list[str]
 
@@ -330,6 +329,10 @@ def _run_publisher(cmd: Sequence[str], env: Mapping[str, str], timeout: float):
 
 def _esc(text: str) -> str:
     return _q(text)[1:-1]
+
+
+def _exists(pad: str) -> Refusal:
+    return Refusal([f"scratch-pad: pad {_q(pad)} already exists — choose another --pad name"])
 
 
 def _check_and_encode(round_path: Path, pad: str, kit_dir: Path) -> str:
@@ -364,7 +367,6 @@ def _write_pad(folder: Path, kit_dir: Path, round_js: str) -> None:
 def _publish_to_workspace(
     workspace: Path, pad: str, kit_dir: Path, round_js: str, env: Mapping[str, str], runner, timeout: float
 ) -> Built:
-    exists = Refusal([f"scratch-pad: pad {_q(pad)} already exists — choose another --pad name"])
     if not PUBLISHER_PATH.is_file():
         raise Refusal(
             [
@@ -379,7 +381,7 @@ def _publish_to_workspace(
     # Only an early refusal: the publisher's own refusal without --overwrite, taken under its
     # workspace lock, is what makes two racing runs on one name yield one site.
     if os.path.lexists(final):
-        raise exists
+        raise _exists(pad)
 
     tmp = Path(tempfile.mkdtemp(prefix="scratch-pad-"))
     try:
@@ -390,27 +392,31 @@ def _publish_to_workspace(
         except subprocess.TimeoutExpired:
             if (final / "index.html").is_file():
                 note = "note: the pad was published but the publisher did not confirm it in time"
-                return Built(final / "index.html", final, [note])
+                return Built(final, [note])
             raise Refusal(
                 [_line("publish", f"the publisher did not finish within {timeout:g} seconds and no pad was published")]
             )
         if result.returncode != 0:
             reasons = [_line("publish", _esc(line)) for line in result.stderr.splitlines() if line.strip()]
             raise Refusal(reasons or [_line("publish", f"the publisher exited with status {result.returncode}")])
-        return Built(final / "index.html", final, result.stdout.splitlines())
+        return Built(final, result.stdout.splitlines())
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
 def _build(
-    round_path: Path,
+    round_path: Path | str,
     pad: str,
-    kit_dir: Path,
-    env: Mapping[str, str],
-    cwd: Path,
+    kit_dir: Path | str,
+    env: Mapping[str, str] | None,
+    cwd: Path | str | None,
     runner,
     timeout: float,
 ) -> Built:
+    round_path, kit_dir = Path(round_path), Path(kit_dir)
+    env = os.environ if env is None else env
+    cwd = Path.cwd() if cwd is None else Path(cwd)
+    runner = runner or _run_publisher
     round_js = _check_and_encode(round_path, pad, kit_dir)
     workspace = enclosing_workspace(cwd, env)
     if workspace is not None:
@@ -419,9 +425,8 @@ def _build(
     pads_root = _pads_root(env)
     final = pads_root / pad
     _ensure_pads_root(pads_root)
-    exists = Refusal([f"scratch-pad: pad {_q(pad)} already exists — choose another --pad name"])
     if os.path.lexists(final):
-        raise exists
+        raise _exists(pad)
 
     tmp = Path(tempfile.mkdtemp(prefix=f".tmp-{pad}-", dir=pads_root))
     try:
@@ -430,14 +435,14 @@ def _build(
             os.rename(tmp, final)
         except OSError:
             if os.path.lexists(final):
-                raise exists
+                raise _exists(pad)
             raise
     except BaseException as exc:
         shutil.rmtree(tmp, ignore_errors=True)
         if isinstance(exc, OSError):
             raise Refusal([_line(_q(str(final)), f"could not build the pad: {exc.strerror or exc}")])
         raise
-    return Built(final / "index.html", final, [(final / "index.html").as_uri()])
+    return Built(final, [(final / "index.html").as_uri()])
 
 
 def build_pad(
@@ -458,16 +463,8 @@ def build_pad(
     the pad is built on disk or published into the enclosing camp workspace;
     *publish_runner* is ``(cmd, env, timeout) -> CompletedProcess``.
     """
-    built = _build(
-        Path(round_path),
-        pad,
-        Path(kit_dir),
-        os.environ if env is None else env,
-        Path.cwd() if cwd is None else Path(cwd),
-        publish_runner or _run_publisher,
-        publish_timeout,
-    )
-    return built.index, built.folder
+    folder = _build(round_path, pad, kit_dir, env, cwd, publish_runner, publish_timeout).folder
+    return folder / "index.html", folder
 
 
 def main(
@@ -485,15 +482,7 @@ def main(
     parser.add_argument("--round", required=True, dest="round_path", help="path to the round's JSON file")
     args = parser.parse_args(argv)
     try:
-        built = _build(
-            Path(args.round_path),
-            args.pad,
-            DEFAULT_KIT_DIR,
-            os.environ if env is None else env,
-            Path.cwd() if cwd is None else Path(cwd),
-            publish_runner or _run_publisher,
-            publish_timeout,
-        )
+        built = _build(args.round_path, args.pad, DEFAULT_KIT_DIR, env, cwd, publish_runner, publish_timeout)
     except Refusal as exc:
         for line in exc.lines:
             print(line, file=sys.stderr)
