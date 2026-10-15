@@ -30,7 +30,7 @@ HOSTILE = [
 SNAPSHOT = """
 const shown = (e) => e.getClientRects().length > 0;
 const text = (e) => (e ? e.textContent : null);
-const entries = [...document.querySelectorAll('nav button')].map((b) => ({
+const entries = [...document.querySelectorAll('nav button:not(.pad-reply-entry)')].map((b) => ({
   text: text(b.querySelector('.pad-entry-label')),
   current: b.getAttribute('aria-current'),
 }));
@@ -107,7 +107,7 @@ def test_clicking_an_entry_shows_only_that_question_and_marks_it_current(tmp_pat
     return {after, cardsNow};
     """
     got = _run(tmp_path, _round(3), js)
-    assert got["after"] == [None, None, "true"]
+    assert got["after"] == [None, None, "true", None]
     assert got["cardsNow"] == ["Q2 opt 0", "Q2 opt 1"]
 
 
@@ -296,7 +296,7 @@ def test_question_entries_are_buttons_and_ink_layer_is_hidden_from_assistive_tec
     };
     """
     got = _run(tmp_path, _round(3), js)
-    assert got["entryTags"] == ["BUTTON"] * 3
+    assert got["entryTags"] == ["BUTTON"] * 4
     assert got["current"] == 1
     assert got["inks"] == [{"tag": "svg", "hidden": "true", "inDrawing": True}] * 2
     assert got["drawings"] == [["0", "0"], ["0", "1"]]

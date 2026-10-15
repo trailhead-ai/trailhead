@@ -124,6 +124,91 @@
       .then(function () { notice.hidden = fontLoaded(); });
   }
 
+  var REPLY_UNBUILT = "The reply could not be built. Answer in words in your session instead.";
+  var COPIED = "Copied. Paste it into your session.";
+  var BLOCKED = "Your browser blocked copying. The reply is selected \u2014 press Ctrl+C (\u2318C on a Mac).";
+
+  function summaryOf(question, answer) {
+    var head = question.prompt + " \u2014 ";
+    if (answer.pick !== null) return head + window.PadReply.letter(answer.pick) + ", " + question.options[answer.pick].name;
+    if (answer.none) return head + "none of these";
+    var said = [];
+    if (answer.not.length) said.push("not " + answer.not.map(window.PadReply.letter).join(", "));
+    if (answer.note) said.push("has a note");
+    return said.length ? head + "no pick yet (" + said.join("; ") + ")" : head + "no answer yet";
+  }
+
+  function buildReplyStep(data, answers) {
+    var panel = el("section", "pad-reply");
+    panel.id = "pad-reply";
+    panel.hidden = true;
+    panel.appendChild(el("h2", "pad-reply-title", "Your reply"));
+    var unbuilt = el("p", "pad-reply-unbuilt", REPLY_UNBUILT);
+    var summary = el("ul", "pad-reply-summary");
+    var unanswered = el("p", "pad-reply-unanswered");
+    var label = el("label", "pad-note-label", "Your reply");
+    label.setAttribute("for", "pad-reply-box");
+    var box = el("textarea", "pad-reply-box");
+    box.id = "pad-reply-box";
+    box.readOnly = true;
+    box.rows = 14;
+    var copyButton = el("button", "pad-toggle pad-copy", "Copy reply");
+    copyButton.type = "button";
+    var status = el("p", "pad-reply-status");
+    status.setAttribute("role", "status");
+    [unbuilt, summary, unanswered, label, box, copyButton, status].forEach(function (node) { panel.appendChild(node); });
+
+    var live = [summary, unanswered, label, box, copyButton, status];
+
+    function fill() {
+      var reply;
+      var lines = [];
+      var missing = 0;
+      try {
+        reply = window.PadReply.build(data, answers);
+        data.questions.forEach(function (question, i) {
+          lines.push(summaryOf(question, answers[i]));
+          if (answers[i].pick === null && !answers[i].none) missing++;
+        });
+      } catch (error) {
+        reply = undefined;
+      }
+      unbuilt.hidden = reply !== undefined;
+      live.forEach(function (node) { node.hidden = reply === undefined; });
+      if (reply === undefined) return;
+      summary.textContent = "";
+      lines.forEach(function (line) { summary.appendChild(el("li", null, line)); });
+      unanswered.hidden = missing === 0;
+      unanswered.textContent = missing === 0 ? "" :
+        "No pick yet on " + missing + " of " + data.questions.length +
+        (data.questions.length === 1 ? " question" : " questions") + ". You can still copy the reply.";
+      box.value = reply;
+    }
+
+    function blocked() {
+      box.focus();
+      box.select();
+      box.setSelectionRange(0, box.value.length);
+      status.textContent = BLOCKED;
+    }
+
+    copyButton.addEventListener("click", function () {
+      var written;
+      try {
+        written = navigator.clipboard.writeText(box.value);
+      } catch (error) {
+        return blocked();
+      }
+      Promise.resolve(written).then(function () { status.textContent = COPIED; }, blocked);
+    });
+
+    return {
+      panel: panel,
+      show: fill,
+      changed: function () { status.textContent = ""; fill(); }
+    };
+  }
+
   function build(data) {
     var head = el("header", "pad-head");
     head.appendChild(el("h1", null, data.title));
@@ -194,11 +279,26 @@
       onChange: function (fn) { hook = fn; }
     };
 
-    function show(index) {
+    var reply = buildReplyStep(data, answers);
+    window.PadAnswers.onChange(reply.changed);
+
+    function setCurrent(index) {
       buttons.forEach(function (button, i) {
         if (i === index) button.setAttribute("aria-current", "true");
         else button.removeAttribute("aria-current");
       });
+    }
+
+    function showReply() {
+      setCurrent(buttons.length - 1);
+      panels.forEach(function (panel) { if (panel) panel.hidden = true; });
+      reply.show();
+      reply.panel.hidden = false;
+    }
+
+    function show(index) {
+      setCurrent(index);
+      reply.panel.hidden = true;
       var fresh = !panels[index];
       if (fresh) {
         views[index] = { cards: [] };
@@ -231,6 +331,15 @@
       list.appendChild(item);
     });
 
+    var replyItem = el("li", "pad-reply-item");
+    var replyButton = el("button", "pad-reply-entry");
+    replyButton.type = "button";
+    replyButton.appendChild(el("span", "pad-entry-label", "Your reply"));
+    replyButton.addEventListener("click", showReply);
+    buttons.push(replyButton);
+    replyItem.appendChild(replyButton);
+    list.appendChild(replyItem);
+
     var nav = el("nav");
     nav.setAttribute("aria-label", "Questions");
     nav.className = "pad-questions";
@@ -238,6 +347,7 @@
     var body = el("div", "pad-body");
     body.appendChild(nav);
     body.appendChild(stage);
+    stage.appendChild(reply.panel);
 
     root.textContent = "";
     root.appendChild(head);
