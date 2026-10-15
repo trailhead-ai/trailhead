@@ -55,7 +55,10 @@ Invariants:
   object of exactly the keys ``at`` (ISO-8601 UTC datetime), ``by`` (non-empty
   string), ``initiated-by`` (``operator`` or ``agent``), ``reason`` (non-empty,
   single line) and ``diff`` (string; the unified diff from the prior body, as
-  produced by ``record.store.make_unified_diff``). A malformed entry is refused
+  produced by ``record.store.make_unified_diff``; ``""`` only when the entry's
+  ``criteria`` reopens or closes a criterion, since such an amend leaves the body
+  untouched), plus an optional ``criteria`` object whose shape
+  :func:`lore.record.criteria.criteria_problem` defines. A malformed entry is refused
   naming ``change-history`` and the entry's index. An unsupported key is refused
   naming the key and pointing at a newer lore as the likely cause.
   The list is append-only; ``record.store`` enforces that on every write, and
@@ -81,6 +84,7 @@ from datetime import datetime, timedelta
 from typing import NamedTuple
 
 from ..search import kql
+from . import criteria as criteria_mod
 
 # --- Canonical declarative model --------------------------------------------
 
@@ -537,23 +541,6 @@ def change_history_reason_problem(reason: object) -> str | None:
 
 _NEWER_LORE_HINT = "this record may have been written by a newer lore; update trailhead"
 
-_CRITERION_ID = re.compile(r"AC[1-9][0-9]{0,8}")
-
-
-def _criteria_problem(criteria: object) -> str | None:
-    """Why *criteria* is not ``{"removed": [<unique AC ids>]}``, or ``None`` when it is."""
-    if not isinstance(criteria, dict) or set(criteria) != {"removed"}:
-        return "must be an object with exactly the key 'removed'"
-    removed = criteria["removed"]
-    if not isinstance(removed, list) or not removed:
-        return "'removed' must be a non-empty list of criterion identifiers"
-    if not all(isinstance(i, str) and _CRITERION_ID.fullmatch(i) for i in removed):
-        return "'removed' must hold identifiers of the form AC1, AC2, ... (no leading zeros, at most nine digits)"
-    if len(set(removed)) != len(removed):
-        return "'removed' must not repeat an identifier"
-    return None
-
-
 def _check_change_history_entry(key: str, index: int, entry: object) -> list[str]:
     where = f"key {key!r} entry [{index}]"
     if not isinstance(entry, dict):
@@ -580,9 +567,13 @@ def _check_change_history_entry(key: str, index: int, entry: object) -> list[str
     if "diff" in entry and not isinstance(entry["diff"], str):
         errors.append(f"{where} field 'diff' must be a string")
     if "criteria" in entry:
-        problem = _criteria_problem(entry["criteria"])
+        problem = criteria_mod.criteria_problem(entry["criteria"])
         if problem:
             errors.append(f"{where} field 'criteria' {problem}")
+    if entry.get("diff") == "" and not criteria_mod.has_mark(entry.get("criteria")):
+        errors.append(
+            f"{where} field 'diff' may be empty only when the entry reopens or closes a criterion"
+        )
     return errors
 
 

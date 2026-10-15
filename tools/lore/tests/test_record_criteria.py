@@ -5,8 +5,10 @@ import pytest
 from lore.record.criteria import (
     CriteriaError,
     check_criteria_amend,
+    check_criteria_marks,
     criteria_state,
     declared_criteria,
+    ledger_entries,
 )
 
 
@@ -110,7 +112,9 @@ def test_criteria_error_is_a_value_error_and_does_not_echo_body():
 
 def test_state_recorded_removal_still_absent():
     body = spec(ac(1), ac(2), ac(4))
-    assert criteria_state(body, hist(["AC3"])) == {"declared": ["AC1", "AC2", "AC4"], "removed": ["AC3"]}
+    assert criteria_state(body, hist(["AC3"])) == {
+        "declared": ["AC1", "AC2", "AC4"], "removed": ["AC3"], "reopened": {}, "closed": [],
+    }
 
 
 def test_state_restored_criterion_is_no_longer_removed():
@@ -495,3 +499,343 @@ def test_reuse_refusal_names_the_most_recent_entry_that_recorded_the_removal():
     _, refusals = check_criteria_amend(old, new, hist(["AC2"], ["AC9"], ["AC2"]))
     assert "--revert-to 3" in refusals[0]
     assert "--revert-to 1" not in refusals[0]
+
+
+# ------------------------------------------------------------- marks and ledger
+
+
+def mark_entry(**crit):
+    return {"at": "t", "by": "b", "initiated-by": "i", "reason": "r", "diff": "", "criteria": crit}
+
+
+def reopen(ids, ledger=()):
+    return mark_entry(reopened=list(ids), ledger=list(ledger))
+
+
+def close(*ids):
+    return mark_entry(closed=list(ids))
+
+
+def slices(*entries, heading="## Slices"):
+    return heading + "\n\n" + "\n".join(entries) + "\n"
+
+
+def slice_line(task, covers=None, partial=None):
+    fields = f"`task/{task}`, closed 2026-01-01"
+    if covers:
+        fields += ", covers " + ", ".join(covers)
+    if partial:
+        fields += ", partially covers " + ", ".join(partial)
+    return f"- value claim ({fields})"
+
+
+def with_ledger(*lines, base=None):
+    return (base or five()) + "\n" + slices(*lines)
+
+
+# fold
+
+
+def test_reopen_then_close_gives_closed():
+    state = criteria_state(five(), [reopen(["AC2"], ["a"]), close("AC2")])
+    assert state["closed"] == ["AC2"]
+    assert state["reopened"] == {}
+
+
+def test_close_then_reopen_gives_reopened_with_the_later_snapshot():
+    state = criteria_state(five(), [close("AC2"), reopen(["AC2"], ["a", "b"])])
+    assert state["reopened"] == {"AC2": ["a", "b"]}
+    assert state["closed"] == []
+
+
+def test_reopen_reopen_gives_the_later_snapshot():
+    state = criteria_state(five(), [reopen(["AC2"], ["a"]), reopen(["AC2"], ["a", "b"])])
+    assert state["reopened"] == {"AC2": ["a", "b"]}
+
+
+def test_a_snapshot_is_per_entry_and_shared_by_the_ids_it_reopens():
+    state = criteria_state(five(), [reopen(["AC1", "AC3"], ["x"])])
+    assert state["reopened"] == {"AC1": ["x"], "AC3": ["x"]}
+
+
+def test_reopen_then_remove_gives_neither():
+    body = spec(*[ac(n) for n in (1, 3, 4, 5)])
+    state = criteria_state(body, [reopen(["AC2"], ["a"]), *hist(["AC2"])])
+    assert state["reopened"] == {} and state["closed"] == []
+    assert state["removed"] == ["AC2"]
+
+
+def test_a_mark_made_before_a_removal_does_not_return_when_the_criterion_is_declared_again():
+    state = criteria_state(five(), [reopen(["AC2"], ["a"]), close("AC3"), *hist(["AC2", "AC3"])])
+    assert state["reopened"] == {} and state["closed"] == []
+
+
+def test_close_then_remove_gives_neither():
+    body = spec(*[ac(n) for n in (1, 3, 4, 5)])
+    state = criteria_state(body, [close("AC2"), *hist(["AC2"])])
+    assert state["closed"] == [] and state["reopened"] == {}
+
+
+def test_a_mark_on_an_undeclared_id_is_dropped():
+    state = criteria_state(five(), [reopen(["AC9"], ["a"]), close("AC8")])
+    assert state["reopened"] == {} and state["closed"] == []
+
+
+def test_no_marks_gives_empty_marks():
+    state = criteria_state(five(), hist(["AC9"]))
+    assert state["reopened"] == {} and state["closed"] == []
+    assert state["declared"] == ["AC1", "AC2", "AC3", "AC4", "AC5"]
+
+
+def test_marked_ids_come_back_in_numeric_order():
+    body = spec(ac(2), ac(4), ac(10))
+    state = criteria_state(body, [close("AC10", "AC2"), reopen(["AC4", "AC10"], ["a"])])
+    assert state["closed"] == ["AC2"]
+    assert list(state["reopened"]) == ["AC4", "AC10"]
+
+
+# criteria object shape (read side)
+
+GOOD_SHAPES = [
+    {"removed": ["AC1"]},
+    {"reopened": ["AC1"], "ledger": []},
+    {"closed": ["AC1"]},
+    {"removed": ["AC1"], "closed": ["AC2"]},
+    {"reopened": ["AC1"], "closed": ["AC2"], "ledger": ["a.b_c-1"]},
+]
+
+
+@pytest.mark.parametrize("crit", GOOD_SHAPES)
+def test_a_well_formed_criteria_object_is_read(crit):
+    assert criteria_state(five(), [mark_entry(**crit)])["declared"]
+
+
+BAD_SHAPES = {
+    "not-object": ["AC1"],
+    "empty-object": {},
+    "unknown-key": {"closed": ["AC1"], "extra": 1},
+    "ledger-alone": {"ledger": []},
+    "reopened-empty": {"reopened": [], "ledger": []},
+    "closed-empty": {"closed": []},
+    "closed-not-list": {"closed": "AC1"},
+    "reopened-not-list": {"reopened": "AC1", "ledger": []},
+    "non-canonical": {"closed": ["AC01"]},
+    "non-string-id": {"closed": [1]},
+    "repeated": {"closed": ["AC1", "AC1"]},
+    "ledger-missing": {"reopened": ["AC1"]},
+    "ledger-without-reopened": {"closed": ["AC1"], "ledger": []},
+    "ledger-not-list": {"reopened": ["AC1"], "ledger": "a"},
+    "ledger-non-string": {"reopened": ["AC1"], "ledger": [1]},
+    "ledger-off-shape": {"reopened": ["AC1"], "ledger": ["Bad Id"]},
+    "ledger-leading-dash": {"reopened": ["AC1"], "ledger": ["-a"]},
+    "ledger-repeated": {"reopened": ["AC1"], "ledger": ["a", "a"]},
+    "both-lists": {"reopened": ["AC1"], "closed": ["AC1"], "ledger": []},
+}
+
+
+@pytest.mark.parametrize("crit", BAD_SHAPES.values(), ids=BAD_SHAPES)
+def test_a_malformed_criteria_object_is_refused_never_repaired(crit):
+    with pytest.raises(CriteriaError):
+        criteria_state(five(), [{"criteria": crit}])
+
+
+def test_an_entry_without_criteria_is_skipped_whatever_its_diff():
+    assert criteria_state(five(), [{"diff": ""}])["closed"] == []
+
+
+# ledger_entries
+
+
+def test_no_slices_section_gives_empty():
+    assert ledger_entries(five()) == []
+
+
+def test_a_slices_section_with_no_entries_gives_empty():
+    assert ledger_entries("## Slices\n\nnothing yet\n") == []
+
+
+def test_one_entry():
+    body = slices(slice_line("alpha", covers=["AC1", "AC2"]))
+    assert ledger_entries(body) == [("alpha", ["AC1", "AC2"], [])]
+
+
+def test_many_entries_with_both_fields_and_a_legacy_entry():
+    body = slices(
+        slice_line("a", covers=["AC1"], partial=["AC2"]),
+        "- legacy four field entry (`task/b`, closed 2026-01-01)",
+        slice_line("c", partial=["AC3"]),
+    )
+    assert ledger_entries(body) == [("a", ["AC1"], ["AC2"]), ("b", [], []), ("c", [], ["AC3"])]
+
+
+def test_a_wrapped_entry_is_scored_whole():
+    body = slices("- a long value claim that wraps\n  across lines (`task/w`, closed 2026-01-01,\n  covers AC4)")
+    assert ledger_entries(body) == [("w", ["AC4"], [])]
+
+
+def test_a_fenced_or_commented_token_is_ignored():
+    body = (
+        "## Slices\n\n```\n- fake (`task/f`, closed 2026-01-01, covers AC1)\n```\n"
+        "<!--\n- hid (`task/h`, closed 2026-01-01, covers AC2)\n-->\n"
+        + slice_line("real", covers=["AC3"])
+        + "\n"
+    )
+    assert ledger_entries(body) == [("real", ["AC3"], [])]
+
+
+def test_a_task_mention_in_the_prose_is_not_the_entry_id():
+    body = slices("- see `task/other` for context (`task/own`, closed 2026-01-01, covers AC1)")
+    assert ledger_entries(body) == [("own", ["AC1"], [])]
+
+
+def test_an_entry_without_a_trailing_task_parenthetical_is_skipped():
+    assert ledger_entries(slices("- prose mentions (`task/x`, closed 2026-01-01) then more")) == []
+
+
+def test_a_masked_slices_heading_does_not_open_the_section():
+    body = "```\n## Slices\n```\n- stray (`task/x`, closed 2026-01-01, covers AC1)\n"
+    assert ledger_entries(body) == []
+
+
+def test_a_second_slices_heading_is_an_error():
+    body = slices(slice_line("a")) + "\n## Slices\n" + slice_line("b")
+    with pytest.raises(CriteriaError):
+        ledger_entries(body)
+
+
+@pytest.mark.parametrize("covers", ["AC1,AC1", "ac1", "AC1 AC2", "AC1,,AC2"])
+def test_a_malformed_coverage_token_is_an_error_not_echoed(covers):
+    body = slices(f"- c (`task/a`, closed 2026-01-01, covers {covers})")
+    with pytest.raises(CriteriaError) as exc:
+        ledger_entries(body)
+    assert covers not in str(exc.value)
+
+
+def test_a_malformed_partial_token_is_an_error():
+    body = slices("- c (`task/a`, closed 2026-01-01, partially covers nope)")
+    with pytest.raises(CriteriaError):
+        ledger_entries(body)
+
+
+# check_criteria_marks
+
+SENTINEL = "ZZSENTINELZZ"
+
+
+def marks(stored, new=None, history=None, reopen=(), close=()):
+    return check_criteria_marks(stored, new if new is not None else stored, history, list(reopen), list(close))
+
+
+def test_a_reopen_names_the_stored_entries_that_cover_or_partly_cover_it():
+    stored = with_ledger(
+        slice_line("a", covers=["AC1"]),
+        slice_line("b", partial=["AC1"]),
+        slice_line("c", covers=["AC2"]),
+    )
+    voided, refusals = marks(stored, reopen=["AC1"])
+    assert refusals == []
+    assert voided == {"AC1": ["a", "b"]}
+
+
+def test_voided_is_empty_for_a_reopen_with_an_empty_ledger():
+    assert marks(five(), reopen=["AC3"]) == ({}, [])
+
+
+def test_voided_leaves_out_an_id_no_entry_names():
+    stored = with_ledger(slice_line("a", covers=["AC1"]))
+    voided, refusals = marks(stored, reopen=["AC1", "AC2"])
+    assert refusals == [] and voided == {"AC1": ["a"]}
+
+
+def test_closing_a_partially_covered_id_passes():
+    stored = with_ledger(slice_line("a", partial=["AC4"]))
+    assert marks(stored, close=["AC4"]) == ({}, [])
+
+
+def test_closing_an_id_named_only_by_coverage_an_earlier_reopen_voided_passes():
+    stored = with_ledger(slice_line("a", covers=["AC2"]))
+    voided, refusals = marks(stored, history=[reopen(["AC2"], ["a"])], close=["AC2"])
+    assert refusals == [] and voided == {}
+
+
+def test_close_of_an_id_no_entry_names_is_refused_with_the_fix():
+    stored = with_ledger(slice_line("a", covers=["AC1"]))
+    _, refusals = marks(stored, close=["AC5"])
+    assert refusals == [
+        "AC5 cannot be closed: no slice has covered it, so the close would not count. "
+        "Cover it in a slice, or remove the criterion by amend"
+    ]
+
+
+def test_close_of_an_already_closed_id_is_refused():
+    stored = with_ledger(slice_line("a", covers=["AC3"]))
+    _, refusals = marks(stored, history=[close("AC3")], close=["AC3"])
+    assert refusals == ["AC3 is already closed; nothing to do"]
+
+
+def test_a_close_after_a_reopen_of_a_closed_id_is_allowed():
+    stored = with_ledger(slice_line("a", covers=["AC3"]))
+    assert marks(stored, history=[close("AC3"), reopen(["AC3"], ["a"])], close=["AC3"]) == ({}, [])
+
+
+def test_a_non_canonical_id_is_refused_with_the_canonical_form():
+    _, refusals = marks(five(), reopen=["AC02"])
+    assert refusals == ["AC02 is not a criterion identifier; use AC2"]
+
+
+@pytest.mark.parametrize("bad", [SENTINEL, "AC0", "AC" + "9" * 40, "", "AC1\nAC2"])
+def test_a_hostile_id_is_refused_without_being_echoed(bad):
+    _, refusals = marks(five(), close=[bad])
+    assert len(refusals) == 1
+    assert "not a criterion identifier" in refusals[0]
+    assert bad not in refusals[0] or bad == ""
+
+
+def test_an_undeclared_id_is_refused_against_the_post_amend_body():
+    new = spec(*[ac(n) for n in (1, 2, 3, 4)])
+    _, refusals = marks(five(), new, reopen=["AC5"])
+    assert refusals == ["AC5 is not declared in the amended body; name a criterion the spec declares"]
+
+
+def test_an_id_declared_only_by_the_post_amend_body_is_accepted():
+    new = spec(*[ac(n) for n in range(1, 7)])
+    stored = with_ledger(slice_line("a", covers=["AC1"]))
+    _, refusals = marks(stored, new, reopen=["AC6"])
+    assert refusals == []
+
+
+def test_an_id_in_both_lists_is_refused_once():
+    _, refusals = marks(five(), reopen=["AC2"], close=["AC2"])
+    assert refusals == ["AC2 is named to reopen and to close; choose one"]
+
+
+def test_a_repeated_id_is_refused():
+    _, refusals = marks(five(), reopen=["AC2", "AC2"])
+    assert refusals == ["AC2 is named more than once; name it once"]
+
+
+def test_a_reopen_is_refused_when_a_stored_entry_has_an_off_shape_task_id():
+    stored = with_ledger(slice_line("Bad Id", covers=["AC1"]))
+    _, refusals = marks(stored, reopen=["AC1"])
+    assert len(refusals) == 1
+    assert "task id" in refusals[0] and "Bad Id" not in refusals[0]
+
+
+def test_an_off_shape_task_id_does_not_stop_a_close():
+    stored = with_ledger(slice_line("Bad Id", covers=["AC1"]))
+    assert marks(stored, close=["AC1"]) == ({}, [])
+
+
+def test_an_unreadable_ledger_is_a_refusal_not_an_exception():
+    stored = with_ledger(slice_line("a", covers=["AC1"])) + "\n## Slices\n"
+    _, refusals = marks(stored, reopen=["AC1"])
+    assert len(refusals) == 1 and "Slices" in refusals[0]
+
+
+def test_no_marks_requested_checks_nothing():
+    assert marks(five() + "\n## Slices\n## Slices\n") == ({}, [])
+
+
+def test_a_malformed_history_raises():
+    with pytest.raises(CriteriaError):
+        marks(five(), history=[{"criteria": {}}], close=["AC1"])

@@ -617,7 +617,8 @@ def test_a_non_ascii_sites_path_is_auto_settled(tmp_path):
 
 def _entry(reason: str, at: str = "2026-06-18T09:00:00Z") -> dict:
     return {"at": at, "by": "t@example.com",
-            "initiated-by": "operator", "reason": reason, "diff": ""}
+            "initiated-by": "operator", "reason": reason,
+            "diff": "--- a\n+++ b\n@@ -1 +1 @@\n-x\n+y\n"}
 
 
 def _set_history(vault: Path, record_id: str, history: list) -> None:

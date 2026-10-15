@@ -1242,7 +1242,7 @@ def _without(entry, key):
     "history",
     [
         [_history_entry()],
-        [_history_entry(), _history_entry(by="agent-1", **{"initiated-by": "agent", "diff": ""})],
+        [_history_entry(), _history_entry(by="agent-1", **{"initiated-by": "agent"})],
     ],
     ids=["one-entry", "two-entries"],
 )
@@ -1274,6 +1274,71 @@ def test_change_history_malformed_is_refused_naming_field(bad_history, index):
     assert all("change-history" in e for e in result.errors)
     if index is not None:
         assert all(f"[{index}]" in e for e in result.errors)
+
+
+_CRITERIA_GOOD = [
+    {"removed": ["AC1"]},
+    {"reopened": ["AC1"], "ledger": []},
+    {"closed": ["AC1", "AC2"]},
+    {"removed": ["AC3"], "reopened": ["AC1"], "closed": ["AC2"], "ledger": ["a", "b.c_d-1"]},
+]
+
+_CRITERIA_BAD = {
+    "not-object": ["AC1"],
+    "empty-object": {},
+    "unknown-key": {"closed": ["AC1"], "extra": 1},
+    "ledger-alone": {"ledger": []},
+    "removed-empty": {"removed": []},
+    "reopened-empty": {"reopened": [], "ledger": []},
+    "closed-empty": {"closed": []},
+    "closed-not-list": {"closed": "AC1"},
+    "non-canonical": {"closed": ["AC01"]},
+    "non-string-id": {"closed": [1]},
+    "repeated": {"closed": ["AC1", "AC1"]},
+    "ledger-missing": {"reopened": ["AC1"]},
+    "ledger-without-reopened": {"closed": ["AC1"], "ledger": []},
+    "ledger-not-list": {"reopened": ["AC1"], "ledger": "a"},
+    "ledger-non-string": {"reopened": ["AC1"], "ledger": [1]},
+    "ledger-off-shape": {"reopened": ["AC1"], "ledger": ["Bad Id"]},
+    "ledger-repeated": {"reopened": ["AC1"], "ledger": ["a", "a"]},
+    "both-lists": {"reopened": ["AC1"], "closed": ["AC1"], "ledger": []},
+}
+
+
+@pytest.mark.parametrize("criteria", _CRITERIA_GOOD)
+def test_change_history_criteria_marks_validate(criteria):
+    entry = _history_entry(criteria=criteria)
+    result = rm().validate(_base_sidecar_with(**{"change-history": [entry]}))
+    assert result.errors == []
+    assert result.sidecar["change-history"] == [entry]
+
+
+@pytest.mark.parametrize("criteria", _CRITERIA_BAD.values(), ids=_CRITERIA_BAD)
+def test_change_history_malformed_criteria_is_refused_not_repaired(criteria):
+    result = rm().validate(_base_sidecar_with(**{"change-history": [_history_entry(criteria=criteria)]}))
+    assert result.errors
+    assert all("change-history" in e and "criteria" in e and "[0]" in e for e in result.errors)
+
+
+@pytest.mark.parametrize("criteria", [{"reopened": ["AC1"], "ledger": []}, {"closed": ["AC1"]}])
+def test_change_history_empty_diff_is_allowed_with_a_mark(criteria):
+    entry = _history_entry(diff="", criteria=criteria)
+    assert rm().validate(_base_sidecar_with(**{"change-history": [entry]})).errors == []
+
+
+@pytest.mark.parametrize("criteria", [None, {"removed": ["AC1"]}], ids=["no-criteria", "removed-only"])
+def test_change_history_empty_diff_without_a_mark_is_refused(criteria):
+    entry = _history_entry(diff="")
+    if criteria is not None:
+        entry["criteria"] = criteria
+    result = rm().validate(_base_sidecar_with(**{"change-history": [entry]}))
+    assert result.errors
+    assert all("change-history" in e and "diff" in e and "[0]" in e for e in result.errors)
+
+
+def test_change_history_non_empty_diff_is_allowed_with_a_mark():
+    entry = _history_entry(criteria={"closed": ["AC1"]})
+    assert rm().validate(_base_sidecar_with(**{"change-history": [entry]})).errors == []
 
 
 @pytest.mark.parametrize("key", ["at", "by", "initiated-by", "diff"])

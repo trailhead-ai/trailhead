@@ -218,7 +218,8 @@ def test_a_field_moved_on_one_side_only_auto_takes_that_side(resolve):
 
 def _hist(at: str, reason: str) -> dict:
     return {"at": at, "by": "t@example.com", "initiated-by": "operator",
-            "reason": reason, "diff": ""}
+            "reason": reason,
+            "diff": "--- a\n+++ b\n@@ -1 +1 @@\n-x\n+y\n"}
 
 
 def test_change_history_moved_on_both_sides_merges_ordered_by_at(resolve):
