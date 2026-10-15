@@ -62,7 +62,12 @@ def _differing_kit_files(installed_skill: Path) -> list[str]:
 def _run_installed(installed_skill: Path, tmp_path: Path, state_dir: Path):
     round_path = tmp_path / "round.json"
     round_path.write_text(json.dumps(ROUND))
-    env = {**os.environ, "OUTPOST_STATE_DIR": str(state_dir)}
+    env = {
+        **os.environ,
+        "OUTPOST_STATE_DIR": str(state_dir),
+        "CAMP_STATE_DIR": str(tmp_path / "camp-state"),
+        "CAMP_CONFIG_DIR": str(tmp_path / "camp-config"),
+    }
     return subprocess.run(
         [
             sys.executable,

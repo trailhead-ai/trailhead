@@ -425,6 +425,65 @@ def test_a_publisher_that_raises_leaves_no_temp_folder_and_no_site(rig):
     assert not (rig.ws / "sites").exists()
 
 
+def test_a_failure_filling_the_temp_folder_is_a_refusal_and_leaves_nothing(rig, capsys, monkeypatch):
+    def full_disk(folder, kit_dir, round_js):
+        (folder / "half-written").write_text("x")
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(rig.pad, "_write_pad", full_disk)
+    called = []
+
+    def runner(cmd, env, timeout):
+        called.append(cmd)
+
+    assert rig.run(publish_runner=runner) == 1
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert len(captured.err.splitlines()) == 1
+    assert captured.err.startswith("scratch-pad: ")
+    assert "could not build the pad: No space left on device" in captured.err
+    assert called == []
+    assert rig.leftovers() == []
+    assert not (rig.ws / "sites").exists()
+
+
+def test_a_temp_folder_that_cannot_be_created_is_a_refusal(rig, capsys, monkeypatch):
+    monkeypatch.setattr(tempfile, "tempdir", str(rig.tmp_path / "no-such-tmp"))
+
+    assert rig.run() == 1
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err.startswith("scratch-pad: ")
+    assert "could not build the pad" in captured.err
+    assert not (rig.ws / "sites").exists()
+
+
+def test_a_working_directory_that_cannot_be_read_counts_as_outside_any_workspace(pad, tmp_path, monkeypatch, capsys):
+    gone = tmp_path / "gone"
+    gone.mkdir()
+    keep = Path.cwd()
+    monkeypatch.chdir(gone)
+    try:
+        gone.rmdir()
+        env = {
+            "CAMP_STATE_DIR": str(tmp_path / "camp-state"),
+            "CAMP_CONFIG_DIR": str(tmp_path / "camp-config"),
+            "HOME": str(tmp_path / "home"),
+            "OUTPOST_STATE_DIR": str(tmp_path / "outpost-state"),
+        }
+        code = pad.main(["--pad", "p", "--round", str(_round_file(tmp_path))], env=env)
+    finally:
+        os.chdir(keep)
+
+    out = capsys.readouterr().out.splitlines()
+    pad_dir = (tmp_path / "outpost-state" / "pads" / "p").resolve()
+    assert code == 0
+    assert out[-1] == f"pad folder: {pad_dir}"
+    assert (pad_dir / "index.html").is_file()
+
+
 def test_a_publisher_that_outlives_the_timeout_after_the_site_landed_is_reported_unconfirmed(rig, capsys):
     seen = {}
 

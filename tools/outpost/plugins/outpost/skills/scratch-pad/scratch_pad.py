@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Build a scratch pad: one round of layout sketches, as plain files on disk.
+"""Build a scratch pad: one round of layout sketches.
 
 Given ``--pad <slug>`` and ``--round <path-to-json>``, this checks the round's
-outer shape, builds the pad under Outpost's state directory, and prints the
-``file://`` link to the pad's top-level ``index.html`` followed by the pad's
-folder path. Nothing is served and nothing needs installing: the pad is a copy
-of the skill's ``kit/`` plus the round's data, so it opens straight from disk.
+outer shape and builds the pad: a copy of the skill's ``kit/`` plus the round's
+data. Inside a camp workspace the pad is published as a site of that workspace
+and the publisher's link is printed; outside one it is built as plain files
+under Outpost's state directory and the ``file://`` link to its top-level
+``index.html`` is printed, so it opens straight from disk with nothing served.
+Either way the pad's folder path follows.
 
 Contract
 --------
@@ -364,6 +366,10 @@ def _write_pad(folder: Path, kit_dir: Path, round_js: str) -> None:
     (folder / "index.html").write_text(_PAD_INDEX, encoding="utf-8")
 
 
+def _build_failed(final: Path, exc: OSError) -> Refusal:
+    return Refusal([_line(_q(str(final)), f"could not build the pad: {exc.strerror or exc}")])
+
+
 def _publish_to_workspace(
     workspace: Path, pad: str, kit_dir: Path, round_js: str, env: Mapping[str, str], runner, timeout: float
 ) -> Built:
@@ -383,7 +389,10 @@ def _publish_to_workspace(
     if os.path.lexists(final):
         raise _exists(pad)
 
-    tmp = Path(tempfile.mkdtemp(prefix="scratch-pad-"))
+    try:
+        tmp = Path(tempfile.mkdtemp(prefix="scratch-pad-"))
+    except OSError as exc:
+        raise _build_failed(final, exc)
     try:
         _write_pad(tmp, kit_dir, round_js)
         cmd = [sys.executable, str(PUBLISHER_PATH), str(tmp), pad, "--workspace-path", str(workspace)]
@@ -400,6 +409,8 @@ def _publish_to_workspace(
             reasons = [_line("publish", _esc(line)) for line in result.stderr.splitlines() if line.strip()]
             raise Refusal(reasons or [_line("publish", f"the publisher exited with status {result.returncode}")])
         return Built(final, result.stdout.splitlines())
+    except OSError as exc:
+        raise _build_failed(final, exc)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -415,10 +426,16 @@ def _build(
 ) -> Built:
     round_path, kit_dir = Path(round_path), Path(kit_dir)
     env = os.environ if env is None else env
-    cwd = Path.cwd() if cwd is None else Path(cwd)
+    if cwd is None:
+        try:
+            cwd = Path.cwd()
+        except OSError:
+            cwd = None
+    else:
+        cwd = Path(cwd)
     runner = runner or _run_publisher
     round_js = _check_and_encode(round_path, pad, kit_dir)
-    workspace = enclosing_workspace(cwd, env)
+    workspace = None if cwd is None else enclosing_workspace(cwd, env)
     if workspace is not None:
         return _publish_to_workspace(workspace, pad, kit_dir, round_js, env, runner, timeout)
 
@@ -440,7 +457,7 @@ def _build(
     except BaseException as exc:
         shutil.rmtree(tmp, ignore_errors=True)
         if isinstance(exc, OSError):
-            raise Refusal([_line(_q(str(final)), f"could not build the pad: {exc.strerror or exc}")])
+            raise _build_failed(final, exc)
         raise
     return Built(final, [(final / "index.html").as_uri()])
 

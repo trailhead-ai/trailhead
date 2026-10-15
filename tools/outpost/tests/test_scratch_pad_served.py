@@ -133,7 +133,7 @@ def test_a_workspace_pad_draws_answers_and_stays_inert_when_served_over_http(tmp
     assert got["pwned"] is None
 
 
-def test_serving_fails_the_test_when_the_server_cannot_start(tmp_path):
+def test_the_loopback_server_reports_a_port_it_cannot_bind(tmp_path):
     (tmp_path / "index.html").write_text("<html><body></body></html>")
     taken = socket.socket()
     taken.bind(("127.0.0.1", 0))
@@ -141,7 +141,8 @@ def test_serving_fails_the_test_when_the_server_cannot_start(tmp_path):
     port = taken.getsockname()[1]
     try:
         with pytest.raises(ch.ServerStartError) as err:
-            ch.run_probe(tmp_path, "return {};", serve=True, serve_port=port, timeout=5)
+            with ch.serve_folder(tmp_path, port=port):
+                pass
     finally:
         taken.close()
     assert f"127.0.0.1:{port}" in str(err.value)
