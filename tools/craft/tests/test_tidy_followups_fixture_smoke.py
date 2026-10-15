@@ -88,8 +88,8 @@ def test_the_mixed_spec_gathers_open_ready_and_blocked_but_not_finished_work(bui
 
 def test_the_planted_credential_is_redacted_from_the_gathered_title(built):
     r = gather(built["env"], built["specs"]["mixed"])
-    assert built["credential"] not in r.stdout
     titles = [f["title"] for f in json.loads(r.stdout)["followups"]]
+    assert not any(built["credential"].lower() in t.lower() for t in titles)
     assert any("[REDACTED]" in t for t in titles)
 
 

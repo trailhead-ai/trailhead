@@ -281,6 +281,39 @@ def test_a_vault_listing_with_no_vaults_cannot_certify(capsys):
     assert reason_of(err) == "no-vaults"
 
 
+class RawVaultLs(FakeLore):
+    def __init__(self, raw_vault_ls, vaults=(), records=None):
+        super().__init__(list(vaults), records)
+        self.raw_vault_ls = raw_vault_ls
+
+    def __call__(self, argv):
+        if argv[:2] == ["vault", "ls"]:
+            self.calls.append(list(argv))
+            return subprocess.CompletedProcess(argv, 0, self.raw_vault_ls, "")
+        return super().__call__(argv)
+
+
+def test_a_vault_listing_that_prints_only_a_message_has_no_vaults(capsys):
+    msg = "No vault config found; run 'lore init' to seed one.\n"
+    runner = RawVaultLs(msg)
+    code, out, err = run_main(runner, "s", capsys)
+    assert (code, reason_of(err), out) == (2, "no-vaults", "")
+    assert all(argv[:2] == ["vault", "ls"] for argv in runner.calls)
+
+
+@pytest.mark.parametrize("bad", ["has space", "a$(touch x)", "-x", "a/../b"])
+def test_a_vault_with_a_hostile_name_is_never_queried_or_emitted(bad, capsys):
+    raw = f"{bad}\tteam\t/x/bad\t[(all kinds)]\nv\tteam\t/x/v\t[(all kinds)]\n"
+    records = {("v", "spec/s"): spec_doc(status="complete")}
+    runner = RawVaultLs(raw, records=records)
+    code, out, err = run_main(runner, "s", capsys)
+    assert code == 0, err
+    assert json.loads(out)["vault"] == "v"
+    assert bad not in out
+    for argv in runner.calls:
+        assert not any(bad in part for part in argv), argv
+
+
 @pytest.mark.parametrize("sidecar", [{"kind": "spec"}, {"status": "ready"}])
 def test_a_sidecar_missing_kind_or_status_is_a_failed_lookup(sidecar, capsys):
     doc = {"record_id": "spec/s", "kind": "spec", "sidecar": sidecar}
@@ -744,7 +777,8 @@ def fake_board(follow_sidecar=None, spec_related=None, search=None, extra=None):
         ("v", "task/p"): task_doc("p", "in-progress", labels={"craft/slice-parent": ""},
                                   related={"spec": ["s"]}),
         ("v", "task/k"): task_doc("k", "done", parent="p"),
-        ("v", "task/f"): follow_sidecar or task_doc("f", "open", title="Follow"),
+        ("v", "task/f"): follow_sidecar
+        or task_doc("f", "open", title="Follow", related={"task": ["p"]}),
     }
     records.update(extra or {})
     listing = [entry("p", "in-progress", children=["k"]), entry("k", "done", parent="p"),
@@ -765,6 +799,40 @@ def test_the_injected_board_gathers_its_follow_up(capsys):
     code, result, _, err = run_json(fake_board(), capsys)
     assert code == 0, err
     assert result["followups"] == [{"name": "f", "title": "Follow", "status": "open"}]
+
+
+def test_a_search_hit_whose_own_edges_and_every_outbound_edge_omit_it_is_not_gathered(capsys):
+    unlinked = task_doc("f", "open", title="Follow", related={"task": ["elsewhere"]})
+    code, result, _, err = run_json(fake_board(follow_sidecar=unlinked), capsys)
+    assert code == 0, err
+    assert result["followups"] == []
+    assert (result["candidates-read"], result["kept"]) == (1, 0)
+
+
+@pytest.mark.parametrize(
+    "related",
+    [{"spec": ["s"]}, {"spec": ["spec/s"]}, {"task": ["p"]}, {"task": ["task/p"]}, {"task": ["k"]}],
+)
+def test_a_search_hit_whose_own_edges_name_the_spec_a_slice_or_a_child_is_gathered(related, capsys):
+    linked = task_doc("f", "open", title="Follow", related=related)
+    code, result, _, err = run_json(fake_board(follow_sidecar=linked), capsys)
+    assert code == 0, err
+    assert [f["name"] for f in result["followups"]] == ["f"]
+
+
+@pytest.mark.parametrize("edge_owner", ["spec", "slice", "child"])
+def test_a_search_hit_named_only_by_an_outbound_edge_is_gathered(edge_owner, capsys):
+    runner = fake_board(
+        follow_sidecar=task_doc("f", "open", title="Follow"),
+        spec_related={"task": ["f"]} if edge_owner == "spec" else None,
+    )
+    if edge_owner == "slice":
+        runner.records[("v", "task/p")]["sidecar"]["related"]["task"] = ["f"]
+    if edge_owner == "child":
+        runner.records[("v", "task/k")]["sidecar"]["related"] = {"task": ["f"]}
+    code, result, _, err = run_json(runner, capsys)
+    assert code == 0, err
+    assert [f["name"] for f in result["followups"]] == ["f"]
 
 
 def test_a_truncated_search_exits_two_search_truncated_with_no_output(capsys):
@@ -893,13 +961,13 @@ def test_every_query_carries_at_most_the_batch_size_in_values(capsys):
 
 
 def test_a_title_is_emitted_without_control_characters(capsys):
-    runner = fake_board(follow_sidecar=task_doc("f", title="Red\x1b[31m alert\x07\x85 done\n"))
+    runner = fake_board(follow_sidecar=task_doc("f", title="Red\x1b[31m alert\x07\x85 done\n", related={"task": ["p"]}))
     _, result, _, _ = run_json(runner, capsys)
     assert result["followups"][0]["title"] == "Red[31m alert done"
 
 
 def test_a_title_carrying_a_credential_is_emitted_redacted(capsys):
-    runner = fake_board(follow_sidecar=task_doc("f", title="Rotate AKIAIOSFODNN7EXAMPLE now"))
+    runner = fake_board(follow_sidecar=task_doc("f", title="Rotate AKIAIOSFODNN7EXAMPLE now", related={"task": ["p"]}))
     _, result, _, _ = run_json(runner, capsys)
     title = result["followups"][0]["title"]
     assert "AKIAIOSFODNN7EXAMPLE" not in title
@@ -907,9 +975,15 @@ def test_a_title_carrying_a_credential_is_emitted_redacted(capsys):
 
 
 def test_a_title_with_nothing_to_strip_is_emitted_unchanged(capsys):
-    runner = fake_board(follow_sidecar=task_doc("f", title="Plain follow-up title"))
+    runner = fake_board(follow_sidecar=task_doc("f", title="Plain follow-up title", related={"task": ["p"]}))
     _, result, _, _ = run_json(runner, capsys)
     assert result["followups"][0]["title"] == "Plain follow-up title"
+
+
+def test_a_title_scanner_that_cannot_be_imported_exits_two_internal_error(capsys, monkeypatch):
+    monkeypatch.setitem(sys.modules, "capture_scan", None)
+    code, _, out, err = run_json(fake_board(), capsys)
+    assert (code, reason_of(err), out) == (2, "internal-error", "")
 
 
 def test_every_reason_code_the_code_can_emit_is_in_the_collection():
