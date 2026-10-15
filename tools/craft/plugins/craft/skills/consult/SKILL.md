@@ -89,9 +89,9 @@ in a voice that stands on content, not on the role tag.
 Synthesize per `_shared/council.md`: de-duplicate by issue (not by member), auto-downgrade
 speculative Criticals (stating which and why), then **lead with the narrative synthesis** in the
 shape "How the synthesis reads" defines there — what the lenses found, whether it holds and where it
-came from, and what to do about it. The consolidated list follows it as supporting detail, grouped
-Critical → Important → Minor with the member count behind each multi-lens finding, writing every
-finding in the shape "How a finding reads" defines there.
+came from, and what to do about it. The consolidated list follows it as supporting detail, with the
+member count behind each multi-lens finding, grouped and named, and every finding written, as "How a
+finding reads" defines there.
 
 The prose is what the user reads first, and on a standalone consult it is often all they read: there
 is no disposition gate here forcing them back through the list, so a `consult` that leads with the

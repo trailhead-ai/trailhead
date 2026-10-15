@@ -263,12 +263,14 @@ After all four members return:
    which lenses raised it.
 3. **Auto-downgrade speculative Criticals.** A Critical that is vague ("this could be a problem"),
    requires guessing about scale / future state / user behavior, or names no concrete failure
-   scenario is reclassified Important. State explicitly which findings were downgraded and why.
+   scenario is reclassified Important. State explicitly which findings were downgraded and why, in
+   the plain readings "How a finding reads" gives: "would build the wrong thing, needs your
+   decision" moves to "would cause trouble later, worth fixing, your call".
 4. **Write the narrative synthesis** — the prose that carries the judgment, in the shape "How the
    synthesis reads" defines below. This is what the reader reads first.
-5. **Then present the consolidated list**, grouped Critical → Important → Minor, noting the member
-   count behind each multi-lens finding, and writing each finding in the shape "How a finding reads"
-   defines below.
+5. **Then present the consolidated list**, grouped under the plain readings "How a finding reads"
+   gives, most serious first, noting the member count behind each multi-lens finding, and writing
+   each finding in the shape "How a finding reads" defines below.
 
 The planning Council Review step adds a disposition gate and persists findings into the plan file;
 `consult` stops here and hands the synthesized view back to the user.
@@ -309,17 +311,47 @@ de-duplication, not to spend more of the reader's attention.
 ### How a finding reads
 
 Every finding in that consolidated list — the one presented to the user in session — takes this
-shape. Someone who has not read the document under review should understand the Critical list on the
-first pass.
+shape. Someone who has not read the document under review should understand the most serious group
+on the first pass.
 
-- **Headline first.** One line, everyday words: what goes wrong, and for whom. It comes *before any
-  mechanism* — no setup, no citation, no shorthand.
-- **Then the mechanism.** A short paragraph: what the document says, what reality does, and the
-  concrete worst case, stated as an event ("we delete a workspace with a live session still in it").
+- **One opening sentence.** Everyday words, before any mechanism: the decision the reader is asked
+  to make, what you recommend, and what is at stake. No setup, no citation, no shorthand.
+- **Then the worst case**, stated as an event ("we delete a workspace with a live session still in
+  it"): what the document says, what reality does, and what goes wrong.
 - **Then the fix, on its own line**, prefixed `Fix:` — one sentence for the remedy, plus any caveat
   that changes whether to take it.
-- **Shorthand last, if at all.** Pass names, invariant tags, flag trivia and other internal labels
-  belong only after the plain statement, and only when the reader needs them to act. Which lens or
-  pass raised a finding rides beside it, not inside its body.
+- **Then who raised it**, by plain label, beside the finding rather than inside its body. Pass
+  names, invariant tags, flag trivia and other internal labels appear only when the reader needs
+  them to act, and only after the plain statement.
+
+A finding in the "rough edges, nothing to decide" group asks no decision, so its opening sentence
+says what is wrong and what you recommend.
 
 If a finding only makes sense to someone who has already read the document, rewrite it.
+
+**Severity, as the reader sees it.** The internal level never labels a group, a count or a downgrade
+note; its plain reading does:
+
+- Critical: "would build the wrong thing, needs your decision"
+- Important: "would cause trouble later, worth fixing, your call"
+- Minor: "rough edges, nothing to decide"
+
+**Reviewers, as the reader sees them.** Each is named by its plain label wherever it reaches the
+reader, including the synthesis's account of each pass:
+
+- builder / Builder: buildability
+- breaker / Reliability: failure cases
+- attacker / Security: security
+- advocate / Advocate: ease of use
+- premise-attacker: right problem
+- consistency-auditor: self-consistency
+- divergence-prober: left undecided
+- fact-verification pass: fact check
+
+**Where the plain forms stop.** They are for what the reader is shown in session: findings, the
+synthesis, and summaries of them (progress narration while passes run is out of scope). Reviewer
+reports, the `## Council Review` block `plan` and the driver persist, the driver's `plan-critical`
+trigger and its `*Critical:* none` convention, and the spec review's status stamp keep the internal
+levels. When that block is written, each plain group maps back to its internal level: the "needs
+your decision" group is the `*Critical:*` list, "worth fixing, your call" is `*Important:*`, and
+"nothing to decide" is `*Minor:*`.
