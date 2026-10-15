@@ -29,6 +29,10 @@ EXPECTED_MD = CASE_DIR / "expected.md"
 # origin/main when the case was cut: every baseline arm reads every source here.
 BASELINE_REVISION = "f68200933f69e0c00bc79634fb4758b8fa039c1c"
 
+# The commit carrying the shared-contract edit: treated arms read `council.md` (and, at
+# consult, `consult/SKILL.md`) from here and every other source from the baseline.
+EDIT_REVISION = "42e1b088cbb9809c9bd4cf41d226c96da8f480b9"
+
 PLUGIN = "tools/craft/plugins/craft"
 RULES = f"{PLUGIN}/rules.md"
 COUNCIL = f"{PLUGIN}/skills/_shared/council.md"
@@ -62,6 +66,27 @@ ARM_SOURCES: dict[str, list[Source]] = {
         (RULES, BASELINE_REVISION),
         (DRIVE_SKILL, BASELINE_REVISION),
         (COUNCIL, BASELINE_REVISION),
+    ],
+    "treated-consult.md": [
+        (RULES, BASELINE_REVISION),
+        (CONSULT_SKILL, EDIT_REVISION),
+        (COUNCIL, EDIT_REVISION),
+    ],
+    "treated-plan.md": [
+        (RULES, BASELINE_REVISION),
+        (PLAN_SKILL, BASELINE_REVISION),
+        (COUNCIL, EDIT_REVISION),
+    ],
+    "treated-specreview.md": [
+        (RULES, BASELINE_REVISION),
+        (GAUNTLET_SKILL, BASELINE_REVISION),
+        (GAUNTLET_DISPOSITIONS, BASELINE_REVISION),
+        (COUNCIL, EDIT_REVISION),
+    ],
+    "treated-driver.md": [
+        (RULES, BASELINE_REVISION),
+        (DRIVE_SKILL, BASELINE_REVISION),
+        (COUNCIL, EDIT_REVISION),
     ],
 }
 
