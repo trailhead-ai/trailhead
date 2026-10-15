@@ -613,15 +613,17 @@ def _format_history(record_id: str, history: list) -> list[str]:
         lines.append(f"initiated-by: {_neutral(_printable(str(entry.get('initiated-by', ''))))}")
         lines.append(f"reason: {_neutral(_printable(str(entry.get('reason', '')), keep=chr(10)))}")
         criteria = entry.get("criteria")
-        removed = criteria.get("removed") if isinstance(criteria, dict) else None
-        if isinstance(removed, list) and removed:
+        if isinstance(criteria, dict):
             from ..record.criteria import _canonical
 
-            shown = (
-                i if isinstance(i, str) and _canonical(i) else "<non-canonical id>"
-                for i in removed
-            )
-            lines.append("removed criteria: " + ", ".join(shown))
+            for key in ("removed", "reopened", "closed"):
+                ids = criteria.get(key)
+                if isinstance(ids, list) and ids:
+                    shown = (
+                        i if isinstance(i, str) and _canonical(i) else "<non-canonical id>"
+                        for i in ids
+                    )
+                    lines.append(f"{key} criteria: " + ", ".join(shown))
         lines.append("diff:")
         diff = _printable(str(entry.get("diff", "")), keep="\n\t")
         lines.extend(_neutral(diff).rstrip("\n").split("\n"))
@@ -3264,7 +3266,10 @@ def add_record_subparser(sub) -> None:
         description="Print one JSON object, {\"record\", \"declared\", \"removed\"}: "
                     "the criterion identifiers a spec's body declares (document "
                     "order) and the ones its change-history recorded as removed "
-                    "(numeric order). Read-only.",
+                    "(numeric order). Two more keys appear only when non-empty: "
+                    "\"reopened\" ({id: [task ids whose coverage the reopen "
+                    "voided]}) and \"closed\" ([ids] closed without a slice). "
+                    "Read-only.",
     )
     p_record_criteria.add_argument(
         "record_id",

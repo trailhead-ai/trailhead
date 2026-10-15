@@ -13,6 +13,7 @@ import pytest
 from conftest import make_vault as _make_vault, run_cli as _run
 from test_record_cli_amend import _amend, _create, _revert, _set_history
 from test_record_cli_amend_criteria import _ac, _make_spec, _spec
+from test_record_cli_amend_marks import LEDGER, _make, _marks, _spec_body
 
 
 def _criteria(vault, state, rid, *extra, env_extra=None):
@@ -193,3 +194,43 @@ def test_an_unreadable_sidecar_is_refused_instead_of_printing_empty_removed(tmp_
     kind, name = rid.split("/", 1)
     (vault / kind / f"{name}.json").write_text(content, encoding="utf-8")
     _assert_clean_refusal(_criteria(vault, state, rid))
+
+
+def test_a_reopen_shows_the_voided_task_ids_and_no_closed_key(tmp_path):
+    vault, state, rid = _make(tmp_path, *LEDGER)
+    assert _marks(vault, state, rid, "--reopen", "AC2").returncode == 0
+    out = json.loads(_criteria(vault, state, rid).stdout)
+    assert out["reopened"] == {"AC2": ["a", "b"]}
+    assert "closed" not in out
+
+
+def test_a_later_close_shows_closed_and_drops_the_reopened_key(tmp_path):
+    vault, state, rid = _make(tmp_path, *LEDGER)
+    assert _marks(vault, state, rid, "--reopen", "AC2").returncode == 0
+    assert _marks(vault, state, rid, "--close", "AC2").returncode == 0
+    out = json.loads(_criteria(vault, state, rid).stdout)
+    assert out["closed"] == ["AC2"]
+    assert "reopened" not in out
+
+
+def test_a_spec_with_no_marks_prints_exactly_the_three_keys(tmp_path):
+    vault, state, rid = _make(tmp_path, *LEDGER)
+    assert set(json.loads(_criteria(vault, state, rid).stdout)) == {"record", "declared", "removed"}
+
+
+def test_removing_a_reopened_criterion_leaves_neither_mark_key(tmp_path):
+    vault, state, rid = _make(tmp_path, *LEDGER)
+    assert _marks(vault, state, rid, "--reopen", "AC2").returncode == 0
+    r = _amend(vault, state, rid, _spec_body(*LEDGER, numbers=(1, 3)))
+    assert r.returncode == 0, r.stderr
+    out = json.loads(_criteria(vault, state, rid).stdout)
+    assert out["removed"] == ["AC2"]
+    assert "reopened" not in out and "closed" not in out
+
+
+def test_criteria_help_names_the_reopened_and_closed_keys(tmp_path):
+    vault, state = _make_vault(tmp_path)
+    r = _run(["record", "criteria", "--help"], vault=vault, state_dir=state)
+    assert r.returncode == 0, r.stderr
+    flat = " ".join(r.stdout.split())
+    assert "reopened" in flat and "closed" in flat
