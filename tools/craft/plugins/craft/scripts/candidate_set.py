@@ -115,11 +115,17 @@ malformed coverage token, not silently deduplicated. This applies to the
 
 Removed criteria (`--criteria-state <path>`): an amend can remove a criterion
 from a spec whose `## Slices` ledger already records coverage of it, and the
-ledger is append-only. The state file is a JSON object with exactly the keys
+ledger is append-only. The state file is a JSON object with the keys
 `record` (a string), `declared` (a list of `^AC[0-9]+$` strings exactly as the
 body declares them, so repeats and non-canonical forms such as `AC007` are
 allowed) and `removed` (a list of unique canonical `^AC[1-9][0-9]{0,8}$`
-identifiers); either list may be empty. A `covers` or
+identifiers); either list may be empty. It may also carry `reopened` (a
+non-empty object from canonical identifier to a list, possibly empty, of unique
+task ids matching `^[a-z0-9][a-z0-9._-]*$`) and `closed` (a non-empty list of
+unique canonical identifiers), each present only when non-empty; an identifier
+in `removed`, or in both `reopened` and `closed`, is malformed, and one the
+body does not declare contradicts it. The gate validates these marks and does
+not yet act on them. A `covers` or
 `partially covers` token naming an identifier in `removed` is void: it is not
 counted as covered or partial, is not an undeclared identifier, and does not
 change `complete-eligible` (the entry still carries a coverage token). With the
@@ -159,8 +165,9 @@ Exit codes:
        state file that is unreadable, a symlink, not a regular file, over
        1 MiB, not JSON, or not the shape above
        (`reason-code: malformed-criteria-state`); or a state whose `declared`
-       list differs from the body's, or whose `removed` list intersects its
-       `declared` list (`reason-code: criteria-state-contradicts-body`).
+       list differs from the body's, whose `removed` list intersects its
+       `declared` list, or that marks an undeclared identifier `reopened` or
+       `closed` (`reason-code: criteria-state-contradicts-body`).
        NEVER exits 0 when the derivation could not be certified.
 """
 
@@ -205,7 +212,9 @@ _MALFORMED_CRITERIA_STATE_REASON_CODE = "malformed-criteria-state"
 _CRITERIA_STATE_CONTRADICTS_BODY_REASON_CODE = "criteria-state-contradicts-body"
 
 _CRITERIA_STATE_MAX_BYTES = 1024 * 1024
-_CRITERIA_STATE_KEYS = frozenset({"record", "declared", "removed"})
+_CRITERIA_STATE_REQUIRED_KEYS = frozenset({"record", "declared", "removed"})
+_CRITERIA_STATE_KEYS = _CRITERIA_STATE_REQUIRED_KEYS | {"reopened", "closed"}
+_SNAPSHOT_TASK_ID_RE = re.compile(r"[a-z0-9][a-z0-9._-]*")
 _CRITERION_ID_RE = re.compile(r"AC[1-9][0-9]{0,8}")
 _DECLARED_ID_RE = re.compile(r"AC\d+")
 
@@ -626,9 +635,41 @@ def _is_removed_list(value: object) -> bool:
     )
 
 
-def load_criteria_state(path: str) -> tuple[list[str], list[str]]:
-    """Return `(declared, removed)` from the `lore record criteria` JSON at
-    `path`. Opens the path exactly once, refusing a symlink (`O_NOFOLLOW`) and
+def _is_canonical_id(value: object) -> bool:
+    return isinstance(value, str) and _CRITERION_ID_RE.fullmatch(value) is not None
+
+
+def _is_snapshot_list(value: object) -> bool:
+    return (
+        isinstance(value, list)
+        and all(isinstance(v, str) and _SNAPSHOT_TASK_ID_RE.fullmatch(v) for v in value)
+        and len(set(value)) == len(value)
+    )
+
+
+def _is_reopened(value: object) -> bool:
+    return (
+        isinstance(value, dict)
+        and bool(value)
+        and all(_is_canonical_id(k) and _is_snapshot_list(v) for k, v in value.items())
+    )
+
+
+def _is_closed(value: object) -> bool:
+    return (
+        isinstance(value, list)
+        and bool(value)
+        and all(_is_canonical_id(v) for v in value)
+        and len(set(value)) == len(value)
+    )
+
+
+def load_criteria_state(
+    path: str,
+) -> tuple[list[str], list[str], dict[str, list[str]], list[str]]:
+    """Return `(declared, removed, reopened, closed)` from the `lore record
+    criteria` JSON at `path`; the last two are `{}` / `[]` when the file omits
+    them. Opens the path exactly once, refusing a symlink (`O_NOFOLLOW`) and
     anything but a regular file of at most `_CRITERIA_STATE_MAX_BYTES`; raises
     CriteriaStateError, whose message never carries file content."""
     try:
@@ -650,9 +691,14 @@ def load_criteria_state(path: str) -> tuple[list[str], list[str]]:
         data = json.loads(raw.decode("utf-8"))
     except (ValueError, RecursionError) as e:
         raise CriteriaStateError("the state file is not valid UTF-8 JSON") from e
-    if not isinstance(data, dict) or set(data) != _CRITERIA_STATE_KEYS:
+    if (
+        not isinstance(data, dict)
+        or not _CRITERIA_STATE_REQUIRED_KEYS <= set(data)
+        or not set(data) <= _CRITERIA_STATE_KEYS
+    ):
         raise CriteriaStateError(
-            "the state file must be an object with exactly the keys record, declared, removed"
+            "the state file must be an object with the keys record, declared, removed "
+            "and optionally reopened, closed"
         )
     if not isinstance(data["record"], str):
         raise CriteriaStateError("the state file's record must be a string")
@@ -661,7 +707,23 @@ def load_criteria_state(path: str) -> tuple[list[str], list[str]]:
             "the state file's declared must be a list of ACn identifiers and its removed "
             "a list of unique canonical ACn identifiers"
         )
-    return data["declared"], data["removed"]
+    reopened = data.get("reopened", {})
+    closed = data.get("closed", [])
+    if "reopened" in data and not _is_reopened(reopened):
+        raise CriteriaStateError(
+            "the state file's reopened must be a non-empty object from canonical ACn "
+            "identifiers to lists of unique task ids"
+        )
+    if "closed" in data and not _is_closed(closed):
+        raise CriteriaStateError(
+            "the state file's closed must be a non-empty list of unique canonical ACn identifiers"
+        )
+    if (set(reopened) & set(closed)) or (set(reopened) | set(closed)) & set(data["removed"]):
+        raise CriteriaStateError(
+            "the state file marks an identifier as both reopened and closed, or as marked "
+            "and removed"
+        )
+    return data["declared"], data["removed"], reopened, closed
 
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
@@ -718,16 +780,22 @@ def main(argv: list[str]) -> int:
     removed: frozenset[str] = frozenset()
     if args.criteria_state is not None:
         try:
-            state_declared, state_removed = load_criteria_state(args.criteria_state)
+            state_declared, state_removed, state_reopened, state_closed = load_criteria_state(
+                args.criteria_state
+            )
         except CriteriaStateError as e:
             _err(f"reason: {e}")
             _err(f"reason-code: {_MALFORMED_CRITERIA_STATE_REASON_CODE}")
             return 2
-        if state_declared != criteria or set(state_removed) & set(state_declared):
+        if (
+            state_declared != criteria
+            or set(state_removed) & set(state_declared)
+            or (set(state_reopened) | set(state_closed)) - set(state_declared)
+        ):
             _err(
                 "reason: the criteria state's declared list differs from the spec body's, "
-                "or lists a declared criterion as removed — the state file is stale or "
-                "belongs to another spec"
+                "lists a declared criterion as removed, or marks an undeclared criterion "
+                "as reopened or closed — the state file is stale or belongs to another spec"
             )
             _err(f"reason-code: {_CRITERIA_STATE_CONTRADICTS_BODY_REASON_CODE}")
             return 2
