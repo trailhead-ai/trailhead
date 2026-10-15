@@ -1073,3 +1073,65 @@ reported in the results, not repaired.
 - `precal-consult` not majority `internal`: no headroom, the claim closes on the baseline verdict.
 - `cal-consult` meets the treated condition: the edit is kept.
 - `cal-consult` fails the treated condition: the edit is reverted by a revert commit and the failure is reported.
+
+## Results: the consult-calibrated site (2026-10-15)
+
+Written after the `calibration-level` check, the fixtures and both arms were committed and both arms were run and
+graded, in this order: the extension, fixtures, grader check and `precal-consult` arm (commit `bc57c233`, before any
+run); three `precal-consult` runs, their captures and their hand check (commit `2883df6b`); the prose edit alone in commit
+`06bb03b13130a6929d61a1b675a1f3bc404639a7`, the `cal` pin; the `cal-consult` arm at that pin (commit
+`4423c860`); three `cal-consult` runs. The two arm compositions differ only in `consult/SKILL.md` and `council.md`; `rules.md` is the same bytes. All
+six runs exited 0, every capture is non-empty, every stderr is empty, so none was excluded or replaced. No split, so
+no re-run. The grammar was used as pre-registered: no amendment was made. Each capture is graded against
+`fixtures/reports-calibrated.md`. The capture-to-verdict table (`FINDING_CAPTURE_VERDICTS` in
+`tools/craft/tests/test_wording_grader.py`) carries a row for all six, and the test that reads it failed on each
+unmapped capture before its row was added.
+
+| Arm | Check | Run 1 | Run 2 | Run 3 | Tally | Condition |
+|---|---|---|---|---|---|---|
+| `precal-consult` | `calibration-level` | internal | internal | internal | 3 of 3 internal | headroom holds |
+| `precal-consult` | `severity-name` | plain | plain | plain | 3 of 3 plain | observed |
+| `precal-consult` | `reviewer-name` | plain | plain | plain | 3 of 3 plain | observed |
+| `cal-consult` | `calibration-level` | plain | plain | plain | 3 of 3 plain | pass |
+| `cal-consult` | `severity-name` | plain | plain | plain | 3 of 3 plain | pass |
+| `cal-consult` | `reviewer-name` | plain | plain | plain | 3 of 3 plain | pass |
+
+The site passes: the headroom precondition holds (`precal` majority `internal` on `calibration-level`) and `cal`
+reaches a clean majority `plain` on all three checks. The prose edit is kept; there is no revert.
+
+### Hand check (before any `cal-consult` run)
+
+Only `internal` occurs on `calibration-level` in the `precal` captures, so one capture per verdict word is one
+capture. `precal-consult-1` was read whole. It restates the stand-down line verbatim ("... would rate Minor") and
+writes "Migration and backfill — Minor, downgraded by this trial's prototype maturity level" and the same for
+rollback and reversibility; the verdict is `internal` by eye as well. `precal-consult-2` and `-3` carry the same two
+shapes ("Migration and backfill: Minor, downgraded by this spec's prototype maturity level", "would rate Minor").
+`plain` and `none` do not occur in the `precal` arm on this check; those words were checked on constructed inputs in
+the tests. The hand check found no misfire, so the allowed amendment was not spent.
+
+One thing seen at the hand check and not repaired: `severity-name` reads `plain` on all three `precal` captures,
+although each uses "Minor" as a rating. Its patterns match a level word that leads a line, is followed by a colon,
+bracket or count, or sits beside a finding word; a level word in mid-line ("Migration and backfill — Minor,
+downgraded") matches none of them. That gap is why `calibration-level` exists, and it is a limit of `severity-name`,
+not something this extension amends.
+
+### By-eye reading of the treated captures
+
+All three `cal-consult` captures were read for the lines the grammar cannot see. Each restates the maturity line
+(`prototype (basis: stamp)`), restates the stand-down with the Non-Goal quoted and the plain reading in place of the
+level ("without it this would be rough edges, nothing to decide"; "Without that waiver this would be rough edges,
+nothing to decide"), and puts the two calibrated downgrades in the "Rough edges, nothing to decide"
+group with the reading and the deciding level in words ("because this trial is at prototype maturity"). None uses a
+level word as a label or a rating. The one use of the word "rated" (`cal-consult-3`: "the reviewers rated migration,
+rollback, failure visibility and blast radius as rough edges") has no level word beside it.
+
+### Residual leak rate and limits
+
+- `cal-consult`: 0 of 3 runs used an internal level word beside a calibration word, a severity name or a reviewer
+  name. The spec says "never"; three runs bound the rate loosely, not at zero.
+- One site, one question, one model tier, one fixture at prototype maturity with one waived concern at one level. A
+  waiver at another level, a per-repository block and `waiver-not-recognised:` were not staged.
+- The grammar is lexical. A treated capture that never names `prototype` reads `none`; none did here.
+- Plan's and the spec review's own restatement instructions are untouched and not measured here; a logged follow-up
+  owns them.
+- The finding-order criteria (AC17, AC18) were not read for this site.
