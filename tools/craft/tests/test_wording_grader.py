@@ -1272,8 +1272,9 @@ SITE_CHECKS = {
 }
 
 # One row per committed capture: the verdict of each check the site runs. The pre-registered expectation for a
-# baseline is internal on both naming checks; a capture whose graded verdict differs is a finding the results
-# section of `expected.md` records.
+# baseline is internal on both naming checks, and for a treated arm plain on both naming checks and kept on
+# persisted-levels; a capture whose graded verdict differs is a finding the results section of `expected.md`
+# records.
 FINDING_CAPTURE_VERDICTS = {
     "baseline-consult-1": {"severity-name": "internal", "reviewer-name": "internal"},
     "baseline-consult-2": {"severity-name": "internal", "reviewer-name": "internal"},
@@ -1287,6 +1288,27 @@ FINDING_CAPTURE_VERDICTS = {
     "baseline-driver-1": {"severity-name": "internal", "reviewer-name": "internal", "persisted-levels": "kept"},
     "baseline-driver-2": {"severity-name": "internal", "reviewer-name": "internal", "persisted-levels": "kept"},
     "baseline-driver-3": {"severity-name": "internal", "reviewer-name": "internal", "persisted-levels": "kept"},
+    "treated-consult-1": {"severity-name": "plain", "reviewer-name": "plain"},
+    "treated-consult-2": {"severity-name": "internal", "reviewer-name": "plain"},
+    "treated-consult-3": {"severity-name": "plain", "reviewer-name": "plain"},
+    "treated-consult-4": {"severity-name": "plain", "reviewer-name": "plain"},
+    "treated-consult-5": {"severity-name": "plain", "reviewer-name": "plain"},
+    "treated-consult-6": {"severity-name": "plain", "reviewer-name": "plain"},
+    "treated-plan-1": {"severity-name": "plain", "reviewer-name": "plain", "persisted-levels": "kept"},
+    "treated-plan-2": {"severity-name": "plain", "reviewer-name": "plain", "persisted-levels": "kept"},
+    "treated-plan-3": {"severity-name": "plain", "reviewer-name": "plain", "persisted-levels": "kept"},
+    "treated-specreview-1": {"severity-name": "plain", "reviewer-name": "plain"},
+    "treated-specreview-2": {"severity-name": "internal", "reviewer-name": "plain"},
+    "treated-specreview-3": {"severity-name": "plain", "reviewer-name": "plain"},
+    "treated-specreview-4": {"severity-name": "plain", "reviewer-name": "plain"},
+    "treated-specreview-5": {"severity-name": "plain", "reviewer-name": "plain"},
+    "treated-specreview-6": {"severity-name": "plain", "reviewer-name": "plain"},
+    "treated-driver-1": {"severity-name": "plain", "reviewer-name": "plain", "persisted-levels": "kept"},
+    "treated-driver-2": {"severity-name": "plain", "reviewer-name": "plain", "persisted-levels": "kept"},
+    "treated-driver-3": {"severity-name": "internal", "reviewer-name": "plain", "persisted-levels": "kept"},
+    "treated-driver-4": {"severity-name": "plain", "reviewer-name": "plain", "persisted-levels": "kept"},
+    "treated-driver-5": {"severity-name": "plain", "reviewer-name": "plain", "persisted-levels": "kept"},
+    "treated-driver-6": {"severity-name": "plain", "reviewer-name": "plain", "persisted-levels": "kept"},
 }
 
 FINDING_CAPTURES = sorted(p for p in FINDING_RUNS.glob("*.txt") if not p.name.endswith(".stderr.txt"))

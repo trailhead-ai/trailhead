@@ -468,3 +468,103 @@ Readings 3 and 4 state what the grader already did. Readings 1 and 2 change it.
 the results above record: `internal` on `severity-name` and `reviewer-name` at all four sites, `kept` on
 `persisted-levels` at plan and driver, in all three runs each. The capture map does not change and the headroom
 table above stands.
+
+## Results: treated arms (2026-10-15)
+
+Written after the four `treated-<site>` arms were run and graded. The arms are pinned at `EDIT_REVISION=42e1b088` in
+`tools/craft/tests/test_finding_presentation_wording_arms_contract.py`: each equals its baseline up to
+`council.md` (and `consult/SKILL.md` at consult). 21 captures were taken: consult, specreview and driver split 2-1 on
+`severity-name` in runs 1-3, so the "Runs, sample size and splits" rule added runs 4-6 (a fresh batch, all six
+combined) at those three sites; plan was 3 of 3 and was not re-run. All 21 `.exit` files read 0, every `.txt` is
+non-empty and every `.stderr.txt` is empty, so none was excluded or replaced. The grammar and its amendment were
+used as they stand; no misfire was found, so nothing is repaired. Each capture is graded against its site's own
+reports, as in the baseline results. The capture-to-verdict table is `FINDING_CAPTURE_VERDICTS` in
+`tools/craft/tests/test_wording_grader.py`, which now carries a row for every treated capture.
+
+### Treated verdicts and pass conditions
+
+A clean majority is 3 of 3 at three runs and 5 or 6 of 6 at six. `none` counts for neither side.
+
+| Site | Check | Run 1 | Run 2 | Run 3 | Run 4 | Run 5 | Run 6 | Tally | Treated condition |
+|---|---|---|---|---|---|---|---|---|---|
+| consult | `severity-name` | plain | internal | plain | plain | plain | plain | 5 of 6 plain | pass |
+| consult | `reviewer-name` | plain | plain | plain | plain | plain | plain | 6 of 6 plain | pass |
+| plan | `severity-name` | plain | plain | plain | not run | not run | not run | 3 of 3 plain | pass |
+| plan | `reviewer-name` | plain | plain | plain | not run | not run | not run | 3 of 3 plain | pass |
+| plan | `persisted-levels` | kept | kept | kept | not run | not run | not run | 3 of 3 kept | pass (guard) |
+| specreview | `severity-name` | plain | internal | plain | plain | plain | plain | 5 of 6 plain | pass |
+| specreview | `reviewer-name` | plain | plain | plain | plain | plain | plain | 6 of 6 plain | pass |
+| driver | `severity-name` | plain | plain | internal | plain | plain | plain | 5 of 6 plain | pass |
+| driver | `reviewer-name` | plain | plain | plain | plain | plain | plain | 6 of 6 plain | pass |
+| driver | `persisted-levels` | kept | kept | kept | kept | kept | kept | 6 of 6 kept | pass (guard) |
+
+Every site holds its headroom precondition (the baseline results above) and meets every treated condition, so
+every site passes: consult, plan, specreview and driver.
+
+### Residual leak rate
+
+- consult: 1 of 6 runs used an internal severity name (run 2); 0 of 6 an internal reviewer name.
+- plan: 0 of 3 runs used an internal severity or reviewer name; 0 of 3 changed the saved block.
+- specreview: 1 of 6 runs used an internal severity name (run 2); 0 of 6 an internal reviewer name.
+- driver: 1 of 6 runs used an internal severity name (run 3); 0 of 6 an internal reviewer name; 0 of 6 changed the
+  saved block.
+
+The spec says "never"; the rate is not zero at three of four sites. Each of the three leaks matched S1 (the whole
+word `Critical`), and each was confirmed by reading the line, so none is a grader misfire:
+
+- consult-2: "The ease-of-use reviewer's Critical, that tenants "might feel the process is unfair", names no
+  failure ..." (in the synthesis prose).
+- specreview-2: "**Recommended outcome:** fix both Criticals in this round, and the spec then moves to `ready`."
+- driver-3: "... under the `plan-critical` trigger, which applies when a Critical survives synthesis", and again, in the
+  decision list, "... which is rated Critical" and "production failure visibility is Critical at this spec's
+  production level".
+
+In all three the word is the model describing its own regrading or the trigger, in prose beside otherwise plain
+labels; the finding headings, groups and attributions in those captures are plain.
+
+### Outcome rule
+
+At least one site passes (all four do), so the edits to `council.md` and `consult/SKILL.md` are kept. No revert.
+
+The fallback in "Fallback, fixed before any run" is reserved for a site whose treated arm fails a check. No site
+fails, so the fallback has no failing site to act on and no `fallback-<site>` arm is created or run.
+
+### Finding order (AC17, AC18): an observation, not a verdict
+
+Read by eye from the captures while checking the leaks above, not under the full protocol, not counted in any pass
+condition, and still recorded as unmeasured. AC17 and AC18 close only when the operator names them at slice close.
+
+- consult (6 runs): every capture puts a narrative (what the reviewers found, whether it holds, what to do) before
+  the grouped list; in the list each finding opens with a bold sentence naming the problem, and in 5 of 6 that
+  sentence or the next carries the decision and an "I recommend" (run 6 states the condition without a
+  recommendation on its first finding). Worst case, `Fix:` and `Raised by:` follow in that order in 6 of 6.
+- plan (3 runs): each finding in the first two groups opens with one bold sentence carrying the question, "I
+  recommend" and what is at stake, then worst case, `Fix:` and `Raised by:` in order, in 3 of 3 (the lower groups
+  in runs 1 and 3 fold the worst case into the opening sentence).
+- specreview (6 runs): the two or three top findings are table rows (id, finding, disposition, proposed edit), not
+  sentences with a decision, recommendation and stake; the recommendation sits in the narrative and the
+  `Recommended outcome` line above the table, and there is no per-finding worst case or `Fix:` line. Who raised a
+  finding is in the narrative, not the row. The shape the criteria describe is not what these captures show.
+- driver (6 runs): the same shape as plan: the opening sentence carries a question or statement, "I recommend" (or
+  "I'd recommend") and the stake in 6 of 6 for the top group, then worst case, `Fix:` and `Raised by:` in order;
+  run 6 puts the recommendation in the bold line and the stake in the next sentence.
+
+### Limits seen
+
+- The three leaks are real uses of the internal word, not lexical misfires, so the grammar's trade-off in
+  "Limits" (ordinary English reading as internal) did not bite on a treated capture. No ordinary-English use of
+  `important`, `minor` or `critical` appeared in any treated capture outside the three leaks.
+- The finding-order notes above are impressions from reading the captures, not the protocol's per-finding record.
+- Consumers of `skills/_shared/council.md` (grep `council.md` under `tools/craft/plugins/`, excluding `evals/`;
+  4 files, 25 lines; no agent file names it). Each skill's eval site is the one whose arm loads that skill:
+  - `skills/consult/SKILL.md` lines 19, 45, 48, 57, 89: the consult site (this is the only consumer whose own
+    restatement was edited, and its treated arm carries the edit).
+  - `skills/plan/SKILL.md` lines 450, 457, 459, 461, 474, 526, 577: the plan site.
+  - `skills/gauntlet/SKILL.md` lines 47, 127, 162, 167, 172, 186, 194, 239, 319, 470: the specreview site. The
+    eval covers the step that recommends and asks for acceptance; the dispatch and synthesis steps at lines 162 to
+    194 are not presented to a reader in the staged run.
+  - `skills/drive/SKILL.md` lines 292, 300, 335: the driver site (step 8).
+  - Outside the plugin, not a skill or agent: `tools/craft/README.md` line 77 names it as the single source of
+    council membership; no eval site applies.
+  - The review skill, the end-of-build review and every agent file under `agents/` do not name `council.md`; they
+    are not consumers and no site covers them (see "Not measured").
