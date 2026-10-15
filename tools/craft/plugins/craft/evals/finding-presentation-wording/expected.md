@@ -471,7 +471,7 @@ table above stands.
 
 ## Results: treated arms (2026-10-15)
 
-Written after the four `treated-<site>` arms were run and graded. The arms are pinned at `EDIT_REVISION=42e1b088` in
+Written after the four `treated-<site>` arms were run and graded. The arms are pinned at `EDIT_REVISION=af083a20` in
 `tools/craft/tests/test_finding_presentation_wording_arms_contract.py`: each equals its baseline up to
 `council.md` (and `consult/SKILL.md` at consult). 21 captures were taken: consult, specreview and driver split 2-1 on
 `severity-name` in runs 1-3, so the "Runs, sample size and splits" rule added runs 4-6 (a fresh batch, all six
@@ -990,7 +990,7 @@ form.
 
 | Arm file | Site | Sources, in order | Pin |
 |---|---|---|---|
-| `precal-consult.md` | consult-calibrated | `rules.md`, `skills/consult/SKILL.md`, `skills/_shared/council.md` | every source at the baseline revision `f68200933f69e0c00bc79634fb4758b8fa039c1c`, except `consult/SKILL.md` and `council.md` at `f98d25850e9a770fd4a14ac585e5029931782ac8` (the committed state before the calibration edit; byte-identical to `42e1b088`) |
+| `precal-consult.md` | consult-calibrated | `rules.md`, `skills/consult/SKILL.md`, `skills/_shared/council.md` | every source at the baseline revision `f68200933f69e0c00bc79634fb4758b8fa039c1c`, except `consult/SKILL.md` and `council.md` at `e88e01300e9a770fd4a14ac585e5029931782ac8` (the committed state before the calibration edit; byte-identical to `42e1b088`) |
 | `cal-consult.md` | consult-calibrated | the same three | the same, with `consult/SKILL.md` and `council.md` at the commit that carries the calibration edit (its SHA is named in the results) |
 
 The two compositions differ in those two files only. The manifest in
