@@ -96,6 +96,69 @@ def test_a_malformed_spec_name_is_refused_before_any_lore_call(name, capsys):
     assert runner.calls == []
 
 
+@pytest.mark.parametrize("name", ["-x", "--flag", "-", "--", "-rf"])
+def test_a_spec_name_starting_with_a_dash_is_refused_before_any_lore_call(name, capsys):
+    runner = FakeLore(["v"])
+    code = gather.main(["--", name], runner=runner)
+    err = capsys.readouterr().err
+    assert code == 2
+    assert reason_of(err) == "invalid-spec-name"
+    assert runner.calls == []
+
+
+@pytest.mark.parametrize("name", ["-x", "--flag"])
+def test_a_dash_name_given_without_a_separator_is_refused_with_a_reason_code(name, capsys):
+    runner = FakeLore(["v"])
+    code = gather.main([name], runner=runner)
+    err = capsys.readouterr().err
+    assert code == 2
+    assert reason_of(err) in {"invalid-spec-name", "invalid-arguments"}
+    assert runner.calls == []
+
+
+@pytest.mark.parametrize("name", ["..", "../x", "a/../b", "a/..", "../../etc"])
+def test_a_spec_name_with_a_dotdot_segment_is_refused_before_any_lore_call(name, capsys):
+    runner = FakeLore(["v"])
+    code, out, err = run_main(runner, name, capsys)
+    assert code == 2
+    assert reason_of(err) == "invalid-spec-name"
+    assert runner.calls == []
+
+
+@pytest.mark.parametrize("name", ["a..b", "..a", "a/.b", "v1.2.3"])
+def test_a_dotted_name_with_no_dotdot_segment_still_reaches_lore(name, capsys):
+    runner = FakeLore(["v"])
+    code, out, err = run_main(runner, name, capsys)
+    assert reason_of(err) == "spec-not-found"
+    assert runner.calls != []
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [[], ["--bogus", "s"], ["s", "extra"], ["s", "--bogus"], ["a", "b", "c"]],
+)
+def test_bad_arguments_exit_two_with_invalid_arguments_and_never_call_lore(argv, capsys):
+    runner = FakeLore(["v"])
+    code = gather.main(argv, runner=runner)
+    err = capsys.readouterr().err
+    assert code == 2
+    assert reason_of(err) == "invalid-arguments"
+    assert runner.calls == []
+
+
+@pytest.mark.parametrize("flag", ["--help", "-h"])
+def test_help_still_exits_zero_with_usage_and_never_calls_lore(flag, capsys):
+    runner = FakeLore(["v"])
+    with pytest.raises(SystemExit) as exc:
+        gather.main([flag], runner=runner)
+    out = capsys.readouterr()
+    assert exc.value.code == 0
+    assert "usage:" in out.out
+    assert "spec_name" in out.out
+    assert "reason-code" not in out.err
+    assert runner.calls == []
+
+
 @pytest.mark.parametrize(
     "status,labels,entry",
     [
