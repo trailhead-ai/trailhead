@@ -371,3 +371,62 @@ is, and a flaw found later is reported in the results, not repaired.
 - Three runs per arm resolve only a large effect.
 - Runs are read-only (`--allowedTools "Read"`) and start from empty directories; behaviour with tools is not
   measured.
+
+## Results: baseline grading and headroom (2026-10-15)
+
+Written after the grader (`scripts/wording_grader.py`, checks `severity-name`, `reviewer-name`, `persisted-levels`)
+was built to the grammar above and run over the 12 committed baseline captures in `runs/`. No treated or fallback
+arm exists yet, and no grammar amendment was made: the hand check below found no misfire. Each site's captures
+are graded against that site's own canned reports (`--reports fixtures/<reports file>`): consult
+`reports-consult.md`, plan and driver `reports-lenses.md`, specreview `reports-spec-review.md`. The
+capture-to-verdict table is `FINDING_CAPTURE_VERDICTS` in `tools/craft/tests/test_wording_grader.py`; the test
+that reads it fails on any capture in `runs/` that is not in the table.
+
+### Baseline verdicts and headroom
+
+| Site | Check | Run 1 | Run 2 | Run 3 | Majority | Headroom |
+|---|---|---|---|---|---|---|
+| consult | `severity-name` | internal | internal | internal | internal | holds |
+| consult | `reviewer-name` | internal | internal | internal | internal | holds |
+| plan | `severity-name` | internal | internal | internal | internal | holds |
+| plan | `reviewer-name` | internal | internal | internal | internal | holds |
+| specreview | `severity-name` | internal | internal | internal | internal | holds |
+| specreview | `reviewer-name` | internal | internal | internal | internal | holds |
+| driver | `severity-name` | internal | internal | internal | internal | holds |
+| driver | `reviewer-name` | internal | internal | internal | internal | holds |
+| plan | `persisted-levels` | kept | kept | kept | kept | none required (guard) |
+| driver | `persisted-levels` | kept | kept | kept | kept | none required (guard) |
+
+Every site is majority `internal` on both naming checks, so no site is stopped by the headroom rule: no baseline
+has a no-majority or `none`-majority result, and none is already majority `plain`. All 12 runs exited 0 and
+none was excluded. `persisted-levels` is observed at plan and driver: all six baseline blocks keep the three
+labels and list Criticals, so the guard has a `kept` baseline to hold in the treated arm.
+
+### Hand check
+
+One real capture per site was read by hand against the grader's verdict: `baseline-consult-1`,
+`baseline-plan-1`, `baseline-specreview-1`, `baseline-driver-1` (the first three whole, the fourth its narrative,
+list and fenced block). Each reads `internal` on both naming checks by eye as well: bold or heading level labels
+(`### Critical`, `**Important (8):**`), `Critical` in the synthesis prose, and the lens names `Builder`,
+`Reliability`, `Advocate` (and `Premise`, `Consistency` at specreview) in the prose and attributions.
+
+Only `internal` (naming) and `kept` occur in the baseline. No baseline capture reads `plain`, `none`, `changed`
+or `missing`, so those words were checked on constructed inputs in the tests, not on a real capture. The
+hand check for those words per site is therefore not available from the baseline and is not claimed.
+
+A scan of every baseline for the words `important`, `minor` and `critical` in any case, outside headings and
+labels, found no ordinary English use in reader-facing text. The one lowercase occurrence is the hyphenated
+`plan-critical` trigger name (driver captures), which the grammar's whole-word rule does not match.
+
+### Unknown resolved
+
+Ordinary English uses of `important`, `minor` or `critical` do not make the severity grammar misfire on the
+baseline: no baseline capture has one, the lowercase forms are excluded by the case-sensitive patterns, and the
+hyphen rule keeps `plan-critical` out. This says nothing about a treated capture, which may use them.
+
+### Limits seen
+
+- Every baseline capture also carries the internal forms in several places (headings, attributions), so none
+  of the 12 verdicts rests on a single borderline match.
+- The text immediately after a closing fence with no blank line between is read as its own line; the grammar
+  does not say whether it joins the fence line. No baseline capture has that shape.
