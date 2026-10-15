@@ -109,9 +109,10 @@ The reply step replaces the question panel when its entry is chosen:
 │                │                                                     │
 │                │  Header layout — B, Stacked header                  │
 │                │  Nav placement — none of these                      │
-│                │  Footer — no pick yet; not A, C; a note             │
+│                │  Footer — no pick yet (not A, C; has a note)        │
 │                │                                                     │
-│                │  1 question has no pick yet. You can still copy.    │
+│                │  No pick yet on 1 of 3 questions. You can still     │
+│                │  copy the reply.                                    │
 │                │  ┌─────────────────────────────────────────────┐    │
 │                │  │ ```json                                     │    │
 │                │  │ { "pad": "Settings page", …                 │    │

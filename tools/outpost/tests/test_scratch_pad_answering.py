@@ -75,7 +75,7 @@ def _round(n_questions=1, picks=(0,), n_options=3):
     }
 
 
-def _probe(tmp_path, data, js):
+def _probe(tmp_path, data, js, without=()):
     env = {
         "OUTPOST_STATE_DIR": str(tmp_path / "state"),
         "XDG_STATE_HOME": str(tmp_path / "xdg"),
@@ -84,6 +84,8 @@ def _probe(tmp_path, data, js):
     round_path = tmp_path / "round.json"
     round_path.write_text(json.dumps(data))
     _, pad = scratch_pad.build_pad(round_path, "demo", env=env)
+    for name in without:
+        (pad / "round-1" / name).unlink()
     return ch.run_probe(pad / "round-1", HELPERS + js)
 
 
@@ -340,8 +342,8 @@ COPIED = "Copied. Paste it into your session."
 BLOCKED = "Your browser blocked copying. The reply is selected \u2014 press Ctrl+C (\u2318C on a Mac)."
 
 
-def _reply_probe(tmp_path, data, js):
-    return _probe(tmp_path, data, REPLY_HELPERS + js)
+def _reply_probe(tmp_path, data, js, without=()):
+    return _probe(tmp_path, data, REPLY_HELPERS + js, without=without)
 
 
 def test_reply_entry_is_last_dotless_and_shows_its_own_panel_in_place_of_the_question(tmp_path):
@@ -486,6 +488,20 @@ def test_a_blocked_clipboard_selects_the_whole_reply_and_says_so(tmp_path, clipb
     assert got["cleared"] == ""
 
 
+def test_a_blocked_clipboard_focuses_the_reply_box_without_relying_on_select(tmp_path):
+    js = """
+    HTMLTextAreaElement.prototype.select = () => {};
+    rejecting();
+    await openReply();
+    await copy();
+    return {status: statusText(), selection: selection()};
+    """
+    got = _reply_probe(tmp_path, _round(), js)
+    assert got["status"] == BLOCKED
+    assert got["selection"]["active"]
+    assert (got["selection"]["start"], got["selection"]["end"]) == (0, got["selection"]["length"])
+
+
 def test_seam_real_clipboard_lands_in_one_outcome(tmp_path):  # inert-gate: allow seam smoke, real clipboard
     """Drive the page's real clipboard. The headless shell refuses a scripted
     write, so this exercises the fallback; the success path is covered by the
@@ -585,3 +601,49 @@ def test_an_answer_change_while_the_reply_is_showing_rebuilds_the_reply(tmp_path
     got = _reply_probe(tmp_path, _round(), js)
     assert got["before"] == {"pick": None, "status": COPIED}
     assert (got["pick"], got["summary"], got["status"]) == ("C", "Q0 — C, Opt C", "")
+
+
+NO_PLACEHOLDER_JS = """
+const letters = [...panel(0).querySelectorAll('.pad-letter')].map((e) => e.textContent);
+const names = [...panel(0).querySelectorAll('.pad-card .pad-toggle')].map((b) => b.getAttribute('aria-label'));
+await press(thisOne(0, 1));
+await show(1);
+const shown1 = seen(panel(1));
+await openReply();
+const lines = [...replyPanel().querySelectorAll('p')].filter(seen).map((p) => p.textContent);
+return {
+  letters, names, failure: !!document.getElementById('pad-failure'),
+  cards: document.querySelectorAll('.pad-card').length,
+  pressed: (await show(0), flags(0, thisOne)), dot: dot(0), shown1, lines,
+};
+"""
+
+
+@pytest.mark.parametrize("without,reply_lines", [
+    (("reply.js",), ["The reply could not be built. Answer in words in your session instead."]),
+    ((), []),
+])
+def test_a_pad_whose_reply_script_did_not_load_still_draws_and_answers(tmp_path, without, reply_lines):
+    got = _reply_probe(tmp_path, _round(2), NO_PLACEHOLDER_JS, without=without)
+    assert not got["failure"]
+    assert got["cards"] == 6
+    assert got["letters"] == ["A", "B", "C"]
+    assert got["names"] == [
+        "This one: A, Opt A", "Not this: A, Opt A",
+        "This one: B, Opt B", "Not this: B, Opt B",
+        "This one: C, Opt C", "Not this: C, Opt C",
+    ]
+    assert got["pressed"] == ["false", "true", "false"]
+    assert got["dot"] == {"answered": "true", "text": "answered"}
+    assert got["shown1"]
+    unbuilt = [line for line in got["lines"] if line.startswith("The reply could not")]
+    assert unbuilt == reply_lines
+
+
+def test_the_reply_entry_is_dashed_and_a_question_entry_is_not(tmp_path):
+    js = """
+    const style = (b) => getComputedStyle(b).borderTopStyle;
+    return {reply: style(replyEntry()), question: style(entries()[0])};
+    """
+    got = _reply_probe(tmp_path, _round(2), js)
+    assert got == {"reply": "dashed", "question": "solid"}

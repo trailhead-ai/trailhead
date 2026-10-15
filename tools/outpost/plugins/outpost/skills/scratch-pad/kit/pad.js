@@ -23,11 +23,15 @@
     return String((error && error.message) || error);
   }
 
+  function optionLetter(index) {
+    return String.fromCharCode(65 + index);
+  }
+
   function toggle(label, option, oIndex, onPress) {
     var button = el("button", "pad-toggle", label);
     button.type = "button";
     button.setAttribute("aria-pressed", "false");
-    button.setAttribute("aria-label", label + ": " + window.PadReply.letter(oIndex) + ", " + option.name);
+    button.setAttribute("aria-label", label + ": " + optionLetter(oIndex) + ", " + option.name);
     button.addEventListener("click", onPress);
     return button;
   }
@@ -35,7 +39,7 @@
   function renderOption(option, qIndex, oIndex, act, view) {
     var card = el("article", "pad-card");
     var head = el("header", "pad-card-head");
-    head.appendChild(el("span", "pad-letter", window.PadReply.letter(oIndex)));
+    head.appendChild(el("span", "pad-letter", optionLetter(oIndex)));
     head.appendChild(el("h3", "pad-name", option.name));
     if (option.pick === true) head.appendChild(el("span", "pad-pick", "my pick"));
     var mark = el("span", "pad-mark");

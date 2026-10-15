@@ -62,7 +62,7 @@ button { font: inherit; color: inherit; }
 .pad-dot[data-answered="true"] { background: var(--ink); }
 .pad-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .pad-reply-item { margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px dashed var(--ink); }
-.pad-reply-entry { border-style: dashed; }
+.pad-questions button.pad-reply-entry { border-style: dashed; }
 .pad-questions button[aria-current="true"] { border-color: var(--ink); background: #fff; }
 
 .pad-stage { flex: 1 1 auto; min-width: 0; padding: 1rem 1.5rem; }
