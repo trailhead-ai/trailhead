@@ -1,0 +1,8 @@
+[
+  {
+    "kind": "decision",
+    "title": "Drop duplicate inbound events",
+    "status": "active",
+    "body": "# Drop duplicate inbound events\n\n## Decision\nInbound events are deduplicated before they reach the processor. The dedupe key is built from the sender id and the sender's sequence number. Keys are held for 24 hours.\n\n## Rationale\nSenders retry on timeout, so the same event can arrive more than once. Deduplicating at the edge keeps the processor simple.\n"
+  }
+]

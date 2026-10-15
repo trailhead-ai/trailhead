@@ -1,0 +1,5 @@
+schema_version: "1.1"
+name: amend-wrong-fact-in-active-adr
+runs: 3
+context:
+  scaffold_script: fixtures/scaffold.sh

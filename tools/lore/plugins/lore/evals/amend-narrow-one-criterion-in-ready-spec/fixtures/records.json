@@ -1,0 +1,8 @@
+[
+  {
+    "kind": "spec",
+    "title": "Export the activity feed",
+    "status": "ready",
+    "body": "# Export the activity feed\n\n## Problem\nTeam leads cannot hand the activity feed to people outside the tool, and they cannot take recent changes out in bulk.\n\n## Objectives\n- Team leads can take a copy of recent feed activity out of the tool.\n- Every export is traceable to the person who requested it.\n\n## Maturity\n- marlin: early\n\n## Acceptance Criteria\n- **AC1.** A team lead can request an export of the feed as a spreadsheet file. *Verified by: manual check.*\n- **AC2.** An export can cover any date range the team lead chooses. *Verified by: manual check.*\n- **AC3.** Each export records who requested it and when. *Verified by: manual check.*\n"
+  }
+]
