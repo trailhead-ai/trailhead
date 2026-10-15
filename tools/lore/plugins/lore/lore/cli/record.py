@@ -759,13 +759,15 @@ def _cmd_record_criteria(args) -> int:
     from the stored body and the sidecar's ``change-history``: ``declared`` is the
     identifiers the body declares in document order, ``removed`` the identifiers a
     history entry recorded as removed in numeric order. A spec whose criteria
-    section declares no identifiers prints two empty lists.
+    section declares no identifiers prints two empty lists. ``reopened`` and
+    ``closed`` (from :func:`~lore.record.criteria.criteria_state`) are printed only
+    when non-empty, so a spec with no marks prints exactly the three keys above.
 
     Read-only: it takes no vault lock and writes no journal entry, so it follows
     ``record history``'s read path, including ``--vault`` resolution. A record
     that is not a spec, a missing record or malformed id, a missing or duplicated
     criteria heading, or a stored history that is not a list or whose
-    ``criteria.removed`` is malformed → non-zero + ``lore: <msg>`` on stderr, no
+    ``criteria`` object is malformed → non-zero + ``lore: <msg>`` on stderr, no
     traceback, nothing on stdout. A stored sidecar is validated only on the write
     path, so this command fails closed on a hand-corrupted one.
     """
@@ -822,7 +824,8 @@ def _cmd_record_criteria(args) -> int:
         print(f"lore: {loc.record_id}: {exc}", file=sys.stderr)
         return 1
 
-    sys.stdout.write(json.dumps({"record": loc.record_id, **state}) + "\n")
+    shown = {k: v for k, v in state.items() if v or k in ("declared", "removed")}
+    sys.stdout.write(json.dumps({"record": loc.record_id, **shown}) + "\n")
     return 0
 
 

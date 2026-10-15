@@ -97,6 +97,7 @@ from .. import locking
 from ..confine import realpath_is_descendant
 from ..search import index as index_store
 from ..vault import vault as vault_mod
+from . import criteria as criteria_mod
 from . import journal
 from . import model as record_model
 from . import sidecar as sidecar_format
@@ -443,7 +444,9 @@ def reconstruct_body_before(body: str, history: Any, n: int) -> str:
     search, so an edit made outside amend is kept only when it overlaps no amend
     hunk and shifts no lines above one; otherwise that entry fails to reverse. Raises
     :class:`ReconstructError`; nothing is returned partially. A *history* that is
-    not a list, or an entry whose diff has no hunk, is ``malformed``.
+    not a list, or an entry whose diff has no hunk, is ``malformed``; an entry with
+    an empty diff and a ``reopened`` or ``closed`` mark changed no body and is
+    stepped over.
     """
     if not isinstance(history, list):
         raise ReconstructError(
@@ -466,6 +469,8 @@ def reconstruct_body_before(body: str, history: Any, n: int) -> str:
         diff = entry.get("diff") if isinstance(entry, dict) else None
         if not isinstance(diff, str):
             raise ReconstructError("malformed", f"entry {number} has no stored diff")
+        if diff == "" and criteria_mod.has_mark(entry.get("criteria")):
+            continue
         try:
             if not _parse_hunks(diff):
                 raise ReconstructError(

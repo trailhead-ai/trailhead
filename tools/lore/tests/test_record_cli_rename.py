@@ -1418,7 +1418,7 @@ def _history(n):
             "by": "tester@example.com",
             "initiated-by": "operator",
             "reason": f"reason {i}",
-            "diff": "",
+            "diff": "--- a\n+++ b\n@@ -1 +1 @@\n-x\n+y\n",
         }
         for i in range(n)
     ]
