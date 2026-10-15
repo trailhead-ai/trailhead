@@ -2880,7 +2880,7 @@ def _cmd_record_amend(args) -> int:
 _AMEND_MARKS_HELP = (
     'Spec criteria marks. --reopen ACn (repeatable) voids the coverage recorded before the amend: the '
     'snapshot is the ledger entries stored at the amend, never ones the new body adds. --close ACn '
-    '(repeatable) closes a criterion without a slice covering it, and undoes a mistaken reopen. A second '
+    '(repeatable) closes a criterion without a slice fully covering it, and undoes a mistaken reopen. A second '
     'reopen is allowed (it voids what was recorded since); a second close is refused as already closed. '
     'Reopening after a mistaken close voids all earlier coverage, so the prior partial state returns only'
     ' when a slice records it again. With no stdin the amend is marks-only (body unchanged, --base '
@@ -3136,9 +3136,9 @@ def add_record_subparser(sub) -> None:
     )
     p_record_amend.add_argument(
         "--close", dest="close", action="append", default=None, metavar="ACn",
-        help="Close spec criterion ACn without a slice covering it (also undoes "
+        help="Close spec criterion ACn without a slice fully covering it (also undoes "
              "a mistaken reopen). Repeatable; refused if ACn is already closed "
-             "or no slice has covered it; spec records only; not with --revert-to.",
+             "or no slice has covered or partially covered it; spec records only; not with --revert-to.",
     )
     p_record_amend.add_argument(
         "--revert-to", dest="revert_to", default=None, metavar="N",
@@ -3264,8 +3264,9 @@ def add_record_subparser(sub) -> None:
                     "the criterion identifiers a spec's body declares (document "
                     "order) and the ones its change-history recorded as removed "
                     "(numeric order). Two more keys appear only when non-empty: "
-                    "\"reopened\" ({id: [task ids whose coverage the reopen "
-                    "voided]}) and \"closed\" ([ids] closed without a slice). "
+                    "\"reopened\" ({id: [the ledger task ids stored at the reopen; only "
+                    "those entries' coverage of that id stops counting]}) and "
+                    "\"closed\" ([ids] closed without a slice fully covering them). "
                     "Read-only.",
     )
     p_record_criteria.add_argument(
