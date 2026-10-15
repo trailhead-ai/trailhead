@@ -85,9 +85,10 @@ adds the predecessor to the successor's `supersedes` list and flips the predeces
 
 - **Decision:** create a new decision, then
   `lore record supersede decision/<old> --by decision/<new>`.
-- **Spec:** create a new spec, take it to `ready`, and only then
-  `lore record supersede spec/<old> --by spec/<new>`. A predecessor is flipped only once its
-  successor is `ready`.
+- **Spec:** create the successor spec as a `draft` and leave the predecessor untouched, still
+  live. The successor goes through the gauntlet to `ready`; only then
+  `lore record supersede spec/<old> --by spec/<new>` flips the predecessor. Stop after drafting
+  and hand the gauntlet to the operator.
 - **ADR:** never amended for a material change, and never superseded directly by a hand-made
   ADR. The route is a new spec, then distill, then a successor ADR. **Stop after drafting the
   new spec** and hand the next step (the gauntlet on that spec, then distill) to the operator.
