@@ -105,6 +105,13 @@ irreducible operator decision. A thin wrapper over
 `skills/_shared/refine.md`, the same procedure `/craft:execute` runs inline when
 it is handed a standalone `open` task.
 
+**Tidy follow-ups:** `/craft:tidy-followups` — present a finished spec's recorded
+follow-ups as a reasoned shortlist: about five to eight worth doing now, each with
+a one-line reason why waiting makes it costlier, the rest by title, and blocked
+ones by title only. Read-only; the set comes from `scripts/followup_gather.py`,
+which refuses a spec whose slice loop has not ended and fails rather than present
+a partial set.
+
 **Review:** `/craft:review`
 
 **Distill:** `/craft:distill` — condense completed spec/task work into ADRs

@@ -162,6 +162,8 @@ class TestCraftInventory:
         # whole, folds duplicate clusters into one coherent lesson each, and
         # deletes what it folded away, so the corpus stops outgrowing the
         # bounded window that dispatch-time retrieval reads from.
+        # tidy-followups presents a finished spec's recorded follow-ups as a
+        # reasoned shortlist, read-only.
         m = load_manifest(_CRAFT_MANIFEST)
         assert set(m.skills) == {
             "polish",
@@ -177,6 +179,7 @@ class TestCraftInventory:
             "slice",
             "drive",
             "consolidate",
+            "tidy-followups",
         }
 
     def test_shared_not_selectable(self):
