@@ -51,6 +51,7 @@ from ..host.transport import (
     TransportOutcome,
     default_producer_spawn,
     default_stream_spawner,
+    require_answer,
     stream_camp,
 )
 
@@ -241,7 +242,7 @@ def send_history(
     producer = producer_spawn(
         build_bundle_argv(repo_root, ref, basis_commit=basis_commit, extra_ref=extra_ref)
     )
-    return stream_camp(
+    outcome = stream_camp(
         host,
         remote_argv,
         producer,
@@ -251,3 +252,4 @@ def send_history(
         extra_ssh_options=extra_ssh_options,
         spawn=spawn,
     )
+    return require_answer(outcome)

@@ -78,6 +78,7 @@ readable by other local users on a multi-user machine.
 """
 from __future__ import annotations
 
+import json
 import os
 import shlex
 import subprocess
@@ -700,6 +701,29 @@ def fetch_camp_bytes(
     return _classify(RawResult(stdout="", stderr=stderr, exit_code=returncode))
 
 
+def require_answer(outcome: TransportOutcome) -> TransportOutcome:
+    """*outcome*, unless it is an `Answered` whose stdout is not a JSON object
+    — then the `RemoteRefusal` it actually was.
+
+    For a verb that prints a JSON object on stdout whenever it succeeds — every
+    `transfer-receive` phase does — a clean exit is not evidence on its own.
+    An ssh server can report exit 0 whatever the remote command returned
+    (observed with Tailscale SSH into macOS), and a sender that trusts it
+    treats a refusal as a phase that landed. The answer is the evidence: an
+    exit 0 with no answer is reclassified as the refusal it was, carrying the
+    remote's stderr, which names why.
+    """
+    if not isinstance(outcome, Answered):
+        return outcome
+    try:
+        body = json.loads(outcome.stdout)
+    except ValueError:
+        body = None
+    if isinstance(body, dict):
+        return outcome
+    return RemoteRefusal(stdout=outcome.stdout, stderr=outcome.stderr, exit_code=outcome.exit_code)
+
+
 def outcome_detail(outcome: TransportOutcome) -> str:
     """A human-legible detail string for a non-`Answered` outcome.
 
@@ -710,7 +734,9 @@ def outcome_detail(outcome: TransportOutcome) -> str:
     so it gets a shape-specific line instead.
     """
     if isinstance(outcome, RemoteRefusal):
-        return outcome.stderr.strip()
+        return outcome.stderr.strip() or (
+            f"the peer exited {outcome.exit_code} without an answer or a reason"
+        )
     if isinstance(outcome, ProducerFailed):
         return f"the local producer exited {outcome.exit_code} before the stream completed"
     kind = type(outcome).__name__

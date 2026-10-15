@@ -112,6 +112,7 @@ from ..host.transport import (
     default_runner,
     default_stream_spawner,
     outcome_detail,
+    require_answer,
     run_camp,
 )
 from .conversations import (
@@ -319,12 +320,14 @@ def _run_camp_phase(
     would escape as an uncaught "nothing crossed" refusal after ownership
     had, in fact, already moved.
     """
-    outcome = run_camp(
-        host,
-        remote_argv,
-        connect_timeout=connect_timeout,
-        execution_timeout=execution_timeout,
-        runner=run,
+    outcome = require_answer(
+        run_camp(
+            host,
+            remote_argv,
+            connect_timeout=connect_timeout,
+            execution_timeout=execution_timeout,
+            runner=run,
+        )
     )
     if isinstance(outcome, Answered):
         return outcome

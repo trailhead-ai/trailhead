@@ -2337,6 +2337,126 @@ class TestConversationResumesOnARealPeer:
         assert session_id not in {row["session_id"] for row in rows}, rows
 
 
+#: Runs the script in argv[1] as a child sharing this process's stdin, stdout,
+#: and stderr, then exits 0 whatever the child returned — the shape of an ssh
+#: server that reports success regardless of the remote command's status
+#: (observed with Tailscale SSH into macOS).
+_EXIT_STATUS_LOST = (
+    "import subprocess, sys; subprocess.run([sys.executable, '-c', sys.argv[1]]); sys.exit(0)"
+)
+
+#: A peer phase that refuses: drains its input, says why on stderr, prints no
+#: answer. Run under `_EXIT_STATUS_LOST`, the sender sees only exit 0.
+_REFUSING_PHASE = (
+    "import sys; sys.stdin.buffer.read(); "
+    "sys.stderr.write('camp transfer-receive: refused by the test peer\\n'); sys.exit(1)"
+)
+
+
+def _exit_status_lost(c: dict, *, refuse: str | None = None) -> dict:
+    """*c* with its peer reached as though through an ssh server that loses
+    the remote exit status: every phase still runs against the real peer,
+    except the *refuse* phase, which refuses — and the sender sees exit 0
+    from all of them."""
+    import shlex
+
+    from camp.host.transport import RawResult
+
+    def _script(argv) -> str:
+        camp_args = shlex.split(argv[-1])[1:]
+        if refuse is not None and camp_args[:2] == ["transfer-receive", refuse]:
+            return _REFUSING_PHASE
+        return _peer_dispatch_script(camp_args)
+
+    child_env = _peer_child_env(c["peer_cfg"], c["peer_state"], c["peer_claude_dir"])
+
+    def _run(argv, execution_timeout, env):
+        result = subprocess.run(
+            [sys.executable, "-c", _EXIT_STATUS_LOST, _script(argv)],
+            capture_output=True,
+            text=True,
+            env=child_env,
+            timeout=execution_timeout,
+        )
+        return RawResult(stdout=result.stdout, stderr=result.stderr, exit_code=result.returncode)
+
+    def _spawn(argv, env):
+        return subprocess.Popen(
+            [sys.executable, "-c", _EXIT_STATUS_LOST, _script(argv)],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=child_env,
+        )
+
+    return {**c, "run": _run, "stream_spawn": _spawn}
+
+
+class TestPeerWhoseExitStatusIsLost:
+    """The sender must not take exit 0 alone as proof a phase landed: every
+    `transfer-receive` phase answers on stdout when it succeeds, so a phase
+    that printed no answer refused, whatever exit status arrived."""
+
+    def test_a_refused_conversation_is_dropped_not_reported_as_crossed(self, conv_env):
+        from pathlib import PurePosixPath
+
+        c = _exit_status_lost(conv_env)
+        session_id = "99999999-9999-4999-8999-999999999991"
+
+        def _corrupt_conversation_producer(argv):
+            return subprocess.Popen(
+                [sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'not a tarball')"],
+                stdout=subprocess.PIPE,
+            )
+
+        result, _phases, _dest = _cross_one_conversation(
+            c,
+            session_id=session_id,
+            subpath=PurePosixPath("."),
+            marker="lost-exit-refused-marker",
+            conversation_producer_spawn=_corrupt_conversation_producer,
+        )
+
+        assert result.claimed_owner == "host-b"
+        assert result.conversations == ()
+        assert [d.session_id for d in result.dropped] == [session_id]
+
+    def test_an_answered_conversation_still_crosses(self, conv_env):
+        from pathlib import PurePosixPath
+
+        c = _exit_status_lost(conv_env)
+        session_id = "99999999-9999-4999-8999-999999999992"
+
+        result, _phases, _dest = _cross_one_conversation(
+            c, session_id=session_id, subpath=PurePosixPath("."), marker="lost-exit-crossed-marker"
+        )
+
+        assert [x.session_id for x in result.conversations] == [session_id]
+        assert result.dropped == ()
+
+    @pytest.mark.parametrize(
+        ("refused_phase", "reported_phase", "claimed_owner"),
+        [
+            ("history", "history (repo_a)", None),
+            ("worktree", "worktree (repo_a)", None),
+            ("finish", "finish", "host-b"),
+        ],
+    )
+    def test_a_phase_that_printed_no_answer_fails_the_move(
+        self, move_env, refused_phase, reported_phase, claimed_owner
+    ):
+        from camp.transfer.move import PhaseFailed
+
+        g = _exit_status_lost(move_env, refuse=refused_phase)
+
+        with pytest.raises(PhaseFailed) as exc_info:
+            _move_from(g)
+
+        assert exc_info.value.phase == reported_phase
+        assert "refused by the test peer" in exc_info.value.detail
+        assert exc_info.value.claimed_owner == claimed_owner
+
+
 def _sender_locate(c: dict):
     """A `locate_transcript` callable against the SENDER's own real harness
     store, mirroring `_cross_one_conversation`'s own `_locate` closure."""
