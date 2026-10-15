@@ -1,0 +1,15 @@
+Going by the status note, four criteria are clearly unfinished, one is partly done, and one has a part that hasn't been checked.
+
+**Not finished**
+- **A librarian override records who granted it and the reason given, and shows in the borrower's history (AC4).** None of it is done yet: the note says override recording is not started.
+- **Returning an overdue item stops the fee from growing the same day, even if the return is scanned after closing time (AC5).** Not started. When it's built, the after-closing return needs its own test.
+- **A borrower receives one reminder message three days before a due date and one on the day after, and no other automatic messages about the same loan (AC6).** The day-after message is sent. The three-days-before message still needs building, and nobody has checked yet that no other automatic messages go out for the same loan.
+- **The monthly fees report lists each category's total charged and total waived, and the two totals reconcile with the per-borrower ledgers (AC7).** Not touched, so all of it is left.
+
+**Partly done**
+- **A borrower owing more than ten pounds in late fees cannot check out further items until the balance is cleared or a librarian overrides (AC3).** The block works and clears when the balance is paid. A librarian can't override it yet, because overrides depend on the recording work in that same override criterion (AC4).
+
+**Done but not checked against the one-minute limit**
+- **A borrower whose loan passes its due date is shown as overdue on the desk screen within one minute of the date rolling over (AC1).** The demo only showed the flag "the morning after" for a loan that went overdue at midnight. That shows the flag appears, but not that it appears within a minute. Someone needs to look at the screen just after midnight to confirm it.
+
+The note shows the daily late fee criterion as finished: fees are charged per item at the category rate and never go above the replacement price (AC2).

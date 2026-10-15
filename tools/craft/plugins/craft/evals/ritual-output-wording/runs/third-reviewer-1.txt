@@ -1,0 +1,12 @@
+## Findings
+- [Critical] No task has a test contract: none of tasks 1–4 says what test proves it, so the AC5 contradiction below and the cap boundary in AC2 (fee at, under and over the replacement price) can ship without a red test. Suggested: give each task failing-first tests that run its entry point. Include the over-ten-pounds boundary for AC3 (10.00 vs 10.01) and a return scanned after closing for AC5.
+- [Critical] Fee charging is not idempotent and its failures are invisible: tasks 1–2 write money from both the nightly job and the return path. If the job is re-run after a crash, or a return lands while the job is running, the same day is charged twice. If the 00:05 job fails, nothing signals it, so overdue flags (AC1) and fees silently go stale. Suggested: key each charge on (loan, date) with a unique constraint, add a dry-run mode for the job, and alert when the job fails or a run is missing.
+- [Important] AC5 conflicts with the plan's notes: a return scanned after closing is stamped with the next morning's date, so the fee is charged for one more day. Suggested: stamp the return with the business date it was physically received, and pin this with a test.
+- [Important] AC1 cannot be met as planned: the job runs at 00:05, but AC1 requires the overdue flag within one minute of rollover. Suggested: work out overdue status from the due date when the screen loads (task 4), or run the job at 00:00 with an alert if it runs late.
+- [Important] AC4 is only partly covered: task 3 stores the reason but not who granted the override, and doesn't say it appears in the borrower's history. Suggested: record the librarian's ID and a timestamp, and test that the history shows them.
+- [Important] AC6 and AC7 have no tasks, so reminders (exactly one before, one after) and the monthly reconciliation go unbuilt and untested. Suggested: add tasks for both, with a test proving there are no duplicate messages and a test that ledger totals reconcile.
+- [Minor] Waivers have no data path, so AC7's "total waived" has nothing to report from.
+- [Minor] The plan doesn't say how the system handles the local-time job across a DST change (00:05 can be skipped or run twice) or rounding of daily rates.
+
+## Confidence
+High: every finding is checked against plan.md lines 6–11 and spec AC1–AC7.

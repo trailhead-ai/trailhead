@@ -1,0 +1,11 @@
+## Findings
+- [Critical] After-hours returns are charged an extra day, against AC5: a return scanned after closing on day N is stamped N+1. The return-time fee run then charges day N+1, and the borrower sees a fee they don't owe. That extra charge can push them over £10, and they are refused at the desk the next morning. Suggested: record the return against the business day it was scanned in, separate from the stamp date, and have the fee calculator stop accruing from that day.
+- [Critical] The override record can't say who granted it, against AC4: task 3 stores only a typed reason as a borrower note. The next librarian sees "ok'd, paid tomorrow" with no name and can't follow up or check it. Overrides then go unchecked, and AC7's reconciliation has nothing to trace back to. Suggested: store the override as a structured event (librarian ID, reason, timestamp, balance at the time) and show it in the borrower's history.
+- [Important] The checkout refusal has no defined message: task 3 says "refuse" and nothing more. The librarian needs the balance, what it's made of (which items, how many days) and the override action on the same screen. Without that, the borrower at the counter gets "computer says no". Suggested: define the refusal panel and its wording.
+- [Important] Borrowers get no warning before they are blocked: the plan has no task for AC6's reminders. A borrower's first sign of a fee is being refused at the desk. Suggested: add the reminder task before the guard goes live.
+- [Important] Librarians have no way to waive a fee: AC7 counts "waived" totals, but no task covers waiving. A wrongly charged fee (such as the after-closing one above) can only be overridden at each checkout, never removed. Suggested: add a waive action with a recorded reason.
+- [Important] AC1 is at risk: the job runs at 00:05, and the desk screen refreshes only when it loads. That is outside the one-minute window, and a screen left open never updates. Suggested: run the job at 00:00 or work out overdue status live, and refresh screens that are already open.
+- [Minor] The £10 rule ("exceeds") should show the threshold next to the balance on the desk screen, so a borrower at £9.80 can be warned.
+
+## Confidence
+Medium-high: the plan and spec are short and unambiguous. The after-closing stamp contradicts AC5 directly, but I haven't seen the desk screen UI.

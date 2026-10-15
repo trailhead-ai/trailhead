@@ -66,6 +66,7 @@ Output shape — REPLACE your usual ~400-600 word output with this constrained s
 - Every Critical includes a one-line "what concretely fails" (a specific failure scenario, not "this could be a problem") and a one-line suggested fix
 - No speculative Criticals — if it requires guessing about future state, scale, or user behavior, downgrade to Important
 - One-line Confidence at the end
+- This report goes to the agent that dispatched you, not to a person: cite an acceptance criterion by its number alone, as the spec writes it (for example AC5); the output-wording section in your rules does not apply to it
 
 Your lens (<lens>) Critical bar:
 <lens-critical-bars>

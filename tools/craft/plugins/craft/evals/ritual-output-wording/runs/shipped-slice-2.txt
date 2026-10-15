@@ -1,0 +1,15 @@
+**Chosen slice: the override slice.** It is the smallest next slice that still delivers real value.
+
+**Value claim:** A borrower who is stuck at the desk because of a fee block can now get it lifted. A librarian can remove the block, and the record shows who did it and why, so the block is no longer a dead end for the borrower.
+
+**Visual surface:** This slice changes no visual surface beyond the desk screen, which an earlier slice already covers. It needs no enumerated states.
+
+**Criteria this slice makes fully green:**
+- A borrower who owes more than ten pounds in late fees can't check out more items until the balance is cleared or a librarian overrides (AC3).
+- A librarian override records who granted it and the reason given, and shows in the borrower's history (AC4).
+
+**Criteria made partially green:** None. This slice finishes both criteria above completely.
+
+The parent task record `task/the-override-slice` hasn't been written yet. I'll write it only if you accept this slice and its value claim.
+
+**Covers:** AC3, AC4

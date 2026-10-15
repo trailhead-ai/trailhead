@@ -1,0 +1,11 @@
+## Findings
+- [Critical] After-hours returns are dated the next morning, which breaks AC5. What concretely fails: a borrower drops an overdue book in the return slot at 21:00. The return is stamped tomorrow, so the 00:05 job charges another day. That extra day can push the balance over £10 and refuse their next checkout at the desk, and the borrower is blamed for a day the library added. Suggested: stamp returns with the actual scan date (or the last business date for drop-box returns), run the fee calculation at return time, and make the nightly job skip any loan that has already been returned.
+- [Critical] Borrower reminders (AC6) appear nowhere in the plan. What concretely fails: the borrower gets no notice three days before the due date or the day after it. Their first sign of a fee is being refused at the desk. That is the end-user path with no warning and no way out before it happens. Suggested: add a task for the two reminder sends, with a per-loan record of what was sent so a loan never gets a duplicate or a third message.
+- [Important] The override note doesn't record who granted it (AC4). Staff reviewing the borrower's history see a reason with no name on it, so a questionable override can't be followed up. Suggested: store the librarian ID and timestamp, and show them in the borrower's history.
+- [Important] The overdue flag is late against AC1. The job runs at 00:05 and the desk only refreshes on screen load, so the flag appears at least 5 minutes after rollover, not within one minute. Suggested: work out overdue status from the due date when the screen is read.
+- [Important] The refusal message isn't specified. The librarian needs to see the balance, the £10 threshold and the override action together on one screen. A bare "checkout refused" leaves them stuck.
+- [Important] The monthly fees report (AC7) is missing, and nothing in the plan records waivers. Waived totals therefore can't reconcile with the ledgers.
+- [Minor] The balance doesn't refresh after a return made during the same session. The desk shows a stale fee until the screen is reloaded.
+
+## Confidence
+High. The plan and spec are short, and each finding comes from a direct mismatch between a plan line and an acceptance criterion.

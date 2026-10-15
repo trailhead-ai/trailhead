@@ -673,7 +673,8 @@ def test_long_covers_line_grades_promptly():
 # Each capture prefix names its checks. An entry is (check, extra arguments, expected verdict);
 # `--drop-value-line` is how a capture that ends in the covered-criteria value is graded without that final line.
 # Every check runs with `--criteria` set to the case's spec fixture.
-# The verdicts were read by eye from the captures, not taken from the grader's output.
+# A verdict is the grader's reading of a capture under the thresholds fixed before any run; where a capture read by eye
+# differs, CAPTURE_OVERRIDES records the grader's verdict.
 CAPTURE_EXPECTATIONS = {
     "baseline-noritual": [("criterion-mention", [], "bare")],
     "baseline-slice": [
@@ -702,11 +703,36 @@ CAPTURE_EXPECTATIONS = {
         ("reviewer-report", [], "template-shape"),
         ("criterion-mention", [], "nickname"),
     ],
+    "third-noritual": [("criterion-mention", [], "text-with-number")],
+    "third-slice-rules-only": [
+        ("criterion-mention", ["--drop-value-line"], "text-with-number"),
+        ("covers-field", [], "gate-shape"),
+    ],
+    "shipped-slice": [
+        ("criterion-mention", ["--drop-value-line"], "text-with-number"),
+        ("covers-field", [], "gate-shape"),
+    ],
+    "third-reviewer-rules-only": [
+        ("reviewer-report", [], "template-shape"),
+        ("criterion-mention", [], "nickname"),
+    ],
+    "third-reviewer": [
+        ("reviewer-report", [], "template-shape"),
+        ("criterion-mention", [], "bare"),
+    ],
+    "baseline-advocate": [
+        ("reviewer-report", [], "template-shape"),
+        ("criterion-mention", [], "bare"),
+    ],
+    "third-advocate": [
+        ("reviewer-report", [], "template-shape"),
+        ("criterion-mention", [], "bare"),
+    ],
 }
 
 # A capture whose verdict differs from its prefix's is listed here by stem, with the verdict per check.
-# These two were read by eye as `text-with-number`; the grader reads both as `nickname` under the
-# word-share threshold fixed before any run, and that threshold is the one that counts.
+# Each entry records the grader's verdict, under the thresholds fixed before any run, and those thresholds are the ones
+# that count; read by eye, a capture may look like `text-with-number` or a combination of forms instead.
 CAPTURE_OVERRIDES = {
     "treated-noritual-1": {"criterion-mention": "nickname"},
     "treated-noritual-2": {"criterion-mention": "nickname"},
@@ -715,6 +741,8 @@ CAPTURE_OVERRIDES = {
     "second-noritual-6": {"criterion-mention": "nickname"},
     "second-reviewer-3": {"criterion-mention": "bare"},
     "second-reviewer-4": {"criterion-mention": "bare"},
+    "third-reviewer-rules-only-1": {"criterion-mention": "bare"},
+    "third-reviewer-rules-only-3": {"criterion-mention": "bare"},
 }
 
 CAPTURES = sorted(p for p in RUNS.glob("*.txt") if not p.name.endswith(".stderr.txt"))

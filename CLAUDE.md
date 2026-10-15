@@ -41,6 +41,18 @@ art as design input rather than adoption candidates. This declaration is scoped 
 this repository only — a vault serving several repositories does not inherit this
 posture for any sibling repository.
 
+**The one exception: files shipped inside published pages.** The scratch pad's kit
+(`tools/outpost/plugins/outpost/skills/scratch-pad/kit/`) carries the Architects
+Daughter font, `ArchitectsDaughter-Regular.ttf`, so a pad is plain files that open
+from disk with no network. It is the only third-party file the repository ships, and
+it is data in a page, never a runtime dependency of the Python code. Source:
+`https://raw.githubusercontent.com/google/fonts/main/ofl/architectsdaughter/ArchitectsDaughter-Regular.ttf`
+(SHA-256 `6159718a08898e34bc1cb7354086141a5f9a70b73e54dbec27ead0d59a697359`),
+licensed SIL Open Font License 1.1, Copyright (c) 2010 Kimberly Geswein; the licence
+text travels beside it as `OFL.txt` (SHA-256
+`0e441ae9f18ad0c294cc5b6ae3974c2db1614cab220598578b1b58c4cc334485`). Any further
+third-party file in a published page needs its own entry here.
+
 ## Project Maturity
 
 production

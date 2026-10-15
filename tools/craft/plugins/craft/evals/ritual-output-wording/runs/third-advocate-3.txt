@@ -1,0 +1,12 @@
+## Findings
+- [Critical] After-hours returns contradict AC5: the plan stamps returns scanned after closing with the next morning's date. The 00:05 job therefore charges another day on an item already handed back, and the borrower sees a fee for a day they no longer had the book. That extra fee can push them over £10 and block their next checkout (AC3). Suggested: store the real scan time and stop the fee on it; keep the next-morning date only for shelving or business-day logic.
+- [Critical] No plan for loans already overdue at launch: the plan says nothing about the first night. It is unclear whether the first job charges every pre-existing overdue loan back to its due date. If it does, many borrowers hit the £10 block at the desk the next morning with no prior notice, and staff have nothing to explain the sudden balances. Suggested: add an explicit backfill rule, such as accruing fees only from the go-live date, plus a dry-run count of who would be blocked before switching the guard on.
+- [Important] Borrower reminders (AC6) are missing from the plan, so borrowers get no warning before fees start or before they are blocked. This would be Critical, but it was downgraded because of the two-Critical limit. Suggested: add a reminder task with a "sent" record on each loan so messages can't repeat.
+- [Important] The override record falls short of AC4: it saves the reason as a note but not the librarian who granted it, and a note is not the borrower's history. A later librarian can't see who overrode or why. Suggested: write a history entry with the librarian's ID, the reason and the time.
+- [Important] AC1 is not met: the job runs at 00:05 and the desk only refreshes when the screen loads. Staleness of 5 minutes or more is built in. Suggested: work out "overdue" when the screen loads, from the due date.
+- [Important] The blocked-checkout screen is unspecified: librarians need to see the balance, the £10 threshold and the override action together. They should not have to read a bare refusal.
+- [Important] There is no way to waive a fee, so the "total waived" in AC7 can never be filled in, and the AC7 report itself has no task.
+- [Minor] The desk screen has no stated empty or error state for when the nightly job didn't run.
+
+## Confidence
+Medium. The gaps between plan and spec are concrete, but I saw no code or desk-screen precedents, and no knowledge vault was consulted.

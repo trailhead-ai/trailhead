@@ -1,0 +1,12 @@
+## Findings
+- [Critical] No task has a test contract: tasks 1–4 can all ship untested, including the fee cap and the checkout threshold. Concretely, a fee of £10.00 against "exceeds ten pounds" can block the wrong borrower, and nothing pins the cap at replacement price. Suggested: give each task a test written to fail first, with boundary cases: balance at £9.99, £10.00 and £10.01; fee just under the cap and well past it.
+- [Critical] The nightly job writes money and flags with no idempotency and no failure signal. Concretely, a rerun or retry after a crash charges a second day's fee, and a job that never runs leaves fees and overdue flags stale with nobody told. Suggested: key each fee charge on (loan, date) so a repeat run adds nothing, and alert when the 00:05 run is missing or fails.
+- [Important] Migration and backfill are missing (rated Critical by the production calibration, moved down only by the two-Critical cap). Concretely, the new overdue flag and fee columns have no plan for loans that are already overdue, and there is no rollback. Suggested: a gated, replayable backfill with a dry-run count first.
+- [Important] The plan's after-hours rule contradicts "Returning an overdue item stops the fee from growing the same day, even if the return is scanned after closing time" (AC5). Concretely, stamping late scans with next morning's date lets the 00:05 run charge one more day. Suggested: record the real return time and test a scan at 23:59 against the 00:05 run.
+- [Important] The 00:05 schedule can't meet "a borrower whose loan passes its due date is shown as overdue on the desk screen within one minute of the date rolling over" (AC1). Concretely, the stored flag appears five minutes late, or not at all if the job fails. Suggested: work out overdue status from the due date when the screen loads.
+- [Important] Fee calculation runs both on return and in the nightly job, so the two can collide. Concretely, a return near midnight can be charged twice. Suggested: the same per-loan, per-day key as above, plus a test that runs both together.
+- [Important] The override note stores only the reason, not "records who granted it" (AC4). Concretely, it fails the audit requirement.
+- [Minor] No task covers the reminder messages (AC6) or the monthly fees report that must reconcile with the ledgers (AC7).
+
+## Confidence
+High: every finding comes from a specific line in the plan or spec that I read.
