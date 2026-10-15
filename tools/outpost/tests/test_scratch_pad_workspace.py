@@ -533,13 +533,12 @@ def test_a_publisher_that_outlives_the_timeout_before_anything_landed_is_a_refus
     assert rig.leftovers() == []
 
 
+# Lands nothing, so the outcome does not hang on how fast the interpreter starts under
+# load: the run ends at the timeout whatever the machine's speed. The landed-before-timeout
+# branch is pinned with an injected runner above.
 STUB_PUBLISHER = (
-    "import sys, time, pathlib\n"
-    "ws = pathlib.Path(sys.argv[sys.argv.index('--workspace-path') + 1])\n"
-    "site = ws / 'sites' / sys.argv[2]\n"
-    "site.mkdir(parents=True)\n"
-    "(site / 'index.html').write_text('landed')\n"
-    "time.sleep(4)\n"
+    "import time\n"
+    "time.sleep(10)\n"
     "print('http://stub/')\n"
 )
 
@@ -563,11 +562,13 @@ def test_the_default_runner_enforces_the_wall_clock_timeout(rig, capsys):
 
     code = mod.main(rig.argv(), env=rig.env, cwd=rig.member, publish_timeout=0.5)
 
-    out = capsys.readouterr().out.splitlines()
-    assert time.monotonic() - started < 3.5
-    assert code == 0
-    assert out[0].startswith("note: the pad was published but the publisher did not confirm")
-    assert out[-1] == f"pad folder: {rig.ws / 'sites' / 'p'}"
+    captured = capsys.readouterr()
+    assert time.monotonic() - started < 5
+    assert code == 1
+    assert captured.out == ""
+    assert captured.err.splitlines() == [
+        "scratch-pad: publish: the publisher did not finish within 0.5 seconds and no pad was published"
+    ]
     assert rig.leftovers() == []
 
 
