@@ -1178,7 +1178,7 @@ def test_the_persisted_levels_check_needs_no_reports_and_ignores_them(tmp_path):
     assert result.stdout == b"persisted-levels: kept\n"
 
 
-REPORT_CHECKS = ("severity-name", "reviewer-name", "calibration-level")
+REPORT_CHECKS = ("severity-name", "reviewer-name", "calibration-level", "code-review-name")
 NEW_CHECKS = (*REPORT_CHECKS, "persisted-levels")
 
 
@@ -1429,6 +1429,110 @@ def test_every_calibration_verdict_exits_with_its_class(cal_reports):
     assert run_grader(args, b"At prototype maturity.").returncode == 0
     assert run_grader(args, b"Rated Minor.").returncode == 1
     assert run_grader(args, b"hello").returncode == 1
+
+
+# --- code-review-name, and severity-name over the code reviewer's heading shape ----------------
+#
+# The grammar is the "Grammar of `code-review-name`" section of the finding-presentation-wording
+# case's `expected.md`.
+
+
+def code_review(text, reports):
+    return grade("code-review-name", text, criteria=None, extra=("--reports", str(reports)))
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "The code-reviewer found one problem.",
+        "The code reviewer found one problem.",
+        "The craft:code-reviewer found one problem.",
+        "Raised by the Code Reviewer.",
+        "Both code-reviewers agreed.",
+        "Both code reviewers agreed.",
+        "I asked the code reviewer's view.",
+        "The code   reviewer found one problem.",
+    ],
+)
+def test_the_agent_name_in_any_form_makes_a_capture_internal(text, reports):
+    assert code_review(text, reports) == "internal"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "The code review found one problem.",
+        "Raised by: code review",
+        "Raised by code-review.",
+        "| Raised by | code review |",
+    ],
+)
+def test_only_code_review_forms_read_plain(text, reports):
+    assert code_review(text, reports) == "plain"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "The reviewer found one problem.",
+        "The review found one problem.",
+        "Nothing names who raised it.",
+        "The code reviews found one problem.",
+        "The code-reviews found one problem.",
+        "A precode review is not a thing.",
+        "The code-reviewer-agent found one problem.",
+        "The xcode reviewer found one problem.",
+        "The codereviewer found one problem.",
+    ],
+)
+def test_text_that_matches_no_whole_phrase_reads_none(text, reports):
+    assert code_review(text, reports) == "none"
+
+
+def test_an_internal_form_beats_a_plain_form_in_the_same_capture(reports):
+    assert code_review("The code review found it.\nI asked the code reviewer to look again.", reports) == "internal"
+
+
+def test_the_internal_form_wins_whichever_line_comes_first(reports):
+    assert code_review("I asked the code-reviewer to look again.\nThe code review found it.", reports) == "internal"
+
+
+def test_an_agent_name_inside_a_fenced_block_is_ignored(reports):
+    assert code_review("The code review found it.\n```\ncode-reviewer said so\n```\n", reports) == "plain"
+    assert code_review("The review found it.\n```\ncode review\n```\n", reports) == "none"
+
+
+def test_an_agent_name_in_a_table_cell_is_read(reports):
+    assert code_review("| Raised by | code reviewer |", reports) == "internal"
+
+
+def test_the_code_review_check_exits_with_its_class(reports):
+    args = ["--check", "code-review-name", "--reports", str(reports)]
+    assert run_grader(args, b"The code review found it.").returncode == 0
+    assert run_grader(args, b"The code reviewer found it.").returncode == 1
+    assert run_grader(args, b"The review found it.").returncode == 1
+
+
+CODE_REVIEWER_SHAPE = "Verdict: FIX_FIRST\n\nCritical\n- one\n\nImportant\n- two\n\nMinor\n- three\n"
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["Important\n- a thing", "Minor\n- a thing", "Critical\n- a thing", CODE_REVIEWER_SHAPE],
+)
+def test_severity_name_reads_the_code_reviewers_heading_shape_as_internal(text, reports):
+    assert severity(text, reports) == "internal"
+
+
+def test_severity_name_reads_only_plain_readings_as_plain(reports):
+    assert severity("This one needs your decision.\nThis one is worth fixing.", reports) == "plain"
+
+
+@pytest.mark.parametrize("phrase", ["no critical issues remain", "no critical findings remain"])
+def test_the_lowercase_critical_phrase_is_internal_and_only_that_phrase_is(phrase, reports):
+    assert severity(f"Good news: {phrase}.", reports) == "internal"
+    assert severity("Good news: no serious problems remain.", reports) == "none"
+    assert severity("Good news: the critical path is clear.", reports) == "none"
 
 
 # --- the finding-presentation-wording baseline captures --------------------------------------
