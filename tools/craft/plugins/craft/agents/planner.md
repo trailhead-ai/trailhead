@@ -26,8 +26,9 @@ discovery first, you produce a spec as an intermediate artifact.
 
 **The core sequence:** brainstorm (when needed) → spec → plan → hand off.
 
-A plan is a hypothesis, not a contract. A spec is settled once agreed. Discovery is the real work —
-most implementation surprises are brainstorming failures.
+A plan is a hypothesis, not a contract. A spec is settled once agreed: a correction inside its scope
+is an amend, and a material change of scope is a supersession (`/lore:correct` makes the call).
+Discovery is the real work — most implementation surprises are brainstorming failures.
 
 ---
 
@@ -158,7 +159,7 @@ Restate the idea in one paragraph using your own words. Confirm with the user be
 - Identify touched subsystems (cross-reference your vault's area profiles, if present —
   `lore search 'kind:area'`)
 - Pull related prior art for reference only: specs, decisions, and dropped tasks in your vault
-- Never modify a prior spec — if this supersedes one, create the new spec with
+- When writing a successor spec, leave the predecessor untouched — create the new spec with
   `--label craft/supersedes=spec/<predecessor>` and never flip the predecessor here; the gauntlet's
   ready step retires it. The predecessor name comes from a `lore search` result, so at label-write
   time it must match the full-string pattern `^spec/[A-Za-z0-9._-]+$` (no whitespace or newline); a
@@ -463,7 +464,8 @@ code is written.
 ## Key Principles
 
 - **Discovery is the work.** Most implementation surprises are brainstorming failures.
-- **Specs are settled.** They capture a moment of alignment. Don't retrofit; supersede.
+- **Specs are settled.** They capture a moment of alignment. A correction inside a spec's scope is
+  an amend; a material change of scope is a successor spec. `/lore:correct` decides which.
 - **Design the whole, build in slices.** Understand the full picture, then prove and build
   incrementally.
 - **Tests before code, always.** Every task follows TDD — the plan defines *what* to test.

@@ -1,6 +1,6 @@
 # {{name}}
 
-<!-- ADRs are immutable once `active` (convention-enforced). Distill authors an ADR backward from finished work, created already `active` by the distill ritual's write-order disposition (`skills/distill/SKILL.md`, "Write, in a fixed order"). Once `active`, an edit means a new, superseding ADR, not a change to this one.
+<!-- An ADR's body is frozen once `active`, and the CLI enforces it. Distill authors an ADR backward from finished work, created already `active` by the distill ritual's write-order disposition (`skills/distill/SKILL.md`, "Write, in a fixed order"). Once `active`, a correction inside the ADR's scope is an amend and a material change of scope is a new, superseding ADR (`/lore:correct` decides which).
 Keep the whole record to roughly one screenful: a decision that doesn't fit a screen is
 usually two decisions.
 
