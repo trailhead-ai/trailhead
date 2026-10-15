@@ -586,3 +586,43 @@ def test_history_prints_a_fixed_placeholder_for_every_non_canonical_removed_id(t
 def test_history_prints_canonical_removed_ids_unchanged(tmp_path):
     r = _history_with_removed(tmp_path, ["AC1", "AC10", "AC999999999"])
     assert "removed criteria: AC1, AC10, AC999999999\n" in r.stdout
+
+
+def _history_with_marks(tmp_path, criteria):
+    vault, state = _make_vault(tmp_path)
+    rid = _create(vault, state)
+    _amend(vault, state, rid, V2, reason="fix", initiated_by="operator")
+    history = _sidecar(vault, rid)["change-history"]
+    history[0]["criteria"] = criteria
+    _set_history(vault, rid, history)
+    return _history(vault, state, rid)
+
+
+def test_history_prints_reopened_and_closed_criteria_lines(tmp_path):
+    r = _history_with_marks(tmp_path, {"reopened": ["AC2", "AC10"], "closed": ["AC1"]})
+    assert r.returncode == 0, r.stderr
+    assert "reopened criteria: AC2, AC10\n" in r.stdout
+    assert "closed criteria: AC1\n" in r.stdout
+
+
+def test_history_prints_a_placeholder_for_every_non_canonical_reopened_or_closed_id(tmp_path):
+    long_id = "ZQ" * 2500
+    r = _history_with_marks(
+        tmp_path, {"reopened": ["AC2", long_id], "closed": [["nested"], "AC3"]}
+    )
+    assert r.returncode == 0, r.stderr
+    assert "reopened criteria: AC2, <non-canonical id>\n" in r.stdout
+    assert "closed criteria: <non-canonical id>, AC3\n" in r.stdout
+    assert "ZQ" not in r.stdout and "nested" not in r.stdout
+
+
+def test_a_marks_only_entry_shows_its_marks_and_an_empty_diff(tmp_path):
+    from test_record_cli_amend_marks import LEDGER, _make, _marks
+
+    vault, state, rid = _make(tmp_path, *LEDGER)
+    assert _marks(vault, state, rid, "--reopen", "AC2", "--close", "AC1").returncode == 0
+    r = _history(vault, state, rid)
+    assert r.returncode == 0, r.stderr
+    assert "reopened criteria: AC2\n" in r.stdout
+    assert "closed criteria: AC1\n" in r.stdout
+    assert r.stdout.rstrip("\n").endswith("diff:")
