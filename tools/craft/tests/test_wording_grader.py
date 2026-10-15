@@ -911,6 +911,52 @@ def test_a_table_cell_that_is_a_bare_level_is_internal(reports):
     assert severity("| level | n |\n|---|---|\n| a minor one | 4 |\n", reports) == "none"
 
 
+@pytest.mark.parametrize(
+    "text",
+    ["- Minor", "- **Important** (2)", "> Minor", "* Minor", "1. Important", "> - Minor"],
+)
+def test_a_level_label_behind_one_quote_or_list_marker_is_internal(text, reports):
+    assert severity(text, reports) == "internal"
+
+
+@pytest.mark.parametrize(
+    "text", ["- a minor one", "> Minor things to know", "- - Minor", "> > Minor", "- Important to note"]
+)
+def test_a_marked_line_that_is_more_than_a_level_label_is_not_one(text, reports):
+    assert severity(text, reports) == "none"
+
+
+@pytest.mark.parametrize("dash", ["-", "\u2013", "\u2014"])
+def test_a_level_word_leading_a_line_before_a_dash_is_a_group_label(dash, reports):
+    assert severity(f"**Important** {dash} would cause trouble later", reports) == "internal"
+    assert severity(f"- **Minor** {dash} rough edges", reports) == "internal"
+
+
+def test_a_level_word_leading_a_line_before_an_open_bracket_is_a_group_label(reports):
+    assert severity("Important (worth fixing, your call)", reports) == "internal"
+    assert severity("> Minor (rough edges)", reports) == "internal"
+    assert severity("## Important (worth fixing)", reports) == "internal"
+
+
+def test_a_level_word_group_label_beats_a_plain_reading(reports):
+    assert severity("Minor \u2014 nothing to decide", reports) == "internal"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Important points \u2014 later",
+        "Notes: Important \u2014 later",
+        "Important-ish \u2014 later",
+        "Minority (a few)",
+        "important \u2014 later",
+        "The Minor (2 items) are fine",
+    ],
+)
+def test_a_level_word_that_does_not_lead_the_line_as_a_label_is_not_a_group_label(text, reports):
+    assert severity(text, reports) == "none"
+
+
 def test_physical_lines_of_one_paragraph_join_into_one_logical_line(reports):
     assert severity("The Minor\n(2) items\n", reports) == "internal"
     assert severity("The Minor\n\n(2) items\n", reports) == "none"

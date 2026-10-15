@@ -118,6 +118,7 @@ _SEVERITY_PATTERNS = (
     re.compile(rf"{_BEFORE}(?:Important|Minor) {_FINDING_WORDS}{_AFTER}"),
 )
 _LEVEL_ONLY_RE = re.compile(rf"(?:Important|Minor)(?: *{_COUNT})?")
+_GROUP_LABEL_RE = re.compile(rf"(?:Important|Minor){_AFTER} *[-\u2013\u2014(]")
 _PLAIN_SEVERITY_RE = re.compile(
     rf"{_BEFORE}(?:needs your decision|worth fixing|nothing to decide){_AFTER}", re.IGNORECASE
 )
@@ -468,13 +469,7 @@ def _outside_fences(physical: list[str]) -> list[tuple[str, bool]]:
 
 def _tagged_text(normalised: str) -> tuple[str, str] | None:
     """(tag, text after the tag) when the line, minus one `>` and a list marker, begins with a finding tag."""
-    text = normalised
-    if text.startswith(">"):
-        text = text[1:]
-    marker = _LEADING_MARKER_RE.match(text)
-    if marker:
-        text = text[marker.end() :]
-    text = text.strip()
+    text = _without_quote_and_list_marker(normalised)
     for tag in _FINDING_TAGS:
         if text.startswith(tag):
             return tag, text[len(tag) :].strip()
@@ -507,10 +502,21 @@ def _reader_facing(text: str, quotations: dict[str, list[str]]) -> list[tuple[st
     return kept
 
 
+def _without_quote_and_list_marker(text: str) -> str:
+    """The text minus one leading `>` and then one leading list marker, trimmed."""
+    if text.startswith(">"):
+        text = text[1:]
+    marker = _LEADING_MARKER_RE.match(text)
+    if marker:
+        text = text[marker.end() :]
+    return text.strip()
+
+
 def _is_level_label_line(text: str, heading: bool) -> bool:
     if heading:
         text = text.lstrip("#").strip()
-    return _LEVEL_ONLY_RE.fullmatch(text) is not None
+    text = _without_quote_and_list_marker(text)
+    return _LEVEL_ONLY_RE.fullmatch(text) is not None or _GROUP_LABEL_RE.match(text) is not None
 
 
 def grade_severity_name(text: str, quotations: dict[str, list[str]]) -> str:
