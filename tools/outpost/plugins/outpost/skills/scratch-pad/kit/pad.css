@@ -54,6 +54,11 @@ button { font: inherit; color: inherit; }
   border-radius: 0.5rem;
   cursor: pointer;
 }
+.pad-questions button { display: flex; align-items: center; gap: 0.5rem; }
+.pad-entry-label { flex: 1 1 auto; }
+.pad-dot { flex: 0 0 auto; width: 0.8rem; height: 0.8rem; border: 2px solid var(--ink); border-radius: 50%; }
+.pad-dot[data-answered="true"] { background: var(--ink); }
+.pad-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .pad-questions button[aria-current="true"] { border-color: var(--ink); background: #fff; }
 
 .pad-stage { flex: 1 1 auto; min-width: 0; padding: 1rem 1.5rem; }
@@ -71,6 +76,19 @@ button { font: inherit; color: inherit; }
 .pad-letter { font-size: 1.4rem; }
 .pad-name { margin: 0; font-size: 1.15rem; font-weight: normal; flex: 1 1 auto; }
 .pad-pick { padding: 0 0.5rem; border: 2px solid var(--ink); border-radius: 1rem; font-size: 0.9rem; }
+.pad-mark { padding: 0 0.5rem; border: 2px dashed var(--ink); border-radius: 1rem; font-size: 0.9rem; }
+.pad-choices { display: flex; gap: 0.5rem; margin: 0.5rem 0 0; }
+.pad-toggle {
+  padding: 0.2rem 0.8rem;
+  background: none;
+  border: 2px solid var(--ink);
+  border-radius: 0.5rem;
+  cursor: pointer;
+}
+.pad-toggle[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+.pad-none { margin-top: 1rem; }
+.pad-note-label { display: block; margin-top: 1rem; color: var(--faint); }
+.pad-note { display: block; width: 100%; max-width: 40rem; padding: 0.5rem; font: inherit; background: #fff; border: 1px solid var(--ink); }
 .pad-cost { margin: 0.25rem 0 0.75rem; color: var(--faint); }
 
 .pad-drawing { position: relative; min-height: 8rem; }
