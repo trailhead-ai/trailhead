@@ -42,6 +42,11 @@ Invariants:
   with `` `task/<id>` `` it returns ``(task_id, covers, partial)``. A second
   unmasked ``## Slices`` heading or a malformed coverage token raises
   :class:`CriteriaError`, as craft's raises ``ValueError``.
+- ``unclaimed_ledger_lines`` is lore's copy of craft's ``find_unclaimed_ledger_lines``:
+  the 1-indexed non-blank ``## Slices`` lines a canonical bullet's block holds outside
+  its structured span. ``check_criteria_marks`` refuses any reopen or close while the
+  stored ledger has one, because craft's wider join reads such a line as part of the
+  entry above it and ``ledger_entries`` does not.
 - Error and refusal strings echo only canonical identifiers (``AC`` followed by
   a positive integer of at most nine digits without leading zeros), never body
   text. Anything longer is non-canonical, so no integer conversion ever sees an
@@ -412,13 +417,7 @@ def _entry_fields(text: str) -> tuple[str, list[str], list[str]] | None:
     return task.group(1), covers, partial
 
 
-def ledger_entries(body: str) -> list[tuple[str, list[str], list[str]]]:
-    """``(task_id, covers, partial)`` for each canonical entry of the ``## Slices`` ledger.
-
-    Entries come back in document order. A body with no unmasked ``## Slices``
-    heading gives ``[]``. Raises :class:`CriteriaError` for a second unmasked
-    heading or a malformed ``covers`` / ``partially covers`` token.
-    """
+def _ledger_blocks(body: str) -> list[tuple[bool, list[tuple[int, str]]]]:
     raw = _split_lines(body)
     lines = [_content(r) for r in raw]
     masked = _mask(raw)
@@ -428,7 +427,7 @@ def ledger_entries(body: str) -> list[tuple[str, list[str], list[str]]]:
     if len(starts) > 1:
         raise CriteriaError("spec body has more than one '## Slices' heading")
 
-    blocks: list[tuple[bool, list[str]]] = []
+    blocks: list[tuple[bool, list[tuple[int, str]]]] = []
     for i in range(starts[0] + 1, len(lines)):
         if masked[i]:
             continue
@@ -436,21 +435,48 @@ def ledger_entries(body: str) -> list[tuple[str, list[str], list[str]]]:
         if line.startswith("## "):
             break
         if line.startswith("- "):
-            blocks.append((True, [line]))
+            blocks.append((True, [(i, line)]))
         elif _LEDGER_NONCANONICAL_MARKER_RE.match(line):
-            blocks.append((False, [line]))
+            blocks.append((False, [(i, line)]))
         elif blocks:
-            blocks[-1][1].append(line)
+            blocks[-1][1].append((i, line))
+    return blocks
 
+
+def ledger_entries(body: str) -> list[tuple[str, list[str], list[str]]]:
+    """``(task_id, covers, partial)`` for each canonical entry of the ``## Slices`` ledger.
+
+    Entries come back in document order. A body with no unmasked ``## Slices``
+    heading gives ``[]``. Raises :class:`CriteriaError` for a second unmasked
+    heading or a malformed ``covers`` / ``partially covers`` token.
+    """
     entries: list[tuple[str, list[str], list[str]]] = []
-    for canonical, block in blocks:
+    for canonical, block in _ledger_blocks(body):
         if not canonical:
             continue
-        text = " ".join(line.strip() for line in _select_structured_span(block) if line.strip())
+        selected = _select_structured_span([line for _, line in block])
+        text = " ".join(line.strip() for line in selected if line.strip())
         parsed = _entry_fields(text)
         if parsed is not None:
             entries.append(parsed)
     return entries
+
+
+def unclaimed_ledger_lines(body: str) -> list[int]:
+    """1-indexed numbers of the non-blank ``## Slices`` lines a canonical bullet's block holds
+    outside its structured span.
+
+    This is lore's copy of craft's ``find_unclaimed_ledger_lines``: the lines craft's
+    wider ledger join folds into the entry above them and ``ledger_entries`` never sees.
+    Raises :class:`CriteriaError` for a second unmasked heading.
+    """
+    unclaimed: list[int] = []
+    for canonical, block in _ledger_blocks(body):
+        if not canonical:
+            continue
+        kept = len(_select_structured_span([line for _, line in block]))
+        unclaimed.extend(i + 1 for i, line in block[kept:] if line.strip())
+    return unclaimed
 
 
 def _id_refusal(ident: object) -> str:
@@ -510,8 +536,17 @@ def check_criteria_marks(
 
     try:
         ledger = ledger_entries(stored_body)
+        unclaimed = unclaimed_ledger_lines(stored_body)
     except CriteriaError as exc:
         refusals.append(f"the stored ledger cannot be read: {exc}")
+        return {}, refusals
+    if unclaimed:
+        numbers = ", ".join(str(n) for n in unclaimed)
+        refusals.append(
+            f"the spec's ## Slices ledger has a line no entry claims (line{'s' if len(unclaimed) > 1 else ''} "
+            f"{numbers}), so a reopen or close cannot tell which slice it belongs to. "
+            "Repair the ledger so every line belongs to an entry, then retry"
+        )
         return {}, refusals
 
     if reopen and any(not valid_task_id(task) for task, _, _ in ledger):

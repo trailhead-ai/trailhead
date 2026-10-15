@@ -267,3 +267,16 @@ def test_a_body_change_plus_reopen_dedupes_the_stored_ledger_snapshot(tmp_path):
     [entry] = _sidecar(vault, rid)["change-history"]
     assert entry["criteria"]["ledger"] == ["b", "a"]
     assert "reworded" in entry["diff"]
+
+
+def test_a_reopen_while_the_stored_ledger_has_an_unclaimed_line_is_refused_and_writes_nothing(tmp_path):
+    vault, state, rid = _make(
+        tmp_path,
+        "- Slice A did stuff (`task/a`, closed 2026-01-01, covers AC1)",
+        "- Slice B did other stuff",
+        "(`task/b`, closed 2026-01-02, covers AC2)",
+    )
+    before = _snapshot(vault)
+    r = _marks(vault, state, rid, "--reopen", "AC2")
+    _mark_refused(vault, state, rid, r, before, "no entry claims", "Repair the ledger")
+    assert "Slice B" not in r.stderr

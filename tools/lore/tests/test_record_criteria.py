@@ -839,3 +839,40 @@ def test_no_marks_requested_checks_nothing():
 def test_a_malformed_history_raises():
     with pytest.raises(CriteriaError):
         marks(five(), history=[{"criteria": {}}], close=["AC1"])
+
+
+UNCLAIMED_LEDGER = (
+    "# S\n\n## Acceptance Criteria\n\n- **AC1.** one\n- **AC2.** two\n\n## Slices\n"
+    "- Slice A did stuff (`task/a`, closed 2026-01-01, covers AC1)\n"
+    "- Slice B did other stuff\n"
+    "(`task/b`, closed 2026-01-02, covers AC2)\n"
+)
+
+
+def test_a_reopen_is_refused_when_the_stored_ledger_has_an_unclaimed_line():
+    voided, refusals = marks(UNCLAIMED_LEDGER, reopen=["AC2"])
+    assert voided == {}
+    [refusal] = refusals
+    assert "line 11" in refusal
+    assert "Repair the ledger" in refusal
+    assert "Slice B" not in refusal and "task/b" not in refusal
+
+
+def test_a_close_is_refused_when_the_stored_ledger_has_an_unclaimed_line():
+    voided, refusals = marks(UNCLAIMED_LEDGER, close=["AC2"])
+    assert voided == {}
+    [refusal] = refusals
+    assert "line 11" in refusal
+    assert "cannot be closed" not in refusal
+
+
+def test_every_unclaimed_line_number_is_named():
+    stored = UNCLAIMED_LEDGER + "stray\n"
+    _, [refusal] = marks(stored, reopen=["AC2"])
+    assert "lines 11, 12" in refusal
+
+
+def test_a_ledger_whose_every_line_is_claimed_is_not_refused():
+    stored = UNCLAIMED_LEDGER.replace("\n(`task/b`", "\n  (`task/b`")
+    voided, refusals = marks(stored, reopen=["AC2"])
+    assert refusals == [] and voided == {"AC2": ["b"]}
