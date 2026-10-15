@@ -38,11 +38,11 @@ BASELINE_REVISION = "f68200933f69e0c00bc79634fb4758b8fa039c1c"
 
 # The commit carrying the shared-contract edit: treated arms read `council.md` (and, at
 # consult, `consult/SKILL.md`) from here and every other source from the baseline.
-EDIT_REVISION = "42e1b088cbb9809c9bd4cf41d226c96da8f480b9"
+EDIT_REVISION = "af083a20b3098f34fb309dc967280cf8d62fe032"
 
 # The commit before the calibration prose edit: the `precal-consult` arm reads `council.md` and
 # `consult/SKILL.md` from here and every other source from the baseline.
-PRECAL_REVISION = "f98d25850e9a770fd4a14ac585e5029931782ac8"
+PRECAL_REVISION = "e88e01303e744f94b60c46e10212d2adf0ca7ed0"
 
 # The commit carrying the calibration prose edit: the `cal-consult` arm reads `council.md` and
 # `consult/SKILL.md` from here and every other source from the baseline.
