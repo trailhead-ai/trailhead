@@ -316,8 +316,39 @@ def _stream_rest_of_overlong_line(f_in: BinaryIO, f_out: BinaryIO) -> None:
 _CWD_FIELD_RE = re.compile(rb'("cwd"\s*:\s*)"((?:\\.|[^"\\])*)"')
 
 
+def _location_under_root(
+    value: Path, old_root: Path, resolved: dict[Path, Path]
+) -> Path | None:
+    """*value*'s location relative to *old_root*, or None when it lies outside.
+
+    *old_root* is a recorded root as :meth:`ClaudeCodeHarness.session_transcripts`
+    reports it — resolved — while a transcript line records the path exactly as
+    the sending host wrote it. The two can name the same directory in different
+    strings (on macOS, `/home/...` resolves to `/System/Volumes/Data/home/...`),
+    so *value* counts as under *old_root* either as written or once resolved the
+    same way. Resolution only ever decides *whether* a value moves; the location
+    returned is relative to *old_root*, so a relocated value always lands under
+    the new root. *resolved* caches each distinct value's resolution, since a
+    transcript repeats the same few paths on thousands of lines.
+    """
+    if value.is_relative_to(old_root):
+        return value.relative_to(old_root)
+    real = resolved.get(value)
+    if real is None:
+        real = resolved[value] = value.resolve()
+    if real.is_relative_to(old_root):
+        return real.relative_to(old_root)
+    return None
+
+
 def _rewrite_transcript_line(
-    chunk: bytes, old_root: Path, new_root: Path, source: Path, *, keep_foreign_roots: bool
+    chunk: bytes,
+    old_root: Path,
+    new_root: Path,
+    source: Path,
+    *,
+    keep_foreign_roots: bool,
+    resolved: dict[Path, Path],
 ) -> bytes:
     """Rewrite one already cap-sized transcript line's ``cwd`` in place, or
     pass it through verbatim.
@@ -337,7 +368,8 @@ def _rewrite_transcript_line(
     Python's own JSON spacing, silently breaking that contract on a real,
     compactly-written transcript.
 
-    Every ``cwd`` key on the line whose value lies under ``old_root`` moves —
+    Every ``cwd`` key on the line whose value lies under ``old_root`` (as
+    written or once resolved; see :func:`_location_under_root`) moves —
     the top-level root and any nested one, since both record the same
     sending host's layout; a nested value elsewhere is left as it is. The
     substituted line is decoded again to prove its top-level ``cwd`` is the
@@ -367,7 +399,8 @@ def _rewrite_transcript_line(
     cwd_path = Path(cwd)
     if not cwd_path.is_absolute():
         return chunk
-    if not cwd_path.is_relative_to(old_root):
+    cwd_location = _location_under_root(cwd_path, old_root, resolved)
+    if cwd_location is None:
         if keep_foreign_roots:
             return chunk
         raise HarnessError(
@@ -382,13 +415,16 @@ def _rewrite_transcript_line(
         except ValueError:
             return match.group(0)
         value_path = Path(value)
-        if not value_path.is_absolute() or not value_path.is_relative_to(old_root):
+        if not value_path.is_absolute():
             return match.group(0)
-        new_value = str(new_root / value_path.relative_to(old_root))
+        location = _location_under_root(value_path, old_root, resolved)
+        if location is None:
+            return match.group(0)
+        new_value = str(new_root / location)
         return match.group(1) + json.dumps(new_value).encode("utf-8")
 
     new_body = _CWD_FIELD_RE.sub(relocate, body)
-    expected = str(new_root / cwd_path.relative_to(old_root))
+    expected = str(new_root / cwd_location)
     try:
         relocated = json.loads(new_body)
     except ValueError:
@@ -1357,7 +1393,9 @@ class ClaudeCodeHarness(Harness):
         A non-camp caller of this harness-boundary method directly, without
         that same guard in front of it, would not have that guarantee.
 
-        A line whose ``cwd`` is absolute but not under ``old_root`` raises
+        A line whose ``cwd`` is absolute but not under ``old_root`` — neither
+        as written nor once resolved, the reading ``session_transcripts``
+        gives a recorded root — raises
         :class:`HarnessError` naming ``source``, and nothing is written to
         ``destination`` — unless ``keep_foreign_roots``, which copies that
         line through verbatim instead.
@@ -1370,6 +1408,7 @@ class ClaudeCodeHarness(Harness):
         """
         old_root = Path(old_root)
         new_root = Path(new_root)
+        resolved: dict[Path, Path] = {}
         tmp_fd, tmp_name = tempfile.mkstemp(
             dir=destination.parent, prefix=f".{destination.name}.", suffix=".tmp"
         )
@@ -1385,7 +1424,12 @@ class ClaudeCodeHarness(Harness):
                             _stream_rest_of_overlong_line(f_in, f_out)
                         continue
                     rewritten = _rewrite_transcript_line(
-                        chunk, old_root, new_root, source, keep_foreign_roots=keep_foreign_roots
+                        chunk,
+                        old_root,
+                        new_root,
+                        source,
+                        keep_foreign_roots=keep_foreign_roots,
+                        resolved=resolved,
                     )
                     f_out.write(rewritten)
         except BaseException:
