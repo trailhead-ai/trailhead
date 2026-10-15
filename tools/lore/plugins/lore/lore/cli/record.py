@@ -2558,6 +2558,26 @@ def _cmd_record_amend(args) -> int:
     entry carries ``criteria`` (reads are unaffected), the only recovery being to
     update lore.
 
+    **Criterion marks (spec records only).** ``--reopen ACn`` and ``--close ACn``
+    (each repeatable) record a human decision about a criterion in the entry's
+    ``criteria`` as ``reopened`` / ``closed``. A reopen voids the coverage
+    recorded before the amend: the entry stores ``ledger``, the task ids of the
+    ``## Slices`` entries in the *stored* body, read under the write lock — a
+    ledger line the new body adds is never part of the snapshot. A second reopen
+    is allowed (it voids what was recorded since); a second close is refused as
+    already closed; a close undoes a mistaken reopen. Reopening after a mistaken
+    close voids all earlier coverage, so the prior partial state returns only
+    when a slice records it again. With marks and no stdin the amend is
+    marks-only: the body is unchanged, the entry's diff is empty and ``--base``
+    is optional (checked if given). With marks and a body (full or ``--diff``)
+    one entry carries both. Marks on a non-spec record, marks with
+    ``--revert-to``, and every :func:`criteria.check_criteria_marks` refusal
+    print ``error: ...`` naming the ID, the problem and the fix, then
+    ``nothing was written``. Success prints ``reopened criteria: AC2 (voids
+    coverage from task/a, task/b)`` (or ``(nothing to void)``), ``closed
+    criteria: ...`` and the ``removed criteria:`` line. The reason is permanent
+    and must never hold secrets.
+
     **The revision handshake.** ``--base REVISION`` (the SHA-256 of the body as
     ``record show`` printed it) is required with a full-body stdin and optional
     with ``--diff``. Under the write lock, after the implicit pull, it is compared
@@ -2622,7 +2642,18 @@ def _cmd_record_amend(args) -> int:
     use_diff = bool(getattr(args, "diff", False))
     revert_raw = getattr(args, "revert_to", None)
     revert_to = None
+    reopen_ids = list(getattr(args, "reopen", None) or [])
+    close_ids = list(getattr(args, "close", None) or [])
+    has_marks = bool(reopen_ids or close_ids)
     if revert_raw is not None:
+        if has_marks:
+            print(
+                "error: --reopen/--close cannot be combined with --revert-to: a "
+                "revert restores an earlier body, so run the revert, then amend "
+                "again with the marks\nnothing was written",
+                file=sys.stderr,
+            )
+            return 1
         if use_diff:
             print(
                 "error: --revert-to cannot be combined with --diff: it computes "
@@ -2645,12 +2676,15 @@ def _cmd_record_amend(args) -> int:
             file=sys.stderr,
         )
         return 1
-    if stdin_text == "" and revert_to is None:
+    if stdin_text == "" and revert_to is None and not has_marks:
         print(
-            "error: no body on stdin: pipe the new body, or pass --diff with a unified diff",
+            "error: no body on stdin: pipe the new body, pass --diff with a "
+            "unified diff, or pass --reopen/--close to mark criteria without "
+            "changing the body\nnothing was written",
             file=sys.stderr,
         )
         return 1
+    marks_only = has_marks and stdin_text == ""
 
     _pull_before_write(record_id, named_vault)
 
@@ -2675,11 +2709,30 @@ def _cmd_record_amend(args) -> int:
                 )
                 raise _UpdateAborted()
 
+            if has_marks and location.kind.casefold() != "spec":
+                print(
+                    f"error: --reopen/--close apply only to spec records, and "
+                    f"{location.record_id} is a {location.kind}: drop the flag\n"
+                    "nothing was written",
+                    file=sys.stderr,
+                )
+                raise _UpdateAborted()
+
             locks.enter_context(locking_mod.vault_write_lock(location.vault_root))
 
             _check_base_revision(
-                location, getattr(args, "base", None), required=not use_diff
+                location,
+                getattr(args, "base", None),
+                required=not use_diff and not marks_only,
             )
+
+            if marks_only:
+                use_diff = False
+                stdin_text = (
+                    location.body_path.read_text(encoding="utf-8")
+                    if location.body_path.exists()
+                    else ""
+                )
 
             if revert_to is not None:
                 stdin_text = _reconstruct_from_stored(location, revert_to, "--revert-to")
@@ -2697,7 +2750,7 @@ def _cmd_record_amend(args) -> int:
 
             stored_before = record_store_mod.neutralize_fences(existing_body)
             stored_after = record_store_mod.neutralize_fences(new_body)
-            if stored_after == stored_before:
+            if stored_after == stored_before and not has_marks:
                 print(
                     "error: the new body is identical to the stored body: nothing to amend",
                     file=sys.stderr,
@@ -2750,8 +2803,39 @@ def _cmd_record_amend(args) -> int:
                         print(f"error: {refusal}", file=sys.stderr)
                     print("nothing was written", file=sys.stderr)
                     raise _UpdateAborted()
+            criteria_entry: dict = {}
             if removed_now:
-                entry["criteria"] = {"removed": removed_now}
+                criteria_entry["removed"] = removed_now
+            voided: dict[str, list[str]] = {}
+            if has_marks:
+                try:
+                    voided, mark_refusals = criteria_mod.check_criteria_marks(
+                        stored_before, stored_after, stored_history, reopen_ids, close_ids
+                    )
+                except criteria_mod.CriteriaError as exc:
+                    print(
+                        f"error: {location.record_id} has a malformed change-history "
+                        f"criteria record ({exc}): marking criteria would lose track "
+                        "of earlier marks. Restore the field from the record's vault "
+                        f"git history (git log -p -- {location.kind}/{location.name}.json), "
+                        "then amend again\nnothing was written",
+                        file=sys.stderr,
+                    )
+                    raise _UpdateAborted()
+                if mark_refusals:
+                    for refusal in mark_refusals:
+                        print(f"error: {refusal}", file=sys.stderr)
+                    print("nothing was written", file=sys.stderr)
+                    raise _UpdateAborted()
+                if reopen_ids:
+                    criteria_entry["reopened"] = reopen_ids
+                    criteria_entry["ledger"] = [
+                        task for task, _, _ in criteria_mod.ledger_entries(stored_before)
+                    ]
+                if close_ids:
+                    criteria_entry["closed"] = close_ids
+            if criteria_entry:
+                entry["criteria"] = criteria_entry
             sidecar["change-history"] = [*stored_history, entry]
 
             dest_root, dest_shared = _resolve_current_vault_shared(location)
@@ -2778,10 +2862,33 @@ def _cmd_record_amend(args) -> int:
     from . import publish as publish_mod
 
     publish_mod.request_publish(dest_root)
+    for ident in reopen_ids:
+        tasks = voided.get(ident)
+        effect = (
+            "voids coverage from " + ", ".join(f"task/{t}" for t in tasks)
+            if tasks
+            else "nothing to void"
+        )
+        print(f"reopened criteria: {ident} ({effect})")
+    if close_ids:
+        print("closed criteria: " + ", ".join(close_ids))
     if removed_now:
         print("removed criteria: " + ", ".join(removed_now))
     print(new_id)
     return 0
+
+
+_AMEND_MARKS_HELP = (
+    'Spec criteria marks. --reopen ACn (repeatable) voids the coverage recorded before the amend: the '
+    'snapshot is the ledger entries stored at the amend, never ones the new body adds. --close ACn '
+    '(repeatable) closes a criterion without a slice covering it, and undoes a mistaken reopen. A second '
+    'reopen is allowed (it voids what was recorded since); a second close is refused as already closed. '
+    'Reopening after a mistaken close voids all earlier coverage, so the prior partial state returns only'
+    ' when a slice records it again. With no stdin the amend is marks-only (body unchanged, --base '
+    'optional but checked if given); with a body (full or --diff) one entry carries both. Marks apply to '
+    'spec records only and cannot be combined with --revert-to. The reason is permanent: never put '
+    'secrets in it.'
+)
 
 
 # Stated once per parser description instead of restated in every --unset-<field>
@@ -2954,7 +3061,8 @@ def add_record_subparser(sub) -> None:
         "amend",
         help="Amend a record's body in place (even a frozen record), recording why",
         usage="lore record amend RECORD_ID --reason REASON --initiated-by "
-              "{operator,agent} [--base REVISION] [--diff | --revert-to N] [--vault NAME]",
+              "{operator,agent} [--base REVISION] [--diff | --revert-to N] "
+              "[--reopen ACn] [--close ACn] [--vault NAME]",
         description="Replace a record's body with the one piped on stdin (or, with "
                     "--diff, apply a unified diff to it) and append a "
                     "change-history entry: when, by whom, who asked, why, and the "
@@ -2992,7 +3100,7 @@ def add_record_subparser(sub) -> None:
                "removed outside amend (e.g. in a draft) is not recorded, so "
                "its number is not protected; an older lore refuses writes to a "
                "spec once an entry carries 'criteria' (reads still work), and "
-               "only updating lore recovers it.",
+               "only updating lore recovers it. " + _AMEND_MARKS_HELP,
     )
     p_record_amend.add_argument(
         "record_id",
@@ -3021,6 +3129,17 @@ def add_record_subparser(sub) -> None:
              "'revision' in --json, 'revision: <hex>' on stderr). Required with a "
              "full-body stdin; optional with --diff. The amend is refused, "
              "writing nothing, if the stored body's revision differs.",
+    )
+    p_record_amend.add_argument(
+        "--reopen", dest="reopen", action="append", default=None, metavar="ACn",
+        help="Reopen spec criterion ACn, voiding the coverage recorded before "
+             "this amend. Repeatable; spec records only; not with --revert-to.",
+    )
+    p_record_amend.add_argument(
+        "--close", dest="close", action="append", default=None, metavar="ACn",
+        help="Close spec criterion ACn without a slice covering it (also undoes "
+             "a mistaken reopen). Repeatable; refused if ACn is already closed "
+             "or no slice has covered it; spec records only; not with --revert-to.",
     )
     p_record_amend.add_argument(
         "--revert-to", dest="revert_to", default=None, metavar="N",
