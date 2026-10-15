@@ -5,6 +5,18 @@
     return String.fromCharCode(65 + index);
   }
 
+  var HIDDEN = /[\p{Cf}\p{Zl}\p{Zp}\u0080-\u009f]/gu;
+
+  function escapeHidden(json) {
+    return json.replace(HIDDEN, function (ch) {
+      var out = "";
+      for (var i = 0; i < ch.length; i++) {
+        out += "\\u" + ("0000" + ch.charCodeAt(i).toString(16)).slice(-4);
+      }
+      return out;
+    });
+  }
+
   function build(round, answers) {
     var reply = {
       pad: round.title,
@@ -25,7 +37,7 @@
         };
       })
     };
-    return "```json\n" + JSON.stringify(reply, null, 2) + "\n```";
+    return "```json\n" + escapeHidden(JSON.stringify(reply, null, 2)) + "\n```";
   }
 
   window.PadReply = { build: build, letter: letter };
