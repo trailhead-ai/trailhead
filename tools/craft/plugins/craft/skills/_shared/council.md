@@ -200,9 +200,12 @@ severity drawn from the reviewed spec's resolved maturity level, rendered by
 
 Every concern above is reported at its mapped severity and is never filtered out — a level
 downgrades a concern's severity, it never removes the concern from the review. A finding downgraded
-by level restates the concern and the deciding level in its own text (for example "migration and
-backfill — Minor, downgraded by this spec's prototype maturity level"), so the operator reading
-`Minor` can tell a calibrated downgrade from noise and has something concrete to override.
+by level restates the concern and the deciding level in its own text, so the operator can tell a
+calibrated downgrade from noise and has something concrete to override. What the reader is shown
+states the downgrade in the plain reading "How a finding reads" gives and names the deciding level
+in plain words (for example "migration and backfill — rough edges, nothing to decide, because this
+spec is at prototype maturity"), never the internal level word as a label or a rating. The
+renderer's block and the reviewers' reports keep the internal forms.
 
 This calibration governs severity for the five named concerns only. The **Per-lens Critical bars**
 above are not rewritten per level — they keep saying what to look for, and this section sits beside
@@ -237,7 +240,13 @@ step 8.5 carries the remedy table and one worked refusal message the other dispa
 Surface the resolved level and its basis in the review you print, restating the renderer's own
 `maturity: <level> (basis: <basis>)` line so a read stamp is distinguishable from a silent default.
 Restate any `stand-down:` and `waiver-not-recognised:` lines the block carries beside it, so an
-operator sees a waiver was exercised without opening the block itself.
+operator sees a waiver was exercised without opening the block itself. In what the reader is shown,
+a `stand-down:` line keeps the concern and the waiving Non-Goal and swaps "would rate <level>" for
+the plain reading of that level: "without it this would need your decision" for Critical, "without
+it this would be worth fixing, your call" for Important, "without it this would be rough edges,
+nothing to decide" for Minor (for example "waived by the Non-Goal `…`; without it this would need
+your decision"). A line that names a level per repository restates each repository's own reading. A
+`waiver-not-recognised:` line carries no level and is restated as it stands.
 
 When the basis is `highest-stamped`, the block is a concern-by-repository matrix rather than a
 single severity, and rating a finding is attribution, not the fallback. Take the leading camp member
@@ -350,8 +359,9 @@ reader, including the synthesis's account of each pass:
 
 **Where the plain forms stop.** They are for what the reader is shown in session: findings, the
 synthesis, and summaries of them (progress narration while passes run is out of scope). Reviewer
-reports, the `## Council Review` block `plan` and the driver persist, the driver's `plan-critical`
-trigger and its `*Critical:* none` convention, and the spec review's status stamp keep the internal
-levels. When that block is written, each plain group maps back to its internal level: the "needs
-your decision" group is the `*Critical:*` list, "worth fixing, your call" is `*Important:*`, and
-"nothing to decide" is `*Minor:*`.
+reports, the renderer's calibration block itself and the driver's persisted restatement of its
+stand-down lines, the `## Council Review` block `plan` and the driver persist, the driver's
+`plan-critical` trigger and its `*Critical:* none` convention, and the spec review's status stamp
+keep the internal levels. When that block is written, each plain group maps back to its internal
+level: the "needs your decision" group is the `*Critical:*` list, "worth fixing, your call" is
+`*Important:*`, and "nothing to decide" is `*Minor:*`.
