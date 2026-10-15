@@ -13,7 +13,7 @@ The run's vault ends with `decision/drop-duplicate-inbound-events` corrected in 
 | Clause | Grader | Type and target |
 |---|---|---|
 | The corrected text (a payload `digest`) is present | `corrected-text-present` | `regex` on `vault/decision/drop-duplicate-inbound-events.md`, contains |
-| The wrong text (`sequence number`) is absent | `wrong-text-gone` | `regex` on `vault/decision/drop-duplicate-inbound-events.md`, `not_contains` |
+| The wrong text (the claim that the key is built from the sender id and a sequence number; post-baseline correction, see `tools/lore/MANUAL-EVAL.md`) is absent | `wrong-text-gone` | `regex` on `vault/decision/drop-duplicate-inbound-events.md`, `not_contains` |
 | Untouched text survives: `Keys are held for 24 hours.` | `unrelated-text-kept-1` | `regex` on `vault/decision/drop-duplicate-inbound-events.md`, contains |
 | Untouched text survives: `Senders retry on timeout` | `unrelated-text-kept-2` | `regex` on `vault/decision/drop-duplicate-inbound-events.md`, contains |
 | No blockquote line was added | `no-blockquote` | `regex` on `vault/decision/drop-duplicate-inbound-events.md`, `not_contains` a line starting with `>` |

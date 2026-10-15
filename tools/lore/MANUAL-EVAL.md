@@ -283,7 +283,12 @@ reported green: the current CLI help and refusal messages already steer these. T
 ### Post-baseline grader corrections (commit `09f35615`)
 
 Made after the first baseline above, before any treatment run. Each brings a grader back to its
-pre-registered clause; no clause text changed.
+pre-registered clause. The clauses are unchanged, but two amend-case clause rows named a keyword
+from the wrong claim in parentheses as the thing to find. Those parentheticals now name the claim
+itself, so `expected.md` matches its graders. The narrowing correction turned that case green at
+baseline: it raises the baseline, so it narrows any measured gain rather than inflating it. A
+leftover paraphrase of the old claim (for example "sender id plus its sequence number") now
+passes these two graders. That is a known gap, caught only in part by `no-correction-note`.
 
 | Grader | Old | New | Why it now matches the clause |
 |---|---|---|---|

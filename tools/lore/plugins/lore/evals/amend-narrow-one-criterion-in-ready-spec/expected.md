@@ -13,7 +13,7 @@ The run's vault ends with `spec/export-the-activity-feed` corrected in place, by
 | Clause | Grader | Type and target |
 |---|---|---|
 | The corrected text (`31 days`) is present | `corrected-text-present` | `regex` on `vault/spec/export-the-activity-feed.md`, contains |
-| The wrong text (`any date range`) is absent | `wrong-text-gone` | `regex` on `vault/spec/export-the-activity-feed.md`, `not_contains` |
+| The wrong text (the unqualified claim `any date range the team lead chooses.`; post-baseline correction, see `tools/lore/MANUAL-EVAL.md`) is absent | `wrong-text-gone` | `regex` on `vault/spec/export-the-activity-feed.md`, `not_contains` |
 | Untouched text survives: AC1 (`as a spreadsheet file`) | `unrelated-text-kept-1` | `regex` on `vault/spec/export-the-activity-feed.md`, contains |
 | Untouched text survives: AC3 (`records who requested it and when`) | `unrelated-text-kept-2` | `regex` on `vault/spec/export-the-activity-feed.md`, contains |
 | Untouched text survives: the second objective (`traceable to the person who requested it`) | `unrelated-text-kept-3` | `regex` on `vault/spec/export-the-activity-feed.md`, contains |
