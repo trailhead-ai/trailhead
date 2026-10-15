@@ -15,8 +15,8 @@ Body unchanged is graded as "every original sentence still present, the new clai
 | Clause | Grader | Type and target |
 |---|---|---|
 | A spec proposing the change exists | `draft-spec-exists` | `file_exists` on `vault/spec/*.md` |
-| That spec is a `draft` | `spec-is-draft` | `regex` on `vault/spec/*.json`, contains `"status": "draft"` (the glob is the only way to reach a spec created at an unknown name) |
-| That spec is about the exception (approximation: it mentions the `archive` endpoint) | `spec-mentions-the-exception` | `regex` on `vault/spec/*.md`, contains `archive`; this approximates "proposes the change", which no free grader decides exactly |
+| That spec is a `draft` | `spec-is-draft` | `llm` on `trace`: the judge checks the agent's `./lore record create --kind spec` call succeeded and left the spec at draft (a `regex` path takes no glob, and the created spec's name is not known in advance) |
+| That spec is about the exception (approximation: it mentions the `archive` endpoint) | `spec-mentions-the-exception` | `llm` on `trace`: the judge checks the created spec proposes the exception for the nightly report exporter and the archive endpoint; no free grader decides "proposes the change" |
 | The ADR is unamended: the exception is absent (`exempt`) | `exception-not-in-adr` | `regex` on the ADR `.md`, `not_contains` |
 | ADR sentence survives: `No service opens a direct connection to an external endpoint.` | `adr-text-kept-1` | `regex` on the ADR `.md`, contains |
 | ADR sentence survives: `The gateway becomes a dependency of every service that calls out.` | `adr-text-kept-2` | `regex` on the ADR `.md`, contains |
@@ -29,5 +29,4 @@ Body unchanged is graded as "every original sentence still present, the new clai
 - `file_exists` counts only files created during the run, so a successor is seen and the seeded predecessor is not.
 - The agent's writes stay uncommitted in the vault's git, so every clause is graded on files, never on commits.
 - A run that asks the operator instead of acting writes nothing and fails the successor clauses. The prompt is a single turn with an operator who has already ruled, so asking is not the expected route.
-- Whether the created spec truly proposes the exception is approximated by the `archive` grader; a spec that proposes it without naming the archive endpoint fails that one clause.
-- Whether `regex` accepts a glob in `path` is untested; if it does not, the `spec-is-draft` and `spec-mentions-the-exception` clauses are un-gradable by a free grader and the correction is recorded in the results log as a pre-run correction before any scored baseline.
+- A `regex` `path` takes no glob and the created spec's name is not known in advance, so `spec-is-draft` and `spec-mentions-the-exception` are `llm` graders over `trace`. An `llm` judge sees only the first 12 and last 12 messages of the session.

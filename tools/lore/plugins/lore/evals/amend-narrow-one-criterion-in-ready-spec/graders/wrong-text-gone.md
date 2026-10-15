@@ -1,6 +1,6 @@
 ---
 type: regex
-pattern: 'any date range'
+pattern: 'any date range the team lead chooses\.'
 match: not_contains
 target:
   source: file
