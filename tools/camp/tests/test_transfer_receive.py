@@ -1192,12 +1192,9 @@ def _conversation_env(g: dict) -> dict[str, str]:
 
 
 #: The workspace root a transcript arrived recording, on the machine that sent
-#: it. Deliberately NOT under `/home`: the rewrite resolves the roots it
-#: compares, and on macOS `/home` is a synthetic firmlink onto
-#: `/System/Volumes/Data/home`, so a `/home/...` literal comes back resolved to
-#: a different string and the comparison fails for a reason that has nothing to
-#: do with the rewrite. This prefix exists on no platform, so it resolves to
-#: itself everywhere.
+#: it. This prefix exists on no platform, so it resolves to itself everywhere;
+#: a root that resolves to a different string is covered on its own by
+#: `test_root_recorded_through_a_symlink_lands_and_rewrites_every_transcript`.
 SENDER_ROOT = "/sender-machine/some-other-workspace"
 
 
@@ -1347,6 +1344,58 @@ class TestConversationRootLanding:
         record = json.loads(found.read_text().splitlines()[0])
         assert record["cwd"] == str(ws_root)
         assert record["type"] == "summary"
+
+    def test_root_recorded_through_a_symlink_lands_and_rewrites_every_transcript(
+        self, one_member_group, tmp_path
+    ):
+        """A recorded root this host resolves to a different string still
+        lands. On macOS `/home` is a firmlink onto `/System/Volumes/Data/home`,
+        so a conversation sent from a Linux host records `/home/...` while this
+        host's transcript scan reports the resolved form; a symlinked parent
+        reproduces the same split on any platform. The top-level transcript and
+        the nested subagent transcript must both be rewritten, not refused or
+        passed through with the sender's path."""
+        from camp.transfer import receive
+        from trailhead.harness.claude_code import ClaudeCodeHarness
+
+        g = one_member_group
+        ws_root = _seed_workspace(g, "feat-x")
+        env = _conversation_env(g)
+        session_id = "88888888-8888-4888-8888-888888888888"
+
+        real_parent = tmp_path / "data-volume" / "home"
+        (real_parent / "sender" / "ws").mkdir(parents=True)
+        aliased_parent = tmp_path / "home"
+        aliased_parent.symlink_to(real_parent)
+        sender_root = str(aliased_parent / "sender" / "ws")
+
+        archive = _archive_bytes(
+            json.dumps({"cwd": sender_root, "type": "summary"}).encode() + b"\n",
+            nested={
+                "subagents/agent-1.jsonl": json.dumps(
+                    {"cwd": sender_root + "/member", "type": "agent"}
+                ).encode()
+                + b"\n"
+            },
+        )
+
+        receive.conversations(
+            groups=[g["group"]],
+            group_name="testgroup",
+            slug="feat-x",
+            session_id=session_id,
+            subpath=".",
+            archive_stream=io.BytesIO(archive),
+            env=env,
+        )
+
+        destination = ClaudeCodeHarness().session_transcript_path(session_id, ws_root, env=env)
+        assert destination is not None
+        assert json.loads(destination.read_text().splitlines()[0])["cwd"] == str(ws_root)
+        nested_path = destination.parent / session_id / "subagents" / "agent-1.jsonl"
+        assert json.loads(nested_path.read_text().splitlines()[0])["cwd"] == str(
+            ws_root / "member"
+        )
 
 
 class TestConversationMemberSubpathLanding:
