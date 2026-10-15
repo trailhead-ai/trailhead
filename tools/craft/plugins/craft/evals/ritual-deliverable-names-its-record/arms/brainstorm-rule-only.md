@@ -24,8 +24,9 @@ you and the user would each describe what gets built and land on the same answer
 
 **A spec is a stable reference, not a scratchpad.** It can still evolve as understanding sharpens —
 through brainstorming and up through the completion of planning. Once the work is settled, though,
-don't keep reworking it in place: substantially new thinking → a new spec, with a reference back to
-the prior one.
+don't keep reworking it in place: a correction inside its scope, such as narrowing an acceptance
+criterion, is an amend, and substantially new thinking that moves its scope → a new spec, with a
+reference back to the prior one. `/lore:correct` decides which.
 
 ## Interrogation discipline
 
@@ -101,12 +102,12 @@ reads as an ordinary result, which is exactly the wrong report for a name that c
   was decided, tried, or left as an open task?"). Otherwise read vault records directly — specs,
   decisions, tasks, and active lessons for the touched areas, where each lesson's prevention check
   should shape acceptance criteria or non-goals.
-- Never modify a prior spec. If this work supersedes one, create the new spec with
-  `--label craft/supersedes=spec/<predecessor>` and never flip the predecessor here: it stays live
-  until the successor reaches `ready`, when the gauntlet's ready step retires it. The predecessor
-  name comes from a `lore search` result, so at label-write time it must match the full-string
-  pattern `^spec/[A-Za-z0-9._-]+$` (no whitespace or newline); a name that fails is refused and
-  reported, never substituted, quoted or escaped into the label.
+- When writing a successor spec, leave the predecessor untouched. If this work supersedes one,
+  create the new spec with `--label craft/supersedes=spec/<predecessor>` and never flip the
+  predecessor here: it stays live until the successor reaches `ready`, when the gauntlet's ready
+  step retires it. The predecessor name comes from a `lore search` result, so at label-write time it
+  must match the full-string pattern `^spec/[A-Za-z0-9._-]+$` (no whitespace or newline); a name
+  that fails is refused and reported, never substituted, quoted or escaped into the label.
 
 **Resolve maturity for every repository the work touches, before grilling begins.** Enumerate those
 repositories the same way `_shared/execute.md`'s push mechanics and `drive/SKILL.md` step 5 already
@@ -590,8 +591,9 @@ The spec frontmatter `status` walks `draft` (brainstorming) → `ready` (settled
 it from here) → `complete` (distilled). `planned` remains a valid value and records already carrying
 it are still read, but nothing writes it: a spec under the slice loop holds `ready` for the whole
 run, because another slice can always be added. Only these values are valid — off-vocab values like
-`shipped` are rejected. Once `ready`, the spec is **settled**: no more edits; new thinking on the
-same topic creates a new spec with a `Related → Prior specs` link back.
+`shipped` are rejected. Once `ready`, the spec is **settled**: only corrections, each an amend
+within its scope (`/lore:correct`); new thinking that moves its scope creates a new spec with a
+`Related → Prior specs` link back.
 
 **The `draft` → `ready` edge is the gauntlet's.** Brainstorm leaves the spec at `draft`; the
 `gauntlet` skill flips it once the operator has accepted its recommendation. A gauntlet Critical
@@ -601,12 +603,13 @@ advances when no Critical still carries `revise`. That is the review working, no
 
 ## Bounce-Back from Planning
 
-If planning or implementation surfaces something that would change a spec's **objectives, acceptance
-criteria, or non-goals**, don't edit the settled spec — stop, re-enter brainstorming on the new
-dimension, produce a new spec referencing the prior one in `Related`, and resume planning against
-it. Task-level uncertainty (how to structure a query, which library to use, what to name a module)
-is resolved inline in planning instead — the bounce-back rule is for *what / why* shifts, not *how*
-shifts.
+If planning or implementation surfaces something that would change a spec's **objectives or
+non-goals**, or an acceptance criterion in any way other than narrowing it, don't edit the settled
+spec — stop, re-enter brainstorming on the new dimension, produce a new spec referencing the prior
+one in `Related`, and resume planning against it. Task-level uncertainty (how to structure a query,
+which library to use, what to name a module) is resolved inline in planning instead — the
+bounce-back rule is for *what / why* shifts, not *how* shifts. Narrowing an acceptance criterion is
+an amend (`/lore:correct`), not a bounce-back.
 
 ## Record links
 
