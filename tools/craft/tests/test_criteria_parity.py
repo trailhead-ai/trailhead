@@ -152,6 +152,15 @@ LEDGER_CORPUS = {
     "malformed-covers": f"{S}\n{_line('a', ', covers AC1,AC1')}\n",
     "malformed-covers-lower": f"{S}\n{_line('a', ', covers ac1')}\n",
     "malformed-partial": f"{S}\n{_line('a', ', partially covers nope')}\n",
+    "unindented-continuation": (
+        f"{S}\n{_line('a', ', covers AC1')}\n- Slice B did other stuff\n"
+        "(`task/b`, closed 2026-01-02, covers AC2)\n"
+    ),
+    "unindented-after-blank": f"{S}\n{_line('a', ', covers AC1')}\n\nstray\n  indented\n",
+    "unindented-then-indented": f"{S}\n- claim\nstray\n  (`task/w`, closed 2026-01-01, covers AC1)\n",
+    "unindented-in-noncanonical": f"{S}\n  - indented\nstray\n{_line('a', ', covers AC1')}\n",
+    "unindented-fenced": f"{S}\n{_line('a', ', covers AC1')}\n```\nfenced\n```\nstray\n",
+    "unindented-commented": f"{S}\n{_line('a', ', covers AC1')}\n<!--\nhidden\n-->\nstray\n",
 }
 
 
@@ -179,3 +188,24 @@ def test_ledger_corpus_reaches_entries_and_both_failure_kinds():
         except ValueError:
             outcomes["failure"] += 1
     assert all(outcomes.values()), outcomes
+
+
+@pytest.mark.parametrize("name", sorted(LEDGER_CORPUS))
+def test_lore_and_craft_agree_on_unclaimed_ledger_lines(name):
+    body = LEDGER_CORPUS[name]
+    try:
+        expected = candidate_set.find_unclaimed_ledger_lines(body)
+    except ValueError:
+        with pytest.raises(criteria.CriteriaError):
+            criteria.unclaimed_ledger_lines(body)
+        return
+    assert criteria.unclaimed_ledger_lines(body) == expected
+
+
+def test_ledger_corpus_reaches_unclaimed_lines_and_clean_ledgers():
+    found = [
+        candidate_set.find_unclaimed_ledger_lines(b)
+        for b in LEDGER_CORPUS.values()
+        if b.count(S) < 2
+    ]
+    assert any(found) and not all(found)
