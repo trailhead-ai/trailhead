@@ -990,7 +990,7 @@ form.
 
 | Arm file | Site | Sources, in order | Pin |
 |---|---|---|---|
-| `precal-consult.md` | consult-calibrated | `rules.md`, `skills/consult/SKILL.md`, `skills/_shared/council.md` | every source at the baseline revision `f68200933f69e0c00bc79634fb4758b8fa039c1c`, except `consult/SKILL.md` and `council.md` at `e88e01300e9a770fd4a14ac585e5029931782ac8` (the committed state before the calibration edit; byte-identical to `42e1b088`) |
+| `precal-consult.md` | consult-calibrated | `rules.md`, `skills/consult/SKILL.md`, `skills/_shared/council.md` | every source at the baseline revision `f68200933f69e0c00bc79634fb4758b8fa039c1c`, except `consult/SKILL.md` and `council.md` at `e88e01303e744f94b60c46e10212d2adf0ca7ed0` (the committed state before the calibration edit; byte-identical to `af083a20`) |
 | `cal-consult.md` | consult-calibrated | the same three | the same, with `consult/SKILL.md` and `council.md` at the commit that carries the calibration edit (its SHA is named in the results) |
 
 The two compositions differ in those two files only. The manifest in
@@ -1077,10 +1077,10 @@ reported in the results, not repaired.
 ## Results: the consult-calibrated site (2026-10-15)
 
 Written after the `calibration-level` check, the fixtures and both arms were committed and both arms were run and
-graded, in this order: the extension, fixtures, grader check and `precal-consult` arm (commit `bc57c233`, before any
-run); three `precal-consult` runs, their captures and their hand check (commit `2883df6b`); the prose edit alone in commit
+graded, in this order: the extension, fixtures, grader check and `precal-consult` arm (commit `835c29f9`, before any
+run); three `precal-consult` runs, their captures and their hand check (commit `4f295b18`); the prose edit alone in commit
 `df65828b`, the `cal` pin; the `cal-consult` arm at that pin (commit
-`4423c860`); three `cal-consult` runs. The two arm compositions differ only in `consult/SKILL.md` and `council.md`; `rules.md` is the same bytes. All
+`999e9ade`); three `cal-consult` runs. The two arm compositions differ only in `consult/SKILL.md` and `council.md`; `rules.md` is the same bytes. All
 six runs exited 0, every capture is non-empty, every stderr is empty, so none was excluded or replaced. No split, so
 no re-run. The grammar was used as pre-registered: no amendment was made. Each capture is graded against
 `fixtures/reports-calibrated.md`. The capture-to-verdict table (`FINDING_CAPTURE_VERDICTS` in
