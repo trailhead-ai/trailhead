@@ -8,9 +8,8 @@ record's name is the slug lore derives from its title (``Use the queue`` ->
 ``adr/use-the-queue``). In the current working directory the script:
 
 1. writes ``$HOME/.gitconfig`` with a synthetic identity when none exists (an
-   existing one is left untouched) — lore stamps every
-   record's provenance from ``git config --global user.email`` and refuses to
-   write without one;
+   existing one is left untouched) — lore stamps every record's provenance
+   from ``git config --global user.email`` and refuses to write without one;
 2. creates ``./vault`` through this checkout's own lore CLI
    (``lore vault add ... --scope default``), which also writes the lore config
    naming it the default vault;
@@ -27,8 +26,8 @@ Nothing is written unless every refusal check passes. It refuses (stderr
 or malformed, when lore's config or state directory — resolved through
 ``trailhead/paths.py``, exactly as lore resolves them, overrides included — is
 not inside ``$HOME``, when a lore config already exists, when an existing
-``$HOME/.gitconfig`` leaves ``git config --global user.email`` empty,
-or when ``./vault``, ``./lore`` or ``./trailhead`` already exists. The intent is
+``$HOME/.gitconfig`` leaves ``git config --global user.email`` empty, or when
+``./vault``, ``./lore`` or ``./trailhead`` already exists. The intent is
 that a run can only ever populate a disposable ``$HOME``, never a live install.
 """
 from __future__ import annotations
@@ -116,7 +115,7 @@ def check_environment(cwd: Path) -> None:
             raise Refusal(f"{cwd / name} already exists")
 
 
-def run_lore(python: str, *args: str, stdin: str | None = None) -> str:
+def run_lore(python: str, *args: str, stdin: str | None = None) -> None:
     result = subprocess.run(
         [python, str(LORE_CLI), *args],
         input=stdin,
@@ -125,7 +124,6 @@ def run_lore(python: str, *args: str, stdin: str | None = None) -> str:
     )
     if result.returncode != 0:
         raise Refusal(f"lore {' '.join(args[:2])} failed: {result.stderr.strip() or result.stdout.strip()}")
-    return result.stdout
 
 
 WRAPPER = """#!/bin/sh
