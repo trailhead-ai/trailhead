@@ -323,3 +323,58 @@ def test_a_stale_snapshot_task_does_not_fail_the_gate_through_lores_state(  # in
     gate = _gate("candidate_set.py", without_second, "--criteria-state", str(state_file))
     assert gate.returncode == 0, gate.stderr
     assert "void: AC2 (reopened by amend)" in gate.stdout.splitlines()
+
+
+BODY_TWO_COVERED = BODY_BEFORE.replace(
+    "covers AC1, AC2)", "covers AC1, AC2)\n- **Second** — more. (`task/second`, closed 2026-01-02, covers AC3)"
+)
+BODY_SECOND_ADDED = BODY_BEFORE + "- **Second** — more. (`task/second`, closed 2026-01-02, covers AC2)\n"
+
+
+@pytest.mark.parametrize(
+    ("body", "first_reopen", "later_body", "second_reopen", "reopened", "void_line", "candidates"),
+    [
+        (
+            BODY_TWO_COVERED, ["AC1", "AC2"], None, None,
+            {"AC1": ["first", "second"], "AC2": ["first", "second"]},
+            "void: AC1 (reopened by amend), AC2 (reopened by amend)",
+            "candidates: AC1, AC2",
+        ),
+        (
+            BODY_BEFORE, ["AC2"], BODY_SECOND_ADDED, ["AC2"],
+            {"AC2": ["first", "second"]},
+            "void: AC2 (reopened by amend)",
+            "candidates: AC2, AC3",
+        ),
+    ],
+    ids=["two-reopened-ids", "second-reopen-resnapshots-new-entry"],
+)
+def test_reopens_of_several_ids_and_of_a_repeated_id_reach_the_gate(  # inert-gate: allow seam smoke
+    lore, tmp_path, body, first_reopen, later_body, second_reopen, reopened, void_line, candidates
+):
+    record_id = lore(
+        "record", "create", "--kind", "spec", "--title", "Seam reopens", "--keyword", "seam",
+        "--status", "ready", stdin_text=body,
+    ).strip()
+    lore(
+        "record", "amend", record_id, "--reason", "reopen", "--initiated-by", "operator",
+        *[a for i in first_reopen for a in ("--reopen", i)], stdin_text="",
+    )
+    if later_body is not None:
+        lore("record", "update", record_id, stdin_text=later_body)
+        lore(
+            "record", "amend", record_id, "--reason", "reopen again", "--initiated-by", "operator",
+            *[a for i in second_reopen for a in ("--reopen", i)], stdin_text="",
+        )
+    printed = json.loads(lore("record", "criteria", record_id))
+    assert printed["reopened"] == reopened
+
+    state_file = tmp_path / "criteria.json"
+    state_file.write_text(json.dumps(printed), encoding="utf-8")
+    shown = lore("record", "show", record_id)
+
+    gate = _gate("candidate_set.py", shown, "--criteria-state", str(state_file))
+    assert gate.returncode == 0, gate.stderr
+    lines = gate.stdout.splitlines()
+    assert void_line in lines
+    assert candidates in lines
