@@ -327,3 +327,61 @@ Diagnosis (kept workspaces of the drifted-mechanism and ADR-exception re-runs, s
   baseline classification is right and only the act is missing.
 - Spec orphaning (from the earlier diagnostic run): the same pattern, noticed the orphaned objective
   and asked.
+
+## Treatment arm: the `correct` skill present, 2026-10-15
+
+Commits `7c52c1fd` (skill, record-skill pointer) and `3475a6da` (read-back fix). Same command, graders
+and fixtures as the baseline; one case per invocation, `--ablation none --runs 3 --model claude-opus-5-5
+--concurrency 3 --max-cost-usd 3 --no-publish --allow-tools 'Bash(./lore *)' --scaffold --trust-plugin`.
+Runner `claude` 2.1.301. Errored runs (scaffold or load failure): **none**. No case missed the bar, so
+no rerun was used.
+
+### Read-back before the treatment run (authoring error, fixed)
+
+The skill was read against each case's `expected.md` only. Five cases routed as registered. One did
+not: for a spec the skill said to take the successor to `ready` and then supersede, while
+`supersede-spec-change-orphaning-an-objective-phrased-as-small-tweak` expects a `draft` successor and a
+predecessor still `ready`. That is an authoring error in the skill, not in the case. The spec route now
+drafts the successor, leaves the predecessor live, and hands the gauntlet to the operator (`3475a6da`).
+Cases, graders and `expected.md` files were not touched.
+
+### Both arms, per run
+
+Baseline is the corrected baseline above (the re-run where graders changed). Treatment cost is the
+runner's list-price estimate for three runs.
+
+| Case | Baseline runs (1 / 2 / 3) | Baseline bar | Treatment runs (1 / 2 / 3) | Treatment cost | Treatment bar | Delta |
+|---|---|---|---|---|---|---|
+| amend-wrong-fact-in-active-adr | 1.00 / 1.00 / 1.00 | green | 1.00 / 1.00 / 1.00 | $0.424 | green | none (already green) |
+| amend-narrow-one-criterion-in-ready-spec | 1.00 / 1.00 / 1.00 | green | 1.00 / 1.00 / 1.00 | $0.482 | green | none |
+| amend-drifted-mechanism-detail-phrased-as-serious-error | 1.00 / 0.667 / 1.00 | green (2 of 3) | 1.00 / 1.00 / 1.00 | $0.424 | green | 2 of 3 to 3 of 3 (baseline's miss was a sandbox denial of the amend call) |
+| supersede-reversed-decision | 1.00 / 1.00 / 1.00 | green | 1.00 / 1.00 / 1.00 | $0.576 | green | none (already green) |
+| supersede-adr-exception-phrased-as-small-tweak | 0.667 / 0.667 / 0.667 | red | 1.00 / 1.00 / 1.00 | $0.670 | green | red to green |
+| supersede-spec-change-orphaning-an-objective-phrased-as-small-tweak | 0.714 / 0.714 / 0.714 | red | 1.00 / 1.00 / 1.00 | $0.616 | green | red to green |
+
+Model `claude-opus-5-5`; treatment total $3.191 for 18 runs. 18 of 18 runs scored 1.0; no flip, no
+rerun. Four cases were already green at baseline, so the measured gain is the two red cases (the agent
+now acts instead of asking) plus a steadier drifted-mechanism case. With only three runs per case the
+2-of-3 bar tolerates one miss in three; it does not show a rate.
+
+### U4: did the agent invoke the `correct` skill?
+
+Read from each run's kept trace: a `Skill` tool call naming `lore:correct`. **Yes in all 18 of 18 runs**
+(3 per case, all six cases). No description rework was needed.
+
+### Not graded in this slice
+
+The closing one-line route report and the `--initiated-by` choice (`operator` vs `agent`) are **not**
+graded by any case here, and no result above claims them. No grader reads the route report or the
+amend's initiator. The AC30 and AC31 confirmation rules are likewise unmeasured (later slice).
+
+### Live-state check
+
+Sha256 of every file under `~/.local/state/lore/` and `~/.config/lore/` (excluding `.git/`) before the
+first and after the last treatment run. Changed: `index.sqlite` (a derived index), one new empty lock
+under `locks/default/session/`, and the session notes `session/ca0e7928-...` (new) and
+`session/c90dc77c-...` (appended) in the `default` vault. Both session notes hold other sessions'
+candidate captures on unrelated work and carry none of the fixture vocabulary. No record, config or
+vault file the evals could reach changed. Attribution caveat: those session files were still
+uncommitted in the vault, so the attribution rests on their content and timestamps, not on a vault
+commit.
