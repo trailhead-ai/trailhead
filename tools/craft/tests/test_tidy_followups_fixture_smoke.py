@@ -98,3 +98,25 @@ def test_a_failing_lookup_is_a_failure_not_a_partial_set(built):
     assert r.returncode == 2
     assert r.stdout == ""
     assert "reason-code: lore-failed" in r.stderr
+
+
+def test_the_manifest_env_runs_lore_and_the_script_by_their_shebangs(tmp_path):
+    """An arm runs `lore` and the gathering script as executables, so `python3` is
+    whatever the manifest's PATH finds first. The fenced PATH must still reach an
+    interpreter lore supports, on hosts where /usr/bin/python3 is older (macOS)."""
+    dest = tmp_path / "run"
+    r = subprocess.run(
+        [sys.executable, str(BUILDER), str(dest)],
+        capture_output=True,
+        text=True,
+        env={"PATH": "/usr/bin:/bin", "LORE_BIN": str(LORE_CLI)},
+    )
+    assert r.returncode == 0, r.stderr
+    built = json.loads(r.stdout)
+    g = subprocess.run(
+        [str(SCRIPT), built["specs"]["stopped"]], capture_output=True, text=True, env=built["env"]
+    )
+    assert g.returncode == 0, g.stderr
+    assert [f["name"] for f in json.loads(g.stdout)["followups"]] == sorted(
+        built["followups"]["stopped"]
+    )
