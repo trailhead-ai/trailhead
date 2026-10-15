@@ -35,10 +35,12 @@ from __future__ import annotations
 
 import json
 import os
+import pwd
 import shlex
 import shutil
 import subprocess
 import sys
+import unicodedata
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -46,6 +48,7 @@ LORE_CLI = REPO_ROOT / "tools" / "lore" / "plugins" / "lore" / "cli" / "lore"
 IDENTITY_NAME = "Eval Fixture"
 IDENTITY_EMAIL = "eval@example.invalid"
 FIELDS = ("kind", "title", "status", "body")
+DIRECTORY_OVERRIDES = ("LORE_CONFIG_DIR", "LORE_STATE_DIR", "XDG_CONFIG_HOME", "XDG_STATE_HOME")
 
 PLUGIN_ROOT = LORE_CLI.parent.parent
 
@@ -84,6 +87,9 @@ def load_records(path: Path) -> list[dict[str, str]]:
         for field in ("title", "status"):
             if not record[field].strip():
                 raise Refusal(f"{where} field {field!r} must not be empty")
+        title = record["title"]
+        if title.startswith("-") or any(unicodedata.category(ch) == "Cc" for ch in title):
+            raise Refusal(f"{where} title {title!r} must not start with '-' or contain control characters")
         vocab = permitted_statuses(record["kind"]) or ()
         if record["status"] not in vocab:
             raise Refusal(
@@ -92,11 +98,40 @@ def load_records(path: Path) -> list[dict[str, str]]:
     return records
 
 
+def account_home() -> Path:
+    return Path(os.path.realpath(pwd.getpwuid(os.getuid()).pw_dir))
+
+
+def tracked_trailhead_files() -> list[Path]:
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(REPO_ROOT), "ls-files", "-z", "trailhead/"],
+            capture_output=True,
+            text=True,
+        )
+    except OSError as exc:
+        raise Refusal(f"cannot run git to list the tracked trailhead/ files: {exc.strerror or exc}") from exc
+    if result.returncode != 0:
+        raise Refusal(f"git ls-files failed in {REPO_ROOT}: {result.stderr.strip()}")
+    return [Path(name) for name in result.stdout.split("\0") if name]
+
+
 def check_environment(cwd: Path) -> None:
     home_value = os.environ.get("HOME", "")
     if not home_value:
         raise Refusal("HOME is not set")
     home = Path(os.path.realpath(home_value))
+    if home == account_home():
+        raise Refusal(f"HOME ({home}) is the invoking account's own home; refusing to seed a live install")
+    if not Path(os.path.realpath(cwd)).is_relative_to(home):
+        raise Refusal(f"the current directory {cwd} is not inside HOME ({home})")
+    for var in DIRECTORY_OVERRIDES:
+        value = os.environ.get(var)
+        if value and not Path(os.path.realpath(value)).is_relative_to(home):
+            raise Refusal(
+                f"{var}={value} is outside HOME ({home}); "
+                "refusing to seed anything that could reach a live install"
+            )
     try:
         config = paths.config_dir("lore")
         state = paths.state_dir("lore")
@@ -131,6 +166,7 @@ def run_lore(python: str, *args: str, stdin: str | None = None) -> None:
         input=stdin,
         capture_output=True,
         text=True,
+        env={**os.environ, "LORE_PUBLISH_DISABLE": "1"},
     )
     if result.returncode != 0:
         raise Refusal(f"lore {' '.join(args[:2])} failed: {result.stderr.strip() or result.stdout.strip()}")
@@ -142,17 +178,29 @@ PYTHONPATH="$here" exec {python} {cli} "$@"
 """
 
 
-def write_wrapper(cwd: Path, python: str) -> None:
+def copy_tracked_trailhead(cwd: Path, tracked: list[Path]) -> None:
+    for relative in tracked:
+        source = REPO_ROOT / relative
+        if source.is_symlink() or not source.is_file():
+            continue
+        target = cwd / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, target, follow_symlinks=False)
+        target.chmod(source.stat().st_mode & 0o777)
+
+
+def write_wrapper(cwd: Path, python: str, tracked: list[Path]) -> None:
     wrapper = cwd / "lore"
     wrapper.write_text(WRAPPER.format(python=shlex.quote(python), cli=shlex.quote(str(LORE_CLI))), encoding="utf-8")
     wrapper.chmod(0o755)
-    shutil.copytree(REPO_ROOT / "trailhead", cwd / "trailhead", ignore=shutil.ignore_patterns("__pycache__"))
+    copy_tracked_trailhead(cwd, tracked)
 
 
 def seed(records_path: Path) -> None:
     cwd = Path.cwd()
     records = load_records(records_path)
     check_environment(cwd)
+    tracked = tracked_trailhead_files()
     python = os.path.realpath(sys.executable)
 
     gitconfig = Path(os.environ["HOME"]) / ".gitconfig"
@@ -168,7 +216,7 @@ def seed(records_path: Path) -> None:
             "--status", record["status"],
             stdin=record["body"],
         )
-    write_wrapper(cwd, python)
+    write_wrapper(cwd, python, tracked)
 
 
 def main(argv: list[str]) -> int:

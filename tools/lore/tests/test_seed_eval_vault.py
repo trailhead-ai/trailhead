@@ -2,18 +2,21 @@
 
 The seeder builds a throwaway lore vault in a runner eval case's working
 directory. Every test runs it as a real subprocess with a hand-built
-environment — HOME, cwd and every lore/XDG directory inside ``tmp_path`` — so
+environment — HOME (with cwd inside it) and every lore/XDG directory inside ``tmp_path`` — so
 nothing here can reach the operator's own lore config, state or ``~/.gitconfig``.
 ``LORE_PUBLISH_DISABLE`` keeps lore's detached publish worker from being spawned.
 """
 
 from __future__ import annotations
 
+import importlib.machinery
+import importlib.util
 import json
 import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -37,9 +40,8 @@ TASK = {"kind": "task", "title": "Wire the queue", "status": "done", "body": "Wi
 @pytest.fixture
 def sandbox(tmp_path):
     home = tmp_path / "home"
-    cwd = tmp_path / "cwd"
-    home.mkdir()
-    cwd.mkdir()
+    cwd = home / "cwd"
+    cwd.mkdir(parents=True)
     return tmp_path
 
 
@@ -59,11 +61,11 @@ def write_records(sandbox: Path, records) -> Path:
     return path
 
 
-def seed(sandbox: Path, records, *, env=None, python: str = PYTHON):
+def seed(sandbox: Path, records, *, env=None, python: str = PYTHON, cwd: Path | None = None):
     path = write_records(sandbox, records)
     return subprocess.run(
         [python, str(SEEDER), str(path)],
-        cwd=sandbox / "cwd",
+        cwd=cwd if cwd is not None else sandbox / "home" / "cwd",
         env=env if env is not None else clean_env(sandbox),
         capture_output=True,
         text=True,
@@ -73,7 +75,7 @@ def seed(sandbox: Path, records, *, env=None, python: str = PYTHON):
 def seeded_lore(sandbox: Path, *args: str, stdin: str | None = None, env=None):
     return subprocess.run(
         ["./lore", *args],
-        cwd=sandbox / "cwd",
+        cwd=sandbox / "home" / "cwd",
         env=env if env is not None else clean_env(sandbox),
         input=stdin,
         capture_output=True,
@@ -91,6 +93,15 @@ def snapshot(root: Path) -> dict[str, bytes]:
     return {
         str(p.relative_to(root)): p.read_bytes() if p.is_file() else b""
         for p in sorted(root.rglob("*"))
+    }
+
+
+def home_snapshot(sandbox: Path) -> dict[str, bytes]:
+    """The fenced HOME's contents, less the runner's cwd that lives inside it."""
+    return {
+        name: data
+        for name, data in snapshot(sandbox / "home").items()
+        if name != "cwd" and not name.startswith("cwd/")
     }
 
 
@@ -172,7 +183,7 @@ def test_wrapper_resolves_trailhead_from_the_copy_beside_it(sandbox):
     assert result.returncode == 0, result.stderr
     assert seeded_lore(sandbox, "record", "show", "adr/use-the-fixture-queue").returncode == 0
 
-    (sandbox / "cwd" / "trailhead" / "paths.py").write_text("raise RuntimeError('copy was used')\n")
+    (sandbox / "home" / "cwd" / "trailhead" / "paths.py").write_text("raise RuntimeError('copy was used')\n")
 
     broken = seeded_lore(sandbox, "record", "show", "adr/use-the-fixture-queue")
     assert broken.returncode != 0
@@ -184,7 +195,7 @@ def test_copied_trailhead_package_carries_no_bytecode_cache(sandbox):
     result = seed(sandbox, [ADR])
     assert result.returncode == 0, result.stderr
 
-    copied = sandbox / "cwd" / "trailhead"
+    copied = sandbox / "home" / "cwd" / "trailhead"
     assert (copied / "paths.py").is_file()
     assert list(copied.rglob("__pycache__")) == []
 
@@ -207,14 +218,14 @@ def test_preexisting_lore_config_refuses_and_leaves_everything_unchanged(sandbox
     target.parent.mkdir(parents=True)
     target.write_bytes(b'{"vaults": []}')
     before_home = snapshot(home)
-    before_cwd = snapshot(sandbox / "cwd")
+    before_cwd = snapshot(sandbox / "home" / "cwd")
 
     result = seed(sandbox, [ADR])
 
     assert result.returncode != 0
     assert result.stderr.startswith("seed-eval-vault: ")
     assert snapshot(home) == before_home
-    assert snapshot(sandbox / "cwd") == before_cwd == {}
+    assert snapshot(sandbox / "home" / "cwd") == before_cwd == {}
 
 
 def test_preexisting_gitconfig_with_an_identity_is_kept_and_its_identity_is_stamped(sandbox):
@@ -248,7 +259,7 @@ def test_preexisting_gitconfig_without_an_email_refuses_and_creates_nothing(sand
     assert result.stderr.startswith("seed-eval-vault: ")
     assert "user.email" in result.stderr
     assert gitconfig.read_bytes() == original
-    assert snapshot(sandbox / "cwd") == {}
+    assert snapshot(sandbox / "home" / "cwd") == {}
     assert not (sandbox / "home" / ".config").exists()
 
 
@@ -277,8 +288,8 @@ def test_override_pointing_outside_home_refuses_and_leaves_that_directory_unchan
     assert result.stderr.startswith("seed-eval-vault: ")
     assert "outside HOME" in result.stderr
     assert snapshot(outside) == before
-    assert snapshot(sandbox / "cwd") == {}
-    assert snapshot(sandbox / "home") == {}
+    assert snapshot(sandbox / "home" / "cwd") == {}
+    assert home_snapshot(sandbox) == {}
 
 
 @pytest.mark.parametrize("var", sorted(OVERRIDES))
@@ -309,7 +320,7 @@ def test_preexisting_config_at_an_overridden_location_inside_home_refuses(sandbo
 
     assert result.returncode != 0
     assert result.stderr.startswith("seed-eval-vault: ")
-    assert snapshot(sandbox / "cwd") == {}
+    assert snapshot(sandbox / "home" / "cwd") == {}
     assert not (sandbox / "home" / ".gitconfig").exists()
 
 
@@ -319,9 +330,9 @@ def test_title_with_path_segments_and_shell_metacharacters_seeds_only_a_plain_na
     result = seed(sandbox, [hostile])
 
     assert result.returncode == 0, result.stderr
-    assert sorted(p.name for p in (sandbox / "cwd").iterdir()) == ["lore", "trailhead", "vault"]
-    assert sorted(p.name for p in sandbox.iterdir()) == ["cwd", "home", "records.json"]
-    created = sorted(p.stem for p in (sandbox / "cwd" / "vault" / "adr").glob("*.md"))
+    assert sorted(p.name for p in (sandbox / "home" / "cwd").iterdir()) == ["lore", "trailhead", "vault"]
+    assert sorted(p.name for p in sandbox.iterdir()) == ["home", "records.json"]
+    created = sorted(p.stem for p in (sandbox / "home" / "cwd" / "vault" / "adr").glob("*.md"))
     assert created == ["escape-touch-pwned-id-x"]
     assert show(sandbox, "adr/escape-touch-pwned-id-x")["body"] == ADR["body"]
 
@@ -332,8 +343,8 @@ def test_kind_outside_lores_kinds_is_refused_before_any_write(sandbox, kind):
 
     assert result.returncode != 0
     assert "kind" in result.stderr
-    assert snapshot(sandbox / "cwd") == {}
-    assert snapshot(sandbox / "home") == {}
+    assert snapshot(sandbox / "home" / "cwd") == {}
+    assert home_snapshot(sandbox) == {}
 
 
 @pytest.mark.parametrize(
@@ -353,32 +364,32 @@ def test_malformed_records_json_exits_nonzero_naming_the_problem_and_creates_not
     assert result.returncode != 0
     assert result.stderr.startswith("seed-eval-vault: ")
     assert named in result.stderr
-    assert snapshot(sandbox / "cwd") == {}
-    assert snapshot(sandbox / "home") == {}
+    assert snapshot(sandbox / "home" / "cwd") == {}
+    assert home_snapshot(sandbox) == {}
 
 
 def test_missing_records_json_is_refused_cleanly(sandbox):
     result = subprocess.run(
         [PYTHON, str(SEEDER), str(sandbox / "absent.json")],
-        cwd=sandbox / "cwd", env=clean_env(sandbox), capture_output=True, text=True,
+        cwd=sandbox / "home" / "cwd", env=clean_env(sandbox), capture_output=True, text=True,
     )
 
     assert result.returncode != 0
     assert result.stderr.startswith("seed-eval-vault: ")
     assert "Traceback" not in result.stderr
-    assert snapshot(sandbox / "cwd") == {}
+    assert snapshot(sandbox / "home" / "cwd") == {}
 
 
 def test_existing_vault_directory_in_cwd_is_refused_untouched(sandbox):
-    (sandbox / "cwd" / "vault").mkdir()
-    (sandbox / "cwd" / "vault" / "keep").write_text("mine")
+    (sandbox / "home" / "cwd" / "vault").mkdir()
+    (sandbox / "home" / "cwd" / "vault" / "keep").write_text("mine")
 
     result = seed(sandbox, [ADR])
 
     assert result.returncode != 0
     assert result.stderr.startswith("seed-eval-vault: ")
-    assert snapshot(sandbox / "cwd") == {"vault": b"", "vault/keep": b"mine"}
-    assert snapshot(sandbox / "home") == {}
+    assert snapshot(sandbox / "home" / "cwd") == {"vault": b"", "vault/keep": b"mine"}
+    assert home_snapshot(sandbox) == {}
 
 
 def _case_tree(sandbox: Path) -> Path:
@@ -418,7 +429,7 @@ def test_scaffold_pattern_seeds_a_vault_and_wrapper_from_a_copied_case_dir(sandb
     env = clean_env(sandbox, PATH=f"{stubs}:/usr/bin:/bin")
 
     result = subprocess.run(
-        [str(fixtures / "scaffold.sh")], cwd=sandbox / "cwd", env=env,
+        [str(fixtures / "scaffold.sh")], cwd=sandbox / "home" / "cwd", env=env,
         capture_output=True, text=True,
     )
 
@@ -437,7 +448,7 @@ def test_dangling_gitconfig_symlink_refuses_and_writes_nothing_through_it(sandbo
     assert result.returncode != 0
     assert result.stderr.startswith("seed-eval-vault: ")
     assert not target.exists()
-    assert snapshot(sandbox / "cwd") == {}
+    assert snapshot(sandbox / "home" / "cwd") == {}
     assert not (sandbox / "home" / ".config").exists()
 
 
@@ -453,21 +464,21 @@ def test_live_gitconfig_symlink_refuses_and_leaves_its_target_unchanged(sandbox)
     assert result.returncode != 0
     assert result.stderr.startswith("seed-eval-vault: ")
     assert target.read_text() == "[user]\n\temail = someone@example.invalid\n"
-    assert snapshot(sandbox / "cwd") == {}
+    assert snapshot(sandbox / "home" / "cwd") == {}
 
 
 def test_nonempty_lore_state_dir_refuses_and_leaves_it_unchanged(sandbox):
     state = sandbox / "home" / "lore-state"
     (state / "vaults" / "live").mkdir(parents=True)
     (state / "vaults" / "live" / "keep").write_text("mine")
-    before = snapshot(sandbox / "home")
+    before = home_snapshot(sandbox)
 
     result = seed(sandbox, [ADR], env=clean_env(sandbox, LORE_STATE_DIR=str(state)))
 
     assert result.returncode != 0
     assert result.stderr.startswith("seed-eval-vault: ")
-    assert snapshot(sandbox / "home") == before
-    assert snapshot(sandbox / "cwd") == {}
+    assert home_snapshot(sandbox) == before
+    assert snapshot(sandbox / "home" / "cwd") == {}
 
 
 def test_empty_lore_state_dir_seeds(sandbox):
@@ -494,7 +505,7 @@ def test_lore_dir_symlinked_outside_home_refuses_and_leaves_the_target_unchanged
     assert result.stderr.startswith("seed-eval-vault: ")
     assert "outside HOME" in result.stderr
     assert snapshot(outside) == before
-    assert snapshot(sandbox / "cwd") == {}
+    assert snapshot(sandbox / "home" / "cwd") == {}
 
 
 def test_default_config_dir_symlinked_outside_home_refuses(sandbox):
@@ -509,19 +520,19 @@ def test_default_config_dir_symlinked_outside_home_refuses(sandbox):
     assert result.returncode != 0
     assert "outside HOME" in result.stderr
     assert snapshot(outside) == {}
-    assert snapshot(sandbox / "cwd") == {}
+    assert snapshot(sandbox / "home" / "cwd") == {}
 
 
 @pytest.mark.parametrize("name", ["lore", "trailhead"])
 def test_existing_cwd_entry_is_refused_untouched(sandbox, name):
-    (sandbox / "cwd" / name).write_text("mine")
+    (sandbox / "home" / "cwd" / name).write_text("mine")
 
     result = seed(sandbox, [ADR])
 
     assert result.returncode != 0
     assert result.stderr.startswith("seed-eval-vault: ")
-    assert snapshot(sandbox / "cwd") == {name: b"mine"}
-    assert snapshot(sandbox / "home") == {}
+    assert snapshot(sandbox / "home" / "cwd") == {name: b"mine"}
+    assert home_snapshot(sandbox) == {}
 
 
 @pytest.mark.parametrize("kind,status", [("adr", "done"), ("task", "active"), ("spec", "bogus")])
@@ -531,8 +542,8 @@ def test_status_outside_the_kinds_vocabulary_refuses_before_creating_a_vault(san
     assert result.returncode != 0
     assert result.stderr.startswith("seed-eval-vault: ")
     assert status in result.stderr
-    assert snapshot(sandbox / "cwd") == {}
-    assert snapshot(sandbox / "home") == {}
+    assert snapshot(sandbox / "home" / "cwd") == {}
+    assert home_snapshot(sandbox) == {}
 
 
 def test_home_reached_through_a_symlink_still_seeds(sandbox):
@@ -543,3 +554,229 @@ def test_home_reached_through_a_symlink_still_seeds(sandbox):
 
     assert result.returncode == 0, result.stderr
     assert (sandbox / "home" / ".config" / "lore" / "config.json").is_file()
+
+
+def load_seeder():
+    loader = importlib.machinery.SourceFileLoader("seed_eval_vault_under_test", str(SEEDER))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    return module
+
+
+def seed_in_process(sandbox: Path, records, monkeypatch, *, env=None, **patches):
+    """Run the seeder's ``main`` in this process so a module seam can be patched.
+
+    The environment is replaced wholesale by ``clean_env``'s, so nothing of the
+    operator's own HOME or lore/XDG variables is visible to the run.
+    """
+    module = load_seeder()
+    for name, value in patches.items():
+        monkeypatch.setattr(module, name, value)
+    for name in list(os.environ):
+        monkeypatch.delenv(name)
+    for name, value in (env if env is not None else clean_env(sandbox)).items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.chdir(sandbox / "home" / "cwd")
+    return module.main(["seed-eval-vault", str(write_records(sandbox, records))])
+
+
+def test_home_that_is_the_accounts_own_home_refuses_and_writes_nothing(sandbox, monkeypatch, capsys):
+    account_home = lambda: sandbox / "home"  # noqa: E731
+
+    code = seed_in_process(sandbox, [ADR], monkeypatch, account_home=account_home)
+
+    err = capsys.readouterr().err
+    assert code != 0
+    assert err.startswith("seed-eval-vault: ")
+    assert "account" in err
+    assert home_snapshot(sandbox) == {}
+    assert snapshot(sandbox / "home" / "cwd") == {}
+
+
+def test_home_reached_through_a_symlink_to_the_accounts_home_refuses(sandbox, monkeypatch, capsys):
+    link = sandbox / "home-link"
+    link.symlink_to(sandbox / "home")
+    env = clean_env(sandbox, HOME=str(link))
+
+    code = seed_in_process(sandbox, [ADR], monkeypatch, env=env, account_home=lambda: sandbox / "home")
+
+    assert code != 0
+    assert "account" in capsys.readouterr().err
+    assert home_snapshot(sandbox) == {}
+
+
+def test_home_that_is_not_the_accounts_home_seeds(sandbox, monkeypatch, capsys):
+    code = seed_in_process(sandbox, [ADR], monkeypatch, account_home=lambda: sandbox / "elsewhere")
+
+    assert code == 0, capsys.readouterr().err
+    assert (sandbox / "home" / "cwd" / "vault" / "adr" / "use-the-fixture-queue.md").is_file()
+
+
+def test_cwd_outside_home_refuses_and_writes_nothing(sandbox):
+    stray = sandbox / "stray-cwd"
+    stray.mkdir()
+
+    result = seed(sandbox, [ADR], cwd=stray)
+
+    assert result.returncode != 0
+    assert result.stderr.startswith("seed-eval-vault: ")
+    assert "current directory" in result.stderr
+    assert snapshot(stray) == {}
+    assert home_snapshot(sandbox) == {}
+
+
+def test_cwd_symlinked_out_of_home_refuses(sandbox):
+    outside = sandbox / "stray-cwd"
+    outside.mkdir()
+    (sandbox / "home" / "cwd-link").symlink_to(outside)
+
+    result = seed(sandbox, [ADR], cwd=sandbox / "home" / "cwd-link")
+
+    assert result.returncode != 0
+    assert "current directory" in result.stderr
+    assert snapshot(outside) == {}
+
+
+def test_cwd_nested_inside_home_seeds(sandbox):
+    nested = sandbox / "home" / "a" / "b"
+    nested.mkdir(parents=True)
+
+    result = seed(sandbox, [ADR], cwd=nested)
+
+    assert result.returncode == 0, result.stderr
+    assert (nested / "vault" / "adr" / "use-the-fixture-queue.md").is_file()
+
+
+@pytest.mark.parametrize("shadowed", ["XDG_CONFIG_HOME", "XDG_STATE_HOME"])
+def test_xdg_override_outside_home_refuses_even_when_lore_dir_overrides_shadow_it(sandbox, shadowed):
+    outside = sandbox / "outside"
+    outside.mkdir()
+    (outside / "keep").write_text("mine")
+    before = snapshot(outside)
+    env = clean_env(
+        sandbox,
+        LORE_CONFIG_DIR=str(sandbox / "home" / "lore-config"),
+        LORE_STATE_DIR=str(sandbox / "home" / "lore-state"),
+        **{shadowed: str(outside)},
+    )
+
+    result = seed(sandbox, [ADR], env=env)
+
+    assert result.returncode != 0
+    assert result.stderr.startswith("seed-eval-vault: ")
+    assert shadowed in result.stderr
+    assert "outside HOME" in result.stderr
+    assert snapshot(outside) == before
+    assert snapshot(sandbox / "home" / "cwd") == {}
+    assert home_snapshot(sandbox) == {}
+
+
+def test_xdg_override_inside_home_shadowed_by_lore_dirs_seeds(sandbox):
+    home = sandbox / "home"
+    env = clean_env(
+        sandbox,
+        LORE_CONFIG_DIR=str(home / "lore-config"),
+        LORE_STATE_DIR=str(home / "lore-state"),
+        XDG_CONFIG_HOME=str(home / "xdg-config"),
+        XDG_STATE_HOME=str(home / "xdg-state"),
+    )
+
+    result = seed(sandbox, [ADR], env=env)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_seeding_spawns_no_publish_worker_even_if_the_caller_did_not_disable_it(sandbox):
+    env = clean_env(sandbox)
+    del env["LORE_PUBLISH_DISABLE"]
+
+    result = seed(sandbox, [ADR, SPEC], env=env)
+    assert result.returncode == 0, result.stderr
+    publish_dir = sandbox / "home" / ".local" / "state" / "lore" / "publish"
+    deadline = time.monotonic() + 3
+    while time.monotonic() < deadline:
+        if list(publish_dir.glob("*.log")) or list(publish_dir.glob("*.json")):
+            break
+        time.sleep(0.1)
+
+    assert [p.name for p in publish_dir.glob("*") if p.suffix in (".log", ".json")] == []
+
+
+@pytest.mark.parametrize("title", ["--status", "-x", "line one\nline two", "bell\x07", "tab\there", "nul\x00"])
+def test_title_with_a_leading_dash_or_control_character_is_refused_before_any_write(sandbox, title):
+    result = seed(sandbox, [ADR, {**ADR, "title": title}])
+
+    assert result.returncode != 0
+    assert result.stderr.startswith("seed-eval-vault: ")
+    assert "title" in result.stderr
+    assert home_snapshot(sandbox) == {}
+    assert snapshot(sandbox / "home" / "cwd") == {}
+    assert not (sandbox / "home" / ".gitconfig").exists()
+
+
+def _fake_repo(sandbox: Path) -> Path:
+    repo = sandbox / "fake-repo"
+    shutil.copytree(
+        REPO_ROOT / "trailhead", repo / "trailhead", ignore=shutil.ignore_patterns("__pycache__")
+    )
+    git_env = {"PATH": "/usr/bin:/bin", "HOME": str(sandbox), "GIT_CONFIG_NOSYSTEM": "1"}
+    for args in (
+        ["init", "-q"],
+        ["add", "-A"],
+        [
+            "-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false",
+            "commit", "-q", "-m", "x",
+        ],
+    ):
+        subprocess.run(["git", "-C", str(repo), *args], env=git_env, check=True, capture_output=True)
+    return repo
+
+
+def test_trailhead_copy_holds_only_git_tracked_files_and_the_wrapper_still_runs(sandbox, monkeypatch, capsys):
+    repo = _fake_repo(sandbox)
+    (repo / "trailhead" / "stray-untracked.txt").write_text("secret")
+    (repo / "trailhead" / "untracked-dir").mkdir()
+    (repo / "trailhead" / "untracked-dir" / "note.txt").write_text("secret")
+    (repo / "trailhead" / "tracked-link.py").symlink_to(sandbox / "records.json")
+    subprocess.run(
+        ["git", "-C", str(repo), "add", "trailhead/tracked-link.py"],
+        check=True, env={"PATH": "/usr/bin:/bin", "HOME": str(sandbox)},
+    )
+
+    code = seed_in_process(sandbox, [ADR], monkeypatch, REPO_ROOT=repo)
+
+    assert code == 0, capsys.readouterr().err
+    copied = sandbox / "home" / "cwd" / "trailhead"
+    assert (copied / "paths.py").is_file()
+    assert not (copied / "stray-untracked.txt").exists()
+    assert not (copied / "untracked-dir").exists()
+    assert not (copied / "tracked-link.py").exists()
+    shown = seeded_lore(sandbox, "record", "show", "adr/use-the-fixture-queue")
+    assert shown.returncode == 0, shown.stderr
+    assert shown.stdout == ADR["body"]
+
+
+def test_repo_that_is_not_a_git_checkout_is_refused_before_any_write(sandbox, monkeypatch, capsys):
+    not_git = sandbox / "plain-copy"
+    shutil.copytree(REPO_ROOT / "trailhead", not_git / "trailhead", ignore=shutil.ignore_patterns("__pycache__"))
+
+    code = seed_in_process(sandbox, [ADR], monkeypatch, REPO_ROOT=not_git)
+
+    assert code != 0
+    assert capsys.readouterr().err.startswith("seed-eval-vault: ")
+    assert home_snapshot(sandbox) == {}
+    assert snapshot(sandbox / "home" / "cwd") == {}
+
+
+def test_missing_git_binary_is_refused_rather_than_falling_back_to_a_full_copy(sandbox):
+    empty = sandbox / "empty-bin"
+    empty.mkdir()
+
+    result = seed(sandbox, [ADR], env=clean_env(sandbox, PATH=str(empty)))
+
+    assert result.returncode != 0
+    assert result.stderr.startswith("seed-eval-vault: ")
+    assert "git" in result.stderr
+    assert home_snapshot(sandbox) == {}
+    assert snapshot(sandbox / "home" / "cwd") == {}
