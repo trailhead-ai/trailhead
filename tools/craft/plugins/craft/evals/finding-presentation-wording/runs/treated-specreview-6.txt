@@ -1,0 +1,45 @@
+## Spec review: a waiting list for allotment plots
+
+**Round 1** · maturity: production (basis: stamp) · no stand-downs
+
+**What the passes found.** The spec explains clearly what is wrong with the paper list. Its gaps are the people on that list, and anyone whose email doesn't work. Nothing in it moves the existing waiting list online in its current order. The only way to join is the self-service email form, "A person joins the waiting list for one site by giving a name, an email address and the site they want" (AC1), so anyone without email has no way on. That includes people who have waited longest. The offer rules have a similar hole. If an offer email bounces, the offer still runs its full 14 days, and then the person is sent to the back of the queue without ever having seen it. The Objectives also promise that a person can "see their place", but only the first confirmation email ever shows it. The fact check found one number wrong: the committee minutes of 3 March record 412 names, not "about 340".
+
+**Whether it holds.** The right-problem pass is correct that the paper list can leave people behind. Its claim that "a large part" of the list has no email has no evidence behind it, and that pass rated its own confidence medium. I've kept the point that doesn't depend on the guess: the spec has no criterion for moving the existing list over. At production maturity that is a migration gap, so it stands as a decision for you. The failure-cases and ease-of-use passes worked separately and reached the same bounced-offer scenario, which makes it the strongest finding here. The ease-of-use and self-consistency passes, and part of the right-problem pass, separately found that the "see their place" promise has no criterion behind it. A build could meet every criterion and still not deliver that objective, so I've raised it from "worth fixing" to "needs your decision". I disagree with the right-problem pass's other point, that AC1 to AC5 are more than the complaint needs. The Objectives ask for joining, place and offers in so many words. The security pass raised nothing that needs your decision.
+
+**What to do about it.** Every one of these can be fixed by editing the spec, so I'm proposing no `revise`. I've drafted five new criteria and two text fixes:
+- Correct the count to 412.
+- Have a warden enter the paper list into each site's queue in its existing order.
+- Let a warden add someone by phone number and make that person's offers by phone.
+- Start the 14 days from when the offer is sent. A bounced offer passes on at once, the person keeps their place, and a warden is told.
+- Send a reminder email on day 10, and an email when an offer lapses.
+- Let a person see their current place at any time from a link in the confirmation email.
+
+Once these land, the spec advances.
+
+**Recommended outcome:** apply all three edits and mark the spec `ready` this round.
+
+| id | finding | proposed disposition | proposed edit |
+|---|---|---|---|
+| C1 | *Nothing moves the 412 people on the paper list online in their order, and people without email can't join at all* | `resolved` | *correct "about 340" to 412; add AC7 (a warden enters the paper list in its existing order) and AC8 (a warden can add a person by phone number and offer them plots by phone, recorded in the history)* |
+| C2 | *A bounced offer email holds the plot for 14 days and then sends an unwarned person to the back of the queue* | `resolved` | *AC2 counts the 14 days from when the offer is sent; add AC9 (a bounced offer passes on at once, the person keeps their place, a warden is told) and AC10 (a reminder email on day 10 and an email when an offer lapses)* |
+| C3 | *The Objectives promise people can "see their place", but no criterion shows it after the first email* | `resolved` | *add AC11 (a person can see their current place at any time from a link in the confirmation email)* |
+
+**Worth fixing, your call (7):**
+- Nothing says who marks a plot as freed, so nothing sets off an offer (AC2).
+- Nothing says what happens when a plot is freed and its site's queue is empty.
+- The spec doesn't say whether a person's place is stored or worked out from join order.
+- Only the warden sees an out-of-turn grant when it's made; nobody else learns of it unless they read the history.
+- AC2 and AC5 don't say they're recorded, though AC6's list of history events already covers them.
+- The spec doesn't say whether one person can be in several sites' queues.
+- The right-problem pass thinks the build is bigger than the complaint needs. I disagree, as above.
+
+**Rough edges, nothing to decide (5):**
+- The time of day the 14 days end isn't stated.
+- The confirmation email shows how many people are ahead.
+- The spec doesn't say who can see the history.
+- Nothing written confirms the warden keeps to the order today.
+- The fact check counted 31 plots freed a year, roughly two or three a month, which fits the spec's "a few times a month".
+
+Three style comments were dropped without being listed.
+
+Reply **"go"** to accept. To override a row instead, name its id with your reason, for example "dispute C2 because …, otherwise go". Your options are `accepted-as-risk`, `disputed` or `answered`. Full detail on any finding is available if you ask.

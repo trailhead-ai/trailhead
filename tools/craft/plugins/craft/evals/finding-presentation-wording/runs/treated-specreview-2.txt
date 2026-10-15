@@ -1,0 +1,28 @@
+**Spec review: a waiting list for allotment plots.** Round 1, all 8 passes returned. Maturity: production (basis: stamp). No stand-downs.
+
+The reviewers agree on one main problem: the spec trusts email to carry every offer, and it never says what happens when email fails. If the offer email bounces or nobody reads it, a person sits on "an offer that stays open for 14 days" (AC2). Then they "go to the back of the queue" (AC3) without ever knowing they had an offer. Separately, the spec treats joining as something a person does online with an email address (AC1). It never says how the people already on the paper list get into the new queue in their current order. The rest of the findings are gaps rather than wrong turns. Nothing lets a person check their place after the first email. Nothing says who marks a plot as freed, or what happens when a site's queue is empty. Two choices are left open: whether a person can wait on more than one site's queue, and when the 14 days start counting.
+
+The undelivered-offer finding is the strongest one. The failure-cases and ease-of-use reviewers reached it separately, and the spec's own text produces it without any guessing about how users behave. The right-problem reviewer was also right that some people can't take part by email. I can't confirm its claim that "a large part" of the list has no email, and I haven't relied on it. The exclusion follows from AC1 whatever the share is. The share only changes how much it hurts. On my own reading, the spec also says nothing about moving the existing list across. At production maturity, moving existing data across is graded as serious, so I've added that to the same finding. The fact check found that the spec's "about 340" is wrong: the committee minutes of 3 March record 412 names. That changes no decisions, but it's corrected in the same edit. The right problem reviewer's suggestion that only the history (AC6) is really needed is the lens overreaching. The Objectives ask for all three things.
+
+My recommendation is to fix both by editing the criteria now. Neither needs rethinking. Undelivered offers move on straight away without costing the person their place. A reminder goes out before the offer lapses. Existing names are carried across in their order, and a warden can enter someone by phone. The edits below are fully drafted.
+
+**Recommended outcome:** fix both Criticals in this round, and the spec then moves to `ready`.
+
+**Would build the wrong thing, needs your decision**
+
+| id | finding | proposed disposition | proposed edit |
+|---|---|---|---|
+| C1 | *An undelivered offer silently sends a person to the back of the queue* (failure cases, ease of use) | `resolved` | *AC2's 14 days run from when the offer is sent. New AC7: a bounced offer passes on at once, the person keeps their place and the warden is told. New AC8: a reminder on day 10, and a notice when the offer lapses.* |
+| C2 | *People on the paper list, and anyone without email, have no way into the new queue* (right problem, plus my own reading) | `resolved` | *Problem: "about 340" becomes "412 (committee minutes, 3 March)". New AC9: wardens enter the paper list in its existing order, ahead of anyone who joins online. New AC10: a warden can enter someone with a phone number instead of an email. That person's offers are made by phone and recorded, on the same 14 days.* |
+
+**Would cause trouble later, worth fixing, your call (8, logged only):**
+- **Seeing your place:** the Objectives promise people can see their place, but nothing after the first email lets them (raised by two reviewers).
+- **Left unstated:** who marks a plot freed; what happens when a site's queue is empty; whether a place is stored or worked out from join order.
+- **Left undecided:** whether a person can wait on more than one site's queue. The question of when the 14 days start is now settled by C1's edit.
+- **History gaps:** AC6 expects acceptances and departures in the history, but no criterion records them.
+- **Out-of-turn grants:** the typed reason is the only check on a warden's out-of-turn grant.
+- **Framing:** the real complaint is that nobody can check the order was followed.
+
+**Rough edges, nothing to decide (4):** what time of day the 14 days end; the confirmation email shows how many people are ahead; who can see the history; "a few times a month" is close to the register's 31 a year. I dropped three style notes: naming a mail provider, the word "lapse", and a duplicated term.
+
+Reply **go** to apply both edits and move the spec to `ready`. You can also override by id, for example "dispute C2: \<your reason\>" or "answer C1: \<what the reviewers didn't know\>". Full detail on any finding is available on request.

@@ -1,0 +1,101 @@
+The council found three problems that need your decision before this plan can be built. The run stops here under the `plan-critical` trigger, which applies when a Critical survives synthesis.
+
+**What the reviewers found.** The findings fall into three groups:
+
+- **Queue order.** Task 1 stores each person's queue position as a number and renumbers everyone behind them whenever someone leaves. If a leave lands during the 02:00 offer run, two people can hold the same position, and one freed plot gets offered to both.
+- **The paper-list import (Task 4).** It loads about 340 people in one run, with no preview and no way to undo it. Running it twice puts everyone on the list twice.
+- **The offer process around the queue.** Several smaller gaps sit around the 14-day offer cycle and the warden's out-of-turn grant:
+  - nothing tells anyone when the nightly job fails;
+  - the offer link accepts the plot as soon as it is opened;
+  - the offer email doesn't warn that ignoring it sends you to the back of the queue;
+  - a warden's grant doesn't take the person off the queue.
+
+**Whether it holds.** The strongest finding is the queue-order one. The buildability and failure-cases reviewers raised it independently, and both traced it to steps the plan writes out. The failure-cases reviewer's import finding also holds. This spec is stamped `production`, so a one-shot load with no undo counts as a "migration and backfill" problem, which is Critical at production.
+
+I moved one finding up a level. The failure-cases reviewer rated "nobody notices if the 02:00 job doesn't run" as worth fixing. That reviewer had already used its two Critical slots, so this one was probably forced down by the limit. "Production failure visibility" is Critical at this spec's production level, so I rated it there.
+
+I moved one finding down. The ease-of-use reviewer's Critical, "people may find the queue confusing", names no concrete failure. It now sits in the worth-fixing group. That reviewer's other points are concrete and stand.
+
+The security reviewer said it had medium confidence because no login design is written down yet. That is a note, not a finding.
+
+**What to do about it.** Taken together, the fixes are:
+
+- Order each site's queue by when people joined, and stop storing a position number. This removes the race and makes "the people behind them each move up one place" (AC5) automatic.
+- Follow that change through the rest of the plan:
+  - A lapse in Task 2 becomes "rejoin at the back now".
+  - The import in Task 4 has to carry each person's paper-list order across as their join time, or the 340 existing people lose their places.
+- Run the import under a batch id, with a preview first, so a bad run can be removed in one go.
+- Have the nightly job report to the warden when it finishes, and send an alert if it hasn't finished by 03:00.
+
+The worth-fixing items below fit into the same pass.
+
+---
+
+**Would build the wrong thing, needs your decision**
+
+**1. How the queue keeps order.** Should the queue be ordered by join time instead of a stored position number that is renumbered on every leave? I recommend join time, because the current design can offer one plot to two people.
+Worst case: someone leaves at 02:00 while the offer job is reading the queue. Two people are briefly both first in line, and both get an offer email for the same plot.
+Fix: store each person's join time and order by it. Adjust the lapse step in Task 2 and the import in Task 4 to match.
+*Raised by: buildability, failure cases*
+
+**2. A safe way to run the paper-list import.** Should the one-shot import get a preview and an undo? I recommend both, because a mistake here corrupts the real queue for all 340 people.
+Worst case: the warden runs the import twice, and every person appears twice. Or the run stops halfway with no record of where it stopped, and there's no clean way to remove what it wrote.
+Fix: import under a batch id, show a preview first, and allow a bad batch to be deleted in one go. At this spec's production level this counts as migration and backfill, which is rated Critical.
+*Raised by: failure cases*
+
+**3. Knowing when the nightly offer job didn't run.** Should a failed 02:00 run alert someone? I recommend yes. Otherwise, "the person at the front of that site's queue is sent an offer by email" (AC2) quietly stops happening.
+Worst case: the job fails for a week, no offers go out, and the first anyone hears of it is complaints from people waiting.
+Fix: email the warden when the job finishes, and send an alert if it hasn't finished by 03:00.
+I raised this one level from the reviewer's rating: production failure visibility is Critical at this spec's production level.
+*Raised by: failure cases*
+
+**Would cause trouble later, worth fixing, your call**
+
+- **A warden's grant leaves the person on the queue.** I recommend having the grant take them off. Otherwise the nightly job can offer them a second plot. Fix: the out-of-turn grant closes that person's queue entry. *Raised by: buildability*
+- **The offer link accepts the plot just by being opened.** A forwarded email, or a mail scanner that follows links, can accept a plot for someone. Fix: the link opens a page where the person confirms. *Raised by: security*
+- **The spreadsheet of 340 names and emails stays on the warden's laptop.** Fix: delete it once the import is verified, and say so in Task 4. *Raised by: security*
+- **The offer email doesn't warn that ignoring it costs your place.** This matters because "the person who did not answer goes to the back of the queue" (AC3). Fix: say it in the email's first paragraph. *Raised by: ease of use*
+- **Leaving the queue gives no confirmation.** Someone who clicked by mistake can't tell whether they're still on the list. Fix: show and email a one-line confirmation. *Raised by: ease of use*
+- **The queue may confuse people once it's online.** I moved this down from "needs your decision" because it names no concrete failure. Fix: add a help page. *Raised by: ease of use*
+
+**Rough edges, nothing to decide**
+
+- Tasks 2 and 5 each format dates separately; they could share one helper. *(buildability)*
+- No test covers an offer that is exactly 14 days old. *(failure cases)*
+- The reason a warden types for an out-of-turn grant is visible to every committee member and may contain personal details. *(security)*
+- "Lapse" on the history page reads as jargon. *(ease of use)*
+
+---
+
+**The run has stopped on the `plan-critical` trigger.** The plan and its council review are done; deciding what to do about the three Criticals above is yours.
+
+- **Escalation record:** a `blocked` child task under the slice parent. It points to this plan and the `## Council Review` section below; it is not a recommended verdict. Its task id is assigned when the record is written, so I can't give it to you yet.
+- **Checkpoint:** a `**Phase:** plan` checkpoint is written before the escalation record.
+- **To resume:** once you've decided, re-run `/craft:drive spec/<this spec's resolved name>`. The files I was given don't include the spec's resolved name, so I can't fill it in here. The new run reads that checkpoint, finds the open escalation, and won't start building until it is resolved.
+
+```markdown
+## Council Review
+
+*Reviewed at:* 2026-10-15
+*Members dispatched:* builder, breaker, attacker, advocate
+*Maturity:* production (basis: stamp)
+
+*Critical:*
+- Queue order stored as a renumbered `place`; a leave during the 02:00 run leaves two rows at place 1 and one freed plot is offered to two people (Task 1, Task 2; AC2, AC5) — builder, breaker
+- Task 4 import of ~340 rows has no dry run, preview or undo; a second run duplicates every row and a partial run leaves no marker (migration and backfill — Critical at this spec's production maturity level) — breaker
+- No signal when the 02:00 offer job fails to run; offers stop silently (production failure visibility — Critical at this spec's production maturity level; raised from the lens's Important, which overflowed its two-Critical cap) — breaker
+
+*Important:*
+- Task 3 out-of-turn grant does not close the grantee's queue row; the nightly job can offer them a second plot (AC4) — builder
+- Offer link accepts on open with no binding to the recipient; a forwarded email or link-following mail scanner accepts the plot — attacker
+- Import spreadsheet (340 names and emails) remains on the warden's laptop after import — attacker
+- Offer email does not state that ignoring it for 14 days sends the person to the back of the queue (AC3) — advocate
+- Leaving the queue gives no on-screen or email confirmation (AC5) — advocate
+- Online queue may confuse people; add a help page (downgraded from Critical: speculative, no concrete failure scenario) — advocate
+
+*Minor:*
+- Tasks 2 and 5 both format dates for display; share one helper — builder
+- No test for an offer exactly 14 days old (AC3 boundary) — breaker
+- Warden's free-text grant reason is shown to every committee member on the history page and may carry personal detail (AC4, AC6) — attacker
+- History page term "lapse" reads as jargon (AC6) — advocate
+```
