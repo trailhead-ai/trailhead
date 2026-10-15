@@ -15,7 +15,7 @@ Body unchanged is graded as "every original sentence still present, the new clai
 | Clause | Grader | Type and target |
 |---|---|---|
 | A successor spec exists | `successor-spec-exists` | `file_exists` on `vault/spec/*.md` |
-| The successor is a `draft` | `successor-is-draft` | `regex` on `vault/spec/*.json`, contains `"status": "draft"` (glob; see Limitations) |
+| The successor is a `draft` | `successor-is-draft` | `llm` on `trace`: the judge checks the agent's `./lore record create --kind spec` call succeeded and left the spec at draft (see Limitations) |
 | The predecessor is not yet flipped: status still `ready` | `predecessor-still-ready` | `regex` on `vault/spec/notify-owners-of-stale-records.json`, contains `"status": "ready"` |
 | Predecessor criterion survives: AC3 (`never flagged as stale again`) | `predecessor-text-kept-1` | `regex` on the predecessor `.md`, contains |
 | Predecessor criterion survives: AC1 (`untouched for 60 days`) | `predecessor-text-kept-2` | `regex` on the predecessor `.md`, contains |
@@ -27,5 +27,5 @@ Body unchanged is graded as "every original sentence still present, the new clai
 - `file_exists` counts only files created during the run, so a successor is seen and the seeded predecessor is not.
 - The agent's writes stay uncommitted in the vault's git, so every clause is graded on files, never on commits.
 - A run that asks the operator instead of acting writes nothing and fails the successor clauses. The prompt is a single turn with an operator who has already ruled, so asking is not the expected route.
-- Whether `regex` accepts a glob in `path` is untested; if it does not, `successor-is-draft` is un-gradable by a free grader and the correction is recorded in the results log as a pre-run correction before any scored baseline.
+- A `regex` `path` takes no glob and the successor's name is not known in advance, so `successor-is-draft` is an `llm` grader over `trace`. An `llm` judge sees only the first 12 and last 12 messages of the session.
 - The second objective is delivered only by AC3 in the fixture, so removing AC3 by amend would leave it with nothing delivering it.

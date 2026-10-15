@@ -1,6 +1,6 @@
 ---
 type: regex
-pattern: '[Ss]equence number'
+pattern: 'sender id and (the sender''s |a |the )?sequence number'
 match: not_contains
 target:
   source: file
