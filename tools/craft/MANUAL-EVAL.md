@@ -2335,3 +2335,94 @@ criterion's own text" is stricter than a reading by eye on paraphrases.
 **Record-link case.** The `ritual-deliverable-names-its-record` case's captures predate the step 8 edit. The edit changes a step that case does not measure, and its two live arms (`baseline.md`, `rule-only.md`) were rebuilt from the edited skill so their byte-identity test holds; its frozen arms and captures are untouched.
 
 **Manual re-run trigger.** There is no recurring runner. When the `## Output wording` section of `rules.md`, the council template, or slice step 8 changes, re-running the existing treated arms measures the old text: `third-*` are pinned at `ecc4f46a`, `shipped-slice` at `ebf23e43`, and the `fixtures/prompt-*-template.md` files carry the bullet as of `ecc4f46a`, so a re-run reports a pass the change has not earned. Instead build new arms and template fixtures from the changed sources, pinned to the commit that carries the change, under a new dated extension to `expected.md` registered before any run; the existing arms stay as the recorded result. Also take a disagreement between real sessions and these counts as the signal to do so.
+
+## Case: finding-presentation-wording
+
+`plugins/craft/evals/finding-presentation-wording/` — fixtures, arms, captures and `expected.md` carrying the pass
+conditions, written before any arm was run; graded by `plugins/craft/scripts/wording_grader.py` (checks
+`severity-name`, `reviewer-name`, `persisted-levels`).
+
+**Under test:** craft's shared reporting contract, `skills/_shared/council.md`, and consult's own restatement of the
+severity grouping in `skills/consult/SKILL.md`. The claim is that when a spec review, a plan's council review, a consult
+or the driver shows the reader a finding in session, severity appears only as the guide's plain readings and reviewers
+only by their plain labels, while the `## Council Review` block that plan and the driver save keeps its internal
+levels. Whether each finding opens with the decision, the recommendation and what is at stake, and then gives the worst
+case, the fix and who raised it, is read by eye and is not graded.
+
+**Dispatch.** Each arm is its own `claude -p` process from an empty directory, with `--setting-sources project`, the arm
+passed by `--append-system-prompt` and `--allowedTools "Read"`. Four sites, each starting at the presentation step with
+canned reviewer reports and no subagents: consult's synthesis, plan's council review, the spec review's recommendation
+step and the driver's step 8.
+
+**Result, 2026-10-15: every site passes and the edits to `council.md` and `consult/SKILL.md` are kept.** Every baseline
+was majority `internal` on both naming checks, so each had headroom. Every treated arm reached a clean majority `plain`
+on both, and `persisted-levels` stayed `kept` at plan and driver. No fallback ritual edit was needed or made.
+
+| Site | Baseline, `severity-name` / `reviewer-name` | Treated, `severity-name` | Treated, `reviewer-name` | `persisted-levels` (treated) |
+|---|---|---|---|---|
+| consult | `internal` 3 of 3 / `internal` 3 of 3 | `plain` 5 of 6 | `plain` 6 of 6 | not run |
+| plan | `internal` 3 of 3 / `internal` 3 of 3 | `plain` 3 of 3 | `plain` 3 of 3 | `kept` 3 of 3 |
+| specreview | `internal` 3 of 3 / `internal` 3 of 3 | `plain` 5 of 6 | `plain` 6 of 6 | not run |
+| driver | `internal` 3 of 3 / `internal` 3 of 3 | `plain` 5 of 6 | `plain` 6 of 6 | `kept` 6 of 6 |
+
+Consult, spec review and driver split 2-1 on `severity-name` in their first three runs and were re-run to six; plan was
+3 of 3 and was not. Baselines were `persisted-levels` `kept` 3 of 3 at plan and driver.
+
+**Grammar amendment.** One dated amendment was spent, before any treated run, after the baseline hand check found no
+misfire. It adds four readings: the severity check sees through a list marker and a quote marker, a severity word that
+leads a line as a group label (a dash or an opening bracket after it) reads as internal, the report files are read
+under the same logical-line rule as the capture, and text right after a closing fence starts its own line. The reason
+was a gap found by reading the grammar against the shape a treated arm was likely to produce (`- **Important** — ...`),
+which the first grammar would have read as plain. Baseline verdicts did not change under it.
+
+**Finding-order reading (AC17, AC18), unmeasured.** All 33 baseline and treated captures were read by eye, by an agent
+and not by a person, which the protocol's "a person reads" does not cover; the operator's naming at slice close is what
+closes both criteria. The per-capture reading and the per-site summary are in `expected.md`, under "Results:
+finding-order reading, close-out and a real consult run". Baseline against treated, most serious group, findings
+carrying decision, recommendation and stake together, and findings in order:
+
+| Site | Baseline, opening all three | Treated, opening all three | Baseline, order held | Treated, order held |
+|---|---|---|---|---|
+| consult | 0 of 3 | 3 of 6 | 1 of 3 | 6 of 6 |
+| plan | 0 of 9 | 9 of 9 | 0 of 9 | 9 of 9 |
+| specreview | 0 of 6 | 0 of 13 | 0 of 6 | 0 of 13 |
+| driver | 0 of 9 | 13 of 19 | 9 of 9 | 19 of 19 |
+
+The spec review is the exception. Its most serious findings are table rows in baseline and treated alike, with no
+per-finding worst case and no `Fix:` line, so neither criterion can hold there whatever the council contract says; the
+rows' proposed-edit cell stands for the fix and who raised a finding sits in the narrative. A plain-wording pass at that
+site does not give the shape the criteria describe, and a change to it would be an edit to the spec review's own
+presentation step.
+
+**Limits.**
+- Arms carry skill text through `--append-system-prompt`, not a real skill invocation; the harness's own loading is not
+  exercised.
+- One model tier (the process default) at one Claude Code version.
+- Runs per arm: 3, or 6 where a 2-1 split was re-run (consult, spec review, driver). Only a large effect resolves.
+- Residual leak rate against the spec's "never": 1 of 6 at consult, spec review and driver on `severity-name`, each a
+  real use of the whole word `Critical` in the session's own prose beside otherwise plain labels, none a grader
+  misfire. Plan showed none in 3 runs. The rate is not zero at three of four sites.
+- On a Linux host the runs went out as plain dispatches without `scripts/eval-sandbox`; the controls were the read-only
+  tool grant, the empty working directory and the capture scans.
+- The grader is lexical and case-sensitive. A real consult run (below) used the lowercase word `minor` as a severity
+  name three times and the grader read it `plain`; only the by-eye reading caught it.
+- Each run starts at the presentation step with the reports in hand; the earlier steps are stubbed.
+
+**One real consult run, 2026-10-15, read by eye.** A real `/craft:consult` from a fresh `/tmp` directory with only the
+branch's plugin loaded (`craft@inline`, path the branch's plugin directory, from the session's own init record), with no
+install and no change under `~/.claude`, `~/.config` or `~/.local/state/trailhead`. Its presentation used plain group
+names and plain reviewer labels, and graded `plain` on both naming checks, but named the severity level `minor` in
+lowercase three times in prose. A consult from a directory with no `CLAUDE.md` and no `Bash` grant stops at the
+maturity preflight and convenes nothing, so the run needed both. Excerpts, and the finding-order reading of that run,
+are in `expected.md`; the raw output is not committed.
+
+**Uncovered consumer.** `tools/craft/README.md` line 77 names `_shared/council.md` as the single source of council
+membership. It is documentation, not a presentation step, and no eval site applies. The review skill, the end-of-build
+review and the agent files do not name `council.md`; no site covers them.
+
+**Manual re-run trigger.** There is no recurring runner. Re-run the case when the finding section of
+`skills/_shared/council.md` changes, when consult's severity restatement changes, or when a caller's presentation step
+changes (the spec review's step 5, plan's step 8.5, the driver's step 8). The existing treated arms are pinned at the
+edit commit named in the case's arms contract test, so a re-run of them measures the old text: build new arms from the
+changed sources, pinned to the commit that carries the change, under a new dated extension to `expected.md` registered
+before any run. Also take a disagreement between real sessions and these counts as the signal.
