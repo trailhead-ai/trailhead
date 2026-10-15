@@ -2532,3 +2532,5 @@ membership. AC8, AC10 and AC11's completeness, freshness and fail-closed guarant
 script's own tests, not on this case.
 
 **A discrepancy in `expected.md`, not reworded.** Its Limitations say the pass condition fixes "the two security items in". The pass condition and the fixture both have three, and the treatment was graded against three.
+
+**What the recorded result covers.** The arms read the gathering script at `48d92da0`. After the run, `d3f7dcc8` refactored it without changing behaviour, and `6d0ff22c` made it confirm each candidate's link from complete reads and shape-check vault names. The skill's prose is unchanged. The result covers the prose; that the shipped script still gathers this fixture the way the arms saw it is shown by `tools/craft/tests/test_tidy_followups_fixture_smoke.py`, not by this run.
