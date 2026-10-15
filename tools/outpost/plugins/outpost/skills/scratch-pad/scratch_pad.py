@@ -22,8 +22,23 @@ Contract
   ``~/.local/state/camp``). When its parts are ``<group>/worktrees/<slug>/...``
   at any depth the result is ``<state root>/<group>/worktrees/<slug>``;
   otherwise ``None``.
+* Inside a camp workspace (``enclosing_workspace`` of the working directory),
+  the pad is not built under Outpost's state directory. The round and pad
+  name are checked as above; a pad name with anything at
+  ``<workspace>/sites/<pad>`` is refused as "already exists"; the pad (same
+  layout) is built in a fresh owner-only ``scratch-pad-`` temp folder outside
+  the workspace and published by the sibling ``publish-site/publish_site.py``,
+  run as ``<python> <publish_site.py> <tmp> <pad> --workspace-path <ws>``
+  under a wall-clock timeout. On success stdout is the publisher's stdout
+  verbatim, then ``pad folder: <ws>/sites/<pad>``. A non-zero publisher exit is
+  refused with each of its stderr lines as ``scratch-pad: publish: <line>``. On
+  timeout the publisher is killed and the outcome is read from disk: a
+  ``<ws>/sites/<pad>/index.html`` gives a ``note:`` that the pad was published
+  but not confirmed (exit 0), otherwise a refusal. The temp folder is removed
+  on every path, and nothing is created under Outpost's pads folder. With no
+  ``publish-site`` skill beside this one, a run inside a workspace is refused.
 * The pad slug matches ``^[a-z0-9][a-z0-9._-]*$`` and is at most 64 characters.
-* Pads live in ``<state>/pads/<slug>/`` where ``<state>`` is
+* Outside a workspace, pads live in ``<state>/pads/<slug>/`` where ``<state>`` is
   ``$OUTPOST_STATE_DIR``, else ``$XDG_STATE_HOME/outpost``, else
   ``~/.local/state/outpost``. A pad folder that already exists is refused.
 * The pad is built in a sibling ``.tmp-`` folder and renamed into place, so a
@@ -62,12 +77,16 @@ import os
 import re
 import shutil
 import stat
+import subprocess
 import sys
 import tempfile
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import NamedTuple
 
 DEFAULT_KIT_DIR = Path(__file__).resolve().parent / "kit"
+PUBLISHER_PATH = Path(__file__).resolve().parent.parent / "publish-site" / "publish_site.py"
+PUBLISH_TIMEOUT_SECONDS = 60.0
 
 _SLUG = re.compile(r"[a-z0-9][a-z0-9._-]*")
 _MAX_SLUG = 64
@@ -298,23 +317,22 @@ def _ensure_pads_root(pads_root: Path) -> None:
         raise Refusal([_line(where, "the pads folder is not a directory")])
 
 
-def build_pad(
-    round_path: Path | str,
-    pad: str,
-    *,
-    kit_dir: Path | str = DEFAULT_KIT_DIR,
-    env: Mapping[str, str] | None = None,
-) -> tuple[Path, Path]:
-    """Check the round and build the pad; return ``(index_html, pad_folder)``.
+class Built(NamedTuple):
+    index: Path
+    folder: Path
+    lines: list[str]
 
-    Raises :class:`Refusal` (carrying the ``scratch-pad:`` lines) when the pad
-    name or round is wrong, the pad exists, or the build fails; in every such
-    case nothing is left behind.
-    """
-    env = os.environ if env is None else env
-    round_path = Path(round_path)
-    kit_dir = Path(kit_dir)
 
+def _run_publisher(cmd: Sequence[str], env: Mapping[str, str], timeout: float):
+    """Run the publisher; raises ``subprocess.TimeoutExpired`` after killing it."""
+    return subprocess.run(list(cmd), env=dict(env), capture_output=True, text=True, timeout=timeout)
+
+
+def _esc(text: str) -> str:
+    return _q(text)[1:-1]
+
+
+def _check_and_encode(round_path: Path, pad: str, kit_dir: Path) -> str:
     problems = _check_slug(pad)
     data = None
     try:
@@ -334,6 +352,69 @@ def build_pad(
         raise Refusal([_line(_q(str(round_path)), "nested too deeply to write")])
     if not kit_dir.is_dir():
         raise Refusal([_line("kit", f"{_q(str(kit_dir))} is not a directory — the pad kit is missing")])
+    return round_js
+
+
+def _write_pad(folder: Path, kit_dir: Path, round_js: str) -> None:
+    shutil.copytree(kit_dir, folder / "round-1")
+    (folder / "round-1" / "round.js").write_text(round_js, encoding="utf-8")
+    (folder / "index.html").write_text(_PAD_INDEX, encoding="utf-8")
+
+
+def _publish_to_workspace(
+    workspace: Path, pad: str, kit_dir: Path, round_js: str, env: Mapping[str, str], runner, timeout: float
+) -> Built:
+    exists = Refusal([f"scratch-pad: pad {_q(pad)} already exists — choose another --pad name"])
+    if not PUBLISHER_PATH.is_file():
+        raise Refusal(
+            [
+                _line(
+                    "publish",
+                    f"the publish-site skill is missing ({_q(str(PUBLISHER_PATH))}) — "
+                    "a pad inside a camp workspace is published through it",
+                )
+            ]
+        )
+    final = workspace / "sites" / pad
+    # Only an early refusal: the publisher's own refusal without --overwrite, taken under its
+    # workspace lock, is what makes two racing runs on one name yield one site.
+    if os.path.lexists(final):
+        raise exists
+
+    tmp = Path(tempfile.mkdtemp(prefix="scratch-pad-"))
+    try:
+        _write_pad(tmp, kit_dir, round_js)
+        cmd = [sys.executable, str(PUBLISHER_PATH), str(tmp), pad, "--workspace-path", str(workspace)]
+        try:
+            result = runner(cmd, env, timeout)
+        except subprocess.TimeoutExpired:
+            if (final / "index.html").is_file():
+                note = "note: the pad was published but the publisher did not confirm it in time"
+                return Built(final / "index.html", final, [note])
+            raise Refusal(
+                [_line("publish", f"the publisher did not finish within {timeout:g} seconds and no pad was published")]
+            )
+        if result.returncode != 0:
+            reasons = [_line("publish", _esc(line)) for line in result.stderr.splitlines() if line.strip()]
+            raise Refusal(reasons or [_line("publish", f"the publisher exited with status {result.returncode}")])
+        return Built(final / "index.html", final, result.stdout.splitlines())
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _build(
+    round_path: Path,
+    pad: str,
+    kit_dir: Path,
+    env: Mapping[str, str],
+    cwd: Path,
+    runner,
+    timeout: float,
+) -> Built:
+    round_js = _check_and_encode(round_path, pad, kit_dir)
+    workspace = enclosing_workspace(cwd, env)
+    if workspace is not None:
+        return _publish_to_workspace(workspace, pad, kit_dir, round_js, env, runner, timeout)
 
     pads_root = _pads_root(env)
     final = pads_root / pad
@@ -344,9 +425,7 @@ def build_pad(
 
     tmp = Path(tempfile.mkdtemp(prefix=f".tmp-{pad}-", dir=pads_root))
     try:
-        shutil.copytree(kit_dir, tmp / "round-1")
-        (tmp / "round-1" / "round.js").write_text(round_js, encoding="utf-8")
-        (tmp / "index.html").write_text(_PAD_INDEX, encoding="utf-8")
+        _write_pad(tmp, kit_dir, round_js)
         try:
             os.rename(tmp, final)
         except OSError:
@@ -358,10 +437,47 @@ def build_pad(
         if isinstance(exc, OSError):
             raise Refusal([_line(_q(str(final)), f"could not build the pad: {exc.strerror or exc}")])
         raise
-    return final / "index.html", final
+    return Built(final / "index.html", final, [(final / "index.html").as_uri()])
 
 
-def main(argv: Sequence[str] | None = None, env: Mapping[str, str] | None = None) -> int:
+def build_pad(
+    round_path: Path | str,
+    pad: str,
+    *,
+    kit_dir: Path | str = DEFAULT_KIT_DIR,
+    env: Mapping[str, str] | None = None,
+    cwd: Path | str | None = None,
+    publish_runner=None,
+    publish_timeout: float = PUBLISH_TIMEOUT_SECONDS,
+) -> tuple[Path, Path]:
+    """Check the round and build the pad; return ``(index_html, pad_folder)``.
+
+    Raises :class:`Refusal` (carrying the ``scratch-pad:`` lines) when the pad
+    name or round is wrong, the pad exists, or the build fails; in every such
+    case nothing is left behind. *cwd* (default the process's) decides whether
+    the pad is built on disk or published into the enclosing camp workspace;
+    *publish_runner* is ``(cmd, env, timeout) -> CompletedProcess``.
+    """
+    built = _build(
+        Path(round_path),
+        pad,
+        Path(kit_dir),
+        os.environ if env is None else env,
+        Path.cwd() if cwd is None else Path(cwd),
+        publish_runner or _run_publisher,
+        publish_timeout,
+    )
+    return built.index, built.folder
+
+
+def main(
+    argv: Sequence[str] | None = None,
+    env: Mapping[str, str] | None = None,
+    *,
+    cwd: Path | str | None = None,
+    publish_runner=None,
+    publish_timeout: float = PUBLISH_TIMEOUT_SECONDS,
+) -> int:
     parser = argparse.ArgumentParser(
         prog="scratch_pad.py", description="Build a scratch pad from a round of questions."
     )
@@ -369,13 +485,22 @@ def main(argv: Sequence[str] | None = None, env: Mapping[str, str] | None = None
     parser.add_argument("--round", required=True, dest="round_path", help="path to the round's JSON file")
     args = parser.parse_args(argv)
     try:
-        index, pad_dir = build_pad(args.round_path, args.pad, env=env)
+        built = _build(
+            Path(args.round_path),
+            args.pad,
+            DEFAULT_KIT_DIR,
+            os.environ if env is None else env,
+            Path.cwd() if cwd is None else Path(cwd),
+            publish_runner or _run_publisher,
+            publish_timeout,
+        )
     except Refusal as exc:
         for line in exc.lines:
             print(line, file=sys.stderr)
         return 1
-    print(index.as_uri())
-    print(f"pad folder: {pad_dir}")
+    for line in built.lines:
+        print(line)
+    print(f"pad folder: {built.folder}")
     return 0
 
 

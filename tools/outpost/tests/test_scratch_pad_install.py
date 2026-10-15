@@ -14,6 +14,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from trailhead.capabilities import load_manifest
 from trailhead.compose import apply_plan, compose_plan
 
@@ -35,9 +37,16 @@ ROUND = {
 }
 
 
-def _compose(tool_dir: Path, dest: Path) -> Path:
+@pytest.fixture(autouse=True)
+def _outside_any_workspace(tmp_path, monkeypatch):
+    work = tmp_path / "cwd"
+    work.mkdir()
+    monkeypatch.chdir(work)
+
+
+def _compose(tool_dir: Path, dest: Path, skills=("scratch-pad",)) -> Path:
     manifest = load_manifest(tool_dir / "capabilities.toml")
-    apply_plan(compose_plan(manifest, None, {"scratch-pad": None}, dest))
+    apply_plan(compose_plan(manifest, None, {name: None for name in skills}, dest))
     return dest / "skills" / "scratch-pad"
 
 
@@ -94,3 +103,35 @@ def test_corrupted_source_font_fails_the_byte_comparison(tmp_path):
     installed = _compose(tool_copy, tmp_path / "composed")
 
     assert _differing_kit_files(installed) == [FONT]
+
+
+def test_seam_workspace_publish(tmp_path):  # inert-gate: allow seam smoke, installed publisher
+    installed = _compose(OUTPOST_TOOL, tmp_path / "composed", ("scratch-pad", "publish-site"))
+    camp_root = tmp_path / "camp-state"
+    member = camp_root / "grp" / "worktrees" / "ws" / "repo"
+    member.mkdir(parents=True)
+    round_path = tmp_path / "round.json"
+    round_path.write_text(json.dumps(ROUND))
+    env = {
+        **os.environ,
+        "CAMP_STATE_DIR": str(camp_root),
+        "CAMP_CONFIG_DIR": str(tmp_path / "camp-config"),
+        "OUTPOST_STATE_DIR": str(tmp_path / "state"),
+        "HOME": str(tmp_path / "home"),
+    }
+
+    result = subprocess.run(
+        [sys.executable, str(installed / "scratch_pad.py"), "--pad", "settings-header", "--round", str(round_path)],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=member,
+    )
+
+    site = camp_root.resolve() / "grp" / "worktrees" / "ws" / "sites" / "settings-header"
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.splitlines()
+    assert lines[0] == "http://127.0.0.1:7314/grp-ws/settings-header/"
+    assert lines[-1] == f"pad folder: {site}"
+    assert "Header layout" in (site / "round-1" / "round.js").read_text()
+    assert not (tmp_path / "state" / "pads").exists()
