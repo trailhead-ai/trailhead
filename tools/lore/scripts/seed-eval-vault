@@ -7,7 +7,8 @@ Usage: seed-eval-vault <records.json>
 record's name is the slug lore derives from its title (``Use the queue`` ->
 ``adr/use-the-queue``). In the current working directory the script:
 
-1. writes ``$HOME/.gitconfig`` with a synthetic identity — lore stamps every
+1. writes ``$HOME/.gitconfig`` with a synthetic identity when none exists (an
+   existing one is left untouched) — lore stamps every
    record's provenance from ``git config --global user.email`` and refuses to
    write without one;
 2. creates ``./vault`` through this checkout's own lore CLI
@@ -25,7 +26,8 @@ Nothing is written unless every refusal check passes. It refuses (stderr
 ``seed-eval-vault: <message>``, non-zero exit) when ``records.json`` is missing
 or malformed, when lore's config or state directory — resolved through
 ``trailhead/paths.py``, exactly as lore resolves them, overrides included — is
-not inside ``$HOME``, when a lore config or ``$HOME/.gitconfig`` already exists,
+not inside ``$HOME``, when a lore config already exists, when an existing
+``$HOME/.gitconfig`` leaves ``git config --global user.email`` empty,
 or when ``./vault``, ``./lore`` or ``./trailhead`` already exists. The intent is
 that a run can only ever populate a disposable ``$HOME``, never a live install.
 """
@@ -104,7 +106,11 @@ def check_environment(cwd: Path) -> None:
     if (config / "config.json").exists():
         raise Refusal(f"a lore config already exists at {config / 'config.json'}")
     if (home / ".gitconfig").exists():
-        raise Refusal(f"{home / '.gitconfig'} already exists")
+        email = subprocess.run(
+            ["git", "config", "--global", "user.email"], capture_output=True, text=True
+        ).stdout.strip()
+        if not email:
+            raise Refusal(f"{home / '.gitconfig'} exists but sets no user.email, so lore cannot stamp provenance")
     for name in ("vault", "lore", "trailhead"):
         if (cwd / name).exists() or (cwd / name).is_symlink():
             raise Refusal(f"{cwd / name} already exists")
@@ -142,7 +148,8 @@ def seed(records_path: Path) -> None:
     python = os.path.realpath(sys.executable)
 
     gitconfig = Path(os.environ["HOME"]) / ".gitconfig"
-    gitconfig.write_text(f"[user]\n\tname = {IDENTITY_NAME}\n\temail = {IDENTITY_EMAIL}\n", encoding="utf-8")
+    if not gitconfig.exists():
+        gitconfig.write_text(f"[user]\n\tname = {IDENTITY_NAME}\n\temail = {IDENTITY_EMAIL}\n", encoding="utf-8")
     run_lore(python, "vault", "add", "eval", "--scope", "default", "--path", str(cwd / "vault"))
     for record in records:
         run_lore(

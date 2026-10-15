@@ -52,12 +52,15 @@ A spec's criteria are only recognised as a `## Acceptance Criteria` heading
 followed by top-level `- **AC1.** text. *Verified by: manual check.*` bullets.
 
 The seeder runs in the run's temp `HOME` and working directory, and writes there:
-a synthetic `~/.gitconfig` (lore stamps provenance from the git identity and
-refuses to write without one), the vault at `./vault`, and an executable `./lore`
-beside a copy of the repo's `trailhead/` package. It refuses, writing nothing,
-unless lore's config and state directories (overrides such as `XDG_*` and
-`LORE_*_DIR` included) resolve inside `HOME` and no lore config or `~/.gitconfig`
-exists yet, so it cannot be pointed at a live install.
+the vault at `./vault`, an executable `./lore` beside a copy of the repo's
+`trailhead/` package, and, only when `~/.gitconfig` does not exist, a synthetic
+one (lore stamps provenance from the git identity and refuses to write without
+one). The runner pre-populates `~/.gitconfig` with its own identity; an existing
+file is left byte-for-byte untouched and its identity is what lore stamps. It
+refuses, writing nothing, if that file leaves `git config --global user.email`
+empty, or unless lore's config and state directories (overrides such as `XDG_*`
+and `LORE_*_DIR` included) resolve inside `HOME` and no lore config exists yet,
+so it cannot be pointed at a live install.
 
 ### The prompt must say `./lore`
 
