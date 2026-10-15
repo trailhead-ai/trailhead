@@ -89,11 +89,13 @@ class TestLoreInventory:
         }
 
     def test_session_skills_selectable(self):
-        # The lore skills are exactly flush, sync, search, record, research.
+        # The lore skills are exactly flush, sync, search, record, research, correct.
         # Per-kind capture is via the lore record/session CLI (not skills);
         # brainstorm lives in the craft plugin; the finalization skill is flush.
         m = load_manifest(_LORE_MANIFEST)
-        assert set(m.skills) == {"flush", "sync", "search", "record", "research"}
+        assert set(m.skills) == {
+            "flush", "sync", "search", "record", "research", "correct",
+        }
         for name in m.skills:
             assert m.skills[name] == f"skills/{name}"
 

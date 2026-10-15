@@ -192,18 +192,7 @@ prior body, with no diff and no warning. Read the record back first with
 `lore record show` and confirm the text you are about to pipe is the complete
 current export, never a delta.
 
-A frozen record (an ADR or spec past `draft`, any decision, a `done`, `dropped` or `superseded`
-task) refuses that
-plain update. Correct it with `lore record amend <record-id> --reason "<why>" --initiated-by agent --base <revision>`,
-piping the whole corrected body, where `<revision>` is the `revision` from the `lore record show`
-read. The reason and the diff, removed lines included, stay in the vault's change history
-permanently and sync to the team, so put no tokens, keys, passwords or key-shaped strings in the
-reason or the new text. Amend cannot remove a secret already in the record: rotate the credential,
-then escalate to the operator for a history rewrite; never amend it out.
-
-On a `spec`, amend keeps `**ACn.**` criterion numbers stable and records removals: it refuses (writing nothing) a skipped, reused or relabelled number, prints `removed criteria: ...` for each removal, and `--revert-to` restores one; its limits are that a relabel which also rewords escapes detection, a criterion removed outside amend (e.g. in a draft) is unprotected, and an older lore refuses writes to a spec once an entry carries the new `criteria` field, so only updating lore recovers it.
-
-`--reopen ACn` makes the slice loop offer a criterion again by voiding the coverage of the ledger entries stored at that moment (a later slice's coverage counts), and `--close ACn` counts it as done even without a slice fully covering it; a close needs some slice (full or partial) coverage already naming the criterion, a close undoes a mistaken reopen, neither edits the ledger, and the reason is permanent and must never hold secrets.
+A frozen record (an ADR or spec past `draft`, any decision, a finished task) refuses that plain update: use `/lore:correct`, which decides between an in-place amend and a supersession and carries out either.
 
 **A transcript imported in error comes out with `lore record delete`.** That
 removes it from the working copy only — git history retains every imported
