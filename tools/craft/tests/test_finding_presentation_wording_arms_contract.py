@@ -13,12 +13,18 @@ Nothing here asserts the eval's measured result; that is decided by dispatched r
 from __future__ import annotations
 
 import re
-import subprocess
-from pathlib import Path
 
 import pytest
+from test_ritual_output_wording_arms_contract import (
+    GIT_ROOT,
+    Source,
+    _earlier_revision,
+    _git,
+    arm_matches,
+    compose,
+    manifest_mismatches,
+)
 
-GIT_ROOT = Path(__file__).resolve().parents[3]
 CASE_DIR = (
     GIT_ROOT / "tools" / "craft" / "plugins" / "craft" / "evals" / "finding-presentation-wording"
 )
@@ -41,9 +47,6 @@ PLAN_SKILL = f"{PLUGIN}/skills/plan/SKILL.md"
 GAUNTLET_SKILL = f"{PLUGIN}/skills/gauntlet/SKILL.md"
 GAUNTLET_DISPOSITIONS = f"{PLUGIN}/skills/gauntlet/dispositions.md"
 DRIVE_SKILL = f"{PLUGIN}/skills/drive/SKILL.md"
-
-# A source is (repo-relative path, revision).
-Source = tuple[str, str]
 
 ARM_SOURCES: dict[str, list[Source]] = {
     "baseline-consult.md": [
@@ -91,47 +94,6 @@ ARM_SOURCES: dict[str, list[Source]] = {
 }
 
 
-def _git(*args: str) -> str:
-    result = subprocess.run(["git", *args], cwd=GIT_ROOT, capture_output=True, text=True)
-    if result.returncode != 0:
-        raise AssertionError(
-            f"`git {' '.join(args)}` failed (exit {result.returncode}): "
-            f"{result.stderr.strip()}\n"
-            "If the checkout is shallow, the pinned revision is not available; CI "
-            "fetches full history for this reason."
-        )
-    return result.stdout
-
-
-def read_source(path: str, revision: str) -> str:
-    return _git("show", f"{revision}:{path}")
-
-
-def compose(sources: list[Source]) -> str:
-    return "\n".join(read_source(path, revision) for path, revision in sources)
-
-
-def arm_matches(arm_file: Path, sources: list[Source]) -> bool:
-    return compose(sources) == arm_file.read_text(encoding="utf-8")
-
-
-def manifest_mismatches(
-    manifest: dict[str, list[Source]], arms_dir: Path
-) -> tuple[set[str], set[str]]:
-    """(files on disk with no manifest entry, manifest entries with no file)."""
-    on_disk = {p.name for p in arms_dir.glob("*.md")}
-    declared = set(manifest)
-    return on_disk - declared, declared - on_disk
-
-
-def _earlier_revision(path: str, revision: str) -> str:
-    """The commit that last touched `path` before the one `revision` sees, so the
-    blob there differs from the blob at `revision` by construction."""
-    log = _git("log", "--format=%H", "-n", "2", revision, "--", path).split()
-    assert len(log) == 2, f"{path} has fewer than two revisions up to {revision}"
-    return log[1]
-
-
 @pytest.mark.parametrize("arm_name", sorted(ARM_SOURCES))
 def test_arm_composed_from_its_manifest_equals_the_committed_file(arm_name: str):
     sources = ARM_SOURCES[arm_name]
@@ -176,21 +138,6 @@ def test_every_arm_file_has_a_manifest_entry_and_every_entry_a_file():
     undeclared, missing = manifest_mismatches(ARM_SOURCES, ARMS_DIR)
     assert not undeclared, f"arm file(s) with no manifest entry: {sorted(undeclared)}"
     assert not missing, f"manifest entries with no file on disk: {sorted(missing)}"
-
-
-def test_an_arm_file_with_no_manifest_entry_is_reported(tmp_path: Path):
-    (tmp_path / "declared.md").write_text("a")
-    (tmp_path / "stray.md").write_text("b")
-    undeclared, missing = manifest_mismatches({"declared.md": []}, tmp_path)
-    assert undeclared == {"stray.md"}
-    assert missing == set()
-
-
-def test_a_manifest_entry_with_no_file_is_reported(tmp_path: Path):
-    (tmp_path / "declared.md").write_text("a")
-    undeclared, missing = manifest_mismatches({"declared.md": [], "gone.md": []}, tmp_path)
-    assert undeclared == set()
-    assert missing == {"gone.md"}
 
 
 def report_labels(text: str) -> list[str]:
