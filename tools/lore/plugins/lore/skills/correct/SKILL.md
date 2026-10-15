@@ -71,7 +71,9 @@ that one command, with no pipe and nothing chained after it.
 - On a `spec`, amend keeps `**ACn.**` criterion numbers stable and records removals: it refuses
   (writing nothing) a skipped, reused or relabelled number, prints `removed criteria: ...` for
   each removal, and `--revert-to N` restores one. A relabel that also rewords escapes
-  detection, and a criterion removed outside amend (for example in a draft) is unprotected.
+  detection, and a criterion removed outside amend (for example in a draft) is unprotected. An
+  older lore refuses writes to a spec once an entry carries the `criteria` field, so only
+  updating lore recovers it.
 - `--reopen ACn` makes the slice loop offer a criterion again by voiding the coverage of the
   ledger entries stored at that moment (a later slice's coverage counts). `--close ACn` counts
   it as done even without a slice fully covering it; a close needs some slice coverage already
@@ -105,4 +107,4 @@ next step.
 
 Amend: `Amended adr/<name> in place: the stated port was a wrong fact, scope unchanged.`
 
-Supersession: `Routed to supersession: the change reverses the storage choice. The old decision stays live until decision/<new> is recorded and superseded; next, review the new decision.`
+Supersession: `Routed to supersession: the change reverses which team owns on-call. The old decision stays live until decision/<new> is recorded and superseded; next, review the new decision.`
