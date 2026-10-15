@@ -40,6 +40,10 @@ BASELINE_REVISION = "f68200933f69e0c00bc79634fb4758b8fa039c1c"
 # consult, `consult/SKILL.md`) from here and every other source from the baseline.
 EDIT_REVISION = "42e1b088cbb9809c9bd4cf41d226c96da8f480b9"
 
+# The commit before the calibration prose edit: the `precal-consult` arm reads `council.md` and
+# `consult/SKILL.md` from here and every other source from the baseline.
+PRECAL_REVISION = "f98d25850e9a770fd4a14ac585e5029931782ac8"
+
 PLUGIN = "tools/craft/plugins/craft"
 RULES = f"{PLUGIN}/rules.md"
 COUNCIL = f"{PLUGIN}/skills/_shared/council.md"
@@ -91,6 +95,11 @@ ARM_SOURCES: dict[str, list[Source]] = {
         (RULES, BASELINE_REVISION),
         (DRIVE_SKILL, BASELINE_REVISION),
         (COUNCIL, EDIT_REVISION),
+    ],
+    "precal-consult.md": [
+        (RULES, BASELINE_REVISION),
+        (CONSULT_SKILL, PRECAL_REVISION),
+        (COUNCIL, PRECAL_REVISION),
     ],
 }
 
@@ -157,7 +166,7 @@ def test_report_labels_reads_headings_and_skips_fenced_ones():
     assert report_labels(text) == ["Builder", "Security"]
 
 
-REPORT_FILES = ["reports-lenses.md", "reports-consult.md", "reports-spec-review.md"]
+REPORT_FILES = ["reports-lenses.md", "reports-consult.md", "reports-spec-review.md", "reports-calibrated.md"]
 
 
 @pytest.mark.parametrize("report_file", REPORT_FILES)
@@ -175,3 +184,33 @@ def test_the_grader_reads_every_label_a_canned_report_carries_as_the_grammar_imp
         expected = "plain" if label == "Security" else "internal"
         verdict = f"reviewer-name: {expected}\n".encode()
         assert result.stdout == verdict, (report_file, label, result.stdout, result.stderr)
+
+
+BARS = GIT_ROOT / "tools" / "craft" / "plugins" / "craft" / "scripts" / "maturity_bars.py"
+
+CALIBRATED_SPEC = (
+    "# Spec\n\n## Maturity\n\n- riverside-sheet: {level}\n\n## Non-Goals\n\n"
+    "- Waives: backwards compatibility \u2014 the paper booking sheets are not carried over to the new page.\n"
+)
+
+
+def _fenced_block(text: str) -> str:
+    lines = text.splitlines()
+    first = next(i for i, line in enumerate(lines) if line.startswith("```"))
+    last = next(i for i in range(first + 1, len(lines)) if lines[i].startswith("```"))
+    return "\n".join(lines[first + 1 : last]) + "\n"
+
+
+def _render(spec: str) -> str:
+    result = subprocess.run(
+        [sys.executable, str(BARS)], input=spec.encode(), capture_output=True, timeout=60
+    )
+    assert result.returncode == 0, result.stderr
+    return result.stdout.decode("utf-8")
+
+
+def test_the_calibrated_reports_carry_the_block_the_renderer_prints_for_a_prototype_spec():
+    fixture = (FIXTURES_DIR / "reports-calibrated.md").read_text(encoding="utf-8")
+    rendered = _render(CALIBRATED_SPEC.format(level="prototype"))
+    assert _fenced_block(fixture) == rendered
+    assert _render(CALIBRATED_SPEC.format(level="production")) != rendered

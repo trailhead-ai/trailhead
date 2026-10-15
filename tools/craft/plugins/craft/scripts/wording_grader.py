@@ -8,12 +8,13 @@ Usage:
     cat capture.txt | wording_grader.py --check reviewer-report
     cat capture.txt | wording_grader.py --check severity-name --reports reports-lenses.md
     cat capture.txt | wording_grader.py --check reviewer-name --reports reports-lenses.md
+    cat capture.txt | wording_grader.py --check calibration-level --reports reports-calibrated.md
     cat capture.txt | wording_grader.py --check persisted-levels
 
 The capture arrives on stdin. The grammar of `criterion-mention`, `covers-field`
 and `reviewer-report` is the one the ritual-output-wording eval case fixes in its
 `expected.md`, read together with that file's dated amendment; the grammar of
-`severity-name`, `reviewer-name` and `persisted-levels` is the one the
+`severity-name`, `reviewer-name`, `calibration-level` and `persisted-levels` is the one the
 finding-presentation-wording case fixes in its `expected.md`.
 
 `criterion-mention` reads every acceptance-criterion number in the capture and
@@ -39,6 +40,14 @@ report verbatim. `--reports` names a canned report file (repeatable) that suppli
 those quotations. Verdicts: `plain`, `internal`, `none`. `internal` when a
 severity level or reviewer role is named in the working vocabulary, else `plain`
 when a plain reading appears, else `none`.
+
+`calibration-level` reads the same reader-facing text and says whether a severity word
+(`critical`, `criticals`, `important`, `minor`, any case, whole word) shares a logical line
+with a calibration word (`prototype`, `early`, `production`, `maturity`, `level`, `waive`,
+`waived`, `waiver`, `stand-down`, `downgrade`, `downgraded`, `rate`, `rated`). Verdicts:
+`plain`, `internal`, `none`. `internal` on such a line, else `plain` when the whole word
+`prototype` appears in reader-facing text, else `none`. The grammar is the dated extension
+at the end of the finding-presentation-wording case's `expected.md`.
 
 `persisted-levels` reads only the first fenced block that holds a `## Council Review`
 line, for the three italic level labels and a Critical list that is not empty or
@@ -90,7 +99,9 @@ VERDICT_WORDS = {
     "severity-name": ("plain", "internal", "none"),
     "reviewer-name": ("plain", "internal", "none"),
     "persisted-levels": ("kept", "changed", "missing"),
+    "calibration-level": ("plain", "internal", "none"),
 }
+_REPORT_CHECKS = ("severity-name", "reviewer-name", "calibration-level")
 PASSING = frozenset({"text-with-number", "template-shape", "gate-shape", "plain", "kept"})
 
 _TOKEN_RE = re.compile(r"(?<![A-Za-z0-9])AC(\d+)")
@@ -123,6 +134,13 @@ _GROUP_LABEL_RE = re.compile(rf"(?:Important|Minor){_AFTER} *[-\u2013\u2014(]")
 _PLAIN_SEVERITY_RE = re.compile(
     rf"{_BEFORE}(?:needs your decision|worth fixing|nothing to decide){_AFTER}", re.IGNORECASE
 )
+_CALIBRATION_SEVERITY_RE = re.compile(rf"{_BEFORE}(?:criticals?|important|minor){_AFTER}", re.IGNORECASE)
+_CALIBRATION_WORD_RE = re.compile(
+    rf"{_BEFORE}(?:prototype|early|production|maturity|level|waive|waived|waiver|stand-down|downgrade|downgraded"
+    rf"|rate|rated){_AFTER}",
+    re.IGNORECASE,
+)
+_RESOLVED_LEVEL_RE = re.compile(rf"{_BEFORE}prototype{_AFTER}", re.IGNORECASE)
 _INTERNAL_REVIEWER_PATTERNS = (
     re.compile(
         rf"{_BEFORE}(?:builder|breaker|attacker|advocate|premise-attacker|consistency-auditor|divergence-prober){_AFTER}",
@@ -544,6 +562,14 @@ def grade_reviewer_name(text: str, quotations: dict[str, list[str]]) -> str:
     return "plain" if any(_PLAIN_REVIEWER_RE.search(line) for line, _ in lines) else "none"
 
 
+def grade_calibration_level(text: str, quotations: dict[str, list[str]]) -> str:
+    lines = _reader_facing(text, quotations)
+    for line, _ in lines:
+        if _CALIBRATION_SEVERITY_RE.search(line) and _CALIBRATION_WORD_RE.search(line):
+            return "internal"
+    return "plain" if any(_RESOLVED_LEVEL_RE.search(line) for line, _ in lines) else "none"
+
+
 # --- persisted-levels ------------------------------------------------------------------------
 
 
@@ -653,7 +679,7 @@ def run(argv: list[str]) -> tuple[str, str]:
         if args.criteria is None:
             raise CouldNotGrade("missing-criteria", "criterion-mention needs --criteria")
         criteria = _read_criteria(args.criteria)
-    quotations = _read_reports(args.reports) if args.check in ("severity-name", "reviewer-name") else None
+    quotations = _read_reports(args.reports) if args.check in _REPORT_CHECKS else None
     text = _read_stdin()
 
     if args.check == "criterion-mention":
@@ -665,6 +691,8 @@ def run(argv: list[str]) -> tuple[str, str]:
         verdict, gap = grade_severity_name(text, quotations), ""
     elif args.check == "reviewer-name":
         verdict, gap = grade_reviewer_name(text, quotations), ""
+    elif args.check == "calibration-level":
+        verdict, gap = grade_calibration_level(text, quotations), ""
     elif args.check == "persisted-levels":
         verdict, gap = grade_persisted_levels(text), ""
     else:

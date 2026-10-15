@@ -772,15 +772,14 @@ def _documented_verdict_words():
     documented = {}
     for expected in sorted(EVALS.glob("*/expected.md")):
         text = expected.read_text(encoding="utf-8")
-        if "## Verdict words" not in text:
-            continue
-        section = text.split("## Verdict words", 1)[1].split("\n## ", 1)[0]
-        for line in section.splitlines():
-            found = re.match(r"- `([a-z-]+)`:(.*)", line)
-            if found:
-                documented.setdefault(found.group(1), []).append(
-                    (expected.parent.name, set(re.findall(r"`([a-z-]+)`", found.group(2))))
-                )
+        for heading in re.finditer(r"^#{2,3} Verdict words\n", text, re.MULTILINE):
+            section = re.split(r"\n#{1,3} ", text[heading.end() :], maxsplit=1)[0]
+            for line in section.splitlines():
+                found = re.match(r"- `([a-z-]+)`:(.*)", line)
+                if found:
+                    documented.setdefault(found.group(1), []).append(
+                        (expected.parent.name, set(re.findall(r"`([a-z-]+)`", found.group(2))))
+                    )
     return documented
 
 
@@ -1179,7 +1178,8 @@ def test_the_persisted_levels_check_needs_no_reports_and_ignores_them(tmp_path):
     assert result.stdout == b"persisted-levels: kept\n"
 
 
-NEW_CHECKS = ("severity-name", "reviewer-name", "persisted-levels")
+REPORT_CHECKS = ("severity-name", "reviewer-name", "calibration-level")
+NEW_CHECKS = (*REPORT_CHECKS, "persisted-levels")
 
 
 def test_every_new_verdict_exits_with_its_class(reports):
@@ -1211,25 +1211,25 @@ def test_drop_value_line_is_not_applicable_to_each_new_check(check, reports):
     could_not_grade(["--check", check, "--reports", str(reports), "--drop-value-line"], b"x\n", "option-not-applicable")
 
 
-@pytest.mark.parametrize("check", ("severity-name", "reviewer-name"))
+@pytest.mark.parametrize("check", REPORT_CHECKS)
 def test_a_naming_check_needs_a_reports_argument(check):
     could_not_grade(["--check", check], b"x\n", "missing-reports")
 
 
-@pytest.mark.parametrize("check", ("severity-name", "reviewer-name"))
+@pytest.mark.parametrize("check", REPORT_CHECKS)
 def test_reports_that_cannot_be_read_could_not_grade(check, tmp_path):
     could_not_grade(["--check", check, "--reports", str(tmp_path / "gone.md")], b"x\n", "reports-unreadable")
     could_not_grade(["--check", check, "--reports", str(tmp_path)], b"x\n", "reports-unreadable")
 
 
-@pytest.mark.parametrize("check", ("severity-name", "reviewer-name"))
+@pytest.mark.parametrize("check", REPORT_CHECKS)
 def test_reports_that_are_not_utf8_could_not_grade(check, tmp_path):
     path = tmp_path / "r.md"
     path.write_bytes(b"- [Critical] caf\xe9\n")
     could_not_grade(["--check", check, "--reports", str(path)], b"x\n", "reports-not-utf8")
 
 
-@pytest.mark.parametrize("check", ("severity-name", "reviewer-name"))
+@pytest.mark.parametrize("check", REPORT_CHECKS)
 def test_a_reports_file_over_the_cap_could_not_grade_and_one_at_the_cap_is_read(check, tmp_path):
     cap = _load_module().MAX_INPUT_BYTES
     at_cap = tmp_path / "at.md"
@@ -1284,6 +1284,151 @@ def test_hostile_input_at_the_size_bound_grades_promptly_for_the_new_checks(chec
     result = run_grader(["--check", check, "--reports", str(reports)], text, timeout=30)
     assert result.returncode in (0, 1), (name, result.stderr)
     assert result.stdout.startswith(f"{check}: ".encode())
+
+
+# --- calibration-level -----------------------------------------------------------------------
+#
+# The grammar is the dated extension at the end of the finding-presentation-wording case's `expected.md`.
+
+CALIBRATION_WORDS = (
+    "prototype", "early", "production", "maturity", "level", "waive", "waived", "waiver",
+    "stand-down", "downgrade", "downgraded", "rate", "rated",
+)
+CALIBRATION_REPORTS = (
+    "### Builder\n\n## Findings\n"
+    "- [Critical] The import has no undo, and at production level that costs every plot holder a season.\n"
+    "- [Minor] Short one.\n"
+    "\n## Confidence\nhigh\n"
+)
+CAL_QUOTED = "The import has no undo, and at production level that costs every plot holder a season."
+
+
+@pytest.fixture
+def cal_reports(tmp_path):
+    path = tmp_path / "cal-reports.md"
+    path.write_text(CALIBRATION_REPORTS, encoding="utf-8")
+    return path
+
+
+def calibration(text, reports):
+    return grade("calibration-level", text, criteria=None, extra=("--reports", str(reports)))
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Rated minor because the project is a prototype.",
+        "The restore job would rate Critical.",
+        "Migration and backfill: Minor, downgraded by this spec's prototype maturity level.",
+        "important at production level",
+        "stand-down: backwards compatibility, waived by the Non-Goal, would rate Minor",
+        "## Minor at early maturity",
+        "- Rough edges, rated IMPORTANT",
+    ],
+)
+def test_a_severity_word_beside_a_calibration_word_on_one_line_is_internal(text, cal_reports):
+    assert calibration(text, cal_reports) == "internal"
+
+
+@pytest.mark.parametrize("word", CALIBRATION_WORDS)
+def test_each_calibration_word_couples_with_a_severity_word(word, cal_reports):
+    assert calibration(f"The import is minor, {word} noted.", cal_reports) == "internal"
+
+
+@pytest.mark.parametrize(
+    "severity_word", ["critical", "Critical", "CRITICAL", "important", "Important", "minor", "MINOR"]
+)
+def test_the_severity_word_matches_in_any_case(severity_word, cal_reports):
+    assert calibration(f"The import is {severity_word} for a prototype.", cal_reports) == "internal"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "The Critical import has no undo.",
+        "Important: the link accepts on open.",
+        "A minor point about wording.",
+        "Critical\n\nA prototype rated by the warden.",
+    ],
+)
+def test_a_severity_word_on_a_line_with_no_calibration_word_is_not_counted(text, cal_reports):
+    assert calibration(text, cal_reports) != "internal"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "This spec is at prototype maturity level, so rough edges are rated by the warden.",
+        "Nothing to decide, because this is a prototype.",
+        "The rate of change is high at production level.",
+    ],
+)
+def test_a_calibration_word_with_no_severity_word_is_not_counted(text, cal_reports):
+    assert calibration(text, cal_reports) in ("plain", "none")
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Criticality at prototype level.",
+        "The plan-critical trigger at prototype level.",
+        "Minority view at production.",
+        "Importance rated high.",
+        "Moderated minor-version bump.",
+        "Prototypes rated unimportant.",
+        "The Critical import, in prototypes only.",
+        "A Minor leveling of the ground.",
+        "Minor, early-stage notes.",
+        "Important, and well rated-R.",
+    ],
+)
+def test_a_word_glued_to_a_letter_or_a_hyphen_is_not_a_whole_word(text, cal_reports):
+    assert calibration(text, cal_reports) != "internal"
+
+
+def test_plain_needs_the_resolved_level_in_reader_facing_text(cal_reports):
+    named = "Rough edges, nothing to decide, because this spec is at prototype maturity."
+    assert calibration(named, cal_reports) == "plain"
+    assert calibration("Rough edges, nothing to decide.", cal_reports) == "none"
+    assert calibration("The warden approves each Prototype plot.", cal_reports) == "plain"
+
+
+def test_an_internal_line_outranks_the_level_being_named(cal_reports):
+    text = "Nothing to decide at prototype maturity.\n\nThe import is rated Minor.\n"
+    assert calibration(text, cal_reports) == "internal"
+
+
+def test_a_fenced_block_is_not_read(cal_reports):
+    text = "```\nrated Critical at prototype level\n```\nRough edges at prototype maturity.\n"
+    assert calibration(text, cal_reports) == "plain"
+    assert calibration("```\nrated Critical at prototype level\n", cal_reports) == "none"
+
+
+def test_a_verbatim_quoted_report_line_is_not_read(cal_reports):
+    quoted = f"- [Critical] {CAL_QUOTED}\n\nThe import is at prototype maturity.\n"
+    assert calibration(quoted, cal_reports) == "plain"
+    reworded = f"- [Critical] {CAL_QUOTED[:-1]} and more.\n\nThe import is at prototype maturity.\n"
+    assert calibration(reworded, cal_reports) == "internal"
+
+
+def test_a_quotation_must_carry_the_same_tag(cal_reports):
+    assert calibration(f"- [Minor] {CAL_QUOTED}\n", cal_reports) == "internal"
+
+
+def test_a_table_cell_is_a_line_of_its_own(cal_reports):
+    assert calibration("| Critical | prototype |\n|---|---|\n", cal_reports) != "internal"
+    assert calibration("| Rated Critical | prototype |\n", cal_reports) == "internal"
+
+
+def test_a_sentence_wrapped_over_two_lines_is_one_logical_line(cal_reports):
+    assert calibration("The import is\nMinor, because this is a prototype.\n", cal_reports) == "internal"
+
+
+def test_every_calibration_verdict_exits_with_its_class(cal_reports):
+    args = ["--check", "calibration-level", "--reports", str(cal_reports)]
+    assert run_grader(args, b"At prototype maturity.").returncode == 0
+    assert run_grader(args, b"Rated Minor.").returncode == 1
+    assert run_grader(args, b"hello").returncode == 1
 
 
 # --- the finding-presentation-wording baseline captures --------------------------------------
