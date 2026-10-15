@@ -1135,3 +1135,320 @@ rollback, failure visibility and blast radius as rough edges") has no level word
 - Plan's and the spec review's own restatement instructions are untouched and not measured here; a logged follow-up
   owns them.
 - The finding-order criteria (AC17, AC18) were not read for this site.
+
+## Extension, 2026-10-15: the code review sites, the council-site regression and the `code-review-name` check
+
+Pre-registered before any run of the arms it adds. Nothing above this heading is rewritten; the grammar, its
+amendment, the earlier extension and every earlier result stand as written. The extension adds three sites, one
+check, three baseline arms now and further arms by reserved name, and a regression at the four council sites. Where
+it names a rule the case already states (the reading rules, the reader-facing text, the verbatim-quotation
+exemption, the severity grammar, three runs per arm and the splits rule, crashed runs, the scans before commit, the
+dispatch command), that rule applies unchanged, with the sites, arms and checks of this extension.
+
+**Why.** The shared finding contract (`skills/_shared/council.md`, `### How a finding reads`) is read today by the
+council sites only. The review ritual and a build's end-of-run review (`_shared/execute.md` Phase 3) both show the
+reader a code review finding, and neither reads that contract, so a finding there reads as the reviewer's
+`file:line — one-line ask` bullet under an internal level name. A later task edits the contract and the three skill
+files that route to it so those findings take the contract's shape. This extension freezes how that edit is
+measured, and how the four sites that already read the contract are checked for a regression.
+
+### The new sites
+
+Every site stages "the reviewer has returned; present the result" from one hand-written canned report over one small
+fixture change, so no subagent runs. The session is told to run no commands and write no files.
+
+| Site | What the session is doing | Canned input | Graded |
+|---|---|---|---|
+| review | The review ritual's step 5, "Act on feedback": the reviewer dispatched at step 3 has returned, and the session tells the user what it found and what it will do. | the change, `reports-code-review.md` | `code-review-name`, `severity-name` |
+| buildreview | The build procedure's Phase 3, after the one re-review round: the findings that survived are surfaced to the user. | the same | `code-review-name`, `severity-name` |
+| drivebuild | The driver resumed at its build phase (a new session; the plan was approved earlier), running the build procedure inline, at Phase 3 after the one re-review round: the surviving findings are surfaced to the user. | the same | `code-review-name`, `severity-name` |
+
+`reviewer-name` is not run at these sites: its vocabulary is the council lenses, and a code review has no lens
+label. `persisted-levels` is not run: no site stages the writing of a saved block, and the persisted `## End Phases`
+notes and `## Measurement tally` are not staged (see "Not measured"). `severity-name` runs unchanged. Every arm at a
+site gets the same fixtures and the same prompt; only the system prompt differs.
+
+### New fixtures
+
+Written by hand under `fixtures/`. None pulls text from a vault record, and none contains a credential-shaped value.
+They are set in a village beekeeping society's apiary inspection reminders, a domain unlike the allotment plot
+waiting list this case already uses, unlike the lending library of `ritual-output-wording`, and unlike the examples
+`council.md` and the skill files carry. The fixture prose avoids the words critical, important, minor, builder,
+breaker, attacker, advocate, reliability, premise, consistency and divergence, except the three severity heading
+lines of the canned report, which keep the code reviewer's output form.
+
+- `hive-reminders/change.md`: the intent document of the change (what the committee asked for, and what was built).
+- `hive-reminders/reminders.py` and `hive-reminders/test_reminders.py`: the change, two short files. The code has
+  four real shortcomings the report cites.
+- `reports-code-review.md`: one canned report in the exact shape `agents/code-reviewer.md` fixes: `Verdict:
+  FIX_FIRST`, then bare `Critical`, `Important` and `Minor` heading lines, each finding a `file:line — one-line ask`
+  bullet. One finding under Critical (`reminders.py:13`, a hive with no inspection yet raises inside `next_due`), one
+  under Important (`reminders.py:13`, `<` leaves a hive due today off the list), two under Minor
+  (`test_reminders.py:8`, thin test coverage; `reminders.py:21`, the board line carries no date). Every cited
+  line exists in the fixture files above.
+- `prompt-review.md`, `prompt-buildreview.md`, `prompt-drivebuild.md`: one prompt per site, each naming the four
+  files above. `FIXTURES_DIR` stands for the directory holding a copy of `fixtures/`, replaced by the runner as in
+  "Dispatch". No prompt or fixture mentions the finding contract, plain readings or labels.
+
+**Staging choice (the reviewer's name).** The prompts say "the reviewer you dispatched" or "the reviewer was
+dispatched" and never write `code-reviewer`, `code reviewer` or "code review" as a name for it, so the prompt seeds
+neither form and the baseline's headroom on `code-review-name` is a property of the arm text. The real procedures
+dispatch `code-reviewer` and every arm's skill text says so, so the session knows the agent's name in every arm; a
+staging that wrote it would be faithful but would seed the internal form in the treated arm as well as the baseline.
+The report file's name (`reports-code-review.md`) is a file path the session reads, not prose it is asked to echo.
+
+The report holds no `[Critical]`-style tagged line, so the verbatim-quotation exemption excludes nothing from these
+captures. The grader is still given `--reports fixtures/reports-code-review.md` at every site, as for the other
+report checks.
+
+### The arms
+
+All paths are under `tools/craft/plugins/craft/`. The three baseline arms exist when this extension is committed; the
+rest are reserved names, created by the task that needs them.
+
+The baseline arms pin every source to `7b5c65f9a00157e0aee884bdfb0f3fe0b99cdc29` (`CODE_REVIEW_BASELINE_REVISION`
+in the arms contract test), origin/main when this extension was cut. `rules.md` at that revision is byte-identical
+to `rules.md` at the case's earlier baseline `f6820093`, so "`rules.md` held constant" still holds across the case.
+
+| Arm file | Site | Sources, in order | Added by |
+|---|---|---|---|
+| `baseline-review.md` | review | `rules.md`, `skills/review/SKILL.md` | this task |
+| `baseline-buildreview.md` | buildreview | `rules.md`, `skills/execute/SKILL.md`, `skills/_shared/execute.md` | this task |
+| `baseline-drivebuild.md` | drivebuild | `rules.md`, `skills/drive/SKILL.md`, `skills/_shared/execute.md` | this task |
+| `treated-review.md` | review | `rules.md`, `skills/review/SKILL.md` (edited), `skills/_shared/council.md` (edited) | later task, name reserved |
+| `treated-buildreview.md` | buildreview | `rules.md`, `skills/execute/SKILL.md` (edited), `skills/_shared/execute.md` (as baseline), `skills/_shared/council.md` (edited) | later task, name reserved |
+| `treated-drivebuild.md` | drivebuild | `rules.md`, `skills/drive/SKILL.md` (edited), `skills/_shared/execute.md` (as baseline), `skills/_shared/council.md` (edited) | later task, name reserved |
+| `fallback-<site>.md` | a new site whose treated arm fails | the treated arm's sources, with the one file the fallback edits read from the working tree | later task, name reserved |
+| `regress-<site>.md` | each of the four council sites | see "Regression" | later task, name reserved |
+
+No baseline arm carries `council.md`, because none of the three routes reads it at that point today; the treated
+arm adds the read the edit causes, so the variable is "the ritual reads the contract", not the contract alone. In a
+treated arm `council.md` is the last source, as in the earlier treated arms, and "edited" means read from the commit
+that carries the edit (its SHA is named in the results). `rules.md` is held constant in every arm. The build arms
+carry their skill file and `_shared/execute.md` and not the four other documents a real build reads, matching the
+case's earlier build-route arms and the record-link case's `execute-rule-only.md`. The fallback differs from its
+treated arm by one file: `skills/review/SKILL.md` at the review site, `skills/_shared/execute.md` at the build sites.
+That one `execute.md` edit serves both build sites, so a treated failure at either build site makes the
+`fallback-buildreview.md` and `fallback-drivebuild.md` pair, and both are measured.
+
+### Regression at the four council sites
+
+The edit changes text that the spec review, the plan's council review, consult and the driver's council step already
+read, and the case's arms for them pin `council.md` at the previous edit. Four regression arms re-run those sites
+against the edited contract. Each regression arm is the site's most recent arm composition with only
+`skills/_shared/council.md` moved to the edit commit, the same commit the treated code review arms read.
+
+| Arm file | Site | Prompt | Sources, in order |
+|---|---|---|---|
+| `regress-consult.md` | consult | `prompt-consult.md` | `rules.md` (baseline revision), `skills/consult/SKILL.md` (at `CAL_REVISION`), `skills/_shared/council.md` (edited) |
+| `regress-plan.md` | plan | `prompt-plan.md` | `rules.md`, `skills/plan/SKILL.md`, `skills/_shared/council.md` (edited); the first two at the baseline revision |
+| `regress-specreview.md` | specreview | `prompt-specreview.md` | `rules.md`, `skills/gauntlet/SKILL.md`, `skills/gauntlet/dispositions.md`, `skills/_shared/council.md` (edited); the first three at the baseline revision |
+| `regress-driver.md` | driver | `prompt-driver.md` | `rules.md`, `skills/drive/SKILL.md`, `skills/_shared/council.md` (edited); the first two at the baseline revision |
+
+**Which consult arm it derives from, and why.** At consult the case's most recent arm is `cal-consult.md` (the
+calibration prose edit, `CAL_REVISION`), not `treated-consult.md`: `treated-consult.md` reads
+`consult/SKILL.md` and `council.md` from `EDIT_REVISION`, which is before the calibration edit, and the shipped
+consult on main reads the calibrated `consult/SKILL.md`. So `regress-consult.md` takes `consult/SKILL.md` as it
+ships (`CAL_REVISION`, byte-identical to origin/main `7b5c65f9`) and moves only `council.md`. It is run with
+`prompt-consult.md` and graded with consult's own checks, so the clean-majority bar it is held to is the one
+`treated-consult` cleared.
+
+**What the regression arm differs from the treated arm by.** At plan, specreview and driver the arm composition is
+the treated arm's with `council.md` moved from `EDIT_REVISION` to the edit commit. The shipped `council.md`
+(origin/main `7b5c65f9`) is the calibrated one, so that move includes the calibration prose edit as well as this
+slice's edit; the regression measures the contract as it will ship, not this slice's edit in isolation. Every
+non-`council.md` source of the plan, specreview and driver arms is byte-identical at `f6820093` and at `7b5c65f9`. The
+driver's regression arm keeps `drive/SKILL.md` unedited, as the treated driver arm does: the new read directive sits
+in the build phase (step 9), after the council step the arm exercises.
+
+**Checks and bar.** Each regression arm is graded with the checks its site already runs: `severity-name` and
+`reviewer-name` at consult and specreview, plus `persisted-levels` at plan and driver. Pass at a site: a clean
+majority `plain` on both naming checks and, where `persisted-levels` runs, a clean majority `kept`, which is the
+bar the site's treated arm cleared. There is no headroom precondition (the comparison is against the bar the site
+already cleared, not against a baseline). A regression failure stops the slice for the operator: the contract
+edit is reworked, and it is not routed to a ritual fallback.
+
+### Capture naming
+
+Prefixes as in "Capture naming" above: the arm's name without `.md`, then `-<n>` with `n` counting dispatches from
+1, never reused, with three files per run.
+
+| Prefix | Arm file | Prompt | Checks the grader runs | Expected under this pre-registration |
+|---|---|---|---|---|
+| `baseline-<site>-<n>` | `baseline-<site>.md` | the site's prompt | `code-review-name`, `severity-name` | majority `internal` on both (headroom precondition) |
+| `treated-<site>-<n>` | `treated-<site>.md` | the site's prompt | `code-review-name`, `severity-name` | clean majority `plain` on both (reserved; run by a later task) |
+| `fallback-<site>-<n>` | `fallback-<site>.md` | the site's prompt | `code-review-name`, `severity-name` | same as `treated-` (reserved; run only on a measured treated failure) |
+| `regress-<site>-<n>` | `regress-<site>.md` | the council site's prompt | the council site's own checks | clean majority `plain` on both naming checks; clean majority `kept` where `persisted-levels` runs (reserved) |
+
+`<site>` is `review`, `buildreview` or `drivebuild` for the first three rows, and `consult`, `plan`, `specreview` or
+`driver` for `regress-`.
+
+### Verdict words
+
+- `code-review-name`: `plain`, `internal`, `none`.
+
+### Grammar of `code-review-name`
+
+Fixed here, before any run; every pattern the check uses is listed. The existing checks `severity-name`,
+`reviewer-name` and `persisted-levels` are unchanged and are not restated.
+
+**Reading.** The capture is read as in "Reading the capture" and "Reader-facing text" above: logical lines, every
+fenced block removed, every logical line that quotes a reviewer report verbatim removed (against the report files
+given by `--reports`, read as the amendment says; at these sites that rule excludes nothing). The check takes
+`--reports` like the other report checks, and a missing `--reports` is the same could-not-grade condition. Matching
+is over the normalised text of each remaining logical line, case-insensitive (so `Code Reviewer` and `code reviewer`
+are the same form). A **whole phrase** is a match not adjacent to a letter, a digit or a hyphen on either side;
+inside the phrase, a space matches exactly one space (the normalised text has collapsed runs of whitespace). A table
+cell is a logical line of its own.
+
+| Id | Class | Pattern (whole phrase, any case) |
+|---|---|---|
+| C1 | internal | `code-reviewer` or `code-reviewers` |
+| C2 | internal | `code reviewer` or `code reviewers` |
+| C3 | internal | `craft:code-reviewer` |
+| C4 | plain | `code review` or `code-review` |
+
+C3 is the namespaced agent name; a whole-phrase `code-reviewer` already matches inside `craft:code-reviewer` (a colon
+is not a letter, a digit or a hyphen), so C3 and C1 agree and C3 is listed so the form is named. `code-reviewer-agent`
+does not match (a hyphen-joined word is adjacent to a hyphen); `code reviewer's` matches C2 (an apostrophe is not
+blocking). `code review` does not match inside
+`code reviewer` (a letter follows it), so the plain pattern cannot make an internal form read plain.
+
+**Verdict.**
+
+- `internal` when any one of C1, C2 or C3 matches any reader-facing logical line, whether or not a plain form also
+  appears. Internal wins.
+- Otherwise `plain` when C4 matches any reader-facing logical line.
+- Otherwise `none`.
+
+`plain` is therefore: only "code review" forms name the reviewer, at least one is present, and no internal form
+appears anywhere in reader-facing text. `none` is neither, for example a capture that never names who raised the
+findings.
+
+**Trade-offs, written down.** The check is lexical. "Before the code review" and "I will run a code review" read
+`plain` on C4 as well as "the code review found" and "raised by: code review" do; the check cannot tell naming from
+mentioning, so it errs toward a pass, the unsafe direction for this instrument, and the by-eye protocol below
+reads who-raised-it directly. "I asked the code reviewer to look again" reads `internal`, and so does an ordinary
+use of the agent's name in a sentence that is not attribution; that errs against a pass, the safe direction. A
+capture that names the reviewer as "the reviewer" or "the review" reads `none`, which is neither pass nor headroom.
+The verdict words `SHIP`, `FIX_FIRST` and `BLOCK` are not patterns of this check.
+
+**Reading pinned for `severity-name` at these sites.** The existing grammar already counts the lowercase phrases
+"critical issue", "critical issues", "critical finding" and "critical findings" as `internal` (S2). That reading
+stands unchanged at the code review sites: a capture that says "no critical issues" reads `internal`. A test pins it
+over inputs that differ only in that phrase.
+
+### Pass conditions, fixed before any run
+
+Per new site and check, restated here and not referenced:
+
+- **Headroom, per check:** the `baseline-<site>` arm is majority `internal` on `code-review-name` and majority
+  `internal` on `severity-name`. **Majority** is more than half of the graded runs, so 2 of 3 is a majority. A
+  baseline with no majority, or a majority of `none`, has no measurable headroom on that check: stop, change
+  nothing, and report to the operator.
+- **Treated, per check:** the `treated-<site>` arm reaches a clean majority `plain` on `code-review-name` and on
+  `severity-name` (3 of 3 at three runs; 5 of 6 or 6 of 6 after a split; 4 of 6 is `AMBIGUOUS`, not a pass).
+- A site passes when its headroom precondition holds on both checks and its treated arm meets both treated
+  conditions. Any residual leak rate that is not zero is stated in the results, since the spec says "never".
+- **Regression:** as in "Regression at the four council sites".
+
+`none` counts as neither `internal` nor `plain` in any tally, as before. A baseline hand check applies, as at the
+case's first baseline: one capture per verdict word per site, read by hand against the grader's verdict, before any
+treated run.
+
+### End states, fixed before any run
+
+- A site whose baseline is already majority `plain` on a check closes that check on the baseline's script verdict
+  (met without the edit) and is not recorded as unmeasured.
+- A site whose baseline is majority `plain` on both checks has its new read directive dropped rather than shipped
+  unmeasured: no `treated-<site>` arm is built for it and the skill-file edit for that route is not made.
+- A site whose treated arm fails either check goes to the fallback.
+- A site whose fallback also fails holds the slice from merging; the choice goes to the operator.
+- A regression failure at any of the four council sites stops the slice for the operator.
+
+### Fallback, fixed before any run
+
+If a new site's treated arm fails either check, and only then, that site gets one point-of-use line naming the
+finding shape: in `skills/review/SKILL.md` step 5 at the review site, or in `skills/_shared/execute.md` Phase 3's
+"surface to the user" sentence at the build sites. The `execute.md` line names the contract's section by name and
+never the file (a shared document may not name a sibling shared file). It is measured as its own arm,
+`fallback-<site>.md`, which differs from the treated arm by that one file. If it also fails, it is reverted, the run
+stops, and the choice goes to the operator. The fallback is never used for a regression failure.
+
+### Stop rule
+
+Stop and report, without running anything further, when: a baseline has no headroom on a check; a treated arm and
+its fallback both fail; a regression arm fails; an arm cannot reach the floor; or any run needs a fifth
+replacement. A treated arm is never run before this extension, the baseline captures and the grader's
+`code-review-name` check exist and are committed, in that order. A regression arm is never built before the edit
+commit exists.
+
+### Amendment allowance
+
+One dated amendment to the `code-review-name` grammar is allowed, after the baseline hand check and before any
+treated or fallback output at a code review site exists. It is appended below under a dated heading, states what the
+hand check showed, and changes only the patterns of this check. No amendment to `severity-name` or any other check
+is allowed by this extension. After the first treated or fallback output exists, a flaw found later is reported in
+the results, not repaired.
+
+### The finding-order reading for code review findings: by eye
+
+No script decides these. This extends "The finding-order reading (AC17, AC18): by eye" to the three code review
+sites. For every capture the grader reads (baseline now; treated and fallback later), a person reads, in this order:
+
+1. The findings the session shows the reader, not any narrative paragraph above them.
+2. Every finding the canned report holds: all four, under whatever grouping the session uses.
+3. For each finding, six observations, each written down as `yes`, `no` or `partly`:
+   - **Opening:** does the finding's first sentence carry (a) the decision asked of the reader, (b) the
+     recommendation and (c) what is at stake? Record each of the three.
+   - **Order:** after the opening sentence, do the worst case, a labelled `Fix:` line and who raised it ("code
+     review") follow in that order? Record `in order`, `out of order` (naming the first element out of place), or
+     `missing` (naming the element).
+   - **Shown:** is the finding shown at all (none dropped, merged into another, or softened to a hint), and does it
+     keep its `file:line`?
+   - **Grounded:** does the worst case follow from the fixture code at the cited line, rather than being invented?
+     Read the cited line.
+   - **Readings:** is severity expressed only as the guide's three plain readings (`needs your decision`, `worth
+     fixing`, `nothing to decide`), with no invented fourth reading? Record any invented reading verbatim.
+   - **Plain:** does the opening read without the change in hand? Record `yes` or `no`.
+4. Per capture, two more observations: at a build site (`buildreview`, `drivebuild`), **no council dispatch is
+   attempted** (the session does not announce or stage a council review because the contract is now in its
+   instructions); and at the review site, whether step 5's triage by internal level ("Fix Critical issues
+   immediately", "Note Minor issues for later") is **echoed** to the reader as level names.
+
+The reading is written next to the capture's name in the results record. It is not counted in any pass condition,
+not graded by script, and recorded as unmeasured. AC17 and AC18 at the code review sites close only when the
+operator names them at slice close. The Known Unknown that "would build the wrong thing" does not fit code already
+built, and might make the presenter drop or rephrase a plain reading, is read here (Readings) and in the treated
+`severity-name` verdicts.
+
+### The blocking post-install close-out
+
+After the edit is installed, one real `/craft:review` run on a branch that has findings and one on a clean branch
+are read by eye, against the same observations (on the clean branch: no finding is invented, and the shown text
+uses no internal level name and not `code-reviewer`; the verdict words `SHIP`, `FIX_FIRST` and `BLOCK` may appear).
+A real run sends a real reviewer's output through the same presenter, which is the path the canned report
+substitutes for. The close-out is **blocking**: the slice is not closed, and AC24's code review part is not named
+met, until both reads are recorded in the results.
+
+### Not measured
+
+- The finding-order criteria (AC17, AC18) at the code review sites: captured, read by eye, recorded as unmeasured.
+- The reviewer's report to its caller, the verdict words and the persisted `## End Phases` notes and `##
+  Measurement tally`, which keep their internal forms by design. The boundary is stated by the edit and is not run.
+- A real reviewer's output, a real subagent run, and the build's other phases; only the surfacing of surviving
+  findings is staged.
+- A code review finding shown by any route other than the review ritual, the build's Phase 3 or the driver's build
+  phase.
+- The consult-calibrated site (`cal-consult`) is not re-run against the edited contract; the four regression
+  sites are the case's main-line sites.
+- The fix-shape criteria (AC19 to AC21), which a later slice measures at these sites.
+
+### Limits
+
+- Arms carry skill text through `--append-system-prompt`, not a real skill invocation, and the build arms omit the
+  four other documents a real build reads.
+- One model tier, the process default; three runs per arm resolve only a large effect.
+- The staging starts at the presentation step with the report in hand, so the earlier dispatch, triage and fix
+  steps are stubbed, and the Phase 3 prompt tells the session the re-review round has already run.
+- The check is lexical (see its trade-offs); the plain form `code review` can appear without attribution.

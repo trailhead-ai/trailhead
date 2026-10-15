@@ -48,6 +48,9 @@ PRECAL_REVISION = "e88e01303e744f94b60c46e10212d2adf0ca7ed0"
 # `consult/SKILL.md` from here and every other source from the baseline.
 CAL_REVISION = "df65828beb59d1814735a6926f4982eb30a1a087"
 
+# origin/main when the code review sites were cut: the three code review baseline arms read every source here.
+CODE_REVIEW_BASELINE_REVISION = "7b5c65f9a00157e0aee884bdfb0f3fe0b99cdc29"
+
 PLUGIN = "tools/craft/plugins/craft"
 RULES = f"{PLUGIN}/rules.md"
 COUNCIL = f"{PLUGIN}/skills/_shared/council.md"
@@ -56,6 +59,9 @@ PLAN_SKILL = f"{PLUGIN}/skills/plan/SKILL.md"
 GAUNTLET_SKILL = f"{PLUGIN}/skills/gauntlet/SKILL.md"
 GAUNTLET_DISPOSITIONS = f"{PLUGIN}/skills/gauntlet/dispositions.md"
 DRIVE_SKILL = f"{PLUGIN}/skills/drive/SKILL.md"
+REVIEW_SKILL = f"{PLUGIN}/skills/review/SKILL.md"
+EXECUTE_SKILL = f"{PLUGIN}/skills/execute/SKILL.md"
+EXECUTE_PROCEDURE = f"{PLUGIN}/skills/_shared/execute.md"
 
 ARM_SOURCES: dict[str, list[Source]] = {
     "baseline-consult.md": [
@@ -109,6 +115,20 @@ ARM_SOURCES: dict[str, list[Source]] = {
         (RULES, BASELINE_REVISION),
         (CONSULT_SKILL, CAL_REVISION),
         (COUNCIL, CAL_REVISION),
+    ],
+    "baseline-review.md": [
+        (RULES, CODE_REVIEW_BASELINE_REVISION),
+        (REVIEW_SKILL, CODE_REVIEW_BASELINE_REVISION),
+    ],
+    "baseline-buildreview.md": [
+        (RULES, CODE_REVIEW_BASELINE_REVISION),
+        (EXECUTE_SKILL, CODE_REVIEW_BASELINE_REVISION),
+        (EXECUTE_PROCEDURE, CODE_REVIEW_BASELINE_REVISION),
+    ],
+    "baseline-drivebuild.md": [
+        (RULES, CODE_REVIEW_BASELINE_REVISION),
+        (DRIVE_SKILL, CODE_REVIEW_BASELINE_REVISION),
+        (EXECUTE_PROCEDURE, CODE_REVIEW_BASELINE_REVISION),
     ],
 }
 
