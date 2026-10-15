@@ -490,6 +490,14 @@ def _linked_by_child(b):
     return b.task("F child", related=[f"task={b.child}"])
 
 
+def _linked_by_qualified_spec(b):
+    return b.task("F qualified spec", related=[f"spec=spec/{b.spec}"])
+
+
+def _linked_by_qualified_child(b):
+    return b.task("F qualified child", related=[f"task=task/{b.child}"])
+
+
 def _linked_by_spec_outbound(b):
     name = b.task("F spec outbound")
     relate(b.env, f"spec/{b.spec}", f"task={name}")
@@ -515,6 +523,8 @@ def _linked_by_child_outbound(b):
         _linked_by_qualified_slice,
         _linked_by_spec,
         _linked_by_child,
+        _linked_by_qualified_spec,
+        _linked_by_qualified_child,
         _linked_by_spec_outbound,
         _linked_by_slice_outbound,
         _linked_by_child_outbound,
@@ -560,7 +570,10 @@ def test_the_slice_parent_itself_is_not_a_follow_up(lore_env):
     env, vault = lore_env
     b = Board(env, vault)
     _lore(env, "record", "update", f"task/{b.slice}", "--status", "open")
-    assert b.names() == []
+    result = b.gather()
+    assert result["followups"] == []
+    assert result["excluded-by-label"] == {"count": 0, "names": []}
+    assert result["candidates-read"] == 0
 
 
 def test_a_task_labelled_as_a_follow_up_parent_is_excluded_and_counted(board):
