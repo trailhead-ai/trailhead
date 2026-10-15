@@ -83,8 +83,8 @@ def _number(identifier: str) -> int:
     return int(identifier[2:])
 
 
-def _canonical(identifier: str) -> bool:
-    return _CANONICAL_RE.fullmatch(identifier) is not None
+def _canonical(identifier: object) -> bool:
+    return isinstance(identifier, str) and _CANONICAL_RE.fullmatch(identifier) is not None
 
 
 def _entries(body: str) -> list[tuple[str | None, str]]:
@@ -156,7 +156,7 @@ def valid_task_id(value: object) -> bool:
 def _ids_problem(name: str, ids: object) -> str | None:
     if not isinstance(ids, list) or not ids:
         return f"'{name}' must be a non-empty list of criterion identifiers"
-    if not all(isinstance(i, str) and _canonical(i) for i in ids):
+    if not all(_canonical(i) for i in ids):
         return f"'{name}' must hold identifiers of the form AC1, AC2, ... (no leading zeros, at most nine digits)"
     if len(set(ids)) != len(ids):
         return f"'{name}' must not repeat an identifier"
@@ -229,10 +229,6 @@ def _fold(history: Any) -> tuple[dict[str, int], dict[str, list[str] | None]]:
     return removed, marks
 
 
-def _recorded_removals(history: Any) -> dict[str, int]:
-    return _fold(history)[0]
-
-
 def criteria_state(body: str, history: list | None) -> dict:
     """``{"declared", "removed", "reopened", "closed"}`` for *body* under *history*.
 
@@ -282,7 +278,7 @@ def check_criteria_amend(
     ``refusals`` are messages naming only canonical identifiers. Raises
     :class:`CriteriaError` only for a malformed *history*.
     """
-    recorded = _recorded_removals(history)
+    recorded, _ = _fold(history)
     old_status, old_entries = _safe_entries(old_body)
     new_status, new_entries = _safe_entries(new_body)
 
@@ -480,24 +476,25 @@ def check_criteria_marks(
     only canonical identifiers, each with its fix. Raises :class:`CriteriaError`
     only for a malformed *history*.
     """
-    recorded, marks = _fold(history)
+    _, marks = _fold(history)
     refusals: list[str] = []
     if not reopen and not close:
         return {}, refusals
 
+    named_ids = [*reopen, *close]
+    both = set(reopen) & set(close)
     seen: set[str] = set()
-    for ident in [*reopen, *close]:
-        if not isinstance(ident, str) or not _canonical(ident):
+    for ident in named_ids:
+        if not _canonical(ident):
             refusals.append(_id_refusal(ident))
-    for ident in sorted(set(reopen) & set(close), key=lambda s: (0, _number(s)) if _canonical(s) else (1, 0)):
-        if _canonical(ident):
-            refusals.append(f"{ident} is named to reopen and to close; choose one")
-    for ident in [*reopen, *close]:
-        if isinstance(ident, str) and _canonical(ident) and ident not in set(reopen) & set(close):
+    for ident in sorted(filter(_canonical, both), key=_number):
+        refusals.append(f"{ident} is named to reopen and to close; choose one")
+    for ident in named_ids:
+        if _canonical(ident) and ident not in both:
             if ident in seen:
                 refusals.append(f"{ident} is named more than once; name it once")
             seen.add(ident)
-    canonical = [i for i in dict.fromkeys([*reopen, *close]) if isinstance(i, str) and _canonical(i)]
+    canonical = [i for i in dict.fromkeys(named_ids) if _canonical(i)]
 
     try:
         declared = {i for i, _ in declared_criteria(new_body)}
@@ -530,7 +527,7 @@ def check_criteria_marks(
                 named[ident].append(task)
 
     for ident in close:
-        if not (isinstance(ident, str) and _canonical(ident)) or ident in reopen:
+        if not _canonical(ident) or ident in reopen:
             continue
         if ident in marks and marks[ident] is None:
             refusals.append(f"{ident} is already closed; nothing to do")
@@ -540,5 +537,5 @@ def check_criteria_marks(
                 "Cover it in a slice, or remove the criterion by amend"
             )
 
-    voided = {i: named[i] for i in dict.fromkeys(reopen) if isinstance(i, str) and i in named and _canonical(i)}
+    voided = {i: named[i] for i in dict.fromkeys(reopen) if _canonical(i) and i in named}
     return voided, refusals

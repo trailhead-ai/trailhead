@@ -15,6 +15,7 @@ from conftest import make_vault as _make_vault, run_cli as _run
 from test_record_cli_amend import AMENDED as V2, BODY, LONG, _body, _sidecar
 from test_record_cli_amend import _amend as _run_amend, _create as _create_record
 from test_record_cli_amend import _revert, _set_history, _snapshot
+from test_record_cli_amend_marks import LEDGER, _make, _marks
 
 V3 = "# Decision\n\nline one\nline TWO\nline 3 changed\n"
 
@@ -565,30 +566,7 @@ def test_body_before_composes_with_vault(tmp_path):
     assert r.stdout == BODY
 
 
-def _history_with_removed(tmp_path, removed):
-    vault, state = _make_vault(tmp_path)
-    rid = _create(vault, state)
-    _amend(vault, state, rid, V2, reason="fix", initiated_by="operator")
-    history = _sidecar(vault, rid)["change-history"]
-    history[0]["criteria"] = {"removed": removed}
-    _set_history(vault, rid, history)
-    return _history(vault, state, rid)
-
-
-def test_history_prints_a_fixed_placeholder_for_every_non_canonical_removed_id(tmp_path):
-    long_id = "ZQ" * 2500
-    r = _history_with_removed(tmp_path, ["AC2", long_id, ["nested"]])
-    assert r.returncode == 0, r.stderr
-    assert "removed criteria: AC2, <non-canonical id>, <non-canonical id>\n" in r.stdout
-    assert "ZQ" not in r.stdout and "nested" not in r.stdout
-
-
-def test_history_prints_canonical_removed_ids_unchanged(tmp_path):
-    r = _history_with_removed(tmp_path, ["AC1", "AC10", "AC999999999"])
-    assert "removed criteria: AC1, AC10, AC999999999\n" in r.stdout
-
-
-def _history_with_marks(tmp_path, criteria):
+def _history_with_criteria(tmp_path, criteria):
     vault, state = _make_vault(tmp_path)
     rid = _create(vault, state)
     _amend(vault, state, rid, V2, reason="fix", initiated_by="operator")
@@ -598,8 +576,21 @@ def _history_with_marks(tmp_path, criteria):
     return _history(vault, state, rid)
 
 
+def test_history_prints_a_fixed_placeholder_for_every_non_canonical_removed_id(tmp_path):
+    long_id = "ZQ" * 2500
+    r = _history_with_criteria(tmp_path, {"removed": ["AC2", long_id, ["nested"]]})
+    assert r.returncode == 0, r.stderr
+    assert "removed criteria: AC2, <non-canonical id>, <non-canonical id>\n" in r.stdout
+    assert "ZQ" not in r.stdout and "nested" not in r.stdout
+
+
+def test_history_prints_canonical_removed_ids_unchanged(tmp_path):
+    r = _history_with_criteria(tmp_path, {"removed": ["AC1", "AC10", "AC999999999"]})
+    assert "removed criteria: AC1, AC10, AC999999999\n" in r.stdout
+
+
 def test_history_prints_reopened_and_closed_criteria_lines(tmp_path):
-    r = _history_with_marks(tmp_path, {"reopened": ["AC2", "AC10"], "closed": ["AC1"]})
+    r = _history_with_criteria(tmp_path, {"reopened": ["AC2", "AC10"], "closed": ["AC1"]})
     assert r.returncode == 0, r.stderr
     assert "reopened criteria: AC2, AC10\n" in r.stdout
     assert "closed criteria: AC1\n" in r.stdout
@@ -607,7 +598,7 @@ def test_history_prints_reopened_and_closed_criteria_lines(tmp_path):
 
 def test_history_prints_a_placeholder_for_every_non_canonical_reopened_or_closed_id(tmp_path):
     long_id = "ZQ" * 2500
-    r = _history_with_marks(
+    r = _history_with_criteria(
         tmp_path, {"reopened": ["AC2", long_id], "closed": [["nested"], "AC3"]}
     )
     assert r.returncode == 0, r.stderr
@@ -617,8 +608,6 @@ def test_history_prints_a_placeholder_for_every_non_canonical_reopened_or_closed
 
 
 def test_a_marks_only_entry_shows_its_marks_and_an_empty_diff(tmp_path):
-    from test_record_cli_amend_marks import LEDGER, _make, _marks
-
     vault, state, rid = _make(tmp_path, *LEDGER)
     assert _marks(vault, state, rid, "--reopen", "AC2", "--close", "AC1").returncode == 0
     r = _history(vault, state, rid)

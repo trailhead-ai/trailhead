@@ -619,10 +619,7 @@ def _format_history(record_id: str, history: list) -> list[str]:
             for key in ("removed", "reopened", "closed"):
                 ids = criteria.get(key)
                 if isinstance(ids, list) and ids:
-                    shown = (
-                        i if isinstance(i, str) and _canonical(i) else "<non-canonical id>"
-                        for i in ids
-                    )
+                    shown = (i if _canonical(i) else "<non-canonical id>" for i in ids)
                     lines.append(f"{key} criteria: " + ", ".join(shown))
         lines.append("diff:")
         diff = _printable(str(entry.get("diff", "")), keep="\n\t")

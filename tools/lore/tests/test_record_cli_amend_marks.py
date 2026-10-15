@@ -13,17 +13,9 @@ import time
 from conftest import make_vault as _make_vault, run_cli_subprocess as _run_sub
 from test_record_cli_amend import _amend, _body, _create, _revision, _sidecar, _snapshot
 from test_record_cli_amend_criteria import _ac
+from test_record_criteria import slice_line as _slice
 
 from lore import locking
-
-
-def _slice(task, covers=(), partial=()):
-    fields = f"`task/{task}`, closed 2026-01-01"
-    if covers:
-        fields += ", covers " + ", ".join(covers)
-    if partial:
-        fields += ", partially covers " + ", ".join(partial)
-    return f"- value claim ({fields})"
 
 
 def _spec_body(*slices, numbers=(1, 2, 3)):

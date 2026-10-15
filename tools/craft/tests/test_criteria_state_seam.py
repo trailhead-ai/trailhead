@@ -63,23 +63,24 @@ def _gate(script: str, body: str, *args: str) -> subprocess.CompletedProcess:
 
 
 @pytest.fixture
-def isolated_lore_env(monkeypatch, tmp_path):
+def lore(monkeypatch, tmp_path):
+    """Run the real lore CLI in-process against an isolated temp vault; return stdout."""
     monkeypatch.delenv("LORE_VAULT_GUARD_ROOT", raising=False)
     monkeypatch.delenv("LORE_VAULT_GUARD_EXEMPT", raising=False)
     monkeypatch.setenv("LORE_GROUPS_DIR", str(tmp_path / "groups"))
-    return make_vault(tmp_path)
+    vault, state = make_vault(tmp_path)
 
-
-def test_amended_away_criterion_is_void_through_the_real_lore_cli(  # inert-gate: allow seam smoke
-    isolated_lore_env, tmp_path
-):
-    vault, state = isolated_lore_env
-
-    def lore(*args, stdin_text=None):
+    def run(*args, stdin_text=None):
         r = run_cli(list(args), vault=vault, state_dir=state, stdin_text=stdin_text)
         assert r.returncode == 0, r.stderr
         return r.stdout
 
+    return run
+
+
+def test_amended_away_criterion_is_void_through_the_real_lore_cli(  # inert-gate: allow seam smoke
+    lore, tmp_path
+):
     record_id = lore(
         "record", "create", "--kind", "spec", "--title", "Seam", "--keyword", "seam",
         "--status", "ready", stdin_text=BODY_BEFORE,
@@ -126,15 +127,8 @@ BODY_DUPLICATED = """# Seam spec
 
 
 def test_a_body_with_a_repeated_and_a_non_canonical_id_passes_the_gate_with_lores_state(  # inert-gate: allow seam smoke
-    isolated_lore_env, tmp_path
+    lore, tmp_path
 ):
-    vault, state = isolated_lore_env
-
-    def lore(*args, stdin_text=None):
-        r = run_cli(list(args), vault=vault, state_dir=state, stdin_text=stdin_text)
-        assert r.returncode == 0, r.stderr
-        return r.stdout
-
     record_id = lore(
         "record", "create", "--kind", "spec", "--title", "Seam dup", "--keyword", "seam",
         "--status", "ready", stdin_text=BODY_DUPLICATED,
@@ -165,15 +159,8 @@ BODY_UNICODE_DIGIT = """# Seam spec
 
 
 def test_a_body_declaring_a_unicode_digit_id_passes_the_gate_with_lores_state(  # inert-gate: allow seam smoke
-    isolated_lore_env, tmp_path
+    lore, tmp_path
 ):
-    vault, state = isolated_lore_env
-
-    def lore(*args, stdin_text=None):
-        r = run_cli(list(args), vault=vault, state_dir=state, stdin_text=stdin_text)
-        assert r.returncode == 0, r.stderr
-        return r.stdout
-
     record_id = lore(
         "record", "create", "--kind", "spec", "--title", "Seam unicode", "--keyword", "seam",
         "--status", "ready", stdin_text=BODY_UNICODE_DIGIT,
@@ -217,15 +204,8 @@ _SNAPSHOT_OF_TWO_STDOUT = (
     ids=["snapshot-of-two-tasks", "empty-snapshot"],
 )
 def test_lores_reopen_and_close_marks_are_accepted_by_the_gate(  # inert-gate: allow seam smoke
-    isolated_lore_env, tmp_path, body, reopened, closed, expected_stdout
+    lore, tmp_path, body, reopened, closed, expected_stdout
 ):
-    vault, state = isolated_lore_env
-
-    def lore(*args, stdin_text=None):
-        r = run_cli(list(args), vault=vault, state_dir=state, stdin_text=stdin_text)
-        assert r.returncode == 0, r.stderr
-        return r.stdout
-
     record_id = lore(
         "record", "create", "--kind", "spec", "--title", "Seam marks", "--keyword", "seam",
         "--status", "ready", stdin_text=body,
@@ -279,15 +259,8 @@ def _ledger_gate_with_parents(body: str, tmp_path: Path, parents: dict) -> subpr
 
 
 def test_reopen_then_recover_then_close_flows_through_the_real_cli_and_gates(  # inert-gate: allow seam smoke
-    isolated_lore_env, tmp_path
+    lore, tmp_path
 ):
-    vault, state = isolated_lore_env
-
-    def lore(*args, stdin_text=None):
-        r = run_cli(list(args), vault=vault, state_dir=state, stdin_text=stdin_text)
-        assert r.returncode == 0, r.stderr
-        return r.stdout
-
     record_id = lore(
         "record", "create", "--kind", "spec", "--title", "Seam flow", "--keyword", "seam",
         "--status", "ready", stdin_text=BODY_THREE_ENTRIES_BASE,
@@ -330,15 +303,8 @@ def test_reopen_then_recover_then_close_flows_through_the_real_cli_and_gates(  #
 
 
 def test_a_stale_snapshot_task_does_not_fail_the_gate_through_lores_state(  # inert-gate: allow seam smoke
-    isolated_lore_env, tmp_path
+    lore, tmp_path
 ):
-    vault, state = isolated_lore_env
-
-    def lore(*args, stdin_text=None):
-        r = run_cli(list(args), vault=vault, state_dir=state, stdin_text=stdin_text)
-        assert r.returncode == 0, r.stderr
-        return r.stdout
-
     record_id = lore(
         "record", "create", "--kind", "spec", "--title", "Seam stale", "--keyword", "seam",
         "--status", "ready", stdin_text=BODY_LEDGER,
