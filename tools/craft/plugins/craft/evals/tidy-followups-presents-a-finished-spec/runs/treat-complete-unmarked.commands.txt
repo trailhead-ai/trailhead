@@ -1,0 +1,7 @@
+"${CLAUDE_PLUGIN_ROOT}/scripts/followup_gather.py" fixture-complete-unmarked-spec; echo "EXIT=$?"
+
+ls "${CLAUDE_PLUGIN_ROOT}"/skills/_shared/ 2>/dev/null; ls "${CLAUDE_PLUGIN_ROOT}"
+
+cat "${CLAUDE_PLUGIN_ROOT}/skills/_shared/security.md"
+
+lore record show --json --vault default task/unmarked-spec-add-a-retry-to-the-sync; echo "EXIT=$?"

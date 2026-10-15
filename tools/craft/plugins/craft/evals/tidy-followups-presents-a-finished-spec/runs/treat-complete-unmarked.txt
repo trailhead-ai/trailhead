@@ -1,0 +1,12 @@
+**Follow-ups for `spec/fixture-complete-unmarked-spec`**
+
+**Summary:** Entry basis: `complete-status`. Slice basis: `labelled`. 1 slice, 1 child. 1 candidate read and 1 kept. 0 excluded by label and 0 edges skipped.
+
+**Recommended:** none. 0 of 1 met a reason class. The one follow-up fixes a sync that fails after a single transient error. That makes it a reliability fix, but its body doesn't say waiting makes it any costlier. It isn't a security exposure, a defect later work would build on, or groundwork that pays off more the sooner it lands.
+
+**Other follow-ups:**
+- Unmarked spec: add a retry to the sync
+
+**Blocked:** none.
+
+Nothing was written. No record, label, status or task was created or changed.

@@ -1,0 +1,15 @@
+**Header:** entry `stopped-marker` · slice basis `labelled` · 1 slice, 1 child · 2 candidates read, 2 kept · 0 excluded by label · 0 edges skipped
+
+**Recommended** (1 of 2 met a reason class)
+
+- **Stopped spec: validate upload names** (`stopped-spec-validate-upload-names`). Upload names get passed to a shell without validation, so a command injection is possible right now and stays possible until this is fixed. *Class: open security exposure.*
+
+**Other follow-ups**
+
+- Stopped spec: reword an error
+
+**Blocked**
+
+- (none)
+
+Nothing was written: no record, label, status or task was created or changed.

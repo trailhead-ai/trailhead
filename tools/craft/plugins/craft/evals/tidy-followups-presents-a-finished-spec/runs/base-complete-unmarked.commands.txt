@@ -1,0 +1,11 @@
+lore --help 2>&1 | head -50
+
+lore search 'fixture-complete-unmarked-spec' 2>&1 | head -40; lore record --help 2>&1 | head -30
+
+lore record show fixture-complete-unmarked-spec --json 2>&1; echo ---; lore task --help 2>&1 | head -20
+
+lore record show spec/fixture-complete-unmarked-spec --json 2>&1; echo ---; lore task graph fixture-complete-unmarked-spec 2>&1
+
+for t in fixture-complete-unmarked-spec-a-finished-child fixture-complete-unmarked-spec-the-slice; do lore record show task/$t --json; done 2>&1; echo ---; lore record criteria spec/fixture-complete-unmarked-spec 2>&1; echo ---; lore record history spec/fixture-complete-unmarked-spec 2>&1; echo ---; lore search 'follow-up' 2>&1 | head -30; ls -R /private/tmp/tidy-eval/runs/base-complete-unmarked/fixture/vault | head -40
+
+cd /private/tmp/tidy-eval/runs/base-complete-unmarked/fixture/vault/task; ls unmarked-spec-* ; for f in unmarked-spec-*; do echo "== $f"; cat "$f"; echo; done

@@ -1,0 +1,13 @@
+lore --help 2>&1 | head -50
+
+lore search --help 2>&1 | head -40; lore search 'fixture-empty-spec' 2>&1 | head -40
+
+cd /private/tmp/tidy-eval/runs/base-empty/fixture/vault; find spec/fixture-empty-spec* task/fixture-empty-spec* -type f | head; for f in $(find spec/fixture-empty-spec* task/fixture-empty-spec* -type f -name '*.md'); do echo "=== $f"; cat "$f"; done; lore task --help 2>&1 | head -30
+
+cd /private/tmp/tidy-eval/runs/base-empty/fixture/vault; cat spec/fixture-empty-spec.json task/fixture-empty-spec-*.json; echo; lore task graph fixture-empty-spec 2>&1; lore search 'follow' 2>&1 | head -20; grep -ril 'fixture-empty-spec' . | head -20
+
+cd /private/tmp/tidy-eval/runs/base-empty/fixture/vault; cat task/slicing-spec-an-unrelated-follow-up.json; grep -rl 'follow' --include=*.json . | head
+
+cd /private/tmp/tidy-eval/runs/base-empty/fixture/vault; grep -rl 'fixture-empty-spec' . ; lore search 'related.task:fixture-empty-spec-the-slice' 2>&1 | head
+
+lore search 'related-task:fixture-empty-spec-the-slice' 2>&1; lore search 'related-task:fixture-empty-spec-a-finished-child' 2>&1; lore search 'related-spec:fixture-empty-spec' 2>&1

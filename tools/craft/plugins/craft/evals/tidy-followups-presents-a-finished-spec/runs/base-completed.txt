@@ -1,0 +1,14 @@
+`fixture-completed-spec` has two follow-ups. Both are tasks linked to the spec's slice task (`fixture-completed-spec-the-slice`), not to the spec itself.
+
+| Follow-up | Status | Description |
+|---|---|---|
+| `completed-spec-cache-the-config-parse` | ready | "The config is parsed on every call." |
+| `completed-spec-rename-a-helper` | open | "A helper name is misleading." |
+
+**Do first: cache the config parse.** It's the only one marked `ready`. It also fixes real repeated work on every call, so it changes how the code runs, not just how it reads.
+
+**Second: rename the helper.** It's still `open`, not yet ready to pick up. It's a readability cleanup with no effect on behaviour. It's cheap, so it could be bundled with the caching change if both touch the same code.
+
+One thing to tidy: the slice task is still `in-progress`, but its only child (`fixture-completed-spec-a-finished-child`) is `done`. The spec is also labelled `craft/slice-loop: complete`. So the slice can probably be closed, separately from the follow-ups.
+
+The vault records are very short, so this ranking rests on their statuses and one-line descriptions only. I didn't edit any files.

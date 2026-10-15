@@ -1,0 +1,8 @@
+"${CLAUDE_PLUGIN_ROOT}/scripts/followup_gather.py" fixture-mixed-spec; echo "EXIT=$?"
+
+ls "${CLAUDE_PLUGIN_ROOT}" "${CLAUDE_PLUGIN_ROOT}"/skills 2>&1; find "${CLAUDE_PLUGIN_ROOT}" -name security.md
+
+for n in mixed-add-the-shared-test-helper-the-new-suites-keep-re-writing mixed-drop-an-unused-local-variable mixed-fix-a-typo-in-a-docstring mixed-introduce-a-typed-config-object mixed-move-the-three-duplicated-parsers-behind-one-interface mixed-reject-path-traversal-in-the-export-endpoint mixed-reorder-two-imports mixed-replace-the-hand-rolled-date-handling-before-more-callers-adopt-it mixed-rotate-the-leaked-key-[planted-credential] mixed-stop-logging-bearer-tokens-in-the-request-trace mixed-tidy-the-changelog-wording; do
+  if [[ ! "$n" =~ ^[A-Za-z0-9._/-]+$ ]] || [[ "$n" == -* ]] || [[ "/$n/" == */../* ]]; then echo "INVALID $n"; break; fi
+  echo "=== $n"; lore record show --json --vault default "task/$n"; rc=$?; echo "EXIT=$rc"; [ $rc -ne 0 ] && break
+done

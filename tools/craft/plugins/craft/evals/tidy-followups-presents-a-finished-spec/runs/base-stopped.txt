@@ -1,0 +1,15 @@
+`fixture-stopped-spec` has two follow-ups. Both are open tasks linked to the spec's slice task (`fixture-stopped-spec-the-slice`) rather than to the spec directly:
+
+| Follow-up | Status | Description |
+|---|---|---|
+| `stopped-spec-validate-upload-names` | open | "Upload names reach a shell unvalidated." |
+| `stopped-spec-reword-an-error` | open | "An error message reads awkwardly." |
+
+**Do first: validate upload names.** If uploaded file names reach a shell without being checked, someone can likely inject shell commands by choosing a file name. That's a real security hole. Rewording the error message is cosmetic and can wait.
+
+**Where the spec stands:**
+- The spec is marked `ready`, but its slice loop is labelled `stopped`.
+- The slice task is still `in-progress`, even though its only child task is `done`.
+- The spec's body is just a heading (`# Fixture spec`), so it doesn't explain why the loop stopped.
+
+Either close the slice task or restart the loop once the upload-name fix is in. I only read the vault and changed nothing.

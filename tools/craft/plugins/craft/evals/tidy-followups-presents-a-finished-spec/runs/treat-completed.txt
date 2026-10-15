@@ -1,0 +1,17 @@
+**Tidy follow-ups: `spec/fixture-completed-spec`**
+
+Entry basis: `complete-marker` · slice basis: `labelled` · 1 slice, 1 child · 2 candidates read, 2 kept · 0 excluded by label · 0 skipped edges
+
+**Recommended** (1 of 2 met a reason class)
+
+- **Completed spec: rename a helper** (`completed-spec-rename-a-helper`). Every new call site that picks up the misleading name is one more place to change later, so the rename costs more the longer it waits. *Class: a fix that gets more expensive as work builds on it.*
+
+**Other follow-ups**
+
+- Completed spec: cache the config parse. Its body says the config is re-parsed on every call, but nothing in it says that waiting makes the fix more expensive.
+
+**Blocked**
+
+- (none)
+
+Nothing was written: no records, labels, statuses or tasks were created or changed.

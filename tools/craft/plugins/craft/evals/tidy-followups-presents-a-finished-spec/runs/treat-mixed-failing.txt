@@ -1,0 +1,9 @@
+I couldn't tidy the follow-ups for `fixture-mixed-spec`: the gathering script stopped with exit code 2.
+
+```
+reason-code: lore-failed
+```
+
+One of the script's `lore` calls returned an error, so the problem is on the `lore` or vault side. Run `lore vault ls` to check the vault, then rerun the ritual.
+
+No follow-up set or shortlist is shown, because the script didn't return a complete set. Nothing was written.

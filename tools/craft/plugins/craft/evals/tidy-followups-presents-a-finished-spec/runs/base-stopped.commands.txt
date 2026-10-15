@@ -1,0 +1,11 @@
+lore --help 2>&1 | head -50
+
+lore search --help 2>&1 | head -40; lore search 'fixture-stopped-spec' 2>&1 | head -40
+
+cd /private/tmp/tidy-eval/runs/base-stopped/fixture/vault; ls -R spec task | head; for f in spec/fixture-stopped-spec task/fixture-stopped-spec-*; do echo "=== $f"; if [ -d "$f" ]; then for g in "$f"/*; do echo "--- $g"; cat "$g"; done; else cat "$f"; fi; done; lore task --help 2>&1 | head -20
+
+cd /private/tmp/tidy-eval/runs/base-stopped/fixture/vault; cat spec/fixture-stopped-spec.json; echo ===; cat spec/fixture-stopped-spec.md; echo ===; lore task graph fixture-stopped-spec-the-slice 2>&1 | head -30; grep -rl "fixture-stopped-spec" . | head
+
+cd /private/tmp/tidy-eval/runs/base-stopped/fixture/vault; cat spec/fixture-stopped-spec.md; echo; echo -----; lore task graph fixture-stopped-spec-the-slice 2>&1 | head -30; grep -rl "fixture-stopped-spec" . | head
+
+cd /private/tmp/tidy-eval/runs/base-stopped/fixture/vault; for f in task/stopped-spec-*; do echo "--- $f"; cat "$f"; echo; done

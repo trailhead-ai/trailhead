@@ -1,0 +1,10 @@
+The spec `fixture-empty-spec` has no follow-ups, so nothing needs to be done first.
+
+The spec is marked `complete` and only two task records are linked to it, both `done`:
+
+- **`fixture-empty-spec-the-slice`**: the spec's slice task.
+- **`fixture-empty-spec-a-finished-child`**: a child of that slice.
+
+In this vault, a follow-up is a task that points back at a spec's slice. For example, `slicing-spec-an-unrelated-follow-up` points to `fixture-slicing-spec-the-slice`. No task points at this spec's slice or its child. I checked with `lore search` (the spec link and both task names) and by searching the vault files directly for `fixture-empty-spec`. The only matches were the two finished tasks.
+
+The open follow-ups that do turn up in a search belong to other specs ("Slicing spec" and "Mixed"), so I left them out. I didn't edit or update any record.

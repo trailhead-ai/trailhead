@@ -1,0 +1,17 @@
+The spec `fixture-complete-unmarked-spec` has **one open follow-up**, so it's also the one to do first.
+
+**Follow-ups**
+
+| Task | Status | What it says |
+|---|---|---|
+| `task/unmarked-spec-add-a-retry-to-the-sync` — "Unmarked spec: add a retry to the sync" | open | "The sync fails on one transient error." |
+
+**Do first:** the sync retry. It's the only open item, and it fixes a real reliability problem: a single transient error makes the sync fail when a retry would recover.
+
+**How I found it**
+- The spec is `complete`. Its body is just a heading (`# Fixture spec`): it lists no follow-ups and has no `## Acceptance Criteria` section.
+- Its one slice, `task/fixture-complete-unmarked-spec-the-slice`, is `done`. That slice's only child, `task/fixture-complete-unmarked-spec-a-finished-child`, is also `done`. Neither counts as a follow-up.
+- The retry task isn't labelled as a follow-up of the spec. It's linked only through `related.task` to the spec's slice, and it's the only record pointing into this spec's tree from outside. That's why plain searches don't find it.
+- Other follow-ups showed up in the search, such as `mixed-tidy-the-changelog-wording` and `slicing-spec-an-unrelated-follow-up`. They belong to other specs, so I left them out.
+
+I didn't edit any files or records; I only ran read-only `lore search` / `lore record show` commands and read files.
