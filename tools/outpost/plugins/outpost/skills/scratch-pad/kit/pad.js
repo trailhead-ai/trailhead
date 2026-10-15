@@ -23,13 +23,33 @@
     return String((error && error.message) || error);
   }
 
-  function renderOption(option, qIndex, oIndex) {
+  function toggle(label, option, oIndex, onPress) {
+    var button = el("button", "pad-toggle", label);
+    button.type = "button";
+    button.setAttribute("aria-pressed", "false");
+    button.setAttribute("aria-label", label + ": " + window.PadReply.letter(oIndex) + ", " + option.name);
+    button.addEventListener("click", onPress);
+    return button;
+  }
+
+  function renderOption(option, qIndex, oIndex, act, view) {
     var card = el("article", "pad-card");
     var head = el("header", "pad-card-head");
-    head.appendChild(el("span", "pad-letter", String.fromCharCode(65 + oIndex)));
+    head.appendChild(el("span", "pad-letter", window.PadReply.letter(oIndex)));
     head.appendChild(el("h3", "pad-name", option.name));
     if (option.pick === true) head.appendChild(el("span", "pad-pick", "my pick"));
+    var mark = el("span", "pad-mark");
+    mark.hidden = true;
+    head.appendChild(mark);
     card.appendChild(head);
+
+    var choices = el("div", "pad-choices");
+    var pickButton = toggle("This one", option, oIndex, function () { act(qIndex, "pick", oIndex); });
+    var rejectButton = toggle("Not this", option, oIndex, function () { act(qIndex, "reject", oIndex); });
+    choices.appendChild(pickButton);
+    choices.appendChild(rejectButton);
+    card.appendChild(choices);
+    view.cards.push({ card: card, mark: mark, pick: pickButton, reject: rejectButton });
     card.appendChild(el("p", "pad-cost", option.cost));
 
     var drawing = el("div", "pad-drawing");
@@ -43,14 +63,32 @@
     return card;
   }
 
-  function renderQuestion(question, qIndex) {
+  function renderQuestion(question, qIndex, act, view) {
     var panel = el("section", "pad-question");
     panel.appendChild(el("h2", "pad-prompt", question.prompt));
     var cards = el("div", "pad-cards");
     question.options.forEach(function (option, oIndex) {
-      cards.appendChild(renderOption(option, qIndex, oIndex));
+      cards.appendChild(renderOption(option, qIndex, oIndex, act, view));
     });
     panel.appendChild(cards);
+
+    var noneButton = el("button", "pad-toggle pad-none", "None of these");
+    noneButton.type = "button";
+    noneButton.setAttribute("aria-pressed", "false");
+    noneButton.addEventListener("click", function () { act(qIndex, "none"); });
+    view.none = noneButton;
+    panel.appendChild(noneButton);
+
+    var noteId = "pad-note-" + qIndex;
+    var noteLabel = el("label", "pad-note-label", "Note");
+    noteLabel.setAttribute("for", noteId);
+    var noteBox = el("textarea", "pad-note");
+    noteBox.id = noteId;
+    noteBox.rows = 3;
+    noteBox.addEventListener("input", function () { act(qIndex, "note", noteBox.value); });
+    view.note = noteBox;
+    panel.appendChild(noteLabel);
+    panel.appendChild(noteBox);
     return panel;
   }
 
@@ -94,7 +132,67 @@
     var list = el("ul");
     var stage = el("div", "pad-stage");
     var buttons = [];
+    var dots = [];
     var panels = [];
+    var views = [];
+    var answers = data.questions.map(function () {
+      return { pick: null, not: [], none: false, note: "" };
+    });
+    var hook = function () {};
+
+    function refresh(qIndex) {
+      var answer = answers[qIndex];
+      var view = views[qIndex];
+      var answered = answer.pick !== null || answer.none;
+      var dot = dots[qIndex];
+      dot.setAttribute("data-answered", String(answered));
+      dot.firstChild.textContent = answered ? "answered" : "not answered";
+      if (!view) return;
+      view.cards.forEach(function (c, oIndex) {
+        var picked = answer.pick === oIndex;
+        var rejected = answer.not.indexOf(oIndex) !== -1;
+        c.pick.setAttribute("aria-pressed", String(picked));
+        c.reject.setAttribute("aria-pressed", String(rejected));
+        c.mark.textContent = picked ? "picked" : rejected ? "not this" : "";
+        c.mark.hidden = !(picked || rejected);
+      });
+      view.none.setAttribute("aria-pressed", String(answer.none));
+      if (view.note.value !== answer.note) view.note.value = answer.note;
+    }
+
+    function change(qIndex, kind, value) {
+      var answer = answers[qIndex];
+      var at = answer.not.indexOf(value);
+      if (kind === "pick") {
+        if (answer.pick === value) {
+          answer.pick = null;
+        } else {
+          answer.pick = value;
+          answer.none = false;
+          if (at !== -1) answer.not.splice(at, 1);
+        }
+      } else if (kind === "reject") {
+        if (at !== -1) {
+          answer.not.splice(at, 1);
+        } else {
+          answer.not.push(value);
+          answer.not.sort(function (a, b) { return a - b; });
+          if (answer.pick === value) answer.pick = null;
+        }
+      } else if (kind === "none") {
+        answer.none = !answer.none;
+        if (answer.none) answer.pick = null;
+      } else {
+        answer.note = value;
+      }
+      refresh(qIndex);
+      hook(qIndex);
+    }
+
+    window.PadAnswers = {
+      answers: answers,
+      onChange: function (fn) { hook = fn; }
+    };
 
     function show(index) {
       buttons.forEach(function (button, i) {
@@ -103,7 +201,9 @@
       });
       var fresh = !panels[index];
       if (fresh) {
-        panels[index] = renderQuestion(data.questions[index], index);
+        views[index] = { cards: [] };
+        panels[index] = renderQuestion(data.questions[index], index, change, views[index]);
+        refresh(index);
         stage.appendChild(panels[index]);
       }
       panels.forEach(function (panel, i) { if (panel) panel.hidden = i !== index; });
@@ -112,8 +212,15 @@
 
     data.questions.forEach(function (question, index) {
       var item = el("li");
-      var button = el("button", null, question.prompt);
+      var button = el("button");
+      var dot = el("span", "pad-dot");
+      dot.appendChild(el("span", "pad-sr"));
+      var label = el("span", "pad-entry-label", question.prompt);
+      button.appendChild(dot);
+      button.appendChild(label);
       button.type = "button";
+      dots.push(dot);
+      refresh(index);
       button.addEventListener("click", function () {
         Promise.resolve()
           .then(function () { return show(index); })

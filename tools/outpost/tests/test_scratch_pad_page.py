@@ -31,7 +31,7 @@ SNAPSHOT = """
 const shown = (e) => e.getClientRects().length > 0;
 const text = (e) => (e ? e.textContent : null);
 const entries = [...document.querySelectorAll('nav button')].map((b) => ({
-  text: b.textContent,
+  text: text(b.querySelector('.pad-entry-label')),
   current: b.getAttribute('aria-current'),
 }));
 const cards = [...document.querySelectorAll('.pad-card')].filter(shown).map((c) => ({
