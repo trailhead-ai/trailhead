@@ -336,6 +336,14 @@ and fixtures as the baseline; one case per invocation, `--ablation none --runs 3
 Runner `claude` 2.1.301. Errored runs (scaffold or load failure): **none**. No case missed the bar, so
 no rerun was used.
 
+### Skill text measured
+
+The treatment ran against `correct/SKILL.md` at commit `3475a6da`. The shipped skill (`a4a78c0b`) adds
+one sentence to the spec-numbering limits (an older lore refuses spec writes once an entry carries
+the `criteria` field). It also changes the subject of the closing supersession example, which
+overlapped in topic with the `supersede-reversed-decision` fixture. Neither change touches the
+routing rules, and that case was green at baseline, so the arms were not re-run.
+
 ### Read-back before the treatment run (authoring error, fixed)
 
 The skill was read against each case's `expected.md` only. Five cases routed as registered. One did
