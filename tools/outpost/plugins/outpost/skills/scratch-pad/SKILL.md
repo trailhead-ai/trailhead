@@ -7,9 +7,11 @@ description: Open a design question as a pad of hand-drawn layout sketches in th
 
 A pad is a page of layout sketches for one round of design questions. You
 write the round as a JSON file; the bundled script (`scratch_pad.py`,
-stdlib-only) checks it, builds the pad as plain files under Outpost's state
-directory, and prints a `file://` link. The page opens from disk with nothing
-running and no network.
+stdlib-only) checks it and builds the pad. Inside a camp workspace (a member
+folder included) the pad is published as a site of that workspace and the script
+prints an Outpost link. Outside one the pad is built as plain files under
+Outpost's state directory and the script prints a `file://` link: that page
+opens from disk with nothing running and no network.
 
 ## When to use it
 
@@ -113,7 +115,15 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/scratch-pad/scratch_pad.py \
 
 - **Success:** relay every line printed before `pad folder:` to the user as
   printed. The `pad folder:` line is for you, not the user.
-- **Name already taken:** retry with a new name, without asking.
+- **Name already taken:** retry with a new name, without asking. Inside a
+  workspace a run that loses a name race gets the publisher's own refusal
+  instead, relayed as `scratch-pad: publish: error: <path> already exists.`, a
+  diff-summary line, then `scratch-pad: publish: Re-run with --overwrite to
+  replace it.` That also means the name is taken: retry with a new name, and
+  never pass `--overwrite` (the script takes none).
+- **Unconfirmed:** if the only line before `pad folder:` is the `note:` that the
+  publisher did not confirm in time, tell the user the pad was probably
+  published but not confirmed, and that there is no link to hand back.
 - **Refusal:** say in one plain line that no pad was made and why, followed by
   the script's reasons. Fix the round and rerun only if the reasons make the fix
   obvious; otherwise fall back to asking in words.
