@@ -2426,3 +2426,18 @@ changes (the spec review's step 5, plan's step 8.5, the driver's step 8). The ex
 edit commit named in the case's arms contract test, so a re-run of them measures the old text: build new arms from the
 changed sources, pinned to the commit that carries the change, under a new dated extension to `expected.md` registered
 before any run. Also take a disagreement between real sessions and these counts as the signal.
+
+**Calibrated downgrades and waived concerns, 2026-10-15: the consult-calibrated site passes and the edit is kept.** The
+treated results above staged only production-maturity input with no stand-down, so the two older paragraphs in
+`council.md` that show the reader a calibrated downgrade ("... Minor, downgraded by ...") and a stand-down ("would rate
+<level>") were never exercised, and a real consult run leaked "Rated minor because the project is a prototype". A new
+site (a prototype-maturity question about a swimming club's lane sign-up page, one waived concern, two calibrated
+downgrades) and a new check, `calibration-level` (a severity word and a calibration word on one reader-facing line is
+`internal`; the level named with no such line is `plain`), were pre-registered before any run. `precal-consult`
+(`council.md` and `consult/SKILL.md` as they stood) was `internal` 3 of 3, so headroom held; `cal-consult` (the same two
+files at the prose edit, `06bb03b1`) was `plain` 3 of 3 on `calibration-level`, and `plain` 3 of 3 on `severity-name`
+and `reviewer-name`, so the finding-contract result did not regress. No split, no exclusion, no grammar amendment, no
+revert. `severity-name` read `plain` on all three `precal` captures although each rates a finding "Minor" mid-line, which
+is the gap the new check covers. Limits: three runs, one question, one level, one waived concern; plan's and the spec
+review's own restatement instructions are a logged follow-up and are not measured. Detail is in `expected.md`, under
+"Results: the consult-calibrated site".
