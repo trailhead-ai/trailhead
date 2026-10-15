@@ -249,8 +249,8 @@ have landed.
 ### The deferral rule
 
 **A cluster with any member still in flight is deferred whole** — report "waiting on spec X" and
-move to the next cluster. There are **no partial ADRs**: a half-distilled cluster writes an
-immutable record of half a decision, and immutable is exactly the wrong property for that. The sweep
+move to the next cluster. There are **no partial ADRs**: a half-distilled cluster writes a frozen
+record of half a decision, and completing a frozen record means superseding it. The sweep
 re-surfaces the cluster once the last member lands.
 
 ## Step 2 — Draft the proposal
@@ -281,8 +281,9 @@ proposal argues, the write list is what lands.
 
 After an `edit`, the final write-list review **renders the post-edit ADR body verbatim, never
 proposal prose**, and that render is **the last thing the operator confirms before any write**. An
-edit that does not re-enter the reviewed list would land the pre-edit text into a record that
-convention then forbids fixing — the correction would have to be a whole superseding ADR.
+edit that does not re-enter the reviewed list would land the pre-edit text into a frozen record,
+where a later fix is an amend only inside the ADR's scope (`/lore:correct`) and otherwise a whole
+superseding ADR.
 
 ## Step 4 — Write, in a fixed order
 
@@ -319,7 +320,7 @@ claims `complete` until everything behind it landed.
    supersedes — `lore record supersede adr/<old> --by adr/<new>`. Step 1's call already did the
    work, so this writes nothing when it landed and finishes it when it was interrupted. The verb
    writes the successor's `supersedes` edge and flips the predecessor to `superseded` in one call.
-   That is the **sole metadata exception to active-ADR immutability**: a reader landing on a
+   That is the **one status change distill makes to an `active` ADR**: a reader landing on a
    superseded ADR finds its successor in `superseded-by:` once `lore reindex` has run, and in the
    successor's `supersedes` list at once.
 
@@ -327,8 +328,7 @@ Each verb call is idempotent and completes a torn pair, so an interrupted run is
 the same verb again: *the re-run finds the successor ADR by its provenance edges, reads the
 predecessor ADRs from the successor's `supersedes` list, and repeats step 1's verb and steps 3 and
 4.* Re-running a call that already landed changes nothing, and the repair is **licensed as part of
-the supersession exception** — it is the same write, finished late, not a new edit to an immutable
-record.
+that supersession** — it is the same write, finished late, not a new edit to a frozen record.
 
 5. Then **touched `area` profiles are re-synthesized** to the sections of
    `${CLAUDE_PLUGIN_ROOT}/templates/area.md`, citing the new ADRs inline as `[[wikilinks]]`. Areas

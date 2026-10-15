@@ -91,7 +91,7 @@ from . import criteria as criteria_mod
 #: The closed set of 9 record kinds. Any other ``kind`` value is rejected.
 #: ``task`` unifies the former ``backlog``/``plan`` kinds — a single kind for
 #: anything worth tracking to completion, ordered via ``depends-on``/``parent``.
-#: ``adr`` is an immutable architecture decision record once ``active`` — a
+#: ``adr`` is an architecture decision record whose body is frozen once ``active`` — a
 #: body-changing write against an ``active`` adr is rejected structurally at
 #: the record-write path (see ``record.guards.check_frozen_body``);
 #: it uses no ``task``-only gated field.
