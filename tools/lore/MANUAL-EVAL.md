@@ -211,20 +211,6 @@ real install the hook would refuse an `Edit`-tool write to all three refusal
 paths regardless of what either arm read. What it speaks to is the Bash path and
 the hookless harness, which is where the prose claims to be alone.
 
-When the next case lands, record it here as:
-
-```
-## Case: <name>
-
-`plugins/lore/evals/<name>/` — fixture, and `expected.md` carrying the pass
-condition, written before any arm was run.
-
-**Under test:** <the claim, and where it is written down>
-
-| Date | Arm | Prose under test | Runs | Result | Notes |
-|------|-----|------------------|------|--------|-------|
-```
-
 ## Cases: amend versus supersede on a frozen record (runner format)
 
 `plugins/lore/evals/{amend-wrong-fact-in-active-adr, amend-narrow-one-criterion-in-ready-spec, amend-drifted-mechanism-detail-phrased-as-serious-error, supersede-reversed-decision, supersede-adr-exception-phrased-as-small-tweak, supersede-spec-change-orphaning-an-objective-phrased-as-small-tweak}/`
@@ -232,8 +218,8 @@ condition, written before any arm was run.
 `prompt.md`, `graders/*.md` and a seeded `fixtures/`.
 
 **Under test:** whether an agent, asked by an operator to correct a frozen record, amends in place for an
-in-scope correction (AC21, AC26, AC27) and routes a material change to supersession (AC22). The prose
-under test is whatever the agent reads today; no `correct` skill exists yet.
+in-scope correction (AC21, AC26, AC27) and routes a material change to supersession (AC22). The
+baseline arm runs on the prose that predates the `correct` skill; the treatment arm adds it.
 
 Run command: README "Running a batch", one case per invocation, with `--ablation none --runs 3
 --model claude-opus-5-5 --concurrency 3 --max-cost-usd 3 --no-publish --allow-tools 'Bash(./lore *)'
@@ -328,15 +314,13 @@ Diagnosis (kept workspaces of the drifted-mechanism and ADR-exception re-runs, s
 - Spec orphaning (from the earlier diagnostic run): the same pattern, noticed the orphaned objective
   and asked.
 
-## Treatment arm: the `correct` skill present, 2026-10-15
+### Treatment arm: the `correct` skill present, 2026-10-15
 
-Commits `7c52c1fd` (skill, record-skill pointer) and `3475a6da` (read-back fix). Same command, graders
-and fixtures as the baseline; one case per invocation, `--ablation none --runs 3 --model claude-opus-5-5
---concurrency 3 --max-cost-usd 3 --no-publish --allow-tools 'Bash(./lore *)' --scaffold --trust-plugin`.
-Runner `claude` 2.1.301. Errored runs (scaffold or load failure): **none**. No case missed the bar, so
-no rerun was used.
+Commits `7c52c1fd` (skill, record-skill pointer) and `3475a6da` (read-back fix). Same run command,
+runner, graders and fixtures as the baseline. Errored runs (scaffold or load failure): **none**.
+No case missed the bar, so no rerun was used.
 
-### Skill text measured
+#### Skill text measured
 
 The treatment ran against `correct/SKILL.md` at commit `3475a6da`. The shipped skill (`a4a78c0b`) adds
 one sentence to the spec-numbering limits (an older lore refuses spec writes once an entry carries
@@ -344,7 +328,7 @@ the `criteria` field). It also changes the subject of the closing supersession e
 overlapped in topic with the `supersede-reversed-decision` fixture. Neither change touches the
 routing rules, and that case was green at baseline, so the arms were not re-run.
 
-### Read-back before the treatment run (authoring error, fixed)
+#### Read-back before the treatment run (authoring error, fixed)
 
 The skill was read against each case's `expected.md` only. Five cases routed as registered. One did
 not: for a spec the skill said to take the successor to `ready` and then supersede, while
@@ -353,7 +337,7 @@ predecessor still `ready`. That is an authoring error in the skill, not in the c
 drafts the successor, leaves the predecessor live, and hands the gauntlet to the operator (`3475a6da`).
 Cases, graders and `expected.md` files were not touched.
 
-### Both arms, per run
+#### Both arms, per run
 
 Baseline is the corrected baseline above (the re-run where graders changed). Treatment cost is the
 runner's list-price estimate for three runs.
@@ -372,18 +356,18 @@ rerun. Four cases were already green at baseline, so the measured gain is the tw
 now acts instead of asking) plus a steadier drifted-mechanism case. With only three runs per case the
 2-of-3 bar tolerates one miss in three; it does not show a rate.
 
-### U4: did the agent invoke the `correct` skill?
+#### U4: did the agent invoke the `correct` skill?
 
 Read from each run's kept trace: a `Skill` tool call naming `lore:correct`. **Yes in all 18 of 18 runs**
 (3 per case, all six cases). No description rework was needed.
 
-### Not graded in this slice
+#### Not graded in this slice
 
 The closing one-line route report and the `--initiated-by` choice (`operator` vs `agent`) are **not**
 graded by any case here, and no result above claims them. No grader reads the route report or the
 amend's initiator. The AC30 and AC31 confirmation rules are likewise unmeasured (later slice).
 
-### Live-state check
+#### Live-state check
 
 Sha256 of every file under `~/.local/state/lore/` and `~/.config/lore/` (excluding `.git/`) before the
 first and after the last treatment run. Changed: `index.sqlite` (a derived index), one new empty lock
@@ -393,3 +377,17 @@ candidate captures on unrelated work and carry none of the fixture vocabulary. N
 vault file the evals could reach changed. Attribution caveat: those session files were still
 uncommitted in the vault, so the attribution rests on their content and timestamps, not on a vault
 commit.
+
+When the next case lands, record it here as:
+
+```
+## Case: <name>
+
+`plugins/lore/evals/<name>/` — fixture, and `expected.md` carrying the pass
+condition, written before any arm was run.
+
+**Under test:** <the claim, and where it is written down>
+
+| Date | Arm | Prose under test | Runs | Result | Notes |
+|------|-----|------------------|------|--------|-------|
+```
