@@ -1626,12 +1626,8 @@ def test_a_hostile_mark_value_is_never_echoed_raw(tmp_path):
 
 # ---- 23. `reopened` voids a snapshot task's tokens; `closed` counts coverage ---
 
-_REOPEN_DECL = ["AC1", "AC2", "AC3"]
-
-
-def _marked_run(tmp_path, ledger, declared=_REOPEN_DECL, removed=(), **marks):
-    state = {"record": "spec/x", "declared": declared, "removed": list(removed), **marks}
-    path = _write(tmp_path, json.dumps(state).encode())
+def _marked_run(tmp_path, ledger, declared=_MARKED_BASE["declared"], removed=(), **marks):
+    path = _marked(tmp_path, declared=declared, removed=list(removed), **marks)
     r = _run_flag(_spec(declared, ledger), path)
     assert r.returncode == 0, r.stderr
     return _tokens(r.stdout)

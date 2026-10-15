@@ -671,10 +671,10 @@ def _is_declared_list(value: object) -> bool:
     )
 
 
-def _is_removed_list(value: object) -> bool:
+def _is_unique_list(value: object, is_item) -> bool:
     return (
         isinstance(value, list)
-        and all(isinstance(v, str) and _CRITERION_ID_RE.fullmatch(v) for v in value)
+        and all(is_item(v) for v in value)
         and len(set(value)) == len(value)
     )
 
@@ -683,29 +683,27 @@ def _is_canonical_id(value: object) -> bool:
     return isinstance(value, str) and _CRITERION_ID_RE.fullmatch(value) is not None
 
 
-def _is_snapshot_list(value: object) -> bool:
-    return (
-        isinstance(value, list)
-        and all(isinstance(v, str) and _SNAPSHOT_TASK_ID_RE.fullmatch(v) for v in value)
-        and len(set(value)) == len(value)
-    )
+def _is_snapshot_task_id(value: object) -> bool:
+    return isinstance(value, str) and _SNAPSHOT_TASK_ID_RE.fullmatch(value) is not None
+
+
+def _is_removed_list(value: object) -> bool:
+    return _is_unique_list(value, _is_canonical_id)
 
 
 def _is_reopened(value: object) -> bool:
     return (
         isinstance(value, dict)
         and bool(value)
-        and all(_is_canonical_id(k) and _is_snapshot_list(v) for k, v in value.items())
+        and all(
+            _is_canonical_id(k) and _is_unique_list(v, _is_snapshot_task_id)
+            for k, v in value.items()
+        )
     )
 
 
 def _is_closed(value: object) -> bool:
-    return (
-        isinstance(value, list)
-        and bool(value)
-        and all(_is_canonical_id(v) for v in value)
-        and len(set(value)) == len(value)
-    )
+    return bool(value) and _is_removed_list(value)
 
 
 def load_criteria_state(

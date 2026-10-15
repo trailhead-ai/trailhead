@@ -1023,12 +1023,10 @@ _MARKS = {"closed": ["AC1"]}
 
 
 def test_reconstruction_steps_over_a_marks_only_entry(rs):
-    from lore.record.store import make_unified_diff
-
     history = [
-        _entry(make_unified_diff(_V1, _V2)),
+        _entry(rs.make_unified_diff(_V1, _V2)),
         _entry("", criteria={"reopened": ["AC1"], "ledger": []}),
-        _entry(make_unified_diff(_V2, _V3)),
+        _entry(rs.make_unified_diff(_V2, _V3)),
     ]
     assert rs.reconstruct_body_before(_V3, history, 1) == _V1
     assert rs.reconstruct_body_before(_V3, history, 2) == _V2
@@ -1041,9 +1039,7 @@ def test_reconstruction_target_on_a_marks_only_entry_returns_the_body_unchanged(
 
 
 def test_reconstruction_refuses_an_empty_diff_once_the_mark_is_stripped(rs):
-    from lore.record.store import make_unified_diff
-
-    history = [_entry(make_unified_diff(_V1, _V2)), _entry(""), _entry(make_unified_diff(_V2, _V3))]
+    history = [_entry(rs.make_unified_diff(_V1, _V2)), _entry(""), _entry(rs.make_unified_diff(_V2, _V3))]
     with pytest.raises(rs.ReconstructError) as exc:
         rs.reconstruct_body_before(_V3, history, 1)
     assert exc.value.kind == "malformed" and "entry 2" in str(exc.value)
