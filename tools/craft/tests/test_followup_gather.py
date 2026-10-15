@@ -1,5 +1,5 @@
-"""followup_gather.py entry half: spec resolution across configured vaults and
-the verdict on whether the spec's slice loop has ended.
+"""followup_gather.py: spec resolution across configured vaults, the verdict on
+whether the spec's slice loop has ended, and the gathering of its follow-ups.
 
 Failure modes drive the script's functions with an injected `lore` runner; the
 seam tests run the script as a subprocess, exactly as a skill invokes it,
@@ -360,14 +360,20 @@ def two_vault_lore_env(tmp_path):
     return env, ("default", "other")
 
 
-def make_spec(env, vault, title, status="ready", labels=(), related=()):
-    args = ["record", "create", "--kind", "spec", "--title", title, "--status", status,
+def _create(env, vault, kind, title, status, related=(), labels=(), parent=None):
+    args = ["record", "create", "--kind", kind, "--title", title, "--status", status,
             "--vault", vault]
-    for label in labels:
-        args += ["--label", label]
     for edge in related:
         args += ["--related", edge]
+    for label in labels:
+        args += ["--label", label]
+    if parent:
+        args += ["--parent", parent]
     return _lore(env, *args, stdin="# body\n").split("/", 1)[1]
+
+
+def make_spec(env, vault, title, status="ready", labels=(), related=()):
+    return _create(env, vault, "spec", title, status, related, labels)
 
 
 def run_script(env, *args):
@@ -430,15 +436,7 @@ FOLLOWUP_PARENT_LABEL = "craft/followup-parent="
 
 
 def make_task(env, vault, title, status="open", related=(), labels=(), parent=None):
-    args = ["record", "create", "--kind", "task", "--title", title, "--status", status,
-            "--vault", vault]
-    for edge in related:
-        args += ["--related", edge]
-    for label in labels:
-        args += ["--label", label]
-    if parent:
-        args += ["--parent", parent]
-    return _lore(env, *args, stdin="# body\n").split("/", 1)[1]
+    return _create(env, vault, "task", title, status, related, labels, parent)
 
 
 def relate(env, record_id, edge):
