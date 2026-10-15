@@ -201,16 +201,11 @@ def test_wrapper_execs_the_resolved_interpreter_not_the_symlink_that_started_the
     assert shown.returncode == 0, shown.stderr
 
 
-@pytest.mark.parametrize("victim", ["config", "gitconfig"])
-def test_preexisting_config_or_gitconfig_refuses_and_leaves_everything_unchanged(sandbox, victim):
+def test_preexisting_lore_config_refuses_and_leaves_everything_unchanged(sandbox):
     home = sandbox / "home"
-    if victim == "config":
-        target = home / ".config" / "lore" / "config.json"
-        target.parent.mkdir(parents=True)
-        target.write_bytes(b'{"vaults": []}')
-    else:
-        target = home / ".gitconfig"
-        target.write_bytes(b"[user]\n\temail = real@example.com\n")
+    target = home / ".config" / "lore" / "config.json"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b'{"vaults": []}')
     before_home = snapshot(home)
     before_cwd = snapshot(sandbox / "cwd")
 
@@ -220,6 +215,41 @@ def test_preexisting_config_or_gitconfig_refuses_and_leaves_everything_unchanged
     assert result.stderr.startswith("seed-eval-vault: ")
     assert snapshot(home) == before_home
     assert snapshot(sandbox / "cwd") == before_cwd == {}
+
+
+def test_preexisting_gitconfig_with_an_identity_is_kept_and_its_identity_is_stamped(sandbox):
+    gitconfig = sandbox / "home" / ".gitconfig"
+    original = b"[user]\n\tname = Runner Identity\n\temail = runner@example.invalid\n"
+    gitconfig.write_bytes(original)
+
+    result = seed(sandbox, [ADR])
+    assert result.returncode == 0, result.stderr
+    assert gitconfig.read_bytes() == original
+
+    amended = seeded_lore(
+        sandbox, "record", "amend", "adr/use-the-fixture-queue",
+        "--reason", "fix", "--initiated-by", "operator",
+        "--diff", stdin="--- a\n+++ b\n@@ -1 +1 @@\n-We use the queue.\n+We use the stream.\n",
+    )
+    assert amended.returncode == 0, amended.stderr
+    entry = show(sandbox, "adr/use-the-fixture-queue")["sidecar"]["change-history"][0]
+    assert entry["by"] == "runner@example.invalid"
+
+
+def test_preexisting_gitconfig_without_an_email_refuses_and_creates_nothing(sandbox):
+    gitconfig = sandbox / "home" / ".gitconfig"
+    original = b"[user]\n\tname = Nameless\n"
+    gitconfig.write_bytes(original)
+    env = clean_env(sandbox, GIT_CONFIG_NOSYSTEM="1")
+
+    result = seed(sandbox, [ADR], env=env)
+
+    assert result.returncode != 0
+    assert result.stderr.startswith("seed-eval-vault: ")
+    assert "user.email" in result.stderr
+    assert gitconfig.read_bytes() == original
+    assert snapshot(sandbox / "cwd") == {}
+    assert not (sandbox / "home" / ".config").exists()
 
 
 OVERRIDES = {
