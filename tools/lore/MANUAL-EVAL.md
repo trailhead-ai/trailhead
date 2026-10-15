@@ -254,7 +254,7 @@ Run command: README "Running a batch", one case per invocation, with `--ablation
   as written. Their scores below are a floor. Replacing them needs a controller decision (an `llm` grader
   named in `expected.md`, or dropping the clause), so they were left as pre-registered.
 
-### Baseline arm (current prose), 2026-10-15
+### Baseline arm (current prose), 2026-10-15 - first pass, scored under the uncorrected graders
 
 Errored runs (scaffold or load failure) in the scored batch: **none**. Cost is the list-price estimate.
 
@@ -279,3 +279,46 @@ Observed from kept workspaces in one unscored diagnostic run each:
 
 Two cases (`amend-wrong-fact-in-active-adr`, `supersede-reversed-decision`) are green at baseline and are
 reported green: the current CLI help and refusal messages already steer these. They are not reworded.
+
+### Post-baseline grader corrections (commit `09f35615`)
+
+Made after the first baseline above, before any treatment run. Each brings a grader back to its
+pre-registered clause; no clause text changed.
+
+| Grader | Old | New | Why it now matches the clause |
+|---|---|---|---|
+| narrowing: `wrong-text-gone` | `not_contains` `any date range` | `not_contains` `any date range the team lead chooses\.` | The wrong text is the unqualified claim; a correct fix "any date range the team lead chooses, up to a maximum of 31 days" keeps the substring but not the claim. |
+| drifted mechanism: `wrong-text-gone` | `not_contains` `[Ss]equence number` | `not_contains` `sender id and (the sender's \|a \|the )?sequence number` | The wrong text is the claim that the key is built from a sequence number; a correction saying "no sequence number is involved" now passes. |
+| ADR exception: `spec-is-draft` | `regex` on `vault/spec/*.json` | `llm`, focus `trace` | A `regex` path takes no glob and the created spec's name is unknown in advance. |
+| ADR exception: `spec-mentions-the-exception` | `regex` on `vault/spec/*.md`, `archive` | `llm`, focus `trace` | Same; also decides "proposes the change" directly instead of approximating it. |
+| spec orphaning: `successor-is-draft` | `regex` on `vault/spec/*.json` | `llm`, focus `trace` | Same glob problem. |
+
+An `llm` grader can read one named file or the session `trace` (first 12 and last 12 messages), not a
+glob of files, so these three judge the agent's `./lore record create --kind spec` call and its result.
+The audit of every other `contains` / `not_contains` grader in all six cases found no further mismatch.
+
+### Baseline arm, re-run under the corrected graders, 2026-10-15
+
+Cases whose graders changed, `--runs 3`, same command. Errored runs (scaffold or load failure): none.
+
+| Case | Run scores (1 / 2 / 3) | Cost | Failed graders | Bar |
+|---|---|---|---|---|
+| amend-narrow-one-criterion-in-ready-spec | 1.00 / 1.00 / 1.00 | $0.663 | none | **green** |
+| amend-drifted-mechanism-detail-phrased-as-serious-error | 1.00 / 0.667 / 1.00 | $0.567 | run 2: `change-history-entry`, `corrected-text-present`, `wrong-text-gone` | **green** (2 of 3) |
+| supersede-adr-exception-phrased-as-small-tweak | 0.667 / 0.667 / 0.667 | $0.655 | `draft-spec-exists`, `spec-is-draft`, `spec-mentions-the-exception`, all three | red |
+| supersede-spec-change-orphaning-an-objective-phrased-as-small-tweak | 0.714 / 0.714 / 0.714 | $0.488 | `successor-spec-exists`, `successor-is-draft`, all three | red |
+
+Model `claude-opus-5-5`; re-run total $2.374. The two cases with unchanged graders
+(`amend-wrong-fact-in-active-adr`, `supersede-reversed-decision`) were not re-run: green 3/3 each.
+
+Diagnosis (kept workspaces of the drifted-mechanism and ADR-exception re-runs, since deleted):
+- Drifted mechanism, runs 1 and 3: amended in place with "built from the sender id and a digest of the
+  event payload; no sequence number is involved". Run 2: the `./lore record amend` call was denied by the
+  sandbox ("don't-ask mode"), so the agent stopped with the record unchanged. That is a tool-permission
+  denial, not a classification decision; it recurred in the first pass's run 3 as well.
+- ADR exception, all three runs: the agent read the ADR, recognised the exception contradicts the
+  decision, recommended supersession (also offering amend), wrote nothing and asked the operator to
+  choose. No spec was created. `expected.md` scores an ask as a fail, so the case is red, but the
+  baseline classification is right and only the act is missing.
+- Spec orphaning (from the earlier diagnostic run): the same pattern, noticed the orphaned objective
+  and asked.
