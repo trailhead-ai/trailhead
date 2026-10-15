@@ -25,7 +25,12 @@ Stdout on exit 0 is one JSON object:
   bare task slug (no `task/` prefix) and has passed the shape check above, so
   it can be substituted into `lore record show --json --vault <vault>
   task/<name>`; it is a record slug and is not credential-scrubbed. `title`
-  has control characters stripped and credential spans redacted;
+  has control characters and invisible format characters (Unicode categories
+  Cf, Zl, Zp: zero-width, bidi and tag characters, line and paragraph
+  separators) stripped, is truncated to MAX_TITLE_CHARS characters with a
+  trailing `…` marker when longer (the credential scan is quadratic on
+  hostile input, so the bound applies before it), and has credential spans
+  redacted;
 - the basis: `slice-basis` (`labelled` or `linked-parents`), `slices` (their
   names), `child-count`, `candidates-read`, `kept`, `excluded-by-label`
   (`{count, names}`) and `skipped-edges`.
@@ -84,6 +89,7 @@ import json
 import re
 import subprocess
 import sys
+import unicodedata
 from pathlib import Path
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
@@ -119,7 +125,10 @@ OPEN_STATUSES = frozenset({"open", "ready", "blocked"})
 QUERY_BATCH_SIZE = 40
 SEARCH_LIMIT = "100000"
 REDACTED = "[REDACTED]"
+MAX_TITLE_CHARS = 300
+TRUNCATION_MARKER = "\u2026"
 _CONTROL_RE = re.compile("[\x00-\x1f\x7f-\x9f]")
+_INVISIBLE_CATEGORIES = frozenset({"Cf", "Zl", "Zp"})
 MARKER_ENTRIES = {"complete": "complete-marker", "stopped": "stopped-marker"}
 
 
@@ -246,7 +255,13 @@ def _call_json(runner, argv: list[str]):
 def sanitize_title(title: str) -> str:
     import capture_scan
 
-    clean = _CONTROL_RE.sub("", title)
+    clean = "".join(
+        c
+        for c in _CONTROL_RE.sub("", title)
+        if unicodedata.category(c) not in _INVISIBLE_CATEGORIES
+    )
+    if len(clean) > MAX_TITLE_CHARS:
+        clean = clean[:MAX_TITLE_CHARS] + TRUNCATION_MARKER
     spans = {
         f.text
         for f in capture_scan.scan_text(clean)

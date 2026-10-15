@@ -980,6 +980,46 @@ def test_a_title_with_nothing_to_strip_is_emitted_unchanged(capsys):
     assert result["followups"][0]["title"] == "Plain follow-up title"
 
 
+def test_a_hostile_oversized_title_is_bounded_and_sanitized_quickly():
+    import time
+
+    start = time.monotonic()
+    out = gather.sanitize_title("token" * 40000)
+    elapsed = time.monotonic() - start
+    assert elapsed < 1.0, f"sanitize took {elapsed:.2f}s"
+    assert len(out) <= gather.MAX_TITLE_CHARS + 1
+    assert out.endswith("\u2026")
+
+
+def test_a_title_within_the_bound_keeps_its_length_and_has_no_marker():
+    title = ("ab " * gather.MAX_TITLE_CHARS)[: gather.MAX_TITLE_CHARS]
+    assert gather.sanitize_title(title) == title
+
+
+def test_a_title_one_past_the_bound_is_truncated_with_a_marker():
+    title = ("ab " * gather.MAX_TITLE_CHARS)[: gather.MAX_TITLE_CHARS + 1]
+    assert gather.sanitize_title(title) == title[: gather.MAX_TITLE_CHARS] + "\u2026"
+
+
+@pytest.mark.parametrize(
+    "ch", ["\u200b", "\u202e", "\u2028", "\u2029", "\U000e0041", "\u200d", "\ufeff"]
+)
+def test_invisible_and_format_characters_are_stripped_from_a_title(ch):
+    assert gather.sanitize_title(f"ab{ch}cd") == "abcd"
+
+
+def test_a_credential_split_by_a_zero_width_character_is_redacted():
+    token = "AKIA" + "\u200b" + "IOSFODNN7" + "EXAMPLE"
+    out = gather.sanitize_title(f"Rotate {token} now")
+    assert "IOSFODNN7EXAMPLE" not in out
+    assert out.startswith("Rotate ") and out.endswith(" now")
+
+
+def test_ordinary_non_ascii_letters_survive_a_title():
+    title = "caf\u00e9 \u00fcber \u6f22\u5b57"
+    assert gather.sanitize_title(title) == title
+
+
 def test_a_title_scanner_that_cannot_be_imported_exits_two_internal_error(capsys, monkeypatch):
     monkeypatch.setitem(sys.modules, "capture_scan", None)
     code, _, out, err = run_json(fake_board(), capsys)
