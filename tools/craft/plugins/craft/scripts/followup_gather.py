@@ -189,18 +189,23 @@ def _parse_sidecar(stdout: str) -> dict:
     return sidecar
 
 
+def _show(runner, vault: str, record_id: str) -> dict | None:
+    """The sidecar of `record_id` in `vault`, or None when it is not there."""
+    done = _call(runner, ["record", "show", "--json", "--vault", vault, record_id])
+    if done.returncode != 0:
+        if "record not found" in done.stderr:
+            return None
+        raise GatherError("lore-failed")
+    return _parse_sidecar(done.stdout)
+
+
 def resolve_spec(runner, name: str) -> tuple[str, dict]:
     """Return (vault, sidecar) for `spec/<name>`, found in exactly one vault."""
     found: list[tuple[str, dict]] = []
     for vault in list_vaults(runner):
-        done = _call(
-            runner, ["record", "show", "--json", "--vault", vault, f"spec/{name}"]
-        )
-        if done.returncode != 0:
-            if "record not found" in done.stderr:
-                continue
-            raise GatherError("lore-failed")
-        found.append((vault, _parse_sidecar(done.stdout)))
+        sidecar = _show(runner, vault, f"spec/{name}")
+        if sidecar is not None:
+            found.append((vault, sidecar))
     if not found:
         raise GatherError("spec-not-found")
     if len(found) > 1:
@@ -211,10 +216,14 @@ def resolve_spec(runner, name: str) -> tuple[str, dict]:
     return vault, sidecar
 
 
+def _labels(sidecar: dict) -> dict:
+    labels = sidecar.get("labels")
+    return labels if isinstance(labels, dict) else {}
+
+
 def entry_verdict(sidecar: dict) -> str | None:
     """How the spec's slice loop ended, or None when it has not."""
-    labels = sidecar.get("labels")
-    marker = labels.get(LOOP_LABEL) if isinstance(labels, dict) else None
+    marker = _labels(sidecar).get(LOOP_LABEL)
     if marker in MARKER_ENTRIES:
         return MARKER_ENTRIES[marker]
     if sidecar["status"] == "complete":
@@ -331,25 +340,15 @@ class _Gatherer:
             return None
         return slug
 
-    def read(self, name: str, missing_ok: bool = False) -> dict | None:
+    def read(self, name: str) -> dict:
         if name not in self._sidecars:
-            done = _call(
-                self.runner, ["record", "show", "--json", "--vault", self.vault, f"task/{name}"]
-            )
-            if done.returncode != 0:
-                if missing_ok and "record not found" in done.stderr:
-                    return None
+            sidecar = _show(self.runner, self.vault, f"task/{name}")
+            if sidecar is None:
                 raise GatherError("lore-failed")
-            sidecar = _parse_sidecar(done.stdout)
             if sidecar["kind"] != "task":
                 raise GatherError("malformed-sidecar")
             self._sidecars[name] = sidecar
         return self._sidecars[name]
-
-
-def _labels(sidecar: dict) -> dict:
-    labels = sidecar.get("labels")
-    return labels if isinstance(labels, dict) else {}
 
 
 def gather_followups(runner, vault: str, spec: str, spec_sidecar: dict) -> dict:
@@ -423,21 +422,16 @@ def main(argv: list[str] | None = None, runner=None) -> int:
             prog="followup_gather.py", description="Decide whether a spec's slice loop has ended."
         )
         parser.add_argument("spec_name", help="bare spec record name (the part after spec/)")
+        runner = runner or lore_runner
         try:
             name = parser.parse_args(argv).spec_name
-        except GatherError as err:
-            return _refuse(2, err.reason)
-        if not _shape_ok(name):
-            return _refuse(2, "invalid-spec-name")
-        try:
-            vault, sidecar = resolve_spec(runner or lore_runner, name)
-        except GatherError as err:
-            return _refuse(2, err.reason)
-        entry = entry_verdict(sidecar)
-        if entry is None:
-            return _refuse(1, "slice-loop-not-ended")
-        try:
-            gathered = gather_followups(runner or lore_runner, vault, name, sidecar)
+            if not _shape_ok(name):
+                raise GatherError("invalid-spec-name")
+            vault, sidecar = resolve_spec(runner, name)
+            entry = entry_verdict(sidecar)
+            if entry is None:
+                return _refuse(1, "slice-loop-not-ended")
+            gathered = gather_followups(runner, vault, name, sidecar)
         except GatherError as err:
             return _refuse(2, err.reason)
         print(json.dumps({"spec": name, "vault": vault, "entry": entry, **gathered}))
