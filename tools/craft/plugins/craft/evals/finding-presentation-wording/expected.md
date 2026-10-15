@@ -568,3 +568,351 @@ condition, and still recorded as unmeasured. AC17 and AC18 close only when the o
     council membership; no eval site applies.
   - The review skill, the end-of-build review and every agent file under `agents/` do not name `council.md`; they
     are not consumers and no site covers them (see "Not measured").
+
+## Results: finding-order reading, close-out and a real consult run (2026-10-15)
+
+Written after the treated results above. It carries the by-eye finding-order reading of every baseline and treated
+capture, the close-out of the fallback, and one real `/craft:consult` run. Nothing above this heading is rewritten.
+
+### Fallback and live-arm rebuild
+
+No site failed. Every site passed both naming checks and, at plan and driver, `persisted-levels` (the table under
+"Results: treated arms (2026-10-15)"). The fallback in "Fallback, fixed before any run" is reserved for a failing
+site, so no skill edit was made, no `fallback-<site>` arm was created and no arm was re-run by this task. No
+`gauntlet/SKILL.md` or `plan/SKILL.md` edit was made either, so the record-link case's live arms needed no rebuild.
+
+### The finding-order reading (AC17, AC18)
+
+**Who read.** An agent read these captures, not a person. The protocol in "The finding-order reading (AC17, AC18):
+by eye" says "a person reads". The reading is therefore a first pass for the operator to check, and it closes
+nothing: **AC17 and AC18 are recorded as unmeasured**, and the operator's naming at slice close is what closes them.
+
+**Protocol as applied.** For each of the 33 captures (12 baseline, 21 treated): the consolidated list only (not the
+narrative paragraphs, not the fenced block); every finding in the most serious group and the first finding of each
+other group; and per finding the three observations. Judgement rules used, so a reader can redo it:
+
+- **Opening (a)** is `yes` when the first sentence or heading asks the reader to decide something ("Decide whether",
+  "Should ...?"), `partly` when it recommends without asking, `no` otherwise. **(b)** is `yes` when the opening carries
+  an "I recommend" or an imperative that is the recommendation, `no` when the recommendation first appears on the
+  `Fix:` line or in a table cell. **(c)** is `yes` when the opening names what is at stake in so many words,
+  `partly` when it only names the problem, `no` when it names neither.
+- A table row is read as a finding whose opening is its finding cell. Its `proposed disposition` cell stands for the
+  decision and its `proposed edit` cell for the recommendation, so a table row at most reaches `partly` on (a) and (b).
+- **Order** is `in order` when the worst case, the `Fix:` line and who raised it follow the opening in that order,
+  `out of order` naming the first element out of place, or `missing` naming the element. A worst case written as an
+  unlabelled sentence right after the opening is read as present.
+- **Plain** is judged strictly: an opening that leans on a spec detail it does not explain (for example "the time of
+  day the 14 days end", or "Tasks 2 and 5") is `no`.
+
+Each line reads: group, the finding's short title, then the three observations.
+
+- `baseline-consult-1` (3 findings read)
+  - most serious group, "Two tenants can both be promised the same plot": Opening (a) no, (b) no, (c) partly; Order out of order, who raised it, in the heading line, comes before the worst case; Plain yes.
+  - first finding of the second group, "A good plot could be sold and passed off as a swap": Opening (a) no, (b) no, (c) partly; Order out of order, who raised it, in the heading line, comes before the worst case; Plain yes.
+  - first finding of the last group, "The confirmation email should name both plots (bullet)": Opening (a) no, (b) yes, (c) partly; Order missing, worst case and the Fix line; Plain yes.
+- `baseline-consult-2` (3 findings read)
+  - most serious group, "Two tenants can be given the same plot": Opening (a) no, (b) no, (c) partly; Order in order; Plain yes.
+  - first finding of the second group, "A swap could keep a good plot away from the waiting list": Opening (a) no, (b) no, (c) partly; Order in order; Plain yes.
+  - first finding of the last group, "The confirmation email should name both plots (bullet)": Opening (a) no, (b) yes, (c) partly; Order missing, worst case and the Fix line; Plain yes.
+- `baseline-consult-3` (3 findings read)
+  - most serious group, "A tenant can arrive to find a stranger on the plot they swapped for": Opening (a) no, (b) no, (c) partly; Order out of order, who raised it, in the heading line, comes before the worst case; Plain yes.
+  - first finding of the second group, "A swap could hide a paid plot transfer that passes over the waiting list": Opening (a) no, (b) no, (c) partly; Order out of order, who raised it, in the heading line, comes before the worst case; Plain yes.
+  - first finding of the last group, "Confirmation emails should name both plots (bullet)": Opening (a) no, (b) yes, (c) partly; Order missing, worst case and the Fix line; Plain yes.
+- `baseline-plan-1` (5 findings read)
+  - most serious group, "1 One freed plot can be offered to two people (at once)": Opening (a) no, (b) no, (c) partly; Order out of order, who raised it, in the heading line, comes before the worst case; Plain yes.
+  - most serious group, "2 The paper-list import can't be checked first / undone": Opening (a) no, (b) no, (c) partly; Order out of order, who raised it, in the heading line, comes before the worst case; Plain yes.
+  - most serious group, "3 If the nightly offer job stops, nobody finds out": Opening (a) no, (b) no, (c) partly; Order out of order, who raised it, in the heading line, comes before the worst case; Plain yes.
+  - first finding of the second group, "Opening the offer email's link accepts the plot": Opening (a) no, (b) no, (c) partly; Order out of order, who raised it, in the heading line, comes before the worst case; Plain yes.
+  - first finding of the last group, "A grant's reason may expose personal details (bullet)": Opening (a) no, (b) no, (c) partly; Order missing, the Fix line; Plain yes.
+- `baseline-plan-2` (5 findings read)
+  - most serious group, "1 One freed plot can be offered to two people (at once)": Opening (a) no, (b) no, (c) partly; Order out of order, who raised it, in the heading line, comes before the worst case; Plain yes.
+  - most serious group, "2 The paper-list import can't be checked first / undone": Opening (a) no, (b) no, (c) partly; Order out of order, who raised it, in the heading line, comes before the worst case; Plain yes.
+  - most serious group, "3 If the nightly offer job stops, nobody finds out": Opening (a) no, (b) no, (c) partly; Order out of order, who raised it, in the heading line, comes before the worst case; Plain yes.
+  - first finding of the second group, "A forwarded email or mail scanner can accept a plot for someone": Opening (a) no, (b) no, (c) partly; Order out of order, who raised it, in the heading line, comes before the worst case; Plain yes.
+  - first finding of the last group, "Tasks 2 and 5 both format dates; share one helper (bullet)": Opening (a) no, (b) yes, (c) no; Order missing, worst case and the Fix line; Plain no.
+- `baseline-plan-3` (5 findings read)
+  - most serious group, "1 One freed plot can be offered to two people (at once)": Opening (a) no, (b) no, (c) partly; Order out of order, who raised it, in the heading line, comes before the worst case; Plain yes.
+  - most serious group, "2 The paper-list import can't be checked first / undone": Opening (a) no, (b) no, (c) partly; Order out of order, who raised it, in the heading line, comes before the worst case; Plain yes.
+  - most serious group, "3 If the nightly offer job stops, nobody finds out": Opening (a) no, (b) no, (c) partly; Order out of order, who raised it, in the heading line, comes before the worst case; Plain yes.
+  - first finding of the second group, "4 Opening the offer email's link accepts the plot": Opening (a) no, (b) no, (c) partly; Order out of order, who raised it, in the heading line, comes before the worst case; Plain yes.
+  - first finding of the last group, "No test covers an offer exactly 14 days old (bullet)": Opening (a) no, (b) no, (c) no; Order missing, worst case and the Fix line; Plain yes.
+- `baseline-specreview-1` (4 findings read)
+  - most serious group, "C1 paper-list people without email lose their place": Opening (a) partly, (b) partly, (c) partly; Order missing, worst case (the finding cell is the problem statement and the proposed-edit cell stands for the Fix line) and who raised it; Plain yes.
+  - most serious group, "C2 an offer that never arrives empties the plot, then sends a long-waiting person to the back": Opening (a) partly, (b) partly, (c) partly; Order missing, worst case (the finding cell is the problem statement and the proposed-edit cell stands for the Fix line) and who raised it; Plain yes.
+  - first finding of the second group, "No criterion says who marks a plot as freed": Opening (a) no, (b) no, (c) partly; Order missing, worst case, Fix line and who raised it; Plain yes.
+  - first finding of the last group, "When during the day the 14 days end": Opening (a) no, (b) no, (c) no; Order missing, worst case, Fix line and who raised it; Plain no.
+- `baseline-specreview-2` (4 findings read)
+  - most serious group, "C1 paper-list people have no route onto the online queue": Opening (a) partly, (b) partly, (c) partly; Order missing, worst case (the finding cell is the problem statement and the proposed-edit cell stands for the Fix line) and who raised it; Plain yes.
+  - most serious group, "C2 an offer that never arrives costs the person their place (Reliability + Advocate)": Opening (a) partly, (b) partly, (c) partly; Order missing, worst case (the proposed-edit cell stands for the Fix line); who raised it sits inside the finding cell, ahead of the edit; Plain yes.
+  - first finding of the second group, "A person can't see their current place after the first email (Consistency + Advocate)": Opening (a) no, (b) no, (c) no; Order missing, worst case and the Fix line; Plain yes.
+  - first finding of the last group, "wording around "a few times a month"": Opening (a) no, (b) no, (c) no; Order missing, worst case, Fix line and who raised it; Plain no.
+- `baseline-specreview-3` (4 findings read)
+  - most serious group, "C1 paper-list people have no path into the online queue": Opening (a) partly, (b) partly, (c) partly; Order missing, worst case (the finding cell is the problem statement and the proposed-edit cell stands for the Fix line) and who raised it; Plain yes.
+  - most serious group, "C2 an undelivered offer leaves the plot empty then moves the person to the back": Opening (a) partly, (b) partly, (c) partly; Order missing, worst case (the finding cell is the problem statement and the proposed-edit cell stands for the Fix line) and who raised it; Plain yes.
+  - first finding of the second group, "Missing triggers and states (nobody marks a plot freed; empty queue)": Opening (a) no, (b) no, (c) no; Order missing, worst case, Fix line and who raised it; Plain yes.
+  - first finding of the last group, "the time of day the 14 days end": Opening (a) no, (b) no, (c) no; Order missing, worst case, Fix line and who raised it; Plain no.
+- `baseline-driver-1` (5 findings read)
+  - most serious group, "1 One freed plot can be offered to two people": Opening (a) no, (b) no, (c) partly; Order in order; Plain yes.
+  - most serious group, "2 A bad or repeated import can't be undone": Opening (a) no, (b) no, (c) partly; Order in order; Plain yes.
+  - most serious group, "3 If the nightly offer job stops, nobody finds out": Opening (a) no, (b) no, (c) partly; Order in order; Plain yes.
+  - first finding of the second group, "A person granted a plot out of turn can be offered a second one": Opening (a) no, (b) no, (c) partly; Order in order; Plain yes.
+  - first finding of the last group, "The out-of-turn reason a warden types is visible to every committee member (bullet)": Opening (a) no, (b) no, (c) partly; Order missing, the Fix line; Plain yes.
+- `baseline-driver-2` (5 findings read)
+  - most serious group, "1 One freed plot can be offered to two people": Opening (a) no, (b) no, (c) partly; Order in order; Plain yes.
+  - most serious group, "2 A bad or repeated import can't be undone": Opening (a) no, (b) no, (c) partly; Order in order; Plain yes.
+  - most serious group, "3 If the nightly offer job stops, nobody finds out": Opening (a) no, (b) no, (c) partly; Order in order; Plain yes.
+  - first finding of the second group, "A warden's out-of-turn grant leaves the person in the queue": Opening (a) no, (b) no, (c) partly; Order in order; Plain yes.
+  - first finding of the last group, "Tasks 2 and 5 each format dates; share one helper (bullet)": Opening (a) no, (b) yes, (c) no; Order missing, worst case and the Fix line; Plain no.
+- `baseline-driver-3` (5 findings read)
+  - most serious group, "1 One freed plot can be offered to two people": Opening (a) no, (b) no, (c) partly; Order in order; Plain yes.
+  - most serious group, "2 Importing the paper list can't be checked first or undone": Opening (a) no, (b) no, (c) partly; Order in order; Plain yes.
+  - most serious group, "3 If the nightly offer job stops, nobody finds out": Opening (a) no, (b) no, (c) partly; Order in order; Plain yes.
+  - first finding of the second group, "Someone given a plot out of turn can still be offered another one": Opening (a) no, (b) no, (c) partly; Order in order; Plain yes.
+  - first finding of the last group, "No test covers an offer exactly 14 days old (bullet)": Opening (a) no, (b) no, (c) no; Order missing, worst case and the Fix line; Plain yes.
+- `treated-consult-1` (3 findings read)
+  - most serious group, "If swaps complete without the warden, two of them can hand out the same plot": Opening (a) partly, (b) yes, (c) yes; Order in order; Plain yes.
+  - first finding of the second group, "A "swap" could hide a paid sale of a good plot": Opening (a) yes, (b) yes, (c) partly; Order in order; Plain yes.
+  - first finding of the last group, "The confirmation email should name both plots (bullet)": Opening (a) no, (b) yes, (c) partly; Order missing, worst case and the Fix line; Plain yes.
+- `treated-consult-2` (3 findings read)
+  - most serious group, "Allowing direct swaps without a single, live record of plot holders would let two swaps claim the same plot": Opening (a) partly, (b) yes, (c) yes; Order in order; Plain yes.
+  - first finding of the second group, "Direct swaps could pass over people on the waiting list": Opening (a) partly, (b) yes, (c) yes; Order in order; Plain yes.
+  - first finding of the last group, "The swap confirmation email doesn't name the plots (bullet)": Opening (a) no, (b) yes, (c) partly; Order missing, worst case and the Fix line; Plain yes.
+- `treated-consult-3` (3 findings read)
+  - most serious group, "1 Decide whether the form checks plot holdings at the final confirmation": Opening (a) yes, (b) yes, (c) yes; Order in order; Plain yes.
+  - first finding of the second group, "2 Decide whether the warden must approve swaps": Opening (a) yes, (b) yes, (c) yes; Order in order; Plain yes.
+  - first finding of the last group, "7 The swap confirmation email should name both plots": Opening (a) no, (b) yes, (c) partly; Order missing, the worst case; Plain yes.
+- `treated-consult-4` (3 findings read)
+  - most serious group, "Two swaps can claim the same plot, and one tenant arrives to find a stranger on it": Opening (a) yes, (b) yes, (c) yes; Order in order; Plain yes.
+  - first finding of the second group, "Swaps can become a back door past the waiting list": Opening (a) yes, (b) yes, (c) yes; Order in order; Plain yes.
+  - first finding of the last group, "The confirmation email should name both plots (bullet)": Opening (a) no, (b) yes, (c) partly; Order missing, worst case and the Fix line; Plain yes.
+- `treated-consult-5` (3 findings read)
+  - most serious group, "Two swaps can claim the same plot, and both go through": Opening (a) yes, (b) yes, (c) yes; Order in order; Plain yes.
+  - first finding of the second group, "A direct swap can hide a sale and pass over the waiting list": Opening (a) yes, (b) yes, (c) yes; Order in order; Plain yes.
+  - first finding of the last group, "The swap confirmation email should name both plots (bullet)": Opening (a) no, (b) yes, (c) partly; Order missing, worst case and the Fix line; Plain yes.
+- `treated-consult-6` (3 findings read)
+  - most serious group, "Two swaps can claim the same plot": Opening (a) partly, (b) partly, (c) yes; Order in order; Plain yes.
+  - first finding of the second group, "A paid "swap" can pass over the waiting list": Opening (a) yes, (b) yes, (c) yes; Order in order; Plain yes.
+  - first finding of the last group, "The swap confirmation email doesn't name the plots (bullet)": Opening (a) no, (b) yes, (c) partly; Order missing, worst case and the Fix line; Plain yes.
+- `treated-plan-1` (5 findings read)
+  - most serious group, "1 Should queue order be stored as a renumbered place, or worked out from join time?": Opening (a) yes, (b) yes, (c) yes; Order in order; Plain yes.
+  - most serious group, "2 Should the paper-list import be allowed to run once, live, with no preview or undo?": Opening (a) yes, (b) yes, (c) yes; Order in order; Plain yes.
+  - most serious group, "3 Should the nightly offer job be able to fail without anyone noticing?": Opening (a) yes, (b) yes, (c) yes; Order in order; Plain yes.
+  - first finding of the second group, "4 The offer link accepts a plot just because it was opened. Put a confirm page behind it": Opening (a) no, (b) yes, (c) yes; Order in order; Plain yes.
+  - first finding of the last group, "Dates are formatted in two places; Tasks 2 and 5 should share a helper (bullet)": Opening (a) no, (b) yes, (c) no; Order missing, worst case and the Fix line; Plain no.
+- `treated-plan-2` (5 findings read)
+  - most serious group, "Should the queue stop storing place numbers?": Opening (a) yes, (b) yes, (c) yes; Order in order; Plain yes.
+  - most serious group, "Should the paper-list import get a preview and a way to undo it?": Opening (a) yes, (b) yes, (c) yes; Order in order; Plain yes.
+  - most serious group, "Should the nightly offer job tell someone it ran, and alarm when it didn't?": Opening (a) yes, (b) yes, (c) yes; Order in order; Plain yes.
+  - first finding of the second group, "Should an out-of-turn grant also take the person off the queue?": Opening (a) yes, (b) yes, (c) yes; Order in order; Plain yes.
+  - first finding of the last group, "Add a test for an offer exactly 14 days old (bullet)": Opening (a) no, (b) yes, (c) partly; Order missing, worst case and the Fix line; Plain yes.
+- `treated-plan-3` (5 findings read)
+  - most serious group, "1 Should the queue order come from join time instead of a stored place number?": Opening (a) yes, (b) yes, (c) yes; Order in order; Plain yes.
+  - most serious group, "2 Should the paper-list import get a preview and a way to undo a run?": Opening (a) yes, (b) yes, (c) yes; Order in order; Plain yes.
+  - most serious group, "3 Should someone be told when the nightly offer job fails to run?": Opening (a) yes, (b) yes, (c) yes; Order in order; Plain yes.
+  - first finding of the second group, "4 A plot given out of turn should take the person off the queue": Opening (a) no, (b) yes, (c) no; Order in order; Plain yes.
+  - first finding of the last group, "10 The reason a warden types for a grant shows on the history page (bullet)": Opening (a) no, (b) yes, (c) partly; Order missing, worst case and the Fix line; Plain yes.
+- `treated-specreview-1` (4 findings read)
+  - most serious group, "C1 an offer email that never arrives sends the person to the back": Opening (a) partly, (b) partly, (c) partly; Order missing, worst case (the finding cell is the problem statement and the proposed-edit cell stands for the Fix line) and who raised it; Plain yes.
+  - most serious group, "C2 the paper list has no way onto the online queue": Opening (a) partly, (b) partly, (c) partly; Order missing, worst case (the finding cell is the problem statement and the proposed-edit cell stands for the Fix line) and who raised it; Plain yes.
+  - first finding of the second group, "Visibility: "see their place" has no criterion after the first email": Opening (a) no, (b) no, (c) no; Order missing, worst case and the Fix line; Plain yes.
+  - first finding of the last group, "Wording: "lapse" reads as jargon": Opening (a) no, (b) no, (c) no; Order missing, worst case, Fix line and who raised it; Plain no.
+- `treated-specreview-2` (4 findings read)
+  - most serious group, "C1 an undelivered offer silently sends a person to the back (failure cases, ease of use)": Opening (a) partly, (b) partly, (c) partly; Order missing, worst case (the proposed-edit cell stands for the Fix line); who raised it sits inside the finding cell, ahead of the edit; Plain yes.
+  - most serious group, "C2 people on the paper list have no way into the new queue (right problem, plus my own reading)": Opening (a) partly, (b) partly, (c) partly; Order missing, worst case (the proposed-edit cell stands for the Fix line); who raised it sits inside the finding cell, ahead of the edit; Plain yes.
+  - first finding of the second group, "Seeing your place: nothing after the first email lets them": Opening (a) no, (b) no, (c) no; Order missing, worst case and the Fix line; Plain yes.
+  - first finding of the last group, "what time of day the 14 days end": Opening (a) no, (b) no, (c) no; Order missing, worst case, Fix line and who raised it; Plain no.
+- `treated-specreview-3` (4 findings read)
+  - most serious group, "C1 the paper list has no path online": Opening (a) partly, (b) partly, (c) partly; Order missing, worst case (the finding cell is the problem statement and the proposed-edit cell stands for the Fix line) and who raised it; Plain yes.
+  - most serious group, "C2 an offer that never arrives leaves the plot empty then sends the person to the back": Opening (a) partly, (b) partly, (c) partly; Order missing, worst case (the finding cell is the problem statement and the proposed-edit cell stands for the Fix line) and who raised it; Plain yes.
+  - first finding of the second group, "Seeing your place: no criterion delivers it after the first email": Opening (a) no, (b) no, (c) no; Order missing, worst case and the Fix line; Plain yes.
+  - first finding of the last group, "Wording and visibility: the time of day the 14 days end": Opening (a) no, (b) no, (c) no; Order missing, worst case, Fix line and who raised it; Plain no.
+- `treated-specreview-4` (4 findings read)
+  - most serious group, "C1 no way to move the paper list online in order": Opening (a) partly, (b) partly, (c) partly; Order missing, worst case (the finding cell is the problem statement and the proposed-edit cell stands for the Fix line) and who raised it; Plain yes.
+  - most serious group, "C2 an undelivered offer costs the person their place": Opening (a) partly, (b) partly, (c) partly; Order missing, worst case (the finding cell is the problem statement and the proposed-edit cell stands for the Fix line) and who raised it; Plain yes.
+  - first finding of the second group, "After joining, a person has no way to see their current place": Opening (a) no, (b) no, (c) no; Order missing, worst case and the Fix line; Plain yes.
+  - first finding of the last group, "The list has 412 names, not about 340": Opening (a) no, (b) no, (c) no; Order missing, worst case, Fix line and who raised it; Plain no.
+- `treated-specreview-5` (4 findings read)
+  - most serious group, "C1 the paper list has no route online": Opening (a) partly, (b) partly, (c) partly; Order missing, worst case (the finding cell is the problem statement and the proposed-edit cell stands for the Fix line) and who raised it; Plain yes.
+  - most serious group, "C2 an offer that never arrives silently sends the person to the back": Opening (a) partly, (b) partly, (c) partly; Order missing, worst case (the finding cell is the problem statement and the proposed-edit cell stands for the Fix line) and who raised it; Plain yes.
+  - first finding of the second group, "Buildability: nothing marks a plot as freed (AC2 has no trigger)": Opening (a) no, (b) no, (c) no; Order out of order, who raised it leads the line (a reviewer label first), and the worst case and Fix line are missing; Plain yes.
+  - first finding of the last group, "What time of day an offer ends": Opening (a) no, (b) no, (c) no; Order missing, worst case, Fix line and who raised it; Plain no.
+- `treated-specreview-6` (5 findings read)
+  - most serious group, "C1 nothing moves the 412 people on the paper list online": Opening (a) partly, (b) partly, (c) partly; Order missing, worst case (the finding cell is the problem statement and the proposed-edit cell stands for the Fix line) and who raised it; Plain yes.
+  - most serious group, "C2 a bounced offer holds the plot 14 days then sends an unwarned person to the back": Opening (a) partly, (b) partly, (c) partly; Order missing, worst case (the finding cell is the problem statement and the proposed-edit cell stands for the Fix line) and who raised it; Plain yes.
+  - most serious group, "C3 the Objectives promise people can see their place, no criterion shows it": Opening (a) partly, (b) partly, (c) partly; Order missing, worst case (the finding cell is the problem statement and the proposed-edit cell stands for the Fix line) and who raised it; Plain yes.
+  - first finding of the second group, "Nothing says who marks a plot as freed": Opening (a) no, (b) no, (c) no; Order missing, worst case, Fix line and who raised it; Plain yes.
+  - first finding of the last group, "The time of day the 14 days end isn't stated": Opening (a) no, (b) no, (c) no; Order missing, worst case, Fix line and who raised it; Plain no.
+- `treated-driver-1` (5 findings read)
+  - most serious group, "Decide how the queue keeps its order": Opening (a) yes, (b) yes, (c) yes; Order in order; Plain yes.
+  - most serious group, "Decide whether the paper-list import needs a preview and an undo": Opening (a) yes, (b) yes, (c) yes; Order in order; Plain yes.
+  - most serious group, "Decide whether a missed nightly offer run should alert someone": Opening (a) yes, (b) yes, (c) yes; Order in order; Plain yes.
+  - first finding of the second group, "A plot granted out of turn should take the person off the queue": Opening (a) no, (b) yes, (c) yes; Order in order; Plain yes.
+  - first finding of the last group, "Tasks 2 and 5 both format dates; share one helper (bullet)": Opening (a) no, (b) yes, (c) no; Order missing, worst case and the Fix line; Plain no.
+- `treated-driver-2` (5 findings read)
+  - most serious group, "1 Should a queue position be a stored number, or worked out from join time?": Opening (a) yes, (b) partly, (c) yes; Order in order; Plain yes.
+  - most serious group, "2 Should the one-off import of 340 people get a preview and a way to undo it?": Opening (a) yes, (b) no, (c) yes; Order in order; Plain yes.
+  - most serious group, "3 Should the nightly offer job report whether it ran?": Opening (a) yes, (b) no, (c) yes; Order in order; Plain yes.
+  - first finding of the second group, "4 The offer link accepts a plot just by being opened; I'd make it lead to a confirmation page": Opening (a) no, (b) yes, (c) yes; Order in order; Plain yes.
+  - first finding of the last group, "Calling an expired offer a "lapse" reads as jargon; use "offer expired" (bullet)": Opening (a) no, (b) yes, (c) no; Order missing, worst case and the Fix line; Plain yes.
+- `treated-driver-3` (5 findings read)
+  - most serious group, "1 How the queue keeps order: should it be ordered by join time?": Opening (a) yes, (b) yes, (c) yes; Order in order; Plain yes.
+  - most serious group, "2 A safe way to run the paper-list import: preview and an undo?": Opening (a) yes, (b) yes, (c) yes; Order in order; Plain yes.
+  - most serious group, "3 Knowing when the nightly offer job didn't run: should a failed run alert someone?": Opening (a) yes, (b) yes, (c) yes; Order in order; Plain yes.
+  - first finding of the second group, "A warden's grant leaves the person on the queue; I recommend having the grant take them off": Opening (a) no, (b) yes, (c) yes; Order in order; Plain yes.
+  - first finding of the last group, "Tasks 2 and 5 each format dates separately; share one helper (bullet)": Opening (a) no, (b) yes, (c) no; Order missing, worst case and the Fix line; Plain no.
+- `treated-driver-4` (6 findings read)
+  - most serious group, "1 Should queue position be a stored number?": Opening (a) yes, (b) yes, (c) yes; Order in order; Plain yes.
+  - most serious group, "2 Does the import need a preview and an undo?": Opening (a) yes, (b) yes, (c) yes; Order in order; Plain yes.
+  - most serious group, "3 Should a missed nightly run alert someone?": Opening (a) yes, (b) yes, (c) yes; Order in order; Plain yes.
+  - most serious group, "4 Should the history page be built from recorded events?": Opening (a) yes, (b) yes, (c) yes; Order in order; Plain no.
+  - first finding of the second group, "Getting a plot out of turn doesn't take the person off the queue": Opening (a) no, (b) no, (c) partly; Order in order; Plain yes.
+  - first finding of the last group, "An offer exactly 14 days old has no test; one should be added (bullet)": Opening (a) no, (b) yes, (c) no; Order missing, worst case and the Fix line; Plain yes.
+- `treated-driver-5` (5 findings read)
+  - most serious group, "1 Should the queue keep its order by join time instead of a stored place number?": Opening (a) yes, (b) yes, (c) yes; Order in order; Plain yes.
+  - most serious group, "2 Should the paper-list import run as a batch you can preview and undo?": Opening (a) yes, (b) yes, (c) yes; Order in order; Plain yes.
+  - most serious group, "3 Should the nightly offer run report whether it ran?": Opening (a) yes, (b) yes, (c) yes; Order in order; Plain yes.
+  - first finding of the second group, "4 A warden's out-of-turn grant leaves the person in the queue": Opening (a) no, (b) no, (c) partly; Order in order; Plain yes.
+  - first finding of the last group, "10 A warden's reason for an out-of-turn grant may contain personal details (bullet)": Opening (a) no, (b) no, (c) partly; Order missing, worst case and the Fix line; Plain yes.
+- `treated-driver-6` (5 findings read)
+  - most serious group, "One freed plot can be offered to two people; I recommend replacing the stored place number with join-time ordering": Opening (a) partly, (b) yes, (c) yes; Order in order; Plain yes.
+  - most serious group, "The paper-list import can't be previewed or undone; I recommend a batch id with a preview": Opening (a) partly, (b) yes, (c) partly; Order in order; Plain yes.
+  - most serious group, "If the nightly offer job stops running, nobody finds out; I recommend having it report to the warden": Opening (a) partly, (b) yes, (c) yes; Order in order; Plain yes.
+  - first finding of the second group, "A warden's out-of-turn grant leaves the person on the queue; I recommend having the grant close their queue row": Opening (a) no, (b) yes, (c) partly; Order in order; Plain yes.
+  - first finding of the last group, "Tasks 2 and 5 each format dates; one shared helper would do (bullet)": Opening (a) no, (b) yes, (c) no; Order missing, worst case and the Fix line; Plain no.
+
+### Summary, per site and arm
+
+"Most serious group" counts only the findings the reading names under that group. "All read" adds the first finding
+of each other group. "All three yes" is (a), (b) and (c) all `yes` on the same finding.
+
+| Site | Arm | Reading | Captures | Findings read | (a) yes | (b) yes | (c) yes | all three yes | Order in order |
+|---|---|---|---|---|---|---|---|---|---|
+| consult | baseline | most serious group | 3 | 3 | 0 | 0 | 0 | 0 | 1 |
+| consult | baseline | all read | 3 | 9 | 0 | 3 | 0 | 0 | 2 |
+| consult | treated | most serious group | 6 | 6 | 3 | 5 | 6 | 3 | 6 |
+| consult | treated | all read | 6 | 18 | 8 | 17 | 11 | 7 | 12 |
+| plan | baseline | most serious group | 3 | 9 | 0 | 0 | 0 | 0 | 0 |
+| plan | baseline | all read | 3 | 15 | 0 | 1 | 0 | 0 | 0 |
+| plan | treated | most serious group | 3 | 9 | 9 | 9 | 9 | 9 | 9 |
+| plan | treated | all read | 3 | 15 | 10 | 15 | 11 | 10 | 12 |
+| specreview | baseline | most serious group | 3 | 6 | 0 | 0 | 0 | 0 | 0 |
+| specreview | baseline | all read | 3 | 12 | 0 | 0 | 0 | 0 | 0 |
+| specreview | treated | most serious group | 6 | 13 | 0 | 0 | 0 | 0 | 0 |
+| specreview | treated | all read | 6 | 25 | 0 | 0 | 0 | 0 | 0 |
+| driver | baseline | most serious group | 3 | 9 | 0 | 0 | 0 | 0 | 9 |
+| driver | baseline | all read | 3 | 15 | 0 | 1 | 0 | 0 | 12 |
+| driver | treated | most serious group | 6 | 19 | 16 | 16 | 18 | 13 | 19 |
+| driver | treated | all read | 6 | 31 | 16 | 25 | 21 | 13 | 25 |
+
+**What the counts say.**
+
+- consult: no baseline finding opens with a decision and a recommendation (0 of 9 on (a), 3 of 9 on (b), all of them
+  minor-group bullets whose text is itself the instruction). Treated, the most serious finding carries all three in 3
+  of 6 runs, and the recommendation in 5 of 6. Runs 1, 2 and 6 state the condition without an explicit ask on the first
+  finding (run 6 also without a single recommendation). The order holds on 6 of 6 most serious findings, against 1 of 3
+  at baseline, where two runs put who raised it ahead of the worst case.
+- plan: baseline 0 of 9 most serious findings carry all three, and 0 of 9 are in order, since every baseline heading
+  puts who raised it ahead of the worst case. Treated, 9 of 9 carry all three and 9 of 9 are in order.
+- specreview: **no change.** Baseline and treated both present the most serious findings as table rows: no row opens
+  with a decision, recommendation and stake as a sentence (0 of 6 and 0 of 13), no row carries a worst case, and the
+  order cannot hold (0 of 6 and 0 of 13 in order). See below.
+- driver: baseline 0 of 9 carry all three, 9 of 9 are in order (raised-by is last in the baseline's driver captures,
+  so the order held with no edit). Treated, 13 of 19 most serious findings carry all three and 19 of 19 are in order.
+  The 6 that do not are run 2 (decision asked, no recommendation or only "I'd raise this", 3 findings) and run 6 (an
+  "I recommend" with no explicit ask, 3 findings), run 6's import finding also naming only the problem as the stake.
+  Run 4 has a fourth most serious finding that no reviewer raised, which also carries all three.
+
+**The specreview shape, as seen.** In all six treated captures, and in all three baseline captures, the most serious
+findings are rows of a four-column table (id, finding, proposed disposition, proposed edit): two rows in five treated
+captures, three in run 6. There is no per-finding worst case and no `Fix:` line in any of the nine; the proposed-edit
+cell is the nearest thing to a fix. Who raised a finding is in a finding cell in treated run 2 only (and baseline run
+2's second row); in the others it is in the narrative above the table. Only treated run 2 puts the group heading
+"Would build the wrong thing, needs your decision" above the table; the others show the table with no group heading and
+use the two lower group headings for the bulleted lists beneath it. Those lower groups are one-line bullets, mostly
+topic fragments with no worst case and no `Fix:` line (and so `no` on Plain where they rely on the spec). The
+recommendation sits in the narrative and the `Recommended outcome` line above the table. The treated shape is the
+baseline's shape with plain group names and plain lens labels; the finding shape the criteria describe is not what
+either arm shows at this site. This verifies the earlier observation exactly as made.
+
+**Other things seen by eye.**
+
+- The gap between baseline and treated at consult, plan and driver is mostly the opening: treated openings are
+  questions or "Decide whether" sentences that carry "I recommend" and the stake, where baseline openings are a
+  problem statement with who raised it in the heading line or at the end.
+- The treated lower groups are weaker than the top group. The first finding of the last group is a one-line bullet in
+  every site, with no worst case, so (a) is `no` throughout and the order is `missing` throughout. The bullets that
+  name tasks by number (plan and driver) and the spec-detail fragments (specreview) read `no` on Plain.
+- Two treated driver captures (runs 2 and 4) add a finding no reviewer raised, about the history page; both say so in the
+  raised-by line.
+- The log can be checked by sampling a capture's consolidated list against its lines above.
+
+### One real `/craft:consult` run, read by eye
+
+**What ran.** One real session, from a fresh empty `/tmp` directory, with the branch's plugin only: `claude -p
+"/craft:consult <question>" --plugin-dir <worktree>/tools/craft/plugins/craft --setting-sources project --allowedTools
+...`. Nothing was installed and nothing under `~/.claude`, `~/.config` or `~/.local/state/trailhead` was touched. The
+question was set in a domain unlike the fixtures: a two-person bakery deciding whether to replace a hand-edited
+shared order spreadsheet with a hosted order form (about 60 loaves a week, regulars who order by text, bakers who are
+not technical).
+
+**Which plugin loaded, and how it is known.** The run was made with `--output-format stream-json --verbose`, so the
+session's own `system init` record is in the output. Its `plugins` list holds exactly one craft entry, with source
+`craft@inline` and path `<worktree>/tools/craft/plugins/craft` (the `--plugin-dir` directory), plus three built-in
+plugins and nothing else; `agents` and `slash_commands` list the `craft:*` agents and skills, including `craft:consult`
+and the four lens agents, and the session's first tool call read `<worktree>/.../skills/_shared/council.md`. No
+installed craft was present.
+
+**Two attempts, one retry.** The first attempt, exactly as the dispatch gave the command (plus the stream flags), from
+a truly empty directory with tools `Read,Grep,Glob,Agent`, did not convene the council. The consult skill runs
+`scripts/maturity_bars.py --agent-instruction-file <dir>/CLAUDE.md` before dispatching, the `Bash` call was refused by
+the tool grant, and the script refuses a missing `CLAUDE.md` rather than defaulting (reason code
+`agent-instruction-file-unreadable`). The session said so and stopped, giving a short view of its own instead. That is
+a reason fixable in the command, so the one permitted retry was used: a fresh directory containing only a
+`CLAUDE.md` with a `## Project Maturity` section (`prototype`) and the grant widened to `Bash(:*)` and
+`Bash(<plugin>/scripts/maturity_bars.py:*)`. That run dispatched all four lens agents (`craft:builder`,
+`craft:breaker`, `craft:attacker`, `craft:advocate`) and synthesized. **A consult from an empty directory with no
+`CLAUDE.md` and no `Bash` grant does not run the council at all**; that is the shipped skill's own preflight, not a
+defect of this change, and is noted for the operator.
+
+**Reading by eye (final presentation to the reader).** Grouped in plain names: "Would build the wrong thing, needs your
+decision" (2 findings), "Would cause trouble later, worth fixing, your call" (5), "Rough edges, nothing to decide" (4
+bullets). Reviewers appear only as "buildability", "failure cases", "security", "ease of use" (and "All four"). The
+words `Critical`, `Important`, `Minor`, `Builder`, `Breaker`, `Attacker`, `Advocate`, `Reliability`, `Premise` do not
+appear in capitalised form. **Internal severity leak, found by eye:** the lowercase word `minor` names a severity level
+three times, all in the rough-edges list and the narrative: "Rated minor because the project is a prototype",
+"prototype maturity sets it at minor" and "a one-off job, minor at prototype level". The session also names the
+maturity level `prototype` in the opening note and these lines. The reviewers' raw reports (not shown to the reader) used
+`[Critical]`, `[Important]` and `[Minor]` tags, as the template has them.
+
+**Graded with the grader.** `wording_grader.py --check severity-name` and `--check reviewer-name`, run over the final
+presentation text only, with `--reports` pointing at the four lens reports taken from the session's stream (a live run
+has no canned reports file). Both read `plain`. `persisted-levels` was not run: a consult saves no block. The grader
+did not flag the three lowercase `minor` uses, because its severity patterns are case-sensitive by design (the
+grammar's whole-word rule in "Grammar"); the by-eye reading above finds them. The grammar and its amendment stand, so
+this is reported here and not repaired.
+
+**Finding order of the live run (same protocol).** Most serious group (2 findings): "The form will take more orders
+than they can bake. I recommend a hard limit and a Friday close before the form goes live." Opening (a) partly, (b)
+yes, (c) yes; Order in order (worst case, fix, raised by); Plain yes. "Text orders and form orders end up in two
+places. I recommend keeping texts and having a baker enter each one through the form." (a) partly, (b) yes, (c)
+partly; in order; Plain yes. First of the second group, "Hand edits in the form's own tab break things. I recommend a
+separate working tab.": (a) partly, (b) yes, (c) partly; in order; Plain yes. First of the last group, "Undoing the
+switch: costs nothing, because the sheet stays the master copy. Rated minor because the project is a prototype.":
+(a) no, (b) no, (c) no; Order missing (worst case and fix); Plain yes. This is unmeasured like the rest.
+
+**Excerpts.** Top of the supporting detail: `### Would build the wrong thing, needs your decision` / `**1. The form
+will take more orders than they can bake.** I recommend a hard limit and a Friday close before the form goes live.` /
+`- **Worst case:** a customer gets an automatic "order received" for loaf 61. The bakers find out on Friday night and
+have to text an apology.` / `- *Raised by: failure cases, ease of use. Buildability and security raised the same gap
+as less serious.*` The leaks: `- **Undoing the switch:** costs nothing, because the sheet stays the master copy.
+Rated minor because the project is a prototype. *(All four.)*`
+
+**Not committed.** The raw stream holds host paths and the session's working directory, so only the excerpts above are
+recorded. No file was added under `runs/`.
+
+### Limits seen
+
+- One real run, one question, one model tier; it is a read-by-eye observation, not a measured rate.
+- The live run needed a `CLAUDE.md` and a narrow `Bash` grant that the dispatch's command did not give; the finding
+  above is about the skill's own preflight.
+- The finding-order reading is by an agent and is unmeasured by the protocol's own terms.
