@@ -818,30 +818,16 @@ def reports(tmp_path):
     return path
 
 
-def name_grade(check, text, reports):
-    """Run a naming check against `reports`; return the verdict word, exit code agreeing with it."""
-    result = run_grader(["--check", check, "--reports", str(reports)], text.encode("utf-8"))
-    stdout = result.stdout.decode("utf-8")
-    match = re.fullmatch(rf"{re.escape(check)}: ([a-z-]+)\n", stdout)
-    assert match, (stdout, result.stderr)
-    word = match.group(1)
-    assert result.returncode == (0 if word in PASSING else 1), (word, result.returncode)
-    return word
-
-
 def severity(text, reports):
-    return name_grade("severity-name", text, reports)
+    return grade("severity-name", text, criteria=None, extra=("--reports", str(reports)))
 
 
 def reviewer(text, reports):
-    return name_grade("reviewer-name", text, reports)
+    return grade("reviewer-name", text, criteria=None, extra=("--reports", str(reports)))
 
 
 def levels(text):
-    result = run_grader(["--check", "persisted-levels"], text.encode("utf-8"))
-    word = result.stdout.decode("utf-8").removeprefix("persisted-levels: ").strip()
-    assert result.returncode == (0 if word == "kept" else 1), (word, result.returncode, result.stderr)
-    return word
+    return grade("persisted-levels", text, criteria=None)
 
 
 @pytest.mark.parametrize(

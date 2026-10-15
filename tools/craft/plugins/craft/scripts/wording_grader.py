@@ -107,7 +107,6 @@ _COVERS_LABEL_RE = re.compile(r"\*\*Covers:\*\* *")
 _BEFORE = r"(?<![^\W_]|-)"
 _AFTER = r"(?![^\W_]|-)"
 _WS_RE = re.compile(r"\s+")
-_LEADING_MARKER_RE = re.compile(r"[ \t]*(?:[-*+]|\d+[.)]) ")
 _FINDING_WORDS = r"(?:findings?|issues?)"
 _COUNT = r"[(\[]\d+[)\]]"
 _SEVERITY_PATTERNS = (
@@ -506,7 +505,7 @@ def _without_quote_and_list_marker(text: str) -> str:
     """The text minus one leading `>` and then one leading list marker, trimmed."""
     if text.startswith(">"):
         text = text[1:]
-    marker = _LEADING_MARKER_RE.match(text)
+    marker = _LIST_ITEM_RE.match(text)
     if marker:
         text = text[marker.end() :]
     return text.strip()
@@ -554,7 +553,7 @@ def grade_persisted_levels(text: str) -> str:
     current: str | None = None
     for line in block:
         trimmed = line.strip()
-        marker = _LEADING_MARKER_RE.match(trimmed)
+        marker = _LIST_ITEM_RE.match(trimmed)
         listed = marker is not None
         body = trimmed[marker.end() :].strip() if marker else trimmed
         label = next((name for name in _LABELS if body.startswith(name)), None)
@@ -593,16 +592,20 @@ def _read_stdin() -> str:
         raise CouldNotGrade("not-utf8", f"input is not UTF-8: {exc}") from exc
 
 
-def _read_criteria(path: str) -> dict[int, list[str]]:
+def _read_utf8(path: str, kind: str) -> str:
+    """The file's text; `<kind>-unreadable` or `<kind>-not-utf8` when it cannot be had."""
     try:
         data = Path(path).read_bytes()
     except OSError as exc:
-        raise CouldNotGrade("criteria-unreadable", f"cannot read {path}: {exc}") from exc
+        raise CouldNotGrade(f"{kind}-unreadable", f"cannot read {path}: {exc}") from exc
     try:
-        text = data.decode("utf-8")
+        return data.decode("utf-8")
     except UnicodeDecodeError as exc:
-        raise CouldNotGrade("criteria-not-utf8", f"{path} is not UTF-8: {exc}") from exc
-    criteria = read_criteria(text)
+        raise CouldNotGrade(f"{kind}-not-utf8", f"{path} is not UTF-8: {exc}") from exc
+
+
+def _read_criteria(path: str) -> dict[int, list[str]]:
+    criteria = read_criteria(_read_utf8(path, "criteria"))
     if not criteria:
         raise CouldNotGrade("no-criteria-found", f"{path} has no `**AC<n>.**` criterion lines")
     return criteria
@@ -613,15 +616,7 @@ def _read_reports(paths: list[str] | None) -> dict[str, list[str]]:
         raise CouldNotGrade("missing-reports", "the naming checks need --reports")
     merged: dict[str, list[str]] = {tag: [] for tag in _FINDING_TAGS}
     for path in paths:
-        try:
-            data = Path(path).read_bytes()
-        except OSError as exc:
-            raise CouldNotGrade("reports-unreadable", f"cannot read {path}: {exc}") from exc
-        try:
-            text = data.decode("utf-8")
-        except UnicodeDecodeError as exc:
-            raise CouldNotGrade("reports-not-utf8", f"{path} is not UTF-8: {exc}") from exc
-        for tag, quoted in _report_quotations(text).items():
+        for tag, quoted in _report_quotations(_read_utf8(path, "reports")).items():
             merged[tag].extend(quoted)
     return merged
 
