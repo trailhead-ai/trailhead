@@ -22,11 +22,11 @@ planning is mechanical and execution unsurprising. Most discovery happens here.
 The spec is the **output** of that understanding, not the goal — you're done discovering only when
 you and the user would each describe what gets built and land on the same answer.
 
-**A spec is a stable reference, not a scratchpad.** It can still evolve as understanding sharpens —
-through brainstorming and up through the completion of planning. Once the work is settled, though,
-don't keep reworking it in place: a correction inside its scope, such as narrowing an acceptance
-criterion, is an amend, and substantially new thinking that moves its scope → a new spec, with a
-reference back to the prior one. `/lore:correct` decides which.
+**A spec is a stable reference, not a scratchpad.** It evolves freely while it is a `draft`
+(brainstorming and the gauntlet). Once it is `ready` it is frozen, and a correction goes through
+`/lore:correct`: a correction inside its scope, such as narrowing an acceptance criterion, is an
+amend, and substantially new thinking that moves its scope → a new spec, with a reference back to
+the prior one. `/lore:correct` decides which.
 
 ## Interrogation discipline
 
@@ -604,9 +604,9 @@ advances when no Critical still carries `revise`. That is the review working, no
 ## Bounce-Back from Planning
 
 If planning or implementation surfaces something that would change a spec's **objectives or
-non-goals**, or an acceptance criterion in any way other than narrowing it, don't edit the settled
-spec — stop, re-enter brainstorming on the new dimension, produce a new spec referencing the prior
-one in `Related`, and resume planning against it. Task-level uncertainty (how to structure a query,
-which library to use, what to name a module) is resolved inline in planning instead — the
-bounce-back rule is for *what / why* shifts, not *how* shifts. Narrowing an acceptance criterion is
-an amend (`/lore:correct`), not a bounce-back.
+non-goals**, don't edit the settled spec — stop, re-enter brainstorming on the new dimension,
+produce a new spec referencing the prior one in `Related`, and resume planning against it.
+Task-level uncertainty (how to structure a query, which library to use, what to name a module) is
+resolved inline in planning instead — the bounce-back rule is for *what / why* shifts, not *how*
+shifts. A correction to an acceptance criterion is not a bounce-back: it goes through
+`/lore:correct`, which decides amend vs successor.
