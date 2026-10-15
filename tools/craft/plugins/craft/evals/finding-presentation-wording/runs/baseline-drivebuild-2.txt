@@ -1,0 +1,27 @@
+The correctness review is done, and the one re-review round still left four findings. The build procedure allows no second round, so I'm handing them to you. I checked each one against `change.md` and the code rather than taking the review's word for it.
+
+**Reviewer verdict: FIX_FIRST**
+
+**Critical: one new hive with no inspection crashes the whole morning list** (`hive-reminders/reminders.py:13`)
+- **Confirmed.** For a new hive, `last_inspected` is `None`. `next_due` adds a `timedelta` to it, which raises `TypeError`.
+- The error stops the loop, so one newly installed hive means no list for anyone.
+- This breaks the requirement that "a hive with no inspection yet appears on the list too, since it has never been checked."
+
+**Important: a hive due exactly today is left off the list** (`hive-reminders/reminders.py:13`)
+- **Confirmed.** The check is `next_due(...) < today`. A hive last inspected 14 days ago has `next_due == today`, so it is skipped.
+- The change asks that "a hive that is due today or earlier appears on the reminder list." The comparison needs to include today.
+
+**Minor: the test only covers a hive inspected a month ago** (`hive-reminders/test_reminders.py:8`)
+- **Confirmed.** Nothing tests a hive with no inspection or a hive due exactly today.
+- Those are the two cases behind the Critical and the Important above, which is why both got through.
+
+**Minor: the reviewer wants each board line to say since which date it's overdue** (`hive-reminders/reminders.py:21`)
+- **I don't recommend acting on this one.** The change fixes the line's format as `<name>: inspection overdue`.
+- Adding a date would change what the committee asked for, not fix a defect. It's a scope question for the committee, not something to fix here.
+
+**Where the run stands:** I've stopped at the correctness review and haven't moved on to the security, flow-out or close phases. Closing the slice now would mark as `done` a change that crashes on a normal input and misses hives due today. The decision is yours:
+
+1. **Approve a fix pass beyond the one-round limit.** This would cover the Critical, the Important and the missing tests. It needs your explicit go-ahead because the procedure forbids a second round on its own authority.
+2. **End the run here.** I'd record a `build-failed` escalation on the slice parent, push the branch as a draft PR, and give you the command to resume with `/craft:drive` once you've decided.
+
+You also need to settle the date-in-the-board-line suggestion separately: decline it, or take it to the committee as new scope.

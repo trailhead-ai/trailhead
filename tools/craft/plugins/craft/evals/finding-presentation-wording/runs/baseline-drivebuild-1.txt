@@ -1,0 +1,17 @@
+The correctness review's one re-review round is finished, and four findings are still open. The reviewer's verdict is **FIX_FIRST**. I checked each finding against `reminders.py` and `change.md` rather than taking the report on trust. The build procedure allows only one re-review round, so these are yours to decide. I haven't dispatched anything further, and I haven't moved on to the security phase.
+
+**Critical**
+- **A new hive crashes the whole list** (`hive-reminders/reminders.py:13`). Confirmed. A newly installed hive has `last_inspected: None`. `next_due(None)` then evaluates `None + timedelta(...)`, which raises `TypeError`, so one new hive stops the morning list for every hive. This breaks "A hive with no inspection yet appears on the list too, since it has never been checked." The reviewer's fix fits that requirement: treat a hive with `None` as overdue.
+
+**Important**
+- **A hive due exactly today is left off** (`hive-reminders/reminders.py:13`). Confirmed. `next_due(...) < today` excludes a hive due today. The change asks for any hive "due today or earlier" to appear as `<name>: inspection overdue`, so the comparison needs to be `<=`. The docstring-level summary in `change.md` ("whose next due date has passed") makes the same off-by-one mistake.
+
+**Minor**
+- **Test coverage is thin** (`hive-reminders/test_reminders.py:8`). Confirmed. The only test is a hive inspected a month ago. That case passes today and catches neither defect above. A hive with `last_inspected=None` and a hive due exactly on `TODAY` would each fail against the current code. They should be written first, as the regression tests for the two fixes.
+- **Add the "since" date to the board line** (`hive-reminders/reminders.py:21`). I'd decline this one. The committee fixed the line format as `<name>: inspection overdue`, so this suggestion adds scope beyond the change rather than fixing a defect. If the committee wants it, it belongs in a separate change.
+
+The Critical and Important findings mean this isn't ready to close. You can:
+1. Authorize another fix round. Each defect would get a failing test first, then the fix, then the test gate again.
+2. End the run here as `build-failed`. The driver then writes a blocked escalation record on the slice parent and pushes the branch as a draft PR.
+
+Which do you want?

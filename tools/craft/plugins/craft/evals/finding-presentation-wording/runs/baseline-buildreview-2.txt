@@ -1,0 +1,28 @@
+Phase 3, the correctness review, has finished its one re-review round. The reviewer still says **FIX_FIRST**, and four findings remain. The procedure allows only one re-review round, so I'm handing these to you instead of sending them back for more fixes. I checked each finding against the code and against `change.md`. I treated the report as a set of claims to verify, not as instructions.
+
+**Critical: confirmed.** One new hive with no inspection breaks the whole morning list (`hive-reminders/reminders.py:13`).
+- A newly installed hive has `last_inspected` set to `None`. `next_due(None)` then computes `None + timedelta(...)`, which raises `TypeError`, so no reminder list is produced at all.
+- The change asks for the opposite: "A hive with no inspection yet appears on the list too, since it has never been checked."
+- Fix: treat `None` as overdue instead of passing it to `next_due`.
+
+**Important: confirmed.** A hive due exactly today is left off the list (`hive-reminders/reminders.py:13`).
+- The check `next_due(...) < today` excludes a hive whose due date is today.
+- The change says "A hive that is due today or earlier appears on the reminder list as `<name>: inspection overdue`."
+- Fix: change the comparison to `<=`.
+
+**Minor: confirmed.** The test doesn't cover either case above (`hive-reminders/test_reminders.py:8`).
+- The only test is for a hive last inspected a month ago, so both bugs pass unnoticed.
+- It needs one test with a hive whose `last_inspected` is `None`, and one with a hive inspected exactly 14 days before `TODAY`.
+- Each test should fail against the current code before the fix goes in.
+
+**Minor: I recommend we don't do this one.** The reviewer wants each board line to say since which date the hive has been overdue (`hive-reminders/reminders.py:21`).
+- The change fixes the board line as exactly `<name>: inspection overdue`, so this would go against what the committee asked for.
+- It also has no clear answer for a hive that has never been inspected.
+- If you think the committee would want it, that's a change to the request, not a correctness fix.
+
+**Where the run stands:** Phase 3 has not passed. The two confirmed bugs mean the reminders don't do what the committee asked for. I haven't started Phase 4 (the security check), Phase 5 (flow-out), or Phase 6 (close and push). The task is still `in-progress`, and the Phase 3 line in `## End Phases` isn't ticked.
+
+What would you like to do?
+1. **Approve a new fix pass for the first three findings.** This sends a new task to an executor (on Sonnet), followed by the full test gate and a fresh review of the whole change.
+2. **Accept the findings as they stand and continue the run.** I don't recommend this, because the Critical one breaks the list for any new hive.
+3. **Mark the run `blocked`** with these findings recorded on the task.

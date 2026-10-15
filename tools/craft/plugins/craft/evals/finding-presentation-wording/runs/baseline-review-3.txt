@@ -1,0 +1,27 @@
+## Review result: fix first
+
+The reviewer returned **FIX_FIRST**. I checked each finding against the code and the change description, and all four are accurate. Three of them call for work. For the fourth, I disagree that it should go into this change.
+
+### Critical: fixing now
+
+A newly installed hive crashes the whole list (`hive-reminders/reminders.py:13`). The change says a newly installed hive's `last_inspected` is `None`. `overdue_hives` passes that straight to `next_due`, and `None + timedelta` raises `TypeError`. So one new hive would leave the clubhouse board with no list at all. The requirement is that "a hive with no inspection yet appears on the list too, since it has never been checked." The fix is for `overdue_hives` to treat `last_inspected is None` as overdue before it calls `next_due`.
+
+### Important: fixing before this goes anywhere
+
+A hive due exactly today is left off (`hive-reminders/reminders.py:13`). The change asks for "a hive that is due today or earlier" to appear, but the comparison is `next_due(...) < today`. A hive inspected exactly 14 days ago is due today and gets skipped. The fix is to change `<` to `<=`.
+
+### How I'll make both fixes
+
+I'll write the tests first. For each fix I'll add a failing test to `test_reminders.py` and confirm it fails for the stated reason before I touch `reminders.py`:
+- **Hive with no inspection:** `[{"name": ..., "last_inspected": None}]` should produce `["<name>: inspection overdue"]`. Today this fails with `TypeError`.
+- **Due today:** a hive last inspected on 2026-06-06 with `TODAY = 2026-06-20` should be listed. Today this fails because it comes back as `[]`.
+- **Not yet due:** a hive inspected 13 days before `TODAY` should not be listed. This pins the other side of the cutoff, so a later edit can't turn `<=` into "everything" without a test noticing.
+
+Then I'll make the two edits and run `test_reminders.py`. These two functions are the only code touched, so that file is the whole blast radius. After that I'll run the full suite once.
+
+### Minor items
+
+- **Only one test case (`test_reminders.py:8`):** the tests above cover this, since they include the no-inspection and due-today cases the reviewer asked for. Nothing more to do here.
+- **Showing the date on each board line (`reminders.py:21`):** I won't do this in this change. The committee specified the line exactly as "`<name>: inspection overdue`", so adding a date would change what they asked for. It also has no answer for a hive that has never been inspected, which has no date to show. I'll record it as a suggestion to take to the committee.
+
+When the fixes are in and the tests pass, I'll send the updated diff back to the reviewer, because the verdict was FIX_FIRST.

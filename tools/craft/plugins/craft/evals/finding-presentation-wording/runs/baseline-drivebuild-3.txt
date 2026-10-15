@@ -1,0 +1,20 @@
+**Correctness review: four findings survived the one re-review round.** The build procedure allows only one re-review round, so I'm stopping here for your decision. I read each finding against `change.md` and the code before passing it on.
+
+**Critical: a hive with no inspection yet crashes the whole morning list** (`hive-reminders/reminders.py:13`)
+The code passes `hive["last_inspected"]` straight to `next_due`, which adds `timedelta(days=14)` to it. For a newly installed hive that value is `None`, so this raises `TypeError`. One new hive means no list at all, for any hive. The change asks for the opposite: "A hive with no inspection yet appears on the list too, since it has never been checked." I confirmed this one.
+
+**Important: a hive due exactly today is left off the list** (`hive-reminders/reminders.py:13`)
+`next_due(...) < today` only lists hives whose due date has already passed. The change asks that "a hive that is due today or earlier appears on the reminder list," so a hive inspected exactly 14 days ago should be listed and isn't. The fix is `<=`. I confirmed this one too.
+
+**Minor: the test covers only one case** (`hive-reminders/test_reminders.py:8`)
+The only test is a hive inspected a month ago, a case that works whether or not either bug above is fixed. Nothing tests a hive with `last_inspected = None` or a hive due exactly today, which are the two cases where the code is wrong. Whatever fixes the two bugs above should come with these as failing tests first.
+
+**Minor, and I recommend not adopting it: add "since which date" to the board line** (`hive-reminders/reminders.py:21`)
+This conflicts with what the change asked for. The committee set the line format as `<name>: inspection overdue`, and the current code produces exactly that. There's also no date to show for a hive that has never been inspected. If the committee wants the date, that's a new request, not a correctness fix.
+
+**Where this leaves the run:** The build is stopped at the correctness review. The security review, flow-out, push and close haven't run, and nothing has been written to the slice parent or pushed. The two confirmed defects mean this code doesn't do what the change asked, so I don't recommend continuing to close as it stands. You have two options:
+
+1. **Fix the two defects.** Each would be a fresh, test-first fix, with the missing tests written to fail before the code changes. Then the test gate runs again and the pipeline continues.
+2. **End the run here.** I'd record this as a `build-failed` escalation on the slice parent so it can be picked up later with `/craft:drive` and the same spec name.
+
+Which do you want?
