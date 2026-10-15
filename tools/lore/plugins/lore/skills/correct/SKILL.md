@@ -100,7 +100,8 @@ adds the predecessor to the successor's `supersedes` list and flips the predeces
 - **Task:** `lore record supersede task/<old> --by task/<new>`.
 
 Draft the successor with the correction applied and the unchanged parts carried over, so it
-stands alone.
+stands alone. A successor never carries a secret forward from its predecessor: a secret found
+there takes the same rotate-and-escalate path as in the amend branch.
 
 ## Step 4: Close with one line
 

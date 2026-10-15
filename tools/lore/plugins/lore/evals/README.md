@@ -135,11 +135,12 @@ see seeded records; grade a seeded record's contents with `regex` over a
 ### Running a batch
 
 ```sh
+out=$(mktemp -d)
 env -u LORE_CONFIG_DIR -u LORE_STATE_DIR -u XDG_CONFIG_HOME -u XDG_STATE_HOME \
   claude plugin eval tools/lore/plugins/lore --case '<glob>' --scaffold \
   --allow-tools 'Bash(./lore *)' --ablation none --trust-plugin \
-  --runs N --model claude-opus-5-5 --json <out> --max-cost-usd N \
-  --output-dir "$(mktemp -d)" --no-publish
+  --runs N --model claude-opus-5-5 --json "$out/run.json" --max-cost-usd N \
+  --output-dir "$out" --no-publish
 ```
 
 - `--scaffold` is required; the runner skips `scaffold_script` without it.
@@ -152,8 +153,9 @@ env -u LORE_CONFIG_DIR -u LORE_STATE_DIR -u XDG_CONFIG_HOME -u XDG_STATE_HOME \
 - `--runs N` sets runs per case; `--max-cost-usd N` stops starting new runs once
   the list-price cost estimate reaches N (exit 2, partial results); `--model`
   pins the agent's model so a model change is not mistaken for a prose change.
-- `--json <out>` (a path ending in `.json`) writes the result document: per-run
-  scores, cost and model, for the results log.
+- `--json <path>` (ending in `.json`) writes the result document: per-run
+  scores, cost and model, for the results log. It also holds per-run traces, so write it into
+  the same temp directory as `--output-dir`, as above, and never commit it.
 - Unsetting the lore and XDG overrides is belt and braces: the seeder already
   refuses an override that points outside `HOME`.
 - `--no-publish` always. Without it the runner publishes its report to claude.ai.
