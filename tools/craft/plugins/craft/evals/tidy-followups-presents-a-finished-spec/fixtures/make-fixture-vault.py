@@ -4,8 +4,11 @@
     LORE_BIN=<path to the lore executable> make-fixture-vault.py <dest>
 
 Creates, under <dest> (which must not exist): a vault, a lore config naming it,
-fenced HOME / state / config directories, and two `lore` shims on PATH. Prints one
-JSON manifest on stdout:
+fenced HOME / state / config directories, and two `lore` shims on PATH. Each shim
+directory also carries `python3`, a link to the interpreter running this builder, so
+an executable run by its `python3` shebang under the fenced PATH gets that
+interpreter rather than an older system one (macOS's /usr/bin/python3). Run the
+builder with Python 3.11 or later. Prints one JSON manifest on stdout:
 
 - `env`: the environment an arm runs in. `lore` on its PATH sees only this vault.
 - `failing_env`: the same, except `lore task list` fails, so the gathering script's
@@ -132,6 +135,7 @@ def main() -> int:
         shim = shim_dir / "lore"
         shim.write_text(f'#!/bin/sh\n{guard}exec "{lore_bin}" "$@"\n')
         shim.chmod(0o755)
+        (shim_dir / "python3").symlink_to(Path(sys.executable).resolve())
         shims[label] = shim_dir
 
     def env_for(shim_dir: Path) -> dict:
