@@ -1,0 +1,86 @@
+**Council review: allotment waiting list, first build**
+
+`maturity: production (basis: stamp)`. No stand-downs, and no waiver notices.
+
+**What the reviewers found.** The plan's biggest problem is how it stores queue order. Task 1 gives each person a `place` number and renumbers everyone behind them when someone leaves. Task 2's nightly job picks people by that same number. Two reviewers found, separately, that if the two run at the same moment, one freed plot gets offered to two people. That breaks the core promise that a freed plot goes to the person at the front of that site's queue (AC2). The second theme is the Task 4 spreadsheet import. It loads the real list of about 340 people in one run, with no preview and no undo. Running it twice, or having it stop halfway, damages the queue we go live with. The third theme is the nightly offer job: nothing tells anyone when it stops running. The rest is about what people see. The offer link accepts the offer as soon as it is opened. The offer email doesn't warn that ignoring it costs you your place. A warden's grant leaves the person in the queue. Leaving the queue gives no confirmation.
+
+**How well the findings hold up.** The ordering and import findings are solid, because each follows from a step the plan writes out. I raised the warning about the silent job from Important to Critical. Reliability marked it Important only because each reviewer may raise at most two Criticals. This spec is stamped `production`, and at that level a production failure nobody can see is rated Critical. I lowered Advocate's Critical ("people may find the queue confusing") to Important. It names no person stuck at any specific point, so it is a guess about user behaviour, not a defect in the plan. The offer link that accepts on open is a real hazard, because a mail scanner that follows links would accept a plot on someone's behalf. It stays Important only because no Security Critical bar covers it. Security's medium confidence comes from the plan having no sign-in design yet, which is a gap in the plan, not in the review.
+
+**What to do.** Stop storing a place number. Order each site's queue by join time and work out a person's place when it is needed. That removes the double offer and the renumbering together. Make the import a staged run under a batch id, with a preview first, so a bad run can be deleted whole. Then delete the spreadsheet from the warden's laptop once the import is checked. Have the nightly job email the warden when it finishes, and email again if it hasn't finished by 03:00. Make the offer link open a confirm page instead of accepting straight away. Have a warden's grant close that person's queue row. Add the warning about losing your place and the leave confirmation to the copy for those emails and screens.
+
+---
+
+### Critical
+
+**1. One freed plot can be offered to two people at once.** *(Builder, Reliability)*
+Task 1 stores each person's queue position as a `place` number. When someone leaves, it subtracts one from everyone behind them. Task 2's 02:00 job emails whoever has the lowest `place`. If someone leaves while the job is running, two rows can briefly both hold place 1, and both people get an offer for the same plot. One of them then accepts a plot that has already gone, which breaks the rule that the person at the front of that site's queue gets the offer (AC2).
+Fix: store each person's join time, order the queue by it, and never store a place number. Each person's place is then counted from join time when an email or page needs it. Leaving just closes that person's row, and everyone behind moves up one without any renumbering (AC5).
+
+**2. Importing the paper list can't be previewed, repeated safely, or undone.** *(Reliability)*
+Task 4 loads about 340 rows from the committee's spreadsheet in one run from the warden's laptop, and writes nothing else. Running it twice puts everyone on the list twice. A run that stops halfway leaves a partial queue with no record of where it stopped. In both cases the queue we go live with is wrong, and there is no clean way back. At `production` maturity, a migration or backfill with no rollback path is Critical.
+Fix: import under a batch id. Show a preview (row count, duplicates, rows that fail checks) before writing anything. Allow a whole batch to be removed in one step, and refuse to import the same file twice.
+
+**3. If the nightly offer job stops, nobody finds out.** *(Reliability; raised to Critical, reason below)*
+Nothing signals that the 02:00 job didn't run or failed. Freed plots just stop being offered, and the first anyone hears of it is a member writing in to ask why. That is exactly the "first reporter is a user" failure.
+Fix: email the warden when the job finishes, with a summary of offers sent and offers lapsed. Send a second email if it hasn't finished by 03:00.
+*Raised from Important. Reliability held it back only because of the two-Critical cap. At `production` maturity, production failure visibility is rated Critical.*
+
+### Important
+
+- **A forwarded email or a mail scanner can accept a plot for someone else.** *(Security)* The offer link accepts the offer the moment it is opened, and nothing ties it to the person it was sent to.
+  Fix: make the link open a page where the person confirms that they accept.
+- **Someone given a plot out of turn stays in the queue and can be offered a second plot.** *(Builder)* Task 3 records the grant and its reason but doesn't close the person's queue row, so the nightly job still treats them as waiting.
+  Fix: have the grant close that person's queue row in the same step.
+- **Names and email addresses for 340 people stay on the warden's laptop.** *(Security)* Task 4's spreadsheet has nowhere to go once the import is finished.
+  Fix: in the task, say to delete the spreadsheet once the import has been checked.
+- **People can lose their place without knowing why.** *(Advocate)* The offer email doesn't say that if they don't accept within 14 days, the offer passes to the next person and they go to the back of the queue (AC3).
+  Fix: say this in the first paragraph of the offer email.
+- **Someone who leaves by mistake can't tell whether they're still on the list.** *(Advocate)* Leaving the queue gives no confirmation.
+  Fix: show a one-line confirmation on screen and send the same line by email.
+- **People may find the online queue confusing.** *(Advocate; lowered from Critical because it names no specific point where someone gets stuck)*
+  Fix: consider a short help page once the screens exist.
+
+### Minor
+
+- Tasks 2 and 5 both format dates for display. Share one helper. *(Builder)*
+- No test covers an offer that is exactly 14 days old. *(Reliability)*
+- The reason a warden types for an out-of-turn grant shows on the history page, which any committee member can read, and it may contain personal details. *(Security)*
+- The history page's word "lapse" for an expired offer reads as jargon. *(Advocate)*
+
+---
+
+Each of the three Critical findings needs a decision from you before I can offer the hand-off to build. For each one, choose one of these:
+
+- `resolved`: you edit the plan to fix it.
+- `bounced-back-to-spec`: it changes what the spec asks for, so it goes back to brainstorming.
+- `accepted-as-risk: <reason>`: you accept the risk and give a reason.
+- `disputed: <reason>`: you disagree with the finding and give a reason.
+
+Section to append to the parent task:
+
+```markdown
+## Council Review
+
+*Reviewed at:* 2026-10-15
+*Members dispatched:* builder, breaker, attacker, advocate
+*Maturity:* production (basis: stamp)
+
+*Critical:*
+- Task 1 stores and renumbers `place` on leave while Task 2's 02:00 job reads it; a concurrent leave yields two rows at place 1 and one freed plot is offered to two people (AC2, AC5) (raised by: Builder, Reliability) — *Disposition:* awaiting operator
+- Task 4 imports ~340 rows in one run with no preview, batch id, or undo; a re-run duplicates every row and a partial run leaves no marker (raised by: Reliability) — *Disposition:* awaiting operator
+- Nightly 02:00 offer job has no completion or missed-run signal; offers stop silently until a member reports it (raised by: Reliability) (raised from Important: held back by the two-Critical cap; production failure visibility rates Critical at production maturity) — *Disposition:* awaiting operator
+
+*Important:*
+- Offer link accepts on open and is not bound to the recipient; a forwarded email or link-following mail scanner accepts the plot (raised by: Security)
+- Task 3 grant does not close the grantee's queue row, so the nightly job can offer them a second plot (raised by: Builder)
+- Task 4 spreadsheet of 340 names and emails stays on the warden's laptop with no deletion step (raised by: Security)
+- Offer email does not warn that ignoring it for 14 days sends the person to the back of the queue (AC3) (raised by: Advocate)
+- Leaving the queue gives no on-screen or email confirmation (raised by: Advocate)
+- Queue may be confusing online; suggested help page (raised by: Advocate) (downgraded from Critical: speculative — no concrete user moment named)
+
+*Minor:*
+- Tasks 2 and 5 both format display dates; share one helper (raised by: Builder)
+- No test for an offer exactly 14 days old (raised by: Reliability)
+- Out-of-turn grant reason is visible to all committee members on the history page and may carry personal detail (raised by: Security)
+- "Lapse" on the history page reads as jargon (raised by: Advocate)
+```

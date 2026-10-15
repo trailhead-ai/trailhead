@@ -1,0 +1,27 @@
+**Gauntlet: spec "a waiting list for allotment plots"** (round 1)
+`maturity: production (basis: stamp)`, with no stand-downs and no waivers. Facts: 2 of 4 confirmed, 1 refuted, 1 unverifiable.
+
+**What the passes found.** Two separate gaps came up, and both affect the people the spec most needs to serve. The first is the people already on the paper list. The spec never says how they get into the online queue in their current order. Joining also requires an email address: AC1 says "a person joins the waiting list for one site by giving a name, an email address and the site they want". So anyone the warden can only phone today has no way to keep their place. The second is an offer email that never arrives. The spec says the person at the front "is sent an offer by email, and the offer stays open for 14 days" (AC2). It also says that if the offer is not accepted, "the person who did not answer goes to the back of the queue" (AC3). With a mistyped address, the plot sits empty for two weeks and then the longest waiter is moved to the back without ever being told. The other findings are smaller holes. Nothing says who marks a plot as freed. Nothing says what happens when a site's queue is empty. Members have no way to "see their place" after the first email, although the Objectives promise it.
+
+**Whether it holds.** Both Criticals hold. The undelivered-offer finding is the strongest signal in this run. Reliability and Advocate reached it on their own, one through bounced mail and one through the person's experience. The premise pass was right that the email-only join is a problem. It was wrong that the cause is a guess about members' ages. The real cause is that the spec has no step for moving the existing list across, and at production maturity, migration and backfill is a Critical concern. The phone fallback is not speculative either: the warden phones people today, so the society already holds phone numbers. The premise pass went too far in arguing that the goal is only to check the order and that AC1 to AC5 are more than needed. The Problem lists "nobody can see where they stand" as a complaint in its own right, so I am not taking that up. The fact pass refuted the list size: the minutes of 3 March record 412 names, not about 340. That correction goes into C1's edit because C1 is about the same list.
+
+**What to do.** Add one criterion for moving the paper list across in its current order, with phone-only entries that the warden offers by phone. Correct the list size. Add a rule for undelivered offers, a day-10 reminder, and a message when an offer lapses. Every finding can be fixed by editing this spec, so nothing needs `revise`.
+
+**Recommended outcome:** advance to `ready` this round once you accept. No `craft/supersedes` label is set.
+
+| id | finding | proposed disposition | proposed edit |
+|---|---|---|---|
+| C1 | People on the paper list, especially those without email, have no path into the online queue at their current place | `resolved` | Problem: "About 340" becomes "About 410 (412 in the committee minutes of 3 March)". New **AC7**: "Before the paper list is retired, a plot warden enters every person on it into their site's queue in their existing order, each with an email address or, where they have none, a phone number; a person entered with a phone number is offered plots by the warden by phone, the warden recording the date of the offer, and the 14 days run from that date." |
+| C2 | An undelivered offer email leaves the plot empty for 14 days, then silently moves the person to the back of the queue | `resolved` | AC3 gains "…goes to the back of the queue and is sent an email saying so." New **AC8**: "If an offer email cannot be delivered, the offer passes to the next person at once, the first person keeps their place, and the warden is told so the address can be corrected." New **AC9**: "A person with an open offer is sent a reminder email on day 10." |
+
+**Important (9), logged only, no disposition:**
+- **Missing triggers and states:** nothing says who marks a plot as freed, and nothing covers a freed plot whose site queue is empty.
+- **The queue model is unpinned:** is a place stored, or worked out from join order? Can a person join several sites' queues? Does the 14-day clock start when the offer is sent or when it is opened?
+- **"See their place" has no criterion after AC1's confirmation email.** Advocate and Consistency both found this.
+- **The history list is incomplete:** acceptance and departure are listed as history events, but the criteria that produce them never say they are recorded.
+- **Out-of-turn grants are visible only in the history:** suggest emailing the committee chair when one is made.
+- **Premise reframe toward auditability only:** not taken up, for the reason given above.
+
+**Minor (4):** the time of day the 14 days end; the confirmation email showing a person's queue position; "lapse" reads as jargon in the history; who may view the history.
+
+Reply "go" to apply both edits and flip the spec to `ready`. To override a row, name it: `accepted-as-risk`, `disputed`, or `answered`, each with your reason. "Show me the detail on C2" prints the full finding.
