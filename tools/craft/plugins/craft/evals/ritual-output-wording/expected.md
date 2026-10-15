@@ -534,7 +534,7 @@ existed when it was committed.
 ## Result, 2026-10-14 — the third wording and the council report bullet pass; both are kept
 
 Counted by the grader against the pass conditions in the third-wording extension above. The third-wording revision is
-`2de62373`; every `third-*` arm pins its rules file and agent definition to it. Every run exited 0 and none was
+`ecc4f46a`; every `third-*` arm pins its rules file and agent definition to it. Every run exited 0 and none was
 excluded. `baseline-advocate` is pinned to `9458af4e`.
 
 | Prefix | Check | Grader's count | Condition | Holds |
@@ -569,9 +569,9 @@ each used its own throwaway directories. The other runs were dispatched one at a
 
 ## Result, 2026-10-14 — the shipped-state slice arm passes both its conditions; step 8's edit is kept
 
-`shipped-slice` reads the slice skill and the rules file both at `b599c254`, the commit that carries slice step 8
+`shipped-slice` reads the slice skill and the rules file both at `ebf23e43`, the commit that carries slice step 8
 with the instruction to name covered criteria by identifier removed (the manifest constant `STEP8_REVISION`). The
-rules file at that commit is the third wording, unchanged since `2de62373`. Three runs, dispatched one at a time;
+rules file at that commit is the third wording, unchanged since `ecc4f46a`. Three runs, dispatched one at a time;
 every run exited 0 and none was excluded.
 
 | Prefix | Check | Grader's count | Condition | Holds |
@@ -590,12 +590,12 @@ edit (`template-shape` and `bare`; `template-shape` and `nickname`).
 
 After the `shipped-slice` runs, slice step 8 was re-wrapped to the prose column the wrap gate enforces. The change
 is whitespace only, so the shipped step differs from the text the `shipped-slice` arm measured (pinned at
-`b599c254`) in line breaks alone.
+`ebf23e43`) in line breaks alone.
 
 ## Note, 2026-10-14 — two departures from what the results above read as
 
 The `shipped-slice` arm was registered above as reading the slice skill and the rules file "both from the working
-tree". It was built pinned at `b599c254`, as the child task specified. The working tree matched that commit's content
+tree". It was built pinned at `ebf23e43`, as the child task specified. The working tree matched that commit's content
 when the runs happened, so the measurement is the same; the arm is pinned, not live.
 
 The two `third-reviewer-rules-only` runs the grader reads as `bare` (1 and 3) are not reports in the baseline's form
