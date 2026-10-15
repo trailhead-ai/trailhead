@@ -1,0 +1,9 @@
+lore --help 2>&1 | head -50; ls -la
+
+lore search --help 2>&1 | head -40; lore search 'fixture-slicing-spec' 2>&1 | head -30
+
+cd /private/tmp/tidy-eval/runs/base-slicing/fixture/vault; find . -type f | head -50; echo ---; cat spec/fixture-slicing-spec*; echo; lore task --help 2>&1 | head -30
+
+cd /private/tmp/tidy-eval/runs/base-slicing/fixture/vault; lore task graph fixture-slicing-spec 2>&1; echo ---; for f in task/fixture-slicing-spec-* task/slicing-spec-*; do echo "== $f"; cat "$f"; echo; done; grep -rl "fixture-slicing-spec" . 
+
+cd /private/tmp/tidy-eval/runs/base-slicing/fixture/vault; cat task/mixed-tidy-the-changelog-wording.json task/completed-spec-cache-the-config-parse.json task/completed-spec-cache-the-config-parse.md task/fixture-mixed-spec-the-slice.json; lore task graph fixture-slicing-spec-the-slice 2>&1

@@ -1,0 +1,9 @@
+lore --help 2>&1 | head -50
+
+lore search --help 2>&1 | head -40; lore search 'fixture-mixed-spec' 2>&1 | head -40
+
+cd /private/tmp/tidy-eval/runs/base-mixed/fixture/vault; ls -R spec/fixture-mixed-spec* task/fixture-mixed-spec* 2>&1; for f in $(find . -path '*fixture-mixed-spec*' -type f); do echo "=== $f"; cat "$f"; done; lore task --help 2>&1 | head -30
+
+cd /private/tmp/tidy-eval/runs/base-mixed/fixture/vault; ls; grep -rl 'fixture-mixed-spec' . ; grep -ril 'follow' . | head; lore task graph fixture-mixed-spec-the-slice 2>&1 | head -30; lore pipeline 2>&1 | head -40
+
+cd /private/tmp/tidy-eval/runs/base-mixed/fixture/vault/task; for f in mixed-*.json slicing-spec-an-unrelated-follow-up.json; do b=${f%.json}; echo "=== $b"; python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]));print({k:d.get(k) for k in ("status","labels","related","parent","depends-on","priority")})' "$f"; echo "--- md:"; cat "$b.md" 2>/dev/null; echo; done

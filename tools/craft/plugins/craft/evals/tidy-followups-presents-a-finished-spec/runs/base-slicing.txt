@@ -1,0 +1,18 @@
+The `fixture-slicing-spec` spec has only one follow-up, and it isn't ready to work on yet, so nothing needs doing first.
+
+**How the spec is set up:**
+- **`fixture-slicing-spec`** (spec, status `ready`). The body is only `# Fixture spec`.
+- **`fixture-slicing-spec-the-slice`** (task, **in-progress**, labelled `craft/slice-parent`). This is the main work task for the spec, and it's still underway.
+  - **`fixture-slicing-spec-a-finished-child`** (task, done). This is a subtask of the slice, not a follow-up.
+
+**The follow-up:**
+
+| Task | Status | Note |
+|---|---|---|
+| `slicing-spec-an-unrelated-follow-up` ("Slicing spec: an unrelated follow-up") | open | Body: *"Not reached: the loop has not ended."* |
+
+Other specs in this vault link their follow-ups the same way, through a `related.task` link to the spec's slice, so I don't think I've missed any.
+
+**Which to do first:** none yet. The only follow-up says it hasn't been reached because "the loop has not ended", and the slice it hangs off is still in progress. Follow-ups are normally sorted out once the slice is finished. Its title also calls it "unrelated", so it may not belong to this spec at all.
+
+The best next step is to finish `fixture-slicing-spec-the-slice`. Once it's done, check whether this follow-up is still needed and whether it belongs under this spec. I only read the vault and didn't change any files.

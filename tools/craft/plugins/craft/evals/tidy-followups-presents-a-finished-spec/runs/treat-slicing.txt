@@ -1,0 +1,5 @@
+The follow-ups for `fixture-slicing-spec` haven't been tidied, because the spec's slice loop hasn't ended yet. To end it, use the slice ritual's early stop:
+
+```
+/craft:slice spec/fixture-slicing-spec
+```

@@ -1,0 +1,9 @@
+lore --help 2>&1 | head -50
+
+lore search --help 2>&1 | head -40; lore search 'fixture-mixed-spec' 2>&1 | head -40
+
+cd /private/tmp/tidy-eval/runs/base-mixed-failing/fixture/vault; ls -R spec task 2>&1 | head -50; for f in spec/fixture-mixed-spec*; do echo "=== $f"; cat "$f" 2>/dev/null || ls "$f"; done
+
+cd /private/tmp/tidy-eval/runs/base-mixed-failing/fixture/vault; lore task --help 2>&1 | head -30; for f in task/mixed-*; do echo "=== $f"; cat "$f"; echo; done
+
+cd /private/tmp/tidy-eval/runs/base-mixed-failing/fixture/vault; grep -l '"fixture-mixed-spec' task/*.json spec/*.json; lore task graph fixture-mixed-spec 2>&1 | head -40

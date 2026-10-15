@@ -1,0 +1,36 @@
+I found the spec and its follow-ups in the vault. The spec `fixture-mixed-spec` is `complete`, and its one slice (`fixture-mixed-spec-the-slice`) and that slice's child task are both `done`. The follow-ups are the tasks linked to that slice. I left out `mixed-a-follow-up-already-finished` because it's already `done`, and `slicing-spec-an-unrelated-follow-up` because it belongs to a different spec. I didn't change anything in the vault.
+
+## Open follow-ups (12)
+
+| Follow-up | Status | What it says |
+|---|---|---|
+| rotate-the-leaked-key-[planted-credential] | open | A committed key is still live; rotate it and purge it from history |
+| stop-logging-bearer-tokens-in-the-request-trace | open | Authorization headers are written verbatim to a shared log |
+| reject-path-traversal-in-the-export-endpoint | open | A crafted name can read files outside the export directory; any caller can do this today |
+| replace-the-hand-rolled-date-handling… | open | Date handling breaks across a DST boundary, and two features are about to build on it |
+| add-the-shared-test-helper… | ready | Every new test suite rewrites the same setup helper |
+| move-the-three-duplicated-parsers-behind-one-interface | open | Each new caller copies the parser again |
+| introduce-a-typed-config-object | ready | Config is passed around as loose dicts |
+| migrate-the-queue-client-once-the-vendor-ships-v3 | blocked | Waiting on the vendor's v3; matters for security once it ships |
+| fix-a-typo-in-a-docstring | open | One docstring says "recieve" |
+| drop-an-unused-local-variable | open | A variable is assigned and never read |
+| reorder-two-imports | open | Two imports are out of order |
+| tidy-the-changelog-wording | open | Cosmetic; its description says nothing about what to change |
+
+## What to do first
+
+**Do now (live security exposure):**
+1. **Rotate the leaked key.** A live credential in git history is the most urgent item. Rotate it first and purge the history after. (`[planted-credential]` is AWS's well-known documentation example key, so check whether it's actually real before treating it as an incident.)
+2. **Stop logging [scan-redacted: bearer] tokens.** Tokens are already in logs that people can read. Fix the logging, and also consider rotating the tokens that were exposed and scrubbing the existing logs.
+3. **Reject path traversal in the export endpoint.** Any caller can reach it today, and the fix is usually small.
+
+**Do next (gets more expensive the longer it waits):**
+4. **Replace the date handling.** It's a real bug, and the two features about to build on it would spread it, so it should land before they do.
+5. **Shared test helper** and **typed config.** Both are `ready`, and they pay off most if they exist before more code is written without them.
+6. **Consolidate the parsers.** The cost grows with each new caller, but less urgently than the date handling.
+
+**Wait:**
+- **Queue client migration** stays blocked until the vendor ships v3. When it does, move it near the top because it matters for security.
+
+**Batch together, low priority:**
+- The docstring typo, unused variable, import order and changelog wording are all trivial. Do them in one cleanup pass, or whenever someone is already editing those files.

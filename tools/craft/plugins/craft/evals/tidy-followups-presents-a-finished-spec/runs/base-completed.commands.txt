@@ -1,0 +1,11 @@
+lore --help 2>&1 | head -50
+
+lore search 'fixture-completed-spec' 2>&1 | head -40; lore search --help 2>&1 | head -40
+
+cd /private/tmp/tidy-eval/runs/base-completed/fixture/vault; ls -R spec task 2>&1 | head; for f in spec/fixture-completed-spec task/fixture-completed-spec-*; do echo "=== $f"; if [ -d "$f" ]; then for g in "$f"/*; do echo "--- $g"; cat "$g"; done; else cat "$f"; fi; done
+
+cd /private/tmp/tidy-eval/runs/base-completed/fixture/vault; cat spec/fixture-completed-spec.json spec/fixture-completed-spec.md; echo ===; grep -rl "fixture-completed-spec" . | grep -v '^./spec/fixture-completed-spec\|the-slice\|finished-child'; lore task --help 2>&1 | head -30
+
+cd /private/tmp/tidy-eval/runs/base-completed/fixture/vault; grep -rl "fixture-completed-spec" . ; echo ---; grep -rli "follow" . | head; echo ---; lore task --help 2>&1 | head -30
+
+cd /private/tmp/tidy-eval/runs/base-completed/fixture/vault; for f in task/completed-spec-cache-the-config-parse.* task/completed-spec-rename-a-helper.*; do echo "--- $f"; cat "$f"; echo; done; lore task graph fixture-completed-spec 2>&1 | head -30

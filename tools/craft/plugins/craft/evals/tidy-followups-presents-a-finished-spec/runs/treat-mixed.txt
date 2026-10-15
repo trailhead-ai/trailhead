@@ -1,0 +1,29 @@
+**Header:** entry `complete-status` · slice basis `labelled` · 1 slice (`fixture-mixed-spec-the-slice`), 1 child · 13 candidates read, 12 kept · 0 excluded by label · 0 skipped edges
+
+**Recommended**
+
+1. **Mixed: reject path traversal in the export endpoint** (`mixed-reject-path-traversal-in-the-export-endpoint`)
+   *Open security exposure.* Any caller can use a crafted name to read files outside the export directory right now. Every day it stays unfixed is another day the hole is reachable.
+2. **Mixed: rotate the leaked key [REDACTED]** (`mixed-rotate-the-leaked-key-[REDACTED]`)
+   *Open security exposure.* A committed credential is still live, so the risk lasts until it is rotated and the history is purged.
+3. **Mixed: stop logging [REDACTED] in the request trace** (`mixed-stop-logging-bearer-tokens-in-the-request-trace`)
+   *Open security exposure.* Authorization headers are written as-is to a shared log people can read. Each request adds more exposed credentials.
+4. **Mixed: replace the hand-rolled date handling before more callers adopt it** (`mixed-replace-the-hand-rolled-date-handling-before-more-callers-adopt-it`)
+   *Fix that gets more expensive as work builds on it.* The date code breaks across DST, and two upcoming features will build on it. Each one makes the fix bigger.
+5. **Mixed: move the three duplicated parsers behind one interface** (`mixed-move-the-three-duplicated-parsers-behind-one-interface`)
+   *Fix that gets more expensive as work builds on it.* Every new caller copies the parser again, so each later change needs one more edit than the last.
+6. **Mixed: introduce a typed config object** (`mixed-introduce-a-typed-config-object`)
+   *Foundation whose payoff grows the sooner it lands.* Only call sites written after it exists get the benefit. Anything written before it stays on loose dicts.
+7. **Mixed: add the shared test helper the new suites keep re-writing** (`mixed-add-the-shared-test-helper-the-new-suites-keep-re-writing`)
+   *Foundation whose payoff grows the sooner it lands.* Every suite written before the helper lands copies the same setup code again.
+
+**Other follow-ups**
+- Mixed: drop an unused local variable
+- Mixed: fix a typo in a docstring
+- Mixed: reorder two imports
+- Mixed: tidy the changelog wording
+
+**Blocked**
+- Mixed: migrate the queue client once the vendor ships v3
+
+Nothing was written: no record, label or status was changed, and no task was created.

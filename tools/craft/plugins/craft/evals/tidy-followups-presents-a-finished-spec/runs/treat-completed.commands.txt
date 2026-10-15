@@ -1,0 +1,5 @@
+"${CLAUDE_PLUGIN_ROOT}/scripts/followup_gather.py" fixture-completed-spec; echo "EXIT=$?"
+
+echo "$CLAUDE_PLUGIN_ROOT"; ls "$CLAUDE_PLUGIN_ROOT"/skills/_shared/ 2>/dev/null || find "$CLAUDE_PLUGIN_ROOT" -name security.md
+
+lore record show --json --vault default task/completed-spec-cache-the-config-parse; echo "EXIT=$?"; lore record show --json --vault default task/completed-spec-rename-a-helper; echo "EXIT=$?"
