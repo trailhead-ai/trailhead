@@ -224,3 +224,58 @@ condition, written before any arm was run.
 | Date | Arm | Prose under test | Runs | Result | Notes |
 |------|-----|------------------|------|--------|-------|
 ```
+
+## Cases: amend versus supersede on a frozen record (runner format)
+
+`plugins/lore/evals/{amend-wrong-fact-in-active-adr, amend-narrow-one-criterion-in-ready-spec, amend-drifted-mechanism-detail-phrased-as-serious-error, supersede-reversed-decision, supersede-adr-exception-phrased-as-small-tweak, supersede-spec-change-orphaning-an-objective-phrased-as-small-tweak}/`
+— each with `expected.md` (committed in `6668c020`, before any grader, fixture or run), `case.yaml`,
+`prompt.md`, `graders/*.md` and a seeded `fixtures/`.
+
+**Under test:** whether an agent, asked by an operator to correct a frozen record, amends in place for an
+in-scope correction (AC21, AC26, AC27) and routes a material change to supersession (AC22). The prose
+under test is whatever the agent reads today; no `correct` skill exists yet.
+
+Run command: README "Running a batch", one case per invocation, with `--ablation none --runs 3
+--model claude-opus-5-5 --concurrency 3 --max-cost-usd 3 --no-publish --allow-tools 'Bash(./lore *)'
+--scaffold --trust-plugin`. Runner: `claude` 2.1.301.
+
+### Pre-run corrections and unscored probes
+
+- First probe (case 1, `--runs 1`, 2026-10-15): scaffold error on every case, because the runner now
+  pre-populates the run's `HOME/.gitconfig` and the seeder refused any existing one. Fixed in the seeder
+  (`21df9f86`: keep an existing `.gitconfig` that carries an identity). Not scored.
+- Second probe (case 1, `--runs 1`, $0.21): all nine graders passed. It verified `file_exists` with
+  `exists: false`, the change-history clause (a sidecar `change-history` key) and that an in-place amend
+  does not count as a created file. Not scored.
+- Grader finding (U3, **not** corrected before the baseline): a `regex` grader's `path` does **not** accept
+  a glob. The run reports `path "vault/spec/*.json" does not exist` (grader threw, scored as a fail).
+  `file_exists` does accept a glob. The three graders affected, `spec-is-draft` and
+  `spec-mentions-the-exception` (ADR-exception case) and `successor-is-draft` (spec case), cannot pass
+  as written. Their scores below are a floor. Replacing them needs a controller decision (an `llm` grader
+  named in `expected.md`, or dropping the clause), so they were left as pre-registered.
+
+### Baseline arm (current prose), 2026-10-15
+
+Errored runs (scaffold or load failure) in the scored batch: **none**. Cost is the list-price estimate.
+
+| Case | Run scores (1 / 2 / 3) | Cost | Failed graders | Bar (2 of 3 at 1.0) |
+|------|------------------------|------|----------------|---------------------|
+| amend-wrong-fact-in-active-adr | 1.00 / 1.00 / 1.00 | $0.564 | none | **green** |
+| amend-narrow-one-criterion-in-ready-spec | 0.909 / 0.909 / 0.909 | $0.650 | `wrong-text-gone` in all three | red |
+| amend-drifted-mechanism-detail-phrased-as-serious-error | 0.889 / 0.889 / 0.667 | $0.583 | `wrong-text-gone` in all three; run 3 also `change-history-entry`, `corrected-text-present` | red |
+| supersede-reversed-decision | 1.00 / 1.00 / 1.00 | $0.647 | none | **green** |
+| supersede-adr-exception-phrased-as-small-tweak | 0.667 / 0.667 / 0.667 | $0.554 | `draft-spec-exists` (real), `spec-is-draft` and `spec-mentions-the-exception` (glob, see above), in all three | red |
+| supersede-spec-change-orphaning-an-objective-phrased-as-small-tweak | 0.714 / 0.714 / 0.714 | $0.428 | `successor-spec-exists` (real), `successor-is-draft` (glob), in all three | red |
+
+Model `claude-opus-5-5`; batch total $3.425 (plus two unscored probes and two unscored diagnostic
+runs, about $0.8).
+
+Observed from kept workspaces in one unscored diagnostic run each:
+- spec-narrowing: the agent amended, but wrote `any date range the team lead chooses, up to a maximum of
+  31 days`, leaving the old wording in place (so `wrong-text-gone` fails).
+- spec-orphaning: the agent read the record, noticed AC3 is the only criterion covering the second
+  objective, wrote nothing and asked the operator how to proceed. The pass condition scores an ask as a
+  fail, as `expected.md` states.
+
+Two cases (`amend-wrong-fact-in-active-adr`, `supersede-reversed-decision`) are green at baseline and are
+reported green: the current CLI help and refusal messages already steer these. They are not reworded.
