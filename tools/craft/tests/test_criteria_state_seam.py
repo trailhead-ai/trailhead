@@ -187,3 +187,53 @@ def test_a_body_declaring_a_unicode_digit_id_passes_the_gate_with_lores_state(  
 
     gate = _gate("candidate_set.py", shown, "--criteria-state", str(state_file))
     assert gate.returncode == 0, gate.stderr
+
+
+BODY_LEDGER = BODY_BEFORE.replace(
+    "covers AC1, AC2)",
+    "covers AC1, AC2)\n- **Second** — more. (`task/second`, closed 2026-01-02, covers AC2)",
+)
+BODY_NO_LEDGER = BODY_BEFORE.split("## Slices")[0].rstrip() + "\n"
+
+
+@pytest.mark.parametrize(
+    ("body", "reopened", "closed"),
+    [(BODY_LEDGER, {"AC2": ["first", "second"]}, ["AC1"]), (BODY_NO_LEDGER, {"AC2": []}, [])],
+    ids=["snapshot-of-two-tasks", "empty-snapshot"],
+)
+def test_lores_reopen_and_close_marks_are_accepted_by_the_gate(  # inert-gate: allow seam smoke
+    isolated_lore_env, tmp_path, body, reopened, closed
+):
+    vault, state = isolated_lore_env
+
+    def lore(*args, stdin_text=None):
+        r = run_cli(list(args), vault=vault, state_dir=state, stdin_text=stdin_text)
+        assert r.returncode == 0, r.stderr
+        return r.stdout
+
+    record_id = lore(
+        "record", "create", "--kind", "spec", "--title", "Seam marks", "--keyword", "seam",
+        "--status", "ready", stdin_text=body,
+    ).strip()
+    lore(
+        "record", "amend", record_id, "--reason", "reopen AC2",
+        "--initiated-by", "operator", "--reopen", "AC2",
+        *[a for c in closed for a in ("--close", c)], stdin_text="",
+    )
+    printed = json.loads(lore("record", "criteria", record_id))
+    assert printed["reopened"] == reopened
+    assert printed.get("closed", []) == closed
+
+    marked_file = tmp_path / "marked.json"
+    marked_file.write_text(json.dumps(printed), encoding="utf-8")
+    plain_file = tmp_path / "plain.json"
+    plain_file.write_text(
+        json.dumps({k: v for k, v in printed.items() if k not in ("reopened", "closed")}),
+        encoding="utf-8",
+    )
+    shown = lore("record", "show", record_id)
+
+    marked = _gate("candidate_set.py", shown, "--criteria-state", str(marked_file))
+    plain = _gate("candidate_set.py", shown, "--criteria-state", str(plain_file))
+    assert marked.returncode == 0, marked.stderr
+    assert marked.stdout == plain.stdout

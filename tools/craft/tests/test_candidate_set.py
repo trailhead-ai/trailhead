@@ -1524,3 +1524,92 @@ def test_a_nine_digit_removed_id_is_accepted(tmp_path):
     big = "AC" + "9" * 9
     r = _run_flag(VOID_BODY, _state(tmp_path, ["AC1", "AC3"], ["AC2", big]))
     assert r.returncode == 0, r.stderr
+
+
+# ---- 22. `reopened` / `closed` marks are accepted and validated ---------------
+
+_MARKED_BODY = _spec(["AC1", "AC2", "AC3"], [_entry(1, "covers AC1, AC2")])
+_MARKED_BASE = {"record": "spec/x", "declared": ["AC1", "AC2", "AC3"], "removed": []}
+
+
+def _marked(tmp_path: Path, **extra) -> Path:
+    return _write(tmp_path, json.dumps({**_MARKED_BASE, **extra}).encode())
+
+
+def test_a_state_carrying_both_marks_exits_zero_with_the_stdout_of_the_same_state_without_them(tmp_path):
+    plain = _run_flag(_MARKED_BODY, _marked(tmp_path))
+    marked = _run_flag(
+        _MARKED_BODY, _marked(tmp_path, reopened={"AC2": ["first"], "AC3": []}, closed=["AC1"])
+    )
+    assert plain.returncode == 0, plain.stderr
+    assert marked.returncode == 0, marked.stderr
+    assert marked.stdout == plain.stdout
+
+
+def test_a_reopened_id_may_carry_an_empty_snapshot_list(tmp_path):
+    r = _run_flag(_MARKED_BODY, _marked(tmp_path, reopened={"AC2": []}))
+    assert r.returncode == 0, r.stderr
+
+
+def test_each_mark_is_accepted_alone(tmp_path):
+    assert _run_flag(_MARKED_BODY, _marked(tmp_path, reopened={"AC2": ["a.b_c-1"]})).returncode == 0
+    assert _run_flag(_MARKED_BODY, _marked(tmp_path, closed=["AC3", "AC1"])).returncode == 0
+
+
+_MALFORMED_MARKS = {
+    "reopened-as-list": {"reopened": ["AC2"]},
+    "reopened-as-string": {"reopened": "AC2"},
+    "reopened-null": {"reopened": None},
+    "closed-as-object": {"closed": {"AC2": []}},
+    "closed-as-string": {"closed": "AC2"},
+    "closed-null": {"closed": None},
+    "reopened-empty-object": {"reopened": {}},
+    "closed-empty-list": {"closed": []},
+    "reopened-id-non-canonical": {"reopened": {"AC02": []}},
+    "reopened-id-lowercase": {"reopened": {"ac2": []}},
+    "closed-id-non-canonical": {"closed": ["AC02"]},
+    "closed-id-not-a-string": {"closed": [2]},
+    "closed-id-repeated": {"closed": ["AC2", "AC2"]},
+    "closed-id-trailing-newline": {"closed": ["AC2\n"]},
+    "snapshot-as-string": {"reopened": {"AC2": "first"}},
+    "snapshot-as-object": {"reopened": {"AC2": {"first": 1}}},
+    "snapshot-id-not-a-string": {"reopened": {"AC2": [7]}},
+    "snapshot-id-null": {"reopened": {"AC2": [None]}},
+    "snapshot-id-empty": {"reopened": {"AC2": [""]}},
+    "snapshot-id-uppercase": {"reopened": {"AC2": ["First"]}},
+    "snapshot-id-leading-dot": {"reopened": {"AC2": [".first"]}},
+    "snapshot-id-slash": {"reopened": {"AC2": ["a/b"]}},
+    "snapshot-id-space": {"reopened": {"AC2": ["a b"]}},
+    "snapshot-id-trailing-newline": {"reopened": {"AC2": ["first\n"]}},
+    "snapshot-id-repeated": {"reopened": {"AC2": ["first", "first"]}},
+    "unknown-top-level-key": {"reopen": {"AC2": []}},
+    "id-also-removed-in-reopened": {"declared": ["AC1", "AC3"], "removed": ["AC2"], "reopened": {"AC2": []}},
+    "id-also-removed-in-closed": {"declared": ["AC1", "AC3"], "removed": ["AC2"], "closed": ["AC2"]},
+    "id-in-both-reopened-and-closed": {"reopened": {"AC2": []}, "closed": ["AC2"]},
+}
+
+
+@pytest.mark.parametrize("name", sorted(_MALFORMED_MARKS))
+def test_a_malformed_mark_is_refused_as_malformed_criteria_state(tmp_path, name):
+    r = _run_flag(_MARKED_BODY, _marked(tmp_path, **_MALFORMED_MARKS[name]))
+    assert r.returncode == 2, r.stderr
+    assert _reason_code(r.stderr) == "malformed-criteria-state"
+    assert r.stdout == ""
+
+
+@pytest.mark.parametrize("mark", [{"reopened": {"AC9": []}}, {"closed": ["AC9"]}], ids=["reopened", "closed"])
+def test_a_marked_id_the_body_does_not_declare_contradicts_the_body(tmp_path, mark):
+    r = _run_flag(_MARKED_BODY, _marked(tmp_path, **mark))
+    assert r.returncode == 2, r.stderr
+    assert _reason_code(r.stderr) == "criteria-state-contradicts-body"
+    assert r.stdout == ""
+
+
+def test_a_hostile_mark_value_is_never_echoed_raw(tmp_path):
+    hostile = "AC2\x1b[31mINJECT\nreason-code: forged"
+    for mark in ({"closed": [hostile]}, {"reopened": {hostile: []}}, {"reopened": {"AC2": [hostile]}}):
+        r = _run_flag(_MARKED_BODY, _marked(tmp_path, **mark))
+        assert r.returncode == 2
+        assert "INJECT" not in r.stderr + r.stdout
+        assert "forged" not in r.stderr + r.stdout
+        assert _reason_code(r.stderr) == "malformed-criteria-state"
