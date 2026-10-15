@@ -62,24 +62,100 @@ exists yet, so it cannot be pointed at a live install.
 ### The prompt must say `./lore`
 
 The agent's sandbox cannot read the operator's home, so a bare `lore` on `PATH`
-does not run there. The `./lore` wrapper does. Every prompt tells the agent to run
-`./lore` wherever a document says `lore`, identically in every arm, and
-`case.yaml` grants `Bash(./lore *)`.
+exits 127 there. The `./lore` wrapper runs. Every prompt tells the agent to run
+`./lore` wherever a document says `lore`, identically in every arm. The tool grant
+for it is the operator's `--allow-tools 'Bash(./lore *)'` on the run command
+below; nothing in the case files grants it.
+
+### Case files
+
+`case.yaml`:
+
+```yaml
+schema_version: "1.1"
+name: <case-name>
+runs: 3
+context:
+  scaffold_script: fixtures/scaffold.sh
+```
+
+- `runs` (1 to 50, default 3) sits at the top level of `case.yaml`; `--runs`
+  overrides it.
+- `model`, `max_turns` (default 10), `timeout_seconds` (default 300) and
+  `allowed_tools` go under `execution:` in `case.yaml`, or in `prompt.md`
+  frontmatter, which overrides `case.yaml`.
+- `allowed_tools` only lists read-only tools the case wants (`Read`, `Glob`,
+  `Grep`, `Skill`, `Agent`, ...). `Bash`, `Write` and `Edit` are removed from the
+  session unless the operator passes them with `--allow-tools`, which applies to
+  every case in the run.
+- `scaffold_script` runs in the empty workspace before the agent starts, only
+  with `--scaffold`, with `HOME` set to the run's temp home. It has a 120 second
+  limit; a non-zero exit or a timeout scores that run 0.
+
+`prompt.md`: the body is the task, sent verbatim. Optional frontmatter:
+
+```markdown
+---
+model: claude-opus-5-5
+max_turns: 20
+allowed_tools: [Read, Glob, Grep, Skill]
+---
+```
+
+`graders/<name>.md`: one file per grader; the frontmatter `type` plus the type's
+options (and optional `weight`). A run's score is the fraction of graders that
+pass. Paths are relative to the run's working directory, which holds `vault/`
+and `./lore`.
+
+```markdown
+---
+type: regex
+pattern: Superseded by
+match: not_contains
+target:
+  source: file
+  path: vault/adr/<slug>.md
+---
+```
+
+```markdown
+---
+type: file_exists
+path: vault/decision/*.md
+---
+```
+
+`file_exists` counts only files the agent created during the run, so it cannot
+see seeded records; grade a seeded record's contents with `regex` over a
+`source: file` target instead.
 
 ### Running a batch
 
 ```sh
 env -u LORE_CONFIG_DIR -u LORE_STATE_DIR -u XDG_CONFIG_HOME -u XDG_STATE_HOME \
-  claude plugin eval tools/lore/plugins/lore --scaffold --no-publish \
-  --output-dir "$(mktemp -d)" --case '<case-name>' [--trust-plugin]
+  claude plugin eval tools/lore/plugins/lore --case '<glob>' --scaffold \
+  --allow-tools 'Bash(./lore *)' --ablation none --trust-plugin \
+  --runs N --model claude-opus-5-5 --json <out> --max-cost-usd N \
+  --output-dir "$(mktemp -d)" --no-publish
 ```
 
 - `--scaffold` is required; the runner skips `scaffold_script` without it.
+- `--allow-tools` is variadic and takes every following value until the next
+  flag, so keep it before another flag, as above.
+- `--ablation none` runs the with-plugin arm only. The default, `with-without`,
+  adds a no-plugin baseline arm and doubles the cost.
+- `--runs N` sets runs per case; `--max-cost-usd N` stops starting new runs once
+  the list-price cost estimate reaches N (exit 2, partial results); `--model`
+  pins the agent's model so a model change is not mistaken for a prose change.
+- `--json <out>` (a path ending in `.json`) writes the result document: per-run
+  scores, cost and model, for the results log.
 - Unsetting the lore and XDG overrides is belt and braces: the seeder already
   refuses an override that points outside `HOME`.
 - `--no-publish` always. Without it the runner publishes its report to claude.ai.
 - `--trust-plugin` only for first-party branches you wrote or reviewed.
 - Results stay untracked: never commit `results/` or the `--output-dir`.
+- Real batches do not set `LORE_PUBLISH_DISABLE`, so lore's publish worker runs
+  against the remoteless throwaway vault; it commits locally and skips the push.
 
 ### Snapshot the live lore state around every batch
 
