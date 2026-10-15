@@ -147,3 +147,29 @@ reason, and quotes the credential-shaped token; `mixed` with `failing_env` prese
 - Only the rendering of the instruction-shaped sentence is covered; the arm is not a prompt-injection
   benchmark.
 - The vanilla path only: one throwaway vault, no camp workspace.
+
+---
+
+# Revision 1 — dispatch corrections on macOS, registered before any arm ran
+
+The dispatch above could not run as written on a Mac. Three corrections were made, each found by
+the pre-batch probe through `scripts/eval-sandbox`. The pass condition, the fixtures' content and
+the prompts are unchanged.
+
+- **The fenced `PATH` reached Python 3.9.** The manifest's `PATH` is the shim directory plus
+  `/usr/bin:/bin`, and `lore` and the gathering script run by their `python3` shebangs. On macOS
+  that is the system Python 3.9, and lore needs 3.11, so the builder failed at its first
+  `lore record create`. The builder now places a `python3` link to its own resolved interpreter in
+  each shim directory, and `tools/craft/tests/test_tidy_followups_fixture_smoke.py` builds the
+  fixture with `LORE_BIN` naming the real `lore` executable and runs the script by its shebang.
+- **A fenced `HOME` logs `claude` out.** Under the manifest's `HOME`, `claude -p` exits 1 with "Not
+  logged in", with or without `USER`. The arm runs with the manifest's `env` plus the developer's
+  real `HOME` and `USER`. `lore` stays fenced by the manifest's `XDG_STATE_HOME`,
+  `XDG_CONFIG_HOME` and `LORE_*` variables, and the sandbox denies reads of the real `~/.config`
+  and `~/.local/state` regardless.
+- **The checkout is unreadable inside the sandbox.** It lives under `~/.local/state`, which the
+  sandbox denies. The arm reads a snapshot of the stated SHA, made with `git archive`, outside
+  `$HOME`. It holds `trailhead/`, `tools/lore/plugins/lore/` and `tools/craft/plugins/craft/`
+  without `evals/` and without `skills/tidy-followups/`, so neither arm can read this file or the
+  prose under test from disk. `LORE_BIN` and `${CLAUDE_PLUGIN_ROOT}` name that snapshot, and both
+  arms get the same environment.
