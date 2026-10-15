@@ -2829,9 +2829,9 @@ def _cmd_record_amend(args) -> int:
                     raise _UpdateAborted()
                 if reopen_ids:
                     criteria_entry["reopened"] = reopen_ids
-                    criteria_entry["ledger"] = [
+                    criteria_entry["ledger"] = list(dict.fromkeys(
                         task for task, _, _ in criteria_mod.ledger_entries(stored_before)
-                    ]
+                    ))
                 if close_ids:
                     criteria_entry["closed"] = close_ids
             if criteria_entry:
