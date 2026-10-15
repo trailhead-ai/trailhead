@@ -16,6 +16,12 @@ Contract
   Exactly one option per question carries ``"pick": true``. An unknown key is
   refused with the allowed keys listed. What is inside ``layout`` is never
   inspected here.
+* ``enclosing_workspace(cwd, env)`` names the camp workspace a directory sits
+  in: ``cwd`` resolved, taken relative to camp's state root (resolved; that is
+  ``$CAMP_STATE_DIR`` verbatim, else ``$XDG_STATE_HOME/camp``, else
+  ``~/.local/state/camp``). When its parts are ``<group>/worktrees/<slug>/...``
+  at any depth the result is ``<state root>/<group>/worktrees/<slug>``;
+  otherwise ``None``.
 * The pad slug matches ``^[a-z0-9][a-z0-9._-]*$`` and is at most 64 characters.
 * Pads live in ``<state>/pads/<slug>/`` where ``<state>`` is
   ``$OUTPOST_STATE_DIR``, else ``$XDG_STATE_HOME/outpost``, else
@@ -110,6 +116,30 @@ def _outpost_state_dir(env: Mapping[str, str]) -> Path:
         return Path(base) / "outpost"
     home = env.get("HOME") or str(Path.home())
     return Path(home) / ".local" / "state" / "outpost"
+
+
+def _camp_state_root(env: Mapping[str, str]) -> Path:
+    """Mirror of ``trailhead.paths.state_dir("camp", env=env)``."""
+    override = env.get("CAMP_STATE_DIR")
+    if override:
+        return Path(override)
+    base = env.get("XDG_STATE_HOME")
+    if base:
+        return Path(base) / "camp"
+    home = env.get("HOME") or str(Path.home())
+    return Path(home) / ".local" / "state" / "camp"
+
+
+def enclosing_workspace(cwd: Path, env: Mapping[str, str]) -> Path | None:
+    """The camp workspace *cwd* sits inside, or ``None``."""
+    root = _camp_state_root(env).resolve()
+    try:
+        parts = Path(cwd).resolve().relative_to(root).parts
+    except ValueError:
+        return None
+    if len(parts) >= 3 and parts[1] == "worktrees":
+        return root / parts[0] / "worktrees" / parts[2]
+    return None
 
 
 def _pads_root(env: Mapping[str, str]) -> Path:
