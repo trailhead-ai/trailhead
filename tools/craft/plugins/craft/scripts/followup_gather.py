@@ -6,8 +6,10 @@ Usage:
     followup_gather.py <spec-name>
 
 `<spec-name>` is the bare name of a spec record (the part after `spec/`) and
-must match `^[A-Za-z0-9._/-]+$`; anything else is refused before `lore` is
-ever invoked.
+must match `^[A-Za-z0-9._/-]+$`, must not start with `-`, and must not
+contain a `..` path segment; anything else is refused before `lore` is ever
+invoked. A name starting with `-` is only reachable after a `--` separator,
+since otherwise it parses as an option.
 
 The spec is looked up with `lore vault ls` followed by `lore record show
 --json --vault <vault> spec/<name>` in each listed vault. Exactly one vault
@@ -24,7 +26,7 @@ Exit codes:
     1  refused: the spec exists but its slice loop has not ended. stderr
        carries `reason-code: slice-loop-not-ended`.
     2  could not certify. stderr carries one `reason-code:` line:
-       invalid-spec-name, no-vaults, spec-not-found, spec-ambiguous,
+       invalid-spec-name, invalid-arguments, no-vaults, spec-not-found, spec-ambiguous,
        not-a-spec, malformed-sidecar, empty-sidecar, lore-missing,
        lore-timeout, lore-failed, lore-output-not-json, internal-error.
 
@@ -37,6 +39,8 @@ Invariants and security posture:
   default uncaught-exception exit is 1, which would read as the refusal.
 - A sidecar that is valid JSON but lacks `kind` or `status` is a failed
   lookup, never a verdict.
+
+`--help` / `-h` prints usage and exits 0.
 
 `lore_runner` is the single seam through which every `lore` call is made, and
 `resolve_spec` takes the runner as an argument, so callers and tests can
@@ -146,6 +150,19 @@ def entry_verdict(sidecar: dict) -> str | None:
     return None
 
 
+class _Parser(argparse.ArgumentParser):
+    def error(self, message: str):
+        raise GatherError("invalid-arguments")
+
+
+def _name_is_safe(name: str) -> bool:
+    return (
+        NAME_RE.fullmatch(name) is not None
+        and not name.startswith("-")
+        and ".." not in name.split("/")
+    )
+
+
 def _refuse(code: int, reason: str) -> int:
     print(f"reason-code: {reason}", file=sys.stderr)
     return code
@@ -153,12 +170,15 @@ def _refuse(code: int, reason: str) -> int:
 
 def main(argv: list[str] | None = None, runner=None) -> int:
     try:
-        parser = argparse.ArgumentParser(
+        parser = _Parser(
             prog="followup_gather.py", description="Decide whether a spec's slice loop has ended."
         )
         parser.add_argument("spec_name", help="bare spec record name (the part after spec/)")
-        name = parser.parse_args(argv).spec_name
-        if not NAME_RE.fullmatch(name):
+        try:
+            name = parser.parse_args(argv).spec_name
+        except GatherError as err:
+            return _refuse(2, err.reason)
+        if not _name_is_safe(name):
             return _refuse(2, "invalid-spec-name")
         try:
             vault, sidecar = resolve_spec(runner or lore_runner, name)
