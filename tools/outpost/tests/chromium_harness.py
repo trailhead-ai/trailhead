@@ -26,17 +26,16 @@ from __future__ import annotations
 
 import contextlib
 import html
+import http.server
 import json
 import os
 import re
-import http.server
 import shutil
 import signal
 import subprocess
 import tempfile
 import threading
 from collections.abc import Callable, Iterator, Mapping
-from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -136,7 +135,7 @@ class _SitesHandler(http.server.SimpleHTTPRequestHandler):
         pass
 
 
-@contextmanager
+@contextlib.contextmanager
 def serve_folder(root: Path, *, port: int = 0) -> Iterator[str]:
     """Serve ``root`` on a loopback port under Outpost's sites headers; yield the base URL."""
     handler = lambda *a, **kw: _SitesHandler(*a, directory=str(root), **kw)  # noqa: E731
