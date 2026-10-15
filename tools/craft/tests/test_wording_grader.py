@@ -1543,6 +1543,9 @@ REPORT_FILES = {
     "specreview": "reports-spec-review.md",
     "driver": "reports-lenses.md",
     "consult-calibrated": "reports-calibrated.md",
+    "review": "reports-code-review.md",
+    "buildreview": "reports-code-review.md",
+    "drivebuild": "reports-code-review.md",
 }
 SITE_CHECKS = {
     "consult": ("severity-name", "reviewer-name"),
@@ -1550,6 +1553,9 @@ SITE_CHECKS = {
     "specreview": ("severity-name", "reviewer-name"),
     "driver": ("severity-name", "reviewer-name", "persisted-levels"),
     "consult-calibrated": ("calibration-level", "severity-name", "reviewer-name"),
+    "review": ("code-review-name", "severity-name"),
+    "buildreview": ("code-review-name", "severity-name"),
+    "drivebuild": ("code-review-name", "severity-name"),
 }
 
 # One row per committed capture: the verdict of each check the site runs. The pre-registered expectation for a
@@ -1599,6 +1605,17 @@ FINDING_CAPTURE_VERDICTS.update(
     }
     | {
         f"cal-consult-{n}": {"calibration-level": "plain", "severity-name": "plain", "reviewer-name": "plain"}
+        for n in (1, 2, 3)
+    }
+)
+
+# The code review sites grade `code-review-name` and `severity-name`. The pre-registered expectation for a baseline is
+# internal on both; every baseline capture reads `none` on `code-review-name` (it names the agent "the reviewer"), so
+# the headroom precondition fails on that check and the results section of `expected.md` records it.
+FINDING_CAPTURE_VERDICTS.update(
+    {
+        f"baseline-{site}-{n}": {"code-review-name": "none", "severity-name": "internal"}
+        for site in ("review", "buildreview", "drivebuild")
         for n in (1, 2, 3)
     }
 )

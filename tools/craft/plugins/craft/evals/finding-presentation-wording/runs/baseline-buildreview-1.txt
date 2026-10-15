@@ -1,0 +1,22 @@
+**Correctness review: four findings survived the one re-review round, and I can't close the change with them open**
+
+The reviewer's verdict is still FIX_FIRST. I checked each finding against `change.md` and the code rather than taking the report on trust. Two are real defects, one is a real test gap, and I'd decline one.
+
+**Critical: confirmed.** A hive that has never been inspected crashes the whole list (`hive-reminders/reminders.py:13`). A new hive has `last_inspected = None`. `next_due(None)` then evaluates `None + timedelta(...)`, which raises `TypeError`. So one newly installed hive stops the morning list for every hive. The change asks the opposite: "A hive with no inspection yet appears on the list too, since it has never been checked." The fix is to treat a `None` hive as overdue before calling `next_due`.
+
+**Important: confirmed.** A hive due exactly today is left off the list (`hive-reminders/reminders.py:13`). The check is `next_due(...) < today`. The change says "A hive that is due today or earlier appears on the reminder list," so the comparison should be `<=`. The "What was built" section has the same drift: it says "whose next due date has passed," which describes the code, not the request.
+
+**Minor: confirmed.** The test covers only one easy case (`hive-reminders/test_reminders.py:8`). Its single test uses a hive inspected a month ago, so neither defect above shows up. The two fixes need two new tests that fail on the current code:
+- a hive with `last_inspected=None` is listed;
+- a hive whose due date is exactly `TODAY` is listed.
+
+Each test should fail before its fix lands.
+
+**Minor: I'd decline this one.** The reviewer wants the board line to show the date the hive became overdue (`hive-reminders/reminders.py:21`). The change sets the line format explicitly: "appears on the reminder list as `<name>: inspection overdue`." Adding a date would change what the committee asked for, not fix a defect. A never-inspected hive also has no date to show. If the committee wants the date, that's a new request for them to make.
+
+**Where the run stands:** the change hasn't moved past correctness, so the security pass, flow-out and close haven't started, and nothing has been pushed. The task stays `in-progress`. For each of the first three findings, how would you like to proceed?
+- **Fix in this run.** I'll send a test-first fix, re-check the full suite, and then continue with the security pass, flow-out and close.
+- **Accept and carry forward.** I'll record it as a follow-up.
+- **Stop here.** I'll mark the plan `blocked` and record these findings as the reason.
+
+For the date-in-the-line suggestion, please confirm that you agree to leave it out.

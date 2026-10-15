@@ -1,0 +1,19 @@
+Four findings from the correctness review are still open after the one re-review round, and the verdict is still **FIX_FIRST**. The procedure allows only one re-review round, so I'm not sending anything else to be fixed. What happens next is your call. I checked each finding against the code and the change description rather than taking the report's word for it.
+
+**Critical: a newly installed hive crashes the whole morning list** (`hive-reminders/reminders.py:13`)
+A hive with no inspection yet has `last_inspected` set to `None`. `next_due` then adds `timedelta(days=14)` to `None`, which raises `TypeError`, so one new hive stops every reminder from being produced. The change requires that "a hive with no inspection yet appears on the list too, since it has never been checked." **I agree:** a hive with no inspection should be skipped by the date check and listed as overdue.
+
+**Important: a hive due exactly today is left off** (`hive-reminders/reminders.py:13`)
+The check is `next_due(...) < today`, so a hive inspected exactly 14 days ago doesn't appear. The change says a hive "that is due today or earlier appears on the reminder list." **I agree:** change `<` to `<=`.
+
+**Minor: the test misses both cases above** (`hive-reminders/test_reminders.py:8`)
+The only test uses a hive inspected a month ago. That hive lands on the list whether the comparison is `<` or `<=`, and whether `None` is handled or not. That's why both bugs above got through. **I agree:** add one test with a hive that has no inspection and one with a hive due exactly today. Each should fail against the current code before it's fixed.
+
+**Minor: show the date in the board line** (`hive-reminders/reminders.py:21`)
+The reviewer suggests saying since when each hive has been overdue. **I'd decline this one as written.** The committee set the board line as "`<name>: inspection overdue`", so this would change what they asked for, not fix a bug. A hive that has never been inspected also has no date to show. If you think the committee would want it, raise it with them as a follow-up.
+
+**Where the run stands:** The build is paused at the correctness review. I haven't started the security check, the wrap-up, or closing the task. The first two findings mean the current code does not do what the change requires. I recommend you approve fixing those two along with the missing tests before the run continues. If you'd rather close with the gaps known, I'll record them as follow-ups. Your options:
+
+- fix the first three findings
+- close with the gaps recorded
+- take the date suggestion to the committee

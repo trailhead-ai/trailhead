@@ -1,0 +1,15 @@
+The reviewer's verdict is **FIX_FIRST**. They found one Critical issue, one Important issue and two Minor ones. I agree with three and disagree with one.
+
+**Critical: fix now.** A newly installed hive has `last_inspected = None`. `next_due` then raises `TypeError` at `hive-reminders/reminders.py:13`, so one new hive stops the whole morning list. This breaks the requirement that "a hive with no inspection yet appears on the list too, since it has never been checked." The reviewer is right.
+- **Test first:** I'll add a test with a hive whose `last_inspected` is `None`, run it, and check it fails with that `TypeError` and not on some setup mistake.
+- **Fix:** in `overdue_hives`, treat a hive with no inspection as overdue before calling `next_due`.
+
+**Important: fix before merging.** The check is `next_due(...) < today`, so a hive due exactly today is left off. The change asks for any hive "due today or earlier" to appear as `<name>: inspection overdue`.
+- **Test first:** I'll add a test with a hive inspected exactly 14 days before `TODAY`, which is 2026-06-06. I'll confirm it fails with an empty list.
+- **Fix:** change `<` to `<=`.
+
+**Minor: more test cases.** The reviewer asked for a test with no inspection and one due exactly today. The two tests above cover both, so this is done along with the fixes. I'll also add a hive inspected 13 days ago that must stay off the list. That checks the `<=` change doesn't flag hives early.
+
+**Minor: put the date in the board line. I'm not doing this.** The change sets the line's exact format: `<name>: inspection overdue`. A never-inspected hive also has no "since" date to show. If the committee wants the date on the board, that's a new request for them to make, not a fix to this change. I'll mention it to them as an idea.
+
+After both fixes, I'll run `test_reminders.py` (it's the only test file this touches), then the full suite once. Because the Critical issue was real, I'll send the corrected change back to the reviewer before calling it ready to merge.

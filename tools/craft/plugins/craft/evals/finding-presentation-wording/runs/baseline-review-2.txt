@@ -1,0 +1,20 @@
+The reviewer's verdict is **FIX_FIRST**. I checked each finding against the code and the change description. The two serious ones are real bugs, and both fall on cases the existing single test never touches.
+
+**Critical: a newly installed hive crashes the whole list** (`hive-reminders/reminders.py:13`)
+This is confirmed. A new hive has `last_inspected = None`, so `next_due` tries `None + timedelta(...)` and raises `TypeError`. That one hive stops the board list for every other hive too. The change says a hive with no inspection yet should appear on the list, because it has never been checked. **I'll fix this now:** `overdue_hives` will treat `None` as overdue before it ever calls `next_due`, and the hive will get the same `<name>: inspection overdue` line.
+
+**Important: a hive due exactly today is left off** (`hive-reminders/reminders.py:13`)
+This is confirmed. The change asks for a hive that is due today or earlier to be listed, but `next_due(...) < today` leaves out the due date itself. A hive inspected 14 days ago won't show up until tomorrow. The "What was built" note ("whose next due date has passed") repeats the same mistake. **I'll fix this before going on:** change the check to `<=` and correct that note.
+
+**Minor: the test covers only one case** (`hive-reminders/test_reminders.py:8`)
+I agree, but I won't leave this for later. These are the regression tests for the two fixes above, so I'll write them first:
+- a hive with `last_inspected=None` appears on the list
+- a hive inspected exactly 14 days before `TODAY` appears on the list
+- a hive inspected 13 days before `TODAY` does not appear, which pins the other side of the boundary
+
+I'll run them before changing any code. I expect the first to fail with `TypeError` and the second to fail because `"<name>: inspection overdue"` is missing from the list. That proves each test catches its bug. Then I'll make the two fixes and rerun `test_reminders.py`, which is everything these changes affect.
+
+**Minor: show the overdue-since date on the board line** (`hive-reminders/reminders.py:21`)
+**I'm pushing back on this one.** The committee set the board line as `<name>: inspection overdue`, so adding a date changes their format, and a never-inspected hive has no date to show anyway. It's a reasonable idea to take to the committee, but it isn't a defect in this change. I'll note it as a possible follow-up and leave the code alone.
+
+Once the Critical and Important fixes are in and the tests pass, I'll run the full suite once and send the updated diff back for another review before merging.

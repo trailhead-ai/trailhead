@@ -1452,3 +1452,65 @@ met, until both reads are recorded in the results.
 - The staging starts at the presentation step with the report in hand, so the earlier dispatch, triage and fix
   steps are stubbed, and the Phase 3 prompt tells the session the re-review round has already run.
 - The check is lexical (see its trade-offs); the plain form `code review` can appear without attribution.
+
+## Results: code review baselines and headroom (2026-10-15)
+
+Nine baseline captures, three per new site, run per "Dispatch" with the arms `baseline-review.md`,
+`baseline-buildreview.md` and `baseline-drivebuild.md`, each from its site's prompt over a fresh copy of `fixtures/`
+and an empty second directory. All nine exited 0, every capture is non-empty and every `.stderr.txt` is empty, so none
+was excluded or replaced. Every capture is clean under `capture_scan.py` and `scripts/leak-gate` (both exit 0) and a
+`grep` for host paths and user names finds none. The grader is `wording_grader.py` with `--reports
+fixtures/reports-code-review.md`.
+
+One deviation from the Dispatch text, on the host: `arms/baseline-drivebuild.md` is 154,938 bytes, over the Linux
+limit of 131,072 bytes for one argument string, so `--append-system-prompt "<contents>"` cannot be started (the
+shell refused with "Argument list too long" before any model ran, and those files were deleted, not counted).
+`baseline-drivebuild-1` to `-3` were run with `--append-system-prompt-file arms/baseline-drivebuild.md`, which
+supplies the same bytes. The other six captures used the inline form. Nothing else differs.
+
+### Verdicts
+
+| Capture | `code-review-name` | `severity-name` |
+|---|---|---|
+| `baseline-review-1`, `-2`, `-3` | `none`, `none`, `none` | `internal`, `internal`, `internal` |
+| `baseline-buildreview-1`, `-2`, `-3` | `none`, `none`, `none` | `internal`, `internal`, `internal` |
+| `baseline-drivebuild-1`, `-2`, `-3` | `none`, `none`, `none` | `internal`, `internal`, `internal` |
+
+### Headroom, per site and check
+
+| Site | `code-review-name` | `severity-name` |
+|---|---|---|
+| review | no headroom: 0 of 3 `internal`, 3 of 3 `none` | headroom: 3 of 3 `internal` |
+| buildreview | no headroom: 0 of 3 `internal`, 3 of 3 `none` | headroom: 3 of 3 `internal` |
+| drivebuild | no headroom: 0 of 3 `internal`, 3 of 3 `none` | headroom: 3 of 3 `internal` |
+
+**The parent's Known Unknown, whether the baseline has headroom on `code-review-name`: it has none, at any of the
+three sites.** No baseline capture writes `code review`, `code-review`, `code reviewer` or `code-reviewer` in any
+form (a case-insensitive `grep` for `code[ -]review` over the nine captures finds nothing). They name the agent "the
+reviewer" or "the review", which the grammar reads `none`, and a majority of `none` is no measurable headroom. No site
+is majority `plain` on either check, so the end state for a baseline already `plain` (a check closed on the baseline,
+a read directive dropped) does not apply. The stop rule applies: "a baseline has no headroom on a check" stops the run
+and nothing further is run or changed; the choice goes to the operator.
+
+### Hand check
+
+One capture per verdict word seen, per site, read by eye against the grader's verdict.
+
+- `baseline-review-1` (and `-3`): the session says "The reviewer's verdict is FIX_FIRST" and "They found one
+  Critical issue, one Important issue and two Minor ones"; it never writes `code review` or the agent's name. By eye
+  `none` for `code-review-name`; `internal` for `severity-name` (the level words `Critical`, `Important`, `Minor` and
+  "Critical issue" head and name the findings). Agrees with the grader.
+- `baseline-buildreview-2`: "The reviewer still says FIX_FIRST", headings and bold lead-ins `Critical: confirmed.`,
+  `Important: confirmed.`, `Minor: confirmed.`. By eye `none` and `internal`. Agrees.
+- `baseline-drivebuild-1`: "The reviewer's verdict is FIX_FIRST", sections headed `**Critical**`, `**Important**`,
+  `**Minor**`. By eye `none` and `internal`. Agrees.
+
+No capture reads `plain` or `internal` on `code-review-name`, so no capture of those words exists to hand check. The
+`none` reading is not a misgrade: the phrase the check looks for is absent, not hidden by a boundary rule (the
+plural, hyphen and fence rules removed nothing here, since the strings are not in the captures at all). No hand-confirmed
+misgrade, so the one amendment allowance is unspent and no amendment is made.
+
+### Not read here
+
+The finding-order reading by eye (AC17, AC18) of these nine captures is not done in this section and stays recorded as
+unmeasured.
