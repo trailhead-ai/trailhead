@@ -1,0 +1,8 @@
+[
+  {
+    "kind": "adr",
+    "title": "Route outbound traffic through the egress gateway",
+    "status": "active",
+    "body": "# Route outbound traffic through the egress gateway\n\n## Context\nServices in the Marlin estate call external endpoints, and auditing those calls needs a single choke point.\n\n## Decision\nAll outbound traffic from services leaves through the egress gateway. No service opens a direct connection to an external endpoint.\n\n## Consequences\nEvery external call is logged in one place. The gateway becomes a dependency of every service that calls out.\n"
+  }
+]

@@ -1,0 +1,8 @@
+[
+  {
+    "kind": "decision",
+    "title": "Keep attachments inside the record row",
+    "status": "active",
+    "body": "# Keep attachments inside the record row\n\n## Decision\nAttachments are stored inline in the same row as the record they belong to, up to the size limit.\n\n## Rationale\nOne write keeps a record and its attachments consistent, and there is no second store to operate.\n"
+  }
+]

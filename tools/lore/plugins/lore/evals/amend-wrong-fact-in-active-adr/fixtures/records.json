@@ -1,0 +1,8 @@
+[
+  {
+    "kind": "adr",
+    "title": "Cache lookups in a regional store",
+    "status": "active",
+    "body": "# Cache lookups in a regional store\n\n## Context\nDirectory lookups dominate read traffic in the Marlin service, and every lookup crosses regions.\n\n## Decision\nEach region keeps its own lookup cache. Entries are retained for 90 seconds, after which the next read refetches from the home region.\n\n## Consequences\nReads stay local and cheap. A changed entry can be stale in a remote region until its retention runs out.\n"
+  }
+]

@@ -24,3 +24,6 @@ config/*
 
 # Local MCP server config — contains machine-specific absolute paths.
 .mcp.json
+
+# lore eval runner output (raw transcripts and scores; per-case scores go in tools/lore/MANUAL-EVAL.md)
+tools/lore/plugins/lore/evals/results/

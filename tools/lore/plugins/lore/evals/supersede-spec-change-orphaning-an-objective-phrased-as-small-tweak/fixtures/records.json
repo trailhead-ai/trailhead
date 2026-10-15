@@ -1,0 +1,8 @@
+[
+  {
+    "kind": "spec",
+    "title": "Notify owners of stale records",
+    "status": "ready",
+    "body": "# Notify owners of stale records\n\n## Problem\nRecords go stale without anyone noticing, and the owner of a stale record is never told.\n\n## Objectives\n- Owners hear about their stale records without having to look.\n- Owners can stop hearing about records they have retired.\n\n## Maturity\n- marlin: early\n\n## Acceptance Criteria\n- **AC1.** A record untouched for 60 days is flagged as stale. *Verified by: manual check.*\n- **AC2.** The owner of a stale record receives a message naming it. *Verified by: manual check.*\n- **AC3.** An owner can retire a record so that it is never flagged as stale again. *Verified by: manual check.*\n"
+  }
+]
