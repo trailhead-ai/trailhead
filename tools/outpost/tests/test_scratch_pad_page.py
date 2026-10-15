@@ -21,6 +21,15 @@ _spec = importlib.util.spec_from_file_location("scratch_pad", SKILL_DIR / "scrat
 scratch_pad = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(scratch_pad)
 
+
+@pytest.fixture(autouse=True)
+def _outside_any_workspace(tmp_path, monkeypatch):
+    """Run from a folder that is in no camp workspace, so the pad builds on disk and nothing is published."""
+    work = tmp_path / "cwd"
+    work.mkdir()
+    monkeypatch.chdir(work)
+
+
 HOSTILE = [
     "<script>window.pwned=1</script>",
     "<img src=x onerror=window.pwned=1>",

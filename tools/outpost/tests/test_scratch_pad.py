@@ -74,6 +74,14 @@ def skill(tmp_path):
     return d
 
 
+@pytest.fixture(autouse=True)
+def _outside_any_workspace(tmp_path, monkeypatch):
+    """Run from a folder that is in no camp workspace, so the pad builds on disk and nothing is published."""
+    work = tmp_path / "cwd"
+    work.mkdir()
+    monkeypatch.chdir(work)
+
+
 @pytest.fixture
 def state(tmp_path):
     return tmp_path / "state"

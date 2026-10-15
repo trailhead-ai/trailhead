@@ -98,18 +98,24 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/scratch-pad/scratch_pad.py \
   --pad <slug> --round <path-to-round.json>
 ```
 
-- `<slug>` names the pad and matches `^[a-z0-9][a-z0-9._-]*$` and is at most 64 characters. A pad that
-  already exists is refused, so pick a new slug for a new pad.
-- On success, line 1 of stdout is the `file://` link and line 2 is
-  `pad folder: <path>`.
+- `<slug>` names the pad and matches `^[a-z0-9][a-z0-9._-]*$` and is at most 64 characters. A name that is
+  already taken is refused, so pick a new slug for a new pad.
+- Outside a camp workspace the pad is built under Outpost's state directory:
+  line 1 of stdout is the `file://` link and line 2 is `pad folder: <path>`.
+- Inside a camp workspace the pad is published there, as a site of that
+  workspace, through the sibling `publish-site` skill. The lines printed before
+  `pad folder:` are the publisher's own (the link, then what it says about it);
+  the last line is `pad folder: <path>`.
 - On refusal the script exits non-zero and prints its reasons on stderr; no
   pad was made.
 
 ## Report it
 
-- **Success:** give the user the printed `file://` link.
-- **Refusal:** say in one plain line that no pad was made, followed by the
-  script's reasons. Fix the round and rerun only if the reasons make the fix
+- **Success:** relay every line printed before `pad folder:` to the user as
+  printed. The `pad folder:` line is for you, not the user.
+- **Name already taken:** retry with a new name, without asking.
+- **Refusal:** say in one plain line that no pad was made and why, followed by
+  the script's reasons. Fix the round and rerun only if the reasons make the fix
   obvious; otherwise fall back to asking in words.
 
 Always ask the question in words too. The pad takes answers: the user can pick
