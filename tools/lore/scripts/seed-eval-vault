@@ -1,0 +1,172 @@
+#!/usr/bin/env python3
+"""seed-eval-vault — build a throwaway lore vault in the current directory.
+
+Usage: seed-eval-vault <records.json>
+
+``records.json`` is a JSON list of ``{kind, title, status, body}`` objects. A
+record's name is the slug lore derives from its title (``Use the queue`` ->
+``adr/use-the-queue``). In the current working directory the script:
+
+1. writes ``$HOME/.gitconfig`` with a synthetic identity — lore stamps every
+   record's provenance from ``git config --global user.email`` and refuses to
+   write without one;
+2. creates ``./vault`` through this checkout's own lore CLI
+   (``lore vault add ... --scope default``), which also writes the lore config
+   naming it the default vault;
+3. creates each record through that CLI at its declared status, passing values as
+   argv and stdin, never through a shell;
+4. writes an executable ``./lore`` wrapper and a copy of the repo's ``trailhead/``
+   package beside it. A sandboxed agent that cannot read the repo (or has no
+   usable ``lore`` on PATH) runs ``./lore ...`` against the seeded vault: the
+   wrapper puts the copy on ``PYTHONPATH`` and execs this checkout's lore CLI
+   under the symlink-resolved interpreter that ran this script.
+
+Nothing is written unless every refusal check passes. It refuses (stderr
+``seed-eval-vault: <message>``, non-zero exit) when ``records.json`` is missing
+or malformed, when lore's config or state directory — resolved through
+``trailhead/paths.py``, exactly as lore resolves them, overrides included — is
+not inside ``$HOME``, when a lore config or ``$HOME/.gitconfig`` already exists,
+or when ``./vault``, ``./lore`` or ``./trailhead`` already exists. The intent is
+that a run can only ever populate a disposable ``$HOME``, never a live install.
+"""
+from __future__ import annotations
+
+import json
+import os
+import shlex
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+LORE_CLI = REPO_ROOT / "tools" / "lore" / "plugins" / "lore" / "cli" / "lore"
+IDENTITY_NAME = "Eval Fixture"
+IDENTITY_EMAIL = "eval@example.invalid"
+FIELDS = ("kind", "title", "status", "body")
+
+PLUGIN_ROOT = LORE_CLI.parent.parent
+
+sys.path[:0] = [str(REPO_ROOT), str(PLUGIN_ROOT)]
+
+from lore.record.model import KINDS  # noqa: E402
+from trailhead import paths  # noqa: E402
+
+
+class Refusal(Exception):
+    """A reason to stop before writing anything; printed as ``seed-eval-vault: <message>``."""
+
+
+def load_records(path: Path) -> list[dict[str, str]]:
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise Refusal(f"cannot read records file {path}: {exc.strerror or exc}") from exc
+    try:
+        records = json.loads(raw)
+    except ValueError as exc:
+        raise Refusal(f"records file {path} is not valid JSON: {exc}") from exc
+    if not isinstance(records, list):
+        raise Refusal(f"records file {path} must hold a JSON list of records")
+    for index, record in enumerate(records):
+        where = f"record {index}"
+        if not isinstance(record, dict):
+            raise Refusal(f"{where} must be an object with {', '.join(FIELDS)}")
+        for field in FIELDS:
+            if field not in record:
+                raise Refusal(f"{where} is missing {field!r}")
+            if not isinstance(record[field], str):
+                raise Refusal(f"{where} field {field!r} must be a string")
+        if record["kind"] not in KINDS:
+            raise Refusal(f"{where} kind {record['kind']!r} is not a lore kind: {', '.join(sorted(KINDS))}")
+        for field in ("title", "status"):
+            if not record[field].strip():
+                raise Refusal(f"{where} field {field!r} must not be empty")
+    return records
+
+
+def check_environment(cwd: Path) -> None:
+    home_value = os.environ.get("HOME", "")
+    if not home_value:
+        raise Refusal("HOME is not set")
+    home = Path(os.path.realpath(home_value))
+    try:
+        config = paths.config_dir("lore")
+        state = paths.state_dir("lore")
+    except paths.PathResolutionError as exc:
+        raise Refusal(str(exc)) from exc
+    for label, directory in (("config", config), ("state", state)):
+        if not Path(os.path.realpath(directory)).is_relative_to(home):
+            raise Refusal(
+                f"lore's {label} directory {directory} is outside HOME ({home}); "
+                "refusing to seed anything that could reach a live install"
+            )
+    if (config / "config.json").exists():
+        raise Refusal(f"a lore config already exists at {config / 'config.json'}")
+    if (home / ".gitconfig").exists():
+        raise Refusal(f"{home / '.gitconfig'} already exists")
+    for name in ("vault", "lore", "trailhead"):
+        if (cwd / name).exists() or (cwd / name).is_symlink():
+            raise Refusal(f"{cwd / name} already exists")
+
+
+def run_lore(python: str, *args: str, stdin: str | None = None) -> str:
+    result = subprocess.run(
+        [python, str(LORE_CLI), *args],
+        input=stdin,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise Refusal(f"lore {' '.join(args[:2])} failed: {result.stderr.strip() or result.stdout.strip()}")
+    return result.stdout
+
+
+WRAPPER = """#!/bin/sh
+here=$(cd "$(dirname "$0")" && pwd)
+PYTHONPATH="$here" exec {python} {cli} "$@"
+"""
+
+
+def write_wrapper(cwd: Path, python: str) -> None:
+    wrapper = cwd / "lore"
+    wrapper.write_text(WRAPPER.format(python=shlex.quote(python), cli=shlex.quote(str(LORE_CLI))), encoding="utf-8")
+    wrapper.chmod(0o755)
+    shutil.copytree(REPO_ROOT / "trailhead", cwd / "trailhead", ignore=shutil.ignore_patterns("__pycache__"))
+
+
+def seed(records_path: Path) -> None:
+    cwd = Path.cwd()
+    records = load_records(records_path)
+    check_environment(cwd)
+    python = os.path.realpath(sys.executable)
+
+    gitconfig = Path(os.environ["HOME"]) / ".gitconfig"
+    gitconfig.write_text(f"[user]\n\tname = {IDENTITY_NAME}\n\temail = {IDENTITY_EMAIL}\n", encoding="utf-8")
+    run_lore(python, "vault", "add", "eval", "--scope", "default", "--path", str(cwd / "vault"))
+    for record in records:
+        run_lore(
+            python,
+            "record", "create",
+            "--kind", record["kind"],
+            "--title", record["title"],
+            "--status", record["status"],
+            stdin=record["body"],
+        )
+    write_wrapper(cwd, python)
+
+
+def main(argv: list[str]) -> int:
+    if len(argv) != 2:
+        print("usage: seed-eval-vault <records.json>", file=sys.stderr)
+        return 2
+    try:
+        seed(Path(argv[1]))
+    except (Refusal, OSError) as exc:
+        print(f"seed-eval-vault: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
