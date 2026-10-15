@@ -12,6 +12,8 @@ import importlib.util
 import json
 from pathlib import Path
 
+import pytest
+
 import chromium_harness as ch
 
 SKILL_DIR = Path(__file__).parent.parent / "plugins" / "outpost" / "skills" / "scratch-pad"
@@ -302,3 +304,284 @@ def test_change_hook_fires_once_per_answer_change_with_the_question_index(tmp_pa
         {"pick": None, "not": [1], "none": False, "note": "x"},
         {"pick": None, "not": [], "none": True, "note": ""},
     ]
+
+
+REPLY_HELPERS = """
+const later = () => new Promise((r) => setTimeout(r, 50));
+const seen = (e) => !!e && e.getClientRects().length > 0;
+const entries = () => [...document.querySelectorAll('nav button')];
+const replyEntry = () => entries()[entries().length - 1];
+const openReply = async () => { replyEntry().click(); await settle(); };
+const replyPanel = () => document.getElementById('pad-reply');
+const replyBox = () => replyPanel().querySelector('textarea');
+const statusLine = () => replyPanel().querySelector('[role="status"]');
+const statusText = () => (seen(statusLine()) ? statusLine().textContent : '');
+const copyButton = () => btn(replyPanel(), 'Copy reply');
+const copy = async () => { copyButton().click(); await later(); };
+const summaries = () => [...replyPanel().querySelectorAll('li')].map((li) => li.textContent);
+const unanswered = () => {
+  const e = replyPanel().querySelector('.pad-reply-unanswered');
+  return seen(e) ? e.textContent : null;
+};
+const parsed = () => JSON.parse(replyBox().value.replace(/^```json\\n/, '').replace(/\\n```$/, ''));
+const useClipboard = (value) => Object.defineProperty(navigator, 'clipboard', {value, configurable: true});
+const written = [];
+const resolving = () => useClipboard({writeText: (t) => { written.push(t); return Promise.resolve(); }});
+const rejecting = () => useClipboard({writeText: () => Promise.reject(new DOMException('no', 'NotAllowedError'))});
+const selection = () => ({
+  active: document.activeElement === replyBox(),
+  start: replyBox().selectionStart,
+  end: replyBox().selectionEnd,
+  length: replyBox().value.length,
+});
+"""
+
+COPIED = "Copied. Paste it into your session."
+BLOCKED = "Your browser blocked copying. The reply is selected \u2014 press Ctrl+C (\u2318C on a Mac)."
+
+
+def _reply_probe(tmp_path, data, js):
+    return _probe(tmp_path, data, REPLY_HELPERS + js)
+
+
+def test_reply_entry_is_last_dotless_and_shows_its_own_panel_in_place_of_the_question(tmp_path):
+    js = """
+    const before = entries().length;
+    await openReply();
+    const onReply = {
+      current: entries().map((b) => b.getAttribute('aria-current')),
+      dot: !!replyEntry().querySelector('.pad-dot'),
+      label: replyEntry().textContent,
+      replyShown: seen(replyPanel()),
+      questionShown: [...document.querySelectorAll('.pad-question')].some(seen),
+      questionPanels: document.querySelectorAll('.pad-question').length,
+    };
+    await show(1);
+    const back = {
+      current: entries().map((b) => b.getAttribute('aria-current')),
+      replyShown: seen(replyPanel()),
+      questionShown: seen(panel(1)),
+    };
+    return {before, onReply, back};
+    """
+    got = _reply_probe(tmp_path, _round(2), js)
+    assert got["before"] == 3
+    assert got["onReply"] == {
+        "current": [None, None, "true"],
+        "dot": False,
+        "label": "Your reply",
+        "replyShown": True,
+        "questionShown": False,
+        "questionPanels": 1,
+    }
+    assert got["back"] == {"current": [None, "true", None], "replyShown": False, "questionShown": True}
+
+
+def test_reply_box_holds_the_reply_for_the_answers_and_the_summary_names_each_question(tmp_path):
+    js = """
+    await press(thisOne(0, 1)); await typeNote(0, 'because');
+    await show(1); await press(none(1)); await press(notThis(1, 0));
+    await openReply();
+    return {reply: parsed(), summaries: summaries(), unanswered: unanswered()};
+    """
+    got = _reply_probe(tmp_path, _round(3), js)
+    assert got["reply"] == {
+        "pad": "Settings page",
+        "answers": [
+            {"question": "Q0", "pick": "B", "not": [], "none": False, "note": "because"},
+            {"question": "Q1", "pick": None, "not": ["A"], "none": True, "note": ""},
+            {"question": "Q2", "pick": None, "not": [], "none": False, "note": ""},
+        ],
+    }
+    assert got["summaries"] == ["Q0 \u2014 B, Opt B", "Q1 \u2014 none of these", "Q2 \u2014 no answer yet"]
+    assert got["unanswered"] == "No pick yet on 1 of 3 questions. You can still copy the reply."
+
+
+def test_a_question_with_rejects_and_a_note_but_no_pick_reads_no_pick_yet(tmp_path):
+    js = """
+    await press(notThis(0, 0)); await press(notThis(0, 2)); await typeNote(0, 'hm');
+    await show(1); await typeNote(1, 'just a note');
+    await show(2); await press(notThis(2, 1));
+    await openReply();
+    return summaries();
+    """
+    got = _reply_probe(tmp_path, _round(4), js)
+    assert got == [
+        "Q0 \u2014 no pick yet (not A, C; has a note)",
+        "Q1 \u2014 no pick yet (has a note)",
+        "Q2 \u2014 no pick yet (not B)",
+        "Q3 \u2014 no answer yet",
+    ]
+
+
+def test_no_unanswered_line_when_every_question_has_a_pick_or_none_and_every_question_when_none_do(tmp_path):
+    js = """
+    await openReply();
+    const none_ = {line: unanswered()};
+    await show(0); await press(thisOne(0, 0));
+    await show(1); await press(none(1));
+    await openReply();
+    return {none_, all: unanswered()};
+    """
+    got = _reply_probe(tmp_path, _round(2), js)
+    assert got["none_"]["line"] == "No pick yet on 2 of 2 questions. You can still copy the reply."
+    assert got["all"] is None
+
+
+def test_unanswered_line_counts_one_question_in_singular(tmp_path):
+    got = _reply_probe(tmp_path, _round(), "await openReply(); return unanswered();")
+    assert got == "No pick yet on 1 of 1 question. You can still copy the reply."
+
+
+def test_changing_an_answer_after_visiting_the_reply_changes_the_reply(tmp_path):
+    js = """
+    await openReply();
+    const first = parsed().answers[0].pick;
+    await show(0); await press(thisOne(0, 2));
+    await openReply();
+    const second = parsed().answers[0].pick;
+    return {first, second, summary: summaries()[0], unanswered: unanswered()};
+    """
+    got = _reply_probe(tmp_path, _round(), js)
+    assert got == {"first": None, "second": "C", "summary": "Q0 \u2014 C, Opt C", "unanswered": None}
+
+
+def test_a_resolving_clipboard_gets_exactly_the_reply_and_an_answer_change_clears_the_message(tmp_path):
+    js = """
+    resolving();
+    await press(thisOne(0, 0));
+    await openReply();
+    await copy();
+    const after = {written: [...written], box: replyBox().value, status: statusText()};
+    await show(0); await press(thisOne(0, 1));
+    await openReply();
+    return {after, cleared: statusText()};
+    """
+    got = _reply_probe(tmp_path, _round(), js)
+    assert len(got["after"]["written"]) == 1
+    assert got["after"]["written"][0] == got["after"]["box"]
+    assert '"pick": "A"' in got["after"]["written"][0]
+    assert got["after"]["status"] == COPIED
+    assert got["cleared"] == ""
+
+
+@pytest.mark.parametrize("clipboard", ["rejecting()", "useClipboard(undefined)"])
+def test_a_blocked_clipboard_selects_the_whole_reply_and_says_so(tmp_path, clipboard):
+    js = f"""
+    {clipboard};
+    await press(thisOne(0, 0)); await typeNote(0, 'n');
+    await openReply();
+    await copy();
+    const out = {{status: statusText(), selection: selection()}};
+    await show(0); await press(thisOne(0, 1));
+    await openReply();
+    out.cleared = statusText();
+    return out;
+    """
+    got = _reply_probe(tmp_path, _round(), js)
+    assert got["status"] == BLOCKED
+    assert got["selection"]["active"]
+    assert got["selection"]["length"] > 0
+    assert (got["selection"]["start"], got["selection"]["end"]) == (0, got["selection"]["length"])
+    assert got["cleared"] == ""
+
+
+def test_seam_real_clipboard_lands_in_one_outcome(tmp_path):  # inert-gate: allow seam smoke, real clipboard
+    """Drive the page's real clipboard. The headless shell refuses a scripted
+    write, so this exercises the fallback; the success path is covered by the
+    resolving stub only."""
+    js = """
+    await openReply();
+    await copy();
+    const s = selection();
+    return {status: statusText(), selected: s.active && s.start === 0 && s.end === s.length && s.length > 0};
+    """
+    got = _reply_probe(tmp_path, _round(), js)
+    assert (got["status"], got["selected"]) in [(COPIED, False), (BLOCKED, True)]
+
+
+@pytest.mark.parametrize("setup,expected", [("resolving()", COPIED), ("rejecting()", BLOCKED), ("", "")])
+def test_status_line_is_a_status_region_and_the_reply_box_is_named_your_reply(tmp_path, setup, expected):
+    js = f"""
+    {setup};
+    await openReply();
+    if ({'true' if setup else 'false'}) await copy();
+    const box = replyBox();
+    const labelled = box.labels && box.labels.length ? box.labels[0].textContent : box.getAttribute('aria-label');
+    return {{
+      status: statusText(), role: statusLine().getAttribute('role'), label: labelled,
+      readOnly: box.readOnly, tag: box.tagName,
+    }};
+    """
+    got = _reply_probe(tmp_path, _round(), js)
+    assert got == {"status": expected, "role": "status", "label": "Your reply", "readOnly": True, "tag": "TEXTAREA"}
+
+
+def test_without_padreply_the_reply_panel_alone_says_it_could_not_be_built(tmp_path):
+    js = """
+    await press(thisOne(0, 1));
+    await show(1); await press(none(1));
+    delete window.PadReply;
+    await openReply();
+    const lines = [...replyPanel().querySelectorAll('p')].filter(seen).map((p) => p.textContent);
+    const out = {
+      lines, box: seen(replyBox()), copy: seen(copyButton()), summaries: summaries().filter(Boolean).length,
+      list: seen(replyPanel().querySelector('ul')),
+    };
+    await show(0);
+    out.entries = entries().slice(0, 2).map((b) => b.querySelector('.pad-entry-label').textContent);
+    out.answers = window.PadAnswers.answers;
+    out.pressed = flags(0, thisOne);
+    out.questionShown = seen(panel(0));
+    return out;
+    """
+    got = _reply_probe(tmp_path, _round(2), js)
+    assert got["lines"] == ["The reply could not be built. Answer in words in your session instead."]
+    assert not got["box"] and not got["copy"] and not got["list"]
+    assert got["entries"] == ["Q0", "Q1"]
+    assert got["answers"][0]["pick"] == 1 and got["answers"][1]["none"] is True
+    assert got["pressed"] == ["false", "true", "false"]
+    assert got["questionShown"]
+
+
+def test_a_build_that_throws_is_the_same_could_not_be_built_line(tmp_path):
+    js = """
+    window.PadReply.build = () => { throw new Error('boom'); };
+    await openReply();
+    const lines = [...replyPanel().querySelectorAll('p')].filter(seen).map((p) => p.textContent);
+    await show(0);
+    return {lines, shown: seen(panel(0)), failure: !!document.getElementById('pad-failure')};
+    """
+    got = _reply_probe(tmp_path, _round(), js)
+    assert got["lines"] == ["The reply could not be built. Answer in words in your session instead."]
+    assert got["shown"] and not got["failure"]
+
+
+def test_the_reply_shows_hostile_text_as_text(tmp_path):
+    data = _round(1)
+    data["title"] = "<b>t</b>"
+    data["questions"][0]["prompt"] = "<i>p</i>"
+    js = """
+    const before = document.querySelectorAll('b, i').length;
+    await openReply();
+    return {extra: document.querySelectorAll('b, i').length - before, summary: summaries()[0], value: replyBox().value};
+    """
+    got = _reply_probe(tmp_path, data, js)
+    assert got["extra"] == 0
+    assert got["summary"] == "<i>p</i> \u2014 no answer yet"
+    assert '"pad": "<b>t</b>"' in got["value"]
+
+
+def test_an_answer_change_while_the_reply_is_showing_rebuilds_the_reply(tmp_path):
+    js = """
+    resolving();
+    await openReply();
+    await copy();
+    const before = {pick: parsed().answers[0].pick, status: statusText()};
+    thisOne(0, 2).click();
+    await settle();
+    return {before, pick: parsed().answers[0].pick, summary: summaries()[0], status: statusText()};
+    """
+    got = _reply_probe(tmp_path, _round(), js)
+    assert got["before"] == {"pick": None, "status": COPIED}
+    assert (got["pick"], got["summary"], got["status"]) == ("C", "Q0 — C, Opt C", "")

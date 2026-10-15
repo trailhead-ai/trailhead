@@ -59,10 +59,12 @@ button { font: inherit; color: inherit; }
 .pad-dot { flex: 0 0 auto; width: 0.8rem; height: 0.8rem; border: 2px solid var(--ink); border-radius: 50%; }
 .pad-dot[data-answered="true"] { background: var(--ink); }
 .pad-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.pad-reply-item { margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px dashed var(--ink); }
+.pad-reply-entry { border-style: dashed; }
 .pad-questions button[aria-current="true"] { border-color: var(--ink); background: #fff; }
 
 .pad-stage { flex: 1 1 auto; min-width: 0; padding: 1rem 1.5rem; }
-.pad-prompt { margin: 0 0 1rem; font-size: 1.4rem; font-weight: normal; }
+.pad-prompt, .pad-reply-title { margin: 0 0 1rem; font-size: 1.4rem; font-weight: normal; }
 
 .pad-cards { display: flex; flex-wrap: wrap; gap: 1rem; }
 .pad-card {
@@ -89,6 +91,10 @@ button { font: inherit; color: inherit; }
 .pad-none { margin-top: 1rem; }
 .pad-note-label { display: block; margin-top: 1rem; color: var(--faint); }
 .pad-note { display: block; width: 100%; max-width: 40rem; padding: 0.5rem; font: inherit; background: #fff; border: 1px solid var(--ink); }
+.pad-reply-summary { margin: 0 0 1rem; padding-left: 1.25rem; }
+.pad-reply-box { display: block; width: 100%; max-width: 40rem; padding: 0.5rem; font: 0.9rem monospace; background: #fff; border: 1px solid var(--ink); }
+.pad-copy { margin-top: 0.75rem; }
+.pad-reply-status { margin: 0.5rem 0 0; min-height: 1.4em; }
 .pad-cost { margin: 0.25rem 0 0.75rem; color: var(--faint); }
 
 .pad-drawing { position: relative; min-height: 8rem; }
