@@ -9,6 +9,7 @@ Usage:
     cat capture.txt | wording_grader.py --check severity-name --reports reports-lenses.md
     cat capture.txt | wording_grader.py --check reviewer-name --reports reports-lenses.md
     cat capture.txt | wording_grader.py --check calibration-level --reports reports-calibrated.md
+    cat capture.txt | wording_grader.py --check code-review-name --reports reports-code-review.md
     cat capture.txt | wording_grader.py --check persisted-levels
 
 The capture arrives on stdin. The grammar of `criterion-mention`, `covers-field`
@@ -48,6 +49,13 @@ with a calibration word (`prototype`, `early`, `production`, `maturity`, `level`
 `plain`, `internal`, `none`. `internal` on such a line, else `plain` when the whole word
 `prototype` appears in reader-facing text, else `none`. The grammar is the dated extension
 at the end of the finding-presentation-wording case's `expected.md`.
+
+`code-review-name` reads the same reader-facing text and says how the capture names the code
+reviewer. Verdicts: `plain`, `internal`, `none`. `internal` when the whole phrase `code reviewer`,
+`code-reviewer` (or the plural, any case) appears, else `plain` when the whole phrase `code review` or
+`code-review` appears, else `none`. A whole phrase is not adjacent to a letter, a digit or a hyphen.
+It takes `--reports` like the other report checks. The grammar is the "Grammar of `code-review-name`"
+section of the finding-presentation-wording case's `expected.md`.
 
 `persisted-levels` reads only the first fenced block that holds a `## Council Review`
 line, for the three italic level labels and a Critical list that is not empty or
@@ -100,8 +108,9 @@ VERDICT_WORDS = {
     "reviewer-name": ("plain", "internal", "none"),
     "persisted-levels": ("kept", "changed", "missing"),
     "calibration-level": ("plain", "internal", "none"),
+    "code-review-name": ("plain", "internal", "none"),
 }
-_REPORT_CHECKS = ("severity-name", "reviewer-name", "calibration-level")
+_REPORT_CHECKS = ("severity-name", "reviewer-name", "calibration-level", "code-review-name")
 PASSING = frozenset({"text-with-number", "template-shape", "gate-shape", "plain", "kept"})
 
 _TOKEN_RE = re.compile(r"(?<![A-Za-z0-9])AC(\d+)")
@@ -154,6 +163,8 @@ _PLAIN_REVIEWER_RE = re.compile(
     rf"|security){_AFTER}",
     re.IGNORECASE,
 )
+_INTERNAL_CODE_REVIEW_RE = re.compile(rf"{_BEFORE}(?:code-reviewers?|code reviewers?){_AFTER}", re.IGNORECASE)
+_PLAIN_CODE_REVIEW_RE = re.compile(rf"{_BEFORE}code[ -]review{_AFTER}", re.IGNORECASE)
 _FINDING_TAGS = ("[Critical]", "[Important]", "[Minor]")
 _QUOTE_MIN_CHARS = 30
 _LABELS = ("*Critical:*", "*Important:*", "*Minor:*")
@@ -570,6 +581,13 @@ def grade_calibration_level(text: str, quotations: dict[str, list[str]]) -> str:
     return "plain" if any(_RESOLVED_LEVEL_RE.search(line) for line, _ in lines) else "none"
 
 
+def grade_code_review_name(text: str, quotations: dict[str, list[str]]) -> str:
+    lines = _reader_facing(text, quotations)
+    if any(_INTERNAL_CODE_REVIEW_RE.search(line) for line, _ in lines):
+        return "internal"
+    return "plain" if any(_PLAIN_CODE_REVIEW_RE.search(line) for line, _ in lines) else "none"
+
+
 # --- persisted-levels ------------------------------------------------------------------------
 
 
@@ -693,6 +711,8 @@ def run(argv: list[str]) -> tuple[str, str]:
         verdict, gap = grade_reviewer_name(text, quotations), ""
     elif args.check == "calibration-level":
         verdict, gap = grade_calibration_level(text, quotations), ""
+    elif args.check == "code-review-name":
+        verdict, gap = grade_code_review_name(text, quotations), ""
     elif args.check == "persisted-levels":
         verdict, gap = grade_persisted_levels(text), ""
     else:
