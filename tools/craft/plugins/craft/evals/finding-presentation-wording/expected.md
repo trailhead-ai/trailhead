@@ -430,3 +430,41 @@ hyphen rule keeps `plan-critical` out. This says nothing about a treated capture
   of the 12 verdicts rests on a single borderline match.
 - The text immediately after a closing fence with no blank line between is read as its own line; the grammar
   does not say whether it joins the fence line. No baseline capture has that shape.
+
+## Amendment, 2026-10-15: four readings added to the grammar
+
+The one amendment the "Amendment allowance" permits. Nothing above this heading is rewritten; where this amendment
+and the grammar disagree, this amendment is the rule the grader implements.
+
+**What was seen first.** Only the 12 baseline captures exist. No treated or fallback output has been seen, and the
+baseline hand check found no misfire. The operator approved spending the amendment, on 2026-10-15, to close a gap
+found by reading the grammar's rules against the output a treated arm is likely to produce, not because a baseline
+capture was misgraded. Likely treated output sets a level word as a group label behind a list or quote marker, or
+as a label followed by a dash or a bracketed gloss, and the patterns above would read that as plain.
+
+The reading below changes only patterns in the grammar section.
+
+1. **S4 sees through a list marker and a quote marker.** Before S4 is tested, one leading `>` and then one leading
+   list marker (as the grammar defines a list marker) are removed from the normalised text, after any leading `#`s
+   of a heading line. So `- Minor`, `- **Important** (2)` and `> Minor` match S4. Only one of each is removed:
+   `> > Minor` does not match.
+2. **S6, a severity word leading a line as a group label.** A new internal severity pattern. The whole word
+   `Important` or `Minor` at the start of a logical line's normalised text, after removing leading `#`s, one leading
+   `>` and one leading list marker and trimming, followed by optional spaces and then a dash (`-`, `–` or `—`) or
+   `(`. It catches `**Important** — would cause trouble later`, `Important (worth fixing, your call)` and
+   `- **Minor** – rough edges`. Trade-off: a sentence that opens `Important (…)` or `Important —` in ordinary prose
+   is read as internal. That errs against a pass, which is the safe direction for this instrument. S6 sits beside
+   S1 to S5, so a line it matches makes the capture `internal` ahead of any plain reading.
+3. **The report files are read as the grader reads them.** When the report files are read for the verbatim-quote
+   rule, they are read with the same logical-line rule, their fenced blocks are dropped, and a report line's tag
+   test is applied after removing one leading `>` and one leading list marker, the same as on the capture side.
+   The fixture report lines are `- [Critical] …`, so without this no quotation could match.
+4. **Text right after a closing fence.** A non-blank line directly after a closing fence line, with no blank line
+   between, starts its own logical line; it does not join the fence line.
+
+Readings 3 and 4 state what the grader already did. Readings 1 and 2 change it.
+
+**Re-grade, 2026-10-15.** All 12 baseline captures were graded again under this amendment. Every verdict is the one
+the results above record: `internal` on `severity-name` and `reviewer-name` at all four sites, `kept` on
+`persisted-levels` at plan and driver, in all three runs each. The capture map does not change and the headroom
+table above stands.
