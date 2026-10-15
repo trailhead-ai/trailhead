@@ -32,11 +32,11 @@ SECOND_WORDING_REVISION = "06a3aa22"
 
 # The commit that carries the third wording of the rules section and the council template's
 # report-citation bullet. Every third-wording arm and the fixture-derivation check read from it.
-THIRD_WORDING_REVISION = "2de62373"
+THIRD_WORDING_REVISION = "ecc4f46a"
 
 # The commit that carries slice step 8 with the instruction to name covered criteria by
 # identifier removed. The shipped-slice arm pins its slice skill and rules file to it.
-STEP8_REVISION = "b599c254"
+STEP8_REVISION = "ebf23e43"
 
 RULES = "tools/craft/plugins/craft/rules.md"
 SLICE_SKILL = "tools/craft/plugins/craft/skills/slice/SKILL.md"
