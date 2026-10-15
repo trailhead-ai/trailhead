@@ -44,6 +44,10 @@ EDIT_REVISION = "42e1b088cbb9809c9bd4cf41d226c96da8f480b9"
 # `consult/SKILL.md` from here and every other source from the baseline.
 PRECAL_REVISION = "f98d25850e9a770fd4a14ac585e5029931782ac8"
 
+# The commit carrying the calibration prose edit: the `cal-consult` arm reads `council.md` and
+# `consult/SKILL.md` from here and every other source from the baseline.
+CAL_REVISION = "06bb03b13130a6929d61a1b675a1f3bc404639a7"
+
 PLUGIN = "tools/craft/plugins/craft"
 RULES = f"{PLUGIN}/rules.md"
 COUNCIL = f"{PLUGIN}/skills/_shared/council.md"
@@ -100,6 +104,11 @@ ARM_SOURCES: dict[str, list[Source]] = {
         (RULES, BASELINE_REVISION),
         (CONSULT_SKILL, PRECAL_REVISION),
         (COUNCIL, PRECAL_REVISION),
+    ],
+    "cal-consult.md": [
+        (RULES, BASELINE_REVISION),
+        (CONSULT_SKILL, CAL_REVISION),
+        (COUNCIL, CAL_REVISION),
     ],
 }
 
