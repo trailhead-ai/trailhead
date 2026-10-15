@@ -943,3 +943,133 @@ No treated block had it. Separately, the grader now reads an indented heading li
 way the amendment's S4 and S6 say, removing the leading `#`s from the line before testing; before this it read such a
 line as `none`. All 33 committed captures (12 baseline, 21 treated) were graded again on all three checks (99 verdicts),
 and no verdict changed.
+
+## Extension, 2026-10-15: the consult-calibrated site and the `calibration-level` check
+
+Pre-registered before any run of the two arms it adds. Nothing above this heading is rewritten; the grammar, its
+amendment, and every earlier result stand as written. The extension adds one site, one check and two arms. Where it
+names a rule the case already states (the reading rules, the verbatim-quotation exemption, crashed runs, the scans
+before commit, the splits rule, the stop rule), that rule applies unchanged.
+
+**Why.** The review notes above found two older paragraphs in `council.md` (the maturity-calibration paragraph and
+the stand-down restatement instruction) and the matching instruction in `consult/SKILL.md` that still show the
+reader internal levels: a downgraded finding restated as "migration and backfill — Minor, downgraded by this
+spec's prototype maturity level", and a stand-down line that ends "would rate Minor". Every fixture so far was at
+production maturity with no stand-down, so that path was never staged, and the real consult run showed the leak
+("Rated minor because the project is a prototype", three times).
+
+### The new site
+
+| Site | What the session is doing | Canned input | Graded |
+|---|---|---|---|
+| consult-calibrated | The consult ritual's synthesis step, on a question about a one-term trial sign-up page for a swimming club, at prototype maturity with one waived concern. | four lens reports and the rendered calibration block (`reports-calibrated.md`) | `calibration-level`, `severity-name`, `reviewer-name` |
+
+### New fixtures
+
+Written by hand under `fixtures/`, in a domain (a swimming club's Saturday lane sign-ups) unlike every earlier
+fixture and unlike the examples `council.md` carries. The fixture prose avoids the words critical, important,
+minor, builder, breaker, attacker, advocate, reliability, premise, consistency and divergence, except inside the
+reports' severity tags, lens labels and the renderer block, which keep the council template's and the renderer's
+form.
+
+- `consult-calibrated-question.md`: the question, with the trial's own notes (carrying the paper sheets over is
+  not part of this term's work).
+- `reports-calibrated.md`: the rendered calibration block in a fenced block, exactly as
+  `scripts/maturity_bars.py` prints it for a spec stamped `prototype` with a `Waives: backwards compatibility`
+  Non-Goal (`maturity: prototype (basis: stamp)`, one `stand-down:` line ending `would rate Minor`, the four
+  rated concerns at Minor), then four lens reports (Builder, Reliability, Security, Advocate) in the template's
+  format. Two lens findings are calibrated downgrades that name the deciding level (migration and backfill, and
+  rollback and reversibility, each `[Minor]` and each stating "downgraded by this spec's prototype maturity
+  level"). The ordinary findings are two concrete Criticals (a double booking of the last place in a lane; a
+  lost booking during the Friday tidy-up), one speculative Critical (the Advocate's, to be downgraded), and
+  Important and Minor findings in each lens that reports any.
+- `prompt-consult-calibrated.md`: the prompt. `FIXTURES_DIR` stands for the directory holding a copy of
+  `fixtures/`, replaced by the runner as in "Dispatch".
+
+### The new arms
+
+| Arm file | Site | Sources, in order | Pin |
+|---|---|---|---|
+| `precal-consult.md` | consult-calibrated | `rules.md`, `skills/consult/SKILL.md`, `skills/_shared/council.md` | every source at the baseline revision `f68200933f69e0c00bc79634fb4758b8fa039c1c`, except `consult/SKILL.md` and `council.md` at `f98d25850e9a770fd4a14ac585e5029931782ac8` (the committed state before the calibration edit; byte-identical to `42e1b088`) |
+| `cal-consult.md` | consult-calibrated | the same three | the same, with `consult/SKILL.md` and `council.md` at the commit that carries the calibration edit (its SHA is named in the results) |
+
+The two compositions differ in those two files only. The manifest in
+`tools/craft/tests/test_finding_presentation_wording_arms_contract.py` names both. `cal-consult.md` is built
+and run only after the edit is committed on its own.
+
+### Capture naming
+
+`precal-consult-<n>` and `cal-consult-<n>`, `n` counting dispatches from 1, never reused; three files per run as in
+"Capture naming". Each is graded against `fixtures/reports-calibrated.md`.
+
+### Verdict words
+
+- `calibration-level`: `plain`, `internal`, `none`.
+
+### Grammar of `calibration-level`
+
+Every pattern the check uses is listed here.
+
+**Reading.** The capture is read as in "Reading the capture" and "Reader-facing text" above: logical lines, fenced
+blocks dropped, a line that quotes a reviewer report verbatim dropped (the quotation rule is applied against
+`fixtures/reports-calibrated.md`, read as the amendment says). Matching is over the normalised text of each
+reader-facing logical line, case-insensitive. A **whole word** is as the case defines it: not adjacent to a
+letter, a digit or a hyphen on either side. A table cell is a logical line of its own, so a severity word in one
+cell and a calibration word in another do not share a line.
+
+| Id | Pattern (whole word, any case) |
+|---|---|
+| K1 | the severity words `critical`, `criticals`, `important`, `minor` |
+| K2 | the calibration words `prototype`, `early`, `production`, `maturity`, `level`, `waive`, `waived`, `waiver`, `stand-down`, `downgrade`, `downgraded`, `rate`, `rated` |
+| K3 | the resolved maturity level: `prototype` |
+
+**Verdict.**
+
+- `internal` when any one reader-facing logical line matches K1 **and** K2. The two must share the line.
+- Otherwise `plain` when K3 matches in any reader-facing logical line.
+- Otherwise `none`.
+
+Both halves of `internal` are needed: a severity word on a line with no calibration word is not counted here (it
+is `severity-name`'s concern), and a calibration word with no severity word is not counted. `plain` is the reading
+the guide asks for: the level is named and no severity name sits beside a calibration word.
+
+**Trade-offs, written down.** An ordinary use such as "an important decision for production" reads `internal`,
+and so does "a critical look at the rate of change": the grammar is lexical and errs against a pass, the safe
+direction for this instrument. The `-ed` and `-s` forms are listed where they matter (`rated`, `waived`,
+`downgraded`, `criticals`); any other inflection (`rating`, `levels`, `importance`) is not a whole word match and
+is not counted. A capture that never names `prototype` reads `none` even when it is clean, so a treated capture
+that restates the level only as "early" or "production" reads `none`, which is not `plain`.
+
+### Pass condition, fixed before any run
+
+- **Headroom, `calibration-level`:** the `precal-consult` arm is majority `internal`. If it is not, the site has no
+  headroom: the claim closes on the baseline verdict, the prose edit is not made, and the result is reported.
+- **Treated:** the `cal-consult` arm reaches a clean majority `plain` on `calibration-level` (3 of 3, or 5 or 6 of 6
+  after a split), and a clean majority `plain` on `severity-name` and `reviewer-name` too, so the finding-contract
+  result does not regress.
+- A treated failure: the prose-edit commit is reverted on the branch with a revert commit (no history rewriting),
+  the result is recorded, and the run stops and is reported.
+
+`none` counts as neither `internal` nor `plain`, as before. The splits rule, the floor and exclusions, and the
+stop rule apply as written above, with the checks and arms of this extension.
+
+### Amendment allowance
+
+One dated amendment to the `calibration-level` grammar is allowed, after the `precal-consult` hand check (one
+capture per verdict word that occurs, read by hand against the grader's verdict) and before any `cal-consult` run.
+It is appended below under a dated heading, states what the hand check showed, and changes only patterns in the
+grammar above. After the first `cal-consult` output exists no amendment is allowed; a flaw found later is
+reported in the results, not repaired.
+
+### Not measured
+
+- The finding-order criteria (AC17, AC18) at this site: not read here.
+- The plan's and the spec review's own restatement instructions, which a logged follow-up owns.
+- The driver's persisted restatement and the renderer's block, which keep the internal forms by design.
+
+### End states, fixed before any run
+
+- `precal-consult` majority `internal`: the headroom holds and the edit is made.
+- `precal-consult` not majority `internal`: no headroom, the claim closes on the baseline verdict.
+- `cal-consult` meets the treated condition: the edit is kept.
+- `cal-consult` fails the treated condition: the edit is reverted by a revert commit and the failure is reported.
