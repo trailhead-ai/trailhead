@@ -1,0 +1,35 @@
+**Gauntlet: Spec "a waiting list for allotment plots" (draft), round 1.** All 8 passes returned. Maturity: production (basis: stamp). No stand-downs. Facts: 2 of 4 confirmed, 1 refuted, 1 unverifiable.
+
+**What the passes found.** The spec assumes every offer reaches a reader who has email. Two places break that. First, the joining rule says a person joins by giving "a name, an email address and the site they want" (AC1). It says nothing about how the existing paper list moves online, so anyone on it without email has no way across. Second, the offer rule says the person at the front "is sent an offer by email, and the offer stays open for 14 days" (AC2), and an unanswered offer means the person "goes to the back of the queue" (AC3). So an offer that bounces, or lands in spam, leaves the plot empty for two weeks. Then it silently sends someone who may have waited years to the back. The other passes found smaller gaps. Nothing says who marks a plot as freed. The Objectives promise people can see their place, but no criterion after the first email delivers it. And it is open whether a person can join more than one site's queue.
+
+**Whether it holds.** Reliability and Advocate could not see each other's work, and both reached the lost-offer failure. That is the strongest signal in this run, and I've merged the two into C2. The premise pass's guess that "a large part" of the list has no email is speculation, and I didn't rank it on that. It stays Critical for a different reason. At production maturity, moving the existing list online is a Critical concern, and the spec never addresses it. Losing even one long-waiting person in the move is a concrete failure. The fact pass also corrects the list size: the 3 March committee minutes record 412 names, not "about 340". The premise pass's reframing (that the real goal is checking the order was followed) is a fair point, but it doesn't block anything, so it stays Important. Two notes were editorial and I dropped them: naming a mail provider, and an observation that two criteria use the same wording.
+
+**What to do.** Both Criticals can be fixed by editing this spec, so neither needs a revise round. The edits:
+- C1: correct the list size, add phone-number entry, and add a criterion for carrying the paper list across in order, keeping the paper copy until the warden has checked the online order against it.
+- C2: count the 14 days from when the offer is sent (this also settles divergence's open question), warn the person on day 10 and tell them when the offer lapses, and pass a bounced offer straight on without the person losing their place.
+
+**Recommended outcome:** advance to `ready` this round. No `craft/supersedes` label, so nothing is retired.
+
+| id | finding | proposed disposition | proposed edit |
+|---|---|---|---|
+| C1 | People on the paper list who have no email can't be carried across and lose their place | `resolved` | Problem says 412 names (minutes, 3 March). AC1 accepts "an email address or a phone number", with a warden entering phone-only people. AC2 adds "or rung by the warden, for a person with no email address". New AC7: everyone on the paper list when it is retired is carried onto their site's queue in paper order, email or not, and the paper list is kept until the warden has checked the online order against it |
+| C2 | An offer that never arrives empties the plot for 14 days, then silently sends a long-waiting person to the back | `resolved` | AC3 becomes "within 14 days of being sent", with a reminder on day 10 and a notice when the offer lapses. New AC8: a bounced offer passes at once to the next person, the person it bounced from keeps their place, and the warden is told to correct the address. AC6's history list adds bounces |
+
+**Important (8):**
+- No criterion says who marks a plot as freed, so nothing starts the offer.
+- The spec doesn't say whether a place is stored or worked out from join order.
+- No behaviour is defined when a plot is freed and the site's queue is empty.
+- An out-of-turn grant is visible only in the history; the suggestion is to notify the committee chair.
+- "See their place" has no criterion after the first email (raised by Advocate and Consistency).
+- Acceptances and departures are not stated as recorded.
+- It's open whether a person can be on more than one site's queue.
+- The premise pass would restate the Objectives around checking the order.
+
+**Minor (5):**
+- When during the day the 14 days end.
+- The confirmation email reveals how many people are ahead.
+- "Lapse" reads as jargon.
+- Who can see the history.
+- "A few times a month" is a figure the spec never relies on. Separately, fact claim 3 ("the warden rings people in order today") is unverifiable without the warden's own account.
+
+Reply **"go"** to apply both edits and flip the spec to `ready`. To override, name the id and give your reason: for example "dispute C1: …", or "answer C2: …" if you know something the passes didn't. "Show me the detail on C2" prints the full finding.

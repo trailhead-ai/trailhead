@@ -1,0 +1,31 @@
+# Gauntlet: allotment waiting-list spec, round 1
+
+maturity: production (basis: stamp). No stand-downs.
+
+**What the passes found.** The spec describes the online queue well but ignores two things it relies on. First, it never says how the people already on the paper list get onto the online queue. A person joins by giving an email address (AC1), so anyone without one has no way back in, and anyone who re-joins loses years of waiting. Second, everything rests on the offer email arriving. If it bounces or goes to spam, the plot sits empty for 14 days, then the person who never saw the offer goes to the back (AC3) without being told. The smaller findings cluster around one gap. The Objectives promise that a person can "see their place", but only the confirmation email delivers that. The spec also never says who marks a plot as freed, or what happens when a site's queue is empty.
+
+**Whether it holds.** The undelivered-offer finding is the strongest of the run. Reliability and Advocate reached it separately, and neither could see the other's report. The premise pass was right that existing waiters are stranded, but its claim that "a large part" of them lack email is a guess. The spec doesn't record the share, and the pass rated its own confidence medium. I've kept that finding at Critical on the part that isn't a guess: the paper list is being retired with no route across, and at production maturity migration is Critical. The fact pass found the list is larger than stated: the 3 March committee minutes record 412 names, not about 340. The premise pass also argued that AC1 to AC5 are more than the complaint needs. That overreaches, because the Problem names both complaints: nobody can see where they stand, and nobody can check the order. Divergence suggested showing the queue's history to the committee only. Don't take that as written: it contradicts the Problem, where it is members who can't check the order. Security's note that the confirmation email reveals a person's place is the feature working as intended, not a defect.
+
+**What to do.** Add criteria that bring the paper list across in its current order and let a warden enter someone by phone number. Add criteria so that a bounced offer moves on at once without costing the person their place, and an unanswered one gets a reminder and a lapse notice. Count the 14 days from when the offer is sent. Correct the list size to 412. With those edits in, the spec can advance.
+
+**Recommended outcome:** advance to `ready` this round. Both Criticals are `resolved` and none is `revise`.
+
+| id | finding | proposed disposition | proposed edit |
+|---|---|---|---|
+| C1 | *People on the paper list, including anyone without email, have no route onto the online queue and lose their place* | `resolved` | *Problem: "About 340" becomes "412 (committee minutes, 3 March)". Add **AC7**: "Before the paper list is retired, everyone on it is entered on their site's online queue in the order the paper list holds them, and keeps that place." Add **AC8**: "A plot warden can put a person with no email address on a queue with a phone number instead; that person's offers are made by the warden by phone, recorded in the queue's history with the date, and the 14 days run from that call."* |
+| C2 | *An offer that never arrives costs the person their place, and nobody tells them* (Reliability + Advocate) | `resolved` | *AC3: "within 14 days" becomes "within 14 days of being sent". Add **AC9**: "An offer email that bounces passes at once to the next person in the queue; the person it bounced for keeps their place, and a plot warden is told so the address can be corrected." Add **AC10**: "A person with an open offer is sent a reminder email on day 10 of the offer." Add **AC11**: "A person whose offer lapses is sent an email saying so and giving their new place in the queue."* |
+
+**Important (8), logged, no disposition needed:**
+- A person can't see their current place after the first email (Consistency + Advocate).
+- Nothing says who marks a plot as freed, so the offer email for a freed plot (AC2) has no trigger.
+- Not settled whether a person's place is stored or worked out from join order.
+- No behaviour defined for a plot freed when its site's queue is empty.
+- An out-of-turn grant isn't seen by anyone until someone reads the history.
+- Accepting an offer and leaving the queue aren't stated as recorded, though the history lists both (AC6).
+- Unsettled whether a person can join more than one site's queue.
+- The premise pass's view that only the order-checking goal matters, judged overreach above.
+- Note: the question of when the 14 days start is answered by C2's edit.
+
+**Minor (4):** wording around "a few times a month" (the register shows 31 plots freed in twelve months); what time of day the 14 days end; the confirmation email revealing how many people are ahead; who sees the history. Also: nothing written down confirms the warden rings people in order today. Only the warden can settle that.
+
+Reply "go" to accept. To override, name an id with your reason, e.g. "dispute C1: …", "accept C2 as risk: …", or "answer C1: …".

@@ -1,0 +1,75 @@
+## Council review: allotment waiting list plan
+
+Maturity is **production**, based on the spec's own stamp (`maturity: production (basis: stamp)`). No concern was stood down and no waiver failed to match.
+
+**What the passes found.** Three themes came up. First, Task 1 stores each person's place in the queue as a number and renumbers everyone when someone leaves. Task 2's 02:00 offer run reads that same number, so one freed plot can go to two people. Second, the Task 4 import is a one-shot load of about 340 real people from the warden's laptop, with no preview and no undo. Third, several gaps would leave users unsure what happened: the offer email doesn't warn about losing your place, leaving the queue gives no confirmation, a one-click link accepts an offer, and nothing reports a failed nightly run.
+
+**Whether it holds.** Builder and Reliability both found the double-offer problem independently, straight from Task 1's wording. It is the strongest finding. Reliability's import finding is a real Critical: at production maturity, a migration with no preview or rollback is rated Critical. I also **raised** Reliability's missed-nightly-run finding from Important to Critical. At production maturity, failures nobody can see are rated Critical, and the reviewer had probably downgraded it only to stay within the two-Critical limit. I **downgraded** Advocate's "people may find the queue confusing" from Critical to Important because it names no concrete failure. Security's findings are sound at the severities given. One thing no reviewer checked is whether the plan covers every acceptance criterion. My own reading (not a council finding, so it is not in the record below): no task records history events, so the requirement that "the queue's history lists every join, offer, acceptance, lapse, out-of-turn grant and departure, newest first" (AC6) has nothing feeding it. Also, accepting an offer only appears in the plan's Notes, not in any task.
+
+**What to do about it.** Task 1 should order the queue by join time and derive the place number when it's displayed, instead of storing it. That one change removes the double offer and makes Task 2's "send to the back" a timestamp update. Task 4 needs a preview and a batch id so a bad import can be removed in one step. Task 2 needs a signal to the warden when the nightly run finishes, or fails to. The Important findings are mostly small additions to emails and screens.
+
+### Critical
+
+**1. Two people can be offered the same plot.**
+Task 1 stores each person's `place` number and subtracts one from everyone behind a person who leaves. If someone leaves while the 02:00 offer run is reading the queue, two rows briefly both hold `place` 1. Both people get an offer email for the one freed plot.
+Fix: Store the join time and order by it. Work out the place number when showing it instead of storing it.
+*(Builder, Reliability)*
+
+**2. A bad import of the paper list can't be undone.**
+Task 4 loads about 340 people in one run with no preview and no batch marker. Running it twice puts everyone on the list twice. A run that stops halfway leaves no record of where it stopped. At production maturity, a migration or backfill with no rollback is rated Critical.
+Fix: Import under a batch id after a preview step, so a bad run can be removed as a whole.
+*(Reliability)*
+
+**3. If the nightly offer run stops, nobody finds out.**
+Nothing reports whether the 02:00 job ran. Offers stop going out and the first sign is people writing in to complain. At production maturity, a failure nobody can see is rated Critical. The reviewer had filed this as Important.
+Fix: Email the warden when the run finishes, and send an alert if it hasn't finished by 03:00.
+*(Reliability; raised from Important by the production rating)*
+
+### Important
+
+- **A warden's out-of-turn grant leaves the person in the queue.** Task 3 records the grant but never removes that person's queue row, so the nightly job can offer them a second plot. Fix: The grant should close the person's queue row. *(Builder)*
+- **Opening the offer email's link accepts the offer.** A forwarded email, or a mail scanner that follows links, can accept a plot for someone. Fix: The link opens a page that asks the person to confirm. *(Security)*
+- **The spreadsheet of 340 names and email addresses stays on the warden's laptop.** Fix: Task 4 should say to delete it once the import is verified. *(Security)*
+- **The offer email doesn't say that ignoring it moves you to the back.** People will lose their place without knowing why. Fix: Say it in the email's first paragraph. *(Advocate)*
+- **Leaving the queue gives no confirmation.** Someone who clicked by mistake can't tell whether they are still on the list. Fix: Show a one-line confirmation and email it. *(Advocate)*
+- **People may find the online queue confusing.** Fix: Add a help page. *(Advocate; downgraded from Critical because it names no concrete failure)*
+
+### Minor
+
+- Tasks 2 and 5 each format dates for display. Share one helper. *(Builder)*
+- No test covers an offer that is exactly 14 days old. *(Reliability)*
+- The reason a warden gives for an out-of-turn grant shows on a history page every committee member can read, and may contain personal detail. *(Security)*
+- Calling an expired offer a "lapse" on the history page reads as jargon. *(Advocate)*
+
+---
+
+**The run has stopped with a `plan-critical` escalation.** Three Critical findings are still open. Deciding what to do about them is your call, so I haven't drafted any decisions or recommended resolutions. Before stopping, the driver records that the plan phase is complete, then opens a `blocked` child task under the slice parent. That task points to the plan record and the `## Council Review` section below.
+
+I can't give you the escalation task's id or the exact resume command yet. I haven't written the records, and the spec's record name isn't in the files I was given. Once you've decided on the three Criticals, run `/craft:drive` again on this same spec. It will pick up from the end of the plan phase, and it will stop again as long as the escalation child is still `blocked`.
+
+```markdown
+## Council Review
+
+*Reviewed at:* 2026-10-15
+*Members dispatched:* builder, breaker, attacker, advocate
+*Maturity:* production (basis: stamp)
+
+*Critical:*
+- Stored `place` renumbered on leave races the 02:00 offer job; two rows hold place 1 and one freed plot is offered to two people (Task 1, Task 2). Suggested: order by join time, derive place on display. [Builder, Reliability]
+- Task 4 import of ~340 rows has no preview and no undo; a re-run duplicates every row and a partial run leaves no marker (migration and backfill — Critical at production maturity). Suggested: import under a batch id with a preview first. [Reliability]
+- Nothing signals that the 02:00 offer job did not run; offers stop silently (production failure visibility — raised from Important to Critical by production maturity). Suggested: email the warden on completion and alert if not finished by 03:00. [Reliability]
+
+*Important:*
+- Task 3 grant does not close the granted person's queue row; the nightly job can offer them a second plot. Suggested: grant closes the queue row. [Builder]
+- Offer link accepts on open with nothing tying it to the recipient; a forwarded email or link-following mail scanner accepts the plot. Suggested: link opens a confirm page. [Security]
+- Task 4 spreadsheet of ~340 names and emails remains on the warden's laptop. Suggested: delete once import is verified, stated in the task. [Security]
+- Offer email does not warn that 14 days' silence sends the person to the back of the queue. Suggested: state it in the first paragraph. [Advocate]
+- Leaving the queue gives no confirmation. Suggested: show and email a one-line confirmation. [Advocate]
+- Queue may be confusing online (downgraded from Critical: speculative, no concrete failure). Suggested: add a help page. [Advocate]
+
+*Minor:*
+- Tasks 2 and 5 both format dates; share one helper. [Builder]
+- No test for an offer exactly 14 days old. [Reliability]
+- Out-of-turn grant reason is visible to all committee members on the history page and may carry personal detail. [Security]
+- "Lapse" on the history page reads as jargon. [Advocate]
+```
