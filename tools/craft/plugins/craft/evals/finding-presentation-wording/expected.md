@@ -1079,7 +1079,7 @@ reported in the results, not repaired.
 Written after the `calibration-level` check, the fixtures and both arms were committed and both arms were run and
 graded, in this order: the extension, fixtures, grader check and `precal-consult` arm (commit `bc57c233`, before any
 run); three `precal-consult` runs, their captures and their hand check (commit `2883df6b`); the prose edit alone in commit
-`06bb03b13130a6929d61a1b675a1f3bc404639a7`, the `cal` pin; the `cal-consult` arm at that pin (commit
+`df65828b`, the `cal` pin; the `cal-consult` arm at that pin (commit
 `4423c860`); three `cal-consult` runs. The two arm compositions differ only in `consult/SKILL.md` and `council.md`; `rules.md` is the same bytes. All
 six runs exited 0, every capture is non-empty, every stderr is empty, so none was excluded or replaced. No split, so
 no re-run. The grammar was used as pre-registered: no amendment was made. Each capture is graded against

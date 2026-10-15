@@ -2435,7 +2435,7 @@ site (a prototype-maturity question about a swimming club's lane sign-up page, o
 downgrades) and a new check, `calibration-level` (a severity word and a calibration word on one reader-facing line is
 `internal`; the level named with no such line is `plain`), were pre-registered before any run. `precal-consult`
 (`council.md` and `consult/SKILL.md` as they stood) was `internal` 3 of 3, so headroom held; `cal-consult` (the same two
-files at the prose edit, `06bb03b1`) was `plain` 3 of 3 on `calibration-level`, and `plain` 3 of 3 on `severity-name`
+files at the prose edit, `df65828b`) was `plain` 3 of 3 on `calibration-level`, and `plain` 3 of 3 on `severity-name`
 and `reviewer-name`, so the finding-contract result did not regress. No split, no exclusion, no grammar amendment, no
 revert. `severity-name` read `plain` on all three `precal` captures although each rates a finding "Minor" mid-line, which
 is the gap the new check covers. Limits: three runs, one question, one level, one waived concern; plan's and the spec
