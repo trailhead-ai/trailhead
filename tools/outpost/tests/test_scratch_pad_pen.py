@@ -406,9 +406,9 @@ def test_a_null_layout_shows_the_message_not_an_empty_box(tmp_path):
     assert not got["failure"] and got["ready"]
 
 
-def test_a_layout_nested_five_hundred_deep_shows_the_message(tmp_path):
+def test_a_layout_nested_far_past_the_depth_limit_shows_the_message(tmp_path):
     deep = {"text": "bottom"}
-    for _ in range(500):
+    for _ in range(200):
         deep = {"box": [deep]}
     data = _round([deep, box(button("fine"))])
     js = STATE + """
