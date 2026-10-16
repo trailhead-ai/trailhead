@@ -398,6 +398,95 @@ record titles and none of the fixture vocabulary checked (`dedupe`, `sequence nu
 passes any `draft` spec. It does not check that the spec supersedes the predecessor or that it drops
 AC3. The grader stays frozen, since both arms were scored with it.
 
+## Cases: applying a known fix and tracking an unknown one (runner format)
+
+`plugins/lore/evals/{apply-ruled-fix-to-frozen-record-phrased-as-note-it, apply-ruled-fix-to-draft-record, track-unknown-fix-phrased-as-fix-it-now, refuse-a-ruled-fix-the-source-contradicts}/`
+— each with `expected.md` (all four committed together in `8fa0f007`, before any grader, fixture or run),
+then `case.yaml`, `prompt.md`, `graders/*.md` and a seeded `fixtures/` in the next commit.
+
+**Under test:** whether an agent that knows a fix applies it in the same session (AC23: amend if the
+record is frozen, plain update if not, no task and no follow-up candidate), tracks a task only when the
+fix is genuinely unknown (AC25), and refuses a ruled fix its source contradicts. The baseline arm runs on
+the current lore prose, which has no "when to act" step in `correct` and no capture carve-outs. The
+treatment arm is a later task and reruns these exact four cases with these exact graders.
+
+Baseline batch command (one invocation per case; `<case>` is the case name, `$out` a fresh `mktemp -d`,
+deleted after the scores were copied out). `--case` takes one glob, so a repeated `--case` runs only the
+last:
+
+```sh
+out=$(mktemp -d)
+env -u LORE_CONFIG_DIR -u LORE_STATE_DIR -u XDG_CONFIG_HOME -u XDG_STATE_HOME \
+  claude plugin eval tools/lore/plugins/lore --case '<case>' --scaffold \
+  --allow-tools 'Bash(./lore *)' --ablation none --trust-plugin \
+  --runs 3 --model claude-opus-5-5 --json "$out/run.json" --max-cost-usd 5 \
+  --output-dir "$out" --no-publish
+```
+
+Runner: `claude` 2.1.301. The refuse case ran with `--max-cost-usd 5`, the other three with `1.5`.
+
+### Grader flip check and smoke runs (unscored)
+
+Before the baseline, 15 scripted runs (1 run each, 1.71 USD, scratch eval dir outside `evals/`, removed
+afterwards) ran the real graders and fixtures through the runner against hand-scripted outcomes: one
+correct and two or three wrong per case. Every grader passed on the correct outcome and failed on at least
+one wrong outcome. The per-run table is in the body of the commit that added the cases. Findings:
+
+- U2 holds. `file_exists` with `exists: false` went red on `vault/task/*.md` when a task was created and on
+  `vault/session/*.md` when `./lore session candidate` ran, and green otherwise.
+- A plain `lore record amend` on a `draft` spec also writes `change-history`, so `no-change-history` in the
+  draft case separates an amend from a plain update.
+- `regex` graders do not glob; each names the exact seeded path.
+
+### Baseline (current prose)
+
+Every per-run score. Errors: none in any run (all `error: null`). A run passes only at 1.0; a case passes
+at 2 of 3 runs.
+
+## Case: apply-ruled-fix-to-frozen-record-phrased-as-note-it
+
+| Date | Arm | Prose under test | Runs | Result | Notes |
+|------|-----|------------------|------|--------|-------|
+| 2026-10-16 | baseline | current lore prose | 3 | 0.33, 0.33, 0.33 (0 of 3 at 1.0): RED | Every run failed `corrected-text-present`, `wrong-text-gone`, `change-history-entry` and `no-candidate-written`: the record was left unamended and a follow-up candidate was written. `no-task-created` and `unrelated-text-kept` passed. Cost 0.188, 0.187, 0.193 USD. |
+
+## Case: apply-ruled-fix-to-draft-record
+
+| Date | Arm | Prose under test | Runs | Result | Notes |
+|------|-----|------------------|------|--------|-------|
+| 2026-10-16 | baseline | current lore prose | 3 | 1.00, 0.40, 1.00 (2 of 3 at 1.0): GREEN at the floor | Run 2 failed `corrected-text-present`, `wrong-text-gone` and `no-task-created` (parked as a task, spec untouched). Runs 1 and 3 updated the spec. Cost 0.229, 0.220, 0.193 USD. A 2-of-3 pass is a floor, not a stable green. |
+
+## Case: track-unknown-fix-phrased-as-fix-it-now
+
+| Date | Arm | Prose under test | Runs | Result | Notes |
+|------|-----|------------------|------|--------|-------|
+| 2026-10-16 | baseline | current lore prose | 3 | 0.50, 0.50, 0.50 (0 of 3 at 1.0): RED | Every run created a task that named the record and the soak test (`task-created` and `task-names-record-and-decider` passed) and also edited the frozen ADR: `original-figure-kept` and `no-change-history` failed in all three. Cost 0.216, 0.212, 0.229 USD. |
+
+## Case: refuse-a-ruled-fix-the-source-contradicts
+
+| Date | Arm | Prose under test | Runs | Result | Notes |
+|------|-----|------------------|------|--------|-------|
+| 2026-10-16 | baseline | current lore prose | 3 | 1.00, 0.80, 1.00 (2 of 3 at 1.0): GREEN at the floor | The ADR was untouched and no task was created in all three runs. Run 2 failed only `operator-told` (all three judge votes FAIL). The case is green at baseline and is recorded as green, not reshaped. Cost 0.165, 0.170, 0.159 USD. |
+
+Baseline total: 2.30 USD for 12 runs (0.48 for the refuse case, 0.57, 0.64, 0.64 for the others),
+plus 1.71 USD for the flip-check runs.
+
+### Live-state check
+
+Sha256 of every file under `~/.local/state/lore/` and `~/.config/lore/` (excluding `.git/`) before the
+flip-check batch and after the last baseline batch. `~/.config/lore/` did not change. Under
+`~/.local/state/lore/` the diff is not empty: `index.sqlite` (derived), publish logs and requests, one
+empty lock and a new session note `c6ecca3c-...` and appended `7f97e80d-...` in the `default` vault, and
+about thirty record files in the `levr` and `trailhead` vaults. Attribution: the `levr` and `trailhead` vault git
+trees are clean, so those changes are committed ("lore: andromeda published N item(s)", "lore: sync
+vault", commits at 09:50 to 10:55 local time on 2026-10-16 from other machines and sessions). The
+`default` session notes `c6ecca3c` and `7f97e80d` are another session's captures (`c6ecca3c` holds a
+billing-launch follow-up). None of the changed files contains any of the four fixture record titles
+(`Invoice batches leave through a nightly export`, `Overdue invoice reminders`, `Size the ingest queue
+for peak load`, `Thumbnails render at a fixed width`, `Thumbnail renderer`). The one fixture-vocabulary
+word match (`invoice`) is the `levr` billing spec, which predates the runs. These attributions come from
+the vault trees and the content, not from per-path commit ids; the controller should treat the check as
+attributed-by-content, not proven by commit.
+
 When the next case lands, record it here as:
 
 ```
