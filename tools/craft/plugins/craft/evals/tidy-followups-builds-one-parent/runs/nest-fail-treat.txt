@@ -1,0 +1,36 @@
+`assemble` exited 2 with `reason-code: nesting-incomplete`: a child could not be nested, so the run undid what it had written.
+
+### Closing report
+
+**Included:**
+- Nest-fail: reject path traversal in the archive extractor (`nest-fail-reject-path-traversal-in-the-archive-extractor`)
+- Nest-fail: stop logging session cookies (`nest-fail-stop-logging-session-cookies`)
+
+**Left:** none.
+
+**Left out at step 10:** none.
+
+**Refined but not nested** (undone after the failure). Both are now `ready`, standalone, with refined bodies:
+- Nest-fail: reject path traversal in the archive extractor (`nest-fail-reject-path-traversal-in-the-archive-extractor`)
+- Nest-fail: stop logging session cookies (`nest-fail-stop-logging-session-cookies`)
+
+**Failed writes:**
+- `nest` of Nest-fail: stop logging session cookies (`nest-fail-stop-logging-session-cookies`)
+
+**Undo writes (all landed):**
+- `un-nest` of `nest-fail-reject-path-traversal-in-the-archive-extractor`
+- `drop` of the parent `build-the-follow-ups-of-fixture-nest-fail-spec-chosen-2026-10-16`
+
+**Undo commands still to run:** none.
+
+**Parent:** `build-the-follow-ups-of-fixture-nest-fail-spec-chosen-2026-10-16` was created, then dropped by the undo. It is not buildable, so there is no build command.
+
+**Things to know:**
+- **First assemble attempt:** the sandbox blocked the heredoc I used to stage the children file. `assemble` refused the empty file before creating anything, and the rerun shown above is the attempt that reached nesting.
+- **Path-traversal refinement:** one subagent said a write promoted that task to `ready` before its refined body was written, and that it then rewrote the body. `followup_parent.py check` later found the task eligible with its refined `delivers` and `files`. The vault history may still show that one intermediate write.
+
+Every undo landed and the spec is not distilled yet, so:
+
+```
+/craft:distill spec/fixture-nest-fail-spec
+```

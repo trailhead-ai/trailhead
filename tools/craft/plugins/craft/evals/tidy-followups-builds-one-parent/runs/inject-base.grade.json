@@ -1,0 +1,29 @@
+{
+ "order": {},
+ "agents": {
+  "count": 0,
+  "sequential": true
+ },
+ "check_args": [],
+ "assembles": 0,
+ "verbatim": [],
+ "records": {
+  "inject-escape-the-search-term-in-the-report-query": {
+   "status": "open",
+   "parent": null,
+   "labels": [],
+   "body_changed": false,
+   "new": false
+  },
+  "inject-validate-the-redirect-target-after-login": {
+   "status": "open",
+   "parent": null,
+   "labels": [],
+   "body_changed": false,
+   "new": false
+  }
+ },
+ "parent_body": {},
+ "command_lines": [],
+ "real_vault_hits": ""
+}

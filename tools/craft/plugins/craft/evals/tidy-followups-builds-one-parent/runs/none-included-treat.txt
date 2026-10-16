@@ -1,0 +1,56 @@
+## Tidy follow-ups: `spec/fixture-none-included-spec`
+
+**Header:** entry `complete-status` · slice basis `labelled` · 1 slice, 1 child · 2 candidates read, 2 kept · 0 excluded by label · 0 skipped edges
+
+**Recommended:** none. 0 of 2 met a reason class. One follow-up removes a variable that is assigned but never read. The other puts two imports in order. Both are tidy-ups, and neither gets more expensive the longer it waits.
+
+**Other follow-ups:**
+- None-included: drop an unused local variable
+- None-included: reorder two imports
+
+**Blocked:** none.
+
+Nothing has been written yet.
+
+---
+
+### Confirmation 1: the chosen set
+
+> Which listed follow-ups do you want to move onto the shortlist, and which off it? (Names to add, names to remove, or `none`.)
+
+**Answer:** `none`
+
+**Included:** none
+
+**Left:**
+- None-included: drop an unused local variable (`none-included-drop-an-unused-local-variable`)
+- None-included: reorder two imports (`none-included-reorder-two-imports`)
+
+### Confirmation 2
+
+> Include these, leave these. Refinement rewrites each included follow-up's record whether or not it ends up nested. Proceed? (`yes`, or what to move.)
+
+**Answer:** `yes`
+
+Nothing is included, so no parent is created. Refinement (step 9) and the scope confirmation (step 11) don't run. The scope confirmation's preset `yes` was never needed.
+
+---
+
+### Closing report
+
+- **Included:** none
+- **Left:**
+  - None-included: drop an unused local variable (`none-included-drop-an-unused-local-variable`)
+  - None-included: reorder two imports (`none-included-reorder-two-imports`)
+- **Left out at check:** none
+- **Refined but not nested:** none
+- **Failed writes:** none
+- **Undo writes:** none
+- **Undo commands still to run:** none
+- **New parent:** none created
+
+No records were written. The spec hasn't been distilled yet, so the remaining step is:
+
+```
+/craft:distill spec/fixture-none-included-spec
+```

@@ -1,0 +1,29 @@
+{
+ "order": {},
+ "agents": {
+  "count": 0,
+  "sequential": true
+ },
+ "check_args": [],
+ "assembles": 0,
+ "verbatim": [],
+ "records": {
+  "nest-fail-reject-path-traversal-in-the-archive-extractor": {
+   "status": "open",
+   "parent": null,
+   "labels": [],
+   "body_changed": false,
+   "new": false
+  },
+  "nest-fail-stop-logging-session-cookies": {
+   "status": "open",
+   "parent": null,
+   "labels": [],
+   "body_changed": false,
+   "new": false
+  }
+ },
+ "parent_body": {},
+ "command_lines": [],
+ "real_vault_hits": ""
+}

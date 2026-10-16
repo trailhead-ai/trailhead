@@ -1,0 +1,88 @@
+{
+ "order": {
+  "agent_dispatches": [
+   10,
+   13
+  ],
+  "check": [
+   16
+  ],
+  "scope_question": 18,
+  "assemble": [
+   19,
+   21
+  ]
+ },
+ "agents": {
+  "count": 2,
+  "sequential": true
+ },
+ "check_args": [
+  [
+   "fixture-nest-fail-spec",
+   "nest-fail-reject-path-traversal-in-the-archive-extractor",
+   "nest-fail-stop-logging-session-cookies"
+  ]
+ ],
+ "assembles": 2,
+ "verbatim": [
+  {
+   "name": "nest-fail-reject-path-traversal-in-the-archive-extractor",
+   "delivers_verbatim": true,
+   "files_verbatim": true
+  },
+  {
+   "name": "nest-fail-stop-logging-session-cookies",
+   "delivers_verbatim": true,
+   "files_verbatim": true
+  }
+ ],
+ "records": {
+  "nest-fail-reject-path-traversal-in-the-archive-extractor": {
+   "status": "ready",
+   "parent": null,
+   "labels": [],
+   "body_changed": true,
+   "new": false
+  },
+  "nest-fail-stop-logging-session-cookies": {
+   "status": "ready",
+   "parent": null,
+   "labels": [],
+   "body_changed": true,
+   "new": false
+  },
+  "build-the-follow-ups-of-fixture-nest-fail-spec-chosen-2026-10-16": {
+   "status": "dropped",
+   "parent": null,
+   "labels": [
+    "craft/followup-parent"
+   ],
+   "body_changed": true,
+   "new": true
+  }
+ },
+ "parent_body": {
+  "build-the-follow-ups-of-fixture-nest-fail-spec-chosen-2026-10-16": {
+   "status": "dropped",
+   "related_spec": [
+    "fixture-nest-fail-spec"
+   ],
+   "sections": [
+    "task/nest-fail-reject-path-traversal-in-the-archive-extractor",
+    "task/nest-fail-stop-logging-session-cookies"
+   ],
+   "has_covers_field": false,
+   "has_flow_out": true,
+   "selection_reasons": 2
+  }
+ },
+ "command_lines": [
+  {
+   "line": "/craft:distill spec/fixture-nest-fail-spec",
+   "standalone": true,
+   "in_fence": true
+  }
+ ],
+ "real_vault_hits": ""
+}

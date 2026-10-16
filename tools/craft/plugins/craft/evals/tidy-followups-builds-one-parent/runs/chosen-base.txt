@@ -1,0 +1,37 @@
+# Follow-ups of fixture-chosen-spec
+
+Entry basis: `complete-status` · slice basis: `labelled` · 1 slice, 1 child · 4 candidates read, 4 kept · 0 excluded by label · 0 edges skipped
+
+## Recommended
+
+These are the 3 of 4 follow-ups that met a reason class.
+
+1. **Chosen: reject path traversal in the export endpoint** (`chosen-reject-path-traversal-in-the-export-endpoint`)
+   *Open security exposure.* The export endpoint passes a caller-supplied name into a file path without checking it, so any caller can read files outside the export directory. That stays possible every day this isn't fixed.
+
+2. **Chosen: stop writing [REDACTED] to the request trace** (`chosen-stop-writing-bearer-tokens-to-the-request-trace`)
+   *Open security exposure.* The request trace writes the Authorization header to a shared log. Live credentials are already in logs that people read, and every request adds more.
+
+3. **Chosen: replace the truncating money rounding before more callers adopt it** (`chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it`)
+   *A fix that gets more expensive as work builds on it.* The cents conversion truncates instead of rounding half up, so some amounts come out one cent wrong. Two more features are about to use it, and each new caller adds code and data that will need fixing later.
+
+## Other follow-ups
+
+- Chosen: fix a typo in a docstring
+
+## Blocked
+
+None.
+
+---
+
+Nothing was written. No record, label or status was created or changed.
+
+---
+
+**About the operator answers:** the skill as written has no step 8 or step 11, no confirmation questions, and no disposition set. It has six steps and is read-only. Because none of those questions comes up in the procedure, I did not show them or act on them.
+
+- **Shortlist (answer 1):** my own judgment from the follow-ups' text picked the same three you named, so the result matches.
+- **Disposition set and scope (answers 2 and 3):** nothing in the procedure uses them. The skill also never dispatches subagents, so the fixture repo was not looked at.
+
+**Title redaction:** the gathering script already shortened one title to "[REDACTED]" because its wording matches the credential pattern for bearer tokens. I kept that in the report as the security rules require.

@@ -1,0 +1,33 @@
+I ran `/craft:tidy-followups` on `fixture-chosen-spec`. It created one buildable parent with two follow-ups nested under it. A third follow-up was refined but held back because it has an open question for you.
+
+**Shortlist and your choice**
+- The spec had four open follow-ups, and three met a reason class: two open security holes and one money bug that gets costlier with each new caller. The docstring typo met none.
+- Your answers kept the shortlist exactly as recommended. Included:
+  - Chosen: reject path traversal in the export endpoint (`chosen-reject-path-traversal-in-the-export-endpoint`)
+  - Chosen: stop writing [REDACTED] to the request trace (`chosen-stop-writing-bearer-tokens-to-the-request-trace`). "Bearer tokens" in this title matches the credential scrub pattern, so the report masks it.
+  - Chosen: replace the truncating money rounding before more callers adopt it (`chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it`)
+- Left: Chosen: fix a typo in a docstring (`chosen-fix-a-typo-in-a-docstring`).
+
+**Nested under the new parent `build-the-follow-ups-of-fixture-chosen-spec-chosen-2026-10-16`**
+- The export-endpoint path traversal fix.
+- The request-trace credential fix.
+
+**Refined but not nested**
+- The money-rounding follow-up. Refinement left a question only you can answer: should `to_cents` round half up, or use Python's built-in rounding? They give different results on half-cent amounts. Until it has an answer it isn't ready to build.
+
+**Failed writes, undo writes, undo commands:** none.
+
+**Things to know**
+- **First assemble attempt:** the sandbox blocked the shell's temp file, so the children list went to the script empty. The script refused it with `invalid-children-file` before creating anything. I rewrote the list a different way and the second attempt succeeded.
+- **Scope added during refinement:** the export fix also refuses absolute names like `/etc/passwd`. The trace fix also hides `Proxy-Authorization` and `Cookie` values. In both cases the extra cases come from the same line of code as the original defect.
+- **Calls refinement made without you:** the export fix raises an error rather than returning nothing for a bad name. The trace fix keeps the header name in the log and hides only its value.
+
+To build the parent, then distill the spec:
+
+```
+/craft:execute task/build-the-follow-ups-of-fixture-chosen-spec-chosen-2026-10-16
+```
+
+```
+/craft:distill spec/fixture-chosen-spec
+```

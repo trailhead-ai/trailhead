@@ -1,0 +1,116 @@
+{
+ "order": {
+  "disposition_question": 10,
+  "agent_dispatches": [
+   11,
+   13,
+   16
+  ],
+  "check": [
+   19
+  ],
+  "scope_question": 21,
+  "assemble": [
+   22,
+   24
+  ]
+ },
+ "agents": {
+  "count": 3,
+  "sequential": true
+ },
+ "check_args": [
+  [
+   "fixture-chosen-spec",
+   "chosen-reject-path-traversal-in-the-export-endpoint",
+   "chosen-stop-writing-bearer-tokens-to-the-request-trace",
+   "chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it"
+  ]
+ ],
+ "assembles": 2,
+ "verbatim": [
+  {
+   "name": "chosen-reject-path-traversal-in-the-export-endpoint",
+   "delivers_verbatim": true,
+   "files_verbatim": true
+  },
+  {
+   "name": "chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it",
+   "delivers_verbatim": true,
+   "files_verbatim": true
+  },
+  {
+   "name": "chosen-stop-writing-bearer-tokens-to-the-request-trace",
+   "delivers_verbatim": true,
+   "files_verbatim": true
+  }
+ ],
+ "records": {
+  "chosen-fix-a-typo-in-a-docstring": {
+   "status": "open",
+   "parent": null,
+   "labels": [],
+   "body_changed": false,
+   "new": false
+  },
+  "chosen-reject-path-traversal-in-the-export-endpoint": {
+   "status": "ready",
+   "parent": "build-the-follow-ups-of-fixture-chosen-spec-chosen-2026-10-16",
+   "labels": [],
+   "body_changed": true,
+   "new": false
+  },
+  "chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it": {
+   "status": "ready",
+   "parent": "build-the-follow-ups-of-fixture-chosen-spec-chosen-2026-10-16",
+   "labels": [],
+   "body_changed": true,
+   "new": false
+  },
+  "chosen-stop-writing-bearer-tokens-to-the-request-trace": {
+   "status": "ready",
+   "parent": "build-the-follow-ups-of-fixture-chosen-spec-chosen-2026-10-16",
+   "labels": [],
+   "body_changed": true,
+   "new": false
+  },
+  "build-the-follow-ups-of-fixture-chosen-spec-chosen-2026-10-16": {
+   "status": "ready",
+   "parent": null,
+   "labels": [
+    "craft/followup-parent"
+   ],
+   "body_changed": true,
+   "new": true
+  }
+ },
+ "parent_body": {
+  "build-the-follow-ups-of-fixture-chosen-spec-chosen-2026-10-16": {
+   "status": "ready",
+   "related_spec": [
+    "fixture-chosen-spec"
+   ],
+   "sections": [
+    "task/chosen-reject-path-traversal-in-the-export-endpoint",
+    "task/chosen-stop-writing-bearer-tokens-to-the-request-trace",
+    "task/chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it"
+   ],
+   "has_covers_field": false,
+   "has_flow_out": true,
+   "selection_reasons": 3
+  }
+ },
+ "command_lines": [
+  {
+   "line": "/craft:execute task/build-the-follow-ups-of-fixture-chosen-spec-chosen-2026-10-16",
+   "standalone": true,
+   "in_fence": true
+  },
+  {
+   "line": "/craft:distill spec/fixture-chosen-spec",
+   "standalone": true,
+   "in_fence": true
+  }
+ ],
+ "real_vault_hits": ""
+}

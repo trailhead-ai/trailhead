@@ -1,0 +1,116 @@
+[main] TOOL Read {"file_path": "$WORK/snap-base/tools/craft/plugins/craft/skills/tidy-followups/SKILL.md"}
+
+[main] RESULT
+1	---
+2	name: tidy-followups
+3	description: >
+4	  Present a finished spec's recorded follow-ups as a reasoned shortlist — which are worth doing
+5	  now rather than later, each with a one-line reason — and list the rest by title. Read-only:
+6	  gathers with a deterministic script, ranks, reports, and writes nothing.
+7	  TRIGGER when: user says "tidy the follow-ups of spec X", "which follow-ups of this spec should
+8	  we do", "what follow-ups does this spec have", or invokes /craft:tidy-followups explicitly.
+9	  DO NOT TRIGGER when: the ask is a batch of in-session code fix-ups to run now (that is
+10	  `/craft:polish`'s), or the spec's slice loop is still running (follow-ups that matter
+11	  mid-loop reach the next slice through `/craft:plan`).
+12	---
+13	
+14	# Tidy follow-ups
+15	
+16	A spec built slice by slice leaves follow-ups: tasks the slices deliberately did not act on, linked
+17	back to the slice they came from. Once the spec closes they sink into the general backlog. This
+18	ritual brings one finished spec's follow-ups back in front of the operator as a shortlist of the
+19	ones that get costlier the longer they wait, with a reason for each, and the rest by title.
+20	
+21	It is r... [cut 9070 chars]
+
+[main] BASH
+$WORK/snap-base/tools/craft/plugins/craft/scripts/followup_gather.py fixture-nest-fail-spec; echo "EXIT=$?"
+
+[main] TOOL Read {"file_path": "$WORK/snap-base/tools/craft/plugins/craft/skills/_shared/security.md"}
+
+[main] RESULT
+{"spec": "fixture-nest-fail-spec", "vault": "default", "entry": "complete-status", "followups": [{"name": "nest-fail-reject-path-traversal-in-the-archive-extractor", "title": "Nest-fail: reject path traversal in the archive extractor", "status": "open"}, {"name": "nest-fail-stop-logging-session-cookies", "title": "Nest-fail: stop logging session cookies", "status": "open"}], "slice-basis": "labelled", "slices": ["fixture-nest-fail-spec-the-slice"], "child-count": 1, "candidates-read": 2, "kept": 2, "excluded-by-label": {"count": 0, "names": []}, "skipped-edges": 0}
+EXIT=0
+
+[main] RESULT
+1	# Security posture — credential scrub and untrusted-value validation
+2	
+3	Two rules every craft surface applies, stated once here so no citing surface restates them.
+4	
+5	## Credential-pattern scrub
+6	
+7	**Credential-pattern scrub (mechanical, runs first).** This is the general rule for the whole run,
+8	not one phase's step: **any finding or note text entering a record body or a report — session
+9	candidates, `blocked` bodies, task-body notes from the per-task loop, raw command stderr quoted into
+10	either — runs through this list first.** A vault is git-backed and has its own push path, so a
+11	credential transcribed into a task body ships as surely as one committed to code. Report bodies are
+12	**summarized, never captured verbatim** — quote only `file:line` references for anything caught. Run
+13	the text through this credential-pattern scrub regex list and drop/redact any match rather than
+14	capturing it:
+15	
+16	- **Key-like tokens** — `(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s*[=:]\s*\S+`
+17	  — the trailing character class is load-bearing: it lets the keyword carry qualifier text before
+18	  the separator, which is what catches `SECRET_KEY=`, `AWS_SECRE... [cut 2830 chars]
+
+[main] TEXT
+Both names pass the safe-name check. Fetching bodies.
+
+[main] BASH
+lore record show --json --vault default task/nest-fail-reject-path-traversal-in-the-archive-extractor; echo "EXIT=$?"; lore record show --json --vault default task/nest-fail-stop-logging-session-cookies; echo "EXIT=$?"
+
+[main] RESULT
+{
+  "body": "`src/extract.py` joins an archive member name onto the destination with no validation, so a member named `../../x` writes outside the destination. Reachable today by any archive a caller extracts. The agreed behaviour: raise `ValueError` for a member whose resolved path (symlinks followed) falls outside the destination, and keep returning the joined path for one that stays inside. The repository has no tests yet; add `tests/test_extract.py`.\n",
+  "kind": "task",
+  "layer": "personal",
+  "name": "nest-fail-reject-path-traversal-in-the-archive-extractor",
+  "record_id": "task/nest-fail-reject-path-traversal-in-the-archive-extractor",
+  "revision": "908a440eba4a7b330212e2610a09cc16a94277d2a08f72788e4d8214cdd419d9",
+  "sidecar": {
+    "created-at": "2026-10-16T15:54:15Z",
+    "created-by": "fixture@example.com",
+    "kind": "task",
+    "related": {
+      "task": [
+        "fixture-nest-fail-spec-the-slice"
+      ]
+    },
+    "status": "open",
+    "title": "Nest-fail: reject path traversal in the archive extractor",
+    "updated-at": "2026-10-16T15:54:15Z",
+    "updated-by": "fixture@example.com",
+    "version": "v1"
+  }
+}
+EXIT=0
+{
+  "body": "`src/cookies.py` writes the re... [cut 990 chars]
+
+[main] TEXT
+# Follow-ups for `fixture-nest-fail-spec`
+
+**Header:** entry: complete-status · slice basis: labelled · 1 slice, 1 child · 2 candidates read, 2 kept · 0 excluded by label · 0 skipped edges
+
+## Recommended
+
+2 of 2 met a reason class.
+
+1. **Nest-fail: reject path traversal in the archive extractor** (`nest-fail-reject-path-traversal-in-the-archive-extractor`)
+   *Class: open security exposure.* The extractor doesn't check member names, so any archive extracted today can write files outside the destination directory. That stays true until the fix lands.
+
+2. **Nest-fail: stop logging session cookies** (`nest-fail-stop-logging-session-cookies`)
+   *Class: open security exposure.* Live session cookies are written verbatim to a shared log that people read. Every request handled before the fix adds more exposed sessions.
+
+## Other follow-ups
+
+None.
+
+## Blocked
+
+None.
+
+Nothing was written. No record, label or status was changed, and no task was created.
+
+---
+
+**About the operator answers you supplied:** this version of `tidy-followups` has six steps and is read-only. It has no step 8 shortlist moves, no disposition set, no step 11 scope confirmation, and no refinement subagents. So none of those questions came up, I didn't use answers 2 and 3, and I dispatched no subagent. The shortlist I reached on my own is already exactly the two follow-ups answer 1 asked for, so it needed no changes.

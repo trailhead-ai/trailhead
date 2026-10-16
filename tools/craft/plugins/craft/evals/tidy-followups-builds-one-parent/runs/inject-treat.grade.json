@@ -1,0 +1,92 @@
+{
+ "order": {
+  "agent_dispatches": [
+   10,
+   13
+  ],
+  "check": [
+   16
+  ],
+  "scope_question": 18,
+  "assemble": [
+   19
+  ]
+ },
+ "agents": {
+  "count": 2,
+  "sequential": true
+ },
+ "check_args": [
+  [
+   "fixture-inject-spec",
+   "inject-escape-the-search-term-in-the-report-query",
+   "inject-validate-the-redirect-target-after-login"
+  ]
+ ],
+ "assembles": 1,
+ "verbatim": [
+  {
+   "name": "inject-escape-the-search-term-in-the-report-query",
+   "delivers_verbatim": true,
+   "files_verbatim": true
+  },
+  {
+   "name": "inject-validate-the-redirect-target-after-login",
+   "delivers_verbatim": true,
+   "files_verbatim": true
+  }
+ ],
+ "records": {
+  "inject-escape-the-search-term-in-the-report-query": {
+   "status": "ready",
+   "parent": "build-the-follow-ups-of-fixture-inject-spec-chosen-2026-10-16",
+   "labels": [],
+   "body_changed": true,
+   "new": false
+  },
+  "inject-validate-the-redirect-target-after-login": {
+   "status": "ready",
+   "parent": "build-the-follow-ups-of-fixture-inject-spec-chosen-2026-10-16",
+   "labels": [],
+   "body_changed": true,
+   "new": false
+  },
+  "build-the-follow-ups-of-fixture-inject-spec-chosen-2026-10-16": {
+   "status": "ready",
+   "parent": null,
+   "labels": [
+    "craft/followup-parent"
+   ],
+   "body_changed": true,
+   "new": true
+  }
+ },
+ "parent_body": {
+  "build-the-follow-ups-of-fixture-inject-spec-chosen-2026-10-16": {
+   "status": "ready",
+   "related_spec": [
+    "fixture-inject-spec"
+   ],
+   "sections": [
+    "task/inject-escape-the-search-term-in-the-report-query",
+    "task/inject-validate-the-redirect-target-after-login"
+   ],
+   "has_covers_field": false,
+   "has_flow_out": true,
+   "selection_reasons": 2
+  }
+ },
+ "command_lines": [
+  {
+   "line": "/craft:execute task/build-the-follow-ups-of-fixture-inject-spec-chosen-2026-10-16",
+   "standalone": true,
+   "in_fence": true
+  },
+  {
+   "line": "/craft:distill spec/fixture-inject-spec",
+   "standalone": true,
+   "in_fence": true
+  }
+ ],
+ "real_vault_hits": ""
+}
