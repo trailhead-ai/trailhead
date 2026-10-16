@@ -162,3 +162,23 @@ def test_assembly_under_the_nestfail_env_fails_the_second_nesting_and_undoes(tmp
     result = json.loads(gathered.stdout)
     assert sorted(f["name"] for f in result["followups"]) == sorted(c["name"] for c in children)
     assert result["followup-parents"] == []
+
+
+@pytest.mark.parametrize("flags", [[], ["-d"], ["-t", "refine.XXXXXX"]])
+def test_mktemp_on_the_manifest_path_creates_inside_tmpdir(built, tmp_path, flags):
+    env = {**built["env"], "TMPDIR": str(tmp_path)}
+    r = run(env, "mktemp", *flags)
+    assert r.returncode == 0, r.stderr
+    made = Path(r.stdout.strip())
+    assert made.parent == tmp_path
+    assert made.is_dir() == ("-d" in flags)
+    if "-t" in flags:
+        assert made.name.startswith("refine.")
+
+
+def test_mktemp_given_a_full_template_uses_that_template(built, tmp_path):
+    env = {**built["env"], "TMPDIR": str(tmp_path / "unused")}
+    r = run(env, "mktemp", str(tmp_path / "named.XXXXXX"))
+    assert r.returncode == 0, r.stderr
+    assert Path(r.stdout.strip()).parent == tmp_path
+    assert Path(r.stdout.strip()).name.startswith("named.")
