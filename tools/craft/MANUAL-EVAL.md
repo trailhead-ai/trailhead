@@ -2809,8 +2809,8 @@ The worked case in the section above quoted the consult fixture's own figures (1
 count as evidence. `d966a50f` keeps the rule ("changing a figure the decision rests on, while the decision itself
 stays the same, is a wrong fact: in scope") and drops the example. The consult case was rerun on that prose with
 the batch command above, verbatim: 3 runs, `-j 1`, the four grants, `--max-cost-usd 3`, runner `claude`
-2.1.301, model `claude-opus-5-5`, 2026-10-16. The accepted and declined cases do not load the edited example's
-context differently and were not rerun. Errored runs: **none**. No rerun was used. Cost basis: per-run figures
+2.1.301, model `claude-opus-5-5`, 2026-10-16. The accepted and declined cases also read this section; they were not
+rerun after `d966a50f`, which removes one example clause and changes no rule. Errored runs: **none**. No rerun was used. Cost basis: per-run figures
 include judge cost.
 
 | Case | Runs | Cost per run (incl. judge) | Result |
