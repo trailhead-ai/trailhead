@@ -1,0 +1,15 @@
+Phase 3 (correctness review) is finished. The procedure allows only one re-review round, and these four findings are still open after it. The verdict is still **FIX_FIRST**, so I've stopped here and am not dispatching another fix cycle. I checked each finding against the change description and the code. A finding is a claim about the code, not an order, so the last one gets pushback below.
+
+**Critical: confirmed.** In `hive-reminders/reminders.py:13`, `overdue_hives` passes `hive["last_inspected"]` straight to `next_due`. A newly installed hive has `None` there, so `None + timedelta(...)` raises `TypeError`. One new hive therefore crashes the whole morning list. The change says "a hive with no inspection yet appears on the list too, since it has never been checked." The fix is to treat `None` as overdue before calling `next_due`.
+
+**Important: confirmed.** `hive-reminders/reminders.py:13` compares with `<`, so a hive whose due date is today is left off the list. The change says "a hive that is due today or earlier appears on the reminder list," so the comparison should be `<=`.
+
+**Minor (tests): confirmed.** `hive-reminders/test_reminders.py:8` has one case only: a hive inspected a month ago. That hive is overdue under both `<` and `<=` and has a real date, so the test can't catch either bug above. Two tests are needed:
+- a hive with `last_inspected=None` appears on the list;
+- a hive inspected exactly 14 days before `TODAY` appears on the list.
+
+Both should fail against the current code before the fix goes in.
+
+**Minor (board wording): I'd decline this one.** The reviewer wants the line at `hive-reminders/reminders.py:21` to show the date it became overdue. The committee asked for the line to read exactly `<name>: inspection overdue`, and the current code matches that. A never-inspected hive also has no date to show. Changing the wording would be new scope, so it's the committee's call, not a defect.
+
+How do you want to handle the first three: fix them now in a fresh pass, or block the plan until later? Either way, the change can't close as `done` while a new hive crashes the list. Nothing has been pushed and no PR has been opened.

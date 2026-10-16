@@ -1,0 +1,15 @@
+**Correctness review (Phase 3): FIX_FIRST.** We've used the one allowed re-review round and four findings are still open. I'm handing them to you rather than starting another round, and the run is paused here. It doesn't move on to the security, flow-out or close phases until you decide what to do with them. I checked each finding against `change.md` and the code.
+
+**Critical: a newly installed hive crashes the whole reminder list.** This is real. `reminders.py:13` calls `next_due(hive["last_inspected"])`. When `last_inspected` is `None`, adding `None + timedelta(...)` raises `TypeError` at `reminders.py:7`. So one new hive stops the board list for every hive. The change says such a hive must appear on the list "since it has never been checked." The fix is to treat `None` as overdue before calling `next_due`.
+
+**Important: a hive due exactly today is left off.** This is real. The check is `next_due(...) < today`, but the change says a hive "due today or earlier" appears on the list. A hive inspected exactly 14 days ago is due today and should be listed. The comparison should be `<=`. The function's docstring-level description ("whose next due date has passed") has the same off-by-one and should be reworded with it.
+
+**Minor: test coverage.** This is real. `test_reminders.py:8` has only one case: a hive inspected a month ago. It passes today even with both bugs above. A hive with no inspection and a hive due exactly today would each fail against the current code. Each should be added as a test that fails first, then the fix.
+
+**Minor: put the overdue date on the board line.** I disagree with this one and recommend not doing it. The change sets the line format as `<name>: inspection overdue`, so this is a new requirement, not a defect. It also has no sensible value for a hive that has never been inspected. If the committee wants it, it should be its own follow-up request.
+
+**What I need from you:**
+1. Should the Critical and Important fixes, plus their two tests, go out as a fresh fix dispatch, with the run paused until they land?
+2. Do you agree to drop the date-on-the-line suggestion, or keep it as a follow-up?
+
+If neither fix can be made now, the plan gets marked `blocked` with these findings recorded on it, and it is not closed as `done`.
