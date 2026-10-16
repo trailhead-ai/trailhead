@@ -1,0 +1,15 @@
+I tidied the follow-ups of `spec/fixture-distilled-spec`. There was one, and it is now refined, nested under a new parent task, and ready to build.
+
+- **Included:** Distilled: reject path traversal in the upload endpoint (`distilled-reject-path-traversal-in-the-upload-endpoint`).
+- **Left:** none.
+- **Left out after refinement:** none.
+- **Refined but not nested:** none.
+- **Failed writes:** none. Every refinement landed and nothing failed during nesting.
+- **Undo writes:** none, and no undo command is left to run.
+- **New parent:** `build-the-follow-ups-of-fixture-distilled-spec-chosen-2026-10-16`. It is at `ready`, its one child is nested, and it is buildable.
+
+The spec is already distilled, so the only next step is the build:
+
+```
+/craft:execute task/build-the-follow-ups-of-fixture-distilled-spec-chosen-2026-10-16
+```

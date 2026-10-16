@@ -1,0 +1,32 @@
+I created the parent, but nesting failed and the run undid itself, so you have no buildable parent. Both follow-ups were refined and are now `ready` as standalone tasks.
+
+**`reason-code: nesting-incomplete`**: one child could not be nested under the parent. The problem is on `lore`'s side or the vault's. Every write the run made was undone; the details are below.
+
+## Closing report
+
+**Included:**
+- Nest-fail: reject path traversal in the archive extractor (`nest-fail-reject-path-traversal-in-the-archive-extractor`)
+- Nest-fail: stop logging session cookies (`nest-fail-stop-logging-session-cookies`)
+
+**Left:** none
+
+**Left out at the eligibility check:** none
+
+**Refined but not nested:** both follow-ups above. Each one was refined to `ready`, then ended up not nested after the failure.
+
+**Failed write:**
+- `nest` of Nest-fail: stop logging session cookies (`nest-fail-stop-logging-session-cookies`)
+
+**Undo writes (all landed):**
+- `un-nest` of Nest-fail: reject path traversal in the archive extractor (`nest-fail-reject-path-traversal-in-the-archive-extractor`)
+- `drop` of the parent `build-the-follow-ups-of-fixture-nest-fail-spec-chosen-2026-10-16`
+
+**Undo commands still to run:** none
+
+**Parent:** `build-the-follow-ups-of-fixture-nest-fail-spec-chosen-2026-10-16` was created, then dropped by the undo. It is not buildable.
+
+Because nesting failed, there is no build command. Every undo landed, so distilling can go ahead:
+
+```
+/craft:distill spec/fixture-nest-fail-spec
+```

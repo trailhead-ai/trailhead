@@ -1,0 +1,82 @@
+[main] BASH
+$WORK/snap-treat/tools/craft/plugins/craft/scripts/followup_gather.py fixture-distilled-spec; echo "EXIT=$?"
+
+[main] BASH
+lore record show --json --vault default task/distilled-reject-path-traversal-in-the-upload-endpoint; echo "EXIT=$?"
+
+[main] AGENT
+Refine the follow-up task `task/distilled-reject-path-traversal-in-the-upload-endpoint` in the lore vault `default`.
+
+1. Read $WORK/snap-treat/tools/craft/plugins/craft/skills/_shared/refine.md yourself, and follow it in full in its **unattended mode**, against that one task only. `${CLAUDE_PLUGIN_ROOT}` is $WORK/snap-treat/tools/craft/plugins/craft. The `lore` command on your PATH reads the vault. The code the task's claims point at is the git repository at $WORK/runs/distilled-r2-treat/fixture/repo. Check those claims against that repo... [cut 436 chars]
+
+[sub] BASH
+lore --help 2>&1 | head -40; lore record show task/distilled-reject-path-traversal-in-the-upload-endpoint 2>&1; lore task graph distilled-reject-path-traversal-in-the-upload-endpoint 2>&1
+
+[sub] BASH
+lore record show --help 2>&1; lore record update --help 2>&1; cd $WORK/runs/distilled-r2-treat/fixture/repo && git status && git log --oneline | head && git ls-files
+
+[sub] BASH
+lore record show --json --vault default task/distilled-reject-path-traversal-in-the-upload-endpoint; cd $WORK/runs/distilled-r2-treat/fixture/repo && ls -la && find . -path ./.git -prune -o -type f -print
+
+[sub] BASH
+cd $WORK/runs/distilled-r2-treat/fixture/repo && cat -n src/upload.py; cat README.md; cat -n src/__init__.py; grep -rn "upload" src/; cat -n src/util.py
+
+[sub] BASH
+lore record show task/fixture-distilled-spec-the-slice 2>&1; lore search "upload" 2>&1 | head -30; lore search "path traversal" 2>&1 | head; lore search "pytest" 2>&1 | head; lore search "test convention" 2>&1|head; lore search "kind:area" 2>&1 | head; lore areas 2>&1 | head -30
+
+[sub] BASH
+lore record show task/chosen-reject-path-traversal-in-the-export-endpoint; lore record show task/nest-fail-reject-path-traversal-in-the-archive-extractor; for q in "test" "tests" "unittest" "ValueError" "decision" "kind:decision" "kind:lesson" "symlink" "fixture"; do echo "== $q"; lore search "$q" 2>&1 | grep -v "^ " | head -15; done
+
+[sub] BASH
+for q in "test" "decision" "fixture"; do echo "== $q"; lore search "$q" 2>&1 | grep "/vault/" ; done
+
+[sub] BASH
+lore record show task/left-out-pin-the-tls-minimum-version-in-the-client; lore record show spec/fixture-distilled-spec; lore record show task/fixture-distilled-spec-a-finished-child
+
+[sub] BASH
+set -e
+T=$(mktemp -t refine-upload.XXXXXX)
+lore record show --json --vault default task/distilled-reject-path-traversal-in-the-upload-endpoint | python3 -I -c 'import json,sys; sys.stdout.write(json.load(sys.stdin)["body"])' > "$T"
+cat >> "$T" <<'EOF'
+
+**Delivers:** `upload_path(base, name)` in `src/upload.py` (`src/upload.py:4-5`, currently a bare `os.path.join` with no check) raises `ValueError` when the resolved path of the joined result (symlinks followed) falls outside the resolved `base`, and otherwise returns the joined path unchanged, as before. Containment is a path-component check, so a sibling directory that only shares a string prefix with `base` counts as outside. An absolute `name` counts as outside too, because `os.path.join` discards `base` for it. The required behaviour comes from the captured prose above. Sibling traversal fixes in `src/export.py` and `src/extract.py` are separate tasks and out of scope.
+
+**Test contract:** New `tests/test_upload.py` (the repo has no tests yet, per the captured prose), using a temporary directory as `base`:
+- a plain name inside `base` returns exactly the joined path;
+- a name inside a subdirectory of `base` returns the joined path;
+- a `../` traversal name raises `ValueError`;
+- an absolute name outside `base` raises `ValueError`;
+- a name that only shares a string prefix with `base` (for example `../<base-basename>-evil/x`) raises `ValueError`;
+- a name that goes through a symlink inside `base` pointing outside `base` raises `ValueError`.
+
+**Files:** `src/upload.py`, `tests/test_upload.py` (new)
+
+## Flow-out
+
+- [ ] Touched area/subsystem profiles updated with what changed
+- [ ] Prover-validated assumptions captured as session candidates (durable at flush)
+- [ ] New decisions / lessons / follow-ups surfaced during the build recorded
+EOF
+grep -nEi 'key|token|secret|passw|AKIA|BEGIN .*PRIVATE' "$T" || echo "scrub: no matches"
+lore record update --vault default task/distilled-reject-path-traversal-in-the-upload-endpoint < "$T"
+rm -f "$T"; echo removed
+
+[sub] BASH
+grep -n -A5 "Flow-out" $WORK/snap-treat/tools/craft/plugins/craft/templates/plan.md; wc -l $WORK/runs/distilled-r2-treat/fixture/repo/src/upload.py
+
+[sub] BASH
+sed -n 29,40p $WORK/snap-treat/tools/craft/plugins/craft/templates/plan.md
+
+[sub] BASH
+lore record update --vault default task/distilled-reject-path-traversal-in-the-upload-endpoint --status ready && lore record show task/distilled-reject-path-traversal-in-the-upload-endpoint && cd $WORK/runs/distilled-r2-treat/fixture/repo && GIT_CONFIG_GLOBAL=/dev/null git status --short
+
+[main] BASH
+$WORK/snap-treat/tools/craft/plugins/craft/scripts/followup_parent.py check fixture-distilled-spec distilled-reject-path-traversal-in-the-upload-endpoint; echo "EXIT=$?"
+
+[main] BASH
+children=$(mktemp)
+cat > "$children" <<'EOF'
+[{"name": "distilled-reject-path-traversal-in-the-upload-endpoint", "reason": "Any caller can write files outside the upload directory today, and that exposure stays open until this is fixed (open security exposure).", "revision": "e14003b62d88788321c25ecd60219d22b746a07eb377b8ffb056c29f94cf41ae"}]
+EOF
+$WORK/snap-treat/tools/craft/plugins/craft/scripts/followup_parent.py assemble fixture-distilled-spec --children "$children"; rc=$?
+rm -f "$children"; echo "EXIT=$rc"

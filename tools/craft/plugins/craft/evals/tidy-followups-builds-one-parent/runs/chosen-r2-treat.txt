@@ -1,0 +1,23 @@
+I tidied the follow-ups of `spec/fixture-chosen-spec`: it now has one buildable parent, with your three chosen follow-ups nested under it, refined and at `ready`. Nothing failed and nothing had to be undone.
+
+**New parent:** `build-the-follow-ups-of-fixture-chosen-spec-chosen-2026-10-16`
+
+**Included, refined and nested:**
+- Chosen: reject path traversal in the export endpoint (`chosen-reject-path-traversal-in-the-export-endpoint`)
+- Chosen: replace the truncating money rounding before more callers adopt it (`chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it`)
+- Chosen: stop writing [REDACTED] to the request trace (`chosen-stop-writing-bearer-tokens-to-the-request-trace`)
+
+**Left:** Chosen: fix a typo in a docstring (`chosen-fix-a-typo-in-a-docstring`). It didn't meet any of the "costlier if it waits" reasons, so only 3 of the 4 follow-ups made the shortlist.
+
+Before you build, check these decisions the refinements made on their own:
+- **Request trace:** the fix now hides the `Cookie` header as well as `Authorization`, which goes beyond what the follow-up first asked for.
+- **Money rounding:** float amounts are converted through their string form before rounding, so values like 1.005 round as written. The alternative would be to refuse float inputs entirely.
+- **Export endpoint:** "reject" was read as raising a `ValueError`.
+
+```
+/craft:execute task/build-the-follow-ups-of-fixture-chosen-spec-chosen-2026-10-16
+```
+
+```
+/craft:distill spec/fixture-chosen-spec
+```
