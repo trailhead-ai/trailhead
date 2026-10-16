@@ -569,6 +569,38 @@ a run's temp `HOME`. The craft executor's eval runs overlapped in time.
   `.log` and `.request` files for the `default`, `levr` and `trailhead` vaults (the publish worker, triggered
   by the commits above).
 
+### Treatment on the final prose (commit `616d96fb`)
+
+A drift-gate review of `6d1943a1` changed the `correct` skill in `616d96fb`. An operator's acceptance
+of a review- or agent-proposed fix now counts as the yes that Step 3a asks for, and the unknown-fix task
+body and the non-frozen plain update now carry the no-secrets caution. The four known-fix cases were
+rerun on that prose with the batch command above: one case per batch, `--max-cost-usd 1.5`, graders
+unchanged. All 12 runs scored 1.0, with no errors and no reruns.
+
+| Case | Runs | Cost per run (USD) |
+|---|---|---|
+| apply-ruled-fix-to-frozen-record-phrased-as-note-it | 1.00 / 1.00 / 1.00 | 0.191, 0.201, 0.208 |
+| apply-ruled-fix-to-draft-record | 1.00 / 1.00 / 1.00 | 0.161, 0.153, 0.161 |
+| track-unknown-fix-phrased-as-fix-it-now | 1.00 / 1.00 / 1.00 | 0.171, 0.164, 0.166 |
+| refuse-a-ruled-fix-the-source-contradicts | 1.00 / 1.00 / 1.00 | 0.166, 0.183, 0.185 |
+
+Batch cost: 2.08 USD. U3 was not re-observed for these runs, since no trace copy was taken. No case
+here exercises the Step 3a change: an operator accepting an agent-proposed amend with lore loaded
+is reviewed, not evaluated. The craft case `accepted-review-correction-is-applied-not-parked` measures
+the same acceptance from craft's side.
+
+Live state: sha256 of `~/.local/state/lore/` and `~/.config/lore/` (excluding `.git/`) at 10:41 and
+10:46. `~/.config/lore/` is unchanged. No vault file carries a fixture title. Changed paths:
+
+- levr `task/{an-environment-picks-up-a-code-change-…, rebuild-refuses-what-it-must-not-touch-…}`:
+  levr `d3e5d36e` (10:43), another session's publish.
+- trailhead `task/{a-probed-session-s-in-flight-…, prove-in-flight-subagents-…}`: trailhead `5ff78dc5`
+  (10:43), another session's publish. A later staged edit to the first is that session's own write.
+- trailhead `task/a-session-draws-a-pad-on-its-own-…`: trailhead `ca8ad788` (10:43), another host's
+  publish.
+- `index.sqlite` and the publish `.log` and `.request` files: derived and publish-worker state, triggered
+  by the commits above.
+
 When the next case lands, record it here as:
 
 ```
