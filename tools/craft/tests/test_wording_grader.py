@@ -1698,12 +1698,52 @@ FINDING_CAPTURE_VERDICTS.update(
 )
 
 
+# Fix-shape treated arms (fs-treated-*) and the calibrated consult regression arm (regress-cal-consult), re-run
+# against the edited contract. The scripted bar is plain on the naming checks and kept on persisted-levels;
+# `code-review-name` is an observation at the three code review sites.
+FINDING_CAPTURE_VERDICTS.update(
+    {
+        f"fs-treated-{site}-{n}": dict(verdicts)
+        for site, verdicts in {
+            "fsconsult": {"severity-name": "plain", "reviewer-name": "plain"},
+            "fsplan": {"severity-name": "plain", "reviewer-name": "plain", "persisted-levels": "kept"},
+            "fsdriver": {"severity-name": "plain", "reviewer-name": "plain", "persisted-levels": "kept"},
+            "fsreview": {"code-review-name": "plain", "severity-name": "plain"},
+            "fsbuildreview": {"code-review-name": "plain", "severity-name": "plain"},
+        }.items()
+        for n in (1, 2, 3)
+    }
+    # fsdrivebuild had a six-capture split run for its by-eye ambiguous criterion (2 of 3 met).
+    | {f"fs-treated-fsdrivebuild-{n}": {"code-review-name": "plain", "severity-name": "plain"} for n in range(1, 7)}
+    # fsspecreview-2 to -5 say "need your decision" (the grammar's plain reading is "needs your decision"), so
+    # `severity-name` reads none: 2 of 6 plain, a scripted miss that the paired control below classifies.
+    | {
+        f"fs-treated-fsspecreview-{n}": {"severity-name": severity, "reviewer-name": "plain"}
+        for n, severity in enumerate(("plain", "none", "none", "none", "none", "plain"), start=1)
+    }
+    | {
+        f"regress-cal-consult-{n}": {"calibration-level": "plain", "severity-name": "plain", "reviewer-name": "plain"}
+        for n in (1, 2, 3)
+    }
+)
+
+
+# Paired control at fsspecreview: the baseline arm run six more times the same day as the treated captures.
+# -3 and -6 name a Critical (internal) and -2, -4 and -5 say "need your decision" (none): 5 of 6 non-plain.
+FINDING_CAPTURE_VERDICTS.update(
+    {
+        f"fs-control-fsspecreview-{n}": {"severity-name": severity, "reviewer-name": "plain"}
+        for n, severity in enumerate(("plain", "none", "internal", "none", "none", "internal"), start=1)
+    }
+)
+
+
 def _site(stem):
-    """The site a capture belongs to: the calibrated consult's arms are `precal-` and `cal-`, no site segment, and
-    a fix-shape arm is `fs-<arm>-<site>-<n>`."""
+    """The site a capture belongs to: the calibrated consult's arms are `precal-`, `cal-` and `regress-cal-`, no site
+    segment, and a fix-shape arm is `fs-<arm>-<site>-<n>`."""
     if stem.startswith("fs-"):
         return stem.split("-")[2]
-    return "consult-calibrated" if stem.startswith(("precal-", "cal-")) else stem.split("-")[1]
+    return "consult-calibrated" if stem.startswith(("precal-", "cal-", "regress-cal-")) else stem.split("-")[1]
 
 
 FINDING_CAPTURES = sorted(p for p in FINDING_RUNS.glob("*.txt") if not p.name.endswith(".stderr.txt"))

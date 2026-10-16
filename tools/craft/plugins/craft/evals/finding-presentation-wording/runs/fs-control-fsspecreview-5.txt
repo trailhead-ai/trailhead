@@ -1,0 +1,44 @@
+**Detail on C1, C2 and C3** — these are the findings that would build the wrong thing and need your decision.
+
+---
+
+**C1: anyone holding a forwarded confirmation email could cancel the booking.** I recommend changing the cancellation criterion so that a cancel only goes through after the member who booked confirms it. Without that, a member can lose a firing they never gave up.
+
+What could go wrong: the spec says "a member can cancel a booking up to 24 hours before its day. The day is freed and offered to the first member on that kiln's standby list" (AC3). It never says how a cancel is tied to the person who made the booking. Suppose a member forwards their confirmation email to a partner or a classmate. Whoever receives it can cancel the booking. The day then goes straight to the first member on the standby list, so the original member turns up with their work to find the slot gone, and nothing tells them why. At production maturity, nobody can quietly put that right afterwards.
+
+Fix: replace AC3 with this exact text:
+
+> **AC3.** A member can cancel a booking up to 24 hours before its day. A cancel takes effect only once it is confirmed from a link sent to the email address the booking was made with. The day is then freed and offered to the first member on that kiln's standby list.
+
+Caveat: this protects cancellations only. Booking under someone else's email address (AC1) is still possible, and this edit doesn't try to stop that.
+
+*Raised by: security.* Proposed disposition: `resolved`.
+
+---
+
+**C2: the spec books the whole kiln for a day, but a firing is several members' work sharing the shelves.** I recommend sending this back for a revise round instead of patching it with an edit. Choosing what a member actually books changes AC1 to AC3 and the Problem statement together, and you are the one who knows how firings are shared at Marlow Street.
+
+What could go wrong: as written, "a kiln holds one firing per day. A second booking for the same kiln and day is refused" (AC2). A kiln is really full when its shelves are full, not when its day has been taken. So one member with a single bowl holds the large kiln for a whole day, every other member is refused, and the online sheet ends up with longer waits than the paper sheet it replaces. The problem the spec opens with, two members turning up for the same firing, is really a shared-load problem, and booking the whole kiln hides it instead of solving it.
+
+**C2** — *booking unit is the whole kiln for a day, not shelf space in a firing* — `revise` (`record-only`)
+  Prescription: restate the Problem as members sharing a firing's load. Then rewrite AC1 so a member books shelf space in a firing, AC2 so a firing takes bookings until its shelves are full and then offers the next firing with space, and AC3 so a cancel frees that member's space rather than the whole day. Or, if firings at the studio really are one member each, add one sentence to the Problem saying so, and the criteria stand.
+
+Caveat: the right-problem pass rated its own confidence medium because the spec doesn't say how often a firing is shared. That missing fact decides between the two branches above. If you know the answer, "answer C2: …" settles it.
+
+*Raised by: right problem.* Proposed disposition: `revise` (`record-only`).
+
+---
+
+**C3: members aren't told when they book that their work must be on the shelves by 8 am.** I recommend adding the load time to the confirmation email so a member learns it when they book, not only the evening before. Without it, a member can miss the deadline and lose the firing.
+
+What could go wrong: the confirmation email only "states the booking" (AC1). The 8 am deadline first appears in the reminder sent the evening before (AC5). A member who misses that reminder arrives at 9 to a kiln that is already packed and loses the firing. The reminder can be missed by not checking email that evening, or because a mistyped address made it bounce, which the failure-cases pass separately flagged as unhandled.
+
+Fix: change AC1's ending to "…and receives a confirmation email stating the booking and that the work must be on the kiln's shelves by 8 am on the day."
+
+Caveat: I checked this one myself. The ease-of-use pass says members aren't told about 8 am at all, which overstates it, because the reminder in AC5 does mention 8 am. The real gap is timing: the member hears about the deadline once, late, by a single email. That makes the edit cheap and still worth making, but the finding is weaker than its wording suggests. If you think the reminder is enough, this is the one to override.
+
+*Raised by: ease of use.* Proposed disposition: `resolved`.
+
+---
+
+My recommendation stands: C1 and C3 `resolved` with the edits above, and C2 `revise`. The spec stays draft for a second round focused on the booking unit, but C1's and C3's edits are written to the spec now. Reply "go" to accept, or override by id, for example "dispute C3, because …".

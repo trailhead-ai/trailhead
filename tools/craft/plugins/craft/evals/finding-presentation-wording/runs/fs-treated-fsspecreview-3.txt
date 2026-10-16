@@ -1,0 +1,54 @@
+## Detail on C1, C2 and C3. All three would build the wrong thing and need your decision.
+
+**C1. Anyone holding a forwarded confirmation email can cancel the booking.** Proposed: `resolved`
+
+I recommend making a cancellation take effect only after the member who booked confirms it. Otherwise any member's firing can be cancelled by someone they never meant to give that power to.
+
+The spec says a member can cancel a booking up to 24 hours before its day, and the day is then freed and offered to the first member on that kiln's standby list (AC3). It never says how a cancel is tied to the member who booked. Members forward confirmation emails to partners, classmates and the technician. Anyone holding one could cancel the booking. The day would then go straight to the standby list, and the member who booked would find out on the morning they arrive with their work.
+
+Fix: replace AC3 with this text, which I've already drafted and which would be applied word for word:
+
+> **AC3.** A member can cancel a booking up to 24 hours before its day. A cancel takes effect only once it is confirmed through a message sent to the email address the booking was made with. The day is then freed and offered to the first member on that kiln's standby list.
+
+The security reviewer suggested "a cancel asks the member to confirm". I've added that the confirmation goes to the booking's own address, because a confirmation sent to whoever started the cancel would not stop the forwarded-email case.
+
+Raised by: security.
+
+---
+
+**C2. The spec books the whole kiln for a day, but a firing holds several members' work.** Proposed: `revise` (`record-only`)
+
+I recommend changing what a booking reserves, from the whole kiln for a day to shelf space in a firing, before this spec goes to planning. The booking unit shapes every criterion, and building on the wrong one would rebuild the problem online.
+
+The spec says a kiln holds one firing per day, and a second booking for the same kiln and day is refused and the next free day offered (AC2). In practice a kiln is full when its shelves are full, not when one person has taken its day. A member firing a single bowl would hold the whole large kiln for the day while others queue for weeks. The spec's own Problem backs this up: it says two members regularly turn up with work for the same firing. That is the shared firing this booking model has no room for. I checked this against the record before raising it.
+
+Fix: rework the booking criteria around shelf space within a firing, with a firing full when its shelves are taken. This rewrites AC1, AC2, AC3 and AC5, and the booking and standby entries the calendar lists (AC6).
+
+I haven't drafted the edit myself because it depends on facts the record doesn't hold and the passes didn't have: how many shelves each kiln has, and whether a firing is shared often or only now and then. The right-problem reviewer flagged that same gap in its own confidence note.
+
+```
+**C2** — booking unit is the whole kiln for a day — `revise` (`record-only`)
+  Prescription: replace the per-day kiln booking in AC1–AC3 with a booking of shelf space in a
+  firing, state each kiln's shelf count, and make a firing full when its shelves are; carry the
+  same unit into AC5's reminder and AC6's calendar entries.
+```
+
+Raised by: right problem.
+
+---
+
+**C3. Members aren't told the shelves must be loaded by 8 am until the evening before.** Proposed: `resolved`
+
+I recommend putting the 8 am load time in the confirmation email as well as the reminder. Then a member knows the deadline when they plan the day, not just the night before.
+
+This finding partly overreaches. The spec already has the member receive a reminder the evening before a firing, listing what must be on the shelves by 8 am (AC5), so members are told. What the ease-of-use reviewer got right is the timing. The confirmation that a member receives when booking states only the booking (AC1). A member who arranged their day around a 9 am arrival learns about the deadline about twelve hours ahead. A member whose reminder bounces, which the failure-cases reviewer raised separately, never learns it at all. Either way they arrive to a packed kiln and lose the firing.
+
+Fix: replace AC1 with this drafted text:
+
+> **AC1.** A member books a firing by giving a name, an email address, the kiln (large or small) and a day, and receives a confirmation email stating the booking and that the work must be on the kiln's shelves by 8 am on that day.
+
+Raised by: ease of use (the bounced-reminder angle is from failure cases).
+
+---
+
+Reply "go" to accept these as proposed, or override any row by its id, for example "dispute C2: …" or "answer C2: …" with your reason.

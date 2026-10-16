@@ -1,0 +1,51 @@
+**Detail on C1, C2 and C3.** All three would build the wrong thing and need your decision. The spec is at production maturity (basis: stamp), and no concern was waived.
+
+---
+
+**C1 — Anyone holding a forwarded confirmation email can cancel the booking** · proposed `resolved`
+
+Should a cancellation need confirming by the member who made the booking? I recommend yes. Without that check, a booking is only as safe as the confirmation email, and that email gets forwarded.
+
+The spec says a member can cancel a booking up to 24 hours before its day, and the day is then freed and offered to the first member on that kiln's standby list (AC3). It never says how a cancellation is tied to the person who booked. A member forwards their confirmation to a friend, or it is shared in the studio group chat. Someone acting on that email cancels the firing. The day passes straight to the next person on standby, and the member who booked finds out when they arrive with their work.
+
+Fix: in the cancellation criterion (AC3), replace "A member can cancel a booking up to 24 hours before its day." with:
+> "A member can cancel a booking up to 24 hours before its day. A cancellation takes effect only once it is confirmed from the email address the booking was made with."
+
+This covers anyone who has the email but is not the member who booked. Only a confirmed cancellation frees the day and offers it on.
+
+*Raised by: security.*
+
+---
+
+**C2 — The spec books the whole kiln for a day, but a firing is shared shelf space** · proposed `revise` (`record-only`)
+
+Should members book shelf space in a firing rather than a whole kiln for a day? I recommend making that change before the spec advances. As written, the system would turn away the shared firings the studio actually runs.
+
+The spec says a kiln holds one firing per day and refuses a second booking for the same kiln and day (AC2). A firing, though, is a load of several members' work, and a kiln is full when its shelves are full, not when its day has been taken. A member books the large kiln for one bowl. The system refuses every other member for that day, and they wait weeks for space that was sitting empty. This would also not cure the double-arrival complaint. It would replace it with a queue.
+
+Fix: members would book a place on a kiln's shelves for a given firing, and a firing would be refused only once its shelves are full. This rewrites the Objectives and the criteria for booking (AC1), the one-firing-per-day limit (AC2), cancelling and the standby offer (AC3) and the evening reminder (AC5).
+
+  Prescription: the unit being booked is wrong. Change it from "a kiln for a day" to "shelf space in a firing". State how many shelves each kiln holds, refuse a booking only when the firing's shelves are full, and have a cancellation free that member's shelf space rather than the whole day.
+
+Caveat: the right-problem pass rated its own confidence medium, because the spec does not say how often a firing is actually shared. If the studio really does fire one member's work per kiln per day, the finding does not apply. That is yours to tell us. No other pass could see this, so it stands on one pass alone.
+
+*Raised by: right problem.*
+
+---
+
+**C3 — Members are not told the shelves must be loaded by 8 am until the evening before** · proposed `resolved`
+
+Should the 8 am loading time appear in the confirmation email as well as the reminder? I recommend yes. It is a one-line addition, and without it a member can plan their day around the wrong time.
+
+The confirmation email states only the booking (AC1). The 8 am deadline first appears in the reminder the member receives the evening before the firing (AC5). A member who books weeks ahead plans to drop their work off mid-morning. They miss or skim the reminder, arrive at 9 to a kiln that is already packed, and lose the firing.
+
+Fix: in the booking criterion (AC1), replace "receives a confirmation email stating the booking" with:
+> "receives a confirmation email stating the booking and that the work must be on the kiln's shelves by 8 am on the day."
+
+Caveat: the evening-before reminder (AC5) already carries the 8 am time, so the finding overstates "not told" somewhat. The edit is still worth taking because it costs nothing and gives the member the deadline when they book, not at the last minute. If C2's change to shelf space is taken, this sentence still applies as written.
+
+*Raised by: ease of use.*
+
+---
+
+Accept as proposed ("go"), or name any of C1–C3 to override it with your reason.

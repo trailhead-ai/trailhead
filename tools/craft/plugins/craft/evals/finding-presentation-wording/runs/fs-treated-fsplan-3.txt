@@ -1,0 +1,89 @@
+**Council review: kiln booking sheet, first build**
+
+maturity: production (basis: stamp)
+
+**What the reviewers found.** The findings fall into three groups. The first and most serious is Task 1's `turn` number. Task 1 stores a place in line on each booking and renumbers every later booking when one is cancelled. If a cancellation happens while the 18:00 reminder job is reading, two bookings end up holding the same firing, which is the double-booking the studio is trying to get rid of. The second group is about what happens around a cancellation:
+- The cancel link cancels as soon as anything opens it.
+- The member gets no sign that the cancellation went through.
+- A member who has been offered a freed day stays on the standby list.
+
+The third group is about things nobody would notice going wrong: a reminder job that stops without anyone knowing, a reminder that leaves out the 8 am loading time, and a spreadsheet of members' personal details left on a laptop.
+
+**Whether it holds.** The buildability and failure-cases reviewers each found the `turn` race on their own, and the plan writes out the renumbering step that causes it, so that finding is solid. I moved one finding up. The failure-cases reviewer rated the silent reminder job as worth fixing. However, this spec is at production maturity, and at that level a failure nobody would see needs your decision. A missed reminder means a lost firing, and nobody would find out until a member complains. I moved one finding down. The ease-of-use reviewer said the booking page "may be confusing" but named no moment where a member gets stuck, so it isn't strong enough to need your decision. The ease-of-use reviewer's 8 am point is concrete and deserves more weight than its rating suggests: a member receives a reminder listing what must be on the shelves by 8 am (AC5), and the plan's reminder leaves out the time. The security reviewer's concerns about the cancel link and the spreadsheet are real. They are not urgent because nobody can sign in yet.
+
+**What to do.** Change Task 1 so bookings are ordered by their booked day and no turn number is stored. Have the reminder job report to the technician when it finishes and when it hasn't run. Then rework Task 3 as one change: the link opens a page that asks the member to confirm, the member sees and receives a confirmation, the 24-hour cutoff is tested, and an offer removes that member from the standby list. The rest are one-line edits.
+
+---
+
+**Would build the wrong thing, needs your decision**
+
+1. **Should Task 1 drop the stored `turn` number and order bookings by their booked day? I recommend yes, because as written it can tell two members that the same firing is theirs.** A kiln holds one firing per day (AC2). Task 1 instead closes the gap after a cancellation by subtracting one from every later `turn`. If that happens while the 18:00 job is reading, two rows share a `turn`, both members get the reminder, and one of them loads a kiln they don't hold.
+   Fix: bookings would be identified and ordered by kiln and day, so a cancellation changes no other row. This rewrites the data model in Task 1 and the read in Task 2.
+   *Raised by: buildability, failure cases*
+
+2. **Should the reminder job tell someone when it has run and when it hasn't? I recommend yes, because otherwise reminders can stop with nobody noticing.** The evening before a firing, the member receives a reminder (AC5). If the 18:00 job fails, no reminder goes out and nothing warns anyone. The first sign is a member who missed their firing. *(Moved up from "worth fixing" because production-maturity failures that nobody can see need your decision.)*
+   Fix: email the technician when the job finishes, and send a second alert if it hasn't finished by 19:00.
+   *Raised by: failure cases*
+
+**Would cause trouble later, worth fixing, your call**
+
+3. **Add the 8 am loading time to the reminder email. Without it, members miss their firing.** The spec says the reminder lists what must be on the shelves by 8 am (AC5). Task 2 sends the list without the time, so a member turns up at 9, finds the kiln already packed, and loses the firing.
+   Fix: add one sentence to the Task 2 reminder giving the 8 am load time.
+   *Raised by: ease of use*
+
+4. **Make the cancel link ask for confirmation instead of cancelling when it is opened. Otherwise someone else can cancel a member's firing.** If the confirmation email is forwarded, or a mail scanner follows its links, the booking is cancelled and the day goes to standby without the member knowing.
+   Fix: the link opens a page that asks the member to confirm the cancellation.
+   *Raised by: security*
+
+5. **Confirm a cancellation to the member. Without that, a member who cancelled by mistake can't tell whether the booking still stands.** Task 3 cancels and frees the day but says nothing to the member.
+   Fix: show a one-line confirmation on the page and send it by email.
+   *Raised by: ease of use*
+
+6. **Remove a member from the standby list once they have been offered a day. Otherwise the same member keeps getting offers.** The day is freed and offered to the first member on that kiln's standby list (AC3). The plan never removes that member's standby entry, so the next cancellation offers them a second day.
+   Fix: making the offer closes that member's standby row.
+   *Raised by: buildability*
+
+7. **Delete the membership spreadsheet once the load is checked. Otherwise 90 members' names and email addresses stay on a laptop.** The plan loads members from the spreadsheet before launch, and the file stays on the technician's laptop afterwards.
+   Fix: add a step to the load task that deletes the spreadsheet once the load is verified.
+   *Raised by: security*
+
+8. **Make the booking page easy to follow. I wouldn't hold the plan for this, because no specific moment of confusion was named.** The concern is that members may find the page confusing at first. *(Moved down from "needs your decision" because it is speculative: no concrete user moment is named.)*
+   Fix: add a help page, as the reviewer suggests, or wait for real feedback after launch.
+   *Raised by: ease of use*
+
+**Rough edges, nothing to decide**
+
+9. Tasks 2 and 5 each format dates for display. Share one helper. *(buildability)*
+10. No test covers a cancellation made exactly 24 hours before the booked day. A member can cancel up to 24 hours before its day (AC3), so add a test on each side of that boundary. *(failure cases)*
+11. A lock's reason appears on a calendar every member can read, and it may contain personal details. Warn the technician on the lock screen. *(security)*
+12. The calendar calls a freed day a "release", which reads as jargon. Use "freed" or "cancelled". *(ease of use)*
+
+Findings 1 and 2 each need a disposition before the plan can go to build: `resolved`, `bounced-back-to-spec`, `accepted-as-risk: <reason>` or `disputed: <reason>`.
+
+---
+
+```markdown
+## Council Review
+
+*Reviewed at:* 2026-10-16
+*Members dispatched:* builder, breaker, attacker, advocate
+*Maturity:* production (basis: stamp)
+
+*Critical:*
+- Task 1 renumbers `turn` on cancellation; a cancellation during the 18:00 reminder read leaves two rows with the same `turn` and two members told the same firing is theirs — order by booked day, store no turn (raised by: Builder, Reliability) — *Disposition:* awaiting operator
+- 18:00 reminder job has no success/failure signal; reminders can silently stop until a firing is missed — notify technician on completion and at 19:00 if not run (raised by: Reliability) (raised from Important: production failure visibility rates Critical at production maturity) — *Disposition:* awaiting operator
+
+*Important:*
+- Task 2 reminder omits the 8 am shelf-load time AC5 requires; members arrive late to a packed kiln (raised by: Advocate)
+- Task 3 cancel link cancels on open with nothing tying it to the member; forwarded email or link-following mail scanner cancels the firing — confirm page (raised by: Security)
+- Cancellation gives no confirmation; a mistaken click leaves the member unsure the booking stands — show and email one-line confirmation (raised by: Advocate)
+- Task 3 offer does not close the offered member's standby row; same member offered a second day on the next cancellation (raised by: Builder)
+- Membership spreadsheet (90 names and emails) left on technician's laptop after load — delete once load verified, state in task (raised by: Security)
+- Booking page may confuse members at first — help page (raised by: Advocate) (downgraded from Critical: speculative — no concrete user moment named)
+
+*Minor:*
+- Tasks 2 and 5 both format dates for display; share one helper (raised by: Builder)
+- No test for a cancellation exactly 24 hours before the booked day (raised by: Reliability)
+- Lock reason shown on member-readable calendar may carry personal detail (raised by: Security)
+- Calendar labels a freed day "release", reads as jargon (raised by: Advocate)
+```
