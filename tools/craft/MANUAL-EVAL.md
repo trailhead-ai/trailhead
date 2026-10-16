@@ -3102,7 +3102,7 @@ given; `assemble` never runs before step 11's blocks and question have been show
 (`[1]`); with the line removed, the same probe printed `can't create temp file for here document: operation not permitted`.
 In the nine cells `assemble` ran once each where it ran at all, and none refused with `invalid-children-file`.
 
-**Result: the treatment arm still fails the case (3 of 9 cells pass, against 4 of 9 in round 1).**
+**Result: the treatment arm still fails the case (5 of 9 cells pass, against 4 of 9 in round 1).**
 
 | Cell | Round 1 | Round 2 |
 |---|---|---|
@@ -3180,7 +3180,7 @@ whatever the answer, including an answer given up front and an answer that chang
 chosen set equal to the shortlist, a single follow-up); "no moves needed" is never a reason to skip a display. Step 9 now has each
 start line, the first included, written as the ritual's own text output ahead of the tool call that dispatches its subagent.
 
-**Result: the treatment arm still fails the case (3 of 9 cells pass).** The prose change moved no cell in the four it targeted, and
+**Result: the treatment arm still fails the case (4 of 9 cells pass, against 5 of 9 in round 2).** The prose change moved no cell in the four it targeted, and
 `chosen` regressed.
 
 | Cell | Round 1 | Round 2 | Round 3 |
@@ -3247,3 +3247,8 @@ file carries one. Each run's fixture repo ended with a clean tree and its HEAD u
 **Limitations.** One run per cell, so each is an anecdote; the stable part is that the same four cells dropped the displays in
 three consecutive rounds. Answers are fixed in the prompt, so this case cannot tell a skipped display from an arm that treats a
 given answer as having been shown. No further prose iteration was run, by pre-registration.
+
+**What ships.** The skill ships round 2's wording (`31e4fc6d`), reflowed to the prose wrap column with no word changed: it is
+the best-measured treatment (5 of 9), and round 3's consolidation measured no better. The displays dropped when the answers
+change nothing are not closed by this change; they are carried as a follow-up, together with an eval that drives the ritual's
+ask-and-wait rather than fixing the answers in the prompt.
