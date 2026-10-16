@@ -97,6 +97,12 @@ treat ALL candidates as outstanding — never silently drop candidates.
 
 For each outstanding candidate, apply agent judgment:
 
+- **Route a known fix to `/lore:correct`**: a candidate that carries a fix to an existing
+  record the operator ruled on or accepted, in their own message in this session, is not
+  promoted to a `task`. Run `/lore:correct` on that record instead; it owns the gate and the
+  apply. Re-read the record and re-verify the claim against its source first, so a record
+  that changed since the candidate was logged is refused on its stale `--base`, never forced.
+
 - **Promote to a vault record**: if the candidate describes a durable finding
   worth finding later on its own — a `decision`, `lesson`, `spec`,
   `area` profile, `collaboration` convention, or a `task` (open work item:
