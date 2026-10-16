@@ -1,0 +1,14 @@
+[
+ {
+  "kind": "spec",
+  "title": "Buoy gauge outage tolerance",
+  "status": "draft",
+  "body": "# Buoy gauge outage tolerance\n\n## Problem\nThe tide gauge on each buoy loses its satellite uplink for hours at a time. Readings taken during an outage must not be lost.\n\n## Hardware\nThe gauge samples every 5 minutes. It reserves 8 KB of flash for readings, and each stored reading takes 64 bytes. The buffer design is recorded in `decision/gauge-buffer-is-sized-for-the-sampling-interval`.\n\n## Acceptance Criteria\n- **AC1.** While the uplink is down, the gauge keeps every reading it takes for up to 6 hours. *Verified by: manual check.*\n- **AC2.** When the uplink returns, buffered readings are sent oldest first. *Verified by: manual check.*\n"
+ },
+ {
+  "kind": "decision",
+  "title": "Gauge buffer is sized for the sampling interval",
+  "status": "active",
+  "body": "# Gauge buffer is sized for the sampling interval\n\nThe sampling interval is ten minutes, so six hours of readings is 36 readings, and the gauge buffer is a ring of 36 slots. Once the ring is full the oldest reading is overwritten.\n"
+ }
+]
