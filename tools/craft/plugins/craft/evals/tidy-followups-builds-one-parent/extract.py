@@ -3,7 +3,7 @@
 
     extract.py <meta-dir> <cell-arm> <out-dir> [--redact STRING ...]
 
-Writes, in <out-dir>:
+Writes, in <out-dir> (every file passed through `scrub.py`):
 - `<cell-arm>.txt`           the arm's final report (the result event's text).
 - `<cell-arm>.commands.txt`  every Bash command and Agent dispatch, in order, one block each,
                              marked `[main]` or `[sub]` (run inside a subagent). An Agent prompt
@@ -18,8 +18,12 @@ Writes, in <out-dir>:
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import scrub as capture_scrub  # noqa: E402
 
 
 def blocks(content):
@@ -87,12 +91,14 @@ def main() -> int:
     def scrub(s):
         for r in redact:
             s = s.replace(r, "[planted-string]")
-        return s
+        return capture_scrub.scrub_text(
+            s, work=str(meta.resolve().parent), home=os.environ.get("HOME"), user=os.environ.get("USER")
+        )
 
     (out / f"{key}.txt").write_text(scrub(final) + "\n")
     (out / f"{key}.commands.txt").write_text(scrub("\n".join(commands)))
     (out / f"{key}.transcript.txt").write_text(scrub("\n".join(transcript)))
-    (out / f"{key}.diff.txt").write_text("\n".join(diff) + "\n")
+    (out / f"{key}.diff.txt").write_text(scrub("\n".join(diff) + "\n"))
     return 0
 
 

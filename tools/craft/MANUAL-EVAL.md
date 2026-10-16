@@ -2632,7 +2632,7 @@ two short probes. The three discarded runs were $3.83 of it.
 **Captures.** `runs/<cell>-<arm>.txt` is the final report, `.commands.txt` every Bash command and Agent dispatch,
 `.transcript.txt` the main thread's text, commands and (cut) results in order, `.diff.txt` the vault and repo files that
 changed, `.grade.json` the mechanical facts, `.cmd.txt` the invocation with the prompt, `.summary.json` exit code, seconds
-and cost. Paths are written `$WORK`, `$HOME`, `$USER`, `$TMP`.
+and cost. Paths are written with the placeholders listed in the scrub note at the end of this case.
 
 **Limitations.** One run per cell, so each is an anecdote. Answers are fixed in the prompt. The arm keeps the real `HOME`,
 fenced by the sandbox. Refinement is a judgment and three cells needed their fixtures settled after an inconclusive run. The
@@ -2827,3 +2827,14 @@ given answer as having been shown. No further prose iteration was run, by pre-re
 the best-measured treatment (5 of 9), and round 3's consolidation measured no better. The displays dropped when the answers
 change nothing are not closed by this change; they are carried as a follow-up, together with an eval that drives the ritual's
 ask-and-wait rather than fixing the answers in the prompt.
+
+**Scrub.** Every file this case writes into `runs/` passes through `scrub.py` at write time: `extract.py` for the four text
+captures, `harness.py` for `.cmd.txt` and `.summary.json`, `grade.py` for `.grade.json` (string values only, so keys,
+numbers and booleans are untouched). The placeholders are `$WORK`, `$HOME` and `$USER` for the real prefixes;
+`$CRAFT[<arm>]` and `$LORE[<arm>]` for the arm's snapshot copies of the craft and lore plugins, and `$SNAP[<arm>]:<path>` for
+anything else in the snapshot, so every path still names its arm; `$RUN[<cell>-<arm>]` for the run directory; `$REPO:` for the
+checkout that holds `scripts/eval-sandbox`; `[sha:<first 8 hex>]` for a git SHA or lore revision hash (the same hash gets the
+same placeholder in every file); and `[redacted:<class>]` for whatever `capture_scan.py` still flags as a credential class
+(`key-like`, `bearer`, `high-entropy-base64`), using the scanner's own detection. `capture_scan.py` exits 0 on this case's
+`runs/` (0 credential findings, 29 known-safe `path-or-url-shape` lines), and no `.grade.json` value differs from the
+unscrubbed capture.

@@ -31,6 +31,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import scrub as capture_scrub  # noqa: E402
+
 
 def lore(env, *argv):
     r = subprocess.run(["lore", *argv], capture_output=True, text=True, env=env)
@@ -180,7 +183,7 @@ def main() -> int:
          f"{os.environ['HOME']}/.local/state/lore", f"{os.environ['HOME']}/.config/lore"],
         capture_output=True, text=True,
     ).stdout.strip()
-    print(json.dumps({
+    graded = {
         "order": order,
         "agents": {"count": agents, "sequential": seq_ok},
         "check_args": check_args,
@@ -190,7 +193,10 @@ def main() -> int:
         "parent_body": parent_body,
         "command_lines": command_lines,
         "real_vault_hits": hits,
-    }, indent=1))
+    }
+    print(json.dumps(capture_scrub.scrub_value(
+        graded, work=str(work.resolve()), home=os.environ["HOME"], user=os.environ.get("USER"),
+    ), indent=1))
     return 0
 
 
