@@ -272,10 +272,11 @@ ${CLAUDE_PLUGIN_ROOT}/scripts/followup_parent.py check <spec-name> <name>...
 ```
 
 Exit 0 prints one JSON object: `eligible` (`{name, revision, delivers, files}`), `left-out`
-(`{name, reason}`, plus `dependency` for `depends-outside`) and `overlaps` (`{file, names}`). It
-decides which follow-ups are eligible, never a subagent's reply. Exit 2 is a failure with a
-`reason-code:` line on stderr: stop, report the code by the table below with one plain sentence, and
-nothing else. Exit 0 without a JSON object carrying those three keys is a failure too.
+(`{name, reason}`, plus `dependency` for a `depends-outside` that names it) and `overlaps`
+(`{file, names}`). It decides which follow-ups are eligible, never a subagent's reply. Exit 2 is a
+failure with a `reason-code:` line on stderr: stop, report the code by the table below with one
+plain sentence, and nothing else. Exit 0 without a JSON object carrying those three keys is a
+failure too.
 
 Report every left-out follow-up as one plain sentence for its reason, naming the follow-up:
 
@@ -317,15 +318,20 @@ none remain, say no parent is created and go to step 13. Nothing is nested befor
 
 ### 12. Assemble
 
-Stage the children file privately, never at a fixed path:
+Stage the children file privately, never at a fixed path, and write it in the same shell call
+through a heredoc whose delimiter is quoted, so the shell expands nothing inside it:
 
 ```
 children=$(mktemp)
+cat > "$children" <<'CHILDREN_JSON'
+<the JSON list>
+CHILDREN_JSON
 ```
 
-Write into it a JSON list with one `{"name", "reason", "revision"}` per confirmed follow-up: the
-bare name, the selection reason the operator saw, and the `revision` exactly as `check` emitted it.
-Then:
+The JSON list holds one `{"name", "reason", "revision"}` per confirmed follow-up: the bare name, the
+selection reason the operator saw, and the `revision` exactly as `check` emitted it. A reason can
+carry vault text, so it is never placed on a command line or inside an unquoted or double-quoted
+heredoc, where `$(…)` or backticks in it would run. Then:
 
 ```
 ${CLAUDE_PLUGIN_ROOT}/scripts/followup_parent.py assemble <spec-name> --children "$children"
