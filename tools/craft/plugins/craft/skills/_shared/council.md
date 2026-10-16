@@ -335,11 +335,41 @@ change that removes it.
   to make, what you recommend, and what is at stake. No setup, no citation, no shorthand.
 - **Then the worst case**, stated as an event ("we delete a workspace with a live session still in
   it"): what the document says, what reality does, and what goes wrong.
-- **Then the fix, on its own line**, prefixed `Fix:` — one sentence for the remedy, plus any caveat
-  that changes whether to take it.
+- **Then the fix, on its own line**, prefixed `Fix:` — the remedy in the form its size calls for
+  (the three forms follow this list), plus any caveat that changes whether to take it.
 - **Then who raised it**, by plain label, beside the finding rather than inside its body. Pass
   names, invariant tags, flag trivia and other internal labels appear only when the reader needs
   them to act, and only after the plain statement.
+
+**The three forms of a fix.** Choose by how much of the thing under review the fix touches.
+
+- **A small fix** — a few words, one line or one clause: put the exact text on the `Fix:` line, then
+  the situation it covers ("replace `x` with `y` when the list is empty"). Draft the text only where
+  the reviewer's ask and the cited lines settle it; where they do not, quote the ask as the reviewer
+  wrote it and draft nothing. Show the text as code or a quotation, never as a command to run. One
+  line of code goes inline after `Fix:`; more goes in an indented block under it, and the `Fix:`
+  line still leads.
+- **A large rewrite** — the fix reshapes the thing under review: open the `Fix:` line with what the
+  reader would notice once it is made, then say how much of the thing under review it touches. For a
+  spec or plan, that is the sections and criteria it rewrites; for a code review, a count of files
+  and functions plus the two most affected names; for a proposal put to a council, the named parts of
+  the proposal it changes and any section or criterion of the context document it touches. The
+  rewritten text itself is not drafted on the line.
+- **Anything in between** — open the `Fix:` line with what the reader would notice once it is made.
+
+An example of each, in the shape the reader sees:
+
+> Fix: replace `"2 crossings"` with `"two crossings"` in the printed notice, so a skipper reading it
+> aloud is not handed a numeral. (small, spec review)
+>
+> Fix: skippers would see one sailing table where they now see three, and the late-tide rule would
+> live in one place; this rewrites the Sailings and Delays sections and criteria 2, 5 and 6 of the
+> spec. (large rewrite)
+>
+> `ferry/timetable.py:88 — a sailing cancelled for weather still counts toward the day's quota`
+> Fix: a cancelled sailing would stop eating into the day's quota, and the quota would show what is
+> still free; this touches 3 files and 5 functions, chiefly `count_sailings` and `apply_quota`.
+> (large rewrite, code review)
 
 A finding in the "rough edges, nothing to decide" group asks no decision, so its opening sentence
 says what is wrong and what you recommend.
