@@ -12,6 +12,7 @@ asserts anything about the eval's measured result.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -174,6 +175,18 @@ def test_a_bare_name_python3_is_linked_as_the_interpreter_it_resolves_to(tmp_pat
     _assert_arm_python3_imports_tomllib(run_dir)
 
 
+def test_a_symlinked_interpreter_is_linked_by_its_real_path(tmp_path):
+    venvish = tmp_path / "venvish" / "bin"
+    venvish.mkdir(parents=True)
+    given = venvish / "python"
+    given.symlink_to(sys.executable)
+    result, run_dir = _build(tmp_path, "visual-inside-workspace", python3=str(given))
+    assert result.returncode == 0, result.stderr
+    target = os.readlink(run_dir / "bin" / "python3")
+    assert target == os.path.realpath(given)
+    assert target != str(given)
+
+
 def test_an_absolute_path_python3_is_linked_as_an_importing_interpreter(tmp_path):
     result, run_dir = _build(tmp_path, "visual-inside-workspace", python3=sys.executable)
     assert result.returncode == 0, result.stderr
@@ -192,7 +205,11 @@ def test_an_unset_python3_defaults_to_the_one_on_the_builders_path(tmp_path):
 
 
 def _relative_files(root: Path) -> set[str]:
-    return {str(p.relative_to(root)) for p in root.rglob("*") if p.is_file() or p.is_symlink()}
+    return {
+        str(p.relative_to(root))
+        for p in root.rglob("*")
+        if (p.is_file() or p.is_symlink()) and "__pycache__" not in p.relative_to(root).parts
+    }
 
 
 def test_the_plugin_copy_is_the_source_tree_without_evals_and_rules(tmp_path):
