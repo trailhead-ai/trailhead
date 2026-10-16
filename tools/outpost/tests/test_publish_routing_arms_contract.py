@@ -11,7 +11,6 @@ Does not assert anything about the eval's measured result.
 
 from __future__ import annotations
 
-from pathlib import Path
 
 import arms_contract as ac
 
