@@ -1001,6 +1001,15 @@ def test_a_title_one_past_the_bound_is_truncated_with_a_marker():
     assert gather.sanitize_title(title) == title[: gather.MAX_TITLE_CHARS] + "\u2026"
 
 
+@pytest.mark.parametrize("before_cut", [4, 8, 12, 16])
+def test_a_credential_straddling_the_bound_leaves_no_part_of_itself_behind(before_cut):
+    token = "AKIAIOSFODNN7EXAMPLE"
+    lead = ("word " * gather.MAX_TITLE_CHARS)[: gather.MAX_TITLE_CHARS - before_cut - 1] + " "
+    out = gather.sanitize_title(lead + token + " tail")
+    assert token[:before_cut] not in out
+    assert out.startswith(lead) and out.endswith("\u2026")
+
+
 @pytest.mark.parametrize(
     "ch", ["\u200b", "\u202e", "\u2028", "\u2029", "\U000e0041", "\u200d", "\ufeff"]
 )
