@@ -1042,3 +1042,120 @@ def test_every_reason_code_the_code_can_emit_is_in_the_collection():
 def test_an_unlisted_reason_code_cannot_be_raised():
     with pytest.raises(AssertionError):
         gather.GatherError("made-up-code")
+
+
+# --- distilled flag and live follow-up parents ---------------------------------
+
+
+def _annotate(env, record_id, value):
+    _lore(env, "record", "update", record_id, "--annotation", f"distilled={value}", stdin="")
+
+
+@pytest.mark.parametrize("value", ["adr", "zero-adr", "rejected"])
+def test_a_spec_with_a_distilled_annotation_reports_distilled_true(board, value):
+    _annotate(board.env, f"spec/{board.spec}", value)
+    assert board.gather()["distilled"] is True
+
+
+def test_a_spec_with_no_distilled_annotation_reports_distilled_false(board):
+    assert board.gather()["distilled"] is False
+
+
+@pytest.mark.parametrize("status", ["open", "ready", "in-progress", "blocked"])
+def test_a_live_follow_up_parent_linked_to_the_spec_is_listed(board, status):
+    parent = board.task(
+        "Live parent", status=status,
+        related=[f"spec={board.spec}"], labels=[FOLLOWUP_PARENT_LABEL],
+    )
+    assert board.gather()["followup-parents"] == [parent]
+
+
+@pytest.mark.parametrize("status", ["done", "dropped", "superseded"])
+def test_a_settled_follow_up_parent_is_not_listed(board, status):
+    settled = board.task(
+        "Settled parent", status="open" if status == "superseded" else status,
+        related=[f"spec={board.spec}"], labels=[FOLLOWUP_PARENT_LABEL],
+    )
+    if status == "superseded":
+        successor = board.task("Successor")
+        _lore(board.env, "record", "supersede", f"task/{settled}", "--by", f"task/{successor}")
+    assert board.gather()["followup-parents"] == []
+
+
+def test_a_follow_up_parent_linked_to_a_different_spec_is_not_listed(board):
+    other = make_spec(board.env, board.vault, "Other spec", status="complete")
+    board.task("Other parent", related=[f"spec={other}"], labels=[FOLLOWUP_PARENT_LABEL])
+    assert board.gather()["followup-parents"] == []
+
+
+def test_a_follow_up_parent_named_only_by_a_spec_outbound_edge_is_listed(board):
+    parent = board.task("Outbound parent", labels=[FOLLOWUP_PARENT_LABEL])
+    relate(board.env, f"spec/{board.spec}", f"task={parent}")
+    assert board.gather()["followup-parents"] == [parent]
+
+
+def test_a_task_linked_to_the_spec_without_the_label_is_not_a_parent_but_is_gathered(board):
+    plain = board.task("Plain", related=[f"spec={board.spec}"])
+    result = board.gather()
+    assert result["followup-parents"] == []
+    assert [f["name"] for f in result["followups"]] == [plain]
+
+
+def test_follow_up_parents_are_sorted_by_name(board):
+    names = [
+        board.task(t, related=[f"spec={board.spec}"], labels=[FOLLOWUP_PARENT_LABEL])
+        for t in ("Zed parent", "Alpha parent", "Mid parent")
+    ]
+    assert board.gather()["followup-parents"] == sorted(names)
+
+
+def test_a_live_follow_up_parent_and_its_children_are_still_not_gathered(board):
+    parent = board.task(
+        "Live parent", related=[f"spec={board.spec}"], labels=[FOLLOWUP_PARENT_LABEL]
+    )
+    board.task("Nested", status="open", related=[f"spec={board.spec}"], parent=parent)
+    result = board.gather()
+    assert result["followup-parents"] == [parent]
+    assert result["followups"] == []
+
+
+def _parent_board(distilled=None, parent_status="open"):
+    spec = spec_doc(status="complete", related=None)
+    if distilled:
+        spec["sidecar"]["annotations"] = {"distilled": distilled}
+    extra = {
+        ("v", "task/fp"): task_doc(
+            "fp", parent_status, labels={"craft/followup-parent": ""}, related={"spec": ["s"]}
+        )
+    }
+
+    def search(q):
+        return 0, search_body(hit("p"), hit("fp")) if q.startswith("related-spec") else search_body(hit("f"))
+
+    runner = fake_board(search=search, extra=extra)
+    runner.records[("v", "spec/s")] = spec
+    runner.listing.append(entry("fp", parent_status))
+    return runner
+
+
+def test_the_injected_board_reports_distilled_and_live_parents(capsys):
+    code, result, _, err = run_json(_parent_board(distilled="zero-adr"), capsys)
+    assert code == 0, err
+    assert result["distilled"] is True
+    assert result["followup-parents"] == ["fp"]
+
+
+def test_the_injected_board_without_annotation_or_live_parent_reports_neither(capsys):
+    code, result, _, err = run_json(_parent_board(parent_status="done"), capsys)
+    assert code == 0, err
+    assert result["distilled"] is False
+    assert result["followup-parents"] == []
+
+
+def test_a_failed_lookup_of_a_follow_up_parent_exits_two_with_no_stdout(capsys):
+    runner = _parent_board()
+    del runner.records[("v", "task/fp")]
+    code, result, out, err = run_json(runner, capsys)
+    assert code == 2
+    assert out == ""
+    assert reason_of(err) == "lore-failed"
