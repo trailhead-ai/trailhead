@@ -613,6 +613,12 @@ re-reading gives a fresh `--base`, and what protects the record is re-verifying 
 read body and its source. The shared contract in craft's `council.md` also gained a materiality test; that
 side is measured in craft's MANUAL-EVAL.
 
+The measured prose is commit `2205fb7e`. No case targets Step 0's source-settled route (the operator asks
+for the correction and the source settles the text) or its unreachable-source route. The frozen-record case
+reaches the unreachable-source route only incidentally: its prompt cites a job configuration that the
+fixture does not contain. Its closing line (that the source was not checked) is never graded. Those two
+routes are reviewed, not evaluated.
+
 The batch command above was run verbatim, one case per invocation, 3 runs, `--max-cost-usd 1.5`, graders
 unchanged, runner `claude` 2.1.301, model `claude-opus-5-5`, 2026-10-16. Errored runs: **none**. Cost basis:
 `costUsd` per run, judge cost excluded (the judge cost per run is in the last column).
@@ -638,7 +644,8 @@ Both batches are counted in the cost. The other nine cases used no rerun.
 
 Cost: 6.47 USD, the sum of the eleven batch totals (ten first batches plus the one
 rerun): 0.656, 0.534, 0.487, 0.536, 0.572, 0.528, 0.574, 0.681, 0.599, 0.625 and 0.678 by each batch's `--json`
-total, which includes judge cost.
+total. Each batch total equals the sum of its per-run `costUsd`, so the 6.47 USD excludes judge cost. With judge
+cost (the last column of the table, about 0.115 USD in all) the total is about 6.59 USD.
 
 Live state: sha256 of `~/.local/state/lore/` and `~/.config/lore/` (excluding `.git/`) at 11:53 and 12:19.
 `~/.config/lore/` is unchanged. No vault file carries a fixture title. Changed paths:
@@ -663,6 +670,83 @@ ADR's original figure and history are untouched. A supersession leaves the body 
 the graders would pass a run that superseded the ADR instead of tracking a task, and no grader reads the
 record's status. The grader set is frozen and was not edited; the case measures "tracked, not edited in
 place", not "tracked, not superseded".
+
+## Earlier greens measured on prose that quoted the fixtures' cues
+
+The four known-fix cases' treatment greens on `6d1943a1`, `616d96fb` and `2205fb7e` above ran on a `correct`
+skill whose Step 0 and description quoted the deferral cues of the cases' own prompts ("make a note of it",
+"put it on the list", "so it doesn't get lost"; the frozen case's prompt says "Make a note of it so we fix it
+later; I don't want it to get lost", the draft case's "Put it on the list", the unknown case's "I don't want it
+to get lost"). They are measured on leaked prose and do not count as clean evidence. Each affected
+`expected.md` claim that the prose "shares no wording with any skill example" was false for that prose; the
+`expected.md` files were not edited. The same leak does not touch the six amend and supersede cases, whose
+prompts carry none of these cues, so their greens on those commits stand as regression evidence only.
+
+## Re-measure on the prose without the cues (commit `d912f583`)
+
+`d912f583` restates Step 0 and the description with no quoted phrase (a request framed as deferral, or as
+urgency, does not change whether the fix is known), makes `flush`, `record` and the resident primer defer to
+`/lore:correct` for what a known fix is, and extends the unreachable-source branch to an accepted fix. A fix a
+review or the agent proposed and the operator has not accepted is listed and goes through Step 3a's single
+yes/no, with nothing written before the yes.
+
+**Leak check, run before any measurement.** The distinctive vocabulary of the seven new cases is every
+three-word phrase from each case's `prompt.md`, `fixtures/records.json` (every string value) and
+`fixtures/review.md`, lower-cased, punctuation dropped (`/tmp` script, 114 to 204 phrases per case). Each was
+matched at word boundaries against every file under `tools/lore/plugins/lore/skills/`,
+`tools/lore/plugins/lore/lore/config/agent_ruleset.py`, and `tools/craft/plugins/craft/skills/` and `agents/`
+(eval trees excluded), and against the lines `ce19d0ce..d912f583` added to those files. Hits: 4 to 14 phrases
+per case, all generic, none distinctive: "the lore cli is", "installed in this" (the prompt's own harness
+footer, matching existing craft prose), "it on the", "the record is", "that is not" and similar. Two matches are
+coincidental: "the list so" joins a sentence boundary after the punctuation strip, and "it to get" is
+"dispatch it to get a synthesized view" in `plan`. One added-prose
+hit is deliberate: the heading "Corrections to other records" is the contract's own heading, and the
+`review.md` fixtures use it because that is the format the contract tells a review to write. Direct greps over
+the same paths for the titles' content words (`invoice|overdue|reminder|nightly export|ingest|peak load|thumbnail|
+renderer|label (printer|queue)|firmware|buoy|gauge|outage|sampling|resend|retr(y|ies)|flat delay`) hit only
+unrelated existing prose (`retry`, `renderer`, `sampling` as general words in `flush`, `execute.md` and
+`council.md`), none in prose this change added. Harness words (`seeded|fixture|eval|runner|scaffold`) in the
+edited sections of `correct`, `flush`, `record`, `agent_ruleset.py`, `council.md`, `consult` and
+`receiving-code-review`: no hits. A multi-line grep for `the list so|put it on|make a note|get lost|noted for
+later` over the same paths: no hits.
+
+The batch command above was run verbatim, one case per invocation, 3 runs, `--max-cost-usd 1.5`, graders
+unchanged, runner `claude` 2.1.301, model `claude-opus-5-5`, 2026-10-16. Errored runs: **none**. No rerun was
+used. Cost basis, stated once: `costUsd` per run excludes judge cost, and each batch total equals the sum of
+its runs' `costUsd`. The judge cost per run is shown separately and is not in any total here.
+
+| Case | Runs | Cost per run (USD) | Judge cost per run (USD) | Result |
+|---|---|---|---|---|
+| apply-ruled-fix-to-frozen-record-phrased-as-note-it | 1.00 / 1.00 / 1.00 | 0.180, 0.191, 0.183 | 0 | green, 3 of 3 |
+| apply-ruled-fix-to-draft-record | 1.00 / 1.00 / 1.00 | 0.176, 0.176, 0.168 | 0 | green, 3 of 3 |
+| track-unknown-fix-phrased-as-fix-it-now | 1.00 / 1.00 / 1.00 | 0.160, 0.164, 0.164 | 0.005 each | green, 3 of 3 |
+| refuse-a-ruled-fix-the-source-contradicts | 1.00 / 1.00 / 1.00 | 0.163, 0.177, 0.178 | 0.005, 0.006, 0.006 | green, 3 of 3 |
+| amend-wrong-fact-in-active-adr (spot check) | 1.00 / 1.00 / 1.00 | 0.205, 0.182, 0.177 | 0 | green, 3 of 3 |
+| supersede-spec-change-orphaning-an-objective-phrased-as-small-tweak (spot check) | 0.71 / 1.00 / 1.00 | 0.193, 0.232, 0.208 | 0.006, 0.008, 0.008 | green at the floor, 2 of 3 |
+
+Batch totals by `costUsd`: 0.554, 0.519, 0.488, 0.517, 0.564 and 0.633, 3.275 USD in all (about 3.33 with
+judge cost). The orphaning case's 0.71 run is the known flip between putting a choice to the operator and
+superseding, on identical prose, as in the earlier batches. The bar (2 of 3 at 1.0) is met without the
+pre-stated rerun.
+
+**Skill invocation.** A loop copied `/tmp/claude-eval-*/**/*.jsonl` every 0.3 s (stopped by its literal PID)
+and the copies were read for `Skill` tool calls. All 18 of 18 runs across the six batches called
+`lore:correct` and no other skill, including the refuse and unknown-fix runs.
+
+**Live state.** Sha256 of every file under `~/.local/state/lore/` and `~/.config/lore/` (excluding `.git/`)
+at 12:51:57 and 13:10:51, covering these six batches and the three craft batches in craft's MANUAL-EVAL.
+`~/.config/lore/` is unchanged. No changed path carries a fixture title. Changed paths:
+
+| Path | Source |
+|---|---|
+| levr `task/adding-a-billing-comp-waits-for-a-passkey` | levr `bcb3913f` (12:56:56), another session's publish |
+| levr `spec/a-versioned-artifact-registry-with-strategy-as-its-first-knowledge-base` | levr `a27a6a1e` (12:57:03), another session's publish |
+| levr `spec/no-audio-goes-missing-or-unaccounted-for` | levr `b3799a4d` (12:57:15), another session's publish |
+| levr `task/the-local-database-rebuilds-from-disk-with-nothing-lost-or-uploaded-twice` | levr `e0e089a5` (12:58:08), another session's publish |
+| levr `task/walk-and-talk-sessions-and-spoken-narration-follow-the-current-strategy-version` | levr `6193e3cd` (13:05:25), another session's publish |
+| default `session/2f94b521-….{md,json}` | uncommitted: another session's `lore session candidate` entries (`kind=follow-up`, levr-platform rebuild slice) at 18:02:54Z and 18:08:31Z, appended to the note committed in `b9bc0ce8` |
+| `index.sqlite` | derived search index, rewritten by any live lore command |
+| `publish/levr-5a2535166072.{log,request}` | the live publish worker, triggered by the levr commits above |
 
 When the next case lands, record it here as:
 
