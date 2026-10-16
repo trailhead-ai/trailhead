@@ -3,6 +3,11 @@
 #
 # Usage: make-fixture-env.sh <run-dir> <variant>
 #
+# <run-dir> must be missing or an empty directory, so a rebuild never writes through
+# anything an earlier arm left there, and its physical path may contain only
+# [A-Za-z0-9._/-], because run.env holds it unquoted and the runner word-splits it.
+# Either refusal exits 2 with nothing written.
+#
 # EVAL_PYTHON3 names the interpreter the arm's bare `python3` resolves to, as an
 # absolute path or a bare name on this script's PATH; it defaults to the `python3`
 # on this script's PATH and must be 3.11+ (the publisher imports tomllib), which a
@@ -23,7 +28,7 @@
 #
 # Produces, all under <run-dir>:
 #   bin/python3   a link to the real path of EVAL_PYTHON3, the only thing run.env's PATH adds
-#   plugin/       a copy of the outpost plugin for --plugin-dir, without evals/ and rules.md
+#   plugin/       a copy of the outpost plugin for --plugin-dir, without evals/, rules.md and __pycache__
 #   home/ xdg-state/ xdg-config/   throwaway HOME and XDG roots (camp state is xdg-state/camp,
 #                 outpost state is xdg-state/outpost, camp config is xdg-config/camp)
 #   project/      the plain project folder (outside variants)
@@ -46,8 +51,25 @@ if [ ! -f "$brief" ]; then
   exit 2
 fi
 
+if [ -e "$run_dir" ] && { [ ! -d "$run_dir" ] || [ -n "$(find "$run_dir" -mindepth 1 -print -quit)" ]; }; then
+  echo "make-fixture-env.sh: run directory '$run_dir' exists and is not an empty directory" >&2
+  exit 2
+fi
+
+case "$run_dir" in /*) probe="$run_dir" ;; *) probe="$PWD/$run_dir" ;; esac
+tail=""
+while [ ! -e "$probe" ]; do
+  tail="/$(basename "$probe")$tail"
+  probe="$(dirname "$probe")"
+done
+physical="$(cd "$probe" && pwd -P)$tail"
+if ! printf '%s' "$physical" | grep -Eq '^[A-Za-z0-9._/-]+$'; then
+  echo "make-fixture-env.sh: run directory '$run_dir' resolves to '$physical', which has characters outside [A-Za-z0-9._/-]" >&2
+  exit 2
+fi
+
 python3="${EVAL_PYTHON3:-$(command -v python3 || true)}"
-if [ -z "$python3" ] || ! "$python3" -c 'import tomllib' 2>/dev/null; then
+if [ -z "$python3" ] || ! "$python3" -I -c 'import tomllib' 2>/dev/null; then
   echo "make-fixture-env.sh: no python3 that can import tomllib (3.11+); set EVAL_PYTHON3" >&2
   exit 2
 fi
@@ -55,11 +77,11 @@ fi
 mkdir -p "$run_dir"
 run_dir="$(cd "$run_dir" && pwd -P)"
 mkdir -p "$run_dir"/{bin,home,xdg-state,xdg-config,project}
-real_python3="$("$python3" -c 'import os,sys; print(os.path.realpath(sys.executable))')"
+real_python3="$("$python3" -I -c 'import os,sys; print(os.path.realpath(sys.executable))')"
 ln -s "$real_python3" "$run_dir/bin/python3"
 
 mkdir -p "$run_dir/plugin"
-(cd "$plugin_src" && tar --exclude=./evals --exclude=./rules.md -cf - .) | (cd "$run_dir/plugin" && tar -xf -)
+(cd "$plugin_src" && tar --exclude=./evals --exclude=./rules.md --exclude=__pycache__ -cf - .) | (cd "$run_dir/plugin" && tar -xf -)
 
 printf '# ledgerlight\n\nA small invoicing web app.\n' > "$run_dir/project/README.md"
 
