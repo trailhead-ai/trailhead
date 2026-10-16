@@ -56,14 +56,15 @@ ROUND = {
 
 
 def _build(
-    tmp_path: Path, variant: str, python3: str = sys.executable
+    tmp_path: Path,
+    variant: str,
+    python3: str | None = sys.executable,
+    path: str = "/usr/bin:/bin",
 ) -> tuple[subprocess.CompletedProcess, Path]:
     run_dir = tmp_path / "run"
-    env = {
-        "PATH": "/usr/bin:/bin",
-        "HOME": str(tmp_path / "unused-home"),
-        "EVAL_PYTHON3": python3,
-    }
+    env = {"PATH": path, "HOME": str(tmp_path / "unused-home")}
+    if python3 is not None:
+        env["EVAL_PYTHON3"] = python3
     result = subprocess.run(
         ["bash", str(BUILDER), str(run_dir), variant],
         capture_output=True,
@@ -151,6 +152,59 @@ def test_a_python3_that_cannot_run_the_publisher_is_refused_and_builds_nothing(t
     assert result.returncode == 2
     assert "tomllib" in result.stderr
     assert not (run_dir / "run.env").exists()
+
+
+def _assert_arm_python3_imports_tomllib(run_dir: Path) -> None:
+    link = run_dir / "bin" / "python3"
+    assert link.resolve().is_absolute() and link.resolve().exists(), link
+    arm_python3 = shutil.which("python3", path=_arm_env(run_dir)["PATH"])
+    assert arm_python3 == str(link), arm_python3
+    probe = subprocess.run([arm_python3, "-c", "import tomllib"], capture_output=True, text=True)
+    assert probe.returncode == 0, probe.stderr
+
+
+def test_a_bare_name_python3_is_linked_as_the_interpreter_it_resolves_to(tmp_path):
+    bin_dir = tmp_path / "pybin"
+    bin_dir.mkdir()
+    (bin_dir / "mypython").symlink_to(sys.executable)
+    result, run_dir = _build(
+        tmp_path, "visual-inside-workspace", python3="mypython", path=f"{bin_dir}:/usr/bin:/bin"
+    )
+    assert result.returncode == 0, result.stderr
+    _assert_arm_python3_imports_tomllib(run_dir)
+
+
+def test_an_absolute_path_python3_is_linked_as_an_importing_interpreter(tmp_path):
+    result, run_dir = _build(tmp_path, "visual-inside-workspace", python3=sys.executable)
+    assert result.returncode == 0, result.stderr
+    _assert_arm_python3_imports_tomllib(run_dir)
+
+
+def test_an_unset_python3_defaults_to_the_one_on_the_builders_path(tmp_path):
+    bin_dir = tmp_path / "pybin"
+    bin_dir.mkdir()
+    (bin_dir / "python3").symlink_to(sys.executable)
+    result, run_dir = _build(
+        tmp_path, "visual-inside-workspace", python3=None, path=f"{bin_dir}:/usr/bin:/bin"
+    )
+    assert result.returncode == 0, result.stderr
+    _assert_arm_python3_imports_tomllib(run_dir)
+
+
+def _relative_files(root: Path) -> set[str]:
+    return {str(p.relative_to(root)) for p in root.rglob("*") if p.is_file() or p.is_symlink()}
+
+
+def test_the_plugin_copy_is_the_source_tree_without_evals_and_rules(tmp_path):
+    run_dir = _built(tmp_path, "visual-inside-workspace")
+    source = CASE_DIR.parent.parent
+    expected = {
+        rel
+        for rel in _relative_files(source)
+        if rel != "rules.md" and not rel.startswith("evals/")
+    }
+    assert expected
+    assert _relative_files(run_dir / "plugin") == expected
 
 
 def test_each_variant_leaves_the_brief_for_the_arm_to_pass_as_the_prompt(tmp_path):

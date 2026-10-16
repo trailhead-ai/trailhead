@@ -3,9 +3,12 @@
 #
 # Usage: make-fixture-env.sh <run-dir> <variant>
 #
-# EVAL_PYTHON3 names the interpreter the arm's bare `python3` resolves to; it
-# defaults to the `python3` on this script's PATH and must be 3.11+ (the
-# publisher imports tomllib), which a macOS /usr/bin/python3 is not.
+# EVAL_PYTHON3 names the interpreter the arm's bare `python3` resolves to, as an
+# absolute path or a bare name on this script's PATH; it defaults to the `python3`
+# on this script's PATH and must be 3.11+ (the publisher imports tomllib), which a
+# macOS /usr/bin/python3 is not. It is linked by its real path (symlinks and
+# virtualenvs resolved to the base interpreter), so the link is absolute and
+# readable from inside a sandbox that denies reads under $HOME.
 #
 # Variants (one per scenario):
 #   visual-inside-workspace       cwd is a member folder of a throwaway camp workspace
@@ -17,7 +20,7 @@
 #   dispatched-agent-observed     plain project folder
 #
 # Produces, all under <run-dir>:
-#   bin/python3   a link to EVAL_PYTHON3, the only thing run.env's PATH adds
+#   bin/python3   a link to the real path of EVAL_PYTHON3, the only thing run.env's PATH adds
 #   plugin/       a copy of the outpost plugin for --plugin-dir, without evals/ and rules.md
 #   home/ xdg-state/ xdg-config/   throwaway HOME and XDG roots (camp state is xdg-state/camp,
 #                 outpost state is xdg-state/outpost, camp config is xdg-config/camp)
@@ -50,7 +53,8 @@ fi
 mkdir -p "$run_dir"
 run_dir="$(cd "$run_dir" && pwd -P)"
 mkdir -p "$run_dir"/{bin,home,xdg-state,xdg-config,project}
-ln -s "$python3" "$run_dir/bin/python3"
+real_python3="$("$python3" -c 'import os,sys; print(os.path.realpath(sys.executable))')"
+ln -s "$real_python3" "$run_dir/bin/python3"
 
 mkdir -p "$run_dir/plugin"
 (cd "$plugin_src" && tar --exclude=./evals --exclude=./rules.md -cf - .) | (cd "$run_dir/plugin" && tar -xf -)
