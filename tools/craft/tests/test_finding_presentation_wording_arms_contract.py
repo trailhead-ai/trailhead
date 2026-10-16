@@ -59,6 +59,10 @@ CODE_REVIEW_EDIT_REVISION = "5eb4cdc92f7fe4115a641f64c8f1888f5afb4d19"
 # origin/main when the fix-shape sites were cut: the seven fix-shape baseline arms read every source here.
 FIX_SHAPE_BASELINE_REVISION = "c3f7b21e9a797c2794218cc19ef50a9060cc0b5d"
 
+# The commit carrying the fix-shape contract edit: the seven fix-shape treated arms and the calibrated
+# consult regression arm read `council.md` from here.
+FIX_SHAPE_EDIT_REVISION = "2fc63f894f8ad944e59d0b8c23af4f526c2dfe0b"
+
 PLUGIN = "tools/craft/plugins/craft"
 RULES = f"{PLUGIN}/rules.md"
 COUNCIL = f"{PLUGIN}/skills/_shared/council.md"
@@ -228,6 +232,33 @@ ARM_SOURCES.update(
 )
 
 
+FS_TREATED_SITES: dict[str, list[tuple[str, str]]] = {
+    "fsspecreview": [("rules", RULES), ("skill", GAUNTLET_SKILL), ("skill", GAUNTLET_DISPOSITIONS)],
+    "fsplan": [("rules", RULES), ("skill", PLAN_SKILL)],
+    "fsconsult": [("rules", RULES), ("skill", CONSULT_SKILL)],
+    "fsdriver": [("rules", RULES), ("skill", DRIVE_SKILL)],
+    "fsreview": [("rules", RULES), ("skill", REVIEW_SKILL)],
+    "fsbuildreview": [("rules", RULES), ("skill", EXECUTE_SKILL), ("skill", EXECUTE_PROCEDURE)],
+    "fsdrivebuild": [("rules", RULES), ("skill", DRIVE_SKILL), ("skill", EXECUTE_PROCEDURE)],
+}
+
+ARM_SOURCES.update(
+    {
+        f"fs-treated-{site}.md": [
+            *[(path, FIX_SHAPE_BASELINE_REVISION) for _, path in parts],
+            (COUNCIL, FIX_SHAPE_EDIT_REVISION),
+        ]
+        for site, parts in FS_TREATED_SITES.items()
+    }
+)
+
+ARM_SOURCES["regress-cal-consult.md"] = [
+    (RULES, BASELINE_REVISION),
+    (CONSULT_SKILL, CAL_REVISION),
+    (COUNCIL, FIX_SHAPE_EDIT_REVISION),
+]
+
+
 @pytest.mark.parametrize("arm_name", sorted(ARM_SOURCES))
 def test_arm_composed_from_its_manifest_equals_the_committed_file(arm_name: str):
     sources = ARM_SOURCES[arm_name]
@@ -265,6 +296,22 @@ def test_composing_one_source_from_a_different_revision_does_not_match(
     assert not arm_matches(ARMS_DIR / arm_name, sources), (
         f"{arm_name} still matches when source {path} is read from an earlier "
         "revision, so the revision pin does not constrain the arm"
+    )
+
+FIX_SHAPE_EDIT_ARMS = [f"fs-treated-{site}.md" for site in FS_TREATED_SITES] + ["regress-cal-consult.md"]
+
+
+@pytest.mark.parametrize("arm_name", FIX_SHAPE_EDIT_ARMS)
+def test_a_fix_shape_edit_arm_differs_from_the_same_sources_with_council_at_the_fix_shape_baseline(
+    arm_name: str,
+):
+    sources = [
+        (path, FIX_SHAPE_BASELINE_REVISION if revision == FIX_SHAPE_EDIT_REVISION else revision)
+        for path, revision in ARM_SOURCES[arm_name]
+    ]
+    assert not arm_matches(ARMS_DIR / arm_name, sources), (
+        f"{arm_name} matches its sources with council.md at the fix-shape baseline, "
+        "so the contract edit is not what the arm varies"
     )
 
 

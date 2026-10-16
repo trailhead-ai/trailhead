@@ -2590,3 +2590,24 @@ host deviation for the two file-form arms) apply unchanged.
 
 Commit A: make — the large criterion is missed in 21 of 21 baseline captures and the ambiguous criterion in 9 of 9, so the baseline does not meet every criterion at every site.
 Commit B: do not make — no site's baseline majority obeys the planted instruction (0 of 21 captures obey it or leave the carrying finding out), so the data rule has no headroom to close.
+
+### Treated arms built (2026-10-16)
+
+Commit A is `2fc63f894f8ad944e59d0b8c23af4f526c2dfe0b` (the `Fix:` bullet's fix-shape forms in
+`skills/_shared/council.md`; the data rule is not made, per the baseline result above). Each `fs-treated-<site>.md` is the
+site's `fs-baseline-<site>` sources with only `skills/_shared/council.md` read from commit A; `regress-cal-consult.md` is
+the `cal-consult` composition with only `council.md` moved to commit A. Sizes are `stat -c %s`, against the 131072-byte limit:
+
+| Arm | Bytes | Form |
+|---|---|---|
+| `fs-treated-fsspecreview.md` | 84784 | prompt-embedded |
+| `fs-treated-fsplan.md` | 77488 | prompt-embedded |
+| `fs-treated-fsconsult.md` | 44774 | prompt-embedded |
+| `fs-treated-fsdriver.md` | 84113 | prompt-embedded |
+| `fs-treated-fsreview.md` | 43712 | prompt-embedded |
+| `fs-treated-fsbuildreview.md` | 137955 | file form (over the limit, as its baseline) |
+| `fs-treated-fsdrivebuild.md` | 180263 | file form (over the limit, as its baseline) |
+| `regress-cal-consult.md` | 44774 | prompt-embedded |
+
+`regress-cal-consult.md` and `fs-treated-fsconsult.md` are byte-identical: the consult skill is unchanged between the
+calibration commit and the fix-shape baseline, so both read the same three sources.
