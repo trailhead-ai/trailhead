@@ -411,14 +411,17 @@ is. That is a correction to another record, not a finding on the record under re
   A material correction is not an amend: list it and leave it to the operator. Material is a narrow
   test. **In scope (amend or update):** a wrong fact (a number, a name, a path, a date), a clause
   that drifted from what shipped, a mechanism detail inside the same decision, wording, new
-  evidence, narrowing a spec criterion. **Material (not an amend):** reversing a decision, adding or
-  removing one, widening or narrowing what an ADR covers, or leaving a spec objective with nothing
-  delivering it. Changing a figure the decision rests on, while the decision itself stays the same,
-  is a wrong fact: in scope.
+  supporting evidence, narrowing a spec criterion. **Material (not an amend):** reversing a
+  decision, adding or removing one, widening or narrowing what an ADR covers (including carving out
+  an exception), or leaving a spec objective with nothing delivering it. Changing a figure the
+  decision rests on, while the decision itself stays the same, is a wrong fact: in scope. A change
+  to a value that sets a security control (a limit, a lifetime, an allowlist, an auth mode) is
+  listed for the operator and never classified in scope by you alone.
   - **Frozen** (an ADR or spec past `draft`, any decision, a `done`, `dropped` or `superseded`
     task): amend in place, with the `revision` the read printed as `--base`. The operator's
-    acceptance is the yes, so do not ask again; `--initiated-by agent` records that a review
-    proposed it.
+    acceptance is the yes, so do not ask again. Use `--initiated-by agent`: `operator` is only for a
+    fix whose text comes from the operator's own message, and a block they pasted from elsewhere is
+    not their ruling. Put the origin (the review that proposed it) in `--reason`.
 
     ```sh
     lore record amend <kind>/<name> --reason "<why the text was wrong>" --initiated-by agent --base <revision>
@@ -438,7 +441,12 @@ is. That is a correction to another record, not a finding on the record under re
 - **Never a task, except when the fix is unknown.** A known fix is never offered as a task, not even
   as an alternative to applying it. The fix is unknown only when nothing within this session's reach
   decides the right text, because something outside it does. A fact you can read in the code, the
-  configuration or the records that settle it is known, not unknown. Only an unknown fix is recorded
-  as a task, naming the record, what is known and what would decide the fix.
-- **No secrets.** The drafted fix and the reason sync to the team permanently. Put no tokens, keys,
-  passwords or key-shaped strings in either.
+  configuration or the records that settle it is known, not unknown: it is listed with its fix, and
+  written only after the operator accepts it. Only an unknown fix is recorded as a task, naming the
+  record, what is known and what would decide the fix.
+- **No secrets.** The reason, the whole body an amend or update writes, the task body for an unknown
+  fix, and the drafted fix text in this deliverable all sync or persist. Put no tokens, keys,
+  passwords or key-shaped strings in any of them. A value read from configuration, an environment
+  file or a secret store is never copied verbatim into a record or the deliverable; describe it
+  instead. An amend cannot remove a secret already in a record: rotate the credential, then escalate
+  to the operator for a history rewrite.
