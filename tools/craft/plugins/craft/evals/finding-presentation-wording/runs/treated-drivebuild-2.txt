@@ -1,0 +1,27 @@
+The one re-review round is done. Four code review findings survived it, and I've stopped here for your decision. One would build the wrong thing, one would cause trouble later, and two are rough edges.
+
+**Would build the wrong thing, needs your decision**
+
+1. **A newly installed hive crashes the whole reminder list.** I recommend listing hives that have never been inspected as overdue, because right now one new hive means the clubhouse board gets no list at all.
+   The change says a hive with no inspection yet should appear on the list, and such a hive has `last_inspected` set to `None`. The code adds 14 days to that value. On `None`, this raises a `TypeError`, and nothing catches it, so `reminder_lines` fails for every hive, not just the new one. The first morning after someone installs a hive, the list is missing entirely.
+   Fix: in `overdue_hives`, treat a hive whose `last_inspected` is `None` as overdue before calling `next_due`.
+   `hive-reminders/reminders.py:13`, raised by code review
+
+**Would cause trouble later, worth fixing, your call**
+
+2. **A hive due exactly today is left off the list.** I recommend changing the check to include today, because the committee asked for hives "due today or earlier".
+   The code uses `<`, so a hive is listed only once its due date has passed. Take a hive inspected on 6 June: it is due on 20 June, but it doesn't appear on the 20 June board. It shows up a day late on 21 June.
+   Fix: change `<` to `<=` on that line.
+   `hive-reminders/reminders.py:13`, raised by code review
+
+**Rough edges, nothing to decide**
+
+3. **The one test can't catch either problem above.** I recommend adding two cases: a hive with no inspection yet, and a hive due exactly today. The only test covers a hive inspected a month ago, which passes whether or not findings 1 and 2 are fixed.
+   Fix: add a test where `last_inspected` is `None` and expect that hive on the list, and another where the last inspection was exactly 14 days before `TODAY`.
+   `hive-reminders/test_reminders.py:8`, raised by code review
+
+4. **The board line doesn't say how overdue a hive is.** The reviewer suggests adding the date it fell due, so the committee can tell a hive one day late from one a month late. Before taking this, note that the change gives the exact wording as `<name>: inspection overdue`. Adding a date would depart from what the committee asked for, so check with them first.
+   Fix: if the committee agrees, add the due date to the line in `reminder_lines`.
+   `hive-reminders/reminders.py:21`, raised by code review
+
+The procedure allows only one re-review round, so I haven't sent these back for more fixes. Tell me which ones to fix, or I'll leave them as they are and continue with the run.

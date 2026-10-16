@@ -1,0 +1,25 @@
+The code review's one re-review round is done and four findings are still open. I won't run another review round, so how to handle each one is up to you. I checked every finding against the code and the change description.
+
+**Would build the wrong thing, needs your decision**
+
+1. **`hive-reminders/reminders.py:13`**: A hive that has never been inspected breaks the whole morning list. I recommend fixing this before the change ships, because the clubhouse board would show nothing at all.
+   Worst case: the committee installs a new hive, so its record has no inspection date. The change says that hive should appear on the list. Instead, the code tries to add 14 days to a missing date and fails with an error. Every other hive's reminder is lost along with it.
+   Fix: treat a hive with no inspection date as overdue and put it on the list without working out a due date for it.
+   Raised by: code review
+
+**Would cause trouble later, worth fixing, your call**
+
+2. **`hive-reminders/reminders.py:13`**: A hive that is due exactly today is left off the list. I recommend including it, because the change asks for hives "due today or earlier".
+   Worst case: a hive inspected 14 days ago is due this morning. The code only lists hives whose due date is strictly before today, so this hive appears a day late.
+   Fix: change the `<` to `<=` so a hive due today counts.
+   Raised by: code review
+
+**Rough edges, nothing to decide**
+
+3. **`hive-reminders/test_reminders.py:8`**: The only test covers a hive inspected a month ago, so it can't catch either problem above. I recommend two more tests: a hive with no inspection, and a hive due exactly today.
+   Fix: add those two cases. Each one would have failed against the current code.
+   Raised by: code review
+
+4. **`hive-reminders/reminders.py:21`**: The board line says only "inspection overdue", so the committee can't tell a hive that is one day late from one that is a month late. The reviewer suggests adding the date it became overdue.
+   Fix: add the overdue-since date to each line. Two caveats change whether this is worth taking. First, the change fixes the line's wording as `<name>: inspection overdue`, so this would change what the committee asked for. Second, a never-inspected hive has no date to show. I'd leave it unless the committee wants it.
+   Raised by: code review
