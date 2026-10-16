@@ -53,7 +53,7 @@ CODE_REVIEW_BASELINE_REVISION = "7b5c65f9a00157e0aee884bdfb0f3fe0b99cdc29"
 
 # The commit carrying the code review contract edit: the treated code review arms and the four
 # regression arms read `council.md` (and, for the treated arms, their skill file) from here.
-CODE_REVIEW_EDIT_REVISION = "33767f4f22bf8a28523ce71863f8b490e0b7cf07"
+CODE_REVIEW_EDIT_REVISION = "5eb4cdc92f7fe4115a641f64c8f1888f5afb4d19"
 
 PLUGIN = "tools/craft/plugins/craft"
 RULES = f"{PLUGIN}/rules.md"

@@ -1539,12 +1539,12 @@ The operator chose to proceed. At the three code review sites:
 
 End state 5 of the extension does not apply: no site was `plain` on both checks at baseline, so all three read
 directives ship (`review/SKILL.md`, `execute/SKILL.md`, `drive/SKILL.md`), at the edit commit
-`33767f4f22bf8a28523ce71863f8b490e0b7cf07`.
+`5eb4cdc92f7fe4115a641f64c8f1888f5afb4d19`.
 
 ## Results: treated and regression runs at the code review and council sites (2026-10-16)
 
-Run per "Dispatch" and the operator decision above, against the edit commit `33767f4f22bf8a28523ce71863f8b490e0b7cf07`
-(arms composed at `733eed75`/`12caae47`). Each capture ran in its own foreground `claude -p` process from a fresh copy of
+Run per "Dispatch" and the operator decision above, against the edit commit `5eb4cdc92f7fe4115a641f64c8f1888f5afb4d19`
+(arms composed at `93800c9f`/`dda3f9a7`). Each capture ran in its own foreground `claude -p` process from a fresh copy of
 `fixtures/` and an empty second directory, `--setting-sources project --allowedTools "Read"`, no `--model`. Every
 capture exited 0, is non-empty and has an empty `.stderr.txt`, so none was excluded or replaced. Every capture is clean
 under `capture_scan.py` and `scripts/leak-gate` (both exit 0) and a `grep` for host paths and user names finds none.
@@ -1682,7 +1682,7 @@ capture was excluded or replaced. The grammar was used as it stands. The table i
 
 | Arm | council.md | Run 1 | Run 2 | Run 3 | Run 4 | Run 5 | Run 6 | Non-plain |
 |---|---|---|---|---|---|---|---|---|
-| `regress-specreview` | the slice's edit (`33767f4f`) | internal | plain | plain | plain | plain | internal | 2 of 6 (4 of 6 `plain`, `AMBIGUOUS`) |
+| `regress-specreview` | the slice's edit (`5eb4cdc9`) | internal | plain | plain | plain | plain | internal | 2 of 6 (4 of 6 `plain`, `AMBIGUOUS`) |
 | `control-specreview` | shipped contract (`7b5c65f9`) | plain | internal | internal | plain | plain | plain | 2 of 6 (4 of 6 `plain`, `AMBIGUOUS`) |
 
 The control is non-plain in 2 of 6, which meets the fixed rule's threshold (2 or more). **Classification: residual.**
