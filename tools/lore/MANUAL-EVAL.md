@@ -542,7 +542,7 @@ of 12 runs of the four new cases (the three unobserved first-batch frozen-record
 18 of 18 runs of the six existing cases. The agent reached for the skill in every case, including the
 refuse and unknown-fix cases, where the skill's Step 0 then decided not to edit.
 
-Cost: 6.48 USD in total by each `--json` list-price estimate, across the first frozen-record batch, the
+Cost: 6.57 USD in total by each `--json` list-price estimate, across the first frozen-record batch, the
 three other new-case batches, the two regression batches and the frozen-record observation batch.
 
 ### Live-state check (treatment batches)
