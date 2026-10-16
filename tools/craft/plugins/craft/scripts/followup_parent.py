@@ -154,6 +154,8 @@ if str(_SCRIPT_DIR) not in sys.path:
 
 import followup_gather as gather  # noqa: E402
 
+lore_runner = gather.lore_runner
+
 REASON_CODES = frozenset(
     {
         "invalid-spec-name",
@@ -261,8 +263,9 @@ def _field(body: str, label: str) -> str:
     return match.group(1) if match else ""
 
 
-def _clean_field(text: str) -> str:
-    return gather.sanitize_text(" ".join(text.split()), MAX_FIELD_CHARS)
+def _one_line(text: str, limit: int) -> str:
+    """`text` folded onto one line, then sanitized and cut to `limit` characters."""
+    return gather.sanitize_text(" ".join(text.split()), limit)
 
 
 def _task_dependencies(sidecar: dict) -> list[str]:
@@ -353,8 +356,8 @@ def check_followups(runner, spec: str, names: list[str]) -> dict:
             {
                 "name": name,
                 "revision": revision,
-                "delivers": _clean_field(_field(body, "Delivers")),
-                "files": _clean_field(raw_files),
+                "delivers": _one_line(_field(body, "Delivers"), MAX_FIELD_CHARS),
+                "files": _one_line(raw_files, MAX_FIELD_CHARS),
             }
         )
         files_by_name[name] = {
@@ -378,21 +381,6 @@ def check_followups(runner, spec: str, names: list[str]) -> dict:
     }
 
 
-def lore_runner(argv: list[str], stdin: str | None = None) -> subprocess.CompletedProcess:
-    """Run `lore <argv>` with no shell and a timeout. `stdin` is piped as the body
-    when given; otherwise stdin is closed, since a metadata-only `lore record
-    update` errors on a stdin that is open but silent."""
-    kwargs = {"stdin": subprocess.DEVNULL} if stdin is None else {"input": stdin}
-    return subprocess.run(
-        ["lore", *argv],
-        capture_output=True,
-        text=True,
-        timeout=gather.LORE_TIMEOUT_SECONDS,
-        shell=False,
-        **kwargs,
-    )
-
-
 def _flow_out_section() -> str:
     text = TEMPLATE_PATH.read_text(encoding="utf-8")
     start = re.search(r"^## Flow-out[ \t]*$", text, re.MULTILINE)
@@ -402,15 +390,11 @@ def _flow_out_section() -> str:
     return text[start.start() : start.end() + end.start()] if end else text[start.start() :]
 
 
-def _clean_reason(text: str) -> str:
-    return gather.sanitize_text(" ".join(text.split()), MAX_REASON_CHARS)
-
-
 def render_body(spec: str, children: list[dict]) -> str:
     """The follow-up parent's body: the plan template's shape, one section per
     child carrying its sanitized, single-line selection reason."""
     sections = "".join(
-        f"### task/{child['name']}\n\n**Selection reason:** {_clean_reason(child['reason'])}\n\n"
+        f"### task/{child['name']}\n\n**Selection reason:** {_one_line(child['reason'], MAX_REASON_CHARS)}\n\n"
         for child in children
     )
     return (
@@ -452,13 +436,7 @@ def live_followup_parents(runner, vault: str, spec: str, spec_sidecar: dict) -> 
     that fills the gathering script's `followup-parents`."""
     g = gather._Gatherer(runner, vault, gather.vault_path(runner, vault))
     g.load_listing()
-    linked = g.search("spec", [spec]) | g.outbound(spec_sidecar)
-    live = []
-    for name in sorted(linked):
-        sidecar = g.read(name)
-        if gather.FOLLOWUP_PARENT_LABEL in gather._labels(sidecar) and sidecar["status"] in gather.LIVE_PARENT_STATUSES:
-            live.append(name)
-    return live
+    return gather.live_parent_names(g.spec_linked(spec, spec_sidecar))
 
 
 def _write(runner, argv: list[str], stdin: str | None = None):

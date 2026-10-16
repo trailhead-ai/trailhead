@@ -149,16 +149,19 @@ class GatherError(Exception):
         self.reason = reason
 
 
-def lore_runner(argv: list[str]) -> subprocess.CompletedProcess:
-    """Run `lore <argv>` with no shell and a timeout. May raise
+def lore_runner(argv: list[str], stdin: str | None = None) -> subprocess.CompletedProcess:
+    """Run `lore <argv>` with no shell and a timeout. `stdin` is piped as the body
+    when given; otherwise stdin is closed, since a metadata-only `lore record
+    update` errors on a stdin that is open but silent. May raise
     FileNotFoundError (no `lore` on PATH) or subprocess.TimeoutExpired."""
+    kwargs = {"stdin": subprocess.DEVNULL} if stdin is None else {"input": stdin}
     return subprocess.run(
         ["lore", *argv],
         capture_output=True,
         text=True,
-        stdin=subprocess.DEVNULL,
         timeout=LORE_TIMEOUT_SECONDS,
         shell=False,
+        **kwargs,
     )
 
 
@@ -393,6 +396,12 @@ class _Gatherer:
             return None
         return slug
 
+    def spec_linked(self, spec: str, spec_sidecar: dict) -> dict[str, dict]:
+        """Sidecars of the tasks linked to the spec (either side names the other),
+        read in name order."""
+        names = self.search("spec", [spec]) | self.outbound(spec_sidecar)
+        return {name: self.read(name) for name in sorted(names)}
+
     def read(self, name: str) -> dict:
         if name not in self._sidecars:
             sidecar = _show(self.runner, self.vault, f"task/{name}")
@@ -404,6 +413,16 @@ class _Gatherer:
         return self._sidecars[name]
 
 
+def live_parent_names(linked: dict[str, dict]) -> list[str]:
+    """Sorted names among the spec-linked sidecars that carry `craft/followup-parent`
+    with a live status."""
+    return sorted(
+        n
+        for n, sc in linked.items()
+        if FOLLOWUP_PARENT_LABEL in _labels(sc) and sc["status"] in LIVE_PARENT_STATUSES
+    )
+
+
 def gather_followups(runner, vault: str, spec: str, spec_sidecar: dict) -> dict:
     g = _Gatherer(runner, vault, vault_path(runner, vault))
     g.load_listing()
@@ -413,13 +432,7 @@ def gather_followups(runner, vault: str, spec: str, spec_sidecar: dict) -> dict:
         if isinstance(parent, str):
             children_of.setdefault(parent, []).append(name)
 
-    spec_linked = g.search("spec", [spec]) | g.outbound(spec_sidecar)
-    linked = {name: g.read(name) for name in sorted(spec_linked)}
-    followup_parents = sorted(
-        n
-        for n, sc in linked.items()
-        if FOLLOWUP_PARENT_LABEL in _labels(sc) and sc["status"] in LIVE_PARENT_STATUSES
-    )
+    linked = g.spec_linked(spec, spec_sidecar)
     slices = sorted(n for n, sc in linked.items() if SLICE_LABEL in _labels(sc))
     basis = "labelled"
     if not slices:
@@ -431,7 +444,7 @@ def gather_followups(runner, vault: str, spec: str, spec_sidecar: dict) -> dict:
         )
     children = sorted({c for s in slices for c in children_of.get(s, [])})
 
-    pool = set(spec_linked)
+    pool = set(linked)
     pool |= g.search("task", [*slices, *children])
     for name in [*slices, *children]:
         pool |= g.outbound(g.read(name))
@@ -460,7 +473,7 @@ def gather_followups(runner, vault: str, spec: str, spec_sidecar: dict) -> dict:
         )
     return {
         "distilled": is_distilled(spec_sidecar),
-        "followup-parents": followup_parents,
+        "followup-parents": live_parent_names(linked),
         "followups": followups,
         "slice-basis": basis,
         "slices": slices,
