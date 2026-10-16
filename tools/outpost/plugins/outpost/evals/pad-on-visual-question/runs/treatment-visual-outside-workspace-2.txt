@@ -1,0 +1,20 @@
+I drew the three options as sketches so you can compare them:
+
+file://<run>/xdg-state/outpost/pads/audit-log-filters/index.html
+
+**My recommendation: the left rail.**
+
+- **You have the room.** Admins are on wide monitors, and an audit-log table rarely needs more than about 1400px. A rail of about 240px takes width they aren't using and costs no rows.
+- **People adjust filters constantly here.** Audit-log work is investigative: narrow to an actor, widen the date range, swap the action, and repeat. With a rail, each change is one click and every active filter stays visible next to the results.
+- **There's room to add filters.** Audit logs tend to gain filters over time (actor, action, resource type, IP, outcome, date). A rail just gets longer. A top bar fills up after 4–5 and then needs a "More filters" overflow, which hides some of them again.
+
+**Why not the other two:**
+
+- **Top bar:** a fine choice if you'll only ever have 3–4 filters. Past that it wraps or overflows, and it takes vertical space from the log, which is what admins are scanning.
+- **Slide-over panel:** best for narrow screens or filters people rarely touch. Here every change means open, edit, apply, close, and the open panel covers the columns you're checking against. It works against how people use this page.
+
+**One addition to the rail:** give it a collapse toggle that shrinks it to an icon strip, so the layout still works in a narrow window or on a laptop.
+
+**Question for you:** left rail, top bar, or slide-over? If you think the filter count will stay at 4 or fewer, I'd reconsider the top bar. Otherwise I'd build the rail.
+
+You can pick an option on the pad and paste its "Copy reply" output back here, or just answer in words.

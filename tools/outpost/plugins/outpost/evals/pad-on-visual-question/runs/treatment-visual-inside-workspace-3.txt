@@ -1,0 +1,22 @@
+I'd go with the collapsed "Have a code?" link under the totals. Here are the three placements as sketches:
+
+http://127.0.0.1:7314/bramble-ws-quill/promo-code-placement/
+Local to this machine only — this link works only on this host (no camp host identity: no self_name in <run>/xdg-config/camp/hosts.toml) and dies with the bramble-ws-quill workspace.
+
+**Why abandonment points to the collapsed link**
+
+The risk isn't people who already have a code. It's people who don't, and who see an empty promo box. To them it says "other people are paying less than you," so they open a new tab to search for codes. Many don't come back. Others come back with a code that doesn't work and get annoyed. The more visible and empty the field is, the more of this you get.
+
+- **Collapsed link under the totals (my pick):** This is the least visible placement, so it sends the fewest people off to search. People who already have a code (from an email, an influencer, a referral) are looking for the code box anyway and will find a "Have a code?" link. Putting it next to the total also matches what they're thinking: "how much is this, and can I make it less?" The cost is one extra click for code holders, which is small. Two details matter:
+  - Clicking the link should open the field in place, not a modal.
+  - The total should update right away when a code is applied.
+- **Input above the item list:** This is the worst of the three for abandonment. An empty box is the first thing everyone sees, before they've even checked their items. It only makes sense if most of your orders come with a code, for example a coupon-heavy or affiliate-driven store.
+- **Field inside the payment step:** It looks tidy, but it has two problems:
+  - People who are price-sensitive want to see the discounted total *before* they commit, so some will leave at the summary when you'd want them to continue.
+  - If a code is rejected right next to the card form, that's the moment people are most likely to give up on the purchase.
+
+**What would change my answer:** if a large share of your orders use codes, the friction of hiding the field starts to matter more, and a visible field (but not one at the top) becomes worth it. If you have the data, check what share of orders use a code. Or A/B test the collapsed link against an always-visible field under the totals, and look at completion rate, not how often codes get used.
+
+**Question:** Do you know roughly what share of your orders use a promo code? And does anything else in the flow lock in one of these placements, such as a design system pattern or the payment provider's hosted step?
+
+You can pick an option on the pad and paste its "Copy reply" back here, or just answer in words.

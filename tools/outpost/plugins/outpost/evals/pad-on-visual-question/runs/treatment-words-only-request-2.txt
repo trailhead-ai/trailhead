@@ -1,0 +1,22 @@
+No pad; here's the comparison in words.
+
+**My recommendation: a row of chips above the list**, if you can afford the horizontal space. If you can't, use a sidebar section.
+
+**Chips above the list**
+- **For:** With about 12 tags, every option is visible at once and takes one click. Active filters are obvious, so nobody wonders why the list looks short. Multi-select and clearing are easy.
+- **Against:** Twelve chips usually wrap to two lines, or need horizontal scrolling on narrow widths. If some workspaces grow to 30+ tags, it gets noisy. You'd need a "+N more" overflow.
+
+**Dropdown in the toolbar**
+- **For:** It's compact, scales to any number of tags, and keeps the list area clean.
+- **Against:** Tags are hidden, so people forget filtering exists. Active filters are invisible unless you add a badge or summary. Every change costs at least two clicks, and multi-select inside a dropdown is clumsy. It's the weakest option if filtering is something people do often.
+
+**Sidebar section**
+- **For:** All tags are always visible, and there's room for counts per tag. It fits naturally if the sidebar already holds folders or saved views. It handles growth beyond 12 tags better than chips.
+- **Against:** It takes space from the list and is far from the content it filters. Collapsed or narrow sidebars hide it. The active filter state isn't next to the results, so you'd probably want a small "Filtered by: X ×" indicator above the list anyway.
+
+**How to decide:**
+- If filtering by tag is a main way people navigate, use chips.
+- If you already have a sidebar people use for navigation, put tags there and add an active-filter indicator above the list.
+- Use the dropdown only if tag filtering is rare or the toolbar is the only free space.
+
+**Question for you:** Is tag filtering something people do constantly, or occasionally? And does the file browser already have a sidebar? Those two answers decide between chips and a sidebar section.

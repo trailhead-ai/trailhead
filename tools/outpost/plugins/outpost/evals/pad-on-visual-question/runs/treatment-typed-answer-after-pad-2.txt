@@ -1,0 +1,7 @@
+Numbered list down the left it is. Your typed answer settles it, so the sketch page is no longer needed.
+
+I can't name the first change from the code, because the wizard code isn't here. The project directory has only a `README.md` ("ledgerlight — A small invoicing web app"). There's no source, no setup wizard and no git history, so anything specific I said about "the wizard's code" would be made up.
+
+In most wizards, the first change for a left-side numbered list is the same. **Move the step definitions into one ordered list of steps that everything else reads from**: each step gets an id, a label and an optional "done" check, and the current step is a single index. A side list has to show every step's name and state (done, current, upcoming) all the time. A "Step 2 of 5" line or a progress bar only needs a count. So if the steps are hard-coded in a switch statement or in separate route files, that has to change before the side list can be drawn. After that, the side list is a simple component that loops over the steps, and the layout becomes two columns: list on the left, step content on the right.
+
+Where does the wizard actually live? It could be another directory, a repo I should clone, or a branch. Point me at it and I'll read the real code and tell you the actual first change, not the generic one.

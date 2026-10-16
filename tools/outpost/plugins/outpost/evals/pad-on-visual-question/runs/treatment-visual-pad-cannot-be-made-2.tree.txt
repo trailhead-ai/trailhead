@@ -1,0 +1,2 @@
+pads: none
+tool calls: Skill, Bash, Bash, Bash, Write, Bash, Read, Write, Bash

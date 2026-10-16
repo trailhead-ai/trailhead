@@ -1,0 +1,22 @@
+I sketched the three placements side by side on a scratch pad:
+
+**http://127.0.0.1:7314/bramble-ws-quill/checkout-promo-code/**
+Local to this machine only — this link works only on this host (no camp host identity: no self_name in <run>/xdg-config/camp/hosts.toml) and dies with the bramble-ws-quill workspace.
+
+The pad was built from a round file that was already in my temp directory, not the one I wrote. My write was refused because a file already existed at that path. I read the file afterwards: it covers the same three options with the same recommendation, so the pad shows what's described below, just with slightly different wording.
+
+## My recommendation: the collapsed "Have a code?" link under the totals
+
+The thing that drives abandonment here is people leaving to hunt for a code, so judge each placement by how many people without a code it sends off to look for one.
+
+- **A. Collapsed link under the totals (my pick).** People without a code barely notice it, so they aren't nudged to go searching. People who came with a code (from an email, an influencer, a referral) are already looking for it next to the price, and that's where it is. The new total shows up right beside the discount, so they get confirmation straight away. The cost is one extra click for code holders, which is small because they're motivated.
+- **B. Input above the item list.** This is the riskiest. An empty field is the first thing everyone sees, and it tells them they're paying more than someone else. That's the classic trigger for leaving to search for a code, and some of those people don't come back. It only pays off if most of your traffic arrives with a code, like a heavy affiliate or coupon-site funnel.
+- **C. Field inside the payment step.** This avoids the code-hunting problem, but it creates a different one. People who came with a code can't check their discount until they're entering card details. Some will abandon earlier because they aren't sure the code will work. The field is also away from the order summary that shows the change.
+
+Two details matter as much as where the field goes:
+1. **When a code is invalid, say why** ("expired", "minimum $50 not met") and leave the code in the field. A vague "invalid code" is the usual reason people abandon at this step.
+2. **Auto-apply codes from links** (`?promo=…`) so code holders don't have to use the field at all. This makes A's extra click even less of a cost.
+
+If you can measure it, A/B test A against B. The number to watch is how many people leave the cart and come back, not how often codes get used.
+
+You can pick an option or mark one "Not this" on the pad, then use **Copy reply** and paste the result here. Replying in words works just as well.

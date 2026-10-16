@@ -79,7 +79,7 @@ number.
 3. **Working directory.** The single line in `<run>/cwd` (a workspace member
    folder for the two workspace variants, `<run>/project` otherwise).
 4. **Argv.**
-   `HOME=<real-home> <repo>/scripts/eval-sandbox <run> -- env -i $(cat <run>/run.env) HOME=<real-home> USER=<user> TMPDIR=/private/tmp/claude-<uid> /bin/sh -c 'cd "$0" && exec "$@"' "$(cat <run>/cwd)" <abs-path-to>/claude -p --setting-sources project --plugin-dir <run>/plugin --append-system-prompt "$(cat <repo>/<case>/arms/<arm>.md)" --allowedTools "Bash,Read,Write,Edit,Skill" --output-format stream-json --verbose "$(cat <run>/prompt.md)"`.
+   `HOME=<real-home> <repo>/scripts/eval-sandbox <run> -- env -i $(cat <run>/run.env) HOME=<real-home> USER=<user> TMPDIR=/private/tmp/claude-<uid>/run-<n> /bin/sh -c 'cd "$0" && exec "$@"' "$(cat <run>/cwd)" <abs-path-to>/claude -p --setting-sources project --plugin-dir <run>/plugin --append-system-prompt "$(cat <repo>/<case>/arms/<arm>.md)" --allowedTools "Bash,Read,Write,Edit,Skill" --output-format stream-json --verbose "$(cat <run>/prompt.md)"`.
    The sandbox is given the real `HOME`, because it builds its read-deny rule
    from `HOME`: wrapped the other way round, it would deny the throwaway folder
    and leave the real home readable. It starts in `<run>`, so the inner shell
@@ -88,7 +88,9 @@ number.
    process starting), so pass every sibling run directory, the capture directory
    and the runner's own files in `DENY_EXTRA`, ending the list with `:` (the
    sandbox drops its last entry): one run must not read another's
-   brief or result. The instructions path is the committed arm file at a known
+   brief or result. Give each run its own `TMPDIR` under the Bash tool's shared
+   scratch root (create it first): runs that share one read each other's files.
+   The instructions path is the committed arm file at a known
    revision, never anything from the fixture.
 5. **Capture and marker.** Redirect the process's stdout to
    `<run>.capture.jsonl` beside the run directory, not inside it, so grading

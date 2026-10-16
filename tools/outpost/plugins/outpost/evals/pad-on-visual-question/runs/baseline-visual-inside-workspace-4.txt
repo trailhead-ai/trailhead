@@ -1,0 +1,29 @@
+My recommendation is the **collapsed "Have a code?" link under the totals**, with one condition: applying a code has to update the total right there, without a page reload or a step change.
+
+**The abandonment risk is the empty box, not where it sits.** An open promo field tells people without a code that others are paying less. Some of them leave to search for a code and don't come back. Baymard's checkout research has found this for years, and it's why many large retailers collapse the field. Which candidate is safest depends mostly on how loudly each one shows that empty box:
+
+| Option | Code holders | People without a code | Abandonment risk |
+|---|---|---|---|
+| **A. Collapsed link under totals** | Find it where they look, next to the price it changes | Barely notice it | **Lowest** |
+| B. Open input above the item list | Very easy to find | Seen before they've even looked at their items, so it's the strongest "go find a coupon" prompt | Highest |
+| C. Field inside the payment step | Can't find it for most of the checkout. Some leave thinking codes aren't accepted, or stall at payment | Not seen until late, but then shown at the moment of highest commitment | Medium, with a different failure |
+
+**Problems with B and C:**
+- **B** puts the field first, which changes what the page is about. It's only worth it if most of your traffic arrives with a code, such as heavy influencer or affiliate promos. In that case a hidden link costs you more than the coupon hunting does.
+- **C** keeps the discount away from the summary it changes. People who brought a code worry for the whole checkout, and the total jumps right before "Pay", which feels like a bait-and-switch even when the price goes down.
+
+**To get A right:**
+- Make the link easy to tap, with clear link styling, not grey small print.
+- Expand it inline with the cursor already in the field, and keep the order summary visible.
+- Show the discount as its own line and update the total right away.
+- Show errors next to the field ("Expired code", not "Invalid"), and let people remove a code.
+- If the customer arrived from a link that carries a code, apply it automatically and show the link already expanded. That covers the case where B would be better.
+
+If you can test it, run A against B and look at completed checkouts, not how often codes get used. B will almost certainly get more code usage, but that number isn't the one you care about.
+
+I also drew the three layouts side by side on a scratch pad:
+
+http://127.0.0.1:7314/bramble-ws-quill/checkout-promo-code/
+Local to this machine only — this link works only on this host (no camp host identity: no self_name in <run>/xdg-config/camp/hosts.toml) and dies with the bramble-ws-quill workspace.
+
+On the pad you can pick an option, mark others "Not this", or add a note, then press "Copy reply" and paste the result back to me. Replying in words works just as well.

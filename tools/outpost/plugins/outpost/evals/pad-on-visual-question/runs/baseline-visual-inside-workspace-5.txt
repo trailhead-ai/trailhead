@@ -1,0 +1,24 @@
+I'd go with **the collapsed "Have a code?" link under the totals**. Since abandonment is your main worry, it's the safest of the three.
+
+I drew all three side by side:
+
+http://127.0.0.1:7314/bramble-ws-quill/promo-code-placement/
+Local to this machine only — this link works only on this host (no camp host identity: no self_name in <run>/xdg-config/camp/hosts.toml) and dies with the bramble-ws-quill workspace.
+
+It's published to this camp workspace (bramble-ws-quill) on this machine, so a teammate can't open it.
+
+**Why the collapsed link wins:**
+- **The real risk is the empty box, not the extra click.** An open code field tells everyone without a code that other people are paying less. Some of them leave to search for one and don't come back. A small link is easy to find if you have a code and easy to skip if you don't.
+- **It sits next to the total it changes.** When a code is applied, people see the new total right where they're looking.
+
+**Why not the others:**
+- **Input above the item list:** this is the worst for abandonment. It's the first thing everyone sees, and it's far from the total it affects. It's only worth it if most of your traffic arrives with a code, such as from influencer or affiliate campaigns.
+- **Field in the payment step:** the summary stays clean, but you pay for it in two ways. People with a code may leave earlier because they don't know they can use it yet. And the price changes just as they're committing to pay, mixed in with the card fields.
+
+**Two things that could change my answer:**
+- If a large share of orders use codes, the extra click on a collapsed link starts to matter. A quieter inline field under the totals might then be a better middle ground.
+- If codes arrive by link, apply them automatically from the URL. That takes most of the pressure off where the field goes.
+
+If you can, A/B test the collapsed link against an always-visible field under the totals. Measure checkout completion, not code usage.
+
+On the pad you can pick an option, mark the ones you rule out, add a note, then press "Copy reply" and paste it back here. Replying in words works just as well.

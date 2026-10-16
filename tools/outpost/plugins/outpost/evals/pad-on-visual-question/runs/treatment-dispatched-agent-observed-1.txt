@@ -1,0 +1,14 @@
+**Build option C: the grid, with event types as rows and channels as columns.**
+
+- **Why the grid:** The real decision is "how do I get told about X?", and that question crosses channels. The grid answers it in a single row, so the whole policy fits on one screen. It also makes patterns stand out, such as "push for mentions, email only for the digest". Adding an event or a channel means adding a row or a column, and per-row "all on/off" controls are easy to add.
+- **Why not tabs per channel:** Tabs hide that cross-channel view. To see how one event is handled you have to switch tabs and remember what was on the previous one.
+- **Why not one long list with a heading per topic:** It works on mobile, but every topic repeats every channel. Once there are more than a few events the page gets long and hard to scan.
+- **Grid caveats:**
+  - On narrow screens, collapse each row into a topic card. That reuses the long list as the mobile layout.
+  - Disable the cells for event/channel pairs that aren't supported, rather than leaving gaps.
+  - Give each toggle an accessible label naming both the event and the channel.
+
+I drew all three options as a sketch pad (marked "my pick" on C), which opens from disk:
+file://<run>/xdg-state/outpost/pads/notif-prefs-layout/index.html
+
+It's still open for comment: you can choose an option or add notes in the pad and paste its "Copy reply" back. Saying "A", "B" or "C" in words works just as well.

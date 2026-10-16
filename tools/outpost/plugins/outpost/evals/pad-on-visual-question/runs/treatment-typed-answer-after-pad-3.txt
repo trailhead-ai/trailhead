@@ -1,0 +1,7 @@
+Numbered list down the left it is.
+
+I can't point at a specific first change yet, because the wizard's code isn't in this directory. The project contains only `README.md` ("ledgerlight — A small invoicing web app."). There are no source files, and it isn't a git repo, so there's no history to check either.
+
+Without the code to look at, the first thing I'd change is how the wizard stores its steps. A left-hand numbered list needs a single ordered list of steps (id, label, and whether each is complete or reachable) that both the sidebar and the step content read from. A "Step 2 of 5" line or a progress bar can get by with just a counter, but a list has to show every step's label and state at once. So the first step would be to find wherever the steps are defined (a hard-coded `switch`, separate routes, or a `currentStep` integer) and pull them out into that one array. The sidebar component then becomes a simple map over the array. That also decides whether users can click back to earlier steps, which is the main thing to settle in the design.
+
+Where does the wizard live? If it's in another repo or folder, give me the path, or point me there, and I'll read it and name the actual first edit.

@@ -1,0 +1,42 @@
+I'd go with **a shared base file plus a small override file per environment**, with one condition: your merge tool must render each environment's full effective config. I checked the working directory and it only has a README, so this is general reasoning, not a review of your actual config.
+
+## How each option does on diffs and merge collisions
+
+Git conflicts when two branches change the same or neighbouring lines in the same file. So the real question is how often two people's unrelated changes end up in the same lines.
+
+| | One big YAML | Separate file per env (`conf.d/`) | Base + overrides |
+|---|---|---|---|
+| Two people editing **different envs** | Usually merges cleanly, but conflicts when sections sit next to each other, when both add to the end of the file, or when someone reorders | Never conflicts | Never conflicts |
+| Changing a **shared value** | One edit, if it's written once with anchors. Otherwise N edits | N edits in N files. Every shared change touches every file, and the copies drift apart over time | One edit in `base.yaml` |
+| Diff readability | Good, but hunks lack context: `replicas: 3` gives no hint which env it belongs to | Very clean | Very clean. An override diff *is* the difference between environments |
+| "What does prod actually run?" | Readable in one place | Readable in one file | **Not in any one file.** You need a render step |
+| Main risk | One hotspot file that everyone edits | Silent drift between envs | Unclear merge rules (lists, deletes) |
+
+Base + overrides is the only layout that keeps both kinds of change, shared and per-env, down to a single small diff. Per-env files remove collisions entirely, but you pay with duplication and drift. That trade only makes sense if your environments share little.
+
+## Suggested layout
+
+```
+deploy/
+  base.yaml          # everything shared, plus sane defaults
+  env/
+    dev.yaml         # only the keys that differ
+    staging.yaml
+    prod.yaml
+```
+
+## Rules that keep diffs clean and collisions rare
+
+1. **Use maps keyed by name, not lists.** For example, `services: {api: {...}, worker: {...}}` rather than `- name: api`. Maps deep-merge one key at a time, and two people adding different services touch different lines. Lists either replace each other wholesale or force you into awkward merge semantics, and appends to a list collide.
+2. **Write the merge rules down:** maps deep-merge, scalars and lists replace, and there's an explicit way to delete a key (e.g. `null`). Ambiguity here causes more bugs than the layout does.
+3. **Render the effective config in CI and diff it.** Something like `render prod > /tmp/prod.yaml`, with the rendered diff shown on each PR. This fixes the "what does prod run?" problem. It also shows when a `base.yaml` change quietly affects prod.
+4. **Don't use YAML anchors or aliases across files.** They can't cross files, and inside one file they hide where values come from.
+5. **Sort keys and keep values one per line,** so additions spread out rather than piling up at the end. A formatter or linter in pre-commit can enforce this.
+6. **Put CODEOWNERS on `base.yaml`.** It becomes the one shared hotspot, and changes there affect every environment.
+
+## When I'd choose differently
+
+- **Per-env files:** if your environments differ in most keys (e.g. different regions, providers or topologies), there's little to share, so a base file mostly adds indirection.
+- **One big file:** if you have only two or three environments, few people editing, and no appetite for a render step.
+
+A couple of facts would firm this up: how many environments you have, and roughly what share of keys differ between them. If it's more than about three environments and most config is shared, base + overrides wins clearly.

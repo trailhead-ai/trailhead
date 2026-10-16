@@ -1,0 +1,25 @@
+I sketched the three options on a scratch pad:
+
+http://127.0.0.1:7314/bramble-ws-quill/promo-code-placement/
+Local to this machine only — this link works only on this host (no camp host identity: no self_name in <run>/xdg-config/camp/hosts.toml) and dies with the bramble-ws-quill workspace.
+
+**My recommendation is A, the collapsed "Have a code?" link under the totals.**
+
+Since abandonment is your worry, the question to ask of each option is: how many people does it send off to search for a code, and does it let people who already have one apply it easily?
+
+- **A: collapsed link under the totals.** This sits next to the price, which is where someone with a code looks for it. Because it's a quiet text link and not an empty box, people without a code are much less likely to feel they're missing a discount and leave to search coupon sites. The cost is one extra click for code holders, which is minor. Remember the open state: if someone applies a code and then reloads or goes back, show the field open with the code still applied.
+- **B: input above the item list.** This is the most visible option, and that's its problem. An empty "Promo code" box at the top of the summary is the classic trigger for leaving to search for codes. It's worth considering only if most of your traffic arrives with a code, such as from an affiliate, a newsletter or influencer campaigns.
+- **C: field inside the payment step.** This hides the field from casual shoppers, but it creates two new problems. Code holders can't see the discounted total before they start entering card details, and the total changes during payment. Both erode trust right before the commit point. Some people who expect to see a code field earlier will also leave, assuming there isn't one.
+
+Some details matter whichever you pick:
+- Validate the code inline and show the discount as its own line item.
+- Make error messages specific, like "Expired" or "Minimum $50", not just "Invalid".
+- Auto-apply codes that arrive in a URL so those shoppers never need the field.
+- Make sure the total next to the pay button always matches the summary.
+
+**So, which placement do you want: A, B or C?** If any of these are true, they could change my answer:
+- A large share of your orders arrive with a code.
+- You run auto-applied promos.
+- The order summary collapses on mobile.
+
+You can answer in words, or pick on the pad, press "Copy reply" at the bottom and paste the result here.

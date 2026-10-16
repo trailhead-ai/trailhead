@@ -1,0 +1,21 @@
+I'd go with **the numbered step list down the left edge.**
+
+**I couldn't make the sketch pad.** No pad was made: the workspace's `sites` directory is a symlink, and the publisher refuses to write through one:
+
+```
+scratch-pad: publish: error: sites directory is a symlink, refusing to publish through it: <run>/xdg-state/camp/bramble/worktrees/ws-quill/sites
+```
+
+I didn't change that symlink, because it may be set up that way on purpose. If it isn't, fixing it will let me draw the three options next time. Here they are in words.
+
+**Why the numbered list:** People who quit halfway usually aren't confused about where they are. They don't know what's still ahead or how much effort it will take. A list like "1 Business ✓ · **2 Payments** · 3 Taxes · 4 Branding · 5 First invoice" shows what's left and makes it feel short and predictable. Ticking off finished steps also gives a sense of progress, and the list lets people go back to an earlier step without losing their place.
+
+**The other two:**
+- **Progress bar across the top:** Cheap to build and it shows momentum. But it shows how far along someone is without saying what's left. At steps 2–3, a bar under half full can make it feel like there's still a long way to go, which is where your drop-off is.
+- **Plain "Step 2 of 5":** Nothing to build and nothing in the way. But it tells people the least, and it doesn't address the problem support is reporting.
+
+**What the numbered list costs:** It takes horizontal space, and on mobile it needs a collapsed version, for example "Step 2 of 5 · Payments" that expands into the full list. Make the step names describe the work ("Connect your bank"), not just name a category.
+
+**Be careful how much you expect from the indicator.** If one step is the actual wall, no indicator will fix it. Bank details and tax IDs are the usual suspects, because people have to go and find the documents. Check which step people drop off at in your analytics before deciding. If it's one specific step, also consider letting people skip it and finish it later.
+
+Do you want the numbered list, or is there a constraint I don't know about, like mobile-first users or a narrow embedded layout, that would change the answer?
