@@ -1653,7 +1653,8 @@ FINDING_CAPTURE_VERDICTS.update(
 )
 
 
-# Paired control at the specreview site: the shipped contract before this slice's edit. control-specreview-2
+# Paired control at the specreview site: its `council.md` is read at origin/main 7b5c65f9, the revision before
+# the code review contract edit (CODE_REVIEW_EDIT_REVISION). control-specreview-2
 # (the closing "either Critical" line) and -3 (the Recommended outcome line and the closing "To override a
 # Critical" line) read `internal` on `severity-name`, which is 2 of 6 non-plain.
 FINDING_CAPTURE_VERDICTS.update(
