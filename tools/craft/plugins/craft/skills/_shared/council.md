@@ -320,8 +320,16 @@ de-duplication, not to spend more of the reader's attention.
 ### How a finding reads
 
 Every finding in that consolidated list — the one presented to the user in session — takes this
-shape. Someone who has not read the document under review should understand the most serious group
-on the first pass.
+shape, and so does a code review finding shown to the reader, whether by the review ritual or at the
+end of a build. Someone who has not read the document under review should understand the most
+serious group on the first pass.
+
+The code reviewer returns each finding as `file:line — one-line ask`. Compose the opening sentence,
+the worst case and the `Fix:` line from that ask and the code it cites, and state only what the ask
+and that code support: read the cited lines before writing a worst case, and invent none. Show every
+finding the reviewer returned, each with its `file:line`. The worst case for a code review finding
+is an event in code already built ("a retry loops forever on a closed socket"); the remedy is the
+change that removes it.
 
 - **One opening sentence.** Everyday words, before any mechanism: the decision the reader is asked
   to make, what you recommend, and what is at stake. No setup, no citation, no shorthand.
@@ -356,6 +364,7 @@ reader, including the synthesis's account of each pass:
 - consistency-auditor: self-consistency
 - divergence-prober: left undecided
 - fact-verification pass: fact check
+- code-reviewer: code review
 
 **Where the plain forms stop.** They are for what the reader is shown in session: findings, the
 synthesis, and summaries of them (progress narration while passes run is out of scope). Reviewer
@@ -365,3 +374,8 @@ stand-down lines, the `## Council Review` block `plan` and the driver persist, t
 keep the internal levels. When that block is written, each plain group maps back to its internal
 level: the "needs your decision" group is the `*Critical:*` list, "worth fixing, your call" is
 `*Important:*`, and "nothing to decide" is `*Minor:*`.
+
+For a code review, the reviewer's report to its caller, its verdict words (`SHIP` / `FIX_FIRST` /
+`BLOCK`), and what a build persists on its parent task (the `## End Phases` notes and the
+`## Measurement tally`) keep the internal forms. A count of code review findings the reader is shown
+uses the plain readings.
