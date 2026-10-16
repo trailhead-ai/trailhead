@@ -108,9 +108,13 @@ it is handed a standalone `open` task.
 **Tidy follow-ups:** `/craft:tidy-followups` — present a finished spec's recorded
 follow-ups as a reasoned shortlist: about five to eight worth doing now, each with
 a one-line reason why waiting makes it costlier, the rest by title, and blocked
-ones by title only. Read-only; the set comes from `scripts/followup_gather.py`,
-which refuses a spec whose slice loop has not ended and fails rather than present
-a partial set.
+ones by title only. The set comes from `scripts/followup_gather.py`, which
+refuses a spec whose slice loop has not ended and fails rather than present a
+partial set. The operator then adjusts and confirms the chosen set; the ritual
+refines each chosen follow-up one at a time, shows each eligible one's scope for
+confirmation, and nests the confirmed ones under one new parent through
+`scripts/followup_parent.py` (`check`, then `assemble`), ending with the commands
+to build and distill. It stops instead when a follow-up parent already exists.
 
 **Review:** `/craft:review`
 
