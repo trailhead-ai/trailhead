@@ -102,15 +102,16 @@ A stderr with no `reason-code:` line, or a code not in the table, is a failure t
 failed without a recognised reason, and stop.
 
 **Exit 0 is a result only when stdout parses as one JSON object** carrying `spec`, `vault`, `entry`,
-`followups`, `slice-basis`, `slices`, `child-count`, `candidates-read`, `kept`, `excluded-by-label`
-`skipped-edges`, `distilled` and `followup-parents`. Anything else on exit 0 — usage text, an empty stdout, a missing key — is a
-failure: say the script exited 0 without a usable result, and stop.
+`followups`, `slice-basis`, `slices`, `child-count`, `candidates-read`, `kept`, `excluded-by-label`,
+`skipped-edges`, `distilled` and `followup-parents`. Anything else on exit 0 — usage text, an empty
+stdout, a missing key — is a failure: say the script exited 0 without a usable result, and stop.
 
 #### Empty set — `followups` is empty
 
 Say no follow-ups were found for the spec, name which slices were checked (`slices`, and the
 `slice-basis` they were found by), and say nothing is created. Then the header and the closing line
-below, and stop.
+below. When `followup-parents` is non-empty — the follow-ups are already nested under a parent, which
+hides them from the gather — go to step 7; otherwise stop.
 
 #### Gathered set — `followups` is non-empty
 
@@ -176,9 +177,9 @@ Every gathered follow-up appears in exactly one of lists 2 to 4.
 
 ### 7. Stop when a follow-up parent already exists
 
-When `followup-parents` is non-empty, the report above has rendered; now say a follow-up parent
-already exists for this spec, name each, and stop here. No second parent is created, and steps 8 to
-13 do not run.
+When `followup-parents` is non-empty, the report above (or the empty-set outcome) has rendered; now
+say a follow-up parent already exists for this spec, name each, and stop here. No second parent is
+created, and steps 8 to 13 do not run.
 
 Each name in `followup-parents` is vault-sourced: validate it against the step 1 shape rules before
 it enters any printed command, and refuse the one that fails by saying the name is not valid. The
@@ -200,20 +201,27 @@ branch on `status`:
 lore record update task/<child> --vault <vault> --unset-parent
 ```
 
-  then drop the parent with a reason, which the operator runs themselves because the reason is
-  theirs to write: `lore record update task/<parent> --vault <vault> --status dropped --diff`,
-  piping a unified diff that appends the why-note (the body is frozen once dropped).
+  printed once per child, then drop the parent, alone on its own line:
+
+```
+lore record update task/<parent> --vault <vault> --status dropped
+```
+
+  Dropping freezes the body, so say that an operator who wants the reason on record appends it in
+  the same write instead (`--status dropped --diff`, piping a diff that appends the why-note); the
+  printed command carries no note so it runs as pasted.
 - Any other status: name it and print no command.
 
-For a parent the operator did not create, also give the way to remove the marker label so the
-follow-up gather stops counting it, alone on its own line:
+The ritual cannot tell who created a parent, so on every stop also give the way to remove the marker
+label — for a parent the operator did not create, this stops the follow-up gather counting it while
+leaving the record alone — alone on its own line:
 
 ```
 lore record update task/<parent> --vault <vault> --unset-label craft/followup-parent
 ```
 
-When `distilled` is true the stop is the end. Otherwise nothing more is printed: distilling waits on
-the parent.
+Print no distill command on this stop, whether or not `distilled` is true: distilling waits on the
+parent.
 
 ### 8. Confirmation 1 — the chosen set
 
@@ -327,7 +335,9 @@ and remove the file. Act on the exit:
   names at fault. Report it by the table below and go to step 13 as no parent.
 - **2** — a failure. After the parent was created, stdout carries the same JSON with `buildable`
   false and the reason code on stderr (not in the JSON). Before the create (`parent-create-failed`,
-  or the checks), nothing was written and nothing is on stdout.
+  or the checks), nothing was written and nothing is on stdout. `internal-error` prints no JSON even
+  after the create: the script attempts its undo first, but its report is lost, so say the parent's
+  state is unknown and that rerunning this ritual names any parent the undo left live (step 7).
 
 | `reason-code` | What happened, whose side, what to do |
 |---|---|
