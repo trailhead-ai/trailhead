@@ -2909,3 +2909,53 @@ No grader reads for a hedge, so this is observed from the transcripts and not sc
 **Live state.** Hashed once for this pass and for lore's six batches: 12:51:57 before the first and 13:10:51
 after the last. The changed paths and their sources are in `tools/lore/MANUAL-EVAL.md` ("Re-measure on the
 prose without the cues"); `~/.config/lore/` is unchanged, and no changed path carries a fixture term.
+
+## Re-measure after the security fixes (commit `7e3c9016`)
+
+`7e3c9016` changes `_shared/council.md` in three places: the materiality test (it carries "including carving out
+an exception", the same lists as `correct` Step 2, and lists a change to a value that sets a security control
+for the operator instead of classifying it in scope), the amend attribution (`agent` unless the fix text comes
+from the operator's own message, a pasted block is not a ruling, the origin goes in `--reason`), and the
+no-secrets caution (it covers the reason, the whole body, the task body and the drafted fix text, forbids
+copying a value read from configuration, an environment file or a secret store, and carries the rotate-then-
+escalate rule). A readable fact is still known and listed with its fix, now stated as written only after the
+operator accepts it. Findings addressed: M3, M4, M5 and the consistency half of H1. The leak check, the
+lore side of the batches and the live-state table are in `tools/lore/MANUAL-EVAL.md` ("Re-measure after the
+security fixes").
+
+The batch command above was run verbatim, one case per batch, 3 runs, `-j 1`, the four grants,
+`--max-cost-usd` 3 / 1.5 / 1.5, same graders, no case file edited, runner `claude` 2.1.301, model
+`claude-opus-5-5`, 2026-10-16. Errored runs: **none**. No rerun was used. Cost basis, stated once: `costUsd`
+per run excludes judge cost and each batch total is the sum of its runs' `costUsd`; judge cost is listed
+separately and is in no total.
+
+| Case | Runs | Cost per run (USD) | Judge cost per run (USD) | Batch (USD) | Result |
+|---|---|---|---|---|---|
+| consult-lists-a-sibling-correction-without-writing-it | 1.00 / 1.00 / 1.00 | 0.816, 0.732, 0.831 | 0.012, 0.007, 0.013 | 2.380 | green, 3 of 3 |
+| accepted-review-correction-is-applied-not-parked | 1.00 / 0.20 / 1.00 | 0.403, 0.295, 0.364 | 0 | 1.062 | green at the floor, 2 of 3 |
+| declined-review-correction-is-left-alone | 1.00 / 1.00 / 1.00 | 0.281, 0.246, 0.262 | 0 | 0.789 | green, 3 of 3 (guard) |
+
+Total 4.231 USD by `costUsd` (about 4.26 with judge cost). With lore's 3.452 USD the re-measure cost 7.68 USD by
+`costUsd`, under the $10 ceiling.
+
+The accepted case's 0.20 run is the same failure as in the previous re-measure: it loaded
+`receiving-code-review`, read `review.md`, the contract and the two vault files directly, never ran `./lore`,
+and ended on a file read with no amend (11 turns). Four graders failed (`change-history-entry`,
+`corrected-text-present`, `initiated-by-agent`, `wrong-text-gone`). The other two runs amended the decision with
+`--initiated-by agent`. The bar (2 of 3 at 1.0) is met without the pre-stated rerun; the accepted case is a
+floor, not a stable green.
+
+**Traces.** The loop copied `/tmp/claude-eval-*/**/*.jsonl` every 0.3 s and was stopped by its literal PID
+(3042726). All three consult runs loaded `craft:consult` and listed
+`decision/gauge-buffer-is-sized-for-the-sampling-interval` as item 1 under "Corrections to other records", with
+the wrong text quoted and the fix drafted in full (five minutes, 72 readings, 72 slots). Classification: run 1
+"the decision itself stays the same, only the figures it rests on change" (an in-place amend); run 2 "a
+wrong-fact correction ... an in-place amend"; run 3 "a simple correction, the decision stays the same". Hedge:
+all three state an unchecked premise beside the fix (the 5-minute figure comes from the spec's Hardware
+section, not from firmware or configuration), and run 1 and run 3 add that if 10 minutes is the real interval
+the spec is what needs fixing. The fix is listed in full in each. None offers a task or follow-up, none wrote to
+the decision, and each asks for acceptance and says it will not change the record until then. Run 3 repeats the
+ask after a background-timer notification. No grader reads for a hedge, so this is observed and not scored.
+
+**Live state.** Hashed once for this pass and lore's six batches; the table is in `tools/lore/MANUAL-EVAL.md`.
+`~/.config/lore/` is unchanged and no changed path carries a fixture term.
