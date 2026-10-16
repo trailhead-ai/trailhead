@@ -25,7 +25,10 @@ that qualify under one new parent task that `/craft:execute` can build.
 Steps 1 to 6 are read-only. Nothing is written until the operator has confirmed the chosen set in
 step 8, and each later write waits on its own confirmation. Every confirmation below is one
 question with one expected answer form: ask it, then wait. Never proceed past a confirmation on an
-assumed answer.
+assumed answer. An answer the operator gave before a question was reached does not skip that
+question's step: the report, the sets, the verbatim blocks and the question are still shown where
+the procedure puts them, and the run then continues on the answer already given. `assemble` never
+runs before step 11's blocks and question have been shown.
 
 ## Argument
 
@@ -246,10 +249,10 @@ Refine each included follow-up, one at a time and unattended. Never run two in p
 writes the vault, and concurrent subagents sharing a scratch location have corrupted each other's
 writes.
 
-For each included follow-up, in turn, print a progress line as it starts and another as it
-finishes, naming the follow-up (`refining task/<name> (2 of 5)` / `refined task/<name>`). Dispatch
-one subagent for it, with a prompt that names the follow-up as `task/<name>` in `<vault>`, tells it
-to:
+For each included follow-up, in turn, starting with the first: print `refining task/<name> (2 of 5)`
+in your own output before its subagent is dispatched, and `refined task/<name>` after that subagent
+returns, with `<name>` copied exactly as gathered. Dispatch one subagent for it, with a prompt that
+names the follow-up as `task/<name>` in `<vault>`, tells it to:
 
 - read `../_shared/refine.md` itself and follow it in full, in its unattended mode, against that
   one task;
