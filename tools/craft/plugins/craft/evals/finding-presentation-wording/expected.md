@@ -1733,3 +1733,225 @@ Readings outside the guide's three: none.
 - Regression summary: consult PASS, plan PASS, driver PASS, specreview a recorded miss classified residual (control
   2 of 6 non-plain, the same as the regress arm's 2 of 6).
 - The by-eye finding-order reading (AC17, AC18) is still unmeasured here.
+
+
+## Results: code review by-eye readings, reviewer-name and the real-run close-out (2026-10-16)
+
+Appended after the control and driver results. Nothing above this heading is rewritten. No prose, arm, grader or
+existing capture changed in this task, and no eval arm was run.
+
+### No fallback
+
+The treated results recorded no `severity-name` failure at any code review site (review, buildreview and drivebuild
+each 3 of 3 `plain`; see "Results: treated arms" and "Handoff to the next task"). Under the operator decision of
+2026-10-16 a treated failure means a `severity-name` failure, so the fallback in "Fallback, fixed before any run" is
+not triggered. No `skills/review/SKILL.md` step 5 or `skills/_shared/execute.md` Phase 3 edit was made, no
+`fallback-<site>` arm was created and none was run.
+
+### The finding-order reading for code review findings (AC17, AC18)
+
+**Who read, and what it closes.** An agent read these captures, not a person. This is a first pass for the operator
+to check. **AC17 and AC18 at the code review sites are recorded as unmeasured**, the same as the previous slice's
+reading ("Results: finding-order reading, close-out and a real consult run"); the operator's naming at slice close
+is what closes them. The "reviewer-name" claim (below) is a by-eye item under the operator decision and closes the
+same way.
+
+**What was read.** All 21 captures: `baseline-review-1..3`, `baseline-buildreview-1..6`, `baseline-drivebuild-1..3`
+and `treated-review-1..3`, `treated-buildreview-1..3`, `treated-drivebuild-1..3`. The consolidated list the session
+shows, every one of the four findings in `fixtures/reports-code-review.md` (F1 `reminders.py:13` none-crash, F2
+`reminders.py:13` `<` against `<=`, F3 `test_reminders.py:8` thin test, F4 `reminders.py:21` date on the board line),
+and for each the six observations. Each cited line was read in `fixtures/hive-reminders/`.
+
+**Judgement rules**, as the previous reading used them: Opening (a) is `yes` when the first sentence asks the reader
+to decide, `partly` when it recommends without asking; (b) is `yes` when the first sentence carries "I recommend" or
+an imperative that is the recommendation; (c) is `yes` when it names the stake in so many words, `partly` when it
+names only the problem.
+
+#### Treated arms (9 captures, 36 findings)
+
+| Observation | F1 none-crash | F2 `<` off by one | F3 thin test | F4 date on the line |
+|---|---|---|---|---|
+| Opening (a) decision asked | partly 9/9 | partly 9/9 | no 9/9 | no 9/9 |
+| Opening (b) recommendation | yes 9/9 | yes 9/9 | yes 6/9 (review-1, buildreview-1, -2, -3, drivebuild-1, -2); partly 3/9 (review-2, review-3, drivebuild-3: the "I'll add" or the imperative comes after the first sentence) | yes 5/9 (review-1, -2, -3, buildreview-1, -2); no 4/9 (buildreview-3, drivebuild-1, -2, -3: the opening restates the suggestion and the lean comes on the `Fix:` line or the last sentence) |
+| Opening (c) stake | yes 4/9 (buildreview-3, drivebuild-1, -2, -3); partly 5/9 | partly 9/9 (the stake, "a day late", sits in the worst case) | partly 9/9 | no 9/9 |
+| Order after the opening | in order 9/9 | in order 9/9 | in order 9/9; the worst case is a single sentence ("so neither bug above was caught") | worst case `missing` 9/9 (nothing breaks); `Fix:` missing in review-3 only; raised-by present 9/9 |
+| Shown, with `file:line` | 9/9 | 9/9 | 9/9 | 9/9 |
+| Grounded in the cited code | 9/9 | 9/9 (see overstatements) | 9/9 | 9/9 |
+| Plain, opening reads without the change | yes 9/9 | yes 9/9 | yes 6/9; no 3/9 (review-1, buildreview-2, drivebuild-3: "the easy case" with no say what it is) | yes 9/9 |
+
+Across the 36 findings: **36 of 36 are shown and keep their `file:line`; none is dropped, merged into another or
+softened to a hint. "code review" names the raiser on 36 of 36** (`*Raised by: code review*` or `raised by code
+review`, one per finding in all 9 captures). The first group is always "Would build the wrong thing, needs your
+decision" (F1), the second "Would cause trouble later, worth fixing, your call" (F2), the last "Rough edges, nothing
+to decide" (F3, F4), so the three plain readings carry the three levels in every capture.
+
+- **Readings:** only the guide's three severity readings appear in all 9 treated captures. No invented fourth
+  reading. The words `Critical`, `Important`, `Minor` and `code-reviewer` appear in none of them (a `grep -iE` finds
+  `ships` only, in two sentences about shipping the change). Buildreview-1 calls the review "the correctness review",
+  a phase name, not a level.
+- **Overstated worst cases (three, none invented):** review-3 F2 ("Every hive gets visited a day later"), buildreview-1
+  F2 ("every due hive shows up a day late") and buildreview-2 F2 ("a day late, every 14-day cycle, for every hive").
+  The code at `reminders.py:13` leaves off only a hive due exactly today, which then appears the next morning; it
+  does not delay a hive already overdue. The concrete 6 June to 20 June cases elsewhere are exact.
+- **Internal contradiction (one):** buildreview-2 F4 opens "I recommend keeping the line as it is for now" and its
+  `Fix:` line says to add the date, with a caveat. The two sentences point opposite ways.
+- **Build-site extra:** drivebuild-3 closes with "the run moves on to the security check and the rest of the close",
+  which is the build procedure's own next step from the staging prompt, not a finding.
+
+#### Baseline arms (12 captures, 48 findings)
+
+Every baseline capture groups under or labels each finding with the internal level (`Critical:`, `Important:`,
+`Minor:`; 12 of 12), opens a finding with the label or a problem statement and puts the recommendation after the
+description ("I agree", "confirmed", "I'd decline this one") rather than in the first sentence: (a) `no` on all 48
+findings; (b) `no` on most, `partly` where the label itself carries a stance ("fix now", "I'd decline this one"); (c)
+`no` on all 48 (a baseline opening is the label and the problem, with the stake in the sentences after). None names "code review" as raiser: the reviewer is "the reviewer" or "the correctness review"
+(12 of 12, matching the `none` script result). Shown with `file:line`: no finding is dropped or merged in 12 of 12,
+but two baselines lose `file:line` on some: `baseline-review-1` cites `reminders.py:13` for F1 only (F2 shares the
+line, F3 and F4 carry none) and `baseline-buildreview-5` gives F4 no line (it cites `reminders.py:7` besides). The
+other 10 keep all four. The baseline worst case is a prose sentence after the label and the fix is a sentence in
+the same paragraph, never on its own `Fix:` line, so Order reads `out of order` (the first element out of place is
+the fix) in 12 of 12. Every baseline is grounded. This is the headroom the treated arms moved.
+
+#### Echo of review step 5's internal-level triage (council review Minor)
+
+At the review site, "Fix Critical issues immediately / Fix Important issues before proceeding / Note Minor issues
+for later" is **echoed to the reader as level names in 3 of 3 baseline captures** (`baseline-review-1`: "Critical:
+fix now", "Important: fix before merging", "Minor: ..."; `-2` and `-3` the same). It is **echoed in 0 of 3 treated
+captures**: no level name appears; the triage shows only as actions inside the plain groups ("fix this before
+anything else", "I'll add the two missing cases", "I'm declining this one"). The Minor is not borne out as a defect
+of the treated text.
+
+#### Council dispatch at the build sites
+
+None attempted, in the 9 baseline and 6 treated build-site captures (`grep -il council` over the 15 captures: no
+match). No capture announces or stages a council review.
+
+#### Known Unknown resolved: can a presenter given only `file:line — one-line ask` bullets compose the opening, worst case and `Fix:`?
+
+**Yes, for the two serious findings, at 9 of 9 treated captures; thinly for the rough edges.** The staged presenter
+saw only the four bullets above plus the fixture code. At F1 and F2 every treated capture composed an opening with a
+recommendation, a worst case that follows from the cited line, and a `Fix:` line (a `Fix:` line is present on 35 of the 36 treated findings; each is the
+remedy sentence of the ask or the exact edit, `<` to `<=`, and none is invented). The worst case is labelled
+`Worst case:` in 1 of 9 captures (drivebuild-1, F1 and F2; review-1 writes "The worst case:" in prose, F1 and F2) and otherwise runs as the
+sentence after the opening. For F3 the worst case is the one sentence that the existing test lets both bugs through;
+for F4 it is absent in 9 of 9, because the ask is a suggestion and the fixture shows nothing that breaks. The
+composition adds no fact the fixture does not hold, apart from the three overstatements above. The previous
+unknown, "would build the wrong thing" does not fit built code and might make the presenter rephrase a plain reading,
+did not occur: the group heading is word for word the guide's in 9 of 9.
+
+### Reviewer-name, read by eye (operator decision of 2026-10-16)
+
+Script observation, `code-review-name` over the treated captures: **`plain` 9 of 9**; baselines **`none` 12 of 12**
+(no headroom, so this was never a pass condition). By eye, every one of the 9 treated captures names the raiser as
+"code review" beside each of its four findings (36 of 36), by the plain label "code review", and none says
+`code-reviewer`, "the reviewer" as a raiser or a lens name. The script and the by-eye reading agree. Where the
+text says "the reviewer wants..." (review-1 and -2 F4, buildreview-3 F4, drivebuild-1 and -2 F4) it is describing
+the suggestion's author, inside a finding that is still labelled "code review" as raiser. This is read by an agent
+and is recorded as an **observation awaiting the operator's close**, not a script pass.
+
+### Real `/craft:review` close-out (blocking), read by eye
+
+**What ran.** Two real sessions, one per throwaway repo, each from its own fresh directory under `/tmp`, in a domain
+unlike every fixture (a community library's late fees; a text helper's initials). Command shape:
+`claude -p "/craft:review <what was built, base and head, test command>" --plugin-dir <worktree>/tools/craft/plugins/craft
+--setting-sources project --output-format stream-json --verbose --allowedTools "Read,Grep,Glob,Agent,Bash(git:*),Bash(python3:*)"`.
+The grant is what the skill needs: `Read`/`Grep`/`Glob` for the code, `Agent` for `test-runner` and `code-reviewer`,
+`git` for `merge-base`, `rev-parse` and the diff, and `python3` to run the repo's `unittest` suite. Nothing was
+installed, nothing under `~/.claude`, `~/.config` or `~/.local/state/trailhead` was touched, and the repos have no
+remote (`origin/main` is a local ref). **No retry was needed**: both runs exited 0 on the first attempt, so neither run
+was retried.
+
+**Which plugin loaded, and how it is known.** Each run's `system init` record (committed, trimmed, as
+`runs/real-review-findings-1.init.json` and `runs/real-review-clean-1.init.json`) lists exactly one craft entry,
+source `craft@inline`, path the worktree's `tools/craft/plugins/craft` (the `--plugin-dir` directory), plus three
+built-in plugins and nothing else; its agents hold `craft:code-reviewer` and `craft:test-runner`, its slash commands
+hold `craft:review`. Each session read `skills/review/code-reviewer.md` and `skills/_shared/council.md` from the
+worktree and dispatched `craft:test-runner` and `craft:code-reviewer` through the `Agent` tool. No installed craft
+was present.
+
+**Committed.** `runs/real-review-findings-1.md` and `runs/real-review-clean-1.md` (the session's final presentation
+text) and the two `.init.json` files. The raw stream holds host paths and the working directory, so it is not
+committed, as the consult run's was not; the `.init.json` replaces the worktree path with `<worktree>`. The files are
+`.md` and `.json`, so the capture test (`runs/*.txt`) does not require a verdict row for them and
+`test_wording_grader.py` is unchanged. Each file is clean under `capture_scan.py` (exit 0) and `scripts/leak-gate`
+(exit 0), and a `grep` for `tomduffield`, `/home/`, `/tmp` and `worktree` finds only the `<worktree>` placeholder.
+
+#### Findings repo (`late-fees`: negative fee for an early return, receipt text `$1.5` for `$1.50`, no tests for the stated rules)
+
+The review's final text has 4 numbered findings and 3 bullets, no council dispatch. Verdict shown: `FIX_FIRST`.
+
+| Finding | Opening (a/b/c) | Order | Shown | Grounded | Readings | Plain |
+|---|---|---|---|---|---|---|
+| 1 early return gets a negative fee, `fees.py:11-12` | partly / yes / yes ("or the receipt shows money owed to the borrower") | in order: `Worst case:`, `Fix:`, raised by | yes | yes: `late = days_late(...)` is -11, fee -1.1, child -0.55 | "needs your decision" | yes |
+| 2 receipt drops trailing zero, `fees.py:21` | no / no / partly (the opening states the mismatch with the spec, the fix is on the `Fix:` line) | in order | yes | yes: `str(1.5)` | "worth fixing, your call" | yes |
+| 3 tests miss every stated rule, `test_fees.py:8-9` | no / no / partly | in order (a bulleted worst case) | yes | yes | "worth fixing, your call" | yes |
+| 4 cap before or after halving undecided, `fees.py:13-16` | partly (the opening names a decision "isn't decided") / no / partly | in order | yes | yes: caps first then halves, $2.50 | "worth fixing, your call" | yes |
+| 5-7 three rough-edge bullets (float money `fees.py:2-3,12,17`; return before borrow `fees.py:10`; committed `.pyc`) | no / partly (a "consider" or "decide whether") / no | **worst case `missing` and `Fix:` label `missing` and raised-by `missing`** on all three: each is one bullet with the remedy in the sentence | yes, with `file:line` | yes (the `.pyc` exists in the diff) | "nothing to decide" | yes |
+
+- **Raiser:** "Raised by: code review" on findings 1-4 (4 of 4), absent on the three bullets. The narration says "sent
+  ... to the code reviewer" once, outside any finding.
+- **Readings:** the three plain headings only; the words `Critical`, `Important` and `Minor` do not appear; `FIX_FIRST`
+  appears, which the guide allows. No invented fourth reading.
+- **Opening of the whole answer** carries the decision and the stake in its first two sentences ("shouldn't merge yet.
+  Early returns get a negative fee, and the receipt text doesn't match...") but its recommendation is the close ("Do
+  you want me to fix 1-3...").
+- **Difference from the staged captures:** the real presenter labelled the worst case in 3 of 4 numbered findings
+  (`Worst case:`), which the staged captures did not; and it kept the `Fix:` line and raised-by only on the numbered
+  findings, not on the "rough edges" bullets (single-line bullets with no label). The staged captures kept all four
+  on every finding, including their rough edges. This is an observed gap at the real path, below the bar the
+  numbered findings meet, and it is unmeasured.
+- **Graded with the script as an observation** (against `reports-code-review.md`, which does not describe this
+  repo): `severity-name: plain`, `code-review-name: internal`. The second is the single "code reviewer" in the
+  narration above the findings, not a raiser label. Not a pass condition.
+
+#### Clean repo (`initials`: a small correct change with three tests)
+
+The review's final text: "The `initials` branch is ready to merge. The reviewer said SHIP and found nothing Critical
+or Important. All 3 tests pass..." followed by five "Rough edges, nothing to decide" bullets. No council dispatch.
+
+- **No finding invented: held.** The five bullets are real and each is traceable: the whitespace-only name and the
+  tab/newline case are untested (`test_words.py` has spaces only), `"ß".upper()` is `"SS"` and a word starting with
+  punctuation yields that punctuation, and `initials(None)` raises `AttributeError`. Each carries its `file:line` and
+  a one-line `Fix:`. They are nitpicks, not defects, but not fabricated, and the verdict is `SHIP`.
+- **`code-reviewer` in the shown text: none.** The text says "the reviewer".
+- **Internal level name in the shown text: FOUND.** The first paragraph says "found nothing **Critical** or
+  **Important**", two internal level words in the opening sentence of the answer. The clean-branch observation
+  ("the shown text uses no internal level name") is **not met by this run**. The script agrees: `severity-name:
+  internal` over this text. The shipped contract names how a *finding* reads and what its plain readings are; it does
+  not name the sentence that reports the *absence* of serious findings, so the presenter used the reviewer's own
+  words for it. The five bullets themselves use the plain heading only.
+- **What is not met and not repaired:** no skill edit was made (this task is the no-fallback path), so the leak is
+  recorded, not fixed, and it is handed to the operator as a decision for the close.
+
+### Re-run trigger
+
+This case's three code review sites (`review`, `buildreview`, `drivebuild`) and the two real runs must be
+re-measured when any of these changes:
+
+- `skills/_shared/council.md`'s `### How a finding reads` section (including the paragraph "Where the plain forms
+  stop" and the sentence on how a code review finding is composed);
+- `skills/review/SKILL.md` step 5 ("Act on feedback"), or its pointer to the shared document;
+- `skills/_shared/execute.md` Phase 3's "surface to the user" sentence, or the driver's build-phase surfacing;
+- the code reviewer's output shape (`file:line — one-line ask`) in `skills/review/code-reviewer.md` or
+  `agents/code-reviewer.md`.
+
+### Results summary per site
+
+| Site | Met by script | Met by eye, awaits the operator's close | Unmeasured |
+|---|---|---|---|
+| review | `severity-name` `plain` 3 of 3 (baseline `internal` 3 of 3) | "code review" as raiser, 3 of 3 treated (script `plain` 3 of 3, observation); no level echo of step 5, 0 of 3 | AC17, AC18 finding order; the shape of the real run (rough-edge bullets without `Fix:` or raiser) |
+| buildreview | `severity-name` `plain` 3 of 3 (baseline `internal` 6 of 6) | "code review" as raiser, 3 of 3; no council dispatch, 0 of 6 attempts | AC17, AC18 |
+| drivebuild | `severity-name` `plain` 3 of 3 (baseline `internal` 3 of 3) | "code review" as raiser, 3 of 3; no council dispatch | AC17, AC18 |
+| real run, findings repo | `severity-name` `plain` (observation) | numbered findings 1-4 in the protocol's order with "code review"; three bullets short of it | AC17, AC18 |
+| real run, clean repo | none | no invented finding; no `code-reviewer`; **internal level words "Critical" and "Important" shown (not met)** | |
+| consult, plan, driver (regression) | PASS, PASS, PASS (see "Handoff to the next task" and the driver results) | | |
+| specreview (regression) | `severity-name` `AMBIGUOUS` 4 of 6, a miss classified residual (control 4 of 6 `AMBIGUOUS`, 2 of 6 non-plain) | | |
+| specreview control | the same 2 of 6, the Recommended outcome line, before and after the slice | | |
+
+### Limits
+
+- By-eye readings are by an agent, one pass, with the judgement rules above; they are unmeasured by the protocol's
+  own terms.
+- The real runs are two sessions on one model tier; they are observations, not rates. The real reviewer's report
+  differs from the canned one (longer asks, more findings); the presentation of its findings is what is read.
+- The clean-branch internal-level leak is a single observation; whether it recurs is not measured.
