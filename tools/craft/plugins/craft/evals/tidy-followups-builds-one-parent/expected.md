@@ -309,3 +309,51 @@ body said to leave "every other header" as it is, in a function that logs only t
 so only one child was nested, the shim's second `--parent` write never happened, and the injected
 failure never fired. It is recorded as `inconclusive`, kept as `runs/nest-fail-run1-treat.*`, and
 rerun once. The `N2` body now states the agreed output line. Nothing else changes.
+
+---
+
+# Round 2 — registered before any prose edit and before any round-2 arm run
+
+Round 1 measured the treatment at `8f65edb5`: 4 of 9 cells passed (`MANUAL-EVAL.md`, "Graded
+results"). The baseline arm failed every cell it ran and is not rerun. This round re-measures the
+treatment after a prose change and a harness correction.
+
+## The prose change under test
+
+Two gaps round 1 found in `skills/tidy-followups/SKILL.md`:
+
+1. **Progress lines (step 9).** The start line (`refining task/<name> (i of N)`) was not printed for
+   every follow-up (the first one's was missing in `left-out`, `nest-fail` and `inject`; `chosen`
+   printed 3 of 6, one misnamed). The change makes the start line precede the follow-up's
+   dispatch and the finish line follow the subagent's return, for every follow-up including the
+   first, with the name copied exactly as gathered.
+2. **Displays skipped when the answers came up front.** In `distilled`, `left-out`, `nest-fail` and
+   `inject` the arm skipped the step 6 report, Confirmation 1 and the disposition set; `distilled`
+   also skipped step 11's blocks and question and ran `assemble` with no scope shown. The change
+   states that an answer given before a question was reached does not skip that question's step:
+   each report, set, block and question is still shown where the procedure puts it, and the run
+   then continues on the answer given. `assemble` never runs before step 11's blocks and question
+   have been shown.
+
+## The harness correction
+
+Not a prose change. In 4 round-1 runs the first `assemble` was refused (`invalid-children-file`)
+because the arm's shell could not create a heredoc temporary file inside the jail (zsh writes it
+under `TMPPREFIX`, default `/tmp/zsh`, which the sandbox denies). `harness.py` now sets
+`TMPPREFIX` to a path inside the run's `TMPDIR` in the arm's environment. It is verified with one
+cheap probe, through the real dispatch, before any cell runs; the probe result is recorded with the
+round.
+
+## What runs
+
+All 9 treatment cells (`chosen`, `distilled`, `none-included`, `none-included-distilled`,
+`left-out`, `rerun`, `slice-pass`, `nest-fail`, `inject`) rerun against the new treatment commit,
+one run each, sequentially, from a fresh snapshot built as round 1 built `snap-treat`. `rerun` and
+`slice-pass` run against the end state of the round-2 `chosen` run. The grading (`grade.py`, the
+lines above), the fixtures and the expected verdicts are unchanged, and the inconclusive rule
+applies as written. Round 1's runs stay in place; round-2 captures are named `<cell>-r2-treat.*`.
+
+## How the result is reported
+
+As it falls. There is no further prose iteration in this round: whatever fails is reported as a
+failure, with the clause it fails on.
