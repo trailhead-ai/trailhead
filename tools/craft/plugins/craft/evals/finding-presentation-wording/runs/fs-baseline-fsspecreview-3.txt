@@ -1,0 +1,52 @@
+**C1, C2 and C3 in detail.** All three are in the "would build the wrong thing, needs your decision" group. Maturity is production (from the spec's own stamp), and no concerns were waived.
+
+---
+
+**C1. Anyone holding a forwarded confirmation email could cancel the booking.** *Raised by: security*
+
+You need to decide whether a cancellation must be confirmed by the member who made the booking. I recommend requiring it. Without that check, someone who never booked can take a member's firing away.
+
+The worst case: a member forwards their confirmation email to a friend or to the studio's group chat. Someone who reads it cancels the booking. AC3 frees the day straight away and gives it to the first member on standby, so the member who booked finds out only when they arrive. The spec says a member can cancel, but nothing ties the cancellation to the person who booked. "A member" is whoever has the email.
+
+Fix: change AC3 so a cancellation takes effect only once it is confirmed from the email address the booking was made with. The edit, drafted in full, replaces AC3 with:
+
+> - **AC3.** A member can cancel a booking up to 24 hours before its day. A cancellation takes effect only once the member confirms it from the email address the booking was made with; until then the booking stands. Once confirmed, the day is freed and offered to the first member on that kiln's standby list.
+
+Caveat: this adds a step to every cancellation, and a member whose mailbox fails cannot cancel without the technician. The failure-cases reviewer raised the same mailbox problem separately as a "worth fixing" finding.
+
+Proposed disposition: `resolved`
+
+---
+
+**C2. The spec books the whole kiln for a day, but a firing holds several members' work.** *Raised by: right problem*
+
+You need to decide what a member actually books: the whole kiln for a day, or space on its shelves in a firing. I recommend shelf space. If the unit is wrong, AC1, AC2 and AC3 all build the wrong thing.
+
+The worst case: one member with a single bowl books the large kiln for Tuesday. AC2 then refuses everyone else for Tuesday and offers them a later day. The kiln fires mostly empty while other members wait weeks. A kiln is full when its shelves are full, not when its day has a name against it. The Problem says "two members regularly turn up with work for the same firing". If firings are normally shared, that is how the studio works, not a clash. Reading it as a clash is what makes the spec book whole days.
+
+Fix: base AC1–AC3 on shelf space within a firing. A member books a number of shelves in a firing. A booking is refused when it would take a firing past its shelf count. A cancellation frees shelves, not the whole day. The Problem should also stop calling a shared firing a double booking.
+
+Caveat: the right-problem reviewer reported only medium confidence, because the spec does not say how often firings are shared. That is something you know and the reviewers did not. If firings in this studio really are one member at a time, answer this one with that.
+
+Proposed disposition: `revise` (`record-only`)
+  Prescription: change the booking unit in AC1–AC3 from "a kiln for a day" to "shelves in a firing". Each kiln gets a stated shelf count, refusals in AC2 and freeing in AC3 count shelves, and the Problem stops describing a shared firing as a clash.
+
+---
+
+**C3. Members are not told the shelves must be loaded by 8 am when they book.** *Raised by: ease of use*
+
+You need to decide whether the 8 am loading deadline goes into the booking confirmation as well as the evening reminder. I recommend adding it. It is a one-line change, and a member who misses the deadline loses the firing.
+
+The worst case: a member books, reads only the confirmation, and arrives at 9 am. The kiln is already packed and their firing is lost. AC1's confirmation states only the booking. AC5's reminder does carry the deadline, but only the evening before. A member who misses that one email, or who books after the reminder has gone out, never sees the 8 am time.
+
+Fix: add the loading deadline to the AC1 confirmation. The edit, drafted in full, replaces AC1 with:
+
+> - **AC1.** A member books a firing by giving a name, an email address, the kiln (large or small) and a day, and receives a confirmation email stating the booking and that their work must be on the kiln's shelves by 8 am on that day.
+
+Caveat: AC5 already covers most members, so this closes a gap rather than fixing a hole. The reviewer's claim that the confirmation "gives only the booking" is accurate, but it leaves AC5 out of the picture.
+
+Proposed disposition: `resolved`
+
+---
+
+You can accept with "go", or override any row by its id (`accepted-as-risk`, `disputed` or `answered`) and give your reason.

@@ -1546,6 +1546,13 @@ REPORT_FILES = {
     "review": "reports-code-review.md",
     "buildreview": "reports-code-review.md",
     "drivebuild": "reports-code-review.md",
+    "fsspecreview": "fs-reports-spec-review.md",
+    "fsplan": "fs-reports-lenses.md",
+    "fsconsult": "fs-reports-consult.md",
+    "fsdriver": "fs-reports-lenses.md",
+    "fsreview": "fs-reports-code-review.md",
+    "fsbuildreview": "fs-reports-code-review.md",
+    "fsdrivebuild": "fs-reports-code-review.md",
 }
 SITE_CHECKS = {
     "consult": ("severity-name", "reviewer-name"),
@@ -1556,6 +1563,13 @@ SITE_CHECKS = {
     "review": ("code-review-name", "severity-name"),
     "buildreview": ("code-review-name", "severity-name"),
     "drivebuild": ("code-review-name", "severity-name"),
+    "fsspecreview": ("severity-name", "reviewer-name"),
+    "fsplan": ("severity-name", "reviewer-name", "persisted-levels"),
+    "fsconsult": ("severity-name", "reviewer-name"),
+    "fsdriver": ("severity-name", "reviewer-name", "persisted-levels"),
+    "fsreview": ("code-review-name", "severity-name"),
+    "fsbuildreview": ("code-review-name", "severity-name"),
+    "fsdrivebuild": ("code-review-name", "severity-name"),
 }
 
 # One row per committed capture: the verdict of each check the site runs. The pre-registered expectation for a
@@ -1665,8 +1679,30 @@ FINDING_CAPTURE_VERDICTS.update(
 )
 
 
+# Fix-shape baselines (fs-baseline-*): the finding-presentation-wording case's third extension, every source at
+# the baseline revision. The scripted checks are observations here; the fix-shape readings are in `expected.md`.
+FINDING_CAPTURE_VERDICTS.update(
+    {
+        f"fs-baseline-{site}-{n}": dict(verdicts)
+        for site, verdicts in {
+            "fsspecreview": {"severity-name": "plain", "reviewer-name": "plain"},
+            "fsconsult": {"severity-name": "plain", "reviewer-name": "plain"},
+            "fsplan": {"severity-name": "plain", "reviewer-name": "plain", "persisted-levels": "kept"},
+            "fsdriver": {"severity-name": "plain", "reviewer-name": "plain", "persisted-levels": "kept"},
+            "fsreview": {"code-review-name": "plain", "severity-name": "plain"},
+            "fsbuildreview": {"code-review-name": "plain", "severity-name": "plain"},
+            "fsdrivebuild": {"code-review-name": "plain", "severity-name": "plain"},
+        }.items()
+        for n in (1, 2, 3)
+    }
+)
+
+
 def _site(stem):
-    """The site a capture belongs to: the calibrated consult's arms are `precal-` and `cal-`, no site segment."""
+    """The site a capture belongs to: the calibrated consult's arms are `precal-` and `cal-`, no site segment, and
+    a fix-shape arm is `fs-<arm>-<site>-<n>`."""
+    if stem.startswith("fs-"):
+        return stem.split("-")[2]
     return "consult-calibrated" if stem.startswith(("precal-", "cal-")) else stem.split("-")[1]
 
 
