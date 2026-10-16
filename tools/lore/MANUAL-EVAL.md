@@ -474,18 +474,27 @@ plus 1.71 USD for the flip-check runs.
 
 Sha256 of every file under `~/.local/state/lore/` and `~/.config/lore/` (excluding `.git/`) before the
 flip-check batch and after the last baseline batch. `~/.config/lore/` did not change. Under
-`~/.local/state/lore/` the diff is not empty: `index.sqlite` (derived), publish logs and requests, one
-empty lock and a new session note `c6ecca3c-...` and appended `7f97e80d-...` in the `default` vault, and
-about thirty record files in the `levr` and `trailhead` vaults. Attribution: the `levr` and `trailhead` vault git
-trees are clean, so those changes are committed ("lore: andromeda published N item(s)", "lore: sync
-vault", commits at 09:50 to 10:55 local time on 2026-10-16 from other machines and sessions). The
-`default` session notes `c6ecca3c` and `7f97e80d` are another session's captures (`c6ecca3c` holds a
-billing-launch follow-up). None of the changed files contains any of the four fixture record titles
-(`Invoice batches leave through a nightly export`, `Overdue invoice reminders`, `Size the ingest queue
-for peak load`, `Thumbnails render at a fixed width`, `Thumbnail renderer`). The one fixture-vocabulary
-word match (`invoice`) is the `levr` billing spec, which predates the runs. These attributions come from
-the vault trees and the content, not from per-path commit ids; the controller should treat the check as
-attributed-by-content, not proven by commit.
+`~/.local/state/lore/` the diff is not empty. Every changed path is attributed below, and none carries
+a fixture record title (`Invoice batches leave through a nightly export`, `Overdue invoice reminders`,
+`Size the ingest queue for peak load`, `Thumbnails render at a fixed width`, `Thumbnail renderer`).
+
+Committed record files, by vault commit (2026-10-16, local time; every commit is a publish of a live
+vault write, none from a run's temp `HOME`):
+
+| Vault | Commit | Time | Records |
+|---|---|---|---|
+| trailhead | `cebc8966`, `bdfa7c22`, `9dcdb5cb` | 09:47, 09:53, 10:07 | the controller session's own writes: this plan's parent `task/known-corrections-are-applied-in-the-session-instead-of-parked-as-tasks` (branch label, U1/U2 checked off) and its child `task/pre-register-craft-eval-cases-for-a-review-found-correction-to-another-record` |
+| trailhead | `da6ae00d`, `989485a4`, `39d75d37`, `42ca6f43`, `0d0d6dff`, `d111b991`, `90e9fefd`, `37c542c4`, `66de873a`, `4a4a7640`, `6aa39f6b`, `a254c63b`, `981e0d5a` | 09:42 to 10:07 | other sessions' tasks, lessons and the craft area profile |
+| levr | `90a94caf`, `ef360c7e`, `9f00c0fc`, `71c474f4`, `359ad141`, `878cfe3c`, `fe058fa3`, `18335251`, `08f3abf9` | 09:50 to 10:55 | other sessions' tasks, decisions, lessons, the billing spec and a `sites/` tree |
+
+Uncommitted paths:
+
+- `index.sqlite`: the derived search index, rewritten by any live lore command
+- publish logs and requests: the live publish worker, triggered by the commits above
+- one empty lock and the `default` session note `7f97e80d` (appended): another session, later flushed in `d10ee2ff` (09:57)
+- the new `default` session note `c6ecca3c`: still uncommitted, and holds one follow-up candidate from another session's billing-spec slice selection
+
+The controller accepted this attribution; it does not rest on any eval run writing live state.
 
 When the next case lands, record it here as:
 
