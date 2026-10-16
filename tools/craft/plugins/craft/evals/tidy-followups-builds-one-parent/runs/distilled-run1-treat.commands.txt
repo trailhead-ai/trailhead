@@ -1,0 +1,94 @@
+[main] BASH
+$WORK/snap-treat/tools/craft/plugins/craft/scripts/followup_gather.py fixture-distilled-spec; echo "EXIT=$?"
+
+[main] BASH
+lore record show --json --vault default task/distilled-reject-path-traversal-in-the-upload-endpoint; echo "EXIT=$?"
+
+[main] AGENT
+Refine one vault task: `task/distilled-reject-path-traversal-in-the-upload-endpoint` in vault `default` (use the `lore` command on your PATH, always with `--vault default`).
+
+Instructions:
+- Read $WORK/snap-treat/tools/craft/plugins/craft/skills/_shared/refine.md yourself and follow it in full, in its **unattended mode**, against this one task only. (`${CLAUDE_PLUGIN_ROOT}` is $WORK/snap-treat/tools/craft/plugins/craft.)
+- The code the task's claims point at is the git repository at $WORK/runs/distilled-treat/fixture/repo — verify claims ag... [cut 395 chars]
+
+[sub] BASH
+lore record show task/distilled-reject-path-traversal-in-the-upload-endpoint --vault default; echo ---; lore task graph distilled-reject-path-traversal-in-the-upload-endpoint --vault default
+
+[sub] BASH
+lore record show --help 2>&1 | head -30; cd $WORK/runs/distilled-treat/fixture/repo && git status --short && git ls-files && cat -n src/upload.py
+
+[sub] BASH
+lore record show task/distilled-reject-path-traversal-in-the-upload-endpoint --vault default --json; echo; cd $WORK/runs/distilled-treat/fixture/repo && find . -path ./.git -prune -o -type f -print && cat -n src/upload.py
+
+[sub] BASH
+cd $WORK/runs/distilled-treat/fixture/repo && cat -n README.md; grep -rn "upload\|ValueError\|raise\|realpath\|abspath" src; cat -n src/util.py src/export.py
+
+[sub] BASH
+lore record show task/fixture-distilled-spec-the-slice --vault default; for q in upload "path traversal" upload_path "kind:area upload" validation "src/upload.py" security; do echo "== $q"; lore search "$q" --vault default 2>&1 | head -20; done
+
+[sub] BASH
+lore search --help; lore --help | head -20
+
+[sub] BASH
+for q in upload "path traversal" traversal upload_path "kind:area" "kind:adr" "kind:lesson" validation security export; do echo "== $q"; lore search "$q" 2>&1 | head -20; done; lore areas --help 2>&1 | head; lore areas 2>&1 | head
+
+[sub] BASH
+lore record show task/chosen-reject-path-traversal-in-the-export-endpoint --vault default; echo ----; lore record show task/nest-fail-reject-path-traversal-in-the-archive-extractor --vault default; cat -n $WORK/runs/distilled-treat/fixture/repo/src/extract.py
+
+[sub] BASH
+T=$(mktemp -t refine-upload.XXXXXX) && cat > "$T" <<'EOF'
+`src/upload.py` joins a caller-supplied name onto the upload directory with no validation, so a crafted name writes files outside the upload directory. Reachable today by any caller of `upload_path`.
+
+**Delivers:** `upload_path(base, name)` (src/upload.py:4) refuses any `name` whose joined result would land outside `base` instead of returning the unvalidated join (src/upload.py:5). Covers both escape shapes the bare join admits: parent-directory segments (`../x`) and an absolute `name`, which makes the join discard `base` entirely. The rejection signal and the containment check's semantics are pending the question in `## Refine — unresolved` below.
+
+**Test contract:** (partial — the asserted rejection signal depends on the unresolved question) tests must verify: a plain name (`a.txt`) and a nested name (`sub/a.txt`) return a path inside `base`; `../x`, `sub/../../x`, and an absolute name are rejected; a name that normalizes back inside `base` (`sub/../a.txt`) is accepted. The repo has no test files or runner today (no tests directory alongside src/upload.py), so the test location is new.
+
+**Files:** src/upload.py; a new test file for `upload_path`.
+
+## Flow-out
+
+- [ ] Touched area/subsystem profiles updated with what changed
+- [ ] Prover-validated assumptions captured as session candidates (durable at flush)
+- [ ] New decisions / lessons / follow-ups surfaced during the build recorded
+
+## Refine — unresolved
+
+**Question:** How should `upload_path` reject an escaping name — which exception (built-in `ValueError` or a new dedicated error type), and should containment be checked lexically (normalized path) or against the resolved path (following symlinks under `base`)?
+
+**Evidence gathered:** src/upload.py:4-5 is the whole function — a bare `os.path.join` with no validation. No module in src/ raises or defines any exception, and `upload_path` has no callers in the repo (only its definition at src/upload.py:4), so there is no existing error convention or caller expectation to follow. No tests exist in the repo. Vault search (upload, upload_path, path traversal, traversal, validation, security, kind:area, kind:adr, kind:lesson) found no area profile, ADR, or lesson; only sibling open tasks with the same defect class in other files — [[task/chosen-reject-path-traversal-in-the-export-endpoint]] (src/export.py:4-5) and [[task/nest-fail-reject-path-traversal-in-the-archive-extractor]] (src/extract.py:4-5) — neither of which carries a decision. Those are different files, so they are not folded into this task.
+
+**Recommended answer:** Raise `ValueError` (idiomatic for a bad argument, no new type to maintain) and check containment on the resolved path (realpath of the join must be `base` or under realpath of `base`), which also rejects absolute names and symlink escapes. Settling it once here would also give the export/extract sibling tasks a shared precedent.
+EOF
+lore record update task/distilled-reject-path-traversal-in-the-upload-endpoint --vault default < "$T"; rc=$?; rm -f "$T"; echo rc=$rc
+
+[sub] BASH
+mktemp -t refine-upload.XXXXXX; echo $TMPDIR
+
+[sub] BASH
+T=$WORK/runs/distilled-treat/tmp/refine-upload.zsBB7B; printf '%s\n' '`src/upload.py` joins a caller-supplied name onto the upload directory with no validation, so a crafted name writes files outside the upload directory. Reachable today by any caller of `upload_path`.
+
+**Delivers:** `upload_path(base, name)` (src/upload.py:4) refuses any `name` whose joined result would land outside `base` instead of returning the unvalidated join (src/upload.py:5). Covers both escape shapes the bare join admits: parent-directory segments (`../x`) and an absolute `name`, which makes the join discard `base` entirely. The rejection signal and the containment check semantics are pending the question in `## Refine — unresolved` below.
+
+**Test contract:** (partial — the asserted rejection signal depends on the unresolved question) tests must verify: a plain name (`a.txt`) and a nested name (`sub/a.txt`) return a path inside `base`; `../x`, `sub/../../x`, and an absolute name are rejected; a name that normalizes back inside `base` (`sub/../a.txt`) is accepted. The repo has no test files or runner today, so the test location is new.
+
+**Files:** src/upload.py; a new test file for `upload_path`.
+
+## Flow-out
+
+- [ ] Touched area/subsystem profiles updated with what changed
+- [ ] Prover-validated assumptions captured as session candidates (durable at flush)
+- [ ] New decisions / lessons / follow-ups surfaced during the build recorded
+
+## Refine — unresolved
+
+**Question:** How should `upload_path` reject an escaping name — which exception (built-in `ValueError` or a new dedicated error type), and should containment be checked lexically (normalized path) or against the resolved path (following symlinks under `base`)?
+
+**Evidence gathered:** src/upload.py:4-5 is the whole function — a bare `os.path.join` with no validation. No module in src/ raises or defines any exception, and `upload_path` has no callers in the repo (only its definition at src/upload.py:4), so there is no existing error convention or caller expectation to follow. No tests exist in the repo. Vault search (upload, upload_path, path traversal, traversal, validation, security, kind:area, kind:adr, kind:lesson) found no area profile, ADR, or lesson; only sibling open tasks with the same defect class in other files — [[task/chosen-reject-path-traversal-in-the-export-endpoint]] (src/export.py:4-5) and [[task/nest-fail-reject-path-traversal-in-the-archive-extractor]] (src/extract.py:4-5) — neither of which carries a decision. Those are different files, so they are not folded into this task.
+
+**Recommended answer:** Raise `ValueError` (idiomatic for a bad argument, no new type to maintain) and check containment on the resolved path (realpath of the join must be `base` or under realpath of `base`), which also rejects absolute names and symlink escapes. Settling it once here would also give the export/extract sibling tasks a shared precedent.' > "$T" && lore record update task/distilled-reject-path-traversal-in-the-upload-endpoint --vault default < "$T"; echo rc=$?; rm -f "$T"; ls $WORK/runs/distilled-treat/tmp/
+
+[sub] BASH
+lore record show task/distilled-reject-path-traversal-in-the-upload-endpoint --vault default --json | python3 -I -c 'import json,sys;d=json.load(sys.stdin);print(d["sidecar"]["status"], d["sidecar"].get("labels"));print(d["body"])'; for r in task/chosen-reject-path-traversal-in-the-export-endpoint task/nest-fail-reject-path-traversal-in-the-archive-extractor; do lore record show $r --vault default >/dev/null && echo ok $r; done
+
+[main] BASH
+$WORK/snap-treat/tools/craft/plugins/craft/scripts/followup_parent.py check fixture-distilled-spec distilled-reject-path-traversal-in-the-upload-endpoint; echo "EXIT=$?"

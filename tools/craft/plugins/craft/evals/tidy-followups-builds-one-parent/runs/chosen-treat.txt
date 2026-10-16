@@ -1,0 +1,30 @@
+I created the follow-up parent `build-the-follow-ups-of-fixture-chosen-spec-chosen-2026-10-16`. It's at `ready` with all three chosen follow-ups nested under it, and nothing failed or had to be undone.
+
+**Included and nested** (each refined and promoted to `ready`):
+- Chosen: reject path traversal in the export endpoint (`chosen-reject-path-traversal-in-the-export-endpoint`)
+- Chosen: stop writing [REDACTED] to the request trace (`chosen-stop-writing-bearer-tokens-to-the-request-trace`)
+- Chosen: replace the truncating money rounding before more callers adopt it (`chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it`)
+
+**Left:** Chosen: fix a typo in a docstring (`chosen-fix-a-typo-in-a-docstring`). It wasn't refined and is unchanged.
+
+**Left out at step 10, removed at step 11, or refined but not nested:** none.
+
+**Failed writes:** none in the final run. The first `assemble` call was refused (`invalid-children-file`) because the sandbox blocked writing the children file, so it got an empty file. Nothing was written by that call, and the retry with the same confirmed children succeeded.
+
+**Undo writes / undo commands still to run:** none.
+
+**Worth checking before you build:**
+- **Briefly ready with an empty body:** the money-rounding subagent reported that one of its writes partly failed, leaving that task at `ready` with no body for a few seconds before it rewrote it. `check` and `assemble` both saw the full body.
+- **Calls made without escalating:** the refiners decided some things nothing in the repo or vault settles:
+  - The export path check raises `ValueError` on a bad name.
+  - The trace replaces credential header values with `[REDACTED]` rather than dropping the headers.
+  - The money conversion goes through `str` before rounding, so 1.005 becomes 101 cents.
+- **Scope added:** two tasks now cover more than they first said, all within the same file. The path-traversal task also rejects absolute names, and the trace task also redacts `Proxy-Authorization` and `Cookie`.
+
+```
+/craft:execute task/build-the-follow-ups-of-fixture-chosen-spec-chosen-2026-10-16
+```
+
+```
+/craft:distill spec/fixture-chosen-spec
+```

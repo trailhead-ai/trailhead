@@ -1,0 +1,2 @@
+[main] BASH
+lore search "kind:task related-spec:fixture-chosen-spec has:label.craft.slice-parent -status:done -status:dropped -status:superseded"; echo "exit=$?"

@@ -1,0 +1,17 @@
+# Tidy follow-ups: `fixture-none-included-distilled-spec`
+
+**Header:** entry `complete-status` · slice basis `labelled` · 1 slice, 1 child · 2 candidates read, 2 kept · 0 excluded by label · 0 skipped edges
+
+**Recommended:** none. 0 of 2 met a reason class. Both are small style cleanups in `src/util.py`, an unused local variable and two imports out of alphabetical order. Neither is a security exposure. Later work won't copy or depend on either one, so neither fix gets more expensive by waiting. Neither is groundwork that later work would benefit from. They're useful but small, and that doesn't qualify.
+
+**Other follow-ups:**
+- None-included-distilled: drop an unused local variable
+- None-included-distilled: reorder two imports
+
+**Blocked:** none.
+
+Nothing was written. No record, label, status or task was created or changed.
+
+---
+
+The skill file doesn't match the answers you gave me. This version of `/craft:tidy-followups` is read-only and has only six steps. It has no step 8 (shortlist moves), no disposition-set question and no step 11 (scope confirmation), and it never sends out refinement subagents. So none of those three questions came up, and I didn't use your answers or send any subagents to the fixture repo.

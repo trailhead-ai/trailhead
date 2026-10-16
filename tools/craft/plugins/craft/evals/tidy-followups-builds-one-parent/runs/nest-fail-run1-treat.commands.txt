@@ -1,0 +1,228 @@
+[main] BASH
+$WORK/snap-treat/tools/craft/plugins/craft/scripts/followup_gather.py fixture-nest-fail-spec; echo "EXIT=$?"
+
+[main] BASH
+lore record show --json --vault default task/nest-fail-reject-path-traversal-in-the-archive-extractor; echo "EXIT=$?"; lore record show --json --vault default task/nest-fail-stop-logging-session-cookies; echo "EXIT=$?"
+
+[main] AGENT
+Refine the vault task `task/nest-fail-reject-path-traversal-in-the-archive-extractor` in vault `default` (use the `lore` command on PATH).
+
+- Read $WORK/snap-treat/tools/craft/plugins/craft/skills/_shared/refine.md yourself and follow it in full, in its unattended mode, against this one task only.
+- The code the task's claims point at is the git repository at $WORK/runs/nest-fail-treat/fixture/repo. Work against it read-only for verification; do not modify the repository.
+- Stage any body you write through your own `mktemp` path, created fresh for this task ... [cut 189 chars]
+
+[sub] BASH
+cd /tmp && lore record show task/nest-fail-reject-path-traversal-in-the-archive-extractor --vault default; echo ---; lore task graph nest-fail-reject-path-traversal-in-the-archive-extractor --vault default 2>&1 || lore task graph nest-fail-reject-path-traversal-in-the-archive-extractor
+
+[sub] BASH
+cd $WORK/runs/nest-fail-treat/fixture/repo && git status --short | head; git log --oneline | head; git ls-files | head -100
+
+[sub] BASH
+cd /tmp && lore record show --help 2>&1 | head -30; lore record update --help 2>&1 | head -40; ls -la $WORK/runs/nest-fail-treat/fixture/repo; find $WORK/runs/nest-fail-treat/fixture/repo -path '*/.git' -prune -o -type f -print
+
+[sub] BASH
+cd /tmp && lore record show task/nest-fail-reject-path-traversal-in-the-archive-extractor --vault default --json; echo; cat -n $WORK/runs/nest-fail-treat/fixture/repo/src/extract.py $WORK/runs/nest-fail-treat/fixture/repo/README.md $WORK/runs/nest-fail-treat/fixture/repo/src/__init__.py; grep -rn "extract\|safe_join\|realpath\|import" $WORK/runs/nest-fail-treat/fixture/repo/src
+
+[sub] BASH
+cd /tmp && lore record show task/fixture-nest-fail-spec-the-slice --vault default --json; echo; lore task graph fixture-nest-fail-spec-the-slice; lore search "extract" ; lore search "path traversal"; lore search "archive"; lore search "kind:area extract"; lore search "tests"; lore search "pytest"
+
+[sub] BASH
+cd /tmp && lore record show task/left-out-pin-the-tls-minimum-version-in-the-client; lore record show spec/fixture-nest-fail-spec; lore search "kind:area"; lore search "kind:adr"; lore search "symlink"; lore search "ValueError"
+
+[sub] BASH
+cd /tmp && sed -n '/Flow-out/,/^## [^F]/p' $WORK/snap-treat/tools/craft/plugins/craft/templates/plan.md; grep -n "Delivers\|Test contract\|Files" $WORK/snap-treat/tools/craft/plugins/craft/templates/task.md; grep -rln "credential-pattern scrub" $WORK/snap-treat/tools/craft/plugins/craft | head
+
+[sub] BASH
+grep -n -i -A25 "credential-pattern" $WORK/snap-treat/tools/craft/plugins/craft/skills/_shared/security.md | head -60
+
+[sub] BASH
+set -e; T=$(mktemp); trap 'rm -f "$T"' EXIT
+cd /tmp && lore record show task/nest-fail-reject-path-traversal-in-the-archive-extractor --vault default --json | python3 -I -c 'import json,sys; sys.stdout.write(json.load(sys.stdin)["body"])' > "$T"
+cat >> "$T" <<'EOF'
+
+**Delivers:** `extract_target(dest, member)` in `src/extract.py` (src/extract.py:4-5, currently a bare `os.path.join` with no validation) resolves the joined path with symlinks followed and compares it against the resolved destination: it raises `ValueError` when the resolved member path falls outside the destination, and otherwise keeps returning the joined path exactly as today (behaviour fixed by the captured task prose above). The containment check is path-component based, not a raw string-prefix match, so a sibling such as `<dest>-evil/x` is rejected.
+
+**Test contract:** New `tests/test_extract.py` (the repo has no tests yet; same new-file convention as `[[task/left-out-pin-the-tls-minimum-version-in-the-client]]`) with failing tests written first for:
+- a plain member (`a/b.txt`) returns `os.path.join(dest, member)` unchanged;
+- a `../`-traversing member (e.g. `../../x`) raises `ValueError`;
+- an absolute member path outside `dest` raises `ValueError`;
+- a member whose path passes through a symlink inside `dest` pointing outside it (built in a temp dir) raises `ValueError`;
+- a sibling-prefix escape (`../<dest-basename>-evil/x`) raises `ValueError`;
+- a member that traverses but stays inside (`a/../b`) is accepted and returns the joined path.
+
+**Files:** `src/extract.py`, `tests/test_extract.py` (new)
+
+## Flow-out
+
+- [ ] Touched area/subsystem profiles updated with what changed
+- [ ] Prover-validated assumptions captured as session candidates (durable at flush)
+- [ ] New decisions / lessons / follow-ups surfaced during the build recorded
+EOF
+python3 -I - "$T" <<'PY'
+import re,sys
+t=open(sys.argv[1]).read()
+pats=[r'(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s*[=:]\s*\S+',r'(?i)\b(AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|gho_[A-Za-z0-9]{36}|glpat-[A-Za-z0-9_-]{20}|xox[baprs]-[A-Za-z0-9-]+|sk_live_[A-Za-z0-9]+|AIza[0-9A-Za-z_-]{35})\b',r'(?i)bearer\s+[A-Za-z0-9._\-]+',r'''(?i)api[_-]?key['"]?\s*[:=]\s*['"]?[A-Za-z0-9._\-]{16,}''',r'\b[A-Za-z0-9+/]{32,}={0,2}\b',r'\b[A-Fa-f0-9]{40,}\b',r'-----BEGIN [A-Z ]*PRIVATE KEY-----']
+hits=[m.group(0) for p in pats for m in re.finditer(p,t)]
+print("scrub hits:",hits); sys.exit(1 if hits else 0)
+PY
+# citation gate
+wc -l < $WORK/runs/nest-fail-treat/fixture/repo/src/extract.py
+lore record show task/left-out-pin-the-tls-minimum-version-in-the-client >/dev/null && echo record-ok
+grep -c '^\*\*Delivers:\*\*\|^\*\*Test contract:\*\*\|^\*\*Files:\*\*\|^## Refine — unresolved' "$T"
+lore record update task/nest-fail-reject-path-traversal-in-the-archive-extractor --vault default --status ready < "$T"
+echo; lore record show task/nest-fail-reject-path-traversal-in-the-archive-extractor --vault default; lore task graph nest-fail-reject-path-traversal-in-the-archive-extractor
+
+[sub] BASH
+cd /tmp && lore record update task/nest-fail-reject-path-traversal-in-the-archive-extractor --vault default --status open </dev/null; mktemp
+
+[sub] BASH
+T=$WORK/runs/nest-fail-treat/tmp/tmp.7E5glV0Pgh
+printf '%s\n' \
+'`src/extract.py` joins an archive member name onto the destination with no validation, so a member named `../../x` writes outside the destination. Reachable today by any archive a caller extracts. The agreed behaviour: raise `ValueError` for a member whose resolved path (symlinks followed) falls outside the destination, and keep returning the joined path for one that stays inside. The repository has no tests yet; add `tests/test_extract.py`.' \
+'' \
+'**Delivers:** `extract_target(dest, member)` in `src/extract.py` (src/extract.py:4-5, currently a bare `os.path.join` with no validation) resolves the joined path with symlinks followed and compares it against the resolved destination: it raises `ValueError` when the resolved member path falls outside the destination, and otherwise keeps returning the joined path exactly as today (behaviour fixed by the captured task prose above). The containment check is path-component based, not a raw string-prefix match, so a sibling such as `<dest>-evil/x` is rejected.' \
+'' \
+'**Test contract:** New `tests/test_extract.py` (the repo has no tests yet; same new-file convention as [[task/left-out-pin-the-tls-minimum-version-in-the-client]]), failing tests written first for:' \
+'- a plain member (`a/b.txt`) returns `os.path.join(dest, member)` unchanged;' \
+'- a `../`-traversing member (e.g. `../../x`) raises `ValueError`;' \
+'- an absolute member path outside `dest` raises `ValueError`;' \
+'- a member whose path passes through a symlink inside `dest` that points outside it (built in a temp dir) raises `ValueError`;' \
+'- a sibling-prefix escape (`../<dest-basename>-evil/x`) raises `ValueError`;' \
+'- a member that traverses but stays inside (`a/../b`) is accepted and returns the joined path.' \
+'' \
+'**Files:** `src/extract.py`, `tests/test_extract.py` (new)' \
+'' \
+'## Flow-out' \
+'' \
+'- [ ] Touched area/subsystem profiles updated with what changed' \
+'- [ ] Prover-validated assumptions captured as session candidates (durable at flush)' \
+'- [ ] New decisions / lessons / follow-ups surfaced during the build recorded' > "$T"
+python3 -I -c '
+import re,sys
+t=open(sys.argv[1]).read()
+pats=[r"(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s*[=:]\s*\S+",r"(?i)\b(AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|gho_[A-Za-z0-9]{36}|glpat-[A-Za-z0-9_-]{20}|xox[baprs]-[A-Za-z0-9-]+|sk_live_[A-Za-z0-9]+|AIza[0-9A-Za-z_-]{35})\b",r"(?i)bearer\s+[A-Za-z0-9._\-]+",r"(?i)api[_-]?key[\x27\"]?\s*[:=]\s*[\x27\"]?[A-Za-z0-9._\-]{16,}",r"\b[A-Za-z0-9+/]{32,}={0,2}\b",r"\b[A-Fa-f0-9]{40,}\b",r"-----BEGIN [A-Z ]*PRIVATE KEY-----"]
+h=[m.group(0) for p in pats for m in re.finditer(p,t)]
+print("scrub hits:",h); sys.exit(1 if h else 0)' "$T" && \
+echo "keys: $(grep -c -E '^(\*\*Delivers:\*\*|\*\*Test contract:\*\*|\*\*Files:\*\*|## Refine — unresolved)' "$T")" && \
+echo "extract.py lines: $(wc -l < $WORK/runs/nest-fail-treat/fixture/repo/src/extract.py)" && \
+cd /tmp && lore record show task/left-out-pin-the-tls-minimum-version-in-the-client >/dev/null && echo record-ok && \
+lore record update task/nest-fail-reject-path-traversal-in-the-archive-extractor --vault default --status ready --unset-label route < "$T"; rm -f "$T"; ls "$T" 2>&1
+
+[sub] BASH
+cd /tmp && lore record show task/nest-fail-reject-path-traversal-in-the-archive-extractor --vault default; lore task graph nest-fail-reject-path-traversal-in-the-archive-extractor
+
+[main] AGENT
+Refine the vault task `task/nest-fail-stop-logging-session-cookies` in vault `default` (use the `lore` command on PATH).
+
+- Read $WORK/snap-treat/tools/craft/plugins/craft/skills/_shared/refine.md yourself and follow it in full, in its unattended mode, against this one task only.
+- The code the task's claims point at is the git repository at $WORK/runs/nest-fail-treat/fixture/repo. Work against it read-only for verification; do not modify the repository.
+- Stage any body you write through your own `mktemp` path, created fresh for this task and removed afterw... [cut 171 chars]
+
+[sub] BASH
+cd /tmp; lore record show task/nest-fail-stop-logging-session-cookies --vault default 2>&1 || lore record show task/nest-fail-stop-logging-session-cookies 2>&1; echo ---; lore task graph nest-fail-stop-logging-session-cookies 2>&1
+
+[sub] BASH
+cd /tmp; lore record show --help 2>&1 | head -30; lore record show task/nest-fail-stop-logging-session-cookies --json 2>&1 | head -40
+
+[sub] BASH
+cd $WORK/runs/nest-fail-treat/fixture/repo && git status --short && git log --oneline | head && find . -path ./.git -prune -o -type f -print && echo --- && cat -n src/cookies.py
+
+[sub] BASH
+cd $WORK/runs/nest-fail-treat/fixture/repo && find . -path ./.git -prune -o -type f -print && echo --- && cat -n src/cookies.py
+
+[sub] BASH
+cd $WORK/runs/nest-fail-treat/fixture/repo && for f in README.md src/*.py; do echo "=== $f"; cat -n "$f"; done; ls -a; ls tests 2>&1
+
+[sub] BASH
+cd /tmp; for q in cookie cookies "session cookie" redact REDACTED logging "log_request" trace headers "kind:area" nest-fail; do echo "=== $q"; lore search "$q" 2>&1 | head -15; done; echo; lore record show task/fixture-nest-fail-spec-the-slice 2>&1 | head -40
+
+[sub] BASH
+cd /tmp; lore record show task/chosen-stop-writing-bearer-tokens-to-the-request-trace --json; lore record show task/nest-fail-reject-path-traversal-in-the-archive-extractor; lore record show spec/fixture-nest-fail-spec; ls $WORK/runs/nest-fail-treat/fixture/vault/
+
+[sub] BASH
+cd /tmp; lore record show task/left-out-pin-the-tls-minimum-version-in-the-client 2>&1 | head -5; lore search "kind:task" 2>&1 | grep -i -E "cookie|trace|log" ; lore search "test convention" 2>&1 | head; lore search pytest 2>&1 | head
+
+[sub] BASH
+set -e; T=$(mktemp); cd /tmp; lore record show task/nest-fail-stop-logging-session-cookies --json | python3 -I -c 'import json,sys; sys.stdout.write(json.load(sys.stdin)["body"])' > "$T"
+cat >> "$T" <<'EOF'
+
+**Delivers:** `log_cookies(logger, request)` in `src/cookies.py` (src/cookies.py:1-2, currently writes the raw `Cookie` header value) no longer writes any cookie value to the log: the `Cookie` header is logged by name with its value replaced by `[REDACTED]` (behaviour fixed by the captured task prose above). The exact shape of the logged line, and whether the function's output scope changes, is pending the question under `## Refine — unresolved` below.
+
+**Test contract:** New `tests/test_cookies.py` (the repo has no tests yet; same new-file convention as [[task/nest-fail-reject-path-traversal-in-the-archive-extractor]]), failing tests written first, using a fake logger that captures `write` calls and a fake request with a `headers` mapping:
+- a request carrying a `Cookie` header with a session value: the captured log output contains neither the session value nor any substring of it;
+- the same request: the captured output names the `Cookie` header and contains `[REDACTED]`;
+- remaining cases (exact line format, other headers, request with no `Cookie` header) pending the unresolved question below.
+
+**Files:** `src/cookies.py`, `tests/test_cookies.py` (new)
+
+## Flow-out
+
+- [ ] Touched area/subsystem profiles updated with what changed
+- [ ] Prover-validated assumptions captured as session candidates (durable at flush)
+- [ ] New decisions / lessons / follow-ups surfaced during the build recorded
+
+## Refine — unresolved
+
+**Question:** `log_cookies` today writes only the `Cookie` header's value (src/cookies.py:2), so the captured clause "leave every other header as it is" has no other header to apply to. Should the fixed `log_cookies` write only the single line `Cookie: [REDACTED]` (and write nothing when the request has no `Cookie` header), or should it start logging every request header with only `Cookie` redacted?
+
+**Evidence gathered:** src/cookies.py:1-2 is the whole function and reads only the `Cookie` header. The only code that logs every header is `log_request` at src/trace.py:1-2 (a `repr` of the full header dict, which also writes `Cookie` verbatim); that file is the subject of the separate open task [[task/chosen-stop-writing-bearer-tokens-to-the-request-trace]], so it was not folded in here. Vault searches (cookie, cookies, session cookie, redact, REDACTED, logging, log_request, trace, headers, kind:area, nest-fail, pytest, test convention) found no area profile, ADR, or prior decision fixing a redacted-log line format or the absent-header behaviour.
+
+**Recommended answer:** Keep the function's scope as-is: write exactly `Cookie: [REDACTED]` when a `Cookie` header is present and write nothing when it is absent; read "leave every other header as it is" as "do not start logging or altering other headers". Widening `log_cookies` to log all headers would add new logging surface to a redaction fix. Separately, consider adding `Cookie` redaction to the trace.py task, since src/trace.py:2 leaks the same session cookies.
+EOF
+lore record update task/nest-fail-stop-logging-session-cookies --vault default < "$T" 2>&1 || lore record update task/nest-fail-stop-logging-session-cookies < "$T"; rm -f "$T"; echo removed
+
+[sub] BASH
+cd /tmp; lore record show task/nest-fail-stop-logging-session-cookies --json | python3 -I -c 'import json,sys; d=json.load(sys.stdin); print(d["sidecar"]["status"]); print(repr(d["body"]))'; mktemp
+
+[sub] BASH
+cd /tmp; T=$WORK/runs/nest-fail-treat/tmp/tmp.yDqszpvti6; lore record update task/nest-fail-stop-logging-session-cookies --vault default < "$T"; rm -f "$T"; ls "$T" 2>&1; lore record show task/nest-fail-stop-logging-session-cookies --json | python3 -I -c 'import json,sys; d=json.load(sys.stdin); print(d["sidecar"]["status"], d["sidecar"].get("labels"))'; lore record show task/nest-fail-stop-logging-session-cookies
+
+[sub] BASH
+cd /tmp; T=$(mktemp) || exit 1; echo "$T"
+APPEND='
+**Delivers:** `log_cookies(logger, request)` in `src/cookies.py` (src/cookies.py:1-2, currently writes the raw `Cookie` header value) no longer writes any cookie value to the log: the `Cookie` header is logged by name with its value replaced by `[REDACTED]` (behaviour fixed by the captured task prose above). The exact shape of the logged line, and whether the scope of what the function logs changes, is pending the question under `## Refine — unresolved` below.
+
+**Test contract:** New `tests/test_cookies.py` (the repo has no tests yet; same new-file convention as [[task/nest-fail-reject-path-traversal-in-the-archive-extractor]]), failing tests written first, using a fake logger that captures `write` calls and a fake request with a `headers` mapping:
+- a request carrying a `Cookie` header with a session value: the captured log output does not contain the session value;
+- the same request: the captured output names the `Cookie` header and contains `[REDACTED]`;
+- remaining cases (exact line format, other headers, request with no `Cookie` header) pending the unresolved question below.
+
+**Files:** `src/cookies.py`, `tests/test_cookies.py` (new)
+
+## Flow-out
+
+- [ ] Touched area/subsystem profiles updated with what changed
+- [ ] Prover-validated assumptions captured as session candidates (durable at flush)
+- [ ] New decisions / lessons / follow-ups surfaced during the build recorded
+
+## Refine — unresolved
+
+**Question:** `log_cookies` today writes only the `Cookie` header value (src/cookies.py:2), so the captured clause "leave every other header as it is" has no other header to apply to. Should the fixed `log_cookies` write only the single line `Cookie: [REDACTED]` (and write nothing when the request has no `Cookie` header), or should it start logging every request header with only `Cookie` redacted?
+
+**Evidence gathered:** src/cookies.py:1-2 is the whole function and reads only the `Cookie` header. The only code that logs every header is `log_request` at src/trace.py:1-2 (a `repr` of the full header dict, which also writes `Cookie` verbatim); that file is the subject of the separate open task [[task/chosen-stop-writing-bearer-tokens-to-the-request-trace]], so it was not folded in here. Vault searches (cookie, cookies, session cookie, redact, REDACTED, logging, log_request, trace, headers, kind:area, nest-fail, pytest, test convention) found no area profile, ADR, or prior decision fixing a redacted-log line format or the absent-header behaviour.
+
+**Recommended answer:** Keep the function scope as-is: write exactly `Cookie: [REDACTED]` when a `Cookie` header is present and write nothing when it is absent; read "leave every other header as it is" as "do not start logging or altering other headers". Widening `log_cookies` to log all headers would add new logging surface to a redaction fix. Separately, consider adding `Cookie` redaction to the trace.py task, since src/trace.py:2 leaks the same session cookies.
+'
+lore record show task/nest-fail-stop-logging-session-cookies --json | python3 -I -c 'import json,sys; b=json.load(sys.stdin)["body"]; open(sys.argv[1],"w").write(b+sys.argv[2])' "$T" "$APPEND"
+wc -l "$T"
+lore record update task/nest-fail-stop-logging-session-cookies --vault default < "$T"; rm -f "$T"; ls "$T" 2>&1
+
+[sub] BASH
+cd /tmp; rm -f $WORK/runs/nest-fail-treat/tmp/tmp.yDqszpvti6; lore record show task/nest-fail-stop-logging-session-cookies --json | python3 -I -c 'import json,sys; d=json.load(sys.stdin); print(d["sidecar"]["status"])'; lore record show task/nest-fail-stop-logging-session-cookies
+
+[main] BASH
+$WORK/snap-treat/tools/craft/plugins/craft/scripts/followup_parent.py check fixture-nest-fail-spec nest-fail-reject-path-traversal-in-the-archive-extractor nest-fail-stop-logging-session-cookies; echo "EXIT=$?"
+
+[main] BASH
+children=$(mktemp)
+cat > "$children" <<'EOF'
+[{"name": "nest-fail-reject-path-traversal-in-the-archive-extractor", "reason": "Any archive extracted today can write files outside the destination directory, so the exposure stays open until this is fixed (open security exposure).", "revision": "eb86c23223ee3ab8c08a5c6004a09d60f1b3bb5fb373e7632b09d0b2fda9b35d"}]
+EOF
+$WORK/snap-treat/tools/craft/plugins/craft/scripts/followup_parent.py assemble fixture-nest-fail-spec --children "$children"; echo "EXIT=$?"
+rm -f "$children"
+
+[main] BASH
+children=$(mktemp)
+printf '%s' '[{"name": "nest-fail-reject-path-traversal-in-the-archive-extractor", "reason": "Any archive extracted today can write files outside the destination directory, so the exposure stays open until this is fixed (open security exposure).", "revision": "eb86c23223ee3ab8c08a5c6004a09d60f1b3bb5fb373e7632b09d0b2fda9b35d"}]' > "$children"
+$WORK/snap-treat/tools/craft/plugins/craft/scripts/followup_parent.py assemble fixture-nest-fail-spec --children "$children"; echo "EXIT=$?"
+rm -f "$children"

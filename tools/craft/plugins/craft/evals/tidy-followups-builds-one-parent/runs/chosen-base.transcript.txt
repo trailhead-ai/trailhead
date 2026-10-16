@@ -1,0 +1,146 @@
+[main] TOOL Read {"file_path": "$WORK/snap-base/tools/craft/plugins/craft/skills/tidy-followups/SKILL.md"}
+
+[main] RESULT
+1	---
+2	name: tidy-followups
+3	description: >
+4	  Present a finished spec's recorded follow-ups as a reasoned shortlist — which are worth doing
+5	  now rather than later, each with a one-line reason — and list the rest by title. Read-only:
+6	  gathers with a deterministic script, ranks, reports, and writes nothing.
+7	  TRIGGER when: user says "tidy the follow-ups of spec X", "which follow-ups of this spec should
+8	  we do", "what follow-ups does this spec have", or invokes /craft:tidy-followups explicitly.
+9	  DO NOT TRIGGER when: the ask is a batch of in-session code fix-ups to run now (that is
+10	  `/craft:polish`'s), or the spec's slice loop is still running (follow-ups that matter
+11	  mid-loop reach the next slice through `/craft:plan`).
+12	---
+13	
+14	# Tidy follow-ups
+15	
+16	A spec built slice by slice leaves follow-ups: tasks the slices deliberately did not act on, linked
+17	back to the slice they came from. Once the spec closes they sink into the general backlog. This
+18	ritual brings one finished spec's follow-ups back in front of the operator as a shortlist of the
+19	ones that get costlier the longer they wait, with a reason for each, and the rest by title.
+20	
+21	It is r... [cut 9070 chars]
+
+[main] BASH
+$WORK/snap-base/tools/craft/plugins/craft/scripts/followup_gather.py fixture-chosen-spec > /tmp/fg_out.json 2> /tmp/fg_err.txt; echo "exit=$?"; cat /tmp/fg_out.json; echo ---; cat /tmp/fg_err.txt
+
+[main] RESULT
+Exit code 1
+(eval):1: operation not permitted: /tmp/fg_out.json
+exit=1
+cat: /tmp/fg_out.json: No such file or directory
+---
+cat: /tmp/fg_err.txt: No such file or directory
+
+[main] TOOL Read {"file_path": "$WORK/snap-base/tools/craft/plugins/craft/skills/_shared/security.md"}
+
+[main] RESULT
+1	# Security posture — credential scrub and untrusted-value validation
+2	
+3	Two rules every craft surface applies, stated once here so no citing surface restates them.
+4	
+5	## Credential-pattern scrub
+6	
+7	**Credential-pattern scrub (mechanical, runs first).** This is the general rule for the whole run,
+8	not one phase's step: **any finding or note text entering a record body or a report — session
+9	candidates, `blocked` bodies, task-body notes from the per-task loop, raw command stderr quoted into
+10	either — runs through this list first.** A vault is git-backed and has its own push path, so a
+11	credential transcribed into a task body ships as surely as one committed to code. Report bodies are
+12	**summarized, never captured verbatim** — quote only `file:line` references for anything caught. Run
+13	the text through this credential-pattern scrub regex list and drop/redact any match rather than
+14	capturing it:
+15	
+16	- **Key-like tokens** — `(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s*[=:]\s*\S+`
+17	  — the trailing character class is load-bearing: it lets the keyword carry qualifier text before
+18	  the separator, which is what catches `SECRET_KEY=`, `AWS_SECRE... [cut 2830 chars]
+
+[main] TEXT
+Name `fixture-chosen-spec` passes the safe-name check. Rerunning without temp files:
+
+[main] BASH
+$WORK/snap-base/tools/craft/plugins/craft/scripts/followup_gather.py fixture-chosen-spec; echo "exit=$?"
+
+[main] RESULT
+{"spec": "fixture-chosen-spec", "vault": "default", "entry": "complete-status", "followups": [{"name": "chosen-fix-a-typo-in-a-docstring", "title": "Chosen: fix a typo in a docstring", "status": "open"}, {"name": "chosen-reject-path-traversal-in-the-export-endpoint", "title": "Chosen: reject path traversal in the export endpoint", "status": "open"}, {"name": "chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it", "title": "Chosen: replace the truncating money rounding before more callers adopt it", "status": "open"}, {"name": "chosen-stop-writing-bearer-tokens-to-the-request-trace", "title": "Chosen: stop writing [REDACTED] to the request trace", "status": "open"}], "slice-basis": "labelled", "slices": ["fixture-chosen-spec-the-slice"], "child-count": 1, "candidates-read": 4, "kept": 4, "excluded-by-label": {"count": 0, "names": []}, "skipped-edges": 0}
+exit=0
+
+[main] TEXT
+All keys present; four open follow-ups. Fetching bodies (all four names pass the safe-name check):
+
+[main] BASH
+for n in chosen-fix-a-typo-in-a-docstring chosen-reject-path-traversal-in-the-export-endpoint chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it chosen-stop-writing-bearer-tokens-to-the-request-trace; do echo "=== $n"; lore record show --json --vault default task/$n; echo "exit=$?"; done
+
+[main] RESULT
+=== chosen-fix-a-typo-in-a-docstring
+{
+  "body": "The docstring in `src/util.py` is missing its closing full stop.\n",
+  "kind": "task",
+  "layer": "personal",
+  "name": "chosen-fix-a-typo-in-a-docstring",
+  "record_id": "task/chosen-fix-a-typo-in-a-docstring",
+  "revision": "564142ab17457a72bb5555b7ccd3f40e2e3a3322fb2036a61503b5c2a2437858",
+  "sidecar": {
+    "created-at": "2026-10-16T15:28:50Z",
+    "created-by": "fixture@example.com",
+    "kind": "task",
+    "related": {
+      "task": [
+        "fixture-chosen-spec-the-slice"
+      ]
+    },
+    "status": "open",
+    "title": "Chosen: fix a typo in a docstring",
+    "updated-at": "2026-10-16T15:28:50Z",
+    "updated-by": "fixture@example.com",
+    "version": "v1"
+  }
+}
+exit=0
+=== chosen-reject-path-traversal-in-the-export-endpoint
+{
+  "body": "`src/export.py` joins a caller-supplied name onto the export directory with no validation, so a crafted name such as `../../etc/passwd` reads files outside the export directory. Reachable today by any caller of `export_path`.\n",
+  "kind": "task",
+  "layer": "personal",
+  "name": "chosen-reject-path-traversal-in-the-export-endpoint",
+  "record_id": "task/chosen-reject-path-traversal-in-the-... [cut 2567 chars]
+
+[main] TEXT
+# Follow-ups of fixture-chosen-spec
+
+Entry basis: `complete-status` · slice basis: `labelled` · 1 slice, 1 child · 4 candidates read, 4 kept · 0 excluded by label · 0 edges skipped
+
+## Recommended
+
+These are the 3 of 4 follow-ups that met a reason class.
+
+1. **Chosen: reject path traversal in the export endpoint** (`chosen-reject-path-traversal-in-the-export-endpoint`)
+   *Open security exposure.* The export endpoint passes a caller-supplied name into a file path without checking it, so any caller can read files outside the export directory. That stays possible every day this isn't fixed.
+
+2. **Chosen: stop writing [REDACTED] to the request trace** (`chosen-stop-writing-bearer-tokens-to-the-request-trace`)
+   *Open security exposure.* The request trace writes the Authorization header to a shared log. Live credentials are already in logs that people read, and every request adds more.
+
+3. **Chosen: replace the truncating money rounding before more callers adopt it** (`chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it`)
+   *A fix that gets more expensive as work builds on it.* The cents conversion truncates instead of rounding half up, so some amounts come out one cent wrong. Two more features are about to use it, and each new caller adds code and data that will need fixing later.
+
+## Other follow-ups
+
+- Chosen: fix a typo in a docstring
+
+## Blocked
+
+None.
+
+---
+
+Nothing was written. No record, label or status was created or changed.
+
+---
+
+**About the operator answers:** the skill as written has no step 8 or step 11, no confirmation questions, and no disposition set. It has six steps and is read-only. Because none of those questions comes up in the procedure, I did not show them or act on them.
+
+- **Shortlist (answer 1):** my own judgment from the follow-ups' text picked the same three you named, so the result matches.
+- **Disposition set and scope (answers 2 and 3):** nothing in the procedure uses them. The skill also never dispatches subagents, so the fixture repo was not looked at.
+
+**Title redaction:** the gathering script already shortened one title to "[REDACTED]" because its wording matches the credential pattern for bearer tokens. I kept that in the report as the security rules require.

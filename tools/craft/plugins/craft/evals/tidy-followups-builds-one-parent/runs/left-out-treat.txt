@@ -1,0 +1,22 @@
+I ran the tidy on `fixture-left-out-spec` through refinement. **No parent task was created**, because the check found neither follow-up ready to nest.
+
+- **Left-out: rotate the hard-coded session signing secret** (`left-out-rotate-the-hard-coded-session-signing-secret`): refinement left a question only you can answer, so it is not ready to build. The question is whether to use the vendor's hosted secret manager or per-deploy environment injection. That's a budget and operating-model call nothing in the code or the vault settles.
+- **Left-out: pin the TLS minimum version in the client** (`left-out-pin-the-tls-minimum-version-in-the-client`): it depends on the unfinished task `outside-upgrade-the-http-client-library`, which is not part of this set.
+
+Refinement ran but no parent was created. The scope confirmation (step 11) never came up, so your `yes` for it wasn't used.
+
+### Closing report
+- **Included:** both follow-ups above. Each confirmation was shown and answered with your answer: the shortlist moves left the set unchanged, and you said `yes` to the chosen set.
+- **Left:** none.
+- **Left out:** both, for the reasons above.
+- **Refined but not nested:** both. Their records were rewritten by refinement even though neither was nested. The session-secret task stays `open` with its question recorded, and the TLS task stays `ready`.
+- **Failed writes:** none.
+- **Undo writes:** none.
+- **Undo commands still to run:** none.
+- **New parent:** none.
+
+No parent was created and the spec is not yet distilled, so the next step is:
+
+```
+/craft:distill spec/fixture-left-out-spec
+```

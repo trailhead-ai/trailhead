@@ -1,0 +1,26 @@
+**Refinement check (step 10):**
+- **Distilled: reject path traversal in the upload endpoint** (`distilled-reject-path-traversal-in-the-upload-endpoint`): refinement left a question only you can answer, so it is not ready to build.
+
+Refinement ran, but no parent was created. The one included follow-up was left out, so nothing is eligible to nest. Confirmation 3 (step 11, the scope check) was never reached, which means the pre-supplied `yes` for it went unused, and step 12 (creating the parent) did not run.
+
+## Tidy-followups for spec/fixture-distilled-spec: no parent created
+
+The spec had one follow-up, and it was refined but not nested because it still needs a decision from you.
+
+**Included:** Distilled: reject path traversal in the upload endpoint (`distilled-reject-path-traversal-in-the-upload-endpoint`). It went onto the shortlist because the hole is open now: any caller can make the upload endpoint write files outside its upload directory.
+
+**Left:** none.
+
+**Left out:** Distilled: reject path traversal in the upload endpoint (`distilled-reject-path-traversal-in-the-upload-endpoint`). Refinement left a question only you can answer, so it is not ready to build.
+
+**Refined but not nested:** Distilled: reject path traversal in the upload endpoint (`distilled-reject-path-traversal-in-the-upload-endpoint`). Its record was rewritten and its status is still `open`.
+
+**Failed writes, undo writes, undo commands still to run:** none. The check found the refinement recorded on the follow-up.
+
+**What to decide:** how the upload code should reject a bad file name.
+- **Error type:** use the built-in `ValueError`, or define a new error type.
+- **How to detect a bad name:** check the path as written, or check the fully resolved path, which also catches a symlink that points outside the directory.
+
+The refinement suggests `ValueError` with the resolved-path check. Once you settle this on the task, it can go to `ready`.
+
+**Closing commands:** none. The spec is already distilled and no parent was created, so there is nothing to build or distill.

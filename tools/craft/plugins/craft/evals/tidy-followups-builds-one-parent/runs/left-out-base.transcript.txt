@@ -1,0 +1,111 @@
+[main] TOOL Read {"file_path": "$WORK/snap-base/tools/craft/plugins/craft/skills/tidy-followups/SKILL.md"}
+
+[main] RESULT
+1	---
+2	name: tidy-followups
+3	description: >
+4	  Present a finished spec's recorded follow-ups as a reasoned shortlist — which are worth doing
+5	  now rather than later, each with a one-line reason — and list the rest by title. Read-only:
+6	  gathers with a deterministic script, ranks, reports, and writes nothing.
+7	  TRIGGER when: user says "tidy the follow-ups of spec X", "which follow-ups of this spec should
+8	  we do", "what follow-ups does this spec have", or invokes /craft:tidy-followups explicitly.
+9	  DO NOT TRIGGER when: the ask is a batch of in-session code fix-ups to run now (that is
+10	  `/craft:polish`'s), or the spec's slice loop is still running (follow-ups that matter
+11	  mid-loop reach the next slice through `/craft:plan`).
+12	---
+13	
+14	# Tidy follow-ups
+15	
+16	A spec built slice by slice leaves follow-ups: tasks the slices deliberately did not act on, linked
+17	back to the slice they came from. Once the spec closes they sink into the general backlog. This
+18	ritual brings one finished spec's follow-ups back in front of the operator as a shortlist of the
+19	ones that get costlier the longer they wait, with a reason for each, and the rest by title.
+20	
+21	It is r... [cut 9070 chars]
+
+[main] TEXT
+The spec name `fixture-left-out-spec` has no `spec/` prefix to strip. It matches `^[A-Za-z0-9._/-]+$`, doesn't start with `-`, and has no `..` segment, so it is valid.
+
+[main] BASH
+$WORK/snap-base/tools/craft/plugins/craft/scripts/followup_gather.py fixture-left-out-spec; echo "EXIT=$?"
+
+[main] TOOL Read {"file_path": "$WORK/snap-base/tools/craft/plugins/craft/skills/_shared/security.md"}
+
+[main] RESULT
+{"spec": "fixture-left-out-spec", "vault": "default", "entry": "complete-status", "followups": [{"name": "left-out-pin-the-tls-minimum-version-in-the-client", "title": "Left-out: pin the TLS minimum version in the client", "status": "ready"}, {"name": "left-out-rotate-the-hard-coded-session-signing-secret", "title": "Left-out: rotate the hard-coded session signing secret", "status": "open"}], "slice-basis": "labelled", "slices": ["fixture-left-out-spec-the-slice"], "child-count": 1, "candidates-read": 2, "kept": 2, "excluded-by-label": {"count": 0, "names": []}, "skipped-edges": 0}
+EXIT=0
+
+[main] RESULT
+1	# Security posture — credential scrub and untrusted-value validation
+2	
+3	Two rules every craft surface applies, stated once here so no citing surface restates them.
+4	
+5	## Credential-pattern scrub
+6	
+7	**Credential-pattern scrub (mechanical, runs first).** This is the general rule for the whole run,
+8	not one phase's step: **any finding or note text entering a record body or a report — session
+9	candidates, `blocked` bodies, task-body notes from the per-task loop, raw command stderr quoted into
+10	either — runs through this list first.** A vault is git-backed and has its own push path, so a
+11	credential transcribed into a task body ships as surely as one committed to code. Report bodies are
+12	**summarized, never captured verbatim** — quote only `file:line` references for anything caught. Run
+13	the text through this credential-pattern scrub regex list and drop/redact any match rather than
+14	capturing it:
+15	
+16	- **Key-like tokens** — `(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s*[=:]\s*\S+`
+17	  — the trailing character class is load-bearing: it lets the keyword carry qualifier text before
+18	  the separator, which is what catches `SECRET_KEY=`, `AWS_SECRE... [cut 2830 chars]
+
+[main] TEXT
+Exit 0 with a complete JSON result and two follow-ups (both `open`/`ready`). Both names pass the step 1 checks, so I'll fetch both bodies.
+
+[main] BASH
+lore record show --json --vault default task/left-out-pin-the-tls-minimum-version-in-the-client; echo "EXIT=$?"; lore record show --json --vault default task/left-out-rotate-the-hard-coded-session-signing-secret; echo "EXIT=$?"
+
+[main] RESULT
+{
+  "body": "`src/client.py` builds its TLS context with no minimum version, so a server can negotiate TLS 1.0, a live exposure. Pin the minimum to TLS 1.2.\n\n**Delivers:** `make_context` in `src/client.py` sets `minimum_version` to `ssl.TLSVersion.TLSv1_2`.\n\n**Test contract:** A test asserts the returned context's `minimum_version` is TLS 1.2.\n\n**Files:** `src/client.py`, `tests/test_client.py` (new)\n\n",
+  "kind": "task",
+  "layer": "personal",
+  "name": "left-out-pin-the-tls-minimum-version-in-the-client",
+  "record_id": "task/left-out-pin-the-tls-minimum-version-in-the-client",
+  "revision": "a58e11b9b8f70c14c28db374dbdb01af3eb4ace77ce6ffe3d622ade33aa3e166",
+  "sidecar": {
+    "created-at": "2026-10-16T15:43:40Z",
+    "created-by": "fixture@example.com",
+    "depends-on": [
+      "outside-upgrade-the-http-client-library"
+    ],
+    "kind": "task",
+    "related": {
+      "task": [
+        "fixture-left-out-spec-the-slice"
+      ]
+    },
+    "status": "ready",
+    "title": "Left-out: pin the TLS minimum version in the client",
+    "updated-at": "2026-10-16T15:43:40Z",
+    "updated-by": "fixture@example.com",
+    "version": "v1"
+  }
+}
+EXIT=0
+{
+  "body": "`src/session.py` har... [cut 1173 chars]
+
+[main] TEXT
+**Header:** entry `complete-status` · slice basis `labelled` · 1 slice (`fixture-left-out-spec-the-slice`) · 1 child · 2 candidates read, 2 kept · 0 excluded by label · 0 skipped edges
+
+**Recommended** (2 of 2 met a reason class)
+
+- **Left-out: rotate the hard-coded session signing secret** (`left-out-rotate-the-hard-coded-session-signing-secret`): *Open security exposure.* The session signing key is committed in source today, so anyone who can read the repository can forge sessions until it is moved out. Before it can be built, the operator has to choose between a hosted secret manager and per-deploy environment injection.
+- **Left-out: pin the TLS minimum version in the client** (`left-out-pin-the-tls-minimum-version-in-the-client`): *Open security exposure.* The client's TLS context has no minimum version, so every connection made until it is fixed can be downgraded to TLS 1.0. The record also lists a dependency on `outside-upgrade-the-http-client-library`.
+
+**Other follow-ups:** none.
+
+**Blocked:** none.
+
+Nothing was written: no record, label, status or task was created or changed.
+
+---
+
+This version of the skill has no step 8 shortlist moves, no disposition question and no step 11 scope confirmation. It ends at step 6 with a read-only report, so those three questions were never reached and I applied none of the answers you gave for them. The shortlist the skill produced is already exactly the two follow-ups in your step 8 answer. It also has no refinement step, so I dispatched no subagents and did not inspect the repository.
