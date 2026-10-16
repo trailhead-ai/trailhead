@@ -280,3 +280,20 @@ Both fixture facts stay inside this file's description of the fixtures (a follow
 committable cut resolves"). The first run's other observation, that the ritual's own flow was
 followed (dispatch one at a time, `check`, scope shown, `assemble`, the two commands), is recorded
 with it and does not change a line above.
+
+---
+
+# Revision 2 — the `distilled` run was inconclusive; fixture bodies settled, registered before any later cell ran
+
+Cells run so far: `chosen` (treatment and baseline) and `distilled` (treatment). The `distilled`
+treatment run did not reach the branch it targets: refinement of its one follow-up left a question
+(which error type to raise, and whether to follow symlinks), so the follow-up was left out and no
+parent was created. Under the inconclusive rule above, the run is recorded as `inconclusive`, kept
+as `runs/distilled-run1-treat.*`, and the cell is rerun once.
+
+The fixture change stays inside the fixture description ("a follow-up of the drafting-cleanly
+kind"): the `D` body, and the bodies of the other follow-ups of that kind that no run has used yet
+(`N1`, `N2`, `J1`, `J2`), now state the agreed behaviour in the follow-up's own words (error type,
+what counts as outside the directory, where the test goes). The `chosen` follow-ups `P`, `Q` and
+`R` are unchanged. The pass condition, the cells and the prompts are unchanged. If a rerun is again
+inconclusive, it is reported as inconclusive and not rerun again.
