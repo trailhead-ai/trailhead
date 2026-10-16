@@ -1668,3 +1668,68 @@ is the `specreview` site run on the shipped contract, before this slice's edit:
   for operator rework.
 - Only if the rule says continue, `regress-driver-1` to `-3` run (inline, `prompt-driver.md`, the driver's checks
   including `persisted-levels`, split to `-4` to `-6` per the case rules). A driver regression failure stops the slice.
+
+
+## Results: the paired `specreview` control and the `driver` regression (2026-10-16)
+
+All nine captures: exit 0, non-empty, empty stderr, `capture_scan` clean, `leak-gate` clean, no host-path hit. No
+capture was excluded or replaced. The grammar was used as it stands. The table is `FINDING_CAPTURE_VERDICTS` in
+`tools/craft/tests/test_wording_grader.py`.
+
+### Control tally and classification
+
+`severity-name` at the `specreview` site, side by side (`reviewer-name` is `plain` 6 of 6 on both arms):
+
+| Arm | council.md | Run 1 | Run 2 | Run 3 | Run 4 | Run 5 | Run 6 | Non-plain |
+|---|---|---|---|---|---|---|---|---|
+| `regress-specreview` | the slice's edit (`33767f4f`) | internal | plain | plain | plain | plain | internal | 2 of 6 (4 of 6 `plain`, `AMBIGUOUS`) |
+| `control-specreview` | shipped contract (`7b5c65f9`) | plain | internal | internal | plain | plain | plain | 2 of 6 (4 of 6 `plain`, `AMBIGUOUS`) |
+
+The control is non-plain in 2 of 6, which meets the fixed rule's threshold (2 or more). **Classification: residual.**
+The `regress-specreview` leak is present at the same rate on the contract as shipped before this slice's edit, so it
+is not caused by the edit. It is recorded, not a pass: `regress-specreview` stays a miss against its bar, as does the
+control. The slice continues.
+
+Where each control leak sits, all reader-facing prose that names the internal level word:
+
+- `control-specreview-2`, line 28, the closing line: "You can also ask for the full detail on either Critical."
+- `control-specreview-3`, line 11, the Recommended outcome: "Both Criticals are proposed `resolved`", and line 27, the
+  closing line: "To override a Critical, name its id and give your reason".
+
+The `regress-specreview` leaks were in the Recommended outcome line ("Both Criticals are `resolved`", also in the
+control) and a sentence about the right-problem pass ("the Critical"). The Recommended outcome line is the one place
+both arms leak.
+
+### Driver regression
+
+| Check | Run 1 | Run 2 | Run 3 | Tally | Bar | Outcome |
+|---|---|---|---|---|---|---|
+| `severity-name` | plain | plain | plain | 3 of 3 | clean majority `plain` | PASS |
+| `reviewer-name` | plain | plain | plain | 3 of 3 | clean majority `plain` | PASS |
+| `persisted-levels` | kept | kept | kept | 3 of 3 | clean majority `kept` | PASS |
+
+3 of 3 on every check, so no split and no `-4`..`-6`. Residual leak 0 of 3.
+
+### Hand check
+
+One capture per verdict word seen, read by eye against the grader.
+
+- control `severity-name` `plain`: `control-specreview-1` groups under "Worth fixing, your call: 10" and "Rough
+  edges, nothing to decide: 3", refers to "C1"/"C2" ids only; no level word. Agrees.
+- control `severity-name` `internal`: `control-specreview-2` (line 28, "either Critical") and `control-specreview-3`
+  (lines 11 and 27). Each is the internal word in prose the reader sees. Agrees; not a misgrade.
+- control `reviewer-name` `plain`: `control-specreview-1` names passes as "failure-cases", "ease-of-use" and
+  "right-problem". Agrees.
+- driver `severity-name`/`reviewer-name` `plain`, `persisted-levels` `kept`: `regress-driver-1` opens "The council
+  found problems in the plan", names no level in the prose above the fence, and carries `*Critical:*`, `*Important:*`
+  and `*Minor:*` with "Raised by: builder, breaker ..." inside the fenced `## Council Review` block. Agrees.
+
+Readings outside the guide's three: none.
+
+### Handoff to the next task
+
+- Classification: **residual**. The slice continues.
+- `regress-driver`: **PASS** (3 of 3 on all three checks).
+- Regression summary: consult PASS, plan PASS, driver PASS, specreview a recorded miss classified residual (control
+  2 of 6 non-plain, the same as the regress arm's 2 of 6).
+- The by-eye finding-order reading (AC17, AC18) is still unmeasured here.
