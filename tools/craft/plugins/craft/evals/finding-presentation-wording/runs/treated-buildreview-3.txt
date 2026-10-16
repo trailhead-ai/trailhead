@@ -1,0 +1,27 @@
+These four code review findings survived the one re-review round. Nothing more will be dispatched for them, so each one is now your call. The two most serious are both on `hive-reminders/reminders.py:13`.
+
+**Would build the wrong thing, needs your decision (1)**
+
+**A newly installed hive crashes the morning list. I recommend listing such hives as overdue, as the committee asked, so the board doesn't come up empty.** — `hive-reminders/reminders.py:13`
+A new hive has no inspection yet, so its `last_inspected` is `None`. The committee wants that hive on the list. Instead, the code adds 14 days to `None`, which raises an error. That one hive stops the whole list from being built, and no reminders appear for any hive that morning.
+Fix: before working out a hive's due date, add any hive with no inspection to the list as overdue.
+*Raised by: code review*
+
+**Would cause trouble later, worth fixing, your call (1)**
+
+**A hive due exactly today is left off the list. I recommend including it, because the committee asked for hives due "today or earlier".** — `hive-reminders/reminders.py:13`
+The code adds a hive only when its due date is strictly before today. Say a hive was inspected on 6 June: it falls due on 20 June. On the morning of 20 June it is missing from the board, and it first appears a day late.
+Fix: change the `<` comparison to `<=`.
+*Raised by: code review*
+
+**Rough edges, nothing to decide (2)**
+
+**The test covers only a hive inspected a month ago. I recommend adding a test for a hive with no inspection and one for a hive due exactly today.** — `hive-reminders/test_reminders.py:8`
+The two problems above are exactly those two cases. With only the one test, both slipped through without a single test failing.
+Fix: add one test with `last_inspected: None` and one with a hive inspected exactly 14 days before `TODAY`.
+*Raised by: code review*
+
+**The board line doesn't say how overdue a hive is. The reviewer suggests adding the date it fell due.** — `hive-reminders/reminders.py:21`
+Every line reads "inspection overdue", so the committee can't tell a hive one day late from one a month late.
+Fix: put the due date in the line. One caveat: the change fixed the line format as `<name>: inspection overdue`, so this would depart from what the committee asked for. Check with them before taking it.
+*Raised by: code review*

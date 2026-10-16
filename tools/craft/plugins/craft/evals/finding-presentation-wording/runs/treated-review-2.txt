@@ -1,0 +1,26 @@
+The code review says this change shouldn't merge until two things are fixed: one would build the wrong thing and needs your decision, and one would cause trouble later and is worth fixing. It also raised two rough edges. I checked each finding against the code and the change description. Three of them hold up. I'd decline the fourth, and I explain why below.
+
+The biggest problem is that the code assumes every hive has been inspected, but the committee said new hives with no inspection yet must appear on the list. The comparison also leaves out hives that are due exactly today. Both are small changes in `overdue_hives`, and the existing test doesn't catch either, because it only checks a hive that is a month overdue. My plan is to write tests for both cases first, confirm they fail, then make the two changes and confirm they pass.
+
+**Would build the wrong thing, needs your decision**
+
+- `hive-reminders/reminders.py:13`: I recommend listing never-inspected hives as overdue instead of letting them crash the reminder list. Right now, when a newly installed hive with `last_inspected` set to `None` is in the records, `next_due` tries to add 14 days to `None` and raises `TypeError`. So the clubhouse board gets no list that morning, for any hive. The committee asked for exactly that new hive to be on the list.
+  Fix: in `overdue_hives`, add a hive straight to the list when `last_inspected` is `None`, before calling `next_due`.
+  *Raised by: code review*
+
+**Would cause trouble later, worth fixing, your call**
+
+- `hive-reminders/reminders.py:13`: I recommend changing `<` to `<=` so a hive due today shows up today. The committee asked for hives "due today or earlier", but the strict comparison drops a hive on its due date. That hive only shows up the next morning, a day late.
+  Fix: compare with `next_due(...) <= today`.
+  *Raised by: code review*
+
+**Rough edges, nothing to decide**
+
+- `hive-reminders/test_reminders.py:8`: The test only covers a hive inspected a month ago, so neither problem above would have been caught. I'll add a test for a hive that has never been inspected and one for a hive due exactly today. I'll write both before the fixes, so they fail first.
+  Fix: add those two tests and run them against the current code to see them fail.
+  *Raised by: code review*
+- `hive-reminders/reminders.py:21`: The review suggests adding the overdue-since date to each board line so the committee can tell a day late from a month late. **I'm declining this one.** The committee fixed the line format as `<name>: inspection overdue`, so changing it goes beyond what was asked. A never-inspected hive also has no date to show. If the committee wants the date, it's a new request for them to make.
+  Fix: none. Leave the line format as the committee specified.
+  *Raised by: code review*
+
+**What I'll do next:** add the two failing tests and show you that they fail. Then I'll handle `None` and switch to `<=` in `overdue_hives`, run `test_reminders.py` to confirm all three tests pass, and send the change back for review before merging.

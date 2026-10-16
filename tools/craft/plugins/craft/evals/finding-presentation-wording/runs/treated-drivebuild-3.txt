@@ -1,0 +1,25 @@
+Four code review findings survived the one re-review round. The build procedure stops looping here, so these are your calls. One would build the wrong thing and needs your decision, one would cause trouble later and is worth fixing, and two are rough edges with nothing to decide.
+
+**Would build the wrong thing, needs your decision**
+
+**A newly installed hive crashes the whole morning list.** I recommend listing those hives instead of crashing, and the board is what's at stake. The change says a hive with no inspection yet should appear on the list. Instead, the code passes its empty `last_inspected` date to `next_due`, which tries to add 14 days to nothing and raises a `TypeError`. Install one new hive and the clubhouse board gets no reminders at all, for any hive.
+Fix: treat a hive with no inspection as overdue before working out a due date, so it shows up as `<name>: inspection overdue`.
+`hive-reminders/reminders.py:13` · raised by code review
+
+**Would cause trouble later, worth fixing, your call**
+
+**A hive due today is left off today's list.** I recommend including it. The committee asked for hives "due today or earlier", but the check uses "strictly after the due date" (`<`). A hive inspected exactly 14 days ago gets no reminder on its due day and only appears the next morning, a day late.
+Fix: change `<` to `<=`.
+`hive-reminders/reminders.py:13` · raised by code review
+
+**Rough edges, nothing to decide**
+
+**The test covers only the easy case.** Its one test uses a hive inspected a month ago, so it passes despite both problems above. Add a test for a hive with no inspection and one for a hive due exactly today. Each should fail on the current code and pass once its fix lands.
+Fix: add those two cases to the test file.
+`hive-reminders/test_reminders.py:8` · raised by code review
+
+**The board line doesn't say how overdue a hive is.** The reviewer suggests adding the date the hive became due, so the committee can tell a day late from a month late.
+Fix: add "since <date>" to the line. One caveat: the committee asked for exactly `<name>: inspection overdue`. This changes the wording they agreed, so take it only if they want it.
+`hive-reminders/reminders.py:21` · raised by code review
+
+Tell me which of these to fix and which to accept as they are. After that, the run moves on to the security check and the rest of the close.

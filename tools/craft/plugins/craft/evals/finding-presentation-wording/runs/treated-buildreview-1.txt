@@ -1,0 +1,27 @@
+The correctness review ran its one re-review round, and four of its findings are still open. I'm not running another round, so what happens with them is up to you. Two of them mean the reminder list doesn't yet do what the committee asked.
+
+**Would build the wrong thing, needs your decision (1)**
+
+**`hive-reminders/reminders.py:13`: A newly installed hive breaks the whole morning list. I recommend fixing this before the change ships.**
+A new hive has no inspection date yet. `next_due` tries to add 14 days to that missing date, which raises an error, and nothing catches it. So one new hive means the board gets no reminders at all, for any hive. The committee asked for exactly the opposite: a hive that has never been checked should be on the list.
+Fix: Put a hive with no inspection date straight on the list as `<name>: inspection overdue`, and only work out a due date for hives that have one.
+*Raised by: code review*
+
+**Would cause trouble later, worth fixing, your call (1)**
+
+**`hive-reminders/reminders.py:13`: A hive due today is left off today's list. I recommend changing one character.**
+The check only lists a hive once its due date has passed. A hive inspected exactly 14 days ago is due today, but it won't appear until tomorrow. The committee said "due today or earlier", so every due hive shows up a day late.
+Fix: Change `<` to `<=` on that line.
+*Raised by: code review*
+
+**Rough edges, nothing to decide (2)**
+
+**`hive-reminders/test_reminders.py:8`: The one test doesn't cover either of the problems above. I recommend adding two cases.**
+The only test is a hive inspected a month ago. That case works, so the test passes even with the crash and the off-by-one-day bug still in the code.
+Fix: Add a test for a hive with no inspection date and one for a hive due exactly today. Write both before making the two fixes above and check that they fail first, so each fix is shown to work.
+*Raised by: code review*
+
+**`hive-reminders/reminders.py:21`: The reviewer wants each board line to say since when the hive has been overdue. I recommend leaving the line as it is.**
+At the moment the board can't tell a hive one day late from one a month late. But the committee specified the exact wording, `<name>: inspection overdue`, so adding a date would go beyond what they asked for.
+Fix: Keep the current wording. If a date would help, put it to the committee as a separate request rather than adding it in this change.
+*Raised by: code review*

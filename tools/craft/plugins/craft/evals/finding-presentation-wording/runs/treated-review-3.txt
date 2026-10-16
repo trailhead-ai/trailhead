@@ -1,0 +1,28 @@
+The code review found four problems in the hive reminder change. I'll fix two, add the missing tests while fixing them, and push back on one suggestion.
+
+**Would build the wrong thing, needs your decision**
+
+**1. One new hive with no inspection yet takes down the whole morning list.** `hive-reminders/reminders.py:13`. I recommend listing these hives as overdue, which is what the committee asked for.
+A hive that has just been installed has `last_inspected` set to `None`. `next_due` then tries to add 14 days to `None`, which raises an error. So on the morning a new hive goes in, the board gets no list at all, and the hives that really are overdue go unreported too.
+Fix: check for `None` before working out the due date, and put those hives on the list.
+*Raised by: code review*
+
+**Would cause trouble later, worth fixing, your call**
+
+**2. A hive that is due exactly today doesn't appear until tomorrow.** `hive-reminders/reminders.py:13`. I recommend including it, because the request says a hive due "today or earlier" goes on the list.
+The check uses "due date is before today", so a hive inspected exactly 14 days ago is left off. Every hive gets visited a day later than the committee intended.
+Fix: change `<` to `<=`.
+*Raised by: code review*
+
+**Rough edges, nothing to decide**
+
+**3. The tests only cover a hive inspected a month ago.** `hive-reminders/test_reminders.py:8`. That's why the two problems above weren't caught, so I'll add a test for each of them.
+Fix: one test with a hive that has never been inspected, and one with a hive due exactly today.
+*Raised by: code review*
+
+**4. The reviewer suggested adding a date to each board line ("overdue since…"). I won't make this change.** `hive-reminders/reminders.py:21`. The committee asked for exactly `<name>: inspection overdue`. A never-inspected hive also has no date to show. If the committee wants the date, they can ask for it as a separate change.
+*Raised by: code review*
+
+**What I'll do next**
+
+I'll write the two new tests first and run them. I expect both to fail: the never-inspected hive should cause an error, and the hive due today should be missing from the list. I'll tell you if either fails for some other reason. Then I'll make the two fixes in `reminders.py`, run the test file again, and send the change back for another code review before it's merged.

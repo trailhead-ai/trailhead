@@ -1628,6 +1628,16 @@ FINDING_CAPTURE_VERDICTS.update(
 )
 
 
+# Treated code review arms: `severity-name` is the gate, `code-review-name` an observation.
+FINDING_CAPTURE_VERDICTS.update(
+    {
+        f"treated-{site}-{n}": {"code-review-name": "plain", "severity-name": "plain"}
+        for site in ("review", "buildreview", "drivebuild")
+        for n in (1, 2, 3)
+    }
+)
+
+
 def _site(stem):
     """The site a capture belongs to: the calibrated consult's arms are `precal-` and `cal-`, no site segment."""
     return "consult-calibrated" if stem.startswith(("precal-", "cal-")) else stem.split("-")[1]
