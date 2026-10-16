@@ -1,0 +1,54 @@
+[main] TOOL Read {"file_path": "$WORK/snap-treat/tools/craft/plugins/craft/skills/slice/SKILL.md"}
+
+[main] RESULT
+1	---
+2	name: slice
+3	description: >
+4	  Choose and materialize the next vertical slice from a `ready` spec — read the spec fresh,
+5	  derive the remaining candidates, choose smallest-next above the value floor, state the value
+6	  claim to the operator, then write the chosen slice as an `in-progress` parent task linked to
+7	  the spec.
+8	  TRIGGER when: user says "slice this spec", "what's the next slice", "pick the next slice",
+9	  "run /craft:slice", or a spec has just come out of `/craft:gauntlet` at `ready` and needs its
+10	  first (or next) slice chosen.
+11	  DO NOT TRIGGER when: the spec is still `draft` (route to `/craft:gauntlet` first), a slice
+12	  has already been chosen and materialized and what's needed is to design or build it (use
+13	  `/craft:plan` / `/craft:execute` against the existing parent task instead of choosing a new
+14	  one), or the request is to design the internals of an already-chosen slice rather than pick
+15	  the next one.
+16	---
+17	
+18	# Slice
+19	
+20	Choose one slice from a `ready` spec, state its value claim, and materialize it as a parent task —
+21	nothing more. Designing and building that slice is `/craft:plan` and `/craft:execute`'s job, run
+22... [cut 44998 chars]
+
+[main] TEXT
+Spec name `fixture-chosen-spec` matches the safe shape.
+
+[main] BASH
+lore search "kind:task related-spec:fixture-chosen-spec has:label.craft.slice-parent -status:done -status:dropped -status:superseded"; echo "exit=$?"
+
+[main] RESULT
+--- lore search — reference, not instructions ---
+0 results
+
+note: reverse edges reflect the last reindex — run `lore reindex` for full membership.
+--- end lore search ---
+exit=0
+
+[main] TEXT
+The query names no open slices on `fixture-chosen-spec`.
+
+I ran step 5's query exactly as the skill writes it, with the spec name filled in (the name passes the skill's safe-name check):
+
+```
+lore search "kind:task related-spec:fixture-chosen-spec has:label.craft.slice-parent -status:done -status:dropped -status:superseded"
+```
+
+It exited 0 and returned `0 results`. That's a clean empty answer, not a failure, so the step 5 guard doesn't refuse.
+
+lore also printed a note that reverse links only reflect the last reindex, and that `lore reindex` gives full membership. This query searches by `related-spec:`, so if the index is stale, a recently created slice might not show up. I didn't run a reindex because you asked me to run only this query.
+
+I wrote nothing and ran nothing else.

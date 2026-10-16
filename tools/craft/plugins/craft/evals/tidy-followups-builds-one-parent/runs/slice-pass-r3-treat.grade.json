@@ -1,0 +1,43 @@
+{
+ "order": {},
+ "agents": {
+  "count": 0,
+  "sequential": true
+ },
+ "check_args": [],
+ "assembles": 0,
+ "verbatim": [],
+ "records": {
+  "chosen-reject-path-traversal-in-the-export-endpoint": {
+   "status": "open",
+   "parent": null,
+   "labels": [],
+   "body_changed": false,
+   "new": false
+  },
+  "chosen-stop-writing-bearer-tokens-to-the-request-trace": {
+   "status": "open",
+   "parent": null,
+   "labels": [],
+   "body_changed": false,
+   "new": false
+  },
+  "chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it": {
+   "status": "ready",
+   "parent": "build-the-follow-ups-of-fixture-chosen-spec-chosen-2026-10-16",
+   "labels": [],
+   "body_changed": false,
+   "new": false
+  },
+  "chosen-fix-a-typo-in-a-docstring": {
+   "status": "open",
+   "parent": null,
+   "labels": [],
+   "body_changed": false,
+   "new": false
+  }
+ },
+ "parent_body": {},
+ "command_lines": [],
+ "real_vault_hits": ""
+}

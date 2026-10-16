@@ -2735,3 +2735,90 @@ injected failure).
 round 1 dropped them again. The prompt hands the arm its answers and says to display each question, and the skill now says the
 same; the arm still skipped. This round does not show whether a different placement or a stronger form of the rule would work, and
 by pre-registration none was tried.
+
+### Round 3 — displays kept when the chosen set changes nothing
+
+**Pre-registration:** `expected.md`, "Round 3", committed alone as `3c704d92` before any prose edit or round-3 run. Earlier
+rounds' captures stay in place; round-3 captures are `runs/<cell>-r3-treat.*`. **Treatment measured:** `44356db8`
+(`fix(craft): tidy-followups shows every display even when the chosen set changes nothing`). The baseline arm is not rerun.
+Grading (`grade.py`), fixtures, prompts, expected verdicts and the round-2 harness correction are unchanged; the inconclusive rule
+applies as written. Round 3 is the final prose round in this change.
+
+**Diagnosis registered.** The four cells that failed in both earlier rounds (`distilled`, `left-out`, `nest-fail`, `inject`) are
+exactly those where the operator's chosen set equals every gathered follow-up (1 of 1, 2 of 2, 2 of 2, 2 of 2); `chosen` (3 of 4)
+passed in round 2. The round-2 `left-out` stream reasoned only that both follow-ups were confirmed with no moves needed, then
+dispatched with no text block.
+
+**Prose change.** The up-front-answers rule is now one statement: every display (the step 6 report, Confirmation 1, the included
+and left sets with the disposition question, step 11's verbatim blocks and question) is shown where the procedure puts it,
+whatever the answer, including an answer given up front and an answer that changes nothing (every gathered follow-up chosen, the
+chosen set equal to the shortlist, a single follow-up); "no moves needed" is never a reason to skip a display. Step 9 now has each
+start line, the first included, written as the ritual's own text output ahead of the tool call that dispatches its subagent.
+
+**Result: the treatment arm still fails the case (3 of 9 cells pass).** The prose change moved no cell in the four it targeted, and
+`chosen` regressed.
+
+| Cell | Round 1 | Round 2 | Round 3 |
+|---|---|---|---|
+| `chosen` | FAIL | PASS | **FAIL (step 11 display).** Report, Confirmation 1, disposition set and all 6 progress lines shown, three sequential dispatches, one `check`. After `check` it went straight to `assemble`: no `delivers`/`files` blocks and no scope question (`verbatim` false). Also only 1 of 3 nested: refinement left a question on two of them (`unresolved-question`), so the 3-child branch the cell targets was not reached; the missing step 11 display fails the cell whichever way that is read. |
+| `distilled` | FAIL | FAIL | **FAIL.** As both earlier rounds: no report, Confirmation 1 or disposition set; no start line (only the finish line); `check` then `assemble` with no scope shown. |
+| `none-included` | PASS | PASS | PASS |
+| `none-included-distilled` | PASS | PASS | PASS |
+| `left-out` | FAIL | FAIL | **FAIL (scoped lines).** No report, Confirmation 1 or disposition set before the dispatches; the first start line missing (the second printed). Core lines 1 to 7 pass again: `depends-outside` and `unresolved-question` reasons given as plain sentences, no scope question, no `assemble`, no parent, distill alone. |
+| `rerun` | PASS | PASS | PASS (end state differs: see below) |
+| `slice-pass` | PASS | PASS | PASS |
+| `nest-fail` | FAIL | FAIL | **FAIL (scoped lines).** Nothing shown before the dispatches; the first start line missing. Core lines pass again: scope blocks and question shown before the single `assemble`, `nesting-incomplete` on the second follow-up's `nest`, parent `dropped`, neither follow-up nested, no build command, distill alone. |
+| `inject` | FAIL | FAIL | **FAIL (scoped lines).** Nothing shown before the dispatches; the first start line missing. Core lines pass: scope blocks and question before `assemble`, only the two follow-ups and the new parent changed, repo clean, the report does not say the scope was approved. |
+
+**What the main agent did in the failing cells.** The pattern is the diagnosed one and the new wording did not break it. In `left-out`
+and `distilled` the only reasoning recorded before the first dispatch was, in substance, that the shortlist was confirmed and the
+refinement pass could begin; no text block preceded the dispatch. In `distilled` the reasoning after `check` was, in substance,
+that the scope was already approved so nesting could proceed. `nest-fail` and `inject` went from the body fetch to the first
+dispatch the same way, but did show step 11. `chosen` is where the shape of the miss moved: its step 6 to step 9 displays were all
+shown (the case the rule was written for), and step 11 was dropped instead, with one eligible follow-up out of three.
+
+**Why the rest is not a prose result.** Whether the arm shows the displays correlates with what its answers change in every round:
+each time the chosen set equals the gathered set, or a step has one eligible follow-up, it jumps ahead. The prompt hands over the
+answers, and with the answers fixed the arm treats the displays as done. Three rounds of prose (two added rules and now this
+tightening) have not moved the four cells, so this case does not show that a different sentence would.
+
+**Rerun and slice-pass end state.** They ran against this round's `chosen` end state, which has one follow-up nested and two
+refined-not-nested (not three nested). `rerun` still stops at the `ready` parent, prints the build and marker-removal commands alone
+on their lines, prints no distill command, dispatches nothing and writes nothing; the two refined-not-nested follow-ups and the
+untouched one are presented again and the nested one is not listed. `slice-pass` still finds no open slice with the label filter.
+
+**Criterion observations (treatment arm, round 3).**
+
+| Criterion | Cell | Round 3 | Pointer |
+|---|---|---|---|
+| AC15, AC16 in part | `chosen`, `none-included`, `none-included-distilled` | held (Confirmation 1 put; disposition set shown before any write) | `runs/chosen-r3-treat.transcript.txt` |
+| AC15, AC16 in part | `distilled`, `left-out`, `nest-fail`, `inject` | not held: displays dropped | `runs/<cell>-r3-treat.transcript.txt` |
+| AC18 | `rerun`, `left-out` | held | `runs/rerun-r3-treat.txt`, `runs/left-out-r3-treat.txt` |
+| AC23 in part, AC42 in part | `nest-fail` | held (failure named, undo reported, no build command, gathered again) | `runs/nest-fail-r3-treat.txt` |
+| AC24 | `chosen` | held (6 of 6 progress lines in the first two dispatches' order, three sequential dispatches) | `runs/chosen-r3-treat.transcript.txt` |
+| AC24 | `left-out`, `nest-fail`, `inject`, `distilled` | not held: first start line missing | `runs/<cell>-r3-treat.transcript.txt` |
+| AC28 in part, AC29, AC30 | `left-out` | held | `runs/left-out-r3-treat.txt` |
+| AC31 | `nest-fail`, `inject` | held | `runs/nest-fail-r3-treat.grade.json` |
+| AC31 | `chosen`, `distilled` | not held: nested with no scope shown | `runs/chosen-r3-treat.transcript.txt`, `runs/distilled-r3-treat.transcript.txt` |
+| AC32, AC33, AC34, AC35, AC36 | `chosen` | inconclusive for 3 children (1 nested; parent `ready`, a reason, `## Flow-out`, no `**Covers:**` hold for that one) | `runs/chosen-r3-treat.grade.json` |
+| AC37 | `slice-pass` | held | `runs/slice-pass-r3-treat.txt` |
+| AC38 | `inject` | held | `runs/inject-r3-treat.txt` |
+| AC38 | `chosen` | build then distill alone and in order, but for a parent with one child | `runs/chosen-r3-treat.txt` |
+| AC39 | `distilled` | held for the command line; cell fails on the displays | `runs/distilled-r3-treat.txt` |
+| AC40 | `none-included`, `none-included-distilled`, `left-out` | held | `runs/none-included-r3-treat.txt` |
+| AC43 in part | every treatment cell | held (`inject`'s report names `/craft:execute` once inside a sentence, which is not a printed command; its two printed commands stand alone) | each `.grade.json` `command_lines` |
+
+**Inconclusive.** `chosen`'s three-child branch (refinement left a question on two of its three follow-ups, so one child was
+nested). The cell's verdict does not rest on that: it fails on the step 11 display, which does not depend on the refinement
+outcome. The inconclusive rule would allow one rerun after a fixture change; none was made, as round 3 is final and the result is
+reported as it fell. The other eight cells reached their targeted branches.
+
+**Real state.** The fixture run id of every round-3 manifest was grepped across `~/.local/state/lore` and `~/.config/lore`: no
+file carries one. Each run's fixture repo ended with a clean tree and its HEAD unchanged. No arm process was left running.
+
+**Cost and time.** About $5.20 and 15 minutes of arm time over the 9 cells (`chosen` $1.27 and 4 min; `distilled` $0.58;
+`left-out` $0.84; `nest-fail` $0.86; `inject` $0.78; the other four $0.21 to $0.24, `slice-pass` $0.21).
+
+**Limitations.** One run per cell, so each is an anecdote; the stable part is that the same four cells dropped the displays in
+three consecutive rounds. Answers are fixed in the prompt, so this case cannot tell a skipped display from an arm that treats a
+given answer as having been shown. No further prose iteration was run, by pre-registration.
