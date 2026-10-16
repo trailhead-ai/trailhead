@@ -2673,17 +2673,20 @@ Run 3 of the consult batch is the one miss: judge votes FAIL FAIL PASS, so 2 of 
 margin, and the verdict is a judgement near the line. The decline case stays green with the contract in
 place.
 
-**Traces (U3).** The runner deletes `trace.jsonl` at the end of a run, so a background loop copied every
+**Traces (U3), corrected.** The runner deletes `trace.jsonl` at the end of a run, so a background loop copied every
 `/tmp/claude-eval-*/**/*.jsonl` every 0.3 s into a scratch directory for the whole window (the child's live
 session transcript under its temp HOME is among them). All 9 runs were captured. The three consult
 transcripts each contain the heading "Corrections to other records" in the final deliverable, with the
-decision's id, the wrong text and a drafted fix, and each says nothing was written and asks for acceptance.
-In the three accepted-case transcripts the agent invokes `craft:receiving-code-review`, reads
-`_shared/council.md`, checks the claim against the ADR, and runs `./lore record amend … --initiated-by agent
---base <revision>` once with no second question. In the three declined-case transcripts it invokes the
-skill and runs no write. The contract is applied in the traces. One consult transcript also raised that the
-fix depends on an unchecked fact and offered a task as an alternative to the amend, which the contract
-allows only for an unknown fix.
+decision's id and the wrong text, and each says nothing was written and asks for acceptance. They did not
+all draft the fix: one deliverable withheld its fix pending the operator's confirmation, and another offered a
+task as an alternative to a fix it already knew. The earlier reading of this paragraph, that all three had a
+drafted fix and that only the task offer was a hedge, was wrong. In the three accepted-case transcripts the
+agent invokes `craft:receiving-code-review`, reads `_shared/council.md`, checks the claim against the ADR,
+and runs `./lore record amend … --initiated-by agent --base <revision>` once with no second question. In the
+three declined-case transcripts it invokes the skill and runs no write. Under U3 ("a miss means a prose
+rework, not a pass"), the two consult hedges meant the prose was reworked: the contract checked the claim
+against its source only under "Accepted: apply it", and defined an unknown fix loosely enough that an
+unchecked fact read as unknown.
 
 **Real state around the runs.** Sha256 of every file under `~/.local/state/lore/` and `~/.config/lore/`
 (excluding `.git/`), hashed at 10:53 before the first batch and at 11:03 after the last (2026-10-16, local
@@ -2692,4 +2695,63 @@ time). `~/.config/lore/` is unchanged. Three paths under `~/.local/state/lore/` 
 | Path | Source |
 |---|---|
 | `vaults/default/session/6dea91f3-ceda-4c5f-8f62-f7781fb210f7.{md,json}` | uncommitted (`git status` shows `M`, no vault commit in the window): another session's `lore session candidate`, the note's own `candidate 2026-10-16T15:57:55Z kind=follow-up` entry, written at 10:57:55 local; none of the 9 child transcripts runs `session candidate` |
+| `index.sqlite` | derived search index, rewritten by any live lore command |
+
+## Treatment, reworked: the hedge closed in `_shared/council.md`
+
+Commit `b3d36c09` was reworked after a conformance review (DRIFT) traced the two consult hedges above to the
+contract's wording. In "Corrections to other records": a new first bullet has the agent check the claim
+against its source while drafting and list the correction with its drafted fix in every case, stating any
+premise it cannot check beside the fix; "unknown" now means nothing within the session's reach decides the
+right text, so a fact readable in the code, configuration or seeded records is known; and a known fix is
+never offered as a task, not even as an alternative. The acceptance gate, the commands, the amend/update
+split and the no-secrets caution are unchanged. The consult pointer in `consult/SKILL.md` now says to check the claim
+against its source and that a fix readable off the code or records is never offered as a task;
+`receiving-code-review/SKILL.md` was re-flowed so the heading "Corrections to other records" sits on one line.
+
+**Material corrections: reviewed, not evaluated.** The rule that a material correction (one that moves what the
+record decides) is not an amend now reads for both routes: where lore is loaded, `/lore:correct` handles it by
+supersession; without lore, the agent lists it and leaves it to the operator. No case measures this (the eval
+children have no lore plugin, so the three consult runs below all say the supersession tool is not loaded and
+list the correction for the operator). It was checked against lore's `correct` Step 2 and Step 3b by reading
+only.
+
+The batch command above was run verbatim, one case per batch, 3 runs, `-j 1`, the four grants, `--max-cost-usd`
+3 / 1.5 / 1.5, same graders, no case file edited, runner `claude` 2.1.301, model `claude-opus-5-5`, 2026-10-16.
+Errored runs: **none**. No rerun was used.
+
+| Case | Baseline (per run) | First treatment `b3d36c09` (per run) | Reworked (per run) | Reworked cost (per run incl. judge; batch) | Result |
+|---|---|---|---|---|---|
+| consult-lists-a-sibling-correction-without-writing-it | 0.75 / 0.75 / 0.75 | 1.00 / 1.00 / 0.75 | 1.00 / 1.00 / 1.00 | 0.866 / 0.833 / 0.823; 2.489 | green, 3 of 3 |
+| accepted-review-correction-is-applied-not-parked | 1.00 / 0.80 / 0.80 | 1.00 / 1.00 / 1.00 | 1.00 / 1.00 / 1.00 | 0.326 / 0.309 / 0.359; 0.995 | green, 3 of 3 |
+| declined-review-correction-is-left-alone | 1.00 / 1.00 / 1.00 | 1.00 / 1.00 / 1.00 | 1.00 / 1.00 / 1.00 | 0.226 / 0.274 / 0.246; 0.746 | green, 3 of 3 (guard) |
+
+Reworked total 4.230 USD of the 9 USD ceiling. First-treatment per-run costs were 0.811 / 0.821 / 0.798,
+0.345 / 0.350 / 0.338 and 0.230 / 0.231 / 0.225.
+
+**Traces (U3), observed again.** The same loop (copy `/tmp/claude-eval-*/**/*.jsonl` every 0.3 s into a scratch
+directory; stopped by its literal PID) captured all 9 runs. For each consult run the final deliverable lists
+`decision/gauge-buffer-is-sized-for-the-sampling-interval` under "Corrections to other records" with the wrong
+text and a drafted fix (five minutes, 72 readings, 72 slots), nothing is withheld pending confirmation, and
+no task or follow-up is offered (the words "task" and "follow-up" do not appear in any of the three final
+messages). Each states beside the fix the premise it could not check (that 5 minutes is the gauge's real
+interval; no firmware or datasheet is in reach), and each says the change moves what the decision decides, so
+it should be superseded rather than edited in place, which is the material-correction guard reading as intended.
+Run 1's last line says the user would have to file the replacement; that is not a task offer. No grader reads
+for a hedge: the `llm` grader fails a deliverable with no drafted fix but passes a fix followed by a task
+offer, so U3 is observed from the transcripts and not scored.
+
+**Real state around the runs.** Sha256 of every file under `~/.local/state/lore/` and `~/.config/lore/`
+(excluding `.git/`), hashed at 11:10 before the first batch and at 11:19 after the last (2026-10-16, local
+time). `~/.config/lore/` is unchanged. None of the changed paths carries a fixture term (buoy, gauge, label
+queue, label printer). Every changed path under `~/.local/state/lore/` is attributed:
+
+| Path | Source |
+|---|---|
+| `vaults/levr/task/{the-connector-reads-strategy-sources-…}.{json,md}` | levr `d7c336b1` (11:13:47), another session's publish |
+| `vaults/levr/task/{a-recording-s-first-end-stands-…}.{json,md}`, `…the-phone-warns-before-it-runs-out-of-room-….{json,md}` | levr `9fe0c3e0` (11:12:34), another session's publish |
+| `vaults/levr/task/{an-app-wide-storage-guard-….json, the-storage-alarms-say-….{json,md}}` | levr `5cb53c16` (11:08:04), content committed before the first hash; the working tree files were rewritten at 11:13:36 by the levr sync and match HEAD (`git status` clean) |
+| `vaults/default/session/1e6b6773-….{md,json}`, `locks/default/session/1e6b6773-….lock` | uncommitted: another session's `lore session candidate` entries, `kind=follow-up`, `kind=lesson` at 16:18:22Z (11:18 local); none of the 9 child transcripts runs `session candidate` |
+| `vaults/default/session/ca0e7928-….{md,json}` | uncommitted: another session's `lore session candidate`, `kind=lesson` at 16:14:35Z (11:14 local) |
+| `publish/levr-5a2535166072.request` | the live publish worker, triggered by the levr commits above |
 | `index.sqlite` | derived search index, rewritten by any live lore command |
