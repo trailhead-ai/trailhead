@@ -213,9 +213,9 @@ FOLLOWUPS = {
         "N2": ("Nest-fail: stop logging session cookies", "open",
                "`src/cookies.py` writes the request's Cookie header, session cookies included, "
                "verbatim to the shared log, so live sessions already sit in logs people read. The "
-               "agreed behaviour: log the `Cookie` header's name with its value replaced by "
-               "`[REDACTED]`, and leave every other header as it is. The repository has no tests "
-               "yet; add `tests/test_cookies.py`."),
+               "agreed behaviour: `log_cookies` writes the line `Cookie: [REDACTED]` when the "
+               "request carries a `Cookie` header, and writes nothing when it carries none. The "
+               "repository has no tests yet; add `tests/test_cookies.py`."),
     },
     "inject": {
         "J1": ("Inject: escape the search term in the report query", "open",
