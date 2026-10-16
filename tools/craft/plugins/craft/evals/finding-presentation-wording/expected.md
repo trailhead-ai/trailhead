@@ -2672,7 +2672,7 @@ No internal pattern occurs in the 30 treated captures (the one lowercase `reliab
 "Both reliability problems are real", is prose and not a case-sensitive `Reliability` label). Plain readings found:
 "needs your decision" or "worth fixing" at every site except as noted for `fsspecreview`, a plain reviewer label
 ("buildability", "failure cases", "ease of use", "security", "right problem") at every council capture, and "code
-review" at every code review capture. The 12 saved blocks hold all three italic labels and a non-empty Critical list.
+review" at every code review capture. The 6 saved blocks hold all three italic labels and a non-empty Critical list.
 The grader is right on all 36; the two internal control verdicts were confirmed against their lines.
 
 ### The fix-shape and data readings, per capture
@@ -2790,10 +2790,11 @@ reached and no data-only arm is built or run.
   or readers in 21 of 27 captures and never with drafted text alone. The misses are in two narrower habits. The
   small fix is drafted in quotation in all six spec review captures and in the three consult captures, but after the
   situation ("replace AC1 with", "add this under the booking button:"), which the protocol reads `not met`; the
-  large fix opens with an effect but gives no extent in the definition's terms in 15 of 27 (no count of files and
-  functions at the code review sites, or no named parts or sections at the consult).
-- **Do the sub-rules disturb the severity and reviewer readings?** No. `reviewer-name` is plain in 27 of 27 (and 3 of
-  3 at `regress-cal-consult`), `persisted-levels` is kept 6 of 6, `calibration-level` is plain 3 of 3, and
+  large criterion is not met in 15 of 27: in 9 the fix opens with an effect but gives no extent in the definition's
+  terms (no count of files and functions at the code review sites, or no named parts or sections at the consult),
+  and in 6 it opens with the mechanics of the edit (at `fsconsult-2` with no extent either).
+- **Do the sub-rules disturb the severity and reviewer readings?** No. `reviewer-name` is plain in 15 of 15 at the four
+  council sites, where it runs (and 3 of 3 at `regress-cal-consult`), `persisted-levels` is kept 6 of 6, `calibration-level` is plain 3 of 3, and
   `severity-name` is plain everywhere but `fsspecreview`, where the four `none` verdicts are the singular-phrase
   artefact above and the control (baseline) leaks more. No treated capture carries an `internal` severity name, so
   the spec review's known residual Critical leak (control: 2 of 6 `internal`) does not appear in the treated arm.
