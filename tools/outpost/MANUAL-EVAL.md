@@ -870,9 +870,12 @@ and told the user plainly it had not published and why. Nothing in it touches a 
 **Containment.** Six runs tried `ls ~/.claude/plugins` and two tried
 `~/.local/state/lore/vaults`; the sandbox refused every one ("Operation not permitted"). The
 developer's real vaults, `~/.config/{camp,lore,outpost}` and `~/.local/state/outpost` were
-snapshotted before the batch and diffed after: the only change was the `levr` vault advancing
-by two background-sync pulls (commits published from another host, 10:22 and 10:24) and
-Outpost re-snapshotting it; every vault working tree clean.
+snapshotted before the batch and diffed after: the only change was one team vault advancing by
+background-sync pulls of commits made elsewhere, and Outpost re-snapshotting it; every vault
+working tree clean. The sandbox confines writes and reads under the home directory, not
+everything: see the residual exposure stated in `pad-on-visual-question/expected.md`'s runner
+contract. No run in this batch touched it (no `ps`, `security`, `~/Library` or `~/.ssh` access
+in any capture).
 
 **Verdict — not PASS as registered, not FAIL.** `expected.md` passes only on 3/3 for every
 fixture and fails only on more than 1/3 misses; one miss in three sits between them, and the
