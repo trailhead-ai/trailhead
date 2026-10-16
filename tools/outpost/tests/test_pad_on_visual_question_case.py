@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import py_compile
 import shutil
 import subprocess
 import sys
@@ -204,24 +205,91 @@ def test_an_unset_python3_defaults_to_the_one_on_the_builders_path(tmp_path):
     _assert_arm_python3_imports_tomllib(run_dir)
 
 
-def _relative_files(root: Path) -> set[str]:
+def _relative_files(root: Path, skip_pycache: bool = True) -> set[str]:
     return {
         str(p.relative_to(root))
         for p in root.rglob("*")
-        if (p.is_file() or p.is_symlink()) and "__pycache__" not in p.relative_to(root).parts
+        if (p.is_file() or p.is_symlink())
+        and not (skip_pycache and "__pycache__" in p.relative_to(root).parts)
     }
 
 
 def test_the_plugin_copy_is_the_source_tree_without_evals_and_rules(tmp_path):
-    run_dir = _built(tmp_path, "visual-inside-workspace")
     source = CASE_DIR.parent.parent
+    py_compile.compile(
+        str(source / "skills" / "scratch-pad" / "scratch_pad.py"), doraise=True
+    )
+    assert list(source.rglob("__pycache__"))
+    run_dir = _built(tmp_path, "visual-inside-workspace")
     expected = {
         rel
         for rel in _relative_files(source)
         if rel != "rules.md" and not rel.startswith("evals/")
     }
     assert expected
-    assert _relative_files(run_dir / "plugin") == expected
+    assert _relative_files(run_dir / "plugin", skip_pycache=False) == expected
+    assert not list((run_dir / "plugin").rglob("__pycache__"))
+
+
+def test_a_non_empty_run_directory_is_refused_and_left_untouched(tmp_path):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    victim = run_dir / "run.env"
+    victim.write_text("keep me")
+    result, _ = _build(tmp_path, "visual-inside-workspace")
+    assert result.returncode == 2
+    assert str(run_dir) in result.stderr
+    assert victim.read_text() == "keep me"
+    assert list(run_dir.iterdir()) == [victim]
+
+
+def test_a_symlink_left_in_a_run_directory_is_not_written_through(tmp_path):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    outside = tmp_path / "outside.txt"
+    outside.write_text("keep me")
+    (run_dir / "prompt.md").symlink_to(outside)
+    result, _ = _build(tmp_path, "visual-inside-workspace")
+    assert result.returncode == 2
+    assert outside.read_text() == "keep me"
+
+
+def test_an_existing_empty_run_directory_is_accepted(tmp_path):
+    (tmp_path / "run").mkdir()
+    result, run_dir = _build(tmp_path, "visual-inside-workspace")
+    assert result.returncode == 0, result.stderr
+    assert (run_dir / "run.env").is_file()
+
+
+def test_a_run_directory_path_with_a_space_is_refused_and_builds_nothing(tmp_path):
+    spaced = tmp_path / "run dir"
+    result = subprocess.run(
+        ["bash", str(BUILDER), str(spaced), "visual-inside-workspace"],
+        capture_output=True,
+        text=True,
+        env={"PATH": "/usr/bin:/bin", "EVAL_PYTHON3": sys.executable},
+    )
+    assert result.returncode == 2
+    assert "run dir" in result.stderr
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_the_interpreter_probes_do_not_import_from_the_current_directory(tmp_path):
+    marker = tmp_path / "marker"
+    cwd = tmp_path / "planted"
+    cwd.mkdir()
+    (cwd / "tomllib.py").write_text(
+        f"open({str(marker)!r}, 'w').write('ran')\n"
+    )
+    result = subprocess.run(
+        ["bash", str(BUILDER), str(tmp_path / "run"), "visual-inside-workspace"],
+        capture_output=True,
+        text=True,
+        cwd=cwd,
+        env={"PATH": "/usr/bin:/bin", "EVAL_PYTHON3": sys.executable},
+    )
+    assert not marker.exists(), result.stderr
+    assert result.returncode == 0, result.stderr
 
 
 def test_each_variant_leaves_the_brief_for_the_arm_to_pass_as_the_prompt(tmp_path):
