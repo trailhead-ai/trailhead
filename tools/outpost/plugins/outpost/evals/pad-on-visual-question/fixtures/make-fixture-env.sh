@@ -7,8 +7,10 @@
 # absolute path or a bare name on this script's PATH; it defaults to the `python3`
 # on this script's PATH and must be 3.11+ (the publisher imports tomllib), which a
 # macOS /usr/bin/python3 is not. It is linked by its real path (symlinks and
-# virtualenvs resolved to the base interpreter), so the link is absolute and
-# readable from inside a sandbox that denies reads under $HOME.
+# virtualenvs resolved to the base interpreter), so the link is absolute. A run
+# inside a sandbox that denies reads under $HOME needs that resolved interpreter to
+# live outside the home directory; an interpreter installed under it (uv, pyenv,
+# asdf, mise) is not readable there.
 #
 # Variants (one per scenario):
 #   visual-inside-workspace       cwd is a member folder of a throwaway camp workspace
