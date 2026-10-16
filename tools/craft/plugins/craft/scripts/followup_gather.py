@@ -266,16 +266,19 @@ def _call_json(runner, argv: list[str]):
         raise GatherError("lore-output-not-json") from None
 
 
-def sanitize_title(title: str) -> str:
+def sanitize_text(text: str, limit: int) -> str:
+    """Vault text made safe to print: control and invisible format characters
+    stripped, cut to `limit` characters with a trailing marker, credential
+    spans redacted."""
     import capture_scan
 
     clean = "".join(
         c
-        for c in _CONTROL_RE.sub("", title)
+        for c in _CONTROL_RE.sub("", text)
         if unicodedata.category(c) not in _INVISIBLE_CATEGORIES
     )
-    if len(clean) > MAX_TITLE_CHARS:
-        clean = clean[:MAX_TITLE_CHARS] + TRUNCATION_MARKER
+    if len(clean) > limit:
+        clean = clean[:limit] + TRUNCATION_MARKER
     spans = {
         f.text
         for f in capture_scan.scan_text(clean)
@@ -284,6 +287,10 @@ def sanitize_title(title: str) -> str:
     for span in sorted(spans, key=len, reverse=True):
         clean = clean.replace(span, REDACTED)
     return clean
+
+
+def sanitize_title(title: str) -> str:
+    return sanitize_text(title, MAX_TITLE_CHARS)
 
 
 def _shape_ok(name: str) -> bool:
