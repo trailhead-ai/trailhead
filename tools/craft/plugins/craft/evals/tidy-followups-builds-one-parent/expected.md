@@ -297,3 +297,15 @@ kind"): the `D` body, and the bodies of the other follow-ups of that kind that n
 what counts as outside the directory, where the test goes). The `chosen` follow-ups `P`, `Q` and
 `R` are unchanged. The pass condition, the cells and the prompts are unchanged. If a rerun is again
 inconclusive, it is reported as inconclusive and not rerun again.
+
+---
+
+# Revision 3 — the `nest-fail` run was inconclusive; the `N2` body settled, registered before any later cell ran
+
+Cells run so far, after Revision 2: `none-included`, `none-included-distilled`, `left-out`
+(treatment and baseline), `distilled` (rerun, treatment and baseline), `rerun` and `slice-pass`.
+The `nest-fail` treatment run did not reach its branch: refinement left `N2` with a question (its
+body said to leave "every other header" as it is, in a function that logs only the Cookie value),
+so only one child was nested, the shim's second `--parent` write never happened, and the injected
+failure never fired. It is recorded as `inconclusive`, kept as `runs/nest-fail-run1-treat.*`, and
+rerun once. The `N2` body now states the agreed output line. Nothing else changes.
