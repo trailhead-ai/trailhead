@@ -34,6 +34,7 @@ _FENCE = re.compile(r"```[a-zA-Z]*\n(.*?)```", re.DOTALL)
 _CALL = re.compile(r"\$\{CLAUDE_PLUGIN_ROOT\}/scripts/([a-z_]+\.py)([^\n`]*)")
 _FLAG = re.compile(r"(?<!\S)(--[a-z][a-z0-9-]*)")
 _OPTION = re.compile(r"(--[a-z][a-z0-9-]*)")
+_SUBCOMMAND_CHOICES = re.compile(r"\{([a-z][a-z0-9_-]*(?:,[a-z][a-z0-9_-]*)+)\}")
 
 
 def _shipped_prose() -> list[Path]:
@@ -51,23 +52,39 @@ def _documented_invocations() -> list[tuple[str, str]]:
     return sorted(found)
 
 
-def _registered_options(script: str) -> set[str] | None:
+def _help(script: str, *subcommand: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, str(_SCRIPTS / script), *subcommand, "--help"],
+        input="",
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+
+def _registered_options(script: str, args: str = "") -> set[str] | None:
     """The option strings `script`'s own parser registers, or None if unreachable.
+
+    When the script's parser has subcommands and the documented argument tail opens
+    with one of them, the flags that follow belong to that subcommand's parser, so
+    its own ``--help`` is read instead. A placeholder, a flag or a ``$var`` is not a
+    subcommand word; only a word the top-level help lists as a choice is.
 
     A gate that fails closed on empty stdin before argparse ever runs cannot be
     asked for its help text. Every such script is documented with no flags at all,
     so there is nothing to check against — the caller skips those rather than
     guessing at an option set.
     """
-    result = subprocess.run(
-        [sys.executable, str(_SCRIPTS / script), "--help"],
-        input="",
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
+    result = _help(script)
     if result.returncode != 0:
         return None
+    words = args.split()
+    if words:
+        choices = {c for group in _SUBCOMMAND_CHOICES.findall(result.stdout) for c in group.split(",")}
+        if words[0] in choices:
+            result = _help(script, words[0])
+            if result.returncode != 0:
+                return None
     return set(_OPTION.findall(result.stdout))
 
 
@@ -80,7 +97,7 @@ def test_every_flag_a_documented_invocation_passes_is_one_the_gate_registers(scr
     flags = set(_FLAG.findall(args))
     if not flags:
         pytest.skip("invocation passes no flags")
-    registered = _registered_options(script)
+    registered = _registered_options(script, args)
     assert registered is not None, (
         f"{script} is documented with flags {sorted(flags)} but does not reach argparse "
         "— its help text is unreachable, so the recipe cannot be checked"
