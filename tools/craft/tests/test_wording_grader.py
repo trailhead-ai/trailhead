@@ -1653,6 +1653,14 @@ FINDING_CAPTURE_VERDICTS.update(
 )
 
 
+FINDING_CAPTURE_VERDICTS.update(
+    {
+        f"regress-driver-{n}": {"severity-name": "plain", "reviewer-name": "plain", "persisted-levels": "kept"}
+        for n in (1, 2, 3)
+    }
+)
+
+
 # Paired control at the specreview site: the shipped contract before this slice's edit. control-specreview-2
 # (the closing "either Critical" line) and -3 (the Recommended outcome line and the closing "To override a
 # Critical" line) read `internal` on `severity-name`, which is 2 of 6 non-plain.
