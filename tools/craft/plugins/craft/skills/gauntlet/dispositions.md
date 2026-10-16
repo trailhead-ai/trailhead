@@ -36,6 +36,8 @@ where control passes to a human.
     outcome and what it costs. **Generalised doubt does not meet it.** A `reaches-downstream`
     prescription **writes nothing to the named specs**: it names them in the escalation table, and
     re-entry into brainstorming is the operator's act.
+  - A *different* record found wrong with a known fix is neither scope: it is not a finding on this
+    record. List it as `_shared/council.md` defines under "Corrections to other records".
 - `accepted-as-risk: <reason>` — explicit acceptance, recorded for audit.
 - `disputed: <reason>` — the operator disagrees with the finding; recorded for audit.
 - `answered: <reason>` — the operator supplies a counterargument the passes did not have, and the

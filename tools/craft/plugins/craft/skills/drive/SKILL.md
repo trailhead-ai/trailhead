@@ -303,6 +303,9 @@ step, and `<cross-cutting>` with `plan/SKILL.md`'s own plan-altitude cross-cutti
 planning's: the dropped "plan's tasks, summed, don't satisfy spec's acceptance criteria" Critical is
 the single check a driver-run council most needs.
 
+A lens finding that a record other than the plan or its spec is wrong with a known fix is listed as
+`_shared/council.md` defines under "Corrections to other records", not parked as a task.
+
 Fill `<maturity-calibration>` with the calibration block `scripts/maturity_bars.py` renders for the
 linked spec — pipe the spec body into the renderer, naming the current repository's
 agent-instruction file so the absent-stamp fallback is reachable:
