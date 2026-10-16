@@ -1955,3 +1955,66 @@ re-measured when any of these changes:
 - The real runs are two sessions on one model tier; they are observations, not rates. The real reviewer's report
   differs from the canned one (longer asks, more findings); the presentation of its findings is what is read.
 - The clean-branch internal-level leak is a single observation; whether it recurs is not measured.
+
+## Errata, 2026-10-16: corrections to this run's results text
+
+Appended after "Results: code review by-eye readings, reviewer-name and the real-run close-out". Nothing above this
+heading is rewritten; each item names the line it corrects. Line numbers are those of the file before this section.
+
+### (a) Wrong pointers
+
+- Line 1746 ("see "Results: treated arms" and "Handoff to the next task"") points to the wrong places.
+  "Results: treated arms" is the 2026-10-15 section at line 472 and holds the earlier sites, not the code review
+  sites. The evidence for "no `severity-name` failure at any code review site" is "Results: treated and regression
+  runs at the code review and council sites (2026-10-16)" (line 1544), and the handoff that summarises it is the
+  first "Handoff to the next task" (line 1640). The file holds two headings of that name; the second (line 1729)
+  closes the paired `specreview` control and the `driver` regression.
+- The pointer at line 1947 ("see "Handoff to the next task" and the driver results") means the same pair: consult
+  and plan PASS are in the handoff at line 1640, and the `driver` PASS is in the handoff at line 1729.
+
+### (b) Wrong count
+
+The buildreview row of "Results summary per site" (line 1943) says "no council dispatch, 0 of 6 attempts". That
+site has 9 code review captures: 6 baseline (`baseline-buildreview-1..6`) and 3 treated (`treated-buildreview-1..3`).
+`grep -il council` over all 9 matches none, so the count is **0 of 9**, and the by-eye reading at line 1826 covers all
+9. The row's "(baseline `internal` 6 of 6)" is unchanged and correct.
+
+### (c) Summary rows that hide script readings
+
+Corrected row content for "Results summary per site":
+
+| Site | Met by script | Met by eye, awaits the operator's close | Unmeasured |
+|---|---|---|---|
+| real run, findings repo | `severity-name` `plain` (observation); `code-review-name` `internal` (observation; the one "code reviewer" in the narration above the findings, not a raiser label) | numbered findings 1-4 in the protocol's order with "code review"; three bullets short of it | AC17, AC18 |
+| real run, clean repo | none met; `severity-name` `internal` (the opening sentence says "nothing Critical or Important") | no invented finding; no `code-reviewer`; **internal level words "Critical" and "Important" shown (not met)** | |
+
+### (d) Clean-repo list
+
+The "Clean repo" section lists the five rough edges wrongly. `runs/real-review-clean-1.md` carries a numbered list
+(1 to 5), not bullets, under "Rough edges, nothing to decide". The five items are:
+
+1. A name made only of whitespace is not tested (`tests/test_words.py:13`).
+2. Tabs and newlines between words are not tested (`tests/test_words.py:10`).
+3. Mixed-case input is not tested (`tests/test_words.py:7`).
+4. Some unusual names give odd initials: `"ß".upper()` is `"SS"`, and a word starting with punctuation adds that
+   punctuation (`textutil/words.py:7`).
+5. Passing something that is not a string fails with an unclear error: `initials(None)` raises `AttributeError`
+   (`textutil/words.py:5`).
+
+Each carries its `file:line` and a one-line `Fix:`. The earlier text splits item 4 in two and omits item 3. The
+finding that none is invented and the verdict `SHIP` stand.
+
+### (e) Deviation from the spec's constraint
+
+The spec's Constraint says AC22 and AC23 close on the script's verdict and are never recorded as unmeasured. At the
+three code review sites the reviewer-name claim (AC23) had no script headroom: the baselines read `none` on
+`code-review-name` in 12 of 12 captures, so the script cannot show a change. Under the operator decision of
+2026-10-16 it moved to an operator close by eye. The treated script reading is `plain` 9 of 9, an observation, not a
+pass. This is a **recorded deviation**: AC23 is not script-closed at the code review sites, and a later reader must
+not take it as such.
+
+### (f) A gap missing from the parent task
+
+In the real findings run, the three rough-edge bullets carry no `Fix:` line and no "Raised by: code review". This is
+an AC17 and AC18 by-eye gap at the real path, below the bar the numbered findings meet, and it is left for the
+operator's close.
