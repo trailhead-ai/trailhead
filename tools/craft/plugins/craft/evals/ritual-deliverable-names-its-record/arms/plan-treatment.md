@@ -532,6 +532,10 @@ auto-downgrading, record the demotion in the persisted `## Council Review` secti
 with a `(downgraded from Critical: <reason>)` parenthetical so calibration audits can detect
 demote-heavy synthesizers.
 
+If a lens shows that a record other than the plan or its spec is wrong with a known fix, list it as
+`_shared/council.md` defines under "Corrections to other records", apart from the findings and
+outside the persisted `## Council Review` section.
+
 **Disposition (required for every Critical):**
 
 For each Critical finding, the user assigns one of:

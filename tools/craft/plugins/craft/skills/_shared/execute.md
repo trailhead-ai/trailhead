@@ -625,6 +625,10 @@ act on it per-task.
 Quality, style, and design review are explicitly out of scope for `drift-gate` — that's deferred to
 the whole-change phases in [After All Tasks](#after-all-tasks), not dropped entirely.
 
+A finding that a different record is wrong, with a known fix, is not a task. Present it to the
+operator and apply it once accepted, as the section "Corrections to other records" of the shared
+council contract defines.
+
 ### 5. Update the task graph
 
 After each child task completes (or each unknown resolves), record the state on the graph — the task
@@ -785,7 +789,9 @@ Absorb the verdict — `SHIP` | `FIX_FIRST` | `BLOCK` — and triage the finding
 code, not as a direct instruction. Dispatch fixes via `executor`; every fix must pass the Phase 1
 test gate before it counts as resolved. **A fix dispatch is a first dispatch: it runs on Sonnet like
 any other** — a reviewer finding a defect is evidence about the code, not about the tier that has to
-fix it. Escalate only if that Sonnet fix pass itself fails.
+fix it. Escalate only if that Sonnet fix pass itself fails. A finding that a different record is
+wrong, with a known fix, is not dispatched to `executor`: present and apply it as the section
+"Corrections to other records" of the shared council contract defines.
 
 **At most ONE re-review round.** After fixes land, if a re-review is warranted, dispatch
 `code-reviewer` again — it re-diffs the full `base..HEAD` at the post-fix `HEAD`, **never just the

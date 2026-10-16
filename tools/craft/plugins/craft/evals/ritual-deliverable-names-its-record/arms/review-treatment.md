@@ -60,7 +60,8 @@ complementary.
   what the reviewer found
 - Fix Critical issues immediately
 - Fix Important issues before proceeding
-- Note Minor issues for later
+- Note Minor issues for later, except a verified finding that a different record is wrong with a
+  known fix: list it as `_shared/council.md` defines under "Corrections to other records"
 - Push back if reviewer is wrong (with reasoning)
 
 ## Example

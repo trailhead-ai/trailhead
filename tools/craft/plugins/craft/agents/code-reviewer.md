@@ -69,6 +69,8 @@ Rules:
   is *gone*, is a finding, and the behaviour it stood in for is untested. Existence asserted over a
   file the test itself generated is a legitimate observation; raise it only as a Minor where the
   contents were checkable and the test settled for the path.
+- A different record found wrong with a known fix is not a finding on this change: list it after the
+  findings, apart, as `_shared/council.md` defines under "Corrections to other records".
 - Be specific (file:line, not vague). Explain why an issue matters in the one-line ask.
 
 ## When to escalate to other subagents

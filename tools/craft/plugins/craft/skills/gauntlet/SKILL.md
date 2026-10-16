@@ -319,6 +319,10 @@ C2") and it is retained in the audit trail either way. When you do print it, wri
 the shape "How a finding reads" defines in `_shared/council.md` — that shape is what makes a finding
 readable by someone who has not read the document under review.
 
+A pass that shows a *different* record is wrong, with a known fix, has no disposition and is not a
+`reaches-downstream` scope either. List it apart, as the contract in `_shared/council.md` sets out
+under "Corrections to other records".
+
 **Security Criticals are never compressed.** A Critical raised by the attacker lens renders its row
 in full — the whole finding and the actual proposed edit text, never a clause standing in for it.
 Compression is a convenience for the operator, and a one-clause summary of a security finding reads
