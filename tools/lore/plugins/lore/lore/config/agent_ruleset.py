@@ -93,6 +93,9 @@ work, follow-ups, area notes, and session history — all in a git-backed vault.
   authored artifacts (`task`, `spec`, `area` profile) or an explicit "record this
   one now". Incidental findings go through a candidate instead.
 - `/lore:flush` — promote the session's candidates into durable records.
+- A fix to a record that the operator has ruled on or accepted in their own message
+  this session is not deferred work: don't log it or file it as a task, run
+  `/lore:correct` and apply it now.
 
 Reach for lore when: starting work in an unfamiliar area, about to repeat an
 approach that may have failed before, making a non-obvious design call, or
