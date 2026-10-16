@@ -2801,3 +2801,42 @@ covering the lore batches recorded in lore's MANUAL-EVAL and these. `~/.config/l
 `e9d09c6e`, `122b7b37`), the uncommitted default-vault session `1e6b6773-….{md,json}` (written 12:04, another
 session's `lore session candidate`), `index.sqlite`, and the levr publish `.log` and `.request`. No changed
 path carries a fixture term.
+
+## Consult re-run: the fixture's figures removed from the contract (commit `d966a50f`)
+
+The worked case in the section above quoted the consult fixture's own figures (10 minutes to 5, 36 slots to
+72). That leaks the answer into the prose under test, so the consult 3 of 3 above is contaminated and does not
+count as evidence. `d966a50f` keeps the rule ("changing a figure the decision rests on, while the decision itself
+stays the same, is a wrong fact: in scope") and drops the example. The consult case was rerun on that prose with
+the batch command above, verbatim: 3 runs, `-j 1`, the four grants, `--max-cost-usd 3`, runner `claude`
+2.1.301, model `claude-opus-5-5`, 2026-10-16. The accepted and declined cases do not load the edited example's
+context differently and were not rerun. Errored runs: **none**. No rerun was used. Cost basis: per-run figures
+include judge cost.
+
+| Case | Runs | Cost per run (incl. judge) | Result |
+|---|---|---|---|
+| consult-lists-a-sibling-correction-without-writing-it | 0.75 / 1.00 / 1.00 | 0.877 / 0.802 / 0.758 (2.437) | green at the floor, 2 of 3 |
+
+Run 1 failed only `correction-listed-apart-with-fix`, with judge votes PASS FAIL FAIL.
+
+**Traces (U3).** A loop copied `/tmp/claude-eval-*/**/*.jsonl` every 0.3 s and was stopped by its literal PID.
+In all three final deliverables:
+- `decision/gauge-buffer-is-sized-for-the-sampling-interval` is listed as item 1 under "Corrections to other
+  records", with the wrong text quoted and the drafted fix (five minutes, 72 readings, 72 slots).
+- It is classified as an in-place amend, because the decision stands and only its figures change.
+- The premise the agent could not check (the spec's 5-minute figure against firmware) is stated beside the fix.
+- There is no task or follow-up offer, and nothing was written before an explicit ask for acceptance.
+
+The judged failure in run 1 is on a deliverable of the same shape as the two that passed, so it reads as judge
+variance on the `llm` grader rather than a behavioural miss. That is a reading, not a measurement.
+
+**Real state around the run.** Sha256 of `~/.local/state/lore/` and `~/.config/lore/` (excluding `.git/`) at
+12:28 and 12:35. `~/.config/lore/` is unchanged, and no vault file carries a fixture term.
+
+| Path | Source |
+|---|---|
+| levr `spec/elevated-actions-need-a-fresh-passkey-wherever-they-are-requested` | levr `4b46597f` (12:34), another session's publish |
+| levr `task/an-environment-picks-up-a-code-change-by-rebuild-…` | levr `a97e5e89` (12:35), another session's publish |
+| trailhead `lesson/run-one-pilot-capture-…` and seven `task/…` records (capture-scan, code-review verdict words, eval-arm pins, consult calibration re-measure, rough-edge findings, shared-finding contract, spec-review outcome line) | trailhead `4ccc7088` (12:34), another session's publish |
+| default `session/3bca27eb-….{md,json}` | default `4f4e61e7` (12:34), another session's flush |
+| `index.sqlite`; `publish/{levr,trailhead}-*.{log,request,json}` | derived index; the publish worker, triggered by the commits above |
