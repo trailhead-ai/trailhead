@@ -1,0 +1,16 @@
+I'd go with the **collapsed "Have a code?" link under the totals**.
+
+**Why abandonment favours it:** for most shoppers, the risk isn't where the field sits but that it can be seen at all. An empty promo box tells people who have no code that a discount exists. Some of them leave to search coupon sites and never return, or come back with a code that cuts your margin. So the more prominent the box, the more often that happens.
+
+- **Collapsed link under the totals (my pick):** code holders still find it, right where they're checking the price. Everyone else barely notices it. The cost is one extra click, and the link has to be easy to see, because people who have a code and can't find the box also leave.
+- **Input above the item list:** easiest for code holders, but it's the first thing every shopper sees. That makes it the option most likely to start a coupon hunt, and it pushes the items down.
+- **Field inside the payment step:** it's hidden while people are deciding, which is good. But people who expected to enter a code earlier may leave before they reach payment. The total also changes at the moment they commit, and code errors get mixed in with card errors.
+
+**Exceptions:** if you send out a lot of codes (email campaigns, influencer codes), many shoppers arrive with one in hand. Then visibility matters more, and a box above the items becomes reasonable. Pre-applying codes from links (`?promo=XYZ`) helps in every layout. If you can run a test, compare A against B and measure completed orders and margin together, not just how often codes get used.
+
+I drew the three options as a scratch pad:
+
+http://127.0.0.1:7314/bramble-ws-quill/promo-code-placement/
+Local to this machine only — this link works only on this host (no camp host identity: no self_name in <run>/xdg-config/camp/hosts.toml) and dies with the bramble-ws-quill workspace.
+
+So, which placement do you want: the collapsed link, the input above the items, or the field in the payment step? It would also help to know roughly what share of your orders use a code today. On the pad you can pick an option, mark the ones you don't want and add a note, then press "Copy reply" and paste the result here. A typed answer works just as well.

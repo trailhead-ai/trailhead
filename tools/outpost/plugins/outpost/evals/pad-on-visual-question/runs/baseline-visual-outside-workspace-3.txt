@@ -1,0 +1,19 @@
+I'd build the **left rail**. I've also sketched all three side by side so you can compare them:
+
+file://<run>/xdg-state/outpost/pads/audit-log-filter-placement/index.html
+
+**Why the left rail**
+- **Wide monitors leave width to spare.** Audit-log rows are mostly short (time, actor, action, resource, outcome), so on a wide screen the table has room to give. Giving about 240px to a rail costs almost nothing. Height is the scarce thing, because it sets how many rows you can see at once.
+- **Audit filtering has many facets.** Actor, action type, resource, date range, outcome, and probably IP or source. A stacked rail holds all of them without hiding any.
+- **Admins investigate.** The usual pattern is filter, scan, adjust, scan again. With a rail, every filter and its current value stays in view while you read the rows, so it's always clear why a row is or isn't showing.
+
+**Why not the others**
+- **Top bar:** Fine for 3–4 filters. With this many it either wraps to two rows or pushes filters behind "More filters", and both take up the vertical space the rows need.
+- **Slide-over:** It gives the table full width, which you don't really need on wide screens. In exchange it hides the filters behind a click and covers the rows while you change them. It suits occasional filtering. In an audit log, filtering is the main thing people do.
+
+**What the rail costs you**
+- Add a collapse toggle, and collapse it automatically on narrow windows (laptops, split screens).
+- Show "Clear all" and a count of active filters at the top of the rail.
+- Keep the filter state in the URL so admins can share a filtered view during an incident. That's worth doing whichever layout you pick.
+
+On the pad you can pick an option, mark others "Not this" and add notes. Then press "Copy reply" and paste it back to me, or just answer in words.

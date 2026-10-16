@@ -1,0 +1,24 @@
+Numbered list down the left it is. Your typed answer settles it, so the sketch page isn't needed anymore.
+
+I can't name a first change in the wizard's code yet, because the code isn't here. This directory (`<run>/project`) has only a `README.md` that says "ledgerlight — A small invoicing web app." There's no source, no wizard component, and it isn't a git repo. I'd rather not invent file names or line numbers.
+
+Wherever the wizard lives, this is what I'd change first: **put the steps in one ordered list in the code, and build both the wizard and the side list from it.** Something like:
+
+```js
+const STEPS = [
+  { id: "business", label: "Business details", component: BusinessStep, isComplete: s => !!s.businessName },
+  { id: "tax",      label: "Tax settings",     component: TaxStep,      isComplete: s => !!s.taxRegion },
+  // ...
+];
+```
+
+The numbered list needs this to exist. It shows every step's name, number and state (done / current / not started) at once, so it needs all the steps up front. Wizards usually spread that across a `switch (step)` or a chain of `if`s with hard-coded "Next" targets, which only knows the current step. With the list in place:
+
+- The side list is just `STEPS.map(...)`. Numbers come from position, and "done" comes from `isComplete`.
+- Next and Back become `index ± 1` instead of hard-coded jumps.
+- Clicking a finished step in the list to go back is a single check (allow it if every earlier step is complete).
+- Adding or reordering steps later is a one-line change.
+
+The visual side list comes second. Doing it first means hard-coding a label list that will drift from the real flow.
+
+Tell me where the ledgerlight source is (another path, or a repo to clone) and I'll find the wizard and make this change against the real code.

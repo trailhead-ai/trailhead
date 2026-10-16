@@ -1,0 +1,2 @@
+pads: xdg-state/outpost/pads/audit-log-filters
+tool calls: Skill, Write, Bash

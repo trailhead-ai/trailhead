@@ -1,0 +1,18 @@
+I'd go with **a row of chips above the list**.
+
+**Why chips work for about a dozen tags:**
+- **Everything is visible.** Twelve tags fit in one or two rows, so people can see what's available without opening anything. With a dropdown, nobody knows the tags exist until they click it.
+- **One click, and the state shows.** Clicking a chip toggles it, and selected chips look selected. You can tell the list is filtered at a glance, which is the most common gap in filter UIs. Dropdowns are bad at this. They usually collapse to "Tags (3)" and you have to open them to see which three.
+- **It's close to what it affects.** The chips sit right above the list they filter, so cause and effect are obvious.
+
+**Why not the others:**
+- **Toolbar dropdown:** Use it if toolbar space is tight or tag counts vary a lot. For about 12 tags it hides too much and adds a click every time. It also has the "is something filtered?" problem. Fall back to it only if some workspaces regularly have 30+ tags.
+- **Sidebar section:** This makes sense if the sidebar is already a navigation tree, where tags act like saved views or folders and people switch between them. It costs permanent horizontal space, and it puts filter state far from the list. It also blurs "where am I" with "what am I filtering by." If your sidebar already holds folders, mixing tags in there tends to confuse people.
+
+**Details that matter with chips:**
+- Decide early whether multiple chips combine with AND or OR, and say so in the UI. OR within tags is the usual expectation.
+- Add a "Clear" affordance once anything is selected.
+- Plan for overflow. Past about 2 rows, collapse the rest behind a "+N more" chip instead of letting the row grow without limit. This also covers the occasional workspace with many tags.
+- Sort chips by usage or alphabetically, and keep the order stable so they don't move around under the cursor.
+
+**One question back:** is the sidebar already a folder/navigation tree, and do people use tags more like *places* ("my drafts," "client X") than *filters*? If they do, the sidebar becomes the stronger choice. Otherwise, go with chips.

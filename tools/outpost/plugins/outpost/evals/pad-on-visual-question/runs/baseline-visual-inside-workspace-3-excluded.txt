@@ -1,0 +1,25 @@
+I recommend the collapsed **"Have a code?" link under the totals**.
+
+I built a scratch pad with drawings of all three layouts. Something unexpected happened along the way: a round file was already sitting at `<tmp>`, my write was refused, and the pad was built from that file instead of mine. I read it afterwards. It sets out the same three options, with the same recommendation and nearly the same wording, so I kept the pad rather than rebuilding it.
+
+http://127.0.0.1:7314/bramble-ws-quill/promo-code-placement/
+Local to this machine only — this link works only on this host (no camp host identity: no self_name in <run>/xdg-config/camp/hosts.toml) and dies with the bramble-ws-quill workspace.
+
+It's published from this host, inside the `bramble-ws-quill` workspace, and isn't shared with teammates.
+
+**Why the collapsed link**
+
+The real risk to abandonment isn't people with a code failing to find the field. It's people *without* a code seeing an empty box and deciding they're overpaying. They leave to search coupon sites, and some never come back. A visible field also makes everyone who skips it feel they're missing out.
+
+- **Collapsed link under the totals:** easy to miss for anyone not looking for it, and a shopper holding a code checks the total first, so the link is right there. The cost is one extra click, and the total has to update the moment the code applies.
+- **Input above the item list:** the most visible spot, which is also the worst for coupon-hunting. It's the first thing on the page and it's empty.
+- **Field inside the payment step:** too late. People who arrive with a code (from an email or an affiliate link) spend the earlier steps unsure whether they can use it. They only see the discounted price after they've started entering card details, and doubt at that point causes abandonment of its own.
+
+**Two refinements, whichever you pick**
+
+- If a code arrives in the URL (an email campaign or affiliate link), apply it automatically and show it as applied. Those shoppers then never touch the field.
+- Give clear inline errors for invalid or expired codes, and keep the rest of the summary in place. A bad code shouldn't feel like a dead end.
+
+**When I'd choose differently:** if most of your traffic arrives with codes (heavy affiliate or influencer traffic), an open field under the totals is worth testing against the collapsed link. This is a good candidate for an A/B test with checkout completion as the metric, rather than code usage.
+
+On the pad you can pick an option, mark others "Not this", or add a note, then press "Copy reply" and paste the result here. Replying in plain words works just as well.

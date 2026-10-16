@@ -1,0 +1,41 @@
+I'd go with **a shared base file plus a small override file per environment**, with a few rules that keep the base file from turning into a merge hotspot. Here's how each option does on diffs and merge collisions.
+
+### How each option behaves
+
+| | Clean diffs | Merge collisions | Main weakness |
+|---|---|---|---|
+| **One big YAML** | Poor. Every change lands in one long file. Anchors (`<<: *defaults`) mean a one-line edit can change several environments without the diff showing it. | Worst. Git merges by nearby lines, so two people editing next to each other collide even when they're working on different environments. | Everyone edits the same file all the time. |
+| **One file per env in `conf.d/`** | Very clear. The diff is exactly what that environment gets. | Fewest collisions for env-specific work. | A change meant for every environment touches N files with N matching hunks. The files drift apart over time, and reviewers can't easily see whether every environment was updated. |
+| **Base + overrides** | Small, meaningful diffs. A change for everyone is one hunk in the base; a change for one environment is one hunk in its override. | Low. Override files rarely collide. The base is the only shared file. | A base diff doesn't show its effect on each environment, and deep-merge rules (lists especially) can surprise you. |
+
+### Why base + overrides wins for what you care about
+
+It's the only layout where the diff size matches the size of the intent: one hunk for a change that applies everywhere, one hunk for a change to one environment. `conf.d/` handles the second case well but turns the first into N hunks. In practice, N-file changes are the ones that both collide and drift.
+
+### Rules that make it work
+
+1. **Use maps instead of lists for anything an environment might override.** Write `services: {api: {...}, worker: {...}}` rather than `services: [ {name: api, ...} ]`. Most mergers replace a list wholesale, which forces an override to copy the whole list and brings back drift. Maps also merge better in git, since an insertion doesn't shift its neighbours.
+2. **Keep keys sorted and write one value per line.** No flow style (`{a: 1, b: 2}`) and no inline lists. When two people add keys, they then land in different places instead of both at the end of a block.
+3. **Overrides should only hold differences.** If an override repeats a base value, delete it. CI can check this.
+4. **Split the base by concern once it gets crowded**, for example `base/{network,services,observability}.yaml`. That fixes the single-hotspot problem without going back to per-env duplication.
+5. **Have CI render the effective config for each environment and diff it on every PR.** This fixes the one real weakness: reviewers see "this base change alters prod and staging like so." You can also commit the rendered files, but if you do, generate them and never hand-edit them, or they'll cause merge conflicts of their own.
+6. **Skip YAML anchors and aliases across sections.** Inheritance should happen in the base/override merge, where everyone can see it.
+
+A suggested layout:
+```
+deploy/
+  base/            # or a single base.yaml until it gets busy
+    services.yaml
+    network.yaml
+  envs/
+    dev.yaml
+    staging.yaml
+    prod.yaml
+```
+
+### When I'd pick something else
+
+- **`conf.d/` per env:** if your environments are mostly different, with little real sharing (say different clouds or topologies). Then a base file would just be shared fiction.
+- **One big file:** only if there are 2–3 environments, one or two people editing, and the whole file still fits on a screen. That's not your situation.
+
+The deciding question is how much of the config is the same across environments. If it's well over half, which is typical, go with base + overrides. If it's under about a third, `conf.d/` is simpler and just as clean. If you tell me how many environments you have and roughly how much they differ, I can sketch the files and the CI render-and-diff step. Your working directory only has a README right now, so there was no existing config for me to look at.

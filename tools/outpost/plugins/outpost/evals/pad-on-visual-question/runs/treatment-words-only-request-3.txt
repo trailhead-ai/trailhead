@@ -1,0 +1,23 @@
+I'd go with **a row of chips above the list**.
+
+**Why chips work at about a dozen tags**
+- Twelve short tags fit in one or two rows. Every option stays visible, and filtering takes one click with no menu to open.
+- The chips also show which tags are active, right next to the results they're filtering. You can see what's applied without opening anything.
+- Turning several tags on and off is easy. That's the main thing people do with a tag filter, and it's awkward in a dropdown.
+
+**Why not a toolbar dropdown**
+- It hides the choices behind a click, and it hides the active filter state too. You'd need a badge or a count on the button just to show that something is filtered.
+- Selecting several tags in a dropdown means a checkbox menu that opens and closes repeatedly. That's fine for 40+ tags, but more effort than a dozen needs.
+- The toolbar is better kept for actions like new, upload and sort. A filter mixed in there is easy to miss.
+
+**Why not a sidebar section**
+- It's a good choice if tags work like places you go, like folders or saved views, or if the sidebar already holds other filters.
+- But it puts the filter far from the list it changes, and it competes for space with the folder tree. In a file browser, the sidebar usually means "where am I," not "what am I narrowing down."
+
+**Things to plan for with chips**
+- **Overflow:** limit the row to one line and add a "+N more" chip that expands it. Some workspaces will go past a dozen.
+- **Clearing:** add a "Clear" link once any chip is active.
+- **AND vs. OR:** decide this when you build it and say it in the UI. OR is what most people expect for tags.
+- **Order:** sort the chips by how often they're used, or pin the most-used ones, so the row stays scannable.
+
+**If tag counts grow a lot** (say 30 or more in some workspaces), switch to a dropdown with a search box. Keep showing the active tags as removable chips above the list, so the filter state stays visible.

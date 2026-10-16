@@ -1,0 +1,14 @@
+**Recommendation: build the grid, with channels as columns and event types as rows.**
+
+Notification preferences are a two-dimensional matrix: event × channel. The grid is the only option that shows the whole matrix at once.
+
+- **Tabs per channel:** you can't compare across channels. Setting "Mentions everywhere" means visiting every tab, and people forget the settings on tabs they never open.
+- **Long list by topic:** the channel toggles repeat under every heading. The list grows as events × channels and becomes a long scroll that's hard to scan.
+- **Grid:** the full state fits on one screen. It's easy to scan along a row (one event on every channel) or down a column (everything on one channel). It also makes per-column "all on/off" controls easy to add.
+
+The grid has costs. On mobile it needs a fallback that collapses each event into its own row of channel toggles. It gets cramped past about 4–5 channels. Each cell needs an accessible label (event + channel).
+
+I drew the three options as a scratch pad:
+file://<run>/xdg-state/outpost/pads/notif-prefs-layout/index.html
+
+**Open question for the user:** grid, tabs, or long list? They can pick on the pad and paste its "Copy reply" back, or just answer in words.

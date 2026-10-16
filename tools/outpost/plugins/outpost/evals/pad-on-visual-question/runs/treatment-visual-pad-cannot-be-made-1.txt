@@ -1,0 +1,13 @@
+I couldn't make the sketch pad. Publishing was refused with: `scratch-pad: publish: error: sites directory is a symlink, refusing to publish through it: <run>/xdg-state/camp/bramble/worktrees/ws-quill/sites`. That's a guard on purpose, so I didn't try to work around it. Someone should check where that symlink points before trusting it.
+
+**My recommendation: the numbered list down the left edge.**
+
+People who quit halfway usually quit because they don't know what's left or how much longer it will take. The three options handle that differently:
+
+- **Numbered list on the left.** It names all five steps, such as "3 Tax & currency, 4 Payment methods, 5 First invoice", so at step 2 the rest looks short and predictable. Finished steps get a tick, which feels like progress, and people can click back to fix an earlier answer without losing their place. The costs: it takes about 200px of width, and on small screens you'd need a fallback, usually a compact row of steps along the top.
+- **Progress bar across the top.** It shows how far along someone is but not what's left. "40%" with unnamed steps can feel longer than it is, and a bar that jumps unevenly between steps makes it worse. It's cheap and compact, but it does little for this particular problem.
+- **"Step 2 of 5" text only.** It's the least clutter and the least work, but it tells people nothing about what's coming. It's the weakest of the three for people quitting partway.
+
+**One caveat:** an indicator won't help if the drop-off has a specific cause. If people quit at step 3 because it asks for something they don't have to hand, like a tax ID or bank details, that's the real fix. Check whether support or your analytics show which step loses people. If it's one step, also let people save and come back later, or skip that step and finish it afterwards.
+
+**So: does the left-hand numbered list work for you, or is there a reason to keep it narrower (lots of mobile users, or an embedded or narrow layout) that would push you to the top bar?** And do you know which step people actually leave on?

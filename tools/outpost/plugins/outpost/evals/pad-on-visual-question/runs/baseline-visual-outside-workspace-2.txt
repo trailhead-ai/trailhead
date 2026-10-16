@@ -1,0 +1,20 @@
+I'd build the **left rail**.
+
+I drew all three options so you can compare them side by side:
+
+file://<run>/xdg-state/outpost/pads/audit-log-filters/index.html
+
+**Why the left rail:**
+- **Wide monitors have room to spare sideways.** A rail about 240px wide costs little horizontal space and leaves the table at full height. Admins scan a lot of rows in a log, so height matters more than width.
+- **Audit logs need a lot of filters.** Date range, actor, action, resource and outcome, plus probably IP or tenant later. A rail stacks these easily, and new filters can be added without redesigning anything.
+- **Filters stay visible while you work.** Investigating a log means changing one filter and watching the rows update, over and over. The rail lets you do that without opening or closing anything, and you can always see what's applied.
+
+**Why not the others:**
+- **Top bar:** It takes vertical space, which the table needs most. It works for 3–4 filters, but beyond that it either wraps onto a second line or pushes filters into a "More ▾" menu where you can't see what's set. Pick it only if you're sure there will never be more than about 4 filters.
+- **Slide-over panel:** It gives the table full width that a wide monitor doesn't need. It hides the filters behind a click and covers rows while it's open, which breaks the change-and-watch loop. It suits narrow or mobile screens, which isn't your case.
+
+**Two details worth deciding with the rail:**
+1. Let users collapse the rail for the occasional narrow window.
+2. Show active filters as removable chips above the table. People can see what's applied at a glance, and you can put the filter state in the URL so a filtered view can be shared.
+
+On the page you can pick an option, mark options "Not this" and add a note, then press "Copy reply" and paste the result back here. Replying in words works just as well.

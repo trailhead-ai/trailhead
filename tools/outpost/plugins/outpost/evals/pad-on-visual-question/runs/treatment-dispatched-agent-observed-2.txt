@@ -1,0 +1,15 @@
+**Build the grid: event types as rows, channels (email, push, SMS, in-app) as columns, with a checkbox in each cell.**
+
+Why:
+- **It matches how the data is shaped.** A preference is a pair: one event type and one channel. The grid shows every pair at once, so users can scan across a row ("how do I hear about mentions?") or down a column ("what reaches my phone?").
+- **Tabs per channel hide too much.** To see how one event is handled, users have to click through every tab and remember what they saw. It also tends to produce the same event list on every tab, which drifts out of sync.
+- **The long list grows too fast.** It needs events × channels toggles, so 10 events and 4 channels already means 40 rows. Comparing channels becomes hard.
+
+Caveats to build in:
+- Group the rows under topic headings. This borrows the useful part of the list option.
+- Add an "all/none" control to each column header, so a whole channel can be muted at once.
+- Disable, rather than hide, cells where a channel doesn't support an event.
+- On mobile, or with more than about 5 channels, fall back to a stacked layout: one card per event, with channel toggles inside it.
+- Each checkbox needs an accessible label naming both the event and the channel.
+
+I didn't draw sketches of the three layouts, because you can only read this text. The project folder holds only a README, so this is based on general UX reasoning, not on the existing code.

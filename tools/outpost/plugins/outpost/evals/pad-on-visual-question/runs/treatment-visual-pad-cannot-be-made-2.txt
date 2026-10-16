@@ -1,0 +1,21 @@
+I tried to sketch the three options as a scratch pad, but it wasn't created: the publisher won't write through a symlinked `sites/` directory.
+
+```
+scratch-pad: publish: error: sites directory is a symlink, refusing to publish through it: <run>/xdg-state/camp/bramble/worktrees/ws-quill/sites
+```
+
+I didn't change that symlink. It may have been set up on purpose, so take a look when you get a chance. Here's the comparison in words instead.
+
+**My pick: the numbered step list down the left edge.**
+
+When people quit halfway, it's usually because they don't know what's still coming. They're on step 2 or 3, can't tell whether the rest takes two minutes or needs their bank details, and leave. Only the step list answers that:
+
+- **A. Progress bar across the top.** It shows how far along someone is, but not what's left. "40% done" doesn't tell them step 4 asks for a payout account. It's compact and fine for short, predictable flows. It probably won't fix this drop-off.
+- **B. Numbered list on the left.** Every step is named (Account, Business details, Payments, Invoice template, First invoice), with finished steps checked and the current one highlighted. People can see the end, and if steps are clickable they can go back and fix things. It costs about 200px of width and needs a collapsed version on mobile, such as "Step 2 of 5: Business details ▾".
+- **C. Plain "Step 2 of 5".** It's the cheapest option and looks clean, but a bare count is the least reassuring. Nobody knows what steps 3–5 involve, which matches the problem support is describing.
+
+Two things will likely help with abandonment more than the indicator itself:
+1. **Find out where people actually quit.** If one step loses most users (often payments or bank details), fix that step: let people skip it, or say upfront that they'll need that information.
+2. **Save progress and let people resume.** Someone who leaves at step 3 should land back on step 3, not step 1.
+
+**Which would you go with: A, B, or C?** Or tell me roughly where in the five steps people drop off and I'll adjust the recommendation. A plain answer works fine. If you fix the `sites/` link and want the sketches, I can build the pad then, and its "Copy reply" output can be pasted back here.

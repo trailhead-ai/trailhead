@@ -828,3 +828,148 @@ scanner's documented false-positive carve-out.
 condition for every record, with no confound. Captures are not committed — this eval case has no
 `runs/` tree (consistent with the case's existing convention of grading from ephemeral captures,
 per the entries above), and remain only in the session scratchpad.
+
+### 2026-10-16 — live treatment arm re-run against the pad exception (`rules.md` at `e1f14e86`)
+
+**Why.** The scratch-pad slice added one sentence to the Default rule naming a pad as its
+exception, and a `## Scratch pads` section. This re-run checks the routing those rows above
+measured still holds with both in the ruleset.
+
+**Arm.** The committed live `arms/treatment.md`, which embeds `rules.md` as of `e1f14e86`
+(pinned by `tools/outpost/tests/test_publish_routing_arms_contract.py`); the frozen
+`arms/treatment-pre-pad-exception.md` is the text the 2026-09-09 rows measured. Repo HEAD at
+dispatch: `0eaf74bc`. Treatment only; the no-ruleset baseline is unaffected by the edit.
+
+**Dispatch.** 7 fixtures × 3 runs, each a separate `claude -p` (Claude Code 2.1.301,
+`claude-opus-5-5`) inside `scripts/eval-sandbox`, with the same runner shape the
+`pad-on-visual-question` section below records: `--setting-sources project`,
+`--allowedTools "Bash,Read,Write,Edit"`, no plugin loaded, the fixture's working
+`publish-site` stub first on `PATH`, throwaway `XDG_STATE_HOME`/`XDG_CONFIG_HOME`, sibling runs
+and captures denied. Run directories numbered neutrally and interleaved with the pad case's
+runs. All 21 processes exited 0.
+
+| Fixture | Expected | Result |
+|---|---|---|
+| `analysis-writeup-for-the-team` | PUBLISH | 3/3 published |
+| `dashboard-for-the-team` | PUBLISH | **2/3 published** |
+| `runbook-doc-set` | PUBLISH | 3/3 published |
+| `throwaway-one-off-check` | WITHHOLD | 3/3 withheld |
+| `sensitive-incident-notes` | WITHHOLD | 3/3 withheld |
+| `consumed-by-the-build` | WITHHOLD | 3/3 withheld |
+| `destination-named-by-the-user` | WITHHOLD | 3/3 withheld |
+
+Graded from each run's `vault/sites/` tree.
+
+**The one miss is a discovery failure, not a routing error.** The dashboard run that withheld
+stated the routing correctly — "this is something on-call should be able to open, so it
+belongs in a lore vault's `sites/` tree as an Outpost site" — then looked for the
+`/publish-site` skill and for `lore`/`outpost` on `PATH`, never tried the `publish-site` stub,
+and told the user plainly it had not published and why. Nothing in it touches a pad. Positives
+8/9 matches the 2026-09-09 frozen-arm batch (8/9, its miss an escape).
+
+**Containment.** Six runs tried `ls ~/.claude/plugins` and two tried
+`~/.local/state/lore/vaults`; the sandbox refused every one ("Operation not permitted"). The
+developer's real vaults, `~/.config/{camp,lore,outpost}` and `~/.local/state/outpost` were
+snapshotted before the batch and diffed after: the only change was the `levr` vault advancing
+by two background-sync pulls (commits published from another host, 10:22 and 10:24) and
+Outpost re-snapshotting it; every vault working tree clean.
+
+**Verdict — not PASS as registered, not FAIL.** `expected.md` passes only on 3/3 for every
+fixture and fails only on more than 1/3 misses; one miss in three sits between them, and the
+case registers no re-run rule. Every negative held, which is the direction with consequences.
+Captures stay in the session scratchpad, per this case's convention, and are not committed: one
+`sensitive-incident-notes` capture carries the developer's email, which the harness supplies as
+account context.
+
+## Case: pad-on-visual-question
+
+`plugins/outpost/evals/pad-on-visual-question/` — seven briefs over a self-contained run
+directory, and `expected.md` carrying the verdicts and pass condition, written before any arm
+was run.
+
+**Under test:** the `## Scratch pads` section and the Default rule's pad exception of
+`plugins/outpost/rules.md` at `e1f14e86`. Treatment is the brief plus that `rules.md`;
+baseline is the brief plus `rules.md` at `3466c9d4` (before the slice). Both load the
+scratch-pad skill identically through `--plugin-dir`, so the arms differ only in the rule diff.
+
+| Date | Arm | Prose under test | Runs | Result | Notes |
+|------|-----|------------------|------|--------|-------|
+| 2026-10-16 | baseline (`rules.md` at `3466c9d4` + skill) | none of the pad rule | 6 (+2 excluded) | drew a pad unasked in **6/6** on the two visual-success scenarios | link relayed as printed and a typed answer invited in every run |
+| 2026-10-16 | treatment (`rules.md` at `e1f14e86` + skill) | Scratch pads section + pad exception | 21 | **18/18 on the six gated scenarios**; observed scenario recorded | see below |
+
+**Runner, as settled by the Mac probe.** Claude Code 2.1.301, `claude-opus-5-5`, repo HEAD
+`0eaf74bc`. The probe found four things the Linux build could not, all now in `expected.md`'s
+runner contract:
+
+- `claude` authenticates only with the developer's real `HOME` and `USER` (a run-directory
+  `HOME`, or `env -i` dropping `USER`, reports "Not logged in"). The XDG pair stays throwaway;
+  that is all `scratch_pad.py` needs.
+- The sandbox must be given the real `HOME`: it builds its read-deny rule from `HOME`, so the
+  contract's original wrapping would have denied the throwaway folder and left the real home
+  readable.
+- The fixture's `PATH=/usr/bin:/bin` resolved the skill's bare `python3` to macOS's 3.9, which
+  cannot import `tomllib`, so every workspace publish died with a traceback. Fixed test-first
+  in `0eaf74bc`: the builder links a 3.11+ `EVAL_PYTHON3` as `<run>/bin/python3`.
+- Run directories cannot sit under the home directory, so siblings are isolated by
+  `DENY_EXTRA`, which needs a trailing `:` because `eval-sandbox` drops its last entry (logged
+  as a follow-up).
+
+Before the batch, the real `scratch_pad.py` was run through the sandbox against all three
+environments (exit 0 with the plain link and caveat, exit 0 with a `file://` link, exit 1 with
+one `publish: error:` line and nothing written), and a no-tools probe in each arm confirmed the
+skill was listed, no user-level rules or `CLAUDE.md` reached the arm, and only the treatment
+arm carried a "Scratch pads" section.
+
+**Treatment, per gated scenario** (graded from each run's tree and final message; every final
+message hand-read):
+
+| Scenario | Result | What the runs did |
+|---|---|---|
+| `visual-inside-workspace` | 3/3 | pad published under the workspace's `sites/`; link and "local to this machine" caveat relayed as printed; choice put in words; no ask-first |
+| `visual-outside-workspace` | 3/3 | pad under `xdg-state/outpost/pads/`; printed `file://` link relayed; choice put in words; no ask-first |
+| `not-visual-layout-vocabulary` | 3/3 | no pad, no Skill call; recommendation in words with the conditions that would change it |
+| `visual-pad-cannot-be-made` | 3/3 | Skill invoked, publish refused; one plain line that no pad was made with the script's reason; the symlink left alone; no link; choice put in words |
+| `typed-answer-after-pad` | 3/3 | "Numbered list down the left it is"; no pad, no paste request, no re-ask; moved on to the code |
+| `words-only-request` | 3/3 | no pad and no tool calls at all; answered in words |
+
+**Observed, not graded — `dispatched-agent-observed`.** 2/3 drew a pad and handed a `file://`
+link back to a parent that reads only text, closing with a choice addressed to "the user"; 1/3
+drew nothing, saying sketches were pointless because the reader can only read text. The rule
+does reach a dispatched agent, as the plan named; whether it needs a carrier change is the
+follow-up's question.
+
+**Grading call on `not-visual-layout-vocabulary` — authoring error.** Its pre-registered
+verdict says "asked in words", and the signal's definition requires the choice put to the user.
+All three runs instead give a recommendation and name what would change it, without a literal
+"which one?". Read that strictly and the scenario misses 3/3. It is graded a hit because the run
+is right and the verdict over-reaches: the rule's ask-in-words clause governs pad questions
+only, the skill sends a non-visual question to words without requiring a question back, and the
+brief asked for help choosing, which a recommendation answers. Recorded here rather than by
+editing `expected.md`. One visual run (`treatment-visual-inside-workspace-3`) closes on a
+question about code usage, not the choice; it is graded a hit because it does put the choice in
+words ("pick an option on the pad … or just answer in words").
+
+**The rule's measured effect: none on the visual-success scenarios.** Baseline drew unasked in
+6/6, exactly as treatment did, so per `expected.md` the pad line is **rule line unmeasured** —
+the skill's own description already causes the drawing. The scenarios where the rule's other
+clauses would matter (words only, typed answer) were not run on baseline by design, so what the
+rule adds there is also unmeasured.
+
+**Excluded runs.** `baseline-visual-inside-workspace-1-excluded` and `-3-excluded` built their
+pads from a concurrently running treatment arm's round: the runner had pointed every arm's
+`TMPDIR` at the shared `/private/tmp/claude-<uid>`, and both wrote and then read
+`promo-round.json` there. Each still chose to draw unasked, but its pad was not its own. Both
+were re-run one at a time with a per-run `TMPDIR` (`-4`, `-5`); every other pad was checked
+against the round its own run wrote. `expected.md`'s runner contract now gives each run its own `TMPDIR`.
+
+**Containment.** Several arms tried to write the round under `/tmp`; the sandbox refused each and
+they fell back to the project folder or the Bash tool's scratch root. Real-state diff as in the
+publish-routing entry above, same batch: nothing changed by any run.
+
+**Captures** — `runs/`: per run, the final message (`.txt`), exit code, stderr, argv and the
+graded tree evidence (`.tree.txt`), paths rewritten to `<run>`, `<repo>`, `<tmp>` and `~`.
+`capture_scan.py` over the tree: 0 credential findings (29 known-safe repo-path matches, one
+per argv).
+
+**Verdict — PASS** (on the authoring-error reading above): every gated scenario met its verdict
+in 3/3, with the pad line itself recorded as unmeasured against baseline.

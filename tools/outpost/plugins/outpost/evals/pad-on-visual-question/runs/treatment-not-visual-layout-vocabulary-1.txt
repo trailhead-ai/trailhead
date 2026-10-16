@@ -1,0 +1,46 @@
+I'd go with **a shared base file plus a small override file per environment.** The project directory only has a README, so I had no existing config to look at. This advice is general and based on the two things you said matter: clean diffs and few merge collisions.
+
+### How the three layouts compare
+
+| | One big YAML | Separate file per env (`conf.d/`) | Base + per-env overrides |
+|---|---|---|---|
+| **Merge collisions** | Most. Everyone edits the same file, and changes to different environments often sit close enough to conflict. | Few. Changes to different environments touch different files. | Few. Most changes touch only one small override file. |
+| **Diff clarity** | Poor. A hunk often doesn't show which environment it's in, because the section header has scrolled out of the diff's context. | Good for each file, but a shared change shows up as N copies of the same edit. | Best. A shared change shows up once in `base`, and an env-specific change shows up only in that env's file. |
+| **Drift risk** | Low. Everything is in one place. | High. The copies quietly diverge, and diffing `prod` against `staging` turns into noise. | Low. Overrides are short, so any difference between environments is deliberate and easy to see. |
+| **Cost** | None | None | Needs a merge step, and you have to settle how lists are merged. |
+
+The per-env `conf.d/` layout does about as well on collisions, but it loses on diffs over time. About 80% of each file is the same as the others, so every shared change becomes a multi-file edit, and the files gradually stop agreeing. The base + override layout keeps the low collision rate and avoids that duplication.
+
+### Making base + override work well
+
+1. **Keep overrides small.** Put a value in an override only if it really differs for that environment. If an override grows to half the size of the base, something that should be shared has moved into it.
+2. **Pick one rule for merging lists and write it down.** This is the main trap. A deep merge usually replaces lists as a whole, so overriding a single entry means copying the full list. Where that would hurt, use maps keyed by name instead of lists, e.g. `services: {api: {...}, worker: {...}}`. Maps merge key by key, the diffs are cleaner, and two people editing different services won't collide.
+3. **Don't use YAML anchors or merge keys (`<<:`) across files.** They don't work across files, and they make it hard to tell where a value came from.
+4. **Commit the merged output, or generate it in CI.** Render each environment's final config, e.g. `rendered/prod.yaml`, and either commit it or diff it in CI. Then a PR that edits `base.yaml` also shows its real effect on every environment, so reviewers can see what a change does in the end, not just the edit.
+5. **Cut collisions further:**
+   - Sort keys within each file.
+   - Use one key per line, and avoid inline flow maps like `{a: 1, b: 2}`.
+   - Add a linter or formatter (e.g. `yamllint` plus a sort check) to pre-commit so formatting differences never show up in diffs.
+6. **If the base itself becomes a hotspot,** split it by concern instead of by environment, e.g. `base/networking.yaml` and `base/services.yaml`. People working on different things then edit different files.
+
+### Suggested layout
+
+```
+deploy/
+  base/
+    services.yaml
+    networking.yaml
+  envs/
+    dev.yaml
+    staging.yaml
+    prod.yaml
+  rendered/          # generated; committed or checked in CI
+    prod.yaml ...
+```
+
+### When the other two layouts make sense
+
+- **One big file:** only if you have two or three small environments and one or two people edit it. In that case it's the simplest option.
+- **Separate full file per environment:** if your environments really are mostly different, or if your deploy tooling can't merge files and you don't want to add a render step.
+
+If you tell me what consumes this config (Helm, Kustomize, Ansible, or your own loader), I can point you to its native override mechanism. Most of these already handle the base + override merge, so you wouldn't need to write one.

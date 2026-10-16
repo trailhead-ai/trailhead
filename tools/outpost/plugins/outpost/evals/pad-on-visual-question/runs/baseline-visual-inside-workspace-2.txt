@@ -1,0 +1,21 @@
+My recommendation is the **collapsed "Have a code?" link under the totals**.
+
+I drew all three options on a scratch pad, published to the `bramble-ws-quill` workspace on this machine:
+
+http://127.0.0.1:7314/bramble-ws-quill/checkout-promo-placement/
+Local to this machine only — this link works only on this host (no camp host identity: no self_name in <run>/xdg-config/camp/hosts.toml) and dies with the bramble-ws-quill workspace.
+
+**The abandonment risk.** An empty promo field tells every shopper that a discount exists and they don't have it. Some of them leave to search for a code, and some never come back. So the question is which option keeps that box out of sight for people without a code, while still letting people with one find it quickly.
+
+- **A: Collapsed link under the totals (my pick).** It barely registers if you don't have a code, and it sits next to the total it changes, so applying a code updates the price right there. The cost is one extra click for shoppers who have a code. That's a small cost, because they already know to look for it.
+- **B: Input above the item list.** This is the easiest to find, but it's also the worst for abandonment: it's the first thing on the page, so every shopper sees it. It's also far from the total, so the discount doesn't show where people are looking.
+- **C: Field inside the payment step.** Fewer people see it, but anyone with a code only sees their discounted price at the last step, which feels like a bait-and-switch. A rejected code also lands on the screen where people are most likely to give up. And both the summary and the payment step would need to handle pricing changes.
+
+**To get the most out of A:**
+- Apply the code inline without reloading the page.
+- Show the discount as its own line above the total.
+- Keep the field open once someone has expanded it.
+- Make the error message specific, like "This code expired on …", not just "Invalid code".
+- If most of your traffic comes from email or affiliate links, put the code in the link and apply it automatically. Then most shoppers never need to type one.
+
+On the pad you can pick an option, mark others "Not this", or add a note, then press **Copy reply** and paste the result here. Or just answer in words. If your analytics show how many orders use a code, that would help confirm the choice: if almost every order uses one, B becomes more reasonable.
