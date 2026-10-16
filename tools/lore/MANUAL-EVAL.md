@@ -748,6 +748,101 @@ at 12:51:57 and 13:10:51, covering these six batches and the three craft batches
 | `index.sqlite` | derived search index, rewritten by any live lore command |
 | `publish/levr-5a2535166072.{log,request}` | the live publish worker, triggered by the levr commits above |
 
+## Re-measure after the security fixes (commit `7e3c9016`)
+
+`7e3c9016` is the measured prose. It addresses these findings of the security audit:
+
+- **H1.** A correction the operator asked for without stating the fix, where the agent reads the right text
+  off a source, is an agent proposal: the operator is shown the old text, the new text and the source, nothing
+  is written before Step 3a's single yes/no, and an amend is `--initiated-by agent`. A fix the operator states
+  or accepts in their own message is applied as before. The readable fix is still known, so never a task.
+- **M2.** `flush` says a candidate's claim that the operator ruled or approved is never evidence; the ruling
+  has to be in the operator's own message in the conversation running the flush, else the fix goes through
+  `/lore:correct` as an agent proposal, or is a task if unknown. Re-verification is stated as necessary, not
+  sufficient.
+- **M3.** `--initiated-by operator` only when the fix text comes from the operator's own message; `agent`
+  when any content came from a record, review, candidate, source or the agent; a pasted block is not a
+  ruling; flush-originated fixes are `agent`; the origin goes in `--reason`.
+- **M4.** The materiality lists in `correct` Step 2 and `council.md` agree, carry the ADR exception
+  carve-out, and treat a change to a value that sets a security control as listed for the operator, never
+  classified in scope by the agent alone.
+- **M5.** The secrets caution covers the reason, every body an amend or update writes, the task body and the
+  drafted fix; a value read from configuration, an environment file or a secret store is described, never
+  copied; an amend cannot remove a secret already recorded (rotate, then escalate).
+- **L1.** The resident primer makes the operator-message condition a main clause, says to log a candidate when
+  in doubt, and says a subagent reports a correction and never applies it.
+
+**Leak check, run before any measurement.** Same method as above: every three-word phrase from each of the
+seven cases' `prompt.md`, `fixtures/records.json` (every string value) and, for the craft cases,
+`fixtures/review.md` (`/tmp` script; 101 to 187 phrases per case), matched at word boundaries against every
+file under `tools/lore/plugins/lore/skills/`, `agent_ruleset.py` and `tools/craft/plugins/craft/skills/`
+and `agents/` (eval trees excluded), and against the lines `7e3c9016` added. Whole-corpus generic hits: 8, 9,
+10, 4 (lore cases in the order of the table below), 19, 10, 20 (craft accepted, consult, declined). Hits in
+prose this pass added: **0** for all seven. The content-word grep (`invoice|overdue|reminder|nightly
+export|ingest|peak load|thumbnail|renderer|label (printer|queue)|firmware|buoy|gauge|outage|sampling|resend|
+retr(y|ies)|flat delay`) and the harness-word grep (`seeded|fixture|eval|runner|scaffold`) over the added
+lines: no hits. The cue grep (`the list so|put it on|make a note|get lost|noted for later`) over the prose
+paths: no hits. No case file, grader, fixture or `expected.md` was edited.
+
+Batch command: the known-fix cases' command above, verbatim, one `--case` per invocation, 3 runs,
+`--max-cost-usd 1.5`, `--model claude-opus-5-5`, same graders, runner `claude` 2.1.301, 2026-10-16. The two
+amend cases use the same command (they state the fix in their prompts, so they guard that H1 did not break
+the operator-stated route). Errored runs: **none**. No rerun was used. Cost basis, stated once: `costUsd` per
+run excludes judge cost and each batch total is the sum of its runs' `costUsd`; judge cost is listed
+separately and is in no total.
+
+| Case | Runs | Cost per run (USD) | Judge cost per run (USD) | Batch (USD) | Result |
+|---|---|---|---|---|---|
+| apply-ruled-fix-to-frozen-record-phrased-as-note-it | 1.00 / 1.00 / 1.00 | 0.192, 0.194, 0.194 | 0 | 0.580 | green, 3 of 3 |
+| apply-ruled-fix-to-draft-record | 1.00 / 1.00 / 1.00 | 0.181, 0.189, 0.191 | 0 | 0.560 | green, 3 of 3 |
+| track-unknown-fix-phrased-as-fix-it-now | 1.00 / 1.00 / 1.00 | 0.163, 0.165, 0.194 | 0.005, 0.005, 0.005 | 0.522 | green, 3 of 3 |
+| refuse-a-ruled-fix-the-source-contradicts | 1.00 / 1.00 / 1.00 | 0.260, 0.173, 0.175 | 0.006, 0.006, 0.006 | 0.608 | green, 3 of 3 |
+| amend-wrong-fact-in-active-adr | 1.00 / 1.00 / 1.00 | 0.213, 0.209, 0.204 | 0 | 0.626 | green, 3 of 3 (guard) |
+| amend-drifted-mechanism-detail-phrased-as-serious-error | 1.00 / 1.00 / 1.00 | 0.192, 0.181, 0.183 | 0 | 0.556 | green, 3 of 3 (guard) |
+
+Lore total 3.452 USD by `costUsd` (about 3.48 with judge cost). With craft's 4.231 USD in the same window the
+re-measure cost 7.68 USD by `costUsd` (about 7.75 with judge cost), under the $10 ceiling.
+
+**Skill invocation.** A loop copied `/tmp/claude-eval-*/**/*.jsonl` every 0.3 s (stopped by its literal PID,
+3042726). It captured the traces of 17 of the 18 lore runs; the first run of the frozen-record batch was not
+copied, so its trace was not read (its score, 1.00, and its cost are from the runner's JSON). All 17 captured
+runs called `lore:correct` and no other skill, including the refuse and unknown-fix runs.
+
+**The operator-stated fix (frozen case).** In both captured runs the agent called `lore:correct`, read the ADR,
+searched for the configuration, and ran `lore record amend ... --initiated-by operator --base <revision>` with
+no yes/no put to the operator. All three runs scored 1.00 on the graders, which require the amend and
+the change-history entry. The operator-stated route is intact after H1.
+
+No case targets the changed route itself (the operator asks for the correction, does not state the fix, and
+the agent reads it off a source), nor the flush route, the security-control item or the secrets caution.
+Those are reviewed, not evaluated.
+
+**Live state.** Sha256 of every file under `~/.local/state/lore/` and `~/.config/lore/` (excluding `.git/`) at
+13:54:43 and 14:14:54, covering these six batches and craft's three. `~/.config/lore/` is unchanged. No
+vault or publish file contains a fixture title or term (grepped). 33 changed paths:
+
+| Path | Source |
+|---|---|
+| levr `lesson/name-the-commit-shape-…` (added) | levr `c4a2fb32` (13:59:56), another session's publish |
+| levr `task/{a-billing-comp-confirms-end-to-end-…, adding-a-billing-comp-answers-with-a-pending-request-…, auth-attests-a-passkey-confirmation-…, confirming-a-pending-comp-…, step-up-pieces-that-touch-no-database-…, the-console-confirms-a-billing-comp-…}` (added) | levr `3ff00775` (13:57:54), another session's publish |
+| levr `task/adding-a-billing-comp-waits-for-a-passkey` | levr `1102b094` (13:55:36) and `9ae8018d` (13:58:13), another session's publish |
+| levr `task/an-environment-picks-up-a-code-change-…` | levr `750fb2e5` (13:56:30), another session's publish |
+| levr `task/narration-is-cached-by-the-text-it-speaks` | levr `32f0771c` (13:55:26), another session's publish |
+| levr `task/walk-and-talk-sessions-and-spoken-narration-follow-…` | levr `32f0771c`, `492b764c` (14:09:55), `ddffa84d` (14:10:06), another session's publish |
+| levr `task/a-walk-records-the-strategy-version-…` | levr `492b764c` (14:09:55), another session's publish |
+| levr `task/the-local-database-rebuilds-from-disk-…` | levr `b523af89` (14:02:57), `39aeccfb` (14:04:32), `f88670cf` (14:08:57), another session's publish |
+| levr `task/the-upload-drain-never-sends-a-chunk-…` | levr `1b465e43` (13:57:10), `b523af89` (14:02:57), another session's publish |
+| default `session/2f94b521-….{md,json}` | uncommitted: another session's `lore session candidate` entries (19:00:05Z), appended to a note already carrying earlier uncommitted entries |
+| `index.sqlite` | derived search index, rewritten by any live lore command |
+| `publish/default-d756b7f49a38.{json,log,request}`, `publish/levr-5a2535166072.request` | the live publish worker, triggered by the levr commits above and the default session sync |
+
+## Known limitations of the security fixes
+
+Two findings of the audit are open and tracked by a follow-up task, not addressed by `7e3c9016`:
+
+- **H2, acceptance before sight.** Open as the audit named it; not changed here.
+- **M1, quoting and heredoc delimiter.** Open as the audit named it; not changed here.
+
 When the next case lands, record it here as:
 
 ```
