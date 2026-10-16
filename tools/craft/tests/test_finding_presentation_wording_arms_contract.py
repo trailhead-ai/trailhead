@@ -12,6 +12,7 @@ Nothing here asserts the eval's measured result; that is decided by dispatched r
 
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 
@@ -54,6 +55,9 @@ CODE_REVIEW_BASELINE_REVISION = "7b5c65f9a00157e0aee884bdfb0f3fe0b99cdc29"
 # The commit carrying the code review contract edit: the treated code review arms and the four
 # regression arms read `council.md` (and, for the treated arms, their skill file) from here.
 CODE_REVIEW_EDIT_REVISION = "5eb4cdc92f7fe4115a641f64c8f1888f5afb4d19"
+
+# origin/main when the fix-shape sites were cut: the seven fix-shape baseline arms read every source here.
+FIX_SHAPE_BASELINE_REVISION = "c3f7b21e9a797c2794218cc19ef50a9060cc0b5d"
 
 PLUGIN = "tools/craft/plugins/craft"
 RULES = f"{PLUGIN}/rules.md"
@@ -180,6 +184,49 @@ ARM_SOURCES: dict[str, list[Source]] = {
     ],
 }
 
+ARM_SOURCES.update(
+    {
+        "fs-baseline-fsspecreview.md": [
+            (RULES, FIX_SHAPE_BASELINE_REVISION),
+            (GAUNTLET_SKILL, FIX_SHAPE_BASELINE_REVISION),
+            (GAUNTLET_DISPOSITIONS, FIX_SHAPE_BASELINE_REVISION),
+            (COUNCIL, FIX_SHAPE_BASELINE_REVISION),
+        ],
+        "fs-baseline-fsplan.md": [
+            (RULES, FIX_SHAPE_BASELINE_REVISION),
+            (PLAN_SKILL, FIX_SHAPE_BASELINE_REVISION),
+            (COUNCIL, FIX_SHAPE_BASELINE_REVISION),
+        ],
+        "fs-baseline-fsconsult.md": [
+            (RULES, FIX_SHAPE_BASELINE_REVISION),
+            (CONSULT_SKILL, FIX_SHAPE_BASELINE_REVISION),
+            (COUNCIL, FIX_SHAPE_BASELINE_REVISION),
+        ],
+        "fs-baseline-fsdriver.md": [
+            (RULES, FIX_SHAPE_BASELINE_REVISION),
+            (DRIVE_SKILL, FIX_SHAPE_BASELINE_REVISION),
+            (COUNCIL, FIX_SHAPE_BASELINE_REVISION),
+        ],
+        "fs-baseline-fsreview.md": [
+            (RULES, FIX_SHAPE_BASELINE_REVISION),
+            (REVIEW_SKILL, FIX_SHAPE_BASELINE_REVISION),
+            (COUNCIL, FIX_SHAPE_BASELINE_REVISION),
+        ],
+        "fs-baseline-fsbuildreview.md": [
+            (RULES, FIX_SHAPE_BASELINE_REVISION),
+            (EXECUTE_SKILL, FIX_SHAPE_BASELINE_REVISION),
+            (EXECUTE_PROCEDURE, FIX_SHAPE_BASELINE_REVISION),
+            (COUNCIL, FIX_SHAPE_BASELINE_REVISION),
+        ],
+        "fs-baseline-fsdrivebuild.md": [
+            (RULES, FIX_SHAPE_BASELINE_REVISION),
+            (DRIVE_SKILL, FIX_SHAPE_BASELINE_REVISION),
+            (EXECUTE_PROCEDURE, FIX_SHAPE_BASELINE_REVISION),
+            (COUNCIL, FIX_SHAPE_BASELINE_REVISION),
+        ],
+    }
+)
+
 
 @pytest.mark.parametrize("arm_name", sorted(ARM_SOURCES))
 def test_arm_composed_from_its_manifest_equals_the_committed_file(arm_name: str):
@@ -243,7 +290,15 @@ def test_report_labels_reads_headings_and_skips_fenced_ones():
     assert report_labels(text) == ["Builder", "Security"]
 
 
-REPORT_FILES = ["reports-lenses.md", "reports-consult.md", "reports-spec-review.md", "reports-calibrated.md"]
+REPORT_FILES = [
+    "reports-lenses.md",
+    "reports-consult.md",
+    "reports-spec-review.md",
+    "reports-calibrated.md",
+    "fs-reports-lenses.md",
+    "fs-reports-consult.md",
+    "fs-reports-spec-review.md",
+]
 
 
 @pytest.mark.parametrize("report_file", REPORT_FILES)
@@ -291,3 +346,100 @@ def test_the_calibrated_reports_carry_the_block_the_renderer_prints_for_a_protot
     rendered = _render(CALIBRATED_SPEC.format(level="prototype"))
     assert _fenced_block(fixture) == rendered
     assert _render(CALIBRATED_SPEC.format(level="production")) != rendered
+
+
+FS_COUNCIL_REPORTS = ["fs-reports-lenses.md", "fs-reports-consult.md", "fs-reports-spec-review.md"]
+TAG_LINE = re.compile(r"^\s*[-*+] \[(Critical|Important|Minor)\] ")
+
+
+def tagged_findings(text: str) -> list[str]:
+    """Each `- [Tag] ...` finding of a canned report, wrapped lines joined with one space."""
+    findings: list[str] = []
+    current: list[str] | None = None
+    for line in text.splitlines():
+        if TAG_LINE.match(line):
+            if current:
+                findings.append(" ".join(current))
+            current = [line.strip()]
+        elif current is not None and line.strip() and not line.startswith(("#", "- ", "* ")):
+            current.append(line.strip())
+        else:
+            if current:
+                findings.append(" ".join(current))
+            current = None
+    if current:
+        findings.append(" ".join(current))
+    return findings
+
+
+def test_tagged_findings_joins_wrapped_lines_and_stops_at_the_next_item():
+    text = "## Findings\n- [Critical] first line\n  wrapped on\n- [Minor] second\n\n## Confidence\nhigh\n"
+    assert tagged_findings(text) == ["- [Critical] first line wrapped on", "- [Minor] second"]
+
+
+def _severity(args: list[str], text: str) -> bytes:
+    result = subprocess.run(
+        [sys.executable, str(GRADER), "--check", "severity-name", *args],
+        input=text.encode(),
+        capture_output=True,
+        timeout=60,
+    )
+    return result.stdout
+
+
+@pytest.mark.parametrize("report_file", FS_COUNCIL_REPORTS)
+def test_the_grader_exempts_every_tagged_fs_finding_when_quoted_and_reads_it_when_reworded(report_file: str):
+    path = FIXTURES_DIR / report_file
+    findings = tagged_findings(path.read_text(encoding="utf-8"))
+    assert findings, f"{report_file} carries no tagged finding"
+    for finding in findings:
+        tag = TAG_LINE.match(finding).group(1)
+        quoted = _severity(["--reports", str(path)], finding + "\n")
+        assert quoted == b"severity-name: none\n", (report_file, finding, quoted)
+        reworded = _severity(
+            ["--reports", str(path)], f"- [{tag}] the booking sheet lists nothing a reviewer here wrote\n"
+        )
+        assert reworded == b"severity-name: internal\n", (report_file, tag, reworded)
+
+
+LOCATION = re.compile(r"^- (?P<file>[\w./-]+):(?P<line>\d+) \u2014 ", re.MULTILINE)
+
+
+def cited_locations(text: str) -> list[tuple[str, int]]:
+    return [(m["file"], int(m["line"])) for m in LOCATION.finditer(text)]
+
+
+def test_cited_locations_reads_file_and_line_from_each_bullet():
+    text = "Verdict: X\n\nCritical\n- a/b.py:13 \u2014 ask\n\nMinor\n- c.py:2 \u2014 ask\nplain 1:2 \u2014 no\n"
+    assert cited_locations(text) == [("a/b.py", 13), ("c.py", 2)]
+
+
+def test_every_line_the_fs_code_review_report_cites_exists_in_the_fixture_files():
+    report = (FIXTURES_DIR / "fs-reports-code-review.md").read_text(encoding="utf-8")
+    cited = cited_locations(report)
+    assert len(cited) >= 4, cited
+    for file, line in cited:
+        lines = (FIXTURES_DIR / file).read_text(encoding="utf-8").splitlines()
+        assert 1 <= line <= len(lines) and lines[line - 1].strip(), (file, line)
+
+
+FS_SITES = ["fsspecreview", "fsplan", "fsconsult", "fsdriver", "fsreview", "fsbuildreview", "fsdrivebuild"]
+FIXTURE_PATH = re.compile(r"FIXTURES_DIR/([\w./-]+?)(?=[,.]?(?:\s|$))")
+
+
+def prompt_fixture_paths(text: str) -> list[str]:
+    return FIXTURE_PATH.findall(text)
+
+
+def test_prompt_fixture_paths_reads_each_named_path():
+    text = "Read:\n- FIXTURES_DIR/a/b.md, the b\n- FIXTURES_DIR/c.md.\nFIXTURES_DIR/d.py"
+    assert prompt_fixture_paths(text) == ["a/b.md", "c.md", "d.py"]
+
+
+@pytest.mark.parametrize("site", FS_SITES)
+def test_each_fs_prompt_names_fixture_files_that_exist(site: str):
+    prompt = (FIXTURES_DIR / f"fs-prompt-{site}.md").read_text(encoding="utf-8")
+    paths = prompt_fixture_paths(prompt)
+    assert paths, f"fs-prompt-{site}.md names no fixture file"
+    for rel in paths:
+        assert (FIXTURES_DIR / rel).is_file(), (site, rel)
