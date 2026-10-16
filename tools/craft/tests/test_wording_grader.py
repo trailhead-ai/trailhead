@@ -1638,6 +1638,21 @@ FINDING_CAPTURE_VERDICTS.update(
 )
 
 
+# Regression arms at the council sites, re-run against the edited contract. regress-specreview-1 and -6 read
+# `internal` on `severity-name` (prose that names "the Critical" / "Both Criticals"), which is 4 of 6 plain.
+FINDING_CAPTURE_VERDICTS.update(
+    {f"regress-consult-{n}": {"severity-name": "plain", "reviewer-name": "plain"} for n in (1, 2, 3)}
+    | {
+        f"regress-plan-{n}": {"severity-name": "plain", "reviewer-name": "plain", "persisted-levels": "kept"}
+        for n in (1, 2, 3)
+    }
+    | {
+        f"regress-specreview-{n}": {"severity-name": severity, "reviewer-name": "plain"}
+        for n, severity in enumerate(("internal", "plain", "plain", "plain", "plain", "internal"), start=1)
+    }
+)
+
+
 def _site(stem):
     """The site a capture belongs to: the calibrated consult's arms are `precal-` and `cal-`, no site segment."""
     return "consult-calibrated" if stem.startswith(("precal-", "cal-")) else stem.split("-")[1]

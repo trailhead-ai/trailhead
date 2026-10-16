@@ -1,0 +1,26 @@
+**Spec review: a waiting list for allotment plots (round 1)**
+maturity: production (basis: stamp). No concerns were waived.
+
+The eight passes kept finding the same weakness: the spec assumes that everyone on the list can be reached by email and always reads it. Two of the review lanes, failure cases and ease of use, could not see each other's work. Both reached the same scene. An offer email bounces or is never read, the plot sits empty for two weeks, and then the person goes to the back of the queue without being told. The right-problem pass came at it from the other side. The spec requires an email address to join, so anyone on today's paper list without one has no way onto the online list. The other findings are smaller gaps in the same areas. Nothing says who marks a plot as freed. The Objectives promise that a person can "see their place", but only the first email delivers it. Two readings are left open: whether a person can join several sites' queues, and when the 14 days start.
+
+The two serious findings hold. The bounced-offer finding is the strongest signal in this run because two lanes reached it independently. It also needs no guess about the future, since mistyped addresses are certain on a list of 400. On the missing-email finding, the right-problem pass overreached on one point: it does not know what share of the list has no email, and the spec doesn't say either. That doesn't weaken the finding. One long-waiting person dropped from the list is already the failure, and checking it turned up something no pass named outright. No criterion moves the existing paper list across, in its current order, when the online list opens. At production maturity that is a decision for you, not an Important. The right-problem pass's other point, that being able to check the order is the real goal, is a fair reframe but doesn't change what gets built. The fact check found one wrong figure: the committee minutes of 3 March record 412 names, not about 340.
+
+The plan is to fix both findings with new and amended acceptance criteria now, while the spec is still a draft. An offer's 14 days count from when it is sent. A bounced offer passes on at once without costing the person their place. People get a reminder before an offer lapses and a message after it does. The existing list moves across in its current order. A warden can enter someone by phone number instead of email. All of this can be done by editing the spec, so nothing needs a revise round.
+
+**Recommended outcome:** accept these edits and the spec advances to `ready` this round. No predecessor is retired.
+
+| id | finding | proposed disposition | proposed edit |
+|---|---|---|---|
+| C1 | An offer that bounces or goes unread silently costs a person years of waiting. Raised by failure cases and ease of use. | `resolved` | Change "An offer not accepted within 14 days passes to the next person in the queue, and the person who did not answer goes to the back of the queue" (AC3) so the 14 days count from when the offer is sent. Add AC7: an offer that can't be delivered passes on at once, the person keeps their place, and the warden is told so the address can be corrected. Add AC8: a reminder is sent on day 10, and a message on lapse states the person's new place. |
+| C2 | Anyone on the paper list without email can't join, and nothing moves the existing list across. Raised by right problem and confirmed by the adjudicator. | `resolved` | Add AC9: everyone on the paper list on opening day is entered in their existing order, ahead of any new joiner. Add AC10: a warden can enter a person by phone number instead of email, that person's confirmations and offers reach them by phone through the warden, and each call is recorded in the history. |
+
+**Would cause trouble later, worth fixing, your call (9):**
+- Missing triggers: nothing says who marks a plot as freed, or what happens when a site's queue is empty.
+- Unmet objective: "see their place" isn't delivered after the first email, and the spec doesn't say whether a place is stored or worked out from join order (raised by three passes).
+- Open readings: whether a person can be on several sites' queues at once, and whether acceptances and departures are recorded at the moment they happen.
+- Oversight: an out-of-turn grant is visible only to whoever reads the history.
+- Problem statement: the list size should read 412, and the Objectives could say that being able to check the order is the goal.
+
+**Rough edges, nothing to decide (4):** what time of day the 14 days end, the place in the queue being shown in the email, "lapse" reading as jargon, and who can see the history.
+
+Reply "go" to accept, or name an id to override it, giving your reason.

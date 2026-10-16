@@ -1,0 +1,30 @@
+**Spec review: a waiting list for allotment plots.** This is the first presentation. Maturity: production (basis: stamp). No concerns were waived.
+
+The eight passes found two problems, and both come from what happens when email fails. First, the spec moves a paper list online without saying what happens to the people already on it. Joining needs an email address (AC1), so anyone on the paper list without one has no way onto the new list and loses years of waiting. Second, a plot offer is only ever made by email. An offer that bounces or never arrives still stays open for the full 14 days (AC2). The person then goes to the back of the queue without having seen it and without being told (AC3). Around these two problems sits a group of smaller gaps in how the queue works. Nothing records that a plot has come free. Nothing says what happens when a site's queue is empty. Nothing says whether one person can join several sites' queues. And the promise that a person can "see their place" is kept once, in the joining email, and never again.
+
+The offer problem is the strongest finding of the run. The failure-cases and ease-of-use reviewers reached it separately, from different starting points. The left-undecided reviewer then pinned the detail it depends on: the 14 days must run from when the offer is sent. The right-problem reviewer's email finding rests on a guess it admits it cannot back up: that a large part of the list is older people with no email. I couldn't confirm that share from anything on record. But the finding doesn't depend on it. Even one person who can't get onto the new list loses their place. And under it is a real gap: the spec never says the paper list is carried over at all, which at production maturity is a decision for you. The fact check corrected the list size from about 340 to 412 (from the 3 March committee minutes). That changes no design. Several smaller notes don't hold up and I've dropped them. One says the joining email reveals a person's place, but showing the place is the purpose of that email. Others are wording points, or ask for recording that AC6 already requires.
+
+I recommend fixing both problems by adding text to the spec. Neither needs a rethink. For the paper list: carry everyone over in their current order, and let a warden enter a person by phone. For offers: a bounced offer passes straight to the next person without costing the first person their place. The 14 days run from sending, with a reminder before the offer runs out and a message when it does. Everything else is worth fixing but doesn't block, and I'm logging it.
+
+**Recommended outcome:** apply both edits and mark the spec ready this round.
+
+| id | finding | proposed disposition | proposed edit |
+|---|---|---|---|
+| C1 | People on the paper list who have no email can't get onto the new list, and the spec never says the paper list is carried over | `resolved` | *add AC7: the paper list is carried over in its order; add AC8: a warden can enter a person by phone number, and that person's offers are made by phone* |
+| C2 | An offer that bounces or never arrives sends the person to the back of the queue without warning, after the plot has sat empty for 14 days | `resolved` | *amend AC3: 14 days from sending, a reminder on day 10, an email when the offer runs out; add AC9: a bounced offer passes on at once and the person keeps their place* |
+
+The drafted text:
+- **AC7.** Everyone on the paper waiting list on the day it goes online is added to their site's queue in their existing order.
+- **AC8.** A warden can add a person who has no email address using a phone number instead. The warden tells that person their place and makes their offers by phone, and each offer is recorded in the queue's history.
+- **AC3 (amended).** An offer not accepted within 14 days of being sent passes to the next person in the queue. A reminder is emailed on day 10. The person who did not answer goes to the back of the queue and is emailed to say so.
+- **AC9.** An offer email that bounces passes at once to the next person. The person it bounced for keeps their place, but gets no offers until a warden confirms a working address, and the warden is told.
+
+**Worth fixing, your call (8, logged with no action needed):**
+- **"See your place" is promised but delivered only once.** Two reviewers found this separately.
+- **Gaps in how the queue works.** Nothing records that a plot is free. There's no rule for a site whose queue is empty. Places could be stored or worked out from joining order. Nothing says whether one person can join several sites' queues.
+- **Granting a plot out of turn is checked by nothing but the reason the warden types.** Nobody is told a grant was made.
+- **The Objectives should name checking the order as the goal.** And the list holds 412 people, not about 340.
+
+**Rough edges, nothing to decide (3):** what time of day the 14 days end; who can see the queue's history; "a few times a month" is never used.
+
+Reply "go" to apply both edits and mark the spec ready. To override a row, name its id, for example "dispute C2, because …, otherwise go". The full finding detail is available on request, for example "show me the detail on C1".

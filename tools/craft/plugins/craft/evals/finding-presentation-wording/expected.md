@@ -1540,3 +1540,109 @@ The operator chose to proceed. At the three code review sites:
 End state 5 of the extension does not apply: no site was `plain` on both checks at baseline, so all three read
 directives ship (`review/SKILL.md`, `execute/SKILL.md`, `drive/SKILL.md`), at the edit commit
 `33767f4f22bf8a28523ce71863f8b490e0b7cf07`.
+
+## Results: treated and regression runs at the code review and council sites (2026-10-16)
+
+Run per "Dispatch" and the operator decision above, against the edit commit `33767f4f22bf8a28523ce71863f8b490e0b7cf07`
+(arms composed at `733eed75`/`12caae47`). Each capture ran in its own foreground `claude -p` process from a fresh copy of
+`fixtures/` and an empty second directory, `--setting-sources project --allowedTools "Read"`, no `--model`. Every
+capture exited 0, is non-empty and has an empty `.stderr.txt`, so none was excluded or replaced. Every capture is clean
+under `capture_scan.py` and `scripts/leak-gate` (both exit 0) and a `grep` for host paths and user names finds none.
+Graded by `wording_grader.py` with each site's own `--reports` file. Invocation form: `--append-system-prompt-file`
+for `baseline-buildreview-4..6`, `treated-buildreview-*` (135,880 bytes) and `treated-drivebuild-*` (178,188 bytes);
+inline `--append-system-prompt` for `treated-review-*` and every `regress-*` capture.
+
+The regression runs stopped at `regress-specreview` per the stop rule ("a regression arm fails"), so `regress-driver`
+was not run (no `regress-driver-*` capture exists) and its bar is unmeasured.
+
+### Verdicts
+
+| Capture | Form | `code-review-name` | `severity-name` |
+|---|---|---|---|
+| `baseline-buildreview-4`, `-5`, `-6` | file | `none`, `none`, `none` | `internal`, `internal`, `internal` |
+| `treated-review-1`, `-2`, `-3` | inline | `plain`, `plain`, `plain` | `plain`, `plain`, `plain` |
+| `treated-buildreview-1`, `-2`, `-3` | file | `plain`, `plain`, `plain` | `plain`, `plain`, `plain` |
+| `treated-drivebuild-1`, `-2`, `-3` | file | `plain`, `plain`, `plain` | `plain`, `plain`, `plain` |
+
+| Capture (all inline) | `severity-name` | `reviewer-name` | `persisted-levels` |
+|---|---|---|---|
+| `regress-consult-1`, `-2`, `-3` | `plain`, `plain`, `plain` | `plain`, `plain`, `plain` | n/a |
+| `regress-plan-1`, `-2`, `-3` | `plain`, `plain`, `plain` | `plain`, `plain`, `plain` | `kept`, `kept`, `kept` |
+| `regress-specreview-1`..`-6` | `internal`, `plain`, `plain`, `plain`, `plain`, `internal` | `plain` x6 | n/a |
+| `regress-driver` | not run | not run | not run |
+
+`regress-specreview-1`..`-3` split 2-1 on `severity-name`, so the whole arm was re-run as `-4`..`-6` per "Runs, sample
+size and splits"; six combined are 4 plain, 2 `internal`.
+
+### Buildreview headroom, both baseline forms
+
+| Baseline | `code-review-name` | `severity-name` |
+|---|---|---|
+| inline, `baseline-buildreview-1`..`-3` | `none` x3, no headroom | `internal` x3, headroom |
+| file form, `baseline-buildreview-4`..`-6` | `none` x3, no headroom | `internal` x3, headroom |
+
+The two forms agree: 6 of 6 `internal` on `severity-name` and 6 of 6 `none` on `code-review-name`. The file form is not
+a different baseline.
+
+### Per-site outcomes against the pass conditions
+
+Code review sites (`severity-name` gates; `code-review-name` is an observation):
+
+| Site | `severity-name` | Outcome | `code-review-name` (observation) | Residual leak |
+|---|---|---|---|---|
+| review | 3 of 3 `plain` | PASS | 3 of 3 `plain` | 0 of 3 |
+| buildreview | 3 of 3 `plain` (baseline: file form 3 of 3 `internal`) | PASS | 3 of 3 `plain` | 0 of 3 |
+| drivebuild | 3 of 3 `plain` | PASS | 3 of 3 `plain` | 0 of 3 |
+
+No treated code review site fails, so no fallback is triggered and no `fallback-` arm is built.
+
+Council regression sites:
+
+| Site | Bar | Outcome |
+|---|---|---|
+| consult | clean majority `plain` on `severity-name` and `reviewer-name` | PASS (3 of 3 each) |
+| plan | the same, plus clean majority `kept` | PASS (3 of 3 each, `kept` 3 of 3) |
+| specreview | the same | FAIL: `severity-name` `AMBIGUOUS` (4 of 6 `plain`, not a clean majority); `reviewer-name` 6 of 6 `plain`. Residual leak 2 of 6 |
+| driver | the same, plus clean majority `kept` | NOT RUN (stop rule) |
+
+The `regress-specreview` failure stops the slice for the operator; the contract edit is reworked and is not routed to a
+ritual fallback.
+
+### Hand check
+
+One capture per verdict word seen per site, read by eye against the grader.
+
+- review, `plain`/`plain`: `treated-review-1` opens "The code review says to fix two things" and every finding ends
+  "*Raised by: code review*"; it groups under "Would build the wrong thing, needs your decision", "Would cause trouble
+  later, worth fixing, your call" and "Rough edges, nothing to decide". No `Critical`/`Important`/`Minor` and no
+  `code-reviewer`. Agrees with both verdicts.
+- buildreview, `plain`/`plain`: `treated-buildreview-1`, the same three readings with counts, each finding
+  "*Raised by: code review*"; the opening says "The correctness review", which the check reads neither way. Agrees.
+- drivebuild, `plain`/`plain`: `treated-drivebuild-1` opens "The code review's one re-review round is done", the same
+  three readings, "Raised by: code review" on all four. Agrees.
+- buildreview baseline, `none`/`internal`: `baseline-buildreview-4` names "The reviewer's verdict", headed `**Critical:`,
+  `**Important:`, `**Minor:`. By eye `none` and `internal`. Agrees (file form matches the inline form).
+- consult, `plain`/`plain`: `regress-consult-1` groups under "Would build the wrong thing, needs your decision"; lens
+  names appear as "buildability, failure cases" in the "Raised by" line. Agrees.
+- plan, `plain`/`plain`/`kept`: `regress-plan-1` shows plain readings above the fence and keeps `*Critical:*`,
+  `*Important:*`, `*Minor:*` in the fenced `## Council Review` block. Agrees.
+- specreview, `plain`: `regress-specreview-2` uses "strongest finding", "Worth fixing, your call" and "Rough edges,
+  nothing to decide". Agrees.
+- specreview, `internal`: `regress-specreview-1` (the capture names "the Critical" in the line about the right-problem
+  pass and "Both Criticals are `resolved` by edit" in the Recommended outcome) and `regress-specreview-6` ("Both
+  Criticals are `resolved`" in the Recommended outcome). By eye both are the internal level word in reader-facing prose.
+  Agrees; not a misgrade.
+
+**Readings outside the guide's three:** none. Across the nine treated code review captures every severity heading is one
+of the guide's three readings, verbatim. In the regression captures the only level words are the two `specreview`
+cases above.
+
+### Handoff to the next task
+
+- Code review sites, `severity-name`: review PASS, buildreview PASS, drivebuild PASS. No fallback trigger.
+- `code-review-name` observation: `plain` on 9 of 9 treated captures (no headroom on the baseline: `none` on 12 of 12
+  baseline captures, so this is reported, not a pass condition).
+- Regression: consult PASS, plan PASS, specreview FAIL (AMBIGUOUS, 4 of 6; the two leaks are the "Both Criticals are
+  `resolved`" outcome line and a "the Critical" sentence), driver not run.
+- `regress-specreview` is BLOCKED-for-operator. The by-eye finding-order reading of these captures (AC17, AC18) is not
+  done here and stays unmeasured.

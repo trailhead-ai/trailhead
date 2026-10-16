@@ -1,0 +1,31 @@
+**Spec review: a waiting list for allotment plots, round 1**
+maturity: production (basis: stamp). Nothing was waived.
+
+The reviews converge on two gaps. First, the spec builds a new online queue but never says how the people already waiting on the paper list get onto it in their current order. The fact check also found that list has 412 names, not "about 340". AC1 takes only an email address, so anyone on paper without one has no way in. Second, the offer rules in AC2 and AC3 assume every email arrives. A mistyped or full mailbox costs that person their place, and nobody, including the person, is told. Behind those, several reviewers found the same thing: the spec promises people can "see their place" but no criterion delivers that after the first email, and AC2 never says who reports a plot as freed.
+
+The reviews mostly hold up. Failure cases and ease of use couldn't see each other's reports, yet both reached the lost-offer problem. Failure cases saw the empty plot and the lost place; ease of use saw the person who never hears a word. That agreement is the strongest signal in this run. Right problem was right that people without email would be shut out, but it also claimed "a large part" of the list is older people with no email, and nothing in the record shows that. I've based the first gap on the missing migration, which needs your decision at production maturity whatever the share turns out to be. Right problem also argued that only the history in AC6 answers the real complaint. That's a fair reframing, but it's about scope, not a defect. Buildability's and left undecided's points are real but smaller. Each is a single line the spec could add.
+
+My plan: add a criterion that brings the paper list across in its existing order with a phone-number path, add a criterion that handles undelivered offers and tells the person what happened, and advance the spec. The issues worth fixing are logged below for you to pick up or leave.
+
+**Recommended outcome:** advance to `ready` this round. Both Criticals are `resolved`, and none is `revise`.
+
+| id | finding | proposed disposition | proposed edit |
+|---|---|---|---|
+| C1 | The 412 people already waiting on paper have no route onto the new queue with their place kept, and anyone without an email can't join at all (right problem; fact check supplied the 412) | `resolved` | *Add a criterion: before go-live the paper list is entered in its existing order. A warden may enter a person with a phone number instead of an email and make that person's offers by phone, recorded in the history like email offers.* |
+| C2 | An offer that never arrives leaves the plot empty for 14 days and sends the person to the back with no message (failure cases, ease of use) | `resolved` | *Add a criterion: a bounced offer passes on at once, the person keeps their place, and the warden is told so the address can be fixed. A reminder goes out on day 10, and a lapse notice tells the person their new place.* |
+
+**Would cause trouble later, worth fixing, your call (10).** In order of weight:
+- The promise to "see their place" has no criterion behind it (self-consistency and ease of use both found this).
+- Nothing in AC2 says who marks a plot as freed.
+- The Problem states the wrong list size: 412, not 340.
+- Nothing covers a freed plot when its site's queue is empty.
+- Nothing says whether a person can be on several sites' queues.
+- Nothing says whether the 14 days count from sending or from opening.
+- Nothing says whether a place is stored or worked out from join order.
+- Out-of-turn grants (AC4) are seen by nobody until someone reads the history.
+- AC2 and AC5 don't say that acceptances and departures are recorded.
+- The framing is scoped wider than the underlying complaint.
+
+**Rough edges, nothing to decide (4).** The time of day the 14 days end, who may read the history, the confirmation email revealing how many people are ahead, and "a few times a month" against 31 plots a year. I cut three wording-only notes.
+
+Reply "go" to accept. To override a row, name it with your reason (for example "dispute C1 because …"), or answer one with information the reviewers didn't have.

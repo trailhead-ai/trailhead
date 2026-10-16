@@ -1,0 +1,41 @@
+**The council on direct plot swaps**
+
+`maturity: production (basis: requested)`. No concerns were waived.
+
+All four reviewers kept coming back to two things the warden currently handles without anyone noticing. The first is ordering. When one person rearranges plots by hand, two swaps can never collide. A form that both tenants confirm can collide: two swaps naming the same plot can both go through, and someone arrives to find a stranger on the plot they thought they had. The second is fairness. The committee has promised that nobody on the 340-person waiting list will be passed over. A direct swap gives two tenants a quiet way to move a good plot between themselves, money changing hands or not, and the warden would never see it. The other findings follow from going online at all: what happens to a swap only one tenant confirmed, the lack of any record of past swaps, and a tenant base that is mostly not online.
+
+The collision finding holds up. Two reviewers found it independently, and it follows directly from a design that needs two confirmations. At six swaps a year it will be rare, but the society is treating this as a live production system, and losing a plot to it is a real harm with no easy way to undo it. The waiting-list finding is the one that matters most for this society, because it goes straight against the committee's own promise. The security reviewer framed it best. Their suggested fix only covers swaps between different sites, though, and a plot can be sold just as easily within one site. The ease-of-use reviewer raised a similar point as its most serious finding, but only as a worry that tenants "might feel" the process is unfair, with no concrete failure. I've moved it from "would build the wrong thing, needs your decision" down to "would cause trouble later, worth fixing, your call" and merged it into the waiting-list finding. The same reviewer made the most useful practical point: six swaps a year by hand already works.
+
+My recommendation is to keep the warden as the route for every swap. If you want something online, add a "swap my plot" form that files a request to the warden instead of carrying out the swap itself. That one decision avoids the collision, because the warden handles requests one at a time. It keeps the waiting-list promise, because every swap gets the warden's eye. It also leaves the paper route open for tenants who aren't online. Record each swap the warden approves in the same history the waiting list uses, so a dispute can be settled later. Fully direct swaps would need a single register of who holds each plot, a check at the moment of the second confirmation, an expiry rule and a fairness check. That is a lot to build and maintain for six swaps a year. The waiting-list spec also sets swaps aside as a non-goal, so whichever way you go, this needs its own short spec instead of being added to that one.
+
+---
+
+**Would build the wrong thing, needs your decision**
+
+**Two swaps can claim the same plot.** If you allow direct swaps, you need to decide how to stop two of them going through on one plot. I recommend avoiding the problem by keeping the warden in the loop. Worst case: tenant A agrees to swap with B, and C separately agrees to swap with A for the same plot. Both are confirmed minutes apart, each checked only against what the tenant saw when they started, so both go through and one tenant turns up to find a stranger on the plot they were promised.
+Fix: send swaps through the warden. If swaps stay direct, keep one register of who holds each plot and apply a swap only if both tenants still hold the named plots at the moment of the second confirmation.
+*Raised by buildability and failure cases (2 reviewers)*
+
+**Would cause trouble later, worth fixing, your call**
+
+**Direct swaps can get round the waiting list.** You need to decide whether the committee's promise that nobody on the waiting list is passed over also applies to swaps. I recommend that it does. Worst case: a tenant with a poor plot pays a tenant with a good one, the two "swap", and someone who has waited years for that plot never gets the chance at it. Tenants who see this happen lose trust in the list.
+Fix: have the warden approve every swap, not only swaps between sites, and publish how swaps work on the society's site.
+*Raised by security and ease of use (2 reviewers). The ease-of-use version was moved down a level because it described a feeling, not a failure.*
+
+**A swap only one tenant confirmed has no end.** You need to decide what happens to a swap that is never fully confirmed. I recommend an expiry date with a stated reason. Worst case: a half-confirmed swap stays open for months, and the second tenant confirms long after the plots have changed hands, or it blocks other swaps.
+Fix: let an unconfirmed swap lapse after a set period, such as seven days, and write down why that period was chosen.
+*Raised by buildability and failure cases (2 reviewers)*
+
+**No record is kept of past swaps.** I recommend keeping one. Worst case: a year later two tenants dispute who agreed to what, and the society has nothing to settle it with.
+Fix: write every swap to the same history the waiting list uses.
+*Raised by failure cases*
+
+**A form-only route leaves out tenants who aren't online.** You need to decide whether the form replaces the warden or sits beside them. I recommend that it sits beside them. Worst case: most tenants aren't online, the warden route is removed, and a process that works today for six swaps a year becomes one many tenants can't use.
+Fix: keep the warden route, and add the form only as a second way in.
+*Raised by ease of use*
+
+**Rough edges, nothing to decide**
+
+- **Name the plots in the confirmation email.** Then a tenant can tell a real swap confirmation from a fake one. *Security*
+- **Call the form "swap my plot", not "reallocate".** *Ease of use*
+- **Reuse the waiting list's email templates for the swap form.** *Buildability*
