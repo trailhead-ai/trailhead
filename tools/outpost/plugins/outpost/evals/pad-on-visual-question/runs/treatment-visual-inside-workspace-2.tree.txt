@@ -1,2 +1,3 @@
 pads: xdg-state/camp/bramble/worktrees/ws-quill/sites/promo-code-placement
+round provenance: built from <run>/xdg-state/camp/bramble/worktrees/ws-quill/app/.promo-round.json; every option name in the built pad appears in this run's own tool inputs: yes
 tool calls: Skill, Write, Write, Bash, Bash

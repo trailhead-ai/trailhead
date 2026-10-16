@@ -928,12 +928,13 @@ message hand-read):
 | `visual-inside-workspace` | 3/3 | pad published under the workspace's `sites/`; link and "local to this machine" caveat relayed as printed; choice put in words; no ask-first |
 | `visual-outside-workspace` | 3/3 | pad under `xdg-state/outpost/pads/`; printed `file://` link relayed; choice put in words; no ask-first |
 | `not-visual-layout-vocabulary` | 3/3 | no pad, no Skill call; recommendation in words with the conditions that would change it |
-| `visual-pad-cannot-be-made` | 3/3 | Skill invoked, publish refused; one plain line that no pad was made with the script's reason; the symlink left alone; no link; choice put in words |
+| `visual-pad-cannot-be-made` | 3/3 | Skill invoked, publish refused; one plain line that no pad was made with the script's reason; `sites` still a symlink and its target empty afterwards (`.tree.txt`); no link; choice put in words |
 | `typed-answer-after-pad` | 3/3 | "Numbered list down the left it is"; no pad, no paste request, no re-ask; moved on to the code |
 | `words-only-request` | 3/3 | no pad and no tool calls at all; answered in words |
 
 **Observed, not graded — `dispatched-agent-observed`.** 2/3 drew a pad and handed a `file://`
-link back to a parent that reads only text, closing with a choice addressed to "the user"; 1/3
+link back to a parent that reads only text, inviting a pick on the pad or in words (one of them
+addressed as an "open question for the user"); 1/3
 drew nothing, saying sketches were pointless because the reader can only read text. The rule
 does reach a dispatched agent, as the plan named; whether it needs a carrier change is the
 follow-up's question.
@@ -942,9 +943,11 @@ follow-up's question.
 verdict says "asked in words", and the signal's definition requires the choice put to the user.
 All three runs instead give a recommendation and name what would change it, without a literal
 "which one?". Read that strictly and the scenario misses 3/3. It is graded a hit because the run
-is right and the verdict over-reaches: the rule's ask-in-words clause governs pad questions
-only, the skill sends a non-visual question to words without requiring a question back, and the
-brief asked for help choosing, which a recommendation answers. Recorded here rather than by
+is right and the verdict over-reaches: the spec requires only that a question that is not
+visual gets no pad (AC2), and its "asks the same question in words" applies whenever a session
+sets out to draw a pad (AC3), which these runs did not. The skill's "ask those in words" is met
+by handling the question in words; the brief asked for help choosing, which a recommendation
+with its conditions answers. Recorded here rather than by
 editing `expected.md`. One visual run (`treatment-visual-inside-workspace-3`) closes on a
 question about code usage, not the choice; it is graded a hit because it does put the choice in
 words ("pick an option on the pad … or just answer in words").
@@ -959,15 +962,19 @@ rule adds there is also unmeasured.
 pads from a concurrently running treatment arm's round: the runner had pointed every arm's
 `TMPDIR` at the shared `/private/tmp/claude-<uid>`, and both wrote and then read
 `promo-round.json` there. Each still chose to draw unasked, but its pad was not its own. Both
-were re-run one at a time with a per-run `TMPDIR` (`-4`, `-5`); every other pad was checked
-against the round its own run wrote. `expected.md`'s runner contract now gives each run its own `TMPDIR`.
+were re-run one at a time with a per-run `TMPDIR` (`-4`, `-5`). The other 25 graded runs ran
+with the same shared `TMPDIR`, so every pad was checked the same way: each run's `.tree.txt`
+records the round file the pad was built from and whether every option name in the built pad
+appears in that run's own tool inputs. Every counted pad passes; only the two excluded runs
+fail. `expected.md`'s runner contract now gives each run its own `TMPDIR`.
 
 **Containment.** Several arms tried to write the round under `/tmp`; the sandbox refused each and
 they fell back to the project folder or the Bash tool's scratch root. Real-state diff as in the
 publish-routing entry above, same batch: nothing changed by any run.
 
-**Captures** — `runs/`: per run, the final message (`.txt`), exit code, stderr, argv and the
-graded tree evidence (`.tree.txt`), paths rewritten to `<run>`, `<repo>`, `<tmp>` and `~`.
+**Captures** — `runs/`: per run, the final message (`.txt`), exit code, stderr, the full sandbox
+invocation (`.argv.txt`) and the graded tree evidence (`.tree.txt`: pads found, round
+provenance, and for the refused scenario the state of `sites`), paths rewritten to `<run>`, `<repo>`, `<tmp>` and `~`.
 `capture_scan.py` over the tree: 0 credential findings (29 known-safe repo-path matches, one
 per argv).
 
