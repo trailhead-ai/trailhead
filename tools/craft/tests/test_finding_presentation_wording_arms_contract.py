@@ -51,6 +51,10 @@ CAL_REVISION = "df65828beb59d1814735a6926f4982eb30a1a087"
 # origin/main when the code review sites were cut: the three code review baseline arms read every source here.
 CODE_REVIEW_BASELINE_REVISION = "7b5c65f9a00157e0aee884bdfb0f3fe0b99cdc29"
 
+# The commit carrying the code review contract edit: the treated code review arms and the four
+# regression arms read `council.md` (and, for the treated arms, their skill file) from here.
+CODE_REVIEW_EDIT_REVISION = "33767f4f22bf8a28523ce71863f8b490e0b7cf07"
+
 PLUGIN = "tools/craft/plugins/craft"
 RULES = f"{PLUGIN}/rules.md"
 COUNCIL = f"{PLUGIN}/skills/_shared/council.md"
@@ -129,6 +133,44 @@ ARM_SOURCES: dict[str, list[Source]] = {
         (RULES, CODE_REVIEW_BASELINE_REVISION),
         (DRIVE_SKILL, CODE_REVIEW_BASELINE_REVISION),
         (EXECUTE_PROCEDURE, CODE_REVIEW_BASELINE_REVISION),
+    ],
+    "treated-review.md": [
+        (RULES, CODE_REVIEW_BASELINE_REVISION),
+        (REVIEW_SKILL, CODE_REVIEW_EDIT_REVISION),
+        (COUNCIL, CODE_REVIEW_EDIT_REVISION),
+    ],
+    "treated-buildreview.md": [
+        (RULES, CODE_REVIEW_BASELINE_REVISION),
+        (EXECUTE_SKILL, CODE_REVIEW_EDIT_REVISION),
+        (EXECUTE_PROCEDURE, CODE_REVIEW_BASELINE_REVISION),
+        (COUNCIL, CODE_REVIEW_EDIT_REVISION),
+    ],
+    "treated-drivebuild.md": [
+        (RULES, CODE_REVIEW_BASELINE_REVISION),
+        (DRIVE_SKILL, CODE_REVIEW_EDIT_REVISION),
+        (EXECUTE_PROCEDURE, CODE_REVIEW_BASELINE_REVISION),
+        (COUNCIL, CODE_REVIEW_EDIT_REVISION),
+    ],
+    "regress-consult.md": [
+        (RULES, BASELINE_REVISION),
+        (CONSULT_SKILL, CAL_REVISION),
+        (COUNCIL, CODE_REVIEW_EDIT_REVISION),
+    ],
+    "regress-plan.md": [
+        (RULES, BASELINE_REVISION),
+        (PLAN_SKILL, BASELINE_REVISION),
+        (COUNCIL, CODE_REVIEW_EDIT_REVISION),
+    ],
+    "regress-specreview.md": [
+        (RULES, BASELINE_REVISION),
+        (GAUNTLET_SKILL, BASELINE_REVISION),
+        (GAUNTLET_DISPOSITIONS, BASELINE_REVISION),
+        (COUNCIL, CODE_REVIEW_EDIT_REVISION),
+    ],
+    "regress-driver.md": [
+        (RULES, BASELINE_REVISION),
+        (DRIVE_SKILL, BASELINE_REVISION),
+        (COUNCIL, CODE_REVIEW_EDIT_REVISION),
     ],
 }
 
