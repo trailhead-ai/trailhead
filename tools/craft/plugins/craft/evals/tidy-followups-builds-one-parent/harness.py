@@ -132,6 +132,7 @@ def run(args) -> None:
     env.pop("HOME", None)
     (run_dir / "tmp").mkdir(exist_ok=True)
     env["TMPDIR"] = str(run_dir / "tmp")
+    env["TMPPREFIX"] = str(run_dir / "tmp" / "zsh")
     env["CLAUDE_PLUGIN_ROOT"] = str(snap / "tools/craft/plugins/craft")
     root = env["CLAUDE_PLUGIN_ROOT"]
     env["LORE_BIN"] = str(snap / "tools/lore/plugins/lore/bin/lore")
