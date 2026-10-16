@@ -1,5 +1,5 @@
 [main] BASH
-$WORK/snap-treat/tools/craft/plugins/craft/scripts/followup_gather.py fixture-nest-fail-spec; echo "EXIT=$?"
+$CRAFT[treat]/scripts/followup_gather.py fixture-nest-fail-spec; echo "EXIT=$?"
 
 [main] BASH
 lore record show --json --vault default task/nest-fail-reject-path-traversal-in-the-archive-extractor; echo "EXIT=$?"; lore record show --json --vault default task/nest-fail-stop-logging-session-cookies; echo "EXIT=$?"
@@ -8,8 +8,8 @@ lore record show --json --vault default task/nest-fail-reject-path-traversal-in-
 You are refining one vault task: `task/nest-fail-reject-path-traversal-in-the-archive-extractor` in vault `default` (use the `lore` CLI on PATH).
 
 Instructions:
-- Read $WORK/snap-treat/tools/craft/plugins/craft/skills/_shared/refine.md yourself and follow it in full, in its unattended mode, against this one task only.
-- The code the task's claims point at is the git repository at $WORK/runs/nest-fail-r2-treat/fixture/repo. Work against it for verification. Do not modify that repository.
+- Read $CRAFT[treat]/skills/_shared/refine.md yourself and follow it in full, in its unattended mode, against this one task only.
+- The code the task's claims point at is the git repository at $RUN[nest-fail-r2-treat]/fixture/repo. Work against it for verification. Do not modify that repository.
 - Stage any body you write through your own `mktemp` path, created fre... [cut 383 chars]
 
 [sub] BASH
@@ -19,22 +19,22 @@ cd /tmp; lore record show task/nest-fail-reject-path-traversal-in-the-archive-ex
 cd /tmp; lore record show task/nest-fail-reject-path-traversal-in-the-archive-extractor --help 2>&1 | head -30; lore record --help 2>&1 | head -30
 
 [sub] BASH
-cd /tmp; lore record show --vault default --json task/nest-fail-reject-path-traversal-in-the-archive-extractor | python3 -I -c 'import json,sys; d=json.load(sys.stdin); print(json.dumps(d["sidecar"],indent=1))'; cd $WORK/runs/nest-fail-r2-treat/fixture/repo && git status --short && git log --oneline | head; find . -path ./.git -prune -o -type f -print
+cd /tmp; lore record show --vault default --json task/nest-fail-reject-path-traversal-in-the-archive-extractor | python3 -I -c 'import json,sys; d=json.load(sys.stdin); print(json.dumps(d["sidecar"],indent=1))'; cd $RUN[nest-fail-r2-treat]/fixture/repo && git status --short && git log --oneline | head; find . -path ./.git -prune -o -type f -print
 
 [sub] BASH
-cd $WORK/runs/nest-fail-r2-treat/fixture/repo; cat -n src/extract.py; cat -n README.md; cat -n src/util.py; grep -rn "extract\|realpath\|ValueError" src | head -30
+cd $RUN[nest-fail-r2-treat]/fixture/repo; cat -n src/extract.py; cat -n README.md; cat -n src/util.py; grep -rn "extract\|realpath\|ValueError" src | head -30
 
 [sub] BASH
 cd /tmp; lore record show task/fixture-nest-fail-spec-the-slice; echo ---; lore task graph fixture-nest-fail-spec-the-slice; for q in "extract" "path traversal" "archive" "kind:area" "extract_target" "tests" "ValueError" "symlink"; do echo "== $q"; lore search "$q" 2>&1 | head -15; done
 
 [sub] BASH
-cd /tmp; lore record show task/left-out-pin-the-tls-minimum-version-in-the-client; lore search "pytest"; lore search "unittest"; lore search "kind:decision"; lore search "kind:adr"; ls $WORK/runs/nest-fail-r2-treat/fixture/vault
+cd /tmp; lore record show task/left-out-pin-the-tls-minimum-version-in-the-client; lore search "pytest"; lore search "unittest"; lore search "kind:decision"; lore search "kind:adr"; ls $RUN[nest-fail-r2-treat]/fixture/vault
 
 [sub] BASH
-cd $WORK/snap-treat/tools/craft/plugins/craft; grep -n -A6 "Flow-out" templates/plan.md; cat templates/task.md; grep -rln "credential-pattern scrub" . | head
+cd $CRAFT[treat]; grep -n -A6 "Flow-out" templates/plan.md; cat templates/task.md; grep -rln "credential-pattern scrub" . | head
 
 [sub] BASH
-cd $WORK/snap-treat/tools/craft/plugins/craft; sed -n 30,40p templates/plan.md; grep -n -i -B2 -A25 "credential-pattern" skills/_shared/security.md | head -60
+cd $CRAFT[treat]; sed -n 30,40p templates/plan.md; grep -n -i -B2 -A25 "credential-pattern" skills/_shared/security.md | head -60
 
 [sub] BASH
 set -e; T=$(mktemp); S=$(mktemp); R=nest-fail-reject-path-traversal-in-the-archive-extractor
@@ -68,19 +68,19 @@ for p in pats:
 print("scrub done")
 PY
 # citation gate
-wc -l < $WORK/runs/nest-fail-r2-treat/fixture/repo/src/extract.py
+wc -l < $RUN[nest-fail-r2-treat]/fixture/repo/src/extract.py
 lore record show task/left-out-pin-the-tls-minimum-version-in-the-client >/dev/null && echo cite-ok
 echo "$T" > /tmp/.refine_path_$$ ; echo $T
 
 [sub] BASH
-ls -la $WORK/runs/nest-fail-r2-treat/tmp/; head -3 $WORK/runs/nest-fail-r2-treat/tmp/tmp.3ILTaQykz4
+ls -la $RUN[nest-fail-r2-treat]/tmp/; head -3 $RUN[nest-fail-r2-treat]/tmp/tmp.3ILTaQykz4
 
 [sub] BASH
-cd /tmp; T=$WORK/runs/nest-fail-r2-treat/tmp/tmp.3ILTaQykz4; rm -f $WORK/runs/nest-fail-r2-treat/tmp/tmp.kx9ukEULxp
+cd /tmp; T=$RUN[nest-fail-r2-treat]/tmp/tmp.3ILTaQykz4; rm -f $RUN[nest-fail-r2-treat]/tmp/tmp.kx9ukEULxp
 lore record update --help 2>&1 | head -40
 
 [sub] BASH
-cd /tmp; T=$WORK/runs/nest-fail-r2-treat/tmp/tmp.3ILTaQykz4; lore record update task/nest-fail-reject-path-traversal-in-the-archive-extractor --vault default --status ready --unset-label route < "$T" && rm -f "$T"; ls $WORK/runs/nest-fail-r2-treat/tmp/; lore record show task/nest-fail-reject-path-traversal-in-the-archive-extractor
+cd /tmp; T=$RUN[nest-fail-r2-treat]/tmp/tmp.3ILTaQykz4; lore record update task/nest-fail-reject-path-traversal-in-the-archive-extractor --vault default --status ready --unset-label route < "$T" && rm -f "$T"; ls $RUN[nest-fail-r2-treat]/tmp/; lore record show task/nest-fail-reject-path-traversal-in-the-archive-extractor
 
 [sub] BASH
 cd /tmp; lore task graph nest-fail-reject-path-traversal-in-the-archive-extractor
@@ -89,8 +89,8 @@ cd /tmp; lore task graph nest-fail-reject-path-traversal-in-the-archive-extracto
 You are refining one vault task: `task/nest-fail-stop-logging-session-cookies` in vault `default` (use the `lore` CLI on PATH).
 
 Instructions:
-- Read $WORK/snap-treat/tools/craft/plugins/craft/skills/_shared/refine.md yourself and follow it in full, in its unattended mode, against this one task only.
-- The code the task's claims point at is the git repository at $WORK/runs/nest-fail-r2-treat/fixture/repo. Work against it for verification. Do not modify that repository.
+- Read $CRAFT[treat]/skills/_shared/refine.md yourself and follow it in full, in its unattended mode, against this one task only.
+- The code the task's claims point at is the git repository at $RUN[nest-fail-r2-treat]/fixture/repo. Work against it for verification. Do not modify that repository.
 - Stage any body you write through your own `mktemp` path, created fresh for this task a... [cut 365 chars]
 
 [sub] BASH
@@ -100,16 +100,16 @@ lore --help 2>&1 | head -50; lore show task/nest-fail-stop-logging-session-cooki
 cd /tmp; lore record show task/nest-fail-stop-logging-session-cookies 2>&1; echo ---; lore task graph nest-fail-stop-logging-session-cookies 2>&1; echo ---; lore record --help 2>&1 | head -30
 
 [sub] BASH
-cd /tmp; lore record show task/nest-fail-stop-logging-session-cookies --json 2>&1; echo ---; R=$WORK/runs/nest-fail-r2-treat/fixture/repo; git -C $R ls-files; git -C $R log --oneline | head; echo ---; cat -n $R/src/cookies.py
+cd /tmp; lore record show task/nest-fail-stop-logging-session-cookies --json 2>&1; echo ---; R=$RUN[nest-fail-r2-treat]/fixture/repo; git -C $R ls-files; git -C $R log --oneline | head; echo ---; cat -n $R/src/cookies.py
 
 [sub] BASH
-cd /tmp; R=$WORK/runs/nest-fail-r2-treat/fixture/repo; find $R -not -path '*/.git/*' | head -50; echo ---; lore record show task/fixture-nest-fail-spec-the-slice --json 2>&1; echo ---; lore search "cookies" 2>&1 | head; lore search "log redact" 2>&1 | head; lore search "kind:area logging" 2>&1|head; lore search "nest-fail" 2>&1 | head -20
+cd /tmp; R=$RUN[nest-fail-r2-treat]/fixture/repo; find $R -not -path '*/.git/*' | head -50; echo ---; lore record show task/fixture-nest-fail-spec-the-slice --json 2>&1; echo ---; lore search "cookies" 2>&1 | head; lore search "log redact" 2>&1 | head; lore search "kind:area logging" 2>&1|head; lore search "nest-fail" 2>&1 | head -20
 
 [sub] BASH
-cd /tmp; R=$WORK/runs/nest-fail-r2-treat/fixture/repo; for f in README.md src/*.py; do echo "== $f"; cat -n $R/$f; done; ls $R/tests 2>&1; lore areas 2>&1 | head; lore search "logger" 2>&1|head; lore search "header" 2>&1 | head -12
+cd /tmp; R=$RUN[nest-fail-r2-treat]/fixture/repo; for f in README.md src/*.py; do echo "== $f"; cat -n $R/$f; done; ls $R/tests 2>&1; lore areas 2>&1 | head; lore search "logger" 2>&1|head; lore search "header" 2>&1 | head -12
 
 [sub] BASH
-R=$WORK/runs/nest-fail-r2-treat/fixture/repo; cd $R && for f in README.md src/*.py; do echo "== $f"; cat -n $f; done; ls tests 2>&1; cd /tmp; lore areas 2>&1 | head; lore search "logger" 2>&1|head; lore search "header" 2>&1 | head -12
+R=$RUN[nest-fail-r2-treat]/fixture/repo; cd $R && for f in README.md src/*.py; do echo "== $f"; cat -n $f; done; ls tests 2>&1; cd /tmp; lore areas 2>&1 | head; lore search "logger" 2>&1|head; lore search "header" 2>&1 | head -12
 
 [sub] BASH
 D=$(mktemp -d); mkdir -p $D/src $D/tests; touch $D/src/__init__.py; printf 'def f():\n    return 1\n' > $D/src/m.py; printf 'import unittest\nfrom src.m import f\nclass T(unittest.TestCase):\n    def test_a(self):\n        self.assertEqual(f(), 1)\n' > $D/tests/test_m.py; cd $D && python3 -m unittest tests.test_m 2>&1; cd /tmp; rm -rf $D
@@ -138,16 +138,16 @@ lore record update task/nest-fail-stop-logging-session-cookies --help 2>&1 | gre
 cd /tmp; grep -l 'Cookie: \[REDACTED\]` (no trailing newline' "${TMPDIR:-/tmp}"/tmp.* 2>/dev/null
 
 [sub] BASH
-cd /tmp; T=$WORK/runs/nest-fail-r2-treat/tmp/tmp.a3yQ65ajBJ; lore record update task/nest-fail-stop-logging-session-cookies --status ready < $T 2>&1; rm -f $T; ls $T 2>&1; lore record show task/nest-fail-stop-logging-session-cookies --json | python3 -I -c 'import json,sys; d=json.load(sys.stdin); print(d["sidecar"]["status"]); print(d["body"])'
+cd /tmp; T=$RUN[nest-fail-r2-treat]/tmp/tmp.a3yQ65ajBJ; lore record update task/nest-fail-stop-logging-session-cookies --status ready < $T 2>&1; rm -f $T; ls $T 2>&1; lore record show task/nest-fail-stop-logging-session-cookies --json | python3 -I -c 'import json,sys; d=json.load(sys.stdin); print(d["sidecar"]["status"]); print(d["body"])'
 
 [main] BASH
-$WORK/snap-treat/tools/craft/plugins/craft/scripts/followup_parent.py check fixture-nest-fail-spec nest-fail-reject-path-traversal-in-the-archive-extractor nest-fail-stop-logging-session-cookies; echo "EXIT=$?"
+$CRAFT[treat]/scripts/followup_parent.py check fixture-nest-fail-spec nest-fail-reject-path-traversal-in-the-archive-extractor nest-fail-stop-logging-session-cookies; echo "EXIT=$?"
 
 [main] BASH
 children=$(mktemp)
 cat > "$children" <<'EOF'
-[{"name": "nest-fail-reject-path-traversal-in-the-archive-extractor", "reason": "Any archive extracted today can write files outside the destination, and the exposure stays open until this is fixed. (Open security exposure.)", "revision": "01d6b4b28e1f1daadef0bd13daeedcf4afa19d23d0c8a94b051ba5c3053ae9df"},
- {"name": "nest-fail-stop-logging-session-cookies", "reason": "Live session cookies are being written to a shared log right now, and every day it waits leaves more readable sessions in that log. (Open security exposure.)", "revision": "b2ef057409b65c25a82a5f0472752971722a89265cfa99925b191bcfc4a1071e"}]
+[{"name": "nest-fail-reject-path-traversal-in-the-archive-extractor", "reason": "Any archive extracted today can write files outside the destination, and the exposure stays open until this is fixed. (Open security exposure.)", "revision": "[sha:01d6b4b2]"},
+ {"name": "nest-fail-stop-logging-session-cookies", "reason": "Live session cookies are being written to a shared log right now, and every day it waits leaves more readable sessions in that log. (Open security exposure.)", "revision": "[sha:b2ef0574]"}]
 EOF
-$WORK/snap-treat/tools/craft/plugins/craft/scripts/followup_parent.py assemble fixture-nest-fail-spec --children "$children"; echo "EXIT=$?"
+$CRAFT[treat]/scripts/followup_parent.py assemble fixture-nest-fail-spec --children "$children"; echo "EXIT=$?"
 rm -f "$children"

@@ -4,5 +4,5 @@ vault CHANGED task/nest-fail-reject-path-traversal-in-the-archive-extractor.json
 vault CHANGED task/nest-fail-reject-path-traversal-in-the-archive-extractor.md
 vault CHANGED task/nest-fail-stop-logging-session-cookies.json
 vault CHANGED task/nest-fail-stop-logging-session-cookies.md
-repo head before=fd77e7fc79d4cf4cc2d3859cb377bb698fcca79b after=fd77e7fc79d4cf4cc2d3859cb377bb698fcca79b
+repo head before=[sha:fd77e7fc] after=[sha:fd77e7fc]
 repo status after=''

@@ -1,4 +1,4 @@
-[main] TOOL Read {"file_path": "$WORK/snap-base/tools/craft/plugins/craft/skills/tidy-followups/SKILL.md"}
+[main] TOOL Read {"file_path": "$CRAFT[base]/skills/tidy-followups/SKILL.md"}
 
 [main] RESULT
 1	---
@@ -24,7 +24,7 @@
 21	It is r... [cut 9070 chars]
 
 [main] BASH
-$WORK/snap-base/tools/craft/plugins/craft/scripts/followup_gather.py fixture-distilled-spec > /tmp/gather_out.json 2>/tmp/gather_err.txt; echo "exit=$?"; cat /tmp/gather_out.json; echo ---; cat /tmp/gather_err.txt
+$CRAFT[base]/scripts/followup_gather.py fixture-distilled-spec > /tmp/gather_out.json 2>/tmp/gather_err.txt; echo "exit=$?"; cat /tmp/gather_out.json; echo ---; cat /tmp/gather_err.txt
 
 [main] RESULT
 Exit code 1
@@ -34,7 +34,7 @@ cat: /tmp/gather_out.json: No such file or directory
 ---
 cat: /tmp/gather_err.txt: No such file or directory
 
-[main] TOOL Read {"file_path": "$WORK/snap-base/tools/craft/plugins/craft/skills/_shared/security.md"}
+[main] TOOL Read {"file_path": "$CRAFT[base]/skills/_shared/security.md"}
 
 [main] RESULT
 1	# Security posture — credential scrub and untrusted-value validation
@@ -54,10 +54,10 @@ cat: /tmp/gather_err.txt: No such file or directory
 15	
 16	- **Key-like tokens** — `(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s*[=:]\s*\S+`
 17	  — the trailing character class is load-bearing: it lets the keyword carry qualifier text before
-18	  the separator, which is what catches `SECRET_KEY=`, `AWS_SECRE... [cut 2830 chars]
+18	  the separator, which is what catches `[redacted:key-like] `AWS_SECRE... [cut 2830 chars]
 
 [main] BASH
-$WORK/snap-base/tools/craft/plugins/craft/scripts/followup_gather.py fixture-distilled-spec; echo "exit=$?"
+$CRAFT[base]/scripts/followup_gather.py fixture-distilled-spec; echo "exit=$?"
 
 [main] RESULT
 {"spec": "fixture-distilled-spec", "vault": "default", "entry": "complete-status", "followups": [{"name": "distilled-reject-path-traversal-in-the-upload-endpoint", "title": "Distilled: reject path traversal in the upload endpoint", "status": "open"}], "slice-basis": "labelled", "slices": ["fixture-distilled-spec-the-slice"], "child-count": 1, "candidates-read": 1, "kept": 1, "excluded-by-label": {"count": 0, "names": []}, "skipped-edges": 0}
@@ -76,7 +76,7 @@ lore record show --json --vault default task/distilled-reject-path-traversal-in-
   "layer": "personal",
   "name": "distilled-reject-path-traversal-in-the-upload-endpoint",
   "record_id": "task/distilled-reject-path-traversal-in-the-upload-endpoint",
-  "revision": "33d2ab906c9ea8b2b31dc30ab27cf50f546e12e690173f6fe30aa2a09cdff703",
+  "revision": "[sha:33d2ab90]",
   "sidecar": {
     "created-at": "2026-10-16T15:35:40Z",
     "created-by": "fixture@example.com",

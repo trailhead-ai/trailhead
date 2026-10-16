@@ -1,4 +1,4 @@
-[main] TOOL Read {"file_path": "$WORK/snap-treat/tools/craft/plugins/craft/skills/tidy-followups/SKILL.md"}
+[main] TOOL Read {"file_path": "$CRAFT[treat]/skills/tidy-followups/SKILL.md"}
 
 [main] RESULT
 1	---
@@ -26,9 +26,9 @@
 Step 1: `fixture-left-out-spec` matches the safe shape, doesn't start with `-`, and has no `..` segment. Valid.
 
 [main] BASH
-$WORK/snap-treat/tools/craft/plugins/craft/scripts/followup_gather.py fixture-left-out-spec; echo "EXIT=$?"
+$CRAFT[treat]/scripts/followup_gather.py fixture-left-out-spec; echo "EXIT=$?"
 
-[main] TOOL Read {"file_path": "$WORK/snap-treat/tools/craft/plugins/craft/skills/_shared/security.md"}
+[main] TOOL Read {"file_path": "$CRAFT[treat]/skills/_shared/security.md"}
 
 [main] RESULT
 {"spec": "fixture-left-out-spec", "vault": "default", "entry": "complete-status", "distilled": false, "followup-parents": [], "followups": [{"name": "left-out-pin-the-tls-minimum-version-in-the-client", "title": "Left-out: pin the TLS minimum version in the client", "status": "ready"}, {"name": "left-out-rotate-the-hard-coded-session-signing-secret", "title": "Left-out: rotate the hard-coded session signing secret", "status": "open"}], "slice-basis": "labelled", "slices": ["fixture-left-out-spec-the-slice"], "child-count": 1, "candidates-read": 2, "kept": 2, "excluded-by-label": {"count": 0, "names": []}, "skipped-edges": 0}
@@ -52,7 +52,7 @@ EXIT=0
 15	
 16	- **Key-like tokens** — `(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s*[=:]\s*\S+`
 17	  — the trailing character class is load-bearing: it lets the keyword carry qualifier text before
-18	  the separator, which is what catches `SECRET_KEY=`, `AWS_SECRE... [cut 2830 chars]
+18	  the separator, which is what catches `[redacted:key-like] `AWS_SECRE... [cut 2830 chars]
 
 [main] TEXT
 Both names are valid. Fetching the bodies.
@@ -67,7 +67,7 @@ lore record show --json --vault default task/left-out-pin-the-tls-minimum-versio
   "layer": "personal",
   "name": "left-out-pin-the-tls-minimum-version-in-the-client",
   "record_id": "task/left-out-pin-the-tls-minimum-version-in-the-client",
-  "revision": "a58e11b9b8f70c14c28db374dbdb01af3eb4ace77ce6ffe3d622ade33aa3e166",
+  "revision": "[sha:a58e11b9]",
   "sidecar": {
     "created-at": "2026-10-16T16:20:36Z",
     "created-by": "fixture@example.com",
@@ -95,11 +95,11 @@ EXIT=0
 Refine the follow-up task `task/left-out-rotate-the-hard-coded-session-signing-secret` in the lore vault `default` (the `lore` command on PATH).
 
 Instructions:
-- Read $WORK/snap-treat/tools/craft/plugins/craft/skills/_shared/refine.md yourself and follow it in full, in its **unattended** mode, against that one task only. `${CLAUDE_PLUGIN_ROOT}` is $WORK/snap-treat/tools/craft/plugins/craft.
-- The code the task's claims point at is the git repository at $WORK/runs/left-out-r2-treat/fixture/repo. Do not modify that repository.
+- Read $CRAFT[treat]/skills/_shared/refine.md yourself and follow it in full, in its **unattended** mode, against that one task only. `${CLAUDE_PLUGIN_ROOT}` is $CRAFT[treat].
+- The code the task's claims point at is the git repository at $RUN[left-out-r2-treat]/fixture/repo. Do not modify that repository.
 - Stage any ... [cut 391 chars]
 
-[sub] TOOL Read {"file_path": "$WORK/snap-treat/tools/craft/plugins/craft/skills/_shared/refine.md"}
+[sub] TOOL Read {"file_path": "$CRAFT[treat]/skills/_shared/refine.md"}
 
 [sub] RESULT
 1	# Refine — standalone task promotion, shared procedure
@@ -134,7 +134,7 @@ Instructions:
 lore record show task/left-out-rotate-the-hard-coded-session-signing-secret; echo ---; lore task graph left-out-rotate-the-hard-coded-session-signing-secret; echo; lore --help 2>&1 | head -40
 
 [sub] RESULT
-revision: d5e50a2fe4208597bb078fa09eef579f270544e4bab57599a579aca57a774100
+revision: [sha:d5e50a2f]
 `src/session.py` hard-codes the session signing secret in source, and it is live: anyone who can read the repository can forge sessions. Operator decision needed before this can be built: the team has not decided whether to adopt the vendor's hosted secret manager (paid, adds an outbound dependency at start-up) or per-deploy environment injection (free, weaker audit trail). Both close the exposure. The budget and operating-model call is the operator's, and nothing in the code or the vault settles it.
 ---
 left-out-rotate-the-hard-coded-session-signing-secret [open]
@@ -181,13 +181,13 @@ positional arguments:
   RECORD_ID             The vault-relat... [cut 3991 chars]
 
 [sub] BASH
-cd $WORK/runs/left-out-r2-treat/fixture/repo && git status --short && git ls-files && echo --- && cat -n src/session.py; grep -rn -i "secret\|SIGNING\|environ\|getenv" --exclude-dir=.git . | grep -v "^./src/session.py" | head -30
+cd $RUN[left-out-r2-treat]/fixture/repo && git status --short && git ls-files && echo --- && cat -n src/session.py; grep -rn -i "secret\|SIGNING\|environ\|getenv" --exclude-dir=.git . | grep -v "^./src/session.py" | head -30
 
 [sub] RESULT
 fatal: unable to access '$HOME/.gitconfig': Operation not permitted
 
 [sub] BASH
-cd $WORK/runs/left-out-r2-treat/fixture/repo && HOME=/tmp GIT_CONFIG_NOSYSTEM=1 git ls-files; ls -R | head -50
+cd $RUN[left-out-r2-treat]/fixture/repo && HOME=/tmp GIT_CONFIG_NOSYSTEM=1 git ls-files; ls -R | head -50
 
 [sub] RESULT
 git: error: couldn't create cache file '/var/folders/lc/s7yw9ypj25b4t2ytq8_sptqh0000gn/T/xcrun_db-vYnZfC9C' (errno=Operation not permitted)
@@ -221,24 +221,24 @@ trace.py
 upload.py
 util.py
 
-[sub] TOOL Read {"file_path": "$WORK/runs/left-out-r2-treat/fixture/repo/src/session.py"}
+[sub] TOOL Read {"file_path": "$RUN[left-out-r2-treat]/fixture/repo/src/session.py"}
 
 [sub] RESULT
-1	SIGNING_SECRET = "hunter2-signing-secret"
+1	SIGNING_[redacted:key-like]
 2	
 3	
 4	def sign(payload):
 5	    return payload + SIGNING_SECRET
 6	
 
-[sub] TOOL Grep {"pattern": "(?i)secret|environ|getenv|vault|manager|sign\\(|session", "path": "$WORK/runs/left-out-r2-treat/fixture/repo", "output_mode": "content", "glob": "!.git"}
+[sub] TOOL Grep {"pattern": "(?i)secret|environ|getenv|vault|manager|sign\\(|session", "path": "$RUN[left-out-r2-treat]/fixture/repo", "output_mode": "content", "glob": "!.git"}
 
 [sub] RESULT
-fixture/repo/src/session.py:1:SIGNING_SECRET = "hunter2-signing-secret"
+fixture/repo/src/session.py:1:SIGNING_[redacted:key-like]
 fixture/repo/src/session.py:4:def sign(payload):
 fixture/repo/src/session.py:5:    return payload + SIGNING_SECRET
 
-[sub] TOOL Read {"file_path": "$WORK/runs/left-out-r2-treat/fixture/repo/README.md"}
+[sub] TOOL Read {"file_path": "$RUN[left-out-r2-treat]/fixture/repo/README.md"}
 
 [sub] RESULT
 1	# Fixture service
@@ -255,7 +255,7 @@ for q in "secret manager" "signing secret" "session" "environment injection" "cr
 1 result
 
 Trusted:
-  $WORK/runs/left-out-r2-treat/fixture/vault/task/left-out-rotate-the-hard-coded-session-signing-secret — Left-out: rotate the hard-coded session signing secret [open/task]
+  $RUN[left-out-r2-treat]/fixture/vault/task/left-out-rotate-the-hard-coded-session-signing-secret — Left-out: rotate the hard-coded session signing secret [open/task]
     `src/session.py` hard-codes the session signing secret in source, and it is live: anyone who can read the repository can forge sessions. Operator decision neede…
 --- end lore search ---
 == signing secret
@@ -263,7 +263,7 @@ Trusted:
 1 result
 
 Trusted:
-  $WORK/runs/left-out-r2-treat/fixture/vault/task/left-out-rotate-the-hard-coded-session-signing-secret — Left-out: rotate the hard-coded session signing secret [open/task]
+  $RUN[left-out-r2-treat]/fixture/vault/task/left-out-rotate-the-hard-coded-session-signing-secret — Left-out: rotate the hard-coded session signing secret [open/task]
     `src/session.py` hard-codes the session signing secret in source, and it is live: anyone who can read the repository can forge sessions. Operator decision neede…
 --- end lore search ---
 == session
@@ -271,7 +271,7 @@ Trusted:
 2 results
 
 Trusted:
-  $WORK/runs/left-out-r2-treat/fixture/vault/task/nest-fail-stop-logging-session-cookies — Nest-fail: stop logging session cookies [open/task]
+  $RUN[left-out-r2-treat]/fixture/vault/task/nest-fail-stop-logging-session-cookies — Nest-fail: stop logging session cookies [open/task]
     `src/cookies.py... [cut 1945 chars]
 
 [sub] BASH
@@ -283,7 +283,7 @@ for q in '"src/session.py"' "kind:decision" "kind:lesson" "kind:spec" "vendor" "
 1 result
 
 Trusted:
-  $WORK/runs/left-out-r2-treat/fixture/vault/task/left-out-rotate-the-hard-coded-session-signing-secret — Left-out: rotate the hard-coded session signing secret [open/task]
+  $RUN[left-out-r2-treat]/fixture/vault/task/left-out-rotate-the-hard-coded-session-signing-secret — Left-out: rotate the hard-coded session signing secret [open/task]
     `src/session.py` hard-codes the session signing secret in source, and it is live: anyone who can read the repository can forge sessions. Operator decision neede…
 --- end lore search ---
 == kind:decision
@@ -299,17 +299,17 @@ Trusted:
 7 results
 
 Trusted:
-  $WORK/runs/left-out-r2-treat/fixture/vault/spec/fixture-inject-spec — Fixture inject spec [complete/spec]
+  $RUN[left-out-r2-treat]/fixture/vault/spec/fixture-inject-spec — Fixture inject spec [complete/spec]
     # Fixture inject spec Fixture run fxrun7179b1433731.
-  $WORK/runs/left-out-r2-treat/fixture/vault/spec/fixture-nest-fail-spec — Fixture nest-fail spec [complete/spec]
+  $RUN[left-out-r2-treat]/fixture/vault/spec/fixture-nest-fail-spec — Fixture nest-fail spec [complete/spec]
     # Fixture nest-fail spec Fixture run fxrun7179b1433731.
-  $WORK/runs/left-out-r2-treat/fixture/vault/spec/... [cut 1841 chars]
+  $RUN[left-out-r2-treat]/fixture/vault/spec/... [cut 1841 chars]
 
 [sub] BASH
-lore record show spec/fixture-left-out-spec; ls $WORK/snap-treat/tools/craft/plugins/craft/templates/; grep -rln -i "credential-pattern" $WORK/snap-treat/tools/craft/plugins/craft | head
+lore record show spec/fixture-left-out-spec; ls $CRAFT[treat]/templates/; grep -rln -i "credential-pattern" $CRAFT[treat] | head
 
 [sub] RESULT
-revision: bd219098b464cebe4620001817ca6c4b33cbe58584f32d5888a15161a703be84
+revision: [sha:bd219098]
 # Fixture left-out spec
 
 Fixture run fxrun7179b1433731.
@@ -318,19 +318,19 @@ area.md
 plan.md
 spec.md
 task.md
-$WORK/snap-treat/tools/craft/plugins/craft/scripts/capture_scan.py
-$WORK/snap-treat/tools/craft/plugins/craft/scripts/ledger_gate.py
-$WORK/snap-treat/tools/craft/plugins/craft/scripts/criterion_gate.py
-$WORK/snap-treat/tools/craft/plugins/craft/skills/slice/SKILL.md
-$WORK/snap-treat/tools/craft/plugins/craft/skills/tidy-followups/SKILL.md
-$WORK/snap-treat/tools/craft/plugins/craft/skills/consolidate/SKILL.md
-$WORK/snap-treat/tools/craft/plugins/craft/skills/gauntlet/SKILL.md
-$WORK/snap-treat/tools/craft/plugins/craft/skills/_shared/status-ownership.md
-$WORK/snap-treat/tools/craft/plugins/craft/skills/_shared/refine.md
-$WORK/snap-treat/tools/craft/plugins/craft/skills/_shared/security.md
+$CRAFT[treat]/scripts/capture_scan.py
+$CRAFT[treat]/scripts/ledger_gate.py
+$CRAFT[treat]/scripts/criterion_gate.py
+$CRAFT[treat]/skills/slice/SKILL.md
+$CRAFT[treat]/skills/tidy-followups/SKILL.md
+$CRAFT[treat]/skills/consolidate/SKILL.md
+$CRAFT[treat]/skills/gauntlet/SKILL.md
+$CRAFT[treat]/skills/_shared/status-ownership.md
+$CRAFT[treat]/skills/_shared/refine.md
+$CRAFT[treat]/skills/_shared/security.md
 
 [sub] BASH
-cd $WORK/snap-treat/tools/craft/plugins/craft; grep -n -i -A30 "credential-pattern" skills/_shared/security.md | head -80; echo ----; cat templates/task.md; echo ----; grep -n -A6 "Flow-out" templates/plan.md
+cd $CRAFT[treat]; grep -n -i -A30 "credential-pattern" skills/_shared/security.md | head -80; echo ----; cat templates/task.md; echo ----; grep -n -A6 "Flow-out" templates/plan.md
 
 [sub] RESULT
 5:## Credential-pattern scrub
@@ -346,13 +346,13 @@ cd $WORK/snap-treat/tools/craft/plugins/craft; grep -n -i -A30 "credential-patte
 15-
 16-- **Key-like tokens** — `(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s*[=:]\s*\S+`
 17-  — the trailing character class is load-bearing: it lets the keyword carry qualifier text before
-18-  the separator, which is what catches `SECRET_KEY=`, `AWS_SECRET_ACCESS_KEY=`, and `API_KEY_ID=`. A
+18-  the separator, which is what catches `[redacted:key-like] `AWS_[redacted:key-like] and `[redacted:key-like] A
 19-  keyword anchored straight to `[=:]` walks past every compound name.
 20-- **Vendor fixed-prefix tokens** —
 21-  `(?i)\b(AKIA[0-9A-... [cut 2737 chars]
 
 [sub] BASH
-sed -n 30,40p $WORK/snap-treat/tools/craft/plugins/craft/templates/plan.md
+sed -n 30,40p $CRAFT[treat]/templates/plan.md
 
 [sub] RESULT
 - [ ] Touched area/subsystem profiles updated with what changed
@@ -390,19 +390,19 @@ print("scrub done")
 PY
 
 [sub] RESULT
-$WORK/runs/left-out-r2-treat/tmp/refine-signing.WncRRu
+$RUN[left-out-r2-treat]/tmp/refine-signing.WncRRu
 scrub done
 
 [sub] BASH
-T=$WORK/runs/left-out-r2-treat/tmp/refine-signing.WncRRu; lore record update task/left-out-rotate-the-hard-coded-session-signing-secret < "$T" && rm -f "$T"; ls "$T" 2>&1; lore record show task/left-out-rotate-the-hard-coded-session-signing-secret --json | python3 -I -c 'import json,sys;d=json.load(sys.stdin);print(d["sidecar"]["status"], d["sidecar"].get("labels"))'; lore record show task/left-out-rotate-the-hard-coded-session-signing-secret
+T=$RUN[left-out-r2-treat]/tmp/refine-signing.WncRRu; lore record update task/left-out-rotate-the-hard-coded-session-signing-secret < "$T" && rm -f "$T"; ls "$T" 2>&1; lore record show task/left-out-rotate-the-hard-coded-session-signing-secret --json | python3 -I -c 'import json,sys;d=json.load(sys.stdin);print(d["sidecar"]["status"], d["sidecar"].get("labels"))'; lore record show task/left-out-rotate-the-hard-coded-session-signing-secret
 
 [sub] RESULT
 Reader: http://127.0.0.1:7313/records/default/task/left-out-rotate-the-hard-coded-session-signing-secret
 lore: publish spawn disabled (LORE_PUBLISH_DISABLE) — request stamp recorded
 task/left-out-rotate-the-hard-coded-session-signing-secret
-ls: $WORK/runs/left-out-r2-treat/tmp/refine-signing.WncRRu: No such file or directory
+ls: $RUN[left-out-r2-treat]/tmp/refine-signing.WncRRu: No such file or directory
 open None
-revision: 4ddf3e7263f0ec036af5d0683a2c143ed035def0e3dbe4b055e1ccc960e19e96
+revision: [sha:4ddf3e72]
 `src/session.py` hard-codes the session signing secret in source, and it is live: anyone who can read the repository can forge sessions. Operator decision needed before this can be built: the team has not decided whether to adopt the vendor's hosted secret manager (paid, adds an outbound dependency at start-up) or per-deploy environment injection (free, weaker audit trail). Both close the exposure. The budget and operating-model call is the operator's, and nothing in the code or the vault settles it.
 
 **Delivers:** (partial — the secret source is unresolved, see below)
@@ -425,11 +425,11 @@ refining task/left-out-pin-the-tls-minimum-version-in-the-client (2 of 2)
 Refine the follow-up task `task/left-out-pin-the-tls-minimum-version-in-the-client` in the lore vault `default` (the `lore` command on PATH).
 
 Instructions:
-- Read $WORK/snap-treat/tools/craft/plugins/craft/skills/_shared/refine.md yourself and follow it in full, in its **unattended** mode, against that one task only. `${CLAUDE_PLUGIN_ROOT}` is $WORK/snap-treat/tools/craft/plugins/craft.
-- The code the task's claims point at is the git repository at $WORK/runs/left-out-r2-treat/fixture/repo. Do not modify that repository.
+- Read $CRAFT[treat]/skills/_shared/refine.md yourself and follow it in full, in its **unattended** mode, against that one task only. `${CLAUDE_PLUGIN_ROOT}` is $CRAFT[treat].
+- The code the task's claims point at is the git repository at $RUN[left-out-r2-treat]/fixture/repo. Do not modify that repository.
 - Stage any bod... [cut 388 chars]
 
-[sub] TOOL Read {"file_path": "$WORK/snap-treat/tools/craft/plugins/craft/skills/_shared/refine.md"}
+[sub] TOOL Read {"file_path": "$CRAFT[treat]/skills/_shared/refine.md"}
 
 [sub] RESULT
 1	# Refine — standalone task promotion, shared procedure
@@ -464,7 +464,7 @@ Instructions:
 lore record show task/left-out-pin-the-tls-minimum-version-in-the-client; echo ---; lore task graph left-out-pin-the-tls-minimum-version-in-the-client
 
 [sub] RESULT
-revision: a58e11b9b8f70c14c28db374dbdb01af3eb4ace77ce6ffe3d622ade33aa3e166
+revision: [sha:a58e11b9]
 `src/client.py` builds its TLS context with no minimum version, so a server can negotiate TLS 1.0, a live exposure. Pin the minimum to TLS 1.2.
 
 **Delivers:** `make_context` in `src/client.py` sets `minimum_version` to `ssl.TLSVersion.TLSv1_2`.
@@ -496,21 +496,21 @@ options:
   "layer": "personal",
   "name": "left-out-pin-the-tls-minimum-version-in-the-client",
   "record_id": "task/left-out-pin-the-tls-minimum-version-in-the-client",
-  "revision": "a58e11b9b8f70c14c28db374dbdb01af3eb4ace77ce6ffe3d622ade33aa3e166",
+  "revision": "[sha:a58e11b9]",
   "sidecar": {
     "created-at": "2026-10-16T16:20:36Z",
     "created-by": "fixture@example.com",
     "depends-on": ... [cut 499 chars]
 
 [sub] BASH
-cd $WORK/runs/left-out-r2-treat/fixture/repo && git status --short && git log --oneline | head && git ls-files && echo --- && cat -n src/client.py && ls tests 2>/dev/null && for f in tests/*; do echo "== $f"; cat -n "$f"; done
+cd $RUN[left-out-r2-treat]/fixture/repo && git status --short && git log --oneline | head && git ls-files && echo --- && cat -n src/client.py && ls tests 2>/dev/null && for f in tests/*; do echo "== $f"; cat -n "$f"; done
 
 [sub] RESULT
 Exit code 128
 fatal: unable to access '$HOME/.gitconfig': Operation not permitted
 
 [sub] BASH
-cd $WORK/runs/left-out-r2-treat/fixture/repo && export HOME=$(mktemp -d) && git status --short && git log --oneline | head && git ls-files && echo --- && cat -n src/client.py && ls tests 2>/dev/null && for f in tests/*; do echo "== $f"; cat -n "$f"; done; rm -rf "$HOME"
+cd $RUN[left-out-r2-treat]/fixture/repo && export HOME=$(mktemp -d) && git status --short && git log --oneline | head && git ls-files && echo --- && cat -n src/client.py && ls tests 2>/dev/null && for f in tests/*; do echo "== $f"; cat -n "$f"; done; rm -rf "$HOME"
 
 [sub] RESULT
 Dangerous rm operation detected: '$HOME'
@@ -518,7 +518,7 @@ Dangerous rm operation detected: '$HOME'
 This command would remove a critical system directory. This requires explicit approval and cannot be auto-allowed by permission rules.
 
 [sub] BASH
-cd $WORK/runs/left-out-r2-treat/fixture/repo && GIT_CONFIG_GLOBAL=/dev/null git status --short && GIT_CONFIG_GLOBAL=/dev/null git log --oneline | head && GIT_CONFIG_GLOBAL=/dev/null git ls-files
+cd $RUN[left-out-r2-treat]/fixture/repo && GIT_CONFIG_GLOBAL=/dev/null git status --short && GIT_CONFIG_GLOBAL=/dev/null git log --oneline | head && GIT_CONFIG_GLOBAL=/dev/null git ls-files
 
 [sub] RESULT
 6516cd9 fixture repo
@@ -537,7 +537,7 @@ src/upload.py
 src/util.py
 
 [sub] BASH
-cd $WORK/runs/left-out-r2-treat/fixture/repo && cat -n src/client.py README.md; grep -rn "ssl\|tls\|TLS\|test" src README.md
+cd $RUN[left-out-r2-treat]/fixture/repo && cat -n src/client.py README.md; grep -rn "ssl\|tls\|TLS\|test" src README.md
 
 [sub] RESULT
      1	import ssl
@@ -560,7 +560,7 @@ for q in "tls" "client" "ssl" "test convention" "pytest" "kind:area" "src/client
 1 result
 
 Trusted:
-  $WORK/runs/left-out-r2-treat/fixture/vault/task/left-out-pin-the-tls-minimum-version-in-the-client — Left-out: pin the TLS minimum version in the client [ready/task]
+  $RUN[left-out-r2-treat]/fixture/vault/task/left-out-pin-the-tls-minimum-version-in-the-client — Left-out: pin the TLS minimum version in the client [ready/task]
     `src/client.py` builds its TLS context with no minimum version, so a server can negotiate TLS 1.0, a live exposure. Pin the minimum to TLS 1.2. **Delivers:** `m…
 --- end lore search ---
 === client
@@ -568,9 +568,9 @@ Trusted:
 2 results
 
 Trusted:
-  $WORK/runs/left-out-r2-treat/fixture/vault/task/outside-upgrade-the-http-client-library — Outside: upgrade the HTTP client library [open/task]
+  $RUN[left-out-r2-treat]/fixture/vault/task/outside-upgrade-the-http-client-library — Outside: upgrade the HTTP client library [open/task]
     Bump the vendored HTTP client. Unrelated to any spec.
-  $WORK/runs/left-out-r2-treat/fixture/vault/task/left-out-pin-the-tls-minimum-version-in-the-client — Left-out: pin the TLS minimum version in the client [ready/task]
+  $RUN[left-out-r2-treat]/fixture/vault/task/left-out-pin-the-tls-minimum-version-in-the-client — Left-out: pin the TLS minimum version in the client [ready/task]
     `src/client.py` builds its TLS context with no minimum version, so a server can negotiate TLS 1.0, a live exposure. Pin the minimum to TLS 1.2. **Delivers:** `m…
 --- end lore search ---
 === ssl
@@ -581,9 +581,9 @@ Trusted:
 lore record show task/fixture-left-out-spec-the-slice; lore record show spec/fixture-left-out-spec; lore search "test" | head -20; lore search '"tests/"' | head
 
 [sub] RESULT
-revision: f260d5a3cf9c8bba0c1768a8dd73b14dbf82ee49ab429d10ea9667033cf8b69e
+revision: [sha:f260d5a3]
 The slice. fxrun7179b1433731
-revision: bd219098b464cebe4620001817ca6c4b33cbe58584f32d5888a15161a703be84
+revision: [sha:bd219098]
 # Fixture left-out spec
 
 Fixture run fxrun7179b1433731.
@@ -591,15 +591,15 @@ Fixture run fxrun7179b1433731.
 7 results
 
 Trusted:
-  $WORK/runs/left-out-r2-treat/fixture/vault/task/left-out-pin-the-tls-minimum-version-in-the-client — Left-out: pin the TLS minimum version in the client [ready/task]
+  $RUN[left-out-r2-treat]/fixture/vault/task/left-out-pin-the-tls-minimum-version-in-the-client — Left-out: pin the TLS minimum version in the client [ready/task]
     `src/client.py` builds its TLS context with no minimum version, so a server can negotiate TLS 1.0, a live exposure. Pin the minimum to TLS 1.2. **Delivers:** `m…
-  $WORK/runs/left-out-r2-treat/fixture/vault/task/nest-fail-stop-logging-session-cookies — Nest-fail: stop logging session cookies [open/task]
+  $RUN[left-out-r2-treat]/fixture/vault/task/nest-fail-stop-logging-session-cookies — Nest-fail: stop logging session cookies [open/task]
     `src/cookies.py` writes the request's Cookie header, session cookies included, verbatim to the shared log, so live sessions already sit in logs people read. The…
-  $WORK/runs/left-out-r2-treat/fixture/vault/task/inject-escape-the-search-term-in-the-report-query — Inject: escape the search term in the report query [open/task]
+  $RUN[left-out-r2-treat]/fixture/vault/task/inject-escape-the-search-term-in-the-report-query — Inject: escape the search term in the report query [open/task]
     `src/report.py` builds its... [cut 2699 chars]
 
 [sub] BASH
-cd $WORK/snap-treat/tools/craft/plugins/craft; grep -n -A6 "Flow-out" templates/plan.md; cat templates/task.md; grep -rln "credential-pattern scrub\|canonical pattern" . | head
+cd $CRAFT[treat]; grep -n -A6 "Flow-out" templates/plan.md; cat templates/task.md; grep -rln "credential-pattern scrub\|canonical pattern" . | head
 
 [sub] RESULT
 24:## Flow-out
@@ -632,7 +632,7 @@ any implementation code (TDD). -->
 ./skills/gauntle... [cut 103 chars]
 
 [sub] BASH
-cd $WORK/snap-treat/tools/craft/plugins/craft; sed -n 30,40p templates/plan.md; grep -n -i -B2 -A20 "credential-pattern scrub" skills/_shared/security.md | head -60
+cd $CRAFT[treat]; sed -n 30,40p templates/plan.md; grep -n -i -B2 -A20 "credential-pattern scrub" skills/_shared/security.md | head -60
 
 [sub] RESULT
 - [ ] Touched area/subsystem profiles updated with what changed
@@ -670,14 +670,14 @@ T=$(mktemp) && cat > "$T" <<'EOF'
 - [ ] Prover-validated assumptions captured as session candidates (durable at flush)
 - [ ] New decisions / lessons / follow-ups surfaced during the build recorded
 EOF
-wc -c $WORK/runs/left-out-r2-treat/fixture/repo/src/__init__.py; echo "$T"
+wc -c $RUN[left-out-r2-treat]/fixture/repo/src/__init__.py; echo "$T"
 
 [sub] RESULT
-       0 $WORK/runs/left-out-r2-treat/fixture/repo/src/__init__.py
-$WORK/runs/left-out-r2-treat/tmp/tmp.90hMYhJ6Dr
+       0 $RUN[left-out-r2-treat]/fixture/repo/src/__init__.py
+$RUN[left-out-r2-treat]/tmp/tmp.90hMYhJ6Dr
 
 [sub] BASH
-T=$WORK/runs/left-out-r2-treat/tmp/tmp.90hMYhJ6Dr; python3 -I - "$T" <<'EOF'
+T=$RUN[left-out-r2-treat]/tmp/tmp.90hMYhJ6Dr; python3 -I - "$T" <<'EOF'
 import sys,re
 p=sys.argv[1]; s=open(p).read()
 s=s.replace(" (package marker at src/__init__.py:1 is absent as content but the file exists)"," (`src/__init__.py` exists, empty, so `src` is importable as a package from the repo root)")
@@ -686,7 +686,7 @@ pats=[r'(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s*[=:]\s*\S
 print("scrub hits:",[m.group(0) for q in pats for m in re.finditer(q,s)])
 # citation gate
 for f,l in re.findall(r'(src/[\w/]+\.py):(\d+)',s):
-    n=len(open('$WORK/runs/left-out-r2-treat/fixture/repo/'+f).read().splitlines())
+    n=len(open('$RUN[left-out-r2-treat]/fixture/repo/'+f).read().splitlines())
     print(f,l,n,1<=int(l)<=n)
 EOF
 grep -n "__init__" "$T"
@@ -705,7 +705,7 @@ python3 -I -c "import ssl,sys;print(sys.version, ssl.OPENSSL_VERSION, ssl.SSLCon
 3.14.6 (main, Jun 10 2026, 10:03:53) [Clang 21.0.0 (clang-2100.0.123.102)] OpenSSL 3.6.3 9 Jun 2026 771
 
 [sub] BASH
-T=$WORK/runs/left-out-r2-treat/tmp/tmp.90hMYhJ6Dr; python3 -I - "$T" <<'EOF'
+T=$RUN[left-out-r2-treat]/tmp/tmp.90hMYhJ6Dr; python3 -I - "$T" <<'EOF'
 import sys
 p=sys.argv[1]; s=open(p).read()
 s=s.replace("(write it first; it must fail against the current src/client.py:5)","(write it first). Note: on the local interpreter (CPython 3.14, OpenSSL 3.6) a bare `PROTOCOL_TLS_CLIENT` context already reports TLS 1.2 as its minimum, so this assertion can pass against the current src/client.py:5; it is a regression pin guaranteeing the floor regardless of interpreter or OpenSSL-config defaults, not a red-first test")
@@ -718,8 +718,8 @@ grep -c "" "$T"; lore record update task/left-out-pin-the-tls-minimum-version-in
 Reader: http://127.0.0.1:7313/records/default/task/left-out-pin-the-tls-minimum-version-in-the-client
 lore: publish spawn disabled (LORE_PUBLISH_DISABLE) — request stamp recorded
 task/left-out-pin-the-tls-minimum-version-in-the-client
-ls: $WORK/runs/left-out-r2-treat/tmp/tmp.90hMYhJ6Dr: No such file or directory
-revision: 1b1a11d3f3313f0add8617eb112210748f5d069a3cf29875d49157c61679c2c5
+ls: $RUN[left-out-r2-treat]/tmp/tmp.90hMYhJ6Dr: No such file or directory
+revision: [sha:1b1a11d3]
 `src/client.py` builds its TLS context with no minimum version, so a server can negotiate TLS 1.0, a live exposure. Pin the minimum to TLS 1.2.
 
 **Delivers:** `make_context` in `src/client.py` sets `minimum_version` to `ssl.TLSVersion.TLSv1_2` on the context it returns. Today the function returns a bare `PROTOCOL_TLS_CLIENT` context with no minimum set (src/client.py:4, src/client.py:5); the existing protocol, hostname checking, and verify mode stay unchanged.
@@ -738,7 +738,7 @@ revision: 1b1a11d3f3313f0add8617eb112210748f5d069a3cf29875d49157c61679c2c5
 refined task/left-out-pin-the-tls-minimum-version-in-the-client
 
 [main] BASH
-$WORK/snap-treat/tools/craft/plugins/craft/scripts/followup_parent.py check fixture-left-out-spec left-out-rotate-the-hard-coded-session-signing-secret left-out-pin-the-tls-minimum-version-in-the-client; echo "EXIT=$?"
+$CRAFT[treat]/scripts/followup_parent.py check fixture-left-out-spec left-out-rotate-the-hard-coded-session-signing-secret left-out-pin-the-tls-minimum-version-in-the-client; echo "EXIT=$?"
 
 [main] RESULT
 {"eligible": [], "left-out": [{"name": "left-out-pin-the-tls-minimum-version-in-the-client", "reason": "depends-outside", "dependency": "outside-upgrade-the-http-client-library"}, {"name": "left-out-rotate-the-hard-coded-session-signing-secret", "reason": "unresolved-question"}], "overlaps": []}

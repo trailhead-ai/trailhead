@@ -1,5 +1,5 @@
 [main] BASH
-$WORK/snap-treat/tools/craft/plugins/craft/scripts/followup_gather.py fixture-distilled-spec; echo "EXIT=$?"
+$CRAFT[treat]/scripts/followup_gather.py fixture-distilled-spec; echo "EXIT=$?"
 
 [main] BASH
 lore record show --json --vault default task/distilled-reject-path-traversal-in-the-upload-endpoint; echo "EXIT=$?"
@@ -7,19 +7,19 @@ lore record show --json --vault default task/distilled-reject-path-traversal-in-
 [main] AGENT
 Refine the follow-up task `task/distilled-reject-path-traversal-in-the-upload-endpoint` in the lore vault `default`.
 
-1. Read $WORK/snap-treat/tools/craft/plugins/craft/skills/_shared/refine.md yourself, and follow it in full in its **unattended mode**, against that one task only. `${CLAUDE_PLUGIN_ROOT}` is $WORK/snap-treat/tools/craft/plugins/craft. The `lore` command on your PATH reads the vault. The code the task's claims point at is the git repository at $WORK/runs/distilled-r2-treat/fixture/repo. Check those claims against that repo... [cut 436 chars]
+1. Read $CRAFT[treat]/skills/_shared/refine.md yourself, and follow it in full in its **unattended mode**, against that one task only. `${CLAUDE_PLUGIN_ROOT}` is $CRAFT[treat]. The `lore` command on your PATH reads the vault. The code the task's claims point at is the git repository at $RUN[distilled-r2-treat]/fixture/repo. Check those claims against that repo... [cut 436 chars]
 
 [sub] BASH
 lore --help 2>&1 | head -40; lore record show task/distilled-reject-path-traversal-in-the-upload-endpoint 2>&1; lore task graph distilled-reject-path-traversal-in-the-upload-endpoint 2>&1
 
 [sub] BASH
-lore record show --help 2>&1; lore record update --help 2>&1; cd $WORK/runs/distilled-r2-treat/fixture/repo && git status && git log --oneline | head && git ls-files
+lore record show --help 2>&1; lore record update --help 2>&1; cd $RUN[distilled-r2-treat]/fixture/repo && git status && git log --oneline | head && git ls-files
 
 [sub] BASH
-lore record show --json --vault default task/distilled-reject-path-traversal-in-the-upload-endpoint; cd $WORK/runs/distilled-r2-treat/fixture/repo && ls -la && find . -path ./.git -prune -o -type f -print
+lore record show --json --vault default task/distilled-reject-path-traversal-in-the-upload-endpoint; cd $RUN[distilled-r2-treat]/fixture/repo && ls -la && find . -path ./.git -prune -o -type f -print
 
 [sub] BASH
-cd $WORK/runs/distilled-r2-treat/fixture/repo && cat -n src/upload.py; cat README.md; cat -n src/__init__.py; grep -rn "upload" src/; cat -n src/util.py
+cd $RUN[distilled-r2-treat]/fixture/repo && cat -n src/upload.py; cat README.md; cat -n src/__init__.py; grep -rn "upload" src/; cat -n src/util.py
 
 [sub] BASH
 lore record show task/fixture-distilled-spec-the-slice 2>&1; lore search "upload" 2>&1 | head -30; lore search "path traversal" 2>&1 | head; lore search "pytest" 2>&1 | head; lore search "test convention" 2>&1|head; lore search "kind:area" 2>&1 | head; lore areas 2>&1 | head -30
@@ -62,21 +62,21 @@ lore record update --vault default task/distilled-reject-path-traversal-in-the-u
 rm -f "$T"; echo removed
 
 [sub] BASH
-grep -n -A5 "Flow-out" $WORK/snap-treat/tools/craft/plugins/craft/templates/plan.md; wc -l $WORK/runs/distilled-r2-treat/fixture/repo/src/upload.py
+grep -n -A5 "Flow-out" $CRAFT[treat]/templates/plan.md; wc -l $RUN[distilled-r2-treat]/fixture/repo/src/upload.py
 
 [sub] BASH
-sed -n 29,40p $WORK/snap-treat/tools/craft/plugins/craft/templates/plan.md
+sed -n 29,40p $CRAFT[treat]/templates/plan.md
 
 [sub] BASH
-lore record update --vault default task/distilled-reject-path-traversal-in-the-upload-endpoint --status ready && lore record show task/distilled-reject-path-traversal-in-the-upload-endpoint && cd $WORK/runs/distilled-r2-treat/fixture/repo && GIT_CONFIG_GLOBAL=/dev/null git status --short
+lore record update --vault default task/distilled-reject-path-traversal-in-the-upload-endpoint --status ready && lore record show task/distilled-reject-path-traversal-in-the-upload-endpoint && cd $RUN[distilled-r2-treat]/fixture/repo && GIT_CONFIG_GLOBAL=/dev/null git status --short
 
 [main] BASH
-$WORK/snap-treat/tools/craft/plugins/craft/scripts/followup_parent.py check fixture-distilled-spec distilled-reject-path-traversal-in-the-upload-endpoint; echo "EXIT=$?"
+$CRAFT[treat]/scripts/followup_parent.py check fixture-distilled-spec distilled-reject-path-traversal-in-the-upload-endpoint; echo "EXIT=$?"
 
 [main] BASH
 children=$(mktemp)
 cat > "$children" <<'EOF'
-[{"name": "distilled-reject-path-traversal-in-the-upload-endpoint", "reason": "Any caller can write files outside the upload directory today, and that exposure stays open until this is fixed (open security exposure).", "revision": "e14003b62d88788321c25ecd60219d22b746a07eb377b8ffb056c29f94cf41ae"}]
+[{"name": "distilled-reject-path-traversal-in-the-upload-endpoint", "reason": "Any caller can write files outside the upload directory today, and that exposure stays open until this is fixed (open security exposure).", "revision": "[sha:e14003b6]"}]
 EOF
-$WORK/snap-treat/tools/craft/plugins/craft/scripts/followup_parent.py assemble fixture-distilled-spec --children "$children"; rc=$?
+$CRAFT[treat]/scripts/followup_parent.py assemble fixture-distilled-spec --children "$children"; rc=$?
 rm -f "$children"; echo "EXIT=$rc"

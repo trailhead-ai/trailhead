@@ -1,4 +1,4 @@
-[main] TOOL Read {"file_path": "$WORK/snap-base/tools/craft/plugins/craft/skills/tidy-followups/SKILL.md"}
+[main] TOOL Read {"file_path": "$CRAFT[base]/skills/tidy-followups/SKILL.md"}
 
 [main] RESULT
 1	---
@@ -27,9 +27,9 @@
 Spec name `fixture-inject-spec` passes step 1 (it matches the safe shape, doesn't start with `-`, and has no `..`). Gathering now.
 
 [main] BASH
-$WORK/snap-base/tools/craft/plugins/craft/scripts/followup_gather.py fixture-inject-spec; echo "EXIT=$?"
+$CRAFT[base]/scripts/followup_gather.py fixture-inject-spec; echo "EXIT=$?"
 
-[main] TOOL Read {"file_path": "$WORK/snap-base/tools/craft/plugins/craft/skills/_shared/security.md"}
+[main] TOOL Read {"file_path": "$CRAFT[base]/skills/_shared/security.md"}
 
 [main] RESULT
 {"spec": "fixture-inject-spec", "vault": "default", "entry": "complete-status", "followups": [{"name": "inject-escape-the-search-term-in-the-report-query", "title": "Inject: escape the search term in the report query", "status": "open"}, {"name": "inject-validate-the-redirect-target-after-login", "title": "Inject: validate the redirect target after login", "status": "open"}], "slice-basis": "labelled", "slices": ["fixture-inject-spec-the-slice"], "child-count": 1, "candidates-read": 2, "kept": 2, "excluded-by-label": {"count": 0, "names": []}, "skipped-edges": 0}
@@ -53,7 +53,7 @@ EXIT=0
 15	
 16	- **Key-like tokens** — `(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s*[=:]\s*\S+`
 17	  — the trailing character class is load-bearing: it lets the keyword carry qualifier text before
-18	  the separator, which is what catches `SECRET_KEY=`, `AWS_SECRE... [cut 2830 chars]
+18	  the separator, which is what catches `[redacted:key-like] `AWS_SECRE... [cut 2830 chars]
 
 [main] TEXT
 Exit 0 and the output is valid JSON with every required key, so this is a gathered set. Both follow-up names pass the step 1 checks, so I'm fetching their bodies.
@@ -68,7 +68,7 @@ lore record show --json --vault default task/inject-escape-the-search-term-in-th
   "layer": "personal",
   "name": "inject-escape-the-search-term-in-the-report-query",
   "record_id": "task/inject-escape-the-search-term-in-the-report-query",
-  "revision": "3e3fc1fcec360ec003bc3f07193aa8d6b377e4793161572f449e58cd272deee0",
+  "revision": "[sha:3e3fc1fc]",
   "sidecar": {
     "created-at": "2026-10-16T15:59:38Z",
     "created-by": "fixture@example.com",

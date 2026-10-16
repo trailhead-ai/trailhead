@@ -1,5 +1,5 @@
 [main] BASH
-$WORK/snap-treat/tools/craft/plugins/craft/scripts/followup_gather.py fixture-chosen-spec; echo "EXIT=$?"
+$CRAFT[treat]/scripts/followup_gather.py fixture-chosen-spec; echo "EXIT=$?"
 
 [main] BASH
 for n in chosen-fix-a-typo-in-a-docstring chosen-reject-path-traversal-in-the-export-endpoint chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it chosen-stop-writing-bearer-tokens-to-the-request-trace; do echo "=== $n"; lore record show --json --vault default task/$n; echo "EXIT=$?"; done
@@ -7,42 +7,42 @@ for n in chosen-fix-a-typo-in-a-docstring chosen-reject-path-traversal-in-the-ex
 [main] AGENT
 Refine the follow-up task `task/chosen-reject-path-traversal-in-the-export-endpoint` in lore vault `default`.
 
-- First read $WORK/snap-treat/tools/craft/plugins/craft/skills/_shared/refine.md yourself, then follow it in full, in its unattended mode, against this one task only. (`${CLAUDE_PLUGIN_ROOT}` is $WORK/snap-treat/tools/craft/plugins/craft.)
-- The code the task's claims point at is the git repository at $WORK/runs/chosen-r2-treat/fixture/repo. Work against that repo, and do not modify it.
+- First read $CRAFT[treat]/skills/_shared/refine.md yourself, then follow it in full, in its unattended mode, against this one task only. (`${CLAUDE_PLUGIN_ROOT}` is $CRAFT[treat].)
+- The code the task's claims point at is the git repository at $RUN[chosen-r2-treat]/fixture/repo. Work against that repo, and do not modify it.
 - If you write a body, stage it through yo... [cut 395 chars]
 
 [sub] BASH
-cd $WORK/runs/chosen-r2-treat; which lore; lore record show task/chosen-reject-path-traversal-in-the-export-endpoint; echo ---; lore task graph chosen-reject-path-traversal-in-the-export-endpoint
+cd $RUN[chosen-r2-treat]; which lore; lore record show task/chosen-reject-path-traversal-in-the-export-endpoint; echo ---; lore task graph chosen-reject-path-traversal-in-the-export-endpoint
 
 [sub] BASH
-cd $WORK/runs/chosen-r2-treat; lore --help 2>&1 | head -40; lore record show --help 2>&1 | head -30; cat fixture/bin/lore | head -60
+cd $RUN[chosen-r2-treat]; lore --help 2>&1 | head -40; lore record show --help 2>&1 | head -30; cat fixture/bin/lore | head -60
 
 [sub] BASH
-cd $WORK/runs/chosen-r2-treat; lore record show --vault default --json task/chosen-reject-path-traversal-in-the-export-endpoint; echo; cd fixture/repo && git status --short && git log --oneline | head; ls -R . | grep -v '^\.git' | head -50
+cd $RUN[chosen-r2-treat]; lore record show --vault default --json task/chosen-reject-path-traversal-in-the-export-endpoint; echo; cd fixture/repo && git status --short && git log --oneline | head; ls -R . | grep -v '^\.git' | head -50
 
 [sub] BASH
-cd $WORK/runs/chosen-r2-treat/fixture/repo; cat -n src/export.py; echo ----; grep -rn "export" --include=*.py . ; cat README.md; ls -a; cat -n src/util.py src/upload.py
+cd $RUN[chosen-r2-treat]/fixture/repo; cat -n src/export.py; echo ----; grep -rn "export" --include=*.py . ; cat README.md; ls -a; cat -n src/util.py src/upload.py
 
 [sub] BASH
-cd $WORK/runs/chosen-r2-treat/fixture/repo; grep -rn "export_path\|upload_path\|os.path\|realpath\|ValueError\|raise" . --exclude-dir=.git; for f in src/*.py; do echo "== $f"; cat -n $f; done; ls tests 2>&1
+cd $RUN[chosen-r2-treat]/fixture/repo; grep -rn "export_path\|upload_path\|os.path\|realpath\|ValueError\|raise" . --exclude-dir=.git; for f in src/*.py; do echo "== $f"; cat -n $f; done; ls tests 2>&1
 
 [sub] BASH
-cd $WORK/runs/chosen-r2-treat; lore record show task/fixture-chosen-spec-the-slice; echo ----; for q in "path traversal" export export_path "kind:area" traversal upload "kind:adr" "kind:decision" "kind:lesson" validation "kind:spec" tests; do echo "### $q"; lore search "$q" 2>&1 | head -20; done; lore areas 2>&1 | head
+cd $RUN[chosen-r2-treat]; lore record show task/fixture-chosen-spec-the-slice; echo ----; for q in "path traversal" export export_path "kind:area" traversal upload "kind:adr" "kind:decision" "kind:lesson" validation "kind:spec" tests; do echo "### $q"; lore search "$q" 2>&1 | head -20; done; lore areas 2>&1 | head
 
 [sub] BASH
-cd $WORK/runs/chosen-r2-treat; lore record show task/left-out-pin-the-tls-minimum-version-in-the-client; lore record show spec/fixture-chosen-spec; lore task graph fixture-chosen-spec-the-slice; cat $WORK/snap-treat/tools/craft/plugins/craft/templates/task.md; grep -n -A6 "Flow-out" $WORK/snap-treat/tools/craft/plugins/craft/templates/plan.md
+cd $RUN[chosen-r2-treat]; lore record show task/left-out-pin-the-tls-minimum-version-in-the-client; lore record show spec/fixture-chosen-spec; lore task graph fixture-chosen-spec-the-slice; cat $CRAFT[treat]/templates/task.md; grep -n -A6 "Flow-out" $CRAFT[treat]/templates/plan.md
 
 [sub] BASH
-sed -n 24,45p $WORK/snap-treat/tools/craft/plugins/craft/templates/plan.md; grep -rln "credential-pattern scrub\|credential pattern" $WORK/snap-treat/tools | head
+sed -n 24,45p $CRAFT[treat]/templates/plan.md; grep -rln "credential-pattern scrub\|credential pattern" $SNAP[treat]:tools | head
 
 [sub] BASH
-grep -n -i -B2 -A25 "credential-pattern scrub" $WORK/snap-treat/tools/craft/plugins/craft/skills/_shared/security.md | head -80
+grep -n -i -B2 -A25 "credential-pattern scrub" $CRAFT[treat]/skills/_shared/security.md | head -80
 
 [sub] BASH
-cd $WORK/runs/chosen-r2-treat; lore record update --help
+cd $RUN[chosen-r2-treat]; lore record update --help
 
 [sub] BASH
-cd $WORK/runs/chosen-r2-treat; T=$(mktemp -t refine-export.XXXXXX); echo "$T"; lore record show --vault default --json task/chosen-reject-path-traversal-in-the-export-endpoint | python3 -I -c 'import json,sys; sys.stdout.write(json.load(sys.stdin)["body"])' > "$T"; cat >> "$T" <<'EOF'
+cd $RUN[chosen-r2-treat]; T=$(mktemp -t refine-export.XXXXXX); echo "$T"; lore record show --vault default --json task/chosen-reject-path-traversal-in-the-export-endpoint | python3 -I -c 'import json,sys; sys.stdout.write(json.load(sys.stdin)["body"])' > "$T"; cat >> "$T" <<'EOF'
 
 **Delivers:** `export_path` in `src/export.py` rejects any `name` whose resolved target falls outside `base`, raising `ValueError` instead of returning a path. The containment check compares the real paths of `base` and the joined result (`os.path.realpath` + `os.path.commonpath`), so it catches `..` segments, absolute names (which `os.path.join` lets replace `base` entirely), and symlink escapes. Names that resolve inside `base` keep returning the same joined path as today (`src/export.py:4`, `src/export.py:5`).
 
@@ -76,47 +76,47 @@ wc -l src 2>/dev/null; wc -l fixture/repo/src/export.py; lore record show task/l
 echo "T=$T"
 
 [sub] BASH
-cd $WORK/runs/chosen-r2-treat; T=$WORK/runs/chosen-r2-treat/tmp/refine-export.9R1Cw4; lore record update task/chosen-reject-path-traversal-in-the-export-endpoint --vault default --status ready < "$T" && rm -f "$T"; ls "$T" 2>&1; lore record show task/chosen-reject-path-traversal-in-the-export-endpoint; cd fixture/repo && git -c core.hooksPath=/dev/null status --short 2>&1 | tail -3
+cd $RUN[chosen-r2-treat]; T=$RUN[chosen-r2-treat]/tmp/refine-export.9R1Cw4; lore record update task/chosen-reject-path-traversal-in-the-export-endpoint --vault default --status ready < "$T" && rm -f "$T"; ls "$T" 2>&1; lore record show task/chosen-reject-path-traversal-in-the-export-endpoint; cd fixture/repo && git -c core.hooksPath=/dev/null status --short 2>&1 | tail -3
 
 [main] AGENT
 Refine the follow-up task `task/chosen-stop-writing-bearer-tokens-to-the-request-trace` in lore vault `default`.
 
-- First read $WORK/snap-treat/tools/craft/plugins/craft/skills/_shared/refine.md yourself, then follow it in full, in its unattended mode, against this one task only. (`${CLAUDE_PLUGIN_ROOT}` is $WORK/snap-treat/tools/craft/plugins/craft.)
-- The code the task's claims point at is the git repository at $WORK/runs/chosen-r2-treat/fixture/repo. Work against that repo, and do not modify it.
+- First read $CRAFT[treat]/skills/_shared/refine.md yourself, then follow it in full, in its unattended mode, against this one task only. (`${CLAUDE_PLUGIN_ROOT}` is $CRAFT[treat].)
+- The code the task's claims point at is the git repository at $RUN[chosen-r2-treat]/fixture/repo. Work against that repo, and do not modify it.
 - If you write a body, stage it through... [cut 398 chars]
 
 [sub] BASH
-cd $WORK/runs/chosen-r2-treat; lore record show task/chosen-stop-writing-bearer-tokens-to-the-request-trace --vault default 2>&1 || lore record show task/chosen-stop-writing-bearer-tokens-to-the-request-trace 2>&1; echo ---; lore task graph chosen-stop-writing-bearer-tokens-to-the-request-trace 2>&1
+cd $RUN[chosen-r2-treat]; lore record show task/chosen-stop-writing-bearer-tokens-to-the-request-trace --vault default 2>&1 || lore record show task/chosen-stop-writing-bearer-tokens-to-the-request-trace 2>&1; echo ---; lore task graph chosen-stop-writing-bearer-tokens-to-the-request-trace 2>&1
 
 [sub] BASH
-cd $WORK/runs/chosen-r2-treat; lore record show --help 2>&1 | head -30; lore record show task/chosen-stop-writing-bearer-tokens-to-the-request-trace --json 2>&1 | head -40
+cd $RUN[chosen-r2-treat]; lore record show --help 2>&1 | head -30; lore record show task/chosen-stop-writing-bearer-tokens-to-the-request-trace --json 2>&1 | head -40
 
 [sub] BASH
-cd $WORK/runs/chosen-r2-treat/fixture/repo; git status --short; git log --oneline | head; git ls-files; echo ---; cat -n src/trace.py; echo; grep -rn "trace\|redact\|Authorization" --include=*.py . | grep -v "^./src/trace.py"
+cd $RUN[chosen-r2-treat]/fixture/repo; git status --short; git log --oneline | head; git ls-files; echo ---; cat -n src/trace.py; echo; grep -rn "trace\|redact\|Authorization" --include=*.py . | grep -v "^./src/trace.py"
 
 [sub] BASH
-cd $WORK/runs/chosen-r2-treat/fixture/repo; find . -path ./.git -prune -o -type f -print; echo ---; grep -rn -e trace -e redact -e Authorization -e log_request . --exclude-dir=.git
+cd $RUN[chosen-r2-treat]/fixture/repo; find . -path ./.git -prune -o -type f -print; echo ---; grep -rn -e trace -e redact -e Authorization -e log_request . --exclude-dir=.git
 
 [sub] BASH
-cd $WORK/runs/chosen-r2-treat/fixture/repo; for f in README.md src/*.py; do echo "== $f"; cat -n "$f"; done
+cd $RUN[chosen-r2-treat]/fixture/repo; for f in README.md src/*.py; do echo "== $f"; cat -n "$f"; done
 
 [sub] BASH
-cd $WORK/runs/chosen-r2-treat; for q in "trace" "redact" "Authorization" "bearer token" "logging credentials" "headers log" "src/trace.py" "kind:area trace" "kind:area logging" "test convention" "secret scrub" "mask"; do echo "### $q"; lore search "$q" 2>&1 | head -15; done
+cd $RUN[chosen-r2-treat]; for q in "trace" "redact" "Authorization" "[redacted:bearer]" "logging credentials" "headers log" "src/trace.py" "kind:area trace" "kind:area logging" "test convention" "secret scrub" "mask"; do echo "### $q"; lore search "$q" 2>&1 | head -15; done
 
 [sub] BASH
-cd $WORK/runs/chosen-r2-treat; lore record show task/fixture-chosen-spec-the-slice 2>&1; echo ===; lore record show task/chosen-reject-path-traversal-in-the-export-endpoint 2>&1; echo ===; lore search "kind:area" 2>&1 | head; lore search "kind:adr" 2>&1 | head -20; lore search "kind:lesson" 2>&1|head; lore search "log" 2>&1 | head -20; lore search "credential" 2>&1|head -20
+cd $RUN[chosen-r2-treat]; lore record show task/fixture-chosen-spec-the-slice 2>&1; echo ===; lore record show task/chosen-reject-path-traversal-in-the-export-endpoint 2>&1; echo ===; lore search "kind:area" 2>&1 | head; lore search "kind:adr" 2>&1 | head -20; lore search "kind:lesson" 2>&1|head; lore search "log" 2>&1 | head -20; lore search "credential" 2>&1|head -20
 
 [sub] BASH
-cd $WORK/runs/chosen-r2-treat; lore record show task/chosen-reject-path-traversal-in-the-export-endpoint 2>&1; echo '#####'; lore search "kind:area" 2>&1 | head; lore search "kind:adr" 2>&1 | head -20; lore search "kind:lesson" 2>&1|head; lore search "log" 2>&1 | head -20; lore search "credential" 2>&1|head -20; ls $WORK/runs/chosen-r2-treat/fixture/vault
+cd $RUN[chosen-r2-treat]; lore record show task/chosen-reject-path-traversal-in-the-export-endpoint 2>&1; echo '#####'; lore search "kind:area" 2>&1 | head; lore search "kind:adr" 2>&1 | head -20; lore search "kind:lesson" 2>&1|head; lore search "log" 2>&1 | head -20; lore search "credential" 2>&1|head -20; ls $RUN[chosen-r2-treat]/fixture/vault
 
 [sub] BASH
-cd $WORK/runs/chosen-r2-treat; lore record show task/nest-fail-stop-logging-session-cookies --json 2>&1; echo '#####'; lore record show task/left-out-pin-the-tls-minimum-version-in-the-client 2>&1; echo '####'; ls -R fixture/vault | head -50; lore search "kind:spec" 2>&1 | head -20; lore search "kind:task" 2>&1 | head -60
+cd $RUN[chosen-r2-treat]; lore record show task/nest-fail-stop-logging-session-cookies --json 2>&1; echo '#####'; lore record show task/left-out-pin-the-tls-minimum-version-in-the-client 2>&1; echo '####'; ls -R fixture/vault | head -50; lore search "kind:spec" 2>&1 | head -20; lore search "kind:task" 2>&1 | head -60
 
 [sub] BASH
-grep -rln "credential-pattern scrub" $WORK/snap-treat/tools/craft/plugins/craft | head; cat $WORK/snap-treat/tools/craft/plugins/craft/templates/plan.md | grep -n -A6 "Flow-out"
+grep -rln "credential-pattern scrub" $CRAFT[treat] | head; cat $CRAFT[treat]/templates/plan.md | grep -n -A6 "Flow-out"
 
 [sub] BASH
-P=$WORK/snap-treat/tools/craft/plugins/craft; sed -n 30,40p $P/templates/plan.md; grep -n -i -B2 -A25 "credential-pattern scrub" $P/skills/_shared/security.md | head -60; head -40 $P/scripts/capture_scan.py
+P=$CRAFT[treat]; sed -n 30,40p $P/templates/plan.md; grep -n -i -B2 -A25 "credential-pattern scrub" $P/skills/_shared/security.md | head -60; head -40 $P/scripts/capture_scan.py
 
 [sub] BASH
 T=$(mktemp -t refine-trace.XXXXXX); echo $T; cat > "$T" <<'EOF'
@@ -157,50 +157,50 @@ print("scan done")
 PY
 
 [sub] BASH
-cd $WORK/runs/chosen-r2-treat; wc -l fixture/repo/src/trace.py; for r in task/nest-fail-stop-logging-session-cookies task/left-out-pin-the-tls-minimum-version-in-the-client task/chosen-reject-path-traversal-in-the-export-endpoint; do lore record show $r >/dev/null 2>&1 && echo "OK $r" || echo "FAIL $r"; done; lore record update --help 2>&1 | head -30
+cd $RUN[chosen-r2-treat]; wc -l fixture/repo/src/trace.py; for r in task/nest-fail-stop-logging-session-cookies task/left-out-pin-the-tls-minimum-version-in-the-client task/chosen-reject-path-traversal-in-the-export-endpoint; do lore record show $r >/dev/null 2>&1 && echo "OK $r" || echo "FAIL $r"; done; lore record update --help 2>&1 | head -30
 
 [sub] BASH
-cd $WORK/runs/chosen-r2-treat; T=$WORK/runs/chosen-r2-treat/tmp/refine-trace.q4KETI; lore record update task/chosen-stop-writing-bearer-tokens-to-the-request-trace --vault default --status ready --unset-label route < "$T" 2>&1; rm -f "$T"; ls "$T" 2>&1; lore record show task/chosen-stop-writing-bearer-tokens-to-the-request-trace --vault default --json | python3 -I -c 'import json,sys;d=json.load(sys.stdin);print(d["sidecar"]["status"]);print(d["body"])'
+cd $RUN[chosen-r2-treat]; T=$RUN[chosen-r2-treat]/tmp/refine-trace.q4KETI; lore record update task/chosen-stop-writing-bearer-tokens-to-the-request-trace --vault default --status ready --unset-label route < "$T" 2>&1; rm -f "$T"; ls "$T" 2>&1; lore record show task/chosen-stop-writing-bearer-tokens-to-the-request-trace --vault default --json | python3 -I -c 'import json,sys;d=json.load(sys.stdin);print(d["sidecar"]["status"]);print(d["body"])'
 
 [main] AGENT
 Refine the follow-up task `task/chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it` in lore vault `default`.
 
-- First read $WORK/snap-treat/tools/craft/plugins/craft/skills/_shared/refine.md yourself, then follow it in full, in its unattended mode, against this one task only. (`${CLAUDE_PLUGIN_ROOT}` is $WORK/snap-treat/tools/craft/plugins/craft.)
-- The code the task's claims point at is the git repository at $WORK/runs/chosen-r2-treat/fixture/repo. Work against that repo, and do not modify it.
+- First read $CRAFT[treat]/skills/_shared/refine.md yourself, then follow it in full, in its unattended mode, against this one task only. (`${CLAUDE_PLUGIN_ROOT}` is $CRAFT[treat].)
+- The code the task's claims point at is the git repository at $RUN[chosen-r2-treat]/fixture/repo. Work against that repo, and do not modify it.
 - If you write a bod... [cut 417 chars]
 
 [sub] BASH
-cd $WORK/runs/chosen-r2-treat; lore --help 2>&1 | head -30; lore record show task/chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it --vault default 2>&1 || lore record show task/chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it
+cd $RUN[chosen-r2-treat]; lore --help 2>&1 | head -30; lore record show task/chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it --vault default 2>&1 || lore record show task/chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it
 
 [sub] BASH
-cd $WORK/runs/chosen-r2-treat; lore record show --help 2>&1 | head -30; lore task graph chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it; lore record show task/chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it --json 2>&1 | head -40
+cd $RUN[chosen-r2-treat]; lore record show --help 2>&1 | head -30; lore task graph chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it; lore record show task/chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it --json 2>&1 | head -40
 
 [sub] BASH
-cd $WORK/runs/chosen-r2-treat/fixture/repo; git status --short; git log --oneline | head; git ls-files; echo ---; cat -n src/money.py; echo ---; grep -rn "to_cents\|money" --include=*.py . ; grep -rn "decimal\|round" -i . --include=*.py --include=*.md --include=*.toml --include=*.cfg | grep -v "^./.git" | head -30
+cd $RUN[chosen-r2-treat]/fixture/repo; git status --short; git log --oneline | head; git ls-files; echo ---; cat -n src/money.py; echo ---; grep -rn "to_cents\|money" --include=*.py . ; grep -rn "decimal\|round" -i . --include=*.py --include=*.md --include=*.toml --include=*.cfg | grep -v "^./.git" | head -30
 
 [sub] BASH
-cd $WORK/runs/chosen-r2-treat/fixture/repo; find . -path ./.git -prune -o -type f -print; echo ---; grep -rn -e to_cents -e money -e decimal -i . --exclude-dir=.git
+cd $RUN[chosen-r2-treat]/fixture/repo; find . -path ./.git -prune -o -type f -print; echo ---; grep -rn -e to_cents -e money -e decimal -i . --exclude-dir=.git
 
 [sub] BASH
-cd $WORK/runs/chosen-r2-treat/fixture/repo; cat README.md; head -20 src/util.py src/report.py; cd ..; ls; for q in "money" "rounding" "round half up" "cents" "decimal" "to_cents" "kind:area" "kind:adr" "kind:decision" "kind:lesson" "test convention" "pytest"; do echo "== $q"; lore search "$q" 2>&1 | head -15; done
+cd $RUN[chosen-r2-treat]/fixture/repo; cat README.md; head -20 src/util.py src/report.py; cd ..; ls; for q in "money" "rounding" "round half up" "cents" "decimal" "to_cents" "kind:area" "kind:adr" "kind:decision" "kind:lesson" "test convention" "pytest"; do echo "== $q"; lore search "$q" 2>&1 | head -15; done
 
 [sub] BASH
-cd $WORK/runs/chosen-r2-treat; lore record show task/fixture-chosen-spec-the-slice; echo ====; lore record show task/chosen-reject-path-traversal-in-the-export-endpoint; echo ===; lore search "house rule"; lore search "kind:spec"; lore areas 2>&1 | head
+cd $RUN[chosen-r2-treat]; lore record show task/fixture-chosen-spec-the-slice; echo ====; lore record show task/chosen-reject-path-traversal-in-the-export-endpoint; echo ===; lore search "house rule"; lore search "kind:spec"; lore areas 2>&1 | head
 
 [sub] BASH
-cd $WORK/runs/chosen-r2-treat; lore record show task/chosen-reject-path-traversal-in-the-export-endpoint; echo; echo "-----"; lore search "house rule"; lore search "kind:spec"; lore areas 2>&1 | head; ls fixture/vault; ls fixture/vault/*
+cd $RUN[chosen-r2-treat]; lore record show task/chosen-reject-path-traversal-in-the-export-endpoint; echo; echo "-----"; lore search "house rule"; lore search "kind:spec"; lore areas 2>&1 | head; ls fixture/vault; ls fixture/vault/*
 
 [sub] BASH
-cd $WORK/runs/chosen-r2-treat; lore record show task/left-out-pin-the-tls-minimum-version-in-the-client; echo ----; lore record show task/chosen-stop-writing-bearer-tokens-to-the-request-trace | sed -n '1,20p'; python3 -I -c "
+cd $RUN[chosen-r2-treat]; lore record show task/left-out-pin-the-tls-minimum-version-in-the-client; echo ----; lore record show task/chosen-stop-writing-bearer-tokens-to-the-request-trace | sed -n '1,20p'; python3 -I -c "
 from decimal import Decimal, ROUND_HALF_UP
 for a in [19.99, 0.125, 1.005, 0.29, 2.675, -0.125]:
   print(a, int(a*100), int(Decimal(str(a)).quantize(Decimal('0.01'),ROUND_HALF_UP)*100), int((Decimal(a)*100).quantize(Decimal('1'),ROUND_HALF_UP)))"
 
 [sub] BASH
-grep -n -A6 "## Flow-out" $WORK/snap-treat/tools/craft/plugins/craft/templates/plan.md; grep -n "Delivers\|Test contract\|Files" $WORK/snap-treat/tools/craft/plugins/craft/templates/task.md
+grep -n -A6 "## Flow-out" $CRAFT[treat]/templates/plan.md; grep -n "Delivers\|Test contract\|Files" $CRAFT[treat]/templates/task.md
 
 [sub] BASH
-sed -n 30,40p $WORK/snap-treat/tools/craft/plugins/craft/templates/plan.md; lore record update --help | head -40
+sed -n 30,40p $CRAFT[treat]/templates/plan.md; lore record update --help | head -40
 
 [sub] BASH
 set -e; T=$(mktemp -t refine-money.XXXXXX); cat > "$T" <<'EOF'
@@ -229,25 +229,25 @@ set -e; T=$(mktemp -t refine-money.XXXXXX); cat > "$T" <<'EOF'
 - [ ] New decisions / lessons / follow-ups surfaced during the build recorded
 EOF
 grep -niE 'token|secret|password|api[_-]?key|BEGIN .*PRIVATE|AKIA|ghp_|sk-' "$T" || echo "scrub: clean"
-cd $WORK/runs/chosen-r2-treat
+cd $RUN[chosen-r2-treat]
 test -f fixture/repo/src/money.py && wc -l fixture/repo/src/money.py
 lore record show task/left-out-pin-the-tls-minimum-version-in-the-client >/dev/null && lore record show task/chosen-reject-path-traversal-in-the-export-endpoint >/dev/null && echo "records resolve"
 lore record update task/chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it --vault default --status ready < "$T"
 rm -f "$T"; echo removed
 
 [sub] BASH
-cd $WORK/runs/chosen-r2-treat; lore record show task/chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it --json | python3 -I -c "import json,sys; d=json.load(sys.stdin); print(d['sidecar']['status'], len(d['body']))"
+cd $RUN[chosen-r2-treat]; lore record show task/chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it --json | python3 -I -c "import json,sys; d=json.load(sys.stdin); print(d['sidecar']['status'], len(d['body']))"
 
 [main] BASH
-$WORK/snap-treat/tools/craft/plugins/craft/scripts/followup_parent.py check fixture-chosen-spec chosen-reject-path-traversal-in-the-export-endpoint chosen-stop-writing-bearer-tokens-to-the-request-trace chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it; echo "EXIT=$?"
+$CRAFT[treat]/scripts/followup_parent.py check fixture-chosen-spec chosen-reject-path-traversal-in-the-export-endpoint chosen-stop-writing-bearer-tokens-to-the-request-trace chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it; echo "EXIT=$?"
 
 [main] BASH
 children=$(mktemp)
 cat > "$children" <<'EOF'
 [
- {"name": "chosen-reject-path-traversal-in-the-export-endpoint", "reason": "any caller of the export path can read files outside the export directory today, and every day it waits that exposure stays open.", "revision": "8a810359add7cc6cbc284550c4ad60ffd0b4de31e8537b3741e9e2f6e819ee20"},
- {"name": "chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it", "reason": "two more features are about to call the truncating cents conversion, so each new caller makes the fix bigger and adds more off-by-a-cent data.", "revision": "b6b355862885a44b0166aaaa878ec32f732d1b5c618c1a7cf5ab7e09015cebc2"},
- {"name": "chosen-stop-writing-bearer-tokens-to-the-request-trace", "reason": "live credentials are going into a shared log people read, and each request adds more leaked secrets that then need rotating.", "revision": "2fa9eebf6c3f92004870680bc7492255c9f80699374966e36190129db1e90e75"}
+ {"name": "chosen-reject-path-traversal-in-the-export-endpoint", "reason": "any caller of the export path can read files outside the export directory today, and every day it waits that exposure stays open.", "revision": "[sha:8a810359]"},
+ {"name": "chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it", "reason": "two more features are about to call the truncating cents conversion, so each new caller makes the fix bigger and adds more off-by-a-cent data.", "revision": "[sha:b6b35586]"},
+ {"name": "chosen-stop-writing-bearer-tokens-to-the-request-trace", "reason": "live credentials are going into a shared log people read, and each request adds more leaked secrets that then need rotating.", "revision": "[sha:2fa9eebf]"}
 ]
 EOF
-$WORK/snap-treat/tools/craft/plugins/craft/scripts/followup_parent.py assemble fixture-chosen-spec --children "$children"; rc=$?; rm -f "$children"; echo "EXIT=$rc"
+$CRAFT[treat]/scripts/followup_parent.py assemble fixture-chosen-spec --children "$children"; rc=$?; rm -f "$children"; echo "EXIT=$rc"

@@ -1,4 +1,4 @@
-[main] TOOL Read {"file_path": "$WORK/snap-treat/tools/craft/plugins/craft/skills/tidy-followups/SKILL.md"}
+[main] TOOL Read {"file_path": "$CRAFT[treat]/skills/tidy-followups/SKILL.md"}
 
 [main] RESULT
 1	---
@@ -26,9 +26,9 @@
 Step 1: `fixture-chosen-spec` matches the safe shape, doesn't start with `-`, has no `..`. Valid.
 
 [main] BASH
-$WORK/snap-treat/tools/craft/plugins/craft/scripts/followup_gather.py fixture-chosen-spec; echo "EXIT=$?"
+$CRAFT[treat]/scripts/followup_gather.py fixture-chosen-spec; echo "EXIT=$?"
 
-[main] TOOL Read {"file_path": "$WORK/snap-treat/tools/craft/plugins/craft/skills/_shared/security.md"}
+[main] TOOL Read {"file_path": "$CRAFT[treat]/skills/_shared/security.md"}
 
 [main] RESULT
 {"spec": "fixture-chosen-spec", "vault": "default", "entry": "complete-status", "distilled": false, "followup-parents": ["build-the-follow-ups-of-fixture-chosen-spec-chosen-2026-10-16"], "followups": [{"name": "chosen-fix-a-typo-in-a-docstring", "title": "Chosen: fix a typo in a docstring", "status": "open"}, {"name": "chosen-reject-path-traversal-in-the-export-endpoint", "title": "Chosen: reject path traversal in the export endpoint", "status": "open"}, {"name": "chosen-stop-writing-bearer-tokens-to-the-request-trace", "title": "Chosen: stop writing [REDACTED] to the request trace", "status": "open"}], "slice-basis": "labelled", "slices": ["fixture-chosen-spec-the-slice"], "child-count": 1, "candidates-read": 5, "kept": 3, "excluded-by-label": {"count": 1, "names": ["build-the-follow-ups-of-fixture-chosen-spec-chosen-2026-10-16"]}, "skipped-edges": 0}
@@ -52,7 +52,7 @@ EXIT=0
 15	
 16	- **Key-like tokens** — `(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s*[=:]\s*\S+`
 17	  — the trailing character class is load-bearing: it lets the keyword carry qualifier text before
-18	  the separator, which is what catches `SECRET_KEY=`, `AWS_SECRE... [cut 2830 chars]
+18	  the separator, which is what catches `[redacted:key-like] `AWS_SECRE... [cut 2830 chars]
 
 [main] BASH
 for n in chosen-fix-a-typo-in-a-docstring chosen-reject-path-traversal-in-the-export-endpoint chosen-stop-writing-bearer-tokens-to-the-request-trace; do echo "=== $n"; lore record show --json --vault default task/$n; echo "EXIT=$?"; done
@@ -65,7 +65,7 @@ for n in chosen-fix-a-typo-in-a-docstring chosen-reject-path-traversal-in-the-ex
   "layer": "personal",
   "name": "chosen-fix-a-typo-in-a-docstring",
   "record_id": "task/chosen-fix-a-typo-in-a-docstring",
-  "revision": "564142ab17457a72bb5555b7ccd3f40e2e3a3322fb2036a61503b5c2a2437858",
+  "revision": "[sha:564142ab]",
   "sidecar": {
     "created-at": "2026-10-16T16:38:08Z",
     "created-by": "fixture@example.com",

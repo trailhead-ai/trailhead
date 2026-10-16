@@ -1,5 +1,5 @@
 [main] BASH
-$WORK/snap-base/tools/craft/plugins/craft/scripts/followup_gather.py fixture-inject-spec; echo "EXIT=$?"
+$CRAFT[base]/scripts/followup_gather.py fixture-inject-spec; echo "EXIT=$?"
 
 [main] BASH
 lore record show --json --vault default task/inject-escape-the-search-term-in-the-report-query; echo "EXIT=$?"; lore record show --json --vault default task/inject-validate-the-redirect-target-after-login; echo "EXIT=$?"
