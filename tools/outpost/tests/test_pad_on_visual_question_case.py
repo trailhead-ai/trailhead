@@ -55,12 +55,14 @@ ROUND = {
 }
 
 
-def _build(tmp_path: Path, variant: str) -> tuple[subprocess.CompletedProcess, Path]:
+def _build(
+    tmp_path: Path, variant: str, python3: str = sys.executable
+) -> tuple[subprocess.CompletedProcess, Path]:
     run_dir = tmp_path / "run"
     env = {
         "PATH": "/usr/bin:/bin",
         "HOME": str(tmp_path / "unused-home"),
-        "EVAL_PYTHON3": sys.executable,
+        "EVAL_PYTHON3": python3,
     }
     result = subprocess.run(
         ["bash", str(BUILDER), str(run_dir), variant],
@@ -101,18 +103,20 @@ def _built(tmp_path: Path, variant: str) -> Path:
     return run_dir
 
 
-def test_inside_workspace_variants_publish_a_site_under_the_fixture_workspace(tmp_path):
-    for variant in [v for v, kind in VARIANTS.items() if kind == INSIDE]:
-        run_dir = _built(tmp_path / variant, variant)
-        pad = "probe-inside"
-        result = _run_pad(run_dir, pad)
-        assert result.returncode == 0, result.stderr
-        sites = list((run_dir / "xdg-state" / "camp").glob(f"*/worktrees/*/sites/{pad}"))
-        assert len(sites) == 1, sites
-        assert "Where does the control go?" in (sites[0] / "round-1" / "round.js").read_text()
-        link = result.stdout.splitlines()[0]
-        assert link.startswith("http://127.0.0.1:") and link.endswith(f"/{pad}/")
-        assert not (run_dir / "xdg-state" / "outpost").exists()
+@pytest.mark.parametrize(
+    "variant", [v for v, kind in VARIANTS.items() if kind == INSIDE]
+)
+def test_inside_workspace_variants_publish_a_site_under_the_fixture_workspace(tmp_path, variant):
+    run_dir = _built(tmp_path, variant)
+    pad = "probe-inside"
+    result = _run_pad(run_dir, pad)
+    assert result.returncode == 0, result.stderr
+    sites = list((run_dir / "xdg-state" / "camp").glob(f"*/worktrees/*/sites/{pad}"))
+    assert len(sites) == 1, sites
+    assert "Where does the control go?" in (sites[0] / "round-1" / "round.js").read_text()
+    link = result.stdout.splitlines()[0]
+    assert link.startswith("http://127.0.0.1:") and link.endswith(f"/{pad}/")
+    assert not (run_dir / "xdg-state" / "outpost").exists()
 
 
 @pytest.mark.parametrize(
@@ -143,14 +147,7 @@ def test_a_python3_that_cannot_run_the_publisher_is_refused_and_builds_nothing(t
     stub = tmp_path / "old-python3"
     stub.write_text("#!/bin/sh\nexit 1\n")
     stub.chmod(0o755)
-    run_dir = tmp_path / "run"
-    env = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path / "unused-home"), "EVAL_PYTHON3": str(stub)}
-    result = subprocess.run(
-        ["bash", str(BUILDER), str(run_dir), "visual-inside-workspace"],
-        capture_output=True,
-        text=True,
-        env=env,
-    )
+    result, run_dir = _build(tmp_path, "visual-inside-workspace", python3=str(stub))
     assert result.returncode == 2
     assert "tomllib" in result.stderr
     assert not (run_dir / "run.env").exists()
