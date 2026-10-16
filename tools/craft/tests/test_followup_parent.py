@@ -526,8 +526,19 @@ def test_an_unexpected_exception_exits_two_internal_error(capsys):
     assert "SECRET" not in err
 
 
-def test_a_depends_on_entry_that_is_not_a_task_name_is_a_malformed_record(capsys):
-    runner = Lore(tasks={"task/f": task_doc(**{"depends-on": ["-flag"]})})
+def test_a_depends_on_entry_of_an_unsafe_shape_leaves_that_follow_up_out_without_a_dependency_key():
+    runner = Lore(tasks={
+        "task/f": task_doc(**{"depends-on": ["-flag"]}),
+        "task/free": task_doc(),
+    })
+    result = parent.check_followups(runner, "s", ["f", "free"])
+    assert [i["name"] for i in result["eligible"]] == ["free"]
+    assert result["left-out"] == [{"name": "f", "reason": "depends-outside"}]
+
+
+@pytest.mark.parametrize("entries", ["task-x", ["ok", 3], {"a": "b"}])
+def test_a_depends_on_that_is_not_a_list_of_strings_is_a_malformed_record(entries, capsys):
+    runner = Lore(tasks={"task/f": task_doc(**{"depends-on": entries})})
     code, out, err = run_main(runner, "check", "s", "f", capsys=capsys)
     assert code == 2 and out == ""
     assert reason_of(err) == "malformed-sidecar"
@@ -565,12 +576,12 @@ def test_a_qualified_dependency_is_never_looked_up_as_a_task():
     assert result["eligible"] == []
 
 
-@pytest.mark.parametrize("entry", ["spec/other@stage", "task/../x", "task/has space", "-task/x"])
-def test_a_qualified_dependency_failing_the_shape_check_is_a_malformed_record(entry, capsys):
+@pytest.mark.parametrize("entry", ["spec/x@stage", "task/../x", "task/has space", "-task/x"])
+def test_a_qualified_entry_failing_the_shape_check_leaves_the_follow_up_out_with_no_dependency_key(entry):
     runner = Lore(tasks={"task/f": task_doc(**{"depends-on": [entry]})})
-    code, out, err = run_main(runner, "check", "s", "f", capsys=capsys)
-    assert code == 2 and out == ""
-    assert reason_of(err) == "malformed-sidecar"
+    result = parent.check_followups(runner, "s", ["f"])
+    assert result["eligible"] == []
+    assert result["left-out"] == [{"name": "f", "reason": "depends-outside"}]
 
 
 # --- the importable seam later subcommands rely on ----------------------------------------------
@@ -1300,6 +1311,7 @@ def test_a_parent_name_too_long_for_the_filesystem_is_parent_create_failed_with_
     code, out, err = run_assemble(tmp_path, runner, long_spec, children, capsys)
     assert code == 2 and out is None
     assert [ln for ln in err.splitlines() if ln.startswith("reason-code: ")] == ["reason-code: parent-create-failed"]
+    assert subject_of(err) == [] and "parent-state: unknown" not in err.splitlines()
     assert vault_snapshot(env, vault) == before
     assert [w[:2] for w in runner.writes()] == [["record", "create"]]
 
@@ -1404,46 +1416,31 @@ UNCLEAR_CREATES = [
 ]
 
 
+def title_of(day=DAY, spec_name=None):
+    return f"Build the follow-ups of {spec_name} chosen {day.isoformat()}"
+
+
+def subject_of(err):
+    lines = [ln for ln in err.splitlines() if ln.startswith("subject: ")]
+    assert len(lines) <= 1, err
+    return lines[0].removeprefix("subject: ").split() if lines else []
+
+
 @pytest.mark.parametrize("outcome", UNCLEAR_CREATES)
-def test_a_create_that_landed_but_looked_failed_is_found_and_dropped_with_the_why_note(
+def test_a_create_that_landed_but_looked_failed_is_left_live_and_named_with_nothing_dropped(
     lore_env, spec, tmp_path, capsys, outcome
 ):
     env, vault = lore_env
     names = make_children(env, vault, spec)
-    code, out, err = run_assemble(
-        tmp_path, EnvRunner(env, landed_then(outcome)), spec, confirm(env, vault, names), capsys
-    )
-    assert code == 2
+    runner = EnvRunner(env, landed_then(outcome))
+    code, out, err = run_assemble(tmp_path, runner, spec, confirm(env, vault, names), capsys)
+    assert code == 2 and out is None
     assert [ln for ln in err.splitlines() if ln.startswith("reason-code: ")] == ["reason-code: parent-create-failed"]
     (made,) = created_parent(env, vault, spec)
-    assert out["parent"] == made
-    assert out["buildable"] is False and out["nested"] == [] and out["failed"] == []
-    assert out["undone"] == [{"name": made, "write": "drop"}] and out["undo-failed"] == []
-    assert sidecar_of(env, vault, made)["status"] == "dropped"
-    assert "## Dropped" in body_of(env, vault, made)
+    assert subject_of(err) == [made]
+    assert sidecar_of(env, vault, made)["status"] == "open"
     assert [sidecar_of(env, vault, n).get("parent") for n in names] == [None] * 3
-
-
-def test_an_unclear_create_whose_drop_fails_reports_the_command_that_completes_it(
-    lore_env, spec, tmp_path, capsys
-):
-    env, vault = lore_env
-    names = make_children(env, vault, spec)
-    landed = landed_then(_timeout)
-
-    def hook(argv, stdin, runner):
-        if is_drop(argv):
-            return refused(argv)
-        return landed(argv, stdin, runner)
-
-    code, out, _ = run_assemble(tmp_path, EnvRunner(env, hook), spec, confirm(env, vault, names), capsys)
-    assert code == 2
-    (made,) = created_parent(env, vault, spec)
-    assert [(f["name"], f["write"]) for f in out["undo-failed"]] == [(made, "drop")]
-    assert out["undone"] == []
-    run = subprocess.run(shlex.split(out["undo-failed"][0]["command"]), capture_output=True, text=True, env=env)
-    assert run.returncode == 0, run.stderr
-    assert sidecar_of(env, vault, made)["status"] == "dropped"
+    assert not any(is_drop(a) or is_nest(a) for a in runner.calls)
 
 
 def test_a_create_that_timed_out_without_landing_is_parent_create_failed_with_nothing_written(
@@ -1479,6 +1476,91 @@ def test_a_failed_create_leaves_alone_a_follow_up_parent_another_run_made_meanwh
     assert code == 2 and out is None
     assert [ln for ln in err.splitlines() if ln.startswith("reason-code: ")] == ["reason-code: parent-create-failed"]
     assert sidecar_of(env, vault, rival["name"])["status"] == "open"
+    assert subject_of(err) == []
+
+
+def test_a_rival_with_this_runs_title_appearing_during_a_failed_create_is_left_live_and_named(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    names = make_children(env, vault, spec)
+    rival = {}
+
+    def hook(argv, stdin, runner):
+        if argv[:2] == ["record", "create"]:
+            rival["name"] = make_followup(
+                env, vault, title_of(spec_name=spec), status="open", labels=[LABEL], spec=spec
+            )
+            return _timeout(argv)
+
+    runner = EnvRunner(env, hook)
+    code, out, err = run_assemble(tmp_path, runner, spec, confirm(env, vault, names), capsys)
+    assert code == 2 and out is None
+    assert [ln for ln in err.splitlines() if ln.startswith("reason-code: ")] == ["reason-code: parent-create-failed"]
+    assert subject_of(err) == [rival["name"]]
+    assert sidecar_of(env, vault, rival["name"])["status"] == "open"
+    assert not any(is_drop(a) or is_nest(a) for a in runner.calls)
+
+
+def test_a_failed_create_names_every_live_parent_carrying_this_runs_title_and_only_those(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    names = make_children(env, vault, spec)
+    made = {}
+
+    def hook(argv, stdin, runner):
+        if argv[:2] == ["record", "create"]:
+            same = title_of(spec_name=spec)
+            made["same"] = [
+                make_followup(env, vault, same, status=st, labels=[LABEL], spec=spec)
+                for st in ("open", "ready")
+            ]
+            make_followup(env, vault, "Other title", status="open", labels=[LABEL], spec=spec)
+            return refused(argv)
+
+    code, out, err = run_assemble(tmp_path, EnvRunner(env, hook), spec, confirm(env, vault, names), capsys)
+    assert code == 2 and out is None
+    assert [ln for ln in err.splitlines() if ln.startswith("reason-code: ")] == ["reason-code: parent-create-failed"]
+    assert subject_of(err) == sorted(made["same"])
+
+
+def test_a_failed_requery_after_an_unclear_create_exits_two_with_no_stdout_and_marks_the_state_unknown(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    names = make_children(env, vault, spec)
+    state = {"armed": False}
+
+    def hook(argv, stdin, runner):
+        if argv[:2] == ["record", "create"]:
+            runner.real(argv, stdin)
+            state["armed"] = True
+            return _timeout(argv)
+        if state["armed"] and argv[0] == "search":
+            doc = json.loads(runner.real(argv).stdout)
+            doc["truncated"] = True
+            return subprocess.CompletedProcess(argv, 0, json.dumps(doc), "")
+
+    runner = EnvRunner(env, hook)
+    code, out, err = run_assemble(tmp_path, runner, spec, confirm(env, vault, names), capsys)
+    assert code == 2 and out is None
+    assert [ln for ln in err.splitlines() if ln.startswith("reason-code: ")] == ["reason-code: search-truncated"]
+    assert "parent-state: unknown" in err.splitlines()
+    assert not any(is_drop(a) or is_nest(a) for a in runner.calls)
+    (made,) = created_parent(env, vault, spec)
+    assert sidecar_of(env, vault, made)["status"] == "open"
+
+
+def test_a_failure_before_the_create_does_not_mark_the_parent_state_unknown(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    names = make_children(env, vault, spec)
+    runner = EnvRunner(env, truncated_searches(after_create=False))
+    code, out, err = run_assemble(tmp_path, runner, spec, confirm(env, vault, names), capsys)
+    assert code == 2 and out is None
+    assert "parent-state: unknown" not in err.splitlines()
 
 
 # --- the undo touches only children it nested -------------------------------------------------
