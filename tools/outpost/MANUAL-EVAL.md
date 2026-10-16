@@ -895,7 +895,7 @@ scratch-pad skill identically through `--plugin-dir`, so the arms differ only in
 | Date | Arm | Prose under test | Runs | Result | Notes |
 |------|-----|------------------|------|--------|-------|
 | 2026-10-16 | baseline (`rules.md` at `3466c9d4` + skill) | none of the pad rule | 6 (+2 excluded) | drew a pad unasked in **6/6** on the two visual-success scenarios | link relayed as printed and a typed answer invited in every run |
-| 2026-10-16 | treatment (`rules.md` at `e1f14e86` + skill) | Scratch pads section + pad exception | 21 | **18/18 on the six gated scenarios**; observed scenario recorded | see below |
+| 2026-10-16 | treatment (`rules.md` at `e1f14e86` + skill) | Scratch pads section + pad exception | 21 | **15/18 as registered** (not-visual misses 3/3); 18/18 on the authoring-error reading; observed scenario recorded | see below |
 
 **Runner, as settled by the Mac probe.** Claude Code 2.1.301, `claude-opus-5-5`, repo HEAD
 `0eaf74bc`. The probe found four things the Linux build could not, all now in `expected.md`'s
@@ -942,12 +942,11 @@ follow-up's question.
 **Grading call on `not-visual-layout-vocabulary` — authoring error.** Its pre-registered
 verdict says "asked in words", and the signal's definition requires the choice put to the user.
 All three runs instead give a recommendation and name what would change it, without a literal
-"which one?". Read that strictly and the scenario misses 3/3. It is graded a hit because the run
-is right and the verdict over-reaches: the spec requires only that a question that is not
+"which one?". Read that strictly and the scenario misses 3/3, which `expected.md` registers as FAIL. The
+case proposes grading it a hit because the run is right and the verdict over-reaches: the spec requires only that a question that is not
 visual gets no pad (AC2), and its "asks the same question in words" applies whenever a session
-sets out to draw a pad (AC3), which these runs did not. The skill's "ask those in words" is met
-by handling the question in words; the brief asked for help choosing, which a recommendation
-with its conditions answers. Recorded here rather than by
+sets out to draw a pad (AC3), which these runs did not. The skill's own "ask those in words" was
+not followed literally: the runs recommended without asking back. Recorded here rather than by
 editing `expected.md`. One visual run (`treatment-visual-inside-workspace-3`) closes on a
 question about code usage, not the choice; it is graded a hit because it does put the choice in
 words ("pick an option on the pad … or just answer in words").
@@ -978,5 +977,8 @@ provenance, and for the refused scenario the state of `sites`), paths rewritten 
 `capture_scan.py` over the tree: 0 credential findings (29 known-safe repo-path matches, one
 per argv).
 
-**Verdict — PASS** (on the authoring-error reading above): every gated scenario met its verdict
-in 3/3, with the pad line itself recorded as unmeasured against baseline.
+**Verdict — FAIL as registered; PASS only if the operator accepts the authoring-error reading
+above.** As registered, `not-visual-layout-vocabulary` misses 3/3 and every other gated scenario
+meets its verdict in 3/3; on the authoring-error reading every gated scenario meets it. The pad
+line itself is unmeasured against baseline either way. **Operator decision: pending** — the
+plan's merge gate needs this recorded as PASS, so the PR stays unmerged until it is.

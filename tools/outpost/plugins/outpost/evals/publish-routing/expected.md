@@ -35,7 +35,8 @@ where an agent decides to put a deliverable.
   the text the committed 2026-09-09 rows measured.
 - **treatment (live)** — `arms/treatment.md`: the baseline brief with today's
   `outpost/rules.md` appended verbatim, including the Scratch pads section and the
-  Default rule's pad exception. The next re-run measures this arm.
+  Default rule's pad exception. Measured on 2026-10-16; see that entry in
+  `tools/outpost/MANUAL-EVAL.md`.
 - **baseline** — `arms/baseline.md`: the same brief, no ruleset.
 
 Dispatched as separate `claude` processes with `--setting-sources project`, per
