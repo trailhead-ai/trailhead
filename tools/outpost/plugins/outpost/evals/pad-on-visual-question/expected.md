@@ -69,7 +69,13 @@ number.
    two overrides the runner adds after them: `HOME` and `USER` set to the
    developer's own. `claude` finds its Keychain login only with both (a
    run-directory `HOME`, or an unset `USER`, reports "Not logged in"); the
-   sandbox's default-deny read under the real home is what confines it. The XDG
+   sandbox's default-deny read under the real home keeps the arm out of the real
+   vaults, `~/.config` and `~/.local/state`. It does not confine everything: the
+   profile allows network, process information and Keychain lookups, and
+   re-opens `~/.claude` (minus plugins, rules and projects) and `~/Library` for
+   reading, so an arm that went looking could reach the `claude` login token,
+   other same-user processes' environments and anything stored under those
+   trees. Treat every run as able to, and check captures for it. The XDG
    pair makes `scratch_pad.py` derive camp state (`$XDG_STATE_HOME/camp`),
    Outpost state (`$XDG_STATE_HOME/outpost`) and camp config
    (`$XDG_CONFIG_HOME/camp`) inside the run directory. The throwaway config
@@ -90,6 +96,12 @@ number.
    sandbox drops its last entry): one run must not read another's
    brief or result. Give each run its own `TMPDIR` under the Bash tool's shared
    scratch root (create it first): runs that share one read each other's files.
+   That root stays readable to every run, so put sibling runs' `TMPDIR`s in
+   `DENY_EXTRA` too, and give `DENY_EXTRA` canonical paths (`/private/tmp/...`,
+   not `/tmp/...`): the sandbox matches real paths. Concurrent runs can still see
+   each other's argv, system prompt included, through `ps`, so a batch that
+   interleaves arms should check captures for process listing. Build every run
+   into a fresh directory, and read the arm file from a clean tree.
    The instructions path is the committed arm file at a known
    revision, never anything from the fixture.
 5. **Capture and marker.** Redirect the process's stdout to
