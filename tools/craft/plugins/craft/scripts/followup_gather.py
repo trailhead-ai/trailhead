@@ -274,11 +274,13 @@ def _call_json(runner, argv: list[str]):
 
 def sanitize_text(text: str, limit: int) -> str:
     """Vault text made safe to print: control and invisible format characters
-    stripped, credential spans redacted, then cut to `limit` characters with a
-    trailing marker. Redaction runs before the cut, over a window reaching
-    `_REDACT_MARGIN` characters past it, so a credential straddling the bound
-    is matched whole and no fragment of it survives the cut; the window keeps
-    the scan bounded on hostile oversized input."""
+    stripped, cut to its first `limit` characters with a trailing marker, and
+    every credential span reaching into that cut redacted. Credentials are
+    matched over a window reaching `_REDACT_MARGIN` characters past the cut, so
+    one straddling the bound is matched whole and none of it survives; the cut
+    is taken on the original text, so a redaction never pulls text from past
+    the bound into the output; the window keeps the scan bounded on hostile
+    oversized input."""
     import capture_scan
 
     clean = "".join(
@@ -286,18 +288,24 @@ def sanitize_text(text: str, limit: int) -> str:
         for c in _CONTROL_RE.sub("", text)
         if unicodedata.category(c) not in _INVISIBLE_CATEGORIES
     )
-    over = len(clean) > limit
-    clean = clean[: limit + _REDACT_MARGIN]
-    spans = {
-        f.text
-        for f in capture_scan.scan_text(clean)
-        if capture_scan.is_credential_class(f.cls)
-    }
-    for span in sorted(spans, key=len, reverse=True):
-        clean = clean.replace(span, REDACTED)
-    if over:
-        clean = clean[:limit] + TRUNCATION_MARKER
-    return clean
+    window = clean[: limit + _REDACT_MARGIN]
+    kept = clean[:limit]
+    hidden = [False] * len(kept)
+    for finding in capture_scan.scan_text(window):
+        if not capture_scan.is_credential_class(finding.cls):
+            continue
+        start = window.find(finding.text)
+        while start != -1 and start < len(kept):
+            for i in range(start, min(start + len(finding.text), len(kept))):
+                hidden[i] = True
+            start = window.find(finding.text, start + 1)
+    out: list[str] = []
+    for i, c in enumerate(kept):
+        if not hidden[i]:
+            out.append(c)
+        elif i == 0 or not hidden[i - 1]:
+            out.append(REDACTED)
+    return "".join(out) + (TRUNCATION_MARKER if len(clean) > limit else "")
 
 
 def sanitize_title(title: str) -> str:

@@ -1010,6 +1010,24 @@ def test_a_credential_straddling_the_bound_leaves_no_part_of_itself_behind(befor
     assert out.startswith(lead) and out.endswith("\u2026")
 
 
+def _entropy_run(seed: int, n: int) -> str:
+    import base64
+    import random
+
+    raw = base64.b64encode(random.Random(seed).randbytes(n)).decode()
+    return raw.replace("/", "Q").replace("+", "Z").rstrip("=")[:n]
+
+
+@pytest.mark.parametrize("lead_len", [480, 4570])
+def test_earlier_redactions_never_pull_a_credential_fragment_from_past_the_bound(lead_len):
+    token = _entropy_run(2, 60)
+    out = gather.sanitize_text(_entropy_run(1, lead_len) + " " + token + " tail", 500)
+    fragments = {token[i : i + 12] for i in range(len(token) - 11)}
+    assert not any(f in out for f in fragments), out
+    assert "tail" not in out
+    assert out.startswith("[REDACTED]") and out.endswith("\u2026")
+
+
 @pytest.mark.parametrize(
     "ch", ["\u200b", "\u202e", "\u2028", "\u2029", "\U000e0041", "\u200d", "\ufeff"]
 )
