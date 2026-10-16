@@ -1,30 +1,30 @@
 [main] BASH
-$WORK/snap-treat/tools/craft/plugins/craft/scripts/followup_gather.py fixture-distilled-spec; echo "EXIT=$?"
+$CRAFT[treat]/scripts/followup_gather.py fixture-distilled-spec; echo "EXIT=$?"
 
 [main] BASH
 lore record show --json --vault default task/distilled-reject-path-traversal-in-the-upload-endpoint; echo "EXIT=$?"
 
 [main] BASH
-ls $WORK/snap-treat/tools/craft/plugins/craft/skills/_shared/
+ls $CRAFT[treat]/skills/_shared/
 
 [main] AGENT
 Refine one task record: `task/distilled-reject-path-traversal-in-the-upload-endpoint` in lore vault `default`.
 
 Instructions:
-- First read $WORK/snap-treat/tools/craft/plugins/craft/skills/_shared/refine.md yourself and follow it in full, in its **unattended** mode, against this one task only. (`${CLAUDE_PLUGIN_ROOT}` = $WORK/snap-treat/tools/craft/plugins/craft.) Any other shared file it references lives in the same `_shared/` directory.
+- First read $CRAFT[treat]/skills/_shared/refine.md yourself and follow it in full, in its **unattended** mode, against this one task only. (`${CLAUDE_PLUGIN_ROOT}` = $CRAFT[treat].) Any other shared file it references lives in the same `_shared/` directory.
 - The `lore` command on PATH reads the vault. The code the task's claims point at is the git repository at /private/tmp/t... [cut 609 chars]
 
 [sub] BASH
 lore record show task/distilled-reject-path-traversal-in-the-upload-endpoint; echo ---; lore task graph distilled-reject-path-traversal-in-the-upload-endpoint; echo ---; lore record --help 2>&1 | head -40
 
 [sub] BASH
-lore record show task/distilled-reject-path-traversal-in-the-upload-endpoint --json; echo ---; cd $WORK/runs/distilled-treat/fixture/repo && git status --short && git log --oneline | head && git ls-files && cat -n src/upload.py
+lore record show task/distilled-reject-path-traversal-in-the-upload-endpoint --json; echo ---; cd $RUN[distilled-treat]/fixture/repo && git status --short && git log --oneline | head && git ls-files && cat -n src/upload.py
 
 [sub] BASH
 lore record show task/fixture-distilled-spec-the-slice; echo ---; lore search upload; echo ---; lore search "path traversal"; echo ---; lore search "kind:area upload"; lore search ValueError; lore search tests
 
 [sub] BASH
-cd $WORK/runs/distilled-treat/fixture/repo; for f in src/upload.py src/export.py src/extract.py src/util.py src/__init__.py README.md; do echo "== $f"; cat -n $f; done; lore record show task/left-out-pin-the-tls-minimum-version-in-the-client; lore search "kind:area"
+cd $RUN[distilled-treat]/fixture/repo; for f in src/upload.py src/export.py src/extract.py src/util.py src/__init__.py README.md; do echo "== $f"; cat -n $f; done; lore record show task/left-out-pin-the-tls-minimum-version-in-the-client; lore search "kind:area"
 
 [sub] BASH
 T=$(mktemp -t refine-upload.XXXXXX) && cat > "$T" <<'EOF'
@@ -48,13 +48,13 @@ Verification: `python -m unittest discover -s tests -t .` from the repo root pas
 - [ ] Prover-validated assumptions captured as session candidates (durable at flush)
 - [ ] New decisions / lessons / follow-ups surfaced during the build recorded
 EOF
-grep -nEi 'key|token|secret|password|passwd|AKIA|BEGIN|bearer' "$T"; echo "scrub-exit=$?"; cat $WORK/snap-treat/tools/craft/plugins/craft/templates/plan.md | grep -n -A5 'Flow-out'; echo "$T"
+grep -nEi 'key|token|secret|password|passwd|AKIA|BEGIN|bearer' "$T"; echo "scrub-exit=$?"; cat $CRAFT[treat]/templates/plan.md | grep -n -A5 'Flow-out'; echo "$T"
 
 [sub] BASH
-sed -n 24,40p $WORK/snap-treat/tools/craft/plugins/craft/templates/plan.md; ls -la $WORK/runs/distilled-treat/tmp/refine-upload.3qWkhc
+sed -n 24,40p $CRAFT[treat]/templates/plan.md; ls -la $RUN[distilled-treat]/tmp/refine-upload.3qWkhc
 
 [sub] BASH
-T=$WORK/runs/distilled-treat/tmp/refine-upload.3qWkhc
+T=$RUN[distilled-treat]/tmp/refine-upload.3qWkhc
 printf '%s\n' \
 '`src/upload.py` joins a caller-supplied name onto the upload directory with no validation, so a crafted name writes files outside the upload directory. Reachable today by any caller of `upload_path`. The agreed behaviour: raise `ValueError` for a name whose resolved path (symlinks followed) falls outside the upload directory, and keep returning the joined path for a name that stays inside. The repository has no tests yet; add `tests/test_upload.py`.' \
 '' \
@@ -77,28 +77,28 @@ printf '%s\n' \
 '- [ ] Prover-validated assumptions captured as session candidates (durable at flush)' \
 '- [ ] New decisions / lessons / follow-ups surfaced during the build recorded' > "$T"
 grep -cEi 'secret|password|passwd|AKIA|BEGIN .*PRIVATE|bearer|api[_-]?key|token' "$T"
-wc -l $WORK/runs/distilled-treat/fixture/repo/src/upload.py
+wc -l $RUN[distilled-treat]/fixture/repo/src/upload.py
 lore record update --help | head -30
 
 [sub] BASH
-T=$WORK/runs/distilled-treat/tmp/refine-upload.3qWkhc
+T=$RUN[distilled-treat]/tmp/refine-upload.3qWkhc
 lore record update task/distilled-reject-path-traversal-in-the-upload-endpoint --vault default --status ready < "$T" && rm -f "$T"; ls "$T" 2>&1; lore record show task/distilled-reject-path-traversal-in-the-upload-endpoint --json | python3 -I -c 'import json,sys;d=json.load(sys.stdin);print(d["sidecar"]["status"]);print(d["body"])'
 
 [main] BASH
-$WORK/snap-treat/tools/craft/plugins/craft/scripts/followup_parent.py check fixture-distilled-spec distilled-reject-path-traversal-in-the-upload-endpoint; echo "EXIT=$?"
+$CRAFT[treat]/scripts/followup_parent.py check fixture-distilled-spec distilled-reject-path-traversal-in-the-upload-endpoint; echo "EXIT=$?"
 
 [main] BASH
 children=$(mktemp)
 cat > "$children" <<'EOF'
-[{"name": "distilled-reject-path-traversal-in-the-upload-endpoint", "reason": "Any caller of the upload path helper can write files outside the upload directory today; the system stays exposed for as long as this waits (open security exposure).", "revision": "ab5ba0f933394893327c13ee67b6ebb325f663fd59e8ff8e23047aa72b079a3c"}]
+[{"name": "distilled-reject-path-traversal-in-the-upload-endpoint", "reason": "Any caller of the upload path helper can write files outside the upload directory today; the system stays exposed for as long as this waits (open security exposure).", "revision": "[sha:ab5ba0f9]"}]
 EOF
-$WORK/snap-treat/tools/craft/plugins/craft/scripts/followup_parent.py assemble fixture-distilled-spec --children "$children"; rc=$?
+$CRAFT[treat]/scripts/followup_parent.py assemble fixture-distilled-spec --children "$children"; rc=$?
 rm -f "$children"
 echo "EXIT=$rc"
 
 [main] BASH
 children=$(mktemp)
-printf '%s' '[{"name": "distilled-reject-path-traversal-in-the-upload-endpoint", "reason": "Any caller of the upload path helper can write files outside the upload directory today; the system stays exposed for as long as this waits (open security exposure).", "revision": "ab5ba0f933394893327c13ee67b6ebb325f663fd59e8ff8e23047aa72b079a3c"}]' > "$children"
-$WORK/snap-treat/tools/craft/plugins/craft/scripts/followup_parent.py assemble fixture-distilled-spec --children "$children"; rc=$?
+printf '%s' '[{"name": "distilled-reject-path-traversal-in-the-upload-endpoint", "reason": "Any caller of the upload path helper can write files outside the upload directory today; the system stays exposed for as long as this waits (open security exposure).", "revision": "[sha:ab5ba0f9]"}]' > "$children"
+$CRAFT[treat]/scripts/followup_parent.py assemble fixture-distilled-spec --children "$children"; rc=$?
 rm -f "$children"
 echo "EXIT=$rc"

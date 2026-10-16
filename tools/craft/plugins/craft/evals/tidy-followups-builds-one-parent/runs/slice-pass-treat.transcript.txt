@@ -1,4 +1,4 @@
-[main] TOOL Grep {"pattern": "^#+ |Guard", "path": "$WORK/snap-treat/tools/craft/plugins/craft/skills/slice/SKILL.md", "output_mode": "content"}
+[main] TOOL Grep {"pattern": "^#+ |Guard", "path": "$CRAFT[treat]/skills/slice/SKILL.md", "output_mode": "content"}
 
 [main] RESULT
 18:# Slice
@@ -16,7 +16,7 @@
 610:### 10. Re-check for a concurrent duplicate
 619:## Outcome
 
-[main] TOOL Read {"file_path": "$WORK/snap-treat/tools/craft/plugins/craft/skills/slice/SKILL.md", "offset": 307, "limit": 36}
+[main] TOOL Read {"file_path": "$CRAFT[treat]/skills/slice/SKILL.md", "offset": 307, "limit": 36}
 
 [main] RESULT
 307	### 5. Guard — refuse while a slice is already open on this spec

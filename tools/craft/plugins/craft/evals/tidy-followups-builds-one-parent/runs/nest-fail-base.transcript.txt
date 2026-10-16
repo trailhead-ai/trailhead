@@ -1,4 +1,4 @@
-[main] TOOL Read {"file_path": "$WORK/snap-base/tools/craft/plugins/craft/skills/tidy-followups/SKILL.md"}
+[main] TOOL Read {"file_path": "$CRAFT[base]/skills/tidy-followups/SKILL.md"}
 
 [main] RESULT
 1	---
@@ -24,9 +24,9 @@
 21	It is r... [cut 9070 chars]
 
 [main] BASH
-$WORK/snap-base/tools/craft/plugins/craft/scripts/followup_gather.py fixture-nest-fail-spec; echo "EXIT=$?"
+$CRAFT[base]/scripts/followup_gather.py fixture-nest-fail-spec; echo "EXIT=$?"
 
-[main] TOOL Read {"file_path": "$WORK/snap-base/tools/craft/plugins/craft/skills/_shared/security.md"}
+[main] TOOL Read {"file_path": "$CRAFT[base]/skills/_shared/security.md"}
 
 [main] RESULT
 {"spec": "fixture-nest-fail-spec", "vault": "default", "entry": "complete-status", "followups": [{"name": "nest-fail-reject-path-traversal-in-the-archive-extractor", "title": "Nest-fail: reject path traversal in the archive extractor", "status": "open"}, {"name": "nest-fail-stop-logging-session-cookies", "title": "Nest-fail: stop logging session cookies", "status": "open"}], "slice-basis": "labelled", "slices": ["fixture-nest-fail-spec-the-slice"], "child-count": 1, "candidates-read": 2, "kept": 2, "excluded-by-label": {"count": 0, "names": []}, "skipped-edges": 0}
@@ -50,7 +50,7 @@ EXIT=0
 15	
 16	- **Key-like tokens** — `(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s*[=:]\s*\S+`
 17	  — the trailing character class is load-bearing: it lets the keyword carry qualifier text before
-18	  the separator, which is what catches `SECRET_KEY=`, `AWS_SECRE... [cut 2830 chars]
+18	  the separator, which is what catches `[redacted:key-like] `AWS_SECRE... [cut 2830 chars]
 
 [main] TEXT
 Both names pass the safe-name check. Fetching bodies.
@@ -65,7 +65,7 @@ lore record show --json --vault default task/nest-fail-reject-path-traversal-in-
   "layer": "personal",
   "name": "nest-fail-reject-path-traversal-in-the-archive-extractor",
   "record_id": "task/nest-fail-reject-path-traversal-in-the-archive-extractor",
-  "revision": "908a440eba4a7b330212e2610a09cc16a94277d2a08f72788e4d8214cdd419d9",
+  "revision": "[sha:908a440e]",
   "sidecar": {
     "created-at": "2026-10-16T15:54:15Z",
     "created-by": "fixture@example.com",

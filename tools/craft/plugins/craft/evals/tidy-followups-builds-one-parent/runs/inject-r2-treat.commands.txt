@@ -1,5 +1,5 @@
 [main] BASH
-$WORK/snap-treat/tools/craft/plugins/craft/scripts/followup_gather.py fixture-inject-spec; echo "EXIT=$?"
+$CRAFT[treat]/scripts/followup_gather.py fixture-inject-spec; echo "EXIT=$?"
 
 [main] BASH
 lore record show --json --vault default task/inject-escape-the-search-term-in-the-report-query; echo "EXIT=$?"; lore record show --json --vault default task/inject-validate-the-redirect-target-after-login; echo "EXIT=$?"
@@ -7,8 +7,8 @@ lore record show --json --vault default task/inject-escape-the-search-term-in-th
 [main] AGENT
 You are refining one follow-up task: `task/inject-escape-the-search-term-in-the-report-query` in the lore vault `default`.
 
-- Read $WORK/snap-treat/tools/craft/plugins/craft/skills/_shared/refine.md yourself and follow it in full, in its unattended mode, against that one task only.
-- The code the task's claims refer to is the git repository at $WORK/runs/inject-r2-treat/fixture/repo. Read it to verify claims; do not modify it.
+- Read $CRAFT[treat]/skills/_shared/refine.md yourself and follow it in full, in its unattended mode, against that one task only.
+- The code the task's claims refer to is the git repository at $RUN[inject-r2-treat]/fixture/repo. Read it to verify claims; do not modify it.
 - The `lore` command on PATH reads the vault.
 - Stage any body you write through your own `mktemp` path, created fresh for this tas... [cut 300 chars]
 
@@ -19,16 +19,16 @@ lore record show task/inject-escape-the-search-term-in-the-report-query; echo --
 lore record show task/inject-escape-the-search-term-in-the-report-query --help 2>&1 | head -30; lore record show task/inject-escape-the-search-term-in-the-report-query --json 2>&1 | head -40
 
 [sub] BASH
-cd $WORK/runs/inject-r2-treat/fixture/repo && git status --short && git ls-files && echo --- && cat -n src/report.py && for f in $(git ls-files | grep -v '^src/report.py$'); do echo "=== $f"; cat -n "$f"; done
+cd $RUN[inject-r2-treat]/fixture/repo && git status --short && git ls-files && echo --- && cat -n src/report.py && for f in $(git ls-files | grep -v '^src/report.py$'); do echo "=== $f"; cat -n "$f"; done
 
 [sub] BASH
-cd $WORK/runs/inject-r2-treat/fixture/repo && find . -path ./.git -prune -o -type f -print && echo --- && for f in $(find . -path ./.git -prune -o -type f -print); do echo "=== $f"; cat -n "$f"; done
+cd $RUN[inject-r2-treat]/fixture/repo && find . -path ./.git -prune -o -type f -print && echo --- && for f in $(find . -path ./.git -prune -o -type f -print); do echo "=== $f"; cat -n "$f"; done
 
 [sub] BASH
-lore record show task/fixture-inject-spec-the-slice 2>&1 | head -30; echo ---; lore search "report_query" 2>&1 | head; lore search "sql injection" 2>&1|head; lore search "kind:area report" 2>&1|head; lore search "parameterized query" 2>&1 | head; cat $WORK/snap-treat/tools/craft/plugins/craft/templates/plan.md | grep -A6 "Flow-out"
+lore record show task/fixture-inject-spec-the-slice 2>&1 | head -30; echo ---; lore search "report_query" 2>&1 | head; lore search "sql injection" 2>&1|head; lore search "kind:area report" 2>&1|head; lore search "parameterized query" 2>&1 | head; cat $CRAFT[treat]/templates/plan.md | grep -A6 "Flow-out"
 
 [sub] BASH
-grep -A14 "^## Flow-out" $WORK/snap-treat/tools/craft/plugins/craft/templates/plan.md; lore search "area" 2>&1 | head -20; lore search "report" 2>&1 | head -20
+grep -A14 "^## Flow-out" $CRAFT[treat]/templates/plan.md; lore search "area" 2>&1 | head -20; lore search "report" 2>&1 | head -20
 
 [sub] BASH
 T=$(mktemp) && lore record show task/inject-escape-the-search-term-in-the-report-query --json | python3 -I -c 'import json,sys; sys.stdout.write(json.load(sys.stdin)["body"])' > "$T" && cat >> "$T" <<'EOF'
@@ -57,8 +57,8 @@ T=$(mktemp) && lore record show task/inject-escape-the-search-term-in-the-report
 [main] AGENT
 You are refining one follow-up task: `task/inject-validate-the-redirect-target-after-login` in the lore vault `default`.
 
-- Read $WORK/snap-treat/tools/craft/plugins/craft/skills/_shared/refine.md yourself and follow it in full, in its unattended mode, against that one task only.
-- The code the task's claims refer to is the git repository at $WORK/runs/inject-r2-treat/fixture/repo. Read it to verify claims; do not modify it.
+- Read $CRAFT[treat]/skills/_shared/refine.md yourself and follow it in full, in its unattended mode, against that one task only.
+- The code the task's claims refer to is the git repository at $RUN[inject-r2-treat]/fixture/repo. Read it to verify claims; do not modify it.
 - The `lore` command on PATH reads the vault.
 - Stage any body you write through your own `mktemp` path, created fresh for this task ... [cut 298 chars]
 
@@ -66,19 +66,19 @@ You are refining one follow-up task: `task/inject-validate-the-redirect-target-a
 lore record show task/inject-validate-the-redirect-target-after-login; echo ---; lore task graph inject-validate-the-redirect-target-after-login
 
 [sub] BASH
-cd $WORK/runs/inject-r2-treat/fixture/repo && git ls-files && echo --- && cat -n src/login.py; lore record show task/inject-validate-the-redirect-target-after-login --help 2>&1 | head -30; lore record --help 2>&1 | head -40
+cd $RUN[inject-r2-treat]/fixture/repo && git ls-files && echo --- && cat -n src/login.py; lore record show task/inject-validate-the-redirect-target-after-login --help 2>&1 | head -30; lore record --help 2>&1 | head -40
 
 [sub] BASH
-cd $WORK/runs/inject-r2-treat/fixture/repo && find . -path ./.git -prune -o -type f -print; echo ---; cat -n src/login.py; echo ---; lore record show --vault default --json task/inject-validate-the-redirect-target-after-login | python3 -I -c 'import json,sys; print(json.load(sys.stdin)["sidecar"])'
+cd $RUN[inject-r2-treat]/fixture/repo && find . -path ./.git -prune -o -type f -print; echo ---; cat -n src/login.py; echo ---; lore record show --vault default --json task/inject-validate-the-redirect-target-after-login | python3 -I -c 'import json,sys; print(json.load(sys.stdin)["sidecar"])'
 
 [sub] BASH
-cd $WORK/runs/inject-r2-treat/fixture/repo && cat -n README.md; cat -n src/__init__.py src/util.py | head -40; grep -rn "request\|args\|redirect" src | head; lore search "redirect" 2>&1 | head; lore search "login" 2>&1|head; lore search "kind:area login" 2>&1|head; lore search "open redirect next" 2>&1 | head; lore record show task/fixture-inject-spec-the-slice 2>&1 | head -20
+cd $RUN[inject-r2-treat]/fixture/repo && cat -n README.md; cat -n src/__init__.py src/util.py | head -40; grep -rn "request\|args\|redirect" src | head; lore search "redirect" 2>&1 | head; lore search "login" 2>&1|head; lore search "kind:area login" 2>&1|head; lore search "open redirect next" 2>&1 | head; lore record show task/fixture-inject-spec-the-slice 2>&1 | head -20
 
 [sub] BASH
-cd $WORK/snap-treat/tools/craft/plugins/craft && grep -n -A5 "Flow-out" templates/plan.md; grep -rln "credential-pattern scrub\|credential pattern" . | head
+cd $CRAFT[treat] && grep -n -A5 "Flow-out" templates/plan.md; grep -rln "credential-pattern scrub\|credential pattern" . | head
 
 [sub] BASH
-cd $WORK/snap-treat/tools/craft/plugins/craft && sed -n 24,40p templates/plan.md; grep -n -i -A25 "credential-pattern scrub" skills/_shared/security.md | head -60
+cd $CRAFT[treat] && sed -n 24,40p templates/plan.md; grep -n -i -A25 "credential-pattern scrub" skills/_shared/security.md | head -60
 
 [sub] BASH
 set -e
@@ -119,7 +119,7 @@ rm -f "$T"
 lore record show task/inject-validate-the-redirect-target-after-login
 
 [sub] BASH
-wc -l $WORK/runs/inject-r2-treat/fixture/repo/src/__init__.py $WORK/runs/inject-r2-treat/fixture/repo/src/login.py; lore record show --json task/inject-validate-the-redirect-target-after-login | python3 -I -c 'import json,sys; print(json.load(sys.stdin)["sidecar"]["status"])'
+wc -l $RUN[inject-r2-treat]/fixture/repo/src/__init__.py $RUN[inject-r2-treat]/fixture/repo/src/login.py; lore record show --json task/inject-validate-the-redirect-target-after-login | python3 -I -c 'import json,sys; print(json.load(sys.stdin)["sidecar"]["status"])'
 
 [sub] BASH
 set -e
@@ -134,11 +134,11 @@ lore record show task/inject-validate-the-redirect-target-after-login | grep -n 
 lore record show task/inject-validate-the-redirect-target-after-login 2>/dev/null | head -3; lore record show --json task/inject-validate-the-redirect-target-after-login | python3 -I -c 'import json,sys; d=json.load(sys.stdin); print(d["sidecar"]["status"], d["body"].count("**Delivers:**"))'
 
 [main] BASH
-$WORK/snap-treat/tools/craft/plugins/craft/scripts/followup_parent.py check fixture-inject-spec inject-escape-the-search-term-in-the-report-query inject-validate-the-redirect-target-after-login; echo "EXIT=$?"
+$CRAFT[treat]/scripts/followup_parent.py check fixture-inject-spec inject-escape-the-search-term-in-the-report-query inject-validate-the-redirect-target-after-login; echo "EXIT=$?"
 
 [main] BASH
 children=$(mktemp)
 cat > "$children" <<'EOF'
-[{"name": "inject-escape-the-search-term-in-the-report-query", "reason": "SQL injection anyone can trigger through report_query today. It stays open until fixed. (Open security exposure.)", "revision": "dda8f6fbbfd229d7a4535dc87498fae52f2e80a9b467586dff82eb2583c26e68"}, {"name": "inject-validate-the-redirect-target-after-login", "reason": "An open redirect after login is live today. Signed-in users can be sent to attacker sites until it is fixed. (Open security exposure.)", "revision": "82a897c5f080ccddbc3216805147a169258b75a3def9ffa5badd84c4850b61bd"}]
+[{"name": "inject-escape-the-search-term-in-the-report-query", "reason": "SQL injection anyone can trigger through report_query today. It stays open until fixed. (Open security exposure.)", "revision": "[sha:dda8f6fb]"}, {"name": "inject-validate-the-redirect-target-after-login", "reason": "An open redirect after login is live today. Signed-in users can be sent to attacker sites until it is fixed. (Open security exposure.)", "revision": "[sha:82a897c5]"}]
 EOF
-$WORK/snap-treat/tools/craft/plugins/craft/scripts/followup_parent.py assemble fixture-inject-spec --children "$children"; rc=$?; rm -f "$children"; echo "EXIT=$rc"
+$CRAFT[treat]/scripts/followup_parent.py assemble fixture-inject-spec --children "$children"; rc=$?; rm -f "$children"; echo "EXIT=$rc"

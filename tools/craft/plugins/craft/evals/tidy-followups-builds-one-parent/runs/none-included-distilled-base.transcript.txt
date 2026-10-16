@@ -1,4 +1,4 @@
-[main] TOOL Read {"file_path": "$WORK/snap-base/tools/craft/plugins/craft/skills/tidy-followups/SKILL.md"}
+[main] TOOL Read {"file_path": "$CRAFT[base]/skills/tidy-followups/SKILL.md"}
 
 [main] RESULT
 1	---
@@ -27,9 +27,9 @@
 The argument `fixture-none-included-distilled-spec` passes step 1: it matches `^[A-Za-z0-9._/-]+$`, doesn't start with `-`, and has no `..` segment. Running the gather script next.
 
 [main] BASH
-$WORK/snap-base/tools/craft/plugins/craft/scripts/followup_gather.py fixture-none-included-distilled-spec; echo "EXIT=$?"
+$CRAFT[base]/scripts/followup_gather.py fixture-none-included-distilled-spec; echo "EXIT=$?"
 
-[main] TOOL Read {"file_path": "$WORK/snap-base/tools/craft/plugins/craft/skills/_shared/security.md"}
+[main] TOOL Read {"file_path": "$CRAFT[base]/skills/_shared/security.md"}
 
 [main] RESULT
 {"spec": "fixture-none-included-distilled-spec", "vault": "default", "entry": "complete-status", "followups": [{"name": "none-included-distilled-drop-an-unused-local-variable", "title": "None-included-distilled: drop an unused local variable", "status": "open"}, {"name": "none-included-distilled-reorder-two-imports", "title": "None-included-distilled: reorder two imports", "status": "open"}], "slice-basis": "labelled", "slices": ["fixture-none-included-distilled-spec-the-slice"], "child-count": 1, "candidates-read": 2, "kept": 2, "excluded-by-label": {"count": 0, "names": []}, "skipped-edges": 0}
@@ -53,7 +53,7 @@ EXIT=0
 15	
 16	- **Key-like tokens** — `(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s*[=:]\s*\S+`
 17	  — the trailing character class is load-bearing: it lets the keyword carry qualifier text before
-18	  the separator, which is what catches `SECRET_KEY=`, `AWS_SECRE... [cut 2830 chars]
+18	  the separator, which is what catches `[redacted:key-like] `AWS_SECRE... [cut 2830 chars]
 
 [main] TEXT
 The script exited 0 with one JSON object that has every required key, and `followups` isn't empty. Both follow-up names pass the step 1 checks again, so I'm fetching their bodies.
@@ -68,7 +68,7 @@ lore record show --json --vault default task/none-included-distilled-drop-an-unu
   "layer": "personal",
   "name": "none-included-distilled-drop-an-unused-local-variable",
   "record_id": "task/none-included-distilled-drop-an-unused-local-variable",
-  "revision": "4d457e9232dd0f916c7da7b55781559c41d6fd9d974308f59a380c3c80ae21bf",
+  "revision": "[sha:4d457e92]",
   "sidecar": {
     "created-at": "2026-10-16T15:38:59Z",
     "created-by": "fixture@example.com",
@@ -92,7 +92,7 @@ EXIT=0
   "layer": "personal",
   "name": "none-included-distilled-reorder-two-imports",
   "record_id": "task/none-included-distilled-reorder-two-imports",
-  "revision": "d96c30e613aefdd46e245039b3c6d82626f4483946aff815a62ac11cfefe71cb",
+  "revision": "[sha:d96c30e6]",
   "sidecar": {
     "created-at": "2026-10-16T15:38:58Z",
     "created-by": "fixture@example.com",

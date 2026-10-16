@@ -34,4 +34,4 @@ Nothing was written. No record, label or status was created or changed.
 - **Shortlist (answer 1):** my own judgment from the follow-ups' text picked the same three you named, so the result matches.
 - **Disposition set and scope (answers 2 and 3):** nothing in the procedure uses them. The skill also never dispatches subagents, so the fixture repo was not looked at.
 
-**Title redaction:** the gathering script already shortened one title to "[REDACTED]" because its wording matches the credential pattern for bearer tokens. I kept that in the report as the security rules require.
+**Title redaction:** the gathering script already shortened one title to "[REDACTED]" because its wording matches the credential pattern for [redacted:bearer] I kept that in the report as the security rules require.

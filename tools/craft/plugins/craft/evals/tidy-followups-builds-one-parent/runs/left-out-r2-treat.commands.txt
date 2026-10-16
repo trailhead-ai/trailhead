@@ -1,5 +1,5 @@
 [main] BASH
-$WORK/snap-treat/tools/craft/plugins/craft/scripts/followup_gather.py fixture-left-out-spec; echo "EXIT=$?"
+$CRAFT[treat]/scripts/followup_gather.py fixture-left-out-spec; echo "EXIT=$?"
 
 [main] BASH
 lore record show --json --vault default task/left-out-pin-the-tls-minimum-version-in-the-client; echo "EXIT=$?"; lore record show --json --vault default task/left-out-rotate-the-hard-coded-session-signing-secret; echo "EXIT=$?"
@@ -8,8 +8,8 @@ lore record show --json --vault default task/left-out-pin-the-tls-minimum-versio
 Refine the follow-up task `task/left-out-rotate-the-hard-coded-session-signing-secret` in the lore vault `default` (the `lore` command on PATH).
 
 Instructions:
-- Read $WORK/snap-treat/tools/craft/plugins/craft/skills/_shared/refine.md yourself and follow it in full, in its **unattended** mode, against that one task only. `${CLAUDE_PLUGIN_ROOT}` is $WORK/snap-treat/tools/craft/plugins/craft.
-- The code the task's claims point at is the git repository at $WORK/runs/left-out-r2-treat/fixture/repo. Do not modify that repository.
+- Read $CRAFT[treat]/skills/_shared/refine.md yourself and follow it in full, in its **unattended** mode, against that one task only. `${CLAUDE_PLUGIN_ROOT}` is $CRAFT[treat].
+- The code the task's claims point at is the git repository at $RUN[left-out-r2-treat]/fixture/repo. Do not modify that repository.
 - Stage any ... [cut 391 chars]
 
 [sub] BASH
@@ -19,10 +19,10 @@ lore record show task/left-out-rotate-the-hard-coded-session-signing-secret; ech
 lore record show --help; lore record update --help; lore record show task/left-out-rotate-the-hard-coded-session-signing-secret --json 2>&1 | head -50
 
 [sub] BASH
-cd $WORK/runs/left-out-r2-treat/fixture/repo && git status --short && git ls-files && echo --- && cat -n src/session.py; grep -rn -i "secret\|SIGNING\|environ\|getenv" --exclude-dir=.git . | grep -v "^./src/session.py" | head -30
+cd $RUN[left-out-r2-treat]/fixture/repo && git status --short && git ls-files && echo --- && cat -n src/session.py; grep -rn -i "secret\|SIGNING\|environ\|getenv" --exclude-dir=.git . | grep -v "^./src/session.py" | head -30
 
 [sub] BASH
-cd $WORK/runs/left-out-r2-treat/fixture/repo && HOME=/tmp GIT_CONFIG_NOSYSTEM=1 git ls-files; ls -R | head -50
+cd $RUN[left-out-r2-treat]/fixture/repo && HOME=/tmp GIT_CONFIG_NOSYSTEM=1 git ls-files; ls -R | head -50
 
 [sub] BASH
 for q in "secret manager" "signing secret" "session" "environment injection" "credentials" "kind:area session" "kind:adr" "src/session.py" "secrets"; do echo "== $q"; lore search "$q" 2>&1 | head -15; done; lore areas 2>&1 | head -30
@@ -31,13 +31,13 @@ for q in "secret manager" "signing secret" "session" "environment injection" "cr
 for q in '"src/session.py"' "kind:decision" "kind:lesson" "kind:spec" "vendor" "rotate" "audit"; do echo "== $q"; lore search "$q" 2>&1 | head -12; done; lore record show task/fixture-left-out-spec-the-slice
 
 [sub] BASH
-lore record show spec/fixture-left-out-spec; ls $WORK/snap-treat/tools/craft/plugins/craft/templates/; grep -rln -i "credential-pattern" $WORK/snap-treat/tools/craft/plugins/craft | head
+lore record show spec/fixture-left-out-spec; ls $CRAFT[treat]/templates/; grep -rln -i "credential-pattern" $CRAFT[treat] | head
 
 [sub] BASH
-cd $WORK/snap-treat/tools/craft/plugins/craft; grep -n -i -A30 "credential-pattern" skills/_shared/security.md | head -80; echo ----; cat templates/task.md; echo ----; grep -n -A6 "Flow-out" templates/plan.md
+cd $CRAFT[treat]; grep -n -i -A30 "credential-pattern" skills/_shared/security.md | head -80; echo ----; cat templates/task.md; echo ----; grep -n -A6 "Flow-out" templates/plan.md
 
 [sub] BASH
-sed -n 30,40p $WORK/snap-treat/tools/craft/plugins/craft/templates/plan.md
+sed -n 30,40p $CRAFT[treat]/templates/plan.md
 
 [sub] BASH
 T=$(mktemp -t refine-signing.XXXXXX); echo $T; cat > "$T" <<'EOF'
@@ -70,14 +70,14 @@ print("scrub done")
 PY
 
 [sub] BASH
-T=$WORK/runs/left-out-r2-treat/tmp/refine-signing.WncRRu; lore record update task/left-out-rotate-the-hard-coded-session-signing-secret < "$T" && rm -f "$T"; ls "$T" 2>&1; lore record show task/left-out-rotate-the-hard-coded-session-signing-secret --json | python3 -I -c 'import json,sys;d=json.load(sys.stdin);print(d["sidecar"]["status"], d["sidecar"].get("labels"))'; lore record show task/left-out-rotate-the-hard-coded-session-signing-secret
+T=$RUN[left-out-r2-treat]/tmp/refine-signing.WncRRu; lore record update task/left-out-rotate-the-hard-coded-session-signing-secret < "$T" && rm -f "$T"; ls "$T" 2>&1; lore record show task/left-out-rotate-the-hard-coded-session-signing-secret --json | python3 -I -c 'import json,sys;d=json.load(sys.stdin);print(d["sidecar"]["status"], d["sidecar"].get("labels"))'; lore record show task/left-out-rotate-the-hard-coded-session-signing-secret
 
 [main] AGENT
 Refine the follow-up task `task/left-out-pin-the-tls-minimum-version-in-the-client` in the lore vault `default` (the `lore` command on PATH).
 
 Instructions:
-- Read $WORK/snap-treat/tools/craft/plugins/craft/skills/_shared/refine.md yourself and follow it in full, in its **unattended** mode, against that one task only. `${CLAUDE_PLUGIN_ROOT}` is $WORK/snap-treat/tools/craft/plugins/craft.
-- The code the task's claims point at is the git repository at $WORK/runs/left-out-r2-treat/fixture/repo. Do not modify that repository.
+- Read $CRAFT[treat]/skills/_shared/refine.md yourself and follow it in full, in its **unattended** mode, against that one task only. `${CLAUDE_PLUGIN_ROOT}` is $CRAFT[treat].
+- The code the task's claims point at is the git repository at $RUN[left-out-r2-treat]/fixture/repo. Do not modify that repository.
 - Stage any bod... [cut 388 chars]
 
 [sub] BASH
@@ -87,16 +87,16 @@ lore record show task/left-out-pin-the-tls-minimum-version-in-the-client; echo -
 lore record show --help 2>&1 | head -30; lore record show task/left-out-pin-the-tls-minimum-version-in-the-client --json 2>&1 | head -50; echo ---; lore record show task/outside-upgrade-the-http-client-library
 
 [sub] BASH
-cd $WORK/runs/left-out-r2-treat/fixture/repo && git status --short && git log --oneline | head && git ls-files && echo --- && cat -n src/client.py && ls tests 2>/dev/null && for f in tests/*; do echo "== $f"; cat -n "$f"; done
+cd $RUN[left-out-r2-treat]/fixture/repo && git status --short && git log --oneline | head && git ls-files && echo --- && cat -n src/client.py && ls tests 2>/dev/null && for f in tests/*; do echo "== $f"; cat -n "$f"; done
 
 [sub] BASH
-cd $WORK/runs/left-out-r2-treat/fixture/repo && export HOME=$(mktemp -d) && git status --short && git log --oneline | head && git ls-files && echo --- && cat -n src/client.py && ls tests 2>/dev/null && for f in tests/*; do echo "== $f"; cat -n "$f"; done; rm -rf "$HOME"
+cd $RUN[left-out-r2-treat]/fixture/repo && export HOME=$(mktemp -d) && git status --short && git log --oneline | head && git ls-files && echo --- && cat -n src/client.py && ls tests 2>/dev/null && for f in tests/*; do echo "== $f"; cat -n "$f"; done; rm -rf "$HOME"
 
 [sub] BASH
-cd $WORK/runs/left-out-r2-treat/fixture/repo && GIT_CONFIG_GLOBAL=/dev/null git status --short && GIT_CONFIG_GLOBAL=/dev/null git log --oneline | head && GIT_CONFIG_GLOBAL=/dev/null git ls-files
+cd $RUN[left-out-r2-treat]/fixture/repo && GIT_CONFIG_GLOBAL=/dev/null git status --short && GIT_CONFIG_GLOBAL=/dev/null git log --oneline | head && GIT_CONFIG_GLOBAL=/dev/null git ls-files
 
 [sub] BASH
-cd $WORK/runs/left-out-r2-treat/fixture/repo && cat -n src/client.py README.md; grep -rn "ssl\|tls\|TLS\|test" src README.md
+cd $RUN[left-out-r2-treat]/fixture/repo && cat -n src/client.py README.md; grep -rn "ssl\|tls\|TLS\|test" src README.md
 
 [sub] BASH
 for q in "tls" "client" "ssl" "test convention" "pytest" "kind:area" "src/client.py" "minimum version" "fixture"; do echo "=== $q"; lore search "$q" 2>&1 | head -15; done
@@ -105,10 +105,10 @@ for q in "tls" "client" "ssl" "test convention" "pytest" "kind:area" "src/client
 lore record show task/fixture-left-out-spec-the-slice; lore record show spec/fixture-left-out-spec; lore search "test" | head -20; lore search '"tests/"' | head
 
 [sub] BASH
-cd $WORK/snap-treat/tools/craft/plugins/craft; grep -n -A6 "Flow-out" templates/plan.md; cat templates/task.md; grep -rln "credential-pattern scrub\|canonical pattern" . | head
+cd $CRAFT[treat]; grep -n -A6 "Flow-out" templates/plan.md; cat templates/task.md; grep -rln "credential-pattern scrub\|canonical pattern" . | head
 
 [sub] BASH
-cd $WORK/snap-treat/tools/craft/plugins/craft; sed -n 30,40p templates/plan.md; grep -n -i -B2 -A20 "credential-pattern scrub" skills/_shared/security.md | head -60
+cd $CRAFT[treat]; sed -n 30,40p templates/plan.md; grep -n -i -B2 -A20 "credential-pattern scrub" skills/_shared/security.md | head -60
 
 [sub] BASH
 T=$(mktemp) && cat > "$T" <<'EOF'
@@ -126,10 +126,10 @@ T=$(mktemp) && cat > "$T" <<'EOF'
 - [ ] Prover-validated assumptions captured as session candidates (durable at flush)
 - [ ] New decisions / lessons / follow-ups surfaced during the build recorded
 EOF
-wc -c $WORK/runs/left-out-r2-treat/fixture/repo/src/__init__.py; echo "$T"
+wc -c $RUN[left-out-r2-treat]/fixture/repo/src/__init__.py; echo "$T"
 
 [sub] BASH
-T=$WORK/runs/left-out-r2-treat/tmp/tmp.90hMYhJ6Dr; python3 -I - "$T" <<'EOF'
+T=$RUN[left-out-r2-treat]/tmp/tmp.90hMYhJ6Dr; python3 -I - "$T" <<'EOF'
 import sys,re
 p=sys.argv[1]; s=open(p).read()
 s=s.replace(" (package marker at src/__init__.py:1 is absent as content but the file exists)"," (`src/__init__.py` exists, empty, so `src` is importable as a package from the repo root)")
@@ -138,7 +138,7 @@ pats=[r'(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s*[=:]\s*\S
 print("scrub hits:",[m.group(0) for q in pats for m in re.finditer(q,s)])
 # citation gate
 for f,l in re.findall(r'(src/[\w/]+\.py):(\d+)',s):
-    n=len(open('$WORK/runs/left-out-r2-treat/fixture/repo/'+f).read().splitlines())
+    n=len(open('$RUN[left-out-r2-treat]/fixture/repo/'+f).read().splitlines())
     print(f,l,n,1<=int(l)<=n)
 EOF
 grep -n "__init__" "$T"
@@ -147,7 +147,7 @@ grep -n "__init__" "$T"
 python3 -I -c "import ssl,sys;print(sys.version, ssl.OPENSSL_VERSION, ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT).minimum_version)"
 
 [sub] BASH
-T=$WORK/runs/left-out-r2-treat/tmp/tmp.90hMYhJ6Dr; python3 -I - "$T" <<'EOF'
+T=$RUN[left-out-r2-treat]/tmp/tmp.90hMYhJ6Dr; python3 -I - "$T" <<'EOF'
 import sys
 p=sys.argv[1]; s=open(p).read()
 s=s.replace("(write it first; it must fail against the current src/client.py:5)","(write it first). Note: on the local interpreter (CPython 3.14, OpenSSL 3.6) a bare `PROTOCOL_TLS_CLIENT` context already reports TLS 1.2 as its minimum, so this assertion can pass against the current src/client.py:5; it is a regression pin guaranteeing the floor regardless of interpreter or OpenSSL-config defaults, not a red-first test")
@@ -156,4 +156,4 @@ EOF
 grep -c "" "$T"; lore record update task/left-out-pin-the-tls-minimum-version-in-the-client < "$T" && rm -f "$T"; ls "$T" 2>&1; lore record show task/left-out-pin-the-tls-minimum-version-in-the-client; lore task graph left-out-pin-the-tls-minimum-version-in-the-client
 
 [main] BASH
-$WORK/snap-treat/tools/craft/plugins/craft/scripts/followup_parent.py check fixture-left-out-spec left-out-rotate-the-hard-coded-session-signing-secret left-out-pin-the-tls-minimum-version-in-the-client; echo "EXIT=$?"
+$CRAFT[treat]/scripts/followup_parent.py check fixture-left-out-spec left-out-rotate-the-hard-coded-session-signing-secret left-out-pin-the-tls-minimum-version-in-the-client; echo "EXIT=$?"

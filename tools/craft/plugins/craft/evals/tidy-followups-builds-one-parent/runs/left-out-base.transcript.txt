@@ -1,4 +1,4 @@
-[main] TOOL Read {"file_path": "$WORK/snap-base/tools/craft/plugins/craft/skills/tidy-followups/SKILL.md"}
+[main] TOOL Read {"file_path": "$CRAFT[base]/skills/tidy-followups/SKILL.md"}
 
 [main] RESULT
 1	---
@@ -27,9 +27,9 @@
 The spec name `fixture-left-out-spec` has no `spec/` prefix to strip. It matches `^[A-Za-z0-9._/-]+$`, doesn't start with `-`, and has no `..` segment, so it is valid.
 
 [main] BASH
-$WORK/snap-base/tools/craft/plugins/craft/scripts/followup_gather.py fixture-left-out-spec; echo "EXIT=$?"
+$CRAFT[base]/scripts/followup_gather.py fixture-left-out-spec; echo "EXIT=$?"
 
-[main] TOOL Read {"file_path": "$WORK/snap-base/tools/craft/plugins/craft/skills/_shared/security.md"}
+[main] TOOL Read {"file_path": "$CRAFT[base]/skills/_shared/security.md"}
 
 [main] RESULT
 {"spec": "fixture-left-out-spec", "vault": "default", "entry": "complete-status", "followups": [{"name": "left-out-pin-the-tls-minimum-version-in-the-client", "title": "Left-out: pin the TLS minimum version in the client", "status": "ready"}, {"name": "left-out-rotate-the-hard-coded-session-signing-secret", "title": "Left-out: rotate the hard-coded session signing secret", "status": "open"}], "slice-basis": "labelled", "slices": ["fixture-left-out-spec-the-slice"], "child-count": 1, "candidates-read": 2, "kept": 2, "excluded-by-label": {"count": 0, "names": []}, "skipped-edges": 0}
@@ -53,7 +53,7 @@ EXIT=0
 15	
 16	- **Key-like tokens** — `(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s*[=:]\s*\S+`
 17	  — the trailing character class is load-bearing: it lets the keyword carry qualifier text before
-18	  the separator, which is what catches `SECRET_KEY=`, `AWS_SECRE... [cut 2830 chars]
+18	  the separator, which is what catches `[redacted:key-like] `AWS_SECRE... [cut 2830 chars]
 
 [main] TEXT
 Exit 0 with a complete JSON result and two follow-ups (both `open`/`ready`). Both names pass the step 1 checks, so I'll fetch both bodies.
@@ -68,7 +68,7 @@ lore record show --json --vault default task/left-out-pin-the-tls-minimum-versio
   "layer": "personal",
   "name": "left-out-pin-the-tls-minimum-version-in-the-client",
   "record_id": "task/left-out-pin-the-tls-minimum-version-in-the-client",
-  "revision": "a58e11b9b8f70c14c28db374dbdb01af3eb4ace77ce6ffe3d622ade33aa3e166",
+  "revision": "[sha:a58e11b9]",
   "sidecar": {
     "created-at": "2026-10-16T15:43:40Z",
     "created-by": "fixture@example.com",

@@ -6,5 +6,5 @@ vault CHANGED task/chosen-replace-the-truncating-money-rounding-before-more-call
 vault CHANGED task/chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it.md
 vault CHANGED task/chosen-stop-writing-bearer-tokens-to-the-request-trace.json
 vault CHANGED task/chosen-stop-writing-bearer-tokens-to-the-request-trace.md
-repo head before=b67b8b7ccf80791ec9affead62b8f4abca94f264 after=b67b8b7ccf80791ec9affead62b8f4abca94f264
+repo head before=[sha:b67b8b7c] after=[sha:b67b8b7c]
 repo status after=''

@@ -1,4 +1,4 @@
-[main] TOOL Read {"file_path": "$WORK/snap-treat/tools/craft/plugins/craft/skills/slice/SKILL.md"}
+[main] TOOL Read {"file_path": "$CRAFT[treat]/skills/slice/SKILL.md"}
 
 [main] RESULT
 1	---

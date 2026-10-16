@@ -1,2 +1,2 @@
-repo head before=55d4f74f2e52b51d54b9057025a390ca507937c8 after=55d4f74f2e52b51d54b9057025a390ca507937c8
+repo head before=[sha:55d4f74f] after=[sha:55d4f74f]
 repo status after=''

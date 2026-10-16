@@ -1,4 +1,4 @@
-[main] TOOL Read {"file_path": "$WORK/snap-treat/tools/craft/plugins/craft/skills/tidy-followups/SKILL.md"}
+[main] TOOL Read {"file_path": "$CRAFT[treat]/skills/tidy-followups/SKILL.md"}
 
 [main] RESULT
 1	---
@@ -26,9 +26,9 @@
 Step 1: `fixture-none-included-spec` matches the safe shape, doesn't start with `-`, and has no `..`. Valid.
 
 [main] BASH
-$WORK/snap-treat/tools/craft/plugins/craft/scripts/followup_gather.py fixture-none-included-spec; echo "EXIT=$?"
+$CRAFT[treat]/scripts/followup_gather.py fixture-none-included-spec; echo "EXIT=$?"
 
-[main] TOOL Read {"file_path": "$WORK/snap-treat/tools/craft/plugins/craft/skills/_shared/security.md"}
+[main] TOOL Read {"file_path": "$CRAFT[treat]/skills/_shared/security.md"}
 
 [main] RESULT
 {"spec": "fixture-none-included-spec", "vault": "default", "entry": "complete-status", "distilled": false, "followup-parents": [], "followups": [{"name": "none-included-drop-an-unused-local-variable", "title": "None-included: drop an unused local variable", "status": "open"}, {"name": "none-included-reorder-two-imports", "title": "None-included: reorder two imports", "status": "open"}], "slice-basis": "labelled", "slices": ["fixture-none-included-spec-the-slice"], "child-count": 1, "candidates-read": 2, "kept": 2, "excluded-by-label": {"count": 0, "names": []}, "skipped-edges": 0}
@@ -52,7 +52,7 @@ EXIT=0
 15	
 16	- **Key-like tokens** — `(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s*[=:]\s*\S+`
 17	  — the trailing character class is load-bearing: it lets the keyword carry qualifier text before
-18	  the separator, which is what catches `SECRET_KEY=`, `AWS_SECRE... [cut 2830 chars]
+18	  the separator, which is what catches `[redacted:key-like] `AWS_SECRE... [cut 2830 chars]
 
 [main] TEXT
 Both names and vault `default` pass the step 1 rules. Fetching bodies.
@@ -67,7 +67,7 @@ lore record show --json --vault default task/none-included-drop-an-unused-local-
   "layer": "personal",
   "name": "none-included-drop-an-unused-local-variable",
   "record_id": "task/none-included-drop-an-unused-local-variable",
-  "revision": "4d457e9232dd0f916c7da7b55781559c41d6fd9d974308f59a380c3c80ae21bf",
+  "revision": "[sha:4d457e92]",
   "sidecar": {
     "created-at": "2026-10-16T16:44:22Z",
     "created-by": "fixture@example.com",
@@ -91,7 +91,7 @@ EXIT=0
   "layer": "personal",
   "name": "none-included-reorder-two-imports",
   "record_id": "task/none-included-reorder-two-imports",
-  "revision": "d96c30e613aefdd46e245039b3c6d82626f4483946aff815a62ac11cfefe71cb",
+  "revision": "[sha:d96c30e6]",
   "sidecar": {
     "created-at": "2026-10-16T16:44:22Z",
     "created-by": "fixture@example.com",
