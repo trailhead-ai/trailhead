@@ -1,0 +1,116 @@
+[main] TOOL Read {"file_path": "$WORK/snap-base/tools/craft/plugins/craft/skills/tidy-followups/SKILL.md"}
+
+[main] RESULT
+1	---
+2	name: tidy-followups
+3	description: >
+4	  Present a finished spec's recorded follow-ups as a reasoned shortlist — which are worth doing
+5	  now rather than later, each with a one-line reason — and list the rest by title. Read-only:
+6	  gathers with a deterministic script, ranks, reports, and writes nothing.
+7	  TRIGGER when: user says "tidy the follow-ups of spec X", "which follow-ups of this spec should
+8	  we do", "what follow-ups does this spec have", or invokes /craft:tidy-followups explicitly.
+9	  DO NOT TRIGGER when: the ask is a batch of in-session code fix-ups to run now (that is
+10	  `/craft:polish`'s), or the spec's slice loop is still running (follow-ups that matter
+11	  mid-loop reach the next slice through `/craft:plan`).
+12	---
+13	
+14	# Tidy follow-ups
+15	
+16	A spec built slice by slice leaves follow-ups: tasks the slices deliberately did not act on, linked
+17	back to the slice they came from. Once the spec closes they sink into the general backlog. This
+18	ritual brings one finished spec's follow-ups back in front of the operator as a shortlist of the
+19	ones that get costlier the longer they wait, with a reason for each, and the rest by title.
+20	
+21	It is r... [cut 9070 chars]
+
+[main] BASH
+$WORK/snap-base/tools/craft/plugins/craft/scripts/followup_gather.py fixture-distilled-spec > /tmp/gather_out.json 2>/tmp/gather_err.txt; echo "exit=$?"; cat /tmp/gather_out.json; echo ---; cat /tmp/gather_err.txt
+
+[main] RESULT
+Exit code 1
+(eval):1: operation not permitted: /tmp/gather_out.json
+exit=1
+cat: /tmp/gather_out.json: No such file or directory
+---
+cat: /tmp/gather_err.txt: No such file or directory
+
+[main] TOOL Read {"file_path": "$WORK/snap-base/tools/craft/plugins/craft/skills/_shared/security.md"}
+
+[main] RESULT
+1	# Security posture — credential scrub and untrusted-value validation
+2	
+3	Two rules every craft surface applies, stated once here so no citing surface restates them.
+4	
+5	## Credential-pattern scrub
+6	
+7	**Credential-pattern scrub (mechanical, runs first).** This is the general rule for the whole run,
+8	not one phase's step: **any finding or note text entering a record body or a report — session
+9	candidates, `blocked` bodies, task-body notes from the per-task loop, raw command stderr quoted into
+10	either — runs through this list first.** A vault is git-backed and has its own push path, so a
+11	credential transcribed into a task body ships as surely as one committed to code. Report bodies are
+12	**summarized, never captured verbatim** — quote only `file:line` references for anything caught. Run
+13	the text through this credential-pattern scrub regex list and drop/redact any match rather than
+14	capturing it:
+15	
+16	- **Key-like tokens** — `(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s*[=:]\s*\S+`
+17	  — the trailing character class is load-bearing: it lets the keyword carry qualifier text before
+18	  the separator, which is what catches `SECRET_KEY=`, `AWS_SECRE... [cut 2830 chars]
+
+[main] BASH
+$WORK/snap-base/tools/craft/plugins/craft/scripts/followup_gather.py fixture-distilled-spec; echo "exit=$?"
+
+[main] RESULT
+{"spec": "fixture-distilled-spec", "vault": "default", "entry": "complete-status", "followups": [{"name": "distilled-reject-path-traversal-in-the-upload-endpoint", "title": "Distilled: reject path traversal in the upload endpoint", "status": "open"}], "slice-basis": "labelled", "slices": ["fixture-distilled-spec-the-slice"], "child-count": 1, "candidates-read": 1, "kept": 1, "excluded-by-label": {"count": 0, "names": []}, "skipped-edges": 0}
+exit=0
+
+[main] TEXT
+Exit 0 with a well-formed result and one open follow-up. Its name passes the safe-name check, so I'm fetching its body.
+
+[main] BASH
+lore record show --json --vault default task/distilled-reject-path-traversal-in-the-upload-endpoint; echo "exit=$?"
+
+[main] RESULT
+{
+  "body": "`src/upload.py` joins a caller-supplied name onto the upload directory with no validation, so a crafted name writes files outside the upload directory. Reachable today by any caller of `upload_path`. The agreed behaviour: raise `ValueError` for a name whose resolved path (symlinks followed) falls outside the upload directory, and keep returning the joined path for a name that stays inside. The repository has no tests yet; add `tests/test_upload.py`.\n",
+  "kind": "task",
+  "layer": "personal",
+  "name": "distilled-reject-path-traversal-in-the-upload-endpoint",
+  "record_id": "task/distilled-reject-path-traversal-in-the-upload-endpoint",
+  "revision": "33d2ab906c9ea8b2b31dc30ab27cf50f546e12e690173f6fe30aa2a09cdff703",
+  "sidecar": {
+    "created-at": "2026-10-16T15:35:40Z",
+    "created-by": "fixture@example.com",
+    "kind": "task",
+    "related": {
+      "task": [
+        "fixture-distilled-spec-the-slice"
+      ]
+    },
+    "status": "open",
+    "title": "Distilled: reject path traversal in the upload endpoint",
+    "updated-at": "2026-10-16T15:35:40Z",
+    "updated-by": "fixture@example.com",
+    "version": "v1"
+  }
+}
+exit=0
+
+[main] TEXT
+**Header:** entry `complete-status` · slice basis `labelled` · 1 slice (`fixture-distilled-spec-the-slice`), 1 child · 1 candidate read, 1 kept · 0 excluded by label · 0 skipped edges
+
+**Recommended**
+
+- **Distilled: reject path traversal in the upload endpoint** (`distilled-reject-path-traversal-in-the-upload-endpoint`)
+  - **Reason:** any caller of the upload path helper can write files outside the upload directory right now. The exposure stays live until the fix lands.
+  - **Class:** open security exposure.
+  - 1 of 1 met a reason class.
+
+**Other follow-ups:** none.
+
+**Blocked:** none.
+
+Nothing was written: no record, label, status or task was created or changed.
+
+---
+
+**About the answers you supplied:** this version of `/craft:tidy-followups` has 6 steps and only reads. It has no step 8 (shortlist moves), no disposition-set question, no step 11 (scope confirmation) and no subagent dispatch. So none of those three questions was ever asked, and the answers to them weren't used. The shortlist still came out as the one you specified, `distilled-reject-path-traversal-in-the-upload-endpoint`, because it was the only follow-up the gathering script found.

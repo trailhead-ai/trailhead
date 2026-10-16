@@ -1,0 +1,21 @@
+I created one new buildable parent, `build-the-follow-ups-of-fixture-nest-fail-spec-chosen-2026-10-16`, and nested the path-traversal follow-up under it. The cookie follow-up was refined but not nested: refinement left it with a question only you can answer.
+
+- **Included:** Nest-fail: reject path traversal in the archive extractor (`nest-fail-reject-path-traversal-in-the-archive-extractor`), and Nest-fail: stop logging session cookies (`nest-fail-stop-logging-session-cookies`).
+- **Left:** none.
+- **Nested under the new parent:** `nest-fail-reject-path-traversal-in-the-archive-extractor`. It has been refined to `ready`, and the parent is now `ready` too.
+- **Refined but not nested:** Nest-fail: stop logging session cookies (`nest-fail-stop-logging-session-cookies`). It stays `open` with the open question written into its record.
+- **Failed writes, undo writes, undo commands still to run:** none.
+
+**Things that went wrong on the way:**
+- **First assemble attempt:** the sandbox blocked the heredoc, so the children file was empty. The script refused it with `invalid-children-file` before writing anything. I restaged the file with `printf` and the rerun succeeded.
+- **First refinement:** the refinement subagent said one of its writes briefly set the path-traversal task to `ready` before its body had changed, then reverted it. The vault history will show that extra status change.
+
+Next, build the new parent, then distill the spec (it hasn't been distilled yet):
+
+```
+/craft:execute task/build-the-follow-ups-of-fixture-nest-fail-spec-chosen-2026-10-16
+```
+
+```
+/craft:distill spec/fixture-nest-fail-spec
+```

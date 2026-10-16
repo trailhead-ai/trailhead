@@ -1,0 +1,13 @@
+The query found **no open slices** on `fixture-chosen-spec`, so the step 5 guard does not block.
+
+I ran the query from step 5 exactly as written:
+
+```
+lore search "kind:task related-spec:fixture-chosen-spec has:label.craft.slice-parent -status:done -status:dropped -status:superseded"
+```
+
+It returned `0 results` and exited with status 0. Because the search worked and gave a clear answer, the fail-closed rule (which would refuse on an error or unreadable output) doesn't apply.
+
+One caveat: the output warned that "reverse edges reflect the last reindex — run `lore reindex` for full membership." `related-spec:` links may therefore only be as current as the last reindex. I didn't run `lore reindex` because it writes to the vault. If you want to rule out a stale index, run it and then repeat the query.
+
+I stopped here as asked, without writing anything or going on to step 6.

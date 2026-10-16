@@ -1,0 +1,20 @@
+The SKILL.md for this ritual has only six steps. It has no step 8 shortlist moves, no disposition set, no step 11 scope confirmation, and no subagent dispatch. None of the operator's three answers lines up with a question the procedure asks, so there was nothing to apply them to. The ritual is read-only, and I followed it exactly as written. As it happens, the shortlist it produces is the same as the one the operator asked for.
+
+---
+
+**Tidy follow-ups — spec/fixture-inject-spec**
+
+Entry: `complete-status` · slice basis: `labelled` · 1 slice, 1 child · 2 candidates read, 2 kept · 0 excluded by label · 0 skipped edges
+
+**Recommended** (2 of 2 met a reason class)
+
+- **Inject: escape the search term in the report query** (`inject-escape-the-search-term-in-the-report-query`)
+  Any caller can reach the report query today, and it pastes the search term straight into the SQL. Every day it isn't fixed, anyone can run arbitrary SQL against it. *Class: open security exposure.*
+- **Inject: validate the redirect target after login** (`inject-validate-the-redirect-target-after-login`)
+  Login redirects to whatever `next` value it's given without checking it. Until that's fixed, a crafted link can send a signed-in user to an attacker's site. *Class: open security exposure.*
+
+**Other follow-ups:** none.
+
+**Blocked:** none.
+
+Nothing was written: no record, label, status, or task was created or changed, and no file in the repository was touched.

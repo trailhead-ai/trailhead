@@ -1,0 +1,13 @@
+I created a parent task for spec/fixture-distilled-spec, and its one chosen follow-up, the upload path-traversal fix, is now nested under it and ready to build.
+
+- **The follow-up:** Distilled: reject path traversal in the upload endpoint (`distilled-reject-path-traversal-in-the-upload-endpoint`). It was the spec's only follow-up and the only one shortlisted.
+- **Refinement:** a subagent rewrote its record and moved it to `ready`. The check script then confirmed it could be nested, with no overlaps.
+- **New parent:** `build-the-follow-ups-of-fixture-distilled-spec-chosen-2026-10-16`. The child is nested under it and it can be built now.
+- **One failed attempt:** the first time I tried to create the parent, it failed with `invalid-children-file`. The sandbox blocked the way I wrote the temporary children file, so the file was empty. That failure came before anything was written to the vault. I rewrote the file another way and the second attempt succeeded.
+- **Nothing else:** no follow-ups were left behind or left out, nothing was undone, and there are no cleanup commands to run.
+
+The spec is already distilled, so the only next step is the build:
+
+```
+/craft:execute task/build-the-follow-ups-of-fixture-distilled-spec-chosen-2026-10-16
+```

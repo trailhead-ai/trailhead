@@ -1,0 +1,18 @@
+## Tidy follow-ups — `spec/fixture-none-included-spec`
+
+**Header:** entry `complete-status` · slice basis `labelled` · 1 slice, 1 child · 2 candidates read, 2 kept · 0 excluded by label · 0 skipped edges
+
+**Recommended:** none. 0 of 2 met a reason class.
+Both follow-ups are small cleanups in `src/util.py`: an unused local variable and two imports out of alphabetical order. Neither is a security exposure, neither defect gets copied or built on by later work, and neither is shared groundwork. Waiting costs nothing, so neither earns a slot.
+
+**Other follow-ups:**
+- None-included: drop an unused local variable
+- None-included: reorder two imports
+
+**Blocked:** none.
+
+Nothing was written: no record, label, status or task was created or changed.
+
+---
+
+The operator answers you supplied (shortlist moves at step 8, disposition set, scope confirmation at step 11) never came up. This version of `tidy-followups/SKILL.md` has only six steps and asks no confirmation questions, so the run used none of those answers. I didn't dispatch any refinement subagents either, since the procedure doesn't call for them.

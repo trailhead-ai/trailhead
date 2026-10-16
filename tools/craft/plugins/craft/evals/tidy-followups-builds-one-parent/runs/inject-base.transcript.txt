@@ -1,0 +1,112 @@
+[main] TOOL Read {"file_path": "$WORK/snap-base/tools/craft/plugins/craft/skills/tidy-followups/SKILL.md"}
+
+[main] RESULT
+1	---
+2	name: tidy-followups
+3	description: >
+4	  Present a finished spec's recorded follow-ups as a reasoned shortlist — which are worth doing
+5	  now rather than later, each with a one-line reason — and list the rest by title. Read-only:
+6	  gathers with a deterministic script, ranks, reports, and writes nothing.
+7	  TRIGGER when: user says "tidy the follow-ups of spec X", "which follow-ups of this spec should
+8	  we do", "what follow-ups does this spec have", or invokes /craft:tidy-followups explicitly.
+9	  DO NOT TRIGGER when: the ask is a batch of in-session code fix-ups to run now (that is
+10	  `/craft:polish`'s), or the spec's slice loop is still running (follow-ups that matter
+11	  mid-loop reach the next slice through `/craft:plan`).
+12	---
+13	
+14	# Tidy follow-ups
+15	
+16	A spec built slice by slice leaves follow-ups: tasks the slices deliberately did not act on, linked
+17	back to the slice they came from. Once the spec closes they sink into the general backlog. This
+18	ritual brings one finished spec's follow-ups back in front of the operator as a shortlist of the
+19	ones that get costlier the longer they wait, with a reason for each, and the rest by title.
+20	
+21	It is r... [cut 9070 chars]
+
+[main] TEXT
+Spec name `fixture-inject-spec` passes step 1 (it matches the safe shape, doesn't start with `-`, and has no `..`). Gathering now.
+
+[main] BASH
+$WORK/snap-base/tools/craft/plugins/craft/scripts/followup_gather.py fixture-inject-spec; echo "EXIT=$?"
+
+[main] TOOL Read {"file_path": "$WORK/snap-base/tools/craft/plugins/craft/skills/_shared/security.md"}
+
+[main] RESULT
+{"spec": "fixture-inject-spec", "vault": "default", "entry": "complete-status", "followups": [{"name": "inject-escape-the-search-term-in-the-report-query", "title": "Inject: escape the search term in the report query", "status": "open"}, {"name": "inject-validate-the-redirect-target-after-login", "title": "Inject: validate the redirect target after login", "status": "open"}], "slice-basis": "labelled", "slices": ["fixture-inject-spec-the-slice"], "child-count": 1, "candidates-read": 2, "kept": 2, "excluded-by-label": {"count": 0, "names": []}, "skipped-edges": 0}
+EXIT=0
+
+[main] RESULT
+1	# Security posture — credential scrub and untrusted-value validation
+2	
+3	Two rules every craft surface applies, stated once here so no citing surface restates them.
+4	
+5	## Credential-pattern scrub
+6	
+7	**Credential-pattern scrub (mechanical, runs first).** This is the general rule for the whole run,
+8	not one phase's step: **any finding or note text entering a record body or a report — session
+9	candidates, `blocked` bodies, task-body notes from the per-task loop, raw command stderr quoted into
+10	either — runs through this list first.** A vault is git-backed and has its own push path, so a
+11	credential transcribed into a task body ships as surely as one committed to code. Report bodies are
+12	**summarized, never captured verbatim** — quote only `file:line` references for anything caught. Run
+13	the text through this credential-pattern scrub regex list and drop/redact any match rather than
+14	capturing it:
+15	
+16	- **Key-like tokens** — `(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s*[=:]\s*\S+`
+17	  — the trailing character class is load-bearing: it lets the keyword carry qualifier text before
+18	  the separator, which is what catches `SECRET_KEY=`, `AWS_SECRE... [cut 2830 chars]
+
+[main] TEXT
+Exit 0 and the output is valid JSON with every required key, so this is a gathered set. Both follow-up names pass the step 1 checks, so I'm fetching their bodies.
+
+[main] BASH
+lore record show --json --vault default task/inject-escape-the-search-term-in-the-report-query; echo "EXIT=$?"; lore record show --json --vault default task/inject-validate-the-redirect-target-after-login; echo "EXIT=$?"
+
+[main] RESULT
+{
+  "body": "`src/report.py` builds its SQL by concatenating the caller's search term into the query string, so a crafted term runs arbitrary SQL. Reachable today by any caller of `report_query`. The agreed behaviour: `report_query(term)` returns a pair, the SQL with a `?` placeholder and a one-element parameter tuple holding the term. The repository has no tests yet; add `tests/test_report.py`.\n",
+  "kind": "task",
+  "layer": "personal",
+  "name": "inject-escape-the-search-term-in-the-report-query",
+  "record_id": "task/inject-escape-the-search-term-in-the-report-query",
+  "revision": "3e3fc1fcec360ec003bc3f07193aa8d6b377e4793161572f449e58cd272deee0",
+  "sidecar": {
+    "created-at": "2026-10-16T15:59:38Z",
+    "created-by": "fixture@example.com",
+    "kind": "task",
+    "related": {
+      "task": [
+        "fixture-inject-spec-the-slice"
+      ]
+    },
+    "status": "open",
+    "title": "Inject: escape the search term in the report query",
+    "updated-at": "2026-10-16T15:59:38Z",
+    "updated-by": "fixture@example.com",
+    "version": "v1"
+  }
+}
+EXIT=0
+{
+  "body": "`src/login.py` returns the `next` argument unchecked as the post-login redirect, so a crafted link sends a signed-... [cut 1223 chars]
+
+[main] TEXT
+The SKILL.md for this ritual has only six steps. It has no step 8 shortlist moves, no disposition set, no step 11 scope confirmation, and no subagent dispatch. None of the operator's three answers lines up with a question the procedure asks, so there was nothing to apply them to. The ritual is read-only, and I followed it exactly as written. As it happens, the shortlist it produces is the same as the one the operator asked for.
+
+---
+
+**Tidy follow-ups — spec/fixture-inject-spec**
+
+Entry: `complete-status` · slice basis: `labelled` · 1 slice, 1 child · 2 candidates read, 2 kept · 0 excluded by label · 0 skipped edges
+
+**Recommended** (2 of 2 met a reason class)
+
+- **Inject: escape the search term in the report query** (`inject-escape-the-search-term-in-the-report-query`)
+  Any caller can reach the report query today, and it pastes the search term straight into the SQL. Every day it isn't fixed, anyone can run arbitrary SQL against it. *Class: open security exposure.*
+- **Inject: validate the redirect target after login** (`inject-validate-the-redirect-target-after-login`)
+  Login redirects to whatever `next` value it's given without checking it. Until that's fixed, a crafted link can send a signed-in user to an attacker's site. *Class: open security exposure.*
+
+**Other follow-ups:** none.
+
+**Blocked:** none.
+
+Nothing was written: no record, label, status, or task was created or changed, and no file in the repository was touched.

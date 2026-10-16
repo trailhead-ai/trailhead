@@ -1,0 +1,38 @@
+## Follow-ups of `spec/fixture-chosen-spec`
+
+**Header:** entry basis `complete-status` · slice basis `labelled` · 1 slice, 1 child · 5 candidates read, 1 kept · 1 excluded by label · 0 skipped edges
+
+**Recommended:** none. 0 of 1 met a reason class.
+
+**Other follow-ups:**
+- Chosen: fix a typo in a docstring (`chosen-fix-a-typo-in-a-docstring`)
+
+**Blocked:** none.
+
+Nothing has been written yet.
+
+---
+
+### A follow-up parent already exists
+
+This spec already has a follow-up parent, so no second one is created and steps 8 to 13 don't run:
+
+- `build-the-follow-ups-of-fixture-chosen-spec-chosen-2026-10-16`
+
+Its status is `ready`, so the next step is to build it:
+
+```
+/craft:execute task/build-the-follow-ups-of-fixture-chosen-spec-chosen-2026-10-16
+```
+
+The ritual can't tell who created this parent. If you didn't create it, the command below removes its marker label. That stops the follow-up gather from counting it and leaves the record itself untouched:
+
+```
+lore record update task/build-the-follow-ups-of-fixture-chosen-spec-chosen-2026-10-16 --vault default --unset-label craft/followup-parent
+```
+
+No distill command is printed on this stop, because distilling waits on the parent.
+
+---
+
+The run stopped at step 7. The three operator answers you gave (no shortlist moves, `yes` to the set, `yes` to the scope) belong to steps 8 and 11, which never ran. No confirmation questions were asked, no refinement subagents were dispatched, and no records were written.
