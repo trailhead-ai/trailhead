@@ -1,0 +1,37 @@
+**Spec review: a waiting list for allotment plots** · 8 passes · maturity: production (basis: stamp) · no waivers
+
+The passes found that the spec describes a list that starts empty and runs entirely by email. It breaks in two places: the people it takes over from the paper list, and the email it depends on. Nothing says how the existing paper list is brought in or how it keeps its order. Joining needs "a name, an email address and the site they want" (AC1), so anyone on paper without an email address drops off. And an offer that never reaches someone still runs its 14 days, then sends them "to the back of the queue" (AC3). Around those two sit smaller gaps. The Objectives promise a person can "see their place", but no criterion delivers it. Nothing says who marks a plot freed. A few choices are left open, such as whether a person can join more than one queue and when the 14 days start.
+
+The email-failure finding is the strongest. Failure cases and ease of use reached it separately, without seeing each other's work. The right-problem pass is right that people without email get shut out, but its "a large part of the list" is a guess. I kept it at needs-your-decision anyway, because the failure doesn't depend on how many people it hits. I checked the spec: it has no route at all for bringing the paper list across, and at production maturity that missing migration is serious on its own. The fact check found the list is 412 names (committee minutes, 3 March), not "about 340". Self-consistency and ease of use both flagged the unkept "see their place" promise. The security concern about grants out of turn is real, but a required reason plus a visible history is a working control for a volunteer society, so it is worth fixing rather than blocking. I dropped two notes: "name the mail provider" and a note that two criteria use the same term.
+
+Both fixes are edits to this spec. Add criteria that bring the paper list across in its original order and let people without email take part by phone. Correct the head count. Add criteria for a bounced offer, a day-10 reminder and a notice when an offer lapses. Nothing needs a second round. Whether to fold any of the smaller findings in now is your call.
+
+**Recommended outcome: advances to `ready` this round.** Nothing is proposed for `revise`.
+
+| id | finding | proposed disposition | proposed edit |
+|---|---|---|---|
+| C1 | *the paper list has no way in, and people without email are dropped* | `resolved` | *fix the head count to 412; add AC7 (paper-list import) and AC8 (phone-only members)* |
+| C2 | *an undelivered offer lapses unseen and the person goes to the back* | `resolved` | *add AC9 (bounced offer), AC10 (day-10 reminder), AC11 (lapse notice)* |
+
+Drafted text, applied word for word on acceptance:
+- Problem: "About 340 people are on it." → "About 412 people are on it."
+- **AC7.** A plot warden can enter a person from the paper list with the date they first joined, and that person takes their place in the site's queue by that date.
+- **AC8.** A plot warden can enter a person who gives a phone number instead of an email address; offers to that person are made by the warden by phone and recorded, with the date, in the queue's history, and the 14 days run from that date.
+- **AC9.** An offer email that bounces passes at once to the next person in the queue, the person it was sent to keeps their place, and the warden is told so the address can be corrected.
+- **AC10.** A person with an open offer is sent a reminder email on day 10.
+- **AC11.** A person whose offer lapses is told by email that it lapsed and what their new place in the queue is.
+
+**Would cause trouble later, worth fixing, your call (9):**
+- Unkept "see their place" promise: no criterion after the first email shows a person their place (raised separately by self-consistency and ease of use).
+- Unstated triggers and outcomes: nothing says who marks a plot freed, and nothing says what happens when the site's queue is empty.
+- Unsettled design choices:
+  - is a person's place stored, or worked out from join order (which sending people to the back breaks)?
+  - one queue per person, or several?
+  - do the 14 days start when the offer is sent or when it is opened?
+- Gaps in the history: acceptance and departure are listed as history events, but no criterion says they are recorded.
+- No oversight of out-of-turn grants: the committee chair is never told when one is made.
+- Objectives framing: they should say that checking the order was followed is the goal.
+
+**Rough edges, nothing to decide (5):** what time of day the 14 days end; "lapse" reads as jargon; who can see the history; the confirmation email shows how many people are ahead; "a few times a month" is loose (31 plots in the last year).
+
+Reply **"go"** to accept. To override, name the row: for example "dispute C2: <your reason>", "accept C1 as risk: <your reason>", or "answer C1: <what the passes didn't know>".

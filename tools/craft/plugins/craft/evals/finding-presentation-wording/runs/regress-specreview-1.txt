@@ -1,0 +1,46 @@
+**Spec review: a waiting list for allotment plots** (draft). Calibrated at `maturity: production (basis: stamp)`, with no stand-downs. Fact check: 2 of 4 claims confirmed, 1 refuted, 1 can't be checked.
+
+**What the passes found.** Two gaps would hurt the people who have waited longest.
+
+- **The existing list has no way in.** The only route onto the new list is "a person joins … by giving a name, an email address and the site they want" (AC1). Nothing carries the existing paper list across in its current order. On switchover everyone now waiting would rejoin at the back, and anyone without email couldn't rejoin at all.
+- **A lost offer email costs a place.** An offer email that never arrives is treated like one that was ignored. The plot sits empty for the 14 days that "an offer … stays open" (AC2). Then the person "goes to the back of the queue" (AC3) without ever having seen the offer or been told.
+
+Around these sit smaller gaps:
+
+- nothing says who marks a plot as freed, so that same 14-day offer (AC2) has nothing to start it
+- the promise that a person can "see their place" is only met by the first email
+- it's left open whether someone can join several sites' queues, and whether the 14 days count from sending or from first opening
+
+**Whether it holds.** The lost-offer finding is the strongest. The failure-cases and ease-of-use passes reached it separately, one from the empty plot and one from the person who lost their place.
+
+- **Right problem.** This pass was right that switchover strands people. But its stronger claim, that "a large part" of the list has no email, is a guess: neither the spec nor any pass has a figure. I've kept the Critical on the part that holds without the guess. The existing list has no route in, and at production maturity a migration with no path is yours to decide. Its other suggestion, narrowing the build to just the history, overreaches: the Objectives commit to joining and offers as well.
+- **Fact check.** The 3 March committee minutes record 412 names, not "about 340". That doesn't change the design, but the Problem statement should be corrected.
+- **Dropped as wording, not defects:** naming the mail provider, "lapse" versus "expired", and a "history" term that self-consistency found already matches.
+
+**What to do.** Both gaps can be fixed by edits, and I've drafted both:
+
+- **For the existing list:** a new criterion that the warden enters the paper list in its current order, giving an email address or a phone number. People with only a phone get their offers from the warden by phone, recorded like any other offer. The edit also corrects the head count.
+- **For lost offers:** a new criterion that an offer the mail system reports as undeliverable passes to the next person straight away, and the first person keeps their place. There's also a reminder on day 10 and a message when an offer lapses.
+
+I'd also take the freed-plot trigger and the 14-day start from the list below, but those are your call.
+
+**Recommended outcome:** this round, the spec moves to `ready` once you accept. Both Criticals are `resolved` by edit and none is `revise`.
+
+| id | finding | proposed disposition | proposed edit |
+|---|---|---|---|
+| C1 | The existing paper list has no route onto the new one, so people now waiting lose their order, and anyone without email is shut out | `resolved` | Add a criterion: the warden enters the existing list in order, with email or phone, and phone-only offers are made and recorded by the warden. Correct "about 340" to 412 |
+| C2 | An offer email that never arrives costs the person their place without them knowing | `resolved` | Add a criterion: an undeliverable offer passes on at once and the person keeps their place, plus a reminder on day 10 and a message on lapse |
+
+**Would cause trouble later, worth fixing, your call (9):**
+- nothing to mark a plot as freed (buildability)
+- no way to see your place after the first email (self-consistency and ease of use)
+- whether a place is stored or worked out from join order (buildability)
+- a freed plot with an empty queue (failure cases)
+- no one is alerted to out-of-turn grants (security)
+- whether a person can be on more than one site's queue, and whether the 14 days count from sending or opening (left undecided)
+- acceptances and departures aren't said to be recorded (self-consistency)
+- the Objectives should name "checking the order was followed" as the goal (right problem)
+
+**Rough edges, nothing to decide (4):** what time of day the 14 days end, the confirmation email revealing how many are ahead, who can see the history, and an unused "a few times a month" figure.
+
+Full text of the drafted edits and the detail on any finding are one request away. Reply **go** to accept, or override by id, giving your reason (for example "dispute C1: …").

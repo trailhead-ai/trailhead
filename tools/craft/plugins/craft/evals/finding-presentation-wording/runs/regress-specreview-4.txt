@@ -1,0 +1,36 @@
+**Spec review: a waiting list for allotment plots (round 1)**
+maturity: production (basis: stamp). No concerns were waived.
+
+The reviewers agree on two problems, and both come from people the spec quietly leaves out. First, the spec explains how a new person joins the online list, but it never explains how the people already on the paper list get onto it. The only way in is to give an email address, so anyone without one is shut out, and the people who have waited longest lose their places. Second, every offer goes by email. If an offer goes to a mistyped or full mailbox, nobody notices for 14 days. Then the person "goes to the back of the queue" (AC3) without ever having seen the offer. The fact check also found the list is longer than the Problem says: the committee minutes of 3 March record 412 names, not about 340.
+
+Both problems hold up. The right-problem reviewer raised the paper-list one. Its reason, that "a large part" of the list has no email, is a guess the reviewer admits it cannot back up. The core of the problem doesn't depend on that guess, though. I checked the spec: nothing carries the existing list across, and at production maturity, moving existing data across without a plan is something you have to decide. The failure-cases and ease-of-use reviewers each found the lost-offer problem on their own, without seeing each other's work, which makes it the strongest signal in this run. The fact-check result on the 340 figure is real, but nothing depends on that number, so it only needs correcting. The remaining reports are smaller gaps inside the spec's existing framing. The one worth noting is that two reviewers spotted it separately: Objectives promises a person can "see their place", but only the confirmation email delivers that.
+
+Both problems can be fixed by adding to the spec, so neither needs a revise round. Add one criterion that brings the paper list across in its current order, with a phone contact and phone offers for anyone without email. Correct the count to 412 at the same time. Add a second criterion so that a bounced offer moves on straight away without costing the person their place, and so that a person hears from the society before and after an offer lapses.
+
+**Recommended outcome:** the spec moves to `ready` this round once you accept.
+
+| id | finding | proposed disposition | proposed edit |
+|---|---|---|---|
+| C1 | People on the paper list have no route onto the online list, and anyone without email is shut out | `resolved` | New criterion: a warden enters the paper list in its current order, ahead of anyone joining online, with a phone number allowed in place of email and offers to those people made by phone. Problem changed to 412 (minutes of 3 March). |
+| C2 | An offer that never arrives costs the person their place and leaves the plot empty for 14 days | `resolved` | New criterion: a bounced offer goes to the next person at once, the first person keeps their place and the warden is told. A day-10 reminder and a lapse notice are emailed. |
+
+**Worth fixing, your call (9).** These are logged and need no decision now:
+- Nothing delivers "see their place" after the first email. Two reviewers raised this separately.
+- Nothing says who marks a plot as freed.
+- It isn't stated whether a person's place is stored or worked out from join order.
+- Nothing covers a freed plot when its site's queue is empty.
+- An out-of-turn grant is visible only in the history.
+- The history needs acceptances and departures recorded.
+- One person could be on several sites' queues.
+- It isn't stated whether the 14 days run from when an offer is sent or when it is opened.
+- Objectives should name checking the order as the goal.
+
+**Rough edges, nothing to decide (4).** These are also logged:
+- The Problem's "a few times a month" is never used.
+- The time of day the 14 days end isn't stated.
+- The confirmation email shows how many people are ahead.
+- Who can see the history isn't stated.
+
+I dropped three wording suggestions.
+
+Reply **go** to apply both edits and move the spec to `ready`. To override a row, name it and give your reason. For example, "dispute C1: …" or "answer C2: …".
