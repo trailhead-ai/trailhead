@@ -547,11 +547,30 @@ def test_a_dependency_cycle_inside_the_set_is_left_out(capsys):
     ]
 
 
-def test_a_qualified_spec_dependency_is_not_a_task_dependency(capsys):
-    runner = Lore(tasks={"task/f": task_doc(**{"depends-on": ["spec/other@stage"]})})
-    code, out, _ = run_main(runner, "check", "s", "f", capsys=capsys)
-    assert code == 0
-    assert [i["name"] for i in json.loads(out)["eligible"]] == ["f"]
+def test_a_qualified_dependency_is_unfinished_so_the_follow_up_is_left_out_with_the_entry_as_written():
+    runner = Lore(tasks={"task/f": task_doc(**{"depends-on": ["task/some-open-thing"]})})
+    result = parent.check_followups(runner, "s", ["f"])
+    assert result["eligible"] == []
+    assert result["left-out"] == [
+        {"name": "f", "reason": "depends-outside", "dependency": "task/some-open-thing"}
+    ]
+
+
+def test_a_qualified_dependency_is_never_looked_up_as_a_task():
+    runner = Lore(tasks={
+        "task/f": task_doc(**{"depends-on": ["task/other"]}),
+        "task/task/other": task_doc(status="done"),
+    })
+    result = parent.check_followups(runner, "s", ["f"])
+    assert result["eligible"] == []
+
+
+@pytest.mark.parametrize("entry", ["spec/other@stage", "task/../x", "task/has space", "-task/x"])
+def test_a_qualified_dependency_failing_the_shape_check_is_a_malformed_record(entry, capsys):
+    runner = Lore(tasks={"task/f": task_doc(**{"depends-on": [entry]})})
+    code, out, err = run_main(runner, "check", "s", "f", capsys=capsys)
+    assert code == 2 and out == ""
+    assert reason_of(err) == "malformed-sidecar"
 
 
 # --- the importable seam later subcommands rely on ----------------------------------------------
@@ -1059,7 +1078,7 @@ def test_a_nesting_that_reads_back_unnested_is_a_failed_nesting(lore_env, spec, 
     assert out["failed"] == [{"name": names[1], "write": "confirm"}]
     assert out["buildable"] is False
     assert sidecar_of(env, vault, out["parent"])["status"] == "dropped"
-    assert {u["name"] for u in out["undone"]} == {names[0], names[1], out["parent"]}
+    assert {u["name"] for u in out["undone"]} == {names[0], out["parent"]}
 
 
 def test_a_nesting_that_reads_back_under_a_different_parent_is_a_failed_nesting(
@@ -1077,6 +1096,9 @@ def test_a_nesting_that_reads_back_under_a_different_parent_is_a_failed_nesting(
     assert code == 2
     assert out["failed"] == [{"name": names[1], "write": "confirm"}]
     assert sidecar_of(env, vault, out["parent"])["status"] == "dropped"
+    assert sidecar_of(env, vault, names[1])["parent"] == holder
+    assert {"name": names[1], "write": "un-nest"} not in out["undone"]
+    assert [sidecar_of(env, vault, n).get("parent") for n in (names[0], names[2])] == [None] * 2
 
 
 def _swap_parent(argv, holder):
@@ -1314,6 +1336,251 @@ def test_a_create_that_prints_something_other_than_a_task_name_is_parent_create_
     assert code == 2 and out is None
     assert "reason-code: parent-create-failed" in err.splitlines()
     assert [w[:2] for w in runner.writes()] == [["record", "create"]]
+
+
+# --- a qualified depends-on entry -------------------------------------------------------------
+
+
+def edited_depends(name, entries):
+    """A hook that makes `task/<name>` read back with `entries` as its depends-on, as an
+    edited or synced sidecar would (the CLI refuses to write a qualified entry)."""
+
+    def hook(argv, stdin, runner):
+        if argv[:3] == ["record", "show", "--json"] and argv[-1] == f"task/{name}":
+            doc = json.loads(runner.real(argv).stdout)
+            doc["sidecar"]["depends-on"] = entries
+            return subprocess.CompletedProcess(argv, 0, json.dumps(doc), "")
+
+    return hook
+
+
+def test_assemble_refuses_a_follow_up_whose_sidecar_depends_on_a_qualified_entry(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    names = make_children(env, vault, spec)
+    children = confirm(env, vault, names)
+    before = vault_snapshot(env, vault)
+    runner = EnvRunner(env, edited_depends(names[1], ["task/some-open-thing"]))
+    code, out, err = run_assemble(tmp_path, runner, spec, children, capsys)
+    assert_refused(code, out, err, runner, "child-not-eligible", names[1])
+    assert vault_snapshot(env, vault) == before
+
+
+def test_check_leaves_out_a_follow_up_whose_sidecar_depends_on_a_qualified_entry(lore_env, spec):
+    env, vault = lore_env
+    names = make_children(env, vault, spec, count=2)
+    runner = EnvRunner(env, edited_depends(names[0], ["task/some-open-thing"]))
+    result = parent.check_followups(runner, spec, names)
+    assert [i["name"] for i in result["eligible"]] == [names[1]]
+    assert result["left-out"] == [
+        {"name": names[0], "reason": "depends-outside", "dependency": "task/some-open-thing"}
+    ]
+
+
+# --- a create whose outcome is unclear ---------------------------------------------------------
+
+
+def landed_then(outcome):
+    """A create hook: the real create runs and lands, then `outcome(argv)` is what the
+    caller sees."""
+
+    def hook(argv, stdin, runner):
+        if argv[:2] == ["record", "create"]:
+            runner.real(argv, stdin)
+            return outcome(argv)
+
+    return hook
+
+
+def _timeout(argv):
+    raise subprocess.TimeoutExpired(argv, 1)
+
+
+UNCLEAR_CREATES = [
+    pytest.param(_timeout, id="timeout"),
+    pytest.param(lambda argv: refused(argv), id="exit-nonzero"),
+    pytest.param(lambda argv: subprocess.CompletedProcess(argv, 0, "task/../../etc\n", ""), id="garbled-stdout"),
+]
+
+
+@pytest.mark.parametrize("outcome", UNCLEAR_CREATES)
+def test_a_create_that_landed_but_looked_failed_is_found_and_dropped_with_the_why_note(
+    lore_env, spec, tmp_path, capsys, outcome
+):
+    env, vault = lore_env
+    names = make_children(env, vault, spec)
+    code, out, err = run_assemble(
+        tmp_path, EnvRunner(env, landed_then(outcome)), spec, confirm(env, vault, names), capsys
+    )
+    assert code == 2
+    assert [ln for ln in err.splitlines() if ln.startswith("reason-code: ")] == ["reason-code: parent-create-failed"]
+    (made,) = created_parent(env, vault, spec)
+    assert out["parent"] == made
+    assert out["buildable"] is False and out["nested"] == [] and out["failed"] == []
+    assert out["undone"] == [{"name": made, "write": "drop"}] and out["undo-failed"] == []
+    assert sidecar_of(env, vault, made)["status"] == "dropped"
+    assert "## Dropped" in body_of(env, vault, made)
+    assert [sidecar_of(env, vault, n).get("parent") for n in names] == [None] * 3
+
+
+def test_an_unclear_create_whose_drop_fails_reports_the_command_that_completes_it(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    names = make_children(env, vault, spec)
+    landed = landed_then(_timeout)
+
+    def hook(argv, stdin, runner):
+        if is_drop(argv):
+            return refused(argv)
+        return landed(argv, stdin, runner)
+
+    code, out, _ = run_assemble(tmp_path, EnvRunner(env, hook), spec, confirm(env, vault, names), capsys)
+    assert code == 2
+    (made,) = created_parent(env, vault, spec)
+    assert [(f["name"], f["write"]) for f in out["undo-failed"]] == [(made, "drop")]
+    assert out["undone"] == []
+    run = subprocess.run(shlex.split(out["undo-failed"][0]["command"]), capture_output=True, text=True, env=env)
+    assert run.returncode == 0, run.stderr
+    assert sidecar_of(env, vault, made)["status"] == "dropped"
+
+
+def test_a_create_that_timed_out_without_landing_is_parent_create_failed_with_nothing_written(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    names = make_children(env, vault, spec)
+    before = vault_snapshot(env, vault)
+
+    def hook(argv, stdin, runner):
+        if argv[:2] == ["record", "create"]:
+            _timeout(argv)
+
+    code, out, err = run_assemble(tmp_path, EnvRunner(env, hook), spec, confirm(env, vault, names), capsys)
+    assert code == 2 and out is None
+    assert [ln for ln in err.splitlines() if ln.startswith("reason-code: ")] == ["reason-code: parent-create-failed"]
+    assert vault_snapshot(env, vault) == before
+
+
+def test_a_failed_create_leaves_alone_a_follow_up_parent_another_run_made_meanwhile(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    names = make_children(env, vault, spec)
+    rival = {}
+
+    def hook(argv, stdin, runner):
+        if argv[:2] == ["record", "create"]:
+            rival["name"] = make_followup(env, vault, "Rival parent", status="open", labels=[LABEL], spec=spec)
+            return refused(argv)
+
+    code, out, err = run_assemble(tmp_path, EnvRunner(env, hook), spec, confirm(env, vault, names), capsys)
+    assert code == 2 and out is None
+    assert [ln for ln in err.splitlines() if ln.startswith("reason-code: ")] == ["reason-code: parent-create-failed"]
+    assert sidecar_of(env, vault, rival["name"])["status"] == "open"
+
+
+# --- the undo touches only children it nested -------------------------------------------------
+
+
+def test_the_undo_leaves_a_child_another_run_moved_under_a_different_parent(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    names = make_children(env, vault, spec)
+    holder = make_followup(env, vault, "Other holder", status="open")
+
+    def hook(argv, stdin, runner):
+        if is_flip(argv):
+            _lore(env, "record", "update", f"task/{names[0]}", "--vault", vault, "--unset-parent")
+            _lore(env, "record", "update", f"task/{names[0]}", "--vault", vault, "--parent", holder)
+            return refused(argv)
+
+    runner = EnvRunner(env, hook)
+    code, out, _ = run_assemble(tmp_path, runner, spec, confirm(env, vault, names), capsys)
+    assert code == 2
+    assert sidecar_of(env, vault, names[0])["parent"] == holder
+    assert [sidecar_of(env, vault, n).get("parent") for n in names[1:]] == [None] * 2
+    assert not any(is_unnest(a, names[0]) for a in runner.calls)
+    assert sorted(u["name"] for u in out["undone"]) == sorted([names[1], names[2], out["parent"]])
+    assert out["undo-failed"] == []
+
+
+def test_an_undo_whose_parent_read_back_fails_is_reported_as_undo_failed_and_writes_nothing(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    names = make_children(env, vault, spec)
+    state = {"flipping": False}
+
+    def hook(argv, stdin, runner):
+        if is_flip(argv):
+            state["flipping"] = True
+            return refused(argv)
+        if (
+            state["flipping"]
+            and argv[:3] == ["record", "show", "--json"]
+            and argv[-1] == f"task/{names[1]}"
+        ):
+            return refused(argv)
+
+    runner = EnvRunner(env, hook)
+    code, out, _ = run_assemble(tmp_path, runner, spec, confirm(env, vault, names), capsys)
+    assert code == 2
+    assert [(f["name"], f["write"]) for f in out["undo-failed"]] == [(names[1], "un-nest")]
+    assert not any(is_unnest(a, names[1]) for a in runner.calls)
+    assert sidecar_of(env, vault, names[1])["parent"] == out["parent"]
+    assert {u["name"] for u in out["undone"]} == {names[0], names[2], out["parent"]}
+
+
+# --- a gather failure the script maps -----------------------------------------------------------
+
+
+def truncated_searches(after_create):
+    """A hook that makes every `lore search` report a truncated result set, once the
+    create has run when `after_create` is set."""
+    state = {"armed": not after_create}
+
+    def hook(argv, stdin, runner):
+        if argv[:2] == ["record", "create"]:
+            done = runner.real(argv, stdin)
+            state["armed"] = True
+            return done
+        if state["armed"] and argv[0] == "search":
+            doc = json.loads(runner.real(argv).stdout)
+            doc["truncated"] = True
+            return subprocess.CompletedProcess(argv, 0, json.dumps(doc), "")
+
+    return hook
+
+
+def test_a_truncated_search_before_the_create_is_search_truncated_with_nothing_written(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    names = make_children(env, vault, spec)
+    before = vault_snapshot(env, vault)
+    runner = EnvRunner(env, truncated_searches(after_create=False))
+    code, out, err = run_assemble(tmp_path, runner, spec, confirm(env, vault, names), capsys)
+    assert code == 2 and out is None
+    assert [ln for ln in err.splitlines() if ln.startswith("reason-code: ")] == ["reason-code: search-truncated"]
+    assert vault_snapshot(env, vault) == before
+
+
+def test_a_truncated_search_after_the_create_undoes_the_parent_and_reports_search_truncated(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    names = make_children(env, vault, spec)
+    runner = EnvRunner(env, truncated_searches(after_create=True))
+    code, out, err = run_assemble(tmp_path, runner, spec, confirm(env, vault, names), capsys)
+    assert code == 2
+    assert [ln for ln in err.splitlines() if ln.startswith("reason-code: ")] == ["reason-code: search-truncated"]
+    assert out["buildable"] is False
+    assert out["undone"] == [{"name": out["parent"], "write": "drop"}]
+    assert sidecar_of(env, vault, out["parent"])["status"] == "dropped"
+    assert [sidecar_of(env, vault, n).get("parent") for n in names] == [None] * 3
 
 
 # --- the children file and the arguments ------------------------------------------------------
