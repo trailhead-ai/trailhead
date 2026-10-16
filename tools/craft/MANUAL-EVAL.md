@@ -2650,3 +2650,46 @@ None of them carries a fixture term (buoy, gauge buffer, label queue, label prin
 | `vaults/default/session/337de250-…{.md,.json}` | default `d7354002` (10:17), another host's session publish; one follow-up candidate from another build |
 | `index.sqlite` | derived search index, rewritten by any live lore command |
 | `publish/{default,levr,trailhead}-*.{log,request}` | the live publish worker, triggered by the commits above |
+
+## Treatment: the shared contract in `_shared/council.md`
+
+The contract is the section "Corrections to other records" in `plugins/craft/skills/_shared/council.md`.
+`consult/SKILL.md` and `receiving-code-review/SKILL.md` each point at it by that heading. The batch command
+above was run verbatim, one case per batch, 3 runs, `-j 1`, same graders, runner `claude` 2.1.301, model
+`claude-opus-5-5`, 2026-10-16, against the working tree carrying the edit. Errored runs: **none**. No rerun
+was used.
+
+| Case | Baseline (per run) | Treatment (per run) | Treatment cost (per run, batch) | Result |
+|---|---|---|---|---|
+| consult-lists-a-sibling-correction-without-writing-it | 0.75 / 0.75 / 0.75 | 1.00 / 1.00 / 0.75 | 0.811 / 0.821 / 0.798, 2.390 | green, 2 of 3 runs at 1.0 |
+| accepted-review-correction-is-applied-not-parked | 1.00 / 0.80 / 0.80 | 1.00 / 1.00 / 1.00 | 0.345 / 0.350 / 0.338, 1.032 | green, 3 of 3 |
+| declined-review-correction-is-left-alone | 1.00 / 1.00 / 1.00 | 1.00 / 1.00 / 1.00 | 0.230 / 0.231 / 0.225, 0.685 | green, 3 of 3 (guard) |
+
+Treatment total 4.107 USD (costs are the runner's per-run estimate plus its judge cost). Which edit targets
+which clause: the "List it apart" bullet and the consult pointer target the `llm` grader
+`correction-listed-apart-with-fix` (0 of 3 at baseline, 2 of 3 now); the `--initiated-by agent` command and
+the acceptance-is-the-yes sentence target `initiated-by-agent` (failed in 2 of 3 at baseline, 0 of 3 now).
+Run 3 of the consult batch is the one miss: judge votes FAIL FAIL PASS, so 2 of 3 is at the bar with no
+margin, and the verdict is a judgement near the line. The decline case stays green with the contract in
+place.
+
+**Traces (U3).** The runner deletes `trace.jsonl` at the end of a run, so a background loop copied every
+`/tmp/claude-eval-*/**/*.jsonl` every 0.3 s into a scratch directory for the whole window (the child's live
+session transcript under its temp HOME is among them). All 9 runs were captured. The three consult
+transcripts each contain the heading "Corrections to other records" in the final deliverable, with the
+decision's id, the wrong text and a drafted fix, and each says nothing was written and asks for acceptance.
+In the three accepted-case transcripts the agent invokes `craft:receiving-code-review`, reads
+`_shared/council.md`, checks the claim against the ADR, and runs `./lore record amend … --initiated-by agent
+--base <revision>` once with no second question. In the three declined-case transcripts it invokes the
+skill and runs no write. The contract is applied in the traces. One consult transcript also raised that the
+fix depends on an unchecked fact and offered a task as an alternative to the amend, which the contract
+allows only for an unknown fix.
+
+**Real state around the runs.** Sha256 of every file under `~/.local/state/lore/` and `~/.config/lore/`
+(excluding `.git/`), hashed at 10:53 before the first batch and at 11:03 after the last (2026-10-16, local
+time). `~/.config/lore/` is unchanged. Three paths under `~/.local/state/lore/` changed:
+
+| Path | Source |
+|---|---|
+| `vaults/default/session/6dea91f3-ceda-4c5f-8f62-f7781fb210f7.{md,json}` | uncommitted (`git status` shows `M`, no vault commit in the window): another session's `lore session candidate`, the note's own `candidate 2026-10-16T15:57:55Z kind=follow-up` entry, written at 10:57:55 local; none of the 9 child transcripts runs `session candidate` |
+| `index.sqlite` | derived search index, rewritten by any live lore command |

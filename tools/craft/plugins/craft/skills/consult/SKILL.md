@@ -101,3 +101,8 @@ list hands back a question's worth of raw material instead of an answer.
 The synthesis is the deliverable. Unlike the planning Council Review there is no plan file to
 persist into and no disposition gate — `consult` answers a question and hands the synthesized view
 back to the user to act on.
+
+If the review shows that a record other than the one under review is wrong and the fix is known,
+list it as the contract in `_shared/council.md` under "Corrections to other records" says: apart
+from the findings, numbered, with the record id and the drafted fix, and written only once the user
+accepts it.
