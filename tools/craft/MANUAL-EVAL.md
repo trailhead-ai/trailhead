@@ -2781,7 +2781,9 @@ was used. Cost basis: per-run figures include judge cost; batch totals are their
 | accepted-review-correction-is-applied-not-parked | 1.00 / 1.00 / 1.00 | 1.00 / 1.00 / 1.00 | 0.275 / 0.349 / 0.303; 0.927 | green, 3 of 3 |
 | declined-review-correction-is-left-alone | 1.00 / 1.00 / 1.00 | 1.00 / 1.00 / 1.00 | 0.212 / 0.228 / 0.249; 0.689 | green, 3 of 3 (guard) |
 
-Craft total 4.136 USD; with lore's 6.47 USD the whole fix pass cost 10.61 USD of the $16 ceiling.
+Craft total 4.136 USD on the basis this section states (per-run figures including judge cost, not re-verified);
+lore's total for the same pass is 6.47 USD on `costUsd` alone, judge cost excluded (about 6.59 USD with it). The
+two are on different bases and are not summed here.
 
 **Traces (U3), observed again.** The same loop (copy `/tmp/claude-eval-*/**/*.jsonl` every 0.3 s; stopped by its
 literal PID) captured all 9 runs. All three consult deliverables list
@@ -2840,3 +2842,70 @@ variance on the `llm` grader rather than a behavioural miss. That is a reading, 
 | trailhead `lesson/run-one-pilot-capture-…` and seven `task/…` records (capture-scan, code-review verdict words, eval-arm pins, consult calibration re-measure, rough-edge findings, shared-finding contract, spec-review outcome line) | trailhead `4ccc7088` (12:34), another session's publish |
 | default `session/3bca27eb-….{md,json}` | default `4f4e61e7` (12:34), another session's flush |
 | `index.sqlite`; `publish/{levr,trailhead}-*.{log,request,json}` | derived index; the publish worker, triggered by the commits above |
+
+## Earlier consult greens measured on prose that carried the fixture's vocabulary
+
+From `d4a7b30f` until `d912f583`, `_shared/council.md` said a fact readable in "the seeded
+records" is known. "Seeded" is the eval harness's word, and the consult case's `expected.md` says the right text
+is "determinable from the seeded records". Every consult green on that prose is measured on leaked prose and
+does not count as clean evidence: the reworked batch above, the "test for material" batch (which also quoted the
+fixture's figures), and the `d966a50f` rerun, which removed the figures but still carried "seeded records".
+The `expected.md` claim that the prose shares no wording with any skill example was false for that prose; the
+file was not edited. The accepted and declined cases ran on the same prose, and their greens are marked the
+same way.
+
+## Re-measure on the corrected prose (commit `d912f583`)
+
+`d912f583` changes the same section of `_shared/council.md` in two places. The source a drafted fix is checked
+against is now "the code, the configuration, or the records that settle it (the record itself or another one)",
+the same set `/lore:correct` uses, and "the seeded records" becomes "the records that settle it".
+
+**Leak check.** The commands, hits and the direct greps are in `tools/lore/MANUAL-EVAL.md` ("Re-measure on the
+prose without the cues"). For the three craft cases the phrases come from `prompt.md`, `fixtures/records.json`
+and `fixtures/review.md`: 197 to 204 three-word phrases per case, 9 to 14 generic hits, and one deliberate
+hit ("Corrections to other records", the contract's own heading, which the `review.md` fixtures reproduce
+because it is the format the contract prescribes). No hit in prose this change added is a fixture phrase.
+The harness words are gone from the edited sections.
+
+The batch command above was run verbatim, one case per batch, 3 runs, `-j 1`, the four grants,
+`--max-cost-usd` 3 / 1.5 / 1.5, same graders, no case file edited, runner `claude` 2.1.301, model
+`claude-opus-5-5`, 2026-10-16. Errored runs: **none**. No rerun was used. Cost basis, stated once: `costUsd`
+per run excludes judge cost, and each batch total is the sum of its runs' `costUsd`; judge cost is listed
+separately and is in no total.
+
+| Case | Runs | Cost per run (USD) | Judge cost per run (USD) | Batch (USD) | Result |
+|---|---|---|---|---|---|
+| consult-lists-a-sibling-correction-without-writing-it | 1.00 / 1.00 / 1.00 | 0.777, 0.917, 0.764 | 0.008, 0.013, 0.012 | 2.458 | green, 3 of 3 |
+| accepted-review-correction-is-applied-not-parked | 1.00 / 0.20 / 1.00 | 0.338, 0.288, 0.331 | 0 | 0.958 | green at the floor, 2 of 3 |
+| declined-review-correction-is-left-alone | 1.00 / 1.00 / 1.00 | 0.229, 0.246, 0.230 | 0 | 0.705 | green, 3 of 3 (guard) |
+
+Total 4.121 USD by `costUsd` (about 4.15 with judge cost). With lore's 3.275 USD in the same window the
+re-measure cost 7.40 USD by `costUsd` (about 7.48 with judge cost), under the $10 ceiling.
+
+The accepted case's 0.20 run applied nothing: it read the decision and ADR files directly from the vault
+directory, never ran `./lore`, and ended on a file read with no closing message (11 turns, 27 s). Four
+graders failed (`change-history-entry`, `corrected-text-present`, `initiated-by-agent`, `wrong-text-gone`);
+`no-task-created` passed. The other two accepted runs checked the claim against the ADR and amended the
+decision with `--initiated-by agent`. The bar (2 of 3 at 1.0) is met without the pre-stated rerun; the
+accepted case is a floor, not a stable green.
+
+**Traces (U3).** The loop copied `/tmp/claude-eval-*/**/*.jsonl` every 0.3 s and was stopped by its literal PID
+(2706231). The three consult deliverables:
+- Run 1: `decision/gauge-buffer-is-sized-for-the-sampling-interval` is item 1 under "Corrections to other
+  records", classified as "corrects a wrong figure; the decision itself stays the same", with the wrong text
+  quoted and the fix drafted (five minutes, 72 readings, 72 slots). Nothing written; it asks "Do you accept
+  correction 1?". Hedge: "What to do" opens with "Confirm the real sampling interval", and the entry says it
+  assumes the spec's 5 minutes is real. The fix is still listed in full.
+- Run 2: item 1, classified "a wrong figure, not a change of decision" ("active, so it would be amended in
+  place"), fix drafted, the unchecked premise stated beside it. No hedge in the entry. A later message, after a
+  background-timer notification, says "please confirm the gauge really samples every 5 minutes" before accepting.
+- Run 3: item 1, classified "a factual fix, applied as an amendment to the frozen record", fix drafted with the
+  second sentence kept. "What to do" step 1 is "Confirm the real sampling interval". Premise stated beside the
+  fix. A hedge of the same kind as run 1.
+- None offers a task or a follow-up, and none wrote to the decision.
+
+No grader reads for a hedge, so this is observed from the transcripts and not scored.
+
+**Live state.** Hashed once for this pass and for lore's six batches: 12:51:57 before the first and 13:10:51
+after the last. The changed paths and their sources are in `tools/lore/MANUAL-EVAL.md` ("Re-measure on the
+prose without the cues"); `~/.config/lore/` is unchanged, and no changed path carries a fixture term.
