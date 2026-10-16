@@ -1,0 +1,13 @@
+I chose one follow-up, refined it, and nested it under a new parent that is now ready to build. Assembly exited 0 with nothing failed and nothing undone.
+
+- **Included:** Distilled: reject path traversal in the upload endpoint (`distilled-reject-path-traversal-in-the-upload-endpoint`). It was the only follow-up the spec had, and it is a live security hole: any caller of the upload path helper can write files outside the upload directory today.
+- **Left, left out, or refined but not nested:** none.
+- **New parent:** `build-the-follow-ups-of-fixture-distilled-spec-chosen-2026-10-16`. Its one child, the follow-up above, is nested under it, and the parent is now `ready`.
+
+The refinement subagent made one choice you may want to check: nothing in the repo or vault named a test framework, so it wrote the follow-up's tests for Python's built-in `unittest`. If you'd rather use plain `pytest`, that follow-up's test plan needs editing before the build.
+
+This spec has already been distilled, so the only next step is the build:
+
+```
+/craft:execute task/build-the-follow-ups-of-fixture-distilled-spec-chosen-2026-10-16
+```

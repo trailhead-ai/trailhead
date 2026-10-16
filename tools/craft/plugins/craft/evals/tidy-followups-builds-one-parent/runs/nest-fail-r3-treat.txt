@@ -1,0 +1,37 @@
+Assembly failed with exit 2.
+
+```
+reason-code: nesting-incomplete
+```
+A child could not be nested, so the parent could not be made ready. The fault is on `lore`'s or the vault's side. The run undid what it had written; the lists below show what happened.
+
+### Step 13: Closing report
+
+- **Included:**
+  - Nest-fail: reject path traversal in the archive extractor (`nest-fail-reject-path-traversal-in-the-archive-extractor`)
+  - Nest-fail: stop logging session cookies (`nest-fail-stop-logging-session-cookies`)
+- **Left:** none.
+- **Left out at step 10:** none.
+- **Refined but not nested:** both follow-ups. Each refinement landed and both are now `ready`, but after the failure neither is nested:
+  - Nest-fail: reject path traversal in the archive extractor (`nest-fail-reject-path-traversal-in-the-archive-extractor`): it was nested, then undone.
+  - Nest-fail: stop logging session cookies (`nest-fail-stop-logging-session-cookies`): its nesting write failed.
+- **Failed write:** `nest` for Nest-fail: stop logging session cookies (`nest-fail-stop-logging-session-cookies`).
+- **Undo writes that landed:**
+  - `un-nest` for `nest-fail-reject-path-traversal-in-the-archive-extractor`
+  - `drop` for the parent `build-the-follow-ups-of-fixture-nest-fail-spec-chosen-2026-10-16`
+- **Undo commands still to run:** none.
+- **Parent:** `build-the-follow-ups-of-fixture-nest-fail-spec-chosen-2026-10-16` was created and then dropped by the undo. No buildable parent exists.
+
+Because a nesting write failed, there is no build command. Every undo landed and the spec is not distilled yet, so the distill command follows:
+
+```
+/craft:distill spec/fixture-nest-fail-spec
+```
+
+## Summary
+
+I didn't get a buildable parent for `fixture-nest-fail-spec`. Both follow-ups were shortlisted, refined to `ready` and confirmed for nesting. Then assembly stopped with `nesting-incomplete`: the nest write for `nest-fail-stop-logging-session-cookies` failed. The script undid its own writes: it un-nested the path-traversal follow-up and dropped the new parent. All undos landed, so the vault only keeps the two refinements.
+
+The refinement subagents also found three related issues outside these follow-ups:
+- **Upload and export endpoints:** `src/upload.py` and `src/export.py` have the same path-traversal flaw. Each already has its own open task.
+- **Trace logging:** `src/trace.py:2` logs every request header, the Cookie header included. No follow-up exists for this yet.

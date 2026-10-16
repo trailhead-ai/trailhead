@@ -1,0 +1,13 @@
+The query names no open slices on `fixture-chosen-spec`.
+
+I ran step 5's query exactly as the skill writes it, with the spec name filled in (the name passes the skill's safe-name check):
+
+```
+lore search "kind:task related-spec:fixture-chosen-spec has:label.craft.slice-parent -status:done -status:dropped -status:superseded"
+```
+
+It exited 0 and returned `0 results`. That's a clean empty answer, not a failure, so the step 5 guard doesn't refuse.
+
+lore also printed a note that reverse links only reflect the last reindex, and that `lore reindex` gives full membership. This query searches by `related-spec:`, so if the index is stale, a recently created slice might not show up. I didn't run a reindex because you asked me to run only this query.
+
+I wrote nothing and ran nothing else.

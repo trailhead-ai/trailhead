@@ -1,0 +1,102 @@
+{
+ "order": {
+  "disposition_question": 10,
+  "agent_dispatches": [
+   14,
+   17,
+   20
+  ],
+  "check": [
+   23
+  ],
+  "assemble": [
+   25
+  ]
+ },
+ "agents": {
+  "count": 3,
+  "sequential": true
+ },
+ "check_args": [
+  [
+   "fixture-chosen-spec",
+   "chosen-reject-path-traversal-in-the-export-endpoint",
+   "chosen-stop-writing-bearer-tokens-to-the-request-trace",
+   "chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it"
+  ]
+ ],
+ "assembles": 1,
+ "verbatim": [
+  {
+   "name": "chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it",
+   "delivers_verbatim": false,
+   "files_verbatim": false
+  }
+ ],
+ "records": {
+  "chosen-reject-path-traversal-in-the-export-endpoint": {
+   "status": "open",
+   "parent": null,
+   "labels": [],
+   "body_changed": true,
+   "new": false
+  },
+  "chosen-stop-writing-bearer-tokens-to-the-request-trace": {
+   "status": "open",
+   "parent": null,
+   "labels": [],
+   "body_changed": true,
+   "new": false
+  },
+  "chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it": {
+   "status": "ready",
+   "parent": "build-the-follow-ups-of-fixture-chosen-spec-chosen-2026-10-16",
+   "labels": [],
+   "body_changed": true,
+   "new": false
+  },
+  "chosen-fix-a-typo-in-a-docstring": {
+   "status": "open",
+   "parent": null,
+   "labels": [],
+   "body_changed": false,
+   "new": false
+  },
+  "build-the-follow-ups-of-fixture-chosen-spec-chosen-2026-10-16": {
+   "status": "ready",
+   "parent": null,
+   "labels": [
+    "craft/followup-parent"
+   ],
+   "body_changed": true,
+   "new": true
+  }
+ },
+ "parent_body": {
+  "build-the-follow-ups-of-fixture-chosen-spec-chosen-2026-10-16": {
+   "status": "ready",
+   "related_spec": [
+    "fixture-chosen-spec"
+   ],
+   "sections": [
+    "task/chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it"
+   ],
+   "has_covers_field": false,
+   "has_flow_out": true,
+   "selection_reasons": 1
+  }
+ },
+ "command_lines": [
+  {
+   "line": "/craft:execute task/build-the-follow-ups-of-fixture-chosen-spec-chosen-2026-10-16",
+   "standalone": true,
+   "in_fence": true
+  },
+  {
+   "line": "/craft:distill spec/fixture-chosen-spec",
+   "standalone": true,
+   "in_fence": true
+  }
+ ],
+ "real_vault_hits": ""
+}

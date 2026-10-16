@@ -1,0 +1,37 @@
+{
+ "order": {
+  "disposition_question": 10
+ },
+ "agents": {
+  "count": 0,
+  "sequential": true
+ },
+ "check_args": [],
+ "assembles": 0,
+ "verbatim": [],
+ "records": {
+  "none-included-drop-an-unused-local-variable": {
+   "status": "open",
+   "parent": null,
+   "labels": [],
+   "body_changed": false,
+   "new": false
+  },
+  "none-included-reorder-two-imports": {
+   "status": "open",
+   "parent": null,
+   "labels": [],
+   "body_changed": false,
+   "new": false
+  }
+ },
+ "parent_body": {},
+ "command_lines": [
+  {
+   "line": "/craft:distill spec/fixture-none-included-spec",
+   "standalone": true,
+   "in_fence": true
+  }
+ ],
+ "real_vault_hits": ""
+}

@@ -1,0 +1,48 @@
+**Follow-ups of spec `fixture-chosen-spec`**
+
+Entry: `complete-status` · slice basis: `labelled` · 1 slice, 1 child · 5 candidates read, 3 kept · 1 excluded by label · 0 skipped edges
+
+**Recommended** (2 of 3 met a reason class)
+
+- **Chosen: reject path traversal in the export endpoint** (`chosen-reject-path-traversal-in-the-export-endpoint`). Class: *open security exposure*. Any caller can read files outside the export directory right now, and that stays true until the fix lands.
+- **Chosen: stop writing [REDACTED] to the request trace** (`chosen-stop-writing-bearer-tokens-to-the-request-trace`). Class: *open security exposure*. Every request writes live credentials into a shared log that people read, so each day of waiting puts more secrets in the logs that will need rotating.
+
+**Other follow-ups**
+
+- Chosen: fix a typo in a docstring
+
+**Blocked**
+
+- (none)
+
+Nothing has been written yet.
+
+---
+
+**A follow-up parent already exists for this spec:** `build-the-follow-ups-of-fixture-chosen-spec-chosen-2026-10-16`. Its status is `ready`, so the next step is to build it:
+
+```
+/craft:execute task/build-the-follow-ups-of-fixture-chosen-spec-chosen-2026-10-16
+```
+
+The ritual can't tell who created this parent. If you didn't, the command below removes its marker label. The record stays as it is, and the follow-up gather stops counting it as a parent:
+
+```
+lore record update task/build-the-follow-ups-of-fixture-chosen-spec-chosen-2026-10-16 --vault default --unset-label craft/followup-parent
+```
+
+No distill command is printed on this stop, because distilling waits on the parent.
+
+---
+
+**The run stopped at step 7.** Step 7 says that when a follow-up parent already exists, steps 8 to 13 do not run and no second parent is created. Because of that:
+
+- None of the confirmation questions came up: not the shortlist moves (step 8), the disposition question (Confirmation 2) or the scope question (step 11). The answers you supplied (`none`, `yes`, `yes`) went unused.
+- No refinement subagents were sent, and `followup_parent.py check` and `assemble` were not run.
+- Nothing in the vault or the repository was changed. The only commands run were the gather script and read-only `lore record show` calls.
+
+Two of the follow-up records already contain an unresolved refinement question from an earlier pass:
+- **Export traversal:** how an out-of-bounds name should be rejected.
+- **Token logging:** what the redaction should look like and which headers it covers.
+
+If the existing parent is built as it stands, those questions are still open.

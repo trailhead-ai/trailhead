@@ -1,0 +1,191 @@
+[main] BASH
+$WORK/snap-treat/tools/craft/plugins/craft/scripts/followup_gather.py fixture-chosen-spec; echo "EXIT=$?"
+
+[main] BASH
+for n in chosen-fix-a-typo-in-a-docstring chosen-reject-path-traversal-in-the-export-endpoint chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it chosen-stop-writing-bearer-tokens-to-the-request-trace; do echo "=== $n"; lore record show --json --vault default task/$n; echo "EXIT=$?"; done
+
+[main] BASH
+ls $WORK/snap-treat/tools/craft/plugins/craft/skills/_shared/
+
+[main] AGENT
+Refine one task record: `task/chosen-reject-path-traversal-in-the-export-endpoint` in lore vault `default`.
+
+Instructions:
+- Read $WORK/snap-treat/tools/craft/plugins/craft/skills/_shared/refine.md yourself and follow it in full, in its UNATTENDED mode, against this one task only. `${CLAUDE_PLUGIN_ROOT}` is $WORK/snap-treat/tools/craft/plugins/craft. The `lore` command on PATH reads the vault.
+- The code the task's claims point at is the git repository at $WORK/runs/chosen-r3-treat/fixture/repo — verify claims against it. Do not modify t... [cut 406 chars]
+
+[sub] BASH
+cd /tmp && lore record show task/chosen-reject-path-traversal-in-the-export-endpoint; echo ---; lore task graph chosen-reject-path-traversal-in-the-export-endpoint
+
+[sub] BASH
+cd $WORK/runs/chosen-r3-treat/fixture/repo && git status --short | head; git ls-files | head -100
+
+[sub] BASH
+cd /tmp && lore record show --help 2>&1 | head -30; lore record show task/chosen-reject-path-traversal-in-the-export-endpoint --json 2>&1 | head -40; find $WORK/runs/chosen-r3-treat/fixture/repo -not -path '*/.git/*' -type f
+
+[sub] BASH
+cd $WORK/runs/chosen-r3-treat/fixture/repo && for f in src/export.py src/upload.py src/util.py src/extract.py README.md src/__init__.py; do echo "=== $f"; cat -n $f; done; grep -rn "export_path\|export\b" src README.md
+
+[sub] BASH
+cd /tmp && for q in "path traversal" "export" "export_path" "src/export.py" "kind:area export" "reject" "ValueError" "test convention" "pytest" "upload_path" "fixture-chosen-spec-the-slice" "path validation"; do echo "### $q"; lore search "$q" 2>&1 | head -15; done; lore record show task/fixture-chosen-spec-the-slice 2>&1 | head -40
+
+[sub] BASH
+cd /tmp && lore record show task/distilled-reject-path-traversal-in-the-upload-endpoint; echo ----; lore record show task/nest-fail-reject-path-traversal-in-the-archive-extractor; echo ----; for q in "kind:adr" "kind:area" "kind:lesson" "kind:spec" "security" "fixture service" "os.path"; do echo "### $q"; lore search "$q" 2>&1 | head -12; done
+
+[sub] BASH
+T=$(mktemp) && cat > "$T" <<'EOF'
+`src/export.py` joins a caller-supplied name onto the export directory with no validation, so a crafted name such as `../../etc/passwd` reads files outside the export directory. Reachable today by any caller of `export_path`.
+
+**Delivers:** `export_path` no longer returns a path outside `base` for a caller-supplied `name` (the unvalidated join is at src/export.py:5); a `name` that stays inside `base` keeps returning the joined path as today. The rejection contract (how an escaping name is refused, and whether containment is checked lexically or after symlink resolution) is pending the question below.
+
+**Files:** src/export.py (modified); a new test module for `export_path` (the repository has no tests yet — see the question below)
+
+## Flow-out
+
+- [ ] Touched area/subsystem profiles updated with what changed
+- [ ] Prover-validated assumptions captured as session candidates (durable at flush)
+- [ ] New decisions / lessons / follow-ups surfaced during the build recorded
+
+## Refine — unresolved
+
+**Question:** How should `export_path` reject an escaping name — raise `ValueError` when the symlink-resolved path falls outside `base` (keeping the joined path as the return value for in-base names), or some other contract (lexical-only check, a different exception, a sentinel return)?
+
+**Evidence gathered:** src/export.py:4-5 is the whole surface — a bare `os.path.join` with no validation, no error-handling convention, and no callers in the repo. The repository has no tests directory or test framework to set a convention. No adr/area/lesson/spec record covers export or path validation (searched: path traversal, export, export_path, reject, ValueError, path validation, security, os.path, pytest, kind:adr, kind:area, kind:lesson). The same defect class exists in src/upload.py:5 and src/extract.py:5, each tracked by its own open task — [[task/distilled-reject-path-traversal-in-the-upload-endpoint]] and [[task/nest-fail-reject-path-traversal-in-the-archive-extractor]] — whose captured prose states an "agreed behaviour" for those surfaces (raise `ValueError` on a symlink-resolved escape; add `tests/test_<module>.py`). Those are open task captures for other files, not a recorded decision for this one.
+
+**Recommended answer:** Match the sibling tasks: raise `ValueError` when the symlink-resolved path falls outside `base`, keep returning the joined path otherwise, and add `tests/test_export.py` covering a `../` escape, an absolute-path name, a symlink inside `base` pointing outside, and an ordinary in-base name. Consistency across the three join helpers is the strongest argument; it needs an operator to confirm it applies to export too.
+EOF
+cd /tmp && lore record update task/chosen-reject-path-traversal-in-the-export-endpoint < "$T"; rc=$?; rm -f "$T"; echo rc=$rc; lore record show task/chosen-reject-path-traversal-in-the-export-endpoint --json | python3 -I -c 'import json,sys;d=json.load(sys.stdin);print(d["sidecar"]["status"])'; lore record show task/distilled-reject-path-traversal-in-the-upload-endpoint >/dev/null && lore record show task/nest-fail-reject-path-traversal-in-the-archive-extractor >/dev/null && echo refs-ok
+
+[sub] BASH
+cd /tmp && lore record show task/chosen-reject-path-traversal-in-the-export-endpoint | head -8
+
+[main] AGENT
+Refine one task record: `task/chosen-stop-writing-bearer-tokens-to-the-request-trace` in lore vault `default`.
+
+Instructions:
+- Read $WORK/snap-treat/tools/craft/plugins/craft/skills/_shared/refine.md yourself and follow it in full, in its UNATTENDED mode, against this one task only. `${CLAUDE_PLUGIN_ROOT}` is $WORK/snap-treat/tools/craft/plugins/craft. The `lore` command on PATH reads the vault.
+- The code the task's claims point at is the git repository at $WORK/runs/chosen-r3-treat/fixture/repo — verify claims against it. Do not modif... [cut 409 chars]
+
+[sub] BASH
+cd /tmp; lore record show task/chosen-stop-writing-bearer-tokens-to-the-request-trace; echo ---; lore task graph chosen-stop-writing-bearer-tokens-to-the-request-trace; echo; lore --help 2>&1 | head -40
+
+[sub] BASH
+cd /tmp; lore record show --help; lore record update --help | head -60; cd $WORK/runs/chosen-r3-treat/fixture/repo && git status --short && git log --oneline | head && find . -path ./.git -prune -o -type f -print
+
+[sub] BASH
+cd /tmp; lore record show --json --vault default task/chosen-stop-writing-bearer-tokens-to-the-request-trace; cd $WORK/runs/chosen-r3-treat/fixture/repo && find . -path ./.git -prune -o -type f -print
+
+[sub] BASH
+cd $WORK/runs/chosen-r3-treat/fixture/repo && cat -n src/trace.py README.md; grep -rn "trace\|header\|Authorization\|redact\|mask" src/ | grep -v "^src/trace.py"
+
+[sub] BASH
+cd $WORK/runs/chosen-r3-treat/fixture/repo && for f in src/*.py; do echo "== $f"; cat -n $f; done; cd /tmp; lore record show task/fixture-chosen-spec-the-slice; lore search "trace"; lore search "redact"; lore search "Authorization header"; lore search "kind:area trace"; lore search "logging credentials"; lore search "kind:area"
+
+[sub] BASH
+cd /tmp; for q in header log logger secret credential token bearer cookie test pytest "kind:adr" "kind:lesson" "kind:spec" "src/trace.py" "src/cookies.py"; do echo "### $q"; lore search "$q" | grep -v "^---"; done; ls $WORK/runs/chosen-r3-treat/fixture/vault/ $WORK/runs/chosen-r3-treat/fixture/vault/*
+
+[sub] BASH
+cd /tmp; lore record show task/left-out-pin-the-tls-minimum-version-in-the-client; echo ----; lore record show task/nest-fail-stop-logging-session-cookies; echo ---; lore record show task/chosen-reject-path-traversal-in-the-export-endpoint; cat $WORK/snap-treat/tools/craft/plugins/craft/templates/plan.md | grep -n -A6 "Flow-out"
+
+[sub] BASH
+set -e; T=$(mktemp); cat > "$T" <<'EOF'
+`src/trace.py` writes every request header, the Authorization header included, verbatim to the shared log, so live credentials already sit in logs people read.
+
+**Delivers:** `log_request` no longer writes the value of the `Authorization` header to the logger (the verbatim dump of every header is at src/trace.py:2); headers that carry no credential keep being written as today. The exact redaction contract — mask the value with a placeholder vs drop the header, which header names count as credential-bearing, and whether matching is case-insensitive — is pending the question below.
+
+**Test contract:** (partial — final shape pending the question below) A test calls `log_request` with a fake logger and headers carrying an `Authorization: Bearer <dummy>` entry plus an ordinary header, and asserts the dummy token string does not appear in anything written while the ordinary header's name and value still do.
+
+**Files:** src/trace.py (modified); a new test module for `log_request`, e.g. `tests/test_trace.py` (the repository has no tests yet)
+
+## Flow-out
+
+- [ ] Touched area/subsystem profiles updated with what changed
+- [ ] Prover-validated assumptions captured as session candidates (durable at flush)
+- [ ] New decisions / lessons / follow-ups surfaced during the build recorded
+
+## Refine — unresolved
+
+**Question:** What redaction contract should `log_request` apply — replace each credential-bearing header's value with `[REDACTED]` (keeping the header name in the log) or drop those headers entirely — and which headers are in scope: `Authorization` only, or also `Proxy-Authorization` and `Cookie`, matched case-insensitively?
+
+**Evidence gathered:** src/trace.py:1-2 is the whole surface — it writes the repr of the full header dict, so every header (including `Cookie`, not only `Authorization`) reaches the log; there are no callers, no logging/redaction helper, and no tests directory or framework in the repo to set a convention. No adr/area/lesson/spec record covers logging, headers, or redaction (searched: trace, redact, Authorization header, bearer, token, credential, header, log, logger, cookie, secret, test, pytest, kind:area, kind:adr, kind:lesson). The nearest neighbour is [[task/nest-fail-stop-logging-session-cookies]], whose captured prose states an "agreed behaviour" of writing `Cookie: [REDACTED]` for src/cookies.py:2 and adding `tests/test_<module>.py` — an open task capture for a different file, not a recorded decision for this one. The ready task [[task/left-out-pin-the-tls-minimum-version-in-the-client]] also uses a new `tests/test_<module>.py`.
+
+**Recommended answer:** Mask rather than drop: write each of `Authorization`, `Proxy-Authorization`, and `Cookie` (matched case-insensitively) with the value `[REDACTED]`, leaving every other header untouched, and add `tests/test_trace.py` covering a bearer token, a lower-case `authorization` key, a `Cookie` header, and an ordinary header that must still appear. Masking keeps the trace useful for seeing that a credential was sent, and `[REDACTED]` matches the sibling cookies task; including `Cookie` widens scope beyond the captured claim, so it needs an operator's confirmation.
+EOF
+cd /tmp; lore record update --vault default task/chosen-stop-writing-bearer-tokens-to-the-request-trace < "$T"; rm -f "$T"; lore record show task/chosen-stop-writing-bearer-tokens-to-the-request-trace | head -3; lore record show task/nest-fail-stop-logging-session-cookies >/dev/null && lore record show task/left-out-pin-the-tls-minimum-version-in-the-client >/dev/null && echo cites-ok; lore record show --json task/chosen-stop-writing-bearer-tokens-to-the-request-trace | grep '"status"'
+
+[main] AGENT
+Refine one task record: `task/chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it` in lore vault `default`.
+
+Instructions:
+- Read $WORK/snap-treat/tools/craft/plugins/craft/skills/_shared/refine.md yourself and follow it in full, in its UNATTENDED mode, against this one task only. `${CLAUDE_PLUGIN_ROOT}` is $WORK/snap-treat/tools/craft/plugins/craft. The `lore` command on PATH reads the vault.
+- The code the task's claims point at is the git repository at $WORK/runs/chosen-r3-treat/fixture/repo — verify claims again... [cut 428 chars]
+
+[sub] BASH
+cd /tmp && lore record show task/chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it; echo ---; lore task graph chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it; lore --help | head -40
+
+[sub] BASH
+cd /tmp && lore record show --help; lore vault ls; cd $WORK/runs/chosen-r3-treat/fixture/repo && git status --short && git ls-files && grep -rn "to_cents\|money\|Decimal\|decimal" --include=*.py . 
+
+[sub] BASH
+cd /tmp && lore record show --json --vault default task/chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it; cd $WORK/runs/chosen-r3-treat/fixture/repo && find . -path ./.git -prune -o -type f -print
+
+[sub] BASH
+cd $WORK/runs/chosen-r3-treat/fixture/repo && cat -n src/money.py; cat -n README.md; grep -rn "to_cents\|money\|decimal\|Decimal\|round" src README.md; ls -la; ls tests 2>/dev/null
+
+[sub] BASH
+cd /tmp && lore record show task/fixture-chosen-spec-the-slice; echo ---; lore search "money"; lore search "rounding"; lore search "decimal"; lore search "cents"; lore search "kind:area money"; lore areas
+
+[sub] BASH
+cd /tmp && python3 -I -c "
+from decimal import Decimal, ROUND_HALF_UP
+print(int(19.99*100))
+f=lambda a:int((Decimal(str(a))*100).quantize(Decimal('1'),rounding=ROUND_HALF_UP))
+g=lambda a:int((Decimal(a)*100).quantize(Decimal('1'),rounding=ROUND_HALF_UP))
+for a in [19.99,1.005,0.125,0.115,10,'2.675',Decimal('2.675'),-1.005]: print(a,f(a),g(a) if not isinstance(a,str) else '-')
+"; cd $WORK/runs/chosen-r3-treat/fixture/repo && GIT_CONFIG_GLOBAL=/dev/null git log --oneline | head
+
+[sub] BASH
+cd /tmp && lore record update --help | head -40
+
+[sub] BASH
+cat $WORK/snap-treat/tools/craft/plugins/craft/templates/plan.md | grep -A6 "## Flow-out"
+
+[sub] BASH
+grep -A14 "## Flow-out" $WORK/snap-treat/tools/craft/plugins/craft/templates/plan.md | tail -8
+
+[sub] BASH
+set -e; T=$(mktemp -t refine-money.XXXXXX); trap 'rm -f "$T"' EXIT
+cat > "$T" <<'EOF'
+`src/money.py` converts an amount to cents with `int(amount * 100)`, which truncates and is off by one cent for amounts such as 19.99. The house rule is to round half up to the nearest cent, using `decimal`. Two more features are about to call `to_cents`, and each will bake the error further in.
+
+**Delivers:** `to_cents` (src/money.py:1) returns an `int` number of cents rounded half up to the nearest cent via the stdlib `decimal` module, replacing the truncating float multiply at src/money.py:2. The amount is converted with `Decimal(str(amount))` (not `Decimal(amount)`) so a float input rounds on its decimal text rather than its binary approximation, then scaled by 100 and quantized to a whole cent with `ROUND_HALF_UP`. Signature and name unchanged; `to_cents` has no other callers in the repo today (only definition: src/money.py:1), so no call sites change.
+
+**Test contract:** No test suite or runner exists in the repo (files: README.md:1, src/*.py), so verification is a command with expected output, run from the repo root:
+`python3 -I -c "import sys; sys.path.insert(0,'src'); from decimal import Decimal; from money import to_cents as t; print(t(19.99), t(1.005), t(0.125), t(10), t('2.675'), t(Decimal('2.675')), t(0), type(t(19.99)).__name__)"`
+expected output: `1999 101 13 1000 268 268 0 int`
+(Current code prints 1998 for 19.99 and 100 for 1.005 — the failing cases.)
+
+**Files:** src/money.py (modified)
+
+## Flow-out
+
+- [ ] Touched area/subsystem profiles updated with what changed
+- [ ] Prover-validated assumptions captured as session candidates (durable at flush)
+- [ ] New decisions / lessons / follow-ups surfaced during the build recorded
+EOF
+cd /tmp; lore record update --vault default task/chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it --status ready --unset-label route < "$T"
+lore record show task/chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it; ls "$T"
+
+[sub] BASH
+cd /tmp && lore task graph chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it; ls $WORK/runs/chosen-r3-treat/tmp/refine-money.wtq8g3 2>&1
+
+[main] BASH
+$WORK/snap-treat/tools/craft/plugins/craft/scripts/followup_parent.py check fixture-chosen-spec chosen-reject-path-traversal-in-the-export-endpoint chosen-stop-writing-bearer-tokens-to-the-request-trace chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it; echo "EXIT=$?"
+
+[main] BASH
+children=$(mktemp)
+cat > "$children" <<'EOF'
+[{"name": "chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it", "reason": "Two features are about to call the off-by-one-cent conversion, and each new caller makes the fix more expensive.", "revision": "257c8f0725f9dd0678e0e1d9826bd60f55071a59fbfac34fdfbc96f5a373bd6d"}]
+EOF
+$WORK/snap-treat/tools/craft/plugins/craft/scripts/followup_parent.py assemble fixture-chosen-spec --children "$children"; rc=$?
+rm -f "$children"; echo "EXIT=$rc"

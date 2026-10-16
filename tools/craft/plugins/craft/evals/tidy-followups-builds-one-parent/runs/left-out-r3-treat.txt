@@ -1,0 +1,23 @@
+**Left out:**
+- **Left-out: pin the TLS minimum version in the client** (`left-out-pin-the-tls-minimum-version-in-the-client`): it depends on the unfinished task `outside-upgrade-the-http-client-library`, which is not part of this set.
+- **Left-out: rotate the hard-coded session signing secret** (`left-out-rotate-the-hard-coded-session-signing-secret`): refinement left a question only you can answer, so it is not ready to build.
+
+Refinement ran on both, but neither can be nested, so no parent was created. The procedure goes straight to step 13. Step 11 (scope confirmation) is never reached, so the scope answer you supplied ("yes") wasn't used, and `assemble` did not run.
+
+## Step 13: Closing report
+
+- **Included:** Left-out: rotate the hard-coded session signing secret (`left-out-rotate-the-hard-coded-session-signing-secret`); Left-out: pin the TLS minimum version in the client (`left-out-pin-the-tls-minimum-version-in-the-client`)
+- **Left:** none
+- **Left out:**
+  - `left-out-pin-the-tls-minimum-version-in-the-client`: it depends on the unfinished task `outside-upgrade-the-http-client-library`, which is not part of this set.
+  - `left-out-rotate-the-hard-coded-session-signing-secret`: refinement left a question only you can answer, so it is not ready to build.
+- **Refined but not nested:** both of the above.
+- **Failed writes:** none. Both refinements ran, and `check` reports both records in their refined state.
+- **Undo writes / undo commands outstanding:** none
+- **New parent:** none created
+
+The spec has not been distilled yet, so the next command is:
+
+```
+/craft:distill spec/fixture-left-out-spec
+```
