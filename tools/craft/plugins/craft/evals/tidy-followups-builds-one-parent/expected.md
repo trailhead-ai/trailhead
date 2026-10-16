@@ -357,3 +357,56 @@ applies as written. Round 1's runs stay in place; round-2 captures are named `<c
 
 As it falls. There is no further prose iteration in this round: whatever fails is reported as a
 failure, with the clause it fails on.
+
+---
+
+# Round 3 — registered before any prose edit and before any round-3 arm run
+
+Round 2 measured the treatment at `31e4fc6d`: 3 of 9 cells passed (`MANUAL-EVAL.md`, "Round 2").
+Four treatment cells failed again, on the same lines as round 1: `distilled`, `left-out`,
+`nest-fail` and `inject`.
+
+## Diagnosis
+
+The four failing cells are exactly the cells where the operator's chosen set equals every gathered
+follow-up:
+
+| Cell | Gathered | Chosen |
+|---|---|---|
+| `distilled` | 1 | 1 |
+| `left-out` | 2 | 2 |
+| `nest-fail` | 2 | 2 |
+| `inject` | 2 | 2 |
+| `chosen` (passes) | 4 | 3 |
+
+In the round-2 `left-out` stream the main agent's only reasoning before the first dispatch was, in
+substance, that both follow-ups are confirmed for the shortlist with no other moves needed, so it
+refines the first now. It then dispatched with no text block: the step 6 report, Confirmation 1, the
+disposition set and the first progress line were all skipped. In `distilled` it went from `check`
+straight to `assemble` with no step 11 blocks. The agent treats "no moves needed / everything chosen"
+as a reason to skip the displays. Round 2's rule (an answer given before a question was reached does
+not skip that question's step) did not name that case and changed nothing in the four cells.
+
+## The prose change under test
+
+In `skills/tidy-followups/SKILL.md` only: the step 6 report, Confirmation 1, the included and left
+sets with the disposition question, and step 11's verbatim blocks and question are each shown even
+when the operator's choice changes nothing (every gathered follow-up chosen, the chosen set equal to
+the shortlist, a single follow-up); "no moves needed" is never a reason to skip a display. Each step 9
+start line is the ritual's own text output before that follow-up's dispatch, the first included. The
+existing up-front-answers rule is tightened into this statement rather than kept beside it.
+
+## What runs
+
+All 9 treatment cells (`chosen`, `distilled`, `none-included`, `none-included-distilled`, `left-out`,
+`rerun`, `slice-pass`, `nest-fail`, `inject`) rerun once each against the new treatment commit,
+sequentially, from a fresh `git archive` snapshot built as round 2 built `snap-treat`. `rerun` and
+`slice-pass` run against the end state of the round-3 `chosen` run. Grading (`grade.py`), fixtures,
+the arm prompt and the expected verdicts are unchanged; the inconclusive rule applies as written;
+the round-2 harness correction (`TMPPREFIX`) stays in place. Earlier rounds' captures stay untouched;
+round-3 captures are named `<cell>-r3-treat.*`.
+
+## How the result is reported
+
+As it falls. Round 3 is the final prose round in this change: there is no further prose iteration,
+and whatever fails is reported as a failure, with the clause it fails on.
