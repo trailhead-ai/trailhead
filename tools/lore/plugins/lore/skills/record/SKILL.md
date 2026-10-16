@@ -114,8 +114,8 @@ habit:
 
 ## Choosing the surface
 
-- A fix to a record that the operator has ruled on or accepted, in their own message in this
-  session, is not deferred work: it is neither a candidate nor a task. Run `/lore:correct`,
+- A fix to a record that is known in the sense `/lore:correct` defines, which needs the operator's
+  own message in this session, is not deferred work: it is neither a candidate nor a task. Run `/lore:correct`,
   which applies it now. Check this first; only a fix nobody can state yet is tracked, and
   `/lore:correct` says how.
 - An incidental finding that arose during work (a decision, lesson, dead-end,

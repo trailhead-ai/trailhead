@@ -388,10 +388,11 @@ A review of one record sometimes shows that a *different* record is wrong and wh
 is. That is a correction to another record, not a finding on the record under review.
 
 - **Check it as you draft, then list it with its fix.** While drafting, check the claim against its
-  source: the code, the configuration or the record itself, never a reviewer's quote of it. List the
-  correction with its drafted fix in every case; never hold the fix back until the operator confirms
-  something. A premise you cannot check from here is stated in the entry, beside the fix. A source
-  that contradicts the claim means there is no correction to list: say so instead.
+  source: the code, the configuration, or the records that settle it (the record itself or another
+  one), never a reviewer's quote of it. List the correction with its drafted fix in every case;
+  never hold the fix back until the operator confirms something. A premise you cannot check from
+  here is stated in the entry, beside the fix. A source that contradicts the claim means there is no
+  correction to list: say so instead.
 - **List it apart.** Under this heading, after the findings on the record under review, as a
   numbered list. Each entry gives the record id as `kind/name`, the wrong text, and the drafted fix
   as the full corrected sentence or value. Do not fold it into the findings on the record under
@@ -437,7 +438,7 @@ is. That is a correction to another record, not a finding on the record under re
 - **Never a task, except when the fix is unknown.** A known fix is never offered as a task, not even
   as an alternative to applying it. The fix is unknown only when nothing within this session's reach
   decides the right text, because something outside it does. A fact you can read in the code, the
-  configuration or the seeded records is known, not unknown. Only an unknown fix is recorded as a
-  task, naming the record, what is known and what would decide the fix.
+  configuration or the records that settle it is known, not unknown. Only an unknown fix is recorded
+  as a task, naming the record, what is known and what would decide the fix.
 - **No secrets.** The drafted fix and the reason sync to the team permanently. Put no tokens, keys,
   passwords or key-shaped strings in either.
