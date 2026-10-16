@@ -28,6 +28,9 @@ import sys
 import time
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import scrub as capture_scrub  # noqa: E402
+
 REPO = Path(__file__).resolve().parents[6]
 BASE_SHA = "ce19d0cec6b8913e7c12ccbb159abe7d926b72d9"
 SNAP_PATHS = ["tools/craft/plugins/craft", "tools/lore/plugins/lore", "trailhead"]
@@ -57,6 +60,14 @@ TASK_PROMPT = (
     "You are an agent working with a throwaway lore vault; `lore` on your PATH reads it. The "
     "craft plugin is at {root}. {task}"
 )
+
+
+def scrub_roots(work: Path) -> dict:
+    return {"work": str(work), "home": HOME, "user": USER, "repo": str(REPO)}
+
+
+def scrubbed(work: Path, text: str) -> str:
+    return capture_scrub.scrub_text(text, **scrub_roots(work))
 
 
 def sh(argv, **kw):
@@ -171,9 +182,8 @@ def run(args) -> None:
         CLAUDE, "-p", prompt, "--setting-sources", "project",
         "--allowedTools", ALLOWED, "--output-format", "stream-json", "--verbose",
     ]
-    (meta / f"{key}.cmd.txt").write_text(
-        " ".join(repr(str(a)) if " " in str(a) or "\n" in str(a) else str(a) for a in argv) + "\n"
-    )
+    cmd_line = " ".join(repr(str(a)) if " " in str(a) or "\n" in str(a) else str(a) for a in argv) + "\n"
+    (meta / f"{key}.cmd.txt").write_text(scrubbed(work, cmd_line))
     start = time.time()
     with open(meta / f"{key}.stream.jsonl", "w") as out, open(meta / f"{key}.stderr.txt", "w") as err:
         done = subprocess.run(
@@ -193,7 +203,8 @@ def run(args) -> None:
             cost = ev.get("total_cost_usd")
     summary = {"cell": key, "exit": done.returncode, "seconds": round(elapsed), "cost_usd": cost,
                "real_vault_hits": hits, "run_id": manifest["run_id"]}
-    (meta / f"{key}.summary.json").write_text(json.dumps(summary, indent=1))
+    scrubbed_summary = capture_scrub.scrub_value(summary, **scrub_roots(work))
+    (meta / f"{key}.summary.json").write_text(json.dumps(scrubbed_summary, indent=1))
     print(json.dumps(summary))
 
 
