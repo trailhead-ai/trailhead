@@ -30,8 +30,12 @@ where an agent decides to put a deliverable.
 
 ## Arms
 
-- **treatment** — `arms/treatment.md`: the baseline brief with
-  `outpost/rules.md` appended verbatim.
+- **treatment (frozen)** — `arms/treatment-pre-pad-exception.md`: the baseline
+  brief with `outpost/rules.md` as of commit `037aff8b` appended verbatim. This is
+  the text the committed 2026-09-09 rows measured.
+- **treatment (live)** — `arms/treatment.md`: the baseline brief with today's
+  `outpost/rules.md` appended verbatim, including the Scratch pads section and the
+  Default rule's pad exception. The next re-run measures this arm.
 - **baseline** — `arms/baseline.md`: the same brief, no ruleset.
 
 Dispatched as separate `claude` processes with `--setting-sources project`, per
