@@ -167,6 +167,12 @@ ARM_SOURCES: dict[str, list[Source]] = {
         (GAUNTLET_DISPOSITIONS, BASELINE_REVISION),
         (COUNCIL, CODE_REVIEW_EDIT_REVISION),
     ],
+    "control-specreview.md": [
+        (RULES, BASELINE_REVISION),
+        (GAUNTLET_SKILL, BASELINE_REVISION),
+        (GAUNTLET_DISPOSITIONS, BASELINE_REVISION),
+        (COUNCIL, CODE_REVIEW_BASELINE_REVISION),
+    ],
     "regress-driver.md": [
         (RULES, BASELINE_REVISION),
         (DRIVE_SKILL, BASELINE_REVISION),

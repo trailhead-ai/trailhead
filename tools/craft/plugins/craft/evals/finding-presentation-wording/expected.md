@@ -1646,3 +1646,25 @@ cases above.
   `resolved`" outcome line and a "the Critical" sentence), driver not run.
 - `regress-specreview` is BLOCKED-for-operator. The by-eye finding-order reading of these captures (AC17, AC18) is not
   done here and stays unmeasured.
+
+
+## Operator decision, 2026-10-16: a paired control for the `specreview` regression miss
+
+Recorded after `regress-specreview` missed its bar (`severity-name` `AMBIGUOUS`, 4 of 6 `plain`) and before any
+control run. This section is dated and appended; it does not amend the grammar or any section above.
+
+The operator chose to separate a leak this slice caused from one the shipped contract already had. The paired control
+is the `specreview` site run on the shipped contract, before this slice's edit:
+
+- Arm `arms/control-specreview.md` = `rules.md`, `skills/gauntlet/SKILL.md` and `skills/gauntlet/dispositions.md`, all
+  three at the case baseline revision exactly as `regress-specreview.md` pins them, plus `skills/_shared/council.md` at
+  origin/main `7b5c65f9a00157e0aee884bdfb0f3fe0b99cdc29` (the shipped contract before the slice's edit). The only
+  difference from `regress-specreview.md` is the `council.md` revision. Pinned in `ARM_SOURCES`.
+- Six runs, `control-specreview-1` to `-6`, inline form, `prompt-specreview.md`, graded with the `specreview` checks
+  against `reports-spec-review.md`.
+- Rule, fixed here: control `severity-name` non-plain (`internal` or any verdict other than `plain`) in 2 or more of 6
+  means the `regress-specreview` leak is residual from before this slice. It is classified residual, recorded, not a
+  pass, and the slice continues. Non-plain in 0 or 1 of 6 means the regression is caused by this edit: the slice stops
+  for operator rework.
+- Only if the rule says continue, `regress-driver-1` to `-3` run (inline, `prompt-driver.md`, the driver's checks
+  including `persisted-levels`, split to `-4` to `-6` per the case rules). A driver regression failure stops the slice.
