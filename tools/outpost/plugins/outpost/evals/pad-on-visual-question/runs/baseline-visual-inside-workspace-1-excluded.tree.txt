@@ -1,2 +1,3 @@
 pads: xdg-state/camp/bramble/worktrees/ws-quill/sites/checkout-promo-code
+round provenance: built from <tmp>; every option name in the built pad appears in this run's own tool inputs: NO
 tool calls: Skill, Write, Bash, Bash, Write, Bash, Read, Bash

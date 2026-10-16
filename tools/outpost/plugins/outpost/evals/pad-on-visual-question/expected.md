@@ -201,7 +201,10 @@ Six gated scenarios plus one observed, three runs per arm, one model tier,
 single-turn `claude -p`. The typed-answer and decline (words-only) scenarios
 **simulate the earlier turn inside a single-turn brief**: the arm reads a
 transcript excerpt, it did not live the earlier turn. No PreToolUse hook in the
-clean room. Runs need macOS for `scripts/eval-sandbox`. The success link form
+clean room. Each arm receives `rules.md` through `--append-system-prompt`, which
+may weigh more than the installed `~/.claude/rules/` file a real session reads;
+the clauses measured on treatment alone (words only, typed answer) carry that
+caveat most. Runs need macOS for `scripts/eval-sandbox`. The success link form
 measured is the no-host-identity one; the identity-qualified form and the
 unconfirmed branch are unmeasured. Not covered: a visual question late in a long
 session, Safari, a pasted pad reply. Dispatched agents are observed, not gated.
