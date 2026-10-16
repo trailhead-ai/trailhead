@@ -287,7 +287,7 @@ Report every left-out follow-up as one plain sentence for its reason, naming the
 | `not-ready` | It is not at `ready` after refinement, so it cannot be nested. |
 | `already-nested` | It already sits under another parent. |
 | `is-a-parent` | It is itself a parent task, not a leaf to build. |
-| `depends-outside` | It depends on the unfinished task named in `dependency`, which is not part of this set. |
+| `depends-outside` | It depends on the unfinished dependency named in `dependency`, which is not part of this set; when `dependency` is absent, it depends on unfinished work outside the set. |
 
 An included follow-up whose refinement did not land (a subagent that failed, or a record that still
 shows no refinement) is named with the write that did not land, `refinement of task/<name>`, in the
@@ -339,10 +339,14 @@ and remove the file. Act on the exit:
   the names at fault. Report it by the table below and go to step 13 as no parent.
 - **2** — a failure. After the parent was created, stdout carries the same JSON with `buildable`
   false and the reason code on stderr (not in the JSON). Before the create (the checks, or a
-  `parent-create-failed` whose create left no parent), nothing was written and nothing is on stdout.
-  `internal-error` prints no JSON even after the create: the script attempts its undo first, but its
-  report is lost, so say the parent's state is unknown and that rerunning this ritual names any
-  parent the undo left live (step 7).
+  `parent-create-failed` with no `subject:` line), nothing was written and nothing is on stdout. A
+  `parent-create-failed` with a `subject:` line has no JSON either: the create's outcome was
+  unclear, nothing was undone, and every parent named there is still live, so rerunning this ritual
+  stops at it (step 7). `internal-error` prints no JSON even after the create: the script attempts
+  its undo first, but its report is lost, so say the parent's state is unknown and that rerunning
+  this ritual names any parent the undo left live (step 7). So does a failure with
+  `parent-state: unknown` on stderr and no JSON: the create's outcome was unclear and the check
+  afterwards failed.
 
 | `reason-code` | What happened, whose side, what to do |
 |---|---|
@@ -353,13 +357,14 @@ and remove the file. Act on the exit:
 | `child-changed` | A child's record changed after you confirmed it; the vault's. Nothing was written. Rerun the ritual so you confirm the new text. |
 | `followup-parent-exists` | A follow-up parent for this spec appeared meanwhile; the vault's. Nothing was written. Rerun, which stops at it. |
 | `concurrent-followup-parent` | A second follow-up parent appeared during assembly; another run's. The new parent was undone. Rerun after the other run settles. |
-| `parent-create-failed` | The parent record could not be created; `lore`'s or the filesystem's. Nothing was written, unless the create's outcome was unclear and the script found the parent it left: then stdout carries the report and the parent was dropped. Check `lore vault ls`, then rerun. |
+| `parent-create-failed` | The parent record could not be created; `lore`'s or the filesystem's. With no `subject:` line, nothing was written. With one, the create's outcome was unclear: nothing was undone, there is no JSON, and every parent named is still live, so a rerun stops at it at step 7. Check `lore vault ls`, then rerun. |
 | `nesting-incomplete` | A child could not be nested or the parent could not be made ready; `lore`'s or the vault's. The run undid what it wrote; read the lists below. |
 
 The codes shared with the gather table (`no-vaults`, `spec-not-found`, `spec-ambiguous`,
 `not-a-spec`, `malformed-sidecar`, `empty-sidecar`, `lore-missing`, `lore-timeout`, `lore-failed`,
-`lore-output-not-json`, `invalid-spec-name`, `invalid-arguments`, `internal-error`) read the same
-here.
+`lore-output-not-json`, `search-truncated`, `invalid-spec-name`, `invalid-arguments`,
+`internal-error`) read the same here. After the create, `search-truncated` with JSON on stdout means
+the run undid the parent, and the JSON's `undone` and `undo-failed` say what happened.
 
 In the JSON, `failed[].write` is `nest`, `confirm` (written, but the read shows it not nested) or
 `ready` (the parent); `undone[].write` is `un-nest` or `drop`; `nested` is what is still nested when

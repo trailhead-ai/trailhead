@@ -41,8 +41,10 @@ left-out sibling, or on a cycle, is left out. A `depends-on` entry holding a
 qualified `kind/name` is never done: lore's runnable check treats any entry that
 is not a bare task name as unfinished, and its CLI refuses to write one, so it
 only arrives through an edited or synced sidecar. Such a follow-up is left out
-as `depends-outside` with the entry as `dependency`. An entry that fails the
-shape check, or holds `@`, makes the record malformed.
+as `depends-outside`, as is one whose entry is anything but a bare task name
+(`@` and every other unsafe shape included). `dependency` is the entry as written
+when it passes the shape check; otherwise it is omitted, so nothing unchecked is
+emitted. A `depends-on` that is not a list of strings makes the record malformed.
 
 When several rules apply, the left-out reason is the first of: `is-a-parent`,
 `already-nested`, `routed-to-plan`, `routed-to-brainstorm`,
@@ -90,13 +92,13 @@ report (below) on stdout and one `reason-code:` line on stderr:
        the title: lore never refuses or overwrites a colliding name, it suffixes
        `-2`, `-3`, ... Anything else (a failed create, such as a name too long for
        the filesystem, or unexpected output) leaves the outcome unclear, so the live
-       follow-up parents are re-queried. A parent with this run's title is the
-       create's: it is dropped through the undo path below, and the report (with
-       `parent` set and `buildable` false) is printed with `parent-create-failed`
-       (exit 2). With none found, `parent-create-failed` (exit 2) means nothing
-       was written, and nothing is on stdout. Several with this run's title cannot
-       be told apart from another run's: `concurrent-followup-parent`, nothing
-       dropped, `subject:` naming them, nothing on stdout.
+       follow-up parents are re-queried. Whatever it finds, nothing is dropped or
+       nested (a same-titled parent may be another run's, so none can be proven
+       this run's) and nothing is printed on stdout: `parent-create-failed`
+       (exit 2), with a `subject:` line naming every live parent carrying this
+       run's title, or none when none does. If the re-query itself fails, the
+       exit is 2 with that failure's reason code, a `parent-state: unknown` line
+       on stderr, and nothing on stdout.
     2. Re-query live follow-up parents linked to the spec. Any other than the new
        one: undo, exit 2 `concurrent-followup-parent`, with `subject:` naming both.
     3. Nest each child in file order (`--parent`): re-read its revision immediately
@@ -227,11 +229,12 @@ _BACKTICKED_RE = re.compile(r"`([^`\n]+)`")
 class ParentError(Exception):
     """A failure that maps to a stable `reason-code:`; carries no vault text."""
 
-    def __init__(self, reason: str, subjects: tuple[str, ...] = ()):
+    def __init__(self, reason: str, subjects: tuple[str, ...] = (), state_unknown: bool = False):
         assert reason in REASON_CODES, reason
         super().__init__(reason)
         self.reason = reason
         self.subjects = subjects
+        self.state_unknown = state_unknown
 
 
 class _Parser(argparse.ArgumentParser):
@@ -294,10 +297,12 @@ def _task_dependencies(sidecar: dict) -> list[str]:
     for entry in entries:
         if not isinstance(entry, str):
             raise ParentError("malformed-sidecar")
-        if "@" in entry or not gather._shape_ok(entry):
-            raise ParentError("malformed-sidecar")
         names.append(entry)
     return sorted(set(names))
+
+
+def _bare_task_name(entry: str) -> bool:
+    return "/" not in entry and gather._shape_ok(entry)
 
 
 def _static_verdict(sidecar: dict, body: str) -> str | None:
@@ -342,13 +347,13 @@ def check_followups(runner, spec: str, names: list[str]) -> dict:
     done_outside: dict[str, bool] = {}
     for deps in candidates.values():
         for dep in deps:
-            if "/" not in dep and dep not in records and dep not in done_outside:
+            if _bare_task_name(dep) and dep not in records and dep not in done_outside:
                 done_outside[dep] = _dependency_done(runner, vault, dep)
 
     accepted: set[str] = set()
 
     def finished(dep: str) -> bool:
-        return "/" not in dep and (dep in accepted or done_outside.get(dep, False))
+        return _bare_task_name(dep) and (dep in accepted or done_outside.get(dep, False))
 
     progressed = True
     while progressed:
@@ -360,7 +365,9 @@ def check_followups(runner, spec: str, names: list[str]) -> dict:
     for name, deps in candidates.items():
         if name not in accepted:
             unfinished = next(dep for dep in deps if not finished(dep))
-            left_out[name] = _left_out(name, "depends-outside", unfinished)
+            left_out[name] = _left_out(
+                name, "depends-outside", unfinished if gather._shape_ok(unfinished) else None
+            )
 
     eligible, files_by_name = [], {}
     for name in sorted(accepted):
@@ -469,18 +476,13 @@ def _created_name(done) -> str | None:
     return name if kind == "task" and gather._shape_ok(name) else None
 
 
-def _landed_parent(runner, vault: str, spec: str, spec_sidecar: dict, title: str) -> str | None:
-    """The follow-up parent a create of unclear outcome left behind, if any. No live
-    parent existed before the create, so any live one now with this run's title
-    is its. More than one with that title cannot be told apart from another run's."""
-    mine = [
+def _live_parents_titled(runner, vault: str, spec: str, spec_sidecar: dict, title: str) -> list[str]:
+    """Names of the live follow-up parents carrying `title`."""
+    return [
         name
         for name in live_followup_parents(runner, vault, spec, spec_sidecar)
-        if _read_task(runner, vault, name)[0].get("title") == title
+        if gather._shape_ok(name) and _read_task(runner, vault, name)[0].get("title") == title
     ]
-    if len(mine) > 1:
-        raise ParentError("concurrent-followup-parent", tuple(mine))
-    return mine[0] if mine else None
 
 
 def _read_ok(read) -> bool:
@@ -558,15 +560,13 @@ def assemble(runner, spec: str, children: list[dict], today: datetime.date) -> t
         stdin=body,
     )
     parent_name = _created_name(created)
-    report: dict = {"parent": parent_name, "nested": [], "failed": [], "undone": [], "undo-failed": []}
     if parent_name is None:
-        parent_name = _landed_parent(runner, vault, spec, spec_sidecar, title)
-        if parent_name is None:
-            raise ParentError("parent-create-failed")
-        report["parent"] = parent_name
-        _undo(runner, vault, parent_name, [], "its create did not report success", report)
-        report["buildable"] = False
-        return report, "parent-create-failed", ()
+        try:
+            mine = _live_parents_titled(runner, vault, spec, spec_sidecar, title)
+        except (ParentError, gather.GatherError) as err:
+            raise ParentError(err.reason, state_unknown=True) from None
+        raise ParentError("parent-create-failed", tuple(sorted(mine)))
+    report: dict = {"parent": parent_name, "nested": [], "failed": [], "undone": [], "undo-failed": []}
     attempted: list[str] = []
     reason, subjects = None, ()
     try:
@@ -621,11 +621,13 @@ def _flip(runner, vault: str, parent_name: str, report: dict) -> None:
         report["failed"].append({"name": parent_name, "write": "ready"})
 
 
-def _refuse(code: int, reason: str, subjects: tuple = ()) -> int:
+def _refuse(code: int, reason: str, subjects: tuple = (), state_unknown: bool = False) -> int:
     assert reason in REASON_CODES, reason
     print(f"reason-code: {reason}", file=sys.stderr)
     if subjects:
         print(f"subject: {' '.join(subjects)}", file=sys.stderr)
+    if state_unknown:
+        print("parent-state: unknown", file=sys.stderr)
     return code
 
 
@@ -656,7 +658,7 @@ def main(argv: list[str] | None = None, runner=None, today: datetime.date | None
                     runner, args.spec_name, children, today or datetime.date.today()
                 )
         except ParentError as err:
-            return _refuse(1 if err.reason in REFUSAL_REASONS else 2, err.reason, err.subjects)
+            return _refuse(1 if err.reason in REFUSAL_REASONS else 2, err.reason, err.subjects, err.state_unknown)
         except gather.GatherError as err:
             return _refuse(2, err.reason)
         print(json.dumps(result))
