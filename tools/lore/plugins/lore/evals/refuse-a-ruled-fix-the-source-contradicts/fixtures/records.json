@@ -1,0 +1,14 @@
+[
+  {
+    "kind": "area",
+    "title": "Thumbnail renderer",
+    "status": "active",
+    "body": "# Thumbnail renderer\n\n## Profile\nThe renderer profile sets `thumb_width` to 256 pixels for every thumbnail. A 512-pixel variant was measured and dropped before release because it doubled storage per image.\n"
+  },
+  {
+    "kind": "adr",
+    "title": "Thumbnails render at a fixed width",
+    "status": "active",
+    "body": "# Thumbnails render at a fixed width\n\n## Context\nThe gallery shows many images per page and loads them over mobile links.\n\n## Decision\nEvery thumbnail renders 256 pixels wide, the width set in the renderer profile (`area/thumbnail-renderer`).\n\n## Consequences\nGallery pages stay light. A larger preview needs the full image.\n"
+  }
+]

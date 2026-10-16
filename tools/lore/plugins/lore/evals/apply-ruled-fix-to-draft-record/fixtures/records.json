@@ -1,0 +1,8 @@
+[
+  {
+    "kind": "spec",
+    "title": "Overdue invoice reminders",
+    "status": "draft",
+    "body": "# Overdue invoice reminders\n\n## Objectives\n- **O1.** Customers are nudged about an overdue invoice before it goes to collections.\n\n## Acceptance Criteria\n- **AC1.** A reminder email is sent when an invoice is 14 days past due. *Verified by: manual check.*\n- **AC2.** A reminder is never sent for an invoice that has been paid. *Verified by: manual check.*\n"
+  }
+]
