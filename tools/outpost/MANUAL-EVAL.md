@@ -829,16 +829,18 @@ condition for every record, with no confound. Captures are not committed — thi
 `runs/` tree (consistent with the case's existing convention of grading from ephemeral captures,
 per the entries above), and remain only in the session scratchpad.
 
-### 2026-10-16 — live treatment arm re-run against the pad exception (`rules.md` at `e1f14e86`)
+### 2026-10-16 — live treatment arm re-run against the pad exception (`rules.md` blob `dc7c8757`)
 
 **Why.** The scratch-pad slice added one sentence to the Default rule naming a pad as its
 exception, and a `## Scratch pads` section. This re-run checks the routing those rows above
 measured still holds with both in the ruleset.
 
-**Arm.** The committed live `arms/treatment.md`, which embeds `rules.md` as of `e1f14e86`
-(pinned by `tools/outpost/tests/test_publish_routing_arms_contract.py`); the frozen
+**Arm.** The committed live `arms/treatment.md`, which embeds the `rules.md` whose blob is
+`dc7c8757` (`git hash-object tools/outpost/plugins/outpost/rules.md`) (pinned by
+`tools/outpost/tests/test_publish_routing_arms_contract.py`); the frozen
 `arms/treatment-pre-pad-exception.md` is the text the 2026-09-09 rows measured. Repo HEAD at
-dispatch: `0eaf74bc`. Treatment only; the no-ruleset baseline is unaffected by the edit.
+dispatch: the commit "fix(outpost): give the pad eval's arm a python3 that can publish, and correct
+its runner". Treatment only; the no-ruleset baseline is unaffected by the edit.
 
 **Dispatch.** 7 fixtures × 3 runs, each a separate `claude -p` (Claude Code 2.1.301,
 `claude-opus-5-5`) inside `scripts/eval-sandbox`, with the same runner shape the
@@ -891,18 +893,19 @@ directory, and `expected.md` carrying the verdicts and pass condition, written b
 was run.
 
 **Under test:** the `## Scratch pads` section and the Default rule's pad exception of
-`plugins/outpost/rules.md` at `e1f14e86`. Treatment is the brief plus that `rules.md`;
+`plugins/outpost/rules.md` with blob `dc7c8757`. Treatment is the brief plus that `rules.md`;
 baseline is the brief plus `rules.md` at `3466c9d4` (before the slice). Both load the
 scratch-pad skill identically through `--plugin-dir`, so the arms differ only in the rule diff.
 
 | Date | Arm | Prose under test | Runs | Result | Notes |
 |------|-----|------------------|------|--------|-------|
 | 2026-10-16 | baseline (`rules.md` at `3466c9d4` + skill) | none of the pad rule | 6 (+2 excluded) | drew a pad unasked in **6/6** on the two visual-success scenarios | link relayed as printed and a typed answer invited in every run |
-| 2026-10-16 | treatment (`rules.md` at `e1f14e86` + skill) | Scratch pads section + pad exception | 21 | **15/18 as registered** (not-visual misses 3/3); 18/18 on the authoring-error reading; observed scenario recorded | see below |
+| 2026-10-16 | treatment (`rules.md` blob `dc7c8757` + skill) | Scratch pads section + pad exception | 21 | **15/18 as registered** (not-visual misses 3/3); 18/18 on the authoring-error reading; observed scenario recorded | see below |
 
-**Runner, as settled by the Mac probe.** Claude Code 2.1.301, `claude-opus-5-5`, repo HEAD
-`0eaf74bc`. The probe found four things the Linux build could not, all now in `expected.md`'s
-runner contract:
+**Runner, as settled by the Mac probe.** Claude Code 2.1.301, `claude-opus-5-5`, repo HEAD at
+the commit "fix(outpost): give the pad eval's arm a python3 that can publish, and correct its
+runner". The probe found four things the Linux build could not, all now in `expected.md`'s runner
+contract:
 
 - `claude` authenticates only with the developer's real `HOME` and `USER` (a run-directory
   `HOME`, or `env -i` dropping `USER`, reports "Not logged in"). The XDG pair stays throwaway;
@@ -912,7 +915,7 @@ runner contract:
   readable.
 - The fixture's `PATH=/usr/bin:/bin` resolved the skill's bare `python3` to macOS's 3.9, which
   cannot import `tomllib`, so every workspace publish died with a traceback. Fixed test-first
-  in `0eaf74bc`: the builder links a 3.11+ `EVAL_PYTHON3` as `<run>/bin/python3`.
+  in that commit: the builder links a 3.11+ `EVAL_PYTHON3` as `<run>/bin/python3`.
 - Run directories cannot sit under the home directory, so siblings are isolated by
   `DENY_EXTRA`, which needs a trailing `:` because `eval-sandbox` drops its last entry (logged
   as a follow-up).
