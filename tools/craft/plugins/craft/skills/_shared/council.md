@@ -412,8 +412,8 @@ is. That is a correction to another record, not a finding on the record under re
   that drifted from what shipped, a mechanism detail inside the same decision, wording, new
   evidence, narrowing a spec criterion. **Material (not an amend):** reversing a decision, adding or
   removing one, widening or narrowing what an ADR covers, or leaving a spec objective with nothing
-  delivering it. Changing a figure the decision rests on (10 minutes to 5, 36 slots to 72) while the
-  decision stays the same is a wrong fact: in scope.
+  delivering it. Changing a figure the decision rests on, while the decision itself stays the same,
+  is a wrong fact: in scope.
   - **Frozen** (an ADR or spec past `draft`, any decision, a `done`, `dropped` or `superseded`
     task): amend in place, with the `revision` the read printed as `--base`. The operator's
     acceptance is the yes, so do not ask again; `--initiated-by agent` records that a review
