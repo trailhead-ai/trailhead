@@ -1,4 +1,4 @@
 vault CHANGED task/distilled-reject-path-traversal-in-the-upload-endpoint.json
 vault CHANGED task/distilled-reject-path-traversal-in-the-upload-endpoint.md
-repo head before=68067ec20512e28362afde79076c879a5a8c04ee after=68067ec20512e28362afde79076c879a5a8c04ee
+repo head before=[sha:68067ec2] after=[sha:68067ec2]
 repo status after=''

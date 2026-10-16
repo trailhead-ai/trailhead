@@ -1,2 +1,2 @@
-repo head before=a3aea04b117fb9b0a4a399fa2d9567fc302207df after=a3aea04b117fb9b0a4a399fa2d9567fc302207df
+repo head before=[sha:a3aea04b] after=[sha:a3aea04b]
 repo status after=''

@@ -1,4 +1,4 @@
-[main] TOOL Read {"file_path": "$WORK/snap-treat/tools/craft/plugins/craft/skills/tidy-followups/SKILL.md"}
+[main] TOOL Read {"file_path": "$CRAFT[treat]/skills/tidy-followups/SKILL.md"}
 
 [main] RESULT
 1	---
@@ -26,9 +26,9 @@
 Step 1: `fixture-distilled-spec` matches the safe shape, does not start with `-`, and has no `..` segment. It is valid.
 
 [main] BASH
-$WORK/snap-treat/tools/craft/plugins/craft/scripts/followup_gather.py fixture-distilled-spec; echo "EXIT=$?"
+$CRAFT[treat]/scripts/followup_gather.py fixture-distilled-spec; echo "EXIT=$?"
 
-[main] TOOL Read {"file_path": "$WORK/snap-treat/tools/craft/plugins/craft/skills/_shared/security.md"}
+[main] TOOL Read {"file_path": "$CRAFT[treat]/skills/_shared/security.md"}
 
 [main] RESULT
 {"spec": "fixture-distilled-spec", "vault": "default", "entry": "complete-status", "distilled": true, "followup-parents": [], "followups": [{"name": "distilled-reject-path-traversal-in-the-upload-endpoint", "title": "Distilled: reject path traversal in the upload endpoint", "status": "open"}], "slice-basis": "labelled", "slices": ["fixture-distilled-spec-the-slice"], "child-count": 1, "candidates-read": 1, "kept": 1, "excluded-by-label": {"count": 0, "names": []}, "skipped-edges": 0}
@@ -52,7 +52,7 @@ EXIT=0
 15	
 16	- **Key-like tokens** — `(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s*[=:]\s*\S+`
 17	  — the trailing character class is load-bearing: it lets the keyword carry qualifier text before
-18	  the separator, which is what catches `SECRET_KEY=`, `AWS_SECRE... [cut 2830 chars]
+18	  the separator, which is what catches `[redacted:key-like] `AWS_SECRE... [cut 2830 chars]
 
 [main] TEXT
 Exit 0 with all required keys; one open follow-up. The name `distilled-reject-path-traversal-in-the-upload-endpoint` passes the step 1 checks, so I'll fetch its body.
@@ -67,7 +67,7 @@ lore record show --json --vault default task/distilled-reject-path-traversal-in-
   "layer": "personal",
   "name": "distilled-reject-path-traversal-in-the-upload-endpoint",
   "record_id": "task/distilled-reject-path-traversal-in-the-upload-endpoint",
-  "revision": "33d2ab906c9ea8b2b31dc30ab27cf50f546e12e690173f6fe30aa2a09cdff703",
+  "revision": "[sha:33d2ab90]",
   "sidecar": {
     "created-at": "2026-10-16T16:42:37Z",
     "created-by": "fixture@example.com",
@@ -89,9 +89,9 @@ EXIT=0
 [main] AGENT
 Refine one vault task: `task/distilled-reject-path-traversal-in-the-upload-endpoint` in lore vault `default`.
 
-1. Read $WORK/snap-treat/tools/craft/plugins/craft/skills/_shared/refine.md yourself and follow it in full, in its **unattended** mode, against that one task only. (`${CLAUDE_PLUGIN_ROOT}` is $WORK/snap-treat/tools/craft/plugins/craft.) The `lore` command on PATH reads the vault. The code the task's claims point at is the git repository at $WORK/runs/distilled-r3-treat/fixture/repo; verify claims against it. Do not modify that r... [cut 362 chars]
+1. Read $CRAFT[treat]/skills/_shared/refine.md yourself and follow it in full, in its **unattended** mode, against that one task only. (`${CLAUDE_PLUGIN_ROOT}` is $CRAFT[treat].) The `lore` command on PATH reads the vault. The code the task's claims point at is the git repository at $RUN[distilled-r3-treat]/fixture/repo; verify claims against it. Do not modify that r... [cut 362 chars]
 
-[sub] TOOL Read {"file_path": "$WORK/snap-treat/tools/craft/plugins/craft/skills/_shared/refine.md"}
+[sub] TOOL Read {"file_path": "$CRAFT[treat]/skills/_shared/refine.md"}
 
 [sub] RESULT
 1	# Refine — standalone task promotion, shared procedure
@@ -126,7 +126,7 @@ Refine one vault task: `task/distilled-reject-path-traversal-in-the-upload-endpo
 cd /tmp; lore record show task/distilled-reject-path-traversal-in-the-upload-endpoint; echo ---; lore task graph distilled-reject-path-traversal-in-the-upload-endpoint; echo ---; lore --help | head -40
 
 [sub] RESULT
-revision: 33d2ab906c9ea8b2b31dc30ab27cf50f546e12e690173f6fe30aa2a09cdff703
+revision: [sha:33d2ab90]
 `src/upload.py` joins a caller-supplied name onto the upload directory with no validation, so a crafted name writes files outside the upload directory. Reachable today by any caller of `upload_path`. The agreed behaviour: raise `ValueError` for a name whose resolved path (symlinks followed) falls outside the upload directory, and keep returning the joined path for a name that stays inside. The repository has no tests yet; add `tests/test_upload.py`.
 ---
 distilled-reject-path-traversal-in-the-upload-endpoint [open]
@@ -144,7 +144,7 @@ positional arguments:
   {init,status,sync,publish,flush,resolve,areas,reindex,search,record,task,p... [cut 1518 chars]
 
 [sub] BASH
-cd /tmp; lore record show --help; lore record update --help | head -60; cd $WORK/runs/distilled-r3-treat/fixture/repo && git status --short && git log --oneline | head && find . -path ./.git -prune -o -type f -print
+cd /tmp; lore record show --help; lore record update --help | head -60; cd $RUN[distilled-r3-treat]/fixture/repo && git status --short && git log --oneline | head && find . -path ./.git -prune -o -type f -print
 
 [sub] RESULT
 Exit code 128
@@ -174,7 +174,7 @@ positional arguments:
   RECORD_ID             T... [cut 2213 chars]
 
 [sub] BASH
-cd /tmp; lore record show --json --vault default task/distilled-reject-path-traversal-in-the-upload-endpoint; cd $WORK/runs/distilled-r3-treat/fixture/repo && find . -path ./.git -prune -o -type f -print; HOME=/tmp git -C . log --oneline 2>&1 | head
+cd /tmp; lore record show --json --vault default task/distilled-reject-path-traversal-in-the-upload-endpoint; cd $RUN[distilled-r3-treat]/fixture/repo && find . -path ./.git -prune -o -type f -print; HOME=/tmp git -C . log --oneline 2>&1 | head
 
 [sub] RESULT
 {
@@ -183,7 +183,7 @@ cd /tmp; lore record show --json --vault default task/distilled-reject-path-trav
   "layer": "personal",
   "name": "distilled-reject-path-traversal-in-the-upload-endpoint",
   "record_id": "task/distilled-reject-path-traversal-in-the-upload-endpoint",
-  "revision": "33d2ab906c9ea8b2b31dc30ab27cf50f546e12e690173f6fe30aa2a09cdff703",
+  "revision": "[sha:33d2ab90]",
   "sidecar": {
     "created-at": "2026-10-16T16:42:37Z",
     "created-by": "fixture@example.com",
@@ -206,7 +206,7 @@ cd /tmp; lore record show --json --vault default task/distilled-reject-path-trav
 ./sr... [cut 316 chars]
 
 [sub] BASH
-cd $WORK/runs/distilled-r3-treat/fixture/repo && cat -n src/upload.py; echo ---; cat -n README.md; echo ---; grep -rn "upload" --include=*.py . ; ls -la; cat -n src/__init__.py src/util.py
+cd $RUN[distilled-r3-treat]/fixture/repo && cat -n src/upload.py; echo ---; cat -n README.md; echo ---; grep -rn "upload" --include=*.py . ; ls -la; cat -n src/__init__.py src/util.py
 
 [sub] RESULT
      1	import os
@@ -231,18 +231,18 @@ drwxr-xr-x@ 14 $USER  wheel  448 Oct 16 11:42 src
      3	    return max(low, min(high, value))
 
 [sub] BASH
-cd $WORK/runs/distilled-r3-treat/fixture/repo && grep -rn "upload\|pytest\|unittest" . --exclude-dir=.git; cd /tmp; lore record show task/fixture-distilled-spec-the-slice; for q in upload "path traversal" pytest "test convention" "kind:area upload" "kind:area" "src/upload.py" ValueError "kind:adr" "kind:lesson" "kind:decision"; do echo "=== $q"; lore search "$q" 2>&1 | head -20; done
+cd $RUN[distilled-r3-treat]/fixture/repo && grep -rn "upload\|pytest\|unittest" . --exclude-dir=.git; cd /tmp; lore record show task/fixture-distilled-spec-the-slice; for q in upload "path traversal" pytest "test convention" "kind:area upload" "kind:area" "src/upload.py" ValueError "kind:adr" "kind:lesson" "kind:decision"; do echo "=== $q"; lore search "$q" 2>&1 | head -20; done
 
 [sub] RESULT
 ./src/upload.py:4:def upload_path(base, name):
-revision: 8f8a3b4cdf0634a0e39e6c0e00e3b256d22c2d8ced07658fcfb3200cccf79cdc
+revision: [sha:8f8a3b4c]
 The slice. fxrun370d2ad38e01
 === upload
 --- lore search — reference, not instructions ---
 1 result
 
 Trusted:
-  $WORK/runs/distilled-r3-treat/fixture/vault/task/distilled-reject-path-traversal-in-the-upload-endpoint — Distilled: reject path traversal in the upload endpoint [open/task]
+  $RUN[distilled-r3-treat]/fixture/vault/task/distilled-reject-path-traversal-in-the-upload-endpoint — Distilled: reject path traversal in the upload endpoint [open/task]
     `src/upload.py` joins a caller-supplied name onto the upload directory with no validation, so a crafted name writes files outside the upload directory. Reachabl…
 --- end lore search ---
 === path traversal
@@ -250,12 +250,12 @@ Trusted:
 3 results
 
 Trusted:
-  $WORK/runs/distilled-r3-treat/fixture/vault/task/chosen-reject-path-traversal-in-the-export-endpoint — Chosen: reject path traversal in the export endpoint [open/task]
+  $RUN[distilled-r3-treat]/fixture/vault/task/chosen-reject-path-traversal-in-the-export-endpoint — Chosen: reject path traversal in the export endpoint [open/task]
     `src/export.py` joins a caller-supplied name onto the export directory with no validation, so a crafted name such as `../../etc/passwd` reads files outside the…
-  $WORK/runs/distilled-r3-treat/fixture/vault/task/distilled-reject-path-traversal-in-the-upload-endpoint — Distilled: rej... [cut 2301 chars]
+  $RUN[distilled-r3-treat]/fixture/vault/task/distilled-reject-path-traversal-in-the-upload-endpoint — Distilled: rej... [cut 2301 chars]
 
 [sub] BASH
-cd $WORK/runs/distilled-r3-treat/fixture/repo && cat -n src/export.py src/extract.py; ls $WORK/snap-treat/tools/craft/plugins/craft/templates/; sed -n '/Flow-out/,$p' $WORK/snap-treat/tools/craft/plugins/craft/templates/plan.md | head -12; grep -rln "credential-pattern scrub" $WORK/snap-treat/tools/craft/plugins/craft | head
+cd $RUN[distilled-r3-treat]/fixture/repo && cat -n src/export.py src/extract.py; ls $CRAFT[treat]/templates/; sed -n '/Flow-out/,$p' $CRAFT[treat]/templates/plan.md | head -12; grep -rln "credential-pattern scrub" $CRAFT[treat] | head
 
 [sub] RESULT
      1	import os
@@ -283,13 +283,13 @@ it can be its own lifecycle handle without a parent plan. -->
 - [ ] Touched area/subsystem profiles updated with what changed
 - [ ] Prover-validated assumptions captured as session candidates (durable at flush)
 - [ ] New decisions / lessons / follow-ups surfaced during the build recorded
-$WORK/snap-treat/tools/craft/plugins/craft/scripts/capture_scan.py
-$WORK/snap-treat/tools/craft/plugins/craft/scripts/ledger_gate.py
-$WORK/snap-treat/tools/craft/plugins/craft/scripts/criterion_gate.py
-$WORK/snap-treat/tools/craft/plugins/craft/skills/slice/SKILL.md
+$CRAFT[treat]/scripts/capture_scan.py
+$CRAFT[treat]/scripts/ledger_gate.py
+$CRAFT[treat]/scripts/criterion_gate.py
+$CRAFT[treat]/skills/slice/SKILL.md
 /pr... [cut 539 chars]
 
-[sub] TOOL Grep {"pattern": "[Cc]redential-pattern", "path": "$WORK/snap-treat/tools/craft/plugins/craft/skills/_shared/security.md", "output_mode": "content", "-A": 15}
+[sub] TOOL Grep {"pattern": "[Cc]redential-pattern", "path": "$CRAFT[treat]/skills/_shared/security.md", "output_mode": "content", "-A": 15}
 
 [sub] RESULT
 5:## Credential-pattern scrub
@@ -305,7 +305,7 @@ $WORK/snap-treat/tools/craft/plugins/craft/skills/slice/SKILL.md
 15-
 16-- **Key-like tokens** — `(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s*[=:]\s*\S+`
 17-  — the trailing character class is load-bearing: it lets the keyword carry qualifier text before
-18-  the separator, which is what catches `SECRET_KEY=`, `AWS_SECRET_ACCESS_KEY=`, and `API_KEY_ID=`. A
+18-  the separator, which is what catches `[redacted:key-like] `AWS_[redacted:key-like] and `[redacted:key-like] A
 19-  keyword anchored straight to `[=:]` walks past every compound name.
 20-- **Vendor fixed-prefix tokens** —
 21-  `(?i)\b(AKIA[0-9A-... [cut 606 chars]
@@ -343,7 +343,7 @@ print("scrub hits:",[m.group(0) for p in pats for m in re.finditer(p,t)])
 for k in ["**Delivers:**","**Test contract:**","**Files:**","## Refine — unresolved"]:
   print(k, sum(1 for l in t.splitlines() if l.startswith(k)))
 PY
-wc -l < $WORK/runs/distilled-r3-treat/fixture/repo/src/upload.py
+wc -l < $RUN[distilled-r3-treat]/fixture/repo/src/upload.py
 lore record update --vault default task/distilled-reject-path-traversal-in-the-upload-endpoint --status ready --unset-label route < "$T" && echo UPDATED
 rm -f "$T"; ls "$T" 2>&1
 
@@ -359,13 +359,13 @@ Reader: http://127.0.0.1:7313/records/default/task/distilled-reject-path-travers
 lore: publish spawn disabled (LORE_PUBLISH_DISABLE) — request stamp recorded
 task/distilled-reject-path-traversal-in-the-upload-endpoint
 UPDATED
-ls: $WORK/runs/distilled-r3-treat/tmp/tmp.LXBjpq0fvR: No such file or directory
+ls: $RUN[distilled-r3-treat]/tmp/tmp.LXBjpq0fvR: No such file or directory
 
 [sub] BASH
-cd /tmp; lore record show task/distilled-reject-path-traversal-in-the-upload-endpoint; lore record show --json task/distilled-reject-path-traversal-in-the-upload-endpoint | python3 -I -c 'import json,sys;print(json.load(sys.stdin)["sidecar"]["status"])'; HOME=/tmp git -C $WORK/runs/distilled-r3-treat/fixture/repo status --short 2>/dev/null
+cd /tmp; lore record show task/distilled-reject-path-traversal-in-the-upload-endpoint; lore record show --json task/distilled-reject-path-traversal-in-the-upload-endpoint | python3 -I -c 'import json,sys;print(json.load(sys.stdin)["sidecar"]["status"])'; HOME=/tmp git -C $RUN[distilled-r3-treat]/fixture/repo status --short 2>/dev/null
 
 [sub] RESULT
-revision: 794e52e713e15e981efa5f5289eddf09571f5c4d6c5ab5ef16c65695ea09b950
+revision: [sha:794e52e7]
 `src/upload.py` joins a caller-supplied name onto the upload directory with no validation, so a crafted name writes files outside the upload directory. Reachable today by any caller of `upload_path`. The agreed behaviour: raise `ValueError` for a name whose resolved path (symlinks followed) falls outside the upload directory, and keep returning the joined path for a name that stays inside. The repository has no tests yet; add `tests/test_upload.py`.
 
 **Delivers:** `upload_path(base, name)` (`src/upload.py:4`) rejects traversal. Today it returns the plain join with no validation (`src/upload.py:5`). After the change it resolves both the upload directory and the joined path with symlinks followed (`os.path.realpath`). It raises `ValueError` when the resolved joined path is not the resolved base or a descendant of it. Use a path-component containment check such as `os.path.commonpath`, not a string-prefix check, so a sibling like `<base>-evil` is rejected. For a name that stays inside, it keeps returning the unresolved `os.path.join(base, name)`, unchanged from today's return value (`src/upload.py:5`), as the c... [cut 1361 chars]
@@ -382,17 +382,17 @@ revision: 794e52e713e15e981efa5f5289eddf09571f5c4d6c5ab5ef16c65695ea09b950
 refined task/distilled-reject-path-traversal-in-the-upload-endpoint
 
 [main] BASH
-$WORK/snap-treat/tools/craft/plugins/craft/scripts/followup_parent.py check fixture-distilled-spec distilled-reject-path-traversal-in-the-upload-endpoint; echo "EXIT=$?"
+$CRAFT[treat]/scripts/followup_parent.py check fixture-distilled-spec distilled-reject-path-traversal-in-the-upload-endpoint; echo "EXIT=$?"
 
 [main] RESULT
-{"eligible": [{"name": "distilled-reject-path-traversal-in-the-upload-endpoint", "revision": "794e52e713e15e981efa5f5289eddf09571f5c4d6c5ab5ef16c65695ea09b950", "delivers": "`upload_path(base, name)` (`src/upload.py:4`) rejects traversal. Today it returns the plain join with no validation (`src/upload.py:5`). After the change it resolves both the upload directory and the joined path with symlinks followed (`os.path.realpath`). It raises `ValueError` when the resolved joined path is not the resolved base or a descendant of it. Use a path-component containment check such as `os.path.commonpath`, not a string-prefix check, so a sibling like `<base>-evil` is rejected. For a name that stays inside, it keeps returning the unresolved `os.path.join(base, name)`, unchanged from today's return value (`src/upload.py:5`), as the captured behaviour above requires. The signature is unchanged.", "files": "`src/upload.py` (modified), `tests/test_upload.py` (created)"}], "left-out": [], "overlaps": []}
+{"eligible": [{"name": "distilled-reject-path-traversal-in-the-upload-endpoint", "revision": "[sha:794e52e7]", "delivers": "`upload_path(base, name)` (`src/upload.py:4`) rejects traversal. Today it returns the plain join with no validation (`src/upload.py:5`). After the change it resolves both the upload directory and the joined path with symlinks followed (`os.path.realpath`). It raises `ValueError` when the resolved joined path is not the resolved base or a descendant of it. Use a path-component containment check such as `os.path.commonpath`, not a string-prefix check, so a sibling like `<base>-evil` is rejected. For a name that stays inside, it keeps returning the unresolved `os.path.join(base, name)`, unchanged from today's return value (`src/upload.py:5`), as the captured behaviour above requires. The signature is unchanged.", "files": "`src/upload.py` (modified), `tests/test_upload.py` (created)"}], "left-out": [], "overlaps": []}
 EXIT=0
 
 [main] BASH
 children=$(mktemp) && cat > "$children" <<'EOF'
-[{"name": "distilled-reject-path-traversal-in-the-upload-endpoint", "reason": "Any caller of the upload path helper can write files outside the upload directory today, so the exposure stays live until the fix lands (open security exposure).", "revision": "794e52e713e15e981efa5f5289eddf09571f5c4d6c5ab5ef16c65695ea09b950"}]
+[{"name": "distilled-reject-path-traversal-in-the-upload-endpoint", "reason": "Any caller of the upload path helper can write files outside the upload directory today, so the exposure stays live until the fix lands (open security exposure).", "revision": "[sha:794e52e7]"}]
 EOF
-$WORK/snap-treat/tools/craft/plugins/craft/scripts/followup_parent.py assemble fixture-distilled-spec --children "$children"; rc=$?; rm -f "$children"; echo "EXIT=$rc"
+$CRAFT[treat]/scripts/followup_parent.py assemble fixture-distilled-spec --children "$children"; rc=$?; rm -f "$children"; echo "EXIT=$rc"
 
 [main] RESULT
 {"parent": "build-the-follow-ups-of-fixture-distilled-spec-chosen-2026-10-16", "nested": ["distilled-reject-path-traversal-in-the-upload-endpoint"], "failed": [], "undone": [], "undo-failed": [], "buildable": true}

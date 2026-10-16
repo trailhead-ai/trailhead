@@ -2,5 +2,5 @@ vault CHANGED task/left-out-pin-the-tls-minimum-version-in-the-client.json
 vault CHANGED task/left-out-pin-the-tls-minimum-version-in-the-client.md
 vault CHANGED task/left-out-rotate-the-hard-coded-session-signing-secret.json
 vault CHANGED task/left-out-rotate-the-hard-coded-session-signing-secret.md
-repo head before=4a0f20353d212d276da6cd7ec8724b1d15647f43 after=4a0f20353d212d276da6cd7ec8724b1d15647f43
+repo head before=[sha:4a0f2035] after=[sha:4a0f2035]
 repo status after=''

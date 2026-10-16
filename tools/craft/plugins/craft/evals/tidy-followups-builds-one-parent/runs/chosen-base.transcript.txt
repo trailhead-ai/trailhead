@@ -1,4 +1,4 @@
-[main] TOOL Read {"file_path": "$WORK/snap-base/tools/craft/plugins/craft/skills/tidy-followups/SKILL.md"}
+[main] TOOL Read {"file_path": "$CRAFT[base]/skills/tidy-followups/SKILL.md"}
 
 [main] RESULT
 1	---
@@ -24,7 +24,7 @@
 21	It is r... [cut 9070 chars]
 
 [main] BASH
-$WORK/snap-base/tools/craft/plugins/craft/scripts/followup_gather.py fixture-chosen-spec > /tmp/fg_out.json 2> /tmp/fg_err.txt; echo "exit=$?"; cat /tmp/fg_out.json; echo ---; cat /tmp/fg_err.txt
+$CRAFT[base]/scripts/followup_gather.py fixture-chosen-spec > /tmp/fg_out.json 2> /tmp/fg_err.txt; echo "exit=$?"; cat /tmp/fg_out.json; echo ---; cat /tmp/fg_err.txt
 
 [main] RESULT
 Exit code 1
@@ -34,7 +34,7 @@ cat: /tmp/fg_out.json: No such file or directory
 ---
 cat: /tmp/fg_err.txt: No such file or directory
 
-[main] TOOL Read {"file_path": "$WORK/snap-base/tools/craft/plugins/craft/skills/_shared/security.md"}
+[main] TOOL Read {"file_path": "$CRAFT[base]/skills/_shared/security.md"}
 
 [main] RESULT
 1	# Security posture — credential scrub and untrusted-value validation
@@ -54,13 +54,13 @@ cat: /tmp/fg_err.txt: No such file or directory
 15	
 16	- **Key-like tokens** — `(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s*[=:]\s*\S+`
 17	  — the trailing character class is load-bearing: it lets the keyword carry qualifier text before
-18	  the separator, which is what catches `SECRET_KEY=`, `AWS_SECRE... [cut 2830 chars]
+18	  the separator, which is what catches `[redacted:key-like] `AWS_SECRE... [cut 2830 chars]
 
 [main] TEXT
 Name `fixture-chosen-spec` passes the safe-name check. Rerunning without temp files:
 
 [main] BASH
-$WORK/snap-base/tools/craft/plugins/craft/scripts/followup_gather.py fixture-chosen-spec; echo "exit=$?"
+$CRAFT[base]/scripts/followup_gather.py fixture-chosen-spec; echo "exit=$?"
 
 [main] RESULT
 {"spec": "fixture-chosen-spec", "vault": "default", "entry": "complete-status", "followups": [{"name": "chosen-fix-a-typo-in-a-docstring", "title": "Chosen: fix a typo in a docstring", "status": "open"}, {"name": "chosen-reject-path-traversal-in-the-export-endpoint", "title": "Chosen: reject path traversal in the export endpoint", "status": "open"}, {"name": "chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it", "title": "Chosen: replace the truncating money rounding before more callers adopt it", "status": "open"}, {"name": "chosen-stop-writing-bearer-tokens-to-the-request-trace", "title": "Chosen: stop writing [REDACTED] to the request trace", "status": "open"}], "slice-basis": "labelled", "slices": ["fixture-chosen-spec-the-slice"], "child-count": 1, "candidates-read": 4, "kept": 4, "excluded-by-label": {"count": 0, "names": []}, "skipped-edges": 0}
@@ -80,7 +80,7 @@ for n in chosen-fix-a-typo-in-a-docstring chosen-reject-path-traversal-in-the-ex
   "layer": "personal",
   "name": "chosen-fix-a-typo-in-a-docstring",
   "record_id": "task/chosen-fix-a-typo-in-a-docstring",
-  "revision": "564142ab17457a72bb5555b7ccd3f40e2e3a3322fb2036a61503b5c2a2437858",
+  "revision": "[sha:564142ab]",
   "sidecar": {
     "created-at": "2026-10-16T15:28:50Z",
     "created-by": "fixture@example.com",
@@ -143,4 +143,4 @@ Nothing was written. No record, label or status was created or changed.
 - **Shortlist (answer 1):** my own judgment from the follow-ups' text picked the same three you named, so the result matches.
 - **Disposition set and scope (answers 2 and 3):** nothing in the procedure uses them. The skill also never dispatches subagents, so the fixture repo was not looked at.
 
-**Title redaction:** the gathering script already shortened one title to "[REDACTED]" because its wording matches the credential pattern for bearer tokens. I kept that in the report as the security rules require.
+**Title redaction:** the gathering script already shortened one title to "[REDACTED]" because its wording matches the credential pattern for [redacted:bearer] I kept that in the report as the security rules require.

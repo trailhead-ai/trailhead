@@ -4,7 +4,7 @@ I ran `/craft:tidy-followups` on `fixture-chosen-spec`. It created one buildable
 - The spec had four open follow-ups, and three met a reason class: two open security holes and one money bug that gets costlier with each new caller. The docstring typo met none.
 - Your answers kept the shortlist exactly as recommended. Included:
   - Chosen: reject path traversal in the export endpoint (`chosen-reject-path-traversal-in-the-export-endpoint`)
-  - Chosen: stop writing [REDACTED] to the request trace (`chosen-stop-writing-bearer-tokens-to-the-request-trace`). "Bearer tokens" in this title matches the credential scrub pattern, so the report masks it.
+  - Chosen: stop writing [REDACTED] to the request trace (`chosen-stop-writing-bearer-tokens-to-the-request-trace`). "[redacted:bearer]" in this title matches the credential scrub pattern, so the report masks it.
   - Chosen: replace the truncating money rounding before more callers adopt it (`chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it`)
 - Left: Chosen: fix a typo in a docstring (`chosen-fix-a-typo-in-a-docstring`).
 

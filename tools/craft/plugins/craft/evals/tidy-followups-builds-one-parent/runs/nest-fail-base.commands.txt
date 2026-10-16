@@ -1,5 +1,5 @@
 [main] BASH
-$WORK/snap-base/tools/craft/plugins/craft/scripts/followup_gather.py fixture-nest-fail-spec; echo "EXIT=$?"
+$CRAFT[base]/scripts/followup_gather.py fixture-nest-fail-spec; echo "EXIT=$?"
 
 [main] BASH
 lore record show --json --vault default task/nest-fail-reject-path-traversal-in-the-archive-extractor; echo "EXIT=$?"; lore record show --json --vault default task/nest-fail-stop-logging-session-cookies; echo "EXIT=$?"

@@ -1,8 +1,8 @@
 [main] BASH
-$WORK/snap-base/tools/craft/plugins/craft/scripts/followup_gather.py fixture-chosen-spec > /tmp/fg_out.json 2> /tmp/fg_err.txt; echo "exit=$?"; cat /tmp/fg_out.json; echo ---; cat /tmp/fg_err.txt
+$CRAFT[base]/scripts/followup_gather.py fixture-chosen-spec > /tmp/fg_out.json 2> /tmp/fg_err.txt; echo "exit=$?"; cat /tmp/fg_out.json; echo ---; cat /tmp/fg_err.txt
 
 [main] BASH
-$WORK/snap-base/tools/craft/plugins/craft/scripts/followup_gather.py fixture-chosen-spec; echo "exit=$?"
+$CRAFT[base]/scripts/followup_gather.py fixture-chosen-spec; echo "exit=$?"
 
 [main] BASH
 for n in chosen-fix-a-typo-in-a-docstring chosen-reject-path-traversal-in-the-export-endpoint chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it chosen-stop-writing-bearer-tokens-to-the-request-trace; do echo "=== $n"; lore record show --json --vault default task/$n; echo "exit=$?"; done

@@ -1,5 +1,5 @@
 [main] BASH
-$WORK/snap-treat/tools/craft/plugins/craft/scripts/followup_gather.py fixture-left-out-spec; echo "EXIT=$?"
+$CRAFT[treat]/scripts/followup_gather.py fixture-left-out-spec; echo "EXIT=$?"
 
 [main] BASH
 lore record show --json --vault default task/left-out-pin-the-tls-minimum-version-in-the-client; echo "EXIT=$?"; lore record show --json --vault default task/left-out-rotate-the-hard-coded-session-signing-secret; echo "EXIT=$?"
@@ -7,39 +7,39 @@ lore record show --json --vault default task/left-out-pin-the-tls-minimum-versio
 [main] AGENT
 Refine the follow-up task `task/left-out-rotate-the-hard-coded-session-signing-secret` in the lore vault `default`.
 
-- First read $WORK/snap-treat/tools/craft/plugins/craft/skills/_shared/refine.md yourself and follow it in full, in its **unattended mode**, against this one task only. (`${CLAUDE_PLUGIN_ROOT}` is $WORK/snap-treat/tools/craft/plugins/craft.)
-- The code the task's claims point at is the git repository at $WORK/runs/left-out-treat/fixture/repo. Work against it there.
+- First read $CRAFT[treat]/skills/_shared/refine.md yourself and follow it in full, in its **unattended mode**, against this one task only. (`${CLAUDE_PLUGIN_ROOT}` is $CRAFT[treat].)
+- The code the task's claims point at is the git repository at $RUN[left-out-treat]/fixture/repo. Work against it there.
 - Stage any body you write through your own `mktemp` path. Cr... [cut 412 chars]
 
 [sub] BASH
-cd $WORK/runs/left-out-treat; lore --help 2>&1 | head -30; lore record show task/left-out-rotate-the-hard-coded-session-signing-secret 2>&1; lore task graph left-out-rotate-the-hard-coded-session-signing-secret 2>&1
+cd $RUN[left-out-treat]; lore --help 2>&1 | head -30; lore record show task/left-out-rotate-the-hard-coded-session-signing-secret 2>&1; lore task graph left-out-rotate-the-hard-coded-session-signing-secret 2>&1
 
 [sub] BASH
-cd $WORK/runs/left-out-treat; lore record show --help 2>&1 | head -30; lore record update --help 2>&1 | head -50; lore vault --help 2>&1 | tail -15
+cd $RUN[left-out-treat]; lore record show --help 2>&1 | head -30; lore record update --help 2>&1 | head -50; lore vault --help 2>&1 | tail -15
 
 [sub] BASH
-cd $WORK/runs/left-out-treat; lore record show --vault default --json task/left-out-rotate-the-hard-coded-session-signing-secret 2>&1; lore record update --help 2>&1 | sed -n 50,90p
+cd $RUN[left-out-treat]; lore record show --vault default --json task/left-out-rotate-the-hard-coded-session-signing-secret 2>&1; lore record update --help 2>&1 | sed -n 50,90p
 
 [sub] BASH
-cd $WORK/runs/left-out-treat/fixture/repo; git log --oneline | head; git ls-files; grep -rn -i "secret\|environ\|getenv\|SIGN" --exclude-dir=.git . | cut -c1-200
+cd $RUN[left-out-treat]/fixture/repo; git log --oneline | head; git ls-files; grep -rn -i "secret\|environ\|getenv\|SIGN" --exclude-dir=.git . | cut -c1-200
 
 [sub] BASH
-cd $WORK/runs/left-out-treat/fixture/repo; find . -path ./.git -prune -o -type f -print; wc -l src/session.py
+cd $RUN[left-out-treat]/fixture/repo; find . -path ./.git -prune -o -type f -print; wc -l src/session.py
 
 [sub] BASH
-cd $WORK/runs/left-out-treat/fixture/repo; cat README.md; grep -rn "session\|sign" src | grep -v "^src/session.py"; ls; find . -name "test*"
+cd $RUN[left-out-treat]/fixture/repo; cat README.md; grep -rn "session\|sign" src | grep -v "^src/session.py"; ls; find . -name "test*"
 
 [sub] BASH
-cd $WORK/runs/left-out-treat; for q in "secret" "signing secret" "secret manager" "session" "environment injection" "kind:area session" "kind:area" "src/session.py" "credential" "kind:decision" "kind:adr"; do echo "== $q"; lore search "$q" 2>&1 | head -15; done
+cd $RUN[left-out-treat]; for q in "secret" "signing secret" "secret manager" "session" "environment injection" "kind:area session" "kind:area" "src/session.py" "credential" "kind:decision" "kind:adr"; do echo "== $q"; lore search "$q" 2>&1 | head -15; done
 
 [sub] BASH
-cd $WORK/runs/left-out-treat; for q in '"src/session.py"' "vendor" "config" "deploy" "env" "kind:lesson" "kind:spec" "budget" "rotate" "forge" "audit"; do echo "== $q"; lore search "$q" 2>&1 | grep -E "results?$|— " ; done; lore record show task/fixture-left-out-spec-the-slice 2>&1 | head -20; ls fixture/vault fixture/vault/*
+cd $RUN[left-out-treat]; for q in '"src/session.py"' "vendor" "config" "deploy" "env" "kind:lesson" "kind:spec" "budget" "rotate" "forge" "audit"; do echo "== $q"; lore search "$q" 2>&1 | grep -E "results?$|— " ; done; lore record show task/fixture-left-out-spec-the-slice 2>&1 | head -20; ls fixture/vault fixture/vault/*
 
 [sub] BASH
-cd $WORK/runs/left-out-treat; lore record show spec/fixture-left-out-spec 2>&1 | head -40
+cd $RUN[left-out-treat]; lore record show spec/fixture-left-out-spec 2>&1 | head -40
 
 [sub] BASH
-cd $WORK/runs/left-out-treat; T=$(mktemp); lore record show --vault default --json task/left-out-rotate-the-hard-coded-session-signing-secret | python3 -I -c 'import json,sys; sys.stdout.write(json.load(sys.stdin)["body"])' > "$T"; cat >> "$T" <<'EOF'
+cd $RUN[left-out-treat]; T=$(mktemp); lore record show --vault default --json task/left-out-rotate-the-hard-coded-session-signing-secret | python3 -I -c 'import json,sys; sys.stdout.write(json.load(sys.stdin)["body"])' > "$T"; cat >> "$T" <<'EOF'
 
 **Delivers:** (partial — mechanism pending the question below)
 - The session signing secret no longer lives in source: the module-level constant at `src/session.py:1` is removed and `sign()` (`src/session.py:4-5`) obtains the secret from the operator-chosen external source at runtime, failing closed (refusing to sign) when it is absent.
@@ -67,7 +67,7 @@ lore record update --vault default task/left-out-rotate-the-hard-coded-session-s
 mktemp
 
 [sub] BASH
-cd $WORK/runs/left-out-treat; T=$WORK/runs/left-out-treat/tmp/tmp.42WWGwa8kq
+cd $RUN[left-out-treat]; T=$RUN[left-out-treat]/tmp/tmp.42WWGwa8kq
 lore record show --vault default --json task/left-out-rotate-the-hard-coded-session-signing-secret | python3 -I -c 'import json,sys; sys.stdout.write(json.load(sys.stdin)["body"])' > "$T"
 printf '%s\n' '' \
 '**Delivers:** (partial; the mechanism is pending the question below)' \
@@ -92,32 +92,32 @@ printf '%s\n' '' \
 grep -c hunter2 "$T"; lore record update --vault default task/left-out-rotate-the-hard-coded-session-signing-secret < "$T" && rm -f "$T"; ls "$T" 2>&1 | tail -1
 
 [sub] BASH
-cd $WORK/runs/left-out-treat; wc -l fixture/repo/src/session.py fixture/repo/README.md; lore record show spec/fixture-left-out-spec >/dev/null && echo spec-ok; rm -f $WORK/runs/left-out-treat/tmp/tmp.5PWcCp0vwd; lore record show --vault default task/left-out-rotate-the-hard-coded-session-signing-secret; lore record show --vault default --json task/left-out-rotate-the-hard-coded-session-signing-secret | grep '"status"'
+cd $RUN[left-out-treat]; wc -l fixture/repo/src/session.py fixture/repo/README.md; lore record show spec/fixture-left-out-spec >/dev/null && echo spec-ok; rm -f $RUN[left-out-treat]/tmp/tmp.5PWcCp0vwd; lore record show --vault default task/left-out-rotate-the-hard-coded-session-signing-secret; lore record show --vault default --json task/left-out-rotate-the-hard-coded-session-signing-secret | grep '"status"'
 
 [main] AGENT
 Refine the follow-up task `task/left-out-pin-the-tls-minimum-version-in-the-client` in the lore vault `default`.
 
-- First read $WORK/snap-treat/tools/craft/plugins/craft/skills/_shared/refine.md yourself and follow it in full, in its **unattended mode**, against this one task only. (`${CLAUDE_PLUGIN_ROOT}` is $WORK/snap-treat/tools/craft/plugins/craft.)
-- The code the task's claims point at is the git repository at $WORK/runs/left-out-treat/fixture/repo. Work against it there.
+- First read $CRAFT[treat]/skills/_shared/refine.md yourself and follow it in full, in its **unattended mode**, against this one task only. (`${CLAUDE_PLUGIN_ROOT}` is $CRAFT[treat].)
+- The code the task's claims point at is the git repository at $RUN[left-out-treat]/fixture/repo. Work against it there.
 - Stage any body you write through your own `mktemp` path. Creat... [cut 409 chars]
 
 [sub] BASH
-cd $WORK/runs/left-out-treat; which lore; lore record show task/left-out-pin-the-tls-minimum-version-in-the-client; echo ---; lore task graph left-out-pin-the-tls-minimum-version-in-the-client
+cd $RUN[left-out-treat]; which lore; lore record show task/left-out-pin-the-tls-minimum-version-in-the-client; echo ---; lore task graph left-out-pin-the-tls-minimum-version-in-the-client
 
 [sub] BASH
-cd $WORK/runs/left-out-treat; lore --help 2>&1 | head -40; lore record show task/left-out-pin-the-tls-minimum-version-in-the-client --help 2>&1 | head -20; ls -la fixture; ls -R fixture/repo | grep -v .git | head -40; git -C fixture/repo log --oneline | head
+cd $RUN[left-out-treat]; lore --help 2>&1 | head -40; lore record show task/left-out-pin-the-tls-minimum-version-in-the-client --help 2>&1 | head -20; ls -la fixture; ls -R fixture/repo | grep -v .git | head -40; git -C fixture/repo log --oneline | head
 
 [sub] BASH
-cd $WORK/runs/left-out-treat/fixture/repo; cat -n src/client.py; cat README.md; ls -a; HOME=/tmp git log --oneline 2>&1 | head; grep -rn "ssl\|TLS\|tls" src; lore record show --json --vault default task/left-out-pin-the-tls-minimum-version-in-the-client | python3 -I -c 'import json,sys; print(json.load(sys.stdin)["sidecar"])'
+cd $RUN[left-out-treat]/fixture/repo; cat -n src/client.py; cat README.md; ls -a; HOME=/tmp git log --oneline 2>&1 | head; grep -rn "ssl\|TLS\|tls" src; lore record show --json --vault default task/left-out-pin-the-tls-minimum-version-in-the-client | python3 -I -c 'import json,sys; print(json.load(sys.stdin)["sidecar"])'
 
 [sub] BASH
-cd $WORK/runs/left-out-treat; lore record show task/outside-upgrade-the-http-client-library; echo ----; lore record show task/fixture-left-out-spec-the-slice; echo ----; for q in tls ssl client "src/client.py" TLSVersion "http client" "kind:area" "kind:adr" test pinning; do echo "== $q"; lore search "$q" 2>&1 | head -15; done; lore areas 2>&1 | head
+cd $RUN[left-out-treat]; lore record show task/outside-upgrade-the-http-client-library; echo ----; lore record show task/fixture-left-out-spec-the-slice; echo ----; for q in tls ssl client "src/client.py" TLSVersion "http client" "kind:area" "kind:adr" test pinning; do echo "== $q"; lore search "$q" 2>&1 | head -15; done; lore areas 2>&1 | head
 
 [sub] BASH
-cd $WORK/snap-treat/tools/craft/plugins/craft; sed -n '/## Flow-out/,/^## [^F]/p' templates/plan.md; grep -n "Delivers\|Test contract\|Files" templates/task.md; grep -rln "credential-pattern scrub" . | head; python3 -I -c "import ssl,sys;print(sys.version, ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT).minimum_version)"; lore record update --help | head -40
+cd $CRAFT[treat]; sed -n '/## Flow-out/,/^## [^F]/p' templates/plan.md; grep -n "Delivers\|Test contract\|Files" templates/task.md; grep -rln "credential-pattern scrub" . | head; python3 -I -c "import ssl,sys;print(sys.version, ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT).minimum_version)"; lore record update --help | head -40
 
 [sub] BASH
-set -e; cd $WORK/runs/left-out-treat; T=$(mktemp); cat > "$T" <<'EOF'
+set -e; cd $RUN[left-out-treat]; T=$(mktemp); cat > "$T" <<'EOF'
 `src/client.py` builds its TLS context with no minimum version, so a server can negotiate TLS 1.0, a live exposure. Pin the minimum to TLS 1.2.
 
 **Delivers:** `make_context` (src/client.py:4) sets `minimum_version` to `ssl.TLSVersion.TLSv1_2` on the `ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)` it builds (src/client.py:5) before returning it, so the floor is explicit in code rather than inherited from the interpreter/OpenSSL default. Note: on Python 3.10+ the default `minimum_version` for a `PROTOCOL_TLS_CLIENT` context is already TLS 1.2 (observed: `python3 -I -c "import ssl; print(ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT).minimum_version)"` prints `771`, i.e. TLSv1_2, on the refine host's Python 3.14), so the exposure is live only on older interpreters or permissive OpenSSL policy; the explicit pin removes that dependency.
@@ -144,13 +144,13 @@ lore record show task/left-out-pin-the-tls-minimum-version-in-the-client
 mktemp
 
 [sub] BASH
-cd $WORK/runs/left-out-treat; T=$WORK/runs/left-out-treat/tmp/tmp.2K6KI9IbFy; python3 -I - "$T" <<'EOF' 2>&1 || echo FAIL
+cd $RUN[left-out-treat]; T=$RUN[left-out-treat]/tmp/tmp.2K6KI9IbFy; python3 -I - "$T" <<'EOF' 2>&1 || echo FAIL
 import sys
 EOF
 printf '%s\n' 'x' > "$T" && echo writable
 
 [sub] BASH
-cd $WORK/runs/left-out-treat; T=$WORK/runs/left-out-treat/tmp/tmp.2K6KI9IbFy
+cd $RUN[left-out-treat]; T=$RUN[left-out-treat]/tmp/tmp.2K6KI9IbFy
 printf '%s\n' \
 '`src/client.py` builds its TLS context with no minimum version, so a server can negotiate TLS 1.0, a live exposure. Pin the minimum to TLS 1.2.' \
 '' \
@@ -174,7 +174,7 @@ lore record update task/left-out-pin-the-tls-minimum-version-in-the-client --vau
 lore record show task/left-out-pin-the-tls-minimum-version-in-the-client
 
 [sub] BASH
-cd $WORK/runs/left-out-treat; lore task graph left-out-pin-the-tls-minimum-version-in-the-client
+cd $RUN[left-out-treat]; lore task graph left-out-pin-the-tls-minimum-version-in-the-client
 
 [main] BASH
-$WORK/snap-treat/tools/craft/plugins/craft/scripts/followup_parent.py check fixture-left-out-spec left-out-rotate-the-hard-coded-session-signing-secret left-out-pin-the-tls-minimum-version-in-the-client; echo "EXIT=$?"
+$CRAFT[treat]/scripts/followup_parent.py check fixture-left-out-spec left-out-rotate-the-hard-coded-session-signing-secret left-out-pin-the-tls-minimum-version-in-the-client; echo "EXIT=$?"

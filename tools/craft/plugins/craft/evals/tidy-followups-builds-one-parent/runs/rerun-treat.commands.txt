@@ -1,5 +1,5 @@
 [main] BASH
-$WORK/snap-treat/tools/craft/plugins/craft/scripts/followup_gather.py fixture-chosen-spec; echo "EXIT=$?"
+$CRAFT[treat]/scripts/followup_gather.py fixture-chosen-spec; echo "EXIT=$?"
 
 [main] BASH
 lore record show --json --vault default task/chosen-fix-a-typo-in-a-docstring; echo "EXIT=$?"
