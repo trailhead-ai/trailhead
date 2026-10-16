@@ -132,6 +132,10 @@ path: vault/decision/*.md
 see seeded records; grade a seeded record's contents with `regex` over a
 `source: file` target instead.
 
+`regex` with `source: file` does not glob: a `path` containing `*` fails the
+grader whether or not a file matches, so name the exact path. `file_exists` does
+glob, which makes it the grader for a record whose name the agent picks.
+
 ### Running a batch
 
 ```sh
@@ -144,6 +148,8 @@ env -u LORE_CONFIG_DIR -u LORE_STATE_DIR -u XDG_CONFIG_HOME -u XDG_STATE_HOME \
 ```
 
 - `--scaffold` is required; the runner skips `scaffold_script` without it.
+- `--case` takes one glob. Given more than once, only the last one runs, so run
+  one batch per glob.
 - `--output-dir` also keeps `trailhead/tests/test_eval_corpus.py` green: without it the runner
   writes `evals/results/<ts>/`, which the corpus test treats as a case with no `expected.md`.
 - `--allow-tools` is variadic and takes every following value until the next
@@ -154,8 +160,11 @@ env -u LORE_CONFIG_DIR -u LORE_STATE_DIR -u XDG_CONFIG_HOME -u XDG_STATE_HOME \
   the list-price cost estimate reaches N (exit 2, partial results); `--model`
   pins the agent's model so a model change is not mistaken for a prose change.
 - `--json <path>` (ending in `.json`) writes the result document: per-run
-  scores, cost and model, for the results log. It also holds per-run traces, so write it into
-  the same temp directory as `--output-dir`, as above, and never commit it.
+  scores, cost and model, for the results log. It also holds the prompts and grader
+  explanations, so write it into the same temp directory as `--output-dir`, as above,
+  and never commit it. It carries each run's `tracePath` but not the trace: the runner
+  deletes the trace when the run ends. To read a run's transcript, copy
+  `/tmp/claude-eval-*/**/*.jsonl` while the run is still going.
 - Unsetting the lore and XDG overrides is belt and braces: the seeder already
   refuses an override that points outside `HOME`.
 - `--no-publish` always. Without it the runner publishes its report to claude.ai.
