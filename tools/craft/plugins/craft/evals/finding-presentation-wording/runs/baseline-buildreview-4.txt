@@ -1,0 +1,19 @@
+## Correctness review: four findings survived the re-review
+
+The reviewer's verdict is still **FIX_FIRST**. One round of fixes and one re-review have already run, and the procedure allows only one, so these come to you instead of another fix dispatch. I checked each finding against `reminders.py`, `test_reminders.py` and `change.md` rather than taking the report's word for it.
+
+**Critical: a newly installed hive crashes the whole list** (`hive-reminders/reminders.py:13`)
+Confirmed. `next_due(None)` calls `None + timedelta(...)` and raises `TypeError`. One hive with `last_inspected` set to `None` means nobody gets a morning list at all. The change says "A hive with no inspection yet appears on the list too, since it has never been checked." The fix is for `overdue_hives` to treat `None` as overdue before it calls `next_due`.
+
+**Important: a hive due exactly today is left off** (`hive-reminders/reminders.py:13`)
+Confirmed. The comparison is `next_due(...) < today`. The change says "A hive that is due today or earlier appears on the reminder list," so it should be `<=`. For example, a hive inspected on 2026-06-06 is due on 2026-06-20 and wouldn't appear on the 20th.
+
+**Minor: the test doesn't cover either case above** (`hive-reminders/test_reminders.py:8`)
+Confirmed. The only test is a hive inspected a month ago, and it passes whether or not the two bugs above are fixed. Both fixes need a test written first and seen to fail: one with a never-inspected hive (it currently raises) and one with a hive due exactly today (it's currently left off).
+
+**Minor: show the overdue-since date on the board line** (`hive-reminders/reminders.py:21`)
+I recommend declining this one. The change sets the line format as "`<name>: inspection overdue`," so adding a date changes what the committee asked for rather than fixing a bug. A never-inspected hive also has no date to show. If you want it, it's a question for the committee and a separate change.
+
+### Where the run stands
+
+The build is paused at Phase 3. Phases 4 to 6 (security, flow-out, close) haven't run, and nothing has been pushed or closed. You can decide how to handle the Critical and Important findings: authorize another fix pass, take them on yourself, or accept them as they stand. Once you have, the pipeline continues from Phase 4.

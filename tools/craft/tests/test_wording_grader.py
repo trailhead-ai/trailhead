@@ -1621,6 +1621,13 @@ FINDING_CAPTURE_VERDICTS.update(
 )
 
 
+# Form-matched baselines for the build review site: the treated arm is over the single-argument limit, so these three
+# ran with the arm file passed as a file, like the treated runs.
+FINDING_CAPTURE_VERDICTS.update(
+    {f"baseline-buildreview-{n}": {"code-review-name": "none", "severity-name": "internal"} for n in (4, 5, 6)}
+)
+
+
 def _site(stem):
     """The site a capture belongs to: the calibrated consult's arms are `precal-` and `cal-`, no site segment."""
     return "consult-calibrated" if stem.startswith(("precal-", "cal-")) else stem.split("-")[1]
