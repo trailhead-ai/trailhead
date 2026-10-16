@@ -72,8 +72,9 @@ env -u LORE_CONFIG_DIR -u LORE_STATE_DIR -u XDG_CONFIG_HOME -u XDG_STATE_HOME \
   `timeout_seconds: 420`). A review-case run takes about 0.2 to 0.35 USD. The
   runner's reported `turns` is wrong when subagents run asynchronously, so size
   limits from duration and cost.
-- `--output-dir` and `--json` go in a fresh temp directory, which holds traces:
-  delete it after copying the scores out, and never commit it.
+- `--output-dir` and `--json` go in a fresh temp directory, which holds the
+  prompts and grader explanations: delete it after copying the scores out, and
+  never commit it.
 
 ### Graders
 
