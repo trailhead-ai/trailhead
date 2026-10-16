@@ -1,0 +1,28 @@
+**Spec review: a waiting list for allotment plots. Round 1. Maturity: production (basis: the spec's own stamp). No concerns were waived.**
+
+The review found two problems, and both are about the people already on the list. First, an offer can be lost without anyone noticing. The spec sends every offer by email and says "the offer stays open for 14 days" (AC2). It also says someone who doesn't answer "goes to the back of the queue" (AC3). Nothing covers an email that never arrives. Second, nothing brings the existing paper list across. The spec only describes a person who joins "by giving a name, an email address and the site they want" (AC1). The people who have waited longest would have to join again at the back. Those without email could not join at all. Some smaller gaps sit alongside these: nothing says how a freed plot gets into the system, how someone checks their place later, or whether a person can wait for more than one site.
+
+The lost-offer finding is the strongest. The failure-cases and ease-of-use reviewers reached it separately, each without seeing the other's work. It is concrete: a mistyped address leaves the plot empty for two weeks, then quietly sends someone who waited years to the back. The right-problem reviewer's claim about the existing list rests on a guess it admits: how many older members have no email. I checked the spec and the finding stands without that guess. The spec says the warden "rings people" today, so the current list is a phone list. At production maturity, moving existing people across in their order is a decision for you, not a rough edge. The right-problem reviewer's second point said that steps 1–5 are more than the complaint needs. That overreaches: the Problem names "nobody can see where they stand" as its own complaint, so I dropped it. The fact check found the list holds 412 names, per the committee minutes of 3 March, not "about 340". That correction is folded into the second fix. It also could not confirm that the warden actually keeps to the order. Copying the paper order across makes that order official, so it is worth a word with the warden.
+
+Both problems can be fixed by editing this spec, so neither needs to send the work back. I have written five new criteria in full. Three cover a lost or unanswered offer: pass it on straight away, send a reminder, and tell the person when it lapses. Two cover the existing list: enter it in its paper order, and allow people with only a phone number. The eight smaller items below are worth a look, but none of them blocks the spec.
+
+**Recommended outcome:** apply both edits and mark the spec ready this round.
+
+| id | finding | proposed disposition | proposed edit |
+|---|---|---|---|
+| C1 | An email that never arrives sends a long-waiting person to the back without them ever seeing the offer | `resolved` | Add AC9–AC11: an undeliverable offer passes on at once and the person keeps their place until a warden fixes their contact; a reminder on day 10; a notice when the offer lapses, saying where they now stand |
+| C2 | Nothing carries the existing paper list across in order, and people without email can't be on the list at all | `resolved` | Correct the Problem to 412 names; add AC7: a warden enters the paper list in its paper order before the queue opens; add AC8: a warden can add a person by phone number, and their offers are made by phone and recorded |
+
+**Would cause trouble later, worth fixing, your call (8):**
+- Nothing says who records that a plot has come free, so an offer has nothing to start it.
+- Two reviewers found the same gap: nothing after the first email lets a person see their current place, though the Objectives promise "see their place".
+- Accepting an offer and leaving the queue aren't stated as recorded, though the history lists them.
+- Nothing covers a freed plot when its site's queue is empty.
+- Nothing says whether a place is stored or worked out from join order.
+- Out-of-turn grants are seen by nobody until someone reads the history.
+- Nothing says whether a person can be on more than one site's queue.
+- Nothing says whether the 14 days count from when the offer is sent or when it is opened.
+
+**Rough edges, nothing to decide (2):** what time of day the 14 days end, and who can see the queue's history. Limiting the history to the committee, as one reviewer suggests, would undercut checking the order "afterwards", so whoever does that checking needs to be named.
+
+Say "go" to accept, or override by id. For example: "dispute C2 because …, otherwise go", or "answer C1: …". I can show you the full detail or the exact edit text for C1 or C2.

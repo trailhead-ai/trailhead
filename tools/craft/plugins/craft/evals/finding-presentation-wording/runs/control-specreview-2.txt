@@ -1,0 +1,28 @@
+# Spec review: a waiting list for allotment plots — round 1
+
+`maturity: production (basis: stamp)`. No concerns were waived.
+
+**What the passes found.** The review keeps coming back to one weakness: the spec assumes every person is reached by email, and the email always gets through. Two things fail on that assumption. First, an offer that never arrives still holds the plot "open for 14 days (AC2)". The person who never saw it then "goes to the back of the queue (AC3)", maybe after years of waiting. Second, the spec retires the paper list but never says how the people already on it get online in their current order. It only covers new joins, by "a name, an email address and the site they want (AC1)". Below that, there are smaller gaps. The Objectives promise a person can "see their place", but only the first email shows it. Nothing says who reports that a plot has come free. Two things are left open that a build could do either way: whether a person can be on more than one site's queue, and whether the 14 days count from when the offer is sent or when it is opened. The fact check also corrected the list size: the committee minutes of 3 March record 412 names, not about 340.
+
+**Whether it holds.** The failure-cases and ease-of-use reviews reached the undelivered-offer problem separately, without seeing each other's work. That makes it the strongest finding here, and I've merged the two. The right-problem review's no-email point is real, but its evidence is thin: it says "a large part" of the list has no email, and nothing backs that up. I've rebased it on what the spec actually leaves out, which is any way to move the existing list across. At production maturity that is a decision for you whatever the email share turns out to be. The self-consistency and ease-of-use reviews also agree on "see their place", which puts it first among the lesser items. The security review's out-of-turn grant concern is reasonable, but it stays a lesser item. The right-problem review's claim that the spec builds more than the complaint needs is a matter of framing. I don't think it calls for a change.
+
+**What to do.** Add four criteria to the spec, all drafted below. Together they make sure a failed delivery never costs anyone their place, and that the paper list moves across in its current order with phone contact allowed. Neither problem needs a rethink, so the spec can become `ready` in this round.
+
+**Recommended outcome:** apply both edits and mark the spec `ready` this round. There's nothing left to revise.
+
+| id | finding | proposed disposition | proposed edit |
+|---|---|---|---|
+| C1 | An offer that never arrives costs the person their place and leaves the plot empty for 14 days | `resolved` | add AC7 and AC8: a bounced offer moves on at once and the person keeps their place; reminder on day 10 and a notice when an offer lapses |
+| C2 | The spec doesn't say how the people on the paper list get online, or how to reach anyone without email | `resolved` | add AC9 and AC10: a warden enters the paper list in its current order; phone contact is allowed in place of email |
+
+Drafted text, which goes in exactly as written if you accept:
+- **AC7.** An offer email that bounces passes at once to the next person in the queue; the person whose email bounced keeps their place and is flagged for a warden to contact.
+- **AC8.** A person with an open offer is emailed a reminder on day 10, and a person whose offer lapses is emailed to say it lapsed and give their new place.
+- **AC9.** A warden enters every person on the paper list at launch in their paper-list order, and each keeps that place in their site's queue.
+- **AC10.** A warden can enter a person with a phone number in place of an email address; that person's confirmation and offers are made by a warden's phone call, recorded with its date in the queue's history.
+
+**Worth fixing later, your call (8):** the list size should read 412, not about 340 · the promise to "see their place" has no criterion behind it (raised by two reviews) · nothing says who marks a plot as freed · no behaviour is set for a freed plot when the queue is empty · it's open whether a place is stored or worked out from join order · it's open whether a person can be on several sites' queues · it's open when the 14 days start · nobody is told about an out-of-turn grant (raised by security), and acceptances and departures are never said to be recorded.
+
+**Rough edges, nothing to decide (7):** naming a mail provider, what time of day the 14 days end, "lapse" reading as jargon, who can see the history, the confirmation email showing how many people are ahead, and two wording notes.
+
+Reply "go" to accept. To override a finding, name its id and give your reason, for example "dispute C2 because …". You can also ask for the full detail on either Critical.
