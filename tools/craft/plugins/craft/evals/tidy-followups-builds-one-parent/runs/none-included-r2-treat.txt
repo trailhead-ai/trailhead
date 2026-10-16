@@ -1,0 +1,54 @@
+**Header:** entry `complete-status` · slice basis `labelled` · 1 slice, 1 child · 2 candidates read, 2 kept · 0 excluded by label · 0 skipped edges
+
+**Recommended:** none. 0 of 2 met a reason class. Both follow-ups are small cosmetic tidy-ups in `src/util.py`. Neither is a security exposure, neither gets more expensive as later work builds on it, and neither is groundwork that later work would benefit from.
+
+**Other follow-ups:**
+- None-included: drop an unused local variable
+- None-included: reorder two imports
+
+**Blocked:** none.
+
+Nothing has been written yet.
+
+---
+
+### Confirmation 1: the chosen set
+
+> Which listed follow-ups do you want to move onto the shortlist, and which off it? (a list of names to add, a list to remove, or `none`)
+
+**Answer given:** `none`
+
+**Included:** none
+
+**Left:**
+- None-included: drop an unused local variable (`none-included-drop-an-unused-local-variable`)
+- None-included: reorder two imports (`none-included-reorder-two-imports`)
+
+### Confirmation 2
+
+> Include these, leave these. Refinement rewrites each included follow-up's record whether or not it ends up nested. Proceed? (`yes`, or what to move.)
+
+**Answer given:** `yes`
+
+Nothing is included, so no parent is created. The procedure skips refinement (steps 9–10), the scope confirmation (step 11) and assembly (step 12), and goes straight to the closing report. The prepared scope-confirmation answer was therefore never needed.
+
+---
+
+### Closing report
+
+- **Included:** none
+- **Left:**
+  - None-included: drop an unused local variable (`none-included-drop-an-unused-local-variable`)
+  - None-included: reorder two imports (`none-included-reorder-two-imports`)
+- **Left out at refinement:** none
+- **Refined but not nested:** none
+- **Failed writes:** none
+- **Undo writes:** none
+- **Undo commands still to run:** none
+- **New parent:** none created
+
+The run wrote nothing to the vault. The spec is not distilled yet, so the next step is:
+
+```
+/craft:distill spec/fixture-none-included-spec
+```

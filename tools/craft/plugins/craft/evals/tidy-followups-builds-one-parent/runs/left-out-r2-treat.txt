@@ -1,0 +1,27 @@
+### Refinement result (from `followup_parent.py check`)
+
+- **Left-out: pin the TLS minimum version in the client** (`left-out-pin-the-tls-minimum-version-in-the-client`): it depends on the unfinished task `outside-upgrade-the-http-client-library`, which is not part of this set.
+- **Left-out: rotate the hard-coded session signing secret** (`left-out-rotate-the-hard-coded-session-signing-secret`): refinement left a question only you can answer, so it is not ready to build.
+
+Both follow-ups were left out, so refinement ran but no parent was created. The scope confirmation in step 11 never came up, and your `yes` for it was not used.
+
+---
+
+## Closing report
+
+- **Included:**
+  - Left-out: rotate the hard-coded session signing secret (`left-out-rotate-the-hard-coded-session-signing-secret`)
+  - Left-out: pin the TLS minimum version in the client (`left-out-pin-the-tls-minimum-version-in-the-client`)
+- **Left:** none.
+- **Left out:**
+  - Left-out: pin the TLS minimum version in the client (`left-out-pin-the-tls-minimum-version-in-the-client`): it depends on the unfinished task `outside-upgrade-the-http-client-library`, which is not part of this set.
+  - Left-out: rotate the hard-coded session signing secret (`left-out-rotate-the-hard-coded-session-signing-secret`): refinement left a question only you can answer, so it is not ready to build.
+- **Refined but not nested:** both follow-ups above, since both were left out at step 10.
+- **Failed writes:** none.
+- **Undo writes:** none.
+- **Undo commands still to run:** none.
+- **New parent:** none created.
+
+```
+/craft:distill spec/fixture-left-out-spec
+```

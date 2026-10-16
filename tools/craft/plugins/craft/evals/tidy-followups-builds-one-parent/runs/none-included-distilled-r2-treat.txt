@@ -1,0 +1,50 @@
+**Header:** entry `complete-status` · slice basis `labelled` · 1 slice, 1 child · 2 candidates read, 2 kept · 0 excluded by label · 0 skipped edges
+
+**Recommended:** none. 0 of 2 met a reason class. One follow-up removes an unused local variable and the other sorts two imports, both in `src/util.py`. Each is a small tidy-up, and putting either off costs nothing extra: no exposure is open, later work won't build on either defect, and neither is groundwork other work needs.
+
+**Other follow-ups:**
+- None-included-distilled: drop an unused local variable
+- None-included-distilled: reorder two imports
+
+**Blocked:** none.
+
+Nothing has been written yet.
+
+---
+
+### Confirmation 1: the chosen set
+
+> Which listed follow-ups do you want to move onto the shortlist, and which off it? (a list of names to add, a list to remove, or `none`)
+
+**Answer given:** `none`
+
+**Included:** none
+
+**Left:**
+- None-included-distilled: drop an unused local variable (`none-included-distilled-drop-an-unused-local-variable`)
+- None-included-distilled: reorder two imports (`none-included-distilled-reorder-two-imports`)
+
+### Confirmation 2
+
+> Include these, leave these. Refinement rewrites each included follow-up's record whether or not it ends up nested. Proceed? (`yes`, or what to move.)
+
+**Answer given:** `yes`
+
+No follow-up is included, so no parent is created. Per the procedure, steps 9–12 are skipped: no refinement, no `check`, and no scope confirmation. The step 11 answer you gave in advance (`yes`) is never reached, and `assemble` did not run.
+
+---
+
+### Closing report
+
+- **Included:** none
+- **Left:**
+  - None-included-distilled: drop an unused local variable (`none-included-distilled-drop-an-unused-local-variable`)
+  - None-included-distilled: reorder two imports (`none-included-distilled-reorder-two-imports`)
+- **Left out at refinement:** none (no refinement ran)
+- **Refined but not nested:** none
+- **Failed writes:** none
+- **Undo writes:** none
+- **Undo commands still to run:** none
+- **New parent:** none created
+
+The run wrote nothing to the vault. There is no parent and the spec is already distilled (`distilled` is true), so there are no closing commands to run.

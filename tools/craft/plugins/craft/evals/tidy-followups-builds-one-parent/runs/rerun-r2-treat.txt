@@ -1,0 +1,32 @@
+## Tidy follow-ups: `spec/fixture-chosen-spec`
+
+**Header:** entry `complete-status` · slice basis `labelled` · 1 slice, 1 child · 5 candidates read, 1 kept · 1 excluded by label · 0 skipped edges
+
+**Recommended:** none. 0 of 1 met a reason class. The one open follow-up corrects punctuation in a docstring. Leaving it for later costs nothing, so it fits none of the three classes (open security exposure, a fix that grows as work builds on it, a foundation that pays off sooner).
+
+**Other follow-ups:**
+- Chosen: fix a typo in a docstring (`chosen-fix-a-typo-in-a-docstring`)
+
+**Blocked:** none.
+
+Nothing has been written yet.
+
+---
+
+**A follow-up parent already exists for this spec:** `build-the-follow-ups-of-fixture-chosen-spec-chosen-2026-10-16`, "Build the follow-ups of fixture-chosen-spec chosen 2026-10-16". The gather excluded it by its label, which is why it counts as the 1 label-excluded record. It is at status `ready`, so the next step is to build it:
+
+```
+/craft:execute task/build-the-follow-ups-of-fixture-chosen-spec-chosen-2026-10-16
+```
+
+This ritual can't tell who created that parent. If you didn't create it, this command removes its marker label so the follow-up gather stops counting it, and leaves the record itself alone:
+
+```
+lore record update task/build-the-follow-ups-of-fixture-chosen-spec-chosen-2026-10-16 --vault default --unset-label craft/followup-parent
+```
+
+The run stops here because a follow-up parent already exists (step 7):
+- No second parent was created.
+- Steps 8 to 13 did not run, so none of the three confirmations was asked and none of the answers you supplied (no moves, `yes`, `yes`) was used.
+- No refinement ran and nothing was written to the vault.
+- No distill command is printed: distilling waits on the parent.
