@@ -2560,6 +2560,12 @@ env -u LORE_CONFIG_DIR -u LORE_STATE_DIR -u XDG_CONFIG_HOME -u XDG_STATE_HOME \
 
 Runner `claude` 2.1.301, model `claude-opus-5-5`, 2026-10-16. Cost is the runner's list-price estimate.
 
+`<N>` is the per-batch cost cap. The treatment arm uses 3 for the consult case and 1.5 for each review
+case, a little above the measured baseline batch costs below (2.245, 0.953 and 0.670 USD). Each case's
+turn and time limits are in its `prompt.md` frontmatter: consult 30 turns / 420 s, the two review
+cases 20 turns / 300 s. `case.yaml` has none, although each `expected.md` says the limits are in
+`case.yaml`.
+
 **Before the baseline.** Every grader was flipped against a hand-written passing outcome and hand-written
 failing outcomes through the runner (13 scripted runs, about 2.1 USD, transcript in `b76cd592`): each
 file grader failed on at least one wrong outcome and passed on the correct one, the `llm` grader failed
@@ -2629,11 +2635,18 @@ action, so current prose already leaves the record alone. Its value is as a guar
 Scored baseline: 3.868 USD (2.245 + 0.953 + 0.670). All runs including grader flips and smoke: about
 9.7 USD, under the 14 USD ceiling.
 
-**Real state around the runs.** `~/.local/state/lore/` and `~/.config/lore/` were hashed before the first
-run and after the last. `~/.config/lore/` is unchanged. Under `~/.local/state/lore/`, 291 diff lines
-cover `index.sqlite`, the publish worker's `.log` and `.request` files for `default`, `levr` and
-`trailhead`, and git internals of those three vaults. Every change is a "lore: <host> published N
-item(s)" commit by another session or host, made during the window (`andromeda` and `toms-macbook-pro`
-captures and `levr` pulls, plus a `Jane Podbelskaya` sync commit on `levr`). None of the three vaults'
-history in the window mentions a fixture title (buoy, gauge buffer, label queue, label printer), and no
-file in any vault does.
+**Real state around the runs.** Sha256 of every file under `~/.local/state/lore/` and `~/.config/lore/`
+(excluding `.git/`), hashed at 10:11 before the first run and at 10:29 after the last (2026-10-16, local
+time). `~/.config/lore/` is unchanged. Each changed path under `~/.local/state/lore/` is attributed below.
+None of them carries a fixture term (buoy, gauge buffer, label queue, label printer).
+
+| Path | Source |
+|---|---|
+| `vaults/levr/task/{a-seat-whose-holder-…, auth-answers-who-has-an-organisation-…, comps-carry-an-operator-seat-unit-…, the-console-comp-editor-…, the-seat-step-takes-an-operator-seat-…}` | levr `317e6111` (10:27), another session's publish |
+| `vaults/levr/task/making-someone-an-admin-or-owner-takes-a-real-operator-seat-…` | levr `f0c9f1c9` (10:22) and `17d025e3` (10:24), another session's publish |
+| `vaults/levr/sites/levr-strategist-practice/{app.js,engine.js}` | levr `bc21031b`, another author's `lore: sync vault`, pulled in the window |
+| `vaults/trailhead/task/{a-probed-session-s-in-flight-…, the-facts-route-admits-…}` | trailhead `3a239199` (10:12), another session's publish |
+| `vaults/trailhead/task/{known-corrections-are-applied-…, pre-register-lore-eval-cases-…}` | trailhead `2be52825` (10:13), the controller session's own run-metrics and status writes for this plan |
+| `vaults/default/session/337de250-…{.md,.json}` | default `d7354002` (10:17), another host's session publish; one follow-up candidate from another build |
+| `index.sqlite` | derived search index, rewritten by any live lore command |
+| `publish/{default,levr,trailhead}-*.{log,request}` | the live publish worker, triggered by the commits above |
