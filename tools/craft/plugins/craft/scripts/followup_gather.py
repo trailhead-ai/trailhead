@@ -135,6 +135,9 @@ SEARCH_LIMIT = "100000"
 REDACTED = "[REDACTED]"
 MAX_TITLE_CHARS = 300
 TRUNCATION_MARKER = "\u2026"
+# How far past a cut the credential scan reaches, so a token straddling the
+# bound is matched whole before the cut drops its tail.
+_REDACT_MARGIN = 4096
 _CONTROL_RE = re.compile("[\x00-\x1f\x7f-\x9f]")
 _INVISIBLE_CATEGORIES = frozenset({"Cf", "Zl", "Zp"})
 MARKER_ENTRIES = {"complete": "complete-marker", "stopped": "stopped-marker"}
@@ -271,8 +274,11 @@ def _call_json(runner, argv: list[str]):
 
 def sanitize_text(text: str, limit: int) -> str:
     """Vault text made safe to print: control and invisible format characters
-    stripped, cut to `limit` characters with a trailing marker, credential
-    spans redacted."""
+    stripped, credential spans redacted, then cut to `limit` characters with a
+    trailing marker. Redaction runs before the cut, over a window reaching
+    `_REDACT_MARGIN` characters past it, so a credential straddling the bound
+    is matched whole and no fragment of it survives the cut; the window keeps
+    the scan bounded on hostile oversized input."""
     import capture_scan
 
     clean = "".join(
@@ -280,8 +286,8 @@ def sanitize_text(text: str, limit: int) -> str:
         for c in _CONTROL_RE.sub("", text)
         if unicodedata.category(c) not in _INVISIBLE_CATEGORIES
     )
-    if len(clean) > limit:
-        clean = clean[:limit] + TRUNCATION_MARKER
+    over = len(clean) > limit
+    clean = clean[: limit + _REDACT_MARGIN]
     spans = {
         f.text
         for f in capture_scan.scan_text(clean)
@@ -289,6 +295,8 @@ def sanitize_text(text: str, limit: int) -> str:
     }
     for span in sorted(spans, key=len, reverse=True):
         clean = clean.replace(span, REDACTED)
+    if over:
+        clean = clean[:limit] + TRUNCATION_MARKER
     return clean
 
 
