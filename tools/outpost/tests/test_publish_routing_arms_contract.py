@@ -11,7 +11,6 @@ Does not assert anything about the eval's measured result.
 
 from __future__ import annotations
 
-
 import arms_contract as ac
 
 ARMS_DIR = ac.EVALS_DIR / "publish-routing" / "arms"
