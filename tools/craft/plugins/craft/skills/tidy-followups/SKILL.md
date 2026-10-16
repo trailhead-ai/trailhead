@@ -352,7 +352,7 @@ and remove the file. Act on the exit:
 | `child-changed` | A child's record changed after you confirmed it; the vault's. Nothing was written. Rerun the ritual so you confirm the new text. |
 | `followup-parent-exists` | A follow-up parent for this spec appeared meanwhile; the vault's. Nothing was written. Rerun, which stops at it. |
 | `concurrent-followup-parent` | A second follow-up parent appeared during assembly; another run's. The new parent was undone. Rerun after the other run settles. |
-| `parent-create-failed` | The parent record could not be created; `lore`'s or the filesystem's. Nothing was written. Check `lore vault ls`, then rerun. |
+| `parent-create-failed` | The parent record could not be created; `lore`'s or the filesystem's. Nothing was written, unless the create's outcome was unclear and the script found the parent it left: then stdout carries the report and the parent was dropped. Check `lore vault ls`, then rerun. |
 | `nesting-incomplete` | A child could not be nested or the parent could not be made ready; `lore`'s or the vault's. The run undid what it wrote; read the lists below. |
 
 The codes shared with the gather table (`no-vaults`, `spec-not-found`, `spec-ambiguous`,

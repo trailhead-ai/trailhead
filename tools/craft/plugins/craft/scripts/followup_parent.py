@@ -24,7 +24,8 @@ a `--` separator.
   credential spans redacted;
 - `left-out`: `{name, reason}` per follow-up that is not eligible, sorted by
   name. `reason` is one of LEFT_OUT_REASONS. A `depends-outside` entry also
-  carries `dependency`, the bare, shape-checked name of the unfinished task;
+  carries `dependency`, the shape-checked `depends-on` entry that is unfinished, as written
+  (a bare task name, or a qualified entry);
 - `overlaps`: `{file, names}` for each backticked token in the `**Files:**`
   field of more than one eligible follow-up (sorted by file; names sorted). It
   is a hint: a path written in plain prose is not seen.
@@ -37,9 +38,11 @@ every task it `depends-on` is `done` or is itself eligible in this set. A
 siblings is the least fixpoint: a follow-up joins the eligible set once all its
 dependencies are done or already eligible, so a follow-up depending on a
 left-out sibling, or on a cycle, is left out. A `depends-on` entry holding a
-qualified `kind/name` (a spec or adr dependency) is not a task dependency and
-is ignored; any other entry that is not a bare task name makes the record
-malformed.
+qualified `kind/name` is never done: lore's runnable check treats any entry that
+is not a bare task name as unfinished, and its CLI refuses to write one, so it
+only arrives through an edited or synced sidecar. Such a follow-up is left out
+as `depends-outside` with the entry as `dependency`. An entry that fails the
+shape check, or holds `@`, makes the record malformed.
 
 When several rules apply, the left-out reason is the first of: `is-a-parent`,
 `already-nested`, `routed-to-plan`, `routed-to-brainstorm`,
@@ -86,8 +89,14 @@ report (below) on stdout and one `reason-code:` line on stderr:
        lore's one-line stdout (`task/<name>`) and shape-checked, never derived from
        the title: lore never refuses or overwrites a colliding name, it suffixes
        `-2`, `-3`, ... Anything else (a failed create, such as a name too long for
-       the filesystem, or unexpected output) is `parent-create-failed` (exit 2) with
-       nothing else written and nothing on stdout.
+       the filesystem, or unexpected output) leaves the outcome unclear, so the live
+       follow-up parents are re-queried. A parent with this run's title is the
+       create's: it is dropped through the undo path below, and the report (with
+       `parent` set and `buildable` false) is printed with `parent-create-failed`
+       (exit 2). With none found, `parent-create-failed` (exit 2) means nothing
+       was written, and nothing is on stdout. Several with this run's title cannot
+       be told apart from another run's: `concurrent-followup-parent`, nothing
+       dropped, `subject:` naming them, nothing on stdout.
     2. Re-query live follow-up parents linked to the spec. Any other than the new
        one: undo, exit 2 `concurrent-followup-parent`, with `subject:` naming both.
     3. Nest each child in file order (`--parent`): re-read its revision immediately
@@ -98,12 +107,17 @@ report (below) on stdout and one `reason-code:` line on stderr:
     4. Flip the parent to `ready` and confirm by a complete read, only when every
        child is confirmed nested.
 On any failed nesting, failed flip or concurrent parent, `assemble` undoes: each
-child it wrote to is un-nested (`--unset-parent`, in reverse order) and the parent
+child it wrote to is read back, and only one whose `parent` is the new parent is
+un-nested (`--unset-parent`, in reverse order; a child under any other parent, or
+none, is left alone, and a read that fails is an `undo-failed` entry, never a
+guess), and the parent
 is dropped (`--status dropped --diff`; the why-note rides the same invocation,
 because `dropped` freezes the body). Each undo write is confirmed by a complete
 read. The failure is `nesting-incomplete` (exit 2) for a failed nesting or flip.
 
-Stdout JSON on exit 0 and on every exit 2 after the create:
+Stdout JSON on exit 0 and on every exit 2 after the create (a create of unclear
+outcome that left a parent included; a gather failure such as `search-truncated`
+after the create reports the same way, once the undo has run):
 - `parent`: the created parent's bare name;
 - `nested`: the children confirmed nested when the run ends (empty after an undo
   that un-nested them all);
@@ -128,7 +142,8 @@ Invariants and security posture:
 - Vault text enters the parent body only through the sanitizing above; the
   confirmed reasons come from the children file, never from the vault.
 - No write precedes the three refusals, and the parent is created before any child
-  is touched, so a refusal or a failed create leaves the vault unchanged.
+  is touched, so a refusal leaves the vault unchanged, as does a create that failed
+  and left no parent behind.
 - Any unexpected exception exits 2 with `reason-code: internal-error`; one that
   occurs after the create first undoes what the run wrote.
 
@@ -180,6 +195,7 @@ REASON_CODES = frozenset(
         "concurrent-followup-parent",
         "parent-create-failed",
         "nesting-incomplete",
+        "search-truncated",
     }
 )
 
@@ -278,8 +294,6 @@ def _task_dependencies(sidecar: dict) -> list[str]:
     for entry in entries:
         if not isinstance(entry, str):
             raise ParentError("malformed-sidecar")
-        if "/" in entry:
-            continue
         if "@" in entry or not gather._shape_ok(entry):
             raise ParentError("malformed-sidecar")
         names.append(entry)
@@ -328,24 +342,24 @@ def check_followups(runner, spec: str, names: list[str]) -> dict:
     done_outside: dict[str, bool] = {}
     for deps in candidates.values():
         for dep in deps:
-            if dep not in records and dep not in done_outside:
+            if "/" not in dep and dep not in records and dep not in done_outside:
                 done_outside[dep] = _dependency_done(runner, vault, dep)
 
     accepted: set[str] = set()
+
+    def finished(dep: str) -> bool:
+        return "/" not in dep and (dep in accepted or done_outside.get(dep, False))
+
     progressed = True
     while progressed:
         progressed = False
         for name, deps in candidates.items():
-            if name not in accepted and all(
-                dep in accepted or done_outside.get(dep, False) for dep in deps
-            ):
+            if name not in accepted and all(finished(dep) for dep in deps):
                 accepted.add(name)
                 progressed = True
     for name, deps in candidates.items():
         if name not in accepted:
-            unfinished = next(
-                dep for dep in deps if dep not in accepted and not done_outside.get(dep, False)
-            )
+            unfinished = next(dep for dep in deps if not finished(dep))
             left_out[name] = _left_out(name, "depends-outside", unfinished)
 
     eligible, files_by_name = [], {}
@@ -455,6 +469,20 @@ def _created_name(done) -> str | None:
     return name if kind == "task" and gather._shape_ok(name) else None
 
 
+def _landed_parent(runner, vault: str, spec: str, spec_sidecar: dict, title: str) -> str | None:
+    """The follow-up parent a create of unclear outcome left behind, if any. No live
+    parent existed before the create, so any live one now with this run's title
+    is its. More than one with that title cannot be told apart from another run's."""
+    mine = [
+        name
+        for name in live_followup_parents(runner, vault, spec, spec_sidecar)
+        if _read_task(runner, vault, name)[0].get("title") == title
+    ]
+    if len(mine) > 1:
+        raise ParentError("concurrent-followup-parent", tuple(mine))
+    return mine[0] if mine else None
+
+
 def _read_ok(read) -> bool:
     try:
         return bool(read())
@@ -473,6 +501,13 @@ def _command(argv: list[str]) -> str:
 def _undo(runner, vault: str, parent_name: str, attempted: list[str], reason: str, report: dict) -> None:
     for name in reversed(attempted):
         argv = _update(vault, name, "--unset-parent")
+        try:
+            current = _read_task(runner, vault, name)[0].get("parent")
+        except (ParentError, gather.GatherError):
+            report["undo-failed"].append({"name": name, "write": "un-nest", "command": _command(argv)})
+            continue
+        if current != parent_name:
+            continue
         _write(runner, argv)
         if _read_ok(lambda: not _read_task(runner, vault, name)[0].get("parent")):
             report["undone"].append({"name": name, "write": "un-nest"})
@@ -523,10 +558,15 @@ def assemble(runner, spec: str, children: list[dict], today: datetime.date) -> t
         stdin=body,
     )
     parent_name = _created_name(created)
-    if parent_name is None:
-        raise ParentError("parent-create-failed")
-
     report: dict = {"parent": parent_name, "nested": [], "failed": [], "undone": [], "undo-failed": []}
+    if parent_name is None:
+        parent_name = _landed_parent(runner, vault, spec, spec_sidecar, title)
+        if parent_name is None:
+            raise ParentError("parent-create-failed")
+        report["parent"] = parent_name
+        _undo(runner, vault, parent_name, [], "its create did not report success", report)
+        report["buildable"] = False
+        return report, "parent-create-failed", ()
     attempted: list[str] = []
     reason, subjects = None, ()
     try:
