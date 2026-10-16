@@ -838,10 +838,21 @@ vault or publish file contains a fixture title or term (grepped). 33 changed pat
 
 ## Known limitations of the security fixes
 
-Two findings of the audit are open and tracked by a follow-up task, not addressed by `7e3c9016`:
+Two findings of the audit are open, tracked by
+`task/correction-acceptance-binds-to-a-list-the-operator-has-seen-and-correction-commands-resist-injected-text`
+in the `trailhead` vault, and not addressed by `7e3c9016`:
 
-- **H2, acceptance before sight.** Open as the audit named it; not changed here.
-- **M1, quoting and heredoc delimiter.** Open as the audit named it; not changed here.
+- **H2, acceptance before sight.** `_shared/council.md` lets an operator accept corrections "all at once"
+  without requiring that they have seen the numbered entries in full. The craft case
+  `accepted-review-correction-is-applied-not-parked` grades that pre-sight form ("I accept the correction it
+  lists") as correct.
+- **M1, untrusted text in the mandated commands.** These apply in `correct` and in `council.md`'s recipe:
+  - The double-quoted `--reason` expands command substitution.
+  - The fixed `EOF` heredoc delimiter closes early on a body line `EOF`.
+  - `kind/name` taken from review text is not validated.
+
+The same task covers the missing hostile-input cases: no case seeds text that claims operator acceptance, a
+pasted third-party ruling, or a planted source record.
 
 When the next case lands, record it here as:
 
