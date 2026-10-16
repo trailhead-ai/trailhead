@@ -18,6 +18,9 @@ multi-page doc set — publish it as an Outpost site unless the user says
 otherwise. Prefer it over dropping a bare `.html` file in the repo or a temp
 directory (nobody finds those) and over a Claude Artifact (that leaves the
 team's own vault). Say where you published it and hand back the URL.
+The one exception is a scratch pad (below): it goes where the scratch-pad skill
+puts it — the enclosing workspace, or a folder on disk outside one — never the
+vault.
 
 **Choose the target by how long the page should live**, not by how polished it
 is. If the team needs it after this work is done, or there is no workspace to
@@ -76,6 +79,15 @@ Sites are content, not credentials: never publish secrets, tokens, or customer
 PII. That holds for a workspace too. It syncs nowhere, but every site on the
 listener shares one browser origin, so any other site served there can read it
 once opened in a tab.
+
+## Scratch pads
+
+When a design question's options differ in how a screen, page or component looks
+or is arranged, draw them as a pad with the `/scratch-pad` skill in that same
+turn. Do not ask first, unless the user asked for words only. Whatever happens to
+the pad, ask the same question in words in that turn too. A typed answer settles
+it as fully as a pasted pad reply. Report what became of the pad as the skill's
+**Report it** says, and never hand back a link its script did not print.
 
 ## Record links
 
