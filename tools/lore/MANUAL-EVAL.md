@@ -496,6 +496,79 @@ Uncommitted paths:
 
 The controller accepted this attribution; it does not rest on any eval run writing live state.
 
+### Treatment (prose commit `6d1943a1`)
+
+Same four cases, same graders, same command as the baseline above, 3 runs each at `claude-opus-5-5`,
+one `--case` per invocation. The prose under test is the `correct` skill's new "when to act" step plus one
+carve-out each in the record skill, flush and the resident primer (the primer is not measured here: only
+the plugin under test enters a runner child). No rerun was used and no run errored (all `error: null`).
+A run passes only at 1.0.
+
+| Case | Baseline | Treatment | Result | Cost per run (USD) |
+|------|----------|-----------|--------|--------------------|
+| apply-ruled-fix-to-frozen-record-phrased-as-note-it | 0.33 / 0.33 / 0.33 (RED) | 1.00 / 1.00 / 1.00 | green, 3 of 3 | 0.203, 0.211, 0.212 |
+| apply-ruled-fix-to-draft-record | 1.00 / 0.40 / 1.00 (floor) | 1.00 / 1.00 / 1.00 | green, 3 of 3 | 0.176, 0.169, 0.162 |
+| track-unknown-fix-phrased-as-fix-it-now | 0.50 / 0.50 / 0.50 (RED) | 1.00 / 1.00 / 1.00 | green, 3 of 3 | 0.167, 0.164, 0.167 |
+| refuse-a-ruled-fix-the-source-contradicts | 1.00 / 0.80 / 1.00 (floor) | 1.00 / 1.00 / 1.00 | green, 3 of 3 | 0.179, 0.173, 0.172 |
+
+Each case is 3 runs, so 3 of 3 is a measured result on that sample, not a proof of stability.
+
+### Existing lore runner cases, rerun once (no-regression check)
+
+Same command, one invocation per glob (`amend-*`, `supersede-*`), 3 runs per case. Every run scored 1.00 and
+none errored.
+
+| Case | Treatment-prose runs | Cost per run (USD) |
+|------|----------------------|--------------------|
+| amend-wrong-fact-in-active-adr | 1.00 / 1.00 / 1.00 | 0.275, 0.220, 0.284 |
+| amend-narrow-one-criterion-in-ready-spec | 1.00 / 1.00 / 1.00 | 0.190, 0.189, 0.168 |
+| amend-drifted-mechanism-detail-phrased-as-serious-error | 1.00 / 1.00 / 1.00 | 0.196, 0.176, 0.192 |
+| supersede-reversed-decision | 1.00 / 1.00 / 1.00 | 0.181, 0.203, 0.191 |
+| supersede-adr-exception-phrased-as-small-tweak | 1.00 / 1.00 / 1.00 | 0.248, 0.216, 0.234 |
+| supersede-spec-change-orphaning-an-objective-phrased-as-small-tweak | 1.00 / 1.00 / 1.00 | 0.239, 0.212, 0.212 |
+
+### U3: did the agent invoke `lore:correct`?
+
+The runner deletes `trace.jsonl` when a run ends and `--json` carries only a `tracePath`, not the trace.
+A background loop (`find /tmp/claude-eval-* -name '*.jsonl'`, copied every 0.3 s) kept each run child's own
+session transcript, which the child writes under its temp `HOME` while it runs, and each copy was read for
+`Skill` tool calls. The first frozen-record batch ran before the loop watched that path, so its three runs
+were not observed; a second frozen-record batch of three runs was run for observation only. It scored
+1.00 / 1.00 / 1.00 (0.204, 0.193, 0.193 USD), and both frozen-record batches are counted in the table's
+cost total, not in its result.
+
+Result: every observed run called `Skill` with `lore:correct`, and none called another skill. That is 12
+of 12 runs of the four new cases (the three unobserved first-batch frozen-record runs are not counted) and
+18 of 18 runs of the six existing cases. The agent reached for the skill in every case, including the
+refuse and unknown-fix cases, where the skill's Step 0 then decided not to edit.
+
+Cost: 6.48 USD in total by each `--json` list-price estimate, across the first frozen-record batch, the
+three other new-case batches, the two regression batches and the frozen-record observation batch.
+
+### Live-state check (treatment batches)
+
+Sha256 of every file under `~/.local/state/lore/` and `~/.config/lore/` (excluding `.git/`) before the first
+and after the last treatment batch (10:14 to 10:36 local, 2026-10-16). `~/.config/lore/` did not change.
+Under `~/.local/state/lore/` 34 paths changed; none carries a fixture record title and none was written by
+a run's temp `HOME`. The craft executor's eval runs overlapped in time.
+
+- trailhead vault: `7656010a` (10:35) touched the parent task
+  `known-corrections-are-applied-in-the-session-instead-of-parked-as-tasks` (this plan's controller);
+  `20199e2a` (10:30) touched `collect-and-report-in-flight-subagents-from-the-probe` (another session).
+- levr vault, other sessions' tasks and a `sites/` tree, by commit: `f0c9f1c9`, `17d025e3`, `317e6111`,
+  `69ae425e`, `43ca67df`, `7920a22f`, `c740e3ab` (the tasks `a-seat-whose-holder-reaches-no-covered-account-stops-counting`,
+  `auth-answers-who-has-an-organisation-as-their-home`, `comps-carry-an-operator-seat-unit-with-a-quantity-or-no-limit`,
+  `the-console-comp-editor-offers-operator-seats`, `the-seat-step-takes-an-operator-seat-against-the-payers-ceiling`,
+  `making-someone-an-admin-or-owner-takes-a-real-operator-seat-counted-against-the-seats-bought-and-comped`,
+  and the `the-connector-*`, `the-phone-warns-*` and `the-recorder-reports-*` tasks) and `bc21031b`
+  (`sites/levr-strategist-practice/app.js`, `engine.js`).
+- default vault: the new session note `337de250` is committed in `d7354002` (10:17, another machine's publish).
+  The `default` session note `c6ecca3c` (modified) is uncommitted and belongs to the same other session as in
+  the baseline check.
+- Uncommitted, derived or worker state: `index.sqlite` (rewritten by any live lore command), and the publish
+  `.log` and `.request` files for the `default`, `levr` and `trailhead` vaults (the publish worker, triggered
+  by the commits above).
+
 When the next case lands, record it here as:
 
 ```
