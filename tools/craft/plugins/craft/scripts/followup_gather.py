@@ -31,6 +31,12 @@ Stdout on exit 0 is one JSON object:
   trailing `…` marker when longer (the credential scan is quadratic on
   hostile input, so the bound applies before it), and has credential spans
   redacted;
+- `distilled`: true when the spec's sidecar `annotations` carry `distilled`,
+  whatever its value (`adr`, `zero-adr` or `rejected`), else false;
+- `followup-parents`: the sorted bare names of tasks in the spec's vault that
+  carry `craft/followup-parent`, are linked to the spec (either side names the
+  other) and have status `open`, `ready`, `in-progress` or `blocked`. Each name
+  has passed the shape check above;
 - the basis: `slice-basis` (`labelled` or `linked-parents`), `slices` (their
   names), `child-count`, `candidates-read`, `kept`, `excluded-by-label`
   (`{count, names}`) and `skipped-edges`.
@@ -122,6 +128,8 @@ LOOP_LABEL = "craft/slice-loop"
 SLICE_LABEL = "craft/slice-parent"
 FOLLOWUP_PARENT_LABEL = "craft/followup-parent"
 OPEN_STATUSES = frozenset({"open", "ready", "blocked"})
+LIVE_PARENT_STATUSES = frozenset({"open", "ready", "in-progress", "blocked"})
+DISTILLED_ANNOTATION = "distilled"
 QUERY_BATCH_SIZE = 40
 SEARCH_LIMIT = "100000"
 REDACTED = "[REDACTED]"
@@ -240,6 +248,12 @@ def entry_verdict(sidecar: dict) -> str | None:
     if sidecar["status"] == "complete":
         return "complete-status"
     return None
+
+
+def is_distilled(sidecar: dict) -> bool:
+    """Whether the spec carries a `distilled` annotation, whatever its value."""
+    annotations = sidecar.get("annotations")
+    return isinstance(annotations, dict) and DISTILLED_ANNOTATION in annotations
 
 
 def _call_json(runner, argv: list[str]):
@@ -394,6 +408,11 @@ def gather_followups(runner, vault: str, spec: str, spec_sidecar: dict) -> dict:
 
     spec_linked = g.search("spec", [spec]) | g.outbound(spec_sidecar)
     linked = {name: g.read(name) for name in sorted(spec_linked)}
+    followup_parents = sorted(
+        n
+        for n, sc in linked.items()
+        if FOLLOWUP_PARENT_LABEL in _labels(sc) and sc["status"] in LIVE_PARENT_STATUSES
+    )
     slices = sorted(n for n, sc in linked.items() if SLICE_LABEL in _labels(sc))
     basis = "labelled"
     if not slices:
@@ -433,6 +452,8 @@ def gather_followups(runner, vault: str, spec: str, spec_sidecar: dict) -> dict:
             {"name": name, "title": sanitize_title(title), "status": sc["status"]}
         )
     return {
+        "distilled": is_distilled(spec_sidecar),
+        "followup-parents": followup_parents,
         "followups": followups,
         "slice-basis": basis,
         "slices": slices,
