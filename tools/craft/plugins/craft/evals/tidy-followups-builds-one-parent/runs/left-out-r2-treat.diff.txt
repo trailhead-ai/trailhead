@@ -1,0 +1,6 @@
+vault CHANGED task/left-out-pin-the-tls-minimum-version-in-the-client.json
+vault CHANGED task/left-out-pin-the-tls-minimum-version-in-the-client.md
+vault CHANGED task/left-out-rotate-the-hard-coded-session-signing-secret.json
+vault CHANGED task/left-out-rotate-the-hard-coded-session-signing-secret.md
+repo head before=6516cd96f0d0866f6f5eca0c7ecb125b314d8f24 after=6516cd96f0d0866f6f5eca0c7ecb125b314d8f24
+repo status after=''

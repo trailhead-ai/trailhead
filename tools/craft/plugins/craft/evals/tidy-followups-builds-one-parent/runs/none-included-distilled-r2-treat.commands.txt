@@ -1,0 +1,5 @@
+[main] BASH
+$WORK/snap-treat/tools/craft/plugins/craft/scripts/followup_gather.py fixture-none-included-distilled-spec; echo "EXIT=$?"
+
+[main] BASH
+lore record show --json --vault default task/none-included-distilled-drop-an-unused-local-variable; echo "EXIT=$?"; lore record show --json --vault default task/none-included-distilled-reorder-two-imports; echo "EXIT=$?"

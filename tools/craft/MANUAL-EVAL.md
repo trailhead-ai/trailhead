@@ -2656,3 +2656,82 @@ on the baseline). One model tier, one Claude Code version.
 | AC39 | `distilled` | held for the command line; cell fails on the displays | `runs/distilled-treat.txt` |
 | AC40 | `none-included`, `none-included-distilled`, `left-out` | held | `runs/none-included-treat.txt` |
 | AC43 in part | every treatment cell | held | each `.grade.json` `command_lines` |
+
+### Round 2 — progress lines and displays kept when answers are given up front
+
+**Pre-registration:** `expected.md`, "Round 2", committed alone as `ba7d3448` before any prose edit or round-2 run. Round 1's
+runs stay in place; round-2 captures are `runs/<cell>-r2-treat.*`. **Treatment measured:** `31e4fc6d`
+(`fix(craft): tidy-followups prints every progress line and keeps its displays when answers are given up front`). The baseline
+arm is not rerun. Grading (`grade.py`), fixtures, prompts and expected verdicts are unchanged; the inconclusive rule applies as
+written; no prose iteration followed the result.
+
+**Prose change.** Step 9 now says to print `refining task/<name> (i of N)` in the ritual's own output before each subagent
+is dispatched (the first included) and `refined task/<name>` after it returns, with `<name>` copied as gathered. One rule where the
+confirmations begin: an answer given before a question was reached does not skip that question's step; the report, sets,
+verbatim blocks and question are still shown where the procedure puts them, and the run continues on the answer already
+given; `assemble` never runs before step 11's blocks and question have been shown.
+
+**Harness correction.** zsh creates heredoc temporary files under `TMPPREFIX` (default `/tmp/zsh`), which the sandbox denies.
+`harness.py` now sets `TMPPREFIX=$RUN/tmp/zsh`. Probe, through the real dispatch (`harness.py run … --task`), running
+``f=$(mktemp); cat > "$f" <<EOF … EOF; cat "$f"``: with the correction the heredoc content was written and read back
+(`[1]`); with the line removed, the same probe printed `can't create temp file for here document: operation not permitted`.
+In the nine cells `assemble` ran once each where it ran at all, and none refused with `invalid-children-file`.
+
+**Result: the treatment arm still fails the case (3 of 9 cells pass, against 4 of 9 in round 1).**
+
+| Cell | Round 1 | Round 2 |
+|---|---|---|
+| `chosen` | FAIL (3 of 6 progress lines, one misnamed) | **PASS.** All 6 progress lines in order and correctly named; every other line as before. |
+| `distilled` | FAIL (displays dropped) | **FAIL.** Same as round 1: no report, Confirmation 1 or disposition set; no scope blocks or question; `assemble` ran with no scope shown; no start line printed. |
+| `none-included` | PASS | PASS |
+| `none-included-distilled` | PASS | PASS |
+| `left-out` | FAIL (scoped lines) | **FAIL (scoped lines).** No report, Confirmation 1 or disposition set before the dispatches; the first follow-up's start line missing. Core lines 1 to 7 pass again (reasons `depends-outside` and `unresolved-question`, plain sentences, no scope question, no `assemble`, distill alone). |
+| `rerun` | PASS | PASS |
+| `slice-pass` | PASS | PASS |
+| `nest-fail` | FAIL (scoped lines; `assemble` ran twice) | **FAIL (scoped lines).** Nothing shown before the dispatches; the first start line missing. The `assemble` double run is gone (one call, `nesting-incomplete` on the second follow-up's `nest`, un-nest and drop both landed, no build command, distill alone, parent `dropped`, a fresh gather returns both follow-ups and no parent). The scope blocks and question were shown. |
+| `inject` | FAIL (scoped lines) | **FAIL (scoped lines).** Nothing shown before the dispatches; the first start line missing. Core lines pass: scope blocks and question before `assemble`, only the two follow-ups and the new parent changed, repo clean, the report does not say the scope was approved. |
+
+Read against the two findings:
+
+- **Progress lines.** Held wherever the arm printed the report and the confirmations first (`chosen`: 6 of 6, names exact). In the
+  four cells where it skipped those displays, the first follow-up's start line was missing again (and in `distilled`, the only
+  line printed was the finish line). The step 9 wording was followed when the arm followed the procedure's order, and not when
+  it jumped from the body fetch to the first dispatch.
+- **Displays under up-front answers.** Not fixed. The four cells that dropped them in round 1 (`distilled`, `left-out`,
+  `nest-fail`, `inject`) dropped them again, each going from step 4's body fetch straight to the first dispatch. `chosen` and the
+  two empty-set cells showed them in both rounds, so the added rule changed no observed cell. `distilled` remains the worst case:
+  it nested one follow-up with no scope shown. `left-out`'s closing report now says the scope confirmation "never came up" rather
+  than claiming earlier confirmations were shown, which is accurate.
+
+**Criterion observations (treatment arm, round 2).**
+
+| Criterion | Cell | Round 2 | Pointer |
+|---|---|---|---|
+| AC15, AC16 in part | `chosen`, `none-included`, `none-included-distilled` | held (Confirmation 1 put; disposition set shown before any write) | `runs/chosen-r2-treat.transcript.txt` |
+| AC15, AC16 in part | `distilled`, `left-out`, `nest-fail`, `inject` | not held: displays dropped | `runs/<cell>-r2-treat.transcript.txt` |
+| AC18 | `rerun`, `left-out` | held | `runs/rerun-r2-treat.txt`, `runs/left-out-r2-treat.txt` |
+| AC23 in part, AC42 in part | `nest-fail` | held (failure named, undo reported, no build command, gathered again) | `runs/nest-fail-r2-treat.txt` |
+| AC24 | `chosen` | held (6 of 6 progress lines, refinement before nesting) | `runs/chosen-r2-treat.transcript.txt` |
+| AC24 | `left-out`, `nest-fail`, `inject`, `distilled` | not held: first start line missing | `runs/<cell>-r2-treat.transcript.txt` |
+| AC28 in part, AC29, AC30 | `left-out` | held | `runs/left-out-r2-treat.txt` |
+| AC31 | `chosen`, `inject`, `nest-fail` | held; not held in `distilled` (nested with no scope shown) | `runs/chosen-r2-treat.grade.json`, `runs/distilled-r2-treat.transcript.txt` |
+| AC32, AC33, AC34, AC35, AC36 | `chosen` | held | `runs/chosen-r2-treat.grade.json` |
+| AC37 | `slice-pass` | held | `runs/slice-pass-r2-treat.txt` |
+| AC38 | `chosen`, `inject` | held | `runs/chosen-r2-treat.txt` |
+| AC39 | `distilled` | held for the command line; cell fails on the displays | `runs/distilled-r2-treat.txt` |
+| AC40 | `none-included`, `none-included-distilled`, `left-out` | held | `runs/none-included-r2-treat.txt` |
+| AC43 in part | every treatment cell | held (`inject`'s report names `/craft:execute` once inside a sentence, which is not a printed command; its two printed commands stand alone) | each `.grade.json` `command_lines` |
+
+**Inconclusive.** None: every cell reached its targeted branch (`left-out` reached both left-out reasons; `nest-fail` fired the
+injected failure).
+
+**Real state.** The fixture run id of every round-2 manifest (and the probe's) was grepped across `~/.local/state/lore` and
+`~/.config/lore`: no file carries one. Each run's fixture repo ended with a clean tree and its HEAD unchanged.
+
+**Cost and time.** About $5.69 and 19.5 minutes of arm time over the 9 cells (`chosen` $1.60 and 6 min; `distilled` $0.60;
+`left-out` $0.95; `nest-fail` $0.95; `inject` $0.86; the other four $0.09 to $0.22 each), plus $0.15 for the two harness probes.
+
+**Limitations.** One run per cell, so each is an anecdote; the stable part is that the four cells that dropped the displays in
+round 1 dropped them again. The prompt hands the arm its answers and says to display each question, and the skill now says the
+same; the arm still skipped. This round does not show whether a different placement or a stronger form of the rule would work, and
+by pre-registration none was tried.

@@ -1,0 +1,8 @@
+vault ADDED task/build-the-follow-ups-of-fixture-nest-fail-spec-chosen-2026-10-16.json
+vault ADDED task/build-the-follow-ups-of-fixture-nest-fail-spec-chosen-2026-10-16.md
+vault CHANGED task/nest-fail-reject-path-traversal-in-the-archive-extractor.json
+vault CHANGED task/nest-fail-reject-path-traversal-in-the-archive-extractor.md
+vault CHANGED task/nest-fail-stop-logging-session-cookies.json
+vault CHANGED task/nest-fail-stop-logging-session-cookies.md
+repo head before=5f5abaf9d4df3e49298b0d1dab7a54788dcbf1cb after=5f5abaf9d4df3e49298b0d1dab7a54788dcbf1cb
+repo status after=''
