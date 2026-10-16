@@ -382,8 +382,10 @@ graph by running craft's shared execute procedure against it.
 **Read it, don't invoke it** — the same deferral step 7 above applies to `../plan/SKILL.md` and step
 4 applies to `../slice/SKILL.md`. Read `../_shared/execute.md` now, in full, alongside
 `../_shared/refine.md`, `../_shared/slice.md`, `../_shared/status-ownership.md`, and
-`../_shared/security.md` — the four documents its rules draw on without naming — and follow
-`execute.md` inline in this session, running its controller loop against the slice parent's
+`../_shared/security.md` — the four documents its rules draw on without naming — and read
+`../_shared/council.md` too, whose "How a finding reads" section governs how a code review finding
+is shown to the user at the end of the build (this does not ask the build to convene a council).
+Follow `execute.md` inline in this session, running its controller loop against the slice parent's
 children. This skill never restates that procedure: a second copy here is exactly how the two would
 drift apart. The driver never invokes `/craft:execute` either — a skill-to-skill chain is unreliable
 by the same rule, so the shared procedure is read directly rather than reached through the skill
