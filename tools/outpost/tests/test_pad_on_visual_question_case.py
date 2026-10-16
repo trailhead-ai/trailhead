@@ -12,6 +12,7 @@ asserts anything about the eval's measured result.
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -56,7 +57,11 @@ ROUND = {
 
 def _build(tmp_path: Path, variant: str) -> tuple[subprocess.CompletedProcess, Path]:
     run_dir = tmp_path / "run"
-    env = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path / "unused-home")}
+    env = {
+        "PATH": "/usr/bin:/bin",
+        "HOME": str(tmp_path / "unused-home"),
+        "EVAL_PYTHON3": sys.executable,
+    }
     result = subprocess.run(
         ["bash", str(BUILDER), str(run_dir), variant],
         capture_output=True,
@@ -76,10 +81,14 @@ def _run_pad(run_dir: Path, pad: str) -> subprocess.CompletedProcess:
     round_file.write_text(json.dumps(ROUND))
     cwd = Path((run_dir / "cwd").read_text().strip())
     script = run_dir / "plugin" / "skills" / "scratch-pad" / "scratch_pad.py"
+    env = _arm_env(run_dir)
+    # The skill's documented command is a bare `python3`, so run the one the arm's PATH finds.
+    python3 = shutil.which("python3", path=env["PATH"])
+    assert python3, env["PATH"]
     return subprocess.run(
-        [sys.executable, str(script), "--pad", pad, "--round", str(round_file)],
+        [python3, str(script), "--pad", pad, "--round", str(round_file)],
         cwd=cwd,
-        env=_arm_env(run_dir),
+        env=env,
         capture_output=True,
         text=True,
         timeout=120,
@@ -128,6 +137,23 @@ def test_refused_variant_exits_non_zero_with_reasons_and_leaves_no_pad(tmp_path)
     assert result.stdout == ""
     assert "scratch-pad: publish: error:" in result.stderr
     assert not list(tmp_path.rglob(pad))
+
+
+def test_a_python3_that_cannot_run_the_publisher_is_refused_and_builds_nothing(tmp_path):
+    stub = tmp_path / "old-python3"
+    stub.write_text("#!/bin/sh\nexit 1\n")
+    stub.chmod(0o755)
+    run_dir = tmp_path / "run"
+    env = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path / "unused-home"), "EVAL_PYTHON3": str(stub)}
+    result = subprocess.run(
+        ["bash", str(BUILDER), str(run_dir), "visual-inside-workspace"],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    assert result.returncode == 2
+    assert "tomllib" in result.stderr
+    assert not (run_dir / "run.env").exists()
 
 
 def test_each_variant_leaves_the_brief_for_the_arm_to_pass_as_the_prompt(tmp_path):

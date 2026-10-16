@@ -58,28 +58,38 @@ number.
    `visual-inside-workspace`, `visual-outside-workspace`,
    `not-visual-layout-vocabulary`, `visual-pad-cannot-be-made`,
    `typed-answer-after-pad`, `words-only-request`, `dispatched-agent-observed`.
-   The builder lays down, inside the run directory only: `plugin/` (the outpost
-   plugin, minus `evals/` and `rules.md`), throwaway `home/`, `xdg-state/`,
+   The builder lays down, inside the run directory only: `bin/python3` (a link to
+   `EVAL_PYTHON3`, a 3.11+ interpreter outside the home directory), `plugin/` (the
+   outpost plugin, minus `evals/` and `rules.md`), throwaway `home/`, `xdg-state/`,
    `xdg-config/`, a `project/` folder, `run.env`, `cwd` and `prompt.md`. Exit 2 on
-   an unknown variant.
-2. **Environment.** The process runs with exactly the `KEY=VALUE` lines of
-   `<run>/run.env` and nothing inherited: `PATH=/usr/bin:/bin`,
-   `HOME=<run>/home`, `XDG_STATE_HOME=<run>/xdg-state`,
-   `XDG_CONFIG_HOME=<run>/xdg-config`. Those four make `scratch_pad.py` derive
-   camp state (`$XDG_STATE_HOME/camp`), Outpost state (`$XDG_STATE_HOME/outpost`)
-   and camp config (`$XDG_CONFIG_HOME/camp`) inside the run directory. The
-   throwaway config directory is load-bearing: the developer's real
-   `~/.config/camp/hosts.toml` carries a host identity, which would yield
-   host-qualified links and a port probe to a real Outpost. If the run-directory
-   `HOME` stops `claude` authenticating, the XDG pair is what the pad script
-   needs; resolve that in the Mac probe before the batch (plan Known Unknown 2)
-   and record the choice in `MANUAL-EVAL.md`.
+   an unknown variant, or when `EVAL_PYTHON3` cannot import `tomllib`.
+2. **Environment.** The process runs with the `KEY=VALUE` lines of
+   `<run>/run.env` and nothing else inherited: `PATH=<run>/bin:/usr/bin:/bin`,
+   `XDG_STATE_HOME=<run>/xdg-state`, `XDG_CONFIG_HOME=<run>/xdg-config`, with
+   two overrides the runner adds after them: `HOME` and `USER` set to the
+   developer's own. `claude` finds its Keychain login only with both (a
+   run-directory `HOME`, or an unset `USER`, reports "Not logged in"); the
+   sandbox's default-deny read under the real home is what confines it. The XDG
+   pair makes `scratch_pad.py` derive camp state (`$XDG_STATE_HOME/camp`),
+   Outpost state (`$XDG_STATE_HOME/outpost`) and camp config
+   (`$XDG_CONFIG_HOME/camp`) inside the run directory. The throwaway config
+   directory is load-bearing: the developer's real `~/.config/camp/hosts.toml`
+   carries a host identity, which would yield host-qualified links and a port
+   probe to a real Outpost.
 3. **Working directory.** The single line in `<run>/cwd` (a workspace member
    folder for the two workspace variants, `<run>/project` otherwise).
 4. **Argv.**
-   `env -i $(cat <run>/run.env) <repo>/scripts/eval-sandbox <run> -- <abs-path-to>/claude -p --setting-sources project --plugin-dir <run>/plugin --append-system-prompt "$(cat <repo>/<case>/arms/<arm>.md)" --allowedTools "Bash,Read,Write,Edit,Skill" --output-format stream-json --verbose "$(cat <run>/prompt.md)"`,
-   started in the directory named by `<run>/cwd`. The instructions path is the
-   committed arm file at a known revision, never anything from the fixture.
+   `HOME=<real-home> <repo>/scripts/eval-sandbox <run> -- env -i $(cat <run>/run.env) HOME=<real-home> USER=<user> TMPDIR=/private/tmp/claude-<uid> /bin/sh -c 'cd "$0" && exec "$@"' "$(cat <run>/cwd)" <abs-path-to>/claude -p --setting-sources project --plugin-dir <run>/plugin --append-system-prompt "$(cat <repo>/<case>/arms/<arm>.md)" --allowedTools "Bash,Read,Write,Edit,Skill" --output-format stream-json --verbose "$(cat <run>/prompt.md)"`.
+   The sandbox is given the real `HOME`, because it builds its read-deny rule
+   from `HOME`: wrapped the other way round, it would deny the throwaway folder
+   and leave the real home readable. It starts in `<run>`, so the inner shell
+   moves to the directory named by `<run>/cwd`. Run directories live outside the
+   home directory (under it, the denied reads on its parent folders stop the
+   process starting), so pass every sibling run directory, the capture directory
+   and the runner's own files in `DENY_EXTRA`, ending the list with `:` (the
+   sandbox drops its last entry): one run must not read another's
+   brief or result. The instructions path is the committed arm file at a known
+   revision, never anything from the fixture.
 5. **Capture and marker.** Redirect the process's stdout to
    `<run>.capture.jsonl` beside the run directory, not inside it, so grading
    the tree does not read the capture as arm output. As the very last act, write
