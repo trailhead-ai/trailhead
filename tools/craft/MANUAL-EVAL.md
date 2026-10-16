@@ -2661,11 +2661,11 @@ was used.
 
 | Case | Baseline (per run) | Treatment (per run) | Treatment cost (per run, batch) | Result |
 |---|---|---|---|---|
-| consult-lists-a-sibling-correction-without-writing-it | 0.75 / 0.75 / 0.75 | 1.00 / 1.00 / 0.75 | 0.811 / 0.821 / 0.798, 2.390 | green, 2 of 3 runs at 1.0 |
-| accepted-review-correction-is-applied-not-parked | 1.00 / 0.80 / 0.80 | 1.00 / 1.00 / 1.00 | 0.345 / 0.350 / 0.338, 1.032 | green, 3 of 3 |
-| declined-review-correction-is-left-alone | 1.00 / 1.00 / 1.00 | 1.00 / 1.00 / 1.00 | 0.230 / 0.231 / 0.225, 0.685 | green, 3 of 3 (guard) |
+| consult-lists-a-sibling-correction-without-writing-it | 0.75 / 0.75 / 0.75 | 1.00 / 1.00 / 0.75 | 0.811 / 0.821 / 0.798, 2.430 | green, 2 of 3 runs at 1.0 |
+| accepted-review-correction-is-applied-not-parked | 1.00 / 0.80 / 0.80 | 1.00 / 1.00 / 1.00 | 0.345 / 0.350 / 0.338, 1.033 | green, 3 of 3 |
+| declined-review-correction-is-left-alone | 1.00 / 1.00 / 1.00 | 1.00 / 1.00 / 1.00 | 0.230 / 0.231 / 0.225, 0.686 | green, 3 of 3 (guard) |
 
-Treatment total 4.107 USD (costs are the runner's per-run estimate plus its judge cost). Which edit targets
+Treatment total 4.149 USD. Cost basis for this table and the reworked one: each per-run figure is the runner's per-run estimate plus its judge cost, and each batch total is the sum of its three per-run figures. Which edit targets
 which clause: the "List it apart" bullet and the consult pointer target the `llm` grader
 `correction-listed-apart-with-fix` (0 of 3 at baseline, 2 of 3 now); the `--initiated-by agent` command and
 the acceptance-is-the-yes sentence target `initiated-by-agent` (failed in 2 of 3 at baseline, 0 of 3 now).
@@ -2722,11 +2722,11 @@ Errored runs: **none**. No rerun was used.
 
 | Case | Baseline (per run) | First treatment `b3d36c09` (per run) | Reworked (per run) | Reworked cost (per run incl. judge; batch) | Result |
 |---|---|---|---|---|---|
-| consult-lists-a-sibling-correction-without-writing-it | 0.75 / 0.75 / 0.75 | 1.00 / 1.00 / 0.75 | 1.00 / 1.00 / 1.00 | 0.866 / 0.833 / 0.823; 2.489 | green, 3 of 3 |
-| accepted-review-correction-is-applied-not-parked | 1.00 / 0.80 / 0.80 | 1.00 / 1.00 / 1.00 | 1.00 / 1.00 / 1.00 | 0.326 / 0.309 / 0.359; 0.995 | green, 3 of 3 |
+| consult-lists-a-sibling-correction-without-writing-it | 0.75 / 0.75 / 0.75 | 1.00 / 1.00 / 0.75 | 1.00 / 1.00 / 1.00 | 0.866 / 0.833 / 0.823; 2.522 | green, 3 of 3 |
+| accepted-review-correction-is-applied-not-parked | 1.00 / 0.80 / 0.80 | 1.00 / 1.00 / 1.00 | 1.00 / 1.00 / 1.00 | 0.326 / 0.309 / 0.359; 0.994 | green, 3 of 3 |
 | declined-review-correction-is-left-alone | 1.00 / 1.00 / 1.00 | 1.00 / 1.00 / 1.00 | 1.00 / 1.00 / 1.00 | 0.226 / 0.274 / 0.246; 0.746 | green, 3 of 3 (guard) |
 
-Reworked total 4.230 USD of the 9 USD ceiling. First-treatment per-run costs were 0.811 / 0.821 / 0.798,
+Reworked total 4.262 USD of the 9 USD ceiling, on the same basis (per-run figures include judge cost). First-treatment per-run costs were 0.811 / 0.821 / 0.798,
 0.345 / 0.350 / 0.338 and 0.230 / 0.231 / 0.225.
 
 **Traces (U3), observed again.** The same loop (copy `/tmp/claude-eval-*/**/*.jsonl` every 0.3 s into a scratch
@@ -2736,7 +2736,9 @@ text and a drafted fix (five minutes, 72 readings, 72 slots), nothing is withhel
 no task or follow-up is offered (the words "task" and "follow-up" do not appear in any of the three final
 messages). Each states beside the fix the premise it could not check (that 5 minutes is the gauge's real
 interval; no firmware or datasheet is in reach), and each says the change moves what the decision decides, so
-it should be superseded rather than edited in place, which is the material-correction guard reading as intended.
+it should be superseded rather than edited in place. By lore's `correct` Step 2 that is a misclassification: a
+wrong figure inside the same decision (10 minutes to 5, 36 slots to 72) is an in-scope amend, so the
+material-correction guard misread an in-scope fact, and the prose was fixed for it (see the next section).
 Run 1's last line says the user would have to file the replacement; that is not a task offer. No grader reads
 for a hedge: the `llm` grader fails a deliverable with no drafted fix but passes a fix followed by a task
 offer, so U3 is observed from the transcripts and not scored.
@@ -2755,3 +2757,47 @@ queue, label printer). Every changed path under `~/.local/state/lore/` is attrib
 | `vaults/default/session/ca0e7928-….{md,json}` | uncommitted: another session's `lore session candidate`, `kind=lesson` at 16:14:35Z (11:14 local) |
 | `publish/levr-5a2535166072.request` | the live publish worker, triggered by the levr commits above |
 | `index.sqlite` | derived search index, rewritten by any live lore command |
+
+## Treatment, reworked again: a test for "material" in `_shared/council.md`
+
+The whole-change review found that all three reworked consult runs called the gauge-buffer fix material and
+said to supersede it, where lore's `correct` Step 2 treats a wrong figure inside the same decision as an
+in-scope amend. A craft-only runner child cannot load lore's skill, so the contract now carries the test
+itself: in scope (a wrong fact, a clause that drifted from what shipped, a mechanism detail inside the same
+decision, wording, new evidence, narrowing a spec criterion) against material (reversing a decision, adding or
+removing one, widening or narrowing what an ADR covers, leaving a spec objective with nothing delivering it),
+with the gauge figures as the worked case. The same edit makes "Ask once, after the list" mean writing
+nothing to that record until the answer, not halting the ritual, and makes an acceptance bind to the fix as
+listed. The acceptance gate, the commands and the no-secrets caution are unchanged, and no case or grader was
+edited.
+
+The batch command above was run verbatim, one case per batch, 3 runs, `-j 1`, the four grants, `--max-cost-usd`
+3 / 1.5 / 1.5, runner `claude` 2.1.301, model `claude-opus-5-5`, 2026-10-16. Errored runs: **none**. No rerun
+was used. Cost basis: per-run figures include judge cost; batch totals are their sums.
+
+| Case | Before (per run) | After (per run) | After cost (per run incl. judge; batch) | Result |
+|---|---|---|---|---|
+| consult-lists-a-sibling-correction-without-writing-it | 1.00 / 1.00 / 1.00 | 1.00 / 1.00 / 1.00 | 0.934 / 0.754 / 0.832; 2.520 | green, 3 of 3 |
+| accepted-review-correction-is-applied-not-parked | 1.00 / 1.00 / 1.00 | 1.00 / 1.00 / 1.00 | 0.275 / 0.349 / 0.303; 0.927 | green, 3 of 3 |
+| declined-review-correction-is-left-alone | 1.00 / 1.00 / 1.00 | 1.00 / 1.00 / 1.00 | 0.212 / 0.228 / 0.249; 0.689 | green, 3 of 3 (guard) |
+
+Craft total 4.136 USD; with lore's 6.47 USD the whole fix pass cost 10.61 USD of the $16 ceiling.
+
+**Traces (U3), observed again.** The same loop (copy `/tmp/claude-eval-*/**/*.jsonl` every 0.3 s; stopped by its
+literal PID) captured all 9 runs. All three consult deliverables list
+`decision/gauge-buffer-is-sized-for-the-sampling-interval` under "Corrections to other records" with the wrong
+text and the drafted fix (five minutes, 72 slots), and all three classify it as an in-scope amend ("the
+decision itself stands and only its figures change, so this is an in-place amend", "counts as fixing a wrong
+fact", "active, so it would be amended in place"). None offers a task or follow-up. Each states beside the fix
+the premise it could not check (that 5 minutes is the gauge's real interval; no firmware in reach); that is the
+contract's stated-premise rule, not a withheld fix. One deliverable also opens its summary with "first confirm
+the real sampling interval" before the fix: a hedge in the summary, with the drafted fix still listed. No
+grader reads for a hedge, so this is observed from the transcripts and not scored.
+
+**Real state around the runs.** Sha256 of every file under `~/.local/state/lore/` and `~/.config/lore/`
+(excluding `.git/`), hashed at 11:53 before the first lore batch and at 12:19 after the last craft batch,
+covering the lore batches recorded in lore's MANUAL-EVAL and these. `~/.config/lore/` is unchanged. The changed
+`~/.local/state/lore/` paths are the levr publishes (`bcae3e3f`, `08abd4a0`, `4874873d`, `4769c87f`, `2ef2bb18`,
+`e9d09c6e`, `122b7b37`), the uncommitted default-vault session `1e6b6773-….{md,json}` (written 12:04, another
+session's `lore session candidate`), `index.sqlite`, and the levr publish `.log` and `.request`. No changed
+path carries a fixture term.

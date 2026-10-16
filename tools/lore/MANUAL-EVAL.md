@@ -467,8 +467,9 @@ at 2 of 3 runs.
 |------|-----|------------------|------|--------|-------|
 | 2026-10-16 | baseline | current lore prose | 3 | 1.00, 0.80, 1.00 (2 of 3 at 1.0): GREEN at the floor | The ADR was untouched and no task was created in all three runs. Run 2 failed only `operator-told` (all three judge votes FAIL). The case is green at baseline and is recorded as green, not reshaped. Cost 0.165, 0.170, 0.159 USD. |
 
-Baseline total: 2.30 USD for 12 runs (0.48 for the refuse case, 0.57, 0.64, 0.64 for the others),
-plus 1.71 USD for the flip-check runs.
+Baseline total: 2.36 USD for 12 runs, the sum of the per-run figures above (0.57 for the frozen-record case,
+0.64 for the draft case, 0.66 for the track case, 0.49 for the refuse case). Cost basis for the runner-format lore
+tables: the runner's per-run `costUsd`, judge cost excluded. The flip-check runs cost a further 1.71 USD.
 
 ### Live-state check
 
@@ -584,7 +585,7 @@ unchanged. All 12 runs scored 1.0, with no errors and no reruns.
 | track-unknown-fix-phrased-as-fix-it-now | 1.00 / 1.00 / 1.00 | 0.171, 0.164, 0.166 |
 | refuse-a-ruled-fix-the-source-contradicts | 1.00 / 1.00 / 1.00 | 0.166, 0.183, 0.185 |
 
-Batch cost: 2.08 USD. U3 was not re-observed for these runs, since no trace copy was taken. No case
+Batch cost: 2.11 USD, the sum of the per-run figures above on the same basis (`costUsd`, judge cost excluded). U3 was not re-observed for these runs, since no trace copy was taken. No case
 here exercises the Step 3a change: an operator accepting an agent-proposed amend with lore loaded
 is reviewed, not evaluated. The craft case `accepted-review-correction-is-applied-not-parked` measures
 the same acceptance from craft's side.
@@ -600,6 +601,68 @@ Live state: sha256 of `~/.local/state/lore/` and `~/.config/lore/` (excluding `.
   publish.
 - `index.sqlite` and the publish `.log` and `.request` files: derived and publish-worker state, triggered
   by the commits above.
+
+## Treatment, re-measured after the whole-change review
+
+The whole-change review found three gaps in the `correct` skill's Step 0, all closed in the prose now under
+test. A request to correct a record that does not state the fix, where the code, configuration or record
+settles the right text, is a known fix: the agent reads it off the source and applies it
+(`--initiated-by operator`). A ruled fix whose source cannot be reached from the session is applied, and the
+closing line says the source was not checked. `flush` no longer claims a stale `--base` refuses the write:
+re-reading gives a fresh `--base`, and what protects the record is re-verifying the claim against the freshly
+read body and its source. The shared contract in craft's `council.md` also gained a materiality test; that
+side is measured in craft's MANUAL-EVAL.
+
+The batch command above was run verbatim, one case per invocation, 3 runs, `--max-cost-usd 1.5`, graders
+unchanged, runner `claude` 2.1.301, model `claude-opus-5-5`, 2026-10-16. Errored runs: **none**. Cost basis:
+`costUsd` per run, judge cost excluded (the judge cost per run is in the last column).
+
+| Case | Runs | Cost per run (USD) | Judge cost per run (USD) |
+|---|---|---|---|
+| apply-ruled-fix-to-frozen-record-phrased-as-note-it | 1.00 / 1.00 / 1.00 | 0.244, 0.207, 0.204 | 0 |
+| apply-ruled-fix-to-draft-record | 1.00 / 1.00 / 1.00 | 0.166, 0.184, 0.184 | 0 |
+| track-unknown-fix-phrased-as-fix-it-now | 1.00 / 1.00 / 1.00 | 0.166, 0.156, 0.165 | 0.005 each |
+| refuse-a-ruled-fix-the-source-contradicts | 1.00 / 1.00 / 1.00 | 0.176, 0.182, 0.177 | 0.006 each |
+| amend-wrong-fact-in-active-adr | 1.00 / 1.00 / 1.00 | 0.197, 0.186, 0.190 | 0 |
+| amend-drifted-mechanism-detail-phrased-as-serious-error | 1.00 / 1.00 / 1.00 | 0.176, 0.170, 0.183 | 0 |
+| amend-narrow-one-criterion-in-ready-spec | 1.00 / 1.00 / 1.00 | 0.190, 0.191, 0.193 | 0 |
+| supersede-reversed-decision | 1.00 / 1.00 / 1.00 | 0.202, 0.193, 0.205 | 0 |
+| supersede-adr-exception-phrased-as-small-tweak | 1.00 / 1.00 / 1.00 | 0.219, 0.238, 0.223 | 0.014 each |
+| supersede-spec-change-orphaning-an-objective-phrased-as-small-tweak | first batch 0.71 / 0.71 / 1.00; rerun 1.00 / 1.00 / 1.00 | first 0.192, 0.203, 0.230; rerun 0.209, 0.235, 0.235 | first 0.006, 0.006, 0.008; rerun 0.006, 0.007, 0.008 |
+
+The orphaning case missed the bar in its first batch (1 of 3 runs at 1.0), so its one pre-stated rerun was
+used: 3 of 3. The two failed runs did not apply the supersession and put a choice to the operator instead
+(`successor-spec-exists` and `successor-is-draft` failed, as in the original baseline's 0.71 runs), so this
+case flips between the two behaviours on identical prose and a 2-of-3 pass is a floor, not a stable green.
+Both batches are counted in the cost. The other nine cases used no rerun.
+
+Cost: 6.47 USD, the sum of the eleven batch totals (ten first batches plus the one
+rerun): 0.656, 0.534, 0.487, 0.536, 0.572, 0.528, 0.574, 0.681, 0.599, 0.625 and 0.678 by each batch's `--json`
+total, which includes judge cost.
+
+Live state: sha256 of `~/.local/state/lore/` and `~/.config/lore/` (excluding `.git/`) at 11:53 and 12:19.
+`~/.config/lore/` is unchanged. No vault file carries a fixture title. Changed paths:
+
+| Path | Source |
+|---|---|
+| levr `area/platform-clients-api` | levr `bcae3e3f` (12:04), another session's publish |
+| levr `lesson/{when-a-dispatch-says-…, when-a-fix-stops-caching-…, when-a-task-moves-a-symbol-…}` | levr `08abd4a0` (12:04), another session's publish |
+| levr `task/an-environment-picks-up-a-code-change-…` | levr `4874873d` (12:12) |
+| levr `task/the-mac-sees-a-rebuilt-environment-…` | levr `4769c87f` (12:12) |
+| levr `task/the-connector-reads-strategy-sources-…` | levr `2ef2bb18` (12:05) |
+| levr `task/the-phone-warns-before-it-runs-out-of-room-…` | levr `e9d09c6e` (12:16) |
+| levr `task/{making-someone-an-admin-or-owner-…, the-console-comp-editor-offers-operator-seats, the-seat-step-takes-an-operator-seat-…}` | levr `122b7b37` (12:18) |
+| `vaults/default/session/1e6b6773-….{md,json}` | uncommitted (untracked, written 12:04): another session's `lore session candidate` |
+| `index.sqlite` | derived search index, rewritten by any live lore command |
+| `publish/levr-5a2535166072.{log,request}` | the live publish worker, triggered by the levr commits above |
+
+### Known limitation: `track-unknown-fix-phrased-as-fix-it-now`
+
+The case's graders check that a task was created and names the record and the decider, and that the frozen
+ADR's original figure and history are untouched. A supersession leaves the body and the history untouched, so
+the graders would pass a run that superseded the ADR instead of tracking a task, and no grader reads the
+record's status. The grader set is frozen and was not edited; the case measures "tracked, not edited in
+place", not "tracked, not superseded".
 
 When the next case lands, record it here as:
 
