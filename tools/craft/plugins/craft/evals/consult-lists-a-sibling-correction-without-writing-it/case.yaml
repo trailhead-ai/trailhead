@@ -1,0 +1,5 @@
+schema_version: "1.1"
+name: consult-lists-a-sibling-correction-without-writing-it
+runs: 3
+context:
+  scaffold_script: fixtures/scaffold.sh

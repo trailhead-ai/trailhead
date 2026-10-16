@@ -1,0 +1,14 @@
+[
+ {
+  "kind": "adr",
+  "title": "Label printer firmware rejects fast resends",
+  "status": "active",
+  "body": "# Label printer firmware rejects fast resends\n\nThe printer firmware rejects any job that is re-sent within 90 seconds of a failed print, and reports a paper jam that is not real. A retry has to wait at least 90 seconds after the failure.\n"
+ },
+ {
+  "kind": "decision",
+  "title": "Label queue retries use a flat delay",
+  "status": "active",
+  "body": "# Label queue retries use a flat delay\n\nA failed label print is retried after 45 seconds, up to 4 times, with the same delay each time. A job that fails the fourth attempt is moved to the manual tray list.\n"
+ }
+]
