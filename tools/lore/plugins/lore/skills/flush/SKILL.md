@@ -98,8 +98,8 @@ treat ALL candidates as outstanding — never silently drop candidates.
 For each outstanding candidate, apply agent judgment:
 
 - **Route a known fix to `/lore:correct`**: a candidate that carries a fix to an existing
-  record the operator ruled on or accepted, in their own message in this session, is not
-  promoted to a `task`. Run `/lore:correct` on that record instead; it owns the gate and the
+  record that is known in the sense `/lore:correct` defines, which needs the operator's own
+  message in this session, is not promoted to a `task`. Run `/lore:correct` on that record instead; it owns the gate and the
   apply. Re-read the record first: that gives a fresh `--base`. What protects the record is
   re-verifying the claim against the freshly read body and its source; if the record changed so
   the claim no longer holds, apply nothing.
