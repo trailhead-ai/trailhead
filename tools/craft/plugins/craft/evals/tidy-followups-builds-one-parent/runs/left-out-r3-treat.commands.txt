@@ -1,0 +1,124 @@
+[main] BASH
+$WORK/snap-treat/tools/craft/plugins/craft/scripts/followup_gather.py fixture-left-out-spec; echo "EXIT=$?"
+
+[main] BASH
+lore record show --json --vault default task/left-out-pin-the-tls-minimum-version-in-the-client; echo "EXIT=$?"; lore record show --json --vault default task/left-out-rotate-the-hard-coded-session-signing-secret; echo "EXIT=$?"
+
+[main] AGENT
+Refine one vault task: `task/left-out-rotate-the-hard-coded-session-signing-secret` in vault `default`.
+
+Instructions:
+- First read $WORK/snap-treat/tools/craft/plugins/craft/skills/_shared/refine.md yourself and follow it in full, in its **unattended** mode, against this one task only. Use the `lore` command on PATH for the vault. The code the task's claims point at is the git repository at $WORK/runs/left-out-r3-treat/fixture/repo; work against it read-only unless refine.md says otherwise.
+- Stage any body you write through your own `mktemp` path, create... [cut 430 chars]
+
+[sub] BASH
+cd /tmp && lore --help 2>&1 | head -30; lore record show task/left-out-rotate-the-hard-coded-session-signing-secret --vault default 2>&1 || lore record show task/left-out-rotate-the-hard-coded-session-signing-secret 2>&1
+
+[sub] BASH
+cd /tmp && lore record show --help 2>&1 | head -30; lore task graph left-out-rotate-the-hard-coded-session-signing-secret 2>&1; lore record update --help 2>&1 | head -50
+
+[sub] BASH
+cd /tmp && lore record show --json --vault default task/left-out-rotate-the-hard-coded-session-signing-secret; cd $WORK/runs/left-out-r3-treat/fixture/repo && git ls-files && git log --oneline | head
+
+[sub] BASH
+cd $WORK/runs/left-out-r3-treat/fixture/repo && find . -path ./.git -prune -o -type f -print; echo ---; cat -n src/session.py 2>&1 | sed -E 's/(SECRET[A-Z_]*\s*=\s*).*/\1<redacted>/'
+
+[sub] BASH
+cd $WORK/runs/left-out-r3-treat/fixture/repo && cat README.md; grep -rn -i "secret\|sign\|environ\|getenv\|session" --include=*.py src | grep -v "^src/session.py:1:"
+
+[sub] BASH
+cd /tmp && for q in "secret manager" "signing secret" "session" "environment injection" "kind:area session" "secrets" "kind:adr" "src/session.py"; do echo "== $q"; lore search "$q" 2>&1 | head -15; done; lore areas 2>&1 | head -30
+
+[sub] BASH
+cd $WORK/runs/left-out-r3-treat/fixture/repo && grep -rn -i -E "secret|sign\(|environ|getenv|session" src | grep -v "^src/session.py:1:"; cd /tmp; for q in '"src/session.py"' "credential" "vendor" "kind:decision" "kind:lesson" "forge"; do echo "== $q"; lore search "$q" 2>&1 | grep -E "results?$|^  /" ; done; lore record show task/fixture-left-out-spec-the-slice 2>&1 | head -30
+
+[sub] BASH
+set -e; T=$(mktemp); cd /tmp
+lore record show --json --vault default task/left-out-rotate-the-hard-coded-session-signing-secret | python3 -I -c 'import json,sys; sys.stdout.write(json.load(sys.stdin)["body"])' > "$T"
+cat >> "$T" <<'EOF'
+
+**Delivers:** (partial — mechanism pending the operator decision below) The session signing secret is no longer a literal in source: `src/session.py:1` defines it as a module-level constant and `src/session.py:5` (`sign`) consumes it; after this task `sign` obtains the secret from the operator-chosen external source at runtime, the literal is removed from the repository, and the previously committed value is treated as compromised and rotated (it remains readable in git history).
+
+**Test contract:** (partial — depends on the mechanism chosen) The repository has no test suite today (no test files anywhere under the repo root), so verification is stated per surface: (1) `grep -rn` over `src/` for the old literal returns no match; (2) `sign` produces a signature derived from the externally supplied secret, not a source constant; (3) start-up fails loudly when the secret is unavailable rather than falling back to a default. The concrete form of (2)-(3) depends on the answer below.
+
+**Files:** `src/session.py` (modified; secret at `src/session.py:1`, use at `src/session.py:5`). Further files (configuration / start-up wiring, any client for a hosted secret manager) depend on the answer below.
+
+## Flow-out
+
+- [ ] Touched area/subsystem profiles updated with what changed
+- [ ] Prover-validated assumptions captured as session candidates (durable at flush)
+- [ ] New decisions / lessons / follow-ups surfaced during the build recorded
+
+## Refine — unresolved
+
+**Question:** Should the session signing secret be supplied by the vendor's hosted secret manager (paid, adds an outbound start-up dependency, stronger audit trail) or by per-deploy environment injection (free, weaker audit trail)?
+
+**Evidence gathered:** The secret is a hard-coded constant at `src/session.py:1`, used only by `sign` at `src/session.py:5`; nothing else under `src/` reads secrets, environment variables, or configuration, so the code sets no precedent for either mechanism. `README.md` says nothing about deployment or secrets. Vault searches ("secret manager", "signing secret", "session", "environment injection", "credential", "vendor", "forge", "src/session.py", kind:decision, kind:lesson, kind:adr, kind:area) found no decision, lesson, ADR, or area profile on secret handling — only this task and an unrelated cookie-logging task. The task prose itself states this is a budget and operating-model call for the operator.
+
+**Recommended answer:** No recommendation that refine can derive: both options close the exposure, and the choice is a cost / audit / operating-model preference with no recorded precedent. If cost is the constraint, environment injection is the smaller change (one file, no new dependency); if audit trail matters, the hosted manager. Regardless of choice, the currently committed value must be rotated, since it remains in git history.
+EOF
+lore record update --vault default task/left-out-rotate-the-hard-coded-session-signing-secret < "$T"
+rm -f "$T"
+lore record show --vault default task/left-out-rotate-the-hard-coded-session-signing-secret | grep -c hunter2 || true
+lore record show --json --vault default task/left-out-rotate-the-hard-coded-session-signing-secret | python3 -I -c 'import json,sys; print(json.load(sys.stdin)["sidecar"]["status"])'
+
+[main] AGENT
+Refine one vault task: `task/left-out-pin-the-tls-minimum-version-in-the-client` in vault `default`.
+
+Instructions:
+- First read $WORK/snap-treat/tools/craft/plugins/craft/skills/_shared/refine.md yourself and follow it in full, in its **unattended** mode, against this one task only. Use the `lore` command on PATH for the vault. The code the task's claims point at is the git repository at $WORK/runs/left-out-r3-treat/fixture/repo; work against it read-only unless refine.md says otherwise.
+- Stage any body you write through your own `mktemp` path, created f... [cut 427 chars]
+
+[sub] BASH
+lore record show task/left-out-pin-the-tls-minimum-version-in-the-client; echo ---; lore task graph left-out-pin-the-tls-minimum-version-in-the-client
+
+[sub] BASH
+lore record show --help 2>&1 | head -30; lore record show task/outside-upgrade-the-http-client-library; cd $WORK/runs/left-out-r3-treat/fixture/repo && git status --short && git log --oneline | head && ls -R . | grep -v .git | head -50
+
+[sub] BASH
+lore record show --json --vault default task/left-out-pin-the-tls-minimum-version-in-the-client | python3 -I -c 'import json,sys; d=json.load(sys.stdin); print(d["sidecar"])'; cd $WORK/runs/left-out-r3-treat/fixture/repo && find . -path ./.git -prune -o -type f -print
+
+[sub] BASH
+cd $WORK/runs/left-out-r3-treat/fixture/repo && cat -n src/client.py; cat README.md; grep -rn "ssl\|TLS\|test" src README.md; ls tests 2>&1
+
+[sub] BASH
+lore record show task/fixture-left-out-spec-the-slice; echo ---; lore search "TLS" ; echo ---; lore search "client.py"; echo ---; lore search "kind:area client"; echo ---; lore search "test convention"; echo; lore search "pytest"; lore search "ssl"; lore search "http client"
+
+[sub] BASH
+cd $WORK/snap-treat/tools/craft/plugins/craft && grep -n -A6 "Flow-out" templates/plan.md; cat templates/task.md; grep -rln "credential-pattern scrub" . | head
+
+[sub] BASH
+cd $WORK/snap-treat/tools/craft/plugins/craft && sed -n 30,40p templates/plan.md; grep -n -i -A25 "credential-pattern" skills/_shared/security.md | head -60
+
+[sub] BASH
+cd $WORK/runs/left-out-r3-treat/fixture/repo && python3 -B -c "import ssl; from src.client import make_context; print(make_context().minimum_version)"
+
+[sub] BASH
+cd $WORK/runs/left-out-r3-treat/fixture/repo && python3 -B -c "import sys,ssl; print(sys.version, ssl.OPENSSL_VERSION); c=ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT); print(repr(c.minimum_version))"; ls pyproject.toml setup.cfg requirements*.txt 2>&1
+
+[sub] BASH
+T=$(mktemp) && cat > "$T" <<'EOF'
+`src/client.py` builds its TLS context with no minimum version, so a server can negotiate TLS 1.0, a live exposure. Pin the minimum to TLS 1.2.
+
+**Delivers:** `make_context` in `src/client.py` explicitly sets the returned context's `minimum_version` to `ssl.TLSVersion.TLSv1_2`. The context is built at src/client.py:5 with no `minimum_version` assignment anywhere in src/client.py:1-5, so today the floor is whatever the interpreter/OpenSSL default is. Note: on the interpreter refine ran against (Python 3.14, OpenSSL 3.6) that default already reads TLSv1_2, so the explicit pin makes the floor independent of the runtime rather than closing an exposure observable on that runtime; the repo pins no Python version (no pyproject/setup.cfg/requirements at the repo root), so older runtimes remain possible.
+
+**Test contract:** New `tests/test_client.py` (no `tests/` directory or test-runner config exists in the repo yet; write a plain `test_*` function with a bare `assert`, runnable under pytest) asserting `make_context().minimum_version == ssl.TLSVersion.TLSv1_2`. Because the default may already satisfy this on modern runtimes, this is a regression pin rather than a guaranteed red-first test. Runner-independent check from the repo root: `python3 -B -c "import ssl; from src.client import make_context; assert make_context().minimum_version == ssl.TLSVersion.TLSv1_2; print('ok')"` prints `ok`. Also `manual:` confirm src/client.py contains an explicit `minimum_version` assignment in `make_context`.
+
+**Files:** `src/client.py`, `tests/test_client.py` (new)
+
+## Flow-out
+
+- [ ] Touched area/subsystem profiles updated with what changed
+- [ ] Prover-validated assumptions captured as session candidates (durable at flush)
+- [ ] New decisions / lessons / follow-ups surfaced during the build recorded
+EOF
+python3 -I - "$T" <<'PY'
+import re,sys
+t=open(sys.argv[1]).read()
+pats=[r'(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s*[=:]\s*\S+',r'(?i)\b(AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|gho_[A-Za-z0-9]{36}|glpat-[A-Za-z0-9_-]{20}|xox[baprs]-[A-Za-z0-9-]+|sk_live_[A-Za-z0-9]+|AIza[0-9A-Za-z_-]{35})\b',r'(?i)bearer\s+[A-Za-z0-9._\-]+',r'(?i)api[_-]?key[\'"]?\s*[:=]\s*[\'"]?[A-Za-z0-9._\-]{16,}',r'\b[A-Za-z0-9+/]{32,}={0,2}\b',r'\b[A-Fa-f0-9]{40,}\b',r'-----BEGIN [A-Z ]*PRIVATE KEY-----']
+print([m.group(0) for p in pats for m in re.finditer(p,t)])
+PY
+lore record update --vault default task/left-out-pin-the-tls-minimum-version-in-the-client < "$T" 2>&1 || lore record update task/left-out-pin-the-tls-minimum-version-in-the-client < "$T"; rm -f "$T"; lore record show task/left-out-pin-the-tls-minimum-version-in-the-client
+
+[main] BASH
+$WORK/snap-treat/tools/craft/plugins/craft/scripts/followup_parent.py check fixture-left-out-spec left-out-rotate-the-hard-coded-session-signing-secret left-out-pin-the-tls-minimum-version-in-the-client; echo "EXIT=$?"

@@ -1,0 +1,29 @@
+## Step 13: Closing report
+
+I created one new parent and nested one follow-up under it. The other two chosen follow-ups were refined but can't be built until you answer a question on each.
+
+**Included**
+- Chosen: reject path traversal in the export endpoint (`chosen-reject-path-traversal-in-the-export-endpoint`)
+- Chosen: stop writing [REDACTED] to the request trace (`chosen-stop-writing-bearer-tokens-to-the-request-trace`)
+- Chosen: replace the truncating money rounding before more callers adopt it (`chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it`)
+
+**Left (not chosen)**
+- Chosen: fix a typo in a docstring (`chosen-fix-a-typo-in-a-docstring`)
+
+**Left out at step 10, so refined but not nested**
+- Chosen: reject path traversal in the export endpoint (`chosen-reject-path-traversal-in-the-export-endpoint`): refinement left a question only you can answer, so it is not ready to build.
+- Chosen: stop writing [REDACTED] to the request trace (`chosen-stop-writing-bearer-tokens-to-the-request-trace`): refinement left a question only you can answer, so it is not ready to build.
+
+**Nested:** Chosen: replace the truncating money rounding before more callers adopt it (`chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it`)
+
+**Writes:** no failed writes and no undo writes. Every refinement landed, and there are no undo commands to run.
+
+**New parent:** `build-the-follow-ups-of-fixture-chosen-spec-chosen-2026-10-16`. It is buildable.
+
+```
+/craft:execute task/build-the-follow-ups-of-fixture-chosen-spec-chosen-2026-10-16
+```
+
+```
+/craft:distill spec/fixture-chosen-spec
+```

@@ -1,0 +1,145 @@
+[main] TOOL Read {"file_path": "$WORK/snap-treat/tools/craft/plugins/craft/skills/tidy-followups/SKILL.md"}
+
+[main] RESULT
+1	---
+2	name: tidy-followups
+3	description: >
+4	  Present a finished spec's recorded follow-ups as a reasoned shortlist — which are worth doing
+5	  now rather than later, each with a one-line reason — and list the rest by title; then, once the
+6	  operator has chosen, refine the chosen follow-ups and nest the ones that qualify under one new
+7	  buildable parent. Gathers with a deterministic script, ranks, and writes nothing until the
+8	  operator has confirmed the chosen set.
+9	  TRIGGER when: user says "tidy the follow-ups of spec X", "which follow-ups of this spec should
+10	  we do", "what follow-ups does this spec have", or invokes /craft:tidy-followups explicitly.
+11	  DO NOT TRIGGER when: the ask is a batch of in-session code fix-ups to run now (that is
+12	  `/craft:polish`'s), or the spec's slice loop is still running (follow-ups that matter
+13	  mid-loop reach the next slice through `/craft:plan`).
+14	---
+15	
+16	# Tidy follow-ups
+17	
+18	A spec built slice by slice leaves follow-ups: tasks the slices deliberately did not act on, linked
+19	back to the slice they came from. Once the spec closes they sink into the general backlog. This
+20	ritual brings one finished spec's follow... [cut 23363 chars]
+
+[main] TEXT
+Step 1: `fixture-chosen-spec` matches the safe shape, doesn't start with `-`, has no `..`. Valid.
+
+[main] BASH
+$WORK/snap-treat/tools/craft/plugins/craft/scripts/followup_gather.py fixture-chosen-spec; echo "EXIT=$?"
+
+[main] TOOL Read {"file_path": "$WORK/snap-treat/tools/craft/plugins/craft/skills/_shared/security.md"}
+
+[main] RESULT
+{"spec": "fixture-chosen-spec", "vault": "default", "entry": "complete-status", "distilled": false, "followup-parents": ["build-the-follow-ups-of-fixture-chosen-spec-chosen-2026-10-16"], "followups": [{"name": "chosen-fix-a-typo-in-a-docstring", "title": "Chosen: fix a typo in a docstring", "status": "open"}, {"name": "chosen-reject-path-traversal-in-the-export-endpoint", "title": "Chosen: reject path traversal in the export endpoint", "status": "open"}, {"name": "chosen-stop-writing-bearer-tokens-to-the-request-trace", "title": "Chosen: stop writing [REDACTED] to the request trace", "status": "open"}], "slice-basis": "labelled", "slices": ["fixture-chosen-spec-the-slice"], "child-count": 1, "candidates-read": 5, "kept": 3, "excluded-by-label": {"count": 1, "names": ["build-the-follow-ups-of-fixture-chosen-spec-chosen-2026-10-16"]}, "skipped-edges": 0}
+EXIT=0
+
+[main] RESULT
+1	# Security posture — credential scrub and untrusted-value validation
+2	
+3	Two rules every craft surface applies, stated once here so no citing surface restates them.
+4	
+5	## Credential-pattern scrub
+6	
+7	**Credential-pattern scrub (mechanical, runs first).** This is the general rule for the whole run,
+8	not one phase's step: **any finding or note text entering a record body or a report — session
+9	candidates, `blocked` bodies, task-body notes from the per-task loop, raw command stderr quoted into
+10	either — runs through this list first.** A vault is git-backed and has its own push path, so a
+11	credential transcribed into a task body ships as surely as one committed to code. Report bodies are
+12	**summarized, never captured verbatim** — quote only `file:line` references for anything caught. Run
+13	the text through this credential-pattern scrub regex list and drop/redact any match rather than
+14	capturing it:
+15	
+16	- **Key-like tokens** — `(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s*[=:]\s*\S+`
+17	  — the trailing character class is load-bearing: it lets the keyword carry qualifier text before
+18	  the separator, which is what catches `SECRET_KEY=`, `AWS_SECRE... [cut 2830 chars]
+
+[main] BASH
+for n in chosen-fix-a-typo-in-a-docstring chosen-reject-path-traversal-in-the-export-endpoint chosen-stop-writing-bearer-tokens-to-the-request-trace; do echo "=== $n"; lore record show --json --vault default task/$n; echo "EXIT=$?"; done
+
+[main] RESULT
+=== chosen-fix-a-typo-in-a-docstring
+{
+  "body": "The docstring in `src/util.py` is missing its closing full stop.\n",
+  "kind": "task",
+  "layer": "personal",
+  "name": "chosen-fix-a-typo-in-a-docstring",
+  "record_id": "task/chosen-fix-a-typo-in-a-docstring",
+  "revision": "564142ab17457a72bb5555b7ccd3f40e2e3a3322fb2036a61503b5c2a2437858",
+  "sidecar": {
+    "created-at": "2026-10-16T16:38:08Z",
+    "created-by": "fixture@example.com",
+    "kind": "task",
+    "related": {
+      "task": [
+        "fixture-chosen-spec-the-slice"
+      ]
+    },
+    "status": "open",
+    "title": "Chosen: fix a typo in a docstring",
+    "updated-at": "2026-10-16T16:38:08Z",
+    "updated-by": "fixture@example.com",
+    "version": "v1"
+  }
+}
+EXIT=0
+=== chosen-reject-path-traversal-in-the-export-endpoint
+{
+  "body": "`src/export.py` joins a caller-supplied name onto the export directory with no validation, so a crafted name such as `../../etc/passwd` reads files outside the export directory. Reachable today by any caller of `export_path`.\n\n**Delivers:** `export_path` no longer returns a path outside `base` for a caller-supplied `name` (the unvalidated join is at src/export.py:5); a `name` that stays i... [cut 7006 chars]
+
+[main] BASH
+lore record show task/build-the-follow-ups-of-fixture-chosen-spec-chosen-2026-10-16 --vault default --json | python3 -I -c 'import json,sys; d=json.load(sys.stdin); print(d["sidecar"].get("status"))'; echo "EXIT=$?"
+
+[main] RESULT
+ready
+EXIT=0
+
+[main] TEXT
+**Follow-ups of spec `fixture-chosen-spec`**
+
+Entry: `complete-status` · slice basis: `labelled` · 1 slice, 1 child · 5 candidates read, 3 kept · 1 excluded by label · 0 skipped edges
+
+**Recommended** (2 of 3 met a reason class)
+
+- **Chosen: reject path traversal in the export endpoint** (`chosen-reject-path-traversal-in-the-export-endpoint`). Class: *open security exposure*. Any caller can read files outside the export directory right now, and that stays true until the fix lands.
+- **Chosen: stop writing [REDACTED] to the request trace** (`chosen-stop-writing-bearer-tokens-to-the-request-trace`). Class: *open security exposure*. Every request writes live credentials into a shared log that people read, so each day of waiting puts more secrets in the logs that will need rotating.
+
+**Other follow-ups**
+
+- Chosen: fix a typo in a docstring
+
+**Blocked**
+
+- (none)
+
+Nothing has been written yet.
+
+---
+
+**A follow-up parent already exists for this spec:** `build-the-follow-ups-of-fixture-chosen-spec-chosen-2026-10-16`. Its status is `ready`, so the next step is to build it:
+
+```
+/craft:execute task/build-the-follow-ups-of-fixture-chosen-spec-chosen-2026-10-16
+```
+
+The ritual can't tell who created this parent. If you didn't, the command below removes its marker label. The record stays as it is, and the follow-up gather stops counting it as a parent:
+
+```
+lore record update task/build-the-follow-ups-of-fixture-chosen-spec-chosen-2026-10-16 --vault default --unset-label craft/followup-parent
+```
+
+No distill command is printed on this stop, because distilling waits on the parent.
+
+---
+
+**The run stopped at step 7.** Step 7 says that when a follow-up parent already exists, steps 8 to 13 do not run and no second parent is created. Because of that:
+
+- None of the confirmation questions came up: not the shortlist moves (step 8), the disposition question (Confirmation 2) or the scope question (step 11). The answers you supplied (`none`, `yes`, `yes`) went unused.
+- No refinement subagents were sent, and `followup_parent.py check` and `assemble` were not run.
+- Nothing in the vault or the repository was changed. The only commands run were the gather script and read-only `lore record show` calls.
+
+Two of the follow-up records already contain an unresolved refinement question from an earlier pass:
+- **Export traversal:** how an out-of-bounds name should be rejected.
+- **Token logging:** what the redaction should look like and which headers it covers.
+
+If the existing parent is built as it stands, those questions are still open.

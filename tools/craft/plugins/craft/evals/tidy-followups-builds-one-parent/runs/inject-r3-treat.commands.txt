@@ -1,0 +1,115 @@
+[main] BASH
+$WORK/snap-treat/tools/craft/plugins/craft/scripts/followup_gather.py fixture-inject-spec; echo "EXIT=$?"
+
+[main] BASH
+lore record show --json --vault default task/inject-escape-the-search-term-in-the-report-query; echo "EXIT=$?"; lore record show --json --vault default task/inject-validate-the-redirect-target-after-login; echo "EXIT=$?"
+
+[main] AGENT
+Refine the follow-up task `task/inject-escape-the-search-term-in-the-report-query` in the lore vault `default`.
+
+- First read $WORK/snap-treat/tools/craft/plugins/craft/skills/_shared/refine.md yourself and follow it in full, in its unattended mode, against this one task only. (`${CLAUDE_PLUGIN_ROOT}` is $WORK/snap-treat/tools/craft/plugins/craft.)
+- The code the task refers to is the git repository at $WORK/runs/inject-r3-treat/fixture/repo. Read it as needed. Do not modify it.
+- Stage any body you write through your own path from `mkte... [cut 432 chars]
+
+[sub] BASH
+cd /tmp && lore record show task/inject-escape-the-search-term-in-the-report-query --vault default 2>&1 || lore record show task/inject-escape-the-search-term-in-the-report-query 2>&1; echo ---; lore task graph inject-escape-the-search-term-in-the-report-query 2>&1
+
+[sub] BASH
+cd /tmp && lore record show --help 2>&1 | head -30; lore record show task/inject-escape-the-search-term-in-the-report-query --json 2>&1 | head -40
+
+[sub] BASH
+cd $WORK/runs/inject-r3-treat/fixture/repo && git ls-files && git log --oneline | head && for f in $(git ls-files); do echo "=== $f"; cat -n "$f"; done
+
+[sub] BASH
+cd $WORK/runs/inject-r3-treat/fixture/repo && find . -path ./.git -prune -o -type f -print | while read f; do echo "=== $f"; cat -n "$f"; done
+
+[sub] BASH
+cd /tmp && lore record show task/fixture-inject-spec-the-slice 2>&1 | head -30; echo ---; for q in report "report_query" "sql injection" "parameterized query" pytest tests "kind:area report" "src/report.py"; do echo "## $q"; lore search "$q" 2>&1 | head -10; done
+
+[sub] BASH
+cd /tmp && grep -n -A5 "Flow-out" $WORK/snap-treat/tools/craft/plugins/craft/templates/plan.md; grep -n "Delivers\|Test contract\|Files:" $WORK/snap-treat/tools/craft/plugins/craft/templates/task.md
+
+[sub] BASH
+sed -n 30,40p $WORK/snap-treat/tools/craft/plugins/craft/templates/plan.md
+
+[sub] BASH
+set -e; T=$(mktemp); trap 'rm -f "$T"' EXIT
+cd /tmp
+lore record show task/inject-escape-the-search-term-in-the-report-query --json | python3 -I -c 'import json,sys; sys.stdout.write(json.load(sys.stdin)["body"])' > "$T"
+cat >> "$T" <<'EOF'
+
+**Delivers:** `report_query(term)` no longer concatenates the caller's term into the SQL text (today it does, src/report.py:2). It returns a pair: the SQL string `SELECT * FROM events WHERE name = ?` — the existing query shape from src/report.py:2 with the quoted literal replaced by a single `?` placeholder — and a one-element parameter tuple `(term,)`. Signature stays `report_query(term)` (src/report.py:1). The return-shape contract is the agreed behaviour stated in this task's captured prose above.
+
+**Test contract:** new `tests/test_report.py`, written first and failing against src/report.py:2:
+- `report_query("alice")` returns a 2-tuple whose first element is exactly `SELECT * FROM events WHERE name = ?` and whose second element is `("alice",)`.
+- A hostile term (e.g. one containing a single quote and `OR 1=1 --`) does not appear anywhere in the returned SQL string; it appears only, unchanged, as the sole element of the parameter tuple.
+- The returned SQL contains exactly one `?` placeholder.
+Verification: `python -m pytest tests/test_report.py` from the repo root passes (plain `test_*` functions importing `report_query` from `src.report`; `src/` is a package via `src/__init__.py`).
+
+**Files:** `src/report.py` (modified), `tests/test_report.py` (created).
+
+## Flow-out
+
+- [ ] Touched area/subsystem profiles updated with what changed
+- [ ] Prover-validated assumptions captured as session candidates (durable at flush)
+- [ ] New decisions / lessons / follow-ups surfaced during the build recorded
+EOF
+lore record update task/inject-escape-the-search-term-in-the-report-query --status ready < "$T"
+lore record show task/inject-escape-the-search-term-in-the-report-query
+
+[sub] BASH
+cd /tmp && lore task graph inject-escape-the-search-term-in-the-report-query
+
+[main] AGENT
+Refine the follow-up task `task/inject-validate-the-redirect-target-after-login` in the lore vault `default`.
+
+- First read $WORK/snap-treat/tools/craft/plugins/craft/skills/_shared/refine.md yourself and follow it in full, in its unattended mode, against this one task only. (`${CLAUDE_PLUGIN_ROOT}` is $WORK/snap-treat/tools/craft/plugins/craft.)
+- The code the task refers to is the git repository at $WORK/runs/inject-r3-treat/fixture/repo. Read it as needed. Do not modify it.
+- Stage any body you write through your own path from `mktemp... [cut 465 chars]
+
+[sub] BASH
+cd $WORK/runs/inject-r3-treat; lore --help 2>&1 | head -30; lore record show task/inject-validate-the-redirect-target-after-login 2>&1; lore task graph inject-validate-the-redirect-target-after-login 2>&1
+
+[sub] BASH
+cd $WORK/runs/inject-r3-treat/fixture/repo; git ls-files; echo ---; cat -n src/login.py; echo ---; ls tests 2>&1; cat README.md; cat pyproject.toml setup.cfg 2>/dev/null; lore record --help 2>&1 | head -30
+
+[sub] BASH
+cd $WORK/runs/inject-r3-treat/fixture/repo; ls -la . src; lore record show task/inject-validate-the-redirect-target-after-login --json 2>&1 | head -40; lore search "redirect login" 2>&1 | head; lore search "kind:area login" 2>&1|head; lore areas 2>&1 | head; lore search "open redirect" 2>&1 | head; lore search "tests pytest" 2>&1 | head
+
+[sub] BASH
+lore record show task/inject-escape-the-search-term-in-the-report-query 2>&1; lore search "login" 2>&1|head; lore search "redirect" 2>&1 | head; lore search "src/login.py" 2>&1|head; lore search "kind:decision" 2>&1 | head; lore search "kind:lesson" 2>&1|head; cat $WORK/snap-treat/tools/craft/plugins/craft/templates/plan.md | grep -n -A6 "Flow-out"
+
+[sub] BASH
+set -e; T=$(mktemp); lore record show task/inject-validate-the-redirect-target-after-login --json | python3 -I -c 'import json,sys; sys.stdout.write(json.load(sys.stdin)["body"])' > "$T"
+cat >> "$T" <<'EOF'
+
+**Delivers:** `after_login_target(request)` (src/login.py:1) no longer returns the `next` argument unchecked (today it does, src/login.py:2). It returns the `next` value only when that value is a relative path beginning with a single `/` and not `//`; a missing `next`, an empty value, an absolute URL (e.g. `https://evil.example`), a scheme-relative `//evil.example`, or any other value not starting with `/` falls back to `/`. Signature and the `request.args.get('next', ...)` lookup shape stay as at src/login.py:1-2. The acceptance rule is the agreed behaviour stated in this task's captured prose above.
+
+**Test contract:** new `tests/test_login.py`, written first and failing against src/login.py:2, using a minimal stub request object exposing an `args` dict:
+- `next="/dashboard"` returns `/dashboard`; `next="/a/b?x=1"` returns it unchanged.
+- no `next` key returns `/`; `next=""` returns `/`.
+- `next="https://evil.example/"` returns `/`; `next="//evil.example"` returns `/`; `next="evil.example"` returns `/`; `next="javascript:alert(1)"` returns `/`.
+Verification: `python -m pytest tests/test_login.py` from the repo root passes (plain `test_*` functions importing `after_login_target` from `src.login`; `src/` is a package via `src/__init__.py`).
+
+**Files:** `src/login.py` (modified), `tests/test_login.py` (created).
+
+## Flow-out
+
+- [ ] Touched area/subsystem profiles updated with what changed
+- [ ] Prover-validated assumptions captured as session candidates (durable at flush)
+- [ ] New decisions / lessons / follow-ups surfaced during the build recorded
+EOF
+lore record update task/inject-validate-the-redirect-target-after-login --status ready < "$T"; rm -f "$T"; lore record show task/inject-validate-the-redirect-target-after-login --json | python3 -I -c 'import json,sys; d=json.load(sys.stdin); print(d["sidecar"]["status"]); print(d["body"])'
+
+[main] BASH
+$WORK/snap-treat/tools/craft/plugins/craft/scripts/followup_parent.py check fixture-inject-spec inject-escape-the-search-term-in-the-report-query inject-validate-the-redirect-target-after-login; echo "EXIT=$?"
+
+[main] BASH
+children=$(mktemp)
+cat > "$children" <<'EOF'
+[
+  {"name": "inject-escape-the-search-term-in-the-report-query", "reason": "any caller can inject SQL through the report query right now, and that stays open until this is fixed. (Open security exposure.)", "revision": "b57737617e48fa168df46aba7f319b13e7c806f210ca0097ae47f1194917f3cc"},
+  {"name": "inject-validate-the-redirect-target-after-login", "reason": "a crafted login link can redirect signed-in users off-site right now, and that stays open until this is fixed. (Open security exposure.)", "revision": "58db0810be9ab9170964235599f76ddaff2da9543fdb28a7009f3ed9032fd77f"}
+]
+EOF
+$WORK/snap-treat/tools/craft/plugins/craft/scripts/followup_parent.py assemble fixture-inject-spec --children "$children"; rc=$?; rm -f "$children"; echo "EXIT=$rc"

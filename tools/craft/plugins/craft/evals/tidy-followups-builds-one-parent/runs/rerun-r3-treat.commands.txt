@@ -1,0 +1,8 @@
+[main] BASH
+$WORK/snap-treat/tools/craft/plugins/craft/scripts/followup_gather.py fixture-chosen-spec; echo "EXIT=$?"
+
+[main] BASH
+for n in chosen-fix-a-typo-in-a-docstring chosen-reject-path-traversal-in-the-export-endpoint chosen-stop-writing-bearer-tokens-to-the-request-trace; do echo "=== $n"; lore record show --json --vault default task/$n; echo "EXIT=$?"; done
+
+[main] BASH
+lore record show task/build-the-follow-ups-of-fixture-chosen-spec-chosen-2026-10-16 --vault default --json | python3 -I -c 'import json,sys; d=json.load(sys.stdin); print(d["sidecar"].get("status"))'; echo "EXIT=$?"
