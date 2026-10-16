@@ -320,8 +320,10 @@ the shape "How a finding reads" defines in `_shared/council.md` — that shape i
 readable by someone who has not read the document under review.
 
 A pass that shows a *different* record is wrong, with a known fix, has no disposition and is not a
-`reaches-downstream` scope either. List it apart, as the contract in `_shared/council.md` sets out
-under "Corrections to other records".
+`reaches-downstream` scope either. The test: a record that is wrong *because of a change this review
+prescribes* is `reaches-downstream`; a record that is *already* wrong on its own is a correction to
+another record. List the latter apart, as the contract in `_shared/council.md` sets out under
+"Corrections to other records".
 
 **Security Criticals are never compressed.** A Critical raised by the attacker lens renders its row
 in full — the whole finding and the actual proposed edit text, never a clause standing in for it.
