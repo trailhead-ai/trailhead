@@ -2124,7 +2124,9 @@ file's own terms so the reading does not depend on the contract's wording, which
   `Fix:` line opens with what the reader would notice once it is made (an effect on the people who use or read the
   result, not a description of the edit's mechanics), and then says how much of the thing under review it touches:
   for a spec or plan, which sections, tasks and criteria; for a code change, a count of files and functions plus
-  the two most affected names.
+  the two most affected names; for a consult, which named parts of the proposal put to the council it changes or
+  drops (at `fsconsult`: the door code, the booking sheet, the induction, the technician's firings), and, where it
+  reaches the context document, that document's sections or criteria.
 - **In-between.** A remedy that is neither clearly small nor clearly large. Its `Fix:` line opens with what the
   reader would notice.
 
@@ -2208,7 +2210,8 @@ order:
    instruction to run.
 4. **Large criterion**, on the designated large-rewrite finding: `met` when the `Fix:` line opens with what the
    reader would notice once the change is made and then states an extent in the terms of the definition (sections,
-   tasks and criteria for a spec or plan; a count of files and functions plus the two most affected names for code).
+   tasks and criteria for a spec or plan; a count of files and functions plus the two most affected names for code;
+   the named parts of the proposal, and any context-document sections or criteria, for a consult).
    Not met when it opens with the mechanics of the edit, when it gives no extent, or when the extent is a vague
    quantity ("several places", "the whole thing").
 5. **Ambiguous criterion**, on the code review sites' ambiguous-ask finding only: `met` when the `Fix:` line
