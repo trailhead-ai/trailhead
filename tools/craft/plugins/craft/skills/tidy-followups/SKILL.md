@@ -338,10 +338,11 @@ and remove the file. Act on the exit:
 - **1** — a refusal, with the vault unchanged: stderr has `reason-code:` and a `subject:` line of
   the names at fault. Report it by the table below and go to step 13 as no parent.
 - **2** — a failure. After the parent was created, stdout carries the same JSON with `buildable`
-  false and the reason code on stderr (not in the JSON). Before the create (`parent-create-failed`,
-  or the checks), nothing was written and nothing is on stdout. `internal-error` prints no JSON even
-  after the create: the script attempts its undo first, but its report is lost, so say the parent's
-  state is unknown and that rerunning this ritual names any parent the undo left live (step 7).
+  false and the reason code on stderr (not in the JSON). Before the create (the checks, or a
+  `parent-create-failed` whose create left no parent), nothing was written and nothing is on stdout.
+  `internal-error` prints no JSON even after the create: the script attempts its undo first, but its
+  report is lost, so say the parent's state is unknown and that rerunning this ritual names any
+  parent the undo left live (step 7).
 
 | `reason-code` | What happened, whose side, what to do |
 |---|---|
