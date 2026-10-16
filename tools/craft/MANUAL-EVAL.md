@@ -2534,3 +2534,106 @@ script's own tests, not on this case.
 **A discrepancy in `expected.md`, not reworded.** Its Limitations say the pass condition fixes "the two security items in". The pass condition and the fixture both have three, and the treatment was graded against three.
 
 **What the recorded result covers.** The arms read the gathering script at `48d92da0`. After the run, `d3f7dcc8` refactored it without changing behaviour, and `6d0ff22c` made it confirm each candidate's link from complete reads and shape-check vault names. The skill's prose is unchanged. The result covers the prose; that the shipped script still gathers this fixture the way the arms saw it is shown by `tools/craft/tests/test_tidy_followups_fixture_smoke.py`, not by this run.
+
+---
+
+## Cases: a review-found correction to another record (runner format)
+
+Three runner cases under `plugins/craft/evals/`, each with `expected.md` (committed alone in `d8ed3d02`,
+with the conditions, the 3-run sample and the 2-of-3-at-1.0 bar, before any fixture, grader or run),
+`case.yaml`, `prompt.md`, `graders/` and a seeded `fixtures/` (fixtures and graders in `b76cd592`). They
+are the first runner-format cases in craft's corpus; setup is in `plugins/craft/evals/README.md`. They
+measure AC24 of the known-corrections plan. The baseline is the current craft prose, with no
+corrections-to-other-records contract, before any prose edit.
+
+**Batch command** (one case per invocation, `<case>` one of the three names below; the treatment arm
+reruns exactly this command with the same graders):
+
+```sh
+out=$(mktemp -d)
+env -u LORE_CONFIG_DIR -u LORE_STATE_DIR -u XDG_CONFIG_HOME -u XDG_STATE_HOME \
+  claude plugin eval tools/craft/plugins/craft --case '<case>' --scaffold \
+  --allow-tools 'Bash(./lore *)' 'Bash(*/scripts/maturity_bars.py *)' 'Bash(:)' 'Bash(: *)' \
+  --ablation none --trust-plugin --runs 3 --model claude-opus-5-5 \
+  --json "$out/run.json" --max-cost-usd <N> --output-dir "$out" --no-publish -j 1
+```
+
+Runner `claude` 2.1.301, model `claude-opus-5-5`, 2026-10-16. Cost is the runner's list-price estimate.
+
+**Before the baseline.** Every grader was flipped against a hand-written passing outcome and hand-written
+failing outcomes through the runner (13 scripted runs, about 2.1 USD, transcript in `b76cd592`): each
+file grader failed on at least one wrong outcome and passed on the correct one, the `llm` grader failed
+all three judge votes on four wrong outcomes and passed on the correct one, and `./lore record amend` and
+`./lore record create` writes landed in a craft-plugin child. One earlier flip pass was discarded: its
+generator emptied every `case.yaml`, so no scaffold ran. Unscored smoke runs of the real prompts followed
+(accepted 1.00, declined 1.00, consult 0.75; 1.4 USD). Errored runs (scaffold failure, timeout) in the
+scored batches: **none**.
+
+## Case: consult-lists-a-sibling-correction-without-writing-it
+
+**Under test:** a real `/craft:consult` on `spec/buoy-gauge-outage-tolerance` finds that the sibling
+`decision/gauge-buffer-is-sized-for-the-sampling-interval` is wrong (it sizes from a 10-minute interval,
+the spec says 5, so 72 readings not 36), lists that correction with its fix apart from the findings on the
+spec, and writes nothing to the decision. Presenting half of AC24.
+
+| Run | Score | Cost | Failed graders |
+|---|---|---|---|
+| 1 | 0.75 | 0.736 | `correction-listed-apart-with-fix` (judge votes FAIL FAIL PASS) |
+| 2 | 0.75 | 0.816 | `correction-listed-apart-with-fix` (judge votes PASS FAIL FAIL) |
+| 3 | 0.75 | 0.693 | `correction-listed-apart-with-fix` (judge votes FAIL FAIL FAIL) |
+
+**Result: red, 0 of 3 runs at 1.0** (bar 2 of 3). Batch cost 2.245 USD. The three file graders passed in
+every run: the decision was untouched, with no change history, and no task was created. Only the
+deliverable clause failed. The council found the error (the unscored smoke run's report names the
+5-versus-10-minute mismatch), but it filed it inside the findings on the spec and did not list it as a
+correction to another record. Two runs had one judge vote of three pass, so the verdict is a judgement
+near the line in those; the smoke run and run 3 were unanimous FAIL.
+
+## Case: accepted-review-correction-is-applied-not-parked
+
+**Under test:** `/craft:receiving-code-review` on a finished review that lists a numbered correction to
+`decision/label-queue-retries-use-a-flat-delay` (`45 seconds` should be `90 seconds`), with the operator's
+acceptance phrased "log these so we don't lose them". The decision is amended in place with the initiator
+recorded as `agent`, and no task is created. Apply half of AC24.
+
+| Run | Score | Cost | Failed graders |
+|---|---|---|---|
+| 1 | 1.00 | 0.353 | none |
+| 2 | 0.80 | 0.304 | `initiated-by-agent` |
+| 3 | 0.80 | 0.296 | `initiated-by-agent` |
+
+**Result: red, 1 of 3 runs at 1.0** (bar 2 of 3). Batch cost 0.953 USD. In all three runs the decision was
+amended in place, the wrong text was gone, the fix was present and no task was created. The two failures
+are the recorded initiator: the sidecar's `change-history` entry did not say `"initiated-by": "agent"`
+(the flag takes only `operator` or `agent`, so those two entries record `operator`). The current prose has
+nothing that tells an agent to record a review-found correction as agent-proposed. The unscored smoke run
+scored 1.00. The case is partly green at baseline: the apply behaviour itself is already there, and the
+gap this measures is the initiator.
+
+## Case: declined-review-correction-is-left-alone
+
+**Under test:** the same fixture, with the operator declining correction 1. The decision is left untouched
+and no task is created. Decline branch of AC24.
+
+| Run | Score | Cost | Failed graders |
+|---|---|---|---|
+| 1 | 1.00 | 0.210 | none |
+| 2 | 1.00 | 0.233 | none |
+| 3 | 1.00 | 0.227 | none |
+
+**Result: green, 3 of 3 runs at 1.0.** Batch cost 0.670 USD. Recorded as green: declining asks for no
+action, so current prose already leaves the record alone. Its value is as a guard in the treatment arm.
+
+## Baseline totals and real state
+
+Scored baseline: 3.868 USD (2.245 + 0.953 + 0.670). All runs including grader flips and smoke: about
+9.7 USD, under the 14 USD ceiling.
+
+**Real state around the runs.** `~/.local/state/lore/` and `~/.config/lore/` were hashed before the first
+run and after the last. `~/.config/lore/` is unchanged. Under `~/.local/state/lore/`, 291 diff lines
+cover `index.sqlite`, the publish worker's `.log` and `.request` files for `default`, `levr` and
+`trailhead`, and git internals of those three vaults. Every change is a "lore: <host> published N
+item(s)" commit by another session or host, made during the window (`andromeda` and `toms-macbook-pro`
+captures and `levr` pulls, plus a `Jane Podbelskaya` sync commit on `levr`). None of the three vaults'
+history in the window mentions a fixture title (buoy, gauge buffer, label queue, label printer), and no
+file in any vault does.
