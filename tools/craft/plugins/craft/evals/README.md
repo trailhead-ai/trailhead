@@ -25,9 +25,9 @@ Three cases are run by `claude plugin eval` instead of by hand:
 `consult-lists-a-sibling-correction-without-writing-it`,
 `accepted-review-correction-is-applied-not-parked` and
 `declined-review-correction-is-left-alone`. The runner skips the hand-dispatched
-cases above, which have no `case.yaml`. The case format, graders and the live-state
-snapshot rule are in `tools/lore/plugins/lore/evals/README.md`; this section covers
-what a craft case needs on top.
+cases above, which have no `case.yaml`. The case format, graders, the runner's flags
+and the live-state snapshot rule are in `tools/lore/plugins/lore/evals/README.md`;
+this section covers what a craft case needs on top.
 
 ```
 <case-name>/
@@ -67,8 +67,6 @@ env -u LORE_CONFIG_DIR -u LORE_STATE_DIR -u XDG_CONFIG_HOME -u XDG_STATE_HOME \
 
 - The three extra grants (`maturity_bars.py`, `:`) are for consult's calibration
   step; without them it refuses and never dispatches the council.
-- `--allow-tools` is variadic: keep it before another flag. `--case` takes one glob,
-  so run one case per batch.
 - A consult run takes about 2 minutes and about 0.75 USD (its limits are
   `allowed_tools: [Skill, Agent, Read, Glob, Grep]`, `max_turns: 30`,
   `timeout_seconds: 420`). A review-case run takes about 0.2 to 0.35 USD. The
