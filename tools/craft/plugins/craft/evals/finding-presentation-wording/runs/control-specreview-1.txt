@@ -1,0 +1,26 @@
+**Gauntlet: the allotment waiting list spec, round 1.** Calibration: maturity: production (basis: stamp). No concern was waived.
+
+**What the passes found.** Most of the findings come back to one assumption the spec never states: that everyone on the list can be reached by email, and that every email arrives. The way onto the list requires one: "A person joins the waiting list for one site by giving a name, an email address and the site they want" (AC1). Offers go only by email (AC2), and silence is punished: "An offer not accepted within 14 days passes to the next person in the queue, and the person who did not answer goes to the back of the queue" (AC3). The spec also never says how the people already on the paper list, in their current order, get onto the online one. The rest is smaller gaps. Nothing says who marks a plot as freed. The promise in the Objectives that a person can "see their place" has nothing behind it after the first email. And there are a few choices any build could make either way.
+
+**Whether it holds.** The failure-cases and ease-of-use passes reached the same finding from opposite ends without seeing each other. One looked at a bounced email, the other at a member who simply never hears anything. That agreement is the strongest signal in this run. The right-problem pass is right that people without email are shut out. It guessed at how many there are, but the problem doesn't depend on that number: AC1 is the only way onto the list, so anyone without email can't get on. Underneath, it is the move off paper that the spec leaves unaddressed, and at production maturity that needs your decision. The fact check corrected the list size (412 names, not about 340). The ease-of-use pass carried the wrong number into its own finding, which didn't change its point. I cut the editorial notes: naming a mail provider, "lapse" versus "expired", and one term the self-consistency pass itself said was used consistently.
+
+**What to do.** Add criteria that bring the paper list across in its current order and give people without email a phone route. Then add criteria so a failed or unread offer email never costs anyone their place without a warden or the person being told. Both are edits to this spec. Nothing needs another round.
+
+**Recommended outcome:** advance to `ready` this round.
+
+| id | finding | proposed disposition | proposed edit |
+|---|---|---|---|
+| C1 | People on the paper list have no way across, and anyone without email can't join | `resolved` | Add two criteria: a warden enters the paper list in its current order, with a phone number where there's no email; phone-only people get offers by phone, recorded like emailed ones |
+| C2 | An offer that never arrives costs the person their place, and nobody is told (failure cases + ease of use) | `resolved` | Add four criteria: an undeliverable offer passes on at once and the person keeps their place; a warden is told; a reminder goes out on day 10; a lapse notice gives the person's new place |
+
+**Worth fixing, your call: 10.** Themes:
+- The list holds 412 names, not about 340.
+- After the first email, people have no way to see their place (ease of use and self-consistency both found this).
+- Nothing says who marks a plot freed, or what happens when a freed plot's site has no one waiting.
+- Out-of-turn grants are seen only by whoever reads the history.
+- Some things are left for the build to decide: whether a person can wait for several sites, and whether the 14 days start when the offer is sent or when it's opened.
+- Some events in the history are never said to be recorded.
+
+**Rough edges, nothing to decide: 3.** Theme: who can see the history and someone's place in the queue, and what time of day the 14 days end.
+
+Reply "go" to accept as shown. To override a row, tell me what to change and why, for example "dispute C2 because …". For the full detail or the drafted criteria text, ask for "detail on C1".

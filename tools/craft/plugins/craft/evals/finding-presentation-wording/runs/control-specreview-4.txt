@@ -1,0 +1,27 @@
+**Spec review: a waiting list for allotment plots — round 1**
+maturity: production (basis: stamp) · no stand-downs · fact check: 2 of 4 confirmed, 1 refuted, 1 unverifiable
+
+**What the passes found.** The passes found two problems. The first is the people already on the paper list. The spec says how a new person joins with an email address: "A person joins the waiting list for one site by giving a name, an email address and the site they want" (AC1). It never says how the people already on the paper list get into the online queue with their places intact. It also gives no route at all for someone without email, even though today the warden phones people. The second is offers that never reach anyone. The spec says "the person at the front of that site's queue is sent an offer by email, and the offer stays open for 14 days" (AC2), and "the person who did not answer goes to the back of the queue" (AC3). Together, those rules send someone with a mistyped or full mailbox to the back after years of waiting, without ever telling them. Meanwhile the plot sits empty for two weeks. Below those two problems sit a cluster of smaller gaps: what tells the system a plot is free, what happens when a site's queue is empty, and whether one person can join several sites' queues.
+
+**Whether it holds.** The failure-cases and ease-of-use reviews could not see each other's work, and both reached the lost-offer problem. That makes it the strongest finding here, and it stands. The right-problem review's no-email finding rests on a guess about how many members lack email, and its own confidence line admits the spec doesn't say. I would have downgraded it on that ground alone. It stands on firmer ground, though: moving an existing list into a new system is a migration, and at production maturity a migration with no stated path needs your decision. The fact check also shows the spec's own number is wrong: the 3 March committee minutes record 412 names, not about 340. The same review's claim that criteria 1 to 5 are a bigger build than the complaint needs overreaches. The Objectives explicitly promise joining and seeing your place, so I've only logged it. Separately, the self-consistency and ease-of-use reviews both noticed that the promise to "see their place" has no criterion after the first email. That's a real gap, but it can be fixed later and doesn't block.
+
+**What to do.** Both decisions are fixed by editing this spec, so nothing needs a revise round. For the first, add two criteria. One lets a warden put someone on a queue with a phone number in place of an email and handle their offers by phone. The other moves every paper-list entry across in its original order with its original join date before new joins open, and the Problem's head count is corrected to the minutes' figure. For the second, an offer that can't be delivered passes on at once while the first person keeps their place and the warden is told. People with an open offer get a reminder on day 10 and a message if it lapses. The 14 days count from when the offer is sent; I folded that point in from the left-undecided review because the day-10 reminder needs a fixed start. Undelivered offers are added to the history list. I've drafted the edit text in full, and it's one request away if you want to read it before saying go.
+
+**Recommended outcome:** apply both edits and advance the spec to `ready` this round.
+
+| id | finding | proposed disposition | proposed edit |
+|---|---|---|---|
+| C1 | People on the paper list, and anyone without email, have no way onto the online queue with their place kept | `resolved` | add a criterion for warden entry with a phone number (offers then made by phone), and one moving the paper list across in its original order with join dates before new joins open; correct "about 340" to the minutes' 412 |
+| C2 | An offer that never arrives sends the person to the back of the queue without them knowing, and leaves the plot empty for 14 days | `resolved` | an undeliverable offer passes on at once, the first person keeps their place and the warden is told; reminder on day 10 and a lapse message; 14 days counted from sending; undelivered offers added to the history list |
+
+**Would cause trouble later, worth fixing, your call (8):**
+- Gaps the spec leaves undecided: what marks a plot as freed, what happens when a site's queue is empty, and whether a person can be on several sites' queues.
+- The promise that a person can see their place has nothing behind it after the first email; two reviews raised this.
+- Whether a person's place is stored or worked out from join order.
+- Joins and departures appear in the history list, but the criteria that create them never say they're recorded.
+- An out-of-turn grant is checked only by its typed reason, and nobody else is told.
+- Objectives framing: right-problem says checking the order is the real goal. I think this overreached.
+
+**Rough edges, nothing to decide (4):** what time of day the 14 days end; the confirmation email reveals how many people are ahead; who may read the history; "a few times a month" isn't relied on anywhere. I dropped three purely editorial notes.
+
+Reply "go" to apply both edits and advance the spec. To override, name an id: you can dispute it, accept it as a risk, or answer it with something the reviews didn't know, giving your reason in each case.

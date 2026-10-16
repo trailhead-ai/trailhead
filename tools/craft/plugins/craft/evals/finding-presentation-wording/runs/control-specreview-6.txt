@@ -1,0 +1,30 @@
+**Spec review: a waiting list for allotment plots.** Round 1. All eight reviewers ran. maturity: production (basis: stamp). No stand-downs.
+
+The reviewers kept landing on one gap. The spec plans the waiting list around a person who has an email address and reads it, and it never says what happens to the people already on the paper list. The paper list has no way into the new system. Every place is earned by joining by name, email and site (AC1), so everyone already waiting would start again at the back. Anyone without email couldn't join at all. Once people are on the list, an offer can fail without anyone noticing. An offer that never arrives still stays open 14 days (AC2). The person is then sent to the back of the queue for not answering (AC3), and nothing tells them. The remaining findings are smaller gaps. Nothing says who marks a plot as freed. Nothing says what happens when a site's queue is empty. Nothing lets a person check their place after the first email, though the Objectives promise they can see it. Two choices are still open: whether someone can join several sites' queues, and when the 14 days start.
+
+The two serious findings hold up, and both get more weight because this spec is at production maturity. A missing move from the old list and a failure nobody would see both rise to "needs your decision" at that level. The right-problem reviewer was right that the email requirement shuts some people out, but its claim that "a large part" of the list has no email is a guess it admits it can't support. I've kept the finding because the missing move from the paper list stands without that claim. The failure-cases and ease-of-use reviewers couldn't see each other's work and reached the same failed-offer problem, which is the strongest signal in this run. The fact check found the list holds 412 names, not "about 340" (committee minutes, 3 March). That needs correcting but changes no design. I dropped three findings as wording notes: naming the email provider, "lapse" versus "expired", and a terminology match that isn't a defect.
+
+My recommendation is to fix both serious findings now with new criteria, since edits to this spec answer both. I'd log the rest. The smaller gaps are all one-line additions. The plot-freed trigger and the place shown after the first email are the two I'd add before planning.
+
+**Recommended outcome:** the spec moves to `ready` this round. No finding needs a revise round.
+
+| id | finding | proposed disposition | proposed edit |
+|---|---|---|---|
+| C1 | People on the paper list have no way into the new system, and anyone without email can't join at all | `resolved` | Add two criteria. A warden enters the paper list in its existing order, so everyone keeps their place. A warden can add a person by phone number, and that person is offered plots by phone, with each call recorded in the history. |
+| C2 | An offer that never arrives still runs 14 days, then sends the person to the back of the queue without telling them | `resolved` | Add two criteria. A bounced offer passes on at once and the person keeps their place. People get a reminder on day 10, and an email with their new place if the offer lapses. |
+
+**Would cause trouble later, worth fixing, your call (10):**
+- The 412-versus-340 fact is wrong.
+- Nothing says who marks a plot as freed.
+- Nothing says whether a place is stored or worked out from join order.
+- A freed plot at a site with an empty queue has no defined handling.
+- Out-of-turn grants are seen by nobody until someone reads the history.
+- A person can't see their place after the first email. The ease-of-use and self-consistency reviewers both raised this.
+- Acceptances and departures aren't stated as recorded in the history.
+- The Objectives frame the goal as getting off paper when the real goal is checking the order.
+- Joining more than one site's queue is not decided.
+- When the 14 days start is not decided.
+
+**Rough edges, nothing to decide (4):** what time of day the 14 days end; "a few times a month" isn't relied on anywhere; the confirmation email reveals how many people are ahead; who can see the history isn't settled.
+
+Reply "go" to apply both edits and move the spec to `ready`. To override either row, give the id, the outcome you want (dispute, accept as risk, or answer) and your reason. For example: "dispute C1 because the warden already holds every member's email, otherwise go."
