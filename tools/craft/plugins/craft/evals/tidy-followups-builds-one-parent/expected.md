@@ -254,3 +254,29 @@ never makes, so they are run on the treatment arm only.
 - One model tier, one Claude Code version, the vanilla path only (one throwaway vault, no camp
   workspace), and the arm keeps the real `HOME` fenced by the sandbox rather than by the
   environment.
+
+---
+
+# Revision 1 — two corrections registered after the first `chosen` treatment run, before any other cell ran
+
+The pass condition, the cells and the prompts are unchanged. The first `chosen` treatment run
+(about 6 minutes, $2.04) was the only arm run before this revision. It was a pre-batch trial of the
+whole dispatch and is kept as `runs/chosen-run1-treat.*`, labelled discarded; it is not graded
+against the pass condition. It showed two authoring errors in the test material, neither a result
+about the prose.
+
+- **`mktemp` cannot run inside `scripts/eval-sandbox` on macOS.** The prose has the ritual and each
+  refinement subagent stage through `mktemp`. macOS's `mktemp` ignores `$TMPDIR` and falls back to
+  a per-user directory the sandbox denies, so every `mktemp` failed ("Operation not permitted") in
+  the ritual and in all three subagents, and the arms improvised. The fixture's shim directory now
+  carries a `mktemp` that creates under `$TMPDIR`, and the dispatch sets `TMPDIR` to a directory
+  inside the run dir. The smoke test runs it by the same path.
+- **The `R` follow-up left a question the code cannot settle.** Its body did not say which rounding
+  mode the house rule is, so refinement correctly escalated it and `chosen` reached only two
+  children. That is the `left-out` branch, not the one `chosen` targets. The body now states the
+  rule (round half up to the nearest cent, using `decimal`).
+
+Both fixture facts stay inside this file's description of the fixtures (a follow-up "that a single
+committable cut resolves"). The first run's other observation, that the ritual's own flow was
+followed (dispatch one at a time, `check`, scope shown, `assemble`, the two commands), is recorded
+with it and does not change a line above.
