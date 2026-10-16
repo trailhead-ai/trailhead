@@ -403,7 +403,6 @@ def _case_tree(sandbox: Path) -> Path:
     plugin.mkdir(parents=True)
     (repo / "tools" / "lore" / "scripts").symlink_to(REPO_ROOT / "tools" / "lore" / "scripts")
     (repo / "trailhead").symlink_to(REPO_ROOT / "trailhead")
-    (repo / ".venv").symlink_to(REPO_ROOT / ".venv")
     for name in ("cli", "lore", "_bootstrap.py"):
         (plugin / name).symlink_to(REPO_ROOT / "tools" / "lore" / "plugins" / "lore" / name)
     fixtures = plugin / "evals" / "a-case" / "fixtures"
@@ -423,8 +422,10 @@ def test_scaffold_pattern_seeds_a_vault_and_wrapper_from_a_copied_case_dir(sandb
     if has_venv:
         (stubs / "python3").write_text("#!/bin/sh\nexit 99\n")
         (stubs / "python3").chmod(0o755)
+        venv_bin = sandbox / "repo" / ".venv" / "bin"
+        venv_bin.mkdir(parents=True)
+        (venv_bin / "python").symlink_to(PYTHON)
     else:
-        (sandbox / "repo" / ".venv").unlink()
         (stubs / "python3").symlink_to(PYTHON)
     env = clean_env(sandbox, PATH=f"{stubs}:/usr/bin:/bin")
 
