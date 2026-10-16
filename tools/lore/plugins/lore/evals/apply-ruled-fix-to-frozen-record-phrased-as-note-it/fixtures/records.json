@@ -1,0 +1,8 @@
+[
+  {
+    "kind": "adr",
+    "title": "Invoice batches leave through a nightly export",
+    "status": "active",
+    "body": "# Invoice batches leave through a nightly export\n\n## Context\nFinance needs every issued invoice delivered to the ledger vendor, and the vendor accepts files, not calls.\n\n## Decision\nA nightly job writes the day's invoices to one export file and uploads it. Rows the vendor rejects are retried up to 5 times before the job gives up on them.\n\n## Consequences\nThe ledger lags by up to a day. A rejected row that exhausts its retries needs manual review.\n"
+  }
+]

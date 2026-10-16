@@ -1,0 +1,8 @@
+[
+  {
+    "kind": "adr",
+    "title": "Size the ingest queue for peak load",
+    "status": "active",
+    "body": "# Size the ingest queue for peak load\n\n## Context\nBursts from the partner feeds arrive faster than the workers drain them.\n\n## Decision\nEach shard's ingest queue holds up to 4,000 messages per shard before producers are throttled.\n\n## Consequences\nA burst beyond the depth slows the partner feeds down instead of dropping messages.\n"
+  }
+]
