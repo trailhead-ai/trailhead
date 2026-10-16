@@ -1514,3 +1514,29 @@ misgrade, so the one amendment allowance is unspent and no amendment is made.
 
 The finding-order reading by eye (AC17, AC18) of these nine captures is not done in this section and stays recorded as
 unmeasured.
+
+## Operator decision, 2026-10-16: proceed on a severity-only gate at the code review sites
+
+Recorded after the code review baselines tripped the stop rule above: `code-review-name` has no headroom (`none` on
+9 of 9 baseline captures, so 0 of 9 `internal`) at `review`, `buildreview` and `drivebuild`. This section is dated
+and appended; it is a decision about what gates the slice, not an amendment to the grammar or to any pre-registered
+section above, which stay as written.
+
+The operator chose to proceed. At the three code review sites:
+
+- `severity-name` is the only scripted pass/fail check. The baselines have headroom on it (`internal` on 9 of 9), so
+  the pre-registered pass condition for it stands unchanged: treated clean majority `plain`.
+- `code-review-name` is still graded on every treated capture and reported as an observation. It is not a pass
+  condition, because it has no measured headroom to move.
+- The reviewer-name claim (a code review finding names its raiser as "code review") joins the finding-order items
+  read by eye and closed by the operator at slice close.
+- A treated failure, for the purpose of the fallback, is a `severity-name` failure. The fallback, its one-file arm
+  and its revert rule are unchanged.
+- The four council regression sites keep the checks and the clean-majority bar they already run under.
+- An arm over the Linux single-argument limit (`drivebuild`, about 155 KB) is run with
+  `--append-system-prompt-file` carrying the same bytes. This is a host deviation from the pre-registered
+  `--append-system-prompt` form; each site keeps its baseline and treated runs on the same form.
+
+End state 5 of the extension does not apply: no site was `plain` on both checks at baseline, so all three read
+directives ship (`review/SKILL.md`, `execute/SKILL.md`, `drive/SKILL.md`), at the edit commit
+`33767f4f22bf8a28523ce71863f8b490e0b7cf07`.
