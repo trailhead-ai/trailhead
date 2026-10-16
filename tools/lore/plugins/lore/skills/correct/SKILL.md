@@ -23,6 +23,9 @@ list", "so it doesn't get lost") does not change whether the fix is known.
   - The source confirms it: go on to Step 1.
   - The source contradicts it: apply nothing and leave the record untouched. Tell the operator
     what the source says and that nothing was changed.
+  - When the operator accepted a fix that a review or you proposed and it ends in an amend
+    (Step 3a), the amend is `--initiated-by agent`, and the acceptance is the yes Step 3a asks
+    for: do not ask again.
 - **Genuinely unknown fix** (the right text is not decided and something outside this session
   decides it): leave the record untouched and track a task.
 
@@ -33,7 +36,8 @@ list", "so it doesn't get lost") does not change whether the fix is known.
   Give the body on stdin as a heredoc: end that command line with `<<'EOF'`, put the body on
   the lines that follow, and close it with a line holding only `EOF`. Run it as that one
   command, with no pipe and nothing chained after it. The body names the record to correct as
-  `kind/name`, what is already known, and what would decide the fix. Then end with one line
+  `kind/name`, what is already known, and what would decide the fix. The body syncs to the
+  team: put no tokens, keys, passwords or key-shaped strings in it. Then end with one line
   naming the task. Steps 1 to 4 do not apply.
 
 ## Step 1: Check the record's status first
@@ -46,7 +50,8 @@ lore record show <kind>/<name>
   nothing to amend. Edit it with a plain update, reading it back first and giving the whole
   corrected body, never a delta, on stdin as a heredoc: end the command line with `<<'EOF'`, put
   the body on the lines that follow, and close it with a line holding only `EOF`. Run it as that
-  one command, with no pipe and nothing chained after it. Then go to Step 4.
+  one command, with no pipe and nothing chained after it. The new body syncs to the team: put
+  no tokens, keys, passwords or key-shaped strings in it. Then go to Step 4.
 
   ```bash
   lore record update <kind>/<name>
