@@ -163,7 +163,7 @@ _PLAIN_REVIEWER_RE = re.compile(
     rf"|security){_AFTER}",
     re.IGNORECASE,
 )
-_INTERNAL_CODE_REVIEW_RE = re.compile(rf"{_BEFORE}(?:code-reviewers?|code reviewers?){_AFTER}", re.IGNORECASE)
+_INTERNAL_CODE_REVIEW_RE = re.compile(rf"{_BEFORE}code[ -]reviewers?{_AFTER}", re.IGNORECASE)
 _PLAIN_CODE_REVIEW_RE = re.compile(rf"{_BEFORE}code[ -]review{_AFTER}", re.IGNORECASE)
 _FINDING_TAGS = ("[Critical]", "[Important]", "[Minor]")
 _QUOTE_MIN_CHARS = 30

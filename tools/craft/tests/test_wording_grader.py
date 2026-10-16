@@ -1618,13 +1618,9 @@ FINDING_CAPTURE_VERDICTS.update(
         for site in ("review", "buildreview", "drivebuild")
         for n in (1, 2, 3)
     }
-)
-
-
-# Form-matched baselines for the build review site: the treated arm is over the single-argument limit, so these three
-# ran with the arm file passed as a file, like the treated runs.
-FINDING_CAPTURE_VERDICTS.update(
-    {f"baseline-buildreview-{n}": {"code-review-name": "none", "severity-name": "internal"} for n in (4, 5, 6)}
+    # Form-matched baselines for the build review site: the treated arm is over the single-argument limit, so these
+    # three ran with the arm file passed as a file, like the treated runs.
+    | {f"baseline-buildreview-{n}": {"code-review-name": "none", "severity-name": "internal"} for n in (4, 5, 6)}
 )
 
 
@@ -1650,11 +1646,7 @@ FINDING_CAPTURE_VERDICTS.update(
         f"regress-specreview-{n}": {"severity-name": severity, "reviewer-name": "plain"}
         for n, severity in enumerate(("internal", "plain", "plain", "plain", "plain", "internal"), start=1)
     }
-)
-
-
-FINDING_CAPTURE_VERDICTS.update(
-    {
+    | {
         f"regress-driver-{n}": {"severity-name": "plain", "reviewer-name": "plain", "persisted-levels": "kept"}
         for n in (1, 2, 3)
     }
