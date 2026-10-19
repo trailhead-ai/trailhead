@@ -23,7 +23,7 @@ The run's vault ends with a new decision created and the seeded decision superse
 - The run's `trace.jsonl` and the `llm` trace judge see only the new turns, never the seeded ones. This case is therefore graded on vault files only, and no clause needs a grader to see the seeded question.
 - The seeded tool result carries the real `revision:` of the scaffolded record, so the fixture's history is regenerated whenever the record body changes.
 - `file_exists` counts only files created during the run, so a successor is seen and the seeded decision is not.
-- A supersession's link is written on the successor's sidecar (`supersedes`), whose slug the agent picks, and a regex grader cannot glob. The successor is detected by the predecessor's status plus a created decision file.
+- A supersession's link is written on the successor's sidecar (`supersedes`), whose slug the agent picks, and a regex grader cannot glob. The successor is detected by the predecessor's status plus a created decision file. That pair implies a linked successor: only `lore record supersede` can set a record `superseded` (a plain status update to it is refused), and it writes the edge onto an existing successor, which in this fixture can only be a decision the run created.
 - `regex` graders with `source: file` do not glob, so each names an exact seeded path.
 - The agent's writes stay uncommitted in the vault's git, so every clause is graded on files, never on commits.
 - A run that asks again or does nothing writes no successor and fails the first two clauses; the operator has answered, so that is not the expected route.
