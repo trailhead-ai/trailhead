@@ -1,0 +1,23 @@
+These four code review findings were still open after the one re-review round. The procedure allows only one re-review, so each one is now your decision.
+
+**Would build the wrong thing, needs your decision (1)**
+
+**`fs-kiln/unload.py:3`: the cool-down time ignores how the firing ran.** I recommend fixing this before the board goes up, because the notice could tell someone a hot kiln is safe to open. The cool-down hours come from a table that only knows the kiln, large or small. But the change says a firing that ran hotter needs longer before it is safe to open. Every large-kiln firing waits 18 hours and every small-kiln firing waits 10, however hot it ran. So a hot firing appears on the board as "ready to unload" before it has cooled.
+Fix: each firing would wait out its own cool-down before it shows as ready. The hours would be recorded on the firing itself and the kiln table would go. This touches 1 file and 2 functions, chiefly `cool_hours` and `unload_time`.
+*Raised by: code review*
+
+**Would cause trouble later, worth fixing, your call (1)**
+
+**`fs-kiln/unload.py:17`: a firing that finishes cooling exactly now is left off the board.** I recommend including it, as the change asks. The check counts a firing as ready only once its cool-down has strictly passed. A firing that becomes ready at exactly 9:00 is missing from the 9:00 board, even though the committee asked for it to appear.
+Fix: `unload_time(firing) <= now` instead of `unload_time(firing) < now`, in the check inside `ready_firings`.
+*Raised by: code review*
+
+**Rough edges, nothing to decide (2)**
+
+**`fs-kiln/test_unload.py:9`: the test covers only one firing, in the small kiln.** I recommend widening it. Neither of the two problems above can be caught by a test that only checks one small-kiln firing from the day before.
+Fix: as the reviewer wrote it, "cover the edge the other findings touch."
+*Raised by: code review*
+
+**`fs-kiln/unload.py:25`: the board line doesn't say when the firing became ready.** I recommend adding the time. The change asks for each line to give the time the firing became ready, but the line only reads `<name>: ready to unload`.
+Fix: as the reviewer wrote it, "the board line gives no time for when the firing became ready; add it."
+*Raised by: code review*

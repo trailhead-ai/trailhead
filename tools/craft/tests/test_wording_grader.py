@@ -1783,6 +1783,7 @@ FINDING_CAPTURE_VERDICTS.update(
             ("fsplan", {"severity-name": "plain", "reviewer-name": "plain", "persisted-levels": "kept"}, 3),
             ("fsconsult", {"severity-name": "plain", "reviewer-name": "plain"}, 6),
             ("fsdriver", {"severity-name": "plain", "reviewer-name": "plain", "persisted-levels": "kept"}, 6),
+            ("fsbuildreview", {"code-review-name": "plain", "severity-name": "plain"}, 3),
         )
         for n in range(1, count + 1)
     }
