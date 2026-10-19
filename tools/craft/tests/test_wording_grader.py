@@ -1773,6 +1773,20 @@ FINDING_CAPTURE_VERDICTS.update(
 )
 
 
+# Fix-shape fallback arms (fs-fallback-*): a site's second-round treated sources with only its own ritual file moved
+# to the commit carrying its one point-of-use line. The scripted bar is plain on the naming checks and kept on
+# persisted-levels; `code-review-name` is an observation at the code review site.
+FINDING_CAPTURE_VERDICTS.update(
+    {
+        f"fs-fallback-{site}-{n}": dict(verdicts)
+        for site, verdicts, count in (
+            ("fsplan", {"severity-name": "plain", "reviewer-name": "plain", "persisted-levels": "kept"}, 3),
+        )
+        for n in range(1, count + 1)
+    }
+)
+
+
 def _site(stem):
     """The site a capture belongs to: the calibrated consult's arms are `precal-`, `cal-`, `regress-cal-` and
     `regress2-cal-`, no site segment, and a fix-shape arm is `fs-<arm>-<site>-<n>`."""
