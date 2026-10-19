@@ -96,9 +96,10 @@ finding reads" defines there.
 
 The list is supporting detail to the synthesis, not shorthand: each finding's `Fix:` takes the form
 its size calls for in "How a finding reads" — a small fix leads with the drafted exact text where
-the reviewer's ask and the text it cites settle it, never the ask quoted or described in words, and
-a large rewrite opens with what the reader would notice and names the parts of the proposal it
-changes and any section or criterion of the context document it touches.
+the reviewer's ask and the text it cites settle it, and otherwise carries the ask as that section
+says, never a description in words, and a large rewrite opens with what the reader would notice and
+names the parts of the proposal it changes and any section or criterion of the context document it
+touches.
 
 The prose is what the user reads first, and on a standalone consult it is often all they read: there
 is no disposition gate here forcing them back through the list, so a `consult` that leads with the
