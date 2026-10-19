@@ -282,6 +282,7 @@ ARM_SOURCES["regress2-cal-consult.md"] = [
 # A fallback arm is the site's second-round treated sources with only that file read from that commit.
 FIX_SHAPE_FALLBACK_REVISIONS: dict[str, str] = {
     "fsplan": "f396eb098fd49851341f0f17272de9ac91b4af38",
+    "fsconsult": "3b50cc4ae78b43fb5494fdb2fe5d600230042284",
 }
 FIX_SHAPE_FALLBACK_FILES = {
     "fsplan": PLAN_SKILL,
