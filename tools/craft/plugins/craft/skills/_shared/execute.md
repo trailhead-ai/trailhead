@@ -792,6 +792,12 @@ fix it. Escalate only if that Sonnet fix pass itself fails.
 fix commits in isolation** (a fix can regress code the fix commits don't touch). Any findings that
 survive that one round **surface to the user** — do not loop further.
 
+Show each surviving finding in the shape "How a finding reads" defines, with its `Fix:` in the form
+its size calls for — a small fix leads with the exact code where the reviewer's ask and the code it
+cites settle it, and a large rewrite opens with what the reader would notice and then gives "N files
+and M functions" with the two most affected names — and where the ask and the code do not settle a
+fix, the ask as the reviewer wrote it.
+
 ### Phase 4: Security (conditional)
 
 Runs on the **final form**, after Phase 3's re-review round concludes and all correctness fixes have
