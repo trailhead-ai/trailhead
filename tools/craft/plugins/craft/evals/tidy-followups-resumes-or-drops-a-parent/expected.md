@@ -222,3 +222,10 @@ is reported as such.**
   registered line scores is a finding against the prose, reported and never added as a line after
   the fact.
 - One model tier, one Claude Code version, the vanilla path only.
+
+## Label correction (2026-10-19, after the batch)
+
+Label correction (2026-10-19, after the batch): the headings above attach two criteria to the wrong
+cells. `resume-left-out` is a resume cell and covers AC5 (the left-out reporting is part of resuming),
+not AC6; `refuse-build` is the AC6 cell (a buildable or in-progress parent is refused with its build
+command), not AC7. `refuse-drop` stays AC7. No pass line and no verdict changed.

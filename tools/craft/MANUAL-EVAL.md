@@ -3370,8 +3370,10 @@ Code version, the vanilla path only.
 | Criterion | Cell | Verdict | Pointer |
 |---|---|---|---|
 | AC5 | `resume` | state and outcome held (parent `ready`, B nested, build command alone); displays and question not put | `runs/resume-treat.grade.json` |
-| AC6 | `resume-left-out` | outcome held (removed from the list, parent `ready`); displays and question not put | `runs/resume-left-out-treat.grade.json` |
-| AC7 | `refuse-build` | held | `runs/refuse-build-treat.txt` |
+| AC5 (left-out reporting) | `resume-left-out` | outcome held (removed from the list, parent `ready`); displays and question not put | `runs/resume-left-out-treat.grade.json` |
+| AC6 | `refuse-build` | held | `runs/refuse-build-treat.txt` |
 | AC7 | `refuse-drop` | outcome held (un-nested, kept, `dropped` with the reason, re-run alone); plan, reason question and confirmation not put | `runs/refuse-drop-treat.diff.txt` |
 | AC23 in part, AC42 | `nest-fail` | held (parent left `open` holding the first child, nothing undone, no build command, re-run alone) | `../tidy-followups-builds-one-parent/runs/nest-fail-r4-treat.txt` |
 | AC43 in part | every treatment cell | held (every printed command alone on its line) | each `.grade.json` `command_lines` |
+
+AC6 held in 1 of the 2 cells that reach branch (c): `refuse-build` printed the build command and put the build-or-drop question, while `refuse-drop` printed no build command before the question. The drop's reason question and its child-naming confirmation, the gate the plan relied on for the forgeable parent marker, were not observed in the one cell that exercised them (`refuse-drop`).
