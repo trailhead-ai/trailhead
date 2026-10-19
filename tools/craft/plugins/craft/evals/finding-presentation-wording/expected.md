@@ -2835,3 +2835,22 @@ its large criterion, and `fsspecreview` would then have no missed criterion); an
 block's labelled remedy clause at `fsdriver-1` to `-3`. A criterion on which a second reader disagrees is `disputed` and
 counts as not met. The limits above (one reader, three runs a site except the two split runs, one model tier, the
 file-form deviation for the two build arms) apply unchanged.
+
+## Amendment: a sharpened contract and a second treated round (2026-10-19)
+
+Operator decision, 2026-10-19: sharpen the shared finding contract and re-measure before any per-site fallback. The first
+treated round ("Results: the fix-shape treated arms and the calibrated consult regression (2026-10-16)", counts corrected
+in `fa8154e9`) named all seven sites for the fallback, but the second reader's diagnosis is that the contract reaches
+most sites and is followed imprecisely, not that it fails to reach them: small-fix text was drafted after the situation
+("In AC1, replace ... with ...", "add this under the booking button: ..."); large fixes opened effect-first with no
+extent in the definition's terms ("changes `unload_time` in one file"; consult lines naming no part); the ambiguous ask
+was quoted and then followed by invented test cases; and the contract's own small example and parenthetical read
+verb- and location-first, which the captures copied. A per-site fallback would paper over a contract that teaches the
+wrong order, so the contract is sharpened first (commit A2, `skills/_shared/council.md`, the three forms of a fix).
+
+This amendment changes no protocol or definition. It reserves the second-round arm names `fs-treated2-<site>` for the
+seven sites (`fsspecreview`, `fsplan`, `fsconsult`, `fsdriver`, `fsreview`, `fsbuildreview`, `fsdrivebuild`) and
+`regress2-cal-consult`, with capture prefixes `fs-treated2-<site>-<n>` and `regress2-cal-consult-<n>`. The second round is
+read under the same protocol, definitions, branch table, scripted bar, splits rule and paired-control rule as the first
+treated round, unchanged. The fallback task acts on the second round's `Fallback needed at:` line, not the first
+round's. Nothing above this heading is rewritten.
