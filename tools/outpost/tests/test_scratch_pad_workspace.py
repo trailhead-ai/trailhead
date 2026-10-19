@@ -8,6 +8,8 @@ mirror are loaded by path so the copies cannot drift apart.
 
 from __future__ import annotations
 
+import fcntl
+import hashlib
 import importlib.util
 import json
 import os
@@ -171,6 +173,7 @@ def test_names_the_same_group_and_slug_as_camp(pad, camp, tmp_path):
 SKILL_DIR = SCRIPT_PATH.parent
 ROUND_JS_PREFIX = "window.PAD_ROUND = JSON.parse("
 ROUND_JS_SUFFIX = ");\n"
+WAITING = "waiting for another session's add"
 KIT_FILES = {"index.html": b"<!doctype html><title>kit</title>\n", "pad.js": b"// pad\n"}
 
 
@@ -205,6 +208,8 @@ class Rig:
             "CAMP_STATE_DIR": str(self.root),
             "CAMP_CONFIG_DIR": str(tmp_path / "camp-config"),
             "HOME": str(tmp_path / "home"),
+            "XDG_STATE_HOME": str(tmp_path / "xdg-state"),
+            "XDG_DATA_HOME": str(tmp_path / "xdg-data"),
             "OUTPOST_STATE_DIR": str(self.outpost_state),
         }
         self.kit = _kit(tmp_path / "kit")
@@ -214,11 +219,16 @@ class Rig:
         self.outside = tmp_path / "outside"
         self.outside.mkdir()
 
-    def argv(self, pad_name="p", round_path=None):
-        return ["--pad", pad_name, "--round", str(round_path or _round_file(self.tmp_path))]
+    def argv(self, pad_name="p", round_path=None, add=False):
+        argv = ["--pad", pad_name, "--round", str(round_path or _round_file(self.tmp_path))]
+        return [*argv, "--add"] if add else argv
 
-    def run(self, pad_name="p", round_path=None, cwd=None, **kw):
-        return self.pad.main(self.argv(pad_name, round_path), env=self.env, cwd=cwd or self.member, **kw)
+    def run(self, pad_name="p", round_path=None, cwd=None, add=False, **kw):
+        return self.pad.main(self.argv(pad_name, round_path, add), env=self.env, cwd=cwd or self.member, **kw)
+
+    def add(self, title, pad_name="p", **kw):
+        path = _round_file(self.tmp_path, {**_round(), "title": title}, f"{title}.json")
+        return self.run(pad_name, path, add=True, **kw)
 
     def leftovers(self):
         return sorted(p.name for p in self.tmpdir.iterdir())
@@ -325,12 +335,24 @@ def test_the_publisher_alone_refuses_a_taken_name_when_the_early_check_is_bypass
     assert rig.leftovers() == []
 
 
-def test_two_concurrent_runs_on_one_name_yield_one_site_and_one_refusal(rig):
-    barrier = threading.Barrier(2)
-    real = rig.pad._run_publisher
+def _wait_for(predicate, what, limit=15.0):
+    deadline = time.monotonic() + limit
+    while time.monotonic() < deadline:
+        if predicate():
+            return
+        time.sleep(0.02)
+    pytest.fail(f"timed out waiting for {what}")
 
-    def both_arrive_then_race(cmd, env, timeout):
-        barrier.wait(timeout=30)
+
+def test_two_concurrent_runs_on_one_name_yield_one_site_and_one_refusal(rig, capsys):
+    first_inside, release = threading.Event(), threading.Event()
+    real = rig.pad._run_publisher
+    calls = []
+
+    def first_parks_inside_the_publisher(cmd, env, timeout):
+        calls.append(cmd)
+        first_inside.set()
+        assert release.wait(timeout=30)
         return real(cmd, env, timeout)
 
     results = []
@@ -343,21 +365,28 @@ def test_two_concurrent_runs_on_one_name_yield_one_site_and_one_refusal(rig):
                 kit_dir=rig.kit,
                 env=rig.env,
                 cwd=rig.member,
-                publish_runner=both_arrive_then_race,
+                publish_runner=first_parks_inside_the_publisher,
             )
             results.append("built")
         except rig.pad.Refusal as exc:
             results.append(exc.lines)
 
-    threads = [threading.Thread(target=attempt) for _ in range(2)]
-    for t in threads:
-        t.start()
-    for t in threads:
+    first = threading.Thread(target=attempt)
+    first.start()
+    assert first_inside.wait(timeout=15)
+    second = threading.Thread(target=attempt)
+    second.start()
+    err = []
+    _wait_for(lambda: err.append(capsys.readouterr().err) or any(WAITING in e for e in err), "the second run to wait")
+    release.set()
+    for t in (first, second):
         t.join(timeout=60)
+        assert not t.is_alive()
 
     refusals = [r for r in results if r != "built"]
-    assert results.count("built") == 1 and len(refusals) == 1
-    assert refusals[0][0].startswith("scratch-pad: publish: error: ") and "already exists" in refusals[0][0]
+    taken = 'scratch-pad: pad "race" already exists — choose another --pad name'
+    assert results.count("built") == 1 and refusals == [[taken]]
+    assert len(calls) == 1
     assert sorted(p.name for p in (rig.ws / "sites").iterdir()) == ["race"]
     assert (rig.ws / "sites" / "race" / "round-1" / "round.js").is_file()
     assert rig.leftovers() == []
@@ -657,3 +686,439 @@ def test_a_publisher_failure_with_undecodable_stderr_is_refused_cleanly(rig, cap
     assert code == 1
     assert captured.err.splitlines() == ["scratch-pad: publish: error: bad \\\\xff byte"]
     assert rig.leftovers() == []
+
+
+# --- adding a round to a pad published in a workspace ------------------------------------------------
+
+
+def _file_hashes(root: Path) -> dict[str, str]:
+    return {
+        str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest()
+        for p in sorted(root.rglob("*"))
+        if p.is_file()
+    }
+
+
+def _site_titles(site: Path) -> list[str]:
+    text = (site / "rounds.js").read_text(encoding="utf-8").rstrip("\n")
+    prefix = "window.PAD_ROUNDS = JSON.parse("
+    assert text.startswith(prefix) and text.endswith(");")
+    return [r["title"] for r in json.loads(json.loads(text[len(prefix) : -2]))]
+
+
+def _lands(rig, cmd):
+    """Stand in for the publisher: the site becomes the payload."""
+    site = rig.ws / "sites" / cmd[3]
+    shutil.rmtree(site)
+    shutil.copytree(cmd[2], site)
+
+
+def _lands_ok(rig, link="http://stub/\n"):
+    def runner(cmd, env, timeout):
+        _lands(rig, cmd)
+        return subprocess.CompletedProcess(cmd, 0, stdout=link, stderr="")
+
+    return runner
+
+
+def _published(rig, capsys, name="p"):
+    assert rig.run(name) == 0
+    return capsys.readouterr().out.splitlines()
+
+
+def test_adding_a_round_through_the_real_publisher_keeps_round_one_and_relays_its_lines(rig, capsys):
+    first_out = _published(rig, capsys)
+    site = rig.ws / "sites" / "p"
+    before = _file_hashes(site)
+
+    code = rig.add("Pricing")
+
+    out = capsys.readouterr().out.splitlines()
+    after = _file_hashes(site)
+    assert code == 0
+    assert {k: v for k, v in after.items() if k.startswith("round-1/")} == {
+        k: v for k, v in before.items() if k.startswith("round-1/")
+    }
+    assert "round-2/index.html" in after and "round-2/round.js" in after
+    assert after["rounds.js"] != before["rounds.js"]
+    assert after["index.html"] != before["index.html"]
+    assert _site_titles(site) == ["Settings", "Pricing"]
+    assert "round-2/" in (site / "index.html").read_text(encoding="utf-8")
+    assert _round_js_data(site / "round-2" / "round.js")["title"] == "Pricing"
+    assert out[:-1] == first_out[:-1]
+    assert out[-1] == f"pad folder: {site}"
+    assert rig.leftovers() == []
+
+
+def _legacy_pad(site: Path) -> None:
+    folder = site / "round-1"
+    folder.mkdir(parents=True)
+    for name, body in KIT_FILES.items():
+        (folder / name).write_bytes(body)
+    literal = json.dumps(json.dumps(_round()))
+    (folder / "round.js").write_text(ROUND_JS_PREFIX + literal + ");\n", encoding="utf-8")
+    (site / "index.html").write_text('<meta http-equiv="refresh" content="0; url=round-1/index.html">\n')
+
+
+def test_a_workspace_pad_built_before_rounds_js_existed_takes_a_second_round(rig, capsys):
+    site = rig.ws / "sites" / "p"
+    _legacy_pad(site)
+    before = _file_hashes(site / "round-1")
+
+    code = rig.add("Pricing")
+
+    assert code == 0, capsys.readouterr().err
+    assert _file_hashes(site / "round-1") == before
+    assert _site_titles(site) == ["Settings", "Pricing"]
+    assert rig.leftovers() == []
+
+
+def test_adding_from_deep_inside_a_member_folder_gives_the_same_result(rig, capsys):
+    _published(rig, capsys)
+    deep = rig.member / "a" / "b" / "c"
+    deep.mkdir(parents=True)
+    path = _round_file(rig.tmp_path, {**_round(), "title": "Pricing"}, "deep.json")
+
+    code = rig.run("p", path, cwd=deep, add=True)
+
+    assert code == 0, capsys.readouterr().err
+    assert _site_titles(rig.ws / "sites" / "p") == ["Settings", "Pricing"]
+    assert rig.leftovers() == []
+
+
+def test_the_publisher_gets_overwrite_only_when_a_round_is_added(rig, capsys):
+    seen = []
+
+    def spy(cmd, env, timeout):
+        seen.append(
+            (list(cmd), stat.S_IMODE(Path(cmd[2]).stat().st_mode), Path(cmd[2]).parent, sorted(os.listdir(cmd[2])))
+        )
+        if (rig.ws / "sites" / "p").exists():
+            _lands(rig, cmd)
+        else:
+            shutil.copytree(cmd[2], rig.ws / "sites" / "p")
+        return subprocess.CompletedProcess(cmd, 0, stdout="link\n", stderr="")
+
+    assert rig.run(publish_runner=spy) == 0
+    assert rig.add("Pricing", publish_runner=spy) == 0
+
+    publisher = str(SKILL_DIR.parent / "publish-site" / "publish_site.py")
+    new_cmd, add_cmd = seen[0][0], seen[1][0]
+    assert "--overwrite" not in new_cmd
+    assert add_cmd == [sys.executable, publisher, add_cmd[2], "p", "--workspace-path", str(rig.ws), "--overwrite"]
+    assert Path(add_cmd[2]).name.startswith("scratch-pad-")
+    assert seen[1][1] == 0o700 and seen[1][2] == rig.tmpdir
+    assert seen[1][3] == ["index.html", "round-1", "round-2", "rounds.js"]
+    assert rig.leftovers() == []
+
+
+def test_adding_to_a_pad_that_is_not_in_the_workspace_is_refused_and_changes_nothing(rig, capsys):
+    (rig.ws / "sites" / "other").mkdir(parents=True)
+    (rig.ws / "sites" / "other" / "index.html").write_text("x")
+    before = _snapshot(rig.ws / "sites")
+
+    code = rig.add("Pricing", publish_runner=lambda *a: pytest.fail("publisher ran"))
+
+    captured = capsys.readouterr()
+    assert code == 1 and captured.out == ""
+    assert captured.err.splitlines() == ['scratch-pad: pad "p": does not exist — drop --add to start a new pad']
+    assert _snapshot(rig.ws / "sites") == before
+    assert rig.leftovers() == []
+
+
+def test_adding_to_a_site_that_is_not_a_pad_is_refused_and_changes_nothing(rig, capsys):
+    (rig.ws / "sites" / "p").mkdir(parents=True)
+    (rig.ws / "sites" / "p" / "index.html").write_text("a plain site")
+    before = _snapshot(rig.ws / "sites")
+
+    code = rig.add("Pricing", publish_runner=lambda *a: pytest.fail("publisher ran"))
+
+    captured = capsys.readouterr()
+    assert code == 1 and captured.out == ""
+    assert "can't take another round" in captured.err and "round-1" in captured.err
+    assert _snapshot(rig.ws / "sites") == before
+    assert rig.leftovers() == []
+
+
+def test_a_title_the_pad_already_has_is_refused_before_the_publisher_runs(rig, capsys):
+    _published(rig, capsys)
+    before = _snapshot(rig.ws / "sites")
+
+    code = rig.add("Settings", publish_runner=lambda *a: pytest.fail("publisher ran"))
+
+    assert code == 1
+    assert "give each round its own title" in capsys.readouterr().err
+    assert _snapshot(rig.ws / "sites") == before
+    assert rig.leftovers() == []
+
+
+def test_a_publisher_failure_on_an_add_is_relayed_and_leaves_the_site_and_no_temp_folder(rig, capsys):
+    _published(rig, capsys)
+    before = _snapshot(rig.ws / "sites")
+
+    def refuses(cmd, env, timeout):
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="error: nope\n\nsecond line\n")
+
+    code = rig.add("Pricing", publish_runner=refuses)
+
+    captured = capsys.readouterr()
+    assert code == 1 and captured.out == ""
+    assert captured.err.splitlines() == ["scratch-pad: publish: error: nope", "scratch-pad: publish: second line"]
+    assert _snapshot(rig.ws / "sites") == before
+    assert rig.leftovers() == []
+
+
+def test_a_publisher_that_cannot_be_started_on_an_add_is_refused_under_publish(rig, capsys):
+    _published(rig, capsys)
+    before = _snapshot(rig.ws / "sites")
+
+    def cannot_start(cmd, env, timeout):
+        raise FileNotFoundError(2, "No such file or directory")
+
+    code = rig.add("Pricing", publish_runner=cannot_start)
+
+    assert code == 1
+    assert capsys.readouterr().err.splitlines() == [
+        "scratch-pad: publish: could not start the publisher: No such file or directory"
+    ]
+    assert _snapshot(rig.ws / "sites") == before
+    assert rig.leftovers() == []
+
+
+def test_without_the_publish_site_skill_an_add_in_a_workspace_is_refused_and_writes_nothing(rig, capsys):
+    _published(rig, capsys)
+    before = _snapshot(rig.ws / "sites")
+    mod = _load("scratch_pad_alone_add", _skill_tree(rig.tmp_path, None))
+    path = _round_file(rig.tmp_path, {**_round(), "title": "Pricing"}, "x.json")
+
+    code = mod.main(
+        rig.argv("p", path, add=True), env=rig.env, cwd=rig.member, publish_runner=lambda *a: pytest.fail("ran")
+    )
+
+    err = capsys.readouterr().err
+    assert code == 1 and "publish-site skill is missing" in err
+    assert _snapshot(rig.ws / "sites") == before
+    assert rig.leftovers() == []
+
+
+def _timeout_with(rig, capsys, outcome):
+    """Publish round one, then add a round whose publisher times out after *outcome* lands on disk."""
+    _published(rig, capsys)
+    site = rig.ws / "sites" / "p"
+
+    def hangs_after(cmd, env, timeout):
+        outcome(cmd, site)
+        raise subprocess.TimeoutExpired(cmd, timeout)
+
+    code = rig.add("Pricing", publish_runner=hangs_after, publish_timeout=7)
+    return code, capsys.readouterr(), site
+
+
+def test_a_timeout_with_the_whole_pad_and_exactly_one_more_round_is_reported_unconfirmed(rig, capsys):
+    code, captured, site = _timeout_with(rig, capsys, lambda cmd, site: _lands(rig, cmd))
+
+    assert code == 0
+    assert captured.out.splitlines()[0].startswith("note: the pad was published but the publisher did not confirm")
+    assert captured.out.splitlines()[-1] == f"pad folder: {site}"
+    assert _site_titles(site) == ["Settings", "Pricing"]
+    assert rig.leftovers() == []
+
+
+def test_a_timeout_with_the_site_unchanged_is_a_refusal(rig, capsys):
+    code, captured, site = _timeout_with(rig, capsys, lambda cmd, site: None)
+
+    assert code == 1 and captured.out == ""
+    assert captured.err.splitlines() == [
+        "scratch-pad: publish: the publisher did not finish within 7 seconds and the round was not added"
+    ]
+    assert _site_titles(site) == ["Settings"]
+    assert rig.leftovers() == []
+
+
+def test_a_timeout_with_a_pad_of_the_wrong_round_count_is_a_refusal(rig, capsys):
+    def two_more(cmd, site):
+        _lands(rig, cmd)
+        shutil.copytree(site / "round-2", site / "round-3")
+
+    code, captured, site = _timeout_with(rig, capsys, two_more)
+
+    assert code == 1 and captured.out == ""
+    assert captured.err.splitlines() == [
+        "scratch-pad: publish: the publisher did not finish within 7 seconds and the pad is not as expected"
+    ]
+    assert rig.leftovers() == []
+
+
+def test_a_timeout_with_a_pad_that_is_no_longer_whole_is_a_refusal(rig, capsys):
+    def half(cmd, site):
+        _lands(rig, cmd)
+        (site / "round-1" / "index.html").unlink()
+
+    code, captured, site = _timeout_with(rig, capsys, half)
+
+    assert code == 1 and captured.out == ""
+    assert "can't take another round" in captured.err and "round-1/index.html is missing" in captured.err
+    assert rig.leftovers() == []
+
+
+def test_a_timeout_with_the_pad_gone_is_a_refusal(rig, capsys):
+    code, captured, site = _timeout_with(rig, capsys, lambda cmd, site: shutil.rmtree(site))
+
+    assert code == 1 and captured.out == ""
+    assert captured.err.splitlines() == [
+        "scratch-pad: publish: the publisher did not finish within 7 seconds and the pad is no longer there"
+    ]
+    assert rig.leftovers() == []
+
+
+def test_a_timeout_with_a_pad_missing_its_top_level_files_is_a_refusal(rig, capsys):
+    def no_listing(cmd, site):
+        _lands(rig, cmd)
+        (site / "rounds.js").unlink()
+
+    code, captured, site = _timeout_with(rig, capsys, no_listing)
+
+    assert code == 1 and captured.out == ""
+    assert "scratch-pad: publish: the publisher did not finish within 7 seconds" in captured.err
+    assert rig.leftovers() == []
+
+
+HALF_SWAP_THEN_NEVER_RETURN = (
+    "import os, sys, time\n"
+    "site, marker = sys.argv[1:3]\n"
+    "os.remove(os.path.join(site, 'round-1', 'index.html'))\n"
+    "open(marker, 'w').close()\n"
+    "time.sleep(300)\n"
+)
+
+
+def test_a_second_add_during_a_publisher_timeout_waits_and_never_reads_mid_swap(rig, capsys):
+    _published(rig, capsys)
+    site = rig.ws / "sites" / "p"
+    marker = rig.tmp_path / "half-swapped"
+
+    def never_returns(cmd, env, timeout):
+        script = [sys.executable, "-c", HALF_SWAP_THEN_NEVER_RETURN, str(site), str(marker)]
+        try:
+            return subprocess.run(script, capture_output=True, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            _lands(rig, cmd)
+            raise
+
+    codes = {}
+    first = threading.Thread(
+        target=lambda: codes.__setitem__("first", rig.add("Pricing", publish_runner=never_returns, publish_timeout=2))
+    )
+    first.start()
+    _wait_for(marker.exists, "the publisher to half-swap the site")
+    assert (site / "round-1" / "index.html").exists() is False
+    second = threading.Thread(
+        target=lambda: codes.__setitem__("second", rig.add("Costs", publish_runner=_lands_ok(rig), publish_timeout=2))
+    )
+    second.start()
+    for t in (first, second):
+        t.join(timeout=60)
+        assert not t.is_alive()
+
+    err = capsys.readouterr().err
+    assert codes == {"first": 0, "second": 0}, err
+    assert WAITING in err
+    assert _site_titles(site) == ["Settings", "Pricing", "Costs"]
+    assert (site / "round-1" / "index.html").is_file()
+    assert rig.leftovers() == []
+
+
+def test_two_racing_adds_on_one_workspace_pad_land_as_consecutive_rounds(rig, capsys):
+    _published(rig, capsys)
+    site = rig.ws / "sites" / "p"
+    round_one = _file_hashes(site / "round-1")
+    inside, release = threading.Event(), threading.Event()
+    real = rig.pad._run_publisher
+    calls = []
+
+    def first_parks_inside_the_publisher(cmd, env, timeout):
+        calls.append(cmd)
+        if len(calls) == 1:
+            inside.set()
+            assert release.wait(timeout=30)
+        return real(cmd, env, timeout)
+
+    codes = []
+    threads = [
+        threading.Thread(target=lambda t=t: codes.append(rig.add(t, publish_runner=first_parks_inside_the_publisher)))
+        for t in ("Pricing", "Costs")
+    ]
+    threads[0].start()
+    assert inside.wait(timeout=15)
+    threads[1].start()
+    err = []
+    _wait_for(lambda: err.append(capsys.readouterr().err) or any(WAITING in e for e in err), "the second add to wait")
+    release.set()
+    for t in threads:
+        t.join(timeout=60)
+        assert not t.is_alive()
+
+    assert codes == [0, 0]
+    assert sorted(_site_titles(site)) == ["Costs", "Pricing", "Settings"] and _site_titles(site)[0] == "Settings"
+    assert sorted(p.name for p in site.glob("round-*")) == ["round-1", "round-2", "round-3"]
+    assert _file_hashes(site / "round-1") == round_one
+    assert rig.leftovers() == []
+
+
+def _lock_file(rig, pad_name):
+    digest = hashlib.sha256(str(rig.ws / "sites" / pad_name).encode()).hexdigest()
+    return rig.outpost_state / "pad-locks" / f"{digest}.lock"
+
+
+@pytest.mark.parametrize("add", [False, True])
+def test_a_run_on_a_workspace_pad_waits_for_the_pads_lock_and_is_refused_when_it_never_frees(rig, capsys, add):
+    if add:
+        _published(rig, capsys)
+    before = _snapshot(rig.ws / "sites") if add else None
+    lock = _lock_file(rig, "p")
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    held = os.open(lock, os.O_RDWR | os.O_CREAT, 0o600)
+    fcntl.flock(held, fcntl.LOCK_EX)
+    try:
+        started = time.monotonic()
+        if add:
+            code = rig.add("Pricing", publish_runner=lambda *a: pytest.fail("publisher ran"), publish_timeout=0.3)
+        else:
+            code = rig.run(publish_runner=lambda *a: pytest.fail("publisher ran"), publish_timeout=0.3)
+        waited = time.monotonic() - started
+    finally:
+        os.close(held)
+
+    err = capsys.readouterr().err
+    assert code == 1 and 0.5 < waited < 10
+    assert WAITING in err
+    assert 'scratch-pad: another session is adding a round to pad "p"; try again' in err
+    if add:
+        assert _snapshot(rig.ws / "sites") == before
+    else:
+        assert not (rig.ws / "sites" / "p").exists()
+    assert rig.leftovers() == []
+
+
+def test_an_add_in_a_workspace_recovers_a_pad_left_aside_by_an_interrupted_run(rig, capsys):
+    _published(rig, capsys)
+    sites = rig.ws / "sites"
+    (sites / "p").rename(sites / ".aside-p")
+    (sites / ".tmp-p-x").mkdir()
+    (sites / ".tmp-pad-other").mkdir()
+
+    code = rig.add("Pricing", publish_runner=_lands_ok(rig))
+
+    assert code == 0, capsys.readouterr().err
+    assert sorted(p.name for p in sites.iterdir()) == [".tmp-pad-other", "p"]
+    assert _site_titles(sites / "p") == ["Settings", "Pricing"]
+
+
+def test_a_new_workspace_pad_recovers_leftovers_of_its_own_name_only(rig, capsys):
+    sites = rig.ws / "sites"
+    (sites / ".tmp-p-x").mkdir(parents=True)
+    (sites / ".tmp-pad-other").mkdir()
+
+    assert rig.run() == 0
+
+    assert sorted(p.name for p in sites.iterdir()) == [".tmp-pad-other", "p"]

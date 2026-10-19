@@ -798,19 +798,3 @@ def test_building_a_new_pad_waits_on_the_same_lock(tmp_path, env, cwd, pads, cap
     assert code == 1
     assert "another session is adding a round" in capsys.readouterr().err
     assert not (pads / "fresh").exists()
-
-
-# --- inside a camp workspace ------------------------------------------------------------------------
-
-
-def test_add_inside_a_camp_workspace_is_refused_cleanly_and_writes_nothing(skill, env, tmp_path):
-    ws = Path(env["CAMP_STATE_DIR"]) / "grp" / "worktrees" / "ws"
-    member = ws / "repo"
-    member.mkdir(parents=True)
-
-    proc = _cli(skill, env, member, "p", _round_file(tmp_path, _round("One")), add=True)
-
-    assert proc.returncode == 1
-    assert proc.stderr.startswith("scratch-pad: --add: ") and "Traceback" not in proc.stderr
-    assert not (ws / "sites").exists()
-    assert not Path(env["OUTPOST_STATE_DIR"]).exists()
