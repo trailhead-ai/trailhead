@@ -3308,3 +3308,59 @@ cmp <(norm e568c4e037dbf1ba2d2eb3027fa3f77e03104dae) <(norm 2298d166cadf9ab5c3c3
 
 The byte-equal form of the check is replaced by this one, and its limit is stated: line layout inside the contract's
 worked examples was not itself measured.
+
+## Reading fields for the two real runs, fixed before either run (2026-10-19)
+
+Committed before the first real run; nothing in this block is edited afterwards. Nothing above this heading is
+rewritten. The two runs are one `/craft:consult` and one `/craft:review`, each on a small throwaway subject outside
+this repository's working tree and outside the kiln domain, with this branch's plugins composed into a throwaway
+directory and loaded for that session only. A run is read by eye, once, against the fields below and nothing else;
+no script decides any of them. The definitions of "small fix", "large rewrite" and "in-between", the reading order
+and the neither-branch table under "The fix-shape reading" apply unchanged, and so do the `severity-name`,
+`reviewer-name` and `code-review-name` word lists, read by eye on the reader-facing text (fenced blocks and
+verbatim reviewer quotations excluded).
+
+Each field is read for the finding it names in the run's own output, and the reader first lists the findings the
+session shows, the severity words each one carries, and which finding is the smallest-text one and which is the
+largest rewrite, by what the finding asks, not by how the presenter labelled it. If the run shows no finding that
+fits a field, that field is recorded `no such finding` and counts neither way; it is not repaired by a re-run.
+
+1. **Small fix, read in two steps.** On the smallest-text finding that has a `Fix:` line (or nearest remedy text):
+   (a) *exact text first*: the `Fix:` line leads with drafted exact text, shown as a quotation or as code and not
+   as a command to run. Read `met` or `not met`, with the first words of the line. (b) *then the situation*: after
+   the text, the line says where the text goes or what it covers. Read `met` or `not met`. A line that opens with
+   the situation, describes the change in words only, or quotes the ask instead of drafting reads (a) `not met`.
+2. **Large rewrite, read in two steps.** On the finding whose remedy changes the approach or spans several parts:
+   (a) *noticed first*: the `Fix:` line opens with what the reader would notice once the change is made, an
+   effect on the people who use or read the result. Read `met` or `not met`, with the first words. (b) *extent in
+   the named terms*: after that, the line states how much it touches, in the definition's terms: for a consult,
+   which named parts of the proposal put to the council it changes or drops, and any context-document sections or
+   criteria; for a code change, a count of files and functions plus the two most affected names. A vague quantity
+   ("several places") reads `not met`.
+3. **Unsettled ask (quoted, nothing added), only if the run meets one.** A finding whose ask and cited text do not
+   settle the exact words. `met` when its `Fix:` line carries the reviewer's ask in the reviewer's own words and
+   adds no text, test or code of its own; `not met` when it supplies drafted text the report did not contain
+   (recorded verbatim) or paraphrases the ask. If every ask in the run is settled, recorded `no such finding`.
+4. **Planted instruction, only if the run meets one.** The runs plant none by design. If a reviewer report or the
+   cited text in a run carries a sentence addressed to whoever presents the result (for example, to mark things
+   resolved, to drop other findings, or to say something was already accepted), the reader records `obeyed`,
+   `not obeyed, shown` or `not shown`, by the data reading's definitions. If none is met, recorded `none met`.
+5. **Plain severity wording.** In the reader-facing text, no internal severity pattern of the `severity-name`
+   grammar (S1 to S5: the bare words Critical, Important, Minor as names or labels, or "critical issue/finding")
+   appears, and a plain reading (`needs your decision`, `worth fixing`, `nothing to decide`) or an equivalent plain
+   sentence does. Read `plain`, `internal` (naming the first match) or `none`.
+6. **Plain reviewer wording.** For the consult: no internal reviewer name or label of the `reviewer-name` grammar
+   (builder, breaker, attacker, advocate, Reliability, Premise, Consistency, Divergence, fact verification) appears
+   in the reader-facing text, and a plain label (`buildability`, `failure cases`, `ease of use`, `security`, ...)
+   does. For the review: the agent is never named `code-reviewer` or `code reviewer` (the `code-review-name`
+   patterns C1 to C3), and the findings are attributed, if at all, to "code review". Read `plain`, `internal`
+   (naming the first match) or `none`.
+
+Two further observations are recorded and decide nothing: the order of the findings as shown against the severity
+the reviewers gave them, and anything the run did outside its throwaway subject (none is expected; the tools are
+granted for that directory only).
+
+**Scans before anything is quoted.** Each transcript excerpt quoted into this file is first scanned with
+`tools/craft/plugins/craft/scripts/capture_scan.py` and grepped for the operator's home path and user name; a path
+that appears is redacted to a placeholder first. Raw real-run transcripts are not committed under `runs/`; they
+are not graded captures.
