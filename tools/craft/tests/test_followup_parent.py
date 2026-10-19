@@ -1997,6 +1997,33 @@ def test_a_done_child_stays_nested_and_an_in_progress_child_is_un_nested(
     assert sidecar_of(env, vault, holder)["status"] == "dropped"
 
 
+@pytest.mark.parametrize("finished", ["done", "dropped"])
+def test_a_child_that_finished_after_the_held_read_is_kept_not_un_nested(
+    lore_env, spec, tmp_path, capsys, finished
+):
+    env, vault = lore_env
+    parent_name, names = assembled_parent(env, vault, spec, tmp_path, capsys)
+    seen = {"parent": 0, "done": False}
+
+    def hook(argv, stdin, runner):
+        if argv[:3] == ["record", "show", "--json"]:
+            if argv[-1] == f"task/{parent_name}":
+                seen["parent"] += 1
+            elif argv[-1] == f"task/{names[0]}" and seen["parent"] >= 3 and not seen["done"]:
+                seen["done"] = True
+                _lore(env, "record", "update", f"task/{names[0]}", "--vault", vault, "--status", finished)
+
+    runner = EnvRunner(env, hook)
+    code, out, err = run_drop(runner, spec, parent_name, tmp_path, capsys)
+    assert seen["done"], "the status change never fired"
+    assert code == 0, err
+    assert out["un-nested"] == [names[1]]
+    assert out["kept"] == [{"name": names[0], "status": finished}]
+    assert not any(is_unnest(a, names[0]) for a in runner.calls)
+    assert parents_of(env, vault, names) == [parent_name, None]
+    assert sidecar_of(env, vault, parent_name)["status"] == "dropped"
+
+
 def test_a_failed_first_un_nest_leaves_the_parent_live_and_a_rerun_completes_the_drop(
     lore_env, spec, tmp_path, capsys
 ):
