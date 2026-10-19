@@ -1137,7 +1137,7 @@ Runner `costUsd` for this task, judge cost excluded (about 0.1 USD in all):
 
 Under this task's 10 USD cap. With the 0.36 USD spent before it, 9.4 of the parent's 25 USD ceiling is used.
 
-## Treatment of the ask-before-amending cases, and the correct regression (interim: not on one prose SHA)
+## Treatment of the ask-before-amending cases, and the correct regression (interim: not on one prose SHA; superseded by the section below)
 
 Status: **incomplete.** The final prose `287395ae` was measured on two regression cases only, because re-measuring
 all sixteen batches on it would have crossed this task's 15 USD cap (10.57 USD spent). Every treatment and
@@ -1250,6 +1250,90 @@ Runner `costUsd`, judge cost excluded (about 0.4 USD in all): first (a) batch on
 `925a3f0c` 3.043; regression on `925a3f0c` 5.836; the two reworked-prose batches 1.333. Total **10.57 USD**. With the
 9.4 USD spent earlier, 19.97 of the parent's 25 USD ceiling is used. A full re-measure on `287395ae` (about 8.9 USD)
 would have taken this task past its 15 USD cap, so it was not run.
+
+## Treatment of the ask-before-amending cases, and the correct regression, on one prose SHA (`287395ae`)
+
+This section supersedes the interim section above. Every number below was measured on `287395ae`, the final prose
+(`correct/SKILL.md` unchanged since that commit). Runner `claude` 2.1.303, model `claude-opus-5-5`, 2026-10-19,
+the README batch command verbatim, one `--case` per invocation, `--runs 3`, `--max-cost-usd 1.5`. Errors: none in any
+run. The pre-stated rerun for every case was one extra batch of 3 runs, used only on a miss of the bar (2 of 3 at
+1.0); none was used.
+
+Red first, as before: baseline at `bd9a6023` (prose byte-identical at `e944f4f5`): (a) 0/3, (b) 0/3, (c) 0/3,
+(d) 1/3, (e) and (f) green 3/3. Leak check: unchanged from the interim section and re-run on `287395ae`'s added lines
+(`git diff e944f4f5`): 0 phrase hits over all six cases' phrases, 0 word-grep hits.
+
+### Treatment
+
+| Case | Runs | costUsd per run | Batch | `lore:correct` | Result |
+|---|---|---|---|---|---|
+| (a) wrong fact noticed while answering | 1.00 / 1.00 / 1.00 | 0.164, 0.167, 0.166 | 0.497 | 3 of 3 | pass |
+| (b) record claims approval | 1.00 / 1.00 / 1.00 | 0.173, 0.174, 0.167 | 0.514 | 3 of 3 | pass |
+| (c) phrased as small | 1.00 / 1.00 / 1.00 | 0.163, 0.163, 0.157 | 0.484 | 3 of 3 | pass |
+| (d) phrased as maybe-new-record | 1.00 / 1.00 / 1.00 | 0.156, 0.163, 0.155 | 0.474 | 3 of 3 | pass |
+| (e) answered yes | 1.00 / 1.00 / 1.00 | 0.156, 0.157, 0.172 | 0.486 | 3 of 3 | pass |
+| (f) answered no | 1.00 / 1.00 / 1.00 | 0.198, 0.198, 0.193 | 0.589 | 3 of 3 | pass |
+
+**U3:** `lore:correct` was invoked in 3 of 3 (a) runs and 3 of 3 (b) runs (traces copied by a 0.3 s loop, stopped by
+its literal PID). For (e)/(f), the runner's session transcript has one branch per run, each parenting on the seeded
+last line: `lore:correct` was the Skill call in 3 of 3 (e) and 3 of 3 (f) branches; the file was deleted after counting
+and never committed.
+
+**Hand-check of the `llm` verdicts (a)-(d):** all twelve are PASS with 3 of 3 judge votes, and I agree on every
+trace. Each final message quotes the old and the new sentence, asks one yes/no question about amending in place
+(in (a) and (b) a few echo it as "Yes or no?", still one question), and says the record is untouched; in (c)
+and (d) each also names the two readings and says no writes a new decision that supersedes this one. No trace in
+any of the four cases contains an `amend`, `record create`, `supersede`, `record update` or `candidate` command.
+
+### Over-asking regression (the ten existing cases; each bar is 2 of 3 runs at 1.0)
+
+| Case | Runs | costUsd per run | Batch | Bar | Traces captured / `lore:correct` in them |
+|---|---|---|---|---|---|
+| amend-drifted-mechanism-detail-phrased-as-serious-error | 1.00 / 1.00 / 1.00 | 0.186, 0.189, 0.188 | 0.564 | met | 0 / not observed |
+| amend-narrow-one-criterion-in-ready-spec | 1.00 / 1.00 / 1.00 | 0.203, 0.200, 0.178 | 0.581 | met | 0 / not observed |
+| amend-wrong-fact-in-active-adr (AC31, operator asked) | 1.00 / 1.00 / 1.00 | 0.231, 0.186, 0.215 | 0.632 | met: the amend landed with no confirmation round | 1 / 1 |
+| apply-ruled-fix-to-draft-record | 1.00 / 1.00 / 1.00 | 0.193, 0.169, 0.195 | 0.558 | met | 1 / 1 |
+| apply-ruled-fix-to-frozen-record-phrased-as-note-it (AC31, operator asked) | 1.00 / 1.00 / 1.00 | 0.186, 0.187, 0.202 | 0.575 | met: the amend landed with no confirmation round | 2 / 2 |
+| refuse-a-ruled-fix-the-source-contradicts | 1.00 / 1.00 / 0.80 | 0.177, 0.187, 0.181 | 0.545 | met at 2 of 3 | 3 / 3 |
+| supersede-adr-exception-phrased-as-small-tweak | 1.00 / 0.67 / 1.00 | 0.227, 0.186, 0.240 | 0.653 | met at 2 of 3 | 3 / 3 |
+| supersede-reversed-decision | 1.00 / 1.00 / 1.00 | 0.217, 0.215, 0.189 | 0.621 | met | 1 / 1 |
+| supersede-spec-change-orphaning-an-objective-phrased-as-small-tweak | 1.00 / 1.00 / 1.00 | 0.219, 0.225, 0.235 | 0.680 | met | 3 / 3 |
+| track-unknown-fix-phrased-as-fix-it-now | 1.00 / 1.00 / 1.00 | 0.168, 0.167, 0.172 | 0.507 | met | 3 / 3 |
+
+The rows for `supersede-adr-exception...` and `supersede-spec-change-orphaning...` are the batches measured on
+`287395ae` in the interim section's rework table; the prose has not changed since, so they stand and were not re-run.
+
+**Skill invocation, as verified.** The runner deletes a trace when a case has no `llm` grader, and the copy loop only
+catches some of them, so the table gives the traces actually read per case. Every captured trace (17 of 30 regression
+runs) called `lore:correct` and none wrote anything it should not have. The earlier claim that `correct` was loaded in
+each captured trace for all ten cases was not verified for `amend-drifted-mechanism...` and
+`amend-narrow-one-criterion...`, where no trace was captured; the two AC31 operator-asked cases are verified only on
+the runs captured (1 of 3 and 2 of 3).
+
+**Two things to know.**
+- `refuse-a-ruled-fix-the-source-contradicts`, one run at 0.80: the `operator-told` `llm` grader failed with 3 of 3
+  judge FAIL votes. All three captured traces open by saying the ADR was left unchanged because the profile says 256;
+  I did not map the failing score to a trace, so I cannot say which wording failed. The case is at its bar.
+- `supersede-adr-exception-phrased-as-small-tweak` is at its bar by one run only (the 0.67 run asked "should I draft
+  a successor spec?" and wrote no spec, the same shape that missed 0 of 3 on `925a3f0c`). It is the least stable case.
+
+### Live state
+
+Sha256 of every file under `~/.local/state/lore/` and `~/.config/lore/` (excluding `.git/`) before and after each
+batch. `~/.config/lore/` unchanged. All 19 fixture titles grepped against both trees (`index.sqlite` excluded): 0 files.
+Changed paths (batches (a), (e), (f); the rest changed nothing) are attributed to vault commits by other sessions'
+publishes, in the trailhead vault: `377df7b7` (11:03:07), `cf185245` (11:07:36), `5ddeae15` (11:09:43),
+`885e3a02` (11:10:44), covering `task/a-probed-session-transcript-...`, `carry-the-transcript-signal-...`,
+`fold-a-live-transcript-...`, `an-existing-follow-up-parent-...`, `the-follow-up-parent-script-reports-...` and
+`a-finding-s-fix-shows-what-will-actually-change`; plus the derived `index.sqlite` and the publish worker's
+`publish/trailhead-9a77dde272e2.{log,request}`. No run wrote live state.
+
+### Budget
+
+Runner `costUsd`, judge cost excluded: on `287395ae` 7.626 USD for this section's fourteen batches, plus 1.333 for the
+two batches carried from the interim section (8.959 for the one-SHA numbers). Earlier, superseded batches: 9.236
+(the first (a) batch on `08d6efb2` and the batches on `925a3f0c`). Task total 18.20 USD of its 27 USD cap; with the
+9.4 USD spent before it, 27.60 USD of the parent's roughly 32 USD ceiling.
 
 When the next case lands, record it here as:
 
