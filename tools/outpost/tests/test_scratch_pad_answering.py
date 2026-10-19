@@ -398,6 +398,7 @@ def test_reply_box_holds_the_reply_for_the_answers_and_the_summary_names_each_qu
     got = _reply_probe(tmp_path, _round(3), js)
     assert got["reply"] == {
         "pad": "Settings page",
+        "round": 1,
         "answers": [
             {"question": "Q0", "pick": "B", "not": [], "none": False, "note": "because"},
             {"question": "Q1", "pick": None, "not": ["A"], "none": True, "note": ""},

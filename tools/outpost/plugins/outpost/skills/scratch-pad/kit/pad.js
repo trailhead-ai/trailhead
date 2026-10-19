@@ -213,10 +213,91 @@
     };
   }
 
+  var TITLE_LIMIT = 40;
+
+  function knownRounds() {
+    var rounds = window.PAD_ROUNDS;
+    var number = window.PAD_ROUND_NUMBER;
+    if (!Array.isArray(rounds) || rounds.length < 2) return null;
+    var readable = rounds.every(function (round) {
+      return round && typeof round.title === "string";
+    });
+    if (!readable || !(number >= 1 && number <= rounds.length && Math.floor(number) === number)) return null;
+    return { titles: rounds.map(function (round) { return round.title; }), current: number };
+  }
+
+  function roundLink(number, label, title) {
+    var link = el("a", "pad-round-link");
+    link.href = "../round-" + number + "/index.html";
+    link.target = "_blank";
+    link.rel = "noopener";
+    if (title !== undefined) link.title = title;
+    link.appendChild(el("span", "pad-round-text", label));
+    link.appendChild(el("span", "pad-sr", " (opens in a new tab)"));
+    return link;
+  }
+
+  function roundLabel(number, title) {
+    var shown = title.length > TITLE_LIMIT ? title.slice(0, TITLE_LIMIT).replace(/\s+$/, "") + "\u2026" : title;
+    return "Round " + number + ": " + shown;
+  }
+
+  function renderSwitcher(rounds) {
+    var nav = el("nav", "pad-rounds");
+    nav.setAttribute("aria-label", "Rounds");
+    nav.appendChild(el("span", "pad-rounds-label", "Rounds:"));
+    var list = el("ul");
+    rounds.titles.forEach(function (title, i) {
+      var number = i + 1;
+      var item = el("li");
+      if (number === rounds.current) {
+        var here = el("span", "pad-round-current");
+        here.setAttribute("aria-current", "page");
+        here.title = title;
+        here.appendChild(el("span", "pad-round-text", roundLabel(number, title)));
+        item.appendChild(here);
+      } else {
+        item.appendChild(roundLink(number, roundLabel(number, title), title));
+      }
+      list.appendChild(item);
+    });
+    nav.appendChild(list);
+    return nav;
+  }
+
+  function renderRoundNote(rounds) {
+    if (rounds.current === rounds.titles.length) return null;
+    var latest = rounds.titles.length;
+    var note = el("p", "pad-rounds-note");
+    note.appendChild(document.createTextNode("This is round " + rounds.current + " of " + latest + ". "));
+    note.appendChild(roundLink(latest, "Go to the latest round"));
+    return note;
+  }
+
+  function renderSettled(settled) {
+    if (!Array.isArray(settled)) return null;
+    var lines = settled.filter(function (line) { return typeof line === "string" && line; });
+    if (!lines.length) return null;
+    var fold = el("details", "pad-settled");
+    fold.appendChild(el("summary", null, "Settled in earlier rounds (" + lines.length + ")"));
+    var list = el("ul");
+    lines.forEach(function (line) { list.appendChild(el("li", null, line)); });
+    fold.appendChild(list);
+    return fold;
+  }
+
   function build(data) {
     var head = el("header", "pad-head");
+    var rounds = knownRounds();
+    if (rounds) {
+      head.appendChild(renderSwitcher(rounds));
+      var note = renderRoundNote(rounds);
+      if (note) head.appendChild(note);
+    }
     head.appendChild(el("h1", null, data.title));
     if (typeof data.intro === "string" && data.intro) head.appendChild(el("p", "pad-intro", data.intro));
+    var settled = renderSettled(data.settled);
+    if (settled) head.appendChild(settled);
 
     var list = el("ul");
     var stage = el("div", "pad-stage");

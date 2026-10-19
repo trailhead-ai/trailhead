@@ -133,6 +133,43 @@ def test_a_workspace_pad_draws_answers_and_stays_inert_when_served_over_http(tmp
     assert got["pwned"] is None
 
 
+def test_a_multi_round_workspace_pad_shows_its_switcher_when_served_over_http(tmp_path):
+    sites = _publish(tmp_path)
+    member = tmp_path / "camp-state" / "grp" / "worktrees" / "ws" / "repo"
+    env = {
+        "CAMP_STATE_DIR": str(tmp_path / "camp-state"),
+        "CAMP_CONFIG_DIR": str(tmp_path / "camp-config"),
+        "HOME": str(tmp_path / "home"),
+        "OUTPOST_STATE_DIR": str(tmp_path / "outpost-state"),
+    }
+    second = tmp_path / "round-2.json"
+    second.write_text(json.dumps({**ROUND, "title": "Second round"}))
+    assert scratch_pad.main(["--pad", "p", "--round", str(second), "--add"], env=env, cwd=member) == 0
+
+    probe = r"""
+    const nav = document.querySelector('nav.pad-rounds');
+    return {
+      url: location.href,
+      links: nav ? [...nav.querySelectorAll('a')].map((a) => a.getAttribute('href')) : null,
+      current: nav ? nav.querySelector('[aria-current="page"] .pad-round-text').textContent : null,
+      roundNumber: window.PAD_ROUND_NUMBER,
+    };
+    """
+    got = ch.run_probe(
+        sites,
+        probe,
+        serve=True,
+        entry="p/",
+        inject_into="p/round-2/index.html",
+        virtual_time_budget=8000,
+    )
+
+    assert got["url"].endswith("/p/round-2/index.html")
+    assert got["roundNumber"] == 2
+    assert got["links"] == ["../round-1/index.html"]
+    assert got["current"] == "Round 2: Second round"
+
+
 def test_the_loopback_server_reports_a_port_it_cannot_bind(tmp_path):
     (tmp_path / "index.html").write_text("<html><body></body></html>")
     taken = socket.socket()

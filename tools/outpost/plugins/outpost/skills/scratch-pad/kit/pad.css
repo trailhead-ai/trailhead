@@ -40,6 +40,18 @@ button { font: inherit; color: inherit; }
 .pad-head h1 { margin: 0; font-size: 1.9rem; font-weight: normal; }
 .pad-intro { margin: 0.25rem 0 0; color: var(--faint); }
 
+.pad-rounds { display: flex; align-items: baseline; gap: 0.75rem; margin: 0 0 0.5rem; }
+.pad-rounds ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 0.25rem 1rem; }
+.pad-rounds-label { color: var(--faint); }
+.pad-rounds a { color: inherit; }
+.pad-round-current::before { content: "["; }
+.pad-round-current::after { content: "]"; }
+.pad-rounds-note { margin: 0 0 0.5rem; color: var(--faint); }
+.pad-rounds-note a { color: inherit; }
+.pad-settled { margin: 0.5rem 0 0; }
+.pad-settled summary { cursor: pointer; color: var(--faint); }
+.pad-settled ul { margin: 0.25rem 0 0; padding-left: 1.25rem; }
+
 .pad-body { display: flex; align-items: flex-start; }
 
 .pad-questions { flex: 0 0 14rem; padding: 1rem 1rem 1rem 1.5rem; border-right: 1px solid var(--rule); }
