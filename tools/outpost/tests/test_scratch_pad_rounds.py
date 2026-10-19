@@ -26,6 +26,7 @@ ROUND_JS_PREFIX = "window.PAD_ROUND = JSON.parse("
 ROUNDS_JS_PREFIX = "window.PAD_ROUNDS = JSON.parse("
 WAITING = "waiting for another session's add"
 WAY_ON = "start a new pad with a different --pad name"
+MOVE_OUT = "move it out of the pad folder and rerun --add"
 
 
 def _load_module():
@@ -877,7 +878,7 @@ def test_a_stray_top_level_file_stops_an_add_and_is_named(skill, env, cwd, tmp_p
 
     assert err.splitlines() == [
         'scratch-pad: pad "p" can\'t take another round: notes.txt is not part of a pad this script builds — '
-        + WAY_ON
+        + MOVE_OUT
     ]
     assert _snapshot(pads / "p") == before
     assert _leftovers(pads) == []
@@ -893,7 +894,7 @@ def test_a_round_01_folder_stops_an_add_and_is_named(skill, env, cwd, tmp_path, 
 
     assert err.splitlines() == [
         'scratch-pad: pad "p" can\'t take another round: round-01 is not part of a pad this script builds; '
-        "stray.html is not part of a pad this script builds — " + WAY_ON
+        "stray.html is not part of a pad this script builds — " + MOVE_OUT
     ]
     assert _snapshot(pads / "p") == before
 
@@ -905,3 +906,114 @@ def test_a_pad_without_rounds_js_still_takes_a_round_and_gets_one(skill, env, cw
     _add(skill, env, cwd, tmp_path, "p", "Two")
 
     assert _titles(pads / "p") == ["One", "Two"]
+
+
+@pytest.mark.parametrize("name", [".DS_Store", "._index.html", "._"])
+def test_an_os_metadata_file_at_the_top_is_ignored_and_not_carried_into_the_rebuilt_pad(
+    skill, env, cwd, tmp_path, pads, name
+):
+    pad_dir = _built_pad(skill, env, cwd, tmp_path, pads, 1)
+    (pad_dir / name).write_bytes(b"finder")
+    round_one = _hashes(pad_dir / "round-1")
+
+    _add(skill, env, cwd, tmp_path, "p", "Two")
+
+    assert sorted(e.name for e in pad_dir.iterdir()) == ["index.html", "round-1", "round-2", "rounds.js"]
+    assert _hashes(pad_dir / "round-1") == round_one
+    assert _titles(pad_dir) == ["One", "Two"]
+    assert _leftovers(pads) == []
+
+
+def test_os_metadata_files_inside_a_round_folder_are_copied_byte_for_byte(skill, env, cwd, tmp_path, pads):
+    pad_dir = _built_pad(skill, env, cwd, tmp_path, pads, 1)
+    (pad_dir / "round-1" / ".DS_Store").write_bytes(b"inside")
+
+    _add(skill, env, cwd, tmp_path, "p", "Two")
+
+    assert (pad_dir / "round-1" / ".DS_Store").read_bytes() == b"inside"
+
+
+def test_a_stray_file_beside_os_metadata_is_named_alone_with_the_move_it_out_way_on(
+    skill, env, cwd, tmp_path, pads
+):
+    pad_dir = _built_pad(skill, env, cwd, tmp_path, pads, 1)
+    (pad_dir / ".DS_Store").write_bytes(b"finder")
+    (pad_dir / "notes.txt").write_text("mine", encoding="utf-8")
+    before = _snapshot(pad_dir)
+
+    err = _refused_add(skill, env, cwd, tmp_path)
+
+    assert err.splitlines() == [
+        'scratch-pad: pad "p" can\'t take another round: notes.txt is not part of a pad this script builds — '
+        + MOVE_OUT
+    ]
+    assert _snapshot(pad_dir) == before
+
+
+def test_a_stray_file_and_a_damaged_pad_get_the_damaged_pad_way_on(skill, env, cwd, tmp_path, pads):
+    pad_dir = _built_pad(skill, env, cwd, tmp_path, pads, 3)
+    _gap(pad_dir)
+    (pad_dir / "notes.txt").write_text("mine", encoding="utf-8")
+
+    err = _refused_add(skill, env, cwd, tmp_path)
+
+    assert err.splitlines() == [
+        'scratch-pad: pad "p" can\'t take another round: round-2 is missing; '
+        "notes.txt is not part of a pad this script builds — " + WAY_ON
+    ]
+
+
+@pytest.mark.parametrize("make", ["symlink", "fifo"])
+def test_an_os_metadata_name_that_is_not_a_regular_file_is_still_refused_as_a_damaged_pad(
+    skill, env, cwd, tmp_path, pads, make
+):
+    pad_dir = _built_pad(skill, env, cwd, tmp_path, pads, 1)
+    if make == "symlink":
+        (pad_dir / ".DS_Store").symlink_to("index.html")
+        what = "is a symlink"
+    else:
+        os.mkfifo(pad_dir / ".DS_Store")
+        what = "is not a regular file or folder"
+    before = _snapshot(pad_dir)
+
+    err = _refused_add(skill, env, cwd, tmp_path)
+
+    assert err.splitlines() == [f'scratch-pad: pad "p" can\'t take another round: .DS_Store {what} — ' + WAY_ON]
+    assert _snapshot(pad_dir) == before
+
+
+@needs_unprivileged
+def test_a_file_that_cannot_be_examined_inside_a_listable_folder_is_named_not_a_traceback(
+    skill, env, cwd, tmp_path, pads
+):
+    _new(skill, env, cwd, tmp_path, "p", "One")
+    locked = pads / "p" / "round-1" / "x"
+    locked.mkdir()
+    (locked / "f").write_text("a", encoding="utf-8")
+    locked.chmod(0o600)
+    try:
+        err = _refused_add(skill, env, cwd, tmp_path)
+    finally:
+        locked.chmod(0o700)
+
+    assert "Traceback" not in err
+    assert err.splitlines() == [
+        'scratch-pad: pad "p" can\'t take another round: round-1/x/f can\'t be read: Permission denied — ' + WAY_ON
+    ]
+
+
+@needs_unprivileged
+def test_a_pad_folder_that_cannot_be_listed_is_named_without_a_false_missing_round(
+    skill, env, cwd, tmp_path, pads
+):
+    _new(skill, env, cwd, tmp_path, "p", "One")
+    pads_p = pads / "p"
+    pads_p.chmod(0o300)
+    try:
+        err = _refused_add(skill, env, cwd, tmp_path)
+    finally:
+        pads_p.chmod(0o700)
+
+    assert err.splitlines() == [
+        'scratch-pad: pad "p" can\'t take another round: the pad folder can\'t be read: Permission denied — ' + WAY_ON
+    ]
