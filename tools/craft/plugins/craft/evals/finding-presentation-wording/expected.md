@@ -2854,3 +2854,23 @@ seven sites (`fsspecreview`, `fsplan`, `fsconsult`, `fsdriver`, `fsreview`, `fsb
 read under the same protocol, definitions, branch table, scripted bar, splits rule and paired-control rule as the first
 treated round, unchanged. The fallback task acts on the second round's `Fallback needed at:` line, not the first
 round's. Nothing above this heading is rewritten.
+
+### Second-round arms built (2026-10-19)
+
+Commit A2 is `ba558e591914f435f694c5e41533db20ed392844` (the sharpened three forms of a fix in
+`skills/_shared/council.md`). Each `fs-treated2-<site>.md` is the site's `fs-treated-<site>` sources with only
+`skills/_shared/council.md` read from A2 instead of commit A; `regress2-cal-consult.md` is the `regress-cal-consult`
+composition with only `council.md` moved to A2. Sizes are `stat -c %s`, against the 131072-byte limit:
+
+| Arm | Bytes | Form |
+|---|---|---|
+| `fs-treated2-fsspecreview.md` | 84976 | prompt-embedded |
+| `fs-treated2-fsplan.md` | 77680 | prompt-embedded |
+| `fs-treated2-fsconsult.md` | 44966 | prompt-embedded |
+| `fs-treated2-fsdriver.md` | 84305 | prompt-embedded |
+| `fs-treated2-fsreview.md` | 43904 | prompt-embedded |
+| `fs-treated2-fsbuildreview.md` | 138147 | file form (over the limit, as its baseline) |
+| `fs-treated2-fsdrivebuild.md` | 180455 | file form (over the limit, as its baseline) |
+| `regress2-cal-consult.md` | 44966 | prompt-embedded |
+
+`regress2-cal-consult.md` and `fs-treated2-fsconsult.md` are byte-identical, as their first-round counterparts are.

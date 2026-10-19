@@ -63,6 +63,10 @@ FIX_SHAPE_BASELINE_REVISION = "c3f7b21e9a797c2794218cc19ef50a9060cc0b5d"
 # consult regression arm read `council.md` from here.
 FIX_SHAPE_EDIT_REVISION = "2fc63f894f8ad944e59d0b8c23af4f526c2dfe0b"
 
+# The commit carrying the sharpened fix-shape contract (commit A2): the seven second-round treated arms
+# and the second-round calibrated consult regression arm read `council.md` from here.
+FIX_SHAPE_SHARPENED_REVISION = "ba558e591914f435f694c5e41533db20ed392844"
+
 PLUGIN = "tools/craft/plugins/craft"
 RULES = f"{PLUGIN}/rules.md"
 COUNCIL = f"{PLUGIN}/skills/_shared/council.md"
@@ -258,6 +262,22 @@ ARM_SOURCES["regress-cal-consult.md"] = [
     (COUNCIL, FIX_SHAPE_EDIT_REVISION),
 ]
 
+ARM_SOURCES.update(
+    {
+        f"fs-treated2-{site}.md": [
+            *[(path, FIX_SHAPE_BASELINE_REVISION) for _, path in parts],
+            (COUNCIL, FIX_SHAPE_SHARPENED_REVISION),
+        ]
+        for site, parts in FS_TREATED_SITES.items()
+    }
+)
+
+ARM_SOURCES["regress2-cal-consult.md"] = [
+    (RULES, BASELINE_REVISION),
+    (CONSULT_SKILL, CAL_REVISION),
+    (COUNCIL, FIX_SHAPE_SHARPENED_REVISION),
+]
+
 
 @pytest.mark.parametrize("arm_name", sorted(ARM_SOURCES))
 def test_arm_composed_from_its_manifest_equals_the_committed_file(arm_name: str):
@@ -312,6 +332,23 @@ def test_a_fix_shape_edit_arm_differs_from_the_same_sources_with_council_at_the_
     assert not arm_matches(ARMS_DIR / arm_name, sources), (
         f"{arm_name} matches its sources with council.md at the fix-shape baseline, "
         "so the contract edit is not what the arm varies"
+    )
+
+
+FIX_SHAPE_SHARPENED_ARMS = [f"fs-treated2-{site}.md" for site in FS_TREATED_SITES] + ["regress2-cal-consult.md"]
+
+
+@pytest.mark.parametrize("arm_name", FIX_SHAPE_SHARPENED_ARMS)
+def test_a_sharpened_arm_differs_from_the_same_sources_with_council_at_the_first_fix_shape_edit(
+    arm_name: str,
+):
+    sources = [
+        (path, FIX_SHAPE_EDIT_REVISION if revision == FIX_SHAPE_SHARPENED_REVISION else revision)
+        for path, revision in ARM_SOURCES[arm_name]
+    ]
+    assert not arm_matches(ARMS_DIR / arm_name, sources), (
+        f"{arm_name} matches its sources with council.md at the first fix-shape edit, "
+        "so the sharpened contract is not what the arm varies"
     )
 
 
