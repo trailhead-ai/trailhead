@@ -343,23 +343,25 @@ change that removes it.
 
 **The three forms of a fix.** Choose by how much of the thing under review the fix touches.
 
-- **A small fix** — a few words, one line or one clause: put the exact text on the `Fix:` line, then
-  the situation it covers ("replace `x` with `y` when the list is empty"). Draft the text only where
-  the reviewer's ask and the cited lines settle it; where they do not, quote the ask as the reviewer
-  wrote it and draft nothing. Show the text as code or a quotation, never as a command to run. One
+- **A small fix** — a few words, one line or one clause: the `Fix:` line leads with the exact text
+  being added, then the place and situation it covers (`"two"` in the printed notice, when the list
+  is empty); never open with a verb or a location. Draft the text only where the reviewer's ask and
+  the cited lines settle it; where they do not, quote the ask as the reviewer wrote it and add
+  nothing of your own: no drafted text, no test cases, no examples. Show the text as code or a quotation, never as a command to run. One
   line of code goes inline after `Fix:`; more goes in an indented block under it, and the `Fix:`
   line still leads.
 - **A large rewrite** — the fix reshapes the thing under review: open the `Fix:` line with what the
-  reader would notice once it is made, then say how much of the thing under review it touches. For a
-  spec or plan, that is the sections and criteria it rewrites; for a code review, a count of files
-  and functions plus the two most affected names; for a proposal put to a council, the named parts of
-  the proposal it changes and any section or criterion of the context document it touches. The
-  rewritten text itself is not drafted on the line.
+  reader would notice once it is made, then state how much of the thing under review it touches, in
+  these terms and never as a vague quantity or left out. For a spec or plan, the sections, tasks and
+  criteria it rewrites, by name; for a code review, "N files and M functions" plus the two most
+  affected names; for a proposal put to a council, the named parts of the proposal it changes and any
+  section or criterion of the context document it touches. The rewritten text itself is not drafted
+  on the line.
 - **Anything in between** — open the `Fix:` line with what the reader would notice once it is made.
 
 An example of each, in the shape the reader sees:
 
-> Fix: replace `"2 crossings"` with `"two crossings"` in the printed notice, so a skipper reading it
+> Fix: `"two crossings"` instead of `"2 crossings"` in the printed notice, so a skipper reading it
 > aloud is not handed a numeral. (small, spec review)
 >
 > Fix: skippers would see one sailing table where they now see three, and the late-tide rule would
