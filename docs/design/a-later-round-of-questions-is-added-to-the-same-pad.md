@@ -24,18 +24,23 @@ on top of an existing one by accident; with `--add`, a pad that does not exist i
 the pad and saying to drop `--add` to start a new one.
 
 The round is checked first, before the pad is read, so a badly shaped round refuses with the pad
-untouched. Then:
+untouched. A round whose title matches an earlier round's title is refused too — "give each round
+its own title" — since a reply from a kit that predates the `round` field names its round only by
+title. Then:
 
-1. Take the pad's lock (see "Two adds at once").
+1. Take the pad's lock (see "Two adds at once") and recover from any interrupted earlier run (see
+   "An interrupted add").
 2. Read the pad back from where it lives — its only copy — and check it is a pad this script can
    add to (see "Reading a pad back").
 3. Build the whole new pad in a fresh temp folder: every earlier round folder copied byte for byte,
    a new `round-<n+1>/` holding a copy of the current kit and the new round's data, a new list of
    rounds, and a top-level `index.html` that sends the browser to the new round.
-4. Put it in place. Outside a workspace the script renames the old pad aside, renames the new one
-   into its place, and removes the old one; if the second rename fails, the old pad is renamed back.
-   Inside a workspace it publishes the temp folder through the publish-site script with
-   `--overwrite`, which makes the same swap under the workspace's own lock.
+4. Check the temp copy again — no symlink or special file anywhere in it — then put it in place.
+   Outside a workspace the script renames the old pad aside to `.aside-<pad>`, renames the new one
+   into its place, and removes the aside copy; any interruption or failure between the two renames
+   renames the old pad back. Inside a workspace it publishes the temp folder through the
+   publish-site script with `--overwrite`, which makes the same swap under the workspace's own lock.
+   The two places share one add routine; only this step differs.
 5. Release the lock and remove the temp folder, on every path.
 
 On success the output is the same as for a new pad: the link (the pad's top-level page, which now
@@ -93,25 +98,59 @@ The pad where it lives is its only copy. Before adding to it, the script checks 
   a regular file or folder.
 - Its round folders are `round-1` up to `round-<n>` with no gaps, each holding an `index.html` and a
   `round.js` whose first line starts with the prefix this script writes.
-- Each round's title is read back from its `round.js`, to build the new list of rounds. Nothing else
-  in an earlier round is read or changed.
+- Each round's title is read back from its `round.js` by stripping the known prefix and suffix and
+  decoding the string literal with `json.loads` twice — never by evaluating it or matching it with a
+  pattern — to build the new list of rounds. Nothing else in an earlier round is read or changed.
+- Copying never follows a symlink: entries are copied as what they are, and the temp copy is checked
+  again before it is put in place, so a link planted after the first check is refused rather than
+  followed.
 - `rounds.js` is not read: it is rebuilt from the round folders on every add. A pad built before
   `rounds.js` existed — one round, no list — is added to like any other.
 
-A pad that fails any check is refused with every problem named and nothing changed: "pad
-"settings-header" can't take another round: …".
+A pad that fails any check is refused with every problem named, nothing changed, and the way on:
+"pad "settings-header" can't take another round: … — start a new pad with a different --pad name".
+
+An earlier round is carried forward byte for byte without checking anything past its `round.js`
+prefix. That is what keeps it drawn by its own kit; a pad edited by hand carries the edit forward.
+Pads live only in the user's own state directory or workspace, so this is accepted rather than
+guarded.
 
 ## Two adds at once
 
 An add holds a lock for its one pad from before it reads the pad until after the new pad is in
-place. The lock is an exclusive `flock` on a file under Outpost's state directory,
-`<outpost state>/pad-locks/<sha256 of the pad's resolved path>.lock`, created owner-only, never
-inside the pad or the workspace's `sites/` tree. A second add to the same pad waits for the first,
+place; building a new pad takes the same lock, so a new pad and an add on one name never interleave.
+The lock is an exclusive `flock` on a file under Outpost's state directory,
+`<outpost state>/pad-locks/<sha256 of the pad's resolved path>.lock`. The path is resolved before
+the pad is read, so a symlinked working directory gives the same lock. The `pad-locks` folder is
+created owner-only and refused if it is a symlink; the lock file is opened `O_NOFOLLOW`, mode 0600.
+It is never inside the pad or the workspace's `sites/` tree. A second add to the same pad waits for the first,
 then reads the pad as the first left it and becomes the next round after it. Both land, in the order
 they took the lock; neither is lost and the pad is never a mix of the two.
 
-A wait has a limit. An add that cannot take the lock within the publish timeout is refused —
-"another session is adding a round to pad "settings-header"; try again" — and changes nothing.
+A run that has to wait prints one line on stderr, "waiting for another session's add to pad
+"settings-header"…". A wait has a limit, set longer than one add can take at most (twice the
+publish timeout), so a second add is not refused only because the first was slow. A run that cannot
+take the lock in that time is refused — "another session is adding a round to pad
+"settings-header"; try again" — and changes nothing.
+
+Inside a workspace, a publisher that times out is killed and waited for before the lock is
+released, and the outcome is then read from disk by the same checks as a read-back: the pad is
+reported "published but not confirmed" only when the whole pad is there with exactly one more round;
+otherwise the add is refused. Another tool publishing over the pad's site between the read and the
+swap would be overwritten; only this script writes pad sites, and the publisher refuses to replace a
+site without `--overwrite`, so this is accepted.
+
+## An interrupted add
+
+A run killed between renaming the old pad aside and renaming the new one in leaves the old pad at
+`.aside-<pad>` beside where it belongs. Every run — new pad or add — checks for this under the
+pad's lock before anything else: with no pad and an aside copy, the aside copy is renamed back; with
+both, the swap had finished and the aside copy is removed. Leftover `.tmp-<pad>-` folders from a
+killed run are removed at the same point. So an interrupted add leaves the pad exactly as it was,
+seen by the next run.
+
+Each round copies the whole kit, about 96 KB. The publisher warns at 5 MB, roughly fifty rounds; no
+cap is set.
 
 ## The page
 
@@ -127,11 +166,14 @@ A wait has a limit. An add that cannot take the lock within the publish timeout 
 │                │  │ …                          │ │ …               │ │
 ```
 
-- **The round switcher** sits at the top, above the title: a list of links labelled "Round 1",
-  "Round 2", …, each with its round's title as its accessible name ("Round 2: Settings page, round
-  2"). The round being viewed is marked current with `aria-current="page"` and shown in brackets.
+- **The round switcher** sits at the top, above the title: a list of links, each showing "Round <k>:
+  <title>" (the title cut short with an ellipsis when long, the full text in the link's `title`).
+  The round being viewed is marked current with `aria-current="page"` and shown in brackets. Each
+  link's address is built from the round's number only, never from its title, and the title is set
+  only as text.
   Each link goes to `../round-<k>/index.html`, so it works from disk and from Outpost alike, and
-  opens in a new tab: answers live only in the open page, so leaving it would lose them.
+  opens in a new tab, carrying hidden text "(opens in a new tab)": answers live only in the open page,
+  so leaving it would lose them.
 - **The settled list** sits under the introduction as a `<details>` element, folded, its summary
   "Settled in earlier rounds (<count>)". Unfolded, it lists each settled line as a list item, as
   text.
@@ -180,7 +222,8 @@ fold.
 ## State — round added
 
 The script prints the pad's link — the same link the pad was first given — and any caveat the
-publisher printed, then `pad folder: <path>`. Opening the link shows the new round, its switcher
+publisher printed, then `pad folder: <path>`. A tab already open on the pad does not learn of the
+new round, so the session tells the user the new round is ready and to open the link again. Opening the link shows the new round, its switcher
 listing every round. Every earlier round folder is byte-for-byte what it was before the add.
 
 ## State — new round refused for bad shape, pad unchanged
@@ -197,13 +240,15 @@ scratch-pad: pad "settings-header" does not exist — drop --add to start a new 
 scratch-pad: pad "settings-header" can't take another round: round-2 has no round.js
 ```
 
-A failure while the new pad is being put in place leaves the old pad in place: outside a workspace
-the old pad is renamed back; inside one the publisher's own swap is whole-or-nothing.
+A failure or interruption while the new pad is being put in place leaves the old pad in place:
+outside a workspace the old pad is renamed back, at once or by the next run; inside one the
+publisher's own swap is whole-or-nothing. A publish that was not confirmed is never retried by the
+session, since a retry would add the round twice.
 
 ## State — two sessions adding a round to the same pad at once
 
 The two adds take the pad's lock one after the other. The first lands as round `n+1`; the second
-waits, reads the pad with that round in it, and lands as round `n+2`. Each session is handed the
+waits, saying so in one line, reads the pad with that round in it, and lands as round `n+2`. Each session is handed the
 pad's link, and the pad holds both rounds, whole, in the order they landed. The second session's
 `settled` list was written before it saw the first's round, so it may not mention it; that is the
 session's text, shown as written.
