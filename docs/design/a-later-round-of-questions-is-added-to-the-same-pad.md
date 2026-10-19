@@ -152,9 +152,12 @@ reported "published but not confirmed" only when the whole pad is there with exa
 otherwise the add is refused. The publisher swaps the site by renaming the old one to
 `sites/.<pad>.previous-*` and restores it only on an exception, not when it is killed; so when the pad
 is gone and such entries exist, the refusal names the newest by modification time as the pad as it was
-before the add, to be renamed back by hand, and lists any others as older leftovers that may be partial — the script reports the publisher's private name and never renames it. Another tool publishing over the pad's site between the read and the
+before the add, to be renamed back by hand, and lists any others as older leftovers that may be partial — the script reports the publisher's private name and never renames it. Only a real folder (not a symlink) whose
+name has the publisher's shape, `.<pad>.previous-` plus the eight characters `mkdtemp` appends from `[a-z0-9_]`, is considered; anything else under that prefix is ignored, so a planted entry is never offered as the pad to restore. Another tool publishing over the pad's site between the read and the
 swap would be overwritten; only this script writes pad sites, and the publisher refuses to replace a
 site without `--overwrite`, so this is accepted.
+
+A workspace's `sites/` that is a symlink, or exists and is not a folder, is refused before the lock is taken and before anything is recovered or read, for a new pad and an add alike: "the sites folder is a symlink — refusing to publish through it" or "the sites folder is not a directory". A `sites/` that does not exist yet is left to the publisher to create.
 
 ## An interrupted add
 

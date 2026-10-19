@@ -1017,3 +1017,21 @@ def test_a_pad_folder_that_cannot_be_listed_is_named_without_a_false_missing_rou
     assert err.splitlines() == [
         'scratch-pad: pad "p" can\'t take another round: the pad folder can\'t be read: Permission denied — ' + WAY_ON
     ]
+
+
+@needs_unprivileged
+def test_a_pad_whose_parent_cannot_be_searched_is_a_refusal_not_a_traceback(skill, tmp_path):
+    mod = _load_module()
+    parent = tmp_path / "parent"
+    (parent / "p").mkdir(parents=True)
+    parent.chmod(0)
+    try:
+        with pytest.raises(mod.Refusal) as caught:
+            mod._read_pad(parent / "p", "p")
+    finally:
+        parent.chmod(0o700)
+
+    assert caught.value.lines == [
+        'scratch-pad: pad "p" can\'t take another round: the pad folder can\'t be read: Permission denied — '
+        + WAY_ON
+    ]
