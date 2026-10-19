@@ -1,0 +1,19 @@
+**Build the single line.** Clicking a row should expand it in place to show the details.
+
+Why it fits admins scanning hundreds of entries:
+
+- **Density is the whole job.** One line per entry fits about 30–40 entries on a laptop screen. Two lines cuts that roughly in half, and cards cut it to maybe 8–10. Scanning means letting the eye run down columns, and that only works when entries are rows of the same height.
+- **Columns line up.** With one line, timestamp, actor, action and target sit in fixed columns, so admins can pick out the odd entry, like an unfamiliar actor or a `delete` among `view`s. Two-line rows and cards break that vertical alignment.
+- **Details are only needed now and then.** Most entries get skimmed and skipped. Click-to-expand (plus a keyboard shortcut like ↓/Enter) puts the before/after diff, IP, user agent and request ID one action away without making every row pay for it.
+
+A few things to get right in the single line:
+
+- **Column order:** timestamp (monospace, fixed width), actor, action, target, then a short result/status at the right edge.
+- **Color only for exceptions.** Use a subtle tint or icon for failed and destructive actions, so they jump out and nothing else does.
+- **Truncate long targets with an ellipsis** and show the full value on hover. Don't wrap; wrapping quietly turns rows into two-liners.
+- **Expanded rows** should push the rows below them down, not open a modal, so admins keep their place. Allow more than one row open at a time so they can compare entries.
+- **Optional density toggle (compact/comfortable)** if some admins want more breathing room. That's cheaper than supporting a second layout.
+
+Two-line rows only make sense if the summary alone usually isn't enough to decide whether an entry matters. For audit logs, actor plus action plus target almost always is. Cards are for browsing a small number of rich items, not for scanning a lot of them.
+
+If you'd like to see the three side by side first, I can add this as round 2 on the audit-filters pad. Otherwise, I'd go straight to the single line.

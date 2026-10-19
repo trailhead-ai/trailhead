@@ -29,6 +29,12 @@ def decode_round_js(path: Path) -> dict:
     return json.loads(json.loads(literal))
 
 
+def _asks_in_words(words: str, styles) -> bool:
+    """The options are named in the message and the user is invited to choose in words."""
+    invites = ("?", "in words", "tell me", "let me know", "which one", "which you")
+    return sum(k in words for k in styles) >= 2 and any(i in words for i in invites)
+
+
 def capture_facts(capture: Path):
     final, tools = "", []
     for line in capture.read_text().splitlines():
@@ -55,7 +61,6 @@ def main(run: Path, capture: Path, variant: str) -> dict:
     out = {"variant": variant, "pads": pads, "audit-filters rounds": rounds,
            "scratch_pad.py commands": script_runs, "tool calls": [n for n, _ in tools]}
     words = final.lower()
-    asks = "?" in final
     if variant == "follow-up-same-design":
         settled = []
         if "round-2" in rounds:
@@ -67,12 +72,12 @@ def main(run: Path, capture: Path, variant: str) -> dict:
         out["C2 settled names the earlier answer"] = any("rail" in s.lower() for s in settled)
         out["C3 told to open the link again"] = any(re.search(rx, words) for rx in _OPEN_AGAIN)
         row_styles = ("single line", "one line", "one-line", "two line", "two-line", "card")
-        out["C4 asked in words"] = asks and sum(k in words for k in row_styles) >= 2
+        out["C4 asked in words"] = _asks_in_words(words, row_styles)
     else:
         new = [p for p in pads if p != "audit-filters"]
         out["N1 a new pad was made under its own name"] = len(new) == 1
         out["N2 audit-filters unchanged"] = rounds == ["round-1"]
-        out["N3 asked in words"] = asks and sum(k in words for k in ("dot", "badge", "strip")) >= 2
+        out["N3 asked in words"] = _asks_in_words(words, ("dot", "badge", "strip"))
     out["final message"] = final
     return out
 

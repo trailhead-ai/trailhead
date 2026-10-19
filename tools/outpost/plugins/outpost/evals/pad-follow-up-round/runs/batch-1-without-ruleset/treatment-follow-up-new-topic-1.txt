@@ -1,0 +1,13 @@
+I'd build **the text badge**, with its own colour, in a fixed status column.
+
+- **It says the status in words.** "Paid", "Overdue", "Draft" can be read without knowing what a colour means. The dot and the strip both depend on colour alone, which fails WCAG 1.4.1 and leaves colour-blind users guessing between red and green. Invoices have several statuses with similar weight (draft, sent, overdue, paid, void), so a colour code quickly needs a legend.
+- **It can be sorted and filtered.** A status column is something people will want to sort by or filter on, and that fits the filter rail you're building for the audit log.
+- **It still scans by colour.** Give each badge a tinted background, and people can skim for the red ones just as they would with dots.
+
+One change to the option as you described it: don't let the badge sit loose at the end of the row. On a wide screen it ends up far from the invoice number, and the eye loses track of which row it belongs to. Give it a fixed column, either right after the number or next to the amount, so all the badges line up vertically.
+
+If you want something quieter, the dot works only with a text label next to it ("● Overdue"). By then it's really a badge without the pill shape. I'd skip the strip: it's elegant, but it gives the least information, and selection or hover highlighting often already uses the left edge.
+
+If you'd rather compare them as drawings first, I can open a pad with the three options sketched.
+
+On the audit log: noted, a left rail that collapses.

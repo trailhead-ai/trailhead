@@ -1,0 +1,18 @@
+Build **A, a single line per entry**, and let the row expand on click to show the details.
+
+Why:
+
+- **Density matters most here.** Admins scanning hundreds of entries need as many rows on screen as possible. One line fits about twice as many rows as two lines, and about four to six times as many as cards.
+- **Scanning works by column.** With single lines the eye can run straight down the timestamp, actor or action column and spot the odd one out. Two-line rows break that rhythm, and cards break it completely.
+- **The details are still there when needed.** You get what the two-line layout offers by clicking to expand one row inline, not by showing details under every row.
+- **Cards suit browsing, not auditing.** They also don't sort or align well in a table.
+
+Some details that make the single line work:
+
+- **Fixed columns, in this order:** timestamp, actor, action, target, result. Truncate long values with an ellipsis and show the full text in a tooltip.
+- **Pin the timestamp and action columns** so they stay put when the collapsible rail opens or closes.
+- **Use a compact row height** of about 28–32px, with a subtle hover highlight. Use colour only for failures and denied actions, so they stand out.
+- **Make the expanded row show** the full payload or diff, the IP and user agent, the request ID, and a "filter by this actor/target" link that feeds back into the rail.
+- **Add keyboard navigation:** j/k to move between rows and Enter to expand. People reviewing hundreds of entries will use it.
+
+If you'd like to compare the three as drawings first, I can add this as a round 2 on the audit-filters pad.

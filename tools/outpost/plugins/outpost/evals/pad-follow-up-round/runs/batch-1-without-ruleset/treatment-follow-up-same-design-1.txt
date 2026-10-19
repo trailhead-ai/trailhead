@@ -1,0 +1,14 @@
+I'd build **A: one line per entry**, with a click to expand the details inline.
+
+Admins scanning hundreds of entries need as many rows on screen as possible, and columns that line up so the eye can run down one field (actor, action, result). A single line gives both, and you get about twice the rows of the two-line version. The two-line version shows details without a click, but the muted second line breaks up the columns and halves the density. Cards are easy to read one at a time but have no columns to scan or sort, so they don't suit this many entries.
+
+A few things to build into A:
+- Show the result as a coloured pill (ok/fail) so failures stand out while scrolling.
+- Expand the details in place, under the row, rather than in a side panel. That keeps the user's position in the list.
+- Show the full value on hover where a cell gets truncated.
+
+I added this question to the audit-filters pad as round 2, sketched inside the viewer with the collapsible left rail already in place:
+
+file://<runs>/run-1/xdg-state/outpost/pads/audit-filters/index.html
+
+Open the link again: a tab you already have open won't show the new round. You can pick, mark options "Not this" and add a note there, then press "Copy reply" and paste the result here. Replying in words works just as well.

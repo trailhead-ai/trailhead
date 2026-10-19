@@ -1,0 +1,16 @@
+**Build the single line**, and let a row expand in place to show its details when clicked.
+
+Why, given that admins scan hundreds of entries:
+
+- **Density is the main need.** One line per entry fits about twice as many entries on screen as two lines, and three or four times as many as cards. When scanning, people move their eyes down a column of timestamps, actors and actions. Every extra line breaks up that column.
+- **Columns line up.** Single-line rows keep actor, action, target and time in fixed columns, so an admin can scan one field ("who did this?") straight down the page. Two-line rows partly lose this. Cards lose it completely.
+- **Details are needed now and then, not all the time.** Most entries get read in a second and skipped. Putting details under every summary makes everyone pay for what only a few rows need. Expanding a row gives the two-line layout's benefit only where someone asks for it.
+- **Cards don't fit this job.** They suit browsing a few rich items, not auditing many similar ones. They also take width, which the left rail is already using.
+
+Things to build alongside it:
+- Truncate long fields with an ellipsis and show the full value on hover, so rows never wrap.
+- Keep the column headers visible while scrolling, and use a monospace or tabular-figure font for timestamps so they line up.
+- Expand rows with the keyboard (arrow keys to move, Enter to toggle). Power users will want it.
+- Optionally, add a density toggle (compact or comfortable). Don't add a two-line mode unless someone asks for it.
+
+If you'd like to compare these as drawings first, I can open them as round 2 in the audit-filters pad. My recommendation will stay the same.

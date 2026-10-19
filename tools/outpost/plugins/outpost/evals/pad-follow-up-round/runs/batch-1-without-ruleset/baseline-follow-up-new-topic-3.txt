@@ -1,0 +1,12 @@
+**Build the text badge at the end of the row.**
+
+- **The dot and the strip show status by colour alone.** That fails accessibility guidelines (WCAG 1.4.1). Colour-blind users and grayscale printouts can't tell Paid from Overdue, and tooltips or legends are a weak fix.
+- **Invoice statuses have names people use.** Draft, Sent, Paid, Overdue and Void are words people search, filter and talk about ("show me what's overdue"). A badge shows the word itself, so nobody has to decode a colour.
+- **Five or more statuses is too many for colour.** A dot or strip works for two or three states. Past that, users have to learn the colours.
+
+The badge's weakness is that it sits at the far right, away from where the eye starts each row. Two cheap ways to cover that:
+
+1. Make it a fixed-width status column with consistent alignment, not something trailing loose after the amount. Then people can scan straight down it, and it can be sorted and filtered.
+2. If overdue invoices are what users mainly look for, add a left-edge strip **for Overdue only** as well as the badge. It helps the eye spot the urgent rows without colour carrying all the meaning.
+
+If you'd like to compare these as drawings first, as we did for the filters, I can open a pad with the three options plus the badge-and-strip combination.
