@@ -278,6 +278,28 @@ ARM_SOURCES["regress2-cal-consult.md"] = [
     (COUNCIL, FIX_SHAPE_SHARPENED_REVISION),
 ]
 
+# The commit carrying each fallback site's one point-of-use line in its own ritual file, and the file it edits.
+# A fallback arm is the site's second-round treated sources with only that file read from that commit.
+FIX_SHAPE_FALLBACK_REVISIONS: dict[str, str] = {
+    "fsplan": "f396eb098fd49851341f0f17272de9ac91b4af38",
+}
+FIX_SHAPE_FALLBACK_FILES = {
+    "fsplan": PLAN_SKILL,
+    "fsconsult": CONSULT_SKILL,
+    "fsdriver": DRIVE_SKILL,
+    "fsbuildreview": EXECUTE_PROCEDURE,
+}
+
+ARM_SOURCES.update(
+    {
+        f"fs-fallback-{site}.md": [
+            (path, revision_at_fallback if path == FIX_SHAPE_FALLBACK_FILES[site] else revision)
+            for path, revision in ARM_SOURCES[f"fs-treated2-{site}.md"]
+        ]
+        for site, revision_at_fallback in FIX_SHAPE_FALLBACK_REVISIONS.items()
+    }
+)
+
 
 @pytest.mark.parametrize("arm_name", sorted(ARM_SOURCES))
 def test_arm_composed_from_its_manifest_equals_the_committed_file(arm_name: str):
@@ -349,6 +371,24 @@ def test_a_sharpened_arm_differs_from_the_same_sources_with_council_at_the_first
     assert not arm_matches(ARMS_DIR / arm_name, sources), (
         f"{arm_name} matches its sources with council.md at the first fix-shape edit, "
         "so the sharpened contract is not what the arm varies"
+    )
+
+
+FIX_SHAPE_FALLBACK_ARMS = [f"fs-fallback-{site}.md" for site in FIX_SHAPE_FALLBACK_REVISIONS]
+
+
+@pytest.mark.parametrize("arm_name", FIX_SHAPE_FALLBACK_ARMS)
+def test_a_fallback_arm_differs_from_its_treated_arm_only_in_the_sites_ritual_file(arm_name: str):
+    site = arm_name.removeprefix("fs-fallback-").removesuffix(".md")
+    treated = (ARMS_DIR / f"fs-treated2-{site}.md").read_text(encoding="utf-8")
+    fallback = (ARMS_DIR / arm_name).read_text(encoding="utf-8")
+    assert fallback != treated, f"{arm_name} is byte-identical to its treated arm"
+    sources = [
+        (path, FIX_SHAPE_BASELINE_REVISION if path == FIX_SHAPE_FALLBACK_FILES[site] else revision)
+        for path, revision in ARM_SOURCES[arm_name]
+    ]
+    assert compose(sources) == treated, (
+        f"{arm_name} differs from its treated arm in more than {FIX_SHAPE_FALLBACK_FILES[site]}"
     )
 
 
