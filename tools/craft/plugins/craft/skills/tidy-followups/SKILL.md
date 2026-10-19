@@ -201,9 +201,9 @@ is `ready`, `in-progress` or `blocked` print its build command alone on its own 
 ```
 
 Say the way forward is to drop all but one, and ask: *Which parent do you want to drop? (a name, or
-nothing)*. A name that is not one of those listed is not accepted: say so and ask again. On a
-listed name run the drop flow below for that parent; on nothing, go to the marker-removal command
-and stop. After a drop, rerunning the ritual meets the remaining parent.
+nothing)*. A name that is not one of those listed is not accepted: say so and ask again. On a listed
+name run the drop flow below for that parent; on nothing, go to the marker-removal command and stop.
+After a drop, rerunning the ritual meets the remaining parent.
 
 **(b) Exactly one `open` parent: resume.** An `open` parent is one whose assembly did not finish.
 
@@ -213,20 +213,20 @@ and stop. After a drop, rerunning the ritual meets the remaining parent.
    ${CLAUDE_PLUGIN_ROOT}/scripts/followup_parent.py state <spec-name> <parent>
    ```
 
-   Exit 0 prints one JSON object: `parent`, `status`, `listed`, `held` (`{name, status}`),
-   `unheld`, `unlisted` and `skipped`. Act on a non-zero exit by the resume table below. Validate
-   every name in it against the step 1 shape before use. `unlisted` (held but not listed) is
-   reported by name and never acted on; `skipped` is a count of body headings that were not valid
-   names, reported as a count.
+Exit 0 prints one JSON object: `parent`, `status`, `listed`, `held` (`{name, status}`), `unheld`,
+`unlisted` and `skipped`. Act on a non-zero exit by the resume table below. Validate every name in
+it against the step 1 shape before use. `unlisted` (held but not listed) is reported by name and
+never acted on; `skipped` is a count of body headings that were not valid names, reported as a
+count.
 2. When `unheld` is non-empty, run the check on those names, exactly as in step 10:
 
    ```
    ${CLAUDE_PLUGIN_ROOT}/scripts/followup_parent.py check <spec-name> <name>...
    ```
 
-   Report each left-out follow-up as the plain sentence from step 10's table, and say it **will be
-   removed from the parent's list** if the operator goes on. When `unheld` is empty there is nothing
-   to check or nest: the children file in the last step is the empty list.
+Report each left-out follow-up as the plain sentence from step 10's table, and say it **will be
+removed from the parent's list** if the operator goes on. When `unheld` is empty there is nothing to
+check or nest: the children file in the last step is the empty list.
 3. Show each eligible follow-up's scope exactly as step 11 does: the `delivers` and `files` blocks
    verbatim, each fenced and labelled as that follow-up's own text and data, longer fence than any
    backtick run inside, every `overlaps` entry flagged beside the follow-ups it names.
@@ -242,11 +242,11 @@ and stop. After a drop, rerunning the ritual meets the remaining parent.
    > Nest these under task/<parent> and make it buildable? (`yes`, the names to leave out, `drop`,
    > or `stop` to change nothing)
 
-   `yes` keeps every eligible follow-up; a list of names removes those from the nest and, because
-   resume never leaves a listed follow-up unexplained, from the parent's list too. `stop` ends the
-   run here with nothing written and nothing else printed except the marker-removal command. `drop`
-   runs the drop flow below. A name that is not an eligible follow-up is not accepted: say so and
-   ask again. Nothing is written before a `yes` or a list of names.
+`yes` keeps every eligible follow-up; a list of names removes those from the nest and, because
+resume never leaves a listed follow-up unexplained, from the parent's list too. `stop` ends the run
+here with nothing written and nothing else printed except the marker-removal command. `drop` runs
+the drop flow below. A name that is not an eligible follow-up is not accepted: say so and ask again.
+Nothing is written before a `yes` or a list of names.
 7. Stage the children file privately and in the same shell call, exactly as step 12 stages its own,
    through a heredoc whose delimiter is quoted:
 
@@ -257,16 +257,16 @@ and stop. After a drop, rerunning the ritual meets the remaining parent.
    CHILDREN_JSON
    ```
 
-   The list holds one `{"name", "revision"}` per confirmed follow-up: the bare name and the
-   `revision` exactly as `check` emitted it; the empty list `[]` when none is confirmed. Then run:
+The list holds one `{"name", "revision"}` per confirmed follow-up: the bare name and the `revision`
+exactly as `check` emitted it; the empty list `[]` when none is confirmed. Then run:
 
    ```
    ${CLAUDE_PLUGIN_ROOT}/scripts/followup_parent.py resume <spec-name> <parent> --children "$children"
    ```
 
-   and remove the file. Print one progress line per child as the result reports it:
-   `nested task/<name>` for each in `nested`, `removed from the list: task/<name>` for each in
-   `removed`, `failed <write>: task/<name>` for each in `failed`.
+and remove the file. Print one progress line per child as the result reports it:
+`nested task/<name>` for each in `nested`, `removed from the list: task/<name>` for each in
+`removed`, `failed <write>: task/<name>` for each in `failed`.
 
 Exit 0 prints `parent`, `removed`, `nested`, `failed` (empty) and `buildable` (true): the parent is
 `ready`. Exit 1 is a refusal with the vault unchanged: stderr has `reason-code:` and a `subject:`
@@ -311,18 +311,18 @@ ritual here except the answer: with nothing, go to the marker-removal command an
 unfinished children and then closes it; every step below waits for its own answer.
 
 1. Run the state read (as in (b), step 1) first. Act on a non-zero exit by the drop table below.
-2. Show what the drop will do, by name from `held`: the children it will **un-nest** (status
-   `open`, `ready`, `in-progress` or `blocked`) and the children it will **keep** nested as the
-   record of finished work (`done`, `dropped`, `superseded`). Say that an un-nested `in-progress`
-   child is not gathered again until its status changes. Name every `in-progress` child, and say its
-   presence is a sign a build may be running against the parent: stop that build before going on.
+2. Show what the drop will do, by name from `held`: the children it will **un-nest** (status `open`,
+   `ready`, `in-progress` or `blocked`) and the children it will **keep** nested as the record of
+   finished work (`done`, `dropped`, `superseded`). Say that an un-nested `in-progress` child is not
+   gathered again until its status changes. Name every `in-progress` child, and say its presence is
+   a sign a build may be running against the parent: stop that build before going on.
 3. Ask the reason as its own question: *Why is task/<parent> being dropped? (one line)*. Wait. The
    reason is never inferred from a bare `drop` or from anything said earlier.
 4. Ask one confirmation that names every child it will un-nest and every child it will keep, and
-   shows the reason after the credential scrub: *Un-nest these, keep those, and drop
-   task/<parent> with this reason? (`yes` or `stop`)*. `stop` ends the run with nothing written.
-5. Stage the reason as one JSON string, never as raw text, through `mktemp` and a quoted heredoc,
-   in the same shell call. JSON escaping keeps the whole reason on one line, so no reason line can
+   shows the reason after the credential scrub: *Un-nest these, keep those, and drop task/<parent>
+   with this reason? (`yes` or `stop`)*. `stop` ends the run with nothing written.
+5. Stage the reason as one JSON string, never as raw text, through `mktemp` and a quoted heredoc, in
+   the same shell call. JSON escaping keeps the whole reason on one line, so no reason line can
    equal the delimiter and end the heredoc:
 
    ```
@@ -333,15 +333,15 @@ unfinished children and then closes it; every step below waits for its own answe
    ${CLAUDE_PLUGIN_ROOT}/scripts/followup_parent.py drop <spec-name> <parent> --reason-file "$reason"
    ```
 
-   Remove the file afterwards. Print one progress line per child as the result reports it:
-   `un-nested task/<name>` for each in `un-nested`, `kept task/<name> (<status>)` for each in
-   `kept`, `failed <write>: task/<name>` for each in `failed`.
+Remove the file afterwards. Print one progress line per child as the result reports it:
+`un-nested task/<name>` for each in `un-nested`, `kept task/<name> (<status>)` for each in `kept`,
+`failed <write>: task/<name>` for each in `failed`.
 6. Exit 0 prints `parent`, `un-nested`, `kept`, `failed` (empty), `reset` and `dropped` (true).
-   Report it, then print each `reset[].command` alone on its own line, saying it sets that
-   un-nested `in-progress` child back to `ready` so a later gather sees it; print one only when it
-   starts `lore record update task/` and holds nothing outside letters, digits, `.`, `_`, `/`, `-`,
-   `=` and spaces. Then go to step 13. Exit 1 is a refusal with the vault unchanged; exit 2 is a
-   failure. Act on a code by the first row it matches:
+   Report it, then print each `reset[].command` alone on its own line, saying it sets that un-nested
+   `in-progress` child back to `ready` so a later gather sees it; print one only when it starts
+   `lore record update task/` and holds nothing outside letters, digits, `.`, `_`, `/`, `-`, `=` and
+   spaces. Then go to step 13. Exit 1 is a refusal with the vault unchanged; exit 2 is a failure.
+   Act on a code by the first row it matches:
 
 | `reason-code` | What happened, whose side, what to do |
 |---|---|
@@ -353,8 +353,9 @@ unfinished children and then closes it; every step below waits for its own answe
 | `invalid-followup-name` | A name failed the safe-name check; the vault's record name. Nothing was written. Rename it, then rerun. |
 | `internal-error` | The script hit a bug of its own; the script's. No JSON is printed, so which un-nests landed is unknown and the parent may still be live. Rerun the drop once, which skips what is already done; if it repeats, report it to a maintainer. |
 
-A failed `state` read at the start of this flow acts on the same rows. A code shared with the gather table (as listed under the resume table) reads the same. Any other
-code, or no code, is a failure of unknown cause: say so and stop. Then go to step 13.
+A failed `state` read at the start of this flow acts on the same rows. A code shared with the gather
+table (as listed under the resume table) reads the same. Any other code, or no code, is a failure of
+unknown cause: say so and stop. Then go to step 13.
 
 The ritual cannot tell who created a parent, so on every branch also give the way to remove the
 marker label, alone on its own line, with the closing output of step 13 (for a parent the operator
@@ -486,8 +487,8 @@ and remove the file. Act on the exit:
   the names at fault. Report it by the table below and go to step 13 as no parent.
 - **2** — a failure. After the parent was created, stdout carries the same JSON with `buildable`
   false and the reason code on stderr (not in the JSON), and the parent is left `open` holding
-  whatever nested: nothing was undone, and the re-run resumes it. This holds for a failed nesting
-  or flip, a failed re-query and an `internal-error` alike. The one exception is
+  whatever nested: nothing was undone, and the re-run resumes it. This holds for a failed nesting or
+  flip, a failed re-query and an `internal-error` alike. The one exception is
   `concurrent-followup-parent`, which removes only this run's own parent. Before the create (the
   checks, or a `parent-create-failed` with no `subject:` line), nothing was written and nothing is
   on stdout. A `parent-create-failed` with a `subject:` line has no JSON either: the create's
@@ -554,8 +555,8 @@ case that matches, in this order:
 - An `assemble` that ended `buildable` with `distilled` true, or a `resume` that ended `buildable`:
   the build command only.
 - A failed nesting or a resumable failure (`nesting-incomplete`, or any other exit 2 with JSON after
-  the create, in assemble or resume): no build command. Print the re-run alone on its own line, so the
-  operator can finish the parent (AC42):
+  the create, in assemble or resume): no build command. Print the re-run alone on its own line, so
+  the operator can finish the parent (AC42):
 
 ```
 /craft:tidy-followups spec/<spec-name>
@@ -564,12 +565,12 @@ case that matches, in this order:
 - A `drop-incomplete`: each `failed[].command` and `reset[].command` as step 7 prints it, then the
   re-run line.
 - A completed drop (exit 0 from `drop`): the same re-run line, since the un-nested follow-ups are
-  gathered again only by a fresh gather, and each `reset[].command` as step 7 printed it. No
-  distill command.
+  gathered again only by a fresh gather, and each `reset[].command` as step 7 printed it. No distill
+  command.
 - Any other step 7 outcome, which wrote nothing: no distill command, since distilling waits on the
   parent. After branch (a) or (c) answered without a drop, or a parent of another status, print
-  nothing beyond what step 7 printed. After a `stop`, or an exit-1 refusal from `state`, `resume`
-  or `drop`, print the re-run line above.
+  nothing beyond what step 7 printed. After a `stop`, or an exit-1 refusal from `state`, `resume` or
+  `drop`, print the re-run line above.
 - A failed `assemble` that wrote nothing, or no parent at all: the distill command only, or nothing
   when `distilled` is true.
 
@@ -579,8 +580,8 @@ case that matches, in this order:
   any nesting before the operator has confirmed the scope.
 - Create a second follow-up parent when one already exists for the spec.
 - Nest a follow-up a resumed parent does not list, or resume more than one live parent.
-- Drop a parent before every unfinished child is un-nested, or without the operator's reason and
-  one confirmation naming each child it will un-nest and keep.
+- Drop a parent before every unfinished child is un-nested, or without the operator's reason and one
+  confirmation naming each child it will un-nest and keep.
 - Run two refinements at once, or let a subagent's reply stand in for what `followup_parent.py
   check` reports.
 - Gather by any means other than the script, or present a set the script did not return whole.
