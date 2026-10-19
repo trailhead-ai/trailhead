@@ -4,7 +4,7 @@ one follow-up parent and those that must be left out, then nest the confirmed on
 under one new parent.
 
 Usage:
-    followup_parent.py check <spec-name> <name>...
+    followup_parent.py check <spec-name> [--parent <parent>] <name>...
     followup_parent.py assemble <spec-name> --children <json-file>
     followup_parent.py resume <spec-name> <parent> --children <json-file>
     followup_parent.py state <spec-name> <parent>
@@ -48,6 +48,12 @@ as `depends-outside`, as is one whose entry is anything but a bare task name
 (`@` and every other unsafe shape included). `dependency` is the entry as written
 when it passes the shape check; otherwise it is omitted, so nothing unchecked is
 emitted. A `depends-on` that is not a list of strings makes the record malformed.
+
+`check --parent <parent>` names a follow-up parent of the spec (`not-a-followup-parent`
+otherwise, as `state` decides): a dependency on a child that parent already holds counts as
+inside the set, exactly as `resume` decides it, so the pre-resume check agrees with what
+`resume` accepts. The held children are evaluated with the set (they must still be eligible
+to count) but are never reported themselves.
 
 When several rules apply, the left-out reason is the first of: `is-a-parent`,
 `already-nested`, `routed-to-plan`, `routed-to-brainstorm`,
@@ -217,8 +223,15 @@ Refusals before any write exit 1 with the vault unchanged and a `subject:` line:
     parent-not-resumable    the parent's status is not `open`;
     followup-parent-exists  another live follow-up parent is linked to the spec;
     child-not-listed        a file name is not in `state`'s `unheld`;
+    unlisted-child          the parent holds a task its body does not list (`state`'s
+                            `unlisted`); resume never makes a parent `ready` over a child
+                            it does not list, so the operator un-nests it by hand or drops
+                            the parent;
     child-not-eligible      a file child fails the `check` eligibility re-run, or a held
-                            child (one already under this parent) is not `ready`;
+                            child (one already under this parent) fails the same rules
+                            (not `ready`, routed, an unresolved question, an unfinished
+                            dependency) or no longer names this parent. A dependency on a
+                            child the parent holds, or on another file child, is finished;
     child-changed           a file child's revision differs from the confirmed one;
     nothing-to-build        no name would remain listed: the parent holds none of its
                             listed children and the file is empty.
@@ -302,6 +315,7 @@ REASON_CODES = frozenset(
         "parent-not-resumable",
         "child-not-listed",
         "nothing-to-build",
+        "unlisted-child",
     }
 )
 
@@ -316,6 +330,7 @@ REFUSAL_REASONS = frozenset(
         "parent-not-resumable",
         "child-not-listed",
         "nothing-to-build",
+        "unlisted-child",
     }
 )
 
@@ -433,11 +448,11 @@ def _bare_task_name(entry: str) -> bool:
     return "/" not in entry and gather._shape_ok(entry)
 
 
-def _static_verdict(sidecar: dict, body: str) -> str | None:
+def _static_verdict(sidecar: dict, body: str, expected_parent: str | None = None) -> str | None:
     labels = gather._labels(sidecar)
     if any(label in labels for label in PARENT_LABELS):
         return "is-a-parent"
-    if sidecar.get("parent"):
+    if (sidecar.get("parent") or None) != expected_parent:
         return "already-nested"
     if ROUTE_LABEL in labels:
         return ROUTE_REASONS.get(labels[ROUTE_LABEL], "not-ready")
@@ -453,20 +468,17 @@ def _dependency_done(runner, vault: str, name: str) -> bool:
     return sidecar is not None and sidecar["kind"] == "task" and sidecar["status"] == "done"
 
 
-def check_followups(runner, spec: str, names: list[str]) -> dict:
-    """Sort the named follow-ups of `spec` into eligible and left out."""
-    if not gather._shape_ok(spec):
-        raise ParentError("invalid-spec-name")
-    if not all(gather._shape_ok(n) for n in names):
-        raise ParentError("invalid-followup-name")
-    names = sorted(set(names))
-    vault, _ = gather.resolve_spec(runner, spec)
-
-    records = {n: _read_task(runner, vault, n) for n in names}
+def _classify(
+    runner, vault: str, records: dict[str, tuple[dict, str, str]], held: frozenset[str], parent: str | None
+) -> tuple[set[str], dict[str, dict]]:
+    """(accepted, left_out) over `records`, the `(sidecar, body, revision)` of each name.
+    A name in `held` is a child already under `parent`: it must still name that parent
+    and passes every other rule a follow-up does, and a dependency among the records
+    counts as inside the set, a held child's included."""
     left_out: dict[str, dict] = {}
     candidates: dict[str, list[str]] = {}
     for name, (sidecar, body, _) in records.items():
-        reason = _static_verdict(sidecar, body)
+        reason = _static_verdict(sidecar, body, parent if name in held else None)
         if reason is not None:
             left_out[name] = _left_out(name, reason)
         else:
@@ -496,9 +508,35 @@ def check_followups(runner, spec: str, names: list[str]) -> dict:
             left_out[name] = _left_out(
                 name, "depends-outside", unfinished if gather._shape_ok(unfinished) else None
             )
+    return accepted, left_out
 
+
+def check_followups(runner, spec: str, names: list[str], parent: str | None = None) -> dict:
+    """Sort the named follow-ups of `spec` into eligible and left out. With `parent`, a
+    follow-up depending on a child that follow-up parent already holds counts that
+    dependency as inside the set, exactly as `resume` decides it."""
+    if not gather._shape_ok(spec):
+        raise ParentError("invalid-spec-name")
+    if not all(gather._shape_ok(n) for n in names):
+        raise ParentError("invalid-followup-name")
+    if parent is not None and not gather._shape_ok(parent):
+        raise ParentError("invalid-followup-name")
+    names = sorted(set(names))
+    vault, _ = gather.resolve_spec(runner, spec)
+
+    held: frozenset[str] = frozenset()
+    if parent is not None:
+        held = frozenset(item["name"] for item in parent_state(runner, spec, parent)["held"]) - set(names)
+    records = {n: _read_task(runner, vault, n) for n in [*names, *sorted(held)]}
+    accepted, left_out = _classify(runner, vault, records, held, parent)
+    return _report(records, names, accepted, left_out)
+
+
+def _report(records: dict, names: list[str], accepted: set[str], left_out: dict[str, dict]) -> dict:
+    """The `check` structure for `names` alone, out of the `_classify` verdicts."""
+    left_out = {n: item for n, item in left_out.items() if n in names}
     eligible, files_by_name = [], {}
-    for name in sorted(accepted):
+    for name in sorted(accepted & set(names)):
         _, body, revision = records[name]
         raw_files = _field(body, "Files")
         eligible.append(
@@ -938,23 +976,22 @@ def resume_parent(runner, spec: str, parent_name: str, children: list[dict]) -> 
     rivals = [n for n in live_followup_parents(runner, vault, spec, spec_sidecar) if n != parent_name]
     if rivals:
         raise ParentError("followup-parent-exists", tuple(sorted(rivals)))
+    if state["unlisted"]:
+        raise ParentError("unlisted-child", tuple(state["unlisted"]))
     unlisted_here = tuple(sorted(n for n in names if n not in state["unheld"]))
     if unlisted_here:
         raise ParentError("child-not-listed", unlisted_here)
     held = state["held"]
-    gone = set()
-    current: dict[str, str] = {}
-    if names:
-        result = check_followups(runner, spec, names)
-        current = {item["name"]: item["revision"] for item in result["eligible"]}
-        gone = {n for n in names if n not in current}
-    gone |= {item["name"] for item in held if item["status"] != "ready"}
+    held_names = {item["name"] for item in held}
+    records = {n: _read_task(runner, vault, n) for n in [*names, *sorted(held_names)]}
+    accepted, _ = _classify(runner, vault, records, frozenset(held_names), parent_name)
+    gone = {n for n in records if n not in accepted}
     if gone:
         raise ParentError("child-not-eligible", tuple(sorted(gone)))
+    current = {n: records[n][2] for n in names}
     changed = tuple(sorted(c["name"] for c in children if current[c["name"]] != c["revision"]))
     if changed:
         raise ParentError("child-changed", changed)
-    held_names = {item["name"] for item in held}
     remaining = [n for n in state["listed"] if n in held_names or n in names]
     if not remaining:
         raise ParentError("nothing-to-build", (parent_name,))
@@ -1006,6 +1043,9 @@ def main(argv: list[str] | None = None, runner=None, today: datetime.date | None
         check = commands.add_parser("check", help="sort follow-ups into eligible and left out")
         check.add_argument("spec_name", help="bare spec record name (the part after spec/)")
         check.add_argument("names", nargs="+", help="bare task record names")
+        check.add_argument(
+            "--parent", help="bare name of a follow-up parent whose held children count as inside the set"
+        )
         build = commands.add_parser("assemble", help="nest confirmed follow-ups under one new parent")
         build.add_argument("spec_name", help="bare spec record name (the part after spec/)")
         build.add_argument("--children", required=True, help="JSON file: a list of {name, reason, revision}")
@@ -1026,7 +1066,7 @@ def main(argv: list[str] | None = None, runner=None, today: datetime.date | None
         try:
             args = parser.parse_args(argv)
             if args.command == "check":
-                result = check_followups(runner, args.spec_name, args.names)
+                result = check_followups(runner, args.spec_name, args.names, args.parent)
             elif args.command == "state":
                 result = parent_state(runner, args.spec_name, args.parent)
             elif args.command == "resume":
