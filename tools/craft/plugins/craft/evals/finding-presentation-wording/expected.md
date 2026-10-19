@@ -3139,3 +3139,13 @@ reviewer's ask in quotation marks at `fsplan`, `fsconsult` and `fsdriver` (a rea
 quotation marks as drafted text would move small at those three sites up). A criterion on which a second reader
 disagrees is `disputed` and counts as not met. The limits above (one reader, three runs a site except the split runs,
 one model tier, the file-form deviation for the two build arms) apply unchanged.
+
+**Second read (2026-10-19).** A second reader (the per-task conformance check) read twelve of the recommended
+captures against the branch table. Agree on eleven: `fsplan-1` L, `-3` L, `-4` L (borderline), `-2` S;
+`fsdriver-1` L, `-2` S; `fsconsult-2` L (borderline), `-5` L (borderline), `-1` S; `fsbuildreview-1` L, `-5` L.
+Disagree on one: `fsdriver-4` L, whose first sentence is the mechanics ("ordered by the day they were booked for, with
+no number to shift") with the effect only in a second sentence, so it is `disputed` and counts as not met: `fsdriver`
+large is 3 of 6, still missed. The second reader confirms that a small `Fix:` quoting the reviewer's ask, where the ask
+and cited text settle the words, is `not met` (protocol step 3; branch table). No site's outcome moves, and the line
+`Fallback needed at: fsplan, fsconsult, fsdriver, fsbuildreview` stands. The `fsbuildreview` large miss rests on the
+definition's explicit count of files and functions.
