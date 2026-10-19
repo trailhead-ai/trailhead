@@ -3573,3 +3573,41 @@ The branch must merge without squash, so `e568c4e0` and the other pinned revisio
   heading "The calibrated consult regression" above and its two lines "`regress-cal-consult` ... pass" (3 of 3) and
   "`regress2-cal-consult` ... pass" (5, 5 and 6 of 6), and the earlier sections' lines "`regress-cal-consult` outcome:
   pass." and "`regress2-cal-consult` outcome: pass.".
+
+## Amendment: the kept consult line is reworded for the unsettled ask and re-measured (2026-10-19)
+
+Written and committed before any run of the two arms below. Nothing above this heading is changed by it.
+
+**The finding.** The kept consult line (`skills/consult/SKILL.md`, lines 97 to 99, from `3b50cc4a`) says a small fix
+"leads with the drafted exact text where the reviewer's ask and the text it cites settle it, never the ask quoted or
+described in words". Read plainly, "never the ask quoted" can be taken as "never quote the ask", including where the ask
+does not settle the text. That contradicts `skills/_shared/council.md`, which says to draft the text only where the ask
+and the cited lines settle it and, "where they do not, quote the ask as the reviewer wrote it and add nothing of your
+own".
+
+**The rewording.** One commit, `skills/consult/SKILL.md` only, the one clause: "never the ask quoted or described in
+words" becomes "and otherwise carries the ask as that section says, never a description in words". The line stays one
+sentence in the file's style and still points at "How a finding reads". No other file, arm, fixture, prompt or capture
+changes.
+
+**Two new arms and their bars, fixed now.**
+
+| Arm | Sources | Runs | Prompt and grading | Bar |
+|---|---|---|---|---|
+| `fs-fallback2-fsconsult.md` | the `fs-fallback-fsconsult` sources with only `skills/consult/SKILL.md` moved to the rewording commit | 3 | `fs-prompt-fsconsult.md`, read under the unchanged protocol; scripted checks as for `fs-fallback-fsconsult` | small and large each a clean majority (3 of 3, or 5 or 6 of 6 after the split run) as `fs-fallback-fsconsult` met them; the splits rule applies as before |
+| `regress3-cal-consult.md` | the `regress2-cal-consult` composition with only `skills/consult/SKILL.md` moved to the rewording commit | 3 | `prompt-consult-calibrated.md`, graded against `reports-calibrated.md` | clean-majority `plain` on `calibration-level`, `severity-name` and `reviewer-name`, as `cal-consult` cleared |
+
+`regress3-cal-consult` measures the line that actually ships at the calibrated consult site, which neither earlier
+regression arm did (`regress-cal-consult` and `regress2-cal-consult` read `consult/SKILL.md` at the calibration
+commit, before `3b50cc4a`).
+
+**Dispatch, as the fallback runs.** `fixtures/` copied to a fresh empty temporary directory, `FIXTURES_DIR` replaced by
+that path, the process started from a second empty temporary directory, `--setting-sources project --allowedTools
+"Read"`, inline form, no input, no `--model`, foreground.
+
+**Outcome rule.** Both arms meet their bars: the rewording is kept. Either misses: the rewording is reverted with
+`git revert -S`, the `3b50cc4a` line is kept, and the unsettled-ask reading is recorded as an unmeasured limit for the
+operator.
+
+**What this measures and what it does not.** The fixtures stage no unsettled consult ask, so this re-measure checks that
+the settled branch did not regress; it does not measure the unsettled branch, which the rewording is meant to fix.
