@@ -532,6 +532,12 @@ auto-downgrading, record the demotion in the persisted `## Council Review` secti
 with a `(downgraded from Critical: <reason>)` parenthetical so calibration audits can detect
 demote-heavy synthesizers.
 
+In the review you print, each finding's `Fix:` takes the form its size calls for in "How a finding
+reads" — a small fix leads with the drafted exact text where the reviewer's ask and the cited lines
+settle it, never the ask quoted or described in words, and a large rewrite opens with what the
+reader would notice and names the sections, tasks and criteria it touches — and the one-line form
+belongs only to the persisted block below.
+
 **Disposition (required for every Critical):**
 
 For each Critical finding, the user assigns one of:
