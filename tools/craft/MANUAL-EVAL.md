@@ -3263,3 +3263,115 @@ same placeholder in every file); and `[redacted:<class>]` for whatever `capture_
 (`key-like`, `bearer`, `high-entropy-base64`), using the scanner's own detection. `capture_scan.py` exits 0 on this case's
 `runs/` (0 credential findings, 29 known-safe `path-or-url-shape` lines), and no `.grade.json` value differs from the
 unscrubbed capture.
+
+
+## Case: tidy-followups-resumes-or-drops-a-parent
+
+`plugins/craft/evals/tidy-followups-resumes-or-drops-a-parent/` holds `expected.md` (the pass condition for four cells),
+`fixtures/make-fixture-vault.py` (the builder), `harness.py` (the existing case's harness with this case's base commit and
+builder), and `runs/` (the captures). Its `extract.py`, `grade.py` and `scrub.py` are the existing case's
+(`tidy-followups-builds-one-parent/`), unchanged. The existing case's `nest-fail` cell is re-registered and re-run here
+(`expected.md` Revision 4 there; captures `runs/nest-fail-r4-*` there).
+
+**Under test:** `skills/tidy-followups/SKILL.md` at `c2a30319`: step 7's resume (`open`), refuse (`ready`, `in-progress`,
+`blocked`) and drop flow, step 12's roll-forward after the create, and step 13's closing cases. **Pre-registration:**
+`expected.md` (both files) committed alone as `fe9024a3`, before the builder existed and before any arm ran; every
+pass line is taken from the prose at `c2a30319`, and no line was added or changed after a run. **Treatment arm:** the skill and
+plugin tree at `c2a30319140d876d7b63970b8744ff6958e2b829`. **Baseline arm:** the tree at
+`7a48b25e5ef7cf054fbb595bc99d29bea36d5b07`, the skill before this change; each arm runs its own commit's
+`followup_parent.py`. The wrapper `harness.py` sets the base commit for this case only; the existing case's pinned
+`ce19d0ce` and its recorded runs are untouched.
+
+**Dispatch.** As the existing case: `git archive` snapshots of each commit under `/private/tmp/eval-resume-drop` (outside
+`$HOME`, without `evals/`), the fixture built inside the run dir with `LORE_BIN` naming the snapshot's `lore` (`env -i`,
+`python3 -I`), `scripts/eval-sandbox`, manifest env minus `HOME`, `TMPDIR`/`TMPPREFIX` in the run dir, Claude Code 2.1.303,
+2026-10-19, one cell at a time, answers in the prompt (the existing case's pre-registered limit). **Probe, one run before the
+batch, through the real dispatch:** `python3` 3.14.6 via the shim; `lore` resolved to the fixture shim; a `mktemp` heredoc
+written and read back; the snapshot's `skills/tidy-followups` readable and `evals/` absent; `~/.local/state/lore` and
+`~/.local/state/trailhead` "Operation not permitted"; `lore task list` shows the fixture vault; `followup_parent.py state`
+runs by shebang. The probe also showed what the smoke test had missed (below).
+
+**Fixture smoke, by the arm's path.** `tests/test_tidy_followups_resumes_or_drops_fixture_smoke.py` builds the fixture with
+the builder invoked as the harness invokes it and drives the real scripts by path under the manifest env. It was written
+first and run red (builder absent). The first probe then failed in the harness: the builder's `lore record update` calls
+inherited an open, silent stdin and lore refused ("stdin is open but silent"), which the smoke had not hit because pytest's
+stdin is closed. The smoke now gives the builder an open, silent stdin (a pipe it holds) and was run red against the builder
+without the fix (that error), green with it. Mutations of the builder, each caught by a named test: B made held in `resume`
+(`test_each_cell_gathers_its_one_parent_and_the_state_read_shows_what_it_lists_and_holds[resume-...]`,
+`test_the_resume_fixture_resumes_...`, `test_the_unheld_follow_up_of_each_open_parent_...`); the `refuse-drop` parent set
+`ready` instead of `in-progress` (`...state_read...[refuse-drop-...]`); the left-out follow-up created `ready` instead of
+`open` (`test_the_resume_left_out_fixture_reports_not_ready_...`); each restored with an empty diff.
+`scripts/inert-test-gate` exits 0 on it.
+
+**Leak check.** Fixture names, follow-up titles and bodies, the drop reason and the spec text use words absent from
+`SKILL.md` at both commits (grep of `ledger`, `receipt`, `sticker`, `barcode`, `scanner`, `shelf`, `tally`, `pallet`, `poll`,
+`ballot`, `retired`, `negative`, `total`, ...: 0 hits each). Two words the first draft used did occur (`label` 7 times,
+`weight` twice) and were renamed in the builder before any run.
+
+### Results
+
+Each cell's answers change its outcome (`yes` nests and flips; `yes` with a left-out follow-up flips with the follow-up
+removed; build leaves the vault alone; `drop` plus a reason and `yes` un-nests, keeps and closes). Verdicts are against the
+lines registered in `expected.md`. The prompt carries every answer up front, so a display the arm skips is observable and a
+question the arm never puts is a registered miss, as in the existing case.
+
+| Cell | Baseline (`7a48b25e`) | Treatment (`c2a30319`) |
+|---|---|---|
+| `resume` | FAIL on line 1: no `state` read, no `check`, no `resume`; it prints un-nest and drop commands, wrote nothing; the parent stays `open`, B un-nested | **FAIL.** Lines 2 (`check` on B only), 7 (one `resume`, `[B + revision]`, `mktemp` and quoted heredoc, exit 0), 8, 9 (parent `ready`, both children held, both listed with reasons, nothing else changed) and 10 (build command alone, no distill, no re-run) pass. Lines 3 to 6 fail: no `delivers`/`files` block, no selection reason or held-child status, no mid-assembly warning, and the question was never put; the step 6 report did not render before the write either. |
+| `resume-left-out` | FAIL on line 1: no `state`/`check`/`resume`; prints un-nest and drop commands; parent stays `open` | **FAIL.** Lines 1, 3, 5, 6, 7, 8 pass (`check` on the one left-out follow-up, `resume` with `[]`, `removed from the list: task/...` printed, parent `ready` holding A, B still `open` and byte-identical, build command alone). Line 2 fails (the `not-ready` sentence appears only after the write, in the past tense, never as "will be removed" before it) and line 4 (the question was never put and nothing was shown before `resume`). |
+| `refuse-build` | FAIL on line 4: no warning about stopping a running build; it prints the build command and the marker-removal command alone and writes nothing (lines 1, 2, 5, 6, 7 pass by doing what the old prose does). Line 3 is contaminated: it repeated "build it, or drop it?" from the prompt's own answer text, not from its prose | **PASS** every line: empty-set outcome, then the `ready` parent named, build command alone, the question `Build it with the command above, or drop it?` put, the stop-a-running-build warning, vault byte-identical, marker-removal alone, no distill, no re-run |
+| `refuse-drop` | FAIL on line 2: no `state` read, no drop flow; prints build and marker-removal commands alone and writes nothing; parent stays `in-progress`, both children held | **FAIL.** Lines 2 (`state` first), 7 (one `drop`, reason as one JSON string via `mktemp` and quoted heredoc, exit 0), 8 (`un-nested` and `kept ... (done)` lines), 9 (parent `dropped` with the reason under `## Dropped`, `ready` child free and `ready`, `done` child still held) and 10 (re-run alone, no distill) pass. Lines 1, 3, 4, 5, 6 fail: no build command printed before the question, no plan, no reason question, no confirmation, and `drop` ran with none of them shown. |
+| `nest-fail` (re-registered, existing fixture) | FAIL core 2 to 5: it undid the nesting, the parent is `dropped`, no re-run line, the distill command printed | **Core PASS, scoped FAIL, so the cell FAILS as registered.** Core 1 to 6 pass: both refined and eligible, scope blocks and question shown, one `assemble`, `nesting-incomplete` naming the second follow-up's `nest`, the parent left `open` holding the first (still `ready`), no `drop` or `--unset-parent`, no build command, no distill, the re-run alone, and a gather afterwards returns the parent and the second follow-up. The scoped lines fail as in every earlier round of that case: no report, Confirmation 1 or disposition set was shown before the first dispatch. |
+
+**Result: the treatment arm passes 1 of 5 cells** (`refuse-build`); `nest-fail` passes its core lines and fails its scoped
+lines; the other three fail. **Every baseline cell fails at least one registered line**, so each cell discriminates; the
+baseline passes lines only by doing what the old prose does (a build command alone, a write-free stop), and that is recorded
+here as non-discriminating: `refuse-build` lines 1, 2, 5, 6, 7.
+
+**What the failures are.** The same behaviour as the existing case's rounds 1 to 3, on a new surface: with the operator's
+answers supplied in the prompt the arm runs the procedure's commands (`state`, `check`, `resume`, `drop`) and writes the
+right records, but does not render the displays the prose puts between them (the scope blocks, the held-child list, the
+warning, the plan, the reason question, the confirmation). In every failing treatment cell the vault ends in the registered
+state and the commands the prose names run in the prose's order; what is missing is the text before the write. This case
+cannot say whether a live operator would be asked, because it fixes the answers (pre-registered); it does say that nothing in
+the arm's behaviour shows the questions being put in three of four cells, and `refuse-build`, the one cell where a question is
+the whole of step 7, put its question. This is a finding against the prose as measured here, not re-worded around.
+
+**Findings beyond the pass condition.**
+- The closing report in `resume` says 0 of 1 follow-ups "made the shortlist" and that the parent "was left `open` by an
+  earlier run that never finished": the arm reuses the step 5 recommendation text in a resume it has no step for. No registered
+  line scores it; it is a finding against step 7(b), which does not say whether the shortlist is part of a resume's output.
+- In `refuse-drop` the arm omitted the build command that branch (c) prints before the question, so the operator is never
+  shown the way forward that is not the drop (line 1). The final report prints the marker-removal command and the re-run only.
+- The `refuse-build` baseline line 3 was contaminated by the answers text naming the two choices; the answers for the
+  other cells were worded the same way ("the question step 7 asks (...)"), so the treatment cells may have been helped by the same
+  contamination. It did not rescue any of them.
+- `nest-fail` treatment: refinement subagents wrote their bodies with `lore record update ... --unset-label route`
+  and cited a record from another cell's fixture (`task/left-out-pin-the-tls-minimum-version-in-the-client`) that the old fixture
+  carries; neither changed the outcome.
+
+**Real state.** The fixture run id of each of the 11 manifests (the probe and 10 arms) was grepped across
+`~/.local/state/lore` and `~/.config/lore`: no file carries one. Every run's fixture repo ended clean at its starting HEAD.
+`capture_scan.py` exits 0 on this case's `runs/` (0 findings, 0 known-safe) and on the existing case's `runs/` (0 credential
+findings, 29 known-safe `path-or-url-shape` lines, unchanged) before the capture commit. **Live-state attribution.** Files
+changed under `~/.local/state/lore` during the batch (26 under `vaults/trailhead/`, `index.sqlite`, 2 under `publish/`, 1 under
+`fetch/`; `find -newer` the snapshot, per path) are the concurrent session's own vault writes and publishing; the arm runs
+cannot read or write that tree (the sandbox denies it, shown by the probe), and none of those paths contains a fixture run id.
+
+**Cost and time.** $4.45 and 777 s of arm time over 11 runs: 10 arm runs ($4.29, 745 s; treatment $2.37, baseline $1.92;
+`nest-fail` is $2.07 of that) and the probe ($0.16, 32 s). No run was discarded. Well inside the ~$20 budget.
+
+**Limitations.** One run per cell, so each is an anecdote. Answers are fixed in the prompt, so this cannot tell a skipped
+display from an arm that treats a given answer as already shown. Refinement ran only in `nest-fail`. One model tier, one Claude
+Code version, the vanilla path only.
+
+**Criterion observations (treatment arm).**
+
+| Criterion | Cell | Verdict | Pointer |
+|---|---|---|---|
+| AC5 | `resume` | state and outcome held (parent `ready`, B nested, build command alone); displays and question not put | `runs/resume-treat.grade.json` |
+| AC6 | `resume-left-out` | outcome held (removed from the list, parent `ready`); displays and question not put | `runs/resume-left-out-treat.grade.json` |
+| AC7 | `refuse-build` | held | `runs/refuse-build-treat.txt` |
+| AC7 | `refuse-drop` | outcome held (un-nested, kept, `dropped` with the reason, re-run alone); plan, reason question and confirmation not put | `runs/refuse-drop-treat.diff.txt` |
+| AC23 in part, AC42 | `nest-fail` | held (parent left `open` holding the first child, nothing undone, no build command, re-run alone) | `../tidy-followups-builds-one-parent/runs/nest-fail-r4-treat.txt` |
+| AC43 in part | every treatment cell | held (every printed command alone on its line) | each `.grade.json` `command_lines` |

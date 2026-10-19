@@ -1,0 +1,165 @@
+[main] TOOL Read {"file_path": "$CRAFT[base]/skills/tidy-followups/SKILL.md"}
+
+[main] RESULT
+1	---
+2	name: tidy-followups
+3	description: >
+4	  Present a finished spec's recorded follow-ups as a reasoned shortlist — which are worth doing
+5	  now rather than later, each with a one-line reason — and list the rest by title; then, once the
+6	  operator has chosen, refine the chosen follow-ups and nest the ones that qualify under one new
+7	  buildable parent. Gathers with a deterministic script, ranks, and writes nothing until the
+8	  operator has confirmed the chosen set.
+9	  TRIGGER when: user says "tidy the follow-ups of spec X", "which follow-ups of this spec should
+10	  we do", "what follow-ups does this spec have", or invokes /craft:tidy-followups explicitly.
+11	  DO NOT TRIGGER when: the ask is a batch of in-session code fix-ups to run now (that is
+12	  `/craft:polish`'s), or the spec's slice loop is still running (follow-ups that matter
+13	  mid-loop reach the next slice through `/craft:plan`).
+14	---
+15	
+16	# Tidy follow-ups
+17	
+18	A spec built slice by slice leaves follow-ups: tasks the slices deliberately did not act on, linked
+19	back to the slice they came from. Once the spec closes they sink into the general backlog. This
+20	ritual brings one finished spec's follow... [cut 24217 chars]
+
+[main] TEXT
+The spec name `fixture-shelf-sticker-spec` passes step 1's checks: it matches the safe shape, doesn't start with `-`, and has no `..` segment.
+
+[main] BASH
+$CRAFT[base]/scripts/followup_gather.py fixture-shelf-sticker-spec; echo "EXIT=$?"
+
+[main] TOOL Read {"file_path": "$CRAFT[base]/skills/_shared/security.md"}
+
+[main] RESULT
+{"spec": "fixture-shelf-sticker-spec", "vault": "default", "entry": "complete-status", "distilled": false, "followup-parents": ["build-the-follow-ups-of-fixture-shelf-sticker-spec-chosen-2026-10-12"], "followups": [{"name": "shelf-sticker-choose-the-barcode-symbology", "title": "Shelf sticker: choose the barcode symbology", "status": "open"}], "slice-basis": "labelled", "slices": ["fixture-shelf-sticker-spec-the-slice"], "child-count": 1, "candidates-read": 3, "kept": 1, "excluded-by-label": {"count": 1, "names": ["build-the-follow-ups-of-fixture-shelf-sticker-spec-chosen-2026-10-12"]}, "skipped-edges": 0}
+EXIT=0
+
+[main] RESULT
+1	# Security posture — credential scrub and untrusted-value validation
+2	
+3	Two rules every craft surface applies, stated once here so no citing surface restates them.
+4	
+5	## Credential-pattern scrub
+6	
+7	**Credential-pattern scrub (mechanical, runs first).** This is the general rule for the whole run,
+8	not one phase's step: **any finding or note text entering a record body or a report — session
+9	candidates, `blocked` bodies, task-body notes from the per-task loop, raw command stderr quoted into
+10	either — runs through this list first.** A vault is git-backed and has its own push path, so a
+11	credential transcribed into a task body ships as surely as one committed to code. Report bodies are
+12	**summarized, never captured verbatim** — quote only `file:line` references for anything caught. Run
+13	the text through this credential-pattern scrub regex list and drop/redact any match rather than
+14	capturing it:
+15	
+16	- **Key-like tokens** — `(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s*[=:]\s*\S+`
+17	  — the trailing character class is load-bearing: it lets the keyword carry qualifier text before
+18	  the separator, which is what catches `[redacted:key-like] `AWS_SECRE... [cut 2830 chars]
+
+[main] BASH
+lore record show --json --vault default task/shelf-sticker-choose-the-barcode-symbology; echo "EXIT=$?"
+
+[main] RESULT
+{
+  "body": "`src/stickers.py` has no barcode. Operator decision needed before this can be built: the warehouse has not decided between Code 128 (compact, every scanner reads it) and QR (carries a link, needs the newer scanners the budget has not covered). Both would work. The scanner budget is the operator's call and nothing in the code or the vault settles it.\n",
+  "kind": "task",
+  "layer": "personal",
+  "name": "shelf-sticker-choose-the-barcode-symbology",
+  "record_id": "task/shelf-sticker-choose-the-barcode-symbology",
+  "revision": "[sha:43fe2144]",
+  "sidecar": {
+    "created-at": "2026-10-19T17:11:47Z",
+    "created-by": "fixture@example.com",
+    "kind": "task",
+    "related": {
+      "task": [
+        "fixture-shelf-sticker-spec-the-slice"
+      ]
+    },
+    "status": "open",
+    "title": "Shelf sticker: choose the barcode symbology",
+    "updated-at": "2026-10-19T17:11:47Z",
+    "updated-by": "fixture@example.com",
+    "version": "v1"
+  }
+}
+EXIT=0
+
+[main] BASH
+lore record show task/build-the-follow-ups-of-fixture-shelf-sticker-spec-chosen-2026-10-12 --vault default --json; echo "EXIT=$?"; lore task graph build-the-follow-ups-of-fixture-shelf-sticker-spec-chosen-2026-10-12; echo "EXIT=$?"
+
+[main] RESULT
+{
+  "body": "**Goal:** Build the follow-ups below, each already refined to ready. `spec/fixture-shelf-sticker-spec` is context only.\n\n**Delta design:** Build these follow-ups, each nested under this parent:\n\n### task/shelf-sticker-cap-the-sticker-width-at-the-printer-limit\n\n**Selection reason:** waiting makes it costlier\n\n### task/shelf-sticker-choose-the-barcode-symbology\n\n**Selection reason:** waiting makes it costlier\n\n**Known Unknowns:**\n\n- None.\n\n",
+  "kind": "task",
+  "layer": "personal",
+  "name": "build-the-follow-ups-of-fixture-shelf-sticker-spec-chosen-2026-10-12",
+  "record_id": "task/build-the-follow-ups-of-fixture-shelf-sticker-spec-chosen-2026-10-12",
+  "revision": "[sha:e964be4f]",
+  "sidecar": {
+    "created-at": "2026-10-19T17:11:47Z",
+    "created-by": "fixture@example.com",
+    "kind": "task",
+    "labels": {
+      "craft/followup-parent": ""
+    },
+    "related": {
+      "spec": [
+        "fixture-shelf-sticker-spec"
+      ]
+    },
+    "status": "open",
+    "title": "Build the follow-ups of fixture-shelf-sticker-spec chosen 2026-10-12",
+    "updated-at": "2026-10-19T17:11:47Z",
+    "updated-by": "... [cut 215 chars]
+
+[main] TEXT
+**Tidy follow-ups: `spec/fixture-shelf-sticker-spec`**
+
+Entry: `complete-status` · slice basis: `labelled` · 1 slice, 1 child · 3 candidates read, 1 kept · 1 excluded by label · 0 skipped edges
+
+**Recommended**
+
+None. 0 of 1 met a reason class.
+
+**Other follow-ups**
+
+- Shelf sticker: choose the barcode symbology (`shelf-sticker-choose-the-barcode-symbology`)
+
+**Blocked**
+
+None.
+
+Nothing has been written yet.
+
+---
+
+**A follow-up parent already exists for this spec:** `build-the-follow-ups-of-fixture-shelf-sticker-spec-chosen-2026-10-12`. No second parent will be created, so steps 8 to 13 (choosing, refining, nesting, assembling) don't run.
+
+The parent's status is `open`, so `/craft:execute` can't build it yet. To recover, first un-nest its child:
+
+```
+lore record update task/shelf-sticker-cap-the-sticker-width-at-the-printer-limit --vault default --unset-parent
+```
+
+Then drop the parent:
+
+```
+lore record update task/build-the-follow-ups-of-fixture-shelf-sticker-spec-chosen-2026-10-12 --vault default --status dropped
+```
+
+Dropping freezes the record's body. If you want the reason on record, add it in the same write instead: use `--status dropped --diff` and pipe in a diff that appends the note. The command above has no note so it runs as pasted.
+
+The ritual can't tell who created this parent. If you didn't, you can remove its marker label instead. The record stays as it is, and the follow-up gather stops counting it:
+
+```
+lore record update task/build-the-follow-ups-of-fixture-shelf-sticker-spec-chosen-2026-10-12 --vault default --unset-label craft/followup-parent
+```
+
+No distill command on this stop: distilling waits on the parent.
+
+---
+
+The run stopped at step 7 and wrote nothing to the vault. I didn't dispatch any subagents and didn't run `followup_parent.py`.
+
+You gave "yes" as the answer to a step 7 question about nesting the unheld follow-ups under the parent and making it buildable. The skill file I followed asks no question at step 7. It reports the parent, prints the commands above and stops, so it never asked that question and I didn't act on the "yes". Nesting and making the parent ready would have meant writes this procedure has no step for.
+
+The parent's body names both `shelf-sticker-cap-the-sticker-width-at-the-printer-limit` and `shelf-sticker-choose-the-barcode-symbology`. But `lore task graph` shows only the first one nested under it, and it is `ready`. The barcode follow-up is still `open` and un-nested, and it is waiting on your choice between Code 128 and QR. Even if it were nested, it couldn't be built until you make that choice.

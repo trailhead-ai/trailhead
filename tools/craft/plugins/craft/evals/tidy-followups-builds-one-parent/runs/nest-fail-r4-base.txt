@@ -1,0 +1,27 @@
+**Assemble failed with `reason-code: nesting-incomplete`.** One child could not be nested under the new parent, so the run undid what it had written. Nothing is left nested, and the parent was dropped.
+
+---
+
+## Closing report
+
+The new parent, `build-the-follow-ups-of-fixture-nest-fail-spec-chosen-2026-10-19`, was created and then dropped, so no buildable parent exists.
+
+- **Included:**
+  - Nest-fail: reject path traversal in the archive extractor (`nest-fail-reject-path-traversal-in-the-archive-extractor`)
+  - Nest-fail: stop logging session cookies (`nest-fail-stop-logging-session-cookies`)
+- **Left:** none.
+- **Left out at step 10:** none.
+- **Refined but not nested:** both follow-ups. Each was refined to `ready`, and nesting was undone after the failure.
+  - Nest-fail: reject path traversal in the archive extractor (`nest-fail-reject-path-traversal-in-the-archive-extractor`)
+  - Nest-fail: stop logging session cookies (`nest-fail-stop-logging-session-cookies`)
+- **Failed write:** `nest` of Nest-fail: stop logging session cookies (`nest-fail-stop-logging-session-cookies`).
+- **Undo writes, both landed:**
+  - `un-nest` of `nest-fail-reject-path-traversal-in-the-archive-extractor`
+  - `drop` of `build-the-follow-ups-of-fixture-nest-fail-spec-chosen-2026-10-19`
+- **Undo commands still to run:** none.
+
+Since nesting failed, there is no build command. Every undo landed, so the distill command follows:
+
+```
+/craft:distill spec/fixture-nest-fail-spec
+```

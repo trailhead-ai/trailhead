@@ -220,7 +220,7 @@ def main() -> int:
     def update(name, *args) -> None:
         done = subprocess.run(
             ["lore", "record", "update", f"task/{name}", "--vault", "default", *args],
-            capture_output=True, text=True, env=env,
+            capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL,
         )
         if done.returncode != 0:
             raise SystemExit(f"lore record update failed for {name}: {done.stderr}")

@@ -1,0 +1,39 @@
+No follow-ups were found for `spec/fixture-shelf-count-spec`. The gather checked 1 slice, `fixture-shelf-count-spec-the-slice`, which it found by its label (`labelled`). Nothing is created.
+
+**Header:** entry `complete-status` · slice basis `labelled` · 1 slice, 1 child · 3 candidates read, 0 kept · 1 excluded by label · 0 skipped edges
+
+Nothing has been written yet.
+
+---
+
+**Existing follow-up parent.** The spec already has a follow-up parent, and that parent hides the follow-ups from the gather:
+
+- `task/build-the-follow-ups-of-fixture-shelf-count-spec-chosen-2026-10-12` ("Build the follow-ups of fixture-shelf-count-spec chosen 2026-10-12"). Status: **`ready`**
+
+The parent is `ready`, so this run won't resume it or nest anything into it. Build it with:
+
+```
+/craft:execute task/build-the-follow-ups-of-fixture-shelf-count-spec-chosen-2026-10-12
+```
+
+Warning: if a build is already running against this parent, stop it before dropping the parent, because a drop un-nests the unfinished children underneath it.
+
+> **Build it with the command above, or drop it? (`drop` and a reason, or nothing)**
+
+**Answer given:** build it; drop nothing.
+
+---
+
+**Closing report**
+
+- **Included:** none. **Left:** none. **Left out:** none. **Refined but not nested:** none. **Failed writes:** none.
+- No parent was created or resumed, and no drop ran. Nothing was written to the vault.
+- The existing parent `build-the-follow-ups-of-fixture-shelf-count-spec-chosen-2026-10-12` is unchanged and still `ready`. Build it with the `/craft:execute` command above.
+
+To stop the follow-up gather counting this parent as the spec's follow-up parent, remove its marker label. The record itself is left alone:
+
+```
+lore record update task/build-the-follow-ups-of-fixture-shelf-count-spec-chosen-2026-10-12 --vault default --unset-label craft/followup-parent
+```
+
+The procedure prints no distill command here, because distilling waits on the parent.

@@ -1,0 +1,115 @@
+[main] TOOL Read {"file_path": "$CRAFT[base]/skills/tidy-followups/SKILL.md"}
+
+[main] RESULT
+1	---
+2	name: tidy-followups
+3	description: >
+4	  Present a finished spec's recorded follow-ups as a reasoned shortlist — which are worth doing
+5	  now rather than later, each with a one-line reason — and list the rest by title; then, once the
+6	  operator has chosen, refine the chosen follow-ups and nest the ones that qualify under one new
+7	  buildable parent. Gathers with a deterministic script, ranks, and writes nothing until the
+8	  operator has confirmed the chosen set.
+9	  TRIGGER when: user says "tidy the follow-ups of spec X", "which follow-ups of this spec should
+10	  we do", "what follow-ups does this spec have", or invokes /craft:tidy-followups explicitly.
+11	  DO NOT TRIGGER when: the ask is a batch of in-session code fix-ups to run now (that is
+12	  `/craft:polish`'s), or the spec's slice loop is still running (follow-ups that matter
+13	  mid-loop reach the next slice through `/craft:plan`).
+14	---
+15	
+16	# Tidy follow-ups
+17	
+18	A spec built slice by slice leaves follow-ups: tasks the slices deliberately did not act on, linked
+19	back to the slice they came from. Once the spec closes they sink into the general backlog. This
+20	ritual brings one finished spec's follow... [cut 24217 chars]
+
+[main] TEXT
+Step 1: `fixture-shelf-count-spec` matches the safe shape. Step 2: gather.
+
+[main] BASH
+$CRAFT[base]/scripts/followup_gather.py fixture-shelf-count-spec; echo "EXIT=$?"
+
+[main] RESULT
+{"spec": "fixture-shelf-count-spec", "vault": "default", "entry": "complete-status", "distilled": false, "followup-parents": ["build-the-follow-ups-of-fixture-shelf-count-spec-chosen-2026-10-12"], "followups": [], "slice-basis": "labelled", "slices": ["fixture-shelf-count-spec-the-slice"], "child-count": 1, "candidates-read": 3, "kept": 0, "excluded-by-label": {"count": 1, "names": ["build-the-follow-ups-of-fixture-shelf-count-spec-chosen-2026-10-12"]}, "skipped-edges": 0}
+EXIT=0
+
+[main] TOOL Read {"file_path": "$CRAFT[base]/skills/_shared/security.md"}
+
+[main] RESULT
+1	# Security posture — credential scrub and untrusted-value validation
+2	
+3	Two rules every craft surface applies, stated once here so no citing surface restates them.
+4	
+5	## Credential-pattern scrub
+6	
+7	**Credential-pattern scrub (mechanical, runs first).** This is the general rule for the whole run,
+8	not one phase's step: **any finding or note text entering a record body or a report — session
+9	candidates, `blocked` bodies, task-body notes from the per-task loop, raw command stderr quoted into
+10	either — runs through this list first.** A vault is git-backed and has its own push path, so a
+11	credential transcribed into a task body ships as surely as one committed to code. Report bodies are
+12	**summarized, never captured verbatim** — quote only `file:line` references for anything caught. Run
+13	the text through this credential-pattern scrub regex list and drop/redact any match rather than
+14	capturing it:
+15	
+16	- **Key-like tokens** — `(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s*[=:]\s*\S+`
+17	  — the trailing character class is load-bearing: it lets the keyword carry qualifier text before
+18	  the separator, which is what catches `[redacted:key-like] `AWS_SECRE... [cut 2830 chars]
+
+[main] BASH
+lore record show task/build-the-follow-ups-of-fixture-shelf-count-spec-chosen-2026-10-12 --vault default --json; echo "EXIT=$?"
+
+[main] RESULT
+{
+  "body": "**Goal:** Build the follow-ups below, each already refined to ready. `spec/fixture-shelf-count-spec` is context only.\n\n**Delta design:** Build these follow-ups, each nested under this parent:\n\n### task/shelf-count-ignore-negative-counts-in-the-shelf-total\n\n**Selection reason:** waiting makes it costlier\n\n### task/shelf-count-report-an-empty-pallet-load-as-zero\n\n**Selection reason:** waiting makes it costlier\n\n**Known Unknowns:**\n\n- None.\n\n",
+  "kind": "task",
+  "layer": "personal",
+  "name": "build-the-follow-ups-of-fixture-shelf-count-spec-chosen-2026-10-12",
+  "record_id": "task/build-the-follow-ups-of-fixture-shelf-count-spec-chosen-2026-10-12",
+  "revision": "[sha:1d75aa24]",
+  "sidecar": {
+    "created-at": "2026-10-19T17:12:35Z",
+    "created-by": "fixture@example.com",
+    "kind": "task",
+    "labels": {
+      "craft/followup-parent": ""
+    },
+    "related": {
+      "spec": [
+        "fixture-shelf-count-spec"
+      ]
+    },
+    "status": "ready",
+    "title": "Build the follow-ups of fixture-shelf-count-spec chosen 2026-10-12",
+    "updated-at": "2026-10-19T17:12:36Z",
+    "updated-by": "fixture... [cut 47 chars]
+
+[main] TEXT
+No follow-ups were found for `spec/fixture-shelf-count-spec`. The gather checked one slice, `fixture-shelf-count-spec-the-slice`, which it found by the `labelled` slice basis. Nothing is created.
+
+**Header:** entry `complete-status` · slice basis `labelled` · 1 slice, 1 child · 3 candidates read, 0 kept · 1 excluded by label · 0 skipped edges
+
+Nothing has been written yet.
+
+---
+
+**A follow-up parent already exists for this spec:** `build-the-follow-ups-of-fixture-shelf-count-spec-chosen-2026-10-12`, titled "Build the follow-ups of fixture-shelf-count-spec chosen 2026-10-12". The follow-ups are already nested under it, which is why the gather found none. No second parent will be created, and steps 8 to 13 don't run.
+
+The parent's status is `ready`, so the next step is to build it:
+
+```
+/craft:execute task/build-the-follow-ups-of-fixture-shelf-count-spec-chosen-2026-10-12
+```
+
+The ritual can't tell who created a parent. If you didn't create this one, the command below removes its marker label. The record stays as it is, and the follow-up gather stops counting it:
+
+```
+lore record update task/build-the-follow-ups-of-fixture-shelf-count-spec-chosen-2026-10-12 --vault default --unset-label craft/followup-parent
+```
+
+Distilling waits on the parent, so no distill command is printed on this stop.
+
+---
+
+**Step 7's question:** the parent is buildable, so build it with the command shown above, or drop it?
+**Answer given:** build it; drop nothing.
+
+So the next step is the `/craft:execute` command above, and no drop or un-nest commands apply. The run ends here. I wrote nothing to the vault and edited no files. The only commands I ran were the gather script and a read of the parent record.

@@ -1,0 +1,11 @@
+[main] BASH
+$CRAFT[base]/scripts/followup_gather.py fixture-ledger-posting-spec; echo "EXIT=$?"
+
+[main] BASH
+lore record show --json --vault default task/ledger-posting-print-the-order-total-on-the-receipt-footer; echo "EXIT=$?"
+
+[main] BASH
+lore record show task/build-the-follow-ups-of-fixture-ledger-posting-spec-chosen-2026-10-12 --vault default --json; echo "EXIT=$?"
+
+[main] BASH
+lore task graph build-the-follow-ups-of-fixture-ledger-posting-spec-chosen-2026-10-12; echo "EXIT=$?"

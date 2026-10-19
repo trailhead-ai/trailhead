@@ -1,0 +1,25 @@
+[main] BASH
+cd $RUN[resume-treat]; $CRAFT[treat]/scripts/followup_gather.py fixture-ledger-posting-spec; echo "EXIT=$?"
+
+[main] BASH
+lore record show --json --vault default task/ledger-posting-print-the-order-total-on-the-receipt-footer; echo "EXIT=$?"
+
+[main] BASH
+lore record show task/build-the-follow-ups-of-fixture-ledger-posting-spec-chosen-2026-10-12 --vault default --json; echo "EXIT=$?"
+
+[main] BASH
+cd $RUN[resume-treat]; $CRAFT[treat]/scripts/followup_parent.py state fixture-ledger-posting-spec build-the-follow-ups-of-fixture-ledger-posting-spec-chosen-2026-10-12; echo "EXIT=$?"
+
+[main] BASH
+cd $RUN[resume-treat]; $CRAFT[treat]/scripts/followup_parent.py check fixture-ledger-posting-spec ledger-posting-print-the-order-total-on-the-receipt-footer; echo "EXIT=$?"
+
+[main] BASH
+cd $RUN[resume-treat]
+children=$(mktemp)
+cat > "$children" <<'CHILDREN_JSON'
+[{"name": "ledger-posting-print-the-order-total-on-the-receipt-footer", "revision": "[sha:ba62363c]"}]
+CHILDREN_JSON
+$CRAFT[treat]/scripts/followup_parent.py resume fixture-ledger-posting-spec build-the-follow-ups-of-fixture-ledger-posting-spec-chosen-2026-10-12 --children "$children"
+rc=$?
+rm -f "$children"
+echo "EXIT=$rc"

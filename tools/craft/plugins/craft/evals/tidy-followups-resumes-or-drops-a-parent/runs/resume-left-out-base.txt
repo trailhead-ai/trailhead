@@ -1,0 +1,51 @@
+**Tidy follow-ups: `spec/fixture-shelf-sticker-spec`**
+
+Entry: `complete-status` · slice basis: `labelled` · 1 slice, 1 child · 3 candidates read, 1 kept · 1 excluded by label · 0 skipped edges
+
+**Recommended**
+
+None. 0 of 1 met a reason class.
+
+**Other follow-ups**
+
+- Shelf sticker: choose the barcode symbology (`shelf-sticker-choose-the-barcode-symbology`)
+
+**Blocked**
+
+None.
+
+Nothing has been written yet.
+
+---
+
+**A follow-up parent already exists for this spec:** `build-the-follow-ups-of-fixture-shelf-sticker-spec-chosen-2026-10-12`. No second parent will be created, so steps 8 to 13 (choosing, refining, nesting, assembling) don't run.
+
+The parent's status is `open`, so `/craft:execute` can't build it yet. To recover, first un-nest its child:
+
+```
+lore record update task/shelf-sticker-cap-the-sticker-width-at-the-printer-limit --vault default --unset-parent
+```
+
+Then drop the parent:
+
+```
+lore record update task/build-the-follow-ups-of-fixture-shelf-sticker-spec-chosen-2026-10-12 --vault default --status dropped
+```
+
+Dropping freezes the record's body. If you want the reason on record, add it in the same write instead: use `--status dropped --diff` and pipe in a diff that appends the note. The command above has no note so it runs as pasted.
+
+The ritual can't tell who created this parent. If you didn't, you can remove its marker label instead. The record stays as it is, and the follow-up gather stops counting it:
+
+```
+lore record update task/build-the-follow-ups-of-fixture-shelf-sticker-spec-chosen-2026-10-12 --vault default --unset-label craft/followup-parent
+```
+
+No distill command on this stop: distilling waits on the parent.
+
+---
+
+The run stopped at step 7 and wrote nothing to the vault. I didn't dispatch any subagents and didn't run `followup_parent.py`.
+
+You gave "yes" as the answer to a step 7 question about nesting the unheld follow-ups under the parent and making it buildable. The skill file I followed asks no question at step 7. It reports the parent, prints the commands above and stops, so it never asked that question and I didn't act on the "yes". Nesting and making the parent ready would have meant writes this procedure has no step for.
+
+The parent's body names both `shelf-sticker-cap-the-sticker-width-at-the-printer-limit` and `shelf-sticker-choose-the-barcode-symbology`. But `lore task graph` shows only the first one nested under it, and it is `ready`. The barcode follow-up is still `open` and un-nested, and it is waiting on your choice between Code 128 and QR. Even if it were nested, it couldn't be built until you make that choice.

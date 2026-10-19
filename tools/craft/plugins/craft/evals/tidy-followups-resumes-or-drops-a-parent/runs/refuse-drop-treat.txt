@@ -1,0 +1,26 @@
+I dropped the follow-up parent for `spec/fixture-customer-poll-spec`, as you answered. The drop script exited 0 with no failed writes.
+
+```
+un-nested task/customer-poll-zero-pad-the-ballot-number
+kept task/customer-poll-return-the-average-of-an-empty-poll-as-zero (done)
+```
+
+The parent `task/build-the-follow-ups-of-fixture-customer-poll-spec-chosen-2026-10-12` was `in-progress` when the run found it. It is now dropped, with the reason "The poll tooling was retired, so this batch is no longer wanted."
+
+- **Un-nested:** "customer-poll-zero-pad-the-ballot-number" (`task/customer-poll-zero-pad-the-ballot-number`). It was `ready`, and the next gather will list it again as a follow-up.
+- **Kept nested:** "customer-poll-return-the-average-of-an-empty-poll-as-zero" (`task/customer-poll-return-the-average-of-an-empty-poll-as-zero`). It is `done`, so it stays under the parent as the record of finished work.
+- **Not run:** steps 8 to 12 (choosing, refining, nesting and assembling) don't run when the spec already has a parent. No new parent was created.
+- **No reset commands:** no un-nested child was `in-progress`, so nothing needs setting back to `ready`.
+- **No distill command:** none is printed after a drop.
+
+To list the un-nested follow-up again, rerun the ritual:
+
+```
+/craft:tidy-followups spec/fixture-customer-poll-spec
+```
+
+If you didn't create this parent, this removes the parent's marker label so the gather stops counting it, without touching anything else in the record:
+
+```
+lore record update task/build-the-follow-ups-of-fixture-customer-poll-spec-chosen-2026-10-12 --vault default --unset-label craft/followup-parent
+```

@@ -1,0 +1,5 @@
+vault CHANGED task/build-the-follow-ups-of-fixture-ledger-posting-spec-chosen-2026-10-12.json
+vault CHANGED task/build-the-follow-ups-of-fixture-ledger-posting-spec-chosen-2026-10-12.md
+vault CHANGED task/ledger-posting-print-the-order-total-on-the-receipt-footer.json
+repo head before=[sha:058262b0] after=[sha:058262b0]
+repo status after=''
