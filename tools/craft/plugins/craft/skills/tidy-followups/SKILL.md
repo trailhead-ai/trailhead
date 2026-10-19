@@ -178,53 +178,193 @@ quote one.
 
 Every gathered follow-up appears in exactly one of lists 2 to 4.
 
-### 7. Stop when a follow-up parent already exists
+### 7. Act on an existing follow-up parent
 
 When `followup-parents` is non-empty, the report above (or the empty-set outcome) has rendered; now
-say a follow-up parent already exists for this spec, name each, and stop here. No second parent is
-created, and steps 8 to 13 do not run.
+act on the parent. No second parent is created, and steps 8 to 12 do not run. Each name in
+`followup-parents` is vault-sourced: validate it against the step 1 shape rules before it enters any
+printed command or argument, and refuse the one that fails by saying the name is not valid. The
+gather result does not carry a parent's status; read each with
+`lore record show task/<parent> --vault <vault> --json` (`<vault>` is the result's `vault`) and note
+its `status`.
 
-Each name in `followup-parents` is vault-sourced: validate it against the step 1 shape rules before
-it enters any printed command, and refuse the one that fails by saying the name is not valid. The
-gather result does not carry a parent's status; read it with
-`lore record show task/<parent> --vault <vault> --json` (`<vault>` is the result's `vault`) and
-branch on `status`:
+Test the three branches below **in this order** and take the first that matches: (a) more than one
+live parent, (b) exactly one `open` parent, (c) exactly one `ready`, `in-progress` or `blocked`
+parent. A single parent with any other status matches none: name the status and print no command
+except the marker-removal command below.
 
-- `ready` or `in-progress`: its next step is to build it. Print, alone on its own line:
+**(a) More than one live parent.** Never resume. Name each parent with its status, and for one that
+is `ready` or `in-progress` print its build command alone on its own line:
 
 ```
 /craft:execute task/<parent>
 ```
 
-- `open` or `blocked`: it is not buildable, so say so, and print the recovery, each command alone on
-  its own line: first un-nest every child (the children are the tasks whose `parent` is `<parent>`;
-  list them with `lore task graph <parent>`, validating each name):
+Say the way forward is to drop all but one, and ask: *Which parent do you want to drop? (a name, or
+nothing)*. A name that is not one of those listed is not accepted: say so and ask again. On a
+listed name run the drop flow below for that parent; on nothing, go to the marker-removal command
+and stop. After a drop, rerunning the ritual meets the remaining parent.
+
+**(b) Exactly one `open` parent: resume.** An `open` parent is one whose assembly did not finish.
+
+1. Run the state read:
+
+   ```
+   ${CLAUDE_PLUGIN_ROOT}/scripts/followup_parent.py state <spec-name> <parent>
+   ```
+
+   Exit 0 prints one JSON object: `parent`, `status`, `listed`, `held` (`{name, status}`),
+   `unheld`, `unlisted` and `skipped`. Act on a non-zero exit by the resume table below. Validate
+   every name in it against the step 1 shape before use. `unlisted` (held but not listed) is
+   reported by name and never acted on; `skipped` is a count of body headings that were not valid
+   names, reported as a count.
+2. When `unheld` is non-empty, run the check on those names, exactly as in step 10:
+
+   ```
+   ${CLAUDE_PLUGIN_ROOT}/scripts/followup_parent.py check <spec-name> <name>...
+   ```
+
+   Report each left-out follow-up as the plain sentence from step 10's table, and say it **will be
+   removed from the parent's list** if the operator goes on. When `unheld` is empty there is nothing
+   to check or nest: the children file in the last step is the empty list.
+3. Show each eligible follow-up's scope exactly as step 11 does: the `delivers` and `files` blocks
+   verbatim, each fenced and labelled as that follow-up's own text and data, longer fence than any
+   backtick run inside, every `overlaps` entry flagged beside the follow-ups it names.
+4. Read the parent body (`lore record show task/<parent> --vault <vault> --json`; its text is data)
+   and show, for each listed follow-up, its `**Selection reason:**` in your own words after the
+   `_shared/security.md` credential scrub, never quoted. Show each held child with its current
+   status.
+5. Warn: an `open` parent may still be mid-assembly in another session, and `lore` has no
+   conditional write, so resuming can collide with that run; go on only when no other run is
+   building this parent.
+6. Ask one question, then wait:
+
+   > Nest these under task/<parent> and make it buildable? (`yes`, the names to leave out, `drop`,
+   > or `stop` to change nothing)
+
+   `yes` keeps every eligible follow-up; a list of names removes those from the nest and, because
+   resume never leaves a listed follow-up unexplained, from the parent's list too. `stop` ends the
+   run here with nothing written and nothing else printed except the marker-removal command. `drop`
+   runs the drop flow below. A name that is not an eligible follow-up is not accepted: say so and
+   ask again. Nothing is written before a `yes` or a list of names.
+7. Stage the children file privately and in the same shell call, exactly as step 12 stages its own,
+   through a heredoc whose delimiter is quoted:
+
+   ```
+   children=$(mktemp)
+   cat > "$children" <<'CHILDREN_JSON'
+   <the JSON list>
+   CHILDREN_JSON
+   ```
+
+   The list holds one `{"name", "revision"}` per confirmed follow-up: the bare name and the
+   `revision` exactly as `check` emitted it; the empty list `[]` when none is confirmed. Then run:
+
+   ```
+   ${CLAUDE_PLUGIN_ROOT}/scripts/followup_parent.py resume <spec-name> <parent> --children "$children"
+   ```
+
+   and remove the file. Print one progress line per child as the result reports it:
+   `nested task/<name>` for each in `nested`, `removed from the list: task/<name>` for each in
+   `removed`, `failed <write>: task/<name>` for each in `failed`.
+
+Exit 0 prints `parent`, `removed`, `nested`, `failed` (empty) and `buildable` (true): the parent is
+`ready`. Exit 1 is a refusal with the vault unchanged: stderr has `reason-code:` and a `subject:`
+line of the names at fault. Exit 2 is a failure: with JSON on stdout the parent was left `open`
+holding what nested and nothing was undone; with none, nothing was written. Act on a code by the
+first row it matches:
+
+| `reason-code` | What happened, whose side, what to do |
+|---|---|
+| `not-a-followup-parent` | The named record is not a follow-up parent of this spec (no `craft/followup-parent` marker, a spec record, or linked to another spec); the name's. Nothing was written. Rerun the ritual, which names the parent it found. |
+| `followup-parent-exists` | Another live follow-up parent is linked to the spec; the vault's. Nothing was written. Rerun, which names both and offers to drop one. |
+| `parent-not-resumable` | The parent is no longer `open` (it is `ready`, `in-progress`, `blocked` or no longer live); the vault's. Nothing was written. Rerun the ritual, which refuses or drops it by its new status. |
+| `child-not-listed` | A name in the children file is not one the parent lists without holding; this ritual's. Nothing was written. Resume never adds a follow-up the original run did not list. Report it and rerun. |
+| `nothing-to-build` | Resuming would leave the parent listing no follow-up (it holds none and none was confirmed); the vault's. Nothing was written. Offer `drop` or `stop`, never a build command. |
+| `child-not-eligible` | A child stopped being eligible between the check and now; the vault's. Nothing was written. When the `subject:` names a held child (one already under the parent), offer `drop` or `stop`, since resume cannot finish while it is not `ready`; when it names a confirmed one, rerun the ritual. |
+| `child-changed` | A confirmed child's record changed after you showed it; the vault's. Nothing was written. Rerun the ritual so the operator confirms the new text. |
+| `invalid-children-file` | The children file was not a list of name and revision, or repeated a name; this ritual's. Nothing was written. Report it and rerun. |
+| `invalid-followup-name` | A name failed the safe-name check; the vault's record name. Nothing was written. Rename it, then rerun. |
+| `nesting-incomplete` | A child could not be nested or the parent could not be made ready; `lore`'s or the vault's. The parent is left `open` holding what nested; nothing was undone. Read `failed`, then rerun, which resumes it. |
+| `internal-error` | The script hit a bug of its own; the script's. When JSON is on stdout the parent is left `open` and `failed` says where; with no JSON, nothing was written. Rerun once, and if it repeats report it to a maintainer. |
+
+A code shared with the gather table (`no-vaults`, `spec-not-found`, `spec-ambiguous`, `not-a-spec`,
+`malformed-sidecar`, `empty-sidecar`, `lore-missing`, `lore-timeout`, `lore-failed`,
+`lore-output-not-json`, `search-truncated`, `invalid-spec-name`, `invalid-arguments`,
+`followup-not-found`) reads the same, and with JSON on stdout the parent is left `open`. Any other
+code, or no code, is a failure of unknown cause: say so and stop. Then go to step 13.
+
+**(c) Exactly one `ready`, `in-progress` or `blocked` parent: refuse.** Never resume or nest into
+it. Name it and its status, and print its build command alone on its own line:
 
 ```
-lore record update task/<child> --vault <vault> --unset-parent
+/craft:execute task/<parent>
 ```
 
-printed once per child, then drop the parent, alone on its own line:
+Ask one question, then wait: *Build it with the command above, or drop it? (`drop` and a reason, or
+nothing)*. Warn that a build already running against this parent must be stopped first, since a drop
+un-nests its unfinished children underneath it. `drop` runs the drop flow below; a reason given with
+it is not taken yet, because the flow asks for the reason as its own question. Nothing ends the
+ritual here except the answer: with nothing, go to the marker-removal command and stop.
 
-```
-lore record update task/<parent> --vault <vault> --status dropped
-```
+**The drop flow**, from (a), (b) or (c), for one named parent. A drop un-nests the parent's
+unfinished children and then closes it; every step below waits for its own answer.
 
-Dropping freezes the body, so say that an operator who wants the reason on record appends it in the
-same write instead (`--status dropped --diff`, piping a diff that appends the why-note); the printed
-command carries no note so it runs as pasted.
-- Any other status: name it and print no command.
+1. Run the state read (as in (b), step 1) first. Act on a non-zero exit by the drop table below.
+2. Show what the drop will do, by name from `held`: the children it will **un-nest** (status
+   `open`, `ready`, `in-progress` or `blocked`) and the children it will **keep** nested as the
+   record of finished work (`done`, `dropped`, `superseded`). Say that an un-nested `in-progress`
+   child is not gathered again until its status changes. Name every `in-progress` child, and say its
+   presence is a sign a build may be running against the parent: stop that build before going on.
+3. Ask the reason as its own question: *Why is task/<parent> being dropped? (one line)*. Wait. The
+   reason is never inferred from a bare `drop` or from anything said earlier.
+4. Ask one confirmation that names every child it will un-nest and every child it will keep, and
+   shows the reason after the credential scrub: *Un-nest these, keep those, and drop
+   task/<parent> with this reason? (`yes` or `stop`)*. `stop` ends the run with nothing written.
+5. Stage the reason as one JSON string, never as raw text, through `mktemp` and a quoted heredoc,
+   in the same shell call. JSON escaping keeps the whole reason on one line, so no reason line can
+   equal the delimiter and end the heredoc:
 
-The ritual cannot tell who created a parent, so on every stop also give the way to remove the marker
-label — for a parent the operator did not create, this stops the follow-up gather counting it while
-leaving the record alone — alone on its own line:
+   ```
+   reason=$(mktemp)
+   cat > "$reason" <<'REASON_JSON'
+   "<the reason as one JSON string>"
+   REASON_JSON
+   ${CLAUDE_PLUGIN_ROOT}/scripts/followup_parent.py drop <spec-name> <parent> --reason-file "$reason"
+   ```
+
+   Remove the file afterwards. Print one progress line per child as the result reports it:
+   `un-nested task/<name>` for each in `un-nested`, `kept task/<name> (<status>)` for each in
+   `kept`, `failed <write>: task/<name>` for each in `failed`.
+6. Exit 0 prints `parent`, `un-nested`, `kept`, `failed` (empty), `reset` and `dropped` (true).
+   Report it, then print each `reset[].command` alone on its own line, saying it sets that
+   un-nested `in-progress` child back to `ready` so a later gather sees it; print one only when it
+   starts `lore record update task/` and holds nothing outside letters, digits, `.`, `_`, `/`, `-`,
+   `=` and spaces. Then go to step 13. Exit 1 is a refusal with the vault unchanged; exit 2 is a
+   failure. Act on a code by the first row it matches:
+
+| `reason-code` | What happened, whose side, what to do |
+|---|---|
+| `not-a-followup-parent` | The named record is not a follow-up parent of this spec; the name's. Nothing was written. Rerun the ritual, which names the parent it found. |
+| `parent-not-live` | The parent is already `done`, `dropped` or `superseded`; the vault's. Nothing was written. Nothing is left to drop. |
+| `parent-changed` | The parent's status moved between reading it and the first write, such as a build starting; the vault's. Nothing was written. Look at the parent again before deciding. |
+| `invalid-reason-file` | The reason file was not a regular file holding one non-empty JSON string of at most 4 KiB; this ritual's. Nothing was written. Restage it and rerun the drop. |
+| `drop-incomplete` | An un-nest or the drop write failed; `lore`'s or the vault's. The parent is still live if an un-nest failed. Print each `failed[].command` alone on its own line under the same shape rule as `reset`, or rerun the drop, which skips what is already done. Print each `reset[].command` too. |
+| `invalid-followup-name` | A name failed the safe-name check; the vault's record name. Nothing was written. Rename it, then rerun. |
+
+A code shared with the gather table (as listed under the resume table) reads the same. Any other
+code, or no code, is a failure of unknown cause: say so and stop. Then go to step 13.
+
+The ritual cannot tell who created a parent, so on every branch also give the way to remove the
+marker label, alone on its own line, with the closing output of step 13 (for a parent the operator
+did not create, this stops the follow-up gather counting it while leaving the record alone):
 
 ```
 lore record update task/<parent> --vault <vault> --unset-label craft/followup-parent
 ```
 
-Print no distill command on this stop, whether or not `distilled` is true: distilling waits on the
-parent.
+Print no distill command after any outcome of this step, whether or not `distilled` is true:
+distilling waits on the parent.
 
 ### 8. Confirmation 1 — the chosen set
 
@@ -344,15 +484,16 @@ and remove the file. Act on the exit:
 - **1** — a refusal, with the vault unchanged: stderr has `reason-code:` and a `subject:` line of
   the names at fault. Report it by the table below and go to step 13 as no parent.
 - **2** — a failure. After the parent was created, stdout carries the same JSON with `buildable`
-  false and the reason code on stderr (not in the JSON). Before the create (the checks, or a
-  `parent-create-failed` with no `subject:` line), nothing was written and nothing is on stdout. A
-  `parent-create-failed` with a `subject:` line has no JSON either: the create's outcome was
-  unclear, nothing was undone, and every parent named there is still live, so rerunning this ritual
-  stops at it (step 7). `internal-error` prints no JSON even after the create: the script attempts
-  its undo first, but its report is lost, so say the parent's state is unknown and that rerunning
-  this ritual names any parent the undo left live (step 7). So does a failure with
-  `parent-state: unknown` on stderr and no JSON: the create's outcome was unclear and the check
-  afterwards failed.
+  false and the reason code on stderr (not in the JSON), and the parent is left `open` holding
+  whatever nested: nothing was undone, and the re-run resumes it. This holds for a failed nesting
+  or flip, a failed re-query and an `internal-error` alike. The one exception is
+  `concurrent-followup-parent`, which removes only this run's own parent. Before the create (the
+  checks, or a `parent-create-failed` with no `subject:` line), nothing was written and nothing is
+  on stdout. A `parent-create-failed` with a `subject:` line has no JSON either: the create's
+  outcome was unclear, nothing was undone, and every parent named there is still live, so rerunning
+  this ritual meets it (step 7). So does a failure with `parent-state: unknown` on stderr and no
+  JSON: the create's outcome was unclear and the check afterwards failed, so say the parent's state
+  is unknown and that rerunning the ritual names any parent it left live.
 
 | `reason-code` | What happened, whose side, what to do |
 |---|---|
@@ -362,41 +503,44 @@ and remove the file. Act on the exit:
 | `child-not-eligible` | A child stopped being eligible between the check and now (moved, routed, or no longer ready); the vault's. Nothing was written. Rerun the ritual. |
 | `child-changed` | A child's record changed after you confirmed it; the vault's. Nothing was written. Rerun the ritual so you confirm the new text. |
 | `followup-parent-exists` | A follow-up parent for this spec appeared meanwhile; the vault's. Nothing was written. Rerun, which stops at it. |
-| `concurrent-followup-parent` | A second follow-up parent appeared during assembly; another run's. The new parent was undone. Rerun after the other run settles. |
+| `concurrent-followup-parent` | A second follow-up parent appeared during assembly; another run's. This run's own new parent was removed and nothing else was written. Rerun after the other run settles, which meets the other parent (step 7). |
 | `parent-create-failed` | The parent record could not be created; `lore`'s or the filesystem's. With no `subject:` line, nothing was written. With one, the create's outcome was unclear: nothing was undone, there is no JSON, and every parent named is still live, so a rerun stops at it at step 7. Check `lore vault ls`, then rerun. |
-| `nesting-incomplete` | A child could not be nested or the parent could not be made ready; `lore`'s or the vault's. The run undid what it wrote; read the lists below. |
-| `not-a-followup-parent` | The named record is not a follow-up parent of this spec (no `craft/followup-parent` marker, a spec record, or linked to another spec); the name's. Nothing was written. Name the parent `/craft:tidy-followups` found and rerun. |
-| `parent-not-live` | The parent is already `done`, `dropped` or `superseded`; the vault's. Nothing was written. Nothing is left to drop. |
-| `parent-changed` | The parent's status moved between reading it and the first write, such as a build starting; the vault's. Nothing was written. Look at the parent again before deciding. |
-| `invalid-reason-file` | The reason file was not a regular file holding one non-empty JSON string of at most 4 KiB; this ritual's. Nothing was written. Restage it and rerun. |
-| `drop-incomplete` | An un-nest or the drop write failed; `lore`'s or the vault's. The parent is still live if an un-nest failed. Run the commands in `failed`, or rerun the drop, which skips what is already done. |
-| `parent-not-resumable` | The parent is not `open` (it is `ready`, `in-progress`, `blocked` or no longer live); the vault's. Nothing was written. Nothing is left to resume. |
-| `child-not-listed` | A name in the resume file is not one the parent's body lists without holding; this ritual's. Nothing was written. Resume never adds a follow-up the original run did not list. |
-| `nothing-to-build` | Resuming would leave the parent listing no follow-up (it holds none and none was confirmed); the vault's. Nothing was written. Drop the parent instead. |
+| `nesting-incomplete` | A child could not be nested or the parent could not be made ready; `lore`'s or the vault's. The parent is left being assembled, holding what nested, and nothing was undone; read `failed` below, then rerun, which resumes it (step 7). |
 
 The codes shared with the gather table (`no-vaults`, `spec-not-found`, `spec-ambiguous`,
 `not-a-spec`, `malformed-sidecar`, `empty-sidecar`, `lore-missing`, `lore-timeout`, `lore-failed`,
 `lore-output-not-json`, `search-truncated`, `invalid-spec-name`, `invalid-arguments`,
-`internal-error`) read the same here. After the create, `search-truncated` with JSON on stdout means
-the run undid the parent, and the JSON's `undone` and `undo-failed` say what happened.
+`internal-error`) read the same here. After the create, any of them with JSON on stdout means the
+parent was left `open` holding what nested, and the JSON's `failed` says where.
 
 In the JSON, `failed[].write` is `nest`, `confirm` (written, but the read shows it not nested) or
-`ready` (the parent); `undone[].write` is `un-nest` or `drop`; `nested` is what is still nested when
-the run ends. `undo-failed[]` is an undo that did not land, with the `command` that completes it.
+`ready` (the parent); `nested` is what this run nested. `undone[]` is non-empty only after
+`concurrent-followup-parent` (the removal of this run's own parent), and `undo-failed[]` is that
+removal failing to land, with the `command` that completes it.
 
 ### 13. Closing report
 
 State, each by title and `name`: included; left; left out, with the sentence from step 10; refined
-but not nested (refined and left out at step 10, removed at step 11, or undone after a failure); any
-failed write (`failed`, and any refinement that did not land) naming the write; any undo write
-(`undone`); and any undo command still to run. Run vault text through the `_shared/security.md`
-credential scrub. Print the new parent's `name` when one was created.
+but not nested (refined and left out at step 10, removed at step 11, or left in the parent after a
+failure); any failed write (`failed`, and any refinement that did not land) naming the write; and,
+after a concurrent-parent removal, the removal (`undone`) and any command still to run
+(`undo-failed`). After a step 7 resume or drop, state what its progress lines reported: the
+follow-ups nested, removed from the list, un-nested and kept, and any write that failed. Run vault
+text through the `_shared/security.md` credential scrub. Print the parent's `name` when one was
+created or resumed.
 
-Then the closing commands, each alone on its own line, pasteable unedited. Every vault-sourced value
-in them (the parent name from `parent`, the spec name) is validated against the step 1 shape first;
-one that fails is not printed.
+Then the closing commands, each alone on its own line, pasteable unedited, with no placeholder for
+the operator to fill. Every vault-sourced value in them (the parent name from `parent`, the spec
+name) is validated against the step 1 shape first; one that fails is not printed. Take the first
+case that matches, in this order:
 
-- Buildable and `distilled` false:
+- An `assemble` refused or removed on a live parent (`followup-parent-exists`,
+  `concurrent-followup-parent`): no distill command, since distilling waits on that parent. Print
+  the re-run line below, which meets the parent, and after a `concurrent-followup-parent` with an
+  `undo-failed[].command`, that command alone on its own line, but only one that starts
+  `lore record update task/` and holds nothing outside letters, digits, `.`, `_`, `/`, `-`, `=` and
+  spaces; otherwise name the write and print no command.
+- An `assemble` that ended `buildable` (exit 0) and `distilled` false:
 
 ```
 /craft:execute task/<parent>
@@ -406,18 +550,32 @@ one that fails is not printed.
 /craft:distill spec/<spec-name>
 ```
 
-- Buildable and `distilled` true: the build command only.
-- No parent: the distill command only, or nothing when `distilled` is true.
-- Any failed nesting: no build command. Print each `undo-failed[].command` alone on its own line,
-  but only one that starts `lore record update task/` and holds nothing outside letters, digits,
-  `.`, `_`, `/`, `-`, `=` and spaces; otherwise name the write and print no command. The distill
-  command follows only when every undo landed.
+- An `assemble` that ended `buildable` with `distilled` true, or a `resume` that ended `buildable`:
+  the build command only.
+- A failed nesting or a resumable failure (`nesting-incomplete`, or any other exit 2 with JSON after
+  the create, in assemble or resume): no build command. Print the re-run alone on its own line, so the
+  operator can finish the parent (AC42):
+
+```
+/craft:tidy-followups spec/<spec-name>
+```
+
+- A `drop-incomplete`: each `failed[].command` and `reset[].command` as step 7 prints it, then the
+  re-run line.
+- A completed drop (exit 0 from `drop`): the same re-run line, since the un-nested follow-ups are
+  gathered again only by a fresh gather, and each `reset[].command` as step 7 printed it. No
+  distill command.
+- A failed `assemble` that wrote nothing, or no parent at all: the distill command only, or nothing
+  when `distilled` is true.
 
 ## What this ritual never does
 
 - Write or update any record, label, or status before the operator has confirmed the chosen set, or
   any nesting before the operator has confirmed the scope.
 - Create a second follow-up parent when one already exists for the spec.
+- Nest a follow-up a resumed parent does not list, or resume more than one live parent.
+- Drop a parent before every unfinished child is un-nested, or without the operator's reason and
+  one confirmation naming each child it will un-nest and keep.
 - Run two refinements at once, or let a subagent's reply stand in for what `followup_parent.py
   check` reports.
 - Gather by any means other than the script, or present a set the script did not return whole.

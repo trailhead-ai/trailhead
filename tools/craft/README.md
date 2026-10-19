@@ -114,7 +114,11 @@ partial set. The operator then adjusts and confirms the chosen set; the ritual
 refines each chosen follow-up one at a time, shows each eligible one's scope for
 confirmation, and nests the confirmed ones under one new parent through
 `scripts/followup_parent.py` (`check`, then `assemble`), ending with the commands
-to build and distill. It stops instead when a follow-up parent already exists.
+to build and distill. When a follow-up parent already exists it acts on it instead:
+an `open` parent is resumed (`state`, `check`, then `resume` nests the follow-ups
+it lists and makes it buildable), a `ready`, `in-progress` or `blocked` parent is
+refused with its build command, and a drop (`drop`, from any of these) un-nests the
+parent's unfinished children before closing it, so a later run gathers them again.
 
 **Review:** `/craft:review`
 
