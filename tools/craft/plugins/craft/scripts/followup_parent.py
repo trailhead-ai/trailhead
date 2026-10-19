@@ -6,6 +6,7 @@ under one new parent.
 Usage:
     followup_parent.py check <spec-name> <name>...
     followup_parent.py assemble <spec-name> --children <json-file>
+    followup_parent.py state <spec-name> <parent>
 
 `<spec-name>` is the bare name of a spec record and each `<name>` the bare name
 of a task record. Every name must match `^[A-Za-z0-9._/-]+$`, must not start
@@ -149,6 +150,22 @@ Invariants and security posture:
 - Any unexpected exception exits 2 with `reason-code: internal-error`; one that
   occurs after the create first undoes what the run wrote.
 
+`state` is read-only. It resolves the spec's vault, reads `<parent>` completely and
+refuses with exit 1 `not-a-followup-parent` (vault untouched, a `subject:` line naming
+the parent, nothing on stdout) unless the record is a task carrying
+`craft/followup-parent` and linked to the spec (either side names the other, the
+lookup behind `followup_gather.py`'s `followup-parents`); a spec record named as the
+parent is refused the same way. Any lookup failure exits 2 with the existing reason
+codes. On exit 0 it prints one JSON object:
+- `parent`, `status`: the parent's bare name and status;
+- `listed`: the shape-checked names of the body's `### task/<name>` headings, in body
+  order; `skipped` counts the headings whose name fails the shape check;
+- `held`: `{name, status}` for every task whose `parent` is this one, found in the
+  live `lore task list --json` and each confirmed by a complete read, sorted by name;
+- `unheld`: listed minus held, body order; `unlisted`: held minus listed, sorted.
+`parse_listing(body)` returns `(names, skipped)` and `held_children(runner, vault,
+parent_name)` the `held` list, as importable functions.
+
 `check_followups(runner, spec, names)` is the same check as an importable
 function, returning the structure the JSON carries; `read_revision(runner,
 vault, name)` is the per-record revision read it uses.
@@ -198,10 +215,13 @@ REASON_CODES = frozenset(
         "parent-create-failed",
         "nesting-incomplete",
         "search-truncated",
+        "not-a-followup-parent",
     }
 )
 
-REFUSAL_REASONS = frozenset({"child-not-eligible", "child-changed", "followup-parent-exists"})
+REFUSAL_REASONS = frozenset(
+    {"child-not-eligible", "child-changed", "followup-parent-exists", "not-a-followup-parent"}
+)
 
 LEFT_OUT_REASONS = frozenset(
     {
@@ -224,6 +244,8 @@ PARENT_LABELS = (gather.FOLLOWUP_PARENT_LABEL, gather.SLICE_LABEL)
 _UNRESOLVED_RE = re.compile(r"^## Refine — unresolved[ \t]*$", re.MULTILINE)
 _FIELD_END = r"(?=^\*\*[^*\n]+:\*\*|^#{1,6} |\Z)"
 _BACKTICKED_RE = re.compile(r"`([^`\n]+)`")
+_LISTING_HEADING_RE = re.compile(r"^### task/(.*?)[ \t]*$", re.MULTILINE)
+MAX_STATUS_CHARS = 40
 
 
 class ParentError(Exception):
@@ -621,6 +643,70 @@ def _flip(runner, vault: str, parent_name: str, report: dict) -> None:
         report["failed"].append({"name": parent_name, "write": "ready"})
 
 
+def parse_listing(body: str) -> tuple[list[str], int]:
+    """The shape-checked names of the `### task/<name>` headings `render_body` writes,
+    in body order (a repeated name once), and the count of headings skipped for a
+    name that fails the shape check."""
+    names: list[str] = []
+    skipped = 0
+    for match in _LISTING_HEADING_RE.finditer(body):
+        name = match.group(1)
+        if not gather._shape_ok(name):
+            skipped += 1
+        elif name not in names:
+            names.append(name)
+    return names, skipped
+
+
+def held_children(runner, vault: str, parent_name: str, listing: dict[str, dict] | None = None) -> list[dict]:
+    """`{name, status}` of every task whose `parent` is `parent_name`, sorted by name:
+    the candidates come from the live `lore task list --json` (`listing`, when the
+    caller already loaded it) and each is confirmed by a complete read."""
+    if listing is None:
+        g = gather._Gatherer(runner, vault, gather.vault_path(runner, vault))
+        g.load_listing()
+        listing = g.listing
+    held = []
+    for name in sorted(n for n, item in listing.items() if item.get("parent") == parent_name):
+        sidecar = _read_task(runner, vault, name)[0]
+        if sidecar.get("parent") == parent_name:
+            held.append({"name": name, "status": gather.sanitize_text(str(sidecar["status"]), MAX_STATUS_CHARS)})
+    return held
+
+
+def parent_state(runner, spec: str, parent_name: str) -> dict:
+    """What the follow-up parent `parent_name` of `spec` lists and what it holds.
+    Read-only. Raises ParentError `not-a-followup-parent` unless the record is a task
+    carrying the marker and linked to the spec."""
+    if not gather._shape_ok(spec):
+        raise ParentError("invalid-spec-name")
+    if not gather._shape_ok(parent_name):
+        raise ParentError("invalid-followup-name")
+    vault, spec_sidecar = gather.resolve_spec(runner, spec)
+    not_a_parent = ParentError("not-a-followup-parent", (parent_name,))
+    if gather._show(runner, vault, f"spec/{parent_name}") is not None:
+        raise not_a_parent
+    sidecar, body, _ = _read_task(runner, vault, parent_name)
+    if gather.FOLLOWUP_PARENT_LABEL not in gather._labels(sidecar):
+        raise not_a_parent
+    g = gather._Gatherer(runner, vault, gather.vault_path(runner, vault))
+    g.load_listing()
+    if parent_name not in g.spec_linked(spec, spec_sidecar):
+        raise not_a_parent
+    listed, skipped = parse_listing(body)
+    held = held_children(runner, vault, parent_name, g.listing)
+    held_names = {item["name"] for item in held}
+    return {
+        "parent": parent_name,
+        "status": gather.sanitize_text(str(sidecar["status"]), MAX_STATUS_CHARS),
+        "listed": listed,
+        "held": held,
+        "unheld": [n for n in listed if n not in held_names],
+        "unlisted": sorted(held_names - set(listed)),
+        "skipped": skipped,
+    }
+
+
 def _refuse(code: int, reason: str, subjects: tuple = (), state_unknown: bool = False) -> int:
     assert reason in REASON_CODES, reason
     print(f"reason-code: {reason}", file=sys.stderr)
@@ -643,6 +729,9 @@ def main(argv: list[str] | None = None, runner=None, today: datetime.date | None
         build = commands.add_parser("assemble", help="nest confirmed follow-ups under one new parent")
         build.add_argument("spec_name", help="bare spec record name (the part after spec/)")
         build.add_argument("--children", required=True, help="JSON file: a list of {name, reason, revision}")
+        state = commands.add_parser("state", help="report what a follow-up parent lists and holds")
+        state.add_argument("spec_name", help="bare spec record name (the part after spec/)")
+        state.add_argument("parent", help="bare name of the follow-up parent task")
         runner = runner or lore_runner
         reason = None
         subjects: tuple = ()
@@ -650,6 +739,8 @@ def main(argv: list[str] | None = None, runner=None, today: datetime.date | None
             args = parser.parse_args(argv)
             if args.command == "check":
                 result = check_followups(runner, args.spec_name, args.names)
+            elif args.command == "state":
+                result = parent_state(runner, args.spec_name, args.parent)
             else:
                 if not gather._shape_ok(args.spec_name):
                     raise ParentError("invalid-spec-name")
