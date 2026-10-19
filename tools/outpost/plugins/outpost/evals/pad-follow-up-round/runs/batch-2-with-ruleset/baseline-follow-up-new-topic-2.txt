@@ -1,0 +1,13 @@
+Noted for the audit log: filters go in a left rail, and the rail collapses. Option C is out.
+
+For invoice status, I drew the three options on a new pad:
+
+file://<runs>/run-8/xdg-state/outpost/pads/invoice-status/index.html
+
+- **A, coloured dot before the number:** this is the most compact, but colour is the only thing showing the status. People need a legend or tooltip to read it, and colour-blind users can't tell the dots apart unless you add text.
+- **B, text badge at the end of the row:** this is my recommendation. "Overdue", "Paid" and "Draft" can be read without a legend and work for everyone. The costs are a column of width, and the badge sits at the far end of the row from the invoice number.
+- **C, thin strip along the left edge:** this is the quickest to scan down a long list and takes no width. But like the dot, it shows status by colour only, and it's easy to miss on a single row.
+
+If scanning matters a lot, you could use C with B: the strip makes overdue rows stand out and the badge says what the status is. If you build only one, build B.
+
+**Which one should you build: A, B or C?** You can choose on the pad and paste back its reply, or just answer here.

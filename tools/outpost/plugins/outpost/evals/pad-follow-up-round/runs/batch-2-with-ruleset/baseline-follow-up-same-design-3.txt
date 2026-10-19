@@ -1,0 +1,15 @@
+I've noted the filters decision: a left rail that collapses.
+
+I sketched the three entry styles on a new pad called **Audit log entries**:
+
+file://<runs>/run-10/xdg-state/outpost/pads/audit-entries/index.html
+
+**Which entry style should you build?** I recommend **A, a single line per entry**:
+
+- **A: Single line.** This is the densest option, at roughly 30 or more entries per screen. Time, actor, action, target and result each sit in their own column, so admins can run their eyes straight down one of them. Long details get cut off, so add a way to see them: clicking a row could expand it in place, or open a detail pane on the right. That pane would share the right edge with nothing, since the filters now sit on the left.
+- **B: Two lines, with details under the summary.** You see the details without clicking, but only about half as many entries fit on a screen. The extra line also breaks up the columns people scan down.
+- **C: Card.** Each entry is the easiest to read on its own, but only a few fit on a screen and nothing lines up from one entry to the next. That makes it the slowest to scan when there are hundreds.
+
+Since admins scan hundreds of entries at once, density and lined-up columns matter most. Whichever you choose, I'd make failed or denied results stand out with a colored tag so they're easy to spot while scanning.
+
+Which do you want? You can pick on the pad and paste its reply back here, or just tell me in words.

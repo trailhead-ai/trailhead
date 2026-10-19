@@ -991,3 +991,116 @@ meets its verdict in 3/3; on the authoring-error reading every gated scenario me
 line itself is unmeasured against baseline either way. **Operator decision (2026-10-19):
 PASS** — the operator reviewed the committed runs and accepted the authoring-error reading
 ("everything looks good"). `expected.md` keeps its registered verdict.
+
+## Case: pad-follow-up-round
+
+`plugins/outpost/evals/pad-follow-up-round/` — two briefs over a self-contained run directory
+holding a pad already open (`audit-filters`, one round, built by the real `scratch_pad.py`), and
+`expected.md` carrying the criteria and pass condition, committed before any arm was run.
+
+**Under test:** the scratch-pad skill's description of rounds: that a follow-up visual question
+on the same design goes to the user's open pad with `--add`, that the new round's `settled` list
+names what the earlier round settled, that the user is told to open the link again, and that a
+different topic gets its own pad. Treatment is the live skill; baseline is the skill at
+`5512014a` (`arms/baseline-SKILL.md`). The script, kit, ruleset and brief are identical in both
+arms; only the skill's text differs.
+
+| Date | Arm | Runs | Result | Notes |
+|------|-----|------|--------|-------|
+| 2026-10-19 | batch 1, no ruleset (both arms) | 12 | authoring error; not graded against the pass condition | 10 of 12 sessions never reached for a pad |
+| 2026-10-19 | batch 2, treatment (live skill) | 6 | same design **3/3** on C1-C4; new topic **3/3** on N1-N3 | |
+| 2026-10-19 | batch 2, baseline (skill at `5512014a`) | 6 | same design **0/3** on C1-C3 (C4 3/3); new topic **3/3** on N1-N3 | a new pad each time instead of a round |
+
+**Runner.** Claude Code 2.1.303, `claude-opus-5-5`, `run-arm.sh` per run inside
+`scripts/eval-sandbox` (`--setting-sources project`, `--plugin-dir` on the run's plugin copy,
+`--allowedTools Bash,Read,Write,Edit,Skill`, per-run `TMPDIR`, other runs denied via `DENY_EXTRA`),
+4 runs in parallel, 3 runs per arm and variant. Before the batches the real
+`scratch_pad.py --add` was run through the sandbox against a built fixture: exit 0, a `round-2/`
+in the same pad.
+
+**Batch 1 — authoring error.** Both arms ran with the operating brief alone, no `rules.md`. The
+ruleset's "Scratch pads" section is what makes a session draw a pad unasked; without it, 10 of 12
+sessions answered in words and offered to open a pad (the two exceptions: treatment same-design
+run 1 added the round, baseline new-topic run 2 made a new pad). Graded as registered, the
+treatment arm would have failed (new topic 0/3 on N1, same design 1/3), but that measured the
+absence of the trigger, not the skill's text. The case's arms were changed to carry the live
+`rules.md` (pinned by a test) and the grader's "asked in words" test was loosened after hand-reading
+two messages it had scored against what they said; criteria and pass condition are unchanged. The
+batch's graded runs are kept in `runs/batch-1-without-ruleset/` (graded with the loosened grader).
+
+**Batch 2, per criterion** (graded from each run's pad tree and final message, finished runs only;
+every treatment final message and one baseline message per variant hand-read against the grader):
+
+| Criterion (same design) | Treatment | Baseline |
+|---|---|---|
+| C1 round added to the same pad with `--add` | 3/3 | 0/3 |
+| C2 `settled` names the earlier answer | 3/3 | 0/3 |
+| C3 told to open the link again | 3/3 | 0/3 |
+| C4 asked in words | 3/3 | 3/3 |
+
+| Criterion (new topic) | Treatment | Baseline |
+|---|---|---|
+| N1 a new pad under its own name | 3/3 | 3/3 |
+| N2 `audit-filters` unchanged | 3/3 | 3/3 |
+| N3 asked in words | 3/3 | 3/3 |
+
+What the runs did. Treatment, same design: the Skill, one round file, `--add` on `audit-filters`;
+every `settled` list is "Filters: A, left rail, and it must collapse" (or close); the message
+says the new round is ready, that the link is the same, and that an open tab will not show it;
+the choice among single line, two lines and card is put in words with the pad as the alternative.
+Baseline, same design: each of the three drew a second pad (`audit-entries`, `audit-rows`) beside
+the first and never mentioned the first pad's round, a `settled` list or reopening a link. New
+topic: all six drew `invoice-status` as a new pad and left `audit-filters` at one round.
+Several runs first wrote their round file under `/tmp`, which the sandbox refused, and
+rewrote it under their `TMPDIR`; treatment same-design run 1 also ran `--add` once against the
+missing file before that, which changed nothing (the pad has exactly two rounds).
+
+**Fixture-vocabulary leak check.** The briefs hold none of the skill's worked example (settings
+page, header, "Split header", "Stacked header", sign-in, logo, avatar) and none of its phrases
+(`--add`, settled, title, "open the link again", "new round"); `grep -niE
+"settings|header|split|stacked|sign in|avatar|logo|--add|settled|open the link|again|title|new
+round|round 2"` over both briefs returns nothing, the one occurrence of "round" being the pasted
+reply's `"round": 1` as the kit writes it. The two briefs share a shape and differ only in whether the
+new question concerns the same design, so a policy of always adding or never adding fails one
+variant. The treatment runs' wording ("won't show the new round", "same link") comes from the
+skill they loaded, which is what is under test.
+
+**Real-state check** (before = before batch 1; after = after batch 2; listing method: `shasum`
+over every file under `~/.config/{lore,camp,outpost}`, `ls -la` of `~/.local/state/outpost/pads`,
+and `git rev-parse HEAD` plus `git status --porcelain` for each directory under
+`~/.local/state/lore/vaults`):
+
+- `~/.config/lore`: unchanged
+- `~/.config/camp`: unchanged
+- `~/.config/outpost`: unchanged
+- `~/.local/state/outpost/pads`: unchanged (absent before and after)
+- `~/.local/state/lore/vaults/trailhead`, `lake-in-the-woods`: unchanged
+- `~/.local/state/lore/vaults/default`: changed — HEAD `100cd28d` to `f52d46b8`, two commits ("session:
+  flush …", "lore: andromeda published 13 item(s)") by the user's lore sync and another session,
+  not from this batch (the arms could not read or write under the home directory)
+- `~/.local/state/lore/vaults/levr`: changed — HEAD `de2a60d1` to `ae9cbd72` after `lore: … published`
+  sync commits from hosts `andromeda` and `toms-macbook-pro`, and two uncommitted entries at the
+  time of the second snapshot, not from this batch (same reason)
+
+Every pad the runs built is under its run directory's `xdg-state/outpost/pads`.
+
+**Captures** — `runs/batch-*/`: per run, the final message (`.txt`), exit code (`.exit`) and the
+graded evidence (`.tree.txt`: pads found, rounds in `audit-filters`, the session's `scratch_pad.py`
+commands, its tool calls, the decoded `settled` list and each criterion), paths rewritten to
+`<runs>`, `<repo>`, `<tmp>` and `~`. The raw stream-json captures are not committed. The credential
+scan (`capture_scan.py`) over the committed `runs/` tree reports 0 findings; over the raw captures
+it flags the encrypted thinking-signature blobs, which are not credentials and stay uncommitted.
+
+**Limitations.** Two scenarios, three runs per arm and variant, one model tier, single-turn
+`claude -p` with the earlier turn simulated by a transcript excerpt and an already-built pad. Pad
+outside a camp workspace only: the workspace publisher, the "not confirmed" note and the refusals
+(does not exist, can't take another round, another session is adding, duplicate title, `settled`)
+are not exercised. The ruleset reaches each arm through `--append-system-prompt`, which may weigh
+more than an installed rules file. No PreToolUse hook. The baseline's second pads on the same
+design show the skill's earlier text gives no cue to add a round; they do not show how a session
+with no skill would act.
+
+**Verdict — PASS against `expected.md`.** Treatment meets C1-C4 in 3/3 same-design runs and N1-N3
+in 3/3 new-topic runs. The baseline-versus-treatment gap (0/3 against 3/3 on C1-C3) is the skill
+text's measured effect; the new-topic variant, which both arms pass, shows the added text does not
+make a session add a round to the pad when the topic is different.

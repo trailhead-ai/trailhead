@@ -1,0 +1,15 @@
+Noted on the audit log: the filters go in a left rail that collapses.
+
+The invoice status question is a different topic, so I opened a new pad for it instead of adding to audit-filters:
+
+file://<runs>/run-3/xdg-state/outpost/pads/invoice-status/index.html
+
+It sketches all three options on a pair of sample invoice rows:
+
+- **A. Coloured dot before the number:** small and quiet. But colour is the only signal, so people need a tooltip or legend, and it fails for colour-blind users.
+- **B. Text badge at the end of the row (my pick):** shows "Paid" or "Overdue" in words, so it reads without colour and is easy to scan for. It costs some width at the end of the row.
+- **C. Thin strip along the left edge:** adds no width and stands out when you look down the list. Colour is again the only signal, and on a single row it's easy to miss.
+
+**I'd build B.** If you like how the strip looks at a glance, B can carry a strip as well: the strip gives a quick read down the list and the badge carries the meaning.
+
+So which one do you want: A, B or C? You can answer in words, or pick on the pad, press "Copy reply" and paste it here.

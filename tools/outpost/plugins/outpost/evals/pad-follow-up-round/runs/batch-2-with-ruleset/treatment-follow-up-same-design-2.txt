@@ -1,0 +1,13 @@
+Noted: the filters go in a left rail that collapses.
+
+I've added this question to your audit-filters pad as round 2. Your open tab won't pick it up, so open the link again:
+
+file://<runs>/run-5/xdg-state/outpost/pads/audit-filters/index.html
+
+**My recommendation is A, one line per entry.** Admins scanning hundreds of entries need as many rows on screen as possible, with columns lined up so they can run their eye down actor, action or result. Here's how the three options compare:
+
+- **A: single line.** This fits the most entries on screen, about three times as many as cards. The cost is that details like IP, request ID and before/after values need a click to see, either by expanding the row in place or in a side panel. Long values also get cut off.
+- **B: two lines, details underneath.** Details show without a click, but you get roughly half as many entries per screen, and the second line gets in the way when scanning. One middle path: build A and let admins expand a single row into B's two-line layout when they need it.
+- **C: card per entry.** Each entry is easy to read on its own, but this fits the fewest per screen, and without lined-up columns it's hard to scan down or compare entries. I'd avoid it for this use.
+
+So which do you want: A, B or C? You can pick in the pad and paste its reply back here, or just answer in words.

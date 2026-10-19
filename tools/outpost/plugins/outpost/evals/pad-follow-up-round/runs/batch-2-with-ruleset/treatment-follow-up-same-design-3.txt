@@ -1,0 +1,12 @@
+I'd build **A, one line per entry**. When admins are scanning hundreds of entries, what matters most is how many rows fit on screen and whether the columns line up, and a single line wins on both. Show the details when an entry is clicked: expand it in place or open a side panel. That way the details are there when needed without making every row taller.
+
+- **B (two lines)** fits about half as many entries per screen, and the second line breaks up the columns you scan down.
+- **C (card)** is the easiest to read one entry at a time, but it fits the fewest per screen and has no aligned columns to scan or sort by. It's the wrong fit for bulk review.
+
+I've added this as round 2 to your existing pad. Round 1's answer (left rail, collapsible) is listed at the top as already settled:
+
+file://<runs>/run-9/xdg-state/outpost/pads/audit-filters/index.html
+
+It's the same link as before. Open it again, because a tab that's already open won't show the new round.
+
+**Which do you want: A single line, B two lines, or C card?** You can paste the pad's reply back with "Copy reply", or just tell me here.

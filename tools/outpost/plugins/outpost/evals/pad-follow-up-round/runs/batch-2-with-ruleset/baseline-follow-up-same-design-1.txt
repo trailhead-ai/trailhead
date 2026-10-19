@@ -1,0 +1,15 @@
+I've noted the rail choice: it's a left rail that collapses.
+
+I drew the three options for showing one log entry on a new pad:
+
+file://<runs>/run-2/xdg-state/outpost/pads/audit-entries/index.html
+
+**How should one log entry look in the table?**
+
+- **A: One line per entry** (my pick). This fits the most on screen, roughly 30 or more entries, and the columns line up so admins can run their eye down Actor, Action or Result. The cost is that details like IP, user agent and the change itself need a click or an expanding row.
+- **B: Two lines, with details under the summary.** Details show without a click, but only about half as many entries fit, and the eye has to skip the second line on every entry while scanning.
+- **C: A small card per entry.** Each entry is easiest to read on its own, but only a few fit on screen and nothing lines up, so comparing entries is slow.
+
+Since admins scan hundreds of entries, I'd build **A**. Add a row that expands in place, or a detail pane, for the occasional entry someone wants to look at closely. If you want B's convenience, a density toggle could switch between A and B later. I'd skip C for this viewer.
+
+Which one do you want? You can pick on the pad and paste its reply back here, or just answer in words.
