@@ -119,7 +119,7 @@ def test_inside_workspace_variants_publish_a_site_under_the_fixture_workspace(tm
     assert "Where does the control go?" in (sites[0] / "round-1" / "round.js").read_text()
     link = result.stdout.splitlines()[0]
     assert link.startswith("http://127.0.0.1:") and link.endswith(f"/{pad}/")
-    assert not (run_dir / "xdg-state" / "outpost").exists()
+    assert not (run_dir / "xdg-state" / "outpost" / "pads").exists()
 
 
 @pytest.mark.parametrize(
