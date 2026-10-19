@@ -7,6 +7,7 @@ Usage:
     followup_parent.py check <spec-name> <name>...
     followup_parent.py assemble <spec-name> --children <json-file>
     followup_parent.py state <spec-name> <parent>
+    followup_parent.py drop <spec-name> <parent> --reason-file <path>
 
 `<spec-name>` is the bare name of a spec record and each `<name>` the bare name
 of a task record. Every name must match `^[A-Za-z0-9._/-]+$`, must not start
@@ -166,6 +167,39 @@ codes. On exit 0 it prints one JSON object:
 `parse_listing(body)` returns `(names, skipped)` and `held_children(runner, vault,
 parent_name)` the `held` list, as importable functions.
 
+`drop` un-nests the unfinished children of a live follow-up parent and then drops it.
+`--reason-file` is a regular, non-symlink file of at most MAX_REASON_FILE_BYTES holding
+one JSON string; anything else, or a reason empty once sanitized, is
+`invalid-reason-file` (exit 2, nothing written). The reason is folded to one line,
+stripped of control and invisible format characters, cut to MAX_REASON_CHARS and
+credential-redacted before it is appended to the parent as a `## Dropped` section.
+Refusals before any write exit 1 with a `subject:` line: `not-a-followup-parent` (as
+`state` decides) and `parent-not-live` (status `done`, `dropped` or `superseded`). The
+parent's status is re-read immediately before the first write; one that differs from
+what `state` reported is `parent-changed` (exit 1, nothing written), such as a build
+that started meanwhile. Each held child whose status is `open`, `ready`, `in-progress`
+or `blocked` is un-nested in name order (`--unset-parent`, then a complete read
+confirming it has no parent); its sidecar is re-read immediately before, and a child no
+longer under this parent is skipped and reported in `kept`. A `done`, `dropped` or
+`superseded` child stays nested and is in `kept`. Only when every un-nest is confirmed
+is the parent dropped (`--status dropped --diff`, confirmed by a complete read). A
+failed un-nest leaves the parent live; either failure is exit 2 `drop-incomplete`, and
+running `drop` again completes it. Stdout JSON on exit 0 and on every `drop-incomplete`:
+- `parent`: the parent's bare name;
+- `un-nested`: the children confirmed free, in the order done;
+- `kept`: `{name, status}` per child left nested;
+- `failed`: `{name, write, command}` per failed write: `un-nest`, or `drop` (name is the
+  parent). `command` is the exact `lore` command that completes it, built only from
+  shape-checked names; the drop command carries no reason;
+- `reset`: `{name, command}` per un-nested child that was `in-progress`; the command
+  sets it back to `ready`, since gathering never sees an `in-progress` follow-up;
+- `dropped`: true only on exit 0.
+
+`un_nest_and_drop(runner, vault, parent_name, children, note,
+drop_after_failed_un_nest=False)` is the one un-nest-then-drop implementation, an
+importable function: `drop` and `assemble`'s undo both run on it. `children` are bare
+names, un-nested in the order given; `note` is the paragraph written under `## Dropped`.
+
 `check_followups(runner, spec, names)` is the same check as an importable
 function, returning the structure the JSON carries; `read_revision(runner,
 vault, name)` is the per-record revision read it uses.
@@ -177,7 +211,9 @@ import argparse
 import datetime
 import difflib
 import json
+import os
 import re
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -216,11 +252,22 @@ REASON_CODES = frozenset(
         "nesting-incomplete",
         "search-truncated",
         "not-a-followup-parent",
+        "parent-not-live",
+        "parent-changed",
+        "invalid-reason-file",
+        "drop-incomplete",
     }
 )
 
 REFUSAL_REASONS = frozenset(
-    {"child-not-eligible", "child-changed", "followup-parent-exists", "not-a-followup-parent"}
+    {
+        "child-not-eligible",
+        "child-changed",
+        "followup-parent-exists",
+        "not-a-followup-parent",
+        "parent-not-live",
+        "parent-changed",
+    }
 )
 
 LEFT_OUT_REASONS = frozenset(
@@ -246,6 +293,9 @@ _FIELD_END = r"(?=^\*\*[^*\n]+:\*\*|^#{1,6} |\Z)"
 _BACKTICKED_RE = re.compile(r"`([^`\n]+)`")
 _LISTING_HEADING_RE = re.compile(r"^### task/(.*?)[ \t]*$", re.MULTILINE)
 MAX_STATUS_CHARS = 40
+MAX_REASON_FILE_BYTES = 4096
+UNFINISHED_STATUSES = frozenset({"open", "ready", "in-progress", "blocked"})
+NOT_LIVE_STATUSES = frozenset({"done", "dropped", "superseded"})
 
 
 class ParentError(Exception):
@@ -522,37 +572,77 @@ def _command(argv: list[str]) -> str:
     return " ".join(["lore", *argv])
 
 
-def _undo(runner, vault: str, parent_name: str, attempted: list[str], reason: str, report: dict) -> None:
-    for name in reversed(attempted):
+def un_nest_and_drop(
+    runner,
+    vault: str,
+    parent_name: str,
+    children: list[str],
+    note: str,
+    drop_after_failed_un_nest: bool = False,
+) -> dict:
+    """The one un-nest-then-drop implementation. Un-nests each of `children` in the
+    order given, then drops `parent_name` with `note` appended as a `## Dropped`
+    section (the why-note rides the same `--status dropped --diff` write, because
+    `dropped` freezes the body). Each child's sidecar is re-read immediately before
+    its un-nest: one no longer under this parent is left alone and reported in
+    `kept`, and a read that fails is a failed write, never a guess. Every write is
+    confirmed by a complete read. The parent is dropped only when every un-nest is
+    confirmed, unless `drop_after_failed_un_nest`. Returns `un-nested`, `kept`
+    (`{name, status}`), `failed` (`{name, write, command}`, `command` the exact
+    `lore` command that completes the write, carrying no note), `reset` (`{name,
+    command}` for each un-nested child that was `in-progress`) and `dropped`."""
+    report: dict = {"un-nested": [], "kept": [], "failed": [], "reset": [], "dropped": False}
+    for name in children:
         argv = _update(vault, name, "--unset-parent")
+        failure = {"name": name, "write": "un-nest", "command": _command(argv)}
         try:
-            current = _read_task(runner, vault, name)[0].get("parent")
+            sidecar = _read_task(runner, vault, name)[0]
         except (ParentError, gather.GatherError):
-            report["undo-failed"].append({"name": name, "write": "un-nest", "command": _command(argv)})
+            report["failed"].append(failure)
             continue
-        if current != parent_name:
+        status = gather.sanitize_text(str(sidecar["status"]), MAX_STATUS_CHARS)
+        if sidecar.get("parent") != parent_name:
+            report["kept"].append({"name": name, "status": status})
             continue
         _write(runner, argv)
         if _read_ok(lambda: not _read_task(runner, vault, name)[0].get("parent")):
-            report["undone"].append({"name": name, "write": "un-nest"})
+            report["un-nested"].append(name)
+            if status == "in-progress":
+                command = _command(_update(vault, name, "--status", "ready"))
+                report["reset"].append({"name": name, "command": command})
         else:
-            report["undo-failed"].append({"name": name, "write": "un-nest", "command": _command(argv)})
+            report["failed"].append(failure)
+    if report["failed"] and not drop_after_failed_un_nest:
+        return report
 
-    dropped = False
     try:
         old = _read_task(runner, vault, parent_name)[1]
     except (ParentError, gather.GatherError):
         old = None
     if old is not None:
-        new = old.rstrip("\n") + f"\n\n## Dropped\n\nAssembly undone: {reason}.\n"
+        new = old.rstrip("\n") + f"\n\n## Dropped\n\n{note}\n"
         diff = "".join(difflib.unified_diff(old.splitlines(True), new.splitlines(True), "a", "b"))
         _write(runner, _update(vault, parent_name, "--status", "dropped", "--diff"), stdin=diff)
-        dropped = _read_ok(lambda: _read_task(runner, vault, parent_name)[0]["status"] == "dropped")
-    if dropped:
-        report["undone"].append({"name": parent_name, "write": "drop"})
-    else:
+        report["dropped"] = _read_ok(lambda: _read_task(runner, vault, parent_name)[0]["status"] == "dropped")
+    if not report["dropped"]:
         command = _command(_update(vault, parent_name, "--status", "dropped"))
-        report["undo-failed"].append({"name": parent_name, "write": "drop", "command": command})
+        report["failed"].append({"name": parent_name, "write": "drop", "command": command})
+    return report
+
+
+def _undo(runner, vault: str, parent_name: str, attempted: list[str], reason: str, report: dict) -> None:
+    done = un_nest_and_drop(
+        runner,
+        vault,
+        parent_name,
+        list(reversed(attempted)),
+        f"Assembly undone: {reason}.",
+        drop_after_failed_un_nest=True,
+    )
+    report["undone"].extend({"name": name, "write": "un-nest"} for name in done["un-nested"])
+    if done["dropped"]:
+        report["undone"].append({"name": parent_name, "write": "drop"})
+    report["undo-failed"].extend(done["failed"])
 
 
 def assemble(runner, spec: str, children: list[dict], today: datetime.date) -> tuple[dict, str | None, tuple]:
@@ -707,6 +797,63 @@ def parent_state(runner, spec: str, parent_name: str) -> dict:
     }
 
 
+def load_reason(path: str) -> str:
+    """The drop reason: the one JSON string in the regular, non-symlink file at
+    `path`, at most MAX_REASON_FILE_BYTES long, sanitized to one line and cut to
+    MAX_REASON_CHARS. A file that is anything else, or whose reason is empty once
+    sanitized, is `invalid-reason-file`."""
+    invalid = ParentError("invalid-reason-file")
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError:
+        raise invalid from None
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise invalid
+        with os.fdopen(fd, "rb", closefd=False) as handle:
+            raw = handle.read(MAX_REASON_FILE_BYTES + 1)
+        if len(raw) > MAX_REASON_FILE_BYTES:
+            raise invalid
+        doc = json.loads(raw.decode("utf-8"))
+    except (OSError, ValueError):
+        raise invalid from None
+    finally:
+        os.close(fd)
+    if not isinstance(doc, str):
+        raise invalid
+    reason = _one_line(doc, MAX_REASON_CHARS)
+    if not reason:
+        raise invalid
+    return reason
+
+
+def drop_parent(runner, spec: str, parent_name: str, reason: str) -> tuple[dict, str | None, tuple]:
+    """Un-nest every unfinished child of the live follow-up parent `parent_name`,
+    then drop it with the sanitized `reason`. Raises ParentError for a refusal, before
+    anything is written. Otherwise returns (report, reason-code, subjects): the code is
+    None when the parent is dropped."""
+    state = parent_state(runner, spec, parent_name)
+    if state["status"] in NOT_LIVE_STATUSES:
+        raise ParentError("parent-not-live", (parent_name,))
+    vault, _ = gather.resolve_spec(runner, spec)
+    current = gather.sanitize_text(str(_read_task(runner, vault, parent_name)[0]["status"]), MAX_STATUS_CHARS)
+    if current != state["status"]:
+        raise ParentError("parent-changed", (parent_name,))
+    held = state["held"]
+    unfinished = [item["name"] for item in held if item["status"] in UNFINISHED_STATUSES]
+    done = un_nest_and_drop(runner, vault, parent_name, unfinished, reason)
+    kept = [item for item in held if item["status"] not in UNFINISHED_STATUSES] + done["kept"]
+    report = {
+        "parent": parent_name,
+        "un-nested": done["un-nested"],
+        "kept": sorted(kept, key=lambda item: item["name"]),
+        "failed": done["failed"],
+        "reset": done["reset"],
+        "dropped": done["dropped"],
+    }
+    return report, (None if done["dropped"] and not done["failed"] else "drop-incomplete"), (parent_name,)
+
+
 def _refuse(code: int, reason: str, subjects: tuple = (), state_unknown: bool = False) -> int:
     assert reason in REASON_CODES, reason
     print(f"reason-code: {reason}", file=sys.stderr)
@@ -732,6 +879,10 @@ def main(argv: list[str] | None = None, runner=None, today: datetime.date | None
         state = commands.add_parser("state", help="report what a follow-up parent lists and holds")
         state.add_argument("spec_name", help="bare spec record name (the part after spec/)")
         state.add_argument("parent", help="bare name of the follow-up parent task")
+        drop = commands.add_parser("drop", help="un-nest a parent's unfinished children, then drop it")
+        drop.add_argument("spec_name", help="bare spec record name (the part after spec/)")
+        drop.add_argument("parent", help="bare name of the follow-up parent task")
+        drop.add_argument("--reason-file", required=True, help="JSON file holding one string: why it is dropped")
         runner = runner or lore_runner
         reason = None
         subjects: tuple = ()
@@ -741,6 +892,13 @@ def main(argv: list[str] | None = None, runner=None, today: datetime.date | None
                 result = check_followups(runner, args.spec_name, args.names)
             elif args.command == "state":
                 result = parent_state(runner, args.spec_name, args.parent)
+            elif args.command == "drop":
+                if not gather._shape_ok(args.spec_name):
+                    raise ParentError("invalid-spec-name")
+                if not gather._shape_ok(args.parent):
+                    raise ParentError("invalid-followup-name")
+                note = load_reason(args.reason_file)
+                result, reason, subjects = drop_parent(runner, args.spec_name, args.parent, note)
             else:
                 if not gather._shape_ok(args.spec_name):
                     raise ParentError("invalid-spec-name")
