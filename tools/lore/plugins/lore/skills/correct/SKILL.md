@@ -107,7 +107,9 @@ phrased. "Small tweak" and "completely wrong" are both just wording; read the ch
 
 **A security control is never classified by you alone.** A change to a value that sets one (a
 limit, a lifetime, an allowlist, an auth mode) is listed for the operator to decide. It stays out
-of any route that proceeds without a further yes.
+of any route that proceeds without a further yes. That yes is owed before anything takes effect: an
+amend, a plain update, or a decision's supersession. Drafting a successor spec as a `draft`, which
+changes nothing in force until it passes the gauntlet, is not held for it.
 
 **A borderline call is asked, once.** A change is borderline when it honestly fits an item on each
 list and the record itself does not settle which reading holds. A change one list names plainly is
