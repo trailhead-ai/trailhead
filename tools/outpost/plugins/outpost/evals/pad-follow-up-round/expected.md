@@ -4,6 +4,22 @@ Pre-registered before any arm is run: this file is committed before the first ru
 is built. The verdicts below were written against the skill's branches, not against what a run
 produced.
 
+**Revised after batch 1 (2026-10-19, commit `f15e8fe7`).** The file as first committed (`dd40bedd`)
+differed as follows, so the criteria below are not exactly the pre-registered ones:
+
+- **C4** read "the final message names the three row styles in words and puts the choice to the
+  user"; **N3** read "the final message names the three status styles and puts the choice". Both
+  now read "names at least two of the ... styles in words and invites the user to choose, in words
+  or on the pad".
+- The "Arms" paragraph described both arms as running without `rules.md`; it now says both carry
+  the live `rules.md`. A sentence was also added to Limitations.
+- The Pass condition section is byte-identical across the revision.
+
+The rewording, and the matching widening of `grade-run.py`'s `_asks_in_words`, were made after
+seeing batch 1 runs and are post-hoc. They did not decide the verdict: re-graded under the old
+and the new rule, all 12 batch 2 finals score the same (0 flips, every treatment final contains
+`?`). See `MANUAL-EVAL.md`, "Case: pad-follow-up-round".
+
 ## What is under test
 
 The **`scratch-pad` skill** (`tools/outpost/plugins/outpost/skills/scratch-pad/SKILL.md`) as it

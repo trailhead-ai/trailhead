@@ -996,7 +996,8 @@ PASS** — the operator reviewed the committed runs and accepted the authoring-e
 
 `plugins/outpost/evals/pad-follow-up-round/` — two briefs over a self-contained run directory
 holding a pad already open (`audit-filters`, one round, built by the real `scratch_pad.py`), and
-`expected.md` carrying the criteria and pass condition, committed before any arm was run.
+`expected.md` carrying the criteria and pass condition, committed before any arm was run and
+revised once afterwards (see Batch 1 below: the C4/N3 wording and the Arms paragraph changed).
 
 **Under test:** the scratch-pad skill's description of rounds: that a follow-up visual question
 on the same design goes to the user's open pad with `--add`, that the new round's `settled` list
@@ -1025,8 +1026,25 @@ run 1 added the round, baseline new-topic run 2 made a new pad). Graded as regis
 treatment arm would have failed (new topic 0/3 on N1, same design 1/3), but that measured the
 absence of the trigger, not the skill's text. The case's arms were changed to carry the live
 `rules.md` (pinned by a test) and the grader's "asked in words" test was loosened after hand-reading
-two messages it had scored against what they said; criteria and pass condition are unchanged. The
-batch's graded runs are kept in `runs/batch-1-without-ruleset/` (graded with the loosened grader).
+two messages it had scored against what they said. This was not "criteria unchanged"; what changed
+(commit `f15e8fe7`, after batch 1):
+
+- `expected.md`'s Pass condition section is byte-identical across the revision, but the **C4 and
+  N3 criterion text was rewritten**: "names the three ... styles in words and puts the choice to the
+  user" became "names at least two of the ... styles in words and invites the user to choose, in
+  words or on the pad". The Arms paragraph was rewritten (both arms carry the live `rules.md`) and a
+  Limitations sentence added.
+- `grade-run.py`'s `_asks_in_words` was widened: the old rule was "`?` present and at least 2
+  styles named"; the new rule is "at least 2 styles named and any of `?`, `in words`, `tell me`,
+  `let me know`, `which one`, `which you`".
+- Re-grade of all 24 committed finals under both rules: batch 2 has 0 flips (all 12 pass under
+  either rule; every treatment final contains `?`); batch 1 has 7 C4/N3 scores that flip, but batch
+  1 is not the graded batch, and its "treatment would have failed as registered" statement rests on
+  C1/N1, which the grader change does not touch.
+
+The C4/N3 rewording and the grader widening were post-hoc, made after seeing batch 1, and did not
+decide the verdict. The batch's graded runs are kept in `runs/batch-1-without-ruleset/` (graded with
+the widened grader).
 
 **Batch 2, per criterion** (graded from each run's pad tree and final message, finished runs only;
 every treatment final message and one baseline message per variant hand-read against the grader):
