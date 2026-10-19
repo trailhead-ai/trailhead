@@ -283,6 +283,7 @@ ARM_SOURCES["regress2-cal-consult.md"] = [
 FIX_SHAPE_FALLBACK_REVISIONS: dict[str, str] = {
     "fsplan": "f396eb098fd49851341f0f17272de9ac91b4af38",
     "fsconsult": "3b50cc4ae78b43fb5494fdb2fe5d600230042284",
+    "fsdriver": "1819cbf6f7180643d607a7ad4d313389e144ec52",
 }
 FIX_SHAPE_FALLBACK_FILES = {
     "fsplan": PLAN_SKILL,
