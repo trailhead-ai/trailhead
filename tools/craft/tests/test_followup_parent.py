@@ -1755,3 +1755,149 @@ def test_the_default_runner_closes_stdin_for_a_metadata_write_and_pipes_a_body_o
     assert quiet["stdin"] == subprocess.DEVNULL and "input" not in quiet
     assert piped["input"] == "# body\n" and "stdin" not in piped
     assert quiet["shell"] is False and quiet["timeout"] == piped["timeout"] > 0
+
+
+# --- state: what a live parent lists and holds -----------------------------------------------
+
+
+def run_state(runner, spec_name, parent_name, capsys):
+    code = parent.main(["state", spec_name, parent_name], runner=runner)
+    out = capsys.readouterr()
+    return code, (json.loads(out.out) if out.out.strip() else None), out.out, out.err
+
+
+def hand_parent(env, vault, spec_name, headings, status="open", labels=(LABEL,), related=None):
+    """A parent record written by hand, its body listing `headings` verbatim."""
+    sections = "".join(f"### task/{h}\n\n**Selection reason:** because\n\n" for h in headings)
+    args = ["record", "create", "--kind", "task", "--title", "Hand parent", "--status", status,
+            "--vault", vault, "--related", f"spec={related or spec_name}"]
+    for label in labels:
+        args += ["--label", label]
+    return _lore(env, *args, stdin=f"**Delta design:**\n\n{sections}").split("/", 1)[1]
+
+
+def unnest(env, vault, name):
+    _lore(env, "record", "update", f"task/{name}", "--vault", vault, "--unset-parent")
+
+
+def test_state_of_an_assembled_parent_with_the_second_child_un_nested(lore_env, spec, tmp_path, capsys):
+    env, vault = lore_env
+    names = make_children(env, vault, spec)
+    _, assembled, _ = run_assemble(tmp_path, EnvRunner(env), spec, confirm(env, vault, names), capsys)
+    unnest(env, vault, names[1])
+    code, out, _, err = run_state(EnvRunner(env), spec, assembled["parent"], capsys)
+    assert code == 0, err
+    assert out == {
+        "parent": assembled["parent"],
+        "status": "ready",
+        "listed": names,
+        "held": sorted(
+            [{"name": names[0], "status": "ready"}, {"name": names[2], "status": "ready"}],
+            key=lambda i: i["name"],
+        ),
+        "unheld": [names[1]],
+        "unlisted": [],
+        "skipped": 0,
+    }
+
+
+def test_a_task_nested_by_hand_but_not_listed_is_unlisted_and_not_unheld(lore_env, spec, capsys):
+    env, vault = lore_env
+    (listed,) = make_children(env, vault, spec, count=1)
+    stray = make_followup(env, vault, "Stray", spec=spec)
+    name = hand_parent(env, vault, spec, [listed])
+    _lore(env, "record", "update", f"task/{stray}", "--vault", vault, "--parent", name)
+    code, out, _, err = run_state(EnvRunner(env), spec, name, capsys)
+    assert code == 0, err
+    assert out["listed"] == [listed]
+    assert out["unlisted"] == [stray]
+    assert out["unheld"] == [listed]
+    assert [h["name"] for h in out["held"]] == [stray]
+
+
+def test_a_heading_failing_the_shape_check_is_skipped_and_counted(lore_env, spec, capsys):
+    env, vault = lore_env
+    (good,) = make_children(env, vault, spec, count=1)
+    name = hand_parent(env, vault, spec, [good, "bad name"])
+    code, out, _, err = run_state(EnvRunner(env), spec, name, capsys)
+    assert code == 0, err
+    assert out["listed"] == [good]
+    assert out["skipped"] == 1
+
+
+def test_parse_listing_returns_names_in_body_order_and_the_skipped_count():
+    body = parent.render_body("s", [
+        {"name": "zeta", "reason": "r"}, {"name": "alpha", "reason": "r"},
+    ]).replace("### task/alpha", "### task/alpha\n\n### task/bad name\n\n### task/-dash")
+    assert parent.parse_listing(body) == (["zeta", "alpha"], 2)
+    assert parent.parse_listing("no sections here\n") == ([], 0)
+
+
+def test_state_refuses_a_record_without_the_marker(lore_env, spec, capsys):
+    env, vault = lore_env
+    plain = hand_parent(env, vault, spec, [], labels=())
+    code, out, raw, err = run_state(EnvRunner(env), spec, plain, capsys)
+    assert code == 1 and raw == ""
+    assert reason_of(err) == "not-a-followup-parent"
+    assert f"subject: {plain}" in err.splitlines()
+
+
+def test_state_refuses_a_marked_parent_linked_to_a_different_spec(lore_env, spec, capsys):
+    env, vault = lore_env
+    other = make_spec(env, vault, "Other spec", status="complete")
+    elsewhere = hand_parent(env, vault, other, [])
+    code, out, raw, err = run_state(EnvRunner(env), spec, elsewhere, capsys)
+    assert code == 1 and raw == ""
+    assert reason_of(err) == "not-a-followup-parent"
+    assert f"subject: {elsewhere}" in err.splitlines()
+
+
+def test_state_refuses_a_spec_record_named_as_the_parent(lore_env, spec, capsys):
+    env, vault = lore_env
+    code, out, raw, err = run_state(EnvRunner(env), spec, spec, capsys)
+    assert code == 1 and raw == ""
+    assert reason_of(err) == "not-a-followup-parent"
+
+
+def test_a_failed_task_listing_is_lore_failed_with_nothing_on_stdout(lore_env, spec, capsys):
+    env, vault = lore_env
+    name = hand_parent(env, vault, spec, [])
+    runner = EnvRunner(env, lambda a, s, r: refused(a) if a[:2] == ["task", "list"] else None)
+    code, out, raw, err = run_state(runner, spec, name, capsys)
+    assert code == 2 and raw == ""
+    assert reason_of(err) == "lore-failed"
+
+
+def test_a_nonexistent_parent_is_followup_not_found(lore_env, spec, capsys):
+    env, vault = lore_env
+    code, out, raw, err = run_state(EnvRunner(env), spec, "no-such-parent", capsys)
+    assert code == 2 and raw == ""
+    assert reason_of(err) == "followup-not-found"
+
+
+def test_a_child_whose_complete_read_shows_another_parent_is_not_held(lore_env, spec, capsys):
+    env, vault = lore_env
+    kept, moved = make_children(env, vault, spec, count=2)
+    name = hand_parent(env, vault, spec, [kept, moved])
+    for child in (kept, moved):
+        _lore(env, "record", "update", f"task/{child}", "--vault", vault, "--parent", name)
+
+    def hook(argv, stdin, runner):
+        if argv[:3] == ["record", "show", "--json"] and argv[-1] == f"task/{moved}":
+            doc = json.loads(runner.real(argv).stdout)
+            doc["sidecar"]["parent"] = "someone-else"
+            return subprocess.CompletedProcess(argv, 0, json.dumps(doc), "")
+
+    code, out, _, err = run_state(EnvRunner(env, hook), spec, name, capsys)
+    assert code == 0, err
+    assert [h["name"] for h in out["held"]] == [kept]
+    assert out["unheld"] == [moved]
+    assert out["unlisted"] == []
+
+
+def test_held_children_returns_name_and_status_of_each_confirmed_child(lore_env, spec):
+    env, vault = lore_env
+    a, b = make_children(env, vault, spec, count=2)
+    name = hand_parent(env, vault, spec, [a, b])
+    _lore(env, "record", "update", f"task/{b}", "--vault", vault, "--parent", name, "--status", "blocked")
+    assert parent.held_children(EnvRunner(env), vault, name) == [{"name": b, "status": "blocked"}]
