@@ -105,7 +105,8 @@ of any route that proceeds without a further yes.
 
 **A borderline call is asked, once.** A change is borderline when it honestly fits an item on each
 list and the record itself does not settle which reading holds. A change one list names plainly is
-never put to the question, and how the request is phrased does not make a change borderline. For a
+never put to the question: it goes straight to Step 3a or Step 3b, drafting the successor included,
+whoever asked for it, and how the request is phrased does not make a change borderline. For a
 borderline change, write nothing and ask the operator one yes/no question: whether to amend the
 record in place. It quotes the exact old text and the exact new text, names the two readings, says
 that yes amends in place, and says what no starts (Step 3b's route for this kind of record). End the
