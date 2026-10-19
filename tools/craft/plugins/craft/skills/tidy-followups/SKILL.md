@@ -370,6 +370,9 @@ and remove the file. Act on the exit:
 | `parent-changed` | The parent's status moved between reading it and the first write, such as a build starting; the vault's. Nothing was written. Look at the parent again before deciding. |
 | `invalid-reason-file` | The reason file was not a regular file holding one non-empty JSON string of at most 4 KiB; this ritual's. Nothing was written. Restage it and rerun. |
 | `drop-incomplete` | An un-nest or the drop write failed; `lore`'s or the vault's. The parent is still live if an un-nest failed. Run the commands in `failed`, or rerun the drop, which skips what is already done. |
+| `parent-not-resumable` | The parent is not `open` (it is `ready`, `in-progress`, `blocked` or no longer live); the vault's. Nothing was written. Nothing is left to resume. |
+| `child-not-listed` | A name in the resume file is not one the parent's body lists without holding; this ritual's. Nothing was written. Resume never adds a follow-up the original run did not list. |
+| `nothing-to-build` | Resuming would leave the parent listing no follow-up (it holds none and none was confirmed); the vault's. Nothing was written. Drop the parent instead. |
 
 The codes shared with the gather table (`no-vaults`, `spec-not-found`, `spec-ambiguous`,
 `not-a-spec`, `malformed-sidecar`, `empty-sidecar`, `lore-missing`, `lore-timeout`, `lore-failed`,
