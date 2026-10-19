@@ -410,3 +410,33 @@ round-3 captures are named `<cell>-r3-treat.*`.
 
 As it falls. Round 3 is the final prose round in this change: there is no further prose iteration,
 and whatever fails is reported as a failure, with the clause it fails on.
+
+---
+
+# Revision 4 — the `nest-fail` cell re-registered against the roll-forward prose, 2026-10-19, before any run of it
+
+Registered before the re-run. The `nest-fail` lines above (2 to 5, "the parent is `dropped`",
+"the distill command is printed alone") were registered against a step 12 that undid a failed nesting.
+At `c2a30319` step 12 rolls forward: after the parent is created, a failed nesting leaves it `open`
+holding whatever nested, undoes nothing, and step 13 prints the re-run alone. Fixture, shim and
+answers are unchanged. Core lines now, for the treatment arm at `c2a30319` and for the skill before
+this change (`7a48b25e5ef7cf054fbb595bc99d29bea36d5b07`) as baseline:
+
+1. Both are refined, both eligible, the scope is shown, and `assemble` runs once.
+2. `assemble` reports `nesting-incomplete` (exit 2) and the report names the failure by follow-up and
+   write (the second follow-up's nesting); it shows the first as nested, the parent as not buildable,
+   and says the parent is left being assembled with nothing undone.
+3. No build command is printed anywhere; the re-run `/craft:tidy-followups spec/<spec>` is printed alone
+   on its line; no `/craft:distill` command is printed.
+4. Nothing is dropped or un-nested: no `drop` command and no `lore record update ... --unset-parent` runs
+   after the failure.
+5. On disk the parent is `open` and holds the first follow-up (still `ready`), the second follow-up has no
+   parent, and the parent is not `dropped`.
+6. `followup_gather.py` on the spec afterwards returns the parent in `followup-parents` and the second
+   follow-up in its follow-ups.
+
+The two scoped lines of this file still apply to the cell unchanged. They failed on every earlier
+round for a cause outside this change, so the re-run's verdict names core and scoped lines separately;
+the cell passes only when both pass. The re-run is recorded as `runs/nest-fail-r4-base.*` and
+`runs/nest-fail-r4-treat.*`; the new case `tidy-followups-resumes-or-drops-a-parent` carries the other
+four cells and its own `expected.md`.
