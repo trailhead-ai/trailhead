@@ -343,3 +343,168 @@ def test_loaded_pen_shows_no_cant_draw_message_for_a_readable_layout(tmp_path):
     assert got["messages"] == []
     assert got["names"] == ["Q0 opt 0", "Q0 opt 1"]
     assert got["ready"]
+
+
+# --- rounds -------------------------------------------------------------------------------------------
+
+ROUNDS = """
+const switcher = document.querySelector('nav.pad-rounds');
+const links = switcher ? [...switcher.querySelectorAll('a')].map((a) => ({
+  text: a.querySelector('.pad-round-text').textContent,
+  href: a.getAttribute('href'),
+  title: a.getAttribute('title'),
+  target: a.getAttribute('target'),
+  rel: a.getAttribute('rel'),
+  hidden: a.querySelector('.pad-sr') ? a.querySelector('.pad-sr').textContent : null,
+  current: a.getAttribute('aria-current'),
+  children: a.querySelectorAll('img, script').length,
+})) : null;
+const currentEl = switcher ? switcher.querySelector('[aria-current="page"]') : null;
+const currentText = currentEl ? currentEl.querySelector('.pad-round-text').textContent : null;
+const current = currentEl ? { tag: currentEl.tagName, text: currentText } : null;
+const settled = document.querySelector('details.pad-settled');
+const settledState = settled ? {
+  open: settled.open,
+  summary: settled.querySelector('summary').textContent,
+  items: [...settled.querySelectorAll('li')].map((li) => li.textContent),
+  injected: settled.querySelectorAll('img, script, [onerror]').length,
+} : null;
+const built = window.PadReply.build(window.PAD_ROUND, window.PadAnswers.answers);
+const reply = JSON.parse(built.replace(/^```json\\n|\\n```$/g, ''));
+"""
+
+
+def _env(tmp_path):
+    return {
+        "OUTPOST_STATE_DIR": str(tmp_path / "state"),
+        "HOME": str(tmp_path / "home"),
+        "XDG_STATE_HOME": str(tmp_path / "xdg-state"),
+        "XDG_DATA_HOME": str(tmp_path / "xdg-data"),
+    }
+
+
+def _build_rounds(tmp_path, rounds):
+    """Build a pad with the real script: the first round, then each later one with --add."""
+    env = _env(tmp_path)
+    cwd = tmp_path / "cwd"
+    pad = None
+    for i, data in enumerate(rounds):
+        round_path = tmp_path / f"round-{i}.json"
+        round_path.write_text(json.dumps(data))
+        if i == 0:
+            _, pad = scratch_pad.build_pad(round_path, "demo", env=env, cwd=cwd)
+        else:
+            assert scratch_pad.main(["--pad", "demo", "--round", str(round_path), "--add"], env=env, cwd=cwd) == 0
+    return pad
+
+
+def _view(pad, k, js, **kw):
+    entry = f"round-{k}/index.html"
+    return ch.run_probe(pad, SNAPSHOT + ROUNDS + js, entry=entry, inject_into=entry, **kw)
+
+
+LONG_TITLE = "A very long title that keeps going well past what a switcher entry has room for " * 2
+
+
+def test_a_one_round_pad_shows_no_switcher_and_its_reply_carries_round_1(tmp_path):
+    pad = _build_rounds(tmp_path, [_round(1)])
+    js = "return {links, reply, firstChild: document.querySelector('.pad-head').firstElementChild.tagName};"
+    got = _view(pad, 1, js)
+    assert got["links"] is None
+    assert got["firstChild"] == "H1"
+    assert list(got["reply"])[:2] == ["pad", "round"]
+    assert got["reply"]["round"] == 1
+
+
+def test_a_pad_without_a_round_list_draws_without_a_switcher_and_its_reply_has_no_round(tmp_path):
+    pad = _build_rounds(tmp_path, [_round(1)])
+    (pad / "rounds.js").unlink()
+    round_js = pad / "round-1" / "round.js"
+    kept = [line for line in round_js.read_text().splitlines(True) if "PAD_ROUND_NUMBER" not in line]
+    round_js.write_text("".join(kept))
+    got = _view(pad, 1, "return {links, reply, entries, loading: !!loading, failure: !!failure};")
+    assert got["links"] is None
+    assert got["entries"] == [{"text": "Q0", "current": "true"}]
+    assert not got["loading"] and not got["failure"]
+    assert "round" not in got["reply"]
+
+
+def test_an_unreadable_round_list_draws_without_a_switcher(tmp_path):
+    pad = _build_rounds(tmp_path, [_round(1), _round(1, title="Second")])
+    (pad / "rounds.js").write_text("window.PAD_ROUNDS = 'not a list';\n")
+    got = _view(pad, 2, "return {links, entries, failure: !!failure};")
+    assert got["links"] is None
+    assert got["entries"] == [{"text": "Q0", "current": "true"}]
+    assert not got["failure"]
+
+
+def test_the_latest_of_three_rounds_links_every_earlier_round_by_its_own_folder(tmp_path):
+    rounds = [_round(1, title=LONG_TITLE), _round(1, title="Second"), _round(1, title="Third")]
+    pad = _build_rounds(tmp_path, rounds)
+    got = _view(pad, 3, "return {links, current, reply, note: document.querySelector('.pad-rounds-note')};")
+    assert [link["href"] for link in got["links"]] == ["../round-1/index.html", "../round-2/index.html"]
+    assert [link["text"].split(":")[0] for link in got["links"]] == ["Round 1", "Round 2"]
+    long_link = got["links"][0]
+    assert long_link["text"].endswith("…")
+    assert len(long_link["text"]) < len(LONG_TITLE)
+    assert long_link["title"] == LONG_TITLE
+    assert got["links"][1]["text"] == "Round 2: Second"
+    assert got["links"][1]["title"] == "Second"
+    for link in got["links"]:
+        assert (link["target"], link["rel"], link["hidden"]) == ("_blank", "noopener", " (opens in a new tab)")
+        assert link["current"] is None
+    assert got["current"] == {"tag": "SPAN", "text": "Round 3: Third"}
+    assert got["note"] is None
+    assert got["reply"]["round"] == 3
+
+
+def test_an_earlier_round_says_which_round_it_is_and_links_to_the_latest(tmp_path):
+    rounds = [_round(1, title="First"), _round(1, title="Second"), _round(1, title="Third")]
+    pad = _build_rounds(tmp_path, rounds)
+    js = """
+    const note = document.querySelector('.pad-rounds-note');
+    const latestLink = note.querySelector('a');
+    return {links, current, reply, note: note.firstChild.textContent,
+            latest: latestLink.getAttribute('href'), latestTarget: latestLink.getAttribute('target')};
+    """
+    got = _view(pad, 1, js)
+    assert got["current"]["text"] == "Round 1: First"
+    assert [link["href"] for link in got["links"]] == ["../round-2/index.html", "../round-3/index.html"]
+    assert got["note"] == "This is round 1 of 3. "
+    assert got["latest"] == "../round-3/index.html"
+    assert got["latestTarget"] == "_blank"
+    assert got["reply"]["round"] == 1
+
+
+def test_a_settled_list_is_folded_counts_its_lines_and_shows_none_when_absent_or_empty(tmp_path):
+    pad = _build_rounds(tmp_path, [_round(1, settled=["Header: B", "Nav on the left"])])
+    got = _view(pad, 1, "return {settledState, text: document.querySelector('.pad-head').textContent};")
+    assert got["settledState"]["open"] is False
+    assert got["settledState"]["summary"] == "Settled in earlier rounds (2)"
+    assert got["settledState"]["items"] == ["Header: B", "Nav on the left"]
+
+    for tag, extra in (("absent", {}), ("empty", {"settled": []})):
+        sub = tmp_path / tag
+        sub.mkdir()
+        (sub / "cwd").mkdir()
+        pad = _build_rounds(sub, [_round(1, **extra)])
+        got = _view(pad, 1, "return {settledState, text: document.querySelector('.pad-head').textContent};")
+        assert got["settledState"] is None, tag
+        assert "Settled" not in got["text"], tag
+
+
+def test_hostile_settled_lines_and_round_titles_show_as_literal_text(tmp_path):
+    script, img = HOSTILE[0], HOSTILE[1]
+    rounds = [_round(1, title=img), _round(1, title=script), _round(1, title="Third", settled=[script, img])]
+    pad = _build_rounds(tmp_path, rounds)
+    got = _view(pad, 3, "return {links, settledState, pwned: window.pwned === undefined ? null : window.pwned};")
+    assert [link["text"] for link in got["links"]] == [f"Round 1: {img}", f"Round 2: {script}"]
+    assert [link["children"] for link in got["links"]] == [0, 0]
+    assert got["settledState"]["items"] == [script, img]
+    assert got["settledState"]["injected"] == 0
+    assert got["pwned"] is None
+
+    got = _view(pad, 2, "return {current, links, pwned: window.pwned === undefined ? null : window.pwned};")
+    assert got["current"]["text"] == f"Round 2: {script}"
+    assert [link["text"] for link in got["links"]] == [f"Round 1: {img}", "Round 3: Third"]
+    assert got["pwned"] is None

@@ -131,9 +131,10 @@ def test_reply_is_a_json_fence_with_two_space_indents(tmp_path):
     assert lines[-1] == "```"
     assert lines[1] == "{"
     assert lines[2] == '  "pad": "Settings page",'
-    assert lines[3] == '  "answers": ['
-    assert lines[4] == "    {"
-    assert lines[5].startswith('      "question"')
+    assert lines[3] == '  "round": 1,'
+    assert lines[4] == '  "answers": ['
+    assert lines[5] == "    {"
+    assert lines[6].startswith('      "question"')
 
 
 @pytest.mark.parametrize(("index", "letter"), [(0, "A"), (25, "Z")])
