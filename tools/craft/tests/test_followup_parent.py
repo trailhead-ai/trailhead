@@ -2942,3 +2942,45 @@ def test_a_dropped_parent_set_back_to_open_by_hand_is_made_ready_again_by_resume
     assert sidecar_of(env, vault, parent_name)["status"] == "ready"
     assert parents_of(env, vault, names) == [parent_name] * 2
     assert "## Dropped" not in body_of(env, vault, parent_name)
+
+
+# --- hostile names reach no lore call -------------------------------------------------------------
+
+HOSTILE_NAMES = ["a$(touch x)", "-rf", "../x", "has space"]
+
+
+def _argv_for(command, spec_name, parent_name, tmp_path, file_text=None):
+    if command == "state":
+        return ["state", "--", spec_name, parent_name]
+    path = tmp_path / f"{command}.json"
+    path.write_text(file_text if file_text is not None else ('"why"' if command == "drop" else "[]"))
+    flag = "--reason-file" if command == "drop" else "--children"
+    return [command, flag, str(path), "--", spec_name, parent_name]
+
+
+@pytest.mark.parametrize("command", ["state", "drop", "resume"])
+@pytest.mark.parametrize("hostile", HOSTILE_NAMES)
+@pytest.mark.parametrize("position", ["spec", "parent"])
+def test_a_hostile_spec_or_parent_name_is_refused_before_any_lore_call(
+    command, hostile, position, tmp_path, capsys
+):
+    runner = Lore()
+    spec_name, parent_name = (hostile, "p") if position == "spec" else ("s", hostile)
+    code, out, err = run_main(runner, *_argv_for(command, spec_name, parent_name, tmp_path), capsys=capsys)
+    assert code == 2 and out == ""
+    assert reason_of(err) == ("invalid-spec-name" if position == "spec" else "invalid-followup-name")
+    assert runner.calls == []
+
+
+@pytest.mark.parametrize("command", ["drop", "resume"])
+@pytest.mark.parametrize("position", ["spec", "parent"])
+def test_a_hostile_name_is_refused_before_the_reason_or_children_file_is_read(
+    command, position, tmp_path, capsys
+):
+    runner = Lore()
+    spec_name, parent_name = ("a b", "p") if position == "spec" else ("s", "a b")
+    argv = _argv_for(command, spec_name, parent_name, tmp_path, file_text="not json")
+    code, out, err = run_main(runner, *argv, capsys=capsys)
+    assert code == 2 and out == ""
+    assert reason_of(err) == ("invalid-spec-name" if position == "spec" else "invalid-followup-name")
+    assert runner.calls == []
