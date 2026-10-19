@@ -160,12 +160,13 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/scratch-pad/scratch_pad.py \
   link again, because a tab that is already open does not learn of it.
 - **Name already taken** (a new pad, no `--add`): retry with a new name, without
   asking. If the pad is the user's own and you meant to add to it, you left out
-  `--add`: rerun with it instead. Inside a
-  workspace a run that loses a name race gets the publisher's own refusal
-  instead, relayed as `scratch-pad: publish: error: <path> already exists.`, a
-  diff-summary line, then `scratch-pad: publish: Re-run with --overwrite to
-  replace it.` That also means the name is taken: retry with a new name, and
-  never pass `--overwrite` (the script takes none).
+  `--add`: rerun with it instead. A run that loses a race for the name to another
+  run of this script, in a workspace or not, gets this same refusal. Only when
+  another tool wrote the site name inside a workspace do you get the publisher's
+  own refusal instead, relayed as `scratch-pad: publish: error: <path> already
+  exists.`, a diff-summary line, then `scratch-pad: publish: Re-run with
+  --overwrite to replace it.` That also means the name is taken: retry with a new
+  name, and never pass `--overwrite` (the script takes none).
 - **Unconfirmed:** if the only line before `pad folder:` is the `note:` that the
   publisher did not confirm in time, tell the user the pad was probably
   published but not confirmed, and that there is no link to hand back (after an
@@ -179,9 +180,13 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/scratch-pad/scratch_pad.py \
     the slug is not a pad here. Fix the slug if you misspelt it; if the pad is
     gone, drop `--add` and start a new pad, telling the user it is a new one.
   - `scratch-pad: pad "<pad>" can't take another round: … — start a new pad with
-    a different --pad name`: this pad cannot be added to. Start a new pad under a
-    different `--pad` name, carry what was settled in its `settled` list, and tell
-    the user it is a new pad.
+    a different --pad name`: this pad cannot be added to. The reasons name what
+    stops it: a symlink or special file, a missing or broken round, a folder that
+    cannot be read (`<path> can't be read: <why>`), or a top-level entry that is
+    not part of a pad this script builds (`<name> is not part of a pad this script
+    builds`, such as a file added by hand). Start a new pad under a different
+    `--pad` name, carry what was settled in its `settled` list, and tell the user
+    it is a new pad.
   - `… give each round its own title`: the round's title matches an earlier
     round's. Retitle the round and rerun.
   - `scratch-pad: waiting for another session's add to pad "<pad>"…` on stderr is
@@ -195,7 +200,10 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/scratch-pad/scratch_pad.py \
   - Inside a workspace, `scratch-pad: publish: the publisher did not finish within
     <n> seconds and …`: when it ends `the round was not added` the pad is
     unchanged and one rerun is safe; for any other ending do not rerun, tell the
-    user what the line says and ask in words.
+    user what the line says and ask in words. When the ending is `the pad is no
+    longer there` and a second line names a `.<pad>.previous-…` path, that path
+    holds the pad as it was before the add: tell the user, and rename it back to
+    the pad's own path to restore it.
 
 Always ask the question in words too, on an added round as on a first one. The
 pad takes answers: the user can pick an option, mark options "Not this", choose

@@ -98,6 +98,12 @@ The pad where it lives is its only copy. Before adding to it, the script checks 
   a regular file or folder.
 - Its round folders are `round-1` up to `round-<n>` with no gaps, each holding an `index.html` and a
   `round.js` whose first line starts with the prefix this script writes.
+- The pad's only other top-level entries are `index.html` and `rounds.js`. An add rebuilds the pad from
+  its round folders and regenerates those two files, so anything else at the top level — a file added
+  by hand, a `round-01` folder — would be deleted with the old copy; each such entry is named and the
+  pad is refused instead.
+- Every folder in the pad can be listed; one that cannot is named ("round-1/x can't be read:
+  Permission denied") rather than ending the run in a traceback.
 - Each round's title is read back from its `round.js` by stripping the known prefix and suffix and
   decoding the string literal with `json.loads` twice — never by evaluating it or matching it with a
   pattern — to build the new list of rounds. Nothing else in an earlier round is read or changed.
@@ -111,9 +117,9 @@ A pad that fails any check is refused with every problem named, nothing changed,
 "pad "settings-header" can't take another round: … — start a new pad with a different --pad name".
 
 An earlier round is carried forward byte for byte without checking anything past its `round.js`
-prefix. That is what keeps it drawn by its own kit; a pad edited by hand carries the edit forward.
-Pads live only in the user's own state directory or workspace, so this is accepted rather than
-guarded.
+prefix. That is what keeps it drawn by its own kit; a hand edit inside a round folder carries forward,
+and one outside the round folders is refused above rather than dropped. Pads live only in the user's
+own state directory or workspace, so an edit inside a round is accepted rather than guarded.
 
 ## Two adds at once
 
@@ -136,7 +142,10 @@ take the lock in that time is refused — "another session is adding a round to 
 Inside a workspace, a publisher that times out is killed and waited for before the lock is
 released, and the outcome is then read from disk by the same checks as a read-back: the pad is
 reported "published but not confirmed" only when the whole pad is there with exactly one more round;
-otherwise the add is refused. Another tool publishing over the pad's site between the read and the
+otherwise the add is refused. The publisher swaps the site by renaming the old one to
+`sites/.<pad>.previous-*` and restores it only on an exception, not when it is killed; so when the pad
+is gone and such an entry exists, the refusal names it as the pad as it was before the add, to be
+renamed back by hand — the script reports the publisher's private name and never renames it. Another tool publishing over the pad's site between the read and the
 swap would be overwritten; only this script writes pad sites, and the publisher refuses to replace a
 site without `--overwrite`, so this is accepted.
 
