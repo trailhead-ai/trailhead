@@ -1,0 +1,29 @@
+{
+  "title": "Audit log filters",
+  "intro": "Where should the audit-log filters sit?",
+  "questions": [
+    {
+      "prompt": "Where do the filters sit?",
+      "options": [
+        {
+          "name": "Left rail",
+          "cost": "Takes a column from the table; the filters stay in view while scrolling.",
+          "pick": true,
+          "layout": {"row": [{"column": [{"field": "Actor"}, {"field": "Action"}]}, {"box": [{"text": "Entries"}, {"rule": true}]}]}
+        },
+        {
+          "name": "Top bar",
+          "cost": "Costs a strip of height; the filters scroll away with the page.",
+          "pick": false,
+          "layout": {"column": [{"row": [{"field": "Actor"}, {"field": "Action"}]}, {"box": [{"text": "Entries"}]}]}
+        },
+        {
+          "name": "Slide-over panel",
+          "cost": "Keeps the table full width; the filters are one click away.",
+          "pick": false,
+          "layout": {"column": [{"button": "Filters"}, {"box": [{"text": "Entries"}]}]}
+        }
+      ]
+    }
+  ]
+}
