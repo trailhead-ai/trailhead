@@ -234,7 +234,7 @@ def _snapshot(root: Path):
 
 
 def _round_js_data(path: Path):
-    text = path.read_text(encoding="utf-8")
+    text = path.read_text(encoding="utf-8").splitlines(keepends=True)[0]
     assert text.startswith(ROUND_JS_PREFIX) and text.endswith(ROUND_JS_SUFFIX)
     return json.loads(json.loads(text[len(ROUND_JS_PREFIX) : -len(ROUND_JS_SUFFIX)]))
 
