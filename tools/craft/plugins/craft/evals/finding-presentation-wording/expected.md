@@ -3691,3 +3691,19 @@ only; no reading, count or verdict changed.
 Addendum to "Results for slice close: the fix-shape rounds, two real runs and the pin check (2026-10-19)": the second
 treated round replaced the pre-registered route (a treated miss goes to the fallback) by recorded operator decision on
 2026-10-19, so the met/missed table there is not read as the pre-registered path.
+
+## Corrections after the whole-change re-review (2026-10-19)
+
+- **The consult fixture does stage an unsettled ask.** `fixtures/fs-reports-consult.md:52` ("Suggested: explain the
+  rules on the studio's site.") is an ask whose cited text does not settle the words; it is not a designated finding,
+  so no criterion reads it. Where the sections above say the fixtures stage no unsettled consult ask, read instead:
+  the branch is staged but undesignated. Observed on it: before the rewording, 2 of 6 `fs-fallback-fsconsult`
+  captures (`-2`, `-5`) quoted it as written; after the rewording, 1 of 3 `fs-fallback2-fsconsult` captures (`-1`)
+  did, `-2` repeated it unmarked and `-3` added its own wording. The rewording is not shown to fix this branch.
+- **Size tags copied into the reader's text.** `runs/fs-fallback2-fsconsult-1.txt` lines 21, 38 and 62 end a `Fix:`
+  line with "(large rewrite)" or "(small)", copied from the worked examples' parenthetical labels in the contract;
+  no other fix-shape capture does this, and no scripted check reads it. The reading of that capture stands; the
+  example-label defect is recorded for the follow-up.
+- **The kept consult line that ships is `3d423811`,** which supersedes `3b50cc4a` (the line the slice-close sections
+  and the consult real run name). Revisions that must stay reachable after merge are therefore `c3f7b21e`,
+  `2fc63f89`, `e568c4e0`, `3b50cc4a` and `3d423811`; the merge must not squash.
