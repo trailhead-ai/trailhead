@@ -423,20 +423,22 @@ def test_a_bad_pad_name_is_refused_inside_a_workspace_before_anything_is_written
     assert not (rig.ws / "sites").exists() and rig.leftovers() == []
 
 
+@pytest.mark.skipif(os.geteuid() == 0, reason="permissions do not bind root")
 def test_a_publisher_failure_is_relayed_under_publish_and_leaves_nothing(rig, capsys):
-    elsewhere = rig.tmp_path / "elsewhere"
-    elsewhere.mkdir()
-    (rig.ws / "sites").symlink_to(elsewhere)
+    sites = rig.ws / "sites"
+    sites.mkdir()
+    sites.chmod(0o500)
+    try:
+        code = rig.run()
+        captured = capsys.readouterr()
+    finally:
+        sites.chmod(0o700)
 
-    code = rig.run()
-
-    captured = capsys.readouterr()
     lines = captured.err.splitlines()
     assert code == 1
     assert captured.out == ""
     assert lines and all(line.startswith("scratch-pad: publish: ") for line in lines)
-    assert "symlink" in lines[0]
-    assert list(elsewhere.iterdir()) == []
+    assert list(sites.iterdir()) == []
     assert rig.leftovers() == []
 
 
@@ -1239,3 +1241,105 @@ def test_an_unlistable_folder_in_a_workspace_pad_refuses_the_add_and_changes_not
     ]
     assert after == before == ["p"]
     assert rig.leftovers() == []
+
+
+@pytest.mark.parametrize("add", [False, True], ids=["new", "add"])
+def test_a_symlinked_sites_folder_is_refused_and_its_target_is_left_untouched(rig, capsys, tmp_path, add):
+    target = tmp_path / "elsewhere"
+    (target / ".aside-q").mkdir(parents=True)
+    (target / ".tmp-q-abc").mkdir()
+    (rig.ws / "sites").symlink_to(target)
+    before = _snapshot(tmp_path / "elsewhere")
+
+    code = rig.run("q", add=add, publish_runner=lambda *a: pytest.fail("publisher ran"))
+    captured = capsys.readouterr()
+
+    assert code == 1 and captured.out == ""
+    assert captured.err.splitlines() == [
+        f'scratch-pad: {_q(rig.ws / "sites")}: the sites folder is a symlink — refusing to publish through it'
+    ]
+    assert sorted(p.name for p in target.iterdir()) == [".aside-q", ".tmp-q-abc"]
+    assert _snapshot(target) == before
+    assert not (rig.outpost_state / "pad-locks").exists()
+
+
+@pytest.mark.parametrize("add", [False, True], ids=["new", "add"])
+def test_a_sites_path_that_is_a_file_is_refused(rig, capsys, add):
+    (rig.ws / "sites").write_text("not a folder")
+
+    code = rig.run("q", add=add, publish_runner=lambda *a: pytest.fail("publisher ran"))
+    captured = capsys.readouterr()
+
+    assert code == 1 and captured.out == ""
+    assert captured.err.splitlines() == [
+        f'scratch-pad: {_q(rig.ws / "sites")}: the sites folder is not a directory'
+    ]
+    assert (rig.ws / "sites").read_text() == "not a folder"
+
+
+def _q(path) -> str:
+    return f'"{path}"'
+
+
+def _timeout_with_planted(rig, capsys, plant):
+    """Publish a pad, then time an add out with the pad gone and *plant(sites, real_previous)* beside it."""
+    left = {}
+
+    def killed(cmd, site):
+        left["real"] = _interrupted_swap(site)
+        os.utime(left["real"], (1_000_000, 1_000_000))
+        plant(site.parent, left["real"])
+
+    code, captured, site = _timeout_with(rig, capsys, killed)
+    return code, captured.err.splitlines(), left["real"], site
+
+
+NAMED = "scratch-pad: publish: {} holds the pad as it was before this add; rename it back to {} to restore it"
+
+
+def test_a_newer_symlink_under_the_previous_prefix_is_not_named_as_the_pad(rig, capsys, tmp_path):
+    def plant(sites, real):
+        (tmp_path / "outside").mkdir(exist_ok=True)
+        (sites / ".p.previous-abcd1234").symlink_to(tmp_path / "outside")
+
+    code, lines, real, site = _timeout_with_planted(rig, capsys, plant)
+
+    assert code == 1
+    assert lines[1] == NAMED.format(real, site)
+    assert len(lines) == 2
+
+
+def test_a_newer_file_under_the_previous_prefix_is_not_named_as_the_pad(rig, capsys):
+    def plant(sites, real):
+        (sites / ".p.previous-abcd1234").write_text("planted")
+
+    code, lines, real, site = _timeout_with_planted(rig, capsys, plant)
+
+    assert code == 1
+    assert lines[1] == NAMED.format(real, site)
+    assert len(lines) == 2
+
+
+@pytest.mark.parametrize("suffix", ["planted-longer", "abcdefghi", "abcdefg", "ABCDEFGH"])
+def test_a_newer_folder_with_a_suffix_the_publisher_never_makes_is_not_named_as_the_pad(rig, capsys, suffix):
+    def plant(sites, real):
+        (sites / f".p.previous-{suffix}").mkdir()
+
+    code, lines, real, site = _timeout_with_planted(rig, capsys, plant)
+
+    assert code == 1
+    assert lines[1] == NAMED.format(real, site)
+    assert len(lines) == 2
+
+
+def test_the_real_previous_entry_is_named_even_when_planted_ones_are_newer_and_older(rig, capsys, tmp_path):
+    def plant(sites, real):
+        (tmp_path / "outside").mkdir(exist_ok=True)
+        (sites / ".p.previous-abcd1234").symlink_to(tmp_path / "outside")
+        (sites / ".p.previous-zzzz").mkdir()
+        os.utime(sites / ".p.previous-zzzz", (1, 1))
+
+    code, lines, real, site = _timeout_with_planted(rig, capsys, plant)
+
+    assert lines[1] == NAMED.format(real, site)
+    assert len(lines) == 2

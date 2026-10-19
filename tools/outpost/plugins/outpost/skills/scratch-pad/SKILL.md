@@ -202,13 +202,18 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/scratch-pad/scratch_pad.py \
   - `scratch-pad: settled: must be a list of strings`, `scratch-pad: settled[i]:
     must be a string` and `scratch-pad: settled[i]: empty — say what was settled
     or leave it out`: fix the `settled` list and rerun.
+  - `scratch-pad: "<path>": the sites folder is a symlink — refusing to publish
+    through it` or `… the sites folder is not a directory`: the workspace's
+    `sites/` is not a plain folder and nothing was changed. Tell the user; do not
+    replace or remove it.
   - Inside a workspace, `scratch-pad: publish: the publisher did not finish within
     <n> seconds and …`: when it ends `the round was not added` the pad is
     unchanged and one rerun is safe; for any other ending do not rerun, tell the
     user what the line says and ask in words. When the ending is `the pad is no
     longer there` and a second line names a `.<pad>.previous-…` path, that path
     holds the pad as it was before the add: tell the user, and rename it back to
-    the pad's own path to restore it. A further line `scratch-pad: publish: older
+    the pad's own path to restore it; rename back only a path the script named,
+    never one you found by looking in `sites/` yourself. A further line `scratch-pad: publish: older
     leftovers that may be partial: <paths>` lists earlier leftovers; leave them
     alone and do not restore from them.
 

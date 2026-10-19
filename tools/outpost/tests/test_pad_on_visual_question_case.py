@@ -142,7 +142,7 @@ def test_refused_variant_exits_non_zero_with_reasons_and_leaves_no_pad(tmp_path)
     result = _run_pad(run_dir, pad)
     assert result.returncode != 0
     assert result.stdout == ""
-    assert "scratch-pad: publish: error:" in result.stderr
+    assert "the sites folder is a symlink" in result.stderr
     assert not list(tmp_path.rglob(pad))
 
 

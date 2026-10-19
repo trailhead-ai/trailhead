@@ -141,7 +141,6 @@ from __future__ import annotations
 import argparse
 import contextlib
 import fcntl
-import glob
 import hashlib
 import json
 import os
@@ -629,7 +628,10 @@ def _read_pad(final: Path, pad: str) -> list[str]:
     problems: list[str] = []
     strays: list[str] = []
     titles: list[str] = []
-    mode = os.lstat(final).st_mode
+    try:
+        mode = os.lstat(final).st_mode
+    except OSError as exc:
+        raise _cannot_take(pad, [f"the pad folder can't be read: {_esc(exc.strerror or str(exc))}"])
     if stat.S_ISLNK(mode):
         problems.append("the pad folder is a symlink")
     elif not stat.S_ISDIR(mode):
@@ -744,6 +746,20 @@ def _add_round(pads_root: Path, pad: str, kit_dir: Path, encoded: Encoded, put_i
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def _require_plain_sites(sites: Path) -> None:
+    """Refuse a ``sites`` that is a symlink or not a folder, before anything is read or recovered through it."""
+    try:
+        st = os.lstat(sites)
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        raise Refusal([_line(_q(str(sites)), f"cannot inspect the sites folder: {exc.strerror or exc}")])
+    if stat.S_ISLNK(st.st_mode):
+        raise Refusal([_line(_q(str(sites)), "the sites folder is a symlink — refusing to publish through it")])
+    if not stat.S_ISDIR(st.st_mode):
+        raise Refusal([_line(_q(str(sites)), "the sites folder is not a directory")])
+
+
 def _require_publisher() -> None:
     if not PUBLISHER_PATH.is_file():
         raise Refusal(
@@ -811,13 +827,32 @@ def _mtime(path: Path) -> float:
         return 0.0
 
 
+def _previous_entries(sites: Path, pad: str) -> list[Path]:
+    """The folders beside the pad that have the shape of the publisher's ``.<pad>.previous-`` temp names."""
+    shape = re.compile(re.escape(f".{pad}.previous-") + r"[a-z0-9_]{8}")
+    found = []
+    try:
+        entries = os.listdir(sites)
+    except OSError:
+        return found
+    for entry in entries:
+        path = sites / entry
+        try:
+            plain_dir = stat.S_ISDIR(os.lstat(path).st_mode)
+        except OSError:
+            continue
+        if plain_dir and shape.fullmatch(entry):
+            found.append(path)
+    return found
+
+
 def _timed_out_add(final: Path, pad: str, tmp: Path, timeout: float) -> Built:
     """Judge an add whose publisher was killed: the site on disk against the pad *tmp* was to become."""
     late = f"the publisher did not finish within {timeout:g} seconds and"
     expected = _read_pad(tmp, pad)
     if not os.path.lexists(final):
         lines = [_line("publish", f"{late} the pad is no longer there")]
-        previous = sorted(final.parent.glob(f".{glob.escape(pad)}.previous-*"), key=lambda p: (_mtime(p), p.name))
+        previous = sorted(_previous_entries(final.parent, pad), key=lambda p: (_mtime(p), p.name))
         if previous:
             lines.append(
                 _line(
@@ -878,6 +913,7 @@ def _build(
     if workspace is not None:
         _require_publisher()
         sites = workspace / "sites"
+        _require_plain_sites(sites)
         with _pad_lock(env, sites, pad, 2 * timeout):
             _recover_in(sites, pad)
             if add:
