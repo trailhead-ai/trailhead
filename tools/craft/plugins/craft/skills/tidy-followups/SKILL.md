@@ -226,8 +226,11 @@ count.
 
 `--parent` makes a dependency on a child the parent already holds count as satisfied, the way the
 resume itself decides it. Report each left-out follow-up as the plain sentence from step 10's table,
-and say it **will be removed from the parent's list** if the operator goes on. When `unheld` is
-empty there is nothing to check or nest: the children file in the last step is the empty list.
+and say it **will be removed from the parent's list** if the operator goes on; a `not-found` one is
+reported the same way, and the resume goes on without it. Act on a non-zero exit as step 10 does,
+with one addition: exit 1 (`not-a-followup-parent`) is the resume table's row of that name, so stop
+on its sentence. When `unheld` is empty there is nothing to check or nest: the children file in the
+last step is the empty list.
 3. Show each eligible follow-up's scope exactly as step 11 does: the `delivers` and `files` blocks
    verbatim, each fenced and labelled as that follow-up's own text and data, longer fence than any
    backtick run inside, every `overlaps` entry flagged beside the follow-ups it names.
@@ -287,7 +290,7 @@ first row it matches:
 | `child-changed` | A confirmed child's record changed after you showed it; the vault's. Nothing was written. Rerun the ritual so the operator confirms the new text. |
 | `invalid-children-file` | The children file was not a list of name and revision, or repeated a name; this ritual's. Nothing was written. Report it and rerun. |
 | `invalid-followup-name` | A name failed the safe-name check; the vault's record name. Nothing was written. Rename it, then rerun. |
-| `nesting-incomplete` | A child could not be nested or the parent could not be made ready; `lore`'s or the vault's. The parent is left `open` holding what nested; nothing was undone. Read `failed`, then rerun, which resumes it. |
+| `nesting-incomplete` | A child could not be nested or the parent could not be made ready; `lore`'s or the vault's. The parent is left `open` holding what nested; nothing was undone. Read `failed`, then rerun, which resumes it. A `list` write in `failed` means the body rewrite was refused or did not read back: nothing was nested and the list was not rewritten. |
 | `internal-error` | The script hit a bug of its own; the script's. When JSON is on stdout the parent is left `open` and `failed` says where; with no JSON, nothing was written. Rerun once, and if it repeats report it to a maintainer. |
 
 A code shared with the gather table (`no-vaults`, `spec-not-found`, `spec-ambiguous`, `not-a-spec`,
@@ -419,8 +422,9 @@ Exit 0 prints one JSON object: `eligible` (`{name, revision, delivers, files}`),
 (`{name, reason}`, plus `dependency` for a `depends-outside` that names it) and `overlaps`
 (`{file, names}`). It decides which follow-ups are eligible, never a subagent's reply. Exit 2 is a
 failure with a `reason-code:` line on stderr: stop, report the code by the table below with one
-plain sentence, and nothing else. Exit 0 without a JSON object carrying those three keys is a
-failure too.
+plain sentence, and nothing else. Exit 1 (`not-a-followup-parent`) happens only with `--parent`, in
+the resume flow of step 7(b), which says what to do. Exit 0 without a JSON object carrying those
+three keys is a failure too.
 
 Report every left-out follow-up as one plain sentence for its reason, naming the follow-up:
 
@@ -433,6 +437,7 @@ Report every left-out follow-up as one plain sentence for its reason, naming the
 | `already-nested` | It already sits under another parent. |
 | `is-a-parent` | It is itself a parent task, not a leaf to build. |
 | `depends-outside` | It depends on the unfinished dependency named in `dependency`, which is not part of this set; when `dependency` is absent, it depends on unfinished work outside the set. |
+| `not-found` | The parent still lists it, but no record by that name exists any more (it was renamed or removed after the parent was written). Only the resume check reports it. |
 
 An included follow-up whose refinement did not land (a subagent that failed, or a record that still
 shows no refinement) is named with the write that did not land, `refinement of task/<name>`, in the
