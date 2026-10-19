@@ -1782,9 +1782,13 @@ FINDING_CAPTURE_VERDICTS.update(
         for site, verdicts, count in (
             ("fsplan", {"severity-name": "plain", "reviewer-name": "plain", "persisted-levels": "kept"}, 3),
             ("fsconsult", {"severity-name": "plain", "reviewer-name": "plain"}, 6),
+            ("fsdriver", {"severity-name": "plain", "reviewer-name": "plain", "persisted-levels": "kept"}, 6),
         )
         for n in range(1, count + 1)
     }
+    # fsdriver-2 closes with "under `*Critical:*`" in reader-facing text (severity-name internal): 5 of 6 plain, a
+    # clean majority.
+    | {"fs-fallback-fsdriver-2": {"severity-name": "internal", "reviewer-name": "plain", "persisted-levels": "kept"}}
 )
 
 
