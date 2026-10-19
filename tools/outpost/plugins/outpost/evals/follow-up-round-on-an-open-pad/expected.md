@@ -1,4 +1,4 @@
-# pad-follow-up-round — does a session add a follow-up visual question to the pad the user already has?
+# follow-up-round-on-an-open-pad — does a session add a follow-up visual question to the pad the user already has?
 
 Pre-registered before any arm is run: this file is committed before the first run directory
 is built. The verdicts below were written against the skill's branches, not against what a run
@@ -18,7 +18,7 @@ differed as follows, so the criteria below are not exactly the pre-registered on
 The rewording, and the matching widening of `grade-run.py`'s `_asks_in_words`, were made after
 seeing batch 1 runs and are post-hoc. They did not decide the verdict: re-graded under the old
 and the new rule, all 12 batch 2 finals score the same (0 flips, every treatment final contains
-`?`). See `MANUAL-EVAL.md`, "Case: pad-follow-up-round".
+`?`). See `MANUAL-EVAL.md`, "Case: follow-up-round-on-an-open-pad".
 
 ## What is under test
 
@@ -40,7 +40,7 @@ same in both arms; only the skill's text differs.
 
 Both arms get `arms/system-prompt.md` as the system prompt: the operating brief
 (`arms/operating-brief.md`) plus the live `tools/outpost/plugins/outpost/rules.md`, appended as
-`tools/outpost/tests/test_pad_follow_up_round_case.py` rebuilds it. The ruleset is what makes a
+`tools/outpost/tests/test_follow_up_round_on_an_open_pad_case.py` rebuilds it. The ruleset is what makes a
 session reach for a pad at all (its "Scratch pads" section), exactly as in a real install; it
 says nothing of rounds, so what happens once a pad exists is decided by the skill alone. An
 earlier batch ran without the ruleset and is logged in `MANUAL-EVAL.md` as an authoring error:

@@ -1,4 +1,4 @@
-"""Tests for the ``pad-follow-up-round`` eval case: its fixture builder.
+"""Tests for the ``follow-up-round-on-an-open-pad`` eval case: its fixture builder.
 
 The builder is run by its real path, then the real ``scratch_pad.py`` (the copy the builder
 placed in the run directory, the one an arm loads through ``--plugin-dir``) is run with the env
@@ -17,7 +17,7 @@ import pytest
 
 import arms_contract as ac
 
-CASE_DIR = ac.EVALS_DIR / "pad-follow-up-round"
+CASE_DIR = ac.EVALS_DIR / "follow-up-round-on-an-open-pad"
 BUILDER = CASE_DIR / "fixtures" / "make-fixture-env.sh"
 VARIANTS = ("follow-up-same-design", "follow-up-new-topic")
 
