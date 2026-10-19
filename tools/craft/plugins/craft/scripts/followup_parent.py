@@ -228,15 +228,17 @@ stdout and one `reason-code:` line on stderr, leaving the parent `open`:
        file children plus the held children, in body order), each `**Selection
        reason:**` read from the current body and sanitized as `render_body` does, so
        nothing but the template's shape survives; an unheld name absent from the file
-       is dropped from the list. One full-body update, confirmed by reading the listing
-       back with `parse_listing` (lore has no conditional write, so an edit landing
-       between the read and this write is lost; a mismatch is a failed `list`).
+       is dropped from the list. One full-body update, confirmed by reading
+       the whole body back and finding it equal to the rendered one (`lore`
+       stores a body byte for byte, so nothing is normalized; lore has no conditional
+       write, so an edit landing between the read and this write is lost; a refused or
+       unconfirmed write is a failed `list`, with nothing nested).
     2. Nest each file child in file order through the shared guard above.
     3. Flip to `ready` only when every name still listed is held, confirmed by a
        complete read, and the flip is confirmed by a complete read.
 Stdout JSON: `parent`; `removed`: the unheld names dropped from the list; `nested`: the
 file children this run confirmed nested; `failed`: `{name, write}` with `write` one of
-`list` (name is the parent: the body rewrite did not read back), `nest`, `confirm`, or
+`list` (name is the parent: the body rewrite was refused or did not read back whole), `nest`, `confirm`, or
 `ready` (name is the parent: the held set could not be confirmed complete, or the flip did
 not read back); `buildable`: true only on exit 0. A failure is `nesting-incomplete`, or its
 own code (`internal-error`, a `lore` failure code); running `resume` again completes it.
@@ -965,7 +967,7 @@ def resume_parent(runner, spec: str, parent_name: str, children: list[dict]) -> 
         reasons = listed_reasons(old_body)
         body = render_body(spec, [{"name": n, "reason": reasons.get(n, "")} for n in remaining])
         _write(runner, _update(vault, parent_name), stdin=body)
-        if _read_ok(lambda: parse_listing(_read_task(runner, vault, parent_name)[1])[0] == remaining):
+        if _read_ok(lambda: _read_task(runner, vault, parent_name)[1] == body):
             report["removed"] = removed
             _nest_children(runner, vault, parent_name, children, report)
             if not report["failed"]:

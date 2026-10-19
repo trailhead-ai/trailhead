@@ -2498,6 +2498,40 @@ def test_a_failed_body_rewrite_leaves_no_child_nested_and_the_body_unchanged(
     assert sidecar_of(env, vault, parent_name)["status"] == "open"
 
 
+def _with_extra_prose(env, vault, parent_name):
+    body = body_of(env, vault, parent_name)
+    edited = body.replace("**Delta design:**", "**Delta design:** EXTRA PROSE", 1)
+    assert edited != body
+    _lore(env, "record", "update", f"task/{parent_name}", "--vault", vault, stdin=edited)
+    return body_of(env, vault, parent_name)
+
+
+@pytest.mark.parametrize("silent", [False, True], ids=["write-refused", "write-silently-ignored"])
+def test_a_refused_body_rewrite_with_nothing_removed_is_still_a_failed_list_when_the_prose_survives(
+    lore_env, spec, tmp_path, capsys, silent
+):
+    env, vault = lore_env
+    parent_name, names = interrupted(env, vault, spec, tmp_path, capsys)
+    before = _with_extra_prose(env, vault, parent_name)
+
+    def hook(argv, stdin, runner):
+        if is_body_write(argv, parent_name):
+            return subprocess.CompletedProcess(argv, 0, "", "") if silent else refused(argv)
+
+    runner = EnvRunner(env, hook)
+    code, out, err = run_resume(runner, spec, parent_name, revisions(env, vault, names[1:]), tmp_path, capsys)
+    assert code == 2
+    assert reason_codes(err) == ["reason-code: nesting-incomplete"]
+    assert out == {
+        "parent": parent_name, "removed": [], "nested": [],
+        "failed": [{"name": parent_name, "write": "list"}], "buildable": False,
+    }
+    assert not any(is_nest(call) or is_flip(call) for call in runner.calls)
+    assert body_of(env, vault, parent_name) == before
+    assert parents_of(env, vault, names) == [parent_name, None, None]
+    assert sidecar_of(env, vault, parent_name)["status"] == "open"
+
+
 def test_a_failed_complete_read_before_the_flip_leaves_the_parent_open(lore_env, spec, tmp_path, capsys):
     env, vault = lore_env
     parent_name, names = interrupted(env, vault, spec, tmp_path, capsys)
