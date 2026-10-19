@@ -12,6 +12,7 @@ from __future__ import annotations
 import datetime
 import importlib.util
 import json
+import os
 import shlex
 import subprocess
 import sys
@@ -50,7 +51,8 @@ CLEAN = "**Delivers:** A new widget that frobs.\n\n**Files:** `src/a.py`, `src/b
 
 
 def make_followup(
-    env, vault, title, status="ready", body=CLEAN, labels=(), parent=None, depends=(), spec=None
+    env, vault, title, status="ready", body=CLEAN, labels=(), parent=None, depends=(), spec=None,
+    task_edge=None,
 ):
     args = ["record", "create", "--kind", "task", "--title", title, "--status", status,
             "--vault", vault]
@@ -62,6 +64,8 @@ def make_followup(
         args += ["--depends-on", dep]
     if spec:
         args += ["--related", f"spec={spec}"]
+    if task_edge:
+        args += ["--related", f"task={task_edge}"]
     return _lore(env, *args, stdin=body).split("/", 1)[1]
 
 
@@ -106,7 +110,7 @@ def spec(lore_env):
 
 def test_a_ready_follow_up_with_a_clean_body_is_eligible(lore_env, spec):
     env, vault = lore_env
-    name = make_followup(env, vault, "Clean one")
+    name = make_followup(env, vault, "Clean one", spec=spec)
     result = check_ok(env, spec, name)
     assert list(eligible(result)) == [name]
     assert result["left-out"] == []
@@ -132,7 +136,7 @@ def test_each_unrefined_or_unfit_follow_up_is_left_out_with_its_reason(
     lore_env, spec, kwargs, reason
 ):
     env, vault = lore_env
-    name = make_followup(env, vault, "Subject", **kwargs)
+    name = make_followup(env, vault, "Subject", **kwargs, spec=spec)
     result = check_ok(env, spec, name)
     assert result["eligible"] == []
     assert left_out(result)[name] == {"name": name, "reason": reason}
@@ -140,23 +144,23 @@ def test_each_unrefined_or_unfit_follow_up_is_left_out_with_its_reason(
 
 def test_a_follow_up_with_a_parent_is_already_nested(lore_env, spec):
     env, vault = lore_env
-    holder = make_followup(env, vault, "Holder", status="open")
-    name = make_followup(env, vault, "Nested", parent=holder)
+    holder = make_followup(env, vault, "Holder", status="open", spec=spec)
+    name = make_followup(env, vault, "Nested", parent=holder, spec=spec)
     result = check_ok(env, spec, name)
     assert left_out(result)[name] == {"name": name, "reason": "already-nested"}
 
 
 def test_a_ready_follow_up_carrying_a_route_label_is_routed_not_eligible(lore_env, spec):
     env, vault = lore_env
-    name = make_followup(env, vault, "Routed ready", labels=["route=plan"])
+    name = make_followup(env, vault, "Routed ready", labels=["route=plan"], spec=spec)
     result = check_ok(env, spec, name)
     assert left_out(result)[name]["reason"] == "routed-to-plan"
 
 
 def test_the_verdicts_are_decided_per_follow_up_within_one_call(lore_env, spec):
     env, vault = lore_env
-    good = make_followup(env, vault, "Good")
-    bad = make_followup(env, vault, "Bad", status="blocked")
+    good = make_followup(env, vault, "Good", spec=spec)
+    bad = make_followup(env, vault, "Bad", status="blocked", spec=spec)
     result = check_ok(env, spec, bad, good)
     assert list(eligible(result)) == [good]
     assert list(left_out(result)) == [bad]
@@ -167,15 +171,15 @@ def test_the_verdicts_are_decided_per_follow_up_within_one_call(lore_env, spec):
 
 def test_a_dependency_on_a_done_task_outside_the_set_keeps_it_eligible(lore_env, spec):
     env, vault = lore_env
-    dep = make_followup(env, vault, "Finished", status="done")
-    name = make_followup(env, vault, "Needs finished", depends=[dep])
+    dep = make_followup(env, vault, "Finished", status="done", spec=spec)
+    name = make_followup(env, vault, "Needs finished", depends=[dep], spec=spec)
     assert list(eligible(check_ok(env, spec, name))) == [name]
 
 
 def test_a_dependency_on_an_open_task_outside_the_set_is_depends_outside(lore_env, spec):
     env, vault = lore_env
-    dep = make_followup(env, vault, "Unfinished", status="open")
-    name = make_followup(env, vault, "Needs unfinished", depends=[dep])
+    dep = make_followup(env, vault, "Unfinished", status="open", spec=spec)
+    name = make_followup(env, vault, "Needs unfinished", depends=[dep], spec=spec)
     result = check_ok(env, spec, name)
     assert left_out(result)[name] == {
         "name": name, "reason": "depends-outside", "dependency": dep,
@@ -184,17 +188,17 @@ def test_a_dependency_on_an_open_task_outside_the_set_is_depends_outside(lore_en
 
 def test_a_dependency_on_a_dropped_task_is_depends_outside(lore_env, spec):
     env, vault = lore_env
-    dep = make_followup(env, vault, "Dropped dep", status="dropped")
-    name = make_followup(env, vault, "Needs dropped", depends=[dep])
+    dep = make_followup(env, vault, "Dropped dep", status="dropped", spec=spec)
+    name = make_followup(env, vault, "Needs dropped", depends=[dep], spec=spec)
     assert left_out(check_ok(env, spec, name))[name]["dependency"] == dep
 
 
 def test_a_dependency_on_a_superseded_task_is_depends_outside(lore_env, spec):
     env, vault = lore_env
-    dep = make_followup(env, vault, "Superseded dep", status="open")
-    successor = make_followup(env, vault, "Successor", status="open")
+    dep = make_followup(env, vault, "Superseded dep", status="open", spec=spec)
+    successor = make_followup(env, vault, "Successor", status="open", spec=spec)
     _lore(env, "record", "supersede", f"task/{dep}", "--by", f"task/{successor}")
-    name = make_followup(env, vault, "Needs superseded", depends=[dep])
+    name = make_followup(env, vault, "Needs superseded", depends=[dep], spec=spec)
     result = check_ok(env, spec, name)
     assert left_out(result)[name] == {
         "name": name, "reason": "depends-outside", "dependency": dep,
@@ -203,23 +207,23 @@ def test_a_dependency_on_a_superseded_task_is_depends_outside(lore_env, spec):
 
 def test_a_dependency_on_an_eligible_sibling_keeps_it_eligible(lore_env, spec):
     env, vault = lore_env
-    first = make_followup(env, vault, "First")
-    second = make_followup(env, vault, "Second", depends=[first])
+    first = make_followup(env, vault, "First", spec=spec)
+    second = make_followup(env, vault, "Second", depends=[first], spec=spec)
     assert set(eligible(check_ok(env, spec, second, first))) == {first, second}
 
 
 def test_a_dependent_sorting_before_its_dependency_chain_is_still_eligible(lore_env, spec):
     env, vault = lore_env
-    base = make_followup(env, vault, "Zulu base")
-    middle = make_followup(env, vault, "Yankee middle", depends=[base])
-    top = make_followup(env, vault, "Alpha top", depends=[middle])
+    base = make_followup(env, vault, "Zulu base", spec=spec)
+    middle = make_followup(env, vault, "Yankee middle", depends=[base], spec=spec)
+    top = make_followup(env, vault, "Alpha top", depends=[middle], spec=spec)
     assert set(eligible(check_ok(env, spec, top, middle, base))) == {top, middle, base}
 
 
 def test_a_dependency_on_a_left_out_sibling_is_left_out_naming_it(lore_env, spec):
     env, vault = lore_env
-    first = make_followup(env, vault, "First", status="blocked")
-    second = make_followup(env, vault, "Second", depends=[first])
+    first = make_followup(env, vault, "First", status="blocked", spec=spec)
+    second = make_followup(env, vault, "Second", depends=[first], spec=spec)
     result = check_ok(env, spec, first, second)
     assert result["eligible"] == []
     assert left_out(result)[first]["reason"] == "not-ready"
@@ -230,9 +234,9 @@ def test_a_dependency_on_a_left_out_sibling_is_left_out_naming_it(lore_env, spec
 
 def test_a_two_step_chain_through_a_left_out_sibling_is_left_out_throughout(lore_env, spec):
     env, vault = lore_env
-    root = make_followup(env, vault, "Root", status="blocked")
-    middle = make_followup(env, vault, "Middle", depends=[root])
-    leaf = make_followup(env, vault, "Leaf", depends=[middle])
+    root = make_followup(env, vault, "Root", status="blocked", spec=spec)
+    middle = make_followup(env, vault, "Middle", depends=[root], spec=spec)
+    leaf = make_followup(env, vault, "Leaf", depends=[middle], spec=spec)
     result = check_ok(env, spec, leaf, middle, root)
     assert result["eligible"] == []
     assert left_out(result)[middle]["dependency"] == root
@@ -243,8 +247,8 @@ def test_a_two_step_chain_through_a_left_out_sibling_is_left_out_throughout(lore
 
 def test_a_dependency_on_a_task_that_does_not_exist_is_depends_outside(lore_env, spec):
     env, vault = lore_env
-    dep = make_followup(env, vault, "Soon gone", status="open")
-    name = make_followup(env, vault, "Dangling", depends=[dep])
+    dep = make_followup(env, vault, "Soon gone", status="open", spec=spec)
+    name = make_followup(env, vault, "Dangling", depends=[dep], spec=spec)
     _lore(env, "record", "delete", f"task/{dep}", "--vault", vault)
     assert left_out(check_ok(env, spec, name))[name]["dependency"] == dep
 
@@ -259,7 +263,7 @@ def shown_revision(env, vault, name):
 
 def test_the_emitted_revision_is_the_one_lore_reports_and_follows_updates(lore_env, spec):
     env, vault = lore_env
-    name = make_followup(env, vault, "Revised")
+    name = make_followup(env, vault, "Revised", spec=spec)
     before = eligible(check_ok(env, spec, name))[name]["revision"]
     assert before == shown_revision(env, vault, name)
     _lore(env, "record", "update", f"task/{name}", stdin=CLEAN + "\nMore text.\n")
@@ -275,7 +279,7 @@ def test_delivers_and_files_carry_the_field_text(lore_env, spec):
         "**Test contract:**\n- a test\n\n**Files:** `src/a.py`\n`src/b.py` (new)\n\n"
         "## Flow-out\n\n- [ ] done\n"
     )
-    name = make_followup(env, vault, "Fields", body=body)
+    name = make_followup(env, vault, "Fields", body=body, spec=spec)
     item = eligible(check_ok(env, spec, name))[name]
     assert item["delivers"] == "First sentence. Second sentence over two lines."
     assert item["files"] == "`src/a.py` `src/b.py` (new)"
@@ -283,7 +287,7 @@ def test_delivers_and_files_carry_the_field_text(lore_env, spec):
 
 def test_a_missing_field_is_emitted_empty(lore_env, spec):
     env, vault = lore_env
-    name = make_followup(env, vault, "No fields", body="Just prose.\n")
+    name = make_followup(env, vault, "No fields", body="Just prose.\n", spec=spec)
     item = eligible(check_ok(env, spec, name))[name]
     assert item["delivers"] == "" and item["files"] == ""
 
@@ -291,7 +295,7 @@ def test_a_missing_field_is_emitted_empty(lore_env, spec):
 def test_a_credential_in_a_field_is_redacted(lore_env, spec):
     env, vault = lore_env
     body = "**Delivers:** Rotate AKIAIOSFODNN7EXAMPLE now.\n\n**Files:** `k/AKIAIOSFODNN7EXAMPLE.py`\n"
-    name = make_followup(env, vault, "Leaky", body=body)
+    name = make_followup(env, vault, "Leaky", body=body, spec=spec)
     r = run_check(env, spec, name)
     assert r.returncode == 0, r.stderr
     assert "AKIAIOSFODNN7EXAMPLE" not in r.stdout
@@ -302,7 +306,7 @@ def test_a_credential_in_a_field_is_redacted(lore_env, spec):
 def test_control_and_invisible_characters_in_a_field_are_stripped(lore_env, spec):
     env, vault = lore_env
     body = "**Delivers:** a\x1b[31mred\x07 and​zero‮width\n\n**Files:** `x.py`\n"
-    name = make_followup(env, vault, "Hostile", body=body)
+    name = make_followup(env, vault, "Hostile", body=body, spec=spec)
     item = eligible(check_ok(env, spec, name))[name]
     assert item["delivers"] == "a[31mred andzerowidth"
 
@@ -312,7 +316,7 @@ def test_an_over_long_field_is_truncated_with_the_marker(lore_env, spec):
     limit = parent.MAX_FIELD_CHARS
     text = sentence(limit + 50)
     body = f"**Delivers:** {text}\n\n**Files:** `src/a.py` {sentence(limit)}\n"
-    name = make_followup(env, vault, "Long", body=body)
+    name = make_followup(env, vault, "Long", body=body, spec=spec)
     item = eligible(check_ok(env, spec, name))[name]
     assert item["delivers"] == text[:limit] + parent.gather.TRUNCATION_MARKER
     assert item["files"].endswith(parent.gather.TRUNCATION_MARKER)
@@ -323,7 +327,7 @@ def test_a_field_one_past_the_bound_is_truncated(lore_env, spec):
     env, vault = lore_env
     limit = parent.MAX_FIELD_CHARS
     text = sentence(limit + 1)
-    name = make_followup(env, vault, "Past", body=f"**Delivers:** {text}\n")
+    name = make_followup(env, vault, "Past", body=f"**Delivers:** {text}\n", spec=spec)
     item = eligible(check_ok(env, spec, name))[name]
     assert item["delivers"] == text[:limit] + parent.gather.TRUNCATION_MARKER
 
@@ -332,7 +336,7 @@ def test_a_field_at_exactly_the_bound_is_not_truncated(lore_env, spec):
     env, vault = lore_env
     limit = parent.MAX_FIELD_CHARS
     text = sentence(limit)
-    name = make_followup(env, vault, "Edge", body=f"**Delivers:** {text}\n")
+    name = make_followup(env, vault, "Edge", body=f"**Delivers:** {text}\n", spec=spec)
     item = eligible(check_ok(env, spec, name))[name]
     assert item["delivers"] == text
 
@@ -342,24 +346,30 @@ def test_a_field_at_exactly_the_bound_is_not_truncated(lore_env, spec):
 
 def test_two_eligible_follow_ups_naming_one_file_overlap(lore_env, spec):
     env, vault = lore_env
-    one = make_followup(env, vault, "One", body="**Delivers:** a\n\n**Files:** `src/shared.py`, `src/one.py`\n")
-    two = make_followup(env, vault, "Two", body="**Delivers:** b\n\n**Files:** `src/shared.py`, `src/two.py`\n")
+    one = make_followup(
+        env, vault, "One", spec=spec,
+        body="**Delivers:** a\n\n**Files:** `src/shared.py`, `src/one.py`\n",
+    )
+    two = make_followup(
+        env, vault, "Two", spec=spec,
+        body="**Delivers:** b\n\n**Files:** `src/shared.py`, `src/two.py`\n",
+    )
     result = check_ok(env, spec, two, one)
     assert result["overlaps"] == [{"file": "src/shared.py", "names": sorted([one, two])}]
 
 
 def test_follow_ups_with_disjoint_files_have_no_overlaps(lore_env, spec):
     env, vault = lore_env
-    one = make_followup(env, vault, "One", body="**Delivers:** a\n\n**Files:** `src/one.py`\n")
-    two = make_followup(env, vault, "Two", body="**Delivers:** b\n\n**Files:** `src/two.py`\n")
+    one = make_followup(env, vault, "One", body="**Delivers:** a\n\n**Files:** `src/one.py`\n", spec=spec)
+    two = make_followup(env, vault, "Two", body="**Delivers:** b\n\n**Files:** `src/two.py`\n", spec=spec)
     assert check_ok(env, spec, one, two)["overlaps"] == []
 
 
 def test_a_credential_shaped_path_in_an_overlap_is_redacted(lore_env, spec):
     env, vault = lore_env
     body = "**Delivers:** a\n\n**Files:** `k/AKIAIOSFODNN7EXAMPLE.py`\n"
-    one = make_followup(env, vault, "One", body=body)
-    two = make_followup(env, vault, "Two", body=body)
+    one = make_followup(env, vault, "One", body=body, spec=spec)
+    two = make_followup(env, vault, "Two", body=body, spec=spec)
     r = run_check(env, spec, one, two)
     assert r.returncode == 0, r.stderr
     assert "AKIAIOSFODNN7EXAMPLE" not in r.stdout
@@ -370,7 +380,7 @@ def test_a_credential_shaped_path_in_an_overlap_is_redacted(lore_env, spec):
 
 def test_a_left_out_follow_up_does_not_create_an_overlap(lore_env, spec):
     env, vault = lore_env
-    one = make_followup(env, vault, "One", body="**Delivers:** a\n\n**Files:** `src/s.py`\n")
+    one = make_followup(env, vault, "One", body="**Delivers:** a\n\n**Files:** `src/s.py`\n", spec=spec)
     two = make_followup(
         env, vault, "Two", status="blocked", body="**Delivers:** b\n\n**Files:** `src/s.py`\n"
     )
@@ -379,8 +389,8 @@ def test_a_left_out_follow_up_does_not_create_an_overlap(lore_env, spec):
 
 def test_a_path_in_prose_is_not_an_overlap(lore_env, spec):
     env, vault = lore_env
-    one = make_followup(env, vault, "One", body="**Delivers:** a\n\n**Files:** src/s.py\n")
-    two = make_followup(env, vault, "Two", body="**Delivers:** b\n\n**Files:** src/s.py\n")
+    one = make_followup(env, vault, "One", body="**Delivers:** a\n\n**Files:** src/s.py\n", spec=spec)
+    two = make_followup(env, vault, "Two", body="**Delivers:** b\n\n**Files:** src/s.py\n", spec=spec)
     assert check_ok(env, spec, one, two)["overlaps"] == []
 
 
@@ -415,13 +425,17 @@ class Lore:
             if doc is None:
                 return subprocess.CompletedProcess(argv, 1, "", f"lore: record not found: {rid}\n")
             return subprocess.CompletedProcess(argv, 0, json.dumps(doc), "")
+        if argv[:2] == ["task", "list"]:
+            return subprocess.CompletedProcess(argv, 0, "[]", "")
+        if argv[0] == "search":
+            return subprocess.CompletedProcess(argv, 0, json.dumps({"hits": [], "truncated": False}), "")
         raise AssertionError(f"unexpected lore call {argv}")
 
 
 def task_doc(status="ready", body=CLEAN, revision="rev1", **sidecar):
     return {
         "revision": revision, "body": body,
-        "sidecar": {"kind": "task", "status": status, "title": "t", **sidecar},
+        "sidecar": {"kind": "task", "status": status, "title": "t", "related": {"spec": ["s"]}, **sidecar},
     }
 
 
@@ -612,15 +626,16 @@ def test_read_revision_of_a_missing_record_is_followup_not_found():
 
 def test_every_left_out_reason_the_script_emits_is_a_member_of_the_constant(lore_env, spec):
     env, vault = lore_env
-    holder = make_followup(env, vault, "Holder", status="open")
+    holder = make_followup(env, vault, "Holder", status="open", spec=spec)
     made = {
-        "unresolved-question": make_followup(env, vault, "U", status="open", body=UNRESOLVED_BODY),
-        "routed-to-plan": make_followup(env, vault, "P", status="open", labels=["route=plan"]),
-        "routed-to-brainstorm": make_followup(env, vault, "B", status="open", labels=["route=brainstorm"]),
-        "not-ready": make_followup(env, vault, "N", status="blocked"),
-        "already-nested": make_followup(env, vault, "A", parent=holder),
-        "is-a-parent": make_followup(env, vault, "I", labels=["craft/followup-parent"]),
-        "depends-outside": make_followup(env, vault, "D", depends=[holder]),
+        "unresolved-question": make_followup(env, vault, "U", status="open", body=UNRESOLVED_BODY, spec=spec),
+        "routed-to-plan": make_followup(env, vault, "P", status="open", labels=["route=plan"], spec=spec),
+        "routed-to-brainstorm": make_followup(env, vault, "B", status="open", labels=["route=brainstorm"], spec=spec),
+        "not-ready": make_followup(env, vault, "N", status="blocked", spec=spec),
+        "already-nested": make_followup(env, vault, "A", parent=holder, spec=spec),
+        "is-a-parent": make_followup(env, vault, "I", labels=["craft/followup-parent"], spec=spec),
+        "depends-outside": make_followup(env, vault, "D", depends=[holder], spec=spec),
+        "not-spec-linked": make_followup(env, vault, "L"),
     }
     result = check_ok(env, spec, *made.values())
     emitted = {i["name"]: i["reason"] for i in result["left-out"]}
@@ -933,7 +948,7 @@ def test_a_credential_shaped_token_in_a_reason_is_redacted():
 
 
 def test_control_characters_in_a_reason_are_stripped():
-    assert reason_line(body_for("bell\x07 esc\x1b[31m red\x00")) == "**Selection reason:** bell esc[31m red"
+    assert reason_line(body_for("bell\x07 esc\x1b[31m red\x00")) == "**Selection reason:** bell esc31m red"
 
 
 def test_invisible_format_characters_in_a_reason_are_stripped():
@@ -1074,7 +1089,7 @@ def test_a_failed_second_nesting_leaves_the_parent_open_holding_the_first_child(
     assert sidecar_of(env, vault, out["parent"])["status"] == "open"
     assert "Dropped" not in body_of(env, vault, out["parent"])
     _, state, _, _ = run_state(EnvRunner(env), spec, out["parent"], capsys)
-    assert state["held"] == [{"name": names[0], "status": "ready"}]
+    assert [(h["name"], h["status"]) for h in state["held"]] == [(names[0], "ready")]
     assert state["unheld"] == names[1:]
     assert gather_json(env, spec)["followup-parents"] == [out["parent"]]
     assert gathered_names(env, spec) == sorted(names[1:])
@@ -1795,9 +1810,11 @@ def run_state(runner, spec_name, parent_name, capsys):
     return code, (json.loads(out.out) if out.out.strip() else None), out.out, out.err
 
 
-def hand_parent(env, vault, spec_name, headings, status="open", labels=(LABEL,), related=None):
+def hand_parent(
+    env, vault, spec_name, headings, status="open", labels=(LABEL,), related=None, reason="because"
+):
     """A parent record written by hand, its body listing `headings` verbatim."""
-    sections = "".join(f"### task/{h}\n\n**Selection reason:** because\n\n" for h in headings)
+    sections = "".join(f"### task/{h}\n\n**Selection reason:** {reason}\n\n" for h in headings)
     args = ["record", "create", "--kind", "task", "--title", "Hand parent", "--status", status,
             "--vault", vault, "--related", f"spec={related or spec_name}"]
     for label in labels:
@@ -1821,7 +1838,10 @@ def test_state_of_an_assembled_parent_with_the_second_child_un_nested(lore_env, 
         "status": "ready",
         "listed": names,
         "held": sorted(
-            [{"name": names[0], "status": "ready"}, {"name": names[2], "status": "ready"}],
+            [
+                {"name": names[0], "status": "ready", "title": "Child 0", "delivers": "A new widget that frobs."},
+                {"name": names[2], "status": "ready", "title": "Child 2", "delivers": "A new widget that frobs."},
+            ],
             key=lambda i: i["name"],
         ),
         "unheld": [names[1]],
@@ -1929,7 +1949,9 @@ def test_held_children_returns_name_and_status_of_each_confirmed_child(lore_env,
     a, b = make_children(env, vault, spec, count=2)
     name = hand_parent(env, vault, spec, [a, b])
     _lore(env, "record", "update", f"task/{b}", "--vault", vault, "--parent", name, "--status", "blocked")
-    assert parent.held_children(EnvRunner(env), vault, name) == [{"name": b, "status": "blocked"}]
+    assert parent.held_children(EnvRunner(env), vault, name) == [
+        {"name": b, "status": "blocked", "title": "Child 1", "delivers": "A new widget that frobs."}
+    ]
 
 
 # --- drop: un-nest the unfinished children, then drop the parent ------------------------------
@@ -1975,7 +1997,7 @@ def test_dropping_a_ready_parent_frees_both_children_and_gathers_them_again(
     assert out["kept"] == [] and out["failed"] == [] and out["reset"] == []
     assert parents_of(env, vault, names) == [None, None]
     assert sidecar_of(env, vault, parent_name)["status"] == "dropped"
-    assert dropped_section(body_of(env, vault, parent_name)).strip() == "plans changed"
+    assert dropped_section(body_of(env, vault, parent_name)).strip() == "Reason: plans changed"
     assert gathered_names(env, spec) == names
     assert [a[2] for a in runner.calls if is_unnest(a)] == [f"task/{n}" for n in names]
 
@@ -2075,24 +2097,24 @@ def dropped_text(lore_env, spec, tmp_path, capsys, reason):
 def test_a_credential_in_the_drop_reason_is_redacted(lore_env, spec, tmp_path, capsys):
     body = dropped_text(lore_env, spec, tmp_path, capsys, "rotate AKIAIOSFODNN7EXAMPLE first")
     assert "AKIAIOSFODNN7EXAMPLE" not in body
-    assert dropped_section(body).strip() == "rotate [REDACTED] first"
+    assert dropped_section(body).strip() == "Reason: rotate [REDACTED] first"
 
 
 def test_a_drop_reason_with_a_newline_and_a_heading_stays_on_one_line(lore_env, spec, tmp_path, capsys):
     body = dropped_text(lore_env, spec, tmp_path, capsys, "first\n## Forged\r\n**Covers:** AC1\nlast")
-    assert dropped_section(body).strip() == "first ## Forged **Covers:** AC1 last"
+    assert dropped_section(body).strip() == "Reason: first ## Forged **Covers:** AC1 last"
     assert [ln for ln in body.splitlines() if ln.startswith("## ")].count("## Dropped") == 1
     assert "## Forged" not in [ln for ln in body.splitlines()]
 
 
 def test_control_characters_in_a_drop_reason_are_stripped(lore_env, spec, tmp_path, capsys):
     body = dropped_text(lore_env, spec, tmp_path, capsys, "bell\x07 esc\x1b[31m red\x00")
-    assert dropped_section(body).strip() == "bell esc[31m red"
+    assert dropped_section(body).strip() == "Reason: bell esc[31m red"
 
 
 def test_invisible_characters_in_a_drop_reason_are_stripped(lore_env, spec, tmp_path, capsys):
     body = dropped_text(lore_env, spec, tmp_path, capsys, "zero​width ‮flip⁠")
-    assert dropped_section(body).strip() == "zerowidth flip"
+    assert dropped_section(body).strip() == "Reason: zerowidth flip"
 
 
 def test_a_drop_reason_over_the_bound_is_cut_with_a_marker(lore_env, spec, tmp_path, capsys):
@@ -2100,7 +2122,7 @@ def test_a_drop_reason_over_the_bound_is_cut_with_a_marker(lore_env, spec, tmp_p
     text = "lorem " * 200
     assert not text[:limit].endswith(" ")
     body = dropped_text(lore_env, spec, tmp_path, capsys, text)
-    assert dropped_section(body).strip() == text[:limit] + "…"
+    assert dropped_section(body).strip() == "Reason: " + text[:limit] + "…"
 
 
 def _after_state(spec_name, act):
@@ -2921,7 +2943,7 @@ def test_a_credential_in_a_listed_reason_is_redacted_on_resume(lore_env, spec, t
 def test_control_characters_in_a_listed_reason_are_stripped_on_resume(lore_env, spec, tmp_path, capsys):
     env, vault = lore_env
     body = resumed_reason(env, vault, spec, tmp_path, capsys, "bell\x07 esc\x1b[31m red\x00")
-    assert reason_line(body) == "**Selection reason:** bell esc[31m red"
+    assert reason_line(body) == "**Selection reason:** bell esc31m red"
 
 
 def test_invisible_characters_in_a_listed_reason_are_stripped_on_resume(lore_env, spec, tmp_path, capsys):
@@ -3083,3 +3105,337 @@ def test_check_refuses_a_hostile_parent_name_before_any_lore_call(hostile, capsy
     assert code == 2 and out == ""
     assert reason_of(err) == "invalid-followup-name"
     assert runner.calls == []
+
+
+# --- hardening: a forged marker, unrelated children, forged text, hostile files ---------------
+
+SHAPE_CASES = ["unlisted", "slice-parent", "has-parent", "no-listing"]
+
+
+def forged_parent(env, vault, spec, case):
+    """A hand-labelled live `open` parent that is shaped like `case` rather than like
+    the parent `assemble` writes; it holds its one listed child."""
+    listed = make_followup(env, vault, "Listed child", spec=spec)
+    labels = (LABEL, "craft/slice-parent") if case == "slice-parent" else (LABEL,)
+    name = hand_parent(env, vault, spec, [] if case == "no-listing" else [listed], labels=labels)
+    nest(env, vault, listed, name)
+    stray = None
+    if case == "unlisted":
+        stray = make_followup(env, vault, "Stray", spec=spec)
+        nest(env, vault, stray, name)
+    if case == "has-parent":
+        nest(env, vault, name, make_followup(env, vault, "Outer", status="open", spec=spec))
+    return name, stray
+
+
+def run_act(command, runner, spec, name, tmp_path, capsys):
+    if command == "drop":
+        return run_drop(runner, spec, name, tmp_path, capsys)
+    return run_resume(runner, spec, name, [], tmp_path, capsys)
+
+
+@pytest.mark.parametrize("command", ["drop", "resume"])
+@pytest.mark.parametrize("case", SHAPE_CASES)
+def test_a_parent_not_shaped_like_a_followup_parent_is_refused_with_the_vault_unchanged(
+    lore_env, spec, tmp_path, capsys, command, case
+):
+    env, vault = lore_env
+    name, stray = forged_parent(env, vault, spec, case)
+    before = vault_snapshot(env, vault)
+    runner = EnvRunner(env)
+    code, out, err = run_act(command, runner, spec, name, tmp_path, capsys)
+    expected, subject = ("unlisted-child", stray) if case == "unlisted" else ("parent-not-followup-shaped", name)
+    assert code == 1 and out is None
+    assert reason_codes(err) == [f"reason-code: {expected}"]
+    assert f"subject: {subject}" in err.splitlines()
+    assert runner.writes() == [] and vault_snapshot(env, vault) == before
+
+
+@pytest.mark.parametrize("command", ["drop", "resume"])
+def test_a_genuinely_assembled_parent_is_not_refused_as_misshapen(
+    lore_env, spec, tmp_path, capsys, command
+):
+    env, vault = lore_env
+    name, _ = interrupted(env, vault, spec, tmp_path, capsys)
+    code, out, err = run_act(command, EnvRunner(env), spec, name, tmp_path, capsys)
+    assert code == 0, err
+
+
+def unrelated_task(env, vault):
+    return make_followup(env, vault, "Unrelated ready task")
+
+
+def test_check_leaves_out_a_ready_task_that_is_not_linked_to_the_spec(lore_env, spec):
+    env, vault = lore_env
+    outsider = unrelated_task(env, vault)
+    linked = make_followup(env, vault, "Linked task", spec=spec)
+    result = check_ok(env, spec, outsider, linked)
+    assert left_out(result) == {outsider: {"name": outsider, "reason": "not-spec-linked"}}
+    assert list(eligible(result)) == [linked]
+
+
+def test_a_task_the_spec_names_is_linked_though_it_does_not_name_the_spec(lore_env):
+    env, vault = lore_env
+    named = unrelated_task(env, vault)
+    owner = make_spec(env, vault, "Names a task", status="complete", related=[f"task={named}"])
+    assert list(eligible(check_ok(env, owner, named))) == [named]
+
+
+@pytest.mark.parametrize("anchor", ["slice", "slice-child"])
+def test_a_follow_up_linked_to_a_slice_of_the_spec_rather_than_the_spec_is_eligible_and_nests(
+    lore_env, spec, tmp_path, capsys, anchor
+):
+    env, vault = lore_env
+    slice_name = make_followup(env, vault, "A slice", status="done", labels=["craft/slice-parent"], spec=spec)
+    child = make_followup(env, vault, "Finished child", status="done", parent=slice_name)
+    follow_up = make_followup(env, vault, "Follow-up", task_edge=slice_name if anchor == "slice" else child)
+    assert list(eligible(check_ok(env, spec, follow_up))) == [follow_up]
+    code, out, err = run_assemble(tmp_path, EnvRunner(env), spec, confirm(env, vault, [follow_up]), capsys)
+    assert code == 0, err
+    assert out["nested"] == [follow_up]
+
+
+def test_check_with_a_parent_also_leaves_out_a_task_not_linked_to_the_spec(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    outsider = unrelated_task(env, vault)
+    name = hand_parent(env, vault, spec, [outsider])
+    code, out, err = run_check_json(EnvRunner(env), spec, "--parent", name, outsider, capsys=capsys)
+    assert code == 0, err
+    assert out["eligible"] == []
+    assert out["left-out"] == [{"name": outsider, "reason": "not-spec-linked"}]
+
+
+def test_assemble_refuses_a_child_not_linked_to_the_spec_with_the_vault_unchanged(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    outsider = unrelated_task(env, vault)
+    children = confirm(env, vault, [outsider])
+    before = vault_snapshot(env, vault)
+    runner = EnvRunner(env)
+    code, out, err = run_assemble(tmp_path, runner, spec, children, capsys)
+    assert_refused(code, out, err, runner, "child-not-eligible", outsider)
+    assert vault_snapshot(env, vault) == before
+
+
+def test_resume_refuses_a_listed_child_not_linked_to_the_spec_and_leaves_the_parent_open(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    outsider = unrelated_task(env, vault)
+    name = hand_parent(env, vault, spec, [outsider])
+    before = vault_snapshot(env, vault)
+    runner = EnvRunner(env)
+    code, out, err = run_resume(runner, spec, name, revisions(env, vault, [outsider]), tmp_path, capsys)
+    assert_refused(code, out, err, runner, "child-not-eligible", outsider)
+    assert vault_snapshot(env, vault) == before
+    assert sidecar_of(env, vault, name)["status"] == "open"
+
+
+def test_resume_refuses_a_held_child_not_linked_to_the_spec(lore_env, spec, tmp_path, capsys):
+    env, vault = lore_env
+    linked = make_followup(env, vault, "Linked child", spec=spec)
+    outsider = unrelated_task(env, vault)
+    name = hand_parent(env, vault, spec, [linked, outsider])
+    nest(env, vault, outsider, name)
+    before = vault_snapshot(env, vault)
+    runner = EnvRunner(env)
+    code, out, err = run_resume(runner, spec, name, revisions(env, vault, [linked]), tmp_path, capsys)
+    assert_refused(code, out, err, runner, "child-not-eligible", outsider)
+    assert vault_snapshot(env, vault) == before
+
+
+def test_state_emits_a_sanitized_title_and_delivers_for_each_held_child(lore_env, spec, capsys):
+    env, vault = lore_env
+    long_text = "lorem " * 500
+    noisy = make_followup(
+        env, vault, "Zero​width title", spec=spec,
+        body=f"**Delivers:** first\nline\x07 {long_text}\n\n**Files:** `a.py`\n",
+    )
+    plain = make_followup(env, vault, "Plain title", spec=spec, body="**Delivers:** one thing.\n")
+    name = hand_parent(env, vault, spec, [noisy, plain])
+    nest(env, vault, noisy, name)
+    nest(env, vault, plain, name)
+    code, out, _, err = run_state(EnvRunner(env), spec, name, capsys)
+    assert code == 0, err
+    held = {item["name"]: item for item in out["held"]}
+    expected = parent._one_line(f"first\nline\x07 {long_text}", parent.MAX_FIELD_CHARS)
+    assert expected.endswith("…") and "\x07" not in expected
+    assert held[noisy] == {"name": noisy, "status": "ready", "title": "Zerowidth title", "delivers": expected}
+    assert held[plain] == {"name": plain, "status": "ready", "title": "Plain title", "delivers": "one thing."}
+
+
+def test_a_drop_report_keeps_only_the_name_and_status_of_a_kept_child(lore_env, spec, tmp_path, capsys):
+    env, vault = lore_env
+    done = make_followup(env, vault, "Finished child", status="done", spec=spec)
+    name = hand_parent(env, vault, spec, [done], status="ready")
+    nest(env, vault, done, name)
+    code, out, err = run_drop(EnvRunner(env), spec, name, tmp_path, capsys)
+    assert code == 0, err
+    assert out["kept"] == [{"name": done, "status": "done"}]
+
+
+FORGED_REASON = (
+    "x [click](https://evil.example/?q=1) ![i](https://evil.example/p.png) <!-- hidden --> `tick`"
+)
+FORGED_REASON_CLEAN = "x click(https://evil.example/?q=1) i(https://evil.example/p.png) -- hidden -- tick"
+
+
+@pytest.mark.parametrize("char", ["[", "]", "<", ">", "`", "!"])
+def test_render_body_strips_each_markdown_active_character_from_a_reason(char):
+    assert reason_line(body_for(f"a{char}b")) == "**Selection reason:** ab"
+
+
+def test_assemble_carries_a_forged_reason_into_the_parent_body_without_markdown_syntax(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    names = make_children(env, vault, spec, count=1)
+    children = [{**c, "reason": FORGED_REASON} for c in confirm(env, vault, names)]
+    code, out, err = run_assemble(tmp_path, EnvRunner(env), spec, children, capsys)
+    assert code == 0, err
+    assert reason_line(body_of(env, vault, out["parent"])) == f"**Selection reason:** {FORGED_REASON_CLEAN}"
+
+
+def test_resume_carries_a_forged_listed_reason_into_the_parent_body_without_markdown_syntax(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    names = make_children(env, vault, spec, count=1)
+    name = hand_parent(env, vault, spec, names, reason=FORGED_REASON)
+    code, out, err = run_resume(EnvRunner(env), spec, name, revisions(env, vault, names), tmp_path, capsys)
+    assert code == 0, err
+    assert reason_line(body_of(env, vault, name)) == f"**Selection reason:** {FORGED_REASON_CLEAN}"
+
+
+def resume_with_injection(env, vault, spec, tmp_path, capsys, inject):
+    """Resume a parent whose one listed child is unheld, running `inject(parent, child)`
+    straight after the body rewrite lands."""
+    (child,) = make_children(env, vault, spec, count=1)
+    held = make_followup(env, vault, "Held child", spec=spec)
+    name = hand_parent(env, vault, spec, [held, child])
+    nest(env, vault, held, name)
+
+    def hook(argv, stdin, runner):
+        if is_body_write(argv, name):
+            done = runner.real(argv, stdin)
+            inject(name, held)
+            return done
+
+    runner = EnvRunner(env, hook)
+    code, out, err = run_resume(runner, spec, name, revisions(env, vault, [child]), tmp_path, capsys)
+    return name, runner, code, out, err
+
+
+@pytest.mark.parametrize("change", ["stray-nested", "held-child-blocked"])
+def test_resume_does_not_flip_when_the_held_set_changed_after_the_body_rewrite(
+    lore_env, spec, tmp_path, capsys, change
+):
+    env, vault = lore_env
+    stray = make_followup(env, vault, "Stray", spec=spec)
+
+    def inject(name, held):
+        if change == "stray-nested":
+            nest(env, vault, stray, name)
+        else:
+            _lore(env, "record", "update", f"task/{held}", "--vault", vault, "--status", "blocked")
+
+    name, runner, code, out, err = resume_with_injection(env, vault, spec, tmp_path, capsys, inject)
+    assert code == 2
+    assert reason_codes(err) == ["reason-code: nesting-incomplete"]
+    assert out["buildable"] is False
+    assert {"name": name, "write": "ready"} in out["failed"]
+    assert not any(is_flip(a) for a in runner.calls)
+    assert sidecar_of(env, vault, name)["status"] == "open"
+
+
+def test_a_symlinked_children_file_is_refused_for_both_loaders(tmp_path, capsys):
+    real = tmp_path / "real.json"
+    real.write_text(json.dumps([GOOD]))
+    link = tmp_path / "link.json"
+    link.symlink_to(real)
+    for argv in (["assemble", "s", "--children", str(link)], ["resume", "s", "p", "--children", str(link)]):
+        code, out, err, _ = assemble_raw(tmp_path, None, capsys, argv=argv)
+        assert code == 2 and reason_of(err) == "invalid-children-file"
+
+
+def test_a_children_file_that_is_not_a_regular_file_is_refused_even_when_it_holds_valid_json(
+    tmp_path, capsys
+):
+    fifo = tmp_path / "children.fifo"
+    os.mkfifo(fifo)
+    keep_open = os.open(fifo, os.O_RDWR)
+    try:
+        os.write(keep_open, json.dumps([GOOD]).encode())
+        code, out, err, runner = assemble_raw(
+            tmp_path, None, capsys, argv=["assemble", "s", "--children", str(fifo)]
+        )
+    finally:
+        os.close(keep_open)
+    assert code == 2 and out == "" and reason_of(err) == "invalid-children-file"
+    assert runner.calls == []
+
+
+def test_a_children_file_over_the_cap_is_refused_and_one_at_the_cap_is_read(tmp_path, capsys):
+    cap = parent.MAX_CHILDREN_FILE_BYTES
+    head = json.dumps([{**GOOD, "reason": ""}])
+    exact = json.dumps([{**GOOD, "reason": "x" * (cap - len(head))}])
+    assert len(exact.encode()) == cap
+    code, out, err, runner = assemble_raw(tmp_path, exact + " ", capsys)
+    assert code == 2 and reason_of(err) == "invalid-children-file" and runner.calls == []
+    (tmp_path / "children.json").write_text(exact)
+    assert parent.load_children(str(tmp_path / "children.json"))[0]["name"] == "a"
+
+
+@pytest.fixture
+def small_json_stack(monkeypatch):
+    """`json.loads` overflowing its stack on deeply nested text, as it does on interpreters
+    whose parser recursion limit is lower than the file-size cap allows depth for."""
+    real = json.loads
+
+    def loads(text, *args, **kwargs):
+        if isinstance(text, str) and text.startswith("[[[["):
+            raise RecursionError("maximum recursion depth exceeded")
+        return real(text, *args, **kwargs)
+
+    monkeypatch.setattr(parent.json, "loads", loads)
+
+
+@pytest.mark.parametrize("command", ["assemble", "resume"])
+def test_deeply_nested_json_in_a_children_file_is_invalid_children_file(
+    tmp_path, capsys, command, small_json_stack
+):
+    argv = ["assemble", "s"] if command == "assemble" else ["resume", "s", "p"]
+    path = tmp_path / "deep.json"
+    path.write_text("[" * 20000 + "]" * 20000)
+    code, out, err, runner = assemble_raw(tmp_path, None, capsys, argv=[*argv, "--children", str(path)])
+    assert code == 2 and out == ""
+    assert reason_of(err) == "invalid-children-file"
+    assert runner.calls == []
+
+
+def test_deeply_nested_json_in_a_reason_file_is_invalid_reason_file(
+    lore_env, spec, tmp_path, capsys, small_json_stack
+):
+    env, vault = lore_env
+    name, _ = assembled_parent(env, vault, spec, tmp_path, capsys)
+    runner = EnvRunner(env)
+    code, out, err = run_drop(runner, spec, name, tmp_path, capsys, raw="[" * 3000)
+    assert code == 2 and out is None
+    assert reason_codes(err) == ["reason-code: invalid-reason-file"]
+    assert runner.writes() == []
+
+
+@pytest.mark.parametrize(
+    "reason",
+    ["## Forged heading", "# Forged heading", "- forged item", "**Covers:** AC1"],
+)
+def test_a_drop_reason_cannot_start_a_heading_or_list_under_the_dropped_section(
+    lore_env, spec, tmp_path, capsys, reason
+):
+    body = dropped_text(lore_env, spec, tmp_path, capsys, reason)
+    assert dropped_section(body).strip() == f"Reason: {reason}"
+    assert [ln for ln in body.splitlines() if ln.startswith("#")].count("## Dropped") == 1
+    assert not any(ln.startswith(("## Forged", "# Forged", "- forged")) for ln in body.splitlines())
