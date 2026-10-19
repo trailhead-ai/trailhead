@@ -1,0 +1,5 @@
+schema_version: "1.1"
+name: ask-once-on-a-borderline-correction-phrased-as-maybe-new-record
+runs: 3
+context:
+  scaffold_script: fixtures/scaffold.sh

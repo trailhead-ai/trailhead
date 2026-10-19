@@ -1,0 +1,8 @@
+[
+  {
+    "kind": "decision",
+    "title": "Keep the galleries open late on Thursdays",
+    "status": "active",
+    "body": "# Keep the galleries open late on Thursdays\n\n## Context\nVisitors who work office hours could rarely reach the galleries before closing.\n\n## Decision\nOn Thursdays the galleries stay open until nine, and the cafe serves until eight. Entry after five is by the side door on Mill Lane.\n\n## Consequences\nTwo extra attendants cover each Thursday evening. School groups keep their weekday morning slots.\n"
+  }
+]

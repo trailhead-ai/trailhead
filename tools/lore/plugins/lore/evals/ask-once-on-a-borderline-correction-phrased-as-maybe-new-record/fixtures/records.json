@@ -1,0 +1,8 @@
+[
+  {
+    "kind": "decision",
+    "title": "Check hotel guests in at lobby kiosks",
+    "status": "active",
+    "body": "# Check hotel guests in at lobby kiosks\n\n## Context\nQueues at the front desk of the Quayside Hotel ran past twenty minutes on Friday evenings.\n\n## Decision\nGuests check in at self-service kiosks in the lobby, and the porters take each guest's bags up to the room as soon as the kiosk prints the room card. Front-desk staff stay on hand for guests who need help at a kiosk.\n\n## Consequences\nFriday queues fell to a few minutes. The front desk now closes at midnight.\n"
+  }
+]

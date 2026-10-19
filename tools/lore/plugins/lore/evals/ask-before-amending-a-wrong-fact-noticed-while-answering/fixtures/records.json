@@ -1,0 +1,14 @@
+[
+  {
+    "kind": "area",
+    "title": "Forklift charging bay",
+    "status": "active",
+    "body": "# Forklift charging bay\n\n## Profile\nThe charging bay at the north dock has twelve chargers; four more were fitted during the March refit, which brought it up from eight. Each charger serves one truck at a time and needs about six hours for a full charge.\n\n## Owners\nFacilities looks after the chargers. The night shift lead runs the plug-in rota.\n"
+  },
+  {
+    "kind": "decision",
+    "title": "Charge forklift trucks overnight in the north bay",
+    "status": "active",
+    "body": "# Charge forklift trucks overnight in the north bay\n\n## Context\nCharging during the day took trucks off the floor in peak picking hours.\n\n## Decision\nEvery truck is plugged in when the second shift ends and charges overnight in the bay described in [[area/forklift-charging-bay]]. The bay has eight chargers, so no truck waits for a free plug.\n\n## Consequences\nThe night shift lead owns the plug-in rota. Trucks that miss the plug-in window start the morning on a partial charge.\n"
+  }
+]
