@@ -53,7 +53,10 @@ emitted. A `depends-on` that is not a list of strings makes the record malformed
 otherwise, as `state` decides): a dependency on a child that parent already holds counts as
 inside the set, exactly as `resume` decides it, so the pre-resume check agrees with what
 `resume` accepts. The held children are evaluated with the set (they must still be eligible
-to count) but are never reported themselves.
+or `done` to count) but are never reported themselves. A requested name that parent lists as
+unheld but that resolves to no record (a follow-up renamed or removed after the parent's body
+was written) is left out as `not-found` instead of failing the check; without `--parent`, or
+for a name the parent does not list, a missing record is `followup-not-found`.
 
 When several rules apply, the left-out reason is the first of: `is-a-parent`,
 `already-nested`, `routed-to-plan`, `routed-to-brainstorm`,
@@ -61,6 +64,8 @@ When several rules apply, the left-out reason is the first of: `is-a-parent`,
 
 Exit codes of `check`:
     0  the JSON object is on stdout.
+    1  `--parent` names a record that is not a follow-up parent of the spec
+       (`not-a-followup-parent`); nothing is written to stdout.
     2  could not check; nothing is written to stdout. stderr carries one
        `reason-code:` line, one of REASON_CODES.
 
@@ -257,7 +262,7 @@ file children this run confirmed nested; `failed`: `{name, write}` with `write` 
 not read back); `buildable`: true only on exit 0. A failure is `nesting-incomplete`, or its
 own code (`internal-error`, a `lore` failure code); running `resume` again completes it.
 
-`check_followups(runner, spec, names)` is the same check as an importable
+`check_followups(runner, spec, names, parent=None)` is the same check as an importable
 function, returning the structure the JSON carries; `read_revision(runner,
 vault, name)` is the per-record revision read it uses.
 """
@@ -344,6 +349,7 @@ LEFT_OUT_REASONS = frozenset(
         "already-nested",
         "is-a-parent",
         "depends-outside",
+        "not-found",
     }
 )
 
@@ -485,7 +491,9 @@ def _classify(
         else:
             candidates[name] = _task_dependencies(sidecar)
 
-    done_outside: dict[str, bool] = {}
+    done_outside: dict[str, bool] = {
+        name: True for name in held if records[name][0]["status"] == "done"
+    }
     for deps in candidates.values():
         for dep in deps:
             if _bare_task_name(dep) and dep not in records and dep not in done_outside:
@@ -515,7 +523,9 @@ def _classify(
 def check_followups(runner, spec: str, names: list[str], parent: str | None = None) -> dict:
     """Sort the named follow-ups of `spec` into eligible and left out. With `parent`, a
     follow-up depending on a child that follow-up parent already holds counts that
-    dependency as inside the set, exactly as `resume` decides it."""
+    dependency as inside the set when the child is eligible or `done`, as `resume`
+    decides it, and a name that parent lists as unheld but that no longer resolves
+    to a record is left out as `not-found`."""
     if not gather._shape_ok(spec):
         raise ParentError("invalid-spec-name")
     if not all(gather._shape_ok(n) for n in names):
@@ -526,11 +536,22 @@ def check_followups(runner, spec: str, names: list[str], parent: str | None = No
     vault, _ = gather.resolve_spec(runner, spec)
 
     held: frozenset[str] = frozenset()
+    unheld: frozenset[str] = frozenset()
     if parent is not None:
-        held = frozenset(item["name"] for item in parent_state(runner, spec, parent)["held"]) - set(names)
-    records = {n: _read_task(runner, vault, n) for n in [*names, *sorted(held)]}
+        state = parent_state(runner, spec, parent)
+        held = frozenset(item["name"] for item in state["held"]) - set(names)
+        unheld = frozenset(state["unheld"])
+    records: dict[str, tuple[dict, str, str]] = {}
+    gone: dict[str, dict] = {}
+    for name in [*names, *sorted(held)]:
+        try:
+            records[name] = _read_task(runner, vault, name)
+        except ParentError as err:
+            if err.reason != "followup-not-found" or name not in unheld:
+                raise
+            gone[name] = _left_out(name, "not-found")
     accepted, left_out = _classify(runner, vault, records, held, parent)
-    return _report(records, names, accepted, left_out)
+    return _report(records, names, accepted, {**left_out, **gone})
 
 
 def _report(records: dict, names: list[str], accepted: set[str], left_out: dict[str, dict]) -> dict:

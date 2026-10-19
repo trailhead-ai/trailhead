@@ -625,7 +625,8 @@ def test_every_left_out_reason_the_script_emits_is_a_member_of_the_constant(lore
     result = check_ok(env, spec, *made.values())
     emitted = {i["name"]: i["reason"] for i in result["left-out"]}
     assert emitted == {name: reason for reason, name in made.items()}
-    assert set(emitted.values()) == parent.LEFT_OUT_REASONS
+    # `not-found` needs a --parent listing, pinned by its own check --parent tests.
+    assert set(emitted.values()) == parent.LEFT_OUT_REASONS - {"not-found"}
 
 
 def test_an_emitted_left_out_reason_outside_the_constant_is_refused():
@@ -2463,6 +2464,95 @@ def test_check_without_the_parent_still_counts_that_dependency_as_outside(lore_e
     assert out["left-out"] == [{"name": b, "reason": "depends-outside", "dependency": a}]
 
 
+def test_check_with_the_parent_counts_a_dependency_on_a_done_held_child_as_satisfied(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    parent_name, a, b = dependent_pair(env, vault, spec, tmp_path, capsys)
+    _lore(env, "record", "update", f"task/{a}", "--vault", vault, "--status", "done")
+    code, plain, err = run_check_json(EnvRunner(env), spec, b, capsys=capsys)
+    assert code == 0, err
+    assert [item["name"] for item in plain["eligible"]] == [b]
+    code, out, err = run_check_json(EnvRunner(env), spec, b, "--parent", parent_name, capsys=capsys)
+    assert code == 0, err
+    assert [item["name"] for item in out["eligible"]] == [b] and out["left-out"] == []
+
+
+def test_check_with_the_parent_still_counts_a_dependency_on_a_blocked_held_child_as_unfinished(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    parent_name, a, b = dependent_pair(env, vault, spec, tmp_path, capsys)
+    _lore(env, "record", "update", f"task/{a}", "--vault", vault, "--status", "blocked")
+    code, out, err = run_check_json(EnvRunner(env), spec, b, "--parent", parent_name, capsys=capsys)
+    assert code == 0, err
+    assert out["left-out"] == [{"name": b, "reason": "depends-outside", "dependency": a}]
+
+
+def renamed_third_child(env, vault, spec, tmp_path, capsys):
+    """(parent, names, old): an interrupted parent whose unheld third child was renamed, so
+    the parent's body still lists `old`, the name it no longer has."""
+    parent_name, names = interrupted(env, vault, spec, tmp_path, capsys, fail_at=2)
+    old = names[2]
+    _lore(env, "record", "rename", f"task/{old}", "--vault", vault, "--title", "Renamed third")
+    return parent_name, names, old
+
+
+def test_a_renamed_unheld_child_stays_listed_under_its_old_name_in_the_parent_body(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    parent_name, names, old = renamed_third_child(env, vault, spec, tmp_path, capsys)
+    code, state, _, err = run_state(EnvRunner(env), spec, parent_name, capsys)
+    assert code == 0, err
+    assert state["unheld"] == [old]
+
+
+def test_check_with_the_parent_reports_a_listed_unheld_name_that_no_longer_resolves_as_not_found(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    parent_name, names, old = renamed_third_child(env, vault, spec, tmp_path, capsys)
+    code, out, err = run_check_json(EnvRunner(env), spec, old, "--parent", parent_name, capsys=capsys)
+    assert code == 0, err
+    assert out["eligible"] == [] and out["left-out"] == [{"name": old, "reason": "not-found"}]
+
+
+def test_check_with_the_parent_still_refuses_a_missing_name_the_parent_does_not_list(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    parent_name, names, old = renamed_third_child(env, vault, spec, tmp_path, capsys)
+    code, out, err = run_check_json(
+        EnvRunner(env), spec, "never-existed", "--parent", parent_name, capsys=capsys
+    )
+    assert code == 2 and out is None
+    assert reason_codes(err) == ["reason-code: followup-not-found"]
+
+
+def test_check_without_the_parent_still_refuses_a_missing_name(lore_env, spec, tmp_path, capsys):
+    env, vault = lore_env
+    parent_name, names, old = renamed_third_child(env, vault, spec, tmp_path, capsys)
+    code, out, err = run_check_json(EnvRunner(env), spec, old, capsys=capsys)
+    assert code == 2 and out is None
+    assert reason_codes(err) == ["reason-code: followup-not-found"]
+
+
+def test_a_renamed_child_goes_through_check_then_resume_to_a_ready_parent_without_the_stale_name(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    parent_name, names, old = renamed_third_child(env, vault, spec, tmp_path, capsys)
+    code, checked, err = run_check_json(EnvRunner(env), spec, old, "--parent", parent_name, capsys=capsys)
+    assert code == 0, err
+    assert [item["name"] for item in checked["left-out"]] == [old]
+    code, out, err = run_resume(EnvRunner(env), spec, parent_name, [], tmp_path, capsys)
+    assert code == 0, err
+    assert out["removed"] == [old] and out["buildable"] is True
+    assert sidecar_of(env, vault, parent_name)["status"] == "ready"
+    assert f"### task/{old}" not in body_of(env, vault, parent_name)
+
+
 def test_check_with_a_parent_that_is_not_a_follow_up_parent_of_the_spec_is_refused(
     lore_env, spec, capsys
 ):
@@ -2983,4 +3073,13 @@ def test_a_hostile_name_is_refused_before_the_reason_or_children_file_is_read(
     code, out, err = run_main(runner, *argv, capsys=capsys)
     assert code == 2 and out == ""
     assert reason_of(err) == ("invalid-spec-name" if position == "spec" else "invalid-followup-name")
+    assert runner.calls == []
+
+
+@pytest.mark.parametrize("hostile", HOSTILE_NAMES)
+def test_check_refuses_a_hostile_parent_name_before_any_lore_call(hostile, capsys):
+    runner = Lore()
+    code, out, err = run_main(runner, "check", "s", f"--parent={hostile}", "f", capsys=capsys)
+    assert code == 2 and out == ""
+    assert reason_of(err) == "invalid-followup-name"
     assert runner.calls == []
