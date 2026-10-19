@@ -3287,3 +3287,24 @@ Fallback outcome: kept at fsconsult; reverted to operator at fsplan, fsdriver, f
 repository's machine-local leak denylist and was replaced with `[redacted]` so the tree passes the leak gate, as the
 `ritual-output-wording` case does. The line is narrative above the findings; no reading or verdict depends on it, and
 the capture grades the same.
+
+## Amendment: the pin check compares the contract's text, not its line layout (2026-10-19)
+
+Operator decision, after every arm had run. From the first fix-shape edit on, `skills/_shared/council.md` failed the
+shared docs' 100-column wrap gate (one line one character over budget, three worked-example lines under-filled).
+Commit `2298d166cadf9ab5c3c31250fc36f621f0c3cba3` fixes the layout by hand: it reflows the large-rewrite bullet, gives
+each worked example its own quote block, and ends the code-review example's cite line with a hard break. No word
+changes. The second-round arms and the kept consult fallback arm stay pinned to `e568c4e0`, the revision their
+captures were taken against.
+
+The close-out pin check therefore compares the merged `council.md` with `e568c4e0`'s after normalising layout: the
+quote marker at the start of a line and a trailing hard-break backslash are dropped, and runs of spaces and newlines
+are collapsed to one space. At `2298d166` the two compare equal:
+
+```
+norm(){ git show $1:tools/craft/plugins/craft/skills/_shared/council.md | sed -e 's/^> \?//' -e 's/\\$//' | tr -s ' \n' ' '; }
+cmp <(norm e568c4e037dbf1ba2d2eb3027fa3f77e03104dae) <(norm 2298d166cadf9ab5c3c31250fc36f621f0c3cba3)   # exit 0
+```
+
+The byte-equal form of the check is replaced by this one, and its limit is stated: line layout inside the contract's
+worked examples was not itself measured.
