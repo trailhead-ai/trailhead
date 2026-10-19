@@ -1,0 +1,43 @@
+The code review's one re-review round is done, and four of its findings were not resolved. The procedure allows no further review rounds, so the decisions are yours: one needs your decision, one is worth fixing (your call), and two are rough edges with nothing to decide.
+
+## Would build the wrong thing, needs your decision
+
+**`fs-kiln/unload.py:3` — the cool-down hours come from a table keyed by kiln size, so a firing that ran hotter in the same kiln is marked ready too early; record the cool-down hours on the firing itself and drop the table.**
+
+I recommend storing the cool-down time on each firing instead of looking it up by kiln. As it stands, the board can tell someone a hot firing is safe to open before it is. The change says the cool-down must depend on how the firing ran, not only on which kiln it was in. The code gives every large-kiln firing 18 hours and every small-kiln firing 10, whatever temperature it reached. So a firing that ran hotter in the large kiln shows up as ready after 18 hours, even though it needs longer to cool.
+
+Fix: a hotter firing would wait longer than a cooler one in the same kiln, because each firing would carry its own cool-down hours. This touches 1 file and 2 functions, `cool_hours` and `unload_time`, and removes the `COOL_HOURS` table. Caveat: firing records would need a new field, and the change doesn't say who fills it in. Settle that before taking this fix.
+
+*Raised by: code review*
+
+## Would cause trouble later, worth fixing, your call
+
+**`fs-kiln/unload.py:17` — a firing that cools exactly at this minute is left off the list; the change asks for it to count as ready, so include it.**
+
+I recommend changing one comparison so that a firing counts as ready at the exact minute it finishes cooling. The change says that "a firing that cools exactly at this minute appears on the board as ready". The code uses a strict `<`. A small-kiln firing started at 08:00 and checked at exactly 18:00 is therefore left off the board until a later run.
+
+Fix: `if unload_time(firing) <= now:` in place of the strict `<` on line 17, so a firing that cools at this exact minute is listed as ready.
+
+*Raised by: code review*
+
+## Rough edges, nothing to decide
+
+**`fs-kiln/test_unload.py:9` — one firing in the small kiln is the only case covered; cover the edge the other findings touch.**
+
+The only test is one small-kiln firing checked 25 hours later. That test passes whether or not the two problems above are fixed. I recommend adding coverage so those fixes are protected.
+
+Fix: as the reviewer put it, "cover the edge the other findings touch."
+
+*Raised by: code review*
+
+**`fs-kiln/unload.py:25` — the board line gives no time for when the firing became ready; add it.**
+
+The board line reads only `<name>: ready to unload`. The change says the line "gives the time it became ready", so a potter reading the board can't tell how long a firing has been waiting. I recommend adding the time.
+
+Fix: as the reviewer put it, "the board line gives no time for when the firing became ready; add it."
+
+*Raised by: code review*
+
+---
+
+Tell me which of these to take forward and I'll send them to be fixed. If you leave them, they go into the completion report as unresolved.

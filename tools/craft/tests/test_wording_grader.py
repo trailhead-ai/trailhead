@@ -1738,12 +1738,48 @@ FINDING_CAPTURE_VERDICTS.update(
 )
 
 
+
+# Fix-shape second-round treated arms (fs-treated2-*) and the calibrated consult regression arm (regress2-cal-consult),
+# run against the sharpened contract. The scripted bar is plain on the naming checks and kept on persisted-levels;
+# `code-review-name` is an observation at the three code review sites. fsspecreview, fsplan, fsconsult, fsdriver and
+# fsbuildreview have captures 4 to 6 from the six-capture split run for a by-eye criterion at 2 of 3.
+FINDING_CAPTURE_VERDICTS.update(
+    {
+        f"fs-treated2-{site}-{n}": dict(verdicts)
+        for site, verdicts, count in (
+            ("fsspecreview", {"severity-name": "plain", "reviewer-name": "plain"}, 6),
+            ("fsplan", {"severity-name": "plain", "reviewer-name": "plain", "persisted-levels": "kept"}, 6),
+            ("fsconsult", {"severity-name": "plain", "reviewer-name": "plain"}, 6),
+            ("fsdriver", {"severity-name": "plain", "reviewer-name": "plain", "persisted-levels": "kept"}, 6),
+            ("fsreview", {"code-review-name": "plain", "severity-name": "plain"}, 3),
+            ("fsbuildreview", {"code-review-name": "plain", "severity-name": "plain"}, 6),
+            ("fsdrivebuild", {"code-review-name": "plain", "severity-name": "plain"}, 3),
+        )
+        for n in range(1, count + 1)
+    }
+    # fsspecreview-5 says "All three ... need your decision" (the grammar's plain reading is "needs your decision"), so
+    # `severity-name` reads none: 5 of 6 plain, a clean majority.
+    | {"fs-treated2-fsspecreview-5": {"severity-name": "none", "reviewer-name": "plain"}}
+    # regress2-cal-consult-2 writes "Its Critical" (severity-name internal) and -6 writes "minor only because the trial
+    # is at prototype maturity" (calibration-level internal): 5 of 6 plain on each of the two checks, a clean majority.
+    | {
+        f"regress2-cal-consult-{n}": {
+            "calibration-level": "internal" if n == 6 else "plain",
+            "severity-name": "internal" if n == 2 else "plain",
+            "reviewer-name": "plain",
+        }
+        for n in range(1, 7)
+    }
+)
+
+
 def _site(stem):
-    """The site a capture belongs to: the calibrated consult's arms are `precal-`, `cal-` and `regress-cal-`, no site
-    segment, and a fix-shape arm is `fs-<arm>-<site>-<n>`."""
+    """The site a capture belongs to: the calibrated consult's arms are `precal-`, `cal-`, `regress-cal-` and
+    `regress2-cal-`, no site segment, and a fix-shape arm is `fs-<arm>-<site>-<n>`."""
     if stem.startswith("fs-"):
         return stem.split("-")[2]
-    return "consult-calibrated" if stem.startswith(("precal-", "cal-", "regress-cal-")) else stem.split("-")[1]
+    calibrated = stem.startswith(("precal-", "cal-", "regress-cal-", "regress2-cal-"))
+    return "consult-calibrated" if calibrated else stem.split("-")[1]
 
 
 FINDING_CAPTURES = sorted(p for p in FINDING_RUNS.glob("*.txt") if not p.name.endswith(".stderr.txt"))

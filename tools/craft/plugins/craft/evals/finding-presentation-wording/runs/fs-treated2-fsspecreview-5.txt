@@ -1,0 +1,46 @@
+**Detail on C1, C2 and C3.** All three are in the group that would build the wrong thing and need your decision. Maturity is production (basis: stamp), with no stand-downs.
+
+---
+
+**C1 — Anyone holding a forwarded confirmation email can cancel the booking.** *(raised by: security)*
+
+You need to decide whether a cancellation must be confirmed by the member who made the booking. I recommend it must, because otherwise a stranger can give away someone's firing.
+
+The spec says a member can cancel a booking up to 24 hours before its day, and the day then goes to the first member on that kiln's standby list (AC3). It never says how a cancellation is tied to the member who booked. Here is the worst case. A member forwards their confirmation to a friend to share the date. The friend, or anyone it is forwarded on to, cancels. The day goes to the next member on standby. The member turns up with a week's work and finds their firing gone. Nobody can tell afterwards that it wasn't them.
+
+Fix: the cancellation criterion (AC3) would read in full:
+
+    **AC3.** A member can cancel a booking up to 24 hours before its day. The cancellation takes
+    effect only once the member confirms it from a message sent to the email address the booking
+    was made with. The day is then freed and offered to the first member on that kiln's standby list.
+
+Proposed disposition: `resolved`.
+
+---
+
+**C2 — The spec books the whole kiln for a day, but a firing holds several members' work.** *(raised by: right problem)*
+
+You need to decide whether members book a whole kiln-day or shelf space in a firing. I recommend shelf space. Otherwise one member with a single bowl holds a whole kiln for a day while others wait weeks.
+
+The spec says a kiln holds one firing per day, and a second booking for the same kiln and day is refused (AC2). In the studio, though, a kiln is full when its shelves are full, not when someone has claimed its day. Here is the worst case. Members book days weeks ahead for small loads. Kilns fire half empty. Waiting times get longer than they are on the paper sheet the spec is replacing.
+
+Fix: members would book a share of a firing's shelves, and a firing would close when its shelves are full rather than when one member claims it. This rewrites the Objectives and three criteria: how a member books a firing (AC1), what one kiln holds per day (AC2), and what a cancellation frees (AC3). Caveat: the pass rated its own confidence medium, because the spec doesn't say how often firings are shared. If you know firings at Marlow Street really are one member's at a time, answer C2 with that, and it will be re-adjudicated.
+
+**C2** — *the booking unit is the whole kiln for a day* — `revise` (`record-only`)
+  Prescription: the booking unit is wrong. Change it from a kiln-day to shelf space within a firing. Rewrite the Objectives and AC1–AC3 so a booking claims space, a firing is full when its shelves are, and a cancellation frees that space for the standby list.
+
+---
+
+**C3 — Members are not told when they book that the shelves must be loaded by 8 am.** *(raised by: ease of use)*
+
+You need to decide whether the confirmation email should state the 8 am load time. I recommend it should. A member who learns it only the evening before can still miss their firing.
+
+The spec says the booking confirmation states the booking (AC1). The 8 am load time appears only in the reminder sent the evening before a firing (AC5). Here is the worst case. A member books a fortnight ahead. They plan to drop their work off at 9 am. The reminder lands in a mistyped or unread mailbox. They arrive to a kiln that is already packed and lose the firing. Caveat: the pass overstates the gap a little, since members are told about 8 am the night before. What the fix adds is telling them at booking time too, when they are still making plans.
+
+Fix: `"and that the work must be on the shelves by 8 am on the day"` added to the end of the booking criterion's confirmation email (AC1).
+
+Proposed disposition: `resolved`.
+
+---
+
+You can reply "go" to accept these as proposed. To override, name the id, for example "dispute C2 because …" or "answer C2: …". Each override needs your reason.

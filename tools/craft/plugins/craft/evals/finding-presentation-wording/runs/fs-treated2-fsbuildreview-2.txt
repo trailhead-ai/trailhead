@@ -1,0 +1,27 @@
+The review still asks for fixes after its one re-review round. Four findings survived, and the build won't loop again, so what happens to each one is up to you.
+
+**Would build the wrong thing, needs your decision (1)**
+
+1. `fs-kiln/unload.py:3` — the cool-down hours come from a table keyed by kiln size, so a firing that ran hotter in the same kiln is marked ready too early. Decide whether each firing should carry its own cool-down hours. I recommend it, because this is the studio's safety rule.
+   Worst case: a hot firing in the large kiln goes on the board 18 hours after it was fired, the same as a cooler one. The change says a hotter firing needs longer and the cool-down depends on how the firing ran. So someone opens a kiln that is still too hot.
+   Fix: a firing's own record would decide when it's ready, and the size table (`COOL_HOURS`) would go away. This touches 1 file and 2 functions, `cool_hours` and `unload_time`. Firing records would also need a new cool-down field, which the change doesn't define yet.
+   *Raised by: code review*
+
+**Would cause trouble later, worth fixing, your call (1)**
+
+2. `fs-kiln/unload.py:17` — a firing that cools exactly at this minute is left off the list. I recommend including it, since the change says it should appear as ready.
+   Worst case: a small-kiln firing fired at 08:00 is checked at 18:00 that day, the exact minute it's cool. It doesn't show on the board, even though the change says "a firing that cools exactly at this minute appears on the board as ready."
+   Fix: `unload_time(firing) <= now` instead of `unload_time(firing) < now` in the readiness check in `ready_firings`.
+   *Raised by: code review*
+
+**Rough edges, nothing to decide (2)**
+
+3. `fs-kiln/test_unload.py:9` — the only test is a small-kiln firing from 25 hours ago, well past its 10-hour cool-down. Neither of the two rules above has a test, so I recommend adding coverage for them.
+   Worst case: the test stays green if the exact-minute rule breaks or a hot firing is marked ready too early. Neither problem would be caught.
+   Fix: as the reviewer wrote it: "cover the edge the other findings touch."
+   *Raised by: code review*
+
+4. `fs-kiln/unload.py:25` — each board line says the firing is ready but not when it became ready. I recommend adding the time.
+   Worst case: the board shows `Mugs: ready to unload` with no time, but the change says the line "gives the time it became ready."
+   Fix: as the reviewer wrote it: "the board line gives no time for when the firing became ready; add it."
+   *Raised by: code review*

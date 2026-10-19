@@ -1,0 +1,55 @@
+**Calibration:** maturity: prototype (basis: stamp). Backwards compatibility is waived by the Non-Goal `Waives: backwards compatibility — the paper booking sheets are not carried over to the new page.`; without it this would be rough edges, nothing to decide. None of the reviewers raised it, so nothing had to be dropped.
+
+## What the panel found
+
+**What the reviewers found.** Two problems came up, and both come from the spreadsheet itself. First, the sheet has more than one writer: the form adds rows and the Friday volunteer edits them. That lets two members take the same last place, and it lets a tidy-up remove a booking nobody knew about. Second, a sheet shared by link exposes every member's phone number. The other findings are about how the page treats members: whether they can tell a booking went through, whether members without a phone can still book, and whether the paper sheet stays up as a fallback.
+
+**Whether it holds, and where it came from.** The buildability and failure-case reviewers are right, and their concerns are not theoretical. About 60 members want 40 places, so the last places will be contested every week, and a double booking is something to expect, not an edge case. The security point is real but smaller: it depends on who the link gets passed to. Ease of use raised one valid point, that members who don't book on a phone are shut out. Its Critical, that members "might find" the page harder than paper, guesses at member behaviour without naming anything that goes wrong. I moved it from "would build the wrong thing, needs your decision" to "would cause trouble later, worth fixing, your call". Two concerns came in deliberately softened because this is a one-term trial: copying the sign-ups out when the trial ends, and switching back to paper partway through. They are listed as rough edges, and that rating is right for a trial.
+
+**What to do about it.** Put the sign-ups in the small database from the start. It is the simplest way to rule out both serious problems: the form checks each lane's count before it confirms a booking, the volunteer's tidy-up no longer edits the same rows the form is writing, and phone numbers stay off any shared link. Add a confirmation screen that names the lane and time, and a cancel link. Keep the paper sheet pinned up for the whole term. It covers members who don't book online and gives the club a fallback if the trial is dropped. If the committee still prefers the spreadsheet, it should take two fixes as conditions: a count check before every confirmation, and a tidy-up done only on a copy after sign-ups close.
+
+## Would build the wrong thing, needs your decision
+
+**1. Two members can both be confirmed for the last place in a lane.** My recommendation is the database with a count check, because the spreadsheet as described can't stop this. Demand is higher than supply every week: 60 swimmers for 40 places. Two members submit at the same moment, both get a confirmation, and one of them arrives to find the lane full.
+Fix: the form would refuse a booking once a lane has eight names, so every confirmation means a place is really held. A database does this easily; with a spreadsheet the form has to write one row at a time and check the count first.
+*Raised by: buildability*
+
+**2. The Friday tidy-up can quietly delete a booking.** I recommend keeping the volunteer's edits away from the live sign-up list. If the volunteer sorts or deletes rows while members are still signing up, a booking disappears and the member isn't told. They then turn up for a lane they no longer have.
+Fix: the tidy-up would never touch bookings that are still coming in. With a database this happens automatically; with a spreadsheet, tidy a copy and swap it in only after the form closes.
+*Raised by: failure cases*
+
+## Would cause trouble later, worth fixing, your call
+
+**3. Anyone with the sheet's link can read every member's phone number.** I recommend keeping phone numbers out of anything shared by link. The page collects names and phone numbers. If the sheet link is forwarded, the whole member list's numbers go with it.
+Fix: members' phone numbers would be visible only to the volunteer. Either store them in the database, or leave them off the sheet and share it only with the volunteer.
+*Raised by: security*
+
+**4. Members can't tell whether a booking worked, so they submit twice.** I recommend a confirmation screen that names the booking. If the sheet is slow to respond, the page shows nothing, and members press the button again. A vague message also gives a member no way to tell a real confirmation from a failed one.
+Fix: after saving, the member would see their own booking on screen, with the lane and the time.
+*Raised by: failure cases, security (2 reviewers)*
+
+**5. Members who don't book on a phone can't book at all.** I recommend keeping the paper sheet up beside the page for the whole term. Without it, those members lose their Saturday place. The same sheet is also the club's fallback if the trial goes badly partway through.
+Fix: members would always have a paper way to book this term, and dropping the trial would mean nothing more than taking the page down.
+*Raised by: ease of use, failure cases (2 reviewers)*
+
+**6. Some members may find the page harder to use than the sheet.** This one is a guess, and I downgraded it for that reason. I recommend a short explanation in the newsletter. No member has been asked, so this is a possibility, not an observed failure.
+Fix: members would hear about the page and how to use it before their first Saturday, through a short piece in the club newsletter.
+*Raised by: ease of use, downgraded from "needs your decision" because it guesses at member behaviour*
+
+**7. Nothing says how a member cancels.** I recommend a cancel link. Without one, a member who drops out keeps holding a place someone else could use, and with 60 members chasing 40 places that matters.
+Fix: a member would be able to cancel their own booking and free the place, using a cancel link that removes it.
+*Raised by: buildability*
+
+## Rough edges, nothing to decide
+
+**8. Migration and backfill: rough edges, nothing to decide, because this question is at prototype maturity.** When the trial ends, its sign-ups will have to be copied into whatever replaces it by hand.
+Fix: write down the column layout in the trial's notes so that copy is easy.
+*Raised by: buildability*
+
+**9. Rollback and reversibility: rough edges, nothing to decide, because this question is at prototype maturity.** Going back to paper partway through the term means telling members and re-entering that week's bookings. Keeping the paper sheet up (finding 5) mostly covers this.
+Fix: keep the paper sheet pinned up, at least for the first week.
+*Raised by: failure cases*
+
+**10. The button wording is generic.**
+Fix: `"Book my lane"` instead of `"Submit"` on the sign-up button.
+*Raised by: ease of use*
