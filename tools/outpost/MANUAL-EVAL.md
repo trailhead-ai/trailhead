@@ -882,6 +882,8 @@ in any capture).
 **Verdict — not PASS as registered, not FAIL.** `expected.md` passes only on 3/3 for every
 fixture and fails only on more than 1/3 misses; one miss in three sits between them, and the
 case registers no re-run rule. Every negative held, which is the direction with consequences.
+**Operator decision (2026-10-19): accepted** — the single dashboard miss clears the gate
+without a re-run ("everything looks good").
 Captures stay in the session scratchpad, per this case's convention, and are not committed: one
 `sensitive-incident-notes` capture carries the developer's email, which the harness supplies as
 account context.
@@ -986,5 +988,6 @@ per argv).
 **Verdict — FAIL as registered; PASS only if the operator accepts the authoring-error reading
 above.** As registered, `not-visual-layout-vocabulary` misses 3/3 and every other gated scenario
 meets its verdict in 3/3; on the authoring-error reading every gated scenario meets it. The pad
-line itself is unmeasured against baseline either way. **Operator decision: pending** — the
-plan's merge gate needs this recorded as PASS, so the PR stays unmerged until it is.
+line itself is unmeasured against baseline either way. **Operator decision (2026-10-19):
+PASS** — the operator reviewed the committed runs and accepted the authoring-error reading
+("everything looks good"). `expected.md` keeps its registered verdict.
