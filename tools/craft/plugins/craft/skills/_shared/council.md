@@ -354,21 +354,21 @@ change that removes it.
   reader would notice once it is made, then state how much of the thing under review it touches, in
   these terms and never as a vague quantity or left out. For a spec or plan, the sections, tasks and
   criteria it rewrites, by name; for a code review, "N files and M functions" plus the two most
-  affected names; for a proposal put to a council, the named parts of the proposal it changes and any
-  section or criterion of the context document it touches. The rewritten text itself is not drafted
-  on the line.
+  affected names; for a proposal put to a council, the named parts of the proposal it changes and
+  any section or criterion of the context document it touches. The rewritten text itself is not
+  drafted on the line.
 - **Anything in between** — open the `Fix:` line with what the reader would notice once it is made.
 
 An example of each, in the shape the reader sees:
 
 > Fix: `"two crossings"` instead of `"2 crossings"` in the printed notice, so a skipper reading it
 > aloud is not handed a numeral. (small, spec review)
->
+
 > Fix: skippers would see one sailing table where they now see three, and the late-tide rule would
 > live in one place; this rewrites the Sailings and Delays sections and criteria 2, 5 and 6 of the
 > spec. (large rewrite)
->
-> `ferry/timetable.py:88 — a sailing cancelled for weather still counts toward the day's quota`
+
+> `ferry/timetable.py:88 — a sailing cancelled for weather still counts toward the day's quota`\
 > Fix: a cancelled sailing would stop eating into the day's quota, and the quota would show what is
 > still free; this touches 3 files and 5 functions, chiefly `count_sailings` and `apply_quota`.
 > (large rewrite, code review)
