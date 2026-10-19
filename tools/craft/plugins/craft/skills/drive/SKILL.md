@@ -335,6 +335,13 @@ The driver is the synthesizer, in session, never a subagent — de-duplicating b
 cross-pass convergence, and auto-downgrading speculative Criticals, per `_shared/council.md`'s
 synthesis rules.
 
+A finding the driver shows the reader in session takes the `Fix:` form its size calls for in "How a
+finding reads" — a small fix leads with the drafted exact text where the reviewer's ask and the
+cited lines settle it, never the ask quoted or described in words, and a large rewrite opens with
+what the reader would notice and names the sections, tasks and criteria it touches — while the
+escalation below points at the Critical's own text and drafts no verdict, and the persisted block
+keeps its one line per finding.
+
 **Persist the findings before escalating.** Append a `## Council Review` section to the slice parent
 — the plan record chosen or resumed at step 4 above — mirroring the schema `plan/SKILL.md` defines
 at its own step 8.5 (`plan/SKILL.md:455-476`): a `*Reviewed at:*` timestamp, a
