@@ -12,7 +12,9 @@ Either way the pad's folder path follows.
 Contract
 --------
 * The round is one JSON object: ``title`` (required, non-empty), ``intro``
-  (optional string) and ``questions`` (at least one). Each question has a
+  (optional string), ``settled`` (optional list of non-empty strings: what
+  earlier rounds settled; an empty list is the same as leaving it out) and
+  ``questions`` (at least one). Each question has a
   non-empty ``prompt`` and 1-26 ``options``; each option has a non-empty
   ``name`` and ``cost``, a ``layout`` key, and an optional boolean ``pick``.
   Exactly one option per question carries ``"pick": true``. An unknown key is
@@ -55,6 +57,10 @@ Contract
       <pad>/round-1/round.js      ``window.PAD_ROUND = JSON.parse(<s>);``
                                   where ``<s>`` is the round's ASCII JSON
                                   encoded once more as a string literal
+                                  then ``window.PAD_ROUND_NUMBER = 1;``
+      <pad>/rounds.js             ``window.PAD_ROUNDS = JSON.parse(<s>);`` where
+                                  ``<s>`` is the ASCII JSON list of one
+                                  ``{"title": ...}`` per round, encoded the same way
 
 * Every refusal prints ``scratch-pad: <where>: <what>`` lines on stderr -- every
   problem found in one pass -- and exits non-zero. No pad and no temp folder
@@ -62,7 +68,7 @@ Contract
 
 Security posture
 ----------------
-Round text is untrusted data. It is written only into ``round.js``, as a
+Round text is untrusted data. It is written only into ``round.js`` and ``rounds.js``, as a
 JSON string literal holding the round's JSON (so a ``__proto__`` key arrives as
 data, which an object literal would not give) with every non-ASCII character
 escaped, and never into HTML. The top-level ``index.html`` carries no round
@@ -97,10 +103,11 @@ PUBLISH_TIMEOUT_SECONDS = 60.0
 _SLUG = re.compile(r"[a-z0-9][a-z0-9._-]*")
 _MAX_SLUG = 64
 _MAX_OPTIONS = 26
-_ROUND_KEYS = ("title", "intro", "questions")
+_ROUND_KEYS = ("title", "intro", "questions", "settled")
 _QUESTION_KEYS = ("prompt", "options")
 _OPTION_KEYS = ("name", "cost", "pick", "layout")
 _ROUND_JS_PREFIX = "window.PAD_ROUND = JSON.parse("
+_ROUNDS_JS_PREFIX = "window.PAD_ROUNDS = JSON.parse("
 _PAD_INDEX = (
     "<!doctype html>\n"
     '<meta charset="utf-8">\n'
@@ -216,6 +223,8 @@ def check_round(data: object) -> list[str]:
     if "intro" in data and not isinstance(data["intro"], str):
         problems.append(_line("intro", "must be a string"))
 
+    _check_settled(data, problems)
+
     questions = data.get("questions")
     if "questions" not in data:
         problems.append(_line("questions", 'no "questions" — a round asks at least one question'))
@@ -227,6 +236,20 @@ def check_round(data: object) -> list[str]:
         for qi, question in enumerate(questions):
             _check_question(question, f"questions[{qi}]", problems)
     return problems
+
+
+def _check_settled(data: dict, problems: list[str]) -> None:
+    if "settled" not in data:
+        return
+    settled = data["settled"]
+    if not isinstance(settled, list):
+        problems.append(_line("settled", "must be a list of strings"))
+        return
+    for i, note in enumerate(settled):
+        if not isinstance(note, str):
+            problems.append(_line(f"settled[{i}]", "must be a string"))
+        elif not note.strip():
+            problems.append(_line(f"settled[{i}]", "empty — say what was settled or leave it out"))
 
 
 def _check_question(question: object, where: str, problems: list[str]) -> None:
@@ -343,7 +366,17 @@ def _exists(pad: str) -> Refusal:
     return Refusal([f"scratch-pad: pad {_q(pad)} already exists — choose another --pad name"])
 
 
-def _check_and_encode(round_path: Path, pad: str, kit_dir: Path) -> str:
+def _js_string_literal(value: object) -> str:
+    """*value* as ASCII JSON, encoded once more as a JS string literal."""
+    return json.dumps(json.dumps(value, ensure_ascii=True, allow_nan=False))
+
+
+class Encoded(NamedTuple):
+    round_js: str
+    title: str
+
+
+def _check_and_encode(round_path: Path, pad: str, kit_dir: Path) -> Encoded:
     problems = _check_slug(pad)
     data = None
     try:
@@ -356,19 +389,26 @@ def _check_and_encode(round_path: Path, pad: str, kit_dir: Path) -> str:
         raise Refusal(problems)
 
     try:
-        round_js = _ROUND_JS_PREFIX + json.dumps(json.dumps(data, ensure_ascii=True, allow_nan=False)) + ");\n"
+        round_js = _ROUND_JS_PREFIX + _js_string_literal(data) + ");\n"
     except ValueError:
         raise Refusal([_line(_q(str(round_path)), "a number is too large to write — numbers must be finite")])
     except RecursionError:
         raise Refusal([_line(_q(str(round_path)), "nested too deeply to write")])
     if not kit_dir.is_dir():
         raise Refusal([_line("kit", f"{_q(str(kit_dir))} is not a directory — the pad kit is missing")])
-    return round_js
+    return Encoded(round_js, data["title"])
 
 
-def _write_pad(folder: Path, kit_dir: Path, round_js: str) -> None:
+def _write_rounds_js(folder: Path, titles: Sequence[str]) -> None:
+    listing = [{"title": title} for title in titles]
+    (folder / "rounds.js").write_text(_ROUNDS_JS_PREFIX + _js_string_literal(listing) + ");\n", encoding="utf-8")
+
+
+def _write_pad(folder: Path, kit_dir: Path, encoded: Encoded) -> None:
     shutil.copytree(kit_dir, folder / "round-1")
+    round_js = encoded.round_js + "window.PAD_ROUND_NUMBER = 1;\n"
     (folder / "round-1" / "round.js").write_text(round_js, encoding="utf-8")
+    _write_rounds_js(folder, [encoded.title])
     (folder / "index.html").write_text(_PAD_INDEX, encoding="utf-8")
 
 
@@ -377,7 +417,7 @@ def _build_failed(final: Path, exc: OSError) -> Refusal:
 
 
 def _publish_to_workspace(
-    workspace: Path, pad: str, kit_dir: Path, round_js: str, env: Mapping[str, str], runner, timeout: float
+    workspace: Path, pad: str, kit_dir: Path, encoded: Encoded, env: Mapping[str, str], runner, timeout: float
 ) -> Built:
     if not PUBLISHER_PATH.is_file():
         raise Refusal(
@@ -400,7 +440,7 @@ def _publish_to_workspace(
     except OSError as exc:
         raise _build_failed(final, exc)
     try:
-        _write_pad(tmp, kit_dir, round_js)
+        _write_pad(tmp, kit_dir, encoded)
         cmd = [sys.executable, str(PUBLISHER_PATH), str(tmp), pad, "--workspace-path", str(workspace)]
         try:
             result = runner(cmd, env, timeout)
@@ -442,10 +482,10 @@ def _build(
     else:
         cwd = Path(cwd)
     runner = runner or _run_publisher
-    round_js = _check_and_encode(round_path, pad, kit_dir)
+    encoded = _check_and_encode(round_path, pad, kit_dir)
     workspace = None if cwd is None else enclosing_workspace(cwd, env)
     if workspace is not None:
-        return _publish_to_workspace(workspace, pad, kit_dir, round_js, env, runner, timeout)
+        return _publish_to_workspace(workspace, pad, kit_dir, encoded, env, runner, timeout)
 
     pads_root = _pads_root(env)
     final = pads_root / pad
@@ -455,7 +495,7 @@ def _build(
 
     tmp = Path(tempfile.mkdtemp(prefix=f".tmp-{pad}-", dir=pads_root))
     try:
-        _write_pad(tmp, kit_dir, round_js)
+        _write_pad(tmp, kit_dir, encoded)
         try:
             os.rename(tmp, final)
         except OSError:

@@ -133,7 +133,7 @@ def _snapshot(root: Path):
 
 
 def _load_round_js(path: Path):
-    text = path.read_text(encoding="utf-8")
+    text = path.read_text(encoding="utf-8").splitlines(keepends=True)[0]
     assert text.startswith(ROUND_JS_PREFIX) and text.endswith(ROUND_JS_SUFFIX)
     inner = json.loads(text[len(ROUND_JS_PREFIX) : -len(ROUND_JS_SUFFIX)])
     return json.loads(inner)
@@ -177,7 +177,7 @@ def test_round_js_is_ascii_and_parses_back_to_the_round(skill, tmp_path, state):
     assert _run(skill, tmp_path, state, "p", rp).returncode == 0
 
     text = (state / "pads" / "p" / "round-1" / "round.js").read_text(encoding="utf-8")
-    assert text.startswith(ROUND_JS_PREFIX) and text.endswith(ROUND_JS_SUFFIX)
+    assert text.startswith(ROUND_JS_PREFIX) and text.splitlines(keepends=True)[0].endswith(ROUND_JS_SUFFIX)
     assert _load_round_js(state / "pads" / "p" / "round-1" / "round.js") == data
     assert text.isascii()
 
@@ -928,3 +928,102 @@ def test_a_round_without_questions_says_so(skill, tmp_path, state):
     del data["questions"]
     proc = _run(skill, tmp_path, state, "p", _write_round(tmp_path, data))
     assert proc.stderr.splitlines() == ['scratch-pad: questions: no "questions" — a round asks at least one question']
+
+
+# ---------------------------------------------------------------------------
+# Settled notes and the pad's list of rounds
+# ---------------------------------------------------------------------------
+
+ROUNDS_JS_PREFIX = "window.PAD_ROUNDS = JSON.parse("
+
+
+def _load_rounds_js(path: Path):
+    text = path.read_text(encoding="utf-8")
+    assert text.startswith(ROUNDS_JS_PREFIX) and text.endswith(ROUND_JS_SUFFIX)
+    return json.loads(json.loads(text[len(ROUNDS_JS_PREFIX) : -len(ROUND_JS_SUFFIX)]))
+
+
+def test_settled_notes_reach_the_built_round(skill, tmp_path, state):
+    data = _round(1)
+    data["settled"] = ["tabs stay", "sidebar goes"]
+    proc = _run(skill, tmp_path, state, "p", _write_round(tmp_path, data))
+    assert proc.returncode == 0, proc.stderr
+    assert _load_round_js(state / "pads" / "p" / "round-1" / "round.js")["settled"] == ["tabs stay", "sidebar goes"]
+
+
+@pytest.mark.parametrize("settled", [[], "absent"])
+def test_an_empty_or_missing_settled_builds(skill, tmp_path, state, settled):
+    data = _round(1)
+    if settled != "absent":
+        data["settled"] = settled
+    proc = _run(skill, tmp_path, state, "p", _write_round(tmp_path, data))
+    assert proc.returncode == 0, proc.stderr
+    assert _load_round_js(state / "pads" / "p" / "round-1" / "round.js").get("settled", []) == []
+
+
+@pytest.mark.parametrize(
+    ("settled", "line"),
+    [
+        ("tabs stay", "scratch-pad: settled: must be a list"),
+        ({"a": 1}, "scratch-pad: settled: must be a list"),
+        (["ok", 3], "scratch-pad: settled[1]: must be a string"),
+        (["ok", None], "scratch-pad: settled[1]: must be a string"),
+        (["ok", ""], "scratch-pad: settled[1]: empty"),
+        (["ok", "  \t"], "scratch-pad: settled[1]: empty"),
+    ],
+)
+def test_a_malformed_settled_is_refused_by_name_and_nothing_is_built(skill, tmp_path, state, settled, line):
+    data = _round(1)
+    data["settled"] = settled
+    proc = _run(skill, tmp_path, state, "p", _write_round(tmp_path, data))
+    assert proc.returncode != 0
+    lines = proc.stderr.splitlines()
+    assert len(lines) == 1 and lines[0].startswith(line)
+    assert not (state / "pads").exists() or list((state / "pads").iterdir()) == []
+
+
+def test_settled_problems_are_reported_with_every_other_problem(skill, tmp_path, state):
+    data = _round(1)
+    data["settled"] = [1, " "]
+    del data["questions"][0]["options"][0]["cost"]
+    proc = _run(skill, tmp_path, state, "p", _write_round(tmp_path, data))
+    lines = proc.stderr.splitlines()
+    assert len(lines) == 3
+    assert any(ln.startswith("scratch-pad: settled[0]: must be a string") for ln in lines)
+    assert any(ln.startswith("scratch-pad: settled[1]: empty") for ln in lines)
+    assert any("questions[0].options[0]" in ln and "cost" in ln for ln in lines)
+
+
+def test_a_new_pad_lists_its_one_round_and_numbers_it(skill, tmp_path, state):
+    proc = _run(skill, tmp_path, state, "p", _write_round(tmp_path, _round(1)))
+    assert proc.returncode == 0, proc.stderr
+    pad = state / "pads" / "p"
+    assert _load_rounds_js(pad / "rounds.js") == [{"title": "Settings page"}]
+    text = (pad / "round-1" / "round.js").read_text(encoding="utf-8")
+    assert text.startswith(ROUND_JS_PREFIX)
+    assert text.splitlines()[-1] == "window.PAD_ROUND_NUMBER = 1;"
+    assert _load_round_js(pad / "round-1" / "round.js")["title"] == "Settings page"
+
+
+@pytest.mark.parametrize(
+    "title",
+    ['say "hi" \\ there', "</script><script>alert(1)</script>", "café \U0001f600  "],
+)
+def test_rounds_js_title_is_escaped_like_round_js(skill, tmp_path, state, title):
+    data = _round(1)
+    data["title"] = title
+    data["questions"][0]["options"][0]["layout"] = {"__proto__": {"x": 1}}
+    proc = _run(skill, tmp_path, state, "p", _write_round(tmp_path, data))
+    assert proc.returncode == 0, proc.stderr
+    js = state / "pads" / "p" / "rounds.js"
+    assert _load_rounds_js(js) == [{"title": title}]
+    raw = js.read_bytes()
+    assert all(b < 0x80 for b in raw)
+
+
+def test_write_rounds_js_lists_several_titles(tmp_path):
+    mod = _load_module()
+    target = tmp_path / "rounds.js"
+    mod._write_rounds_js(tmp_path, ["One", 'Two "quoted"', "Té"])
+    assert _load_rounds_js(target) == [{"title": "One"}, {"title": 'Two "quoted"'}, {"title": "Té"}]
+    assert target.read_bytes().isascii()
