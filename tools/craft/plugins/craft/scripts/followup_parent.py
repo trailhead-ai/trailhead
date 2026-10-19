@@ -194,7 +194,8 @@ what `state` reported is `parent-changed` (exit 1, nothing written), such as a b
 that started meanwhile. Each held child whose status is `open`, `ready`, `in-progress`
 or `blocked` is un-nested in name order (`--unset-parent`, then a complete read
 confirming it has no parent); its sidecar is re-read immediately before, and a child no
-longer under this parent is skipped and reported in `kept`. A `done`, `dropped` or
+longer under this parent, or one whose status is now `done`, `dropped` or `superseded`, is
+skipped and reported in `kept` with its current status. A `done`, `dropped` or
 `superseded` child stays nested and is in `kept`. Only when every un-nest is confirmed
 is the parent dropped (`--status dropped --diff`, confirmed by a complete read). A
 failed un-nest leaves the parent live; either failure is exit 2 `drop-incomplete`, and
@@ -682,8 +683,9 @@ def un_nest_and_drop(runner, vault: str, parent_name: str, children: list[str], 
     order given, then drops `parent_name` with `note` appended as a `## Dropped`
     section (the why-note rides the same `--status dropped --diff` write, because
     `dropped` freezes the body). Each child's sidecar is re-read immediately before
-    its un-nest: one no longer under this parent is left alone and reported in
-    `kept`, and a read that fails is a failed write, never a guess. Every write is
+    its un-nest: one no longer under this parent, or one that finished meanwhile
+    (`done`, `dropped`, `superseded`), is left alone and reported in `kept` with its
+    current status, and a read that fails is a failed write, never a guess. Every write is
     confirmed by a complete read. The parent is dropped only when every un-nest is
     confirmed. Returns `un-nested`, `kept`
     (`{name, status}`), `failed` (`{name, write, command}`, `command` the exact
@@ -699,7 +701,7 @@ def un_nest_and_drop(runner, vault: str, parent_name: str, children: list[str], 
             report["failed"].append(failure)
             continue
         status = _status(sidecar)
-        if sidecar.get("parent") != parent_name:
+        if sidecar.get("parent") != parent_name or status not in UNFINISHED_STATUSES:
             report["kept"].append({"name": name, "status": status})
             continue
         _write(runner, argv)
