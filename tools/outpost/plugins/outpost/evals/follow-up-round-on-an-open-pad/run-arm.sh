@@ -15,7 +15,7 @@
 set -uo pipefail
 
 repo="${1:?repo}"; root="${2:?runs-root}"; id="${3:?run-id}"; variant="${4:?variant}"; arm="${5:?arm}"
-case_dir="$repo/tools/outpost/plugins/outpost/evals/pad-follow-up-round"
+case_dir="$repo/tools/outpost/plugins/outpost/evals/follow-up-round-on-an-open-pad"
 claude_bin="${CLAUDE_BIN:-$(readlink -f "$(command -v claude)")}"
 uid="$(id -u)"
 run="$root/run-$id"

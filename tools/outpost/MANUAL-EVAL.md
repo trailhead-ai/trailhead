@@ -992,9 +992,11 @@ line itself is unmeasured against baseline either way. **Operator decision (2026
 PASS** — the operator reviewed the committed runs and accepted the authoring-error reading
 ("everything looks good"). `expected.md` keeps its registered verdict.
 
-## Case: pad-follow-up-round
+## Case: follow-up-round-on-an-open-pad
 
-`plugins/outpost/evals/pad-follow-up-round/` — two briefs over a self-contained run directory
+Renamed from `pad-follow-up-round` on 2026-10-19 (the old `pad-` prefix made the `evals/pad` path ambiguous to the capture scanner), so older commit messages use the old name.
+
+`plugins/outpost/evals/follow-up-round-on-an-open-pad/` — two briefs over a self-contained run directory
 holding a pad already open (`audit-filters`, one round, built by the real `scratch_pad.py`), and
 `expected.md` carrying the criteria and pass condition, committed before any arm was run and
 revised once afterwards (see Batch 1 below: the C4/N3 wording and the Arms paragraph changed).
