@@ -146,7 +146,7 @@ def test_assembly_under_the_plain_env_nests_every_child(tmp_path):
     assert report["buildable"] is True
 
 
-def test_assembly_under_the_nestfail_env_fails_the_second_nesting_and_undoes(tmp_path):
+def test_assembly_under_the_nestfail_env_fails_the_second_nesting_and_leaves_the_parent_open(tmp_path):
     built = build(tmp_path / "run")
     children = make_ready_and_confirm(built, "nest-fail", ["N1", "N2"])
     r = assemble(built, "nestfail_env", "nest-fail", children, tmp_path)
@@ -155,13 +155,14 @@ def test_assembly_under_the_nestfail_env_fails_the_second_nesting_and_undoes(tmp
     report = json.loads(r.stdout)
     assert report["buildable"] is False
     assert [f["write"] for f in report["failed"]] == ["nest"]
-    assert report["nested"] == []
-    assert {u["write"] for u in report["undone"]} == {"un-nest", "drop"}
-    assert report["undo-failed"] == []
+    assert len(report["nested"]) == 1
+    assert report["undone"] == [] and report["undo-failed"] == []
     gathered = run(built["env"], GATHER, built["specs"]["nest-fail"])
     result = json.loads(gathered.stdout)
-    assert sorted(f["name"] for f in result["followups"]) == sorted(c["name"] for c in children)
-    assert result["followup-parents"] == []
+    assert result["followup-parents"] == [report["parent"]]
+    assert [f["name"] for f in result["followups"]] == [
+        c["name"] for c in children if c["name"] not in report["nested"]
+    ]
 
 
 @pytest.mark.parametrize("flags", [[], ["-d"], ["-t", "refine.XXXXXX"]])

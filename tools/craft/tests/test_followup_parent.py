@@ -1,5 +1,6 @@
-"""followup_parent.py `check` (sorts refined follow-ups into eligible and left out) and
-`assemble` (nests the confirmed ones under one follow-up parent, or undoes itself).
+"""followup_parent.py `check` (sorts refined follow-ups into eligible and left out),
+`assemble` (nests the confirmed ones under one follow-up parent and rolls forward after the
+create) and `resume` (finishes an open parent).
 
 End-to-end cases run the script as a subprocess against the real `lore` CLI reading
 a throwaway vault (the pattern of test_followup_gather.py); failure cases drive the
@@ -1031,10 +1032,20 @@ def test_a_live_follow_up_parent_linked_to_the_spec_is_refused_and_the_vault_is_
     assert vault_snapshot(env, vault) == before
 
 
-# --- failed nesting, failed flip, concurrent parent: undo ------------------------------------
+# --- failed nesting, failed flip: roll forward; concurrent parent: undo -----------------------
 
 
-def test_a_failed_second_nesting_undoes_the_first_and_drops_the_parent(lore_env, spec, tmp_path, capsys):
+def assert_rolled_forward(out, runner):
+    """The report of a roll-forward after a failure: nothing undone, no un-nest or
+    drop write attempted, nothing buildable."""
+    assert out["buildable"] is False
+    assert out["undone"] == [] and out["undo-failed"] == []
+    assert not any(is_unnest(call) or is_drop(call) for call in runner.calls)
+
+
+def test_a_failed_second_nesting_leaves_the_parent_open_holding_the_first_child(
+    lore_env, spec, tmp_path, capsys
+):
     env, vault = lore_env
     names = make_children(env, vault, spec)
     children = confirm(env, vault, names)
@@ -1043,36 +1054,32 @@ def test_a_failed_second_nesting_undoes_the_first_and_drops_the_parent(lore_env,
     assert code == 2
     assert not any(is_flip(call) for call in runner.calls)
     assert [ln for ln in err.splitlines() if ln.startswith("reason-code: ")] == ["reason-code: nesting-incomplete"]
-    assert out["buildable"] is False
+    assert_rolled_forward(out, runner)
     assert out["failed"] == [{"name": names[1], "write": "nest"}]
-    assert out["nested"] == []
-    assert out["undone"] == [
-        {"name": names[0], "write": "un-nest"},
-        {"name": out["parent"], "write": "drop"},
-    ]
-    assert out["undo-failed"] == []
-    assert [sidecar_of(env, vault, n).get("parent") for n in names] == [None] * 3
-    assert sidecar_of(env, vault, out["parent"])["status"] == "dropped"
-    assert "nesting-incomplete" in body_of(env, vault, out["parent"])
-    assert gathered_names(env, spec) == sorted(names)
+    assert out["nested"] == [names[0]]
+    assert [sidecar_of(env, vault, n).get("parent") for n in names] == [out["parent"], None, None]
+    assert sidecar_of(env, vault, out["parent"])["status"] == "open"
+    assert "Dropped" not in body_of(env, vault, out["parent"])
+    _, state, _, _ = run_state(EnvRunner(env), spec, out["parent"], capsys)
+    assert state["held"] == [{"name": names[0], "status": "ready"}]
+    assert state["unheld"] == names[1:]
+    assert gather_json(env, spec)["followup-parents"] == [out["parent"]]
+    assert gathered_names(env, spec) == sorted(names[1:])
 
 
-def test_a_failed_flip_undoes_all_three_and_drops_the_parent(lore_env, spec, tmp_path, capsys):
+def test_a_failed_flip_leaves_the_parent_open_holding_all_three(lore_env, spec, tmp_path, capsys):
     env, vault = lore_env
     names = make_children(env, vault, spec)
     runner = EnvRunner(env, lambda a, s, r: refused(a) if is_flip(a) else None)
     code, out, err = run_assemble(tmp_path, runner, spec, confirm(env, vault, names), capsys)
     assert code == 2
     assert "reason-code: nesting-incomplete" in err.splitlines()
-    assert out["buildable"] is False
+    assert_rolled_forward(out, runner)
     assert out["failed"] == [{"name": out["parent"], "write": "ready"}]
-    assert [u for u in out["undone"] if u["write"] == "un-nest"] == [
-        {"name": n, "write": "un-nest"} for n in reversed(names)
-    ]
-    assert out["undone"][-1] == {"name": out["parent"], "write": "drop"}
-    assert [sidecar_of(env, vault, n).get("parent") for n in names] == [None] * 3
-    assert sidecar_of(env, vault, out["parent"])["status"] == "dropped"
-    assert gathered_names(env, spec) == sorted(names)
+    assert out["nested"] == names
+    assert [sidecar_of(env, vault, n).get("parent") for n in names] == [out["parent"]] * 3
+    assert sidecar_of(env, vault, out["parent"])["status"] == "open"
+    assert gather_json(env, spec)["followup-parents"] == [out["parent"]]
 
 
 def test_a_nesting_that_reads_back_unnested_is_a_failed_nesting(lore_env, spec, tmp_path, capsys):
@@ -1087,9 +1094,10 @@ def test_a_nesting_that_reads_back_unnested_is_a_failed_nesting(lore_env, spec, 
     code, out, err = run_assemble(tmp_path, runner, spec, confirm(env, vault, names), capsys)
     assert code == 2
     assert out["failed"] == [{"name": names[1], "write": "confirm"}]
-    assert out["buildable"] is False
-    assert sidecar_of(env, vault, out["parent"])["status"] == "dropped"
-    assert {u["name"] for u in out["undone"]} == {names[0], out["parent"]}
+    assert_rolled_forward(out, runner)
+    assert out["nested"] == [names[0]]
+    assert sidecar_of(env, vault, out["parent"])["status"] == "open"
+    assert sidecar_of(env, vault, names[0])["parent"] == out["parent"]
 
 
 def test_a_nesting_that_reads_back_under_a_different_parent_is_a_failed_nesting(
@@ -1103,13 +1111,15 @@ def test_a_nesting_that_reads_back_under_a_different_parent_is_a_failed_nesting(
         if is_nest(argv, names[1]):
             return runner.real(_swap_parent(argv, holder))
 
-    code, out, _ = run_assemble(tmp_path, EnvRunner(env, hook), spec, confirm(env, vault, names), capsys)
+    runner = EnvRunner(env, hook)
+    code, out, _ = run_assemble(tmp_path, runner, spec, confirm(env, vault, names), capsys)
     assert code == 2
     assert out["failed"] == [{"name": names[1], "write": "confirm"}]
-    assert sidecar_of(env, vault, out["parent"])["status"] == "dropped"
+    assert_rolled_forward(out, runner)
+    assert sidecar_of(env, vault, out["parent"])["status"] == "open"
     assert sidecar_of(env, vault, names[1])["parent"] == holder
-    assert {"name": names[1], "write": "un-nest"} not in out["undone"]
-    assert [sidecar_of(env, vault, n).get("parent") for n in (names[0], names[2])] == [None] * 2
+    assert sidecar_of(env, vault, names[0])["parent"] == out["parent"]
+    assert sidecar_of(env, vault, names[2]).get("parent") is None
 
 
 def _swap_parent(argv, holder):
@@ -1135,11 +1145,12 @@ def test_a_child_edited_between_the_pre_write_check_and_its_nesting_is_a_failed_
 
     runner = EnvRunner(env, hook)
     code, out, err = run_assemble(tmp_path, runner, spec, confirm(env, vault, names), capsys)
-    assert code == 2 and out["buildable"] is False
+    assert code == 2
+    assert_rolled_forward(out, runner)
     assert out["failed"] == [{"name": names[1], "write": "nest"}]
     assert not any(is_nest(w, names[1]) for w in runner.calls)
-    assert [sidecar_of(env, vault, n).get("parent") for n in names] == [None] * 3
-    assert sidecar_of(env, vault, out["parent"])["status"] == "dropped"
+    assert [sidecar_of(env, vault, n).get("parent") for n in names] == [out["parent"], None, None]
+    assert sidecar_of(env, vault, out["parent"])["status"] == "open"
 
 
 def test_a_flip_that_reads_back_not_ready_is_a_failed_flip(lore_env, spec, tmp_path, capsys):
@@ -1150,13 +1161,16 @@ def test_a_flip_that_reads_back_not_ready_is_a_failed_flip(lore_env, spec, tmp_p
         if is_flip(argv):
             return subprocess.CompletedProcess(argv, 0, "", "")
 
-    code, out, _ = run_assemble(tmp_path, EnvRunner(env, hook), spec, confirm(env, vault, names), capsys)
-    assert code == 2 and out["buildable"] is False
+    runner = EnvRunner(env, hook)
+    code, out, _ = run_assemble(tmp_path, runner, spec, confirm(env, vault, names), capsys)
+    assert code == 2
+    assert_rolled_forward(out, runner)
     assert out["failed"] == [{"name": out["parent"], "write": "ready"}]
-    assert sidecar_of(env, vault, out["parent"])["status"] == "dropped"
+    assert sidecar_of(env, vault, out["parent"])["status"] == "open"
+    assert [sidecar_of(env, vault, n).get("parent") for n in names] == [out["parent"]] * 3
 
 
-def test_a_nesting_whose_lore_call_times_out_is_a_failed_nesting_and_is_undone(
+def test_a_nesting_whose_lore_call_times_out_is_a_failed_nesting_and_rolls_forward(
     lore_env, spec, tmp_path, capsys
 ):
     env, vault = lore_env
@@ -1166,14 +1180,16 @@ def test_a_nesting_whose_lore_call_times_out_is_a_failed_nesting_and_is_undone(
         if is_nest(argv, names[1]):
             raise subprocess.TimeoutExpired(argv, 1)
 
-    code, out, _ = run_assemble(tmp_path, EnvRunner(env, hook), spec, confirm(env, vault, names), capsys)
+    runner = EnvRunner(env, hook)
+    code, out, _ = run_assemble(tmp_path, runner, spec, confirm(env, vault, names), capsys)
     assert code == 2
+    assert_rolled_forward(out, runner)
     assert out["failed"] == [{"name": names[1], "write": "nest"}]
-    assert [sidecar_of(env, vault, n).get("parent") for n in names] == [None] * 3
-    assert sidecar_of(env, vault, out["parent"])["status"] == "dropped"
+    assert [sidecar_of(env, vault, n).get("parent") for n in names] == [out["parent"], None, None]
+    assert sidecar_of(env, vault, out["parent"])["status"] == "open"
 
 
-def test_an_unexpected_exception_after_the_create_undoes_the_writes_before_exiting_two(
+def test_an_unexpected_exception_after_the_create_leaves_the_parent_open_and_reports_it(
     lore_env, spec, tmp_path, capsys
 ):
     env, vault = lore_env
@@ -1185,12 +1201,15 @@ def test_an_unexpected_exception_after_the_create_undoes_the_writes_before_exiti
 
     runner = EnvRunner(env, hook)
     code, out, err = run_assemble(tmp_path, runner, spec, confirm(env, vault, names), capsys)
-    assert code == 2 and out is None
+    assert code == 2
     assert [ln for ln in err.splitlines() if ln.startswith("reason-code: ")] == ["reason-code: internal-error"]
     assert "SECRET" not in err
-    assert [sidecar_of(env, vault, n).get("parent") for n in names] == [None] * 3
+    assert_rolled_forward(out, runner)
+    assert out["nested"] == [names[0]]
     (made,) = created_parent(env, vault, spec)
-    assert sidecar_of(env, vault, made)["status"] == "dropped"
+    assert out["parent"] == made
+    assert sidecar_of(env, vault, made)["status"] == "open"
+    assert [sidecar_of(env, vault, n).get("parent") for n in names] == [made, None, None]
 
 
 def created_parent(env, vault, spec):
@@ -1199,25 +1218,23 @@ def created_parent(env, vault, spec):
     return sorted(h["id"].rsplit("/task/", 1)[1] for h in hits)
 
 
-def test_a_failed_un_nest_is_reported_with_a_command_that_completes_it(lore_env, spec, tmp_path, capsys):
+def test_a_failed_flip_attempts_no_un_nest_even_when_every_un_nest_would_fail(
+    lore_env, spec, tmp_path, capsys
+):
     env, vault = lore_env
     names = make_children(env, vault, spec)
-    runner = EnvRunner(env, lambda a, s, r: refused(a) if is_unnest(a, names[0]) else (
-        refused(a) if is_nest(a, names[1]) else None))
+    runner = EnvRunner(env, lambda a, s, r: refused(a) if is_unnest(a) or is_flip(a) else None)
     code, out, err = run_assemble(tmp_path, runner, spec, confirm(env, vault, names), capsys)
     assert code == 2
-    assert len(out["undo-failed"]) == 1
-    failed = out["undo-failed"][0]
-    assert (failed["name"], failed["write"]) == (names[0], "un-nest")
-    assert sidecar_of(env, vault, names[0])["parent"] == out["parent"]
-    assert {"name": out["parent"], "write": "drop"} in out["undone"]
-    run = subprocess.run(shlex.split(failed["command"]), capture_output=True, text=True, env=env)
-    assert run.returncode == 0, run.stderr
-    assert sidecar_of(env, vault, names[0]).get("parent") is None
+    assert_rolled_forward(out, runner)
+    assert [sidecar_of(env, vault, n).get("parent") for n in names] == [out["parent"]] * 3
 
 
-def test_an_un_nest_that_reads_back_still_nested_is_an_undo_failure(lore_env, spec, tmp_path, capsys):
+def test_a_refused_nesting_attempts_no_un_nest_even_when_an_un_nest_would_read_back_nested(
+    lore_env, spec, tmp_path, capsys
+):
     env, vault = lore_env
+    names = make_children(env, vault, spec)
 
     def hook(argv, stdin, runner):
         if is_unnest(argv, names[0]):
@@ -1225,24 +1242,27 @@ def test_an_un_nest_that_reads_back_still_nested_is_an_undo_failure(lore_env, sp
         if is_nest(argv, names[1]):
             return refused(argv)
 
-    names = make_children(env, vault, spec)
-    code, out, _ = run_assemble(tmp_path, EnvRunner(env, hook), spec, confirm(env, vault, names), capsys)
-    assert [(f["name"], f["write"]) for f in out["undo-failed"]] == [(names[0], "un-nest")]
-    assert {"name": names[0], "write": "un-nest"} not in out["undone"]
+    runner = EnvRunner(env, hook)
+    code, out, _ = run_assemble(tmp_path, runner, spec, confirm(env, vault, names), capsys)
+    assert code == 2
+    assert_rolled_forward(out, runner)
+    assert sidecar_of(env, vault, names[0])["parent"] == out["parent"]
 
 
 @pytest.mark.parametrize("silent", [False, True], ids=["write-refused", "write-silently-ignored"])
-def test_a_failed_drop_is_reported_with_the_command_that_completes_it(
+def test_a_failed_drop_of_a_concurrent_parent_is_reported_with_the_command_that_completes_it(
     lore_env, spec, tmp_path, capsys, silent
 ):
     env, vault = lore_env
     names = make_children(env, vault, spec)
 
     def hook(argv, stdin, runner):
+        if argv[:2] == ["record", "create"]:
+            done = runner.real(argv, stdin)
+            make_followup(env, vault, "Rival parent", status="open", labels=[LABEL], spec=spec)
+            return done
         if is_drop(argv):
             return subprocess.CompletedProcess(argv, 0, "", "") if silent else refused(argv)
-        if is_flip(argv):
-            return refused(argv)
 
     code, out, _ = run_assemble(tmp_path, EnvRunner(env, hook), spec, confirm(env, vault, names), capsys)
     assert code == 2
@@ -1563,10 +1583,10 @@ def test_a_failure_before_the_create_does_not_mark_the_parent_state_unknown(
     assert "parent-state: unknown" not in err.splitlines()
 
 
-# --- the undo touches only children it nested -------------------------------------------------
+# --- a failure after the create never touches a child another run moved -------------------------
 
 
-def test_the_undo_leaves_a_child_another_run_moved_under_a_different_parent(
+def test_a_flip_failure_leaves_a_child_another_run_moved_under_a_different_parent_alone(
     lore_env, spec, tmp_path, capsys
 ):
     env, vault = lore_env
@@ -1582,38 +1602,34 @@ def test_the_undo_leaves_a_child_another_run_moved_under_a_different_parent(
     runner = EnvRunner(env, hook)
     code, out, _ = run_assemble(tmp_path, runner, spec, confirm(env, vault, names), capsys)
     assert code == 2
+    assert_rolled_forward(out, runner)
     assert sidecar_of(env, vault, names[0])["parent"] == holder
-    assert [sidecar_of(env, vault, n).get("parent") for n in names[1:]] == [None] * 2
-    assert not any(is_unnest(a, names[0]) for a in runner.calls)
-    assert sorted(u["name"] for u in out["undone"]) == sorted([names[1], names[2], out["parent"]])
-    assert out["undo-failed"] == []
+    assert [sidecar_of(env, vault, n).get("parent") for n in names[1:]] == [out["parent"]] * 2
+    assert sidecar_of(env, vault, out["parent"])["status"] == "open"
 
 
-def test_an_undo_whose_parent_read_back_fails_is_reported_as_undo_failed_and_writes_nothing(
+def test_a_failed_read_before_a_nesting_is_a_failed_nesting_that_writes_nothing_to_that_child(
     lore_env, spec, tmp_path, capsys
 ):
     env, vault = lore_env
     names = make_children(env, vault, spec)
-    state = {"flipping": False}
+    state = {"first_nested": False}
 
     def hook(argv, stdin, runner):
-        if is_flip(argv):
-            state["flipping"] = True
-            return refused(argv)
-        if (
-            state["flipping"]
-            and argv[:3] == ["record", "show", "--json"]
-            and argv[-1] == f"task/{names[1]}"
-        ):
+        if is_nest(argv, names[0]):
+            state["first_nested"] = True
+        if state["first_nested"] and argv[:3] == ["record", "show", "--json"] and argv[-1] == f"task/{names[1]}":
             return refused(argv)
 
     runner = EnvRunner(env, hook)
     code, out, _ = run_assemble(tmp_path, runner, spec, confirm(env, vault, names), capsys)
     assert code == 2
-    assert [(f["name"], f["write"]) for f in out["undo-failed"]] == [(names[1], "un-nest")]
-    assert not any(is_unnest(a, names[1]) for a in runner.calls)
-    assert sidecar_of(env, vault, names[1])["parent"] == out["parent"]
-    assert {u["name"] for u in out["undone"]} == {names[0], names[2], out["parent"]}
+    assert_rolled_forward(out, runner)
+    assert out["failed"] == [{"name": names[1], "write": "nest"}]
+    assert out["nested"] == [names[0]]
+    assert not any(is_nest(a, names[1]) for a in runner.calls)
+    assert sidecar_of(env, vault, names[0])["parent"] == out["parent"]
+    assert sidecar_of(env, vault, out["parent"])["status"] == "open"
 
 
 # --- a gather failure the script maps -----------------------------------------------------------
@@ -1650,7 +1666,7 @@ def test_a_truncated_search_before_the_create_is_search_truncated_with_nothing_w
     assert vault_snapshot(env, vault) == before
 
 
-def test_a_truncated_search_after_the_create_undoes_the_parent_and_reports_search_truncated(
+def test_a_truncated_search_after_the_create_leaves_the_parent_open_and_reports_search_truncated(
     lore_env, spec, tmp_path, capsys
 ):
     env, vault = lore_env
@@ -1659,9 +1675,9 @@ def test_a_truncated_search_after_the_create_undoes_the_parent_and_reports_searc
     code, out, err = run_assemble(tmp_path, runner, spec, confirm(env, vault, names), capsys)
     assert code == 2
     assert [ln for ln in err.splitlines() if ln.startswith("reason-code: ")] == ["reason-code: search-truncated"]
-    assert out["buildable"] is False
-    assert out["undone"] == [{"name": out["parent"], "write": "drop"}]
-    assert sidecar_of(env, vault, out["parent"])["status"] == "dropped"
+    assert_rolled_forward(out, runner)
+    assert out["nested"] == []
+    assert sidecar_of(env, vault, out["parent"])["status"] == "open"
     assert [sidecar_of(env, vault, n).get("parent") for n in names] == [None] * 3
 
 
@@ -2199,3 +2215,503 @@ def test_an_unmarked_task_is_refused_as_not_a_followup_parent_with_the_vault_unc
         "reason-code: not-a-followup-parent"
     ]
     assert runner.writes() == [] and vault_snapshot(env, vault) == before
+
+
+# --- resume: finish an open parent --------------------------------------------------------------
+
+
+def run_resume(runner, spec_name, parent_name, children, tmp_path, capsys, raw=None):
+    path = tmp_path / "resume-children.json"
+    path.write_text(json.dumps(children) if raw is None else raw)
+    code = parent.main(["resume", spec_name, parent_name, "--children", str(path)], runner=runner)
+    out = capsys.readouterr()
+    return code, (json.loads(out.out) if out.out.strip() else None), out.err
+
+
+def revisions(env, vault, names):
+    return [{"name": n, "revision": shown_revision(env, vault, n)} for n in names]
+
+
+def interrupted(env, vault, spec, tmp_path, capsys, count=3, fail_at=1):
+    """(parent, names): an assembly whose nesting of names[fail_at] failed, so the
+    parent is `open` holding the children before it."""
+    names = make_children(env, vault, spec, count=count)
+    runner = EnvRunner(env, lambda a, s, r: refused(a) if is_nest(a, names[fail_at]) else None)
+    _, out, _ = run_assemble(tmp_path, runner, spec, confirm(env, vault, names), capsys)
+    return out["parent"], names
+
+
+def is_body_write(argv, name):
+    return argv[:3] == ["record", "update", f"task/{name}"] and len(argv) == 5
+
+
+def reason_codes(err):
+    return [ln for ln in err.splitlines() if ln.startswith("reason-code: ")]
+
+
+def parents_of(env, vault, names):
+    return [sidecar_of(env, vault, n).get("parent") for n in names]
+
+
+def test_resume_nests_the_remaining_children_and_makes_the_parent_ready(lore_env, spec, tmp_path, capsys):
+    env, vault = lore_env
+    parent_name, names = interrupted(env, vault, spec, tmp_path, capsys)
+    code, out, err = run_resume(
+        EnvRunner(env), spec, parent_name, revisions(env, vault, names[1:]), tmp_path, capsys
+    )
+    assert code == 0, err
+    assert out == {"parent": parent_name, "removed": [], "nested": names[1:], "failed": [], "buildable": True}
+    assert sidecar_of(env, vault, parent_name)["status"] == "ready"
+    assert parents_of(env, vault, names) == [parent_name] * 3
+    graph = _lore(env, "task", "graph", parent_name, "--vault", vault).splitlines()
+    assert graph[0] == f"{parent_name} [ready]"
+    assert sorted(line.strip() for line in graph[1:]) == sorted(f"{n} [ready] (runnable)" for n in names)
+
+
+def test_resume_with_an_empty_file_flips_a_parent_that_holds_every_listed_child(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    names = make_children(env, vault, spec)
+    runner = EnvRunner(env, lambda a, s, r: refused(a) if is_flip(a) else None)
+    _, assembled, _ = run_assemble(tmp_path, runner, spec, confirm(env, vault, names), capsys)
+    assert sidecar_of(env, vault, assembled["parent"])["status"] == "open"
+    code, out, err = run_resume(EnvRunner(env), spec, assembled["parent"], [], tmp_path, capsys)
+    assert code == 0, err
+    assert out == {"parent": assembled["parent"], "removed": [], "nested": [], "failed": [], "buildable": True}
+    assert sidecar_of(env, vault, assembled["parent"])["status"] == "ready"
+
+
+def test_resume_without_the_third_child_removes_its_section_and_leaves_it_gatherable(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    parent_name, names = interrupted(env, vault, spec, tmp_path, capsys)
+    code, out, err = run_resume(
+        EnvRunner(env), spec, parent_name, revisions(env, vault, names[1:2]), tmp_path, capsys
+    )
+    assert code == 0, err
+    assert out["removed"] == [names[2]] and out["nested"] == [names[1]]
+    body = body_of(env, vault, parent_name)
+    assert f"### task/{names[2]}" not in body and body.count("### task/") == 2
+    assert parents_of(env, vault, names) == [parent_name, parent_name, None]
+    assert gathered_names(env, spec) == [names[2]]
+    assert sidecar_of(env, vault, parent_name)["status"] == "ready"
+    graph = _lore(env, "task", "graph", parent_name, "--vault", vault).splitlines()
+    assert sorted(line.strip() for line in graph[1:]) == sorted(f"{n} [ready] (runnable)" for n in names[:2])
+
+
+# --- resume: refusals, each leaving the vault unchanged --------------------------------------
+
+
+def test_resume_refuses_a_name_the_body_does_not_list_as_child_not_listed(lore_env, spec, tmp_path, capsys):
+    env, vault = lore_env
+    parent_name, names = interrupted(env, vault, spec, tmp_path, capsys)
+    outsider = make_followup(env, vault, "Outsider", spec=spec)
+    before = vault_snapshot(env, vault)
+    runner = EnvRunner(env)
+    code, out, err = run_resume(
+        runner, spec, parent_name, revisions(env, vault, [names[1], outsider]), tmp_path, capsys
+    )
+    assert_refused(code, out, err, runner, "child-not-listed", outsider)
+    assert vault_snapshot(env, vault) == before
+
+
+def test_resume_refuses_a_child_edited_since_the_confirmation_as_child_changed(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    parent_name, names = interrupted(env, vault, spec, tmp_path, capsys)
+    children = revisions(env, vault, names[1:])
+    _lore(env, "record", "update", f"task/{names[2]}", "--vault", vault, stdin=CLEAN + "\nA later edit.\n")
+    before = vault_snapshot(env, vault)
+    runner = EnvRunner(env)
+    code, out, err = run_resume(runner, spec, parent_name, children, tmp_path, capsys)
+    assert_refused(code, out, err, runner, "child-changed", names[2])
+    assert vault_snapshot(env, vault) == before
+
+
+def test_resume_refuses_a_child_no_longer_ready_as_child_not_eligible(lore_env, spec, tmp_path, capsys):
+    env, vault = lore_env
+    parent_name, names = interrupted(env, vault, spec, tmp_path, capsys)
+    children = revisions(env, vault, names[1:])
+    _lore(env, "record", "update", f"task/{names[1]}", "--vault", vault, "--status", "blocked")
+    before = vault_snapshot(env, vault)
+    runner = EnvRunner(env)
+    code, out, err = run_resume(runner, spec, parent_name, children, tmp_path, capsys)
+    assert_refused(code, out, err, runner, "child-not-eligible", names[1])
+    assert vault_snapshot(env, vault) == before
+
+
+def test_resume_refuses_a_held_child_set_back_to_open_as_child_not_eligible(lore_env, spec, tmp_path, capsys):
+    env, vault = lore_env
+    parent_name, names = interrupted(env, vault, spec, tmp_path, capsys)
+    children = revisions(env, vault, names[1:])
+    _lore(env, "record", "update", f"task/{names[0]}", "--vault", vault, "--status", "open")
+    before = vault_snapshot(env, vault)
+    runner = EnvRunner(env)
+    code, out, err = run_resume(runner, spec, parent_name, children, tmp_path, capsys)
+    assert_refused(code, out, err, runner, "child-not-eligible", names[0])
+    assert vault_snapshot(env, vault) == before
+
+
+def test_resume_refuses_a_ready_parent_as_parent_not_resumable(lore_env, spec, tmp_path, capsys):
+    env, vault = lore_env
+    parent_name, names = assembled_parent(env, vault, spec, tmp_path, capsys)
+    before = vault_snapshot(env, vault)
+    runner = EnvRunner(env)
+    code, out, err = run_resume(runner, spec, parent_name, [], tmp_path, capsys)
+    assert_refused(code, out, err, runner, "parent-not-resumable", parent_name)
+    assert vault_snapshot(env, vault) == before
+
+
+def test_a_second_resume_on_a_parent_the_first_made_ready_is_parent_not_resumable(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    parent_name, names = interrupted(env, vault, spec, tmp_path, capsys)
+    children = revisions(env, vault, names[1:])
+    code, _, err = run_resume(EnvRunner(env), spec, parent_name, children, tmp_path, capsys)
+    assert code == 0, err
+    before = vault_snapshot(env, vault)
+    runner = EnvRunner(env)
+    code, out, err = run_resume(runner, spec, parent_name, children, tmp_path, capsys)
+    assert_refused(code, out, err, runner, "parent-not-resumable", parent_name)
+    assert vault_snapshot(env, vault) == before
+
+
+def test_resume_refuses_while_another_live_parent_is_linked_to_the_spec(lore_env, spec, tmp_path, capsys):
+    env, vault = lore_env
+    parent_name, names = interrupted(env, vault, spec, tmp_path, capsys)
+    other = make_followup(env, vault, "Other parent", status="open", labels=[LABEL], spec=spec)
+    children = revisions(env, vault, names[1:])
+    before = vault_snapshot(env, vault)
+    runner = EnvRunner(env)
+    code, out, err = run_resume(runner, spec, parent_name, children, tmp_path, capsys)
+    assert_refused(code, out, err, runner, "followup-parent-exists", other)
+    assert vault_snapshot(env, vault) == before
+
+
+def test_resume_with_no_held_child_and_an_empty_file_is_nothing_to_build(lore_env, spec, tmp_path, capsys):
+    env, vault = lore_env
+    parent_name, names = interrupted(env, vault, spec, tmp_path, capsys, fail_at=0)
+    before = vault_snapshot(env, vault)
+    runner = EnvRunner(env)
+    code, out, err = run_resume(runner, spec, parent_name, [], tmp_path, capsys)
+    assert_refused(code, out, err, runner, "nothing-to-build", parent_name)
+    assert vault_snapshot(env, vault) == before
+
+
+def test_resume_refuses_a_task_that_is_not_a_follow_up_parent(lore_env, spec, tmp_path, capsys):
+    env, vault = lore_env
+    plain = make_followup(env, vault, "Plain", status="open", spec=spec)
+    before = vault_snapshot(env, vault)
+    runner = EnvRunner(env)
+    code, out, err = run_resume(runner, spec, plain, [], tmp_path, capsys)
+    assert_refused(code, out, err, runner, "not-a-followup-parent", plain)
+    assert vault_snapshot(env, vault) == before
+
+
+@pytest.mark.parametrize(
+    "raw",
+    ["not json", "{}", '"x"', '[{"name": "a"}]', '[{"name": "a", "revision": ""}]', '[3]',
+     '[{"name": "a", "revision": "r"}, {"name": "a", "revision": "r"}]'],
+)
+def test_a_malformed_resume_children_file_is_refused_before_any_lore_call(tmp_path, capsys, raw):
+    runner = Lore()
+    code, out, err = run_resume(runner, "s", "p", [], tmp_path, capsys, raw=raw)
+    assert code == 2 and out is None
+    assert reason_codes(err) == ["reason-code: invalid-children-file"]
+    assert runner.calls == []
+
+
+def test_a_resume_child_name_of_a_hostile_shape_is_refused_before_any_lore_call(tmp_path, capsys):
+    runner = Lore()
+    code, out, err = run_resume(runner, "s", "p", [{"name": "a b", "revision": "r"}], tmp_path, capsys)
+    assert code == 2 and out is None
+    assert reason_codes(err) == ["reason-code: invalid-followup-name"]
+    assert runner.calls == []
+
+
+def test_resume_without_its_children_file_is_invalid_arguments(capsys):
+    runner = Lore()
+    assert parent.main(["resume", "s", "p"], runner=runner) == 2
+    assert reason_codes(capsys.readouterr().err) == ["reason-code: invalid-arguments"]
+    assert runner.calls == []
+
+
+# --- resume: failure semantics ------------------------------------------------------------------
+
+
+def test_a_failed_nesting_during_resume_leaves_the_parent_open_and_a_second_resume_completes_it(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    parent_name, names = interrupted(env, vault, spec, tmp_path, capsys)
+    runner = EnvRunner(env, lambda a, s, r: refused(a) if is_nest(a, names[2]) else None)
+    code, out, err = run_resume(runner, spec, parent_name, revisions(env, vault, names[1:]), tmp_path, capsys)
+    assert code == 2
+    assert reason_codes(err) == ["reason-code: nesting-incomplete"]
+    assert out == {
+        "parent": parent_name, "removed": [], "nested": [names[1]],
+        "failed": [{"name": names[2], "write": "nest"}], "buildable": False,
+    }
+    assert not any(is_flip(call) for call in runner.calls)
+    assert sidecar_of(env, vault, parent_name)["status"] == "open"
+    assert parents_of(env, vault, names) == [parent_name, parent_name, None]
+    code, out, err = run_resume(
+        EnvRunner(env), spec, parent_name, revisions(env, vault, names[2:]), tmp_path, capsys
+    )
+    assert code == 0, err
+    assert out["nested"] == [names[2]] and out["buildable"] is True
+    assert sidecar_of(env, vault, parent_name)["status"] == "ready"
+    assert parents_of(env, vault, names) == [parent_name] * 3
+
+
+@pytest.mark.parametrize("silent", [False, True], ids=["write-refused", "write-silently-ignored"])
+def test_a_failed_body_rewrite_leaves_no_child_nested_and_the_body_unchanged(
+    lore_env, spec, tmp_path, capsys, silent
+):
+    env, vault = lore_env
+    parent_name, names = interrupted(env, vault, spec, tmp_path, capsys)
+    before = body_of(env, vault, parent_name)
+
+    def hook(argv, stdin, runner):
+        if is_body_write(argv, parent_name):
+            return subprocess.CompletedProcess(argv, 0, "", "") if silent else refused(argv)
+
+    runner = EnvRunner(env, hook)
+    code, out, err = run_resume(runner, spec, parent_name, revisions(env, vault, names[1:2]), tmp_path, capsys)
+    assert code == 2
+    assert reason_codes(err) == ["reason-code: nesting-incomplete"]
+    assert out == {
+        "parent": parent_name, "removed": [], "nested": [],
+        "failed": [{"name": parent_name, "write": "list"}], "buildable": False,
+    }
+    assert not any(is_nest(call) or is_flip(call) for call in runner.calls)
+    assert body_of(env, vault, parent_name) == before
+    assert parents_of(env, vault, names) == [parent_name, None, None]
+    assert sidecar_of(env, vault, parent_name)["status"] == "open"
+
+
+def test_a_failed_complete_read_before_the_flip_leaves_the_parent_open(lore_env, spec, tmp_path, capsys):
+    env, vault = lore_env
+    parent_name, names = interrupted(env, vault, spec, tmp_path, capsys)
+    state = {"nested": 0}
+
+    def hook(argv, stdin, runner):
+        if is_nest(argv, names[2]):
+            state["nested"] += 1
+        if state["nested"] and argv[:2] == ["task", "list"]:
+            return refused(argv)
+
+    runner = EnvRunner(env, hook)
+    code, out, err = run_resume(runner, spec, parent_name, revisions(env, vault, names[1:]), tmp_path, capsys)
+    assert code == 2
+    assert reason_codes(err) == ["reason-code: nesting-incomplete"]
+    assert out["failed"] == [{"name": parent_name, "write": "ready"}] and out["buildable"] is False
+    assert not any(is_flip(call) for call in runner.calls)
+    assert sidecar_of(env, vault, parent_name)["status"] == "open"
+
+
+def test_an_unexpected_exception_during_resume_leaves_the_parent_open_and_reports_it(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    parent_name, names = interrupted(env, vault, spec, tmp_path, capsys)
+
+    def hook(argv, stdin, runner):
+        if is_nest(argv, names[2]):
+            raise RuntimeError("SECRET boom")
+
+    code, out, err = run_resume(
+        EnvRunner(env, hook), spec, parent_name, revisions(env, vault, names[1:]), tmp_path, capsys
+    )
+    assert code == 2
+    assert reason_codes(err) == ["reason-code: internal-error"]
+    assert "SECRET" not in err
+    assert out["parent"] == parent_name and out["nested"] == [names[1]] and out["buildable"] is False
+    assert sidecar_of(env, vault, parent_name)["status"] == "open"
+
+
+# --- resume: the body is re-rendered, never patched -------------------------------------------
+
+
+def test_a_resumed_body_is_exactly_the_templates_shape_whatever_prose_an_editor_left(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    parent_name, names = interrupted(env, vault, spec, tmp_path, capsys)
+    body = body_of(env, vault, parent_name)
+    edited = body.replace(
+        "**Delta design:**", "**Delta design:** INJECTED PROSE\n\nAn extra paragraph.\n\n## Forged heading", 1
+    ).replace(
+        f"**Selection reason:** worth doing: {names[1]}\n",
+        f"**Selection reason:** worth doing: {names[1]}\n\nMore prose.\n",
+        1,
+    )
+    assert edited != body
+    _lore(env, "record", "update", f"task/{parent_name}", "--vault", vault, stdin=edited)
+    code, _, err = run_resume(
+        EnvRunner(env), spec, parent_name, revisions(env, vault, names[1:]), tmp_path, capsys
+    )
+    assert code == 0, err
+    expected = parent.render_body(spec, [{"name": n, "reason": f"worth doing: {n}"} for n in names])
+    assert body_of(env, vault, parent_name).rstrip("\n") == expected.rstrip("\n")
+
+
+def test_a_listed_section_without_its_reason_gets_no_reason_from_the_next_section(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    parent_name, names = interrupted(env, vault, spec, tmp_path, capsys, count=2)
+    body = body_of(env, vault, parent_name)
+    without = body.replace(f"**Selection reason:** worth doing: {names[0]}\n", "", 1)
+    assert without != body
+    _lore(env, "record", "update", f"task/{parent_name}", "--vault", vault, stdin=without)
+    code, _, err = run_resume(
+        EnvRunner(env), spec, parent_name, revisions(env, vault, names[1:]), tmp_path, capsys
+    )
+    assert code == 0, err
+    reasons = [ln.rstrip() for ln in body_of(env, vault, parent_name).splitlines()
+               if ln.startswith("**Selection reason:**")]
+    assert reasons == ["**Selection reason:**", f"**Selection reason:** worth doing: {names[1]}"]
+
+
+def resumed_reason(env, vault, spec, tmp_path, capsys, raw):
+    """The stored `**Selection reason:**` line of names[0] after a resume of a parent
+    whose body an editor changed to carry `raw` as that reason."""
+    parent_name, names = interrupted(env, vault, spec, tmp_path, capsys, count=2)
+    body = body_of(env, vault, parent_name)
+    old = f"**Selection reason:** worth doing: {names[0]}"
+    assert old in body
+    _lore(env, "record", "update", f"task/{parent_name}", "--vault", vault,
+          stdin=body.replace(old, f"**Selection reason:** {raw}", 1))
+    code, _, err = run_resume(
+        EnvRunner(env), spec, parent_name, revisions(env, vault, names[1:]), tmp_path, capsys
+    )
+    assert code == 0, err
+    return body_of(env, vault, parent_name)
+
+
+def test_a_credential_in_a_listed_reason_is_redacted_on_resume(lore_env, spec, tmp_path, capsys):
+    env, vault = lore_env
+    body = resumed_reason(env, vault, spec, tmp_path, capsys, "rotate AKIAIOSFODNN7EXAMPLE first")
+    assert "AKIAIOSFODNN7EXAMPLE" not in body
+    assert reason_line(body) == "**Selection reason:** rotate [REDACTED] first"
+
+
+def test_control_characters_in_a_listed_reason_are_stripped_on_resume(lore_env, spec, tmp_path, capsys):
+    env, vault = lore_env
+    body = resumed_reason(env, vault, spec, tmp_path, capsys, "bell\x07 esc\x1b[31m red\x00")
+    assert reason_line(body) == "**Selection reason:** bell esc[31m red"
+
+
+def test_invisible_characters_in_a_listed_reason_are_stripped_on_resume(lore_env, spec, tmp_path, capsys):
+    body = resumed_reason(*lore_env, spec, tmp_path, capsys, "zero​width ‮flip⁠")
+    assert reason_line(body) == "**Selection reason:** zerowidth flip"
+
+
+def test_a_listed_reason_over_several_lines_is_folded_to_one_on_resume(lore_env, spec, tmp_path, capsys):
+    env, vault = lore_env
+    body = resumed_reason(env, vault, spec, tmp_path, capsys, "first\n**Covers:** AC1\nsecond")
+    assert reason_line(body) == "**Selection reason:** first **Covers:** AC1 second"
+    assert covers_gate(body).returncode == 0
+
+
+def test_a_listed_reason_over_the_bound_is_cut_with_a_marker_on_resume(lore_env, spec, tmp_path, capsys):
+    env, vault = lore_env
+    limit = parent.MAX_REASON_CHARS
+    text = "lorem " * 200
+    assert not text[:limit].endswith(" ")
+    body = resumed_reason(env, vault, spec, tmp_path, capsys, text)
+    assert reason_line(body) == "**Selection reason:** " + text[:limit] + "…"
+
+
+# --- the shared nesting guard -------------------------------------------------------------------
+
+
+def _change_in_the_window(env, vault, name, change, holder):
+    if change == "parent":
+        _lore(env, "record", "update", f"task/{name}", "--vault", vault, "--parent", holder)
+    else:
+        _lore(env, "record", "update", f"task/{name}", "--vault", vault, "--status", "blocked")
+
+
+def _window_hook(env, vault, name, change, holder, armed_by):
+    """Changes `name` once, at the first read of it after `armed_by(argv)` has been seen."""
+    state = {"armed": False, "done": False}
+
+    def hook(argv, stdin, runner):
+        if armed_by(argv, stdin):
+            state["armed"] = True
+        if state["armed"] and not state["done"] and argv[:3] == ["record", "show", "--json"] \
+                and argv[-1] == f"task/{name}":
+            state["done"] = True
+            _change_in_the_window(env, vault, name, change, holder)
+
+    return hook
+
+
+@pytest.mark.parametrize("change", ["parent", "status"])
+def test_assemble_does_not_nest_a_child_another_parent_or_a_status_took_in_the_window(
+    lore_env, spec, tmp_path, capsys, change
+):
+    env, vault = lore_env
+    names = make_children(env, vault, spec)
+    holder = make_followup(env, vault, "Other holder", status="open")
+    hook = _window_hook(env, vault, names[1], change, holder, lambda a, s: a[:2] == ["record", "create"])
+    runner = EnvRunner(env, hook)
+    code, out, _ = run_assemble(tmp_path, runner, spec, confirm(env, vault, names), capsys)
+    assert code == 2
+    assert_rolled_forward(out, runner)
+    assert out["failed"] == [{"name": names[1], "write": "nest"}]
+    assert not any(is_nest(a, names[1]) for a in runner.calls)
+    side = sidecar_of(env, vault, names[1])
+    assert side.get("parent") == (holder if change == "parent" else None)
+    assert side["status"] == ("ready" if change == "parent" else "blocked")
+    assert sidecar_of(env, vault, holder).get("parent") is None
+    assert sidecar_of(env, vault, names[0])["parent"] == out["parent"]
+
+
+@pytest.mark.parametrize("change", ["parent", "status"])
+def test_resume_does_not_nest_a_child_another_parent_or_a_status_took_in_the_window(
+    lore_env, spec, tmp_path, capsys, change
+):
+    env, vault = lore_env
+    parent_name, names = interrupted(env, vault, spec, tmp_path, capsys)
+    holder = make_followup(env, vault, "Other holder", status="open")
+    children = revisions(env, vault, names[1:])
+    hook = _window_hook(env, vault, names[1], change, holder, lambda a, s: is_body_write(a, parent_name))
+    runner = EnvRunner(env, hook)
+    code, out, err = run_resume(runner, spec, parent_name, children, tmp_path, capsys)
+    assert code == 2
+    assert reason_codes(err) == ["reason-code: nesting-incomplete"]
+    assert out["failed"] == [{"name": names[1], "write": "nest"}]
+    assert out["nested"] == [] and out["buildable"] is False
+    assert not any(is_nest(a, names[1]) for a in runner.calls)
+    side = sidecar_of(env, vault, names[1])
+    assert side.get("parent") == (holder if change == "parent" else None)
+    assert sidecar_of(env, vault, parent_name)["status"] == "open"
+
+
+# --- the rollback path ----------------------------------------------------------------------
+
+
+def test_a_dropped_parent_set_back_to_open_by_hand_is_made_ready_again_by_resume(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    parent_name, names = assembled_parent(env, vault, spec, tmp_path, capsys)
+    code, _, err = run_drop(EnvRunner(env), spec, parent_name, tmp_path, capsys)
+    assert code == 0, err
+    assert parents_of(env, vault, names) == [None, None]
+    _lore(env, "record", "update", f"task/{parent_name}", "--vault", vault, "--status", "open")
+    code, out, err = run_resume(
+        EnvRunner(env), spec, parent_name, revisions(env, vault, names), tmp_path, capsys
+    )
+    assert code == 0, err
+    assert out["nested"] == names and out["buildable"] is True
+    assert sidecar_of(env, vault, parent_name)["status"] == "ready"
+    assert parents_of(env, vault, names) == [parent_name] * 2
+    assert "## Dropped" not in body_of(env, vault, parent_name)

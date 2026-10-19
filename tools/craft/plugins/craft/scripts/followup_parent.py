@@ -6,6 +6,7 @@ under one new parent.
 Usage:
     followup_parent.py check <spec-name> <name>...
     followup_parent.py assemble <spec-name> --children <json-file>
+    followup_parent.py resume <spec-name> <parent> --children <json-file>
     followup_parent.py state <spec-name> <parent>
     followup_parent.py drop <spec-name> <parent> --reason-file <path>
 
@@ -110,28 +111,34 @@ report (below) on stdout and one `reason-code:` line on stderr:
        not caught.
     4. Flip the parent to `ready` and confirm by a complete read, only when every
        child is confirmed nested.
-On any failed nesting, failed flip or concurrent parent, `assemble` undoes: each
-child it wrote to is read back, and only one whose `parent` is the new parent is
-un-nested (`--unset-parent`, in reverse order; a child under any other parent, or
-none, is left alone, and a read that fails is an `undo-failed` entry, never a
-guess), and the parent
-is dropped (`--status dropped --diff`; the why-note rides the same invocation,
-because `dropped` freezes the body). Each undo write is confirmed by a complete
-read. The failure is `nesting-incomplete` (exit 2) for a failed nesting or flip.
+Creating the parent is the point of no return, and `assemble` rolls forward from there:
+a failed nesting, a failed flip, a failed re-query or an unexpected exception leaves the
+parent `open`, holding whatever nested, and is `nesting-incomplete` (exit 2) for a failed
+nesting or flip, the failure's own code otherwise (`internal-error` for an exception).
+`resume` finishes it. The one exception is `concurrent-followup-parent`: this run's own
+parent holds no child yet, so it is removed through `un_nest_and_drop` (`--status dropped
+--diff`; the why-note rides the same invocation, because `dropped` freezes the body),
+confirmed by a complete read.
+
+The shared nesting guard (`assemble` and `resume` nest through one function): immediately
+before each `--parent` write the child's sidecar and revision are re-read, and the child is
+written only when the revision is the confirmed one, it has no `parent` and its status is
+`ready`; otherwise it is a failed nesting (`nest`) and is not written, so a child another
+parent took in the window is never re-parented.
 
 Stdout JSON on exit 0 and on every exit 2 after the create (a create of unclear
 outcome that left a parent included; a gather failure such as `search-truncated`
-after the create reports the same way, once the undo has run):
+or an `internal-error` after the create reports the same way, with the parent left
+`open`):
 - `parent`: the created parent's bare name;
-- `nested`: the children confirmed nested when the run ends (empty after an undo
-  that un-nested them all);
+- `nested`: the children this run confirmed nested;
 - `failed`: `{name, write}` per failed write: `nest` (the nesting write, or the
   revision re-read before it, failed), `confirm` (the write succeeded but the read
   shows the child not nested) or `ready` (name is the parent);
-- `undone`: `{name, write}` per confirmed undo write: `un-nest` or `drop` (name is
-  the parent);
+- `undone`: `{name, write}` per confirmed undo write; only the concurrent-parent
+  removal writes one (`drop`, name the parent), so it is empty otherwise;
 - `undo-failed`: `{name, write, command}` per undo write that failed or did not
-  read back. `command` is the exact `lore` command that completes it, built only
+  read back; empty unless that removal failed. `command` is the exact `lore` command that completes it, built only
   from shape-checked names (the drop command carries no why-note);
 - `buildable`: true only on exit 0.
 
@@ -143,13 +150,14 @@ Invariants and security posture:
 - `lore`'s stdout and stderr are vault-derived and are never printed: a failure
   prints its `reason-code:`, plus a `subject:` line of names that passed the shape
   check, and nothing parsed from `lore`.
-- Vault text enters the parent body only through the sanitizing above; the
-  confirmed reasons come from the children file, never from the vault.
+- Vault text enters the parent body only through the sanitizing above. `assemble`'s
+  reasons come from the children file; `resume` re-reads each reason from the
+  vault-writable body and passes it through the same sanitizing.
 - No write precedes the three refusals, and the parent is created before any child
   is touched, so a refusal leaves the vault unchanged, as does a create that failed
   and left no parent behind.
 - Any unexpected exception exits 2 with `reason-code: internal-error`; one that
-  occurs after the create first undoes what the run wrote.
+  occurs after the create leaves the parent `open` and prints the report.
 
 `state` is read-only. It resolves the spec's vault, reads `<parent>` completely and
 refuses with exit 1 `not-a-followup-parent` (vault untouched, a `subject:` line naming
@@ -195,10 +203,43 @@ running `drop` again completes it. Stdout JSON on exit 0 and on every `drop-inco
   sets it back to `ready`, since gathering never sees an `in-progress` follow-up;
 - `dropped`: true only on exit 0.
 
-`un_nest_and_drop(runner, vault, parent_name, children, note,
-drop_after_failed_un_nest=False)` is the one un-nest-then-drop implementation, an
-importable function: `drop` and `assemble`'s undo both run on it. `children` are bare
+`un_nest_and_drop(runner, vault, parent_name, children, note)` is the one
+un-nest-then-drop implementation, an importable function: `drop` and `assemble`'s
+concurrent-parent removal (which un-nests nothing) both run on it. `children` are bare
 names, un-nested in the order given; `note` is the paragraph written under `## Dropped`.
+
+`resume` finishes an `open` follow-up parent. `--children` is a JSON file holding a list,
+possibly empty, of `{name, revision}`: the listed-but-unheld follow-ups the operator
+confirmed, each at the `revision` that `check` emitted (anything else, or a repeated name,
+is `invalid-children-file`; a name failing the shape check is `invalid-followup-name`).
+Refusals before any write exit 1 with the vault unchanged and a `subject:` line:
+    not-a-followup-parent   as `state` decides;
+    parent-not-resumable    the parent's status is not `open`;
+    followup-parent-exists  another live follow-up parent is linked to the spec;
+    child-not-listed        a file name is not in `state`'s `unheld`;
+    child-not-eligible      a file child fails the `check` eligibility re-run, or a held
+                            child (one already under this parent) is not `ready`;
+    child-changed           a file child's revision differs from the confirmed one;
+    nothing-to-build        no name would remain listed: the parent holds none of its
+                            listed children and the file is empty.
+The writes run in this order, and every exit 2 after the first prints the report on
+stdout and one `reason-code:` line on stderr, leaving the parent `open`:
+    1. Re-render the whole body with `render_body` from the names still listed (the
+       file children plus the held children, in body order), each `**Selection
+       reason:**` read from the current body and sanitized as `render_body` does, so
+       nothing but the template's shape survives; an unheld name absent from the file
+       is dropped from the list. One full-body update, confirmed by reading the listing
+       back with `parse_listing` (lore has no conditional write, so an edit landing
+       between the read and this write is lost; a mismatch is a failed `list`).
+    2. Nest each file child in file order through the shared guard above.
+    3. Flip to `ready` only when every name still listed is held, confirmed by a
+       complete read, and the flip is confirmed by a complete read.
+Stdout JSON: `parent`; `removed`: the unheld names dropped from the list; `nested`: the
+file children this run confirmed nested; `failed`: `{name, write}` with `write` one of
+`list` (name is the parent: the body rewrite did not read back), `nest`, `confirm`, or
+`ready` (name is the parent: the held set could not be confirmed complete, or the flip did
+not read back); `buildable`: true only on exit 0. A failure is `nesting-incomplete`, or its
+own code (`internal-error`, a `lore` failure code); running `resume` again completes it.
 
 `check_followups(runner, spec, names)` is the same check as an importable
 function, returning the structure the JSON carries; `read_revision(runner,
@@ -256,6 +297,9 @@ REASON_CODES = frozenset(
         "parent-changed",
         "invalid-reason-file",
         "drop-incomplete",
+        "parent-not-resumable",
+        "child-not-listed",
+        "nothing-to-build",
     }
 )
 
@@ -267,6 +311,9 @@ REFUSAL_REASONS = frozenset(
         "not-a-followup-parent",
         "parent-not-live",
         "parent-changed",
+        "parent-not-resumable",
+        "child-not-listed",
+        "nothing-to-build",
     }
 )
 
@@ -292,6 +339,8 @@ _UNRESOLVED_RE = re.compile(r"^## Refine — unresolved[ \t]*$", re.MULTILINE)
 _FIELD_END = r"(?=^\*\*[^*\n]+:\*\*|^#{1,6} |\Z)"
 _BACKTICKED_RE = re.compile(r"`([^`\n]+)`")
 _LISTING_HEADING_RE = re.compile(r"^### task/(.*?)[ \t]*$", re.MULTILINE)
+_HEADING_RE = re.compile(r"^#{1,6} ", re.MULTILINE)
+_SELECTION_REASON_RE = re.compile(r"^\*\*Selection reason:\*\*(.*?)(?:\n[ \t]*\n|\Z)", re.MULTILINE | re.DOTALL)
 MAX_STATUS_CHARS = 40
 MAX_REASON_FILE_BYTES = 4096
 UNFINISHED_STATUSES = frozenset({"open", "ready", "in-progress", "blocked"})
@@ -572,14 +621,7 @@ def _command(argv: list[str]) -> str:
     return " ".join(["lore", *argv])
 
 
-def un_nest_and_drop(
-    runner,
-    vault: str,
-    parent_name: str,
-    children: list[str],
-    note: str,
-    drop_after_failed_un_nest: bool = False,
-) -> dict:
+def un_nest_and_drop(runner, vault: str, parent_name: str, children: list[str], note: str) -> dict:
     """The one un-nest-then-drop implementation. Un-nests each of `children` in the
     order given, then drops `parent_name` with `note` appended as a `## Dropped`
     section (the why-note rides the same `--status dropped --diff` write, because
@@ -587,7 +629,7 @@ def un_nest_and_drop(
     its un-nest: one no longer under this parent is left alone and reported in
     `kept`, and a read that fails is a failed write, never a guess. Every write is
     confirmed by a complete read. The parent is dropped only when every un-nest is
-    confirmed, unless `drop_after_failed_un_nest`. Returns `un-nested`, `kept`
+    confirmed. Returns `un-nested`, `kept`
     (`{name, status}`), `failed` (`{name, write, command}`, `command` the exact
     `lore` command that completes the write, carrying no note), `reset` (`{name,
     command}` for each un-nested child that was `in-progress`) and `dropped`."""
@@ -612,7 +654,7 @@ def un_nest_and_drop(
                 report["reset"].append({"name": name, "command": command})
         else:
             report["failed"].append(failure)
-    if report["failed"] and not drop_after_failed_un_nest:
+    if report["failed"]:
         return report
 
     try:
@@ -628,21 +670,6 @@ def un_nest_and_drop(
         command = _command(_update(vault, parent_name, "--status", "dropped"))
         report["failed"].append({"name": parent_name, "write": "drop", "command": command})
     return report
-
-
-def _undo(runner, vault: str, parent_name: str, attempted: list[str], reason: str, report: dict) -> None:
-    done = un_nest_and_drop(
-        runner,
-        vault,
-        parent_name,
-        list(reversed(attempted)),
-        f"Assembly undone: {reason}.",
-        drop_after_failed_un_nest=True,
-    )
-    report["undone"].extend({"name": name, "write": "un-nest"} for name in done["un-nested"])
-    if done["dropped"]:
-        report["undone"].append({"name": parent_name, "write": "drop"})
-    report["undo-failed"].extend(done["failed"])
 
 
 def assemble(runner, spec: str, children: list[dict], today: datetime.date) -> tuple[dict, str | None, tuple]:
@@ -679,14 +706,17 @@ def assemble(runner, spec: str, children: list[dict], today: datetime.date) -> t
             raise ParentError(err.reason, state_unknown=True) from None
         raise ParentError("parent-create-failed", tuple(sorted(mine)))
     report: dict = {"parent": parent_name, "nested": [], "failed": [], "undone": [], "undo-failed": []}
-    attempted: list[str] = []
     reason, subjects = None, ()
     try:
         rival = [n for n in live_followup_parents(runner, vault, spec, spec_sidecar) if n != parent_name]
         if rival:
             reason, subjects = "concurrent-followup-parent", tuple(sorted([parent_name, *rival]))
+            done = un_nest_and_drop(runner, vault, parent_name, [], f"Assembly undone: {reason}.")
+            if done["dropped"]:
+                report["undone"].append({"name": parent_name, "write": "drop"})
+            report["undo-failed"].extend(done["failed"])
         else:
-            _nest_all(runner, vault, parent_name, children, attempted, report)
+            _nest_children(runner, vault, parent_name, children, report)
             if not report["failed"]:
                 _flip(runner, vault, parent_name, report)
             if report["failed"]:
@@ -694,31 +724,33 @@ def assemble(runner, spec: str, children: list[dict], today: datetime.date) -> t
     except (ParentError, gather.GatherError) as err:
         reason = err.reason
     except Exception:
-        _undo(runner, vault, parent_name, attempted, "internal-error", {"undone": [], "undo-failed": []})
-        raise
-    if reason is not None:
-        _undo(runner, vault, parent_name, attempted, reason, report)
-        report["nested"] = []
+        reason = "internal-error"
     report["buildable"] = reason is None
     return report, reason, subjects
 
 
-def _nest_all(runner, vault: str, parent_name: str, children: list[dict], attempted: list[str], report: dict) -> None:
+def _nest_children(runner, vault: str, parent_name: str, children: list[dict], report: dict) -> None:
+    """Nest each child under `parent_name` in order, stopping at the first failure.
+    Immediately before each `--parent` write the child's sidecar and revision are
+    re-read and must show the confirmed revision, no `parent` and status `ready`;
+    otherwise the child is a failed nesting and is not written, so a child another
+    parent took in the window is never re-parented. Each write is confirmed by a
+    complete read. Appends to `report["nested"]` and `report["failed"]`."""
     for child in children:
         name = child["name"]
         failure = {"name": name, "write": "nest"}
         try:
-            if read_revision(runner, vault, name) != child["revision"]:
-                report["failed"].append(failure)
-                return
+            sidecar, _, revision = _read_task(runner, vault, name)
         except (ParentError, gather.GatherError):
+            report["failed"].append(failure)
+            return
+        if revision != child["revision"] or sidecar.get("parent") or sidecar["status"] != "ready":
             report["failed"].append(failure)
             return
         done = _write(runner, _update(vault, name, "--parent", parent_name))
         if done is not None and done.returncode != 0:
             report["failed"].append(failure)
             return
-        attempted.append(name)
         if not _read_ok(lambda: _read_task(runner, vault, name)[0].get("parent") == parent_name):
             report["failed"].append({"name": name, "write": "confirm" if done is not None else "nest"})
             return
@@ -854,6 +886,108 @@ def drop_parent(runner, spec: str, parent_name: str, reason: str) -> tuple[dict,
     return report, (None if done["dropped"] and not done["failed"] else "drop-incomplete"), (parent_name,)
 
 
+def load_resume_children(path: str) -> list[dict]:
+    """The resume children file: a JSON list, possibly empty, of `{name, revision}`."""
+    try:
+        doc = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        raise ParentError("invalid-children-file") from None
+    if not isinstance(doc, list):
+        raise ParentError("invalid-children-file")
+    children, seen = [], set()
+    for item in doc:
+        if not isinstance(item, dict) or not all(isinstance(item.get(k), str) for k in ("name", "revision")):
+            raise ParentError("invalid-children-file")
+        if not item["revision"] or item["name"] in seen:
+            raise ParentError("invalid-children-file")
+        if not gather._shape_ok(item["name"]):
+            raise ParentError("invalid-followup-name")
+        seen.add(item["name"])
+        children.append({"name": item["name"], "revision": item["revision"]})
+    return children
+
+
+def listed_reasons(body: str) -> dict[str, str]:
+    """Each `### task/<name>` section's raw `**Selection reason:**` paragraph, by
+    shape-checked name (the first section of a repeated name). Vault text: callers
+    sanitize it before it is written anywhere."""
+    headings = list(_LISTING_HEADING_RE.finditer(body))
+    reasons: dict[str, str] = {}
+    for match in headings:
+        name = match.group(1)
+        if not gather._shape_ok(name) or name in reasons:
+            continue
+        rest = body[match.end() :]
+        stop = _HEADING_RE.search(rest)
+        section = rest[: stop.start()] if stop else rest
+        found = _SELECTION_REASON_RE.search(section)
+        reasons[name] = found.group(1) if found else ""
+    return reasons
+
+
+def resume_parent(runner, spec: str, parent_name: str, children: list[dict]) -> tuple[dict, str | None, tuple]:
+    """Finish the `open` follow-up parent `parent_name`: nest the confirmed `children`
+    (the listed follow-ups it does not hold) and make it `ready` once every name it
+    still lists is held. Raises ParentError for a refusal, before anything is written.
+    Otherwise returns (report, reason-code, subjects): the code is None when the
+    parent is buildable."""
+    names = [c["name"] for c in children]
+    state = parent_state(runner, spec, parent_name)
+    if state["status"] != "open":
+        raise ParentError("parent-not-resumable", (parent_name,))
+    vault, spec_sidecar = gather.resolve_spec(runner, spec)
+    rivals = [n for n in live_followup_parents(runner, vault, spec, spec_sidecar) if n != parent_name]
+    if rivals:
+        raise ParentError("followup-parent-exists", tuple(sorted(rivals)))
+    unlisted_here = tuple(sorted(n for n in names if n not in state["unheld"]))
+    if unlisted_here:
+        raise ParentError("child-not-listed", unlisted_here)
+    held = state["held"]
+    gone = set()
+    current: dict[str, str] = {}
+    if names:
+        result = check_followups(runner, spec, names)
+        current = {item["name"]: item["revision"] for item in result["eligible"]}
+        gone = {n for n in names if n not in current}
+    gone |= {item["name"] for item in held if item["status"] != "ready"}
+    if gone:
+        raise ParentError("child-not-eligible", tuple(sorted(gone)))
+    changed = tuple(sorted(c["name"] for c in children if current[c["name"]] != c["revision"]))
+    if changed:
+        raise ParentError("child-changed", changed)
+    held_names = {item["name"] for item in held}
+    remaining = [n for n in state["listed"] if n in held_names or n in names]
+    if not remaining:
+        raise ParentError("nothing-to-build", (parent_name,))
+    removed = [n for n in state["unheld"] if n not in names]
+
+    report: dict = {"parent": parent_name, "removed": [], "nested": [], "failed": [], "buildable": False}
+    reason = None
+    try:
+        old_body = _read_task(runner, vault, parent_name)[1]
+        reasons = listed_reasons(old_body)
+        body = render_body(spec, [{"name": n, "reason": reasons.get(n, "")} for n in remaining])
+        _write(runner, _update(vault, parent_name), stdin=body)
+        if _read_ok(lambda: parse_listing(_read_task(runner, vault, parent_name)[1])[0] == remaining):
+            report["removed"] = removed
+            _nest_children(runner, vault, parent_name, children, report)
+            if not report["failed"]:
+                if _read_ok(lambda: set(remaining) <= {i["name"] for i in held_children(runner, vault, parent_name)}):
+                    _flip(runner, vault, parent_name, report)
+                else:
+                    report["failed"].append({"name": parent_name, "write": "ready"})
+        else:
+            report["failed"].append({"name": parent_name, "write": "list"})
+        if report["failed"]:
+            reason = "nesting-incomplete"
+    except (ParentError, gather.GatherError) as err:
+        reason = err.reason
+    except Exception:
+        reason = "internal-error"
+    report["buildable"] = reason is None
+    return report, reason, (parent_name,)
+
+
 def _refuse(code: int, reason: str, subjects: tuple = (), state_unknown: bool = False) -> int:
     assert reason in REASON_CODES, reason
     print(f"reason-code: {reason}", file=sys.stderr)
@@ -883,6 +1017,10 @@ def main(argv: list[str] | None = None, runner=None, today: datetime.date | None
         drop.add_argument("spec_name", help="bare spec record name (the part after spec/)")
         drop.add_argument("parent", help="bare name of the follow-up parent task")
         drop.add_argument("--reason-file", required=True, help="JSON file holding one string: why it is dropped")
+        resume = commands.add_parser("resume", help="finish an open follow-up parent")
+        resume.add_argument("spec_name", help="bare spec record name (the part after spec/)")
+        resume.add_argument("parent", help="bare name of the follow-up parent task")
+        resume.add_argument("--children", required=True, help="JSON file: a list of {name, revision}")
         runner = runner or lore_runner
         reason = None
         subjects: tuple = ()
@@ -892,6 +1030,13 @@ def main(argv: list[str] | None = None, runner=None, today: datetime.date | None
                 result = check_followups(runner, args.spec_name, args.names)
             elif args.command == "state":
                 result = parent_state(runner, args.spec_name, args.parent)
+            elif args.command == "resume":
+                if not gather._shape_ok(args.spec_name):
+                    raise ParentError("invalid-spec-name")
+                if not gather._shape_ok(args.parent):
+                    raise ParentError("invalid-followup-name")
+                files = load_resume_children(args.children)
+                result, reason, subjects = resume_parent(runner, args.spec_name, args.parent, files)
             elif args.command == "drop":
                 if not gather._shape_ok(args.spec_name):
                     raise ParentError("invalid-spec-name")
