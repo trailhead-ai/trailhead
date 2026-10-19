@@ -132,6 +132,11 @@ def _snapshot(root: Path):
     return out
 
 
+def _without_locks(snapshot):
+    """A state-dir snapshot minus ``pad-locks/``: the lock files a run leaves behind are not part of a pad."""
+    return {k: v for k, v in snapshot.items() if k != "pad-locks" and not k.startswith("pad-locks/")}
+
+
 def _load_round_js(path: Path):
     text = path.read_text(encoding="utf-8").splitlines(keepends=True)[0]
     assert text.startswith(ROUND_JS_PREFIX) and text.endswith(ROUND_JS_SUFFIX)
@@ -513,13 +518,13 @@ def test_a_round_too_deep_to_write_is_refused_cleanly(tmp_path, state, monkeypat
 
 def test_an_existing_empty_pad_folder_is_refused_and_left_alone(skill, tmp_path, state):
     (state / "pads" / "p").mkdir(parents=True)
-    before = _snapshot(state)
+    before = _without_locks(_snapshot(state))
 
     proc = _run(skill, tmp_path, state, "p", _write_round(tmp_path, _round(1)))
 
     assert proc.returncode != 0
     assert "already exists" in proc.stderr
-    assert _snapshot(state) == before
+    assert _without_locks(_snapshot(state)) == before
 
 
 def test_three_distinct_problems_are_all_reported(skill, tmp_path, state):
@@ -612,13 +617,13 @@ def test_existing_pad_is_refused_and_left_untouched(skill, tmp_path, state):
 def test_a_dangling_symlink_named_like_the_pad_counts_as_existing(skill, tmp_path, state):
     (state / "pads").mkdir(parents=True, mode=0o700)
     (state / "pads" / "p").symlink_to(tmp_path / "nowhere")
-    before = _snapshot(state)
+    before = _without_locks(_snapshot(state))
 
     proc = _run(skill, tmp_path, state, "p", _write_round(tmp_path, _round(1)))
 
     assert proc.returncode != 0
     assert "already exists" in proc.stderr
-    assert _snapshot(state) == before
+    assert _without_locks(_snapshot(state)) == before
 
 
 def test_missing_kit_is_a_clean_refusal(skill, tmp_path, state):
@@ -838,7 +843,7 @@ def test_failure_partway_through_the_build_leaves_no_pad_and_no_temp_folder(tmp_
     kit = _write_kit(tmp_path / "kit")
     rp = _write_round(tmp_path, _round(1))
     (state / "pads").mkdir(parents=True, mode=0o700)
-    before = _snapshot(state)
+    before = _without_locks(_snapshot(state))
 
     def boom(src, dst, *a, **k):
         Path(dst).mkdir()
@@ -851,7 +856,7 @@ def test_failure_partway_through_the_build_leaves_no_pad_and_no_temp_folder(tmp_
         mod.build_pad(rp, "p", kit_dir=kit, env={"OUTPOST_STATE_DIR": str(state)})
 
     assert "No space left" in "\n".join(exc.value.lines)
-    assert _snapshot(state) == before
+    assert _without_locks(_snapshot(state)) == before
 
 
 @pytest.mark.parametrize("failure", [RuntimeError("boom"), KeyboardInterrupt()], ids=["exception", "interrupt"])
@@ -860,7 +865,7 @@ def test_failure_after_the_temp_folder_exists_leaves_no_pad_and_no_temp_folder(t
     kit = _write_kit(tmp_path / "kit")
     rp = _write_round(tmp_path, _round(1))
     (state / "pads").mkdir(parents=True, mode=0o700)
-    before = _snapshot(state)
+    before = _without_locks(_snapshot(state))
     seen = {}
 
     def boom(src, dst, *a, **k):
@@ -875,7 +880,7 @@ def test_failure_after_the_temp_folder_exists_leaves_no_pad_and_no_temp_folder(t
         mod.build_pad(rp, "p", kit_dir=kit, env={"OUTPOST_STATE_DIR": str(state)})
 
     assert seen["tmp_existed"]
-    assert _snapshot(state) == before
+    assert _without_locks(_snapshot(state)) == before
 
 
 # ---------------------------------------------------------------------------

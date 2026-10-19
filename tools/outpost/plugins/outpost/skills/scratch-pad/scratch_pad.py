@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Build a scratch pad: one round of layout sketches.
 
-Given ``--pad <slug>`` and ``--round <path-to-json>``, this checks the round's
+Given ``--pad <slug>`` and ``--round <path-to-json>`` (and ``--add`` for a later round of an
+existing pad), this checks the round's
 outer shape and builds the pad: a copy of the skill's ``kit/`` plus the round's
 data. Inside a camp workspace the pad is published as a site of that workspace
 and the publisher's link is printed; outside one it is built as plain files
@@ -48,11 +49,39 @@ Contract
 * The pad slug matches ``^[a-z0-9][a-z0-9._-]*$`` and is at most 64 characters.
 * Outside a workspace, pads live in ``<state>/pads/<slug>/`` where ``<state>`` is
   ``$OUTPOST_STATE_DIR``, else ``$XDG_STATE_HOME/outpost``, else
-  ``~/.local/state/outpost``. A pad folder that already exists is refused.
+  ``~/.local/state/outpost``. Without ``--add`` a pad folder that already exists is refused.
+* ``--add`` (outside a camp workspace; inside one it is refused with one ``--add`` line and nothing is
+  written) adds the round to the existing pad, in this order: the round is checked as above; the pad's
+  lock is taken; any interrupted earlier run is recovered from; the pad is read back; the whole new pad
+  is built in a ``.tmp-`` sibling; the temp copy is checked again; the new pad is put in place. A pad
+  that does not exist is refused as "does not exist — drop --add to start a new pad", and a round
+  whose title equals an earlier round's as "give each round its own title".
+* The pad's lock is an exclusive ``flock`` on
+  ``<outpost state>/pad-locks/<sha256 of the pad's resolved path>.lock``. ``pad-locks`` is created
+  owner-only and refused if it is a symlink; the lock file is opened ``O_NOFOLLOW | O_CREAT`` with
+  mode 0600 and is left in place. Building a new pad takes the same lock. A run that must wait prints
+  one "waiting for another session's add" line on stderr, and after twice the publish timeout is refused
+  with "another session is adding a round to pad ...; try again", changing nothing.
+* Recovery, under the lock on every run on a pad name (new pad or add): with no pad and a
+  ``.aside-<pad>`` folder, that folder is renamed back; with both, ``.aside-<pad>`` is removed; leftover
+  ``.tmp-<pad>-`` folders are removed (a folder of another pad whose name merely starts with this
+  one's is left alone).
+* Read-back: the pad is a real folder with no symlink or special file anywhere in it, its round folders are
+  ``round-1`` .. ``round-<n>`` with no gap, and each holds an ``index.html`` and a ``round.js`` whose first
+  line starts with the prefix this script writes. A round's title is the ``json.loads`` of that line's
+  string literal, decoded twice; the literal is never evaluated and ``rounds.js`` is never read. A pad
+  built before ``rounds.js`` existed (no ``PAD_ROUND_NUMBER``) reads back the same way. Every problem is
+  named in one refusal ending "-- start a new pad with a different --pad name".
+* The new pad holds each earlier round copied byte for byte (a symlink is copied as a link, never
+  followed; a special file is refused unopened), ``round-<n+1>/`` built from the current kit with
+  ``PAD_ROUND_NUMBER = n+1``, a rebuilt ``rounds.js`` and an ``index.html`` that sends the browser to
+  ``round-<n+1>/``. The temp copy is checked again for symlinks and special files. It is then put in
+  place by renaming the old pad to ``.aside-<pad>``, renaming the new one in, and removing the aside copy;
+  any ``BaseException`` between the two renames renames the old pad back.
 * The pad is built in a sibling ``.tmp-`` folder and renamed into place, so a
   failure leaves neither a pad nor a temp folder. Layout::
 
-      <pad>/index.html            sends the browser to round-1/index.html
+      <pad>/index.html            sends the browser to the latest round's index.html
       <pad>/round-1/<kit files>
       <pad>/round-1/round.js      ``window.PAD_ROUND = JSON.parse(<s>);``
                                   where ``<s>`` is the round's ASCII JSON
@@ -84,6 +113,9 @@ nested deeper than the interpreter will parse) is a refusal, never a traceback.
 from __future__ import annotations
 
 import argparse
+import contextlib
+import fcntl
+import hashlib
 import json
 import os
 import re
@@ -92,6 +124,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import NamedTuple
@@ -108,13 +141,20 @@ _QUESTION_KEYS = ("prompt", "options")
 _OPTION_KEYS = ("name", "cost", "pick", "layout")
 _ROUND_JS_PREFIX = "window.PAD_ROUND = JSON.parse("
 _ROUNDS_JS_PREFIX = "window.PAD_ROUNDS = JSON.parse("
-_PAD_INDEX = (
-    "<!doctype html>\n"
-    '<meta charset="utf-8">\n'
-    '<meta http-equiv="refresh" content="0; url=round-1/index.html">\n'
-    "<title>Scratch pad</title>\n"
-    '<a href="round-1/index.html">Open the pad</a>\n'
-)
+_ROUND_DIR = re.compile(r"round-([1-9][0-9]*)")
+_LOCK_POLL_SECONDS = 0.05
+_WAY_ON = "start a new pad with a different --pad name"
+
+
+def _pad_index(number: int) -> str:
+    target = f"round-{number}/index.html"
+    return (
+        "<!doctype html>\n"
+        '<meta charset="utf-8">\n'
+        f'<meta http-equiv="refresh" content="0; url={target}">\n'
+        "<title>Scratch pad</title>\n"
+        f'<a href="{target}">Open the pad</a>\n'
+    )
 
 
 class Refusal(Exception):
@@ -404,16 +444,242 @@ def _write_rounds_js(folder: Path, titles: Sequence[str]) -> None:
     (folder / "rounds.js").write_text(_ROUNDS_JS_PREFIX + _js_string_literal(listing) + ");\n", encoding="utf-8")
 
 
+def _write_round(folder: Path, number: int, kit_dir: Path, encoded: Encoded) -> None:
+    shutil.copytree(kit_dir, folder / f"round-{number}")
+    round_js = encoded.round_js + f"window.PAD_ROUND_NUMBER = {number};\n"
+    (folder / f"round-{number}" / "round.js").write_text(round_js, encoding="utf-8")
+
+
 def _write_pad(folder: Path, kit_dir: Path, encoded: Encoded) -> None:
-    shutil.copytree(kit_dir, folder / "round-1")
-    round_js = encoded.round_js + "window.PAD_ROUND_NUMBER = 1;\n"
-    (folder / "round-1" / "round.js").write_text(round_js, encoding="utf-8")
+    _write_round(folder, 1, kit_dir, encoded)
     _write_rounds_js(folder, [encoded.title])
-    (folder / "index.html").write_text(_PAD_INDEX, encoding="utf-8")
+    (folder / "index.html").write_text(_pad_index(1), encoding="utf-8")
 
 
 def _build_failed(final: Path, exc: OSError) -> Refusal:
     return Refusal([_line(_q(str(final)), f"could not build the pad: {exc.strerror or exc}")])
+
+
+def _locks_dir(env: Mapping[str, str]) -> Path:
+    return _outpost_state_dir(env).absolute() / "pad-locks"
+
+
+def _open_lock(env: Mapping[str, str], pad_path: Path) -> int:
+    locks = _locks_dir(env)
+    where = _q(str(locks))
+    try:
+        locks.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            os.mkdir(locks, 0o700)
+        except FileExistsError:
+            pass
+        st = os.lstat(locks)
+    except OSError as exc:
+        raise Refusal([_line(where, f"cannot create the pad-locks folder: {exc.strerror or exc}")])
+    if stat.S_ISLNK(st.st_mode):
+        raise Refusal([_line(where, "the pad-locks folder is a symlink — refusing to lock through it")])
+    if not stat.S_ISDIR(st.st_mode):
+        raise Refusal([_line(where, "the pad-locks folder is not a directory")])
+    path = locks / (hashlib.sha256(str(pad_path).encode()).hexdigest() + ".lock")
+    try:
+        return os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    except OSError as exc:
+        raise Refusal([_line(_q(str(path)), f"cannot open the pad's lock file: {exc.strerror or exc}")])
+
+
+@contextlib.contextmanager
+def _pad_lock(env: Mapping[str, str], pads_root: Path, pad: str, limit: float):
+    """Hold the exclusive lock for one pad; refuse once *limit* seconds of waiting pass."""
+    fd = _open_lock(env, pads_root.resolve() / pad)
+    try:
+        deadline = time.monotonic() + limit
+        announced = False
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                pass
+            if not announced:
+                print(f"scratch-pad: waiting for another session's add to pad {_q(pad)}…", file=sys.stderr)
+                announced = True
+            if time.monotonic() >= deadline:
+                raise Refusal([f"scratch-pad: another session is adding a round to pad {_q(pad)}; try again"])
+            time.sleep(_LOCK_POLL_SECONDS)
+        yield
+    finally:
+        os.close(fd)
+
+
+def _remove(path: Path) -> None:
+    if path.is_symlink() or not path.is_dir():
+        path.unlink(missing_ok=True)
+    else:
+        shutil.rmtree(path, ignore_errors=True)
+
+
+def _recover(pads_root: Path, pad: str) -> None:
+    """Undo what a run killed part-way left beside the pad; call only under the pad's lock."""
+    final, aside = pads_root / pad, pads_root / f".aside-{pad}"
+    if os.path.lexists(aside):
+        if os.path.lexists(final):
+            _remove(aside)
+        else:
+            os.rename(aside, final)
+    stale = re.compile(re.escape(f".tmp-{pad}-") + r"[A-Za-z0-9_]+")
+    for entry in os.listdir(pads_root):
+        if stale.fullmatch(entry):
+            _remove(pads_root / entry)
+
+
+def _tree_problems(root: Path) -> list[str]:
+    """Every symlink or special file under *root*, named relative to it."""
+    problems: list[str] = []
+
+    def walk(folder: Path) -> None:
+        for entry in sorted(os.listdir(folder)):
+            path = folder / entry
+            mode = os.lstat(path).st_mode
+            rel = _esc(str(path.relative_to(root)))
+            if stat.S_ISLNK(mode):
+                problems.append(f"{rel} is a symlink")
+            elif stat.S_ISDIR(mode):
+                walk(path)
+            elif not stat.S_ISREG(mode):
+                problems.append(f"{rel} is not a regular file or folder")
+
+    walk(root)
+    return problems
+
+
+def _round_title(round_js: Path) -> str:
+    """The title in a ``round.js`` first line, decoded as data; ``ValueError`` when it cannot be."""
+    with open(round_js, encoding="utf-8") as handle:
+        first = handle.readline().rstrip("\n")
+    if not first.startswith(_ROUND_JS_PREFIX):
+        raise ValueError("does not start the way this script writes it")
+    if not first.endswith(");"):
+        raise ValueError("its first line does not end the way this script writes it")
+    try:
+        title = json.loads(json.loads(first[len(_ROUND_JS_PREFIX) : -2]))["title"]
+    except (ValueError, KeyError, TypeError, RecursionError):
+        raise ValueError("its first line does not hold a round") from None
+    if not isinstance(title, str):
+        raise ValueError("its round has no title")
+    return title
+
+
+def _cannot_take(pad: str, problems: Sequence[str]) -> Refusal:
+    return Refusal([f"scratch-pad: pad {_q(pad)} can't take another round: {'; '.join(problems)} — {_WAY_ON}"])
+
+
+def _read_pad(final: Path, pad: str) -> list[str]:
+    """The pad's round titles in order, or a :class:`Refusal` naming everything that stops a new round."""
+    problems: list[str] = []
+    titles: list[str] = []
+    mode = os.lstat(final).st_mode
+    if stat.S_ISLNK(mode):
+        problems.append("the pad folder is a symlink")
+    elif not stat.S_ISDIR(mode):
+        problems.append("the pad is not a folder")
+    else:
+        problems.extend(_tree_problems(final))
+        numbers = sorted(int(m.group(1)) for e in os.listdir(final) if (m := _ROUND_DIR.fullmatch(e)))
+        if not numbers:
+            problems.append("it has no round-1 folder")
+        for expected, found in enumerate(numbers, 1):
+            if found != expected:
+                problems.append(f"round-{expected} is missing")
+                break
+        else:
+            for k in numbers:
+                folder = final / f"round-{k}"
+                if not folder.is_dir() or folder.is_symlink():
+                    problems.append(f"round-{k} is not a folder")
+                    continue
+                if not (folder / "index.html").is_file():
+                    problems.append(f"round-{k}/index.html is missing")
+                round_js = folder / "round.js"
+                try:
+                    plain = stat.S_ISREG(os.lstat(round_js).st_mode)
+                except FileNotFoundError:
+                    problems.append(f"round-{k}/round.js is missing")
+                    continue
+                if not plain:
+                    continue  # named by the tree check; a link or special file is never opened
+                try:
+                    titles.append(_round_title(round_js))
+                except (OSError, ValueError) as exc:
+                    problems.append(f"round-{k}/round.js: {_esc(str(exc))}")
+    if problems:
+        raise _cannot_take(pad, problems)
+    return titles
+
+
+def _copy_round(src: Path, dst: Path) -> None:
+    """Copy a round folder byte for byte; a symlink is copied as a link, never followed."""
+    dst.mkdir()
+    for entry in sorted(os.listdir(src)):
+        source, target = src / entry, dst / entry
+        mode = os.lstat(source).st_mode
+        if stat.S_ISLNK(mode):
+            os.symlink(os.readlink(source), target)
+        elif stat.S_ISDIR(mode):
+            _copy_round(source, target)
+        elif stat.S_ISREG(mode):
+            shutil.copy2(source, target, follow_symlinks=False)
+        else:
+            raise Refusal([_line(_q(str(source)), "is not a regular file or folder — cannot copy it")])
+
+
+def _swap_in(tmp: Path, final: Path, aside: Path) -> None:
+    """Put *tmp* at *final*, the old pad going aside first and coming back if the swap fails."""
+    os.rename(final, aside)
+    try:
+        os.rename(tmp, final)
+    except BaseException:
+        if not os.path.lexists(final):
+            os.rename(aside, final)
+        raise
+    shutil.rmtree(aside, ignore_errors=True)
+
+
+def _add_round(pads_root: Path, pad: str, kit_dir: Path, encoded: Encoded, put_in_place=_swap_in) -> Path:
+    """Add the round to the existing pad; *put_in_place(tmp, final, aside)* is the only step a caller swaps."""
+    final, aside = pads_root / pad, pads_root / f".aside-{pad}"
+    if not os.path.lexists(final):
+        raise Refusal([_line(f"pad {_q(pad)}", "does not exist — drop --add to start a new pad")])
+    titles = _read_pad(final, pad)
+    if encoded.title in titles:
+        raise Refusal(
+            [
+                _line(
+                    "title",
+                    f"{_q(encoded.title)} is the title of round {titles.index(encoded.title) + 1} — "
+                    "give each round its own title",
+                )
+            ]
+        )
+    number = len(titles) + 1
+    try:
+        tmp = Path(tempfile.mkdtemp(prefix=f".tmp-{pad}-", dir=pads_root))
+    except OSError as exc:
+        raise _build_failed(final, exc)
+    try:
+        for k in range(1, number):
+            _copy_round(final / f"round-{k}", tmp / f"round-{k}")
+        _write_round(tmp, number, kit_dir, encoded)
+        _write_rounds_js(tmp, [*titles, encoded.title])
+        (tmp / "index.html").write_text(_pad_index(number), encoding="utf-8")
+        problems = _tree_problems(tmp)
+        if problems:
+            raise _cannot_take(pad, problems)
+        put_in_place(tmp, final, aside)
+    except OSError as exc:
+        raise _build_failed(final, exc)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    return final
 
 
 def _publish_to_workspace(
@@ -471,6 +737,7 @@ def _build(
     cwd: Path | str | None,
     runner,
     timeout: float,
+    add: bool = False,
 ) -> Built:
     round_path, kit_dir = Path(round_path), Path(kit_dir)
     env = os.environ if env is None else env
@@ -485,11 +752,27 @@ def _build(
     encoded = _check_and_encode(round_path, pad, kit_dir)
     workspace = None if cwd is None else enclosing_workspace(cwd, env)
     if workspace is not None:
+        if add:
+            raise Refusal([_line("--add", "adding a round is not available inside a camp workspace")])
         return _publish_to_workspace(workspace, pad, kit_dir, encoded, env, runner, timeout)
 
     pads_root = _pads_root(env)
     final = pads_root / pad
     _ensure_pads_root(pads_root)
+    with _pad_lock(env, pads_root, pad, 2 * timeout):
+        try:
+            _recover(pads_root, pad)
+        except OSError as exc:
+            raise _build_failed(final, exc)
+        if add:
+            _add_round(pads_root, pad, kit_dir, encoded)
+        else:
+            _new_pad(pads_root, pad, kit_dir, encoded)
+    return Built(final, [(final / "index.html").as_uri()])
+
+
+def _new_pad(pads_root: Path, pad: str, kit_dir: Path, encoded: Encoded) -> None:
+    final = pads_root / pad
     if os.path.lexists(final):
         raise _exists(pad)
 
@@ -507,7 +790,6 @@ def _build(
         if isinstance(exc, OSError):
             raise _build_failed(final, exc)
         raise
-    return Built(final, [(final / "index.html").as_uri()])
 
 
 def build_pad(
@@ -519,6 +801,7 @@ def build_pad(
     cwd: Path | str | None = None,
     publish_runner=None,
     publish_timeout: float = PUBLISH_TIMEOUT_SECONDS,
+    add: bool = False,
 ) -> tuple[Path, Path]:
     """Check the round and build the pad; return ``(index_html, pad_folder)``.
 
@@ -528,7 +811,7 @@ def build_pad(
     the pad is built on disk or published into the enclosing camp workspace;
     *publish_runner* is ``(cmd, env, timeout) -> CompletedProcess``.
     """
-    folder = _build(round_path, pad, kit_dir, env, cwd, publish_runner, publish_timeout).folder
+    folder = _build(round_path, pad, kit_dir, env, cwd, publish_runner, publish_timeout, add).folder
     return folder / "index.html", folder
 
 
@@ -545,9 +828,10 @@ def main(
     )
     parser.add_argument("--pad", required=True, help="pad name: ^[a-z0-9][a-z0-9._-]*$")
     parser.add_argument("--round", required=True, dest="round_path", help="path to the round's JSON file")
+    parser.add_argument("--add", action="store_true", help="add the round to the existing pad instead of starting one")
     args = parser.parse_args(argv)
     try:
-        built = _build(args.round_path, args.pad, DEFAULT_KIT_DIR, env, cwd, publish_runner, publish_timeout)
+        built = _build(args.round_path, args.pad, DEFAULT_KIT_DIR, env, cwd, publish_runner, publish_timeout, args.add)
     except Refusal as exc:
         for line in exc.lines:
             print(line, file=sys.stderr)
