@@ -194,7 +194,7 @@ parent. A single parent with any other status matches none: name the status and 
 except the marker-removal command below.
 
 **(a) More than one live parent.** Never resume. Name each parent with its status, and for one that
-is `ready` or `in-progress` print its build command alone on its own line:
+is `ready`, `in-progress` or `blocked` print its build command alone on its own line:
 
 ```
 /craft:execute task/<parent>
@@ -351,8 +351,9 @@ unfinished children and then closes it; every step below waits for its own answe
 | `invalid-reason-file` | The reason file was not a regular file holding one non-empty JSON string of at most 4 KiB; this ritual's. Nothing was written. Restage it and rerun the drop. |
 | `drop-incomplete` | An un-nest or the drop write failed; `lore`'s or the vault's. The parent is still live if an un-nest failed. Print each `failed[].command` alone on its own line under the same shape rule as `reset`, or rerun the drop, which skips what is already done. Print each `reset[].command` too. |
 | `invalid-followup-name` | A name failed the safe-name check; the vault's record name. Nothing was written. Rename it, then rerun. |
+| `internal-error` | The script hit a bug of its own; the script's. No JSON is printed, so which un-nests landed is unknown and the parent may still be live. Rerun the drop once, which skips what is already done; if it repeats, report it to a maintainer. |
 
-A code shared with the gather table (as listed under the resume table) reads the same. Any other
+A failed `state` read at the start of this flow acts on the same rows. A code shared with the gather table (as listed under the resume table) reads the same. Any other
 code, or no code, is a failure of unknown cause: say so and stop. Then go to step 13.
 
 The ritual cannot tell who created a parent, so on every branch also give the way to remove the
@@ -502,7 +503,7 @@ and remove the file. Act on the exit:
 | `invalid-children-file` | The children file was not a non-empty list of name, reason and revision, or repeated a name; this ritual's. Report it and rerun. |
 | `child-not-eligible` | A child stopped being eligible between the check and now (moved, routed, or no longer ready); the vault's. Nothing was written. Rerun the ritual. |
 | `child-changed` | A child's record changed after you confirmed it; the vault's. Nothing was written. Rerun the ritual so you confirm the new text. |
-| `followup-parent-exists` | A follow-up parent for this spec appeared meanwhile; the vault's. Nothing was written. Rerun, which stops at it. |
+| `followup-parent-exists` | A follow-up parent for this spec appeared meanwhile; the vault's. Nothing was written. Rerun, which meets it at step 7. |
 | `concurrent-followup-parent` | A second follow-up parent appeared during assembly; another run's. This run's own new parent was removed and nothing else was written. Rerun after the other run settles, which meets the other parent (step 7). |
 | `parent-create-failed` | The parent record could not be created; `lore`'s or the filesystem's. With no `subject:` line, nothing was written. With one, the create's outcome was unclear: nothing was undone, there is no JSON, and every parent named is still live, so a rerun stops at it at step 7. Check `lore vault ls`, then rerun. |
 | `nesting-incomplete` | A child could not be nested or the parent could not be made ready; `lore`'s or the vault's. The parent is left being assembled, holding what nested, and nothing was undone; read `failed` below, then rerun, which resumes it (step 7). |
@@ -565,6 +566,10 @@ case that matches, in this order:
 - A completed drop (exit 0 from `drop`): the same re-run line, since the un-nested follow-ups are
   gathered again only by a fresh gather, and each `reset[].command` as step 7 printed it. No
   distill command.
+- Any other step 7 outcome, which wrote nothing: no distill command, since distilling waits on the
+  parent. After branch (a) or (c) answered without a drop, or a parent of another status, print
+  nothing beyond what step 7 printed. After a `stop`, or an exit-1 refusal from `state`, `resume`
+  or `drop`, print the re-run line above.
 - A failed `assemble` that wrote nothing, or no parent at all: the distill command only, or nothing
   when `distilled` is true.
 
