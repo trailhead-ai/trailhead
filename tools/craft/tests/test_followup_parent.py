@@ -725,6 +725,18 @@ def body_of(env, vault, name):
     return json.loads(_lore(env, "record", "show", "--json", "--vault", vault, f"task/{name}"))["body"]
 
 
+def parents_of(env, vault, names):
+    return [sidecar_of(env, vault, n).get("parent") for n in names]
+
+
+def nest(env, vault, name, holder):
+    _lore(env, "record", "update", f"task/{name}", "--vault", vault, "--parent", holder)
+
+
+def reason_codes(err):
+    return [ln for ln in err.splitlines() if ln.startswith("reason-code: ")]
+
+
 def vault_snapshot(env, vault):
     listing = json.loads(_lore(env, "task", "list", "--vault", vault, "--json"))
     return {
@@ -888,7 +900,7 @@ def test_the_parent_stays_open_until_every_child_is_confirmed_nested(lore_env, s
 
     def hook(argv, stdin, runner):
         if is_flip(argv):
-            seen.append([sidecar_of(env, vault, n).get("parent") for n in names])
+            seen.append(parents_of(env, vault, names))
             seen.append(sidecar_of(env, vault, argv[2].removeprefix("task/"))["status"])
 
     run_assemble(tmp_path, EnvRunner(env, hook), spec, confirm(env, vault, names), capsys)
@@ -997,7 +1009,7 @@ def test_a_child_nested_elsewhere_since_the_check_is_not_eligible(lore_env, spec
     names = make_children(env, vault, spec, count=2)
     children = confirm(env, vault, names)
     holder = make_followup(env, vault, "Holder", status="open")
-    _lore(env, "record", "update", f"task/{names[0]}", "--vault", vault, "--parent", holder)
+    nest(env, vault, names[0], holder)
     runner = EnvRunner(env)
     code, out, err = run_assemble(tmp_path, runner, spec, children, capsys)
     assert_refused(code, out, err, runner, "child-not-eligible", names[0])
@@ -1053,11 +1065,11 @@ def test_a_failed_second_nesting_leaves_the_parent_open_holding_the_first_child(
     code, out, err = run_assemble(tmp_path, runner, spec, children, capsys)
     assert code == 2
     assert not any(is_flip(call) for call in runner.calls)
-    assert [ln for ln in err.splitlines() if ln.startswith("reason-code: ")] == ["reason-code: nesting-incomplete"]
+    assert reason_codes(err) == ["reason-code: nesting-incomplete"]
     assert_rolled_forward(out, runner)
     assert out["failed"] == [{"name": names[1], "write": "nest"}]
     assert out["nested"] == [names[0]]
-    assert [sidecar_of(env, vault, n).get("parent") for n in names] == [out["parent"], None, None]
+    assert parents_of(env, vault, names) == [out["parent"], None, None]
     assert sidecar_of(env, vault, out["parent"])["status"] == "open"
     assert "Dropped" not in body_of(env, vault, out["parent"])
     _, state, _, _ = run_state(EnvRunner(env), spec, out["parent"], capsys)
@@ -1077,7 +1089,7 @@ def test_a_failed_flip_leaves_the_parent_open_holding_all_three(lore_env, spec, 
     assert_rolled_forward(out, runner)
     assert out["failed"] == [{"name": out["parent"], "write": "ready"}]
     assert out["nested"] == names
-    assert [sidecar_of(env, vault, n).get("parent") for n in names] == [out["parent"]] * 3
+    assert parents_of(env, vault, names) == [out["parent"]] * 3
     assert sidecar_of(env, vault, out["parent"])["status"] == "open"
     assert gather_json(env, spec)["followup-parents"] == [out["parent"]]
 
@@ -1149,7 +1161,7 @@ def test_a_child_edited_between_the_pre_write_check_and_its_nesting_is_a_failed_
     assert_rolled_forward(out, runner)
     assert out["failed"] == [{"name": names[1], "write": "nest"}]
     assert not any(is_nest(w, names[1]) for w in runner.calls)
-    assert [sidecar_of(env, vault, n).get("parent") for n in names] == [out["parent"], None, None]
+    assert parents_of(env, vault, names) == [out["parent"], None, None]
     assert sidecar_of(env, vault, out["parent"])["status"] == "open"
 
 
@@ -1167,7 +1179,7 @@ def test_a_flip_that_reads_back_not_ready_is_a_failed_flip(lore_env, spec, tmp_p
     assert_rolled_forward(out, runner)
     assert out["failed"] == [{"name": out["parent"], "write": "ready"}]
     assert sidecar_of(env, vault, out["parent"])["status"] == "open"
-    assert [sidecar_of(env, vault, n).get("parent") for n in names] == [out["parent"]] * 3
+    assert parents_of(env, vault, names) == [out["parent"]] * 3
 
 
 def test_a_nesting_whose_lore_call_times_out_is_a_failed_nesting_and_rolls_forward(
@@ -1185,7 +1197,7 @@ def test_a_nesting_whose_lore_call_times_out_is_a_failed_nesting_and_rolls_forwa
     assert code == 2
     assert_rolled_forward(out, runner)
     assert out["failed"] == [{"name": names[1], "write": "nest"}]
-    assert [sidecar_of(env, vault, n).get("parent") for n in names] == [out["parent"], None, None]
+    assert parents_of(env, vault, names) == [out["parent"], None, None]
     assert sidecar_of(env, vault, out["parent"])["status"] == "open"
 
 
@@ -1202,14 +1214,14 @@ def test_an_unexpected_exception_after_the_create_leaves_the_parent_open_and_rep
     runner = EnvRunner(env, hook)
     code, out, err = run_assemble(tmp_path, runner, spec, confirm(env, vault, names), capsys)
     assert code == 2
-    assert [ln for ln in err.splitlines() if ln.startswith("reason-code: ")] == ["reason-code: internal-error"]
+    assert reason_codes(err) == ["reason-code: internal-error"]
     assert "SECRET" not in err
     assert_rolled_forward(out, runner)
     assert out["nested"] == [names[0]]
     (made,) = created_parent(env, vault, spec)
     assert out["parent"] == made
     assert sidecar_of(env, vault, made)["status"] == "open"
-    assert [sidecar_of(env, vault, n).get("parent") for n in names] == [made, None, None]
+    assert parents_of(env, vault, names) == [made, None, None]
 
 
 def created_parent(env, vault, spec):
@@ -1227,7 +1239,7 @@ def test_a_failed_flip_attempts_no_un_nest_even_when_every_un_nest_would_fail(
     code, out, err = run_assemble(tmp_path, runner, spec, confirm(env, vault, names), capsys)
     assert code == 2
     assert_rolled_forward(out, runner)
-    assert [sidecar_of(env, vault, n).get("parent") for n in names] == [out["parent"]] * 3
+    assert parents_of(env, vault, names) == [out["parent"]] * 3
 
 
 def test_a_refused_nesting_attempts_no_un_nest_even_when_an_un_nest_would_read_back_nested(
@@ -1289,7 +1301,7 @@ def test_a_concurrent_parent_appearing_after_the_create_undoes_this_runs_parent(
 
     code, out, err = run_assemble(tmp_path, EnvRunner(env, hook), spec, confirm(env, vault, names), capsys)
     assert code == 2
-    assert [ln for ln in err.splitlines() if ln.startswith("reason-code: ")] == [
+    assert reason_codes(err) == [
         "reason-code: concurrent-followup-parent"
     ]
     assert f"subject: {' '.join(sorted([out['parent'], rival['name']]))}" in err.splitlines()
@@ -1297,7 +1309,7 @@ def test_a_concurrent_parent_appearing_after_the_create_undoes_this_runs_parent(
     assert out["undone"] == [{"name": out["parent"], "write": "drop"}]
     assert sidecar_of(env, vault, out["parent"])["status"] == "dropped"
     assert sidecar_of(env, vault, rival["name"])["status"] == "open"
-    assert [sidecar_of(env, vault, n).get("parent") for n in names] == [None] * 3
+    assert parents_of(env, vault, names) == [None] * 3
 
 
 # --- the title, collisions and a create that fails -------------------------------------------
@@ -1330,7 +1342,7 @@ def test_a_parent_name_too_long_for_the_filesystem_is_parent_create_failed_with_
     runner = EnvRunner(env)
     code, out, err = run_assemble(tmp_path, runner, long_spec, children, capsys)
     assert code == 2 and out is None
-    assert [ln for ln in err.splitlines() if ln.startswith("reason-code: ")] == ["reason-code: parent-create-failed"]
+    assert reason_codes(err) == ["reason-code: parent-create-failed"]
     assert subject_of(err) == [] and "parent-state: unknown" not in err.splitlines()
     assert vault_snapshot(env, vault) == before
     assert [w[:2] for w in runner.writes()] == [["record", "create"]]
@@ -1455,11 +1467,11 @@ def test_a_create_that_landed_but_looked_failed_is_left_live_and_named_with_noth
     runner = EnvRunner(env, landed_then(outcome))
     code, out, err = run_assemble(tmp_path, runner, spec, confirm(env, vault, names), capsys)
     assert code == 2 and out is None
-    assert [ln for ln in err.splitlines() if ln.startswith("reason-code: ")] == ["reason-code: parent-create-failed"]
+    assert reason_codes(err) == ["reason-code: parent-create-failed"]
     (made,) = created_parent(env, vault, spec)
     assert subject_of(err) == [made]
     assert sidecar_of(env, vault, made)["status"] == "open"
-    assert [sidecar_of(env, vault, n).get("parent") for n in names] == [None] * 3
+    assert parents_of(env, vault, names) == [None] * 3
     assert not any(is_drop(a) or is_nest(a) for a in runner.calls)
 
 
@@ -1476,7 +1488,7 @@ def test_a_create_that_timed_out_without_landing_is_parent_create_failed_with_no
 
     code, out, err = run_assemble(tmp_path, EnvRunner(env, hook), spec, confirm(env, vault, names), capsys)
     assert code == 2 and out is None
-    assert [ln for ln in err.splitlines() if ln.startswith("reason-code: ")] == ["reason-code: parent-create-failed"]
+    assert reason_codes(err) == ["reason-code: parent-create-failed"]
     assert vault_snapshot(env, vault) == before
 
 
@@ -1494,7 +1506,7 @@ def test_a_failed_create_leaves_alone_a_follow_up_parent_another_run_made_meanwh
 
     code, out, err = run_assemble(tmp_path, EnvRunner(env, hook), spec, confirm(env, vault, names), capsys)
     assert code == 2 and out is None
-    assert [ln for ln in err.splitlines() if ln.startswith("reason-code: ")] == ["reason-code: parent-create-failed"]
+    assert reason_codes(err) == ["reason-code: parent-create-failed"]
     assert sidecar_of(env, vault, rival["name"])["status"] == "open"
     assert subject_of(err) == []
 
@@ -1516,7 +1528,7 @@ def test_a_rival_with_this_runs_title_appearing_during_a_failed_create_is_left_l
     runner = EnvRunner(env, hook)
     code, out, err = run_assemble(tmp_path, runner, spec, confirm(env, vault, names), capsys)
     assert code == 2 and out is None
-    assert [ln for ln in err.splitlines() if ln.startswith("reason-code: ")] == ["reason-code: parent-create-failed"]
+    assert reason_codes(err) == ["reason-code: parent-create-failed"]
     assert subject_of(err) == [rival["name"]]
     assert sidecar_of(env, vault, rival["name"])["status"] == "open"
     assert not any(is_drop(a) or is_nest(a) for a in runner.calls)
@@ -1541,7 +1553,7 @@ def test_a_failed_create_names_every_live_parent_carrying_this_runs_title_and_on
 
     code, out, err = run_assemble(tmp_path, EnvRunner(env, hook), spec, confirm(env, vault, names), capsys)
     assert code == 2 and out is None
-    assert [ln for ln in err.splitlines() if ln.startswith("reason-code: ")] == ["reason-code: parent-create-failed"]
+    assert reason_codes(err) == ["reason-code: parent-create-failed"]
     assert subject_of(err) == sorted(made["same"])
 
 
@@ -1565,7 +1577,7 @@ def test_a_failed_requery_after_an_unclear_create_exits_two_with_no_stdout_and_m
     runner = EnvRunner(env, hook)
     code, out, err = run_assemble(tmp_path, runner, spec, confirm(env, vault, names), capsys)
     assert code == 2 and out is None
-    assert [ln for ln in err.splitlines() if ln.startswith("reason-code: ")] == ["reason-code: search-truncated"]
+    assert reason_codes(err) == ["reason-code: search-truncated"]
     assert "parent-state: unknown" in err.splitlines()
     assert not any(is_drop(a) or is_nest(a) for a in runner.calls)
     (made,) = created_parent(env, vault, spec)
@@ -1596,7 +1608,7 @@ def test_a_flip_failure_leaves_a_child_another_run_moved_under_a_different_paren
     def hook(argv, stdin, runner):
         if is_flip(argv):
             _lore(env, "record", "update", f"task/{names[0]}", "--vault", vault, "--unset-parent")
-            _lore(env, "record", "update", f"task/{names[0]}", "--vault", vault, "--parent", holder)
+            nest(env, vault, names[0], holder)
             return refused(argv)
 
     runner = EnvRunner(env, hook)
@@ -1604,7 +1616,7 @@ def test_a_flip_failure_leaves_a_child_another_run_moved_under_a_different_paren
     assert code == 2
     assert_rolled_forward(out, runner)
     assert sidecar_of(env, vault, names[0])["parent"] == holder
-    assert [sidecar_of(env, vault, n).get("parent") for n in names[1:]] == [out["parent"]] * 2
+    assert parents_of(env, vault, names[1:]) == [out["parent"]] * 2
     assert sidecar_of(env, vault, out["parent"])["status"] == "open"
 
 
@@ -1662,7 +1674,7 @@ def test_a_truncated_search_before_the_create_is_search_truncated_with_nothing_w
     runner = EnvRunner(env, truncated_searches(after_create=False))
     code, out, err = run_assemble(tmp_path, runner, spec, confirm(env, vault, names), capsys)
     assert code == 2 and out is None
-    assert [ln for ln in err.splitlines() if ln.startswith("reason-code: ")] == ["reason-code: search-truncated"]
+    assert reason_codes(err) == ["reason-code: search-truncated"]
     assert vault_snapshot(env, vault) == before
 
 
@@ -1674,11 +1686,11 @@ def test_a_truncated_search_after_the_create_leaves_the_parent_open_and_reports_
     runner = EnvRunner(env, truncated_searches(after_create=True))
     code, out, err = run_assemble(tmp_path, runner, spec, confirm(env, vault, names), capsys)
     assert code == 2
-    assert [ln for ln in err.splitlines() if ln.startswith("reason-code: ")] == ["reason-code: search-truncated"]
+    assert reason_codes(err) == ["reason-code: search-truncated"]
     assert_rolled_forward(out, runner)
     assert out["nested"] == []
     assert sidecar_of(env, vault, out["parent"])["status"] == "open"
-    assert [sidecar_of(env, vault, n).get("parent") for n in names] == [None] * 3
+    assert parents_of(env, vault, names) == [None] * 3
 
 
 # --- the children file and the arguments ------------------------------------------------------
@@ -1822,7 +1834,7 @@ def test_a_task_nested_by_hand_but_not_listed_is_unlisted_and_not_unheld(lore_en
     (listed,) = make_children(env, vault, spec, count=1)
     stray = make_followup(env, vault, "Stray", spec=spec)
     name = hand_parent(env, vault, spec, [listed])
-    _lore(env, "record", "update", f"task/{stray}", "--vault", vault, "--parent", name)
+    nest(env, vault, stray, name)
     code, out, _, err = run_state(EnvRunner(env), spec, name, capsys)
     assert code == 0, err
     assert out["listed"] == [listed]
@@ -1896,7 +1908,7 @@ def test_a_child_whose_complete_read_shows_another_parent_is_not_held(lore_env, 
     kept, moved = make_children(env, vault, spec, count=2)
     name = hand_parent(env, vault, spec, [kept, moved])
     for child in (kept, moved):
-        _lore(env, "record", "update", f"task/{child}", "--vault", vault, "--parent", name)
+        nest(env, vault, child, name)
 
     def hook(argv, stdin, runner):
         if argv[:3] == ["record", "show", "--json"] and argv[-1] == f"task/{moved}":
@@ -1960,7 +1972,7 @@ def test_dropping_a_ready_parent_frees_both_children_and_gathers_them_again(
     assert out["parent"] == parent_name and out["dropped"] is True
     assert out["un-nested"] == names
     assert out["kept"] == [] and out["failed"] == [] and out["reset"] == []
-    assert [sidecar_of(env, vault, n).get("parent") for n in names] == [None, None]
+    assert parents_of(env, vault, names) == [None, None]
     assert sidecar_of(env, vault, parent_name)["status"] == "dropped"
     assert dropped_section(body_of(env, vault, parent_name)).strip() == "plans changed"
     assert gathered_names(env, spec) == names
@@ -1975,7 +1987,7 @@ def test_a_done_child_stays_nested_and_an_in_progress_child_is_un_nested(
     busy = make_followup(env, vault, "Busy child", status="in-progress", spec=spec)
     holder = hand_parent(env, vault, spec, [done, busy], status="in-progress")
     for n in (done, busy):
-        _lore(env, "record", "update", f"task/{n}", "--vault", vault, "--parent", holder)
+        nest(env, vault, n, holder)
     code, out, err = run_drop(EnvRunner(env), spec, holder, tmp_path, capsys)
     assert code == 0, err
     assert out["kept"] == [{"name": done, "status": "done"}]
@@ -1993,7 +2005,7 @@ def test_a_failed_first_un_nest_leaves_the_parent_live_and_a_rerun_completes_the
     runner = EnvRunner(env, lambda a, s, r: refused(a) if is_unnest(a, names[0]) else None)
     code, out, err = run_drop(runner, spec, parent_name, tmp_path, capsys)
     assert code == 2
-    assert [ln for ln in err.splitlines() if ln.startswith("reason-code: ")] == ["reason-code: drop-incomplete"]
+    assert reason_codes(err) == ["reason-code: drop-incomplete"]
     assert out["dropped"] is False
     assert sidecar_of(env, vault, parent_name)["status"] == "ready"
     assert [(f["name"], f["write"]) for f in out["failed"]] == [(names[0], "un-nest")]
@@ -2015,7 +2027,7 @@ def test_a_failed_drop_write_after_every_un_nest_names_a_command_that_drops_the_
     runner = EnvRunner(env, lambda a, s, r: refused(a) if is_drop(a) else None)
     code, out, err = run_drop(runner, spec, parent_name, tmp_path, capsys, reason="secret-free reason")
     assert code == 2
-    assert [ln for ln in err.splitlines() if ln.startswith("reason-code: ")] == ["reason-code: drop-incomplete"]
+    assert reason_codes(err) == ["reason-code: drop-incomplete"]
     assert out["un-nested"] == names and out["dropped"] is False
     assert [(f["name"], f["write"]) for f in out["failed"]] == [(parent_name, "drop")]
     assert "secret-free" not in out["failed"][0]["command"]
@@ -2112,7 +2124,7 @@ def test_a_parent_that_started_building_between_state_and_the_first_write_is_ref
     runner = EnvRunner(env, hook)
     code, out, err = run_drop(runner, spec, parent_name, tmp_path, capsys)
     assert code == 1 and out is None
-    assert [ln for ln in err.splitlines() if ln.startswith("reason-code: ")] == ["reason-code: parent-changed"]
+    assert reason_codes(err) == ["reason-code: parent-changed"]
     assert f"subject: {parent_name}" in err.splitlines()
     assert runner.writes() == []
     assert sidecar_of(env, vault, parent_name)["status"] == "in-progress"
@@ -2125,7 +2137,7 @@ def test_an_un_nested_in_progress_child_gets_a_reset_command_that_makes_it_gathe
     env, vault = lore_env
     busy = make_followup(env, vault, "Busy child", status="in-progress", spec=spec)
     holder = hand_parent(env, vault, spec, [busy], status="ready")
-    _lore(env, "record", "update", f"task/{busy}", "--vault", vault, "--parent", holder)
+    nest(env, vault, busy, holder)
     code, out, err = run_drop(EnvRunner(env), spec, holder, tmp_path, capsys)
     assert code == 0, err
     assert [r["name"] for r in out["reset"]] == [busy]
@@ -2173,7 +2185,7 @@ def test_an_unusable_reason_file_is_refused_with_the_vault_unchanged(
     code = parent.main(["drop", spec, parent_name, "--reason-file", str(path)], runner=runner)
     out = capsys.readouterr()
     assert code == 2 and out.out == ""
-    assert [ln for ln in out.err.splitlines() if ln.startswith("reason-code: ")] == [
+    assert reason_codes(out.err) == [
         "reason-code: invalid-reason-file"
     ]
     assert runner.writes() == [] and vault_snapshot(env, vault) == before
@@ -2198,7 +2210,7 @@ def test_a_parent_that_is_no_longer_live_is_refused_with_the_vault_unchanged(
     runner = EnvRunner(env)
     code, out, err = run_drop(runner, spec, holder, tmp_path, capsys)
     assert code == 1 and out is None
-    assert [ln for ln in err.splitlines() if ln.startswith("reason-code: ")] == ["reason-code: parent-not-live"]
+    assert reason_codes(err) == ["reason-code: parent-not-live"]
     assert runner.writes() == [] and vault_snapshot(env, vault) == before
 
 
@@ -2211,7 +2223,7 @@ def test_an_unmarked_task_is_refused_as_not_a_followup_parent_with_the_vault_unc
     runner = EnvRunner(env)
     code, out, err = run_drop(runner, spec, plain, tmp_path, capsys)
     assert code == 1 and out is None
-    assert [ln for ln in err.splitlines() if ln.startswith("reason-code: ")] == [
+    assert reason_codes(err) == [
         "reason-code: not-a-followup-parent"
     ]
     assert runner.writes() == [] and vault_snapshot(env, vault) == before
@@ -2243,14 +2255,6 @@ def interrupted(env, vault, spec, tmp_path, capsys, count=3, fail_at=1):
 
 def is_body_write(argv, name):
     return argv[:3] == ["record", "update", f"task/{name}"] and len(argv) == 5
-
-
-def reason_codes(err):
-    return [ln for ln in err.splitlines() if ln.startswith("reason-code: ")]
-
-
-def parents_of(env, vault, names):
-    return [sidecar_of(env, vault, n).get("parent") for n in names]
 
 
 def test_resume_nests_the_remaining_children_and_makes_the_parent_ready(lore_env, spec, tmp_path, capsys):
@@ -2633,7 +2637,7 @@ def test_a_listed_reason_over_the_bound_is_cut_with_a_marker_on_resume(lore_env,
 
 def _change_in_the_window(env, vault, name, change, holder):
     if change == "parent":
-        _lore(env, "record", "update", f"task/{name}", "--vault", vault, "--parent", holder)
+        nest(env, vault, name, holder)
     else:
         _lore(env, "record", "update", f"task/{name}", "--vault", vault, "--status", "blocked")
 

@@ -391,6 +391,11 @@ def _read_task(runner, vault: str, name: str) -> tuple[dict, str, str]:
     return sidecar, body, revision
 
 
+def _status(sidecar: dict) -> str:
+    """The sidecar's status, sanitized and bounded for the report."""
+    return gather.sanitize_text(str(sidecar["status"]), MAX_STATUS_CHARS)
+
+
 def read_revision(runner, vault: str, name: str) -> str:
     """The revision `lore record show --json` reports for `task/<name>`."""
     return _read_task(runner, vault, name)[2]
@@ -552,33 +557,44 @@ def render_body(spec: str, children: list[dict]) -> str:
     )
 
 
-def load_children(path: str) -> list[dict]:
-    """The children file: a non-empty JSON list of `{name, reason, revision}`."""
+def _load_children_file(path: str, keys: tuple[str, ...], allow_empty: bool) -> list[dict]:
+    """A JSON list of objects each carrying the string `keys` (a non-empty
+    `revision`, a unique, shape-checked `name`), empty only when `allow_empty`."""
     try:
         doc = json.loads(Path(path).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         raise ParentError("invalid-children-file") from None
-    if not isinstance(doc, list) or not doc:
+    if not isinstance(doc, list) or not (doc or allow_empty):
         raise ParentError("invalid-children-file")
     children, seen = [], set()
     for item in doc:
-        if not isinstance(item, dict) or not all(isinstance(item.get(k), str) for k in ("name", "reason", "revision")):
+        if not isinstance(item, dict) or not all(isinstance(item.get(k), str) for k in keys):
             raise ParentError("invalid-children-file")
         if not item["revision"] or item["name"] in seen:
             raise ParentError("invalid-children-file")
         if not gather._shape_ok(item["name"]):
             raise ParentError("invalid-followup-name")
         seen.add(item["name"])
-        children.append({k: item[k] for k in ("name", "reason", "revision")})
+        children.append({k: item[k] for k in keys})
     return children
+
+
+def load_children(path: str) -> list[dict]:
+    """The children file: a non-empty JSON list of `{name, reason, revision}`."""
+    return _load_children_file(path, ("name", "reason", "revision"), allow_empty=False)
+
+
+def _loaded_gatherer(runner, vault: str):
+    """A gatherer over `vault` with the live `lore task list --json` loaded."""
+    g = gather._Gatherer(runner, vault, gather.vault_path(runner, vault))
+    g.load_listing()
+    return g
 
 
 def live_followup_parents(runner, vault: str, spec: str, spec_sidecar: dict) -> list[str]:
     """Sorted names of live follow-up parents linked to the spec: the same lookup
     that fills the gathering script's `followup-parents`."""
-    g = gather._Gatherer(runner, vault, gather.vault_path(runner, vault))
-    g.load_listing()
-    return gather.live_parent_names(g.spec_linked(spec, spec_sidecar))
+    return gather.live_parent_names(_loaded_gatherer(runner, vault).spec_linked(spec, spec_sidecar))
 
 
 def _write(runner, argv: list[str], stdin: str | None = None):
@@ -642,7 +658,7 @@ def un_nest_and_drop(runner, vault: str, parent_name: str, children: list[str], 
         except (ParentError, gather.GatherError):
             report["failed"].append(failure)
             continue
-        status = gather.sanitize_text(str(sidecar["status"]), MAX_STATUS_CHARS)
+        status = _status(sidecar)
         if sidecar.get("parent") != parent_name:
             report["kept"].append({"name": name, "status": status})
             continue
@@ -785,14 +801,12 @@ def held_children(runner, vault: str, parent_name: str, listing: dict[str, dict]
     the candidates come from the live `lore task list --json` (`listing`, when the
     caller already loaded it) and each is confirmed by a complete read."""
     if listing is None:
-        g = gather._Gatherer(runner, vault, gather.vault_path(runner, vault))
-        g.load_listing()
-        listing = g.listing
+        listing = _loaded_gatherer(runner, vault).listing
     held = []
     for name in sorted(n for n, item in listing.items() if item.get("parent") == parent_name):
         sidecar = _read_task(runner, vault, name)[0]
         if sidecar.get("parent") == parent_name:
-            held.append({"name": name, "status": gather.sanitize_text(str(sidecar["status"]), MAX_STATUS_CHARS)})
+            held.append({"name": name, "status": _status(sidecar)})
     return held
 
 
@@ -811,8 +825,7 @@ def parent_state(runner, spec: str, parent_name: str) -> dict:
     sidecar, body, _ = _read_task(runner, vault, parent_name)
     if gather.FOLLOWUP_PARENT_LABEL not in gather._labels(sidecar):
         raise not_a_parent
-    g = gather._Gatherer(runner, vault, gather.vault_path(runner, vault))
-    g.load_listing()
+    g = _loaded_gatherer(runner, vault)
     if parent_name not in g.spec_linked(spec, spec_sidecar):
         raise not_a_parent
     listed, skipped = parse_listing(body)
@@ -820,7 +833,7 @@ def parent_state(runner, spec: str, parent_name: str) -> dict:
     held_names = {item["name"] for item in held}
     return {
         "parent": parent_name,
-        "status": gather.sanitize_text(str(sidecar["status"]), MAX_STATUS_CHARS),
+        "status": _status(sidecar),
         "listed": listed,
         "held": held,
         "unheld": [n for n in listed if n not in held_names],
@@ -868,7 +881,7 @@ def drop_parent(runner, spec: str, parent_name: str, reason: str) -> tuple[dict,
     if state["status"] in NOT_LIVE_STATUSES:
         raise ParentError("parent-not-live", (parent_name,))
     vault, _ = gather.resolve_spec(runner, spec)
-    current = gather.sanitize_text(str(_read_task(runner, vault, parent_name)[0]["status"]), MAX_STATUS_CHARS)
+    current = _status(_read_task(runner, vault, parent_name)[0])
     if current != state["status"]:
         raise ParentError("parent-changed", (parent_name,))
     held = state["held"]
@@ -888,23 +901,7 @@ def drop_parent(runner, spec: str, parent_name: str, reason: str) -> tuple[dict,
 
 def load_resume_children(path: str) -> list[dict]:
     """The resume children file: a JSON list, possibly empty, of `{name, revision}`."""
-    try:
-        doc = json.loads(Path(path).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        raise ParentError("invalid-children-file") from None
-    if not isinstance(doc, list):
-        raise ParentError("invalid-children-file")
-    children, seen = [], set()
-    for item in doc:
-        if not isinstance(item, dict) or not all(isinstance(item.get(k), str) for k in ("name", "revision")):
-            raise ParentError("invalid-children-file")
-        if not item["revision"] or item["name"] in seen:
-            raise ParentError("invalid-children-file")
-        if not gather._shape_ok(item["name"]):
-            raise ParentError("invalid-followup-name")
-        seen.add(item["name"])
-        children.append({"name": item["name"], "revision": item["revision"]})
-    return children
+    return _load_children_file(path, ("name", "revision"), allow_empty=True)
 
 
 def listed_reasons(body: str) -> dict[str, str]:
