@@ -94,6 +94,12 @@ came from, and what to do about it. The consolidated list follows it as supporti
 member count behind each multi-lens finding, grouped and named, and every finding written, as "How a
 finding reads" defines there.
 
+The list is supporting detail to the synthesis, not shorthand: each finding's `Fix:` takes the form
+its size calls for in "How a finding reads" — a small fix leads with the drafted exact text where
+the reviewer's ask and the text it cites settle it, never the ask quoted or described in words, and
+a large rewrite opens with what the reader would notice and names the parts of the proposal it
+changes and any section or criterion of the context document it touches.
+
 The prose is what the user reads first, and on a standalone consult it is often all they read: there
 is no disposition gate here forcing them back through the list, so a `consult` that leads with the
 list hands back a question's worth of raw material instead of an answer.
