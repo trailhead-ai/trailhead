@@ -1777,8 +1777,8 @@ FINDING_CAPTURE_VERDICTS.update(
 
 def _site(stem):
     """The site a capture belongs to: the segment before its run number, except that the calibrated consult's arms
-    (`precal-`, `cal-`, `regress-cal-` and `regress2-cal-`) belong to `consult-calibrated`."""
-    if stem.startswith(("precal-", "cal-", "regress-cal-", "regress2-cal-")):
+    (`precal-`, `cal-`, `regress-cal-`, `regress2-cal-` and `regress3-cal-`) belong to `consult-calibrated`."""
+    if stem.startswith(("precal-", "cal-", "regress-cal-", "regress2-cal-", "regress3-cal-")):
         return "consult-calibrated"
     return stem.split("-")[-2]
 
