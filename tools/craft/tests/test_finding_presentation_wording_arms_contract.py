@@ -15,6 +15,7 @@ from __future__ import annotations
 import re
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 from test_ritual_output_wording_arms_contract import (
@@ -63,7 +64,7 @@ FIX_SHAPE_BASELINE_REVISION = "c3f7b21e9a797c2794218cc19ef50a9060cc0b5d"
 # consult regression arm read `council.md` from here.
 FIX_SHAPE_EDIT_REVISION = "2fc63f894f8ad944e59d0b8c23af4f526c2dfe0b"
 
-# The commit carrying the sharpened fix-shape contract (commit A2): the seven second-round treated arms
+# The commit carrying the sharpened fix-shape contract: the seven second-round treated arms
 # and the second-round calibrated consult regression arm read `council.md` from here.
 FIX_SHAPE_SHARPENED_REVISION = "e568c4e037dbf1ba2d2eb3027fa3f77e03104dae"
 
@@ -192,114 +193,64 @@ ARM_SOURCES: dict[str, list[Source]] = {
     ],
 }
 
-ARM_SOURCES.update(
-    {
-        "fs-baseline-fsspecreview.md": [
-            (RULES, FIX_SHAPE_BASELINE_REVISION),
-            (GAUNTLET_SKILL, FIX_SHAPE_BASELINE_REVISION),
-            (GAUNTLET_DISPOSITIONS, FIX_SHAPE_BASELINE_REVISION),
-            (COUNCIL, FIX_SHAPE_BASELINE_REVISION),
-        ],
-        "fs-baseline-fsplan.md": [
-            (RULES, FIX_SHAPE_BASELINE_REVISION),
-            (PLAN_SKILL, FIX_SHAPE_BASELINE_REVISION),
-            (COUNCIL, FIX_SHAPE_BASELINE_REVISION),
-        ],
-        "fs-baseline-fsconsult.md": [
-            (RULES, FIX_SHAPE_BASELINE_REVISION),
-            (CONSULT_SKILL, FIX_SHAPE_BASELINE_REVISION),
-            (COUNCIL, FIX_SHAPE_BASELINE_REVISION),
-        ],
-        "fs-baseline-fsdriver.md": [
-            (RULES, FIX_SHAPE_BASELINE_REVISION),
-            (DRIVE_SKILL, FIX_SHAPE_BASELINE_REVISION),
-            (COUNCIL, FIX_SHAPE_BASELINE_REVISION),
-        ],
-        "fs-baseline-fsreview.md": [
-            (RULES, FIX_SHAPE_BASELINE_REVISION),
-            (REVIEW_SKILL, FIX_SHAPE_BASELINE_REVISION),
-            (COUNCIL, FIX_SHAPE_BASELINE_REVISION),
-        ],
-        "fs-baseline-fsbuildreview.md": [
-            (RULES, FIX_SHAPE_BASELINE_REVISION),
-            (EXECUTE_SKILL, FIX_SHAPE_BASELINE_REVISION),
-            (EXECUTE_PROCEDURE, FIX_SHAPE_BASELINE_REVISION),
-            (COUNCIL, FIX_SHAPE_BASELINE_REVISION),
-        ],
-        "fs-baseline-fsdrivebuild.md": [
-            (RULES, FIX_SHAPE_BASELINE_REVISION),
-            (DRIVE_SKILL, FIX_SHAPE_BASELINE_REVISION),
-            (EXECUTE_PROCEDURE, FIX_SHAPE_BASELINE_REVISION),
-            (COUNCIL, FIX_SHAPE_BASELINE_REVISION),
-        ],
-    }
-)
+# Each fix-shape site's sources other than `council.md`, in arm order.
+FS_SITE_SOURCES: dict[str, list[str]] = {
+    "fsspecreview": [RULES, GAUNTLET_SKILL, GAUNTLET_DISPOSITIONS],
+    "fsplan": [RULES, PLAN_SKILL],
+    "fsconsult": [RULES, CONSULT_SKILL],
+    "fsdriver": [RULES, DRIVE_SKILL],
+    "fsreview": [RULES, REVIEW_SKILL],
+    "fsbuildreview": [RULES, EXECUTE_SKILL, EXECUTE_PROCEDURE],
+    "fsdrivebuild": [RULES, DRIVE_SKILL, EXECUTE_PROCEDURE],
+}
 
-
-FS_TREATED_SITES: dict[str, list[tuple[str, str]]] = {
-    "fsspecreview": [("rules", RULES), ("skill", GAUNTLET_SKILL), ("skill", GAUNTLET_DISPOSITIONS)],
-    "fsplan": [("rules", RULES), ("skill", PLAN_SKILL)],
-    "fsconsult": [("rules", RULES), ("skill", CONSULT_SKILL)],
-    "fsdriver": [("rules", RULES), ("skill", DRIVE_SKILL)],
-    "fsreview": [("rules", RULES), ("skill", REVIEW_SKILL)],
-    "fsbuildreview": [("rules", RULES), ("skill", EXECUTE_SKILL), ("skill", EXECUTE_PROCEDURE)],
-    "fsdrivebuild": [("rules", RULES), ("skill", DRIVE_SKILL), ("skill", EXECUTE_PROCEDURE)],
+# Each fix-shape round's arm prefix and the `council.md` revision its arms read; every other source of a fix-shape
+# arm is at the fix-shape baseline.
+FS_ROUNDS = {
+    "fs-baseline": FIX_SHAPE_BASELINE_REVISION,
+    "fs-treated": FIX_SHAPE_EDIT_REVISION,
+    "fs-treated2": FIX_SHAPE_SHARPENED_REVISION,
 }
 
 ARM_SOURCES.update(
     {
-        f"fs-treated-{site}.md": [
-            *[(path, FIX_SHAPE_BASELINE_REVISION) for _, path in parts],
-            (COUNCIL, FIX_SHAPE_EDIT_REVISION),
+        f"{prefix}-{site}.md": [
+            *[(path, FIX_SHAPE_BASELINE_REVISION) for path in paths],
+            (COUNCIL, council_revision),
         ]
-        for site, parts in FS_TREATED_SITES.items()
+        for prefix, council_revision in FS_ROUNDS.items()
+        for site, paths in FS_SITE_SOURCES.items()
     }
 )
 
+# The calibrated consult regression arms: the `cal-consult` composition with `council.md` at each fix-shape edit.
 ARM_SOURCES["regress-cal-consult.md"] = [
     (RULES, BASELINE_REVISION),
     (CONSULT_SKILL, CAL_REVISION),
     (COUNCIL, FIX_SHAPE_EDIT_REVISION),
 ]
-
-ARM_SOURCES.update(
-    {
-        f"fs-treated2-{site}.md": [
-            *[(path, FIX_SHAPE_BASELINE_REVISION) for _, path in parts],
-            (COUNCIL, FIX_SHAPE_SHARPENED_REVISION),
-        ]
-        for site, parts in FS_TREATED_SITES.items()
-    }
-)
-
 ARM_SOURCES["regress2-cal-consult.md"] = [
     (RULES, BASELINE_REVISION),
     (CONSULT_SKILL, CAL_REVISION),
     (COUNCIL, FIX_SHAPE_SHARPENED_REVISION),
 ]
 
-# The commit carrying each fallback site's one point-of-use line in its own ritual file, and the file it edits.
-# A fallback arm is the site's second-round treated sources with only that file read from that commit.
-FIX_SHAPE_FALLBACK_REVISIONS: dict[str, str] = {
-    "fsplan": "f396eb098fd49851341f0f17272de9ac91b4af38",
-    "fsconsult": "3b50cc4ae78b43fb5494fdb2fe5d600230042284",
-    "fsdriver": "1819cbf6f7180643d607a7ad4d313389e144ec52",
-    "fsbuildreview": "f485a84a72fbbcb6fd0211075aea451f0c37a93c",
-}
-FIX_SHAPE_FALLBACK_FILES = {
-    "fsplan": PLAN_SKILL,
-    "fsconsult": CONSULT_SKILL,
-    "fsdriver": DRIVE_SKILL,
-    "fsbuildreview": EXECUTE_PROCEDURE,
+# Each fallback site's ritual file and the commit carrying its one point-of-use line there. A fallback arm is the
+# site's second-round treated sources with only that file read from that commit.
+FIX_SHAPE_FALLBACKS: dict[str, Source] = {
+    "fsplan": (PLAN_SKILL, "f396eb098fd49851341f0f17272de9ac91b4af38"),
+    "fsconsult": (CONSULT_SKILL, "3b50cc4ae78b43fb5494fdb2fe5d600230042284"),
+    "fsdriver": (DRIVE_SKILL, "1819cbf6f7180643d607a7ad4d313389e144ec52"),
+    "fsbuildreview": (EXECUTE_PROCEDURE, "f485a84a72fbbcb6fd0211075aea451f0c37a93c"),
 }
 
 ARM_SOURCES.update(
     {
         f"fs-fallback-{site}.md": [
-            (path, revision_at_fallback if path == FIX_SHAPE_FALLBACK_FILES[site] else revision)
+            fallback if path == fallback[0] else (path, revision)
             for path, revision in ARM_SOURCES[f"fs-treated2-{site}.md"]
         ]
-        for site, revision_at_fallback in FIX_SHAPE_FALLBACK_REVISIONS.items()
+        for site, fallback in FIX_SHAPE_FALLBACKS.items()
     }
 )
 
@@ -343,56 +294,46 @@ def test_composing_one_source_from_a_different_revision_does_not_match(
         "revision, so the revision pin does not constrain the arm"
     )
 
-FIX_SHAPE_EDIT_ARMS = [f"fs-treated-{site}.md" for site in FS_TREATED_SITES] + ["regress-cal-consult.md"]
+
+# Each arm that reads `council.md` at a fix-shape contract edit, the edit's revision, and the revision before it.
+COUNCIL_EDIT_ARMS = [
+    (f"{prefix}-{site}.md", edit, before)
+    for prefix, edit, before in (
+        ("fs-treated", FIX_SHAPE_EDIT_REVISION, FIX_SHAPE_BASELINE_REVISION),
+        ("fs-treated2", FIX_SHAPE_SHARPENED_REVISION, FIX_SHAPE_EDIT_REVISION),
+    )
+    for site in FS_SITE_SOURCES
+] + [
+    ("regress-cal-consult.md", FIX_SHAPE_EDIT_REVISION, FIX_SHAPE_BASELINE_REVISION),
+    ("regress2-cal-consult.md", FIX_SHAPE_SHARPENED_REVISION, FIX_SHAPE_EDIT_REVISION),
+]
 
 
-@pytest.mark.parametrize("arm_name", FIX_SHAPE_EDIT_ARMS)
-def test_a_fix_shape_edit_arm_differs_from_the_same_sources_with_council_at_the_fix_shape_baseline(
-    arm_name: str,
+@pytest.mark.parametrize(
+    "arm_name,edit,before", COUNCIL_EDIT_ARMS, ids=[arm for arm, _, _ in COUNCIL_EDIT_ARMS]
+)
+def test_a_fix_shape_edit_arm_differs_from_the_same_sources_with_council_before_that_edit(
+    arm_name: str, edit: str, before: str
 ):
-    sources = [
-        (path, FIX_SHAPE_BASELINE_REVISION if revision == FIX_SHAPE_EDIT_REVISION else revision)
-        for path, revision in ARM_SOURCES[arm_name]
-    ]
+    sources = [(path, before if revision == edit else revision) for path, revision in ARM_SOURCES[arm_name]]
     assert not arm_matches(ARMS_DIR / arm_name, sources), (
-        f"{arm_name} matches its sources with council.md at the fix-shape baseline, "
+        f"{arm_name} matches its sources with council.md at {before}, "
         "so the contract edit is not what the arm varies"
     )
 
 
-FIX_SHAPE_SHARPENED_ARMS = [f"fs-treated2-{site}.md" for site in FS_TREATED_SITES] + ["regress2-cal-consult.md"]
-
-
-@pytest.mark.parametrize("arm_name", FIX_SHAPE_SHARPENED_ARMS)
-def test_a_sharpened_arm_differs_from_the_same_sources_with_council_at_the_first_fix_shape_edit(
-    arm_name: str,
-):
-    sources = [
-        (path, FIX_SHAPE_EDIT_REVISION if revision == FIX_SHAPE_SHARPENED_REVISION else revision)
-        for path, revision in ARM_SOURCES[arm_name]
-    ]
-    assert not arm_matches(ARMS_DIR / arm_name, sources), (
-        f"{arm_name} matches its sources with council.md at the first fix-shape edit, "
-        "so the sharpened contract is not what the arm varies"
-    )
-
-
-FIX_SHAPE_FALLBACK_ARMS = [f"fs-fallback-{site}.md" for site in FIX_SHAPE_FALLBACK_REVISIONS]
-
-
-@pytest.mark.parametrize("arm_name", FIX_SHAPE_FALLBACK_ARMS)
-def test_a_fallback_arm_differs_from_its_treated_arm_only_in_the_sites_ritual_file(arm_name: str):
-    site = arm_name.removeprefix("fs-fallback-").removesuffix(".md")
+@pytest.mark.parametrize("site", FIX_SHAPE_FALLBACKS)
+def test_a_fallback_arm_differs_from_its_treated_arm_only_in_the_sites_ritual_file(site: str):
+    arm_name = f"fs-fallback-{site}.md"
+    ritual_file, _ = FIX_SHAPE_FALLBACKS[site]
     treated = (ARMS_DIR / f"fs-treated2-{site}.md").read_text(encoding="utf-8")
     fallback = (ARMS_DIR / arm_name).read_text(encoding="utf-8")
     assert fallback != treated, f"{arm_name} is byte-identical to its treated arm"
     sources = [
-        (path, FIX_SHAPE_BASELINE_REVISION if path == FIX_SHAPE_FALLBACK_FILES[site] else revision)
+        (path, FIX_SHAPE_BASELINE_REVISION if path == ritual_file else revision)
         for path, revision in ARM_SOURCES[arm_name]
     ]
-    assert compose(sources) == treated, (
-        f"{arm_name} differs from its treated arm in more than {FIX_SHAPE_FALLBACK_FILES[site]}"
-    )
+    assert compose(sources) == treated, f"{arm_name} differs from its treated arm in more than {ritual_file}"
 
 
 def test_every_arm_file_has_a_manifest_entry_and_every_entry_a_file():
@@ -417,15 +358,23 @@ def test_report_labels_reads_headings_and_skips_fenced_ones():
     assert report_labels(text) == ["Builder", "Security"]
 
 
+FS_COUNCIL_REPORTS = ["fs-reports-lenses.md", "fs-reports-consult.md", "fs-reports-spec-review.md"]
 REPORT_FILES = [
     "reports-lenses.md",
     "reports-consult.md",
     "reports-spec-review.md",
     "reports-calibrated.md",
-    "fs-reports-lenses.md",
-    "fs-reports-consult.md",
-    "fs-reports-spec-review.md",
+    *FS_COUNCIL_REPORTS,
 ]
+
+
+def _grade(check: str, reports: Path, text: str) -> subprocess.CompletedProcess[bytes]:
+    return subprocess.run(
+        [sys.executable, str(GRADER), "--check", check, "--reports", str(reports)],
+        input=text.encode(),
+        capture_output=True,
+        timeout=60,
+    )
 
 
 @pytest.mark.parametrize("report_file", REPORT_FILES)
@@ -434,12 +383,7 @@ def test_the_grader_reads_every_label_a_canned_report_carries_as_the_grammar_imp
     labels = report_labels(path.read_text(encoding="utf-8"))
     assert labels, f"{report_file} carries no `### <label>` heading"
     for label in labels:
-        result = subprocess.run(
-            [sys.executable, str(GRADER), "--check", "reviewer-name", "--reports", str(path)],
-            input=f"{label} found nothing that blocks the work.\n".encode(),
-            capture_output=True,
-            timeout=60,
-        )
+        result = _grade("reviewer-name", path, f"{label} found nothing that blocks the work.\n")
         expected = "plain" if label == "Security" else "internal"
         verdict = f"reviewer-name: {expected}\n".encode()
         assert result.stdout == verdict, (report_file, label, result.stdout, result.stderr)
@@ -475,7 +419,6 @@ def test_the_calibrated_reports_carry_the_block_the_renderer_prints_for_a_protot
     assert _render(CALIBRATED_SPEC.format(level="production")) != rendered
 
 
-FS_COUNCIL_REPORTS = ["fs-reports-lenses.md", "fs-reports-consult.md", "fs-reports-spec-review.md"]
 TAG_LINE = re.compile(r"^\s*[-*+] \[(Critical|Important|Minor)\] ")
 
 
@@ -504,16 +447,6 @@ def test_tagged_findings_joins_wrapped_lines_and_stops_at_the_next_item():
     assert tagged_findings(text) == ["- [Critical] first line wrapped on", "- [Minor] second"]
 
 
-def _severity(args: list[str], text: str) -> bytes:
-    result = subprocess.run(
-        [sys.executable, str(GRADER), "--check", "severity-name", *args],
-        input=text.encode(),
-        capture_output=True,
-        timeout=60,
-    )
-    return result.stdout
-
-
 @pytest.mark.parametrize("report_file", FS_COUNCIL_REPORTS)
 def test_the_grader_exempts_every_tagged_fs_finding_when_quoted_and_reads_it_when_reworded(report_file: str):
     path = FIXTURES_DIR / report_file
@@ -521,11 +454,11 @@ def test_the_grader_exempts_every_tagged_fs_finding_when_quoted_and_reads_it_whe
     assert findings, f"{report_file} carries no tagged finding"
     for finding in findings:
         tag = TAG_LINE.match(finding).group(1)
-        quoted = _severity(["--reports", str(path)], finding + "\n")
+        quoted = _grade("severity-name", path, finding + "\n").stdout
         assert quoted == b"severity-name: none\n", (report_file, finding, quoted)
-        reworded = _severity(
-            ["--reports", str(path)], f"- [{tag}] the booking sheet lists nothing a reviewer here wrote\n"
-        )
+        reworded = _grade(
+            "severity-name", path, f"- [{tag}] the booking sheet lists nothing a reviewer here wrote\n"
+        ).stdout
         assert reworded == b"severity-name: internal\n", (report_file, tag, reworded)
 
 
@@ -550,7 +483,6 @@ def test_every_line_the_fs_code_review_report_cites_exists_in_the_fixture_files(
         assert 1 <= line <= len(lines) and lines[line - 1].strip(), (file, line)
 
 
-FS_SITES = ["fsspecreview", "fsplan", "fsconsult", "fsdriver", "fsreview", "fsbuildreview", "fsdrivebuild"]
 FIXTURE_PATH = re.compile(r"FIXTURES_DIR/([\w./-]+?)(?=[,.]?(?:\s|$))")
 
 
@@ -563,7 +495,7 @@ def test_prompt_fixture_paths_reads_each_named_path():
     assert prompt_fixture_paths(text) == ["a/b.md", "c.md", "d.py"]
 
 
-@pytest.mark.parametrize("site", FS_SITES)
+@pytest.mark.parametrize("site", FS_SITE_SOURCES)
 def test_each_fs_prompt_names_fixture_files_that_exist(site: str):
     prompt = (FIXTURES_DIR / f"fs-prompt-{site}.md").read_text(encoding="utf-8")
     paths = prompt_fixture_paths(prompt)

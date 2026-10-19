@@ -1546,13 +1546,6 @@ REPORT_FILES = {
     "review": "reports-code-review.md",
     "buildreview": "reports-code-review.md",
     "drivebuild": "reports-code-review.md",
-    "fsspecreview": "fs-reports-spec-review.md",
-    "fsplan": "fs-reports-lenses.md",
-    "fsconsult": "fs-reports-consult.md",
-    "fsdriver": "fs-reports-lenses.md",
-    "fsreview": "fs-reports-code-review.md",
-    "fsbuildreview": "fs-reports-code-review.md",
-    "fsdrivebuild": "fs-reports-code-review.md",
 }
 SITE_CHECKS = {
     "consult": ("severity-name", "reviewer-name"),
@@ -1563,14 +1556,21 @@ SITE_CHECKS = {
     "review": ("code-review-name", "severity-name"),
     "buildreview": ("code-review-name", "severity-name"),
     "drivebuild": ("code-review-name", "severity-name"),
-    "fsspecreview": ("severity-name", "reviewer-name"),
-    "fsplan": ("severity-name", "reviewer-name", "persisted-levels"),
-    "fsconsult": ("severity-name", "reviewer-name"),
-    "fsdriver": ("severity-name", "reviewer-name", "persisted-levels"),
-    "fsreview": ("code-review-name", "severity-name"),
-    "fsbuildreview": ("code-review-name", "severity-name"),
-    "fsdrivebuild": ("code-review-name", "severity-name"),
 }
+
+# A fix-shape site `fs<site>` restages a site with fresh fixtures: it runs that site's checks against the `fs-` copy
+# of its reports file.
+FS_SITES = {
+    f"fs{site}": site for site in ("specreview", "plan", "consult", "driver", "review", "buildreview", "drivebuild")
+}
+REPORT_FILES |= {fs_site: f"fs-{REPORT_FILES[site]}" for fs_site, site in FS_SITES.items()}
+SITE_CHECKS |= {fs_site: SITE_CHECKS[site] for fs_site, site in FS_SITES.items()}
+
+
+def _plain_verdicts(site):
+    """The verdicts of a capture that reads plain on every check its site runs, and kept on persisted-levels."""
+    return {check: "kept" if check == "persisted-levels" else "plain" for check in SITE_CHECKS[site]}
+
 
 # One row per committed capture: the verdict of each check the site runs. The pre-registered expectation for a
 # baseline is internal on both naming checks, and for a treated arm plain on both naming checks and kept on
@@ -1682,19 +1682,7 @@ FINDING_CAPTURE_VERDICTS.update(
 # Fix-shape baselines (fs-baseline-*): the finding-presentation-wording case's third extension, every source at
 # the baseline revision. The scripted checks are observations here; the fix-shape readings are in `expected.md`.
 FINDING_CAPTURE_VERDICTS.update(
-    {
-        f"fs-baseline-{site}-{n}": dict(verdicts)
-        for site, verdicts in {
-            "fsspecreview": {"severity-name": "plain", "reviewer-name": "plain"},
-            "fsconsult": {"severity-name": "plain", "reviewer-name": "plain"},
-            "fsplan": {"severity-name": "plain", "reviewer-name": "plain", "persisted-levels": "kept"},
-            "fsdriver": {"severity-name": "plain", "reviewer-name": "plain", "persisted-levels": "kept"},
-            "fsreview": {"code-review-name": "plain", "severity-name": "plain"},
-            "fsbuildreview": {"code-review-name": "plain", "severity-name": "plain"},
-            "fsdrivebuild": {"code-review-name": "plain", "severity-name": "plain"},
-        }.items()
-        for n in (1, 2, 3)
-    }
+    {f"fs-baseline-{site}-{n}": _plain_verdicts(site) for site in FS_SITES for n in (1, 2, 3)}
 )
 
 
@@ -1703,28 +1691,19 @@ FINDING_CAPTURE_VERDICTS.update(
 # `code-review-name` is an observation at the three code review sites.
 FINDING_CAPTURE_VERDICTS.update(
     {
-        f"fs-treated-{site}-{n}": dict(verdicts)
-        for site, verdicts in {
-            "fsconsult": {"severity-name": "plain", "reviewer-name": "plain"},
-            "fsplan": {"severity-name": "plain", "reviewer-name": "plain", "persisted-levels": "kept"},
-            "fsdriver": {"severity-name": "plain", "reviewer-name": "plain", "persisted-levels": "kept"},
-            "fsreview": {"code-review-name": "plain", "severity-name": "plain"},
-            "fsbuildreview": {"code-review-name": "plain", "severity-name": "plain"},
-        }.items()
+        f"fs-treated-{site}-{n}": _plain_verdicts(site)
+        for site in ("fsconsult", "fsplan", "fsdriver", "fsreview", "fsbuildreview")
         for n in (1, 2, 3)
     }
     # fsdrivebuild had a six-capture split run for its by-eye ambiguous criterion (2 of 3 met).
-    | {f"fs-treated-fsdrivebuild-{n}": {"code-review-name": "plain", "severity-name": "plain"} for n in range(1, 7)}
+    | {f"fs-treated-fsdrivebuild-{n}": _plain_verdicts("fsdrivebuild") for n in range(1, 7)}
     # fsspecreview-2 to -5 say "need your decision" (the grammar's plain reading is "needs your decision"), so
     # `severity-name` reads none: 2 of 6 plain, a scripted miss that the paired control below classifies.
     | {
         f"fs-treated-fsspecreview-{n}": {"severity-name": severity, "reviewer-name": "plain"}
         for n, severity in enumerate(("plain", "none", "none", "none", "none", "plain"), start=1)
     }
-    | {
-        f"regress-cal-consult-{n}": {"calibration-level": "plain", "severity-name": "plain", "reviewer-name": "plain"}
-        for n in (1, 2, 3)
-    }
+    | {f"regress-cal-consult-{n}": _plain_verdicts("consult-calibrated") for n in (1, 2, 3)}
 )
 
 
@@ -1738,22 +1717,21 @@ FINDING_CAPTURE_VERDICTS.update(
 )
 
 
-
 # Fix-shape second-round treated arms (fs-treated2-*) and the calibrated consult regression arm (regress2-cal-consult),
 # run against the sharpened contract. The scripted bar is plain on the naming checks and kept on persisted-levels;
 # `code-review-name` is an observation at the three code review sites. fsspecreview, fsplan, fsconsult, fsdriver and
 # fsbuildreview have captures 4 to 6 from the six-capture split run for a by-eye criterion at 2 of 3.
 FINDING_CAPTURE_VERDICTS.update(
     {
-        f"fs-treated2-{site}-{n}": dict(verdicts)
-        for site, verdicts, count in (
-            ("fsspecreview", {"severity-name": "plain", "reviewer-name": "plain"}, 6),
-            ("fsplan", {"severity-name": "plain", "reviewer-name": "plain", "persisted-levels": "kept"}, 6),
-            ("fsconsult", {"severity-name": "plain", "reviewer-name": "plain"}, 6),
-            ("fsdriver", {"severity-name": "plain", "reviewer-name": "plain", "persisted-levels": "kept"}, 6),
-            ("fsreview", {"code-review-name": "plain", "severity-name": "plain"}, 3),
-            ("fsbuildreview", {"code-review-name": "plain", "severity-name": "plain"}, 6),
-            ("fsdrivebuild", {"code-review-name": "plain", "severity-name": "plain"}, 3),
+        f"fs-treated2-{site}-{n}": _plain_verdicts(site)
+        for site, count in (
+            ("fsspecreview", 6),
+            ("fsplan", 6),
+            ("fsconsult", 6),
+            ("fsdriver", 6),
+            ("fsreview", 3),
+            ("fsbuildreview", 6),
+            ("fsdrivebuild", 3),
         )
         for n in range(1, count + 1)
     }
@@ -1778,13 +1756,8 @@ FINDING_CAPTURE_VERDICTS.update(
 # persisted-levels; `code-review-name` is an observation at the code review site.
 FINDING_CAPTURE_VERDICTS.update(
     {
-        f"fs-fallback-{site}-{n}": dict(verdicts)
-        for site, verdicts, count in (
-            ("fsplan", {"severity-name": "plain", "reviewer-name": "plain", "persisted-levels": "kept"}, 3),
-            ("fsconsult", {"severity-name": "plain", "reviewer-name": "plain"}, 6),
-            ("fsdriver", {"severity-name": "plain", "reviewer-name": "plain", "persisted-levels": "kept"}, 6),
-            ("fsbuildreview", {"code-review-name": "plain", "severity-name": "plain"}, 3),
-        )
+        f"fs-fallback-{site}-{n}": _plain_verdicts(site)
+        for site, count in (("fsplan", 3), ("fsconsult", 6), ("fsdriver", 6), ("fsbuildreview", 3))
         for n in range(1, count + 1)
     }
     # fsdriver-2 closes with "under `*Critical:*`" in reader-facing text (severity-name internal): 5 of 6 plain, a
@@ -1794,12 +1767,11 @@ FINDING_CAPTURE_VERDICTS.update(
 
 
 def _site(stem):
-    """The site a capture belongs to: the calibrated consult's arms are `precal-`, `cal-`, `regress-cal-` and
-    `regress2-cal-`, no site segment, and a fix-shape arm is `fs-<arm>-<site>-<n>`."""
-    if stem.startswith("fs-"):
-        return stem.split("-")[2]
-    calibrated = stem.startswith(("precal-", "cal-", "regress-cal-", "regress2-cal-"))
-    return "consult-calibrated" if calibrated else stem.split("-")[1]
+    """The site a capture belongs to: the segment before its run number, except that the calibrated consult's arms
+    (`precal-`, `cal-`, `regress-cal-` and `regress2-cal-`) belong to `consult-calibrated`."""
+    if stem.startswith(("precal-", "cal-", "regress-cal-", "regress2-cal-")):
+        return "consult-calibrated"
+    return stem.split("-")[-2]
 
 
 FINDING_CAPTURES = sorted(p for p in FINDING_RUNS.glob("*.txt") if not p.name.endswith(".stderr.txt"))
