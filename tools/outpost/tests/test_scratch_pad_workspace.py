@@ -172,6 +172,7 @@ def test_names_the_same_group_and_slug_as_camp(pad, camp, tmp_path):
 
 SKILL_DIR = SCRIPT_PATH.parent
 ROUND_JS_PREFIX = "window.PAD_ROUND = JSON.parse("
+ROUNDS_JS_PREFIX = "window.PAD_ROUNDS = JSON.parse("
 ROUND_JS_SUFFIX = ");\n"
 WAITING = "waiting for another session's add"
 KIT_FILES = {"index.html": b"<!doctype html><title>kit</title>\n", "pad.js": b"// pad\n"}
@@ -243,10 +244,14 @@ def _snapshot(root: Path):
     return {str(p.relative_to(root)): (p.read_bytes() if p.is_file() else None) for p in sorted(root.rglob("*"))}
 
 
+def _decode_literal(line: str, prefix: str):
+    """The data in a ``<prefix><JSON string literal>);`` line as the script writes it."""
+    assert line.startswith(prefix) and line.endswith(ROUND_JS_SUFFIX)
+    return json.loads(json.loads(line[len(prefix) : -len(ROUND_JS_SUFFIX)]))
+
+
 def _round_js_data(path: Path):
-    text = path.read_text(encoding="utf-8").splitlines(keepends=True)[0]
-    assert text.startswith(ROUND_JS_PREFIX) and text.endswith(ROUND_JS_SUFFIX)
-    return json.loads(json.loads(text[len(ROUND_JS_PREFIX) : -len(ROUND_JS_SUFFIX)]))
+    return _decode_literal(path.read_text(encoding="utf-8").splitlines(keepends=True)[0], ROUND_JS_PREFIX)
 
 
 def test_run_from_a_member_folder_publishes_the_pad_as_a_workspace_site(rig, capsys):
@@ -700,10 +705,7 @@ def _file_hashes(root: Path) -> dict[str, str]:
 
 
 def _site_titles(site: Path) -> list[str]:
-    text = (site / "rounds.js").read_text(encoding="utf-8").rstrip("\n")
-    prefix = "window.PAD_ROUNDS = JSON.parse("
-    assert text.startswith(prefix) and text.endswith(");")
-    return [r["title"] for r in json.loads(json.loads(text[len(prefix) : -2]))]
+    return [r["title"] for r in _decode_literal((site / "rounds.js").read_text(encoding="utf-8"), ROUNDS_JS_PREFIX)]
 
 
 def _lands(rig, cmd):

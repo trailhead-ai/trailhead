@@ -30,6 +30,7 @@ KIT_FILES = {
 }
 
 ROUND_JS_PREFIX = "window.PAD_ROUND = JSON.parse("
+ROUNDS_JS_PREFIX = "window.PAD_ROUNDS = JSON.parse("
 ROUND_JS_SUFFIX = ");\n"
 
 
@@ -137,11 +138,18 @@ def _without_locks(snapshot):
     return {k: v for k, v in snapshot.items() if k != "pad-locks" and not k.startswith("pad-locks/")}
 
 
+def _decode_literal(line: str, prefix: str):
+    """The data in a ``<prefix><JSON string literal>);`` line as the script writes it."""
+    assert line.startswith(prefix) and line.endswith(ROUND_JS_SUFFIX)
+    return json.loads(json.loads(line[len(prefix) : -len(ROUND_JS_SUFFIX)]))
+
+
 def _load_round_js(path: Path):
-    text = path.read_text(encoding="utf-8").splitlines(keepends=True)[0]
-    assert text.startswith(ROUND_JS_PREFIX) and text.endswith(ROUND_JS_SUFFIX)
-    inner = json.loads(text[len(ROUND_JS_PREFIX) : -len(ROUND_JS_SUFFIX)])
-    return json.loads(inner)
+    return _decode_literal(path.read_text(encoding="utf-8").splitlines(keepends=True)[0], ROUND_JS_PREFIX)
+
+
+def _load_rounds_js(path: Path):
+    return _decode_literal(path.read_text(encoding="utf-8"), ROUNDS_JS_PREFIX)
 
 
 # ---------------------------------------------------------------------------
@@ -938,15 +946,6 @@ def test_a_round_without_questions_says_so(skill, tmp_path, state):
 # ---------------------------------------------------------------------------
 # Settled notes and the pad's list of rounds
 # ---------------------------------------------------------------------------
-
-ROUNDS_JS_PREFIX = "window.PAD_ROUNDS = JSON.parse("
-
-
-def _load_rounds_js(path: Path):
-    text = path.read_text(encoding="utf-8")
-    assert text.startswith(ROUNDS_JS_PREFIX) and text.endswith(ROUND_JS_SUFFIX)
-    return json.loads(json.loads(text[len(ROUNDS_JS_PREFIX) : -len(ROUND_JS_SUFFIX)]))
-
 
 def test_settled_notes_reach_the_built_round(skill, tmp_path, state):
     data = _round(1)
