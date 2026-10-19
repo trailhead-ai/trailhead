@@ -158,6 +158,7 @@ _ROUNDS_JS_PREFIX = "window.PAD_ROUNDS = JSON.parse("
 _ROUND_DIR = re.compile(r"round-([1-9][0-9]*)")
 _LOCK_POLL_SECONDS = 0.05
 _WAY_ON = "start a new pad with a different --pad name"
+_UNCONFIRMED = "note: the pad was published but the publisher did not confirm it in time"
 
 
 def _pad_index(number: int) -> str:
@@ -458,16 +459,14 @@ def _write_rounds_js(folder: Path, titles: Sequence[str]) -> None:
     (folder / "rounds.js").write_text(_ROUNDS_JS_PREFIX + _js_string_literal(listing) + ");\n", encoding="utf-8")
 
 
-def _write_round(folder: Path, number: int, kit_dir: Path, encoded: Encoded) -> None:
+def _write_pad(folder: Path, kit_dir: Path, encoded: Encoded, earlier: Sequence[str] = ()) -> None:
+    """Write the round after the *earlier* rounds' titles, the pad's ``rounds.js`` and its ``index.html``."""
+    number = len(earlier) + 1
     shutil.copytree(kit_dir, folder / f"round-{number}")
     round_js = encoded.round_js + f"window.PAD_ROUND_NUMBER = {number};\n"
     (folder / f"round-{number}" / "round.js").write_text(round_js, encoding="utf-8")
-
-
-def _write_pad(folder: Path, kit_dir: Path, encoded: Encoded) -> None:
-    _write_round(folder, 1, kit_dir, encoded)
-    _write_rounds_js(folder, [encoded.title])
-    (folder / "index.html").write_text(_pad_index(1), encoding="utf-8")
+    _write_rounds_js(folder, [*earlier, encoded.title])
+    (folder / "index.html").write_text(_pad_index(number), encoding="utf-8")
 
 
 def _build_failed(final: Path, exc: OSError) -> Refusal:
@@ -667,10 +666,8 @@ def _swap_in(tmp: Path, final: Path, aside: Path) -> None:
     shutil.rmtree(aside, ignore_errors=True)
 
 
-def _add_round(
-    pads_root: Path, pad: str, kit_dir: Path, encoded: Encoded, put_in_place=_swap_in, make_tmp=None
-) -> Path:
-    """Add the round to the existing pad.
+def _add_round(pads_root: Path, pad: str, kit_dir: Path, encoded: Encoded, put_in_place=_swap_in, make_tmp=None):
+    """Add the round to the existing pad; return what *put_in_place* returns.
 
     *put_in_place(tmp, final, aside)* is the step a caller swaps; *make_tmp()* says where the new pad is
     built (default: a ``.tmp-`` sibling of the pad).
@@ -697,18 +694,15 @@ def _add_round(
     try:
         for k in range(1, number):
             _copy_round(final / f"round-{k}", tmp / f"round-{k}")
-        _write_round(tmp, number, kit_dir, encoded)
-        _write_rounds_js(tmp, [*titles, encoded.title])
-        (tmp / "index.html").write_text(_pad_index(number), encoding="utf-8")
+        _write_pad(tmp, kit_dir, encoded, titles)
         problems = _tree_problems(tmp)
         if problems:
             raise _cannot_take(pad, problems)
-        put_in_place(tmp, final, aside)
+        return put_in_place(tmp, final, aside)
     except OSError as exc:
         raise _build_failed(final, exc)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
-    return final
 
 
 def _require_publisher() -> None:
@@ -728,16 +722,18 @@ def _publisher_cmd(tmp: Path, pad: str, workspace: Path, *extra: str) -> list[st
     return [sys.executable, str(PUBLISHER_PATH), str(tmp), pad, "--workspace-path", str(workspace), *extra]
 
 
-def _run_the_publisher(runner, cmd: Sequence[str], env: Mapping[str, str], timeout: float):
+def _publish(runner, cmd: Sequence[str], env: Mapping[str, str], timeout: float, final: Path, timed_out) -> Built:
+    """Run the publisher: its stdout on success, a ``publish:`` refusal on failure, ``timed_out()`` on timeout."""
     try:
-        return runner(cmd, env, timeout)
+        result = runner(cmd, env, timeout)
     except OSError as exc:
         raise Refusal([_line("publish", f"could not start the publisher: {exc.strerror or exc}")])
-
-
-def _publish_failed(result) -> Refusal:
-    reasons = [_line("publish", _esc(line)) for line in result.stderr.splitlines() if line.strip()]
-    return Refusal(reasons or [_line("publish", f"the publisher exited with status {result.returncode}")])
+    except subprocess.TimeoutExpired:
+        return timed_out()
+    if result.returncode != 0:
+        reasons = [_line("publish", _esc(line)) for line in result.stderr.splitlines() if line.strip()]
+        raise Refusal(reasons or [_line("publish", f"the publisher exited with status {result.returncode}")])
+    return Built(final, result.stdout.splitlines())
 
 
 def _publish_to_workspace(
@@ -749,24 +745,20 @@ def _publish_to_workspace(
     if os.path.lexists(final):
         raise _exists(pad)
 
+    def timed_out() -> Built:
+        if (final / "index.html").is_file():
+            return Built(final, [_UNCONFIRMED])
+        raise Refusal(
+            [_line("publish", f"the publisher did not finish within {timeout:g} seconds and no pad was published")]
+        )
+
     try:
         tmp = Path(tempfile.mkdtemp(prefix="scratch-pad-"))
     except OSError as exc:
         raise _build_failed(final, exc)
     try:
         _write_pad(tmp, kit_dir, encoded)
-        try:
-            result = _run_the_publisher(runner, _publisher_cmd(tmp, pad, workspace), env, timeout)
-        except subprocess.TimeoutExpired:
-            if (final / "index.html").is_file():
-                note = "note: the pad was published but the publisher did not confirm it in time"
-                return Built(final, [note])
-            raise Refusal(
-                [_line("publish", f"the publisher did not finish within {timeout:g} seconds and no pad was published")]
-            )
-        if result.returncode != 0:
-            raise _publish_failed(result)
-        return Built(final, result.stdout.splitlines())
+        return _publish(runner, _publisher_cmd(tmp, pad, workspace), env, timeout, final, timed_out)
     except OSError as exc:
         raise _build_failed(final, exc)
     finally:
@@ -784,29 +776,22 @@ def _timed_out_add(final: Path, pad: str, tmp: Path, timeout: float) -> Built:
         raise Refusal([_line("publish", f"{late} the round was not added")])
     if titles != expected or not all((final / name).is_file() for name in ("index.html", "rounds.js")):
         raise Refusal([_line("publish", f"{late} the pad is not as expected")])
-    return Built(final, ["note: the pad was published but the publisher did not confirm it in time"])
+    return Built(final, [_UNCONFIRMED])
 
 
 def _add_to_workspace(
     workspace: Path, pad: str, kit_dir: Path, encoded: Encoded, env: Mapping[str, str], runner, timeout: float
 ) -> Built:
     """Add the round to the pad published at ``<workspace>/sites/<pad>``; call only under the pad's lock."""
-    sites = workspace / "sites"
-    outcome: list[Built] = []
 
-    def publish(tmp: Path, final: Path, aside: Path) -> None:
+    def publish(tmp: Path, final: Path, aside: Path) -> Built:
         cmd = _publisher_cmd(tmp, pad, workspace, "--overwrite")
-        try:
-            result = _run_the_publisher(runner, cmd, env, timeout)
-        except subprocess.TimeoutExpired:
-            outcome.append(_timed_out_add(final, pad, tmp, timeout))
-            return
-        if result.returncode != 0:
-            raise _publish_failed(result)
-        outcome.append(Built(final, result.stdout.splitlines()))
+        return _publish(runner, cmd, env, timeout, final, lambda: _timed_out_add(final, pad, tmp, timeout))
 
-    _add_round(sites, pad, kit_dir, encoded, publish, lambda: tempfile.mkdtemp(prefix="scratch-pad-"))
-    return outcome[0]
+    def make_tmp() -> str:
+        return tempfile.mkdtemp(prefix="scratch-pad-")
+
+    return _add_round(workspace / "sites", pad, kit_dir, encoded, publish, make_tmp)
 
 
 def _build(
