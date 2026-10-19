@@ -366,6 +366,10 @@ and remove the file. Act on the exit:
 | `parent-create-failed` | The parent record could not be created; `lore`'s or the filesystem's. With no `subject:` line, nothing was written. With one, the create's outcome was unclear: nothing was undone, there is no JSON, and every parent named is still live, so a rerun stops at it at step 7. Check `lore vault ls`, then rerun. |
 | `nesting-incomplete` | A child could not be nested or the parent could not be made ready; `lore`'s or the vault's. The run undid what it wrote; read the lists below. |
 | `not-a-followup-parent` | The named record is not a follow-up parent of this spec (no `craft/followup-parent` marker, a spec record, or linked to another spec); the name's. Nothing was written. Name the parent `/craft:tidy-followups` found and rerun. |
+| `parent-not-live` | The parent is already `done`, `dropped` or `superseded`; the vault's. Nothing was written. Nothing is left to drop. |
+| `parent-changed` | The parent's status moved between reading it and the first write, such as a build starting; the vault's. Nothing was written. Look at the parent again before deciding. |
+| `invalid-reason-file` | The reason file was not a regular file holding one non-empty JSON string of at most 4 KiB; this ritual's. Nothing was written. Restage it and rerun. |
+| `drop-incomplete` | An un-nest or the drop write failed; `lore`'s or the vault's. The parent is still live if an un-nest failed. Run the commands in `failed`, or rerun the drop, which skips what is already done. |
 
 The codes shared with the gather table (`no-vaults`, `spec-not-found`, `spec-ambiguous`,
 `not-a-spec`, `malformed-sidecar`, `empty-sidecar`, `lore-missing`, `lore-timeout`, `lore-failed`,

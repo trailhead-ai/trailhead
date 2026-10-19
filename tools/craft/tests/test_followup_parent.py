@@ -1901,3 +1901,301 @@ def test_held_children_returns_name_and_status_of_each_confirmed_child(lore_env,
     name = hand_parent(env, vault, spec, [a, b])
     _lore(env, "record", "update", f"task/{b}", "--vault", vault, "--parent", name, "--status", "blocked")
     assert parent.held_children(EnvRunner(env), vault, name) == [{"name": b, "status": "blocked"}]
+
+
+# --- drop: un-nest the unfinished children, then drop the parent ------------------------------
+
+
+def run_drop(runner, spec_name, parent_name, tmp_path, capsys, reason="no longer wanted", raw=None):
+    path = tmp_path / "reason.json"
+    path.write_text(json.dumps(reason) if raw is None else raw)
+    code = parent.main(["drop", spec_name, parent_name, "--reason-file", str(path)], runner=runner)
+    out = capsys.readouterr()
+    return code, (json.loads(out.out) if out.out.strip() else None), out.err
+
+
+def assembled_parent(env, vault, spec, tmp_path, capsys, count=2):
+    names = make_children(env, vault, spec, count=count)
+    _, out, _ = run_assemble(tmp_path, EnvRunner(env), spec, confirm(env, vault, names), capsys)
+    return out["parent"], names
+
+
+def dropped_section(body):
+    head, _, tail = body.partition("\n## Dropped\n\n")
+    assert head and tail, body
+    return tail
+
+
+def paste(env, command):
+    return subprocess.run(
+        shlex.split(command), capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL
+    )
+
+
+def test_dropping_a_ready_parent_frees_both_children_and_gathers_them_again(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    parent_name, names = assembled_parent(env, vault, spec, tmp_path, capsys)
+    assert gathered_names(env, spec) == []
+    runner = EnvRunner(env)
+    code, out, err = run_drop(runner, spec, parent_name, tmp_path, capsys, reason="plans changed")
+    assert code == 0, err
+    assert out["parent"] == parent_name and out["dropped"] is True
+    assert out["un-nested"] == names
+    assert out["kept"] == [] and out["failed"] == [] and out["reset"] == []
+    assert [sidecar_of(env, vault, n).get("parent") for n in names] == [None, None]
+    assert sidecar_of(env, vault, parent_name)["status"] == "dropped"
+    assert dropped_section(body_of(env, vault, parent_name)).strip() == "plans changed"
+    assert gathered_names(env, spec) == names
+    assert [a[2] for a in runner.calls if is_unnest(a)] == [f"task/{n}" for n in names]
+
+
+def test_a_done_child_stays_nested_and_an_in_progress_child_is_un_nested(
+    lore_env, spec, capsys, tmp_path
+):
+    env, vault = lore_env
+    done = make_followup(env, vault, "Finished child", status="done", spec=spec)
+    busy = make_followup(env, vault, "Busy child", status="in-progress", spec=spec)
+    holder = hand_parent(env, vault, spec, [done, busy], status="in-progress")
+    for n in (done, busy):
+        _lore(env, "record", "update", f"task/{n}", "--vault", vault, "--parent", holder)
+    code, out, err = run_drop(EnvRunner(env), spec, holder, tmp_path, capsys)
+    assert code == 0, err
+    assert out["kept"] == [{"name": done, "status": "done"}]
+    assert out["un-nested"] == [busy]
+    assert sidecar_of(env, vault, done)["parent"] == holder
+    assert sidecar_of(env, vault, busy).get("parent") is None
+    assert sidecar_of(env, vault, holder)["status"] == "dropped"
+
+
+def test_a_failed_first_un_nest_leaves_the_parent_live_and_a_rerun_completes_the_drop(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    parent_name, names = assembled_parent(env, vault, spec, tmp_path, capsys)
+    runner = EnvRunner(env, lambda a, s, r: refused(a) if is_unnest(a, names[0]) else None)
+    code, out, err = run_drop(runner, spec, parent_name, tmp_path, capsys)
+    assert code == 2
+    assert [ln for ln in err.splitlines() if ln.startswith("reason-code: ")] == ["reason-code: drop-incomplete"]
+    assert out["dropped"] is False
+    assert sidecar_of(env, vault, parent_name)["status"] == "ready"
+    assert [(f["name"], f["write"]) for f in out["failed"]] == [(names[0], "un-nest")]
+    assert out["un-nested"] == [names[1]]
+    assert not any(is_drop(a) for a in runner.calls)
+    assert paste(env, out["failed"][0]["command"]).returncode == 0
+    assert sidecar_of(env, vault, names[0]).get("parent") is None
+    code, out, err = run_drop(EnvRunner(env), spec, parent_name, tmp_path, capsys)
+    assert code == 0, err
+    assert out["dropped"] is True and out["un-nested"] == []
+    assert sidecar_of(env, vault, parent_name)["status"] == "dropped"
+
+
+def test_a_failed_drop_write_after_every_un_nest_names_a_command_that_drops_the_parent(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    parent_name, names = assembled_parent(env, vault, spec, tmp_path, capsys)
+    runner = EnvRunner(env, lambda a, s, r: refused(a) if is_drop(a) else None)
+    code, out, err = run_drop(runner, spec, parent_name, tmp_path, capsys, reason="secret-free reason")
+    assert code == 2
+    assert [ln for ln in err.splitlines() if ln.startswith("reason-code: ")] == ["reason-code: drop-incomplete"]
+    assert out["un-nested"] == names and out["dropped"] is False
+    assert [(f["name"], f["write"]) for f in out["failed"]] == [(parent_name, "drop")]
+    assert "secret-free" not in out["failed"][0]["command"]
+    assert sidecar_of(env, vault, parent_name)["status"] == "ready"
+    assert paste(env, out["failed"][0]["command"]).returncode == 0
+    assert sidecar_of(env, vault, parent_name)["status"] == "dropped"
+
+
+def dropped_text(lore_env, spec, tmp_path, capsys, reason):
+    env, vault = lore_env
+    parent_name, _ = assembled_parent(env, vault, spec, tmp_path, capsys, count=1)
+    code, _, err = run_drop(EnvRunner(env), spec, parent_name, tmp_path, capsys, reason=reason)
+    assert code == 0, err
+    return body_of(env, vault, parent_name)
+
+
+def test_a_credential_in_the_drop_reason_is_redacted(lore_env, spec, tmp_path, capsys):
+    body = dropped_text(lore_env, spec, tmp_path, capsys, "rotate AKIAIOSFODNN7EXAMPLE first")
+    assert "AKIAIOSFODNN7EXAMPLE" not in body
+    assert dropped_section(body).strip() == "rotate [REDACTED] first"
+
+
+def test_a_drop_reason_with_a_newline_and_a_heading_stays_on_one_line(lore_env, spec, tmp_path, capsys):
+    body = dropped_text(lore_env, spec, tmp_path, capsys, "first\n## Forged\r\n**Covers:** AC1\nlast")
+    assert dropped_section(body).strip() == "first ## Forged **Covers:** AC1 last"
+    assert [ln for ln in body.splitlines() if ln.startswith("## ")].count("## Dropped") == 1
+    assert "## Forged" not in [ln for ln in body.splitlines()]
+
+
+def test_control_characters_in_a_drop_reason_are_stripped(lore_env, spec, tmp_path, capsys):
+    body = dropped_text(lore_env, spec, tmp_path, capsys, "bell\x07 esc\x1b[31m red\x00")
+    assert dropped_section(body).strip() == "bell esc[31m red"
+
+
+def test_invisible_characters_in_a_drop_reason_are_stripped(lore_env, spec, tmp_path, capsys):
+    body = dropped_text(lore_env, spec, tmp_path, capsys, "zero​width ‮flip⁠")
+    assert dropped_section(body).strip() == "zerowidth flip"
+
+
+def test_a_drop_reason_over_the_bound_is_cut_with_a_marker(lore_env, spec, tmp_path, capsys):
+    limit = parent.MAX_REASON_CHARS
+    text = "lorem " * 200
+    assert not text[:limit].endswith(" ")
+    body = dropped_text(lore_env, spec, tmp_path, capsys, text)
+    assert dropped_section(body).strip() == text[:limit] + "…"
+
+
+def _after_state(spec_name, act):
+    """A hook running `act` once, between `state` (which resolves the spec first) and
+    drop's own re-resolution of it: after the held read, before the first write."""
+    seen = {"n": 0}
+
+    def hook(argv, stdin, runner):
+        if argv[:3] == ["record", "show", "--json"] and argv[-1] == f"spec/{spec_name}":
+            seen["n"] += 1
+            if seen["n"] == 2:
+                act()
+
+    return hook
+
+
+@pytest.mark.parametrize("elsewhere", [True, False], ids=["re-parented", "already-free"])
+def test_a_child_moved_off_the_parent_before_its_un_nest_is_kept_and_not_touched(
+    lore_env, spec, tmp_path, capsys, elsewhere
+):
+    env, vault = lore_env
+    parent_name, names = assembled_parent(env, vault, spec, tmp_path, capsys)
+    rival = hand_parent(env, vault, spec, [], status="open") if elsewhere else None
+    flags = ["--parent", rival] if elsewhere else ["--unset-parent"]
+    hook = _after_state(
+        spec, lambda: _lore(env, "record", "update", f"task/{names[0]}", "--vault", vault, *flags)
+    )
+    runner = EnvRunner(env, hook)
+    code, out, err = run_drop(runner, spec, parent_name, tmp_path, capsys)
+    assert code == 0, err
+    assert out["kept"] == [{"name": names[0], "status": "ready"}]
+    assert out["un-nested"] == [names[1]]
+    assert not any(is_unnest(a, names[0]) for a in runner.calls)
+    assert sidecar_of(env, vault, names[0]).get("parent") == rival
+    if elsewhere:
+        assert sidecar_of(env, vault, rival)["status"] == "open"
+    assert sidecar_of(env, vault, parent_name)["status"] == "dropped"
+
+
+def test_a_parent_that_started_building_between_state_and_the_first_write_is_refused(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    parent_name, names = assembled_parent(env, vault, spec, tmp_path, capsys)
+    hook = _after_state(
+        spec,
+        lambda: _lore(env, "record", "update", f"task/{parent_name}", "--vault", vault, "--status", "in-progress"),
+    )
+    runner = EnvRunner(env, hook)
+    code, out, err = run_drop(runner, spec, parent_name, tmp_path, capsys)
+    assert code == 1 and out is None
+    assert [ln for ln in err.splitlines() if ln.startswith("reason-code: ")] == ["reason-code: parent-changed"]
+    assert f"subject: {parent_name}" in err.splitlines()
+    assert runner.writes() == []
+    assert sidecar_of(env, vault, parent_name)["status"] == "in-progress"
+    assert [sidecar_of(env, vault, n)["parent"] for n in names] == [parent_name] * 2
+
+
+def test_an_un_nested_in_progress_child_gets_a_reset_command_that_makes_it_gatherable(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    busy = make_followup(env, vault, "Busy child", status="in-progress", spec=spec)
+    holder = hand_parent(env, vault, spec, [busy], status="ready")
+    _lore(env, "record", "update", f"task/{busy}", "--vault", vault, "--parent", holder)
+    code, out, err = run_drop(EnvRunner(env), spec, holder, tmp_path, capsys)
+    assert code == 0, err
+    assert [r["name"] for r in out["reset"]] == [busy]
+    assert gathered_names(env, spec) == []
+    assert paste(env, out["reset"][0]["command"]).returncode == 0
+    assert gathered_names(env, spec) == [busy]
+
+
+def test_a_ready_child_needs_no_reset(lore_env, spec, tmp_path, capsys):
+    env, vault = lore_env
+    parent_name, _ = assembled_parent(env, vault, spec, tmp_path, capsys, count=1)
+    _, out, _ = run_drop(EnvRunner(env), spec, parent_name, tmp_path, capsys)
+    assert out["reset"] == []
+
+
+@pytest.mark.parametrize(
+    "make",
+    [
+        lambda p: p.symlink_to(p.parent / "real.json"),
+        lambda p: p.write_text(json.dumps("x" * 4097)),
+        lambda p: p.write_text('"fine"' + " " * 5000),
+        lambda p: p.write_text("123"),
+        lambda p: p.write_text('["a"]'),
+        lambda p: p.write_text("not json"),
+        lambda p: p.write_text('""'),
+        lambda p: p.write_text('"   "'),
+        lambda p: p.write_text('"\\u200b\\u0007"'),
+        lambda p: None,
+    ],
+    ids=[
+        "symlink", "over-cap", "over-cap-padded", "number", "list", "not-json",
+        "empty", "blank", "only-stripped", "missing",
+    ],
+)
+def test_an_unusable_reason_file_is_refused_with_the_vault_unchanged(
+    lore_env, spec, tmp_path, capsys, make
+):
+    env, vault = lore_env
+    parent_name, _ = assembled_parent(env, vault, spec, tmp_path, capsys)
+    before = vault_snapshot(env, vault)
+    (tmp_path / "real.json").write_text(json.dumps("fine"))
+    path = tmp_path / "reason-under-test.json"
+    make(path)
+    runner = EnvRunner(env)
+    code = parent.main(["drop", spec, parent_name, "--reason-file", str(path)], runner=runner)
+    out = capsys.readouterr()
+    assert code == 2 and out.out == ""
+    assert [ln for ln in out.err.splitlines() if ln.startswith("reason-code: ")] == [
+        "reason-code: invalid-reason-file"
+    ]
+    assert runner.writes() == [] and vault_snapshot(env, vault) == before
+
+
+def test_a_reason_file_at_exactly_the_cap_is_accepted(lore_env, spec, tmp_path, capsys):
+    env, vault = lore_env
+    parent_name, _ = assembled_parent(env, vault, spec, tmp_path, capsys, count=1)
+    raw = json.dumps("x" * (4096 - 2))
+    assert len(raw.encode()) == 4096
+    code, _, err = run_drop(EnvRunner(env), spec, parent_name, tmp_path, capsys, raw=raw)
+    assert code == 0, err
+
+
+@pytest.mark.parametrize("status", ["dropped", "done"])
+def test_a_parent_that_is_no_longer_live_is_refused_with_the_vault_unchanged(
+    lore_env, spec, tmp_path, capsys, status
+):
+    env, vault = lore_env
+    holder = hand_parent(env, vault, spec, [], status=status)
+    before = vault_snapshot(env, vault)
+    runner = EnvRunner(env)
+    code, out, err = run_drop(runner, spec, holder, tmp_path, capsys)
+    assert code == 1 and out is None
+    assert [ln for ln in err.splitlines() if ln.startswith("reason-code: ")] == ["reason-code: parent-not-live"]
+    assert runner.writes() == [] and vault_snapshot(env, vault) == before
+
+
+def test_an_unmarked_task_is_refused_as_not_a_followup_parent_with_the_vault_unchanged(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    plain = make_followup(env, vault, "Plain task", status="open", spec=spec)
+    before = vault_snapshot(env, vault)
+    runner = EnvRunner(env)
+    code, out, err = run_drop(runner, spec, plain, tmp_path, capsys)
+    assert code == 1 and out is None
+    assert [ln for ln in err.splitlines() if ln.startswith("reason-code: ")] == [
+        "reason-code: not-a-followup-parent"
+    ]
+    assert runner.writes() == [] and vault_snapshot(env, vault) == before
