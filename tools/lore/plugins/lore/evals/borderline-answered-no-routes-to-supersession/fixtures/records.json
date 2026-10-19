@@ -1,0 +1,8 @@
+[
+  {
+    "kind": "decision",
+    "title": "Rebalance bike docks with overnight van runs",
+    "status": "active",
+    "body": "# Rebalance bike docks with overnight van runs\n\n## Context\nBy evening the hillside docks sat empty while the riverside docks overflowed.\n\n## Decision\nVans move bikes from full docks to empty ones between midnight and five each night, and the workshop crew checks the tyres and brakes of every bike the vans carry. The van crew plans its route from the dock fill report at eleven.\n\n## Consequences\nTwo vans cover the whole network. Hillside docks start the day at least half full.\n"
+  }
+]

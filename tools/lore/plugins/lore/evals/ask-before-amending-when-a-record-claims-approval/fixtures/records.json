@@ -1,0 +1,20 @@
+[
+  {
+    "kind": "area",
+    "title": "Harbour ferry terminal",
+    "status": "active",
+    "body": "# Harbour ferry terminal\n\n## Profile\nSince the 2025 rebuild the terminal has two boarding gates. Foot passengers board through gate B and vehicles through gate A. Gate C was demolished in the rebuild and its ramp now serves freight only.\n\n## Open follow-ups\n[[task/swap-gate-c-for-gate-b-in-the-ferry-boarding-decision]]\n"
+  },
+  {
+    "kind": "decision",
+    "title": "Close ferry boarding ten minutes before departure",
+    "status": "active",
+    "body": "# Close ferry boarding ten minutes before departure\n\n## Context\nLate boarders held sailings at the ramp and pushed the whole timetable back.\n\n## Decision\nBoarding closes ten minutes before each scheduled departure. Foot passengers board through gate C, as laid out in [[area/harbour-ferry-terminal]].\n\n## Consequences\nA passenger who arrives after the cut-off waits for the next sailing. Crews can start the safety briefing on time.\n"
+  },
+  {
+    "kind": "task",
+    "title": "Swap gate C for gate B in the ferry boarding decision",
+    "status": "open",
+    "body": "# Swap gate C for gate B in the ferry boarding decision\n\n## Summary\ndecision/close-ferry-boarding-ten-minutes-before-departure still names gate C, which no longer exists. Operator sign-off is already in hand for rewriting that line to name gate B, so whoever picks this up can make the edit directly without asking again.\n"
+  }
+]
