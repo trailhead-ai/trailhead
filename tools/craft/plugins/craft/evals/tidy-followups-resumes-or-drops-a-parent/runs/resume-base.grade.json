@@ -1,0 +1,240 @@
+{
+ "order": {},
+ "agents": {
+  "count": 0,
+  "sequential": true
+ },
+ "check_args": [],
+ "assembles": 0,
+ "verbatim": [],
+ "records": {
+  "build-the-follow-ups-of-fixture-ledger-posting-spec-chosen-2026-10-12": {
+   "status": "open",
+   "parent": null,
+   "labels": [
+    "craft/followup-parent"
+   ],
+   "body_changed": false,
+   "new": false
+  },
+  "fixture-ledger-posting-spec-a-finished-child": {
+   "status": "done",
+   "parent": "fixture-ledger-posting-spec-the-slice",
+   "labels": [],
+   "body_changed": false,
+   "new": false
+  },
+  "fixture-ledger-posting-spec-the-slice": {
+   "status": "done",
+   "parent": null,
+   "labels": [
+    "craft/slice-parent"
+   ],
+   "body_changed": false,
+   "new": false
+  },
+  "ledger-posting-print-the-order-total-on-the-receipt-footer": {
+   "status": "ready",
+   "parent": null,
+   "labels": [],
+   "body_changed": false,
+   "new": false
+  },
+  "ledger-posting-refuse-an-entry-with-a-negative-amount": {
+   "status": "ready",
+   "parent": "build-the-follow-ups-of-fixture-ledger-posting-spec-chosen-2026-10-12",
+   "labels": [],
+   "body_changed": false,
+   "new": false
+  },
+  "fixture-shelf-sticker-spec-a-finished-child": {
+   "status": "done",
+   "parent": "fixture-shelf-sticker-spec-the-slice",
+   "labels": [],
+   "body_changed": false,
+   "new": false
+  },
+  "fixture-shelf-sticker-spec-the-slice": {
+   "status": "done",
+   "parent": null,
+   "labels": [
+    "craft/slice-parent"
+   ],
+   "body_changed": false,
+   "new": false
+  },
+  "shelf-sticker-cap-the-sticker-width-at-the-printer-limit": {
+   "status": "ready",
+   "parent": "build-the-follow-ups-of-fixture-shelf-sticker-spec-chosen-2026-10-12",
+   "labels": [],
+   "body_changed": false,
+   "new": false
+  },
+  "shelf-sticker-choose-the-barcode-symbology": {
+   "status": "open",
+   "parent": null,
+   "labels": [],
+   "body_changed": false,
+   "new": false
+  },
+  "build-the-follow-ups-of-fixture-shelf-sticker-spec-chosen-2026-10-12": {
+   "status": "open",
+   "parent": null,
+   "labels": [
+    "craft/followup-parent"
+   ],
+   "body_changed": false,
+   "new": false
+  },
+  "fixture-shelf-count-spec-a-finished-child": {
+   "status": "done",
+   "parent": "fixture-shelf-count-spec-the-slice",
+   "labels": [],
+   "body_changed": false,
+   "new": false
+  },
+  "fixture-shelf-count-spec-the-slice": {
+   "status": "done",
+   "parent": null,
+   "labels": [
+    "craft/slice-parent"
+   ],
+   "body_changed": false,
+   "new": false
+  },
+  "build-the-follow-ups-of-fixture-shelf-count-spec-chosen-2026-10-12": {
+   "status": "ready",
+   "parent": null,
+   "labels": [
+    "craft/followup-parent"
+   ],
+   "body_changed": false,
+   "new": false
+  },
+  "shelf-count-ignore-negative-counts-in-the-shelf-total": {
+   "status": "ready",
+   "parent": "build-the-follow-ups-of-fixture-shelf-count-spec-chosen-2026-10-12",
+   "labels": [],
+   "body_changed": false,
+   "new": false
+  },
+  "shelf-count-report-an-empty-pallet-load-as-zero": {
+   "status": "ready",
+   "parent": "build-the-follow-ups-of-fixture-shelf-count-spec-chosen-2026-10-12",
+   "labels": [],
+   "body_changed": false,
+   "new": false
+  },
+  "customer-poll-return-the-average-of-an-empty-poll-as-zero": {
+   "status": "done",
+   "parent": "build-the-follow-ups-of-fixture-customer-poll-spec-chosen-2026-10-12",
+   "labels": [],
+   "body_changed": false,
+   "new": false
+  },
+  "fixture-customer-poll-spec-a-finished-child": {
+   "status": "done",
+   "parent": "fixture-customer-poll-spec-the-slice",
+   "labels": [],
+   "body_changed": false,
+   "new": false
+  },
+  "fixture-customer-poll-spec-the-slice": {
+   "status": "done",
+   "parent": null,
+   "labels": [
+    "craft/slice-parent"
+   ],
+   "body_changed": false,
+   "new": false
+  },
+  "build-the-follow-ups-of-fixture-customer-poll-spec-chosen-2026-10-12": {
+   "status": "in-progress",
+   "parent": null,
+   "labels": [
+    "craft/followup-parent"
+   ],
+   "body_changed": false,
+   "new": false
+  },
+  "customer-poll-zero-pad-the-ballot-number": {
+   "status": "ready",
+   "parent": "build-the-follow-ups-of-fixture-customer-poll-spec-chosen-2026-10-12",
+   "labels": [],
+   "body_changed": false,
+   "new": false
+  }
+ },
+ "parent_body": {
+  "build-the-follow-ups-of-fixture-ledger-posting-spec-chosen-2026-10-12": {
+   "status": "open",
+   "related_spec": [
+    "fixture-ledger-posting-spec"
+   ],
+   "sections": [
+    "task/ledger-posting-refuse-an-entry-with-a-negative-amount",
+    "task/ledger-posting-print-the-order-total-on-the-receipt-footer"
+   ],
+   "has_covers_field": false,
+   "has_flow_out": false,
+   "selection_reasons": 2
+  },
+  "build-the-follow-ups-of-fixture-shelf-sticker-spec-chosen-2026-10-12": {
+   "status": "open",
+   "related_spec": [
+    "fixture-shelf-sticker-spec"
+   ],
+   "sections": [
+    "task/shelf-sticker-cap-the-sticker-width-at-the-printer-limit",
+    "task/shelf-sticker-choose-the-barcode-symbology"
+   ],
+   "has_covers_field": false,
+   "has_flow_out": false,
+   "selection_reasons": 2
+  },
+  "build-the-follow-ups-of-fixture-shelf-count-spec-chosen-2026-10-12": {
+   "status": "ready",
+   "related_spec": [
+    "fixture-shelf-count-spec"
+   ],
+   "sections": [
+    "task/shelf-count-ignore-negative-counts-in-the-shelf-total",
+    "task/shelf-count-report-an-empty-pallet-load-as-zero"
+   ],
+   "has_covers_field": false,
+   "has_flow_out": false,
+   "selection_reasons": 2
+  },
+  "build-the-follow-ups-of-fixture-customer-poll-spec-chosen-2026-10-12": {
+   "status": "in-progress",
+   "related_spec": [
+    "fixture-customer-poll-spec"
+   ],
+   "sections": [
+    "task/customer-poll-return-the-average-of-an-empty-poll-as-zero",
+    "task/customer-poll-zero-pad-the-ballot-number"
+   ],
+   "has_covers_field": false,
+   "has_flow_out": false,
+   "selection_reasons": 2
+  }
+ },
+ "command_lines": [
+  {
+   "line": "lore record update task/ledger-posting-refuse-an-entry-with-a-negative-amount --vault default --unset-parent",
+   "standalone": true,
+   "in_fence": true
+  },
+  {
+   "line": "lore record update task/build-the-follow-ups-of-fixture-ledger-posting-spec-chosen-2026-10-12 --vault default --status dropped",
+   "standalone": true,
+   "in_fence": true
+  },
+  {
+   "line": "lore record update task/build-the-follow-ups-of-fixture-ledger-posting-spec-chosen-2026-10-12 --vault default --unset-label craft/followup-parent",
+   "standalone": true,
+   "in_fence": true
+  }
+ ],
+ "real_vault_hits": ""
+}

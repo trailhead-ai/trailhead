@@ -11,6 +11,7 @@ by path under the manifest's env, so a fixture that does not behave the way
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -27,12 +28,20 @@ LORE_BIN = Path(__file__).resolve().parents[2] / "lore" / "plugins" / "lore" / "
 
 
 def build(dest: Path) -> dict:
-    r = subprocess.run(
-        [sys.executable, "-I", str(BUILDER), str(dest)],
-        capture_output=True,
-        text=True,
-        env={"PATH": "/usr/bin:/bin", "LORE_BIN": str(LORE_BIN)},
-    )
+    # The harness runs the builder from a shell whose stdin is open and silent; lore refuses
+    # an update that waits on such a stdin, so the build gets the same kind of stdin here.
+    read_end, write_end = os.pipe()
+    try:
+        r = subprocess.run(
+            [sys.executable, "-I", str(BUILDER), str(dest)],
+            capture_output=True,
+            text=True,
+            stdin=read_end,
+            env={"PATH": "/usr/bin:/bin", "LORE_BIN": str(LORE_BIN)},
+        )
+    finally:
+        os.close(read_end)
+        os.close(write_end)
     assert r.returncode == 0, r.stderr
     return json.loads(r.stdout)
 

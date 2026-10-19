@@ -1,0 +1,22 @@
+### Assemble: failed (`reason-code: nesting-incomplete`)
+
+The parent record was created, but one child couldn't be nested, so the parent wasn't made ready. This is a `lore` or vault failure, not something in your input. The parent is left `open` holding the child that did nest, and nothing was undone. Re-running the ritual will resume it.
+
+### Closing report
+
+- **Parent:** `build-the-follow-ups-of-fixture-nest-fail-spec-chosen-2026-10-19`. It is `open` and not buildable.
+- **Included:**
+  - Nest-fail: reject path traversal in the archive extractor (`nest-fail-reject-path-traversal-in-the-archive-extractor`)
+  - Nest-fail: stop logging session cookies (`nest-fail-stop-logging-session-cookies`)
+- **Left:** none.
+- **Left out at step 10:** none.
+- **Nested:** Nest-fail: reject path traversal in the archive extractor (`nest-fail-reject-path-traversal-in-the-archive-extractor`).
+- **Refined but not nested:** Nest-fail: stop logging session cookies (`nest-fail-stop-logging-session-cookies`). Its nesting failed. It was refined to `ready`, but it is not under the parent.
+- **Failed write:** `nest` for `task/nest-fail-stop-logging-session-cookies`.
+- **Refinements that didn't land:** none. `check` confirmed both are refined and eligible.
+
+The build and distill commands aren't printed because the parent isn't buildable yet. To finish the parent, re-run the ritual, which will resume it:
+
+```
+/craft:tidy-followups spec/fixture-nest-fail-spec
+```

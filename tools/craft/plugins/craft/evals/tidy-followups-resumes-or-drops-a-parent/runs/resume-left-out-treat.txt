@@ -1,0 +1,22 @@
+removed from the list: task/shelf-sticker-choose-the-barcode-symbology
+
+---
+
+The existing parent for `fixture-shelf-sticker-spec` is now `ready` and can be built. One follow-up was dropped from its list because it isn't ready; nothing new was nested.
+
+- **Parent resumed:** `build-the-follow-ups-of-fixture-shelf-sticker-spec-chosen-2026-10-12`. It holds Shelf sticker: cap the sticker width at the printer limit (`shelf-sticker-cap-the-sticker-width-at-the-printer-limit`, `ready`).
+- **Removed from the parent's list:** Shelf sticker: choose the barcode symbology (`shelf-sticker-choose-the-barcode-symbology`). It is not at `ready` after refinement, so it couldn't be nested. It comes down to a choice between Code 128 and QR, which depends on the scanner budget and is your call.
+- **Nested this run:** none.
+- **Failed writes:** none.
+
+Build command:
+
+```
+/craft:execute task/build-the-follow-ups-of-fixture-shelf-sticker-spec-chosen-2026-10-12
+```
+
+The procedure gives this command on every branch of step 7. Only run it if you didn't create this parent: it removes the parent's marker label so the follow-up gather stops counting it, and leaves the record otherwise unchanged.
+
+```
+lore record update task/build-the-follow-ups-of-fixture-shelf-sticker-spec-chosen-2026-10-12 --vault default --unset-label craft/followup-parent
+```

@@ -1,0 +1,99 @@
+[main] TOOL Read {"file_path": "$CRAFT[treat]/skills/tidy-followups/SKILL.md"}
+
+[main] RESULT
+1	---
+2	name: tidy-followups
+3	description: >
+4	  Present a finished spec's recorded follow-ups as a reasoned shortlist — which are worth doing
+5	  now rather than later, each with a one-line reason — and list the rest by title; then, once the
+6	  operator has chosen, refine the chosen follow-ups and nest the ones that qualify under one new
+7	  buildable parent. Gathers with a deterministic script, ranks, and writes nothing until the
+8	  operator has confirmed the chosen set.
+9	  TRIGGER when: user says "tidy the follow-ups of spec X", "which follow-ups of this spec should
+10	  we do", "what follow-ups does this spec have", or invokes /craft:tidy-followups explicitly.
+11	  DO NOT TRIGGER when: the ask is a batch of in-session code fix-ups to run now (that is
+12	  `/craft:polish`'s), or the spec's slice loop is still running (follow-ups that matter
+13	  mid-loop reach the next slice through `/craft:plan`).
+14	---
+15	
+16	# Tidy follow-ups
+17	
+18	A spec built slice by slice leaves follow-ups: tasks the slices deliberately did not act on, linked
+19	back to the slice they came from. Once the spec closes they sink into the general backlog. This
+20	ritual brings one finished spec's follow... [cut 38591 chars]
+
+[main] BASH
+$CRAFT[treat]/scripts/followup_gather.py fixture-shelf-count-spec; echo "EXIT=$?"
+
+[main] RESULT
+{"spec": "fixture-shelf-count-spec", "vault": "default", "entry": "complete-status", "distilled": false, "followup-parents": ["build-the-follow-ups-of-fixture-shelf-count-spec-chosen-2026-10-12"], "followups": [], "slice-basis": "labelled", "slices": ["fixture-shelf-count-spec-the-slice"], "child-count": 1, "candidates-read": 3, "kept": 0, "excluded-by-label": {"count": 1, "names": ["build-the-follow-ups-of-fixture-shelf-count-spec-chosen-2026-10-12"]}, "skipped-edges": 0}
+EXIT=0
+
+[main] BASH
+lore record show task/build-the-follow-ups-of-fixture-shelf-count-spec-chosen-2026-10-12 --vault default --json; echo "EXIT=$?"
+
+[main] RESULT
+{
+  "body": "**Goal:** Build the follow-ups below, each already refined to ready. `spec/fixture-shelf-count-spec` is context only.\n\n**Delta design:** Build these follow-ups, each nested under this parent:\n\n### task/shelf-count-ignore-negative-counts-in-the-shelf-total\n\n**Selection reason:** waiting makes it costlier\n\n### task/shelf-count-report-an-empty-pallet-load-as-zero\n\n**Selection reason:** waiting makes it costlier\n\n**Known Unknowns:**\n\n- None.\n\n",
+  "kind": "task",
+  "layer": "personal",
+  "name": "build-the-follow-ups-of-fixture-shelf-count-spec-chosen-2026-10-12",
+  "record_id": "task/build-the-follow-ups-of-fixture-shelf-count-spec-chosen-2026-10-12",
+  "revision": "[sha:1d75aa24]",
+  "sidecar": {
+    "created-at": "2026-10-19T17:05:14Z",
+    "created-by": "fixture@example.com",
+    "kind": "task",
+    "labels": {
+      "craft/followup-parent": ""
+    },
+    "related": {
+      "spec": [
+        "fixture-shelf-count-spec"
+      ]
+    },
+    "status": "ready",
+    "title": "Build the follow-ups of fixture-shelf-count-spec chosen 2026-10-12",
+    "updated-at": "2026-10-19T17:05:15Z",
+    "updated-by": "fixture... [cut 47 chars]
+
+[main] TEXT
+No follow-ups were found for `spec/fixture-shelf-count-spec`. The gather checked 1 slice, `fixture-shelf-count-spec-the-slice`, which it found by its label (`labelled`). Nothing is created.
+
+**Header:** entry `complete-status` · slice basis `labelled` · 1 slice, 1 child · 3 candidates read, 0 kept · 1 excluded by label · 0 skipped edges
+
+Nothing has been written yet.
+
+---
+
+**Existing follow-up parent.** The spec already has a follow-up parent, and that parent hides the follow-ups from the gather:
+
+- `task/build-the-follow-ups-of-fixture-shelf-count-spec-chosen-2026-10-12` ("Build the follow-ups of fixture-shelf-count-spec chosen 2026-10-12"). Status: **`ready`**
+
+The parent is `ready`, so this run won't resume it or nest anything into it. Build it with:
+
+```
+/craft:execute task/build-the-follow-ups-of-fixture-shelf-count-spec-chosen-2026-10-12
+```
+
+Warning: if a build is already running against this parent, stop it before dropping the parent, because a drop un-nests the unfinished children underneath it.
+
+> **Build it with the command above, or drop it? (`drop` and a reason, or nothing)**
+
+**Answer given:** build it; drop nothing.
+
+---
+
+**Closing report**
+
+- **Included:** none. **Left:** none. **Left out:** none. **Refined but not nested:** none. **Failed writes:** none.
+- No parent was created or resumed, and no drop ran. Nothing was written to the vault.
+- The existing parent `build-the-follow-ups-of-fixture-shelf-count-spec-chosen-2026-10-12` is unchanged and still `ready`. Build it with the `/craft:execute` command above.
+
+To stop the follow-up gather counting this parent as the spec's follow-up parent, remove its marker label. The record itself is left alone:
+
+```
+lore record update task/build-the-follow-ups-of-fixture-shelf-count-spec-chosen-2026-10-12 --vault default --unset-label craft/followup-parent
+```
+
+The procedure prints no distill command here, because distilling waits on the parent.

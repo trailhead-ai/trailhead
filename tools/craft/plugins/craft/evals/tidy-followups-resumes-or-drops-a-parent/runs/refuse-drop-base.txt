@@ -1,0 +1,35 @@
+## Tidy follow-ups: `spec/fixture-customer-poll-spec`
+
+No follow-ups were found for this spec. The gather checked one slice, `fixture-customer-poll-spec-the-slice`, found by the `labelled` slice basis. Nothing is created.
+
+**Header:** entry `complete-status` · slice basis `labelled` · 1 slice, 1 child · 3 candidates read, 0 kept · 0 excluded by label · 0 skipped edges
+
+Nothing has been written yet.
+
+### A follow-up parent already exists
+
+A follow-up parent already exists for this spec:
+
+- `task/build-the-follow-ups-of-fixture-customer-poll-spec-chosen-2026-10-12`
+
+That parent is why the gather comes back empty: its follow-ups are nested under it. No second parent is created, and steps 8 to 13 do not run.
+
+Its status is `in-progress`, so the next step is to build it:
+
+```
+/craft:execute task/build-the-follow-ups-of-fixture-customer-poll-spec-chosen-2026-10-12
+```
+
+The ritual can't tell who created this parent. If you didn't create it, this command removes its marker label. The follow-up gather then stops counting it, and the record itself is left alone:
+
+```
+lore record update task/build-the-follow-ups-of-fixture-customer-poll-spec-chosen-2026-10-12 --vault default --unset-label craft/followup-parent
+```
+
+No distill command is printed on this stop, because distilling waits on the parent. The run stops here.
+
+---
+
+**Your answers to the drop questions weren't used.** In this version of the skill, step 7 asks nothing. It shows commands and stops, and there is no drop flow, no reason question and no drop confirmation. Even for a parent at `open` or `blocked`, the procedure only prints commands to un-nest and drop it and never runs them. This parent is at `in-progress`, so that path doesn't apply either. Acting on "drop", "The poll tooling was retired…" and "yes" would have meant writing to the vault outside the procedure, so I didn't.
+
+Nothing was written: I only ran the gather script and read the parent's record. If you still want to retire this batch, you'll have to drop the parent yourself, for example by un-nesting its two children and setting `--status dropped` with a diff that adds your reason. Be aware it is currently `in-progress`.

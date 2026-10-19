@@ -1,0 +1,24 @@
+The existing follow-up parent for `fixture-ledger-posting-spec` is now buildable: I nested the last follow-up it was waiting on and the parent is `ready`.
+
+nested task/ledger-posting-print-the-order-total-on-the-receipt-footer
+
+**What happened**
+- **Parent:** `build-the-follow-ups-of-fixture-ledger-posting-spec-chosen-2026-10-12` was left `open` by an earlier run that never finished. I picked that run back up; I didn't create a second parent.
+- **Nested this run:** "Ledger posting: print the order total on the receipt footer" (`ledger-posting-print-the-order-total-on-the-receipt-footer`).
+- **Already nested:** "refuse an entry with a negative amount" (`ledger-posting-refuse-an-entry-with-a-negative-amount`), status `ready`.
+- **Nothing else changed:** no follow-up was taken off the parent's list or left out, and no write failed.
+- **Weak case for doing these now:** the receipt-total follow-up met none of the reasons for acting early (a security gap, a defect later work will build on, or shared groundwork). So 0 of 1 made the shortlist. The parent's own reasons for both follow-ups say only that waiting makes them costlier, without naming a cost. You approved the nesting anyway.
+
+To build it:
+
+```
+/craft:execute task/build-the-follow-ups-of-fixture-ledger-posting-spec-chosen-2026-10-12
+```
+
+I can't tell who created this parent. If it wasn't you, this command removes its marker so the follow-up gather stops counting it, and leaves the record itself alone:
+
+```
+lore record update task/build-the-follow-ups-of-fixture-ledger-posting-spec-chosen-2026-10-12 --vault default --unset-label craft/followup-parent
+```
+
+There's no distill command yet; distilling the spec waits until this parent is done.

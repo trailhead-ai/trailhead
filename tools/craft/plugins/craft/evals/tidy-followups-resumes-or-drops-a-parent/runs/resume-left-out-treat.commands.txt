@@ -1,0 +1,23 @@
+[main] BASH
+$CRAFT[treat]/scripts/followup_gather.py fixture-shelf-sticker-spec; echo "EXIT=$?"
+
+[main] BASH
+lore record show --json --vault default task/shelf-sticker-choose-the-barcode-symbology; echo "EXIT=$?"
+
+[main] BASH
+lore record show task/build-the-follow-ups-of-fixture-shelf-sticker-spec-chosen-2026-10-12 --vault default --json; echo "EXIT=$?"
+
+[main] BASH
+$CRAFT[treat]/scripts/followup_parent.py state fixture-shelf-sticker-spec build-the-follow-ups-of-fixture-shelf-sticker-spec-chosen-2026-10-12; echo "EXIT=$?"
+
+[main] BASH
+$CRAFT[treat]/scripts/followup_parent.py check fixture-shelf-sticker-spec shelf-sticker-choose-the-barcode-symbology; echo "EXIT=$?"
+
+[main] BASH
+children=$(mktemp)
+cat > "$children" <<'CHILDREN_JSON'
+[]
+CHILDREN_JSON
+$CRAFT[treat]/scripts/followup_parent.py resume fixture-shelf-sticker-spec build-the-follow-ups-of-fixture-shelf-sticker-spec-chosen-2026-10-12 --children "$children"; rc=$?
+rm -f "$children"
+echo "EXIT=$rc"
