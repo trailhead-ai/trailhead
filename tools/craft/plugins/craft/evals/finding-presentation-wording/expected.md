@@ -1874,7 +1874,7 @@ text) and the two `.init.json` files. The raw stream holds host paths and the wo
 committed, as the consult run's was not; the `.init.json` replaces the worktree path with `<worktree>`. The files are
 `.md` and `.json`, so the capture test (`runs/*.txt`) does not require a verdict row for them and
 `test_wording_grader.py` is unchanged. Each file is clean under `capture_scan.py` (exit 0) and `scripts/leak-gate`
-(exit 0), and a `grep` for `tomduffield`, `/home/`, `/tmp` and `worktree` finds only the `<worktree>` placeholder.
+(exit 0), and a `grep` for the operator's username, `/home/`, `/tmp` and `worktree` finds only the `<worktree>` placeholder.
 
 #### Findings repo (`late-fees`: negative fee for an early return, receipt text `$1.5` for `$1.50`, no tests for the stated rules)
 
@@ -2427,8 +2427,8 @@ no `--model`. The five arms under the argument limit passed `--append-system-pro
 and `fs-baseline-fsdrivebuild.md` passed `--append-system-prompt-file` (a host deviation, as the arms table records),
 with a temporary copy removed after each run. All 21 exited 0, all 21 stderr files are empty, and no run was repeated,
 so the dispatch counts are 1 to 3 at every site. Before commit, `scripts/capture_scan.py` ran over the 63 files
-(`.txt`, `.stderr.txt`, `.exit`): 0 credential findings, exit 0; a search of them for `/home/tomduffield` and for
-`tomduffield` found 0 files.
+(`.txt`, `.stderr.txt`, `.exit`): 0 credential findings, exit 0; a search of them for the operator's home path and
+username found 0 files.
 
 ### Scripted checks, as observations
 
@@ -2633,7 +2633,7 @@ argument limit passed `--append-system-prompt`; `fs-treated-fsbuildreview.md` an
 `prompt-consult-calibrated.md` and is graded against `reports-calibrated.md`. All 36 exited 0, all 36 stderr files
 are empty, and no run was repeated for an operational failure. No baseline arm ran except as the control. Before
 commit, `scripts/capture_scan.py` ran over the 108 new files: 0 credential findings, exit 0; a search of them for
-`/home/tomduffield` and for `tomduffield` found 0 files.
+the operator's home path and username found 0 files.
 
 ### Scripted verdicts and the regression bar
 
@@ -3178,7 +3178,7 @@ directory, `FIXTURES_DIR` replaced by that path, the process started from a seco
 `fs-fallback-fsconsult-1..6`, `fs-fallback-fsdriver-1..6`, `fs-fallback-fsbuildreview-1..3`; consult and driver took three
 further runs each by the splits rule, a criterion at 2 of 3), all exit 0, all stderr empty, none repeated. The scan
 (`scripts/capture_scan.py`, 54 files) exits 0 with 0 credential findings, and a search of the new captures for
-`/home/tomduffield` and `tomduffield` finds 0 files. No baseline, first-round, second-round or control arm ran, and no
+the operator's home path and username finds 0 files. No baseline, first-round, second-round or control arm ran, and no
 paired control was needed.
 
 ### Scripted verdicts and the regression bar
@@ -3536,7 +3536,7 @@ wording held in both; plain reviewer wording held in the consult and failed once
 reader, and say nothing about rates.
 
 **Scans.** `tools/craft/plugins/craft/scripts/capture_scan.py` over each run's final text: 0 known-safe matches, 0
-credential findings, exit 0, for both. A search of both for `tomduffield` and `/home/tomduffield` found 0 hits. The
+credential findings, exit 0, for both. A search of both for the operator's home path and username found 0 hits. The
 excerpts above were quoted from those scanned texts. Raw transcripts are not committed; they sit outside the
 repository.
 
@@ -3681,3 +3681,13 @@ reader, no second reader; `fs-fallback2-fsconsult-1` large is a borderline readi
 unsettled branch of the rewording is unmeasured, since no fixture stages an unsettled consult ask.
 
 Consult rewording: kept
+
+## Errata and addendum to the slice-close results (2026-10-19)
+
+Errata: the scan descriptions at lines 1877, 2430, 2431, 2636, 3181 and 3539 named the operator's username and home path
+literally; they now say "the operator's home path and username". This is a wording change to those scan descriptions
+only; no reading, count or verdict changed.
+
+Addendum to "Results for slice close: the fix-shape rounds, two real runs and the pin check (2026-10-19)": the second
+treated round replaced the pre-registered route (a treated miss goes to the fallback) by recorded operator decision on
+2026-10-19, so the met/missed table there is not read as the pre-registered path.
