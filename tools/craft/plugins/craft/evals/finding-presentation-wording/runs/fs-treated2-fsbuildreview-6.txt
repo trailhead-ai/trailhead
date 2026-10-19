@@ -1,0 +1,27 @@
+The re-review round has run, and the reviewer still wants fixes before this ships. Four findings are left: one would build the wrong thing and needs your decision, one would cause trouble later and is worth fixing, and two are rough edges with nothing to decide. The procedure allows only that one re-review round, so I'm not sending any more fixes. What happens with these is your call.
+
+### Would build the wrong thing, needs your decision
+
+**`fs-kiln/unload.py:3`: the cool-down time comes from which kiln was used, not from how the firing ran.**
+Should each firing carry its own cool-down time? I recommend yes. As it stands, the board can tell someone a hot kiln is safe to open. The change says a firing that ran hotter needs longer to cool, even in the same kiln. But the code looks up a fixed time per kiln (18 hours for large, 10 for small) and ignores everything else about the firing. Worst case: a high-temperature firing in the large kiln shows as "ready to unload" after 18 hours, and someone opens it before it has cooled.
+Fix: each firing's ready time would come from how that firing ran, not from a per-kiln table. This touches 1 file and 2 functions, `cool_hours` and `unload_time`, and removes the `COOL_HOURS` table. One caveat: the firing records would then have to include their cool-down hours, and the reviewer didn't say what that field should be called.
+*Raised by: code review*
+
+### Would cause trouble later, worth fixing, your call
+
+**`fs-kiln/unload.py:17`: a firing that finishes cooling at exactly this minute is left off the board.**
+I recommend counting it as ready, since the change asks for exactly that and the fix is one character. The comparison is strictly "before now". Worst case: a firing whose cool-down ends at 9:00 doesn't appear on the 9:00 board, even though the committee said it should.
+Fix: `if unload_time(firing) <= now:` in place of the `<` comparison at line 17, so a firing whose cool-down ends this minute counts as ready.
+*Raised by: code review*
+
+### Rough edges, nothing to decide
+
+**`fs-kiln/test_unload.py:9`: the test covers only one case.**
+The only test is a single small-kiln firing from the previous day. It doesn't touch the cool-down rule or the exact-minute case above, so neither fix would be proven by a test. I recommend adding tests for those.
+Fix: in the reviewer's words, "cover the edge the other findings touch."
+*Raised by: code review*
+
+**`fs-kiln/unload.py:25`: the board line doesn't say when the firing became ready.**
+The change asks for each line to give the time the firing became ready, but the code prints only `<name>: ready to unload`. I recommend adding the time.
+Fix: in the reviewer's words, "the board line gives no time for when the firing became ready; add it."
+*Raised by: code review*

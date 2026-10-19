@@ -1,0 +1,51 @@
+**Council on member-run firings of the large kiln**
+
+Calibration: `maturity: production (basis: requested)`. No concern was waived.
+
+**What the reviewers found.** The question is whether inducted members may load and start the large kiln themselves on evenings and weekends, using a code from the booking sheet. The reviewers agree that this design works against the committee's rule that nobody's work should be lost to someone else's mistake. Nothing in the code-and-form start stops a member from overloading the shared kiln and ruining everyone's work in the load. Nothing records who loaded or started a firing, so a loss can't be traced afterwards. The door code itself is shared, so it doesn't even prove which member was there. Smaller points cover what the booking sheet should record and tell members.
+
+**Whether it holds, and where it came from.** The failure-cases reviewer raised the strongest point, and it is concrete: one bad load cracks a shelf and destroys other people's pots. That is the exact outcome the committee ruled out. The buildability reviewer's traceability point is real but secondary, because a record explains a loss without preventing it. The failure-cases reviewer raised the same gap at a lower severity. I kept it at the top level because, at production maturity, not being able to see a failure is rated that way. The security reviewer is right that a shared code lets anyone start the kiln. The ease-of-use reviewer's top concern, that members who can't come in the evenings might feel the rules are unfair, is a guess about how people will react with no failure behind it. I moved it down a group (explained below). Their point about new members only finding out at the door is more useful.
+
+**What to do about it.** Keep the technician as the only person who starts the large kiln, and let members do the loading:
+- Members leave their loaded kiln furniture in a queue by 5 pm.
+- The technician checks each load against the shelf limit and starts every firing from that queue.
+- The booking sheet records who loaded what and whether a firing was stopped early.
+
+This meets the committee's rule without needing per-member door codes. If the committee still wants members to start firings themselves later, the minimum before allowing it is: each member gets their own code, the shelf limit is checked before a start, and every start is recorded. Before committing, count firings over a full quarter. Nine a month is a rough figure, and the queue has to fit the technician's time.
+
+---
+
+**Would build the wrong thing, needs your decision**
+
+1. **Should members start the large kiln at all? I recommend no. One overloaded firing can destroy every other member's work in the load.** As described, any inducted member with the code can load past the kiln's shelf limit and start a firing. A shelf cracks and everyone else's pots in that load are ruined, which is exactly what the committee ruled out.
+   Fix: only the technician starts the large kiln. Members can still load into a queue that the technician checks against the shelf limit before starting.
+   *Raised by: failure cases; the buildability reviewer's queue proposal lands on the same fix.*
+
+2. **Should every firing record who loaded and started it? I recommend yes. Without that record, a ruined firing can't be traced.** With a door code and no record of who loaded what, the studio can't tell whose pot burst or whose shelf cracked. A dispute a month later can't be settled, and the members who lost work have no one to ask.
+   Fix: write each firing's loader and starter into the same calendar history the booking sheet already keeps. This is still needed under the technician queue, which tells you who loaded each shelf.
+   *Raised by: buildability, failure cases (2 reviewers)*
+
+**Would cause trouble later, worth fixing, your call**
+
+3. **The door code from the booking sheet is shared, so it doesn't control who gets in. If member access goes ahead, give each member their own code.** Anyone who knows the code can pass it on, and a stranger could get in and start the kiln. If the technician starts every firing, this matters less for the kiln, but it still affects access to the studio.
+   Fix: give each member their own code. How easy that is depends on what codes the door lock accepts.
+   *Raised by: security*
+
+4. **New members only find out that the large kiln needs the induction stamp when they're turned away at the door. I recommend saying so up front.** A member books the large kiln without knowing it needs the stamp and is refused when they arrive.
+   Fix: add a sentence under the booking button saying the large kiln needs the induction stamp.
+   *Raised by: ease of use*
+
+5. **The booking sheet can't record that a firing was stopped early. I recommend asking for it.** A firing is cut short, nobody writes it down, and the next person to unload, or the next dispute, has nothing to go on.
+   Fix: have the booking sheet ask whether the firing was stopped early when the door is closed.
+   *Raised by: buildability*
+
+6. **Members who can't come in the evenings may see the new rules as unfair. I recommend explaining the rules publicly.** The worry is that limiting evening access feels uneven to people who can't use those slots. No member has been asked, so this is a guess about how people will react.
+   Fix: explain the rules, and the reason for them, on the studio's site.
+   *Raised by: ease of use. Downgraded from "would build the wrong thing, needs your decision" to "would cause trouble later, worth fixing, your call" because it names no concrete failure and depends on guessing how members will feel.*
+
+**Rough edges, nothing to decide**
+
+7. Nine firings a month is a rough figure. Count a full quarter before deciding how big the technician's queue needs to be. *Failure cases*
+8. The code in the confirmation email should expire after the booked evening, so an old email can't open the studio. *Security*
+9. Call the evening slots "member firings", not "unsupervised runs". *Ease of use*
+10. The booking sheet could reuse the wording of the booking confirmation email. *Buildability*

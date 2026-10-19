@@ -1,0 +1,49 @@
+maturity: production (basis: requested). No concerns were waived.
+
+**What the panel found.** Two reviewers reached the same conclusion: with the booking sheet's code-and-form start as it stands, one member's mistake can ruin everyone else's pots in the same firing. Afterwards, nobody can tell who loaded or started that firing. The failure-cases reviewer gave the clearest example: a member loads past the shelf limit, a shelf cracks, and the whole load is lost. That breaks the committee's rule that nobody's work should be lost to someone else's mistake. The security reviewer found that the code on the booking sheet is shared, so it doesn't limit the kiln to inducted members and doesn't show who used it. The ease-of-use reviewer found that new members don't learn the large kiln needs the induction stamp until they are turned away at the door.
+
+**Whether it holds.** The failure-cases reviewer is the most directly on point, because the shelf-limit risk is the one problem nothing in the current design prevents. The buildability reviewer's point about not being able to trace a ruined firing is right. Its proposed queue looks drastic at first, but it ends up where the failure-cases reviewer does: members load, the technician starts. The security reviewer's finding matters more than its rating suggests. A personal code is what would make any record of who started a firing worth anything. The ease-of-use reviewer's worry that the rules will feel unfair to people who can't come in the evenings is a guess, since no member has been asked. I moved it from "would build the wrong thing, needs your decision" to "would cause trouble later, worth fixing, your call". The point about the monthly figure being rough is a reason to measure, not a flaw in the design.
+
+**What to do.** My recommendation is that members should not start the large kiln themselves yet. Let them load, and have the technician check the load and start every firing. That meets the committee's rule now. If the studio wants member-started firings later, three things need to be in place first:
+- a personal code for each member that expires after their booked evening
+- a record of every start and every early stop, with who loaded it
+- some way to stop an overloaded kiln being fired
+
+Before committing, count a full quarter of firings so you know how much work this adds for the technician.
+
+---
+
+**Would build the wrong thing, needs your decision**
+
+**A member who overloads the kiln can ruin everyone's work in that firing.** Decide whether members may start the large kiln at all. I recommend they don't, because nothing in the current design stops this loss. A member loads past the shelf limit and enters their code, the shelf cracks during the firing, and every other member's pots in that load are destroyed.
+Fix: members would still load in the evenings, but only the technician would start a firing, after checking the load.
+*Raised by: failure cases*
+
+**When a firing is ruined, nobody can tell who loaded or started it.** Decide whether member-run firings must leave a record. I recommend they must, because otherwise a loss can't be traced or settled. A pot bursts and cracks a shelf, the members who lost work ask who loaded it, and the booking sheet has no answer, even a month later.
+Fix: every start would show in the booking sheet's calendar history with the member who loaded and started it. This depends on members having personal codes (the next group). The buildability reviewer instead proposed a queue where members leave loaded kiln furniture by 5 pm and the technician starts every firing, which also settles the decision above.
+*Raised by: buildability, failure cases (2 reviewers)*
+
+**Would cause trouble later, worth fixing, your call**
+
+**Everyone uses the same door code, so it can't show who opened the studio and anyone can be given it.** I recommend a code for each member. A member passes the code to a friend, and a stranger gets in and starts the kiln, with nothing showing whose code it was.
+Fix: each member would have their own code instead of one shared code from the booking sheet. The reviewer was only moderately confident because it depends on what codes the door lock can accept.
+*Raised by: security*
+
+**A firing stopped early leaves no trace.** I recommend recording it. A member stops a firing partway through, the next member finds pots that aren't fully fired, and nothing says what happened.
+Fix: the booking sheet would ask whether the firing was stopped early when the member closes the kiln door.
+*Raised by: buildability*
+
+**New members don't know the large kiln needs the induction stamp until they are turned away.** I recommend telling them when they book. A new member books an evening slot, arrives with work ready, and is refused at the door.
+Fix: "add a sentence under the booking button saying the large kiln needs the induction stamp" (the reviewer's ask, as written).
+*Raised by: ease of use*
+
+**Some members may find the rules unfair to people who can't come in the evenings.** I recommend explaining the rules on the studio's website. This was moved down from "needs your decision" because it guesses how members will feel and names no concrete harm. In the worst case, members who can't come in the evenings feel left out and complain.
+Fix: the reasoning behind the rules would be explained on the studio's website.
+*Raised by: ease of use*
+
+**Rough edges, nothing to decide**
+
+- **An old confirmation email still opens the studio.** I recommend making the code in the email expire after the booked evening. *Raised by: security*
+- **The monthly figure is a rough estimate.** "About nine firings a month" should be checked by counting a full quarter before deciding, especially if the technician will start every firing. *Raised by: failure cases*
+- **The evening slots have an off-putting name.** Fix: `"member firings"` instead of `"unsupervised runs"` for the evening slots. *Raised by: ease of use*
+- **The booking sheet's wording could be more consistent.** I recommend reusing the booking confirmation email's wording on the sheet. *Raised by: buildability*

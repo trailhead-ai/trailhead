@@ -1,0 +1,35 @@
+The code review's second pass still has four findings open. All four come from the code review, and there are no more fix rounds, so they need your decision.
+
+**What the passes found.** The unload notice gets three of the committee's asks wrong. It works out cool-down from which kiln a firing was in, when the committee asked that "the cool-down depends on how the firing ran, not only on which kiln it was in". It leaves off a firing that is ready right now, when the committee asked that "a firing that cools exactly at this minute appears on the board as ready". And the board line doesn't say when the firing became ready, when the committee asked that it "gives the time it became ready". The one test only checks a small-kiln firing from yesterday, so it catches none of these.
+
+**Whether it holds.** All four are real. I checked each one against `unload.py` and against what the committee asked for in `change.md`. The cool-down finding is the only one that could hurt someone: it can tell people a kiln is safe to open while it is still too hot. The ready-this-minute finding is a one-character comparison. The missing time is a gap in what the board shows. The thin test explains why the other three got through.
+
+**What to do.** Store a cool-down on each firing record and work out readiness from that. Change the comparison so a firing that is ready right now counts. Add the ready time to the board line. Then add tests for a hotter firing in the same kiln and for a firing that becomes ready exactly now. Each of these tests should fail against the current code.
+
+---
+
+**Would build the wrong thing, needs your decision**
+
+`fs-kiln/unload.py:3 — the cool-down hours come from a table keyed by kiln size, so a firing that ran hotter in the same kiln is marked ready too early; record the cool-down hours on the firing itself and drop the table.`
+Should each firing record carry its own cool-down hours? I recommend it, because the board can currently call a kiln safe while it is still hot. Right now every large-kiln firing gets 18 hours and every small-kiln firing gets 10, however hot it ran. So a hotter firing goes on the board as "ready to unload" before it has cooled enough, and someone opens a kiln that is too hot.
+Fix: each firing would wait out its own cool-down, not the kiln's fixed one. This takes out the `COOL_HOURS` table and changes `cool_hours` and `unload_time` in `unload.py`, plus the firing record in the test. The technician then has to record a cool-down for every firing, so a firing without one needs decided behaviour, such as refusing it rather than guessing.
+*Raised by: code review*
+
+**Would cause trouble later, worth fixing, your call**
+
+`fs-kiln/unload.py:17 — a firing that cools exactly at this minute is left off the list; the change asks for it to count as ready, so include it.`
+Should a firing that becomes ready this exact minute show on the board? I recommend yes, because that's what the committee asked for. The check is `unload_time(firing) < now`, so a small-kiln firing from 23:00 last night, ready at 09:00, is missing from the 09:00 board. It only appears from 09:01.
+Fix: on line 17, replace `unload_time(firing) < now` with `unload_time(firing) <= now`.
+*Raised by: code review*
+
+**Rough edges, nothing to decide**
+
+`fs-kiln/unload.py:25 — the board line gives no time for when the firing became ready; add it.`
+The board line says only `<name>: ready to unload`, and the committee asked it to also give the time the firing became ready. I recommend adding it. As written, `board_lines` only gets names back from `ready_firings`, so it has no time to print.
+Fix: the board line would show when each firing became ready. The reviewer only says "add it" and doesn't set a format, so the wording of the time is yours to choose.
+*Raised by: code review*
+
+`fs-kiln/test_unload.py:9 — one firing in the small kiln is the only case covered; cover the edge the other findings touch.`
+The only test is a small-kiln firing that has clearly cooled, so it passes on the current code despite the three problems above. I recommend tests that pin each one down.
+Fix: a hotter firing in the same kiln, a firing that becomes ready exactly at `NOW`, and a board line that includes the ready time. Each should fail on the current code before the fix goes in.
+*Raised by: code review*

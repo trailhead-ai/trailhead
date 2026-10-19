@@ -1,0 +1,48 @@
+Here is the full detail on the three findings that need your decision. All three came back from the reviewers rated "would build the wrong thing, needs your decision". The review ran at production maturity, which was read from the spec's own stamp.
+
+---
+
+**C1. Should anyone holding a forwarded confirmation email be able to cancel someone else's firing? I recommend no: a cancel should only take effect once the member who booked confirms it. Without that, one forwarded email lets anyone take a member's kiln day away.**
+
+*Raised by: security (one reviewer)*
+
+Worst case: Member A books the large kiln for Saturday and forwards the confirmation email to a friend. Or it reaches a shared family inbox. The spec says a member can cancel a booking up to 24 hours before its day (AC3), but it never says how the cancel is checked against the person who made the booking. So whoever holds the email can cancel. The day is freed and offered at once to the first member on that kiln's standby list. Member A turns up on Saturday with a load of work and finds their firing has gone to someone else. Nobody can say who cancelled it, even though the spec promises that every change to a kiln's calendar can be checked afterwards.
+
+Fix: A cancel takes effect only after the member who booked confirms it from the email address they booked with. Until then, the day is not freed and no standby offer goes out.
+
+Proposed disposition: `resolved`. This is the full text of the edit, which replaces AC3:
+
+> - **AC3.** A member can cancel a booking up to 24 hours before its day. A cancel takes effect only once the member confirms it from the email address the booking was made with; until then the booking stands and nothing is offered. Once confirmed, the day is freed and offered to the first member on that kiln's standby list.
+
+---
+
+**C2. Should the thing a member books be a share of shelf space in a firing rather than the whole kiln for a day? I recommend yes. As written, one member with a single bowl can hold a whole kiln-day while others wait weeks, so the online sheet would make the queue worse than the paper one.**
+
+*Raised by: right problem (one reviewer)*
+
+Worst case: the spec treats a kiln as full once its day is taken. One firing per kiln per day, and a second booking is refused (AC2). In practice a firing is one load made up of several members' work, and a kiln is full when its shelves are full. A member books Tuesday for one small piece. Everyone else who has work ready is turned away from Tuesday and sent to the next free day, while the kiln fires mostly empty. The double-booking problem the spec set out to fix becomes a shortage that the system itself creates.
+
+Fix: Make the booking unit space on a firing's shelves. A booking is refused when the shelves are full, not when the day has been taken.
+
+Proposed disposition: `revise`. This changes what every criterion counts, so a single drafted edit can't settle it here.
+
+**C2** — *the booking unit is the whole kiln for a day* — `revise` (`record-only`)
+  Prescription: change the booking unit from a kiln-day to shelf space within a firing. Rewrite AC1 so a member books space in a named kiln's firing. Rewrite AC2 so a booking is refused only once that firing's shelves are full, with the next firing that has room offered instead. Rewrite AC3 so a cancel frees that member's space, not the whole day. Before the rewrite, state in the Problem how a firing is shared. The reviewer flagged that this is not known today.
+
+---
+
+**C3. Should the 8 am loading deadline appear in the confirmation email as well as in the evening-before reminder? I recommend yes. A member who misses the reminder turns up after the kiln is packed and loses their firing.**
+
+*Raised by: ease of use (one reviewer). The failure-cases reviewer independently flagged the same weak point: a reminder can fail to arrive.*
+
+Worst case: the confirmation email states only the booking (AC1). The reminder sent the evening before a firing does list what must be on the shelves by 8 am (AC5), so the gap is narrower than the original report suggested. But that reminder is the only place a member learns the deadline. Several things can stop it reaching them: a member books after that evening's reminders have gone out, the reminder lands in spam, or the member typed their address wrong. Any of those members arrives at 9, finds the kiln already loaded and fired, and loses the day.
+
+Fix: State the 8 am loading deadline in the confirmation email, so the member has it from the moment they book.
+
+Proposed disposition: `resolved`. This is the full text of the edit, which replaces AC1:
+
+> - **AC1.** A member books a firing by giving a name, an email address, the kiln (large or small) and a day, and receives a confirmation email stating the booking and that their work must be on the kiln's shelves by 8 am on that day.
+
+---
+
+To go ahead as proposed, reply "go". To override a row, name it by its id, for example "dispute C2: <your reason>", and include your reason.

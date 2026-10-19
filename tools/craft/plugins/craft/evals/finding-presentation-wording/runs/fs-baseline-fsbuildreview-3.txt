@@ -1,0 +1,27 @@
+Four findings from the code review are still open after the one re-review round. The procedure allows only one, so they come to you rather than going back for another pass.
+
+**Would build the wrong thing, needs your decision (1)**
+
+**`fs-kiln/unload.py:3`: Cool-down time is set by kiln size alone. I recommend storing it on each firing record.**
+The change says "the cool-down depends on how the firing ran, not only on which kiln it was in." The code looks up a fixed number of hours by kiln: 18 for large and 10 for small. Two firings in the same kiln always get the same wait. A large-kiln firing that ran hotter would go on the board as ready after 18 hours, even though it needs longer, and someone could open a kiln that is still too hot.
+Fix: Record the cool-down hours on each firing and drop the kiln table. Caveat: firing records today hold only `name`, `kiln` and `fired_at`, so whoever creates the records would need to fill in the new field.
+*Raised by: code review*
+
+**Would cause trouble later, worth fixing, your call (1)**
+
+**`fs-kiln/unload.py:17`: A firing that cools exactly at this minute is left off the board. I recommend counting it as ready.**
+The change asks that "a firing that cools exactly at this minute appears on the board as ready." The check uses a strict `unload_time(firing) < now`, so a firing that becomes ready right at `now` is dropped. It only shows up at the next check.
+Fix: Change the comparison to `<=`.
+*Raised by: code review*
+
+**Rough edges, nothing to decide (2)**
+
+**`fs-kiln/unload.py:25`: The board line doesn't say when the firing became ready. I recommend adding the time.**
+The change says the line "reads `<name>: ready to unload`, and gives the time it became ready." The code writes only `"{name}: ready to unload"`, so people at the board can't tell how long a firing has been waiting.
+Fix: Add the firing's `unload_time` to the line.
+*Raised by: code review*
+
+**`fs-kiln/test_unload.py:9`: The only test is one small-kiln firing from 25 hours ago, well past its cool-down. I recommend testing the cases the other findings cover.**
+None of the three problems above would make this test fail. That's why they got through: a strict `<`, hours by kiln, and a line with no time all pass it.
+Fix: Add tests for a firing that becomes ready exactly at `now`, two firings in the same kiln that ran differently, and a board line that includes the ready time.
+*Raised by: code review*

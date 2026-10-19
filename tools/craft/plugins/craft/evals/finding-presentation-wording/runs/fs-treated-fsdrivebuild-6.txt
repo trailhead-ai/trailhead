@@ -1,0 +1,39 @@
+The code review's second and final pass still finds four problems in the kiln unload notice. Under the build procedure there are no more review rounds, so these now need your decision.
+
+**What the review found.** The notice doesn't yet do three things the committee asked for. The cool-down still depends only on which kiln was used, not on how the firing ran. A firing that cools exactly at this minute is left off the board. And the board line doesn't say when the firing became ready. The only test is a single small-kiln case, and it would pass with all three gaps in place.
+
+**Whether it holds.** All four findings are correct when checked against the code. The review was right to mark the cool-down problem as the most serious, because it decides when a kiln is safe to open. I think it rated the missing ready time too low. The committee explicitly asked that the board line "gives the time it became ready", so leaving it out is a missed requirement, not a rough edge.
+
+**What to do.** Store the cool-down on each firing record and drop the per-kiln table. Count a firing as ready when its cool-down ends exactly now. Add the ready time to each board line. Then add tests for exactly those cases, so a later change can't quietly undo any of them.
+
+---
+
+### Would build the wrong thing, needs your decision
+
+**`fs-kiln/unload.py:3`: the cool-down comes from a table keyed by kiln size.** I recommend storing the cool-down hours on each firing, because otherwise a hotter firing is posted as ready while its kiln is still too hot to open.
+Worst case: the committee said the cool-down "depends on how the firing ran, not only on which kiln it was in". The code uses a fixed 18 hours for the large kiln and 10 for the small one. So a hotter firing in the large kiln goes on the board as ready after 18 hours, and someone opens it before it has cooled.
+Fix: each firing would carry its own cool-down, and the board would follow it rather than the kiln size. This touches 1 file and 2 functions, chiefly `cool_hours` and `unload_time`, and removes the `COOL_HOURS` table. One thing to settle: the firing records have no field for this yet, so whoever creates the records has to start supplying it.
+*Raised by: code review*
+
+### Would cause trouble later, worth fixing, your call
+
+**`fs-kiln/unload.py:17`: a firing that cools exactly at this minute is left off the list.** I recommend counting it as ready, as the committee asked.
+Worst case: the committee said "a firing that cools exactly at this minute appears on the board as ready". The check is a strict "earlier than now", so that firing is missing from the board until the next minute.
+Fix: replace `unload_time(firing) < now` with `unload_time(firing) <= now`, so a firing whose cool-down ends exactly now counts as ready.
+*Raised by: code review*
+
+### Rough edges, nothing to decide
+
+**`fs-kiln/unload.py:25`: the board line doesn't say when the firing became ready.** I recommend adding the time. I'd also move this up to "worth fixing", because the committee asked for it in so many words.
+Worst case: the committee's line "gives the time it became ready". The code prints only `<name>: ready to unload`, so the studio can't tell how long a firing has been waiting.
+Fix: each board line would show the time its firing became ready. That means `board_lines` needs the ready time, not just the name it gets from `ready_firings` today. The reviewer's ask was "add it". The committee gave no wording or time format, so I haven't drafted the line.
+*Raised by: code review*
+
+**`fs-kiln/test_unload.py:9`: only one small-kiln firing is tested.** I recommend adding tests for the cases the other findings fix.
+Worst case: the single test passes whether or not those three fixes are in, so a later edit could undo any of them with the test staying green.
+Fix: there would be one test each for a firing that cools exactly now, a hotter firing in the same kiln that isn't ready yet, and a board line that shows its ready time.
+*Raised by: code review*
+
+---
+
+I'm stopping the build here, with the review's verdict at FIX_FIRST. Tell me which of these to fix, and in what order.
