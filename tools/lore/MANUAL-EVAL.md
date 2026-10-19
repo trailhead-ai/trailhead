@@ -1050,24 +1050,24 @@ fire; run 3 is the one run in which the current prose-plus-agent already behaves
 
 | Run | Score | costUsd | Failed graders | `lore:correct` |
 |---|---|---|---|---|
-| 1 | 1.00 | 0.1590 | none | not captured |
-| 2 | 1.00 | 0.1644 | none | not captured |
-| 3 | 1.00 | 0.1579 | none | not captured |
+| 1 | 1.00 | 0.1590 | none | invoked |
+| 2 | 1.00 | 0.1644 | none | invoked |
+| 3 | 1.00 | 0.1579 | none | invoked |
 
 GREEN, 3 of 3. The seeded history loaded in every run (every run amended the seeded decision, which only the
 resumed turn could prompt). No `llm` grader. Batch 0.4812 USD. A supplementary re-run for trace capture, outside
-the baseline: 1.00, 1.00, 1.00 at 0.1567, 0.1595, 0.1602 USD; the traces were again not captured.
+the baseline: 1.00, 1.00, 1.00 at 0.1567, 0.1595, 0.1602 USD; the traces were again not copied by the loop.
 
 ## Case: borderline-answered-no-routes-to-supersession
 
 | Run | Score | costUsd | Failed graders | `lore:correct` |
 |---|---|---|---|---|
-| 1 | 1.00 | 0.1937 | none | not captured |
-| 2 | 1.00 | 0.1979 | none | not captured |
-| 3 | 1.00 | 0.1920 | none | not captured |
+| 1 | 1.00 | 0.1937 | none | invoked |
+| 2 | 1.00 | 0.1979 | none | invoked |
+| 3 | 1.00 | 0.1920 | none | invoked |
 
 GREEN, 3 of 3, in 6 to 7 turns each. No `llm` grader. Batch 0.5835 USD. A supplementary re-run for trace
-capture, outside the baseline: 1.00, 1.00, 1.00 at 0.1905, 0.1821, 0.1870 USD; the traces were not captured.
+capture, outside the baseline: 1.00, 1.00, 1.00 at 0.1905, 0.1821, 0.1870 USD; the traces were not copied by the loop.
 
 ### Baseline reading
 
@@ -1086,8 +1086,11 @@ on the current prose and are not a fix.
 
 **Skill invocation.** `lore:correct` was invoked in all 3 runs of (c) and all 3 of (d) (two of the (d) runs
 called it with no arguments), and in none of the 3 runs of (a) and (b), where the agent only read records. For
-(e) and (f) the per-run traces were not captured (see the smoke notes), so the baseline runs' invocation is
-unknown; the traced (e) smoke run invoked it. The traces for (a) to (d) were copied by a 0.3 s loop (stopped by
+(e) and (f) the trace-copy loop missed the runs, but the runner also writes each resumed run into a session
+transcript beside the seeded history (`fixtures/<seeded sessionId>.jsonl`, untracked, deleted after this count).
+In it every run is one branch whose first turn has the seeded last line as its parent, so no run resumed another
+run's turns. `lore:correct` was the Skill call in every branch: all 11 (e) runs (5 smoke, 3 baseline, 3
+supplementary) and all 7 (f) runs (1 smoke, 3 baseline, 3 supplementary). The traces for (a) to (d) were copied by a 0.3 s loop (stopped by
 its literal PID) and read run by run for the hand-check above.
 
 ### Live-state check
