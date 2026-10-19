@@ -1781,6 +1781,7 @@ FINDING_CAPTURE_VERDICTS.update(
         f"fs-fallback-{site}-{n}": dict(verdicts)
         for site, verdicts, count in (
             ("fsplan", {"severity-name": "plain", "reviewer-name": "plain", "persisted-levels": "kept"}, 3),
+            ("fsconsult", {"severity-name": "plain", "reviewer-name": "plain"}, 6),
         )
         for n in range(1, count + 1)
     }
