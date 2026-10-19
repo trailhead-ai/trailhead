@@ -35,7 +35,10 @@ a `--` separator.
 
 A follow-up is eligible only when its status is `ready`, it has no `parent`, it
 carries no `route` label and neither `craft/slice-parent` nor
-`craft/followup-parent`, its body has no `## Refine — unresolved` heading, and
+`craft/followup-parent`, its body has no `## Refine — unresolved` heading, it is
+a follow-up of the spec by the membership test `followup_gather.py` gathers with (its
+`related` edges name the spec, or a slice of the spec or a child of one, or the spec or one
+of those names it), and
 every task it `depends-on` is `done` or is itself eligible in this set. A
 `dropped`, `superseded` or missing dependency is unfinished. Eligibility among
 siblings is the least fixpoint: a follow-up joins the eligible set once all its
@@ -60,7 +63,7 @@ for a name the parent does not list, a missing record is `followup-not-found`.
 
 When several rules apply, the left-out reason is the first of: `is-a-parent`,
 `already-nested`, `routed-to-plan`, `routed-to-brainstorm`,
-`unresolved-question`, `not-ready`, `depends-outside`.
+`unresolved-question`, `not-ready`, `not-spec-linked`, `depends-outside`.
 
 Exit codes of `check`:
     0  the JSON object is on stdout.
@@ -82,8 +85,8 @@ follow-up parent linked to the spec (the lookup behind `followup_gather.py`'s
 carries the `reason-code:` line and a `subject:` line of the shape-checked names
 at fault:
     child-not-eligible      a child is no longer eligible (not `ready`, nested
-                            elsewhere, routed, unresolved, or depending on
-                            unfinished work);
+                            elsewhere, routed, unresolved, not linked to the spec, or
+                            depending on unfinished work);
     child-changed           a child's revision differs from the confirmed one;
     followup-parent-exists  a live follow-up parent is already linked to the spec.
 `revision` is a body hash, so a metadata edit is caught only by the eligibility
@@ -169,6 +172,21 @@ Invariants and security posture:
   and left no parent behind.
 - Any unexpected exception exits 2 with `reason-code: internal-error`; one that
   occurs after the create leaves the parent `open` and prints the report.
+- A children file and a reason file are read the same way: a regular, non-symlink file
+  opened without blocking, at most MAX_CHILDREN_FILE_BYTES (children) or
+  MAX_REASON_FILE_BYTES (reason) long, whose JSON parses within the interpreter's nesting
+  limit; anything else is `invalid-children-file` or `invalid-reason-file`.
+- Trust model. The `craft/followup-parent` label and a spec link are forgeable: anyone who
+  can write the vault can add both to a live plan or slice parent. The script therefore
+  enforces structurally, before any write, that `resume` and `drop` act only on a record
+  shaped like the parent `assemble` writes (`parent-not-followup-shaped`: no
+  `craft/slice-parent` label, no parent of its own, a `### task/` listing whenever it holds
+  children; `unlisted-child`: it holds nothing its body does not list), that every child it
+  nests or keeps is a follow-up of the spec (`not-spec-linked`), that a selection reason
+  enters a body with no markdown link, image, HTML or code-span syntax, and that a drop's
+  reason sits under a fixed `Reason: ` label. What it cannot decide is whether the operator
+  meant that parent: the drop confirmation, which names every child it will un-nest and
+  keep, remains the human gate.
 
 `state` is read-only. It resolves the spec's vault, reads `<parent>` completely and
 refuses with exit 1 `not-a-followup-parent` (vault untouched, a `subject:` line naming
@@ -180,8 +198,10 @@ codes. On exit 0 it prints one JSON object:
 - `parent`, `status`: the parent's bare name and status;
 - `listed`: the shape-checked names of the body's `### task/<name>` headings, in body
   order; `skipped` counts the headings whose name fails the shape check;
-- `held`: `{name, status}` for every task whose `parent` is this one, found in the
-  live `lore task list --json` and each confirmed by a complete read, sorted by name;
+- `held`: `{name, status, title, delivers}` for every task whose `parent` is this one,
+  found in the live `lore task list --json` and each confirmed by a complete read, sorted
+  by name; `title` and `delivers` are sanitized and bounded as `check` bounds them, so a
+  caller can show what the parent already holds;
 - `unheld`: listed minus held, body order; `unlisted`: held minus listed, sorted.
 `parse_listing(body)` returns `(names, skipped)` and `held_children(runner, vault,
 parent_name)` the `held` list, as importable functions.
@@ -191,9 +211,15 @@ parent_name)` the `held` list, as importable functions.
 one JSON string; anything else, or a reason empty once sanitized, is
 `invalid-reason-file` (exit 2, nothing written). The reason is folded to one line,
 stripped of control and invisible format characters, cut to MAX_REASON_CHARS and
-credential-redacted before it is appended to the parent as a `## Dropped` section.
+credential-redacted before it is appended to the parent as a `## Dropped` section, on a
+line of its own carrying the fixed label `Reason: `, so no reason can begin a heading or a
+list item.
 Refusals before any write exit 1 with a `subject:` line: `not-a-followup-parent` (as
-`state` decides) and `parent-not-live` (status `done`, `dropped` or `superseded`). The
+`state` decides), `parent-not-live` (status `done`, `dropped` or `superseded`),
+`parent-not-followup-shaped` (the parent carries `craft/slice-parent`, has a `parent` of its
+own, or holds children while its body lists none; the subject is the parent) and
+`unlisted-child` (the parent holds a task its body does not list; the subject is that
+task). The
 parent's status is re-read immediately before the first write; one that differs from
 what `state` reported is `parent-changed` (exit 1, nothing written), such as a build
 that started meanwhile. Each held child whose status is `open`, `ready`, `in-progress`
@@ -227,6 +253,7 @@ is `invalid-children-file`; a name failing the shape check is `invalid-followup-
 Refusals before any write exit 1 with the vault unchanged and a `subject:` line:
     not-a-followup-parent   as `state` decides;
     parent-not-resumable    the parent's status is not `open`;
+    parent-not-followup-shaped  as `drop` decides, checked before any other refusal below;
     followup-parent-exists  another live follow-up parent is linked to the spec;
     child-not-listed        a file name is not in `state`'s `unheld`;
     unlisted-child          the parent holds a task its body does not list (`state`'s
@@ -235,8 +262,8 @@ Refusals before any write exit 1 with the vault unchanged and a `subject:` line:
                             the parent;
     child-not-eligible      a file child fails the `check` eligibility re-run, or a held
                             child (one already under this parent) fails the same rules
-                            (not `ready`, routed, an unresolved question, an unfinished
-                            dependency) or no longer names this parent. A dependency on a
+                            (not `ready`, routed, an unresolved question, not linked to the
+                            spec, an unfinished dependency) or no longer names this parent. A dependency on a
                             child the parent holds, or on another file child, is finished;
     child-changed           a file child's revision differs from the confirmed one;
     nothing-to-build        no name would remain listed: the parent holds none of its
@@ -253,13 +280,14 @@ stdout and one `reason-code:` line on stderr, leaving the parent `open`:
        write, so an edit landing between the read and this write is lost; a refused or
        unconfirmed write is a failed `list`, with nothing nested).
     2. Nest each file child in file order through the shared guard above.
-    3. Flip to `ready` only when every name still listed is held, confirmed by a
-       complete read, and the flip is confirmed by a complete read.
+    3. Flip to `ready` only when, read fresh immediately before, every name still listed is
+       held, the parent holds nothing its body does not list and every child it holds is
+       still eligible by the rules above; the flip is confirmed by a complete read.
 Stdout JSON: `parent`; `removed`: the unheld names dropped from the list; `nested`: the
 file children this run confirmed nested; `failed`: `{name, write}` with `write` one of
 `list` (name is the parent: the body rewrite was refused or did not read back whole), `nest`, `confirm`, or
-`ready` (name is the parent: the held set could not be confirmed complete, or the flip did
-not read back); `buildable`: true only on exit 0. A failure is `nesting-incomplete`, or its
+`ready` (name is the parent: the held set could not be confirmed complete and eligible, or
+the flip did not read back); `buildable`: true only on exit 0. A failure is `nesting-incomplete`, or its
 own code (`internal-error`, a `lore` failure code); running `resume` again completes it.
 
 `check_followups(runner, spec, names, parent=None)` is the same check as an importable
@@ -322,6 +350,7 @@ REASON_CODES = frozenset(
         "child-not-listed",
         "nothing-to-build",
         "unlisted-child",
+        "parent-not-followup-shaped",
     }
 )
 
@@ -337,6 +366,7 @@ REFUSAL_REASONS = frozenset(
         "child-not-listed",
         "nothing-to-build",
         "unlisted-child",
+        "parent-not-followup-shaped",
     }
 )
 
@@ -350,6 +380,7 @@ LEFT_OUT_REASONS = frozenset(
         "is-a-parent",
         "depends-outside",
         "not-found",
+        "not-spec-linked",
     }
 )
 
@@ -367,6 +398,8 @@ _HEADING_RE = re.compile(r"^#{1,6} ", re.MULTILINE)
 _SELECTION_REASON_RE = re.compile(r"^\*\*Selection reason:\*\*(.*?)(?:\n[ \t]*\n|\Z)", re.MULTILINE | re.DOTALL)
 MAX_STATUS_CHARS = 40
 MAX_REASON_FILE_BYTES = 4096
+MAX_CHILDREN_FILE_BYTES = 65536
+_MARKDOWN_ACTIVE = str.maketrans("", "", "[]<>`!")
 UNFINISHED_STATUSES = frozenset({"open", "ready", "in-progress", "blocked"})
 NOT_LIVE_STATUSES = frozenset({"done", "dropped", "superseded"})
 
@@ -437,6 +470,12 @@ def _one_line(text: str, limit: int) -> str:
     return gather.sanitize_text(" ".join(text.split()), limit)
 
 
+def _reason_text(reason: str) -> str:
+    """A selection reason as it may sit in a parent body: one sanitized line with the
+    characters that make markdown links, images, HTML and code spans removed."""
+    return _one_line(reason.translate(_MARKDOWN_ACTIVE), MAX_REASON_CHARS)
+
+
 def _task_dependencies(sidecar: dict) -> list[str]:
     entries = sidecar.get("depends-on")
     if entries is None:
@@ -455,7 +494,34 @@ def _bare_task_name(entry: str) -> bool:
     return "/" not in entry and gather._shape_ok(entry)
 
 
-def _static_verdict(sidecar: dict, body: str, expected_parent: str | None = None) -> str | None:
+class _FollowupLink:
+    """Whether a task is a follow-up of the spec, by the membership test
+    `followup_gather.gather_followups` applies: the spec's `related.task` or that of one of
+    its slices or their children names the task, or the task's own `related` edges name the
+    spec or one of those slices or children. The slices are the ones `gather_followups`
+    reports; the rest is derived on the first call and kept."""
+
+    def __init__(self, runner, vault: str, spec: str, spec_sidecar: dict):
+        self._runner, self._vault, self._spec, self._spec_sidecar = runner, vault, spec, spec_sidecar
+        self._anchors: list[str] | None = None
+        self._named: set[str] = set()
+
+    def _load(self) -> None:
+        slices = gather.gather_followups(self._runner, self._vault, self._spec, self._spec_sidecar)["slices"]
+        g = _loaded_gatherer(self._runner, self._vault)
+        children = sorted(n for n, item in g.listing.items() if item.get("parent") in slices)
+        self._anchors = [*slices, *children]
+        self._named = g.outbound(self._spec_sidecar)
+        for name in self._anchors:
+            self._named |= g.outbound(g.read(name))
+
+    def __call__(self, name: str, sidecar: dict) -> bool:
+        if self._anchors is None:
+            self._load()
+        return name in self._named or gather._names_any(sidecar, self._spec, self._anchors)
+
+
+def _static_verdict(sidecar: dict, body: str, expected_parent: str | None, linked) -> str | None:
     labels = gather._labels(sidecar)
     if any(label in labels for label in PARENT_LABELS):
         return "is-a-parent"
@@ -467,6 +533,8 @@ def _static_verdict(sidecar: dict, body: str, expected_parent: str | None = None
         return "unresolved-question"
     if sidecar["status"] != "ready":
         return "not-ready"
+    if not linked():
+        return "not-spec-linked"
     return None
 
 
@@ -476,16 +544,22 @@ def _dependency_done(runner, vault: str, name: str) -> bool:
 
 
 def _classify(
-    runner, vault: str, records: dict[str, tuple[dict, str, str]], held: frozenset[str], parent: str | None
+    runner,
+    vault: str,
+    records: dict[str, tuple[dict, str, str]],
+    held: frozenset[str],
+    parent: str | None,
+    linked,
 ) -> tuple[set[str], dict[str, dict]]:
     """(accepted, left_out) over `records`, the `(sidecar, body, revision)` of each name.
     A name in `held` is a child already under `parent`: it must still name that parent
     and passes every other rule a follow-up does, and a dependency among the records
-    counts as inside the set, a held child's included."""
+    counts as inside the set, a held child's included. `linked(name, sidecar)` is the
+    `_FollowupLink` verdict on whether a task is a follow-up of the spec."""
     left_out: dict[str, dict] = {}
     candidates: dict[str, list[str]] = {}
     for name, (sidecar, body, _) in records.items():
-        reason = _static_verdict(sidecar, body, parent if name in held else None)
+        reason = _static_verdict(sidecar, body, parent if name in held else None, lambda: linked(name, sidecar))
         if reason is not None:
             left_out[name] = _left_out(name, reason)
         else:
@@ -533,7 +607,7 @@ def check_followups(runner, spec: str, names: list[str], parent: str | None = No
     if parent is not None and not gather._shape_ok(parent):
         raise ParentError("invalid-followup-name")
     names = sorted(set(names))
-    vault, _ = gather.resolve_spec(runner, spec)
+    vault, spec_sidecar = gather.resolve_spec(runner, spec)
 
     held: frozenset[str] = frozenset()
     unheld: frozenset[str] = frozenset()
@@ -550,7 +624,8 @@ def check_followups(runner, spec: str, names: list[str], parent: str | None = No
             if err.reason != "followup-not-found" or name not in unheld:
                 raise
             gone[name] = _left_out(name, "not-found")
-    accepted, left_out = _classify(runner, vault, records, held, parent)
+    linked = _FollowupLink(runner, vault, spec, spec_sidecar)
+    accepted, left_out = _classify(runner, vault, records, held, parent, linked)
     return _report(records, names, accepted, {**left_out, **gone})
 
 
@@ -603,7 +678,7 @@ def render_body(spec: str, children: list[dict]) -> str:
     """The follow-up parent's body: the plan template's shape, one section per
     child carrying its sanitized, single-line selection reason."""
     sections = "".join(
-        f"### task/{child['name']}\n\n**Selection reason:** {_one_line(child['reason'], MAX_REASON_CHARS)}\n\n"
+        f"### task/{child['name']}\n\n**Selection reason:** {_reason_text(child['reason'])}\n\n"
         for child in children
     )
     return (
@@ -619,15 +694,34 @@ def render_body(spec: str, children: list[dict]) -> str:
     )
 
 
+def _read_json_file(path: str, limit: int, invalid: ParentError):
+    """The JSON document in the regular, non-symlink file at `path`, at most `limit`
+    bytes long. Anything else, or JSON too deeply nested to parse, raises `invalid`."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError:
+        raise invalid from None
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise invalid
+        with os.fdopen(fd, "rb", closefd=False) as handle:
+            raw = handle.read(limit + 1)
+        if len(raw) > limit:
+            raise invalid
+        return json.loads(raw.decode("utf-8"))
+    except (OSError, ValueError, RecursionError):
+        raise invalid from None
+    finally:
+        os.close(fd)
+
+
 def _load_children_file(path: str, keys: tuple[str, ...], allow_empty: bool) -> list[dict]:
     """A JSON list of objects each carrying the string `keys` (a non-empty
     `revision`, a unique, shape-checked `name`), empty only when `allow_empty`."""
-    try:
-        doc = json.loads(Path(path).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        raise ParentError("invalid-children-file") from None
+    invalid = ParentError("invalid-children-file")
+    doc = _read_json_file(path, MAX_CHILDREN_FILE_BYTES, invalid)
     if not isinstance(doc, list) or not (doc or allow_empty):
-        raise ParentError("invalid-children-file")
+        raise invalid
     children, seen = [], set()
     for item in doc:
         if not isinstance(item, dict) or not all(isinstance(item.get(k), str) for k in keys):
@@ -860,16 +954,27 @@ def parse_listing(body: str) -> tuple[list[str], int]:
 
 
 def held_children(runner, vault: str, parent_name: str, listing: dict[str, dict] | None = None) -> list[dict]:
-    """`{name, status}` of every task whose `parent` is `parent_name`, sorted by name:
-    the candidates come from the live `lore task list --json` (`listing`, when the
-    caller already loaded it) and each is confirmed by a complete read."""
+    """`{name, status, title, delivers}` of every task whose `parent` is `parent_name`,
+    sorted by name: the candidates come from the live `lore task list --json`
+    (`listing`, when the caller already loaded it) and each is confirmed by a complete
+    read. `title` and `delivers` are sanitized and bounded as `check` bounds them."""
     if listing is None:
         listing = _loaded_gatherer(runner, vault).listing
     held = []
     for name in sorted(n for n, item in listing.items() if item.get("parent") == parent_name):
-        sidecar = _read_task(runner, vault, name)[0]
+        sidecar, body, _ = _read_task(runner, vault, name)
         if sidecar.get("parent") == parent_name:
-            held.append({"name": name, "status": _status(sidecar)})
+            title = sidecar.get("title")
+            if not isinstance(title, str):
+                raise ParentError("malformed-sidecar")
+            held.append(
+                {
+                    "name": name,
+                    "status": _status(sidecar),
+                    "title": gather.sanitize_title(title),
+                    "delivers": _one_line(_field(body, "Delivers"), MAX_FIELD_CHARS),
+                }
+            )
     return held
 
 
@@ -877,6 +982,11 @@ def parent_state(runner, spec: str, parent_name: str) -> dict:
     """What the follow-up parent `parent_name` of `spec` lists and what it holds.
     Read-only. Raises ParentError `not-a-followup-parent` unless the record is a task
     carrying the marker and linked to the spec."""
+    return _read_parent(runner, spec, parent_name)[0]
+
+
+def _read_parent(runner, spec: str, parent_name: str) -> tuple[dict, dict]:
+    """(`parent_state`, the parent's own sidecar)."""
     if not gather._shape_ok(spec):
         raise ParentError("invalid-spec-name")
     if not gather._shape_ok(parent_name):
@@ -894,7 +1004,7 @@ def parent_state(runner, spec: str, parent_name: str) -> dict:
     listed, skipped = parse_listing(body)
     held = held_children(runner, vault, parent_name, g.listing)
     held_names = {item["name"] for item in held}
-    return {
+    state = {
         "parent": parent_name,
         "status": _status(sidecar),
         "listed": listed,
@@ -903,6 +1013,22 @@ def parent_state(runner, spec: str, parent_name: str) -> dict:
         "unlisted": sorted(held_names - set(listed)),
         "skipped": skipped,
     }
+    return state, sidecar
+
+
+def _require_followup_shaped(parent_name: str, state: dict, sidecar: dict) -> None:
+    """Refuse `parent-not-followup-shaped` unless the record looks like the parent
+    `assemble` writes: no `craft/slice-parent` label, no parent of its own, and a
+    `### task/` listing whenever it holds children. The marker label and a spec link
+    are forgeable, so a live plan or slice parent can carry both; these are the shapes a
+    follow-up parent never has."""
+    shaped = (
+        gather.SLICE_LABEL not in gather._labels(sidecar)
+        and not sidecar.get("parent")
+        and (state["listed"] or state["skipped"] or not state["held"])
+    )
+    if not shaped:
+        raise ParentError("parent-not-followup-shaped", (parent_name,))
 
 
 def load_reason(path: str) -> str:
@@ -911,22 +1037,7 @@ def load_reason(path: str) -> str:
     MAX_REASON_CHARS. A file that is anything else, or whose reason is empty once
     sanitized, is `invalid-reason-file`."""
     invalid = ParentError("invalid-reason-file")
-    try:
-        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-    except OSError:
-        raise invalid from None
-    try:
-        if not stat.S_ISREG(os.fstat(fd).st_mode):
-            raise invalid
-        with os.fdopen(fd, "rb", closefd=False) as handle:
-            raw = handle.read(MAX_REASON_FILE_BYTES + 1)
-        if len(raw) > MAX_REASON_FILE_BYTES:
-            raise invalid
-        doc = json.loads(raw.decode("utf-8"))
-    except (OSError, ValueError):
-        raise invalid from None
-    finally:
-        os.close(fd)
+    doc = _read_json_file(path, MAX_REASON_FILE_BYTES, invalid)
     if not isinstance(doc, str):
         raise invalid
     reason = _one_line(doc, MAX_REASON_CHARS)
@@ -940,17 +1051,24 @@ def drop_parent(runner, spec: str, parent_name: str, reason: str) -> tuple[dict,
     then drop it with the sanitized `reason`. Raises ParentError for a refusal, before
     anything is written. Otherwise returns (report, reason-code, subjects): the code is
     None when the parent is dropped."""
-    state = parent_state(runner, spec, parent_name)
+    state, sidecar = _read_parent(runner, spec, parent_name)
     if state["status"] in NOT_LIVE_STATUSES:
         raise ParentError("parent-not-live", (parent_name,))
+    _require_followup_shaped(parent_name, state, sidecar)
+    if state["unlisted"]:
+        raise ParentError("unlisted-child", tuple(state["unlisted"]))
     vault, _ = gather.resolve_spec(runner, spec)
     current = _status(_read_task(runner, vault, parent_name)[0])
     if current != state["status"]:
         raise ParentError("parent-changed", (parent_name,))
     held = state["held"]
     unfinished = [item["name"] for item in held if item["status"] in UNFINISHED_STATUSES]
-    done = un_nest_and_drop(runner, vault, parent_name, unfinished, reason)
-    kept = [item for item in held if item["status"] not in UNFINISHED_STATUSES] + done["kept"]
+    done = un_nest_and_drop(runner, vault, parent_name, unfinished, f"Reason: {reason}")
+    kept = [
+        {"name": item["name"], "status": item["status"]}
+        for item in held
+        if item["status"] not in UNFINISHED_STATUSES
+    ] + done["kept"]
     report = {
         "parent": parent_name,
         "un-nested": done["un-nested"],
@@ -992,10 +1110,12 @@ def resume_parent(runner, spec: str, parent_name: str, children: list[dict]) -> 
     Otherwise returns (report, reason-code, subjects): the code is None when the
     parent is buildable."""
     names = [c["name"] for c in children]
-    state = parent_state(runner, spec, parent_name)
+    state, sidecar = _read_parent(runner, spec, parent_name)
     if state["status"] != "open":
         raise ParentError("parent-not-resumable", (parent_name,))
+    _require_followup_shaped(parent_name, state, sidecar)
     vault, spec_sidecar = gather.resolve_spec(runner, spec)
+    linked = _FollowupLink(runner, vault, spec, spec_sidecar)
     rivals = [n for n in live_followup_parents(runner, vault, spec, spec_sidecar) if n != parent_name]
     if rivals:
         raise ParentError("followup-parent-exists", tuple(sorted(rivals)))
@@ -1007,7 +1127,7 @@ def resume_parent(runner, spec: str, parent_name: str, children: list[dict]) -> 
     held = state["held"]
     held_names = {item["name"] for item in held}
     records = {n: _read_task(runner, vault, n) for n in [*names, *sorted(held_names)]}
-    accepted, _ = _classify(runner, vault, records, frozenset(held_names), parent_name)
+    accepted, _ = _classify(runner, vault, records, frozenset(held_names), parent_name, linked)
     gone = {n for n in records if n not in accepted}
     if gone:
         raise ParentError("child-not-eligible", tuple(sorted(gone)))
@@ -1031,7 +1151,7 @@ def resume_parent(runner, spec: str, parent_name: str, children: list[dict]) -> 
             report["removed"] = removed
             _nest_children(runner, vault, parent_name, children, report)
             if not report["failed"]:
-                if _read_ok(lambda: set(remaining) <= {i["name"] for i in held_children(runner, vault, parent_name)}):
+                if _read_ok(lambda: _ready_to_flip(runner, spec, vault, linked, parent_name, remaining)):
                     _flip(runner, vault, parent_name, report)
                 else:
                     report["failed"].append({"name": parent_name, "write": "ready"})
@@ -1045,6 +1165,19 @@ def resume_parent(runner, spec: str, parent_name: str, children: list[dict]) -> 
         reason = "internal-error"
     report["buildable"] = reason is None
     return report, reason, (parent_name,)
+
+
+def _ready_to_flip(runner, spec: str, vault: str, linked, parent_name: str, remaining: list[str]) -> bool:
+    """Whether the parent may be made `ready` now, read fresh: it holds every name still
+    listed, holds nothing its body does not list, and every child it holds is still an
+    eligible follow-up of the spec."""
+    state = parent_state(runner, spec, parent_name)
+    held = {item["name"] for item in state["held"]}
+    if state["unlisted"] or not set(remaining) <= held:
+        return False
+    records = {n: _read_task(runner, vault, n) for n in sorted(held)}
+    accepted, _ = _classify(runner, vault, records, frozenset(held), parent_name, linked)
+    return accepted == held
 
 
 def _refuse(code: int, reason: str, subjects: tuple = (), state_unknown: bool = False) -> int:

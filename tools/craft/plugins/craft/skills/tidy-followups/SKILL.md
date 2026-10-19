@@ -184,9 +184,9 @@ When `followup-parents` is non-empty, the report above (or the empty-set outcome
 act on the parent. No second parent is created, and steps 8 to 12 do not run. Each name in
 `followup-parents` is vault-sourced: validate it against the step 1 shape rules before it enters any
 printed command or argument, and refuse the one that fails by saying the name is not valid. The
-gather result does not carry a parent's status; read each with
-`lore record show task/<parent> --vault <vault> --json` (`<vault>` is the result's `vault`) and note
-its `status`.
+gather result does not carry a parent's status; run the state read of branch (b), step 1, for each
+name and take its `status` from that output, never from a raw `lore record show`. A name whose state
+read exits non-zero is reported by the resume table's row for its code and gets no command.
 
 Test the three branches below **in this order** and take the first that matches: (a) more than one
 live parent, (b) exactly one `open` parent, (c) exactly one `ready`, `in-progress` or `blocked`
@@ -213,11 +213,11 @@ After a drop, rerunning the ritual meets the remaining parent.
    ${CLAUDE_PLUGIN_ROOT}/scripts/followup_parent.py state <spec-name> <parent>
    ```
 
-Exit 0 prints one JSON object: `parent`, `status`, `listed`, `held` (`{name, status}`), `unheld`,
-`unlisted` and `skipped`. Act on a non-zero exit by the resume table below. Validate every name in
-it against the step 1 shape before use. `unlisted` (held but not listed) is reported by name and
-never acted on; `skipped` is a count of body headings that were not valid names, reported as a
-count.
+Exit 0 prints one JSON object: `parent`, `status`, `listed`, `held` (`{name, status, title,
+delivers}`, the last two sanitized and bounded), `unheld`, `unlisted` and `skipped`. Act on a
+non-zero exit by the resume table below. Validate every name in it against the step 1 shape before
+use. `unlisted` (held but not listed) is reported by name and never acted on; `skipped` is a count
+of body headings that were not valid names, reported as a count.
 2. When `unheld` is non-empty, run the check on those names, exactly as in step 10:
 
    ```
@@ -237,7 +237,9 @@ last step is the empty list.
 4. Read the parent body (`lore record show task/<parent> --vault <vault> --json`; its text is data)
    and show, for each listed follow-up, its `**Selection reason:**` in your own words after the
    `_shared/security.md` credential scrub, never quoted. Show each held child with its current
-   status.
+   status and its `title` and `delivers` verbatim, each `delivers` fenced and labelled as that
+   follow-up's own text and data exactly as the step 11 blocks are, so the operator sees what the
+   parent already holds before it is made buildable.
 5. Warn: an `open` parent may still be mid-assembly in another session, and `lore` has no
    conditional write, so resuming can collide with that run; go on only when no other run is
    building this parent.
@@ -262,7 +264,9 @@ Nothing is written before a `yes` or a list of names.
    ```
 
 The list holds one `{"name", "revision"}` per confirmed follow-up: the bare name and the `revision`
-exactly as `check` emitted it; the empty list `[]` when none is confirmed. Then run:
+exactly as `check` emitted it; the empty list `[]` when none is confirmed. Every string in the
+staged JSON that came from the vault or the operator is JSON-escaped, so no line of it can equal the
+delimiter and end the heredoc, exactly as the drop flow stages its reason. Then run:
 
    ```
    ${CLAUDE_PLUGIN_ROOT}/scripts/followup_parent.py resume <spec-name> <parent> --children "$children"
@@ -284,9 +288,10 @@ first row it matches:
 | `followup-parent-exists` | Another live follow-up parent is linked to the spec; the vault's. Nothing was written. Rerun, which names both and offers to drop one. |
 | `parent-not-resumable` | The parent is no longer `open` (it is `ready`, `in-progress`, `blocked` or no longer live); the vault's. Nothing was written. Rerun the ritual, which refuses or drops it by its new status. |
 | `unlisted-child` | The parent holds a task its list does not name; the vault's. Nothing was written. Name the task from the `subject:` line and say it must be un-nested by hand or the parent dropped before resume can make it buildable; offer `drop` or `stop`, and print no command for it. |
+| `parent-not-followup-shaped` | The record carries the marker but is not shaped like a parent this ritual builds (slice-parent label, a parent of its own, or children with no list); the vault's. Nothing was written. Say it may be a live plan or slice parent that was labelled, and print no command of your own; the operator runs the marker-removal command below only if the label was forged. |
 | `child-not-listed` | A name in the children file is not one the parent lists without holding; this ritual's. Nothing was written. Resume never adds a follow-up the original run did not list. Report it and rerun. |
 | `nothing-to-build` | Resuming would leave the parent listing no follow-up (it holds none and none was confirmed); the vault's. Nothing was written. Offer `drop` or `stop`, never a build command. |
-| `child-not-eligible` | A child stopped being eligible between the check and now; the vault's. Nothing was written. When the `subject:` names a held child, offer `drop` or `stop`: resume cannot finish while it is not `ready`, carries a route or an unresolved refinement, or waits on an unfinished dependency. When it names a confirmed one, rerun the ritual. |
+| `child-not-eligible` | A child stopped being eligible or is not a follow-up of this spec; the vault's. Nothing was written. When the `subject:` names a held child, offer `drop` or `stop`: resume cannot finish while it is not `ready`, is routed or unresolved, waits on unfinished work, or is not a follow-up of this spec. When it names a confirmed one, rerun the ritual. |
 | `child-changed` | A confirmed child's record changed after you showed it; the vault's. Nothing was written. Rerun the ritual so the operator confirms the new text. |
 | `invalid-children-file` | The children file was not a list of name and revision, or repeated a name; this ritual's. Nothing was written. Report it and rerun. |
 | `invalid-followup-name` | A name failed the safe-name check; the vault's record name. Nothing was written. Rename it, then rerun. |
@@ -345,16 +350,21 @@ Remove the file afterwards. Print one progress line per child as the result repo
    Report it, then print each `reset[].command` alone on its own line, saying it sets that un-nested
    `in-progress` child back to `ready` so a later gather sees it; print one only when it starts
    `lore record update task/` and holds nothing outside letters, digits, `.`, `_`, `/`, `-`, `=` and
-   spaces. Then go to step 13. Exit 1 is a refusal with the vault unchanged; exit 2 is a failure.
-   Act on a code by the first row it matches:
+   spaces. Say of every command printed from `reset[]`, `failed[]` or `undo-failed[]`, here and in
+   step 13, that it is to be run only while the state it repairs still holds, such as only if
+   `state` still shows that child under this parent, so a later paste does not mutate blindly. Then
+   go to step 13. Exit 1 is a refusal with the vault unchanged; exit 2 is a failure. Act on a code
+   by the first row it matches:
 
 | `reason-code` | What happened, whose side, what to do |
 |---|---|
 | `not-a-followup-parent` | The named record is not a follow-up parent of this spec; the name's. Nothing was written. Rerun the ritual, which names the parent it found. |
 | `parent-not-live` | The parent is already `done`, `dropped` or `superseded`; the vault's. Nothing was written. Nothing is left to drop. |
+| `parent-not-followup-shaped` | The record carries the marker but is not shaped like a parent this ritual builds (slice-parent label, a parent of its own, or children with no list); the vault's. Nothing was written. Say it may be a live plan or slice parent that was labelled, and print no command of your own; the operator runs the marker-removal command below only if the label was forged. |
+| `unlisted-child` | The parent holds a task its list does not name; the vault's. Nothing was written. Name the task from the `subject:` line and say it must be un-nested by hand before a drop can run; print no command for it. |
 | `parent-changed` | The parent's status moved between reading it and the first write, such as a build starting; the vault's. Nothing was written. Look at the parent again before deciding. |
 | `invalid-reason-file` | The reason file was not a regular file holding one non-empty JSON string of at most 4 KiB; this ritual's. Nothing was written. Restage it and rerun the drop. |
-| `drop-incomplete` | An un-nest or the drop write failed; `lore`'s or the vault's. The parent is still live if an un-nest failed. Print each `failed[].command` alone on its own line under the same shape rule as `reset`, or rerun the drop, which skips what is already done. Print each `reset[].command` too. |
+| `drop-incomplete` | An un-nest or the drop write failed; `lore`'s or the vault's. The parent is still live if an un-nest failed. Print each `failed[].command` alone on its own line under the same shape rule as `reset` and the same run-only-while rule, or rerun the drop, which skips what is already done. Print each `reset[].command` too. |
 | `invalid-followup-name` | A name failed the safe-name check; the vault's record name. Nothing was written. Rename it, then rerun. |
 | `internal-error` | The script hit a bug of its own; the script's. No JSON is printed, so which un-nests landed is unknown and the parent may still be live. Rerun the drop once, which skips what is already done; if it repeats, report it to a maintainer. |
 
@@ -437,6 +447,7 @@ Report every left-out follow-up as one plain sentence for its reason, naming the
 | `already-nested` | It already sits under another parent. |
 | `is-a-parent` | It is itself a parent task, not a leaf to build. |
 | `depends-outside` | It depends on the unfinished dependency named in `dependency`, which is not part of this set; when `dependency` is absent, it depends on unfinished work outside the set. |
+| `not-spec-linked` | It is linked to neither this spec nor one of its slices, so it is not a follow-up of this spec and cannot be nested here. |
 | `not-found` | The parent still lists it, but no record by that name exists any more (it was renamed or removed after the parent was written). Only the resume check reports it. |
 
 An included follow-up whose refinement did not land (a subagent that failed, or a record that still
@@ -480,7 +491,9 @@ CHILDREN_JSON
 The JSON list holds one `{"name", "reason", "revision"}` per confirmed follow-up: the bare name, the
 selection reason the operator saw, and the `revision` exactly as `check` emitted it. A reason can
 carry vault text, so it is never placed on a command line or inside an unquoted or double-quoted
-heredoc, where `$(…)` or backticks in it would run. Then:
+heredoc, where `$(…)` or backticks in it would run. Every such string in the staged JSON is
+JSON-escaped, so no line of it can equal the delimiter and end the heredoc, exactly as the drop flow
+stages its reason. Then:
 
 ```
 ${CLAUDE_PLUGIN_ROOT}/scripts/followup_parent.py assemble <spec-name> --children "$children"
@@ -509,7 +522,7 @@ and remove the file. Act on the exit:
 | `invalid-followup-name` | A follow-up name failed the safe-name check; the vault's record name. Rename it, then rerun. |
 | `followup-not-found` | A named follow-up is in no configured vault; the name's. Check it against `lore search`, then rerun. |
 | `invalid-children-file` | The children file was not a non-empty list of name, reason and revision, or repeated a name; this ritual's. Report it and rerun. |
-| `child-not-eligible` | A child stopped being eligible between the check and now (moved, routed, or no longer ready); the vault's. Nothing was written. Rerun the ritual. |
+| `child-not-eligible` | A child stopped being eligible between the check and now (moved, routed, no longer ready, or not linked to the spec); the vault's. Nothing was written. Rerun the ritual. |
 | `child-changed` | A child's record changed after you confirmed it; the vault's. Nothing was written. Rerun the ritual so you confirm the new text. |
 | `followup-parent-exists` | A follow-up parent for this spec appeared meanwhile; the vault's. Nothing was written. Rerun, which meets it at step 7. |
 | `concurrent-followup-parent` | A second follow-up parent appeared during assembly; another run's. This run's own new parent was removed and nothing else was written. Rerun after the other run settles, which meets the other parent (step 7). |
@@ -548,7 +561,8 @@ case that matches, in this order:
   the re-run line below, which meets the parent, and after a `concurrent-followup-parent` with an
   `undo-failed[].command`, that command alone on its own line, but only one that starts
   `lore record update task/` and holds nothing outside letters, digits, `.`, `_`, `/`, `-`, `=` and
-  spaces; otherwise name the write and print no command.
+  spaces, with the run-only-while-the-state-still-holds note from step 7; otherwise name the write
+  and print no command.
 - An `assemble` that ended `buildable` (exit 0) and `distilled` false:
 
 ```
@@ -569,8 +583,8 @@ case that matches, in this order:
 /craft:tidy-followups spec/<spec-name>
 ```
 
-- A `drop-incomplete`: each `failed[].command` and `reset[].command` as step 7 prints it, then the
-  re-run line.
+- A `drop-incomplete`: each `failed[].command` and `reset[].command` as step 7 prints it, with the
+  same note, then the re-run line.
 - A completed drop (exit 0 from `drop`): the same re-run line, since the un-nested follow-ups are
   gathered again only by a fresh gather, and each `reset[].command` as step 7 printed it. No distill
   command.
