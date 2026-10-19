@@ -1,0 +1,11 @@
+I'd build **A, a single line per entry**, with a click on a row expanding it to show the details.
+
+When admins work through hundreds of entries, they need as many rows on screen as possible and columns lined up so they can read down "Actor" or "Result" and spot the odd one out. A single line does both.
+- **Two lines** show the details without a click, but you see about half as many entries per screen, and the eye has to skip every other line.
+- **Cards** are the easiest to read one at a time. They're the worst for scanning, though: few fit on screen, and with no shared columns there's nothing to compare down the page.
+
+I added this question to your audit-filters pad as a second round, with all three options drawn. It also lists what round 1 settled: a left rail that collapses. Reopen the link to see it, because a tab that's already open won't pick up the new round:
+
+file://<runs>/run-1/xdg-state/outpost/pads/audit-filters/index.html
+
+**Which one should you build: single line, two lines, or a card?** You can pick on the pad and paste its reply here, or just answer in words.

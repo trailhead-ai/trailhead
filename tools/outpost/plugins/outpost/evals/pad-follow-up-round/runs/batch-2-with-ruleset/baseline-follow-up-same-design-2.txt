@@ -1,0 +1,15 @@
+I drew the three entry styles on a new pad:
+
+file://<runs>/run-6/xdg-state/outpost/pads/audit-rows/index.html
+
+It's a separate pad from audit-filters because a pad name can only be used once. It opens straight from disk, so nothing needs to be running.
+
+**I'd build A, the single line**, with a click that shows the details: either the row expands in place or a side panel opens.
+
+- **A, single line:** time, actor, action, target, and a ▸ to expand, all in aligned columns. It fits the most entries on screen, about twice as many as B. Admins scanning hundreds of entries mostly run their eyes down the actor and action columns looking for something odd, and aligned single lines are what make that fast. They can open the details only for the few entries that need it.
+- **B, two lines:** the details (IP address, before → after values) can be read without clicking. But only about half as many entries fit, and the second line competes with the summary when you're scanning.
+- **C, card:** gives each entry the most room, but fits the fewest per screen and has no aligned columns to scan down or sort by. It suits a feed, not an audit table.
+
+One idea if you go with A: put a single key detail in a dimmed trailing column, such as the IP address or "viewer → admin". That gives you most of B's value without the second line.
+
+**Which should you build: A, B or C?** You can answer on the pad (pick one, mark options "Not this", add a note), press "Copy reply" and paste it here. Or just answer in words.

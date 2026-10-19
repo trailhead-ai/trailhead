@@ -1,0 +1,29 @@
+{
+  "variant": "follow-up-same-design",
+  "pads": [
+    "audit-filters"
+  ],
+  "audit-filters rounds": [
+    "round-1",
+    "round-2"
+  ],
+  "scratch_pad.py commands": [
+    "python3 <runs>/run-1/plugin/skills/scratch-pad/scratch_pad.py --pad audit-filters --round /tmp/audit-round2.json --add",
+    "python3 <runs>/run-1/plugin/skills/scratch-pad/scratch_pad.py --pad audit-filters --round <tmp>/run-1/audit-round2.json --add"
+  ],
+  "tool calls": [
+    "Skill",
+    "Write",
+    "Bash",
+    "Bash",
+    "Write",
+    "Bash"
+  ],
+  "settled": [
+    "Filters: A, left rail, and it must collapse"
+  ],
+  "C1 round added to the same pad with --add": true,
+  "C2 settled names the earlier answer": true,
+  "C3 told to open the link again": true,
+  "C4 asked in words": true
+}

@@ -1,0 +1,24 @@
+{
+  "variant": "follow-up-new-topic",
+  "pads": [
+    "audit-filters",
+    "invoice-status"
+  ],
+  "audit-filters rounds": [
+    "round-1"
+  ],
+  "scratch_pad.py commands": [
+    "mkdir -p /tmp/padround && cat > /tmp/padround/invoice-status.json <<'EOF'\n{\n  \"title\": \"Invoice status in the list\",\n  \"intro\": \"How should each invoice's status show in the invoices list?\",\n  \"questions\": [\n    {\n      \"prompt\": \"Status indicator\",\n      \"options\": [\n        {\n          \"name\": \"Coloured dot before the number\",\n          \"cost\": \"Most compact; colour alone carries meaning, so it needs a tooltip or legend and fails for colour-blind users without one.\",\n          \"pick\": false,\n          \"layout\": {\"box\": [\n            {\"row\": [{\"pill\": \"●\"}, {\"text\": \"INV-1042\"}, {\"text\": \"Acme Ltd\"}, {\"text\": \"€1,200\"}]},\n            {\"row\": [{\"pill\": \"●\"}, {\"text\": \"INV-1041\"}, {\"text\": \"Globex\"}, {\"text\": \"€860\"}]},\n            {\"row\": [{\"pill\": \"●\"}, {\"text\": \"INV-1040\"}, {\"text\": \"Initech\"}, {\"text\": \"€3,450\"}]}\n          ]}\n        },\n        {\n          \"name\": \"Text badge at end of row\",\n          \"cost\": \"Readable at a glance and accessible (word + colour); takes a column of width and sits far from the number the eye starts on.\",\n          \"pick\": true,\n          \"layout\": {\"box\": [\n            {\"row\": [{\"text\": \"INV-1042\"}, {\"text\": \"Acme Ltd\"}, {\"text\": \"€1,200\"}, {\"pill\": \"Paid\"}]},\n            {\"row\": [{\"text\": \"INV-1041\"}, {\"text\": \"Globex\"}, {\"text\": \"€860\"}, {\"pill\": \"Overdue\"}]},\n            {\"row\": [{\"text\": \"INV-1040\"}, {\"text\": \"Initech\"}, {\"text\": \"€3,450\"}, {\"pill\": \"Draft\"}]}\n          ]}\n        },\n        {\n          \"name\": \"Thin strip along the row's left edge\",\n          \"cost\": \"Scans well down a long list, zero width cost; colour-only like the dot, and easy to miss on a single row.\",\n          \"pick\": false,\n          \"layout\": {\"box\": [\n            {\"row\": [{\"text\": \"▌\"}, {\"text\": \"INV-1042\"}, {\"text\": \"Acme Ltd\"}, {\"text\": \"€1,200\"}]},\n            {\"row\": [{\"text\": \"▌\"}, {\"text\": \"INV-1041\"}, {\"text\": \"Globex\"}, {\"text\": \"€860\"}]},\n            {\"row\": [{\"text\": \"▌\"}, {\"text\": \"INV-1040\"}, {\"text\": \"Initech\"}, {\"text\": \"€3,450\"}]}\n          ]}\n        }\n      ]\n    }\n  ]\n}\nEOF\npython3 <runs>/run-12/plugin/skills/scratch-pad/scratch_pad.py --pad invoice-status --round /tmp/padround/invoice-status.json",
+    "python3 <runs>/run-12/plugin/skills/scratch-pad/scratch_pad.py --pad invoice-status --round <tmp>/run-12/invoice-status.json"
+  ],
+  "tool calls": [
+    "Skill",
+    "Bash",
+    "Bash",
+    "Write",
+    "Bash"
+  ],
+  "N1 a new pad was made under its own name": true,
+  "N2 audit-filters unchanged": true,
+  "N3 asked in words": true
+}

@@ -1,0 +1,15 @@
+Noted: the audit-log filters go in a collapsible left rail.
+
+The invoice status question is a new topic, so I drew it as a new pad rather than adding it to audit-filters:
+
+file://<runs>/run-7/xdg-state/outpost/pads/invoice-status/index.html
+
+**Which status indicator should invoice rows use?**
+
+- **A. Coloured dot before the invoice number.** Small and easy to scan, but colour is the only thing showing the status. It needs a legend or tooltip, and colour-blind users can't tell the statuses apart without one.
+- **B. Text badge at the end of the row** ("Paid", "Overdue", "Draft"). You can read it without relying on colour, and it can't be misread. The downside is that it takes a column of width and sits at the far end of the row from where people start reading.
+- **C. Thin strip along the row's left edge.** Takes no extra width and is easy to scan down the list. But like the dot, it relies on colour alone, and it can be mistaken for a selected or hovered row.
+
+**I recommend B.** Invoice status matters (overdue versus paid), and the badge is the only option that shows it in words. If you want the left edge to catch the eye too, you could add a dot or strip in the badge's colour later, as long as the text stays.
+
+Which should you build? You can mark your choice on the pad, press "Copy reply" and paste it here, or just answer in words.
