@@ -798,3 +798,110 @@ def test_building_a_new_pad_waits_on_the_same_lock(tmp_path, env, cwd, pads, cap
     assert code == 1
     assert "another session is adding a round" in capsys.readouterr().err
     assert not (pads / "fresh").exists()
+
+
+# --- what the read-back refuses -----------------------------------------------------------------------
+
+needs_unprivileged = pytest.mark.skipif(os.geteuid() == 0, reason="permissions do not bind root")
+
+
+def _refused_add(skill, env, cwd, tmp_path, title="Two"):
+    proc = _cli(skill, env, cwd, "p", _round_file(tmp_path, _round(title), f"{title}.json"), add=True)
+    assert proc.returncode == 1
+    assert proc.stdout == ""
+    return proc.stderr
+
+
+@needs_unprivileged
+def test_a_folder_inside_the_pad_that_cannot_be_listed_is_named_in_the_cannot_take_refusal(
+    skill, env, cwd, tmp_path, pads
+):
+    _new(skill, env, cwd, tmp_path, "p", "One")
+    locked = pads / "p" / "round-1" / "x"
+    locked.mkdir()
+    locked.chmod(0)
+    try:
+        before = _snapshot(pads / "p")
+        err = _refused_add(skill, env, cwd, tmp_path)
+        assert _snapshot(pads / "p") == before
+    finally:
+        locked.chmod(0o700)
+
+    assert "Traceback" not in err
+    assert err.splitlines() == [
+        'scratch-pad: pad "p" can\'t take another round: round-1/x can\'t be read: Permission denied — ' + WAY_ON
+    ]
+    assert _leftovers(pads) == []
+    assert _try_lock(_lock_path(env, pads / "p"))
+
+
+def _try_lock(lock: Path) -> bool:
+    fd = os.open(lock, os.O_RDWR)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return True
+    except BlockingIOError:
+        return False
+    finally:
+        os.close(fd)
+
+
+@needs_unprivileged
+def test_an_unwritable_pads_folder_refuses_a_new_pad_the_way_it_refuses_an_add(skill, env, cwd, tmp_path, pads):
+    _new(skill, env, cwd, tmp_path, "p", "One")
+    pads.chmod(0o500)
+    try:
+        new = _cli(skill, env, cwd, "fresh", _round_file(tmp_path, _round("A"), "a.json"))
+        add = _cli(skill, env, cwd, "p", _round_file(tmp_path, _round("Two"), "two.json"), add=True)
+    finally:
+        pads.chmod(0o700)
+
+    assert new.returncode == 1 and new.stdout == ""
+    assert "Traceback" not in new.stderr
+    assert new.stderr.splitlines() == [
+        f'scratch-pad: "{pads / "fresh"}": could not build the pad: Permission denied'
+    ]
+    assert add.stderr.splitlines() == [
+        f'scratch-pad: "{pads / "p"}": could not build the pad: Permission denied'
+    ]
+    assert not (pads / "fresh").exists()
+    assert _leftovers(pads) == []
+
+
+def test_a_stray_top_level_file_stops_an_add_and_is_named(skill, env, cwd, tmp_path, pads):
+    _new(skill, env, cwd, tmp_path, "p", "One")
+    (pads / "p" / "notes.txt").write_text("mine", encoding="utf-8")
+    before = _snapshot(pads / "p")
+
+    err = _refused_add(skill, env, cwd, tmp_path)
+
+    assert err.splitlines() == [
+        'scratch-pad: pad "p" can\'t take another round: notes.txt is not part of a pad this script builds — '
+        + WAY_ON
+    ]
+    assert _snapshot(pads / "p") == before
+    assert _leftovers(pads) == []
+
+
+def test_a_round_01_folder_stops_an_add_and_is_named(skill, env, cwd, tmp_path, pads):
+    _new(skill, env, cwd, tmp_path, "p", "One")
+    (pads / "p" / "round-01").mkdir()
+    (pads / "p" / "stray.html").write_text("x", encoding="utf-8")
+    before = _snapshot(pads / "p")
+
+    err = _refused_add(skill, env, cwd, tmp_path)
+
+    assert err.splitlines() == [
+        'scratch-pad: pad "p" can\'t take another round: round-01 is not part of a pad this script builds; '
+        "stray.html is not part of a pad this script builds — " + WAY_ON
+    ]
+    assert _snapshot(pads / "p") == before
+
+
+def test_a_pad_without_rounds_js_still_takes_a_round_and_gets_one(skill, env, cwd, tmp_path, pads):
+    _new(skill, env, cwd, tmp_path, "p", "One")
+    (pads / "p" / "rounds.js").unlink()
+
+    _add(skill, env, cwd, tmp_path, "p", "Two")
+
+    assert _titles(pads / "p") == ["One", "Two"]

@@ -1102,7 +1102,7 @@ def test_a_run_on_a_workspace_pad_waits_for_the_pads_lock_and_is_refused_when_it
     assert rig.leftovers() == []
 
 
-def test_an_add_in_a_workspace_recovers_a_pad_left_aside_by_an_interrupted_run(rig, capsys):
+def test_an_add_in_a_workspace_recovers_a_pad_found_aside_by_the_script_itself(rig, capsys):
     _published(rig, capsys)
     sites = rig.ws / "sites"
     (sites / "p").rename(sites / ".aside-p")
@@ -1124,3 +1124,45 @@ def test_a_new_workspace_pad_recovers_leftovers_of_its_own_name_only(rig, capsys
     assert rig.run() == 0
 
     assert sorted(p.name for p in sites.iterdir()) == [".tmp-pad-other", "p"]
+
+
+def test_a_timeout_that_leaves_the_old_site_under_the_publishers_previous_name_says_where_it_is(rig, capsys):
+    def killed_mid_swap(cmd, site):
+        site.rename(site.parent / ".p.previous-abc123")
+        (site.parent / ".p.stage-xyz").mkdir()
+
+    code, captured, site = _timeout_with(rig, capsys, killed_mid_swap)
+
+    previous = site.parent / ".p.previous-abc123"
+    assert code == 1 and captured.out == ""
+    assert captured.err.splitlines() == [
+        "scratch-pad: publish: the publisher did not finish within 7 seconds and the pad is no longer there",
+        f"scratch-pad: publish: {previous} holds the pad as it was before this add; "
+        f"rename it back to {site} to restore it",
+    ]
+    assert _site_titles(previous) == ["Settings"]
+    assert rig.leftovers() == []
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="permissions do not bind root")
+def test_an_unlistable_folder_in_a_workspace_pad_refuses_the_add_and_changes_nothing(rig, capsys):
+    _published(rig, capsys)
+    site = rig.ws / "sites" / "p"
+    locked = site / "round-1" / "x"
+    locked.mkdir()
+    locked.chmod(0)
+    try:
+        before = sorted(p.name for p in (rig.ws / "sites").iterdir())
+        code = rig.add("Pricing", publish_runner=lambda *a: pytest.fail("publisher ran"))
+        captured = capsys.readouterr()
+        after = sorted(p.name for p in (rig.ws / "sites").iterdir())
+    finally:
+        locked.chmod(0o700)
+
+    assert code == 1 and captured.out == ""
+    assert captured.err.splitlines() == [
+        'scratch-pad: pad "p" can\'t take another round: round-1/x can\'t be read: Permission denied — '
+        "start a new pad with a different --pad name"
+    ]
+    assert after == before == ["p"]
+    assert rig.leftovers() == []
