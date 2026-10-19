@@ -8,9 +8,11 @@ mirror are loaded by path so the copies cannot drift apart.
 
 from __future__ import annotations
 
+import contextlib
 import fcntl
 import hashlib
 import importlib.util
+import io
 import json
 import os
 import shutil
@@ -21,6 +23,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
@@ -1126,14 +1129,46 @@ def test_a_new_workspace_pad_recovers_leftovers_of_its_own_name_only(rig, capsys
     assert sorted(p.name for p in sites.iterdir()) == [".tmp-pad-other", "p"]
 
 
+def _interrupted_swap(site: Path) -> Path:
+    """Run the real publisher's swap over *site*, killed between its two renames with its restore failing.
+
+    Returns the entry the publisher left beside the site, whatever it names it.
+    """
+    publisher = _load("publish_site_under_test", PUBLISH_PATH)
+    sites = site.parent
+    source = Path(tempfile.mkdtemp(dir=sites.parent, prefix="source-"))
+    (source / "index.html").write_text("new", encoding="utf-8")
+    before = set(sites.iterdir())
+    real_rename = os.rename
+    calls = []
+
+    def rename(src, dst):
+        calls.append(src)
+        if len(calls) == 1:
+            return real_rename(src, dst)
+        if len(calls) == 2:
+            raise KeyboardInterrupt
+        raise OSError("restore failed")
+
+    with (
+        mock.patch.object(os, "rename", rename),
+        contextlib.redirect_stderr(io.StringIO()),
+        pytest.raises(KeyboardInterrupt),
+    ):
+        publisher._stage_and_replace(source, sites, site, site.name)
+    (left,) = set(sites.iterdir()) - before
+    return left
+
+
 def test_a_timeout_that_leaves_the_old_site_under_the_publishers_previous_name_says_where_it_is(rig, capsys):
+    left = {}
+
     def killed_mid_swap(cmd, site):
-        site.rename(site.parent / ".p.previous-abc123")
-        (site.parent / ".p.stage-xyz").mkdir()
+        left["previous"] = _interrupted_swap(site)
 
     code, captured, site = _timeout_with(rig, capsys, killed_mid_swap)
 
-    previous = site.parent / ".p.previous-abc123"
+    previous = left["previous"]
     assert code == 1 and captured.out == ""
     assert captured.err.splitlines() == [
         "scratch-pad: publish: the publisher did not finish within 7 seconds and the pad is no longer there",
@@ -1142,6 +1177,44 @@ def test_a_timeout_that_leaves_the_old_site_under_the_publishers_previous_name_s
     ]
     assert _site_titles(previous) == ["Settings"]
     assert rig.leftovers() == []
+
+
+def test_with_several_previous_entries_only_the_newest_is_named_as_the_pad_before_the_add(rig, capsys):
+    left = {}
+
+    def killed_twice(cmd, site):
+        sites = site.parent
+        site.rename(sites / "held")
+        site.mkdir()
+        (site / "index.html").write_text("partial", encoding="utf-8")
+        older = _interrupted_swap(site)
+        os.utime(older, (1_000_000, 1_000_000))
+        (sites / "held").rename(site)
+        left["older"], left["newest"] = older, _interrupted_swap(site)
+
+    code, captured, site = _timeout_with(rig, capsys, killed_twice)
+
+    assert code == 1 and captured.out == ""
+    assert captured.err.splitlines() == [
+        "scratch-pad: publish: the publisher did not finish within 7 seconds and the pad is no longer there",
+        f"scratch-pad: publish: {left['newest']} holds the pad as it was before this add; "
+        f"rename it back to {site} to restore it",
+        f"scratch-pad: publish: older leftovers that may be partial: {left['older']}",
+    ]
+    assert _site_titles(left["newest"]) == ["Settings"]
+
+
+def test_an_os_metadata_file_in_a_published_pad_is_not_carried_into_the_republished_site(rig, capsys):
+    _published(rig, capsys)
+    site = rig.ws / "sites" / "p"
+    (site / ".DS_Store").write_bytes(b"finder")
+    (site / "._index.html").write_bytes(b"fork")
+
+    code = rig.add("Pricing")
+
+    assert code == 0, capsys.readouterr().err
+    assert sorted(e.name for e in site.iterdir()) == ["index.html", "round-1", "round-2", "rounds.js"]
+    assert _site_titles(site) == ["Settings", "Pricing"]
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="permissions do not bind root")

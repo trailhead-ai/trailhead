@@ -62,8 +62,9 @@ Contract
   (site unchanged), ``the pad is no longer there`` or ``the pad is not as expected``, or the read-back's
   own "can't take another round" refusal. When the pad is no longer there and the publisher's
   ``.<pad>.previous-*`` entry sits beside it in ``sites/`` (it renames the old site there while swapping),
-  the refusal adds a line naming that path as the pad as it was before the add, to be renamed back; the
-  script never renames it itself. The temp folder is removed on every path.
+  the refusal adds a line naming the newest such entry (by modification time) as the pad as it was before
+  the add, to be renamed back, and, when there are others, one line listing them as older leftovers that
+  may be partial; the script never renames any of them itself. The temp folder is removed on every path.
 * The pad slug matches ``^[a-z0-9][a-z0-9._-]*$`` and is at most 64 characters.
 * Outside a workspace, pads live in ``<state>/pads/<slug>/`` where ``<state>`` is
   ``$OUTPOST_STATE_DIR``, else ``$XDG_STATE_HOME/outpost``, else
@@ -86,12 +87,17 @@ Contract
 * Read-back: the pad is a real folder with no symlink or special file anywhere in it, its round folders are
   ``round-1`` .. ``round-<n>`` with no gap, and each holds an ``index.html`` and a ``round.js`` whose first
   line starts with the prefix this script writes. The pad's only other top-level entries are ``index.html``
-  and ``rounds.js`` (optional: a pad built before it existed lacks it); any other entry, such as a file
-  added by hand or a ``round-01`` folder, would be lost when the pad is rebuilt, so it is named as not
-  part of a pad this script builds and the pad is refused. A folder that cannot be listed is named
-  ("<path> can't be read: <why>"). A round's title is the ``json.loads`` of that line's
+  and ``rounds.js`` (optional: a pad built before it existed lacks it), plus the operating system's own
+  files ``.DS_Store`` and ``._*``, which are ignored and not carried into the rebuilt pad (they are still
+  refused when not regular files). Any other entry, such as a file added by hand or a ``round-01`` folder,
+  would be lost when the pad is rebuilt, so it is named as not part of a pad this script builds and the
+  pad is refused. A folder that cannot be listed, or a file in it that cannot be examined, is named
+  ("<path> can't be read: <why>"); the pad folder itself as "the pad folder can't be read: <why>", with
+  no round checks. A round's title is the ``json.loads`` of that line's
   string literal, decoded twice; the literal is never evaluated and ``rounds.js`` is never read. Every
-  problem is named in one refusal ending "-- start a new pad with a different --pad name".
+  problem is named in one refusal ending "-- start a new pad with a different --pad name"; when the only
+  problems are stray top-level entries, which can be moved aside, it ends "-- move it out of the pad
+  folder and rerun --add".
 * The new pad holds each earlier round copied byte for byte (a symlink is copied as a link, never
   followed; a special file is refused unopened), ``round-<n+1>/`` built from the current kit with
   ``PAD_ROUND_NUMBER = n+1``, a rebuilt ``rounds.js`` and an ``index.html`` that sends the browser to
@@ -166,6 +172,8 @@ _ROUND_DIR = re.compile(r"round-([1-9][0-9]*)")
 _PAD_FILES = ("index.html", "rounds.js")
 _LOCK_POLL_SECONDS = 0.05
 _WAY_ON = "start a new pad with a different --pad name"
+_MOVE_OUT = "move it out of the pad folder and rerun --add"
+_OS_METADATA = re.compile(r"\.DS_Store|\._.*", re.DOTALL)
 _UNCONFIRMED = "note: the pad was published but the publisher did not confirm it in time"
 
 
@@ -574,8 +582,12 @@ def _tree_problems(root: Path) -> list[str]:
             return
         for entry in entries:
             path = folder / entry
-            mode = os.lstat(path).st_mode
             rel = _esc(str(path.relative_to(root)))
+            try:
+                mode = os.lstat(path).st_mode
+            except OSError as exc:
+                problems.append(f"{rel} can't be read: {_esc(exc.strerror or str(exc))}")
+                continue
             if stat.S_ISLNK(mode):
                 problems.append(f"{rel} is a symlink")
             elif stat.S_ISDIR(mode):
@@ -604,13 +616,18 @@ def _round_title(round_js: Path) -> str:
     return title
 
 
-def _cannot_take(pad: str, problems: Sequence[str]) -> Refusal:
-    return Refusal([f"scratch-pad: pad {_q(pad)} can't take another round: {'; '.join(problems)} — {_WAY_ON}"])
+def _cannot_take(pad: str, problems: Sequence[str], strays: Sequence[str] = ()) -> Refusal:
+    """Refuse the add naming *problems* then *strays*; only strays, which can be moved out, change the way on."""
+    way_on = _WAY_ON if problems else _MOVE_OUT
+    return Refusal(
+        [f"scratch-pad: pad {_q(pad)} can't take another round: {'; '.join([*problems, *strays])} — {way_on}"]
+    )
 
 
 def _read_pad(final: Path, pad: str) -> list[str]:
     """The pad's round titles in order, or a :class:`Refusal` naming everything that stops a new round."""
     problems: list[str] = []
+    strays: list[str] = []
     titles: list[str] = []
     mode = os.lstat(final).st_mode
     if stat.S_ISLNK(mode):
@@ -618,15 +635,15 @@ def _read_pad(final: Path, pad: str) -> list[str]:
     elif not stat.S_ISDIR(mode):
         problems.append("the pad is not a folder")
     else:
-        problems.extend(_tree_problems(final))
         try:
             entries = sorted(os.listdir(final))
-        except OSError:
-            entries = []  # named by the tree check
-        problems.extend(
+        except OSError as exc:
+            raise _cannot_take(pad, [f"the pad folder can't be read: {_esc(exc.strerror or str(exc))}"])
+        problems.extend(_tree_problems(final))
+        strays.extend(
             f"{_esc(e)} is not part of a pad this script builds"
             for e in entries
-            if e not in _PAD_FILES and not _ROUND_DIR.fullmatch(e)
+            if e not in _PAD_FILES and not _ROUND_DIR.fullmatch(e) and not _OS_METADATA.fullmatch(e)
         )
         numbers = sorted(int(m.group(1)) for e in entries if (m := _ROUND_DIR.fullmatch(e)))
         if not numbers:
@@ -655,8 +672,8 @@ def _read_pad(final: Path, pad: str) -> list[str]:
                     titles.append(_round_title(round_js))
                 except (OSError, ValueError) as exc:
                     problems.append(f"round-{k}/round.js: {_esc(str(exc))}")
-    if problems:
-        raise _cannot_take(pad, problems)
+    if problems or strays:
+        raise _cannot_take(pad, problems, strays)
     return titles
 
 
@@ -787,20 +804,31 @@ def _publish_to_workspace(
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def _mtime(path: Path) -> float:
+    try:
+        return os.lstat(path).st_mtime
+    except OSError:
+        return 0.0
+
+
 def _timed_out_add(final: Path, pad: str, tmp: Path, timeout: float) -> Built:
     """Judge an add whose publisher was killed: the site on disk against the pad *tmp* was to become."""
     late = f"the publisher did not finish within {timeout:g} seconds and"
     expected = _read_pad(tmp, pad)
     if not os.path.lexists(final):
         lines = [_line("publish", f"{late} the pad is no longer there")]
-        for previous in sorted(final.parent.glob(f".{glob.escape(pad)}.previous-*")):
+        previous = sorted(final.parent.glob(f".{glob.escape(pad)}.previous-*"), key=lambda p: (_mtime(p), p.name))
+        if previous:
             lines.append(
                 _line(
                     "publish",
-                    f"{_esc(str(previous))} holds the pad as it was before this add; "
+                    f"{_esc(str(previous[-1]))} holds the pad as it was before this add; "
                     f"rename it back to {_esc(str(final))} to restore it",
                 )
             )
+        if previous[:-1]:
+            older = ", ".join(_esc(str(p)) for p in previous[:-1])
+            lines.append(_line("publish", f"older leftovers that may be partial: {older}"))
         raise Refusal(lines)
     titles = _read_pad(final, pad)
     if titles == expected[:-1]:

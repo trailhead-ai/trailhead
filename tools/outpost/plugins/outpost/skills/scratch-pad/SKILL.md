@@ -182,11 +182,16 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/scratch-pad/scratch_pad.py \
   - `scratch-pad: pad "<pad>" can't take another round: … — start a new pad with
     a different --pad name`: this pad cannot be added to. The reasons name what
     stops it: a symlink or special file, a missing or broken round, a folder that
-    cannot be read (`<path> can't be read: <why>`), or a top-level entry that is
-    not part of a pad this script builds (`<name> is not part of a pad this script
-    builds`, such as a file added by hand). Start a new pad under a different
-    `--pad` name, carry what was settled in its `settled` list, and tell the user
-    it is a new pad.
+    cannot be read (`<path> can't be read: <why>`, or `the pad folder can't be
+    read: <why>`). Start a new pad under a different `--pad` name, carry what was
+    settled in its `settled` list, and tell the user it is a new pad.
+  - `scratch-pad: pad "<pad>" can't take another round: <name> is not part of a pad
+    this script builds — move it out of the pad folder and rerun --add`: a file
+    added by hand sits at the pad's top level and would be lost when the pad is
+    rebuilt. The pad itself is fine: tell the user, move that file out of the pad
+    folder (to the folder beside it, say), and rerun the same `--add`. Do not start
+    a new pad. (Finder's `.DS_Store` and `._*` files are ignored and never get
+    this line.)
   - `… give each round its own title`: the round's title matches an earlier
     round's. Retitle the round and rerun.
   - `scratch-pad: waiting for another session's add to pad "<pad>"…` on stderr is
@@ -203,7 +208,9 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/scratch-pad/scratch_pad.py \
     user what the line says and ask in words. When the ending is `the pad is no
     longer there` and a second line names a `.<pad>.previous-…` path, that path
     holds the pad as it was before the add: tell the user, and rename it back to
-    the pad's own path to restore it.
+    the pad's own path to restore it. A further line `scratch-pad: publish: older
+    leftovers that may be partial: <paths>` lists earlier leftovers; leave them
+    alone and do not restore from them.
 
 Always ask the question in words too, on an added round as on a first one. The
 pad takes answers: the user can pick an option, mark options "Not this", choose
