@@ -1766,6 +1766,15 @@ FINDING_CAPTURE_VERDICTS.update(
 )
 
 
+# Reworded-consult arms: `fs-fallback2-fsconsult` (the fallback arm's sources with `consult/SKILL.md` at the rewording)
+# and `regress3-cal-consult` (the calibrated consult regression with `consult/SKILL.md` at the rewording). The scripted
+# bar is plain on every check the site runs.
+FINDING_CAPTURE_VERDICTS.update(
+    {f"fs-fallback2-fsconsult-{n}": _plain_verdicts("fsconsult") for n in (1, 2, 3)}
+    | {f"regress3-cal-consult-{n}": _plain_verdicts("consult-calibrated") for n in (1, 2, 3)}
+)
+
+
 def _site(stem):
     """The site a capture belongs to: the segment before its run number, except that the calibrated consult's arms
     (`precal-`, `cal-`, `regress-cal-` and `regress2-cal-`) belong to `consult-calibrated`."""

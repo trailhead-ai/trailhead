@@ -68,6 +68,10 @@ FIX_SHAPE_EDIT_REVISION = "2fc63f894f8ad944e59d0b8c23af4f526c2dfe0b"
 # and the second-round calibrated consult regression arm read `council.md` from here.
 FIX_SHAPE_SHARPENED_REVISION = "e568c4e037dbf1ba2d2eb3027fa3f77e03104dae"
 
+# The commit rewording the kept consult line so a small fix carries an unsettled ask as "How a finding reads" says: the
+# two reworded-consult arms read `consult/SKILL.md` from here.
+CONSULT_REWORDING_REVISION = "3d423811493b6e776ef8007faee3db3f02a8f1ca"
+
 PLUGIN = "tools/craft/plugins/craft"
 RULES = f"{PLUGIN}/rules.md"
 COUNCIL = f"{PLUGIN}/skills/_shared/council.md"
@@ -254,6 +258,22 @@ ARM_SOURCES.update(
     }
 )
 
+# Each reworded-consult arm and the arm whose sources it repeats with only `consult/SKILL.md` read from the rewording.
+CONSULT_REWORDED_ARMS = {
+    "fs-fallback2-fsconsult.md": "fs-fallback-fsconsult.md",
+    "regress3-cal-consult.md": "regress2-cal-consult.md",
+}
+
+ARM_SOURCES.update(
+    {
+        arm: [
+            (path, CONSULT_REWORDING_REVISION if path == CONSULT_SKILL else revision)
+            for path, revision in ARM_SOURCES[predecessor]
+        ]
+        for arm, predecessor in CONSULT_REWORDED_ARMS.items()
+    }
+)
+
 
 @pytest.mark.parametrize("arm_name", sorted(ARM_SOURCES))
 def test_arm_composed_from_its_manifest_equals_the_committed_file(arm_name: str):
@@ -334,6 +354,18 @@ def test_a_fallback_arm_differs_from_its_treated_arm_only_in_the_sites_ritual_fi
         for path, revision in ARM_SOURCES[arm_name]
     ]
     assert compose(sources) == treated, f"{arm_name} differs from its treated arm in more than {ritual_file}"
+
+
+@pytest.mark.parametrize("arm_name,predecessor", CONSULT_REWORDED_ARMS.items())
+def test_a_reworded_consult_arm_differs_from_its_predecessor_only_in_the_consult_skill(arm_name: str, predecessor: str):
+    before = (ARMS_DIR / predecessor).read_text(encoding="utf-8")
+    after = (ARMS_DIR / arm_name).read_text(encoding="utf-8")
+    assert after != before, f"{arm_name} is byte-identical to {predecessor}"
+    sources = [
+        (path, revision) if path != CONSULT_SKILL else ARM_SOURCES[predecessor][index]
+        for index, (path, revision) in enumerate(ARM_SOURCES[arm_name])
+    ]
+    assert compose(sources) == before, f"{arm_name} differs from {predecessor} in more than {CONSULT_SKILL}"
 
 
 def test_every_arm_file_has_a_manifest_entry_and_every_entry_a_file():
