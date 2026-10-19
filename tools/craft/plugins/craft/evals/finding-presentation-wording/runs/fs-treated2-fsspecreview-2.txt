@@ -22,7 +22,7 @@ A kiln holds one firing per day, and a second booking for the same kiln and day 
 
 Fix: members would book shelf space in a firing, and a firing would close when its shelves are full rather than when one person claims the day. This rewrites the Objectives and criteria AC1, AC2, AC3 and AC5.
 
-I can't draft that rewrite here because the spec doesn't have the facts it needs. The spec doesn't say how many shelves each kiln holds. It doesn't say whether one firing can mix members' work, for example work that needs different temperatures. And it doesn't say who decides when a firing runs.
+I can't draft that rewrite here because the spec doesn't have the facts it needs. The spec doesn't say how many shelves each kiln holds. It doesn't say whether one firing can [redacted] members' work, for example work that needs different temperatures. And it doesn't say who decides when a firing runs.
 
 Proposed disposition: `revise` (`record-only`)
   Prescription: Change the booking unit from kiln-and-day to shelf space within a firing of a kiln, which means the following:

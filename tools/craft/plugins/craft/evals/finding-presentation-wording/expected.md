@@ -3282,3 +3282,8 @@ small (the ask quoted in quotation marks) and large (a single named part); and `
 which a second reader disagrees is `disputed` and counts as not met.
 
 Fallback outcome: kept at fsconsult; reverted to operator at fsplan, fsdriver, fsbuildreview
+
+**Redaction (2026-10-19).** In `runs/fs-treated2-fsspecreview-2.txt`, line 25, one ordinary English word matched the
+repository's machine-local leak denylist and was replaced with `[redacted]` so the tree passes the leak gate, as the
+`ritual-output-wording` case does. The line is narrative above the findings; no reading or verdict depends on it, and
+the capture grades the same.
