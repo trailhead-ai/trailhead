@@ -2359,6 +2359,168 @@ def test_resume_refuses_a_held_child_set_back_to_open_as_child_not_eligible(lore
     assert vault_snapshot(env, vault) == before
 
 
+def dependent_pair(env, vault, spec, tmp_path, capsys):
+    """(parent, a, b): `b` depends on `a`; the assembly nested `a` and failed on `b`."""
+    a = make_followup(env, vault, "Base", spec=spec)
+    b = make_followup(env, vault, "Needs base", spec=spec, depends=[a])
+    runner = EnvRunner(env, lambda argv, s, r: refused(argv) if is_nest(argv, b) else None)
+    _, out, _ = run_assemble(tmp_path, runner, spec, confirm(env, vault, [a, b]), capsys)
+    assert out["nested"] == [a] and out["failed"] == [{"name": b, "write": "nest"}]
+    return out["parent"], a, b
+
+
+def test_resume_nests_a_child_whose_dependency_the_parent_already_holds(lore_env, spec, tmp_path, capsys):
+    env, vault = lore_env
+    parent_name, a, b = dependent_pair(env, vault, spec, tmp_path, capsys)
+    code, out, err = run_resume(
+        EnvRunner(env), spec, parent_name, revisions(env, vault, [b]), tmp_path, capsys
+    )
+    assert code == 0, err
+    assert out["nested"] == [b] and out["buildable"] is True
+    assert sidecar_of(env, vault, parent_name)["status"] == "ready"
+    assert parents_of(env, vault, [a, b]) == [parent_name] * 2
+
+
+def test_resume_nests_two_children_one_of_which_depends_on_the_other(lore_env, spec, tmp_path, capsys):
+    env, vault = lore_env
+    a = make_followup(env, vault, "First", spec=spec)
+    b = make_followup(env, vault, "Second", spec=spec)
+    c = make_followup(env, vault, "Third", spec=spec, depends=[b])
+    runner = EnvRunner(env, lambda argv, s, r: refused(argv) if is_nest(argv, b) else None)
+    _, out, _ = run_assemble(tmp_path, runner, spec, confirm(env, vault, [a, b, c]), capsys)
+    code, out2, err = run_resume(
+        EnvRunner(env), spec, out["parent"], revisions(env, vault, [b, c]), tmp_path, capsys
+    )
+    assert code == 0, err
+    assert out2["nested"] == [b, c] and out2["buildable"] is True
+    assert parents_of(env, vault, [a, b, c]) == [out["parent"]] * 3
+
+
+def test_resume_still_refuses_a_dependency_that_is_neither_held_nor_confirmed(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    parent_name, a, b = dependent_pair(env, vault, spec, tmp_path, capsys)
+    outside = make_followup(env, vault, "Unfinished outside", status="open")
+    _lore(env, "record", "update", f"task/{b}", "--vault", vault, "--unset-depends-on", a,
+          "--depends-on", outside)
+    before = vault_snapshot(env, vault)
+    runner = EnvRunner(env)
+    code, out, err = run_resume(runner, spec, parent_name, revisions(env, vault, [b]), tmp_path, capsys)
+    assert_refused(code, out, err, runner, "child-not-eligible", b)
+    assert vault_snapshot(env, vault) == before
+
+
+def run_check_json(runner, spec_name, *argv, capsys):
+    code = parent.main(["check", spec_name, *argv], runner=runner)
+    out = capsys.readouterr()
+    return code, (json.loads(out.out) if out.out.strip() else None), out.err
+
+
+def test_check_with_the_parent_counts_a_dependency_the_parent_holds_as_inside(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    parent_name, a, b = dependent_pair(env, vault, spec, tmp_path, capsys)
+    code, out, err = run_check_json(EnvRunner(env), spec, b, "--parent", parent_name, capsys=capsys)
+    assert code == 0, err
+    assert [item["name"] for item in out["eligible"]] == [b] and out["left-out"] == []
+    assert out["eligible"][0]["revision"] == shown_revision(env, vault, b)
+
+
+def test_check_without_the_parent_still_counts_that_dependency_as_outside(lore_env, spec, tmp_path, capsys):
+    env, vault = lore_env
+    parent_name, a, b = dependent_pair(env, vault, spec, tmp_path, capsys)
+    code, out, err = run_check_json(EnvRunner(env), spec, b, capsys=capsys)
+    assert code == 0, err
+    assert out["left-out"] == [{"name": b, "reason": "depends-outside", "dependency": a}]
+
+
+def test_check_with_a_parent_that_is_not_a_follow_up_parent_of_the_spec_is_refused(
+    lore_env, spec, capsys
+):
+    env, vault = lore_env
+    plain = make_followup(env, vault, "Plain", status="open", spec=spec)
+    b = make_followup(env, vault, "Candidate", spec=spec)
+    runner = EnvRunner(env)
+    code, out, err = run_check_json(runner, spec, b, "--parent", plain, capsys=capsys)
+    assert code == 1 and out is None
+    assert reason_codes(err) == ["reason-code: not-a-followup-parent"]
+    assert runner.writes() == []
+
+
+def test_resume_refuses_a_held_child_the_parent_does_not_list_as_unlisted_child(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    parent_name, names = interrupted(env, vault, spec, tmp_path, capsys)
+    stray = make_followup(env, vault, "Stray", spec=spec)
+    nest(env, vault, stray, parent_name)
+    before = vault_snapshot(env, vault)
+    runner = EnvRunner(env)
+    code, out, err = run_resume(runner, spec, parent_name, revisions(env, vault, names[1:]), tmp_path, capsys)
+    assert_refused(code, out, err, runner, "unlisted-child", stray)
+    assert vault_snapshot(env, vault) == before
+
+
+def _make_held_child_route_labelled(env, vault, name):
+    _lore(env, "record", "update", f"task/{name}", "--vault", vault, "--label", "route=plan")
+
+
+def _make_held_child_unresolved(env, vault, name):
+    body = body_of(env, vault, name)
+    _lore(env, "record", "update", f"task/{name}", "--vault", vault,
+          stdin=body + "\n## Refine — unresolved\n\nWhich way?\n")
+
+
+def _make_held_child_depend_on_unfinished(env, vault, name):
+    outside = make_followup(env, vault, "Unfinished outside", status="open")
+    _lore(env, "record", "update", f"task/{name}", "--vault", vault, "--depends-on", outside)
+
+
+@pytest.mark.parametrize(
+    "degrade",
+    [_make_held_child_route_labelled, _make_held_child_unresolved, _make_held_child_depend_on_unfinished],
+    ids=["route-label", "unresolved-heading", "unfinished-dependency"],
+)
+def test_resume_refuses_a_listed_held_child_that_stopped_being_eligible(
+    lore_env, spec, tmp_path, capsys, degrade
+):
+    env, vault = lore_env
+    parent_name, names = interrupted(env, vault, spec, tmp_path, capsys)
+    children = revisions(env, vault, names[1:])
+    degrade(env, vault, names[0])
+    assert sidecar_of(env, vault, names[0])["status"] == "ready"
+    before = vault_snapshot(env, vault)
+    runner = EnvRunner(env)
+    code, out, err = run_resume(runner, spec, parent_name, children, tmp_path, capsys)
+    assert_refused(code, out, err, runner, "child-not-eligible", names[0])
+    assert vault_snapshot(env, vault) == before
+
+
+def test_resume_refuses_a_held_child_another_parent_took_after_the_state_read(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    parent_name, names = interrupted(env, vault, spec, tmp_path, capsys)
+    holder = make_followup(env, vault, "Other holder", status="open")
+    children = revisions(env, vault, names[1:])
+    shows = []
+
+    def hook(argv, stdin, runner):
+        if argv[:3] == ["record", "show", "--json"] and argv[-1] == f"task/{names[0]}":
+            shows.append(argv)
+            if len(shows) == 3:
+                nest(env, vault, names[0], holder)
+
+    runner = EnvRunner(env, hook)
+    code, out, err = run_resume(runner, spec, parent_name, children, tmp_path, capsys)
+    assert len(shows) >= 3
+    assert_refused(code, out, err, runner, "child-not-eligible", names[0])
+    assert sidecar_of(env, vault, names[0])["parent"] == holder
+    assert sidecar_of(env, vault, parent_name)["status"] == "open"
+
+
 def test_resume_refuses_a_ready_parent_as_parent_not_resumable(lore_env, spec, tmp_path, capsys):
     env, vault = lore_env
     parent_name, names = assembled_parent(env, vault, spec, tmp_path, capsys)

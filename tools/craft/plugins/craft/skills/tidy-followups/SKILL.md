@@ -221,12 +221,13 @@ count.
 2. When `unheld` is non-empty, run the check on those names, exactly as in step 10:
 
    ```
-   ${CLAUDE_PLUGIN_ROOT}/scripts/followup_parent.py check <spec-name> <name>...
+   ${CLAUDE_PLUGIN_ROOT}/scripts/followup_parent.py check <spec-name> --parent <parent> <name>...
    ```
 
-Report each left-out follow-up as the plain sentence from step 10's table, and say it **will be
-removed from the parent's list** if the operator goes on. When `unheld` is empty there is nothing to
-check or nest: the children file in the last step is the empty list.
+`--parent` makes a dependency on a child the parent already holds count as satisfied, the way the
+resume itself decides it. Report each left-out follow-up as the plain sentence from step 10's table,
+and say it **will be removed from the parent's list** if the operator goes on. When `unheld` is
+empty there is nothing to check or nest: the children file in the last step is the empty list.
 3. Show each eligible follow-up's scope exactly as step 11 does: the `delivers` and `files` blocks
    verbatim, each fenced and labelled as that follow-up's own text and data, longer fence than any
    backtick run inside, every `overlaps` entry flagged beside the follow-ups it names.
@@ -279,6 +280,7 @@ first row it matches:
 | `not-a-followup-parent` | The named record is not a follow-up parent of this spec (no `craft/followup-parent` marker, a spec record, or linked to another spec); the name's. Nothing was written. Rerun the ritual, which names the parent it found. |
 | `followup-parent-exists` | Another live follow-up parent is linked to the spec; the vault's. Nothing was written. Rerun, which names both and offers to drop one. |
 | `parent-not-resumable` | The parent is no longer `open` (it is `ready`, `in-progress`, `blocked` or no longer live); the vault's. Nothing was written. Rerun the ritual, which refuses or drops it by its new status. |
+| `unlisted-child` | The parent holds a task its list does not name; the vault's. Nothing was written. Name the task from the `subject:` line and say it must be un-nested by hand or the parent dropped before resume can make it buildable; offer `drop` or `stop`, and print no command for it. |
 | `child-not-listed` | A name in the children file is not one the parent lists without holding; this ritual's. Nothing was written. Resume never adds a follow-up the original run did not list. Report it and rerun. |
 | `nothing-to-build` | Resuming would leave the parent listing no follow-up (it holds none and none was confirmed); the vault's. Nothing was written. Offer `drop` or `stop`, never a build command. |
 | `child-not-eligible` | A child stopped being eligible between the check and now; the vault's. Nothing was written. When the `subject:` names a held child (one already under the parent), offer `drop` or `stop`, since resume cannot finish while it is not `ready`; when it names a confirmed one, rerun the ritual. |
