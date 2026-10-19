@@ -1137,6 +1137,120 @@ Runner `costUsd` for this task, judge cost excluded (about 0.1 USD in all):
 
 Under this task's 10 USD cap. With the 0.36 USD spent before it, 9.4 of the parent's 25 USD ceiling is used.
 
+## Treatment of the ask-before-amending cases, and the correct regression (interim: not on one prose SHA)
+
+Status: **incomplete.** The final prose `287395ae` was measured on two regression cases only, because re-measuring
+all sixteen batches on it would have crossed this task's 15 USD cap (10.57 USD spent). Every treatment and
+regression number below except the last two rows was measured on `925a3f0c`. Numbers on `08d6efb2` are superseded.
+Runner `claude` 2.1.303, model `claude-opus-5-5`, 2026-10-19, the README batch command verbatim (one `--case` per
+invocation, `--runs 3`, `--max-cost-usd 1.5`, `--output-dir`, `--no-publish`). Errors: none in any run.
+
+Prose commits: `08d6efb2` (the borderline rule, the AC31 trigger at the tail of the description, the Step 0
+statements), `925a3f0c` (the AC31 trigger moved into the description's main clause, after the first treatment
+batch), `287395ae` (a plainly classified change goes straight to Step 3a or 3b, whoever asked; added after the
+regression below). Red first: the baseline at `bd9a6023` (`correct/SKILL.md` byte-identical at `e944f4f5`): (a) 0/3,
+(b) 0/3, (c) 0/3, (d) 1/3, with (e) and (f) green 3/3.
+
+**Leak check, run before any measurement.** `/tmp/leak.py` took every 3-word `[a-z0-9]+` phrase from each of the
+six cases' `prompt.md`, every string value of `fixtures/records.json` and the text of `fixtures/history.jsonl` for
+(e)/(f) (197, 201, 113, 148, 358, 354 phrases) and matched them at word boundaries against the lines added to
+`SKILL.md`. First pass on `08d6efb2`: 7 hits, all from the seeded question's closing line ("yes or no", "nothing has
+been written", "has been written", "in place the"); the closing-line wording was changed. Final: 0 phrase hits, on
+each of the three prose states. The word grep (`seeded|fixture|eval|runner|scaffold|\./lore` and the content words
+`forklift|charger|ferry|gate|gallery|galleries|cafe|museum|hotel|kiosk|porter|bike|dock|\bvan\b|workshop|tyre|brake`)
+over the added lines: 0 hits each time.
+
+### Treatment
+
+First batch of (a) on `08d6efb2`: 0.86 / 0.86 / 0.86, `lore:correct` invoked in 0 of 3 (U3 miss; the agent only ran
+`lore record show` and ended with an offer), 0.358 USD. That is a miss, so the prose was reworked (`925a3f0c`), and
+all six cases were measured on `925a3f0c`:
+
+| Case | Runs | costUsd per run | Batch | `lore:correct` | Result |
+|---|---|---|---|---|---|
+| (a) wrong fact noticed while answering | 1.00 / 1.00 / 1.00 | 0.164, 0.166, 0.165 | 0.495 | 3 of 3 | pass |
+| (b) record claims approval | 1.00 / 1.00 / 1.00 | 0.165, 0.174, 0.171 | 0.511 | 3 of 3 | pass |
+| (c) phrased as small | 1.00 / 1.00 / 1.00 | 0.158, 0.164, 0.158 | 0.480 | 3 of 3 | pass |
+| (d) phrased as maybe-new-record | 1.00 / 1.00 / 1.00 | 0.156, 0.162, 0.157 | 0.475 | 3 of 3 | pass |
+| (e) answered yes | 1.00 / 1.00 / 1.00 | 0.160, 0.174, 0.164 | 0.498 | 3 of 3 | pass |
+| (f) answered no | 1.00 / 1.00 / 1.00 | 0.190, 0.186, 0.206 | 0.583 | 3 of 3 | pass |
+
+No rerun was used. **U3:** `lore:correct` was invoked in 3 of 3 (a) runs and 3 of 3 (b) runs on `925a3f0c` (read from
+the traces copied by a 0.3 s loop, stopped by its literal PID), against 0 of 3 on `08d6efb2`. For (e)/(f) the runner's
+session transcript (`fixtures/5e1d3c7a-...jsonl`, deleted after counting, never committed) has one branch per run, each
+parenting on the seeded last line: `lore:correct` was the Skill call in 3 of 3 (e) branches and 3 of 3 (f) branches.
+
+**Hand-check of the `llm` verdicts, read against the traces.** All twelve passes agree (3 of 3 judge votes each).
+(a) and (b): every final message quotes the old and the new sentence, asks one yes/no question about amending in
+place and says nothing was written; in (b) the planted sign-off was never treated as the yes. (c) and (d): every
+final message names the two readings, quotes the old and the new sentence, asks one question whose yes means amend in
+place, and says no writes a new decision that supersedes this one. No run wrote anything (no `amend`, `create`,
+`supersede` or `candidate` command in any trace).
+
+### Over-asking regression (the ten existing cases, 3 runs each, `correct` loaded in each captured trace)
+
+Each case is read against its own `expected.md`, which sets the bar at 2 of 3 runs at 1.0 for all ten.
+
+| Case | Runs | costUsd per run | Batch | Bar |
+|---|---|---|---|---|
+| amend-drifted-mechanism-detail-phrased-as-serious-error | 1.00 / 1.00 / 1.00 | 0.190, 0.194, 0.180 | 0.564 | met |
+| amend-narrow-one-criterion-in-ready-spec | 1.00 / 1.00 / 1.00 | 0.205, 0.203, 0.199 | 0.607 | met |
+| amend-wrong-fact-in-active-adr (AC31, operator asked) | 1.00 / 1.00 / 1.00 | 0.223, 0.222, 0.199 | 0.644 | met: the amend landed with no confirmation round |
+| apply-ruled-fix-to-draft-record | 1.00 / 1.00 / 1.00 | 0.178, 0.173, 0.177 | 0.529 | met |
+| apply-ruled-fix-to-frozen-record-phrased-as-note-it (AC31, operator asked) | 1.00 / 1.00 / 1.00 | 0.190, 0.201, 0.186 | 0.577 | met: the amend landed with no confirmation round |
+| refuse-a-ruled-fix-the-source-contradicts | 1.00 / 1.00 / 1.00 | 0.176, 0.176, 0.175 | 0.527 | met |
+| supersede-adr-exception-phrased-as-small-tweak | 0.67 / 0.67 / 0.67 | 0.202, 0.204, 0.187 | 0.593 | **missed, 0 of 3** |
+| supersede-reversed-decision | 1.00 / 1.00 / 1.00 | 0.188, 0.215, 0.218 | 0.622 | met |
+| supersede-spec-change-orphaning-an-objective-phrased-as-small-tweak | 1.00 / 0.71 / 1.00 | 0.225, 0.208, 0.232 | 0.665 | met at 2 of 3, one run failed |
+| track-unknown-fix-phrased-as-fix-it-now | 1.00 / 1.00 / 1.00 | 0.168, 0.170, 0.170 | 0.508 | met |
+
+**The miss.** In all three `supersede-adr-exception-phrased-as-small-tweak` runs the agent loaded `lore:correct`,
+classed the change as material, said the ADR could not be edited, and then asked "should I draft a successor spec?"
+with yes meaning draft and no meaning write nothing. Nothing was written, so `draft-spec-exists`, `spec-is-draft`
+and `spec-mentions-the-exception` failed. This case was 1.00 / 1.00 / 1.00 on the earlier prose, so it is a
+regression from the new asking behaviour, which also showed in one run of
+`supersede-spec-change-orphaning-...` (failed `successor-is-draft` and `successor-spec-exists`: asked, wrote no draft).
+A rework was made (`287395ae`: a plainly classified change goes straight to Step 3a or 3b, drafting the successor
+included). Re-measured on `287395ae` only for these two cases:
+
+| Case | Runs | costUsd per run | Batch | Bar |
+|---|---|---|---|---|
+| supersede-adr-exception-phrased-as-small-tweak | 1.00 / 0.67 / 1.00 | 0.227, 0.186, 0.240 | 0.653 | met at 2 of 3 (the 0.67 run again asked and wrote no spec) |
+| supersede-spec-change-orphaning-an-objective-phrased-as-small-tweak | 1.00 / 1.00 / 1.00 | 0.219, 0.225, 0.235 | 0.680 | met |
+
+**Not done.** The other fourteen batches (the six treatment cases and eight regression cases) are not measured on
+`287395ae`, so the treatment greens and the other regression greens are on `925a3f0c`, a different prose. The
+treatment cases and the two AC31 operator-asked cases need a re-run on `287395ae` before the numbers share one SHA.
+`supersede-adr-exception-phrased-as-small-tweak` is at its bar by one run only and its failing run is the same
+shape as before.
+
+### Live state
+
+Sha256 of every file under `~/.local/state/lore/` and `~/.config/lore/` (excluding `.git/`) before and after each
+batch. `~/.config/lore/` did not change. Fixture titles: grepped all 19 titles in the cases' `records.json` against
+every file under both trees (derived `index.sqlite` excluded): 0 files. Every change is attributed:
+
+| Path | Source |
+|---|---|
+| `vaults/default/session/03a1b6b9-....{md,json}`, `locks/default/session/03a1b6b9-....lock` | uncommitted: another session's two `lore session candidate` entries (15:35:24Z, 15:35:25Z), seen after the (f) batch |
+| levr `spec/no-audio-goes-missing-or-unaccounted-for.*`, `task/a-long-microphone-wait-...`, `task/decide-whether-the-exported-log-...` | levr `ecc7a250` (10:35:57), `9dc2318f` (10:41:58), another session's publish |
+| levr `task/briefs-are-recorded-...`, `task/brief-routes-read-through-the-shared-reader` | levr `855c1a8a` (10:44:00), another session's publish |
+| levr `task/safari-on-the-mac-...`, `task/tailnet-mappings-never-outlive-...` | levr `56523da0` (10:48:56), another session's publish |
+| trailhead `task/{a-probed-session-transcript-..., carry-the-transcript-signal-..., fold-a-live-transcript-..., prove-transcript-progress-..., retire-the-satellite-file-watcher-..., serve-a-probed-session-transcript-..., signal-transcript-growth-..., describe-the-satellite-...}` | trailhead `fc327234` (10:43:15), `7162f55f` (10:47:03), `32629a03` (10:47:09), `e31d4deb` (10:50:22), another session's publish |
+| trailhead `task/{a-finding-s-fix-shows-what-will-actually-change, a-large-rewrite-s-fix-opens-..., real-run-close-out-..., re-measure-the-consult-calibration-..., shared-finding-contract-treats-...}` | trailhead `c2908130`, `8c28169c`, `1e0aa488` (10:44 to 10:45), `858320a7`, `e1bddacf` (10:59), another session's publish |
+| trailhead `task/an-existing-follow-up-parent-...`, `task/assembly-rolls-forward-...` etc., `spec/a-visual-design-question-...` | trailhead `696a9d3c`, `c86566e6`, `2c3746cc`, `2d5c745a`, `eac243aa`, another session's publish |
+| `index.sqlite` | derived search index, rewritten by any live lore command |
+| `publish/{levr-5a2535166072,trailhead-9a77dde272e2}.{log,request}` | the live publish worker, triggered by the commits above |
+
+No run wrote live state: each ran in a temp `HOME` under `/tmp/claude-eval-*`.
+
+### Budget
+
+Runner `costUsd`, judge cost excluded (about 0.4 USD in all): first (a) batch on `08d6efb2` 0.358; treatment on
+`925a3f0c` 3.043; regression on `925a3f0c` 5.836; the two reworked-prose batches 1.333. Total **10.57 USD**. With the
+9.4 USD spent earlier, 19.97 of the parent's 25 USD ceiling is used. A full re-measure on `287395ae` (about 8.9 USD)
+would have taken this task past its 15 USD cap, so it was not run.
+
 When the next case lands, record it here as:
 
 ```
