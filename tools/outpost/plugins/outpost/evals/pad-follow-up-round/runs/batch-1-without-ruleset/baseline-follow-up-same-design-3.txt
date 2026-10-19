@@ -1,0 +1,19 @@
+**Build A: one line per entry.** Show the full details only when an admin expands that row.
+
+**Why:**
+
+- **Density is the job.** Admins scan hundreds of entries, so they need as many rows on screen as possible. Two-line rows show about half as many, and cards show far fewer. You'll also lose some width to the rail when it's open.
+- **Scanning works down columns.** With one line per entry, timestamp, actor, action and target each line up in a column. The eye can run straight down "action" looking for `delete`. Two-line rows and cards break up those columns.
+- **The details are still there.** Clicking a row, or pressing Enter on it, opens the full entry inline below it. That covers what option B offers, but only for the rows you care about. It also isn't a slide-over panel, which you ruled out with "not C" last round.
+
+**Details worth getting right:**
+
+- **Columns:** timestamp, actor, action, target, result. Truncate long values with an ellipsis and show the full text on hover. Use a fixed-width font for IDs and IPs.
+- **Rows:** about 32px high. Light zebra striping or a hover highlight helps the eye stay on one row across a wide table.
+- **Severity:** a small colored dot or a coloured action label for failures and destructive actions. Don't tint the whole row.
+- **Keyboard:** `j`/`k` to move between rows and Enter to expand. Heavy users will rely on this.
+- **Optional:** a compact/comfortable density toggle, if anyone pushes back. Default to compact.
+
+Cards only make sense if this view has to work well on phones. If it does, you could show cards below a mobile breakpoint and keep single lines everywhere else.
+
+If you'd like to compare the three options as drawings first, I can add this as round 2 of the audit-filters pad. Otherwise I'd go ahead with single lines.

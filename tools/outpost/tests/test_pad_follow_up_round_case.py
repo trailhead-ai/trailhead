@@ -119,3 +119,8 @@ def test_a_non_empty_run_directory_is_refused_and_left_untouched(tmp_path):
     result, _ = _build(tmp_path, VARIANTS[0])
     assert result.returncode == 2
     assert [p.name for p in run_dir.iterdir()] == ["keep"]
+
+
+def test_the_system_prompt_is_the_operating_brief_then_todays_rules():
+    brief = ac.read_arm(CASE_DIR / "arms", "operating-brief.md")
+    assert ac.read_arm(CASE_DIR / "arms", "system-prompt.md") == ac.build_arm(brief, ac.current_rules())

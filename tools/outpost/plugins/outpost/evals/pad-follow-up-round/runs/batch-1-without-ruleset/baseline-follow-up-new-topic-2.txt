@@ -1,0 +1,15 @@
+Noted on the audit-log filters: a left rail that collapses.
+
+For invoice status I've opened a new pad with sketches of all three options:
+
+file://<runs>/run-8/xdg-state/outpost/pads/invoice-status/index.html
+
+**I'd build B, the text badge at the end of the row.** Here's why:
+
+- **It's the only option that doesn't rely on colour alone.** With the dot (A) or the strip (C), you need a legend or tooltip before "red" means "Overdue." People with colour blindness may not be able to tell Paid from Overdue at all. On an invoices screen, mixing those two up is a real mistake.
+- **It reads at a glance.** "Overdue" and "Draft" explain themselves.
+- **What it costs:** it takes a column of width, and it sits at the far end of the row from where the eye starts.
+
+If you like the scanning speed of A or C, a good middle ground is to tint the badge too, so the colour helps you scan and the word carries the meaning. A strip next to a badge also works if you want overdue rows to stand out as you scroll. I'd just avoid making the dot or the strip the only signal.
+
+You can choose on the pad (pick one, mark options "Not this", add a note), then press "Copy reply" and paste it here. Or just tell me in words; that works too.

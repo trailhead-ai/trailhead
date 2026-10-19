@@ -1,0 +1,15 @@
+**Build the single line per entry, and let a row expand on click to show its details.**
+
+- **Single line fits the job.** Admins scanning hundreds of entries need as many rows on screen as possible, and need columns that line up so the eye can run down "actor" or "action" without hunting. A dense single-line table does both.
+- **Two lines** shows half as many entries per screen, and every entry pays that cost even though most are never read in detail. The tucked-under details also break the column alignment.
+- **Cards** are the worst choice here. They're the least dense, they're hard to compare side by side, and they suit browsing a few items rather than scanning many.
+
+A few details that make the single line work:
+
+1. **Column order:** timestamp, actor, action, target, result/status. Put the columns admins filter and sort on first.
+2. **Truncate long values with an ellipsis** and show the full text on hover. Don't wrap, because wrapping quietly turns the row into a second line.
+3. **Expand inline** on click or Enter to show the full payload, IP and user agent, request ID and diff. Expand under the row rather than in a side panel, because the right side might later conflict with the rail layout. Allow several rows open at once so admins can compare them.
+4. **Mark rows by colour or icon** only for failures and privileged actions, so those stand out without adding visual weight to everything else.
+5. **Optional:** a compact/comfortable row-height toggle. It's cheap to add if admins ask for it later.
+
+If you'd like to see the three options drawn next to each other before you commit, I can open this as round 2 on the audit-filters pad. Otherwise I'd go straight to the single line with expandable rows.

@@ -4,7 +4,7 @@
 # Usage: run-arm.sh <repo> <runs-root> <run-id> <variant> <arm>
 #
 # <arm> is baseline (the committed pre-change skill, arms/baseline-SKILL.md) or treatment (the
-# live skill in the repo). Both use arms/operating-brief.md as the system prompt. The instruction
+# live skill in the repo). Both use arms/system-prompt.md (the operating brief plus the live rules.md) as the system prompt. The instruction
 # files are chosen here from the repo, never from the fixture.
 #
 # <runs-root>/ids.txt lists every run id of the batch, one per line; the other runs' directories,
@@ -41,7 +41,7 @@ HOME_REAL="$HOME" DENY_EXTRA="$deny" HOME="$HOME" "$repo/scripts/eval-sandbox" "
   env -i $(cat "$run/run.env") HOME="$HOME" USER="$USER" TMPDIR="$tmp" \
   /bin/sh -c 'cd "$0" && exec "$@"' "$(cat "$run/cwd")" \
   "$claude_bin" -p --setting-sources project --plugin-dir "$run/plugin" \
-  --append-system-prompt "$(cat "$case_dir/arms/operating-brief.md")" \
+  --append-system-prompt "$(cat "$case_dir/arms/system-prompt.md")" \
   --allowedTools "Bash,Read,Write,Edit,Skill" --output-format stream-json --verbose \
   "$(cat "$run/prompt.md")" > "$root/run-$id.capture.jsonl" 2> "$root/run-$id.stderr"
 code=$?

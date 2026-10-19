@@ -1,0 +1,12 @@
+Noted on the audit log: left rail, and it has to collapse.
+
+**For invoice status, build the text badge.** Put it in its own aligned column instead of tacking it onto the end of each row.
+
+- **The dot and the strip only use colour.** Someone with colour-blindness, or anyone looking at a greyscale printout, can't tell "Overdue" from "Paid". That fails WCAG 1.4.1, so you'd end up adding tooltips or a legend to fix it. A badge says "Overdue" in words and still gets the colour.
+- **Invoice statuses carry real meaning.** Draft, Sent, Paid, Overdue and Void each lead to a different action. A dot or strip only works when there are two or three states people already know. Five that matter is too many.
+- **An aligned column scans better.** Badges in a fixed column line up, so you can run your eye down it to find the overdue ones. A badge at the end of a ragged row loses that. A fixed column also gives you sorting and filtering by status for free.
+- **The strip clashes with other row states.** Selection, hover and focus styles usually use the row's left edge too.
+
+If space is tight, a dot right before the number is my second choice, but only with the status text in a tooltip and an `aria-label`. The strip is my last choice.
+
+If you'd like to compare the three as sketches before deciding, I can open them in a pad like the audit-filters one.

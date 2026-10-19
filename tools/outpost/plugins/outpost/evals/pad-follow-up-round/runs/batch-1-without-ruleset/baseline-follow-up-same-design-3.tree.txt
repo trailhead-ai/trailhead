@@ -1,0 +1,16 @@
+{
+  "variant": "follow-up-same-design",
+  "pads": [
+    "audit-filters"
+  ],
+  "audit-filters rounds": [
+    "round-1"
+  ],
+  "scratch_pad.py commands": [],
+  "tool calls": [],
+  "settled": [],
+  "C1 round added to the same pad with --add": false,
+  "C2 settled names the earlier answer": false,
+  "C3 told to open the link again": false,
+  "C4 asked in words": true
+}

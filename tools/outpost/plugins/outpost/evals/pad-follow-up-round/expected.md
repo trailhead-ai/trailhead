@@ -22,9 +22,14 @@ same in both arms; only the skill's text differs.
   `5512014a` (before rounds were described), installed over the plugin copy's `SKILL.md` by the
   builder's third argument. The script, the kit and every other file are identical between arms.
 
-Both arms get `arms/operating-brief.md` as the system prompt and nothing else: no `rules.md`,
-so the skill is the only prose that tells the session what to do with a pad. Each arm is its own
-`claude` process with `--setting-sources project`, inside `scripts/eval-sandbox`, via
+Both arms get `arms/system-prompt.md` as the system prompt: the operating brief
+(`arms/operating-brief.md`) plus the live `tools/outpost/plugins/outpost/rules.md`, appended as
+`tools/outpost/tests/test_pad_follow_up_round_case.py` rebuilds it. The ruleset is what makes a
+session reach for a pad at all (its "Scratch pads" section), exactly as in a real install; it
+says nothing of rounds, so what happens once a pad exists is decided by the skill alone. An
+earlier batch ran without the ruleset and is logged in `MANUAL-EVAL.md` as an authoring error:
+most of its sessions never reached for a pad, so it measured nothing about the skill. Each arm
+is its own `claude` process with `--setting-sources project`, inside `scripts/eval-sandbox`, via
 `run-arm.sh`. The instructions paths are committed files chosen by `run-arm.sh`; nothing comes
 from a fixture.
 
@@ -55,14 +60,15 @@ heuristics and every final message is hand-read against them.
   `round-2/round.js`) has a line naming the left rail.
 - **C3 told to open the link again** — the final message tells the user the new round is ready
   and to open the link (or the pad) again, or says an open tab will not show it.
-- **C4 asked in words** — the final message names the three row styles in words and puts the
-  choice to the user.
+- **C4 asked in words** — the final message names at least two of the row styles in words and
+  invites the user to choose, in words or on the pad.
 
 **follow-up-new-topic**
 
 - **N1 a new pad under its own name** — exactly one pad besides `audit-filters` exists.
 - **N2 `audit-filters` unchanged** — it still holds only `round-1`.
-- **N3 asked in words** — the final message names the three status styles and puts the choice.
+- **N3 asked in words** — the final message names at least two of the status styles in words
+  and invites the user to choose, in words or on the pad.
 
 ## Pass condition
 
@@ -122,5 +128,6 @@ Two scenarios, three runs per arm, one model tier, single-turn `claude -p`: the 
 simulated by a transcript excerpt and an already-built pad, not lived. The pad is outside a
 camp workspace only; the workspace path (publisher, "not confirmed" note) is not measured. The
 refusals (does not exist, can't take another round, another session is adding, duplicate title,
-`settled`) are not exercised; the script's tests own their behaviour. No PreToolUse hook in the
+`settled`) are not exercised; the script's tests own their behaviour. Each arm receives `rules.md` through `--append-system-prompt`, which may weigh more than the
+installed `~/.claude/rules/` file a real session reads. No PreToolUse hook in the
 clean room. Runs need macOS for `scripts/eval-sandbox`.

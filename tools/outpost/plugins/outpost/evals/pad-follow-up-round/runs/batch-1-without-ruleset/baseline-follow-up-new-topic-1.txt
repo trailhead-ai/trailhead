@@ -1,0 +1,11 @@
+**Build the text badge.** If you want the colour too, put a small coloured dot inside the badge.
+
+- **Status needs to be readable without colour.** The dot and the strip only use colour. That fails WCAG 1.4.1 and doesn't work for colour-blind users. Invoices usually have five or more statuses (draft, sent, viewed, paid, partially paid, overdue, void), and nobody remembers what five colours mean. A badge that says "Overdue" needs no legend.
+- **It holds up as statuses get added.** A new status like "Disputed" is just another label. With a dot or strip you'd need a sixth colour that can't be mistaken for the other five.
+- **The left-edge strip would clash with row states.** Lists often use the left edge to show which row is selected, focused or hovered. Using it for status as well makes both harder to read.
+
+What I'd change about your option B: don't push the badge to the very end of the row, where it lands in a different spot on every row. Give it its own fixed-width **Status column**, ideally next to the amount, so your eye can run straight down it. A fixed column also makes sorting and filtering by status simple, which people do a lot with invoices ("show me everything overdue").
+
+If you want a coloured signal you can spot from across the room, put the dot inside the badge (`● Overdue`) or tint the badge background. You get the quick colour scan and the text stays the source of truth.
+
+Noted on the audit log: left rail, collapsible. If you'd rather compare the three invoice options as drawings before deciding, I can open a pad for this one too.

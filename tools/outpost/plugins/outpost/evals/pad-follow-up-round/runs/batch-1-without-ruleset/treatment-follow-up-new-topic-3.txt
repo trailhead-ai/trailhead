@@ -1,0 +1,14 @@
+**Build the text badge.** Here's why I'd pick it over the other two:
+
+- **It doesn't depend on colour.** Invoices usually have four or more states, such as draft, sent, paid, overdue and void. Colour alone can't tell that many apart reliably. People with colour-blindness would struggle, and you'd fail WCAG 1.4.1. The dot and the strip both rely on colour alone, so each would need a tooltip or legend to work. The badge says the status in words.
+- **It's easy to scan and filter.** If the badges line up in their own fixed-width column, the eye can run straight down it. A word like "Overdue" stands out without anyone having to remember a colour code.
+- **It leaves the row edges free.** A left-edge strip competes with the selected, hover and focus styles that list rows usually need. The badge doesn't get in their way.
+
+Two things to watch with the badge:
+
+1. **Keep it in a real column, not tucked after variable-width content.** On wide screens, "end of the row" can sit a long way from the invoice number. If status is what people check first, move that column close to the number or amount instead of the far right.
+2. **Use colour only on the states that need attention.** Overdue might be red and draft muted, with the rest neutral. That keeps the list calm and makes the important ones pop.
+
+The dot would make sense only if space is very tight (on mobile, for example) and you put the status text in an accessible label. The strip is worth it only if a single state, like overdue, is all you need people to spot.
+
+If you'd like to compare the three as drawings first, as we did for the filters, I can open a pad for them.
