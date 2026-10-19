@@ -65,7 +65,7 @@ FIX_SHAPE_EDIT_REVISION = "2fc63f894f8ad944e59d0b8c23af4f526c2dfe0b"
 
 # The commit carrying the sharpened fix-shape contract (commit A2): the seven second-round treated arms
 # and the second-round calibrated consult regression arm read `council.md` from here.
-FIX_SHAPE_SHARPENED_REVISION = "ba558e591914f435f694c5e41533db20ed392844"
+FIX_SHAPE_SHARPENED_REVISION = "e568c4e037dbf1ba2d2eb3027fa3f77e03104dae"
 
 PLUGIN = "tools/craft/plugins/craft"
 RULES = f"{PLUGIN}/rules.md"

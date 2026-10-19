@@ -2874,3 +2874,20 @@ composition with only `council.md` moved to A2. Sizes are `stat -c %s`, against 
 | `regress2-cal-consult.md` | 44966 | prompt-embedded |
 
 `regress2-cal-consult.md` and `fs-treated2-fsconsult.md` are byte-identical, as their first-round counterparts are.
+
+**Rebuilt before any second-round run (2026-10-19).** A2's small-fix bullet carried a spliced inline example
+(the printed-notice example joined to an unrelated empty-list condition) and an overlong line; commit
+`e568c4e037dbf1ba2d2eb3027fa3f77e03104dae` drops the parenthetical and rewraps the paragraph, changing no rule. The
+second-round arms now pin `council.md` there (`FIX_SHAPE_SHARPENED_REVISION`), and the table above is superseded
+by these sizes, same forms:
+
+| Arm | Bytes |
+|---|---|
+| `fs-treated2-fsspecreview.md` | 84924 |
+| `fs-treated2-fsplan.md` | 77628 |
+| `fs-treated2-fsconsult.md` | 44914 |
+| `fs-treated2-fsdriver.md` | 84253 |
+| `fs-treated2-fsreview.md` | 43852 |
+| `fs-treated2-fsbuildreview.md` | 138095 |
+| `fs-treated2-fsdrivebuild.md` | 180403 |
+| `regress2-cal-consult.md` | 44914 |

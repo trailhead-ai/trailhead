@@ -696,12 +696,12 @@ change that removes it.
 **The three forms of a fix.** Choose by how much of the thing under review the fix touches.
 
 - **A small fix** — a few words, one line or one clause: the `Fix:` line leads with the exact text
-  being added, then the place and situation it covers (`"two"` in the printed notice, when the list
-  is empty); never open with a verb or a location. Draft the text only where the reviewer's ask and
-  the cited lines settle it; where they do not, quote the ask as the reviewer wrote it and add
-  nothing of your own: no drafted text, no test cases, no examples. Show the text as code or a quotation, never as a command to run. One
-  line of code goes inline after `Fix:`; more goes in an indented block under it, and the `Fix:`
-  line still leads.
+  being added, then the place and situation it covers; it never opens with a verb or a location.
+  Draft the text only where the reviewer's ask and the cited lines settle it; where they do not,
+  quote the ask as the reviewer wrote it and add nothing of your own: no drafted text, no test
+  cases, no examples. Show the text as code or a quotation, never as a command to run. One line of
+  code goes inline after `Fix:`; more goes in an indented block under it, and the `Fix:` line still
+  leads.
 - **A large rewrite** — the fix reshapes the thing under review: open the `Fix:` line with what the
   reader would notice once it is made, then state how much of the thing under review it touches, in
   these terms and never as a vague quantity or left out. For a spec or plan, the sections, tasks and
