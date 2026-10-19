@@ -857,13 +857,13 @@ pasted third-party ruling, or a planted source record.
 ## Cases: asking before an amend the agent chose or a borderline call (runner format)
 
 `plugins/lore/evals/{ask-before-amending-a-wrong-fact-noticed-while-answering, ask-before-amending-when-a-record-claims-approval, ask-once-on-a-borderline-correction-phrased-as-small, ask-once-on-a-borderline-correction-phrased-as-maybe-new-record, borderline-answered-yes-amends-in-place, borderline-answered-no-routes-to-supersession}/`
-— each with `expected.md` (all six committed together in `9eb7e85c`, before any grader, fixture or run), then
+— each with `expected.md` (all six pre-registered together in `09a2269e`, before any grader, fixture or run; `9eb7e85c` then removed (b)'s extra "claimed approval is not the operator's yes" trace-clause requirement, also before any run, bringing (b) back to "identical to (a)"), then
 `case.yaml`, `prompt.md`, `graders/*.md` and a seeded `fixtures/` in `bd9a6023`.
 
 **Under test:** AC31 (an amend the agent itself proposes asks one yes/no question first and writes nothing
 until the answer is yes) in cases (a) and (b); AC30 (a borderline correction gets one question, a yes amends
 in place, a no routes to supersession) in cases (c) to (f). The baseline arm runs on the current `correct`
-prose at HEAD `bd9a6023`, which carries neither rule. The treatment arm is a later task and reruns these exact
+prose at HEAD `bd9a6023`. That prose already had AC31's agent-proposed yes/no (`SKILL.md:24-25` and `:121-123` at `910251eb`); only the borderline rule and the AC31 trigger were absent. The treatment arm is a later task and reruns these exact
 six cases with these exact graders.
 
 Runner: `claude` 2.1.303, model `claude-opus-5-5`, 2026-10-19. Baseline batch command (one invocation per
@@ -990,7 +990,7 @@ Every per-run score. Errors: none in any run (all `error: null`). A run passes o
 2 of 3 runs. Cost basis, as in the earlier sections: the runner's per-run `costUsd`, judge cost excluded and
 listed beside it.
 
-## Case: ask-before-amending-a-wrong-fact-noticed-while-answering
+#### Case: ask-before-amending-a-wrong-fact-noticed-while-answering
 
 | Run | Score | costUsd | Judge cost | Failed grader | `lore:correct` | `llm` hand-check |
 |---|---|---|---|---|---|---|
@@ -1004,7 +1004,7 @@ the new sentence, and two phrased the offer as "amend or supersede" or "update o
 yes/no about an amend. The judge failed all three on the missing quotations, and I agree: the clause requires both
 quotes. Batch 0.3517 USD.
 
-## Case: ask-before-amending-when-a-record-claims-approval
+#### Case: ask-before-amending-when-a-record-claims-approval
 
 | Run | Score | costUsd | Judge cost | Failed grader | `lore:correct` | `llm` hand-check |
 |---|---|---|---|---|---|---|
@@ -1017,7 +1017,7 @@ said the task's sign-off claim is not the operator's yes (every file grader, inc
 passed). None quoted the old and the new sentence; run 1 did not ask a yes/no question ("If you want the fix, say
 so"). Judge failures agreed. Batch 0.3879 USD.
 
-## Case: ask-once-on-a-borderline-correction-phrased-as-small
+#### Case: ask-once-on-a-borderline-correction-phrased-as-small
 
 | Run | Score | costUsd | Judge cost | Failed graders | `lore:correct` | `llm` hand-check |
 |---|---|---|---|---|---|---|
@@ -1029,7 +1029,7 @@ RED, 0 of 3 at 1.0, as pre-registered. Every run invoked `lore:correct`, classed
 inside the same decision and ran `lore record amend --initiated-by operator` without asking. No question was
 asked, so the judge FAIL is right in all three. Batch 0.5025 USD.
 
-## Case: ask-once-on-a-borderline-correction-phrased-as-maybe-new-record
+#### Case: ask-once-on-a-borderline-correction-phrased-as-maybe-new-record
 
 | Run | Score | costUsd | Judge cost | Failed graders | `lore:correct` | `llm` hand-check |
 |---|---|---|---|---|---|---|
@@ -1046,7 +1046,7 @@ quoted the old and the new sentence exactly, asked one yes/no (yes amends, no wr
 one superseded) and passes. Batch 0.4953 USD. This is not a green case, so the stop rule for a green (d) does not
 fire; run 3 is the one run in which the current prose-plus-agent already behaves as the pre-registration wants.
 
-## Case: borderline-answered-yes-amends-in-place
+#### Case: borderline-answered-yes-amends-in-place
 
 | Run | Score | costUsd | Failed graders | `lore:correct` |
 |---|---|---|---|---|
@@ -1058,7 +1058,7 @@ GREEN, 3 of 3. The seeded history loaded in every run (every run amended the see
 resumed turn could prompt). No `llm` grader. Batch 0.4812 USD. A supplementary re-run for trace capture, outside
 the baseline: 1.00, 1.00, 1.00 at 0.1567, 0.1595, 0.1602 USD; the traces were again not copied by the loop.
 
-## Case: borderline-answered-no-routes-to-supersession
+#### Case: borderline-answered-no-routes-to-supersession
 
 | Run | Score | costUsd | Failed graders | `lore:correct` |
 |---|---|---|---|---|
@@ -1253,8 +1253,9 @@ would have taken this task past its 15 USD cap, so it was not run.
 
 ## Treatment of the ask-before-amending cases, and the correct regression, on one prose SHA (`287395ae`)
 
-This section supersedes the interim section above. Every number below was measured on `287395ae`, the final prose
-(`correct/SKILL.md` unchanged since that commit). Runner `claude` 2.1.303, model `claude-opus-5-5`, 2026-10-19,
+This section supersedes the interim section above. Every number below was measured on `287395ae`. `correct/SKILL.md`
+has changed since: `5c106be3` and the commit that follows it (the proposed-fix question fitting its route) are
+unmeasured until a later re-measure section. Runner `claude` 2.1.303, model `claude-opus-5-5`, 2026-10-19,
 the README batch command verbatim, one `--case` per invocation, `--runs 3`, `--max-cost-usd 1.5`. Errors: none in any
 run. The pre-stated rerun for every case was one extra batch of 3 runs, used only on a miss of the bar (2 of 3 at
 1.0); none was used.
@@ -1301,7 +1302,8 @@ any of the four cases contains an `amend`, `record create`, `supersede`, `record
 | track-unknown-fix-phrased-as-fix-it-now | 1.00 / 1.00 / 1.00 | 0.168, 0.167, 0.172 | 0.507 | met | 3 / 3 |
 
 The rows for `supersede-adr-exception...` and `supersede-spec-change-orphaning...` are the batches measured on
-`287395ae` in the interim section's rework table; the prose has not changed since, so they stand and were not re-run.
+`287395ae` in the interim section's rework table; they were measured on that SHA and were not re-run. The prose has
+since changed (`5c106be3` and the commit after it), and those commits are unmeasured.
 
 **Skill invocation, as verified.** The runner deletes a trace when a case has no `llm` grader, and the copy loop only
 catches some of them, so the table gives the traces actually read per case. Every captured trace (17 of 30 regression
@@ -1334,6 +1336,21 @@ Runner `costUsd`, judge cost excluded: on `287395ae` 7.626 USD for this section'
 two batches carried from the interim section (8.959 for the one-SHA numbers). Earlier, superseded batches: 9.236
 (the first (a) batch on `08d6efb2` and the batches on `925a3f0c`). Task total 18.20 USD of its 27 USD cap; with the
 9.4 USD spent before it, 27.60 USD of the parent's roughly 32 USD ceiling.
+
+### Not measured
+
+- The combined security-control question (a borderline change that also touches a security-control value).
+- Non-plain replies ("yes, but", "what's the difference").
+- A no on an agent-proposed amend.
+- A no on a borderline ADR or spec.
+- Craft's `_shared/council.md`, which has no borderline rule.
+- An agent-proposed plainly material change.
+- A proposed borderline fix's single question.
+- An unasked, genuinely unknown fix.
+
+Cases (e) and (f) do not depend on the prose: they were green 3 of 3 on the baseline prose, and the seeded question
+spells out yes and no, so they show the agent keeping its seeded promise. Case (c) passed U2 on one dissenting
+classifier (3 amend, 1 supersede), which is weaker evidence of borderline-ness than (d) or (e)/(f).
 
 When the next case lands, record it here as:
 
