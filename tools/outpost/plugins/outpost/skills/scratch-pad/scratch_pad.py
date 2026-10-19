@@ -46,12 +46,26 @@ Contract
   but not confirmed (exit 0), otherwise a refusal. The temp folder is removed
   on every path, and nothing is created under Outpost's pads folder. With no
   ``publish-site`` skill beside this one, a run inside a workspace is refused.
+  The pad's lock and recovery (below) are taken on this path too, keyed on
+  ``<ws>/sites/<pad>``, so a new pad and an add on one name never interleave.
+* ``--add`` inside a camp workspace runs the same add routine as on disk (see below) against
+  ``<ws>/sites/<pad>``, from any depth of the workspace. Only two steps differ: the new pad is built in a
+  fresh owner-only ``scratch-pad-`` temp folder outside the workspace, and it is put in place by running
+  the publisher with ``--overwrite`` (the publisher replaces the site wholesale, so the temp folder holds
+  every earlier round). ``--overwrite`` is passed only for an add. The publisher's stdout is relayed
+  verbatim, then ``pad folder:``; a non-zero exit is refused as ``scratch-pad: publish: <stderr line>``
+  per line; one that cannot be started as ``scratch-pad: publish: could not start the publisher: <why>``.
+  On timeout the publisher is killed and waited for while the pad's lock is still held, then the site is
+  read back as for any add: a pad that reads back whole, with top-level ``index.html`` and ``rounds.js``,
+  and exactly the new pad's rounds gives the same ``note:`` (exit 0); otherwise a refusal ends
+  ``scratch-pad: publish: the publisher did not finish within <n> seconds and`` ``the round was not added``
+  (site unchanged), ``the pad is no longer there`` or ``the pad is not as expected``, or the read-back's
+  own "can't take another round" refusal. The temp folder is removed on every path.
 * The pad slug matches ``^[a-z0-9][a-z0-9._-]*$`` and is at most 64 characters.
 * Outside a workspace, pads live in ``<state>/pads/<slug>/`` where ``<state>`` is
   ``$OUTPOST_STATE_DIR``, else ``$XDG_STATE_HOME/outpost``, else
   ``~/.local/state/outpost``. Without ``--add`` a pad folder that already exists is refused.
-* ``--add`` (outside a camp workspace; inside one it is refused with one ``--add`` line and nothing is
-  written) adds the round to the existing pad, in this order: the round is checked as above; the pad's
+* ``--add`` adds the round to the existing pad, in this order: the round is checked as above; the pad's
   lock is taken; any interrupted earlier run is recovered from; the pad is read back; the whole new pad
   is built in a ``.tmp-`` sibling; the temp copy is checked again; the new pad is put in place. A pad
   that does not exist is refused as "does not exist — drop --add to start a new pad", and a round
@@ -59,9 +73,9 @@ Contract
 * The pad's lock is an exclusive ``flock`` on
   ``<outpost state>/pad-locks/<sha256 of the pad's resolved path>.lock``. ``pad-locks`` is created
   owner-only and refused if it is a symlink; the lock file is opened ``O_NOFOLLOW | O_CREAT`` with
-  mode 0600 and is left in place. Building a new pad takes the same lock. A run that must wait prints
-  one "waiting for another session's add" line on stderr, and after twice the publish timeout is refused
-  with "another session is adding a round to pad ...; try again", changing nothing.
+  mode 0600 and is left in place. Building a new pad, on disk or in a workspace, takes the same lock. A run
+  that must wait prints one "waiting for another session's add" line on stderr, and after twice the
+  publish timeout is refused with "another session is adding a round to pad ...; try again", changing nothing.
 * Recovery, under the lock on every run on a pad name (new pad or add): with no pad and a
   ``.aside-<pad>`` folder, that folder is renamed back; with both, ``.aside-<pad>`` is removed; leftover
   ``.tmp-<pad>-`` folders are removed (a folder of another pad whose name merely starts with this
@@ -532,6 +546,15 @@ def _recover(pads_root: Path, pad: str) -> None:
             _remove(pads_root / entry)
 
 
+def _recover_in(pads_root: Path, pad: str) -> None:
+    """``_recover`` where the folder may not exist yet (a workspace without sites); I/O failure is a refusal."""
+    try:
+        if pads_root.is_dir():
+            _recover(pads_root, pad)
+    except OSError as exc:
+        raise _build_failed(pads_root / pad, exc)
+
+
 def _tree_problems(root: Path) -> list[str]:
     """Every symlink or special file under *root*, named relative to it."""
     problems: list[str] = []
@@ -644,8 +667,14 @@ def _swap_in(tmp: Path, final: Path, aside: Path) -> None:
     shutil.rmtree(aside, ignore_errors=True)
 
 
-def _add_round(pads_root: Path, pad: str, kit_dir: Path, encoded: Encoded, put_in_place=_swap_in) -> Path:
-    """Add the round to the existing pad; *put_in_place(tmp, final, aside)* is the only step a caller swaps."""
+def _add_round(
+    pads_root: Path, pad: str, kit_dir: Path, encoded: Encoded, put_in_place=_swap_in, make_tmp=None
+) -> Path:
+    """Add the round to the existing pad.
+
+    *put_in_place(tmp, final, aside)* is the step a caller swaps; *make_tmp()* says where the new pad is
+    built (default: a ``.tmp-`` sibling of the pad).
+    """
     final, aside = pads_root / pad, pads_root / f".aside-{pad}"
     if not os.path.lexists(final):
         raise Refusal([_line(f"pad {_q(pad)}", "does not exist — drop --add to start a new pad")])
@@ -662,7 +691,7 @@ def _add_round(pads_root: Path, pad: str, kit_dir: Path, encoded: Encoded, put_i
         )
     number = len(titles) + 1
     try:
-        tmp = Path(tempfile.mkdtemp(prefix=f".tmp-{pad}-", dir=pads_root))
+        tmp = Path(make_tmp() if make_tmp else tempfile.mkdtemp(prefix=f".tmp-{pad}-", dir=pads_root))
     except OSError as exc:
         raise _build_failed(final, exc)
     try:
@@ -682,9 +711,7 @@ def _add_round(pads_root: Path, pad: str, kit_dir: Path, encoded: Encoded, put_i
     return final
 
 
-def _publish_to_workspace(
-    workspace: Path, pad: str, kit_dir: Path, encoded: Encoded, env: Mapping[str, str], runner, timeout: float
-) -> Built:
+def _require_publisher() -> None:
     if not PUBLISHER_PATH.is_file():
         raise Refusal(
             [
@@ -695,6 +722,27 @@ def _publish_to_workspace(
                 )
             ]
         )
+
+
+def _publisher_cmd(tmp: Path, pad: str, workspace: Path, *extra: str) -> list[str]:
+    return [sys.executable, str(PUBLISHER_PATH), str(tmp), pad, "--workspace-path", str(workspace), *extra]
+
+
+def _run_the_publisher(runner, cmd: Sequence[str], env: Mapping[str, str], timeout: float):
+    try:
+        return runner(cmd, env, timeout)
+    except OSError as exc:
+        raise Refusal([_line("publish", f"could not start the publisher: {exc.strerror or exc}")])
+
+
+def _publish_failed(result) -> Refusal:
+    reasons = [_line("publish", _esc(line)) for line in result.stderr.splitlines() if line.strip()]
+    return Refusal(reasons or [_line("publish", f"the publisher exited with status {result.returncode}")])
+
+
+def _publish_to_workspace(
+    workspace: Path, pad: str, kit_dir: Path, encoded: Encoded, env: Mapping[str, str], runner, timeout: float
+) -> Built:
     final = workspace / "sites" / pad
     # Only an early refusal: the publisher's own refusal without --overwrite, taken under its
     # workspace lock, is what makes two racing runs on one name yield one site.
@@ -707,11 +755,8 @@ def _publish_to_workspace(
         raise _build_failed(final, exc)
     try:
         _write_pad(tmp, kit_dir, encoded)
-        cmd = [sys.executable, str(PUBLISHER_PATH), str(tmp), pad, "--workspace-path", str(workspace)]
         try:
-            result = runner(cmd, env, timeout)
-        except OSError as exc:
-            raise Refusal([_line("publish", f"could not start the publisher: {exc.strerror or exc}")])
+            result = _run_the_publisher(runner, _publisher_cmd(tmp, pad, workspace), env, timeout)
         except subprocess.TimeoutExpired:
             if (final / "index.html").is_file():
                 note = "note: the pad was published but the publisher did not confirm it in time"
@@ -720,13 +765,48 @@ def _publish_to_workspace(
                 [_line("publish", f"the publisher did not finish within {timeout:g} seconds and no pad was published")]
             )
         if result.returncode != 0:
-            reasons = [_line("publish", _esc(line)) for line in result.stderr.splitlines() if line.strip()]
-            raise Refusal(reasons or [_line("publish", f"the publisher exited with status {result.returncode}")])
+            raise _publish_failed(result)
         return Built(final, result.stdout.splitlines())
     except OSError as exc:
         raise _build_failed(final, exc)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _timed_out_add(final: Path, pad: str, tmp: Path, timeout: float) -> Built:
+    """Judge an add whose publisher was killed: the site on disk against the pad *tmp* was to become."""
+    late = f"the publisher did not finish within {timeout:g} seconds and"
+    expected = _read_pad(tmp, pad)
+    if not os.path.lexists(final):
+        raise Refusal([_line("publish", f"{late} the pad is no longer there")])
+    titles = _read_pad(final, pad)
+    if titles == expected[:-1]:
+        raise Refusal([_line("publish", f"{late} the round was not added")])
+    if titles != expected or not all((final / name).is_file() for name in ("index.html", "rounds.js")):
+        raise Refusal([_line("publish", f"{late} the pad is not as expected")])
+    return Built(final, ["note: the pad was published but the publisher did not confirm it in time"])
+
+
+def _add_to_workspace(
+    workspace: Path, pad: str, kit_dir: Path, encoded: Encoded, env: Mapping[str, str], runner, timeout: float
+) -> Built:
+    """Add the round to the pad published at ``<workspace>/sites/<pad>``; call only under the pad's lock."""
+    sites = workspace / "sites"
+    outcome: list[Built] = []
+
+    def publish(tmp: Path, final: Path, aside: Path) -> None:
+        cmd = _publisher_cmd(tmp, pad, workspace, "--overwrite")
+        try:
+            result = _run_the_publisher(runner, cmd, env, timeout)
+        except subprocess.TimeoutExpired:
+            outcome.append(_timed_out_add(final, pad, tmp, timeout))
+            return
+        if result.returncode != 0:
+            raise _publish_failed(result)
+        outcome.append(Built(final, result.stdout.splitlines()))
+
+    _add_round(sites, pad, kit_dir, encoded, publish, lambda: tempfile.mkdtemp(prefix="scratch-pad-"))
+    return outcome[0]
 
 
 def _build(
@@ -752,18 +832,19 @@ def _build(
     encoded = _check_and_encode(round_path, pad, kit_dir)
     workspace = None if cwd is None else enclosing_workspace(cwd, env)
     if workspace is not None:
-        if add:
-            raise Refusal([_line("--add", "adding a round is not available inside a camp workspace")])
-        return _publish_to_workspace(workspace, pad, kit_dir, encoded, env, runner, timeout)
+        _require_publisher()
+        sites = workspace / "sites"
+        with _pad_lock(env, sites, pad, 2 * timeout):
+            _recover_in(sites, pad)
+            if add:
+                return _add_to_workspace(workspace, pad, kit_dir, encoded, env, runner, timeout)
+            return _publish_to_workspace(workspace, pad, kit_dir, encoded, env, runner, timeout)
 
     pads_root = _pads_root(env)
     final = pads_root / pad
     _ensure_pads_root(pads_root)
     with _pad_lock(env, pads_root, pad, 2 * timeout):
-        try:
-            _recover(pads_root, pad)
-        except OSError as exc:
-            raise _build_failed(final, exc)
+        _recover_in(pads_root, pad)
         if add:
             _add_round(pads_root, pad, kit_dir, encoded)
         else:
