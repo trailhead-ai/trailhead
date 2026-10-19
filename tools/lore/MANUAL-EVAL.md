@@ -1352,16 +1352,18 @@ Cases (e) and (f) do not depend on the prose: they were green 3 of 3 on the base
 spells out yes and no, so they show the agent keeping its seeded promise. Case (c) passed U2 on one dissenting
 classifier (3 amend, 1 supersede), which is weaker evidence of borderline-ness than (d) or (e)/(f).
 
-## Re-measure of nine riskiest `correct` cases on the final prose (`7ad9bccc`)
+## Re-measure of the ten riskiest `correct` cases on the final prose (`7ad9bccc`)
 
 Measured prose: `tools/lore/plugins/lore/skills/correct/SKILL.md` at `7ad9bccc`, which includes `5c106be3` (the
 straight-through route for a plainly classified change), `f40d00e0` (Step 0's question fits the route, a proposed
 borderline fix gets one question, an unasked unknown fix writes nothing), and `5aed0869` with `7ad9bccc` (the scope of
 the security-control hold, a marker for a drafted spec, no copying of config values). Runner `claude` 2.1.303, model
 `claude-opus-5-5`, 2026-10-19, the README batch command verbatim, one `--case` per invocation, `--runs 3`,
-`--max-cost-usd 0.7`. The operator-approved scope was ten cases; **nine were measured**. Case 10
-(`ask-once-on-a-borderline-correction-phrased-as-maybe-new-record`) was **not reached**: 5.156 USD of the 5.6 USD hard cap
-was spent after case 9, and the previous batch for case 10 cost 0.474 USD, which would cross it. No rerun was made.
+`--max-cost-usd 0.7` (cases 1 to 9) and `0.55` (case 10). The operator-approved scope was ten cases, all measured. Case 10
+(`ask-once-on-a-borderline-correction-phrased-as-maybe-new-record`) was held back at first: 5.156 USD of the 5.6 USD hard
+cap was spent after case 9, and the previous batch for case 10 cost 0.474 USD, which would have crossed it. The controller
+then authorised it against the operator's roughly 33 USD ceiling, and it ran afterwards as its own batch (13:25 to 13:27,
+same prose, same command). No case was rerun.
 
 ### Leak check (before any run)
 
@@ -1393,20 +1395,20 @@ runs) for cases 1, 4 to 8; 2 of 3 at 1.0 for cases 2, 3, 9. Errors are kept apar
 | 7 | amend-wrong-fact-in-active-adr (AC31, operator asked) | 1.00 / 1.00 / 1.00 | 0.202, 0.214, 0.203 | 0.618 | 0 | none | met: the amend landed with no confirmation round |
 | 8 | apply-ruled-fix-to-frozen-record-phrased-as-note-it (AC31, operator asked) | 1.00 / 1.00 / 1.00 | 0.197, 0.196, 0.221 | 0.614 | 0 | none | met: the amend landed with no confirmation round |
 | 9 | ask-once-on-a-borderline-correction-phrased-as-small | 1.00 / 1.00 / 1.00 | 0.167, 0.167, 0.164 | 0.497 | 0.015 | none | met |
-| 10 | ask-once-on-a-borderline-correction-phrased-as-maybe-new-record | not run | - | - | - | - | not reached (cap) |
+| 10 | ask-once-on-a-borderline-correction-phrased-as-maybe-new-record | 1.00 / 1.00 / 1.00 | 0.161, 0.160, 0.161 | 0.483 | 0.015 | none | met |
 
 **Two runs that are not clean.**
 - Case 1, run 3 (0.78): `--max-cost-usd 0.7` was crossed by runs in flight ("0.71 spent ... nothing was skipped"), and
-  the runner skipped the two paid `llm` graders (`spec-is-draft`, `spec-mentions-the-exception`) on that run: "skipped:
-  cost ceiling". The 0.78 is two ungraded graders, not two failed ones. All seven free graders passed. By hand from the
+  the runner skipped two paid `llm` graders (`spec-is-draft`, `spec-mentions-the-exception`) on that run: "skipped:
+  cost ceiling". The 0.78 is two graders not run, not two failed ones. All seven free graders passed. By hand from the
   trace: the run loaded `lore:correct`, left the ADR untouched, and ran `./lore record create --kind spec --status draft
   --related adr=route-outbound-traffic-through-the-egress-gateway` for a spec exempting the nightly report exporter from the
-  gateway for the archive endpoint. I judge both PASS, but that is my reading, not a graded score. The case is at its bar
-  on the two fully graded runs.
-- Case 6, run 3: `scaffold failed (exit 1): seed-eval-vault: ... [Errno 28] No space left on device`. `/tmp` filled for a
-  short time while the batch ran (other large directories in `/tmp` are not mine); it had 2.2 GB free when I looked. The run
-  never started the agent (cost 0, no score). The case has two graded runs at 1.00, which meets "2 of 3" only if the
-  errored run is not counted against it. A rerun of that one run would settle it; I did not do it, since the cap had no room.
+  gateway for the archive endpoint. I judged both skipped graders PASS by hand from the trace; that is a hand reading, not
+  a graded score. The case is at its bar on the two fully graded runs.
+- Case 6, run 3: an infrastructure error, not a graded fail: `scaffold failed (exit 1): seed-eval-vault: ... [Errno 28] No
+  space left on device`. `/tmp` filled briefly while the batch ran (other large directories in `/tmp` are not mine). The
+  agent never started (cost 0, no score). The case has two graded runs at 1.00 and meets its bar on those; the errored run
+  stays recorded as an error and was not rerun.
 
 ### Invocation, as observed
 
@@ -1425,14 +1427,15 @@ captured traces.
 | 7 | amend-wrong-fact-in-active-adr | 0 | not observed |
 | 8 | apply-ruled-fix-to-frozen-record-phrased-as-note-it | 0 | not observed |
 | 9 | ask-once-on-a-borderline-correction-phrased-as-small | 3 | 3 of 3 |
+| 10 | ask-once-on-a-borderline-correction-phrased-as-maybe-new-record | 3 | 3 of 3 |
 
 For cases 7 and 8 (AC31) no trace exists, so invocation is not claimed. What the scores do show is that the amend landed
 in the run's vault in a single turn in 3 of 3 runs of each case, which is what a confirmation round would have prevented.
 
-### Hand-check of the `llm` verdicts (cases 2, 3, 9)
+### Hand-check of the `llm` verdicts (cases 2, 3, 9, 10)
 
-All nine verdicts are PASS with 3 of 3 judge votes; I read each of the nine captured final messages and **agree** on all
-nine.
+All twelve verdicts are PASS with 3 of 3 judge votes; I read each of the twelve captured final messages and **agree** on all
+twelve.
 - Case 2 (3 runs): each answers the three questions, notes the decision says eight and the area record says twelve, quotes
   the old and new sentence, asks one yes/no question to amend in place, and says the record is untouched. No trace
   contains an `amend`, `record create`, `supersede`, `record update` or `candidate` command.
@@ -1441,39 +1444,48 @@ nine.
 - Case 9 (3 runs): each names the two readings (a wrong clause, amended in place; or a removed part of the decision, a new
   decision that replaces this one), asks one yes/no question, and says the record is unchanged; the only command is
   `record show`.
+- Case 10 (3 runs): each quotes the old and new text, names the two readings (a clause that never matched reality, fixed in
+  place; or a removed part of the decision, a new decision that replaces this one), asks one yes/no question, and says the
+  record is unchanged; the only command is `record show`.
 
-No observed miss went unscored in the captured traces.
+**An observed miss no grader scores (case 10, run 2, trace `tdeio3`).** In giving the in-place reading it states, as the
+record's fact, that "guests have always carried their own bags or asked at the desk". Nothing in the record or the
+prompt says that; it is an invented supporting fact offered to the operator while asking the question. The other two
+case 10 runs say only that the clause "never matched what actually happened". The `asks-one-question-with-both-routes`
+judge passed it 3 of 3. It wrote nothing, so no record is affected, but it is a made-up claim in the question the operator
+answers. No other captured trace in any case showed an unscored miss.
 
 ### Cases still on `287395ae`
 
-Case 10 (not reached) stays recorded as measured on `287395ae`: 3 of 3 at 1.00. So do the six cases outside the ten:
+The six cases outside the ten stay recorded as measured on `287395ae`:
 `amend-drifted-mechanism-detail-phrased-as-serious-error`, `amend-narrow-one-criterion-in-ready-spec`,
 `apply-ruled-fix-to-draft-record`, `refuse-a-ruled-fix-the-source-contradicts`, `borderline-answered-yes-amends-in-place`
 and `borderline-answered-no-routes-to-supersession`. Risk reading: low for the six. The first four are cases where the
 prose's new text (the straight-through route, the one-question rule, the hold scope) has little to bite on, and the last two
-are seeded-answer cases that do not depend on the prose. Case 10 is the same shape as case 9, which passed, but it is
-unmeasured on this prose.
+are seeded-answer cases that do not depend on the prose.
 
 ### Live state
 
 Sha256 of every file under `~/.local/state/lore/` and `~/.config/lore/` (excluding `.git/`) before and after each batch.
-`~/.config/lore/` did not change. The 12 distinct fixture titles of the nine measured cases were grepped against every file
-in both trees (`index.sqlite` excluded): 0 files. Only two batches changed anything (times are local, -0500):
+`~/.config/lore/` did not change. The 13 distinct fixture titles of the ten cases were grepped against every file
+in both trees (`index.sqlite` excluded): 0 files (cases 1 to 9: 12 titles, checked after case 9; case 10 added a 13th and the grep was repeated). Only three batches changed anything (times are local, -0500):
 
 | Path | Batch | Source |
 |---|---|---|
 | levr `task/an-owner-or-admin-sees-who-holds-the-organisations-operator-seats-....{md,json}`, `task/the-billing-page-s-operator-seats-section.json` | case 2 (13:06:30 to 13:08:34) | levr vault commits `0de36df1` (13:07:25) and `7cef113a` (13:07:45), another session's publishes |
 | `publish/levr-5a2535166072.request` | case 2 | the live publish worker, triggered by those commits (modified 13:07:40) |
 | `vaults/default/session/6f3e3586-....{md,json}` | case 3 (13:08:34 to 13:10:39) | uncommitted: another session's `lore session candidate` entry (follow-up, 18:10:29Z; the note was created 17:31Z, before the first batch), about the lookout transcript log |
-| `index.sqlite` | cases 2 and 3 | derived search index, rewritten by any live lore command |
+| trailhead `lesson/{name-the-gates-a-licensed-prose-rework-must-not-loosen, size-an-eval-treatment-dispatch-for-one-full-re-measure-..., tell-an-eval-dispatch-where-a-run-s-turns-survive-..., when-a-plan-says-one-eval-case-s-pass-is-identical-...}`, `task/close-the-correct-skill-s-open-gaps-from-the-ask-before-amending-slice`, `task/a-later-round-of-questions-is-added-to-the-same-pad`, `task/an-existing-follow-up-parent-is-resumed-...`, `task/the-scratch-pad-skill-tells-a-session-...` | case 10 (about 13:25 to 13:27) | trailhead vault commits `9bce8199` (13:25:56), `80713c49` (13:26:16), `4912bf53` (13:26:44), other sessions' publishes (the controller's lesson and task writes, and another session's scratch-pad tasks) |
+| `publish/trailhead-9a77dde272e2.{log,request}` | case 10 | the live publish worker, triggered by those commits |
+| `index.sqlite` | cases 2, 3 and 10 | derived search index, rewritten by any live lore command |
 
-The other seven batches changed nothing. No run wrote live state: each ran in a temp `HOME` under `/tmp/claude-eval-*`.
+The other six batches changed nothing. No run wrote live state: each ran in a temp `HOME` under `/tmp/claude-eval-*`.
 
 ### Budget
 
-Runner `costUsd`, judge cost excluded: 5.156 USD for the nine batches of this section (judge about 0.11 USD more), against a
-hard cap of 5.6 USD; 0.444 USD of the cap was unspent. Run total: 27.60 + 5.156 = 32.756 USD of the parent's roughly 33 USD
-ceiling. No reruns.
+Runner `costUsd`, judge cost excluded: 5.639 USD for the ten batches of this section (5.156 for cases 1 to 9, 0.483 for
+case 10; judge about 0.13 USD more). The hard cap was 5.6 USD; case 10 ran on the controller's authorisation and ended 0.039
+USD over it. Run total: 27.60 + 5.639 = 33.239 USD against the parent's roughly 33 USD ceiling. No reruns.
 
 When the next case lands, record it here as:
 
