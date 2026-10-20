@@ -7,11 +7,11 @@
  *
  * flow = {
  *   direction: "LR" | "TD",                       // TB is read as TD
- *   steps:  Map id -> { id, shape, label, labelled, accent, index }   // shape: box | round | pill | decision
+ *   steps:  Map id -> { id, shape, label, labelled, accent }   // shape: box | round | pill | decision
  *   order:  [id, ...]                             // steps in order of first appearance
- *   arrows: [{ index, from, to, line, dashed, label, loop }]   // index is the written order; ids, not step objects;
- *                                                              // label is the text on the arrow, or null; loop is true
- *                                                              // for a loop back (see findLoops)
+ *   arrows: [{ index, from, to, dashed, label, loop }]   // index is the written order; ids, not step objects;
+ *                                                        // label is the text on the arrow, or null; loop is true
+ *                                                        // for a loop back (see findLoops)
  * }
  *
  * plan = {
@@ -32,8 +32,7 @@
  *
  * A flow that cannot be drawn throws a FlowError carrying problems: [{ line, text, message }] in line
  * order, every broken line at once. line is 1-based, or null for the whole flow (the flow has no steps,
- * or a limit is passed; those are the only problem listed). flowLine, flowText and message repeat the
- * first problem.
+ * or a limit is passed; those are the only problem listed). message repeats the first problem's.
  */
 (function () {
   "use strict";
@@ -55,10 +54,6 @@
   var HALO_PAD_Y = 5;
   var MARGIN = 14;
 
-  function FlowError(line, text, message) {
-    return failed([{ line: line, text: text, message: message }]);
-  }
-
   function failed(problems) {
     var shown = problems.map(function (p) {
       var text = p.text === null ? null : p.text.length > MAX_TEXT ? p.text.slice(0, MAX_TEXT) + "…" : p.text;
@@ -68,9 +63,12 @@
     error.name = "FlowError";
     error.isFlowError = true;
     error.problems = shown;
-    error.flowLine = shown[0].line;
-    error.flowText = shown[0].text;
     return error;
+  }
+
+  // A problem with the whole flow rather than one of its lines.
+  function wholeFlow(message) {
+    return failed([{ line: null, text: null, message: message }]);
   }
 
   var HEADER = /^(?:flowchart|graph)[ \t]+(LR|TD|TB)$/;
@@ -273,7 +271,6 @@
         label: node.label === null ? node.id : node.label,
         labelled: node.label !== null,
         accent: false,
-        index: flow.order.length,
       };
       flow.steps.set(node.id, step);
       flow.order.push(node.id);
@@ -324,18 +321,14 @@
     return loops;
   }
 
-  function overLimit(message) {
-    return FlowError(null, null, message);
-  }
-
   // The limits that need no parsing, in the order they are checked.
   function checkSize(lines) {
     if (lines.length > MAX_LINES) {
-      throw overLimit("The flow has " + lines.length + " lines; at most " + MAX_LINES + " are drawn.");
+      throw wholeFlow("The flow has " + lines.length + " lines; at most " + MAX_LINES + " are drawn.");
     }
     for (var i = 0; i < lines.length; i++) {
       if (lines[i].length > MAX_LINE_LENGTH) {
-        throw overLimit("Line " + (i + 1) + " has " + lines[i].length + " characters; at most " + MAX_LINE_LENGTH + " are drawn.");
+        throw wholeFlow("Line " + (i + 1) + " has " + lines[i].length + " characters; at most " + MAX_LINE_LENGTH + " are drawn.");
       }
     }
   }
@@ -371,7 +364,6 @@
               index: flow.arrows.length,
               from: got.nodes[k - 1].id,
               to: node.id,
-              line: lineNo,
               dashed: link.dashed,
               label: link.label,
             });
@@ -382,16 +374,16 @@
       }
     }
     if (flow.order.length > MAX_STEPS) {
-      throw overLimit("The flow has " + flow.order.length + " steps; at most " + MAX_STEPS + " are drawn.");
+      throw wholeFlow("The flow has " + flow.order.length + " steps; at most " + MAX_STEPS + " are drawn.");
     }
     if (flow.arrows.length > MAX_ARROWS) {
-      throw overLimit("The flow has " + flow.arrows.length + " arrows; at most " + MAX_ARROWS + " are drawn.");
+      throw wholeFlow("The flow has " + flow.arrows.length + " arrows; at most " + MAX_ARROWS + " are drawn.");
     }
     if (problems.length) {
       problems.sort(function (a, b) { return a.line - b.line; });
       throw failed(problems);
     }
-    if (flow.order.length === 0) throw FlowError(null, null, "The flow has no steps.");
+    if (flow.order.length === 0) throw wholeFlow("The flow has no steps.");
     findLoops(flow.arrows);
     var layer = layersOf(flow);
     var waypoints = 0;
@@ -400,7 +392,7 @@
       waypoints += layer.get(arrow.to) - layer.get(arrow.from) - 1;
     });
     if (waypoints > MAX_WAYPOINTS) {
-      throw overLimit("The flow's arrows pass " + waypoints + " waypoints; at most " + MAX_WAYPOINTS + " are drawn.");
+      throw wholeFlow("The flow's arrows pass " + waypoints + " waypoints; at most " + MAX_WAYPOINTS + " are drawn.");
     }
     return flow;
   }
@@ -446,10 +438,21 @@
     return lines;
   }
 
+  // A label wrapped to the widest line allowed: its lines, and the width and height they take.
+  function textBlock(text, measure) {
+    var lines = wrap(text, measure, MAX_LABEL_WIDTH);
+    return {
+      lines: lines,
+      w: Math.max.apply(null, lines.map(function (l) { return measure(l); })),
+      h: lines.length * LINE_HEIGHT,
+    };
+  }
+
   function sized(step, measure) {
-    var lines = wrap(step.label, measure, MAX_LABEL_WIDTH);
-    var tw = Math.max.apply(null, lines.map(function (l) { return measure(l); }));
-    var th = lines.length * LINE_HEIGHT;
+    var block = textBlock(step.label, measure);
+    var lines = block.lines;
+    var tw = block.w;
+    var th = block.h;
     var w;
     var h;
     if (step.shape === "decision") {
@@ -513,12 +516,12 @@
   }
 
   // The label sits at the middle of the arrow's first leg, set on a halo that hides the line behind it.
-  function labelAt(text, from, to, measure) {
+  function labelAt(block, from, to) {
     var mx = (from[0] + to[0]) / 2;
     var my = (from[1] + to[1]) / 2;
-    var lines = wrap(text, measure, MAX_LABEL_WIDTH);
-    var tw = Math.max.apply(null, lines.map(function (l) { return measure(l); }));
-    var th = lines.length * LINE_HEIGHT;
+    var lines = block.lines;
+    var tw = block.w;
+    var th = block.h;
     return {
       lines: lines.map(function (line, k) {
         return { text: line, x: mx, y: my + (k - (lines.length - 1) / 2) * LINE_HEIGHT };
@@ -594,6 +597,7 @@
     });
 
     function at2(m, c) { return LR ? [m, c] : [c, m]; }
+    var colRight = layers.map(function (members, l) { return start[l] + columns[l]; });
 
     var plan = {
       width: LR ? mainExtent : crossExtent,
@@ -613,14 +617,12 @@
       var route = routes[a];
       var source = nodes[route[0]];
       var points = [at2(source.mainStart + main(source), source.crossMid)];
-      var colEnd = start[source.layer] + columns[source.layer];
-      if (colEnd > source.mainStart + main(source)) points.push(at2(colEnd, source.crossMid));
+      if (colRight[source.layer] > source.mainStart + main(source)) points.push(at2(colRight[source.layer], source.crossMid));
       for (var k = 1; k < route.length; k++) {
         var n = nodes[route[k]];
         points.push(at2(start[n.layer], n.crossMid));
         if (k < route.length - 1) {
-          var colRight = start[n.layer] + columns[n.layer];
-          if (colRight > start[n.layer]) points.push(at2(colRight, n.crossMid));
+          if (colRight[n.layer] > start[n.layer]) points.push(at2(colRight[n.layer], n.crossMid));
         } else if (n.mainStart > start[n.layer]) {
           points.push(at2(n.mainStart, n.crossMid));
         }
@@ -632,12 +634,11 @@
         dashed: arrow.dashed,
         loop: false,
         points: points,
-        label: arrow.label === null ? null : labelAt(arrow.label, points[0], points[1], measure),
+        label: arrow.label === null ? null : labelAt(textBlock(arrow.label, measure), points[0], points[1]),
       });
     });
 
     // Loop backs. Abstract coordinates (m along the flow, c across it); the lane side is +c.
-    var colRight = layers.map(function (members, l) { return start[l] + columns[l]; });
     var gapUsed = layers.map(function () { return 0; });
     var cursor = crossExtent - MARGIN + LANE;
     var stepNodes = flow.order.map(function (id) { return nodes[nodeOfStep.get(id)]; });
@@ -672,9 +673,9 @@
       return out;
     }
 
-    var lanes = loops.map(function (arrow) {
-      var lines = arrow.label === null ? null : wrap(arrow.label, measure, MAX_LABEL_WIDTH);
-      var band = LANE + (lines ? lines.length * LINE_HEIGHT + 2 * HALO_PAD_Y : 0);
+    var loopLabels = loops.map(function (arrow) { return arrow.label === null ? null : textBlock(arrow.label, measure); });
+    var lanes = loopLabels.map(function (block) {
+      var band = LANE + (block ? block.h + 2 * HALO_PAD_Y : 0);
       var laneC = cursor + band / 2;
       cursor += band;
       return laneC;
@@ -719,7 +720,7 @@
         dashed: arrow.dashed,
         loop: true,
         points: points,
-        label: arrow.label === null ? null : labelAt(arrow.label, at2(laneRun[0][0], laneRun[0][1]), at2(laneRun[1][0], laneRun[1][1]), measure),
+        label: loopLabels[k] && labelAt(loopLabels[k], at2(laneRun[0][0], laneRun[0][1]), at2(laneRun[1][0], laneRun[1][1])),
       });
     });
     if (loops.length) {
@@ -730,5 +731,5 @@
     return plan;
   }
 
-  window.PadFlow = { parse: parse, layout: layout, FlowError: FlowError };
+  window.PadFlow = { parse: parse, layout: layout };
 })();
