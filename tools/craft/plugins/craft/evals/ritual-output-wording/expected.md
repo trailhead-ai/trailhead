@@ -982,7 +982,7 @@ before the branch merged (its G1 cause, its G4 reading and its slice-close reaso
 rewritten. It records every capture the measurement
 took in one table, recomputes every count from that table, re-reads each pass condition against the rule
 registered in the extension of 2026-10-20, and states the end state taken and how the slice closed. No eval was
-run to write it. R is `d6eb84540f8e5b959554bc1578b0ece26154a76f` and its revert is `c73f3563` (both branch-local
+run to write it. R is `d6eb84540f8e5b959554bc1578b0ece26154a76f` and its revert is `609dc65c` (both branch-local
 SHAs, so they change at merge; recorded for a reader, read by no test). B is `d860c95a7d470be857e01f04c55c986abadab916`.
 
 ### Per-capture table
@@ -1082,7 +1082,7 @@ count typed by hand).
 
 G1 missed its bar. The registered end states say that any guard missing its bar is a regression, that R is
 reverted and the slice stops for the operator, and that when R is reverted the build-report task is blocked and
-not run. R was reverted by a signed `git revert` (`c73f3563`). **E was not made and `summary-build` was not run.**
+not run. R was reverted by a signed `git revert` (`609dc65c`). **E was not made and `summary-build` was not run.**
 At the slice stop the operator decided to record the failure and close the slice, rather than reword R (which needs
 a new dated extension the operator authorizes, per this case's precedent) or ship E on its own.
 
