@@ -55,7 +55,7 @@ const boundsOf = (paths) => {
 };
 const stepsOf = (d) =>
   [...inkOf(d).querySelectorAll('g[data-kind]')]
-    .filter((g) => g.getAttribute('data-kind') !== 'arrow')
+    .filter((g) => !['arrow', 'loop'].includes(g.getAttribute('data-kind')))
     .map((g) => {
       const paths = pathsOf(g);
       const b = boundsOf(paths);
@@ -77,6 +77,26 @@ const arrowsOf = (d) =>
     index: Number(g.getAttribute('data-arrow-index')),
     paths: pathsOf(g),
   }));
+const loopsOf = (d) =>
+  [...inkOf(d).querySelectorAll('g[data-kind="loop"]')].map((g) => {
+    const text = g.querySelector('text');
+    const halo = g.querySelector('rect');
+    const kids = [...g.children];
+    return {
+      index: Number(g.getAttribute('data-arrow-index')),
+      paths: pathsOf(g),
+      dashes: [...g.querySelectorAll('path')].map((p) => getComputedStyle(p).strokeDasharray),
+      label: text
+        ? {text: text.textContent, y: Number(text.getAttribute('y')), x: Number(text.getAttribute('x'))}
+        : null,
+      halo: halo
+        ? {y: halo.y.baseVal.value, h: halo.height.baseVal.value, under: kids.indexOf(halo) < kids.indexOf(text)}
+        : null,
+    };
+  });
+const kindsOf = (d) =>
+  Object.fromEntries([...inkOf(d).querySelectorAll('g[data-arrow-index]')]
+    .map((g) => [g.getAttribute('data-arrow-index'), g.getAttribute('data-kind')]));
 const messageOf = (d) => {
   const m = d.querySelector('.pen-message');
   return m ? [...m.querySelectorAll('p')].map((p) => p.textContent) : null;
@@ -467,12 +487,9 @@ REDRAW = "Ask the session to redraw this option."
         ("flowchart LR\n  a --> b\n  subgraph x", "line 3: subgraph x", "subgraph"),
         ("a --> b", "line 1: a --> b", "flowchart"),
         ("\n\nflowchart RL\n  a --> b", "line 3: flowchart RL", "RL"),
-        ("flowchart LR\n  a --> b\n  b --> a", "line 3: b --> a", "loops are not drawn yet"),
-        ("flowchart LR\n  a --> a", "line 2: a --> a", "loops are not drawn yet"),
-        ("flowchart LR\n  a --> b\n  b --> c\n  c --> a", "line 4: c --> a", "loops are not drawn yet"),
         ("flowchart LR\n  a((round)) --> b", "line 2: a((round)) --> b", "step"),
     ],
-    ids=["subgraph", "no-header", "bad-direction", "loop", "self-loop", "long-loop", "other-shape"],
+    ids=["subgraph", "no-header", "bad-direction", "other-shape"],
 )
 def test_a_flow_that_cannot_be_drawn_shows_the_line_its_reason_and_the_redraw_request(tmp_path, flow, line, reason):
     got = _run(tmp_path, _round([flow, SIBLING]), MESSAGE)
@@ -773,12 +790,250 @@ def test_each_limit_draws_at_the_limit_and_refuses_one_over_naming_the_number_fo
     assert got[-1]["message"] is None
 
 
-def test_a_flow_that_closes_a_loop_is_listed_with_the_other_broken_lines(tmp_path):
-    flow = "flowchart LR\n  a --> b\n  subgraph x\n  b --> a"
-    got = _run(tmp_path, _round([flow]), ALL_MESSAGES)
-    message = got[0]["message"]
-    assert message[1::2][:2] == ["line 3: subgraph x", "line 4: b --> a"]
-    assert "loops are not drawn yet" in message[4]
+def test_a_flow_that_closes_a_loop_draws_it_and_lists_only_the_other_broken_lines(tmp_path):
+    loop = "flowchart LR\n  a --> b\n  b --> a"
+    broken = "flowchart LR\n  a --> b\n  subgraph x\n  b --> a"
+    js = """
+    return [0, 1].map((o) => {
+      const d = drawing(0, o);
+      return {message: messageOf(d), loops: inkOf(d) ? loopsOf(d).length : 0};
+    });
+    """
+    drawn, listed = _run(tmp_path, _round([loop, broken]), js)
+    assert drawn["message"] is None and drawn["loops"] == 1
+    assert listed["message"][1] == "line 3: subgraph x" and len(listed["message"]) == 4
+
+
+def _lane(loop, axis):
+    """The far side of the lane a loop back runs along: its greatest y (LR) or x (TD)."""
+    return max(p[axis] for p in loop["paths"][0])
+
+
+LOOP_PROBE = """
+const d = drawing(0, %d);
+return {steps: stepsOf(d), loops: loopsOf(d), kinds: kindsOf(d), arrows: arrowsOf(d)};
+"""
+
+
+@pytest.mark.parametrize("direction", ["LR", "TD"])
+def test_a_loop_back_runs_in_a_lane_beside_the_flow_and_enters_its_target_on_the_lane_side(tmp_path, direction):
+    axis = 1 if direction == "LR" else 0
+    flows = [f"flowchart {direction}\n  {CHAIN}", f"flowchart {direction}\n  {CHAIN}\n  c --> a"]
+    js = """
+    return [0, 1].map((o) => {
+      const d = drawing(0, o);
+      return {steps: stepsOf(d), loops: loopsOf(d), kinds: kindsOf(d), arrows: arrowsOf(d)};
+    });
+    """
+    plain, looped = _run(tmp_path, _round(flows), js)
+    steps = _by_id(looped["steps"])
+    assert len(looped["loops"]) == 1 and len(looped["arrows"]) == 2
+    loop = looped["loops"][0]
+    assert loop["index"] == 2 and looped["kinds"] == {"0": "arrow", "1": "arrow", "2": "loop"}
+    edge = "y1" if direction == "LR" else "x1"
+    beyond = max(s["b"][edge] for s in steps.values())
+    assert not any(_crosses(loop["paths"][0], s["b"]) for s in steps.values())
+    assert _lane(loop, axis) > beyond + 8
+    tip, backs = _head(loop)
+    target = steps["a"]["b"]
+    assert abs(tip[axis] - target[edge]) <= TOL
+    across = 0 if direction == "LR" else 1
+    assert target[("x0", "y0")[across]] < tip[across] < target[("x1", "y1")[across]]
+    assert all(back[axis] > tip[axis] + 3 for back in backs)
+    for mine, theirs in zip(plain["steps"], looped["steps"]):
+        assert abs(mine["cx"] - theirs["cx"]) <= TOL and abs(mine["cy"] - theirs["cy"]) <= TOL
+    along = "cx" if direction == "LR" else "cy"
+    assert looped["steps"][2][along] > looped["steps"][0][along] + 100
+
+
+@pytest.mark.parametrize("direction", ["LR", "TD"])
+def test_the_flows_view_box_grows_by_a_lane_for_each_loop_back(tmp_path, direction):
+    flows = [
+        f"flowchart {direction}\n  {CHAIN}",
+        f"flowchart {direction}\n  {CHAIN}\n  c --> a",
+        f"flowchart {direction}\n  {CHAIN}\n  c --> a\n  c --> b",
+    ]
+    js = """
+    return [0, 1, 2].map((o) => {
+      const d = drawing(0, o);
+      const box = inkOf(d).viewBox.baseVal;
+      return {box: {width: box.width, height: box.height}, loops: loopsOf(d)};
+    });
+    """
+    none, one, two = _run(tmp_path, _round(flows), js)
+    axis = 1 if direction == "LR" else 0
+    size = "height" if direction == "LR" else "width"
+    assert none["box"][size] + 10 < one["box"][size] and one["box"][size] + 10 < two["box"][size]
+    assert none["box"]["width" if direction == "LR" else "height"] == pytest.approx(
+        two["box"]["width" if direction == "LR" else "height"], abs=0.01
+    )
+    for loop in two["loops"]:
+        assert _lane(loop, axis) < two["box"][size]
+
+
+@pytest.mark.parametrize("direction", ["LR", "TD"])
+def test_two_loop_backs_take_two_lanes_the_first_written_nearest_the_flow(tmp_path, direction):
+    first = f"flowchart {direction}\n  {CHAIN}\n  c --> a\n  c --> b"
+    swapped = f"flowchart {direction}\n  {CHAIN}\n  c --> b\n  c --> a"
+    axis = 1 if direction == "LR" else 0
+    js = "return [0, 1].map((o) => ({loops: loopsOf(drawing(0, o)), steps: stepsOf(drawing(0, o))}));"
+    one, two = _run(tmp_path, _round([first, swapped]), js)
+    for got, target_of_first in ((one, "a"), (two, "b")):
+        near, far = sorted(got["loops"], key=lambda loop: loop["index"])
+        assert near["index"] == 2 and far["index"] == 3
+        assert _lane(far, axis) > _lane(near, axis) + 10
+        steps = _by_id(got["steps"])
+        edge = "y1" if direction == "LR" else "x1"
+        assert abs(_head(near)[0][axis] - steps[target_of_first]["b"][edge]) <= TOL
+
+
+@pytest.mark.parametrize("direction", ["LR", "TD"])
+def test_a_step_that_points_at_itself_loops_out_of_and_back_into_it_outside_the_flow(tmp_path, direction):
+    axis = 1 if direction == "LR" else 0
+    across = 1 - axis
+    flow = f"flowchart {direction}\n  {CHAIN}\n  b --> b"
+    got = _run(tmp_path, _round([flow]), LOOP_PROBE % 0)
+    assert len(got["loops"]) == 1
+    loop = got["loops"][0]
+    b = _by_id(got["steps"])["b"]["b"]
+    edge = ("y1", "x1")[1 - axis]
+    start, end = loop["paths"][0][0], _head(loop)[0]
+    assert abs(start[axis] - b[edge]) <= TOL and abs(end[axis] - b[edge]) <= TOL
+    assert abs(start[across] - end[across]) > 8
+    assert _lane(loop, axis) > b[edge] + 8
+    assert all(p[axis] >= b[edge] - 2 for p in loop["paths"][0])
+
+
+def test_written_order_decides_which_arrow_of_a_pair_is_the_loop_back(tmp_path):
+    flows = ["flowchart LR\n  a --> b\n  b --> a", "flowchart LR\n  b --> a\n  a --> b"]
+    js = """
+    return [0, 1].map((o) => {
+      const d = drawing(0, o);
+      return {loops: loopsOf(d), steps: stepsOf(d), kinds: kindsOf(d)};
+    });
+    """
+    ab, ba = _run(tmp_path, _round(flows), js)
+    assert ab["kinds"] == {"0": "arrow", "1": "loop"} and ba["kinds"] == {"0": "arrow", "1": "loop"}
+    for got, target in ((ab, "a"), (ba, "b")):
+        steps = _by_id(got["steps"])
+        assert abs(_head(got["loops"][0])[0][0] - steps[target]["cx"]) <= steps[target]["b"]["x1"] - steps[target]["cx"]
+        assert abs(_head(got["loops"][0])[0][1] - steps[target]["b"]["y1"]) <= TOL
+    assert _by_id(ab["steps"])["a"]["cx"] < _by_id(ab["steps"])["b"]["cx"]
+    assert _by_id(ba["steps"])["b"]["cx"] < _by_id(ba["steps"])["a"]["cx"]
+
+
+@pytest.mark.parametrize("direction", ["LR", "TD"])
+def test_a_loop_back_leaving_a_step_with_a_neighbour_beyond_it_crosses_no_step(tmp_path, direction):
+    flow = f"flowchart {direction}\n  a[A] --> b[B]\n  a --> c[C]\n  b --> a\n  c --> a"
+    got = _run(tmp_path, _round([flow]), LOOP_PROBE % 0)
+    assert sorted(loop["index"] for loop in got["loops"]) == [2, 3]
+    steps = _by_id(got["steps"])
+    for loop in got["loops"]:
+        for step in steps.values():
+            assert not _crosses(loop["paths"][0], step["b"]), (loop["index"], step["id"])
+        tip, _ = _head(loop)
+        edge = steps["a"]["b"]["y1" if direction == "LR" else "x1"]
+        assert abs(tip[1 if direction == "LR" else 0] - edge) <= TOL
+
+
+TEN_LINES = """flowchart LR
+  start([Start]) --> read[Read the order]
+  read --> ok{Is it complete?}
+  ok -->|yes| route[Route to a team]
+  ok -->|no| ask[Ask the customer]
+  ask --> fix[Fix the order]
+  fix --> read
+  route --> notify[Notify the team]
+  notify --> done([Done])
+  fix -.->|later| done"""
+
+
+def test_a_decision_whose_no_branch_loops_to_an_earlier_step_draws_with_no_loop_back_crossing_a_step(tmp_path):
+    got = _run(tmp_path, _round([TEN_LINES]), LOOP_PROBE % 0)
+    assert len(TEN_LINES.split("\n")) == 10
+    assert [loop["index"] for loop in got["loops"]] == [5]
+    steps = _by_id(got["steps"])
+    for step in steps.values():
+        assert not _crosses(got["loops"][0]["paths"][0], step["b"]), step["id"]
+    tip, _ = _head(got["loops"][0])
+    assert abs(tip[1] - steps["read"]["b"]["y1"]) <= TOL
+    assert steps["read"]["b"]["x0"] < tip[0] < steps["read"]["b"]["x1"]
+
+
+def test_dashed_and_labelled_loop_backs_follow_the_forward_arrow_rules(tmp_path):
+    flows = [
+        f"flowchart LR\n  {CHAIN}\n  c -. try again .-> a",
+        f"flowchart LR\n  {CHAIN}\n  c -->|try again| a",
+        f"flowchart LR\n  {CHAIN}\n  c --> a",
+    ]
+    js = """
+    return [0, 1, 2].map((o) => {
+      const d = drawing(0, o);
+      return {loops: loopsOf(d), steps: stepsOf(d)};
+    });
+    """
+    dashed, plain_label, plain = _run(tmp_path, _round(flows), js)
+    assert [d != "none" for d in dashed["loops"][0]["dashes"]] == [True, True, False, False, False, False]
+    assert plain_label["loops"][0]["dashes"] == ["none"] * 6
+    assert plain["loops"][0]["label"] is None and plain["loops"][0]["halo"] is None
+    for got in (dashed, plain_label):
+        loop = got["loops"][0]
+        assert loop["label"]["text"] == "try again" and loop["halo"]["under"]
+        below = max(s["b"]["y1"] for s in got["steps"])
+        assert loop["label"]["y"] > below + 4
+        lane = _lane(loop, 1)
+        assert abs(loop["label"]["y"] - lane) <= 4
+
+
+def _loop_heavy_flow(kind):
+    rng = random.Random(11)
+    steps = [f"s{i}[{_label(kind, 985, rng)}]" for i in range(60)]
+    pairs = [(i, i + 1) for i in range(59)]
+    for k in range(61):
+        low = k % 58
+        pairs.append((low + 1 + k % (59 - low), low))
+    arrows = [f"s{a} -->|{_label(kind, 970, rng)}| s{b}" for a, b in pairs]
+    return _flow(steps + arrows)
+
+
+def _ladder_flow():
+    rungs = []
+    for i in range(58, -1, -1):
+        rungs.append(f"s{i} --> s{i + 1}")
+        if i < 58:
+            rungs.append(f"s{i} --> s{i + 2}")
+    return _flow(rungs + ["s59 --> s0", "s30 --> s2", "s58 --> s58"])
+
+
+BUDGET_PROBE = """
+const question = {options: [{flow: %s}]};
+const t0 = performance.now();
+await PadPen.drawQuestion(document.body, question, 0);
+const ms = performance.now() - t0;
+const d = drawing(0, 0);
+return {ms, steps: stepsOf(d).length, arrows: arrowsOf(d).length, loops: loopsOf(d).length,
+        lanes: new Set(loopsOf(d).map((l) => Math.round(Math.max(...l.paths[0].map((p) => p[1]))))).size,
+        message: messageOf(d)};
+"""
+
+
+@pytest.mark.parametrize("kind", ["token", "words"])
+def test_the_largest_legal_flow_of_mostly_loop_backs_draws_in_under_a_second(tmp_path, kind):
+    flow = _loop_heavy_flow(kind)
+    assert max(len(line) for line in flow.split("\n")) <= 1000
+    got = _run(tmp_path, _round([flow]), BUDGET_PROBE % json.dumps(flow), timeout=120)
+    assert got["message"] is None
+    assert (got["steps"], got["arrows"], got["loops"]) == (60, 59, 61)
+    assert got["lanes"] == 61
+    assert got["ms"] < 1000, got["ms"]
+
+
+def test_a_flow_of_many_forward_routes_finds_its_loop_backs_without_trying_every_route(tmp_path):
+    flow = _ladder_flow()
+    got = _run(tmp_path, _round([flow]), BUDGET_PROBE % json.dumps(flow), timeout=120)
+    assert got["message"] is None
+    assert (got["steps"], got["arrows"], got["loops"]) == (60, 117, 3)
+    assert got["ms"] < 1000, got["ms"]
 
 
 def _label(kind, size, rng):

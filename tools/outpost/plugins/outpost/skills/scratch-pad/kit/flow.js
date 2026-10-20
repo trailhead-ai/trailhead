@@ -9,16 +9,22 @@
  *   direction: "LR" | "TD",                       // TB is read as TD
  *   steps:  Map id -> { id, shape, label, labelled, accent, index }   // shape: box | round | pill | decision
  *   order:  [id, ...]                             // steps in order of first appearance
- *   arrows: [{ index, from, to, line, dashed, label }]   // index is the written order; ids, not step objects;
- *                                                        // label is the text on the arrow, or null
+ *   arrows: [{ index, from, to, line, dashed, label, loop }]   // index is the written order; ids, not step objects;
+ *                                                              // label is the text on the arrow, or null; loop is true
+ *                                                              // for a loop back (see findLoops)
  * }
  *
  * plan = {
  *   width, height,                                // the flow's natural size, in SVG units
  *   steps:  [{ id, shape, x, y, w, h, lines: [{ text, x, y }] }]   // x, y: top-left; lines: label centres
- *   arrows: [{ index, from, to, dashed, points: [[x, y], ...],     // from the source edge to the target edge
+ *   arrows: [{ index, from, to, dashed, loop, points: [[x, y], ...],     // from the source edge to the target edge
  *             label: null | { lines: [{ text, x, y }], halo: { x, y, w, h } } }]   // at the first leg's middle
  * }
+ *
+ * plan.arrows lists the forward arrows in written order, then the loop backs in written order. A loop
+ * back is drawn in its own lane outside the flow (below it for LR, right of it for TD); the first one
+ * written takes the lane nearest the flow, and its label sits at the middle of its run along the lane.
+ * The plan's size includes the lanes.
  *
  * measure(text) returns the width of one line of label text as the browser sets it. Parse and layout
  * are pure functions of the flow text and measure(); nothing depends on the page width. Every table
@@ -300,13 +306,15 @@
     return false;
   }
 
-  // Arrows in written order; every one whose target already reaches its source would close a loop.
+  // Arrows in written order; every one whose target already reaches its source would close a loop, and
+  // is marked as a loop back. Each check walks the arrows kept so far once, never one path at a time.
   function findLoops(arrows) {
     var adjacency = new Map();
     var loops = [];
     for (var i = 0; i < arrows.length; i++) {
       var arrow = arrows[i];
-      if (arrow.from === arrow.to || reaches(adjacency, arrow.to, arrow.from)) {
+      arrow.loop = arrow.from === arrow.to || reaches(adjacency, arrow.to, arrow.from);
+      if (arrow.loop) {
         loops.push(arrow);
         continue;
       }
@@ -379,17 +387,16 @@
     if (flow.arrows.length > MAX_ARROWS) {
       throw overLimit("The flow has " + flow.arrows.length + " arrows; at most " + MAX_ARROWS + " are drawn.");
     }
-    findLoops(flow.arrows).forEach(function (arrow) {
-      problem(arrow.line, "This arrow closes a loop, and loops are not drawn yet.");
-    });
     if (problems.length) {
       problems.sort(function (a, b) { return a.line - b.line; });
       throw failed(problems);
     }
     if (flow.order.length === 0) throw FlowError(null, null, "The flow has no steps.");
+    findLoops(flow.arrows);
     var layer = layersOf(flow);
     var waypoints = 0;
     flow.arrows.forEach(function (arrow) {
+      if (arrow.loop) return;
       waypoints += layer.get(arrow.to) - layer.get(arrow.from) - 1;
     });
     if (waypoints > MAX_WAYPOINTS) {
@@ -455,7 +462,7 @@
     return { lines: lines, w: w, h: h };
   }
 
-  // Longest chain of arrows leading into each step; every arrow in a loop-free flow points forward.
+  // Longest chain of forward arrows leading into each step; loop backs are set aside.
   function layersOf(flow) {
     var into = new Map();
     var outOf = new Map();
@@ -464,6 +471,7 @@
       outOf.set(id, []);
     });
     flow.arrows.forEach(function (arrow) {
+      if (arrow.loop) return;
       into.set(arrow.to, into.get(arrow.to) + 1);
       outOf.get(arrow.from).push(arrow.to);
     });
@@ -530,7 +538,9 @@
       nodeOfStep.set(id, nodes.length);
       nodes.push({ step: step, layer: layer.get(id), size: size, preds: [], succs: [], appear: nodes.length });
     });
-    var routes = flow.arrows.map(function (arrow) {
+    var forward = flow.arrows.filter(function (arrow) { return !arrow.loop; });
+    var loops = flow.arrows.filter(function (arrow) { return arrow.loop; });
+    var routes = forward.map(function (arrow) {
       var route = [nodeOfStep.get(arrow.from)];
       for (var l = layer.get(arrow.from) + 1; l < layer.get(arrow.to); l++) {
         route.push(nodes.length);
@@ -599,7 +609,7 @@
       });
       plan.steps.push({ id: id, shape: n.step.shape, x: topLeft[0], y: topLeft[1], w: n.size.w, h: n.size.h, lines: lines });
     });
-    flow.arrows.forEach(function (arrow, a) {
+    forward.forEach(function (arrow, a) {
       var route = routes[a];
       var source = nodes[route[0]];
       var points = [at2(source.mainStart + main(source), source.crossMid)];
@@ -620,10 +630,85 @@
         from: arrow.from,
         to: arrow.to,
         dashed: arrow.dashed,
+        loop: false,
         points: points,
         label: arrow.label === null ? null : labelAt(arrow.label, points[0], points[1], measure),
       });
     });
+
+    // Loop backs. Abstract coordinates (m along the flow, c across it); the lane side is +c.
+    var colRight = layers.map(function (members, l) { return start[l] + columns[l]; });
+    var gapUsed = layers.map(function () { return 0; });
+    var cursor = crossExtent - MARGIN + LANE;
+    var stepNodes = flow.order.map(function (id) { return nodes[nodeOfStep.get(id)]; });
+
+    // Where a step's lane-side edge lies at m, measured across the flow.
+    function edgeAt(n, m) {
+      if (n.step.shape !== "decision") return n.crossStart + cross(n);
+      var half = main(n) / 2;
+      return n.crossMid + (cross(n) / 2) * (1 - Math.abs(m - (n.mainStart + half)) / half);
+    }
+
+    // A step beyond n on the lane side, over the same stretch of the flow, would be crossed by a straight drop.
+    function blocked(n, m) {
+      return stepNodes.some(function (o) {
+        return o !== n && o.layer === n.layer && o.crossStart > n.crossStart && o.mainStart - 2 < m && m < o.mainStart + main(o) + 2;
+      });
+    }
+
+    // The way out of (or into) a step's lane-side edge to the lane: a straight run when nothing lies in the
+    // way, otherwise through the gap beneath the step and down the gap beside its layer. row is the
+    // fraction of the gap beneath the step where the sideways run goes.
+    function reach(n, m, laneC, row) {
+      var e = edgeAt(n, m);
+      var out = [[m, e]];
+      if (blocked(n, m)) {
+        var x = colRight[n.layer] + 2 + (gapUsed[n.layer]++ % 4) * 3;
+        var y = n.crossStart + cross(n) + GAP_CROSS * row;
+        out.push([m, y], [x, y], [x, laneC]);
+      } else {
+        out.push([m, laneC]);
+      }
+      return out;
+    }
+
+    var lanes = loops.map(function (arrow) {
+      var lines = arrow.label === null ? null : wrap(arrow.label, measure, MAX_LABEL_WIDTH);
+      var band = LANE + (lines ? lines.length * LINE_HEIGHT + 2 * HALO_PAD_Y : 0);
+      var laneC = cursor + band / 2;
+      cursor += band;
+      return laneC;
+    });
+    loops.forEach(function (arrow, k) {
+      var from = nodes[nodeOfStep.get(arrow.from)];
+      var to = nodes[nodeOfStep.get(arrow.to)];
+      var mFrom = from.mainStart + main(from) / 2;
+      var mTo = to.mainStart + main(to) / 2;
+      if (from === to) {
+        var offset = main(from) / 4;
+        mTo = mFrom + offset;
+        mFrom -= offset;
+      }
+      var entry = reach(to, mTo, lanes[k], 2 / 3);
+      var exit = reach(from, mFrom, lanes[k], 1 / 3);
+      var laneRun = [exit[exit.length - 1], entry[entry.length - 1]];
+      var route = exit.concat(entry.reverse());
+      var points = route.map(function (p) { return at2(p[0], p[1]); });
+      plan.arrows.push({
+        index: arrow.index,
+        from: arrow.from,
+        to: arrow.to,
+        dashed: arrow.dashed,
+        loop: true,
+        points: points,
+        label: arrow.label === null ? null : labelAt(arrow.label, at2(laneRun[0][0], laneRun[0][1]), at2(laneRun[1][0], laneRun[1][1]), measure),
+      });
+    });
+    if (loops.length) {
+      var grown = cursor + MARGIN;
+      if (LR) plan.height = grown;
+      else plan.width = grown;
+    }
     return plan;
   }
 
