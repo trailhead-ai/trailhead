@@ -55,6 +55,9 @@
   var HALO_PAD_X = 4;
   var HALO_PAD_Y = 5;
   var MARGIN = 14;
+  var EDGE = 2;
+  var LABEL_STEP = 8;
+  var MAX_WIDENINGS = 400;
 
   function failed(problems) {
     var shown = problems.map(function (p) {
@@ -525,10 +528,10 @@
     }
   }
 
-  // The label sits at the middle of the given leg, set on a halo that hides the line behind it.
-  function labelAt(block, from, to) {
-    var mx = (from[0] + to[0]) / 2;
-    var my = (from[1] + to[1]) / 2;
+  // The label is centred on the given point, set on a halo that hides the line behind it.
+  function labelAt(block, centre) {
+    var mx = centre[0];
+    var my = centre[1];
     var lines = block.lines;
     var tw = block.w;
     var th = block.h;
@@ -594,30 +597,104 @@
       var l = nodes[routes[a][0]].layer;
       gaps[l] = Math.max(gaps[l], room);
     });
-    var start = [];
-    var at = MARGIN;
-    columns.forEach(function (width, l) {
-      start.push(at);
-      at += width + gaps[l];
-    });
-    var mainExtent = at - gaps[gaps.length - 1] + MARGIN;
     var totals = layers.map(function (members) {
       return members.reduce(function (sum, i) { return sum + cross(nodes[i]); }, 0) + GAP_CROSS * (members.length - 1);
     });
-    var crossExtent = Math.max.apply(null, totals) + 2 * MARGIN;
-    layers.forEach(function (members, l) {
-      var offset = MARGIN + (crossExtent - 2 * MARGIN - totals[l]) / 2;
-      members.forEach(function (i) {
-        var n = nodes[i];
-        n.mainStart = start[l] + (columns[l] - main(n)) / 2;
-        n.crossStart = offset;
-        n.crossMid = offset + cross(n) / 2;
-        offset += cross(n) + GAP_CROSS;
+    var baseExtent = Math.max.apply(null, totals) + 2 * MARGIN;
+    var padLo = 0;
+    var crossExtent = baseExtent;
+    var start;
+    var colRight;
+    var mainExtent;
+
+    // Columns and steps at the current gap widths, with room before the steps for any label that overhangs.
+    function settle() {
+      start = [];
+      var at = MARGIN;
+      columns.forEach(function (width, l) {
+        start.push(at);
+        at += width + gaps[l];
       });
+      mainExtent = at - gaps[gaps.length - 1] + MARGIN;
+      colRight = layers.map(function (members, l) { return start[l] + columns[l]; });
+      layers.forEach(function (members, l) {
+        var offset = MARGIN + padLo + (baseExtent - 2 * MARGIN - totals[l]) / 2;
+        members.forEach(function (i) {
+          var n = nodes[i];
+          n.mainStart = start[l] + (columns[l] - main(n)) / 2;
+          n.crossStart = offset;
+          n.crossMid = offset + cross(n) / 2;
+          offset += cross(n) + GAP_CROSS;
+        });
+      });
+    }
+
+    // Each label centres on its own arrow's leg across the gap, as near the middle as it can go without
+    // touching a label already placed in that gap. spots[a] is where its halo is centred, along and across
+    // the flow; clash is the gap in which some label found no room, else -1.
+    function placeLabels() {
+      var spots = forwardLabels.map(function () { return null; });
+      var placed = gaps.map(function () { return []; });
+      var clash = -1;
+      var widen = 0;
+      for (var a = 0; a < forwardLabels.length; a++) {
+        var block = forwardLabels[a];
+        if (block === null) continue;
+        var route = routes[a];
+        var from = nodes[route[0]];
+        var to = nodes[route[1]];
+        var l = from.layer;
+        var hm = LR ? block.w + 2 * HALO_PAD_X : block.h + 2 * HALO_PAD_Y;
+        var hc = LR ? block.h + 2 * HALO_PAD_Y : block.w + 2 * HALO_PAD_X;
+        var reach = (gaps[l] - hm) / 2 - HEAD_CLEAR;
+        var step = Math.max(LABEL_STEP, hm / 4);
+        var spot = null;
+        for (var k = 0; k <= 2 * Math.floor(reach / step) && spot === null; k++) {
+          var t = 0.5 + ((k % 2 ? 1 : -1) * Math.ceil(k / 2) * step) / gaps[l];
+          var m = colRight[l] + t * gaps[l];
+          var c = from.crossMid + t * (to.crossMid - from.crossMid);
+          var clear = placed[l].every(function (o) {
+            return Math.abs(o.m - m) >= (o.hm + hm) / 2 + 1 || Math.abs(o.c - c) >= (o.hc + hc) / 2 + 1;
+          });
+          if (clear) spot = { m: m, c: c, hm: hm, hc: hc };
+        }
+        if (spot === null) {
+          if (clash < 0) {
+            clash = l;
+            widen = hm;
+          }
+          spot = { m: colRight[l] + gaps[l] / 2, c: (from.crossMid + to.crossMid) / 2, hm: hm, hc: hc };
+        }
+        placed[l].push(spot);
+        spots[a] = spot;
+      }
+      return { spots: spots, clash: clash, widen: widen };
+    }
+
+    var placement;
+    for (var tries = 0; ; tries++) {
+      settle();
+      placement = placeLabels();
+      if (placement.clash < 0 || tries >= MAX_WIDENINGS) break;
+      gaps[placement.clash] += placement.widen;
+    }
+    // A label that reaches past either edge of the steps' extent grows the drawing to hold it.
+    var lo = baseExtent;
+    var hi = 0;
+    placement.spots.forEach(function (spot) {
+      if (spot === null) return;
+      lo = Math.min(lo, spot.c - spot.hc / 2);
+      hi = Math.max(hi, spot.c + spot.hc / 2);
     });
+    var padHi = Math.max(0, hi - (baseExtent - EDGE));
+    padLo = Math.max(0, EDGE - lo);
+    if (padLo > 0 || padHi > 0) {
+      crossExtent = baseExtent + padLo + padHi;
+      settle();
+      placement = placeLabels();
+    }
 
     function at2(m, c) { return LR ? [m, c] : [c, m]; }
-    var colRight = layers.map(function (members, l) { return start[l] + columns[l]; });
 
     var plan = {
       width: LR ? mainExtent : crossExtent,
@@ -655,7 +732,7 @@
         dashed: arrow.dashed,
         loop: false,
         points: points,
-        label: forwardLabels[a] === null ? null : labelAt(forwardLabels[a], points[stub ? 1 : 0], points[stub ? 2 : 1]),
+        label: forwardLabels[a] === null ? null : labelAt(forwardLabels[a], at2(placement.spots[a].m, placement.spots[a].c)),
       });
     });
 
@@ -696,7 +773,7 @@
 
     var loopLabels = loops.map(function (arrow) { return arrow.label === null ? null : textBlock(arrow.label, measure); });
     var lanes = loopLabels.map(function (block) {
-      var band = LANE + (block ? block.h + 2 * HALO_PAD_Y : 0);
+      var band = LANE + (block ? (LR ? block.h + 2 * HALO_PAD_Y : block.w + 2 * HALO_PAD_X) : 0);
       var laneC = cursor + band / 2;
       cursor += band;
       return laneC;
@@ -741,7 +818,7 @@
         dashed: arrow.dashed,
         loop: true,
         points: points,
-        label: loopLabels[k] && labelAt(loopLabels[k], at2(laneRun[0][0], laneRun[0][1]), at2(laneRun[1][0], laneRun[1][1])),
+        label: loopLabels[k] && labelAt(loopLabels[k], at2((laneRun[0][0] + laneRun[1][0]) / 2, (laneRun[0][1] + laneRun[1][1]) / 2)),
       });
     });
     if (loops.length) {

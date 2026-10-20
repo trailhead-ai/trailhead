@@ -1468,6 +1468,31 @@ const haloHits = (d) => {
     const inside = ([x, y]) => h.x0 < x && x < h.x1 && h.y0 < y && y < h.y1;
     if (s.pts.some(inside)) hits.add(`arrow ${h.arrow} halo covers ${s.what}`);
   }));
+  const box = ink.viewBox.baseVal;
+  const outside = (b) => b.x0 < 0 || b.y0 < 0 || b.x1 > box.width || b.y1 > box.height;
+  halos.forEach((h) => {
+    if (outside(h)) hits.add(`arrow ${h.arrow} halo lies outside the drawing`);
+  });
+  ink.querySelectorAll('g[data-arrow-index] text.flow-label').forEach((t) => {
+    const b = t.getBBox();
+    if (outside({x0: b.x, y0: b.y, x1: b.x + b.width, y1: b.y + b.height})) {
+      hits.add(`arrow ${t.parentNode.getAttribute('data-arrow-index')} label text lies outside the drawing`);
+    }
+  });
+  ink.querySelectorAll('g[data-kind="loop"]').forEach((g) => {
+    const mine = g.getAttribute('data-arrow-index');
+    const pts = pathsOf(g).flatMap(sampled);
+    halos.forEach((h) => {
+      if (h.arrow !== mine && pts.some(([x, y]) => h.x0 < x && x < h.x1 && h.y0 < y && y < h.y1)) {
+        hits.add(`loop ${mine} runs through the label of arrow ${h.arrow}`);
+      }
+    });
+  });
+  halos.forEach((a, i) => halos.slice(i + 1).forEach((b) => {
+    if (a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1) {
+      hits.add(`labels of arrows ${a.arrow} and ${b.arrow} overlap`);
+    }
+  }));
   return {halos: halos.length, heads: strokes.filter((s) => s.what.startsWith('head')).length, hits: [...hits]};
 };
 """
@@ -1517,6 +1542,65 @@ def test_arrow_labels_of_any_length_leave_every_step_outline_and_arrowhead_visib
     for label, result in zip(labels, got):
         assert result["halos"] == 2 and result["heads"] >= 4, label[:20]
         assert result["hits"] == [], (label[:20], result["hits"])
+
+
+LABEL_SIZES = {
+    "one word": "yes",
+    "five words": "only when the build passes",
+    "ten words": "only when the build is green and the review is done",
+    "forty words": "only when the build is green and the review is done " * 4,
+}
+
+
+def _label_flows(direction, label):
+    return {
+        "chain": f"flowchart {direction}\n  a[Plan] -->|{label}| b[Ship]",
+        "chain with a loop back": f"flowchart {direction}\n  a[Plan] -->|{label}| b[Ship]\n  b --> a",
+        "chain with a labelled loop back": f"flowchart {direction}\n  a[Plan] -->|{label}| b[Ship]\n  b -->|{label}| a",
+        "two arrows crossing in one gap": (
+            f"flowchart {direction}\n  a[Alpha] -->|{label}| c[Gamma]\n  a -->|{label} too| d[Delta]\n"
+            f"  b[Beta] -->|{label} as well| c\n  b -->|{label} again| d"
+        ),
+    }
+
+
+def test_every_forward_label_stays_inside_the_drawing_clear_of_loop_backs_and_of_the_other_labels(tmp_path):
+    bad = {}
+    for direction in ("LR", "TD"):
+        names, flows = [], []
+        for size, label in LABEL_SIZES.items():
+            for name, flow in _label_flows(direction, label).items():
+                names.append(f"{direction} {size} {name}")
+                flows.append(flow)
+        (tmp_path / direction).mkdir()
+        got = _halo_hits(tmp_path / direction, flows)
+        assert all(r["halos"] >= 1 for r in got)
+        bad.update({name: r["hits"] for name, r in zip(names, got) if r["hits"]})
+    assert bad == {}, "\n" + "\n".join(f"{name}: {'; '.join(hits)}" for name, hits in bad.items())
+
+
+def test_a_label_wider_than_the_flow_widens_the_drawing_rather_than_leaving_the_drawing(tmp_path):
+    flows = [
+        "flowchart TD\n  a[Plan] -->|only when the build is green| b[Ship]",
+        "flowchart TD\n  a[Plan] -->|only when the build is green| b[Ship]\n  b --> a",
+    ]
+    got = _run(
+        tmp_path,
+        _round(flows),
+        """
+        return [...document.querySelectorAll('.pad-drawing')].map((d) => {
+          const box = inkOf(d).viewBox.baseVal;
+          const xs = [...inkOf(d).querySelectorAll('text.flow-label')].map((t) => t.getBBox());
+          return {
+            width: box.width,
+            left: Math.min(...xs.map((b) => b.x)),
+            right: Math.max(...xs.map((b) => b.x + b.width)),
+          };
+        });
+        """,
+    )
+    for result in got:
+        assert result["left"] >= 0 and result["right"] <= result["width"], result
 
 
 def test_a_directive_before_the_header_is_ignored_and_a_plain_comment_before_it_is_still_refused(tmp_path):
