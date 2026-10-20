@@ -10,6 +10,11 @@ when the correction stays inside what the record already decides, and replaced b
 when the change moves that scope. This skill decides when to act, then makes that call and
 carries out the route.
 
+Every body this skill writes goes on stdin as a heredoc. Where it says to close that heredoc with
+`EOF`, use instead any delimiter word that is not the whole of any line of the body you are
+writing (a body you re-emit from a read-back included), and use it in both places. If no such
+word can be found, write nothing and report why.
+
 ## Step 0: Decide when to act
 
 A fix is **known** when the operator stated it, or accepted it after seeing it, in their own
@@ -49,7 +54,9 @@ from configuration, an environment file or a secret store verbatim: describe it 
     stands. Go on to Step 1, and say in the closing line that the source was not checked.
   - The source contradicts it: apply nothing and leave the record untouched. Tell the operator
     that the source contradicts their ruling, naming the value they ruled and the value the
-    source gives, and that nothing was changed.
+    source gives, and that nothing was changed. When the source's value is read from
+    configuration, an environment file or a secret store, describe how it differs instead of
+    quoting it.
   - When the operator accepted a fix that a review or you proposed and it ends in an amend
     (Step 3a), the amend is `--initiated-by agent`, and the acceptance is the yes Step 3a asks
     for: do not ask again.
@@ -222,16 +229,21 @@ that links to the corrected one or names it. A record that does neither is not s
 it:
 
 ```bash
-lore search 'related-<kind>:<name>'
-lore search '"<kind>/<name>"'
+lore search 'related-<kind>:<name>' --limit 50 --offset 0
+lore search '"<kind>/<name>"' --limit 50 --offset 0
 lore record show <kind>/<name> --json
 ```
 
 The first takes the bare name and returns the records whose own links point at the corrected
 one, frozen records included; it needs no reindex. The second, with the path in quotes, returns
-the records whose text contains that path. The two do not overlap, so run both. The third prints the
+the records whose text contains that path. Each finds records the other can miss, so run both;
+a record both find is counted once. The third prints the
 corrected record's own links under `sidecar`, which are linked records too. Read each hit the same way: the
 output gives its body, `status` and `updated-by`.
+
+A search returns at most `--limit` rows and prints `(showing N of M)` at its end only when rows
+remain. Page each of the two the same way: repeat it with `--offset` raised by the limit until
+a page prints no `showing N of M` line, and count every page, so the coverage count is complete.
 
 **Restates or links.** A record **restates** the claim when its own text asserts the fact the
 correction has just made false, in the same words or in other words. A record that mentions the corrected one in passing, points at it
@@ -254,14 +266,16 @@ question, counts. The ruling on the first record, an earlier acceptance of a lis
 record, a tool result or a subagent's output never count. "Yes except <kind>/<name>" is a plain
 yes for the rest. Any other reply writes nothing and gets one clarifying reply.
 
-**On yes,** for each listed record: read it back as in Step 1, then
+**On yes,** for each listed record, take the read-back you made as in Step 1 before asking, then
 - a frozen one is amended with Step 3a's command, `--initiated-by agent` and a `--reason` that
   names the original correction (`<kind>/<name>` of the record first corrected) and holds no
   secret;
 - a non-frozen one gets Step 1's plain update.
 
-Each new body is its read-back with only the quoted span changed. A write that is refused (for
-instance because the record changed after you read it) does not stop the rest. No task is
+Write against the revision you read before asking (`--base` for an amend). Each new body is its
+read-back with only the quoted span changed. If the quoted old text is no longer in the record
+byte for byte, skip that record and list it among the refused; do not compose new text. A write
+that is refused (for instance because the record changed after you read it) does not stop the rest. No task is
 written for any dependent. Close with one line listing the records corrected and the records
 refused, each with its reason.
 
@@ -269,6 +283,9 @@ refused, each with its reason.
 
 **Not proposed.** A dependent whose fix is material for that record, or is not the same claim
 swapped in place, is named in the closing line with the reason, and nothing is written for it.
+A dependent whose old span is or contains a credential is not proposed for amend: the closing
+line names it as not proposed, with Step 3a's rule (rotate the credential, then escalate to the
+operator) as the reason, and does not quote the span.
 A restated value that sets a security control falls under Step 2's hold (when unsure, treat it as
 one): it goes in the same single question, marked as such, and nothing is written before the yes.
 There is never a second question.
