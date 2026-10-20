@@ -185,7 +185,8 @@ layout. Over any limit, the flow cannot be drawn: only the limit message shows, 
 found, never a broken line that turns up later. Long arrows add at most 2000 waypoints
 in all, and a label word wider than a step is broken across lines. The limits keep a flow written in
 error, or one copied from somewhere hostile, from hanging the page: the largest flow they allow
-draws in under a second.
+draws within a fixed multiple of the time a small reference flow takes to draw on the same machine,
+which is about a second on a typical developer laptop.
 
 ## Light and dark
 

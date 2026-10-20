@@ -1035,35 +1035,86 @@ def _ladder_flow():
     return _flow(rungs + ["s59 --> s0", "s30 --> s2", "s58 --> s58"])
 
 
-BUDGET_PROBE = """
+REFERENCE_JS = r"""
+const referenceFlow = [
+  'flowchart LR',
+  ...Array.from({length: 12}, (_, i) => `r${i}[step ${i} checks the order and sends it to the right team]`),
+  ...Array.from({length: 11}, (_, i) => `r${i} -->|hand over the order to the next team| r${i + 1}`),
+  'r11 -.->|try again with the corrected order| r2',
+  'r9 -->|escalate to the owner of the order| r4',
+].join('\n');
+const referenceMs = async () => {
+  const question = {options: [{flow: referenceFlow}]};
+  const t0 = performance.now();
+  for (let i = 0; i < 20; i++) {
+    const panel = document.createElement('div');
+    panel.innerHTML = '<div class="pad-drawing" data-question="9" data-option="0"><svg class="pad-ink"></svg></div>';
+    document.body.appendChild(panel);
+    await PadPen.drawQuestion(panel, question, 9);
+    const drawn = panel.querySelectorAll('[data-step-id]').length;
+    if (drawn !== 12) throw new Error('the reference flow drew ' + drawn + ' steps: ' + panel.innerHTML.slice(0, 300));
+    panel.remove();
+  }
+  return performance.now() - t0;
+};
+"""
+
+# A drawing may take at most this many times as long as the reference drawing timed in the same page just
+# before it. The reference takes about 43 ms and the largest flows 400-490 ms (a ratio of 9 to 11) on an
+# Apple-silicon laptop, so the bound is about a second there and moves with the machine's speed.
+BUDGET_MULTIPLE = 23
+BUDGET_VIRTUAL_MS = 600000
+CLOCK_ATTEMPTS = 8
+
+
+def _timed(tmp_path, flow, probe, timeout):
+    """Run a probe that reports ``ms`` and ``ref``. The harness's virtual clock sometimes stands still for a
+    whole page when the machine is busy, which reads as 0 ms for every draw; such a page measured nothing, so
+    it is run again."""
+    for _ in range(CLOCK_ATTEMPTS):
+        got = _run(
+            tmp_path, _round([flow]), probe % json.dumps(flow), timeout=timeout, virtual_time_budget=BUDGET_VIRTUAL_MS
+        )
+        if got["ref"] > 0:
+            return got
+    pytest.fail(f"the page's clock stood still in each of {CLOCK_ATTEMPTS} runs, so no drawing could be timed")
+
+
+def _assert_within_budget(got):
+    ratio = got["ms"] / got["ref"]
+    assert ratio < BUDGET_MULTIPLE, f"{got['ms']:.0f} ms is {ratio:.1f}x the {got['ref']:.0f} ms reference drawing"
+
+
+BUDGET_PROBE = REFERENCE_JS + """
+const ref = await referenceMs();
 const question = {options: [{flow: %s}]};
 const t0 = performance.now();
 await PadPen.drawQuestion(document.body, question, 0);
 const ms = performance.now() - t0;
 const d = drawing(0, 0);
-return {ms, steps: stepsOf(d).length, arrows: arrowsOf(d).length, loops: loopsOf(d).length,
+return {ms, ref, steps: stepsOf(d).length, arrows: arrowsOf(d).length, loops: loopsOf(d).length,
         lanes: new Set(loopsOf(d).map((l) => Math.round(Math.max(...l.paths[0].map((p) => p[1]))))).size,
         message: messageOf(d)};
 """
 
 
 @pytest.mark.parametrize("kind", ["token", "words"])
-def test_the_largest_legal_flow_of_mostly_loop_backs_draws_in_under_a_second(tmp_path, kind):
+def test_the_largest_legal_flow_of_mostly_loop_backs_draws_within_its_budget(tmp_path, kind):
     flow = _loop_heavy_flow(kind)
     assert max(len(line) for line in flow.split("\n")) <= 1000
-    got = _run(tmp_path, _round([flow]), BUDGET_PROBE % json.dumps(flow), timeout=120)
+    got = _timed(tmp_path, flow, BUDGET_PROBE, 120)
     assert got["message"] is None
     assert (got["steps"], got["arrows"], got["loops"]) == (60, 59, 61)
     assert got["lanes"] == 61
-    assert got["ms"] < 1000, got["ms"]
+    _assert_within_budget(got)
 
 
 def test_a_flow_of_many_forward_routes_finds_its_loop_backs_without_trying_every_route(tmp_path):
     flow = _ladder_flow()
-    got = _run(tmp_path, _round([flow]), BUDGET_PROBE % json.dumps(flow), timeout=120)
+    got = _timed(tmp_path, flow, BUDGET_PROBE, 120)
     assert got["message"] is None
     assert (got["steps"], got["arrows"], got["loops"]) == (60, 117, 3)
-    assert got["ms"] < 1000, got["ms"]
+    _assert_within_budget(got)
 
 
 def _label(kind, size, rng):
@@ -1087,21 +1138,13 @@ def _largest_flow(kind):
 
 
 @pytest.mark.parametrize("kind", ["token", "words"])
-def test_the_largest_legal_flow_draws_in_under_a_second(tmp_path, kind):
+def test_the_largest_legal_flow_draws_within_its_budget(tmp_path, kind):
     flow = _largest_flow(kind)
     assert max(len(line) for line in flow.split("\n")) <= 1000
-    js = """
-    const question = {options: [{flow: %s}]};
-    const t0 = performance.now();
-    await PadPen.drawQuestion(document.body, question, 0);
-    const ms = performance.now() - t0;
-    const d = drawing(0, 0);
-    return {ms, steps: stepsOf(d).length, arrows: arrowsOf(d).length, message: messageOf(d)};
-    """ % json.dumps(flow)
-    got = _run(tmp_path, _round([flow]), js, timeout=120)
+    got = _timed(tmp_path, flow, BUDGET_PROBE, 120)
     assert got["message"] is None
     assert (got["steps"], got["arrows"]) == (60, 120)
-    assert got["ms"] < 1000, got["ms"]
+    _assert_within_budget(got)
 
 
 def _malformed_lines():
@@ -1123,22 +1166,23 @@ MALFORMED = {
 }
 
 
-REFUSAL_PROBE = """
+REFUSAL_PROBE = REFERENCE_JS + """
+const ref = await referenceMs();
 const question = {options: [{flow: %s}]};
 const t0 = performance.now();
 await PadPen.drawQuestion(document.body, question, 0);
 const ms = performance.now() - t0;
-return {ms, message: messageOf(document.querySelector('.pad-drawing'))};
+return {ms, ref, message: messageOf(document.querySelector('.pad-drawing'))};
 """
 
 
 @pytest.mark.parametrize("name", list(MALFORMED))
-def test_a_malformed_flow_within_every_limit_is_refused_in_under_a_second(tmp_path, name):
+def test_a_malformed_flow_within_every_limit_is_refused_within_its_budget(tmp_path, name):
     flow = _flow(MALFORMED[name])
     assert max(len(line) for line in flow.split("\n")) <= 1000
-    got = _run(tmp_path, _round([flow]), REFUSAL_PROBE % json.dumps(flow), timeout=300)
+    got = _timed(tmp_path, flow, REFUSAL_PROBE, 300)
     assert got["message"][0] == "Can't draw this flow:"
-    assert got["ms"] < 1000, got["ms"]
+    _assert_within_budget(got)
 
 
 WRAP = """
