@@ -167,9 +167,13 @@
   var ARROW_WORDS = [
     { re: /^-\.->/y, dashed: true, bar: true },
     { re: /^-->/y, dashed: false, bar: true },
-    { re: /^-\.[ \t]+(.*?)[ \t]*\.->/y, dashed: true, bar: false },
-    { re: /^--[ \t]+(.*?)[ \t]*-->/y, dashed: false, bar: false },
   ];
+  // "-. label .->" and "-- label -->": a blank, then the label up to the first closing arrow.
+  var ARROW_WITH_WORDS = [
+    { open: "-.", close: ".->", dashed: true },
+    { open: "--", close: "-->", dashed: false },
+  ];
+  var LINE_BREAK = /[\n\r\u2028\u2029]/;
   var ARROW_REFUSED = [
     { re: /^<(?:-->|-\.->|--|-\.-)/, reason: "Two-way arrows are not drawn; write one arrow each way." },
     { re: /^={2,}>?/, reason: 'Thick arrows ("==>") are not drawn; use "-->".' },
@@ -197,6 +201,15 @@
       var close = s.indexOf("|", bar + 1);
       if (close < 0) throw new Error('An arrow label needs its closing "|".');
       return { end: close + 1, dashed: word.dashed, label: labelled(s.slice(bar + 1, close)) };
+    }
+    for (var x = 0; x < ARROW_WITH_WORDS.length; x++) {
+      var spelled = ARROW_WITH_WORDS[x];
+      if (rest.substr(0, 2) !== spelled.open || (rest[2] !== " " && rest[2] !== "\t")) continue;
+      var closing = rest.indexOf(spelled.close, 3);
+      if (closing < 0) continue;
+      var words = rest.slice(2, closing);
+      if (LINE_BREAK.test(words)) continue;
+      return { end: pos + closing + spelled.close.length, dashed: spelled.dashed, label: labelled(words) };
     }
     if (/^[-.=~]/.test(rest)) throw new Error("This is not an arrow this pen draws; " + ARROW_HELP);
     throw new Error("A step is followed by an arrow or the end of the line; " + ARROW_HELP);
