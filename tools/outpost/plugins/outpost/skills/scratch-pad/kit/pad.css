@@ -127,3 +127,7 @@ button { font: inherit; color: inherit; }
 .pen-rule { height: 1rem; width: 100%; }
 .pen-message { padding: 0.75rem; border: 1px solid var(--rule); background: var(--paper); }
 .pen-message p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.pad-drawing-flow { overflow-x: auto; overflow-y: hidden; }
+.pad-ink.pad-flow { position: relative; inset: auto; display: block; height: auto; overflow: visible; }
+.flow-label { font-size: 16px; fill: var(--ink); text-anchor: middle; dominant-baseline: central; }
