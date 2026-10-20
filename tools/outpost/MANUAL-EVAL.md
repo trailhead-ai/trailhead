@@ -1104,6 +1104,21 @@ known-safe repo-path matches, one per argv).
 
 **Changes to the case after the first run of this batch:** none.
 
+**Limits on this verdict.** The narrowing sentence "How files, folders or settings are laid out
+is neither" was written after batch 1 missed `not-visual-layout-vocabulary`, and it names that
+brief's subject. The 3/3 there confirms the fix but is not a held-out measurement.
+`not-visual-flow-vocabulary`, registered before either batch, is the held-out not-visual check
+(3/3). The case's Pass condition says a FAIL is not answered by a wording change and re-run;
+the operator's decision overrode that once, as `expected.md` records.
+
+**Correction to commit `9d1d55c3`.** Its body says the three arm-contract tests went red on the
+`rules.md` edit alone. That red was not observed in that commit, because the arms were rebuilt in
+the same step. The red-first evidence is in `20057986`, where
+`test_live_treatment_arm_rebuilds_from_todays_rules` failed with `arms/treatment.md` not
+rebuilt. Observation points for `9d1d55c3`: the four test files that read `rules.md` (case,
+publish-routing, follow-up-round, record-link) pass, and the narrowed wording appears in
+`rules.md` and the three rebuilt live arms. `baseline.md` keeps the pre-change wording by design.
+
 ## Case: follow-up-round-on-an-open-pad
 
 Renamed from `pad-follow-up-round` on 2026-10-19 (the old `pad-` prefix made the `evals/pad` path ambiguous to the capture scanner), so older commit messages use the old name.

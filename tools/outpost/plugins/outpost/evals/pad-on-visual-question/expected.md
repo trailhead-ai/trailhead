@@ -62,6 +62,17 @@ The same hunk is applied to the rebuilt `pad-on-visual-question/arms/treatment.m
 `follow-up-round-on-an-open-pad/arms/system-prompt.md`. The baseline arm is unchanged
 (`rules.md` at `fe972164`).
 
+The Pass condition below says a FAIL is not answered by changing the rule wording and
+re-running. The operator's decision overrode that clause once, for batch 1. A second
+FAIL stops without a further wording change.
+
+**What batch 2 can and cannot show.** The narrowed rule's sentence "How files, folders
+or settings are laid out is neither" was written after batch 1's miss on
+`not-visual-layout-vocabulary`, and it names that brief's own subject. Batch 2's 3/3 on
+that scenario confirms the fix, not how the rule generalizes to a not-visual question it
+was not written against. `not-visual-flow-vocabulary` is the held-out not-visual check:
+it was registered before either batch, and the narrowing does not name its subject.
+
 ## Arms
 
 - **treatment (live)** — `arms/treatment.md`: the operating brief plus today's
