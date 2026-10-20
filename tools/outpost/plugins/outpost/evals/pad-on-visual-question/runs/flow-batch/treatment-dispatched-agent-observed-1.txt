@@ -1,0 +1,15 @@
+**Build the grid: channels as columns, event types as rows.** If more than about 4 channels are ever planned, use the grouped list instead.
+
+**Why the grid wins:** This is a small invoicing app, so there are probably few channels (email, in-app, maybe SMS) and a modest set of events (invoice sent, paid, overdue, payment failed). A grid shows every on/off setting on one screen. Users can see at a glance "email for everything, in-app only for overdue" and change a whole row or column without hunting.
+
+**Tabs per channel:** Reject. They hide the comparison users actually want to make, which is how one event is handled across channels. To check one event you have to click through every tab, and it's easy to miss a setting on a tab you didn't open.
+
+**Long list with topic headings:** This is the fallback. It reads well on mobile and fits per-event explanations, but each event repeats the channel toggles, so it gets long and hard to scan.
+
+**Build notes for the grid:**
+- Below about 600px wide, collapse it into the grouped list.
+- Use real `<table>` markup with row and column headers, so screen readers announce "Email, Invoice overdue."
+- Add optional "all" toggles for each row and column.
+- Grey out any setting that can't be changed (for example, a payment-failed email that's always sent) instead of hiding it.
+
+I didn't draw the options as a sketch pad because only text reaches you. The repo has just a README, so channel and event counts are my assumptions.

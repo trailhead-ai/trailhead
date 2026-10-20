@@ -1,0 +1,25 @@
+Numbered list down the left it is. Your typed answer settles it, so you don't need to open the pad. It's still sitting at the link from my last message, but nothing depends on it now and you can ignore it.
+
+**I can't point you to a specific line, because the wizard's code isn't in this directory.** The project here (`<run>/project`) has only a `README.md` that says "ledgerlight — a small invoicing web app." There's no source code at all. Can you tell me where the wizard lives, or open this session in the actual repo?
+
+Here's what I'd do first, whatever the framework turns out to be:
+
+**Make the list of steps a single piece of data.** A side list needs every step's name, its order and whether it's done or not yet reached, all available at once. A bar or a "Step 2 of 5" line only needs a counter. Most wizards I've seen have exactly that: a `step` integer and a `switch`/`if` chain that renders one screen. So the first change is a list like this:
+
+```js
+const steps = [
+  { id: "company",  label: "Company details", component: CompanyStep,  isComplete: (d) => !!d.companyName },
+  { id: "billing",  label: "Billing",         component: BillingStep,  isComplete: (d) => !!d.currency },
+  // ...
+];
+```
+
+The wizard would track `currentStepId` (or an index into that list) instead of a bare number. Then:
+
+- the numbered side list is just `steps.map(...)` showing the label, the number and a done/current/upcoming state
+- the screen being shown is `steps[current].component`
+- whether a step can be clicked comes from `isComplete`, not from guesswork about earlier steps
+
+This doesn't change how anything looks, so it's a safe change to land first. The side-list component and jumping back to earlier steps by clicking them come next and are small once this is in place.
+
+Send me the path to the real code and I'll check whether it already works this way and make the change.

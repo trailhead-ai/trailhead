@@ -1,0 +1,26 @@
+I couldn't make the sketch pad. The script refused because the `sites` folder in this camp workspace is a symlink:
+
+```
+scratch-pad: "<run>/xdg-state/camp/bramble/worktrees/ws-quill/sites": the sites folder is a symlink — refusing to publish through it
+```
+
+I left the folder as it is. If you want the drawings, replace `ws-quill/sites` with a real directory and I can build the pad again. Here are the options in words.
+
+## My pick: the numbered step list down the left
+
+The problem is people abandoning halfway, so the question is what makes someone at step 2 or 3 stay.
+
+- **Plain "Step 2 of 5" text.** It tells people how many steps there are but not what they are. Someone halfway through can't tell whether the rest is two minutes of clicking or a hunt for a bank routing number. When they can't tell how much work is left, many leave. This is the weakest option for your problem.
+- **Progress bar across the top.** It's compact and looks good, but it measures distance, not content. At step 3 of 5 the bar is still half empty, which can make the rest feel long right where people already drop off. It also can't show that a step is optional.
+- **Numbered list on the left** (e.g. ✓ Business details → **Tax settings** → Payment methods → Invoice branding → Send a test invoice). This is the only option that names every remaining step, so people can see the rest is small and familiar. It also helps in three more ways:
+  - You can label steps like branding "Optional" or "Skip for now", which is often the biggest single fix for dropping out midway.
+  - Completed steps get checkmarks, so people can see what they've already done.
+  - People can click back to an earlier step without losing their place.
+
+  It costs a sidebar column, and on mobile it needs to turn into a "Step 2 of 5 · Tax settings ▾" header that expands into the list.
+
+Two more points, whichever you choose:
+- **Find out which step people leave on before you redesign.** If it's one step (payments or tax are the usual ones), the indicator matters less than letting people skip that step and come back later.
+- **Save progress between sessions,** so leaving halfway isn't final.
+
+**So which do you want: (A) the progress bar, (B) the numbered left-hand list, or (C) the plain "Step 2 of 5" text?** And do you know which step people are leaving on?

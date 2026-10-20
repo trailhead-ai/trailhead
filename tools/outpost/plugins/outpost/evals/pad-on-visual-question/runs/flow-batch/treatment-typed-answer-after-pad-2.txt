@@ -1,0 +1,11 @@
+Got it: we'll use the numbered list down the left. Your typed answer settles it, so the comparison page isn't needed.
+
+I can't name the first code change yet, because I can't find the wizard's code. This directory (`<run>/project`) holds only a `README.md` that says "ledgerlight — A small invoicing web app." It isn't a git repo, and there's no source code in it.
+
+Here's what I'd change first, depending on what the code looks like:
+
+**Make the list of steps a single piece of data.** A left-hand numbered list needs every step's title and order up front. A "Step 2 of 5" line only needed a count. So the first change is to pull the steps into one array (`[{ id, title, component, isComplete }]`) if they're currently hard-coded in the wizard's flow, such as a `switch` on a step number. Then the sidebar, the Next/Back buttons and the "which step am I on" logic all read from that one list. The sidebar itself becomes a small component that maps over the array and shows each step as done, current or not yet reached.
+
+If the wizard already keeps its steps in a list like that, the first change is just adding the sidebar component and switching the layout to two columns.
+
+Where does the wizard's code live? It might be in another directory or repo, or this checkout might be incomplete. Once you point me to it, I'll make the change.

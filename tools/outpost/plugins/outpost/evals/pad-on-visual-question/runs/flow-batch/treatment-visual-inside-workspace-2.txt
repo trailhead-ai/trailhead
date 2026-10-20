@@ -1,0 +1,17 @@
+I drew the three options side by side on a scratch pad:
+
+http://127.0.0.1:7314/bramble-ws-quill/checkout-promo-placement/
+Local to this machine only — this link works only on this host (no camp host identity: no self_name in <run>/xdg-config/camp/hosts.toml) and dies with the bramble-ws-quill workspace.
+
+**My recommendation is A, the collapsed "Have a code?" link under the totals.** Here's why, with abandonment as the main concern:
+
+- **The risk is a visible empty field.** Most shoppers don't have a code. When they see an open promo box, they feel they're about to pay more than other people, so they leave to search for codes. Many of them get distracted or find a competitor and don't come back. Checkout usability research has found this again and again. A collapsed link takes away that prompt but still gives people with a code an obvious place to use it.
+- **B, the input above the item list,** is the worst on this count. It's the most prominent spot in the whole summary, and shoppers see it before they've even looked over their order.
+- **C, a field inside the payment step,** has the opposite problem. People who arrive with a code (from an email, an influencer, a referral) can't find anywhere to enter it during the summary. Some of them drop out early, worried the code won't work. The discount also only appears at the last step, so the total they've been looking at changes right when they're about to pay.
+
+Some things would change my answer:
+- **If most of your traffic arrives with a code** (heavy email or affiliate campaigns), a visible field like B is better, because the hunting risk mostly goes away. Better still, apply the code from the URL so nobody has to type it.
+- **If codes are rare and you can see the code in the URL,** pre-apply it and keep the link collapsed. That gives you the best of both.
+- Whichever you choose, show the discount as its own line in the totals right away, and make invalid-code errors clear and specific. A vague error is its own source of abandonment.
+
+**So the question for you: A, B, or C, or do you know roughly what share of your checkouts arrive with a code?** That share is the number that would change the answer. You can pick an option on the pad, mark the ones you don't want, add notes, then press "Copy reply" and paste it back here. Or just answer in words, which works just as well.

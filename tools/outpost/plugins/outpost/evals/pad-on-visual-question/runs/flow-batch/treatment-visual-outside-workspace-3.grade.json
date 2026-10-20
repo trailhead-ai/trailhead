@@ -1,0 +1,17 @@
+{
+  "variant": "visual-outside-workspace",
+  "pads": [
+    "audit-log-filters"
+  ],
+  "pad locations": [
+    "xdg-state/outpost/pads/audit-log-filters"
+  ],
+  "flow options": 0,
+  "layout options": 3,
+  "tool calls": [
+    "Skill",
+    "Write",
+    "Bash"
+  ],
+  "final message": "I sketched the three layouts side by side here:\n\nfile://<run>/xdg-state/outpost/pads/audit-log-filters/index.html\n\n**I'd build the left rail.**\n\n- **It suits how admins use an audit log.** They narrow down step by step: pick a date range, then an actor, then an action, then a resource. A rail keeps every filter visible and one click away. The other two layouts make you open a menu or drawer for each change.\n- **It fits wide monitors.** About 240px for the rail still leaves plenty of room for time, actor, action, resource, IP and details. On a wide screen, saving that space is the slide-over's only real advantage, and it doesn't matter there.\n- **It has room to grow.** Audit-log filters tend to multiply: IP, outcome, source, tenant. A rail takes them easily. A top bar runs out of room at four or five controls and ends up with a \"More\" menu.\n- **The cost:** you need a fallback for narrow screens. Collapsing the rail into the slide-over below a breakpoint covers this. Also add a row of active-filter chips above the table so the current query is easy to read and to clear one filter at a time.\n\n**Top bar** is the right choice if you expect only three or four filters for good, since it's the cheapest to build. **Slide-over** fits users on small screens who filter rarely, which isn't your admins: it covers the rows they're filtering and hides which filters are on.\n\n**So for standup:** do you expect this to stay at a handful of filters, or keep growing past four or five? If it'll grow, go with the left rail. If it really will stay small, the top bar is fine.\n\nYou can answer here in words, or pick an option on the pad, add a note, press \"Copy reply\" and paste the result back."
+}

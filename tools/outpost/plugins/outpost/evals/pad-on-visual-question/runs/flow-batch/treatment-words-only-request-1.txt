@@ -1,0 +1,21 @@
+**My pick is a section in the sidebar.** With about a dozen tags, the other two options each run into a problem.
+
+**Chips above the list** are good with 3–6 tags. With 12 they wrap onto two or three rows, push the file list down, and change height whenever tags are added or renamed. Chips work well for showing which filters are *active*, but not for listing every tag you can pick.
+
+**A dropdown in the toolbar** keeps things tidy and can hold 12 tags easily, but it hides them. Users can't see which tags exist or which are applied without opening it, so filtering becomes a deliberate trip instead of something they do in passing. Multi-select inside a dropdown is also awkward: checkboxes in a popover, and it closes when you click away.
+
+**A sidebar section** fits a dozen tags as a short vertical list with no wrapping. Every tag stays visible, so the tags double as a map of the workspace. It also gives you room for:
+- a count next to each tag
+- a colour dot
+- multi-select toggles
+- a "clear" link
+
+File browsers already train people to look in the sidebar for scoping, like folders and favourites, so tags fit that habit. It also scales well: if a workspace grows to 30 tags, you can make the section collapsible or scrollable, or add a small search field.
+
+**One refinement:** when tags are selected, show them as removable chips at the top of the list, e.g. "Filtered by: design × draft ×". The sidebar is where you pick tags, and the chips tell you what is filtering the list right now, which you'd otherwise miss if the sidebar is collapsed or off-screen.
+
+**When I'd choose differently:**
+- If the sidebar is already crowded, or it's hidden on narrow layouts, use the toolbar dropdown, and still show active tags as chips.
+- If most workspaces only have a handful of tags, chips alone are fine.
+
+Do you want the tag list in the sidebar, with active-filter chips above the file list, or do you have a constraint (sidebar space, mobile layout) that points to the dropdown?

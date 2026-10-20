@@ -1,0 +1,4 @@
+pads: xdg-state/camp/bramble/worktrees/ws-quill/sites/checkout-promo-placement
+flow options: 0; layout options: 3
+round provenance (checkout-promo-placement): every option name in the built pad appears in this run's own tool inputs: yes
+tool calls: Skill, Bash, Bash, Bash, Write, Bash, Read, Write, Bash

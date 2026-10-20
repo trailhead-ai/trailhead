@@ -1,0 +1,27 @@
+I'd build **option one**: decide each request as it arrives and pay it out right away. If anything forces a batch, keep it to the payout step and keep the approval decision per-request.
+
+**Why option one**
+
+- **Speed for most customers.** Most refunds are small. Under option one they're paid in seconds. Under option two even a $5 refund waits for the nightly job and then the end-of-day payout run, which means up to about a day, longer over weekends. That gap is where "where's my refund?" tickets and chargebacks come from.
+- **Finance gets a steady trickle instead of a morning pile.** Option two drops every large request on finance at once. Worse, anything they approve after that day's payout run waits until the next one.
+- **Smaller blast radius.** If the nightly job or payout run fails, every refund that day stalls together, and the rerun has to know exactly what already paid. With option one a failure affects one request and retries on its own.
+- **Same policy logic either way.** The policy check, the auto-approve limit and the finance step are identical in both. The only real difference is *when* things run, and that should follow what the customer and finance need, not a cron schedule.
+
+**What option two genuinely does better**
+
+- **One payout call per day.** If your payment provider charges per payout, rate-limits you, or finance wants one daily settlement line to reconcile against the bank, batching helps.
+- **A built-in cooling-off window.** Holding requests gives you time to catch duplicates or fraud before money moves.
+- **Simpler on day one.** A cron job plus a table is less to build than an event-driven flow.
+
+You can get the first two inside option one: a short hold before payout (say 15 minutes) for duplicate and fraud checks, and a payout batcher that runs every hour or so, only if fees actually require it.
+
+**What option one needs to be safe**
+
+- **An explicit state machine:** `received → auto_approved | pending_finance → approved | rejected → paid → notified`, with every transition logged (who, when, which policy version).
+- **Idempotent payouts:** use the refund ID as the provider's idempotency key, so a retry can never pay twice.
+- **Send the email after payout succeeds,** not after approval, and let it retry independently of the payout.
+- **An SLA alarm on `pending_finance`,** so nothing sits forgotten in the finance queue.
+
+**What would flip my answer**
+
+Does your payment provider charge per payout, cap payout calls, or only support batch files (for example ACH)? Or does finance need one settlement per day? If yes, go with option one's per-request approvals plus a scheduled payout batch. If no, build option one as described. Either way, I wouldn't make customers with small refunds wait for a nightly job.

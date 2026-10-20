@@ -1,0 +1,20 @@
+{
+  "variant": "flow-outside-workspace",
+  "pads": [
+    "refund-approval-flow"
+  ],
+  "pad locations": [
+    "xdg-state/outpost/pads/refund-approval-flow"
+  ],
+  "flow options": 2,
+  "layout options": 0,
+  "tool calls": [
+    "Skill",
+    "Bash",
+    "Bash",
+    "Write",
+    "Bash",
+    "Bash"
+  ],
+  "final message": "I drew both flows side by side in a scratch pad:\n\nfile://<run>/xdg-state/outpost/pads/refund-approval-flow/index.html\n\nIt opens straight from disk, with no server needed.\n\n**My recommendation is option one, real-time per request.** Here's why:\n\n- **Customer wait time.** Option two makes every refund wait, even the small ones the policy would approve at once. A request made just after the nightly batch waits about a day before it's checked. If it needs finance, it can miss that day's payout run and wait a second day. In option one, small refunds pay out in seconds. The only wait is for the requests that need a person anyway.\n- **Finance workload.** Option one sends requests to finance one at a time as they arrive. Option two gives them a big pile every morning and puts a deadline on it: whatever they don't finish misses the payout run.\n- **Failures.** In option two, one bad batch or payout run delays every refund for that day. In option one, a failure affects one request and can be retried.\n- **What option two does better.** It's simpler to reconcile, with one payout run a day. It makes fewer calls to the payment provider. And if the provider charges per transfer or only supports bulk payouts, it's cheaper. Those are real reasons, but you can get most of that benefit while keeping option one. Make each payout idempotent, keyed on the refund ID, so a retry can't pay twice. Then reconcile once a day as a separate job.\n\n**One thing that would change my answer:** if your payment provider makes per-refund payouts expensive or impractical, use a hybrid. Approve in real time, but pay out in batches several times a day.\n\n**The decision for standup:** do we pay approved refunds immediately (option one), or hold everything for a nightly check and one daily payout run (option two)? I'd go with option one unless payout cost or provider limits rule it out.\n\nYou can answer in words, or pick an option in the pad, add a note, press \"Copy reply\" and paste it here. If either drawing shows \"Can't draw this flow\", paste me that message and I'll redraw it."
+}

@@ -1,0 +1,17 @@
+{
+  "variant": "flow-outside-workspace",
+  "pads": [
+    "refund-approval-flow"
+  ],
+  "pad locations": [
+    "xdg-state/outpost/pads/refund-approval-flow"
+  ],
+  "flow options": 2,
+  "layout options": 0,
+  "tool calls": [
+    "Skill",
+    "Write",
+    "Bash"
+  ],
+  "final message": "I drew both flows side by side on a scratch pad. It opens straight from disk, with nothing needing to run:\n\nfile://<run>/xdg-state/outpost/pads/refund-approval-flow/index.html\n\n**Which one do you want to build: inline (option 1) or queued batch (option 2)?**\n\nI'd go with **option 1, inline**:\n\n- **Speed for customers.** Most refunds are probably small. With option 1 they're paid within seconds. With option 2 the policy check runs at night and the payout runs at the end of the day, so a request that comes in in the morning may not be paid until the *next* evening. That's one to two days for a refund the policy already allows.\n- **Failures stay small.** If one inline payout fails, you retry that one refund. If the end-of-day run fails, every approved refund for the day is stuck, and the fix has to happen that same evening.\n- **Finance gets a steady trickle.** In option 1, reviews arrive during the day as requests come in. In option 2 they all land at once after the nightly job, so finance faces a morning pile and approvals made late in the day might miss that day's payout.\n\nOption 2 wins in a couple of places:\n\n- **Reconciliation:** one payout run a day is simpler to reconcile.\n- **Fees:** your payment provider may charge less per payout when you send them in batches.\n- **Fraud review:** the delay gives you time to catch duplicate or fraudulent requests before money goes out.\n\nIf reconciliation or fees are what really matters, there's a middle ground. Decide inline as in option 1, but send approved payouts in small batches every 15 minutes or so instead of once a day.\n\nTwo gaps to settle whichever you pick:\n\n- **Rejection emails.** Neither flow tells the customer when finance rejects a request.\n- **Duplicate payments.** Option 1 needs an idempotency key on each payout so a retry can't pay the same refund twice.\n\nYou can answer on the pad and press \"Copy reply\" to paste it back here, or just tell me in words. Both work the same. If either drawing shows \"Can't draw this flow\", paste the message to me and I'll redraw it."
+}

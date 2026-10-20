@@ -1,0 +1,25 @@
+I'd go with **a shared base file plus a small override file per environment**, and have CI render the full merged config for each environment so reviewers can see what actually changes.
+
+I sketched the three layouts and two ways of reviewing changes side by side:
+
+file://<run>/xdg-state/outpost/pads/deploy-config-layout/index.html
+
+**How each option does on your two criteria:**
+
+| Layout | Clean diffs | Merge collisions |
+|---|---|---|
+| One big YAML, a section per env | Poor. Shared values get copied into each section or tied together with anchors (`&`/`*`), and anchor changes are hard to read in a diff. | Worst. Every change goes through the same file, so unrelated edits often sit next to each other. |
+| A full file per env in `conf.d/` | Poor for shared changes: one shared setting means the same edit in N files, and the files slowly drift apart. | Best. People working on different environments almost never touch the same file. |
+| **Base + per-env overrides** | Good. Each change lives in exactly one place, and override files stay small, so their diffs are short. | Low. Environment changes are spread across separate small files. Collisions only happen in `base.yaml`, and only for changes that really are shared. |
+
+**What the base + overrides layout costs you, and how to cover it:**
+
+- **No single file shows an environment's final config.** A one-line change to `base.yaml` quietly changes every environment. The fix is the second question on the pad: a CI step that renders the merged config for dev, staging and prod and diffs it against main. That gives you clean diffs of the *result* as well as the source.
+- **Merge rules need to be written down.** Decide whether lists replace or append and whether maps deep-merge. "Maps deep-merge, lists replace" is the least surprising choice. Put it in a comment at the top of `base.yaml`.
+- **Keep overrides small.** If an override file grows to look like a full copy of the base, the setting probably doesn't belong in the base.
+
+**When I'd pick something else:**
+- **`conf.d/` full files:** your environments differ in most settings, so a base would hold very little.
+- **One big file:** there are only two or three environments and almost nobody edits them at the same time.
+
+**Your call:** do you want base + overrides with a rendered diff in CI? Or do your environments differ enough that full files per environment fit better? You can answer in words, or pick options on the pad, press "Copy reply" and paste the result here. If either flow drawing shows "Can't draw this flow", paste that message too and I'll redraw it.

@@ -1,0 +1,21 @@
+I recommend **option one, the real-time flow**, unless something you haven't mentioned forces payouts into a daily batch.
+
+I drew both flows side by side on a scratch pad:
+
+file://<run>/xdg-state/outpost/pads/refund-approval-flow/index.html
+
+**Why option one:**
+- **Customers wait less.** Small refunds pay out in seconds. With the nightly batch, even a $5 refund waits until the end of the day, and a refund that comes in just after the cutoff waits almost two days.
+- **The step that needs a person isn't tied to a clock.** In option two, finance can only see a large refund after the nightly batch has routed it, then has to approve it before the next payout run. If they miss that, it slips another day. In option one, the request reaches finance as soon as it comes in.
+- **One request failing only affects that request.** If a payout or email fails, you retry that one refund. If a batch run fails partway through, you have to work out which refunds were paid and which weren't.
+
+**What option one costs you:**
+- Payouts must be safe to retry, so give each refund a unique key that stops it from being paid twice.
+- Finance needs somewhere to see pending refunds as they arrive.
+- You'll have many small payout transactions to reconcile instead of one daily run.
+
+**When option two is the better choice:** your payment provider or bank charges per payout or only settles once a day, finance wants a single daily total, or you're worried about fraud and want a delay before money goes out. If any of those apply, there's a middle option: approve refunds in real time, then pay out everything approved in one daily run. That keeps fast decisions and still gives you a single payout batch.
+
+**So, which do you want to build?** Option one, option two, or the middle option? It would also help to know whether anything forces payouts into a daily batch.
+
+You can answer here in words, or pick an option and add a note on the pad, then press "Copy reply" and paste the result back. If either drawing shows "Can't draw this flow", paste that message back too and I'll redraw it.

@@ -1,0 +1,17 @@
+**Build the grid: channels as columns, event types as rows.** Add topic headings as row-group dividers, and on narrow screens collapse it into the topic list.
+
+**Why the grid wins:**
+- **It matches how people decide.** People think "how do I want to hear about *X*?" and pick a channel for each event. In a grid, one row answers that question, so you can see everything about an event at a glance.
+- **It's dense and familiar.** With 3–5 channels (email, push, in-app, SMS) and 10–30 events, the whole panel fits on one screen. GitHub and Linear use this layout, so users already know how it works.
+- **It's easy to add to.** A new channel is one more column and a new event is one more row.
+
+**Why not tabs per channel:** tabs hide comparisons between channels. To check how a single event is set up, users have to flip between tabs and remember what they saw. Settings also tend to drift out of sync between channels.
+
+**Why not one long list by topic:** it's best for mobile and for events that need long descriptions. But each channel's toggles repeat on every item, so it gets long fast and is harder to scan on desktop.
+
+**Grid caveats to handle:**
+- Grey out (don't hide) cells where an event doesn't support a channel.
+- Add a mute-all control at the top of each channel column.
+- Below about 600px wide, render each row as a topic-list item with that event's channel toggles inside it.
+
+I didn't sketch the three options because this was a written decision report.

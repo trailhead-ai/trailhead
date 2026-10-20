@@ -1,0 +1,21 @@
+I'd go with **a row of chips above the list**.
+
+**Why chips work for about a dozen tags:**
+- Twelve short labels fit in one or two lines, so every tag shows at once with no extra click.
+- You can see which tags are active right where the filtering happens, next to the results.
+- Picking several tags is natural: click to toggle each one, plus a "clear" chip at the end.
+- It's the pattern people already know from Gmail labels, GitHub issue filters and photo apps.
+
+**Why not the others:**
+- **Dropdown in the toolbar:** It hides the tags behind a click and hides what's filtered once it closes. That works for 50+ tags or a crowded screen, but it's the wrong trade at 12. Selecting several tags in a dropdown is also clumsy.
+- **Sidebar section:** It makes sense if the sidebar already holds navigation like folders or saved views, and tags are another way to browse. But it puts the filter far from the list it affects. It also takes permanent space and does nothing when the sidebar is collapsed or on narrow screens.
+
+**Details worth deciding:**
+- **Several tags selected:** Pick whether a file must have all of them (AND) or any of them (OR), and say which in the UI. AND is usually what people expect when narrowing down.
+- **Order:** Sort chips by how often they're used, or alphabetically, and keep the order fixed so they don't jump around as you click.
+- **Workspaces with many more tags:** Cap the row at about 10–12 chips and put the rest behind a "+N more" chip that opens a searchable popover. That way chips scale without switching to a dropdown later.
+- **Counts:** Showing how many files each tag has on its chip is a nice touch if it's cheap to compute.
+
+**One case where I'd choose the sidebar instead:** if people treat tags like folders, picking one and staying in it for a while, rather than as a quick filter. Then a persistent sidebar section matches how they work better.
+
+So: are tags a quick "narrow this list" filter or a main way to navigate? If it's the filter, use chips. If it's navigation, use the sidebar.

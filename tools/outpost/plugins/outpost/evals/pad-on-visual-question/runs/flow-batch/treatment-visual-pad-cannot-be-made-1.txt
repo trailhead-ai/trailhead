@@ -1,0 +1,27 @@
+I couldn't make a sketch pad. The `ws-quill` workspace's `sites/` folder is a symlink, so the script refused to publish through it:
+
+```
+scratch-pad: "…/camp/bramble/worktrees/ws-quill/sites": the sites folder is a symlink — refusing to publish through it
+```
+
+I left that folder alone. Check where it points: a symlinked `sites/` usually means something was set up by hand that shouldn't have been. Here are the options in words instead.
+
+## My recommendation: the numbered step list down the left
+
+Your problem is people abandoning halfway, and the likely cause is not knowing what's still ahead. At step 3 someone wonders whether there's much more and whether they need to go find their tax ID first. The three options differ mainly in how well they answer that:
+
+| | Shows how far along you are | Shows what's left | Lets you go back to a step | Cost |
+|---|---|---|---|---|
+| **A. Progress bar across the top** | Yes (as a %) | No | No | Low, works on mobile |
+| **B. Numbered list down the left** | Yes | **Yes, every step is named** | Yes, click a finished step | Takes ~200px of width; on mobile it has to collapse to a strip at the top |
+| **C. "Step 2 of 5" text** | Roughly | No | No | Nothing to build |
+
+- **B** names the remaining steps, for example "3 Tax & currency, 4 Payment methods, 5 First invoice". People can see how close the end is and can get documents ready before they need them. It's also the usual pattern for setup flows with a fixed set of steps.
+- **A** looks like progress, but a bar at 40% doesn't say whether the next step takes 10 seconds or means a search for bank details. That's the halfway point where people quit.
+- **C** is the honest minimum, but it gives no more reassurance than A does.
+
+Two things to do whichever you pick:
+1. **Check where people actually drop off.** If most of them leave on one particular step (bank or tax details are the usual suspects), that step is the real problem. A progress indicator won't fix it. Splitting the step, adding "skip for now", or warning people up front about what they'll need will.
+2. **Save progress and say so** ("You can finish this later"). People who leave halfway can then come back instead of being lost for good.
+
+**So, which way are you leaning?** Does B's sidebar fit the wizard's layout, or does the screen need the full width? And do you know which step people drop out on? Tell me either and I can tighten the recommendation.

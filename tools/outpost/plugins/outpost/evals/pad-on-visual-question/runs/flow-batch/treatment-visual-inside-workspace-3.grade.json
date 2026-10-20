@@ -1,0 +1,23 @@
+{
+  "variant": "visual-inside-workspace",
+  "pads": [
+    "checkout-promo-placement"
+  ],
+  "pad locations": [
+    "xdg-state/camp/bramble/worktrees/ws-quill/sites/checkout-promo-placement"
+  ],
+  "flow options": 0,
+  "layout options": 3,
+  "tool calls": [
+    "Skill",
+    "Bash",
+    "Bash",
+    "Bash",
+    "Write",
+    "Bash",
+    "Read",
+    "Write",
+    "Bash"
+  ],
+  "final message": "I drew all three placements as sketches on a pad, published to the bramble/ws-quill workspace:\n\nhttp://127.0.0.1:7314/bramble-ws-quill/checkout-promo-placement/\nLocal to this machine only — this link works only on this host (no camp host identity: no self_name in <run>/xdg-config/camp/hosts.toml) and dies with the bramble-ws-quill workspace.\n\n**My pick is the collapsed \"Have a code?\" link under the totals.** Since abandonment is your worry, here's how each option does on it:\n\n- **Collapsed link under totals.** Most shoppers have no code. An open, empty promo box tells them someone else is paying less, and some leave the checkout to search coupon sites. Many don't come back, or come back annoyed when the code they found doesn't work. A quiet text link avoids most of that. Shoppers who do have a code still find it easily, because they look for it next to the total, and that's also where the discount should appear. The cost is one extra click, plus the expanded, error and applied states you'll need to build.\n- **Input above the item list.** This is the easiest to find, and the worst for abandonment. It's the first thing people see, so it sends the most people off to hunt for a code. The discount also appears far from the total it changes. It only makes sense if most of your traffic arrives with a code in hand, like a store that's mostly influencer or affiliate traffic.\n- **Field inside the payment step.** The summary stays clean, but it hurts the people who *do* have a code. They check the summary, see no place to enter it, and may assume they can't use it and leave. Or the total changes after they've started entering card details, which feels shaky. It's also bad for mobile wallet buttons like Apple Pay and Google Pay, which skip that step.\n\nWhichever you choose, a few details matter as much as where the field goes:\n- Apply the code inline, without a page reload, and show the discount as its own line in the totals.\n- Give specific errors like \"Expired\" or \"Minimum $50 not met\" instead of \"Invalid code\".\n- Keep the code applied if the shopper goes back and forth between steps.\n- If the shopper arrived from a promo link, apply the code automatically and show the field expanded and filled in.\n\nIf you have the data, check the share of orders that use a code. If it's high (roughly over 30–40%), the input above the item list becomes worth considering. Otherwise go with the collapsed link, and A/B test it against the payment-step version if you want proof.\n\n**So which way are you leaning?** You can pick, rule options out and leave notes on the pad, then press \"Copy reply\" and paste it back here. Or just answer in words, which works just as well."
+}

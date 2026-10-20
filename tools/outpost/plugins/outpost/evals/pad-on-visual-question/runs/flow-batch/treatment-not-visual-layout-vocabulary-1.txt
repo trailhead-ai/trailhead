@@ -1,0 +1,24 @@
+I'd go with a **shared base file plus a small override file per environment**. Since your goals are clean diffs and fewer merge collisions, it's the only one of the three that does well on both.
+
+I drew the three layouts side by side on a scratch pad. It opens straight from disk:
+file://<run>/xdg-state/outpost/pads/ledgerlight-deploy-config-layout/index.html
+
+If an option shows "Can't draw this flow" instead of a diagram, paste the message back and I'll redraw it.
+
+**How the three compare**
+
+| | Clean diffs | Merge collisions |
+|---|---|---|
+| **One big `deploy.yaml`** | Bad for shared changes: one setting gets edited in N sections, and the diff hunks blur across environments. | Worst. Everyone edits the same file, and git conflicts on edits that are next to each other even when they're in different environment sections. |
+| **`conf.d/` with a full file per environment** | Diffs within one environment are clean. A shared change becomes the same edit in N files, and over time the files drift apart without anyone noticing. | Few. People working on different environments rarely touch the same file. |
+| **`base.yaml` + `overrides/<env>.yaml`** | Best. A shared change is one line in the base, and an environment's diff shows only what makes it different. | Few. Most edits go to the small override files. The base changes less often and has less in it per key. |
+
+**What the override layout costs, and how to handle it:**
+- **The loader needs a deep merge.** Decide now how lists behave (replace or append; I'd use replace) and how to delete a key in an override (for example, an explicit `null` removes it).
+- **Nobody can see the final config just by reading a file.** Add a `render-config <env>` command that prints the merged result. Have CI render every environment and either check the output in or diff it, so a change to `base.yaml` shows its effect on prod in the PR.
+- **Keep it to one level:** base, then the environment. Chains like base → staging → prod are where this pattern gets confusing.
+- **Keep files small and keys sorted.** That's what keeps the collision rate low over time.
+
+If you only have two or three environments that really are different from each other with little in common, `conf.d/` is fine and saves you the merge logic. Once they share most of their settings, the override layout is worth it.
+
+**Your call:** which of the three do you want? Tell me in words, or use "Copy reply" at the bottom of the pad and paste the result here; either works. Also, how many environments do you have, and roughly how much of the config do they share? If they share very little, I'd pick `conf.d/` instead.
