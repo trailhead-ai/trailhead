@@ -1,0 +1,20 @@
+merged task/tote-tag-print-the-tote-id-with-emphasis-marks into task/tote-tag-print-the-tote-id-in-capitals
+
+Every write landed and read back. Nothing is included, so refinement (steps 9 to 12) did not run and no parent was created.
+
+### Closing report
+
+- **Included:** none.
+- **Left:** Tote tag: print the tote id in capitals (`tote-tag-print-the-tote-id-in-capitals`).
+- **Left out / refined but not nested:** none, because refinement did not run.
+- **Dropped:** none.
+- **Merged:** Tote tag: print the tote id with emphasis marks (`tote-tag-print-the-tote-id-with-emphasis-marks`) was folded into Tote tag: print the tote id in capitals (`tote-tag-print-the-tote-id-in-capitals`). The survivor's prior status was `open`.
+- **Reset to open:** none.
+- **Failed writes:** none.
+- **Held back:** none.
+
+No parent was created. Every dispose write landed and `distilled` is false, so the next step is:
+
+```
+/craft:distill spec/fixture-tote-tag-spec
+```

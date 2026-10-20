@@ -1,0 +1,148 @@
+{
+ "dispose_runs": [
+  {
+   "at": 6,
+   "preview": true,
+   "file": {
+    "reason": "the rack was scrapped with the old stockroom",
+    "drops": [
+     {
+      "role": "F1",
+      "revision": true
+     },
+     {
+      "role": "F2",
+      "revision": true
+     }
+    ],
+    "merges": []
+   },
+   "exit": 0,
+   "stderr_lines": [],
+   "result": {
+    "drops": [
+     {
+      "name": "F1",
+      "status": "open"
+     },
+     {
+      "name": "F2",
+      "status": "open"
+     }
+    ],
+    "merges": [],
+    "dependents": {
+     "F1": [],
+     "F2": []
+    }
+   }
+  },
+  {
+   "at": 7,
+   "preview": false,
+   "file": {
+    "reason": "the rack was scrapped with the old stockroom",
+    "drops": [
+     {
+      "role": "F1",
+      "revision": true
+     },
+     {
+      "role": "F2",
+      "revision": true
+     }
+    ],
+    "merges": []
+   },
+   "exit": 2,
+   "stderr_lines": [
+    "reason-code: dispose-incomplete",
+    "subject: F2"
+   ],
+   "result": {
+    "dropped": [
+     {
+      "name": "F1",
+      "prior-status": "open"
+     }
+    ],
+    "merged": [],
+    "reset-to-open": [],
+    "failed": [
+     {
+      "name": "F2",
+      "write": "drop",
+      "command": "lore record update task/F2 --vault default --status dropped"
+     }
+    ],
+    "incomplete-merges": []
+   }
+  }
+ ],
+ "order": {
+  "write_dispose": [
+   7
+  ]
+ },
+ "children_files": [],
+ "fetched_by_main": [
+  "F1",
+  "F2"
+ ],
+ "progress": {
+  "assistant_text": [
+   {
+    "at": 8,
+    "line": "dropped task/F1"
+   },
+   {
+    "at": 8,
+    "line": "failed drop: task/F2"
+   }
+  ],
+  "final_report": [
+   "dropped task/F1",
+   "failed drop: task/F2"
+  ]
+ },
+ "closing_commands": [
+  {
+   "line": "lore record update task/F2 --vault default --status dropped",
+   "standalone": true
+  },
+  {
+   "line": "/craft:tidy-followups spec/fixture-mug-rack-spec",
+   "standalone": true
+  }
+ ],
+ "records": {
+  "F1": {
+   "status": "dropped",
+   "parent": null,
+   "supersedes": [],
+   "depends-on": [],
+   "dropped_note": "Reason: the rack was scrapped with the old stockroom",
+   "merged_sections": [],
+   "body_changed": true,
+   "new": false,
+   "body_has_5000": false
+  },
+  "F2": {
+   "status": "open",
+   "parent": null,
+   "supersedes": [],
+   "depends-on": [],
+   "dropped_note": null,
+   "merged_sections": [],
+   "body_changed": false,
+   "new": false,
+   "body_has_5000": false
+  }
+ },
+ "repo": {
+  "head_before": "[sha:17c23d94]",
+  "head_after": "[sha:17c23d94]",
+  "status_after": ""
+ },
+ "real_vault_hits": ""
+}

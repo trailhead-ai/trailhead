@@ -1,0 +1,35 @@
+[main] BASH
+$CRAFT[treat]/scripts/followup_gather.py fixture-banner-printer-spec; echo "exit: $?"
+
+[main] BASH
+lore record show --json --vault default task/banner-printer-centre-the-banner-text; echo "exit: $?"; lore record show --json --vault default task/banner-printer-pad-the-banner-text-with-a-border; echo "exit: $?"
+
+[main] BASH
+dispositions=$(mktemp)
+cat > "$dispositions" <<'DISPOSITIONS_JSON'
+{"reason": "", "drops": [], "merges": [{"survivor": {"name": "banner-printer-centre-the-banner-text", "revision": "[sha:d1bd802e]"}, "absorbed": [{"name": "banner-printer-pad-the-banner-text-with-a-border", "revision": "[sha:1cac473e]", "intent": "Adds a border: a # character placed on each side of the banner text, which the centring task does not cover."}]}]}
+DISPOSITIONS_JSON
+$CRAFT[treat]/scripts/followup_dispose.py dispose fixture-banner-printer-spec --dispositions "$dispositions" --preview
+rc=$?
+rm -f "$dispositions"
+echo "exit: $rc"
+
+[main] BASH
+dispositions=$(mktemp)
+cat > "$dispositions" <<'DISPOSITIONS_JSON'
+{"reason": "", "drops": [], "merges": [{"survivor": {"name": "banner-printer-centre-the-banner-text", "revision": "[sha:d1bd802e]"}, "absorbed": [{"name": "banner-printer-pad-the-banner-text-with-a-border", "revision": "[sha:1cac473e]", "intent": "Also keep any border one character wide and centre the banner on a forty column line, as the sign painter asked"}]}]}
+DISPOSITIONS_JSON
+$CRAFT[treat]/scripts/followup_dispose.py dispose fixture-banner-printer-spec --dispositions "$dispositions" --preview
+rc=$?
+rm -f "$dispositions"
+echo "exit: $rc"
+
+[main] BASH
+dispositions=$(mktemp)
+cat > "$dispositions" <<'DISPOSITIONS_JSON'
+{"reason": "", "drops": [], "merges": [{"survivor": {"name": "banner-printer-centre-the-banner-text", "revision": "[sha:d1bd802e]"}, "absorbed": [{"name": "banner-printer-pad-the-banner-text-with-a-border", "revision": "[sha:1cac473e]", "intent": "Also keep any border one character wide and centre the banner on a forty column line, as the sign painter asked"}]}]}
+DISPOSITIONS_JSON
+$CRAFT[treat]/scripts/followup_dispose.py dispose fixture-banner-printer-spec --dispositions "$dispositions"
+rc=$?
+rm -f "$dispositions"
+echo "exit: $rc"

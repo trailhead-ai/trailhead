@@ -1,0 +1,40 @@
+{
+ "order": {},
+ "agents": {
+  "count": 0,
+  "sequential": true
+ },
+ "check_args": [],
+ "assembles": 0,
+ "verbatim": [],
+ "records": {
+  "mugs-count-the-mugs-hanging-on-the-rack": {
+   "status": "dropped",
+   "parent": null,
+   "labels": [],
+   "body_changed": true,
+   "new": false
+  },
+  "rack-paint-pick-a-warmer-grey": {
+   "status": "open",
+   "parent": null,
+   "labels": [],
+   "body_changed": false,
+   "new": false
+  }
+ },
+ "parent_body": {},
+ "command_lines": [
+  {
+   "line": "lore record update task/rack-paint-pick-a-warmer-grey --vault default --status dropped",
+   "standalone": true,
+   "in_fence": true
+  },
+  {
+   "line": "/craft:tidy-followups spec/fixture-mug-rack-spec",
+   "standalone": true,
+   "in_fence": true
+  }
+ ],
+ "real_vault_hits": ""
+}

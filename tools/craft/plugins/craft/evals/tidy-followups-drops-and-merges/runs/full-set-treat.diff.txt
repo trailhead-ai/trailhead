@@ -1,0 +1,13 @@
+vault CHANGED task/bin-log-write-the-chosen-bin-to-the-log.json
+vault CHANGED task/bin-log-write-the-chosen-bin-to-the-log.md
+vault CHANGED task/bin-log-write-the-crate-id-with-the-chosen-bin.json
+vault ADDED task/build-the-follow-ups-of-fixture-crate-sorter-spec-chosen-2026-10-20.json
+vault ADDED task/build-the-follow-ups-of-fixture-crate-sorter-spec-chosen-2026-10-20.md
+vault CHANGED task/chutes-remove-the-legacy-chute-table.json
+vault CHANGED task/chutes-remove-the-legacy-chute-table.md
+vault CHANGED task/chutes-remove-the-table-of-legacy-chute-names.json
+vault CHANGED task/chutes-remove-the-table-of-legacy-chute-names.md
+vault CHANGED task/sorter-refuse-a-crate-mass-of-zero.json
+vault CHANGED task/sorter-refuse-a-crate-mass-of-zero.md
+repo head before=[sha:177a19fb] after=[sha:177a19fb]
+repo status after=''

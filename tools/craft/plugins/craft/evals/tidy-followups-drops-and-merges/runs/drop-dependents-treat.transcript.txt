@@ -1,0 +1,170 @@
+[main] TOOL Read {"file_path": "$CRAFT[treat]/skills/tidy-followups/SKILL.md"}
+
+[main] RESULT
+1	---
+2	name: tidy-followups
+3	description: >
+4	  Present a finished spec's recorded follow-ups as a reasoned shortlist — which are worth doing
+5	  now rather than later, each with a one-line reason — and list the rest by title; then, once the
+6	  operator has chosen, refine the chosen follow-ups and nest the ones that qualify under one new
+7	  buildable parent. Gathers with a deterministic script, ranks, and writes nothing until the
+8	  operator has confirmed the chosen set.
+9	  TRIGGER when: user says "tidy the follow-ups of spec X", "which follow-ups of this spec should
+10	  we do", "what follow-ups does this spec have", or invokes /craft:tidy-followups explicitly.
+11	  DO NOT TRIGGER when: the ask is a batch of in-session code fix-ups to run now (that is
+12	  `/craft:polish`'s), or the spec's slice loop is still running (follow-ups that matter
+13	  mid-loop reach the next slice through `/craft:plan`).
+14	---
+15	
+16	# Tidy follow-ups
+17	
+18	A spec built slice by slice leaves follow-ups: tasks the slices deliberately did not act on, linked
+19	back to the slice they came from. Once the spec closes they sink into the general backlog. This
+20	ritual brings one finished spec's follow... [cut 58993 chars]
+
+[main] TEXT
+Step 1: `fixture-shelf-lamp-spec` matches the safe shape, doesn't start with `-`, and has no `..` segment. Valid.
+
+[main] BASH
+$CRAFT[treat]/scripts/followup_gather.py fixture-shelf-lamp-spec; echo "exit: $?"
+
+[main] TOOL Read {"file_path": "$CRAFT[treat]/skills/_shared/security.md"}
+
+[main] RESULT
+{"spec": "fixture-shelf-lamp-spec", "vault": "default", "entry": "complete-status", "distilled": false, "followup-parents": [], "followups": [{"name": "dimmer-remove-the-dim-table-s-step-comments", "title": "Dimmer: remove the dim table's step comments", "status": "open"}, {"name": "dimmer-remove-the-unused-dim-table", "title": "Dimmer: remove the unused dim table", "status": "open"}], "slice-basis": "labelled", "slices": ["fixture-shelf-lamp-spec-the-slice"], "child-count": 1, "candidates-read": 2, "kept": 2, "excluded-by-label": {"count": 0, "names": []}, "skipped-edges": 0}
+exit: 0
+
+[main] RESULT
+1	# Security posture — credential scrub and untrusted-value validation
+2	
+3	Two rules every craft surface applies, stated once here so no citing surface restates them.
+4	
+5	## Credential-pattern scrub
+6	
+7	**Credential-pattern scrub (mechanical, runs first).** This is the general rule for the whole run,
+8	not one phase's step: **any finding or note text entering a record body or a report — session
+9	candidates, `blocked` bodies, task-body notes from the per-task loop, raw command stderr quoted into
+10	either — runs through this list first.** A vault is git-backed and has its own push path, so a
+11	credential transcribed into a task body ships as surely as one committed to code. Report bodies are
+12	**summarized, never captured verbatim** — quote only `file:line` references for anything caught. Run
+13	the text through this credential-pattern scrub regex list and drop/redact any match rather than
+14	capturing it:
+15	
+16	- **Key-like tokens** — `(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s*[=:]\s*\S+`
+17	  — the trailing character class is load-bearing: it lets the keyword carry qualifier text before
+18	  the separator, which is what catches `[redacted:key-like] `AWS_SECRE... [cut 2830 chars]
+
+[main] TEXT
+Both names pass the shape check. Fetching bodies.
+
+[main] BASH
+lore record show --json --vault default task/dimmer-remove-the-dim-table-s-step-comments; echo "exit: $?"; lore record show --json --vault default task/dimmer-remove-the-unused-dim-table; echo "exit: $?"
+
+[main] RESULT
+{
+  "body": "The comments beside `DIM_TABLE` go with the table.\n",
+  "kind": "task",
+  "layer": "personal",
+  "name": "dimmer-remove-the-dim-table-s-step-comments",
+  "record_id": "task/dimmer-remove-the-dim-table-s-step-comments",
+  "revision": "[sha:e86a469b]",
+  "sidecar": {
+    "created-at": "2026-10-20T20:21:13Z",
+    "created-by": "fixture@example.com",
+    "depends-on": [
+      "dimmer-remove-the-unused-dim-table"
+    ],
+    "kind": "task",
+    "related": {
+      "task": [
+        "fixture-shelf-lamp-spec-the-slice"
+      ]
+    },
+    "status": "open",
+    "title": "Dimmer: remove the dim table's step comments",
+    "updated-at": "2026-10-20T20:21:13Z",
+    "updated-by": "fixture@example.com",
+    "version": "v1"
+  }
+}
+exit: 0
+{
+  "body": "`DIM_TABLE` in `src/dimmer.py` is read by nothing now.\n",
+  "kind": "task",
+  "layer": "personal",
+  "name": "dimmer-remove-the-unused-dim-table",
+  "record_id": "task/dimmer-remove-the-unused-dim-table",
+  "revision": "[sha:1caf0233]",
+  "sidecar": {
+    "created-at": "2026-10-20T20:21:13Z",
+    "created-by": "fixture@example.com",
+    "k... [cut 296 chars]
+
+[main] BASH
+dispositions=$(mktemp)
+cat > "$dispositions" <<'DISPOSITIONS_JSON'
+{"reason": "the lamp shelf was taken out of the plan", "drops": [{"name": "dimmer-remove-the-unused-dim-table", "revision": "[sha:1caf0233]"}], "merges": []}
+DISPOSITIONS_JSON
+$CRAFT[treat]/scripts/followup_dispose.py dispose fixture-shelf-lamp-spec --dispositions "$dispositions" --preview
+rc=$?
+rm -f "$dispositions"
+echo "exit: $rc"
+
+[main] RESULT
+{"drops": [{"name": "dimmer-remove-the-unused-dim-table", "status": "open"}], "merges": [], "dependents": {"dimmer-remove-the-unused-dim-table": [{"name": "dimmer-remove-the-dim-table-s-step-comments", "vault": "default", "status": "open"}, {"name": "lamp-audit-the-wall-switch-wiring", "vault": "default", "status": "open"}]}}
+exit: 0
+
+[main] BASH
+dispositions=$(mktemp)
+cat > "$dispositions" <<'DISPOSITIONS_JSON'
+{"reason": "the lamp shelf was taken out of the plan", "drops": [{"name": "dimmer-remove-the-unused-dim-table", "revision": "[sha:1caf0233]"}, {"name": "dimmer-remove-the-dim-table-s-step-comments", "revision": "[sha:e86a469b]"}], "merges": []}
+DISPOSITIONS_JSON
+$CRAFT[treat]/scripts/followup_dispose.py dispose fixture-shelf-lamp-spec --dispositions "$dispositions" --preview
+rc=$?
+rm -f "$dispositions"
+echo "exit: $rc"
+
+[main] RESULT
+{"drops": [{"name": "dimmer-remove-the-dim-table-s-step-comments", "status": "open"}, {"name": "dimmer-remove-the-unused-dim-table", "status": "open"}], "merges": [], "dependents": {"dimmer-remove-the-dim-table-s-step-comments": [], "dimmer-remove-the-unused-dim-table": [{"name": "dimmer-remove-the-dim-table-s-step-comments", "vault": "default", "status": "open"}, {"name": "lamp-audit-the-wall-switch-wiring", "vault": "default", "status": "open"}]}}
+exit: 0
+
+[main] BASH
+dispositions=$(mktemp)
+cat > "$dispositions" <<'DISPOSITIONS_JSON'
+{"reason": "the lamp shelf was taken out of the plan", "drops": [{"name": "dimmer-remove-the-unused-dim-table", "revision": "[sha:1caf0233]"}, {"name": "dimmer-remove-the-dim-table-s-step-comments", "revision": "[sha:e86a469b]"}], "merges": []}
+DISPOSITIONS_JSON
+$CRAFT[treat]/scripts/followup_dispose.py dispose fixture-shelf-lamp-spec --dispositions "$dispositions"
+rc=$?
+rm -f "$dispositions"
+echo "exit: $rc"
+
+[main] RESULT
+{"dropped": [{"name": "dimmer-remove-the-dim-table-s-step-comments", "prior-status": "open"}, {"name": "dimmer-remove-the-unused-dim-table", "prior-status": "open"}], "merged": [], "reset-to-open": [], "failed": [], "incomplete-merges": []}
+exit: 0
+
+[main] TEXT
+dropped task/dimmer-remove-the-dim-table-s-step-comments
+dropped task/dimmer-remove-the-unused-dim-table
+
+Both drops were written and read back. Nothing is included, so refinement (steps 9–11) did not run and no parent was created.
+
+### Closing report
+
+- **Included:** none
+- **Left:** none
+- **Left out / refined but not nested:** none
+- **Dropped.** Reason: *the lamp shelf was taken out of the plan*
+  - Dimmer: remove the dim table's step comments (`dimmer-remove-the-dim-table-s-step-comments`), was `open`
+  - Dimmer: remove the unused dim table (`dimmer-remove-the-unused-dim-table`), was `open`
+- **Merged:** none
+- **Reset to open:** none
+- **Failed:** none
+- **Held back:** none
+
+One task outside this follow-up set, `lamp-audit-the-wall-switch-wiring` (vault `default`, `open`), still depends on the dropped `dimmer-remove-the-unused-dim-table` and will stay waiting on it.
+
+Every dispose write landed, no parent was created, and the spec is not distilled yet, so the next step is to distill it:
+
+```
+/craft:distill spec/fixture-shelf-lamp-spec
+```

@@ -1,0 +1,70 @@
+{
+ "dispose_runs": [],
+ "order": {},
+ "children_files": [],
+ "fetched_by_main": [
+  "P",
+  "Q"
+ ],
+ "progress": {
+  "assistant_text": [],
+  "final_report": []
+ },
+ "closing_commands": [
+  {
+   "line": "**Operator's answer:** move every follow-up off the shortlist, and merge `Q` into `P`.",
+   "standalone": false
+  },
+  {
+   "line": "- **Merge: refused.** This ritual has no merge step. Confirmation 1 only accepts moves onto or off the shortlist, or `none`, and no later step can merge one record into another. Because the ritual can't merge in either direction, it doesn't offer the reverse merge (emphasis-marks into capitals). The pre-supplied answer for that offer therefore doesn't come into play, and no merge is applied.",
+   "standalone": false
+  },
+  {
+   "line": "/craft:distill spec/fixture-tote-tag-spec",
+   "standalone": true
+  }
+ ],
+ "records": {
+  "Q": {
+   "status": "open",
+   "parent": null,
+   "supersedes": [],
+   "depends-on": [],
+   "dropped_note": null,
+   "merged_sections": [],
+   "body_changed": false,
+   "new": false,
+   "body_has_5000": false
+  },
+  "P": {
+   "status": "open",
+   "parent": null,
+   "supersedes": [],
+   "depends-on": [],
+   "dropped_note": null,
+   "merged_sections": [],
+   "body_changed": false,
+   "new": false,
+   "body_has_5000": false
+  },
+  "R": {
+   "status": "open",
+   "parent": null,
+   "supersedes": [],
+   "depends-on": [
+    "Q"
+   ],
+   "dropped_note": null,
+   "merged_sections": [],
+   "body_changed": false,
+   "new": false,
+   "body_has_5000": false
+  }
+ },
+ "repo": {
+  "head_before": "[sha:b3c08182]",
+  "head_after": "[sha:b3c08182]",
+  "status_after": ""
+ },
+ "real_vault_hits": ""
+}

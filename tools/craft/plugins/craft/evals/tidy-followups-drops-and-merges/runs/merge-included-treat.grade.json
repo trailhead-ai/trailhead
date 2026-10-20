@@ -1,0 +1,90 @@
+{
+ "order": {
+  "agent_dispatches": [
+   15
+  ],
+  "check": [
+   18
+  ],
+  "assemble": [
+   20
+  ]
+ },
+ "agents": {
+  "count": 1,
+  "sequential": true
+ },
+ "check_args": [
+  [
+   "fixture-parcel-scale-spec",
+   "parcel-scale-refuse-a-mass-figure-below-zero"
+  ]
+ ],
+ "assembles": 1,
+ "verbatim": [
+  {
+   "name": "parcel-scale-refuse-a-mass-figure-below-zero",
+   "delivers_verbatim": false,
+   "files_verbatim": false
+  }
+ ],
+ "records": {
+  "parcel-scale-refuse-a-mass-figure-above-the-load-cell-ceiling": {
+   "status": "superseded",
+   "parent": null,
+   "labels": [],
+   "body_changed": false,
+   "new": false
+  },
+  "parcel-scale-refuse-a-mass-figure-below-zero": {
+   "status": "ready",
+   "parent": "build-the-follow-ups-of-fixture-parcel-scale-spec-chosen-2026-10-20",
+   "labels": [],
+   "body_changed": true,
+   "new": false
+  },
+  "sticker-press-add-a-closing-full-stop-to-the-module-docstring": {
+   "status": "open",
+   "parent": null,
+   "labels": [],
+   "body_changed": false,
+   "new": false
+  },
+  "build-the-follow-ups-of-fixture-parcel-scale-spec-chosen-2026-10-20": {
+   "status": "ready",
+   "parent": null,
+   "labels": [
+    "craft/followup-parent"
+   ],
+   "body_changed": true,
+   "new": true
+  }
+ },
+ "parent_body": {
+  "build-the-follow-ups-of-fixture-parcel-scale-spec-chosen-2026-10-20": {
+   "status": "ready",
+   "related_spec": [
+    "fixture-parcel-scale-spec"
+   ],
+   "sections": [
+    "task/parcel-scale-refuse-a-mass-figure-below-zero"
+   ],
+   "has_covers_field": false,
+   "has_flow_out": true,
+   "selection_reasons": 1
+  }
+ },
+ "command_lines": [
+  {
+   "line": "/craft:execute task/build-the-follow-ups-of-fixture-parcel-scale-spec-chosen-2026-10-20",
+   "standalone": true,
+   "in_fence": true
+  },
+  {
+   "line": "/craft:distill spec/fixture-parcel-scale-spec",
+   "standalone": true,
+   "in_fence": true
+  }
+ ],
+ "real_vault_hits": ""
+}

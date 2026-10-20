@@ -1,0 +1,100 @@
+[main] BASH
+$CRAFT[treat]/scripts/followup_gather.py fixture-parcel-scale-spec; echo "exit: $?"
+
+[main] BASH
+for n in parcel-scale-refuse-a-mass-figure-above-the-load-cell-ceiling parcel-scale-refuse-a-mass-figure-below-zero sticker-press-add-a-closing-full-stop-to-the-module-docstring; do lore record show --json --vault default task/$n; echo "exit: $?"; done
+
+[main] BASH
+dispositions=$(mktemp)
+cat > "$dispositions" <<'DISPOSITIONS_JSON'
+{"reason": "", "drops": [], "merges": [{"survivor": {"name": "parcel-scale-refuse-a-mass-figure-below-zero", "revision": "[sha:58507d9b]"}, "absorbed": [{"name": "parcel-scale-refuse-a-mass-figure-above-the-load-cell-ceiling", "revision": "[sha:e3bda382]", "intent": "Also refuse a figure above the load cell's 5000-gram ceiling: read_weight should raise ValueError for any figure over 5000 as well as below zero."}]}]}
+DISPOSITIONS_JSON
+$CRAFT[treat]/scripts/followup_dispose.py dispose fixture-parcel-scale-spec --dispositions "$dispositions" --preview
+rc=$?
+rm -f "$dispositions"
+echo "exit: $rc"
+
+[main] BASH
+dispositions=$(mktemp)
+cat > "$dispositions" <<'DISPOSITIONS_JSON'
+{"reason": "", "drops": [], "merges": [{"survivor": {"name": "parcel-scale-refuse-a-mass-figure-below-zero", "revision": "[sha:58507d9b]"}, "absorbed": [{"name": "parcel-scale-refuse-a-mass-figure-above-the-load-cell-ceiling", "revision": "[sha:e3bda382]", "intent": "Also refuse a figure above the load cell's 5000-gram ceiling: read_weight should raise ValueError for any figure over 5000 as well as below zero."}]}]}
+DISPOSITIONS_JSON
+$CRAFT[treat]/scripts/followup_dispose.py dispose fixture-parcel-scale-spec --dispositions "$dispositions"
+rc=$?
+rm -f "$dispositions"
+echo "exit: $rc"
+
+[main] AGENT
+Refine one task: `task/parcel-scale-refuse-a-mass-figure-below-zero` in the lore vault `default`.
+
+1. Read $CRAFT[treat]/skills/_shared/refine.md yourself and follow it in full, in its **unattended** mode, against this one task only. `${CLAUDE_PLUGIN_ROOT}` is $CRAFT[treat]. The `lore` command on PATH reads the vault. The code the task's claims point at is the git repository at $RUN[merge-included-treat]/fixture/repo. Work against that repo, and do not modify the ... [cut 360 chars]
+
+[sub] BASH
+lore record show task/parcel-scale-refuse-a-mass-figure-below-zero; echo ---; lore task graph parcel-scale-refuse-a-mass-figure-below-zero
+
+[sub] BASH
+lore record show --help 2>&1 | head -30; lore record show task/parcel-scale-refuse-a-mass-figure-below-zero --json 2>&1 | head -40; cd $RUN[merge-included-treat]/fixture/repo && git status --short && git log --oneline | head && find . -path ./.git -prune -o -type f -print
+
+[sub] BASH
+cd $RUN[merge-included-treat]/fixture/repo && find . -path ./.git -prune -o -type f -print; echo; cat -n src/scale.py; HOME=/tmp git log --oneline 2>&1 | head
+
+[sub] BASH
+cd $RUN[merge-included-treat]/fixture/repo && cat README.md; grep -rn "raise\|ValueError" src | head; lore record show task/fixture-parcel-scale-spec-the-slice --json 2>&1 | head -30; lore record show task/parcel-scale-refuse-a-mass-figure-above-the-load-cell-ceiling --json 2>&1 | head -30; lore search "parcel scale" 2>&1 | head; lore search "scale.py" 2>&1|head; lore search "load cell ceiling" 2>&1|head; lore search "kind:area scale" 2>&1 | head; lore record show area/scale 2>&1 | head -5
+
+[sub] BASH
+lore record show spec/fixture-parcel-scale-spec 2>&1 | head -30; lore search "kind:area" 2>&1 | head -20; lore search "ValueError" 2>&1 | head; lore search "sensor" 2>&1 | head -20; ls $CRAFT[treat]/templates/; grep -n -A6 "Flow-out" $CRAFT[treat]/templates/plan.md
+
+[sub] BASH
+sed -n 30,40p $CRAFT[treat]/templates/plan.md; cat $CRAFT[treat]/templates/task.md; lore record update --help 2>&1 | head -30
+
+[sub] BASH
+set -e
+T=$(mktemp)
+lore record show task/parcel-scale-refuse-a-mass-figure-below-zero --json | python3 -I -c 'import json,sys; sys.stdout.write(json.load(sys.stdin)["body"])' > "$T"
+cat >> "$T" <<'EOF'
+
+**Delivers:** `read_weight` in `src/scale.py` (currently passes the sensor figure through unchecked, src/scale.py:1-2) validates the figure from `sensor.raw()` before returning it:
+- raises `ValueError` for a figure below zero (agreed behaviour in this task's captured prose);
+- raises `ValueError` for a figure above the load cell's 5000-gram ceiling (agreed behaviour in [[task/parcel-scale-refuse-a-mass-figure-above-the-load-cell-ceiling]], merged here);
+- returns every other figure unchanged, including the boundary figures 0 and 5000.
+
+**Test contract:** new `tests/test_scale.py`, written first and failing against the current src/scale.py:2, using a stub sensor object whose `raw()` returns a fixed figure. Use stdlib `unittest` test cases so the file runs under both `python3 -m unittest discover -s tests -t .` and pytest. Behaviors:
+- a negative figure (e.g. -1) raises `ValueError`;
+- a figure above 5000 (e.g. 5001) raises `ValueError`;
+- 0 is returned unchanged;
+- 5000 is returned unchanged;
+- an in-range figure (e.g. 1234) is returned unchanged.
+Verification: `python3 -m unittest discover -s tests -t .` from the repo root reports all tests OK.
+
+**Files:** `src/scale.py` (modified), `tests/test_scale.py` (created).
+
+## Flow-out
+
+- [ ] Touched area/subsystem profiles updated with what changed
+- [ ] Prover-validated assumptions captured as session candidates (durable at flush)
+- [ ] New decisions / lessons / follow-ups surfaced during the build recorded
+EOF
+lore record update task/parcel-scale-refuse-a-mass-figure-below-zero --vault default --status ready < "$T"
+rm -f "$T"
+lore record show task/parcel-scale-refuse-a-mass-figure-below-zero
+
+[sub] BASH
+set -e
+T=$(mktemp)
+lore record show task/parcel-scale-refuse-a-mass-figure-below-zero --json | python3 -I -c 'import json,sys; sys.stdout.write(json.load(sys.stdin)["body"].replace("discover -s tests -t .","discover -s tests"))' > "$T"
+lore record update task/parcel-scale-refuse-a-mass-figure-below-zero --vault default < "$T"
+rm -f "$T"
+lore record show task/parcel-scale-refuse-a-mass-figure-below-zero --json | python3 -I -c 'import json,sys; d=json.load(sys.stdin); print(d["sidecar"]["status"]); print([l for l in d["body"].splitlines() if "unittest" in l])'
+
+[main] BASH
+$CRAFT[treat]/scripts/followup_parent.py check fixture-parcel-scale-spec parcel-scale-refuse-a-mass-figure-below-zero; echo "exit: $?"
+
+[main] BASH
+children=$(mktemp)
+cat > "$children" <<'CHILDREN_JSON'
+[{"name": "parcel-scale-refuse-a-mass-figure-below-zero", "reason": "Faulty-sensor readings (negative, and now also above the ceiling) keep going into parcel records as untrustworthy masses, and callers harden around unchecked output while the fix waits. Class: a fix that gets more expensive as work builds on it.", "revision": "[sha:029a6688]"}]
+CHILDREN_JSON
+$CRAFT[treat]/scripts/followup_parent.py assemble fixture-parcel-scale-spec --children "$children"
+rc=$?
+rm -f "$children"
+echo "exit: $rc"

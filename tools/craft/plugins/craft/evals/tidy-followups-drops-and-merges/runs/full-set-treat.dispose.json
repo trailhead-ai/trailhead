@@ -1,0 +1,327 @@
+{
+ "dispose_runs": [
+  {
+   "at": 7,
+   "preview": true,
+   "file": {
+    "reason": "the chute work moved into the supplier's own firmware",
+    "drops": [
+     {
+      "role": "D",
+      "revision": true
+     }
+    ],
+    "merges": [
+     {
+      "survivor": "S",
+      "absorbed": [
+       {
+        "role": "M",
+        "intent": "Also record which crate each logged bin choice belongs to, by writing the crate id alongside the chosen bin."
+       }
+      ]
+     }
+    ]
+   },
+   "exit": 0,
+   "stderr_lines": [],
+   "result": {
+    "drops": [
+     {
+      "name": "D",
+      "status": "open"
+     }
+    ],
+    "merges": [
+     {
+      "survivor": "S",
+      "status": "open",
+      "reset-to-open": false,
+      "absorbed": [
+       {
+        "name": "M",
+        "status": "open",
+        "note": "## Merged from task/M\n\nAlso record which crate each logged bin choice belongs to, by writing the crate id alongside the chosen bin.\n"
+       }
+      ],
+      "supersedes": [
+       {
+        "name": "M",
+        "by": "S"
+       }
+      ]
+     }
+    ],
+    "dependents": {
+     "D": [
+      {
+       "name": "L2",
+       "vault": "default",
+       "status": "open"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "at": 8,
+   "preview": true,
+   "file": {
+    "reason": "the chute work moved into the supplier's own firmware",
+    "drops": [
+     {
+      "role": "D",
+      "revision": true
+     },
+     {
+      "role": "L2",
+      "revision": true
+     }
+    ],
+    "merges": [
+     {
+      "survivor": "S",
+      "absorbed": [
+       {
+        "role": "M",
+        "intent": "Also record which crate each logged bin choice belongs to, by writing the crate id alongside the chosen bin."
+       }
+      ]
+     }
+    ]
+   },
+   "exit": 0,
+   "stderr_lines": [],
+   "result": {
+    "drops": [
+     {
+      "name": "D",
+      "status": "open"
+     },
+     {
+      "name": "L2",
+      "status": "open"
+     }
+    ],
+    "merges": [
+     {
+      "survivor": "S",
+      "status": "open",
+      "reset-to-open": false,
+      "absorbed": [
+       {
+        "name": "M",
+        "status": "open",
+        "note": "## Merged from task/M\n\nAlso record which crate each logged bin choice belongs to, by writing the crate id alongside the chosen bin.\n"
+       }
+      ],
+      "supersedes": [
+       {
+        "name": "M",
+        "by": "S"
+       }
+      ]
+     }
+    ],
+    "dependents": {
+     "D": [
+      {
+       "name": "L2",
+       "vault": "default",
+       "status": "open"
+      }
+     ],
+     "L2": []
+    }
+   }
+  },
+  {
+   "at": 9,
+   "preview": false,
+   "file": {
+    "reason": "the chute work moved into the supplier's own firmware",
+    "drops": [
+     {
+      "role": "D",
+      "revision": true
+     },
+     {
+      "role": "L2",
+      "revision": true
+     }
+    ],
+    "merges": [
+     {
+      "survivor": "S",
+      "absorbed": [
+       {
+        "role": "M",
+        "intent": "Also record which crate each logged bin choice belongs to, by writing the crate id alongside the chosen bin."
+       }
+      ]
+     }
+    ]
+   },
+   "exit": 0,
+   "stderr_lines": [],
+   "result": {
+    "dropped": [
+     {
+      "name": "D",
+      "prior-status": "open"
+     },
+     {
+      "name": "L2",
+      "prior-status": "open"
+     }
+    ],
+    "merged": [
+     {
+      "survivor": "S",
+      "absorbed": [
+       "M"
+      ],
+      "survivor-prior-status": "open"
+     }
+    ],
+    "reset-to-open": [],
+    "failed": [],
+    "incomplete-merges": []
+   }
+  }
+ ],
+ "order": {
+  "reason_question": [
+   6
+  ],
+  "possible_overlap": [
+   6
+  ],
+  "write_dispose": [
+   9
+  ],
+  "agent": [
+   10
+  ],
+  "check": [
+   12
+  ],
+  "assemble": [
+   13
+  ]
+ },
+ "children_files": [
+  [
+   "I"
+  ]
+ ],
+ "fetched_by_main": [],
+ "progress": {
+  "assistant_text": [],
+  "final_report": []
+ },
+ "closing_commands": [
+  {
+   "line": "/craft:execute task/build-the-follow-ups-of-fixture-crate-sorter-spec-chosen-2026-10-20",
+   "standalone": true
+  },
+  {
+   "line": "/craft:distill spec/fixture-crate-sorter-spec",
+   "standalone": true
+  }
+ ],
+ "records": {
+  "D": {
+   "status": "dropped",
+   "parent": null,
+   "supersedes": [],
+   "depends-on": [],
+   "dropped_note": "Reason: the chute work moved into the supplier's own firmware",
+   "merged_sections": [],
+   "body_changed": true,
+   "new": false,
+   "body_has_5000": false
+  },
+  "I": {
+   "status": "ready",
+   "parent": "build-the-follow-ups-of-fixture-crate-sorter-spec-chosen-2026-10-20",
+   "supersedes": [],
+   "depends-on": [],
+   "dropped_note": null,
+   "merged_sections": [],
+   "body_changed": true,
+   "new": false,
+   "body_has_5000": false
+  },
+  "S": {
+   "status": "open",
+   "parent": null,
+   "supersedes": [
+    "M"
+   ],
+   "depends-on": [],
+   "dropped_note": null,
+   "merged_sections": [
+    {
+     "from": "M",
+     "first_line": "Also record which crate each logged bin choice belongs to, by writing the crate id alongside the chosen bin."
+    }
+   ],
+   "body_changed": true,
+   "new": false,
+   "body_has_5000": false
+  },
+  "L1": {
+   "status": "open",
+   "parent": null,
+   "supersedes": [],
+   "depends-on": [],
+   "dropped_note": null,
+   "merged_sections": [],
+   "body_changed": false,
+   "new": false,
+   "body_has_5000": false
+  },
+  "M": {
+   "status": "superseded",
+   "parent": null,
+   "supersedes": [],
+   "depends-on": [],
+   "dropped_note": null,
+   "merged_sections": [],
+   "body_changed": false,
+   "new": false,
+   "body_has_5000": false
+  },
+  "L2": {
+   "status": "dropped",
+   "parent": null,
+   "supersedes": [],
+   "depends-on": [
+    "D"
+   ],
+   "dropped_note": "Reason: the chute work moved into the supplier's own firmware",
+   "merged_sections": [],
+   "body_changed": true,
+   "new": false,
+   "body_has_5000": false
+  },
+  "build-the-follow-ups-of-fixture-crate-sorter-spec-chosen-2026-10-20": {
+   "status": "ready",
+   "parent": null,
+   "supersedes": [],
+   "depends-on": [],
+   "dropped_note": null,
+   "merged_sections": [],
+   "body_changed": true,
+   "new": true,
+   "body_has_5000": false
+  }
+ },
+ "repo": {
+  "head_before": "[sha:177a19fb]",
+  "head_after": "[sha:177a19fb]",
+  "status_after": ""
+ },
+ "real_vault_hits": ""
+}

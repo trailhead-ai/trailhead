@@ -1,0 +1,25 @@
+merged task/banner-printer-pad-the-banner-text-with-a-border into task/banner-printer-centre-the-banner-text
+
+The write exited 0, and the merge note and the supersede both landed and read back. Nothing is included, so refinement (steps 9–11) did not run and no parent is created.
+
+### 13. Closing report
+
+The merge is done: "pad the banner text with a border" is now folded into "centre the banner text". No follow-up was refined or nested, so no parent was created.
+
+- **Included:** none
+- **Left:** Banner printer: centre the banner text (`banner-printer-centre-the-banner-text`)
+- **Left out:** none
+- **Refined but not nested:** none
+- **Dropped:** none
+- **Merged:**
+  - **Survivor:** Banner printer: centre the banner text (`banner-printer-centre-the-banner-text`), prior status `open`.
+  - **Folded in:** Banner printer: pad the banner text with a border (`banner-printer-pad-the-banner-text-with-a-border`). It is now superseded by the survivor.
+- **Reset to open:** none
+- **Failed writes:** none
+- **Held back:** none
+
+Every write landed and the spec is not distilled yet, so the closing command is distill:
+
+```
+/craft:distill spec/fixture-banner-printer-spec
+```

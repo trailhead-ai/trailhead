@@ -1,0 +1,78 @@
+Step 1: `fixture-banner-printer-spec` has no `spec/` prefix to strip. It matches `^[A-Za-z0-9._/-]+$`, doesn't start with `-` and has no `..` segment, so it is valid.
+
+Step 2: the gather script exited 0 with a complete JSON result. It found 2 follow-ups and no existing follow-up parent. I fetched both bodies (each fetch exited 0) and read them as data.
+
+---
+
+## Follow-ups of `spec/fixture-banner-printer-spec`
+
+**Header:** entry `complete-status` · slice basis `labelled` · 1 slice, 1 child · 2 candidates read, 2 kept · 0 excluded by label · 0 skipped edges
+
+**Recommended:** none. **0 of 2 met a reason class.** Both follow-ups are small, self-contained formatting changes to `render_banner` in `src/banner.py`: one centres the text on a fixed-width line, the other wraps it with a border character. Neither is a security exposure. Neither is a defect that later work will copy or build on, and neither is groundwork that later work needs. Waiting makes neither more expensive.
+
+**Other follow-ups:**
+- Banner printer: centre the banner text (`banner-printer-centre-the-banner-text`)
+- Banner printer: pad the banner text with a border (`banner-printer-pad-the-banner-text-with-a-border`)
+
+**Blocked:** none.
+
+Nothing has been written yet.
+
+---
+
+### Confirmation 1 — the chosen set
+
+> Which listed follow-ups do you want to move onto the shortlist, and which off it? (names to add, names to remove, or `none`)
+
+**Answer given:** move every follow-up off the shortlist so none is included, and merge `banner-printer-pad-the-banner-text-with-a-border` into `banner-printer-centre-the-banner-text`.
+
+Nothing was on the shortlist, so after this answer nothing is included. **This procedure has no merge operation.** Its only choices are to include or leave each follow-up; it cannot combine, drop or annotate follow-ups. So I did not carry out the merge, and both records stay as they are.
+
+**Included:** none
+
+**Left:**
+- Banner printer: centre the banner text (`banner-printer-centre-the-banner-text`)
+- Banner printer: pad the banner text with a border (`banner-printer-pad-the-banner-text-with-a-border`)
+
+### Confirmation 2
+
+> Include these, leave these. Refinement rewrites each included follow-up's record whether or not it ends up nested. Proceed? (`yes`, or what to move.)
+
+**Answer given:** intent `banner-printer-pad-the-banner-text-with-a-border`: "Also keep any border one character wide and centre the banner on a forty column line, as the sign painter asked"
+
+This answer is neither `yes` nor a move. This procedure cannot record intent notes on a follow-up, so I did not record the note and nothing was written. The sets are unchanged, so I'm asking again:
+
+**Included:** none
+
+**Left:**
+- Banner printer: centre the banner text (`banner-printer-centre-the-banner-text`)
+- Banner printer: pad the banner text with a border (`banner-printer-pad-the-banner-text-with-a-border`)
+
+> Include these, leave these. Refinement rewrites each included follow-up's record whether or not it ends up nested. Proceed? (`yes`, or what to move.)
+
+**Answer given:** yes
+
+Nothing is included, so no parent is created. Steps 9 to 12 don't run: no refinement, no check, no Confirmation 3 and no assembly.
+
+---
+
+## Closing report
+
+- **Included:** none
+- **Left:**
+  - Banner printer: centre the banner text (`banner-printer-centre-the-banner-text`)
+  - Banner printer: pad the banner text with a border (`banner-printer-pad-the-banner-text-with-a-border`)
+- **Left out at refinement:** none, because no refinement ran.
+- **Refined but not nested:** none.
+- **Failed writes:** none. Nothing was written to the vault.
+- **Not carried out:**
+  - The merge of `banner-printer-pad-the-banner-text-with-a-border` into `banner-printer-centre-the-banner-text`.
+  - The intent note on `banner-printer-pad-the-banner-text-with-a-border`.
+
+  This version of the ritual has neither operation, so both follow-ups remain separate, unchanged `open` records.
+
+No parent was created. `distilled` is false, so the next step is:
+
+```
+/craft:distill spec/fixture-banner-printer-spec
+```

@@ -1,0 +1,128 @@
+{
+ "dispose_runs": [],
+ "order": {
+  "reason_question": [
+   5
+  ],
+  "agent": [
+   6
+  ],
+  "check": [
+   8
+  ],
+  "assemble": [
+   9
+  ]
+ },
+ "children_files": [
+  [
+   "I"
+  ]
+ ],
+ "fetched_by_main": [],
+ "progress": {
+  "assistant_text": [],
+  "final_report": []
+ },
+ "closing_commands": [
+  {
+   "line": "- You asked to merge `M` into `S`.",
+   "standalone": false
+  },
+  {
+   "line": "/craft:execute task/build-the-follow-ups-of-fixture-crate-sorter-spec-chosen-2026-10-20",
+   "standalone": true
+  },
+  {
+   "line": "/craft:distill spec/fixture-crate-sorter-spec",
+   "standalone": true
+  }
+ ],
+ "records": {
+  "L1": {
+   "status": "open",
+   "parent": null,
+   "supersedes": [],
+   "depends-on": [],
+   "dropped_note": null,
+   "merged_sections": [],
+   "body_changed": false,
+   "new": false,
+   "body_has_5000": false
+  },
+  "S": {
+   "status": "open",
+   "parent": null,
+   "supersedes": [],
+   "depends-on": [],
+   "dropped_note": null,
+   "merged_sections": [],
+   "body_changed": false,
+   "new": false,
+   "body_has_5000": false
+  },
+  "M": {
+   "status": "open",
+   "parent": null,
+   "supersedes": [],
+   "depends-on": [],
+   "dropped_note": null,
+   "merged_sections": [],
+   "body_changed": false,
+   "new": false,
+   "body_has_5000": false
+  },
+  "D": {
+   "status": "open",
+   "parent": null,
+   "supersedes": [],
+   "depends-on": [],
+   "dropped_note": null,
+   "merged_sections": [],
+   "body_changed": false,
+   "new": false,
+   "body_has_5000": false
+  },
+  "I": {
+   "status": "ready",
+   "parent": "build-the-follow-ups-of-fixture-crate-sorter-spec-chosen-2026-10-20",
+   "supersedes": [],
+   "depends-on": [],
+   "dropped_note": null,
+   "merged_sections": [],
+   "body_changed": true,
+   "new": false,
+   "body_has_5000": false
+  },
+  "L2": {
+   "status": "open",
+   "parent": null,
+   "supersedes": [],
+   "depends-on": [
+    "D"
+   ],
+   "dropped_note": null,
+   "merged_sections": [],
+   "body_changed": false,
+   "new": false,
+   "body_has_5000": false
+  },
+  "build-the-follow-ups-of-fixture-crate-sorter-spec-chosen-2026-10-20": {
+   "status": "ready",
+   "parent": null,
+   "supersedes": [],
+   "depends-on": [],
+   "dropped_note": null,
+   "merged_sections": [],
+   "body_changed": true,
+   "new": true,
+   "body_has_5000": false
+  }
+ },
+ "repo": {
+  "head_before": "[sha:d05fe92e]",
+  "head_after": "[sha:d05fe92e]",
+  "status_after": ""
+ },
+ "real_vault_hits": ""
+}

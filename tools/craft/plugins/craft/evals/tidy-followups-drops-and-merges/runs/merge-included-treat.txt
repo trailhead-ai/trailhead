@@ -1,0 +1,21 @@
+I tidied the follow-ups of `spec/fixture-parcel-scale-spec`: two follow-ups are now one, refined to `ready` and nested under a new parent, `task/build-the-follow-ups-of-fixture-parcel-scale-spec-chosen-2026-10-20`, which is buildable. Every write landed and nothing failed.
+
+**What was done with each follow-up**
+- **Included and nested:** Parcel scale: refuse a mass figure below zero (`parcel-scale-refuse-a-mass-figure-below-zero`).
+- **Merged into it:** Parcel scale: refuse a mass figure above the load-cell ceiling (`parcel-scale-refuse-a-mass-figure-above-the-load-cell-ceiling`). The surviving task was `open` before the merge and was not reset. Its refined scope now covers both checks:
+  - `read_weight` raises `ValueError` for a figure below zero or above 5000 grams, and returns every other figure unchanged, including exactly 0 and 5000.
+  - The task changes `src/scale.py` and adds `tests/test_scale.py`.
+- **Left:** Sticker press: add a closing full stop to the module docstring (`sticker-press-add-a-closing-full-stop-to-the-module-docstring`). It is untouched and stays in the backlog.
+- **Dropped:** none.
+
+The refinement wrote one choice into the task that you didn't make: the new tests use Python's built-in `unittest`, because nothing in the repo picks a test framework.
+
+To build the parent:
+```
+/craft:execute task/build-the-follow-ups-of-fixture-parcel-scale-spec-chosen-2026-10-20
+```
+
+The spec hasn't been distilled yet; this does it:
+```
+/craft:distill spec/fixture-parcel-scale-spec
+```

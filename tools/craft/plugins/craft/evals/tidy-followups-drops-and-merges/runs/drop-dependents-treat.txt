@@ -1,0 +1,25 @@
+dropped task/dimmer-remove-the-dim-table-s-step-comments
+dropped task/dimmer-remove-the-unused-dim-table
+
+Both drops were written and read back. Nothing is included, so refinement (steps 9–11) did not run and no parent was created.
+
+### Closing report
+
+- **Included:** none
+- **Left:** none
+- **Left out / refined but not nested:** none
+- **Dropped.** Reason: *the lamp shelf was taken out of the plan*
+  - Dimmer: remove the dim table's step comments (`dimmer-remove-the-dim-table-s-step-comments`), was `open`
+  - Dimmer: remove the unused dim table (`dimmer-remove-the-unused-dim-table`), was `open`
+- **Merged:** none
+- **Reset to open:** none
+- **Failed:** none
+- **Held back:** none
+
+One task outside this follow-up set, `lamp-audit-the-wall-switch-wiring` (vault `default`, `open`), still depends on the dropped `dimmer-remove-the-unused-dim-table` and will stay waiting on it.
+
+Every dispose write landed, no parent was created, and the spec is not distilled yet, so the next step is to distill it:
+
+```
+/craft:distill spec/fixture-shelf-lamp-spec
+```

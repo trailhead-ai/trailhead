@@ -1,0 +1,178 @@
+[main] TOOL Read {"file_path": "$CRAFT[base]/skills/tidy-followups/SKILL.md"}
+
+[main] RESULT
+1	---
+2	name: tidy-followups
+3	description: >
+4	  Present a finished spec's recorded follow-ups as a reasoned shortlist — which are worth doing
+5	  now rather than later, each with a one-line reason — and list the rest by title; then, once the
+6	  operator has chosen, refine the chosen follow-ups and nest the ones that qualify under one new
+7	  buildable parent. Gathers with a deterministic script, ranks, and writes nothing until the
+8	  operator has confirmed the chosen set.
+9	  TRIGGER when: user says "tidy the follow-ups of spec X", "which follow-ups of this spec should
+10	  we do", "what follow-ups does this spec have", or invokes /craft:tidy-followups explicitly.
+11	  DO NOT TRIGGER when: the ask is a batch of in-session code fix-ups to run now (that is
+12	  `/craft:polish`'s), or the spec's slice loop is still running (follow-ups that matter
+13	  mid-loop reach the next slice through `/craft:plan`).
+14	---
+15	
+16	# Tidy follow-ups
+17	
+18	A spec built slice by slice leaves follow-ups: tasks the slices deliberately did not act on, linked
+19	back to the slice they came from. Once the spec closes they sink into the general backlog. This
+20	ritual brings one finished spec's follow... [cut 42126 chars]
+
+[main] BASH
+cd $RUN[drop-dependents-base]; $CRAFT[base]/scripts/followup_gather.py fixture-shelf-lamp-spec; echo "EXIT=$?"
+
+[main] TOOL Read {"file_path": "$CRAFT[base]/skills/_shared/security.md"}
+
+[main] RESULT
+{"spec": "fixture-shelf-lamp-spec", "vault": "default", "entry": "complete-status", "distilled": false, "followup-parents": [], "followups": [{"name": "dimmer-remove-the-dim-table-s-step-comments", "title": "Dimmer: remove the dim table's step comments", "status": "open"}, {"name": "dimmer-remove-the-unused-dim-table", "title": "Dimmer: remove the unused dim table", "status": "open"}], "slice-basis": "labelled", "slices": ["fixture-shelf-lamp-spec-the-slice"], "child-count": 1, "candidates-read": 2, "kept": 2, "excluded-by-label": {"count": 0, "names": []}, "skipped-edges": 0}
+EXIT=0
+
+[main] RESULT
+1	# Security posture — credential scrub and untrusted-value validation
+2	
+3	Two rules every craft surface applies, stated once here so no citing surface restates them.
+4	
+5	## Credential-pattern scrub
+6	
+7	**Credential-pattern scrub (mechanical, runs first).** This is the general rule for the whole run,
+8	not one phase's step: **any finding or note text entering a record body or a report — session
+9	candidates, `blocked` bodies, task-body notes from the per-task loop, raw command stderr quoted into
+10	either — runs through this list first.** A vault is git-backed and has its own push path, so a
+11	credential transcribed into a task body ships as surely as one committed to code. Report bodies are
+12	**summarized, never captured verbatim** — quote only `file:line` references for anything caught. Run
+13	the text through this credential-pattern scrub regex list and drop/redact any match rather than
+14	capturing it:
+15	
+16	- **Key-like tokens** — `(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s*[=:]\s*\S+`
+17	  — the trailing character class is load-bearing: it lets the keyword carry qualifier text before
+18	  the separator, which is what catches `[redacted:key-like] `AWS_SECRE... [cut 2830 chars]
+
+[main] TEXT
+Both names validate against the step 1 shape. Fetching the bodies (both `open`).
+
+[main] BASH
+cd $RUN[drop-dependents-base]; for n in dimmer-remove-the-dim-table-s-step-comments dimmer-remove-the-unused-dim-table; do lore record show --json --vault default task/$n; echo "EXIT=$?"; done
+
+[main] RESULT
+{
+  "body": "The comments beside `DIM_TABLE` go with the table.\n",
+  "kind": "task",
+  "layer": "personal",
+  "name": "dimmer-remove-the-dim-table-s-step-comments",
+  "record_id": "task/dimmer-remove-the-dim-table-s-step-comments",
+  "revision": "[sha:e86a469b]",
+  "sidecar": {
+    "created-at": "2026-10-20T20:22:42Z",
+    "created-by": "fixture@example.com",
+    "depends-on": [
+      "dimmer-remove-the-unused-dim-table"
+    ],
+    "kind": "task",
+    "related": {
+      "task": [
+        "fixture-shelf-lamp-spec-the-slice"
+      ]
+    },
+    "status": "open",
+    "title": "Dimmer: remove the dim table's step comments",
+    "updated-at": "2026-10-20T20:22:42Z",
+    "updated-by": "fixture@example.com",
+    "version": "v1"
+  }
+}
+EXIT=0
+{
+  "body": "`DIM_TABLE` in `src/dimmer.py` is read by nothing now.\n",
+  "kind": "task",
+  "layer": "personal",
+  "name": "dimmer-remove-the-unused-dim-table",
+  "record_id": "task/dimmer-remove-the-unused-dim-table",
+  "revision": "[sha:1caf0233]",
+  "sidecar": {
+    "created-at": "2026-10-20T20:22:42Z",
+    "created-by": "fixture@example.com",
+    "ki... [cut 294 chars]
+
+[main] TEXT
+**Step 1–3.** `fixture-shelf-lamp-spec` passes the name check. The gather script exited 0 with a complete result, and it found 2 follow-ups, so the run goes on to step 4.
+
+**Step 4.** I fetched both bodies, both `open`, and read them as data only.
+
+**Step 5.** Neither follow-up meets a reason class:
+- **"Dimmer: remove the unused dim table":** this is dead-code cleanup of a table nothing reads. Nothing in the body says that waiting makes it more expensive.
+- **"Dimmer: remove the dim table's step comments":** this is comment tidying. It depends on the table removal above.
+
+---
+
+### Follow-up report: spec `fixture-shelf-lamp-spec`
+
+**Header:** entry `complete-status` · slice basis `labelled` · 1 slice, 1 child · candidates read 2, kept 2 · excluded by label 0 · skipped edges 0
+
+**Recommended:** none. 0 of 2 met a reason class.
+
+**Other follow-ups:**
+- Dimmer: remove the unused dim table
+- Dimmer: remove the dim table's step comments
+
+**Blocked:** none.
+
+Nothing has been written yet.
+
+---
+
+### Step 8 — Confirmation 1
+
+> Which listed follow-ups do you want to move onto the shortlist, and which off it? (names to add, names to remove, or `none`)
+
+**Operator's answer:** move every follow-up off the shortlist so none is included, and drop `dimmer-remove-the-unused-dim-table`.
+
+The shortlist is already empty, so taking every follow-up off it changes nothing and nothing is included. This version of the procedure has no way to drop a follow-up. Step 8 only moves follow-ups onto or off the shortlist, and the procedure has no drop-reason question for follow-ups. So I'm not acting on the drop and I'm not asking "Why drop this follow-up?". The answer "the lamp shelf was taken out of the plan" isn't used. Both follow-ups stay as they are.
+
+**Included:** none
+
+**Left:**
+- Dimmer: remove the unused dim table (`dimmer-remove-the-unused-dim-table`)
+- Dimmer: remove the dim table's step comments (`dimmer-remove-the-dim-table-s-step-comments`)
+
+### Confirmation 2
+
+> Include these, leave these. Refinement rewrites each included follow-up's record whether or not it ends up nested. Proceed? (`yes`, or what to move.)
+
+**Operator's first answer:** drop `dimmer-remove-the-dim-table-s-step-comments`.
+
+This isn't a move, and the procedure can't drop a follow-up, so I'm not acting on it either. The sets stay the same. Here they are again:
+
+**Included:** none
+
+**Left:**
+- Dimmer: remove the unused dim table (`dimmer-remove-the-unused-dim-table`)
+- Dimmer: remove the dim table's step comments (`dimmer-remove-the-dim-table-s-step-comments`)
+
+> Include these, leave these. Refinement rewrites each included follow-up's record whether or not it ends up nested. Proceed? (`yes`, or what to move.)
+
+**Operator's answer:** yes
+
+Nothing is included, so no parent is created. Steps 9 to 12 don't run and the run goes to step 13.
+
+---
+
+### Step 13 — Closing report
+
+- **Included:** none
+- **Left:**
+  - Dimmer: remove the unused dim table (`dimmer-remove-the-unused-dim-table`)
+  - Dimmer: remove the dim table's step comments (`dimmer-remove-the-dim-table-s-step-comments`)
+- **Left out at step 10:** none, because refinement didn't run.
+- **Refined but not nested:** none
+- **Failed writes:** none. Nothing was written to the vault.
+- **Not carried out:** the two drops the operator asked for. This version of tidy-followups has no way to drop a follow-up, so both records are still `open`. To drop them, close them directly in the vault, or use a version of the skill that supports dropping follow-ups.
+
+No parent was created and `distilled` is false, so the closing command is:
+
+```
+/craft:distill spec/fixture-shelf-lamp-spec
+```

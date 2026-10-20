@@ -1,0 +1,8 @@
+vault CHANGED task/dials-rename-the-two-dial-constants-to-match-the-manual.json
+vault CHANGED task/dials-rename-the-two-dial-constants-to-match-the-manual.md
+vault CHANGED task/journal-note-the-preheat-time-beside-each-loaf.json
+vault CHANGED task/journal-note-the-preheat-time-beside-each-loaf.md
+vault CHANGED task/thermostat-swap-the-probe-supplier.json
+vault CHANGED task/thermostat-swap-the-probe-supplier.md
+repo head before=[sha:9fdefc15] after=[sha:9fdefc15]
+repo status after=''

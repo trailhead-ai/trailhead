@@ -1,0 +1,204 @@
+{
+ "dispose_runs": [
+  {
+   "at": 6,
+   "preview": true,
+   "file": {
+    "reason": "the lamp shelf was taken out of the plan",
+    "drops": [
+     {
+      "role": "H1",
+      "revision": true
+     }
+    ],
+    "merges": []
+   },
+   "exit": 0,
+   "stderr_lines": [],
+   "result": {
+    "drops": [
+     {
+      "name": "H1",
+      "status": "open"
+     }
+    ],
+    "merges": [],
+    "dependents": {
+     "H1": [
+      {
+       "name": "T",
+       "vault": "default",
+       "status": "open"
+      },
+      {
+       "name": "U",
+       "vault": "default",
+       "status": "open"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "at": 7,
+   "preview": true,
+   "file": {
+    "reason": "the lamp shelf was taken out of the plan",
+    "drops": [
+     {
+      "role": "H1",
+      "revision": true
+     },
+     {
+      "role": "T",
+      "revision": true
+     }
+    ],
+    "merges": []
+   },
+   "exit": 0,
+   "stderr_lines": [],
+   "result": {
+    "drops": [
+     {
+      "name": "T",
+      "status": "open"
+     },
+     {
+      "name": "H1",
+      "status": "open"
+     }
+    ],
+    "merges": [],
+    "dependents": {
+     "T": [],
+     "H1": [
+      {
+       "name": "T",
+       "vault": "default",
+       "status": "open"
+      },
+      {
+       "name": "U",
+       "vault": "default",
+       "status": "open"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "at": 8,
+   "preview": false,
+   "file": {
+    "reason": "the lamp shelf was taken out of the plan",
+    "drops": [
+     {
+      "role": "H1",
+      "revision": true
+     },
+     {
+      "role": "T",
+      "revision": true
+     }
+    ],
+    "merges": []
+   },
+   "exit": 0,
+   "stderr_lines": [],
+   "result": {
+    "dropped": [
+     {
+      "name": "T",
+      "prior-status": "open"
+     },
+     {
+      "name": "H1",
+      "prior-status": "open"
+     }
+    ],
+    "merged": [],
+    "reset-to-open": [],
+    "failed": [],
+    "incomplete-merges": []
+   }
+  }
+ ],
+ "order": {
+  "write_dispose": [
+   8
+  ]
+ },
+ "children_files": [],
+ "fetched_by_main": [
+  "H1",
+  "T"
+ ],
+ "progress": {
+  "assistant_text": [
+   {
+    "at": 9,
+    "line": "dropped task/T"
+   },
+   {
+    "at": 9,
+    "line": "dropped task/H1"
+   }
+  ],
+  "final_report": [
+   "dropped task/T",
+   "dropped task/H1"
+  ]
+ },
+ "closing_commands": [
+  {
+   "line": "/craft:distill spec/fixture-shelf-lamp-spec",
+   "standalone": true
+  }
+ ],
+ "records": {
+  "T": {
+   "status": "dropped",
+   "parent": null,
+   "supersedes": [],
+   "depends-on": [
+    "H1"
+   ],
+   "dropped_note": "Reason: the lamp shelf was taken out of the plan",
+   "merged_sections": [],
+   "body_changed": true,
+   "new": false,
+   "body_has_5000": false
+  },
+  "H1": {
+   "status": "dropped",
+   "parent": null,
+   "supersedes": [],
+   "depends-on": [],
+   "dropped_note": "Reason: the lamp shelf was taken out of the plan",
+   "merged_sections": [],
+   "body_changed": true,
+   "new": false,
+   "body_has_5000": false
+  },
+  "U": {
+   "status": "open",
+   "parent": null,
+   "supersedes": [],
+   "depends-on": [
+    "H1"
+   ],
+   "dropped_note": null,
+   "merged_sections": [],
+   "body_changed": false,
+   "new": false,
+   "body_has_5000": false
+  }
+ },
+ "repo": {
+  "head_before": "[sha:93b94246]",
+  "head_after": "[sha:93b94246]",
+  "status_after": ""
+ },
+ "real_vault_hits": ""
+}

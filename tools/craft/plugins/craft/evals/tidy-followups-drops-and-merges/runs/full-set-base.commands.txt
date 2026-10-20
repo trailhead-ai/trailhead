@@ -1,0 +1,72 @@
+[main] BASH
+cd $RUN[full-set-base]; $CRAFT[base]/scripts/followup_gather.py fixture-crate-sorter-spec; echo "EXIT=$?"
+
+[main] BASH
+for n in belt-say-the-speed-unit-in-the-comment bin-log-write-the-chosen-bin-to-the-log bin-log-write-the-crate-id-with-the-chosen-bin chutes-remove-the-legacy-chute-table chutes-remove-the-table-of-legacy-chute-names sorter-refuse-a-crate-mass-of-zero; do echo "=== $n"; lore record show --json --vault default task/$n; echo "EXIT=$?"; done
+
+[main] AGENT
+Refine the follow-up task `task/sorter-refuse-a-crate-mass-of-zero` in the lore vault `default` (the `lore` command on your PATH).
+
+Instructions:
+- Read $CRAFT[base]/skills/_shared/refine.md yourself and follow it in full, in its unattended mode, against that one task only. `${CLAUDE_PLUGIN_ROOT}` is $CRAFT[base].
+- The code the task's claims point at is the git repository at $RUN[full-set-base]/fixture/repo. Read it to verify claims; do not modify the repository.... [cut 302 chars]
+
+[sub] BASH
+cd /tmp; lore record show task/sorter-refuse-a-crate-mass-of-zero; echo ---; lore task graph sorter-refuse-a-crate-mass-of-zero
+
+[sub] BASH
+ls $CRAFT[base]/templates/ $CRAFT[base]/skills/; cat $CRAFT[base]/templates/plan.md | grep -A6 "Flow-out"
+
+[sub] BASH
+cd /tmp; grep -A20 "^## Flow-out" $CRAFT[base]/templates/plan.md | tail -12; cat $CRAFT[base]/templates/task.md; lore record show task/sorter-refuse-a-crate-mass-of-zero --help 2>&1 | head -20; cd $RUN[full-set-base]/fixture/repo && git ls-files && cat -n src/sorter.py && git log --oneline | head
+
+[sub] BASH
+cd /tmp; lore record show task/sorter-refuse-a-crate-mass-of-zero --json --vault default; R=$RUN[full-set-base]/fixture/repo; ls -laR $R | grep -v .git/ | head -40; cat -n $R/src/sorter.py
+
+[sub] BASH
+cd /tmp; R=$RUN[full-set-base]/fixture/repo; ls -la $R/src; cat $R/README.md; GIT_CONFIG_GLOBAL=/dev/null git -C $R log --oneline; GIT_CONFIG_GLOBAL=/dev/null git -C $R status --short; lore record show task/fixture-crate-sorter-spec-the-slice; lore search sorter; lore search "bin_for"; lore search "kind:area sorter"; lore search "crate mass"
+
+[sub] BASH
+cd /tmp; R=$RUN[full-set-base]/fixture/repo; grep -rn "sorter\|bin_for" $R/src $R/README.md; cat -n $R/src/scale.py $R/src/crate.py; lore record show spec/fixture-crate-sorter-spec; lore search "kind:area"; lore search "kind:adr"; lore search "zero mass"; lore search "ValueError"; lore search "tests"
+
+[sub] BASH
+cd /tmp; lore record show task/dials-rename-the-two-dial-constants-to-match-the-manual; lore record show task/crate-docket-print-the-destination-city-on-the-docket
+
+[sub] BASH
+cd /tmp; T=$(mktemp); lore record show task/sorter-refuse-a-crate-mass-of-zero --json | python3 -I -c 'import json,sys; sys.stdout.write(json.load(sys.stdin)["body"])' > "$T"; cat >> "$T" <<'EOF'
+
+**Delivers:** `bin_for` in `src/sorter.py` raises `ValueError` when `mass` is zero or less, before any bin is chosen; every positive mass keeps the existing threshold, where a mass above 20 goes to `heavy` and anything else goes to `light` (`src/sorter.py:2`).
+
+**Test contract:** Tests in `tests/test_sorter.py` import `bin_for` from `src/sorter` and assert that:
+- `bin_for(0)` raises `ValueError`
+- `bin_for(-5)` raises `ValueError`
+- `bin_for(5)` returns `light`
+- `bin_for(20)` returns `light` (the boundary stays where it is)
+- `bin_for(21)` returns `heavy`
+
+Run with `python -m pytest tests/test_sorter.py`; all pass.
+
+**Files:** `src/sorter.py`, `tests/test_sorter.py` (new)
+
+## Flow-out
+
+- [ ] Touched area/subsystem profiles updated with what changed
+- [ ] Prover-validated assumptions captured as session candidates (durable at flush)
+- [ ] New decisions / lessons / follow-ups surfaced during the build recorded
+EOF
+lore record update task/sorter-refuse-a-crate-mass-of-zero --status ready < "$T"; rc=$?; rm -f "$T"; echo rc=$rc; lore record show task/sorter-refuse-a-crate-mass-of-zero
+
+[sub] BASH
+cd /tmp; lore record show task/sorter-refuse-a-crate-mass-of-zero --json | python3 -I -c 'import json,sys; print(json.load(sys.stdin)["sidecar"]["status"])'
+
+[main] BASH
+cd $RUN[full-set-base]; $CRAFT[base]/scripts/followup_parent.py check fixture-crate-sorter-spec sorter-refuse-a-crate-mass-of-zero; echo "EXIT=$?"
+
+[main] BASH
+cd $RUN[full-set-base]
+children=$(mktemp)
+cat > "$children" <<'CHILDREN_JSON'
+[{"name": "sorter-refuse-a-crate-mass-of-zero", "reason": "A mass of zero is silently routed to the light bin, hiding crates the scale failed to weigh; the longer it waits, the more work comes to rely on that routing and the costlier the fix becomes.", "revision": "[sha:3d32b334]"}]
+CHILDREN_JSON
+$CRAFT[base]/scripts/followup_parent.py assemble fixture-crate-sorter-spec --children "$children"; rc=$?
+rm -f "$children"; echo "EXIT=$rc"

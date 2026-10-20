@@ -1,0 +1,36 @@
+The merge only partly landed and stopped the run: one of the two folded-in follow-ups could not be marked superseded, so nothing was refined and no parent task was created.
+
+**What changed in the vault:**
+- **Merged:** nothing. The tool returned an empty `merged` list for the planned group, so it doesn't count as merged.
+- **Dropped:** none.
+- **Reset to open:** none.
+- **Failed write:** Hat pegs: report the pegs in use as a ratio of all pegs (`hat-pegs-report-the-pegs-in-use-as-a-ratio-of-all-pegs`) was not marked as superseded by the survivor. Its status is still `open`. The other folded-in follow-up, Hat pegs: report how many pegs are free (`hat-pegs-report-how-many-pegs-are-free`), is now `superseded`. Neither merge note was reported as failed.
+
+**Follow-ups:**
+- **Included:** Hat pegs: report how many pegs are in use (`hat-pegs-report-how-many-pegs-are-in-use`).
+- **Held back:** that same follow-up, because its merge did not fully land (the supersede of `hat-pegs-report-the-pegs-in-use-as-a-ratio-of-all-pegs` failed). It was not refined or nested.
+- **Left:** none.
+- **Left out at step 10:** none, because the check did not run.
+- **Refined but not nested:** none.
+
+**Commands:**
+
+This command finishes the failed supersede. Run it only while `hat-pegs-report-the-pegs-in-use-as-a-ratio-of-all-pegs` is still `open` and not yet superseded:
+
+```
+lore record supersede task/hat-pegs-report-the-pegs-in-use-as-a-ratio-of-all-pegs --by task/hat-pegs-report-how-many-pegs-are-in-use --vault default
+```
+
+Give this answer again at the next run's Confirmation 1. It names only the folded-in follow-up the next run will still list, since the "free" one is already superseded:
+
+```
+merge hat-pegs-report-the-pegs-in-use-as-a-ratio-of-all-pegs into hat-pegs-report-how-many-pegs-are-in-use
+```
+
+Re-run the ritual with this line:
+
+```
+/craft:tidy-followups spec/fixture-hat-peg-spec
+```
+
+I've printed no distill command, because the merge is not settled yet.

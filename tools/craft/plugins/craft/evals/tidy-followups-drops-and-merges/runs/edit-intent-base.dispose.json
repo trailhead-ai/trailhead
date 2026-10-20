@@ -1,0 +1,57 @@
+{
+ "dispose_runs": [],
+ "order": {},
+ "children_files": [],
+ "fetched_by_main": [
+  "E1",
+  "E2"
+ ],
+ "progress": {
+  "assistant_text": [],
+  "final_report": []
+ },
+ "closing_commands": [
+  {
+   "line": "**Answer given:** move every follow-up off the shortlist so none is included, and merge `E2` into `E1`.",
+   "standalone": false
+  },
+  {
+   "line": "- The merge of `E2` into `E1`.",
+   "standalone": false
+  },
+  {
+   "line": "/craft:distill spec/fixture-banner-printer-spec",
+   "standalone": true
+  }
+ ],
+ "records": {
+  "E1": {
+   "status": "open",
+   "parent": null,
+   "supersedes": [],
+   "depends-on": [],
+   "dropped_note": null,
+   "merged_sections": [],
+   "body_changed": false,
+   "new": false,
+   "body_has_5000": false
+  },
+  "E2": {
+   "status": "open",
+   "parent": null,
+   "supersedes": [],
+   "depends-on": [],
+   "dropped_note": null,
+   "merged_sections": [],
+   "body_changed": false,
+   "new": false,
+   "body_has_5000": false
+  }
+ },
+ "repo": {
+  "head_before": "[sha:53cc45ee]",
+  "head_after": "[sha:53cc45ee]",
+  "status_after": ""
+ },
+ "real_vault_hits": ""
+}

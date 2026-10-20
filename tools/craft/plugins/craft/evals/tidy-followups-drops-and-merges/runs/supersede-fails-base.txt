@@ -1,0 +1,20 @@
+**Step 10.** The check script found no eligible follow-ups. Refinement ran, but no parent was created:
+- **Hat pegs: report how many pegs are in use** (`hat-pegs-report-how-many-pegs-are-in-use`): refinement left a question only you can answer, so it is not ready to build.
+
+Since nothing is eligible, Step 11's "Nest these under one new parent?" was never reached, and `assemble` did not run.
+
+### Closing report
+- **Included:** Hat pegs: report how many pegs are in use (`hat-pegs-report-how-many-pegs-are-in-use`)
+- **Left:**
+  - Hat pegs: report how many pegs are free (`hat-pegs-report-how-many-pegs-are-free`)
+  - Hat pegs: report the pegs in use as a ratio of all pegs (`hat-pegs-report-the-pegs-in-use-as-a-ratio-of-all-pegs`)
+
+  Neither was merged: this version of the ritual can't merge.
+- **Left out:** Hat pegs: report how many pegs are in use (`hat-pegs-report-how-many-pegs-are-in-use`). Refinement left a question only you can answer, so it is not ready to build.
+- **Refined but not nested:** Hat pegs: report how many pegs are in use (`hat-pegs-report-how-many-pegs-are-in-use`). Its record was rewritten and it stays `open`.
+- **Failed writes:** none.
+- **Parent:** none created.
+
+```
+/craft:distill spec/fixture-hat-peg-spec
+```

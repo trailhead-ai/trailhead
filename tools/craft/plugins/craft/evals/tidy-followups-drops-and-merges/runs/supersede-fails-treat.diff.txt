@@ -1,0 +1,5 @@
+vault CHANGED task/hat-pegs-report-how-many-pegs-are-free.json
+vault CHANGED task/hat-pegs-report-how-many-pegs-are-in-use.json
+vault CHANGED task/hat-pegs-report-how-many-pegs-are-in-use.md
+repo head before=[sha:6409224f] after=[sha:6409224f]
+repo status after=''

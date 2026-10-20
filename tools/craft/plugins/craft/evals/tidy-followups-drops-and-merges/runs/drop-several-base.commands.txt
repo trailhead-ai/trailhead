@@ -1,0 +1,5 @@
+[main] BASH
+$CRAFT[base]/scripts/followup_gather.py fixture-bakery-oven-spec; echo "EXIT=$?"
+
+[main] BASH
+for n in dials-rename-the-two-dial-constants-to-match-the-manual hinge-reword-the-swing-comment journal-note-the-preheat-time-beside-each-loaf; do echo "== $n"; lore record show --json --vault default task/$n; echo "EXIT=$?"; done

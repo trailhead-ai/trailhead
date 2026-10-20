@@ -1,0 +1,68 @@
+**Step 1.** `fixture-mug-rack-spec` matches `^[A-Za-z0-9._/-]+$`, does not start with `-`, and has no `..` segment.
+
+**Steps 2–3.** The gather script exited 0 with a complete JSON result. It found two follow-ups and `followup-parents` is empty, so the run goes to step 4.
+
+**Step 4.** Both follow-up names passed the step 1 check again. Both are `open`, and both bodies were fetched (exit 0).
+
+---
+
+## Follow-ups of spec `fixture-mug-rack-spec`
+
+**Header:** entry `complete-status` · slice basis `labelled` · 1 slice, 1 child · 2 candidates read, 2 kept · 0 excluded by label · 0 skipped edges
+
+**Recommended**
+- **Mugs: count the mugs hanging on the rack** (`mugs-count-the-mugs-hanging-on-the-rack`). The mug counter counts empty slots as well as filled ones. Any code written to call it will be built around the wrong number, so the fix costs more with every new caller. *Class: a fix that gets more expensive as work builds on it.*
+
+1 of 2 met a reason class.
+
+**Other follow-ups**
+- Rack paint: pick a warmer grey
+
+**Blocked**
+- (none)
+
+Nothing has been written yet.
+
+---
+
+### Confirmation 1: the chosen set
+
+> Which listed follow-ups do you want to move onto the shortlist, and which off it? (a list of names to add, a list to remove, or `none`)
+
+**Answer given:** move every follow-up off the shortlist, and drop `mugs-count-the-mugs-hanging-on-the-rack` and `rack-paint-pick-a-warmer-grey`.
+
+Both names are in the gathered set, so the move is accepted: `mugs-count-the-mugs-hanging-on-the-rack` comes off the shortlist.
+
+This ritual can't drop a follow-up. Its procedure only moves follow-ups onto or off the shortlist. The only drop it has is for an existing follow-up parent (step 7), and this spec has none. So the drop request is not carried out, and the procedure never asks "Why drop this follow-up?". The reason you gave ("the rack was scrapped with the old stockroom") was not used and nothing was recorded. Both follow-ups go to the **left** set.
+
+**Included:**
+- (none)
+
+**Left:**
+- Mugs: count the mugs hanging on the rack (`mugs-count-the-mugs-hanging-on-the-rack`)
+- Rack paint: pick a warmer grey (`rack-paint-pick-a-warmer-grey`)
+
+### Confirmation 2
+
+> Include these, leave these. Refinement rewrites each included follow-up's record whether or not it ends up nested. Proceed? (`yes`, or what to move.)
+
+**Answer given:** `yes`. You worded this question as "Drop, merge, include and leave as shown?", but the ritual's question is the one above and it takes the same `yes`.
+
+Nothing is included, so no parent is created. Steps 9–12 (refinement, check, scope confirmation, assemble) do not run.
+
+---
+
+## Closing report
+
+- **Included:** none
+- **Left:** Mugs: count the mugs hanging on the rack (`mugs-count-the-mugs-hanging-on-the-rack`); Rack paint: pick a warmer grey (`rack-paint-pick-a-warmer-grey`)
+- **Left out at step 10:** none (no check ran)
+- **Refined but not nested:** none
+- **Failed writes:** none
+- **Not carried out:** the drop of `mugs-count-the-mugs-hanging-on-the-rack` and `rack-paint-pick-a-warmer-grey`, because this ritual has no follow-up drop. Both records are unchanged and `open`, and they will show up again the next time this spec is tidied. To get rid of them, set their status outside this ritual.
+
+Nothing was written to the vault. No parent was created and `distilled` is false, so the closing command is:
+
+```
+/craft:distill spec/fixture-mug-rack-spec
+```

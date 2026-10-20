@@ -1,0 +1,35 @@
+{
+ "order": {},
+ "agents": {
+  "count": 0,
+  "sequential": true
+ },
+ "check_args": [],
+ "assembles": 0,
+ "verbatim": [],
+ "records": {
+  "dimmer-remove-the-dim-table-s-step-comments": {
+   "status": "dropped",
+   "parent": null,
+   "labels": [],
+   "body_changed": true,
+   "new": false
+  },
+  "dimmer-remove-the-unused-dim-table": {
+   "status": "dropped",
+   "parent": null,
+   "labels": [],
+   "body_changed": true,
+   "new": false
+  }
+ },
+ "parent_body": {},
+ "command_lines": [
+  {
+   "line": "/craft:distill spec/fixture-shelf-lamp-spec",
+   "standalone": true,
+   "in_fence": true
+  }
+ ],
+ "real_vault_hits": ""
+}

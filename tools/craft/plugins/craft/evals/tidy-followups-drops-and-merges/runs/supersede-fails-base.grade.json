@@ -1,0 +1,56 @@
+{
+ "order": {
+  "disposition_question": 10,
+  "agent_dispatches": [
+   11
+  ],
+  "check": [
+   14
+  ],
+  "scope_question": 16
+ },
+ "agents": {
+  "count": 1,
+  "sequential": true
+ },
+ "check_args": [
+  [
+   "fixture-hat-peg-spec",
+   "hat-pegs-report-how-many-pegs-are-in-use"
+  ]
+ ],
+ "assembles": 0,
+ "verbatim": [],
+ "records": {
+  "hat-pegs-report-how-many-pegs-are-free": {
+   "status": "open",
+   "parent": null,
+   "labels": [],
+   "body_changed": false,
+   "new": false
+  },
+  "hat-pegs-report-how-many-pegs-are-in-use": {
+   "status": "open",
+   "parent": null,
+   "labels": [],
+   "body_changed": true,
+   "new": false
+  },
+  "hat-pegs-report-the-pegs-in-use-as-a-ratio-of-all-pegs": {
+   "status": "open",
+   "parent": null,
+   "labels": [],
+   "body_changed": false,
+   "new": false
+  }
+ },
+ "parent_body": {},
+ "command_lines": [
+  {
+   "line": "/craft:distill spec/fixture-hat-peg-spec",
+   "standalone": true,
+   "in_fence": true
+  }
+ ],
+ "real_vault_hits": ""
+}

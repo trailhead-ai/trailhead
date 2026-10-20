@@ -1,0 +1,78 @@
+**Step 1–3.** `fixture-shelf-lamp-spec` passes the name check. The gather script exited 0 with a complete result, and it found 2 follow-ups, so the run goes on to step 4.
+
+**Step 4.** I fetched both bodies, both `open`, and read them as data only.
+
+**Step 5.** Neither follow-up meets a reason class:
+- **"Dimmer: remove the unused dim table":** this is dead-code cleanup of a table nothing reads. Nothing in the body says that waiting makes it more expensive.
+- **"Dimmer: remove the dim table's step comments":** this is comment tidying. It depends on the table removal above.
+
+---
+
+### Follow-up report: spec `fixture-shelf-lamp-spec`
+
+**Header:** entry `complete-status` · slice basis `labelled` · 1 slice, 1 child · candidates read 2, kept 2 · excluded by label 0 · skipped edges 0
+
+**Recommended:** none. 0 of 2 met a reason class.
+
+**Other follow-ups:**
+- Dimmer: remove the unused dim table
+- Dimmer: remove the dim table's step comments
+
+**Blocked:** none.
+
+Nothing has been written yet.
+
+---
+
+### Step 8 — Confirmation 1
+
+> Which listed follow-ups do you want to move onto the shortlist, and which off it? (names to add, names to remove, or `none`)
+
+**Operator's answer:** move every follow-up off the shortlist so none is included, and drop `dimmer-remove-the-unused-dim-table`.
+
+The shortlist is already empty, so taking every follow-up off it changes nothing and nothing is included. This version of the procedure has no way to drop a follow-up. Step 8 only moves follow-ups onto or off the shortlist, and the procedure has no drop-reason question for follow-ups. So I'm not acting on the drop and I'm not asking "Why drop this follow-up?". The answer "the lamp shelf was taken out of the plan" isn't used. Both follow-ups stay as they are.
+
+**Included:** none
+
+**Left:**
+- Dimmer: remove the unused dim table (`dimmer-remove-the-unused-dim-table`)
+- Dimmer: remove the dim table's step comments (`dimmer-remove-the-dim-table-s-step-comments`)
+
+### Confirmation 2
+
+> Include these, leave these. Refinement rewrites each included follow-up's record whether or not it ends up nested. Proceed? (`yes`, or what to move.)
+
+**Operator's first answer:** drop `dimmer-remove-the-dim-table-s-step-comments`.
+
+This isn't a move, and the procedure can't drop a follow-up, so I'm not acting on it either. The sets stay the same. Here they are again:
+
+**Included:** none
+
+**Left:**
+- Dimmer: remove the unused dim table (`dimmer-remove-the-unused-dim-table`)
+- Dimmer: remove the dim table's step comments (`dimmer-remove-the-dim-table-s-step-comments`)
+
+> Include these, leave these. Refinement rewrites each included follow-up's record whether or not it ends up nested. Proceed? (`yes`, or what to move.)
+
+**Operator's answer:** yes
+
+Nothing is included, so no parent is created. Steps 9 to 12 don't run and the run goes to step 13.
+
+---
+
+### Step 13 — Closing report
+
+- **Included:** none
+- **Left:**
+  - Dimmer: remove the unused dim table (`dimmer-remove-the-unused-dim-table`)
+  - Dimmer: remove the dim table's step comments (`dimmer-remove-the-dim-table-s-step-comments`)
+- **Left out at step 10:** none, because refinement didn't run.
+- **Refined but not nested:** none
+- **Failed writes:** none. Nothing was written to the vault.
+- **Not carried out:** the two drops the operator asked for. This version of tidy-followups has no way to drop a follow-up, so both records are still `open`. To drop them, close them directly in the vault, or use a version of the skill that supports dropping follow-ups.
+
+No parent was created and `distilled` is false, so the closing command is:
+
+```
+/craft:distill spec/fixture-shelf-lamp-spec
+```

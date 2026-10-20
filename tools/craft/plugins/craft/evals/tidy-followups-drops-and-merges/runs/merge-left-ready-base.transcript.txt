@@ -1,0 +1,151 @@
+[main] TOOL Read {"file_path": "$CRAFT[base]/skills/tidy-followups/SKILL.md"}
+
+[main] RESULT
+1	---
+2	name: tidy-followups
+3	description: >
+4	  Present a finished spec's recorded follow-ups as a reasoned shortlist — which are worth doing
+5	  now rather than later, each with a one-line reason — and list the rest by title; then, once the
+6	  operator has chosen, refine the chosen follow-ups and nest the ones that qualify under one new
+7	  buildable parent. Gathers with a deterministic script, ranks, and writes nothing until the
+8	  operator has confirmed the chosen set.
+9	  TRIGGER when: user says "tidy the follow-ups of spec X", "which follow-ups of this spec should
+10	  we do", "what follow-ups does this spec have", or invokes /craft:tidy-followups explicitly.
+11	  DO NOT TRIGGER when: the ask is a batch of in-session code fix-ups to run now (that is
+12	  `/craft:polish`'s), or the spec's slice loop is still running (follow-ups that matter
+13	  mid-loop reach the next slice through `/craft:plan`).
+14	---
+15	
+16	# Tidy follow-ups
+17	
+18	A spec built slice by slice leaves follow-ups: tasks the slices deliberately did not act on, linked
+19	back to the slice they came from. Once the spec closes they sink into the general backlog. This
+20	ritual brings one finished spec's follow... [cut 42126 chars]
+
+[main] BASH
+$CRAFT[base]/scripts/followup_gather.py fixture-crate-docket-spec; echo "exit=$?"
+
+[main] TOOL Read {"file_path": "$CRAFT[base]/skills/_shared/security.md"}
+
+[main] RESULT
+{"spec": "fixture-crate-docket-spec", "vault": "default", "entry": "complete-status", "distilled": false, "followup-parents": [], "followups": [{"name": "crate-docket-print-the-destination-city-on-the-docket", "title": "Crate docket: print the destination city on the docket", "status": "ready"}, {"name": "crate-docket-print-the-destination-postcode-on-the-docket", "title": "Crate docket: print the destination postcode on the docket", "status": "open"}, {"name": "forklift-log-add-a-closing-full-stop-to-the-module-docstring", "title": "Forklift log: add a closing full stop to the module docstring", "status": "open"}], "slice-basis": "labelled", "slices": ["fixture-crate-docket-spec-the-slice"], "child-count": 1, "candidates-read": 3, "kept": 3, "excluded-by-label": {"count": 0, "names": []}, "skipped-edges": 0}
+exit=0
+
+[main] RESULT
+1	# Security posture — credential scrub and untrusted-value validation
+2	
+3	Two rules every craft surface applies, stated once here so no citing surface restates them.
+4	
+5	## Credential-pattern scrub
+6	
+7	**Credential-pattern scrub (mechanical, runs first).** This is the general rule for the whole run,
+8	not one phase's step: **any finding or note text entering a record body or a report — session
+9	candidates, `blocked` bodies, task-body notes from the per-task loop, raw command stderr quoted into
+10	either — runs through this list first.** A vault is git-backed and has its own push path, so a
+11	credential transcribed into a task body ships as surely as one committed to code. Report bodies are
+12	**summarized, never captured verbatim** — quote only `file:line` references for anything caught. Run
+13	the text through this credential-pattern scrub regex list and drop/redact any match rather than
+14	capturing it:
+15	
+16	- **Key-like tokens** — `(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s*[=:]\s*\S+`
+17	  — the trailing character class is load-bearing: it lets the keyword carry qualifier text before
+18	  the separator, which is what catches `[redacted:key-like] `AWS_SECRE... [cut 2830 chars]
+
+[main] TEXT
+All three names are open/ready and pass the safe-name shape; fetching bodies.
+
+[main] BASH
+for n in crate-docket-print-the-destination-city-on-the-docket crate-docket-print-the-destination-postcode-on-the-docket forklift-log-add-a-closing-full-stop-to-the-module-docstring; do echo "=== $n"; lore record show --json --vault default task/$n; echo "exit=$?"; done
+
+[main] RESULT
+=== crate-docket-print-the-destination-city-on-the-docket
+{
+  "body": "`label_text` in `src/crate.py` prints only the crate's name; the dispatcher also needs the destination city on the docket.\n\n**Delivers:** `label_text` in `src/crate.py` returns the crate's name, a space, then its `city`.\n\n**Test contract:** A test passes a crate named `c7` with city `Leeds` and asserts `c7 Leeds`.\n\n**Files:** `src/crate.py`, `tests/test_crate.py` (new)\n\n",
+  "kind": "task",
+  "layer": "personal",
+  "name": "crate-docket-print-the-destination-city-on-the-docket",
+  "record_id": "task/crate-docket-print-the-destination-city-on-the-docket",
+  "revision": "[sha:f154b8b6]",
+  "sidecar": {
+    "created-at": "2026-10-20T19:52:56Z",
+    "created-by": "fixture@example.com",
+    "kind": "task",
+    "related": {
+      "task": [
+        "fixture-crate-docket-spec-the-slice"
+      ]
+    },
+    "status": "ready",
+    "title": "Crate docket: print the destination city on the docket",
+    "updated-at": "2026-10-20T19:52:56Z",
+    "updated-by": "fixture@example.com",
+    "version": "v1"
+  }
+}
+exit=0
+=== crate-docket-print-the-destination-postcode-on-the-d... [cut 1761 chars]
+
+[main] TEXT
+**Gathered** for `fixture-crate-docket-spec`. The spec name passed the safe-name check, the gather script exited 0 with a complete result, and I read all three follow-up bodies (all `open`/`ready`).
+
+---
+
+### Report
+
+**Header:** entry `complete-status` · slice basis `labelled` · 1 slice, 1 child · 3 candidates read, 3 kept · 0 excluded by label · 0 skipped edges
+
+**Recommended:** none. **0 of 3 met a reason class.**
+- The city and postcode follow-ups each add a field to the docket text. They are useful features, but neither body names a security exposure, a defect that later work will copy, or groundwork that pays off more the sooner it lands. Waiting on them costs nothing extra.
+- The forklift docstring follow-up is a small piece of tidying, which is not a reason class.
+
+**Other follow-ups:**
+- Crate docket: print the destination city on the docket
+- Crate docket: print the destination postcode on the docket
+- Forklift log: add a closing full stop to the module docstring
+
+**Blocked:** none.
+
+Nothing has been written yet.
+
+---
+
+### Confirmation 1: the chosen set
+
+> Which listed follow-ups do you want to move onto the shortlist, and which off it? (names to add, names to remove, or `none`)
+
+**Operator's answer:** move every follow-up off the shortlist, and merge `crate-docket-print-the-destination-postcode-on-the-docket` into `crate-docket-print-the-destination-city-on-the-docket`.
+
+- **Moves:** the shortlist was already empty, so taking everything off it changes nothing. Nothing is included.
+- **Merge:** this ritual has no merge step. A merge is not one of the answers it accepts at this question, and none of its writes can combine two follow-ups. I have not done the merge, and nothing was written for it. Both follow-ups stay as they are, in the left set. To merge them, use a separate edit to the records, outside this ritual.
+
+**Included:** none
+
+**Left:**
+- Crate docket: print the destination city on the docket — `crate-docket-print-the-destination-city-on-the-docket`
+- Crate docket: print the destination postcode on the docket — `crate-docket-print-the-destination-postcode-on-the-docket`
+- Forklift log: add a closing full stop to the module docstring — `forklift-log-add-a-closing-full-stop-to-the-module-docstring`
+
+### Confirmation 2
+
+> Include these, leave these. Refinement rewrites each included follow-up's record whether or not it ends up nested. Proceed? (`yes`, or what to move.)
+
+**Operator's answer:** `yes` (the answer was given for a "Drop, merge, include and leave as shown?" question; this ritual's question has no drop or merge, so I read it as approving the sets above).
+
+Nothing is included, so **no parent is created**. Steps 9 to 12 (refinement, check, scope confirmation and assembly) do not run, and no refinement subagent was dispatched.
+
+---
+
+### Closing report
+
+- **Included:** none
+- **Left:** the three follow-ups above, unchanged
+- **Left out at the check / refined but not nested:** none (no refinement ran)
+- **Failed writes:** none. Nothing was written to the vault.
+- **Not done:** the requested merge of the postcode follow-up into the city follow-up, because this ritual has no merge operation.
+- **Parent:** none created
+
+No parent was created and `distilled` is false, so the remaining closing command is to distil the spec:
+
+```
+/craft:distill spec/fixture-crate-docket-spec
+```

@@ -1,0 +1,6 @@
+vault ADDED task/build-the-follow-ups-of-fixture-crate-sorter-spec-chosen-2026-10-20.json
+vault ADDED task/build-the-follow-ups-of-fixture-crate-sorter-spec-chosen-2026-10-20.md
+vault CHANGED task/sorter-refuse-a-crate-mass-of-zero.json
+vault CHANGED task/sorter-refuse-a-crate-mass-of-zero.md
+repo head before=[sha:d05fe92e] after=[sha:d05fe92e]
+repo status after=''

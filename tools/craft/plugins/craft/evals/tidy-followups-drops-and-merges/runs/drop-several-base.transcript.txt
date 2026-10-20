@@ -1,0 +1,153 @@
+[main] TOOL Read {"file_path": "$CRAFT[base]/skills/tidy-followups/SKILL.md"}
+
+[main] RESULT
+1	---
+2	name: tidy-followups
+3	description: >
+4	  Present a finished spec's recorded follow-ups as a reasoned shortlist — which are worth doing
+5	  now rather than later, each with a one-line reason — and list the rest by title; then, once the
+6	  operator has chosen, refine the chosen follow-ups and nest the ones that qualify under one new
+7	  buildable parent. Gathers with a deterministic script, ranks, and writes nothing until the
+8	  operator has confirmed the chosen set.
+9	  TRIGGER when: user says "tidy the follow-ups of spec X", "which follow-ups of this spec should
+10	  we do", "what follow-ups does this spec have", or invokes /craft:tidy-followups explicitly.
+11	  DO NOT TRIGGER when: the ask is a batch of in-session code fix-ups to run now (that is
+12	  `/craft:polish`'s), or the spec's slice loop is still running (follow-ups that matter
+13	  mid-loop reach the next slice through `/craft:plan`).
+14	---
+15	
+16	# Tidy follow-ups
+17	
+18	A spec built slice by slice leaves follow-ups: tasks the slices deliberately did not act on, linked
+19	back to the slice they came from. Once the spec closes they sink into the general backlog. This
+20	ritual brings one finished spec's follow... [cut 42126 chars]
+
+[main] BASH
+$CRAFT[base]/scripts/followup_gather.py fixture-bakery-oven-spec; echo "EXIT=$?"
+
+[main] TOOL Read {"file_path": "$CRAFT[base]/skills/_shared/security.md"}
+
+[main] RESULT
+{"spec": "fixture-bakery-oven-spec", "vault": "default", "entry": "complete-status", "distilled": false, "followup-parents": [], "followups": [{"name": "dials-rename-the-two-dial-constants-to-match-the-manual", "title": "Dials: rename the two dial constants to match the manual", "status": "ready"}, {"name": "hinge-reword-the-swing-comment", "title": "Hinge: reword the swing comment", "status": "open"}, {"name": "journal-note-the-preheat-time-beside-each-loaf", "title": "Journal: note the preheat time beside each loaf", "status": "open"}, {"name": "thermostat-swap-the-probe-supplier", "title": "Thermostat: swap the probe supplier", "status": "blocked"}], "slice-basis": "labelled", "slices": ["fixture-bakery-oven-spec-the-slice"], "child-count": 1, "candidates-read": 4, "kept": 4, "excluded-by-label": {"count": 0, "names": []}, "skipped-edges": 0}
+EXIT=0
+
+[main] RESULT
+1	# Security posture — credential scrub and untrusted-value validation
+2	
+3	Two rules every craft surface applies, stated once here so no citing surface restates them.
+4	
+5	## Credential-pattern scrub
+6	
+7	**Credential-pattern scrub (mechanical, runs first).** This is the general rule for the whole run,
+8	not one phase's step: **any finding or note text entering a record body or a report — session
+9	candidates, `blocked` bodies, task-body notes from the per-task loop, raw command stderr quoted into
+10	either — runs through this list first.** A vault is git-backed and has its own push path, so a
+11	credential transcribed into a task body ships as surely as one committed to code. Report bodies are
+12	**summarized, never captured verbatim** — quote only `file:line` references for anything caught. Run
+13	the text through this credential-pattern scrub regex list and drop/redact any match rather than
+14	capturing it:
+15	
+16	- **Key-like tokens** — `(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s*[=:]\s*\S+`
+17	  — the trailing character class is load-bearing: it lets the keyword carry qualifier text before
+18	  the separator, which is what catches `[redacted:key-like] `AWS_SECRE... [cut 2830 chars]
+
+[main] TEXT
+Names all pass the step-1 shape. Fetching bodies of the three open/ready follow-ups (not the blocked one).
+
+[main] BASH
+for n in dials-rename-the-two-dial-constants-to-match-the-manual hinge-reword-the-swing-comment journal-note-the-preheat-time-beside-each-loaf; do echo "== $n"; lore record show --json --vault default task/$n; echo "EXIT=$?"; done
+
+[main] RESULT
+== dials-rename-the-two-dial-constants-to-match-the-manual
+{
+  "body": "`src/dials.py` calls the dials `DIAL_A` and `DIAL_B`; the manual calls them `TOP` and `BASE`.\n\n**Delivers:** `src/dials.py` defines `TOP` and `BASE` in place of `DIAL_A` and `DIAL_B`.\n\n**Test contract:** A test imports `TOP` and `BASE` from `src/dials` and asserts 1 and 2.\n\n**Files:** `src/dials.py`, `tests/test_dials.py` (new)\n\n",
+  "kind": "task",
+  "layer": "personal",
+  "name": "dials-rename-the-two-dial-constants-to-match-the-manual",
+  "record_id": "task/dials-rename-the-two-dial-constants-to-match-the-manual",
+  "revision": "[sha:b7d7c731]",
+  "sidecar": {
+    "created-at": "2026-10-20T19:50:31Z",
+    "created-by": "fixture@example.com",
+    "kind": "task",
+    "related": {
+      "task": [
+        "fixture-bakery-oven-spec-the-slice"
+      ]
+    },
+    "status": "ready",
+    "title": "Dials: rename the two dial constants to match the manual",
+    "updated-at": "2026-10-20T19:50:31Z",
+    "updated-by": "fixture@example.com",
+    "version": "v1"
+  }
+}
+EXIT=0
+== hinge-reword-the-swing-comment
+{
+  "body": "The comment in `src/hinge.py` says `hinge geo... [cut 1493 chars]
+
+[main] TEXT
+**Step 1–3.** `fixture-bakery-oven-spec` passes the name checks. The gather script exited 0 with a complete result: 4 follow-ups, none of them already under a follow-up parent. **Step 4:** I read the bodies of the three `open`/`ready` follow-ups. I did not read the blocked one.
+
+---
+
+## Follow-ups of spec/fixture-bakery-oven-spec
+
+Entry: `complete-status` · slice basis: `labelled` · slices: 1 · children: 1 · candidates read: 4, kept: 4 · label-excluded: 0 · skipped edges: 0
+
+**Recommended** (2 of 3 met a reason class)
+- **Dials: rename the two dial constants to match the manual** (`dials-rename-the-two-dial-constants-to-match-the-manual`). Any new code that imports the old dial names will also need renaming, so the rename gets bigger the longer it waits. *Class: a fix that gets more expensive as work builds on it.*
+- **Journal: note the preheat time beside each loaf** (`journal-note-the-preheat-time-beside-each-loaf`). Loaves logged before this lands will never have their preheat time, so the record is only complete from the day it ships. *Class: a foundation whose payoff grows the sooner it lands.*
+
+**Other follow-ups**
+- Hinge: reword the swing comment
+
+**Blocked**
+- Thermostat: swap the probe supplier
+
+Nothing has been written yet.
+
+---
+
+### Confirmation 1: the chosen set
+
+> Which listed follow-ups do you want to move onto the shortlist, and which off it? (names to add, names to remove, or `none`)
+
+**Answer given:** move every follow-up off the shortlist, and drop `journal-note-the-preheat-time-beside-each-loaf`, `dials-rename-the-two-dial-constants-to-match-the-manual` and `thermostat-swap-the-probe-supplier`.
+
+I'm taking the off-shortlist moves: both recommended follow-ups come off. **This version of the ritual can't drop follow-ups.** At this step it only moves follow-ups onto or off the shortlist, and its only drop is the step 7 flow for an existing follow-up parent. This spec has no such parent. So I'm not dropping the three follow-ups, I'm not asking the "Why drop this follow-up?" question, and I'm not using the reason supplied for it. All three stay in the left set, unchanged.
+
+**Included:** none
+
+**Left:**
+- Dials: rename the two dial constants to match the manual (`dials-rename-the-two-dial-constants-to-match-the-manual`)
+- Hinge: reword the swing comment (`hinge-reword-the-swing-comment`)
+- Journal: note the preheat time beside each loaf (`journal-note-the-preheat-time-beside-each-loaf`)
+- Thermostat: swap the probe supplier (`thermostat-swap-the-probe-supplier`)
+
+### Confirmation 2
+
+> Include these, leave these. Refinement rewrites each included follow-up's record whether or not it ends up nested. Proceed? (`yes`, or what to move.)
+
+**Answer given:** `yes`. The answer was written for a "Drop, merge, include and leave as shown?" question, which this ritual doesn't ask. With no drops, I'm treating it as `yes` to the sets above.
+
+Nothing is included, so **no parent is created**. Steps 9 to 12 (refinement, check, scope confirmation, assemble) don't run, and no subagent was dispatched.
+
+---
+
+## Closing report
+
+- **Included:** none
+- **Left:** Dials: rename the two dial constants to match the manual (`dials-rename-the-two-dial-constants-to-match-the-manual`); Hinge: reword the swing comment (`hinge-reword-the-swing-comment`); Journal: note the preheat time beside each loaf (`journal-note-the-preheat-time-beside-each-loaf`); Thermostat: swap the probe supplier (`thermostat-swap-the-probe-supplier`)
+- **Left out by the check:** none (the check didn't run)
+- **Refined but not nested:** none
+- **Failed writes:** none
+- **Dropped:** none. The ritual has no way to drop a follow-up, so the three you asked to drop are still in the vault with their status unchanged.
+- **Parent:** none created
+
+Nothing was written to the vault. No parent exists and `distilled` is false, so the closing command is:
+
+```
+/craft:distill spec/fixture-bakery-oven-spec
+```
