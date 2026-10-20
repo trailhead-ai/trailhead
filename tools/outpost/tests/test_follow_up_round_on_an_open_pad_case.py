@@ -97,11 +97,6 @@ def test_a_skill_file_given_to_the_builder_replaces_the_plugin_copys_skill(tmp_p
     assert (run_dir / "plugin" / "skills" / "scratch-pad" / "scratch_pad.py").is_file()
 
 
-def test_the_baseline_skill_is_the_skill_before_rounds_were_described():
-    before = ac.git_show("5512014a", "tools/outpost/plugins/outpost/skills/scratch-pad/SKILL.md")
-    assert (CASE_DIR / "arms" / "baseline-SKILL.md").read_text() == before
-
-
 def test_an_unknown_variant_or_a_missing_skill_file_is_refused_and_builds_nothing(tmp_path):
     result, run_dir = _build(tmp_path / "a", "no-such-variant")
     assert result.returncode == 2

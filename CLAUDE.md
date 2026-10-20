@@ -143,6 +143,14 @@ fallback, no GNU `readlink -f`, macOS-safe).
   smoke, marked `# inert-gate: allow <reason>`. `scripts/inert-test-gate` enforces both
   halves and `--list-allowed` prints every exemption; see the craft ruleset for the full
   rule.
+- **A test never reads this repository's git history** — no `git show <sha>:<path>`,
+  `git log`, or any lookup by commit. Merging rebases a branch onto main, which gives
+  its commits new SHAs, so a test pinned to one passes on its pull request and fails
+  on main. When a test needs a past version of a file (an eval arm's baseline, an
+  earlier implementation's output), commit that version or its output as a fixture,
+  and record which commit it came from in prose for a person to read. CI checks out
+  at depth 1, so any history read fails on the pull request that adds it. A test that
+  builds its own throwaway repository under `tmp_path` is unaffected.
 - Comments, docstrings, and tests must stand on their own — explain intent and
   contracts in terms a reader of the code can verify directly. Do **not** reference
   internal planning artifacts (development "slices", lettered "specs" or invariant

@@ -5,7 +5,7 @@ The fixture smoke tests run ``make-fixture-env.sh`` by its real path, then the r
 loads through ``--plugin-dir``) with the env the builder emitted, per variant. Every
 env is built from scratch; nothing is inherited from the developer's HOME or XDG state.
 
-The arms contract test pins that the arms rebuild from ``rules.md``. Neither half
+The arms contract test pins that the treatment arm rebuilds from today's ``rules.md``. Neither half
 asserts anything about the eval's measured result.
 """
 
@@ -29,8 +29,6 @@ ARMS_DIR = CASE_DIR / "arms"
 
 BASELINE = "baseline.md"
 TREATMENT = "treatment.md"
-BASELINE_REVISION = "3466c9d4"
-_WRONG_REVISION = "bc8c493e"
 
 INSIDE, OUTSIDE, REFUSED = "inside", "outside", "refused"
 VARIANTS = {
@@ -319,18 +317,6 @@ def test_every_arm_on_disk_has_a_manifest_entry():
 def test_live_treatment_arm_rebuilds_from_todays_rules():
     expected = ac.build_arm(_brief(), ac.current_rules())
     assert ac.read_arm(ARMS_DIR, TREATMENT) == expected
-
-
-def test_baseline_arm_rebuilds_from_the_rules_before_the_pad_slice():
-    """IF THIS GOES RED: never edit the baseline arm to make it pass; it is the
-    rule as it stood at BASELINE_REVISION."""
-    expected = ac.build_arm(_brief(), ac.rules_at(BASELINE_REVISION))
-    assert ac.read_arm(ARMS_DIR, BASELINE) == expected
-
-
-def test_baseline_reconstruction_is_sensitive_to_revision():
-    wrong = ac.build_arm(_brief(), ac.rules_at(_WRONG_REVISION))
-    assert wrong != ac.read_arm(ARMS_DIR, BASELINE)
 
 
 def test_the_two_arms_differ():
