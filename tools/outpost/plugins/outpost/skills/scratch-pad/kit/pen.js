@@ -10,6 +10,7 @@
   var MIN_SCALE = 0.6;
   var ARROW_LENGTH = 11;
   var HATCH_GAP = 8;
+  var HALO_PAD = 2;
   var ARROW_SPREAD = (26 * Math.PI) / 180;
 
   function mulberry32(seed) {
@@ -402,6 +403,7 @@
         group.setAttribute("class", "flow-accent");
         hatch(group, outline);
       }
+      svg.appendChild(group);
       step.lines.forEach(function (line) {
         var text = svgNode("text");
         text.setAttribute("class", "flow-label");
@@ -409,8 +411,8 @@
         text.setAttribute("y", round1(line.y));
         text.textContent = line.text;
         group.appendChild(text);
+        if (step.accent) labelHalo(group, text);
       });
-      svg.appendChild(group);
     });
     plan.arrows.forEach(function (arrow) {
       var group = svgNode("g");
@@ -422,6 +424,17 @@
       svg.appendChild(group);
     });
     fitFlow(state);
+  }
+
+  function labelHalo(group, text) {
+    var box = text.getBBox();
+    var halo = svgNode("rect");
+    halo.setAttribute("class", "flow-halo");
+    halo.setAttribute("x", round1(box.x - HALO_PAD));
+    halo.setAttribute("y", round1(box.y - HALO_PAD));
+    halo.setAttribute("width", round1(box.width + 2 * HALO_PAD));
+    halo.setAttribute("height", round1(box.height + 2 * HALO_PAD));
+    group.insertBefore(halo, text);
   }
 
   function drawLabel(group, label) {

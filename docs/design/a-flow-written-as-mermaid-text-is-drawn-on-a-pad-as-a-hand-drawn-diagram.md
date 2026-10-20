@@ -122,7 +122,7 @@ page width.
 - **Arrows.** A forward arrow leaves its source on the side facing the next layer (right for `LR`,
   bottom for `TD`), runs through its waypoints, and enters its target on the opposite side, ending
   in a two-stroke arrowhead. A dashed arrow is drawn in dashes. A label sits at the middle of the
-  arrow's first leg, on a halo of paper colour so the line does not run through the letters.
+  arrow's first leg, on a halo in the colour of the card the drawing sits on so the line does not run through the letters.
 - **Loop backs.** Each loop back gets its own lane outside the flow: below it for `LR`, to the right
   of it for `TD`. The first loop back written takes the lane nearest the flow, the next the one
   beyond it. A loop back leaves its source from the side facing the lane, runs along the lane, and
@@ -201,7 +201,7 @@ the same as `flowchart TD`.
 ## State — flow with decisions and labelled, dashed and chained arrows
 
 A decision is a diamond around its label. A labelled arrow carries its label at the middle of its
-first leg, on a paper-coloured halo. A dashed arrow is drawn in dashes, both passes. A chain
+first leg, on a halo in the colour of the card the drawing sits on. A dashed arrow is drawn in dashes, both passes. A chain
 `a --> b --> c` draws two arrows, `a` to `b` and `b` to `c`. An arrow that skips a layer runs
 through its own lane and crosses no step.
 
