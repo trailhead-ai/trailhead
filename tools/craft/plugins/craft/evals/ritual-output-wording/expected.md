@@ -29,10 +29,11 @@ Every arm at a site gets the same fixture and the same prompt. Only the system p
 
 ## Arms
 
-Each arm is a file under `arms/` named `<arm>.md`. The manifest in
-`tools/craft/tests/test_ritual_output_wording_arms_contract.py` names each arm's sources and, per source, a pinned
-revision or the working tree. The test composes every arm from its manifest and compares it to the file byte for
-byte. Arms carry no provenance notes; provenance is the manifest's and this file's.
+Each arm is a file under `arms/` named `<arm>.md`, a committed copy of its sources as they stood when it was
+built. The table below names each arm's sources and, per source, the commit it was copied from or the working tree.
+The manifest in `tools/craft/tests/test_ritual_output_wording_arms_contract.py` lists every arm file; no test
+recomposes an arm, because the pinned text exists only in repository history. Arms carry no provenance notes;
+provenance is this file's.
 
 Every variable that differs between arms:
 

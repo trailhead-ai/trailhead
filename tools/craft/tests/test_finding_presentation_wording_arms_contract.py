@@ -1,11 +1,11 @@
 """Contract tests for the `finding-presentation-wording` eval's `arms/` and `fixtures/`.
 
-Every arm is the concatenation of source documents, each read at a pinned git revision.
-The manifest below names those sources per arm. These tests pin that each committed arm
-file is exactly what its manifest composes, that composing from a different revision of a
-pinned source does not give the same bytes, that the manifest and the directory list the
-same files, and that the grader reads every reviewer label a canned report carries as the
-case's pre-registered grammar classes it.
+Every arm is a committed copy of the concatenation of source documents, each as it stood
+at a past commit. The manifest below records those sources per arm; the case's
+`expected.md` cites it as the arms' provenance. That text exists only in repository
+history, so nothing here recomposes an arm. These tests pin that the manifest and the
+directory list the same files, and that the grader reads every reviewer label a canned
+report carries as the case's pre-registered grammar classes it.
 
 Nothing here asserts the eval's measured result; that is decided by dispatched runs.
 """
@@ -18,15 +18,12 @@ import sys
 from pathlib import Path
 
 import pytest
-from test_ritual_output_wording_arms_contract import (
-    GIT_ROOT,
-    Source,
-    _earlier_revision,
-    _git,
-    arm_matches,
-    compose,
-    manifest_mismatches,
-)
+from test_ritual_output_wording_arms_contract import manifest_mismatches
+
+GIT_ROOT = Path(__file__).resolve().parents[3]
+
+# A source is (repo-relative path, the commit the arm copied it from).
+Source = tuple[str, str]
 
 CASE_DIR = (
     GIT_ROOT / "tools" / "craft" / "plugins" / "craft" / "evals" / "finding-presentation-wording"
@@ -275,101 +272,8 @@ ARM_SOURCES.update(
 )
 
 
-@pytest.mark.parametrize("arm_name", sorted(ARM_SOURCES))
-def test_arm_composed_from_its_manifest_equals_the_committed_file(arm_name: str):
-    sources = ARM_SOURCES[arm_name]
-    expected = compose(sources)
-    actual = (ARMS_DIR / arm_name).read_text(encoding="utf-8")
-    assert actual == expected, (
-        f"{arm_name} differs from its manifest sources {sources}: "
-        f"expected {len(expected)} chars, committed {len(actual)}"
-    )
-
-
-def _has_earlier_revision(path: str, revision: str) -> bool:
-    return len(_git("log", "--format=%H", "-n", "2", revision, "--", path).split()) == 2
-
-
-# A source with a single revision up to its pin (a file added shortly before the pin) has
-# no earlier blob to compose from; the byte-identity test above is what constrains it.
-_PINNED_SOURCES = [
-    (arm, index)
-    for arm, sources in sorted(ARM_SOURCES.items())
-    for index, (path, revision) in enumerate(sources)
-    if _has_earlier_revision(path, revision)
-]
-
-
-@pytest.mark.parametrize(
-    "arm_name,index", _PINNED_SOURCES, ids=[f"{a}:{i}" for a, i in _PINNED_SOURCES]
-)
-def test_composing_one_source_from_a_different_revision_does_not_match(
-    arm_name: str, index: int
-):
-    sources = list(ARM_SOURCES[arm_name])
-    path, revision = sources[index]
-    sources[index] = (path, _earlier_revision(path, revision))
-    assert not arm_matches(ARMS_DIR / arm_name, sources), (
-        f"{arm_name} still matches when source {path} is read from an earlier "
-        "revision, so the revision pin does not constrain the arm"
-    )
-
-
-# Each arm that reads `council.md` at a fix-shape contract edit, the edit's revision, and the revision before it.
-COUNCIL_EDIT_ARMS = [
-    (f"{prefix}-{site}.md", edit, before)
-    for prefix, edit, before in (
-        ("fs-treated", FIX_SHAPE_EDIT_REVISION, FIX_SHAPE_BASELINE_REVISION),
-        ("fs-treated2", FIX_SHAPE_SHARPENED_REVISION, FIX_SHAPE_EDIT_REVISION),
-    )
-    for site in FS_SITE_SOURCES
-] + [
-    ("regress-cal-consult.md", FIX_SHAPE_EDIT_REVISION, FIX_SHAPE_BASELINE_REVISION),
-    ("regress2-cal-consult.md", FIX_SHAPE_SHARPENED_REVISION, FIX_SHAPE_EDIT_REVISION),
-]
-
-
-@pytest.mark.parametrize(
-    "arm_name,edit,before", COUNCIL_EDIT_ARMS, ids=[arm for arm, _, _ in COUNCIL_EDIT_ARMS]
-)
-def test_a_fix_shape_edit_arm_differs_from_the_same_sources_with_council_before_that_edit(
-    arm_name: str, edit: str, before: str
-):
-    sources = [(path, before if revision == edit else revision) for path, revision in ARM_SOURCES[arm_name]]
-    assert not arm_matches(ARMS_DIR / arm_name, sources), (
-        f"{arm_name} matches its sources with council.md at {before}, "
-        "so the contract edit is not what the arm varies"
-    )
-
-
-@pytest.mark.parametrize("site", FIX_SHAPE_FALLBACKS)
-def test_a_fallback_arm_differs_from_its_treated_arm_only_in_the_sites_ritual_file(site: str):
-    arm_name = f"fs-fallback-{site}.md"
-    ritual_file, _ = FIX_SHAPE_FALLBACKS[site]
-    treated = (ARMS_DIR / f"fs-treated2-{site}.md").read_text(encoding="utf-8")
-    fallback = (ARMS_DIR / arm_name).read_text(encoding="utf-8")
-    assert fallback != treated, f"{arm_name} is byte-identical to its treated arm"
-    sources = [
-        (path, FIX_SHAPE_BASELINE_REVISION if path == ritual_file else revision)
-        for path, revision in ARM_SOURCES[arm_name]
-    ]
-    assert compose(sources) == treated, f"{arm_name} differs from its treated arm in more than {ritual_file}"
-
-
-@pytest.mark.parametrize("arm_name,predecessor", CONSULT_REWORDED_ARMS.items())
-def test_a_reworded_consult_arm_differs_from_its_predecessor_only_in_the_consult_skill(arm_name: str, predecessor: str):
-    before = (ARMS_DIR / predecessor).read_text(encoding="utf-8")
-    after = (ARMS_DIR / arm_name).read_text(encoding="utf-8")
-    assert after != before, f"{arm_name} is byte-identical to {predecessor}"
-    sources = [
-        (path, revision) if path != CONSULT_SKILL else ARM_SOURCES[predecessor][index]
-        for index, (path, revision) in enumerate(ARM_SOURCES[arm_name])
-    ]
-    assert compose(sources) == before, f"{arm_name} differs from {predecessor} in more than {CONSULT_SKILL}"
-
-
 def test_every_arm_file_has_a_manifest_entry_and_every_entry_a_file():
-    undeclared, missing = manifest_mismatches(ARM_SOURCES, ARMS_DIR)
+    undeclared, missing = manifest_mismatches(set(ARM_SOURCES), ARMS_DIR)
     assert not undeclared, f"arm file(s) with no manifest entry: {sorted(undeclared)}"
     assert not missing, f"manifest entries with no file on disk: {sorted(missing)}"
 

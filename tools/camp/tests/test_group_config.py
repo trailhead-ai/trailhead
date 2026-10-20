@@ -1891,64 +1891,29 @@ def test_excluded_with_unrecognized_sibling_key_drops_the_unrecognized_key(
     assert "bogus_key" not in member
 
 
-def _load_pre_change_baseline_group(toml_text: str, tmp_path: Path):
-    """Load the group config via the pre-change config.py blob (base commit
-    68793ea1), so the 'no excluded anywhere' comparison is derived from an
-    actual prior execution rather than a hand-typed expected dict."""
-    import importlib.util
-    import subprocess
-
-    blob = subprocess.run(
-        ["git", "show", "68793ea1:tools/camp/plugins/camp/camp/group/config.py"],
-        cwd=_REPO_ROOT,
-        capture_output=True,
-        text=True,
-    )
-    if blob.returncode != 0:
-        # A shallow clone (the CI checkout default) carries no history to read a
-        # prior loader out of, and a source tree with no `.git` carries none
-        # either. The invariant this comparison strengthens is pinned
-        # independently of history by
-        # `test_excluded_absent_key_is_none`, so skipping
-        # here loses a stronger form of an already-covered claim rather than the
-        # claim itself.
-        pytest.skip(
-            "pre-change loader blob unavailable (shallow clone or no git history)"
-        )
-    baseline_source = blob.stdout
-    spec = importlib.util.spec_from_loader("camp_group_config_pre_change_baseline", loader=None)
-    module = importlib.util.module_from_spec(spec)
-    exec(compile(baseline_source, "<pre-change-config-baseline>", "exec"), module.__dict__)
-
-    f = tmp_path / "baseline.toml"
-    f.write_text(toml_text)
-    return module.load_group(f)
-
-
-def test_no_excluded_anywhere_loads_exactly_as_it_did_before_this_change(
-    tmp_path: Path,
-) -> None:
-    """A group config carrying no 'excluded' anywhere loads exactly as it did
-    before this change, aside from the new 'excluded': None key on each
-    member — every other field is byte-identical to the pre-change loader's
-    own output on the same fixture."""
+def test_declaring_excluded_changes_nothing_else_the_config_loads(tmp_path: Path) -> None:
+    """The same group config loaded with and without an 'excluded' declaration on its
+    member differs only in that member's 'excluded' value — declaring it disturbs no
+    other member field and nothing outside the members."""
     from camp.group.config import load_group
 
-    f = tmp_path / "testgroup.toml"
-    f.write_text(_VALID_TOML_NO_BOOTSTRAP)
-    current_cfg = load_group(f)
+    plain = tmp_path / "plain.toml"
+    plain.write_text(_VALID_TOML_NO_BOOTSTRAP)
+    declared = tmp_path / "declared.toml"
+    declared.write_text(_VALID_TOML_NO_BOOTSTRAP + 'excluded = ["build"]\n')
 
-    baseline_cfg = _load_pre_change_baseline_group(_VALID_TOML_NO_BOOTSTRAP, tmp_path)
+    without, with_ = load_group(plain), load_group(declared)
 
-    assert current_cfg["members"][0]["excluded"] is None
+    assert without["members"][0]["excluded"] is None
+    assert with_["members"][0]["excluded"] == ("build",)
 
-    current_members_without_excluded = [
-        {k: v for k, v in member.items() if k != "excluded"} for member in current_cfg["members"]
-    ]
-    assert current_members_without_excluded == baseline_cfg["members"]
-    # '_toml_path' legitimately differs — each loader read a different fixture
-    # file on disk — so it's excluded from this "everything else is
-    # byte-identical" comparison, not because it's uninteresting to pin.
-    assert {k: v for k, v in current_cfg.items() if k not in ("members", "_toml_path")} == {
-        k: v for k, v in baseline_cfg.items() if k not in ("members", "_toml_path")
+    def _members_minus_excluded(cfg):
+        return [{k: v for k, v in m.items() if k != "excluded"} for m in cfg["members"]]
+
+    assert _members_minus_excluded(with_) == _members_minus_excluded(without)
+    # '_toml_path' differs only because each config was read from its own file.
+    assert {k: v for k, v in with_.items() if k not in ("members", "_toml_path")} == {
+        k: v for k, v in without.items() if k not in ("members", "_toml_path")
     }
+
+

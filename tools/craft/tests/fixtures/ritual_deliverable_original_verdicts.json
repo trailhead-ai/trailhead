@@ -1,0 +1,674 @@
+{
+  "brainstorm-1.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "brainstorm-2.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "brainstorm-3.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "distill-1.txt": {
+    "exit": 1,
+    "verdicts": [
+      "record-link: bare",
+      "next-command: own-line"
+    ]
+  },
+  "distill-2.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "distill-3.txt": {
+    "exit": 1,
+    "verdicts": [
+      "record-link: bare",
+      "next-command: own-line"
+    ]
+  },
+  "distill-4.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "distill-5.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "distill-6.txt": {
+    "exit": 1,
+    "verdicts": [
+      "record-link: bare",
+      "next-command: own-line"
+    ]
+  },
+  "execute-1.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: exempt"
+    ]
+  },
+  "execute-2.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: exempt"
+    ]
+  },
+  "execute-3.txt": {
+    "exit": 1,
+    "verdicts": [
+      "record-link: bare",
+      "next-command: exempt"
+    ]
+  },
+  "execute-measurable-1.txt": {
+    "exit": 1,
+    "verdicts": [
+      "record-link: link",
+      "next-command: absent"
+    ]
+  },
+  "execute-measurable-2.txt": {
+    "exit": 1,
+    "verdicts": [
+      "record-link: link",
+      "next-command: absent"
+    ]
+  },
+  "execute-measurable-3.txt": {
+    "exit": 1,
+    "verdicts": [
+      "record-link: link",
+      "next-command: embedded"
+    ]
+  },
+  "execute-treated-1.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "execute-treated-2.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "execute-treated-3.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "gauntlet-1.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "gauntlet-2.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "gauntlet-3.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "plan-1.txt": {
+    "exit": 1,
+    "verdicts": [
+      "record-link: link",
+      "next-command: embedded"
+    ]
+  },
+  "plan-2.txt": {
+    "exit": 1,
+    "verdicts": [
+      "record-link: link",
+      "next-command: embedded"
+    ]
+  },
+  "plan-3.txt": {
+    "exit": 1,
+    "verdicts": [
+      "record-link: link",
+      "next-command: embedded"
+    ]
+  },
+  "plan-treatment-1.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "plan-treatment-2.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "plan-treatment-3.txt": {
+    "exit": 1,
+    "verdicts": [
+      "record-link: bare",
+      "next-command: own-line"
+    ]
+  },
+  "recordlinks-baseline-distill-1.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "recordlinks-baseline-distill-2.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "recordlinks-baseline-distill-3.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "recordlinks-baseline-distill-4.txt": {
+    "exit": 1,
+    "verdicts": [
+      "record-link: bare",
+      "next-command: own-line"
+    ]
+  },
+  "recordlinks-baseline-distill-5.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "recordlinks-baseline-distill-6.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "recordlinks-baseline-distill-7.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "recordlinks-baseline-distill-8.txt": {
+    "exit": 1,
+    "verdicts": [
+      "record-link: bare",
+      "next-command: own-line"
+    ]
+  },
+  "recordlinks-baseline-distill-9.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "recordlinks-baseline-review-1.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "recordlinks-baseline-review-2.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "recordlinks-baseline-review-3.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "recordlinks-baseline-slice-1.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "recordlinks-baseline-slice-2.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "recordlinks-baseline-slice-3.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "recordlinks-treatment-distill-1.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "recordlinks-treatment-distill-2.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "recordlinks-treatment-distill-3.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "recordlinks-treatment-distill-4.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "recordlinks-treatment-distill-5.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "recordlinks-treatment-distill-6.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "recordlinks-treatment-distill-7.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "recordlinks-treatment-distill-8.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "recordlinks-treatment-distill-9.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "recordlinks-treatment-review-1.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "recordlinks-treatment-review-2.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "recordlinks-treatment-review-3.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "recordlinks-treatment-slice-1.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "recordlinks-treatment-slice-2.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "recordlinks-treatment-slice-3.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "review-1.txt": {
+    "exit": 1,
+    "verdicts": [
+      "record-link: link",
+      "next-command: embedded"
+    ]
+  },
+  "review-2.txt": {
+    "exit": 1,
+    "verdicts": [
+      "record-link: bare",
+      "next-command: embedded"
+    ]
+  },
+  "review-3.txt": {
+    "exit": 1,
+    "verdicts": [
+      "record-link: link",
+      "next-command: embedded"
+    ]
+  },
+  "review-4.txt": {
+    "exit": 1,
+    "verdicts": [
+      "record-link: link",
+      "next-command: embedded"
+    ]
+  },
+  "review-5.txt": {
+    "exit": 1,
+    "verdicts": [
+      "record-link: link",
+      "next-command: embedded"
+    ]
+  },
+  "review-6.txt": {
+    "exit": 1,
+    "verdicts": [
+      "record-link: link",
+      "next-command: embedded"
+    ]
+  },
+  "review-loop-open-1.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "review-loop-open-2.txt": {
+    "exit": 1,
+    "verdicts": [
+      "record-link: link",
+      "next-command: embedded"
+    ]
+  },
+  "review-loop-open-3.txt": {
+    "exit": 1,
+    "verdicts": [
+      "record-link: link",
+      "next-command: embedded"
+    ]
+  },
+  "review-loop-open-4.txt": {
+    "exit": 1,
+    "verdicts": [
+      "record-link: link",
+      "next-command: embedded"
+    ]
+  },
+  "review-loop-open-5.txt": {
+    "exit": 1,
+    "verdicts": [
+      "record-link: link",
+      "next-command: embedded"
+    ]
+  },
+  "review-loop-open-6.txt": {
+    "exit": 1,
+    "verdicts": [
+      "record-link: link",
+      "next-command: embedded"
+    ]
+  },
+  "review-loop-open-treated-1.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "review-loop-open-treated-2.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "review-loop-open-treated-3.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "review-treatment-1.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "review-treatment-2.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "review-treatment-3.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "slice-1.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "slice-2.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "slice-3.txt": {
+    "exit": 1,
+    "verdicts": [
+      "record-link: link",
+      "next-command: embedded"
+    ]
+  },
+  "slice-4.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "slice-5.txt": {
+    "exit": 1,
+    "verdicts": [
+      "record-link: link",
+      "next-command: embedded"
+    ]
+  },
+  "slice-6.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "slice-early-stop-baseline-1.txt": {
+    "exit": 1,
+    "verdicts": [
+      "record-link: link",
+      "next-command: embedded"
+    ]
+  },
+  "slice-early-stop-baseline-2.txt": {
+    "exit": 1,
+    "verdicts": [
+      "record-link: link",
+      "next-command: embedded"
+    ]
+  },
+  "slice-early-stop-baseline-3.txt": {
+    "exit": 1,
+    "verdicts": [
+      "record-link: link",
+      "next-command: embedded"
+    ]
+  },
+  "slice-early-stop-treatment-1.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "slice-early-stop-treatment-2.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "slice-early-stop-treatment-3.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "slice-spec-complete-baseline-1.txt": {
+    "exit": 1,
+    "verdicts": [
+      "record-link: link",
+      "next-command: embedded"
+    ]
+  },
+  "slice-spec-complete-baseline-2.txt": {
+    "exit": 1,
+    "verdicts": [
+      "record-link: link",
+      "next-command: embedded"
+    ]
+  },
+  "slice-spec-complete-baseline-3.txt": {
+    "exit": 1,
+    "verdicts": [
+      "record-link: link",
+      "next-command: embedded"
+    ]
+  },
+  "slice-spec-complete-treatment-1.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "slice-spec-complete-treatment-2.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "slice-spec-complete-treatment-3.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "slice-treated-1.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "slice-treated-2.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  },
+  "slice-treated-3.txt": {
+    "exit": 0,
+    "verdicts": [
+      "record-link: link",
+      "next-command: own-line"
+    ]
+  }
+}

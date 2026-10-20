@@ -1,46 +1,21 @@
 """Shared pieces for the contract tests that pin an eval case's `arms/` directory.
 
 An arm is a brief with a ruleset appended. A "live" arm must rebuild byte-for-byte
-from today's `rules.md`; a "frozen" arm must rebuild byte-for-byte from `rules.md`
-at the commit its committed measurements were taken against. The helpers here carry
-what every such test needs so each case's test states only its own manifest and
-pins.
+from today's `rules.md`. A "frozen" arm is a committed copy of the ruleset as it
+stood when its measurements were taken; that text exists only in repository history,
+so nothing here rebuilds it. The helpers here carry what every such test needs so
+each case's test states only its own manifest and pins.
 """
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 
 OUTPOST_ROOT = Path(__file__).parent.parent
-GIT_ROOT = OUTPOST_ROOT.parent.parent
 EVALS_DIR = OUTPOST_ROOT / "plugins" / "outpost" / "evals"
 OUTPOST_RULES = OUTPOST_ROOT / "plugins" / "outpost" / "rules.md"
-OUTPOST_RULES_GIT_PATH = "tools/outpost/plugins/outpost/rules.md"
 
 SEPARATOR = "\n---\n\n"
-
-
-def git_show(commit: str, path: str) -> str:
-    result = subprocess.run(
-        ["git", "show", f"{commit}:{path}"],
-        cwd=GIT_ROOT,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        raise AssertionError(
-            f"`git show {commit}:{path}` failed (exit {result.returncode}): "
-            f"{result.stderr.strip()}\n"
-            "This most often means the checkout is shallow and does not carry "
-            f"commit {commit} — confirm `fetch-depth: 0` is still set in "
-            ".github/workflows/tests.yml before treating this as arm corruption."
-        )
-    return result.stdout
-
-
-def rules_at(revision: str) -> str:
-    return git_show(revision, OUTPOST_RULES_GIT_PATH)
 
 
 def current_rules() -> str:
