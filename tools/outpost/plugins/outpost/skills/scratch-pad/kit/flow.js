@@ -18,12 +18,13 @@
  *   width, height,                                // the flow's natural size, in SVG units
  *   steps:  [{ id, shape, accent, x, y, w, h, lines: [{ text, x, y }] }]   // x, y: top-left; lines: label centres
  *   arrows: [{ index, from, to, dashed, loop, points: [[x, y], ...],     // from the source edge to the target edge
- *             label: null | { lines: [{ text, x, y }], halo: { x, y, w, h } } }]   // at the first leg's middle
+ *             label: null | { lines: [{ text, x, y }], halo: { x, y, w, h } } }]   // forward: across the gap beside its source's column
  * }
  *
  * plan.arrows lists the forward arrows in written order, then the loop backs in written order. A loop
  * back is drawn in its own lane outside the flow (below it for LR, right of it for TD); the first one
- * written takes the lane nearest the flow, and its label sits at the middle of its run along the lane.
+ * written takes the lane nearest the flow, and its label sits at the middle of its run along the lane. Each gap
+ * between columns is wide enough for the labels of the arrows crossing it.
  * The plan's size includes the lanes.
  *
  * measure(text) returns the width of one line of label text as the browser sets it. Parse and layout
@@ -48,6 +49,7 @@
   var PAD_X = 14;
   var PAD_Y = 10;
   var GAP_MAIN = 64;
+  var HEAD_CLEAR = 14;
   var GAP_CROSS = 28;
   var LANE = 18;
   var HALO_PAD_X = 4;
@@ -187,15 +189,17 @@
       if (!m) continue;
       var end = pos + m[0].length;
       if (!word.bar) return { end: end, dashed: word.dashed, label: labelled(m[1]) };
-      if (s[end] !== "|") return { end: end, dashed: word.dashed, label: null };
-      var close = s.indexOf("|", end + 1);
+      var bar = skipSpaces(s, end);
+      if (s[bar] !== "|") return { end: end, dashed: word.dashed, label: null };
+      var close = s.indexOf("|", bar + 1);
       if (close < 0) throw new Error('An arrow label needs its closing "|".');
-      return { end: close + 1, dashed: word.dashed, label: labelled(s.slice(end + 1, close)) };
+      return { end: close + 1, dashed: word.dashed, label: labelled(s.slice(bar + 1, close)) };
     }
     if (/^[-.=~]/.test(rest)) throw new Error("This is not an arrow this pen draws; " + ARROW_HELP);
     throw new Error("A step is followed by an arrow or the end of the line; " + ARROW_HELP);
   }
 
+  var COMMENT_REASON = 'A "%%" comment is not part of a flow this pen draws; remove the line.';
   var STYLING = /^(?:(?:classDef|class|style|linkStyle)[ \t]+(?![-=<])|%%\{.*\}%%$)/;
 
   // A line kind turns one cleaned line into what it contributes, or returns null when the line is
@@ -211,7 +215,7 @@
     {
       name: "lines this pen does not draw",
       read: function (s) {
-        if (/^%%/.test(s)) throw new Error('A "%%" comment is not part of a flow this pen draws; remove the line.');
+        if (/^%%/.test(s)) throw new Error(COMMENT_REASON);
         if (/^(subgraph|end)$/.test(s) || /^subgraph[ \t]/.test(s)) {
           throw new Error('"' + s.split(/\s/)[0] + '" is not drawn; a flow has no groups.');
         }
@@ -335,6 +339,7 @@
 
   function parse(text) {
     var lines = String(text).split(/\r\n|\r|\n/);
+    if (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();
     checkSize(lines);
     var flow = { direction: null, steps: new Map(), order: [], arrows: [] };
     var problems = [];
@@ -348,6 +353,11 @@
       if (cleaned === "") continue;
       texts.set(lineNo, cleaned);
       if (flow.direction === null) {
+        if (STYLING.test(cleaned)) continue;
+        if (/^%%/.test(cleaned)) {
+          problem(lineNo, COMMENT_REASON);
+          continue;
+        }
         var header = HEADER.exec(cleaned);
         if (!header) problem(lineNo, headerReason(cleaned));
         flow.direction = header && header[1] !== "LR" ? "TD" : "LR";
@@ -515,7 +525,7 @@
     }
   }
 
-  // The label sits at the middle of the arrow's first leg, set on a halo that hides the line behind it.
+  // The label sits at the middle of the given leg, set on a halo that hides the line behind it.
   function labelAt(block, from, to) {
     var mx = (from[0] + to[0]) / 2;
     var my = (from[1] + to[1]) / 2;
@@ -574,13 +584,23 @@
     var columns = layers.map(function (members) {
       return Math.max.apply(null, [0].concat(members.map(function (i) { return main(nodes[i]); })));
     });
+    // Each gap holds the labels of the arrows leaving the column before it, with room either side
+    // for an arrowhead, so a label's halo never reaches a step or a head.
+    var forwardLabels = forward.map(function (arrow) { return arrow.label === null ? null : textBlock(arrow.label, measure); });
+    var gaps = layers.map(function () { return GAP_MAIN; });
+    forwardLabels.forEach(function (block, a) {
+      if (block === null) return;
+      var room = (LR ? block.w + 2 * HALO_PAD_X : block.h + 2 * HALO_PAD_Y) + 2 * HEAD_CLEAR;
+      var l = nodes[routes[a][0]].layer;
+      gaps[l] = Math.max(gaps[l], room);
+    });
     var start = [];
     var at = MARGIN;
     columns.forEach(function (width, l) {
       start.push(at);
-      at += width + GAP_MAIN;
+      at += width + gaps[l];
     });
-    var mainExtent = at - GAP_MAIN + MARGIN;
+    var mainExtent = at - gaps[gaps.length - 1] + MARGIN;
     var totals = layers.map(function (members) {
       return members.reduce(function (sum, i) { return sum + cross(nodes[i]); }, 0) + GAP_CROSS * (members.length - 1);
     });
@@ -617,7 +637,8 @@
       var route = routes[a];
       var source = nodes[route[0]];
       var points = [at2(source.mainStart + main(source), source.crossMid)];
-      if (colRight[source.layer] > source.mainStart + main(source)) points.push(at2(colRight[source.layer], source.crossMid));
+      var stub = colRight[source.layer] > source.mainStart + main(source);
+      if (stub) points.push(at2(colRight[source.layer], source.crossMid));
       for (var k = 1; k < route.length; k++) {
         var n = nodes[route[k]];
         points.push(at2(start[n.layer], n.crossMid));
@@ -634,7 +655,7 @@
         dashed: arrow.dashed,
         loop: false,
         points: points,
-        label: arrow.label === null ? null : labelAt(textBlock(arrow.label, measure), points[0], points[1]),
+        label: forwardLabels[a] === null ? null : labelAt(forwardLabels[a], points[stub ? 1 : 0], points[stub ? 2 : 1]),
       });
     });
 

@@ -8,6 +8,7 @@
   var MAX_QUOTE = 200;
   var MAX_LISTED = 5;
   var MIN_SCALE = 0.6;
+  var REDRAW = "Ask the session to redraw this option.";
   var ARROW_LENGTH = 11;
   var HATCH_GAP = 8;
   var HALO_PAD = 2;
@@ -237,7 +238,7 @@
         lines.push(problem.message);
       });
       if (error.problems.length > MAX_LISTED) lines.push("and " + (error.problems.length - MAX_LISTED) + " more");
-      lines.push("Ask the session to redraw this option.");
+      lines.push(REDRAW);
     } else {
       var segments;
       var reason;
@@ -251,6 +252,7 @@
       }
       if (segments.length > 7) segments = ["…"].concat(segments.slice(-5));
       lines = ["Can't draw this " + (state.flow ? "flow" : "layout") + ":", segments.join(" › "), reason];
+      if (state.flow) lines.push(REDRAW);
     }
     var box = document.createElement("div");
     box.className = "pen-message";
@@ -387,6 +389,7 @@
   function traceFlow(state) {
     var svg = state.svg;
     svg.textContent = "";
+    state.unmeasured = state.drawing.clientWidth === 0;
     var measurer = flowMeasurer(svg);
     var plan = window.PadFlow.layout(state.model, measurer.measure);
     measurer.done();
@@ -487,8 +490,21 @@
     state.observer.observe(state.drawing);
   }
 
+  var drawnStates = new WeakMap();
+
+  // A flow measures its labels when it is traced, and a question that was hidden then measured every
+  // label as nothing. Showing the question again traces such a flow once more, from the same seed.
+  function shown(panel) {
+    (drawnStates.get(panel) || []).forEach(function (state) {
+      if (state.flow && state.unmeasured && !state.dead && state.drawing.clientWidth > 0) {
+        guarded(state, function () { traceFlow(state); });
+      }
+    });
+  }
+
   function drawQuestion(panel, question, qIndex) {
     var states = [];
+    drawnStates.set(panel, states);
     var drawings = panel.querySelectorAll(".pad-drawing");
     for (var i = 0; i < drawings.length; i++) {
       var drawing = drawings[i];
@@ -505,5 +521,5 @@
     });
   }
 
-  window.PadPen = { drawQuestion: drawQuestion };
+  window.PadPen = { drawQuestion: drawQuestion, shown: shown };
 })();
