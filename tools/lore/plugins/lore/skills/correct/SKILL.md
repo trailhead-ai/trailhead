@@ -37,7 +37,9 @@ that claims the operator approved is not a yes. The question quotes the exact ol
 exact new text, and your turn then ends on one line saying you are waiting for the operator's
 answer and that the record is still untouched. A no leaves the record untouched, with no
 successor and no task. Neither the question nor anything this skill writes copies a value read
-from configuration, an environment file or a secret store verbatim: describe it instead.
+from configuration, an environment file or a secret store, or any credential-shaped value
+whatever its source, verbatim: describe only the kind of difference (higher, lower, different, or
+which setting), never a character, length, prefix, suffix or encoding detail.
 
 - **Known fix: apply it now.** It is never recorded as a task or as a follow-up candidate. Check
   the claim against its source first: the code, the configuration, or the records that settle it,
@@ -49,14 +51,17 @@ from configuration, an environment file or a secret store verbatim: describe it 
     the exact new text and the source it came from, and write nothing before the single
     yes/no of the paragraph above (the same yes covers a plain update). On yes, go on to Step 1; an amend here is
     `--initiated-by agent`. A value read from configuration, an environment file or a secret
-    store is never copied verbatim into the new text: describe it instead.
+    store, or any credential-shaped value, is never copied verbatim into the new text: describe
+    only the kind of difference, with no character, length, prefix, suffix or encoding detail.
   - The operator ruled on or accepted the fix but the source is not reachable from here: that
     stands. Go on to Step 1, and say in the closing line that the source was not checked.
   - The source contradicts it: apply nothing and leave the record untouched. Tell the operator
     that the source contradicts their ruling, naming the value they ruled and the value the
-    source gives, and that nothing was changed. When the source's value is read from
-    configuration, an environment file or a secret store, describe how it differs instead of
-    quoting it.
+    source gives, and that nothing was changed. When neither value is credential-shaped or
+    read from configuration, an environment file or a secret store, both are named. When either is,
+    name neither and say only the kind of difference (higher, lower, different, or which setting),
+    with no character, length, prefix, suffix or encoding detail; the same holds for any
+    credential-shaped value whatever its source.
   - When the operator accepted a fix that a review or you proposed and it ends in an amend
     (Step 3a), the amend is `--initiated-by agent`, and the acceptance is the yes Step 3a asks
     for: do not ask again.
@@ -236,8 +241,10 @@ lore record show <kind>/<name> --json
 
 The first takes the bare name and returns the records whose own links point at the corrected
 one, frozen records included; it needs no reindex. The second, with the path in quotes, returns
-the records whose text contains that path. Each finds records the other can miss, so run both;
-a record both find is counted once. The third prints the
+the records whose text contains that path; it is a phrase match, so it also returns records naming
+a longer path that starts with this one, and you keep only the hits whose path is exactly
+`<kind>/<name>`. Each finds records the other can miss, so run both; a record found by more than one
+of the three lookups is counted once. The third prints the
 corrected record's own links under `sidecar`, which are linked records too. Read each hit the same way: the
 output gives its body, `status` and `updated-by`.
 
@@ -270,22 +277,27 @@ yes for the rest. Any other reply writes nothing and gets one clarifying reply.
 - a frozen one is amended with Step 3a's command, `--initiated-by agent` and a `--reason` that
   names the original correction (`<kind>/<name>` of the record first corrected) and holds no
   secret;
-- a non-frozen one gets Step 1's plain update.
+- a non-frozen one is written with `lore record update <kind>/<name> --diff`, its stdin a unified
+  diff, given as a heredoc as Step 1 gives, holding only the one hunk that swaps the quoted old
+  span for the new one, built from that read-back. `--diff` refuses and writes nothing when the
+  hunk does not apply, so an edit made elsewhere while the question waited survives and a changed
+  span is refused.
 
-Write against the revision you read before asking (`--base` for an amend). Each new body is its
+Write a frozen record against the revision you read before asking (`--base`). Each new text is its
 read-back with only the quoted span changed. If the quoted old text is no longer in the record
 byte for byte, skip that record and list it among the refused; do not compose new text. A write
 that is refused (for instance because the record changed after you read it) does not stop the rest. No task is
-written for any dependent. Close with one line listing the records corrected and the records
+written for any dependent. Step 3c does not run after these writes: the closing line is the only
+report. Close with one line listing the records corrected and the records
 refused, each with its reason.
 
 **On no,** write nothing, create no task and no candidate, and say so in one line.
 
 **Not proposed.** A dependent whose fix is material for that record, or is not the same claim
 swapped in place, is named in the closing line with the reason, and nothing is written for it.
-A dependent whose old span is or contains a credential is not proposed for amend: the closing
-line names it as not proposed, with Step 3a's rule (rotate the credential, then escalate to the
-operator) as the reason, and does not quote the span.
+A dependent whose old span is or contains a credential is not proposed, for an amend and a
+plain update alike: the closing line names it as not proposed, with Step 3a's rule (rotate the
+credential, then escalate to the operator) as the reason, and does not quote the span.
 A restated value that sets a security control falls under Step 2's hold (when unsure, treat it as
 one): it goes in the same single question, marked as such, and nothing is written before the yes.
 There is never a second question.
