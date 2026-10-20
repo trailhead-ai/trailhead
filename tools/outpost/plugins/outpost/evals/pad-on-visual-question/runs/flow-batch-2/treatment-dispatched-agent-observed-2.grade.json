@@ -1,0 +1,19 @@
+{
+  "variant": "dispatched-agent-observed",
+  "pads": [
+    "notification-prefs-layout"
+  ],
+  "pad locations": [
+    "xdg-state/outpost/pads/notification-prefs-layout"
+  ],
+  "flow options": 0,
+  "layout options": 3,
+  "tool calls": [
+    "Skill",
+    "Bash",
+    "Bash",
+    "Write",
+    "Bash"
+  ],
+  "final message": "**Build the grid: channels as columns, event types as rows.**\n\nWhy:\n- **It's the shape of the data.** Each preference is one event on one channel. The grid shows every pair at once, so \"I want Mentions by email but not by SMS\" is a single row.\n- **Tabs per channel** hide the comparison. To see how one event is set across channels you have to switch tabs, and the same event list repeats on every tab.\n- **One long list by topic** works well on phones but gets long. It also repeats the channel toggles under every row, which is the grid again, just harder to scan.\n\nCosts of the grid:\n- On narrow screens it needs to collapse, ideally into the topic list, so that option becomes the mobile view rather than being thrown away.\n- Past about four channels it gets wide.\n- Add per-column \"all on/off\" and per-row headers so people can change a whole channel or event at once.\n\nI sketched all three for comparison (it opens from disk on this machine):\nfile://<run>/xdg-state/outpost/pads/notification-prefs-layout/index.html\n\nThe open question is **grid, tabs or list?** The user can answer in words, or pick on the pad and paste back its \"Copy reply\". The round file is at `project/.padround/r1.json` and is safe to delete."
+}

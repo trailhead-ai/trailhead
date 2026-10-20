@@ -1,0 +1,13 @@
+I couldn't make the sketch pad. This workspace's `sites/` folder (`…/worktrees/ws-quill/sites`) is a symlink, and the publish script won't write through one. I haven't changed or removed it; you may want to check whether that's intended. Here are the three options in words:
+
+**A. Progress bar across the top.** It's cheap and works on mobile. But it only shows *how far* someone has got, not *what's left*. 40% doesn't tell anyone whether the rest is two easy screens or one that needs a bank login.
+
+**B. Numbered step list down the left (my pick).** Every remaining step is named, and finished steps get a tick. That makes the rest feel finite and lets people get ready for it ("step 4 needs my tax ID"). It costs about 200px of width, and on mobile it has to collapse to a line like "Step 2 of 5 · Tax & currency".
+
+**C. Plain "Step 2 of 5" text.** It's almost free to build, but it gives a count with no names and nothing visual. It does the least to keep someone going halfway through.
+
+**Why B, given the abandonment:** halfway is usually where a step asks for something people don't have to hand: tax IDs, bank details, a logo. Naming the steps helps people see that coming. Still, the indicator is probably not the whole fix. Check two things before you settle on a fix:
+- **Which step people actually leave on.** If most leave on one step, that step is the problem, not the indicator.
+- **Whether they can "save and finish later" or skip optional steps,** like importing clients or picking a template. Letting people skip and come back usually matters more than which indicator you use.
+
+**Which one do you want?** A, B or C, or B with a different mobile fallback? Also, do you know which step people drop off at? If you send me the real step names, I can make the recommendation more specific.

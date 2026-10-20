@@ -1,0 +1,12 @@
+{
+  "variant": "typed-answer-after-pad",
+  "pads": [],
+  "pad locations": [],
+  "flow options": 0,
+  "layout options": 0,
+  "tool calls": [
+    "Bash",
+    "Read"
+  ],
+  "final message": "The numbered list down the left it is. Since you answered by typing, that settles it and you don't need to open the pad.\n\n**I can't point you at real code yet, because the wizard isn't in this directory.** The project at `<run>/project` has only a `README.md` (\"ledgerlight — A small invoicing web app\"). There are no source files, and it isn't a git repo, so I can't see the wizard's components or its step logic.\n\nHere's the first change I'd make once I can see the code:\n\n**Make the list of steps one shared, ordered piece of data before touching any UI.** For example, an array of `{ id, label }` that the wizard's step logic reads from. Wizards often keep \"which step am I on\" as a bare number, with the step names hardcoded in each screen. A left-hand list needs every step's name, plus whether each one is done, current or still to come, all in one place. Once that array exists:\n\n1. The left list just loops over it to draw each item and its state.\n2. \"Next\" and \"Back\" move through that same array, so the list and the screens can't drift apart.\n3. Optionally, you can make finished steps clickable so people can jump back. That's easy to add once the steps are data rather than a hardcoded sequence.\n\nAfter that, the UI work is a two-column layout: the list in a fixed left column, the current step's form on the right. On narrow screens, collapse the list to a \"Step 2 of 5\" line.\n\nIf you tell me where the wizard code lives, or move it into this directory, I'll find the actual step logic and make the change."
+}

@@ -1,0 +1,19 @@
+{
+  "variant": "flow-outside-workspace",
+  "pads": [
+    "refund-approval-flow"
+  ],
+  "pad locations": [
+    "xdg-state/outpost/pads/refund-approval-flow"
+  ],
+  "flow options": 2,
+  "layout options": 0,
+  "tool calls": [
+    "Skill",
+    "Bash",
+    "Write",
+    "Bash",
+    "Bash"
+  ],
+  "final message": "I drew both flows side by side on a scratch pad:\n\nfile://<run>/xdg-state/outpost/pads/refund-approval-flow/index.html\n\n**My recommendation: build option one, real-time per request.** One thing I'd change: if finance rejects a request, email the customer to say so. As you described it, only approved refunds trigger an email.\n\nWhy option one:\n- **Customer wait.** Under option two, even a $3 refund waits up to a day. A finance approval made after the nightly batch or the payout run waits another full day. Under option one, small refunds pay out in seconds, and large ones pay out as soon as someone in finance approves them.\n- **Finance workflow.** Under option two, finance works in bursts after the nightly run. Under option one, requests reach them one at a time as they come in. Each approval takes effect right away, so nobody has to wait on a schedule.\n- **Failure handling.** One failed payout in option one affects one customer, and you can retry just that payout. If the daily run in option two fails partway, you have to work out which payouts went through before re-running, and every customer waiting that day is held up.\n\nWhat option one costs you:\n- Payouts must be idempotent, using an idempotency key per refund, so a retry can never pay twice.\n- You need retries and alerting for each payout.\n- Finance needs a review queue in the UI.\n\nOption two does have real advantages: there's one point a day to reconcile against, payments are grouped, and the system has fewer moving parts. If your payment provider charges per transaction, or settles in batches anyway, that tips toward option two. You can also get the reconciliation benefit inside option one with a daily reconciliation report, without making customers wait.\n\n**So which one: real-time per request, or the nightly batch with a daily payout run?** One more question: does your payment provider push you toward batching, through per-payout fees or batch-only settlement?\n\nYou can answer on the pad and paste back its \"Copy reply\" output, or just reply in words. If either drawing shows \"Can't draw this flow\", paste me that message and I'll redraw it."
+}

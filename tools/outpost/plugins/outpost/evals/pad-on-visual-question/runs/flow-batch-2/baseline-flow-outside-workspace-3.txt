@@ -1,0 +1,25 @@
+**My recommendation: build option one.** One change makes it safer: model each refund as a state machine (`requested → auto_approved | pending_finance → approved | rejected → paid → notified`). That way the approval logic doesn't care whether the payout happens straight away or in a batch.
+
+## Where they actually differ
+
+| | Option 1: decide on arrival | Option 2: nightly batch |
+|---|---|---|
+| **Small refund, customer's wait** | Seconds | Up to about 1.5 days, depending on when it lands relative to the nightly check and the end-of-day payout |
+| **Large refund, customer's wait** | However long finance takes | Nightly check, then finance, then the *next* payout run. Often 2+ days |
+| **Finance workload** | Steady trickle. Needs a review queue or UI with notifications | One daily list to work through. Simpler for them |
+| **Failure impact** | One request fails and retries alone | One bad batch run delays everyone's refunds that day |
+| **Payout cost and reconciliation** | One transaction per refund | One run a day is easier to reconcile, and cheaper if the payment rail charges per transfer or works in batches (ACH, bank files) |
+| **Fraud window** | Auto-approved money leaves immediately | Built-in delay gives you time to catch abuse before money goes out |
+| **Complexity** | Event handling, idempotent payouts, a finance queue | Scheduler, batch state, partial-failure handling, catch-up after a missed run |
+
+## Why option one
+- Speed is what customers notice about refunds. Paying small ones instantly removes most "where's my refund?" tickets.
+- Option two's real advantages are cheaper batched payouts and a fraud delay. Neither requires batching the *decision*. You can add them to option one later if needed: keep the instant decision, then hold auto-approved payouts for N hours or send them in a daily payout run.
+- Going the other way, from batch to real-time, is a rewrite.
+
+Build these into option one from the start either way: an idempotency key on every payout, so a retry never pays twice. A timeout or escalation for requests that sit in `pending_finance` too long. An audit record of who or what approved each refund and which policy version they were checked against.
+
+## The question that could flip this
+**How do refunds go out?** If they go back to the original card through a processor like Stripe, every refund is already its own cheap transaction, and option one is clearly right. If they're bank transfers that your bank processes in batches, or that have meaningful per-transfer fees, use option one's decision flow with a daily payout run. That hybrid captures most of what option two offers.
+
+If there's a known refund-abuse problem, the same hybrid also gives you the fraud delay. If neither applies, go with option one as described.

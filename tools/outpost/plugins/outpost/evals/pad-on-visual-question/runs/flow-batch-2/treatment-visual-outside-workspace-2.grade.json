@@ -1,0 +1,19 @@
+{
+  "variant": "visual-outside-workspace",
+  "pads": [
+    "audit-log-filter-placement"
+  ],
+  "pad locations": [
+    "xdg-state/outpost/pads/audit-log-filter-placement"
+  ],
+  "flow options": 0,
+  "layout options": 3,
+  "tool calls": [
+    "Skill",
+    "Write",
+    "Bash",
+    "Write",
+    "Bash"
+  ],
+  "final message": "I drew the three options on a scratch pad so you can compare them side by side:\n\nfile://<run>/xdg-state/outpost/pads/audit-log-filter-placement/index.html\n\n**My recommendation is the left rail.** Here's why:\n\n- **Your admins have spare width.** On a wide monitor, an audit-log table rarely needs the full width. A rail of about 240px costs little and keeps every filter visible.\n- **Audit-log work means changing filters over and over.** Someone investigating will narrow by user, then action, then date, checking the results each time. The rail lets them change a filter and see the rows update without opening or closing anything.\n- **The filter list will grow.** Actor, action, resource, date range, IP, outcome and so on fit easily in a vertical list. A top bar fills up after 4 or 5 filters, and the rest end up in a \"More\" menu.\n- **Show what's applied.** Put chips like `actor: alice` and `last 7 days` above the table so people can see the active filters at a glance and remove one quickly.\n\n**Where the other two make more sense:**\n\n- **Top bar:** Choose this if people mostly use 2 or 3 filters, or if the table has so many columns that it really needs the full width. It's also the cheapest to build.\n- **Slide-over panel:** This hides the filters while people are reading results, and the panel covers the table. That works against the way people investigate audit logs. It suits pages where filters are rarely used, and that probably isn't true here.\n\nIf you choose the rail, give it a collapse toggle. It will then still work on laptops and narrow windows, which is the main thing the slide-over panel would have handled for you.\n\n**So, which one should we build: the left rail, the top bar or the slide-over panel?** Also, how many filters do you expect to ship? If it's only 3 or so, the top bar becomes a reasonable choice.\n\nYou can answer here in words. Or, on the pad, pick an option, add notes, press \"Copy reply\" and paste the result here."
+}

@@ -1,0 +1,19 @@
+{
+  "variant": "visual-outside-workspace",
+  "pads": [
+    "audit-log-filters"
+  ],
+  "pad locations": [
+    "xdg-state/outpost/pads/audit-log-filters"
+  ],
+  "flow options": 0,
+  "layout options": 3,
+  "tool calls": [
+    "Skill",
+    "Bash",
+    "Bash",
+    "Write",
+    "Bash"
+  ],
+  "final message": "I sketched the three options on a scratch pad:\n\nfile://<run>/xdg-state/outpost/pads/audit-log-filters/index.html\n\nIt's a plain file and opens straight from disk.\n\n**My recommendation is the left rail.** Here's why:\n\n- **Wide monitors leave spare width.** A 240px rail costs a 2560px-wide table very little. A top bar uses vertical space instead, and vertical space is what you need to scan log rows.\n- **People filter audit logs over and over.** A typical search goes: narrow by actor, then action, then date, look at the results, adjust. A rail keeps every filter visible while you do that. A slide-over covers the rows you're filtering and has to be reopened every time, which is the biggest drawback of any option here.\n- **Audit logs collect a lot of filters.** Actor, action, resource, result, IP, and date range already make six. A top bar runs out of room around four or five and ends up needing a \"More filters\" overflow, which hides filters just like a slide-over does.\n\nWhere the others would win:\n- **Top bar:** if you expect about three filters and most people just search and go.\n- **Slide-over:** if most admins only skim the log and rarely filter, or if this page has to work on narrow screens.\n\nWhichever you choose, show the active filters as removable pills above the table so you can see what's applied at a glance. With the rail, also let people collapse it.\n\n**So which do you want to build: left rail, top bar, or right slide-over?** You can answer here in plain words. Or pick an option on the pad (and add a note if you like), press \"Copy reply\", and paste it back here."
+}

@@ -1,0 +1,19 @@
+{
+  "variant": "flow-outside-workspace",
+  "pads": [
+    "refund-approval-flow"
+  ],
+  "pad locations": [
+    "xdg-state/outpost/pads/refund-approval-flow"
+  ],
+  "flow options": 2,
+  "layout options": 0,
+  "tool calls": [
+    "Skill",
+    "Write",
+    "Bash",
+    "Write",
+    "Bash"
+  ],
+  "final message": "I drew both flows side by side on a scratch pad:\n\nfile://<run>/xdg-state/outpost/pads/refund-approval-flow/index.html\n\nIt opens straight from disk, with nothing running. If either drawing shows \"Can't draw this flow\", paste that message back and I'll redraw it.\n\n**I'd build option one, the inline flow.** Here's why:\n\n- **Customer wait time.** With option one, small refunds pay out in seconds, and big ones pay out as soon as finance approves. With option two, everyone waits up to a day, even for a $5 refund. That cost is the same every day.\n- **Finance workload.** With option one, review cases arrive one at a time through the day. With option two, finance gets the whole day's large cases at once after the nightly run. If they don't clear them the same day, those customers miss that day's payout and wait another day.\n- **Where option two is better.** Paying from one run is easier to reconcile, easier to retry if it fails, and keeps payment-provider calls to one window. You can get most of that with option one by giving each payout an idempotency key (so a retry can't pay twice) and adding a daily reconciliation job. It's less work than making customers wait.\n- **When option two is the right call.** If the payment provider or the finance/accounting side really does need one settlement file a day, or a per-request payout costs a lot, then batching wins. A middle option: decide on arrival as in option one, but put approved refunds into a payout run every hour or so.\n\n**So, which one?** Option one, option two, or the hourly-payout middle option? The deciding question is whether anything downstream actually needs a single daily settlement. If nothing does, go with option one.\n\nYou can answer here in words, or pick an option on the pad, press \"Copy reply\" and paste it back."
+}

@@ -1,0 +1,18 @@
+For about a dozen tags, I'd go with **a row of chips above the list**.
+
+**Why chips:**
+- **You can see them without opening anything.** Twelve tags fit in one or two wrapped rows. Every tag shows, and so does which ones are on, so the filter state is visible at a glance.
+- **Toggling is one click.** Picking several tags means clicking several chips. A dropdown takes an open, a pick, maybe another pick, and a close, then hides your choice again.
+- **The filter sits next to what it filters.** Putting the chips right above the list makes it clear they narrow that list.
+
+**Why not the others:**
+- **Dropdown in the toolbar:** This fits better at 30+ tags, or when screen space is tight. At 12 it just hides choices you could show for free. Its one plus is that the toolbar stays compact.
+- **Sidebar section:** This works if the sidebar already handles navigation (folders, saved views) and you want tags treated as places to go rather than filters on the current list. The downsides are that it sits far from the list and gets hidden whenever the sidebar is collapsed.
+
+**Details that make chips work:**
+- Add a "clear" control whenever any tag is on.
+- Decide how picking several tags combines: any of them (OR) or all of them (AND). OR is the usual default. State it somewhere, or add a small switch.
+- Cap the row at two lines and put the rest behind "+N more", in case a workspace ends up with 40 tags.
+- Sort by how often each tag is used, or let users pin tags, so the useful ones come first.
+
+One question decides whether I'd change this: does the sidebar already work as the place you navigate from, like folders or saved searches? If so, a tags section there would match it. If not, go with chips.

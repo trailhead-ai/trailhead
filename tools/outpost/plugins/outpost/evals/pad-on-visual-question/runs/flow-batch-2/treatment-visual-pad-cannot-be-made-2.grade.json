@@ -1,0 +1,15 @@
+{
+  "variant": "visual-pad-cannot-be-made",
+  "pads": [],
+  "pad locations": [],
+  "flow options": 0,
+  "layout options": 0,
+  "tool calls": [
+    "Skill",
+    "Write",
+    "Bash",
+    "Write",
+    "Bash"
+  ],
+  "final message": "I'd go with **the numbered step list down the left edge.**\n\nPeople quitting halfway usually aren't confused about *where* they are. They can't tell how much work is still ahead, and the middle is where that doubt peaks. Here's what each option says at step 3:\n\n- **Progress bar:** \"you're about 60% through.\" That tells them how far they've come but not what's left. Step 4 could be a two-minute form or connecting a payment provider, and when people don't know, they often assume it's the harder one.\n- **\"Step 3 of 5\":** says the same thing with even less. It also offers no way to jump back to an earlier step, so there's nothing in it that would reduce the drop-off.\n- **Numbered list:** \"✓ Business details, ✓ Logo, ● Tax & currency, ○ Payment methods, ○ First invoice.\" It names exactly what's left, shows what's already done, and finished steps can be clickable so people can go back and fix things. It's the only option that answers \"is the rest worth it?\" at the moment they're deciding whether to quit.\n\n**What the list costs:** you need a short label for every step, the left column takes up width, and on mobile it has to collapse into a horizontal stepper (numbered dots with the current step's name). If any later step is actually long, the list will show that too. Then the fix is to shorten that step or make it optional. It's worth checking whether people drop out *on* step 3 or *after* seeing what comes next. A list makes a heavy step obvious, and so does your funnel data.\n\n**I didn't draw the sketches.** I tried to make a pad with the three layouts, but the script refused: `ws-quill/sites` in this workspace is a symlink, and it won't publish through one. I didn't change anything. If that symlink isn't meant to be there, replacing it with a plain folder would let me draw the options next time.\n\n**Which one fits your wizard: the numbered list, the progress bar, or the plain \"Step 2 of 5\" text?** Two things would change my answer. If the wizard has to work on very narrow screens with no room for a side column, or if your step names are vague (like \"Configuration\"), a labelled top stepper is a good middle option."
+}

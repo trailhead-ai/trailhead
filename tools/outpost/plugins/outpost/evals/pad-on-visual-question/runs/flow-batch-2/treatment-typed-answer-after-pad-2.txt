@@ -1,0 +1,11 @@
+Numbered list down the left it is.
+
+I can't point you at a real first change yet, because the wizard's code isn't in this directory. The project folder (`<run>/project`) holds only a `README.md` that says "ledgerlight — a small invoicing web app." There are no source files, no wizard component and no step definitions, and it isn't a git repo. Anything I named as "the first change" would be a guess about code I haven't seen.
+
+Here's where I'd normally start, so you can tell me whether it fits your code:
+
+1. **Put the steps in one ordered list** (id, label, completion status) and render both the left-hand list and the step content from it. If the step count and labels are hard-coded across separate screens, a numbered sidebar has nothing to read from. Wizards are often built that way, and it's what blocks this layout.
+2. Then build the sidebar from that list: number and label for each step, with current, done and upcoming states, plus `aria-current="step"` on the active one.
+3. Then decide whether finished steps can be clicked to jump back. That depends on whether the wizard validates each step as you go or only at the end.
+
+**Where does the wizard code live?** Give me the path or repo, or tell me to look elsewhere on this machine, and I'll open it and name the actual first change.

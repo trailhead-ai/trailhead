@@ -1,0 +1,20 @@
+I drew the three options side by side on a scratch pad, published in this camp workspace (`bramble-ws-quill`):
+
+http://127.0.0.1:7314/bramble-ws-quill/checkout-promo-code/
+Local to this machine only — this link works only on this host (no camp host identity: no self_name in <run>/xdg-config/camp/hosts.toml) and dies with the bramble-ws-quill workspace.
+
+**My recommendation: A, the collapsed "Have a code?" link under the totals.** Here's how each option affects abandonment:
+
+- **A: collapsed link under totals.** The main way a promo field causes abandonment is this: a shopper without a code sees an empty box, thinks they're missing a deal, and leaves to search for one. Some never come back, and some come back with a code that doesn't work. A quiet text link avoids that prompt. Shoppers who do have a code look for it, and they'll find it right next to the total it changes, so they see the discount take effect before they commit. The cost is one extra click for code holders.
+- **B: visible input above the items.** This is the most discoverable option, and it's the worst one for abandonment. The empty field is the first thing every shopper sees, before they've even looked over their order. It also pushes the items down, which matters on mobile.
+- **C: field inside the payment step.** This hides the code from browsers, but it moves the risk to the worst moment. A rejected or expired code now fails right next to the card form, and the total changes after the shopper already reviewed it. Shoppers with a code may also decide there's nowhere to enter it and leave before they reach payment.
+
+Some details make A work better:
+- Expand the field inline instead of opening a modal.
+- Show the discount line in the totals as soon as a code applies.
+- Keep the error text specific, like "expired" or "minimum $50 not met", not just "invalid".
+- Once a code applies, keep it visible as a removable pill.
+
+**So the question is: does A fit your checkout, or is there something that pushes you toward B or C?** For example, if promo codes drive most of your traffic (influencer or email campaigns), a more visible field like B, or auto-applying the code from the link, becomes the better choice.
+
+You can answer on the pad: pick an option, mark the ones you don't want with "Not this", add a note, then press "Copy reply" and paste it here. Or just reply in words, which works just as well.

@@ -1,0 +1,4 @@
+pads: none
+flow options: 0; layout options: 0
+sites: still a symlink: True; target entries: 0
+tool calls: Skill, Write, Bash, Write, Bash, Bash

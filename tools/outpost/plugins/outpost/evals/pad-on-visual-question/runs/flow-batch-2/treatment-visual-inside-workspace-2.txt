@@ -1,0 +1,18 @@
+I drew the three options as a scratch pad:
+
+http://127.0.0.1:7314/bramble-ws-quill/checkout-promo-code/
+Local to this machine only — this link works only on this host (no camp host identity: no self_name in <run>/xdg-config/camp/hosts.toml) and dies with the bramble-ws-quill workspace.
+
+It's published to this host, inside the `bramble-ws-quill` workspace.
+
+**My recommendation is the collapsed "Have a code?" link under the totals.** Since abandonment is the worry, here's how each option affects it:
+
+- **Collapsed link under totals (my pick).** The biggest abandonment risk with promo fields is an empty, visible box. It tells shoppers who don't have a code that they're paying more than they need to, and some leave to search coupon sites and never come back. A quiet text link avoids that. People who already have a code are looking for it, and they'll find it right next to the total it changes. The cost is one extra click for them. Make sure the field expands in place (no modal), the total updates immediately, and errors are clear.
+- **Input above the item list.** It's the easiest to find, which helps if most of your traffic comes from campaigns with codes. But it's the first thing on the summary, before the shopper has even looked at their items, so it's the strongest nudge to go hunting for a code. It's also far from the totals, so the effect of applying a code is harder to see.
+- **Field inside the payment step.** This one risks abandonment from the other direction. Shoppers with a code can't see where to enter it during the summary, worry it won't apply, and some drop out before reaching payment. Putting it next to the card form also adds a distraction at the step where people are most likely to quit.
+
+One case would change my answer. If a large share of your orders arrive with a code (affiliate or email-heavy traffic), keep it as a link but make it more visible, or auto-apply codes from the campaign URL so shoppers never have to type them.
+
+**So which way are you leaning: the collapsed link under the totals, the input above the items, or the field in the payment step?** And roughly how much of your traffic arrives with a code in hand? That's the main thing that could shift the choice.
+
+On the pad you can pick an option, mark others "Not this", add a note, then press "Copy reply" and paste it here. Replying in words works just as well.

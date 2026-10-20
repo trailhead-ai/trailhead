@@ -1,0 +1,38 @@
+This repo (ledgerlight) has nothing but a README, so I can't see your current config. What follows is general reasoning, judged on the two things you care about.
+
+## Recommendation: shared base plus a small override file per environment
+
+```
+deploy/
+  base.yaml          # everything that's the same everywhere
+  env/
+    dev.yaml         # only what differs from base
+    staging.yaml
+    prod.yaml
+```
+
+## How the three options compare
+
+| | Clean diffs | Merge collisions |
+|---|---|---|
+| **One big YAML, a section per env** | Weak. Diff context lines often come from a neighbouring environment, so a reviewer can't tell at a glance which env a change hits. A shared change gets repeated in N places. | Worst. Everyone edits one file, and edits at section boundaries land in each other's context lines and conflict even when they touch different envs. |
+| **One full file per env in conf.d/** | Good for env-specific changes: the filename tells you the env. Bad for shared changes, which become N identical edits that drift apart over time. | Good. Two people working on different envs never touch the same file. |
+| **Base plus overrides** | Best. A shared change is one hunk in `base.yaml`, and an env change is one hunk in a small file. You can read what's different about prod straight from `prod.yaml`. | Good. Env work is spread across separate small files. `base.yaml` is the one hot spot, but it changes less often and each change is made once. |
+
+conf.d/ only beats base-plus-overrides when the environments have very little in common. If prod and dev share almost nothing, a base file adds indirection for no benefit.
+
+## Things that decide whether it actually stays clean
+
+1. **Merge semantics.** Settle how an override combines with the base before you split anything. Deep-merging maps is standard. Lists are the trap: does an override's list replace the base list or append to it? Pick "replace", document it, and prefer keyed maps to lists wherever order doesn't matter. Then a change to one entry is a one-line diff, not an edit to a whole list.
+2. **Keep each override small.** If an override file ends up mostly repeating `base.yaml`, the split has failed. Push the shared values back down into the base.
+3. **Diff the merged output too.** Have CI render the final config for each env and diff it on every PR (for example `yq ea '. as $i ireduce ({}; . * $i)' base.yaml env/prod.yaml`, or whatever your deploy tool uses). A one-line edit to `base.yaml` can change prod in ways the source diff doesn't show, and the rendered diff closes that gap.
+4. **Fewer collisions in `base.yaml`.** Sort keys, put one setting per line, and avoid YAML anchors and aliases that reach across distant sections. If it grows large, split it by area (`base/db.yaml`, `base/http.yaml`) rather than by env.
+5. **Secrets.** Keep them out of all of these files and reference them from your secret store, whichever layout you choose.
+
+## What would change the answer
+
+- Environments that are mostly different from each other: use conf.d/ with one full file each.
+- Only two environments that rarely change: a single file is fine, and the restructure isn't worth it.
+- A deploy tool with its own layering (Helm values, Kustomize overlays): use the tool's native mechanism. It is base-plus-overrides anyway, and you get its merge semantics for free.
+
+How many environments do you have, and roughly what fraction of keys differ between them? If it's 3 or more environments with mostly shared settings, base plus overrides is the choice. If you tell me what deploy tool reads the config, I can sketch the merge step for it.

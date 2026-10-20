@@ -1,0 +1,19 @@
+**Go with 3.**
+
+**Wait time.** With a few seconds between attempts (say about 3s), here is the worst case before the user hears anything, not counting the slow calls themselves:
+
+| Retries | Worst-case wait | What the user sees |
+|---|---|---|
+| 3 | ~10s | A spinner that's slow but acceptable |
+| 5 | ~15–20s | Many people start reloading or leaving |
+| 8 | ~25–30s+ | Effectively stuck, which is what you want to avoid |
+
+These numbers get worse because you're retrying *because* the provider is slow. Each attempt that fails is probably also slow before it times out, so the real wait is longer than the sleeps alone.
+
+**Diminishing returns.** Short slowdowns usually clear within one or two retries. If attempts 1–4 all failed, the provider is most likely degraded or down, and attempts 5–8 are likely to fail too. Those extra retries add almost no successes. What they do add is a long wait for the user and more load on a provider that's already struggling. Load is also multiplied by every signup happening during the incident, so 8 retries means up to 9× the traffic at the worst moment.
+
+**Duplicate emails.** "Slow" often means your request timed out even though the provider accepted it. Each retry can then send another verification email. Three retries keeps the worst case at a few duplicate emails instead of up to nine.
+
+**Giving up after 3 doesn't leave people stuck,** as long as the failure message offers a way forward, like "We couldn't send your email, try again." That lets the user retry when they choose to, which is better than you retrying automatically for 30 seconds.
+
+**When I'd pick 5 instead:** if your logs show a meaningful share of sends succeeding only on the 4th or 5th attempt. If you have send logs, check which attempt number succeeds. If nearly all successes come on attempts 1–3, keep 3. I wouldn't pick 8 under any circumstances in this setup.

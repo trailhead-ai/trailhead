@@ -1,0 +1,19 @@
+{
+  "variant": "dispatched-agent-observed",
+  "pads": [
+    "notification-prefs-layout"
+  ],
+  "pad locations": [
+    "xdg-state/outpost/pads/notification-prefs-layout"
+  ],
+  "flow options": 0,
+  "layout options": 3,
+  "tool calls": [
+    "Skill",
+    "Bash",
+    "Bash",
+    "Write",
+    "Bash"
+  ],
+  "final message": "**Build the grid: event types as rows, channels as columns.**\n\n- **Why the grid:** The settings are a two-dimensional matrix (event × channel), and the grid is the only layout that shows it as one. A user can see what an event does on every channel, and how noisy a channel is overall, without switching views. It's also the most compact, and it's what users already know from GitHub, Slack and Linear.\n- **Tab per channel (rejected):** It hides the comparison. To answer \"where do I get mentions?\" the user has to flip through every tab. It suits products with one or two channels and very different settings per channel.\n- **Long list by topic (rejected):** It's the easiest to build and works well on mobile. But the number of toggles is events × channels, so the list gets long and hard to scan once there are three or more channels.\n- **Caveats for the grid:**\n  - Give each row a toggle-all control and each column header a toggle-all control.\n  - Group rows under topic headings.\n  - Below about 600px, collapse it into the topic list. That list then serves as the mobile fallback, so no extra layout needs to be designed.\n  - If some event/channel pairs can't exist, show those cells as disabled, not missing.\n\nI drew the three layouts as a sketch pad, with the grid marked as my pick: file://<run>/xdg-state/outpost/pads/notification-prefs-layout/index.html\n\n**Open question:** go with the grid plus a mobile fallback, or does a constraint (mainly mobile users, or only one or two channels) favour another layout? A reply in words works, or pick on the pad and paste back its \"Copy reply\" output."
+}
