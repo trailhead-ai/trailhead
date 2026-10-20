@@ -36,6 +36,12 @@ ARMS = {
     "third-advocate.md",
     "summary-baseline-noritual.md",
     "summary-baseline-build.md",
+    "summary-noritual.md",
+    "summary-build-rules-only.md",
+    "fourth-noritual.md",
+    "fourth-reviewer.md",
+    "fourth-advocate.md",
+    "fourth-slice.md",
 }
 
 

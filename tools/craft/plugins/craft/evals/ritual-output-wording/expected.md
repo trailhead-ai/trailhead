@@ -843,3 +843,124 @@ outcome. Read as "named before any routine item or phase outcome", S1 would be 3
 Consequences recorded, not acted on here: S2 shows no headroom on `leads` or `one-line`, so the baseline already
 puts the unfixed finding first in most runs and E cannot be shown to improve those verdicts; and S1's `leads`
 headroom depends on the literal first-sentence reading above.
+
+## Result, 2026-10-20 — R, the summary paragraph: the criterion guard G1 misses its bar; R is reverted
+
+R is commit `d6eb84540f8e5b959554bc1578b0ece26154a76f` on the task branch (branch-local, so its SHA changes at merge;
+recorded for a reader, read by no test). Its paragraph is byte-identical to the one quoted in the extension above
+(checked by unwrapping the five wrapped lines of `rules.md` and comparing to the quoted text). Every arm below carries
+the always-loaded rules at R; B is `d860c95a7d470be857e01f04c55c986abadab916`. Each arm was composed with `git show`
+at build time, sources joined by one newline, the method checked first by reproducing `summary-baseline-build.md`
+byte for byte (and, for the finding-presentation arm, `fs-treated2-fsspecreview.md` byte for byte from its pinned
+sources). The new arms differ from their B counterparts by R's 325 bytes alone where one exists
+(`summary-noritual` and `summary-build-rules-only` against the two baseline arms).
+
+### Arms built
+
+| Arm | Site | Sources (all at B except `rules.md`) | Rules file | Bytes | Form |
+|---|---|---|---|---|---|
+| `summary-noritual` | S1 | none | `rules.md` at R | 13629 | argument |
+| `summary-build-rules-only` | S2 | `execute/SKILL.md`, `_shared/execute.md` | `rules.md` at R | 113577 | `--append-system-prompt-file` |
+| `fourth-noritual` | G1 | none | `rules.md` at R | 13629 | argument |
+| `fourth-reviewer` | G2 | `agents/breaker.md` | `rules.md` at R | 19307 | argument |
+| `fourth-advocate` | G2 | `agents/advocate.md` | `rules.md` at R | 19694 | argument |
+| `fourth-slice` | G3 | `skills/slice/SKILL.md` | `rules.md` at R | 57664 | argument |
+| `summary-guard-specreview` (in `finding-presentation-wording`) | G4 | `skills/gauntlet/SKILL.md`, `skills/gauntlet/dispositions.md`, `skills/_shared/council.md` | `rules.md` at R | 91187 | argument |
+
+`summary-noritual` and `fourth-noritual` are byte-identical (the rules file alone), as the registration's table
+implies; they differ in the prompt and the check. The agent definitions at B are byte-identical to those at
+`ecc4f46a`. `council.md` at B is not byte-identical to the `e568c4e0` copy the second-round `fs-treated2-*` arms
+carry (it moved on main since), so `summary-guard-specreview` is the site's sources at B, as registered, and not the
+`fs-treated2-fsspecreview` bytes with `rules.md` moved.
+
+### Departures from the registration, stated
+
+- G2 prompts. The registration lists `prompt-reviewer.md` and `prompt-advocate.md`. `council.md` at B already carries
+  the shipped bullet (the reviewer's report goes to a dispatching agent), so the shipped state of a reviewer prompt is
+  the template with the bullet, which is what `third-reviewer` and `third-advocate` were run with. `fourth-reviewer`
+  and `fourth-advocate` were run with `prompt-reviewer-template.md` and `prompt-advocate-template.md`. The prompts
+  without the bullet were not run.
+- G4 prompt and the opening summary. The registered site, `fsspecreview`, stages the operator's request for the
+  detail on C1 to C3; the opening summary is stated in its prompt, not written by the capture, so one row per finding
+  in an opening summary cannot be read from it. `summary-guard-specreview` ran there three times, graded against the
+  fs reports as registered. As a further observation (not a bar), the same arm ran three times on the
+  `finding-presentation-wording` case's `prompt-specreview.md`, which stages the step that recommends and asks for
+  acceptance, as `summary-guard-specreview-open-1` to `-3`, graded against `reports-spec-review.md`.
+- S1 `leads` split was not re-run to six. G1 (below) misses its bar on a script verdict and fixes the end state
+  whatever S1 reads, so the S1 re-run would not change what happens; the S1 verdict is recorded as unresolved.
+
+Dispatch as `## Dispatch` and the extension fix it: fixtures copied to an empty temp directory per run,
+`FIXTURES_DIR` replaced, the process started from a second empty directory, `--setting-sources project`,
+`--allowedTools "Read"`, no `--model`, foreground, sequential. All captures exited 0 with empty stderr.
+
+### Guards, script-graded (per-capture)
+
+| Capture | Check | Verdict |
+|---|---|---|
+| `fourth-noritual-1`, `-2` | `criterion-mention` | `text-with-number` |
+| `fourth-noritual-3`, `-6` | `criterion-mention` | `bare` |
+| `fourth-noritual-4`, `-5` | `criterion-mention` | `nickname` |
+| `fourth-slice-1` to `-3` | `criterion-mention` over the statement; `covers-field` | `text-with-number`; `gate-shape` |
+| `fourth-reviewer-1` to `-3` | `reviewer-report`; `criterion-mention` | `template-shape`; `bare` |
+| `fourth-advocate-1` to `-3` | `reviewer-report`; `criterion-mention` | `template-shape`; `bare` |
+
+G1 split 2-1 after three (`text-with-number`, `text-with-number`, `bare`) and was re-run to six under the split rule.
+
+| Guard | Registered bar | Count | Holds |
+|---|---|---|---|
+| G1 `fourth-noritual` | clean majority `text-with-number` | `text-with-number` 2 of 6, `bare` 2, `nickname` 2 | **no** |
+| G2 `fourth-reviewer` | every run `template-shape`; `criterion-mention` majority `bare` | 3 of 3; `bare` 3 of 3 | yes |
+| G2 `fourth-advocate` | same, equal to `baseline-advocate` (`bare`) | 3 of 3; `bare` 3 of 3 | yes |
+| G3 `fourth-slice` | every run `gate-shape`; clean majority `text-with-number` | 3 of 3; 3 of 3 | yes |
+| G4 `summary-guard-specreview` | last recorded bar: clean majority `plain` on `severity-name` and `reviewer-name` | `plain` 3 of 3 on both | yes |
+
+By eye at G4: each of the three captures gives C1, C2 and C3 each its own block under its id, with the proposed
+disposition. Observation, `summary-guard-specreview-open-1` to `-3` (the opening-summary prompt): `severity-name`
+`plain` 3 of 3; `reviewer-name` `plain`, `internal`, `plain`; each capture has a table with one row per finding that
+needs a decision (two findings, ids C1 and C2) and the worth-fixing and rough-edge items grouped below it.
+
+### Sites S1 and S2 (rules-only), by eye
+
+In-session reading, then a blind subagent given only the protocol, the two situations' fixtures and the six captures
+renamed `cap-A` to `cap-F` in shuffled order (mapping kept by the caller: A `summary-build-rules-only-2`, B
+`summary-noritual-3`, C `summary-build-rules-only-3`, D `summary-noritual-1`, E `summary-build-rules-only-1`, F
+`summary-noritual-2`).
+
+| Capture | Site | `leads` in-session | `leads` blind | `one-line` (both) | `all-present` (both) | Note |
+|---|---|---|---|---|---|---|
+| `summary-noritual-1` | S1 | buried | buried | one-line | all-present | sentence 1 "The tour is nearly ready."; the Marlow decision is sentence 2 |
+| `summary-noritual-2` | S1 | leads | leads | one-line | all-present | sentence 1 names the Marlow date |
+| `summary-noritual-3` | S1 | buried | leads | one-line | all-present | sentence 1 "One thing is still open, and it has a Friday deadline."; Marlow is named in sentence 2. **Readers disagree** |
+| `summary-build-rules-only-1` | S2 | leads | leads | one-line | all-present | opens on the security decision, before any phase outcome |
+| `summary-build-rules-only-2` | S2 | leads | leads | one-line | all-present | same |
+| `summary-build-rules-only-3` | S2 | leads | leads | one-line | all-present | same |
+
+Counts: S1 `leads` 1 of 3 in-session, 2 of 3 blind (a 2-1 split either way, not a clean majority; not re-run, see
+above); S1 `one-line` 3 of 3 and `all-present` 3 of 3 by both readers (the in-session `over` reading of the baseline
+was not repeated here: the closing "one thing to check" paragraphs of the baseline are gone and the Commit/Release
+sub-bullets belong to the planted item). Against the baseline: S1 `leads` moves from 0 of 3 to 1 or 2 of 3; S1
+`one-line` was contested at baseline and reads `one-line` 3 of 3 now; `all-present` met without the edit. S2 had no
+headroom at baseline (`leads` 4 of 6); the rules-only arm reads `leads` 3 of 3, `one-line` 3 of 3, `all-present` 3
+of 3, and `ritual_deliverable_grader.py --record task/the-tide-table-export-slice --command /portage:pull_request`
+reads `next-command: own-line` on all three. Close calls the blind reader flagged: `cap-C`, `cap-E` hold two
+sentences in one list item (read as one list item, as at the baseline); `cap-B` and `cap-D` on `leads`.
+
+### End state
+
+S1 `leads` is not a clean majority, but the end state does not rest on it: G1 misses its registered bar on a script
+verdict (2 of 6 `text-with-number`, where `third-noritual` held 3 of 3). Under the registered end states, "Any guard
+G1-G4 misses its bar: this is a regression. R is reverted and the slice stops for the operator", and "R reverted, for
+any reason: the build-report task is blocked and not run". R is reverted by a signed `git revert` in the commit after
+this one. `summary-build` is not run.
+
+### Known unknowns resolved
+
+- Does the section's limit make the build closing report read as exempt? No, the rules-only arm does move: `leads`
+  3 of 3 (baseline 4 of 6) with the planted item opening every capture, though the baseline already did so in most
+  runs, so the movement cannot be separated from the baseline's own rate.
+- Does "at most one line each" shorten criterion mentions at G1 (AC1)? Yes: four of six captures give a criterion
+  fewer of its own words than the grammar's threshold (two `bare`, two `nickname`), mostly in the "Done" line.
+- Does the paragraph reshape a reviewer's report, the slice's covered-criteria value, or the spec review's opening
+  summary? No at the reviewer and advocate (`template-shape` 6 of 6 with unchanged `bare` mentions), no at the slice
+  (`gate-shape` 3 of 3, `text-with-number` 3 of 3), and not on the scripted checks at the spec review (3 of 3 `plain`;
+  the opening-summary observation keeps one row per finding with ids).

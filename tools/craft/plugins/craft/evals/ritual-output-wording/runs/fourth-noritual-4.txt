@@ -1,0 +1,10 @@
+Five of the seven still need work. Two of those five look finished in the status note but don't fully meet their criterion yet:
+
+- **The overdue flag shows on the desk screen within one minute of the date rolling over (AC1):** this needs a timing check. The flag was only seen "the morning after" a loan went overdue at midnight, which doesn't show it appeared within the minute.
+- **A borrower over ten pounds is blocked from checkout until the balance is cleared or a librarian overrides (AC3):** the block and clearing it by paying both work. Letting a librarian override the block isn't built yet, because override recording hasn't been started.
+- **An override records who granted it and the reason, and shows in the borrower's history (AC4):** not started.
+- **Returning an overdue item stops the fee growing the same day, even if scanned after closing (AC5):** not started.
+- **One reminder three days before the due date and one the day after, and nothing else automatic (AC6):** the day-after message is sent, but the three-days-before one isn't built. Nobody has checked yet that no other automatic messages go out about the same loan.
+- **The monthly report lists each category's total charged and waived, and reconciles with the per-borrower ledgers (AC7):** not started.
+
+Only the per-item daily fee at the category rate, capped at the replacement price (AC2), is done. It was tried on the rare atlas.

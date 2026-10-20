@@ -69,6 +69,12 @@ FIX_SHAPE_SHARPENED_REVISION = "e568c4e037dbf1ba2d2eb3027fa3f77e03104dae"
 # two reworded-consult arms read `consult/SKILL.md` from here.
 CONSULT_REWORDING_REVISION = "3d423811493b6e776ef8007faee3db3f02a8f1ca"
 
+# origin/main when the summary measurement was cut: the `summary-guard-specreview` arm reads every source here except
+# `rules.md`, which it reads from "R", the branch-local commit adding the summary paragraph (its SHA is in the
+# `ritual-output-wording` case's `expected.md`).
+SUMMARY_BASE_REVISION = "d860c95a7d470be857e01f04c55c986abadab916"
+SUMMARY_RULES_REVISION = "R"
+
 PLUGIN = "tools/craft/plugins/craft"
 RULES = f"{PLUGIN}/rules.md"
 COUNCIL = f"{PLUGIN}/skills/_shared/council.md"
@@ -193,6 +199,13 @@ ARM_SOURCES: dict[str, list[Source]] = {
         (COUNCIL, CODE_REVIEW_EDIT_REVISION),
     ],
 }
+
+ARM_SOURCES["summary-guard-specreview.md"] = [
+    (RULES, SUMMARY_RULES_REVISION),
+    (GAUNTLET_SKILL, SUMMARY_BASE_REVISION),
+    (GAUNTLET_DISPOSITIONS, SUMMARY_BASE_REVISION),
+    (COUNCIL, SUMMARY_BASE_REVISION),
+]
 
 # Each fix-shape site's sources other than `council.md`, in arm order.
 FS_SITE_SOURCES: dict[str, list[str]] = {

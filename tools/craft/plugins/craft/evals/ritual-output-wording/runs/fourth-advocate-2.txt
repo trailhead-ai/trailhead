@@ -1,0 +1,12 @@
+## Findings
+- [Critical] After-hours returns are dated the next morning, which breaks AC5. What fails: a borrower who drops an overdue book in the after-hours return on Monday night gets a return date of Tuesday. Tuesday's fee is charged, and that extra day can push their balance over £10, so the AC3 guard refuses their next checkout. They are blocked by a fee the spec says they don't owe, and the librarian has no record to explain it. Suggested: date after-hours returns to the business day they were dropped off (or the last open day). Keep the scan time separately, and have the fee calculator use the return date, not the scan date.
+- [Critical] Reminders (AC6) are missing from the plan. What fails: the plan sends no message before the due date or after it, so the first a borrower hears of a late fee is a refusal at the desk. That is the worst moment to find out, and the spec requires the warning. Suggested: add a task that sends the 3-days-before and day-after messages once per loan, with a sent-flag on the loan so the nightly job can't send them twice.
+- [Important] The override record doesn't meet AC4. A free-text note on the borrower doesn't record who granted the override and isn't part of the borrower's history. The next librarian can't tell whether an override was authorised. Suggested: store an override event with the staff ID, reason, time and loan. Show it in the history and on the desk screen.
+- [Important] The plan has no way to clear a balance or waive a fee. AC3 says "until cleared" and AC7 reports waived totals, so without this the only way past the block is an override at every visit. Suggested: add a desk action to record a payment and a waiver, with the waiver kept in the ledger.
+- [Important] The refusal message isn't specified. If the librarian sees only "checkout refused", they can't tell the borrower why. Suggested: show the balance, the items it comes from, and the override button in the refusal.
+- [Important] The desk screen's balance only refreshes on load. After a return or payment, the balance on screen no longer matches what the checkout guard enforces. Suggested: recalculate after any action on that borrower.
+- [Minor] The nightly job runs at 00:05, which misses AC1's one-minute window. It has no user impact while the desk is closed.
+- [Minor] AC7's monthly fees report isn't in the plan.
+
+## Confidence
+Medium. Every finding comes from comparing the plan with the spec. I had no code or UI to check against.

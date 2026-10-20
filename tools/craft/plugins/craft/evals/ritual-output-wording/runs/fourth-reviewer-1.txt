@@ -1,0 +1,13 @@
+## Findings
+- [Critical] No task has a test contract: none of Tasks 1–4 names a test or a failure condition, so the spec mismatches below would ship with nothing to catch them. One example: a fee calculator that uses replacement price as the daily rate would ship unnoticed. Suggested: give each task a red-first test. Task 2 needs a rate × days test across the cap boundary (AC2). Task 3 needs balances of £10.00 and £10.01 (AC3). Task 1 needs a due date of yesterday and of today.
+- [Critical] The nightly job writes fees with no protection against reruns, and a failure is silent: if a 00:05 run is retried or overlaps the next run, every overdue item is charged twice. If the job dies, no flags or fees appear and nothing alerts anyone. The fees are ledger money, so wrong charges can't simply be undone. Suggested: key each fee row on (loan, date) with a unique constraint. Add a dry-run mode. Raise an alert if no successful run is recorded by 00:30.
+- [Important] The plan contradicts AC5: returns scanned after closing get the next morning's date. The 00:05 job sees the item as still out and charges another day. Suggested: date the return to the business day it was scanned. Add a test for a return scanned at 23:00.
+- [Important] The 00:05 schedule can't meet AC1: flags appear at least 5 minutes after rollover, and the spec allows one minute. Suggested: work out overdue status when the screen loads, or move the job to 00:00 and alert if it runs late.
+- [Important] No migration or backfill for the new overdue flag: loans already overdue at deploy get no flag until the first run, and nothing covers rolling the flag back. Suggested: add a gated, repeatable backfill with a dry-run count, run through the migration tooling.
+- [Important] Fees can be charged twice for the same day: the job and the return both run the calculator, so a return on the same date can double-charge. Suggested: same per-(loan, date) key as above.
+- [Important] The override is stored as a free-text note: it doesn't record who granted it, so AC4 fails and the record can be edited or lost. Suggested: a structured override record with librarian ID, reason and timestamp.
+- [Important] No task covers AC6 or AC7. AC7's totals can't reconcile without a waiver path or a per-borrower ledger.
+- [Minor] "Exceeds ten pounds" has no stated rounding or currency precision.
+
+## Confidence
+High: the plan and spec are short, and each finding comes from a direct conflict between their texts.

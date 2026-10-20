@@ -3707,3 +3707,11 @@ treated round replaced the pre-registered route (a treated miss goes to the fall
 - **The kept consult line that ships is `3d423811`,** which supersedes `3b50cc4a` (the line the slice-close sections
   and the consult real run name). Revisions that must stay reachable after merge are therefore `c3f7b21e`,
   `2fc63f89`, `e568c4e0`, `3b50cc4a` and `3d423811`; the merge must not squash.
+
+## Note, 2026-10-20 — the `summary-guard-specreview` arm and its captures
+
+Built and run under the `ritual-output-wording` case's extension of 2026-10-20 and recorded in its result section
+there (arm composition, byte counts, per-capture verdicts, the departures). `summary-guard-specreview-1` to `-3` ran
+the `fsspecreview` prompt and read `plain` on `severity-name` and on `reviewer-name` against `fs-reports-spec-review.md`.
+`summary-guard-specreview-open-1` to `-3` ran `prompt-specreview.md` against `reports-spec-review.md` as an observation
+(`severity-name` `plain` x3; `reviewer-name` `plain`, `internal`, `plain`). `test_wording_grader.py` pins every row.

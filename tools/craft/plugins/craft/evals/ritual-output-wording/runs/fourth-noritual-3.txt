@@ -1,0 +1,15 @@
+Four criteria are clearly still open, and two that the note reports as done haven't actually been shown to meet the spec. You'll need to decide whether those two count as done.
+
+**Not finished:**
+
+- **A librarian override records who granted it and the reason given, and shows in the borrower's history (AC4):** not started, so all of it is left.
+- **Returning an overdue item stops the fee from growing the same day, even if the return is scanned after closing time (AC5):** not started. The after-closing case is part of what's left.
+- **A borrower receives one reminder three days before a due date and one on the day after, and no other automatic messages about the same loan (AC6):** the three-days-before message still needs building. Nobody has checked yet that no other automatic messages go out.
+- **The monthly fees report lists each category's total charged and total waived, and the totals reconcile with the per-borrower ledgers (AC7):** not touched, so the whole report is left, reconciliation included.
+
+**Reported done, but not proven against the spec:**
+
+- **An overdue borrower shows as overdue on the desk screen within one minute of the date rolling over (AC1):** the note only says the flag appeared "the morning after" a loan went overdue at midnight. That doesn't show the one-minute limit. Someone needs to watch the screen at rollover.
+- **A borrower owing more than ten pounds can't check out until the balance is cleared or a librarian overrides (AC3):** the block and the clearing on payment work. The librarian override route can't exist until the override recording in AC4 is built.
+
+**Done as the note describes:** the daily fee is charged per item at the category rate and never goes above the item's replacement price (AC2). This was tried on a rare atlas.
