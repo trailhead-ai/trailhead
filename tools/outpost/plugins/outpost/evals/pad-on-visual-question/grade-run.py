@@ -12,8 +12,15 @@ import sys
 from pathlib import Path
 
 
+def is_plain_file(path: Path) -> bool:
+    return path.is_file() and not path.is_symlink()
+
+
 def decode_round_js(path: Path) -> dict:
-    first = path.read_text().splitlines()[0]
+    lines = path.read_text().splitlines()
+    if not lines:
+        raise ValueError("round.js is empty")
+    first = lines[0]
     literal = first.removeprefix("window.PAD_ROUND = JSON.parse(").removesuffix(");")
     return json.loads(json.loads(literal))
 
@@ -37,12 +44,14 @@ def pads_in(run: Path):
     """Every pad directory holding round-1/round.js, relative to the run directory."""
     found = run.glob("xdg-state/outpost/pads/*/round-1/round.js")
     found = list(found) + list(run.glob("xdg-state/camp/*/worktrees/*/sites/*/round-1/round.js"))
-    return sorted(p.parent.parent for p in found)
+    return sorted(p.parent.parent for p in found if is_plain_file(p))
 
 
 def option_keys(pad: Path):
     keys = []
     for round_js in sorted(pad.glob("round-*/round.js")):
+        if not is_plain_file(round_js):
+            continue
         for question in decode_round_js(round_js).get("questions", []):
             keys += [sorted(k for k in o if k in ("layout", "flow")) for o in question.get("options", [])]
     return keys
@@ -51,13 +60,19 @@ def option_keys(pad: Path):
 def main(run: Path, capture: Path, variant: str) -> dict:
     final, tools = capture_facts(capture)
     pads = pads_in(run)
-    keys = [k for pad in pads for k in option_keys(pad)]
+    keys, failures = [], []
+    for pad in pads:
+        try:
+            keys += option_keys(pad)
+        except (ValueError, AttributeError, TypeError) as err:
+            failures.append({"pad": pad.name, "reason": f"{type(err).__name__}: {err}"})
     return {
         "variant": variant,
         "pads": [p.name for p in pads],
         "pad locations": [str(p.relative_to(run)) for p in pads],
         "flow options": sum(1 for k in keys if "flow" in k),
         "layout options": sum(1 for k in keys if "layout" in k),
+        "grading failures": failures,
         "tool calls": [n for n, _ in tools],
         "final message": final,
     }

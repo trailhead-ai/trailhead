@@ -389,3 +389,44 @@ def test_the_grader_reports_no_pad_for_a_run_that_drew_nothing(tmp_path):
     graded = _grade(tmp_path, run_dir, "not-visual-flow-vocabulary")
     assert graded["pads"] == []
     assert graded["flow options"] == 0
+
+
+def _round_js(pad: Path) -> Path:
+    return pad / "round-1" / "round.js"
+
+
+def _only_pad(run_dir: Path) -> Path:
+    return next(run_dir.glob("xdg-state/outpost/pads/*"))
+
+
+@pytest.mark.parametrize("damage", ["", "\n", "window.PAD_ROUND = JSON.parse(not json);"])
+def test_the_grader_records_a_malformed_or_empty_round_as_a_grading_failure_for_that_pad(tmp_path, damage):
+    run_dir = _built(tmp_path, "flow-outside-workspace")
+    _draw(run_dir, "refund-approval", FLOW_ROUND)
+    _draw(run_dir, "filters", FLOW_ROUND)
+    broken = run_dir / "xdg-state/outpost/pads/filters"
+    _round_js(broken).write_text(damage)
+    graded = _grade(tmp_path, run_dir)
+    assert graded["pads"] == ["filters", "refund-approval"]
+    assert graded["flow options"] == 2
+    assert [f["pad"] for f in graded["grading failures"]] == ["filters"]
+    assert graded["grading failures"][0]["reason"]
+
+
+def test_the_grader_skips_a_round_js_that_is_a_symlink(tmp_path):
+    run_dir = _built(tmp_path, "flow-outside-workspace")
+    _draw(run_dir, "refund-approval", FLOW_ROUND)
+    pad = _only_pad(run_dir)
+    real = tmp_path / "elsewhere.js"
+    real.write_text(_round_js(pad).read_text())
+    _round_js(pad).unlink()
+    _round_js(pad).symlink_to(real)
+    graded = _grade(tmp_path, run_dir)
+    assert graded["flow options"] == 0
+    assert graded["grading failures"] == []
+
+
+def test_a_clean_run_has_no_grading_failures(tmp_path):
+    run_dir = _built(tmp_path, "flow-outside-workspace")
+    _draw(run_dir, "refund-approval", FLOW_ROUND)
+    assert _grade(tmp_path, run_dir)["grading failures"] == []

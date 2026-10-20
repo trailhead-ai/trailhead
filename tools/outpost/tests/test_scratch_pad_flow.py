@@ -1104,6 +1104,43 @@ def test_the_largest_legal_flow_draws_in_under_a_second(tmp_path, kind):
     assert got["ms"] < 1000, got["ms"]
 
 
+def _malformed_lines():
+    refused = [
+        text for _, problems in REFUSED for _, text, _ in problems if text.startswith(("a ", "click", "subgraph"))
+    ]
+    lines = []
+    for k in range(399):
+        text = refused[k % len(refused)]
+        head, _, tail = text.partition(" ")
+        lines.append(head + " " + " " * (1000 - len(text) - 3) + tail + " x")
+    return lines
+
+
+MALFORMED = {
+    "unclosed dotted word label": [f"A -.{' ' * 970}x"] * 399,
+    "unclosed solid word label": [f"A --{' ' * 970}x"] * 399,
+    "every refused construct at full width": _malformed_lines(),
+}
+
+
+REFUSAL_PROBE = """
+const question = {options: [{flow: %s}]};
+const t0 = performance.now();
+await PadPen.drawQuestion(document.body, question, 0);
+const ms = performance.now() - t0;
+return {ms, message: messageOf(document.querySelector('.pad-drawing'))};
+"""
+
+
+@pytest.mark.parametrize("name", list(MALFORMED))
+def test_a_malformed_flow_within_every_limit_is_refused_in_under_a_second(tmp_path, name):
+    flow = _flow(MALFORMED[name])
+    assert max(len(line) for line in flow.split("\n")) <= 1000
+    got = _run(tmp_path, _round([flow]), REFUSAL_PROBE % json.dumps(flow), timeout=300)
+    assert got["message"][0] == "Can't draw this flow:"
+    assert got["ms"] < 1000, got["ms"]
+
+
 WRAP = """
 return [0, 1, 2].map((o) => {
   const steps = stepsOf(drawing(0, o));
