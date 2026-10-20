@@ -140,6 +140,30 @@ path: vault/decision/*.md
 see seeded records; grade a seeded record's contents with `regex` over a
 `source: file` target instead.
 
+`regex` and `llm` with `target: files` read the list of files created during
+the run, never the ones the agent modified in place; an in-place edit of a seeded
+record is invisible to it. Grade a seeded record's change with a `regex` on its
+`source: file` path (its body and its `.json` sidecar), one grader per record.
+
+`tool_used` counts the agent's tool calls that match:
+
+```markdown
+---
+type: tool_used
+tool: Bash
+input_match: '(?=.*record create)(?=.*--kind task)(?=.*spec=<slug>)'
+min: 1
+max: 1
+---
+```
+
+`tool` is the tool name; `input_match` is a JavaScript regex tested against the
+JSON text of the whole tool input (a heredoc body appears with `\n` escapes, and
+a lookahead per required term matches in any order); `min` and `max` bound the
+number of matching calls. It reads every call in the run, not a window of the
+last events. JSON escapes quote characters in the input, so keep quote characters
+out of the pattern.
+
 `regex` with `source: file` does not glob: a `path` containing `*` fails the
 grader whether or not a file matches, so name the exact path. `file_exists` does
 glob, which makes it the grader for a record whose name the agent picks.

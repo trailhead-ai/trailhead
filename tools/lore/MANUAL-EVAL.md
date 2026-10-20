@@ -1612,7 +1612,7 @@ successor spec that supersedes the unamended original.
 | Case | Correct (C) | Grader fails on |
 |---|---|---|
 | (a) | 1.00, 14 of 14 | `d1-corrected-text-present`, `d1-wrong-text-gone`, `d1-change-history-entry`, `question-lists-d2-with-old-and-new-text`: Wn. `d1-unrelated-text-kept`, `d2-text-kept`, `d2-no-change-history`, `t1-text-kept`, `t1-no-change-history`, `no-new-record`, `question-omits-t1`: Wx. `coverage-count-stated`, `search-boundary-stated`, `turn-ends-waiting-with-one-question`: Wn and Wx |
-| (b) | 1.00, 12 of 12 (after `8a4b7c14`) | `c0-corrected-text-present`, `c0-wrong-text-gone`, `c0-change-history-entry`: Wn. `c0-unrelated-text-kept`, `no-new-record`: Wx. `p-text-kept`: Wx, Wm. `question-omits-link-only-records`: Wx (Wm; Wn split 1 PASS 2 FAIL). `question-lists-p-with-old-and-new-text`, `coverage-count-stated`, `search-boundary-stated`, `turn-ends-waiting-with-one-question`: Wn, Wm, Wx. **`only-the-corrected-decision-changed`: Wx only, not Wm (U4, below)** |
+| (b) | 1.00, 12 of 12 (after `8a4b7c14`) | `c0-corrected-text-present`, `c0-wrong-text-gone`, `c0-change-history-entry`: Wn. `c0-unrelated-text-kept`, `no-new-record`: Wx. `p-text-kept`: Wx, Wm. `question-omits-link-only-records`: Wx (Wm; Wn split 1 PASS 2 FAIL). `question-lists-p-with-old-and-new-text`, `coverage-count-stated`, `search-boundary-stated`, `turn-ends-waiting-with-one-question`: Wn, Wm, Wx. **`only-the-corrected-decision-changed`: Wx only, not Wm (U4, below); replaced by sixteen per-record graders** |
 | (c) | 1.00, 13 of 13 | `d2-corrected-text-present`, `d2-change-history-entry`, `a1-corrected-text-present`, `a1-wrong-text-gone`: Wn. `d2-wrong-text-gone`, `d2-initiated-by-agent`: Wn, Wx. `d2-unrelated-text-kept-1`, `d2-unrelated-text-kept-2`, `d2-no-note-added`, `a1-unrelated-text-kept`, `t1-body-unchanged`, `t1-no-change-history`, `no-new-record`: Wx |
 | (f) | 1.00, 6 of 6 | all six: Wx (0.00) |
 | (d) | 1.00, 9 of 9 | `corrected-text-present`: Wn, Wy1, Wz. `wrong-text-gone`, `change-history-entry`: Wn, Wz. `criterion-kept-in-place`: Wy1. `unrelated-text-kept-1`, `-2`, `-3`: Wy2. `status-unchanged`, `no-new-record`: Wz |
@@ -1623,15 +1623,36 @@ input (the lookahead over a heredoc body with `\n` escapes matched), `min`/`max`
 scripted outcome and three real baseline runs with exactly one matching call, and failed the missing, unlinked,
 not-naming and doubled calls. It was not run on 2.1.304; its schema there was read from the binary and matches.
 
-**U4, `only-the-corrected-decision-changed` in (b): INVALIDATED. The baseline of (b) was not run.** The grader's target
-`files` is, in the runner, the sorted list of paths present after the run and absent before it (`hg(before, after)` over a
-directory walk of the run's cwd): created files only, no modification. Wx (a created task) fails it; Wm, which amended P
-and a link-only task in place and created nothing, passes it. So the clause as pre-registered, "nothing other than the named
-decision was created or changed", cannot see an edit to any of the eight link-only records, and the churn it stands in for
-(Wb2: appending a note to each of the eight) would score as clean. The other graders catch only P's own rewrite. Spelling
-cannot fix this, and the clause is not mine to change, so (b) has a smoke run and a flip check but no baseline. The cheapest
-honest repair for the controller is per-record `regex` graders (a body and a sidecar for each of the eight, as `expected.md`
-first costed it), or a `llm` grader over a `source: file` target the run would have to write.
+**U4, `only-the-corrected-decision-changed` in (b): INVALIDATED, then repaired.** The grader's target `files` is, in the
+runner, the sorted list of paths present after the run and absent before it (`hg(before, after)` over a directory walk of
+the run's cwd): created files only, no modification. Wx (a created task) failed it; Wm, which amended P and a link-only
+task in place and created nothing, passed it, so the pre-registered clause "nothing other than the named decision was
+created or changed" could not see an edit to any of the eight link-only records. The operator chose per-record graders
+(2026-10-20; no baseline of (b) had run). The clause's meaning is unchanged. `expected.md` was changed first, alone,
+in the commit after `2c78b9fb` (`git log --oneline 2c78b9fb..HEAD -- tools/lore/plugins/lore/evals/cited-everywhere-decision-proposes-only-records-that-restate-it/expected.md`),
+then the graders in the next commit. `git diff 2c78b9fb..HEAD -- tools/lore/plugins/lore/evals/cited-everywhere-decision-proposes-only-records-that-restate-it`
+is the whole case change: `only-the-corrected-decision-changed` removed, sixteen graders added (`label`, `citrus`, `sign`,
+`count`, `gloves`, `fridge`, `lesson`, `area`, each as `<short>-text-kept` and `<short>-no-change-history`). `-text-kept`
+is a `regex` on the record's `.md` for its last sentence followed by `\s*$`; `-no-change-history` is a `regex` with
+`match: not_contains` for `change-history` on its `.json`. (b) now has 27 graders, no `target: files` grader.
+
+Flip check of the sixteen, same method as above (clone of `1b81de7b` with the new graders copied in, haiku, 1 scripted run
+each, 5 runs, 0.3458 USD). Outcomes: C amends the decision only and gives the correct message; Wm amends the decision, P and
+`task/print-a-sign-for-the-produce-table` in place, no create (the case the old grader passed); Wx as before; Wc amends the
+decision and all eight with a note appended (each last sentence kept); Wu plain-updates the decision's eight citers.
+
+| Outcome | Score | Failed graders |
+|---|---|---|
+| C | 0.96 | `turn-ends-waiting-with-one-question` only, judge votes PASS FAIL FAIL (the 2 of 3 majority fails the correct message; see Concerns); all sixteen new graders pass |
+| Wm | 0.70 | `p-text-kept`, `sign-text-kept`, `sign-no-change-history`, five `llm` clauses |
+| Wx | 0.63 | as Wm, plus `c0-unrelated-text-kept`, `no-new-record` |
+| Wc | 0.22 | all sixteen new graders (the appended note keeps each last sentence, so `-text-kept` fails on the end anchor and `-no-change-history` on the amend), plus five `llm` clauses |
+| Wu | 0.70 | `fridge-text-kept`, `lesson-text-kept`, `area-text-kept`, five `llm` clauses |
+
+Every one of the sixteen failed on Wc, so each has a failing outcome; the old grader would have passed Wm and Wc. In Wu the
+graph-guard (`frozen-body`) refused the plain update of the two active decisions and the three done tasks; only the open
+task, the lesson and the area can be edited by plain update, and those three failed their `-text-kept`. So a plain-update
+churn can only reach three of the eight, and an amend (caught by `-no-change-history`) reaches the other five.
 
 One grader wording change, `8a4b7c14` (`git diff 1b81de7b..8a4b7c14`, two lines), before any baseline: the judge failed the
 correct outcome on `question-omits-link-only-records` (3 of 3 FAIL) when the criterion described the eight records by
@@ -1660,7 +1681,9 @@ the copied traces.
 | (f) no-to-dependent | 1 | 1.00 | 1 | 0.1207 | 0 | none | no |
 | (f) | 2 | 1.00 | 1 | 0.1194 | 0 | none | no |
 | (f) | 3 | 1.00 | 1 | 0.1204 | 0 | none | no |
-| (b) cited-everywhere | not run | | | | | U4 invalidated for `only-the-corrected-decision-changed` | |
+| (b) cited-everywhere | 1 | 0.81 | 6 | 0.2178 | 0.0284 | `coverage-count-stated`, `question-lists-p-with-old-and-new-text`, `question-omits-link-only-records`, `search-boundary-stated`, `turn-ends-waiting-with-one-question` | yes |
+| (b) | 2 | 0.85 | 16 | 0.3074 | 0.0315 | `coverage-count-stated`, `question-lists-p-with-old-and-new-text`, `search-boundary-stated`, `turn-ends-waiting-with-one-question` | yes |
+| (b) | 3 | 0.85 | 16 | 0.3105 | 0.0291 | same four | yes |
 
 Batches: (a) 0.6248, (c) 0.5685, (d) 0.5939, (e) 0.6222, (f) 0.3606 USD. The five ran at the same time, one process each.
 
@@ -1678,6 +1701,23 @@ Batches: (a) 0.6248, (c) 0.5685, (d) 0.5939, (e) 0.6222, (f) 0.3606 USD. The fiv
   --related spec=let-members-collect-holds` call whose body names the text message part.
 - **(f): GREEN, 3 of 3**, in one turn each with no tool call: a seeded "No." is carried out by saying nothing is changed.
   The case does not discriminate between the baseline and a prose that does the same.
+
+- **(b): RED, 0 of 3 at 1.0, case as changed above (`git diff 2c78b9fb..HEAD` on the case directory), prose unchanged.** Errors:
+  none. `lore:correct` was invoked in 3 of 3 runs. All three amended the decision in place (`72 hours`, change history
+  written) and put no dependents question: each ends by saying that the records citing the decision only link to it and
+  need no edit. None found P (the paraphrase, "two days"): runs 2 and 3 read the eight other citers one by one and
+  concluded none states the figure; run 1 grepped for `72 hours|48 hours` and stopped. All 16 new per-record graders
+  and `p-text-kept`, `c0-*`, `no-new-record` passed in all three runs: nothing but the decision was edited. I read the
+  final message of all three runs and the command list of each trace and agree with every `llm` FAIL: `coverage-count-stated`
+  (run 1 gives no count; runs 2 and 3 say "8", not "9 checked, 1 restates, 8 only link"), `question-lists-p-with-old-and-new-text`,
+  `search-boundary-stated`, `turn-ends-waiting-with-one-question` (no question, no waiting line), 13 of 13 failed `llm` verdicts. The one
+  verdict I do not read the same way as the judge is `question-omits-link-only-records`: run 1 failed it
+  by votes FAIL PASS FAIL; runs 2 and 3 passed it unanimously. The grader says PASS only if the question proposes P and none of the eight;
+  none of the three runs asks a question, so by that wording all three fail it. The judge read runs 2 and 3 as "no
+  link-only record is proposed", which is the intent of the clause and not its text. It is the same split the Wn flip
+  outcome showed. It does not move the verdict (each run fails four other `llm` clauses), but it moves the score between
+  0.81 and 0.85. The prose task re-runs this case unchanged; the case had no discriminating failure other than the
+  dependents question.
 
 **U3 (do (d) and (e) already pass on current prose?): yes, both.** (d) 3 of 3 at 1.0 and (e) 3 of 3 at 1.0 on the baseline
 prose. In all six runs `lore:correct` was invoked, the spec was amended in place with its numbers kept, and no run made a
@@ -1724,3 +1764,17 @@ Runner `costUsd` for this task, judge cost excluded (0.556 USD more): **6.72 USD
 
 The parent's 25 USD ceiling is not touched by anything else here. The per-case rerun allowance was not used; (b) is
 unmeasured, so its three-run baseline (about 0.9 USD) is the first thing to spend when its grader is repaired.
+
+### Repair dispatch: live state and budget
+
+Sha256 snapshot of `~/.local/state/lore/` and `~/.config/lore/` (excluding `.git/`) taken at 10:53:00 before the first
+batch (the five flip runs) and 10:58:46 after the last (the 3-run baseline). `~/.config/lore/` did not change. Under
+`~/.local/state/lore/` 21 paths changed or appeared plus `index.sqlite`, all another session's: levr commit `12c4b7fe`
+(10:54:20, six new decision records `agent-fact-memory-*` and `persistent-agent-runtime-*`) and trailhead commits `8746a4e0`
+(10:52:54, landed six seconds before the first snapshot finished; its three records show as modified) and `e088857a`
+(10:57:43); each vault tree is clean. No file there contains the fixture titles (grepped for `set-the-shelf-hold` and
+`Plan Saturday restocking`: 0 files). The runs wrote only inside their temp homes.
+
+Runner `costUsd`, judge cost excluded: flip check of the sixteen 0.3458 USD (five runs), baseline of (b) 0.8357 USD
+(0.2178 + 0.3074 + 0.3105), **1.1815 USD this dispatch** against its 2.2 USD limit, no `--max-cost-usd` stop reached.
+Judge cost of this dispatch: 0.0891 USD (baseline) + 0.1047 USD (flip).
