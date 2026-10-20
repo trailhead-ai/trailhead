@@ -3715,3 +3715,243 @@ there (arm composition, byte counts, per-capture verdicts, the departures). `sum
 the `fsspecreview` prompt and read `plain` on `severity-name` and on `reviewer-name` against `fs-reports-spec-review.md`.
 `summary-guard-specreview-open-1` to `-3` ran `prompt-specreview.md` against `reports-spec-review.md` as an observation
 (`severity-name` `plain` x3; `reviewer-name` `plain`, `internal`, `plain`). `test_wording_grader.py` pins every row.
+
+## Extension, 2026-10-20: plain words at three spec review sites
+
+Pre-registered before any baseline batch, treated arm or control of the sites it adds. Nothing above this heading is
+rewritten; the grammar, its amendments, every earlier extension and every earlier result stand as written. Where it
+names a rule the case already states (the reading rules, the reader-facing text, the verbatim-quotation exemption, the
+severity and reviewer grammars, `criterion-mention`, three runs per arm and the splits rule, crashed runs and the
+floor, the scans before commit, the dispatch command and the capture-file triple), that rule applies unchanged, with
+the sites, arms and checks of this extension.
+
+**Why.** A later task edits the spec review ritual so that its opening deliverable calls it "the spec review" with
+"gauntlet" once in round brackets (AC25), shows each finding's outcome as "fixed in the spec" or "needs a rewrite" and
+the operator-only outcomes in the words the review accepts as a reply (AC26), puts each finding's id in round brackets
+after it (AC27), and names acceptance criteria by their own text with the number after in the finding detail it saves on
+the spec (AC28). All four are script-decidable. This extension freezes the checks, the grammars, the fixtures, the arms,
+the bars and the end states before any batch is captured.
+
+### The three sites
+
+Every site stages "the reviewers have returned" from one hand-written canned report set over a small fixture, so no
+subagent runs. The session is told to run no commands and write no files; at `pwsaved` it is told to print, rather than
+write, the section it would append. No prompt says "spec review" or "gauntlet", and none mentions wording, outcomes or
+(except the operator's staged reply at `pwsaved`) finding ids. `pwdetail` and `pwsaved` carry a neutral prior turn: the
+opening summary is described by the three findings' headlines and nothing else.
+
+| Site | What the session is doing | Graded by script |
+|---|---|---|
+| `pwopen` | The opening deliverable, after the eight passes return. | `review-name`, `outcome-word`, `finding-id`; guards `severity-name`, `reviewer-name`, `criterion-mention` (AC1) |
+| `pwdetail` | The operator asks for the detail on every finding that needs their decision, after a neutral opening summary. | `finding-id`, `outcome-word`; guards `severity-name`, `reviewer-name` |
+| `pwsaved` | The operator replies "accept C2 as a risk: <reason>, dispute C3: <reason>, otherwise go"; the session echoes the post-override table and prints, fenced, the section it would append to the spec. | `outcome-word`, `finding-id` on the echo; `criterion-mention` and `finding-id` on the saved detail; guards `stamp-form`, `override-mapping`. By hand: the marker bullet is still printed, and `scripts/capture_scan.py` passes over the saved block. |
+
+### Fixtures
+
+Written by hand under `fixtures/`, prefixed `pw-`. None pulls text from a vault record, and none contains a
+credential-shaped value, a real path or a user name. They are set in an astronomy club's telescope loan desk, a domain
+used by no other fixture in this repository and by no worked example in `council.md` or the skill files (confirmed by
+searching `tools/`, `trailhead/` and `docs/` for the domain words before the fixtures were written). The prose avoids
+the words critical, important, minor, builder, breaker, attacker, advocate, reliability, premise, consistency and
+divergence, except inside the canned reports' severity tags and lens labels.
+
+- `pw-spec.md`: a six-criterion spec, stamped `production`, with its criteria under two sections, "Borrowing" (AC1 to
+  AC3) and "Returns and care" (AC4 to AC6), each criterion of similar length.
+- `pw-reports-spec-review.md`: a claim list and eight pass reports on the spec (fact verification, premise, Builder,
+  Reliability, Security, Advocate, consistency, divergence), in the forms the case's earlier spec review reports use.
+  Report lines cite criteria by bare number (`AC4`).
+- `pw-prompt-pwopen.md`, `pw-prompt-pwdetail.md`, `pw-prompt-pwsaved.md`: one prompt per site. `FIXTURES_DIR` stands for
+  the directory holding a copy of `fixtures/`, replaced by the runner as in "Dispatch".
+
+**Designated findings.** The reports hold three findings that need the operator's decision, in the order the
+`pwdetail` and `pwsaved` prompts list them: C1, the Advocate's finding that the confirmation email omits what goes back
+in the case (a drafted edit fixes it); C2, the Premise finding that a loan ties up a whole telescope for the full dates
+asked (a rewrite); C3, the Reliability finding that a telescope left in the cupboard shows as free with no condition
+note. Each headline fits one line, and the longest fits with ` (C<n>)` appended; the arms contract test checks both.
+
+### Arms
+
+All paths are under `tools/craft/plugins/craft/`. Every source of a baseline arm is pinned to
+`4722bd0b45f838ecd02b17baa90931e4d47166e6` (`PLAIN_WORDS_BASELINE_REVISION` in the arms contract test), origin/main when
+the task branch was cut. The baseline arms exist when this extension is committed; the treated arms are reserved names,
+created by the task that builds the ritual edit.
+
+| Arm file | Site | Sources, in order | Bytes | Form |
+|---|---|---|---|---|
+| `pw-baseline-pwopen.md` | `pwopen` | `rules.md`, `skills/gauntlet/SKILL.md`, `skills/gauntlet/dispositions.md`, `skills/_shared/council.md` | 90862 | inline |
+| `pw-baseline-pwdetail.md` | `pwdetail` | the same four | 90862 | inline |
+| `pw-baseline-pwsaved.md` | `pwsaved` | the same four | 90862 | inline |
+| `pw-treated-<site>.md` | each | the baseline's sources, with `skills/gauntlet/SKILL.md` and `skills/gauntlet/dispositions.md` read from the commit carrying the ritual edit | measured when built | by size |
+| `pw-control-<site>` | a site with a guard miss | the baseline arm, run again (no new file) | 90862 | inline |
+
+The three baseline arms are byte-identical, so the sites differ by prompt alone. Byte counts are `stat -c %s` on the
+composed arms, against the Linux single-argument limit (`MAX_ARG_STRLEN`, 131072 bytes) and `getconf ARG_MAX`
+(2097152); all three pass `--append-system-prompt` inline. A treated arm is checked against the limit when built.
+`rules.md`, with its shipped output-wording section, is held at the baseline revision in every arm. A treated arm
+differs from its baseline in the two gauntlet files and nothing else; the prompts are shared.
+
+### Verdict words
+
+Each check prints one line per capture, with the check name and one of these words.
+
+- `review-name`: `plain`, `internal`, `none`.
+- `outcome-word`: `plain`, `internal`, `none`.
+- `finding-id`: `bracketed`, `bare`, `none`.
+- `stamp-form`: `kept`, `changed`, `missing`.
+- `override-mapping`: `mapped`, `misapplied`.
+
+### Grammar of the five checks
+
+`review-name`, `outcome-word` and `finding-id` read the reader-facing text of the case's grammar: the logical lines
+outside fenced blocks, with a line that quotes a report verbatim left out, given the site's reports file as `--reports`.
+Markup characters are deleted before matching, except that `outcome-word` keeps backticks.
+
+- **`review-name`.** A naming is the whole phrase "spec review" or the whole word "gauntlet", in any case. A
+  `/craft:gauntlet` or `craft:gauntlet` command token is not a naming. `plain` when the first naming is "spec review" and
+  the word "gauntlet" appears exactly once in the text, inside a pair of round brackets on its line. `internal` when the
+  first naming is "gauntlet", or "gauntlet" appears twice or more, or appears outside round brackets, or never appears
+  beside a "spec review". `none` when the text holds no naming.
+- **`outcome-word`.** `internal` when any reader-facing line holds a backticked span that begins with one of the five
+  terms `resolved`, `revise`, `accepted-as-risk`, `disputed`, `answered`; or holds the hyphenated `accepted-as-risk` as
+  a whole word; or holds `resolved` or `revise` as a whole word (any case) on a line that also holds a finding id.
+  Otherwise `plain` when the whole phrase "fixed in the spec" or "needs a rewrite" appears in any case, else `none`. Prose
+  such as "the fact check resolved the claim" on a line with no finding id is not internal. A table cell is a line of
+  its own, so a term in one cell and an id in another do not meet under the third rule.
+- **`finding-id`.** A finding id is `C` and digits, not adjacent to a letter or digit. It is allowed when it sits in a
+  pair of round brackets after text, alone or in a list joined by a comma, "and" or `&` (`(C2)`, `(C1, C3)`), or when it
+  is the id in a reply form: "dispute C<n>:", "answer C<n>:" or "accept C<n> as a risk" (any case). `bracketed` when
+  every id in the text is allowed; `bare` when any is not (a table cell `| C2 |`, "**C2** —", "C2:", "(C2)" with no text
+  before it, "[C2]"); `none` when no id appears.
+
+**The saved detail.** The saved section is the first fenced block that holds a line `## Gauntlet`. Its detail is that
+block minus its fence lines, the `## Gauntlet` heading, the marker bullet (the bullet that begins "Retained review
+evidence") and the stamp bullet (the bullet that begins "Adversarial spec review"). A bullet runs over the non-blank
+lines after it that do not open a bullet or a heading of their own. `--saved-detail` applies `criterion-mention` (given
+`--criteria`) and `finding-id` to the detail instead of the capture's reader-facing text; `finding-id` then reads no
+reports file and drops no quotation. A capture with no saved section has an empty detail: `no-mention` and `none`.
+
+**`stamp-form`.** Reads the stamp bullet of the saved section. `kept` when it holds at least one finding id and every id
+is followed by a space and a backticked term of the five (`C2` then `` `accepted-as-risk` ``). `changed` when it holds
+no id or any id is not so followed. `missing` when there is no saved section or no stamp bullet. Only the stamp bullet
+is read; ids in the detail do not change it.
+
+**`override-mapping`.** Reads the same stamp against each `--override C<n>=<term>:<reason>` the dispatch passes (the
+reply the prompt stages: here `C2=accepted-as-risk:<C2's reason>` and `C3=disputed:<C3's reason>`). The stamp is cut
+into one segment per `C<n> \`<term>\`` token, each running to the next token. `mapped` when every staged id has exactly
+one token, carrying its staged term, and its segment holds its staged reason (compared after collapsing whitespace and
+lowering case); and no other id carries `accepted-as-risk`, `disputed` or `answered`. `misapplied` otherwise, including
+when there is no stamp. A staged id that is absent, a swapped term, a swapped or missing reason and an override on an
+unstaged id are each `misapplied`.
+
+Grader invocations, from the case directory (`G` is `../../scripts/wording_grader.py`, `R` is
+`fixtures/pw-reports-spec-review.md`, `S` is `fixtures/pw-spec.md`):
+
+| Check | Command |
+|---|---|
+| `review-name`, `outcome-word`, `finding-id`, `severity-name`, `reviewer-name` | `G --check <check> --reports R < capture` |
+| `criterion-mention` (AC1, `pwopen`) | `G --check criterion-mention --criteria S < capture` |
+| `finding-id` on the saved detail | `G --check finding-id --saved-detail < capture` |
+| `criterion-mention` on the saved detail | `G --check criterion-mention --criteria S --saved-detail < capture` |
+| `stamp-form` | `G --check stamp-form < capture` |
+| `override-mapping` | `G --check override-mapping --override C2=accepted-as-risk:<reason> --override C3=disputed:<reason> < capture` |
+
+The two reasons are the ones in `fixtures/pw-prompt-pwsaved.md`; `test_wording_grader.py` reads them from the prompt.
+
+### Bars, split rule and end states, fixed before any batch
+
+A clean majority wins: 3 of 3, or 5 or 6 of 6 after a 2-1 split is re-run to six. "Wins" is `plain` for `review-name`
+and `outcome-word`, `bracketed` for `finding-id`, `text-with-number` for `criterion-mention` on the saved detail, `kept`
+for `stamp-form` and `mapped` for `override-mapping`. Each arm runs three times at each site, with the case's splits
+rule.
+
+- **Met without the edit.** A check whose baseline is already a clean majority of its winning word at a site is
+  recorded as met without the edit there.
+- **Headroom gate.** A part of the ritual edit whose check was a clean-majority win at baseline is dropped, except a
+  part that removes a contradicting instruction (the table's backticked outcome cell, the bare id column, the `revise`
+  header), which is kept regardless.
+- **Closes.** A criterion closes on the treated script verdict at every site it is graded at.
+- **Treated miss.** The slice stops for the operator. There is no rewording without a dated amendment the operator
+  authorizes.
+- **Guard miss.** A guard check (`severity-name`, `reviewer-name`, `criterion-mention` at `pwopen`, `stamp-form`,
+  `override-mapping`) that misses in 2 or more of 6 treated runs gets a same-day paired control first: the baseline arm,
+  six runs, captured as `pw-control-<site>`. A control that also misses 2 or more of 6 marks the miss residual.
+  Otherwise it is a regression, the ritual edit is reverted and the slice stops.
+- **By hand.** At `pwsaved` the marker bullet is still printed in every treated capture and `scripts/capture_scan.py`
+  passes over the saved block; neither is a script verdict.
+
+### Capture naming
+
+One prefix per site and arm, as the case's capture naming: the arm's name without `.md`, then `-<n>`, never reused. A
+run's three files are `<prefix>-<n>.txt`, `<prefix>-<n>.stderr.txt` and `<prefix>-<n>.exit`.
+
+| Prefix | Arm | Prompt | Read | Expected under this pre-registration |
+|---|---|---|---|---|
+| `pw-pilot-<site>-1` | `pw-baseline-<site>.md` | `pw-prompt-<site>.md` | the site's checks, as observations | none; the pilots set the grammar (results below) |
+| `pw-baseline-<site>-<n>` | `pw-baseline-<site>.md` | `pw-prompt-<site>.md` | the site's checks | no expectation; headroom is read against the bars above |
+| `pw-treated-<site>-<n>` | `pw-treated-<site>.md` | the site's prompt | the site's checks | reserved; run by a later task |
+| `pw-control-<site>-<n>` | `pw-baseline-<site>.md` (run again) | the site's prompt | the guard that missed | reserved; run only on a guard miss |
+
+`<site>` is `pwopen`, `pwdetail` or `pwsaved`. The pilots are not part of any batch and count toward no bar.
+
+### Dispatch, as the pilots were run
+
+Each run is its own foreground `claude -p` process, never a subagent, sequential. `fixtures/` is copied to a fresh
+temporary directory, `FIXTURES_DIR` in the prompt is replaced by that path, and the process starts from a second fresh
+empty temporary directory, so `expected.md` is never visible to it. The arm passes inline:
+
+```
+claude -p "<prompt>" --setting-sources project --append-system-prompt "<contents of arms/pw-baseline-<site>.md>" \
+  --allowedTools "Read" < /dev/null > runs/<prefix>-<n>.txt 2> runs/<prefix>-<n>.stderr.txt
+```
+
+The exit status goes to `runs/<prefix>-<n>.exit`. No `--model` flag, a 600-second limit, and no sandbox wrapper on this
+Linux host. The baseline batch uses this path unchanged.
+
+### Pilot captures at baseline (2026-10-20), observations before the grammar was frozen
+
+One capture per site, `pw-pilot-pwopen-1`, `pw-pilot-pwdetail-1` and `pw-pilot-pwsaved-1`, each exit 0 with an empty
+stderr file. Each is graded with the commands above and pinned in `test_wording_grader.py`. Before commit,
+`scripts/capture_scan.py` ran over the nine pilot files (`.txt`, `.stderr.txt`, `.exit`): 0 credential findings, exit 0;
+a search of them, the fixtures and the arms for the operator's home path and username found 0 files.
+
+| Site | Check | Pilot verdict | Headroom against the winning word |
+|---|---|---|---|
+| `pwopen` | `review-name` | `internal` | yes: the deliverable opens "Gauntlet: telescope loan desk spec" |
+| `pwopen` | `outcome-word` | `internal` | yes: `resolved` in backticks in the table |
+| `pwopen` | `finding-id` | `bare` | yes: ids in a bare `id` column |
+| `pwopen` | `severity-name` / `reviewer-name` | `internal` / `plain` | guards; `reviewer-name` already plain |
+| `pwopen` | `criterion-mention` (AC1) | `bare` | the guard is already missed at baseline in this capture: the session drafted new criterion text labelled `AC4.` and `AC7` |
+| `pwdetail` | `outcome-word` | `internal` | yes: `` `resolved` `` and `` `revise` `` after each finding |
+| `pwdetail` | `finding-id` | `bare` | yes: "**C1 —**" |
+| `pwdetail` | `severity-name` / `reviewer-name` | `plain` / `plain` | guards |
+| `pwsaved` | `outcome-word` | `internal` | yes: `` `resolved` ``, `` `accepted-as-risk` `` and `` `disputed` `` in the echoed table |
+| `pwsaved` | `finding-id` (echo) | `bare` | yes |
+| `pwsaved` | `finding-id` (saved detail) | `bare` | yes: "**C1 (Critical, resolved).**" |
+| `pwsaved` | `criterion-mention` (saved detail) | `bare` | yes: criteria cited as `AC1` |
+| `pwsaved` | `stamp-form` / `override-mapping` | `kept` / `mapped` | guards; the baseline stamp already records both staged overrides on their own ids with their reasons |
+
+Every check that the ritual edit is meant to move has headroom at its site in the pilot. One capture per site is not a
+baseline: whether a check is met without the edit is the batch's to say.
+
+**Does the prior turn steer wording?** In the one `pwdetail` capture and the one `pwsaved` capture, no. The prompts give
+the headlines and no ids, outcome terms or review name, and both captures still used the ritual's own words (`C1` and
+`` `resolved` `` at `pwdetail`; `C1` to `C3`, `` `accepted-as-risk` `` and `` `disputed` `` at `pwsaved`) unprompted; the
+`pwdetail` capture said "I've kept the ids the opening summary used" although the prompt supplied none. The reading is from one capture each and is a hypothesis, not an ablation; the batch's
+three captures per arm are the first test of it.
+
+**Two observations for the batch.** The `pwopen` guard `criterion-mention` was `bare` in the pilot because the session
+drafted new criterion text with `AC4.` and `AC7` labels, a reading of a drafted edit and not a mention of a criterion;
+the check's grammar is the case's and is not changed here, and the guard rule above (a paired control) handles a guard
+that misses at baseline. The `pwsaved` capture printed the marker bullet and the stamp bullet in the shapes the saved-
+detail scoping removes, and `stamp-form` and `override-mapping` read the stamp as the grammar describes.
+
+**Grammar changes after the pilots: none.** The grammar above is the one written before the pilots; no pilot capture
+showed a misread by hand.
+
+### Not measured
+
+Measured at the surfaces a typical run shows: the opening deliverable, a detail request and an override reply with the
+saved section. Not measured: the missing-agent stop and the maturity line, which can name the review before the
+deliverable; the out-of-range override rejection; the `reaches-downstream` escalation table; the re-presented table
+after a revise round; an `answered` row's re-adjudication. Arms carry skill text through the system prompt, so they
+cannot show what a real session reads; a real run is the close-out's go/no-go and is not a script verdict.

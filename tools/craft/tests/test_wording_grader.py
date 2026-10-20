@@ -26,7 +26,7 @@ SPEC = CASE / "fixtures" / "spec.md"
 RUNS = CASE / "runs"
 EVALS = CASE.parent
 
-PASSING = {"text-with-number", "template-shape", "gate-shape", "plain", "kept"}
+PASSING = {"text-with-number", "template-shape", "gate-shape", "plain", "kept", "bracketed", "mapped"}
 
 AC4 = "A librarian override records who granted it and the reason given, and shows in the borrower's history"
 
@@ -1809,6 +1809,82 @@ FINDING_CAPTURE_VERDICTS.update(
 )
 
 
+# The plain-words sites: a pilot capture per site at baseline, run before the grammar was frozen. Each site grades the
+# checks that read the session's reader-facing text against `pw-reports-spec-review.md`; `pwsaved` also grades the saved
+# section, in `PW_SAVED_VERDICTS`.
+PW_SITES = ("pwopen", "pwdetail", "pwsaved")
+REPORT_FILES |= {site: "pw-reports-spec-review.md" for site in PW_SITES}
+SITE_CHECKS |= {
+    "pwopen": ("review-name", "outcome-word", "finding-id", "severity-name", "reviewer-name"),
+    "pwdetail": ("outcome-word", "finding-id", "severity-name", "reviewer-name"),
+    "pwsaved": ("outcome-word", "finding-id"),
+}
+FINDING_CAPTURE_VERDICTS.update(
+    {
+        "pw-pilot-pwopen-1": {
+            "review-name": "internal",
+            "outcome-word": "internal",
+            "finding-id": "bare",
+            "severity-name": "internal",
+            "reviewer-name": "plain",
+        },
+        "pw-pilot-pwdetail-1": {
+            "outcome-word": "internal",
+            "finding-id": "bare",
+            "severity-name": "plain",
+            "reviewer-name": "plain",
+        },
+        "pw-pilot-pwsaved-1": {"outcome-word": "internal", "finding-id": "bare"},
+    }
+)
+
+PW_FIXTURES = FINDING_CASE / "fixtures"
+PW_SPEC = PW_FIXTURES / "pw-spec.md"
+_STAGED_REPLY_RE = re.compile(r"accept (C\d+) as a risk: (.+?), dispute (C\d+): (.+?), otherwise go")
+
+
+def staged_overrides(prompt):
+    """The `--override` arguments for the reply a pwsaved prompt stages: the accepted id first, then the disputed one."""
+    found = _STAGED_REPLY_RE.search(prompt)
+    assert found, "the prompt stages no accept-and-dispute reply"
+    accepted, accepted_reason, disputed, disputed_reason = found.groups()
+    return [
+        "--override", f"{accepted}=accepted-as-risk:{accepted_reason}",
+        "--override", f"{disputed}=disputed:{disputed_reason}",
+    ]
+
+
+def test_staged_overrides_reads_both_overrides_and_their_reasons_from_the_reply():
+    prompt = 'replied: "accept C2 as a risk: a reason, with a comma, dispute C3: other reason, otherwise go".'
+    assert staged_overrides(prompt) == [
+        "--override", "C2=accepted-as-risk:a reason, with a comma",
+        "--override", "C3=disputed:other reason",
+    ]
+    assert staged_overrides(prompt.replace("C2", "C4").replace("C3", "C5"))[1].startswith("C4=")
+
+
+# The saved section of a pwsaved capture: the verdict of each check run on it, with the arguments that scope it.
+PW_SAVED_VERDICTS = {
+    "pw-pilot-pwsaved-1": {
+        "finding-id": ("bare", ["--saved-detail"]),
+        "criterion-mention": ("bare", ["--saved-detail", "--criteria", str(PW_SPEC)]),
+        "stamp-form": ("kept", []),
+        "override-mapping": ("mapped", "staged"),
+    },
+}
+
+
+@pytest.mark.parametrize("stem", sorted(PW_SAVED_VERDICTS))
+def test_every_pwsaved_capture_grades_its_saved_section_to_its_mapped_verdicts(stem):
+    capture = FINDING_RUNS / f"{stem}.txt"
+    prompt = (PW_FIXTURES / "pw-prompt-pwsaved.md").read_text(encoding="utf-8")
+    for check, (verdict, extra) in PW_SAVED_VERDICTS[stem].items():
+        extra = staged_overrides(prompt) if extra == "staged" else extra
+        result = run_grader(["--check", check, *extra], capture.read_bytes())
+        assert result.stdout.decode("utf-8") == f"{check}: {verdict}\n", (stem, result.stderr)
+        assert result.returncode == (0 if verdict in PASSING else 1)
+
+
 def _site(stem):
     """The site a capture belongs to: the segment before its run number, except that the calibrated consult's arms
     (`precal-`, `cal-`, `regress-cal-`, `regress2-cal-` and `regress3-cal-`) belong to `consult-calibrated`."""
@@ -1836,3 +1912,428 @@ def test_every_finding_capture_grades_to_its_mapped_verdicts_against_its_sites_r
         result = run_grader(args, capture.read_bytes())
         assert result.stdout.decode("utf-8") == f"{check}: {verdict}\n", (capture.name, result.stderr)
         assert result.returncode == (0 if verdict in PASSING else 1)
+
+
+# --- review-name, outcome-word, finding-id, stamp-form and override-mapping -------------------
+#
+# The grammar is the plain-words extension of the finding-presentation-wording case's `expected.md`.
+
+
+def review_name(text, reports):
+    return grade("review-name", text, criteria=None, extra=("--reports", str(reports)))
+
+
+def outcome_word(text, reports):
+    return grade("outcome-word", text, criteria=None, extra=("--reports", str(reports)))
+
+
+def finding_id(text, reports):
+    return grade("finding-id", text, criteria=None, extra=("--reports", str(reports)))
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "This is the spec review (gauntlet). Eight passes came back.",
+        "Spec Review (Gauntlet): three findings need you.",
+        "The spec review (also called the gauntlet) found three problems.",
+        "The spec review (gauntlet) is done. Later, the spec review said so again.",
+        "**Spec review** (`gauntlet`) results",
+        "Ran /craft:gauntlet. The spec review (gauntlet) found three problems.",
+        "```\nthe gauntlet found it\n```\nThe spec review (gauntlet) found three problems.",
+    ],
+)
+def test_the_spec_review_named_first_with_gauntlet_once_in_brackets_is_plain(text, reports):
+    assert review_name(text, reports) == "plain"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "The gauntlet (spec review) found three problems.",
+        "The gauntlet found three problems.",
+        "The spec review (gauntlet) is done. The gauntlet found three problems.",
+        "The spec review (gauntlet) is done (gauntlet again).",
+        "The spec review is done; the gauntlet found three problems.",
+        "The spec review (see below) gauntlet found three problems.",
+        "The spec review found three problems.",
+        "Results (gauntlet): this is the spec review.",
+    ],
+)
+def test_any_other_naming_of_the_review_is_internal(text, reports):
+    assert review_name(text, reports) == "internal"
+
+
+def test_a_longer_word_that_contains_gauntlet_is_not_a_naming(reports):
+    assert review_name("The gauntlets found it.\nThe spec review (gauntlet) agrees.", reports) == "plain"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Run /craft:gauntlet to start.",
+        "Nothing to show.",
+        "```\nspec review (gauntlet)\n```",
+    ],
+)
+def test_text_that_never_names_the_review_reads_none(text, reports):
+    assert review_name(text, reports) == "none"
+
+
+def test_a_command_token_does_not_count_as_naming_the_review_beside_a_plain_name(reports):
+    assert review_name("Start with /craft:gauntlet.\nThe spec review (gauntlet) is done.", reports) == "plain"
+    assert review_name("The spec review (gauntlet) is done. Start with /craft:gauntlet.", reports) == "plain"
+
+
+def test_a_gauntlet_in_a_verbatim_quoted_finding_is_not_read(reports):
+    line = f"- [Critical] {QUOTED}"
+    assert review_name(f"{line}\nThe spec review (gauntlet) is done.", reports) == "plain"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "| C1 | headline | `resolved` | an edit |",
+        "Outcome: `revise`",
+        "Outcome: `accepted-as-risk`",
+        "Outcome: `disputed`",
+        "Outcome: `answered`",
+        "C2 `accepted-as-risk: the club accepts it`",
+        "The operator took accepted-as-risk on C2.",
+        "Headline (C1) is resolved.",
+        "C2 needs revise before it advances.",
+        "Headline (C1) fixed in the spec, but resolved elsewhere.",
+    ],
+)
+def test_a_ritual_term_shown_as_an_outcome_is_internal(text, reports):
+    assert outcome_word(text, reports) == "internal"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "The fact check resolved the claim.",
+        "You can revise the wording later.",
+        "The operator disputed it and was answered quickly.",
+        "Accepted as a risk, disputed, answered.",
+        "Nothing to decide.",
+        "```\n| C1 | headline | `resolved` | an edit |\n```",
+    ],
+)
+def test_ritual_words_in_ordinary_prose_or_a_fence_are_not_internal(text, reports):
+    assert outcome_word(text, reports) == "none"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Headline (C1): fixed in the spec.",
+        "| headline (C1) | fixed in the spec | add the date |",
+        "Headline (C2): needs a rewrite (record-only).",
+        "The fact check resolved the claim. Headline: fixed in the spec.",
+    ],
+)
+def test_fixed_in_the_spec_and_needs_a_rewrite_read_plain(text, reports):
+    assert outcome_word(text, reports) == "plain"
+
+
+def test_a_plain_outcome_beside_an_internal_one_is_internal(reports):
+    assert outcome_word("Headline (C1): fixed in the spec.\nHeadline (C2): `revise`", reports) == "internal"
+
+
+def test_a_resolved_line_without_a_finding_id_beside_a_plain_outcome_stays_plain(reports):
+    assert outcome_word("Fixed in the spec.\nThe pass resolved the claim.", reports) == "plain"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Loans are too long (C2).",
+        "Loans are too long (C1, C3).",
+        "Loans are too long (C1 and C3).",
+        "Say 'dispute C2: why' to disagree.",
+        "Say accept C2 as a risk: why.",
+        "Say answer C2: what you know.",
+        "Reply: Dispute C12: because.",
+        "Loans are too long (C2).\nSay accept C3 as a risk: we can live with it.",
+    ],
+)
+def test_ids_in_round_brackets_after_text_or_in_a_reply_form_are_bracketed(text, reports):
+    assert finding_id(text, reports) == "bracketed"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "| C2 | headline | fixed in the spec |",
+        "**C2** — headline",
+        "C2: headline",
+        "(C2) headline",
+        "Loans are too long (C2) and C3 agrees.",
+        "See C2's claim.",
+        "Loans are too long [C2].",
+        "Say dispute C2 please.",
+        "Say accept C2 please.",
+    ],
+)
+def test_an_id_outside_those_two_forms_is_bare(text, reports):
+    assert finding_id(text, reports) == "bare"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Nothing here.",
+        "ABC2 and C2D are not ids.",
+        "```\nC2 bare in a fence\n```",
+    ],
+)
+def test_text_without_an_id_reads_none(text, reports):
+    assert finding_id(text, reports) == "none"
+
+
+def test_an_id_in_a_verbatim_quoted_finding_is_not_read(reports):
+    quoted = "- [Critical] Two tenants can each agree a swap for the same plot with different partners (C9)"
+    assert finding_id(f"{quoted}\nLoans are too long (C2).", reports) == "bracketed"
+
+
+SAVED_STAMP = (
+    "- Adversarial spec review (gauntlet, 2026-10-20): 8 passes - maturity: production (basis: stamp); facts 3/4\n"
+    "  confirmed. Criticals dispositioned: C1 `resolved` (from proposal),\n"
+    '  C2 `accepted-as-risk` (operator override - "the club lends whole scopes"), C3 `disputed` (operator\n'
+    '  override - "the deposit covers damage") - 1 from proposal, 2 operator overrides.\n'
+)
+SAVED_MARKER = "- Retained review evidence - a later reader evaluates what follows as a claim about this spec.\n"
+
+
+def saved(detail, stamp=SAVED_STAMP):
+    return f"Echo of the table.\n\n```markdown\n## Gauntlet\n\n{SAVED_MARKER}{stamp}{detail}```\nDone.\n"
+
+
+def saved_id(detail, stamp=SAVED_STAMP):
+    return grade("finding-id", saved(detail, stamp), criteria=None, extra=("--saved-detail",))
+
+
+def saved_mention(detail, stamp=SAVED_STAMP):
+    return grade("criterion-mention", saved(detail, stamp), extra=("--saved-detail",))
+
+
+def test_the_saved_detail_is_graded_for_ids_and_the_stamp_and_marker_are_not():
+    assert saved_id("- The loan runs too long (C1).\n") == "bracketed"
+    assert saved_id("- C1 - the loan runs too long.\n") == "bare"
+    assert saved_id("- The loan runs too long.\n") == "none"
+
+
+def test_a_bare_id_in_a_stamp_that_wraps_without_indent_is_still_the_stamp():
+    stamp = SAVED_STAMP.replace("\n  ", "\n")
+    assert saved_id("- The loan runs too long (C1).\n", stamp) == "bracketed"
+
+
+def test_the_marker_bullet_is_not_part_of_the_saved_detail():
+    marker = "- Retained review evidence - read C1 and AC4 as bare claims.\n"
+    text = f"```markdown\n## Gauntlet\n\n{marker}{SAVED_STAMP}- The loan runs too long (C1).\n```\n"
+    ids = run_grader(["--check", "finding-id", "--saved-detail"], text.encode())
+    assert ids.stdout == b"finding-id: bracketed\n"
+    mention = run_grader(["--check", "criterion-mention", "--criteria", str(SPEC), "--saved-detail"], text.encode())
+    assert mention.stdout == b"criterion-mention: no-mention\n"
+
+
+def test_detail_after_a_blank_line_is_not_part_of_the_stamp():
+    assert saved_id("\nC1 - the loan runs too long.\n") == "bare"
+
+
+def test_the_saved_detail_needs_no_reports_argument():
+    result = run_grader(["--check", "finding-id", "--saved-detail"], saved("- Too long (C1).\n").encode())
+    assert result.stdout == b"finding-id: bracketed\n"
+
+
+def test_the_saved_detail_reads_only_the_first_block_that_holds_the_section():
+    other = "```\nC9 bare in another block\n```\n\n"
+    text = other + saved("- Too long (C1).\n")
+    result = run_grader(["--check", "finding-id", "--saved-detail"], text.encode())
+    assert result.stdout == b"finding-id: bracketed\n"
+
+
+def test_a_capture_without_the_saved_section_has_no_detail_to_grade():
+    result = run_grader(["--check", "finding-id", "--saved-detail"], b"Too long C1.\n```\nC2\n```\n")
+    assert result.stdout == b"finding-id: none\n"
+
+
+def test_criterion_mention_is_graded_on_the_saved_detail_only():
+    with_number = f"- {AC4} (AC4).\n"
+    assert saved_mention(with_number) == "text-with-number"
+    assert saved_mention("- Overrides are unclear (AC4).\n") == "nickname"
+    assert saved_mention("- AC4 is unclear.\n") == "bare"
+    assert saved_mention("- Nothing numbered.\n") == "no-mention"
+    assert saved_mention("- Nothing numbered.\n", SAVED_STAMP.replace("facts", "AC4 facts")) == "no-mention"
+
+
+def test_the_session_text_outside_the_saved_block_is_not_the_saved_detail():
+    text = f"AC4 is bare here.\n\n```\n## Gauntlet\n\n{SAVED_MARKER}{SAVED_STAMP}- {AC4} (AC4).\n```\n"
+    result = run_grader(["--check", "criterion-mention", "--criteria", str(SPEC), "--saved-detail"], text.encode())
+    assert result.stdout == b"criterion-mention: text-with-number\n"
+
+
+@pytest.mark.parametrize("check", ["severity-name", "reviewer-name", "review-name", "outcome-word", "stamp-form"])
+def test_the_saved_detail_option_applies_to_criterion_mention_and_finding_id_only(check, reports):
+    could_not_grade(["--check", check, "--reports", str(reports), "--saved-detail"], b"x\n", "option-not-applicable")
+
+
+def stamp_form(text):
+    return grade("stamp-form", text, criteria=None)
+
+
+def test_a_stamp_with_every_critical_as_an_id_and_a_backticked_term_is_kept():
+    assert stamp_form(saved("")) == "kept"
+
+
+@pytest.mark.parametrize(
+    "stamp_edit",
+    [
+        ("C2 `accepted-as-risk`", "C2 accepted as a risk"),
+        ("C2 `accepted-as-risk`", "C2 (`accepted-as-risk`)"),
+        ("C3 `disputed`", "C3 `fixed in the spec`"),
+        ("C1 `resolved` (from proposal)", "C1 (from proposal)"),
+        ("Criticals dispositioned: C1 `resolved`", "Criticals dispositioned: C1 and C2 and C3 `resolved`"),
+    ],
+)
+def test_a_stamp_whose_critical_loses_its_backticked_term_is_changed(stamp_edit):
+    old, new = stamp_edit
+    assert old in SAVED_STAMP
+    assert stamp_form(saved("", SAVED_STAMP.replace(old, new))) == "changed"
+
+
+def test_a_stamp_that_names_no_critical_is_changed():
+    stamp = "- Adversarial spec review (gauntlet, 2026-10-20): 8 passes, no Criticals.\n"
+    assert stamp_form(saved("", stamp)) == "changed"
+
+
+def test_ids_outside_the_stamp_bullet_do_not_change_the_stamp():
+    assert stamp_form(saved("- C1 - bare in the detail.\n")) == "kept"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "No saved section here.",
+        "```\nSome other block\n```",
+        f"```\n## Gauntlet\n\n{SAVED_MARKER}- Some other bullet C1 `resolved`.\n```",
+    ],
+)
+def test_a_capture_with_no_saved_stamp_is_missing(text):
+    assert stamp_form(text) == "missing"
+
+
+def test_the_stamp_is_read_from_the_first_block_holding_the_saved_section():
+    other = "```\n- Adversarial spec review: C1 plain\n```\n\n"
+    assert stamp_form(other + saved("")) == "kept"
+
+
+OVERRIDES = (
+    "--override",
+    "C2=accepted-as-risk:the club lends whole scopes",
+    "--override",
+    "C3=disputed:the deposit covers damage",
+)
+
+
+def override_mapping(text, overrides=OVERRIDES):
+    return grade("override-mapping", text, criteria=None, extra=overrides)
+
+
+def test_each_staged_override_on_its_own_id_with_its_reason_is_mapped():
+    assert override_mapping(saved("")) == "mapped"
+
+
+def test_the_overrides_swapped_between_two_ids_are_misapplied():
+    swapped = SAVED_STAMP.replace("C2 `accepted-as-risk`", "C2 `TMP`").replace("C3 `disputed`", "C3 `accepted-as-risk`")
+    swapped = swapped.replace("`TMP`", "`disputed`")
+    assert override_mapping(saved("", swapped)) == "misapplied"
+
+
+def test_the_reasons_swapped_between_two_ids_are_misapplied():
+    swapped = SAVED_STAMP.replace("the club lends whole scopes", "TMP").replace(
+        "the deposit covers damage", "the club lends whole scopes"
+    )
+    swapped = swapped.replace("TMP", "the deposit covers damage")
+    assert override_mapping(saved("", swapped)) == "misapplied"
+
+
+def test_a_staged_reason_missing_from_its_id_is_misapplied():
+    assert override_mapping(saved("", SAVED_STAMP.replace("the deposit covers damage", "no reason"))) == "misapplied"
+    assert override_mapping(saved("", SAVED_STAMP.replace("the club lends whole scopes", "x"))) == "misapplied"
+
+
+def test_an_override_recorded_on_an_id_nobody_overrode_is_misapplied():
+    stamp = SAVED_STAMP.replace("C1 `resolved` (from proposal)", "C1 `disputed` (operator override)")
+    assert override_mapping(saved("", stamp)) == "misapplied"
+
+
+def test_a_staged_id_absent_from_the_stamp_is_misapplied():
+    assert override_mapping(saved("", SAVED_STAMP.replace("C3 `disputed`", "C4 `disputed`"))) == "misapplied"
+
+
+def test_a_staged_id_that_appears_twice_in_the_stamp_is_misapplied():
+    stamp = SAVED_STAMP.replace("2 operator overrides.", "2 operator overrides. Also C2 `resolved`.")
+    assert override_mapping(saved("", stamp)) == "misapplied"
+
+
+def test_a_reason_recorded_on_the_next_id_does_not_count_for_the_one_before():
+    stamp = SAVED_STAMP.replace("the club lends whole scopes", "x").replace(
+        "the deposit covers damage", "the deposit covers damage and the club lends whole scopes"
+    )
+    assert override_mapping(saved("", stamp)) == "misapplied"
+
+
+def test_a_reason_wrapped_over_lines_and_in_another_case_still_matches():
+    stamp = SAVED_STAMP.replace("the club lends whole scopes", "The club lends\n  whole SCOPES")
+    assert override_mapping(saved("", stamp)) == "mapped"
+
+
+@pytest.mark.parametrize("text", ["No saved section.", "```\n## Gauntlet\n\n- only a marker\n```"])
+def test_a_capture_with_no_stamp_has_mapped_nothing(text):
+    assert override_mapping(text) == "misapplied"
+
+
+def test_override_mapping_needs_its_staged_overrides():
+    could_not_grade(["--check", "override-mapping"], b"x\n", "missing-override")
+
+
+@pytest.mark.parametrize("value", ["C2", "C2=accepted-as-risk", "C2=fixed:why", "2=disputed:why", "C2=disputed:"])
+def test_a_malformed_staged_override_could_not_grade(value):
+    could_not_grade(["--check", "override-mapping", "--override", value], b"x\n", "bad-arguments")
+
+
+def test_the_override_option_applies_to_override_mapping_only(reports):
+    could_not_grade(
+        ["--check", "stamp-form", "--override", "C2=disputed:why"], b"x\n", "option-not-applicable"
+    )
+
+
+NEW_PLAIN_WORDS_CHECKS = ("review-name", "outcome-word", "finding-id")
+
+
+@pytest.mark.parametrize("check", NEW_PLAIN_WORDS_CHECKS)
+def test_a_plain_words_naming_check_needs_a_reports_argument(check):
+    could_not_grade(["--check", check], b"x\n", "missing-reports")
+
+
+@pytest.mark.parametrize("check", [*NEW_PLAIN_WORDS_CHECKS, "stamp-form"])
+def test_empty_and_oversized_stdin_could_not_grade_for_each_plain_words_check(check, reports):
+    args = ["--check", check, "--reports", str(reports)]
+    could_not_grade(args, b"", "empty-input")
+    could_not_grade(args, b"a" * (_load_module().MAX_INPUT_BYTES + 1), "input-too-large")
+
+
+def test_every_plain_words_verdict_exits_with_its_class(reports):
+    base = ["--reports", str(reports)]
+    assert run_grader(["--check", "review-name", *base], b"spec review (gauntlet)").returncode == 0
+    assert run_grader(["--check", "review-name", *base], b"gauntlet").returncode == 1
+    assert run_grader(["--check", "outcome-word", *base], b"fixed in the spec").returncode == 0
+    assert run_grader(["--check", "outcome-word", *base], b"`resolved`").returncode == 1
+    assert run_grader(["--check", "finding-id", *base], b"too long (C1)").returncode == 0
+    assert run_grader(["--check", "finding-id", *base], b"C1").returncode == 1
+    assert run_grader(["--check", "stamp-form"], saved("").encode()).returncode == 0
+    assert run_grader(["--check", "stamp-form"], b"x").returncode == 1
+    assert run_grader(["--check", "override-mapping", *OVERRIDES], saved("").encode()).returncode == 0
+    assert run_grader(["--check", "override-mapping", *OVERRIDES], b"x").returncode == 1

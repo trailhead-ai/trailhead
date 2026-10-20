@@ -78,6 +78,9 @@ SUMMARY_BASE_REVISION = "d860c95a7d470be857e01f04c55c986abadab916"
 # measurement, so after a rebase merge find it by that subject line.
 SUMMARY_RULES_REVISION = "d6eb84540f8e5b959554bc1578b0ece26154a76f"
 
+# origin/main when the plain-words sites were cut: the three plain-words baseline arms read every source here.
+PLAIN_WORDS_BASELINE_REVISION = "4722bd0b45f838ecd02b17baa90931e4d47166e6"
+
 PLUGIN = "tools/craft/plugins/craft"
 RULES = f"{PLUGIN}/rules.md"
 COUNCIL = f"{PLUGIN}/skills/_shared/council.md"
@@ -288,6 +291,21 @@ ARM_SOURCES.update(
 )
 
 
+# The plain-words sites each run the spec review's baseline composition, which is the same four sources at each site.
+PLAIN_WORDS_SITES = ("pwopen", "pwdetail", "pwsaved")
+ARM_SOURCES.update(
+    {
+        f"pw-baseline-{site}.md": [
+            (RULES, PLAIN_WORDS_BASELINE_REVISION),
+            (GAUNTLET_SKILL, PLAIN_WORDS_BASELINE_REVISION),
+            (GAUNTLET_DISPOSITIONS, PLAIN_WORDS_BASELINE_REVISION),
+            (COUNCIL, PLAIN_WORDS_BASELINE_REVISION),
+        ]
+        for site in PLAIN_WORDS_SITES
+    }
+)
+
+
 def test_every_arm_file_has_a_manifest_entry_and_every_entry_a_file():
     undeclared, missing = manifest_mismatches(set(ARM_SOURCES), ARMS_DIR)
     assert not undeclared, f"arm file(s) with no manifest entry: {sorted(undeclared)}"
@@ -310,7 +328,8 @@ def test_report_labels_reads_headings_and_skips_fenced_ones():
     assert report_labels(text) == ["Builder", "Security"]
 
 
-FS_COUNCIL_REPORTS = ["fs-reports-lenses.md", "fs-reports-consult.md", "fs-reports-spec-review.md"]
+PW_REPORTS = "pw-reports-spec-review.md"
+FS_COUNCIL_REPORTS = ["fs-reports-lenses.md", "fs-reports-consult.md", "fs-reports-spec-review.md", PW_REPORTS]
 REPORT_FILES = [
     "reports-lenses.md",
     "reports-consult.md",
@@ -454,3 +473,87 @@ def test_each_fs_prompt_names_fixture_files_that_exist(site: str):
     assert paths, f"fs-prompt-{site}.md names no fixture file"
     for rel in paths:
         assert (FIXTURES_DIR / rel).is_file(), (site, rel)
+
+
+PW_SPEC = FIXTURES_DIR / "pw-spec.md"
+ONE_LINE = 80
+
+
+def test_each_pw_prompt_names_fixture_files_that_exist():
+    for site in PLAIN_WORDS_SITES:
+        prompt = (FIXTURES_DIR / f"pw-prompt-{site}.md").read_text(encoding="utf-8")
+        paths = prompt_fixture_paths(prompt)
+        assert paths, f"pw-prompt-{site}.md names no fixture file"
+        for rel in paths:
+            assert (FIXTURES_DIR / rel).is_file(), (site, rel)
+
+
+@pytest.mark.parametrize("site", PLAIN_WORDS_SITES)
+@pytest.mark.parametrize("check", ["review-name", "outcome-word"])
+def test_no_pw_prompt_names_the_review_or_shows_an_outcome(site: str, check: str):
+    path = FIXTURES_DIR / f"pw-prompt-{site}.md"
+    result = _grade(check, FIXTURES_DIR / PW_REPORTS, path.read_text(encoding="utf-8"))
+    assert result.stdout == f"{check}: none\n".encode(), (site, result.stdout, result.stderr)
+
+
+def prompt_headlines(text: str) -> list[str]:
+    """The three finding headlines a pwdetail or pwsaved prompt gives as the opening summary's content."""
+    found = re.search(r"decision(?:, in this order)?: (.+?)\. The operator has replied", text, re.DOTALL)
+    return [part.strip() for part in found.group(1).split(";")] if found else []
+
+
+def test_prompt_headlines_reads_each_headline_of_the_opening_summary():
+    text = "findings that need the operator's decision: first one; second one; third. The operator has replied: x"
+    assert prompt_headlines(text) == ["first one", "second one", "third"]
+    assert prompt_headlines("no list here") == []
+
+
+@pytest.mark.parametrize("site", ["pwdetail", "pwsaved"])
+def test_each_fixture_headline_fits_one_line_with_its_id_appended(site: str):
+    prompt = (FIXTURES_DIR / f"pw-prompt-{site}.md").read_text(encoding="utf-8")
+    headlines = prompt_headlines(prompt)
+    assert len(headlines) == 3, (site, headlines)
+    for number, headline in enumerate(headlines, start=1):
+        assert len(f"{headline} (C{number})") <= ONE_LINE, (site, headline)
+    longest = max(headlines, key=len)
+    assert len(f"{longest} (C{len(headlines)})") <= ONE_LINE
+
+
+def test_the_pw_headlines_of_the_two_prompts_are_the_same_three_findings():
+    texts = [(FIXTURES_DIR / f"pw-prompt-{site}.md").read_text(encoding="utf-8") for site in ("pwdetail", "pwsaved")]
+    assert prompt_headlines(texts[0]) == prompt_headlines(texts[1])
+
+
+def acceptance_criteria_by_section(text: str) -> dict[str, list[str]]:
+    sections: dict[str, list[str]] = {}
+    current = None
+    for line in text.splitlines():
+        if line.startswith("### "):
+            current = line[4:].strip()
+            sections[current] = []
+        elif current is not None and re.match(r"- \*\*AC\d+\.\*\*", line):
+            sections[current].append(line)
+        elif current is not None and line.startswith("## "):
+            current = None
+        elif current is not None and sections[current] and line.startswith("  ") and line.strip():
+            sections[current][-1] += " " + line.strip()
+    return sections
+
+
+def test_acceptance_criteria_by_section_groups_each_criterion_under_its_heading():
+    text = "## A\n### One\n- **AC1.** x\n### Two\n- **AC2.** y\n- **AC3.** z\n## Next\n- **AC4.** w\n"
+    assert acceptance_criteria_by_section(text) == {"One": ["- **AC1.** x"], "Two": ["- **AC2.** y", "- **AC3.** z"]}
+    wrapped = "### One\n- **AC1.** x\n  and more\n- **AC2.** y\n"
+    assert acceptance_criteria_by_section(wrapped) == {"One": ["- **AC1.** x and more", "- **AC2.** y"]}
+
+
+def test_the_pw_spec_holds_its_criteria_under_two_sections_of_similar_length():
+    sections = acceptance_criteria_by_section(PW_SPEC.read_text(encoding="utf-8"))
+    assert len(sections) >= 2 and all(sections.values()), sections
+    result = subprocess.run(
+        [sys.executable, str(GRADER), "--check", "criterion-mention", "--criteria", str(PW_SPEC)],
+        input=b"AC1", capture_output=True, timeout=60,
+    )
+    assert result.stdout == b"criterion-mention: bare\n", result.stderr
+    words = [len(line.split()) for lines in sections.values() for line in lines]
+    assert max(words) <= 1.5 * min(words), words

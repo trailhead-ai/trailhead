@@ -1,0 +1,41 @@
+Here is the detail on the three findings that need your decision. I've kept the ids the opening summary used.
+
+---
+
+**C1 — Members are told what goes back in the case only once, near the end of the loan** · would build the wrong thing, needs your decision · proposed: `resolved`
+
+Should the confirmation email also say what belongs in the case? I recommend it, because otherwise a member who misses one email can be charged for a finder cap they were never told about. The spec does have the member "receive a reminder listing what goes back in the case: the telescope, its eyepieces, and the finder cap" two days before the return date (AC5). But the email sent when the loan starts "states the loan and its return date" and nothing else (AC1).
+
+Worst case: the reminder goes to a mistyped address and nobody sees it. The member collects the case without checking it, returns it without the finder cap, and is asked to replace it. They could not have known, because the only message that listed the cap never reached them.
+
+Fix: `, and lists what goes back in the case: the telescope, its eyepieces, and the finder cap` added to the end of the sentence about the confirmation email (AC1), so the list reaches the member when they collect the scope, not only two days before it is due back. One caveat: the case only goes wrong if the reminder is never seen, so this edit covers the same failure as the bounced-reminder point below. It is still worth taking on its own, because it costs one clause.
+
+*Raised by: ease of use. Supported by failure cases' separate point that a reminder sent to a mistyped address is never seen.*
+
+---
+
+**C2 — A loan holds a whole telescope for the full dates asked, even if it is used for one night** · would build the wrong thing, needs your decision · proposed: `revise` (`record-only`)
+
+Should loans be booked by the night, rather than from a start date to a return date? I recommend reconsidering the loan unit before this is built, because everything else in the spec assumes the current one. Changing it later means reworking every criterion. Today a member borrows by giving "the telescope and a start date" (AC1), and "a second request for the same telescope and dates is refused" (AC2).
+
+Worst case: a member wants the club's largest scope for one clear Saturday and takes it for the whole weekend, because that is how loans work. Other members are refused those dates and wait weeks for the scope, which spent most of the loan sitting unused in someone's car.
+
+Fix: members would book one or more nights and add nights as needed, and the calendar would show each night as taken or free. This rewrites the sentence about how a member borrows (AC1), the rule against two members holding the same scope (AC2), cancelling and freeing dates (AC3), recording the return (AC4), and the timing of the reminder (AC5). Caveat: the reviewer could not say how often a loan is really for a single night. If you know most loans really do run a weekend or longer, say so with "answer C2: …", and I'll re-assess the finding with that in hand.
+
+*Raised by: right problem.*
+
+---
+
+**C3 — A telescope left in the cupboard shows as free with no condition note** · would build the wrong thing, needs your decision · proposed: `resolved`
+
+Should a returned telescope stay off the calendar until someone has checked it? I recommend it, because otherwise the spec doesn't fix the problem it was written for: nobody can tell who had a scope when its mirror was scratched. As written, "on the return date the loan officer records the telescope as back, with a note of its condition, and the telescope shows as free on the club's loan calendar from that day" (AC4). The spec never says what happens when the officer isn't there to record it.
+
+Worst case: a member drops the scope in the cupboard on a day the loan officer isn't in. The calendar shows it as free with no condition note, and the next member collects it and finds the scratched mirror. The history (AC6) has no note from the return, so the club can't tell which of the two members had it when the damage happened.
+
+Fix: `When a telescope comes back, it shows on the club's loan calendar as returned and unchecked until the loan officer records a note of its condition, and shows as free only from then.` This replaces the second half of the sentence about recording a return (AC4), so a scope is only offered to the next member once someone has looked at it.
+
+*Raised by: failure cases.*
+
+---
+
+Reply "go" to accept as proposed, or override any of them by id, for example "dispute C2 because …" or "answer C2: …". Include your reason with any override.

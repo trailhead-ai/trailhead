@@ -11,6 +11,13 @@ Usage:
     cat capture.txt | wording_grader.py --check calibration-level --reports reports-calibrated.md
     cat capture.txt | wording_grader.py --check code-review-name --reports reports-code-review.md
     cat capture.txt | wording_grader.py --check persisted-levels
+    cat capture.txt | wording_grader.py --check review-name --reports reports-spec-review.md
+    cat capture.txt | wording_grader.py --check outcome-word --reports reports-spec-review.md
+    cat capture.txt | wording_grader.py --check finding-id --reports reports-spec-review.md
+    cat capture.txt | wording_grader.py --check finding-id --saved-detail
+    cat capture.txt | wording_grader.py --check criterion-mention --criteria spec.md --saved-detail
+    cat capture.txt | wording_grader.py --check stamp-form
+    cat capture.txt | wording_grader.py --check override-mapping --override C2=accepted-as-risk:<reason>
 
 The capture arrives on stdin. The grammar of `criterion-mention`, `covers-field`
 and `reviewer-report` is the one the ritual-output-wording eval case fixes in its
@@ -61,14 +68,34 @@ section of the finding-presentation-wording case's `expected.md`.
 line, for the three italic level labels and a Critical list that is not empty or
 `none`. Verdicts: `kept`, `changed`, `missing`. It reads no `--reports`.
 
+`review-name`, `outcome-word` and `finding-id` read the same reader-facing text. `review-name` says how the capture
+first names the spec review: `plain` when "spec review" comes first and "gauntlet" appears exactly once, inside round
+brackets; `internal` otherwise; `none` when the review is not named (a `/craft:gauntlet` command token is not a
+naming). `outcome-word` says how a finding's outcome is shown: `internal` for a ritual term (`resolved`, `revise`,
+`accepted-as-risk`, `disputed`, `answered`) in backticks, the hyphenated `accepted-as-risk`, or `resolved` or `revise`
+on a line that carries a finding id; else `plain` when "fixed in the spec" or "needs a rewrite" appears; else `none`.
+`finding-id` says whether every finding id (`C<n>`) is in round brackets after text, or is the id in a reply form
+("dispute C2:", "accept C2 as a risk", "answer C2:"): `bracketed`; `bare` otherwise; `none` when no id appears. The
+grammar is the plain-words extension of the finding-presentation-wording case's `expected.md`.
+
+`--saved-detail` applies `criterion-mention` and `finding-id` to the saved review section's detail instead of the
+capture's reader-facing text: the first fenced block holding a `## Gauntlet` line, minus its fences, heading, marker
+bullet and stamp bullet. `finding-id` then reads no `--reports`.
+
+`stamp-form` reads the stamp bullet of that saved section. Verdicts: `kept` when every finding id in it is followed by
+a backticked ritual term, `changed` when one is not or none appears, `missing` when there is no saved section or no
+stamp bullet. `override-mapping` reads the same stamp against each `--override C<n>=<term>:<reason>` (repeatable):
+`mapped` when each staged id carries its term and its reason and no other id carries an override term, else
+`misapplied`.
+
 stdout carries exactly the line `<check>: <verdict>`.
 
 Exit codes:
-    0  a passing verdict (text-with-number, template-shape, gate-shape, plain, kept)
+    0  a passing verdict (text-with-number, template-shape, gate-shape, plain, kept, bracketed, mapped)
     1  any other verdict
     2  could not grade: nothing on stdout, a `reason-code:` line on stderr —
        bad-arguments, missing-check, unknown-check, option-not-applicable,
-       missing-criteria, criteria-unreadable, criteria-not-utf8,
+       missing-criteria, missing-override, criteria-unreadable, criteria-not-utf8,
        no-criteria-found, duplicate-criterion, missing-reports,
        reports-unreadable, reports-not-utf8, criteria-too-large,
        reports-too-large, empty-input, input-too-large, not-utf8. Zero bytes of stdin is `empty-input`;
@@ -109,9 +136,23 @@ VERDICT_WORDS = {
     "persisted-levels": ("kept", "changed", "missing"),
     "calibration-level": ("plain", "internal", "none"),
     "code-review-name": ("plain", "internal", "none"),
+    "review-name": ("plain", "internal", "none"),
+    "outcome-word": ("plain", "internal", "none"),
+    "finding-id": ("bracketed", "bare", "none"),
+    "stamp-form": ("kept", "changed", "missing"),
+    "override-mapping": ("mapped", "misapplied"),
 }
-_REPORT_CHECKS = ("severity-name", "reviewer-name", "calibration-level", "code-review-name")
-PASSING = frozenset({"text-with-number", "template-shape", "gate-shape", "plain", "kept"})
+_REPORT_CHECKS = (
+    "severity-name",
+    "reviewer-name",
+    "calibration-level",
+    "code-review-name",
+    "review-name",
+    "outcome-word",
+    "finding-id",
+)
+_SAVED_DETAIL_CHECKS = ("criterion-mention", "finding-id")
+PASSING = frozenset({"text-with-number", "template-shape", "gate-shape", "plain", "kept", "bracketed", "mapped"})
 
 _TOKEN_RE = re.compile(r"(?<![A-Za-z0-9])AC(\d+)")
 _DIGITS_RE = re.compile(r"(\d+)")
@@ -120,6 +161,7 @@ _RANGE_CONNECTOR_RE = re.compile(r"\s*[-–—]\s*|\s+(?:to|through)\s+")
 _LINE_BREAK_RE = re.compile(r"\r\n|\r|\n")
 _WORD_RE = re.compile(r"[a-z]+")
 _MARKUP_RE = re.compile(r"[*_`]")
+_EMPHASIS_RE = re.compile(r"[*_]")
 _LIST_ITEM_RE = re.compile(r"[ \t]*(?:[-*+]|\d+[.)])[ ]")
 _CRITERION_LINE_RE = re.compile(r"[ \t]*(?:[-*+] )?[ \t]*\*\*AC(\d+)\.\*\*(.*)")
 _FINDING_TAG_RE = re.compile(r"[ \t]*[-*]?[ \t]*(?:\*\*)?\[(?:Critical|Important|Minor)\]")
@@ -165,6 +207,26 @@ _PLAIN_REVIEWER_RE = re.compile(
 )
 _INTERNAL_CODE_REVIEW_RE = re.compile(rf"{_BEFORE}code[ -]reviewers?{_AFTER}", re.IGNORECASE)
 _PLAIN_CODE_REVIEW_RE = re.compile(rf"{_BEFORE}code[ -]review{_AFTER}", re.IGNORECASE)
+_SPEC_REVIEW_RE = re.compile(rf"{_BEFORE}spec review{_AFTER}", re.IGNORECASE)
+_GAUNTLET_RE = re.compile(rf"(?<![/:]){_BEFORE}gauntlet{_AFTER}", re.IGNORECASE)
+_RITUAL_TERMS = "resolved|revise|accepted-as-risk|disputed|answered"
+_BACKTICKED_TERM_RE = re.compile(rf"`(?:{_RITUAL_TERMS})(?![A-Za-z-])[^`]*`")
+_HYPHENATED_TERM_RE = re.compile(rf"{_BEFORE}accepted-as-risk{_AFTER}")
+_ID_LINE_TERM_RE = re.compile(rf"{_BEFORE}(?:resolved|revise){_AFTER}", re.IGNORECASE)
+_PLAIN_OUTCOME_RE = re.compile(rf"{_BEFORE}(?:fixed in the spec|needs a rewrite){_AFTER}", re.IGNORECASE)
+_FINDING_ID_RE = re.compile(r"(?<![A-Za-z0-9])C(\d+)(?![A-Za-z0-9])")
+_ID_LIST = r"C\d+(?:(?:\s*,\s*(?:and\s+)?|\s+and\s+|\s*&\s*)C\d+)*"
+_BRACKETED_IDS_RE = re.compile(rf"\(\s*({_ID_LIST})\s*\)")
+_REPLY_FORM_RES = (
+    re.compile(r"\b(?:dispute|answer)\s+(C\d+)\s*:", re.IGNORECASE),
+    re.compile(r"\baccept\s+(C\d+)\s+as a risk\b", re.IGNORECASE),
+)
+_STAMP_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9])C(\d+) `([a-z-]+)`")
+_STAMP_TERM_RE = re.compile(rf" `(?:{_RITUAL_TERMS})`")
+_OVERRIDE_TERMS = ("accepted-as-risk", "disputed", "answered")
+_OVERRIDE_ARG_RE = re.compile(r"C(\d+)=(accepted-as-risk|disputed|answered):(.*\S.*)")
+_SAVED_HEADING = "## Gauntlet"
+_BULLET_RE = re.compile(r"[-*+] ")
 _FINDING_TAGS = ("[Critical]", "[Important]", "[Minor]")
 _QUOTE_MIN_CHARS = 30
 _LABELS = ("*Critical:*", "*Important:*", "*Minor:*")
@@ -464,8 +526,8 @@ def _fenced_flags(physical: list[str]) -> list[bool]:
     return flags
 
 
-def _normalise(text: str) -> str:
-    return _WS_RE.sub(" ", _MARKUP_RE.sub("", text)).strip()
+def _normalise(text: str, keep_ticks: bool = False) -> str:
+    return _WS_RE.sub(" ", (_EMPHASIS_RE if keep_ticks else _MARKUP_RE).sub("", text)).strip()
 
 
 def _outside_fences(physical: list[str]) -> list[tuple[str, bool]]:
@@ -530,13 +592,15 @@ def _is_verbatim_quotation(normalised: str, quotations: dict[str, list[str]]) ->
     return any(source.startswith(tagged[1]) for source in quotations[tagged[0]])
 
 
-def _reader_facing(text: str, quotations: dict[str, list[str]]) -> list[tuple[str, bool]]:
-    """Normalised reader-facing logical lines as (text, is_heading) pairs."""
+def _reader_facing(
+    text: str, quotations: dict[str, list[str]], keep_ticks: bool = False
+) -> list[tuple[str, bool]]:
+    """Normalised reader-facing logical lines as (text, is_heading) pairs; `keep_ticks` leaves backticks in."""
     kept = []
     for line, heading in _outside_fences(_split_lines(text)):
         normalised = _normalise(line)
         if not _is_verbatim_quotation(normalised, quotations):
-            kept.append((normalised, heading))
+            kept.append((_normalise(line, keep_ticks) if keep_ticks else normalised, heading))
     return kept
 
 
@@ -586,6 +650,159 @@ def grade_code_review_name(text: str, quotations: dict[str, list[str]]) -> str:
     if any(_INTERNAL_CODE_REVIEW_RE.search(line) for line, _ in lines):
         return "internal"
     return "plain" if any(_PLAIN_CODE_REVIEW_RE.search(line) for line, _ in lines) else "none"
+
+
+# --- review-name, outcome-word and finding-id ------------------------------------------------
+
+
+def _in_round_brackets(line: str, position: int) -> bool:
+    before = line[:position]
+    return before.count("(") > before.count(")") and ")" in line[position:]
+
+
+def grade_review_name(text: str, quotations: dict[str, list[str]]) -> str:
+    gauntlets: list[bool] = []
+    first: str | None = None
+    for line, _ in _reader_facing(text, quotations):
+        found = [(m.start(), "spec review") for m in _SPEC_REVIEW_RE.finditer(line)]
+        found += [(m.start(), "gauntlet") for m in _GAUNTLET_RE.finditer(line)]
+        for position, name in sorted(found):
+            if first is None:
+                first = name
+            if name == "gauntlet":
+                gauntlets.append(_in_round_brackets(line, position))
+    if first is None:
+        return "none"
+    return "plain" if first == "spec review" and gauntlets == [True] else "internal"
+
+
+def grade_outcome_word(text: str, quotations: dict[str, list[str]]) -> str:
+    lines = [line for line, _ in _reader_facing(text, quotations, keep_ticks=True)]
+    for line in lines:
+        if _BACKTICKED_TERM_RE.search(line) or _HYPHENATED_TERM_RE.search(line):
+            return "internal"
+        if _FINDING_ID_RE.search(line) and _ID_LINE_TERM_RE.search(line):
+            return "internal"
+    return "plain" if any(_PLAIN_OUTCOME_RE.search(line) for line in lines) else "none"
+
+
+def _bracketed_id_starts(line: str) -> set[int]:
+    """Where the ids that sit in a round-bracket pair after text, or in a reply form, begin."""
+    allowed: set[int] = set()
+    for group in _BRACKETED_IDS_RE.finditer(line):
+        if any(ch.isalpha() for ch in line[: group.start()]):
+            allowed.update(m.start() for m in _FINDING_ID_RE.finditer(line, group.start(1), group.end(1)))
+    for pattern in _REPLY_FORM_RES:
+        allowed.update(m.start(1) for m in pattern.finditer(line))
+    return allowed
+
+
+def _grade_finding_id(lines: list[str]) -> str:
+    verdict = "none"
+    for line in lines:
+        allowed = _bracketed_id_starts(line)
+        for found in _FINDING_ID_RE.finditer(line):
+            if found.start() in allowed:
+                verdict = "bracketed" if verdict == "none" else verdict
+            else:
+                return "bare"
+    return verdict
+
+
+def grade_finding_id(text: str, quotations: dict[str, list[str]]) -> str:
+    return _grade_finding_id([line for line, _ in _reader_facing(text, quotations)])
+
+
+# --- the saved section: detail, stamp-form and override-mapping ------------------------------
+
+
+def _saved_parts(text: str) -> tuple[list[str] | None, str]:
+    """The stamp bullet's lines (None when absent) and the detail text of the saved section.
+
+    The section is the first fenced block holding a `## Gauntlet` line. Its detail is what remains once the fences,
+    the heading, the marker bullet and the stamp bullet are taken out; a bullet runs over the non-blank lines that do
+    not open a bullet or a heading of their own.
+    """
+    physical = _split_lines(text)
+    block = next(
+        (physical[first : last + 1] for first, last in _fenced_blocks(physical)
+         if any(line.strip() == _SAVED_HEADING for line in physical[first : last + 1])),
+        None,
+    )
+    if block is None:
+        return None, ""
+    body = block[1:]
+    stamp: list[str] | None = None
+    detail: list[str] = []
+    current = "detail"
+    for line in body:
+        stripped = line.strip()
+        if stripped == _SAVED_HEADING:
+            current = "detail"
+            continue
+        opens_own = _BULLET_RE.match(line) is not None or line.startswith("#")
+        if not stripped:
+            current = "detail"
+        elif opens_own:
+            label = _MARKUP_RE.sub("", line[2:] if _BULLET_RE.match(line) else line).lstrip().lower()
+            if label.startswith("retained review evidence"):
+                current = "marker"
+            elif label.startswith("adversarial spec review"):
+                current = "stamp"
+                stamp = []
+            else:
+                current = "detail"
+        if current == "stamp":
+            stamp.append(line)
+        elif current == "detail":
+            detail.append(line)
+    return stamp, "\n".join(detail)
+
+
+def saved_detail(text: str) -> str:
+    return _saved_parts(text)[1]
+
+
+def grade_saved_finding_id(text: str) -> str:
+    return _grade_finding_id(_logical_lines(_split_lines(saved_detail(text))))
+
+
+def _stamp_text(text: str) -> str | None:
+    stamp = _saved_parts(text)[0]
+    return None if stamp is None else _normalise("\n".join(stamp), keep_ticks=True)
+
+
+def grade_stamp_form(text: str) -> str:
+    stamp = _stamp_text(text)
+    if stamp is None:
+        return "missing"
+    ids = list(_FINDING_ID_RE.finditer(stamp))
+    if ids and all(_STAMP_TERM_RE.match(stamp, found.end()) for found in ids):
+        return "kept"
+    return "changed"
+
+
+def _fold_reason(text: str) -> str:
+    return _WS_RE.sub(" ", text).strip().casefold()
+
+
+def grade_override_mapping(text: str, staged: list[tuple[str, str, str]]) -> str:
+    stamp = _stamp_text(text)
+    if stamp is None:
+        return "misapplied"
+    tokens = list(_STAMP_TOKEN_RE.finditer(stamp))
+    segments: dict[str, list[tuple[str, str]]] = {}
+    for index, token in enumerate(tokens):
+        end = tokens[index + 1].start() if index + 1 < len(tokens) else len(stamp)
+        segments.setdefault(f"C{token.group(1)}", []).append((token.group(2), _fold_reason(stamp[token.end() : end])))
+    for found, entries in segments.items():
+        if found not in {staged_id for staged_id, _, _ in staged} and any(term in _OVERRIDE_TERMS for term, _ in entries):
+            return "misapplied"
+    for staged_id, term, reason in staged:
+        entries = segments.get(staged_id, [])
+        if len(entries) != 1 or entries[0][0] != term or _fold_reason(reason) not in entries[0][1]:
+            return "misapplied"
+    return "mapped"
 
 
 # --- persisted-levels ------------------------------------------------------------------------
@@ -678,12 +895,26 @@ def _read_reports(paths: list[str] | None) -> dict[str, list[str]]:
     return merged
 
 
+def _read_overrides(values: list[str] | None) -> list[tuple[str, str, str]]:
+    if not values:
+        raise CouldNotGrade("missing-override", "override-mapping needs --override C<n>=<term>:<reason>")
+    staged = []
+    for value in values:
+        found = _OVERRIDE_ARG_RE.fullmatch(value)
+        if found is None:
+            raise CouldNotGrade("bad-arguments", f"--override {value!r} is not C<n>=<term>:<reason>")
+        staged.append((f"C{found.group(1)}", found.group(2), found.group(3)))
+    return staged
+
+
 def run(argv: list[str]) -> tuple[str, str]:
     parser = _Parser(description="Grade one captured output for one wording check.")
     parser.add_argument("--check")
     parser.add_argument("--criteria")
     parser.add_argument("--reports", action="append")
     parser.add_argument("--drop-value-line", action="store_true")
+    parser.add_argument("--saved-detail", action="store_true")
+    parser.add_argument("--override", action="append")
     args = parser.parse_args(argv)
 
     if args.check is None:
@@ -692,17 +923,36 @@ def run(argv: list[str]) -> tuple[str, str]:
         raise CouldNotGrade("unknown-check", f"unknown check {args.check!r}")
     if args.drop_value_line and args.check != "criterion-mention":
         raise CouldNotGrade("option-not-applicable", "--drop-value-line applies to criterion-mention only")
+    if args.saved_detail and args.check not in _SAVED_DETAIL_CHECKS:
+        raise CouldNotGrade("option-not-applicable", "--saved-detail applies to criterion-mention and finding-id only")
+    if args.override and args.check != "override-mapping":
+        raise CouldNotGrade("option-not-applicable", "--override applies to override-mapping only")
+    staged = _read_overrides(args.override) if args.check == "override-mapping" else None
     criteria = None
     if args.check == "criterion-mention":
         if args.criteria is None:
             raise CouldNotGrade("missing-criteria", "criterion-mention needs --criteria")
         criteria = _read_criteria(args.criteria)
-    quotations = _read_reports(args.reports) if args.check in _REPORT_CHECKS else None
+    needs_reports = args.check in _REPORT_CHECKS and not args.saved_detail
+    quotations = _read_reports(args.reports) if needs_reports else None
     text = _read_stdin()
 
     if args.check == "criterion-mention":
-        verdict = grade_criterion_mention(text, criteria, args.drop_value_line)
+        scoped = saved_detail(text) if args.saved_detail else text
+        verdict = grade_criterion_mention(scoped, criteria, args.drop_value_line)
         gap = ""
+    elif args.check == "finding-id" and args.saved_detail:
+        verdict, gap = grade_saved_finding_id(text), ""
+    elif args.check == "finding-id":
+        verdict, gap = grade_finding_id(text, quotations), ""
+    elif args.check == "review-name":
+        verdict, gap = grade_review_name(text, quotations), ""
+    elif args.check == "outcome-word":
+        verdict, gap = grade_outcome_word(text, quotations), ""
+    elif args.check == "stamp-form":
+        verdict, gap = grade_stamp_form(text), ""
+    elif args.check == "override-mapping":
+        verdict, gap = grade_override_mapping(text, staged), ""
     elif args.check == "covers-field":
         verdict, gap = grade_covers_field(text), ""
     elif args.check == "severity-name":
