@@ -1,0 +1,13 @@
+## Findings
+- [Critical] Returns scanned after closing are stamped with the next morning's date (plan Notes), which contradicts AC5: a borrower drops an overdue book at 18:30, the 00:05 job still sees it on loan, and they are charged one more day. At the desk the next day they are shown a fee they know is wrong, and the system's own record backs the fee. Suggested: stamp the return with the scan time, or the drop-box business date, and have the fee calculator stop accrual on that date. Add a test across the closing-time boundary.
+- [Critical] On deploy, the plan does not say how fees and blocks apply to loans that are already overdue (production migration/backfill): the first 00:05 run may charge backdated fees. Borrowers then go over £10 overnight and are refused at checkout with no warning, because AC6 reminders are not built. Suggested: decide accrual-from-launch vs. backdated, send a one-time notice or set a grace period before the AC3 guard turns on, and make the guard switchable by a flag so it can be rolled back.
+- [Important] The plan has no task for AC6 reminders. Borrowers learn they are overdue only when blocked at the desk. Suggested: add a reminder task with a dedupe key per loan.
+- [Important] The override note stores only the reason, not who granted it (AC4). The next librarian cannot see who authorised it or why repeat overrides keep happening. Suggested: store the librarian's ID and a timestamp, and show them in the borrower's history.
+- [Important] There is no flow for recording a cash payment or a waiver at the desk. A borrower who pays stays blocked, every later checkout needs an override, and the waived totals in AC7 have no source. Suggested: add desk payment and waiver actions that write to the ledger.
+- [Important] AC1 requires the overdue flag within one minute of rollover, but the job runs at 00:05. Suggested: compute overdue at screen load from the due date.
+- [Important] The AC7 report is missing from the plan.
+- [Minor] The refusal screen copy is not specified. It should show the balance, the threshold and the override action in one step.
+- [Minor] The fee balance refreshes only on screen load, so it shows a stale figure after a return during the same session.
+
+## Confidence
+Medium: the gaps against the spec are clear from the text, but there is no codebase or existing desk UI to check them against.

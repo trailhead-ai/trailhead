@@ -1,0 +1,21 @@
+**Would build the wrong thing, needs your decision**
+
+**C1.** Should cancelling a booking require the member who made it to confirm? I recommend adding that confirmation step, because otherwise anyone who has seen a booking's confirmation email can take away someone else's firing.
+The spec says a member can cancel a booking up to 24 hours before its day (AC3), but it never says how a cancellation is tied to the member who booked. Here is how it goes wrong: a member forwards their confirmation email to a friend to show the date. The friend, or anyone that email reaches later, cancels the booking. The day is freed and goes to the first member on the standby list, and the member who booked arrives with their work to find the firing is no longer theirs. AC6 records the cancellation, but nothing in the record shows who made it.
+Fix: `"A cancellation takes effect only once the member who made the booking confirms it; until then the day stays booked."` This is added to AC3 and covers every cancellation, made at any point up to the 24-hour cutoff. One caveat matters: the fix only closes the gap if the request to confirm goes to the email address the booking was made with. A confirmation sent back to whoever asked to cancel would still let the forwarded email through.
+Proposed disposition: `resolved`.
+*Raised by: security.*
+
+**C2.** Should the spec book a share of a firing's shelf space instead of a whole kiln for a whole day? I recommend the change, because as written one member with a single bowl can hold a kiln for a day while everyone else waits weeks.
+The spec makes the kiln-day the thing a member books (AC1, AC2). In practice a firing is several members' work loaded together, and a kiln is full when its shelves are full, not when its day has been claimed. Here is how it goes wrong: a member books the large kiln for Thursday for one small piece. AC2 then refuses every other member who asks for Thursday and offers them the next free day. With about 90 members (the fact check found 112) and two kilns, a queue builds up behind kilns that are firing almost empty. The spec's own text points the same way. Its Problem describes two members turning up "with work for the same firing", and AC5 talks about what must be "on the shelves". Both describe a shared firing, not a private booking.
+Fix: members would book space on a firing and see how much is left, so a firing fills up instead of being claimed. This rewrites the Objectives and AC1, AC2 and AC3, and changes what AC6 lists. The rewritten criteria are not drafted here.
+Proposed disposition: `revise` (`record-only`). Prescription: replace the kiln-day as the booking unit with shelf space in a firing. AC1 books space, AC2 refuses only once a firing is full, and AC3 frees space rather than a whole day.
+*Raised by: right problem.*
+
+**C3.** Should the confirmation email tell the member that the shelves must be loaded by 8 am? I recommend adding it, because it is a one-line addition and a member who only finds out late loses the firing.
+The confirmation email in AC1 states the booking and nothing more. The 8 am load time first reaches the member in the reminder sent the evening before (AC5). Here is how it goes wrong: a member plans their day around the booking, never sees the evening reminder, and arrives at 9 to a kiln that is already packed. The failure-cases review raised a related point: a reminder sent to a mistyped address is never seen. On a closer read, this finding is narrower than the summary made it sound. AC5 does carry the 8 am time, so a member only loses out if they miss the reminder. The edit is still cheap and covers that case.
+Fix: `"and that the work must be on the shelves by 8 am on the day"`. This is added to the confirmation email in AC1, after "stating the booking".
+Proposed disposition: `resolved`.
+*Raised by: ease of use.*
+
+Your reply can be "go" to accept these as proposed, or an override per finding, for example "dispute C3: <your reason>, otherwise go".

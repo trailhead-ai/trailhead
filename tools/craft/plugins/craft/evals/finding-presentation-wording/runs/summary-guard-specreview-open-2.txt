@@ -1,0 +1,31 @@
+**Spec review: a waiting list for allotment plots.** maturity: production (basis: stamp) · round 1 · no waivers
+
+Two findings need your decision, and I propose an edit for each. Reply **"go"** to accept both, or override by id: `dispute C2: <your reason>`, `accept C1 as risk: <your reason>`, or `answer C2: <what the passes didn't know>`.
+
+The passes kept coming back to one weakness: every step in this spec depends on an email reaching the right person. Two passes looked at an offer that is never delivered, from different sides. The failure-cases pass saw a freed plot sitting empty for 14 days. The ease-of-use pass saw a person who has waited for years dropped to the back of the queue without being told. The right-problem pass found the other half: joining requires an email address (AC1). The paper list exists because the warden phones people, so anyone without email can't join once the paper list is retired. Beyond those two, the remaining findings are gaps a builder would have to guess at. Nothing says who reports that a plot has come free, what happens when a site's queue is empty, or how a person checks their place after the first email.
+
+The convergent finding holds up best. Two passes that couldn't see each other described the same event, and it follows from the text of AC2 and AC3 alone. I kept the no-email finding at "needs your decision" even though its pass couldn't say how many people lack email. The exclusion follows from AC1's own wording, whatever the number is, and how the existing list moves online is a decision this production-maturity spec has to make. The fact check found one wrong figure: the committee minutes of 3 March record 412 names, not about 340. That changes the scale of the problem, not the design. The divergence pass's "pins" are real choices, but each one is a sentence, not a reason to rethink the spec. I dropped notes that were only about wording (whether to say "lapse", whether to name the mail provider).
+
+What I propose: tighten the offer criteria so an offer that can't be delivered doesn't cost anyone their place, and give people without email a phone route handled by the warden. Both fit inside the spec's own sections, so it can advance this round.
+
+**Recommended outcome:** advance to `ready` this round. No finding needs another revise round.
+
+| id | finding | proposed disposition | proposed edit |
+|---|---|---|---|
+| C1 | *An offer email that never arrives lapses silently, and the person who never saw it goes to the back of the queue (failure cases, ease of use)* | `resolved` | *add criteria: an offer that bounces passes on at once and the person keeps their place; a reminder is sent on day 10 and a notice when an offer lapses* |
+| C2 | *Joining requires email, so people on the paper list who have no email can't join once it is retired (right problem)* | `resolved` | *AC1 accepts a phone number instead of an email; new criterion: a warden can enter a phone-only person and makes their offers by phone, recording each one* |
+
+**Worth fixing, your call: 10 findings.** Gaps the build would have to guess at:
+- who reports that a plot is free
+- an empty queue for a site
+- how a person sees their place after the first email (raised by two passes)
+- one queue per person or several
+- whether the 14 days count from when the offer is sent or when it is opened
+- whether a person's place is stored or worked out from join order
+- whether acceptances and departures are recorded
+
+Also: wardens can grant plots out of turn with no one else being told, Problem should say 412 rather than about 340, and the real goal is being able to check the order was followed.
+
+**Rough edges, nothing to decide: 4 findings.** Loose wording on timing ("a few times a month", what time of day the 14 days end), what the confirmation email reveals about the queue, and who can see the history.
+
+Both edits are drafted in full. Ask for "detail on C1" or "detail on C2" to see the exact text before you accept.

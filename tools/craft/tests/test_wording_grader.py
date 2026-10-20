@@ -677,6 +677,26 @@ def test_long_covers_line_grades_promptly():
 # differs, CAPTURE_OVERRIDES records the grader's verdict.
 CAPTURE_EXPECTATIONS = {
     "baseline-noritual": [("criterion-mention", [], "bare")],
+    # The summary sites are read by eye under the extension of 2026-10-20; no wording-grader check
+    # is registered for them.
+    "summary-baseline-noritual": [],
+    "summary-baseline-build": [],
+    "summary-noritual": [],
+    "summary-build-rules-only": [],
+    # The fourth arms carry the rules file with the summary paragraph; they are the guards of that paragraph.
+    "fourth-noritual": [("criterion-mention", [], "text-with-number")],
+    "fourth-slice": [
+        ("criterion-mention", ["--drop-value-line"], "text-with-number"),
+        ("covers-field", [], "gate-shape"),
+    ],
+    "fourth-reviewer": [
+        ("reviewer-report", [], "template-shape"),
+        ("criterion-mention", [], "bare"),
+    ],
+    "fourth-advocate": [
+        ("reviewer-report", [], "template-shape"),
+        ("criterion-mention", [], "bare"),
+    ],
     "baseline-slice": [
         ("criterion-mention", ["--drop-value-line"], "bare"),
         ("covers-field", [], "gate-shape"),
@@ -743,6 +763,11 @@ CAPTURE_OVERRIDES = {
     "second-reviewer-4": {"criterion-mention": "bare"},
     "third-reviewer-rules-only-1": {"criterion-mention": "bare"},
     "third-reviewer-rules-only-3": {"criterion-mention": "bare"},
+    # fourth-noritual: 2 of 6 text-with-number, so the guard misses its bar.
+    "fourth-noritual-3": {"criterion-mention": "bare"},
+    "fourth-noritual-4": {"criterion-mention": "nickname"},
+    "fourth-noritual-5": {"criterion-mention": "nickname"},
+    "fourth-noritual-6": {"criterion-mention": "bare"},
 }
 
 CAPTURES = sorted(p for p in RUNS.glob("*.txt") if not p.name.endswith(".stderr.txt"))
@@ -1775,11 +1800,24 @@ FINDING_CAPTURE_VERDICTS.update(
 )
 
 
+# The summary guard: `summary-guard-specreview` run on the `fsspecreview` prompt, graded against the fs reports; and
+# the same arm run on the `specreview` prompt (the opening summary), observed against the original reports.
+FINDING_CAPTURE_VERDICTS.update(
+    {f"summary-guard-specreview-{n}": _plain_verdicts("fsspecreview") for n in (1, 2, 3)}
+    | {f"summary-guard-specreview-open-{n}": _plain_verdicts("specreview") for n in (1, 3)}
+    | {"summary-guard-specreview-open-2": {"severity-name": "plain", "reviewer-name": "internal"}}
+)
+
+
 def _site(stem):
     """The site a capture belongs to: the segment before its run number, except that the calibrated consult's arms
     (`precal-`, `cal-`, `regress-cal-`, `regress2-cal-` and `regress3-cal-`) belong to `consult-calibrated`."""
     if stem.startswith(("precal-", "cal-", "regress-cal-", "regress2-cal-", "regress3-cal-")):
         return "consult-calibrated"
+    if stem.startswith("summary-guard-specreview-open-"):
+        return "specreview"
+    if stem.startswith("summary-guard-specreview-"):
+        return "fsspecreview"
     return stem.split("-")[-2]
 
 

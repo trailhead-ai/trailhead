@@ -1,0 +1,11 @@
+## Findings
+- [Critical] After-hours returns are stamped with the next morning's date (plan Notes), which breaks AC5: a borrower who drops off a book at 19:30 still gets charged for the next day. That extra day can push their balance past £10, so the Task 3 checkout guard refuses them at the desk for a fee they didn't owe. Suggested: stamp returns with the business day they were dropped off. Run the fee calculator on that date, not on the scan date.
+- [Critical] Rolling out to existing loans is not covered (migration/backfill). On the first 00:05 run, every loan that is already overdue gets flagged and charged, possibly back to its due date, and nobody is told. Borrowers arrive to a surprise balance and a refused checkout. Suggested: say whether old loans are charged back or only from go-live. Model the first run as a dry run and review its output before turning the guard on.
+- [Important] The plan fails AC1. The job runs at 00:05, and the screen only refreshes when it loads. The flag shows up at least 5 minutes after the date rolls over, and a desk screen left open never shows it. Suggested: run the job at 00:00 and refresh the screen on a timer or push. *(Moved down from Critical only because of the cap of two.)*
+- [Important] The override is saved as a free-text note on the borrower. That misses AC4, which needs who granted it and needs it in the borrower's history. Later staff can't tell who waived the block or why it's there. Suggested: store a structured override event with the librarian ID, the reason and a timestamp, and show it in the history.
+- [Important] The refused checkout has no defined message. The librarian needs to see the balance, the £10 threshold, the items behind it and how to override, all in one step. Without that it's a dead end in the middle of a queue.
+- [Important] The plan has no tasks for AC6 (borrower reminders) or AC7 (the fees report). Waived fees are never modelled, so the totals in AC7 can't reconcile.
+- [Minor] The desk screen shows the fee balance but not how it breaks down by item. Staff can't explain the charge when a borrower disputes it.
+
+## Confidence
+High. Every finding traces to specific plan lines and AC text. The plan says nothing about how old loans are handled, so the backfill finding assumes the library has existing overdue loans, which any running library will.

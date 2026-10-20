@@ -1,0 +1,17 @@
+**One decision for you:** `export_tides` writes to any path the caller gives it, including paths outside the reports directory. The security review rated this High, and it is not fixed. The plan doesn't say which directories an export is allowed to write to, so no fix was applied. Tell me where exports may go (for example, only the reports directory), and I'll restrict `export_tides` to that location.
+
+Phase outcomes for `task/the-tide-table-export-slice` (vault `harbourlight`):
+
+- **simplify:** folded 2 helper functions into one; behaviour is unchanged.
+- **correctness:** SHIP, 0 findings. The measurement tally has nothing to record: there were no Critical or Important findings.
+- **security:** 1 High finding, not fixed (the export path issue above).
+- **state-coverage:** parent 5, doc 5, missing 0.
+- **criterion-observations:** covered 2, observed 2, missing 0.
+- **push:** 1 repo pushed.
+- **metrics:** 3 tasks, 6 dispatches (2.0 per task), 34m wall clock, 2 lessons written, 0 lessons consumed.
+
+I haven't opened a PR; that's your call. You may want to settle the export-path finding first. Run this when you're ready:
+
+```
+/portage:pull_request
+```

@@ -1,0 +1,15 @@
+**Do you accept this slice?** Nothing has been written yet. If you accept, I'll create the parent task `task/the-override-slice`. If you don't, now is the cheap time to say no.
+
+**Chosen slice:** The override slice, for `spec/overdue-handling`. It is the smallest next slice that clears the value floor.
+
+**Value claim:** A librarian can lift a fee block for a borrower who is stuck at the desk, and the system records who lifted it and why. The block is no longer a dead end for the borrower.
+
+**Visual surface:** No enumerated states apply. The only screen involved is the desk screen, and an earlier slice already covers it.
+
+**Makes fully green:**
+- A borrower owing more than ten pounds in late fees can't check out more items until the balance is cleared or a librarian overrides (AC3).
+- A librarian override records who granted it and the reason given, and shows in the borrower's history (AC4).
+
+**Makes partially green:** None. This slice finishes no criterion only in part.
+
+AC3, AC4

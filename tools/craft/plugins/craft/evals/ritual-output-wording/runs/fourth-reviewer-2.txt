@@ -1,0 +1,13 @@
+## Findings
+- [Critical] No task has a test contract: none of Tasks 1–4 says which test fails first, so the AC5 and AC1 defects below would ship unnoticed. What concretely fails: a return scanned at 21:00 is stamped with the next day's date and charged one extra day, and nothing goes red. Suggested: give each task a failing test written first, with a clock that tests can set, covering the fee cap (AC2), the £10 threshold either side (AC3), and an after-closing return (AC5).
+- [Critical] The first nightly run is an irreversible, unpreviewed backfill that is not idempotent: Task 2 writes fees with no ledger, no dry-run and no reversal path. What concretely fails: on go-live, every loan already overdue is charged at once and can be blocked by Task 3. Re-running after a crash, or the return-time recalculation in Task 2, charges the same day twice. Suggested: record fees in a ledger keyed by (loan, date) so writes are idempotent, do a dry-run report before the first run, and give that first run a gated, replayable backfill command.
+- [Important] The plan breaks AC5 by design: stamping after-closing returns with the next morning's date adds a day of fee. Suggested: stamp the return with the business day of the scan.
+- [Important] The plan cannot meet AC1: a job at 00:05 is already past the one-minute window. Suggested: work out overdue status when the desk screen loads, or run the job at 00:00.
+- [Important] A failed nightly job is invisible: no alert, heartbeat or catch-up for a missed night, so flags and fees silently go stale. Suggested: a last-run heartbeat with an alert, and a catch-up run that covers the missed dates.
+- [Important] Task 3 does not satisfy AC4: a free-text note does not record who granted the override and may not show in the borrower's history. Suggested: a structured override record with the librarian's ID and a timestamp.
+- [Important] Nothing in the plan covers AC6 (reminders) or AC7 (fees report and waived totals), so there is no way to reconcile charged against waived.
+- [Important] Adding the flag column to the loan table has no migration or rollback plan.
+- [Minor] A fee posted between the guard's balance read and the checkout commit can let a checkout through over the threshold.
+
+## Confidence
+High: the plan and spec are short and explicit, and every finding cites a specific task or AC.

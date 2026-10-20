@@ -1,0 +1,12 @@
+## Findings
+- [Critical] Nightly job fails silently and is not idempotent (Tasks 1–2): if the 00:05 run crashes, nothing is flagged or charged and nobody is alerted. If it is retried or run twice, a day's fee is charged twice, because Task 2 adds fees rather than computing them from the loan's state. The first production run also backfills every historic loan with no dry run and no way to undo it. Suggested: work out the fee from (due date, return date, rate, cap) so reruns are safe; key ledger rows by loan+date; alert when a run is missed or fails; preview the first backfill and gate it.
+- [Critical] No task has a test contract: none of AC1–AC5 has a test, so the cap (AC2), the boundary at exactly £10.00 (AC3) and the after-hours return (AC5) are all unpinned. Suggested: give each task a failing test first. Fixtures: a fee one [redacted] under and one [redacted] over the cap; balances of £10.00 and £10.01; a return scanned at 23:30 that must not grow the fee the next day.
+- [Important] (production cross-consumer/migration concern, above the Critical cap) On deploy day, any borrower who already owes more than £10 is blocked at the desk at once, with no notice and no staged rollout. Suggested: run the guard in warn-only mode first and count how many would be blocked; ship a flag to turn it off.
+- [Important] AC5 contradiction: returns scanned after closing are stamped with the next morning's date, so the 00:05 run charges one more day. Suggested: stamp the return with the scan's real time, or treat it as returned at closing time.
+- [Important] AC1 can't be met: a job at 00:05, refreshed only when the screen loads, misses "within one minute". Suggested: work out the overdue flag when the screen is read, rather than storing it.
+- [Important] AC4 gap: the override note doesn't record who granted it. Suggested: store the librarian's ID and a timestamp in an audit row.
+- [Important] AC6 and AC7 have no tasks. AC7's waived totals have no waiver model behind them, so the report can't reconcile with the ledgers.
+- [Minor] Race: a return scanned during the 00:05 run can also trigger a fee run; that needs a lock or a ledger that ignores the second write.
+
+## Confidence
+High: every finding comes from the plan text checked against AC1–AC7. No code exists yet to confirm the concurrency findings.

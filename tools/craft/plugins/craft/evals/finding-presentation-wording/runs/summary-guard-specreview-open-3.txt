@@ -1,0 +1,22 @@
+Spec review of **the allotment waiting list spec**. maturity: production (basis: stamp). No waivers.
+
+The passes landed on two things. First, the spec assumes every offer email arrives and is read. Under the rule that an offer not accepted within 14 days passes on and the person who did not answer goes to the back of the queue (AC3), a mistyped address or a full mailbox leaves the plot empty for two weeks. The person who was owed it then loses years of waiting without ever being told. Second, the spec never says how the people already on the paper list get onto the online one. The only way in is joining with a name, an email address and a site (AC1), so anyone on the paper list without an email has no route across. Below those two, the passes agree that the day-to-day mechanics are thin: who marks a plot as free, what happens when a site's queue is empty, whether one person can be on several sites' queues, and when the 14 days start. They also agree that the promise that a person can "see their place" has no criterion behind it after the first email.
+
+The failure-cases and ease-of-use passes could not see each other's work, yet both found the unseen offer. That makes it the strongest finding in the run, and I rank it first. The right-problem pass framed the paper-list gap as older members having no email. That share is unverified, so I would normally downgrade it as a guess about users. I haven't, because the gap does not depend on the share: a production spec retiring a list of real people has to say how they are moved across. I set aside the right-problem pass's other suggestion, to cut the build back to the history alone. The Objectives clearly ask for more than that. The fact check found the list holds 412 names, not "about 340". That doesn't change the design, and it is logged. Nothing raised was a security problem that needs your decision.
+
+My recommendation: fix both by adding criteria, with no reframing. Bounced offers pass on straight away without costing the person their place. People with an open offer get a reminder, and people whose offer lapsed are told. The paper list is carried over in its current order, and a warden can enter someone by phone number. All four edits are drafted and ready to apply in one write.
+
+**Recommended outcome:** the spec advances to `ready` this round once you accept.
+
+| id | finding | proposed disposition | proposed edit |
+|---|---|---|---|
+| C1 | An offer that never reaches its person costs them their place silently (failure cases, ease of use) | `resolved` | add AC7: a bounced offer passes on at once, the person keeps their place and the warden is told to fix the address. Add AC8: a reminder on day 10 and a lapse notice saying where they now stand |
+| C2 | Nothing carries the existing paper list over, and joining needs an email (right problem) | `resolved` | add AC9: the paper list is entered in its current order before it is retired. Add AC10: a warden can enter a person with a phone number instead, and that person's offers are made by phone and recorded in the history |
+
+**Worth fixing, your call: 10, logged.** The day-to-day mechanics listed above. The "see their place" promise with nothing behind it (raised by two passes). Accepting and leaving aren't stated as recorded in the history. An out-of-turn grant isn't seen by anyone until the history is read. And the list size is 412, not 340.
+
+**Rough edges, nothing to decide: 5, logged.** What time of day the 14 days end, the place number in the confirmation email showing how many people are ahead, who can see the history, "lapse" as a word, and "a few times a month" being unused.
+
+The fact check: 2 of 4 claims confirmed, 1 refuted (the list size), and 1 it couldn't check: that the warden rings people in order today, which only the warden can say.
+
+Reply **"go"** to apply both edits and mark the spec `ready`, or override by id, for example "dispute C2 because …" or "answer C1: …".

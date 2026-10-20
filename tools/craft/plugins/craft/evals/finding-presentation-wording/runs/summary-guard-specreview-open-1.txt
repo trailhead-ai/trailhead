@@ -1,0 +1,35 @@
+# Spec review: allotment waiting list. Ready to advance after two edits
+
+**Maturity: production (basis: stamp).** No waivers. The fact check confirmed 2 of 4 claims, refuted 1 and could not settle 1.
+
+**What the passes found.** The spec describes the online queue well. It says too little about the people it is replacing the paper list for and about the email channel everything depends on. Two problems need your decision. First, nothing says how the people already on the paper list get onto the online list in their current order. The spec also gives no route for anyone who has no email address, because joining requires one (AC1). Second, the spec assumes every offer email arrives. If it doesn't, the plot sits empty for 14 days and the person drops to the back of the queue without ever seeing the offer (AC2, AC3). Beyond those two, the spec leaves several things unsaid: who marks a plot as freed, what happens when a site's queue is empty, and how a person can see their place after the first email.
+
+**Whether it holds, and where it came from.** The undelivered-offer problem is the strongest finding. The failure-cases and ease-of-use reviewers reached it separately, from different directions, and both described the same outcome. The right-problem reviewer was correct about existing members but rested its case on a guess: that "a large part" of the list has no email. I checked the spec instead. It has no way to bring the existing list over, whatever that share turns out to be. At production maturity a migration gap like that needs your decision on its own merits, so the finding stands on firmer ground than the one it was raised on. The fact check also found the list holds 412 names, not "about 340" (committee minutes, 3 March). The rest of the right-problem report overreaches: AC1 to AC5 are not a bigger build than the complaint needs. Without them nobody can see their place in the queue, and seeing it is the Objectives' first promise. The left-undecided reviewer's point about when the 14 days start belongs with the email fix, so I've folded it in there.
+
+**What to do about it.** Make two edits to the record and advance it. One edit brings the existing list across in order, lets a warden enter someone by phone, and corrects the 412 figure. The other makes a bounced offer pass on immediately without costing the person their place, starts the 14 days when the offer is sent, and tells the person before the offer ends and when it lapses. The worth-fixing items below are left for you to fold in or not.
+
+**Recommended outcome:** the spec advances to `ready` this round, after the two edits below.
+
+| id | finding | proposed disposition | proposed edit |
+|---|---|---|---|
+| C1 | The existing paper list has no way onto the online list, and people without email can't join at all | `resolved` | New AC7: a warden enters the existing list in its current order before new joins open. A phone number can stand in for email, and phone offers are made and recorded by the warden. The Problem section's count changes to 412. |
+| C2 | An undelivered offer email leaves the plot empty for 14 days and sends an unaware person to the back of the queue | `resolved` | AC2: the 14 days count from when the offer is sent. New AC8: a bounced offer passes on at once, the person keeps their place, and a warden is told. AC3: the person gets a reminder 4 days before the offer ends and a message when it lapses. |
+
+**Would cause trouble later, worth fixing, your call (8).** The first item is the strongest:
+- The Objectives promise a person can "see their place", but nothing after the first confirmation email lets them. The ease-of-use and self-consistency reviewers both raised this.
+- Nothing says who marks a plot as freed.
+- Nothing covers a freed plot whose site queue is empty.
+- The spec doesn't say whether a place is stored or worked out from join order.
+- An out-of-turn grant is checked only by the reason typed for it.
+- AC2 and AC5 don't say that acceptances and departures are recorded.
+- The spec doesn't say whether a person can be on more than one site's queue.
+- The Objectives could say outright that checking the order is the goal.
+
+**Rough edges, nothing to decide (5):**
+- When in the day the 14 days end
+- Who can see the history
+- The place shown in the confirmation email reveals how many people are ahead
+- "Lapse" reads as jargon
+- "A few times a month" isn't relied on anywhere
+
+Reply **"go"** to apply both edits and mark the spec `ready`. To override a row, say `dispute`, `accept-as-risk` or `answer` with its id and your reason.
