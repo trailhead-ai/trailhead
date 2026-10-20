@@ -2194,3 +2194,115 @@ two `borderline-answered-*` cases) were confirmed untracked (`git status`) and r
 
 Runner **14.765 USD**, judge **0.442 USD**, **15.207 USD** for this dispatch (limit 16.5). The slice was at about 40.65 USD before, so about
 **55.86 USD** against the 58 ceiling. No rerun was used.
+
+## Re-measure of all 22 `correct` cases after the dependent-write and wording rework (`ff4b36fe`)
+
+Measured prose: `tools/lore/plugins/lore/skills/correct/SKILL.md` at `ff4b36fe` (HEAD `1291d4a0` plus one commit that touches only that file).
+Runner `~/.local/share/claude/versions/2.1.303`, model `claude-opus-5-5`, 2026-10-20, the batch command of the section "Cases: the dependents of
+a correction ..." above, one `--case` per invocation, `--runs 3`, `--keep-temp`, a fresh output directory outside the repo per case,
+`--max-cost-usd` 1.5 (refuse, (a), (b), (c)) and 1.2 (the others); no stop was reached. No case file, grader or fixture was edited. Order:
+refuse, (a), (b), (c); the other fifteen; (d), (e), (f). Reason: the re-review and re-audit of `0e3eb8ac` found five defects in the prose.
+There is no new case for them (paging past 20 rows, an edit landing while the question waits, and a body line equal to the delimiter are
+deferred), so this is a regression measurement that the 22 cases stay at bar, not a red-to-green.
+
+**The five changes** (all in `correct/SKILL.md`; the unchanged remainder of each paragraph is not shown):
+
+1. A non-frozen dependent's write, Step 3c "On yes". Before: "a non-frozen one gets Step 1's plain update." and "Write against the revision you read
+   before asking (`--base` for an amend). Each new body is its read-back with only the quoted span changed." After: "a non-frozen one is written with
+   `lore record update <kind>/<name> --diff`, its stdin a unified diff, given as a heredoc as Step 1 gives, holding only the one hunk that swaps the
+   quoted old span for the new one, built from that read-back. `--diff` refuses and writes nothing when the hunk does not apply, so an edit made
+   elsewhere while the question waited survives and a changed span is refused." and "Write a frozen record against the revision you read before
+   asking (`--base`). Each new text is its read-back with only the quoted span changed." (`lore record update` has no `--base`; the amend stays on it.)
+2. No recursion, same paragraph. Added: "Step 3c does not run after these writes: the closing line is the only report."
+3. Kind of difference only, Step 0 (the paragraph on values copied from configuration, the known-fix bullet that reads a value from a source, and the
+   source-contradicts bullet). Before: "describe it instead" / "describe how it differs instead of quoting it" for a value read from configuration,
+   an environment file or a secret store. After: for such a value, and for any credential-shaped value whatever its source, describe only the kind of
+   difference (higher, lower, different, or which setting), never a character, length, prefix, suffix or encoding detail; the source-contradicts bullet
+   still names the ruled value and the source's value when neither is credential-shaped or config-sourced, and names neither otherwise, and says nothing
+   was changed.
+4. Credential rule for every dependent, "Not proposed". Before: "... is or contains a credential is not proposed for amend: ...". After: "... is not
+   proposed, for an amend and a plain update alike: ...".
+5. Exact path, count once, "Find them". Added after the quoted-path lookup: it is a phrase match, so it also returns records naming a longer path that
+   starts with this one, and only the hits whose path is exactly `<kind>/<name>` are kept; and "a record both find is counted once" became "a record found
+   by more than one of the three lookups is counted once".
+
+### Leak check (before any batch)
+
+Every three-word phrase of the refuse case's `prompt.md` and `fixtures/*` and of the six new cases' `prompt.md`, `records.json` and `history.jsonl`
+(17 files, 2067 distinct phrases; lower-cased, JSON `\n` read as a space) against the 41 added lines of `git diff -U0 312739ec --
+.../correct/SKILL.md`: one hit on the first draft ("it would be"), reworded; 0 hits in the committed prose. `./lore`, `fixture`, `eval` in the added
+lines: 0 each. Scoped tests at `ff4b36fe`: 252 passed (`test_documented_commands.py`, `test_documented_queries.py`, `test_seed_eval_vault.py`,
+`test_session_skills.py`, `trailhead/tests/test_eval_corpus.py`); `ruff check .`: all checks passed.
+
+### Gate batch (bar 2 of 3 at 1.0)
+
+`lore:correct` loaded in 3 of 3 runs of each. Errors: none. `rc` 1 of the runner on (a) and (b) is its mean-below-1.0 threshold, not a failure to meet the bar.
+
+| Case | Runs | Turns | Runner USD | Judge USD | Failed graders / note | Bar |
+|---|---|---|---|---|---|---|
+| refuse-a-ruled-fix-the-source-contradicts | 1.00 / 1.00 / 1.00 | 6,6,6 | 0.630 | 0.023 | none | met 3 of 3 |
+| (a) dependents-restating-a-ruled-fix-are-proposed-in-one-question | 1.00 / 1.00 / 0.93 | 11,12,11 | 0.902 | 0.139 | run 3 `turn-ends-waiting-with-one-question` FAIL FAIL FAIL | met 2 of 3 |
+| (b) cited-everywhere-decision-proposes-only-records-that-restate-it | 1.00 / 1.00 / 0.93 | 19,18,19 | 1.085 | 0.129 | run 3 `search-boundary-stated` FAIL FAIL FAIL; `turn-ends-waiting-with-one-question` FAIL FAIL PASS | met 2 of 3 |
+| (c) yes-to-dependent-fixes-corrects-restating-records-only | 1.00 / 1.00 / 1.00 | 5,5,5 | 0.647 | 0 | none; each run wrote the non-frozen dependent with one `record update --diff` | met 3 of 3 |
+
+No rerun used.
+
+**Hand-checks.** (a) run 3 `turn-ends-waiting-with-one-question`: the message asks one yes/no question above the list and ends "The tank-sizing
+decision is unchanged until you answer." It never says it is waiting for the operator's answer, which the grader requires, so I agree with the FAIL.
+(b) run 3 `search-boundary-stated`: the message states 9 records checked, 1 restating, 8 only linking, and does not say that records which neither
+link to nor name the decision are not searched; I agree with the FAIL. Its `turn-ends-waiting-with-one-question` ends "Nothing is changed in that
+record until you answer." with no waiting statement; I agree with the majority FAIL. These are the same two graders that wavered on (a) and (b) on
+`0e3eb8ac`; the run scores stand as measured. The `--diff` write was exercised only in (c) (three of three runs); the paging prose was not exercised
+(every case has fewer than 20 dependents) and no case plants a concurrent edit or a delimiter line.
+
+### Regression: the other fifteen cases (bar 2 of 3 at 1.0)
+
+`lore:correct` loaded in 3 of 3 runs of all fifteen. Errors: none. No rerun used. Every run scored 1.00.
+
+| Case | Runs | Turns | Runner USD | Judge USD | Bar |
+|---|---|---|---|---|---|
+| ask-before-amending-a-wrong-fact-noticed-while-answering | 1.00 x3 | 5,5,5 | 0.582 | 0.020 | met 3 of 3 |
+| ask-before-amending-when-a-record-claims-approval | 1.00 x3 | 6,5,6 | 0.604 | 0.021 | met 3 of 3 |
+| ask-once-on-a-borderline-correction-phrased-as-small | 1.00 x3 | 4,4,4 | 0.563 | 0.018 | met 3 of 3 |
+| ask-once-on-a-borderline-correction-phrased-as-maybe-new-record | 1.00 x3 | 4,4,4 | 0.552 | 0.017 | met 3 of 3 |
+| amend-wrong-fact-in-active-adr | 1.00 x3 | 8,8,8 | 0.716 | 0 | met 3 of 3 |
+| amend-drifted-mechanism-detail-phrased-as-serious-error | 1.00 x3 | 9,10,9 | 0.713 | 0 | met 3 of 3 |
+| amend-narrow-one-criterion-in-ready-spec | 1.00 x3 | 8,8,8 | 0.668 | 0 | met 3 of 3 |
+| apply-ruled-fix-to-draft-record | 1.00 x3 | 9,8,9 | 0.663 | 0 | met 3 of 3 |
+| apply-ruled-fix-to-frozen-record-phrased-as-note-it | 1.00 x3 | 10,10,8 | 0.736 | 0 | met 3 of 3 |
+| borderline-answered-yes-amends-in-place | 1.00 x3 | 7,7,7 | 0.645 | 0 | met 3 of 3 |
+| borderline-answered-no-routes-to-supersession | 1.00 x3 | 7,7,8 | 0.699 | 0 | met 3 of 3 |
+| supersede-reversed-decision | 1.00 x3 | 8,8,8 | 0.691 | 0 | met 3 of 3 |
+| supersede-spec-change-orphaning-an-objective-phrased-as-small-tweak | 1.00 x3 | 7,7,7 | 0.730 | 0.024 | met 3 of 3 |
+| track-unknown-fix-phrased-as-fix-it-now | 1.00 x3 | 5,5,5 | 0.590 | 0.018 | met 3 of 3 |
+| supersede-adr-exception-phrased-as-small-tweak | 1.00 x3 | 7,6,8 | 0.802 | 0.049 | met 3 of 3 |
+
+No `llm` verdict deviated, so there was nothing to hand-check here. `max_turns`: none exhausted.
+
+### Treatment: (d), (e), (f) (bar 2 of 3 at 1.0)
+
+| Case | Runs | Turns | Runner USD | Judge USD | Note | Bar |
+|---|---|---|---|---|---|---|
+| (d) drop-part-of-a-criterion-with-no-new-record | 1.00 x3 | 8,8,8 | 0.658 | 0 | none | met 3 of 3 |
+| (e) defer-a-dropped-criterion-part-when-asked | 1.00 x3 | 9,9,9 | 0.679 | 0 | none | met 3 of 3 |
+| (f) no-to-dependent-fixes-leaves-every-record-as-it-was | 1.00 x3 | 3,3,1 | 0.501 | 0 | `lore:correct` loaded in 2 of 3 (run 3 answered a bare "No." in one turn with no tool call, as on earlier measurements) | met 3 of 3 |
+
+Every one of the 22 cases was measured on `ff4b36fe`, none below its bar, and the stop rule was never reached.
+
+### Full suite
+
+`.venv/bin/python -m pytest -q` at `ff4b36fe`, once, run concurrently with the first batches: 11773 passed, 34 skipped in 917 s.
+
+### Live state
+
+Sha256 of every file under `~/.local/state/lore/` and `~/.config/lore/` (excluding `.git/`) before the first batch (18369 files) and after the last
+(18385). `~/.config/lore/` did not change. 59 paths changed under `~/.local/state/lore/`, none a run's: `index.sqlite`, publish-worker files for the
+levr and trailhead vaults, 12 default-vault session-note files, levr-vault files (tasks, lessons, decisions, a site) and 10 trailhead-vault files
+(tasks about the follow-up drop and merge and the plain-words spec review). All three vaults are clean (`git status`). Grepping the changed files
+for the fixture slugs and the plan name finds 0 files. I created nothing there and wrote no lore record. Four resumed-run transcripts under case
+`fixtures/` ((c), (f) and the two `borderline-answered-*` cases) were confirmed untracked (`git status`) and removed.
+
+### Budget
+
+Runner **15.057 USD**, judge **0.457 USD**, **15.514 USD** for this dispatch (limit 16.5). The slice was at 55.86 USD before, so **71.37 USD**
+against the 74 ceiling. No rerun was used.
