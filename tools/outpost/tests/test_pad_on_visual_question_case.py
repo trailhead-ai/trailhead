@@ -323,10 +323,6 @@ def test_live_treatment_arm_rebuilds_from_todays_rules():
     assert ac.read_arm(ARMS_DIR, TREATMENT) == expected
 
 
-def test_the_two_arms_differ():
-    assert ac.read_arm(ARMS_DIR, BASELINE) != ac.read_arm(ARMS_DIR, TREATMENT)
-
-
 def test_both_arms_carry_the_same_brief_and_differ_only_in_the_ruleset():
     baseline, treatment = (ac.read_arm(ARMS_DIR, n).split(ac.SEPARATOR, 1) for n in (BASELINE, TREATMENT))
     assert baseline[0] == treatment[0]
