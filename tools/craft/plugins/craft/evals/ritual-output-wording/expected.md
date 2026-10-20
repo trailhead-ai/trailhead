@@ -964,3 +964,166 @@ this one. `summary-build` is not run.
   summary? No at the reviewer and advocate (`template-shape` 6 of 6 with unchanged `bare` mentions), no at the slice
   (`gate-shape` 3 of 3, `text-with-number` 3 of 3), and not on the scripted checks at the spec review (3 of 3 `plain`;
   the opening-summary observation keeps one row per finding with ids).
+
+## Result, 2026-10-20 — the summary measurement closes: R was reverted, E was not run, AC11 and AC12 are not covered
+
+This section completes the result above; nothing above it is rewritten. It records every capture the measurement
+took in one table, recomputes every count from that table, re-reads each pass condition against the rule
+registered in the extension of 2026-10-20, and states the end state taken and how the slice closed. No eval was
+run to write it. R is `d6eb84540f8e5b959554bc1578b0ece26154a76f` and its revert is `c73f3563` (both branch-local
+SHAs, so they change at merge; recorded for a reader, read by no test). B is `d860c95a7d470be857e01f04c55c986abadab916`.
+
+### Per-capture table
+
+Sites S1 and S2 are read by eye under the registered protocol, twice: in session and by a blind subagent given the
+protocol, the fixtures and the captures renamed. Where the table shows one value for the two readers they agreed.
+Rows for `summary-baseline-*` are the baseline arms (rules at B); `summary-noritual` is S1 treated (rules at R);
+`summary-build-rules-only` is S2 with only the rules at R. There is no `summary-build` arm (E was not run).
+
+| Capture | Site | `leads` (session / blind) | `one-line` (session / blind) | `all-present` (session / blind) |
+|---|---|---|---|---|
+| `summary-baseline-noritual-1` | S1 | buried / buried | over / one-line | all-present / all-present |
+| `summary-baseline-noritual-2` | S1 | buried / buried | over / one-line | all-present / all-present |
+| `summary-baseline-noritual-3` | S1 | buried / buried | over / one-line | all-present / all-present |
+| `summary-baseline-build-1` | S2 | buried / buried | one-line / one-line | all-present / all-present |
+| `summary-baseline-build-2` | S2 | leads / leads | one-line / one-line | all-present / all-present |
+| `summary-baseline-build-3` | S2 | buried / buried | one-line / one-line | all-present / all-present |
+| `summary-baseline-build-4` | S2 | leads / leads | one-line / one-line | all-present / all-present |
+| `summary-baseline-build-5` | S2 | leads / leads | one-line / one-line | all-present / all-present |
+| `summary-baseline-build-6` | S2 | leads / leads | one-line / one-line | all-present / all-present |
+| `summary-noritual-1` | S1 | buried / buried | one-line / one-line | all-present / all-present |
+| `summary-noritual-2` | S1 | leads / leads | one-line / one-line | all-present / all-present |
+| `summary-noritual-3` | S1 | buried / leads | one-line / one-line | all-present / all-present |
+| `summary-build-rules-only-1` | S2 | leads / leads | one-line / one-line | all-present / all-present |
+| `summary-build-rules-only-2` | S2 | leads / leads | one-line / one-line | all-present / all-present |
+| `summary-build-rules-only-3` | S2 | leads / leads | one-line / one-line | all-present / all-present |
+
+Scripted guard captures, graded by `wording_grader.py` (the G4 rows against the `finding-presentation-wording`
+case's `fs-reports-spec-review.md` for the registered prompt, and `reports-spec-review.md` for the observation-only
+`-open-` captures). Every row was re-graded by running the grader on the committed capture while writing this
+section; each matches its `CAPTURE_EXPECTATIONS` / `FINDING_CAPTURE_VERDICTS` entry.
+
+| Capture | Site | Scripted verdicts |
+|---|---|---|
+| `fourth-noritual-1` | G1 | criterion-mention: text-with-number |
+| `fourth-noritual-2` | G1 | criterion-mention: text-with-number |
+| `fourth-noritual-3` | G1 | criterion-mention: bare |
+| `fourth-noritual-4` | G1 | criterion-mention: nickname |
+| `fourth-noritual-5` | G1 | criterion-mention: nickname |
+| `fourth-noritual-6` | G1 | criterion-mention: bare |
+| `fourth-slice-1` | G3 | covers-field: gate-shape; criterion-mention: text-with-number |
+| `fourth-slice-2` | G3 | covers-field: gate-shape; criterion-mention: text-with-number |
+| `fourth-slice-3` | G3 | covers-field: gate-shape; criterion-mention: text-with-number |
+| `fourth-reviewer-1` | G2 | reviewer-report: template-shape; criterion-mention: bare |
+| `fourth-reviewer-2` | G2 | reviewer-report: template-shape; criterion-mention: bare |
+| `fourth-reviewer-3` | G2 | reviewer-report: template-shape; criterion-mention: bare |
+| `fourth-advocate-1` | G2 | reviewer-report: template-shape; criterion-mention: bare |
+| `fourth-advocate-2` | G2 | reviewer-report: template-shape; criterion-mention: bare |
+| `fourth-advocate-3` | G2 | reviewer-report: template-shape; criterion-mention: bare |
+| `summary-guard-specreview-1` | G4 | severity-name: plain; reviewer-name: plain |
+| `summary-guard-specreview-2` | G4 | severity-name: plain; reviewer-name: plain |
+| `summary-guard-specreview-3` | G4 | severity-name: plain; reviewer-name: plain |
+| `summary-guard-specreview-open-1` | G4 (observed) | severity-name: plain; reviewer-name: plain |
+| `summary-guard-specreview-open-2` | G4 (observed) | severity-name: plain; reviewer-name: internal |
+| `summary-guard-specreview-open-3` | G4 (observed) | severity-name: plain; reviewer-name: plain |
+
+### Counts, derived from the two tables above
+
+Each count is the number of rows in the table above with that value, taken by a script over the table's rows (no
+count typed by hand).
+
+| Arm | Site | `leads` session | `leads` blind | `one-line` session | `one-line` blind | `all-present` session | `all-present` blind |
+|---|---|---|---|---|---|---|---|
+| `summary-baseline-noritual` | S1 | 0 of 3 | 0 of 3 | 0 of 3 | 3 of 3 | 3 of 3 | 3 of 3 |
+| `summary-baseline-build` | S2 | 4 of 6 | 4 of 6 | 6 of 6 | 6 of 6 | 6 of 6 | 6 of 6 |
+| `summary-noritual` | S1 | 1 of 3 | 2 of 3 | 3 of 3 | 3 of 3 | 3 of 3 | 3 of 3 |
+| `summary-build-rules-only` | S2 | 3 of 3 | 3 of 3 | 3 of 3 | 3 of 3 | 3 of 3 | 3 of 3 |
+
+| Guard arm | Count of each scripted verdict |
+|---|---|
+| `fourth-noritual` (6 runs) | criterion-mention: text-with-number: 2, criterion-mention: bare: 2, criterion-mention: nickname: 2 |
+| `fourth-slice` (3 runs) | covers-field: gate-shape: 3 |
+| `fourth-slice` (3 runs) | criterion-mention: text-with-number: 3 |
+| `fourth-reviewer` (3 runs) | reviewer-report: template-shape: 3 |
+| `fourth-reviewer` (3 runs) | criterion-mention: bare: 3 |
+| `fourth-advocate` (3 runs) | reviewer-report: template-shape: 3 |
+| `fourth-advocate` (3 runs) | criterion-mention: bare: 3 |
+| `summary-guard-specreview` (3 runs) | severity-name: plain: 3 |
+| `summary-guard-specreview` (3 runs) | reviewer-name: plain: 3 |
+| `summary-guard-specreview-open` (3 runs) | severity-name: plain: 3 |
+| `summary-guard-specreview-open` (3 runs) | reviewer-name: plain: 2, reviewer-name: internal: 1 |
+
+
+### Pass conditions, each re-read against its registered rule
+
+| Registered condition | Reading | Holds |
+|---|---|---|
+| S1 `summary-noritual`: clean majority of `leads` (3 of 3, or 5 or 6 of 6 after a 2-1 split is re-run to six) | 1 of 3 in session, 2 of 3 blind: a 2-1 split by either reader, not re-run | **not shown** (no clean majority) |
+| S1 `one-line` and `all-present`: clean majority | `one-line` 3 of 3 and `all-present` 3 of 3 by both readers | yes, though `one-line` at baseline was contested (3 of 3 `over` in session, 0 of 3 blind) and `all-present` needed no edit |
+| S2 `summary-build-rules-only`: no pass condition of its own (E was the S2 edit); `leads`, `one-line`, `all-present` read | 3 of 3 each by both readers; baseline `leads` was already 4 of 6, so no headroom | not a pass condition; the movement cannot be separated from the baseline's own rate |
+| G1: `criterion-mention` clean majority `text-with-number`, bar `third-noritual` 3 of 3 | 2 of 6 after the 2-1 split was re-run to six | **no, misses its bar** |
+| G2: `reviewer-report` every run `template-shape`; `criterion-mention` majority `bare`, equal to baseline | 6 of 6 `template-shape`; `bare` 3 of 3 at each lens | yes |
+| G3: `covers-field` every run `gate-shape`; clean majority `text-with-number` | 3 of 3; 3 of 3 | yes |
+| G4: that site's own `severity-name` and `reviewer-name` against its last bar; by eye | `plain` 3 of 3 on both (registered prompt); the observation-only captures were `plain` on `severity-name` 3 of 3 and on `reviewer-name` 2 of 3 | yes |
+
+### End state taken
+
+G1 missed its bar. The registered end states say that any guard missing its bar is a regression, that R is
+reverted and the slice stops for the operator, and that when R is reverted the build-report task is blocked and
+not run. R was reverted by a signed `git revert` (`c73f3563`). **E was not made and `summary-build` was not run.**
+At the slice stop the operator decided to record the failure and close the slice, rather than reword R (which needs
+a new dated extension the operator authorizes, per this case's precedent) or ship E on its own.
+
+### Exclusions and the disclosed departures
+
+- Exclusions: none. Every capture exited 0 with empty stderr and every capture is in the tables above. The two
+  smoke runs (one per new site) are not captures and are not committed, as the baseline section records.
+- G2 ran the `-template` prompts (`prompt-reviewer-template.md`, `prompt-advocate-template.md`) in place of the
+  registered `prompt-reviewer.md` and `prompt-advocate.md`, because the shipped state of a reviewer prompt carries the
+  council template bullet; the prompts without the bullet were not run.
+- G4's registered `fsspecreview` prompt states the opening summary in the prompt rather than writing it, so the
+  opening-summary rows could not be read from it. The `-open-` captures observe the same arm on the
+  `specreview` prompt as a further, observation-only reading (not a bar). G4's arm was composed from the council
+  template at B, not from the older `fs-treated2` bytes.
+- S1 `leads` was not re-run to six, because G1 fixed the end state whatever S1 read. The S1 verdict is unresolved,
+  not failed.
+- The finding-presentation arm contract test carries `SUMMARY_RULES_REVISION = "R"` as a placeholder for the revision
+  of `rules.md` the `summary-guard-specreview` arm reads; R is reverted, so that name now labels a revision that is
+  no longer in the tree, and the arm remains the recorded copy.
+
+### Observed failure mode, as design input
+
+The sentence "Give everything that needs nothing from them at most one line each" shortened criterion mentions to
+labels: at G1 four of six captures gave a criterion fewer of its own words than the grammar's threshold (two
+`bare`, two `nickname`), mostly in the closing "Done" line where routine items are listed. The same paragraph
+did not reshape a reviewer's report, the slice statement's covered-criteria value or the spec review's per-finding
+rows, so the regression is specific to a no-ritual summary that names criteria. A future attempt has to hold a
+one-line routine item and a criterion mentioned by its own text together; this section does not propose wording.
+
+### Limits
+
+- One planted item per site; summaries with several decisions were not staged.
+- Dispatched agents other than the council reviewers (the builder, the drift check, the code reviewer, the security
+  auditor) are unmeasured.
+- Three runs per arm, six where a 2-1 split was re-run; S1's `leads` split was not. One model tier. The by-eye
+  readings are the in-session reader and one blind subagent; where they disagree (S1 `leads` on
+  `summary-noritual-3`, S1 `one-line` at baseline) the disagreement is reported, not reconciled.
+- Arms reach the model by `--append-system-prompt` (or `--append-system-prompt-file` for the S2 arms), not by the
+  harness's own rules loading.
+
+### Manual re-run trigger
+
+There is no recurring runner. A new attempt at a summary paragraph starts from a new dated extension to this file,
+registered before any run, with arms built from the changed `rules.md` and the pinned guards G1 to G4. The
+existing `summary-baseline-*` arms are pinned at B and remain a valid baseline only while `rules.md` and
+`_shared/execute.md` match B. The `fourth-*` and `summary-*` treated arms carry R's paragraph, which is no longer in
+`rules.md`; re-running them measures a text that is not shipped. Also take a disagreement between real sessions and
+these counts as the signal to re-measure.
+
+### Slice close
+
+**This slice delivers no coverage of AC11 or AC12.** The plan-time claim that it partially covers them did not hold:
+R regressed AC1's guard (G1) and did not reach a clean majority on S1 `leads`. Two sites were measured, the
+no-ritual summary (S1) and the build's closing report (S2, rules-only); the remaining sites, about eight whose own
+instructions open a summary with routine detail, are listed in
+`task/ritual-summaries-elsewhere-open-with-what-needs-the-reader`. AC11 and AC12 stay recorded as unmeasured.

@@ -2336,6 +2336,29 @@ criterion's own text" is stricter than a reading by eye on paraphrases.
 
 **Manual re-run trigger.** There is no recurring runner. When the `## Output wording` section of `rules.md`, the council template, or slice step 8 changes, re-running the existing treated arms measures the old text: `third-*` are pinned at `ecc4f46a`, `shipped-slice` at `ebf23e43`, and the `fixtures/prompt-*-template.md` files carry the bullet as of `ecc4f46a`, so a re-run reports a pass the change has not earned. Instead build new arms and template fixtures from the changed sources, pinned to the commit that carries the change, under a new dated extension to `expected.md` registered before any run; the existing arms stay as the recorded result. Also take a disagreement between real sessions and these counts as the signal to do so.
 
+**Result, 2026-10-20 (summaries lead with what needs the reader): the criterion guard misses its bar, R is reverted, and the slice delivers no coverage of AC11 or AC12.** Registered as an extension in `expected.md` before any run; the full per-capture table, the counts and the re-read pass conditions are in that file's `Result, 2026-10-20 — the summary measurement closes` section. Counts below are recomputed from that table.
+
+| Site and arm | Runs | `leads` (session / blind) | `one-line` (session / blind) | `all-present` | Scripted |
+|---|---|---|---|---|---|
+| S1 no-ritual, `summary-baseline-noritual` (rules at B) | 3 | 0 / 0 | 0 / 3 | 3 / 3 | none |
+| S1 no-ritual, `summary-noritual` (rules at R) | 3 | 1 / 2 | 3 / 3 | 3 / 3 | none |
+| S2 build report, `summary-baseline-build` (B) | 6 | 4 / 4 | 6 / 6 | 6 / 6 | none |
+| S2 build report, `summary-build-rules-only` (rules at R) | 3 | 3 / 3 | 3 / 3 | 3 / 3 | `next-command: own-line` 3 |
+| G1, `fourth-noritual` | 6 | n/a | n/a | n/a | `criterion-mention` `text-with-number` 2, `bare` 2, `nickname` 2 |
+| G2, `fourth-reviewer`, `fourth-advocate` | 3 each | n/a | n/a | n/a | `template-shape` 6; `bare` 6 |
+| G3, `fourth-slice` | 3 | n/a | n/a | n/a | `gate-shape` 3; `text-with-number` 3 |
+| G4, `summary-guard-specreview` | 3 (+3 observed) | n/a | n/a | n/a | `plain` 3 on both checks; observed `reviewer-name` `plain` 2, `internal` 1 |
+
+**Verdict against the registered rules.** G1 misses its bar (`text-with-number` 2 of 6 against `third-noritual` 3 of 3, after the 2-1 split was re-run to six), which the end states define as a regression: R was reverted (`c73f3563`), E was not made and `summary-build` was not run, and at the slice stop the operator decided to record and close rather than reword R or ship E alone. S1 `leads` did not reach a clean majority (1 of 3 in session, 2 of 3 blind; not re-run to six, since G1 fixed the end state). G2, G3 and G4 hold. S2 had no headroom at baseline (`leads` 4 of 6), so the rules-only arm's 3 of 3 cannot be separated from the baseline's own rate.
+
+**Observed failure mode.** The "at most one line each" sentence shortened criterion mentions to labels in the no-ritual summary (four of six G1 captures gave fewer of the criterion's words than the grammar's threshold, mostly in the closing "Done" line); reviewer reports, the slice's covered-criteria value and the spec review's per-finding rows did not move. This is design input for a later attempt; no replacement wording is proposed here.
+
+**Slice close.** This slice delivers no coverage of AC11 or AC12: the plan-time "partially covers" claim did not hold, because R regressed AC1's guard and did not reach a clean majority on S1 `leads`. Two sites were measured, the no-ritual summary and the build's closing report (rules-only). The remaining sites are listed in `task/ritual-summaries-elsewhere-open-with-what-needs-the-reader`.
+
+**Departures and limits.** G2 ran the `-template` prompts (shipped state) in place of the registered ones. G4's registered prompt states the opening summary, so the `-open-` captures observe the arm on the opening-summary prompt as observation only. S1 `leads` was not re-run to six. The finding-presentation arm contract carries `SUMMARY_RULES_REVISION = "R"` as a placeholder for a revision no longer in the tree. One planted item per site; dispatched agents other than the council reviewers are unmeasured; one model tier; the two by-eye readers disagree on S1 `leads` (`summary-noritual-3`) and on baseline S1 `one-line`, reported and not reconciled.
+
+**Manual re-run trigger.** A new attempt at a summary paragraph starts from a new dated extension to `expected.md`, registered before any run, with arms built from the changed `rules.md`. The `summary-baseline-*` arms are pinned at B (`d860c95a`) and are a valid baseline only while `rules.md` and `_shared/execute.md` match B; the `fourth-*` and `summary-*` treated arms carry R's paragraph, which is not shipped, so re-running them measures unshipped text.
+
 ## Case: finding-presentation-wording
 
 `plugins/craft/evals/finding-presentation-wording/` — fixtures, arms, captures and `expected.md` carrying the pass
