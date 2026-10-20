@@ -1800,9 +1800,8 @@ FINDING_CAPTURE_VERDICTS.update(
 )
 
 
-# The summary guard (G4): `summary-guard-specreview` run on the `fsspecreview` prompt, graded against the fs
-# reports; and the same arm run on the `specreview` prompt (the opening summary), observed against the original
-# reports.
+# The summary guard: `summary-guard-specreview` run on the `fsspecreview` prompt, graded against the fs reports; and
+# the same arm run on the `specreview` prompt (the opening summary), observed against the original reports.
 FINDING_CAPTURE_VERDICTS.update(
     {f"summary-guard-specreview-{n}": _plain_verdicts("fsspecreview") for n in (1, 2, 3)}
     | {f"summary-guard-specreview-open-{n}": _plain_verdicts("specreview") for n in (1, 3)}

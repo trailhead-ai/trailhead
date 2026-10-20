@@ -70,10 +70,13 @@ FIX_SHAPE_SHARPENED_REVISION = "e568c4e037dbf1ba2d2eb3027fa3f77e03104dae"
 CONSULT_REWORDING_REVISION = "3d423811493b6e776ef8007faee3db3f02a8f1ca"
 
 # origin/main when the summary measurement was cut: the `summary-guard-specreview` arm reads every source here except
-# `rules.md`, which it reads from "R", the branch-local commit adding the summary paragraph (its SHA is in the
-# `ritual-output-wording` case's `expected.md`).
+# `rules.md`, which it reads from `SUMMARY_RULES_REVISION`.
 SUMMARY_BASE_REVISION = "d860c95a7d470be857e01f04c55c986abadab916"
-SUMMARY_RULES_REVISION = "R"
+
+# The commit "feat(craft): summaries and closing reports open with what needs the reader", which added the summary
+# paragraph to `rules.md` and was reverted later on the same branch. It was a branch-local SHA at the time of the
+# measurement, so after a rebase merge find it by that subject line.
+SUMMARY_RULES_REVISION = "d6eb84540f8e5b959554bc1578b0ece26154a76f"
 
 PLUGIN = "tools/craft/plugins/craft"
 RULES = f"{PLUGIN}/rules.md"

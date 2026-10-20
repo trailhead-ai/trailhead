@@ -912,12 +912,18 @@ G1 split 2-1 after three (`text-with-number`, `text-with-number`, `bare`) and wa
 | G2 `fourth-reviewer` | every run `template-shape`; `criterion-mention` majority `bare` | 3 of 3; `bare` 3 of 3 | yes |
 | G2 `fourth-advocate` | same, equal to `baseline-advocate` (`bare`) | 3 of 3; `bare` 3 of 3 | yes |
 | G3 `fourth-slice` | every run `gate-shape`; clean majority `text-with-number` | 3 of 3; 3 of 3 | yes |
-| G4 `summary-guard-specreview` | last recorded bar: clean majority `plain` on `severity-name` and `reviewer-name` | `plain` 3 of 3 on both | yes |
+| G4 `summary-guard-specreview` | last recorded bar: clean majority `plain` on `severity-name` and `reviewer-name` | `plain` 3 of 3 on both (scripted checks, registered prompt) | scripted yes; by-eye check not readable on this prompt (below) |
 
 By eye at G4: each of the three captures gives C1, C2 and C3 each its own block under its id, with the proposed
-disposition. Observation, `summary-guard-specreview-open-1` to `-3` (the opening-summary prompt): `severity-name`
-`plain` 3 of 3; `reviewer-name` `plain`, `internal`, `plain`; each capture has a table with one row per finding that
+disposition, but the registered by-eye check (one row per finding in the opening summary) cannot be read here, because
+this prompt states the opening summary rather than writing it. Observation, `summary-guard-specreview-open-1` to `-3`
+(the opening-summary prompt): `severity-name` `plain` 3 of 3; `reviewer-name` `plain`, `internal`, `plain`; each capture has a table with one row per finding that
 needs a decision (two findings, ids C1 and C2) and the worth-fixing and rough-edge items grouped below it.
+`summary-guard-specreview-open-2` names internal passes ("the divergence pass", "the fact check") in its opening
+summary. That is the first non-`plain` `reviewer-name` at the specreview site since its edit (`treated-`, `regress-`
+and `control-specreview` read `plain` on `reviewer-name` in 18 of 18 captures). It cannot be attributed to the summary
+paragraph: the arm's `council.md` also moved to B, and no B arm ran on the `specreview` prompt. G4 is an unresolved
+2-1 split and a possible signal, not a hold.
 
 ### Sites S1 and S2 (rules-only), by eye
 
@@ -942,8 +948,9 @@ sub-bullets belong to the planted item). Against the baseline: S1 `leads` moves 
 `one-line` was contested at baseline and reads `one-line` 3 of 3 now; `all-present` met without the edit. S2 had no
 headroom at baseline (`leads` 4 of 6); the rules-only arm reads `leads` 3 of 3, `one-line` 3 of 3, `all-present` 3
 of 3, and `ritual_deliverable_grader.py --record task/the-tide-table-export-slice --command /portage:pull_request`
-reads `next-command: own-line` on all three. Close calls the blind reader flagged: `cap-C`, `cap-E` hold two
-sentences in one list item (read as one list item, as at the baseline); `cap-B` and `cap-D` on `leads`.
+reads `next-command: own-line` on all three (read by hand; no test pins it). Close calls the blind reader flagged:
+`cap-C`, `cap-E` hold two sentences in one list item (read as one list item, as at the baseline); `cap-B` and `cap-D`
+on `leads`.
 
 ### End state
 
@@ -959,11 +966,12 @@ this one. `summary-build` is not run.
   3 of 3 (baseline 4 of 6) with the planted item opening every capture, though the baseline already did so in most
   runs, so the movement cannot be separated from the baseline's own rate.
 - Does "at most one line each" shorten criterion mentions at G1 (AC1)? Yes: four of six captures give a criterion
-  fewer of its own words than the grammar's threshold (two `bare`, two `nickname`), mostly in the "Done" line.
+  fewer of its own words than the grammar's threshold (two `bare`, two `nickname`); the cause per capture is in
+  "Observed failure mode" below.
 - Does the paragraph reshape a reviewer's report, the slice's covered-criteria value, or the spec review's opening
   summary? No at the reviewer and advocate (`template-shape` 6 of 6 with unchanged `bare` mentions), no at the slice
   (`gate-shape` 3 of 3, `text-with-number` 3 of 3), and not on the scripted checks at the spec review (3 of 3 `plain`;
-  the opening-summary observation keeps one row per finding with ids).
+  the opening-summary observation is an unresolved split, in "Observed failure mode" below).
 
 ## Result, 2026-10-20 — the summary measurement closes: R was reverted, E was not run, AC11 and AC12 are not covered
 
@@ -1064,7 +1072,7 @@ count typed by hand).
 | G1: `criterion-mention` clean majority `text-with-number`, bar `third-noritual` 3 of 3 | 2 of 6 after the 2-1 split was re-run to six | **no, misses its bar** |
 | G2: `reviewer-report` every run `template-shape`; `criterion-mention` majority `bare`, equal to baseline | 6 of 6 `template-shape`; `bare` 3 of 3 at each lens | yes |
 | G3: `covers-field` every run `gate-shape`; clean majority `text-with-number` | 3 of 3; 3 of 3 | yes |
-| G4: that site's own `severity-name` and `reviewer-name` against its last bar; by eye | `plain` 3 of 3 on both (registered prompt); the observation-only captures were `plain` on `severity-name` 3 of 3 and on `reviewer-name` 2 of 3 | yes |
+| G4: that site's own `severity-name` and `reviewer-name` against its last bar; by eye | `plain` 3 of 3 on both (registered prompt); the observation-only captures were `plain` on `severity-name` 3 of 3 and on `reviewer-name` 2 of 3 (`internal` on `-open-2`); the by-eye check is not readable on the registered prompt | scripted checks yes; the opening-summary reading is an unresolved split, not a hold |
 
 ### End state taken
 
@@ -1087,17 +1095,27 @@ a new dated extension the operator authorizes, per this case's precedent) or shi
   template at B, not from the older `fs-treated2` bytes.
 - S1 `leads` was not re-run to six, because G1 fixed the end state whatever S1 read. The S1 verdict is unresolved,
   not failed.
-- The finding-presentation arm contract test carries `SUMMARY_RULES_REVISION = "R"` as a placeholder for the revision
-  of `rules.md` the `summary-guard-specreview` arm reads; R is reverted, so that name now labels a revision that is
-  no longer in the tree, and the arm remains the recorded copy.
+- The finding-presentation arm contract test carries `SUMMARY_RULES_REVISION`, the full SHA of R, as the revision
+  of `rules.md` the `summary-guard-specreview` arm reads; R is reverted, so that revision is no longer in the tree,
+  and the arm remains the recorded copy. The SHA is branch-local and the test's comment names R by its commit subject.
 
 ### Observed failure mode, as design input
 
-The sentence "Give everything that needs nothing from them at most one line each" shortened criterion mentions to
-labels: at G1 four of six captures gave a criterion fewer of its own words than the grammar's threshold (two
-`bare`, two `nickname`), mostly in the closing "Done" line where routine items are listed. The same paragraph
-did not reshape a reviewer's report, the slice statement's covered-criteria value or the spec review's per-finding
-rows, so the regression is specific to a no-ritual summary that names criteria. A future attempt has to hold a
+At G1 four of six captures gave a criterion fewer of its own words than the grammar's threshold (two `bare`, two
+`nickname`), so the miss under the registered grammar stands and the end state is unchanged. The cause differs by
+capture. Re-grading each of `fourth-noritual-3` to `-6` with one passage removed at a time
+(`wording_grader.py --check criterion-mention --criteria fixtures/spec.md`): runs 3 and 6 are `bare` only because of
+a later cross-reference to a criterion by number ("... in AC4") inside another criterion's bullet, and read
+`text-with-number` without it; run 5 is the only one driven by the closing "Done" line (removing it gives
+`text-with-number`); run 4 is `nickname` from shortened bullet labels (the AC3 and AC6 bullets each read `nickname`
+on their own). No same-day run at B on the G1 prompt shows that the sentence "Give everything that needs nothing
+from them at most one line each" is what shortened the mentions, so that causal link is a hypothesis, not a finding.
+The same paragraph did not reshape a reviewer's report or the slice statement's covered-criteria value
+(`template-shape` and `gate-shape` unchanged, `bare` and `text-with-number` mentions unchanged). The spec review is
+an unresolved split: its scripted checks on the registered prompt read `plain` 3 of 3, but that prompt states the
+opening summary, so the registered by-eye check (one row per finding in the opening summary) can only be read on the
+`-open-` captures, where `reviewer-name` reads `plain`, `internal`, `plain`; see the G4 row above. This section does
+not conclude the regression is specific to a no-ritual summary. A future attempt has to hold a
 one-line routine item and a criterion mentioned by its own text together; this section does not propose wording.
 
 ### Limits
@@ -1123,7 +1141,7 @@ these counts as the signal to re-measure.
 ### Slice close
 
 **This slice delivers no coverage of AC11 or AC12.** The plan-time claim that it partially covers them did not hold:
-R regressed AC1's guard (G1) and did not reach a clean majority on S1 `leads`. Two sites were measured, the
+R regressed AC1's guard (G1), which forced R's revert; S1 `leads` is unresolved. Two sites were measured, the
 no-ritual summary (S1) and the build's closing report (S2, rules-only); the remaining sites, about eight whose own
 instructions open a summary with routine detail, are listed in
 `task/ritual-summaries-elsewhere-open-with-what-needs-the-reader`. AC11 and AC12 stay recorded as unmeasured.
