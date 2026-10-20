@@ -405,13 +405,11 @@
       }
       svg.appendChild(group);
       step.lines.forEach(function (line) {
-        var text = svgNode("text");
-        text.setAttribute("class", "flow-label");
-        text.setAttribute("x", round1(line.x));
-        text.setAttribute("y", round1(line.y));
-        text.textContent = line.text;
-        group.appendChild(text);
-        if (step.accent) labelHalo(group, text);
+        var text = labelText(group, line);
+        if (step.accent) {
+          var box = text.getBBox();
+          group.insertBefore(haloRect(box.x - HALO_PAD, box.y - HALO_PAD, box.width + 2 * HALO_PAD, box.height + 2 * HALO_PAD), text);
+        }
       });
     });
     plan.arrows.forEach(function (arrow) {
@@ -426,33 +424,30 @@
     fitFlow(state);
   }
 
-  function labelHalo(group, text) {
-    var box = text.getBBox();
+  function labelText(group, line) {
+    var text = svgNode("text");
+    text.setAttribute("class", "flow-label");
+    text.setAttribute("x", round1(line.x));
+    text.setAttribute("y", round1(line.y));
+    text.textContent = line.text;
+    group.appendChild(text);
+    return text;
+  }
+
+  // The card-coloured patch set under a label so no line or hatch shows through it.
+  function haloRect(x, y, w, h) {
     var halo = svgNode("rect");
     halo.setAttribute("class", "flow-halo");
-    halo.setAttribute("x", round1(box.x - HALO_PAD));
-    halo.setAttribute("y", round1(box.y - HALO_PAD));
-    halo.setAttribute("width", round1(box.width + 2 * HALO_PAD));
-    halo.setAttribute("height", round1(box.height + 2 * HALO_PAD));
-    group.insertBefore(halo, text);
+    halo.setAttribute("x", round1(x));
+    halo.setAttribute("y", round1(y));
+    halo.setAttribute("width", round1(w));
+    halo.setAttribute("height", round1(h));
+    return halo;
   }
 
   function drawLabel(group, label) {
-    var halo = svgNode("rect");
-    halo.setAttribute("class", "flow-halo");
-    halo.setAttribute("x", round1(label.halo.x));
-    halo.setAttribute("y", round1(label.halo.y));
-    halo.setAttribute("width", round1(label.halo.w));
-    halo.setAttribute("height", round1(label.halo.h));
-    group.appendChild(halo);
-    label.lines.forEach(function (line) {
-      var text = svgNode("text");
-      text.setAttribute("class", "flow-label");
-      text.setAttribute("x", round1(line.x));
-      text.setAttribute("y", round1(line.y));
-      text.textContent = line.text;
-      group.appendChild(text);
-    });
+    group.appendChild(haloRect(label.halo.x, label.halo.y, label.halo.w, label.halo.h));
+    label.lines.forEach(function (line) { labelText(group, line); });
   }
 
   function fitFlow(state) {

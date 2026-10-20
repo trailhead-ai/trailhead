@@ -83,9 +83,9 @@ def _arm_env(run_dir: Path) -> dict[str, str]:
     return dict(line.split("=", 1) for line in lines if line)
 
 
-def _run_pad(run_dir: Path, pad: str) -> subprocess.CompletedProcess:
+def _run_pad(run_dir: Path, pad: str, round_: dict = ROUND) -> subprocess.CompletedProcess:
     round_file = run_dir.parent / "round.json"
-    round_file.write_text(json.dumps(ROUND))
+    round_file.write_text(json.dumps(round_))
     cwd = Path((run_dir / "cwd").read_text().strip())
     script = run_dir / "plugin" / "skills" / "scratch-pad" / "scratch_pad.py"
     env = _arm_env(run_dir)
@@ -368,12 +368,7 @@ def _grade(tmp_path: Path, run_dir: Path, variant: str = "flow-outside-workspace
 
 
 def _draw(run_dir: Path, pad: str, round_: dict) -> None:
-    global ROUND
-    saved, ROUND = ROUND, round_
-    try:
-        assert _run_pad(run_dir, pad).returncode == 0
-    finally:
-        ROUND = saved
+    assert _run_pad(run_dir, pad, round_).returncode == 0
 
 
 def test_the_grader_counts_flow_options_in_a_pad_a_run_left_under_the_outpost_state(tmp_path):
