@@ -40,6 +40,7 @@ The run's vault ends with D2 amended and A1 updated, each correct in the quoted 
 - The run's `trace.jsonl` and the `llm` trace judge see only the new turns, never the seeded ones. This case is graded on vault files only.
 - The seeded tool results carry the real `revision:` of each scaffolded record, so the fixture's history is regenerated whenever a record body changes.
 - "Body differs only in the quoted span" is graded by the two kept sentences and the no-note clause for D2, and by the kept clause for A1. An edit elsewhere in D2's title line or an unquoted rewording of a kept sentence is caught only if it breaks a kept-sentence pattern; a note appended to A1 is not seen.
+- D2's amend `--reason` is not graded: that it names the original correction (`decision/set-the-loan-period-for-power-tools`), as the dependents step requires, is not read by any clause.
 - A plain update of the non-frozen area is not asserted to write a change history, so no clause reads A1's sidecar.
 - `regex` graders with `source: file` do not glob, so each names an exact seeded path. `file_exists` counts only files created during the run.
 - A run that asks again instead of acting writes nothing and fails the correction clauses; the operator has answered, so asking is not the expected route.
