@@ -528,6 +528,9 @@ and remove the file. Act on the exit:
 | `concurrent-followup-parent` | A second follow-up parent appeared during assembly; another run's. This run's own new parent was removed and nothing else was written. Rerun after the other run settles, which meets the other parent (step 7). |
 | `parent-create-failed` | The parent record could not be created; `lore`'s or the filesystem's. With no `subject:` line, nothing was written. With one, the create's outcome was unclear: nothing was undone, there is no JSON, and every parent named is still live, so a rerun stops at it at step 7. Check `lore vault ls`, then rerun. |
 | `nesting-incomplete` | A child could not be nested or the parent could not be made ready; `lore`'s or the vault's. The parent is left being assembled, holding what nested, and nothing was undone; read `failed` below, then rerun, which resumes it (step 7). |
+| `not-a-gathered-followup` | A named follow-up is not among the spec's gathered follow-ups (nested under a parent, already dropped, or linked to no slice of the spec); the vault's. Nothing was written; `subject:` names it. Rerun the ritual. |
+| `invalid-dispositions-file` | The dispositions file was not the expected object, repeated a name, or carried drops with an empty reason; this ritual's. Nothing was written. Report it and rerun. |
+| `dispose-incomplete` | A drop could not be written or its read-back did not show it; `lore`'s or the vault's. Stdout JSON carries `dropped` and `failed` (`name`, `write`, `command`); the rest still ran. Read `failed`, then rerun. |
 
 The codes shared with the gather table (`no-vaults`, `spec-not-found`, `spec-ambiguous`,
 `not-a-spec`, `malformed-sidecar`, `empty-sidecar`, `lore-missing`, `lore-timeout`, `lore-failed`,
