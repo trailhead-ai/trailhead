@@ -16,7 +16,7 @@
  *
  * plan = {
  *   width, height,                                // the flow's natural size, in SVG units
- *   steps:  [{ id, shape, x, y, w, h, lines: [{ text, x, y }] }]   // x, y: top-left; lines: label centres
+ *   steps:  [{ id, shape, accent, x, y, w, h, lines: [{ text, x, y }] }]   // x, y: top-left; lines: label centres
  *   arrows: [{ index, from, to, dashed, loop, points: [[x, y], ...],     // from the source edge to the target edge
  *             label: null | { lines: [{ text, x, y }], halo: { x, y, w, h } } }]   // at the first leg's middle
  * }
@@ -607,7 +607,7 @@
       var lines = n.size.lines.map(function (text, k) {
         return { text: text, x: topLeft[0] + n.size.w / 2, y: topLeft[1] + n.size.h / 2 + (k - (n.size.lines.length - 1) / 2) * LINE_HEIGHT };
       });
-      plan.steps.push({ id: id, shape: n.step.shape, x: topLeft[0], y: topLeft[1], w: n.size.w, h: n.size.h, lines: lines });
+      plan.steps.push({ id: id, shape: n.step.shape, x: topLeft[0], y: topLeft[1], w: n.size.w, h: n.size.h, accent: n.step.accent, lines: lines });
     });
     forward.forEach(function (arrow, a) {
       var route = routes[a];

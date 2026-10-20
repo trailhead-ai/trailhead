@@ -1188,3 +1188,187 @@ def test_a_flow_on_a_pad_served_under_the_sites_csp_draws_its_steps(tmp_path):
     assert got["kinds"] == ["box", "decision", "arrow"]
     assert got["texts"] == ["Served one", "Served two"]
     assert all(w > 20 for w in got["widths"])
+
+
+SCHEMES = ["light", "dark"]
+
+PAINT = r"""
+const rgb = (s) => (s.match(/[\d.]+/g) || []).slice(0, 3).map(Number);
+const seen = () => ({
+  dark: matchMedia('(prefers-color-scheme: dark)').matches,
+  bg: getComputedStyle(document.body).backgroundColor,
+  ink: getComputedStyle(document.body).color,
+});
+const strokes = (root) => [...root.querySelectorAll('path')].map((p) => getComputedStyle(p).stroke);
+"""
+
+LAYOUT = {"layout": {"column": [{"button": "Save"}, {"box": [{"text": "Hello"}]}]}}
+
+
+def _paint(tmp_path, scheme, data, js):
+    page = _build(tmp_path, data)
+    return ch.run_probe(page, LIB + PAINT + "await ready();\n" + js, color_scheme=scheme)
+
+
+def _lum(color):
+    r, g, b = (int(v) / 255 for v in color)
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def _channels(css):
+    import re
+
+    return [float(v) for v in re.findall(r"[\d.]+", css)[:3]]
+
+
+@pytest.mark.parametrize("scheme", SCHEMES)
+def test_every_stroke_is_in_the_pages_ink_and_the_page_is_dark_paper_only_when_dark_is_preferred(tmp_path, scheme):
+    got = _paint(
+        tmp_path,
+        scheme,
+        _round([LAYOUT, "flowchart LR\n  a[One] -.-> b[Two]\n  b --> a"]),
+        "return {...seen(), layout: strokes(drawing(0, 0)), flow: strokes(drawing(0, 1))};",
+    )
+    assert got["dark"] == (scheme == "dark")
+    assert got["layout"] and got["flow"]
+    assert set(got["layout"]) == {got["ink"]}
+    assert set(got["flow"]) == {got["ink"]}
+    bg, ink = _lum(_channels(got["bg"])), _lum(_channels(got["ink"]))
+    assert (bg < 0.2 and ink > 0.7) if scheme == "dark" else (bg > 0.8 and ink < 0.2)
+
+
+ACCENT_FLOW = "flowchart LR\n  a[One]:::accent --> b[Two]\n  b --> c[Three]"
+
+
+@pytest.mark.parametrize("scheme", SCHEMES)
+def test_an_accented_steps_strokes_are_the_accent_colour_and_its_arrows_and_other_steps_stay_ink(tmp_path, scheme):
+    got = _paint(
+        tmp_path,
+        scheme,
+        _round([ACCENT_FLOW]),
+        """
+        const d = drawing(0, 0);
+        const group = (id) => d.querySelector(`g[data-step-id="${id}"]`);
+        return {
+          ...seen(),
+          accented: strokes(group('a')),
+          hatch: [...group('a').querySelectorAll('.flow-hatch')].map((l) => getComputedStyle(l).stroke),
+          plain: strokes(group('b')),
+          arrows: strokes(d.querySelector('g[data-kind="arrow"]')),
+        };
+        """,
+    )
+    assert got["dark"] == (scheme == "dark")
+    accent = got["accented"][0]
+    assert accent != got["ink"]
+    assert set(got["accented"]) == {accent}
+    assert got["hatch"] and set(got["hatch"]) == {accent}
+    assert set(got["plain"]) == {got["ink"]}
+    assert set(got["arrows"]) == {got["ink"]}
+
+
+def test_the_accent_colour_differs_between_light_and_dark(tmp_path):
+    js = "return getComputedStyle(drawing(0, 0).querySelector('g[data-step-id=\"a\"] path')).stroke;"
+    data = _round([ACCENT_FLOW])
+    assert _paint(tmp_path, "light", data, js) != _paint(tmp_path, "dark", data, js)
+
+
+def _inside(poly, point, slack):
+    """Whether point is in the traced polygon (even-odd) or within slack of its edge."""
+    px, py = point
+    crossings = 0
+    for (x1, y1), (x2, y2) in zip(poly, poly[1:]):
+        if (y1 > py) != (y2 > py) and px < x1 + (py - y1) * (x2 - x1) / (y2 - y1):
+            crossings += 1
+        dx, dy = x2 - x1, y2 - y1
+        t = 0 if dx == dy == 0 else max(0, min(1, ((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy)))
+        if math.hypot(px - (x1 + t * dx), py - (y1 + t * dy)) <= slack:
+            return True
+    return crossings % 2 == 1
+
+
+SHAPES = {"box": "a[One]", "round": "a(One)", "pill": "a([One])", "decision": "a{One}"}
+
+
+@pytest.mark.parametrize("shape", SHAPES)
+def test_every_hatch_line_of_an_accented_step_is_diagonal_and_ends_inside_its_outline(tmp_path, shape):
+    flow = f"flowchart LR\n  {SHAPES[shape]}:::accent --> b[Two]"
+    got = _run(
+        tmp_path,
+        _round([flow]),
+        """
+        const num = (l, n) => Number(l.getAttribute(n));
+        const group = (id) => drawing(0, 0).querySelector(`g[data-step-id="${id}"]`);
+        return {
+          outline: pathsOf(group('a'))[0],
+          hatch: [...group('a').querySelectorAll('.flow-hatch')]
+            .map((l) => [num(l, 'x1'), num(l, 'y1'), num(l, 'x2'), num(l, 'y2')]),
+          plain: group('b').querySelectorAll('.flow-hatch').length,
+        };
+        """,
+    )
+    assert len(got["hatch"]) >= 3
+    assert got["plain"] == 0
+    for x1, y1, x2, y2 in got["hatch"]:
+        assert abs(abs(x2 - x1) - abs(y2 - y1)) < 0.5
+        assert _inside(got["outline"], (x1, y1), 2.0) and _inside(got["outline"], (x2, y2), 2.0)
+
+
+def test_hatching_does_not_move_any_outline_or_arrow_stroke(tmp_path):
+    marked = "flowchart LR\n  a[One]:::accent --> b[Two]\n  b --> c[Three]"
+    assert _run(tmp_path, _round([marked]), "return everyPath(drawing(0, 0));") == _plain_paths(tmp_path)
+
+
+@pytest.mark.parametrize("scheme", SCHEMES)
+def test_cards_pressed_buttons_note_and_reply_boxes_and_the_font_notice_contrast_with_their_text(tmp_path, scheme):
+    got = _paint(
+        tmp_path,
+        scheme,
+        _round([LAYOUT, "flowchart LR\n  a[One] -->|go| b[Two]"]),
+        """
+        const pressed = document.querySelector('.pad-toggle');
+        pressed.setAttribute('aria-pressed', 'true');
+        const current = document.querySelector('.pad-questions button[aria-current="true"]');
+        const of = (el) => ({bg: getComputedStyle(el).backgroundColor, fg: getComputedStyle(el).color});
+        const notice = document.getElementById('pad-font-notice');
+        return {
+          ...seen(),
+          card: of(document.querySelector('.pad-card')),
+          pressed: of(pressed),
+          current: of(current),
+          note: of(document.querySelector('.pad-note')),
+          reply: of(document.querySelector('.pad-reply-box')),
+          notice: of(notice),
+          halo: getComputedStyle(drawing(0, 1).querySelector('.flow-halo')).fill,
+        };
+        """,
+    )
+    assert got["dark"] == (scheme == "dark")
+    for name in ("card", "pressed", "current", "note", "reply", "notice"):
+        bg, fg = _lum(_channels(got[name]["bg"])), _lum(_channels(got[name]["fg"]))
+        assert abs(bg - fg) > 0.5, f"{name}: background {got[name]['bg']} on text {got[name]['fg']}"
+    assert got["halo"] == got["bg"]
+    page_bg = _lum(_channels(got["bg"]))
+    assert (page_bg < 0.2) if scheme == "dark" else (page_bg > 0.8)
+    for name in ("card", "current", "note", "reply"):
+        assert (_lum(_channels(got[name]["bg"])) < 0.3) == (scheme == "dark")
+
+
+def test_two_accented_drawings_on_one_question_share_no_svg_id(tmp_path):
+    got = _run(
+        tmp_path,
+        _round([ACCENT_FLOW, "flowchart TD\n  x{Pick}:::accent --> y([End]):::accent"]),
+        """
+        const ids = [...document.querySelectorAll('svg.pad-ink [id]')].map((e) => e.id);
+        const optionOf = (el) => el.closest('.pad-drawing').dataset.option;
+        const refs = [...document.querySelectorAll('svg.pad-ink *')].flatMap((e) =>
+          [...e.attributes].filter((a) => /url\\(#/.test(a.value)).map((a) => [optionOf(e), a.value]));
+        const owner = (id) => (document.getElementById(id) ? optionOf(document.getElementById(id)) : null);
+        return {ids, dupes: ids.length - new Set(ids).size,
+          refs: refs.map(([option, value]) => [option, owner(value.match(/#([^)]+)/)[1])]),
+          hatch: [...document.querySelectorAll('.flow-hatch')].length};
+        """,
+    )
+    assert got["hatch"] > 0
+    assert got["dupes"] == 0
+    assert all(own == mine for mine, own in got["refs"])

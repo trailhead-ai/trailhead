@@ -9,6 +9,7 @@
   var MAX_LISTED = 5;
   var MIN_SCALE = 0.6;
   var ARROW_LENGTH = 11;
+  var HATCH_GAP = 8;
   var ARROW_SPREAD = (26 * Math.PI) / 180;
 
   function mulberry32(seed) {
@@ -61,7 +62,7 @@
       var path = svgNode("path");
       path.setAttribute("d", d);
       path.setAttribute("fill", "none");
-      path.setAttribute("stroke", "#000");
+      path.setAttribute("stroke", "currentColor");
       path.setAttribute("stroke-width", "1.5");
       path.setAttribute("stroke-linecap", "round");
       path.setAttribute("stroke-linejoin", "round");
@@ -301,6 +302,53 @@
     return roundedOutline(r, 0);
   }
 
+  // The part of the line through p with direction (dx, dy) that lies inside a convex polygon, or null.
+  function clipLine(poly, p, dx, dy) {
+    var lo = -Infinity;
+    var hi = Infinity;
+    var area = 0;
+    for (var i = 0; i < poly.length - 1; i++) area += poly[i][0] * poly[i + 1][1] - poly[i + 1][0] * poly[i][1];
+    var turn = area >= 0 ? 1 : -1;
+    for (var k = 0; k < poly.length - 1; k++) {
+      var a = poly[k];
+      var b = poly[k + 1];
+      var ex = b[0] - a[0];
+      var ey = b[1] - a[1];
+      if (ex === 0 && ey === 0) continue;
+      var inward = turn * (ex * (p[1] - a[1]) - ey * (p[0] - a[0]));
+      var rate = turn * (ex * dy - ey * dx);
+      if (Math.abs(rate) < 1e-9) {
+        if (inward < 0) return null;
+      } else if (rate > 0) {
+        lo = Math.max(lo, -inward / rate);
+      } else {
+        hi = Math.min(hi, -inward / rate);
+      }
+    }
+    return lo < hi ? [lo, hi] : null;
+  }
+
+  function hatch(group, outline) {
+    var xs = outline.map(function (p) { return p[0]; });
+    var ys = outline.map(function (p) { return p[1]; });
+    var x0 = Math.min.apply(null, xs);
+    var x1 = Math.max.apply(null, xs);
+    var y0 = Math.min.apply(null, ys);
+    var y1 = Math.max.apply(null, ys);
+    var step = HATCH_GAP * Math.SQRT2;
+    for (var c = x0 + y0 + step; c < x1 + y1; c += step) {
+      var span = clipLine(outline, [c - y0, y0], -1, 1);
+      if (!span) continue;
+      var line = svgNode("line");
+      line.setAttribute("class", "flow-hatch");
+      line.setAttribute("x1", round1(c - y0 - span[0]));
+      line.setAttribute("y1", round1(y0 + span[0]));
+      line.setAttribute("x2", round1(c - y0 - span[1]));
+      line.setAttribute("y2", round1(y0 + span[1]));
+      group.appendChild(line);
+    }
+  }
+
   function arrowhead(group, rng, points) {
     var tip = points[points.length - 1];
     var from = points[points.length - 2];
@@ -348,7 +396,12 @@
       var group = svgNode("g");
       group.setAttribute("data-kind", step.shape);
       group.setAttribute("data-step-id", step.id);
-      stroke(group, rng, stepOutline(step));
+      var outline = stepOutline(step);
+      stroke(group, rng, outline);
+      if (step.accent) {
+        group.setAttribute("class", "flow-accent");
+        hatch(group, outline);
+      }
       step.lines.forEach(function (line) {
         var text = svgNode("text");
         text.setAttribute("class", "flow-label");
