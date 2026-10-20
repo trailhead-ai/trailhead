@@ -15,7 +15,7 @@ The **`## Scratch pads`** section and the **Default rule's pad exception** of
 `tools/outpost/plugins/outpost/rules.md`, installed by trailhead as the
 always-loaded ruleset, as committed at the slice's HEAD. Verbatim:
 
-The text below is the **second batch's** rule. The first batch measured the same
+The text below is the rule as of the **third** batch (the second measured the flow clause; see "Changes after the first run of the flow batches"). The first batch measured the same
 section without the flow clause (`rules.md` blob `dc7c8757`).
 
 > The one exception is a scratch pad (below): it goes where the scratch-pad skill
@@ -23,9 +23,10 @@ section without the flow clause (`rules.md` blob `dc7c8757`).
 > vault.
 
 > When a design question's options differ in how a screen, page or component looks
-> or is arranged, or in the shape of a flow, process or architecture (its steps and
-> the arrows between them), draw them as a pad with the `/scratch-pad` skill in that
-> same turn, without asking first. If the user asked for words only, draw nothing.
+> or is arranged, or in how a process or system runs (the steps it takes and what
+> hands off to what), draw them as a pad with the `/scratch-pad` skill in that same
+> turn, without asking first. How files, folders or settings are laid out is neither.
+> If the user asked for words only, draw nothing.
 > Whatever happens to the pad, ask the same question in words in that turn too. A
 > typed answer settles it as fully as a pasted pad reply. Report what became of the
 > pad as the skill's **Report it** says, and never hand back a link its script did
@@ -36,6 +37,30 @@ flow clause is the only difference between the arms of the second batch.
 This is a **behavioural** decision (whether, where and how a session reaches for
 a pad), so only a run can observe it. The skill's own text is not under test; it
 is loaded identically in every arm.
+
+## Changes after the first run of the flow batches
+
+Batch 1 of the flow clause (commits `20057986`, `e1244c91`, runs in `runs/flow-batch/`)
+failed the pass condition: `not-visual-layout-vocabulary` missed 3/3, drawing a pad of
+flow options for a file-layout question. On the operator's decision (2026-10-20) the
+clause was narrowed and the whole batch re-run (`runs/flow-batch-2/`). Only the rule
+wording and the three live arms rebuilt from it changed; every verdict, threshold and
+brief registered above is as committed in `20057986`. The `rules.md` hunk:
+
+```diff
+-or is arranged, or in the shape of a flow, process or architecture (its steps and
+-the arrows between them), draw them as a pad with the `/scratch-pad` skill in that
+-same turn, without asking first. If the user asked for words only, draw nothing.
++or is arranged, or in how a process or system runs (the steps it takes and what
++hands off to what), draw them as a pad with the `/scratch-pad` skill in that same
++turn, without asking first. How files, folders or settings are laid out is neither.
++If the user asked for words only, draw nothing.
+```
+
+The same hunk is applied to the rebuilt `pad-on-visual-question/arms/treatment.md`,
+`publish-routing/arms/treatment.md` and
+`follow-up-round-on-an-open-pad/arms/system-prompt.md`. The baseline arm is unchanged
+(`rules.md` at `fe972164`).
 
 ## Arms
 

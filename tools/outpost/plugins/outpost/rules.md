@@ -83,9 +83,10 @@ once opened in a tab.
 ## Scratch pads
 
 When a design question's options differ in how a screen, page or component looks
-or is arranged, or in the shape of a flow, process or architecture (its steps and
-the arrows between them), draw them as a pad with the `/scratch-pad` skill in that
-same turn, without asking first. If the user asked for words only, draw nothing.
+or is arranged, or in how a process or system runs (the steps it takes and what
+hands off to what), draw them as a pad with the `/scratch-pad` skill in that same
+turn, without asking first. How files, folders or settings are laid out is neither.
+If the user asked for words only, draw nothing.
 Whatever happens to the pad, ask the same question in words in that turn too. A
 typed answer settles it as fully as a pasted pad reply. Report what became of the
 pad as the skill's **Report it** says, and never hand back a link its script did
