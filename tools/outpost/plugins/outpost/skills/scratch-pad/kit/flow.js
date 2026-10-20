@@ -398,17 +398,23 @@
     return flow;
   }
 
+  // Breaks a word that is wider than max into the fewest lines of the longest prefixes that fit,
+  // finding each break by bisection so the page measures a handful of candidates, not every prefix.
   function breakWord(word, measure, max) {
+    var chars = Array.from(word);
     var parts = [];
-    var chunk = "";
-    Array.from(word).forEach(function (ch) {
-      if (chunk !== "" && measure(chunk + ch) > max) {
-        parts.push(chunk);
-        chunk = "";
+    var start = 0;
+    while (start < chars.length) {
+      var lo = 1;
+      var hi = chars.length - start;
+      while (lo < hi) {
+        var mid = Math.ceil((lo + hi) / 2);
+        if (measure(chars.slice(start, start + mid).join("")) > max) hi = mid - 1;
+        else lo = mid;
       }
-      chunk += ch;
-    });
-    if (chunk !== "") parts.push(chunk);
+      parts.push(chars.slice(start, start + lo).join(""));
+      start += lo;
+    }
     return parts;
   }
 

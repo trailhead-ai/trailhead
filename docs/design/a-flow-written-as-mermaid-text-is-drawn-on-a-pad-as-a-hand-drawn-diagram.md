@@ -164,8 +164,10 @@ Ask the session to redraw this option.
 Only that option's drawing shows the message; the other options on the question draw normally.
 
 **Limits.** A flow holds at most 400 lines, no line longer than 1000 characters, 60 steps and 120
-arrows, checked in that order and before anything else is read. Over any limit, the flow cannot be
-drawn and the message says which limit and the number found. Long arrows add at most 2000 waypoints
+arrows. Lines and characters per line are checked before any line is read; steps and arrows are
+counted by reading the flow, which those first two limits already bound, and are checked before
+layout. Over any limit, the flow cannot be drawn: only the limit message shows, naming the number
+found, never a broken line that turns up later. Long arrows add at most 2000 waypoints
 in all, and a label word wider than a step is broken across lines. The limits keep a flow written in
 error, or one copied from somewhere hostile, from hanging the page: the largest flow they allow
 draws in under a second.
