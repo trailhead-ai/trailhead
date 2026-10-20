@@ -590,9 +590,9 @@ LABEL_FORMS = ["-->|go|", "-- go -->", "-.->|go|", "-. go .->"]
 def test_each_labelled_arrow_form_sets_its_label_at_the_middle_of_the_first_leg_on_a_halo(tmp_path):
     flows = [LABEL_FLOW.format(arrow=form) for form in LABEL_FORMS]
     js = """
-    const body = getComputedStyle(document.body).backgroundColor;
+    const card = getComputedStyle(document.querySelector('.pad-card')).backgroundColor;
     return {
-      body,
+      card,
       steps: Object.fromEntries(stepsOf(drawing(0, 0)).map((s) => [s.id, s])),
       forms: [0, 1, 2, 3].map((o) => arrowDetail(drawing(0, o)).filter((a) => a.index === 0)[0]),
       unlabelled: [0, 1, 2, 3]
@@ -615,7 +615,7 @@ def test_each_labelled_arrow_form_sets_its_label_at_the_middle_of_the_first_leg_
         assert form["label"]["w"] == pytest.approx(first["label"]["w"], abs=0.5)
         halo, label = form["halo"], form["label"]
         assert halo["under"]
-        assert halo["fill"] == got["body"]
+        assert halo["fill"] == got["card"]
         assert halo["x"] <= label["x"] + 0.01 and halo["y"] <= label["y"] + 0.01
         assert halo["x"] + halo["w"] >= label["x"] + label["w"]
         assert halo["y"] + halo["h"] >= label["y"] + label["h"]
@@ -1314,6 +1314,60 @@ def test_every_hatch_line_of_an_accented_step_is_diagonal_and_ends_inside_its_ou
         assert _inside(got["outline"], (x1, y1), 2.0) and _inside(got["outline"], (x2, y2), 2.0)
 
 
+def _span_in_rect(line, rect):
+    """The (lo, hi) parameter run of the segment line inside rect, or None."""
+    x1, y1, x2, y2 = line
+    x, y, w, h = rect
+    lo, hi = 0.0, 1.0
+    for p, d, a, b in ((x1, x2 - x1, x, x + w), (y1, y2 - y1, y, y + h)):
+        if abs(d) < 1e-9:
+            if not a <= p <= b:
+                return None
+            continue
+        t0, t1 = sorted(((a - p) / d, (b - p) / d))
+        lo, hi = max(lo, t0), min(hi, t1)
+    return (lo, hi) if lo < hi else None
+
+
+@pytest.mark.parametrize("scheme", SCHEMES)
+@pytest.mark.parametrize("shape", SHAPES)
+def test_no_hatch_line_of_an_accented_step_shows_behind_its_label(tmp_path, scheme, shape):
+    flow = f"flowchart LR\n  {SHAPES[shape]}:::accent --> b[Two]"
+    got = _paint(
+        tmp_path,
+        scheme,
+        _round([flow]),
+        """
+        const g = drawing(0, 0).querySelector('g[data-step-id="a"]');
+        const kids = [...g.children];
+        const num = (l, n) => Number(l.getAttribute(n));
+        const text = g.querySelector('text');
+        const box = text.getBBox();
+        return {
+          card: getComputedStyle(document.querySelector('.pad-card')).backgroundColor,
+          text: [box.x, box.y, box.width, box.height],
+          hatch: kids.filter((k) => k.classList.contains('flow-hatch'))
+            .map((l) => ({at: kids.indexOf(l), line: [num(l, 'x1'), num(l, 'y1'), num(l, 'x2'), num(l, 'y2')]})),
+          halos: kids.filter((k) => k.classList.contains('flow-halo'))
+            .map((h) => ({at: kids.indexOf(h), fill: getComputedStyle(h).fill,
+                          rect: [num(h, 'x'), num(h, 'y'), num(h, 'width'), num(h, 'height')]})),
+          textAt: kids.indexOf(text),
+        };
+        """,
+    )
+    assert got["halos"] and all(h["at"] < got["textAt"] and h["fill"] == got["card"] for h in got["halos"])
+    crossing = 0
+    for hatch in got["hatch"]:
+        run = _span_in_rect(hatch["line"], got["text"])
+        if run is None:
+            continue
+        covers = [_span_in_rect(hatch["line"], h["rect"]) for h in got["halos"] if h["at"] > hatch["at"]]
+        covered = [c for c in covers if c]
+        assert covered and min(c[0] for c in covered) <= run[0] and max(c[1] for c in covered) >= run[1]
+        crossing += 1
+    assert crossing >= 1
+
+
 def test_hatching_does_not_move_any_outline_or_arrow_stroke(tmp_path):
     marked = "flowchart LR\n  a[One]:::accent --> b[Two]\n  b --> c[Three]"
     assert _run(tmp_path, _round([marked]), "return everyPath(drawing(0, 0));") == _plain_paths(tmp_path)
@@ -1324,7 +1378,7 @@ def test_cards_pressed_buttons_note_and_reply_boxes_and_the_font_notice_contrast
     got = _paint(
         tmp_path,
         scheme,
-        _round([LAYOUT, "flowchart LR\n  a[One] -->|go| b[Two]"]),
+        _round([LAYOUT, "flowchart LR\n  a[One]:::accent -->|go| b[Two]"]),
         """
         const pressed = document.querySelector('.pad-toggle');
         pressed.setAttribute('aria-pressed', 'true');
@@ -1339,7 +1393,7 @@ def test_cards_pressed_buttons_note_and_reply_boxes_and_the_font_notice_contrast
           note: of(document.querySelector('.pad-note')),
           reply: of(document.querySelector('.pad-reply-box')),
           notice: of(notice),
-          halo: getComputedStyle(drawing(0, 1).querySelector('.flow-halo')).fill,
+          halos: [...drawing(0, 1).querySelectorAll('.flow-halo')].map((h) => getComputedStyle(h).fill),
         };
         """,
     )
@@ -1347,7 +1401,9 @@ def test_cards_pressed_buttons_note_and_reply_boxes_and_the_font_notice_contrast
     for name in ("card", "pressed", "current", "note", "reply", "notice"):
         bg, fg = _lum(_channels(got[name]["bg"])), _lum(_channels(got[name]["fg"]))
         assert abs(bg - fg) > 0.5, f"{name}: background {got[name]['bg']} on text {got[name]['fg']}"
-    assert got["halo"] == got["bg"]
+    assert len(got["halos"]) == 2
+    for halo in got["halos"]:
+        assert halo == got["card"]["bg"]
     page_bg = _lum(_channels(got["bg"]))
     assert (page_bg < 0.2) if scheme == "dark" else (page_bg > 0.8)
     for name in ("card", "current", "note", "reply"):
