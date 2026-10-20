@@ -27,6 +27,8 @@ CASE_DIR = ac.EVALS_DIR / "pad-on-visual-question"
 BUILDER = CASE_DIR / "fixtures" / "make-fixture-env.sh"
 ARMS_DIR = CASE_DIR / "arms"
 
+GRADER = CASE_DIR / "grade-run.py"
+
 BASELINE = "baseline.md"
 TREATMENT = "treatment.md"
 
@@ -39,6 +41,8 @@ VARIANTS = {
     "typed-answer-after-pad": OUTSIDE,
     "words-only-request": OUTSIDE,
     "dispatched-agent-observed": OUTSIDE,
+    "flow-outside-workspace": OUTSIDE,
+    "not-visual-flow-vocabulary": OUTSIDE,
 }
 
 ROUND = {
@@ -321,3 +325,76 @@ def test_live_treatment_arm_rebuilds_from_todays_rules():
 
 def test_the_two_arms_differ():
     assert ac.read_arm(ARMS_DIR, BASELINE) != ac.read_arm(ARMS_DIR, TREATMENT)
+
+
+def test_both_arms_carry_the_same_brief_and_differ_only_in_the_ruleset():
+    baseline, treatment = (ac.read_arm(ARMS_DIR, n).split(ac.SEPARATOR, 1) for n in (BASELINE, TREATMENT))
+    assert baseline[0] == treatment[0]
+    assert baseline[1] != treatment[1]
+
+
+FLOW_ROUND = {
+    "title": "Probe",
+    "questions": [
+        {
+            "prompt": "Which process?",
+            "options": [
+                {"name": "Synchronous", "cost": "Slow.", "pick": True, "flow": "flowchart LR\n  a[Ask] --> b[Answer]"},
+                {"name": "Queued", "cost": "Late.", "flow": "flowchart LR\n  a[Ask] --> q[Queue] --> b[Answer]"},
+            ],
+        }
+    ],
+}
+
+
+def _capture(tmp_path: Path, final: str = "Done.") -> Path:
+    capture = tmp_path / "run.capture.jsonl"
+    events = [
+        {"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "Skill", "input": {}}]}},
+        {"type": "result", "result": final},
+    ]
+    capture.write_text("\n".join(json.dumps(e) for e in events))
+    return capture
+
+
+def _grade(tmp_path: Path, run_dir: Path, variant: str = "flow-outside-workspace") -> dict:
+    result = subprocess.run(
+        [sys.executable, str(GRADER), str(run_dir), str(_capture(tmp_path)), variant],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    return json.loads(result.stdout)
+
+
+def _draw(run_dir: Path, pad: str, round_: dict) -> None:
+    global ROUND
+    saved, ROUND = ROUND, round_
+    try:
+        assert _run_pad(run_dir, pad).returncode == 0
+    finally:
+        ROUND = saved
+
+
+def test_the_grader_counts_flow_options_in_a_pad_a_run_left_under_the_outpost_state(tmp_path):
+    run_dir = _built(tmp_path, "flow-outside-workspace")
+    _draw(run_dir, "refund-approval", FLOW_ROUND)
+    graded = _grade(tmp_path, run_dir)
+    assert graded["pads"] == ["refund-approval"]
+    assert graded["flow options"] == 2
+    assert graded["final message"] == "Done."
+
+
+def test_the_grader_counts_no_flow_options_when_the_pad_holds_only_layouts(tmp_path):
+    run_dir = _built(tmp_path, "flow-outside-workspace")
+    _draw(run_dir, "filters", ROUND)
+    graded = _grade(tmp_path, run_dir)
+    assert graded["pads"] == ["filters"]
+    assert graded["flow options"] == 0
+
+
+def test_the_grader_reports_no_pad_for_a_run_that_drew_nothing(tmp_path):
+    run_dir = _built(tmp_path, "not-visual-flow-vocabulary")
+    graded = _grade(tmp_path, run_dir, "not-visual-flow-vocabulary")
+    assert graded["pads"] == []
+    assert graded["flow options"] == 0

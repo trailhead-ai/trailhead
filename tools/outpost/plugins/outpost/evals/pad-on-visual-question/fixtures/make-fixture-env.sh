@@ -24,6 +24,8 @@
 #   not-visual-layout-vocabulary  plain project folder
 #   typed-answer-after-pad        plain project folder
 #   words-only-request            plain project folder
+#   flow-outside-workspace        plain project folder
+#   not-visual-flow-vocabulary    plain project folder
 #   dispatched-agent-observed     plain project folder
 #
 # Produces, all under <run-dir>:
