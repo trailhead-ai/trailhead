@@ -7,55 +7,86 @@
  *
  * flow = {
  *   direction: "LR" | "TD",                       // TB is read as TD
- *   steps:  Map id -> { id, shape, label, labelled, index }   // shape: box | round | pill | decision
+ *   steps:  Map id -> { id, shape, label, labelled, accent, index }   // shape: box | round | pill | decision
  *   order:  [id, ...]                             // steps in order of first appearance
- *   arrows: [{ index, from, to, line }]           // index is the written order; ids, not step objects
+ *   arrows: [{ index, from, to, line, dashed, label }]   // index is the written order; ids, not step objects;
+ *                                                        // label is the text on the arrow, or null
  * }
  *
  * plan = {
  *   width, height,                                // the flow's natural size, in SVG units
  *   steps:  [{ id, shape, x, y, w, h, lines: [{ text, x, y }] }]   // x, y: top-left; lines: label centres
- *   arrows: [{ index, from, to, points: [[x, y], ...] }]           // from the source edge to the target edge
+ *   arrows: [{ index, from, to, dashed, points: [[x, y], ...],     // from the source edge to the target edge
+ *             label: null | { lines: [{ text, x, y }], halo: { x, y, w, h } } }]   // at the first leg's middle
  * }
  *
  * measure(text) returns the width of one line of label text as the browser sets it. Parse and layout
  * are pure functions of the flow text and measure(); nothing depends on the page width. Every table
  * keyed by a step id is a Map, so an id such as __proto__ is an ordinary step.
  *
- * A line the flow does not understand throws a FlowError carrying line (1-based, or null for the whole
- * flow), text (the line as written) and message (what is wrong).
+ * A flow that cannot be drawn throws a FlowError carrying problems: [{ line, text, message }] in line
+ * order, every broken line at once. line is 1-based, or null for the whole flow (the flow has no steps,
+ * or a limit is passed; those are the only problem listed). flowLine, flowText and message repeat the
+ * first problem.
  */
 (function () {
   "use strict";
 
   var MAX_TEXT = 200;
-  var MAX_LABEL_WIDTH = 200;
+  var MAX_LABEL_WIDTH = 400;
+  var MAX_LINES = 400;
+  var MAX_LINE_LENGTH = 1000;
+  var MAX_STEPS = 60;
+  var MAX_ARROWS = 120;
+  var MAX_WAYPOINTS = 2000;
   var LINE_HEIGHT = 21;
   var PAD_X = 14;
   var PAD_Y = 10;
   var GAP_MAIN = 64;
   var GAP_CROSS = 28;
   var LANE = 18;
+  var HALO_PAD_X = 4;
+  var HALO_PAD_Y = 5;
   var MARGIN = 14;
 
   function FlowError(line, text, message) {
-    var error = new Error(message);
+    return failed([{ line: line, text: text, message: message }]);
+  }
+
+  function failed(problems) {
+    var shown = problems.map(function (p) {
+      var text = p.text === null ? null : p.text.length > MAX_TEXT ? p.text.slice(0, MAX_TEXT) + "…" : p.text;
+      return { line: p.line, text: text, message: p.message };
+    });
+    var error = new Error(shown[0].message);
     error.name = "FlowError";
     error.isFlowError = true;
-    error.flowLine = line;
-    error.flowText = text === null ? null : text.length > MAX_TEXT ? text.slice(0, MAX_TEXT) + "…" : text;
+    error.problems = shown;
+    error.flowLine = shown[0].line;
+    error.flowText = shown[0].text;
     return error;
   }
 
   var HEADER = /^(?:flowchart|graph)[ \t]+(LR|TD|TB)$/;
   var ID = /[A-Za-z0-9_]+/y;
+  var CLASS_NAME = /:::([A-Za-z0-9_-]*)/y;
   var SHAPES = [
     { open: "([", close: "])", shape: "pill" },
     { open: "(", close: ")", shape: "round" },
     { open: "[", close: "]", shape: "box" },
     { open: "{", close: "}", shape: "decision" },
   ];
+  var OTHER_STEPS = [
+    { open: "((", reason: 'Circle steps ("((…))") are not drawn; a step is [box], (rounded), ([pill]) or {decision}.' },
+    { open: "{{", reason: 'Hexagon steps ("{{…}}") are not drawn; a step is [box], (rounded), ([pill]) or {decision}.' },
+    { open: "[(", reason: 'Database steps ("[(…)]") are not drawn; a step is [box], (rounded), ([pill]) or {decision}.' },
+    { open: "[[", reason: 'Subroutine steps ("[[…]]") are not drawn; a step is [box], (rounded), ([pill]) or {decision}.' },
+    { open: "[/", reason: 'Slanted steps ("[/…/]") are not drawn; a step is [box], (rounded), ([pill]) or {decision}.' },
+    { open: "[\\", reason: 'Slanted steps ("[\\…\\]") are not drawn; a step is [box], (rounded), ([pill]) or {decision}.' },
+    { open: ">", reason: 'Flag steps (">…]") are not drawn; a step is [box], (rounded), ([pill]) or {decision}.' },
+  ];
   var LABEL_FORBIDDEN = /[\[\](){}"|]/;
+  var ARROW_HELP = 'this pen draws "-->", "-.->" and their labelled forms.';
 
   function skipSpaces(s, pos) {
     while (pos < s.length && (s[pos] === " " || s[pos] === "\t")) pos++;
@@ -89,8 +120,11 @@
     ID.lastIndex = pos;
     var m = ID.exec(s);
     if (!m) throw new Error('A step is an id of letters, digits and "_" here.');
-    var node = { id: m[0], shape: null, label: null };
+    var node = { id: m[0], shape: null, label: null, accent: false };
     pos += m[0].length;
+    for (var o = 0; o < OTHER_STEPS.length; o++) {
+      if (s.substr(pos, OTHER_STEPS[o].open.length) === OTHER_STEPS[o].open) throw new Error(OTHER_STEPS[o].reason);
+    }
     for (var i = 0; i < SHAPES.length; i++) {
       var shape = SHAPES[i];
       if (s.substr(pos, shape.open.length) === shape.open) {
@@ -101,36 +135,108 @@
         break;
       }
     }
+    CLASS_NAME.lastIndex = pos;
+    var mark = CLASS_NAME.exec(s);
+    if (mark) {
+      node.accent = mark[1] === "accent";
+      pos += mark[0].length;
+    }
     return { node: node, end: pos };
   }
 
+  function unquoted(text) {
+    var t = text.trim();
+    return t.length >= 2 && t[0] === '"' && t[t.length - 1] === '"' ? t.slice(1, -1) : t;
+  }
+
+  function labelled(text) {
+    var label = unquoted(text);
+    if (label.trim() === "") throw new Error("An arrow label cannot be empty.");
+    return label;
+  }
+
+  var ARROW_WORDS = [
+    { re: /^-\.->/y, dashed: true, bar: true },
+    { re: /^-->/y, dashed: false, bar: true },
+    { re: /^-\.[ \t]+(.*?)[ \t]*\.->/y, dashed: true, bar: false },
+    { re: /^--[ \t]+(.*?)[ \t]*-->/y, dashed: false, bar: false },
+  ];
+  var ARROW_REFUSED = [
+    { re: /^<(?:-->|-\.->|--|-\.-)/, reason: "Two-way arrows are not drawn; write one arrow each way." },
+    { re: /^={2,}>?/, reason: 'Thick arrows ("==>") are not drawn; use "-->".' },
+    { re: /^---/, reason: 'Open links ("---") are not drawn; use "-->".' },
+    { re: /^-\.-(?!>)/, reason: 'Open links ("-.-") are not drawn; use "-.->" or "-->".' },
+    { re: /^--o(?=\s|$)/, reason: 'Circle-ended links ("--o") are not drawn; use "-->".' },
+    { re: /^--x(?=\s|$)/, reason: 'Cross-ended links ("--x") are not drawn; use "-->".' },
+  ];
+
+  // The arrow starting at pos: its end, whether it is dashed, and its label (or null).
+  function readArrow(s, pos) {
+    var rest = s.slice(pos);
+    for (var r = 0; r < ARROW_REFUSED.length; r++) {
+      if (ARROW_REFUSED[r].re.test(rest)) throw new Error(ARROW_REFUSED[r].reason);
+    }
+    for (var w = 0; w < ARROW_WORDS.length; w++) {
+      var word = ARROW_WORDS[w];
+      word.re.lastIndex = 0;
+      var m = word.re.exec(rest);
+      if (!m) continue;
+      var end = pos + m[0].length;
+      if (!word.bar) return { end: end, dashed: word.dashed, label: labelled(m[1]) };
+      if (s[end] !== "|") return { end: end, dashed: word.dashed, label: null };
+      var close = s.indexOf("|", end + 1);
+      if (close < 0) throw new Error('An arrow label needs its closing "|".');
+      return { end: close + 1, dashed: word.dashed, label: labelled(s.slice(end + 1, close)) };
+    }
+    if (/^[-.=~]/.test(rest)) throw new Error("This is not an arrow this pen draws; " + ARROW_HELP);
+    throw new Error("A step is followed by an arrow or the end of the line; " + ARROW_HELP);
+  }
+
+  var STYLING = /^(?:(?:classDef|class|style|linkStyle)[ \t]+(?![-=<])|%%\{.*\}%%$)/;
+
   // A line kind turns one cleaned line into what it contributes, or returns null when the line is
-  // not its kind. A new kind of line is added to LINE_KINDS and nowhere else.
+  // not its kind. nodes are the steps the line names in order; links[k] is the arrow from nodes[k] to
+  // nodes[k + 1]. A new kind of line is added to LINE_KINDS and nowhere else.
   var LINE_KINDS = [
+    {
+      name: "styling",
+      read: function (s) {
+        return STYLING.test(s) ? { nodes: [], links: [] } : null;
+      },
+    },
+    {
+      name: "lines this pen does not draw",
+      read: function (s) {
+        if (/^%%/.test(s)) throw new Error('A "%%" comment is not part of a flow this pen draws; remove the line.');
+        if (/^(subgraph|end)$/.test(s) || /^subgraph[ \t]/.test(s)) {
+          throw new Error('"' + s.split(/\s/)[0] + '" is not drawn; a flow has no groups.');
+        }
+        if (/^click[ \t]/.test(s)) throw new Error('"click" lines are not drawn; a flow has no links.');
+        if (/^direction[ \t]/.test(s)) throw new Error('"direction" lines are not drawn; the header sets the direction.');
+        return null;
+      },
+    },
     {
       name: "steps and arrows",
       read: function (s) {
         var nodes = [];
+        var links = [];
         var pos = 0;
         for (;;) {
           var step = readStep(s, pos);
           nodes.push(step.node);
           pos = skipSpaces(s, step.end);
           if (pos >= s.length) break;
-          if (s.substr(pos, 3) !== "-->") {
-            throw new Error('Expected "-->" or the end of the line after a step; this pen draws plain arrows only.');
-          }
-          pos = skipSpaces(s, pos + 3);
+          if (s[pos] === "&") throw new Error('Steps joined with "&" are not drawn; write one arrow per pair.');
+          var arrow = readArrow(s, pos);
+          links.push({ dashed: arrow.dashed, label: arrow.label });
+          pos = skipSpaces(s, arrow.end);
+          if (pos >= s.length) throw new Error("An arrow needs a step after it.");
         }
-        return { nodes: nodes };
+        return { nodes: nodes, links: links };
       },
     },
   ];
-
-  function explain(text, error) {
-    if (/^(subgraph|end)\b/.test(text)) return '"' + text.split(/\s/)[0] + '" is not drawn; a flow has no groups.';
-    return error.message;
-  }
 
   function readLineKinds(text) {
     for (var i = 0; i < LINE_KINDS.length; i++) {
@@ -146,22 +252,35 @@
     return text;
   }
 
-  function declare(flow, node, lineNo, text) {
+  function headerReason(text) {
+    var direction = /^(?:flowchart|graph)[ \t]+(RL|BT)$/.exec(text);
+    if (direction) return '"' + direction[1] + '" is not a direction this pen draws; use LR, TD or TB.';
+    return 'The first line must be a header: "flowchart LR", "flowchart TD" or "flowchart TB".';
+  }
+
+  function declare(flow, node) {
     var step = flow.steps.get(node.id);
     if (!step) {
-      step = { id: node.id, shape: node.shape || "box", label: node.label === null ? node.id : node.label, labelled: node.label !== null, index: flow.order.length };
+      step = {
+        id: node.id,
+        shape: node.shape || "box",
+        label: node.label === null ? node.id : node.label,
+        labelled: node.label !== null,
+        accent: false,
+        index: flow.order.length,
+      };
       flow.steps.set(node.id, step);
       flow.order.push(node.id);
-      return;
+    } else if (node.label !== null) {
+      if (!step.labelled) {
+        step.shape = node.shape;
+        step.label = node.label;
+        step.labelled = true;
+      } else if (step.shape !== node.shape || step.label !== node.label) {
+        throw new Error('Step "' + node.id + '" is already drawn with a different shape or label; a step has one of each.');
+      }
     }
-    if (node.label === null) return;
-    if (!step.labelled) {
-      step.shape = node.shape;
-      step.label = node.label;
-      step.labelled = true;
-    } else if (step.shape !== node.shape || step.label !== node.label) {
-      throw FlowError(lineNo, text, 'Step "' + node.id + '" is already drawn with a different shape or label; a step has one of each.');
-    }
+    if (node.accent) step.accent = true;
   }
 
   function reaches(adjacency, from, to) {
@@ -181,52 +300,101 @@
     return false;
   }
 
-  // Arrows in written order; one whose target already reaches its source would close a loop.
-  function findLoop(arrows) {
+  // Arrows in written order; every one whose target already reaches its source would close a loop.
+  function findLoops(arrows) {
     var adjacency = new Map();
+    var loops = [];
     for (var i = 0; i < arrows.length; i++) {
       var arrow = arrows[i];
-      if (arrow.from === arrow.to || reaches(adjacency, arrow.to, arrow.from)) return arrow;
+      if (arrow.from === arrow.to || reaches(adjacency, arrow.to, arrow.from)) {
+        loops.push(arrow);
+        continue;
+      }
       if (!adjacency.has(arrow.from)) adjacency.set(arrow.from, []);
       adjacency.get(arrow.from).push(arrow.to);
     }
-    return null;
+    return loops;
+  }
+
+  function overLimit(message) {
+    return FlowError(null, null, message);
+  }
+
+  // The limits that need no parsing, in the order they are checked.
+  function checkSize(lines) {
+    if (lines.length > MAX_LINES) {
+      throw overLimit("The flow has " + lines.length + " lines; at most " + MAX_LINES + " are drawn.");
+    }
+    for (var i = 0; i < lines.length; i++) {
+      if (lines[i].length > MAX_LINE_LENGTH) {
+        throw overLimit("Line " + (i + 1) + " has " + lines[i].length + " characters; at most " + MAX_LINE_LENGTH + " are drawn.");
+      }
+    }
   }
 
   function parse(text) {
     var lines = String(text).split(/\r\n|\r|\n/);
+    checkSize(lines);
     var flow = { direction: null, steps: new Map(), order: [], arrows: [] };
+    var problems = [];
     var texts = new Map();
+    function problem(lineNo, message) {
+      problems.push({ line: lineNo, text: texts.get(lineNo), message: message });
+    }
     for (var i = 0; i < lines.length; i++) {
       var lineNo = i + 1;
       var cleaned = clean(lines[i]);
       if (cleaned === "") continue;
+      texts.set(lineNo, cleaned);
       if (flow.direction === null) {
         var header = HEADER.exec(cleaned);
-        if (!header) {
-          throw FlowError(lineNo, cleaned, 'The first line must be a header: "flowchart LR", "flowchart TD" or "flowchart TB".');
-        }
-        flow.direction = header[1] === "LR" ? "LR" : "TD";
+        if (!header) problem(lineNo, headerReason(cleaned));
+        flow.direction = header && header[1] !== "LR" ? "TD" : "LR";
         continue;
       }
-      var got;
       try {
-        got = readLineKinds(cleaned);
+        var got = readLineKinds(cleaned);
+        if (!got) throw new Error("This pen does not draw this line.");
+        got.nodes.forEach(function (node, k) {
+          declare(flow, node);
+          if (k > 0) {
+            var link = got.links[k - 1];
+            flow.arrows.push({
+              index: flow.arrows.length,
+              from: got.nodes[k - 1].id,
+              to: node.id,
+              line: lineNo,
+              dashed: link.dashed,
+              label: link.label,
+            });
+          }
+        });
       } catch (error) {
-        throw FlowError(lineNo, cleaned, explain(cleaned, error));
+        problem(lineNo, error.message);
       }
-      if (!got) throw FlowError(lineNo, cleaned, explain(cleaned, new Error("This pen does not draw this line.")));
-      got.nodes.forEach(function (node, k) {
-        declare(flow, node, lineNo, cleaned);
-        if (k > 0) {
-          flow.arrows.push({ index: flow.arrows.length, from: got.nodes[k - 1].id, to: node.id, line: lineNo });
-        }
-      });
-      texts.set(lineNo, cleaned);
+    }
+    if (flow.order.length > MAX_STEPS) {
+      throw overLimit("The flow has " + flow.order.length + " steps; at most " + MAX_STEPS + " are drawn.");
+    }
+    if (flow.arrows.length > MAX_ARROWS) {
+      throw overLimit("The flow has " + flow.arrows.length + " arrows; at most " + MAX_ARROWS + " are drawn.");
+    }
+    findLoops(flow.arrows).forEach(function (arrow) {
+      problem(arrow.line, "This arrow closes a loop, and loops are not drawn yet.");
+    });
+    if (problems.length) {
+      problems.sort(function (a, b) { return a.line - b.line; });
+      throw failed(problems);
     }
     if (flow.order.length === 0) throw FlowError(null, null, "The flow has no steps.");
-    var loop = findLoop(flow.arrows);
-    if (loop) throw FlowError(loop.line, texts.get(loop.line), "This arrow closes a loop, and loops are not drawn yet.");
+    var layer = layersOf(flow);
+    var waypoints = 0;
+    flow.arrows.forEach(function (arrow) {
+      waypoints += layer.get(arrow.to) - layer.get(arrow.from) - 1;
+    });
+    if (waypoints > MAX_WAYPOINTS) {
+      throw overLimit("The flow's arrows pass " + waypoints + " waypoints; at most " + MAX_WAYPOINTS + " are drawn.");
+    }
     return flow;
   }
 
@@ -330,6 +498,21 @@
     }
   }
 
+  // The label sits at the middle of the arrow's first leg, set on a halo that hides the line behind it.
+  function labelAt(text, from, to, measure) {
+    var mx = (from[0] + to[0]) / 2;
+    var my = (from[1] + to[1]) / 2;
+    var lines = wrap(text, measure, MAX_LABEL_WIDTH);
+    var tw = Math.max.apply(null, lines.map(function (l) { return measure(l); }));
+    var th = lines.length * LINE_HEIGHT;
+    return {
+      lines: lines.map(function (line, k) {
+        return { text: line, x: mx, y: my + (k - (lines.length - 1) / 2) * LINE_HEIGHT };
+      }),
+      halo: { x: mx - tw / 2 - HALO_PAD_X, y: my - th / 2 - HALO_PAD_Y, w: tw + 2 * HALO_PAD_X, h: th + 2 * HALO_PAD_Y },
+    };
+  }
+
   function layout(flow, measure) {
     var LR = flow.direction === "LR";
     var layer = layersOf(flow);
@@ -426,7 +609,14 @@
           points.push(at2(n.mainStart, n.crossMid));
         }
       }
-      plan.arrows.push({ index: arrow.index, from: arrow.from, to: arrow.to, points: points });
+      plan.arrows.push({
+        index: arrow.index,
+        from: arrow.from,
+        to: arrow.to,
+        dashed: arrow.dashed,
+        points: points,
+        label: arrow.label === null ? null : labelAt(arrow.label, points[0], points[1], measure),
+      });
     });
     return plan;
   }
