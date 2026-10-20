@@ -41,9 +41,10 @@ they did.
 A flow is read line by line. Leading and trailing spaces and one trailing `;` on a line are ignored,
 and blank lines are skipped.
 
-**The first line that is not blank is the header:** `flowchart LR`, `flowchart TD` or
-`flowchart TB` (`graph` is accepted in place of `flowchart`; `TB` means the same as `TD`). `LR`
-draws left to right and `TD` top down. Any other first line is refused, naming it.
+**The first line that is not blank and not a styling line is the header:** `flowchart LR`,
+`flowchart TD` or `flowchart TB` (`graph` is accepted in place of `flowchart`; `TB` means the same as
+`TD`). `LR` draws left to right and `TD` top down. Styling lines and `%%{ … }%%` directives (see
+below) may come before it. Any other first line is refused, and the message names that line.
 
 **A step** is written as an id, optionally followed by its shape and label:
 
@@ -69,11 +70,14 @@ second time is refused, naming the line, because the two are contradictory.
 |---|---|
 | `a --> b` | a plain arrow |
 | `a -.-> b` | a dashed arrow |
-| `a -->\|label\| b` or `a -- label --> b` | a plain arrow with a label |
+| `a -->\|label\| b` or `a -- label --> b` | a plain arrow with a label (a space before the first bar, `a --> \|label\| b`, is accepted) |
 | `a -.->\|label\| b` or `a -. label .-> b` | a dashed arrow with a label |
 | `a --> b --> c` | a chain: one arrow per link, in order |
 
 A line holding a single step, with no arrow, declares that step.
+
+One newline at the very end of the text ends the last line; it is not a further line, so it does not
+count toward the line limit.
 
 **Lines that only style a diagram are ignored:** lines starting with `classDef`, `class`, `style` or
 `linkStyle`, and `%%{ … }%%` configuration directives.
@@ -121,8 +125,14 @@ page width.
   label sits centred inside, as SVG text set through `textContent`.
 - **Arrows.** A forward arrow leaves its source on the side facing the next layer (right for `LR`,
   bottom for `TD`), runs through its waypoints, and enters its target on the opposite side, ending
-  in a two-stroke arrowhead. A dashed arrow is drawn in dashes. A label sits at the middle of the
-  arrow's first leg, on a halo in the colour of the card the drawing sits on so the line does not run through the letters.
+  in a two-stroke arrowhead. A dashed arrow is drawn in dashes. A label sits on the arrow's first leg
+  across the gap beside its source column, on a halo in the colour of the card the drawing sits on so
+  the line does not run through the letters. Each gap is widened to fit the labels of the arrows
+  leaving the column before it, with room either side for an arrowhead, so a halo never reaches a step
+  or a head. When two labels in one gap would overlap, one slides along its own arrow's leg to the
+  nearest place where it does not, and the gap widens further if the leg has no such place. The
+  drawing grows to hold every label and halo, on either side of the flow, so none is clipped, and the
+  loop lanes begin beyond the furthest label.
 - **Loop backs.** Each loop back gets its own lane outside the flow: below it for `LR`, to the right
   of it for `TD`. The first loop back written takes the lane nearest the flow, the next the one
   beyond it. A loop back leaves its source from the side facing the lane, runs along the lane, and
@@ -200,8 +210,9 @@ the same as `flowchart TD`.
 
 ## State — flow with decisions and labelled, dashed and chained arrows
 
-A decision is a diamond around its label. A labelled arrow carries its label at the middle of its
-first leg, on a halo in the colour of the card the drawing sits on. A dashed arrow is drawn in dashes, both passes. A chain
+A decision is a diamond around its label. A labelled arrow carries its label on its first leg
+across the gap beside its source, on a halo in the colour of the card the drawing sits on, kept inside the
+drawing and clear of the other labels and of the loop lanes. A dashed arrow is drawn in dashes, both passes. A chain
 `a --> b --> c` draws two arrows, `a` to `b` and `b` to `c`. An arrow that skips a layer runs
 through its own lane and crosses no step.
 
@@ -244,8 +255,8 @@ message.
 
 A flow holding any line outside the supported part shows the message naming each such line (up to
 five) by its number and text, with what is wrong: `subgraph` is not drawn, `RL` is not a direction this pen
-draws, a `%%` comment is not part of a flow it draws, and so on. A first line that is not a header
-names line 1. A flow over a limit names the limit. The other options on the question draw normally.
+draws, a `%%` comment is not part of a flow it draws, and so on. A first line that is neither a header nor a
+styling line names that line, by its own number. A flow over a limit names the limit. The other options on the question draw normally.
 
 ## State — label written as markup shows as plain characters
 
