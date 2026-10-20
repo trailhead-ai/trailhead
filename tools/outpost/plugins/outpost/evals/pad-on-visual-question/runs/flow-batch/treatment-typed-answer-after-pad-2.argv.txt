@@ -1,0 +1,2 @@
+DENY_EXTRA=<every sibling run dir, capture, TMPDIR>:<captures>:<runner>: HOME=~ <repo>/scripts/eval-sandbox <run> -- /usr/bin/env -i $(cat <run>/run.env) HOME=~ USER=<user> TMPDIR=<tmp>
+  /bin/sh -c 'cd "$0" && exec "$@"' "$(cat <run>/cwd)" ~/.local/share/claude/versions/2.1.304 -p --setting-sources project --plugin-dir <run>/plugin --append-system-prompt "$(cat <repo>/tools/outpost/plugins/outpost/evals/pad-on-visual-question/arms/treatment.md)" --allowedTools Bash\,Read\,Write\,Edit\,Skill --output-format stream-json --verbose "$(cat <run>/prompt.md)"

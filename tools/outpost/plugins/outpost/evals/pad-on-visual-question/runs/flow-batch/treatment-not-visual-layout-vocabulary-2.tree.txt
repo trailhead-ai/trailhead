@@ -1,0 +1,4 @@
+pads: xdg-state/outpost/pads/deploy-config-layout
+flow options: 2; layout options: 3
+round provenance (deploy-config-layout): every option name in the built pad appears in this run's own tool inputs: yes
+tool calls: Skill, Bash, Write, Bash

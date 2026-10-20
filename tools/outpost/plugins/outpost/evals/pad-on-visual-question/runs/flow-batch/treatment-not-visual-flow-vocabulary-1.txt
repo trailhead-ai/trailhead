@@ -1,0 +1,13 @@
+My pick is **3 retries**, which means up to 4 attempts in total. Go to 5 only if your logs show that sends often succeed on the 4th or 5th try. Don't use 8.
+
+I checked this directory and it contains only a README, with no signup code. So the numbers below assume about a 3-second wait between attempts and a few seconds per attempt. Plug in your real figures; the reasoning stays the same.
+
+**Why 3:**
+
+- **How slow providers usually fail.** Slowness tends to come in one of two forms. The first is a brief hiccup that clears within seconds, and one or two retries catch it. The second is a real slowdown or outage lasting minutes, and no retry count that fits inside a signup screen will outlast it. Each retry after the first few adds a smaller chance of success than the one before, but the same extra wait.
+- **How long people wait at the verify step.** With 3 retries, a user who is going to hit an error gets it in roughly 10–20 seconds. With 8, it's closer to 30–60 seconds, and many people will leave or start clicking "resend" before then. A clear "we couldn't send your email, try again" message after about 15 seconds leaves people less stuck than a spinner that runs for a minute and then fails anyway.
+- **Load on the provider.** Retries hit hardest when the provider is already struggling. During a slowdown, every signup that fails sends 4 requests with 3 retries, 6 with 5, and 9 with 8. At 8 you're more than doubling your traffic at the worst possible moment. Users clicking "resend" during a long wait add even more on top.
+
+**When 5 makes sense:** if your logs show a real share of sends that only succeed on attempt 4 or later, the extra two retries are rescuing people and are worth it. If nearly everything that succeeds does so on attempt 1 or 2, 3 is plenty. That check settles it with data: look at the attempt number on successful sends, and check whether failures cluster into outage windows.
+
+**Rule of thumb:** pick the count that fails users within about 15–20 seconds and keeps a failed signup to no more than 4–6 provider calls. With a few seconds between attempts, that's 3.

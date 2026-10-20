@@ -1,0 +1,15 @@
+I drew all three options side by side as rough sketches in a scratch pad:
+
+file://<run>/xdg-state/outpost/pads/audit-log-filter-placement/index.html
+
+**My recommendation is the left rail**, mainly because of how people use an audit log. Admins investigating something keep adjusting the filters: narrow to one actor, then one action, then a time window, then widen again. That favours a layout where the filters are always visible and the table stays visible next to them.
+
+- **Left rail (my pick):** Every filter is always in view, and it has room for as many facets as you need (actor, action, resource type, date range, IP, outcome) without wrapping. Wide monitors make the ~240px it takes from the table affordable. Audit tables usually fit in the remaining width, and you can truncate or drop the IP/user-agent columns. You'll need a collapse toggle for narrower screens.
+- **Top bar:** This is the best second choice, and the right one if you only expect 3–4 filters. Above that it wraps or needs a "More" overflow, which hides filters again. It also takes vertical space, which is the scarcer dimension on a wide monitor.
+- **Slide-over panel:** I'd rule this out for this screen. The panel covers the rows you're trying to filter, so every change becomes open, change, apply, close, check. It suits pages where people rarely filter, and an audit log isn't one.
+
+Whichever you choose, show the active filters as removable chips above the table and keep the filter state in the URL. Admins share links to "everything bob did on Tuesday" a lot, and those links should reproduce the filtered view.
+
+**Question for you:** which do you want to build: the left rail, the top bar, or the slide-over panel? Two things would change my answer. If you expect only a handful of filters, the top bar wins. If a significant share of admins use laptops, a collapsible rail matters more.
+
+You can answer on the pad (pick an option, mark others "Not this", add a note, then press **Copy reply** and paste it here) or just reply in words.

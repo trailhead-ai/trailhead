@@ -1,0 +1,20 @@
+{
+  "variant": "flow-outside-workspace",
+  "pads": [
+    "refund-approval-flow"
+  ],
+  "pad locations": [
+    "xdg-state/outpost/pads/refund-approval-flow"
+  ],
+  "flow options": 2,
+  "layout options": 0,
+  "tool calls": [
+    "Skill",
+    "Write",
+    "Bash",
+    "Write",
+    "Bash",
+    "Bash"
+  ],
+  "final message": "I recommend **option one, the real-time flow**, unless something you haven't mentioned forces payouts into a daily batch.\n\nI drew both flows side by side on a scratch pad:\n\nfile://<run>/xdg-state/outpost/pads/refund-approval-flow/index.html\n\n**Why option one:**\n- **Customers wait less.** Small refunds pay out in seconds. With the nightly batch, even a $5 refund waits until the end of the day, and a refund that comes in just after the cutoff waits almost two days.\n- **The step that needs a person isn't tied to a clock.** In option two, finance can only see a large refund after the nightly batch has routed it, then has to approve it before the next payout run. If they miss that, it slips another day. In option one, the request reaches finance as soon as it comes in.\n- **One request failing only affects that request.** If a payout or email fails, you retry that one refund. If a batch run fails partway through, you have to work out which refunds were paid and which weren't.\n\n**What option one costs you:**\n- Payouts must be safe to retry, so give each refund a unique key that stops it from being paid twice.\n- Finance needs somewhere to see pending refunds as they arrive.\n- You'll have many small payout transactions to reconcile instead of one daily run.\n\n**When option two is the better choice:** your payment provider or bank charges per payout or only settles once a day, finance wants a single daily total, or you're worried about fraud and want a delay before money goes out. If any of those apply, there's a middle option: approve refunds in real time, then pay out everything approved in one daily run. That keeps fast decisions and still gives you a single payout batch.\n\n**So, which do you want to build?** Option one, option two, or the middle option? It would also help to know whether anything forces payouts into a daily batch.\n\nYou can answer here in words, or pick an option and add a note on the pad, then press \"Copy reply\" and paste the result back. If either drawing shows \"Can't draw this flow\", paste that message back too and I'll redraw it."
+}

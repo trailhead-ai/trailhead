@@ -1,0 +1,15 @@
+{
+  "variant": "visual-pad-cannot-be-made",
+  "pads": [],
+  "pad locations": [],
+  "flow options": 0,
+  "layout options": 0,
+  "tool calls": [
+    "Skill",
+    "Write",
+    "Bash",
+    "Write",
+    "Bash"
+  ],
+  "final message": "I couldn't make a sketch pad. The `ws-quill` workspace's `sites/` folder is a symlink, so the script refused to publish through it:\n\n```\nscratch-pad: \"…/camp/bramble/worktrees/ws-quill/sites\": the sites folder is a symlink — refusing to publish through it\n```\n\nI left that folder alone. Check where it points: a symlinked `sites/` usually means something was set up by hand that shouldn't have been. Here are the options in words instead.\n\n## My recommendation: the numbered step list down the left\n\nYour problem is people abandoning halfway, and the likely cause is not knowing what's still ahead. At step 3 someone wonders whether there's much more and whether they need to go find their tax ID first. The three options differ mainly in how well they answer that:\n\n| | Shows how far along you are | Shows what's left | Lets you go back to a step | Cost |\n|---|---|---|---|---|\n| **A. Progress bar across the top** | Yes (as a %) | No | No | Low, works on mobile |\n| **B. Numbered list down the left** | Yes | **Yes, every step is named** | Yes, click a finished step | Takes ~200px of width; on mobile it has to collapse to a strip at the top |\n| **C. \"Step 2 of 5\" text** | Roughly | No | No | Nothing to build |\n\n- **B** names the remaining steps, for example \"3 Tax & currency, 4 Payment methods, 5 First invoice\". People can see how close the end is and can get documents ready before they need them. It's also the usual pattern for setup flows with a fixed set of steps.\n- **A** looks like progress, but a bar at 40% doesn't say whether the next step takes 10 seconds or means a search for bank details. That's the halfway point where people quit.\n- **C** is the honest minimum, but it gives no more reassurance than A does.\n\nTwo things to do whichever you pick:\n1. **Check where people actually drop off.** If most of them leave on one particular step (bank or tax details are the usual suspects), that step is the real problem. A progress indicator won't fix it. Splitting the step, adding \"skip for now\", or warning people up front about what they'll need will.\n2. **Save progress and say so** (\"You can finish this later\"). People who leave halfway can then come back instead of being lost for good.\n\n**So, which way are you leaning?** Does B's sidebar fit the wizard's layout, or does the screen need the full width? And do you know which step people drop out on? Tell me either and I can tighten the recommendation."
+}

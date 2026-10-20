@@ -1,0 +1,22 @@
+**My recommendation: build option one, the per-request flow.** One change: keep a state machine and idempotent payouts so you can add batching later if you need it.
+
+**Why option one wins**
+
+- **Customers wait less.** A small refund pays out in seconds instead of up to about 24 hours. Large ones reach finance as soon as they arrive. In option two, a request that comes in just after the nightly run sits for a day before finance even sees it, and then it may wait for the next payout run.
+- **Finance's work is spread out.** Reviews arrive through the day instead of landing in one pile each morning.
+- **Smaller failures.** If one request fails, only that request is affected. In option two, a bug or outage in the nightly job or the payout run holds up every refund from that day, and you won't find out until the next morning.
+- **Easier to debug.** Each request has its own trail: received → checked → approved or routed → paid → emailed. You don't have to trace a batch to find one refund.
+
+**What option two really gives you**
+
+- **Payout fees and reconciliation.** If your payout provider charges per transfer, or finance reconciles against one daily settlement, a single run is cheaper and tidier. This is the strongest argument for option two.
+- **Day-level policy checks.** Rules like "no more than N refunds per customer per day" or "daily refund total under X" are simple in a batch. In option one you need counters or a lookup at request time. That's doable but extra work.
+- **Rate limits.** A batch spreads load if the payout API is strict.
+
+**If one of those matters, you can have both.** Use option one's approval flow (instant check, instant routing to finance) and send approved refunds to a payout step. That step can run right away or on a schedule, depending on configuration. Model each refund as a state machine: `received → policy_checked → approved | pending_review → approved | rejected → paid → notified`. Use an idempotency key on each payout so retries can't pay a refund twice. Send the customer email only after the payout is confirmed. With that in place, moving from instant payouts to batched ones later is a scheduling change, not a rewrite.
+
+**Two questions settle it at standup:**
+1. Does your payout provider charge per transaction, or does finance need one daily settlement? If yes, use option one's approvals with batched payouts. If no, use option one as written.
+2. Do you have policy rules that look at a whole day's refunds? If yes, budget for request-time counters in option one. That isn't a reason to switch to option two.
+
+If both answers are no, build option one as written.

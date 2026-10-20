@@ -1,0 +1,18 @@
+I drew both flows on a scratch pad so you can compare them side by side:
+
+file://<run>/xdg-state/outpost/pads/refund-approval-flow/index.html
+
+**I'd build Option 1 (inline, decided when the request arrives).**
+
+- **Customer wait time is the main difference.** With Option 1, a small refund (most of them) pays out within seconds of the request. With Option 2, every customer waits until the end of the day, even when no person needs to look at their request.
+- **Option 2 can delay big refunds by an extra day.** The nightly batch sends large requests to finance overnight. If finance approves one after that day's payout run, it isn't paid until the next run. Option 1 sends large requests to finance as soon as they arrive.
+- **Option 2's advantages can be added to Option 1 later.** A single daily payout file is easier to reconcile, and you can stop payouts with one switch. You can get both with Option 1 by recording every payout in a ledger and adding a feature flag that turns auto-approve off.
+- **What Option 1 costs you:**
+  - The payout call happens while the request is being handled, so it needs an idempotency key and retries.
+  - Requests waiting on finance need a pending state.
+
+**Pick Option 2 instead if:**
+- your payment provider charges per transaction or only accepts batch files, or
+- finance requires one payout file per day.
+
+**Which do you want to build: Option 1, inline, or Option 2, the nightly batch?** You can pick on the pad and paste its "Copy reply" back here, or just answer here. If either drawing shows "Can't draw this flow", paste that message and I'll redraw it.

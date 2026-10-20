@@ -1,0 +1,11 @@
+Got it: the numbered list down the left edge.
+
+I can't name the first change yet, because the wizard's code isn't in this directory. `<run>/project` contains only a `README.md` ("ledgerlight — A small invoicing web app."). There's no source, no wizard component, and no git history. I'd be guessing at code I haven't seen.
+
+Here's where I'd start once I can see it. The order doesn't depend on your framework:
+
+1. **Make the step list a single piece of data.** Wizards often hard-code their steps across several places: the "Step 2 of 5" text, the next/back handlers, and the conditionals that pick which panel shows. The left-edge list needs one ordered array, something like `[{ id, label, isComplete, isReachable }]`, so the sidebar, the content area and the navigation all read from it. If the code already has that, this step is free. If it doesn't, the sidebar will drift out of sync with the steps.
+2. **Pull the current step and completed steps into explicit state.** A numbered list shows done, current and upcoming steps, and you'd probably want users to be able to click back to finished ones. The usual state is a current index plus a set of completed or validated steps, rather than one counter that only moves forward.
+3. **Only then build the sidebar component** and swap it in for whatever progress indicator is there now.
+
+For step 1 I need the code. Either point me at the repo or directory where ledgerlight's source lives, or paste the wizard component and its parent, and I'll tell you exactly what to change first and start on it.

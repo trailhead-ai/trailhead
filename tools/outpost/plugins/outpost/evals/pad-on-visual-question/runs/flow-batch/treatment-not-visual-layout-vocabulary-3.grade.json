@@ -1,0 +1,20 @@
+{
+  "variant": "not-visual-layout-vocabulary",
+  "pads": [
+    "deploy-config-layout"
+  ],
+  "pad locations": [
+    "xdg-state/outpost/pads/deploy-config-layout"
+  ],
+  "flow options": 3,
+  "layout options": 0,
+  "tool calls": [
+    "Bash",
+    "Skill",
+    "Write",
+    "Bash",
+    "Write",
+    "Bash"
+  ],
+  "final message": "I sketched the three layouts on a pad you can open in a browser. It works offline and needs nothing running:\n\nfile://<run>/xdg-state/outpost/pads/deploy-config-layout/index.html\n\n## Recommendation: a shared base file plus one small override file per environment\n\n**One big YAML with a section per environment.** This is the worst option on both of your criteria. Every change from every person lands in the same file. Shared settings get copied into each environment's section, so one logical change becomes N separate edits in the diff. When two people edit nearby lines, even in different environments, git reports a conflict.\n\n**A separate file per environment under `conf.d/`.** Edits to one environment never collide with another, which is good. But each file is a full copy, so shared settings are duplicated. A change that applies everywhere becomes an N-file diff. Two people making unrelated changes that both apply everywhere will both touch every file. The environments also drift apart without anyone noticing, because nothing shows that they're meant to match.\n\n**Base file plus per-environment overrides.** This is the best on both criteria:\n- **Clean diffs:** a change that applies everywhere is one edit in `base.yaml`. An environment-specific change is a few lines in that environment's override file. Each override file shows exactly how that environment differs, so a reviewer can see from `overrides/prod.yaml` alone what's special about prod.\n- **Fewer merge collisions:** edits spread across several small files, and each override is short and rarely touched. Most collisions you still get will be real ones, where two people changed the same setting.\n\nTo make the base-plus-overrides option work:\n1. **Write down the merge rules,** especially for lists. Decide whether an override list replaces the base list or appends to it; \"replace\" is the least surprising. Also decide how to remove a key, for example by setting it to `null`.\n2. **Add a command that prints the merged config for each environment.** Run it in CI and commit or diff its output. Reviewers then see what actually changed in prod, not just which lines changed.\n3. **Inside each file, sort keys and keep one setting per line** so diffs stay small.\n4. **Keep overrides small.** If an override file grows to look like a full copy, those settings probably belong in the base file.\n\n## Which layout do you want?\n\nThe pad's recommendation is the base file plus overrides. Two things would change my answer:\n- **Your environments share almost nothing** (for example, different clouds): choose `conf.d/`.\n- **Your deploy tool can't merge files** and you don't want to write a merge step: choose `conf.d/`, with a check that compares the shared keys across files.\n\nYou can pick an option on the pad, press \"Copy reply\" and paste the result here, or just tell me in words. Either works. If an option on the pad shows \"Can't draw this flow\", paste that message back and I'll redraw it."
+}

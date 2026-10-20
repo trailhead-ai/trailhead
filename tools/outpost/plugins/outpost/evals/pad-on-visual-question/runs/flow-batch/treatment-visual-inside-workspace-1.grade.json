@@ -1,0 +1,19 @@
+{
+  "variant": "visual-inside-workspace",
+  "pads": [
+    "checkout-promo-code"
+  ],
+  "pad locations": [
+    "xdg-state/camp/bramble/worktrees/ws-quill/sites/checkout-promo-code"
+  ],
+  "flow options": 0,
+  "layout options": 3,
+  "tool calls": [
+    "Skill",
+    "Write",
+    "Bash",
+    "Write",
+    "Bash"
+  ],
+  "final message": "I sketched the three options side by side on a scratch pad:\n\nhttp://127.0.0.1:7314/bramble-ws-quill/checkout-promo-code/\nLocal to this machine only — this link works only on this host (no camp host identity: no self_name in <run>/xdg-config/camp/hosts.toml) and dies with the bramble-ws-quill workspace.\n\nIt was published to this workspace on this machine, so it won't open anywhere else.\n\n**I'd go with A, the collapsed \"Have a code?\" link under the totals.** Here's why, given that abandonment is your main worry:\n\n- **The biggest risk is shoppers without a code, not shoppers with one.** An empty, labelled promo box tells everyone a discount exists. Some of them open a new tab to search for coupons and never come back. Or they find a code that doesn't work and feel they're overpaying. B puts that box right at the top, so it's the worst for this.\n- **A still serves people who have a code.** The summary is exactly where they look, right next to the totals the code changes. A quiet text link is easy to find if you're looking and easy to skip if you're not.\n- **C fails in two ways.** People who have a code worry through the earlier steps that there's nowhere to enter it, and some leave or email support. And the total changes while they're typing card details, which looks sloppy and makes them double-check the price.\n\n**When B makes sense:** if most of your traffic comes in with a code (affiliate links, influencer campaigns, newsletter offers), a visible field saves them a click. Even then, a better fix is to apply the code automatically from the URL, so nobody has to type it.\n\n**Making A work well:**\n- Expand inline, with no modal.\n- Show the discount as its own line in the totals.\n- Make errors specific (\"Expired on Oct 1\", not just \"Invalid code\").\n- Keep the applied code when the cart changes.\n\n**So my question for you:** do you want A, or do you have a reason to lean toward B or C? For example: what share of your checkouts arrive with a code in hand, and do you already support codes in the URL?\n\nYou can pick an option on the pad, mark any you've ruled out, add a note, then press \"Copy reply\" and paste it back here. Or just answer in words; either works."
+}
