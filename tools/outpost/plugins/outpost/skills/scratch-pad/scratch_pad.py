@@ -17,10 +17,12 @@ Contract
   earlier rounds settled; an empty list is the same as leaving it out) and
   ``questions`` (at least one). Each question has a
   non-empty ``prompt`` and 1-26 ``options``; each option has a non-empty
-  ``name`` and ``cost``, a ``layout`` key, and an optional boolean ``pick``.
+  ``name`` and ``cost``, exactly one of a ``layout`` key or a ``flow`` string, and an optional boolean
+  ``pick``.
   Exactly one option per question carries ``"pick": true``. An unknown key is
   refused with the allowed keys listed. What is inside ``layout`` is never
-  inspected here.
+  inspected here, and a ``flow`` is only checked to be a string (an empty one is left for the pen to
+  judge); its text is written into ``round.js`` untouched.
 * ``enclosing_workspace(cwd, env)`` names the camp workspace a directory sits
   in: ``cwd`` resolved, taken relative to camp's state root (resolved; that is
   ``$CAMP_STATE_DIR`` verbatim, else ``$XDG_STATE_HOME/camp``, else
@@ -164,7 +166,7 @@ _MAX_SLUG = 64
 _MAX_OPTIONS = 26
 _ROUND_KEYS = ("title", "intro", "questions", "settled")
 _QUESTION_KEYS = ("prompt", "options")
-_OPTION_KEYS = ("name", "cost", "pick", "layout")
+_OPTION_KEYS = ("name", "cost", "pick", "layout", "flow")
 _ROUND_JS_PREFIX = "window.PAD_ROUND = JSON.parse("
 _ROUNDS_JS_PREFIX = "window.PAD_ROUNDS = JSON.parse("
 _ROUND_DIR = re.compile(r"round-([1-9][0-9]*)")
@@ -368,8 +370,12 @@ def _check_option(option: object, where: str, problems: list[str]) -> int:
             problems.append(_line(f"{where}.{key}", "must be a string"))
         elif not option[key].strip():
             problems.append(_line(f"{where}.{key}", f"empty — {why}"))
-    if "layout" not in option:
-        problems.append(_line(where, 'no "layout" — every option is drawn'))
+    if "layout" in option and "flow" in option:
+        problems.append(_line(where, 'has both "layout" and "flow" — give it either a layout or a flow'))
+    elif "layout" not in option and "flow" not in option:
+        problems.append(_line(where, 'no "layout" or "flow" — give it either a layout or a flow'))
+    if "flow" in option and not isinstance(option["flow"], str):
+        problems.append(_line(f"{where}.flow", "must be a string"))
     pick = option.get("pick", False)
     if not isinstance(pick, bool):
         problems.append(_line(f"{where}.pick", "must be true or false"))

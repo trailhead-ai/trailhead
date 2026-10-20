@@ -1343,3 +1343,13 @@ def test_the_real_previous_entry_is_named_even_when_planted_ones_are_newer_and_o
 
     assert lines[1] == NAMED.format(real, site)
     assert len(lines) == 2
+
+
+def test_a_round_with_a_flow_option_is_published_as_a_workspace_site_with_the_flow_intact(rig):
+    data = _round()
+    data["questions"][0]["options"][1] = {"name": "F", "cost": "c", "flow": "flowchart LR\n a --> b"}
+
+    assert rig.run(round_path=_round_file(rig.tmp_path, data)) == 0
+
+    got = _round_js_data(rig.ws / "sites" / "p" / "round-1" / "round.js")
+    assert got == data

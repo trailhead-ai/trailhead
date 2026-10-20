@@ -508,3 +508,25 @@ def test_hostile_settled_lines_and_round_titles_show_as_literal_text(tmp_path):
     assert got["current"]["text"] == f"Round 2: {script}"
     assert [link["text"] for link in got["links"]] == [f"Round 1: {img}", "Round 3: Third"]
     assert got["pwned"] is None
+
+
+def _with_flow_option(data):
+    data["questions"][0]["options"][1] = {"name": "F", "cost": "c", "flow": "flowchart LR\n a --> b"}
+    return data
+
+
+def test_missing_pen_names_a_flow_option_a_flow_and_a_layout_option_a_layout(tmp_path):
+    got = _run(tmp_path, _with_flow_option(_round(1)), MESSAGE_JS, mutate=_delete_pen)
+    assert got["messages"] == [
+        "Can't draw this layout:The sketch pen did not load.",
+        "Can't draw this flow:The sketch pen did not load.",
+    ]
+
+
+def test_a_flow_option_shows_the_pens_cant_draw_message_and_its_layout_sibling_draws(tmp_path):
+    got = _run(tmp_path, _with_flow_option(_round(1)), MESSAGE_JS)
+    assert len(got["messages"]) == 1
+    assert got["messages"][0].startswith("Can't draw this flow:")
+    assert "flowchart LR" in got["messages"][0]
+    assert got["names"] == ["Q0 opt 0", "F"]
+    assert got["ready"]

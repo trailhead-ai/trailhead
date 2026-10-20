@@ -1035,3 +1035,42 @@ def test_a_pad_whose_parent_cannot_be_searched_is_a_refusal_not_a_traceback(skil
         'scratch-pad: pad "p" can\'t take another round: the pad folder can\'t be read: Permission denied — '
         + WAY_ON
     ]
+
+
+def _flow_round(title: str) -> dict:
+    data = _round(title)
+    data["questions"][0]["options"][1] = {"name": "F", "cost": "c", "flow": "flowchart LR\n a --> b"}
+    return data
+
+
+def _add_round(skill, env, cwd, tmp_path, pad, data):
+    proc = _cli(skill, env, cwd, pad, _round_file(tmp_path, data, f"{data['title']}.json"), add=True)
+    assert proc.returncode == 0, proc.stderr
+    return proc
+
+
+def test_a_round_with_a_flow_added_to_a_layout_only_pad_leaves_round_one_byte_for_byte(
+    skill, env, cwd, tmp_path, pads
+):
+    _new(skill, env, cwd, tmp_path, "p", "One")
+    r1 = _hashes(pads / "p" / "round-1")
+
+    _add_round(skill, env, cwd, tmp_path, "p", _flow_round("Two"))
+
+    assert _hashes(pads / "p" / "round-1") == r1
+    first = (pads / "p" / "round-2" / "round.js").read_text(encoding="utf-8").splitlines(keepends=True)[0]
+    two = _decode_literal(first, "window.PAD_ROUND = JSON.parse(")
+    assert two["questions"][0]["options"][1]["flow"] == "flowchart LR\n a --> b"
+
+
+def test_a_layout_only_round_added_to_a_pad_whose_round_one_has_a_flow_leaves_it_byte_for_byte(
+    skill, env, cwd, tmp_path, pads
+):
+    proc = _cli(skill, env, cwd, "p", _round_file(tmp_path, _flow_round("One")))
+    assert proc.returncode == 0, proc.stderr
+    r1 = _hashes(pads / "p" / "round-1")
+
+    _add(skill, env, cwd, tmp_path, "p", "Two")
+
+    assert _hashes(pads / "p" / "round-1") == r1
+    assert _titles(pads / "p") == ["One", "Two"]

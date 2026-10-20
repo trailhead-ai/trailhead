@@ -103,7 +103,9 @@
     var drawings = panel.querySelectorAll(".pad-drawing");
     for (var i = 0; i < drawings.length; i++) {
       var box = el("div", "pen-message");
-      ["Can't draw this layout:", "The sketch pen did not load."].forEach(function (line) {
+      var option = question && question.options ? question.options[Number(drawings[i].getAttribute("data-option"))] : undefined;
+      var kind = option && typeof option === "object" && Object.prototype.hasOwnProperty.call(option, "flow") ? "flow" : "layout";
+      ["Can't draw this " + kind + ":", "The sketch pen did not load."].forEach(function (line) {
         box.appendChild(el("p", null, line));
       });
       drawings[i].textContent = "";
