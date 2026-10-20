@@ -1,0 +1,29 @@
+Unless you have a specific reason to batch, I'd build **option one**. It works best if the request, the policy check and the payout run as separate steps with the request's state saved between them, not as one call from start to finish.
+
+**Where they actually differ**
+
+| | Option 1: per request | Option 2: nightly batch |
+|---|---|---|
+| Small refund reaches the customer | Seconds | Up to about 24h, longer if the request arrives just after the cutoff |
+| Large refund | Paid as soon as finance approves | Finance approves, then waits for the next payout run |
+| When something fails | One refund is stuck | The whole day's batch can stall, which means a bad morning for support |
+| Fraud or duplicate window | None for auto-approved refunds, money leaves at once | Built in, so you can catch repeats and velocity patterns before paying |
+| Finance reconciliation | Many small payouts | One run a day, easy to tie out |
+| Payment provider costs and limits | One call per refund | Batched, which helps if you pay per transaction or the rail settles in batches anyway (e.g. ACH) |
+
+**Why option one**
+- Holding a $5 refund overnight gives you nothing except a support ticket.
+- Option two's real advantages are reconciliation, a fraud window and batched fees. You can add each of those to option one later without redesigning it.
+- The reverse is much harder. Once a batch design ships, making it real-time means rebuilding it.
+
+**How to build option one so it doesn't hurt later**
+- Save each request as a record with a status: `received → policy_checked → auto_approved | pending_review → approved | rejected → paid → notified`.
+- A payout worker picks up approved requests. Give every payout an idempotency key so a retry can never pay twice.
+- If fraud is a worry, add a short delay of minutes before auto-approved refunds are paid, not a nightly one. That gets you option two's safety window and still pays out the same day.
+- If finance wants one daily figure, produce it as a report over the `paid` records. You don't have to batch the payments to get it.
+
+**Two gaps to fix in either option before you build**
+1. **Customer emails for auto-approved refunds.** In option one as you described it, the customer gets an email only after finance approves. The auto-approved path should send one too.
+2. **Rejection emails.** Neither option tells a rejected customer anything. Option two's single end-of-day run only emails the people it paid.
+
+**What could change my answer:** does your payment rail, or finance, require payouts to go out as a daily batch? If so, take option two, or a hybrid where approval happens per request and only the payout is batched. If not, go with option one.

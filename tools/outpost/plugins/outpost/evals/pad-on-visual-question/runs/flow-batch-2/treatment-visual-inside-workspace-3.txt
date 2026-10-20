@@ -1,0 +1,17 @@
+I'd go with **the collapsed "Have a code?" link under the totals**. I've sketched all three options on a pad so you can see them side by side:
+
+http://127.0.0.1:7314/bramble-ws-quill/checkout-promo-code/
+Local to this machine only — this link works only on this host (no camp host identity: no self_name in <run>/xdg-config/camp/hosts.toml) and dies with the bramble-ws-quill workspace.
+
+It's published from the `bramble-ws-quill` workspace on host `Mac`.
+
+**Why that one, given abandonment:**
+
+- **Code-hunting is what causes the abandonment.** A visible empty promo field tells every shopper that a discount exists. The ones without a code leave for a coupon site or search, and some don't come back. Checkout usability research has found this over and over. A small collapsed link still serves people who already have a code, and barely registers with everyone else.
+- **Above the item list is the worst place for that.** It's the first thing people see, before they've even checked their items, and it's the most open invitation to go searching. It's easy to find, but that's exactly the problem.
+- **In the payment step is risky in a different way.** People holding a code look for the field in the summary. If they don't see it, some leave to "check later" or think the code won't work. Shoppers who do find it see the total change right when they're about to pay, which feels off and can make them doubt the price.
+- **Under the totals, the code sits right next to the number it changes.** Applying it updates the total in front of them, before they commit to payment.
+
+**What could change this:** if a large share of your orders come in with codes (influencer, email or affiliate campaigns), the cost of a code-holder missing the link goes up. In that case, a visible field under the totals, or auto-applying codes from campaign URLs, can beat the collapsed link. Your current code-redemption rate is the number to check.
+
+**The question:** which placement do you want: A (collapsed link under totals), B (input above the items) or C (field in the payment step)? Or roughly what share of your orders use a code today? You can answer in words, or mark your choice on the pad, press "Copy reply" and paste the result here.

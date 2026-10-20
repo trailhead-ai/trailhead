@@ -992,7 +992,7 @@ line itself is unmeasured against baseline either way. **Operator decision (2026
 PASS** — the operator reviewed the committed runs and accepted the authoring-error reading
 ("everything looks good"). `expected.md` keeps its registered verdict.
 
-### pad-on-visual-question — second batch: the flow clause (2026-10-20)
+### pad-on-visual-question — second batch: the flow clause (2026-10-20, FAILED; kept as evidence)
 
 `rules.md` `## Scratch pads` now also triggers on options that differ in "the shape of a flow,
 process or architecture (its steps and the arrows between them)". The case gained
@@ -1043,6 +1043,63 @@ checked for `ps`-style process listing, other runs' directories and reads under 
 none. Captures stay outside the repo (they hold the model's thinking signatures and the
 harness's account context); the committed per-run files are path-rewritten to `<run>`, `<repo>`,
 `<tmp>` and `~`. `capture_scan.py` over `runs/flow-batch/`: 0 credential findings (30
+known-safe repo-path matches, one per argv).
+
+**Changes to the case after the first run of this batch:** none.
+
+### pad-on-visual-question — third batch: the narrowed flow clause (2026-10-20)
+
+Batch 1 above (commits `20057986`, `e1244c91`, `runs/flow-batch/`) failed, so on the
+operator's decision the clause was narrowed and every scenario re-run. The change is the
+`rules.md` hunk disclosed by diff in `expected.md` ("Changes after the first run of the flow
+batches") plus the three rebuilt live arms, committed in `9d1d55c3` before any run:
+
+```diff
+-or is arranged, or in the shape of a flow, process or architecture (its steps and
+-the arrows between them), draw them as a pad with the `/scratch-pad` skill in that
+-same turn, without asking first. If the user asked for words only, draw nothing.
++or is arranged, or in how a process or system runs (the steps it takes and what
++hands off to what), draw them as a pad with the `/scratch-pad` skill in that same
++turn, without asking first. How files, folders or settings are laid out is neither.
++If the user asked for words only, draw nothing.
+```
+
+No verdict, threshold or brief changed. Runs, grades and final messages are under
+`runs/flow-batch-2/`. Arms: treatment is the brief + the narrowed `rules.md`; baseline is the
+brief + `rules.md` at `fe972164` (unchanged). Same runner as batch 1 (Claude Code 2.1.304,
+per-run `TMPDIR`, 6 in parallel), 30 runs, none excluded, all exit 0. The no-tools probe per
+arm again showed no user-level rules or `CLAUDE.md` in either arm and the narrowed wording
+only in treatment.
+
+| Scenario (treatment, 3 runs each) | As registered | Accepted reading | What the runs did |
+|---|---|---|---|
+| `visual-inside-workspace` | 3/3 | 3/3 | pad under the workspace `sites/`, link and caveat relayed, choice in words |
+| `visual-outside-workspace` | 3/3 | 3/3 | pad under `xdg-state/outpost/pads/`, `file://` link relayed, choice in words |
+| `not-visual-layout-vocabulary` | 3/3 on "no pad" (batch 1: 0/3) | 3/3 | no pad, no Skill call; recommends base + overrides; strict "asked in words" reading 0/3 (each closes on a question about the facts that would settle it, not the choice itself) |
+| `visual-pad-cannot-be-made` | 3/3 | 3/3 | publish refused, no pad, no link, `sites` still a symlink with an empty target |
+| `typed-answer-after-pad` | 3/3 | 3/3 | pick treated as settled |
+| `words-only-request` | 3/3 | 3/3 | no pad, no tool calls |
+| `flow-outside-workspace` | 3/3 | 3/3 | pad with 2 `flow` options each run, link relayed, choice in words, no ask-first |
+| `not-visual-flow-vocabulary` | 3/3 | 3/3 | no pad; recommends 3 retries; strict reading 0/3 (no run puts a question to the user) |
+| `dispatched-agent-observed` (observed) | n/a | n/a | 3/3 drew a layout pad (notification preferences) and handed the link back (batch 1: 0/3; first batch: 2/3) |
+
+**Baseline, `flow-outside-workspace`: 1/3** drew a flow pad (`-2`), the other two answered in
+words. The clause's measured effect on flows is 3/3 against 1/3; baseline is reported, not
+gated.
+
+**Verdict: PASS.** Every gated scenario meets its registered verdict in 3/3 runs on the accepted
+reading; `not-visual-layout-vocabulary` and `not-visual-flow-vocabulary` meet the registered
+"no pad" half in 3/3 and miss only the strict "asked in words" half, as the first batch's
+operator-accepted reading allows. No re-run was needed. The pad over-trigger batch 1 found on
+file layouts is gone; the pad still draws for a process question 3/3.
+
+**Containment.** Real-state diff of `~/.config/camp`, `~/.local/state/camp`,
+`~/.local/state/outpost` and the lore vaults: nothing run-related changed. The camp and config
+trees were unchanged; the only differences are the Outpost daemon's own log and `state.db` files
+and other sessions' vault task records. Captures checked for `ps`-style listing, other runs'
+directories and reads under the real home: none, and none carries the developer's email.
+Batch 1's directory was added to `DENY_EXTRA`. Captures stay outside the repo; committed files
+are path-rewritten. `capture_scan.py` over `runs/flow-batch-2/`: 0 credential findings (30
 known-safe repo-path matches, one per argv).
 
 **Changes to the case after the first run of this batch:** none.

@@ -1,0 +1,16 @@
+**Build the grid: channels as columns, event types as rows.**
+
+Why:
+- **It's the shape of the data.** Each preference is one event on one channel. The grid shows every pair at once, so "I want Mentions by email but not by SMS" is a single row.
+- **Tabs per channel** hide the comparison. To see how one event is set across channels you have to switch tabs, and the same event list repeats on every tab.
+- **One long list by topic** works well on phones but gets long. It also repeats the channel toggles under every row, which is the grid again, just harder to scan.
+
+Costs of the grid:
+- On narrow screens it needs to collapse, ideally into the topic list, so that option becomes the mobile view rather than being thrown away.
+- Past about four channels it gets wide.
+- Add per-column "all on/off" and per-row headers so people can change a whole channel or event at once.
+
+I sketched all three for comparison (it opens from disk on this machine):
+file://<run>/xdg-state/outpost/pads/notification-prefs-layout/index.html
+
+The open question is **grid, tabs or list?** The user can answer in words, or pick on the pad and paste back its "Copy reply". The round file is at `project/.padround/r1.json` and is safe to delete.

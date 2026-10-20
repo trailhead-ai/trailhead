@@ -1,0 +1,19 @@
+{
+  "variant": "flow-outside-workspace",
+  "pads": [
+    "refund-approval-flow"
+  ],
+  "pad locations": [
+    "xdg-state/outpost/pads/refund-approval-flow"
+  ],
+  "flow options": 2,
+  "layout options": 0,
+  "tool calls": [
+    "Skill",
+    "Write",
+    "Write",
+    "Bash",
+    "Bash"
+  ],
+  "final message": "I'd build **option one**, handling each request as it arrives. I've drawn both flows side by side on a pad:\n\nfile://<run>/xdg-state/outpost/pads/refund-approval-flow/index.html\n\n**Why option one:**\n- **Small refunds are paid in seconds, not the next day.** Those are most of your volume, and fast payment is where customers notice the difference. Under the batch option even a $5 refund waits up to a day.\n- **Finance can start sooner.** Large requests reach a person as soon as they arrive, instead of only after the nightly run. Under the batch option a refund that needs review can wait a night and then another day.\n- **A failure affects one request, not all of them.** If one payout fails, only that refund retries. If the end-of-day run fails, every customer due that day waits.\n- **It's simpler to build.** It's one decision point and one payout path, with no scheduler and no extra queue just for holding requests.\n\n**What option one asks of you:**\n- Payouts have to be idempotent, keyed on the refund ID, so a retry can't pay a customer twice.\n- Finance needs a review queue or inbox for the requests over the limit.\n- Reconciliation happens per transaction instead of once per run. If finance wants a daily summary, a report can provide it without delaying the payouts.\n\n**When option two would win:** your payment provider charges per payout or limits how often you can call it, finance contractually works from a daily batch, or the policy check needs data that only exists at end of day (for example, settled transactions). If any of those apply, batching may be the right choice.\n\n**So the question is:** do you want refunds handled per request in real time (my pick), or held for the nightly batch? Is there a provider fee, a finance process requirement, or a data dependency that pushes you toward batching?\n\nOn the pad you can pick an option and add a note, then press \"Copy reply\" and paste it back here. Answering in words works just as well. If either drawing shows \"Can't draw this flow\", paste that message back and I'll redraw it."
+}

@@ -1,0 +1,7 @@
+Numbered list down the left it is. Your typed answer settles it, so you don't need to open the page.
+
+I can't tell you the first change in the wizard's code yet, because the code isn't here. This directory (`<run>/project`) holds only a `README.md` with two lines: "ledgerlight — a small invoicing web app." It has no source files, no wizard component and no git history.
+
+Here's what I'd normally do first for this change, before touching any layout: **make the list of steps a single piece of data.** Wizards often hard-code the step order inside each screen, with "next goes to X" and a literal "Step 2 of 5". A sidebar needs one ordered array instead: an id, a label and a done/current/upcoming state for each step. The sidebar draws from that array, and the screens read their position from it. Once that's in place, the left-hand list is mostly styling, and adding or reordering a step won't break the numbers.
+
+Can you point me at the wizard's code? A path on this machine, a repo to clone, or the files pasted in would all work. Then I can find where step state actually lives and start with that change.

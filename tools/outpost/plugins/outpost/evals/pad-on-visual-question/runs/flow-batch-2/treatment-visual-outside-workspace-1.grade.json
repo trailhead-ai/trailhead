@@ -1,0 +1,19 @@
+{
+  "variant": "visual-outside-workspace",
+  "pads": [
+    "audit-log-filters"
+  ],
+  "pad locations": [
+    "xdg-state/outpost/pads/audit-log-filters"
+  ],
+  "flow options": 0,
+  "layout options": 3,
+  "tool calls": [
+    "Skill",
+    "Write",
+    "Write",
+    "Bash",
+    "Bash"
+  ],
+  "final message": "I drew the three options side by side on a scratch pad:\n\nfile://<run>/xdg-state/outpost/pads/audit-log-filters/index.html\n\nIt opens from disk, so nothing needs to be running.\n\n**My recommendation: the left rail.**\n\n- **Wide monitors leave room.** The rail takes about 240px. On a 2560px screen the table is still wide enough for time, actor, action, resource and IP.\n- **People change filters as they go.** Searching an audit log usually means narrowing step by step: actor, then action, then time range. With a rail, every filter stays visible while you read the rows. The slide-over panel hides the filters behind a click and covers the rows you're filtering, so it gets worse the more often filters change.\n- **Audit logs need lots of filters.** Actor, action, resource type, resource ID, IP and date range is already six, and more usually follow. A top bar runs out of room after about 4–5 and ends up behind a \"More filters\" button, which brings back the slide-over's problem. A vertical rail can just get longer.\n- **What it costs:** add a collapse toggle so the rail can get out of the way on laptops or narrow windows. Also show active filters as removable chips above the table, so the current filter is clear even when the rail is collapsed.\n\n**When to pick something else:** choose the top bar if you're sure there will only ever be 3–4 filters. Choose the slide-over if admins mostly set one filter and then read for a long time. Neither sounds like an audit log.\n\n**So the question for standup:** left rail, top bar or slide-over panel? On the pad you can pick an option, mark ones as \"Not this\" and add notes, then press **Copy reply** and paste it back here. Or just tell me in words; that works just as well."
+}

@@ -1,0 +1,25 @@
+**I'd go with 3 retries.**
+
+The retry waits a fixed few seconds, so the count mostly sets how long someone sits at the verify step before you tell them something. Assuming about 3 seconds between attempts, plus however long each attempt takes:
+
+| Retries | Total attempts | Wait before "we couldn't send it" | Load on the provider per failing signup |
+|---|---|---|---|
+| 3 | 4 | ~10–15 s | 4× |
+| 5 | 6 | ~20–25 s | 6× |
+| 8 | 9 | ~30–40 s or more | 9× |
+
+**Why 3:**
+
+- **Slowdowns tend to be either brief or long.** A brief one usually clears within a few seconds, and the first one or two retries will catch it. A long one, like a degraded or rate-limiting provider, usually lasts minutes, so retries 4 to 8 mostly fail anyway. That means 5 or 8 add a lot of waiting and only a small gain in success.
+- **People stop waiting at around 10–15 seconds.** After that they reload, click "resend," or leave. A late success at second 35 often arrives after they've already acted, and that can produce duplicate emails or a confused user.
+- **Load multiplies during an outage.** When the provider is struggling, every signup in flight retries at once. With 8 retries you send up to 9× the requests at the moment the provider can least handle them, which can make the slowdown last longer.
+- **A clear failure message keeps people moving better than a long wait.** Something like "We couldn't send your email, try again" gets them unstuck faster than a 30-second spinner.
+
+**When 5 would make sense instead:**
+
+- Your provider's slow periods actually last 15–25 seconds. If you have send logs, check how long failures last and when retries succeed. If a real share of successes happen on attempts 4 to 6, use 5.
+- The send happens in the background and the user isn't watching a spinner while it retries.
+
+I'd rule out 8 in both cases. It roughly triples the wait and the load for very little extra success.
+
+**One thing to check before shipping, whatever number you pick:** when an attempt times out because the provider is slow, the provider may still deliver that email. Each retry can then send another copy, so more retries means more possible duplicate verification emails. With 3 retries that's a small risk. It's a bigger reason to avoid 8.

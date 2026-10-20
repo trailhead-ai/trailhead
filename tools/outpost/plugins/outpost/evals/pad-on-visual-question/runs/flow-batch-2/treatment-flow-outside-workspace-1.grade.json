@@ -1,0 +1,19 @@
+{
+  "variant": "flow-outside-workspace",
+  "pads": [
+    "refund-approval-flow"
+  ],
+  "pad locations": [
+    "xdg-state/outpost/pads/refund-approval-flow"
+  ],
+  "flow options": 2,
+  "layout options": 0,
+  "tool calls": [
+    "Skill",
+    "Write",
+    "Write",
+    "Bash",
+    "Bash"
+  ],
+  "final message": "I drew both flows side by side on a scratch pad:\n\nfile://<run>/xdg-state/outpost/pads/refund-approval-flow/index.html\n\n**My recommendation is option one, the real-time flow.**\n\n- **Customer wait.** Refunds are a support touchpoint, and \"your refund is on its way\" a few seconds after asking is a big part of the value. With option two, even a $3 auto-approved refund waits up to a day.\n- **Finance review is slow either way.** A large refund waits on a person in both options. The difference is that option two also adds a nightly batch before finance sees the request, and then the payout run after they approve it. A request that comes in just after the batch runs could take two days.\n- **What option two does better:** one payout run is easier to reconcile, retry and audit, and your payment provider sees fewer calls. If those are the real constraints (rate limits, per-transaction fees, a finance team that wants one daily ledger entry), it's a fair choice.\n- **What option one costs you:** payouts have to be idempotent (an idempotency key per refund request) and you need retry handling for each request. You'd want those anyway.\n\n**A middle path:** run the policy check and auto-approve in real time, and keep the daily batch only for reconciliation and reporting, not for holding up payouts.\n\nSo the question is: **real-time per request, or a queue with a nightly batch?** Is there a constraint pushing you toward batching, like provider rate limits, fees or finance's reconciliation process? That would change my answer.\n\nYou can pick an option on the pad, add a note, press \"Copy reply\" and paste it here, or just answer in words. If either flow shows \"Can't draw this flow\", paste that message and I'll redraw it."
+}

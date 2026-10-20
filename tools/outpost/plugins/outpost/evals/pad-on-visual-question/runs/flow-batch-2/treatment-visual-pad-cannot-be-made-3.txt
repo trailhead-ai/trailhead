@@ -1,0 +1,21 @@
+I sketched the three options as a scratch pad, but **no pad was made**. This workspace's `sites/` folder is a symlink, and the script won't publish through one:
+
+```
+scratch-pad: ".../worktrees/ws-quill/sites": the sites folder is a symlink — refusing to publish through it
+```
+
+I didn't change or remove that folder. You might want to check why it's a symlink. Here's the comparison in words instead.
+
+**My recommendation: the numbered step list down the left edge.**
+
+Your problem is people giving up halfway, and on step 3 of 5 the question in their head is "how much more of this is there?"
+
+- **Numbered list on the left:** shows step names, for example ✓ Business details, ✓ Bank account, **Tax & currency**, Invoice template, Send a test invoice. People can see that what's left is short and concrete, and they can click back to fix an earlier answer instead of quitting. It takes a column of width, so on narrow screens it needs to fall back to something like a "3 of 5 · Tax & currency" header.
+- **Progress bar across the top:** cheap and familiar, and it shows how far along someone is. But "60%" says nothing about what's still to come. If step 4 turns out to be long, the bar has set the wrong expectation, which is the halfway drop-off you're seeing.
+- **Plain "Step 2 of 5" text:** nothing to build, but it gives the least information exactly where people are leaving.
+
+Two things that probably matter as much as the indicator:
+- **Check where they actually leave.** If most drop-offs are on one step (bank account details are a common culprit), changing the indicator won't fix it. That step needs to be optional, skippable, or able to be saved and finished later.
+- **Make "save and finish later" obvious.** The step list helps with this, because people can see they can come back to step 4.
+
+**So which way are you leaning: the left-hand step list, the top progress bar, or the plain "Step N of 5" text?** And do you know whether the drop-off is spread across steps 2–3 or concentrated on one of them?

@@ -1,0 +1,19 @@
+{
+  "variant": "dispatched-agent-observed",
+  "pads": [
+    "notification-prefs-layout"
+  ],
+  "pad locations": [
+    "xdg-state/outpost/pads/notification-prefs-layout"
+  ],
+  "flow options": 0,
+  "layout options": 3,
+  "tool calls": [
+    "Skill",
+    "Write",
+    "Bash",
+    "Write",
+    "Bash"
+  ],
+  "final message": "**I recommend the grid: channels as columns, event types as rows.**\n\n- **It shows everything at once.** Each event and channel pair is one cell, so you can answer \"what reaches me by SMS?\" or \"how do I hear about billing?\" just by looking. Tabs hide all but one channel at a time. The long list repeats the same channel toggles under every topic.\n- **Bulk changes are easy.** You can add \"all on/off\" to a column header (mute a channel) or a row header (mute an event). Tabs make you visit every tab to change one event everywhere.\n- **It grows well.** A new event is one row and a new channel is one column. The list gets longer with every addition, and tabs stop fitting past about 4 channels.\n- **The cost:** narrow screens need a fallback. Below a breakpoint, show each event as a card with its channel toggles stacked inside. That's roughly the topic-list layout, so the list comes free as the mobile view.\n\n**When to choose something else:** if channels have their own settings that don't fit in a grid cell (quiet hours for push, a digest frequency for email), use tabs. Use the list only if there's just one or two channels.\n\nI drew all three as sketches, with the grid marked as my pick: file://<run>/xdg-state/outpost/pads/notification-prefs-layout/index.html\n\n**Open question:** grid, topic list or tabs? You can answer in words or paste back the pad's \"Copy reply\"."
+}

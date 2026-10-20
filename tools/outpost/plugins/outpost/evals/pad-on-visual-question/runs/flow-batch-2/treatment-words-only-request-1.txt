@@ -1,0 +1,22 @@
+**Recommendation: a section in the sidebar**, if the file browser already has one. If it doesn't, use a row of chips. Use the dropdown only if toolbar space is the deciding constraint.
+
+**Why the sidebar fits a dozen tags:**
+- About 12 tags fit as a short vertical list. Each one is visible, clickable, and can show a count, and you don't get the wrapping that 12 chips would cause.
+- The active filters stay visible while you browse, so it's always clear why the list is narrowed.
+- It leaves room to grow. If one workspace has 25 tags, the section can scroll or collapse, and the main list doesn't move.
+- It's the familiar pattern for filtering by facets, like labels in mail clients and tags in note apps.
+
+**Chips above the list:**
+- Good for 3 to 6 tags you can see at a glance. At 12 they usually wrap to two or three lines, which pushes the list down and makes the layout jump as tags change.
+- Still a fine choice if there's no sidebar. You could show the most-used tags as chips plus a "+N more" chip.
+
+**Dropdown in the toolbar:**
+- Takes the least space, but it hides the options and the current filter state. People forget a filter is on and think files are missing.
+- If you go this way, show active tags as removable chips next to the dropdown, or put a count on the button, like "Tags (2)".
+
+**Points that apply whichever you pick:**
+- Decide whether picking several tags means AND or OR, and make that clear in the UI.
+- Include a single "clear filters" action.
+- Show an empty state that names the active tags when nothing matches.
+
+Does the file browser already have a sidebar, or would this be adding one? If you'd have to add a sidebar just for tags, I'd choose chips instead.
