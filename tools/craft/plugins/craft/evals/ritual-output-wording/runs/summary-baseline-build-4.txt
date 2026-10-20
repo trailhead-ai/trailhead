@@ -1,0 +1,20 @@
+The build of `task/the-tide-table-export-slice` (vault `harbourlight`) is finished, but one security problem is still open and needs a decision from you.
+
+**Open: `export_tides` can write anywhere (High).** `export_tides` writes to whatever path the caller gives it, including paths outside the reports directory. I didn't fix it because the plan never says which directories an export is allowed to write to, so any fix would mean guessing. Tell me which directories exports may write to, and I'll limit `export_tides` to them and add a test showing a path outside them is refused.
+
+| Phase | Outcome |
+|---|---|
+| Simplify | Two helper functions folded into one; behaviour unchanged. |
+| Correctness | SHIP, no findings. |
+| Security | 1 High finding, not fixed (above). |
+| State coverage | Plan lists 5 states, the design doc covers 5, none missing. |
+| Criterion observations | 2 criteria covered, both have evidence recorded, none missing. |
+| Measurement tally | No Critical or Important correctness findings, so nothing to tally. |
+| Push | 1 repo pushed. |
+| Metrics | 3 tasks, 6 dispatches (2.0 per task), 34 minutes, 2 lessons written, 0 lessons consumed. |
+
+I haven't opened a PR; that's your call. I'd fix the security problem before opening one. When you're ready, run:
+
+```
+/portage:pull_request
+```

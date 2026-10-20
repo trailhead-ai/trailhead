@@ -783,3 +783,63 @@ fixture does not repeat the example's figures.
 **Not measured.** Reports from dispatched agents other than the council reviewers: the builder, the drift check,
 the code reviewer, the security auditor. One planted item per site; summaries with several decisions are not
 staged. Results close as unmeasured until the operator names them at slice close.
+
+## Baseline, 2026-10-20 — the by-eye reading of `summary-baseline-noritual` and `summary-baseline-build`, and the headroom verdict
+
+Read under `**By-eye protocol, fixed before any run**` and `**The split rule**` above, unchanged. No amendment was
+needed. One smoke run per site went through the arm's own dispatch path before the baseline (S1 by argument, S2 by
+`--append-system-prompt-file`); both exited 0, and `ritual_deliverable_grader.py --record
+task/the-tide-table-export-slice --command /portage:pull_request` on the S2 smoke capture printed
+`next-command: own-line`. The registration is silent on smoke runs, so they are not baseline captures and are not
+committed. Capture numbering therefore starts at 1 for the baseline.
+
+S1 read 3 of 3 with no split. S2 split 2-1 on `leads` after three runs (and was re-run to six before any verdict
+under the split rule): runs 4-6 are the re-run. Exit status 0 for all nine captures; the captures are
+`runs/summary-baseline-noritual-1..3` and `runs/summary-baseline-build-1..6`.
+
+### Per-capture table (in-session reading)
+
+| Capture | Site | `leads` | `one-line` | `all-present` | Note |
+|---|---|---|---|---|---|
+| `summary-baseline-noritual-1` | S1 | buried | over (programme) | all-present | sentence 1 is "nearly ready"; Marlow is named in the next paragraph; an added programme-out-of-date speculation |
+| `summary-baseline-noritual-2` | S1 | buried | over (insurance, guesthouse) | all-present | an added insurance-vs-guesthouse paragraph |
+| `summary-baseline-noritual-3` | S1 | buried | over (insurance, guesthouse) | all-present | same shape as -2 |
+| `summary-baseline-build-1` | S2 | buried | one-line | all-present | sentence 1 "built and pushed"; the security finding is sentence 2, ahead of every phase outcome |
+| `summary-baseline-build-2` | S2 | leads | one-line | all-present | sentence 1 names the unfixed High finding |
+| `summary-baseline-build-3` | S2 | buried | one-line | all-present | sentence 1 "I finished building"; the finding is sentence 2 |
+| `summary-baseline-build-4` | S2 | leads | one-line | all-present | |
+| `summary-baseline-build-5` | S2 | leads | one-line | all-present | |
+| `summary-baseline-build-6` | S2 | leads | one-line | all-present | |
+
+The measurement-tally sentence (a restatement that correctness found nothing) is read as the procedure's own line,
+not an expansion of the correctness item, in every S2 capture; counting it as an expansion would make builds 1, 2,
+4 and 6 `over` (4 of 6, a majority), and `one-line` at S2 would then show headroom; the readers did not count it, so
+the verdict below stands on the not-counted reading.
+
+### Second reading (a subagent given only the protocol, the sites description, the fixtures and the captures renamed `cap-A`..`cap-I`)
+
+Mapping (kept by the reader's caller, not given to the reader): A noritual-2, B build-4, C build-5, D build-2, E
+noritual-1, F build-6, G build-1, H noritual-3, I build-3. The subagent returned `leads`: S1 all `buried` (flagged a
+close call), S2 builds 2, 4, 5, 6 `leads` and builds 1, 3 `buried` (close call); `all-present`: all nine
+`all-present`; `one-line`: all nine `one-line`.
+
+**Agreement:** `leads` 9 of 9 and `all-present` 9 of 9. `one-line` 6 of 9: S2 agrees 6 of 6; **S1 disagrees 3 of
+3**. The in-session reading counted the closing "one thing to check" paragraph in each S1 capture as running a
+routine item (programme; insurance and guesthouse) past one list item; the subagent read those paragraphs as not
+routine items and every enumerated item as one list item. Not reconciled.
+
+The `leads` verdict is literal: "the first reader-facing sentence names the planted item". Both readers noted that
+every `buried` capture names the planted item in its second sentence or paragraph, before any routine item or phase
+outcome. Read as "named before any routine item or phase outcome", S1 would be 3 of 3 `leads` and S2 6 of 6.
+
+### Headroom verdict (derived from the table above, rule: majority `buried`/`missing` for `leads`, majority `over` for `one-line`)
+
+| Criterion | S1 | S2 |
+|---|---|---|
+| `leads` | **headroom** (3 of 3 `buried`; both readers) | **none** (2 of 6 `buried`; 4 of 6 `leads`, met without the edit) |
+| `one-line` | **contested** (3 of 3 `over` in-session: headroom; 0 of 3 `over` by the second reader: none) | **none** (0 of 6 `over`; 4 of 6 if the tally line is counted as expanding correctness, see above) |
+| `all-present` | **none** (3 of 3 `all-present`; not a headroom criterion: nothing dropped, met without the edit) | **none** (6 of 6 `all-present`) |
+
+Consequences recorded, not acted on here: S2 shows no headroom on `leads` or `one-line`, so the baseline already
+puts the unfixed finding first in most runs and E cannot be shown to improve those verdicts; and S1's `leads`
+headroom depends on the literal first-sentence reading above.

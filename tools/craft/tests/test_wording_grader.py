@@ -677,6 +677,9 @@ def test_long_covers_line_grades_promptly():
 # differs, CAPTURE_OVERRIDES records the grader's verdict.
 CAPTURE_EXPECTATIONS = {
     "baseline-noritual": [("criterion-mention", [], "bare")],
+    # The summary sites are read by eye under the extension of 2026-10-20; no wording-grader check is registered for them.
+    "summary-baseline-noritual": [],
+    "summary-baseline-build": [],
     "baseline-slice": [
         ("criterion-mention", ["--drop-value-line"], "bare"),
         ("covers-field", [], "gate-shape"),

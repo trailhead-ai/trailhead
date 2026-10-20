@@ -1,0 +1,21 @@
+I finished building the-tide-table-export-slice (`task/the-tide-table-export-slice` in the `harbourlight` vault). One security problem was found and is not fixed: `export_tides` can write files anywhere on disk.
+
+**Security problem: `export_tides` will write a file to any path the caller gives it (High, not fixed)**
+
+The path isn't limited to the reports directory, so an export can create or overwrite files outside it. The plan doesn't say which directories an export may write to, so I couldn't pick a fix without guessing. **Decision needed:** which directories should exports be allowed to write to? Once you say, the fix is to reject any path that resolves outside those directories.
+
+**Results by phase**
+
+- **Simplify:** two helper functions were merged into one. Behaviour is unchanged.
+- **Code review:** passed (SHIP) with no findings, so there were no serious review issues to count in the tally.
+- **Security:** one High finding, the unfixed export path problem above.
+- **Design-doc states:** the plan lists 5 states and the design doc covers all 5; none are missing.
+- **Acceptance criteria:** both covered criteria have recorded evidence; none are missing.
+- **Push:** 1 repo pushed.
+- **Metrics:** 3 tasks took 6 build-agent dispatches (2.0 per task) and 34 minutes in total. The run wrote 2 lessons and used none from earlier runs.
+
+I haven't opened a pull request; that call is yours. Run this when you're ready:
+
+```
+/portage:pull_request
+```
