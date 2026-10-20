@@ -1838,6 +1838,35 @@ FINDING_CAPTURE_VERDICTS.update(
     }
 )
 
+
+def _pwopen(review, outcome, ident, severity, reviewer):
+    return {
+        "review-name": review,
+        "outcome-word": outcome,
+        "finding-id": ident,
+        "severity-name": severity,
+        "reviewer-name": reviewer,
+    }
+
+
+def _pwdetail(outcome, severity):
+    return {"outcome-word": outcome, "finding-id": "bare", "severity-name": severity, "reviewer-name": "plain"}
+
+
+# The baseline batch: three runs per site, `pwdetail` re-run to six after `outcome-word` and `severity-name` split 2-1.
+FINDING_CAPTURE_VERDICTS.update(
+    {
+        **{f"pw-baseline-pwopen-{n}": _pwopen("internal", "internal", "bare", "plain", "plain") for n in (1, 2, 3)},
+        "pw-baseline-pwdetail-1": _pwdetail("none", "none"),
+        "pw-baseline-pwdetail-2": _pwdetail("none", "plain"),
+        "pw-baseline-pwdetail-3": _pwdetail("internal", "plain"),
+        "pw-baseline-pwdetail-4": _pwdetail("none", "plain"),
+        "pw-baseline-pwdetail-5": _pwdetail("internal", "plain"),
+        "pw-baseline-pwdetail-6": _pwdetail("internal", "plain"),
+        **{f"pw-baseline-pwsaved-{n}": {"outcome-word": "internal", "finding-id": "bare"} for n in (1, 2, 3)},
+    }
+)
+
 PW_FIXTURES = FINDING_CASE / "fixtures"
 PW_SPEC = PW_FIXTURES / "pw-spec.md"
 _STAGED_REPLY_RE = re.compile(r"accept (C\d+) as a risk: (.+?), dispute (C\d+): (.+?), otherwise go")
@@ -1871,7 +1900,27 @@ PW_SAVED_VERDICTS = {
         "stamp-form": ("kept", []),
         "override-mapping": ("mapped", "staged"),
     },
+    **{
+        f"pw-baseline-pwsaved-{n}": {
+            "finding-id": ("bare", ["--saved-detail"]),
+            "criterion-mention": ("bare", ["--saved-detail", "--criteria", str(PW_SPEC)]),
+            "stamp-form": ("kept", []),
+            "override-mapping": ("mapped", "staged"),
+        }
+        for n in (1, 2, 3)
+    },
 }
+
+# The `pwopen` guard `criterion-mention` is graded against the spec's criteria, which the site-wide table does not pass.
+PW_OPEN_CRITERION_VERDICTS = {f"pw-baseline-pwopen-{n}": "bare" for n in (1, 2, 3)}
+
+
+@pytest.mark.parametrize("stem", sorted(PW_OPEN_CRITERION_VERDICTS))
+def test_every_pwopen_capture_grades_its_criterion_mention_guard_to_its_mapped_verdict(stem):
+    capture = FINDING_RUNS / f"{stem}.txt"
+    result = run_grader(["--check", "criterion-mention", "--criteria", str(PW_SPEC)], capture.read_bytes())
+    verdict = PW_OPEN_CRITERION_VERDICTS[stem]
+    assert result.stdout.decode("utf-8") == f"criterion-mention: {verdict}\n", (stem, result.stderr)
 
 
 @pytest.mark.parametrize("stem", sorted(PW_SAVED_VERDICTS))

@@ -1,0 +1,25 @@
+Here is the detail on the three findings that need your decision. I checked each against the spec myself. Two hold as raised. The first is narrower than its reviewer said, and I've noted where.
+
+**Would build the wrong thing, needs your decision**
+
+**C1: members aren't told what goes back in the case until near the end of the loan.** Should the confirmation email also list what goes back in the case? I recommend yes. It's a one-line change, and without it a member can lose the finder cap before anyone has told them it matters.
+
+What could go wrong: a member collects a telescope, and the confirmation email states only "the loan and its return date" (AC1). Nothing yet says the case must hold the eyepieces and finder cap. The cap gets left on a field after a viewing night, and the member is asked to replace it. The reviewer missed one thing: the spec does send this list "two days before the return date" in the reminder (AC5). So the member does learn it, but only at the end of the loan, after the chance to keep the kit together has passed. The list also goes to the same address as the confirmation, so a mistyped email loses both. That mistyped-address gap was raised separately as worth fixing.
+Fix: `", and lists what goes back in the case: the telescope, its eyepieces, and the finder cap"` added to the end of AC1, so the list arrives when the member collects the telescope as well as in the reminder.
+*Raised by: ease of use.*
+
+**C2: a loan holds a whole telescope for days when the member may only need one night.** Should a loan be booked by the night rather than from a start date to a return date? I recommend deciding this now: every borrowing criterion depends on the answer, and changing it after build means rebuilding the booking flow.
+
+What could go wrong: a member wants the club's largest scope for the one clear night in the forecast. They give a start date and the scope is theirs until the return date. Other members asking for that scope "on the same dates" are refused and offered the next free start date (AC2). The scope sits unused for the rest of the loan while they wait. Checking the spec turned up a sharper version of the gap. The member gives only a start date (AC1), and the spec never says how the return date is set or how long a loan runs. Whichever way you go on per-night booking, loan length is currently unspecified. The reviewer's confidence was medium, because nothing says how often a loan is for a single night. That is the thing you know and the reviewers don't.
+Fix: members would book one or more named nights and could add nights later, and a scope would be free on any night nobody booked. This rewrites the Borrowing section, the request and confirmation (AC1), the one-member-at-a-time refusal (AC2), the cancellation and waiting-list offer (AC3), and the reminder's timing (AC5). If you'd rather keep date-range loans, the smaller fix is to state in AC1 how the return date is set, and I'd draft that edit instead.
+*Raised by: right problem.*
+
+**C3: a telescope left in the cupboard shows as free with no condition note.** Should a telescope show as free only after its condition has been recorded? I recommend yes. A scratched mirror nobody can trace is the main harm the spec's Problem names, and right now the spec reopens that gap.
+
+What could go wrong: the spec has the loan officer record the telescope "as back, with a note of its condition" on the return date, and it shows as free "from that day" (AC4). If the officer isn't there, the member leaves the scope in the cupboard. The calendar shows it as free with no note. The next member finds the scratched mirror, and the loan history (AC6) can't say who had the scope. The spec is at production maturity, so this is held to the full bar.
+Fix: `"The telescope shows as returned and unchecked until the loan officer records its condition, and as free on the club's loan calendar only once that note is recorded."` replacing the second half of AC4.
+*Raised by: failure cases.*
+
+One related point for when you decide C3: a separate security finding, rated worth fixing, notes that the condition note appears on a history every member can read. You might want both settled in the same edit to AC4 and AC6.
+
+Reply "go" to take the recommendation as it stands. To override any of the three, name it by its id (C1, C2, C3) and give your reason.

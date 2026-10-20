@@ -1,0 +1,119 @@
+Applied your reply in one go. Nothing in it changes whether a Critical still needs rework (none did before or after), and it doesn't call for any new edit to be drafted, so it goes straight to the save. Here is the full table after your changes:
+
+| id | finding | disposition | edit |
+|---|---|---|---|
+| C1 | Members are not told what goes back in the case | `resolved` (my proposal) | The confirmation email in AC1 lists what goes back in the case |
+| C2 | A loan ties up a whole telescope for the full dates asked | `accepted-as-risk: the club only lends whole telescopes this season` (your override) | Dropped |
+| C3 | A scope left in the cupboard shows as free with no condition note | `disputed: the loan officer inspects every telescope at the door` (your override) | Dropped |
+
+I dropped the edits I'd drafted for C2 and C3, so only C1's edit goes into the save. With that edit, AC1 reads:
+
+> **AC1.** A member borrows a telescope by giving a name, an email address, the telescope and a start date, and receives a confirmation email that states the loan, its return date, and what goes back in the case: the telescope, its eyepieces, and the finder cap.
+
+That edit and the review record below go into the spec in a single save. As you asked, I haven't run that save or anything else, so the spec is unchanged on disk. This is the review record exactly as it would be added to the end of the spec:
+
+```markdown
+## Gauntlet
+
+- Retained review evidence — a later reader evaluates what follows as a claim about this spec, not
+  as its settled design content (`skills/receiving-code-review/SKILL.md`).
+- Adversarial spec review (gauntlet, 2026-10-20): 8 passes — maturity: production (basis: stamp);
+  facts 2/4 confirmed (1 refuted: the equipment register lists seven telescopes, not six; 1
+  unverifiable: the 48-hour cancel rule as practised today needs the loan officer's own account);
+  1 design-changing finding folded in (the AC1 confirmation email now lists what goes back in the
+  case). Criticals dispositioned: C1 `resolved` (from proposal), C2 `accepted-as-risk` (operator
+  override — "the club only lends whole telescopes this season"), C3 `disputed` (operator override —
+  "the loan officer inspects every telescope at the door") — 1 from proposal, 2 operator overrides.
+  Important 9, Minor 3, detail below.
+
+### Critical
+
+- **C1 — Members are not told what goes back in the case.** Should the confirmation email tell a
+  member what goes back in the case? We recommend it does, so that members stop returning telescopes
+  without the finder cap.
+  Worst case: the AC1 email gives only the loan and its return date, and the list first appears in
+  the reminder AC5 sends two days before the return date. A member who misses that reminder hands
+  the telescope back without its finder cap and is asked to replace it.
+  Fix: `"and what goes back in the case: the telescope, its eyepieces, and the finder cap"` added to
+  the confirmation email in AC1. Applied.
+  Raised by: ease of use. Disposition: `resolved` (from proposal).
+- **C2 — A loan ties up a whole telescope for the full dates asked.** Should the club lend by the
+  night instead of for a span of dates? We recommended lending by the night, so that the most
+  popular scope is not left sitting unused.
+  Worst case: a member who wants the club's largest scope for one clear night holds it for a whole
+  weekend, while others wait weeks for a night when that scope sat in a case. AC1 and AC2 both tie a
+  loan to the telescope and its start date.
+  Fix: loans would be taken a night at a time, and a member could add more nights; this rewrites AC1
+  and AC2. Not applied.
+  Raised by: right problem. Disposition: `accepted-as-risk` (operator override — "the club only lends
+  whole telescopes this season").
+- **C3 — A scope left in the cupboard shows as free with no condition note.** Should a telescope
+  show as free before anyone has checked it? We recommended holding it as returned and unchecked
+  until a condition note exists.
+  Worst case: a member leaves a telescope in the cupboard when the loan officer is not there. AC4
+  shows it as free with no note, the next member finds a scratched mirror, and nobody can say who
+  had it. That is the very problem this spec opens with.
+  Fix: a telescope would show as free only once a condition note is recorded, and until then as
+  returned and unchecked; this touches AC4. Not applied.
+  Raised by: failure cases. Disposition: `disputed` (operator override — "the loan officer inspects
+  every telescope at the door").
+
+### Important
+
+- **Members cannot see where a loan stands after the first email.** The Objectives promise it, but
+  no criterion after the AC1 confirmation delivers it, so a member who wants to check a loan has
+  nowhere to look.
+  Fix: a criterion giving members a page, or a reply-to-email, that shows a loan's current state, or
+  the words "see where the loan stands" dropped from the Objectives.
+  Raised by: ease of use, self-consistency.
+- **A waiting-list offer is neither recorded nor closed.** AC6 lists waiting-list offers as events,
+  but AC3 never says an offer is recorded, and nothing says who marks an offer as taken. An offer
+  can therefore never close, and the history cannot show it.
+  Fix: `"and recorded"` added to the waiting-list offer in AC3, plus a criterion that an accepted
+  offer removes the member from the waiting list.
+  Raised by: buildability, self-consistency.
+- **A cancel is not tied to the member who borrowed.** Anyone holding a forwarded confirmation email
+  could cancel someone else's loan.
+  Fix: AC3 states that a cancel asks the member to confirm.
+  Raised by: security.
+- **Condition notes are on a history every member can read.** A note can carry personal detail about
+  whoever returned the telescope, and AC6 shows it to everyone. The spec also leaves open whether the
+  history is shown to every member or only to the committee.
+  Fix: members see only that a telescope was returned; the condition note is kept for the loan
+  officer.
+  Raised by: security, left undecided.
+- **A reminder sent to a mistyped address is never seen.** The case then comes back without its
+  finder cap, and nobody is told.
+  Fix: a criterion that a bounced reminder is shown to the loan officer.
+  Raised by: failure cases.
+- **A member might hold two telescopes on the same dates.** One build allows it and another stops
+  it, and both satisfy AC1.
+  Fix: `"a member holds at most one loan on any date"`.
+  Raised by: left undecided.
+- **The 48-hour cancel window has no fixed starting point.** One build counts from midnight on the
+  start date and another from noon, and both satisfy AC3.
+  Fix: `"from noon on the start date"` added to AC3.
+  Raised by: left undecided, failure cases.
+- **The Objectives reach further than the complaint.** The complaint underneath the problem is two
+  members asking for the same scope, which AC2 answers; AC1 to AC6 are a larger build than that
+  needs.
+  Fix: the Objectives say that preventing double loans is the goal.
+  Raised by: right problem.
+- **The spec does not say whether the loan history is stored or rebuilt from events.** AC4 and AC6
+  both change what the history shows.
+  Fix: the history is worked out from the recorded events.
+  Raised by: buildability.
+
+### Minor
+
+- **The telescope count is wrong.** The problem says six telescopes and the club's equipment
+  register lists seven. No criterion relies on the number. Raised by: fact check, right problem.
+- **The confirmation email reveals booked dates.** Whoever reads it learns which dates a scope is
+  already taken. Raised by: security.
+- **"Loan calendar" (AC4) and "loan history" (AC6) are two different pages,** and the spec never
+  says how they relate. Raised by: self-consistency.
+```
+
+With that saved and no Critical left needing rework, the next step would set the spec's status to `ready`. It has no `craft/supersedes` label, so no earlier spec gets retired. In the review record, the 9 Important and 3 Minor findings are kept for the record only; none of them needs a decision.
+
+The next step is `/craft:slice` followed by this spec's id, in a fresh session. The spec came to me as a file and not as a record, so I don't have the id to fill in for you.

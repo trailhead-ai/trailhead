@@ -3948,6 +3948,156 @@ detail scoping removes, and `stamp-form` and `override-mapping` read the stamp a
 **Grammar changes after the pilots: none.** The grammar above is the one written before the pilots; no pilot capture
 showed a misread by hand.
 
+### Baseline batch (2026-10-20): captures, verdicts and headroom
+
+The three baseline arms were run by the dispatch above: `pwopen` and `pwsaved` three times each, `pwdetail` three times
+and then three more (`-4` to `-6`, the whole arm, a fresh batch) because two of its graded checks split 2-1 on the first
+three. All 12 runs exited 0 with an empty stderr file; none was excluded. Every verdict below was read from the grader
+with the invocations tabled above and is registered in `test_wording_grader.py` (`FINDING_CAPTURE_VERDICTS`,
+`PW_SAVED_VERDICTS` and, for the `pwopen` guard `criterion-mention`, `PW_OPEN_CRITERION_VERDICTS`). Every count in the
+tables after this one is derived from this one.
+
+**Per-capture verdicts.**
+
+| Capture | Check | Verdict |
+|---|---|---|
+| `pw-baseline-pwopen-1` | `review-name` | `internal` |
+| `pw-baseline-pwopen-1` | `outcome-word` | `internal` |
+| `pw-baseline-pwopen-1` | `finding-id` | `bare` |
+| `pw-baseline-pwopen-1` | `severity-name` | `plain` |
+| `pw-baseline-pwopen-1` | `reviewer-name` | `plain` |
+| `pw-baseline-pwopen-1` | `criterion-mention` | `bare` |
+| `pw-baseline-pwopen-2` | `review-name` | `internal` |
+| `pw-baseline-pwopen-2` | `outcome-word` | `internal` |
+| `pw-baseline-pwopen-2` | `finding-id` | `bare` |
+| `pw-baseline-pwopen-2` | `severity-name` | `plain` |
+| `pw-baseline-pwopen-2` | `reviewer-name` | `plain` |
+| `pw-baseline-pwopen-2` | `criterion-mention` | `bare` |
+| `pw-baseline-pwopen-3` | `review-name` | `internal` |
+| `pw-baseline-pwopen-3` | `outcome-word` | `internal` |
+| `pw-baseline-pwopen-3` | `finding-id` | `bare` |
+| `pw-baseline-pwopen-3` | `severity-name` | `plain` |
+| `pw-baseline-pwopen-3` | `reviewer-name` | `plain` |
+| `pw-baseline-pwopen-3` | `criterion-mention` | `bare` |
+| `pw-baseline-pwdetail-1` | `outcome-word` | `none` |
+| `pw-baseline-pwdetail-1` | `finding-id` | `bare` |
+| `pw-baseline-pwdetail-1` | `severity-name` | `none` |
+| `pw-baseline-pwdetail-1` | `reviewer-name` | `plain` |
+| `pw-baseline-pwdetail-2` | `outcome-word` | `none` |
+| `pw-baseline-pwdetail-2` | `finding-id` | `bare` |
+| `pw-baseline-pwdetail-2` | `severity-name` | `plain` |
+| `pw-baseline-pwdetail-2` | `reviewer-name` | `plain` |
+| `pw-baseline-pwdetail-3` | `outcome-word` | `internal` |
+| `pw-baseline-pwdetail-3` | `finding-id` | `bare` |
+| `pw-baseline-pwdetail-3` | `severity-name` | `plain` |
+| `pw-baseline-pwdetail-3` | `reviewer-name` | `plain` |
+| `pw-baseline-pwdetail-4` | `outcome-word` | `none` |
+| `pw-baseline-pwdetail-4` | `finding-id` | `bare` |
+| `pw-baseline-pwdetail-4` | `severity-name` | `plain` |
+| `pw-baseline-pwdetail-4` | `reviewer-name` | `plain` |
+| `pw-baseline-pwdetail-5` | `outcome-word` | `internal` |
+| `pw-baseline-pwdetail-5` | `finding-id` | `bare` |
+| `pw-baseline-pwdetail-5` | `severity-name` | `plain` |
+| `pw-baseline-pwdetail-5` | `reviewer-name` | `plain` |
+| `pw-baseline-pwdetail-6` | `outcome-word` | `internal` |
+| `pw-baseline-pwdetail-6` | `finding-id` | `bare` |
+| `pw-baseline-pwdetail-6` | `severity-name` | `plain` |
+| `pw-baseline-pwdetail-6` | `reviewer-name` | `plain` |
+| `pw-baseline-pwsaved-1` | `outcome-word` | `internal` |
+| `pw-baseline-pwsaved-1` | `finding-id` | `bare` |
+| `pw-baseline-pwsaved-1` | `finding-id (saved detail)` | `bare` |
+| `pw-baseline-pwsaved-1` | `criterion-mention (saved detail)` | `bare` |
+| `pw-baseline-pwsaved-1` | `stamp-form` | `kept` |
+| `pw-baseline-pwsaved-1` | `override-mapping` | `mapped` |
+| `pw-baseline-pwsaved-2` | `outcome-word` | `internal` |
+| `pw-baseline-pwsaved-2` | `finding-id` | `bare` |
+| `pw-baseline-pwsaved-2` | `finding-id (saved detail)` | `bare` |
+| `pw-baseline-pwsaved-2` | `criterion-mention (saved detail)` | `bare` |
+| `pw-baseline-pwsaved-2` | `stamp-form` | `kept` |
+| `pw-baseline-pwsaved-2` | `override-mapping` | `mapped` |
+| `pw-baseline-pwsaved-3` | `outcome-word` | `internal` |
+| `pw-baseline-pwsaved-3` | `finding-id` | `bare` |
+| `pw-baseline-pwsaved-3` | `finding-id (saved detail)` | `bare` |
+| `pw-baseline-pwsaved-3` | `criterion-mention (saved detail)` | `bare` |
+| `pw-baseline-pwsaved-3` | `stamp-form` | `kept` |
+| `pw-baseline-pwsaved-3` | `override-mapping` | `mapped` |
+
+**Counts and headroom, derived from the table above.** "Win" is the word the bars name; "clean majority" is 3 of 3, or 5 or 6 of 6.
+
+| Site | Check | Runs | Verdict counts | Win count | Clean majority of the win | Reading |
+|---|---|---|---|---|---|---|
+| `pwopen` | `review-name` | 3 | `internal` 3 | 0 of 3 `plain` | no | headroom |
+| `pwopen` | `outcome-word` | 3 | `internal` 3 | 0 of 3 `plain` | no | headroom |
+| `pwopen` | `finding-id` | 3 | `bare` 3 | 0 of 3 `bracketed` | no | headroom |
+| `pwopen` | `severity-name` | 3 | `plain` 3 | 3 of 3 `plain` | yes | guard held at baseline |
+| `pwopen` | `reviewer-name` | 3 | `plain` 3 | 3 of 3 `plain` | yes | guard held at baseline |
+| `pwopen` | `criterion-mention` | 3 | `bare` 3 | 0 of 3 `text-with-number` | no | guard missed at baseline |
+| `pwdetail` | `outcome-word` | 6 | `internal` 3, `none` 3 | 0 of 6 `plain` | no | headroom |
+| `pwdetail` | `finding-id` | 6 | `bare` 6 | 0 of 6 `bracketed` | no | headroom |
+| `pwdetail` | `severity-name` | 6 | `plain` 5, `none` 1 | 5 of 6 `plain` | yes | guard held at baseline |
+| `pwdetail` | `reviewer-name` | 6 | `plain` 6 | 6 of 6 `plain` | yes | guard held at baseline |
+| `pwsaved` | `outcome-word` | 3 | `internal` 3 | 0 of 3 `plain` | no | headroom |
+| `pwsaved` | `finding-id` | 3 | `bare` 3 | 0 of 3 `bracketed` | no | headroom |
+| `pwsaved` | `finding-id (saved detail)` | 3 | `bare` 3 | 0 of 3 `bracketed` | no | headroom |
+| `pwsaved` | `criterion-mention (saved detail)` | 3 | `bare` 3 | 0 of 3 `text-with-number` | no | headroom |
+| `pwsaved` | `stamp-form` | 3 | `kept` 3 | 3 of 3 `kept` | yes | guard held at baseline |
+| `pwsaved` | `override-mapping` | 3 | `mapped` 3 | 3 of 3 `mapped` | yes | guard held at baseline |
+
+**The 2-1 splits and their re-run.** At `pwdetail`, `outcome-word` (`none`, `none`, `internal` in `-1` to `-3`) and
+`severity-name` (`none`, `plain`, `plain`) each split 2-1, so the arm was re-run as `-4` to `-6`. Six combined:
+`outcome-word` is 3 `none` and 3 `internal`, no `plain`: not a clean majority of anything, and it has headroom;
+`severity-name` is 5 `plain` and 1 `none`, a clean majority of its guard's word. `pwopen` and `pwsaved` had no check
+that split, so they stay at three runs. `finding-id` and `reviewer-name` at `pwdetail` were 6 of 6 and did not split.
+
+**Met without the edit.** None of the edit's own checks (`review-name`, `outcome-word`, `finding-id` at any site, and
+`criterion-mention` and `finding-id` on the saved detail) wins at baseline at any site: every win count above is 0, so
+nothing is recorded as met without the edit and the headroom gate drops nothing on the strength of these checks. For the
+two ritual-edit parts the next task names: the first-mention sentence (graded by `review-name` at `pwopen`) was
+`internal` in 3 of 3 baseline captures, and the saved-detail criterion clause (graded by `criterion-mention` on the
+`pwsaved` saved detail) was `bare` in 3 of 3. Neither was a clean-majority pass at baseline, so neither is dropped.
+
+**Guards at baseline.**
+
+| Guard | `pwopen` | `pwdetail` | `pwsaved` |
+|---|---|---|---|
+| `severity-name` | `plain` 3 of 3 | `plain` 5 of 6, `none` 1 | not graded |
+| `reviewer-name` | `plain` 3 of 3 | `plain` 6 of 6 | not graded |
+| `criterion-mention` (AC1) | `bare` 3 of 3: missed at baseline | not graded | not graded |
+| `stamp-form` | not graded | not graded | `kept` 3 of 3 |
+| `override-mapping` | not graded | not graded | `mapped` 3 of 3 |
+
+The `criterion-mention` guard at `pwopen` reads `bare` in every baseline capture, as in the pilot. The grammar takes the
+worst mention across the whole capture, and each capture labels drafted criteria by number (`**AC7:**`). The guard rule
+sends a treated miss of 2 or more of 6 to a paired control; here the baseline arm is itself 3 of 3 `bare`, which is
+evidence for how that control would read. Why the sessions label drafted criteria by number is a hypothesis, not an
+ablation.
+
+**Hand check.** One capture per verdict word per site, read against the registered grammar rather than the script.
+`pwopen-2`: `review-name` `internal` (the deliverable opens "Gauntlet: telescope loan desk spec"; the first naming is
+"gauntlet"); `outcome-word` `internal` (`` `resolved` `` backticked in the table); `finding-id` `bare` (table cells
+`| C1 |` and `| C2 |`); `reviewer-name` `plain` (the passes appear only as "failure-cases review", "ease of use" and the
+like); `severity-name` `plain` ("worth fixing, your call"; no matched level word); `criterion-mention` `bare` (drafted
+`**AC7:**` and `**AC4:**` labels). `pwdetail-1`: `outcome-word` `none` (no backticked term, no "fixed in the spec" or
+"needs a rewrite"); `severity-name` `none` (the heading "findings that need your decision" is not the registered "needs
+your decision"); `finding-id` `bare` ("**C1:**"). `pwdetail-3`: `outcome-word` `internal` (`` `resolved` `` under each
+finding); `severity-name` `plain` ("needs your decision"); `reviewer-name` `plain`. `pwsaved-1`: `outcome-word`
+`internal` (`` `resolved` ``, `` `accepted-as-risk` ``, `` `disputed` `` in the echoed table); `finding-id` `bare` on the
+echo (`| C1 |`) and on the saved detail ("**C1 —**"); `criterion-mention` on the saved detail `bare` (`AC1`, `AC4` and
+`AC5` cited by number only); `stamp-form` `kept` (C1, C2 and C3 each followed by their backticked term);
+`override-mapping` `mapped` (C2 `accepted-as-risk` with "the club only lends whole telescopes this season", C3
+`disputed` with "the loan officer inspects every telescope at the door", no other id carrying those terms). No verdict
+disagreed with the grammar read by hand.
+
+**One literal reading to note, not a grammar change.** `pwopen-2` writes "the strongest of the Importants" and "The
+Importants are worth a pass". The registered `severity-name` patterns do not match the plural `Importants`, so the
+grammar reads that capture `plain`, as the other two. A reader would likely call the plural an internal level name. This
+is the grammar as registered; nothing is amended here.
+
+**By hand, `pwsaved`.** The marker bullet ("Retained review evidence") is printed in the saved block of all three
+captures. `scripts/capture_scan.py` over the 36 baseline files (12 `.txt`, 12 `.stderr.txt`, 12 `.exit`): 0 known-safe
+matches, 0 credential findings, exit 0; a search of the 36 for the operator's home path and username found 0 files. All
+12 stderr files are empty.
+
 ### Not measured
 
 Measured at the surfaces a typical run shows: the opening deliverable, a detail request and an override reply with the
