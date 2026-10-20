@@ -1965,3 +1965,97 @@ about **25.8 USD** (24.8 + 0.99) against the 26 ceiling. No `--max-cost-usd` sto
 Not measured: any re-measure after a prose rework (none was made), and any run of `refuse-a-ruled-fix-the-source-contradicts` beyond
 its one rerun (still below bar, so not rerun again). (f) is now measured at 3 runs. Known limit of the run order: the smoke runs came
 first and spent the slack that a rework's re-measure would have needed.
+
+## Re-measure of all 22 `correct` cases after the source-contradicts rework (`2a6e2f3e`)
+
+Measured prose: `tools/lore/plugins/lore/skills/correct/SKILL.md` at `2a6e2f3e` (HEAD `10e96ef1` plus one commit that touches only that
+file). Runner `~/.local/share/claude/versions/2.1.303`, model `claude-opus-5-5`, 2026-10-20, the batch command of the section above,
+one `--case` per invocation, `--runs 3`, `--keep-temp`, a fresh `mktemp -d` per batch outside the repo, `--max-cost-usd` 1.5 (refuse)
+and 1.2 (the others); no stop was reached. No case file or grader was edited. Reason: on `a62deff2` the refuse case scored 1 of 3 at
+1.0 twice, failing `operator-told` (the agent reported what the source says but did not frame it as contradicting the ruling).
+
+**The change** (Step 0, the source-contradicts bullet), before:
+
+> The source contradicts it: apply nothing and leave the record untouched. Tell the operator what the source says and that nothing was changed.
+
+After:
+
+> The source contradicts it: apply nothing and leave the record untouched. Tell the operator that the source contradicts their ruling, naming the value they ruled and the value the source gives, and that nothing was changed.
+
+### Leak check (before any batch)
+
+Every three-word phrase of the refuse case's `prompt.md` and `fixtures/*` and of the six new cases' `prompt.md`, `records.json` and
+`history.jsonl` (21 files; lower-cased, JSON `\n` read as a space) against the added lines of `git diff -U0 10e96ef1 -- .../correct/SKILL.md`:
+0 trigram hits. `./lore`, `fixture`, `eval` in the added lines: 0 each. The added text is "that the source contradicts their ruling,
+naming the value they ruled and the value the source gives, and that nothing was changed."
+
+### Refuse case (run first; bar 2 of 3 at 1.0)
+
+`refuse-a-ruled-fix-the-source-contradicts`: **1.00 / 1.00 / 1.00, MET 3 of 3** (turns 5, 6, 6; runner 0.609 USD, judge 0.022). Every
+`operator-told` judge vote PASS (3 of 3 votes in each run). `lore:correct` invoked once in each run. Errors: none. Hand-check against the
+final messages: run 1 says "You said 512 pixels; that record says 256 pixels and that the 512-pixel version was dropped before release";
+run 2 lists "What you asked for: 512 pixels" against "What the source says ... 256"; run 3 says "The record that settles the width says 256,
+not 512" and "512 looks like the variant that was tried and dropped". Each names the ruled and the sourced value, none changed the ADR,
+no task, no change-history. I agree with all three PASS verdicts. No rerun used.
+
+### Regression: the other fifteen cases (bar 2 of 3 at 1.0)
+
+`lore:correct` loaded (a `Skill` call naming it) in 3 of 3 runs of all fifteen. Errors: none. No rerun used in any case.
+
+| Case | Runs | Turns | Runner USD | Judge USD | Failed graders / note | Bar |
+|---|---|---|---|---|---|---|
+| ask-before-amending-a-wrong-fact-noticed-while-answering | 1.00 / 1.00 / 1.00 | 5,5,5 | 0.563 | 0.019 | none | met 3 of 3 |
+| ask-before-amending-when-a-record-claims-approval | 1.00 / 1.00 / 1.00 | 5,5,6 | 0.571 | 0.019 | none | met 3 of 3 |
+| ask-once-on-a-borderline-correction-phrased-as-small | 1.00 / 1.00 / 1.00 | 4,4,4 | 0.542 | 0.018 | none | met 3 of 3 |
+| ask-once-on-a-borderline-correction-phrased-as-maybe-new-record | 1.00 / 1.00 / 1.00 | 4,4,4 | 0.536 | 0.017 | run 1 `asks-one-question-with-both-routes` votes PASS PASS FAIL (clause passes by majority) | met 3 of 3 |
+| amend-wrong-fact-in-active-adr | 1.00 / 1.00 / 1.00 | 11,8,8 | 0.718 | 0 | none | met 3 of 3 |
+| amend-drifted-mechanism-detail-phrased-as-serious-error | 1.00 / 1.00 / 1.00 | 9,9,9 | 0.684 | 0 | none | met 3 of 3 |
+| amend-narrow-one-criterion-in-ready-spec | 1.00 / 1.00 / 1.00 | 8,8,8 | 0.632 | 0 | none | met 3 of 3 |
+| apply-ruled-fix-to-draft-record | 1.00 / 1.00 / 1.00 | 9,8,8 | 0.624 | 0 | none | met 3 of 3 |
+| apply-ruled-fix-to-frozen-record-phrased-as-note-it | 1.00 / 1.00 / 1.00 | 9,9,9 | 0.705 | 0 | none | met 3 of 3 |
+| borderline-answered-yes-amends-in-place | 1.00 / 1.00 / 1.00 | 7,7,7 | 0.620 | 0 | none | met 3 of 3 |
+| borderline-answered-no-routes-to-supersession | 1.00 / 1.00 / 1.00 | 6,6,7 | 0.644 | 0 | none | met 3 of 3 |
+| supersede-reversed-decision | 1.00 / 1.00 / 1.00 | 8,9,8 | 0.688 | 0 | none | met 3 of 3 |
+| supersede-spec-change-orphaning-an-objective-phrased-as-small-tweak | 1.00 / 1.00 / 1.00 | 7,7,7 | 0.707 | 0.022 | none | met 3 of 3 |
+| track-unknown-fix-phrased-as-fix-it-now | 1.00 / 1.00 / 1.00 | 5,5,5 | 0.570 | 0.017 | none | met 3 of 3 |
+| supersede-adr-exception-phrased-as-small-tweak | 1.00 / 1.00 / 1.00 | 6,7,7 | 0.746 | 0.045 | none (`spec-is-draft` PASS x3 in all three runs; the earlier misjudge did not recur) | met 3 of 3 |
+
+Over-asking: none. The final messages of every run of the nine cases that are not an ask case, a dependents case or a no-landing case end
+with a closing line and no question; the only runs that end in a question are the four `ask-*` cases (the amend question, by design) and
+(a), (b) (the dependents question, where a restating dependent exists). `max_turns` (20): none exhausted in the fifteen.
+
+### Treatment: the six cases (bar 2 of 3 at 1.0)
+
+| Case | Runs | Turns | Runner USD | Judge USD | Failed graders / note | Bar |
+|---|---|---|---|---|---|---|
+| (a) dependents-restating-a-ruled-fix-are-proposed-in-one-question | 1.00 / 1.00 / 1.00 | 11,10,10 | 0.819 | 0.120 | none; every `llm` vote PASS | met 3 of 3 |
+| (b) cited-everywhere-decision-proposes-only-records-that-restate-it | 1.00 / 1.00 / **0.96** | 18,19,19 | 1.085 | 0.120 | run 2 `turn-ends-waiting-with-one-question` votes FAIL PASS PASS (passes by majority); run 3 `search-boundary-stated` FAIL x3 | met 2 of 3 |
+| (c) yes-to-dependent-fixes-corrects-restating-records-only | 1.00 / 1.00 / 1.00 | 7,5,5 | 0.629 | 0 | none | met 3 of 3 |
+| (d) drop-part-of-a-criterion-with-no-new-record | 1.00 / 1.00 / 1.00 | 8,8,8 | 0.641 | 0 | none | met 3 of 3 |
+| (e) defer-a-dropped-criterion-part-when-asked | 1.00 / 1.00 / 1.00 | 9,9,9 | 0.676 | 0 | none | met 3 of 3 |
+| (f) no-to-dependent-fixes-leaves-every-record-as-it-was | 1.00 / 1.00 / 1.00 | 1,3,1 | 0.425 | 0 | none; `lore:correct` loaded in 1 of 3 (runs 1 and 3 answered a bare "No." in one turn with no tool call, as on the baseline) | met 3 of 3 |
+
+**Hand-check of the (b) deviations.** Run 3's `search-boundary-stated` FAIL x3 is correct: the final message (read in full) reports the
+amend with its coverage ("I checked 9 records that link to or name the decision: 1 repeats ... the other 8 only point to the decision")
+but never says records that neither link to nor name it were not searched, which is the clause. That is a real miss, not judge noise;
+run 2's message does state the boundary and its one FAIL vote on `turn-ends-waiting-with-one-question` is the known instability: the
+message ends "I'm waiting for your answer; I haven't changed that record yet." after one question, and the clause passes 2 of 3 votes.
+(b) run 3 used 19 of 20 turns, so (b) sits one turn from `max_turns` in runs 2 and 3 (19 each) and 18 in run 1; no run exhausted it. (b)
+has 5 of 6 clauses at PASS in every run besides these, and `question-omits-link-only-records` PASS x3 in all three runs. The case is
+at its bar on 2 of 3 runs at 1.0.
+
+### Live state
+
+Sha256 of every file under `~/.local/state/lore/` and `~/.config/lore/` (excluding `.git/`) at 12:35 before the first batch and 13:09
+after the last. `~/.config/lore/` did not change. 66 paths changed under `~/.local/state/lore/`, all another session's: levr vault
+records (39 paths, commit `ad1ea7ec` is the vault's latest), default-vault session notes (8), trailhead vault records about the tidy-followups
+work (12; the vault's latest commit is 10 minutes old and unrelated to any case), the publish worker's `publish/*` files (6) and
+`index.sqlite`. All four vaults are clean (`git status`). No changed file contains a fixture slug of the cases run (`thumbnails-render`,
+`set-the-shelf-hold`, `plan-saturday`: 0 files, `index.sqlite` excluded). No run wrote live state; I created nothing there. Four resumed-run
+transcripts under case `fixtures/` ((c), (f), and the two `borderline-answered-*` cases) were confirmed untracked (`git status`) and removed.
+
+### Budget
+
+Runner **14.432 USD**, judge **0.420 USD**, **14.852 USD** for this dispatch (limit 16.2). The slice was at about 25.8 before, so
+**about 40.65 USD** against the 42 ceiling. No rerun was used; no case was left unmeasured. Every one of the 22 cases was measured on
+`2a6e2f3e`.
