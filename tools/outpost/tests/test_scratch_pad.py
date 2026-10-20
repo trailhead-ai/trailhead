@@ -399,7 +399,7 @@ def test_each_problem_has_its_documented_wording(skill, tmp_path, state):
 
     assert proc.stderr.splitlines() == [
         'scratch-pad: questions[0].options[1]: no "cost" — every option states what it costs',
-        'scratch-pad: questions[1].options[1]: unknown key "costs" — allowed: name, cost, pick, layout',
+        'scratch-pad: questions[1].options[1]: unknown key "costs" — allowed: name, cost, pick, layout, flow',
         'scratch-pad: questions[2]: no option has "pick": true — mark the session\'s own pick',
     ]
 
@@ -1031,3 +1031,62 @@ def test_write_rounds_js_lists_several_titles(tmp_path):
     mod._write_rounds_js(tmp_path, ["One", 'Two "quoted"', "Té"])
     assert _load_rounds_js(target) == [{"title": "One"}, {"title": 'Two "quoted"'}, {"title": "Té"}]
     assert target.read_bytes().isascii()
+
+
+FLOW = "flowchart LR\n a --> b"
+
+
+def _flow_option(**over):
+    option = {"name": "Flowed", "cost": "c", "pick": False, "flow": FLOW}
+    option.update(over)
+    return option
+
+
+def _check_with(mod, option):
+    data = _round(1)
+    data["questions"][0]["options"] = [{"name": "P", "cost": "c", "pick": True, "layout": {"rule": True}}, option]
+    return mod.check_round(data)
+
+
+def test_a_flow_option_with_no_layout_has_no_problems():
+    assert _check_with(_load_module(), _flow_option()) == []
+
+
+def test_an_empty_flow_is_left_for_the_pen_to_judge():
+    assert _check_with(_load_module(), _flow_option(flow="")) == []
+
+
+def test_an_option_with_both_a_layout_and_a_flow_is_refused_once_naming_the_option():
+    got = _check_with(_load_module(), _flow_option(layout={"rule": True}))
+    assert got == [
+        'scratch-pad: questions[0].options[1]: has both "layout" and "flow" — give it either a layout or a flow'
+    ]
+
+
+def test_an_option_with_neither_a_layout_nor_a_flow_is_refused_once_naming_the_option():
+    option = _flow_option()
+    del option["flow"]
+    got = _check_with(_load_module(), option)
+    assert got == ['scratch-pad: questions[0].options[1]: no "layout" or "flow" — give it either a layout or a flow']
+
+
+@pytest.mark.parametrize("value", [42, None, ["a"]])
+def test_a_flow_that_is_not_a_string_is_refused(value):
+    got = _check_with(_load_module(), _flow_option(flow=value))
+    assert got == ["scratch-pad: questions[0].options[1].flow: must be a string"]
+
+
+def test_a_flow_survives_round_js_byte_for_byte_beside_a_layout_option(skill, tmp_path, state):
+    data = _round(1)
+    flow = "flowchart LR\n a[\"</script> caf\u00e9 \u2028 \U0001f600\"] --> b"
+    data["questions"][0]["options"][1] = _flow_option(name="F", flow=flow)
+    rp = _write_round(tmp_path, data)
+
+    assert _run(skill, tmp_path, state, "p", rp).returncode == 0
+
+    js = state / "pads" / "p" / "round-1" / "round.js"
+    got = _load_round_js(js)
+    assert got["questions"][0]["options"][1]["flow"] == flow
+    assert got["questions"][0]["options"][0]["layout"] == {"rule": True}
+    assert "layout" not in got["questions"][0]["options"][1]
+    assert js.read_text(encoding="utf-8").isascii()

@@ -235,7 +235,7 @@
     if (segments.length > 7) segments = ["…"].concat(segments.slice(-5));
     var box = document.createElement("div");
     box.className = "pen-message";
-    ["Can't draw this layout:", segments.join(" › "), reason].forEach(function (line) {
+    ["Can't draw this " + (state.flow ? "flow" : "layout") + ":", segments.join(" › "), reason].forEach(function (line) {
       var p = document.createElement("p");
       p.textContent = line;
       box.appendChild(p);
@@ -268,9 +268,19 @@
     }
   }
 
-  function prepare(drawing, layout, seed) {
-    var state = { drawing: drawing, layout: layout, seed: seed, dead: false, items: [], svg: null, observer: null };
+  function buildFlow(flow, ctx) {
+    throw new Error("flows are not drawn yet.");
+  }
+
+  function prepare(drawing, option, seed) {
+    var isFlow = !!option && typeof option === "object" && Object.prototype.hasOwnProperty.call(option, "flow");
+    var layout = option ? (isFlow ? option.flow : option.layout) : undefined;
+    var state = { drawing: drawing, layout: layout, flow: isFlow, seed: seed, dead: false, items: [], svg: null, observer: null };
     guarded(state, function () {
+      if (isFlow) {
+        buildFlow(layout, { items: state.items });
+        return;
+      }
       var ctx = { items: state.items };
       var root = document.createElement("div");
       root.className = "pen-layout";
@@ -297,7 +307,7 @@
       var drawing = drawings[i];
       var oIndex = Number(drawing.getAttribute("data-option"));
       var option = question && question.options ? question.options[oIndex] : undefined;
-      states.push(prepare(drawing, option ? option.layout : undefined, seedFor(qIndex, oIndex)));
+      states.push(prepare(drawing, option, seedFor(qIndex, oIndex)));
     }
     var ready = document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve();
     return ready.catch(function () {}).then(function () {
