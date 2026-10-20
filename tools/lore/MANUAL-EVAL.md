@@ -1500,3 +1500,227 @@ condition, written before any arm was run.
 | Date | Arm | Prose under test | Runs | Result | Notes |
 |------|-----|------------------|------|--------|-------|
 ```
+
+## Cases: the dependents of a correction and the dropped part of a criterion (runner format)
+
+`plugins/lore/evals/{dependents-restating-a-ruled-fix-are-proposed-in-one-question, cited-everywhere-decision-proposes-only-records-that-restate-it, yes-to-dependent-fixes-corrects-restating-records-only, drop-part-of-a-criterion-with-no-new-record, defer-a-dropped-criterion-part-when-asked, no-to-dependent-fixes-leaves-every-record-as-it-was}/`
+— `expected.md` for all six pre-registered in `31f84ad1`; `case.yaml` (schema 1.1, `runs: 3`), `prompt.md`, `graders/*.md`
+(one per `expected.md` clause) and a seeded `fixtures/` in `1b81de7b`; one grader wording fix in `8a4b7c14` (below). The
+two answer cases (c) and (f) share one `fixtures/history.jsonl`, rebuilt from real `lore` output by
+`evals/yes-to-dependent-fixes-corrects-restating-records-only/fixtures/build_history.py` (it runs `seed-eval-vault` on the
+case's `records.json` with the corrected decision put back to the old figure, runs each command the seeded turns name,
+captures its output, and writes the same file into both cases; it refuses if the two `records.json` differ). Rerun it
+whenever a record body in `records.json` changes.
+
+**Under test:** AC28 and AC29 in (a), (b), (c), (f) (a restating dependent is proposed in one batched question and fixed on
+a yes; a record that only links is left alone; a no changes nothing); AC32 in (d) and (e) (the part a narrowed criterion
+drops makes no new record unless the operator asks for a task). The baseline arm is the current `correct` prose at HEAD
+`8a4b7c14`; `tools/lore/plugins/lore/skills/correct/SKILL.md` is unchanged on this branch (it has no dependents step and no
+rule about the dropped part). The treatment arm is a later task and reruns these exact cases with these exact graders.
+
+### Read this first: the runner is 2.1.303, not 2.1.304
+
+Every run below used `~/.local/share/claude/versions/2.1.303`, not the current `claude` (2.1.304). On 2.1.304 on this
+machine the sandboxed shell cannot write inside the run's temp home: the agent's own Bash tool printed
+`/tmp/claude-eval-<id>/tmp/claude-1000/cwd-xxxx: Read-only file system`, and every `lore record amend` failed with
+`error: record amend failed: unable to open database file`, so the vault was never changed. Evidence: case (d), one run
+each, same command, same fixture: 2.1.304 scored 0.67 twice (with and without `--keep-temp`; the agent could only
+read) and 2.1.303 scored 1.00 (the amend landed). The smokes of (a) and (b) on 2.1.304 hit the same error. That is four
+invalid 2.1.304 runs (0.8040 + 0.2155 USD, counted in the budget below). The treatment task must use the same binary for its A/B to be comparable, or a 2.1.304 that can write must
+be shown to score the same cases the same way first.
+
+### Batch command
+
+One invocation per case; `$out` a fresh `mktemp -d` outside the repo, never committed; `<case>` the case name:
+
+```sh
+out=$(mktemp -d)
+env -u LORE_CONFIG_DIR -u LORE_STATE_DIR -u XDG_CONFIG_HOME -u XDG_STATE_HOME \
+  ~/.local/share/claude/versions/2.1.303 plugin eval tools/lore/plugins/lore --case '<case>' --scaffold \
+  --allow-tools 'Bash(./lore *)' --ablation none --trust-plugin \
+  --runs 3 --model claude-opus-5-5 --json "$out/run.json" --max-cost-usd 1.5 \
+  --output-dir "$out" --no-publish --keep-temp
+```
+
+`--keep-temp` keeps each run's sandbox, trace included (`/tmp/claude-eval-<id>/out/trace.jsonl`); I also copied every trace
+while its run was live with a 0.3 s loop. Both copies are outside the repo and temporary: the loop's copies are under
+`/tmp/flipwork/traces/base/` named by sandbox id. Every `llm` verdict below was hand-checked against a trace that survived.
+A resumed run (cases (c), (f)) writes its transcript beside the seeded history, `fixtures/<seeded sessionId>.jsonl`;
+delete those files before committing (I did; the invocation counts below come from the copied traces instead).
+
+### Fixture checks (before any run)
+
+- No record body, `history.jsonl` or prompt contains `$(` (`grep -c '\$(' */fixtures/records.json */fixtures/history.jsonl`
+  over the six cases: 0 in each). The only `$(` in a fixtures directory is the unchanged `scaffold.sh` template, as in every
+  existing case.
+- No record body contains a line reading `EOF` (checked with a script over every body). `history.jsonl` holds one heredoc
+  inside the recorded amend command, `... <<'EOF'\n...\nEOF`, which is one JSON string and no line of the file.
+- Link-only bodies in (b): a grep of the seven bodies for `48|72|hour|day|two|three|second|week|minute|daily|once|twice`
+  returns one word, "second" in the title of the open task ("second fridge"), an ordinal and not a duration. Only the
+  paraphrasing record carries a duration ("two days").
+- Three-word shingle check of every record title and body, every prompt and the seeded turns' prose and commands against the
+  whole of `correct/SKILL.md` (lowercased word tokens, all 3-grams of each, intersected):
+
+  ```sh
+  cd tools/lore/plugins/lore && python3 shingle.py   # the script I ran, kept outside the repo
+  ```
+
+  | Case | Shared 3-grams |
+  |---|---|
+  | (a) dependents-restating | 0 |
+  | (b) cited-everywhere | 0 |
+  | (c) yes-to-dependent, (f) no-to-dependent (same history) | 4: `lore record amend`, `lore record show`, `initiated by operator`, `by operator base` (CLI syntax of the commands in the seeded turns; no prose) |
+  | (d) drop-part | 0 |
+  | (e) defer-a-dropped | 0 |
+
+  I first reworded my own seeded turn, which had copied the skill's amend closing line ("its change history can restore the
+  prior body"), and three phrases in (b)'s link-only bodies, to reach these counts.
+
+### Smoke runs (unscored)
+
+One run per case through the batch command, `--runs 1`. Every case ran end to end with no error on 2.1.303:
+
+| Case | Score | Notes |
+|---|---|---|
+| (a) | 0.71 | amended D1, asked no dependents question |
+| (b) | 0.67, then 0.58 | second run after the grader wording fix; amended the decision, found no dependents |
+| (c) | 0.92 | trace `session_id` equals the seeded `sessionId`; the agent amended D2 and updated A1 without re-asking |
+| (d) | 1.00 | the first smoke of the cases (2.1.304) could not write; this is the 2.1.303 run |
+| (e) | 1.00 | `tool_used` passed on a real run: one `record create` call carrying all four terms |
+| (f) | 1.00 | one turn, no tool call |
+
+### Grader flip check (unscored)
+
+Method: a throwaway local clone of `1b81de7b` under `/tmp/flipclone/repo` (the agent's `./lore` points at the CLI inside the
+plugin tree it was seeded from, and the sandbox hides any other path), a scratch eval dir `flipevals/` in its plugin
+holding, per case and outcome, the real `graders/` and `fixtures/` and a prompt that replaces the task with the exact
+commands of a hand-scripted outcome (revisions for `--base` read from a seeded vault; the final message given word for word),
+run with `--eval-dir flipevals` and `--model claude-haiku-4-5` (the scripted replay needs no judgement; the `llm` judge is
+the runner's default). 25 outcomes, 33 scripted runs counting the repeats after the (b) wording fix and the (d) rework; the 2.1.304 binary was not used. Each case has the hand-written correct
+outcome (C) and the wrong outcomes below; "fails on" lists the outcomes where the grader failed.
+
+Outcomes. (a): Wn writes nothing and says "Done"; Wx rewrites the decision to one sentence, amends D2 and T1, creates a task
+and lists D2 and T1 in a "2 restate" message. (b): Wn as (a); Wx rewrites the decision, amends P and one link-only task,
+creates a task and lists nine records; Wm amends the decision, P and one link-only task and creates nothing. (c): Wn writes
+nothing; Wx amends D2 as operator with a blockquote note, "(was 4 days)" and both original sentences cut, rewrites A1,
+amends T1, creates a task. (f): Wx amends D2 and T1, updates A1, creates a task and a session candidate. (d): Wn nothing;
+Wy1 removes the AC2 line; Wy2 rewords AC1 and AC3 and drops the objectives; Wz creates a ready successor spec and supersedes
+the original. (e): We1 amends only; We2 adds an unlinked task; We3 a linked task that does not name the text message; We4
+two valid creates; Wr1 removes AC2 plus a task; Wr2 rewords AC1 and AC3 plus a task; Wx a task, a session candidate, and a
+successor spec that supersedes the unamended original.
+
+| Case | Correct (C) | Grader fails on |
+|---|---|---|
+| (a) | 1.00, 14 of 14 | `d1-corrected-text-present`, `d1-wrong-text-gone`, `d1-change-history-entry`, `question-lists-d2-with-old-and-new-text`: Wn. `d1-unrelated-text-kept`, `d2-text-kept`, `d2-no-change-history`, `t1-text-kept`, `t1-no-change-history`, `no-new-record`, `question-omits-t1`: Wx. `coverage-count-stated`, `search-boundary-stated`, `turn-ends-waiting-with-one-question`: Wn and Wx |
+| (b) | 1.00, 12 of 12 (after `8a4b7c14`) | `c0-corrected-text-present`, `c0-wrong-text-gone`, `c0-change-history-entry`: Wn. `c0-unrelated-text-kept`, `no-new-record`: Wx. `p-text-kept`: Wx, Wm. `question-omits-link-only-records`: Wx (Wm; Wn split 1 PASS 2 FAIL). `question-lists-p-with-old-and-new-text`, `coverage-count-stated`, `search-boundary-stated`, `turn-ends-waiting-with-one-question`: Wn, Wm, Wx. **`only-the-corrected-decision-changed`: Wx only, not Wm (U4, below)** |
+| (c) | 1.00, 13 of 13 | `d2-corrected-text-present`, `d2-change-history-entry`, `a1-corrected-text-present`, `a1-wrong-text-gone`: Wn. `d2-wrong-text-gone`, `d2-initiated-by-agent`: Wn, Wx. `d2-unrelated-text-kept-1`, `d2-unrelated-text-kept-2`, `d2-no-note-added`, `a1-unrelated-text-kept`, `t1-body-unchanged`, `t1-no-change-history`, `no-new-record`: Wx |
+| (f) | 1.00, 6 of 6 | all six: Wx (0.00) |
+| (d) | 1.00, 9 of 9 | `corrected-text-present`: Wn, Wy1, Wz. `wrong-text-gone`, `change-history-entry`: Wn, Wz. `criterion-kept-in-place`: Wy1. `unrelated-text-kept-1`, `-2`, `-3`: Wy2. `status-unchanged`, `no-new-record`: Wz |
+| (e) | 1.00, 11 of 11 | `corrected-text-present`: Wr1, Wx. `wrong-text-gone`, `change-history-entry`, `status-unchanged`, `no-session-note`, `no-successor-spec`: Wx. `criterion-kept-in-place`: Wr1. `unrelated-text-kept-1`, `-2`: Wr2. `task-created`: We1. `deferral-task-call-names-dropped-part-and-spec`: We1 (0 matching calls), We2 (0), We3 (0), We4 (2, over `max: 1`) |
+
+**U4, the `tool_used` grader in (e): VALIDATED on 2.1.303.** `input_match` is a JS regex over the JSON of the whole tool
+input (the lookahead over a heredoc body with `\n` escapes matched), `min`/`max` count matching calls: it passed the correct
+scripted outcome and three real baseline runs with exactly one matching call, and failed the missing, unlinked,
+not-naming and doubled calls. It was not run on 2.1.304; its schema there was read from the binary and matches.
+
+**U4, `only-the-corrected-decision-changed` in (b): INVALIDATED. The baseline of (b) was not run.** The grader's target
+`files` is, in the runner, the sorted list of paths present after the run and absent before it (`hg(before, after)` over a
+directory walk of the run's cwd): created files only, no modification. Wx (a created task) fails it; Wm, which amended P
+and a link-only task in place and created nothing, passes it. So the clause as pre-registered, "nothing other than the named
+decision was created or changed", cannot see an edit to any of the eight link-only records, and the churn it stands in for
+(Wb2: appending a note to each of the eight) would score as clean. The other graders catch only P's own rewrite. Spelling
+cannot fix this, and the clause is not mine to change, so (b) has a smoke run and a flip check but no baseline. The cheapest
+honest repair for the controller is per-record `regex` graders (a body and a sidecar for each of the eight, as `expected.md`
+first costed it), or a `llm` grader over a `source: file` target the run would have to write.
+
+One grader wording change, `8a4b7c14` (`git diff 1b81de7b..8a4b7c14`, two lines), before any baseline: the judge failed the
+correct outcome on `question-omits-link-only-records` (3 of 3 FAIL) when the criterion described the eight records by
+category; the criterion now lists their ids. The clause is unchanged. The (b) smoke batch was rerun after it.
+
+### Baseline (current prose, HEAD `8a4b7c14`)
+
+Every per-run score. Errors: none in any run. A run passes only at 1.0; a case passes at 2 of 3 runs. `costUsd` is the
+runner's per-run figure, judge cost excluded and listed beside it. "Skill" is whether the run called `lore:correct`, read from
+the copied traces.
+
+| Case | Run | Score | Turns | costUsd | Judge cost | Failed graders | Skill |
+|---|---|---|---|---|---|---|---|
+| (a) dependents-restating | 1 | 0.71 | 5 | 0.1859 | 0.0224 | `coverage-count-stated`, `question-lists-d2-with-old-and-new-text`, `search-boundary-stated`, `turn-ends-waiting-with-one-question` | yes |
+| (a) | 2 | 0.71 | 6 | 0.2162 | 0.0321 | same four | yes |
+| (a) | 3 | 0.71 | 6 | 0.2228 | 0.0318 | same four | yes |
+| (c) yes-to-dependent | 1 | 0.92 | 5 | 0.1884 | 0 | `d2-initiated-by-agent` | no |
+| (c) | 2 | 0.92 | 4 | 0.1753 | 0 | `d2-initiated-by-agent` | no |
+| (c) | 3 | 0.92 | 7 | 0.2048 | 0 | `d2-initiated-by-agent` | no |
+| (d) drop-part | 1 | 1.00 | 8 | 0.2039 | 0 | none | yes |
+| (d) | 2 | 1.00 | 6 | 0.1848 | 0 | none | yes |
+| (d) | 3 | 1.00 | 8 | 0.2052 | 0 | none | yes |
+| (e) defer-a-dropped | 1 | 1.00 | 9 | 0.2209 | 0 | none | yes |
+| (e) | 2 | 1.00 | 7 | 0.2006 | 0 | none | yes |
+| (e) | 3 | 1.00 | 7 | 0.2007 | 0 | none | yes |
+| (f) no-to-dependent | 1 | 1.00 | 1 | 0.1207 | 0 | none | no |
+| (f) | 2 | 1.00 | 1 | 0.1194 | 0 | none | no |
+| (f) | 3 | 1.00 | 1 | 0.1204 | 0 | none | no |
+| (b) cited-everywhere | not run | | | | | U4 invalidated for `only-the-corrected-decision-changed` | |
+
+Batches: (a) 0.6248, (c) 0.5685, (d) 0.5939, (e) 0.6222, (f) 0.3606 USD. The five ran at the same time, one process each.
+
+- **(a): RED, 0 of 3 at 1.0.** All three amended the decision in place and none put the dependents question. Runs 1 and 3
+  never mention D2. Run 2 searched, found D2 and asked "Do you want me to update that one to 8 minutes as well?", quoting
+  the old sentence but not the new one, with no coverage count, no search boundary and no waiting line. I read the final
+  message of all three and agree with all twelve `llm` FAILs, including run 2's `question-lists-d2-with-old-and-new-text`
+  (the new sentence is not given) and `turn-ends-waiting-with-one-question` (the message ends on the question, with no
+  waiting line). `question-omits-t1` passed in all three: T1 is not mentioned anywhere. The unscored miss: none; every
+  departure is a failed grader.
+- **(c): RED, 0 of 3 at 1.0, on one grader.** Each run amended D2 and plain-updated A1 correctly and left T1 alone (12 of 13
+  graders pass): the seeded yes is carried out. Each amend used `--initiated-by operator`, not
+  `agent`, which the dependents step asks for. None called `lore:correct`.
+- **(d): GREEN, 3 of 3. (e): GREEN, 3 of 3.** See U3. (e)'s three runs each made exactly one `record create --kind task ...
+  --related spec=let-members-collect-holds` call whose body names the text message part.
+- **(f): GREEN, 3 of 3**, in one turn each with no tool call: a seeded "No." is carried out by saying nothing is changed.
+  The case does not discriminate between the baseline and a prose that does the same.
+
+**U3 (do (d) and (e) already pass on current prose?): yes, both.** (d) 3 of 3 at 1.0 and (e) 3 of 3 at 1.0 on the baseline
+prose. In all six runs `lore:correct` was invoked, the spec was amended in place with its numbers kept, and no run made a
+task for the dropped part in (d) or a second record in (e). That is the measurement; it is not a fix. The AC32 prose line
+still has no case that is red on the baseline, so these two cases can only show that the new line does not break what the
+agent already does. (d)'s closing message in all three runs does not say the dropped part is untracked, which the added rule
+asks for and no grader reads.
+
+### Live state
+
+Sha256 of every file under `~/.local/state/lore/` and `~/.config/lore/` (excluding `.git/`) at 10:19:25 before the first
+batch and 10:37:43 after the last, covering every batch above. `~/.config/lore/` did not change. Under
+`~/.local/state/lore/` 28 paths changed or appeared, all attributed to another session's activity, none to a run: no file
+there contains any of the 23 fixture and scripted-outcome titles (grepped, `index.sqlite` excluded: 0 files), and the three
+vault working trees are clean.
+
+| Path | Source |
+|---|---|
+| levr `task/cap-total-decoded-audio-...`, `task/the-archive-treats-a-provisional-or-skipped-chunk-file-...`, `task/a-phone-signs-in-to-an-andromeda-...`, `task/the-recording-ledger-s-writers-...` | levr `846efd31` (10:21:27), `83dbfe74` (10:25:54), `808a27f1` (10:32:18), `39fa04ca` (10:34:37), other sessions' publishes |
+| trailhead `task/add-the-summary-rule-...`, `task/open-the-build-closing-report-...`, `task/summaries-and-closing-reports-...` | trailhead `60c446f4` (10:27:41), another session's publish |
+| trailhead `task/a-flow-written-as-mermaid-text-...`, `task/an-arrow-that-closes-a-loop-...` | trailhead `78e0fad9` (10:33:22), `00b10b9b` (10:36:13), other sessions' publishes |
+| trailhead `task/flows-draw-dashed-and-labelled-arrows-....json` | trailhead `67792a91` (10:19:15): the vault commit landed ten seconds before my first snapshot finished and the publish worker rewrote the sidecar at 10:19:31, inside the window; the tree is clean, so the content is the committed one |
+| `vaults/default/session/27d71a20-....{json,md}`, `373a3f7a-....{json,md}` | default-vault commits `a17b4cea` (10:32:18) and `8a375ba1` (10:36:23): other sessions' candidate logs |
+| `publish/levr-5a2535166072.{json (new),log,request}`, `publish/trailhead-9a77dde272e2.{log,request}` | the live publish worker, triggered by the commits above |
+| `index.sqlite` | derived search index, rewritten by any live lore command |
+
+No run wrote live state: each ran in a temp `HOME` under `/tmp/claude-eval-*`. One self-inflicted exception, reverted:
+while diagnosing the 2.1.304 sandbox I created and removed an empty `~/.local/state/lore/.probe` from my own shell (a write
+test); it is not in the snapshot diff.
+
+### Budget
+
+Runner `costUsd` for this task, judge cost excluded (0.556 USD more): **6.72 USD of this task's 9 USD cap**, no
+`--max-cost-usd` stop reached.
+
+| Step | USD |
+|---|---|
+| Four invalid runs on 2.1.304 (three smokes, one diagnostic) | 1.0195 |
+| Smokes on 2.1.303 (six cases) | 1.1974 |
+| (b) smoke rerun after the grader wording fix | 0.2509 |
+| Flip check (33 scripted runs on haiku: 25 outcomes, 8 repeats) | 1.4817 |
+| Baseline (15 runs) | 2.7700 |
+| Total | 6.7196 (summed over every `run.json`) |
+
+The parent's 25 USD ceiling is not touched by anything else here. The per-case rerun allowance was not used; (b) is
+unmeasured, so its three-run baseline (about 0.9 USD) is the first thing to spend when its grader is repaired.
