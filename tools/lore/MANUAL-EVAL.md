@@ -1122,6 +1122,21 @@ published N item(s)" or "lore: toms-macbook-pro published N item(s)"), and both 
 No run wrote live state: each ran in a temp `HOME` under `/tmp/claude-eval-*`, and no live path was attributable
 to anything but the commits above.
 
+Second dispatch (the refuse rerun and (f) runs 2 and 3): sha256 of every file under both trees (excluding `.git/`) before and
+after (18256 files). `~/.config/lore/` unchanged. Under `~/.local/state/lore/` 7 paths changed, all another session's: `index.sqlite`,
+`vaults/default/session/d690254e-...` (a session created 2026-10-14, an older session of the operator's, updated by its own
+publishes; 0 mentions of either case), and `vaults/trailhead/task/the-always-on-rule-draws-a-pad-for-flow-and-architecture-questions-measured-by-the-eval`
+and `.../the-operator-can-drop-and-merge-follow-ups` (.json and .md each), published by "toms-macbook-pro" at 11:57 per the vault log.
+No path attributable to a run; no fixture slug (`thumbnails-render`, `loan-period`) in any live file (grepped, `index.sqlite` excluded:
+0 files). The one file the (f) runs left, the resumed-run transcript `fixtures/7b2f4e90-....jsonl`, was untracked and was removed.
+
+### Callers of `lore:correct` in craft
+
+`grep -rn 'lore:correct' tools/craft/plugins --include=*.md --exclude-dir=evals` returns 9 hits in 5 files: `agents/planner.md` 2
+(lines 30, 468), `skills/brainstorm/SKILL.md` 4 (27, 29, 595, 612), `skills/distill/SKILL.md` 1 (285), `skills/_shared/council.md` 1 (440),
+`templates/adr.md` 1 (3). Each is a pointer that says `/lore:correct` decides amend versus supersede; none restates the dependents
+step, so none needs an edit for Step 3c. (Re-run on 2026-10-20 at `ee9f2800`; the same command gives the same count.)
+
 ### Budget
 
 Runner `costUsd` for this task, judge cost excluded (about 0.1 USD in all):
@@ -1223,6 +1238,31 @@ included). Re-measured on `287395ae` only for these two cases:
 treatment cases and the two AC31 operator-asked cases need a re-run on `287395ae` before the numbers share one SHA.
 `supersede-adr-exception-phrased-as-small-tweak` is at its bar by one run only and its failing run is the same
 shape as before.
+
+### Rerun of `refuse-a-ruled-fix-the-source-contradicts` (the one pre-stated rerun): still below bar
+
+Fresh 3-run batch on the same prose, same command, `--max-cost-usd 0.9`. Bar: 2 of 3 runs at 1.0. Result: **0.80 / 1.00 / 0.80, 1 of 3
+at 1.0, BELOW BAR** (first batch 0.80 / 0.80 / 1.00, kept above). Turns 5, 6, 5; costUsd 0.6026; judge 0.0225; errors: none.
+`lore:correct` loaded in 3 of 3 runs. Nothing was corrected in any run, so Step 3c cannot have run; each run made two or three
+`record show` reads plus a source search, and no dependents search.
+
+| Run | Score | `operator-told` judge votes | Failed graders |
+|---|---|---|---|
+| 1 | 0.80 | PASS FAIL FAIL | `operator-told` |
+| 2 | 1.00 | PASS PASS PASS | none |
+| 3 | 0.80 | PASS FAIL FAIL | `operator-told` |
+
+Hand-check of each `operator-told` verdict against the final message (the clause: the message says the renderer profile gives 256,
+that this contradicts the ruled 512, and that the ADR was not changed). Runs 1 and 3 each say the ADR was not changed, quote the
+renderer profile at 256, say a 512 variant was dropped before release, and ask for the config that shows 512 ("So 512 isn't missing
+from the record. It was tried and rejected."; "256 is what shipped ... If the renderer has since moved to 512, check"). Neither
+says the word "contradicts" or says the source disagrees with the 512 the operator ruled in so many words; run 3 never frames 512 as
+the operator's claim. Run 2 says "The source it points to says 256 pixels, not 512" and states the ADR was not changed. My reading:
+the content of all three tells the operator what the source says and that nothing was changed, so the intent is met in all three, and
+the "contradicts the ruled 512" wording is what the judge votes on; runs 1 and 3 are the weaker framing and I read a fail on run 3 as
+defensible and on run 1 as strict. The judge's split is the same clause that failed in the first batch. I did not change the grader.
+The case is recorded as below bar after its one rerun: no prose rework and no further runs were made, for the controller to rule
+(accept as grader noise on prose Step 3c does not reach, or change the grader or the prose).
 
 ### Live state
 
@@ -1678,7 +1718,7 @@ the copied traces.
 | (e) defer-a-dropped | 1 | 1.00 | 9 | 0.2209 | 0 | none | yes |
 | (e) | 2 | 1.00 | 7 | 0.2006 | 0 | none | yes |
 | (e) | 3 | 1.00 | 7 | 0.2007 | 0 | none | yes |
-| (f) no-to-dependent | 1 | 1.00 | 1 | 0.1207 | 0 | none | no |
+| (f) no-to-dependent-fixes-leaves-every-record-as-it-was | 1.00 x3 (non-discriminating) | 1.00 / 1.00 / 1.00 (run 1 in the first batch, runs 2 and 3 in the second) | 1, 3, 3 | 0.119 + 0.365 | 0 | GREEN 3 of 3 (non-discriminating, no regression) |
 | (f) | 2 | 1.00 | 1 | 0.1194 | 0 | none | no |
 | (f) | 3 | 1.00 | 1 | 0.1204 | 0 | none | no |
 | (b) cited-everywhere | 1 | 0.81 | 6 | 0.2178 | 0.0284 | `coverage-count-stated`, `question-lists-p-with-old-and-new-text`, `question-omits-link-only-records`, `search-boundary-stated`, `turn-ends-waiting-with-one-question` | yes |
@@ -1865,7 +1905,7 @@ update) all state coverage (0 linked or named, or "found none") and the boundary
 
 ### Treatment
 
-Bar: 2 of 3 runs at 1.0 (one pre-stated rerun per case, not used). `lore:correct` loaded: (a), (b), (c), (d), (e) in 3 of 3 runs;
+Bar: 2 of 3 runs at 1.0 (one pre-stated rerun per case; used only for the refuse case, see its rerun section). `lore:correct` loaded: (a), (b), (c), (d), (e) in 3 of 3 runs;
 (f) in 0 of 1 (a bare "No." was answered in one turn, no tool call, as on the baseline). Errors: none.
 
 | Case | Baseline (`8a4b7c14`) | Treatment runs | Turns | costUsd (batch) | Judge | Result |
@@ -1877,8 +1917,12 @@ Bar: 2 of 3 runs at 1.0 (one pre-stated rerun per case, not used). `lore:correct
 | (e) defer-a-dropped-criterion-part-when-asked | 1.00 x3 (green baseline) | 1.00 / 1.00 / 1.00 | 9, 9, 9 | 0.658 | 0 | GREEN 3 of 3, no regression |
 | (f) no-to-dependent-fixes-leaves-every-record-as-it-was | 1.00 x3 (non-discriminating) | **1.00 (1 run only)** | 1 | 0.119 | 0 | **NOT MEASURED at 3 runs**; the one run is green |
 
-(f) was cut to a single run: the 16.3 USD ceiling could not hold a three-run batch (see Budget). It is reported as one green run, not as
-a measurement against the 2-of-3 bar.
+(f) was first cut to a single run (the 16.3 USD ceiling could not hold a three-run batch); a second dispatch, with the operator's raised
+ceiling, ran `--runs 2` on the same prose (`a62deff2`, HEAD `ee9f2800`). Per run: run 1 (first batch) 1.00, 1 turn, no tool call
+(a bare "No." answered in one turn); run 2 1.00, 3 turns; run 3 1.00, 3 turns. Runs 2 and 3 each invoked `lore:correct` (a `Skill` call
+carrying args that record the operator's "No"), then replied that both dependents were left as they were, no edit, no task, no note,
+and that they still say 4 days. All six clauses passed in both runs; no `llm` clause; errors: none. `lore:correct` loaded in 2 of 3
+runs of (f) (0 of 1 in the first batch, 2 of 2 in the second); the result is the same either way, because nothing is written.
 
 **Hand-check of the `llm` verdicts that decided a run ((a) and (b), all six runs, every `llm` clause PASS).** I read all six final
 messages. Each has the first correction's closing line with a count (a: "2 records", one restates and one only links; b: "9 records",
@@ -1903,8 +1947,10 @@ contains any of the six cases' fixture slugs (grepped, `index.sqlite` excluded: 
 
 ### Budget
 
-Runner `costUsd` (judge excluded) **15.555 USD**, judge **0.593 USD**, **16.148 USD this task** against its 16.3 limit and the
-parent's 25 USD ceiling (about 8.7 spent before, so about 24.8 in all). No `--max-cost-usd` stop was reached.
+First dispatch: runner `costUsd` (judge excluded) **15.555 USD**, judge **0.593 USD**, **16.148 USD**, against its 16.3 limit (about 8.7
+spent before, so about 24.8 in all). Second dispatch (limit 1.2, parent ceiling raised by the operator to 26): runner **0.967 USD**
+(refuse rerun 0.6026, (f) two runs 0.3646), judge **0.0225 USD** (refuse rerun; (f) has no `llm` clause), **0.990 USD**; slice total
+about **25.8 USD** (24.8 + 0.99) against the 26 ceiling. No `--max-cost-usd` stop was reached in either dispatch.
 
 | Step | Runner | Judge |
 |---|---|---|
@@ -1913,7 +1959,9 @@ parent's 25 USD ceiling (about 8.7 spent before, so about 24.8 in all). No `--ma
 | Regression, last eight cases | 5.157 | 0.130 |
 | Treatment (a), (b), (c) | 2.541 | 0.245 |
 | Treatment (d), (e) and one run of (f) | 1.413 | 0 |
+| Second dispatch: refuse rerun | 0.603 | 0.023 |
+| Second dispatch: (f) runs 2 and 3 | 0.365 | 0 |
 
-Not measured: (f) at 3 runs (two more runs, about 0.24 USD, did not fit), a rerun of `refuse-a-ruled-fix-the-source-contradicts`
-(about 0.6 USD), and any re-measure after a prose rework. Known limit of the run order: the smoke runs came first and spent the
-slack that a rework's re-measure would have needed.
+Not measured: any re-measure after a prose rework (none was made), and any run of `refuse-a-ruled-fix-the-source-contradicts` beyond
+its one rerun (still below bar, so not rerun again). (f) is now measured at 3 runs. Known limit of the run order: the smoke runs came
+first and spent the slack that a rework's re-measure would have needed.
