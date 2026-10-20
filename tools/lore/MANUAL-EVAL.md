@@ -1778,3 +1778,142 @@ batch (the five flip runs) and 10:58:46 after the last (the 3-run baseline). `~/
 Runner `costUsd`, judge cost excluded: flip check of the sixteen 0.3458 USD (five runs), baseline of (b) 0.8357 USD
 (0.2178 + 0.3074 + 0.3105), **1.1815 USD this dispatch** against its 2.2 USD limit, no `--max-cost-usd` stop reached.
 Judge cost of this dispatch: 0.0891 USD (baseline) + 0.1047 USD (flip).
+
+## Treatment of the dependents and dropped-part cases, and the correct regression, on one prose SHA (`a62deff2`)
+
+Measured prose: `tools/lore/plugins/lore/skills/correct/SKILL.md` at `a62deff2` (the baseline measured `8a4b7c14`, pre-edit prose,
+unchanged through `41361ca4`). Runner `~/.local/share/claude/versions/2.1.303`, model `claude-opus-5-5`, 2026-10-20, the batch
+command of the section above, one `--case` per invocation, `--runs 3`, `--keep-temp`, a fresh `mktemp -d` per batch outside the
+repo, `--max-cost-usd` on every batch (0.6 smokes, 1.0 regression, 1.0/1.2/0.8 for (a)/(b)/(c), 0.75/0.7/0.3 for (e)/(d)/(f)).
+No case file or grader was edited after the baseline (`git diff 41361ca4..a62deff2 --stat` is the one prose file).
+
+**What changed in the prose.** Step 3c (find the records that link to or name the corrected one with `related-<kind>:<name>`,
+a quoted `"<kind>/<name>"` text search and the corrected record's own links; restates versus links; one batched question; what
+counts as the answer; on yes, `--initiated-by agent` amends and plain updates; on no, nothing; never-proposed cases); the
+narrowing rule beside Step 2's narrowing paragraph; Step 4 rewritten (coverage in every amend or plain-update closing line, the
+order closing line, question, waiting line); one sentence added to the skill description so a bare "Yes" or "No" to the
+dependents question loads the skill. Step 1 and Step 3a point to Step 3c; Step 3b says a supersession skips it.
+
+**Red first (from the baseline section, not re-run).** On the pre-edit prose: (a) 0.71 x3 RED; (b) 0.81/0.85/0.85 RED; (c) 0.92 x3
+RED (only `d2-initiated-by-agent`); (d) 1.00 x3 and (e) 1.00 x3 GREEN, reported as green baselines and no-regression, never as
+fixes (U3); (f) 1.00 x3 GREEN, non-discriminating.
+
+### Leak check (before any treatment batch)
+
+Every three-word phrase of the six cases' `prompt.md`, `fixtures/records.json` and `fixtures/history.jsonl` (lower-cased, JSON `\n`
+read as a space) against the lines the prose edit **added** (`git diff -U0 HEAD` of `SKILL.md`, then again on the final text):
+0 hits for four cases; the same three hits for (c) and (f), which share `history.jsonl`: `lore record show`, `lore search '`,
+`lore search 'related`. They are the CLI commands the history's own turns ran, and the prose must name those commands (the
+proven lookups of U1; `lore record show` is Step 1's existing read). Every prose phrase that earlier matched the history's
+agent turns was reworded until only the three command literals were left. The word grep for `./lore`, `fixture` and `eval` over
+the added lines: 0 hits each. No example in the added prose is drawn from a fixture (the new text uses `<kind>/<name>` only).
+
+### Unscored smokes (the one deviation from "regression first")
+
+Budget sized for exactly one pass. To avoid a sixteen-case regression on prose that would then need a rework, I ran one run of
+(a), (b), (c) on a first draft of Step 3c, then one run of (a) and (b) on the reworked draft. Not scored, not counted as
+measurement; the batches below are all on the final prose. Smoke 1: (a) 0.86 (the agent mentioned the restating record but left
+it, saying the operator had asked for one decision only, and gave no waiting line), (b) 0.96 (a second "Yes or no?" question
+and no waiting statement), (c) 1.00. Rework: one sentence that the question is one sentence with one question mark above the
+list, the waiting line a statement, and that a ruling limited to one record limits what is written unasked, not whether the
+question is asked. Smoke 2: (a) 1.00, (b) 1.00. 1.46 USD runner, 0.16 judge.
+
+### Regression: the sixteen existing runner cases that exercise `correct`
+
+Found with `ls plugins/lore/evals/*/case.yaml` (22 cases) minus the six new ones; `bash-write-gate` and `carve-out-does-not-generalise`
+have no `case.yaml` and are not runner cases (they are arm-format cases about the write prohibition, not about `correct`). Bar: 2
+of 3 runs at 1.0 for all sixteen; no entry above states a different bar. `lore:correct` loaded (a `Skill` tool call naming it)
+in 3 of 3 runs of all sixteen. Errors: none in any run. Bash calls in the traces show Step 3c's two searches in every run
+where a correction landed and none where none did.
+
+| Case | Runs | costUsd (batch) | Judge | Failed graders | Bar |
+|---|---|---|---|---|---|
+| ask-before-amending-a-wrong-fact-noticed-while-answering | 1.00 / 1.00 / 1.00 | 0.559 | 0.019 | none | met |
+| ask-before-amending-when-a-record-claims-approval | 1.00 / 1.00 / 1.00 | 0.590 | 0.021 | none | met |
+| ask-once-on-a-borderline-correction-phrased-as-small | 1.00 / 1.00 / 1.00 | 0.548 | 0.018 | none | met |
+| ask-once-on-a-borderline-correction-phrased-as-maybe-new-record | 1.00 / 1.00 / 1.00 | 0.533 | 0.016 | none | met |
+| amend-wrong-fact-in-active-adr | 1.00 / 1.00 / 1.00 | 0.699 | 0 | none | met |
+| amend-drifted-mechanism-detail-phrased-as-serious-error | 1.00 / 1.00 / 1.00 | 0.672 | 0 | none | met |
+| amend-narrow-one-criterion-in-ready-spec | 1.00 / 1.00 / 1.00 | 0.636 | 0 | none | met |
+| apply-ruled-fix-to-draft-record | 1.00 / 1.00 / 1.00 | 0.609 | 0 | none | met |
+| apply-ruled-fix-to-frozen-record-phrased-as-note-it | 1.00 / 1.00 / 1.00 | 0.686 | 0 | none | met |
+| borderline-answered-yes-amends-in-place | 1.00 / 1.00 / 1.00 | 0.626 | 0 | none | met |
+| borderline-answered-no-routes-to-supersession | 1.00 / 1.00 / 1.00 | 0.660 | 0 | none | met |
+| supersede-reversed-decision | 1.00 / 1.00 / 1.00 | 0.671 | 0 | none | met |
+| supersede-spec-change-orphaning-an-objective-phrased-as-small-tweak | 1.00 / 1.00 / 1.00 | 0.707 | 0.022 | none | met |
+| track-unknown-fix-phrased-as-fix-it-now | 1.00 / 1.00 / 1.00 | 0.578 | 0.018 | none | met |
+| supersede-adr-exception-phrased-as-small-tweak | 0.89 / 1.00 / 1.00 | 0.765 | 0.049 | run 1: `spec-is-draft` (FAIL FAIL FAIL) | met at 2 of 3 |
+| refuse-a-ruled-fix-the-source-contradicts | 0.80 / 0.80 / 1.00 | 0.602 | 0.022 | runs 1, 2: `operator-told` (FAIL PASS FAIL; FAIL FAIL FAIL) | **BELOW BAR: 1 of 3** |
+
+**One case is below its bar and I did not rework the prose.** `refuse-a-ruled-fix-the-source-contradicts`: 1 of 3 runs at 1.0.
+Step 3c cannot have run: in all three runs nothing was corrected, the commands are two or three `record show` reads, and
+no dependents search appears. The failing clause is the `operator-told` judge. I read all three final messages. Each says the ADR
+was not changed, quotes the ADR and the renderer profile at 256 pixels, says 512 was a variant measured and dropped before release,
+and asks for the config or code that shows 512; none says in so many words that this "contradicts the 512 you ruled". Runs 1 and 2
+are the weaker wording (they speak of what the records say, run 3 says "if 512 really is what ships now, the ADR and the renderer
+profile are both wrong"). My reading is that the content meets the clause's intent in all three and the judge is strict on
+"contradicts", but a score is not changed by a hand reading. The same clause failed 3 of 3 judge votes in one run of the earlier
+`287395ae` re-measure (cited above), so it is judge-unstable on prose that does not reach it. I did not rerun it and I did not edit
+the grader: a rework of the prose would re-run every case a batch measured (the sixteen regression cases and the six treatment cases), and the budget below does not allow one. This is a below-bar result
+reported as such for the controller to rule on (rerun, accept as grader noise, or rework).
+
+**Hand-check of the other failed `llm` verdict.** `supersede-adr-exception...` run 1, `spec-is-draft` FAIL x3: the trace shows
+`./lore record create --kind spec --status draft ...`, the final message says it is a `draft`, no command moves a status. I read the
+grader's PASS condition as met, so I think the judge misread it; the run stays at 0.89 and the case is at its bar on the other two
+runs. No dependents question was asked in any regression run: the final messages of the six runs-with-a-landing cases (amend or plain
+update) all state coverage (0 linked or named, or "found none") and the boundary, and none asks a question.
+
+### Treatment
+
+Bar: 2 of 3 runs at 1.0 (one pre-stated rerun per case, not used). `lore:correct` loaded: (a), (b), (c), (d), (e) in 3 of 3 runs;
+(f) in 0 of 1 (a bare "No." was answered in one turn, no tool call, as on the baseline). Errors: none.
+
+| Case | Baseline (`8a4b7c14`) | Treatment runs | Turns | costUsd (batch) | Judge | Result |
+|---|---|---|---|---|---|---|
+| (a) dependents-restating-a-ruled-fix-are-proposed-in-one-question | 0.71 x3 RED | 1.00 / 1.00 / 1.00 | 10, 10, 10 | 0.818 | 0.121 | GREEN 3 of 3 |
+| (b) cited-everywhere-decision-proposes-only-records-that-restate-it | 0.81 / 0.85 / 0.85 RED | 1.00 / 1.00 / 1.00 | 18, 18, 18 | 1.051 | 0.123 | GREEN 3 of 3 |
+| (c) yes-to-dependent-fixes-corrects-restating-records-only | 0.92 x3 RED | 1.00 / 1.00 / 1.00 | 7, 7, 7 | 0.672 | 0 | GREEN 3 of 3 |
+| (d) drop-part-of-a-criterion-with-no-new-record | 1.00 x3 (green baseline) | 1.00 / 1.00 / 1.00 | 8, 8, 8 | 0.636 | 0 | GREEN 3 of 3, no regression |
+| (e) defer-a-dropped-criterion-part-when-asked | 1.00 x3 (green baseline) | 1.00 / 1.00 / 1.00 | 9, 9, 9 | 0.658 | 0 | GREEN 3 of 3, no regression |
+| (f) no-to-dependent-fixes-leaves-every-record-as-it-was | 1.00 x3 (non-discriminating) | **1.00 (1 run only)** | 1 | 0.119 | 0 | **NOT MEASURED at 3 runs**; the one run is green |
+
+(f) was cut to a single run: the 16.3 USD ceiling could not hold a three-run batch (see Budget). It is reported as one green run, not as
+a measurement against the 2-of-3 bar.
+
+**Hand-check of the `llm` verdicts that decided a run ((a) and (b), all six runs, every `llm` clause PASS).** I read all six final
+messages. Each has the first correction's closing line with a count (a: "2 records", one restates and one only links; b: "9 records",
+one restates, eight only link) and the boundary (records that neither link to nor name it were not searched), then one question
+naming the restating record with `frozen` and `last updated by eval@example.invalid` and the exact old and new sentence, then a
+last line that waits and says the record is unchanged; the link-only records are named at most as "only links, left alone". I agree
+with all the PASS verdicts. In (a), run 1 says "none name it in their text" and run 3 says "that's the only search I ran", which is a
+loose description of the three lookups, not a count error. Every file clause passed in all runs of (a), (b) and (c): in (c) D2 and the area
+were the only records written, and in (a) and (b) nothing but the corrected decision was. In (c) the
+amend was `--initiated-by agent` in 3 of 3 (the baseline's one failure). (d) and (e): the closing line says in all six runs that the
+email or text-message part is untracked and the change history keeps the old text and that a task can be created on request (d)
+or that the part is now tracked in the one task (e); no grader reads this.
+
+### Live state
+
+Sha256 of every file under `~/.local/state/lore/` and `~/.config/lore/` (excluding `.git/`) at 11:06:47 before the first batch and
+11:50:33 after the last. `~/.config/lore/` did not change. Under `~/.local/state/lore/`, every changed path is another session's:
+levr vault commits `bdd93648` .. `e41d4a2c` (11:19 to 11:49, "toms-macbook-pro" and "andromeda" publishes), trailhead commits
+`68be28e8` and `cb3cd019` (11:32, 11:34, "andromeda"), default-vault commits `25ac9d54`, `c3c637df`, `58a2fe72` (session notes), the
+publish worker's `publish/{levr,trailhead}-*` files and `index.sqlite`. The three vault trees are clean (`git status`). No file there
+contains any of the six cases' fixture slugs (grepped, `index.sqlite` excluded: 0 files). No run wrote live state.
+
+### Budget
+
+Runner `costUsd` (judge excluded) **15.555 USD**, judge **0.593 USD**, **16.148 USD this task** against its 16.3 limit and the
+parent's 25 USD ceiling (about 8.7 spent before, so about 24.8 in all). No `--max-cost-usd` stop was reached.
+
+| Step | Runner | Judge |
+|---|---|---|
+| Unscored smokes (5 runs) | 1.460 | 0.162 |
+| Regression, first eight cases | 4.984 | 0.056 |
+| Regression, last eight cases | 5.157 | 0.130 |
+| Treatment (a), (b), (c) | 2.541 | 0.245 |
+| Treatment (d), (e) and one run of (f) | 1.413 | 0 |
+
+Not measured: (f) at 3 runs (two more runs, about 0.24 USD, did not fit), a rerun of `refuse-a-ruled-fix-the-source-contradicts`
+(about 0.6 USD), and any re-measure after a prose rework. Known limit of the run order: the smoke runs came first and spent the
+slack that a rework's re-measure would have needed.
