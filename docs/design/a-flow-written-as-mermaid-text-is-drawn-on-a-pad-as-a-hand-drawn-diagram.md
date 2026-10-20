@@ -127,6 +127,11 @@ page width.
   of it for `TD`. The first loop back written takes the lane nearest the flow, the next the one
   beyond it. A loop back leaves its source from the side facing the lane, runs along the lane, and
   enters its target from that same side. It never crosses a step.
+  Loop backs that end on the same step's lane-side edge are spread along it, each end at its own
+  point (written order, evenly spaced, inside the edge), so no two arrowheads or legs coincide; a
+  step with a single loop back keeps its end at the middle of the edge. A loop back's label sits at
+  the middle of its run along the lane, not at the middle of its first leg: that leg is a short drop
+  beside its step, and a halo there would cover the step's outline.
 - **The accent mark.** A step marked `:::accent` is outlined in the page's accent colour and filled
   with diagonal hatching that stays inside its outline. Only the step is marked; its arrows stay in
   ink.
@@ -206,7 +211,7 @@ An arrow that would close a loop (`r --> b` after `b --> … --> r`) is drawn as
 its source towards the lane, along a lane outside the flow (below it for `LR`, to its right for
 `TD`), and into its target from the same side, arrowhead pointing at the target. Two loop backs take
 two lanes, the first written nearest the flow. A step's arrow to itself loops out and back into the
-same step. No loop back crosses a step.
+same step. No loop back crosses a step. Loop backs sharing a step's edge end at separate points along it.
 
 ## State — flow carrying styling lines, drawn with them ignored
 

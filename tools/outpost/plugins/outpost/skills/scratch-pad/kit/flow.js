@@ -679,16 +679,34 @@
       cursor += band;
       return laneC;
     });
+    // Where each loop back meets its steps along the lane-side edge. A step with one loop back keeps it at
+    // the middle (a self-loop's two ends a quarter either side); a step with several shares its edge, so
+    // every end takes its own evenly spaced point, in written order, and no two arrowheads or legs coincide.
+    var ends = new Map();
+    function endsOn(n) {
+      if (!ends.has(n)) ends.set(n, []);
+      return ends.get(n);
+    }
+    loops.forEach(function (arrow, k) {
+      endsOn(nodes[nodeOfStep.get(arrow.from)]).push({ k: k, role: "from" });
+      endsOn(nodes[nodeOfStep.get(arrow.to)]).push({ k: k, role: "to" });
+    });
+    function endAt(n, k, role) {
+      var list = endsOn(n);
+      var loneArrow = list.every(function (e) { return e.k === list[0].k; });
+      var mid = n.mainStart + main(n) / 2;
+      if (loneArrow) {
+        if (list.length === 1) return mid;
+        return role === "from" ? mid - main(n) / 4 : mid + main(n) / 4;
+      }
+      var i = list.findIndex(function (e) { return e.k === k && e.role === role; });
+      return n.mainStart + (main(n) * (i + 1)) / (list.length + 1);
+    }
     loops.forEach(function (arrow, k) {
       var from = nodes[nodeOfStep.get(arrow.from)];
       var to = nodes[nodeOfStep.get(arrow.to)];
-      var mFrom = from.mainStart + main(from) / 2;
-      var mTo = to.mainStart + main(to) / 2;
-      if (from === to) {
-        var offset = main(from) / 4;
-        mTo = mFrom + offset;
-        mFrom -= offset;
-      }
+      var mFrom = endAt(from, k, "from");
+      var mTo = endAt(to, k, "to");
       var entry = reach(to, mTo, lanes[k], 2 / 3);
       var exit = reach(from, mFrom, lanes[k], 1 / 3);
       var laneRun = [exit[exit.length - 1], entry[entry.length - 1]];
