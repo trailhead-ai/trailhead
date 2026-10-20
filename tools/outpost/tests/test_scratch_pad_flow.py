@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import random
 import tempfile
 from pathlib import Path
 
@@ -780,13 +781,30 @@ def test_a_flow_that_closes_a_loop_is_listed_with_the_other_broken_lines(tmp_pat
     assert "loops are not drawn yet" in message[4]
 
 
-def _largest_flow():
-    longs = ["s0 --> s59"] * 34 + ["s1 --> s3"] * 27
-    return _flow(_chain(60, longs))
+def _label(kind, size, rng):
+    if kind == "token":
+        return "".join(rng.choice("abcdefghijklmnopqrstuvwxyzWMiI") for _ in range(size))
+    words = []
+    total = 0
+    while total < size:
+        word = "".join(rng.choice("abcdefghijklmnopqrstuvwxyzWM") for _ in range(rng.randint(2, 9)))
+        words.append(word)
+        total += len(word) + 1
+    return " ".join(words)[:size].rstrip()
 
 
-def test_the_largest_legal_flow_draws_in_under_a_second(tmp_path):
-    flow = _largest_flow()
+def _largest_flow(kind):
+    rng = random.Random(7)
+    steps = [f"s{i}[{_label(kind, 985, rng)}]" for i in range(60)]
+    pairs = [(i, i + 1) for i in range(59)] + [(0, 59)] * 34 + [(1, 3)] * 27
+    arrows = [f"s{a} -->|{_label(kind, 970, rng)}| s{b}" for a, b in pairs]
+    return _flow(steps + arrows)
+
+
+@pytest.mark.parametrize("kind", ["token", "words"])
+def test_the_largest_legal_flow_draws_in_under_a_second(tmp_path, kind):
+    flow = _largest_flow(kind)
+    assert max(len(line) for line in flow.split("\n")) <= 1000
     js = """
     const question = {options: [{flow: %s}]};
     const t0 = performance.now();
