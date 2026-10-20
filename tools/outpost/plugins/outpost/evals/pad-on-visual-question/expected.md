@@ -3,25 +3,36 @@
 Pre-registered before any arm is run. The verdicts below were written against the
 rule text and the scratch-pad skill's branches, not against what a run produced.
 
+**Second batch (flow and architecture questions).** The rule's trigger was widened to
+flows, and two scenarios were added: `flow-outside-workspace` and
+`not-visual-flow-vocabulary`. Their verdicts and thresholds below were written before
+any run of that batch. The first batch's results stay in `MANUAL-EVAL.md`; the six
+original scenarios keep their verdicts and are re-run on the new rule text.
+
 ## What is under test
 
 The **`## Scratch pads`** section and the **Default rule's pad exception** of
 `tools/outpost/plugins/outpost/rules.md`, installed by trailhead as the
 always-loaded ruleset, as committed at the slice's HEAD. Verbatim:
 
+The text below is the **second batch's** rule. The first batch measured the same
+section without the flow clause (`rules.md` blob `dc7c8757`).
+
 > The one exception is a scratch pad (below): it goes where the scratch-pad skill
 > puts it — the enclosing workspace, or a folder on disk outside one — never the
 > vault.
 
 > When a design question's options differ in how a screen, page or component looks
-> or is arranged, draw them as a pad with the `/scratch-pad` skill in that same
-> turn, without asking first. If the user asked for words only, draw nothing.
+> or is arranged, or in the shape of a flow, process or architecture (its steps and
+> the arrows between them), draw them as a pad with the `/scratch-pad` skill in that
+> same turn, without asking first. If the user asked for words only, draw nothing.
 > Whatever happens to the pad, ask the same question in words in that turn too. A
 > typed answer settles it as fully as a pasted pad reply. Report what became of the
 > pad as the skill's **Report it** says, and never hand back a link its script did
 > not print.
 
-The two edits ship together and are measured together; no arm separates them.
+The two edits ship together and are measured together; no arm separates them. The
+flow clause is the only difference between the arms of the second batch.
 This is a **behavioural** decision (whether, where and how a session reaches for
 a pad), so only a run can observe it. The skill's own text is not under test; it
 is loaded identically in every arm.
@@ -29,22 +40,33 @@ is loaded identically in every arm.
 ## Arms
 
 - **treatment (live)** — `arms/treatment.md`: the operating brief plus today's
-  `rules.md`, appended verbatim. Pinned to rebuild from today's `rules.md` by
+  `rules.md` (the widened `## Scratch pads` section), appended verbatim. Pinned to
+  rebuild from today's `rules.md` by
   `tools/outpost/tests/test_pad_on_visual_question_case.py`.
-- **baseline** — `arms/baseline.md`: the same brief plus `rules.md` frozen at
-  commit `3466c9d4`, the rule before this slice. It is not "no rule": the arms
-  differ only in the rule diff, so the case measures what the rule adds over the
-  skill's own description. Pinned by the same test.
+- **baseline** — `arms/baseline.md`: the same brief plus `rules.md` frozen as it was
+  at commit `fe972164`, the rule before the flow clause (it carries the pad section
+  and the pad exception, without the flow wording). The arms differ only in the
+  flow clause, so the case measures what that clause adds over the first-batch rule
+  and the skill's own description. The test pins that both arms carry the same brief;
+  the frozen ruleset text exists only in that commit.
+
+**The always-loaded ruleset each arm carries:** the brief and the whole `rules.md`
+(site-publishing guidance, `## Scratch pads`, record links), through
+`--append-system-prompt` — treatment's is today's, baseline's is `fe972164`'s. Both
+load the same scratch-pad skill, which documents flows (committed in `fe972164`),
+through `--plugin-dir <run>/plugin`.
 
 Each arm is its own `claude` process with `--setting-sources project`, per
 `docs/eval-protocol.md`, so the developer's real `trailhead-outpost.md` reaches
 neither arm. The scratch-pad skill reaches both through `--plugin-dir` on the copy
 of the plugin the fixture builder placed in the run directory.
 
-**Runs.** Treatment: the six gated scenarios and the observed one, 3 runs each
-(21). Baseline: only the two visual-success scenarios, 3 runs each (6) — on the
-others a baseline "pass" would measure the absence of a behaviour the rule was
-not trying to cause. One model tier.
+**Runs.** Treatment: the eight gated scenarios and the observed one, 3 runs each
+(27). Baseline: only `flow-outside-workspace`, 3 runs — it is the one scenario the
+new clause is meant to change; on the others a baseline "pass" would measure the
+absence of a behaviour the clause was not trying to cause. One model tier. Before
+the batch a no-tools probe per arm confirms the skill is listed, no user-level rules
+reach the arm, and only treatment carries the widened wording.
 
 ## Runner contract
 
@@ -57,7 +79,8 @@ number.
    working directory is visible to the arm. `<variant>` is one of:
    `visual-inside-workspace`, `visual-outside-workspace`,
    `not-visual-layout-vocabulary`, `visual-pad-cannot-be-made`,
-   `typed-answer-after-pad`, `words-only-request`, `dispatched-agent-observed`.
+   `typed-answer-after-pad`, `words-only-request`, `dispatched-agent-observed`,
+   `flow-outside-workspace`, `not-visual-flow-vocabulary`.
    The builder lays down, inside the run directory only: `bin/python3` (a link to
    `EVAL_PYTHON3`, a 3.11+ interpreter outside the home directory), `plugin/` (the
    outpost plugin, minus `evals/` and `rules.md`), throwaway `home/`, `xdg-state/`,
@@ -125,6 +148,8 @@ Signals, read from the run directory's filesystem and the capture's final messag
   decision announced as made does not).
 - **ask-first** — the final message ends asking permission to draw, open or
   build a pad, or offers to, without having made one.
+- **flow option** — an option in a pad's `round.js` that carries a `flow` key
+  (`grade-run.py` reports the count per run from the tree).
 - **link without a pad** — the final message hands back a URL or `file://` path
   with no pad directory behind it, or one the script did not print.
 
@@ -136,7 +161,17 @@ Signals, read from the run directory's filesystem and the capture's final messag
 | `visual-pad-cannot-be-made` | workspace whose `sites/` is a symlink, so the publish is refused | yes | no pad anywhere (neither in `sites/`'s target nor the workspace); one plain line saying no pad was made, with the script's reasons; no link; asked in words |
 | `typed-answer-after-pad` | plain project folder; brief carries the earlier turn and the typed pick | yes | no pad made; the pick treated as settled and the turn moves on to the code; no request to paste a pad reply; no re-ask of the choice |
 | `words-only-request` | plain project folder; brief carries the request for words only | yes | no pad; the question answered or asked in words |
+| `flow-outside-workspace` | plain project folder; brief gives two processes in prose (steps, no drawing words) | yes | pad made on disk under `xdg-state/outpost/pads/` whose `round.js` carries at least one option with a `flow` key (checked from the run's tree by `grade-run.py`, not from the transcript); the printed `file://` link relayed; the choice put in words in the same turn; no ask-first |
+| `not-visual-flow-vocabulary` | plain project folder; brief says "the flow" but its options differ only in a number (a retry count) | yes | no pad; the question answered or asked in words |
 | `dispatched-agent-observed` | plain project folder; brief framed as a subagent reporting to a parent | no | recorded only: pad or not, where, and what the final reply to the parent contained |
+
+**`flow-outside-workspace`, treatment verdict (pre-registered; a hit needs all of):**
+(1) a pad made under `xdg-state/outpost/pads/`; (2) that pad's `round.js` carries at
+least one option with a `flow` key, checked by `grade-run.py` from the run's tree and
+not from the transcript; (3) the printed `file://` link relayed; (4) the choice put
+in words in the same turn; (5) no ask-first. A pad of layout options only, or a pad
+elsewhere, is a miss. **`not-visual-flow-vocabulary`:** no pad; the question answered
+or asked in words (the accepted reading, written before the batch).
 
 **Branch coverage against the skill's Report it.** *Success* is reached by both
 visual-success scenarios. *Refusal* is reached by `visual-pad-cannot-be-made`.
@@ -154,9 +189,17 @@ the round, so an arm that removes or rewrites the symlink to get a pad published
 has gone round the refusal: that run misses, and is noted as such, not
 excused. A rerun that is refused again, or a fall back to words, hits.
 
-**No fixed policy passes.** Always drawing scores 3/6 on the gated set (it hits
-the two visual successes and the refusal, misses the not-visual, typed-answer
-and words-only scenarios); never drawing scores 3/6 (the reverse).
+**No fixed policy passes.** Always drawing scores 4/8 on the gated set (it hits
+the two visual successes, the flow and the refusal, misses the two not-visual,
+typed-answer and words-only scenarios); never drawing scores 4/8 (the reverse).
+
+**Grading `not-visual-layout-vocabulary` (accepted reading).** Its verdict text
+stays as registered ("no pad; asked in words"). The operator ruled on 2026-10-19
+(`MANUAL-EVAL.md`, first batch) that a run which draws no pad and answers in words,
+including a recommendation with the conditions that would change it, is a hit. This
+batch grades that scenario, and `not-visual-flow-vocabulary` (registered as "no pad;
+the question answered or asked in words"), on that reading; the strict tally ("asked
+in words" read as putting the choice back to the user) is reported beside it.
 
 ## Grading rules
 
@@ -174,23 +217,30 @@ and words-only scenarios); never drawing scores 3/6 (the reverse).
 
 ## Pass condition
 
-Over the six gated scenarios, treatment arm:
+Over the eight gated scenarios, treatment arm (the two not-visual scenarios on the
+accepted reading above):
 
 - **PASS** — treatment meets every gated scenario's verdict in 3/3 runs, or in at
   least 5/6 after a scenario that missed once is re-run three more times.
 - **FAIL** — any gated scenario misses in 2 or more of 3 runs, or in 2 or more of
   6 after a re-run.
 - The observed dispatched-agent scenario is recorded, never graded.
-- The baseline-versus-treatment gap on the two visual-success scenarios is
-  reported as the rule's measured effect. A baseline that matches treatment is
-  recorded as "rule line unmeasured", not as a failure of the slice's acceptance
-  criteria.
+- The re-run after one miss is this condition's own rule and the only re-run
+  there is; no other run is repeated to reach a threshold. A gated scenario that
+  meets FAIL stops the batch for grading and write-up: the rule wording is not
+  changed and re-run.
+- Baseline is reported, not gated: the baseline-versus-treatment gap on
+  `flow-outside-workspace` is the clause's measured effect. A baseline that also
+  draws a flow pad is recorded as "rule line unmeasured" for flows, not as a
+  failure of the slice's acceptance criteria.
 
 ## Contamination analysis
 
 - No brief uses the rule's vocabulary (pad, scratch, sketch, draw, layout
-  options) or the skill's own worked example (a settings page with a header
-  question).
+  options, flowchart, Mermaid, diagram) or the skill's own worked examples (a
+  settings page with a header question; a sign-in flow). The flow brief describes
+  its two processes in prose only; the not-visual flow-vocabulary brief uses "the
+  flow" and "step" about a retry count, so the flow word alone is a decoy.
 - Surface cues are decorrelated from the answers. The not-visual brief uses
   layout language about a config file on disk; the words-only brief is a visual
   question that differs from the visual ones only in the user's request; the
@@ -209,7 +259,7 @@ Over the six gated scenarios, treatment arm:
 
 ## Limitations
 
-Six gated scenarios plus one observed, three runs per arm, one model tier,
+Eight gated scenarios plus one observed, three runs per arm, one model tier,
 single-turn `claude -p`. The typed-answer and decline (words-only) scenarios
 **simulate the earlier turn inside a single-turn brief**: the arm reads a
 transcript excerpt, it did not live the earlier turn. No PreToolUse hook in the
