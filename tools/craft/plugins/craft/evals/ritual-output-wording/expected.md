@@ -604,3 +604,182 @@ when read. Run 1 puts the number first with the criterion's quoted text after it
 overdue i…`). Run 3 mixes text-before-number mentions with a short label (`the reminder messages (AC6)`). The grader's
 precedence returns `bare` for both, so "2 bare" understates how far the arm moved without the bullet. The keep
 decision for the bullet is unchanged: the fuller reading only strengthens it.
+
+## Extension, 2026-10-20 — summaries lead with what needs the reader: sites S1, S2 and guards G1-G4, registered before any run
+
+Committed before any run of a new arm. Nothing above this heading is rewritten; the grammar, verdict words, run
+rules, floor and exclusion rules, no-mention rule and capture naming above apply unchanged to every arm named here
+except where this section adds a check of its own.
+
+**What is under test.** Two prose edits, each measured under this section, and the claim that follows from them: in
+a session carrying craft's always-loaded rules, and in a build's closing report, a summary opens with what needs
+the reader and gives everything that needs nothing from them at most one line each.
+
+- **R**, the always-loaded paragraph, appended to `## Output wording` in `tools/craft/plugins/craft/rules.md`
+  after the criterion paragraph, verbatim and not adjusted after this section is committed:
+
+  > When you sum up or close out a piece of work for the person reading, open with what needs them: a decision only they can make, a question, or an action only they can take. Give everything that needs nothing from them at most one line each, and leave the detail until they ask. A pasteable command may still close the reply.
+
+  It carries no worked example, because the section is read in every session. It sits under the section's existing
+  limit (text a person reads in the session; never a report to a dispatching agent, a script-read field, plan
+  files, or commit and pull request text), so that limit is not restated.
+
+- **E**, the build's closing report, in the `**Completion report.**` paragraph of
+  `tools/craft/plugins/craft/skills/_shared/execute.md`. The sentence, inserted directly after "the user decides
+  when to open a PR.", verbatim:
+
+  > The report opens with everything the run left for the user: an unresolved correctness or security finding, a failed or blocked gate, a default branch left unpushed, or a failed push. These come ahead of the pull request decision, which follows them. Every phase's outcome then follows, one line each.
+
+  The duty to "enumerate every phase's outcome explicitly" is unchanged. The worked example is reordered, verbatim.
+  The lead-in `Worked example:` becomes `Worked example (a clean run, with nothing else left for the user):`, and
+  the example reads, with the command inside its own fenced block, alone on its line:
+
+  > No PR was opened — that call is yours.
+
+  > simplify: no changes; correctness: SHIP, 0 findings; security: skipped — no trigger; state-coverage: parent 4, doc 4, missing 0; criterion-observations: covered 3, observed 3, missing 0; push: 2 repos pushed, 1 already up to date; metrics: 4 tasks, 7 dispatches (1.75/task), 42m wall clock, 1 lesson written, 2 lessons consumed
+
+  > Run this when you're ready to open it:
+
+  ```
+  /portage:pull_request
+  ```
+
+  The phase paragraph of the example is the existing one, unchanged; only the order and the closing lead-in line
+  differ from today's text. E and the rebuild of the `ritual-deliverable-names-its-record` case's
+  `execute-rule-only.md` live arm land in one commit, so that case's arm test is never red and one revert undoes
+  both.
+
+**Base.** B is `d860c95a7d470be857e01f04c55c986abadab916`, the main-branch commit the task branch was cut from. Arms
+below are committed copies composed with `git show <rev>:<path>` at build time; no test reads history and no test
+recomposes an arm. R and E are commits on the task branch; their SHAs are recorded in the arm table below when the
+arms that carry them are built, and a table row naming a source "at R" or "at E" is not built until then.
+
+**Sites.**
+
+| Site | What the session is doing | Fixture and prompt | Read by |
+|---|---|---|---|
+| S1 | No ritual loaded. The session is given a status note (a choir's autumn tour, six routine items and one item only the reader can settle, placed fourth of seven) and asked where it stands. | `fixtures/summary-status-note.md`, `fixtures/prompt-summary-noritual.md` | by-eye protocol below |
+| S2 | The execute ritual is loaded, stubbed to start at the Completion report: every phase has an outcome, and exactly one item beyond the pull request call needs the reader, an unresolved High security finding, third of the six phase lines. | `fixtures/summary-build-run.md`, `fixtures/prompt-summary-build.md` | by-eye protocol below; `scripts/ritual_deliverable_grader.py` for whether the next command is observed on its own line |
+| G1 | The criterion guard: this case's no-ritual site, prompt and fixtures, unchanged. | `fixtures/prompt-noritual.md`, `fixtures/spec.md`, `fixtures/status-note.md` | `criterion-mention` |
+| G2 | The reviewer guard: this case's reviewer and advocate sites, prompts and fixtures, unchanged. | `fixtures/prompt-reviewer.md`, `fixtures/prompt-advocate.md`, `fixtures/plan.md`, `fixtures/spec.md` | `reviewer-report`, `criterion-mention` |
+| G3 | The slice guard: this case's slice site, prompt and fixtures, unchanged. | `fixtures/slice-run.md`, `fixtures/prompt-slice.md`, `fixtures/spec.md` | `covers-field`, `criterion-mention` |
+| G4 | The spec review guard: the `finding-presentation-wording` case's `fsspecreview` site, with its prompt and canned reports used from that case's own fixtures. | that case's fixtures | that case's own `severity-name` and `reviewer-name`; by eye, below |
+
+S1's and S2's fixtures set the reader's need in a domain no existing fixture and no rule text uses. Every item in
+each fixture has an answer that changes a verdict under the protocol below: moving the planted item to the end,
+dropping any item, or expanding a routine item past one line changes `leads`, `all-present` or `one-line`
+respectively. S1's routine items are the coach, the programme, the rehearsals, the sheet music, the insurance and
+the guesthouse; its planted item is the Marlow hall commitment (34 of 40 confirmed singers, the choir or the chair
+to say whether to commit or release). S2's routine items are the simplify, correctness, state-coverage,
+criterion-observations and push outcomes and the metrics line; its planted item is the security finding, which the
+stub states as not fixed. Neither prompt mentions ordering, leading, line counts or completeness. Names are
+invented throughout.
+
+**Arms.** Every arm carries the always-loaded rules file at its stated revision. Within a site, arms differ in one
+variable per pair.
+
+| Arm | Site | Execute sources | Rules file | Added by |
+|---|---|---|---|---|
+| `summary-baseline-noritual` | S1 | none | `rules.md` at B | this task (built) |
+| `summary-noritual` | S1 | none | `rules.md` at R | later task |
+| `summary-baseline-build` | S2 | `execute/SKILL.md` and `_shared/execute.md` at B | `rules.md` at B | this task (built) |
+| `summary-build-rules-only` | S2 | same, at B | `rules.md` at R | later task |
+| `summary-build` | S2 | same, at E | `rules.md` at R | later task |
+| `fourth-noritual` | G1 | none | `rules.md` at R | later task |
+| `fourth-reviewer`, `fourth-advocate` | G2 | agent definition at R's base | `rules.md` at R | later task |
+| `fourth-slice` | G3 | slice skill at B | `rules.md` at R | later task |
+| `summary-guard-specreview` | G4 | that site's current sources at B | `rules.md` at R, nothing else moved | later task |
+
+**Composition and provenance of the two built arms.** Both were composed by `git show` of each source at B and
+concatenated in this order, joined by a single newline between sources, the same joining the earlier arms of this
+case use (a skill file, then the rules file):
+
+- `arms/summary-baseline-noritual.md` is `tools/craft/plugins/craft/rules.md` at B (13304 bytes), alone.
+- `arms/summary-baseline-build.md` is `tools/craft/plugins/craft/skills/execute/SKILL.md` at B, a newline,
+  `tools/craft/plugins/craft/skills/_shared/execute.md` at B, a newline, then `tools/craft/plugins/craft/rules.md`
+  at B (113252 bytes). Every source is at `d860c95a`; none is from the working tree. This arm does not carry the
+  record-links tail that the `ritual-deliverable-names-its-record` case's `execute-rule-only.md` carries: this
+  case's S2 arm carries `rules.md` in its place, as every arm of this case does. It is built from the same two
+  execute sources that case's live arm uses (`execute/SKILL.md` then `_shared/execute.md`), so E's edit to
+  `_shared/execute.md` reaches both.
+
+Each arm's bytes were checked once at compose time against a fresh `git show` concatenation of its sources at B and
+are identical.
+
+**Dispatch.** As `## Dispatch` above, with these differences. The prompt's `FIXTURES_DIR` is replaced as before.
+
+- `summary-baseline-noritual`, `summary-noritual`, `fourth-noritual` and the other arms under the single-argument
+  limit go by `--append-system-prompt "<contents of arms/<arm>.md>"`, as every earlier arm of this case did.
+- `summary-baseline-build`, `summary-build-rules-only` and `summary-build` are about 113 KB, over the Linux
+  single-argument limit, so they go by `--append-system-prompt-file arms/<arm>.md`, the same bytes by a file instead
+  of an argument:
+
+  ```
+  claude -p "<prompt>" --setting-sources project --append-system-prompt-file arms/<arm>.md \
+    --allowedTools "Read" < /dev/null > runs/<arm>-<n>.txt 2> runs/<arm>-<n>.stderr.txt
+  ```
+
+  This is a host deviation from `## Dispatch`, recorded here: the bytes the model receives are the arm's, and only
+  the delivery differs. Precedent: the `ritual-deliverable-names-its-record` case's execute arm and
+  `task/code-review-findings-read-like-council-findings-wherever-the-reader-sees-one`. An arm that fits the limit
+  is dispatched by argument.
+
+Three runs per arm. Capture naming follows `### Capture naming` above, with the arm's name as the prefix.
+
+**By-eye protocol, fixed before any run.** AC11 and AC12 are not on the spec's list of criteria a script must
+decide. Per capture, each of the three verdicts is read separately:
+
+- `leads`: the first reader-facing sentence, after any heading, names the planted item that needs the reader. At S2
+  the pull request decision also counts, provided the planted item is named before any phase outcome. Verdicts:
+  `leads`, `buried` (named later), `missing`.
+- `one-line`: every routine item the fixture enumerates takes at most one line, meaning one sentence or one list
+  item with no sub-bullets. Grouping several items on one line is allowed. Verdicts: `one-line`, `over` (naming the
+  items that ran over).
+- `all-present`: every routine item the fixture enumerates, and the planted item, appears at least once (grouping
+  allowed). Verdicts: `all-present`, `dropped` (naming the missing items).
+
+A site passes on a clean majority of `leads`, of `one-line` and of `all-present`: 3 of 3, or 5 or 6 of 6 after a 2-1
+split is re-run to six. Headroom: the baseline arm at the site is majority `buried` or `missing`, or majority
+`over`. Where it is neither, that criterion is met without the edit at that site, and this is recorded. Captures are
+read twice: once in session, and once by a subagent given this protocol and the captures renamed so it cannot tell
+the arm. Disagreements are reported, not reconciled away. At G4, additionally by eye: the opening summary keeps one
+row per finding that needs a decision, each with its id.
+
+**The split rule.** A 2-1 split on any graded verdict, at a by-eye site or a guard (G1-G4), is re-run to six runs
+before any verdict. After six, 5 or 6 of 6 is a clean majority; anything less is not.
+
+**Guard bars.**
+
+- G1, `fourth-noritual`: `criterion-mention` clean majority `text-with-number`; bar `third-noritual` at 3 of 3.
+- G2, `fourth-reviewer` and `fourth-advocate`: `reviewer-report` every run `template-shape`; `criterion-mention`
+  majority `bare`, equal to the baseline arms' majority.
+- G3, `fourth-slice`: `covers-field` every run `gate-shape`; `criterion-mention` clean majority `text-with-number`.
+- G4, `summary-guard-specreview`: that site's own checks against its last recorded bar, and the by-eye reading above.
+
+**End states, fixed before any run.**
+
+- S1 `summary-noritual` passes: commit R is kept.
+- S1 fails: R is reverted on the branch and the slice stops for the operator. No rewording without a new dated
+  extension the operator authorizes, per this case's precedent.
+- Any guard G1-G4 misses its bar: this is a regression. R is reverted and the slice stops for the operator.
+- R reverted, for any reason: the build-report task is blocked and not run, and the results task records the failed
+  run and the revert.
+- S2: commit E removes an example that demonstrates the contradicting order, so it is kept whatever its own
+  measured effect (the spec's Constraints exempt removing a contradicting instruction). It is reverted only if
+  `summary-build` reads worse than `summary-build-rules-only` on either verdict, or if the pull request command
+  stops being alone on its own line (`next-command: own-line`). The effect it shows is reported either way.
+
+**Fixture vocabulary leak check.** Run before this section was committed, against the verbatim text of both edits
+above, and passed. The check is a throwaway script run from the repository root (not committed); it takes every 3-word
+phrase (lower-cased, punctuation-split) of the four new fixture and prompt files, plus the fixture titles' content
+words and the harness words `seeded`, `fixture`, `eval`, `runner`, `scaffold`, and searches R's text and E's text
+for each. Against R: 0 hits. Against E: 0 hits on harness words and on any domain word; 5 phrase hits, every one
+the execute procedure's own vocabulary that the stub has to reproduce to run the ritual (`state-coverage parent`,
+`missing 0 criterion` across the two adjacent phase names, `0 criterion observations`,
+`criterion-observations covered`, `/portage:pull_request`), each already present in `_shared/execute.md` and in E's
+unchanged worked example, and none from the fixtures' invented content. Numbers in the fixture were chosen so the
+fixture does not repeat the example's figures.
+
+**Not measured.** Reports from dispatched agents other than the council reviewers: the builder, the drift check,
+the code reviewer, the security auditor. One planted item per site; summaries with several decisions are not
+staged. Results close as unmeasured until the operator names them at slice close.

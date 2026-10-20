@@ -34,6 +34,8 @@ ARMS = {
     "shipped-slice.md",
     "baseline-advocate.md",
     "third-advocate.md",
+    "summary-baseline-noritual.md",
+    "summary-baseline-build.md",
 }
 
 
