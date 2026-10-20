@@ -587,7 +587,7 @@ LABEL_FLOW = (
 LABEL_FORMS = ["-->|go|", "-- go -->", "-.->|go|", "-. go .->"]
 
 
-def test_each_labelled_arrow_form_sets_its_label_at_the_middle_of_the_first_leg_on_a_halo(tmp_path):
+def test_each_labelled_arrow_form_sets_its_label_at_the_middle_of_the_gap_beside_its_column_on_a_halo(tmp_path):
     flows = [LABEL_FLOW.format(arrow=form) for form in LABEL_FORMS]
     js = """
     const card = getComputedStyle(document.querySelector('.pad-card')).backgroundColor;
@@ -606,8 +606,11 @@ def test_each_labelled_arrow_form_sets_its_label_at_the_middle_of_the_first_leg_
     a, wide = got["steps"]["a"], got["steps"]["w"]
     cx = first["label"]["x"] + first["label"]["w"] / 2
     cy = first["label"]["y"] + first["label"]["h"] / 2
-    assert wide["b"]["x1"] - a["b"]["x1"] > 60, "the first leg runs from a's edge to the end of its column"
-    assert abs(cx - (a["b"]["x1"] + wide["b"]["x1"]) / 2) <= TOL
+    assert wide["b"]["x1"] - a["b"]["x1"] > 60, "a is narrower than its column, so its first leg is a stub"
+    assert got["steps"]["b"]["b"]["x0"] > wide["b"]["x1"]
+    assert wide["b"]["x1"] < cx - first["label"]["w"] / 2, "the label clears the column"
+    assert cx + first["label"]["w"] / 2 < got["steps"]["b"]["b"]["x0"], "and the next column"
+    assert abs(cx - (wide["b"]["x1"] + got["steps"]["b"]["b"]["x0"]) / 2) <= TOL
     assert abs(cy - a["cy"]) <= TOL
     for form in got["forms"]:
         assert form["label"]["text"] == "go"
@@ -764,7 +767,7 @@ LIMITS = [
     ("2001 waypoints", _waypoint_flow(1), "The flow's arrows pass 2001 waypoints; at most 2000 are drawn."),
     (
         "lines before chars before steps",
-        _flow(_chain(61) + ["a --> b" + " " * 994], pad_to=401),
+        _flow(_chain(61) + ["a --> b" + " " * 994], pad_to=402),
         "The flow has 401 lines; at most 400 are drawn.",
     ),
     (
@@ -1428,3 +1431,184 @@ def test_two_accented_drawings_on_one_question_share_no_svg_id(tmp_path):
     assert got["hatch"] > 0
     assert got["dupes"] == 0
     assert all(own == mine for mine, own in got["refs"])
+
+
+HALO_HITS = """
+const sampled = (path) => {
+  const out = [];
+  for (let i = 0; i + 1 < path.length; i++) {
+    for (let k = 0; k <= 40; k++) {
+      const t = k / 40;
+      out.push([path[i][0] + (path[i + 1][0] - path[i][0]) * t, path[i][1] + (path[i + 1][1] - path[i][1]) * t]);
+    }
+  }
+  return out;
+};
+const haloHits = (d) => {
+  const ink = inkOf(d);
+  const halos = [...ink.querySelectorAll('g[data-arrow-index] rect.flow-halo')].map((r) => ({
+    x0: r.x.baseVal.value, x1: r.x.baseVal.value + r.width.baseVal.value,
+    y0: r.y.baseVal.value, y1: r.y.baseVal.value + r.height.baseVal.value,
+    arrow: r.parentNode.getAttribute('data-arrow-index'),
+  }));
+  const strokes = [];
+  ink.querySelectorAll('g[data-kind]').forEach((g) => {
+    const kind = g.getAttribute('data-kind');
+    const id = g.getAttribute('data-step-id') || 'arrow ' + g.getAttribute('data-arrow-index');
+    pathsOf(g).forEach((p, i) => {
+      if (kind === 'arrow' || kind === 'loop') {
+        if (i >= 2) strokes.push({what: 'head of ' + id, pts: sampled(p)});
+      } else {
+        strokes.push({what: 'outline of ' + id, pts: sampled(p)});
+      }
+    });
+  });
+  const hits = new Set();
+  halos.forEach((h) => strokes.forEach((s) => {
+    const inside = ([x, y]) => h.x0 < x && x < h.x1 && h.y0 < y && y < h.y1;
+    if (s.pts.some(inside)) hits.add(`arrow ${h.arrow} halo covers ${s.what}`);
+  }));
+  return {halos: halos.length, heads: strokes.filter((s) => s.what.startsWith('head')).length, hits: [...hits]};
+};
+"""
+
+REPRO_FLOWS = {
+    "lr-narrow-source": (
+        "flowchart LR\n  a[Start] --> b[Approve]\n  a --> c[Refund]\n  c -->|yes| d[Pay]\n  b -->|no| d"
+    ),
+    "td-short-source": (
+        "flowchart TD\n  a[Start] --> b{Is it ready to go?}\n  a --> c[Fix]\n  c -->|retry| d[End]\n  b -->|yes| d"
+    ),
+    "lr-narrowest": (
+        "flowchart LR\n  a[Start] --> w[A much wider step here]\n  a --> n[No]\n  n -->|go| z[End]\n  w --> z"
+    ),
+    "td-narrowest": (
+        "flowchart TD\n  a[Start] --> w{A much taller decision here?}\n  a --> n[No]\n  n -->|go| z[End]\n  w --> z"
+    ),
+}
+
+
+def _halo_hits(tmp_path, flows):
+    js = "return [...document.querySelectorAll('.pad-drawing')].map((d) => haloHits(d));"
+    return _run(tmp_path, _round(flows), HALO_HITS + js, timeout=120)
+
+
+def test_no_forward_arrow_label_halo_covers_a_step_outline_or_an_arrowhead_even_from_the_narrowest_step(tmp_path):
+    got = _halo_hits(tmp_path, list(REPRO_FLOWS.values()))
+    for name, result in zip(REPRO_FLOWS, got):
+        assert result["halos"] >= 1 and result["heads"] >= 3, name
+        assert result["hits"] == [], name
+
+
+@pytest.mark.parametrize("direction", ["LR", "TD"])
+def test_arrow_labels_of_any_length_leave_every_step_outline_and_arrowhead_visible(tmp_path, direction):
+    labels = [
+        "abcdefgh",
+        "twenty characters ok",
+        "a label of about forty characters, ok?",
+        "waiting for the finance team to look at it and approve the payment before anything at all goes out " * 2,
+    ]
+    flows = [
+        f"flowchart {direction}\n  a{{Under limit?}} -->|{label}| f[Finance]\n  a -->|yes| p[Pay out]\n"
+        "  f --> e[End]\n  p --> e"
+        for label in labels
+    ]
+    got = _halo_hits(tmp_path, flows)
+    for label, result in zip(labels, got):
+        assert result["halos"] == 2 and result["heads"] >= 4, label[:20]
+        assert result["hits"] == [], (label[:20], result["hits"])
+
+
+def test_a_directive_before_the_header_is_ignored_and_a_plain_comment_before_it_is_still_refused(tmp_path):
+    flows = [
+        "%%{init: {'theme': 'base'}}%%\nflowchart LR\n  a[A] --> b[B]",
+        "\n%%{init: {'theme': 'base'}}%%\n\n  classDef x fill:#fff\nflowchart TD\n  a[A] --> b[B]",
+        "%% a note\nflowchart LR\n  a[A] --> b[B]",
+    ]
+    got = _run(tmp_path, _round(flows), ALL_MESSAGES)
+    assert got[0]["message"] is None and got[0]["steps"] == 2
+    assert got[1]["message"] is None and got[1]["steps"] == 2
+    assert got[2]["message"] == [
+        "Can't draw this flow:",
+        "line 1: %% a note",
+        'A "%%" comment is not part of a flow this pen draws; remove the line.',
+        REDRAW,
+    ]
+
+
+def test_one_trailing_newline_is_not_a_line_but_a_401st_real_line_is(tmp_path):
+    drawn = _flow(["a --> b"], pad_to=400) + "\n"
+    refused = _flow(["a --> b"], pad_to=400) + "\nsubgraph x"
+    got = _run(tmp_path, _round([drawn, refused]), ALL_MESSAGES, timeout=120)
+    assert got[0]["message"] is None and got[0]["steps"] == 2
+    assert got[1]["message"][2] == "The flow has 401 lines; at most 400 are drawn."
+
+
+def test_a_space_may_come_between_an_arrow_and_its_bar_label(tmp_path):
+    flows = ["flowchart LR\n  a --> |yes| b", "flowchart LR\n  a -.-> |x y| b", "flowchart LR\n  a -->|yes| b"]
+    js = """
+    return [0, 1, 2].map((o) => {
+      const d = drawing(0, o);
+      const arrows = inkOf(d) ? arrowDetail(d) : [];
+      return {
+        message: messageOf(d),
+        arrows: arrows.map((a) => ({label: a.label && a.label.text, dashed: a.dashes.some((x) => x !== 'none')})),
+      };
+    });
+    """
+    got = _run(tmp_path, _round(flows), js)
+    assert [g["message"] for g in got] == [None, None, None]
+    assert [g["arrows"] for g in got] == [
+        [{"label": "yes", "dashed": False}],
+        [{"label": "x y", "dashed": True}],
+        [{"label": "yes", "dashed": False}],
+    ]
+
+
+def test_a_flow_that_fails_for_any_reason_ends_with_the_redraw_request_but_a_layout_does_not(tmp_path):
+    round_dir = _build(tmp_path, _round([{"flow": "flowchart LR\n  a --> b"}, {"layout": {"bogus": "x"}}]))
+    page = round_dir / "index.html"
+    html = page.read_text()
+    assert '<script src="flow.js"></script>' in html
+    page.write_text(html.replace('<script src="flow.js"></script>', ""))
+    got = ch.run_probe(
+        round_dir,
+        LIB + "await ready();\nreturn [0, 1].map((o) => messageOf(drawing(0, o)));",
+    )
+    flow, layout = got
+    assert flow[0] == "Can't draw this flow:"
+    assert flow[-1] == REDRAW
+    assert layout == ["Can't draw this layout:", '{"bogus": "x"}', '"bogus" is not a block kind.']
+
+
+FIT = """
+const fits = (d) => stepsOf(d).map((s) => ({
+  id: s.id,
+  fits: s.texts.length > 0 && s.texts.every((t) =>
+    t.x1 - t.x0 > 5 && s.b.x0 <= t.x0 && t.x1 <= s.b.x1 && s.b.y0 <= t.y0 && t.y1 <= s.b.y1),
+}));
+"""
+
+
+def test_a_flow_drawn_while_its_question_was_hidden_is_traced_again_when_it_is_shown(tmp_path):
+    data = _round([{"layout": {"box": [{"button": "A"}]}}], ["flowchart LR\n  a[Start here] --> b[Finish line]"])
+    nav = "const nav = document.querySelectorAll('nav button');\n"
+    hidden = nav + """
+    nav[1].click(); nav[0].click();
+    await sleep(500);
+    nav[1].click();
+    await sleep(800);
+    const d = drawing(1, 0);
+    return {fits: fits(d), paths: everyPath(d)};
+    """
+    direct = nav + """
+    nav[1].click();
+    await sleep(800);
+    const d = drawing(1, 0);
+    return {fits: fits(d), paths: everyPath(d)};
+    """
+    shown_late = _run(tmp_path, data, FIT + hidden)
+    shown_now = _run(tmp_path, data, FIT + direct)
+    assert [f["id"] for f in shown_late["fits"]] == ["a", "b"]
+    assert all(f["fits"] for f in shown_late["fits"]), shown_late["fits"]
+    assert shown_late["paths"] == shown_now["paths"]

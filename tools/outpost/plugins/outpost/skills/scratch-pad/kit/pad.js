@@ -394,6 +394,7 @@
         stage.appendChild(panels[index]);
       }
       panels.forEach(function (panel, i) { if (panel) panel.hidden = i !== index; });
+      if (!fresh && window.PadPen && typeof window.PadPen.shown === "function") window.PadPen.shown(panels[index]);
       return fresh ? drawWithPen(panels[index], data.questions[index], index) : undefined;
     }
 
