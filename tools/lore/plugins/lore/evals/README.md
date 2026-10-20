@@ -51,6 +51,14 @@ A record's name is lore's slug of its title, so `"Use the queue"` as an `adr` is
 A spec's criteria are only recognised as a `## Acceptance Criteria` heading
 followed by top-level `- **AC1.** text. *Verified by: manual check.*` bullets.
 
+A record may also carry `"related": ["KIND=NAME", ...]`: each entry becomes one
+`--related KIND=NAME` link on that record, so `"related": ["decision=use-postgres"]`
+links the record to `decision/use-postgres`. `NAME` is the slug lore derives from
+the linked record's title, and that record must be listed earlier in the file; a
+link naming no earlier record of that kind, a `related` that is not a list, an
+entry that is not `KIND=NAME`, and any field other than `kind`, `title`, `status`,
+`body` and `related` are refused before anything is written.
+
 The seeder runs in the run's temp `HOME` and working directory, and writes there:
 the vault at `./vault`, an executable `./lore` beside a copy of the repo's
 `trailhead/` package, and, only when `~/.gitconfig` does not exist, a synthetic

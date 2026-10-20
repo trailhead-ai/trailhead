@@ -3,9 +3,11 @@
 
 Usage: seed-eval-vault <records.json>
 
-``records.json`` is a JSON list of ``{kind, title, status, body}`` objects. A
-record's name is the slug lore derives from its title (``Use the queue`` ->
-``adr/use-the-queue``). In the current working directory the script:
+``records.json`` is a JSON list of ``{kind, title, status, body}`` objects, each
+optionally with ``related``: a list of ``KIND=NAME`` strings, one ``--related``
+each. A record's name is the slug lore derives from its title (``Use the queue``
+-> ``adr/use-the-queue``), and a link must name a record listed earlier in the
+file. In the current working directory the script:
 
 1. writes ``$HOME/.gitconfig`` with a synthetic identity when none exists (an
    existing one is left untouched) — lore stamps every record's provenance
@@ -48,6 +50,7 @@ LORE_CLI = REPO_ROOT / "tools" / "lore" / "plugins" / "lore" / "cli" / "lore"
 IDENTITY_NAME = "Eval Fixture"
 IDENTITY_EMAIL = "eval@example.invalid"
 FIELDS = ("kind", "title", "status", "body")
+OPTIONAL_FIELDS = ("related",)
 DIRECTORY_OVERRIDES = ("LORE_CONFIG_DIR", "LORE_STATE_DIR", "XDG_CONFIG_HOME", "XDG_STATE_HOME")
 
 PLUGIN_ROOT = LORE_CLI.parent.parent
@@ -55,6 +58,7 @@ PLUGIN_ROOT = LORE_CLI.parent.parent
 sys.path[:0] = [str(REPO_ROOT), str(PLUGIN_ROOT)]
 
 from lore.record.model import KINDS, permitted_statuses  # noqa: E402
+from lore.record.store import _kebab  # noqa: E402
 from trailhead import paths  # noqa: E402
 
 
@@ -73,10 +77,14 @@ def load_records(path: Path) -> list[dict[str, str]]:
         raise Refusal(f"records file {path} is not valid JSON: {exc}") from exc
     if not isinstance(records, list):
         raise Refusal(f"records file {path} must hold a JSON list of records")
+    seeded: set[tuple[str, str]] = set()
     for index, record in enumerate(records):
         where = f"record {index}"
         if not isinstance(record, dict):
             raise Refusal(f"{where} must be an object with {', '.join(FIELDS)}")
+        unknown = sorted(set(record) - set(FIELDS) - set(OPTIONAL_FIELDS))
+        if unknown:
+            raise Refusal(f"{where} has unknown field(s): {', '.join(map(repr, unknown))}")
         for field in FIELDS:
             if field not in record:
                 raise Refusal(f"{where} is missing {field!r}")
@@ -95,7 +103,22 @@ def load_records(path: Path) -> list[dict[str, str]]:
             raise Refusal(
                 f"{where} status {record['status']!r} is not a {record['kind']} status: {', '.join(vocab)}"
             )
+        check_related(where, record.get("related", []), seeded)
+        seeded.add((record["kind"], _kebab(title)))
     return records
+
+
+def check_related(where: str, related: object, seeded: set[tuple[str, str]]) -> None:
+    if not isinstance(related, list):
+        raise Refusal(f"{where} field 'related' must be a list of KIND=NAME strings")
+    for entry in related:
+        kind, sep, name = entry.partition("=") if isinstance(entry, str) else ("", "", "")
+        if not (sep and kind and name):
+            raise Refusal(f"{where} related entry {entry!r} must be a KIND=NAME string")
+        if (kind, name) not in seeded:
+            raise Refusal(
+                f"{where} related entry {entry!r} names no {kind} record seeded earlier in the file"
+            )
 
 
 def account_home() -> Path:
@@ -208,12 +231,14 @@ def seed(records_path: Path) -> None:
         gitconfig.write_text(f"[user]\n\tname = {IDENTITY_NAME}\n\temail = {IDENTITY_EMAIL}\n", encoding="utf-8")
     run_lore(python, "vault", "add", "eval", "--scope", "default", "--path", str(cwd / "vault"))
     for record in records:
+        related = [arg for entry in record.get("related", []) for arg in ("--related", entry)]
         run_lore(
             python,
             "record", "create",
             "--kind", record["kind"],
             "--title", record["title"],
             "--status", record["status"],
+            *related,
             stdin=record["body"],
         )
     write_wrapper(cwd, python, tracked)
