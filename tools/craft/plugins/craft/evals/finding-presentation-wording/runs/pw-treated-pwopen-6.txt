@@ -1,0 +1,36 @@
+**The spec review (gauntlet)** of *a telescope loan desk for the Hollin Hill astronomy club*: all eight reviewers have reported. Maturity: production (basis: stamp). No concerns were waived.
+
+The reviewers kept coming back to two moments where the spec says something happened but nothing shows whether it did. The first is the email. The spec relies on two emails: the confirmation that states the loan and its return date (AC1), and the reminder two days before the return date that lists what goes back in the case (AC5). If either email never arrives, nothing tells anyone. The second is the return. A telescope "shows as free on the club's loan calendar from that day" (AC4), even if the loan officer never checked it. That reopens the exact problem the spec starts from: a scratched mirror that nobody can trace. Around these two gaps, the findings that would cause trouble later cluster in three places. The waiting-list hand-off in AC3 is never closed or recorded. The promise that a member can "see where the loan stands" has no criterion behind it. And the spec doesn't say who may cancel a loan or who may read a condition note.
+
+The failure-cases reviewer is right about the unchecked return. It holds as raised, and it ties straight back to the Problem section. The ease-of-use reviewer overreached on its own terms: it said members are never told about the finder cap, but AC5's reminder does tell them. The underlying point still holds once it is combined with the failure-cases note that a reminder sent to a mistyped address is never seen. Two reviewers who couldn't see each other's work reached the same lost finder cap. At production maturity, a failure that nobody can see needs your decision. The right-problem reviewer argued for lending by the night instead of by start and return dates. That is a real design question, but it depends on how members actually borrow, which nothing in the spec or the club's records shows. I've moved it down to "would cause trouble later, worth fixing, your call". The fact check found one wrong number: the equipment register lists seven telescopes, not six. Nothing in the spec depends on that count, and the fact check gave no citation I could check.
+
+Both decisions can be settled by editing the spec now. Add one criterion that makes an undelivered email visible to the loan officer. Rewrite AC4 so a telescope becomes free only once its condition note is recorded. The rest is worth doing, but none of it blocks the spec.
+
+**Recommended outcome:** apply both edits and advance the spec to `ready` this round. Nothing needs a rewrite.
+
+| finding | proposed outcome | proposed edit |
+|---|---|---|
+| *An email that never arrives goes unnoticed, so a member can miss the return date or the case list* (C1) | fixed in the spec | *add AC7: the loan officer sees any confirmation or reminder email that could not be delivered* |
+| *An unchecked return shows as free, so damage can't be traced to a borrower* (C2) | fixed in the spec | *rewrite AC4 so a telescope is free only after its condition note is recorded* |
+
+Drafted text:
+- C1, new AC7: "**AC7.** When a confirmation or reminder email cannot be delivered, the loan officer sees which member and which loan it was for."
+- C2, AC4 rewritten: "**AC4.** When a telescope comes back, the loan officer records it as back with a note of its condition, and from then on it shows as free on the club's loan calendar. Until that note is recorded, a telescope past its return date shows as not yet checked in and cannot be lent."
+
+Reply go, or dispute C2: <why>, accept C2 as a risk: <why>, answer C2: <what you know>.
+
+**Would cause trouble later, worth fixing, your call (8):**
+- The promise that a member can "see where the loan stands" has no criterion behind it.
+- In AC3, an accepted waiting-list offer is never closed and never recorded for the history.
+- AC3 doesn't say which clock the 48 hours run on.
+- Nothing stops one member from holding two telescopes on the same dates.
+- Anyone holding a forwarded confirmation email can cancel the loan.
+- Every member can read condition notes, which may carry personal detail.
+- Lending by the night instead of by date range (moved down from "needs your decision", as explained above).
+- The Objectives reach further than the double-booking complaint needs.
+
+**Rough edges, nothing to decide (4):**
+- Seven telescopes, not six.
+- "Loan calendar" and "loan history" are used without saying how the two pages differ.
+- The confirmation email reveals which dates a telescope is taken.
+- The spec doesn't say whether the loan history is stored or worked out from loan events.

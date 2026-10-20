@@ -1,0 +1,35 @@
+# Gauntlet: telescope loan desk spec (round 1)
+
+maturity: production (basis: stamp). No concerns waived.
+
+**What the passes found.** The review keeps coming back to one question: can the club tell who had a telescope when it was damaged? The spec names that as its own problem. Right now it lets a telescope show as free on the club's loan calendar once its return date arrives. It does not require the loan officer to have checked it in with a condition note first (AC4). The spec also makes promises that no criterion delivers. Members are told they can "see where the loan stands", but nothing after the confirmation email provides that. Waiting-list offers appear in the history, but no criterion says an offer is recorded or how it is closed (AC3, AC6). Several details are also left open: which clock the 48-hour cancellation limit runs on, whether one member can hold two telescopes on the same dates, and who can read condition notes.
+
+**Whether it holds, and where it came from.** The failure-cases reviewer is right about the unchecked return. It is concrete, and it reproduces the scratched-mirror problem the spec was written to fix. That reviewer also flagged reminders sent to a mistyped address, and rated it lower than it deserves. A bounced email that nobody sees is a production failure visibility gap, and at production maturity that needs your decision. I've raised it to that level. Two other high-severity findings didn't hold up. The right-problem reviewer's proposal to lend by the night depends on how often members want a single night, and by its own admission the spec doesn't say. That makes it a guess about member behaviour, so it moves to "worth fixing". The ease-of-use reviewer said members are never told what goes back in the case. They are: the reminder two days before the return date lists the telescope, eyepieces and finder cap (AC5). So that one moves to "rough edges". Findings raised independently by two reviewers carry the most weight: the undelivered "see where the loan stands" promise (ease of use and self-consistency) and the unrecorded waiting-list offer (buildability and self-consistency). Even so, both are wording gaps, not wrong designs. The fact check says the club owns seven telescopes, not six, but it cites no record. I haven't confirmed it, and nothing in the spec depends on the number.
+
+**What to do about it.** Rewrite the return criterion so a telescope is free only once the officer has checked it in, and add one criterion that shows the loan officer any email that didn't arrive. Both edits are drafted and fit inside this spec. Neither needs a rethink, so the spec can advance this round.
+
+**Recommended outcome:** advance to `ready` this round, with C1 and C2 applied as `resolved`.
+
+| id | finding | proposed disposition | proposed edit |
+|---|---|---|---|
+| C1 | A telescope shows as free on its return date even if nobody has checked it in, so damage can't be traced to who had it | `resolved` | *rewrite AC4: free only after the officer records the return with a condition note; until then it shows "returned and unchecked" and the loan stays with the member* |
+| C2 | A confirmation or reminder sent to a mistyped address fails silently | `resolved` | *add AC7: the loan officer sees any undelivered confirmation or reminder against its loan, with the member's name* |
+
+**Worth fixing, your call (9).** These take no decision now and are kept in the review record:
+- the "see where the loan stands" promise has no criterion behind it
+- waiting-list offers are neither recorded nor closed
+- the 48-hour clock is undefined
+- one member could hold two telescopes on the same dates
+- anyone holding a forwarded confirmation email could cancel the loan
+- condition notes are visible to every member (the security reviewer says hide them; the left-undecided reviewer says show them)
+- lend by the night rather than by date range (moved down from "needs your decision")
+- the Objectives could narrow to preventing double loans
+- whether the history is stored or worked out from events
+
+**Rough edges, nothing to decide (4):**
+- six or seven telescopes (unconfirmed)
+- the case contents could also go in the confirmation email (moved down from "needs your decision")
+- a confirmation email reveals dates that are already taken
+- "loan calendar" and "loan history" are used without saying how they relate
+
+Reply **"go"** to accept. To override a row, name its id and give your reason, for example "dispute C2 because …". You can also ask for the full detail on any finding.

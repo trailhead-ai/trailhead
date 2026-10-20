@@ -1,0 +1,35 @@
+All three need your decision. They're in the order of the opening summary, and the ids won't change.
+
+**1. Members aren't told what goes back in the case until the reminder (C1)**
+
+You need to decide whether the first email should list what goes back in the case. I recommend it should, because a member who keeps the lost finder cap is the one asked to replace it. One correction to the opening summary: the spec does tell members. The reminder, which lists "what goes back in the case: the telescope, its eyepieces, and the finder cap" (AC5), arrives two days before the return date. So the real gap is narrower than the opening summary put it: the list arrives only once, and late.
+
+The worst case: a member mistypes their email address. The confirmation that states "the loan and its return date" (AC1) bounces, and so does the reminder. Nothing tells the loan officer either email failed, and the scope comes back without its finder cap. The member then gets a replacement bill for a rule nobody showed them. The failure-cases reviewer raised the bounced reminder separately, so two reviewers reached this on their own, though neither knew the other had.
+
+Fix: `", and lists what goes back in the case: the telescope, its eyepieces, and the finder cap"` added to the end of the borrowing criterion, after "states the loan and its return date" (AC1).
+
+*Raised by: ease of use. Also reached by failure cases, through the bounced reminder.*
+
+**2. A loan ties up a whole telescope for every date asked (C2)**
+
+You need to decide whether members borrow a telescope by the night or by a start date and a return date. I recommend by the night, but only if single-night loans are common at Hollin Hill. You know how often they are and the reviewers didn't. If they're rare, answering this finding is the right move.
+
+The worst case: a member wants the largest scope for one clear Saturday and books a weekend. AC1 asks for a start date, and the spec then sets a return date. "A second request for the same telescope and dates is refused" (AC2), so the scope sits unused on Sunday while the next member waits weeks for a night. The spec's own Problem names two members asking for the same scope on the same weekend as the main complaint. The current design leaves the scope as hard to get as it is now.
+
+Fix: members would book single nights and add more, and a refusal would offer the next free night. This rewrites the borrowing criteria: borrowing with "a start date" (AC1), "one member at a time" with the next free start date offered (AC2), and cancelling "up to 48 hours before it starts" (AC3). It also touches the return on "the return date" (AC4), the reminder "two days before the return date" (AC5), and the Objectives sentence about "a loan and its return date". It doesn't change the loan history (AC6).
+
+*Raised by: right problem. The reviewer's confidence is medium, because how often a loan is for a single night isn't in the spec.*
+
+**3. A telescope left in the cupboard shows as free with no condition note (C3)**
+
+You need to decide whether a returned telescope stays off the calendar until someone has checked it. I recommend it should. Without that rule, the spec doesn't fix the scratched-mirror problem it was written for.
+
+The worst case: a member drops the scope in the cupboard on the return date while the loan officer is away. The spec says the loan officer "records the telescope as back, with a note of its condition, and the telescope shows as free on the club's loan calendar from that day" (AC4). So the calendar shows the scope as free with no note. The next member finds the scratch, and the loan history (AC6) can't say who had it. That's the same failure the Problem section describes.
+
+Fix: in the return criterion (AC4), "the telescope shows as free on the club's loan calendar from that day" becomes `"the telescope shows as returned and unchecked until a condition note is recorded, and as free on the club's loan calendar only from then"`.
+
+*Raised by: failure cases.*
+
+---
+
+Reply go, or dispute C2: <why>, accept C2 as a risk: <why>, answer C2: <what you know>. For C2, the most useful answer is how often members borrow for a single night.

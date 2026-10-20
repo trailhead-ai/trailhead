@@ -1,0 +1,44 @@
+**The spec review: detail on the three findings that need your decision**
+
+All three are rated "would build the wrong thing, needs your decision". IDs C1 to C3 match the opening summary.
+
+---
+
+**Members aren't told what goes back in the case when they collect the telescope (C1)**
+*Raised by: ease of use. Failure cases raised a related point.*
+
+I recommend adding the list of what goes back in the case to the confirmation email. That way a member knows the finder cap belongs with the telescope from the first night, not only near the end. The confirmation email a member receives on borrowing "states the loan and its return date" and nothing else (AC1). The list of what goes back (the telescope, its eyepieces and the finder cap) first reaches the member in a reminder sent two days before the return date (AC5).
+
+So a member who leaves the finder cap at a viewing site on the first night only finds out it mattered days later, when it's too late to fetch it. They then hand the case back short and are asked to replace the cap. The failure cases reviewer found another route to the same loss: a reminder sent to a mistyped address is never seen, so the list never arrives at all.
+
+Fix: `", and lists what goes back in the case: the telescope, its eyepieces, and the finder cap"` added to the end of the confirmation email sentence in the borrowing criterion (AC1), right after "states the loan and its return date".
+
+This is the weakest of the three. The two-days-before reminder (AC5) already covers the hand-back, so the gap is only the time between collection and the reminder. If you think that gap doesn't matter, this is the one to dispute.
+
+---
+
+**A loan ties up a whole telescope for the full loan period (C2)**
+*Raised by: right problem*
+
+I recommend lending by the night, so a member can book one clear night and add more nights if they want. As written, a member borrows by giving a name, an email address, the telescope and a start date (AC1). A second request for the same telescope and dates is then refused (AC2). The spec never says how long a loan lasts. The return date just appears in the confirmation email, so every loan blocks the telescope for a fixed period, whatever the member actually needs.
+
+Here is the worst case. A member who wants the club's largest telescope for one clear Saturday holds it for the whole weekend. Other members are refused those dates and wait weeks for a night the telescope spent unused in someone's car. That is the "two members ask for the same telescope on the same weekend" problem the spec was written to fix.
+
+Fix: members would book specific nights instead of a start date, and a telescope would only be blocked on the nights actually booked. This rewrites the two Borrowing criteria (AC1 and AC2). "Return date" in the return and reminder criteria (AC4 and AC5) then means the morning after the last booked night, and their wording stays the same.
+
+The finding depends on how often members want just one night, and none of the reviewers could check that. You know how the club actually borrows. If loans are mostly whole weekends, answering with that is the right reply, not accepting this fix.
+
+---
+
+**A telescope left in the cupboard shows as free, with no condition note (C3)**
+*Raised by: failure cases*
+
+I recommend showing a telescope as free only after its condition has been checked. Until then it should show as "returned, unchecked". As written, the loan officer records the telescope as back with a condition note "on the return date", and the telescope "shows as free on the club's loan calendar from that day" (AC4). That makes it free on a date, not because a check happened.
+
+Here is the worst case. A member drops the telescope in the cupboard on a day the loan officer isn't there. The calendar shows it as free, the next member takes it out and finds the scratched mirror, and the loan history has no condition note to show who had it. That is exactly the "nobody can tell afterwards who had a scope when its mirror was scratched" problem the spec opens with.
+
+Fix: the calendar would show a returned telescope as "returned, unchecked" until the loan officer records its condition, and as free only after that. This rewrites the return criterion (AC4) only.
+
+---
+
+Reply **go**, or: **dispute C2:** <why>, **accept C2 as a risk:** <why>, **answer C2:** <what you know>.

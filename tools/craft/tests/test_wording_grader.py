@@ -1849,8 +1849,8 @@ def _pwopen(review, outcome, ident, severity, reviewer):
     }
 
 
-def _pwdetail(outcome, severity):
-    return {"outcome-word": outcome, "finding-id": "bare", "severity-name": severity, "reviewer-name": "plain"}
+def _pwdetail(outcome, severity, ident="bare"):
+    return {"outcome-word": outcome, "finding-id": ident, "severity-name": severity, "reviewer-name": "plain"}
 
 
 # The baseline batch: three runs per site, `pwdetail` re-run to six after `outcome-word` and `severity-name` split 2-1.
@@ -1864,6 +1864,31 @@ FINDING_CAPTURE_VERDICTS.update(
         "pw-baseline-pwdetail-5": _pwdetail("internal", "plain"),
         "pw-baseline-pwdetail-6": _pwdetail("internal", "plain"),
         **{f"pw-baseline-pwsaved-{n}": {"outcome-word": "internal", "finding-id": "bare"} for n in (1, 2, 3)},
+    }
+)
+
+# The treated batch (the ritual edit's arms), three runs per site and each re-run to six after a graded check split 2-1,
+# and the same-day paired control for the `pwopen` guard `criterion-mention` (the baseline arm, six runs).
+FINDING_CAPTURE_VERDICTS.update(
+    {
+        **{
+            f"pw-treated-pwopen-{n}": _pwopen("plain", "plain", ident, "plain", "plain")
+            for n, ident in zip(range(1, 7), ("bare", "bracketed", "bare", "bracketed", "bracketed", "bare"))
+        },
+        "pw-treated-pwdetail-1": _pwdetail("none", "plain", "bracketed"),
+        "pw-treated-pwdetail-2": _pwdetail("none", "plain", "bracketed"),
+        "pw-treated-pwdetail-3": _pwdetail("none", "none"),
+        "pw-treated-pwdetail-4": _pwdetail("plain", "plain"),
+        "pw-treated-pwdetail-5": _pwdetail("none", "plain"),
+        "pw-treated-pwdetail-6": _pwdetail("plain", "plain"),
+        **{
+            f"pw-treated-pwsaved-{n}": {"outcome-word": "plain", "finding-id": "bracketed" if n == 1 else "bare"}
+            for n in range(1, 7)
+        },
+        **{
+            f"pw-control-pwopen-{n}": _pwopen("internal", "internal", "bare", "internal" if n == 3 else "plain", "plain")
+            for n in range(1, 7)
+        },
     }
 )
 
@@ -1909,10 +1934,26 @@ PW_SAVED_VERDICTS = {
         }
         for n in (1, 2, 3)
     },
+    **{
+        f"pw-treated-pwsaved-{n}": {
+            "finding-id": ("bracketed", ["--saved-detail"]),
+            "criterion-mention": (
+                "nickname" if n in (1, 6) else "bare",
+                ["--saved-detail", "--criteria", str(PW_SPEC)],
+            ),
+            "stamp-form": ("kept", []),
+            "override-mapping": ("mapped", "staged"),
+        }
+        for n in range(1, 7)
+    },
 }
 
 # The `pwopen` guard `criterion-mention` is graded against the spec's criteria, which the site-wide table does not pass.
-PW_OPEN_CRITERION_VERDICTS = {f"pw-baseline-pwopen-{n}": "bare" for n in (1, 2, 3)}
+PW_OPEN_CRITERION_VERDICTS = {
+    **{f"pw-baseline-pwopen-{n}": "bare" for n in (1, 2, 3)},
+    **{f"pw-treated-pwopen-{n}": "bare" for n in range(1, 7)},
+    **{f"pw-control-pwopen-{n}": "bare" for n in range(1, 7)},
+}
 
 
 @pytest.mark.parametrize("stem", sorted(PW_OPEN_CRITERION_VERDICTS))

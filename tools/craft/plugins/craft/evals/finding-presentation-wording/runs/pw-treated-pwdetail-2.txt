@@ -1,0 +1,23 @@
+Here is the detail on the three findings from the spec review that need your decision. They are in the same order as before.
+
+**Would build the wrong thing, needs your decision**
+
+**Members are not told what goes back in the case until near the end of the loan (C1)**
+Should the confirmation email list what goes back in the case? I recommend it does, because a member who doesn't know the finder cap belongs in the case may lose it and be asked to replace it. As written, a member only learns this from the reminder sent two days before the return date (AC5). The email they get when they borrow gives only the loan and its return date (AC1). I checked this one myself, and it is narrower than the ease-of-use reviewer said. For a normal loan the reminder does tell the member in time. The real gap is a loan shorter than two days, such as a single night: its reminder would be due before the loan even starts, so the member is never told at all.
+Worst case: a member borrows a scope for one night and never gets a list of what belongs in the case. They return it without the finder cap and are asked to pay for a new one.
+Fix: add `", and lists what goes back in the case: the telescope, its eyepieces, and the finder cap"` to the end of the borrowing criterion, after "states the loan and its return date" (AC1). This keeps the reminder (AC5) as it is. It covers every loan, including one too short for the reminder to arrive.
+Raised by: ease of use.
+
+**A loan ties up a whole telescope for every date it covers (C2)**
+Should members borrow a telescope by the night instead of from a start date to a return date? I recommend it, because the club's main complaint is two members wanting the same scope on the same weekend. Lending in fixed blocks makes that clash worse. The spec ties each loan to a telescope from its start date (AC1) and refuses any other request for those dates (AC2).
+Worst case: a member wants the largest scope for one clear night and books it, so it is held for the whole weekend. It sits unused on the other nights while the next member in line waits weeks.
+Fix: members would book a scope night by night and add nights as they need them, so one clear night no longer blocks a weekend. This rewrites the whole Borrowing section: borrowing (AC1), one loan at a time (AC2) and cancelling (AC3). It also changes what "return date" means in recording a return (AC4) and in the reminder (AC5). One caveat changes whether to take this: the right-problem reviewer had only medium confidence, because the spec doesn't say how often a loan is for a single night. You or the loan officer may know. If most loans really are for a weekend, the rewrite isn't worth it.
+Raised by: right problem.
+
+**A scope left in the cupboard shows as free with no condition note (C3)**
+Should a returned telescope stay marked unavailable until someone records its condition? I recommend it. Knowing who had a scope when its mirror was scratched is one of the three problems this spec exists to fix, and as written the gap stays open. The spec only gets a condition note when the loan officer is there on the return date. The scope also shows as free from that day either way (AC4).
+Worst case: a member leaves a scope in the cupboard while the loan officer is away. The calendar shows it as free with no condition note. The next member finds a scratched mirror, and nobody can say whether it happened on the earlier loan or theirs. The spec is marked production maturity, so this would happen on the live club calendar.
+Fix: the loan calendar would show a returned telescope as "returned, not yet checked" until the loan officer records its condition, and as free only after that. This changes the return criterion (AC4), and the loan history entry for returns (AC6) gains that unchecked state.
+Raised by: failure cases.
+
+Reply go, or dispute C2: <why>, accept C2 as a risk: <why>, answer C2: <what you know>.

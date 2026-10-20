@@ -1,0 +1,31 @@
+**Gauntlet: telescope loan desk spec, round 1.** maturity: production (basis: stamp). Nothing was waived.
+
+**What the passes found.** Most of the findings concern what happens around a loan, not the act of borrowing. The biggest gap is returns. The spec says a telescope shows as free once the loan officer records it back with a condition note (AC4). But a scope a member leaves in the cupboard with nobody checking it has no defined state. That is exactly how the Problem's scratched mirror goes unexplained. The second gap is email. The confirmation and the reminder are the only way a loan reaches its member, and nothing tells anyone when one doesn't arrive. The rest gathers around cancellation and the waiting list (AC3): which clock the 48 hours run on, who may cancel, and how an offer is closed and recorded. Separately, two reviewers noticed that the Objectives promise members can "see where the loan stands", but nothing after the first email delivers that.
+
+**Whether it holds.** The failure-cases reviewer is right about returns, and it is the one finding tied directly to the Problem as written. That reviewer rated the bounced-email issue lower than this spec's production maturity sets. Under that calibration, a failure that only a user would report needs your decision, so I have raised it. The right-problem reviewer's case for lending by the night rests on how often members want a single night, which the spec doesn't tell us. Its own confidence says so, so I downgraded it. The ease-of-use reviewer's finder-cap finding overreached: the reminder already lists what goes back in the case (AC5). What is left of that worry is the reminder not arriving, which C2 covers. The self-consistency and ease-of-use reviewers both independently flagged "see where the loan stands", which is the strongest signal among the lesser findings. The security and left-undecided reviewers disagree on who may read condition notes. The fact check refuted "six telescopes": the club's register says seven.
+
+**What to do.** Make two edits and advance. First, a returned scope stays "returned, unchecked" until someone records its condition. Second, the loan officer sees any undelivered email. Both are drafted below. The AC3 gaps and the undelivered "see where the loan stands" promise are worth a follow-up spec, or an override now if you'd rather fold them in.
+
+**Recommended outcome:** apply C1 and C2 and advance this round to `ready`.
+
+| id | finding | proposed disposition | proposed edit |
+|---|---|---|---|
+| C1 | A scope returned with nobody checking it shows as free with no condition note, so damage can't be traced to whoever had it | `resolved` | Rewrite AC4: "When a telescope comes back, it shows on the club's loan calendar as returned and unchecked. It shows as free only from the day the loan officer records its condition note." |
+| C2 | A confirmation or reminder sent to a mistyped address fails silently, and the member never learns the loan or what goes back in the case | `resolved` | Add AC7 under Returns and care: "When a confirmation or reminder email cannot be delivered, the loan officer is shown the undelivered email against its loan, with the address it was sent to." |
+
+**Would cause trouble later, worth fixing, your call (8):**
+- Nothing delivers "see where the loan stands" (raised by both self-consistency and ease of use).
+- AC3 leaves the waiting-list offer with no way to close and no record.
+- The 48-hour cancel clock is unpinned.
+- A forwarded email lets anyone cancel.
+- Reviewers split on whether condition notes appear on the shared history.
+- One member can hold two scopes on the same dates.
+- Lending by the night (downgraded, see above).
+- The finder cap is missing from the confirmation (downgraded, see above).
+
+**Rough edges, nothing to decide (3):**
+- "Six telescopes" should read seven.
+- AC4 says "loan calendar" and AC6 says "loan history"; the two are not the same page.
+- The confirmation email reveals which dates a scope is already taken.
+
+Reply **go** to apply both edits and flip the spec to `ready`. To override a row, give its id and your reason ("dispute C2: …", "answer C1: …").

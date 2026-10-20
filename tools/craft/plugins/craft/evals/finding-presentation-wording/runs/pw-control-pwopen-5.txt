@@ -1,0 +1,41 @@
+## Spec review: telescope loan desk (`pw-spec.md`), round 1
+
+`maturity: production (basis: stamp)`. No concerns were waived.
+
+**What the passes found.** The spec handles booking well. It is weak where a telescope comes back and where a message fails to arrive. The worst gap is in "the loan officer records the telescope as back, with a note of its condition, and the telescope shows as free on the club's loan calendar from that day" (AC4). That wording lets a telescope left in the cupboard show as free with no condition note. The next member then finds the scratched mirror, which is the exact problem the spec opens with. The second gap is email. If a confirmation or reminder bounces, nobody finds out. Two smaller themes came from several reviewers at once. First, the Objectives promise a member can "see where the loan stands", but nothing after the first email delivers that. Second, the waiting list is only half described: no criterion lets a member join it, and no criterion records or closes an offer.
+
+**Whether it holds.** The failure-cases reviewer is right about the unchecked return, and I'm keeping it as needing your decision. The same reviewer rated the bounced email as worth fixing, your call. I've raised it to needing your decision because this spec is stamped for production use, and at that stage a failure no human can see always rates that high. Two other reviewers asked for a decision and overreached, so I've moved both down a level. The right-problem reviewer wants loans by the night rather than by start date. That rests on a guess about how members borrow, which the reviewer admits the spec doesn't show, so it is now worth fixing, your call. The ease-of-use reviewer said members are never told the finder cap goes back in the case. That was raised as needing your decision, but "the member receives a reminder listing what goes back in the case: the telescope, its eyepieces, and the finder cap" (AC5) already tells them. So it's now a rough edge. The fact check found the club owns seven telescopes, not six. Nothing in the spec depends on the number. I dropped four notes:
+- naming the mail provider
+- calling the waiting list "next in line"
+- whether the history is stored or worked out from events, which is a build question
+- the claim that the spec answers one complaint, when the Problem names three
+
+**What to do.** Change AC4 so a telescope shows as free only once its condition is recorded. Add one criterion that shows the loan officer any email that didn't get through. With those two edits the spec can go to `ready`. The waiting-list and loan-status gaps are worth fixing before planning, but whether to fix them is your call.
+
+**Recommended outcome:** accept both edits below and the spec advances to `ready` this round.
+
+| id | finding | proposed disposition | proposed edit |
+|---|---|---|---|
+| C1 | A telescope left in the cupboard shows as free with no condition note | `resolved` | replace AC4 so a telescope reads as free only after its condition note is recorded |
+| C2 | An undelivered confirmation or reminder goes unnoticed | `resolved` | add AC7, which shows the loan officer any email that bounced |
+
+These are the drafted texts. Accepting applies them word for word.
+- C1: "**AC4.** When a telescope comes back, the loan officer records it as back with a note of its condition, and only then does it show as free on the club's loan calendar; until then it shows as returned and unchecked."
+- C2: "**AC7.** When a confirmation or reminder email cannot be delivered, the loan officer is shown the loan it was for and the address it was sent to."
+
+**Worth fixing, your call (7).** These are listed most serious first and take no disposition:
+- The loan-status promise in the Objectives has nothing delivering it.
+- The waiting list has no criterion to join it, record an offer or close one.
+- The clock for the 48-hour cancel cutoff is not set.
+- It's not stated who can read condition notes in the history.
+- A cancel isn't tied to the member who borrowed.
+- A member could hold two loans on the same dates.
+- Loans could be lent by the night instead (moved down a level).
+
+**Rough edges, nothing to decide (4):**
+- The spec says six telescopes; the club owns seven.
+- The finder-cap list could also go in the confirmation email (moved down a level).
+- The confirmation email shows which dates are taken.
+- "Loan calendar" and "loan history" are easy to confuse.
+
+Reply "go" to accept, or override by id. For example, "dispute C2 because …" or "answer C1: …". A dispute, accepted risk or answer needs your own reason.

@@ -1,0 +1,33 @@
+The spec review (gauntlet) of the telescope loan desk spec is done. All eight passes came back. maturity: production (basis: stamp); no concerns were waived.
+
+**What the passes found.** The findings fall into three groups. The biggest is about returns. The Problem says nobody can tell who had a scope when its mirror was scratched. But the return criterion lets a telescope show as free on its return date even when nobody has checked it ("the telescope shows as free on the club's loan calendar from that day" (AC4)). Second, the Objectives promise that a member can "see where the loan stands", but no criterion gives them that after the first confirmation email. Third, the waiting list, cancellations and the loan history leave things open that two builders could reasonably settle differently. These include how an offer from the waiting list is recorded and closed, which clock the 48-hour cancel window runs on, and who can read condition notes. The fact check also found the spec wrong on one fact: the club's equipment register lists seven telescopes, not six.
+
+**Whether it holds.** The failure-cases reviewer is right about the unchecked return. I checked AC4's wording myself: "that day" means the return date, not the day anyone records the scope as back. So a scope dropped in the cupboard, or a late return, shows as free with no condition note. That is the exact failure the spec exists to prevent. Two reviewers, self-consistency and ease of use, found the missing loan-status view independently, and that is the strongest signal in this run. I treat it as needing your decision because an objective with nothing delivering it would be built wrong. The right-problem reviewer's proposal to lend by the night is a guess about how members borrow, and its own confidence line admits that. I moved it down to "would cause trouble later, worth fixing, your call". The ease-of-use reviewer's missing finder-cap list is mostly answered already: two days before the return date, the member is sent a reminder listing what goes back in the case (AC5). What's left of it is a bounced reminder, which the failure-cases reviewer covers. I moved it to "rough edges".
+
+**What to do about it.** I've written two edits to the criteria. One makes a scope free only once the loan officer has checked it in. The other adds a criterion that lets members look up their own loans. With those in, the spec can go to ready. The remaining findings are logged for the record and don't block it.
+
+**Recommended outcome:** apply both edits, then mark the spec ready. Nothing needs a rewrite this round.
+
+| finding | proposed outcome | proposed edit |
+|---|---|---|
+| *An unchecked scope shows as free on its return date (C1)* | fixed in the spec | *AC4 becomes: "A telescope shows as free on the club's loan calendar only once the loan officer has recorded it as back with a note of its condition; until then, from its return date, it shows as overdue."* |
+| *"See where the loan stands" has no criterion behind it (C2)* | fixed in the spec | *add AC7 under Borrowing: "A member can look up their own loans at any time and see, for each, whether it is booked, out, overdue, returned or cancelled, with its dates."* |
+
+Reply go, or dispute C2: <why>, accept C2 as a risk: <why>, answer C2: <what you know>.
+
+**Would cause trouble later, worth fixing, your call (9):**
+- **Waiting list.** A waiting-list offer is never recorded or closed ("offered to the first member on that telescope's waiting list" (AC3)). Raised by self-consistency and buildability.
+- **Cancelling.** Nothing ties a cancel to the member who borrowed, so a forwarded confirmation email is enough to cancel a loan. Raised by security.
+- **The 48-hour window.** Its clock is unpinned: midnight or noon. Raised by left undecided and failure cases.
+- **Condition notes.** They sit in a history every member can read, and the reviewers disagree on who should see it. Raised by security and left undecided.
+- **Loans per member.** Nothing stops one member holding two loans on the same dates. Raised by left undecided.
+- **Bounced reminders.** A reminder that bounces is never seen by anyone. Raised by failure cases.
+- **Loan history.** The spec doesn't say whether it's stored or worked out from events. Raised by buildability.
+- **Lending by the night.** Moved down from "needs your decision". Raised by right problem.
+- **Objectives.** They are broader than the double-booking complaint behind them. Raised by right problem.
+
+**Rough edges, nothing to decide (4):**
+- **Telescope count.** The Problem says six telescopes, but the register lists seven. Fact check.
+- **Finder cap.** It isn't listed in the confirmation email. Moved down; mostly covered by AC5.
+- **Confirmation email.** It shows which dates a scope is taken.
+- **Naming.** "Loan calendar" and "loan history" are used without saying they are different pages.

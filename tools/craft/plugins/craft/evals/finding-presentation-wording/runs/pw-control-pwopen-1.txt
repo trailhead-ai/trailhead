@@ -1,0 +1,23 @@
+**Gauntlet: the telescope loan desk spec (round 1)**
+Maturity: production (basis: stamp). Nothing was waived.
+
+The eight reviewers kept coming back to two weak spots. The first is what happens when a telescope comes back. The spec marks a scope free the day it returns, but says nothing about a scope that comes back with no condition check. That is exactly how the Problem's scratched mirror goes unexplained. The second is what a member can see once the first email has gone. The Objectives promise that a member can "see where the loan stands", but no criterion delivers that. Smaller gaps sit around the edges: the waiting-list offer in the cancellation rule has no way to close, there is no clock for the 48-hour cut-off, and the rules don't say who may cancel a loan or who can read the condition notes.
+
+The failure-cases reviewer is right, and its finding is the only one that holds at "needs your decision". It ties directly to a failure the Problem names, and it describes a state the club will certainly reach. Two other reviewers marked findings at that level, and I have moved both down to "worth fixing, your call". The right-problem reviewer wants loans counted by the night. That rests on how often members borrow for a single night, which the spec doesn't say and the reviewer admits it doesn't know. It's a guess about behaviour, not a defect. The ease-of-use reviewer says members are never told the finder cap goes back in the case. But the reminder two days before the return date already lists the telescope, its eyepieces and the finder cap (AC5), so the harm it describes mostly can't happen. The self-consistency and ease-of-use reviewers reached the "see where the loan stands" gap independently, so it heads the "worth fixing" list. The fact check found the spec counts six telescopes where the club's register lists seven.
+
+My recommendation is one edit to the return rule, after which the spec advances. A telescope would show as free only after its condition note is recorded. Until then it would show as returned and unchecked, where the loan officer can see it. The remaining items are worth tightening, but none of them stops planning.
+
+**Recommended outcome:** advance to `ready` once you accept. There are no `revise` findings, and the spec has no predecessor to retire.
+
+| id | finding | proposed disposition | proposed edit |
+|---|---|---|---|
+| C1 | A scope left back with no condition check shows as free, so damage can't be traced to whoever had it | `resolved` | Rewrite the return rule (AC4) so a scope is free only after its condition note is recorded, and is shown as returned and unchecked until then |
+
+Drafted text for C1, replacing AC4:
+> **AC4.** When a telescope comes back, the loan officer records it as back with a note of its condition, and only then does it show as free on the club's loan calendar. A telescope whose return date has passed with no condition note recorded shows as returned and unchecked, and the loan officer can see every such telescope.
+
+**Worth fixing, your call (10):** no criterion lets a member see where their loan stands after the first email, and the waiting-list offer in the cancellation rule (AC3) is never recorded or closed. Other gaps: no clock for the 48 hours; nothing ties a cancellation to the member who borrowed; members' condition notes may be readable by everyone; one member could hold two scopes on the same dates; a bounced reminder is never seen by anyone. Also here are the two findings I moved down (lending by the night, the finder cap in the first email), plus whether the loan history is stored or rebuilt from events.
+
+**Rough edges, nothing to decide (3):** the spec says six telescopes but the register lists seven; "loan calendar" and "loan history" are used as if they were one page; the confirmation email shows which dates a scope is already taken.
+
+Reply "go" to accept. To override C1, say `accepted-as-risk`, `disputed` or `answered`, and give your reason in your own words.

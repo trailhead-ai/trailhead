@@ -1,0 +1,34 @@
+**The spec review (gauntlet)** of the telescope loan desk spec is done. All eight passes returned. Maturity: production (basis: stamp), and no concerns were waived.
+
+The passes found three things. First, the spec's central promise is weaker than it reads: the Problem says nobody can tell afterwards who had a scope when its mirror was scratched, but the officer records the telescope as back with a condition note and it shows as free from that day (AC4), so a scope dropped back without the officer ends up free with no note on it. Second, a mistyped email address fails silently. The confirmation email that states the loan and its return date (AC1) and the reminder two days before the return date (AC5) carry the whole member side of the loan, and nobody is told when one doesn't arrive. Third, smaller parts are left open around the waiting list, the 48-hour cancel window, and who can see condition notes. The Objectives also promise members can "see where the loan stands", and no criterion delivers that. Separately, the fact check found the club has seven telescopes, not six.
+
+The failure-cases pass had the strongest finding, and it lands squarely on the Problem's own complaint. Its bounced-email finding came in as "worth fixing, your call". I've raised it to "needs your decision" because this spec is at production maturity, where a failure no human can see is not optional. The right-problem pass's lend-by-the-night idea guesses at how members actually borrow, and the Problem itself describes weekend clashes, so I've downgraded it. Its claim that the six criteria are a bigger build than the complaint needs overreaches: the Problem names three complaints, not one. The ease-of-use pass asked for the case-contents list in the confirmation email, but it missed that the two-day reminder (AC5) already lists the telescope, eyepieces and finder cap, so that is now rough edges. Two pairs of passes converged: self-consistency and ease of use both flagged the "see where the loan stands" gap, and buildability and self-consistency both flagged the half-built waiting list. Nothing in the spec says how a member joins that list in the first place.
+
+My recommendation is two edits to the criteria, both drafted, after which the spec advances. Everything else is logged for planning to pick up.
+
+**Recommended outcome:** advance this round. Apply C1 and C2, then flip the spec to `ready`.
+
+| finding | proposed outcome | proposed edit |
+|---|---|---|
+| *A telescope returned without a condition note shows as free, so damage can't be traced to who had it* (C1) | fixed in the spec | *rewrite AC4 so a scope shows "returned and unchecked" until its condition note is recorded, and free only from then* |
+| *An undeliverable confirmation or reminder email is never noticed by anyone* (C2) | fixed in the spec | *add AC7: when a confirmation or reminder email can't be delivered, the loan officer is shown which member and which loan it was for* |
+
+Reply go, or dispute C2: <why>, accept C2 as a risk: <why>, answer C2: <what you know>.
+
+**Would cause trouble later, worth fixing, your call (8):**
+- Nothing delivers the Objectives' "see where the loan stands" (raised by both self-consistency and ease of use).
+- The waiting list is half-specified: nothing says how a member joins it, how an offer is taken up, or that offers are recorded.
+- Loans could be lent by the night instead of by date range (downgraded, since it guesses at member behaviour).
+- Anyone holding a forwarded confirmation email could cancel the loan.
+- Condition notes are visible to every member. The security pass would hide them and the left-undecided pass would show them, so this needs settling.
+- Nothing caps how many telescopes one member can hold on the same dates.
+- It isn't said whether the 48-hour cancel window runs from midnight or noon (raised by both left undecided and failure cases).
+- It isn't said whether the loan history is stored or worked out from the events.
+
+**Rough edges, nothing to decide (4):**
+- The Problem says six telescopes and the equipment register lists seven. It's a one-word fix and I can fold it into the write if you say so.
+- The confirmation email could repeat the case-contents list.
+- AC4 calls it a "loan calendar" and AC6 a "loan history", and these are different pages.
+- A confirmation email shows which dates a scope is taken.
+
+I dropped two editorial notes: naming the mail provider, and a wording preference for "waiting list".
