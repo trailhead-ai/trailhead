@@ -1,11 +1,11 @@
 ---
 name: scratch-pad
-description: Open a design question as a pad of hand-drawn layout sketches in the browser, so options can be compared as drawings instead of read as descriptions, and add a follow-up round of questions to a pad the user already has open. Use when a design question's options are visual layouts (where a control lives, how a page is arranged, which of several screens to build), or for "sketch these options", "draw the layouts", "show me the options", "open a scratch pad".
+description: Open a design question as a pad of hand-drawn sketches in the browser, so options can be compared as drawings instead of read as descriptions, and add a follow-up round of questions to a pad the user already has open. Use when a design question's options are visual layouts (where a control lives, how a page is arranged, which of several screens to build) or flows (the steps of a process, how data or control moves through a system, an architecture picture), or for "sketch these options", "draw the layouts", "draw the flow", "show me the options", "open a scratch pad".
 ---
 
 # Scratch pad
 
-A pad is a set of pages of layout sketches. Each page is one round of design
+A pad is a set of pages of sketches, layouts and flows. Each page is one round of design
 questions, and a pad holds one or more rounds: the pad opens on its latest
 round, a switcher at the top reaches the earlier ones, and each round keeps the
 drawings it was made with. You write a round as a JSON file; the bundled script
@@ -20,9 +20,12 @@ opens from disk with nothing running and no network.
 
 Use it when the question being decided is about how something *looks or is
 arranged* and the options differ visually: header layouts, where a control
-lives, one screen versus two, list versus grid. Do not use it for questions
-whose options differ in behaviour, naming, data or trade-offs that a drawing
-cannot show; ask those in words.
+lives, one screen versus two, list versus grid. Use it too when the options are
+*flows* that differ in shape: the steps of a process, which step decides what,
+where a loop goes back, how data or control moves between the parts of a system.
+Draw those as a `flow`, not a `layout`. Do not use it for questions whose
+options differ in naming, data or trade-offs that a drawing cannot show, or in
+behaviour that has no steps to draw; ask those in words.
 
 When the user has a pad open and the next question is also visual and belongs to
 the same design, add it to that pad as a new round (see "Build the pad"). A
@@ -57,6 +60,23 @@ One JSON file, written anywhere you can read back (a temp file is fine):
           "layout": {"column": [{"text": "Logo"}, {"button": "Sign in"}]}
         }
       ]
+    },
+    {
+      "prompt": "Sign-in steps",
+      "options": [
+        {
+          "name": "Retry in place",
+          "cost": "Fewest screens; a wrong password loops back to the form.",
+          "pick": true,
+          "flow": "flowchart LR\n  start([Open page]) --> form[Email and password]\n  form --> check{Right?}\n  check -->|yes| home[Settings]:::accent\n  check -.->|no| form"
+        },
+        {
+          "name": "Separate error page",
+          "cost": "One more screen to build and test.",
+          "pick": false,
+          "flow": "flowchart LR\n  start([Open page]) --> form[Email and password] --> check{Right?}\n  check -->|yes| home[Settings]\n  check -->|no| err(Error page) --> form"
+        }
+      ]
     }
   ]
 }
@@ -66,7 +86,7 @@ One JSON file, written anywhere you can read back (a temp file is fine):
 - `questions` holds at least one question. Each has a non-empty `prompt` and
   1 to 26 `options` (lettered A to Z in order).
 - Each option has a non-empty `name`, a non-empty `cost` (a line or two on what
-  choosing it costs), and a `layout`. `pick` is optional on each option, but
+  choosing it costs), and exactly one of a `layout` or a `flow`, never both. `pick` is optional on each option, but
   exactly one option per question carries `"pick": true`: your own
   recommendation.
 - An unknown key in this outer shape is refused, so a misspelt key is caught
@@ -81,10 +101,11 @@ One JSON file, written anywhere you can read back (a temp file is fine):
   in the same pad is refused.
 - Numbers anywhere in the round must be finite; one too large to write is refused.
 
-The script checks only this outer shape. It does not look inside `layout`, so
-a bad block still builds a pad (exit 0), and that drawing shows "Can't draw this
-layout" in its place. Get the blocks right yourself, and check the pad if the
-layouts matter.
+The script checks only this outer shape. It does not look inside `layout` or
+`flow` (a `flow` is only checked to be a string), so a bad block or a bad flow
+line still builds a pad (exit 0), and that drawing shows "Can't draw this
+layout" or "Can't draw this flow" in its place. Get the blocks and the flow text
+right yourself, and check the pad if the drawings matter.
 
 A `layout` is a tree of blocks. Each block is an object with exactly one key
 naming its kind:
@@ -116,7 +137,47 @@ A later round in the same pad, with what the first one settled:
 }
 ```
 
-Keep drawings schematic: a few blocks per option, enough to show how the
+A `flow` is a string of text in a small part of Mermaid's flowchart syntax, one
+statement per line (`\n` in the JSON). One question may hold layout options and
+flow options side by side.
+
+| Write | Meaning |
+|---|---|
+| first line `flowchart LR` or `flowchart TD` | required header; `graph` for `flowchart`, and `TB` for `TD`, also work. `LR` runs left to right, `TD` top to bottom |
+| `a`, `a[text]`, `a(text)`, `a([text])`, `a{text}` | a step: bare id, box, rounded, pill, decision. An id is letters, digits and `_`. A label with brackets, parentheses, braces or `\|` goes in quotes: `a["save (draft)"]` |
+| `a --> b`, `a -.-> b` | an arrow; dashed for `-.->` |
+| `a -->|yes| b`, `a -- yes --> b`, `a -.->|no| b`, `a -. no .-> b` | an arrow with a label |
+| `a --> b --> c` | a chain on one line |
+| `a[text]:::accent` | outline and hatch the step in the accent colour, to mark the recommended or changed step; the label and arrows stay in ink. Works on any mention of the step |
+
+A step's shape and label are given once; naming it again by id alone is fine.
+A trailing `;` is ignored. A loop back (an arrow to a step that already leads to
+the arrow's source) is drawn in a lane outside the flow, so write loops as plain
+arrows. Long labels wrap at about ten words. A flow wider than its card is scaled
+down to fit, never below 0.6 of its size, and the card then scrolls sideways.
+
+Ignored without complaint: `classDef`, `class`, `style` and `linkStyle` lines,
+`%%{ ... }%%` directives, and any `:::name` other than `accent`.
+
+Refused (that line is reported, nothing is drawn): anything else you may reach for
+out of Mermaid habit.
+
+- `subgraph` / `end`, `click`, `direction` lines, and `%%` comments (remove them)
+- `A & B` (write one arrow per pair)
+- steps shaped `((circle))`, `{{hexagon}}`, `[(database)]`, `[[subroutine]]`,
+  `[/slanted/]` or `>flag]`
+- `RL` and `BT` headers (use `LR`, `TD` or `TB`)
+- `---`, `-.-`, `==>`, `--o`, `--x` and two-way `<-->` arrows (use `-->` or `-.->`)
+
+Limits: at most 400 lines, 1000 characters per line, 60 steps and 120 arrows,
+and arrows may not pass more than 2000 waypoints; a flow over a limit shows only
+that message. A flow with no steps is refused.
+
+A flow with a mistake still builds, and its drawing shows "Can't draw this flow"
+followed by each broken line and why (up to five, then "and N more") and
+"Ask the session to redraw this option."
+
+Keep drawings schematic: a few blocks or steps per option, enough to show how the
 options differ. Every string is shown as text, never as markup.
 
 ## Build the pad
@@ -192,6 +253,8 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/scratch-pad/scratch_pad.py \
     folder (to the folder beside it, say), and rerun the same `--add`. Do not start
     a new pad. (Finder's `.DS_Store` and `._*` files are ignored and never get
     this line.)
+  - `scratch-pad: … has both "layout" and "flow"` or `no "layout" or "flow"`: give
+    the option exactly one and rerun.
   - `… give each round its own title`: the round's title matches an earlier
     round's. Retitle the round and rerun.
   - `scratch-pad: waiting for another session's add to pad "<pad>"…` on stderr is
@@ -216,6 +279,10 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/scratch-pad/scratch_pad.py \
     never one you found by looking in `sites/` yourself. A further line `scratch-pad: publish: older
     leftovers that may be partial: <paths>` lists earlier leftovers; leave them
     alone and do not restore from them.
+
+After any pad that holds a flow, ask the user to paste back any "Can't draw this
+flow" message an option shows. The fix is a new round (`--add`, with its own
+title) redrawing that option; do not rebuild the pad.
 
 Always ask the question in words too, on an added round as on a first one. The
 pad takes answers: the user can pick an option, mark options "Not this", choose
