@@ -1,0 +1,32 @@
+[
+  {
+    "kind": "decision",
+    "title": "Set the loan period for power tools",
+    "status": "active",
+    "body": "# Set the loan period for power tools\n\n## Context\nMembers keep asking how long a drill or a saw may stay out.\n\n## Decision\nA member may keep a power tool for 6 days, and the desk volunteer writes the due date on the loan card.\n\n## Consequences\nTools come back before the weekend rush.\n"
+  },
+  {
+    "kind": "decision",
+    "title": "Keep a wipe-down step on every tool return",
+    "status": "active",
+    "body": "# Keep a wipe-down step on every tool return\n\n## Context\nSawdust and grease left on a returned tool wear it out.\n\n## Decision\nA power tool is lent for 4 days and must be wiped down before it goes back on the shelf. The desk volunteer signs the tool back in on the return sheet.\n\n## Consequences\nTools stay clean and the return sheet shows who handled each one.\n",
+    "related": [
+      "decision=set-the-loan-period-for-power-tools"
+    ]
+  },
+  {
+    "kind": "area",
+    "title": "Tool desk",
+    "status": "active",
+    "body": "# Tool desk\n\nThe desk is where members sign tools in and out. The loan rules are set in decision/set-the-loan-period-for-power-tools. Members borrow a power tool for 4 days; the desk opens at ten on weekdays. A volunteer staffs the desk and keeps the loan cards in the green box.\n"
+  },
+  {
+    "kind": "task",
+    "title": "Check the drill batteries when a loan comes back",
+    "status": "done",
+    "body": "# Check the drill batteries when a loan comes back\n\nTest each drill battery when a loan comes back, and put flat ones on the charger. Leave a note on the return sheet for any battery that will not hold a charge.\n",
+    "related": [
+      "decision=set-the-loan-period-for-power-tools"
+    ]
+  }
+]

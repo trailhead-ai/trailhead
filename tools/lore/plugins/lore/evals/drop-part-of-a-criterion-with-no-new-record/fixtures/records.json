@@ -1,0 +1,8 @@
+[
+  {
+    "kind": "spec",
+    "title": "Publish trail closure notices",
+    "status": "ready",
+    "body": "# Publish trail closure notices\n\n## Problem\nHikers set out for a trail that rangers have already closed, because the closure is only pinned to a board at the trailhead.\n\n## Objectives\n- Hikers can see which trails are closed before they set out.\n- Rangers can take a notice down when a trail reopens.\n\n## Maturity\n- marlin: early\n\n## Acceptance Criteria\n- **AC1.** A ranger can post a closure notice for a trail. *Verified by: manual check.*\n- **AC2.** A closure notice shows on the page for that trail and is emailed to hikers who follow that trail. *Verified by: manual check.*\n- **AC3.** A ranger can take a closure notice down when the trail reopens. *Verified by: manual check.*\n"
+  }
+]

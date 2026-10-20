@@ -1,0 +1,8 @@
+[
+  {
+    "kind": "spec",
+    "title": "Let members collect holds",
+    "status": "ready",
+    "body": "# Let members collect holds\n\n## Problem\nMembers do not know when a book they asked for is waiting, and staff cannot find the book at the desk.\n\n## Objectives\n- Members can pick up a book the library is holding for them.\n- Members find out when a hold is ready.\n\n## Maturity\n- marlin: early\n\n## Acceptance Criteria\n- **AC1.** A member can collect a held book from the front desk by showing a library card. *Verified by: manual check.*\n- **AC2.** A member is told by text message and by email when a hold is ready. *Verified by: manual check.*\n- **AC3.** A held book is kept at the front desk for seven days. *Verified by: manual check.*\n"
+  }
+]
