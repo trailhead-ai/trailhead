@@ -528,3 +528,693 @@ def test_a_successful_dependents_read_with_no_match_is_not_an_error(
     )
     assert code == 0, err
     assert out["dependents"] == {target: []}
+
+
+# --- the merge path ------------------------------------------------------------------
+
+INTENT = "also covers the retry path"
+
+
+def merge_entry(env, vault, survivor, absorbed):
+    """`absorbed` is a list of names, or of (name, intent) pairs."""
+    return {
+        "survivor": {"name": survivor, "revision": shown_revision(env, vault, survivor)},
+        "absorbed": [
+            {
+                "name": n,
+                "revision": shown_revision(env, vault, n),
+                "intent": i,
+            }
+            for n, i in ((a, INTENT) if isinstance(a, str) else a for a in absorbed)
+        ],
+    }
+
+
+def merge_doc(env, vault, merges, drops=(), reason=REASON):
+    doc = file_for(env, vault, drops, reason=reason)
+    doc["merges"] = [merge_entry(env, vault, s, a) for s, a in merges]
+    return doc
+
+
+def merged_line(body, name):
+    return body.partition(f"\n## Merged from task/{name}\n\n")[2].split("\n")[0]
+
+
+def is_note_write(argv, survivor=None):
+    return (
+        argv[:2] == ["record", "update"]
+        and "--diff" in argv
+        and "dropped" not in argv
+        and (survivor is None or argv[2] == f"task/{survivor}")
+    )
+
+
+def is_supersede(argv, absorbed=None):
+    return argv[:2] == ["record", "supersede"] and (absorbed is None or argv[2] == f"task/{absorbed}")
+
+
+def stub_ok(argv):
+    return subprocess.CompletedProcess(argv, 0, "", "")
+
+
+@pytest.fixture
+def trio(lore_env, spec):
+    """(survivor, first absorbed, second absorbed): three overlapping open follow-ups."""
+    env, vault = lore_env
+    return (
+        make_followup(env, vault, "Survivor", status="open", spec=spec),
+        make_followup(env, vault, "Absorbed one", status="open", spec=spec),
+        make_followup(env, vault, "Absorbed two", status="open", spec=spec),
+    )
+
+
+def test_two_overlapping_follow_ups_merged_into_a_third_carry_their_intent_and_end_superseded(
+    lore_env, spec, trio, tmp_path, capsys
+):
+    env, vault = lore_env
+    survivor, one, two = trio
+    bystander = make_followup(env, vault, "Bystander", status="open", spec=spec)
+    before = _lore(env, "record", "show", "--json", "--vault", vault, f"task/{bystander}")
+    doc = merge_doc(env, vault, [(survivor, [(one, "intent of one"), (two, "intent of two")])])
+    code, out, err = run_dispose(EnvRunner(env), spec, tmp_path, capsys, doc)
+    assert code == 0, err
+    body = body_of(env, vault, survivor)
+    assert merged_line(body, one) == "intent of one"
+    assert merged_line(body, two) == "intent of two"
+    assert [sidecar_of(env, vault, n)["status"] for n in (one, two)] == ["superseded"] * 2
+    assert sorted(sidecar_of(env, vault, survivor)["supersedes"]) == sorted(
+        [f"task/{one}", f"task/{two}"]
+    )
+    assert out["merged"] == [
+        {"survivor": survivor, "absorbed": sorted([one, two]), "survivor-prior-status": "open"}
+    ]
+    assert out["failed"] == [] and out["incomplete-merges"] == [] and out["dropped"] == []
+    assert [f["name"] for f in gather_json(env, spec)["followups"]] == sorted([survivor, bystander])
+    assert _lore(env, "record", "show", "--json", "--vault", vault, f"task/{bystander}") == before
+
+
+def test_a_ready_survivor_ends_open_and_is_reported_reset_while_an_open_one_is_not(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    ready = make_followup(env, vault, "Ready survivor", status="ready", spec=spec)
+    open_one = make_followup(env, vault, "Open survivor", status="open", spec=spec)
+    a = make_followup(env, vault, "Feeds ready", status="open", spec=spec)
+    b = make_followup(env, vault, "Feeds open", status="ready", spec=spec)
+    doc = merge_doc(env, vault, [(ready, [a]), (open_one, [b])])
+    code, out, err = run_dispose(EnvRunner(env), spec, tmp_path, capsys, doc)
+    assert code == 0, err
+    assert sidecar_of(env, vault, ready)["status"] == "open"
+    assert sidecar_of(env, vault, open_one)["status"] == "open"
+    assert out["reset-to-open"] == [{"name": ready, "prior-status": "ready"}]
+    assert sorted((m["survivor"], m["survivor-prior-status"]) for m in out["merged"]) == sorted(
+        [(ready, "ready"), (open_one, "open")]
+    )
+
+
+def test_a_ready_survivor_whose_notes_already_landed_is_still_reset_to_open(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    absorbed = make_followup(env, vault, "Absorbed", status="open", spec=spec)
+    body = f"Survivor body.\n\n## Merged from task/{absorbed}\n\n{INTENT}\n"
+    survivor = make_followup(env, vault, "Ready survivor", status="ready", spec=spec, body=body)
+    doc = merge_doc(env, vault, [(survivor, [absorbed])])
+    code, out, err = run_dispose(EnvRunner(env), spec, tmp_path, capsys, doc)
+    assert code == 0, err
+    assert sidecar_of(env, vault, survivor)["status"] == "open"
+    assert body_of(env, vault, survivor).count(f"## Merged from task/{absorbed}") == 1
+    assert out["reset-to-open"] == [{"name": survivor, "prior-status": "ready"}]
+    assert sidecar_of(env, vault, absorbed)["status"] == "superseded"
+
+
+def test_an_absorbed_follow_up_with_a_dependent_in_another_vault_is_not_mergeable_but_can_survive(
+    two_vault_lore_env, tmp_path, capsys
+):
+    env, (vault, other) = two_vault_lore_env
+    spec = make_spec(env, vault, "Parent spec", status="complete")
+    depended = make_followup(env, vault, "Depended on", status="open", spec=spec)
+    plain = make_followup(env, vault, "Plain", status="open", spec=spec)
+    dependent = make_followup(env, other, "Dependent", status="open", depends=[depended])
+
+    def both():
+        return (vault_snapshot(env, vault), vault_snapshot(env, other))
+
+    before = both()
+    runner = EnvRunner(env)
+    doc = merge_doc(env, vault, [(plain, [depended])])
+    code, out, err = run_dispose(runner, spec, tmp_path, capsys, doc)
+    assert (code, reason_code(err), subject(err)) == (1, "not-mergeable", [depended])
+    assert f"{other}/{dependent}" in err
+    assert out is None
+    assert runner.writes() == [] and both() == before
+
+    dependent_before = _lore(env, "record", "show", "--json", "--vault", other, f"task/{dependent}")
+    flipped = merge_doc(env, vault, [(depended, [plain])])
+    code, out, err = run_dispose(EnvRunner(env), spec, tmp_path, capsys, flipped)
+    assert code == 0, err
+    assert sidecar_of(env, vault, plain)["status"] == "superseded"
+    assert _lore(env, "record", "show", "--json", "--vault", other, f"task/{dependent}") == dependent_before
+
+
+@pytest.mark.parametrize("who", ["survivor", "absorbed"])
+def test_a_blocked_merge_member_is_not_mergeable_and_the_vault_unchanged(
+    lore_env, spec, trio, tmp_path, capsys, who
+):
+    env, vault = lore_env
+    survivor, one, two = trio
+    victim = survivor if who == "survivor" else one
+    set_status(env, vault, victim, "blocked")
+    doc = merge_doc(env, vault, [(survivor, [one, two])])
+    before = vault_snapshot(env, vault)
+    runner = EnvRunner(env)
+    code, out, err = run_dispose(runner, spec, tmp_path, capsys, doc)
+    assert (code, reason_code(err), subject(err)) == (1, "not-mergeable", [victim])
+    assert out is None
+    assert runner.writes() == [] and vault_snapshot(env, vault) == before
+
+
+def bad_merge_docs(env, vault, survivor, one, two):
+    def entry(s, absorbed):
+        return merge_entry(env, vault, s, absorbed)
+
+    def base(merges, drops=()):
+        doc = file_for(env, vault, drops)
+        doc["merges"] = merges
+        return doc
+
+    empty_intent = entry(survivor, [one])
+    empty_intent["absorbed"][0]["intent"] = " \n\t "
+    markup_only = entry(survivor, [one])
+    markup_only["absorbed"][0]["intent"] = "`<[]>`!"
+    no_intent = entry(survivor, [one])
+    del no_intent["absorbed"][0]["intent"]
+    no_revision = entry(survivor, [one])
+    del no_revision["survivor"]["revision"]
+    return {
+        "survivor-in-own-absorbed": base([entry(survivor, [survivor, one])]),
+        "name-in-two-merges": base([entry(survivor, [one]), entry(two, [one])]),
+        "name-in-a-merge-and-a-drop": base([entry(survivor, [one])], drops=[two, one]),
+        "survivor-also-absorbed-elsewhere": base([entry(survivor, [one]), entry(one, [two])]),
+        "empty-absorbed-list": base([{"survivor": entry(survivor, [one])["survivor"], "absorbed": []}]),
+        "intent-empty-once-sanitized": base([empty_intent]),
+        "intent-only-markup": base([markup_only]),
+        "intent-missing": base([no_intent]),
+        "survivor-revision-missing": base([no_revision]),
+        "merge-not-an-object": base(["x"]),
+    }
+
+
+@pytest.mark.parametrize(
+    "case",
+    ["survivor-in-own-absorbed", "name-in-two-merges", "name-in-a-merge-and-a-drop",
+     "survivor-also-absorbed-elsewhere", "empty-absorbed-list", "intent-empty-once-sanitized",
+     "intent-only-markup", "intent-missing", "survivor-revision-missing", "merge-not-an-object"],
+)
+def test_a_malformed_merge_is_invalid_dispositions_file_and_the_vault_unchanged(
+    lore_env, spec, trio, tmp_path, capsys, case
+):
+    env, vault = lore_env
+    doc = bad_merge_docs(env, vault, *trio)[case]
+    before = vault_snapshot(env, vault)
+    runner = EnvRunner(env)
+    code, out, err = run_dispose(runner, spec, tmp_path, capsys, doc)
+    assert (code, reason_code(err)) == (2, "invalid-dispositions-file")
+    assert out is None
+    assert runner.writes() == [] and vault_snapshot(env, vault) == before
+
+
+def test_a_merge_member_name_failing_the_shape_check_is_refused_before_any_lore_call(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    doc = {"reason": REASON, "drops": [], "merges": [
+        {"survivor": {"name": "x;y", "revision": "r"},
+         "absorbed": [{"name": "ok", "revision": "r", "intent": "i"}]}]}
+    runner = EnvRunner(env)
+    code, out, err = run_dispose(runner, spec, tmp_path, capsys, doc)
+    assert (code, reason_code(err)) == (2, "invalid-followup-name")
+    assert runner.calls == []
+
+
+def test_a_merge_with_no_drops_needs_no_reason(lore_env, spec, trio, tmp_path, capsys):
+    env, vault = lore_env
+    survivor, one, two = trio
+    doc = merge_doc(env, vault, [(survivor, [one])], reason="")
+    code, out, err = run_dispose(EnvRunner(env), spec, tmp_path, capsys, doc)
+    assert code == 0, err
+    assert sidecar_of(env, vault, one)["status"] == "superseded"
+
+
+def test_a_merge_member_that_is_not_a_gathered_follow_up_is_refused(
+    lore_env, spec, trio, tmp_path, capsys
+):
+    env, vault = lore_env
+    survivor, one, _ = trio
+    stranger = make_stranger(env, vault, spec, "unlinked")
+    doc = merge_doc(env, vault, [(survivor, [one, stranger])])
+    before = vault_snapshot(env, vault)
+    runner = EnvRunner(env)
+    code, out, err = run_dispose(runner, spec, tmp_path, capsys, doc)
+    assert (code, reason_code(err), subject(err)) == (1, "not-a-gathered-followup", [stranger])
+    assert runner.writes() == [] and vault_snapshot(env, vault) == before
+
+
+@pytest.mark.parametrize("who", ["survivor", "absorbed"])
+def test_a_merge_member_revision_moved_before_the_run_refuses_child_changed(
+    lore_env, spec, trio, tmp_path, capsys, who
+):
+    env, vault = lore_env
+    survivor, one, two = trio
+    doc = merge_doc(env, vault, [(survivor, [one, two])])
+    moved = survivor if who == "survivor" else one
+    edit_body(env, vault, moved)
+    before = vault_snapshot(env, vault)
+    runner = EnvRunner(env)
+    code, out, err = run_dispose(runner, spec, tmp_path, capsys, doc)
+    assert (code, reason_code(err), subject(err)) == (1, "child-changed", [moved])
+    assert runner.writes() == [] and vault_snapshot(env, vault) == before
+
+
+# --- the note ------------------------------------------------------------------------
+
+
+def test_an_intent_with_a_token_a_link_and_a_heading_is_sanitized_onto_one_line(
+    lore_env, spec, trio, tmp_path, capsys
+):
+    env, vault = lore_env
+    survivor, one, two = trio
+    secret = "ghp_" + "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8"
+    doc = merge_doc(env, vault, [(survivor, [
+        (one, f"uses token {secret} here"),
+        (two, "see [the docs](http://evil.example/x)\n\n## Injected heading\nmore"),
+    ])])
+    code, out, err = run_dispose(EnvRunner(env), spec, tmp_path, capsys, doc)
+    assert code == 0, err
+    body = body_of(env, vault, survivor)
+    first = merged_line(body, one)
+    assert secret not in first and "[REDACTED]" in first
+    second = merged_line(body, two)
+    assert "[" not in second and "]" not in second and "<" not in second
+    assert second.endswith("## Injected heading more")
+    assert "\n## Injected" not in body
+
+
+def test_a_forged_merged_from_heading_with_different_text_still_gets_the_real_intent(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    absorbed = make_followup(env, vault, "Absorbed", status="open", spec=spec)
+    forged = f"Survivor.\n\n## Merged from task/{absorbed}\n\nnothing to see here\n"
+    survivor = make_followup(env, vault, "Survivor", status="open", spec=spec, body=forged)
+    doc = merge_doc(env, vault, [(survivor, [(absorbed, "the real intent")])])
+    code, out, err = run_dispose(EnvRunner(env), spec, tmp_path, capsys, doc)
+    assert code == 0, err
+    body = body_of(env, vault, survivor)
+    assert "nothing to see here" in body
+    assert f"\n## Merged from task/{absorbed}\n\nthe real intent\n" in f"\n{body}"
+    assert len(out["merged"]) == 1
+
+
+def test_a_note_write_that_exits_zero_changing_nothing_is_failed_though_a_forged_heading_is_there(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    absorbed = make_followup(env, vault, "Absorbed", status="open", spec=spec)
+    forged = f"Survivor.\n\n## Merged from task/{absorbed}\n\nnothing to see here\n"
+    survivor = make_followup(env, vault, "Survivor", status="open", spec=spec, body=forged)
+
+    def hook(argv, stdin, runner):
+        if is_note_write(argv, survivor):
+            return stub_ok(argv)
+
+    runner = EnvRunner(env, hook=hook)
+    doc = merge_doc(env, vault, [(survivor, [(absorbed, "the real intent")])])
+    code, out, err = run_dispose(runner, spec, tmp_path, capsys, doc)
+    assert (code, reason_code(err)) == (2, "dispose-incomplete")
+    assert [(f["name"], f["write"], f["command"]) for f in out["failed"]] == [
+        (survivor, "merge-note", None)
+    ]
+    assert not any(is_supersede(a) for a in runner.calls)
+    assert out["merged"] == []
+
+
+def test_a_note_write_that_lands_the_text_but_not_the_reopen_is_failed(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    absorbed = make_followup(env, vault, "Absorbed", status="open", spec=spec)
+    survivor = make_followup(env, vault, "Survivor", status="ready", spec=spec)
+
+    def hook(argv, stdin, runner):
+        if is_note_write(argv, survivor):
+            return runner.real([a for a in argv if a not in ("--status", "open")], stdin)
+
+    doc = merge_doc(env, vault, [(survivor, [absorbed])])
+    code, out, err = run_dispose(EnvRunner(env, hook=hook), spec, tmp_path, capsys, doc)
+    assert sidecar_of(env, vault, survivor)["status"] == "ready"
+    assert merged_line(body_of(env, vault, survivor), absorbed) == INTENT
+    assert code == 2
+    assert [(f["write"], f["command"]) for f in out["failed"]] == [("merge-note", None)]
+    assert out["reset-to-open"] == [] and out["merged"] == []
+
+
+def test_an_injected_note_failure_supersedes_nothing_and_leaves_the_group_incomplete(
+    lore_env, spec, trio, tmp_path, capsys
+):
+    env, vault = lore_env
+    survivor, one, two = trio
+
+    def hook(argv, stdin, runner):
+        if is_note_write(argv, survivor):
+            return refused(argv)
+
+    runner = EnvRunner(env, hook=hook)
+    doc = merge_doc(env, vault, [(survivor, [one, two])])
+    code, out, err = run_dispose(runner, spec, tmp_path, capsys, doc)
+    assert code == 2
+    assert (reason_code(err), subject(err)) == ("dispose-incomplete", [survivor])
+    assert [(f["name"], f["write"], f["command"]) for f in out["failed"]] == [
+        (survivor, "merge-note", None)
+    ]
+    assert out["incomplete-merges"] == [{"survivor": survivor, "absorbed": sorted([one, two])}]
+    assert out["merged"] == []
+    assert not any(is_supersede(a) for a in runner.calls)
+    assert [sidecar_of(env, vault, n)["status"] for n in (one, two)] == ["open", "open"]
+
+
+# --- the supersedes -------------------------------------------------------------------
+
+
+def run_with_failing_supersede(env, vault, spec, trio, tmp_path, capsys, failing, how="refuse"):
+    survivor, one, two = trio
+
+    def hook(argv, stdin, runner):
+        if is_supersede(argv, failing):
+            return refused(argv) if how == "refuse" else stub_ok(argv)
+
+    runner = EnvRunner(env, hook=hook)
+    doc = merge_doc(env, vault, [(survivor, [one, two])])
+    return runner, run_dispose(runner, spec, tmp_path, capsys, doc)
+
+
+def test_a_failed_supersede_on_the_second_absorbed_still_lands_the_first_and_names_a_command_that_completes_it(
+    lore_env, spec, trio, tmp_path, capsys
+):
+    env, vault = lore_env
+    survivor, one, two = trio
+    second = sorted([one, two])[1]
+    first = sorted([one, two])[0]
+    runner, (code, out, err) = run_with_failing_supersede(env, vault, spec, trio, tmp_path, capsys, second)
+    assert code == 2
+    assert (reason_code(err), subject(err)) == ("dispose-incomplete", [second])
+    assert sidecar_of(env, vault, first)["status"] == "superseded"
+    assert sidecar_of(env, vault, second)["status"] == "open"
+    assert [(f["name"], f["write"]) for f in out["failed"]] == [(second, "supersede")]
+    assert out["incomplete-merges"] == [{"survivor": survivor, "absorbed": sorted([one, two])}]
+    assert out["merged"] == []
+    command = out["failed"][0]["command"]
+    done = subprocess.run(
+        shlex.split(command), capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL
+    )
+    assert done.returncode == 0, done.stderr
+    assert sidecar_of(env, vault, second)["status"] == "superseded"
+    assert f"task/{second}" in sidecar_of(env, vault, survivor)["supersedes"]
+
+
+def test_a_failed_supersede_on_the_first_absorbed_still_attempts_the_second(
+    lore_env, spec, trio, tmp_path, capsys
+):
+    env, vault = lore_env
+    survivor, one, two = trio
+    first, second = sorted([one, two])
+    runner, (code, out, err) = run_with_failing_supersede(env, vault, spec, trio, tmp_path, capsys, first)
+    assert code == 2
+    assert [f["name"] for f in out["failed"]] == [first]
+    assert [a[2] for a in runner.calls if is_supersede(a)] == [f"task/{first}", f"task/{second}"]
+    assert sidecar_of(env, vault, second)["status"] == "superseded"
+
+
+def test_a_supersede_that_exits_zero_leaving_the_record_unchanged_is_failed(
+    lore_env, spec, trio, tmp_path, capsys
+):
+    env, vault = lore_env
+    survivor, one, two = trio
+    second = sorted([one, two])[1]
+    runner, (code, out, err) = run_with_failing_supersede(
+        env, vault, spec, trio, tmp_path, capsys, second, how="stub"
+    )
+    assert code == 2
+    assert [(f["name"], f["write"]) for f in out["failed"]] == [(second, "supersede")]
+    assert out["merged"] == []
+
+
+def test_a_supersede_that_marks_the_status_but_leaves_no_link_on_the_survivor_is_failed(
+    lore_env, spec, trio, tmp_path, capsys
+):
+    env, vault = lore_env
+    survivor, one, two = trio
+    target = sorted([one, two])[1]
+
+    def hook(argv, stdin, runner):
+        if is_supersede(argv, target):
+            runner.real(argv)
+            return runner.real(
+                ["record", "update", f"task/{survivor}", "--vault", vault, "--unset-supersedes", f"task/{target}"]
+            )
+
+    doc = merge_doc(env, vault, [(survivor, [one, two])])
+    code, out, err = run_dispose(EnvRunner(env, hook=hook), spec, tmp_path, capsys, doc)
+    assert sidecar_of(env, vault, target)["status"] == "superseded"
+    assert f"task/{target}" not in sidecar_of(env, vault, survivor).get("supersedes", [])
+    assert code == 2
+    assert [(f["name"], f["write"]) for f in out["failed"]] == [(target, "supersede")]
+
+
+# --- recovery -------------------------------------------------------------------------
+
+
+def test_after_a_supersede_failure_a_rerun_with_the_gathered_absorbed_keeps_one_note_and_lands_it(
+    lore_env, spec, trio, tmp_path, capsys
+):
+    env, vault = lore_env
+    survivor, one, two = trio
+    first, second = sorted([one, two])
+    runner, (code, out, err) = run_with_failing_supersede(env, vault, spec, trio, tmp_path, capsys, second)
+    assert code == 2
+    assert [f["name"] for f in gather_json(env, spec)["followups"] if f["name"] == first] == []
+    again = merge_doc(env, vault, [(survivor, [second])])
+    code, out, err = run_dispose(EnvRunner(env), spec, tmp_path, capsys, again)
+    assert code == 0, err
+    body = body_of(env, vault, survivor)
+    assert body.count(f"## Merged from task/{second}") == 1
+    assert body.count(f"## Merged from task/{first}") == 1
+    assert sidecar_of(env, vault, second)["status"] == "superseded"
+    assert sorted(sidecar_of(env, vault, survivor)["supersedes"]) == sorted([f"task/{first}", f"task/{second}"])
+    assert out["merged"] == [{"survivor": survivor, "absorbed": [second], "survivor-prior-status": "open"}]
+    assert out["failed"] == []
+
+
+def test_a_rerun_that_writes_no_new_note_makes_no_note_write(lore_env, spec, trio, tmp_path, capsys):
+    env, vault = lore_env
+    survivor, one, two = trio
+    second = sorted([one, two])[1]
+    run_with_failing_supersede(env, vault, spec, trio, tmp_path, capsys, second)
+    runner = EnvRunner(env)
+    code, out, err = run_dispose(runner, spec, tmp_path, capsys, merge_doc(env, vault, [(survivor, [second])]))
+    assert code == 0, err
+    assert not any(is_note_write(a) for a in runner.calls)
+    assert [a for a in runner.calls if is_supersede(a)] == [
+        ["record", "supersede", f"task/{second}", "--by", f"task/{survivor}", "--vault", vault]
+    ]
+
+
+# --- the ordering matrix -----------------------------------------------------------------
+
+
+def kinds(calls, survivor_names, dropped_names):
+    """The write calls in order, each as ("drop"|"note"|"supersede", name)."""
+    seq = []
+    for argv in calls:
+        if is_drop_write(argv):
+            seq.append(("drop", argv[2].removeprefix("task/")))
+        elif is_supersede(argv):
+            seq.append(("supersede", argv[2].removeprefix("task/")))
+        elif is_note_write(argv):
+            seq.append(("note", argv[2].removeprefix("task/")))
+    return seq
+
+
+@pytest.fixture
+def two_groups(lore_env, spec):
+    env, vault = lore_env
+    names = {
+        k: make_followup(env, vault, k, status="open", spec=spec)
+        for k in ("Sa", "Aa", "Sb", "Bb", "Dd")
+    }
+    return names
+
+
+def test_every_drop_lands_before_the_first_merge_write(lore_env, spec, two_groups, tmp_path, capsys):
+    env, vault = lore_env
+    n = two_groups
+    runner = EnvRunner(env)
+    doc = merge_doc(env, vault, [(n["Sa"], [n["Aa"]]), (n["Sb"], [n["Bb"]])], drops=[n["Dd"]])
+    code, out, err = run_dispose(runner, spec, tmp_path, capsys, doc)
+    assert code == 0, err
+    seq = kinds(runner.calls, None, None)
+    assert seq[0] == ("drop", n["Dd"])
+    assert all(k != "drop" for k, _ in seq[1:])
+
+
+def test_a_failed_drop_does_not_stop_the_merges(lore_env, spec, two_groups, tmp_path, capsys):
+    env, vault = lore_env
+    n = two_groups
+
+    def hook(argv, stdin, runner):
+        if is_drop_write(argv):
+            return refused(argv)
+
+    doc = merge_doc(env, vault, [(n["Sa"], [n["Aa"]])], drops=[n["Dd"]])
+    code, out, err = run_dispose(EnvRunner(env, hook=hook), spec, tmp_path, capsys, doc)
+    assert code == 2
+    assert [(f["name"], f["write"]) for f in out["failed"]] == [(n["Dd"], "drop")]
+    assert sidecar_of(env, vault, n["Aa"])["status"] == "superseded"
+    assert len(out["merged"]) == 1
+
+
+def test_within_a_group_the_note_comes_before_every_supersede(lore_env, spec, trio, tmp_path, capsys):
+    env, vault = lore_env
+    survivor, one, two = trio
+    runner = EnvRunner(env)
+    code, out, err = run_dispose(runner, spec, tmp_path, capsys, merge_doc(env, vault, [(survivor, [one, two])]))
+    assert code == 0, err
+    assert kinds(runner.calls, None, None) == [
+        ("note", survivor), ("supersede", sorted([one, two])[0]), ("supersede", sorted([one, two])[1])
+    ]
+
+
+def test_a_failure_in_one_group_does_not_stop_later_groups(lore_env, spec, two_groups, tmp_path, capsys):
+    env, vault = lore_env
+    n = two_groups
+    first, second = sorted([(n["Sa"], n["Aa"]), (n["Sb"], n["Bb"])])
+
+    def hook(argv, stdin, runner):
+        if is_note_write(argv, first[0]):
+            return refused(argv)
+
+    runner = EnvRunner(env, hook=hook)
+    doc = merge_doc(env, vault, [(first[0], [first[1]]), (second[0], [second[1]])])
+    code, out, err = run_dispose(runner, spec, tmp_path, capsys, doc)
+    assert code == 2
+    assert out["incomplete-merges"] == [{"survivor": first[0], "absorbed": [first[1]]}]
+    assert [m["survivor"] for m in out["merged"]] == [second[0]]
+    assert sidecar_of(env, vault, first[1])["status"] == "open"
+    assert sidecar_of(env, vault, second[1])["status"] == "superseded"
+
+
+def test_a_later_group_failure_leaves_an_earlier_group_merged(lore_env, spec, two_groups, tmp_path, capsys):
+    env, vault = lore_env
+    n = two_groups
+    first, second = sorted([(n["Sa"], n["Aa"]), (n["Sb"], n["Bb"])])
+
+    def hook(argv, stdin, runner):
+        if is_supersede(argv, second[1]):
+            return refused(argv)
+
+    doc = merge_doc(env, vault, [(first[0], [first[1]]), (second[0], [second[1]])])
+    code, out, err = run_dispose(EnvRunner(env, hook=hook), spec, tmp_path, capsys, doc)
+    assert code == 2
+    assert [m["survivor"] for m in out["merged"]] == [first[0]]
+    assert [g["survivor"] for g in out["incomplete-merges"]] == [second[0]]
+
+
+# --- re-read before each merge write ----------------------------------------------------
+
+
+@pytest.mark.parametrize("change", [edit_body, move_status], ids=["body", "status"])
+def test_a_survivor_that_moved_before_its_note_write_is_child_changed_and_its_group_skipped(
+    lore_env, spec, trio, tmp_path, capsys, change
+):
+    env, vault = lore_env
+    survivor, one, two = trio
+    hook = edit_between_check_and_write(env, vault, survivor, change)
+    runner = EnvRunner(env, hook=hook)
+    doc = merge_doc(env, vault, [(survivor, [one, two])])
+    code, out, err = run_dispose(runner, spec, tmp_path, capsys, doc)
+    assert code == 2
+    assert [(f["name"], f["write"], f["command"], f["reason"]) for f in out["failed"]] == [
+        (survivor, "merge-note", None, "child-changed")
+    ]
+    assert not any(is_note_write(a) or is_supersede(a) for a in runner.calls)
+    assert out["incomplete-merges"] == [{"survivor": survivor, "absorbed": sorted([one, two])}]
+
+
+def test_an_absorbed_follow_up_whose_status_moved_before_its_supersede_is_child_changed(
+    lore_env, spec, trio, tmp_path, capsys
+):
+    env, vault = lore_env
+    survivor, one, two = trio
+    first, second = sorted([one, two])
+    before = shown_revision(env, vault, second)
+
+    def hook(argv, stdin, runner):
+        if is_note_write(argv, survivor):
+            move_status(env, vault, second)
+
+    runner = EnvRunner(env, hook=hook)
+    doc = merge_doc(env, vault, [(survivor, [one, two])])
+    code, out, err = run_dispose(runner, spec, tmp_path, capsys, doc)
+    assert shown_revision(env, vault, second) == before
+    assert code == 2
+    assert [(f["name"], f["write"], f["command"], f["reason"]) for f in out["failed"]] == [
+        (second, "supersede", None, "child-changed")
+    ]
+    assert not any(is_supersede(a, second) for a in runner.calls)
+    assert sidecar_of(env, vault, first)["status"] == "superseded"
+    assert sidecar_of(env, vault, second)["status"] == "ready"
+
+
+# --- preview --------------------------------------------------------------------------
+
+
+def test_preview_shows_the_exact_note_the_reset_and_the_supersedes_and_writes_nothing(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    survivor = make_followup(env, vault, "Ready survivor", status="ready", spec=spec)
+    open_survivor = make_followup(env, vault, "Open survivor", status="open", spec=spec)
+    a = make_followup(env, vault, "Aa", status="open", spec=spec)
+    b = make_followup(env, vault, "Bb", status="ready", spec=spec)
+    doc = merge_doc(env, vault, [
+        (survivor, [(a, "see [docs](http://x.example/y)\n## Heading")]),
+        (open_survivor, [(b, "plain intent")]),
+    ])
+    before = vault_snapshot(env, vault)
+    runner = EnvRunner(env)
+    code, out, err = run_dispose(runner, spec, tmp_path, capsys, doc, preview=True)
+    assert code == 0, err
+    groups = {g["survivor"]: g for g in out["merges"]}
+    ready_group, open_group = groups[survivor], groups[open_survivor]
+    assert (ready_group["status"], ready_group["reset-to-open"]) == ("ready", True)
+    assert (open_group["status"], open_group["reset-to-open"]) == ("open", False)
+    note = ready_group["absorbed"][0]["note"]
+    assert note.startswith(f"## Merged from task/{a}\n\nsee ")
+    assert note.endswith(" ## Heading\n") and note.count("\n") == 3
+    assert "[" not in note and "]" not in note
+    assert open_group["absorbed"][0]["note"] == f"## Merged from task/{b}\n\nplain intent\n"
+    assert open_group["absorbed"][0]["status"] == "ready"
+    assert open_group["supersedes"] == [{"name": b, "by": open_survivor}]
+    assert out["drops"] == []
+    assert runner.writes() == [] and vault_snapshot(env, vault) == before
+
+
+def test_preview_refuses_a_not_mergeable_member_like_the_real_run(lore_env, spec, trio, tmp_path, capsys):
+    env, vault = lore_env
+    survivor, one, two = trio
+    set_status(env, vault, one, "blocked")
+    runner = EnvRunner(env)
+    doc = merge_doc(env, vault, [(survivor, [one, two])])
+    code, out, err = run_dispose(runner, spec, tmp_path, capsys, doc, preview=True)
+    assert (code, reason_code(err), subject(err)) == (1, "not-mergeable", [one])
+    assert runner.writes() == []
