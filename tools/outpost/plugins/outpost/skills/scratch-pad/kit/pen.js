@@ -361,7 +361,7 @@
     });
     plan.arrows.forEach(function (arrow) {
       var group = svgNode("g");
-      group.setAttribute("data-kind", "arrow");
+      group.setAttribute("data-kind", arrow.loop ? "loop" : "arrow");
       group.setAttribute("data-arrow-index", String(arrow.index));
       stroke(group, rng, arrow.points, arrow.dashed ? "flow-dashed" : null);
       arrowhead(group, rng, arrow.points);
