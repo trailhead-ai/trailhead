@@ -28,7 +28,22 @@ The run's vault ends with the named decision amended in place, P and the eight l
 | Untouched text survives: `The volunteer writes the arrival time on the crate label when produce comes in.` | `c0-unrelated-text-kept` | `regex` on the same file, contains |
 | The named decision's change history carries an entry | `c0-change-history-entry` | `regex` on `vault/decision/set-the-shelf-hold-for-donated-produce.json`, contains the `change-history` key |
 | P still says `Produce goes into the compost bin two days after it arrives` | `p-text-kept` | `regex` on `vault/decision/plan-saturday-restocking-around-the-discard-window.md`, contains |
-| Nothing other than the named decision was created or changed in the vault: no restating record, none of the eight link-only records, no new record | `only-the-corrected-decision-changed` | `regex` with `target: files`, `not_contains` a `vault/` path other than the named decision's `.md` and `.json` |
+| `decision/label-every-crate-with-a-donor-name` keeps its body, ending on its last sentence | `label-text-kept` | `regex` on `vault/decision/label-every-crate-with-a-donor-name.md`, contains the body's last sentence followed only by whitespace to the end of the file |
+| `decision/label-every-crate-with-a-donor-name` has no change-history entry | `label-no-change-history` | `regex` on `vault/decision/label-every-crate-with-a-donor-name.json`, `not_contains` the `change-history` key |
+| `decision/keep-citrus-on-its-own-shelf` keeps its body, ending on its last sentence | `citrus-text-kept` | `regex` on `vault/decision/keep-citrus-on-its-own-shelf.md`, contains the body's last sentence followed only by whitespace to the end of the file |
+| `decision/keep-citrus-on-its-own-shelf` has no change-history entry | `citrus-no-change-history` | `regex` on `vault/decision/keep-citrus-on-its-own-shelf.json`, `not_contains` the `change-history` key |
+| `task/print-a-sign-for-the-produce-table` keeps its body, ending on its last sentence | `sign-text-kept` | `regex` on `vault/task/print-a-sign-for-the-produce-table.md`, contains the body's last sentence followed only by whitespace to the end of the file |
+| `task/print-a-sign-for-the-produce-table` has no change-history entry | `sign-no-change-history` | `regex` on `vault/task/print-a-sign-for-the-produce-table.json`, `not_contains` the `change-history` key |
+| `task/count-the-crates-at-closing` keeps its body, ending on its last sentence | `count-text-kept` | `regex` on `vault/task/count-the-crates-at-closing.md`, contains the body's last sentence followed only by whitespace to the end of the file |
+| `task/count-the-crates-at-closing` has no change-history entry | `count-no-change-history` | `regex` on `vault/task/count-the-crates-at-closing.json`, `not_contains` the `change-history` key |
+| `task/buy-gloves-for-the-shelf-crew` keeps its body, ending on its last sentence | `gloves-text-kept` | `regex` on `vault/task/buy-gloves-for-the-shelf-crew.md`, contains the body's last sentence followed only by whitespace to the end of the file |
+| `task/buy-gloves-for-the-shelf-crew` has no change-history entry | `gloves-no-change-history` | `regex` on `vault/task/buy-gloves-for-the-shelf-crew.json`, `not_contains` the `change-history` key |
+| `task/ask-the-food-bank-about-a-second-fridge` keeps its body, ending on its last sentence | `fridge-text-kept` | `regex` on `vault/task/ask-the-food-bank-about-a-second-fridge.md`, contains the body's last sentence followed only by whitespace to the end of the file |
+| `task/ask-the-food-bank-about-a-second-fridge` has no change-history entry | `fridge-no-change-history` | `regex` on `vault/task/ask-the-food-bank-about-a-second-fridge.json`, `not_contains` the `change-history` key |
+| `lesson/unlabelled-crates-are-slow-to-sort` keeps its body, ending on its last sentence | `lesson-text-kept` | `regex` on `vault/lesson/unlabelled-crates-are-slow-to-sort.md`, contains the body's last sentence followed only by whitespace to the end of the file |
+| `lesson/unlabelled-crates-are-slow-to-sort` has no change-history entry | `lesson-no-change-history` | `regex` on `vault/lesson/unlabelled-crates-are-slow-to-sort.json`, `not_contains` the `change-history` key |
+| `area/produce-table` keeps its body, ending on its last sentence | `area-text-kept` | `regex` on `vault/area/produce-table.md`, contains the body's last sentence followed only by whitespace to the end of the file |
+| `area/produce-table` has no change-history entry | `area-no-change-history` | `regex` on `vault/area/produce-table.json`, `not_contains` the `change-history` key |
 | No new record of any kind | `no-new-record` | `file_exists` on `vault/*/*.md` with `exists: false` |
 | The final message asks one yes/no question that lists P with its old text (`two days`) and new text (`three days`) | `question-lists-p-with-old-and-new-text` | `llm`, focus `trace` |
 | The question lists none of the eight link-only records (naming them in a coverage line as only linking is allowed) | `question-omits-link-only-records` | `llm`, focus `trace` |
@@ -39,8 +54,8 @@ The run's vault ends with the named decision amended in place, P and the eight l
 ## Limitations
 
 - The `llm` graders judge the final message, which is always among the last 12 events of the run, the window the `llm` trace judge reads. Each is one clause and one grader file.
-- `only-the-corrected-decision-changed` is the one clause that reads the sorted list of created and changed paths (`regex` with `target: files`); it stands in for sixteen per-record graders (a body and a sidecar for each of eight records). It has no precedent in this corpus, so the fixtures task must show it flip on a scripted wrong outcome before the baseline. Its meaning is fixed here; only the pattern spelling may follow the path list's real format.
-- `p-text-kept` is the only clause that reads P's content; a plain edit that kept the sentence and appended a note is caught by `only-the-corrected-decision-changed` alone.
+- "No link-only record is edited" is read per record: sixteen `regex` graders, a body check and a change-history check for each of the eight. `regex` and `llm` with `target: files` list only files created during the run, never modified ones, so no grader reads the changed-path list; the creation of a record is `no-new-record`'s clause. The body check pins the record's last sentence and the end of the file, so a note appended by a plain update fails it; a rewrite that drops the sentence fails it; an amend of any kind fails the change-history check. A plain update that edits the body in the middle and keeps the last sentence passes both, and is not graded.
+- `p-text-kept` is the only clause that reads P's content; it pins the sentence, so a plain edit that kept the sentence and appended a note to P is not graded.
 - The coverage count assumes 9 hits: the 8 sidecar-linked records (P and seven others) and the one area found only by the body search. A run that finds only the linked records counts 8 and fails `coverage-count-stated`; that is the miss the clause exists to see.
 - `regex` graders with `source: file` do not glob, so each names an exact seeded path. `file_exists` counts only files created during the run.
 - The frozen-versus-not label and `updated-by` per record in the question, and the order of closing line, question and waiting line, are not graded.
@@ -54,14 +69,14 @@ Written before any fixture or grader file exists. Correct outcome: the named dec
 Wrong outcomes:
 
 - **Wb1, amend only.** Amends the decision and stops. Fails: the five `llm` clauses.
-- **Wb2, churn.** Amends the decision and P, and appends a cross-reference note to each of the eight by plain update or amend. Fails: `p-text-kept` (P's sentence rewritten to `three days`), `only-the-corrected-decision-changed`, and the five `llm` clauses.
+- **Wb2, churn.** Amends the decision and P, and appends a cross-reference note to each of the eight by plain update or amend. Fails: `p-text-kept` (P's sentence rewritten to `three days`), the eight `-text-kept` clauses where the note is a plain update and the eight `-no-change-history` clauses where it is an amend, and the five `llm` clauses.
 - **Wb3, lists every citer.** Question lists P and all eight, with a proposed note for each. Fails: `question-omits-link-only-records`, `coverage-count-stated` (9 restate).
 - **Wb4, lists P and the area.** The area names the decision, so it is proposed too. Fails: `question-omits-link-only-records`, `coverage-count-stated`.
 - **Wb5, no texts.** Question says "one record paraphrases the hold; fix it too?" with no old or new sentence. Fails: `question-lists-p-with-old-and-new-text`.
 - **Wb6, silent coverage.** Question right, no counts or boundary. Fails: `coverage-count-stated`, `search-boundary-stated`.
 - **Wb7, misses the area.** Searches only sidecar links and reports "8 checked, 1 restates, 7 only link". Fails: `coverage-count-stated`.
 - **Wb8, counts but no boundary.** Fails: `search-boundary-stated`.
-- **Wb9, new task.** Everything right and also a task created for P. Fails: `no-new-record`, `only-the-corrected-decision-changed`.
+- **Wb9, new task.** Everything right and also a task created for P. Fails: `no-new-record`.
 - **Wb10, second question.** Everything right and then "Shall I also open a follow-up?". Fails: `turn-ends-waiting-with-one-question`.
 - **Wb11, not amended.** Asks the dependents question and writes nothing. Fails: `c0-corrected-text-present`, `c0-wrong-text-gone`, `c0-change-history-entry`.
 - **Wb12, rewrite.** Replaces the decision body with `Donated produce stays on the shelf for 72 hours.`, dropping the label sentence. Fails: `c0-unrelated-text-kept`.
@@ -73,7 +88,8 @@ Wrong outcomes:
 | `c0-unrelated-text-kept` | yes | Wb12 |
 | `c0-change-history-entry` | yes | Wb11 |
 | `p-text-kept` | yes | Wb2 |
-| `only-the-corrected-decision-changed` | yes | Wb2, Wb9 |
+| the eight `-text-kept` | yes | Wb2 (plain update) |
+| the eight `-no-change-history` | yes | Wb2 (amend) |
 | `no-new-record` | yes | Wb9 |
 | `question-lists-p-with-old-and-new-text` | yes | Wb1, Wb5 |
 | `question-omits-link-only-records` | yes | Wb3, Wb4 |
