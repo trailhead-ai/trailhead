@@ -991,6 +991,75 @@ def test_a_supersede_that_marks_the_status_but_leaves_no_link_on_the_survivor_is
     assert [(f["name"], f["write"]) for f in out["failed"]] == [(target, "supersede")]
 
 
+# --- a write that lands but exits non-zero ---------------------------------------------
+
+
+def lands_then_exits_nonzero(argv, stdin, runner):
+    runner.real(argv, stdin)
+    return refused(argv)
+
+
+def test_a_drop_that_lands_but_exits_nonzero_is_failed_and_not_listed_dropped(
+    lore_env, spec, pile, tmp_path, capsys
+):
+    env, vault = lore_env
+    target = pile[0]
+
+    def hook(argv, stdin, runner):
+        if is_drop_write(argv) and argv[2] == f"task/{target}":
+            return lands_then_exits_nonzero(argv, stdin, runner)
+
+    code, out, err = run_incomplete(env, vault, spec, [target], hook, tmp_path, capsys)
+    assert sidecar_of(env, vault, target)["status"] == "dropped"
+    assert (code, reason_code(err)) == (2, "dispose-incomplete")
+    assert [(f["name"], f["write"]) for f in out["failed"]] == [(target, "drop")]
+    assert out["failed"][0]["command"] is not None
+    assert out["dropped"] == []
+
+
+def test_a_note_write_that_lands_but_exits_nonzero_is_failed_and_the_group_incomplete(
+    lore_env, spec, trio, tmp_path, capsys
+):
+    env, vault = lore_env
+    survivor, one, two = trio
+
+    def hook(argv, stdin, runner):
+        if is_note_write(argv, survivor):
+            return lands_then_exits_nonzero(argv, stdin, runner)
+
+    runner = EnvRunner(env, hook=hook)
+    doc = merge_doc(env, vault, [(survivor, [one, two])])
+    code, out, err = run_dispose(runner, spec, tmp_path, capsys, doc)
+    assert merged_line(body_of(env, vault, survivor), one) == INTENT
+    assert (code, reason_code(err)) == (2, "dispose-incomplete")
+    assert [(f["name"], f["write"], f["command"]) for f in out["failed"]] == [
+        (survivor, "merge-note", None)
+    ]
+    assert out["merged"] == []
+    assert out["incomplete-merges"] == [{"survivor": survivor, "absorbed": sorted([one, two])}]
+
+
+def test_a_supersede_that_lands_but_exits_nonzero_is_failed_and_the_group_incomplete(
+    lore_env, spec, trio, tmp_path, capsys
+):
+    env, vault = lore_env
+    survivor, one, two = trio
+    target = sorted([one, two])[1]
+
+    def hook(argv, stdin, runner):
+        if is_supersede(argv, target):
+            return lands_then_exits_nonzero(argv, stdin, runner)
+
+    doc = merge_doc(env, vault, [(survivor, [one, two])])
+    code, out, err = run_dispose(EnvRunner(env, hook=hook), spec, tmp_path, capsys, doc)
+    assert sidecar_of(env, vault, target)["status"] == "superseded"
+    assert (code, reason_code(err)) == (2, "dispose-incomplete")
+    assert [(f["name"], f["write"]) for f in out["failed"]] == [(target, "supersede")]
+    assert out["failed"][0]["command"] is not None
+    assert out["merged"] == []
+    assert out["incomplete-merges"] == [{"survivor": survivor, "absorbed": sorted([one, two])}]
+
+
 # --- recovery -------------------------------------------------------------------------
 
 
