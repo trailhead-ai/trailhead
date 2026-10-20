@@ -1127,3 +1127,7 @@ R regressed AC1's guard (G1) and did not reach a clean majority on S1 `leads`. T
 no-ritual summary (S1) and the build's closing report (S2, rules-only); the remaining sites, about eight whose own
 instructions open a summary with routine detail, are listed in
 `task/ritual-summaries-elsewhere-open-with-what-needs-the-reader`. AC11 and AC12 stay recorded as unmeasured.
+
+One capture was edited after it was taken: in `fourth-reviewer-3.txt` one ordinary English word matched the
+repository's machine-local leak denylist and was replaced with `[redacted]` so the tree passes the leak gate. The
+grader's verdicts on that capture are the same before and after the edit (`template-shape` and `bare`).
