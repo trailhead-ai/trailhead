@@ -146,7 +146,7 @@ button { font: inherit; color: inherit; }
 
 .pad-drawing-flow { overflow-x: auto; overflow-y: hidden; }
 .pad-ink.pad-flow { position: relative; inset: auto; display: block; height: auto; overflow: visible; }
-.flow-label { font-size: 16px; fill: var(--ink); text-anchor: middle; dominant-baseline: central; }
+.flow-label { font-size: 16px; fill: var(--ink); text-anchor: middle; dominant-baseline: central; text-rendering: geometricPrecision; }
 .flow-accent > path, .flow-accent > .flow-hatch { stroke: var(--accent); }
 .flow-hatch { stroke-width: 1; stroke-linecap: round; }
 .flow-dashed { stroke-dasharray: 7 6; }
