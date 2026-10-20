@@ -175,7 +175,10 @@ class Writer:
     def result(self, tool_id: str, output: str) -> None:
         self._base(
             "user",
-            {"role": "user", "content": [{"tool_use_id": tool_id, "type": "tool_result", "content": output, "is_error": False}]},
+            {
+                "role": "user",
+                "content": [{"tool_use_id": tool_id, "type": "tool_result", "content": output, "is_error": False}],
+            },
             {"toolUseResult": {"stdout": output, "stderr": "", "interrupted": False, "isImage": False}},
         )
 
@@ -197,7 +200,10 @@ def build() -> str:
     if NEW_PERIOD not in corrected or OLD_PERIOD in corrected:
         sys.exit(f"build_history: the first record must carry {NEW_PERIOD!r}, the state the history leaves it in")
     pre_body = corrected.replace(NEW_PERIOD, OLD_PERIOD)
-    pre_records = [dict(r, body=pre_body) if r["kind"] == FIRST.split("/")[0] and slug(r["title"]) == FIRST.split("/")[1] else r for r in records]
+    first_kind, first_name = FIRST.split("/")
+    pre_records = [
+        dict(r, body=pre_body) if r["kind"] == first_kind and slug(r["title"]) == first_name else r for r in records
+    ]
 
     with tempfile.TemporaryDirectory(prefix="build-history-") as tmp:
         vault = Vault(Path(tmp), pre_records)
@@ -210,7 +216,13 @@ def build() -> str:
             f"./lore record amend {FIRST} --reason \"The loan period is 6 days, not 4, as you ruled.\" "
             f"--initiated-by operator --base {revision} <<'EOF'\n{corrected}EOF"
         )
-        w.step(vault, "Active decisions are frozen. This is a corrected figure and nothing else, so I will amend it where it stands.", amend, "Amend the decision")
+        w.step(
+            vault,
+            "Active decisions are frozen. This is a corrected figure and nothing else, "
+            "so I will amend it where it stands.",
+            amend,
+            "Amend the decision",
+        )
 
         linked = w.step(
             vault, "Next, any record linked to this decision.",
@@ -233,7 +245,8 @@ def build() -> str:
         w.assistant(
             f"Done: {FIRST} now gives the corrected period; "
             "the earlier wording remains in the version history. "
-            f"Three records link to it or cite it: two repeat the old figure and one only links ({LINK_ONLY}, which I have left alone). "
+            "Three records link to it or cite it: two repeat the old figure and one only links "
+            f"({LINK_ONLY}, which I have left alone). "
             "Records with no link to it and no mention of it were not searched.\n\n"
             "Shall I make the same correction in both of those records?\n\n"
             f"1. {RESTATING_FROZEN} (frozen, so it would be amended; last updated by eval@example.invalid)\n"

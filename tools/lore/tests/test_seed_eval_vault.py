@@ -787,7 +787,14 @@ FIRST = {"kind": "decision", "title": "Use Postgres", "status": "active", "body"
 
 
 def linking(*related, **extra):
-    return {"kind": "adr", "title": "Adopt the store", "status": "active", "body": "Adopted.\n", "related": list(related), **extra}
+    return {
+        "kind": "adr",
+        "title": "Adopt the store",
+        "status": "active",
+        "body": "Adopted.\n",
+        "related": list(related),
+        **extra,
+    }
 
 
 def test_related_entry_lands_under_its_kind_in_the_sidecar(sandbox):
