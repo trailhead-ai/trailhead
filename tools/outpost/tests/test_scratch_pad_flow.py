@@ -8,7 +8,9 @@ pen traced and the text the browser measured and set.
 from __future__ import annotations
 
 import importlib.util
+import itertools
 import json
+import math
 import random
 import tempfile
 from pathlib import Path
@@ -934,6 +936,31 @@ def test_a_loop_back_leaving_a_step_with_a_neighbour_beyond_it_crosses_no_step(t
         tip, _ = _head(loop)
         edge = steps["a"]["b"]["y1" if direction == "LR" else "x1"]
         assert abs(tip[1 if direction == "LR" else 0] - edge) <= TOL
+
+
+SHARED_EDGE = """flowchart TD
+  a[Plan] --> b[Build] --> c{Tests pass?}
+  c -->|no| b
+  c -->|yes| d([Ship])
+  d -.->|bug found| a
+  b --> b"""
+HEAD_WIDTH = 2 * 11 * math.sin(math.radians(26))
+
+
+def test_loop_backs_ending_on_one_steps_lane_side_edge_are_spread_along_it(tmp_path):
+    got = _run(tmp_path, _round([SHARED_EDGE]), LOOP_PROBE % 0)
+    b = _by_id(got["steps"])["b"]["b"]
+    loops = {loop["index"]: loop for loop in got["loops"]}
+    assert sorted(loops) == [2, 4, 5]
+    ends = [
+        ("no tip", _head(loops[2])[0][1]),
+        ("self out", loops[5]["paths"][0][0][1]),
+        ("self tip", _head(loops[5])[0][1]),
+    ]
+    for _, y in ends:
+        assert b["y0"] <= y <= b["y1"]
+    for (name, y), (other, z) in itertools.combinations(ends, 2):
+        assert abs(y - z) >= HEAD_WIDTH, (name, other)
 
 
 TEN_LINES = """flowchart LR
