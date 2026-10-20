@@ -485,7 +485,8 @@ preview's exit **in this order**, taking the first that matches:
 
 **Confirmation 2.** Show the four sets, by title and `name`:
 
-- **Included**, and **left**, as before.
+- **Included** and **left**, each by title and `name`, the same two sets the plain Confirmation 2
+  question shows.
 - **Dropped**, with the credential-scrubbed reason once above the list, and each follow-up's current
   `status` from the preview. A dropped follow-up that is `blocked` is flagged "title only, body not
   read". For each dropped follow-up, every entry of its `dependents`, by `name`, `vault` and
@@ -779,7 +780,9 @@ matches, in this order:
   `lore record update task/` and holds nothing outside letters, digits, `.`, `_`, `/`, `-`, `=` and
   spaces, with the run-only-while-the-state-still-holds note from step 7; otherwise name the write
   and print no command.
-- An `assemble` that ended `buildable` (exit 0) and `distilled` false:
+- An `assemble` that ended `buildable` (exit 0) and `distilled` false: the build command, then the
+  distill command only when every dispose write landed; when a dispose write failed, the re-run line
+  replaces it, as above.
 
 ```
 /craft:execute task/<parent>
