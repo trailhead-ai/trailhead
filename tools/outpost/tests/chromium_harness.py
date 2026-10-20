@@ -15,6 +15,11 @@ With ``serve=True`` the copy is served over HTTP on a loopback port (``serve_fol
 and ``entry`` is a URL path under it rather than a file; a server that cannot start
 raises ``ServerStartError`` before the browser launches.
 
+``color_scheme="dark"`` or ``"light"`` launches the browser preferring that scheme
+(``--blink-settings=preferredColorScheme``, 0 = dark, 1 = light), so a page's
+``prefers-color-scheme`` rules apply; a probe should assert the media query itself so a flag
+that silently does nothing fails the test.
+
 Browser lookup (``find_browser``): ``$OUTPOST_TEST_BROWSER``, then
 ``chrome-headless-shell`` on PATH, then the Playwright cache's headless shell,
 and only then full Chrome/Chromium (launched with ``--headless=new``). Every
@@ -52,6 +57,8 @@ MAC_APP_BUNDLES = (
 )
 _FULL_CHROME_NAMES = ("google-chrome", "google-chrome-stable", "chromium", "chromium-browser")
 _RESULT_RE = re.compile(r'<pre id="probe-result"[^>]*>(.*?)</pre>', re.DOTALL)
+
+_COLOR_SCHEMES = {"dark": 0, "light": 1}
 
 PROBE_FILE = "pad-probe.js"
 
@@ -254,6 +261,7 @@ def run_probe(
     inject_into: str | None = None,
     serve: bool = False,
     serve_port: int = 0,
+    color_scheme: str | None = None,
 ):
     env = os.environ if env is None else env
     browser = (lookup or (lambda: find_browser(env)))()
@@ -277,6 +285,8 @@ def run_probe(
             argv.append("--headless=new")
         if env.get(ENV_REQUIRE):
             argv.append("--no-sandbox")
+        if color_scheme is not None:
+            argv.append(f"--blink-settings=preferredColorScheme={_COLOR_SCHEMES[color_scheme]}")
         argv += [
             f"--user-data-dir={Path(tmp) / 'profile'}",
             f"--window-size={window_size[0]},{window_size[1]}",

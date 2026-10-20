@@ -5,10 +5,26 @@
 }
 
 :root {
+  color-scheme: light dark;
   --paper: #fbf8f1;
   --ink: #1b1b1b;
   --faint: #6b665c;
   --rule: #cfc8b8;
+  --surface: #ffffff;
+  --notice: #fff3c4;
+  --accent: #b4390f;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #1c1b19;
+    --ink: #ece7db;
+    --faint: #a39d90;
+    --rule: #4a463e;
+    --surface: #2a2824;
+    --notice: #4a3f12;
+    --accent: #ff9a5c;
+  }
 }
 
 * { box-sizing: border-box; }
@@ -31,7 +47,7 @@ button { font: inherit; color: inherit; }
   margin: 0;
   padding: 0.5rem 1.5rem;
   border-bottom: 2px solid var(--ink);
-  background: #fff3c4;
+  background: var(--notice);
 }
 
 #pad-loading, #pad-failure { margin: 1.5rem; }
@@ -75,7 +91,7 @@ button { font: inherit; color: inherit; }
 .pad-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .pad-reply-item { margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px dashed var(--ink); }
 .pad-questions button.pad-reply-entry { border-style: dashed; }
-.pad-questions button[aria-current="true"] { border-color: var(--ink); background: #fff; }
+.pad-questions button[aria-current="true"] { border-color: var(--ink); background: var(--surface); }
 
 .pad-stage { flex: 1 1 auto; min-width: 0; padding: 1rem 1.5rem; }
 .pad-prompt, .pad-reply-title { margin: 0 0 1rem; font-size: 1.4rem; font-weight: normal; }
@@ -85,7 +101,7 @@ button { font: inherit; color: inherit; }
   flex: 1 1 18rem;
   max-width: 28rem;
   padding: 0.75rem;
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--rule);
 }
 .pad-card-head { display: flex; align-items: baseline; gap: 0.5rem; }
@@ -104,7 +120,7 @@ button { font: inherit; color: inherit; }
 .pad-toggle[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
 .pad-none { margin-top: 1rem; }
 .pad-note-label { display: block; margin-top: 1rem; color: var(--faint); }
-.pad-note, .pad-reply-box { display: block; width: 100%; max-width: 40rem; padding: 0.5rem; font: inherit; background: #fff; border: 1px solid var(--ink); }
+.pad-note, .pad-reply-box { display: block; width: 100%; max-width: 40rem; padding: 0.5rem; font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--ink); }
 .pad-reply-summary { margin: 0 0 1rem; padding-left: 1.25rem; }
 .pad-reply-box { font: 0.9rem monospace; }
 .pad-copy { margin-top: 0.75rem; }
@@ -131,5 +147,7 @@ button { font: inherit; color: inherit; }
 .pad-drawing-flow { overflow-x: auto; overflow-y: hidden; }
 .pad-ink.pad-flow { position: relative; inset: auto; display: block; height: auto; overflow: visible; }
 .flow-label { font-size: 16px; fill: var(--ink); text-anchor: middle; dominant-baseline: central; }
+.flow-accent > path, .flow-accent > .flow-hatch { stroke: var(--accent); }
+.flow-hatch { stroke-width: 1; stroke-linecap: round; }
 .flow-dashed { stroke-dasharray: 7 6; }
 .flow-halo { fill: var(--paper); stroke: none; }
