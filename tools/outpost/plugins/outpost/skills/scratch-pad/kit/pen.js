@@ -6,6 +6,7 @@
   var WOBBLE = 0.9;
   var SEGMENT = 22;
   var MAX_QUOTE = 200;
+  var MAX_LISTED = 5;
   var MIN_SCALE = 0.6;
   var ARROW_LENGTH = 11;
   var ARROW_SPREAD = (26 * Math.PI) / 180;
@@ -48,7 +49,7 @@
     return out;
   }
 
-  function stroke(group, rng, base) {
+  function stroke(group, rng, base, cls) {
     for (var pass = 0; pass < 2; pass++) {
       var d = densify(base)
         .map(function (p, i) {
@@ -64,6 +65,7 @@
       path.setAttribute("stroke-width", "1.5");
       path.setAttribute("stroke-linecap", "round");
       path.setAttribute("stroke-linejoin", "round");
+      if (cls) path.setAttribute("class", cls);
       group.appendChild(path);
     }
   }
@@ -225,23 +227,32 @@
   function showMessage(state, error) {
     state.dead = true;
     if (state.observer) state.observer.disconnect();
-    var segments = [];
-    var reason;
+    var lines;
     if (error && error.isFlowError) {
-      segments = [error.flowLine === null ? "the whole flow" : "line " + error.flowLine + ": " + error.flowText];
-      reason = error.message;
-    } else if (error && error.hasBlock) {
-      segments = error.penPath.slice();
-      segments.push(quoted(error.penBlock));
-      reason = error.message;
+      lines = ["Can't draw this flow:"];
+      error.problems.slice(0, MAX_LISTED).forEach(function (problem) {
+        lines.push(problem.line === null ? "the whole flow" : "line " + problem.line + ": " + problem.text);
+        lines.push(problem.message);
+      });
+      if (error.problems.length > MAX_LISTED) lines.push("and " + (error.problems.length - MAX_LISTED) + " more");
+      lines.push("Ask the session to redraw this option.");
     } else {
-      segments = [quoted(state.layout)];
-      reason = String((error && error.message) || error);
+      var segments;
+      var reason;
+      if (error && error.hasBlock) {
+        segments = error.penPath.slice();
+        segments.push(quoted(error.penBlock));
+        reason = error.message;
+      } else {
+        segments = [quoted(state.layout)];
+        reason = String((error && error.message) || error);
+      }
+      if (segments.length > 7) segments = ["…"].concat(segments.slice(-5));
+      lines = ["Can't draw this " + (state.flow ? "flow" : "layout") + ":", segments.join(" › "), reason];
     }
-    if (segments.length > 7) segments = ["…"].concat(segments.slice(-5));
     var box = document.createElement("div");
     box.className = "pen-message";
-    ["Can't draw this " + (state.flow ? "flow" : "layout") + ":", segments.join(" › "), reason].forEach(function (line) {
+    lines.forEach(function (line) {
       var p = document.createElement("p");
       p.textContent = line;
       box.appendChild(p);
@@ -352,11 +363,30 @@
       var group = svgNode("g");
       group.setAttribute("data-kind", "arrow");
       group.setAttribute("data-arrow-index", String(arrow.index));
-      stroke(group, rng, arrow.points);
+      stroke(group, rng, arrow.points, arrow.dashed ? "flow-dashed" : null);
       arrowhead(group, rng, arrow.points);
+      if (arrow.label) drawLabel(group, arrow.label);
       svg.appendChild(group);
     });
     fitFlow(state);
+  }
+
+  function drawLabel(group, label) {
+    var halo = svgNode("rect");
+    halo.setAttribute("class", "flow-halo");
+    halo.setAttribute("x", round1(label.halo.x));
+    halo.setAttribute("y", round1(label.halo.y));
+    halo.setAttribute("width", round1(label.halo.w));
+    halo.setAttribute("height", round1(label.halo.h));
+    group.appendChild(halo);
+    label.lines.forEach(function (line) {
+      var text = svgNode("text");
+      text.setAttribute("class", "flow-label");
+      text.setAttribute("x", round1(line.x));
+      text.setAttribute("y", round1(line.y));
+      text.textContent = line.text;
+      group.appendChild(text);
+    });
   }
 
   function fitFlow(state) {
