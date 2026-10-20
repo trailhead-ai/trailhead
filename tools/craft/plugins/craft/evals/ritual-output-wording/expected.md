@@ -922,7 +922,8 @@ needs a decision (two findings, ids C1 and C2) and the worth-fixing and rough-ed
 `summary-guard-specreview-open-2` names internal passes ("the divergence pass", "the fact check") in its opening
 summary. That is the first non-`plain` `reviewer-name` at the specreview site since its edit (`treated-`, `regress-`
 and `control-specreview` read `plain` on `reviewer-name` in 18 of 18 captures). It cannot be attributed to the summary
-paragraph: the arm's `council.md` also moved to B, and no B arm ran on the `specreview` prompt. G4 is an unresolved
+paragraph: the arm's `council.md`, `gauntlet/SKILL.md` and `gauntlet/dispositions.md` also moved to B, and no B
+arm ran on the `specreview` prompt. G4 is an unresolved
 2-1 split and a possible signal, not a hold.
 
 ### Sites S1 and S2 (rules-only), by eye
@@ -965,9 +966,10 @@ this one. `summary-build` is not run.
 - Does the section's limit make the build closing report read as exempt? No, the rules-only arm does move: `leads`
   3 of 3 (baseline 4 of 6) with the planted item opening every capture, though the baseline already did so in most
   runs, so the movement cannot be separated from the baseline's own rate.
-- Does "at most one line each" shorten criterion mentions at G1 (AC1)? Yes: four of six captures give a criterion
-  fewer of its own words than the grammar's threshold (two `bare`, two `nickname`); the cause per capture is in
-  "Observed failure mode" below.
+- Does "at most one line each" shorten criterion mentions at G1 (AC1)? Not shown. G1 missed its bar: four of six
+  captures give a criterion fewer of its own words than the grammar's threshold (two `bare`, two `nickname`). No
+  same-day run at B on the G1 prompt isolates the sentence's role; the cause per capture is in "Observed failure
+  mode" below.
 - Does the paragraph reshape a reviewer's report, the slice's covered-criteria value, or the spec review's opening
   summary? No at the reviewer and advocate (`template-shape` 6 of 6 with unchanged `bare` mentions), no at the slice
   (`gate-shape` 3 of 3, `text-with-number` 3 of 3), and not on the scripted checks at the spec review (3 of 3 `plain`;
@@ -975,7 +977,9 @@ this one. `summary-build` is not run.
 
 ## Result, 2026-10-20 — the summary measurement closes: R was reverted, E was not run, AC11 and AC12 are not covered
 
-This section completes the result above; nothing above it is rewritten. It records every capture the measurement
+This section completes the result above. The result above was corrected in place after the whole-change review,
+before the branch merged (its G1 cause, its G4 reading and its slice-close reason); nothing else above it is
+rewritten. It records every capture the measurement
 took in one table, recomputes every count from that table, re-reads each pass condition against the rule
 registered in the extension of 2026-10-20, and states the end state taken and how the slice closed. No eval was
 run to write it. R is `d6eb84540f8e5b959554bc1578b0ece26154a76f` and its revert is `c73f3563` (both branch-local
