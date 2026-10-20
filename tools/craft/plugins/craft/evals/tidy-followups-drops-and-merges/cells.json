@@ -1,0 +1,38 @@
+{
+  "drop-several": {
+    "shim": "env",
+    "answers": "1. Confirmation 1 (step 8): move every follow-up off the shortlist so none is included, and drop these three follow-ups: {X1} {X2} {X3}\n2. The drop reason question (\"Why drop this follow-up?\"): the oven line was closed when the bakery gave up its second site\n3. Confirmation 2 (\"Drop, merge, include and leave as shown?\"): yes\n4. Step 11: not reached, nothing is included"
+  },
+  "merge-included": {
+    "shim": "env",
+    "answers": "1. Confirmation 1 (step 8): make the shortlist exactly this one follow-up: {S}. Add it if it is not already shortlisted and remove every other shortlisted follow-up. Then merge {M} into {S}.\n2. The drop reason question: not asked, nothing is dropped\n3. Confirmation 2 (\"Drop, merge, include and leave as shown?\"): yes\n4. Step 11 (\"Nest these under one new parent?\"): yes"
+  },
+  "merge-left-ready": {
+    "shim": "env",
+    "answers": "1. Confirmation 1 (step 8): move every follow-up off the shortlist so none is included, and merge {B} into {A}.\n2. The drop reason question: not asked, nothing is dropped\n3. Confirmation 2 (\"Drop, merge, include and leave as shown?\"): yes\n4. Step 11: not reached, nothing is included"
+  },
+  "merge-refused-dependent": {
+    "shim": "env",
+    "answers": "1. Confirmation 1 (step 8): move every follow-up off the shortlist so none is included, and merge {Q} into {P}.\n2. If the ritual refuses that merge and offers to merge the other way round, accept the offer: your answer to the repeated Confirmation 1 question is merge {P} into {Q}, with nothing else changed.\n3. The drop reason question: not asked, nothing is dropped\n4. Confirmation 2 (\"Drop, merge, include and leave as shown?\"): yes\n5. Step 11: not reached, nothing is included"
+  },
+  "edit-intent": {
+    "shim": "env",
+    "answers": "1. Confirmation 1 (step 8): move every follow-up off the shortlist so none is included, and merge {E2} into {E1}.\n2. The drop reason question: not asked, nothing is dropped\n3. Confirmation 2 (\"Drop, merge, include and leave as shown?\"), first answer: intent {E2}: Also keep any border one character wide and centre the banner on a forty column line, as the sign painter asked\n4. Confirmation 2, once it is shown again with the new note: yes\n5. Step 11: not reached, nothing is included"
+  },
+  "full-set": {
+    "shim": "env",
+    "answers": "1. Confirmation 1 (step 8): make the shortlist exactly this one follow-up: {I}. Add it if it is not already shortlisted and remove every other shortlisted follow-up. Then drop {D}, and merge {M} into {S}.\n2. The drop reason question (\"Why drop this follow-up?\"): the chute work moved into the supplier's own firmware\n3. Confirmation 2 (\"Drop, merge, include and leave as shown?\"), first answer: drop {L2}\n4. Confirmation 2, once it is shown again with that change: yes\n5. Step 11 (\"Nest these under one new parent?\"): yes"
+  },
+  "drop-fails": {
+    "shim": "dropfail_env",
+    "answers": "1. Confirmation 1 (step 8): move every follow-up off the shortlist so none is included, and drop these two follow-ups: {F1} {F2}\n2. The drop reason question (\"Why drop this follow-up?\"): the rack was scrapped with the old stockroom\n3. Confirmation 2 (\"Drop, merge, include and leave as shown?\"): yes\n4. Step 11: not reached, nothing is included"
+  },
+  "supersede-fails": {
+    "shim": "supersedefail_env",
+    "answers": "1. Confirmation 1 (step 8): make the shortlist exactly this one follow-up: {G1}. Add it if it is not already shortlisted and remove every other shortlisted follow-up. Then merge {G2} {G3} into {G1}.\n2. The drop reason question: not asked, nothing is dropped\n3. Confirmation 2 (\"Drop, merge, include and leave as shown?\"): yes\n4. Step 11 (\"Nest these under one new parent?\"): yes, if it is reached"
+  },
+  "drop-dependents": {
+    "shim": "env",
+    "answers": "1. Confirmation 1 (step 8): move every follow-up off the shortlist so none is included, and drop {H1}.\n2. The drop reason question (\"Why drop this follow-up?\"): the lamp shelf was taken out of the plan\n3. Confirmation 2 (\"Drop, merge, include and leave as shown?\"), first answer: drop {T}\n4. Confirmation 2, once it is shown again with that change: yes\n5. Step 11: not reached, nothing is included"
+  }
+}
