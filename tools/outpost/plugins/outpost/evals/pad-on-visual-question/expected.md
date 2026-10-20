@@ -32,8 +32,9 @@ section without the flow clause (`rules.md` blob `dc7c8757`).
 > pad as the skill's **Report it** says, and never hand back a link its script did
 > not print.
 
-The two edits ship together and are measured together; no arm separates them. The
-flow clause is the only difference between the arms of the second batch.
+The baseline arm carries the pad rule as it stood before the flow clause, and the
+treatment arm carries the rule as it stands now; the flow clause is the only
+difference between them.
 This is a **behavioural** decision (whether, where and how a session reaches for
 a pad), so only a run can observe it. The skill's own text is not under test; it
 is loaded identically in every arm.

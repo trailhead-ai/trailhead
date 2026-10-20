@@ -1111,6 +1111,14 @@ brief's subject. The 3/3 there confirms the fix but is not a held-out measuremen
 (3/3). The case's Pass condition says a FAIL is not answered by a wording change and re-run;
 the operator's decision overrode that once, as `expected.md` records.
 
+Three further gaps in what the batch measures. `grade-run.py` counts a flow option by the
+presence of the `flow` key, not by whether the flow draws without "Can't draw this flow", so the
+batch shows that sessions write flow options, not that those options draw. No scenario covers an
+architecture picture, so the "what hands off to what" half of the clause is unmeasured. And "How
+files, folders or settings are laid out is neither" could be read as excluding the layout of a
+settings screen; the ungated dispatched-agent scenario still drew a settings-panel pad 3/3, but
+no gated check covers that reading.
+
 **Correction to commit `9d1d55c3`.** Its body says the three arm-contract tests went red on the
 `rules.md` edit alone. That red was not observed in that commit, because the arms were rebuilt in
 the same step. The red-first evidence is in `20057986`, where

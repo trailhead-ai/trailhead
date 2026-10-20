@@ -399,7 +399,8 @@ def test_each_problem_has_its_documented_wording(skill, tmp_path, state):
 
     assert proc.stderr.splitlines() == [
         'scratch-pad: questions[0].options[1]: no "cost" — every option states what it costs',
-        'scratch-pad: questions[1].options[1]: unknown key "costs" — allowed: name, cost, pick, layout, flow',
+        'scratch-pad: questions[1].options[1]: unknown key "costs" — allowed: '
+        + ", ".join(_load_module()._OPTION_KEYS),
         'scratch-pad: questions[2]: no option has "pick": true — mark the session\'s own pick',
     ]
 
