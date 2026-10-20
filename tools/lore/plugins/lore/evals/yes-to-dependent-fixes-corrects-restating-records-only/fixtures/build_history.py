@@ -35,6 +35,10 @@ REPO = HERE.parents[6]
 YES_CASE = EVALS / "yes-to-dependent-fixes-corrects-restating-records-only"
 NO_CASE = EVALS / "no-to-dependent-fixes-leaves-every-record-as-it-was"
 
+sys.path.insert(0, str(REPO / "tools" / "lore" / "plugins" / "lore"))
+
+from lore.record.store import _kebab  # noqa: E402
+
 FAKE_CWD = "/tmp/claude-eval-seed/home/cwd"
 SESSION_ID = "7b2f4e90-3c1d-4a58-8e6b-9d0a5c7e1f34"
 FIRST = "decision/set-the-loan-period-for-power-tools"
@@ -101,21 +105,9 @@ def revision_of(shown: str) -> str:
 def body_of(records: list[dict], record_id: str) -> str:
     kind, _, name = record_id.partition("/")
     for r in records:
-        if r["kind"] == kind and slug(r["title"]) == name:
+        if r["kind"] == kind and _kebab(r["title"]) == name:
             return r["body"]
     sys.exit(f"build_history: no seeded record {record_id}")
-
-
-def slug(title: str) -> str:
-    out, dash = [], False
-    for ch in title.lower():
-        if ch.isalnum():
-            out.append(ch)
-            dash = False
-        elif not dash:
-            out.append("-")
-            dash = True
-    return "".join(out).strip("-")
 
 
 def sentence_with(body: str, needle: str) -> str:
@@ -202,7 +194,7 @@ def build() -> str:
     pre_body = corrected.replace(NEW_PERIOD, OLD_PERIOD)
     first_kind, first_name = FIRST.split("/")
     pre_records = [
-        dict(r, body=pre_body) if r["kind"] == first_kind and slug(r["title"]) == first_name else r for r in records
+        dict(r, body=pre_body) if r["kind"] == first_kind and _kebab(r["title"]) == first_name else r for r in records
     ]
 
     with tempfile.TemporaryDirectory(prefix="build-history-") as tmp:

@@ -783,39 +783,35 @@ def test_missing_git_binary_is_refused_rather_than_falling_back_to_a_full_copy(s
     assert snapshot(sandbox / "home" / "cwd") == {}
 
 
-FIRST = {"kind": "decision", "title": "Use Postgres", "status": "active", "body": "Postgres it is.\n"}
-
-
-def linking(*related, **extra):
+def linking(*related):
     return {
         "kind": "adr",
         "title": "Adopt the store",
         "status": "active",
         "body": "Adopted.\n",
         "related": list(related),
-        **extra,
     }
 
 
 def test_related_entry_lands_under_its_kind_in_the_sidecar(sandbox):
-    result = seed(sandbox, [FIRST, linking("decision=use-postgres")])
+    result = seed(sandbox, [DECISION, linking("decision=pick-a-transport")])
     assert result.returncode == 0, result.stderr
 
-    assert show(sandbox, "adr/adopt-the-store")["sidecar"]["related"]["decision"] == ["use-postgres"]
+    assert show(sandbox, "adr/adopt-the-store")["sidecar"]["related"]["decision"] == ["pick-a-transport"]
 
 
 def test_two_related_entries_produce_both_links(sandbox):
-    result = seed(sandbox, [FIRST, ADR, linking("decision=use-postgres", "adr=use-the-fixture-queue")])
+    result = seed(sandbox, [DECISION, ADR, linking("decision=pick-a-transport", "adr=use-the-fixture-queue")])
     assert result.returncode == 0, result.stderr
 
     assert show(sandbox, "adr/adopt-the-store")["sidecar"]["related"] == {
-        "decision": ["use-postgres"],
+        "decision": ["pick-a-transport"],
         "adr": ["use-the-fixture-queue"],
     }
 
 
 def test_record_without_related_has_no_related_key(sandbox):
-    result = seed(sandbox, [FIRST, ADR])
+    result = seed(sandbox, [DECISION, ADR])
     assert result.returncode == 0, result.stderr
 
     assert "related" not in show(sandbox, "adr/use-the-fixture-queue")["sidecar"]
@@ -823,10 +819,17 @@ def test_record_without_related_has_no_related_key(sandbox):
 
 @pytest.mark.parametrize(
     "related",
-    ["decision=use-postgres", ["use-postgres"], ["decision="], ["=use-postgres"], [7], ["nokind=use-postgres"]],
+    [
+        "decision=pick-a-transport",
+        ["pick-a-transport"],
+        ["decision="],
+        ["=pick-a-transport"],
+        [7],
+        ["nokind=pick-a-transport"],
+    ],
 )
 def test_malformed_related_is_refused_and_creates_nothing(sandbox, related):
-    result = seed(sandbox, [FIRST, {**linking(), "related": related}])
+    result = seed(sandbox, [DECISION, {**linking(), "related": related}])
 
     assert result.returncode != 0
     assert result.stderr.startswith("seed-eval-vault: ")
@@ -836,8 +839,8 @@ def test_malformed_related_is_refused_and_creates_nothing(sandbox, related):
 
 
 @pytest.mark.parametrize("records", [
-    [linking("decision=use-postgress"), FIRST],
-    [FIRST, linking("adr=use-postgres")],
+    [linking("decision=pick-a-transportt"), DECISION],
+    [DECISION, linking("adr=pick-a-transport")],
     [linking("decision=adopt-the-store")],
     [linking("adr=adopt-the-store")],
 ])
@@ -852,17 +855,17 @@ def test_related_naming_no_earlier_seeded_record_is_refused_and_creates_nothing(
 
 
 def test_search_by_related_edge_returns_the_record_that_links_the_earlier_one(sandbox):
-    result = seed(sandbox, [FIRST, linking("decision=use-postgres")])
+    result = seed(sandbox, [DECISION, linking("decision=pick-a-transport")])
     assert result.returncode == 0, result.stderr
 
-    found = seeded_lore(sandbox, "search", "related-decision:use-postgres")
+    found = seeded_lore(sandbox, "search", "related-decision:pick-a-transport")
     assert found.returncode == 0, found.stderr
     assert "adr/adopt-the-store" in found.stdout
-    assert "decision/use-postgres" not in found.stdout
+    assert "decision/pick-a-transport" not in found.stdout
 
 
 def test_unknown_field_is_refused_and_creates_nothing(sandbox):
-    result = seed(sandbox, [FIRST, {**ADR, "title": "Other", "relatedd": ["decision=use-postgres"]}])
+    result = seed(sandbox, [DECISION, {**ADR, "title": "Other", "relatedd": ["decision=pick-a-transport"]}])
 
     assert result.returncode != 0
     assert result.stderr.startswith("seed-eval-vault: ")

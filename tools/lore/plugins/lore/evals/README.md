@@ -136,14 +136,11 @@ path: vault/decision/*.md
 ---
 ```
 
-`file_exists` counts only files the agent created during the run, so it cannot
-see seeded records; grade a seeded record's contents with `regex` over a
-`source: file` target instead.
-
-`regex` and `llm` with `target: files` read the list of files created during
-the run, never the ones the agent modified in place; an in-place edit of a seeded
-record is invisible to it. Grade a seeded record's change with a `regex` on its
-`source: file` path (its body and its `.json` sidecar), one grader per record.
+`file_exists`, and `regex` and `llm` with `target: files`, see only the files the
+agent created during the run, never the ones it modified in place, so a seeded
+record and an in-place edit of it are invisible to them. Grade a seeded record's
+contents or change with a `regex` on its `source: file` path (its body and its
+`.json` sidecar), one grader per record.
 
 `tool_used` counts the agent's tool calls that match:
 
