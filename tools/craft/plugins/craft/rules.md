@@ -245,3 +245,9 @@ holds for every first mention, a closing summary line included. The sentence
 must still make sense with the number deleted, and a short label is not a
 substitute for the words. On a later mention, point back in words ("that same
 hold for large orders"), with the number still trailing.
+
+When you sum up or close out a piece of work for the person reading, open with
+what needs them: a decision only they can make, a question, or an action only
+they can take. Give everything that needs nothing from them at most one line
+each, and leave the detail until they ask. A pasteable command may still close
+the reply.
