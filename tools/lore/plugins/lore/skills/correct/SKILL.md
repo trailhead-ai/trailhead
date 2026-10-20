@@ -48,7 +48,8 @@ from configuration, an environment file or a secret store verbatim: describe it 
   - The operator ruled on or accepted the fix but the source is not reachable from here: that
     stands. Go on to Step 1, and say in the closing line that the source was not checked.
   - The source contradicts it: apply nothing and leave the record untouched. Tell the operator
-    what the source says and that nothing was changed.
+    that the source contradicts their ruling, naming the value they ruled and the value the
+    source gives, and that nothing was changed.
   - When the operator accepted a fix that a review or you proposed and it ends in an amend
     (Step 3a), the amend is `--initiated-by agent`, and the acceptance is the yes Step 3a asks
     for: do not ask again.
