@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a scratch pad: one or more rounds of layout sketches.
+"""Build a scratch pad: one or more rounds of layout and flow sketches.
 
 Given ``--pad <slug>`` and ``--round <path-to-json>`` (and ``--add`` for a later round of an
 existing pad), this checks the round's
