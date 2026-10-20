@@ -6,6 +6,9 @@
   var WOBBLE = 0.9;
   var SEGMENT = 22;
   var MAX_QUOTE = 200;
+  var MIN_SCALE = 0.6;
+  var ARROW_LENGTH = 11;
+  var ARROW_SPREAD = (26 * Math.PI) / 180;
 
   function mulberry32(seed) {
     var a = seed >>> 0;
@@ -224,7 +227,10 @@
     if (state.observer) state.observer.disconnect();
     var segments = [];
     var reason;
-    if (error && error.hasBlock) {
+    if (error && error.isFlowError) {
+      segments = [error.flowLine === null ? "the whole flow" : "line " + error.flowLine + ": " + error.flowText];
+      reason = error.message;
+    } else if (error && error.hasBlock) {
       segments = error.penPath.slice();
       segments.push(quoted(error.penBlock));
       reason = error.message;
@@ -245,6 +251,10 @@
   }
 
   function trace(state) {
+    if (state.flow) {
+      traceFlow(state);
+      return;
+    }
     var base = state.svg.getBoundingClientRect();
     var rng = mulberry32(state.seed);
     state.svg.textContent = "";
@@ -268,8 +278,94 @@
     }
   }
 
-  function buildFlow(flow, ctx) {
-    throw new Error("flows are not drawn yet.");
+  function stepOutline(step) {
+    var r = { x: step.x, y: step.y, w: step.w, h: step.h };
+    if (step.shape === "round") return roundedOutline(r, 12);
+    if (step.shape === "pill") return roundedOutline(r, r.h / 2);
+    if (step.shape === "decision") {
+      var cx = r.x + r.w / 2;
+      var cy = r.y + r.h / 2;
+      return [[cx, r.y], [r.x + r.w, cy], [cx, r.y + r.h], [r.x, cy], [cx, r.y]];
+    }
+    return roundedOutline(r, 0);
+  }
+
+  function arrowhead(group, rng, points) {
+    var tip = points[points.length - 1];
+    var from = points[points.length - 2];
+    var back = Math.atan2(from[1] - tip[1], from[0] - tip[0]);
+    [-1, 1].forEach(function (side) {
+      var angle = back + side * ARROW_SPREAD;
+      stroke(group, rng, [[tip[0] + ARROW_LENGTH * Math.cos(angle), tip[1] + ARROW_LENGTH * Math.sin(angle)], tip]);
+    });
+  }
+
+  function flowMeasurer(svg) {
+    var probe = svgNode("text");
+    probe.setAttribute("class", "flow-label");
+    svg.appendChild(probe);
+    var widths = new Map();
+    function measure(text) {
+      if (!widths.has(text)) {
+        probe.textContent = text;
+        widths.set(text, probe.getComputedTextLength());
+      }
+      return widths.get(text);
+    }
+    return { measure: measure, done: function () { svg.removeChild(probe); } };
+  }
+
+  function buildFlow(flow, state) {
+    if (!window.PadFlow) throw new Error("the flow parser did not load.");
+    state.model = window.PadFlow.parse(flow);
+    state.svg = state.drawing.querySelector("svg.pad-ink");
+    if (!state.svg) throw new Error("the drawing has no ink layer.");
+    state.svg.setAttribute("class", "pad-ink pad-flow");
+    state.drawing.classList.add("pad-drawing-flow");
+  }
+
+  function traceFlow(state) {
+    var svg = state.svg;
+    svg.textContent = "";
+    var measurer = flowMeasurer(svg);
+    var plan = window.PadFlow.layout(state.model, measurer.measure);
+    measurer.done();
+    state.plan = plan;
+    svg.setAttribute("viewBox", "0 0 " + round1(plan.width) + " " + round1(plan.height));
+    var rng = mulberry32(state.seed);
+    plan.steps.forEach(function (step) {
+      var group = svgNode("g");
+      group.setAttribute("data-kind", step.shape);
+      group.setAttribute("data-step-id", step.id);
+      stroke(group, rng, stepOutline(step));
+      step.lines.forEach(function (line) {
+        var text = svgNode("text");
+        text.setAttribute("class", "flow-label");
+        text.setAttribute("x", round1(line.x));
+        text.setAttribute("y", round1(line.y));
+        text.textContent = line.text;
+        group.appendChild(text);
+      });
+      svg.appendChild(group);
+    });
+    plan.arrows.forEach(function (arrow) {
+      var group = svgNode("g");
+      group.setAttribute("data-kind", "arrow");
+      group.setAttribute("data-arrow-index", String(arrow.index));
+      stroke(group, rng, arrow.points);
+      arrowhead(group, rng, arrow.points);
+      svg.appendChild(group);
+    });
+    fitFlow(state);
+  }
+
+  function fitFlow(state) {
+    var plan = state.plan;
+    if (!plan) return;
+    var avail = state.drawing.clientWidth;
+    var scale = avail > 0 ? Math.max(MIN_SCALE, Math.min(1, avail / plan.width)) : 1;
+    state.svg.style.width = round1(plan.width * scale) + "px";
+    state.svg.style.height = round1(plan.height * scale) + "px";
   }
 
   function prepare(drawing, option, seed) {
@@ -278,7 +374,7 @@
     var state = { drawing: drawing, layout: layout, flow: isFlow, seed: seed, dead: false, items: [], svg: null, observer: null };
     guarded(state, function () {
       if (isFlow) {
-        buildFlow(layout, { items: state.items });
+        buildFlow(layout, state);
         return;
       }
       var ctx = { items: state.items };
@@ -295,7 +391,7 @@
   function observe(state) {
     if (state.dead || typeof ResizeObserver !== "function") return;
     state.observer = new ResizeObserver(function () {
-      guarded(state, function () { trace(state); });
+      guarded(state, function () { if (state.flow) fitFlow(state); else trace(state); });
     });
     state.observer.observe(state.drawing);
   }
