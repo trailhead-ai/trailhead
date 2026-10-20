@@ -132,8 +132,12 @@ page width.
   ink.
 - **Size.** A flow draws into its own SVG, sized to the flow's natural size, with a viewBox of the
   same size. When the card is narrower, the drawing scales down to fit its width, keeping its
-  proportions; it never scales up. Scaling changes nothing inside the drawing, so its strokes are the
-  same at every page width.
+  proportions; it never scales up, and never below 0.6 of its natural size: a flow that would need
+  more shrinking than that keeps 0.6 and the card scrolls sideways, so its labels stay readable.
+  Scaling changes nothing inside the drawing, so its strokes are the same at every page width.
+- **Where it lives.** The parser and the layout are their own kit file, `flow.js`, loaded before
+  the pen; the pen traces what the layout returns. Every table keyed by a step id is a `Map`, so an
+  id such as `__proto__` or `constructor` is an ordinary step.
 
 ## When a flow can't be drawn
 
@@ -143,21 +147,28 @@ A flow the pen cannot draw shows a message in that option's place, instead of an
 Can't draw this flow:
 line 4: a --x b
 "--x" is not an arrow this pen draws.
+line 7: %% the retry path
+A "%%" comment is not part of a flow this pen draws.
+Ask the session to redraw this option.
 ```
 
 - The first line is always `Can't draw this flow:`.
-- The second names the first line that broke, by its number in the flow text (counting from 1,
-  blank lines included) and its text, cut to 200 characters with `…`. A problem with no single line
-  (an empty flow, too many steps) names the flow as a whole instead.
-- The third says what is wrong in plain words.
+- Then every line that broke, up to five, in order: its number in the flow text (counting from 1,
+  blank lines included) and its text, cut to 200 characters with `…`, followed by what is wrong in
+  plain words. More than five end with `and <n> more`. A problem with no single line (an empty flow,
+  a limit) names the flow as a whole instead, and is the only problem listed.
+- The last line is always `Ask the session to redraw this option.`, so a user who has never seen
+  the flow text knows what to do with the message.
 - Every line is set as text. A line of flow text holding a script tag shows as those characters.
 
 Only that option's drawing shows the message; the other options on the question draw normally.
 
-**Limits.** A flow holds at most 60 steps, 120 arrows and 400 lines, and no line is longer than 1000
-characters. Over any limit, the flow cannot be drawn and the message says which limit and the
-number found. The limits keep a flow written in error, or one copied from somewhere hostile, from
-hanging the page.
+**Limits.** A flow holds at most 400 lines, no line longer than 1000 characters, 60 steps and 120
+arrows, checked in that order and before anything else is read. Over any limit, the flow cannot be
+drawn and the message says which limit and the number found. Long arrows add at most 2000 waypoints
+in all, and a label word wider than a step is broken across lines. The limits keep a flow written in
+error, or one copied from somewhere hostile, from hanging the page: the largest flow they allow
+draws in under a second.
 
 ## Light and dark
 
@@ -216,6 +227,7 @@ lines shows the message:
 Can't draw this flow:
 the whole flow
 The flow has no steps.
+Ask the session to redraw this option.
 ```
 
 The pad is still built and the option's name, cost and buttons are there; only its drawing is the
@@ -223,8 +235,8 @@ message.
 
 ## State — unsupported line shows the message naming that line
 
-A flow holding any line outside the supported part shows the message naming the first such line by
-its number and text, with what is wrong: `subgraph` is not drawn, `RL` is not a direction this pen
+A flow holding any line outside the supported part shows the message naming each such line (up to
+five) by its number and text, with what is wrong: `subgraph` is not drawn, `RL` is not a direction this pen
 draws, a `%%` comment is not part of a flow it draws, and so on. A first line that is not a header
 names line 1. A flow over a limit names the limit. The other options on the question draw normally.
 
