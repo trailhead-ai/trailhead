@@ -44,8 +44,7 @@ independently — so a clean fact pass is never read as evidence the spec is sou
 
 This step runs on **every** spec before it flips to `ready`. There is no skip flag. Calibration is
 tuned through the per-lens Critical bars in `_shared/council.md` and the severity rules below —
-never through per-invocation opt-outs. A spec that "obviously doesn't need it" is the spec the
-premise pass most often reframes.
+never through per-invocation opt-outs.
 
 ## Process
 
@@ -196,17 +195,14 @@ adjudication — it is delegation of the work you were dispatched to do.** Conso
    disposition — they are only logged for the audit trail — so a compound criterion filed at either
    severity is noted and the spec advances with it intact. Critical is what forces a disposition:
    `resolved` means the adjudicator drafts and applies the split before the record advances, which
-   is what keeps the compound criterion from surviving. This bar pins measured behavior, not new
-   behavior — under the auditor's current output shape a reported compound criterion already reaches
-   Critical here. Write it as a rule so an edit to that output shape, or to this step, does not
-   silently regress it. **This bar is not subject to item 5's auto-downgrade.** Independent
-   deliverability is a judgment about how work would be sliced, which can read as "guessing about
-   future state" — but it is answered from the criterion's own text, and downgrading it to Important
-   strips the disposition that makes the finding land at all.
+   is what keeps the compound criterion from surviving. Write it as a rule so an edit to the
+   auditor's output shape does not silently regress it. **This bar is not subject to item 5's
+   auto-downgrade.** Independent deliverability is a judgment about how work would be sliced, which
+   can read as "guessing about future state" — but it is answered from the criterion's own text, and
+   downgrading it to Important strips the disposition that makes the finding land at all.
 7. **Hold every `revise` finding to the prescription-specificity bar.** A finding that cannot
    produce a prescription this specific is not a Critical — a severity bar applied here, at
-   consolidation, before a finding is numbered, not a step-5 consult. `dispositions.md`'s `revise`
-   glossary entry restates it beside the term it defines, downstream of this decision.
+   consolidation, before a finding is numbered, not a step-5 consult.
 8. **Spot-verify contentious claims.** Any finding that would be expensive to act on, that
    contradicts another pass, or that arrives in a transcript reading anomalously (over-confident,
    thin on evidence, or wandering outside its stated lane) gets checked yourself before it reaches
@@ -215,9 +211,6 @@ adjudication — it is delegation of the work you were dispatched to do.** Conso
    you will present them. An id is **stable for the rest of the run** — the operator names it to
    override, and the audit trail records it — so never renumber after presenting, not even when an
    override collapses a row's relevance.
-
-Consolidation is not the deliverable. What the operator sees is the recommendation step 5 builds out
-of it.
 
 ### 5. Recommend, then accept
 
@@ -229,6 +222,11 @@ is a complete answer to it.
 The first line you show the reader calls this "the spec review (gauntlet)", with the word in
 brackets once; every later line says "the spec review". `/craft:gauntlet` stays a command.
 
+Everywhere else your own prose mentions a finding — the synthesis, a list, a next-steps line — name
+it by its headline, or a faithful short form, with the id in round brackets after: "apply the cache
+TTL fix (C1) and the tenant rewrite (C2)", never "apply C1 and C2", "the C1 edit" or "C1's change".
+The table, the rewrite headers and the reply line keep their own forms.
+
 The deliverable is these four parts, in this order — all four whenever there is a Critical to
 disposition, and the same parts minus the table on a run that produced none (`dispositions.md`'s
 "Zero Criticals is still a decision"):
@@ -239,11 +237,10 @@ disposition, and the same parts minus the table on a run that produced none (`di
    `_shared/council.md`. Read it there; do not restate it here. Two things about it are worth naming
    for this caller in particular:
 
-   - **No sentence cap.** Three movements do not fit a fixed sentence count, and a cap tight enough
-     to squeeze them squeezes two of the three down into the table instead — which is the reader
-     reconstructing the explanation from rows again. What holds the length is the one-screen budget
-     above, plus the shared rule that a synthesis which will not fit means the finding set is
-     **under-consolidated**: go back to step 4 rather than spend more of the screen.
+   - **No sentence cap.** A cap tight enough to squeeze three movements squeezes two of them into
+     the table, which is the reader reconstructing the explanation from rows again. The one-screen
+     budget holds the length, and a synthesis that will not fit means the finding set is
+     **under-consolidated**: go back to step 4.
    - **The interpretive per-pass read is the point.** Eight passes attacked this record from lanes
      that could not see each other, and which of them were right is a judgment only the adjudicator
      is positioned to make. Making it is movement two's whole job; the shared contract names what
@@ -319,8 +316,10 @@ operator never approved.
 
 **Full finding detail is not printed by default.** It is one request away ("show me the detail on
 C2") and it is retained in the audit trail either way. When you do print it, write the finding in
-the shape "How a finding reads" defines in `_shared/council.md` — that shape is what makes a finding
-readable by someone who has not read the document under review.
+the shape "How a finding reads" defines in `_shared/council.md`, and open each finding with its
+proposed outcome in plain words — "fixed in the spec", "needs a rewrite", or the reading of an
+operator outcome — before its reasoning. That shape is what makes a finding readable by someone who
+has not read the document under review.
 
 A pass that shows a *different* record is wrong, with a known fix, has no disposition and is not a
 `reaches-downstream` scope either. The test: a record that is wrong *because of a change this review
@@ -331,8 +330,7 @@ another record. List the latter apart, as the contract in `_shared/council.md` s
 **Security Criticals are never compressed.** A Critical raised by the attacker lens renders its row
 in full — the whole finding and the actual proposed edit text, never a clause standing in for it.
 Compression is a convenience for the operator, and a one-clause summary of a security finding reads
-as reasonable no matter what it elides. This mirrors drift-gate's rule that security surface is
-conformance, not quality.
+as reasonable no matter what it elides.
 
 #### Who may propose what
 
@@ -472,9 +470,11 @@ count (see above):
   C2 `disputed` (operator override — "<their reason, quoted>"), C3 `resolved` (operator override —
   answered: "<their counterargument, quoted>"), … — <n> from proposal, <n> operator overrides.
   Important <n>, Minor <n>, detail below.
-- <the consolidated detail, per finding, in the shape `_shared/council.md` defines; name each
-  criterion by its own text with its number after it in round brackets, and put each Critical's id
-  after its headline in round brackets>
+- <the consolidated detail, per finding, in the shape `_shared/council.md` defines; open each with
+  its proposed outcome in plain words and put each Critical's id after its headline in round
+  brackets. Name every criterion by its own text with its number after it in round brackets, also
+  where several are listed together: "the packet limit per swap (AC1) and the labelling rule
+  (AC2)", never "this rewrites AC1 and AC2">
 ```
 
 That is one invocation. `$EDITS` is the unified diff carrying all three payloads — every `resolved`

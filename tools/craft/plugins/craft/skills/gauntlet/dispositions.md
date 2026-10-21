@@ -117,9 +117,9 @@ back through the table finding by finding.
   override ("dispute C3" recorded against C4) changes nothing that one line displays, and the audit
   trail it lands in is permanent.
 - **An override naming an id outside the presented range is rejected.** "dispute C7" against a
-  five-row table is an error, not a puzzle: say which ids exist and ask again. **Never map an
-  unknown id onto the id you think was meant.** This holds for all three forms — dispute, accept as
-  a risk, answer.
+  five-row table is an error, not a puzzle: name the findings that exist, each by its headline with
+  its id in round brackets, and ask again. **Never map an unknown id onto the id you think was
+  meant.** This holds for all three forms — dispute, accept as a risk, answer.
 - **An override with no reason is incomplete.** `accepted-as-risk`, `disputed`, and `answered` carry
   the operator's reason text, and you may not write it for them — so "dispute C3", "accept C3 as a
   risk" or "answer C3", with nothing said about why, is not yet a disposition: ask for the reason
