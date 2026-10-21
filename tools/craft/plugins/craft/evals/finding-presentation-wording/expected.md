@@ -4615,7 +4615,7 @@ needs a clean majority (5 or 6 of 6, or 3 of 3) of the winning word at every sit
 | `pwopen` | `criterion-mention` | 0 of 3 `text-with-number` (`bare` 3) | no | guard miss; control `bare` 6 of 6: residual |
 | `pwdetail` | `outcome-word` | 6 of 6 `plain` | yes | at this site: wins |
 | `pwdetail` | `finding-id` | 4 of 6 `bracketed` (`bare` 2) | no | treated miss |
-| `pwdetail` | `severity-name` | 4 of 6 `plain` (`none` 2) | no | guard miss; control `none` 1 of 6: regression |
+| `pwdetail` | `severity-name` | 4 of 6 `plain` (`none` 2) | no | guard miss; control `none` 1 of 6: regression if `none` counts as a miss; held otherwise. The operator's reading of 2026-10-21: `none` is not a miss when no internal severity name appears, so the guard is held |
 | `pwdetail` | `reviewer-name` | 6 of 6 `plain` | yes | guard held |
 | `pwsaved` | `outcome-word` | 6 of 6 `plain` | yes | at this site: wins |
 | `pwsaved` | `finding-id` (echo) | 6 of 6 `bracketed` | yes | at this site: wins |
@@ -4639,12 +4639,11 @@ re-run to six and the guard controls was made.
 - `criterion-mention` at `pwopen`: treated2 `bare` in 3 of 3; the same-day paired control (baseline arm, six runs) read
   `bare` in 6 of 6, so the miss is residual.
 - `severity-name` at `pwdetail`: treated2 `plain` 4, `none` 2 (`-1`, `-3`), which is 2 of 6 off the winning word; the
-  same-day paired control read `none` in 1 of 6 (`pw-control2-pwdetail-5`), fewer than 2 of 6. By the registered guard
-  rule that is a regression, and the slice stops for the operator; nothing is reverted here. The registered rule does
-  not say whether `none` (no severity word in the reader-facing text) is a miss. This reading counts every
-  non-`plain` verdict as one, as "5 of 6 `plain`" was read as "held" for this guard in the first treated batch. No
-  treated2 or control2 `pwdetail` capture reads `internal` for `severity-name`; the `none` captures print no severity
-  name at all. Whether that is a regression of the guard's intent is the operator's reading, not made here.
+  same-day paired control read `none` in 1 of 6 (`pw-control2-pwdetail-5`), fewer than 2 of 6. The registered rule
+  does not say whether `none` (no severity word in the reader-facing text) is a miss. Read as a regression if `none`
+  counts as a miss; held otherwise. No treated2 or control2 `pwdetail` capture reads `internal` for `severity-name`; the
+  `none` captures print no severity name at all. The operator's reading, 2026-10-21: `none` is not a miss when no
+  internal severity name appears, so the guard is held; nothing is reverted.
 
 **Hand check.** Each verdict word that carries a miss was read against the registered grammar rather than the script.
 `pwdetail` `finding-id` `bare`: `-2` holds `reply "answer C2" and say so` in prose and `-6` holds `with C1 moved down a
@@ -4662,8 +4661,10 @@ that these follow the second edit's added clauses is likewise a hypothesis, sinc
 
 **Grammar observations.** None to correct. Two for the operator: the guard rule does not say whether `none` counts as a
 miss (above), and `criterion-mention` takes the worst mention in a capture, so one bare `AC<n>` among otherwise
-numbered-after citations reads `bare` (as in `pw-treated2-pwsaved-5`); no grammar was changed. The plural level names
-("Criticals", "Importants", "Minors") do not appear in the reader-facing text of any treated2 or control2 capture.
+numbered-after citations reads `bare` (as in `pw-treated2-pwsaved-5`); no grammar was changed. One plural level name appears
+in reader-facing text in the treated2 and control2 captures: `pw-control2-pwopen-2` line 7 ("I downgraded two
+Criticals:"), which the `severity-name` grammar reads `internal`. No treated2 capture shows one in reader-facing text;
+"Criticals dispositioned" in the six `pwsaved` captures sits inside the fenced saved block.
 
 **By hand, `pwsaved`.** The marker bullet ("Retained review evidence") is printed in the saved block of all six
 treated2 captures (one occurrence each, line 16 to 31 of the capture). The credential-pattern scrub of
