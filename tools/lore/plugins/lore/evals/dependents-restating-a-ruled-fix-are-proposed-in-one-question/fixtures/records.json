@@ -1,0 +1,26 @@
+[
+  {
+    "kind": "decision",
+    "title": "Water the seedling benches before dawn",
+    "status": "active",
+    "body": "# Water the seedling benches before dawn\n\n## Context\nSeedlings dry out fast once the glass warms, so the benches are watered while the house is still cool.\n\n## Decision\nEvery bench runs a 12 minute cycle, one bench at a time. The night grower starts the first bench and logs the start time on the wall sheet.\n\n## Consequences\nThe pump never serves two benches at once, and the last bench finishes before the first light.\n"
+  },
+  {
+    "kind": "decision",
+    "title": "Size the irrigation tank for peak benches",
+    "status": "active",
+    "body": "# Size the irrigation tank for peak benches\n\n## Context\nThe tank has to hold what the busiest night draws.\n\n## Decision\nEach seedling bench runs a 12 minute cycle. The caretaker tops up the tank from the rain barrel whenever the gauge drops below the red line.\n\n## Consequences\nThe tank is sized from the bench count, and the barrel is the first source.\n",
+    "related": [
+      "decision=water-the-seedling-benches-before-dawn"
+    ]
+  },
+  {
+    "kind": "task",
+    "title": "Log pump pressure after each bench cycle",
+    "status": "done",
+    "body": "# Log pump pressure after each bench cycle\n\nRecord the pump pressure on the wall sheet when a bench cycle ends, and flag any reading under the pump's rated minimum.\n",
+    "related": [
+      "decision=water-the-seedling-benches-before-dawn"
+    ]
+  }
+]

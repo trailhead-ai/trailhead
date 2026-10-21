@@ -1,0 +1,5 @@
+schema_version: "1.1"
+name: defer-a-dropped-criterion-part-when-asked
+runs: 3
+context:
+  scaffold_script: fixtures/scaffold.sh

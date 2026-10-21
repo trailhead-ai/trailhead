@@ -1,0 +1,5 @@
+schema_version: "1.1"
+name: dependents-restating-a-ruled-fix-are-proposed-in-one-question
+runs: 3
+context:
+  scaffold_script: fixtures/scaffold.sh

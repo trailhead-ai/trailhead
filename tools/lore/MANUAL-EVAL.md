@@ -1122,6 +1122,29 @@ published N item(s)" or "lore: toms-macbook-pro published N item(s)"), and both 
 No run wrote live state: each ran in a temp `HOME` under `/tmp/claude-eval-*`, and no live path was attributable
 to anything but the commits above.
 
+Second dispatch (the refuse rerun and (f) runs 2 and 3): sha256 of every file under both trees (excluding `.git/`) before and
+after (18256 files). `~/.config/lore/` unchanged. Under `~/.local/state/lore/` 7 paths changed, all another session's: `index.sqlite`,
+`vaults/default/session/d690254e-...` (a session created 2026-10-14, an older session of the operator's, updated by its own
+publishes; 0 mentions of either case), and `vaults/trailhead/task/the-always-on-rule-draws-a-pad-for-flow-and-architecture-questions-measured-by-the-eval`
+and `.../the-operator-can-drop-and-merge-follow-ups` (.json and .md each), published by "toms-macbook-pro" at 11:57 per the vault log.
+No path attributable to a run; no fixture slug (`thumbnails-render`, `loan-period`) in any live file (grepped, `index.sqlite` excluded:
+0 files). The one file the (f) runs left, the resumed-run transcript `fixtures/7b2f4e90-....jsonl`, was untracked and was removed.
+
+### Callers of `lore:correct` in craft
+
+`grep -rn 'lore:correct' tools/craft/plugins --include=*.md --exclude-dir=evals` returns 9 hits in 5 files: `agents/planner.md` 2
+(lines 30, 468), `skills/brainstorm/SKILL.md` 4 (27, 29, 595, 612), `skills/distill/SKILL.md` 1 (285), `skills/_shared/council.md` 1 (440),
+`templates/adr.md` 1 (3). Each is a pointer that says `/lore:correct` decides amend versus supersede; none restates the dependents
+step, so none needs an edit for Step 3c. (Re-run on 2026-10-20 at `ee9f2800`; the same command gives the same count.)
+
+Where the turn ends when each caller is running a flow and `lore:correct` asks its dependents question: in every case the flow stops on
+the waiting line that closes the question and resumes on the operator's answer.
+
+- `planner`: stops on the waiting line, and the plan resumes from the operator's answer.
+- `brainstorm`: stops on the waiting line, and the discussion resumes from the operator's answer.
+- `distill`: stops on the waiting line, and the ritual resumes from the operator's answer.
+- `council` (consult): stops on the waiting line, and the panel's synthesis resumes from the operator's answer.
+
 ### Budget
 
 Runner `costUsd` for this task, judge cost excluded (about 0.1 USD in all):
@@ -1223,6 +1246,31 @@ included). Re-measured on `287395ae` only for these two cases:
 treatment cases and the two AC31 operator-asked cases need a re-run on `287395ae` before the numbers share one SHA.
 `supersede-adr-exception-phrased-as-small-tweak` is at its bar by one run only and its failing run is the same
 shape as before.
+
+### Rerun of `refuse-a-ruled-fix-the-source-contradicts` (the one pre-stated rerun): still below bar
+
+Fresh 3-run batch on the same prose, same command, `--max-cost-usd 0.9`. Bar: 2 of 3 runs at 1.0. Result: **0.80 / 1.00 / 0.80, 1 of 3
+at 1.0, BELOW BAR** (first batch 0.80 / 0.80 / 1.00, kept above). Turns 5, 6, 5; costUsd 0.6026; judge 0.0225; errors: none.
+`lore:correct` loaded in 3 of 3 runs. Nothing was corrected in any run, so Step 3c cannot have run; each run made two or three
+`record show` reads plus a source search, and no dependents search.
+
+| Run | Score | `operator-told` judge votes | Failed graders |
+|---|---|---|---|
+| 1 | 0.80 | PASS FAIL FAIL | `operator-told` |
+| 2 | 1.00 | PASS PASS PASS | none |
+| 3 | 0.80 | PASS FAIL FAIL | `operator-told` |
+
+Hand-check of each `operator-told` verdict against the final message (the clause: the message says the renderer profile gives 256,
+that this contradicts the ruled 512, and that the ADR was not changed). Runs 1 and 3 each say the ADR was not changed, quote the
+renderer profile at 256, say a 512 variant was dropped before release, and ask for the config that shows 512 ("So 512 isn't missing
+from the record. It was tried and rejected."; "256 is what shipped ... If the renderer has since moved to 512, check"). Neither
+says the word "contradicts" or says the source disagrees with the 512 the operator ruled in so many words; run 3 never frames 512 as
+the operator's claim. Run 2 says "The source it points to says 256 pixels, not 512" and states the ADR was not changed. My reading:
+the content of all three tells the operator what the source says and that nothing was changed, so the intent is met in all three, and
+the "contradicts the ruled 512" wording is what the judge votes on; runs 1 and 3 are the weaker framing and I read a fail on run 3 as
+defensible and on run 1 as strict. The judge's split is the same clause that failed in the first batch. I did not change the grader.
+The case is recorded as below bar after its one rerun: no prose rework and no further runs were made, for the controller to rule
+(accept as grader noise on prose Step 3c does not reach, or change the grader or the prose).
 
 ### Live state
 
@@ -1500,3 +1548,761 @@ condition, written before any arm was run.
 | Date | Arm | Prose under test | Runs | Result | Notes |
 |------|-----|------------------|------|--------|-------|
 ```
+
+## Cases: the dependents of a correction and the dropped part of a criterion (runner format)
+
+`plugins/lore/evals/{dependents-restating-a-ruled-fix-are-proposed-in-one-question, cited-everywhere-decision-proposes-only-records-that-restate-it, yes-to-dependent-fixes-corrects-restating-records-only, drop-part-of-a-criterion-with-no-new-record, defer-a-dropped-criterion-part-when-asked, no-to-dependent-fixes-leaves-every-record-as-it-was}/`
+— `expected.md` for all six pre-registered in `31f84ad1`; `case.yaml` (schema 1.1, `runs: 3`), `prompt.md`, `graders/*.md`
+(one per `expected.md` clause) and a seeded `fixtures/` in `1b81de7b`; one grader wording fix in `8a4b7c14` (below). The
+two answer cases (c) and (f) share one `fixtures/history.jsonl`, rebuilt from real `lore` output by
+`evals/yes-to-dependent-fixes-corrects-restating-records-only/fixtures/build_history.py` (it runs `seed-eval-vault` on the
+case's `records.json` with the corrected decision put back to the old figure, runs each command the seeded turns name,
+captures its output, and writes the same file into both cases; it refuses if the two `records.json` differ). Rerun it
+whenever a record body in `records.json` changes.
+
+**Under test:** AC28 and AC29 in (a), (b), (c), (f) (a restating dependent is proposed in one batched question and fixed on
+a yes; a record that only links is left alone; a no changes nothing); AC32 in (d) and (e) (the part a narrowed criterion
+drops makes no new record unless the operator asks for a task). The baseline arm is the current `correct` prose at HEAD
+`8a4b7c14`; `tools/lore/plugins/lore/skills/correct/SKILL.md` is unchanged on this branch (it has no dependents step and no
+rule about the dropped part). The treatment arm is a later task and reruns these exact cases with these exact graders.
+
+### Read this first: the runner is 2.1.303, not 2.1.304
+
+Every run below used `~/.local/share/claude/versions/2.1.303`, not the current `claude` (2.1.304). On 2.1.304 on this
+machine the sandboxed shell cannot write inside the run's temp home: the agent's own Bash tool printed
+`/tmp/claude-eval-<id>/tmp/claude-1000/cwd-xxxx: Read-only file system`, and every `lore record amend` failed with
+`error: record amend failed: unable to open database file`, so the vault was never changed. Evidence: case (d), one run
+each, same command, same fixture: 2.1.304 scored 0.67 twice (with and without `--keep-temp`; the agent could only
+read) and 2.1.303 scored 1.00 (the amend landed). The smokes of (a) and (b) on 2.1.304 hit the same error. That is four
+invalid 2.1.304 runs (0.8040 + 0.2155 USD, counted in the budget below). The treatment task must use the same binary for its A/B to be comparable, or a 2.1.304 that can write must
+be shown to score the same cases the same way first.
+
+### Batch command
+
+One invocation per case; `$out` a fresh `mktemp -d` outside the repo, never committed; `<case>` the case name:
+
+```sh
+out=$(mktemp -d)
+env -u LORE_CONFIG_DIR -u LORE_STATE_DIR -u XDG_CONFIG_HOME -u XDG_STATE_HOME \
+  ~/.local/share/claude/versions/2.1.303 plugin eval tools/lore/plugins/lore --case '<case>' --scaffold \
+  --allow-tools 'Bash(./lore *)' --ablation none --trust-plugin \
+  --runs 3 --model claude-opus-5-5 --json "$out/run.json" --max-cost-usd 1.5 \
+  --output-dir "$out" --no-publish --keep-temp
+```
+
+`--keep-temp` keeps each run's sandbox, trace included (`/tmp/claude-eval-<id>/out/trace.jsonl`); I also copied every trace
+while its run was live with a 0.3 s loop. Both copies are outside the repo and temporary: the loop's copies are under
+`/tmp/flipwork/traces/base/` named by sandbox id. Every `llm` verdict below was hand-checked against a trace that survived.
+A resumed run (cases (c), (f)) writes its transcript beside the seeded history, `fixtures/<seeded sessionId>.jsonl`;
+delete those files before committing (I did; the invocation counts below come from the copied traces instead).
+
+### Fixture checks (before any run)
+
+- No record body, `history.jsonl` or prompt contains `$(` (`grep -c '\$(' */fixtures/records.json */fixtures/history.jsonl`
+  over the six cases: 0 in each). The only `$(` in a fixtures directory is the unchanged `scaffold.sh` template, as in every
+  existing case.
+- No record body contains a line reading `EOF` (checked with a script over every body). `history.jsonl` holds one heredoc
+  inside the recorded amend command, `... <<'EOF'\n...\nEOF`, which is one JSON string and no line of the file.
+- Link-only bodies in (b): a grep of the seven bodies for `48|72|hour|day|two|three|second|week|minute|daily|once|twice`
+  returns one word, "second" in the title of the open task ("second fridge"), an ordinal and not a duration. Only the
+  paraphrasing record carries a duration ("two days").
+- Three-word shingle check of every record title and body, every prompt and the seeded turns' prose and commands against the
+  whole of `correct/SKILL.md` (lowercased word tokens, all 3-grams of each, intersected):
+
+  ```sh
+  cd tools/lore/plugins/lore && python3 shingle.py   # the script I ran, kept outside the repo
+  ```
+
+  | Case | Shared 3-grams |
+  |---|---|
+  | (a) dependents-restating | 0 |
+  | (b) cited-everywhere | 0 |
+  | (c) yes-to-dependent, (f) no-to-dependent (same history) | 4: `lore record amend`, `lore record show`, `initiated by operator`, `by operator base` (CLI syntax of the commands in the seeded turns; no prose) |
+  | (d) drop-part | 0 |
+  | (e) defer-a-dropped | 0 |
+
+  I first reworded my own seeded turn, which had copied the skill's amend closing line ("its change history can restore the
+  prior body"), and three phrases in (b)'s link-only bodies, to reach these counts.
+
+### Smoke runs (unscored)
+
+One run per case through the batch command, `--runs 1`. Every case ran end to end with no error on 2.1.303:
+
+| Case | Score | Notes |
+|---|---|---|
+| (a) | 0.71 | amended D1, asked no dependents question |
+| (b) | 0.67, then 0.58 | second run after the grader wording fix; amended the decision, found no dependents |
+| (c) | 0.92 | trace `session_id` equals the seeded `sessionId`; the agent amended D2 and updated A1 without re-asking |
+| (d) | 1.00 | the first smoke of the cases (2.1.304) could not write; this is the 2.1.303 run |
+| (e) | 1.00 | `tool_used` passed on a real run: one `record create` call carrying all four terms |
+| (f) | 1.00 | one turn, no tool call |
+
+### Grader flip check (unscored)
+
+Method: a throwaway local clone of `1b81de7b` under `/tmp/flipclone/repo` (the agent's `./lore` points at the CLI inside the
+plugin tree it was seeded from, and the sandbox hides any other path), a scratch eval dir `flipevals/` in its plugin
+holding, per case and outcome, the real `graders/` and `fixtures/` and a prompt that replaces the task with the exact
+commands of a hand-scripted outcome (revisions for `--base` read from a seeded vault; the final message given word for word),
+run with `--eval-dir flipevals` and `--model claude-haiku-4-5` (the scripted replay needs no judgement; the `llm` judge is
+the runner's default). 25 outcomes, 33 scripted runs counting the repeats after the (b) wording fix and the (d) rework; the 2.1.304 binary was not used. Each case has the hand-written correct
+outcome (C) and the wrong outcomes below; "fails on" lists the outcomes where the grader failed.
+
+Outcomes. (a): Wn writes nothing and says "Done"; Wx rewrites the decision to one sentence, amends D2 and T1, creates a task
+and lists D2 and T1 in a "2 restate" message. (b): Wn as (a); Wx rewrites the decision, amends P and one link-only task,
+creates a task and lists nine records; Wm amends the decision, P and one link-only task and creates nothing. (c): Wn writes
+nothing; Wx amends D2 as operator with a blockquote note, "(was 4 days)" and both original sentences cut, rewrites A1,
+amends T1, creates a task. (f): Wx amends D2 and T1, updates A1, creates a task and a session candidate. (d): Wn nothing;
+Wy1 removes the AC2 line; Wy2 rewords AC1 and AC3 and drops the objectives; Wz creates a ready successor spec and supersedes
+the original. (e): We1 amends only; We2 adds an unlinked task; We3 a linked task that does not name the text message; We4
+two valid creates; Wr1 removes AC2 plus a task; Wr2 rewords AC1 and AC3 plus a task; Wx a task, a session candidate, and a
+successor spec that supersedes the unamended original.
+
+| Case | Correct (C) | Grader fails on |
+|---|---|---|
+| (a) | 1.00, 14 of 14 | `d1-corrected-text-present`, `d1-wrong-text-gone`, `d1-change-history-entry`, `question-lists-d2-with-old-and-new-text`: Wn. `d1-unrelated-text-kept`, `d2-text-kept`, `d2-no-change-history`, `t1-text-kept`, `t1-no-change-history`, `no-new-record`, `question-omits-t1`: Wx. `coverage-count-stated`, `search-boundary-stated`, `turn-ends-waiting-with-one-question`: Wn and Wx |
+| (b) | 1.00, 12 of 12 (after `8a4b7c14`) | `c0-corrected-text-present`, `c0-wrong-text-gone`, `c0-change-history-entry`: Wn. `c0-unrelated-text-kept`, `no-new-record`: Wx. `p-text-kept`: Wx, Wm. `question-omits-link-only-records`: Wx (Wm; Wn split 1 PASS 2 FAIL). `question-lists-p-with-old-and-new-text`, `coverage-count-stated`, `search-boundary-stated`, `turn-ends-waiting-with-one-question`: Wn, Wm, Wx. **`only-the-corrected-decision-changed`: Wx only, not Wm (U4, below); replaced by sixteen per-record graders** |
+| (c) | 1.00, 13 of 13 | `d2-corrected-text-present`, `d2-change-history-entry`, `a1-corrected-text-present`, `a1-wrong-text-gone`: Wn. `d2-wrong-text-gone`, `d2-initiated-by-agent`: Wn, Wx. `d2-unrelated-text-kept-1`, `d2-unrelated-text-kept-2`, `d2-no-note-added`, `a1-unrelated-text-kept`, `t1-body-unchanged`, `t1-no-change-history`, `no-new-record`: Wx |
+| (f) | 1.00, 6 of 6 | all six: Wx (0.00) |
+| (d) | 1.00, 9 of 9 | `corrected-text-present`: Wn, Wy1, Wz. `wrong-text-gone`, `change-history-entry`: Wn, Wz. `criterion-kept-in-place`: Wy1. `unrelated-text-kept-1`, `-2`, `-3`: Wy2. `status-unchanged`, `no-new-record`: Wz |
+| (e) | 1.00, 11 of 11 | `corrected-text-present`: Wr1, Wx. `wrong-text-gone`, `change-history-entry`, `status-unchanged`, `no-session-note`, `no-successor-spec`: Wx. `criterion-kept-in-place`: Wr1. `unrelated-text-kept-1`, `-2`: Wr2. `task-created`: We1. `deferral-task-call-names-dropped-part-and-spec`: We1 (0 matching calls), We2 (0), We3 (0), We4 (2, over `max: 1`) |
+
+**U4, the `tool_used` grader in (e): VALIDATED on 2.1.303.** `input_match` is a JS regex over the JSON of the whole tool
+input (the lookahead over a heredoc body with `\n` escapes matched), `min`/`max` count matching calls: it passed the correct
+scripted outcome and three real baseline runs with exactly one matching call, and failed the missing, unlinked,
+not-naming and doubled calls. It was not run on 2.1.304; its schema there was read from the binary and matches.
+
+**U4, `only-the-corrected-decision-changed` in (b): INVALIDATED, then repaired.** The grader's target `files` is, in the
+runner, the sorted list of paths present after the run and absent before it (`hg(before, after)` over a directory walk of
+the run's cwd): created files only, no modification. Wx (a created task) failed it; Wm, which amended P and a link-only
+task in place and created nothing, passed it, so the pre-registered clause "nothing other than the named decision was
+created or changed" could not see an edit to any of the eight link-only records. The operator chose per-record graders
+(2026-10-20; no baseline of (b) had run). The clause's meaning is unchanged. `expected.md` was changed first, alone,
+in the commit after `2c78b9fb` (`git log --oneline 2c78b9fb..HEAD -- tools/lore/plugins/lore/evals/cited-everywhere-decision-proposes-only-records-that-restate-it/expected.md`),
+then the graders in the next commit. `git diff 2c78b9fb..HEAD -- tools/lore/plugins/lore/evals/cited-everywhere-decision-proposes-only-records-that-restate-it`
+is the whole case change: `only-the-corrected-decision-changed` removed, sixteen graders added (`label`, `citrus`, `sign`,
+`count`, `gloves`, `fridge`, `lesson`, `area`, each as `<short>-text-kept` and `<short>-no-change-history`). `-text-kept`
+is a `regex` on the record's `.md` for its last sentence followed by `\s*$`; `-no-change-history` is a `regex` with
+`match: not_contains` for `change-history` on its `.json`. (b) now has 27 graders, no `target: files` grader.
+
+Flip check of the sixteen, same method as above (clone of `1b81de7b` with the new graders copied in, haiku, 1 scripted run
+each, 5 runs, 0.3458 USD). Outcomes: C amends the decision only and gives the correct message; Wm amends the decision, P and
+`task/print-a-sign-for-the-produce-table` in place, no create (the case the old grader passed); Wx as before; Wc amends the
+decision and all eight with a note appended (each last sentence kept); Wu plain-updates the decision's eight citers.
+
+| Outcome | Score | Failed graders |
+|---|---|---|
+| C | 0.96 | `turn-ends-waiting-with-one-question` only, judge votes PASS FAIL FAIL (the 2 of 3 majority fails the correct message; see Concerns); all sixteen new graders pass |
+| Wm | 0.70 | `p-text-kept`, `sign-text-kept`, `sign-no-change-history`, five `llm` clauses |
+| Wx | 0.63 | as Wm, plus `c0-unrelated-text-kept`, `no-new-record` |
+| Wc | 0.22 | all sixteen new graders (the appended note keeps each last sentence, so `-text-kept` fails on the end anchor and `-no-change-history` on the amend), plus five `llm` clauses |
+| Wu | 0.70 | `fridge-text-kept`, `lesson-text-kept`, `area-text-kept`, five `llm` clauses |
+
+Every one of the sixteen failed on Wc, so each has a failing outcome; the old grader would have passed Wm and Wc. In Wu the
+graph-guard (`frozen-body`) refused the plain update of the two active decisions and the three done tasks; only the open
+task, the lesson and the area can be edited by plain update, and those three failed their `-text-kept`. So a plain-update
+churn can only reach three of the eight, and an amend (caught by `-no-change-history`) reaches the other five.
+
+One grader wording change, `8a4b7c14` (`git diff 1b81de7b..8a4b7c14`, two lines), before any baseline: the judge failed the
+correct outcome on `question-omits-link-only-records` (3 of 3 FAIL) when the criterion described the eight records by
+category; the criterion now lists their ids. The clause is unchanged. The (b) smoke batch was rerun after it.
+
+### Baseline (current prose, HEAD `8a4b7c14`)
+
+Every per-run score. Errors: none in any run. A run passes only at 1.0; a case passes at 2 of 3 runs. `costUsd` is the
+runner's per-run figure, judge cost excluded and listed beside it. "Skill" is whether the run called `lore:correct`, read from
+the copied traces.
+
+| Case | Run | Score | Turns | costUsd | Judge cost | Failed graders | Skill |
+|---|---|---|---|---|---|---|---|
+| (a) dependents-restating | 1 | 0.71 | 5 | 0.1859 | 0.0224 | `coverage-count-stated`, `question-lists-d2-with-old-and-new-text`, `search-boundary-stated`, `turn-ends-waiting-with-one-question` | yes |
+| (a) | 2 | 0.71 | 6 | 0.2162 | 0.0321 | same four | yes |
+| (a) | 3 | 0.71 | 6 | 0.2228 | 0.0318 | same four | yes |
+| (c) yes-to-dependent | 1 | 0.92 | 5 | 0.1884 | 0 | `d2-initiated-by-agent` | no |
+| (c) | 2 | 0.92 | 4 | 0.1753 | 0 | `d2-initiated-by-agent` | no |
+| (c) | 3 | 0.92 | 7 | 0.2048 | 0 | `d2-initiated-by-agent` | no |
+| (d) drop-part | 1 | 1.00 | 8 | 0.2039 | 0 | none | yes |
+| (d) | 2 | 1.00 | 6 | 0.1848 | 0 | none | yes |
+| (d) | 3 | 1.00 | 8 | 0.2052 | 0 | none | yes |
+| (e) defer-a-dropped | 1 | 1.00 | 9 | 0.2209 | 0 | none | yes |
+| (e) | 2 | 1.00 | 7 | 0.2006 | 0 | none | yes |
+| (e) | 3 | 1.00 | 7 | 0.2007 | 0 | none | yes |
+| (f) no-to-dependent-fixes-leaves-every-record-as-it-was | 1.00 x3 (non-discriminating) | 1.00 / 1.00 / 1.00 (run 1 in the first batch, runs 2 and 3 in the second) | 1, 3, 3 | 0.119 + 0.365 | 0 | GREEN 3 of 3 (non-discriminating, no regression) |
+| (f) | 2 | 1.00 | 1 | 0.1194 | 0 | none | no |
+| (f) | 3 | 1.00 | 1 | 0.1204 | 0 | none | no |
+| (b) cited-everywhere | 1 | 0.81 | 6 | 0.2178 | 0.0284 | `coverage-count-stated`, `question-lists-p-with-old-and-new-text`, `question-omits-link-only-records`, `search-boundary-stated`, `turn-ends-waiting-with-one-question` | yes |
+| (b) | 2 | 0.85 | 16 | 0.3074 | 0.0315 | `coverage-count-stated`, `question-lists-p-with-old-and-new-text`, `search-boundary-stated`, `turn-ends-waiting-with-one-question` | yes |
+| (b) | 3 | 0.85 | 16 | 0.3105 | 0.0291 | same four | yes |
+
+Batches: (a) 0.6248, (c) 0.5685, (d) 0.5939, (e) 0.6222, (f) 0.3606 USD. The five ran at the same time, one process each.
+
+- **(a): RED, 0 of 3 at 1.0.** All three amended the decision in place and none put the dependents question. Runs 1 and 3
+  never mention D2. Run 2 searched, found D2 and asked "Do you want me to update that one to 8 minutes as well?", quoting
+  the old sentence but not the new one, with no coverage count, no search boundary and no waiting line. I read the final
+  message of all three and agree with all twelve `llm` FAILs, including run 2's `question-lists-d2-with-old-and-new-text`
+  (the new sentence is not given) and `turn-ends-waiting-with-one-question` (the message ends on the question, with no
+  waiting line). `question-omits-t1` passed in all three: T1 is not mentioned anywhere. The unscored miss: none; every
+  departure is a failed grader.
+- **(c): RED, 0 of 3 at 1.0, on one grader.** Each run amended D2 and plain-updated A1 correctly and left T1 alone (12 of 13
+  graders pass): the seeded yes is carried out. Each amend used `--initiated-by operator`, not
+  `agent`, which the dependents step asks for. None called `lore:correct`.
+- **(d): GREEN, 3 of 3. (e): GREEN, 3 of 3.** See U3. (e)'s three runs each made exactly one `record create --kind task ...
+  --related spec=let-members-collect-holds` call whose body names the text message part.
+- **(f): GREEN, 3 of 3**, in one turn each with no tool call: a seeded "No." is carried out by saying nothing is changed.
+  The case does not discriminate between the baseline and a prose that does the same.
+
+- **(b): RED, 0 of 3 at 1.0, case as changed above (`git diff 2c78b9fb..HEAD` on the case directory), prose unchanged.** Errors:
+  none. `lore:correct` was invoked in 3 of 3 runs. All three amended the decision in place (`72 hours`, change history
+  written) and put no dependents question: each ends by saying that the records citing the decision only link to it and
+  need no edit. None found P (the paraphrase, "two days"): runs 2 and 3 read the eight other citers one by one and
+  concluded none states the figure; run 1 grepped for `72 hours|48 hours` and stopped. All 16 new per-record graders
+  and `p-text-kept`, `c0-*`, `no-new-record` passed in all three runs: nothing but the decision was edited. I read the
+  final message of all three runs and the command list of each trace and agree with every `llm` FAIL: `coverage-count-stated`
+  (run 1 gives no count; runs 2 and 3 say "8", not "9 checked, 1 restates, 8 only link"), `question-lists-p-with-old-and-new-text`,
+  `search-boundary-stated`, `turn-ends-waiting-with-one-question` (no question, no waiting line), 13 of 13 failed `llm` verdicts. The one
+  verdict I do not read the same way as the judge is `question-omits-link-only-records`: run 1 failed it
+  by votes FAIL PASS FAIL; runs 2 and 3 passed it unanimously. The grader says PASS only if the question proposes P and none of the eight;
+  none of the three runs asks a question, so by that wording all three fail it. The judge read runs 2 and 3 as "no
+  link-only record is proposed", which is the intent of the clause and not its text. It is the same split the Wn flip
+  outcome showed. It does not move the verdict (each run fails four other `llm` clauses), but it moves the score between
+  0.81 and 0.85. The prose task re-runs this case unchanged; the case had no discriminating failure other than the
+  dependents question.
+
+**U3 (do (d) and (e) already pass on current prose?): yes, both.** (d) 3 of 3 at 1.0 and (e) 3 of 3 at 1.0 on the baseline
+prose. In all six runs `lore:correct` was invoked, the spec was amended in place with its numbers kept, and no run made a
+task for the dropped part in (d) or a second record in (e). That is the measurement; it is not a fix. The AC32 prose line
+still has no case that is red on the baseline, so these two cases can only show that the new line does not break what the
+agent already does. (d)'s closing message in all three runs does not say the dropped part is untracked, which the added rule
+asks for and no grader reads.
+
+### Live state
+
+Sha256 of every file under `~/.local/state/lore/` and `~/.config/lore/` (excluding `.git/`) at 10:19:25 before the first
+batch and 10:37:43 after the last, covering every batch above. `~/.config/lore/` did not change. Under
+`~/.local/state/lore/` 28 paths changed or appeared, all attributed to another session's activity, none to a run: no file
+there contains any of the 23 fixture and scripted-outcome titles (grepped, `index.sqlite` excluded: 0 files), and the three
+vault working trees are clean.
+
+| Path | Source |
+|---|---|
+| levr `task/cap-total-decoded-audio-...`, `task/the-archive-treats-a-provisional-or-skipped-chunk-file-...`, `task/a-phone-signs-in-to-an-andromeda-...`, `task/the-recording-ledger-s-writers-...` | levr `846efd31` (10:21:27), `83dbfe74` (10:25:54), `808a27f1` (10:32:18), `39fa04ca` (10:34:37), other sessions' publishes |
+| trailhead `task/add-the-summary-rule-...`, `task/open-the-build-closing-report-...`, `task/summaries-and-closing-reports-...` | trailhead `60c446f4` (10:27:41), another session's publish |
+| trailhead `task/a-flow-written-as-mermaid-text-...`, `task/an-arrow-that-closes-a-loop-...` | trailhead `78e0fad9` (10:33:22), `00b10b9b` (10:36:13), other sessions' publishes |
+| trailhead `task/flows-draw-dashed-and-labelled-arrows-....json` | trailhead `67792a91` (10:19:15): the vault commit landed ten seconds before my first snapshot finished and the publish worker rewrote the sidecar at 10:19:31, inside the window; the tree is clean, so the content is the committed one |
+| `vaults/default/session/27d71a20-....{json,md}`, `373a3f7a-....{json,md}` | default-vault commits `a17b4cea` (10:32:18) and `8a375ba1` (10:36:23): other sessions' candidate logs |
+| `publish/levr-5a2535166072.{json (new),log,request}`, `publish/trailhead-9a77dde272e2.{log,request}` | the live publish worker, triggered by the commits above |
+| `index.sqlite` | derived search index, rewritten by any live lore command |
+
+No run wrote live state: each ran in a temp `HOME` under `/tmp/claude-eval-*`. One self-inflicted exception, reverted:
+while diagnosing the 2.1.304 sandbox I created and removed an empty `~/.local/state/lore/.probe` from my own shell (a write
+test); it is not in the snapshot diff.
+
+### Budget
+
+Runner `costUsd` for this task, judge cost excluded (0.556 USD more): **6.72 USD of this task's 9 USD cap**, no
+`--max-cost-usd` stop reached.
+
+| Step | USD |
+|---|---|
+| Four invalid runs on 2.1.304 (three smokes, one diagnostic) | 1.0195 |
+| Smokes on 2.1.303 (six cases) | 1.1974 |
+| (b) smoke rerun after the grader wording fix | 0.2509 |
+| Flip check (33 scripted runs on haiku: 25 outcomes, 8 repeats) | 1.4817 |
+| Baseline (15 runs) | 2.7700 |
+| Total | 6.7196 (summed over every `run.json`) |
+
+The parent's 25 USD ceiling is not touched by anything else here. The per-case rerun allowance was not used; (b) is
+unmeasured, so its three-run baseline (about 0.9 USD) is the first thing to spend when its grader is repaired.
+
+### Repair dispatch: live state and budget
+
+Sha256 snapshot of `~/.local/state/lore/` and `~/.config/lore/` (excluding `.git/`) taken at 10:53:00 before the first
+batch (the five flip runs) and 10:58:46 after the last (the 3-run baseline). `~/.config/lore/` did not change. Under
+`~/.local/state/lore/` 21 paths changed or appeared plus `index.sqlite`, all another session's: levr commit `12c4b7fe`
+(10:54:20, six new decision records `agent-fact-memory-*` and `persistent-agent-runtime-*`) and trailhead commits `8746a4e0`
+(10:52:54, landed six seconds before the first snapshot finished; its three records show as modified) and `e088857a`
+(10:57:43); each vault tree is clean. No file there contains the fixture titles (grepped for `set-the-shelf-hold` and
+`Plan Saturday restocking`: 0 files). The runs wrote only inside their temp homes.
+
+Runner `costUsd`, judge cost excluded: flip check of the sixteen 0.3458 USD (five runs), baseline of (b) 0.8357 USD
+(0.2178 + 0.3074 + 0.3105), **1.1815 USD this dispatch** against its 2.2 USD limit, no `--max-cost-usd` stop reached.
+Judge cost of this dispatch: 0.0891 USD (baseline) + 0.1047 USD (flip).
+
+## Treatment of the dependents and dropped-part cases, and the correct regression, on one prose SHA (`a62deff2`)
+
+Measured prose: `tools/lore/plugins/lore/skills/correct/SKILL.md` at `a62deff2` (the baseline measured `8a4b7c14`, pre-edit prose,
+unchanged through `41361ca4`). Runner `~/.local/share/claude/versions/2.1.303`, model `claude-opus-5-5`, 2026-10-20, the batch
+command of the section above, one `--case` per invocation, `--runs 3`, `--keep-temp`, a fresh `mktemp -d` per batch outside the
+repo, `--max-cost-usd` on every batch (0.6 smokes, 1.0 regression, 1.0/1.2/0.8 for (a)/(b)/(c), 0.75/0.7/0.3 for (e)/(d)/(f)).
+No case file or grader was edited after the baseline (`git diff 41361ca4..a62deff2 --stat` is the one prose file).
+
+**What changed in the prose.** Step 3c (find the records that link to or name the corrected one with `related-<kind>:<name>`,
+a quoted `"<kind>/<name>"` text search and the corrected record's own links; restates versus links; one batched question; what
+counts as the answer; on yes, `--initiated-by agent` amends and plain updates; on no, nothing; never-proposed cases); the
+narrowing rule beside Step 2's narrowing paragraph; Step 4 rewritten (coverage in every amend or plain-update closing line, the
+order closing line, question, waiting line); one sentence added to the skill description so a bare "Yes" or "No" to the
+dependents question loads the skill. Step 1 and Step 3a point to Step 3c; Step 3b says a supersession skips it.
+
+**Red first (from the baseline section, not re-run).** On the pre-edit prose: (a) 0.71 x3 RED; (b) 0.81/0.85/0.85 RED; (c) 0.92 x3
+RED (only `d2-initiated-by-agent`); (d) 1.00 x3 and (e) 1.00 x3 GREEN, reported as green baselines and no-regression, never as
+fixes (U3); (f) 1.00 x3 GREEN, non-discriminating.
+
+### Leak check (before any treatment batch)
+
+Every three-word phrase of the six cases' `prompt.md`, `fixtures/records.json` and `fixtures/history.jsonl` (lower-cased, JSON `\n`
+read as a space) against the lines the prose edit **added** (`git diff -U0 HEAD` of `SKILL.md`, then again on the final text):
+0 hits for four cases; the same three hits for (c) and (f), which share `history.jsonl`: `lore record show`, `lore search '`,
+`lore search 'related`. They are the CLI commands the history's own turns ran, and the prose must name those commands (the
+proven lookups of U1; `lore record show` is Step 1's existing read). Every prose phrase that earlier matched the history's
+agent turns was reworded until only the three command literals were left. The word grep for `./lore`, `fixture` and `eval` over
+the added lines: 0 hits each. No example in the added prose is drawn from a fixture (the new text uses `<kind>/<name>` only).
+
+### Unscored smokes (the one deviation from "regression first")
+
+Budget sized for exactly one pass. To avoid a sixteen-case regression on prose that would then need a rework, I ran one run of
+(a), (b), (c) on a first draft of Step 3c, then one run of (a) and (b) on the reworked draft. Not scored, not counted as
+measurement; the batches below are all on the final prose. Smoke 1: (a) 0.86 (the agent mentioned the restating record but left
+it, saying the operator had asked for one decision only, and gave no waiting line), (b) 0.96 (a second "Yes or no?" question
+and no waiting statement), (c) 1.00. Rework: one sentence that the question is one sentence with one question mark above the
+list, the waiting line a statement, and that a ruling limited to one record limits what is written unasked, not whether the
+question is asked. Smoke 2: (a) 1.00, (b) 1.00. 1.46 USD runner, 0.16 judge.
+
+### Regression: the sixteen existing runner cases that exercise `correct`
+
+Found with `ls plugins/lore/evals/*/case.yaml` (22 cases) minus the six new ones; `bash-write-gate` and `carve-out-does-not-generalise`
+have no `case.yaml` and are not runner cases (they are arm-format cases about the write prohibition, not about `correct`). Bar: 2
+of 3 runs at 1.0 for all sixteen; no entry above states a different bar. `lore:correct` loaded (a `Skill` tool call naming it)
+in 3 of 3 runs of all sixteen. Errors: none in any run. Bash calls in the traces show Step 3c's two searches in every run
+where a correction landed and none where none did.
+
+| Case | Runs | costUsd (batch) | Judge | Failed graders | Bar |
+|---|---|---|---|---|---|
+| ask-before-amending-a-wrong-fact-noticed-while-answering | 1.00 / 1.00 / 1.00 | 0.559 | 0.019 | none | met |
+| ask-before-amending-when-a-record-claims-approval | 1.00 / 1.00 / 1.00 | 0.590 | 0.021 | none | met |
+| ask-once-on-a-borderline-correction-phrased-as-small | 1.00 / 1.00 / 1.00 | 0.548 | 0.018 | none | met |
+| ask-once-on-a-borderline-correction-phrased-as-maybe-new-record | 1.00 / 1.00 / 1.00 | 0.533 | 0.016 | none | met |
+| amend-wrong-fact-in-active-adr | 1.00 / 1.00 / 1.00 | 0.699 | 0 | none | met |
+| amend-drifted-mechanism-detail-phrased-as-serious-error | 1.00 / 1.00 / 1.00 | 0.672 | 0 | none | met |
+| amend-narrow-one-criterion-in-ready-spec | 1.00 / 1.00 / 1.00 | 0.636 | 0 | none | met |
+| apply-ruled-fix-to-draft-record | 1.00 / 1.00 / 1.00 | 0.609 | 0 | none | met |
+| apply-ruled-fix-to-frozen-record-phrased-as-note-it | 1.00 / 1.00 / 1.00 | 0.686 | 0 | none | met |
+| borderline-answered-yes-amends-in-place | 1.00 / 1.00 / 1.00 | 0.626 | 0 | none | met |
+| borderline-answered-no-routes-to-supersession | 1.00 / 1.00 / 1.00 | 0.660 | 0 | none | met |
+| supersede-reversed-decision | 1.00 / 1.00 / 1.00 | 0.671 | 0 | none | met |
+| supersede-spec-change-orphaning-an-objective-phrased-as-small-tweak | 1.00 / 1.00 / 1.00 | 0.707 | 0.022 | none | met |
+| track-unknown-fix-phrased-as-fix-it-now | 1.00 / 1.00 / 1.00 | 0.578 | 0.018 | none | met |
+| supersede-adr-exception-phrased-as-small-tweak | 0.89 / 1.00 / 1.00 | 0.765 | 0.049 | run 1: `spec-is-draft` (FAIL FAIL FAIL) | met at 2 of 3 |
+| refuse-a-ruled-fix-the-source-contradicts | 0.80 / 0.80 / 1.00 | 0.602 | 0.022 | runs 1, 2: `operator-told` (FAIL PASS FAIL; FAIL FAIL FAIL) | **BELOW BAR: 1 of 3** |
+
+**One case is below its bar and I did not rework the prose.** `refuse-a-ruled-fix-the-source-contradicts`: 1 of 3 runs at 1.0.
+Step 3c cannot have run: in all three runs nothing was corrected, the commands are two or three `record show` reads, and
+no dependents search appears. The failing clause is the `operator-told` judge. I read all three final messages. Each says the ADR
+was not changed, quotes the ADR and the renderer profile at 256 pixels, says 512 was a variant measured and dropped before release,
+and asks for the config or code that shows 512; none says in so many words that this "contradicts the 512 you ruled". Runs 1 and 2
+are the weaker wording (they speak of what the records say, run 3 says "if 512 really is what ships now, the ADR and the renderer
+profile are both wrong"). My reading is that the content meets the clause's intent in all three and the judge is strict on
+"contradicts", but a score is not changed by a hand reading. The same clause failed 3 of 3 judge votes in one run of the earlier
+`287395ae` re-measure (cited above), so it is judge-unstable on prose that does not reach it. I did not rerun it and I did not edit
+the grader: a rework of the prose would re-run every case a batch measured (the sixteen regression cases and the six treatment cases), and the budget below does not allow one. This is a below-bar result
+reported as such for the controller to rule on (rerun, accept as grader noise, or rework).
+
+**Hand-check of the other failed `llm` verdict.** `supersede-adr-exception...` run 1, `spec-is-draft` FAIL x3: the trace shows
+`./lore record create --kind spec --status draft ...`, the final message says it is a `draft`, no command moves a status. I read the
+grader's PASS condition as met, so I think the judge misread it; the run stays at 0.89 and the case is at its bar on the other two
+runs. No dependents question was asked in any regression run: the final messages of the six runs-with-a-landing cases (amend or plain
+update) all state coverage (0 linked or named, or "found none") and the boundary, and none asks a question.
+
+### Treatment
+
+Bar: 2 of 3 runs at 1.0 (one pre-stated rerun per case; used only for the refuse case, see its rerun section). `lore:correct` loaded: (a), (b), (c), (d), (e) in 3 of 3 runs;
+(f) in 0 of 1 (a bare "No." was answered in one turn, no tool call, as on the baseline). Errors: none.
+
+| Case | Baseline (`8a4b7c14`) | Treatment runs | Turns | costUsd (batch) | Judge | Result |
+|---|---|---|---|---|---|---|
+| (a) dependents-restating-a-ruled-fix-are-proposed-in-one-question | 0.71 x3 RED | 1.00 / 1.00 / 1.00 | 10, 10, 10 | 0.818 | 0.121 | GREEN 3 of 3 |
+| (b) cited-everywhere-decision-proposes-only-records-that-restate-it | 0.81 / 0.85 / 0.85 RED | 1.00 / 1.00 / 1.00 | 18, 18, 18 | 1.051 | 0.123 | GREEN 3 of 3 |
+| (c) yes-to-dependent-fixes-corrects-restating-records-only | 0.92 x3 RED | 1.00 / 1.00 / 1.00 | 7, 7, 7 | 0.672 | 0 | GREEN 3 of 3 |
+| (d) drop-part-of-a-criterion-with-no-new-record | 1.00 x3 (green baseline) | 1.00 / 1.00 / 1.00 | 8, 8, 8 | 0.636 | 0 | GREEN 3 of 3, no regression |
+| (e) defer-a-dropped-criterion-part-when-asked | 1.00 x3 (green baseline) | 1.00 / 1.00 / 1.00 | 9, 9, 9 | 0.658 | 0 | GREEN 3 of 3, no regression |
+| (f) no-to-dependent-fixes-leaves-every-record-as-it-was | 1.00 x3 (non-discriminating) | **1.00 (1 run only)** | 1 | 0.119 | 0 | **NOT MEASURED at 3 runs**; the one run is green |
+
+(f) was first cut to a single run (the 16.3 USD ceiling could not hold a three-run batch); a second dispatch, with the operator's raised
+ceiling, ran `--runs 2` on the same prose (`a62deff2`, HEAD `ee9f2800`). Per run: run 1 (first batch) 1.00, 1 turn, no tool call
+(a bare "No." answered in one turn); run 2 1.00, 3 turns; run 3 1.00, 3 turns. Runs 2 and 3 each invoked `lore:correct` (a `Skill` call
+carrying args that record the operator's "No"), then replied that both dependents were left as they were, no edit, no task, no note,
+and that they still say 4 days. All six clauses passed in both runs; no `llm` clause; errors: none. `lore:correct` loaded in 2 of 3
+runs of (f) (0 of 1 in the first batch, 2 of 2 in the second); the result is the same either way, because nothing is written.
+
+**Hand-check of the `llm` verdicts that decided a run ((a) and (b), all six runs, every `llm` clause PASS).** I read all six final
+messages. Each has the first correction's closing line with a count (a: "2 records", one restates and one only links; b: "9 records",
+one restates, eight only link) and the boundary (records that neither link to nor name it were not searched), then one question
+naming the restating record with `frozen` and `last updated by eval@example.invalid` and the exact old and new sentence, then a
+last line that waits and says the record is unchanged; the link-only records are named at most as "only links, left alone". I agree
+with all the PASS verdicts. In (a), run 1 says "none name it in their text" and run 3 says "that's the only search I ran", which is a
+loose description of the three lookups, not a count error. Every file clause passed in all runs of (a), (b) and (c): in (c) D2 and the area
+were the only records written, and in (a) and (b) nothing but the corrected decision was. In (c) the
+amend was `--initiated-by agent` in 3 of 3 (the baseline's one failure). (d) and (e): the closing line says in all six runs that the
+email or text-message part is untracked and the change history keeps the old text and that a task can be created on request (d)
+or that the part is now tracked in the one task (e); no grader reads this.
+
+### Live state
+
+Sha256 of every file under `~/.local/state/lore/` and `~/.config/lore/` (excluding `.git/`) at 11:06:47 before the first batch and
+11:50:33 after the last. `~/.config/lore/` did not change. Under `~/.local/state/lore/`, every changed path is another session's:
+levr vault commits `bdd93648` .. `e41d4a2c` (11:19 to 11:49, "toms-macbook-pro" and "andromeda" publishes), trailhead commits
+`68be28e8` and `cb3cd019` (11:32, 11:34, "andromeda"), default-vault commits `25ac9d54`, `c3c637df`, `58a2fe72` (session notes), the
+publish worker's `publish/{levr,trailhead}-*` files and `index.sqlite`. The three vault trees are clean (`git status`). No file there
+contains any of the six cases' fixture slugs (grepped, `index.sqlite` excluded: 0 files). No run wrote live state.
+
+### Budget
+
+First dispatch: runner `costUsd` (judge excluded) **15.555 USD**, judge **0.593 USD**, **16.148 USD**, against its 16.3 limit (about 8.7
+spent before, so about 24.8 in all). Second dispatch (limit 1.2, parent ceiling raised by the operator to 26): runner **0.967 USD**
+(refuse rerun 0.6026, (f) two runs 0.3646), judge **0.0225 USD** (refuse rerun; (f) has no `llm` clause), **0.990 USD**; slice total
+about **25.8 USD** (24.8 + 0.99) against the 26 ceiling. No `--max-cost-usd` stop was reached in either dispatch.
+
+| Step | Runner | Judge |
+|---|---|---|
+| Unscored smokes (5 runs) | 1.460 | 0.162 |
+| Regression, first eight cases | 4.984 | 0.056 |
+| Regression, last eight cases | 5.157 | 0.130 |
+| Treatment (a), (b), (c) | 2.541 | 0.245 |
+| Treatment (d), (e) and one run of (f) | 1.413 | 0 |
+| Second dispatch: refuse rerun | 0.603 | 0.023 |
+| Second dispatch: (f) runs 2 and 3 | 0.365 | 0 |
+
+Not measured: any re-measure after a prose rework (none was made), and any run of `refuse-a-ruled-fix-the-source-contradicts` beyond
+its one rerun (still below bar, so not rerun again). (f) is now measured at 3 runs. Known limit of the run order: the smoke runs came
+first and spent the slack that a rework's re-measure would have needed.
+
+## Re-measure of all 22 `correct` cases after the source-contradicts rework (`2a6e2f3e`)
+
+Measured prose: `tools/lore/plugins/lore/skills/correct/SKILL.md` at `2a6e2f3e` (HEAD `10e96ef1` plus one commit that touches only that
+file). Runner `~/.local/share/claude/versions/2.1.303`, model `claude-opus-5-5`, 2026-10-20, the batch command of the section above,
+one `--case` per invocation, `--runs 3`, `--keep-temp`, a fresh `mktemp -d` per batch outside the repo, `--max-cost-usd` 1.5 (refuse)
+and 1.2 (the others); no stop was reached. No case file or grader was edited. Reason: on `a62deff2` the refuse case scored 1 of 3 at
+1.0 twice, failing `operator-told` (the agent reported what the source says but did not frame it as contradicting the ruling).
+
+**The change** (Step 0, the source-contradicts bullet), before:
+
+> The source contradicts it: apply nothing and leave the record untouched. Tell the operator what the source says and that nothing was changed.
+
+After:
+
+> The source contradicts it: apply nothing and leave the record untouched. Tell the operator that the source contradicts their ruling, naming the value they ruled and the value the source gives, and that nothing was changed.
+
+### Leak check (before any batch)
+
+Every three-word phrase of the refuse case's `prompt.md` and `fixtures/*` and of the six new cases' `prompt.md`, `records.json` and
+`history.jsonl` (21 files; lower-cased, JSON `\n` read as a space) against the added lines of `git diff -U0 10e96ef1 -- .../correct/SKILL.md`:
+0 trigram hits. `./lore`, `fixture`, `eval` in the added lines: 0 each. The added text is "that the source contradicts their ruling,
+naming the value they ruled and the value the source gives, and that nothing was changed."
+
+### Refuse case (run first; bar 2 of 3 at 1.0)
+
+`refuse-a-ruled-fix-the-source-contradicts`: **1.00 / 1.00 / 1.00, MET 3 of 3** (turns 5, 6, 6; runner 0.609 USD, judge 0.022). Every
+`operator-told` judge vote PASS (3 of 3 votes in each run). `lore:correct` invoked once in each run. Errors: none. Hand-check against the
+final messages: run 1 says "You said 512 pixels; that record says 256 pixels and that the 512-pixel version was dropped before release";
+run 2 lists "What you asked for: 512 pixels" against "What the source says ... 256"; run 3 says "The record that settles the width says 256,
+not 512" and "512 looks like the variant that was tried and dropped". Each names the ruled and the sourced value, none changed the ADR,
+no task, no change-history. I agree with all three PASS verdicts. No rerun used.
+
+### Regression: the other fifteen cases (bar 2 of 3 at 1.0)
+
+`lore:correct` loaded (a `Skill` call naming it) in 3 of 3 runs of all fifteen. Errors: none. No rerun used in any case.
+
+| Case | Runs | Turns | Runner USD | Judge USD | Failed graders / note | Bar |
+|---|---|---|---|---|---|---|
+| ask-before-amending-a-wrong-fact-noticed-while-answering | 1.00 / 1.00 / 1.00 | 5,5,5 | 0.563 | 0.019 | none | met 3 of 3 |
+| ask-before-amending-when-a-record-claims-approval | 1.00 / 1.00 / 1.00 | 5,5,6 | 0.571 | 0.019 | none | met 3 of 3 |
+| ask-once-on-a-borderline-correction-phrased-as-small | 1.00 / 1.00 / 1.00 | 4,4,4 | 0.542 | 0.018 | none | met 3 of 3 |
+| ask-once-on-a-borderline-correction-phrased-as-maybe-new-record | 1.00 / 1.00 / 1.00 | 4,4,4 | 0.536 | 0.017 | run 1 `asks-one-question-with-both-routes` votes PASS PASS FAIL (clause passes by majority) | met 3 of 3 |
+| amend-wrong-fact-in-active-adr | 1.00 / 1.00 / 1.00 | 11,8,8 | 0.718 | 0 | none | met 3 of 3 |
+| amend-drifted-mechanism-detail-phrased-as-serious-error | 1.00 / 1.00 / 1.00 | 9,9,9 | 0.684 | 0 | none | met 3 of 3 |
+| amend-narrow-one-criterion-in-ready-spec | 1.00 / 1.00 / 1.00 | 8,8,8 | 0.632 | 0 | none | met 3 of 3 |
+| apply-ruled-fix-to-draft-record | 1.00 / 1.00 / 1.00 | 9,8,8 | 0.624 | 0 | none | met 3 of 3 |
+| apply-ruled-fix-to-frozen-record-phrased-as-note-it | 1.00 / 1.00 / 1.00 | 9,9,9 | 0.705 | 0 | none | met 3 of 3 |
+| borderline-answered-yes-amends-in-place | 1.00 / 1.00 / 1.00 | 7,7,7 | 0.620 | 0 | none | met 3 of 3 |
+| borderline-answered-no-routes-to-supersession | 1.00 / 1.00 / 1.00 | 6,6,7 | 0.644 | 0 | none | met 3 of 3 |
+| supersede-reversed-decision | 1.00 / 1.00 / 1.00 | 8,9,8 | 0.688 | 0 | none | met 3 of 3 |
+| supersede-spec-change-orphaning-an-objective-phrased-as-small-tweak | 1.00 / 1.00 / 1.00 | 7,7,7 | 0.707 | 0.022 | none | met 3 of 3 |
+| track-unknown-fix-phrased-as-fix-it-now | 1.00 / 1.00 / 1.00 | 5,5,5 | 0.570 | 0.017 | none | met 3 of 3 |
+| supersede-adr-exception-phrased-as-small-tweak | 1.00 / 1.00 / 1.00 | 6,7,7 | 0.746 | 0.045 | none (`spec-is-draft` PASS x3 in all three runs; the earlier misjudge did not recur) | met 3 of 3 |
+
+Over-asking: none. The final messages of every run of the nine cases that are not an ask case, a dependents case or a no-landing case end
+with a closing line and no question; the only runs that end in a question are the four `ask-*` cases (the amend question, by design) and
+(a), (b) (the dependents question, where a restating dependent exists). `max_turns` (20): none exhausted in the fifteen.
+
+### Treatment: the six cases (bar 2 of 3 at 1.0)
+
+| Case | Runs | Turns | Runner USD | Judge USD | Failed graders / note | Bar |
+|---|---|---|---|---|---|---|
+| (a) dependents-restating-a-ruled-fix-are-proposed-in-one-question | 1.00 / 1.00 / 1.00 | 11,10,10 | 0.819 | 0.120 | none; every `llm` vote PASS | met 3 of 3 |
+| (b) cited-everywhere-decision-proposes-only-records-that-restate-it | 1.00 / 1.00 / **0.96** | 18,19,19 | 1.085 | 0.120 | run 2 `turn-ends-waiting-with-one-question` votes FAIL PASS PASS (passes by majority); run 3 `search-boundary-stated` FAIL x3 | met 2 of 3 |
+| (c) yes-to-dependent-fixes-corrects-restating-records-only | 1.00 / 1.00 / 1.00 | 7,5,5 | 0.629 | 0 | none | met 3 of 3 |
+| (d) drop-part-of-a-criterion-with-no-new-record | 1.00 / 1.00 / 1.00 | 8,8,8 | 0.641 | 0 | none | met 3 of 3 |
+| (e) defer-a-dropped-criterion-part-when-asked | 1.00 / 1.00 / 1.00 | 9,9,9 | 0.676 | 0 | none | met 3 of 3 |
+| (f) no-to-dependent-fixes-leaves-every-record-as-it-was | 1.00 / 1.00 / 1.00 | 1,3,1 | 0.425 | 0 | none; `lore:correct` loaded in 1 of 3 (runs 1 and 3 answered a bare "No." in one turn with no tool call, as on the baseline) | met 3 of 3 |
+
+**Hand-check of the (b) deviations.** Run 3's `search-boundary-stated` FAIL x3 is correct: the final message (read in full) reports the
+amend with its coverage ("I checked 9 records that link to or name the decision: 1 repeats ... the other 8 only point to the decision")
+but never says records that neither link to nor name it were not searched, which is the clause. That is a real miss, not judge noise;
+run 2's message does state the boundary and its one FAIL vote on `turn-ends-waiting-with-one-question` is the known instability: the
+message ends "I'm waiting for your answer; I haven't changed that record yet." after one question, and the clause passes 2 of 3 votes.
+(b) run 3 used 19 of 20 turns, so (b) sits one turn from `max_turns` in runs 2 and 3 (19 each) and 18 in run 1; no run exhausted it. (b)
+has 5 of 6 clauses at PASS in every run besides these, and `question-omits-link-only-records` PASS x3 in all three runs. The case is
+at its bar on 2 of 3 runs at 1.0.
+
+### Live state
+
+Sha256 of every file under `~/.local/state/lore/` and `~/.config/lore/` (excluding `.git/`) at 12:35 before the first batch and 13:09
+after the last. `~/.config/lore/` did not change. 66 paths changed under `~/.local/state/lore/`, all another session's: levr vault
+records (39 paths, commit `ad1ea7ec` is the vault's latest), default-vault session notes (8), trailhead vault records about the tidy-followups
+work (12; the vault's latest commit is 10 minutes old and unrelated to any case), the publish worker's `publish/*` files (6) and
+`index.sqlite`. All four vaults are clean (`git status`). No changed file contains a fixture slug of the cases run (`thumbnails-render`,
+`set-the-shelf-hold`, `plan-saturday`: 0 files, `index.sqlite` excluded). No run wrote live state; I created nothing there. Four resumed-run
+transcripts under case `fixtures/` ((c), (f), and the two `borderline-answered-*` cases) were confirmed untracked (`git status`) and removed.
+
+### Budget
+
+Runner **14.432 USD**, judge **0.420 USD**, **14.852 USD** for this dispatch (limit 16.2). The slice was at about 25.8 before, so
+**about 40.65 USD** against the 42 ceiling. No rerun was used; no case was left unmeasured. Every one of the 22 cases was measured on
+`2a6e2f3e`.
+
+## Re-measure of all 22 `correct` cases after the review and security rework (`0e3eb8ac`)
+
+Measured prose: `tools/lore/plugins/lore/skills/correct/SKILL.md` at `0e3eb8ac` (HEAD `312739ec` plus one commit that touches only that
+file). Runner `~/.local/share/claude/versions/2.1.303`, model `claude-opus-5-5`, 2026-10-20, the batch command of the section "Cases: the
+dependents of a correction ..." above, one `--case` per invocation, `--runs 3`, `--keep-temp`, a fresh `mktemp -d` outside the repo per
+case, `--max-cost-usd` 1.5 (refuse, (a), (b), (c)) and 1.2 (the others); no stop was reached. No case file, grader or fixture was edited.
+Order: refuse, (a), (b), (c); the other fifteen; (d), (e), (f). Reason: the whole-change review (Important: the two lookups return 20 rows
+and were never paged; Minor: "the two do not overlap" is false) and the security audit (Important I1: a body line equal to the heredoc
+delimiter; M3, M4, M5b) were folded into one prose rework.
+
+**The six changes** (all in `correct/SKILL.md`; the unchanged remainder of each paragraph is not shown):
+
+1. Paging, Step 3c "Find them". Before: the two lookups were `lore search 'related-<kind>:<name>'` and `lore search '"<kind>/<name>"'`,
+   run once. After: both carry `--limit 50 --offset 0`, and a new paragraph follows: "A search returns at most `--limit` rows and prints
+   `(showing N of M)` at its end only when rows remain. Page each of the two the same way: repeat it with `--offset` raised by the limit until
+   a page prints no `showing N of M` line, and count every page, so the coverage count is complete."
+2. Count once, same paragraph. Before: "The two do not overlap, so run both." After: "Each finds records the other can miss, so run both;
+   a record both find is counted once."
+3. No value echo, Step 0 source-contradicts bullet. Before: "... naming the value they ruled and the value the source gives, and that nothing
+   was changed." After: the same sentence, then "When the source's value is read from configuration, an environment file or a secret store,
+   describe how it differs instead of quoting it."
+4. Heredoc delimiter, a new paragraph before Step 0 (generic, covers every heredoc the skill writes): "Every body this skill writes goes on stdin
+   as a heredoc. Where it says to close that heredoc with `EOF`, use instead any delimiter word that is not the whole of any line of the body
+   you are writing (a body you re-emit from a read-back included), and use it in both places. If no such word can be found, write nothing and
+   report why."
+5. Bind the write, Step 3c "On yes". Before: "**On yes,** for each listed record: read it back as in Step 1, then" and "Each new body is its read-back
+   with only the quoted span changed. A write that is refused ... does not stop the rest." After: "**On yes,** for each listed record, take the
+   read-back you made as in Step 1 before asking, then" and "Write against the revision you read before asking (`--base` for an amend). Each new
+   body is its read-back with only the quoted span changed. If the quoted old text is no longer in the record byte for byte, skip that record and
+   list it among the refused; do not compose new text. A write that is refused ... does not stop the rest."
+6. Credential-shaped old text, Step 3c "Not proposed". Added before the security-control sentence: "A dependent whose old span is or contains a
+   credential is not proposed for amend: the closing line names it as not proposed, with Step 3a's rule (rotate the credential, then escalate to
+   the operator) as the reason, and does not quote the span."
+
+Docs only, no re-measure impact: `yes-to-dependent-fixes-corrects-restating-records-only/expected.md` Limitations gained a bullet that D2's
+amend `--reason` naming the original correction is not graded; the "Callers of `lore:correct` in craft" section above gained a line per caller
+(planner, brainstorm, distill, council) on where the turn ends.
+
+### Leak check (before any batch)
+
+Every three-word phrase of the refuse case's `prompt.md` and `fixtures/*` and of the six new cases' `prompt.md`, `records.json` and
+`history.jsonl` (17 files present, 2067 distinct phrases; lower-cased, JSON `\n` read as a space) against the 24 added lines of
+`git diff -U0 312739ec -- .../correct/SKILL.md`: 0 trigram hits. `./lore`, `fixture`, `eval` in the added lines: 0 each. The command literals
+`lore search '` and `lore record show` were already accepted. Scoped tests at `0e3eb8ac`: 167 passed; `ruff check .`: all checks passed.
+
+### Gate batch (bar 2 of 3 at 1.0)
+
+`lore:correct` loaded (a `Skill` call naming it, counted from the trace's `tool_use` blocks) in 3 of 3 runs of each. Errors: none.
+
+| Case | Runs | Turns | Runner USD | Judge USD | Failed graders / note | Bar |
+|---|---|---|---|---|---|---|
+| refuse-a-ruled-fix-the-source-contradicts | 1.00 / 1.00 / 1.00 | 5,5,6 | 0.617 | 0.022 | none; `operator-told` PASS PASS PASS in each run | met 3 of 3 |
+| (a) dependents-restating-a-ruled-fix-are-proposed-in-one-question | 0.93 / 1.00 / 1.00 | 10,9,11 | 0.821 | 0.125 | run 1 `turn-ends-waiting-with-one-question` FAIL x3; `coverage-count-stated` FAIL PASS PASS | met 2 of 3 |
+| (b) cited-everywhere-decision-proposes-only-records-that-restate-it | 1.00 / 0.96 / 1.00 | 18,18,18 | 1.059 | 0.131 | run 2 `coverage-count-stated` PASS FAIL FAIL | met 2 of 3 |
+| (c) yes-to-dependent-fixes-corrects-restating-records-only | 1.00 / 1.00 / 1.00 | 5,5,5 | 0.628 | 0 | none | met 3 of 3 |
+
+No rerun used. (b) used 18 of 20 `max_turns` in all three runs; none exhausted.
+
+**Hand-checks.** Refuse: the three final messages each say the ADR was not changed and that the record it cites says 256 pixels, not 512
+(the ruled value), and that 512 was tried and dropped; no run quotes configuration; I agree with all three PASS verdicts. (a) run 1
+`turn-ends-waiting-with-one-question` FAIL x3: the message asks one yes/no question, but ends "I'll wait for your answer before writing
+anything to the tank-sizing decision." without saying the record is still untouched; the grader requires both, so the FAIL is right. Its
+`coverage-count-stated` (2 checked, 1 restates, 1 only links, stated in the message) is correct and passes by majority; the one FAIL vote is
+judge noise. (b) run 2 `coverage-count-stated` FAIL by two votes is wrong: the message reads "I checked 9 records that link to or name the
+decision. 1 of them states the hold itself, and the other 8 only point to the decision", which is the PASS condition; the run is left at 0.96 as
+scored, and (b) is at bar on runs 1 and 3. This is the known judge instability on (b)'s coverage and waiting clauses; no grader was edited. The
+paging prose was not exercised: every case has fewer than 20 dependents, so no search printed `(showing N of M)`. The case that would
+exercise it (more than 20 links) is a deferred follow-up.
+
+### Regression: the other fifteen cases (bar 2 of 3 at 1.0)
+
+`lore:correct` loaded in 3 of 3 runs of all fifteen. Errors: none. No rerun used in any case.
+
+| Case | Runs | Turns | Runner USD | Judge USD | Failed graders / note | Bar |
+|---|---|---|---|---|---|---|
+| ask-before-amending-a-wrong-fact-noticed-while-answering | 1.00 / 1.00 / 1.00 | 5,5,5 | 0.570 | 0.019 | none | met 3 of 3 |
+| ask-before-amending-when-a-record-claims-approval | 1.00 / 1.00 / 1.00 | 6,6,6 | 0.603 | 0.021 | none | met 3 of 3 |
+| ask-once-on-a-borderline-correction-phrased-as-small | 1.00 / 1.00 / 1.00 | 4,4,4 | 0.557 | 0.018 | none | met 3 of 3 |
+| ask-once-on-a-borderline-correction-phrased-as-maybe-new-record | 1.00 / 1.00 / 1.00 | 4,4,4 | 0.547 | 0.017 | none | met 3 of 3 |
+| amend-wrong-fact-in-active-adr | 1.00 / 1.00 / 1.00 | 8,9,9 | 0.713 | 0 | none | met 3 of 3 |
+| amend-drifted-mechanism-detail-phrased-as-serious-error | 1.00 / 1.00 / 1.00 | 9,9,9 | 0.706 | 0 | none | met 3 of 3 |
+| amend-narrow-one-criterion-in-ready-spec | 1.00 / 1.00 / 1.00 | 8,8,8 | 0.660 | 0 | none | met 3 of 3 |
+| apply-ruled-fix-to-draft-record | 1.00 / 1.00 / 1.00 | 8,8,9 | 0.630 | 0 | none | met 3 of 3 |
+| apply-ruled-fix-to-frozen-record-phrased-as-note-it | 1.00 / 1.00 / 1.00 | 10,9,8 | 0.735 | 0 | none | met 3 of 3 |
+| borderline-answered-yes-amends-in-place | 1.00 / 1.00 / 1.00 | 7,8,7 | 0.631 | 0 | none | met 3 of 3 |
+| borderline-answered-no-routes-to-supersession | 1.00 / 1.00 / 1.00 | 7,6,7 | 0.670 | 0 | none | met 3 of 3 |
+| supersede-reversed-decision | 1.00 / 1.00 / 1.00 | 9,9,8 | 0.701 | 0 | none | met 3 of 3 |
+| supersede-spec-change-orphaning-an-objective-phrased-as-small-tweak | 0.86 / 1.00 / 1.00 | 6,7,7 | 0.727 | 0.022 | run 1 `successor-is-draft` FAIL PASS FAIL | met 2 of 3 |
+| track-unknown-fix-phrased-as-fix-it-now | 1.00 / 1.00 / 1.00 | 5,5,5 | 0.583 | 0.018 | none | met 3 of 3 |
+| supersede-adr-exception-phrased-as-small-tweak | 1.00 / 1.00 / 1.00 | 7,8,6 | 0.779 | 0.047 | none | met 3 of 3 |
+
+**Hand-check.** `supersede-spec-change-orphaning-...` run 1 `successor-is-draft` FAIL by two votes is wrong: the trace shows one
+`./lore record create --kind spec ... --status draft --label craft/supersedes=spec/notify-owners-of-stale-records` call whose output created
+the successor, and no later command moves any spec; that is the PASS condition. Known judge instability on this case (it misjudged
+once before, on `a62deff2`); the run stays at 0.86 as scored and the case is at bar on runs 2 and 3. Over-asking: none; the only runs that end in
+a question are the four `ask-*` cases and (a), (b). `max_turns`: none exhausted.
+
+### Treatment: (d), (e), (f) (bar 2 of 3 at 1.0)
+
+| Case | Runs | Turns | Runner USD | Judge USD | Failed graders / note | Bar |
+|---|---|---|---|---|---|---|
+| (d) drop-part-of-a-criterion-with-no-new-record | 1.00 / 1.00 / 1.00 | 8,8,8 | 0.653 | 0 | none | met 3 of 3 |
+| (e) defer-a-dropped-criterion-part-when-asked | 1.00 / 1.00 / 1.00 | 9,9,9 | 0.684 | 0 | none | met 3 of 3 |
+| (f) no-to-dependent-fixes-leaves-every-record-as-it-was | 1.00 / 1.00 / 1.00 | 3,3,1 | 0.492 | 0 | none; `lore:correct` loaded in 2 of 3 (run 3 answered a bare "No." in one turn with no tool call, as on earlier measurements) | met 3 of 3 |
+
+Every one of the 22 cases was measured on `0e3eb8ac`, none below its bar, and the stop rule was never reached.
+
+### Full suite
+
+`.venv/bin/python -m pytest -q` at `0e3eb8ac`, once, run concurrently with the first batches: 11773 passed, 34 skipped in 967 s (the baseline).
+
+### Live state
+
+Sha256 of every file under `~/.local/state/lore/` and `~/.config/lore/` (excluding `.git/`) before the first batch (18352 files) and after the
+last (18369). `~/.config/lore/` did not change. 52 paths changed under `~/.local/state/lore/`, none a run's: `index.sqlite`, 4 `publish/*`
+files of the publish worker, 4 default-vault session-note files (sessions `40e4c5c9-...`, created before the first batch, and `f9bf532b-...`,
+whose candidates are about audio-chunk encoding), 36 levr-vault files (the same audio work: tasks, lessons, areas) and 7 trailhead-vault files
+(tasks about plain-words and follow-up merging). The vault logs show only `andromeda` and `toms-macbook-pro` publish commits of those
+records; all three vaults are clean (`git status`). Grepping the changed files (`index.sqlite` excluded) for the fixture slugs and the plan
+name finds 0 files. I created nothing there and wrote no lore record. Four resumed-run transcripts under case `fixtures/` ((c), (f) and the
+two `borderline-answered-*` cases) were confirmed untracked (`git status`) and removed.
+
+### Budget
+
+Runner **14.765 USD**, judge **0.442 USD**, **15.207 USD** for this dispatch (limit 16.5). The slice was at about 40.65 USD before, so about
+**55.86 USD** against the 58 ceiling. No rerun was used.
+
+## Re-measure of all 22 `correct` cases after the dependent-write and wording rework (`ff4b36fe`)
+
+Measured prose: `tools/lore/plugins/lore/skills/correct/SKILL.md` at `ff4b36fe` (HEAD `1291d4a0` plus one commit that touches only that file).
+Runner `~/.local/share/claude/versions/2.1.303`, model `claude-opus-5-5`, 2026-10-20, the batch command of the section "Cases: the dependents of
+a correction ..." above, one `--case` per invocation, `--runs 3`, `--keep-temp`, a fresh output directory outside the repo per case,
+`--max-cost-usd` 1.5 (refuse, (a), (b), (c)) and 1.2 (the others); no stop was reached. No case file, grader or fixture was edited. Order:
+refuse, (a), (b), (c); the other fifteen; (d), (e), (f). Reason: the re-review and re-audit of `0e3eb8ac` found five defects in the prose.
+There is no new case for them (paging past 20 rows, an edit landing while the question waits, and a body line equal to the delimiter are
+deferred), so this is a regression measurement that the 22 cases stay at bar, not a red-to-green.
+
+**The five changes** (all in `correct/SKILL.md`; the unchanged remainder of each paragraph is not shown):
+
+1. A non-frozen dependent's write, Step 3c "On yes". Before: "a non-frozen one gets Step 1's plain update." and "Write against the revision you read
+   before asking (`--base` for an amend). Each new body is its read-back with only the quoted span changed." After: "a non-frozen one is written with
+   `lore record update <kind>/<name> --diff`, its stdin a unified diff, given as a heredoc as Step 1 gives, holding only the one hunk that swaps the
+   quoted old span for the new one, built from that read-back. `--diff` refuses and writes nothing when the hunk does not apply, so an edit made
+   elsewhere while the question waited survives and a changed span is refused." and "Write a frozen record against the revision you read before
+   asking (`--base`). Each new text is its read-back with only the quoted span changed." (`lore record update` has no `--base`; the amend stays on it.)
+2. No recursion, same paragraph. Added: "Step 3c does not run after these writes: the closing line is the only report."
+3. Kind of difference only, Step 0 (the paragraph on values copied from configuration, the known-fix bullet that reads a value from a source, and the
+   source-contradicts bullet). Before: "describe it instead" / "describe how it differs instead of quoting it" for a value read from configuration,
+   an environment file or a secret store. After: for such a value, and for any credential-shaped value whatever its source, describe only the kind of
+   difference (higher, lower, different, or which setting), never a character, length, prefix, suffix or encoding detail; the source-contradicts bullet
+   still names the ruled value and the source's value when neither is credential-shaped or config-sourced, and names neither otherwise, and says nothing
+   was changed.
+4. Credential rule for every dependent, "Not proposed". Before: "... is or contains a credential is not proposed for amend: ...". After: "... is not
+   proposed, for an amend and a plain update alike: ...".
+5. Exact path, count once, "Find them". Added after the quoted-path lookup: it is a phrase match, so it also returns records naming a longer path that
+   starts with this one, and only the hits whose path is exactly `<kind>/<name>` are kept; and "a record both find is counted once" became "a record found
+   by more than one of the three lookups is counted once".
+
+### Leak check (before any batch)
+
+Every three-word phrase of the refuse case's `prompt.md` and `fixtures/*` and of the six new cases' `prompt.md`, `records.json` and `history.jsonl`
+(17 files, 2067 distinct phrases; lower-cased, JSON `\n` read as a space) against the 41 added lines of `git diff -U0 312739ec --
+.../correct/SKILL.md`: one hit on the first draft ("it would be"), reworded; 0 hits in the committed prose. `./lore`, `fixture`, `eval` in the added
+lines: 0 each. Scoped tests at `ff4b36fe`: 252 passed (`test_documented_commands.py`, `test_documented_queries.py`, `test_seed_eval_vault.py`,
+`test_session_skills.py`, `trailhead/tests/test_eval_corpus.py`); `ruff check .`: all checks passed.
+
+### Gate batch (bar 2 of 3 at 1.0)
+
+`lore:correct` loaded in 3 of 3 runs of each. Errors: none. `rc` 1 of the runner on (a) and (b) is its mean-below-1.0 threshold, not a failure to meet the bar.
+
+| Case | Runs | Turns | Runner USD | Judge USD | Failed graders / note | Bar |
+|---|---|---|---|---|---|---|
+| refuse-a-ruled-fix-the-source-contradicts | 1.00 / 1.00 / 1.00 | 6,6,6 | 0.630 | 0.023 | none | met 3 of 3 |
+| (a) dependents-restating-a-ruled-fix-are-proposed-in-one-question | 1.00 / 1.00 / 0.93 | 11,12,11 | 0.902 | 0.139 | run 3 `turn-ends-waiting-with-one-question` FAIL FAIL FAIL | met 2 of 3 |
+| (b) cited-everywhere-decision-proposes-only-records-that-restate-it | 1.00 / 1.00 / 0.93 | 19,18,19 | 1.085 | 0.129 | run 3 `search-boundary-stated` FAIL FAIL FAIL; `turn-ends-waiting-with-one-question` FAIL FAIL PASS | met 2 of 3 |
+| (c) yes-to-dependent-fixes-corrects-restating-records-only | 1.00 / 1.00 / 1.00 | 5,5,5 | 0.647 | 0 | none; each run wrote the non-frozen dependent with one `record update --diff` | met 3 of 3 |
+
+No rerun used.
+
+**Hand-checks.** (a) run 3 `turn-ends-waiting-with-one-question`: the message asks one yes/no question above the list and ends "The tank-sizing
+decision is unchanged until you answer." It never says it is waiting for the operator's answer, which the grader requires, so I agree with the FAIL.
+(b) run 3 `search-boundary-stated`: the message states 9 records checked, 1 restating, 8 only linking, and does not say that records which neither
+link to nor name the decision are not searched; I agree with the FAIL. Its `turn-ends-waiting-with-one-question` ends "Nothing is changed in that
+record until you answer." with no waiting statement; I agree with the majority FAIL. These are the same two graders that wavered on (a) and (b) on
+`0e3eb8ac`; the run scores stand as measured. The `--diff` write was exercised only in (c) (three of three runs); the paging prose was not exercised
+(every case has fewer than 20 dependents) and no case plants a concurrent edit or a delimiter line.
+
+### Regression: the other fifteen cases (bar 2 of 3 at 1.0)
+
+`lore:correct` loaded in 3 of 3 runs of all fifteen. Errors: none. No rerun used. Every run scored 1.00.
+
+| Case | Runs | Turns | Runner USD | Judge USD | Bar |
+|---|---|---|---|---|---|
+| ask-before-amending-a-wrong-fact-noticed-while-answering | 1.00 x3 | 5,5,5 | 0.582 | 0.020 | met 3 of 3 |
+| ask-before-amending-when-a-record-claims-approval | 1.00 x3 | 6,5,6 | 0.604 | 0.021 | met 3 of 3 |
+| ask-once-on-a-borderline-correction-phrased-as-small | 1.00 x3 | 4,4,4 | 0.563 | 0.018 | met 3 of 3 |
+| ask-once-on-a-borderline-correction-phrased-as-maybe-new-record | 1.00 x3 | 4,4,4 | 0.552 | 0.017 | met 3 of 3 |
+| amend-wrong-fact-in-active-adr | 1.00 x3 | 8,8,8 | 0.716 | 0 | met 3 of 3 |
+| amend-drifted-mechanism-detail-phrased-as-serious-error | 1.00 x3 | 9,10,9 | 0.713 | 0 | met 3 of 3 |
+| amend-narrow-one-criterion-in-ready-spec | 1.00 x3 | 8,8,8 | 0.668 | 0 | met 3 of 3 |
+| apply-ruled-fix-to-draft-record | 1.00 x3 | 9,8,9 | 0.663 | 0 | met 3 of 3 |
+| apply-ruled-fix-to-frozen-record-phrased-as-note-it | 1.00 x3 | 10,10,8 | 0.736 | 0 | met 3 of 3 |
+| borderline-answered-yes-amends-in-place | 1.00 x3 | 7,7,7 | 0.645 | 0 | met 3 of 3 |
+| borderline-answered-no-routes-to-supersession | 1.00 x3 | 7,7,8 | 0.699 | 0 | met 3 of 3 |
+| supersede-reversed-decision | 1.00 x3 | 8,8,8 | 0.691 | 0 | met 3 of 3 |
+| supersede-spec-change-orphaning-an-objective-phrased-as-small-tweak | 1.00 x3 | 7,7,7 | 0.730 | 0.024 | met 3 of 3 |
+| track-unknown-fix-phrased-as-fix-it-now | 1.00 x3 | 5,5,5 | 0.590 | 0.018 | met 3 of 3 |
+| supersede-adr-exception-phrased-as-small-tweak | 1.00 x3 | 7,6,8 | 0.802 | 0.049 | met 3 of 3 |
+
+No `llm` verdict deviated, so there was nothing to hand-check here. `max_turns`: none exhausted.
+
+### Treatment: (d), (e), (f) (bar 2 of 3 at 1.0)
+
+| Case | Runs | Turns | Runner USD | Judge USD | Note | Bar |
+|---|---|---|---|---|---|---|
+| (d) drop-part-of-a-criterion-with-no-new-record | 1.00 x3 | 8,8,8 | 0.658 | 0 | none | met 3 of 3 |
+| (e) defer-a-dropped-criterion-part-when-asked | 1.00 x3 | 9,9,9 | 0.679 | 0 | none | met 3 of 3 |
+| (f) no-to-dependent-fixes-leaves-every-record-as-it-was | 1.00 x3 | 3,3,1 | 0.501 | 0 | `lore:correct` loaded in 2 of 3 (run 3 answered a bare "No." in one turn with no tool call, as on earlier measurements) | met 3 of 3 |
+
+Every one of the 22 cases was measured on `ff4b36fe`, none below its bar, and the stop rule was never reached.
+
+### Full suite
+
+`.venv/bin/python -m pytest -q` at `ff4b36fe`, once, run concurrently with the first batches: 11773 passed, 34 skipped in 917 s.
+
+### Live state
+
+Sha256 of every file under `~/.local/state/lore/` and `~/.config/lore/` (excluding `.git/`) before the first batch (18369 files) and after the last
+(18385). `~/.config/lore/` did not change. 59 paths changed under `~/.local/state/lore/`, none a run's: `index.sqlite`, publish-worker files for the
+levr and trailhead vaults, 12 default-vault session-note files, levr-vault files (tasks, lessons, decisions, a site) and 10 trailhead-vault files
+(tasks about the follow-up drop and merge and the plain-words spec review). All three vaults are clean (`git status`). Grepping the changed files
+for the fixture slugs and the plan name finds 0 files. I created nothing there and wrote no lore record. Four resumed-run transcripts under case
+`fixtures/` ((c), (f) and the two `borderline-answered-*` cases) were confirmed untracked (`git status`) and removed.
+
+### Budget
+
+Runner **15.057 USD**, judge **0.457 USD**, **15.514 USD** for this dispatch (limit 16.5). The slice was at 55.86 USD before, so **71.37 USD**
+against the 74 ceiling. No rerun was used.

@@ -51,6 +51,14 @@ A record's name is lore's slug of its title, so `"Use the queue"` as an `adr` is
 A spec's criteria are only recognised as a `## Acceptance Criteria` heading
 followed by top-level `- **AC1.** text. *Verified by: manual check.*` bullets.
 
+A record may also carry `"related": ["KIND=NAME", ...]`: each entry becomes one
+`--related KIND=NAME` link on that record, so `"related": ["decision=use-postgres"]`
+links the record to `decision/use-postgres`. `NAME` is the slug lore derives from
+the linked record's title, and that record must be listed earlier in the file; a
+link naming no earlier record of that kind, a `related` that is not a list, an
+entry that is not `KIND=NAME`, and any field other than `kind`, `title`, `status`,
+`body` and `related` are refused before anything is written.
+
 The seeder runs in the run's temp `HOME` and working directory, and writes there:
 the vault at `./vault`, an executable `./lore` beside a copy of the repo's
 `trailhead/` package, and, only when `~/.gitconfig` does not exist, a synthetic
@@ -128,9 +136,30 @@ path: vault/decision/*.md
 ---
 ```
 
-`file_exists` counts only files the agent created during the run, so it cannot
-see seeded records; grade a seeded record's contents with `regex` over a
-`source: file` target instead.
+`file_exists`, and `regex` and `llm` with `target: files`, see only the files the
+agent created during the run, never the ones it modified in place, so a seeded
+record and an in-place edit of it are invisible to them. Grade a seeded record's
+contents or change with a `regex` on its `source: file` path (its body and its
+`.json` sidecar), one grader per record.
+
+`tool_used` counts the agent's tool calls that match:
+
+```markdown
+---
+type: tool_used
+tool: Bash
+input_match: '(?=.*record create)(?=.*--kind task)(?=.*spec=<slug>)'
+min: 1
+max: 1
+---
+```
+
+`tool` is the tool name; `input_match` is a JavaScript regex tested against the
+JSON text of the whole tool input (a heredoc body appears with `\n` escapes, and
+a lookahead per required term matches in any order); `min` and `max` bound the
+number of matching calls. It reads every call in the run, not a window of the
+last events. JSON escapes quote characters in the input, so keep quote characters
+out of the pattern.
 
 `regex` with `source: file` does not glob: a `path` containing `*` fails the
 grader whether or not a file matches, so name the exact path. `file_exists` does

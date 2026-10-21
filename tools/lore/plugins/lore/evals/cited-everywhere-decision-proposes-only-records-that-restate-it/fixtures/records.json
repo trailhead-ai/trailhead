@@ -1,0 +1,86 @@
+[
+  {
+    "kind": "decision",
+    "title": "Set the shelf hold for donated produce",
+    "status": "active",
+    "body": "# Set the shelf hold for donated produce\n\n## Context\nDonated produce arrives in mixed condition and the pantry has one shelf for it.\n\n## Decision\nDonated produce stays on the shelf for 48 hours. Whatever is still there when the hold ends is discarded. The volunteer writes the arrival time on the crate label when produce comes in.\n\n## Consequences\nThe shelf turns over often and the front table stays tidy.\n"
+  },
+  {
+    "kind": "decision",
+    "title": "Plan Saturday restocking around the discard window",
+    "status": "active",
+    "body": "# Plan Saturday restocking around the discard window\n\n## Context\nThe Saturday crew restocks the front shelf from the Friday delivery.\n\n## Decision\nProduce goes into the compost bin two days after it arrives, so the Saturday crew clears anything older before it sets out new crates.\n\n## Consequences\nThe front shelf is full when the doors open.\n",
+    "related": [
+      "decision=set-the-shelf-hold-for-donated-produce"
+    ]
+  },
+  {
+    "kind": "decision",
+    "title": "Label every crate with a donor name",
+    "status": "active",
+    "body": "# Label every crate with a donor name\n\n## Context\nDonors like to know their crate was used.\n\n## Decision\nThe volunteer requests a name from each donor or initials and writes them on the crate label. The shelf rules in decision/set-the-shelf-hold-for-donated-produce apply to labelled crates like any other.\n\n## Consequences\nThank-you notes can name the right donor.\n",
+    "related": [
+      "decision=set-the-shelf-hold-for-donated-produce"
+    ]
+  },
+  {
+    "kind": "decision",
+    "title": "Keep citrus on its own shelf",
+    "status": "active",
+    "body": "# Keep citrus on its own shelf\n\n## Context\nCitrus crates are heavy and roll off the front shelf.\n\n## Decision\nCitrus goes on the low shelf by the door, in the crates it arrived in. Read decision/set-the-shelf-hold-for-donated-produce for everything else on the table.\n\n## Consequences\nThe front shelf holds only light crates.\n",
+    "related": [
+      "decision=set-the-shelf-hold-for-donated-produce"
+    ]
+  },
+  {
+    "kind": "task",
+    "title": "Print a sign for the produce table",
+    "status": "done",
+    "body": "# Print a sign for the produce table\n\nPrint a large sign for the produce table that points volunteers to decision/set-the-shelf-hold-for-donated-produce, and tape it to the wall above the crates.\n",
+    "related": [
+      "decision=set-the-shelf-hold-for-donated-produce"
+    ]
+  },
+  {
+    "kind": "task",
+    "title": "Count the crates at closing",
+    "status": "done",
+    "body": "# Count the crates at closing\n\nCount the crates left on the produce table when the doors close and write the number on the clipboard by the exit. This follows the shelf rules in decision/set-the-shelf-hold-for-donated-produce.\n",
+    "related": [
+      "decision=set-the-shelf-hold-for-donated-produce"
+    ]
+  },
+  {
+    "kind": "task",
+    "title": "Buy gloves for the shelf crew",
+    "status": "done",
+    "body": "# Buy gloves for the shelf crew\n\nBuy a box of disposable gloves for the volunteers who clear the produce table, in whatever sizes the crew requests. The grounds are in decision/set-the-shelf-hold-for-donated-produce.\n",
+    "related": [
+      "decision=set-the-shelf-hold-for-donated-produce"
+    ]
+  },
+  {
+    "kind": "task",
+    "title": "Ask the food bank about a second fridge",
+    "status": "open",
+    "body": "# Ask the food bank about a second fridge\n\nAsk the regional food bank whether they have a spare fridge for donated produce, and what the delivery arrangements would be. A fridge would change how decision/set-the-shelf-hold-for-donated-produce is used, so report back to the coordinator.\n",
+    "related": [
+      "decision=set-the-shelf-hold-for-donated-produce"
+    ]
+  },
+  {
+    "kind": "lesson",
+    "title": "Unlabelled crates are slow to sort",
+    "status": "active",
+    "body": "# Unlabelled crates are slow to sort\n\nA crate with no label costs the volunteer a trip to the coordinator to learn who dropped it off. The label rule in decision/set-the-shelf-hold-for-donated-produce exists to prevent this, and the lesson is to refuse a crate that arrives bare.\n",
+    "related": [
+      "decision=set-the-shelf-hold-for-donated-produce"
+    ]
+  },
+  {
+    "kind": "area",
+    "title": "Produce table",
+    "status": "active",
+    "body": "# Produce table\n\nThe produce table is the first thing visitors see. It runs under decision/set-the-shelf-hold-for-donated-produce, and the coordinator checks it at the start of each shift. Volunteers keep the crates facing outward and the signs in view.\n"
+  }
+]
