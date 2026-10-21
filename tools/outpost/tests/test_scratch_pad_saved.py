@@ -590,3 +590,385 @@ def test_a_note_of_ten_thousand_characters_is_kept_and_the_box_takes_no_more(tmp
         inject_into=ROUND1,
     )
     assert got == {"kept": 10000, "after": 10000, "max": 10000}
+
+
+PAIR_JS = """
+const quick = () => [0, 1].map((q) => ({
+  this: flags(q, thisOne), not: flags(q, notThis), none: pressed(none(q)), note: note(q).value, dot: dot(q),
+}));
+const ready = async () => {
+  await show(1); await show(0);
+  let back = false;
+  window.addEventListener('pageshow', () => { back = true; });
+  try { await harness.waitFor('the load-time pageshow', () => back, 300); } catch (error) {}
+};
+const stored = () => JSON.parse(localStorage.getItem('outpost-scratch-pad:' + roundId()));
+const entryWith = (pick) => JSON.stringify({answers: [
+  {pick, not: [], none: false, note: ''}, {pick: null, not: [], none: false, note: ''}]});
+"""
+
+
+def _pair(pad, one, two, *, serve=False, **kw):
+    return ch.run_probe_pair(
+        pad, PRE + PAIR_JS + one, PRE + PAIR_JS + two, entry=ROUND1, inject_into=ROUND1, serve=serve, **kw
+    )
+
+
+@pytest.mark.parametrize("serve", [False, True], ids=["file", "served"])
+def test_a_pick_in_one_tab_shows_in_the_other_without_a_reload(tmp_path, serve):
+    pad = _build(tmp_path)
+    _, got = _pair(
+        pad,
+        """
+        await harness.barrier();
+        await show(0);
+        await press(thisOne(0, 1));
+        await harness.barrier();
+        """,
+        """
+        await ready();
+        await harness.barrier();
+        await harness.waitFor('the pick to arrive', () => pressed(thisOne(0, 1)) === 'true');
+        const after = await snapshot();
+        await harness.barrier();
+        return after;
+        """,
+        serve=serve,
+    )
+    first = got["questions"][0]
+    assert first["this"] == ["false", "true", "false"]
+    assert first["marks"] == [None, "picked", None]
+    assert first["dot"] == {"answered": "true", "text": "answered"}
+    assert '"pick": "B"' in got["reply"]
+
+
+def test_a_note_typed_in_the_second_tab_appears_in_the_first(tmp_path):
+    pad = _build(tmp_path)
+    got, _ = _pair(
+        pad,
+        """
+        await ready();
+        await harness.barrier();
+        await harness.waitFor('the note to arrive', () => note(0).value === 'from the other tab');
+        await harness.barrier();
+        return note(0).value;
+        """,
+        """
+        await harness.barrier();
+        await show(0);
+        await typeNote(0, 'from the other tab');
+        await harness.barrier();
+        """,
+    )
+    assert got == "from the other tab"
+
+
+def test_a_change_on_question_two_is_there_when_the_other_tab_moves_to_it(tmp_path):
+    pad = _build(tmp_path)
+    _, got = _pair(
+        pad,
+        """
+        await harness.barrier();
+        await show(1);
+        await press(thisOne(1, 2)); await typeNote(1, 'second');
+        await harness.barrier();
+        """,
+        """
+        await show(0);
+        await harness.barrier();
+        await harness.waitFor('question 2 to read answered', () => dot(1).answered === 'true');
+        await show(1);
+        const out = {this: flags(1, thisOne), marks: marks(1), note: note(1).value};
+        await harness.barrier();
+        return out;
+        """,
+    )
+    assert got == {"this": ["false", "false", "true"], "marks": [None, None, "picked"], "note": "second"}
+
+
+def test_a_pick_in_each_tab_leaves_both_in_the_stored_entry(tmp_path):
+    pad = _build(tmp_path)
+    got, _ = _pair(
+        pad,
+        """
+        await harness.barrier();
+        await show(0);
+        await press(thisOne(0, 0));
+        await harness.barrier();
+        await harness.waitFor('the second tab pick', () => stored().answers[1].pick === 2);
+        await harness.barrier();
+        return stored().answers.map((a) => a.pick);
+        """,
+        """
+        await ready();
+        await harness.barrier();
+        await harness.waitFor('the first tab pick', () => pressed(thisOne(0, 0)) === 'true');
+        await show(1);
+        await press(thisOne(1, 2));
+        await harness.barrier();
+        await harness.barrier();
+        """,
+    )
+    assert got == [0, 2]
+
+
+IGNORED = {  # name: (copy 1 action, copy 2 action, key the event carries, console warnings copy 2 gives)
+    "bad-data": ("localStorage.setItem('outpost-scratch-pad:' + roundId(), '{not json');", "", "own", 1),
+    "fails-the-checks": (
+        "localStorage.setItem('outpost-scratch-pad:' + roundId(), entryWith(9));",
+        "",
+        "own",
+        1,
+    ),
+    "another-round": ("localStorage.setItem('outpost-scratch-pad:other-round', entryWith(0));", "", "other", 0),
+    "removed": ("localStorage.removeItem('outpost-scratch-pad:' + roundId());", "", "own", 0),
+    "cleared": ("localStorage.clear();", "", "cleared", 0),
+    "other-storage-area": (
+        "",
+        """
+        window.dispatchEvent(new StorageEvent('storage', {
+          key: 'outpost-scratch-pad:' + roundId(), newValue: entryWith(0), storageArea: sessionStorage}));
+        """,
+        "own",
+        0,
+    ),
+}
+
+
+@pytest.mark.parametrize("name", list(IGNORED))
+def test_an_event_that_is_not_this_rounds_saved_answers_leaves_the_tab_as_it_was(tmp_path, name):
+    action_one, action_two, carries, warnings = IGNORED[name]
+    pad = _build(tmp_path)
+    _, got = _pair(
+        pad,
+        f"""
+        await harness.barrier();
+        await show(0);
+        await press(thisOne(0, 1));
+        await harness.barrier();
+        {action_one}
+        localStorage.setItem('sentinel-key', '1');
+        await harness.barrier();
+        """,
+        f"""
+        await ready();
+        const log = [];
+        const warns = [];
+        console.warn = (...args) => warns.push(args.join(' '));
+        window.addEventListener('storage', (e) => log.push({{key: e.key, state: quick()}}));
+        await harness.barrier();
+        await harness.waitFor('the first pick', () => pressed(thisOne(0, 1)) === 'true');
+        const baseline = quick();
+        await harness.barrier();
+        {action_two}
+        await harness.barrier();
+        await harness.waitFor('the sentinel', () => log.some((l) => l.key === 'sentinel-key'));
+        return {{baseline, after: quick(), log, id: roundId(), warns}};
+        """,
+    )
+    own = KEY + got["id"]
+    carried = {"own": own, "other": KEY + "other-round", "cleared": None}[carries]
+    assert [entry["key"] for entry in got["log"]] == [own, carried, "sentinel-key"]
+    assert got["baseline"][0]["this"] == ["false", "true", "false"]
+    for entry in got["log"][1:]:
+        assert entry["state"] == got["baseline"]
+    assert got["after"] == got["baseline"]
+    assert len(got["warns"]) == warnings
+
+
+def test_taking_the_other_tabs_answers_writes_nothing_until_this_tab_changes_something(tmp_path):
+    pad = _build(tmp_path)
+    _, got = _pair(
+        pad,
+        """
+        await harness.barrier();
+        await show(0);
+        await press(thisOne(0, 1)); await typeNote(0, 'theirs');
+        await harness.barrier();
+        await harness.barrier();
+        """,
+        """
+        await ready();
+        await harness.barrier();
+        await harness.waitFor('the other tab', () => note(0).value === 'theirs');
+        const adopted = window.__sets;
+        await press(thisOne(1, 0));
+        const own = window.__sets;
+        await harness.barrier();
+        await harness.barrier();
+        return {adopted, own};
+        """,
+        before_script="""
+        window.__sets = 0;
+        const original = Storage.prototype.setItem;
+        Storage.prototype.setItem = function () { window.__sets += 1; return original.apply(this, arguments); };
+        """,
+    )
+    assert got == {"adopted": 0, "own": 1}
+
+
+def test_a_note_box_being_typed_in_keeps_its_text_and_caret_while_the_other_controls_change(tmp_path):
+    pad = _build(tmp_path)
+    _, got = _pair(
+        pad,
+        """
+        await harness.barrier();
+        await show(0);
+        await typeNote(0, 'theirs');
+        await press(thisOne(0, 2));
+        await harness.barrier();
+        """,
+        """
+        await ready();
+        await typeNote(0, 'my own words');
+        note(0).focus();
+        note(0).setSelectionRange(3, 7);
+        await harness.barrier();
+        await harness.waitFor('the pick to arrive', () => pressed(thisOne(0, 2)) === 'true');
+        const out = {
+          text: note(0).value, start: note(0).selectionStart, end: note(0).selectionEnd,
+          focused: document.activeElement === note(0), picked: flags(0, thisOne), dot: dot(0),
+        };
+        await harness.barrier();
+        return out;
+        """,
+    )
+    assert got == {
+        "text": "my own words",
+        "start": 3,
+        "end": 7,
+        "focused": True,
+        "picked": ["false", "false", "true"],
+        "dot": {"answered": "true", "text": "answered"},
+    }
+
+
+MISSED = {
+    "pageshow": ("window.dispatchEvent(new PageTransitionEvent('pageshow', {persisted: true}));", True),
+    "visible": (
+        """
+        Object.defineProperty(document, 'visibilityState', {configurable: true, get: () => 'visible'});
+        document.dispatchEvent(new Event('visibilitychange'));
+        """,
+        True,
+    ),
+    "hidden": (
+        """
+        Object.defineProperty(document, 'visibilityState', {configurable: true, get: () => 'hidden'});
+        document.dispatchEvent(new Event('visibilitychange'));
+        """,
+        False,
+    ),
+}
+
+
+@pytest.mark.parametrize("name", list(MISSED))
+def test_a_tab_that_missed_the_event_reads_its_entry_again_when_it_comes_back_into_view(tmp_path, name):
+    event, takes = MISSED[name]
+    pad = _build(tmp_path)
+    got = ch.run_probe(
+        pad,
+        PRE
+        + PAIR_JS
+        + f"""
+        await ready();
+        localStorage.setItem('outpost-scratch-pad:' + roundId(), entryWith(1));
+        const before = quick();
+        {event}
+        await settle();
+        const shown = quick();
+        await press(thisOne(1, 2));
+        return {{before, shown, pick: stored().answers.map((a) => a.pick)}};
+        """,
+        entry=ROUND1,
+        inject_into=ROUND1,
+    )
+    assert got["before"][0]["this"] == ["false", "false", "false"]
+    if takes:
+        assert got["shown"][0]["this"] == ["false", "true", "false"]
+        assert got["shown"][0]["dot"]["answered"] == "true"
+        assert got["pick"] == [1, 2]
+    else:
+        assert got["shown"] == got["before"]
+        assert got["pick"] == [None, 2]
+
+
+def test_coming_back_into_view_with_the_entry_unchanged_leaves_the_copied_line_alone(tmp_path):
+    pad = _build(tmp_path)
+    got = ch.run_probe(
+        pad,
+        PRE
+        + PAIR_JS
+        + """
+        resolving();
+        await ready();
+        await press(thisOne(0, 1));
+        await openReply();
+        await copy();
+        const copied = statusText();
+        window.dispatchEvent(new PageTransitionEvent('pageshow', {persisted: true}));
+        await settle();
+        const unchanged = statusText();
+        localStorage.setItem('outpost-scratch-pad:' + roundId(), entryWith(2));
+        window.dispatchEvent(new PageTransitionEvent('pageshow', {persisted: true}));
+        await settle();
+        return {copied, unchanged, changed: statusText(), reply: parsed().answers[0].pick};
+        """,
+        entry=ROUND1,
+        inject_into=ROUND1,
+    )
+    assert got == {
+        "copied": "Copied. Paste it into your session.",
+        "unchanged": "Copied. Paste it into your session.",
+        "changed": "",
+        "reply": "C",
+    }
+
+
+def test_a_stored_entry_that_was_ignored_at_open_is_not_warned_about_again_when_the_tab_returns(tmp_path):
+    pad = _build(tmp_path)
+    got = _steps(
+        pad,
+        [
+            """
+            localStorage.setItem('outpost-scratch-pad:' + roundId(), '{not json');
+            harness.reload();
+            """,
+            PAIR_JS
+            + """
+            await ready();
+            const warns = [];
+            console.warn = (...args) => warns.push(args.join(' '));
+            window.dispatchEvent(new PageTransitionEvent('pageshow', {persisted: true}));
+            await settle();
+            return {warns, blank: quick()[0].this};
+            """,
+        ],
+        entry=ROUND1,
+        inject_into=ROUND1,
+    )
+    assert got == {"warns": [], "blank": ["false", "false", "false"]}
+
+
+def test_a_reply_that_is_showing_is_rebuilt_when_the_other_tab_changes_an_answer(tmp_path):
+    pad = _build(tmp_path)
+    _, got = _pair(
+        pad,
+        """
+        await harness.barrier();
+        await show(1);
+        await press(none(1));
+        await harness.barrier();
+        """,
+        """
+        await ready();
+        await openReply();
+        await harness.barrier();
+        await harness.waitFor('the reply to name the other tab', () => parsed().answers[1].none === true);
+        const out = {pick: parsed().answers[1].pick, summary: summaries()[1], shown: seen(replyBox())};
+        await harness.barrier();
+        return out;
+        """,
+    )
+    assert got["shown"] is True
+    assert got["summary"].endswith("none of these")

@@ -20,6 +20,12 @@
 //   keeper.accept(text)    -> the answers list if text is an entry that fits the round, else null
 //                             with one console.warn naming the round and the failed check
 //   keeper.write(answers)  -> true if the whole entry was stored, false if the write threw
+//   keeper.watch(take)     -> calls take(answers) with a list that fits the round each time another tab
+//                             saves this round's entry (a "storage" event on localStorage for this
+//                             round's key), and again from a fresh read of the entry on "pageshow" and
+//                             when the page becomes visible, if it differs from the last text this
+//                             keeper read, wrote or was told of. Events for another key, a cleared store, a
+//                             removed entry and entries that fail the checks call nothing. It never writes.
 (function () {
   "use strict";
 
@@ -81,6 +87,7 @@
   function create(roundId, optionCounts) {
     var key = PREFIX + roundId;
     var limit = entryLimit(optionCounts);
+    var seen = null;
 
     function warn(why) {
       try {
@@ -119,19 +126,54 @@
       } catch (error) {
         return { usable: false };
       }
+      seen = text;
       return { usable: true, answers: text === null ? null : accept(text) };
     }
 
     function write(answers) {
       try {
-        window.localStorage.setItem(key, JSON.stringify({ answers: answers }));
+        var text = JSON.stringify({ answers: answers });
+        window.localStorage.setItem(key, text);
+        seen = text;
         return true;
       } catch (error) {
         return false;
       }
     }
 
-    return { read: read, accept: accept, write: write };
+    function watch(take) {
+      function reread() {
+        var text;
+        try {
+          text = window.localStorage.getItem(key);
+        } catch (error) {
+          return;
+        }
+        if (text === null || text === seen) return;
+        seen = text;
+        var answers = accept(text);
+        if (answers) take(answers);
+      }
+
+      window.addEventListener("storage", function (event) {
+        var area;
+        try {
+          area = window.localStorage;
+        } catch (error) {
+          return;
+        }
+        if (event.storageArea !== area || event.key !== key || event.newValue === null) return;
+        seen = event.newValue;
+        var answers = accept(event.newValue);
+        if (answers) take(answers);
+      });
+      window.addEventListener("pageshow", reread);
+      document.addEventListener("visibilitychange", function () {
+        if (document.visibilityState === "visible") reread();
+      });
+    }
+
+    return { read: read, accept: accept, write: write, watch: watch };
   }
 
   window.PadSaved = { create: create };

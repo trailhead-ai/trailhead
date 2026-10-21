@@ -391,9 +391,10 @@
         var answer = answers[qIndex];
         answer.pick = saved.pick;
         answer.none = saved.none;
-        answer.note = saved.note;
         answer.not.length = 0;
         saved.not.forEach(function (n) { answer.not.push(n); });
+        var view = views[qIndex];
+        answer.note = view && view.note === document.activeElement ? view.note.value : saved.note;
         if (dots[qIndex]) refresh(qIndex);
       });
       reply.changed();
@@ -401,6 +402,7 @@
 
     if (!keeper) cantKeep.hidden = false;
     else if (restored.answers) applyAnswers(restored.answers);
+    if (keeper) keeper.watch(applyAnswers);
 
     function setCurrent(index) {
       buttons.forEach(function (button, i) {
