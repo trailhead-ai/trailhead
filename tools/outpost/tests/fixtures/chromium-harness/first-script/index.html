@@ -1,0 +1,16 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"></head>
+<body>
+<script>
+  try {
+    window.localStorage.getItem("k");
+    window.localStorage.setItem("k", "v");
+    window.__first = { threw: false };
+  } catch (error) {
+    window.__first = { threw: true, name: error.name };
+  }
+  document.documentElement.setAttribute("data-pad-ready", "");
+</script>
+</body>
+</html>

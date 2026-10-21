@@ -222,3 +222,188 @@ def test_served_folder_serves_only_the_folder_it_was_given(tmp_path):
         with pytest.raises(urllib.error.HTTPError) as err:
             _fetch(f"{base}/../secret.txt")
     assert err.value.code == 404
+
+
+_ENV_REQUIRE = {"PATH": "", "HOME": "/nonexistent", ch.ENV_REQUIRE: "1"}
+
+SERVE_MODES = pytest.mark.parametrize("serve", [False, True], ids=["file", "served"])
+
+DENY_STORAGE = (
+    "Object.defineProperty(window, 'localStorage', {configurable: true, "
+    "get: function () { throw new DOMException('denied', 'SecurityError'); }});"
+)
+FULL_STORAGE = (
+    "Storage.prototype.setItem = function () { throw new DOMException('full', 'QuotaExceededError'); };"
+)
+
+
+@SERVE_MODES
+def test_a_probe_that_reloads_carries_on_in_the_reloaded_page(serve):
+    steps = [
+        "sessionStorage.setItem('first', localStorage.getItem('c')); harness.reload();",
+        "return [Number(sessionStorage.getItem('first')), Number(localStorage.getItem('c'))];",
+    ]
+    assert ch.run_probe_steps(FIXTURES / "counter", steps, serve=serve) == [1, 2]
+
+
+@SERVE_MODES
+def test_a_second_run_of_the_same_page_starts_from_a_fresh_profile(serve):
+    read = "return Number(localStorage.getItem('c'));"
+    assert ch.run_probe_steps(FIXTURES / "counter", [read], serve=serve) == 1
+    assert ch.run_probe_steps(FIXTURES / "counter", [read], serve=serve) == 1
+
+
+@SERVE_MODES
+def test_a_value_stored_on_page_a_is_read_on_page_b_in_another_folder(serve):
+    steps = [
+        "localStorage.setItem('x', 'from-a'); harness.goto('../b/index.html');",
+        "return {x: localStorage.getItem('x'), page: location.pathname.split('/').slice(-2).join('/')};",
+    ]
+    result = ch.run_probe_steps(
+        FIXTURES / "two-pads",
+        steps,
+        entry="a/index.html",
+        inject_into=["a/index.html", "b/index.html"],
+        serve=serve,
+    )
+    assert result == {"x": "from-a", "page": "b/index.html"}
+
+
+def test_a_step_that_does_not_move_on_is_reported_when_more_steps_remain():
+    with pytest.raises(ch.ProbeFailed) as err:
+        ch.run_probe_steps(FIXTURES / "counter", ["return 1;", "return 2;"])
+    assert "step 0 finished without" in str(err.value)
+
+
+def test_the_last_step_cannot_move_on_to_nothing():
+    with pytest.raises(ch.ProbeFailed) as err:
+        ch.run_probe_steps(FIXTURES / "counter", ["harness.reload();"])
+    assert "last step" in str(err.value)
+
+
+STORAGE_LISTENER = """
+  var events = [];
+  addEventListener('storage', function (e) { events.push({key: e.key, value: e.newValue}); });
+"""
+
+
+@SERVE_MODES
+def test_a_write_in_one_copy_reaches_the_other_as_storage_events_with_the_right_key(serve):
+    copy_1 = STORAGE_LISTENER + """
+      await harness.barrier();
+      localStorage.setItem('k1', 'v1');
+      localStorage.setItem('k2', 'v2');
+      await harness.barrier();
+      return events;
+    """
+    copy_2 = """
+      var events = [];
+      await new Promise(function (resolve) { setTimeout(resolve, 50); });
+      addEventListener('storage', function (e) { events.push({key: e.key, value: e.newValue}); });
+      await harness.barrier();
+      await harness.waitFor('two storage events', function () { return events.length >= 2; });
+      await harness.barrier();
+      return events;
+    """
+    one, two = ch.run_probe_pair(FIXTURES / "widths-narrow", copy_1, copy_2, serve=serve)
+    assert two == [{"key": "k1", "value": "v1"}, {"key": "k2", "value": "v2"}]
+    assert one == []
+
+
+def test_each_copy_reads_its_own_result_and_a_throw_names_the_copy():
+    one, two = ch.run_probe_pair(
+        FIXTURES / "widths-narrow",
+        "return 'one:' + (window.opener === null);",
+        "return 'two:' + (window.opener !== null);",
+    )
+    assert (one, two) == ("one:true", "two:true")
+    with pytest.raises(ch.ProbeFailed) as err:
+        ch.run_probe_pair(FIXTURES / "widths-narrow", "return 1;", "throw new Error('copy two broke');")
+    assert "second copy" in str(err.value) and "copy two broke" in str(err.value)
+
+
+@SERVE_MODES
+def test_a_before_script_that_denies_local_storage_is_in_force_for_the_pages_first_script(serve):
+    read = "return window.__first;"
+    assert ch.run_probe(FIXTURES / "first-script", read, serve=serve) == {"threw": False}
+    denied = ch.run_probe(FIXTURES / "first-script", read, serve=serve, before_script=DENY_STORAGE)
+    assert denied == {"threw": True, "name": "SecurityError"}
+
+
+@SERVE_MODES
+def test_a_before_script_can_make_only_set_item_throw(serve):
+    result = ch.run_probe(
+        FIXTURES / "first-script", "return window.__first;", serve=serve, before_script=FULL_STORAGE
+    )
+    assert result == {"threw": True, "name": "QuotaExceededError"}
+
+
+def test_a_before_script_applies_to_the_page_a_probe_moves_to():
+    steps = ["harness.goto('../b/index.html');", "return typeof window.__beforeRan;"]
+    result = ch.run_probe_steps(
+        FIXTURES / "two-pads",
+        steps,
+        entry="a/index.html",
+        inject_into=["a/index.html", "b/index.html"],
+        before_script="window.__beforeRan = true;",
+    )
+    assert result == "boolean"
+
+
+@pytest.mark.parametrize("worker", [1, 2])
+def test_two_launches_share_one_server_port_and_one_profile(worker):
+    probe = "return {port: location.port, c: Number(localStorage.getItem('c'))};"
+    first, second = ch.run_probe_launches(FIXTURES / "counter", [probe, probe], serve=True)
+    assert first["port"] and first["port"] == second["port"]
+    assert (first["c"], second["c"]) == (1, 2)
+
+
+def test_two_launches_from_disk_share_one_profile():
+    probe = "return Number(localStorage.getItem('c'));"
+    assert ch.run_probe_launches(FIXTURES / "counter", [probe, probe]) == [1, 2]
+
+
+def test_separate_launch_runs_do_not_share_state():
+    probe = "return Number(localStorage.getItem('c'));"
+    assert ch.run_probe_launches(FIXTURES / "counter", [probe]) == [1]
+    assert ch.run_probe_launches(FIXTURES / "counter", [probe]) == [1]
+
+
+def test_wait_for_returns_the_value_once_its_condition_holds():
+    probe = """
+      var calls = 0;
+      var got = await harness.waitFor('third call', function () { calls += 1; return calls >= 3 ? calls : false; });
+      return {got: got, calls: calls};
+    """
+    assert ch.run_probe(FIXTURES / "widths-narrow", probe) == {"got": 3, "calls": 3}
+
+
+def test_wait_for_that_never_holds_fails_naming_the_awaited_state():
+    probe = "await harness.waitFor('the other tab to write k9', function () { return false; }, 300);"
+    with pytest.raises(ch.ProbeFailed) as err:
+        ch.run_probe(FIXTURES / "widths-narrow", probe)
+    assert "the other tab to write k9" in str(err.value)
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda: ch.run_probe_steps(FIXTURES / "counter", ["return 1;"], env=_ENV_REQUIRE, lookup=lambda: None),
+        lambda: ch.run_probe_pair(
+            FIXTURES / "counter", "return 1;", "return 2;", env=_ENV_REQUIRE, lookup=lambda: None
+        ),
+        lambda: ch.run_probe_launches(FIXTURES / "counter", ["return 1;"], env=_ENV_REQUIRE, lookup=lambda: None),
+    ],
+    ids=["steps", "pair", "launches"],
+)
+def test_a_missing_browser_fails_rather_than_skips_for_every_entry_point(call):
+    with pytest.raises((pytest.skip.Exception, pytest.fail.Exception)) as outcome:
+        call()
+    assert outcome.type is pytest.fail.Exception
+
+
+def test_wait_for_without_a_timeout_fails_named_before_the_virtual_time_budget_runs_out():
+    probe = "await harness.waitFor('a state that never arrives', function () { return false; });"
+    with pytest.raises(ch.ProbeFailed) as err:
+        ch.run_probe(FIXTURES / "widths-narrow", probe, virtual_time_budget=1500)
+    assert "a state that never arrives" in str(err.value)

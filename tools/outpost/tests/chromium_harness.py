@@ -20,6 +20,42 @@ raises ``ServerStartError`` before the browser launches.
 ``prefers-color-scheme`` rules apply; a probe should assert the media query itself so a flag
 that silently does nothing fails the test.
 
+Four more entry points share ``run_probe``'s keyword arguments (``entry``, ``inject_into``,
+``serve``, ``serve_port``, ``window_size``, ``timeout``, ``virtual_time_budget``, ``env``, ``lookup``,
+``color_scheme``) and its missing-browser rule. ``inject_into`` may also be a list of files: every
+listed page gets the probe, so a probe can move to any of them. Every probe body, in every entry
+point, receives a ``harness`` object.
+
+- ``run_probe_steps(page_dir, steps, ...)``: ``steps`` is a list of probe bodies, one per page load.
+  A step that is not the last must end by calling ``harness.reload()`` or ``harness.goto(url)``
+  (``url`` resolved against the current page); the harness then loads that page and runs the next
+  step there. State survives the move through ``localStorage`` / ``sessionStorage``; the value
+  returned is the last step's. A step that does not move on, or a last step that does, raises
+  ``ProbeFailed``. Two pages in different folders of ``page_dir`` share one ``file://`` origin, so
+  ``entry="a/index.html"``, ``inject_into=["a/index.html", "b/index.html"]`` and
+  ``harness.goto("../b/index.html")`` carry ``localStorage`` from a to b.
+- ``run_probe_pair(page_dir, probe_one, probe_two, ...)`` returns ``(value_one, value_two)``. The page
+  is opened twice at once (the second copy through ``window.open``, so it works from ``file://``
+  and served; a framing wrapper does not, the sites CSP forbids framing). Each copy runs its probe
+  once the page is ready; ``await harness.barrier()`` in both probes lines them up (a probe that
+  registers a listener after its first ``await`` needs it before the other copy writes). Writes
+  in one copy arrive in the other as ``storage`` events; the writer gets none. A throw in either
+  probe raises ``ProbeFailed`` naming the copy. Defaults to ``PAIR_VIRTUAL_TIME_BUDGET``, a larger
+  budget, because a wait for the other copy is real inter-process time that the virtual clock
+  does not hold back.
+- ``run_probe_launches(page_dir, probes, ...)`` runs one probe per browser launch, in order, sharing
+  one profile and (served) one server on one OS-picked free port, so ``localStorage`` written by
+  launch 1 is there for launch 2 under the same origin. It returns the list of values. Separate
+  calls never share a profile or a port.
+- ``before_script=<js>`` (on every entry point) writes the script beside each injected page and loads
+  it as the first ``<script>`` in ``<head>``, ahead of the page's own scripts, so a test can replace
+  ``window.localStorage`` or ``Storage.prototype.setItem`` before the page sees them.
+- ``await harness.waitFor(description, condition, timeoutMs)`` polls ``condition`` (sync or async,
+  truthy means done) every 20 ms of virtual time and returns its truthy value; on timeout it throws
+  ``timed out waiting for: <description>``, which surfaces as ``ProbeFailed``. The default timeout
+  is ``WAIT_FOR_BUDGET_SHARE`` of ``virtual_time_budget``: a wait that outlasts the budget would
+  surface as ``ProbeNotReported`` instead of naming what was awaited.
+
 Browser lookup (``find_browser``): ``$OUTPOST_TEST_BROWSER``, then
 ``chrome-headless-shell`` on PATH, then the Playwright cache's headless shell,
 and only then full Chrome/Chromium (launched with ``--headless=new``). Every
@@ -40,7 +76,7 @@ import signal
 import subprocess
 import tempfile
 import threading
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -61,14 +97,28 @@ _RESULT_RE = re.compile(r'<pre id="probe-result"[^>]*>(.*?)</pre>', re.DOTALL)
 _COLOR_SCHEMES = {"dark": 0, "light": 1}
 
 PROBE_FILE = "pad-probe.js"
+BEFORE_FILE = "pad-before.js"
+COPY_WINDOW_NAME = "harness-copy-2"
+STEP_WINDOW_PREFIX = "harness-step:"
+PAIR_VIRTUAL_TIME_BUDGET = 30000
+WAIT_FOR_BUDGET_SHARE = 0.8
 
 _WRAPPER = """(function () {
+  var MODE = %(mode)s;
+  var COPY_NAME = %(copy_name)s;
+  var STEP_PREFIX = %(step_prefix)s;
+  var POLL_MS = 20;
+  var steps = [
+%(steps)s
+  ];
+
   function report(payload) {
     var pre = document.createElement("pre");
     pre.id = "probe-result";
     pre.textContent = JSON.stringify(payload);
     document.body.appendChild(pre);
   }
+  function failure(error) { return { ok: false, error: String((error && error.message) || error) }; }
   function padReady() {
     return new Promise(function (resolve) {
       var root = document.documentElement;
@@ -78,18 +128,133 @@ _WRAPPER = """(function () {
       }).observe(root, { attributes: true });
     });
   }
-  var probe = async function () {
-%s
-  };
-  padReady()
-    .then(function () { return document.fonts.ready; })
-    .then(probe)
-    .then(
-      function (value) { report({ ok: true, value: value === undefined ? null : value }); },
-      function (error) { report({ ok: false, error: String((error && error.message) || error) }); }
-    );
+  function ready() {
+    return padReady().then(function () { return document.fonts.ready; });
+  }
+  function pause(ms) { return new Promise(function (resolve) { setTimeout(resolve, ms); }); }
+
+  async function waitFor(description, condition, timeoutMs) {
+    var ticks = Math.ceil((timeoutMs === undefined ? %(wait_ms)d : timeoutMs) / POLL_MS);
+    for (var tick = 0; tick <= ticks; tick++) {
+      var value = await condition();
+      if (value) { return value; }
+      await pause(POLL_MS);
+    }
+    throw new Error("timed out waiting for: " + description);
+  }
+
+  function makeHarness(peer) {
+    var moveTo = null;
+    var mine = 0;
+    var seen = 0;
+    if (peer) {
+      addEventListener("message", function (event) {
+        if (event.source === peer && event.data && event.data.t === "barrier") { seen += 1; }
+      });
+    }
+    return {
+      waitFor: waitFor,
+      reload: function () { moveTo = { reload: true }; },
+      goto: function (url) { moveTo = { url: new URL(url, location.href).href }; },
+      barrier: async function () {
+        if (!peer) { throw new Error("barrier needs a second copy: use run_probe_pair"); }
+        mine += 1;
+        peer.postMessage({ t: "barrier" }, "*");
+        await waitFor("the other copy to reach barrier " + mine, function () { return seen >= mine; });
+      },
+      moved: function () { return moveTo; }
+    };
+  }
+
+  async function runSteps() {
+    var index = window.name.indexOf(STEP_PREFIX) === 0
+      ? Number(window.name.slice(STEP_PREFIX.length)) : 0;
+    var harness = makeHarness(null);
+    await ready();
+    var value = await steps[index](harness);
+    var move = harness.moved();
+    if (move === null) {
+      if (index < steps.length - 1) {
+        throw new Error("step " + index + " finished without calling harness.reload() or harness.goto()");
+      }
+      return value === undefined ? null : value;
+    }
+    if (index >= steps.length - 1) {
+      throw new Error("the last step called harness.reload() or harness.goto(): there is no step to run after it");
+    }
+    window.name = STEP_PREFIX + (index + 1);
+    if (move.reload) { location.reload(); } else { location.href = move.url; }
+    return NOT_FINISHED;
+  }
+  var NOT_FINISHED = {};
+
+  function runCopyTwo() {
+    var opener = window.opener;
+    var harness = makeHarness(opener);
+    ready().then(function () {
+      var started = false;
+      addEventListener("message", function (event) {
+        if (event.source !== opener || !event.data || event.data.t !== "go" || started) { return; }
+        started = true;
+        Promise.resolve().then(function () { return steps[1](harness); }).then(
+          function (value) {
+            opener.postMessage({ t: "result", ok: true, value: value === undefined ? null : value }, "*");
+          },
+          function (error) { opener.postMessage(Object.assign({ t: "result" }, failure(error)), "*"); }
+        );
+      });
+      opener.postMessage({ t: "hello" }, "*");
+    });
+  }
+
+  async function runCopyOne() {
+    await ready();
+    var popup = window.open(location.href, COPY_NAME);
+    if (!popup) { throw new Error("the browser would not open a second copy of the page"); }
+    var hello = false;
+    var second = null;
+    var harness = makeHarness(popup);
+    addEventListener("message", function (event) {
+      if (event.source !== popup || !event.data) { return; }
+      if (event.data.t === "hello") { hello = true; }
+      if (event.data.t === "result") { second = event.data; }
+    });
+    await waitFor("the second copy of the page to signal ready", function () { return hello; });
+    popup.postMessage({ t: "go" }, "*");
+    var first;
+    try { first = await steps[0](harness); } catch (error) {
+      popup.close();
+      throw new Error("first copy: " + ((error && error.message) || error));
+    }
+    await waitFor("the second copy's probe to report", function () { return second; });
+    popup.close();
+    if (!second.ok) { throw new Error("second copy: " + second.error); }
+    return [first === undefined ? null : first, second.value];
+  }
+
+  var role;
+  if (MODE === "pair" && window.name === COPY_NAME) { runCopyTwo(); return; }
+  role = MODE === "pair" ? runCopyOne : runSteps;
+  role().then(
+    function (value) { if (value !== NOT_FINISHED) { report({ ok: true, value: value }); } },
+    function (error) { report(failure(error)); }
+  );
 })();
 """
+
+
+def _step_source(body: str) -> str:
+    return "    async function (harness) {\n" + body + "\n    }"
+
+
+def _render_wrapper(mode: str, bodies: Sequence[str], virtual_time_budget: int) -> str:
+    return _WRAPPER % {
+        "mode": json.dumps(mode),
+        "copy_name": json.dumps(COPY_WINDOW_NAME),
+        "step_prefix": json.dumps(STEP_WINDOW_PREFIX),
+        "steps": ",\n".join(_step_source(body) for body in bodies),
+        "wait_ms": int(virtual_time_budget * WAIT_FOR_BUDGET_SHARE),
+    }
 
 
 class HarnessError(Exception):
@@ -248,59 +413,75 @@ def _inject(index_html: str) -> str:
     return index_html[:pos] + wrapper + index_html[pos:]
 
 
-def run_probe(
-    page_dir: Path,
-    probe_js: str,
-    *,
-    window_size: tuple[int, int] = (1280, 900),
-    timeout: float = DEFAULT_TIMEOUT,
-    virtual_time_budget: int = 5000,
-    env: Mapping[str, str] | None = None,
-    lookup: Callable[[], Browser | None] | None = None,
-    entry: str = "index.html",
-    inject_into: str | None = None,
-    serve: bool = False,
-    serve_port: int = 0,
-    color_scheme: str | None = None,
-):
-    env = os.environ if env is None else env
+_HEAD_OPEN_RE = re.compile(r"<head(?:\s[^>]*)?>", re.IGNORECASE)
+_DOCTYPE_RE = re.compile(r"<!doctype[^>]*>", re.IGNORECASE)
+
+
+def _inject_before(index_html: str) -> str:
+    tag = f'<script src="{BEFORE_FILE}"></script>\n'
+    head = _HEAD_OPEN_RE.search(index_html)
+    if head:
+        return index_html[: head.end()] + tag + index_html[head.end() :]
+    doctype = _DOCTYPE_RE.search(index_html)
+    at = doctype.end() if doctype else 0
+    return index_html[:at] + tag + index_html[at:]
+
+
+def _require_browser(env: Mapping[str, str], lookup: Callable[[], Browser | None] | None) -> Browser:
     browser = (lookup or (lambda: find_browser(env)))()
     if browser is None:
         message = "no headless Chrome/Chromium found (see chromium_harness.find_browser)"
         if env.get(ENV_REQUIRE):
             pytest.fail(f"{message}; {ENV_REQUIRE} is set, so a missing browser is a failure")
-        pytest.skip(f"{message}; set {ENV_REQUIRE} to fail instead of skip")
+        pytest.skip(f"{message}; set {ENV_REQUIRE} to fail instead of skipping")
+    return browser
 
-    page_dir = Path(page_dir)
-    with tempfile.TemporaryDirectory(prefix="chromium-harness-") as tmp:
-        page = Path(tmp) / "page"
-        shutil.copytree(page_dir, page)
-        target = page / (inject_into or entry)
-        target.write_text(_inject(target.read_text()))
-        (target.parent / PROBE_FILE).write_text(_WRAPPER % probe_js)
-        index = page / entry
 
-        argv = [str(browser.path)]
-        if not browser.is_headless_shell:
-            argv.append("--headless=new")
-        if env.get(ENV_REQUIRE):
-            argv.append("--no-sandbox")
-        if color_scheme is not None:
-            argv.append(f"--blink-settings=preferredColorScheme={_COLOR_SCHEMES[color_scheme]}")
-        argv += [
-            f"--user-data-dir={Path(tmp) / 'profile'}",
-            f"--window-size={window_size[0]},{window_size[1]}",
-            f"--virtual-time-budget={virtual_time_budget}",
-            "--dump-dom",
-        ]
-        with contextlib.ExitStack() as stack:
-            if serve:
-                base = stack.enter_context(serve_folder(page, port=serve_port))
-                argv.append(f"{base}/{entry}")
-            else:
-                argv.append(index.as_uri())
-            dom = _launch(argv, browser, timeout, env)
+def _prepare_copy(
+    page_dir: Path,
+    tmp: str,
+    entry: str,
+    inject_into: str | Sequence[str] | None,
+    before_script: str | None,
+) -> tuple[Path, list[Path]]:
+    page = Path(tmp) / "page"
+    shutil.copytree(page_dir, page)
+    names = [inject_into or entry] if isinstance(inject_into, (str, type(None))) else list(inject_into)
+    targets = [page / name for name in names]
+    for target in targets:
+        text = target.read_text()
+        if before_script is not None:
+            text = _inject_before(text)
+            (target.parent / BEFORE_FILE).write_text(before_script)
+        target.write_text(_inject(text))
+    return page, targets
 
+
+def _argv(
+    browser: Browser,
+    env: Mapping[str, str],
+    tmp: str,
+    window_size: tuple[int, int],
+    virtual_time_budget: int,
+    color_scheme: str | None,
+) -> list[str]:
+    argv = [str(browser.path)]
+    if not browser.is_headless_shell:
+        argv.append("--headless=new")
+    if env.get(ENV_REQUIRE):
+        argv.append("--no-sandbox")
+    if color_scheme is not None:
+        argv.append(f"--blink-settings=preferredColorScheme={_COLOR_SCHEMES[color_scheme]}")
+    argv += [
+        f"--user-data-dir={Path(tmp) / 'profile'}",
+        f"--window-size={window_size[0]},{window_size[1]}",
+        f"--virtual-time-budget={virtual_time_budget}",
+        "--dump-dom",
+    ]
+    return argv
+
+
+def _read_result(dom: str, page_dir: Path):
     match = _RESULT_RE.search(dom)
     if match is None:
         raise ProbeNotReported(
@@ -312,3 +493,177 @@ def run_probe(
     if not result["ok"]:
         raise ProbeFailed(f"probe threw on page {page_dir.name!r}: {result['error']}")
     return result["value"]
+
+
+def _run_launches(
+    page_dir: Path,
+    wrappers: Sequence[str],
+    *,
+    window_size: tuple[int, int],
+    timeout: float,
+    virtual_time_budget: int,
+    env: Mapping[str, str] | None,
+    lookup: Callable[[], Browser | None] | None,
+    entry: str,
+    inject_into: str | Sequence[str] | None,
+    serve: bool,
+    serve_port: int,
+    color_scheme: str | None,
+    before_script: str | None,
+) -> list:
+    env = os.environ if env is None else env
+    browser = _require_browser(env, lookup)
+    page_dir = Path(page_dir)
+    values = []
+    with tempfile.TemporaryDirectory(prefix="chromium-harness-") as tmp:
+        page, targets = _prepare_copy(page_dir, tmp, entry, inject_into, before_script)
+        argv = _argv(browser, env, tmp, window_size, virtual_time_budget, color_scheme)
+        with contextlib.ExitStack() as stack:
+            if serve:
+                base = stack.enter_context(serve_folder(page, port=serve_port))
+                argv.append(f"{base}/{entry}")
+            else:
+                argv.append((page / entry).as_uri())
+            for wrapper in wrappers:
+                for probe_dir in {target.parent for target in targets}:
+                    (probe_dir / PROBE_FILE).write_text(wrapper)
+                values.append(_read_result(_launch(argv, browser, timeout, env), page_dir))
+    return values
+
+
+def run_probe(
+    page_dir: Path,
+    probe_js: str,
+    *,
+    window_size: tuple[int, int] = (1280, 900),
+    timeout: float = DEFAULT_TIMEOUT,
+    virtual_time_budget: int = 5000,
+    env: Mapping[str, str] | None = None,
+    lookup: Callable[[], Browser | None] | None = None,
+    entry: str = "index.html",
+    inject_into: str | Sequence[str] | None = None,
+    serve: bool = False,
+    serve_port: int = 0,
+    color_scheme: str | None = None,
+    before_script: str | None = None,
+):
+    return run_probe_steps(
+        page_dir,
+        [probe_js],
+        window_size=window_size,
+        timeout=timeout,
+        virtual_time_budget=virtual_time_budget,
+        env=env,
+        lookup=lookup,
+        entry=entry,
+        inject_into=inject_into,
+        serve=serve,
+        serve_port=serve_port,
+        color_scheme=color_scheme,
+        before_script=before_script,
+    )
+
+
+def run_probe_steps(
+    page_dir: Path,
+    steps: Sequence[str],
+    *,
+    window_size: tuple[int, int] = (1280, 900),
+    timeout: float = DEFAULT_TIMEOUT,
+    virtual_time_budget: int = 5000,
+    env: Mapping[str, str] | None = None,
+    lookup: Callable[[], Browser | None] | None = None,
+    entry: str = "index.html",
+    inject_into: str | Sequence[str] | None = None,
+    serve: bool = False,
+    serve_port: int = 0,
+    color_scheme: str | None = None,
+    before_script: str | None = None,
+):
+    wrapper = _render_wrapper("steps", steps, virtual_time_budget)
+    (value,) = _run_launches(
+        page_dir,
+        [wrapper],
+        window_size=window_size,
+        timeout=timeout,
+        virtual_time_budget=virtual_time_budget,
+        env=env,
+        lookup=lookup,
+        entry=entry,
+        inject_into=inject_into,
+        serve=serve,
+        serve_port=serve_port,
+        color_scheme=color_scheme,
+        before_script=before_script,
+    )
+    return value
+
+
+def run_probe_pair(
+    page_dir: Path,
+    probe_one: str,
+    probe_two: str,
+    *,
+    window_size: tuple[int, int] = (1280, 900),
+    timeout: float = DEFAULT_TIMEOUT,
+    virtual_time_budget: int = PAIR_VIRTUAL_TIME_BUDGET,
+    env: Mapping[str, str] | None = None,
+    lookup: Callable[[], Browser | None] | None = None,
+    entry: str = "index.html",
+    inject_into: str | Sequence[str] | None = None,
+    serve: bool = False,
+    serve_port: int = 0,
+    color_scheme: str | None = None,
+    before_script: str | None = None,
+) -> tuple:
+    wrapper = _render_wrapper("pair", [probe_one, probe_two], virtual_time_budget)
+    (value,) = _run_launches(
+        page_dir,
+        [wrapper],
+        window_size=window_size,
+        timeout=timeout,
+        virtual_time_budget=virtual_time_budget,
+        env=env,
+        lookup=lookup,
+        entry=entry,
+        inject_into=inject_into,
+        serve=serve,
+        serve_port=serve_port,
+        color_scheme=color_scheme,
+        before_script=before_script,
+    )
+    return tuple(value)
+
+
+def run_probe_launches(
+    page_dir: Path,
+    probes: Sequence[str],
+    *,
+    window_size: tuple[int, int] = (1280, 900),
+    timeout: float = DEFAULT_TIMEOUT,
+    virtual_time_budget: int = 5000,
+    env: Mapping[str, str] | None = None,
+    lookup: Callable[[], Browser | None] | None = None,
+    entry: str = "index.html",
+    inject_into: str | Sequence[str] | None = None,
+    serve: bool = False,
+    serve_port: int = 0,
+    color_scheme: str | None = None,
+    before_script: str | None = None,
+) -> list:
+    wrappers = [_render_wrapper("steps", [probe], virtual_time_budget) for probe in probes]
+    return _run_launches(
+        page_dir,
+        wrappers,
+        window_size=window_size,
+        timeout=timeout,
+        virtual_time_budget=virtual_time_budget,
+        env=env,
+        lookup=lookup,
+        entry=entry,
+        inject_into=inject_into,
+        serve=serve,
+        serve_port=serve_port,
+        color_scheme=color_scheme,
+        before_script=before_script,
+    )
