@@ -4765,8 +4765,9 @@ one real spec review. Causes named here are hypotheses unless a line says an arm
   shows the same remainder in its turn-2 prose (four bare mentions, field 3).
 - **AC28 is partial.** Treated2: saved-detail `criterion-mention` `text-with-number` 0 of 6 (`nickname` 4, `bare` 2);
   the first treated round was 0 of 6 (`bare` 4, `nickname` 2). Criteria are cited with the number after, but by a short
-  name rather than their own text. That is the remainder, which goes back to the spec. The real run could not be read
-  for this field (field 4): its saved section was not written within the one reply turn.
+  name rather than their own text. That is the remainder, which goes back to the spec. The real run's saved section
+  (field 4) cites every criterion as a clause with its number in round brackets after, none bare; most clauses are
+  short forms ("the request (AC1)", "confirmation (AC3)") rather than the criterion's own text.
 
 ### The two treated rounds and the operator's amendment
 
@@ -4808,7 +4809,7 @@ the mtimes of `~/.claude/settings.json` and `~/.claude/CLAUDE.md` were unchanged
 (committed, trimmed, as `runs/pw-realrun.init.json`) lists one craft entry, `craft@inline`, path the branch's plugin
 directory, plus three built-in plugins; its slash commands carry no prefix other than `craft:`.
 
-**Departures from the plan, each forced by a stop before any review.** (1) The fixture spec's criteria carry no
+**Departures from the plan, each forced by a stop before any review (a third reply turn, "go", was authorised afterwards and is described above).** (1) The fixture spec's criteria carry no
 verification trailer, so the review's criterion gate refused it (exit 1, "carries no verification trailer naming a
 sanctioned method" for AC1 to AC6) before any pass ran. The throwaway record is the fixture with ` *Verified by:
 manual-check.*` appended to each criterion; the criterion text is unchanged, the repository's fixture is unchanged, and
@@ -4830,21 +4831,28 @@ and its condition at handover stay on paper and the desk does not need to record
 Critical shown, by the rule fixed in advance (none read "needs a rewrite"). The session recorded the override, withdrew
 C1's edit, found that the withdrawal changed text in three accepted edits, re-checked the drafted criteria against the
 gate, and re-presented the post-override table with "Reply go to apply all of this as one write, or override again."
-The spec is still `draft` and no `## Gauntlet` section exists: the one reply turn ended before the write.
+The spec was still `draft` and no `## Gauntlet` section existed when that turn ended. The controller then authorised one
+bare "go" (turn 3) against the same session, with the same env, flags and grant. It re-ran no pass, made one atomic
+`lore record update --diff` write of the edits, the `## Gauntlet` section and the stamp, set the spec to `ready`, and read
+the record back; its final text and the section as the record holds it are in `runs/pw-realrun-turn3.md`.
 
 | Field | Reading |
 |---|---|
 | 1 First naming (AC25) | `plain`. Turn 1 opens "I've finished the spec review (gauntlet) of *A telescope loan desk ...*"; "gauntlet" appears once, in round brackets, and no other naming occurs in either turn. Earlier narration: no naming. |
 | 2 Outcome words (AC26) | `plain`. Turn 1's table has seven rows, each "fixed in the spec"; the two findings below it read "Proposed: fixed in the spec". Turn 2's echoed table has nine rows: C1 "accepted as a risk: "<reason>"", the other eight "fixed in the spec". No backticked `resolved`, `revise`, `accepted-as-risk`, `disputed` or `answered`; the only backticked word in turn 1 is the status `ready`, and turn 2 adds none that is an outcome. |
 | 3 Ids in round brackets (AC27) | Turn 1: every id is bracketed after the finding's text (nine of nine) or sits in the reply line ("dispute C2: ...", "accept C2 as a risk", "answer C2: ..."); no bare id. Turn 2: the nine table rows are bracketed; four bare mentions in prose, "the C1 edit" (line 1), "C7's officer view" (line 25), "from C2 (AC17)" and "C2's other text" (line 27). Recorded against AC27, which is partial; none stops the slice. |
-| 4 Criteria by text in the saved detail (AC28) | Not readable: no section was saved. Read instead, as an observation outside the field, turn 2's prose cites criteria by short name with the number after ("the handover criterion (old AC12)", "the officer view (now AC13)", "The loan history (AC16)", "the reminder (AC15)") and in lists of bare ranges ("(AC4-AC6)", "(AC2, AC8, AC9 ...)"). That matches the remainder the treated2 captures show for AC28 (hypothesis, not ablated). |
-| 5 Override on the right finding | `mapped` in the echo: C1 carries the staged override with the reason as given and the other eight keep "fixed in the spec". The stamp bullet is unread for the same reason as field 4. |
+| 4 Criteria by text in the saved detail (AC28) | Read from the written record (turn 3). The detail has 17 criterion mentions, each a clause with its number in round brackets after, none bare: some close to the criterion's own wording ("a loan is held only once its emailed link is opened (AC2)", "a club loan length of 7 days that the officer can change (AC4)"), others short names ("the request (AC1), confirmation (AC3), refusal (AC5), next free date (AC6)", "freed dates (AC10)"). By the strict grammar the short-name mentions read `nickname`, so the detail does not read `text-with-number`; recorded against AC28 (partial), no stop. Finding ids in the detail: nine, each after its headline in round brackets ("**Anyone can borrow or cancel as someone else (C2).**"), none bare; the stamp bullet keeps its stored form. The treated2 pattern repeats (hypothesis, not ablated). |
+| 5 Override on the right finding | `mapped`. The stamp bullet reads "C1 `accepted-as-risk` (operator override — "the club keeps its paper handover sheet this season, so who held a scope and its condition at handover stay on paper and the desk does not need to record them yet")", then C2 to C9 each `resolved` (from proposal), "8 from proposal, 1 operator override". The echo agreed (turn 2). The spec is `ready`. |
 
-**Go or no-go.** Go. Fields 1 and 2 read `plain` in both turns, so neither stop rule fired, and the override was applied
-to the right finding. Fields 3 and 5 are recorded against the partial criteria and AC27's remainder shows in the real
-session as it does at `pwdetail`; fields 4 and the stamp half of 5 are unread, so the real run does not confirm that the
-saved section reads as the arms' `pwsaved` captures did. One further session turn ("go") would complete the write and
-make both readable; it was not run, because the task allows one real session and one reply turn.
+**By hand, the saved block.** The marker bullet ("Retained review evidence") is printed once, first in the section. The
+credential-pattern scrub of `_shared/security.md` (key-like tokens, vendor-prefix tokens, bearer and api-key shapes,
+high-entropy literals, PEM headers), applied as a script over the section as the record holds it: 0 matches for each of
+the seven patterns.
+
+**Go or no-go.** Go. Fields 1 and 2 read `plain` in all three turns, so neither stop rule fired, and the stamp records
+the override on the right finding (`mapped`, not `misapplied`). Field 3 (bare ids in turn 2's prose) and field 4
+(short-name criteria in the saved detail) are recorded against AC27 and AC28, which are partial, and match the remainders
+the treated2 captures show.
 
 **Limits.** The operator's user-level rule files in `~/.claude/rules` and the user `CLAUDE.md` load regardless of
 `--setting-sources` and are not isolated, and four claude.ai connector servers (listed in the raw init record, omitted from the trimmed file) are present.
@@ -4896,7 +4904,11 @@ neither shows nor tests them. A comparison against the guide's wording is left f
 
 ### Scans
 
-`scripts/capture_scan.py` over `runs/pw-realrun-turn1.md`, `runs/pw-realrun-turn2.md` and `runs/pw-realrun.init.json`:
+`scripts/capture_scan.py` over `runs/pw-realrun-turn1.md`, `runs/pw-realrun-turn2.md`, `runs/pw-realrun-turn3.md` and `runs/pw-realrun.init.json`:
 0 known-safe matches, 0 credential findings, exit 0, for each. A search of the three for the operator's home path,
-username, `/tmp/` and the throwaway directory name found 0 hits. The raw stream is not committed. The `.md` and `.json`
+username, `/tmp/` and the throwaway directory name found 0 hits. Isolation for turn 3: `lore vault ls` listed only the
+throwaway vault; the trailhead vault's `git status --porcelain` was 0 lines before and after; `~/.claude/CLAUDE.md`'s
+mtime was unchanged, and `~/.claude/settings.json`'s mtime was the same before and after the turn (1792596033), though
+it differed from the value read before turn 2 (1792160979): something outside this run rewrote it between those reads,
+which this run cannot attribute. The raw stream is not committed. The `.md` and `.json`
 extensions keep the files outside the graded `runs/*.txt` captures, and `test_wording_grader.py` is unchanged.

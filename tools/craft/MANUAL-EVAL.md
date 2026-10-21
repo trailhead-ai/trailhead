@@ -2496,16 +2496,18 @@ severity name appears, so the guard is held.
 
 **One real spec review, 2026-10-21, read by eye, go.** A real `/craft:gauntlet` from a fresh `/tmp` directory against the
 `pw` fixture spec held in a throwaway lore vault (throwaway lore config and state, synthetic git identity), with only the
-branch's craft plugin loaded (`craft@inline`, from the init record), and one reply that accepted one Critical as a risk.
+branch's craft plugin loaded (`craft@inline`, from the init record), and a reply that accepted one Critical as a risk, then "go".
 Its first naming read "spec review (gauntlet)" and its table and echo read "fixed in the spec" and "accepted as a risk"
 with no internal outcome word, so neither stop rule fired; the override landed on the right finding in the echo. Ids in
 its second turn's prose were bare four times, and criteria were cited by short name; both are recorded against the
-partial criteria. The session re-presented the table after the override and did not write within the one reply turn, so
-the saved section (AC28, and the stamp half of the override check) was not read. The fixture spec needed verification
+partial criteria. The session re-presented the table after the override; a bare "go" turn then wrote the saved section and
+flipped the spec to `ready`. The stamp records the override on C1 as `accepted-as-risk` with the reason and C2 to C9 as
+`resolved`; the marker bullet is printed and the credential scrub finds nothing; the saved detail cites criteria as
+clauses with the number in brackets after, none bare, but mostly by short name, so AC28 stays partial. The fixture spec needed verification
 trailers on its criteria to pass the review's criterion gate (the arms never reach the gate), so the throwaway copy
 carries them. Limits: user-level rules and the claude.ai connectors still load; one session; `Bash` granted unrestricted
 because the review composes its shell steps; no sibling records. Captures: `runs/pw-realrun-turn1.md`,
-`runs/pw-realrun-turn2.md`, `runs/pw-realrun.init.json` (not graded; the `.txt` capture test ignores them).
+`runs/pw-realrun-turn2.md`, `runs/pw-realrun-turn3.md`, `runs/pw-realrun.init.json` (not graded; the `.txt` capture test ignores them).
 
 **Pin check.** `skills/gauntlet/SKILL.md` and `skills/gauntlet/dispositions.md` at the branch HEAD are byte-equal to
 `c6af0ccb` (G2), the revision the `pw-treated2-*` arms pin.
