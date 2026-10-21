@@ -1395,3 +1395,65 @@ def test_a_note_rerun_after_a_supersede_failure_on_an_unterminated_survivor_keep
     assert code == 0, err
     assert body_of(env, vault, survivor).count(f"## Merged from task/{absorbed}") == 1
     assert sidecar_of(env, vault, absorbed)["status"] == "superseded"
+
+
+# --- a dependent whose own name fails the shape check ------------------------------------
+
+
+def listing_with(other, entries):
+    def hook(argv, stdin, runner):
+        if listing_of(other, argv):
+            return subprocess.CompletedProcess(argv, 0, json.dumps(entries), "")
+
+    return hook
+
+
+UNSHAPED = "bad name;rm"
+
+
+@pytest.mark.parametrize("preview", [True, False])
+def test_an_absorbed_follow_up_with_a_dependent_whose_name_fails_the_shape_check_is_not_mergeable(
+    two_vault_lore_env, tmp_path, capsys, preview
+):
+    env, (vault, other) = two_vault_lore_env
+    spec = make_spec(env, vault, "Parent spec", status="complete")
+    survivor = make_followup(env, vault, "Survivor", status="open", spec=spec)
+    absorbed = make_followup(env, vault, "Absorbed", status="open", spec=spec)
+    hook = listing_with(other, [{"name": UNSHAPED, "status": "open", "depends-on": [absorbed]}])
+    runner = EnvRunner(env, hook=hook)
+    before = vault_snapshot(env, vault)
+    doc = merge_doc(env, vault, [(survivor, [absorbed])])
+    code, out, err = run_dispose(runner, spec, tmp_path, capsys, doc, preview)
+    assert (code, reason_of(err), subject(err)) == (1, "not-mergeable", [absorbed])
+    assert "bad name" not in err
+    assert out is None
+    assert runner.writes() == [] and vault_snapshot(env, vault) == before
+
+
+def test_a_dependent_with_an_unshaped_name_on_a_dropped_follow_up_is_counted_not_printed(
+    two_vault_lore_env, tmp_path, capsys
+):
+    env, (vault, other) = two_vault_lore_env
+    spec = make_spec(env, vault, "Parent spec", status="complete")
+    target = make_followup(env, vault, "Target", status="open", spec=spec)
+    hook = listing_with(other, [{"name": UNSHAPED, "status": "open", "depends-on": [target]}])
+    code, out, err = run_dispose(
+        EnvRunner(env, hook=hook), spec, tmp_path, capsys, file_for(env, vault, [target]), preview=True
+    )
+    assert code == 0, err
+    assert out["dependents"][target] == []
+    assert "bad name" not in json.dumps(out) + err
+
+
+def test_a_follow_up_nobody_depends_on_stays_mergeable_beside_an_unshaped_unrelated_task(
+    two_vault_lore_env, tmp_path, capsys
+):
+    env, (vault, other) = two_vault_lore_env
+    spec = make_spec(env, vault, "Parent spec", status="complete")
+    survivor = make_followup(env, vault, "Survivor", status="open", spec=spec)
+    absorbed = make_followup(env, vault, "Absorbed", status="open", spec=spec)
+    hook = listing_with(other, [{"name": UNSHAPED, "status": "open", "depends-on": ["somebody-else"]}])
+    doc = merge_doc(env, vault, [(survivor, [absorbed])])
+    code, out, err = run_dispose(EnvRunner(env, hook=hook), spec, tmp_path, capsys, doc)
+    assert code == 0, err
+    assert sidecar_of(env, vault, absorbed)["status"] == "superseded"

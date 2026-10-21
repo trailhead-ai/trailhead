@@ -40,7 +40,8 @@ only a successful read with no match means no dependents. An absorbed follow-up 
 dependent is `not-mergeable` (exit 1, vault unchanged): stderr carries `reason-code:`,
 one `subject:` line naming each such absorbed follow-up, and one line per one of them,
 `dependents <absorbed>: <vault>/<task> <vault>/<task> ...`, so the skill can offer the
-merge the other way round. A survivor may have dependents.
+merge the other way round. A dependent whose own name fails the shape check counts toward that refusal but is never
+printed, and gets no `dependents` line of its own. A survivor may have dependents.
 
 `--preview` runs every check and writes nothing. Exit 0 prints
     {drops: [{name, status}],
@@ -225,13 +226,16 @@ def load_dispositions(path: str) -> dict:
     }
 
 
-def dependents_map(runner, names: list[str]) -> dict[str, list[dict]]:
-    """For each of `names`, the tasks in every configured vault whose `depends-on` names
-    it: `{name, vault, status}`, sorted by vault then name. Read from the live
+def dependents_map(runner, names: list[str]) -> tuple[dict[str, list[dict]], dict[str, int]]:
+    """`(found, unnamed)` for each of `names`. `found` maps it to the tasks in every
+    configured vault whose `depends-on` names it: `{name, vault, status}`, sorted by vault
+    then name. `unnamed` counts, per name, the dependents whose own name fails the shape
+    check: they cannot be shown, but they still depend on it. Read from the live
     `lore task list --vault <v> --json` of each vault. A listing that cannot be read is an
     error, never an empty result."""
     wanted = set(names)
     found: dict[str, list[dict]] = {name: [] for name in names}
+    unnamed: dict[str, int] = {name: 0 for name in names}
     for vault in gather.list_vaults(runner):
         listing = gather._call_json(runner, ["task", "list", "--vault", vault, "--json"])
         if not isinstance(listing, list):
@@ -243,6 +247,8 @@ def dependents_map(runner, names: list[str]) -> dict[str, list[dict]]:
             if not isinstance(entries, list) or not all(isinstance(e, str) for e in entries):
                 raise gather.GatherError("lore-output-not-json")
             if not gather._shape_ok(item["name"]):
+                for target in wanted & set(entries):
+                    unnamed[target] += 1
                 continue
             status = item.get("status")
             record = {
@@ -254,7 +260,7 @@ def dependents_map(runner, names: list[str]) -> dict[str, list[dict]]:
                 found[target].append(record)
     for dependents in found.values():
         dependents.sort(key=lambda d: (d["vault"], d["name"]))
-    return found
+    return found, unnamed
 
 
 def failure_record(name: str, write: str, argv: list[str] | None, reason: str | None = None) -> dict:
@@ -486,12 +492,13 @@ def dispose(runner, spec: str, dispositions: dict, preview: bool) -> tuple[dict,
 
     names = [item["name"] for item in drops]
     absorbed = [m["name"] for group in groups for m in group["absorbed"]]
-    dependents = dependents_map(runner, names + absorbed)
-    held = [name for name in absorbed if dependents[name]]
+    dependents, unnamed = dependents_map(runner, names + absorbed)
+    held = [name for name in absorbed if dependents[name] or unnamed[name]]
     if held:
         lines = tuple(
             f"dependents {name}: " + " ".join(f"{d['vault']}/{d['name']}" for d in dependents[name])
             for name in held
+            if dependents[name]
         )
         raise DisposeError("not-mergeable", tuple(held), lines)
     if preview:
