@@ -1,0 +1,47 @@
+**The three findings that need your decision**
+
+---
+
+**C1: members aren't told what goes back in the case until the end of the loan**
+
+Should the borrowing confirmation also list what goes back in the case? I recommend adding it. It's a one-line change, but having checked it, this matters less than the opening summary suggested. The spec already sends a reminder listing what goes back in the case: the telescope, its eyepieces and the finder cap (AC5). It goes out two days before the return date. The only gap is the start of the loan, so I'd treat this as "worth fixing, your call" rather than one that needs your decision. It keeps its id, C1.
+
+Worst case: a member takes a telescope home and leaves the finder cap in the car, because the confirmation email states only the loan and its return date (AC1). The list arrives two days before the return date, when the cap may already be lost. If that reminder goes to a mistyped address, the list never arrives at all. The failure-cases pass raised that last point separately as worth fixing.
+
+Fix: `", and lists what goes back in the case: the telescope, its eyepieces, and the finder cap"`, added to the end of that same confirmation email for a new loan (AC1), so the list reaches the member at the start of the loan as well as at the end.
+
+*Raised by: ease of use. The fix is a small edit (proposed: `resolved`).*
+
+---
+
+**C2: a loan holds a whole telescope for longer than the member needs**
+
+Should a member choose how long a loan lasts, or should the club lend by the night? I recommend letting the member give a return date, and not rebuilding the loan desk around nights. As written, the member gives only a start date (AC1), and the spec never says how the return date is set. That missing piece causes the harm. Lending by the night is a much bigger change, and the right-problem pass said itself that it doesn't know how often members want a single night.
+
+Worst case: a member wants the club's largest scope for one clear Friday. The system sets the return date for them, perhaps a weekend or a week later. The scope sits in their house unused. Every other request for it is turned away and offered the next free start date (AC2), so other members wait weeks for a night it wasn't being used.
+
+Fix: a member could book a scope for exactly the nights they want, and others could book it after that. This rewrites the line for borrowing a telescope (AC1) to:
+
+    **AC1.** A member borrows a telescope by giving a name, an email address, the telescope, a start date and a return date, and receives a confirmation email that states the loan and its return date.
+
+Caveat: if you know most loans really are for a single night, lending by the night is the better shape. That would make this a `revise` (`record-only`). It would rewrite the Objectives and AC1 to AC5, and the edit above wouldn't be enough. The spec also doesn't set a longest allowed loan. That limit is yours to choose, so I haven't written one.
+
+*Raised by: right problem. The fix is a moderate edit (proposed: `resolved`).*
+
+---
+
+**C3: a telescope left in the cupboard shows as free with no condition note**
+
+Should a returned telescope stay off the loan calendar until someone has checked it? I recommend yes. This finding goes straight to the problem the spec was written to solve: nobody can tell who had a scope when its mirror was scratched.
+
+Worst case: a member drops a telescope back in the cupboard on a day the loan officer isn't there. The requirement that the officer records it as back, with a condition note, and that it then shows as free (AC4) assumes the officer is present on the return date. If they aren't, nothing covers the gap. The scope shows as free with no note. The next member collects it and finds the scratched mirror, and the loan history of every loan and return with its condition note (AC6) can't say whether the damage happened before or after the last loan.
+
+Fix: the loan calendar would show "returned, not yet checked" until the loan officer records a condition note, and only then show the scope as free. This rewrites the line for recording a return (AC4) to:
+
+    **AC4.** When a telescope comes back, it shows on the club's loan calendar as returned and not yet checked. It shows as free only once the loan officer has recorded its condition note.
+
+*Raised by: failure cases. The fix is a moderate edit (proposed: `resolved`).*
+
+---
+
+If you accept these, the rewritten borrowing line (AC1) would include both C1's case list and C2's return date. To answer, say "go", or name an id to override it: dispute, accept as a risk, or answer it with your reason.

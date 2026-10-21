@@ -1,0 +1,39 @@
+**Spec review: telescope loan desk** (maturity: production (basis: stamp); no concerns waived)
+
+**What the reviewers found.** The spec's central promise is accountability: afterwards, someone can tell who had a scope when its mirror was scratched. Two gaps undercut that promise and the second objective, "a loan and its return date reach the right member". First, a telescope "shows as free on the club's loan calendar from that day" on the return date (AC4) whether or not anyone has checked it, so a scope left in the cupboard goes back into circulation with no condition note. Second, every member-facing step runs on email, but nothing tells the loan officer when an email can't be delivered. Around those two, the waiting list is underbuilt: no criterion lets a member join it, and an offer is never recorded or closed. The objective that a member can "see where the loan stands" has no criterion behind it after the first email. A few rules are open in ways that let two builds behave differently: which clock the 48 hours run on, whether one member can hold two scopes on the same dates, and who can cancel a loan or read the condition notes.
+
+**Whether it holds.** The failure-cases reviewer's unchecked return is the strongest finding. It ties straight to the scratched mirror in the Problem, and the fix is one edit. I raised the failure-cases reviewer's bounced-reminder point from "worth fixing" to "needs your decision". A production spec rates "failure nobody sees" at that level, and a mistyped address fails the second objective silently, for the confirmation as well as the reminder. I downgraded two others to "worth fixing, your call":
+- **Lending by the night (right-problem reviewer).** It assumes members usually want one clear night. That guesses at member behaviour, and the reviewer said so itself. The Problem describes weekend clashes.
+- **Missing finder cap (ease-of-use reviewer).** It missed that the reminder already lists what goes back in the case (AC5). What's left is real but narrower: on a loan shorter than two days, that reminder would fall before the loan starts.
+
+Separately, two reviewers converged on the unseen loan status, and two others on the waiting list. Those convergences are the strongest of the "worth fixing" items. The fact check refuted "six telescopes": the club's register reportedly lists seven. It didn't cite where, so the count is worth confirming before you change it.
+
+**What to do.** Make both edits below and advance the spec. Then decide whether the waiting list and the loan-status page belong in this spec or a follow-up. As written, both are promised and neither is delivered.
+
+**Recommended outcome:** advance to `ready` this round with both edits applied. No `revise` rows. No predecessor to retire.
+
+| id | finding | proposed disposition | proposed edit |
+|---|---|---|---|
+| C1 | An unchecked return shows the scope as free, so damage can't be traced to the borrower | `resolved` | *Rewrite AC4 so the scope is free only once a condition note is recorded* |
+| C2 | An undeliverable confirmation or reminder fails silently | `resolved` | *Add AC7: the loan officer sees any email that couldn't be delivered* |
+
+Drafted text, applied verbatim on acceptance:
+
+- **C1, replaces AC4:** "**AC4.** When a telescope comes back, the loan officer records it as back with a note of its condition. The telescope shows as free on the club's loan calendar from the day that note is recorded; until then it shows as still on loan to the member who borrowed it, including after the return date has passed."
+- **C2, appended after AC6:** "**AC7.** When a confirmation or reminder email cannot be delivered, the loan officer sees which loan it belongs to and the address it failed at."
+  - Caveat: this catches bounces only. A mistyped address that belongs to someone else still delivers.
+
+**Would cause trouble later, worth fixing, your call (10).** Raised by:
+- right problem: lending by the night; Objectives broader than the double-booking complaint
+- buildability: waiting-list offers can't be closed; whether the history is stored or worked out from events
+- self-consistency: no criterion delivers "see where the loan stands"; waiting-list offers never recorded
+- left undecided: two scopes per member on the same dates; which clock the 48 hours run on
+- security: cancel not tied to the borrower; condition notes readable by every member
+- ease of use: short loans miss the case-contents reminder
+
+**Rough edges, nothing to decide (3).** Raised by:
+- fact check: telescope count (six vs seven)
+- self-consistency: "loan calendar" and "loan history" named as two different pages
+- security: the confirmation email reveals which dates a scope is taken
+
+Reply "go" to apply both edits and flip the spec to `ready`. Or override any row by its id with your reason, for example "dispute C2: \<why\>, otherwise go".

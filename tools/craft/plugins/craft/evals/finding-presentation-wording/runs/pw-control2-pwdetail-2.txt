@@ -1,0 +1,23 @@
+## Would build the wrong thing, needs your decision
+
+**C1. Members aren't told what goes back in the case when they borrow** *(raised by: ease of use)*
+
+You need to decide whether the borrowing email should list what has to come back in the case. I recommend it should, because otherwise a member can lose the finder cap without knowing it mattered. The confirmation email only "states the loan and its return date" (AC1). The list of what goes back (the telescope, its eyepieces and the finder cap) first appears in the reminder sent two days before the return date (AC5). So a member takes the scope home, puts the finder cap down somewhere during the week, and finds out it was required two days before handing back. If that reminder goes to a mistyped address it never arrives at all, and the case comes back short. The member is then asked to pay for a replacement they were never warned about.
+
+Fix: `"and what goes back in the case: the telescope, its eyepieces, and the finder cap"` added after "its return date" in the confirmation email of AC1, so the member has the list from the day they borrow. The reminder in AC5 already carries the list, so the gap is only at the start of the loan and when the reminder doesn't arrive. The failure-cases reviewer separately flagged a bounced reminder as worth fixing, which is why I think this still needs your decision.
+
+**C2. A loan ties up a whole telescope for every date asked, even for a single night** *(raised by: right problem)*
+
+You need to decide whether a loan covers a run of dates or is booked night by night. I recommend night by night, because the spec's main complaint is members competing for the same scope, and the current design makes that worse. As written, a loan is a telescope from a start date to a return date (AC1). A second request for the same telescope and dates is refused and offered the next free start date (AC2). Picture a member who wants the club's largest scope for one clear Saturday. They hold it Friday to Monday. Three other members are pushed back weeks, and the scope sits unused in a garden on two of those nights.
+
+Fix: members would book a telescope for a night and add more nights if they want them, and a refusal would offer the next free night. This rewrites the borrowing in AC1, the refusal in AC2, the 48-hour cancellation and waiting-list offer in AC3, the return in AC4, the "two days before the return date" timing of the reminder in AC5, and how loans read in the history in AC6. The reviewer was only moderately confident: the spec doesn't say how often a loan is really for a single night. If the loan officer knows most loans run a full weekend, you could answer this finding with that fact rather than take the rewrite.
+
+**C3. A scope left in the cupboard shows as free with no condition note** *(raised by: failure cases)*
+
+You need to decide whether a returned telescope can be lent again before anyone has checked it. I recommend it can't, because this spec exists so that a scratched mirror can be traced to whoever had it. The only return the spec describes is the loan officer recording the telescope "as back, with a note of its condition" on the return date, after which it "shows as free on the club's loan calendar" (AC4). Nothing covers a member who drops the scope in the cupboard when the officer isn't there. The calendar shows it free, the next member borrows it and finds the scratch, and the history (AC6) has no condition note between the two loans. That is exactly the "nobody can tell afterwards who had a scope" problem the spec opens with, in a spec marked production.
+
+Fix: a telescope handed back without a condition note would show on the loan calendar as returned but unchecked, and would become free only once the loan officer records its condition. This changes the return and "free from that day" wording in AC4, and adds the unchecked return as an event in the history in AC6. The security reviewer separately flagged, as worth fixing, that condition notes on a history every member can read may carry personal detail. That doesn't change this fix, but it affects who sees the note once it exists.
+
+---
+
+Reply "go" to accept the recommendation as it stands. You can also override any of C1–C3, with your reason, in the same reply.

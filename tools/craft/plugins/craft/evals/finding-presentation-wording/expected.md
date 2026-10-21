@@ -4399,3 +4399,276 @@ baseline composition with the two gauntlet files read from the commit carrying G
 `pw-treated2-<site>-<n>`, and a same-day paired control on a guard miss is `pw-control2-<site>-<n>` (the baseline arm,
 run again, six runs). Each is read by the registered grammar and judged by the registered bars: a treated2 miss stops the
 slice for the operator again, and a guard miss that the paired control does not reproduce is a regression.
+
+### Second treated batch (2026-10-21): captures, verdicts and end-state reading
+
+The three treated2 arms (`pw-treated2-pwopen.md`, `pw-treated2-pwdetail.md`, `pw-treated2-pwsaved.md`, composed at G2,
+`c6af0ccb`) were run by the dispatch path of the first treated batch (one foreground `claude -p` per run, run in turn, a
+fresh copy of `fixtures/` and a fresh empty working directory each, no `--model`, 600s limit). Each site ran three
+times. In the first three, `pwdetail` `finding-id` split `bracketed`, `bare`, `bracketed` and `severity-name` split
+`none`, `plain`, `none`, and `pwsaved` `criterion-mention` on the saved detail split `bare`, `nickname`, `nickname`, so
+those two sites were re-run as `-4` to `-6` (a fresh batch of three, as the first batch did). No check split at
+`pwopen` (every check read the same word in 3 of 3), so `pwopen` stays at three runs. `pwopen` `criterion-mention`
+read `bare` in 3 of 3, which is 2 or more misses, and `pwdetail` `severity-name` read non-`plain` (`none`) in 2 of 6, so
+both guards got the same-day paired control: the baseline arm at that site, six runs, captured as `pw-control2-pwopen-1`
+to `-6` and `pw-control2-pwdetail-1` to `-6`. All 27 runs (15 treated2, 12 control2) exited 0
+with an empty stderr file; none was excluded. Every verdict is read from the grader with the invocations tabled in the
+pre-registration and is registered in `test_wording_grader.py` (`FINDING_CAPTURE_VERDICTS`, `PW_SAVED_VERDICTS` and
+`PW_OPEN_CRITERION_VERDICTS`). Every count in the tables after these is derived from them.
+
+**Per-capture verdicts, treated2.**
+
+| Capture | Check | Verdict |
+|---|---|---|
+| `pw-treated2-pwopen-1` | `review-name` | `plain` |
+| `pw-treated2-pwopen-1` | `outcome-word` | `plain` |
+| `pw-treated2-pwopen-1` | `finding-id` | `bracketed` |
+| `pw-treated2-pwopen-1` | `severity-name` | `plain` |
+| `pw-treated2-pwopen-1` | `reviewer-name` | `plain` |
+| `pw-treated2-pwopen-1` | `criterion-mention` | `bare` |
+| `pw-treated2-pwopen-2` | `review-name` | `plain` |
+| `pw-treated2-pwopen-2` | `outcome-word` | `plain` |
+| `pw-treated2-pwopen-2` | `finding-id` | `bracketed` |
+| `pw-treated2-pwopen-2` | `severity-name` | `plain` |
+| `pw-treated2-pwopen-2` | `reviewer-name` | `plain` |
+| `pw-treated2-pwopen-2` | `criterion-mention` | `bare` |
+| `pw-treated2-pwopen-3` | `review-name` | `plain` |
+| `pw-treated2-pwopen-3` | `outcome-word` | `plain` |
+| `pw-treated2-pwopen-3` | `finding-id` | `bracketed` |
+| `pw-treated2-pwopen-3` | `severity-name` | `plain` |
+| `pw-treated2-pwopen-3` | `reviewer-name` | `plain` |
+| `pw-treated2-pwopen-3` | `criterion-mention` | `bare` |
+| `pw-treated2-pwdetail-1` | `outcome-word` | `plain` |
+| `pw-treated2-pwdetail-1` | `finding-id` | `bracketed` |
+| `pw-treated2-pwdetail-1` | `severity-name` | `none` |
+| `pw-treated2-pwdetail-1` | `reviewer-name` | `plain` |
+| `pw-treated2-pwdetail-2` | `outcome-word` | `plain` |
+| `pw-treated2-pwdetail-2` | `finding-id` | `bare` |
+| `pw-treated2-pwdetail-2` | `severity-name` | `plain` |
+| `pw-treated2-pwdetail-2` | `reviewer-name` | `plain` |
+| `pw-treated2-pwdetail-3` | `outcome-word` | `plain` |
+| `pw-treated2-pwdetail-3` | `finding-id` | `bracketed` |
+| `pw-treated2-pwdetail-3` | `severity-name` | `none` |
+| `pw-treated2-pwdetail-3` | `reviewer-name` | `plain` |
+| `pw-treated2-pwdetail-4` | `outcome-word` | `plain` |
+| `pw-treated2-pwdetail-4` | `finding-id` | `bracketed` |
+| `pw-treated2-pwdetail-4` | `severity-name` | `plain` |
+| `pw-treated2-pwdetail-4` | `reviewer-name` | `plain` |
+| `pw-treated2-pwdetail-5` | `outcome-word` | `plain` |
+| `pw-treated2-pwdetail-5` | `finding-id` | `bracketed` |
+| `pw-treated2-pwdetail-5` | `severity-name` | `plain` |
+| `pw-treated2-pwdetail-5` | `reviewer-name` | `plain` |
+| `pw-treated2-pwdetail-6` | `outcome-word` | `plain` |
+| `pw-treated2-pwdetail-6` | `finding-id` | `bare` |
+| `pw-treated2-pwdetail-6` | `severity-name` | `plain` |
+| `pw-treated2-pwdetail-6` | `reviewer-name` | `plain` |
+| `pw-treated2-pwsaved-1` | `outcome-word` | `plain` |
+| `pw-treated2-pwsaved-1` | `finding-id` | `bracketed` |
+| `pw-treated2-pwsaved-1` | `finding-id (saved detail)` | `bracketed` |
+| `pw-treated2-pwsaved-1` | `criterion-mention (saved detail)` | `bare` |
+| `pw-treated2-pwsaved-1` | `stamp-form` | `kept` |
+| `pw-treated2-pwsaved-1` | `override-mapping` | `mapped` |
+| `pw-treated2-pwsaved-2` | `outcome-word` | `plain` |
+| `pw-treated2-pwsaved-2` | `finding-id` | `bracketed` |
+| `pw-treated2-pwsaved-2` | `finding-id (saved detail)` | `bracketed` |
+| `pw-treated2-pwsaved-2` | `criterion-mention (saved detail)` | `nickname` |
+| `pw-treated2-pwsaved-2` | `stamp-form` | `kept` |
+| `pw-treated2-pwsaved-2` | `override-mapping` | `mapped` |
+| `pw-treated2-pwsaved-3` | `outcome-word` | `plain` |
+| `pw-treated2-pwsaved-3` | `finding-id` | `bracketed` |
+| `pw-treated2-pwsaved-3` | `finding-id (saved detail)` | `bracketed` |
+| `pw-treated2-pwsaved-3` | `criterion-mention (saved detail)` | `nickname` |
+| `pw-treated2-pwsaved-3` | `stamp-form` | `kept` |
+| `pw-treated2-pwsaved-3` | `override-mapping` | `mapped` |
+| `pw-treated2-pwsaved-4` | `outcome-word` | `plain` |
+| `pw-treated2-pwsaved-4` | `finding-id` | `bracketed` |
+| `pw-treated2-pwsaved-4` | `finding-id (saved detail)` | `bracketed` |
+| `pw-treated2-pwsaved-4` | `criterion-mention (saved detail)` | `nickname` |
+| `pw-treated2-pwsaved-4` | `stamp-form` | `kept` |
+| `pw-treated2-pwsaved-4` | `override-mapping` | `mapped` |
+| `pw-treated2-pwsaved-5` | `outcome-word` | `plain` |
+| `pw-treated2-pwsaved-5` | `finding-id` | `bracketed` |
+| `pw-treated2-pwsaved-5` | `finding-id (saved detail)` | `bracketed` |
+| `pw-treated2-pwsaved-5` | `criterion-mention (saved detail)` | `bare` |
+| `pw-treated2-pwsaved-5` | `stamp-form` | `kept` |
+| `pw-treated2-pwsaved-5` | `override-mapping` | `mapped` |
+| `pw-treated2-pwsaved-6` | `outcome-word` | `plain` |
+| `pw-treated2-pwsaved-6` | `finding-id` | `bracketed` |
+| `pw-treated2-pwsaved-6` | `finding-id (saved detail)` | `bracketed` |
+| `pw-treated2-pwsaved-6` | `criterion-mention (saved detail)` | `nickname` |
+| `pw-treated2-pwsaved-6` | `stamp-form` | `kept` |
+| `pw-treated2-pwsaved-6` | `override-mapping` | `mapped` |
+
+**Per-capture verdicts, the same-day paired controls (baseline arm, run 2026-10-21).**
+
+| Capture | Check | Verdict |
+|---|---|---|
+| `pw-control2-pwopen-1` | `review-name` | `internal` |
+| `pw-control2-pwopen-1` | `outcome-word` | `internal` |
+| `pw-control2-pwopen-1` | `finding-id` | `bare` |
+| `pw-control2-pwopen-1` | `severity-name` | `plain` |
+| `pw-control2-pwopen-1` | `reviewer-name` | `plain` |
+| `pw-control2-pwopen-1` | `criterion-mention` | `bare` |
+| `pw-control2-pwopen-2` | `review-name` | `internal` |
+| `pw-control2-pwopen-2` | `outcome-word` | `internal` |
+| `pw-control2-pwopen-2` | `finding-id` | `bare` |
+| `pw-control2-pwopen-2` | `severity-name` | `internal` |
+| `pw-control2-pwopen-2` | `reviewer-name` | `plain` |
+| `pw-control2-pwopen-2` | `criterion-mention` | `bare` |
+| `pw-control2-pwopen-3` | `review-name` | `internal` |
+| `pw-control2-pwopen-3` | `outcome-word` | `internal` |
+| `pw-control2-pwopen-3` | `finding-id` | `bare` |
+| `pw-control2-pwopen-3` | `severity-name` | `plain` |
+| `pw-control2-pwopen-3` | `reviewer-name` | `plain` |
+| `pw-control2-pwopen-3` | `criterion-mention` | `bare` |
+| `pw-control2-pwopen-4` | `review-name` | `internal` |
+| `pw-control2-pwopen-4` | `outcome-word` | `internal` |
+| `pw-control2-pwopen-4` | `finding-id` | `bare` |
+| `pw-control2-pwopen-4` | `severity-name` | `plain` |
+| `pw-control2-pwopen-4` | `reviewer-name` | `plain` |
+| `pw-control2-pwopen-4` | `criterion-mention` | `bare` |
+| `pw-control2-pwopen-5` | `review-name` | `internal` |
+| `pw-control2-pwopen-5` | `outcome-word` | `internal` |
+| `pw-control2-pwopen-5` | `finding-id` | `bare` |
+| `pw-control2-pwopen-5` | `severity-name` | `plain` |
+| `pw-control2-pwopen-5` | `reviewer-name` | `plain` |
+| `pw-control2-pwopen-5` | `criterion-mention` | `bare` |
+| `pw-control2-pwopen-6` | `review-name` | `internal` |
+| `pw-control2-pwopen-6` | `outcome-word` | `internal` |
+| `pw-control2-pwopen-6` | `finding-id` | `bare` |
+| `pw-control2-pwopen-6` | `severity-name` | `plain` |
+| `pw-control2-pwopen-6` | `reviewer-name` | `plain` |
+| `pw-control2-pwopen-6` | `criterion-mention` | `bare` |
+| `pw-control2-pwdetail-1` | `outcome-word` | `internal` |
+| `pw-control2-pwdetail-1` | `finding-id` | `bare` |
+| `pw-control2-pwdetail-1` | `severity-name` | `plain` |
+| `pw-control2-pwdetail-1` | `reviewer-name` | `plain` |
+| `pw-control2-pwdetail-2` | `outcome-word` | `none` |
+| `pw-control2-pwdetail-2` | `finding-id` | `bare` |
+| `pw-control2-pwdetail-2` | `severity-name` | `plain` |
+| `pw-control2-pwdetail-2` | `reviewer-name` | `plain` |
+| `pw-control2-pwdetail-3` | `outcome-word` | `none` |
+| `pw-control2-pwdetail-3` | `finding-id` | `bare` |
+| `pw-control2-pwdetail-3` | `severity-name` | `plain` |
+| `pw-control2-pwdetail-3` | `reviewer-name` | `plain` |
+| `pw-control2-pwdetail-4` | `outcome-word` | `none` |
+| `pw-control2-pwdetail-4` | `finding-id` | `bare` |
+| `pw-control2-pwdetail-4` | `severity-name` | `plain` |
+| `pw-control2-pwdetail-4` | `reviewer-name` | `plain` |
+| `pw-control2-pwdetail-5` | `outcome-word` | `none` |
+| `pw-control2-pwdetail-5` | `finding-id` | `bare` |
+| `pw-control2-pwdetail-5` | `severity-name` | `none` |
+| `pw-control2-pwdetail-5` | `reviewer-name` | `plain` |
+| `pw-control2-pwdetail-6` | `outcome-word` | `internal` |
+| `pw-control2-pwdetail-6` | `finding-id` | `bare` |
+| `pw-control2-pwdetail-6` | `severity-name` | `plain` |
+| `pw-control2-pwdetail-6` | `reviewer-name` | `plain` |
+
+**Counts, treated2 beside the first treated batch, derived from the rows above and the first treated batch's rows.**
+The first-treated column is read from "Treated counts" under "Treated batch (2026-10-20)". The first treated batch ran
+`pwopen` to six; treated2 `pwopen` is three runs because nothing split there.
+
+| Site | Check | Treated2 runs | Treated2 verdict counts | Treated2 win count | Clean majority | First treated: runs, win count |
+|---|---|---|---|---|---|---|
+| `pwopen` | `review-name` | 3 | `plain` 3 | 3 of 3 `plain` | yes | 6, 6 of 6 `plain` |
+| `pwopen` | `outcome-word` | 3 | `plain` 3 | 3 of 3 `plain` | yes | 6, 6 of 6 `plain` |
+| `pwopen` | `finding-id` | 3 | `bracketed` 3 | 3 of 3 `bracketed` | yes | 6, 3 of 6 `bracketed` |
+| `pwopen` | `severity-name` | 3 | `plain` 3 | 3 of 3 `plain` | yes | 6, 6 of 6 `plain` |
+| `pwopen` | `reviewer-name` | 3 | `plain` 3 | 3 of 3 `plain` | yes | 6, 6 of 6 `plain` |
+| `pwopen` | `criterion-mention` | 3 | `bare` 3 | 0 of 3 `text-with-number` | no | 6, 0 of 6 (`bare` 6) |
+| `pwdetail` | `outcome-word` | 6 | `plain` 6 | 6 of 6 `plain` | yes | 6, 2 of 6 `plain` (`none` 4) |
+| `pwdetail` | `finding-id` | 6 | `bracketed` 4, `bare` 2 | 4 of 6 `bracketed` | no | 6, 2 of 6 `bracketed` (`bare` 4) |
+| `pwdetail` | `severity-name` | 6 | `plain` 4, `none` 2 | 4 of 6 `plain` | no | 6, 5 of 6 `plain` (`none` 1) |
+| `pwdetail` | `reviewer-name` | 6 | `plain` 6 | 6 of 6 `plain` | yes | 6, 6 of 6 `plain` |
+| `pwsaved` | `outcome-word` | 6 | `plain` 6 | 6 of 6 `plain` | yes | 6, 6 of 6 `plain` |
+| `pwsaved` | `finding-id` (echo) | 6 | `bracketed` 6 | 6 of 6 `bracketed` | yes | 6, 1 of 6 `bracketed` (`bare` 5) |
+| `pwsaved` | `finding-id` (saved detail) | 6 | `bracketed` 6 | 6 of 6 `bracketed` | yes | 6, 6 of 6 `bracketed` |
+| `pwsaved` | `criterion-mention` (saved detail) | 6 | `nickname` 4, `bare` 2 | 0 of 6 `text-with-number` | no | 6, 0 of 6 (`bare` 4, `nickname` 2) |
+| `pwsaved` | `stamp-form` | 6 | `kept` 6 | 6 of 6 `kept` | yes | 6, 6 of 6 `kept` |
+| `pwsaved` | `override-mapping` | 6 | `mapped` 6 | 6 of 6 `mapped` | yes | 6, 6 of 6 `mapped` |
+
+**Control counts (baseline arm, 2026-10-21), derived from the control2 rows above.**
+
+| Site | Check | Runs | Verdict counts | Win count | Clean majority of the win |
+|---|---|---|---|---|---|
+| `pwopen` | `review-name` | 6 | `internal` 6 | 0 of 6 `plain` | no |
+| `pwopen` | `outcome-word` | 6 | `internal` 6 | 0 of 6 `plain` | no |
+| `pwopen` | `finding-id` | 6 | `bare` 6 | 0 of 6 `bracketed` | no |
+| `pwopen` | `severity-name` | 6 | `plain` 5, `internal` 1 | 5 of 6 `plain` | yes |
+| `pwopen` | `reviewer-name` | 6 | `plain` 6 | 6 of 6 `plain` | yes |
+| `pwopen` | `criterion-mention` | 6 | `bare` 6 | 0 of 6 `text-with-number` | no |
+| `pwdetail` | `outcome-word` | 6 | `none` 4, `internal` 2 | 0 of 6 `plain` | no |
+| `pwdetail` | `finding-id` | 6 | `bare` 6 | 0 of 6 `bracketed` | no |
+| `pwdetail` | `severity-name` | 6 | `plain` 5, `none` 1 | 5 of 6 `plain` | yes |
+| `pwdetail` | `reviewer-name` | 6 | `plain` 6 | 6 of 6 `plain` | yes |
+
+**End-state reading per check per site, against the pre-registered end states** (unchanged by the amendment). "Closes"
+needs a clean majority (5 or 6 of 6, or 3 of 3) of the winning word at every site the check is graded at.
+
+| Site | Check | Treated2 win count | Clean majority | Reading |
+|---|---|---|---|---|
+| `pwopen` | `review-name` | 3 of 3 `plain` | yes | at this site: wins |
+| `pwopen` | `outcome-word` | 3 of 3 `plain` | yes | at this site: wins |
+| `pwopen` | `finding-id` | 3 of 3 `bracketed` | yes | at this site: wins |
+| `pwopen` | `severity-name` | 3 of 3 `plain` | yes | guard held |
+| `pwopen` | `reviewer-name` | 3 of 3 `plain` | yes | guard held |
+| `pwopen` | `criterion-mention` | 0 of 3 `text-with-number` (`bare` 3) | no | guard miss; control `bare` 6 of 6: residual |
+| `pwdetail` | `outcome-word` | 6 of 6 `plain` | yes | at this site: wins |
+| `pwdetail` | `finding-id` | 4 of 6 `bracketed` (`bare` 2) | no | treated miss |
+| `pwdetail` | `severity-name` | 4 of 6 `plain` (`none` 2) | no | guard miss; control `none` 1 of 6: regression |
+| `pwdetail` | `reviewer-name` | 6 of 6 `plain` | yes | guard held |
+| `pwsaved` | `outcome-word` | 6 of 6 `plain` | yes | at this site: wins |
+| `pwsaved` | `finding-id` (echo) | 6 of 6 `bracketed` | yes | at this site: wins |
+| `pwsaved` | `finding-id` (saved detail) | 6 of 6 `bracketed` | yes | at this site: wins |
+| `pwsaved` | `criterion-mention` (saved detail) | 0 of 6 `text-with-number` (`nickname` 4, `bare` 2) | no | treated miss |
+| `pwsaved` | `stamp-form` | 6 of 6 `kept` | yes | guard held |
+| `pwsaved` | `override-mapping` | 6 of 6 `mapped` | yes | guard held |
+
+Reading by criterion: AC25 (`review-name`, graded at `pwopen` only) closes. AC26 (`outcome-word`) wins at `pwopen`,
+`pwdetail` and `pwsaved`, so it closes. AC27 (`finding-id`) wins at `pwopen`, on the `pwsaved` echo and on the saved
+detail, and misses at `pwdetail` (4 of 6 `bracketed`, one short of the clean majority), so it does not close; the
+deciding site is `pwdetail`. AC28 (`criterion-mention` on the saved detail) misses (0 of 6 `text-with-number`), so it
+does not close. By the end states above, `finding-id` at `pwdetail` and `criterion-mention` on the `pwsaved` saved
+detail are treated misses: the slice stops for the operator, nothing is reworded and no run beyond the registered
+re-run to six and the guard controls was made.
+
+**Guard readings.** `reviewer-name`, `stamp-form` and `override-mapping` held at every site they are graded at, and
+`override-mapping` read `mapped` on all six treated2 `pwsaved` captures; none read `misapplied`. `severity-name` held at
+`pwopen` (3 of 3 `plain`). Two guard misses:
+
+- `criterion-mention` at `pwopen`: treated2 `bare` in 3 of 3; the same-day paired control (baseline arm, six runs) read
+  `bare` in 6 of 6, so the miss is residual.
+- `severity-name` at `pwdetail`: treated2 `plain` 4, `none` 2 (`-1`, `-3`), which is 2 of 6 off the winning word; the
+  same-day paired control read `none` in 1 of 6 (`pw-control2-pwdetail-5`), fewer than 2 of 6. By the registered guard
+  rule that is a regression, and the slice stops for the operator; nothing is reverted here. The registered rule does
+  not say whether `none` (no severity word in the reader-facing text) is a miss. This reading counts every
+  non-`plain` verdict as one, as "5 of 6 `plain`" was read as "held" for this guard in the first treated batch. No
+  treated2 or control2 `pwdetail` capture reads `internal` for `severity-name`; the `none` captures print no severity
+  name at all. Whether that is a regression of the guard's intent is the operator's reading, not made here.
+
+**Hand check.** Each verdict word that carries a miss was read against the registered grammar rather than the script.
+`pwdetail` `finding-id` `bare`: `-2` holds `reply "answer C2" and say so` in prose and `-6` holds `with C1 moved down a
+level` in prose; the other four print the id in round brackets after the finding's text, and the closing reply line
+(`Reply go, or dispute C2: ...`) is the unchanged reply form. `pwdetail` `severity-name` `none` (`-1`, `-3`): no
+severity name, internal or plain, appears in the reader-facing text. `pwsaved` saved-detail `criterion-mention`: `bare`
+in `-1` ("AC3 would state", "AC1 allows", "which AC2 answers") and `-5` ("the confirmation email in AC1", "this touches
+AC4"), `nickname` in `-2`, `-3`, `-4` and `-6` (every citation follows a nickname such as "the
+confirmation email in the borrowing criterion (AC1)"); no capture reads `text-with-number` (every citation the criterion's own text, then its number); `-1` quotes
+criterion text with the number after in several places and still holds the bare mentions above, and the grammar takes
+the worst mention. No verdict disagreed with the grammar read by hand. Why `pwdetail` `finding-id` and the
+saved-detail criterion citations did not reach a clean majority is a hypothesis, not an ablation. The treated2
+`pwsaved` echo moved from 1 of 6 `bracketed` to 6 of 6, and `pwdetail` `outcome-word` from 2 of 6 `plain` to 6 of 6;
+that these follow the second edit's added clauses is likewise a hypothesis, since no arm ablates a clause.
+
+**Grammar observations.** None to correct. Two for the operator: the guard rule does not say whether `none` counts as a
+miss (above), and `criterion-mention` takes the worst mention in a capture, so one bare `AC<n>` among otherwise
+numbered-after citations reads `bare` (as in `pw-treated2-pwsaved-5`); no grammar was changed. The plural level names
+("Criticals", "Importants", "Minors") do not appear in the reader-facing text of any treated2 or control2 capture.
+
+**By hand, `pwsaved`.** The marker bullet ("Retained review evidence") is printed in the saved block of all six
+treated2 captures (one occurrence each, line 16 to 31 of the capture). The credential-pattern scrub of
+`_shared/security.md` ("Credential-pattern scrub": key-like tokens, vendor fixed-prefix tokens, bearer and api-key
+shapes, high-entropy literals, PEM headers), applied to the saved block of each of the six captures as a script over the
+block's text: 0 matches in all six. `scripts/capture_scan.py` over the 81 treated2 and control2 files (27 `.txt`, 27
+`.stderr.txt`, 27 `.exit`): 0 known-safe matches, 0 credential findings, exit 0; a search of the 81 for the operator's
+home path and username found 0 files. All 27 stderr files are empty.

@@ -1,0 +1,43 @@
+**Gauntlet: telescope loan desk, round 1.** maturity: production (basis: stamp). No stand-downs. Fact check: 2 of 4 claims confirmed, 1 refuted, 1 could not be checked.
+
+**What the passes found.** One finding goes to the spec's own reason for existing. The Problem says nobody can tell who had a scope when its mirror was scratched. But the only criterion about condition says the loan officer records a telescope as back with a condition note on the return date, and it shows as free from that day (AC4). That ties "free" to the calendar date, not to a check. So a scope a member drops off when no officer is there goes back into use without a note. The other findings group into four themes:
+- The Objectives promise a member can "see where the loan stands", but no criterion delivers that.
+- Waiting-list offers have no recorded lifecycle.
+- It is undecided who can read condition notes.
+- Some loan rules have no fixed answer: how many loans a member can hold at once, and which clock the cancellation window runs on.
+
+**Whether it holds.** The failure-cases finding on AC4 holds. It is not a guess about user behaviour: the Problem itself names this failure, and the criterion as written leaves it open. Two other "needs your decision" findings didn't survive checking:
+- The right-problem pass proposed lending by the night rather than by start and return date. That rests on how often members want a single night, which the pass admits isn't known. The Problem points the other way: two members asking for the same scope on the same weekend. I moved it to worth-fixing.
+- The ease-of-use pass said a member is never told the finder cap goes back in the case. The two-day reminder listing the telescope, its eyepieces and the finder cap (AC5) already tells them. What's left is that they hear it late, or not at all if the reminder bounces. That is worth fixing, not a decision.
+
+Where findings agree, they come from passes that could not see each other:
+- The self-consistency and ease-of-use passes both caught the undelivered "see where the loan stands".
+- The buildability and self-consistency passes both caught the waiting-list gap.
+- The security and left-undecided passes both raised who sees the history, and they disagree on the answer, so you choose. The disagreement is the security pass saying members should see only that a scope came back, against "every member".
+
+Not carried forward:
+- Buildability's "stored or derived history" and "name the mail provider" are questions for planning, not flaws in the spec.
+- The fact check's "seven telescopes, not six" cites no source and nothing in the spec depends on the number. It's worth correcting, but I couldn't confirm it.
+
+**What to do.** Rewrite the condition criterion (AC4) so a telescope is free only once its condition note is recorded. That is one edit, already drafted, and with it the spec advances. The worth-fixing items don't block. The two most worth a pass before planning are the convergent ones: either add a way for a member to see a loan's state or drop that phrase from the Objectives, and record waiting-list offers and how they close.
+
+**Recommended outcome:** apply C1's edit, then the spec advances to `ready` this round.
+
+| id | finding | proposed disposition | proposed edit |
+|---|---|---|---|
+| C1 | *A scope returned when no officer is there shows as free with no condition note* | `resolved` | *rewrite AC4 so a scope shows "returned, unchecked" until its condition note is recorded* |
+
+Drafted replacement for AC4, applied word for word on acceptance:
+
+> **AC4.** When a telescope comes back, the loan officer records it as back with a note of its condition. Until that note is recorded, the club's loan calendar shows the telescope as returned and unchecked, and it shows as free only from the day the note is recorded.
+
+**Would cause trouble later, worth fixing, your call: 10.**
+- **Undelivered or unrecorded promises:** seeing a loan's state; waiting-list offers.
+- **Access:** who can read condition notes; whether a cancel is tied to the borrower.
+- **Loan rules not pinned:** one loan per member per date; the 48-hour clock.
+- **Notices:** a bounced reminder goes unseen; the case contents are told only at the reminder.
+- **Framing (right-problem):** lending by the night; stating "no double loans" as the goal.
+
+**Rough edges, nothing to decide: 3.** "Six telescopes" may be seven; "loan calendar" and "loan history" are used without saying how they relate; the confirmation email reveals which dates are taken.
+
+Reply **"go"** to accept. To override C1, name it with `disputed`, `accepted-as-risk` or `answered`, plus your reason in your own words. You can also ask to see the detail on any finding.

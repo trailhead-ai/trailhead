@@ -1,0 +1,35 @@
+**Would build the wrong thing, needs your decision**
+
+**C1: members aren't told what goes back in the case until the loan is almost over** *(raised by: ease of use; failure cases made a related point)*
+
+Should the first email tell a member what must come back in the case? I recommend it should, because a lost finder cap gets charged to a member who was never told it had to come back.
+
+Worst case: a member takes the scope out for a fortnight and loses the finder cap at a viewing site in the first week. The spec's first message is the confirmation email that "states the loan and its return date" (AC1). The list of what goes back (the telescope, its eyepieces and the finder cap) only arrives in the reminder sent "two days before the return date" (AC5). By then the cap is already gone. If the reminder went to a mistyped address, the member never sees the list at all. The failure-cases reviewer raised that bounce separately. Either way, the member hands back an incomplete case and is asked to replace a part nobody told them to look after.
+
+I checked the claim myself. The list does reach the member, but only at the end of the loan (AC5), never at the start. That's why the finding stands.
+
+Fix: `", and lists what goes back in the case: the telescope, its eyepieces, and the finder cap"` at the end of the confirmation email in the borrowing criterion (AC1), so the member has the list from the first day. The reminder (AC5) stays as it is.
+
+---
+
+**C2: a loan ties up a whole telescope for every date asked** *(raised by: right problem)*
+
+Should members book telescopes by the night instead of by start and return dates? I recommend it, but only if most loans really are for a night or two. Get this wrong and the club's best scope sits unused while members wait weeks for it.
+
+Worst case: a member wants the largest scope for one clear Saturday night and books it Friday to Monday. The spec ties every loan to a start date and a return date (AC1), and refuses any second request "for the same telescope and dates" (AC2). So the scope is held for the whole weekend. It's used for one night, and the next member is offered a start date weeks away. That's the same clash between two members that the Problem section describes, now enforced by the system instead of the ledger.
+
+Fix: members would book the nights they want and add more nights later, and a refused request would be offered the next free night instead of the next free start date. This rewrites the three Borrowing criteria: the borrowing request (AC1), the one-member-at-a-time rule (AC2) and the 48-hour cancellation (AC3). The return date in the two care criteria (AC4, AC5) would become the morning after the last booked night. Caveat: the reviewer couldn't tell from the spec how often a loan is for a single night, and you can. If members mostly borrow for a week at a time, tell me, and this finding gets re-judged with that in mind.
+
+---
+
+**C3: a scope left in the cupboard shows as free with no condition note** *(raised by: failure cases)*
+
+Should a returned telescope stay off the calendar until someone has checked it? I recommend it should. Without that, the spec doesn't fix the problem it was written for: nobody can say who had a scope when its mirror got scratched.
+
+Worst case: a member drops the scope back in the cupboard on a day the loan officer isn't there. The spec has the loan officer record the telescope as back "with a note of its condition" on the return date, and show it as free "from that day" (AC4). Nothing covers a return the officer doesn't see in person, so the scope shows as free with no condition note. The next member finds the scratched mirror. The loan history (AC6) has no note to say whether the scratch came before or after the previous loan, so nobody can say who had it.
+
+Fix: a telescope handed back without a check would show on the loan calendar as "returned, not yet checked" instead of free, and would only become free once the loan officer records its condition note. This changes the return criterion (AC4), and the history (AC6) would then always have a note for each return.
+
+---
+
+Reply "go" to accept as recommended. To override any of these, name it by its id (C1, C2 or C3) and say why.

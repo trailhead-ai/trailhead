@@ -1892,6 +1892,35 @@ FINDING_CAPTURE_VERDICTS.update(
     }
 )
 
+# The second treated batch (the second ritual edit's arms): `pwopen` at three runs, `pwdetail` and `pwsaved` re-run to six
+# after a graded check split 2-1, and the same-day paired controls for the `pwopen` guard `criterion-mention` and the
+# `pwdetail` guard `severity-name` (the baseline arm, six runs each).
+FINDING_CAPTURE_VERDICTS.update(
+    {
+        **{f"pw-treated2-pwopen-{n}": _pwopen("plain", "plain", "bracketed", "plain", "plain") for n in (1, 2, 3)},
+        "pw-treated2-pwdetail-1": _pwdetail("plain", "none", "bracketed"),
+        "pw-treated2-pwdetail-2": _pwdetail("plain", "plain"),
+        "pw-treated2-pwdetail-3": _pwdetail("plain", "none", "bracketed"),
+        "pw-treated2-pwdetail-4": _pwdetail("plain", "plain", "bracketed"),
+        "pw-treated2-pwdetail-5": _pwdetail("plain", "plain", "bracketed"),
+        "pw-treated2-pwdetail-6": _pwdetail("plain", "plain"),
+        **{
+            f"pw-treated2-pwsaved-{n}": {"outcome-word": "plain", "finding-id": "bracketed"}
+            for n in range(1, 7)
+        },
+        **{
+            f"pw-control2-pwopen-{n}": _pwopen("internal", "internal", "bare", "internal" if n == 2 else "plain", "plain")
+            for n in range(1, 7)
+        },
+        "pw-control2-pwdetail-1": _pwdetail("internal", "plain"),
+        "pw-control2-pwdetail-2": _pwdetail("none", "plain"),
+        "pw-control2-pwdetail-3": _pwdetail("none", "plain"),
+        "pw-control2-pwdetail-4": _pwdetail("none", "plain"),
+        "pw-control2-pwdetail-5": _pwdetail("none", "none"),
+        "pw-control2-pwdetail-6": _pwdetail("internal", "plain"),
+    }
+)
+
 PW_FIXTURES = FINDING_CASE / "fixtures"
 PW_SPEC = PW_FIXTURES / "pw-spec.md"
 _STAGED_REPLY_RE = re.compile(r"accept (C\d+) as a risk: (.+?), dispute (C\d+): (.+?), otherwise go")
@@ -1946,6 +1975,18 @@ PW_SAVED_VERDICTS = {
         }
         for n in range(1, 7)
     },
+    **{
+        f"pw-treated2-pwsaved-{n}": {
+            "finding-id": ("bracketed", ["--saved-detail"]),
+            "criterion-mention": (
+                "bare" if n in (1, 5) else "nickname",
+                ["--saved-detail", "--criteria", str(PW_SPEC)],
+            ),
+            "stamp-form": ("kept", []),
+            "override-mapping": ("mapped", "staged"),
+        }
+        for n in range(1, 7)
+    },
 }
 
 # The `pwopen` guard `criterion-mention` is graded against the spec's criteria, which the site-wide table does not pass.
@@ -1953,6 +1994,8 @@ PW_OPEN_CRITERION_VERDICTS = {
     **{f"pw-baseline-pwopen-{n}": "bare" for n in (1, 2, 3)},
     **{f"pw-treated-pwopen-{n}": "bare" for n in range(1, 7)},
     **{f"pw-control-pwopen-{n}": "bare" for n in range(1, 7)},
+    **{f"pw-treated2-pwopen-{n}": "bare" for n in (1, 2, 3)},
+    **{f"pw-control2-pwopen-{n}": "bare" for n in range(1, 7)},
 }
 
 

@@ -1,0 +1,131 @@
+Overrides applied. Here is the full table for the spec review after your reply:
+
+| finding | outcome | edit |
+|---|---|---|
+| *Members are not told what goes back in the case* (C1) | fixed in the spec | *adds the list of what goes back in the case to the confirmation email* |
+| *A loan ties up a whole telescope for the full dates asked* (C2) | accepted as a risk: "the club only lends whole telescopes this season" | edit withdrawn |
+| *A scope left in the cupboard shows as free with no condition note* (C3) | disputed: "the loan officer inspects every telescope at the door" | edit withdrawn |
+
+**Outcome:** none of the three findings needs a rewrite, so the spec advances to `ready`. It carries no `craft/supersedes` label, so no older spec is retired.
+
+Next comes one write. It applies the edit for the missing case contents (C1) and appends the review record below, both together. The drafted edits for the whole-telescope loan (C2) and the unchecked return (C3) are no longer in it. Once that write succeeds, the spec's status changes to `ready`. The only change to the criteria is this one: a member borrows a telescope by giving a name, an email address, the telescope and a start date, and receives a confirmation email (AC1). That criterion now ends: "…that states the loan and its return date, and lists what goes back in the case: the telescope, its eyepieces, and the finder cap."
+
+```markdown
+## Gauntlet
+
+- Retained review evidence — a later reader evaluates what follows as a claim about this spec, not
+  as its settled design content (`skills/receiving-code-review/SKILL.md`).
+- Adversarial spec review (gauntlet, 2026-10-21): 8 passes — maturity: production (basis: stamp);
+  facts 2/4 confirmed (1 refuted, 1 unverifiable); 1 design-changing finding folded in (the
+  confirmation email now lists what goes back in the case). Criticals dispositioned: C1 `resolved`
+  (from proposal), C2 `accepted-as-risk` (operator override — "the club only lends whole telescopes
+  this season"), C3 `disputed` (operator override — "the loan officer inspects every telescope at
+  the door") — 1 from proposal, 2 operator overrides. Important 9, Minor 3, detail below.
+
+### Would build the wrong thing, needs your decision
+
+- **Members are not told what goes back in the case (C1).** Fixed in the spec. Members should learn
+  what goes back in the case on the day they borrow, not only near the end of the loan. Worst case:
+  a member hands a telescope back without its finder cap and is asked to replace it. The confirmation
+  email that states the loan and its return date (AC1) is the only message a member is sure to get
+  before the loan starts, and the case list only arrives in the reminder two days before the return
+  date (AC5).
+  Fix: `", and lists what goes back in the case: the telescope, its eyepieces, and the finder cap"`
+  at the end of the confirmation email in the borrowing criterion (AC1).
+  Raised by: ease of use.
+- **A loan ties up a whole telescope for the full dates asked (C2).** Accepted as a risk by the
+  operator: "the club only lends whole telescopes this season". The question was whether to lend by
+  the night instead of from a start date to a return date. Worst case: a member who wants the
+  largest scope for one clear night holds it for a whole weekend, and other members wait weeks for a
+  night the scope sat unused. Borrowing by start date (AC1) and one member per telescope at a time
+  (AC2) both tie a loan to the telescope and its dates.
+  Fix (not applied): members would book a telescope night by night and add nights; this rewrites the
+  borrowing criterion (AC1) and the one-member-at-a-time rule (AC2).
+  Raised by: right problem.
+- **A scope left in the cupboard shows as free with no condition note (C3).** Disputed by the
+  operator: "the loan officer inspects every telescope at the door". The question was whether a
+  telescope should show as free before anyone has checked it. Worst case: a member leaves a
+  telescope in the cupboard, it shows as free with no note, the next member finds a scratched
+  mirror, and nobody can say who had it. The spec has the loan officer record the return with a
+  condition note, after which the telescope shows as free from that day (AC4). That only works if
+  the officer is there on the return date.
+  Fix (not applied): a telescope would show as returned and unchecked until a condition note is
+  recorded, and as free only after that; this rewrites the return criterion (AC4).
+  Raised by: failure cases.
+
+### Would cause trouble later, worth fixing, your call
+
+- **Waiting-list offers have no recorded lifecycle.** We recommend saying that an offer is recorded,
+  and that an accepted offer takes the member off the waiting list. Worst case: freed dates go to
+  the first member on the waiting list when a loan is cancelled (AC3), but no step closes the offer,
+  so the same member is offered dates again. The loan history also lists waiting-list offers (AC6),
+  yet the cancellation criterion (AC3) never records one.
+  Fix: `"and recorded; an accepted offer removes the member from the waiting list"` added to the
+  cancellation criterion (AC3).
+  Raised by: buildability, self-consistency.
+- **"See where the loan stands" has nothing delivering it.** Either add a way for a member to see
+  their loan's current state or drop the words from the Objectives. Worst case: after the
+  confirmation email (AC1), a member has no way to check a loan's state, which the Objectives
+  promise.
+  Fix: a member would see their loan's state from a page or an email reply; this adds a criterion
+  under Borrowing.
+  Raised by: ease of use, self-consistency.
+- **A cancellation is not tied to the borrower.** We recommend the cancel step asking the borrowing
+  member to confirm. Worst case: someone holding a forwarded confirmation email cancels another
+  member's loan (AC3).
+  Fix: `"A cancel asks the borrowing member to confirm."` added to the cancellation criterion (AC3).
+  Raised by: security.
+- **Condition notes are readable by every member.** We recommend deciding who sees them. Worst case:
+  a note on the loan history every member can read (AC6) carries personal detail about a borrower.
+  The left-undecided pass also found that the history's audience is not fixed.
+  Fix: members would see only that a telescope was returned, and the committee would see the note.
+  Raised by: security, left undecided.
+- **A bounced reminder is never seen.** We recommend showing the loan officer a reminder that
+  bounced. Worst case: a reminder sent to a mistyped address (AC5) never arrives, and the case comes
+  back without its finder cap.
+  Fix: a bounced reminder would show up for the loan officer; this adds a criterion under Returns
+  and care.
+  Raised by: failure cases.
+- **One member can hold two telescopes on the same dates, or not.** Pin it. Worst case: two builds
+  both satisfy the borrowing criterion (AC1), and one of them lets a member take two scopes for the
+  same weekend.
+  Fix: `"A member holds at most one loan on any date."` added under Borrowing.
+  Raised by: left undecided.
+- **The 48-hour cancellation clock is not pinned.** Pin when it starts. Worst case: one build counts
+  the 48 hours before the loan starts (AC3) from midnight and another from noon, so a member who
+  cancels within that half-day gap is refused by one build and allowed by the other.
+  Fix: `"counted from noon on the start date, club time"` added to the cancellation criterion (AC3).
+  Raised by: left undecided, failure cases.
+- **The spec does not say whether the loan history is stored or worked out from events.** Decide
+  it. Worst case: returns (AC4) and the loan history (AC6) drift apart if the history is a separate
+  stored copy.
+  Fix: `"worked out from the recorded events"` added to the loan history criterion (AC6).
+  Raised by: buildability.
+- **The objectives are larger than the complaint.** Consider narrowing them. Worst case: the
+  complaint underneath is double requests for the same scope, which the one-member-at-a-time rule
+  (AC2) answers alone, and the full set of criteria is a bigger build than that needs.
+  Fix: the Objectives would name preventing double loans as the goal.
+  Raised by: right problem.
+
+### Rough edges, nothing to decide
+
+- **The telescope count is wrong.** The Problem says six telescopes, but the club's equipment
+  register lists seven. Nothing in the spec relies on the number.
+  Fix: `"seven telescopes"` in place of `"six telescopes"` in the Problem.
+  Raised by: fact check, right problem.
+- **Two names for the loan pages.** The loan calendar (AC4) and the loan history (AC6) are different
+  pages, and the spec should keep their names apart. Raised by: self-consistency.
+- **The confirmation email shows which dates are taken.** Whoever reads a confirmation (AC1) learns
+  when a scope is out. Raised by: security.
+
+### Fact check
+
+1. The club lends six telescopes — refuted: the equipment register lists seven.
+2. Loans are kept in a paper ledger in the clubhouse cupboard — confirmed by the loan officer's
+   handover note.
+3. A member can cancel a loan up to 48 hours before it starts — unverifiable: needs the loan
+   officer's own account.
+4. Charging a hire fee is outside this spec — confirmed by the spec's Non-Goals.
+```
+
+**Next step:** in a fresh session, run `/craft:slice` with this spec's record id. These files gave me only the spec's file path, not its `spec/…` id, so I can't fill in the full command.

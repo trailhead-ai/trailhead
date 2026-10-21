@@ -1,0 +1,44 @@
+**C1 — Members aren't told what goes back in the case until the loan is nearly over** · *would build the wrong thing, needs your decision* · raised by: ease of use
+
+Should the first email a member gets also say what has to go back in the case? I recommend yes. Otherwise a member can lose the finder cap before anyone has told them it's part of the loan.
+
+The spec does tell members, but late. The confirmation email that states the loan and its return date (AC1) is the only message at the start. The list comes in the reminder two days before the return date, naming the telescope, its eyepieces and the finder cap (AC5). If a member loses the cap on the first night, they find out from that reminder that it mattered. Then they hand back an incomplete case and are asked to replace the cap.
+
+Fix: `, and lists what goes back in the case: the telescope, its eyepieces, and the finder cap` added to the end of the confirmation email sentence in that same borrowing rule (AC1). The member then has the list from day one. The reminder (AC5) stays as written.
+
+Proposed disposition: `resolved`.
+
+---
+
+**C2 — A loan ties up a whole telescope for a fixed block of dates** · *would build the wrong thing, needs your decision* · raised by: right problem
+
+Should a loan be booked by the night rather than as a block of dates? I recommend yes, unless you know most loans really are for a weekend. As written, one member can hold the club's largest scope for days to use it on one evening.
+
+To borrow, a member gives only a start date and is told the return date (AC1). The spec never lets them say how long they need the scope, and never says who decides the loan length. A telescope is on loan to one member at a time, and a second request for the same dates is refused with the next free start date offered instead (AC2). So a member who wants one clear night holds the biggest scope for the whole loan. It sits unused on the cloudy nights, and the next member is offered a later start date for a scope nobody is using.
+
+Fix: members would book the nights they want and add more if the sky stays clear, and a scope would be free again the morning after its last booked night. This rewrites:
+- what a member gives when borrowing (AC1)
+- one member at a time, with the next free date offered (AC2)
+- the rule that a member can cancel up to 48 hours before the loan starts, freeing the dates for the first member on the waiting list (AC3)
+- the officer recording the telescope as back on the return date, with a condition note, after which it shows as free (AC4)
+- the timing of the reminder before return (AC5)
+
+The Objectives are untouched. One caveat: the reviewer was only moderately confident, because the spec doesn't say how often a loan is for a single night. You probably know. If most loans really do run a weekend, tell me and I'll re-weigh this one.
+
+Proposed disposition: `resolved`.
+
+---
+
+**C3 — A scope left in the cupboard shows as free with no condition note** · *would build the wrong thing, needs your decision* · raised by: failure cases
+
+Should a telescope show as free only once someone has recorded what state it came back in? I recommend yes. That note is the spec's whole answer to the scratched-mirror problem it opens with.
+
+The spec says that on the return date the loan officer records the telescope as back, with a note of its condition, and that it shows as free on the club's loan calendar from that day (AC4). The calendar changes on the date, not on the note. Say a member drops the scope in the cupboard on an evening the officer isn't there. It shows as free with no note, and the next member finds the scratched mirror. The loan history is meant to list every loan, cancellation, return and offer with its date and condition note (AC6), but it can't say who had the scope. That is exactly the failure the Problem section describes.
+
+Fix: `once its condition note is recorded, and as returned and unchecked until then` replacing "from that day" at the end of that same return rule (AC4).
+
+Proposed disposition: `resolved`.
+
+---
+
+Over to you: reply "go" to accept all three as proposed. To override any of them, name it (C1–C3) and give your reason in the same reply.
