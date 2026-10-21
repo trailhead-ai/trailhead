@@ -365,6 +365,29 @@ def test_a_revision_moved_before_the_run_refuses_child_changed_and_writes_nothin
     assert vault_snapshot(env, vault) == before
 
 
+def test_a_status_moved_between_the_gather_and_the_baseline_read_refuses_child_changed(
+    lore_env, spec, pile, tmp_path, capsys
+):
+    env, vault = lore_env
+    victim = next(n for n in pile if sidecar_of(env, vault, n)["status"] == "open")
+    doc = file_for(env, vault, [victim])
+    shows = []
+
+    def hook(argv, stdin, runner):
+        if argv[:2] == ["record", "show"] and argv[-1] == f"task/{victim}":
+            shows.append(argv)
+            if len(shows) == 2:  # the gather read the member once; this second read is the baseline
+                set_status(env, vault, victim, "in-progress")
+
+    runner = EnvRunner(env, hook=hook)
+    code, out, err = run_dispose(runner, spec, tmp_path, capsys, doc)
+    assert (code, reason_of(err), subject(err)) == (1, "child-changed", [victim])
+    assert out is None
+    assert runner.writes() == []
+    assert sidecar_of(env, vault, victim)["status"] == "in-progress"
+    assert "## Dropped" not in body_of(env, vault, victim)
+
+
 def test_a_blocked_drop_that_became_open_refuses_child_changed(lore_env, spec, pile, tmp_path, capsys):
     env, vault = lore_env
     blocked = next(n for n in pile if sidecar_of(env, vault, n)["status"] == "blocked")
