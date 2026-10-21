@@ -2432,3 +2432,43 @@ def test_every_plain_words_verdict_exits_with_its_class(reports):
     assert run_grader(["--check", "stamp-form"], b"x").returncode == 1
     assert run_grader(["--check", "override-mapping", *OVERRIDES], saved("").encode()).returncode == 0
     assert run_grader(["--check", "override-mapping", *OVERRIDES], b"x").returncode == 1
+
+
+def test_a_bracketed_gauntlet_on_a_line_with_no_spec_review_is_internal(reports):
+    text = "The spec review found three problems.\n\nRun it again (gauntlet) next week."
+    assert review_name(text, reports) == "internal"
+
+
+def test_a_bracketed_gauntlet_beside_a_spec_review_on_a_later_line_is_plain(reports):
+    text = "Intro line.\n\nThe spec review (gauntlet) found three problems."
+    assert review_name(text, reports) == "plain"
+
+
+def test_a_gauntlet_inside_a_path_is_a_naming_but_a_command_token_is_not(reports):
+    path = "See skills/gauntlet/SKILL.md. The spec review (gauntlet) is done."
+    assert review_name(path, reports) == "internal"
+    for token in ("/craft:gauntlet", "craft:gauntlet"):
+        assert review_name(f"Ran {token}. The spec review (gauntlet) is done.", reports) == "plain"
+
+
+def test_an_indented_sub_bullet_after_the_stamp_bullet_opens_its_own_run():
+    sub_bullet = "  - C3 was the hard one.\n"
+    assert saved_id(sub_bullet) == "bare"
+    assert stamp_form(saved(sub_bullet)) == "kept"
+
+
+def test_a_saved_block_indented_under_a_list_item_still_has_its_stamp_and_detail():
+    indented = "".join(f"  {line}\n" for line in saved("- The loan runs too long (C1).\n").splitlines())
+    assert stamp_form(indented) == "kept"
+    assert grade("finding-id", indented, criteria=None, extra=("--saved-detail",)) == "bracketed"
+
+
+@pytest.mark.parametrize("reason", ["the max_loan rule", "the *whole* scope", "snake_case_name"])
+def test_a_reason_carrying_markup_characters_maps_when_the_stamp_records_it(reason):
+    stamp = SAVED_STAMP.replace("the club lends whole scopes", reason)
+    overrides = ("--override", f"C2=accepted-as-risk:{reason}", "--override", OVERRIDES[3])
+    assert override_mapping(saved("", stamp), overrides) == "mapped"
+
+
+def test_an_answered_override_could_not_grade_because_the_stamp_records_the_final_disposition():
+    could_not_grade(["--check", "override-mapping", "--override", "C2=answered:why"], b"x\n", "bad-arguments")

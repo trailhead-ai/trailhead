@@ -103,8 +103,9 @@ Exit codes:
 
 Stdin, each `--criteria` file and each `--reports` file are capped at MAX_INPUT_BYTES: a
 file over the cap is never read past it and could not be graded (`criteria-too-large`,
-`reports-too-large`). Every pattern is linear and none nests one
-repeat inside another; the scans that need a window walk the line by index.
+`reports-too-large`). Every pattern is linear: the one repeat that sits
+inside another (the finding-id list) consumes a `C\d+` on every iteration, so it cannot backtrack catastrophically;
+the scans that need a window walk the line by index.
 A range wider than MAX_RANGE_SPAN is not expanded: it can name no criterion the
 criteria file defines and counts as no earlier mention.
 """
@@ -208,7 +209,7 @@ _PLAIN_REVIEWER_RE = re.compile(
 _INTERNAL_CODE_REVIEW_RE = re.compile(rf"{_BEFORE}code[ -]reviewers?{_AFTER}", re.IGNORECASE)
 _PLAIN_CODE_REVIEW_RE = re.compile(rf"{_BEFORE}code[ -]review{_AFTER}", re.IGNORECASE)
 _SPEC_REVIEW_RE = re.compile(rf"{_BEFORE}spec review{_AFTER}", re.IGNORECASE)
-_GAUNTLET_RE = re.compile(rf"(?<![/:]){_BEFORE}gauntlet{_AFTER}", re.IGNORECASE)
+_GAUNTLET_RE = re.compile(rf"(?<!craft:){_BEFORE}gauntlet{_AFTER}", re.IGNORECASE)
 _RITUAL_TERMS = "resolved|revise|accepted-as-risk|disputed|answered"
 _BACKTICKED_TERM_RE = re.compile(rf"`(?:{_RITUAL_TERMS})(?![A-Za-z-])[^`]*`")
 _HYPHENATED_TERM_RE = re.compile(rf"{_BEFORE}accepted-as-risk{_AFTER}")
@@ -224,9 +225,9 @@ _REPLY_FORM_RES = (
 _STAMP_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9])C(\d+) `([a-z-]+)`")
 _STAMP_TERM_RE = re.compile(rf" `(?:{_RITUAL_TERMS})`")
 _OVERRIDE_TERMS = ("accepted-as-risk", "disputed", "answered")
-_OVERRIDE_ARG_RE = re.compile(rf"C(\d+)=({'|'.join(_OVERRIDE_TERMS)}):(.*\S.*)")
+_OVERRIDE_ARG_RE = re.compile(r"C(\d+)=(accepted-as-risk|disputed):(.*\S.*)")
 _SAVED_HEADING = "## Gauntlet"
-_BULLET_RE = re.compile(r"[-*+] ")
+_BULLET_RE = re.compile(r"[ \t]*[-*+] ")
 _FINDING_TAGS = ("[Critical]", "[Important]", "[Minor]")
 _QUOTE_MIN_CHARS = 30
 _LABELS = ("*Critical:*", "*Important:*", "*Minor:*")
@@ -673,13 +674,14 @@ def grade_review_name(text: str, quotations: dict[str, list[str]]) -> str:
     gauntlets: list[bool] = []
     first: str | None = None
     for line, _ in _reader_facing(text, quotations):
-        found = [(m.start(), "spec review") for m in _SPEC_REVIEW_RE.finditer(line)]
+        spec_reviews = [m.start() for m in _SPEC_REVIEW_RE.finditer(line)]
+        found = [(position, "spec review") for position in spec_reviews]
         found += [(m.start(), "gauntlet") for m in _GAUNTLET_RE.finditer(line)]
         for position, name in sorted(found):
             if first is None:
                 first = name
             if name == "gauntlet":
-                gauntlets.append(_in_round_brackets(line, position))
+                gauntlets.append(bool(spec_reviews) and _in_round_brackets(line, position))
     if first is None:
         return "none"
     return "plain" if first == "spec review" and gauntlets == [True] else "internal"
@@ -748,7 +750,7 @@ def _saved_parts(text: str) -> tuple[list[str] | None, str]:
         if not stripped:
             current = "detail"
         elif opens_own:
-            label = _MARKUP_RE.sub("", line[2:] if _BULLET_RE.match(line) else line).lstrip().lower()
+            label = _MARKUP_RE.sub("", line.lstrip()[2:] if _BULLET_RE.match(line) else line).lstrip().lower()
             if label.startswith("retained review evidence"):
                 current = "marker"
             elif label.startswith("adversarial spec review"):
@@ -787,7 +789,7 @@ def grade_stamp_form(text: str) -> str:
 
 
 def _fold_reason(text: str) -> str:
-    return _WS_RE.sub(" ", text).strip().casefold()
+    return _WS_RE.sub(" ", _EMPHASIS_RE.sub("", text)).strip().casefold()
 
 
 def grade_override_mapping(text: str, staged: list[tuple[str, str, str]]) -> str:
