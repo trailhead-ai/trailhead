@@ -43,7 +43,7 @@ so invoke it as bare `portage <subcommand>`.
 - `slug` — the worktree slug within the group (e.g. `ai-tooling`)
 - `manifest_path` — absolute path to the camp central manifest JSON for this worktree
 - `pr_body_file` — optional. Absolute path of a file already holding the current body of the PR being
-  updated (single-repo `update` only), for a shell that cannot redirect output into a file. When absent,
+  created or updated (single-repo only, either mode), for a shell that cannot redirect output into a file. When absent,
   save the body yourself.
 
 The camp manifest (schema v1) lives at `manifest_path` and carries:
@@ -90,7 +90,10 @@ tool result.
    ```
 
    One call can take up to 540 s, so give the Bash tool `timeout: 600000` and wait for it to
-   return. Exit 0 means a result was recorded, whatever it says; `verdict` reads it. **Forbidden:**
+   return. Exit 0 means a result was recorded, whatever it says; `verdict` reads it. A non-zero exit
+   means no result was recorded for that case: go on to the next case, and still run `verdict` at the
+   end, which reports the case as not run and stops the push if any case in the repo failed.
+   **Forbidden:**
    `nohup`, a trailing `&`, a runner script, `run_in_background`, or any other way of leaving a
    case running after the call returns. A backgrounded run is lost when this subagent returns.
    The runner binary comes from the harness; the operator can pin one with `PORTAGE_EVAL_RUNNER`
@@ -110,35 +113,28 @@ tool result.
    - **1**: **stop. Nothing is pushed in any repo**, whatever the other repos' verdicts. Do not
      re-run the case, edit the state, or look for another way past it. Go to "On a stop" below.
 
-**Any other non-zero exit from `plan`, `run` or `verdict`** (usage error, refused state, fault) is a
-gate error, not a verdict. Render that repo's section and let its push proceed:
+**A non-zero exit from `plan` or from `verdict`** (usage error, refused state, fault; a `verdict` exit
+of 1 is the stop above, not this) is a gate error, not a verdict. Render that repo's section and let its
+push proceed:
 
 ```bash
-portage eval-gate verdict --gate-error <plan|run|verdict> --state <state>
+portage eval-gate verdict --gate-error <plan|verdict> --state <state>
 ```
 
-When `plan` itself failed there is no state directory yet. Make one first with
-`mktemp -d` (mode 0700, which the gate accepts) and pass that as `--state`. The section is then written
-to `<state>/eval-gate-section.md` and goes into the PR body like any other.
+When `plan` itself failed there is no state directory yet. Make one first with `mktemp -d` (mode 0700,
+which the gate accepts), note its path as one you created, and pass it as `--state`. The section is then
+written to `<state>/eval-gate-section.md`, and Step 4 places it like any other.
 
-**The section goes into every PR body, on every push.** A skip must never be silent.
+**The section goes into every PR body, on every push**, so a skip is never silent. It is placed in Step 4,
+after the push has succeeded, so a failed preflight never leaves a section describing commits that were not
+pushed.
 
-- `mode=create`: write the body you compose to `<state>/pr-body.md`, end it with the section
-  exactly as printed (markers included), and pass it as `gh pr create --body-file <state>/pr-body.md`.
-- `mode=update`: first get the PR's current body into `<state>/pr-body.md`. Run
-  `gh pr view <n> --json body --jq .body` with its output written to that file. If the dispatch gave
-  a `pr_body_file` (see Inputs), use that file as the body instead; it exists for shells that refuse
-  redirection. Then run
-  `portage eval-gate splice --body-file <state>/pr-body.md --state <state> --out <state>/pr-body-new.md`
-  and `gh pr edit <n> --body-file <state>/pr-body-new.md`. Splice replaces an earlier section in
-  place, so a stale skip note never survives a passing push. Never rebuild a body from memory or
-  pass the section on its own: either replaces what the PR already says.
+**State directories.** Step 4 removes each state directory once its section is placed
+(`rm -rf <state>`): a `portage-eval-gate-*` directory that `plan` printed, or the `mktemp -d` directory you
+created and noted. Remove nothing else. A stop keeps the failing repo's directory, because its per-run
+grader verdicts are the evidence; remove the other repos' (and your own `mktemp -d` ones).
 
-**State directories.** After a repo's PR body is written, remove its state directory
-(`rm -rf <state>`, only a `portage-eval-gate-*` directory that `plan` printed). A stop keeps the
-failing repo's directory, because its per-run grader verdicts are the evidence; remove the others'.
-
-**On a stop**, gate no further repo, skip Steps 3-6, and report: the `**Eval gate:**`
+**On a stop**, gate no further repo, skip Steps 3-7, and report: the `**Eval gate:**`
 line says the push was stopped; name every failing case with its repo and the kept state path;
 copy the "ways forward" the verdict printed; `**PRs:**` says none were pushed or updated; leave
 `pr_pairs:` empty.
@@ -169,24 +165,40 @@ push-ready state:
   For `mode=update`: the branch already has a PR → push new commits to it.
 
 Then push and (for `create`) open the PR with `gh pr create` (title/body/links are judgment —
-compose them from the change shape).
+compose them from the change shape). Leave the eval-gate section out of a `create` body; Step 4 adds it.
 
 - **1 repo**: execute the preflight + push inline with `mode=<mode>`.
 - **2+ repos**: dispatch one `general-purpose` subagent per repo in parallel (sonnet/medium),
-  each receiving the preflight description above with `mode=<mode>` and the repo's path.
-  Collect results.
+  each receiving the preflight description above with `mode=<mode>` and the repo's path, and told
+  that it must not write the `## Eval gate` section: the updater places every section itself in
+  Step 4, once the subagents return. Collect results.
 
 Each preflight subagent either: pushes successfully (returns PR URL + PR number) or fails
-(returns specific failure). Hand each one its repo's state directory so the PR body carries the
-gate section. If any fail, report the failure and stop — don't proceed to
+(returns specific failure). If any fail, report the failure and stop — don't proceed to
 link/sidecar.
 
-### Step 4 — Link sibling PRs (multi-repo only)
+### Step 4 — Place the eval-gate sections (after the push, for create and update alike)
+
+Do this for every repo whose push succeeded, one at a time, using that repo's PR number `<n>` and
+state directory `<state>` from Step 2 (the placement is the same whether the PR was just created or
+already existed, and the updater does it itself, not the preflight subagents):
+
+1. Get the PR's current body into `<state>/pr-body.md`: run `gh pr view <n> --json body --jq .body`
+   with its output written to that file. A shell that refuses redirection cannot do that; if the
+   dispatch gave a `pr_body_file` (see Inputs), use that file as the body instead, in either mode.
+2. `portage eval-gate splice --body-file <state>/pr-body.md --state <state> --out <state>/pr-body-new.md`
+3. `gh pr edit <n> --body-file <state>/pr-body-new.md`
+
+Splice appends the section, or replaces an earlier one in place, so a stale skip note never survives a
+passing push. Never rebuild a body from memory or pass the section on its own: either replaces what the
+PR already says. Then remove the state directory as described in Step 2.
+
+### Step 5 — Link sibling PRs (multi-repo only)
 
 If 2+ PRs were created/updated, update the `## Linked Docs` section of each PR body to
 cross-link the siblings. Leave the eval-gate section (between its markers) as it is.
 
-### Step 5 — Record the prs.json sidecar
+### Step 6 — Record the prs.json sidecar
 
 Record PR associations to the portage-owned `prs.json` sidecar that lives alongside the camp manifest:
 
@@ -203,7 +215,7 @@ Each `--pr` flag is repeatable: one per PR, in `<repo>:<pr_number>:<url>:<branch
 The sidecar shape: `{schema_version:1, prs:[{repo, pr_number, url, branch}], external_tracker:null}`.
 The `external_tracker` field defaults to null.
 
-### Step 6 — Collect `pr_pairs` for the caller to launch monitor
+### Step 7 — Collect `pr_pairs` for the caller to launch monitor
 
 **Do not dispatch monitor from this subagent.** Background agents dispatched from inside a
 subagent lose their notification channel when the subagent returns — the background agent's
@@ -224,7 +236,7 @@ background agent from the top-level session.
 ## Report structure
 
 ```
-**Eval gate:** <per repo: passed | no cases mapped | did not run (<reason>) | FAILED, push stopped> — N cases, $X ceiling; persistent: <codes, or none>
+**Eval gate:** <per repo: passed | no cases mapped | base unresolved | did not run (<reason>; for case-removed-on-branch say the branch removes the case and the removal needs review) | gate error at <plan|verdict> | FAILED, push stopped> — N cases, $X ceiling; persistent: <codes from the persistent: line, or none>
 **Mode:** create | update
 **Group/Slug:** <group>/<slug>
 **Repos:** <count> (<list of names>)
