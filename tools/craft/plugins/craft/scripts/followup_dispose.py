@@ -285,9 +285,13 @@ def _dropped_note(reason: str) -> str:
 
 
 def _appending_diff(old: str, sections: list[str]) -> str:
-    """The unified diff that appends each of `sections` to `old`, a blank line before each."""
+    """The unified diff that appends each of `sections` to `old`, a blank line before each.
+    A line `difflib` emits without its newline (the last line of a body that has none) is
+    closed and followed by the `\\ No newline at end of file` marker, which `lore` reads;
+    left bare it runs into the next diff line and `lore` refuses the diff."""
     new = old.rstrip("\n") + "".join(f"\n\n{section}" for section in sections)
-    return "".join(difflib.unified_diff(old.splitlines(True), new.splitlines(True), "a", "b"))
+    diff = difflib.unified_diff(old.splitlines(True), new.splitlines(True), "a", "b")
+    return "".join(line if line.endswith("\n") else line + "\n\\ No newline at end of file\n" for line in diff)
 
 
 def _drop_landed(runner, vault: str, name: str, note: str) -> bool:
@@ -321,7 +325,7 @@ def _section(name: str, intent: str) -> str:
 
 
 def _has_section(body: str, section: str) -> bool:
-    return f"\n{section}" in f"\n{body}"
+    return f"\n{section.rstrip(chr(10))}\n" in f"\n{body}\n"
 
 
 def _note_landed(runner, vault: str, group: dict, expect_status: str) -> bool:

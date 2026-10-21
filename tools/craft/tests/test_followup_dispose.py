@@ -1271,3 +1271,82 @@ def test_preview_refuses_a_not_mergeable_member_like_the_real_run(lore_env, spec
     code, out, err = run_dispose(runner, spec, tmp_path, capsys, doc, preview=True)
     assert (code, reason_of(err), subject(err)) == (1, "not-mergeable", [one])
     assert runner.writes() == []
+
+
+# --- bodies stored without a final newline ---------------------------------------------
+
+UNTERMINATED = "**Delivers:** A widget.\n\n**Files:** `src/a.py`"
+
+
+def unterminated(env, vault, title, spec, status="open", body=UNTERMINATED):
+    name = make_followup(env, vault, title, status=status, spec=spec, body=body)
+    assert not body_of(env, vault, name).endswith("\n")
+    return name
+
+
+def test_a_follow_up_whose_body_has_no_final_newline_is_dropped_with_its_reason(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    target = unterminated(env, vault, "No newline", spec)
+    code, out, err = run_dispose(EnvRunner(env), spec, tmp_path, capsys, file_for(env, vault, [target]))
+    assert code == 0, err
+    assert out["failed"] == [] and [d["name"] for d in out["dropped"]] == [target]
+    assert sidecar_of(env, vault, target)["status"] == "dropped"
+    body = body_of(env, vault, target)
+    assert body.startswith(UNTERMINATED + "\n\n## Dropped\n\n")
+    assert dropped_section(body).strip() == f"Reason: {REASON}"
+
+
+def test_a_merge_into_a_survivor_whose_body_has_no_final_newline_lands_its_note_and_supersedes(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    survivor = unterminated(env, vault, "Survivor", spec)
+    absorbed = unterminated(env, vault, "Absorbed", spec)
+    doc = merge_doc(env, vault, [(survivor, [absorbed])])
+    code, out, err = run_dispose(EnvRunner(env), spec, tmp_path, capsys, doc)
+    assert code == 0, err
+    assert out["failed"] == []
+    body = body_of(env, vault, survivor)
+    assert body.startswith(UNTERMINATED + "\n\n")
+    assert merged_line(body, absorbed) == INTENT
+    assert sidecar_of(env, vault, absorbed)["status"] == "superseded"
+    assert sidecar_of(env, vault, survivor)["supersedes"] == [f"task/{absorbed}"]
+
+
+def test_a_survivor_whose_unterminated_last_line_is_the_note_gets_no_second_note(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    absorbed = unterminated(env, vault, "Absorbed", spec)
+    body = f"Survivor body.\n\n## Merged from task/{absorbed}\n\n{INTENT}"
+    survivor = unterminated(env, vault, "Survivor", spec, body=body)
+    runner = EnvRunner(env)
+    code, out, err = run_dispose(runner, spec, tmp_path, capsys, merge_doc(env, vault, [(survivor, [absorbed])]))
+    assert code == 0, err
+    assert not any(is_note_write(a) for a in runner.calls)
+    assert body_of(env, vault, survivor).count(f"## Merged from task/{absorbed}") == 1
+    assert sidecar_of(env, vault, absorbed)["status"] == "superseded"
+
+
+def test_a_note_rerun_after_a_supersede_failure_on_an_unterminated_survivor_keeps_one_note(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    survivor = unterminated(env, vault, "Survivor", spec)
+    absorbed = unterminated(env, vault, "Absorbed", spec)
+
+    def hook(argv, stdin, runner):
+        if is_supersede(argv, absorbed):
+            return refused(argv)
+
+    doc = merge_doc(env, vault, [(survivor, [absorbed])])
+    code, out, err = run_dispose(EnvRunner(env, hook=hook), spec, tmp_path, capsys, doc)
+    assert code == 2
+    assert [(f["name"], f["write"]) for f in out["failed"]] == [(absorbed, "supersede")]
+    again = merge_doc(env, vault, [(survivor, [absorbed])])
+    code, out, err = run_dispose(EnvRunner(env), spec, tmp_path, capsys, again)
+    assert code == 0, err
+    assert body_of(env, vault, survivor).count(f"## Merged from task/{absorbed}") == 1
+    assert sidecar_of(env, vault, absorbed)["status"] == "superseded"
