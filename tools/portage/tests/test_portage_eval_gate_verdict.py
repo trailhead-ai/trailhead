@@ -156,6 +156,32 @@ def test_no_cases_mapped_exits_0_with_single_line_section(st, capsys):
     assert len([l for l in sec.splitlines() if l.strip() and l not in (START, END, "## Eval gate")]) == 1
 
 
+def _invalid_plan(st, revision):
+    st.plan(status="mapping-invalid",
+            mapping_invalid={"file": "plugins/demo/evals/eval-gate.json", "fault": "runs must be 1..5",
+                             "revision": revision})
+
+
+def test_a_base_revision_mapping_fault_says_the_fix_must_land_on_the_base(st, capsys):
+    _invalid_plan(st, "base")
+    code, out, _ = verdict(capsys, st)
+    assert code == 1
+    assert "The base revision's mapping is invalid; the fix must land on the base (or be pushed directly), not on the branch" in out.split("<!--")[0]
+    assert ("The eval-case mapping `plugins/demo/evals/eval-gate.json` is invalid at the base revision, "
+            "so no case was selected. Fixing it on the branch will not clear this: the fix must land "
+            "on the base (or be pushed directly).") in section_of(out)
+    assert "fixed on the branch" not in out
+
+
+def test_a_head_mapping_fault_keeps_the_fix_it_on_the_branch_wording(st, capsys):
+    _invalid_plan(st, "head")
+    code, out, _ = verdict(capsys, st)
+    assert code == 1
+    assert "The mapping must be fixed on the branch; there is no override." in out.split("<!--")[0]
+    assert "The mapping must be fixed on the branch." in section_of(out)
+    assert "base" not in section_of(out).replace("eval-gate.json", "")
+
+
 def test_base_unresolved_exits_0_with_could_not_determine(st, capsys):
     st.plan(status="base-unresolved")
     code, out, _ = verdict(capsys, st)

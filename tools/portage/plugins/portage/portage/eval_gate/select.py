@@ -10,8 +10,9 @@ mode 0700) and returns ``(state, plan)``. The plan is consumed by the later
      "base": "<ref as given or resolved>" | null,
      "merge_base": "<sha>" | null,
      "changed_files": ["<repo-relative path>", ...],
-     "mapping_invalid": {"file": "<repo-relative mapping path>", "fault": "<one line>"} | null,
-                          # a fault in the base revision's mapping says so in its text
+     "mapping_invalid": {"file": "<repo-relative mapping path>", "fault": "<one line>",
+                         "revision": "base" | "head"} | null,
+                          # revision: which side's mapping is faulty; "base" faults also say so in the text
      "new_runner_grants": bool,          # any selected case runs under a branch-authored runner block
      "total_max_cost_usd": number,       # sum of the selected cases' runner.max_cost_usd
      "cases": [{"plugin_root": "<repo-relative>", "case": "<name>",
@@ -94,7 +95,9 @@ def _load_base(path: str, text: str) -> Mapping:
     try:
         return load_mapping(text, path)
     except MappingError as e:
-        raise MappingError(path, f"the base revision's mapping is invalid: {e.fault}") from None
+        err = MappingError(path, f"the base revision's mapping is invalid: {e.fault}")
+        err.revision = "base"
+        raise err from None
 
 
 def _touches(name: str, measures: tuple[str, ...], plugin: PurePosixPath, changed: list[str]) -> bool:
@@ -162,7 +165,7 @@ def plan(repo: Path, base: str | None) -> tuple[Path, dict]:
             cases = _select(repo, resolved[1], changed)
         except MappingError as e:
             result["status"] = "mapping-invalid"
-            result["mapping_invalid"] = {"file": e.file, "fault": e.fault}
+            result["mapping_invalid"] = {"file": e.file, "fault": e.fault, "revision": e.revision}
         else:
             if cases:
                 result["status"] = "cases-selected"

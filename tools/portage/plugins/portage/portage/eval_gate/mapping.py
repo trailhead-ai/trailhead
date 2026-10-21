@@ -36,6 +36,7 @@ class MappingError(Exception):
         super().__init__(f"{file}: {fault}")
         self.file = file
         self.fault = fault
+        self.revision = "head"
 
 
 @dataclass(frozen=True)

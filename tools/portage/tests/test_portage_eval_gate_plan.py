@@ -460,8 +460,10 @@ class TestBrokenBaseMapping:
         assert plan["status"] == "mapping-invalid"
         assert plan["mapping_invalid"]["file"] == "p/evals/eval-gate.json"
         assert "base revision's mapping is invalid" in plan["mapping_invalid"]["fault"]
+        assert plan["mapping_invalid"]["revision"] == "base"
         assert "JSON" in plan["mapping_invalid"]["fault"]
 
     def test_an_invalid_head_mapping_is_not_blamed_on_the_base(self, repo, capsys):
         rc, plan, _ = _invalid(repo, capsys, "{not json")
         assert "base revision" not in plan["mapping_invalid"]["fault"]
+        assert plan["mapping_invalid"]["revision"] == "head"

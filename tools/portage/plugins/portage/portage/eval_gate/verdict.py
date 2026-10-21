@@ -275,11 +275,18 @@ def verdict(state: Path) -> tuple[int, list[str], str]:
     if status == "mapping-invalid":
         bad = plan.get("mapping_invalid") if isinstance(plan.get("mapping_invalid"), dict) else {}
         file, fault = _corpus(bad.get("file")), _safe(bad.get("fault", "unspecified"))
-        section = _wrap([f"The eval-case mapping `{file}` is invalid, so no case was selected. "
-                         "The mapping must be fixed on the branch."])
+        if bad.get("revision") == "base":
+            section = _wrap([f"The eval-case mapping `{file}` is invalid at the base revision, so no case "
+                             "was selected. Fixing it on the branch will not clear this: the fix must "
+                             "land on the base (or be pushed directly)."])
+            way = ("The base revision's mapping is invalid; the fix must land on the base "
+                   "(or be pushed directly), not on the branch; there is no override.")
+        else:
+            section = _wrap([f"The eval-case mapping `{file}` is invalid, so no case was selected. "
+                             "The mapping must be fixed on the branch."])
+            way = "The mapping must be fixed on the branch; there is no override."
         return 1, ["eval-gate: mapping-invalid", "persistent: none",
-                   f"mapping-invalid: {file}: {fault}",
-                   "The mapping must be fixed on the branch; there is no override."], section
+                   f"mapping-invalid: {file}: {fault}", way], section
     if status == "base-unresolved":
         return 0, ["eval-gate: base-unresolved", "persistent: base-unresolved"], _wrap(
             ["The eval gate could not determine the changed files (the base ref did not resolve), "
