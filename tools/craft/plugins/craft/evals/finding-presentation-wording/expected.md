@@ -4879,7 +4879,7 @@ Both files are byte-equal with no normalisation (the layout normalisation the ea
 
 The arms and the real run exercise the typical path of step 5. Not measured, and so not part of any closing verdict:
 
-- the missing-agent stop and the maturity line (`SKILL.md:132-134`, `:173` at base B; `:130-132`, `:171` at HEAD), which can name the review before step 5;
+- the missing-agent stop and the maturity line (`SKILL.md:132-134`, `:173` at base B; `:130-132`, `:169` at HEAD), which can name the review before step 5;
 - the out-of-range override rejection;
 - the `reaches-downstream` escalation table;
 - the re-presented table after a revise round (the real run's turn 2 re-presented a table after an override, a

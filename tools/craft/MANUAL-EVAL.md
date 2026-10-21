@@ -2515,7 +2515,7 @@ operator's dotfiles source. Captures: `runs/pw-realrun-turn1.md`,
 **Pin check.** `skills/gauntlet/SKILL.md` and `skills/gauntlet/dispositions.md` at the branch HEAD are byte-equal to
 `c6af0ccb` (G2), the revision the `pw-treated2-*` arms pin.
 
-**Not measured.** The missing-agent stop and the maturity line (`SKILL.md:132-134`, `:173` at base B; `:130-132`, `:171` at HEAD), the out-of-range override
+**Not measured.** The missing-agent stop and the maturity line (`SKILL.md:132-134`, `:173` at base B; `:130-132`, `:169` at HEAD), the out-of-range override
 rejection, the `reaches-downstream` escalation table, a revise round's re-presented table, and an `answered` row's
 re-adjudication. AC25 and AC27 are measured at the surfaces a typical run shows; whether that is coverage in full or in
 part is the operator's call at slice close.
