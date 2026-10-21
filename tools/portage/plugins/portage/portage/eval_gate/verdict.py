@@ -28,7 +28,10 @@ Markers, each on its own line, wrapping the section::
 2. ``persistent: <codes>`` — the sorted, comma-joined persistent reason codes among
    the not-run cases (``runner-missing``, ``harness-has-no-eval-runner``,
    ``runner-sandbox-unwritable``: nothing about the branch will change them), or
-   ``persistent: none``. ``persistent_reasons`` is the same classification;
+   ``persistent: none``. When the outcome is ``base-unresolved`` the line is
+   ``persistent: base-unresolved`` (a repo with no resolvable base hits it on every
+   push). ``case-removed-on-branch`` is not persistent. ``persistent_reasons`` is the
+   classification of reason codes;
 3. ``ignored:`` lines for result files whose case is not in the plan;
 4. on exit 1, the failing cases with counts (``<case>: passed P, failed F, errored E``),
    ``state kept: <dir>``, per-run grader verdicts (``run N: <grader>=pass|fail ...``) and
@@ -41,6 +44,8 @@ plus a final newline) so an agent that cannot redirect shell output can hand it 
 ``--state`` it still writes the section file there.
 
 Exit codes: 0 push, 1 stop, 2 usage, unusable state directory/plan, an OS error reading or writing, or a marker fault.
+A fault writing the section file never turns a decided stop into 2: with a stop decided the
+fault goes to stderr, the section is still printed and the exit code stays 1.
 
 ``portage eval-gate splice --body-file <f> (--state <dir> | --section-file <f>)
 [--out <path>]`` prints the body with the section appended (no section in the body) or
@@ -62,6 +67,7 @@ from .mapping import CASE_NAME
 from .run import (
     NO_RUNNER,
     RUNNER_MISSING,
+    CASE_REMOVED,
     SANDBOX_UNWRITABLE,
     RunRefused,
     _check_state,
@@ -87,6 +93,7 @@ REASONS = {
         "scored; set `PORTAGE_EVAL_RUNNER` to a runner build that can write, or wait for "
         "a fixed runner"
     ),
+    CASE_REMOVED: "the branch removes this case; it was not run — review the removal",
     NO_RESULT: "no usable result was recorded for this case",
 }
 
@@ -274,7 +281,7 @@ def verdict(state: Path) -> tuple[int, list[str], str]:
                    f"mapping-invalid: {file}: {fault}",
                    "The mapping must be fixed on the branch; there is no override."], section
     if status == "base-unresolved":
-        return 0, ["eval-gate: base-unresolved", "persistent: none"], _wrap(
+        return 0, ["eval-gate: base-unresolved", "persistent: base-unresolved"], _wrap(
             ["The eval gate could not determine the changed files (the base ref did not resolve), "
              "so it selected no cases."])
     if status == "no-cases-mapped" or not plan["cases"]:

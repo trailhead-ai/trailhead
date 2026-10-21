@@ -9,7 +9,8 @@ first detected harness for its eval runner, runs it bounded by a wall-clock time
      "verdict": "pass" | "fail" | "not-run",
      "passed": int, "failed": int, "errored": int,     # scored passes / scored fails / errored runs
      "reason": null | "harness-has-no-eval-runner" | "runner-missing" | "timeout"
-                    | "cost-cap" | "runner-error" | "runs-errored" | "runner-sandbox-unwritable",
+                    | "cost-cap" | "runner-error" | "runs-errored" | "runner-sandbox-unwritable"
+                    | "case-removed-on-branch",
      "runs": [{"passed": bool, "errored": bool,
                "graders": [{"name": str, "passed": bool}, ...]}, ...]}
 
@@ -47,6 +48,11 @@ regular file, else the case is not-run ``runner-missing`` (a stderr line names t
 variable) and nothing starts. It replaces the harness's own ``claude`` lookup and is
 never forwarded into the child's environment.
 
+A plan entry with ``case_removed`` true (the branch removes the case) is recorded as
+not-run ``case-removed-on-branch`` before any harness lookup or canary; no runner starts.
+A runner that cannot be launched (``OSError``: not found, not executable, bad format) is
+not-run ``runner-missing``.
+
 Refusals (``RunRefused``, exit 2, no runner started): a state directory that is a
 symlink, not owned by the caller or not mode 0700; a case that is not in the plan or
 whose name fails the mapping's shape; a plugin root that leaves the repo.
@@ -77,6 +83,7 @@ COST_CAP = "cost-cap"
 RUNNER_ERROR = "runner-error"
 RUNS_ERRORED = "runs-errored"
 SANDBOX_UNWRITABLE = "runner-sandbox-unwritable"
+CASE_REMOVED = "case-removed-on-branch"
 RUNNER_OVERRIDE_ENV = "PORTAGE_EVAL_RUNNER"
 
 
@@ -211,7 +218,7 @@ def _execute(runner, state: Path, timeout: float) -> tuple[int | None, bool, boo
             stderr=subprocess.DEVNULL,
             start_new_session=True,
         )
-    except FileNotFoundError:
+    except OSError:
         return None, False, True
     try:
         return proc.wait(timeout=timeout), False, False
@@ -240,6 +247,8 @@ def run_case(
     plan, entry = _load_case(state, case)
     plugin_dir = _plugin_dir(plan, entry)
     n, pass_at = entry["runs"], entry["pass_at"]
+    if entry.get("case_removed") is True:
+        return _record(state, case, _not_run(case, n, CASE_REMOVED))
     runner_cfg = entry["runner"]
 
     if env is None:

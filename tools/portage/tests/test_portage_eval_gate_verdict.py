@@ -471,6 +471,35 @@ def test_verdict_section_path_being_a_directory_exits_2_without_traceback(st, ca
     assert _leftovers(st.dir) == []
 
 
+def test_a_decided_fail_survives_a_section_write_fault(st, capsys):
+    st.plan([_entry("bad")])
+    st.result("bad", verdict="fail", passed=0, failed=3)
+    (st.dir / "eval-gate-section.md").mkdir()
+    code = dispatch.main(["eval-gate", "verdict", "--state", str(st.dir)])
+    captured = capsys.readouterr()
+    assert code == 1
+    assert captured.err.startswith("eval-gate verdict:") and "Traceback" not in captured.err
+    assert captured.out.splitlines()[0] == "eval-gate: failed"
+    assert "`bad`" in section_of(captured.out)
+
+
+def test_base_unresolved_is_a_persistent_reason(st, capsys):
+    st.plan(status="base-unresolved")
+    code, out, _ = verdict(capsys, st)
+    assert code == 0
+    assert out.splitlines()[:2] == ["eval-gate: base-unresolved", "persistent: base-unresolved"]
+
+
+def test_case_removed_on_branch_is_listed_with_its_gloss_and_is_not_persistent(st, capsys):
+    st.plan([_entry("gone")])
+    st.result("gone", verdict="not-run", passed=0, failed=0, errored=3, reason="case-removed-on-branch")
+    code, out, _ = verdict(capsys, st)
+    assert code == 0
+    assert out.splitlines()[:2] == ["eval-gate: not-run", "persistent: none"]
+    assert ("`gone` — `case-removed-on-branch`: the branch removes this case; it was not run "
+            "— review the removal") in section_of(out)
+
+
 def test_verdict_unreadable_plan_exits_2(st, capsys):
     (st.dir / "plan.json").mkdir()
     assert dispatch.main(["eval-gate", "verdict", "--state", str(st.dir)]) == 2

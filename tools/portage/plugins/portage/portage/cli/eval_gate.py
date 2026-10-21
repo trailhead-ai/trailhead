@@ -124,11 +124,16 @@ def cmd_verdict(args: argparse.Namespace) -> int:
             raise gate_verdict.Fault("one of --state or --gate-error is required")
         else:
             code, report, section = gate_verdict.verdict(Path(args.state))
-        if args.state is not None:
-            gate_verdict.write_section_file(Path(args.state), section)
     except (gate_verdict.Fault, OSError) as e:
         print(f"eval-gate verdict: {gate_verdict.one_line(e)}", file=sys.stderr)
         return 2
+    if args.state is not None:
+        try:
+            gate_verdict.write_section_file(Path(args.state), section)
+        except (gate_verdict.Fault, OSError) as e:
+            print(f"eval-gate verdict: {gate_verdict.one_line(e)}", file=sys.stderr)
+            if code != 1:
+                return 2
     for line in report:
         print(line)
     print(section)

@@ -8,6 +8,7 @@ whose argv carries ``--eval-dir``. The real ``claude`` is never started.
 from __future__ import annotations
 
 import json
+import re
 import time
 from pathlib import Path
 
@@ -120,8 +121,14 @@ class TestCanaryRequest:
         assert env.run() == 0
         plugin = Path(_canary_calls(env)[0]["argv"][3])
         case = plugin / "eval-canary" / "sandbox-write"
-        assert (case / "case.yaml").is_file() and (case / "prompt.md").is_file()
-        assert (case / "graders").is_dir() and any((case / "graders").iterdir())
+        name = re.search(r"^name:\s*(\S+)\s*$", (case / "case.yaml").read_text(), re.M).group(1)
+        assert name == "sandbox-write" == canary.CASE
+        created = re.search(r"`touch (\S+)`", (case / "prompt.md").read_text()).group(1)
+        graded = [
+            re.search(r"^path:\s*(\S+)\s*$", g.read_text(), re.M).group(1)
+            for g in (case / "graders").iterdir()
+        ]
+        assert graded == [created]
 
 
 class TestCanaryIsCached:

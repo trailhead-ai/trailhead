@@ -36,7 +36,8 @@ call, so give the tool call a 600000 ms timeout) and records a verdict in the st
 - **pass**: at least `pass_at` runs scored 1.0.
 - **fail**: so many scored runs failed that `pass_at` is out of reach.
 - **not-run**, with a reason: the runner errored, timed out, hit its cost cap, was missing, or cannot write
-  (below). A not-run case is never a pass and never a fail.
+  (below), or the branch removes the case (`case-removed-on-branch`: the case was selected but its
+  `case.yaml` is gone, so nothing ran). A not-run case is never a pass and never a fail.
 
 The runner is the harness's `claude plugin eval`, started with an allowlist environment (`PATH`, `HOME`,
 `USER`, `LANG`, `TERM`, `LC_*`), so API keys and tokens in the caller's environment never reach it and the
@@ -77,7 +78,7 @@ with `eval-gate: <outcome>` and `persistent: <codes>|none`, and ends with the PR
   override).
 - Exit 0 with a not-run case: the push goes ahead and the section lists each case with its reason.
 - `persistent:` names the reasons nothing about the branch will change (the same machine will skip on every
-  push). `updater` marks them on the `**Eval gate:**` line that leads its report, and `/portage:pull_request`
+  push), and `base-unresolved` when the base ref cannot be resolved. `updater` marks them on the `**Eval gate:**` line that leads its report, and `/portage:pull_request`
   relays that line first.
 
 `portage eval-gate verdict --gate-error <step>` renders the section for a gate command that crashed;

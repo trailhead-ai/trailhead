@@ -11,17 +11,23 @@ mode 0700) and returns ``(state, plan)``. The plan is consumed by the later
      "merge_base": "<sha>" | null,
      "changed_files": ["<repo-relative path>", ...],
      "mapping_invalid": {"file": "<repo-relative mapping path>", "fault": "<one line>"} | null,
+                          # a fault in the base revision's mapping says so in its text
      "new_runner_grants": bool,          # any selected case runs under a branch-authored runner block
      "total_max_cost_usd": number,       # sum of the selected cases' runner.max_cost_usd
      "cases": [{"plugin_root": "<repo-relative>", "case": "<name>",
                 "runs": int, "pass_at": int,
                 "runner": {"model": str, "allow_tools": [str], "max_cost_usd": number},
-                "new_runner_grants": bool}, ...]}
+                "new_runner_grants": bool,
+                "case_removed": bool}, ...]}   # true: selected, but its case.yaml is gone at head
 
 Base takes precedence over the branch: cases are selected from the base and head
 mappings combined, and a corpus whose mapping exists at the base runs under the
 base's runner block, runs and pass_at. A corpus new on the branch uses its own and
-is flagged ``new_runner_grants``.
+is flagged ``new_runner_grants``. A selected case whose ``case.yaml`` is gone at head
+stays in the plan with ``case_removed`` true; ``run`` records it as not-run
+``case-removed-on-branch`` without starting a runner, and it adds nothing to
+``total_max_cost_usd``. Changed files come from ``git diff --no-renames``, so a renamed
+file counts as both its old and its new path.
 """
 
 from __future__ import annotations
@@ -69,13 +75,26 @@ def _show(repo: Path, rev: str, path: str) -> str | None:
         return _git(repo, "show", f"{rev}:{path}")
     except GitError:
         return None
+    except UnicodeDecodeError:
+        raise MappingError(path, "not valid UTF-8") from None
 
 
 def _load_head(repo: Path, path: str, tracked: set[str]) -> Mapping | None:
     if path not in tracked:
         return None
     evals = (repo / path).parent
-    return load_mapping((repo / path).read_text(), path, plugin_root=evals.parent, evals_dir=evals)
+    try:
+        text = (repo / path).read_text()
+    except UnicodeDecodeError:
+        raise MappingError(path, "not valid UTF-8") from None
+    return load_mapping(text, path, plugin_root=evals.parent, evals_dir=evals)
+
+
+def _load_base(path: str, text: str) -> Mapping:
+    try:
+        return load_mapping(text, path)
+    except MappingError as e:
+        raise MappingError(path, f"the base revision's mapping is invalid: {e.fault}") from None
 
 
 def _touches(name: str, measures: tuple[str, ...], plugin: PurePosixPath, changed: list[str]) -> bool:
@@ -96,14 +115,12 @@ def _select(repo: Path, merge_base: str, changed: list[str]) -> list[dict]:
     selected: list[dict] = []
     for path in sorted(p for p in tracked | at_base if _is_mapping(p)):
         base_text = _show(repo, merge_base, path) if path in at_base else None
-        base_map = load_mapping(base_text, path) if base_text is not None else None
+        base_map = _load_base(path, base_text) if base_text is not None else None
         head_map = _load_head(repo, path, tracked)
         plugin = PurePosixPath(path).parent.parent
         evals = (repo / path).parent
         names = sorted(set(base_map.cases if base_map else ()) | set(head_map.cases if head_map else ()))
         for name in names:
-            if not (evals / name / "case.yaml").is_file():
-                continue
             base_case = base_map.cases.get(name) if base_map else None
             head_case = head_map.cases.get(name) if head_map else None
             measures = tuple(dict.fromkeys((base_case.measures if base_case else ()) + (head_case.measures if head_case else ())))
@@ -118,6 +135,7 @@ def _select(repo: Path, merge_base: str, changed: list[str]) -> list[dict]:
                 "pass_at": case.pass_at,
                 "runner": runner,
                 "new_runner_grants": base_map is None,
+                "case_removed": not (evals / name / "case.yaml").is_file(),
             })
     return selected
 
@@ -138,7 +156,7 @@ def plan(repo: Path, base: str | None) -> tuple[Path, dict]:
         result["status"] = "base-unresolved"
     else:
         result["base"], result["merge_base"] = resolved
-        changed = [c for c in _git(repo, "diff", "--name-only", "-z", f"{resolved[1]}...HEAD").split("\0") if c]
+        changed = [c for c in _git(repo, "diff", "--name-only", "--no-renames", "-z", f"{resolved[1]}...HEAD").split("\0") if c]
         result["changed_files"] = changed
         try:
             cases = _select(repo, resolved[1], changed)
@@ -150,7 +168,7 @@ def plan(repo: Path, base: str | None) -> tuple[Path, dict]:
                 result["status"] = "cases-selected"
                 result["cases"] = cases
                 result["new_runner_grants"] = any(c["new_runner_grants"] for c in cases)
-                result["total_max_cost_usd"] = sum(c["runner"]["max_cost_usd"] for c in cases)
+                result["total_max_cost_usd"] = sum(c["runner"]["max_cost_usd"] for c in cases if not c["case_removed"])
     state = Path(tempfile.mkdtemp(prefix="portage-eval-gate-"))
     (state / "plan.json").write_text(json.dumps(result, indent=2) + "\n")
     return state, result

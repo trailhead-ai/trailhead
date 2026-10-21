@@ -218,6 +218,23 @@ class TestRunnerFailures:
         r = env.result()
         assert (r["verdict"], r["reason"]) == ("not-run", "runner-missing")
 
+    def test_a_runner_that_cannot_be_executed_is_runner_missing(self, env):
+        exe = env.bin / "claude"
+        exe.write_text("not a program\n")
+        exe.chmod(0o755)
+        assert env.run() == 0
+        r = env.result()
+        assert (r["verdict"], r["reason"]) == ("not-run", "runner-missing")
+
+    def test_a_removed_case_starts_no_runner(self, env):
+        env.cases[0]["case_removed"] = True
+        env.plan()
+        env.fake(_result([PASS] * 3))
+        assert env.run() == 0
+        r = env.result()
+        assert (r["verdict"], r["reason"], r["errored"]) == ("not-run", "case-removed-on-branch", 3)
+        assert env.calls == []
+
     def test_harness_without_a_hook(self, env):
         class Bare(Harness):
             name = "bare"

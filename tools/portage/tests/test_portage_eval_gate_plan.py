@@ -294,17 +294,6 @@ class TestBasePrecedence:
         _, plan, _ = _plan(repo, capsys, "--base", "base")
         assert (plan["cases"][0]["runs"], plan["cases"][0]["pass_at"]) == (5, 4)
 
-    def test_a_case_removed_with_its_directory_is_not_selected(self, repo, capsys):
-        _corpus(repo, "p", M)
-        _commit(repo)
-        _branch(repo)
-        _write(repo, "p/evals/eval-gate.json", _mapping({"beta": M["beta"]}))
-        _git(repo, "rm", "-r", "-q", "p/evals/alpha")
-        _write(repo, "p/skills/a.md", "changed\n")
-        _commit(repo)
-        _, plan, _ = _plan(repo, capsys, "--base", "base")
-        assert plan["status"] == "no-cases-mapped"
-
     def test_a_corpus_absent_at_the_base_uses_its_own_block_and_is_flagged(self, repo, capsys):
         _write(repo, "README.md")
         _commit(repo)
@@ -345,3 +334,134 @@ class TestUsage:
         rc = dispatch.main(["eval-gate", "plan", "--repo", str(tmp_path)])
         assert rc == 2
         assert capsys.readouterr().err.strip()
+
+
+PROSE = "".join(f"line {i} of the measured prose\n" for i in range(20))
+
+
+class TestBranchHistoryShapes:
+    def _measured(self, repo):
+        _write(repo, "p/skills/a.md", PROSE)
+        _write(repo, "p/evals/alpha/case.yaml")
+        _write(repo, "p/evals/beta/case.yaml")
+        _write(repo, "p/evals/eval-gate.json",
+               _mapping({"alpha": {"measures": ["skills/a.md"]}, "beta": {"measures": ["skills/b.md"]}}))
+        _write(repo, "p/skills/b.md")
+        _commit(repo)
+        _branch(repo)
+
+    def test_renaming_a_measured_file_and_deleting_its_entry_still_selects_the_case(self, repo, capsys):
+        self._measured(repo)
+        _git(repo, "mv", "p/skills/a.md", "p/skills/renamed.md")
+        _write(repo, "p/skills/renamed.md", PROSE + "one more line\n")
+        _write(repo, "p/evals/eval-gate.json", _mapping({"beta": {"measures": ["skills/b.md"]}}))
+        _commit(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert plan["status"] == "cases-selected"
+        assert _names(plan) == ["alpha"]
+
+    def test_a_case_removed_on_the_branch_stays_in_the_plan_flagged_removed(self, repo, capsys):
+        self._measured(repo)
+        _git(repo, "rm", "-rq", "p/evals/alpha")
+        _write(repo, "p/evals/eval-gate.json", _mapping({"beta": {"measures": ["skills/b.md"]}}))
+        _write(repo, "p/skills/a.md", PROSE + "edited\n")
+        _commit(repo)
+        _, plan, out = _plan(repo, capsys, "--base", "base")
+        assert plan["status"] == "cases-selected"
+        assert [(c["case"], c["case_removed"]) for c in plan["cases"]] == [("alpha", True)]
+        assert plan["total_max_cost_usd"] == 0
+        assert "p:alpha" in out.splitlines()
+
+    def test_a_renamed_case_dir_selects_the_old_name_as_removed(self, repo, capsys):
+        self._measured(repo)
+        _git(repo, "mv", "p/evals/alpha", "p/evals/alpha-two")
+        _write(repo, "p/evals/eval-gate.json",
+               _mapping({"alpha-two": {"measures": ["skills/a.md"]}, "beta": {"measures": ["skills/b.md"]}}))
+        _commit(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base")
+        by_name = {c["case"]: c["case_removed"] for c in plan["cases"]}
+        assert by_name == {"alpha": True, "alpha-two": False}
+
+    def test_a_present_case_is_not_flagged_removed(self, repo, capsys):
+        self._measured(repo)
+        _write(repo, "p/skills/a.md", PROSE + "edited\n")
+        _commit(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert [(c["case"], c["case_removed"]) for c in plan["cases"]] == [("alpha", False)]
+
+    def test_a_removed_case_runs_no_runner_and_the_section_explains_it(self, repo, capsys, tmp_path, monkeypatch):
+        self._measured(repo)
+        _git(repo, "rm", "-rq", "p/evals/alpha")
+        _write(repo, "p/evals/eval-gate.json", _mapping({"beta": {"measures": ["skills/b.md"]}}))
+        _write(repo, "p/skills/a.md", PROSE + "edited\n")
+        _commit(repo)
+        _, plan, out = _plan(repo, capsys, "--base", "base")
+        state = Path(next(l for l in out.splitlines() if l.startswith("state: "))[len("state: "):])
+        empty = tmp_path / "empty-bin"
+        empty.mkdir()
+        monkeypatch.setenv("PATH", str(empty))
+        assert dispatch.main(["eval-gate", "run", "--state", str(state), "--case", "alpha"]) == 0
+        assert "reason: case-removed-on-branch" in capsys.readouterr().out
+        assert not (state / "canary.json").exists()
+        code = dispatch.main(["eval-gate", "verdict", "--state", str(state)])
+        verdict_out = capsys.readouterr().out
+        assert code == 0
+        assert "persistent: none" in verdict_out.splitlines()
+        assert ("`alpha` — `case-removed-on-branch`: the branch removes this case; it was not run "
+                "— review the removal") in verdict_out
+
+
+class TestNonUtf8Mapping:
+    BAD = b'{"schema_version": 1, "x": "\xff\xfe"}'
+
+    def test_a_non_utf8_mapping_on_the_branch_is_mapping_invalid_naming_the_file(self, repo, capsys):
+        _write(repo, "p/skills/a.md")
+        _write(repo, "p/evals/alpha/case.yaml")
+        _write(repo, "p/evals/eval-gate.json", _entry())
+        _commit(repo)
+        _branch(repo)
+        (repo / "p/evals/eval-gate.json").write_bytes(self.BAD)
+        _write(repo, "p/skills/a.md", "changed\n")
+        _commit(repo)
+        rc, plan, out = _plan(repo, capsys, "--base", "base")
+        assert rc == 0
+        assert plan["status"] == "mapping-invalid"
+        assert plan["mapping_invalid"]["file"] == "p/evals/eval-gate.json"
+        assert "UTF-8" in plan["mapping_invalid"]["fault"]
+        assert "Traceback" not in out
+
+    def test_a_non_utf8_mapping_at_the_base_is_mapping_invalid_naming_the_file(self, repo, capsys):
+        _write(repo, "p/skills/a.md")
+        _write(repo, "p/evals/alpha/case.yaml")
+        (repo / "p/evals").mkdir(parents=True, exist_ok=True)
+        (repo / "p/evals/eval-gate.json").write_bytes(self.BAD)
+        _commit(repo)
+        _branch(repo)
+        _write(repo, "p/evals/eval-gate.json", _entry())
+        _write(repo, "p/skills/a.md", "changed\n")
+        _commit(repo)
+        rc, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert rc == 0
+        assert plan["status"] == "mapping-invalid"
+        assert plan["mapping_invalid"]["file"] == "p/evals/eval-gate.json"
+        assert "UTF-8" in plan["mapping_invalid"]["fault"]
+
+
+class TestBrokenBaseMapping:
+    def test_an_invalid_base_mapping_is_reported_as_the_base_revisions(self, repo, capsys):
+        _write(repo, "p/skills/a.md")
+        _write(repo, "p/evals/alpha/case.yaml")
+        _write(repo, "p/evals/eval-gate.json", "{not json")
+        _commit(repo)
+        _branch(repo)
+        _write(repo, "p/evals/eval-gate.json", _entry())
+        _commit(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert plan["status"] == "mapping-invalid"
+        assert plan["mapping_invalid"]["file"] == "p/evals/eval-gate.json"
+        assert "base revision's mapping is invalid" in plan["mapping_invalid"]["fault"]
+        assert "JSON" in plan["mapping_invalid"]["fault"]
+
+    def test_an_invalid_head_mapping_is_not_blamed_on_the_base(self, repo, capsys):
+        rc, plan, _ = _invalid(repo, capsys, "{not json")
+        assert "base revision" not in plan["mapping_invalid"]["fault"]
