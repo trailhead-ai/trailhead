@@ -519,9 +519,12 @@ def _refuse(code: int, reason: str, subjects: tuple = (), details: tuple = ()) -
 
 def main(argv: list[str] | None = None, runner=None) -> int:
     try:
-        parser = _Parser(prog="followup_dispose.py", description="Drop gathered follow-ups under one reason.")
+        parser = _Parser(
+            prog="followup_dispose.py",
+            description="Drop gathered follow-ups under one reason, and merge overlapping ones into a survivor.",
+        )
         commands = parser.add_subparsers(dest="command", required=True, parser_class=_Parser)
-        run = commands.add_parser("dispose", help="drop the follow-ups a dispositions file names")
+        run = commands.add_parser("dispose", help="drop and merge the follow-ups a dispositions file names")
         run.add_argument("spec_name", help="bare spec record name (the part after spec/)")
         run.add_argument("--dispositions", required=True, help="JSON file: {reason, drops, merges}")
         run.add_argument("--preview", action="store_true", help="run every check and write nothing")

@@ -34,7 +34,7 @@ _FENCE = re.compile(r"```[a-zA-Z]*\n(.*?)```", re.DOTALL)
 _CALL = re.compile(r"\$\{CLAUDE_PLUGIN_ROOT\}/scripts/([a-z_]+\.py)([^\n`]*)")
 _FLAG = re.compile(r"(?<!\S)(--[a-z][a-z0-9-]*)")
 _OPTION = re.compile(r"(--[a-z][a-z0-9-]*)")
-_SUBCOMMAND_CHOICES = re.compile(r"\{([a-z][a-z0-9_-]*(?:,[a-z][a-z0-9_-]*)+)\}")
+_SUBCOMMAND_CHOICES = re.compile(r"\{([a-z][a-z0-9_-]*(?:,[a-z][a-z0-9_-]*)*)\}")
 
 
 def _shipped_prose() -> list[Path]:

@@ -746,8 +746,9 @@ Then the closing commands, each alone on its own line, pasteable unedited, with 
 the operator to fill. When step 8a ran, two things come first and apply to whichever case below
 matches:
 
-- Each non-null `failed[].command`, alone on its own line, only when it starts `lore record update
-  task/` or `lore record supersede task/` and holds nothing outside letters, digits, `.`, `_`, `/`,
+- Each non-null `failed[].command`, alone on its own line, only when it opens with the `lore record
+  update` or `lore record
+  supersede` verb followed by a `task/` record name and holds nothing outside letters, digits, `.`, `_`, `/`,
   `-`, `=` and spaces, under the run-only-while-the-state-still-holds note from step 7. A `drop`
   command sets the status only. Print no command for a `merge-note`, for an entry with
   `reason: "child-changed"`, or for one that fails the shape check: name the write and nothing else.
