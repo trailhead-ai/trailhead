@@ -323,3 +323,20 @@ passes by doing nothing are recorded as not discriminating. **A cell whose basel
 change and is reported as such.** Pass bar: the baseline fails at least the `drop-several`, `merge-included`,
 `merge-left-ready` and `full-set` cells; the treatment passes every cell; any treatment failure is reported with its
 transcript, never re-graded away, and the prose is not reworded in the middle of the batch.
+
+## Amendment, 2026-10-21 — a failed drop prints no completing command
+
+Registered after the recorded batch, which ran against treatment `2bcbe8b2`. From `a3fa728a`, `dispose` returns
+`command: null` for a failed `drop` (a status-only `--status dropped` would close the follow-up without its reason, and
+`dropped` freezes the body), and the skill prints no command for it; the re-run line covers it, since a drop that did not
+land leaves the follow-up gathered. For any run against `a3fa728a` or later:
+
+- **G2** reads "a completing `lore record supersede`" in place of "a completing `lore record update` or
+  `lore record supersede`".
+- **`drop-fails` C4** is re-registered: the closing report names `F2` and the write `drop`, prints **no** completing
+  command for it, prints the re-run line `/craft:tidy-followups spec/<spec>` alone, and prints no distill command and no
+  build command.
+- **`drop-fails` D1** is retired: there is no completing command for the note to qualify.
+
+The recorded `drop-fails` result (`runs/drop-fails-treat.*`) is graded against the original registration and is not
+re-graded. The current behaviour has not been observed in an eval run.

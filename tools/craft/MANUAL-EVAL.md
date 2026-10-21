@@ -3505,3 +3505,9 @@ vanilla path only.
 | AC19 (survivor carries the combined intent) | `merge-left-ready`, `merge-included`, `edit-intent`, `merge-refused-dependent` | held on disk (note under `## Merged from`; in `merge-included` the refined `delivers` holds `5000`; in `edit-intent` the operator's text, not the draft); Confirmation 3's block not shown | `merge-included-treat.transcript.txt` (the `check` result) |
 | AC20 (merged-away follow-up superseded by the survivor) | the four merge cells | held on disk (`superseded`, survivor's `supersedes` holds it); `merged task/M into task/S` not printed in `merge-included` | each `.dispose.json` |
 | AC23 (a failed write named by follow-up and write, never shown as done) | `drop-fails`, `supersede-fails` | held: `F2` and `G3` named with the write, never shown as dropped or merged, completing commands and re-run alone, no distill; the `failed supersede: task/G3` progress line itself not printed | `drop-fails-treat.txt`, `supersede-fails-treat.txt` |
+
+**Amendment, 2026-10-21.** These results are against treatment `2bcbe8b2`. In `a3fa728a` a failed drop stopped returning
+a completing command (a status-only `--status dropped` closes the follow-up without its reason), so the `drop-fails`
+evidence above that cites "its completing command" describes behaviour that no longer ships. The step 8a and step 13
+wording from `a3fa728a` and the step 8 `not-mergeable` wording from `dedaf8e5` have not been observed in an eval run.
+`expected.md` carries the matching dated amendment to `G2` and `drop-fails` `C4` and `D1`.
