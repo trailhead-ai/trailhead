@@ -70,8 +70,9 @@ line, for the three italic level labels and a Critical list that is not empty or
 
 `review-name`, `outcome-word` and `finding-id` read the same reader-facing text. `review-name` says how the capture
 first names the spec review: `plain` when "spec review" comes first and "gauntlet" appears exactly once, inside round
-brackets; `internal` otherwise; `none` when the review is not named (a `/craft:gauntlet` command token is not a
-naming). `outcome-word` says how a finding's outcome is shown: `internal` for a ritual term (`resolved`, `revise`,
+brackets on a line that also names a "spec review"; `internal` otherwise; `none` when the review is not named. A
+`craft:gauntlet` command token, with or without its leading slash, is not a naming; any other "gauntlet", a path
+segment included, is. `outcome-word` says how a finding's outcome is shown: `internal` for a ritual term (`resolved`, `revise`,
 `accepted-as-risk`, `disputed`, `answered`) in backticks, the hyphenated `accepted-as-risk`, or `resolved` or `revise`
 on a line that carries a finding id; else `plain` when "fixed in the spec" or "needs a rewrite" appears; else `none`.
 `finding-id` says whether every finding id (`C<n>`) is in round brackets after text, or is the id in a reply form
@@ -86,7 +87,10 @@ bullet and stamp bullet. `finding-id` then reads no `--reports`.
 a backticked ritual term, `changed` when one is not or none appears, `missing` when there is no saved section or no
 stamp bullet. `override-mapping` reads the same stamp against each `--override C<n>=<term>:<reason>` (repeatable):
 `mapped` when each staged id carries its term and its reason and no other id carries an override term, else
-`misapplied`.
+`misapplied`. The staged term is `accepted-as-risk` or `disputed`: an answered row is stamped under its final
+disposition, so an `answered` override, like any other term, is `bad-arguments`. Reasons on both sides are compared
+folded (`*` and `_` removed, whitespace collapsed, case folded), and a reason that folds to nothing is
+`bad-arguments`. Bullets and headings open their own run at any indentation.
 
 stdout carries exactly the line `<check>: <verdict>`.
 
@@ -104,7 +108,7 @@ Exit codes:
 Stdin, each `--criteria` file and each `--reports` file are capped at MAX_INPUT_BYTES: a
 file over the cap is never read past it and could not be graded (`criteria-too-large`,
 `reports-too-large`). Every pattern is linear: the one repeat that sits
-inside another (the finding-id list) consumes a `C\d+` on every iteration, so it cannot backtrack catastrophically;
+inside another (the finding-id list) consumes a `C` and its digits on every iteration, so it cannot backtrack catastrophically;
 the scans that need a window walk the line by index.
 A range wider than MAX_RANGE_SPAN is not expanded: it can name no criterion the
 criteria file defines and counts as no earlier mention.
@@ -746,7 +750,7 @@ def _saved_parts(text: str) -> tuple[list[str] | None, str]:
         if stripped == _SAVED_HEADING:
             current = "detail"
             continue
-        opens_own = _BULLET_RE.match(line) is not None or line.startswith("#")
+        opens_own = _BULLET_RE.match(line) is not None or stripped.startswith("#")
         if not stripped:
             current = "detail"
         elif opens_own:
@@ -901,6 +905,8 @@ def _read_overrides(values: list[str] | None) -> list[tuple[str, str, str]]:
         found = _OVERRIDE_ARG_RE.fullmatch(value)
         if found is None:
             raise CouldNotGrade("bad-arguments", f"--override {value!r} is not C<n>=<term>:<reason>")
+        if not _fold_reason(found.group(3)):
+            raise CouldNotGrade("bad-arguments", f"--override {value!r} has no reason once markup is folded away")
         staged.append((f"C{found.group(1)}", found.group(2), found.group(3)))
     return staged
 

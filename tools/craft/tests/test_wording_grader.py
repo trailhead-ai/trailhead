@@ -2472,3 +2472,22 @@ def test_a_reason_carrying_markup_characters_maps_when_the_stamp_records_it(reas
 
 def test_an_answered_override_could_not_grade_because_the_stamp_records_the_final_disposition():
     could_not_grade(["--check", "override-mapping", "--override", "C2=answered:why"], b"x\n", "bad-arguments")
+
+
+def test_a_passing_verdict_writes_nothing_to_stderr(reports):
+    result = run_grader(
+        ["--check", "review-name", "--reports", str(reports)], b"The spec review (gauntlet) found three problems.\n"
+    )
+    assert result.returncode == 0
+    assert result.stderr == b""
+
+
+def test_an_indented_heading_after_the_stamp_bullet_ends_its_run():
+    indented = "".join(f"  {line}\n" for line in saved("### Detail\nC3 was the hard one.\n").splitlines())
+    assert stamp_form(indented) == "kept"
+    assert grade("finding-id", indented, criteria=None, extra=("--saved-detail",)) == "bare"
+
+
+@pytest.mark.parametrize("reason", ["__", "**", "* _"])
+def test_a_reason_of_markup_characters_alone_could_not_grade(reason):
+    could_not_grade(["--check", "override-mapping", "--override", f"C2=disputed:{reason}"], b"x\n", "bad-arguments")
