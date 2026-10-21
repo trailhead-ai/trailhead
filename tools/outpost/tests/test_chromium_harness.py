@@ -239,11 +239,23 @@ FULL_STORAGE = (
 
 @SERVE_MODES
 def test_a_probe_that_reloads_carries_on_in_the_reloaded_page(serve):
+    # The reload is observed through the document itself (a global that does not survive it, the
+    # navigation type, the page's own ready flag), not through localStorage: a write made moments
+    # before the old document unloads can reach the new one late, which is the browser's storage
+    # timing and not the harness's.
     steps = [
-        "sessionStorage.setItem('first', localStorage.getItem('c')); harness.reload();",
-        "return [Number(sessionStorage.getItem('first')), Number(localStorage.getItem('c'))];",
+        "window.leftBehind = 'old document'; harness.reload();",
+        """return {
+          leftBehind: typeof window.leftBehind,
+          navigation: performance.getEntriesByType('navigation')[0].type,
+          ready: document.documentElement.hasAttribute('data-pad-ready'),
+        };""",
     ]
-    assert ch.run_probe_steps(FIXTURES / "counter", steps, serve=serve) == [1, 2]
+    assert ch.run_probe_steps(FIXTURES / "counter", steps, serve=serve) == {
+        "leftBehind": "undefined",
+        "navigation": "reload",
+        "ready": True,
+    }
 
 
 @SERVE_MODES
