@@ -103,6 +103,7 @@ from typing import BinaryIO
 from trailhead.harness.base import (
     AccountAuthentication,
     AccountIdentity,
+    EvalRunner,
     Harness,
     HarnessError,
     SessionRecord,
@@ -538,6 +539,14 @@ _TOOL_DESCRIPTIONS: dict[str, str] = {
     ),
     "portage": ("Get the PR merged: PR lifecycle, CI watch, and merge ordering for a camp group."),
 }
+
+
+#: Variables a ``claude plugin eval`` child may inherit: enough to find the binary and
+#: authenticate on the operator's login, nothing that can move the run onto another
+#: credential or config (API keys, tokens, Bedrock/base-URL switches, lore/XDG overrides).
+_EVAL_ENV_ALLOWLIST = ("PATH", "HOME", "USER", "LANG", "TERM")
+_EVAL_ENV_PREFIXES = ("LC_",)
+_EVAL_MAX_PARALLEL = 8
 
 
 def _tool_description(tool: str) -> str:
@@ -1697,6 +1706,46 @@ class ClaudeCodeHarness(Harness):
             binding = self.session_launch_env_set(account, env=source)
             config_dir = Path(binding["CLAUDE_CONFIG_DIR"])
         return _read_account_authentication(config_dir)
+
+    def eval_runner(
+        self,
+        *,
+        plugin_dir: Path,
+        case: str,
+        runs: int,
+        model: str,
+        allow_tools: list[str],
+        max_cost_usd: float,
+        json_path: Path,
+        output_dir: Path,
+        env: dict[str, str],
+    ) -> EvalRunner:
+        """``claude plugin eval`` for one case, with an allowlist-only environment.
+
+        ``--allow-tools`` is variadic, so it is followed by another flag. Always
+        invoke through a stub runner in tests — never the real ``claude``.
+        """
+        argv = [
+            "claude", "plugin", "eval", str(plugin_dir),
+            "--case", case,
+            "--scaffold",
+            "--allow-tools", *allow_tools,
+            "--ablation", "none",
+            "--trust-plugin",
+            "--runs", str(runs),
+            "-j", str(min(runs, _EVAL_MAX_PARALLEL)),
+            "--model", model,
+            "--max-cost-usd", str(max_cost_usd),
+            "--json", str(json_path),
+            "--output-dir", str(output_dir) + "/",
+            "--no-publish",
+        ]
+        child = {
+            k: v
+            for k, v in env.items()
+            if k in _EVAL_ENV_ALLOWLIST or k.startswith(_EVAL_ENV_PREFIXES)
+        }
+        return EvalRunner(argv=argv, env=child)
 
     def session_enumerate(self, workspace: Path | None = None) -> list[str]:
         """Return ``["claude", "agents", "--json"]``, plus ``--cwd <workspace>``.
