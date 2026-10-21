@@ -4809,7 +4809,7 @@ the mtimes of `~/.claude/settings.json` and `~/.claude/CLAUDE.md` were unchanged
 (committed, trimmed, as `runs/pw-realrun.init.json`) lists one craft entry, `craft@inline`, path the branch's plugin
 directory, plus three built-in plugins; its slash commands carry no prefix other than `craft:`.
 
-**Departures from the plan, each forced by a stop before any review (a third reply turn, "go", was authorised afterwards and is described above).** (1) The fixture spec's criteria carry no
+**Departures from the plan, each forced by a stop before any review (a third reply turn, "go", was authorised afterwards and is described below).** (1) The fixture spec's criteria carry no
 verification trailer, so the review's criterion gate refused it (exit 1, "carries no verification trailer naming a
 sanctioned method" for AC1 to AC6) before any pass ran. The throwaway record is the fixture with ` *Verified by:
 manual-check.*` appended to each criterion; the criterion text is unchanged, the repository's fixture is unchanged, and
@@ -4849,7 +4849,7 @@ credential-pattern scrub of `_shared/security.md` (key-like tokens, vendor-prefi
 high-entropy literals, PEM headers), applied as a script over the section as the record holds it: 0 matches for each of
 the seven patterns.
 
-**Go or no-go.** Go. Fields 1 and 2 read `plain` in all three turns, so neither stop rule fired, and the stamp records
+**Go or no-go.** Go. Field 1 reads `plain` on turn 1, the only turn it defines, and field 2 reads `plain` on turns 1 and 2, the tables it defines (turn 3's prose is read by neither; its mention of the "`## Gauntlet` section" outside brackets names the saved section by its heading and is not a naming of the review), so neither stop rule fired, and the stamp records
 the override on the right finding (`mapped`, not `misapplied`). Field 3 (bare ids in turn 2's prose) and field 4
 (short-name criteria in the saved detail) are recorded against AC27 and AC28, which are partial, and match the remainders
 the treated2 captures show.
@@ -4879,7 +4879,7 @@ Both files are byte-equal with no normalisation (the layout normalisation the ea
 
 The arms and the real run exercise the typical path of step 5. Not measured, and so not part of any closing verdict:
 
-- the missing-agent stop and the maturity line (`SKILL.md:132-134`, `:173`), which can name the review before step 5;
+- the missing-agent stop and the maturity line (`SKILL.md:132-134`, `:173` at base B; `:130-132`, `:171` at HEAD), which can name the review before step 5;
 - the out-of-range override rejection;
 - the `reaches-downstream` escalation table;
 - the re-presented table after a revise round (the real run's turn 2 re-presented a table after an override, a
