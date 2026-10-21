@@ -42,6 +42,9 @@ so invoke it as bare `portage <subcommand>`.
 - `group` — the camp group name (e.g. `my-feature`)
 - `slug` — the worktree slug within the group (e.g. `ai-tooling`)
 - `manifest_path` — absolute path to the camp central manifest JSON for this worktree
+- `pr_body_file` — optional. Absolute path of a file already holding the current body of the PR being
+  updated (single-repo `update` only), for a shell that cannot redirect output into a file. When absent,
+  save the body yourself.
 
 The camp manifest (schema v1) lives at `manifest_path` and carries:
 `{schema_version:1, group, slug, branch, members:[{name, repo_root, worktree_path}]}`.
@@ -114,16 +117,18 @@ gate error, not a verdict. Render that repo's section and let its push proceed:
 portage eval-gate verdict --gate-error <plan|run|verdict> --state <state>
 ```
 
-Leave out `--state` when `plan` itself failed and there is no state directory; the section is then
-the text it prints.
+When `plan` itself failed there is no state directory yet. Make one first with
+`mktemp -d` (mode 0700, which the gate accepts) and pass that as `--state`. The section is then written
+to `<state>/eval-gate-section.md` and goes into the PR body like any other.
 
 **The section goes into every PR body, on every push.** A skip must never be silent.
 
 - `mode=create`: write the body you compose to `<state>/pr-body.md`, end it with the section
   exactly as printed (markers included), and pass it as `gh pr create --body-file <state>/pr-body.md`.
-- `mode=update`: save the PR's current body (`gh pr view <n> --json body --jq .body`) to
-  `<state>/pr-body.md`, or use the file that already holds it when the dispatch names one, because a
-  shell that refuses redirection cannot save it. Then run
+- `mode=update`: first get the PR's current body into `<state>/pr-body.md`. Run
+  `gh pr view <n> --json body --jq .body` with its output written to that file. If the dispatch gave
+  a `pr_body_file` (see Inputs), use that file as the body instead; it exists for shells that refuse
+  redirection. Then run
   `portage eval-gate splice --body-file <state>/pr-body.md --state <state> --out <state>/pr-body-new.md`
   and `gh pr edit <n> --body-file <state>/pr-body-new.md`. Splice replaces an earlier section in
   place, so a stale skip note never survives a passing push. Never rebuild a body from memory or
