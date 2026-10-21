@@ -4673,3 +4673,72 @@ shapes, high-entropy literals, PEM headers), applied to the saved block of each 
 block's text: 0 matches in all six. `scripts/capture_scan.py` over the 81 treated2 and control2 files (27 `.txt`, 27
 `.stderr.txt`, 27 `.exit`): 0 known-safe matches, 0 credential findings, exit 0; a search of the 81 for the operator's
 home path and username found 0 files. All 27 stderr files are empty.
+
+## Reading fields for the real spec review, fixed before the run (2026-10-21)
+
+Committed before the real run; nothing in this block is edited afterwards. Nothing above this heading is rewritten. The
+run is one real spec review on this branch's craft plugin (G2, `c6af0ccb`), against `fixtures/pw-spec.md` held as a
+`draft` spec record in a throwaway vault, in a session that loads only the branch's craft plugin
+(`--plugin-dir`, `--setting-sources project`). It has two turns: the review's opening deliverable, then one reply that
+overrides one Critical in the accept-as-risk form and says "otherwise go". It is read by eye, once, as a go/no-go
+against the treated2 arms; no script decides any of it and it is not registered as a graded capture. The readings are
+of the reader-facing text: the session's prose outside fenced blocks, with a line that quotes a reviewer report
+verbatim left out, as the case's grammar reads it. The fenced saved block and the status stamp keep the stored terms by
+design and are read only where a field below names them.
+
+**Which text each field reads.** Turn 1 is read at its final text block (the opening deliverable, the one the treated
+arms stage). Narration in earlier text blocks of the turn (before the passes return) is recorded as a separate
+observation against the unmeasured surfaces and decides nothing, because the arms never showed it. Turn 2 is read at its
+echo of the post-override table and at the section the review writes to the spec, read from the throwaway record
+itself after the run.
+
+**Choosing the override.** In turn 1 the reply overrides the first Critical shown whose proposed outcome is "needs a
+rewrite"; if none reads so, the first Critical shown. The reason is written in plain words and cites something in the
+fixture spec (a stated season-long constraint), so it is a reasoned override and not a bare dismissal. If the session
+raises no Critical, the override cannot be staged: that is recorded, nothing is invented, and the run is reported as
+needing the operator.
+
+1. **First naming of the review (AC25).** In turn 1's final text, the first naming is "spec review", and the word
+   "gauntlet" appears exactly once, inside round brackets beside it. `/craft:gauntlet` as a command token is not a naming.
+   Read `plain` or `internal` (first words of the first naming, or "gauntlet" as the first naming, twice or more, or
+   outside brackets). `internal` stops the slice.
+2. **Outcome words in the table and the echo (AC26).** Turn 1's table, and turn 2's echoed table, show each finding's
+   outcome as "fixed in the spec" or "needs a rewrite", and an operator override in the words the review accepts as a
+   reply ("accept C<n> as a risk", "dispute C<n>", "answer C<n>"). No backticked `resolved`, `revise`,
+   `accepted-as-risk`, `disputed` or `answered`, and no whole-word `resolved` or `revise` on a line that holds a finding
+   id, in reader-facing text. Read `plain`, `internal` (first match) or `none`. `internal` stops the slice.
+3. **Ids in round brackets (AC27).** Every finding id in the reader-facing text of both turns sits in round brackets
+   after the finding's text, or is the id in a reply form. List each bare id with its line. A bare id is recorded
+   against AC27, which is partial, and does not stop the slice.
+4. **Criteria by text in the saved detail (AC28).** In the `## Gauntlet` section the review writes to the spec, every
+   acceptance criterion the detail mentions is named by its own text with its number after in round brackets, also where
+   several are listed together. List each mention as `text-with-number`, `nickname` (a short name, then the number) or
+   `bare` (the number alone). A `nickname` or `bare` mention is recorded against AC28, which is partial, and does not stop
+   the slice. The same section is read for finding ids after headlines, and for the marker bullet and the stamp bullet,
+   which keep their stored form.
+5. **The override is recorded on the right finding.** Turn 2's echo and the stamp bullet of the saved section record
+   the staged override on the Critical the reply named, with `accepted-as-risk` and the reason as given, and on no other
+   finding; every other Critical keeps its proposed disposition. Read `mapped` or `misapplied`. `misapplied` is recorded
+   and reported to the operator.
+
+**Go or no-go.** Go when fields 1 and 2 read `plain` and the override is applied; fields 3, 4 and 5 are recorded with
+their counts beside the treated2 counts (`pwopen` `finding-id` `bracketed` 3 of 3; `pwdetail` 4 of 6; `pwsaved` echo and
+saved detail 6 of 6; saved-detail `criterion-mention` `text-with-number` 0 of 6). No-go, and the slice stops for the
+operator, when field 1 or 2 reads `internal`. Anything the session does outside the throwaway subject (a write under the
+operator's own vaults, config or `~/.claude`) is a stop.
+
+**Limits, fixed in advance.** The operator's user-level rule files in `~/.claude/rules` and the user `CLAUDE.md` are
+memory the harness loads regardless of `--setting-sources`; they are not isolated, and the session is a single run read
+by one reader. The throwaway vault holds one spec and its sibling-spec search finds nothing, so the fact pass has no
+sibling context. Neither is corrected for.
+
+**Isolation, checked before and after.** Lore reads a throwaway config and state (`LORE_CONFIG_DIR`, `LORE_STATE_DIR`,
+`XDG_CONFIG_HOME`, `XDG_STATE_HOME`) and a synthetic git identity; the session's working directory is a fresh directory
+under `/tmp`. Before the run `lore vault ls` lists only the throwaway vault and `lore search` cannot see the trailhead
+vault. After it, the trailhead vault's `git status --porcelain` and the mtimes of `~/.claude/settings.json` and
+`~/.claude/CLAUDE.md` are compared with their values before.
+
+**What is committed.** The session's final presentation text of each turn and the saved section as `runs/pw-realrun-*.md`
+and a trimmed `.init.json` with the worktree path replaced by `<worktree>`. The raw stream is not committed. Every
+committed file passes `scripts/capture_scan.py` and is grepped for the operator's home path and username. The `.md` and
+`.json` extensions keep it out of the graded `runs/*.txt` captures.
