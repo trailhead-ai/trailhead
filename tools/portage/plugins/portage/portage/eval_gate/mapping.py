@@ -24,7 +24,7 @@ from pathlib import Path, PurePosixPath
 SCHEMA_VERSION = 1
 DEFAULT_RUNS = 3
 DEFAULT_PASS_AT = 2
-CASE_NAME = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
+CASE_NAME = re.compile(r"^[a-z0-9][a-z0-9._-]*\Z")
 
 _TOP_KEYS = {"schema_version", "runner", "cases"}
 _RUNNER_KEYS = {"model", "allow_tools", "max_cost_usd"}

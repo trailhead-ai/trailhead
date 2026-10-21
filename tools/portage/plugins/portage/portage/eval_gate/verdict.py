@@ -40,7 +40,7 @@ plus a final newline) so an agent that cannot redirect shell output can hand it 
 ``splice --state <dir>``. ``verdict --gate-error <step>`` reads no state; with
 ``--state`` it still writes the section file there.
 
-Exit codes: 0 push, 1 stop, 2 usage, unusable state directory/plan, or marker fault.
+Exit codes: 0 push, 1 stop, 2 usage, unusable state directory/plan, an OS error reading or writing, or a marker fault.
 
 ``portage eval-gate splice --body-file <f> (--state <dir> | --section-file <f>)
 [--out <path>]`` prints the body with the section appended (no section in the body) or
@@ -90,9 +90,9 @@ REASONS = {
     NO_RESULT: "no usable result was recorded for this case",
 }
 
-_STEP = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
-_GRADER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
-_CORPUS = re.compile(r"^[A-Za-z0-9._][A-Za-z0-9._/-]{0,199}$")
+_STEP = re.compile(r"^[a-z][a-z0-9-]{0,31}\Z")
+_GRADER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}\Z")
+_CORPUS = re.compile(r"^[A-Za-z0-9._][A-Za-z0-9._/-]{0,199}\Z")
 _STATUSES = ("cases-selected", "no-cases-mapped", "base-unresolved", "mapping-invalid")
 
 
@@ -107,6 +107,10 @@ def persistent_reasons(reasons) -> list[str]:
 
 def _safe(text: object, limit: int = 300) -> str:
     return "".join(c for c in str(text) if c.isprintable())[:limit]
+
+
+def one_line(exc: BaseException) -> str:
+    return _safe(" ".join(str(exc).split()))
 
 
 def _corpus(root: object) -> str:
@@ -330,14 +334,18 @@ def require_state(state: Path) -> None:
 def write_section_file(state: Path, section: str) -> None:
     state = Path(state)
     require_state(state)
-    _atomic_write(state / SECTION_FILE, section + "\n")
+    atomic_write(state / SECTION_FILE, section + "\n")
 
 
-def _atomic_write(path: Path, text: str) -> None:
+def atomic_write(path: Path, text: str) -> None:
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
-    with os.fdopen(fd, "w") as f:
-        f.write(text)
-    os.replace(tmp, path)
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
 
 
 def _span(text: str) -> tuple[int, int] | None:

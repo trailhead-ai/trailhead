@@ -126,8 +126,8 @@ def cmd_verdict(args: argparse.Namespace) -> int:
             code, report, section = gate_verdict.verdict(Path(args.state))
         if args.state is not None:
             gate_verdict.write_section_file(Path(args.state), section)
-    except gate_verdict.Fault as e:
-        print(f"eval-gate verdict: {e}", file=sys.stderr)
+    except (gate_verdict.Fault, OSError) as e:
+        print(f"eval-gate verdict: {gate_verdict.one_line(e)}", file=sys.stderr)
         return 2
     for line in report:
         print(line)
@@ -158,14 +158,11 @@ def cmd_splice(args: argparse.Namespace) -> int:
         body = Path(args.body_file).read_text()
         section = section_path.read_text()
         result = gate_verdict.splice(body, section)
-    except (OSError, UnicodeDecodeError) as e:
-        print(f"eval-gate splice: {e}", file=sys.stderr)
+        if args.out:
+            Path(args.out).write_text(result)
+    except (gate_verdict.Fault, OSError, UnicodeDecodeError) as e:
+        print(f"eval-gate splice: {gate_verdict.one_line(e)}", file=sys.stderr)
         return 2
-    except gate_verdict.Fault as e:
-        print(f"eval-gate splice: {e}", file=sys.stderr)
-        return 2
-    if args.out:
-        Path(args.out).write_text(result)
-    else:
+    if not args.out:
         sys.stdout.write(result)
     return 0

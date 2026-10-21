@@ -452,3 +452,75 @@ def test_splice_missing_body_file_exits_2(tmp_path, capsys):
     sec = make_section(tmp_path)[0]
     assert dispatch.main(["eval-gate", "splice", "--body-file", str(tmp_path / "nope"),
                           "--section-file", str(sec)]) == 2
+
+
+# --- OS faults exit 2, never a traceback or the stop code ------------------
+
+def _leftovers(d):
+    return [p.name for p in d.iterdir() if p.name.endswith(".tmp")]
+
+
+def test_verdict_section_path_being_a_directory_exits_2_without_traceback(st, capsys):
+    st.plan([_entry("a-case")])
+    st.result("a-case")
+    (st.dir / "eval-gate-section.md").mkdir()
+    code = dispatch.main(["eval-gate", "verdict", "--state", str(st.dir)])
+    err = capsys.readouterr().err
+    assert code == 2
+    assert err.startswith("eval-gate verdict:") and "Traceback" not in err and len(err.splitlines()) == 1
+    assert _leftovers(st.dir) == []
+
+
+def test_verdict_unreadable_plan_exits_2(st, capsys):
+    (st.dir / "plan.json").mkdir()
+    assert dispatch.main(["eval-gate", "verdict", "--state", str(st.dir)]) == 2
+
+
+def test_splice_unwritable_out_exits_2_without_traceback(tmp_path, capsys):
+    code, out, err, _ = splice(capsys, "body\n", tmp_path, "--out", str(tmp_path / "no" / "such" / "out.md"))
+    assert code == 2
+    assert err.startswith("eval-gate splice:") and "Traceback" not in err
+    assert out == ""
+
+
+def test_splice_out_failure_leaves_no_temp_file(tmp_path, capsys):
+    target = tmp_path / "isdir"
+    target.mkdir()
+    code, *_ = splice(capsys, "body\n", tmp_path, "--out", str(target))
+    assert code == 2
+    assert _leftovers(tmp_path) == []
+
+
+# --- a trailing newline does not pass shape validation ---------------------
+
+def test_result_file_with_trailing_newline_in_name_is_not_echoed(st, capsys):
+    st.plan([_entry("a-case")])
+    st.result("a-case")
+    (st.dir / "results" / "zz\n.json").write_text(json.dumps(_result("zz\n")))
+    _, out, _ = verdict(capsys, st)
+    assert "zz" not in out
+    assert "ignored: 1 result with an invalid name" in out
+
+
+def test_planned_case_name_with_trailing_newline_is_refused(st, capsys):
+    st.plan([_entry("a-case\n")])
+    assert dispatch.main(["eval-gate", "verdict", "--state", str(st.dir)]) == 2
+
+
+def test_grader_name_with_trailing_newline_is_not_echoed(st, capsys):
+    st.plan([_entry("bad")])
+    st.result("bad", verdict="fail", passed=0, failed=1,
+              runs=[{"passed": False, "errored": False, "graders": [{"name": "grader\n", "passed": False}]}])
+    _, out, _ = verdict(capsys, st)
+    assert "grader\n=" not in out and "<invalid-grader-name>" in out
+
+
+def test_corpus_path_with_trailing_newline_is_not_echoed(st, capsys):
+    st.plan([_entry("a-case", root="plugins/x\n", grants=True)])
+    st.result("a-case")
+    _, out, _ = verdict(capsys, st)
+    assert "plugins/x" not in out
+
+
+def test_gate_error_step_with_trailing_newline_is_refused():
+    assert dispatch.main(["eval-gate", "verdict", "--gate-error", "plan\n"]) == 2
