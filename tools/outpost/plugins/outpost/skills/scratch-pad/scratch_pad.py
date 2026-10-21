@@ -115,6 +115,10 @@ Contract
                                   where ``<s>`` is the round's ASCII JSON
                                   encoded once more as a string literal
                                   then ``window.PAD_ROUND_NUMBER = 1;``
+                                  then ``window.PAD_ROUND_ID = "<32 hex>";``
+                                  a fresh ``secrets.token_hex(16)`` per round
+                                  built; an earlier round keeps its own id,
+                                  and a round with no such line still reads back
       <pad>/rounds.js             ``window.PAD_ROUNDS = JSON.parse(<s>);`` where
                                   ``<s>`` is the ASCII JSON list of one
                                   ``{"title": ...}`` per round, encoded the same way
@@ -147,6 +151,7 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import shutil
 import stat
 import subprocess
@@ -484,7 +489,8 @@ def _write_pad(folder: Path, kit_dir: Path, encoded: Encoded, earlier: Sequence[
     """Write the round after the *earlier* rounds' titles, the pad's ``rounds.js`` and its ``index.html``."""
     number = len(earlier) + 1
     shutil.copytree(kit_dir, folder / f"round-{number}")
-    round_js = encoded.round_js + f"window.PAD_ROUND_NUMBER = {number};\n"
+    round_id = json.dumps(secrets.token_hex(16))
+    round_js = encoded.round_js + f"window.PAD_ROUND_NUMBER = {number};\nwindow.PAD_ROUND_ID = {round_id};\n"
     (folder / f"round-{number}" / "round.js").write_text(round_js, encoding="utf-8")
     _write_rounds_js(folder, [*earlier, encoded.title])
     (folder / "index.html").write_text(_pad_index(number), encoding="utf-8")

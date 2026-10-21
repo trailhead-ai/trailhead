@@ -15,6 +15,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -1353,3 +1354,23 @@ def test_a_round_with_a_flow_option_is_published_as_a_workspace_site_with_the_fl
 
     got = _round_js_data(rig.ws / "sites" / "p" / "round-1" / "round.js")
     assert got == data
+
+
+def _workspace_round_id(site: Path, k: int) -> str:
+    lines = (site / f"round-{k}" / "round.js").read_text(encoding="utf-8").splitlines()
+    assert re.fullmatch(r'window\.PAD_ROUND_ID = "[0-9a-f]{32}";', lines[2]), lines
+    return json.loads(lines[2].removeprefix("window.PAD_ROUND_ID = ").removesuffix(";"))
+
+
+def test_a_workspace_pad_and_an_add_both_carry_ids_and_the_add_keeps_round_ones(rig, capsys):
+    assert rig.run() == 0
+    capsys.readouterr()
+    site = rig.ws / "sites" / "p"
+    first = _workspace_round_id(site, 1)
+    before = (site / "round-1" / "round.js").read_bytes()
+
+    assert rig.add("Pricing") == 0
+
+    assert (site / "round-1" / "round.js").read_bytes() == before
+    assert _workspace_round_id(site, 1) == first
+    assert _workspace_round_id(site, 2) != first
