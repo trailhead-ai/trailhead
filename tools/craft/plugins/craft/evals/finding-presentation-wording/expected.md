@@ -4816,7 +4816,11 @@ manual-check.*` appended to each criterion; the criterion text is unchanged, the
 the arms never exercised the gate. (2) The first grant of `Bash` by command prefix stopped the session twice before it
 did anything, because the review composes its shell steps (a variable assignment, pipes, here-documents); the grant used
 for the session that ran is `Read,Grep,Glob,Agent,Bash`. `Bash` is needed for `lore`, the two craft scripts and the
-review's own pipes; it is unrestricted in the tool, and lore's reach is bounded by the environment, not by the grant.
+review's own pipes; it is unrestricted in the tool. The environment points lore at the throwaway vault, but that bounds
+only a cooperating session: with the real `HOME`, `--permission-mode dontAsk` and unrestricted `Bash`, a session could
+unset those variables or reach credentials and the network. **This is not a sandbox.** It was acceptable here because
+the reviewed spec is a self-authored fixture. Do not reuse this recipe on a spec someone else wrote without a separate
+`HOME`, a container, or a narrow `Bash` allowlist.
 (3) The session's working directory holds a `CLAUDE.md` declaring a maturity level and a git repository, which the
 review's calibration step needs (the same condition a real consult run found). The two stopped attempts and the gate
 refusal made no review and wrote nothing; they are not read.

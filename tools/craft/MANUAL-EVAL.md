@@ -2506,7 +2506,9 @@ flipped the spec to `ready`. The stamp records the override on C1 as `accepted-a
 clauses with the number in brackets after, none bare, but mostly by short name, so AC28 stays partial. The fixture spec needed verification
 trailers on its criteria to pass the review's criterion gate (the arms never reach the gate), so the throwaway copy
 carries them. Limits: user-level rules and the claude.ai connectors still load; one session; `Bash` granted unrestricted
-because the review composes its shell steps; no sibling records. Three earlier invocations stopped before any review
+because the review composes its shell steps, so isolation holds only for a cooperating session (not a sandbox: never
+reuse it on a spec someone else wrote without a separate `HOME`, a container or a narrow `Bash` allowlist); no sibling
+records. Three earlier invocations stopped before any review
 and wrote nothing (two on a narrower `Bash` grant, one at the criterion gate before the trailers were added).
 `~/.claude/settings.json` was rewritten between turns 2 and 3, while no session of the run was alive, and matches the
 operator's dotfiles source. Captures: `runs/pw-realrun-turn1.md`,
