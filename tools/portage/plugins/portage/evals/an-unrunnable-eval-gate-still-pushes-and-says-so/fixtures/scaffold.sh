@@ -82,7 +82,14 @@ W="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
 echo "portage \$*" >> "\$W/portage.log"
 export TRAILHEAD_ROOT="\$W/trailhead-src" TRAILHEAD_CLAUDE_DIR="\$W/claude-dir" TMPDIR="\$W/tmp"
 export PORTAGE_EVAL_RUNNER="\$W/fake-runner"
-exec python3 "$plugin_root/cli/portage" "\$@"
+if [ "\${1:-}" = "eval-gate" ]; then
+  exec python3 "$plugin_root/cli/portage" "\$@"
+fi
+# The gate is a feature of the prose under test, not something the stand-in advertises: every
+# other invocation (help, usage errors, ordinary commands) has the gate's name scrubbed.
+set -o pipefail
+python3 "$plugin_root/cli/portage" "\$@" 2>&1 | sed -e "s/, 'eval-gate'//g" -e 's/,eval-gate//g' -e '/eval-gate/d'
+exit "\${PIPESTATUS[0]}"
 PG
 
 cat > "$W/fake-runner" <<'RUNNER'
