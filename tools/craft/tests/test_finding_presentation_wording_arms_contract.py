@@ -299,38 +299,26 @@ ARM_SOURCES.update(
 )
 
 
-# The plain-words sites each run the spec review's baseline composition, which is the same four sources at each site.
+# The plain-words sites each run the spec review's composition, which is the same four sources at each site.
 PLAIN_WORDS_SITES = ("pwopen", "pwdetail", "pwsaved")
+
+# Each plain-words round's arm prefix and the revision its arms read the two gauntlet files from; `rules.md` and
+# `council.md` are at the plain-words baseline in every round.
+PW_ROUNDS = {
+    "pw-baseline": PLAIN_WORDS_BASELINE_REVISION,
+    "pw-treated": PLAIN_WORDS_EDIT_REVISION,
+    "pw-treated2": PLAIN_WORDS_EDIT2_REVISION,
+}
+
 ARM_SOURCES.update(
     {
-        f"pw-baseline-{site}.md": [
+        f"{prefix}-{site}.md": [
             (RULES, PLAIN_WORDS_BASELINE_REVISION),
-            (GAUNTLET_SKILL, PLAIN_WORDS_BASELINE_REVISION),
-            (GAUNTLET_DISPOSITIONS, PLAIN_WORDS_BASELINE_REVISION),
+            (GAUNTLET_SKILL, gauntlet_revision),
+            (GAUNTLET_DISPOSITIONS, gauntlet_revision),
             (COUNCIL, PLAIN_WORDS_BASELINE_REVISION),
         ]
-        for site in PLAIN_WORDS_SITES
-    }
-)
-ARM_SOURCES.update(
-    {
-        f"pw-treated-{site}.md": [
-            (RULES, PLAIN_WORDS_BASELINE_REVISION),
-            (GAUNTLET_SKILL, PLAIN_WORDS_EDIT_REVISION),
-            (GAUNTLET_DISPOSITIONS, PLAIN_WORDS_EDIT_REVISION),
-            (COUNCIL, PLAIN_WORDS_BASELINE_REVISION),
-        ]
-        for site in PLAIN_WORDS_SITES
-    }
-)
-ARM_SOURCES.update(
-    {
-        f"pw-treated2-{site}.md": [
-            (RULES, PLAIN_WORDS_BASELINE_REVISION),
-            (GAUNTLET_SKILL, PLAIN_WORDS_EDIT2_REVISION),
-            (GAUNTLET_DISPOSITIONS, PLAIN_WORDS_EDIT2_REVISION),
-            (COUNCIL, PLAIN_WORDS_BASELINE_REVISION),
-        ]
+        for prefix, gauntlet_revision in PW_ROUNDS.items()
         for site in PLAIN_WORDS_SITES
     }
 )
@@ -496,26 +484,19 @@ def test_prompt_fixture_paths_reads_each_named_path():
     assert prompt_fixture_paths(text) == ["a/b.md", "c.md", "d.py"]
 
 
-@pytest.mark.parametrize("site", FS_SITE_SOURCES)
-def test_each_fs_prompt_names_fixture_files_that_exist(site: str):
-    prompt = (FIXTURES_DIR / f"fs-prompt-{site}.md").read_text(encoding="utf-8")
-    paths = prompt_fixture_paths(prompt)
-    assert paths, f"fs-prompt-{site}.md names no fixture file"
+@pytest.mark.parametrize(
+    "prompt_file",
+    [*(f"fs-prompt-{site}.md" for site in FS_SITE_SOURCES), *(f"pw-prompt-{site}.md" for site in PLAIN_WORDS_SITES)],
+)
+def test_each_fs_and_pw_prompt_names_fixture_files_that_exist(prompt_file: str):
+    paths = prompt_fixture_paths((FIXTURES_DIR / prompt_file).read_text(encoding="utf-8"))
+    assert paths, f"{prompt_file} names no fixture file"
     for rel in paths:
-        assert (FIXTURES_DIR / rel).is_file(), (site, rel)
+        assert (FIXTURES_DIR / rel).is_file(), (prompt_file, rel)
 
 
 PW_SPEC = FIXTURES_DIR / "pw-spec.md"
 ONE_LINE = 80
-
-
-def test_each_pw_prompt_names_fixture_files_that_exist():
-    for site in PLAIN_WORDS_SITES:
-        prompt = (FIXTURES_DIR / f"pw-prompt-{site}.md").read_text(encoding="utf-8")
-        paths = prompt_fixture_paths(prompt)
-        assert paths, f"pw-prompt-{site}.md names no fixture file"
-        for rel in paths:
-            assert (FIXTURES_DIR / rel).is_file(), (site, rel)
 
 
 @pytest.mark.parametrize("site", PLAIN_WORDS_SITES)

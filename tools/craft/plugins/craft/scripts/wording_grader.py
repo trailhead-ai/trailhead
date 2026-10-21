@@ -224,7 +224,7 @@ _REPLY_FORM_RES = (
 _STAMP_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9])C(\d+) `([a-z-]+)`")
 _STAMP_TERM_RE = re.compile(rf" `(?:{_RITUAL_TERMS})`")
 _OVERRIDE_TERMS = ("accepted-as-risk", "disputed", "answered")
-_OVERRIDE_ARG_RE = re.compile(r"C(\d+)=(accepted-as-risk|disputed|answered):(.*\S.*)")
+_OVERRIDE_ARG_RE = re.compile(rf"C(\d+)=({'|'.join(_OVERRIDE_TERMS)}):(.*\S.*)")
 _SAVED_HEADING = "## Gauntlet"
 _BULLET_RE = re.compile(r"[-*+] ")
 _FINDING_TAGS = ("[Critical]", "[Important]", "[Minor]")
@@ -518,6 +518,15 @@ def _fenced_blocks(physical: list[str]) -> list[tuple[int, int]]:
     return blocks
 
 
+def _first_block_holding(physical: list[str], heading: str) -> list[str] | None:
+    """The lines of the first fenced block with a line that is `heading` once trimmed, fences included."""
+    for first, last in _fenced_blocks(physical):
+        block = physical[first : last + 1]
+        if any(line.strip() == heading for line in block):
+            return block
+    return None
+
+
 def _fenced_flags(physical: list[str]) -> list[bool]:
     flags = [False] * len(physical)
     for first, last in _fenced_blocks(physical):
@@ -723,12 +732,7 @@ def _saved_parts(text: str) -> tuple[list[str] | None, str]:
     the heading, the marker bullet and the stamp bullet are taken out; a bullet runs over the non-blank lines that do
     not open a bullet or a heading of their own.
     """
-    physical = _split_lines(text)
-    block = next(
-        (physical[first : last + 1] for first, last in _fenced_blocks(physical)
-         if any(line.strip() == _SAVED_HEADING for line in physical[first : last + 1])),
-        None,
-    )
+    block = _first_block_holding(_split_lines(text), _SAVED_HEADING)
     if block is None:
         return None, ""
     body = block[1:]
@@ -808,16 +812,8 @@ def grade_override_mapping(text: str, staged: list[tuple[str, str, str]]) -> str
 # --- persisted-levels ------------------------------------------------------------------------
 
 
-def _council_review_block(physical: list[str]) -> list[str] | None:
-    for first, last in _fenced_blocks(physical):
-        block = physical[first : last + 1]
-        if any(line.strip() == "## Council Review" for line in block):
-            return block
-    return None
-
-
 def grade_persisted_levels(text: str) -> str:
-    block = _council_review_block(_split_lines(text))
+    block = _first_block_holding(_split_lines(text), "## Council Review")
     if block is None:
         return "missing"
     entries: dict[str, list[str]] = {}

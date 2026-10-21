@@ -1205,6 +1205,7 @@ def test_the_persisted_levels_check_needs_no_reports_and_ignores_them(tmp_path):
 
 REPORT_CHECKS = ("severity-name", "reviewer-name", "calibration-level", "code-review-name")
 NEW_CHECKS = (*REPORT_CHECKS, "persisted-levels")
+PLAIN_WORDS_REPORT_CHECKS = ("review-name", "outcome-word", "finding-id")
 
 
 def test_every_new_verdict_exits_with_its_class(reports):
@@ -1215,7 +1216,7 @@ def test_every_new_verdict_exits_with_its_class(reports):
     assert run_grader(["--check", "persisted-levels"], b"x").returncode == 1
 
 
-@pytest.mark.parametrize("check", NEW_CHECKS)
+@pytest.mark.parametrize("check", [*NEW_CHECKS, *PLAIN_WORDS_REPORT_CHECKS, "stamp-form"])
 def test_empty_stdin_could_not_grade_for_each_new_check(check, reports):
     could_not_grade(["--check", check, "--reports", str(reports)], b"", "empty-input")
 
@@ -1225,7 +1226,7 @@ def test_non_utf8_stdin_could_not_grade_for_each_new_check(check, reports):
     could_not_grade(["--check", check, "--reports", str(reports)], b"Critical \xff\xfe", "not-utf8")
 
 
-@pytest.mark.parametrize("check", NEW_CHECKS)
+@pytest.mark.parametrize("check", [*NEW_CHECKS, *PLAIN_WORDS_REPORT_CHECKS, "stamp-form"])
 def test_oversized_stdin_could_not_grade_for_each_new_check(check, reports):
     limit = _load_module().MAX_INPUT_BYTES
     could_not_grade(["--check", check, "--reports", str(reports)], b"a" * (limit + 1), "input-too-large")
@@ -1236,7 +1237,7 @@ def test_drop_value_line_is_not_applicable_to_each_new_check(check, reports):
     could_not_grade(["--check", check, "--reports", str(reports), "--drop-value-line"], b"x\n", "option-not-applicable")
 
 
-@pytest.mark.parametrize("check", REPORT_CHECKS)
+@pytest.mark.parametrize("check", [*REPORT_CHECKS, *PLAIN_WORDS_REPORT_CHECKS])
 def test_a_naming_check_needs_a_reports_argument(check):
     could_not_grade(["--check", check], b"x\n", "missing-reports")
 
@@ -1946,47 +1947,23 @@ def test_staged_overrides_reads_both_overrides_and_their_reasons_from_the_reply(
     assert staged_overrides(prompt.replace("C2", "C4").replace("C3", "C5"))[1].startswith("C4=")
 
 
-# The saved section of a pwsaved capture: the verdict of each check run on it, with the arguments that scope it.
-PW_SAVED_VERDICTS = {
-    "pw-pilot-pwsaved-1": {
-        "finding-id": ("bare", ["--saved-detail"]),
-        "criterion-mention": ("bare", ["--saved-detail", "--criteria", str(PW_SPEC)]),
+def _pwsaved(ident, mention):
+    """A pwsaved capture's saved-section verdicts, each with the arguments that scope its check; every run so far keeps
+    the stamp and maps the staged overrides."""
+    return {
+        "finding-id": (ident, ["--saved-detail"]),
+        "criterion-mention": (mention, ["--saved-detail", "--criteria", str(PW_SPEC)]),
         "stamp-form": ("kept", []),
         "override-mapping": ("mapped", "staged"),
-    },
-    **{
-        f"pw-baseline-pwsaved-{n}": {
-            "finding-id": ("bare", ["--saved-detail"]),
-            "criterion-mention": ("bare", ["--saved-detail", "--criteria", str(PW_SPEC)]),
-            "stamp-form": ("kept", []),
-            "override-mapping": ("mapped", "staged"),
-        }
-        for n in (1, 2, 3)
-    },
-    **{
-        f"pw-treated-pwsaved-{n}": {
-            "finding-id": ("bracketed", ["--saved-detail"]),
-            "criterion-mention": (
-                "nickname" if n in (1, 6) else "bare",
-                ["--saved-detail", "--criteria", str(PW_SPEC)],
-            ),
-            "stamp-form": ("kept", []),
-            "override-mapping": ("mapped", "staged"),
-        }
-        for n in range(1, 7)
-    },
-    **{
-        f"pw-treated2-pwsaved-{n}": {
-            "finding-id": ("bracketed", ["--saved-detail"]),
-            "criterion-mention": (
-                "bare" if n in (1, 5) else "nickname",
-                ["--saved-detail", "--criteria", str(PW_SPEC)],
-            ),
-            "stamp-form": ("kept", []),
-            "override-mapping": ("mapped", "staged"),
-        }
-        for n in range(1, 7)
-    },
+    }
+
+
+# The saved section of a pwsaved capture: the verdict of each check run on it, with the arguments that scope it.
+PW_SAVED_VERDICTS = {
+    "pw-pilot-pwsaved-1": _pwsaved("bare", "bare"),
+    **{f"pw-baseline-pwsaved-{n}": _pwsaved("bare", "bare") for n in (1, 2, 3)},
+    **{f"pw-treated-pwsaved-{n}": _pwsaved("bracketed", "nickname" if n in (1, 6) else "bare") for n in range(1, 7)},
+    **{f"pw-treated2-pwsaved-{n}": _pwsaved("bracketed", "bare" if n in (1, 5) else "nickname") for n in range(1, 7)},
 }
 
 # The `pwopen` guard `criterion-mention` is graded against the spec's criteria, which the site-wide table does not pass.
@@ -2437,25 +2414,10 @@ def test_a_malformed_staged_override_could_not_grade(value):
     could_not_grade(["--check", "override-mapping", "--override", value], b"x\n", "bad-arguments")
 
 
-def test_the_override_option_applies_to_override_mapping_only(reports):
+def test_the_override_option_applies_to_override_mapping_only():
     could_not_grade(
         ["--check", "stamp-form", "--override", "C2=disputed:why"], b"x\n", "option-not-applicable"
     )
-
-
-NEW_PLAIN_WORDS_CHECKS = ("review-name", "outcome-word", "finding-id")
-
-
-@pytest.mark.parametrize("check", NEW_PLAIN_WORDS_CHECKS)
-def test_a_plain_words_naming_check_needs_a_reports_argument(check):
-    could_not_grade(["--check", check], b"x\n", "missing-reports")
-
-
-@pytest.mark.parametrize("check", [*NEW_PLAIN_WORDS_CHECKS, "stamp-form"])
-def test_empty_and_oversized_stdin_could_not_grade_for_each_plain_words_check(check, reports):
-    args = ["--check", check, "--reports", str(reports)]
-    could_not_grade(args, b"", "empty-input")
-    could_not_grade(args, b"a" * (_load_module().MAX_INPUT_BYTES + 1), "input-too-large")
 
 
 def test_every_plain_words_verdict_exits_with_its_class(reports):
