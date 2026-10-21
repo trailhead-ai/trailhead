@@ -217,6 +217,13 @@ class TestLoaderRefusals:
         assert "ghost" in plan["mapping_invalid"]["fault"]
 
 
+    def test_a_bad_case_name_is_refused_even_with_its_case_yaml_present(self, repo, capsys):
+        text = _mapping({"Bad_Name": {"measures": ["skills/a.md"]}})
+        _, plan, _ = _invalid(repo, capsys, text, extra_files=("p/evals/Bad_Name/case.yaml",))
+        assert plan["status"] == "mapping-invalid"
+        assert "must match" in plan["mapping_invalid"]["fault"]
+
+
 class TestDefaults:
     def _go(self, repo, capsys, **kw):
         _write(repo, "p/skills/a.md")
