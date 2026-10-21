@@ -472,14 +472,16 @@ preview's exit **in this order**, taking the first that matches:
    (`{survivor, status, reset-to-open, absorbed: [{name, status, note}],
    supersedes}`) and `dependents` (each dropped name mapped to a list of `{name, vault, status}`).
    Go to Confirmation 2.
-2. **Exit 1 with `reason-code: not-mergeable`.** Nothing was written. Each name on the `subject:`
-   line is either a follow-up folded into a merge that some task depends on, which has a `dependents
-   <name>: <vault>/<task> ...` line, or one that is `blocked`, which has none. For the first, name
-   the dependents (each validated against the step 1 shape first), say that follow-up cannot be
-   folded away while they depend on it, and offer the merge the other way round: it survives and the
-   others fold into it, as `merge <names> into <that name>`. For the second, say it is blocked and
-   cannot be merged, and offer `drop`. Then ask Confirmation 1's question again, keep the answers
-   already given, and run the preview again after the new answer.
+2. **Exit 1 with `reason-code: not-mergeable`.** Nothing was written. Tell each name on the
+   `subject:` line apart by the status step 2 gathered for it. One gathered `blocked` cannot be
+   merged: say so, and offer `drop`. Any other is a follow-up folded into a merge that some task
+   depends on. Its `dependents <name>: <vault>/<task> ...` line names those tasks (each validated
+   against the step 1 shape first); when it has no such line, every task depending on it has a name
+   that fails that shape, so say tasks depend on it without naming them. Either way, say that
+   follow-up cannot be folded away while they depend on it, and offer the merge the other way round:
+   it survives and the others fold into it, as `merge <names> into <that name>`. Then ask
+   Confirmation 1's question again, keep the answers already given, and run the preview again after
+   the new answer.
 3. **Every other code, or no code.** Act on the table in step 8a. Nothing was written, so stop: no
    refinement runs, and the run goes to step 13.
 
@@ -551,7 +553,7 @@ Act on the exit **in this order**, taking the first that matches:
 | `invalid-followup-name` | A follow-up name failed the safe-name check; the vault's record name. Nothing was written. Rename it, then rerun. |
 | `not-a-gathered-followup` | A named follow-up is not among the spec's gathered follow-ups (nested under a parent, already dropped or merged away, or linked to no slice of the spec); the vault's. Nothing was written; `subject:` names it. Rerun the ritual. |
 | `invalid-dispositions-file` | The dispositions file was not the expected object, repeated a name, had a merge with no folded-in follow-up or a missing revision, an intent missing or empty once sanitized, or drops with an empty reason; this ritual's. Nothing was written. Report it and rerun. |
-| `not-mergeable` | A merge member is `blocked`, or a follow-up folded in has a dependent in some vault; the vault's. Nothing was written. `subject:` names the member, and a `dependents <name>: <vault>/<task> ...` line names the tasks that depend on it. In the preview, step 8 offers the merge the other way round; here, report it and rerun. |
+| `not-mergeable` | A merge member is `blocked`, or a follow-up folded in has a dependent in some vault; the vault's. Nothing was written. `subject:` names the member, and a `dependents <name>: <vault>/<task> ...` line names the tasks that depend on it whose names pass the step 1 shape. In the preview, step 8 offers the merge the other way round; here, report it and rerun. |
 | `child-changed` | A follow-up's record changed after it was shown (its text, or a status such as `blocked`); the vault's. Nothing was written; `subject:` names it. Rerun the ritual so the operator dispositions it again from its new text. |
 | `dispose-incomplete` | A drop, a merge note or a supersede could not be written, or its read-back did not show it; `lore`'s or the vault's. Stdout JSON says what landed. Read `failed` and `incomplete-merges`, then rerun. A `failed` entry with `reason: "child-changed"` was skipped because the record changed after it was shown. |
 | `internal-error` | The script hit a bug of its own; the script's. No JSON is printed, so which writes landed is unknown. Rerun the ritual, which gathers fresh; if it repeats, report it to a maintainer. |
