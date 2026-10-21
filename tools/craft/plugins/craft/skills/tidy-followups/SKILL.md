@@ -563,11 +563,11 @@ A code shared with the gather table (`no-vaults`, `spec-not-found`, `spec-ambigu
 code, or no code, is a failure of unknown cause: say so and stop at step 13.
 
 In the JSON, `failed[].write` is `drop`, `merge-note` (`name` is the survivor) or `supersede`
-(`name` is the folded-in follow-up). `command` is the `lore` command that completes that write, and
-is null for every `merge-note` (its text never goes on a command line) and for any entry with
-`reason: "child-changed"`. A `drop` command sets the status only: the reason note is written only by
-a rerun. `incomplete-merges` holds `{survivor, absorbed}` for each group whose note or any supersede
-did not land.
+(`name` is the folded-in follow-up). Only a `supersede` carries a `command`, the `lore` command that
+completes that write. It is null for every `drop` (a drop that did not land leaves the follow-up
+gathered, and the rerun offers it again with its reason), for every `merge-note` (its text never
+goes on a command line) and for any entry with `reason: "child-changed"`. `incomplete-merges` holds
+`{survivor, absorbed}` for each group whose note or any supersede did not land.
 
 ### 9. First refinement pass
 
@@ -747,11 +747,11 @@ the operator to fill. When step 8a ran, two things come first and apply to which
 matches:
 
 - Each non-null `failed[].command`, alone on its own line, only when it opens with the `lore record
-  update` or `lore record
-  supersede` verb followed by a `task/` record name and holds nothing outside letters, digits, `.`, `_`, `/`,
-  `-`, `=` and spaces, under the run-only-while-the-state-still-holds note from step 7. A `drop`
-  command sets the status only. Print no command for a `merge-note`, for an entry with
-  `reason: "child-changed"`, or for one that fails the shape check: name the write and nothing else.
+  supersede` verb followed by a `task/` record name and holds nothing outside letters, digits, `.`,
+  `_`, `/`, `-`, `=` and spaces, under the run-only-while-the-state-still-holds note from step 7.
+  Print no command for a `drop`, for a `merge-note`, for an entry with `reason: "child-changed"`, or
+  for one that fails the shape check: name the write and nothing else. A failed `drop` is covered by
+  the re-run line below.
 - Each group in `incomplete-merges` as the answer to give again at the next run's Confirmation 1,
   alone on its own line, with only those folded-in names the next run still lists (one already
   superseded is not gathered again):

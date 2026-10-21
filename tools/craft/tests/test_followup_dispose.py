@@ -186,7 +186,7 @@ def run_incomplete(env, vault, spec, names, hook, tmp_path, capsys):
     return run_dispose(runner, spec, tmp_path, capsys, file_for(env, vault, names))
 
 
-def test_a_failed_second_drop_is_reported_with_a_command_that_completes_it(
+def test_a_failed_second_drop_has_no_command_and_stays_gathered_for_a_rerun_with_its_reason(
     lore_env, spec, pile, tmp_path, capsys
 ):
     env, vault = lore_env
@@ -203,11 +203,33 @@ def test_a_failed_second_drop_is_reported_with_a_command_that_completes_it(
     assert sorted(d["name"] for d in out["dropped"]) == [first, third]
     assert [(f["name"], f["write"]) for f in out["failed"]] == [(second, "drop")]
     assert sidecar_of(env, vault, second)["status"] != "dropped"
-    command = out["failed"][0]["command"]
-    assert REASON not in command
-    done = paste(env, command)
-    assert done.returncode == 0, done.stderr
+    assert out["failed"][0]["command"] is None
+    assert second in [f["name"] for f in gather_json(env, spec)["followups"]]
+    code, out, err = run_dispose(EnvRunner(env), spec, tmp_path, capsys, file_for(env, vault, [second]))
+    assert code == 0, err
     assert sidecar_of(env, vault, second)["status"] == "dropped"
+    assert dropped_section(body_of(env, vault, second)).strip() == f"Reason: {REASON}"
+
+
+def test_a_drop_whose_reread_before_the_write_fails_has_no_command_and_writes_nothing(
+    lore_env, spec, pile, tmp_path, capsys
+):
+    env, vault = lore_env
+    target = pile[0]
+
+    def hook(argv, stdin, runner):
+        if argv[:2] == ["record", "show"] and argv[-1] == f"task/{target}":
+            shown = [i for i, a in enumerate(runner.calls[:-1]) if a == argv]
+            listed = [i for i, a in enumerate(runner.calls[:-1]) if a[:2] == ["task", "list"]]
+            if shown and listed and listed[-1] > shown[-1]:
+                return refused(argv)
+
+    runner = EnvRunner(env, hook=hook)
+    code, out, err = run_dispose(runner, spec, tmp_path, capsys, file_for(env, vault, [target]))
+    assert (code, reason_of(err)) == (2, "dispose-incomplete")
+    assert [(f["name"], f["write"], f["command"]) for f in out["failed"]] == [(target, "drop", None)]
+    assert runner.writes() == []
+    assert target in [f["name"] for f in gather_json(env, spec)["followups"]]
 
 
 def test_a_drop_that_exits_zero_but_leaves_the_record_unchanged_is_failed(
@@ -997,7 +1019,7 @@ def test_a_drop_that_lands_but_exits_nonzero_is_failed_and_not_listed_dropped(
     assert sidecar_of(env, vault, target)["status"] == "dropped"
     assert (code, reason_of(err)) == (2, "dispose-incomplete")
     assert [(f["name"], f["write"]) for f in out["failed"]] == [(target, "drop")]
-    assert out["failed"][0]["command"] is not None
+    assert out["failed"][0]["command"] is None
     assert out["dropped"] == []
 
 

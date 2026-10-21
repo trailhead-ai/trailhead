@@ -81,9 +81,12 @@ Stdout on exit 0 and on every exit 2 after a write is one JSON object:
                          `write` is `drop`, `merge-note` (`name` is the survivor) or
                          `supersede` (`name` is the absorbed follow-up). `command` is the
                          exact `lore` command that completes it, built from shape-checked
-                         names, carrying no free text, and runnable as pasted; it is null
-                         for `merge-note` (its text never goes on a command line) and, with
-                         `reason: "child-changed"`, for any write the guard skipped
+                         names, carrying no free text, and runnable as pasted; only a
+                         `supersede` has one. It is null for `merge-note` (its text never
+                         goes on a command line), for `drop` (`dropped` freezes the body, so a
+                         command could close the follow-up with no reason; a drop that did
+                         not land leaves it gathered, and a rerun drops it with its reason)
+                         and, with `reason: "child-changed"`, for any write the guard skipped
     incomplete-merges    {survivor, absorbed: [names]} per group with a failure; the operator
                          re-enters it with the still-gathered absorbed follow-ups
 
@@ -312,11 +315,11 @@ def drop_one(runner, vault: str, name: str, baseline: dict, note: str) -> dict |
     except DisposeError:
         return failure_record(name, "drop", None, "child-changed")
     except (parent.ParentError, gather.GatherError):
-        return failure_record(name, "drop", argv)
+        return failure_record(name, "drop", None)
     diff = _appending_diff(old, [f"## Dropped\n\n{note}\n"])
     done = parent._write(runner, [*argv, "--diff"], stdin=diff)
     if done is None or done.returncode != 0 or not _drop_landed(runner, vault, name, note):
-        return failure_record(name, "drop", argv)
+        return failure_record(name, "drop", None)
     return None
 
 
