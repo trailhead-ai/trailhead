@@ -62,7 +62,7 @@ Per-group behavior is read from the `[release]` block of the group TOML:
 Before `updater` pushes, `portage eval-gate` runs the eval cases that measure the prose the branch
 changed (the mapping is each corpus's `evals/eval-gate.json`). A case that scores below its bar stops
 every push and is named in the report; a gate that cannot run lets the push through, and the PR body
-carries a `## Eval gate` section giving the reason. The runs use the operator's Claude Code login.
+carries a `## Eval gate` section giving the reason. The runner is started without the caller's API keys and tokens; see the docs below for what that does and does not guarantee about billing.
 
 A sandbox-write canary runs first. If the runner's sandbox cannot write, the cases are skipped with
 `runner-sandbox-unwritable` rather than scored as failures. `PORTAGE_EVAL_RUNNER` (an absolute path to

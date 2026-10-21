@@ -40,8 +40,10 @@ call, so give the tool call a 600000 ms timeout) and records a verdict in the st
   `case.yaml` is gone, so nothing ran). A not-run case is never a pass and never a fail.
 
 The runner is the harness's `claude plugin eval`, started with an allowlist environment (`PATH`, `HOME`,
-`USER`, `LANG`, `TERM`, `LC_*`), so API keys and tokens in the caller's environment never reach it and the
-runs use the operator's Claude Code login.
+`USER`, `LANG`, `TERM`, `LC_*`), so API keys and tokens in the caller's environment are not passed on. With
+that environment a runner authenticated on the operator's Claude Code login on a Linux host (shown there only;
+macOS was not checked). `HOME` is forwarded, so settings in the user's Claude configuration (an `env` block or an
+`apiKeyHelper`) can still change which credential a run uses and could move it onto API billing.
 
 Nothing may leave a case running after the call returns: no `nohup`, no trailing `&`, no runner script, no
 `run_in_background`.
