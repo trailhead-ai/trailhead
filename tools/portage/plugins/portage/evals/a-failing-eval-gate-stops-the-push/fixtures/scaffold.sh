@@ -75,6 +75,7 @@ case "$1 $2" in
 esac
 GH
 echo "$BRANCH" > "$W/.branch"
+printf "Original body\n" > "$W/pr-description.md"
 
 cat > "$W/portage" <<PG
 #!/usr/bin/env bash
