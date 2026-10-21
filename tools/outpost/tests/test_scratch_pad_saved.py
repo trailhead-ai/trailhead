@@ -921,6 +921,43 @@ def test_a_tab_without_focus_takes_the_other_tabs_note_even_with_its_caret_still
     assert got["stored0"] == {"pick": 1, "not": [], "none": False, "note": "final"}
 
 
+def test_a_tab_whose_window_regains_focus_keeps_the_text_and_caret_of_the_note_it_is_typing(tmp_path):
+    pad = _build(tmp_path)
+    _, got = _pair(
+        pad,
+        """
+        await harness.barrier();
+        await show(0);
+        await typeNote(0, 'theirs');
+        await press(thisOne(0, 2));
+        await harness.barrier();
+        """,
+        """
+        await ready();
+        await typeNote(0, 'my own words');
+        note(0).focus();
+        note(0).setSelectionRange(3, 7);
+        window.dispatchEvent(new Event('blur'));
+        window.dispatchEvent(new Event('focus'));
+        await harness.barrier();
+        await harness.waitFor('the pick to arrive', () => pressed(thisOne(0, 2)) === 'true');
+        const out = {
+          text: note(0).value, start: note(0).selectionStart, end: note(0).selectionEnd,
+          focused: document.activeElement === note(0), picked: flags(0, thisOne),
+        };
+        await harness.barrier();
+        return out;
+        """,
+    )
+    assert got == {
+        "text": "my own words",
+        "start": 3,
+        "end": 7,
+        "focused": True,
+        "picked": ["false", "false", "true"],
+    }
+
+
 MISSED = {
     "pageshow": ("window.dispatchEvent(new PageTransitionEvent('pageshow', {persisted: true}));", True),
     "visible": (

@@ -116,8 +116,10 @@ current.
   ignored, and the tab keeps what it has.
 - Taking another tab's answers changes the page's answers in place and saves nothing, so tabs never
   echo a change back and forth.
-- A note box you are typing in keeps its text; your next keystroke saves it, so the note being typed
-  wins. Every other control still changes to match.
+- A note box counts as being typed in only while the caret is in it and the window has focus. It keeps
+  its text, and your next keystroke saves it, so the note being typed wins. A tab without focus takes
+  the other tab's note into the box even with its caret left there. Every other control still changes
+  to match.
 - A tab that comes back into view (`pageshow`, or `visibilitychange` to visible) reads its round's
   entry again and takes it, so a tab that missed an event never saves stale answers over newer ones.
 
@@ -139,6 +141,11 @@ tells it about each change, and hears from it about another tab's changes.
 - **Notes are readable by other pages on the same origin.** The spec keeps a pad's answers in the
   browser that made them and accepts that every site there shares one origin; nothing on the page
   sends them anywhere.
+- **A page restored from the back/forward cache keeps its own note.** A page restored with its caret
+  still in a note box gets no window `blur` when it entered the cache. If another tab changed that note
+  meanwhile, the restored page keeps its own note text in the box on return, and its next keystroke
+  saves that text over the other tab's note. This needs back/forward navigation (keyboard or mouse
+  button) between rounds with the caret in a note box and an edit in another tab in between.
 - **There is no "start this round over" control.** Answers stay until each is undone by hand or the
   browser's storage is cleared.
 
@@ -203,4 +210,5 @@ first change that fails to save when only writing fails.
 
 You pick A in one tab. The other tab shows A picked, its dot reads "answered", and its reply names
 A, without a reload. A note typed in either tab appears in the other, unless you are typing in that
-same note box there. A tab you come back to shows the latest answers.
+same note box there, with the caret in it and the window focused; a tab without focus takes the note
+even with its caret left in the box. A tab you come back to shows the latest answers.
