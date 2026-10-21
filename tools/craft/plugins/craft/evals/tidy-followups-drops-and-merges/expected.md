@@ -340,3 +340,8 @@ land leaves the follow-up gathered. For any run against `a3fa728a` or later:
 
 The recorded `drop-fails` result (`runs/drop-fails-treat.*`) is graded against the original registration and is not
 re-graded. The current behaviour has not been observed in an eval run.
+
+From this change, the line under each `## Merged from task/<name>` heading reads `Intent: <text>`, so the
+`merge-left-ready`, `merge-refused-dependent` and `edit-intent` lines that say the section holds an intent or the
+operator's text mean the text after that label, and the grader's `first_line` carries the label. The recorded runs are
+not re-graded.

@@ -49,7 +49,8 @@ printed, and gets no `dependents` line of its own. A survivor may have dependent
                supersedes: [{name, by}]}],
      dependents}
 `note` is the exact text appended to the survivor for that absorbed follow-up
-(`## Merged from task/<name>`, a blank line, the sanitized intent, a newline);
+(`## Merged from task/<name>`, a blank line, `Intent: ` and the sanitized intent, a newline;
+the fixed label keeps any intent text from opening a line as markdown);
 `reset-to-open` is true when the survivor is `ready` and will go `open`; `supersedes` is
 the supersedes planned. `dependents` maps each dropped name to a list of `{name, vault,
 status}`.
@@ -62,8 +63,8 @@ write (`revision` hashes the body only, so status is compared as well).
                (sanitized as `followup_parent.load_reason` sanitizes a parent's drop
                reason); the read-back must show the `dropped` status and that section.
     merge      one `--diff` write on the survivor appending a `## Merged from task/<name>`
-               section per absorbed follow-up, with `--status open` on the same write when
-               the survivor was `ready`. A section is skipped only when its heading and
+               section per absorbed follow-up, its one line `Intent: <intent>`, with `--status open` on the
+               same write when the survivor was `ready`. A section is skipped only when its heading and
                the identical intent line are already there together. The read-back must
                show every intent line and the status. Only then, one
                `lore record supersede task/<absorbed> --by task/<survivor> --vault <v>` per
@@ -330,7 +331,7 @@ def drop_one(runner, vault: str, name: str, baseline: dict, note: str) -> dict |
 
 
 def _section(name: str, intent: str) -> str:
-    return f"## Merged from task/{name}\n\n{intent}\n"
+    return f"## Merged from task/{name}\n\nIntent: {intent}\n"
 
 
 def _has_section(body: str, section: str) -> bool:

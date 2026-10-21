@@ -630,8 +630,8 @@ def test_two_overlapping_follow_ups_merged_into_a_third_carry_their_intent_and_e
     code, out, err = run_dispose(EnvRunner(env), spec, tmp_path, capsys, doc)
     assert code == 0, err
     body = body_of(env, vault, survivor)
-    assert merged_line(body, one) == "intent of one"
-    assert merged_line(body, two) == "intent of two"
+    assert merged_line(body, one) == "Intent: intent of one"
+    assert merged_line(body, two) == "Intent: intent of two"
     assert [sidecar_of(env, vault, n)["status"] for n in (one, two)] == ["superseded"] * 2
     assert sorted(sidecar_of(env, vault, survivor)["supersedes"]) == sorted(
         [f"task/{one}", f"task/{two}"]
@@ -668,7 +668,7 @@ def test_a_ready_survivor_whose_notes_already_landed_is_still_reset_to_open(
 ):
     env, vault = lore_env
     absorbed = make_followup(env, vault, "Absorbed", status="open", spec=spec)
-    body = f"Survivor body.\n\n## Merged from task/{absorbed}\n\n{INTENT}\n"
+    body = f"Survivor body.\n\n## Merged from task/{absorbed}\n\nIntent: {INTENT}\n"
     survivor = make_followup(env, vault, "Ready survivor", status="ready", spec=spec, body=body)
     doc = merge_doc(env, vault, [(survivor, [absorbed])])
     code, out, err = run_dispose(EnvRunner(env), spec, tmp_path, capsys, doc)
@@ -851,6 +851,34 @@ def test_an_intent_with_a_token_a_link_and_a_heading_is_sanitized_onto_one_line(
     assert "\n## Injected" not in body
 
 
+@pytest.mark.parametrize(
+    "intent",
+    [
+        "## Refine \u2014 unresolved",
+        "## Merged from task/other",
+        "# H",
+        "- item",
+        "| a |",
+        "**Delivers:** x",
+    ],
+)
+def test_an_intent_opening_with_line_start_markdown_lands_as_one_labelled_line_and_leaves_the_survivor_classification(
+    lore_env, spec, trio, tmp_path, capsys, intent
+):
+    env, vault = lore_env
+    survivor, one, two = trio
+    sidecar = sidecar_of(env, vault, survivor)
+    before = dispose.parent._static_verdict(sidecar, body_of(env, vault, survivor), None, lambda: True)
+    doc = merge_doc(env, vault, [(survivor, [(one, intent)])])
+    code, out, err = run_dispose(EnvRunner(env), spec, tmp_path, capsys, doc)
+    assert code == 0, err
+    body = body_of(env, vault, survivor)
+    assert merged_line(body, one) == f"Intent: {dispose.parent._reason_text(intent)}"
+    assert not dispose.parent._UNRESOLVED_RE.search(body)
+    sidecar = sidecar_of(env, vault, survivor)
+    assert dispose.parent._static_verdict(sidecar, body, None, lambda: True) == before
+
+
 def test_a_forged_merged_from_heading_with_different_text_still_gets_the_real_intent(
     lore_env, spec, tmp_path, capsys
 ):
@@ -863,7 +891,7 @@ def test_a_forged_merged_from_heading_with_different_text_still_gets_the_real_in
     assert code == 0, err
     body = body_of(env, vault, survivor)
     assert "nothing to see here" in body
-    assert f"\n## Merged from task/{absorbed}\n\nthe real intent\n" in f"\n{body}"
+    assert f"\n## Merged from task/{absorbed}\n\nIntent: the real intent\n" in f"\n{body}"
     assert len(out["merged"]) == 1
 
 
@@ -904,7 +932,7 @@ def test_a_note_write_that_lands_the_text_but_not_the_reopen_is_failed(
     doc = merge_doc(env, vault, [(survivor, [absorbed])])
     code, out, err = run_dispose(EnvRunner(env, hook=hook), spec, tmp_path, capsys, doc)
     assert sidecar_of(env, vault, survivor)["status"] == "ready"
-    assert merged_line(body_of(env, vault, survivor), absorbed) == INTENT
+    assert merged_line(body_of(env, vault, survivor), absorbed) == f"Intent: {INTENT}"
     assert code == 2
     assert [(f["write"], f["command"]) for f in out["failed"]] == [("merge-note", None)]
     assert out["reset-to-open"] == [] and out["merged"] == []
@@ -1059,7 +1087,7 @@ def test_a_note_write_that_lands_but_exits_nonzero_is_failed_and_the_group_incom
     runner = EnvRunner(env, hook=hook)
     doc = merge_doc(env, vault, [(survivor, [one, two])])
     code, out, err = run_dispose(runner, spec, tmp_path, capsys, doc)
-    assert merged_line(body_of(env, vault, survivor), one) == INTENT
+    assert merged_line(body_of(env, vault, survivor), one) == f"Intent: {INTENT}"
     assert (code, reason_of(err)) == (2, "dispose-incomplete")
     assert [(f["name"], f["write"], f["command"]) for f in out["failed"]] == [
         (survivor, "merge-note", None)
@@ -1297,10 +1325,10 @@ def test_preview_shows_the_exact_note_the_reset_and_the_supersedes_and_writes_no
     assert (ready_group["status"], ready_group["reset-to-open"]) == ("ready", True)
     assert (open_group["status"], open_group["reset-to-open"]) == ("open", False)
     note = ready_group["absorbed"][0]["note"]
-    assert note.startswith(f"## Merged from task/{a}\n\nsee ")
+    assert note.startswith(f"## Merged from task/{a}\n\nIntent: see ")
     assert note.endswith(" ## Heading\n") and note.count("\n") == 3
     assert "[" not in note and "]" not in note
-    assert open_group["absorbed"][0]["note"] == f"## Merged from task/{b}\n\nplain intent\n"
+    assert open_group["absorbed"][0]["note"] == f"## Merged from task/{b}\n\nIntent: plain intent\n"
     assert open_group["absorbed"][0]["status"] == "ready"
     assert open_group["supersedes"] == [{"name": b, "by": open_survivor}]
     assert out["drops"] == []
@@ -1355,7 +1383,7 @@ def test_a_merge_into_a_survivor_whose_body_has_no_final_newline_lands_its_note_
     assert out["failed"] == []
     body = body_of(env, vault, survivor)
     assert body.startswith(UNTERMINATED + "\n\n")
-    assert merged_line(body, absorbed) == INTENT
+    assert merged_line(body, absorbed) == f"Intent: {INTENT}"
     assert sidecar_of(env, vault, absorbed)["status"] == "superseded"
     assert sidecar_of(env, vault, survivor)["supersedes"] == [f"task/{absorbed}"]
 
@@ -1365,7 +1393,7 @@ def test_a_survivor_whose_unterminated_last_line_is_the_note_gets_no_second_note
 ):
     env, vault = lore_env
     absorbed = unterminated(env, vault, "Absorbed", spec)
-    body = f"Survivor body.\n\n## Merged from task/{absorbed}\n\n{INTENT}"
+    body = f"Survivor body.\n\n## Merged from task/{absorbed}\n\nIntent: {INTENT}"
     survivor = unterminated(env, vault, "Survivor", spec, body=body)
     runner = EnvRunner(env)
     code, out, err = run_dispose(runner, spec, tmp_path, capsys, merge_doc(env, vault, [(survivor, [absorbed])]))
