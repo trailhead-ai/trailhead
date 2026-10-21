@@ -16,6 +16,12 @@ writes ``<state>/results/<case>.json`` (shape in ``portage.eval_gate.run``). Out
 ``case: <name>``, ``verdict: pass|fail|not-run``, ``reason: <code>`` (not-run only).
 Exit 0 whenever a result was written, whatever the verdict; exit 2 on a refusal
 (state directory, case name, plugin root, timeout) with no runner started.
+
+``verdict (--state <dir> | --gate-error <step>)`` aggregates the results into a push
+decision (exit 0 push, 1 stop, 2 fault) and prints the PR section; ``splice --body-file
+<f> (--state <dir> | --section-file <f>) [--out <path>]`` inserts it into a PR body. Output
+format, markers, exit codes and the ``persistent:`` line are documented in
+``portage.eval_gate.verdict``.
 """
 
 from __future__ import annotations
@@ -25,6 +31,7 @@ import sys
 from pathlib import Path
 
 from ..eval_gate.run import DEFAULT_TIMEOUT_SECONDS, RunRefused, run_case
+from ..eval_gate import verdict as gate_verdict
 from ..eval_gate.select import GitError, plan
 
 
@@ -37,6 +44,8 @@ def add_eval_gate_subparser(sub) -> None:
     group = p.add_subparsers(dest="eval_gate_command", required=True)
     _add_plan(group)
     _add_run(group)
+    _add_verdict(group)
+    _add_splice(group)
 
 
 def _add_plan(group) -> None:
@@ -91,4 +100,72 @@ def cmd_run(args: argparse.Namespace) -> int:
     print(f"verdict: {result['verdict']}")
     if result["reason"]:
         print(f"reason: {result['reason']}")
+    return 0
+
+
+def _add_verdict(group) -> None:
+    p = group.add_parser(
+        "verdict",
+        help="Decide push or stop from the case results and print the PR section.",
+        description="Decide push (exit 0) or stop (exit 1) from the case results and print the "
+                    "`## Eval gate` section.",
+    )
+    p.add_argument("--state", help="State directory written by `plan`")
+    p.add_argument("--gate-error", metavar="STEP",
+                   help="Render the gate-error section for a crashed step; reads no state")
+    p.set_defaults(func=cmd_verdict)
+
+
+def cmd_verdict(args: argparse.Namespace) -> int:
+    try:
+        if args.gate_error is not None:
+            code, report, section = 0, ["eval-gate: gate-error"], gate_verdict.render_gate_error(args.gate_error)
+        elif args.state is None:
+            raise gate_verdict.Fault("one of --state or --gate-error is required")
+        else:
+            code, report, section = gate_verdict.verdict(Path(args.state))
+        if args.state is not None:
+            gate_verdict.write_section_file(Path(args.state), section)
+    except gate_verdict.Fault as e:
+        print(f"eval-gate verdict: {e}", file=sys.stderr)
+        return 2
+    for line in report:
+        print(line)
+    print(section)
+    return code
+
+
+def _add_splice(group) -> None:
+    p = group.add_parser(
+        "splice",
+        help="Insert or replace the eval-gate section in a PR body.",
+        description="Insert or replace the eval-gate section in a PR body.",
+    )
+    p.add_argument("--body-file", required=True, help="File holding the PR body")
+    src = p.add_mutually_exclusive_group(required=True)
+    src.add_argument("--state", help="State directory whose eval-gate-section.md to splice")
+    src.add_argument("--section-file", help="File holding the rendered section")
+    p.add_argument("--out", default=None, help="Write the spliced body here instead of stdout")
+    p.set_defaults(func=cmd_splice)
+
+
+def cmd_splice(args: argparse.Namespace) -> int:
+    try:
+        section_path = (Path(args.state) / gate_verdict.SECTION_FILE) if args.state \
+            else Path(args.section_file)
+        if args.state:
+            gate_verdict.require_state(Path(args.state))
+        body = Path(args.body_file).read_text()
+        section = section_path.read_text()
+        result = gate_verdict.splice(body, section)
+    except (OSError, UnicodeDecodeError) as e:
+        print(f"eval-gate splice: {e}", file=sys.stderr)
+        return 2
+    except gate_verdict.Fault as e:
+        print(f"eval-gate splice: {e}", file=sys.stderr)
+        return 2
+    if args.out:
+        Path(args.out).write_text(result)
+    else:
+        sys.stdout.write(result)
     return 0
