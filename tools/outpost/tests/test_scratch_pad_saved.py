@@ -355,6 +355,28 @@ BAD_ENTRIES = {
         "const a = good(); a[0].pick = 1; a[0].none = true; return JSON.stringify({answers: a});",
         "none with a pick",
     ),
+    "none-not-a-boolean": (
+        "const a = good(); a[0].none = 'x'; return JSON.stringify({answers: a});",
+        "none is not true or false",
+    ),
+    "pick-negative": (
+        "const a = good(); a[0].pick = -1; return JSON.stringify({answers: a});",
+        "pick is not null",
+    ),
+    "not-negative-index": (
+        "const a = good(); a[1].not = [-1]; return JSON.stringify({answers: a});",
+        "not list is not distinct",
+    ),
+    "answers-not-a-list": (
+        "return JSON.stringify({answers: {length: 2}});",
+        "answer count",
+    ),
+    "not-not-a-list": (
+        "const a = good(); a[0].not = 'x'; return JSON.stringify({answers: a});",
+        "not list is not a list",
+    ),
+    "top-level-array": ("return JSON.stringify(good());", "top-level"),
+    "top-level-null": ("return 'null';", "top-level"),
     "note-not-a-string": (
         "const a = good(); a[1].note = 5; return JSON.stringify({answers: a});",
         "note",
@@ -459,6 +481,39 @@ def test_restored_hostile_note_text_shows_as_characters_in_the_box_and_the_reply
     assert hostile in got["reply"]
     assert got["pwned"] is None
     assert got["injected"] == 0
+
+
+def test_the_longest_entry_this_page_can_write_is_not_dropped_as_too_long_on_reload(tmp_path):
+    pad = _build(tmp_path, data=_round(2))
+    got = _steps(
+        pad,
+        [
+            """
+            const text = '\\u0001'.repeat(10000);
+            const entry = JSON.stringify({answers: [0, 1].map(() => (
+              {pick: null, not: [0, 1, 2], none: false, note: text}))});
+            localStorage.setItem('outpost-scratch-pad:' + roundId(), entry);
+            sessionStorage.setItem('length', String(entry.length));
+            harness.reload();
+            """,
+            """
+            const q = await questionsNow(2);
+            return {
+              length: Number(sessionStorage.getItem('length')),
+              warns: window.__warns.slice(),
+              notes: q.map((x) => x.note.length),
+              not: q.map((x) => x.not),
+            };
+            """,
+        ],
+        entry=ROUND1,
+        inject_into=ROUND1,
+        before_script=CAP_SPY,
+    )
+    assert got["length"] > 120112
+    assert got["warns"] == []
+    assert got["notes"] == [10000, 10000]
+    assert got["not"] == [["true"] * 3, ["true"] * 3]
 
 
 LINE = """
@@ -831,6 +886,39 @@ def test_a_note_box_being_typed_in_keeps_its_text_and_caret_while_the_other_cont
         "picked": ["false", "false", "true"],
         "dot": {"answered": "true", "text": "answered"},
     }
+
+
+def test_a_tab_without_focus_takes_the_other_tabs_note_even_with_its_caret_still_in_the_box(tmp_path):
+    pad = _build(tmp_path)
+    got, _ = _pair(
+        pad,
+        """
+        await ready();
+        await show(0);
+        await typeNote(0, 'draft');
+        note(0).focus();
+        window.dispatchEvent(new Event('blur'));
+        const caretKept = document.activeElement === note(0);
+        await harness.barrier();
+        await harness.waitFor('the final note to arrive', () => note(0).value === 'final');
+        const snap = await snapshot();
+        await show(0);
+        await press(thisOne(0, 1));
+        const stored0 = stored().answers[0];
+        await harness.barrier();
+        return {caretKept, note: snap.questions[0].note, reply: snap.reply, stored0};
+        """,
+        """
+        await harness.barrier();
+        await show(0);
+        await typeNote(0, 'final');
+        await harness.barrier();
+        """,
+    )
+    assert got["caretKept"] is True
+    assert got["note"] == "final"
+    assert '"note": "final"' in got["reply"]
+    assert got["stored0"] == {"pick": 1, "not": [], "none": False, "note": "final"}
 
 
 MISSED = {

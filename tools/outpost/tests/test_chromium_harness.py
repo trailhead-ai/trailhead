@@ -387,3 +387,13 @@ def test_wait_for_without_a_timeout_fails_named_before_the_virtual_time_budget_r
     with pytest.raises(ch.ProbeFailed) as err:
         ch.run_probe(FIXTURES / "widths-narrow", probe, virtual_time_budget=1500)
     assert "a state that never arrives" in str(err.value)
+
+
+def test_wait_for_without_a_timeout_started_late_still_fails_named_rather_than_unreported():
+    probe = """
+      await new Promise(function (resolve) { setTimeout(resolve, 2000); });
+      await harness.waitFor('a state that never arrives late', function () { return false; });
+    """
+    with pytest.raises(ch.ProbeFailed) as err:
+        ch.run_probe(FIXTURES / "widths-narrow", probe, virtual_time_budget=3000)
+    assert "a state that never arrives late" in str(err.value)

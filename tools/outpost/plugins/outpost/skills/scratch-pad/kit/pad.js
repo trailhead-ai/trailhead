@@ -386,6 +386,10 @@
       if (keeper && !keeper.write(answers)) cantKeep.hidden = false;
     }
 
+    var windowAway = false;
+    window.addEventListener("blur", function (event) { if (event.target === window) windowAway = true; });
+    window.addEventListener("focus", function (event) { if (event.target === window) windowAway = false; });
+
     function applyAnswers(list) {
       list.forEach(function (saved, qIndex) {
         var answer = answers[qIndex];
@@ -394,7 +398,8 @@
         answer.not.length = 0;
         saved.not.forEach(function (n) { answer.not.push(n); });
         var view = views[qIndex];
-        answer.note = view && view.note === document.activeElement ? view.note.value : saved.note;
+        var typing = view && view.note === document.activeElement && !windowAway;
+        answer.note = typing ? view.note.value : saved.note;
         if (dots[qIndex]) refresh(qIndex);
       });
       reply.changed();

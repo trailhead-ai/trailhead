@@ -49,8 +49,10 @@ point, receives a ``harness`` object.
 - ``await harness.waitFor(description, condition, timeoutMs)`` polls ``condition`` (sync or async,
   truthy means done) every 20 ms of virtual time and returns its truthy value; on timeout it throws
   ``timed out waiting for: <description>``, which surfaces as ``ProbeFailed``. The default timeout
-  is ``WAIT_FOR_BUDGET_SHARE`` of ``virtual_time_budget``: a wait that outlasts the budget would
-  surface as ``ProbeNotReported`` instead of naming what was awaited.
+  is ``WAIT_FOR_BUDGET_SHARE`` of the virtual-time budget still left when ``waitFor`` is called
+  (``virtual_time_budget`` minus ``performance.now()``), never under ``WAIT_FOR_FLOOR_MS``: a wait
+  that outlasts the budget would surface as ``ProbeNotReported`` instead of naming what was awaited,
+  however late in the probe, or after however many barriers, the wait starts.
 
 Browser lookup (``find_browser``): ``$OUTPOST_TEST_BROWSER``, then
 ``chrome-headless-shell`` on PATH, then the Playwright cache's headless shell,
@@ -98,6 +100,7 @@ COPY_WINDOW_NAME = "harness-copy-2"
 STEP_WINDOW_PREFIX = "harness-step:"
 PAIR_VIRTUAL_TIME_BUDGET = 30000
 WAIT_FOR_BUDGET_SHARE = 0.8
+WAIT_FOR_FLOOR_MS = 100
 
 _WRAPPER = """(function () {
   var MODE = %(mode)s;
@@ -130,7 +133,9 @@ _WRAPPER = """(function () {
   function pause(ms) { return new Promise(function (resolve) { setTimeout(resolve, ms); }); }
 
   async function waitFor(description, condition, timeoutMs) {
-    var ticks = Math.ceil((timeoutMs === undefined ? %(wait_ms)d : timeoutMs) / POLL_MS);
+    var left = %(budget_ms)d - performance.now();
+    var span = timeoutMs === undefined ? Math.max(%(wait_floor_ms)d, left * %(wait_share)s) : timeoutMs;
+    var ticks = Math.ceil(span / POLL_MS);
     for (var tick = 0; tick <= ticks; tick++) {
       var value = await condition();
       if (value) { return value; }
@@ -248,7 +253,9 @@ def _render_wrapper(mode: str, bodies: Sequence[str], virtual_time_budget: int) 
         "copy_name": json.dumps(COPY_WINDOW_NAME),
         "step_prefix": json.dumps(STEP_WINDOW_PREFIX),
         "steps": ",\n".join(_step_source(body) for body in bodies),
-        "wait_ms": int(virtual_time_budget * WAIT_FOR_BUDGET_SHARE),
+        "budget_ms": virtual_time_budget,
+        "wait_share": repr(WAIT_FOR_BUDGET_SHARE),
+        "wait_floor_ms": WAIT_FOR_FLOOR_MS,
     }
 
 

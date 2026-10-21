@@ -47,7 +47,7 @@
   function entryLimit(optionCounts) {
     var total = '{"answers":[]}'.length + optionCounts.length;
     optionCounts.forEach(function (count) {
-      total += '{"pick":,"not":[],"none":false,"note":""}'.length + String(count).length +
+      total += '{"pick":,"not":[],"none":false,"note":""}'.length + Math.max(String(count).length, 'null'.length) +
         count * (String(count).length + 1) + NOTE_LIMIT * ESCAPED_CHAR;
     });
     return total;
