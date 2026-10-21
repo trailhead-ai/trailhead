@@ -1719,11 +1719,15 @@ class ClaudeCodeHarness(Harness):
         json_path: Path,
         output_dir: Path,
         env: dict[str, str],
+        eval_dir: str | None = None,
     ) -> EvalRunner:
         """``claude plugin eval`` for one case, with an allowlist-only environment.
 
         ``--allow-tools`` is variadic, so it is followed by another flag. Always
         invoke through a stub runner in tests — never the real ``claude``.
+
+        ``eval_dir`` names the directory below the plugin that holds the cases
+        (``--eval-dir``); omitted, the runner's own default applies.
         """
         argv = [
             "claude", "plugin", "eval", str(plugin_dir),
@@ -1740,6 +1744,8 @@ class ClaudeCodeHarness(Harness):
             "--output-dir", str(output_dir) + "/",
             "--no-publish",
         ]
+        if eval_dir is not None:
+            argv += ["--eval-dir", eval_dir]
         child = {
             k: v
             for k, v in env.items()

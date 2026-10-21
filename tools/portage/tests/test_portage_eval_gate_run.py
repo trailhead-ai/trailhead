@@ -51,21 +51,26 @@ def _result(runs: list[dict], **top) -> dict:
 FAKE = """#!{python}
 import json, os, shutil, subprocess, sys, time
 LOG = {log!r}
+CANARY = "--eval-dir" in sys.argv
 open(LOG + ".started", "w").write("1")
 json.dump({{"argv": sys.argv, "env": dict(os.environ), "cwd": os.getcwd()}}, open(LOG + ".seen", "w"))
-if {grandchild!r}:
+open(LOG + ".calls", "a").write(json.dumps(
+    {{"canary": CANARY, "argv": sys.argv, "env": dict(os.environ)}}) + "\\n")
+payload, code, sleep = ({canary_payload!r}, {canary_code!r}, {canary_sleep!r}) if CANARY else (
+    {payload!r}, {code!r}, {sleep!r})
+if {grandchild!r} and not CANARY:
     p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
     open(LOG + ".pid", "w").write(str(p.pid))
-if {payload!r}:
+if payload:
     out = sys.argv[sys.argv.index("--json") + 1]
     os.makedirs(os.path.dirname(out), exist_ok=True)
-    if {payload!r} == "garbage":
+    if payload == "garbage":
         open(out, "w").write("{{not json")
     else:
-        shutil.copy({payload!r}, out)
-if {sleep!r}:
-    time.sleep({sleep!r})
-sys.exit({code!r})
+        shutil.copy(payload, out)
+if sleep:
+    time.sleep(sleep)
+sys.exit(code)
 """
 
 
@@ -96,19 +101,37 @@ class Env:
         doc.update(over)
         (self.state / "plan.json").write_text(json.dumps(doc))
 
-    def fake(self, doc: dict | str | None = None, code: int = 0, sleep: float = 0,
-             grandchild: bool = False) -> None:
-        payload = ""
+    def _payload(self, doc: dict | str | None, name: str) -> str:
         if isinstance(doc, dict):
-            f = self.tmp / "payload.json"
+            f = self.tmp / name
             f.write_text(json.dumps(doc))
-            payload = str(f)
-        elif doc:
-            payload = doc
-        exe = self.bin / "claude"
-        exe.write_text(FAKE.format(python=sys.executable, log=self.log, payload=payload,
-                                   code=code, sleep=sleep, grandchild=grandchild))
+            return str(f)
+        return doc or ""
+
+    def fake(self, doc: dict | str | None = None, code: int = 0, sleep: float = 0,
+             grandchild: bool = False, canary: dict | str | None = "pass", canary_code: int = 0,
+             canary_sleep: float = 0, path: Path | None = None) -> Path:
+        """Install the fake runner; the canary (any call with ``--eval-dir``) passes by default."""
+        if canary == "pass":
+            canary = _result([PASS])
+        exe = path or self.bin / "claude"
+        exe.write_text(FAKE.format(
+            python=sys.executable, log=self.log, payload=self._payload(doc, "payload.json"),
+            code=code, sleep=sleep, grandchild=grandchild,
+            canary_payload=self._payload(canary, "canary-payload.json"),
+            canary_code=canary_code, canary_sleep=canary_sleep))
         exe.chmod(0o755)
+        return exe
+
+    @property
+    def calls(self) -> list[dict]:
+        f = Path(self.log + ".calls")
+        return [json.loads(line) for line in f.read_text().splitlines()] if f.exists() else []
+
+    def seed_canary(self, verdict="pass") -> None:
+        (self.state / "canary.json").write_text(json.dumps(
+            {"case": "sandbox-write", "verdict": verdict, "passed": 1, "failed": 0, "errored": 0,
+             "reason": None, "runs": []}))
 
     def run(self, case="c1", *extra) -> int:
         return dispatch.main(["eval-gate", "run", "--state", str(self.state), "--case", case,
@@ -376,6 +399,7 @@ class TestArgv:
 class TestHarnessSelection:
     def test_the_first_detected_harness_supplies_the_runner(self, env):
         env.fake(_result([PASS] * 3))
+        env.seed_canary()
 
         class Stub:
             def __init__(self, tag):

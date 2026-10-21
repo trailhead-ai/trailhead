@@ -2311,6 +2311,14 @@ class TestEvalRunnerHook:
         runner = ClaudeCodeHarness().eval_runner(env={"PATH": "/bin", "FOO": "1"}, **self.KW)
         assert runner.env == {"PATH": "/bin"}
 
+    def test_eval_dir_names_the_directory_that_holds_the_cases(self):
+        def argv(**extra):
+            return ClaudeCodeHarness().eval_runner(env={}, **{**self.KW, **extra}).argv
+
+        named = argv(eval_dir="eval-canary")
+        assert named[named.index("--eval-dir") + 1] == "eval-canary"
+        assert "--eval-dir" not in argv()
+
     def test_runs_drive_parallelism_up_to_eight(self):
         def j(runs):
             argv = ClaudeCodeHarness().eval_runner(env={}, **{**self.KW, "runs": runs}).argv

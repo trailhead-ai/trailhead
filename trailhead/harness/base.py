@@ -609,12 +609,15 @@ class Harness(ABC):
         json_path: Path,
         output_dir: Path,
         env: dict[str, str],
+        eval_dir: str | None = None,
     ) -> EvalRunner | None:
         """The argv and allowlist environment that run one eval case, or ``None``.
 
         ``None`` means "this harness has no prose-eval runner". ``env`` is the
         caller's environment, which the harness filters down to what its runner
-        needs; nothing outside that allowlist may reach the child.
+        needs; nothing outside that allowlist may reach the child. ``eval_dir``
+        names the directory below the plugin that holds the cases, when it is
+        not the runner's default.
         """
         return None
 

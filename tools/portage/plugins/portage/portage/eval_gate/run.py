@@ -9,7 +9,7 @@ first detected harness for its eval runner, runs it bounded by a wall-clock time
      "verdict": "pass" | "fail" | "not-run",
      "passed": int, "failed": int, "errored": int,     # scored passes / scored fails / errored runs
      "reason": null | "harness-has-no-eval-runner" | "runner-missing" | "timeout"
-                    | "cost-cap" | "runner-error" | "runs-errored",
+                    | "cost-cap" | "runner-error" | "runs-errored" | "runner-sandbox-unwritable",
      "runs": [{"passed": bool, "errored": bool,
                "graders": [{"name": str, "passed": bool}, ...]}, ...]}
 
@@ -27,6 +27,26 @@ fail when scored failing > n - k; otherwise nothing is decidable and the reason 
 ``runner-error`` (``auth_failed`` partial, or a non-zero exit with no usable JSON),
 else ``runs-errored``.
 
+The sandbox-write canary (``canary.py``) runs once per state directory before the first
+case and is cached at ``<state>/canary.json`` — the same shape as a case result, with
+``case`` ``"sandbox-write"`` and a single run (runs 1, pass_at 1, same ``_decide``)::
+
+    {"case": "sandbox-write", "verdict": "pass" | "fail" | "not-run", "passed": int,
+     "failed": int, "errored": int, "reason": null | <a reason code>, "runs": [...]}
+
+A cached result, whatever its verdict, is reused by every later ``run`` in that state
+directory. Canary ``pass``: the case runs. Canary ``fail``: the case is not-run with
+reason ``runner-sandbox-unwritable`` (the runner's sandboxed Bash cannot write). Canary
+``not-run``: the case is not-run with the canary's own reason. Either way the case
+runner is never started. The canary is bounded by 120 s inside the call's total bound;
+the case gets what remains.
+
+``PORTAGE_EVAL_RUNNER`` (read from the gate's own environment) pins the runner binary
+for this machine, for both the canary and the case: an absolute path to an executable
+regular file, else the case is not-run ``runner-missing`` (a stderr line names the
+variable) and nothing starts. It replaces the harness's own ``claude`` lookup and is
+never forwarded into the child's environment.
+
 Refusals (``RunRefused``, exit 2, no runner started): a state directory that is a
 symlink, not owned by the caller or not mode 0700; a case that is not in the plan or
 whose name fails the mapping's shape; a plugin root that leaves the repo.
@@ -39,9 +59,12 @@ import os
 import signal
 import stat
 import subprocess
+import sys
 import tempfile
+import time
 from pathlib import Path, PurePosixPath
 
+from . import canary
 from .mapping import CASE_NAME
 
 DEFAULT_TIMEOUT_SECONDS = 540
@@ -53,6 +76,8 @@ TIMEOUT = "timeout"
 COST_CAP = "cost-cap"
 RUNNER_ERROR = "runner-error"
 RUNS_ERRORED = "runs-errored"
+SANDBOX_UNWRITABLE = "runner-sandbox-unwritable"
+RUNNER_OVERRIDE_ENV = "PORTAGE_EVAL_RUNNER"
 
 
 class RunRefused(Exception):
@@ -163,7 +188,7 @@ def _write_result(state: Path, case: str, result: dict) -> None:
     os.replace(tmp, results / f"{case}.json")
 
 
-def _execute(runner, state: Path, timeout: int) -> tuple[int | None, bool, bool]:
+def _execute(runner, state: Path, timeout: float) -> tuple[int | None, bool, bool]:
     """Run the runner in its own session. Returns ``(exit_code, killed, missing)``."""
     try:
         proc = subprocess.Popen(
@@ -213,40 +238,105 @@ def run_case(
 
         harnesses = detect_harnesses(env)
 
+    override = _runner_override(env)
+    if override is False:
+        print(f"eval-gate run: {RUNNER_OVERRIDE_ENV} must be an absolute path to an "
+              f"executable file", file=sys.stderr)
+        return _record(state, case, _not_run(case, n, RUNNER_MISSING))
+
     runs_dir = state / "runs"
     runs_dir.mkdir(mode=0o700, exist_ok=True)
     json_path = runs_dir / f"{case}.json"
     json_path.unlink(missing_ok=True)
 
-    runner = (
-        harnesses[0].eval_runner(
-            plugin_dir=plugin_dir,
-            case=case,
-            runs=n,
-            model=runner_cfg["model"],
-            allow_tools=list(runner_cfg["allow_tools"]),
-            max_cost_usd=runner_cfg["max_cost_usd"],
-            json_path=json_path,
-            output_dir=runs_dir / case,
-            env=env,
-        )
-        if harnesses
-        else None
-    )
-    empty = {"passed": 0, "failed": 0, "errored": n, "runs": []}
+    def request(**kw):
+        return harnesses[0].eval_runner(env=env, **kw) if harnesses else None
+
+    runner = _pin(request(
+        plugin_dir=plugin_dir,
+        case=case,
+        runs=n,
+        model=runner_cfg["model"],
+        allow_tools=list(runner_cfg["allow_tools"]),
+        max_cost_usd=runner_cfg["max_cost_usd"],
+        json_path=json_path,
+        output_dir=runs_dir / case,
+    ), override)
     if runner is None:
-        result = {"case": case, "verdict": "not-run", "reason": NO_RUNNER, **empty}
-    else:
-        code, killed, missing = _execute(runner, state, timeout_seconds)
-        if missing:
-            result = {"case": case, "verdict": "not-run", "reason": RUNNER_MISSING, **empty}
-        else:
-            try:
-                doc = json.loads(json_path.read_text())
-            except (OSError, ValueError):
-                doc = None
-            result = {"case": case, **_decide(doc, n, pass_at, code, killed)}
+        return _record(state, case, _not_run(case, n, NO_RUNNER))
+
+    started = time.monotonic()
+    gate = canary.read_cached(state)
+    if gate is None:
+        gate = _run_canary(state, request, override, min(canary.TIMEOUT_SECONDS, timeout_seconds))
+        canary.write_cached(state, gate)
+    if gate["verdict"] != "pass":
+        reason = SANDBOX_UNWRITABLE if gate["verdict"] == "fail" else gate["reason"]
+        return _record(state, case, _not_run(case, n, reason))
+
+    remaining = max(1.0, timeout_seconds - (time.monotonic() - started))
+    code, killed, missing = _execute(runner, state, remaining)
+    if missing:
+        return _record(state, case, _not_run(case, n, RUNNER_MISSING))
+    return _record(state, case, {"case": case, **_decide(_read_json(json_path), n, pass_at, code, killed)})
+
+
+def _not_run(case: str, n: int, reason: str) -> dict:
+    return {"case": case, "verdict": "not-run", "reason": reason,
+            "passed": 0, "failed": 0, "errored": n, "runs": []}
+
+
+def _record(state: Path, case: str, result: dict) -> dict:
     ordered = {k: result[k] for k in
                ("case", "verdict", "passed", "failed", "errored", "reason", "runs")}
     _write_result(state, case, ordered)
     return ordered
+
+
+def _read_json(path: Path) -> object:
+    try:
+        return json.loads(path.read_text())
+    except (OSError, ValueError):
+        return None
+
+
+def _runner_override(env: dict[str, str]) -> str | None | bool:
+    """The validated ``PORTAGE_EVAL_RUNNER`` path, ``None`` when unset, ``False`` when unusable."""
+    value = env.get(RUNNER_OVERRIDE_ENV)
+    if value is None:
+        return None
+    if os.path.isabs(value) and os.path.isfile(value) and os.access(value, os.X_OK):
+        return value
+    return False
+
+
+def _pin(runner, override: str | None):
+    if runner is None or override is None:
+        return runner
+    return type(runner)(argv=[override, *runner.argv[1:]], env=runner.env)
+
+
+def _run_canary(state: Path, request, override: str | None, timeout: float) -> dict:
+    run_json = state / canary.RUN_JSON
+    run_json.unlink(missing_ok=True)
+    runner = _pin(request(
+        plugin_dir=canary.plugin_dir(),
+        case=canary.CASE,
+        runs=1,
+        model=canary.MODEL,
+        allow_tools=list(canary.ALLOW_TOOLS),
+        max_cost_usd=canary.MAX_COST_USD,
+        json_path=run_json,
+        output_dir=state / canary.RUN_OUTPUT,
+        eval_dir=canary.EVAL_DIR,
+    ), override)
+    if runner is None:
+        result = _not_run(canary.CASE, 1, NO_RUNNER)
+    else:
+        code, killed, missing = _execute(runner, state, timeout)
+        if missing:
+            result = _not_run(canary.CASE, 1, RUNNER_MISSING)
+        else:
+            result = {"case": canary.CASE, **_decide(_read_json(run_json), 1, 1, code, killed)}
+    return {k: result[k] for k in
+            ("case", "verdict", "passed", "failed", "errored", "reason", "runs")}
