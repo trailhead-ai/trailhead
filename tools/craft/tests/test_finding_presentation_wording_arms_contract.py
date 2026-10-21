@@ -85,6 +85,10 @@ PLAIN_WORDS_BASELINE_REVISION = "4722bd0b45f838ecd02b17baa90931e4d47166e6"
 # here and every other source from `PLAIN_WORDS_BASELINE_REVISION`.
 PLAIN_WORDS_EDIT_REVISION = "9bae50c390aaa2f91f1a4dd3dac2eb7ea9da30ef"
 
+# The commit carrying the second plain-words ritual edit: the three treated2 arms read the two gauntlet files from here
+# and every other source from `PLAIN_WORDS_BASELINE_REVISION`.
+PLAIN_WORDS_EDIT2_REVISION = "c6af0ccbf4448626581cfc495ceec0c034f7fbc4"
+
 PLUGIN = "tools/craft/plugins/craft"
 RULES = f"{PLUGIN}/rules.md"
 COUNCIL = f"{PLUGIN}/skills/_shared/council.md"
@@ -314,6 +318,17 @@ ARM_SOURCES.update(
             (RULES, PLAIN_WORDS_BASELINE_REVISION),
             (GAUNTLET_SKILL, PLAIN_WORDS_EDIT_REVISION),
             (GAUNTLET_DISPOSITIONS, PLAIN_WORDS_EDIT_REVISION),
+            (COUNCIL, PLAIN_WORDS_BASELINE_REVISION),
+        ]
+        for site in PLAIN_WORDS_SITES
+    }
+)
+ARM_SOURCES.update(
+    {
+        f"pw-treated2-{site}.md": [
+            (RULES, PLAIN_WORDS_BASELINE_REVISION),
+            (GAUNTLET_SKILL, PLAIN_WORDS_EDIT2_REVISION),
+            (GAUNTLET_DISPOSITIONS, PLAIN_WORDS_EDIT2_REVISION),
             (COUNCIL, PLAIN_WORDS_BASELINE_REVISION),
         ]
         for site in PLAIN_WORDS_SITES
