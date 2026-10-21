@@ -4357,3 +4357,45 @@ saved section. Not measured: the missing-agent stop and the maturity line, which
 deliverable; the out-of-range override rejection; the `reaches-downstream` escalation table; the re-presented table
 after a revise round; an `answered` row's re-adjudication. Arms carry skill text through the system prompt, so they
 cannot show what a real session reads; a real run is the close-out's go/no-go and is not a script verdict.
+
+## Amendment, 2026-10-21: a second edit to the spec review's prose, and its treated2 arms
+
+Authorized by the operator on 2026-10-21 and committed before any treated2 run. Nothing above this heading is rewritten;
+the plain-words extension, its grammar, its bars and end states, the baseline batch and the treated batch stand as
+written. This amendment adds an edit, three arms and capture names, and changes no registered grammar, bar, split rule
+or end state.
+
+**Why.** The treated batch (`70cb73fc`, "Treated batch (2026-10-20)" above) missed AC26, AC27 and AC28, and the
+registered rule for a treated miss is that the slice stops for the operator with no rewording without a dated amendment
+the operator authorizes. The misses were `finding-id` at `pwopen` (bracketed 3 of 6), `pwdetail` (2 of 6) and on the
+`pwsaved` echo (1 of 6); `outcome-word` at `pwdetail` (plain 2 of 6, `none` 4 of 6); and `criterion-mention` on the
+`pwsaved` saved detail (`text-with-number` 0 of 6, `bare` 4, `nickname` 2). By reading the captures, the surfaces the
+first edit shaped read plain, and the misses are free-prose mentions it did not address ("Apply C1 and C2, then flip the
+spec to `ready`", "the C1 edit", "C1's change", "this rewrites AC1 and AC2") plus a detail view that never states an
+outcome. That is a hypothesis, not an ablation.
+
+**Decision, 2026-10-21.** Shown the miss, the operator chose "Amend and re-run".
+
+**What the second edit (commit G2) changes.** Only `skills/gauntlet/SKILL.md` (and `skills/gauntlet/dispositions.md`
+only where a statement there would otherwise contradict it), under the same 531-line ceiling as the first edit:
+
+- Step 5: wherever the session's own prose mentions a finding, outside the table, the rewrite headers and the reply
+  line, it names the finding by its headline or a faithful short form with the id in round brackets after, never a bare
+  `C<n>`, including in a list or a next-steps line. The reply forms are unchanged.
+- Step 5: when the reader asks for a finding's detail, each finding's detail opens with its proposed outcome in plain
+  words ("fixed in the spec", "needs a rewrite", or the reading of an operator outcome).
+- Step 6: the saved-detail clause names every criterion by its own text with its number after in round brackets,
+  including where several are listed together, with one short example in a domain that shares no vocabulary with the
+  `pw-*` fixtures.
+
+**Reused unchanged.** The grammar of the five checks, the bars, the split rule (a 2-1 split re-run to six), the end
+states, the headroom gate, the guard-miss rule, the fixtures and the three prompts, the dispatch command, the scans
+before commit, and the baseline arms and their captures (`pw-baseline-*`, `pw-pilot-*`, `pw-treated-*`, `pw-control-*`,
+which are not re-run and not re-read). Stored terms, the stamp and how an override is recorded are unchanged by G2.
+`rules.md` and `_shared/council.md` stay at `PLAIN_WORDS_BASELINE_REVISION` in every treated2 arm.
+
+**New names.** The arms are `pw-treated2-pwopen.md`, `pw-treated2-pwdetail.md` and `pw-treated2-pwsaved.md`: the
+baseline composition with the two gauntlet files read from the commit carrying G2. Captures are
+`pw-treated2-<site>-<n>`, and a same-day paired control on a guard miss is `pw-control2-<site>-<n>` (the baseline arm,
+run again, six runs). Each is read by the registered grammar and judged by the registered bars: a treated2 miss stops the
+slice for the operator again, and a guard miss that the paired control does not reproduce is a regression.
