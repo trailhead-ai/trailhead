@@ -254,11 +254,10 @@ def dependents_map(runner, names: list[str]) -> dict[str, list[dict]]:
     return found
 
 
-def failure_record(vault: str, name: str, write: str, flags: tuple[str, ...] | None, reason: str | None = None) -> dict:
-    """`{name, write, command}`: `command` is the status-only `lore` command made of
-    `flags` that completes the write, or null when `flags` is None. `reason` is added
-    when given."""
-    command = None if flags is None else parent._command(parent._update(vault, name, *flags))
+def failure_record(name: str, write: str, argv: list[str] | None, reason: str | None = None) -> dict:
+    """`{name, write, command}`: `command` is the `lore` command `argv` that completes the
+    write, or null when `argv` is None. `reason` is added when given."""
+    command = None if argv is None else parent._command(argv)
     record = {"name": name, "write": write, "command": command}
     if reason is not None:
         record["reason"] = reason
@@ -285,6 +284,12 @@ def _dropped_note(reason: str) -> str:
     return f"Reason: {reason}"
 
 
+def _appending_diff(old: str, sections: list[str]) -> str:
+    """The unified diff that appends each of `sections` to `old`, a blank line before each."""
+    new = old.rstrip("\n") + "".join(f"\n\n{section}" for section in sections)
+    return "".join(difflib.unified_diff(old.splitlines(True), new.splitlines(True), "a", "b"))
+
+
 def _drop_landed(runner, vault: str, name: str, note: str) -> bool:
     try:
         sidecar, body, _ = parent._read_task(runner, vault, name)
@@ -297,18 +302,17 @@ def drop_one(runner, vault: str, name: str, baseline: dict, note: str) -> dict |
     """Drop `name` with `note` appended as a `## Dropped` section, on one
     `--status dropped --diff` write. Returns None when the read-back shows the drop landed,
     otherwise the `failed` record."""
-    flags = ("--status", "dropped")
+    argv = parent._update(vault, name, "--status", "dropped")
     try:
         old = reread_for_write(runner, vault, name, baseline)
     except DisposeError:
-        return failure_record(vault, name, "drop", None, "child-changed")
+        return failure_record(name, "drop", None, "child-changed")
     except (parent.ParentError, gather.GatherError):
-        return failure_record(vault, name, "drop", flags)
-    new = old.rstrip("\n") + f"\n\n## Dropped\n\n{note}\n"
-    diff = "".join(difflib.unified_diff(old.splitlines(True), new.splitlines(True), "a", "b"))
-    done = parent._write(runner, parent._update(vault, name, *flags, "--diff"), stdin=diff)
+        return failure_record(name, "drop", argv)
+    diff = _appending_diff(old, [f"## Dropped\n\n{note}\n"])
+    done = parent._write(runner, [*argv, "--diff"], stdin=diff)
     if done is None or done.returncode != 0 or not _drop_landed(runner, vault, name, note):
-        return failure_record(vault, name, "drop", flags)
+        return failure_record(name, "drop", argv)
     return None
 
 
@@ -340,9 +344,9 @@ def note_one(runner, vault: str, group: dict, baseline: dict) -> dict | None:
     try:
         old = reread_for_write(runner, vault, survivor, baseline)
     except DisposeError:
-        return failure_record(vault, survivor, "merge-note", None, "child-changed")
+        return failure_record(survivor, "merge-note", None, "child-changed")
     except (parent.ParentError, gather.GatherError):
-        return failure_record(vault, survivor, "merge-note", None)
+        return failure_record(survivor, "merge-note", None)
     missing = [m for m in group["absorbed"] if not _has_section(old, _section(m["name"], m["intent"]))]
     reopen = baseline["status"] == "ready"
     expect = "open" if reopen else baseline["status"]
@@ -350,14 +354,13 @@ def note_one(runner, vault: str, group: dict, baseline: dict) -> dict | None:
         flags = ["--status", "open"] if reopen else []
         stdin = None
         if missing:
-            new = old.rstrip("\n") + "".join(f"\n\n{_section(m['name'], m['intent'])}" for m in missing)
-            stdin = "".join(difflib.unified_diff(old.splitlines(True), new.splitlines(True), "a", "b"))
+            stdin = _appending_diff(old, [_section(m["name"], m["intent"]) for m in missing])
             flags.append("--diff")
         done = parent._write(runner, parent._update(vault, survivor, *flags), stdin=stdin)
         if done is None or done.returncode != 0:
-            return failure_record(vault, survivor, "merge-note", None)
+            return failure_record(survivor, "merge-note", None)
     if not _note_landed(runner, vault, group, expect):
-        return failure_record(vault, survivor, "merge-note", None)
+        return failure_record(survivor, "merge-note", None)
     return None
 
 
@@ -375,16 +378,15 @@ def supersede_one(runner, vault: str, survivor: str, absorbed: str, baseline: di
     """Supersede `absorbed` by `survivor`. Returns None when the read-back shows
     `superseded` and the survivor's link, otherwise the `failed` record."""
     argv = ["record", "supersede", f"task/{absorbed}", "--by", f"task/{survivor}", "--vault", vault]
-    failed = {"name": absorbed, "write": "supersede", "command": parent._command(argv)}
     try:
         reread_for_write(runner, vault, absorbed, baseline)
     except DisposeError:
-        return {**failed, "command": None, "reason": "child-changed"}
+        return failure_record(absorbed, "supersede", None, "child-changed")
     except (parent.ParentError, gather.GatherError):
-        return failed
+        return failure_record(absorbed, "supersede", argv)
     done = parent._write(runner, argv)
     if done is None or done.returncode != 0 or not _supersede_landed(runner, vault, survivor, absorbed):
-        return failed
+        return failure_record(absorbed, "supersede", argv)
     return None
 
 
@@ -413,9 +415,9 @@ def merge_one(runner, vault: str, group: dict, baselines: dict, report: dict) ->
         )
 
 
-def _moved(item: dict, baseline: dict, gathered_status: str) -> bool:
-    if baseline["status"] != gathered_status:
-        return True
+def _moved(item: dict, baseline: dict) -> bool:
+    """Whether a member moved since the dispositions file was written: its `revision` no
+    longer matches, or a revisionless drop is no longer `blocked`."""
     if item["revision"] is not None:
         return baseline["revision"] != item["revision"]
     return baseline["status"] != "blocked"
@@ -471,9 +473,7 @@ def dispose(runner, spec: str, dispositions: dict, preview: bool) -> tuple[dict,
     )
     if blocked:
         raise DisposeError("not-mergeable", blocked)
-    changed = tuple(
-        item["name"] for item, _ in members if _moved(item, baselines[item["name"]], gathered[item["name"]])
-    )
+    changed = tuple(item["name"] for item, _ in members if _moved(item, baselines[item["name"]]))
     if changed:
         raise DisposeError("child-changed", changed)
 

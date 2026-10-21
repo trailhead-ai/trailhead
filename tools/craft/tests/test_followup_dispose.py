@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import importlib.util
 import json
-import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -27,11 +26,14 @@ from test_followup_gather import (  # noqa: F401
     make_vault,
 )
 from test_followup_parent import (  # noqa: F401
-    GATHER,
     EnvRunner,
     body_of,
+    dropped_section,
     gather_json,
+    is_drop,
     make_followup,
+    paste,
+    reason_of,
     refused,
     shown_revision,
     sidecar_of,
@@ -80,12 +82,6 @@ def run_dispose(runner, spec_name, tmp_path, capsys, doc=None, preview=False, ra
     return code, (json.loads(out.out) if out.out.strip() else None), out.err
 
 
-def reason_code(err):
-    lines = [ln for ln in err.splitlines() if ln.startswith("reason-code: ")]
-    assert len(lines) == 1, err
-    return lines[0].removeprefix("reason-code: ")
-
-
 def subject(err):
     lines = [ln for ln in err.splitlines() if ln.startswith("subject: ")]
     assert len(lines) == 1, err
@@ -101,14 +97,6 @@ def drop_entry(env, vault, name):
 
 def file_for(env, vault, names, reason=REASON):
     return {"reason": reason, "drops": [drop_entry(env, vault, n) for n in names]}
-
-
-def dropped_section(body):
-    return body.partition("\n## Dropped\n\n")[2]
-
-
-def is_drop_write(argv):
-    return argv[:2] == ["record", "update"] and "dropped" in argv
 
 
 @pytest.fixture
@@ -205,21 +193,19 @@ def test_a_failed_second_drop_is_reported_with_a_command_that_completes_it(
     first, second, third = pile
 
     def hook(argv, stdin, runner):
-        if is_drop_write(argv) and argv[2] == f"task/{second}":
+        if is_drop(argv) and argv[2] == f"task/{second}":
             return refused(argv)
 
     code, out, err = run_incomplete(env, vault, spec, pile, hook, tmp_path, capsys)
     assert code == 2
-    assert reason_code(err) == "dispose-incomplete"
+    assert reason_of(err) == "dispose-incomplete"
     assert subject(err) == [second]
     assert sorted(d["name"] for d in out["dropped"]) == [first, third]
     assert [(f["name"], f["write"]) for f in out["failed"]] == [(second, "drop")]
     assert sidecar_of(env, vault, second)["status"] != "dropped"
     command = out["failed"][0]["command"]
     assert REASON not in command
-    done = subprocess.run(
-        shlex.split(command), capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL
-    )
+    done = paste(env, command)
     assert done.returncode == 0, done.stderr
     assert sidecar_of(env, vault, second)["status"] == "dropped"
 
@@ -231,12 +217,12 @@ def test_a_drop_that_exits_zero_but_leaves_the_record_unchanged_is_failed(
     target = pile[0]
 
     def hook(argv, stdin, runner):
-        if is_drop_write(argv) and argv[2] == f"task/{target}":
-            return subprocess.CompletedProcess(argv, 0, "", "")
+        if is_drop(argv) and argv[2] == f"task/{target}":
+            return stub_ok(argv)
 
     code, out, err = run_incomplete(env, vault, spec, [target], hook, tmp_path, capsys)
     assert code == 2
-    assert reason_code(err) == "dispose-incomplete"
+    assert reason_of(err) == "dispose-incomplete"
     assert [f["name"] for f in out["failed"]] == [target]
     assert target not in [d["name"] for d in out["dropped"]]
 
@@ -248,7 +234,7 @@ def test_a_drop_that_sets_the_status_but_writes_no_reason_section_is_failed(
     target = pile[0]
 
     def hook(argv, stdin, runner):
-        if is_drop_write(argv) and argv[2] == f"task/{target}":
+        if is_drop(argv) and argv[2] == f"task/{target}":
             return runner.real([a for a in argv if a != "--diff"])
 
     code, out, err = run_incomplete(env, vault, spec, [target], hook, tmp_path, capsys)
@@ -265,7 +251,7 @@ def test_a_drop_that_writes_the_reason_but_leaves_the_status_is_failed(
     target = pile[0]
 
     def hook(argv, stdin, runner):
-        if is_drop_write(argv) and argv[2] == f"task/{target}":
+        if is_drop(argv) and argv[2] == f"task/{target}":
             return runner.real([a for a in argv if a not in ("--status", "dropped")], stdin)
 
     code, out, err = run_incomplete(env, vault, spec, [target], hook, tmp_path, capsys)
@@ -315,7 +301,7 @@ def test_a_body_edited_before_the_write_is_child_changed_in_failed_and_the_rest_
     hook = edit_between_check_and_write(env, vault, victim, edit_body)
     code, out, err = run_incomplete(env, vault, spec, pile, hook, tmp_path, capsys)
     assert code == 2
-    assert reason_code(err) == "dispose-incomplete"
+    assert reason_of(err) == "dispose-incomplete"
     assert [(f["name"], f["write"], f["reason"]) for f in out["failed"]] == [
         (victim, "drop", "child-changed")
     ]
@@ -351,7 +337,7 @@ def test_a_revision_moved_before_the_run_refuses_child_changed_and_writes_nothin
     before = vault_snapshot(env, vault)
     runner = EnvRunner(env)
     code, out, err = run_dispose(runner, spec, tmp_path, capsys, doc)
-    assert (code, reason_code(err), subject(err)) == (1, "child-changed", [pile[0]])
+    assert (code, reason_of(err), subject(err)) == (1, "child-changed", [pile[0]])
     assert out is None
     assert runner.writes() == []
     assert vault_snapshot(env, vault) == before
@@ -365,7 +351,7 @@ def test_a_blocked_drop_that_became_open_refuses_child_changed(lore_env, spec, p
     before = vault_snapshot(env, vault)
     runner = EnvRunner(env)
     code, out, err = run_dispose(runner, spec, tmp_path, capsys, doc)
-    assert (code, reason_code(err), subject(err)) == (1, "child-changed", [blocked])
+    assert (code, reason_of(err), subject(err)) == (1, "child-changed", [blocked])
     assert runner.writes() == []
     assert vault_snapshot(env, vault) == before
 
@@ -390,7 +376,7 @@ def test_a_name_that_is_not_a_gathered_follow_up_is_refused_and_the_vault_unchan
     before = vault_snapshot(env, vault)
     runner = EnvRunner(env)
     code, out, err = run_dispose(runner, spec, tmp_path, capsys, doc)
-    assert (code, reason_code(err), subject(err)) == (1, "not-a-gathered-followup", [stranger])
+    assert (code, reason_of(err), subject(err)) == (1, "not-a-gathered-followup", [stranger])
     assert out is None
     assert runner.writes() == []
     assert vault_snapshot(env, vault) == before
@@ -467,7 +453,7 @@ def test_a_malformed_dispositions_file_is_refused_and_the_vault_unchanged(
     else:
         code, _, err = run_dispose(runner, spec, tmp_path, capsys, raw=raw)
     assert code == 2
-    assert reason_code(err) == "invalid-dispositions-file"
+    assert reason_of(err) == "invalid-dispositions-file"
     assert runner.writes() == []
     assert vault_snapshot(env, vault) == before
 
@@ -480,7 +466,7 @@ def test_a_follow_up_name_failing_the_shape_check_is_refused_before_any_lore_cal
     runner = EnvRunner(env)
     doc = {"reason": REASON, "drops": [{"name": name, "revision": "r"}]}
     code, out, err = run_dispose(runner, spec, tmp_path, capsys, doc)
-    assert (code, reason_code(err)) == (2, "invalid-followup-name")
+    assert (code, reason_of(err)) == (2, "invalid-followup-name")
     assert runner.calls == []
 
 
@@ -510,7 +496,7 @@ def test_a_failed_dependents_read_in_another_vault_stops_the_run_and_writes_noth
     before = vault_snapshot(env, vault)
     code, out, err = run_dispose(runner, spec, tmp_path, capsys, file_for(env, vault, [target]), preview)
     assert code == 2
-    assert reason_code(err) == ("lore-failed" if broken == "fails" else "lore-output-not-json")
+    assert reason_of(err) == ("lore-failed" if broken == "fails" else "lore-output-not-json")
     assert out is None
     assert runner.writes() == []
     assert vault_snapshot(env, vault) == before
@@ -664,7 +650,7 @@ def test_an_absorbed_follow_up_with_a_dependent_in_another_vault_is_not_mergeabl
     runner = EnvRunner(env)
     doc = merge_doc(env, vault, [(plain, [depended])])
     code, out, err = run_dispose(runner, spec, tmp_path, capsys, doc)
-    assert (code, reason_code(err), subject(err)) == (1, "not-mergeable", [depended])
+    assert (code, reason_of(err), subject(err)) == (1, "not-mergeable", [depended])
     assert f"{other}/{dependent}" in err
     assert out is None
     assert runner.writes() == [] and both() == before
@@ -689,7 +675,7 @@ def test_a_blocked_merge_member_is_not_mergeable_and_the_vault_unchanged(
     before = vault_snapshot(env, vault)
     runner = EnvRunner(env)
     code, out, err = run_dispose(runner, spec, tmp_path, capsys, doc)
-    assert (code, reason_code(err), subject(err)) == (1, "not-mergeable", [victim])
+    assert (code, reason_of(err), subject(err)) == (1, "not-mergeable", [victim])
     assert out is None
     assert runner.writes() == [] and vault_snapshot(env, vault) == before
 
@@ -739,7 +725,7 @@ def test_a_malformed_merge_is_invalid_dispositions_file_and_the_vault_unchanged(
     before = vault_snapshot(env, vault)
     runner = EnvRunner(env)
     code, out, err = run_dispose(runner, spec, tmp_path, capsys, doc)
-    assert (code, reason_code(err)) == (2, "invalid-dispositions-file")
+    assert (code, reason_of(err)) == (2, "invalid-dispositions-file")
     assert out is None
     assert runner.writes() == [] and vault_snapshot(env, vault) == before
 
@@ -753,7 +739,7 @@ def test_a_merge_member_name_failing_the_shape_check_is_refused_before_any_lore_
          "absorbed": [{"name": "ok", "revision": "r", "intent": "i"}]}]}
     runner = EnvRunner(env)
     code, out, err = run_dispose(runner, spec, tmp_path, capsys, doc)
-    assert (code, reason_code(err)) == (2, "invalid-followup-name")
+    assert (code, reason_of(err)) == (2, "invalid-followup-name")
     assert runner.calls == []
 
 
@@ -776,7 +762,7 @@ def test_a_merge_member_that_is_not_a_gathered_follow_up_is_refused(
     before = vault_snapshot(env, vault)
     runner = EnvRunner(env)
     code, out, err = run_dispose(runner, spec, tmp_path, capsys, doc)
-    assert (code, reason_code(err), subject(err)) == (1, "not-a-gathered-followup", [stranger])
+    assert (code, reason_of(err), subject(err)) == (1, "not-a-gathered-followup", [stranger])
     assert runner.writes() == [] and vault_snapshot(env, vault) == before
 
 
@@ -792,7 +778,7 @@ def test_a_merge_member_revision_moved_before_the_run_refuses_child_changed(
     before = vault_snapshot(env, vault)
     runner = EnvRunner(env)
     code, out, err = run_dispose(runner, spec, tmp_path, capsys, doc)
-    assert (code, reason_code(err), subject(err)) == (1, "child-changed", [moved])
+    assert (code, reason_of(err), subject(err)) == (1, "child-changed", [moved])
     assert runner.writes() == [] and vault_snapshot(env, vault) == before
 
 
@@ -851,7 +837,7 @@ def test_a_note_write_that_exits_zero_changing_nothing_is_failed_though_a_forged
     runner = EnvRunner(env, hook=hook)
     doc = merge_doc(env, vault, [(survivor, [(absorbed, "the real intent")])])
     code, out, err = run_dispose(runner, spec, tmp_path, capsys, doc)
-    assert (code, reason_code(err)) == (2, "dispose-incomplete")
+    assert (code, reason_of(err)) == (2, "dispose-incomplete")
     assert [(f["name"], f["write"], f["command"]) for f in out["failed"]] == [
         (survivor, "merge-note", None)
     ]
@@ -893,7 +879,7 @@ def test_an_injected_note_failure_supersedes_nothing_and_leaves_the_group_incomp
     doc = merge_doc(env, vault, [(survivor, [one, two])])
     code, out, err = run_dispose(runner, spec, tmp_path, capsys, doc)
     assert code == 2
-    assert (reason_code(err), subject(err)) == ("dispose-incomplete", [survivor])
+    assert (reason_of(err), subject(err)) == ("dispose-incomplete", [survivor])
     assert [(f["name"], f["write"], f["command"]) for f in out["failed"]] == [
         (survivor, "merge-note", None)
     ]
@@ -927,16 +913,14 @@ def test_a_failed_supersede_on_the_second_absorbed_still_lands_the_first_and_nam
     first = sorted([one, two])[0]
     runner, (code, out, err) = run_with_failing_supersede(env, vault, spec, trio, tmp_path, capsys, second)
     assert code == 2
-    assert (reason_code(err), subject(err)) == ("dispose-incomplete", [second])
+    assert (reason_of(err), subject(err)) == ("dispose-incomplete", [second])
     assert sidecar_of(env, vault, first)["status"] == "superseded"
     assert sidecar_of(env, vault, second)["status"] == "open"
     assert [(f["name"], f["write"]) for f in out["failed"]] == [(second, "supersede")]
     assert out["incomplete-merges"] == [{"survivor": survivor, "absorbed": sorted([one, two])}]
     assert out["merged"] == []
     command = out["failed"][0]["command"]
-    done = subprocess.run(
-        shlex.split(command), capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL
-    )
+    done = paste(env, command)
     assert done.returncode == 0, done.stderr
     assert sidecar_of(env, vault, second)["status"] == "superseded"
     assert f"task/{second}" in sidecar_of(env, vault, survivor)["supersedes"]
@@ -1006,12 +990,12 @@ def test_a_drop_that_lands_but_exits_nonzero_is_failed_and_not_listed_dropped(
     target = pile[0]
 
     def hook(argv, stdin, runner):
-        if is_drop_write(argv) and argv[2] == f"task/{target}":
+        if is_drop(argv) and argv[2] == f"task/{target}":
             return lands_then_exits_nonzero(argv, stdin, runner)
 
     code, out, err = run_incomplete(env, vault, spec, [target], hook, tmp_path, capsys)
     assert sidecar_of(env, vault, target)["status"] == "dropped"
-    assert (code, reason_code(err)) == (2, "dispose-incomplete")
+    assert (code, reason_of(err)) == (2, "dispose-incomplete")
     assert [(f["name"], f["write"]) for f in out["failed"]] == [(target, "drop")]
     assert out["failed"][0]["command"] is not None
     assert out["dropped"] == []
@@ -1031,7 +1015,7 @@ def test_a_note_write_that_lands_but_exits_nonzero_is_failed_and_the_group_incom
     doc = merge_doc(env, vault, [(survivor, [one, two])])
     code, out, err = run_dispose(runner, spec, tmp_path, capsys, doc)
     assert merged_line(body_of(env, vault, survivor), one) == INTENT
-    assert (code, reason_code(err)) == (2, "dispose-incomplete")
+    assert (code, reason_of(err)) == (2, "dispose-incomplete")
     assert [(f["name"], f["write"], f["command"]) for f in out["failed"]] == [
         (survivor, "merge-note", None)
     ]
@@ -1053,7 +1037,7 @@ def test_a_supersede_that_lands_but_exits_nonzero_is_failed_and_the_group_incomp
     doc = merge_doc(env, vault, [(survivor, [one, two])])
     code, out, err = run_dispose(EnvRunner(env, hook=hook), spec, tmp_path, capsys, doc)
     assert sidecar_of(env, vault, target)["status"] == "superseded"
-    assert (code, reason_code(err)) == (2, "dispose-incomplete")
+    assert (code, reason_of(err)) == (2, "dispose-incomplete")
     assert [(f["name"], f["write"]) for f in out["failed"]] == [(target, "supersede")]
     assert out["failed"][0]["command"] is not None
     assert out["merged"] == []
@@ -1105,7 +1089,7 @@ def kinds(calls, survivor_names, dropped_names):
     """The write calls in order, each as ("drop"|"note"|"supersede", name)."""
     seq = []
     for argv in calls:
-        if is_drop_write(argv):
+        if is_drop(argv):
             seq.append(("drop", argv[2].removeprefix("task/")))
         elif is_supersede(argv):
             seq.append(("supersede", argv[2].removeprefix("task/")))
@@ -1141,7 +1125,7 @@ def test_a_failed_drop_does_not_stop_the_merges(lore_env, spec, two_groups, tmp_
     n = two_groups
 
     def hook(argv, stdin, runner):
-        if is_drop_write(argv):
+        if is_drop(argv):
             return refused(argv)
 
     doc = merge_doc(env, vault, [(n["Sa"], [n["Aa"]])], drops=[n["Dd"]])
@@ -1285,5 +1269,5 @@ def test_preview_refuses_a_not_mergeable_member_like_the_real_run(lore_env, spec
     runner = EnvRunner(env)
     doc = merge_doc(env, vault, [(survivor, [one, two])])
     code, out, err = run_dispose(runner, spec, tmp_path, capsys, doc, preview=True)
-    assert (code, reason_code(err), subject(err)) == (1, "not-mergeable", [one])
+    assert (code, reason_of(err), subject(err)) == (1, "not-mergeable", [one])
     assert runner.writes() == []
