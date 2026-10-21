@@ -1,0 +1,76 @@
+{
+  "_provenance": "claude 2.1.306 (claude plugin eval), run 2026-10-21 on Linux; outcome: scaffold_script exited 1; runs have error 'scaffold failed (exit 1)', graders [], score 0, runner exit 1 (probe case, runs 2). Trimmed: prompts, grader explanations, grader evidence and config, trace paths, suite paths removed.",
+  "schemaVersion": 1,
+  "claudeVersion": "2.1.306",
+  "startedAt": "2026-10-21T15:48:56.891Z",
+  "durationSeconds": 0,
+  "costUsd": 0,
+  "partial": false,
+  "suite": {
+    "ablation": "none",
+    "modelOverride": "claude-haiku-4-5",
+    "caseFilter": "scaf1",
+    "threshold": 1,
+    "concurrency": 2,
+    "plugins": [
+      {
+        "name": "probe",
+        "version": "0.0.1"
+      }
+    ]
+  },
+  "cases": [
+    {
+      "name": "scaf1",
+      "source": "mixed",
+      "runsPerCase": 3,
+      "timeoutSeconds": 300,
+      "maxTurns": 3,
+      "graders": [
+        {
+          "name": "says",
+          "type": "llm",
+          "weight": 1
+        }
+      ],
+      "arms": {
+        "with": [
+          {
+            "score": 0,
+            "passed": false,
+            "turns": 0,
+            "costUsd": 0,
+            "judgeCostUsd": 0,
+            "durationSeconds": 0,
+            "startedAt": "2026-10-21T15:48:56.974Z",
+            "error": "scaffold failed (exit 1): scaffold-boom ",
+            "skippedPaidGraders": false,
+            "graders": []
+          },
+          {
+            "score": 0,
+            "passed": false,
+            "turns": 0,
+            "costUsd": 0,
+            "judgeCostUsd": 0,
+            "durationSeconds": 0,
+            "startedAt": "2026-10-21T15:48:56.975Z",
+            "error": "scaffold failed (exit 1): scaffold-boom ",
+            "skippedPaidGraders": false,
+            "graders": []
+          }
+        ]
+      },
+      "aggregates": {
+        "score": 0,
+        "passRate": 0
+      }
+    }
+  ],
+  "aggregates": {
+    "casesTotal": 1,
+    "casesPassed": 0,
+    "overallScore": 0,
+    "overallPassRate": 0
+  }
+}
