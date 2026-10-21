@@ -287,7 +287,10 @@ title) redrawing that option; do not rebuild the pad.
 Always ask the question in words too, on an added round as on a first one. The
 pad takes answers: the user can pick an option, mark options "Not this", choose
 "None of these" and add a note on each question, then press "Copy reply" on the
-pad's last entry, "Your reply", and paste the result back to you. Tell them they can paste the pad's reply
+pad's last entry, "Your reply", and paste the result back to you. Answers stay in
+that browser across reloads and reopening, each round and each pad apart from the
+others, and the page says so at the top when the browser cannot keep them: then
+the user should copy the reply before leaving. Tell them they can paste the pad's reply
 back, and that replying in words still works exactly as before.
 
 ## Read the reply
