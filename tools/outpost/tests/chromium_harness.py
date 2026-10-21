@@ -43,10 +43,6 @@ point, receives a ``harness`` object.
   probe raises ``ProbeFailed`` naming the copy. Defaults to ``PAIR_VIRTUAL_TIME_BUDGET``, a larger
   budget, because a wait for the other copy is real inter-process time that the virtual clock
   does not hold back.
-- ``run_probe_launches(page_dir, probes, ...)`` runs one probe per browser launch, in order, sharing
-  one profile and (served) one server on one OS-picked free port, so ``localStorage`` written by
-  launch 1 is there for launch 2 under the same origin. It returns the list of values. Separate
-  calls never share a profile or a port.
 - ``before_script=<js>`` (on every entry point) writes the script beside each injected page and loads
   it as the first ``<script>`` in ``<head>``, ahead of the page's own scripts, so a test can replace
   ``window.localStorage`` or ``Storage.prototype.setItem`` before the page sees them.
@@ -495,9 +491,9 @@ def _read_result(dom: str, page_dir: Path):
     return result["value"]
 
 
-def _run_launches(
+def _run_launch(
     page_dir: Path,
-    wrappers: Sequence[str],
+    wrapper: str,
     *,
     window_size: tuple[int, int],
     timeout: float,
@@ -510,11 +506,10 @@ def _run_launches(
     serve_port: int,
     color_scheme: str | None,
     before_script: str | None,
-) -> list:
+):
     env = os.environ if env is None else env
     browser = _require_browser(env, lookup)
     page_dir = Path(page_dir)
-    values = []
     with tempfile.TemporaryDirectory(prefix="chromium-harness-") as tmp:
         page, targets = _prepare_copy(page_dir, tmp, entry, inject_into, before_script)
         argv = _argv(browser, env, tmp, window_size, virtual_time_budget, color_scheme)
@@ -524,11 +519,9 @@ def _run_launches(
                 argv.append(f"{base}/{entry}")
             else:
                 argv.append((page / entry).as_uri())
-            for wrapper in wrappers:
-                for probe_dir in {target.parent for target in targets}:
-                    (probe_dir / PROBE_FILE).write_text(wrapper)
-                values.append(_read_result(_launch(argv, browser, timeout, env), page_dir))
-    return values
+            for probe_dir in {target.parent for target in targets}:
+                (probe_dir / PROBE_FILE).write_text(wrapper)
+            return _read_result(_launch(argv, browser, timeout, env), page_dir)
 
 
 def run_probe(
@@ -581,9 +574,9 @@ def run_probe_steps(
     before_script: str | None = None,
 ):
     wrapper = _render_wrapper("steps", steps, virtual_time_budget)
-    (value,) = _run_launches(
+    return _run_launch(
         page_dir,
-        [wrapper],
+        wrapper,
         window_size=window_size,
         timeout=timeout,
         virtual_time_budget=virtual_time_budget,
@@ -596,7 +589,6 @@ def run_probe_steps(
         color_scheme=color_scheme,
         before_script=before_script,
     )
-    return value
 
 
 def run_probe_pair(
@@ -617,9 +609,9 @@ def run_probe_pair(
     before_script: str | None = None,
 ) -> tuple:
     wrapper = _render_wrapper("pair", [probe_one, probe_two], virtual_time_budget)
-    (value,) = _run_launches(
+    value = _run_launch(
         page_dir,
-        [wrapper],
+        wrapper,
         window_size=window_size,
         timeout=timeout,
         virtual_time_budget=virtual_time_budget,
@@ -633,37 +625,3 @@ def run_probe_pair(
         before_script=before_script,
     )
     return tuple(value)
-
-
-def run_probe_launches(
-    page_dir: Path,
-    probes: Sequence[str],
-    *,
-    window_size: tuple[int, int] = (1280, 900),
-    timeout: float = DEFAULT_TIMEOUT,
-    virtual_time_budget: int = 5000,
-    env: Mapping[str, str] | None = None,
-    lookup: Callable[[], Browser | None] | None = None,
-    entry: str = "index.html",
-    inject_into: str | Sequence[str] | None = None,
-    serve: bool = False,
-    serve_port: int = 0,
-    color_scheme: str | None = None,
-    before_script: str | None = None,
-) -> list:
-    wrappers = [_render_wrapper("steps", [probe], virtual_time_budget) for probe in probes]
-    return _run_launches(
-        page_dir,
-        wrappers,
-        window_size=window_size,
-        timeout=timeout,
-        virtual_time_budget=virtual_time_budget,
-        env=env,
-        lookup=lookup,
-        entry=entry,
-        inject_into=inject_into,
-        serve=serve,
-        serve_port=serve_port,
-        color_scheme=color_scheme,
-        before_script=before_script,
-    )

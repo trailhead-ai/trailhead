@@ -350,25 +350,6 @@ def test_a_before_script_applies_to_the_page_a_probe_moves_to():
     assert result == "boolean"
 
 
-@pytest.mark.parametrize("worker", [1, 2])
-def test_two_launches_share_one_server_port_and_one_profile(worker):
-    probe = "return {port: location.port, c: Number(localStorage.getItem('c'))};"
-    first, second = ch.run_probe_launches(FIXTURES / "counter", [probe, probe], serve=True)
-    assert first["port"] and first["port"] == second["port"]
-    assert (first["c"], second["c"]) == (1, 2)
-
-
-def test_two_launches_from_disk_share_one_profile():
-    probe = "return Number(localStorage.getItem('c'));"
-    assert ch.run_probe_launches(FIXTURES / "counter", [probe, probe]) == [1, 2]
-
-
-def test_separate_launch_runs_do_not_share_state():
-    probe = "return Number(localStorage.getItem('c'));"
-    assert ch.run_probe_launches(FIXTURES / "counter", [probe]) == [1]
-    assert ch.run_probe_launches(FIXTURES / "counter", [probe]) == [1]
-
-
 def test_wait_for_returns_the_value_once_its_condition_holds():
     probe = """
       var calls = 0;
@@ -392,9 +373,8 @@ def test_wait_for_that_never_holds_fails_naming_the_awaited_state():
         lambda: ch.run_probe_pair(
             FIXTURES / "counter", "return 1;", "return 2;", env=_ENV_REQUIRE, lookup=lambda: None
         ),
-        lambda: ch.run_probe_launches(FIXTURES / "counter", ["return 1;"], env=_ENV_REQUIRE, lookup=lambda: None),
     ],
-    ids=["steps", "pair", "launches"],
+    ids=["steps", "pair"],
 )
 def test_a_missing_browser_fails_rather_than_skips_for_every_entry_point(call):
     with pytest.raises((pytest.skip.Exception, pytest.fail.Exception)) as outcome:
