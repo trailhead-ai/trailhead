@@ -1887,15 +1887,17 @@ FINDING_CAPTURE_VERDICTS.update(
             for n in range(1, 7)
         },
         **{
-            f"pw-control-pwopen-{n}": _pwopen("internal", "internal", "bare", "internal" if n == 3 else "plain", "plain")
+            f"pw-control-pwopen-{n}": _pwopen(
+                "internal", "internal", "bare", "internal" if n == 3 else "plain", "plain"
+            )
             for n in range(1, 7)
         },
     }
 )
 
-# The second treated batch (the second ritual edit's arms): `pwopen` at three runs, `pwdetail` and `pwsaved` re-run to six
-# after a graded check split 2-1, and the same-day paired controls for the `pwopen` guard `criterion-mention` and the
-# `pwdetail` guard `severity-name` (the baseline arm, six runs each).
+# The second treated batch (the second ritual edit's arms): `pwopen` at three runs, `pwdetail` and `pwsaved` re-run
+# to six after a graded check split 2-1, and the same-day paired controls for the `pwopen` guard
+# `criterion-mention` and the `pwdetail` guard `severity-name` (the baseline arm, six runs each).
 FINDING_CAPTURE_VERDICTS.update(
     {
         **{f"pw-treated2-pwopen-{n}": _pwopen("plain", "plain", "bracketed", "plain", "plain") for n in (1, 2, 3)},
@@ -1910,7 +1912,9 @@ FINDING_CAPTURE_VERDICTS.update(
             for n in range(1, 7)
         },
         **{
-            f"pw-control2-pwopen-{n}": _pwopen("internal", "internal", "bare", "internal" if n == 2 else "plain", "plain")
+            f"pw-control2-pwopen-{n}": _pwopen(
+                "internal", "internal", "bare", "internal" if n == 2 else "plain", "plain"
+            )
             for n in range(1, 7)
         },
         "pw-control2-pwdetail-1": _pwdetail("internal", "plain"),
@@ -1928,7 +1932,7 @@ _STAGED_REPLY_RE = re.compile(r"accept (C\d+) as a risk: (.+?), dispute (C\d+): 
 
 
 def staged_overrides(prompt):
-    """The `--override` arguments for the reply a pwsaved prompt stages: the accepted id first, then the disputed one."""
+    """The `--override` arguments for the reply a pwsaved prompt stages: the accepted id, then the disputed one."""
     found = _STAGED_REPLY_RE.search(prompt)
     assert found, "the prompt stages no accept-and-dispute reply"
     accepted, accepted_reason, disputed, disputed_reason = found.groups()

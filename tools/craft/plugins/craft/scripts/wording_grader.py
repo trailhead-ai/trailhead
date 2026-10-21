@@ -72,9 +72,10 @@ line, for the three italic level labels and a Critical list that is not empty or
 first names the spec review: `plain` when "spec review" comes first and "gauntlet" appears exactly once, inside round
 brackets on a line that also names a "spec review"; `internal` otherwise; `none` when the review is not named. A
 `craft:gauntlet` command token, with or without its leading slash, is not a naming; any other "gauntlet", a path
-segment included, is. `outcome-word` says how a finding's outcome is shown: `internal` for a ritual term (`resolved`, `revise`,
-`accepted-as-risk`, `disputed`, `answered`) in backticks, the hyphenated `accepted-as-risk`, or `resolved` or `revise`
-on a line that carries a finding id; else `plain` when "fixed in the spec" or "needs a rewrite" appears; else `none`.
+segment included, is. `outcome-word` says how a finding's outcome is shown: `internal` for a ritual term
+(`resolved`, `revise`, `accepted-as-risk`, `disputed`, `answered`) in backticks, the hyphenated `accepted-as-risk`, or
+`resolved` or `revise` on a line that carries a finding id; else `plain` when "fixed in the spec" or
+"needs a rewrite" appears; else `none`.
 `finding-id` says whether every finding id (`C<n>`) is in round brackets after text, or is the id in a reply form
 ("dispute C2:", "accept C2 as a risk", "answer C2:"): `bracketed`; `bare` otherwise; `none` when no id appears. The
 grammar is the plain-words extension of the finding-presentation-wording case's `expected.md`.
@@ -108,8 +109,8 @@ Exit codes:
 Stdin, each `--criteria` file and each `--reports` file are capped at MAX_INPUT_BYTES: a
 file over the cap is never read past it and could not be graded (`criteria-too-large`,
 `reports-too-large`). Every pattern is linear: the one repeat that sits
-inside another (the finding-id list) consumes a `C` and its digits on every iteration, so it cannot backtrack catastrophically;
-the scans that need a window walk the line by index.
+inside another (the finding-id list) consumes a `C` and its digits on every iteration, so it cannot backtrack
+catastrophically; the scans that need a window walk the line by index.
 A range wider than MAX_RANGE_SPAN is not expanded: it can name no criterion the
 criteria file defines and counts as no earlier mention.
 """
@@ -805,8 +806,9 @@ def grade_override_mapping(text: str, staged: list[tuple[str, str, str]]) -> str
     for index, token in enumerate(tokens):
         end = tokens[index + 1].start() if index + 1 < len(tokens) else len(stamp)
         segments.setdefault(f"C{token.group(1)}", []).append((token.group(2), _fold_reason(stamp[token.end() : end])))
+    staged_ids = {staged_id for staged_id, _, _ in staged}
     for found, entries in segments.items():
-        if found not in {staged_id for staged_id, _, _ in staged} and any(term in _OVERRIDE_TERMS for term, _ in entries):
+        if found not in staged_ids and any(term in _OVERRIDE_TERMS for term, _ in entries):
             return "misapplied"
     for staged_id, term, reason in staged:
         entries = segments.get(staged_id, [])
