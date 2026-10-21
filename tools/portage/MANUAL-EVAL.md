@@ -117,21 +117,21 @@ real `portage eval-gate` plans, runs, decides and renders; only the runner is fa
 `2d70b30f`; the cases and mapping followed in `c03a92c2`.
 
 **Under test:** the gate step added to `agents/updater.md`. Baseline is the updater at `ebdc9d95` (no gate);
-the treatment is the final revision, `12ff1180` (earlier revisions are listed per batch below). Graded from the scratch repo's origin ref, the stand-in's captured
+the treatment is the final revision, `d6027228` (earlier revisions are listed per batch below). Graded from the scratch repo's origin ref, the stand-in's captured
 PR body and the run's tool calls.
 
 ### Result, 2026-10-21 — runner 2.1.303, model claude-opus-5-5, 3 runs per case per arm
 
-The final measurement, run against the final prose (`12ff1180`) and the final fixtures (`a22bb807`, unchanged since the previous measurement; the fixed prose still reaches `verdict` and places the section after the push through the same stand-ins, so no fixture change was needed):
+The final measurement, run against the final prose (`d6027228`) and the final fixtures (`a22bb807`, unchanged since the previous measurement; the fixed prose still reaches `verdict` and places the section after the push through the same stand-ins, so no fixture change was needed):
 
 | Case | Arm (updater revision) | Run scores | Cost (USD) | Meets 2 of 3 at 1.0 |
 |---|---|---|---|---|
 | a-failing-eval-gate-stops-the-push | baseline (`ebdc9d95`) | 0.6, 0.4, 0.8 | 0.58 | no (0 of 3) |
-| a-failing-eval-gate-stops-the-push | treatment (`12ff1180`) | 1, 1, 1 | 0.48 | yes (3 of 3) |
+| a-failing-eval-gate-stops-the-push | treatment (`d6027228`) | 1, 1, 1 | 0.48 | yes (3 of 3) |
 | an-unrunnable-eval-gate-still-pushes-and-says-so | baseline (`ebdc9d95`) | 0, 0.4, 0.4 | 0.60 | no (0 of 3) |
-| an-unrunnable-eval-gate-still-pushes-and-says-so | treatment (`12ff1180`) | 1, 1, 1 | 0.61 | yes (3 of 3) |
+| an-unrunnable-eval-gate-still-pushes-and-says-so | treatment (`d6027228`) | 1, 1, 1 | 0.61 | yes (3 of 3) |
 
-Treatment graders at `12ff1180`: every grader passed in every run of both cases (failing-gate: `agent-dispatched`,
+Treatment graders at `d6027228`: every grader passed in every run of both cases (failing-gate: `agent-dispatched`,
 `case-named`, `gate-ran`, `no-pr-edit`, `origin-untouched`; not-run: `body-gives-reason`, `body-has-section`,
 `gate-ran`, `gh-edit-called`, `pushed`). The lore snapshots before and after both batches were identical.
 
@@ -150,15 +150,15 @@ with no gate; "draft" is the first, uncommitted version of the gate step):
 | failing-gate treatment 2 | `f4a9b1c7` | `a9690263` | 1, 1, 1 |
 | failing-gate treatment | `205288f9` | `a22bb807` | 1, 1, 1 |
 | not-run treatment | `205288f9` | `a22bb807` | 1, 1, 1 |
-| failing-gate treatment, final | `12ff1180` | `a22bb807` | 1, 1, 1 |
-| not-run treatment, final | `12ff1180` | `a22bb807` | 1, 1, 1 |
+| failing-gate treatment, final | `d6027228` | `a22bb807` | 1, 1, 1 |
+| not-run treatment, final | `d6027228` | `a22bb807` | 1, 1, 1 |
 
-The `205288f9` revision differs from `f4a9b1c7` in two places (`12ff1180` then changed the gate step again; see below): a failed `plan` now gets a state directory from
+The `205288f9` revision differs from `f4a9b1c7` in two places (`d6027228` then changed the gate step again; see below): a failed `plan` now gets a state directory from
 `mktemp -d` so its gate-error section reaches the PR body, and the update path names how the current body is
 saved (the `gh pr view` output written to a file, or the optional `pr_body_file` input). The not-run case's
 prompt now passes the saved description as `pr_body_file` (`a22bb807`).
 
-`12ff1180` differs from `205288f9` as follows: a non-zero `run` exit carries on to the next case and still calls
+`d6027228` differs from `205288f9` as follows: a non-zero `run` exit carries on to the next case and still calls
 `verdict`, so a case that already failed still stops the push; gate-error is for `plan` and `verdict` faults only;
 the updater, not the preflight subagents, places every section in a new Step 4 after the push, for create and
 update alike; the `mktemp -d` directory made for a failed `plan` is removed; and the report vocabulary covers
