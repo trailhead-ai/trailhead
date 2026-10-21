@@ -2363,14 +2363,21 @@ criterion's own text" is stricter than a reading by eye on paraphrases.
 
 `plugins/craft/evals/finding-presentation-wording/` — fixtures, arms, captures and `expected.md` carrying the pass
 conditions, written before any arm was run; graded by `plugins/craft/scripts/wording_grader.py` (checks
-`severity-name`, `reviewer-name`, `persisted-levels`).
+`severity-name`, `reviewer-name`, `persisted-levels`, `calibration-level`, and for the spec review's plain words
+`review-name`, `outcome-word`, `finding-id`, `criterion-mention`, `stamp-form`, `override-mapping`).
 
 **Under test:** craft's shared reporting contract, `skills/_shared/council.md`, and consult's own restatement of the
 severity grouping in `skills/consult/SKILL.md`. The claim is that when a spec review, a plan's council review, a consult
 or the driver shows the reader a finding in session, severity appears only as the guide's plain readings and reviewers
 only by their plain labels, while the `## Council Review` block that plan and the driver save keeps its internal
 levels. Whether each finding opens with the decision, the recommendation and what is at stake, and then gives the worst
-case, the fix and who raised it, is read by eye and is not graded.
+case, the fix and who raised it, is read by eye and is not graded. The plain-words extension (2026-10-20) adds the
+spec review's own step 5 and step 6 in `skills/gauntlet/SKILL.md` (with `dispositions.md`): the claim is that the
+review calls itself "the spec review" with "gauntlet" once in brackets (AC25), shows each finding's outcome as "fixed in
+the spec" or "needs a rewrite" and the operator-only outcomes in the words it accepts as a reply (AC26), puts each
+finding's id in round brackets after the finding's text (AC27), and names acceptance criteria by their own text with the
+number after in the finding detail it saves on the spec (AC28). Three sites (`pwopen`, `pwdetail`, `pwsaved`) are
+graded by script, and one real spec review is read by eye.
 
 **Dispatch.** Each arm is its own `claude -p` process from an empty directory, with `--setting-sources project`, the arm
 passed by `--append-system-prompt` and `--allowedTools "Read"`. Four sites, each starting at the presentation step with
@@ -2464,6 +2471,57 @@ revert. `severity-name` read `plain` on all three `precal` captures although eac
 is the gap the new check covers. Limits: three runs, one question, one level, one waived concern; plan's and the spec
 review's own restatement instructions are a logged follow-up and are not measured. Detail is in `expected.md`, under
 "Results: the consult-calibrated site".
+
+**Plain words at three spec review sites, 2026-10-21: AC25 and AC26 close, AC27 and AC28 are partial; both ritual
+edits are kept.** The extension was pre-registered before any run (checks, grammars, fixtures, arms, bars and end
+states), with baseline arms at `4722bd0b` and treated arms at the ritual edit. Counts below come from the per-capture
+tables in `expected.md`, under "Extension, 2026-10-20", "Treated batch (2026-10-20)" and "Second treated batch
+(2026-10-21)".
+
+| Criterion | Check, site | Baseline | First treated (G) | Treated2 (G2) | Reading |
+|---|---|---|---|---|---|
+| AC25 | `review-name`, `pwopen` | `internal` 3 of 3 | `plain` 6 of 6 | `plain` 3 of 3 | closes |
+| AC26 | `outcome-word`, `pwopen` / `pwdetail` / `pwsaved` | `internal` 3 of 3 / `plain` 0 of 6 / `internal` 3 of 3 | `plain` 6 of 6 / 2 of 6 / 6 of 6 | `plain` 3 of 3 / 6 of 6 / 6 of 6 | closes |
+| AC27 | `finding-id`, `pwopen` / `pwdetail` / `pwsaved` echo / saved detail | `bracketed` 0 of 3 / 0 of 6 / 0 of 3 / 0 of 3 | 3 of 6 / 2 of 6 / 1 of 6 / 6 of 6 | 3 of 3 / 4 of 6 / 6 of 6 / 6 of 6 | partial: `pwdetail` one short of a clean majority |
+| AC28 | `criterion-mention`, `pwsaved` saved detail | `text-with-number` 0 of 3 | 0 of 6 | 0 of 6 (`nickname` 4, `bare` 2) | partial |
+
+The first treated round stopped the slice for the operator (AC25 closed, AC26 to AC28 missed). The operator chose to
+amend and re-run (commit G2), and after treated2 chose to close AC25 and AC26 and leave AC27 and AC28 partial. The
+remainders go back to the spec: bare ids in free prose at the detail view (AC27), and criteria cited by a short name
+rather than their own text in the saved detail (AC28). Guards held: `override-mapping` `mapped` 6 of 6, `stamp-form`
+`kept` 6 of 6, marker bullet and credential scrub clean. `pwopen` `criterion-mention` is residual (same-day control
+`bare` 6 of 6). `pwdetail` `severity-name` read `plain` 4 and `none` 2 of 6 against `none` 1 of 6 in the control; the
+registered rule does not define a miss, and the operator's dated reading is that `none` is not a miss when no internal
+severity name appears, so the guard is held.
+
+**One real spec review, 2026-10-21, read by eye, go.** A real `/craft:gauntlet` from a fresh `/tmp` directory against the
+`pw` fixture spec held in a throwaway lore vault (throwaway lore config and state, synthetic git identity), with only the
+branch's craft plugin loaded (`craft@inline`, from the init record), and one reply that accepted one Critical as a risk.
+Its first naming read "spec review (gauntlet)" and its table and echo read "fixed in the spec" and "accepted as a risk"
+with no internal outcome word, so neither stop rule fired; the override landed on the right finding in the echo. Ids in
+its second turn's prose were bare four times, and criteria were cited by short name; both are recorded against the
+partial criteria. The session re-presented the table after the override and did not write within the one reply turn, so
+the saved section (AC28, and the stamp half of the override check) was not read. The fixture spec needed verification
+trailers on its criteria to pass the review's criterion gate (the arms never reach the gate), so the throwaway copy
+carries them. Limits: user-level rules and the claude.ai connectors still load; one session; `Bash` granted unrestricted
+because the review composes its shell steps; no sibling records. Captures: `runs/pw-realrun-turn1.md`,
+`runs/pw-realrun-turn2.md`, `runs/pw-realrun.init.json` (not graded; the `.txt` capture test ignores them).
+
+**Pin check.** `skills/gauntlet/SKILL.md` and `skills/gauntlet/dispositions.md` at the branch HEAD are byte-equal to
+`c6af0ccb` (G2), the revision the `pw-treated2-*` arms pin.
+
+**Not measured.** The missing-agent stop and the maturity line (`SKILL.md:132-134`, `:173`), the out-of-range override
+rejection, the `reaches-downstream` escalation table, a revise round's re-presented table, and an `answered` row's
+re-adjudication. AC25 and AC27 are measured at the surfaces a typical run shows; whether that is coverage in full or in
+part is the operator's call at slice close.
+
+**Waiver.** `skills/gauntlet/SKILL.md` is 531 lines at base, at each edit and at HEAD. The spec's 499 is stale, and
+nothing enforces the 500-line guideline (`LINE_LIMIT` is unused). The scope words `record-only` and `reaches-downstream`
+stay as jargon beside the plain words, for a later comparison with the guide.
+
+**Manual re-run trigger.** A change to `skills/gauntlet/SKILL.md` step 5 or 6, or to `dispositions.md`, starts from a new
+dated extension to `expected.md` registered before any run, with arms built from the changed files. The `pw-treated2-*`
+arms pin G2 (`c6af0ccb`) and measure that text only; the baseline arms pin `4722bd0b`.
 
 ## Case: tidy-followups-presents-a-finished-spec
 

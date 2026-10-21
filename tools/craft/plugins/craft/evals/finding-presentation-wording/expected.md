@@ -4742,3 +4742,161 @@ vault. After it, the trailhead vault's `git status --porcelain` and the mtimes o
 and a trimmed `.init.json` with the worktree path replaced by `<worktree>`. The raw stream is not committed. Every
 committed file passes `scripts/capture_scan.py` and is grepped for the operator's home path and username. The `.md` and
 `.json` extensions keep it out of the graded `runs/*.txt` captures.
+
+## Results for slice close: plain words at three spec review sites, two treated rounds and one real spec review (2026-10-21)
+
+Nothing above this heading is changed except the two wording fixes committed before the reading fields (the plural level
+name and the `pwdetail` `severity-name` reading, both in the treated2 section). Every count below is read from the
+per-capture tables of the baseline, treated and treated2 batches above; no run was made for this section other than the
+one real spec review. Causes named here are hypotheses unless a line says an arm ablated them; no arm ablates a clause.
+
+### Per criterion
+
+- **AC25 closes.** Site and verdict: `pwopen`, `review-name` `plain` 3 of 3 (treated2, G2 `c6af0ccb`); `plain` 6 of 6 in
+  the first treated round (G); baseline `internal` 3 of 3. It is graded at `pwopen` only. The real run's first naming is
+  "spec review (gauntlet)" (field 1, `plain`).
+- **AC26 closes.** Sites and verdicts, treated2: `pwopen` `outcome-word` `plain` 3 of 3; `pwdetail` `plain` 6 of 6;
+  `pwsaved` `plain` 6 of 6. The first treated round missed it at `pwdetail` (`plain` 2 of 6, `none` 4 of 6); baseline
+  `pwdetail` had `internal` 3 and `none` 3 of 6. The real run's table and echo read `plain` (field 2).
+- **AC27 is partial.** Treated2: `pwopen` `finding-id` `bracketed` 3 of 3; `pwsaved` echo `bracketed` 6 of 6; `pwsaved`
+  saved detail `bracketed` 6 of 6; `pwdetail` `bracketed` 4 of 6 (`bare` 2), one short of the clean majority. The
+  remainder, which goes back to the spec: a bare id in free prose at the detail view. One of the two `bare` captures
+  quotes a reply form without its colon ("reply "answer C2""), the other has "with C1 moved down a level". The real run
+  shows the same remainder in its turn-2 prose (four bare mentions, field 3).
+- **AC28 is partial.** Treated2: saved-detail `criterion-mention` `text-with-number` 0 of 6 (`nickname` 4, `bare` 2);
+  the first treated round was 0 of 6 (`bare` 4, `nickname` 2). Criteria are cited with the number after, but by a short
+  name rather than their own text. That is the remainder, which goes back to the spec. The real run could not be read
+  for this field (field 4): its saved section was not written within the one reply turn.
+
+### The two treated rounds and the operator's amendment
+
+| Site | Check | Baseline | First treated (G) | Treated2 (G2) |
+|---|---|---|---|---|
+| `pwopen` | `review-name` | `internal` 3 of 3 | `plain` 6 of 6 | `plain` 3 of 3 |
+| `pwopen` | `outcome-word` | `internal` 3 of 3 | `plain` 6 of 6 | `plain` 3 of 3 |
+| `pwopen` | `finding-id` | `bare` 3 of 3 | `bracketed` 3 of 6 | `bracketed` 3 of 3 |
+| `pwdetail` | `outcome-word` | `plain` 0 of 6 | `plain` 2 of 6 | `plain` 6 of 6 |
+| `pwdetail` | `finding-id` | `bare` 6 of 6 | `bracketed` 2 of 6 | `bracketed` 4 of 6 |
+| `pwsaved` | `outcome-word` | `internal` 3 of 3 | `plain` 6 of 6 | `plain` 6 of 6 |
+| `pwsaved` | `finding-id` (echo) | `bare` 3 of 3 | `bracketed` 1 of 6 | `bracketed` 6 of 6 |
+| `pwsaved` | `finding-id` (saved detail) | `bare` 3 of 3 | `bracketed` 6 of 6 | `bracketed` 6 of 6 |
+| `pwsaved` | `criterion-mention` (saved detail) | `text-with-number` 0 of 3 | `text-with-number` 0 of 6 | `text-with-number` 0 of 6 |
+
+The first treated round (G, `70cb73fc`) stopped the slice for the operator: it closed AC25 and missed AC26, AC27 and
+AC28. On 2026-10-21 the operator chose "Amend and re-run" (the dated amendment and commit G2). The treated2 round
+(`c4f1ff15`) closed AC25 and AC26 and missed AC27 and AC28, and the operator chose "Close AC25-26, rest partial" the same
+day. Both edits stay. The parent covers AC25 and AC26 and partially covers AC27 and AC28.
+
+### The severity guard, as the operator read it
+
+`pwdetail` `severity-name` read `plain` 4 and `none` 2 of 6 in treated2 against `none` 1 of 6 in the same-day control.
+The registered guard rule does not define a miss, so the reading is: regression if `none` counts as a miss; held
+otherwise. The operator's reading, dated 2026-10-21, is that `none` is not a miss when no internal severity name
+appears. No treated2 or control2 `pwdetail` capture carries an internal severity name, so the guard is held. This is the
+operator's reading of a rule that did not define a miss; it is not a script verdict.
+
+### The real spec review
+
+**What ran.** One `/craft:gauntlet` on `spec/a-telescope-loan-desk-for-the-hollin-hill-astronomy-club`, a `draft` spec
+record in a throwaway vault holding the `pw-spec.md` fixture, in a session started from a fresh directory under `/tmp`
+with `--plugin-dir <worktree>/tools/craft/plugins/craft`, `--setting-sources project`, `--output-format stream-json
+--verbose`, `--permission-mode dontAsk`. Lore read a throwaway config and state (`LORE_CONFIG_DIR`, `LORE_STATE_DIR`,
+`XDG_CONFIG_HOME`, `XDG_STATE_HOME`), a synthetic git identity and `LORE_PUBLISH_DISABLE=1`; the vault was seeded by
+`tools/lore/scripts/seed-eval-vault`. Before the run `lore vault ls` listed only the throwaway vault and `lore search`
+found nothing from the trailhead vault; after it the trailhead vault's `git status --porcelain` was empty (as before) and
+the mtimes of `~/.claude/settings.json` and `~/.claude/CLAUDE.md` were unchanged. The session's `system init` record
+(committed, trimmed, as `runs/pw-realrun.init.json`) lists one craft entry, `craft@inline`, path the branch's plugin
+directory, plus three built-in plugins; its slash commands carry no prefix other than `craft:`.
+
+**Departures from the plan, each forced by a stop before any review.** (1) The fixture spec's criteria carry no
+verification trailer, so the review's criterion gate refused it (exit 1, "carries no verification trailer naming a
+sanctioned method" for AC1 to AC6) before any pass ran. The throwaway record is the fixture with ` *Verified by:
+manual-check.*` appended to each criterion; the criterion text is unchanged, the repository's fixture is unchanged, and
+the arms never exercised the gate. (2) The first grant of `Bash` by command prefix stopped the session twice before it
+did anything, because the review composes its shell steps (a variable assignment, pipes, here-documents); the grant used
+for the session that ran is `Read,Grep,Glob,Agent,Bash`. `Bash` is needed for `lore`, the two craft scripts and the
+review's own pipes; it is unrestricted in the tool, and lore's reach is bounded by the environment, not by the grant.
+(3) The session's working directory holds a `CLAUDE.md` declaring a maturity level and a git repository, which the
+review's calibration step needs (the same condition a real consult run found). The two stopped attempts and the gate
+refusal made no review and wrote nothing; they are not read.
+
+**Turn 1 (the opening deliverable).** The review ran its criterion gate, dispatched all eight passes and presented one
+recommendation: seven table rows and two findings below it, nine findings that need the operator's decision, every one
+proposed "fixed in the spec" and none "needs a rewrite". Narration in earlier main-session text blocks ("Gate
+certified", "Security is back; four of eight passes in") names the review nowhere.
+
+**Turn 2 (one reply).** "accept C1 as a risk: the club keeps its paper handover sheet this season, so who held a scope
+and its condition at handover stay on paper and the desk does not need to record them yet, otherwise go". C1 is the first
+Critical shown, by the rule fixed in advance (none read "needs a rewrite"). The session recorded the override, withdrew
+C1's edit, found that the withdrawal changed text in three accepted edits, re-checked the drafted criteria against the
+gate, and re-presented the post-override table with "Reply go to apply all of this as one write, or override again."
+The spec is still `draft` and no `## Gauntlet` section exists: the one reply turn ended before the write.
+
+| Field | Reading |
+|---|---|
+| 1 First naming (AC25) | `plain`. Turn 1 opens "I've finished the spec review (gauntlet) of *A telescope loan desk ...*"; "gauntlet" appears once, in round brackets, and no other naming occurs in either turn. Earlier narration: no naming. |
+| 2 Outcome words (AC26) | `plain`. Turn 1's table has seven rows, each "fixed in the spec"; the two findings below it read "Proposed: fixed in the spec". Turn 2's echoed table has nine rows: C1 "accepted as a risk: "<reason>"", the other eight "fixed in the spec". No backticked `resolved`, `revise`, `accepted-as-risk`, `disputed` or `answered`; the only backticked word in turn 1 is the status `ready`, and turn 2 adds none that is an outcome. |
+| 3 Ids in round brackets (AC27) | Turn 1: every id is bracketed after the finding's text (nine of nine) or sits in the reply line ("dispute C2: ...", "accept C2 as a risk", "answer C2: ..."); no bare id. Turn 2: the nine table rows are bracketed; four bare mentions in prose, "the C1 edit" (line 1), "C7's officer view" (line 25), "from C2 (AC17)" and "C2's other text" (line 27). Recorded against AC27, which is partial; none stops the slice. |
+| 4 Criteria by text in the saved detail (AC28) | Not readable: no section was saved. Read instead, as an observation outside the field, turn 2's prose cites criteria by short name with the number after ("the handover criterion (old AC12)", "the officer view (now AC13)", "The loan history (AC16)", "the reminder (AC15)") and in lists of bare ranges ("(AC4-AC6)", "(AC2, AC8, AC9 ...)"). That matches the remainder the treated2 captures show for AC28 (hypothesis, not ablated). |
+| 5 Override on the right finding | `mapped` in the echo: C1 carries the staged override with the reason as given and the other eight keep "fixed in the spec". The stamp bullet is unread for the same reason as field 4. |
+
+**Go or no-go.** Go. Fields 1 and 2 read `plain` in both turns, so neither stop rule fired, and the override was applied
+to the right finding. Fields 3 and 5 are recorded against the partial criteria and AC27's remainder shows in the real
+session as it does at `pwdetail`; fields 4 and the stamp half of 5 are unread, so the real run does not confirm that the
+saved section reads as the arms' `pwsaved` captures did. One further session turn ("go") would complete the write and
+make both readable; it was not run, because the task allows one real session and one reply turn.
+
+**Limits.** The operator's user-level rule files in `~/.claude/rules` and the user `CLAUDE.md` load regardless of
+`--setting-sources` and are not isolated, and four claude.ai connector servers (listed in the raw init record, omitted from the trimmed file) are present.
+One session, one reader, one model tier. The vault holds one spec, so the fact pass had no sibling records. `Bash` was
+unrestricted in the tool. The fenced check on the real lore state found the trailhead vault clean; other lore processes
+wrote to the real state directory during the same minutes (publish logs for other vaults, the search index), which this
+run cannot attribute either way because it read no other part of the real vault.
+
+### Pin check
+
+The two gauntlet files on the branch HEAD against `PLAIN_WORDS_EDIT2_REVISION` (`c6af0ccbf4448626581cfc495ceec0c034f7fbc4`,
+G2), which the `pw-treated2-*` arms pin:
+
+```
+for f in SKILL.md dispositions.md; do cmp <(git show c6af0ccb:tools/craft/plugins/craft/skills/gauntlet/$f) tools/craft/plugins/craft/skills/gauntlet/$f; done   # exit 0 for both
+git log --oneline c6af0ccb..HEAD -- tools/craft/plugins/craft/skills/gauntlet                                                                              # no commits
+```
+
+Both files are byte-equal with no normalisation (the layout normalisation the earlier slice needed was for
+`_shared/council.md`, which this edit does not touch). `SKILL.md` sha256 `5a5a0de0...b5980`, `dispositions.md` sha256
+`ed8c1135...0de`.
+
+### Surfaces not measured
+
+The arms and the real run exercise the typical path of step 5. Not measured, and so not part of any closing verdict:
+
+- the missing-agent stop and the maturity line (`SKILL.md:132-134`, `:173`), which can name the review before step 5;
+- the out-of-range override rejection;
+- the `reaches-downstream` escalation table;
+- the re-presented table after a revise round (the real run's turn 2 re-presented a table after an override, a
+  neighbouring surface, and read `plain` there; a revise round itself was not exercised);
+- an `answered` row's re-adjudication.
+
+AC25 and AC27 are measured at the surfaces a typical run shows. Whether that is coverage in full or in part is the
+operator's call at slice close; for AC25 the arms and the real run agree at the one surface they reach.
+
+### The 531-line waiver
+
+`skills/gauntlet/SKILL.md` is 531 lines at base B (`4722bd0b`), at G (`9bae50c3`), at G2 (`c6af0ccb`) and at HEAD. The
+spec's Constraints say 499, which is stale. Nothing enforces the 500-line guideline (`LINE_LIMIT` at
+`tests/test_gauntlet_skill_reference_contract.py:48` is unused). Neither edit grew the file; each displaced as many lines
+as it added. The waiver is recorded here and rests with the operator at slice close.
+
+### Scope words left for a guide comparison
+
+`record-only` and `reaches-downstream` stay in the spec review's prose as scope words, because the guide has no line for
+them (spec Non-Goals, "Changing the guide"). Neither appears in the real run's two turns (0 occurrences), so the real run
+neither shows nor tests them. A comparison against the guide's wording is left for a later slice.
+
+### Scans
+
+`scripts/capture_scan.py` over `runs/pw-realrun-turn1.md`, `runs/pw-realrun-turn2.md` and `runs/pw-realrun.init.json`:
+0 known-safe matches, 0 credential findings, exit 0, for each. A search of the three for the operator's home path,
+username, `/tmp/` and the throwaway directory name found 0 hits. The raw stream is not committed. The `.md` and `.json`
+extensions keep the files outside the graded `runs/*.txt` captures, and `test_wording_grader.py` is unchanged.
