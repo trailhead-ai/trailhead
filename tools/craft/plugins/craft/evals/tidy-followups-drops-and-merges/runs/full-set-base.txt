@@ -1,0 +1,28 @@
+I created a buildable parent with one follow-up under it. The drops and the merge you asked for were not done, because this version of the ritual has no drop or merge step. Those follow-ups are untouched.
+
+**Parent:** `build-the-follow-ups-of-fixture-crate-sorter-spec-chosen-2026-10-20`. It is `ready`, and assembly reported no failed writes.
+
+**Included and nested**
+- Sorter: refuse a crate mass of zero (`sorter-refuse-a-crate-mass-of-zero`). It was refined from `open` to `ready`. Refinement picked `pytest` as the test run command because the repo has no test setup yet; change it if you use something else.
+
+**Left (not refined, not written)**
+- Belt: say the speed unit in the comment (`belt-say-the-speed-unit-in-the-comment`)
+- Bin log: write the chosen bin to the log (`bin-log-write-the-chosen-bin-to-the-log`)
+- Bin log: write the crate id with the chosen bin (`bin-log-write-the-crate-id-with-the-chosen-bin`)
+- Chutes: remove the legacy chute table (`chutes-remove-the-legacy-chute-table`)
+- Chutes: remove the table of legacy chute names (`chutes-remove-the-table-of-legacy-chute-names`)
+
+**Not nested after refinement:** none. **Left out at the check:** none. **Failed writes:** none.
+
+**Drop and merge requests that were not carried out:**
+- You asked to drop `chutes-remove-the-legacy-chute-table` and `chutes-remove-the-table-of-legacy-chute-names`. Your reason for the drop was that the chute work moved into the supplier's own firmware.
+- You asked to merge `bin-log-write-the-crate-id-with-the-chosen-bin` into `bin-log-write-the-chosen-bin-to-the-log`.
+- None of this reached the vault. All four records are still `open`, so you'll need to drop and merge them by hand in the vault.
+
+```
+/craft:execute task/build-the-follow-ups-of-fixture-crate-sorter-spec-chosen-2026-10-20
+```
+
+```
+/craft:distill spec/fixture-crate-sorter-spec
+```

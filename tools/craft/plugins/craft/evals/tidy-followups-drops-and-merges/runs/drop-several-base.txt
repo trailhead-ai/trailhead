@@ -1,0 +1,63 @@
+**Step 1–3.** `fixture-bakery-oven-spec` passes the name checks. The gather script exited 0 with a complete result: 4 follow-ups, none of them already under a follow-up parent. **Step 4:** I read the bodies of the three `open`/`ready` follow-ups. I did not read the blocked one.
+
+---
+
+## Follow-ups of spec/fixture-bakery-oven-spec
+
+Entry: `complete-status` · slice basis: `labelled` · slices: 1 · children: 1 · candidates read: 4, kept: 4 · label-excluded: 0 · skipped edges: 0
+
+**Recommended** (2 of 3 met a reason class)
+- **Dials: rename the two dial constants to match the manual** (`dials-rename-the-two-dial-constants-to-match-the-manual`). Any new code that imports the old dial names will also need renaming, so the rename gets bigger the longer it waits. *Class: a fix that gets more expensive as work builds on it.*
+- **Journal: note the preheat time beside each loaf** (`journal-note-the-preheat-time-beside-each-loaf`). Loaves logged before this lands will never have their preheat time, so the record is only complete from the day it ships. *Class: a foundation whose payoff grows the sooner it lands.*
+
+**Other follow-ups**
+- Hinge: reword the swing comment
+
+**Blocked**
+- Thermostat: swap the probe supplier
+
+Nothing has been written yet.
+
+---
+
+### Confirmation 1: the chosen set
+
+> Which listed follow-ups do you want to move onto the shortlist, and which off it? (names to add, names to remove, or `none`)
+
+**Answer given:** move every follow-up off the shortlist, and drop `journal-note-the-preheat-time-beside-each-loaf`, `dials-rename-the-two-dial-constants-to-match-the-manual` and `thermostat-swap-the-probe-supplier`.
+
+I'm taking the off-shortlist moves: both recommended follow-ups come off. **This version of the ritual can't drop follow-ups.** At this step it only moves follow-ups onto or off the shortlist, and its only drop is the step 7 flow for an existing follow-up parent. This spec has no such parent. So I'm not dropping the three follow-ups, I'm not asking the "Why drop this follow-up?" question, and I'm not using the reason supplied for it. All three stay in the left set, unchanged.
+
+**Included:** none
+
+**Left:**
+- Dials: rename the two dial constants to match the manual (`dials-rename-the-two-dial-constants-to-match-the-manual`)
+- Hinge: reword the swing comment (`hinge-reword-the-swing-comment`)
+- Journal: note the preheat time beside each loaf (`journal-note-the-preheat-time-beside-each-loaf`)
+- Thermostat: swap the probe supplier (`thermostat-swap-the-probe-supplier`)
+
+### Confirmation 2
+
+> Include these, leave these. Refinement rewrites each included follow-up's record whether or not it ends up nested. Proceed? (`yes`, or what to move.)
+
+**Answer given:** `yes`. The answer was written for a "Drop, merge, include and leave as shown?" question, which this ritual doesn't ask. With no drops, I'm treating it as `yes` to the sets above.
+
+Nothing is included, so **no parent is created**. Steps 9 to 12 (refinement, check, scope confirmation, assemble) don't run, and no subagent was dispatched.
+
+---
+
+## Closing report
+
+- **Included:** none
+- **Left:** Dials: rename the two dial constants to match the manual (`dials-rename-the-two-dial-constants-to-match-the-manual`); Hinge: reword the swing comment (`hinge-reword-the-swing-comment`); Journal: note the preheat time beside each loaf (`journal-note-the-preheat-time-beside-each-loaf`); Thermostat: swap the probe supplier (`thermostat-swap-the-probe-supplier`)
+- **Left out by the check:** none (the check didn't run)
+- **Refined but not nested:** none
+- **Failed writes:** none
+- **Dropped:** none. The ritual has no way to drop a follow-up, so the three you asked to drop are still in the vault with their status unchanged.
+- **Parent:** none created
+
+Nothing was written to the vault. No parent exists and `distilled` is false, so the closing command is:
+
+```
+/craft:distill spec/fixture-bakery-oven-spec
+```

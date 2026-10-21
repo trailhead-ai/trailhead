@@ -1,0 +1,5 @@
+vault CHANGED task/tote-tag-print-the-tote-id-in-capitals.json
+vault CHANGED task/tote-tag-print-the-tote-id-in-capitals.md
+vault CHANGED task/tote-tag-print-the-tote-id-with-emphasis-marks.json
+repo head before=[sha:1be0b0ea] after=[sha:1be0b0ea]
+repo status after=''

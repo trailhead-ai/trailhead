@@ -1,0 +1,171 @@
+{
+ "dispose_runs": [
+  {
+   "at": 6,
+   "preview": true,
+   "file": {
+    "reason": "",
+    "drops": [],
+    "merges": [
+     {
+      "survivor": "A",
+      "absorbed": [
+       {
+        "role": "B",
+        "intent": "Also print the crate's destination postcode at the end of the docket, which the courier needs."
+       }
+      ]
+     }
+    ]
+   },
+   "exit": 0,
+   "stderr_lines": [],
+   "result": {
+    "drops": [],
+    "merges": [
+     {
+      "survivor": "A",
+      "status": "ready",
+      "reset-to-open": true,
+      "absorbed": [
+       {
+        "name": "B",
+        "status": "open",
+        "note": "## Merged from task/B\n\nAlso print the crate's destination postcode at the end of the docket, which the courier needs.\n"
+       }
+      ],
+      "supersedes": [
+       {
+        "name": "B",
+        "by": "A"
+       }
+      ]
+     }
+    ],
+    "dependents": {}
+   }
+  },
+  {
+   "at": 7,
+   "preview": false,
+   "file": {
+    "reason": "",
+    "drops": [],
+    "merges": [
+     {
+      "survivor": "A",
+      "absorbed": [
+       {
+        "role": "B",
+        "intent": "Also print the crate's destination postcode at the end of the docket, which the courier needs."
+       }
+      ]
+     }
+    ]
+   },
+   "exit": 0,
+   "stderr_lines": [],
+   "result": {
+    "dropped": [],
+    "merged": [
+     {
+      "survivor": "A",
+      "absorbed": [
+       "B"
+      ],
+      "survivor-prior-status": "ready"
+     }
+    ],
+    "reset-to-open": [
+     {
+      "name": "A",
+      "prior-status": "ready"
+     }
+    ],
+    "failed": [],
+    "incomplete-merges": []
+   }
+  }
+ ],
+ "order": {
+  "write_dispose": [
+   7
+  ]
+ },
+ "children_files": [],
+ "fetched_by_main": [],
+ "progress": {
+  "assistant_text": [
+   {
+    "at": 8,
+    "line": "merged task/B into task/A"
+   },
+   {
+    "at": 8,
+    "line": "reset to open: task/A"
+   }
+  ],
+  "final_report": [
+   "merged task/B into task/A",
+   "reset to open: task/A"
+  ]
+ },
+ "closing_commands": [
+  {
+   "line": "The merge of the postcode follow-up into the city follow-up was written and read back. No follow-up was dropped, refined or nested.",
+   "standalone": false
+  },
+  {
+   "line": "/craft:distill spec/fixture-crate-docket-spec",
+   "standalone": true
+  }
+ ],
+ "records": {
+  "A": {
+   "status": "open",
+   "parent": null,
+   "supersedes": [
+    "B"
+   ],
+   "depends-on": [],
+   "dropped_note": null,
+   "merged_sections": [
+    {
+     "from": "B",
+     "first_line": "Also print the crate's destination postcode at the end of the docket, which the courier needs."
+    }
+   ],
+   "body_changed": true,
+   "new": false,
+   "body_has_5000": false
+  },
+  "B": {
+   "status": "superseded",
+   "parent": null,
+   "supersedes": [],
+   "depends-on": [],
+   "dropped_note": null,
+   "merged_sections": [],
+   "body_changed": false,
+   "new": false,
+   "body_has_5000": false
+  },
+  "C": {
+   "status": "open",
+   "parent": null,
+   "supersedes": [],
+   "depends-on": [],
+   "dropped_note": null,
+   "merged_sections": [],
+   "body_changed": false,
+   "new": false,
+   "body_has_5000": false
+  }
+ },
+ "repo": {
+  "head_before": "[sha:2cadbcc4]",
+  "head_after": "[sha:2cadbcc4]",
+  "status_after": ""
+ },
+ "real_vault_hits": ""
+}

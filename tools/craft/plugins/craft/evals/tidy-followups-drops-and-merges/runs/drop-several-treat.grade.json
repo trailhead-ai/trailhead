@@ -1,0 +1,49 @@
+{
+ "order": {},
+ "agents": {
+  "count": 0,
+  "sequential": true
+ },
+ "check_args": [],
+ "assembles": 0,
+ "verbatim": [],
+ "records": {
+  "dials-rename-the-two-dial-constants-to-match-the-manual": {
+   "status": "dropped",
+   "parent": null,
+   "labels": [],
+   "body_changed": true,
+   "new": false
+  },
+  "journal-note-the-preheat-time-beside-each-loaf": {
+   "status": "dropped",
+   "parent": null,
+   "labels": [],
+   "body_changed": true,
+   "new": false
+  },
+  "thermostat-swap-the-probe-supplier": {
+   "status": "dropped",
+   "parent": null,
+   "labels": [],
+   "body_changed": true,
+   "new": false
+  },
+  "hinge-reword-the-swing-comment": {
+   "status": "open",
+   "parent": null,
+   "labels": [],
+   "body_changed": false,
+   "new": false
+  }
+ },
+ "parent_body": {},
+ "command_lines": [
+  {
+   "line": "/craft:distill spec/fixture-bakery-oven-spec",
+   "standalone": true,
+   "in_fence": true
+  }
+ ],
+ "real_vault_hits": ""
+}

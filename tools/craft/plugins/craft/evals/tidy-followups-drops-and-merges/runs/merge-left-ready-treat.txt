@@ -1,0 +1,26 @@
+merged task/crate-docket-print-the-destination-postcode-on-the-docket into task/crate-docket-print-the-destination-city-on-the-docket
+reset to open: task/crate-docket-print-the-destination-city-on-the-docket
+
+Every disposition write landed and read back. Nothing is included, so no parent is created and no refinement was run.
+
+### Closing report
+
+The merge of the postcode follow-up into the city follow-up was written and read back. No follow-up was dropped, refined or nested.
+
+- **Included:** none.
+- **Left:**
+  - Crate docket: print the destination city on the docket (`crate-docket-print-the-destination-city-on-the-docket`)
+  - Forklift log: add a closing full stop to the module docstring (`forklift-log-add-a-closing-full-stop-to-the-module-docstring`)
+- **Left out at step 10:** none, because refinement did not run.
+- **Refined but not nested:** none.
+- **Dropped:** none.
+- **Merged:** Crate docket: print the destination city on the docket (`crate-docket-print-the-destination-city-on-the-docket`) was `ready` before the merge. Folded into it: Crate docket: print the destination postcode on the docket (`crate-docket-print-the-destination-postcode-on-the-docket`).
+- **Reset to open:** Crate docket: print the destination city on the docket (`crate-docket-print-the-destination-city-on-the-docket`), which was `ready`.
+- **Failed writes:** none.
+- **Held back:** none.
+
+No parent was created. Next step:
+
+```
+/craft:distill spec/fixture-crate-docket-spec
+```

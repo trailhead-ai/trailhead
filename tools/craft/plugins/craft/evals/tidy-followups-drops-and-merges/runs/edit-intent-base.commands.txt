@@ -1,0 +1,5 @@
+[main] BASH
+$CRAFT[base]/scripts/followup_gather.py fixture-banner-printer-spec; echo "EXIT=$?"
+
+[main] BASH
+lore record show --json --vault default task/banner-printer-centre-the-banner-text; echo "EXIT=$?"; lore record show --json --vault default task/banner-printer-pad-the-banner-text-with-a-border; echo "EXIT=$?"

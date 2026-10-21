@@ -1,0 +1,151 @@
+[main] TOOL Read {"file_path": "$CRAFT[base]/skills/tidy-followups/SKILL.md"}
+
+[main] RESULT
+1	---
+2	name: tidy-followups
+3	description: >
+4	  Present a finished spec's recorded follow-ups as a reasoned shortlist — which are worth doing
+5	  now rather than later, each with a one-line reason — and list the rest by title; then, once the
+6	  operator has chosen, refine the chosen follow-ups and nest the ones that qualify under one new
+7	  buildable parent. Gathers with a deterministic script, ranks, and writes nothing until the
+8	  operator has confirmed the chosen set.
+9	  TRIGGER when: user says "tidy the follow-ups of spec X", "which follow-ups of this spec should
+10	  we do", "what follow-ups does this spec have", or invokes /craft:tidy-followups explicitly.
+11	  DO NOT TRIGGER when: the ask is a batch of in-session code fix-ups to run now (that is
+12	  `/craft:polish`'s), or the spec's slice loop is still running (follow-ups that matter
+13	  mid-loop reach the next slice through `/craft:plan`).
+14	---
+15	
+16	# Tidy follow-ups
+17	
+18	A spec built slice by slice leaves follow-ups: tasks the slices deliberately did not act on, linked
+19	back to the slice they came from. Once the spec closes they sink into the general backlog. This
+20	ritual brings one finished spec's follow... [cut 42126 chars]
+
+[main] TEXT
+The name `fixture-tote-tag-spec` matches the safe-name shape: it doesn't start with `-` and has no `..` segment. Next, gathering the follow-ups.
+
+[main] BASH
+$CRAFT[base]/scripts/followup_gather.py fixture-tote-tag-spec; echo "EXIT=$?"
+
+[main] TOOL Read {"file_path": "$CRAFT[base]/skills/_shared/security.md"}
+
+[main] RESULT
+{"spec": "fixture-tote-tag-spec", "vault": "default", "entry": "complete-status", "distilled": false, "followup-parents": [], "followups": [{"name": "tote-tag-print-the-tote-id-in-capitals", "title": "Tote tag: print the tote id in capitals", "status": "open"}, {"name": "tote-tag-print-the-tote-id-with-emphasis-marks", "title": "Tote tag: print the tote id with emphasis marks", "status": "open"}], "slice-basis": "labelled", "slices": ["fixture-tote-tag-spec-the-slice"], "child-count": 1, "candidates-read": 2, "kept": 2, "excluded-by-label": {"count": 0, "names": []}, "skipped-edges": 0}
+EXIT=0
+
+[main] RESULT
+1	# Security posture — credential scrub and untrusted-value validation
+2	
+3	Two rules every craft surface applies, stated once here so no citing surface restates them.
+4	
+5	## Credential-pattern scrub
+6	
+7	**Credential-pattern scrub (mechanical, runs first).** This is the general rule for the whole run,
+8	not one phase's step: **any finding or note text entering a record body or a report — session
+9	candidates, `blocked` bodies, task-body notes from the per-task loop, raw command stderr quoted into
+10	either — runs through this list first.** A vault is git-backed and has its own push path, so a
+11	credential transcribed into a task body ships as surely as one committed to code. Report bodies are
+12	**summarized, never captured verbatim** — quote only `file:line` references for anything caught. Run
+13	the text through this credential-pattern scrub regex list and drop/redact any match rather than
+14	capturing it:
+15	
+16	- **Key-like tokens** — `(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s*[=:]\s*\S+`
+17	  — the trailing character class is load-bearing: it lets the keyword carry qualifier text before
+18	  the separator, which is what catches `[redacted:key-like] `AWS_SECRE... [cut 2830 chars]
+
+[main] TEXT
+Both follow-ups are `open` and their names pass the safe-name check. Fetching their bodies:
+
+[main] BASH
+lore record show --json --vault default task/tote-tag-print-the-tote-id-in-capitals; echo "EXIT=$?"; lore record show --json --vault default task/tote-tag-print-the-tote-id-with-emphasis-marks; echo "EXIT=$?"
+
+[main] RESULT
+{
+  "body": "`tag_lines` in `src/tote.py` returns the tote id as a plain line. Agreed behaviour: upper-case the id.\n",
+  "kind": "task",
+  "layer": "personal",
+  "name": "tote-tag-print-the-tote-id-in-capitals",
+  "record_id": "task/tote-tag-print-the-tote-id-in-capitals",
+  "revision": "[sha:ea1c4d72]",
+  "sidecar": {
+    "created-at": "2026-10-20T20:02:13Z",
+    "created-by": "fixture@example.com",
+    "kind": "task",
+    "related": {
+      "task": [
+        "fixture-tote-tag-spec-the-slice"
+      ]
+    },
+    "status": "open",
+    "title": "Tote tag: print the tote id in capitals",
+    "updated-at": "2026-10-20T20:02:13Z",
+    "updated-by": "fixture@example.com",
+    "version": "v1"
+  }
+}
+EXIT=0
+{
+  "body": "`tag_lines` in `src/tote.py` returns the tote id as a plain line. Agreed behaviour: wrap the id in `**` marks.\n",
+  "kind": "task",
+  "layer": "personal",
+  "name": "tote-tag-print-the-tote-id-with-emphasis-marks",
+  "record_id": "task/tote-tag-print-the-tote-id-with-emphasis-marks",
+  "revision": "[sha:0a6ce041]",
+  "sidecar": {
+    "created-at": "2026-10-20T20:02:13Z",
+   ... [cut 349 chars]
+
+[main] TEXT
+**Header:** entry `complete-status` · slice basis `labelled` · 1 slice, 1 child · 2 candidates read, 2 kept · 0 excluded by label · 0 skipped edges
+
+**Recommended:** none. 0 of 2 met a reason class. Both follow-ups change only how `tag_lines` in `src/tote.py` prints the tote id. Neither leaves a security exposure open. Neither is a defect that later work will copy or harden around, and neither is shared groundwork. Waiting costs nothing named, so neither earns a slot.
+
+**Other follow-ups:**
+- Tote tag: print the tote id in capitals (`tote-tag-print-the-tote-id-in-capitals`)
+- Tote tag: print the tote id with emphasis marks (`tote-tag-print-the-tote-id-with-emphasis-marks`)
+
+**Blocked:** none.
+
+Nothing has been written yet.
+
+---
+
+**Confirmation 1:** *Which listed follow-ups do you want to move onto the shortlist, and which off it?* (names to add, names to remove, or `none`)
+
+**Operator's answer:** move every follow-up off the shortlist, and merge `tote-tag-print-the-tote-id-in-capitals` into `tote-tag-print-the-tote-id-with-emphasis-marks`.
+
+- **Merge: refused.** This ritual has no merge step. Confirmation 1 only accepts moves onto or off the shortlist, or `none`, and no later step can merge one record into another. Because the ritual can't merge in either direction, it doesn't offer the reverse merge (emphasis-marks into capitals). The pre-supplied answer for that offer therefore doesn't come into play, and no merge is applied.
+- **Move off the shortlist: accepted.** Nothing was on the shortlist, so nothing changes. Nothing is included.
+
+**Included:** none.
+
+**Left:**
+- Tote tag: print the tote id in capitals (`tote-tag-print-the-tote-id-in-capitals`)
+- Tote tag: print the tote id with emphasis marks (`tote-tag-print-the-tote-id-with-emphasis-marks`)
+
+> Include these, leave these. Refinement rewrites each included follow-up's record whether or not it ends up nested. Proceed? (`yes`, or what to move.)
+
+**Operator's answer:** `yes`
+
+Nothing is included, so no parent is created. Steps 9 to 12 don't run: no refinement, no check and no assembly.
+
+---
+
+### Closing report
+
+- **Included:** none
+- **Left:**
+  - Tote tag: print the tote id in capitals (`tote-tag-print-the-tote-id-in-capitals`)
+  - Tote tag: print the tote id with emphasis marks (`tote-tag-print-the-tote-id-with-emphasis-marks`)
+- **Left out at refinement:** none, because no refinement ran
+- **Refined but not nested:** none
+- **Failed writes:** none
+- **Parent:** none created
+- **Merge:** refused, and nothing was merged. Both records are unchanged in the vault.
+
+The spec isn't distilled yet. To distill it:
+
+```
+/craft:distill spec/fixture-tote-tag-spec
+```

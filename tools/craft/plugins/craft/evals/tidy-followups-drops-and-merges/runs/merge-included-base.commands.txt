@@ -1,0 +1,62 @@
+[main] BASH
+$CRAFT[base]/scripts/followup_gather.py fixture-parcel-scale-spec; echo "EXIT=$?"
+
+[main] BASH
+for n in parcel-scale-refuse-a-mass-figure-above-the-load-cell-ceiling parcel-scale-refuse-a-mass-figure-below-zero sticker-press-add-a-closing-full-stop-to-the-module-docstring; do echo "=== $n"; lore record show --json --vault default task/$n; echo "EXIT=$?"; done
+
+[main] AGENT
+Refine the follow-up task `task/parcel-scale-refuse-a-mass-figure-below-zero` in the lore vault `default`.
+
+- Read $CRAFT[base]/skills/_shared/refine.md yourself and follow it in full, in its unattended mode, against that one task only. `${CLAUDE_PLUGIN_ROOT}` is $CRAFT[base]. The `lore` command on PATH reads the vault. The code the task's claims point at is the git repository at $RUN[merge-included-base]/fixture/repo — work against it (read-only for code; do not ... [cut 435 chars]
+
+[sub] BASH
+cd /tmp && lore record show task/parcel-scale-refuse-a-mass-figure-below-zero --vault default; echo ---; lore task graph parcel-scale-refuse-a-mass-figure-below-zero --vault default 2>&1 || lore task graph parcel-scale-refuse-a-mass-figure-below-zero; lore --help | head -40
+
+[sub] BASH
+cd /tmp && lore record show --help; lore record update --help; lore vault ls
+
+[sub] BASH
+cd /tmp && lore record show --json --vault default task/parcel-scale-refuse-a-mass-figure-below-zero; R=$RUN[merge-included-base]/fixture/repo; git -C $R ls-files; git -C $R log --oneline | head; cat -n $R/src/scale.py
+
+[sub] BASH
+cd /tmp && R=$RUN[merge-included-base]/fixture/repo; find $R -not -path '*/.git/*' -type f | head -50; lore record show --vault default task/fixture-parcel-scale-spec-the-slice; lore search "parcel scale" ; lore search "read_weight"; lore search "kind:area scale"; lore areas
+
+[sub] BASH
+cd /tmp && R=$RUN[merge-included-base]/fixture/repo; cat -n $R/README.md; ls -a $R; lore record show --vault default spec/fixture-parcel-scale-spec; lore search "test convention pytest"; lore search "sensor"
+
+[sub] BASH
+P=$CRAFT[base]; cat $P/templates/task.md; grep -n -A6 "Flow-out" $P/templates/plan.md
+
+[sub] BASH
+sed -n 30,40p $CRAFT[base]/templates/plan.md
+
+[sub] BASH
+cd /tmp && T=$(mktemp) && cat > "$T" <<'EOF'
+`src/scale.py` returns the sensor's raw figure, so a faulty sensor's negative figure flows into the parcel's recorded mass. Agreed behaviour: `read_weight` raises `ValueError` for a figure below zero and returns any other figure unchanged. The repository has no tests yet; add `tests/test_scale.py`.
+
+**Delivers:** `read_weight(sensor)` (src/scale.py:1) reads the sensor's figure once (currently returned raw at src/scale.py:2) and raises `ValueError` when that figure is below zero; any other figure (zero included) is returned unchanged. Behaviour as agreed in this task's captured prose ([[task/parcel-scale-refuse-a-mass-figure-below-zero]]). Out of scope: the upper load-cell ceiling, tracked separately in [[task/parcel-scale-refuse-a-mass-figure-above-the-load-cell-ceiling]].
+
+**Test contract:** New `tests/test_scale.py` (the repository has no tests yet, per the captured prose), using a stub sensor object exposing `raw()`; write these failing first:
+- a negative figure (e.g. -1, and a small negative fraction such as -0.5) makes `read_weight` raise `ValueError`;
+- a figure of exactly 0 is returned unchanged (boundary: zero is not below zero);
+- a positive figure (e.g. 1250) is returned unchanged, same value and type.
+
+**Files:** `src/scale.py` (modified), `tests/test_scale.py` (created).
+
+## Flow-out
+
+- [ ] Touched area/subsystem profiles updated with what changed
+- [ ] Prover-validated assumptions captured as session candidates (durable at flush)
+- [ ] New decisions / lessons / follow-ups surfaced during the build recorded
+EOF
+lore record update --vault default task/parcel-scale-refuse-a-mass-figure-below-zero --status ready < "$T"; rm -f "$T"; ls "$T" 2>&1; lore record show --vault default task/parcel-scale-refuse-a-mass-figure-above-the-load-cell-ceiling >/dev/null && echo resolves; lore record show --vault default task/parcel-scale-refuse-a-mass-figure-below-zero; lore record show --json --vault default task/parcel-scale-refuse-a-mass-figure-below-zero | grep status
+
+[main] BASH
+$CRAFT[base]/scripts/followup_parent.py check fixture-parcel-scale-spec parcel-scale-refuse-a-mass-figure-below-zero; echo "EXIT=$?"
+
+[main] BASH
+children=$(mktemp)
+cat > "$children" <<'CHILDREN_JSON'
+[{"name": "parcel-scale-refuse-a-mass-figure-below-zero", "reason": "A faulty sensor's negative figure flows straight into recorded parcel masses; every parcel weighed before the fix is bad data and code built on read_weight will assume raw figures are trustworthy (a fix that gets more expensive as work builds on it).", "revision": "[sha:c1053d84]"}]
+CHILDREN_JSON
+$CRAFT[base]/scripts/followup_parent.py assemble fixture-parcel-scale-spec --children "$children"; rc=$?; rm -f "$children"; echo "EXIT=$rc"

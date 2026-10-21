@@ -1,0 +1,18 @@
+The parent `build-the-follow-ups-of-fixture-parcel-scale-spec-chosen-2026-10-20` was created, now holds the below-zero follow-up, and is ready to build. Of your instructions, the merge was the one thing I couldn't do: this procedure has no merge step, so the above-the-ceiling follow-up was only moved off the shortlist and its record is unchanged.
+
+**Included**
+- Parcel scale: refuse a mass figure below zero (`parcel-scale-refuse-a-mass-figure-below-zero`). It was refined, moved from `open` to `ready`, and nested under the new parent.
+
+**Left**
+- Parcel scale: refuse a mass figure above the load-cell ceiling (`parcel-scale-refuse-a-mass-figure-above-the-load-cell-ceiling`). It is still a separate `open` follow-up. The refined below-zero task names it as out of scope, but both change `src/scale.py` and add tests to `tests/test_scale.py`.
+- Sticker press: add a closing full stop to the module docstring (`sticker-press-add-a-closing-full-stop-to-the-module-docstring`).
+
+Nothing was refined but left un-nested, and no write failed.
+
+```
+/craft:execute task/build-the-follow-ups-of-fixture-parcel-scale-spec-chosen-2026-10-20
+```
+
+```
+/craft:distill spec/fixture-parcel-scale-spec
+```

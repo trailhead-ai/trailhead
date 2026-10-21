@@ -1,0 +1,25 @@
+[main] BASH
+$CRAFT[treat]/scripts/followup_gather.py fixture-bakery-oven-spec; echo "exit: $?"
+
+[main] BASH
+for n in dials-rename-the-two-dial-constants-to-match-the-manual hinge-reword-the-swing-comment journal-note-the-preheat-time-beside-each-loaf; do lore record show --json --vault default task/$n; echo "exit: $?"; done
+
+[main] BASH
+dispositions=$(mktemp)
+cat > "$dispositions" <<'DISPOSITIONS_JSON'
+{"reason": "the oven line was closed when the bakery gave up its second site", "drops": [{"name": "journal-note-the-preheat-time-beside-each-loaf", "revision": "[sha:b8e96728]"}, {"name": "dials-rename-the-two-dial-constants-to-match-the-manual", "revision": "[sha:b7d7c731]"}, {"name": "thermostat-swap-the-probe-supplier"}], "merges": []}
+DISPOSITIONS_JSON
+$CRAFT[treat]/scripts/followup_dispose.py dispose fixture-bakery-oven-spec --dispositions "$dispositions" --preview
+rc=$?
+rm -f "$dispositions"
+echo "exit: $rc"
+
+[main] BASH
+dispositions=$(mktemp)
+cat > "$dispositions" <<'DISPOSITIONS_JSON'
+{"reason": "the oven line was closed when the bakery gave up its second site", "drops": [{"name": "journal-note-the-preheat-time-beside-each-loaf", "revision": "[sha:b8e96728]"}, {"name": "dials-rename-the-two-dial-constants-to-match-the-manual", "revision": "[sha:b7d7c731]"}, {"name": "thermostat-swap-the-probe-supplier"}], "merges": []}
+DISPOSITIONS_JSON
+$CRAFT[treat]/scripts/followup_dispose.py dispose fixture-bakery-oven-spec --dispositions "$dispositions"
+rc=$?
+rm -f "$dispositions"
+echo "exit: $rc"

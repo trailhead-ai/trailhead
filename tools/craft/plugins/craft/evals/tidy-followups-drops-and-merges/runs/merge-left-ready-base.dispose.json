@@ -1,0 +1,69 @@
+{
+ "dispose_runs": [],
+ "order": {
+  "confirmation_2": [
+   5
+  ]
+ },
+ "children_files": [],
+ "fetched_by_main": [],
+ "progress": {
+  "assistant_text": [],
+  "final_report": []
+ },
+ "closing_commands": [
+  {
+   "line": "**Operator's answer:** move every follow-up off the shortlist, and merge `B` into `A`.",
+   "standalone": false
+  },
+  {
+   "line": "- **Not done:** the requested merge of the postcode follow-up into the city follow-up, because this ritual has no merge operation.",
+   "standalone": false
+  },
+  {
+   "line": "/craft:distill spec/fixture-crate-docket-spec",
+   "standalone": true
+  }
+ ],
+ "records": {
+  "A": {
+   "status": "ready",
+   "parent": null,
+   "supersedes": [],
+   "depends-on": [],
+   "dropped_note": null,
+   "merged_sections": [],
+   "body_changed": false,
+   "new": false,
+   "body_has_5000": false
+  },
+  "B": {
+   "status": "open",
+   "parent": null,
+   "supersedes": [],
+   "depends-on": [],
+   "dropped_note": null,
+   "merged_sections": [],
+   "body_changed": false,
+   "new": false,
+   "body_has_5000": false
+  },
+  "C": {
+   "status": "open",
+   "parent": null,
+   "supersedes": [],
+   "depends-on": [],
+   "dropped_note": null,
+   "merged_sections": [],
+   "body_changed": false,
+   "new": false,
+   "body_has_5000": false
+  }
+ },
+ "repo": {
+  "head_before": "[sha:291d581e]",
+  "head_after": "[sha:291d581e]",
+  "status_after": ""
+ },
+ "real_vault_hits": ""
+}

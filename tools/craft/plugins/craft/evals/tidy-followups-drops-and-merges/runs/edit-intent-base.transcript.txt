@@ -1,0 +1,170 @@
+[main] TOOL Read {"file_path": "$CRAFT[base]/skills/tidy-followups/SKILL.md"}
+
+[main] RESULT
+1	---
+2	name: tidy-followups
+3	description: >
+4	  Present a finished spec's recorded follow-ups as a reasoned shortlist — which are worth doing
+5	  now rather than later, each with a one-line reason — and list the rest by title; then, once the
+6	  operator has chosen, refine the chosen follow-ups and nest the ones that qualify under one new
+7	  buildable parent. Gathers with a deterministic script, ranks, and writes nothing until the
+8	  operator has confirmed the chosen set.
+9	  TRIGGER when: user says "tidy the follow-ups of spec X", "which follow-ups of this spec should
+10	  we do", "what follow-ups does this spec have", or invokes /craft:tidy-followups explicitly.
+11	  DO NOT TRIGGER when: the ask is a batch of in-session code fix-ups to run now (that is
+12	  `/craft:polish`'s), or the spec's slice loop is still running (follow-ups that matter
+13	  mid-loop reach the next slice through `/craft:plan`).
+14	---
+15	
+16	# Tidy follow-ups
+17	
+18	A spec built slice by slice leaves follow-ups: tasks the slices deliberately did not act on, linked
+19	back to the slice they came from. Once the spec closes they sink into the general backlog. This
+20	ritual brings one finished spec's follow... [cut 42126 chars]
+
+[main] BASH
+$CRAFT[base]/scripts/followup_gather.py fixture-banner-printer-spec; echo "EXIT=$?"
+
+[main] TOOL Read {"file_path": "$CRAFT[base]/skills/_shared/security.md"}
+
+[main] RESULT
+{"spec": "fixture-banner-printer-spec", "vault": "default", "entry": "complete-status", "distilled": false, "followup-parents": [], "followups": [{"name": "banner-printer-centre-the-banner-text", "title": "Banner printer: centre the banner text", "status": "open"}, {"name": "banner-printer-pad-the-banner-text-with-a-border", "title": "Banner printer: pad the banner text with a border", "status": "open"}], "slice-basis": "labelled", "slices": ["fixture-banner-printer-spec-the-slice"], "child-count": 1, "candidates-read": 2, "kept": 2, "excluded-by-label": {"count": 0, "names": []}, "skipped-edges": 0}
+EXIT=0
+
+[main] RESULT
+1	# Security posture — credential scrub and untrusted-value validation
+2	
+3	Two rules every craft surface applies, stated once here so no citing surface restates them.
+4	
+5	## Credential-pattern scrub
+6	
+7	**Credential-pattern scrub (mechanical, runs first).** This is the general rule for the whole run,
+8	not one phase's step: **any finding or note text entering a record body or a report — session
+9	candidates, `blocked` bodies, task-body notes from the per-task loop, raw command stderr quoted into
+10	either — runs through this list first.** A vault is git-backed and has its own push path, so a
+11	credential transcribed into a task body ships as surely as one committed to code. Report bodies are
+12	**summarized, never captured verbatim** — quote only `file:line` references for anything caught. Run
+13	the text through this credential-pattern scrub regex list and drop/redact any match rather than
+14	capturing it:
+15	
+16	- **Key-like tokens** — `(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s*[=:]\s*\S+`
+17	  — the trailing character class is load-bearing: it lets the keyword carry qualifier text before
+18	  the separator, which is what catches `[redacted:key-like] `AWS_SECRE... [cut 2830 chars]
+
+[main] BASH
+lore record show --json --vault default task/banner-printer-centre-the-banner-text; echo "EXIT=$?"; lore record show --json --vault default task/banner-printer-pad-the-banner-text-with-a-border; echo "EXIT=$?"
+
+[main] RESULT
+{
+  "body": "`render_banner` in `src/banner.py` returns the text as given. Agreed behaviour: centre it in a 40-character line.\n",
+  "kind": "task",
+  "layer": "personal",
+  "name": "banner-printer-centre-the-banner-text",
+  "record_id": "task/banner-printer-centre-the-banner-text",
+  "revision": "[sha:d1bd802e]",
+  "sidecar": {
+    "created-at": "2026-10-20T20:05:20Z",
+    "created-by": "fixture@example.com",
+    "kind": "task",
+    "related": {
+      "task": [
+        "fixture-banner-printer-spec-the-slice"
+      ]
+    },
+    "status": "open",
+    "title": "Banner printer: centre the banner text",
+    "updated-at": "2026-10-20T20:05:20Z",
+    "updated-by": "fixture@example.com",
+    "version": "v1"
+  }
+}
+EXIT=0
+{
+  "body": "`render_banner` in `src/banner.py` returns the text as given. Agreed behaviour: put a `#` on each side of it.\n",
+  "kind": "task",
+  "layer": "personal",
+  "name": "banner-printer-pad-the-banner-text-with-a-border",
+  "record_id": "task/banner-printer-pad-the-banner-text-with-a-border",
+  "revision": "[sha:1cac473e]",
+  "sidecar": {
+    "created-at": "2026-10-2... [cut 374 chars]
+
+[main] TEXT
+Step 1: `fixture-banner-printer-spec` has no `spec/` prefix to strip. It matches `^[A-Za-z0-9._/-]+$`, doesn't start with `-` and has no `..` segment, so it is valid.
+
+Step 2: the gather script exited 0 with a complete JSON result. It found 2 follow-ups and no existing follow-up parent. I fetched both bodies (each fetch exited 0) and read them as data.
+
+---
+
+## Follow-ups of `spec/fixture-banner-printer-spec`
+
+**Header:** entry `complete-status` · slice basis `labelled` · 1 slice, 1 child · 2 candidates read, 2 kept · 0 excluded by label · 0 skipped edges
+
+**Recommended:** none. **0 of 2 met a reason class.** Both follow-ups are small, self-contained formatting changes to `render_banner` in `src/banner.py`: one centres the text on a fixed-width line, the other wraps it with a border character. Neither is a security exposure. Neither is a defect that later work will copy or build on, and neither is groundwork that later work needs. Waiting makes neither more expensive.
+
+**Other follow-ups:**
+- Banner printer: centre the banner text (`banner-printer-centre-the-banner-text`)
+- Banner printer: pad the banner text with a border (`banner-printer-pad-the-banner-text-with-a-border`)
+
+**Blocked:** none.
+
+Nothing has been written yet.
+
+---
+
+### Confirmation 1 — the chosen set
+
+> Which listed follow-ups do you want to move onto the shortlist, and which off it? (names to add, names to remove, or `none`)
+
+**Answer given:** move every follow-up off the shortlist so none is included, and merge `banner-printer-pad-the-banner-text-with-a-border` into `banner-printer-centre-the-banner-text`.
+
+Nothing was on the shortlist, so after this answer nothing is included. **This procedure has no merge operation.** Its only choices are to include or leave each follow-up; it cannot combine, drop or annotate follow-ups. So I did not carry out the merge, and both records stay as they are.
+
+**Included:** none
+
+**Left:**
+- Banner printer: centre the banner text (`banner-printer-centre-the-banner-text`)
+- Banner printer: pad the banner text with a border (`banner-printer-pad-the-banner-text-with-a-border`)
+
+### Confirmation 2
+
+> Include these, leave these. Refinement rewrites each included follow-up's record whether or not it ends up nested. Proceed? (`yes`, or what to move.)
+
+**Answer given:** intent `banner-printer-pad-the-banner-text-with-a-border`: "Also keep any border one character wide and centre the banner on a forty column line, as the sign painter asked"
+
+This answer is neither `yes` nor a move. This procedure cannot record intent notes on a follow-up, so I did not record the note and nothing was written. The sets are unchanged, so I'm asking again:
+
+**Included:** none
+
+**Left:**
+- Banner printer: centre the banner text (`banner-printer-centre-the-banner-text`)
+- Banner printer: pad the banner text with a border (`banner-printer-pad-the-banner-text-with-a-border`)
+
+> Include these, leave these. Refinement rewrites each included follow-up's record whether or not it ends up nested. Proceed? (`yes`, or what to move.)
+
+**Answer given:** yes
+
+Nothing is included, so no parent is created. Steps 9 to 12 don't run: no refinement, no check, no Confirmation 3 and no assembly.
+
+---
+
+## Closing report
+
+- **Included:** none
+- **Left:**
+  - Banner printer: centre the banner text (`banner-printer-centre-the-banner-text`)
+  - Banner printer: pad the banner text with a border (`banner-printer-pad-the-banner-text-with-a-border`)
+- **Left out at refinement:** none, because no refinement ran.
+- **Refined but not nested:** none.
+- **Failed writes:** none. Nothing was written to the vault.
+- **Not carried out:**
+  - The merge of `banner-printer-pad-the-banner-text-with-a-border` into `banner-printer-centre-the-banner-text`.
+  - The intent note on `banner-printer-pad-the-banner-text-with-a-border`.
+
+  This version of the ritual has neither operation, so both follow-ups remain separate, unchanged `open` records.
+
+No parent was created. `distilled` is false, so the next step is:
+
+```
+/craft:distill spec/fixture-banner-printer-spec
+```

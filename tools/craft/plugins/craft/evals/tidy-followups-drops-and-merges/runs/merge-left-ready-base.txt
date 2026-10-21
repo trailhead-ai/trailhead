@@ -1,0 +1,63 @@
+**Gathered** for `fixture-crate-docket-spec`. The spec name passed the safe-name check, the gather script exited 0 with a complete result, and I read all three follow-up bodies (all `open`/`ready`).
+
+---
+
+### Report
+
+**Header:** entry `complete-status` · slice basis `labelled` · 1 slice, 1 child · 3 candidates read, 3 kept · 0 excluded by label · 0 skipped edges
+
+**Recommended:** none. **0 of 3 met a reason class.**
+- The city and postcode follow-ups each add a field to the docket text. They are useful features, but neither body names a security exposure, a defect that later work will copy, or groundwork that pays off more the sooner it lands. Waiting on them costs nothing extra.
+- The forklift docstring follow-up is a small piece of tidying, which is not a reason class.
+
+**Other follow-ups:**
+- Crate docket: print the destination city on the docket
+- Crate docket: print the destination postcode on the docket
+- Forklift log: add a closing full stop to the module docstring
+
+**Blocked:** none.
+
+Nothing has been written yet.
+
+---
+
+### Confirmation 1: the chosen set
+
+> Which listed follow-ups do you want to move onto the shortlist, and which off it? (names to add, names to remove, or `none`)
+
+**Operator's answer:** move every follow-up off the shortlist, and merge `crate-docket-print-the-destination-postcode-on-the-docket` into `crate-docket-print-the-destination-city-on-the-docket`.
+
+- **Moves:** the shortlist was already empty, so taking everything off it changes nothing. Nothing is included.
+- **Merge:** this ritual has no merge step. A merge is not one of the answers it accepts at this question, and none of its writes can combine two follow-ups. I have not done the merge, and nothing was written for it. Both follow-ups stay as they are, in the left set. To merge them, use a separate edit to the records, outside this ritual.
+
+**Included:** none
+
+**Left:**
+- Crate docket: print the destination city on the docket — `crate-docket-print-the-destination-city-on-the-docket`
+- Crate docket: print the destination postcode on the docket — `crate-docket-print-the-destination-postcode-on-the-docket`
+- Forklift log: add a closing full stop to the module docstring — `forklift-log-add-a-closing-full-stop-to-the-module-docstring`
+
+### Confirmation 2
+
+> Include these, leave these. Refinement rewrites each included follow-up's record whether or not it ends up nested. Proceed? (`yes`, or what to move.)
+
+**Operator's answer:** `yes` (the answer was given for a "Drop, merge, include and leave as shown?" question; this ritual's question has no drop or merge, so I read it as approving the sets above).
+
+Nothing is included, so **no parent is created**. Steps 9 to 12 (refinement, check, scope confirmation and assembly) do not run, and no refinement subagent was dispatched.
+
+---
+
+### Closing report
+
+- **Included:** none
+- **Left:** the three follow-ups above, unchanged
+- **Left out at the check / refined but not nested:** none (no refinement ran)
+- **Failed writes:** none. Nothing was written to the vault.
+- **Not done:** the requested merge of the postcode follow-up into the city follow-up, because this ritual has no merge operation.
+- **Parent:** none created
+
+No parent was created and `distilled` is false, so the remaining closing command is to distil the spec:
+
+```
+/craft:distill spec/fixture-crate-docket-spec
+```

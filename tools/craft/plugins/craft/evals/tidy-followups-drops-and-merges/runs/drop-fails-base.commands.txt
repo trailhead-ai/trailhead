@@ -1,0 +1,5 @@
+[main] BASH
+$CRAFT[base]/scripts/followup_gather.py fixture-mug-rack-spec; echo "EXIT=$?"
+
+[main] BASH
+lore record show --json --vault default task/mugs-count-the-mugs-hanging-on-the-rack; echo "EXIT=$?"; lore record show --json --vault default task/rack-paint-pick-a-warmer-grey; echo "EXIT=$?"

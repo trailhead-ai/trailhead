@@ -1,0 +1,81 @@
+[main] BASH
+$CRAFT[base]/scripts/followup_gather.py fixture-hat-peg-spec; echo "EXIT=$?"
+
+[main] BASH
+for n in hat-pegs-report-how-many-pegs-are-free hat-pegs-report-how-many-pegs-are-in-use hat-pegs-report-the-pegs-in-use-as-a-ratio-of-all-pegs; do echo "== $n"; lore record show --json --vault default task/$n; echo "EXIT=$?"; done
+
+[main] BASH
+ls $CRAFT[base]/skills/_shared/; cd $RUN[supersede-fails-base]/fixture/repo && git status --short && ls -R . | head -30
+
+[main] AGENT
+Refine the follow-up task `task/hat-pegs-report-how-many-pegs-are-in-use` in the lore vault `default`.
+
+- Read $CRAFT[base]/skills/_shared/refine.md yourself and follow it in full, in its unattended mode, against that one task only. (`${CLAUDE_PLUGIN_ROOT}` is $CRAFT[base].) The `lore` command on PATH reads the vault.
+- The code the task's claims point at is the git repository at $RUN[supersede-fails-base]/fixture/repo; check claims against it (read-only — do not ... [cut 438 chars]
+
+[sub] BASH
+lore record show task/hat-pegs-report-how-many-pegs-are-in-use --vault default 2>&1 || lore record show task/hat-pegs-report-how-many-pegs-are-in-use 2>&1; echo ---; lore task graph hat-pegs-report-how-many-pegs-are-in-use 2>&1
+
+[sub] BASH
+lore record show --help 2>&1 | head -30; lore record show task/hat-pegs-report-how-many-pegs-are-in-use --json 2>&1 | head -40
+
+[sub] BASH
+cd $RUN[supersede-fails-base]/fixture/repo && git log --oneline | head; git status --short; find . -path ./.git -prune -o -type f -print; echo ---; cat -n src/pegs.py; echo ---; lore record show task/fixture-hat-peg-spec-the-slice 2>&1
+
+[sub] BASH
+cd $RUN[supersede-fails-base]/fixture/repo && cat -n README.md; grep -rn "peg\|hat" src README.md; head -50 src/mugs.py src/tote.py src/crate.py; ls -a; ls tests 2>&1
+
+[sub] BASH
+cd $RUN[supersede-fails-base]/fixture/repo && for f in src/*.py; do echo "== $f"; cat $f; done; for q in "peg" "pegs" "hat" "peg_report" "src/pegs.py" "hat pegs" "tests" "kind:area pegs"; do echo "### $q"; lore search "$q" 2>&1 | head -20; done
+
+[sub] BASH
+for r in spec/fixture-hat-peg-spec task/hat-pegs-report-how-many-pegs-are-free task/hat-pegs-report-the-pegs-in-use-as-a-ratio-of-all-pegs task/crate-docket-print-the-destination-city-on-the-docket task/fixture-hat-peg-spec-a-finished-child; do echo "=== $r"; lore record show $r --json 2>&1; done; lore search "kind:area" 2>&1 | head; lore search "kind:adr" 2>&1 | head; lore search "kind:decision" 2>&1|head
+
+[sub] BASH
+grep -n -A6 "Flow-out" $CRAFT[base]/templates/plan.md; grep -rln "credential-pattern scrub\|canonical pattern list" $CRAFT[base] | head
+
+[sub] BASH
+sed -n 30,40p $CRAFT[base]/templates/plan.md; grep -n -i "credential\|pattern" $CRAFT[base]/skills/_shared/security.md | head -30
+
+[sub] BASH
+T=$(mktemp -t refine-hatpegs.XXXXXX) && cat > "$T" <<'EOF'
+`peg_report` in `src/pegs.py` counts every peg. Agreed behaviour: it returns the number of pegs that hold a hat. The repository has no tests yet; add `tests/test_pegs.py`.
+
+**Delivers:** `peg_report` in `src/pegs.py` returns the number of pegs that hold a hat, instead of the count of every peg it returns today (`src/pegs.py:2`). How a peg signals that it holds a hat is not yet settled — see `## Refine — unresolved` below.
+
+**Test contract:** New `tests/test_pegs.py` (the repo has no tests directory yet). Tests must verify: a [leak-gate-redacted] of occupied and empty pegs returns only the occupied count; a list where every peg is empty returns 0; an empty list returns 0; a list where every peg holds a hat returns its length. The peg fixtures these tests build depend on the unresolved peg shape below.
+
+**Files:** `src/pegs.py`, `tests/test_pegs.py` (new)
+
+## Flow-out
+
+- [ ] Touched area/subsystem profiles updated with what changed
+- [ ] Prover-validated assumptions captured as session candidates (durable at flush)
+- [ ] New decisions / lessons / follow-ups surfaced during the build recorded
+
+## Refine — unresolved
+
+**Question:** How does a peg passed to `peg_report` show that it holds a hat — a `hat` attribute that is `None` when the peg is empty, or some other shape (each element being the hat-or-`None` value itself, a boolean flag, a mapping)?
+
+**Evidence gathered:** `src/pegs.py:1-2` is the whole module and only calls `len(pegs)`, so it says nothing about what a peg looks like; no other module in `src/` mentions pegs or hats. Other modules in the repo read plain attributes off their argument (`src/crate.py:2`, `src/tote.py:2`), and the ready task [[task/crate-docket-print-the-destination-city-on-the-docket]] named a new attribute (`city`) from its prose. The vault has no area profile, ADR, or spec content on pegs: searches for peg, pegs, hat, hat pegs, peg_report, kind:area, and kind:adr turned up only [[spec/fixture-hat-peg-spec]] (no content beyond a fixture marker), [[task/fixture-hat-peg-spec-the-slice]] (done, no content), and the sibling open follow-ups [[task/hat-pegs-report-how-many-pegs-are-free]] and [[task/hat-pegs-report-the-pegs-in-use-as-a-ratio-of-all-pegs]], which also leave the peg shape undefined. Those siblings are separate follow-ups and were not folded in.
+
+**Recommended answer:** Each peg exposes a `hat` attribute that is `None` when the peg is empty, and `peg_report` counts pegs whose `hat is not None`. This matches the attribute-access style in `src/crate.py:2` and `src/tote.py:2` and the noun used in the task prose. It would also give the free-pegs and ratio follow-ups a shared definition.
+EOF
+python3 -I - "$T" <<'PY'
+import re,sys
+t=open(sys.argv[1]).read()
+pats=[r'(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s*[=:]\s*\S+',
+r'(?i)\b(AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|gho_[A-Za-z0-9]{36}|glpat-[A-Za-z0-9_-]{20}|xox[baprs]-[A-Za-z0-9-]+|sk_live_[A-Za-z0-9]+|AIza[0-9A-Za-z_-]{35})\b',
+r'(?i)bearer\s+[A-Za-z0-9._\-]+',r'(?i)api[_-]?key[\'"]?\s*[:=]\s*[\'"]?[A-Za-z0-9._\-]{16,}',
+r'\b[A-Za-z0-9+/]{32,}={0,2}\b',r'\b[A-Fa-f0-9]{40,}\b',r'-----BEGIN [A-Z ]*PRIVATE KEY-----']
+for p in pats:
+  for m in re.finditer(p,t): print("HIT",p,m.group(0))
+print("scrub done")
+PY
+echo "$T"
+
+[sub] BASH
+T=$RUN[supersede-fails-base]/tmp/refine-hatpegs.Y7UczC; lore record update task/hat-pegs-report-how-many-pegs-are-in-use --vault default < "$T" 2>&1 || lore record update task/hat-pegs-report-how-many-pegs-are-in-use < "$T"; rm -f "$T"; lore record show task/hat-pegs-report-how-many-pegs-are-in-use --json | python3 -I -c 'import json,sys;d=json.load(sys.stdin);print(d["sidecar"]["status"]);print(d["body"])'
+
+[main] BASH
+$CRAFT[base]/scripts/followup_parent.py check fixture-hat-peg-spec hat-pegs-report-how-many-pegs-are-in-use; echo "EXIT=$?"

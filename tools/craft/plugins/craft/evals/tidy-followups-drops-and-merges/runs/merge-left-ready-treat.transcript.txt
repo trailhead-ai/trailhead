@@ -1,0 +1,145 @@
+[main] TOOL Read {"file_path": "$CRAFT[treat]/skills/tidy-followups/SKILL.md"}
+
+[main] RESULT
+1	---
+2	name: tidy-followups
+3	description: >
+4	  Present a finished spec's recorded follow-ups as a reasoned shortlist — which are worth doing
+5	  now rather than later, each with a one-line reason — and list the rest by title; then, once the
+6	  operator has chosen, refine the chosen follow-ups and nest the ones that qualify under one new
+7	  buildable parent. Gathers with a deterministic script, ranks, and writes nothing until the
+8	  operator has confirmed the chosen set.
+9	  TRIGGER when: user says "tidy the follow-ups of spec X", "which follow-ups of this spec should
+10	  we do", "what follow-ups does this spec have", or invokes /craft:tidy-followups explicitly.
+11	  DO NOT TRIGGER when: the ask is a batch of in-session code fix-ups to run now (that is
+12	  `/craft:polish`'s), or the spec's slice loop is still running (follow-ups that matter
+13	  mid-loop reach the next slice through `/craft:plan`).
+14	---
+15	
+16	# Tidy follow-ups
+17	
+18	A spec built slice by slice leaves follow-ups: tasks the slices deliberately did not act on, linked
+19	back to the slice they came from. Once the spec closes they sink into the general backlog. This
+20	ritual brings one finished spec's follow... [cut 58993 chars]
+
+[main] TEXT
+Step 1: name `fixture-crate-docket-spec` is valid. Step 2: gather.
+
+[main] BASH
+$CRAFT[treat]/scripts/followup_gather.py fixture-crate-docket-spec; echo "exit: $?"
+
+[main] TOOL Read {"file_path": "$CRAFT[treat]/skills/_shared/security.md"}
+
+[main] RESULT
+{"spec": "fixture-crate-docket-spec", "vault": "default", "entry": "complete-status", "distilled": false, "followup-parents": [], "followups": [{"name": "crate-docket-print-the-destination-city-on-the-docket", "title": "Crate docket: print the destination city on the docket", "status": "ready"}, {"name": "crate-docket-print-the-destination-postcode-on-the-docket", "title": "Crate docket: print the destination postcode on the docket", "status": "open"}, {"name": "forklift-log-add-a-closing-full-stop-to-the-module-docstring", "title": "Forklift log: add a closing full stop to the module docstring", "status": "open"}], "slice-basis": "labelled", "slices": ["fixture-crate-docket-spec-the-slice"], "child-count": 1, "candidates-read": 3, "kept": 3, "excluded-by-label": {"count": 0, "names": []}, "skipped-edges": 0}
+exit: 0
+
+[main] RESULT
+1	# Security posture — credential scrub and untrusted-value validation
+2	
+3	Two rules every craft surface applies, stated once here so no citing surface restates them.
+4	
+5	## Credential-pattern scrub
+6	
+7	**Credential-pattern scrub (mechanical, runs first).** This is the general rule for the whole run,
+8	not one phase's step: **any finding or note text entering a record body or a report — session
+9	candidates, `blocked` bodies, task-body notes from the per-task loop, raw command stderr quoted into
+10	either — runs through this list first.** A vault is git-backed and has its own push path, so a
+11	credential transcribed into a task body ships as surely as one committed to code. Report bodies are
+12	**summarized, never captured verbatim** — quote only `file:line` references for anything caught. Run
+13	the text through this credential-pattern scrub regex list and drop/redact any match rather than
+14	capturing it:
+15	
+16	- **Key-like tokens** — `(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s*[=:]\s*\S+`
+17	  — the trailing character class is load-bearing: it lets the keyword carry qualifier text before
+18	  the separator, which is what catches `[redacted:key-like] `AWS_SECRE... [cut 2830 chars]
+
+[main] TEXT
+All three names pass the step 1 checks. Fetching bodies.
+
+[main] BASH
+for n in crate-docket-print-the-destination-city-on-the-docket crate-docket-print-the-destination-postcode-on-the-docket forklift-log-add-a-closing-full-stop-to-the-module-docstring; do lore record show --json --vault default task/$n; echo "exit: $?"; done
+
+[main] RESULT
+{
+  "body": "`label_text` in `src/crate.py` prints only the crate's name; the dispatcher also needs the destination city on the docket.\n\n**Delivers:** `label_text` in `src/crate.py` returns the crate's name, a space, then its `city`.\n\n**Test contract:** A test passes a crate named `c7` with city `Leeds` and asserts `c7 Leeds`.\n\n**Files:** `src/crate.py`, `tests/test_crate.py` (new)\n\n",
+  "kind": "task",
+  "layer": "personal",
+  "name": "crate-docket-print-the-destination-city-on-the-docket",
+  "record_id": "task/crate-docket-print-the-destination-city-on-the-docket",
+  "revision": "[sha:f154b8b6]",
+  "sidecar": {
+    "created-at": "2026-10-20T19:51:36Z",
+    "created-by": "fixture@example.com",
+    "kind": "task",
+    "related": {
+      "task": [
+        "fixture-crate-docket-spec-the-slice"
+      ]
+    },
+    "status": "ready",
+    "title": "Crate docket: print the destination city on the docket",
+    "updated-at": "2026-10-20T19:51:36Z",
+    "updated-by": "fixture@example.com",
+    "version": "v1"
+  }
+}
+exit: 0
+{
+  "body": "`label_text` in `src/crate.py` prints only the crate's name; the courier also needs the destination ... [cut 1579 chars]
+
+[main] BASH
+dispositions=$(mktemp)
+cat > "$dispositions" <<'DISPOSITIONS_JSON'
+{"reason": "", "drops": [], "merges": [{"survivor": {"name": "crate-docket-print-the-destination-city-on-the-docket", "revision": "[sha:f154b8b6]"}, "absorbed": [{"name": "crate-docket-print-the-destination-postcode-on-the-docket", "revision": "[sha:d44e096c]", "intent": "Also print the crate's destination postcode at the end of the docket, which the courier needs."}]}]}
+DISPOSITIONS_JSON
+$CRAFT[treat]/scripts/followup_dispose.py dispose fixture-crate-docket-spec --dispositions "$dispositions" --preview
+rc=$?
+rm -f "$dispositions"
+echo "exit: $rc"
+
+[main] RESULT
+{"drops": [], "merges": [{"survivor": "crate-docket-print-the-destination-city-on-the-docket", "status": "ready", "reset-to-open": true, "absorbed": [{"name": "crate-docket-print-the-destination-postcode-on-the-docket", "status": "open", "note": "## Merged from task/crate-docket-print-the-destination-postcode-on-the-docket\n\nAlso print the crate's destination postcode at the end of the docket, which the courier needs.\n"}], "supersedes": [{"name": "crate-docket-print-the-destination-postcode-on-the-docket", "by": "crate-docket-print-the-destination-city-on-the-docket"}]}], "dependents": {}}
+exit: 0
+
+[main] BASH
+dispositions=$(mktemp)
+cat > "$dispositions" <<'DISPOSITIONS_JSON'
+{"reason": "", "drops": [], "merges": [{"survivor": {"name": "crate-docket-print-the-destination-city-on-the-docket", "revision": "[sha:f154b8b6]"}, "absorbed": [{"name": "crate-docket-print-the-destination-postcode-on-the-docket", "revision": "[sha:d44e096c]", "intent": "Also print the crate's destination postcode at the end of the docket, which the courier needs."}]}]}
+DISPOSITIONS_JSON
+$CRAFT[treat]/scripts/followup_dispose.py dispose fixture-crate-docket-spec --dispositions "$dispositions"
+rc=$?
+rm -f "$dispositions"
+echo "exit: $rc"
+
+[main] RESULT
+{"dropped": [], "merged": [{"survivor": "crate-docket-print-the-destination-city-on-the-docket", "absorbed": ["crate-docket-print-the-destination-postcode-on-the-docket"], "survivor-prior-status": "ready"}], "reset-to-open": [{"name": "crate-docket-print-the-destination-city-on-the-docket", "prior-status": "ready"}], "failed": [], "incomplete-merges": []}
+exit: 0
+
+[main] TEXT
+merged task/crate-docket-print-the-destination-postcode-on-the-docket into task/crate-docket-print-the-destination-city-on-the-docket
+reset to open: task/crate-docket-print-the-destination-city-on-the-docket
+
+Every disposition write landed and read back. Nothing is included, so no parent is created and no refinement was run.
+
+### Closing report
+
+The merge of the postcode follow-up into the city follow-up was written and read back. No follow-up was dropped, refined or nested.
+
+- **Included:** none.
+- **Left:**
+  - Crate docket: print the destination city on the docket (`crate-docket-print-the-destination-city-on-the-docket`)
+  - Forklift log: add a closing full stop to the module docstring (`forklift-log-add-a-closing-full-stop-to-the-module-docstring`)
+- **Left out at step 10:** none, because refinement did not run.
+- **Refined but not nested:** none.
+- **Dropped:** none.
+- **Merged:** Crate docket: print the destination city on the docket (`crate-docket-print-the-destination-city-on-the-docket`) was `ready` before the merge. Folded into it: Crate docket: print the destination postcode on the docket (`crate-docket-print-the-destination-postcode-on-the-docket`).
+- **Reset to open:** Crate docket: print the destination city on the docket (`crate-docket-print-the-destination-city-on-the-docket`), which was `ready`.
+- **Failed writes:** none.
+- **Held back:** none.
+
+No parent was created. Next step:
+
+```
+/craft:distill spec/fixture-crate-docket-spec
+```

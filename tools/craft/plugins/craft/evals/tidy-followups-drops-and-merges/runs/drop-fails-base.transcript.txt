@@ -1,0 +1,169 @@
+[main] TOOL Read {"file_path": "$CRAFT[base]/skills/tidy-followups/SKILL.md"}
+
+[main] RESULT
+1	---
+2	name: tidy-followups
+3	description: >
+4	  Present a finished spec's recorded follow-ups as a reasoned shortlist — which are worth doing
+5	  now rather than later, each with a one-line reason — and list the rest by title; then, once the
+6	  operator has chosen, refine the chosen follow-ups and nest the ones that qualify under one new
+7	  buildable parent. Gathers with a deterministic script, ranks, and writes nothing until the
+8	  operator has confirmed the chosen set.
+9	  TRIGGER when: user says "tidy the follow-ups of spec X", "which follow-ups of this spec should
+10	  we do", "what follow-ups does this spec have", or invokes /craft:tidy-followups explicitly.
+11	  DO NOT TRIGGER when: the ask is a batch of in-session code fix-ups to run now (that is
+12	  `/craft:polish`'s), or the spec's slice loop is still running (follow-ups that matter
+13	  mid-loop reach the next slice through `/craft:plan`).
+14	---
+15	
+16	# Tidy follow-ups
+17	
+18	A spec built slice by slice leaves follow-ups: tasks the slices deliberately did not act on, linked
+19	back to the slice they came from. Once the spec closes they sink into the general backlog. This
+20	ritual brings one finished spec's follow... [cut 42126 chars]
+
+[main] BASH
+$CRAFT[base]/scripts/followup_gather.py fixture-mug-rack-spec; echo "EXIT=$?"
+
+[main] TOOL Read {"file_path": "$CRAFT[base]/skills/_shared/security.md"}
+
+[main] RESULT
+{"spec": "fixture-mug-rack-spec", "vault": "default", "entry": "complete-status", "distilled": false, "followup-parents": [], "followups": [{"name": "mugs-count-the-mugs-hanging-on-the-rack", "title": "Mugs: count the mugs hanging on the rack", "status": "open"}, {"name": "rack-paint-pick-a-warmer-grey", "title": "Rack paint: pick a warmer grey", "status": "open"}], "slice-basis": "labelled", "slices": ["fixture-mug-rack-spec-the-slice"], "child-count": 1, "candidates-read": 2, "kept": 2, "excluded-by-label": {"count": 0, "names": []}, "skipped-edges": 0}
+EXIT=0
+
+[main] RESULT
+1	# Security posture — credential scrub and untrusted-value validation
+2	
+3	Two rules every craft surface applies, stated once here so no citing surface restates them.
+4	
+5	## Credential-pattern scrub
+6	
+7	**Credential-pattern scrub (mechanical, runs first).** This is the general rule for the whole run,
+8	not one phase's step: **any finding or note text entering a record body or a report — session
+9	candidates, `blocked` bodies, task-body notes from the per-task loop, raw command stderr quoted into
+10	either — runs through this list first.** A vault is git-backed and has its own push path, so a
+11	credential transcribed into a task body ships as surely as one committed to code. Report bodies are
+12	**summarized, never captured verbatim** — quote only `file:line` references for anything caught. Run
+13	the text through this credential-pattern scrub regex list and drop/redact any match rather than
+14	capturing it:
+15	
+16	- **Key-like tokens** — `(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s*[=:]\s*\S+`
+17	  — the trailing character class is load-bearing: it lets the keyword carry qualifier text before
+18	  the separator, which is what catches `[redacted:key-like] `AWS_SECRE... [cut 2830 chars]
+
+[main] TEXT
+Both names pass the safe shape. Fetching bodies.
+
+[main] BASH
+lore record show --json --vault default task/mugs-count-the-mugs-hanging-on-the-rack; echo "EXIT=$?"; lore record show --json --vault default task/rack-paint-pick-a-warmer-grey; echo "EXIT=$?"
+
+[main] RESULT
+{
+  "body": "`mug_count` in `src/mugs.py` counts every slot, empty or not.\n",
+  "kind": "task",
+  "layer": "personal",
+  "name": "mugs-count-the-mugs-hanging-on-the-rack",
+  "record_id": "task/mugs-count-the-mugs-hanging-on-the-rack",
+  "revision": "[sha:2e3126a9]",
+  "sidecar": {
+    "created-at": "2026-10-20T20:15:05Z",
+    "created-by": "fixture@example.com",
+    "kind": "task",
+    "related": {
+      "task": [
+        "fixture-mug-rack-spec-the-slice"
+      ]
+    },
+    "status": "open",
+    "title": "Mugs: count the mugs hanging on the rack",
+    "updated-at": "2026-10-20T20:15:05Z",
+    "updated-by": "fixture@example.com",
+    "version": "v1"
+  }
+}
+EXIT=0
+{
+  "body": "`COLOUR` in `src/rackpaint.py` is a cold grey.\n",
+  "kind": "task",
+  "layer": "personal",
+  "name": "rack-paint-pick-a-warmer-grey",
+  "record_id": "task/rack-paint-pick-a-warmer-grey",
+  "revision": "[sha:d328db49]",
+  "sidecar": {
+    "created-at": "2026-10-20T20:15:05Z",
+    "created-by": "fixture@example.com",
+    "kind": "task",
+    "related": {
+      "task": [
+        "fixture-mug-rack-spec-the-slice"
+   ... [cut 196 chars]
+
+[main] TEXT
+**Step 1.** `fixture-mug-rack-spec` matches `^[A-Za-z0-9._/-]+$`, does not start with `-`, and has no `..` segment.
+
+**Steps 2–3.** The gather script exited 0 with a complete JSON result. It found two follow-ups and `followup-parents` is empty, so the run goes to step 4.
+
+**Step 4.** Both follow-up names passed the step 1 check again. Both are `open`, and both bodies were fetched (exit 0).
+
+---
+
+## Follow-ups of spec `fixture-mug-rack-spec`
+
+**Header:** entry `complete-status` · slice basis `labelled` · 1 slice, 1 child · 2 candidates read, 2 kept · 0 excluded by label · 0 skipped edges
+
+**Recommended**
+- **Mugs: count the mugs hanging on the rack** (`mugs-count-the-mugs-hanging-on-the-rack`). The mug counter counts empty slots as well as filled ones. Any code written to call it will be built around the wrong number, so the fix costs more with every new caller. *Class: a fix that gets more expensive as work builds on it.*
+
+1 of 2 met a reason class.
+
+**Other follow-ups**
+- Rack paint: pick a warmer grey
+
+**Blocked**
+- (none)
+
+Nothing has been written yet.
+
+---
+
+### Confirmation 1: the chosen set
+
+> Which listed follow-ups do you want to move onto the shortlist, and which off it? (a list of names to add, a list to remove, or `none`)
+
+**Answer given:** move every follow-up off the shortlist, and drop `mugs-count-the-mugs-hanging-on-the-rack` and `rack-paint-pick-a-warmer-grey`.
+
+Both names are in the gathered set, so the move is accepted: `mugs-count-the-mugs-hanging-on-the-rack` comes off the shortlist.
+
+This ritual can't drop a follow-up. Its procedure only moves follow-ups onto or off the shortlist. The only drop it has is for an existing follow-up parent (step 7), and this spec has none. So the drop request is not carried out, and the procedure never asks "Why drop this follow-up?". The reason you gave ("the rack was scrapped with the old stockroom") was not used and nothing was recorded. Both follow-ups go to the **left** set.
+
+**Included:**
+- (none)
+
+**Left:**
+- Mugs: count the mugs hanging on the rack (`mugs-count-the-mugs-hanging-on-the-rack`)
+- Rack paint: pick a warmer grey (`rack-paint-pick-a-warmer-grey`)
+
+### Confirmation 2
+
+> Include these, leave these. Refinement rewrites each included follow-up's record whether or not it ends up nested. Proceed? (`yes`, or what to move.)
+
+**Answer given:** `yes`. You worded this question as "Drop, merge, include and leave as shown?", but the ritual's question is the one above and it takes the same `yes`.
+
+Nothing is included, so no parent is created. Steps 9–12 (refinement, check, scope confirmation, assemble) do not run.
+
+---
+
+## Closing report
+
+- **Included:** none
+- **Left:** Mugs: count the mugs hanging on the rack (`mugs-count-the-mugs-hanging-on-the-rack`); Rack paint: pick a warmer grey (`rack-paint-pick-a-warmer-grey`)
+- **Left out at step 10:** none (no check ran)
+- **Refined but not nested:** none
+- **Failed writes:** none
+- **Not carried out:** the drop of `mugs-count-the-mugs-hanging-on-the-rack` and `rack-paint-pick-a-warmer-grey`, because this ritual has no follow-up drop. Both records are unchanged and `open`, and they will show up again the next time this spec is tidied. To get rid of them, set their status outside this ritual.
+
+Nothing was written to the vault. No parent was created and `distilled` is false, so the closing command is:
+
+```
+/craft:distill spec/fixture-mug-rack-spec
+```

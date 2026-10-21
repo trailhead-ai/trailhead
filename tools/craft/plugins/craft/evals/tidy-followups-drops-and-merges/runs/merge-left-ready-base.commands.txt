@@ -1,0 +1,5 @@
+[main] BASH
+$CRAFT[base]/scripts/followup_gather.py fixture-crate-docket-spec; echo "exit=$?"
+
+[main] BASH
+for n in crate-docket-print-the-destination-city-on-the-docket crate-docket-print-the-destination-postcode-on-the-docket forklift-log-add-a-closing-full-stop-to-the-module-docstring; do echo "=== $n"; lore record show --json --vault default task/$n; echo "exit=$?"; done

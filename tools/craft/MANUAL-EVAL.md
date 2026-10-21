@@ -3400,3 +3400,114 @@ Code version, the vanilla path only.
 | AC43 in part | every treatment cell | held (every printed command alone on its line) | each `.grade.json` `command_lines` |
 
 AC6 held in 1 of the 2 cells that reach branch (c): `refuse-build` printed the build command and put the build-or-drop question, while `refuse-drop` printed no build command before the question. The drop's reason question and its child-naming confirmation, the gate the plan relied on for the forgeable parent marker, were not observed in the one cell that exercised them (`refuse-drop`).
+
+---
+
+## Case: tidy-followups-drops-and-merges
+
+`plugins/craft/evals/tidy-followups-drops-and-merges/` holds `expected.md` (the pass condition for nine cells), `fixtures/make-fixture-vault.py`
+(the builder: one spec per cell and three `lore` shim environments), `cells.json` (each cell's spec, shim and operator answers), `harness.py` (the
+existing case's harness with this case's base commit, builder, answers and shims), `grade_dispose.py` (the dispose-half facts), and `runs/`. Its
+`extract.py`, `grade.py` and `scrub.py` are the existing case's (`tidy-followups-builds-one-parent/`), unchanged.
+
+**Under test:** `skills/tidy-followups/SKILL.md` at `2bcbe8b2`: step 6's "possible overlap", step 8's `drop` and `merge ... into ...` answers, the
+reason question, the staged `followup_dispose.py` preview and its three outcomes, Confirmation 2, step 8a's write, steps 9 and 10's hold-back, step
+13's closing report. **Pre-registration:** `expected.md` committed alone as `6b7793b0`, before the builder, grader, wrapper or any arm existed; every
+line is taken from the prose, and none was added or changed after a run. **Treatment arm:** the skill and plugin tree at
+`2bcbe8b29c079daf9444debeb24784dc6e63eb2e`. **Baseline arm:** the tree at `4722bd0b45f838ecd02b17baa90931e4d47166e6`, before drop and merge (no
+`followup_dispose.py`). Builder, wrapper, grader and smoke test: `a0143913`.
+
+**Dispatch.** As the earlier tidy-followups cases: `git archive` snapshots of each commit under `/private/tmp/eval-drop-merge` (outside `$HOME`,
+without `evals/`), fixture built inside the run dir with `LORE_BIN` naming the snapshot's `lore`, `scripts/eval-sandbox`, manifest env minus `HOME`,
+Claude Code 2.1.304, 2026-10-20, one cell at a time. **Answers are delivered up front in the prompt**: the harness is one `claude -p` call per arm and
+cannot hold a turn open for the next answer, and `expected.md` says so. Because the earlier cases found that an arm handed its answers up front
+skips the displays (recorded against `task/tidy-followups-shows-its-report-and-confirmations-when-the-operator-answers-before-being-asked`), each
+cell's lines were split before any run into core lines `C` (commands, exit codes, staged files, records on disk, progress and closing lines) and
+display lines `D` (text the prose puts before a write). **Probe, one run before the batch, through the real dispatch** (on the drop-fail shim):
+`python3` 3.14.6 and `lore` and `mktemp` resolved to the fixture's shim directory; a `mktemp` heredoc written and read back; the snapshot's
+`skills/tidy-followups/SKILL.md` readable and `evals/` absent; `~/.local/state/lore` and `~/.config/lore` "Operation not permitted"; `lore task list`
+shows the fixture vault; `followup_dispose.py` with no arguments run by its shebang exits 2 `invalid-arguments`; `followup_gather.py` runs; and the
+shim failed the one named `lore record update ... --status dropped` write (exit 1, `lore: write failed`).
+
+**Failure injection.** `drop-fails`: the arm's `lore` is a shim that fails `lore record update ... task/<F2> ... --status dropped` and passes all
+else through; `supersede-fails`: it fails `lore record supersede task/<G3> ...`. The scripts are unedited. The smoke test confirms each shim fails
+only its named write and that the plain environment completes the same disposition.
+
+**Fixture smoke, by the arm's path.** `tests/test_tidy_followups_drops_and_merges_fixture_smoke.py` builds the fixture with the builder invoked as
+the harness invokes it (an open, silent stdin) and drives the real `followup_gather.py` and `followup_dispose.py` by path under the manifest env.
+Written first and run red (the builder's `depends-on` entries were not bare names); mutations of the builder (a blocked follow-up made open, a
+`ready` survivor made open, a dependent re-pointed, each shim aimed at the wrong record, the dependency of `L2` removed, `U` re-pointed) and of the
+grader and wrapper were each caught by a named test and restored with an empty diff (commit body of `a0143913`); one grader mutation stayed green
+until the test was strengthened. `scripts/inert-test-gate` exits 0 on it.
+
+**Leak check.** Fixture words (`bakery`, `parcel`, `crate`, `tote`, `banner`, `sorter`, `mug`, `peg`, `lamp`, ...) are absent from `SKILL.md`,
+`refine.md` and `security.md`; five that did occur (`label`, `bold`, `vendor`, `reading`, `weight`) were renamed in the builder before any run.
+
+### Results
+
+Verdicts are against the lines registered in `expected.md`. A cell passes only when every `C` and `D` line passes.
+
+| Cell | Baseline (`4722bd0b`) | Treatment (`2bcbe8b2`) |
+|---|---|---|
+| `drop-several` | FAIL `C1`, `C3`, `C4`, `C5` (no `dispose` command can run; nothing written; the three follow-ups stay as they were). Prints the distill command alone, which is the closing line it passes by doing nothing. | **FAIL.** Core: `C1` (one preview, one write; drops `X1`, `X2`, `X3`; `X3` with no revision; exit 0, 0), `C2` (the blocked body was never fetched), `C3` (the three `dropped`, each `## Dropped` holding `Reason: R1`; `K` unchanged), `C5` pass. **`C4` fails**: no `dropped task/<n>` line; the arm gave a table. `D1`, `D2`, `D3` fail (no reason question, no Confirmation 2, no step 6 report shown before the write); `G5` fails. |
+| `merge-included` | FAIL `C1`, `C3`, `C5`, `C6`: it refined and nested `S` and ignored the merge (`S`'s scope has no `5000`, `M` stays `open`) | **FAIL.** `C1` to `C5` pass (preview, write, one refinement Agent after the write, `check` on `S` alone whose `delivers` holds `5000`, `assemble` with `[S]` exit 0, `M` `superseded`, `S` `ready` and nested). **`C6` fails** in its first half: no `merged task/M into task/S` line (prose summary instead); the build and distill commands are alone and in order. `D3` passes (the `possible overlap:` line names `S` and `M`). `D1` and `D2` fail (no Confirmation 2 or 3); `G5` fails. |
+| `merge-left-ready` | FAIL `C1` to `C5`: "this ritual has no merge operation"; nothing written | **FAIL.** Core `C1` to `C5` pass (preview `reset-to-open` true; `A` `open` with the note, `B` `superseded`; `merged task/B into task/A` and `reset to open: task/A`; distill alone). `D1` and `D2` fail (no Confirmation 2, no step 6 report); `G5` fails. |
+| `merge-refused-dependent` | FAIL `C1` to `C5`: "no merge step"; nothing written | **FAIL.** Core `C1` to `C5` pass (first preview exit 1 `not-mergeable` with `dependents Q: default/R`; nothing written between; second preview `P` into `Q` exit 0; one write; `R` unchanged). `D1` fails (the arm said nothing between the previews), `D2` fails; `G5` fails. |
+| `edit-intent` | FAIL `C1` to `C4`; nothing written | **FAIL.** Core `C1` to `C4` pass (the second preview and the write carry exactly the operator's text; `E1` holds it, not the drafted line). `D1` fails (no note shown, no `intent` offered); `G5` fails. |
+| `full-set` | FAIL `C1` to `C4`: built the parent for `I` and said the drops and merge are not supported | **FAIL.** `C1` (the second preview adds `L2` after `drop L2`; one write from it), `C2`, `C3` pass. **`C4` fails** in its first half: no `dropped task/D`, `dropped task/L2` or `merged task/M into task/S` line; the build and distill commands are alone. The step 6 report and the reason question were shown before the write. `D1` and `D2` fail (the four sets were never shown); `G5` fails. |
+| `drop-fails` | FAIL `C1` to `C4`; nothing written | **FAIL on `G5` only.** `C1` to `C4` and `D1` pass: the write exits 2 with `failed` `[F2 drop]`; `dropped task/F1` and `failed drop: task/F2` printed; `F2` stays `open` and unchanged and is never shown as dropped; its completing command and the re-run line alone, no distill, no build; the run-only-while note given. `G5` fails (no Confirmation 2 before the write). |
+| `supersede-fails` | FAIL `C1` to `C5`: refined `G1`, merged nothing, printed distill | **FAIL.** `C1`, `C2`, `C3`, `C5` pass: `failed` `[G3 supersede]`, `merged` empty, `incomplete-merges` `G1`; `G1` held back with no Agent, `check` or `assemble`; `lore record supersede ...`, `merge G3 into G1` and the re-run line alone; no distill. **`C4` fails** in its first half: no `failed supersede: task/G3` line (the report names `G3` and the write in prose and says nothing merged). `G5` fails. |
+| `drop-dependents` | FAIL `C1` to `C3`; nothing written | **FAIL.** Core `C1` (the first preview's `dependents` for `H1` hold `T` and `U`, `default`, `open`; the second preview adds `T`), `C2`, `C3` pass. `D1` and `D2` fail (the dependents list was not shown before the write; `U` is named as staying put only in the closing report); `G5` fails. |
+
+**Result: the baseline fails all nine cells on `C1`** (the pass bar asked at least the drop, merge and full-set cells), **and the treatment passes none**:
+nine of nine fail the registered display line `G5` (Confirmation 2 is absent from the arm's assistant text before the write), and four also miss a
+core progress line. Every baseline cell fails at least one registered line, so each cell discriminates. The lines the baseline passes by doing nothing,
+recorded as non-discriminating: `G1` to `G4`; the distill-alone part of `drop-several` `C5` and `drop-dependents` `C3`; and the build-then-distill
+part of `merge-included` `C6` and `full-set` `C4` (the baseline nests `S` and `I` as it always did). In `merge-left-ready`, `merge-refused-dependent`,
+`edit-intent` and `full-set` the baseline said plainly that the ritual has no drop or merge step. In `drop-fails` and `supersede-fails` its distill
+command is itself a miss, since the registered lines forbid one after a failed write.
+
+**What the treatment misses are (per-capture counts; no ablation was run, so the causes are hypotheses).**
+- **The known display skip, again.** Confirmation 2 is absent before the write in 9 of 9 treatment captures; the reason question is absent in 3 of
+  the 4 that should ask it (shown in `full-set`); Confirmation 3's block is absent in both cells that reach step 11 (`merge-included`, `full-set`);
+  the step 6 report is shown before the write in 2 of 9 (`merge-included`, `full-set`). In every capture the commands ran in the prose's order and the
+  vault ended in the registered state; what is missing is the text between them. **Hypothesis**, not tested: the answers handed over up front let the
+  arm run the staged-file commands straight from them. The baseline, which has nothing to run for a `drop` or `merge` answer, showed the report and
+  Confirmation 1 in 9 of 9 captures, so the skip is not a property of the prompt alone; this case cannot say what a live operator would be shown.
+- **Progress lines (new, not the earlier finding).** `dropped task/<n>`, `merged task/<a> into task/<s>` and `failed <write>: task/<n>` are printed as
+  literal lines in 5 of 9 treatment captures (`merge-left-ready`, `merge-refused-dependent`, `edit-intent`, `drop-fails`, `drop-dependents`) and
+  folded into a prose closing report in the other 4 (`drop-several`, `merge-included`, `full-set`, `supersede-fails`). In the four the facts are
+  right, including which write failed in `supersede-fails`; the registered lines ask for the progress lines themselves. **Hypothesis**: a closing
+  report that is already a table or a list absorbs them. Not re-graded: the lines stand as registered.
+- **`merge-refused-dependent` (`D1`).** Between the refused preview and the second one the arm printed nothing at all, so the operator is not told
+  that `R` depends on `Q` or that the merge goes the other way round. The answers had anticipated the other way round, so the arm went straight to it.
+
+**Real state.** The 19 fixture run ids (the probe and 18 arms) were grepped across `~/.local/state/lore` and `~/.config/lore`: no file carries one,
+and `lore search` for three run ids, the blocked-body sentinel, `Fixture bakery oven spec`, `hat-pegs-report` and `Tote tag` returns 0 results.
+Every run's fixture repo ended clean at its starting HEAD. `capture_scan.py` exits 0 on this case's `runs/` (0 credential findings, 5 known-safe
+`path-or-url-shape` lines in four transcripts) before the capture commit. The repository's leak gate blocked the commit on one ordinary word in a refinement subagent's text in `supersede-fails-base` (3 lines in
+`commands` and `transcript`); those 3 occurrences are replaced by `[leak-gate-redacted]` in the committed captures and nowhere else.
+
+**Cost and time.** $8.59 and 1,393 s of arm time over 19 runs: 18 arm runs ($8.48, 1,361 s; treatment $4.66 and 764 s, baseline $3.81 and 597 s) and
+the probe ($0.12, 32 s). No run was discarded or rerun. The dearest cells are the two that refine and nest (`full-set`, `merge-included`).
+
+**Limitations.** One run per cell and arm, so each is an anecdote. Answers are fixed in the prompt, so this cannot tell a skipped display from an
+arm that treats an answer as already shown. Refinement ran only in `merge-included` and `full-set`. One model tier, one Claude Code version, the
+vanilla path only.
+
+**Criterion observations (treatment arm).**
+
+| Criterion | Cell | Verdict | Pointer |
+|---|---|---|---|
+| AC15 (move or drop before anything is written) | `drop-several`, `full-set` | held in state (preview exit 0 before the write; the three, and `D` with `L2`, dropped; the blocked one by title); the question and Confirmation 2 not shown | `drop-several-treat.dispose.json`, `full-set-treat.dispose.json` |
+| AC16 (the complete disposition set shown before the first write) | `full-set` | **not observed**: included, dropped, merged and left were never shown as one set before the write, 9 of 9; a changed answer at that confirmation did change what was written (`drop L2` added a second drop) | `full-set-treat.transcript.txt` |
+| AC17 (dropped, reason recorded, one reason for several) | `drop-several`, `drop-dependents`, `full-set` | held on disk (`## Dropped` with the one reason on 3, 2 and 2 records); `drop-several`'s progress lines not printed | each `.dispose.json` `records` |
+| AC19 (survivor carries the combined intent) | `merge-left-ready`, `merge-included`, `edit-intent`, `merge-refused-dependent` | held on disk (note under `## Merged from`; in `merge-included` the refined `delivers` holds `5000`; in `edit-intent` the operator's text, not the draft); Confirmation 3's block not shown | `merge-included-treat.transcript.txt` (the `check` result) |
+| AC20 (merged-away follow-up superseded by the survivor) | the four merge cells | held on disk (`superseded`, survivor's `supersedes` holds it); `merged task/M into task/S` not printed in `merge-included` | each `.dispose.json` |
+| AC23 (a failed write named by follow-up and write, never shown as done) | `drop-fails`, `supersede-fails` | held: `F2` and `G3` named with the write, never shown as dropped or merged, completing commands and re-run alone, no distill; the `failed supersede: task/G3` progress line itself not printed | `drop-fails-treat.txt`, `supersede-fails-treat.txt` |
+
+**Amendment, 2026-10-21.** These results are against treatment `2bcbe8b2`. In `a3fa728a` a failed drop stopped returning
+a completing command (a status-only `--status dropped` closes the follow-up without its reason), so the `drop-fails`
+evidence above that cites "its completing command" describes behaviour that no longer ships. The step 8a and step 13
+wording from `a3fa728a` and the step 8 `not-mergeable` wording from `dedaf8e5` have not been observed in an eval run.
+`expected.md` carries the matching dated amendment to `G2` and `drop-fails` `C4` and `D1`.

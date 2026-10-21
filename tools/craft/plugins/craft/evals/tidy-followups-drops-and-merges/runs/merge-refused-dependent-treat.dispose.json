@@ -1,0 +1,188 @@
+{
+ "dispose_runs": [
+  {
+   "at": 6,
+   "preview": true,
+   "file": {
+    "reason": "",
+    "drops": [],
+    "merges": [
+     {
+      "survivor": "P",
+      "absorbed": [
+       {
+        "role": "Q",
+        "intent": "Adds upper-casing of the tote id, which the emphasis-marks follow-up does not cover."
+       }
+      ]
+     }
+    ]
+   },
+   "exit": 1,
+   "stderr_lines": [
+    "reason-code: not-mergeable",
+    "subject: Q",
+    "dependents Q: default/R"
+   ],
+   "result": null
+  },
+  {
+   "at": 7,
+   "preview": true,
+   "file": {
+    "reason": "",
+    "drops": [],
+    "merges": [
+     {
+      "survivor": "Q",
+      "absorbed": [
+       {
+        "role": "P",
+        "intent": "Adds wrapping the tote id in double-asterisk emphasis marks, which the capitals follow-up does not cover."
+       }
+      ]
+     }
+    ]
+   },
+   "exit": 0,
+   "stderr_lines": [],
+   "result": {
+    "drops": [],
+    "merges": [
+     {
+      "survivor": "Q",
+      "status": "open",
+      "reset-to-open": false,
+      "absorbed": [
+       {
+        "name": "P",
+        "status": "open",
+        "note": "## Merged from task/P\n\nAdds wrapping the tote id in double-asterisk emphasis marks, which the capitals follow-up does not cover.\n"
+       }
+      ],
+      "supersedes": [
+       {
+        "name": "P",
+        "by": "Q"
+       }
+      ]
+     }
+    ],
+    "dependents": {}
+   }
+  },
+  {
+   "at": 8,
+   "preview": false,
+   "file": {
+    "reason": "",
+    "drops": [],
+    "merges": [
+     {
+      "survivor": "Q",
+      "absorbed": [
+       {
+        "role": "P",
+        "intent": "Adds wrapping the tote id in double-asterisk emphasis marks, which the capitals follow-up does not cover."
+       }
+      ]
+     }
+    ]
+   },
+   "exit": 0,
+   "stderr_lines": [],
+   "result": {
+    "dropped": [],
+    "merged": [
+     {
+      "survivor": "Q",
+      "absorbed": [
+       "P"
+      ],
+      "survivor-prior-status": "open"
+     }
+    ],
+    "reset-to-open": [],
+    "failed": [],
+    "incomplete-merges": []
+   }
+  }
+ ],
+ "order": {
+  "write_dispose": [
+   8
+  ]
+ },
+ "children_files": [],
+ "fetched_by_main": [
+  "P",
+  "Q"
+ ],
+ "progress": {
+  "assistant_text": [
+   {
+    "at": 9,
+    "line": "merged task/P into task/Q"
+   }
+  ],
+  "final_report": [
+   "merged task/P into task/Q"
+  ]
+ },
+ "closing_commands": [
+  {
+   "line": "/craft:distill spec/fixture-tote-tag-spec",
+   "standalone": true
+  }
+ ],
+ "records": {
+  "P": {
+   "status": "superseded",
+   "parent": null,
+   "supersedes": [],
+   "depends-on": [],
+   "dropped_note": null,
+   "merged_sections": [],
+   "body_changed": false,
+   "new": false,
+   "body_has_5000": false
+  },
+  "Q": {
+   "status": "open",
+   "parent": null,
+   "supersedes": [
+    "P"
+   ],
+   "depends-on": [],
+   "dropped_note": null,
+   "merged_sections": [
+    {
+     "from": "P",
+     "first_line": "Adds wrapping the tote id in double-asterisk emphasis marks, which the capitals follow-up does not cover."
+    }
+   ],
+   "body_changed": true,
+   "new": false,
+   "body_has_5000": false
+  },
+  "R": {
+   "status": "open",
+   "parent": null,
+   "supersedes": [],
+   "depends-on": [
+    "Q"
+   ],
+   "dropped_note": null,
+   "merged_sections": [],
+   "body_changed": false,
+   "new": false,
+   "body_has_5000": false
+  }
+ },
+ "repo": {
+  "head_before": "[sha:1be0b0ea]",
+  "head_after": "[sha:1be0b0ea]",
+  "status_after": ""
+ },
+ "real_vault_hits": ""
+}

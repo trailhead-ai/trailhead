@@ -1,6 +1,6 @@
 """The tidy-followups skill names every code the follow-up scripts can emit.
 
-``followup_gather.py`` and ``followup_parent.py`` print ``reason-code: <token>`` on
+``followup_gather.py``, ``followup_parent.py`` and ``followup_dispose.py`` print ``reason-code: <token>`` on
 stderr for each refusal or failure, and ``followup_parent.py check`` reports a
 ``reason`` per left-out follow-up. The skill tells the agent what each token means
 and whose side it is on. A token a script emits and the skill never names leaves the
@@ -29,6 +29,11 @@ _pspec = importlib.util.spec_from_file_location("followup_parent_for_reason_code
 parent = importlib.util.module_from_spec(_pspec)
 _pspec.loader.exec_module(parent)
 
+DISPOSE_SCRIPT = CRAFT / "scripts" / "followup_dispose.py"
+_dspec = importlib.util.spec_from_file_location("followup_dispose_for_reason_codes", DISPOSE_SCRIPT)
+dispose = importlib.util.module_from_spec(_dspec)
+_dspec.loader.exec_module(dispose)
+
 
 def test_skill_names_every_reason_code_the_script_emits():  # inert-gate: allow code-vs-document consistency seam
     text = SKILL.read_text(encoding="utf-8")
@@ -41,6 +46,12 @@ def test_skill_names_every_reason_code_the_parent_script_emits():  # inert-gate:
     text = SKILL.read_text(encoding="utf-8")
     missing = sorted(code for code in parent.REASON_CODES if code not in text)
     assert not missing, f"tidy-followups/SKILL.md never names followup_parent reason-code(s): {missing}"
+
+
+def test_skill_names_every_reason_code_dispose_emits():  # inert-gate: allow code-vs-document consistency seam
+    text = SKILL.read_text(encoding="utf-8")
+    missing = sorted(code for code in dispose.REASON_CODES if code not in text)
+    assert not missing, f"tidy-followups/SKILL.md never names followup_dispose reason-code(s): {missing}"
 
 
 def test_skill_names_every_left_out_reason_check_can_report():  # inert-gate: allow code-vs-document consistency seam

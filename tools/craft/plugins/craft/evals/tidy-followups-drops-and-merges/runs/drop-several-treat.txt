@@ -1,0 +1,26 @@
+The three follow-ups are dropped and nothing went to a new parent. The reason I gave you is the one you supplied: "the oven line was closed when the bakery gave up its second site".
+
+**What I recommended first:** I put two of the three readable follow-ups on the shortlist:
+- the dials rename, because each new caller using the current names makes the rename cost more;
+- the journal preheat time, because every loaf logged without it is history you can't get back.
+
+Your answer moved everything off the shortlist and dropped both of those plus the blocked thermostat one.
+
+The write step exited 0, and all three drops landed and read back:
+
+| Follow-up | Status before | Now |
+|---|---|---|
+| Dials: rename the two dial constants to match the manual (`dials-rename-the-two-dial-constants-to-match-the-manual`) | `ready` | dropped |
+| Journal: note the preheat time beside each loaf (`journal-note-the-preheat-time-beside-each-loaf`) | `open` | dropped |
+| Thermostat: swap the probe supplier (`thermostat-swap-the-probe-supplier`) | `blocked` | dropped (title only, its body was never read) |
+
+None of them had dependents. Nothing was merged, reset to open, failed or held back.
+
+- **Left as it was:** Hinge: reword the swing comment (`hinge-reword-the-swing-comment`).
+- **No refinement ran and no parent was created:** nothing was included, so the scope question (step 11) was never reached.
+
+The spec isn't distilled yet, and since every write landed, the next step is:
+
+```
+/craft:distill spec/fixture-bakery-oven-spec
+```

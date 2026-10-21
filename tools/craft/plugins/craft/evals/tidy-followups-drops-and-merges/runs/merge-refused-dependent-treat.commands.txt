@@ -1,0 +1,35 @@
+[main] BASH
+$CRAFT[treat]/scripts/followup_gather.py fixture-tote-tag-spec; echo "exit: $?"
+
+[main] BASH
+lore record show --json --vault default task/tote-tag-print-the-tote-id-in-capitals; echo "exit: $?"; lore record show --json --vault default task/tote-tag-print-the-tote-id-with-emphasis-marks; echo "exit: $?"
+
+[main] BASH
+dispositions=$(mktemp)
+cat > "$dispositions" <<'DISPOSITIONS_JSON'
+{"reason": "", "drops": [], "merges": [{"survivor": {"name": "tote-tag-print-the-tote-id-with-emphasis-marks", "revision": "[sha:0a6ce041]"}, "absorbed": [{"name": "tote-tag-print-the-tote-id-in-capitals", "revision": "[sha:ea1c4d72]", "intent": "Adds upper-casing of the tote id, which the emphasis-marks follow-up does not cover."}]}]}
+DISPOSITIONS_JSON
+$CRAFT[treat]/scripts/followup_dispose.py dispose fixture-tote-tag-spec --dispositions "$dispositions" --preview
+rc=$?
+rm -f "$dispositions"
+echo "exit: $rc"
+
+[main] BASH
+dispositions=$(mktemp)
+cat > "$dispositions" <<'DISPOSITIONS_JSON'
+{"reason": "", "drops": [], "merges": [{"survivor": {"name": "tote-tag-print-the-tote-id-in-capitals", "revision": "[sha:ea1c4d72]"}, "absorbed": [{"name": "tote-tag-print-the-tote-id-with-emphasis-marks", "revision": "[sha:0a6ce041]", "intent": "Adds wrapping the tote id in double-asterisk emphasis marks, which the capitals follow-up does not cover."}]}]}
+DISPOSITIONS_JSON
+$CRAFT[treat]/scripts/followup_dispose.py dispose fixture-tote-tag-spec --dispositions "$dispositions" --preview
+rc=$?
+rm -f "$dispositions"
+echo "exit: $rc"
+
+[main] BASH
+dispositions=$(mktemp)
+cat > "$dispositions" <<'DISPOSITIONS_JSON'
+{"reason": "", "drops": [], "merges": [{"survivor": {"name": "tote-tag-print-the-tote-id-in-capitals", "revision": "[sha:ea1c4d72]"}, "absorbed": [{"name": "tote-tag-print-the-tote-id-with-emphasis-marks", "revision": "[sha:0a6ce041]", "intent": "Adds wrapping the tote id in double-asterisk emphasis marks, which the capitals follow-up does not cover."}]}]}
+DISPOSITIONS_JSON
+$CRAFT[treat]/scripts/followup_dispose.py dispose fixture-tote-tag-spec --dispositions "$dispositions"
+rc=$?
+rm -f "$dispositions"
+echo "exit: $rc"

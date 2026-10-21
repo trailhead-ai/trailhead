@@ -1,0 +1,75 @@
+{
+ "dispose_runs": [],
+ "order": {
+  "reason_question": [
+   5
+  ],
+  "confirmation_2": [
+   5
+  ]
+ },
+ "children_files": [],
+ "fetched_by_main": [],
+ "progress": {
+  "assistant_text": [],
+  "final_report": []
+ },
+ "closing_commands": [
+  {
+   "line": "/craft:distill spec/fixture-bakery-oven-spec",
+   "standalone": true
+  }
+ ],
+ "records": {
+  "X2": {
+   "status": "ready",
+   "parent": null,
+   "supersedes": [],
+   "depends-on": [],
+   "dropped_note": null,
+   "merged_sections": [],
+   "body_changed": false,
+   "new": false,
+   "body_has_5000": false
+  },
+  "X1": {
+   "status": "open",
+   "parent": null,
+   "supersedes": [],
+   "depends-on": [],
+   "dropped_note": null,
+   "merged_sections": [],
+   "body_changed": false,
+   "new": false,
+   "body_has_5000": false
+  },
+  "X3": {
+   "status": "blocked",
+   "parent": null,
+   "supersedes": [],
+   "depends-on": [],
+   "dropped_note": null,
+   "merged_sections": [],
+   "body_changed": false,
+   "new": false,
+   "body_has_5000": false
+  },
+  "K": {
+   "status": "open",
+   "parent": null,
+   "supersedes": [],
+   "depends-on": [],
+   "dropped_note": null,
+   "merged_sections": [],
+   "body_changed": false,
+   "new": false,
+   "body_has_5000": false
+  }
+ },
+ "repo": {
+  "head_before": "[sha:fef5d26b]",
+  "head_after": "[sha:fef5d26b]",
+  "status_after": ""
+ },
+ "real_vault_hits": ""
+}

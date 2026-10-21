@@ -1,0 +1,108 @@
+[main] BASH
+$CRAFT[treat]/scripts/followup_gather.py fixture-crate-sorter-spec; echo "exit: $?"
+
+[main] BASH
+for n in belt-say-the-speed-unit-in-the-comment bin-log-write-the-chosen-bin-to-the-log bin-log-write-the-crate-id-with-the-chosen-bin chutes-remove-the-legacy-chute-table chutes-remove-the-table-of-legacy-chute-names sorter-refuse-a-crate-mass-of-zero; do echo "=== $n"; lore record show --json --vault default task/$n; echo "exit: $?"; done
+
+[main] BASH
+dispositions=$(mktemp)
+cat > "$dispositions" <<'DISPOSITIONS_JSON'
+{"reason": "the chute work moved into the supplier's own firmware", "drops": [{"name": "chutes-remove-the-legacy-chute-table", "revision": "[sha:75e3a0f8]"}], "merges": [{"survivor": {"name": "bin-log-write-the-chosen-bin-to-the-log", "revision": "[sha:100d04dd]"}, "absorbed": [{"name": "bin-log-write-the-crate-id-with-the-chosen-bin", "revision": "[sha:9991ba5e]", "intent": "Also record which crate each logged bin choice belongs to, by writing the crate id alongside the chosen bin."}]}]}
+DISPOSITIONS_JSON
+$CRAFT[treat]/scripts/followup_dispose.py dispose fixture-crate-sorter-spec --dispositions "$dispositions" --preview
+rc=$?
+rm -f "$dispositions"
+echo "exit: $rc"
+
+[main] BASH
+dispositions=$(mktemp)
+cat > "$dispositions" <<'DISPOSITIONS_JSON'
+{"reason": "the chute work moved into the supplier's own firmware", "drops": [{"name": "chutes-remove-the-legacy-chute-table", "revision": "[sha:75e3a0f8]"}, {"name": "chutes-remove-the-table-of-legacy-chute-names", "revision": "[sha:d1d9a9bc]"}], "merges": [{"survivor": {"name": "bin-log-write-the-chosen-bin-to-the-log", "revision": "[sha:100d04dd]"}, "absorbed": [{"name": "bin-log-write-the-crate-id-with-the-chosen-bin", "revision": "[sha:9991ba5e]", "intent": "Also record which crate each logged bin choice belongs to, by writing the crate id alongside the chosen bin."}]}]}
+DISPOSITIONS_JSON
+$CRAFT[treat]/scripts/followup_dispose.py dispose fixture-crate-sorter-spec --dispositions "$dispositions" --preview
+rc=$?
+rm -f "$dispositions"
+echo "exit: $rc"
+
+[main] BASH
+dispositions=$(mktemp)
+cat > "$dispositions" <<'DISPOSITIONS_JSON'
+{"reason": "the chute work moved into the supplier's own firmware", "drops": [{"name": "chutes-remove-the-legacy-chute-table", "revision": "[sha:75e3a0f8]"}, {"name": "chutes-remove-the-table-of-legacy-chute-names", "revision": "[sha:d1d9a9bc]"}], "merges": [{"survivor": {"name": "bin-log-write-the-chosen-bin-to-the-log", "revision": "[sha:100d04dd]"}, "absorbed": [{"name": "bin-log-write-the-crate-id-with-the-chosen-bin", "revision": "[sha:9991ba5e]", "intent": "Also record which crate each logged bin choice belongs to, by writing the crate id alongside the chosen bin."}]}]}
+DISPOSITIONS_JSON
+$CRAFT[treat]/scripts/followup_dispose.py dispose fixture-crate-sorter-spec --dispositions "$dispositions"
+rc=$?
+rm -f "$dispositions"
+echo "exit: $rc"
+
+[main] AGENT
+Refine one vault task: `task/sorter-refuse-a-crate-mass-of-zero` in the lore vault `default`.
+
+- First read $CRAFT[treat]/skills/_shared/refine.md yourself and follow it in full, in its unattended mode, against that one task only. `${CLAUDE_PLUGIN_ROOT}` is $CRAFT[treat].
+- The code the task's claims point at is the git repository at $RUN[full-set-treat]/fixture/repo. Read it to verify claims; do not modify it.
+- Stage any record body you write through your own `m... [cut 296 chars]
+
+[sub] BASH
+cd $RUN[full-set-treat]; lore record show task/sorter-refuse-a-crate-mass-of-zero; echo ---; lore task graph sorter-refuse-a-crate-mass-of-zero
+
+[sub] BASH
+cd $RUN[full-set-treat]; lore record show --help 2>&1 | head -30; lore record show task/sorter-refuse-a-crate-mass-of-zero --json 2>&1 | head -40
+
+[sub] BASH
+cd $RUN[full-set-treat]/fixture/repo; git status --short; git log --oneline | head; find . -path ./.git -prune -o -type f -print; echo ---; cat -n src/sorter.py; for f in $(find . -path ./.git -prune -o -type f \( -name '*.toml' -o -name '*.cfg' -o -name '*.md' -o -name '*.txt' \) -print); do echo "== $f"; cat -n $f; done
+
+[sub] BASH
+cd $RUN[full-set-treat]/fixture/repo; grep -rn "bin_for\|sorter\|ValueError\|raise" src README.md; ls -a; ls tests 2>&1; cat -n src/__init__.py src/scale.py src/crate.py
+
+[sub] BASH
+cd $RUN[full-set-treat]; lore record show task/fixture-crate-sorter-spec-the-slice; echo ---; lore search "sorter" ; lore search "bin_for"; lore search "kind:area sorter"; lore search "crate mass"; lore search "ValueError"; lore search "tests pytest"
+
+[sub] BASH
+cd $RUN[full-set-treat]; lore record show spec/fixture-crate-sorter-spec; lore search "kind:area"; lore search "test convention"; grep -rln "credential-pattern\|Credential-pattern" $CRAFT[treat] | head; cat $CRAFT[treat]/templates/plan.md | grep -n -A5 "Flow-out"
+
+[sub] BASH
+cd $CRAFT[treat]; sed -n 24,45p templates/plan.md; grep -n -i -A25 "credential-pattern scrub\|canonical pattern" skills/_shared/security.md | head -60; grep -n "Delivers\|Test contract\|Files" templates/task.md
+
+[sub] BASH
+cd $RUN[full-set-treat]; T=$(mktemp); lore record show task/sorter-refuse-a-crate-mass-of-zero --json | python3 -I -c 'import json,sys; sys.stdout.write(json.load(sys.stdin)["body"])' > "$T"; cat >> "$T" <<'EOF'
+
+**Delivers:** `bin_for` in `src/sorter.py` raises `ValueError` when the mass is zero or less, instead of returning the light bin (current unconditional threshold at `src/sorter.py:2`); every mass above zero keeps the existing bins unchanged — `'heavy'` above 20, `'light'` otherwise (`src/sorter.py:2`). A new `tests/test_sorter.py` pins both behaviours; the repo has no tests directory today, so this file is its first test surface.
+
+**Test contract:** Failing tests to write first in `tests/test_sorter.py`, importing `bin_for` from `src.sorter` (`src/` is a package via `src/__init__.py`):
+- `bin_for(0)` raises `ValueError`.
+- a negative mass (e.g. `bin_for(-1)`) raises `ValueError`.
+- a small positive mass (e.g. `bin_for(1)`) returns `'light'`.
+- the boundary `bin_for(20)` returns `'light'` and `bin_for(21)` returns `'heavy'` (threshold at `src/sorter.py:2` unchanged).
+Written with the stdlib `unittest` module (the repo carries no dependency manifest — only `README.md:1` and `src/` exist), so verification is, from the repo root: `python -m unittest discover -s tests` — expected: all tests pass, zero failures.
+
+**Files:** `src/sorter.py` (modified), `tests/test_sorter.py` (created)
+
+## Flow-out
+
+- [ ] Touched area/subsystem profiles updated with what changed
+- [ ] Prover-validated assumptions captured as session candidates (durable at flush)
+- [ ] New decisions / lessons / follow-ups surfaced during the build recorded
+EOF
+python3 -I - "$T" <<'PY'
+import re,sys
+t=open(sys.argv[1]).read()
+pats=[r'(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s*[=:]\s*\S+',r'(?i)\b(AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|gho_[A-Za-z0-9]{36}|glpat-[A-Za-z0-9_-]{20}|xox[baprs]-[A-Za-z0-9-]+|sk_live_[A-Za-z0-9]+|AIza[0-9A-Za-z_-]{35})\b',r'(?i)bearer\s+[A-Za-z0-9._\-]+',r'(?i)api[_-]?key[\'"]?\s*[:=]\s*[\'"]?[A-Za-z0-9._\-]{16,}',r'\b[A-Za-z0-9+/]{32,}={0,2}\b',r'\b[A-Fa-f0-9]{40,}\b',r'-----BEGIN [A-Z ]*PRIVATE KEY-----']
+print("scrub hits:",[m.group(0) for p in pats for m in re.finditer(p,t)])
+PY
+R=$RUN[full-set-treat]/fixture/repo; wc -l $R/src/sorter.py $R/README.md; test -f $R/src/__init__.py && echo init-ok
+echo "$T"
+
+[sub] BASH
+cd $RUN[full-set-treat]; T=$RUN[full-set-treat]/tmp/tmp.1uL7FpyogX; lore record update task/sorter-refuse-a-crate-mass-of-zero --status ready < "$T" && rm -f "$T"; ls "$T" 2>&1; lore record show task/sorter-refuse-a-crate-mass-of-zero; lore record show task/sorter-refuse-a-crate-mass-of-zero --json | grep '"status"'
+
+[main] BASH
+$CRAFT[treat]/scripts/followup_parent.py check fixture-crate-sorter-spec sorter-refuse-a-crate-mass-of-zero; echo "exit: $?"
+
+[main] BASH
+children=$(mktemp)
+cat > "$children" <<'CHILDREN_JSON'
+[{"name": "sorter-refuse-a-crate-mass-of-zero", "reason": "A crate the scale failed to weigh is silently routed to the light bin; every day it waits, more crates are misrouted and more later work builds on that fallback, so the fix grows costlier.", "revision": "[sha:a711d798]"}]
+CHILDREN_JSON
+$CRAFT[treat]/scripts/followup_parent.py assemble fixture-crate-sorter-spec --children "$children"
+rc=$?
+rm -f "$children"
+echo "exit: $rc"

@@ -1,0 +1,22 @@
+I've tidied the follow-ups of `fixture-crate-sorter-spec`. Two were dropped, two were merged into one, and one was refined and put under a new parent task that is ready to build. Every write succeeded.
+
+**Parent created:** `build-the-follow-ups-of-fixture-crate-sorter-spec-chosen-2026-10-20`. It is ready to build.
+
+- **Nested under the parent:** Sorter: refuse a crate mass of zero (`sorter-refuse-a-crate-mass-of-zero`). It is now `ready`. Once built, a crate mass of zero or less raises an error instead of going to the light bin, and the repo gets its first test file.
+- **Not taken on this time:**
+  - Belt: say the speed unit in the comment (`belt-say-the-speed-unit-in-the-comment`)
+  - Bin log: write the chosen bin to the log (`bin-log-write-the-chosen-bin-to-the-log`), which now also carries the merged crate-id request
+- **Dropped** because "the chute work moved into the supplier's own firmware":
+  - Chutes: remove the legacy chute table (`chutes-remove-the-legacy-chute-table`), was `open`
+  - Chutes: remove the table of legacy chute names (`chutes-remove-the-table-of-legacy-chute-names`), was `open`
+- **Merged:** Bin log: write the crate id with the chosen bin (`bin-log-write-the-crate-id-with-the-chosen-bin`) was folded into Bin log: write the chosen bin to the log (`bin-log-write-the-chosen-bin-to-the-log`). The survivor was `open` and keeps that status.
+
+To build the parent:
+```
+/craft:execute task/build-the-follow-ups-of-fixture-crate-sorter-spec-chosen-2026-10-20
+```
+
+Then, since the spec hasn't been distilled yet:
+```
+/craft:distill spec/fixture-crate-sorter-spec
+```

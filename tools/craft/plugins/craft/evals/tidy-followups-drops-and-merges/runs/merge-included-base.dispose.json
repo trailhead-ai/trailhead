@@ -1,0 +1,89 @@
+{
+ "dispose_runs": [],
+ "order": {
+  "confirmation_2": [
+   5
+  ],
+  "agent": [
+   6
+  ],
+  "check": [
+   8
+  ],
+  "assemble": [
+   9
+  ]
+ },
+ "children_files": [
+  [
+   "S"
+  ]
+ ],
+ "fetched_by_main": [],
+ "progress": {
+  "assistant_text": [],
+  "final_report": []
+ },
+ "closing_commands": [
+  {
+   "line": "/craft:execute task/build-the-follow-ups-of-fixture-parcel-scale-spec-chosen-2026-10-20",
+   "standalone": true
+  },
+  {
+   "line": "/craft:distill spec/fixture-parcel-scale-spec",
+   "standalone": true
+  }
+ ],
+ "records": {
+  "S": {
+   "status": "ready",
+   "parent": "build-the-follow-ups-of-fixture-parcel-scale-spec-chosen-2026-10-20",
+   "supersedes": [],
+   "depends-on": [],
+   "dropped_note": null,
+   "merged_sections": [],
+   "body_changed": true,
+   "new": false,
+   "body_has_5000": false
+  },
+  "M": {
+   "status": "open",
+   "parent": null,
+   "supersedes": [],
+   "depends-on": [],
+   "dropped_note": null,
+   "merged_sections": [],
+   "body_changed": false,
+   "new": false,
+   "body_has_5000": true
+  },
+  "L": {
+   "status": "open",
+   "parent": null,
+   "supersedes": [],
+   "depends-on": [],
+   "dropped_note": null,
+   "merged_sections": [],
+   "body_changed": false,
+   "new": false,
+   "body_has_5000": false
+  },
+  "build-the-follow-ups-of-fixture-parcel-scale-spec-chosen-2026-10-20": {
+   "status": "ready",
+   "parent": null,
+   "supersedes": [],
+   "depends-on": [],
+   "dropped_note": null,
+   "merged_sections": [],
+   "body_changed": true,
+   "new": true,
+   "body_has_5000": false
+  }
+ },
+ "repo": {
+  "head_before": "[sha:d1201fa9]",
+  "head_after": "[sha:d1201fa9]",
+  "status_after": ""
+ },
+ "real_vault_hits": ""
+}

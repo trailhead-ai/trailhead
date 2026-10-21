@@ -1,0 +1,67 @@
+{
+ "dispose_runs": [],
+ "order": {
+  "agent": [
+   6
+  ],
+  "check": [
+   8
+  ],
+  "scope_question": [
+   9
+  ]
+ },
+ "children_files": [],
+ "fetched_by_main": [],
+ "progress": {
+  "assistant_text": [],
+  "final_report": []
+ },
+ "closing_commands": [
+  {
+   "line": "/craft:distill spec/fixture-hat-peg-spec",
+   "standalone": true
+  }
+ ],
+ "records": {
+  "G2": {
+   "status": "open",
+   "parent": null,
+   "supersedes": [],
+   "depends-on": [],
+   "dropped_note": null,
+   "merged_sections": [],
+   "body_changed": false,
+   "new": false,
+   "body_has_5000": false
+  },
+  "G1": {
+   "status": "open",
+   "parent": null,
+   "supersedes": [],
+   "depends-on": [],
+   "dropped_note": null,
+   "merged_sections": [],
+   "body_changed": true,
+   "new": false,
+   "body_has_5000": false
+  },
+  "G3": {
+   "status": "open",
+   "parent": null,
+   "supersedes": [],
+   "depends-on": [],
+   "dropped_note": null,
+   "merged_sections": [],
+   "body_changed": false,
+   "new": false,
+   "body_has_5000": false
+  }
+ },
+ "repo": {
+  "head_before": "[sha:a19e3ff8]",
+  "head_after": "[sha:a19e3ff8]",
+  "status_after": ""
+ },
+ "real_vault_hits": ""
+}

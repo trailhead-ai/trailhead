@@ -1,0 +1,5 @@
+[main] BASH
+cd $RUN[drop-dependents-base]; $CRAFT[base]/scripts/followup_gather.py fixture-shelf-lamp-spec; echo "EXIT=$?"
+
+[main] BASH
+cd $RUN[drop-dependents-base]; for n in dimmer-remove-the-dim-table-s-step-comments dimmer-remove-the-unused-dim-table; do lore record show --json --vault default task/$n; echo "EXIT=$?"; done

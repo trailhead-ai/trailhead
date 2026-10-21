@@ -1,0 +1,52 @@
+**Header:** entry `complete-status` · slice basis `labelled` · 1 slice, 1 child · 2 candidates read, 2 kept · 0 excluded by label · 0 skipped edges
+
+**Recommended:** none. 0 of 2 met a reason class. Both follow-ups change only how `tag_lines` in `src/tote.py` prints the tote id. Neither leaves a security exposure open. Neither is a defect that later work will copy or harden around, and neither is shared groundwork. Waiting costs nothing named, so neither earns a slot.
+
+**Other follow-ups:**
+- Tote tag: print the tote id in capitals (`tote-tag-print-the-tote-id-in-capitals`)
+- Tote tag: print the tote id with emphasis marks (`tote-tag-print-the-tote-id-with-emphasis-marks`)
+
+**Blocked:** none.
+
+Nothing has been written yet.
+
+---
+
+**Confirmation 1:** *Which listed follow-ups do you want to move onto the shortlist, and which off it?* (names to add, names to remove, or `none`)
+
+**Operator's answer:** move every follow-up off the shortlist, and merge `tote-tag-print-the-tote-id-in-capitals` into `tote-tag-print-the-tote-id-with-emphasis-marks`.
+
+- **Merge: refused.** This ritual has no merge step. Confirmation 1 only accepts moves onto or off the shortlist, or `none`, and no later step can merge one record into another. Because the ritual can't merge in either direction, it doesn't offer the reverse merge (emphasis-marks into capitals). The pre-supplied answer for that offer therefore doesn't come into play, and no merge is applied.
+- **Move off the shortlist: accepted.** Nothing was on the shortlist, so nothing changes. Nothing is included.
+
+**Included:** none.
+
+**Left:**
+- Tote tag: print the tote id in capitals (`tote-tag-print-the-tote-id-in-capitals`)
+- Tote tag: print the tote id with emphasis marks (`tote-tag-print-the-tote-id-with-emphasis-marks`)
+
+> Include these, leave these. Refinement rewrites each included follow-up's record whether or not it ends up nested. Proceed? (`yes`, or what to move.)
+
+**Operator's answer:** `yes`
+
+Nothing is included, so no parent is created. Steps 9 to 12 don't run: no refinement, no check and no assembly.
+
+---
+
+### Closing report
+
+- **Included:** none
+- **Left:**
+  - Tote tag: print the tote id in capitals (`tote-tag-print-the-tote-id-in-capitals`)
+  - Tote tag: print the tote id with emphasis marks (`tote-tag-print-the-tote-id-with-emphasis-marks`)
+- **Left out at refinement:** none, because no refinement ran
+- **Refined but not nested:** none
+- **Failed writes:** none
+- **Parent:** none created
+- **Merge:** refused, and nothing was merged. Both records are unchanged in the vault.
+
+The spec isn't distilled yet. To distill it:
+
+```
+/craft:distill spec/fixture-tote-tag-spec
+```
