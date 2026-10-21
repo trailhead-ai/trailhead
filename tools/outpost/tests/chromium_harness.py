@@ -20,9 +20,9 @@ raises ``ServerStartError`` before the browser launches.
 ``prefers-color-scheme`` rules apply; a probe should assert the media query itself so a flag
 that silently does nothing fails the test.
 
-Four more entry points share ``run_probe``'s keyword arguments (``entry``, ``inject_into``,
+Two more entry points share ``run_probe``'s keyword arguments (``entry``, ``inject_into``,
 ``serve``, ``serve_port``, ``window_size``, ``timeout``, ``virtual_time_budget``, ``env``, ``lookup``,
-``color_scheme``) and its missing-browser rule. ``inject_into`` may also be a list of files: every
+``color_scheme``, ``before_script``) and its missing-browser rule. ``inject_into`` may also be a list of files: every
 listed page gets the probe, so a probe can move to any of them. Every probe body, in every entry
 point, receives a ``harness`` object.
 
@@ -228,9 +228,8 @@ _WRAPPER = """(function () {
     return [first === undefined ? null : first, second.value];
   }
 
-  var role;
   if (MODE === "pair" && window.name === COPY_NAME) { runCopyTwo(); return; }
-  role = MODE === "pair" ? runCopyOne : runSteps;
+  var role = MODE === "pair" ? runCopyOne : runSteps;
   role().then(
     function (value) { if (value !== NOT_FINISHED) { report({ ok: true, value: value }); } },
     function (error) { report(failure(error)); }
@@ -438,19 +437,21 @@ def _prepare_copy(
     tmp: str,
     entry: str,
     inject_into: str | Sequence[str] | None,
+    wrapper: str,
     before_script: str | None,
-) -> tuple[Path, list[Path]]:
+) -> Path:
     page = Path(tmp) / "page"
     shutil.copytree(page_dir, page)
     names = [inject_into or entry] if isinstance(inject_into, (str, type(None))) else list(inject_into)
-    targets = [page / name for name in names]
-    for target in targets:
+    for name in names:
+        target = page / name
         text = target.read_text()
         if before_script is not None:
             text = _inject_before(text)
             (target.parent / BEFORE_FILE).write_text(before_script)
         target.write_text(_inject(text))
-    return page, targets
+        (target.parent / PROBE_FILE).write_text(wrapper)
+    return page
 
 
 def _argv(
@@ -511,7 +512,7 @@ def _run_launch(
     browser = _require_browser(env, lookup)
     page_dir = Path(page_dir)
     with tempfile.TemporaryDirectory(prefix="chromium-harness-") as tmp:
-        page, targets = _prepare_copy(page_dir, tmp, entry, inject_into, before_script)
+        page = _prepare_copy(page_dir, tmp, entry, inject_into, wrapper, before_script)
         argv = _argv(browser, env, tmp, window_size, virtual_time_budget, color_scheme)
         with contextlib.ExitStack() as stack:
             if serve:
@@ -519,8 +520,6 @@ def _run_launch(
                 argv.append(f"{base}/{entry}")
             else:
                 argv.append((page / entry).as_uri())
-            for probe_dir in {target.parent for target in targets}:
-                (probe_dir / PROBE_FILE).write_text(wrapper)
             return _read_result(_launch(argv, browser, timeout, env), page_dir)
 
 

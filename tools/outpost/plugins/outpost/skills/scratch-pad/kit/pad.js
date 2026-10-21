@@ -400,9 +400,12 @@
       reply.changed();
     }
 
-    if (!keeper) cantKeep.hidden = false;
-    else if (restored.answers) applyAnswers(restored.answers);
-    if (keeper) keeper.watch(applyAnswers);
+    if (!keeper) {
+      cantKeep.hidden = false;
+    } else {
+      if (restored.answers) applyAnswers(restored.answers);
+      keeper.watch(applyAnswers);
+    }
 
     function setCurrent(index) {
       buttons.forEach(function (button, i) {

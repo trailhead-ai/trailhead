@@ -142,6 +142,12 @@
     }
 
     function watch(take) {
+      function adopt(text) {
+        seen = text;
+        var answers = accept(text);
+        if (answers) take(answers);
+      }
+
       function reread() {
         var text;
         try {
@@ -149,10 +155,7 @@
         } catch (error) {
           return;
         }
-        if (text === null || text === seen) return;
-        seen = text;
-        var answers = accept(text);
-        if (answers) take(answers);
+        if (text !== null && text !== seen) adopt(text);
       }
 
       window.addEventListener("storage", function (event) {
@@ -162,10 +165,7 @@
         } catch (error) {
           return;
         }
-        if (event.storageArea !== area || event.key !== key || event.newValue === null) return;
-        seen = event.newValue;
-        var answers = accept(event.newValue);
-        if (answers) take(answers);
+        if (event.storageArea === area && event.key === key && event.newValue !== null) adopt(event.newValue);
       });
       window.addEventListener("pageshow", reread);
       document.addEventListener("visibilitychange", function () {

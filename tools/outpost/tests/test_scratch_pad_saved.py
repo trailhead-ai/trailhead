@@ -69,22 +69,7 @@ const answerBoth = async () => {
   await show(1);
   await press(none(1)); await typeNote(1, 'Neither fits');
 };
-const snapshot = async () => {
-  const out = {questions: []};
-  for (let q = 0; q < 2; q++) {
-    await show(q);
-    out.questions.push({
-      this: flags(q, thisOne), not: flags(q, notThis), none: pressed(none(q)),
-      note: note(q).value, marks: marks(q), dot: dot(q),
-    });
-  }
-  await openReply();
-  out.reply = document.getElementById('pad-reply-box').value;
-  return out;
-};
-const BLANK = {this: ['false', 'false', 'false'], not: ['false', 'false', 'false'], none: 'false', note: '',
-  marks: [null, null, null], dot: {answered: 'false', text: 'not answered'}};
-const blankNow = async (count) => {
+const questionsNow = async (count) => {
   const out = [];
   for (let q = 0; q < count; q++) {
     await show(q);
@@ -94,6 +79,11 @@ const blankNow = async (count) => {
     });
   }
   return out;
+};
+const snapshot = async () => {
+  const questions = await questionsNow(2);
+  await openReply();
+  return {questions, reply: document.getElementById('pad-reply-box').value};
 };
 const roundId = () => window.PAD_ROUND_ID;
 const storedKeys = () => Object.keys(localStorage).filter((k) => k.startsWith('outpost-scratch-pad:'));
@@ -188,7 +178,7 @@ def test_a_round_with_no_entry_opens_blank_even_when_storage_holds_another_round
             localStorage.setItem('outpost-scratch-pad:' + 'f'.repeat(32), JSON.stringify(other));
             harness.reload();
             """,
-            "return {blank: await blankNow(2), keys: storedKeys().length};",
+            "return {blank: await questionsNow(2), keys: storedKeys().length};",
         ],
         entry=ROUND1,
         inject_into=ROUND1,
@@ -205,13 +195,13 @@ def test_two_rounds_of_one_pad_keep_their_own_answers(tmp_path):
         [
             "await show(0); await press(thisOne(0, 1)); harness.goto('../round-2/index.html');",
             """
-            const seenBlank = await blankNow(2);
+            const seenBlank = await questionsNow(2);
             await show(0); await press(notThis(0, 2)); await typeNote(0, 'second');
             sessionStorage.setItem('blank2', JSON.stringify(seenBlank));
             harness.goto('../round-1/index.html');
             """,
             """
-            const one = await blankNow(2);
+            const one = await questionsNow(2);
             sessionStorage.setItem('one', JSON.stringify(one));
             harness.goto('../round-2/index.html');
             """,
@@ -219,7 +209,7 @@ def test_two_rounds_of_one_pad_keep_their_own_answers(tmp_path):
             return {
               blank2: JSON.parse(sessionStorage.getItem('blank2')),
               one: JSON.parse(sessionStorage.getItem('one')),
-              two: await blankNow(2),
+              two: await questionsNow(2),
             };
             """,
         ],
@@ -244,7 +234,7 @@ def test_two_pads_from_disk_with_the_same_title_and_questions_keep_separate_answ
         [
             "await answerBoth(); harness.goto('../../beta/round-1/index.html');",
             """
-            const blank = await blankNow(2);
+            const blank = await questionsNow(2);
             await show(0); await press(thisOne(0, 2));
             harness.goto('../../alpha/round-1/index.html');
             sessionStorage.setItem('blank', JSON.stringify(blank));
@@ -270,7 +260,7 @@ def test_a_pad_built_again_under_a_deleted_pads_name_opens_blank(tmp_path):
         stage,
         [
             "await answerBoth(); harness.goto('../../new/round-1/index.html');",
-            "return {blank: await blankNow(2), kept: storedKeys().length};",
+            "return {blank: await questionsNow(2), kept: storedKeys().length};",
         ],
         entry="old/round-1/index.html",
         inject_into=["old/round-1/index.html", "new/round-1/index.html"],
@@ -294,7 +284,7 @@ def test_adding_a_round_keeps_the_earlier_rounds_answers_and_opens_the_new_round
             harness.goto('../round-2/index.html');
             """,
             """
-            return {one: JSON.parse(sessionStorage.getItem('one')), two: await blankNow(2)};
+            return {one: JSON.parse(sessionStorage.getItem('one')), two: await questionsNow(2)};
             """,
         ],
         entry="before/round-1/index.html",
@@ -402,7 +392,7 @@ def test_an_entry_that_does_not_fit_the_round_is_ignored_whole_until_the_first_c
             """
             const key = 'outpost-scratch-pad:' + roundId();
             const out = {
-              blank: await blankNow(2),
+              blank: await questionsNow(2),
               warns: window.__warns.slice(),
               bigParses: window.__bigParses,
               untouched: localStorage.getItem(key) === sessionStorage.getItem('seed'),
