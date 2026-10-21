@@ -19,7 +19,7 @@ written) when the shape is wrong, a name appears twice anywhere (drops and merge
 together, a survivor among its own absorbed included), a revision is not a non-empty
 string, a merge has no absorbed follow-up or lacks a survivor/absorbed revision, an
 `intent` is missing or is empty once sanitized (`followup_parent._reason_text`: one line,
-credentials redacted, markdown link/image/HTML/code characters removed), or drops are
+credentials redacted, markdown link/image/HTML/code characters and lone surrogates removed), or drops are
 present and the reason is empty once sanitized.
 
 Membership is decided by a fresh gather of the spec's follow-ups, in process, never by
@@ -70,9 +70,9 @@ write (`revision` hashes the body only, so status is compared as well).
                `lore record supersede task/<absorbed> --by task/<survivor> --vault <v>` per
                absorbed follow-up, each attempted whatever the others do, read back as
                `superseded` with the survivor's `supersedes` holding it.
-A write counts as failed when lore exits non-zero, and also when it exits 0 but the
-read-back does not show it. A note failure skips that group's supersedes; a failure in a
-group or a drop never stops the rest.
+A write counts as failed when lore exits non-zero, when it exits 0 but the
+read-back does not show it, and when an unexpected exception ends the write or its read-back. A
+note failure skips that group's supersedes; a failure in a group or a drop never stops the rest.
 
 Stdout on exit 0 and on every exit 2 after a write is one JSON object:
     dropped              {name, prior-status} per landed drop
@@ -164,6 +164,12 @@ class _Parser(argparse.ArgumentParser):
         raise DisposeError("invalid-arguments")
 
 
+def _strip_surrogates(text: str) -> str:
+    """`text` without lone UTF-16 surrogates, which `sanitize_text` lets through and which
+    no UTF-8 stream can carry to `lore`."""
+    return "".join(ch for ch in text if not 0xD800 <= ord(ch) <= 0xDFFF)
+
+
 def _member(item, invalid) -> dict:
     """`{name, revision}` of a drop or merge member: `name` a string, `revision` absent or a
     non-empty string."""
@@ -188,7 +194,7 @@ def _merge_group(group, invalid) -> dict:
         intent = item.get("intent")
         if member["revision"] is None or not isinstance(intent, str):
             raise invalid
-        member["intent"] = parent._reason_text(intent)
+        member["intent"] = parent._reason_text(_strip_surrogates(intent))
         if not member["intent"]:
             raise invalid
         members.append(member)
@@ -217,7 +223,7 @@ def load_dispositions(path: str) -> dict:
         raise invalid
     if not all(gather._shape_ok(name) for name in names):
         raise DisposeError("invalid-followup-name")
-    reason = parent._one_line(doc["reason"], parent.MAX_REASON_CHARS)
+    reason = parent._one_line(_strip_surrogates(doc["reason"]), parent.MAX_REASON_CHARS)
     if cleaned and not reason:
         raise invalid
     return {
@@ -388,10 +394,14 @@ def _supersede_landed(runner, vault: str, survivor: str, absorbed: str) -> bool:
     return sidecar["status"] == "superseded" and isinstance(links, list) and f"task/{absorbed}" in links
 
 
+def _supersede_argv(vault: str, survivor: str, absorbed: str) -> list[str]:
+    return ["record", "supersede", f"task/{absorbed}", "--by", f"task/{survivor}", "--vault", vault]
+
+
 def supersede_one(runner, vault: str, survivor: str, absorbed: str, baseline: dict) -> dict | None:
     """Supersede `absorbed` by `survivor`. Returns None when the read-back shows
     `superseded` and the survivor's link, otherwise the `failed` record."""
-    argv = ["record", "supersede", f"task/{absorbed}", "--by", f"task/{survivor}", "--vault", vault]
+    argv = _supersede_argv(vault, survivor, absorbed)
     try:
         reread_for_write(runner, vault, absorbed, baseline)
     except DisposeError:
@@ -404,18 +414,33 @@ def supersede_one(runner, vault: str, survivor: str, absorbed: str, baseline: di
     return None
 
 
+def _unexpected_failure(write_fn, record: dict) -> dict | None:
+    """Run `write_fn`; an exception it raises that nothing below handles is the write's own
+    failure, so it becomes the `failed` record `record` instead of ending the run."""
+    try:
+        return write_fn()
+    except Exception:
+        return record
+
+
 def merge_one(runner, vault: str, group: dict, baselines: dict, report: dict) -> None:
     """Run one merge group: the note, then (only if it landed) a supersede per absorbed
     follow-up, each attempted whatever the others do. Records into `report`."""
     survivor = group["survivor"]["name"]
     names = [m["name"] for m in group["absorbed"]]
     failures = []
-    failure = note_one(runner, vault, group, baselines[survivor])
+    failure = _unexpected_failure(
+        lambda: note_one(runner, vault, group, baselines[survivor]),
+        failure_record(survivor, "merge-note", None),
+    )
     if failure is None:
         if baselines[survivor]["status"] == "ready":
             report["reset-to-open"].append({"name": survivor, "prior-status": "ready"})
         for name in names:
-            failure = supersede_one(runner, vault, survivor, name, baselines[name])
+            failure = _unexpected_failure(
+                lambda: supersede_one(runner, vault, survivor, name, baselines[name]),
+                failure_record(name, "supersede", _supersede_argv(vault, survivor, name)),
+            )
             if failure is not None:
                 failures.append(failure)
     else:
@@ -510,7 +535,9 @@ def dispose(runner, spec: str, dispositions: dict, preview: bool) -> tuple[dict,
     note = _dropped_note(dispositions["reason"])
     report: dict = {"dropped": [], "merged": [], "reset-to-open": [], "failed": [], "incomplete-merges": []}
     for name in names:
-        failure = drop_one(runner, vault, name, baselines[name], note)
+        failure = _unexpected_failure(
+            lambda: drop_one(runner, vault, name, baselines[name], note), failure_record(name, "drop", None)
+        )
         if failure is None:
             report["dropped"].append({"name": name, "prior-status": baselines[name]["status"]})
         else:

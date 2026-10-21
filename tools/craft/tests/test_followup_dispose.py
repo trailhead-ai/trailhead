@@ -211,6 +211,82 @@ def test_a_failed_second_drop_has_no_command_and_stays_gathered_for_a_rerun_with
     assert dropped_section(body_of(env, vault, second)).strip() == f"Reason: {REASON}"
 
 
+def test_an_exception_on_the_second_write_is_a_failed_write_with_the_full_report_and_later_members_still_run(
+    lore_env, spec, pile, tmp_path, capsys
+):
+    env, vault = lore_env
+    first, second, third = pile
+
+    def hook(argv, stdin, runner):
+        if is_drop(argv) and argv[2] == f"task/{second}":
+            raise RuntimeError("boom")
+
+    code, out, err = run_incomplete(env, vault, spec, pile, hook, tmp_path, capsys)
+    assert code == 2
+    assert reason_of(err) == "dispose-incomplete"
+    assert subject(err) == [second]
+    assert sorted(d["name"] for d in out["dropped"]) == [first, third]
+    assert out["failed"] == [{"name": second, "write": "drop", "command": None}]
+    assert sidecar_of(env, vault, second)["status"] != "dropped"
+    assert sidecar_of(env, vault, third)["status"] == "dropped"
+
+
+def test_an_exception_on_a_merge_note_write_fails_the_note_and_a_later_group_still_runs(
+    lore_env, spec, two_groups, tmp_path, capsys
+):
+    env, vault = lore_env
+    n = two_groups
+    first, second = sorted([(n["Sa"], n["Aa"]), (n["Sb"], n["Bb"])])
+
+    def hook(argv, stdin, runner):
+        if is_note_write(argv, first[0]):
+            raise RuntimeError("boom")
+
+    doc = merge_doc(env, vault, [(s, [a]) for s, a in (first, second)])
+    code, out, err = run_dispose(EnvRunner(env, hook=hook), spec, tmp_path, capsys, doc)
+    assert code == 2
+    assert reason_of(err) == "dispose-incomplete"
+    assert out["failed"] == [{"name": first[0], "write": "merge-note", "command": None}]
+    assert out["incomplete-merges"] == [{"survivor": first[0], "absorbed": [first[1]]}]
+    assert sidecar_of(env, vault, first[1])["status"] != "superseded"
+    assert [m["survivor"] for m in out["merged"]] == [second[0]]
+
+
+def test_an_exception_on_a_supersede_is_a_failed_supersede_with_its_command_and_the_next_still_runs(
+    lore_env, spec, trio, tmp_path, capsys
+):
+    env, vault = lore_env
+    survivor, one, two = trio
+    first, second = sorted([one, two])
+
+    def hook(argv, stdin, runner):
+        if is_supersede(argv, first):
+            raise RuntimeError("boom")
+
+    doc = merge_doc(env, vault, [(survivor, [one, two])])
+    code, out, err = run_dispose(EnvRunner(env, hook=hook), spec, tmp_path, capsys, doc)
+    assert code == 2
+    assert reason_of(err) == "dispose-incomplete"
+    assert [(f["name"], f["write"]) for f in out["failed"]] == [(first, "supersede")]
+    assert out["failed"][0]["command"].startswith(f"lore record supersede task/{first} --by task/{survivor}")
+    assert sidecar_of(env, vault, second)["status"] == "superseded"
+    assert out["incomplete-merges"] == [{"survivor": survivor, "absorbed": sorted([one, two])}]
+
+
+def test_an_exception_before_the_first_write_stays_internal_error(lore_env, spec, pile, tmp_path, capsys):
+    env, vault = lore_env
+
+    def hook(argv, stdin, runner):
+        if argv[:2] == ["record", "show"]:
+            raise RuntimeError("boom")
+
+    runner = EnvRunner(env, hook=hook)
+    code, out, err = run_dispose(runner, spec, tmp_path, capsys, file_for(env, vault, pile))
+    assert code == 2 and out is None
+    assert reason_of(err) == "internal-error"
+    assert runner.writes() == []
+
+
 def test_a_drop_whose_reread_before_the_write_fails_has_no_command_and_writes_nothing(
     lore_env, spec, pile, tmp_path, capsys
 ):
@@ -877,6 +953,46 @@ def test_an_intent_opening_with_line_start_markdown_lands_as_one_labelled_line_a
     assert not dispose.parent._UNRESOLVED_RE.search(body)
     sidecar = sidecar_of(env, vault, survivor)
     assert dispose.parent._static_verdict(sidecar, body, None, lambda: True) == before
+
+
+def surrogate_doc(env, vault, survivor, one, intent, reason=REASON, drops=()):
+    text = json.dumps(merge_doc(env, vault, [(survivor, [(one, "PLACEHOLDER")])], drops=drops, reason=reason))
+    return text.replace('"PLACEHOLDER"', json.dumps(intent, ensure_ascii=True))
+
+
+def test_a_lone_surrogate_in_an_intent_is_stripped_before_any_write_and_the_run_lands(
+    lore_env, spec, trio, tmp_path, capsys
+):
+    env, vault = lore_env
+    survivor, one, two = trio
+    raw = surrogate_doc(env, vault, survivor, one, "keep\ud800 this")
+    runner = EnvRunner(env)
+    code, out, err = run_dispose(runner, spec, tmp_path, capsys, raw=raw)
+    assert code == 0, err
+    assert merged_line(body_of(env, vault, survivor), one) == "Intent: keep this"
+    assert out["failed"] == [] and len(out["merged"]) == 1
+
+
+def test_a_lone_surrogate_in_the_reason_is_stripped_before_any_write(lore_env, spec, pile, tmp_path, capsys):
+    env, vault = lore_env
+    doc = file_for(env, vault, pile[:1], reason="because\ud800 reasons")
+    raw = json.dumps(doc)
+    code, out, err = run_dispose(EnvRunner(env), spec, tmp_path, capsys, raw=raw)
+    assert code == 0, err
+    assert dropped_section(body_of(env, vault, pile[0])).strip() == "Reason: because reasons"
+
+
+def test_an_intent_that_is_only_a_lone_surrogate_is_refused_and_nothing_is_written(
+    lore_env, spec, trio, tmp_path, capsys
+):
+    env, vault = lore_env
+    survivor, one, two = trio
+    raw = surrogate_doc(env, vault, survivor, one, "\ud800")
+    runner = EnvRunner(env)
+    code, out, err = run_dispose(runner, spec, tmp_path, capsys, raw=raw)
+    assert code == 2 and out is None
+    assert reason_of(err) == "invalid-dispositions-file"
+    assert runner.writes() == []
 
 
 def test_a_forged_merged_from_heading_with_different_text_still_gets_the_real_intent(
