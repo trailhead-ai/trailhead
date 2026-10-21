@@ -86,3 +86,19 @@ env -u LORE_CONFIG_DIR -u LORE_STATE_DIR -u XDG_CONFIG_HOME -u XDG_STATE_HOME \
 - The runner deletes its trace after each run. A check on the council's deliverable
   is an `llm` grader with `focus: trace`, which sees the first and last 12 messages
   of the session, including the final message.
+
+### The gate mapping
+
+`eval-gate.json` here maps each runner case to the plugin prose it measures, so
+`portage eval-gate plan` can select the cases a branch touches. Each case lists
+`measures`: paths relative to the plugin root (the directory holding `evals/`), taken
+from the prose its `expected.md` names under "Under test". The two review-correction
+cases measure `skills/receiving-code-review/SKILL.md`; the consult case measures
+`skills/consult/SKILL.md` and `skills/_shared/council.md`. A case with no entry is a
+failure: add its entry when you add the case.
+
+The `runner` block holds the grants of the batch command above, the model
+`claude-opus-5-5`, and `max_cost_usd` 3.5 per case. The cap is sized from the logged
+cost: the consult case is the dearest at about 0.75 to 0.93 USD a run, 2.4 to 2.5 USD for
+three runs (`tools/craft/MANUAL-EVAL.md`), and the review-correction cases cost 0.7 to
+1.1 USD for three runs, so 3.5 leaves about 40 percent headroom over the largest batch.

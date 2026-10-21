@@ -209,3 +209,20 @@ Before and after a batch, snapshot `~/.local/state/lore/` and `~/.config/lore/`
 Any difference is a hard stop. The one exception: every changed path is
 attributed to a commit made by another session, and that commit carries none of
 the batch's fixture titles.
+
+### The gate mapping
+
+`eval-gate.json` here maps each runner case to the plugin prose it measures, so
+`portage eval-gate plan` can select the cases a branch touches. Each case lists
+`measures`: paths relative to the plugin root (the directory holding `evals/`), taken
+from the prose its `expected.md` names under "Under test". `skills/correct/SKILL.md` is
+measured by all 22 cases; the four that also name deferred-work capture add
+`skills/record/SKILL.md`. Prose in another plugin that a baseline arm reads (the craft
+prose) is outside the plugin root and cannot be listed. A case with no entry is a
+failure: add its entry when you add the case.
+
+The `runner` block holds the grants of the batch command above (`Bash(./lore *)`), the
+model `claude-opus-5-5`, and `max_cost_usd` 1.5 per case. The cap is sized from the
+logged cost: a 22-case batch costs about 15 USD at list price (0.68 USD a case across
+three runs, `tools/lore/MANUAL-EVAL.md`), and the batches above ran each case under
+`--max-cost-usd` 1.2 to 1.5 without a stop.

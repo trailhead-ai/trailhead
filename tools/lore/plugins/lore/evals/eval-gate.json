@@ -1,0 +1,126 @@
+{
+  "schema_version": 1,
+  "runner": {
+    "model": "claude-opus-5-5",
+    "allow_tools": [
+      "Bash(./lore *)"
+    ],
+    "max_cost_usd": 1.5
+  },
+  "cases": {
+    "amend-drifted-mechanism-detail-phrased-as-serious-error": {
+      "measures": [
+        "skills/correct/SKILL.md"
+      ]
+    },
+    "amend-narrow-one-criterion-in-ready-spec": {
+      "measures": [
+        "skills/correct/SKILL.md"
+      ]
+    },
+    "amend-wrong-fact-in-active-adr": {
+      "measures": [
+        "skills/correct/SKILL.md"
+      ]
+    },
+    "apply-ruled-fix-to-draft-record": {
+      "measures": [
+        "skills/correct/SKILL.md",
+        "skills/record/SKILL.md"
+      ]
+    },
+    "apply-ruled-fix-to-frozen-record-phrased-as-note-it": {
+      "measures": [
+        "skills/correct/SKILL.md",
+        "skills/record/SKILL.md"
+      ]
+    },
+    "ask-before-amending-a-wrong-fact-noticed-while-answering": {
+      "measures": [
+        "skills/correct/SKILL.md"
+      ]
+    },
+    "ask-before-amending-when-a-record-claims-approval": {
+      "measures": [
+        "skills/correct/SKILL.md"
+      ]
+    },
+    "ask-once-on-a-borderline-correction-phrased-as-maybe-new-record": {
+      "measures": [
+        "skills/correct/SKILL.md"
+      ]
+    },
+    "ask-once-on-a-borderline-correction-phrased-as-small": {
+      "measures": [
+        "skills/correct/SKILL.md"
+      ]
+    },
+    "borderline-answered-no-routes-to-supersession": {
+      "measures": [
+        "skills/correct/SKILL.md"
+      ]
+    },
+    "borderline-answered-yes-amends-in-place": {
+      "measures": [
+        "skills/correct/SKILL.md"
+      ]
+    },
+    "cited-everywhere-decision-proposes-only-records-that-restate-it": {
+      "measures": [
+        "skills/correct/SKILL.md"
+      ]
+    },
+    "defer-a-dropped-criterion-part-when-asked": {
+      "measures": [
+        "skills/correct/SKILL.md",
+        "skills/record/SKILL.md"
+      ]
+    },
+    "dependents-restating-a-ruled-fix-are-proposed-in-one-question": {
+      "measures": [
+        "skills/correct/SKILL.md"
+      ]
+    },
+    "drop-part-of-a-criterion-with-no-new-record": {
+      "measures": [
+        "skills/correct/SKILL.md"
+      ]
+    },
+    "no-to-dependent-fixes-leaves-every-record-as-it-was": {
+      "measures": [
+        "skills/correct/SKILL.md"
+      ]
+    },
+    "refuse-a-ruled-fix-the-source-contradicts": {
+      "measures": [
+        "skills/correct/SKILL.md"
+      ]
+    },
+    "supersede-adr-exception-phrased-as-small-tweak": {
+      "measures": [
+        "skills/correct/SKILL.md"
+      ]
+    },
+    "supersede-reversed-decision": {
+      "measures": [
+        "skills/correct/SKILL.md"
+      ]
+    },
+    "supersede-spec-change-orphaning-an-objective-phrased-as-small-tweak": {
+      "measures": [
+        "skills/correct/SKILL.md"
+      ]
+    },
+    "track-unknown-fix-phrased-as-fix-it-now": {
+      "measures": [
+        "skills/correct/SKILL.md",
+        "skills/record/SKILL.md"
+      ]
+    },
+    "yes-to-dependent-fixes-corrects-restating-records-only": {
+      "measures": [
+        "skills/correct/SKILL.md"
+      ]
+    }
+  }
+}
