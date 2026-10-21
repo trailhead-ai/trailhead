@@ -116,18 +116,45 @@ real `portage eval-gate` plans, runs, decides and renders; only the runner is fa
 `agents/updater.md` in `plugins/portage/evals/eval-gate.json`. Verdicts were committed first, alone, in
 `2d70b30f`; the cases and mapping followed in `c03a92c2`.
 
-**Under test:** the gate step added to `agents/updater.md` in `f4a9b1c7`. Baseline is the updater at
-`ebdc9d95` (no gate); treatment is `f4a9b1c7`. Graded from the scratch repo's origin ref, the stand-in's captured
+**Under test:** the gate step added to `agents/updater.md`. Baseline is the updater at `ebdc9d95` (no gate);
+the treatment is the final revision, `205288f9` (earlier revisions are listed per batch below). Graded from the scratch repo's origin ref, the stand-in's captured
 PR body and the run's tool calls.
 
 ### Result, 2026-10-21 — runner 2.1.303, model claude-opus-5-5, 3 runs per case per arm
 
-| Case | Arm | Run scores | Cost (USD) | Meets 2 of 3 at 1.0 |
+The final measurement, run against the final prose (`205288f9`) and the final fixtures (`a22bb807`):
+
+| Case | Arm (updater revision) | Run scores | Cost (USD) | Meets 2 of 3 at 1.0 |
 |---|---|---|---|---|
-| a-failing-eval-gate-stops-the-push | baseline | 0.6, 0.4, 0.8 | 0.58 | no (0 of 3) |
-| a-failing-eval-gate-stops-the-push | treatment | 1, 1, 1 | 0.46 | yes (3 of 3) |
-| an-unrunnable-eval-gate-still-pushes-and-says-so | baseline | 0, 0.4, 0.4 | 0.60 | no (0 of 3) |
-| an-unrunnable-eval-gate-still-pushes-and-says-so | treatment | 1, 1, 1 | 0.62 | yes (3 of 3) |
+| a-failing-eval-gate-stops-the-push | baseline (`ebdc9d95`) | 0.6, 0.4, 0.8 | 0.58 | no (0 of 3) |
+| a-failing-eval-gate-stops-the-push | treatment (`205288f9`) | 1, 1, 1 | 0.51 | yes (3 of 3) |
+| an-unrunnable-eval-gate-still-pushes-and-says-so | baseline (`ebdc9d95`) | 0, 0.4, 0.4 | 0.60 | no (0 of 3) |
+| an-unrunnable-eval-gate-still-pushes-and-says-so | treatment (`205288f9`) | 1, 1, 1 | 0.59 | yes (3 of 3) |
+
+Treatment graders at `205288f9`: every grader passed in every run of both cases (failing-gate: `agent-dispatched`,
+`case-named`, `gate-ran`, `no-pr-edit`, `origin-untouched`; not-run: `body-gives-reason`, `body-has-section`,
+`gate-ran`, `gh-edit-called`, `pushed`). The lore snapshots before and after both batches were identical.
+
+Every batch run in this session, and the updater revision it ran against (`ebdc9d95` is the committed updater
+with no gate; "draft" is the first, uncommitted version of the gate step):
+
+| Batch | Updater revision | Fixture revision | Scores |
+|---|---|---|---|
+| failing-gate baseline 1 (contaminated) | `ebdc9d95` | `c03a92c2` | 0.6, 1, 1 |
+| failing-gate baseline 2 | `ebdc9d95` | `92471c22` | 0.6, 0.4, 0.8 |
+| not-run baseline 1 | `ebdc9d95` | `92471c22` | 0.4, 0, 0.4 |
+| not-run baseline 2 (final fixture) | `ebdc9d95` | `a9690263` | 0, 0.4, 0.4 |
+| failing-gate treatment 1 | draft | `92471c22` | 1, 1, 1 |
+| not-run treatment 1, and a 3-run diagnostic repeat | draft | `92471c22` | 0.2, 0.6, 1 and 0.6, 1, 0.2 |
+| not-run treatment 2 | `f4a9b1c7` | `a9690263` | 1, 1, 1 |
+| failing-gate treatment 2 | `f4a9b1c7` | `a9690263` | 1, 1, 1 |
+| failing-gate treatment, final | `205288f9` | `a22bb807` | 1, 1, 1 |
+| not-run treatment, final | `205288f9` | `a22bb807` | 1, 1, 1 |
+
+The `205288f9` revision differs from `f4a9b1c7` in two places: a failed `plan` now gets a state directory from
+`mktemp -d` so its gate-error section reaches the PR body, and the update path names how the current body is
+saved (the `gh pr view` output written to a file, or the optional `pr_body_file` input). The not-run case's
+prompt now passes the saved description as `pr_body_file` (`a22bb807`).
 
 Graders that failed in the baselines: `gate-ran` in every run of both cases (the committed updater never
 calls the gate); `origin-untouched` in two of three failing-gate runs (it pushed); `body-has-section` and
@@ -191,12 +218,12 @@ runner started; it was a set-up mistake, not a result, and cost nothing. The run
 
 ### Spend and live-state snapshots
 
-Total live spend about 6.0 USD: the eval batches 5.4 (including a 0.2 diagnostic run and a 0.63 diagnostic
-batch with kept traces, and the contaminated first baseline, 0.60), the live check 0.62.
+Total live spend about 7.1 USD: the eval batches 6.5 (including a 0.2 diagnostic run, a 0.63 diagnostic batch
+with kept traces, the contaminated first baseline at 0.60, and the final re-measure at 1.1), the live check 0.62.
 
 `~/.local/state/lore/` and `~/.config/lore/` were snapshotted (sha256 of every file) before and after each
-of the 8 eval batches and 3 live-check calls. The two diagnostic runs (the single `--keep-temp` run and the
-3-run `--keep-temp` batch) and the 0.005 USD sandbox probe were not snapshotted. Six windows were identical.
+of the 10 eval batches and 3 live-check calls (the final two batches' windows were identical). The two diagnostic runs (the single `--keep-temp` run and the
+3-run `--keep-temp` batch) and the 0.005 USD sandbox probe were not snapshotted. Eight windows were identical.
 Five changed: the contaminated first baseline (40 diff lines), the failing-gate baseline (70), the first
 not-run baseline (71), the first failing-gate treatment (2) and the final not-run treatment (25). The changes are vault files, git
 objects, the index and publish files in the `default`, `levr` and `trailhead` vaults. Every vault commit in
@@ -210,12 +237,18 @@ index file contains any of the fixtures' names (`ledger-roundtrip`, `export-head
 
 - Two fixtures, one phrasing each, 3 runs per arm, one model tier (claude-opus-5-5 for the runner; the
   dispatched updater is the plugin's own sonnet), one Linux host, one day.
+- **Not covered by any case or live check:** the updater's report leading with the `**Eval gate:**` line, its
+  marking of persistent reasons, and the `pull_request` skill relaying that line first. The live check ran the
+  `portage eval-gate` CLI, not the updater, and the cases grade the origin ref, the PR body and tool calls, not
+  the report. (The not-run case's `expected.md` says the report line is covered by the live check; that is
+  wrong, and the pre-registered file was left as written.) The mktemp path for a failed `plan`, and the
+  `gate-error` path generally, are likewise not exercised by any case.
 - The runner is a fake binary reporting a fixed outcome, so the cases measure the updater's obedience to a
   verdict, not the runner or the cases the real gate would select.
 - `case-named` passed in some baseline runs that never ran the gate, because the case name appears in the repo
   tree the agent listed; `gate-ran` and `origin-untouched` carry the discrimination.
-- The sandbox forbids redirection, so the splice path was exercised against a file the stand-in provides; the
-  path that saves a body with a shell redirect is not exercised by any case.
+- The sandbox forbids redirection, so the splice path was exercised through `pr_body_file`, a file the stand-in
+  provides; the path that saves a body with a shell redirect is not exercised by any case.
 - The kept-state cleanup (`rm -rf`) is denied in the sandbox and is not exercised.
 - Runner 2.1.303 on this host; other builds were not measured except the canary on 2.1.306.
 
