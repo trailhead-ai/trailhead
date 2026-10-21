@@ -56,7 +56,6 @@ import json
 import os
 import re
 import stat
-import tempfile
 from pathlib import Path, PurePosixPath
 
 from .mapping import CASE_NAME
@@ -66,6 +65,7 @@ from .run import (
     SANDBOX_UNWRITABLE,
     RunRefused,
     _check_state,
+    atomic_write,
 )
 
 START_MARKER = "<!-- portage:eval-gate:start -->"
@@ -213,11 +213,6 @@ def _wrap(lines: list[str]) -> str:
     return "\n".join([START_MARKER, "## Eval gate", "", *lines, END_MARKER])
 
 
-def _gate_error_section(step: str) -> str:
-    return _wrap([f"The eval gate errored at step `{step}`, so no eval verdict was produced. "
-                  "Re-run the gate."])
-
-
 def _bullets(items: list[str]) -> list[str]:
     return [f"- {i}" for i in items]
 
@@ -321,7 +316,8 @@ def verdict(state: Path) -> tuple[int, list[str], str]:
 def render_gate_error(step: str) -> str:
     if not _STEP.match(step):
         raise Fault(f"gate-error step {_safe(step, 40)!r} must match {_STEP.pattern}")
-    return _gate_error_section(step)
+    return _wrap([f"The eval gate errored at step `{step}`, so no eval verdict was produced. "
+                  "Re-run the gate."])
 
 
 def require_state(state: Path) -> None:
@@ -335,17 +331,6 @@ def write_section_file(state: Path, section: str) -> None:
     state = Path(state)
     require_state(state)
     atomic_write(state / SECTION_FILE, section + "\n")
-
-
-def atomic_write(path: Path, text: str) -> None:
-    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w") as f:
-            f.write(text)
-        os.replace(tmp, path)
-    except BaseException:
-        Path(tmp).unlink(missing_ok=True)
-        raise
 
 
 def _span(text: str) -> tuple[int, int] | None:

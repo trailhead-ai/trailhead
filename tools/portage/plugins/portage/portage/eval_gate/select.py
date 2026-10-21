@@ -31,7 +31,7 @@ import subprocess
 import tempfile
 from pathlib import Path, PurePosixPath
 
-from .mapping import Case, Mapping, MappingError, load_mapping
+from .mapping import Mapping, MappingError, load_mapping
 
 MAPPING_NAME = "eval-gate.json"
 SCHEMA_VERSION = 1
@@ -78,12 +78,12 @@ def _load_head(repo: Path, path: str, tracked: set[str]) -> Mapping | None:
     return load_mapping((repo / path).read_text(), path, plugin_root=evals.parent, evals_dir=evals)
 
 
-def _touches(case: Case, plugin: PurePosixPath, changed: list[str]) -> bool:
-    case_dir = (plugin / "evals" / case.name).as_posix() + "/"
+def _touches(name: str, measures: tuple[str, ...], plugin: PurePosixPath, changed: list[str]) -> bool:
+    case_dir = (plugin / "evals" / name).as_posix() + "/"
     for c in changed:
         if c.startswith(case_dir):
             return True
-        for m in case.measures:
+        for m in measures:
             target = (plugin / m).as_posix()
             if c == target or c.startswith(target + "/"):
                 return True
@@ -99,8 +99,7 @@ def _select(repo: Path, merge_base: str, changed: list[str]) -> list[dict]:
         base_map = load_mapping(base_text, path) if base_text is not None else None
         head_map = _load_head(repo, path, tracked)
         plugin = PurePosixPath(path).parent.parent
-        evals = repo / path
-        evals = evals.parent
+        evals = (repo / path).parent
         names = sorted(set(base_map.cases if base_map else ()) | set(head_map.cases if head_map else ()))
         for name in names:
             if not (evals / name / "case.yaml").is_file():
@@ -108,8 +107,7 @@ def _select(repo: Path, merge_base: str, changed: list[str]) -> list[dict]:
             base_case = base_map.cases.get(name) if base_map else None
             head_case = head_map.cases.get(name) if head_map else None
             measures = tuple(dict.fromkeys((base_case.measures if base_case else ()) + (head_case.measures if head_case else ())))
-            merged = Case(name, measures, 0, 0)
-            if not _touches(merged, plugin, changed):
+            if not _touches(name, measures, plugin, changed):
                 continue
             case = base_case or head_case
             runner = (base_map or head_map).runner

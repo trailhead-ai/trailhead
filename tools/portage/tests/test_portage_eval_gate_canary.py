@@ -16,9 +16,9 @@ import pytest
 import _portage_cli  # noqa: F401  (prepends the plugin root onto sys.path)
 
 from portage.cli import dispatch
-from portage.eval_gate import canary
-from test_portage_eval_gate_plan import _commit, _git, _write
-from test_portage_eval_gate_run import ERR, FAIL, PASS, Env, _result
+from portage.eval_gate import canary, unmapped_runner_cases
+from test_portage_eval_gate_plan import _commit, _corpus, _git, _plan, _write
+from test_portage_eval_gate_run import ERR, FAIL, PASS, Env, _fixture, _result
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -70,8 +70,6 @@ class TestCanaryGatesTheCase:
         assert (r["verdict"], r["reason"]) == ("not-run", "timeout")
 
     def test_a_canary_that_hits_the_cost_cap_records_cost_cap(self, env):
-        from test_portage_eval_gate_run import _fixture
-
         env.fake(_result([PASS] * 3), canary=_fixture("partial_cost_ceiling"), canary_code=2)
         assert env.run() == 0
         assert _case_calls(env) == []
@@ -211,8 +209,6 @@ class TestRunnerOverride:
 
 class TestCanaryIsNeverAGatedCase:
     def _repo_with_canary(self, tmp_path):
-        from test_portage_eval_gate_plan import _corpus
-
         repo = tmp_path / "repo"
         repo.mkdir()
         _git(repo, "init", "-b", "main")
@@ -229,14 +225,10 @@ class TestCanaryIsNeverAGatedCase:
         return repo
 
     def test_a_branch_touching_only_the_shipped_canary_maps_no_cases(self, tmp_path, capsys):
-        from test_portage_eval_gate_plan import _plan
-
         repo = self._repo_with_canary(tmp_path)
         rc, plan, _ = _plan(repo, capsys, "--base", "base")
         assert (rc, plan["status"], plan["cases"]) == (0, "no-cases-mapped", [])
 
     def test_the_corpus_beside_the_canary_reports_no_unmapped_case(self, tmp_path):
-        from portage.eval_gate import unmapped_runner_cases
-
         repo = self._repo_with_canary(tmp_path)
         assert unmapped_runner_cases(repo / "plugins" / "portage" / "evals") == []

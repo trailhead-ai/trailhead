@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import re
 import shutil
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -20,7 +19,8 @@ import _portage_cli  # noqa: F401  (prepends the plugin root onto sys.path)
 
 from portage.cli import dispatch
 from portage.eval_gate import unmapped_runner_cases
-from portage.eval_gate.mapping import MappingError, load_mapping
+from portage.eval_gate.mapping import load_mapping
+from test_portage_eval_gate_plan import _git
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -95,14 +95,6 @@ class TestMappingLoads:
         )
         assert unmapped_runner_cases(corpus) == []
         assert sorted(mapping.cases) == _runner_cases(corpus)
-
-
-def _git(repo: Path, *args: str) -> str:
-    return subprocess.run(
-        ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t",
-         "-c", "commit.gpgsign=false", *args],
-        check=True, capture_output=True, text=True,
-    ).stdout.strip()
 
 
 @pytest.fixture(scope="module", params=CORPORA, ids=IDS)

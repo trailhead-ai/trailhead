@@ -9,8 +9,6 @@ agent creates one file through its sandboxed Bash; ``file_exists`` grades it.
 from __future__ import annotations
 
 import json
-import os
-import tempfile
 from pathlib import Path
 
 CASE = "sandbox-write"
@@ -39,10 +37,3 @@ def read_cached(state: Path) -> dict | None:
         return None
     return doc
 
-
-def write_cached(state: Path, result: dict) -> None:
-    fd, tmp = tempfile.mkstemp(dir=state, prefix=f".{CACHE_NAME}.", suffix=".tmp")
-    with os.fdopen(fd, "w") as f:
-        json.dump(result, f, indent=2)
-        f.write("\n")
-    os.replace(tmp, state / CACHE_NAME)

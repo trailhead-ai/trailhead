@@ -178,14 +178,25 @@ def _decide(doc: object, n: int, pass_at: int, exit_code: int | None, killed: bo
     return {**base, "verdict": "not-run", "reason": reason}
 
 
+def atomic_write(path: Path, text: str) -> None:
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
+
+
+def _write_json(path: Path, doc: dict) -> None:
+    atomic_write(path, json.dumps(doc, indent=2) + "\n")
+
+
 def _write_result(state: Path, case: str, result: dict) -> None:
     results = state / "results"
     results.mkdir(mode=0o700, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=results, prefix=f".{case}.", suffix=".tmp")
-    with os.fdopen(fd, "w") as f:
-        json.dump(result, f, indent=2)
-        f.write("\n")
-    os.replace(tmp, results / f"{case}.json")
+    _write_json(results / f"{case}.json", result)
 
 
 def _execute(runner, state: Path, timeout: float) -> tuple[int | None, bool, bool]:
@@ -269,7 +280,7 @@ def run_case(
     gate = canary.read_cached(state)
     if gate is None:
         gate = _run_canary(state, request, override, min(canary.TIMEOUT_SECONDS, timeout_seconds))
-        canary.write_cached(state, gate)
+        _write_json(state / canary.CACHE_NAME, gate)
     if gate["verdict"] != "pass":
         reason = SANDBOX_UNWRITABLE if gate["verdict"] == "fail" else gate["reason"]
         return _record(state, case, _not_run(case, n, reason))
@@ -286,9 +297,13 @@ def _not_run(case: str, n: int, reason: str) -> dict:
             "passed": 0, "failed": 0, "errored": n, "runs": []}
 
 
+def _ordered(result: dict) -> dict:
+    return {k: result[k] for k in
+            ("case", "verdict", "passed", "failed", "errored", "reason", "runs")}
+
+
 def _record(state: Path, case: str, result: dict) -> dict:
-    ordered = {k: result[k] for k in
-               ("case", "verdict", "passed", "failed", "errored", "reason", "runs")}
+    ordered = _ordered(result)
     _write_result(state, case, ordered)
     return ordered
 
@@ -338,5 +353,4 @@ def _run_canary(state: Path, request, override: str | None, timeout: float) -> d
             result = _not_run(canary.CASE, 1, RUNNER_MISSING)
         else:
             result = {"case": canary.CASE, **_decide(_read_json(run_json), 1, 1, code, killed)}
-    return {k: result[k] for k in
-            ("case", "verdict", "passed", "failed", "errored", "reason", "runs")}
+    return _ordered(result)
