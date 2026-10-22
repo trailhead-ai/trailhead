@@ -85,7 +85,7 @@ not an absolute path to an executable makes the case not-run `runner-missing`. T
 environment and never passes it on to the runner.
 
 ```sh
-PORTAGE_EVAL_RUNNER=$HOME/.local/share/claude/versions/2.1.303 portage eval-gate run --state <dir> --case <name>
+PORTAGE_EVAL_RUNNER=/absolute/path/to/a/claude/build portage eval-gate run --state <dir> --case <name>
 ```
 
 ## The verdict and the PR section

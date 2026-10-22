@@ -191,7 +191,7 @@ predicted verdict (the baseline fails the case) held.
    updater given a saved description, which is the sandbox's accommodation and not something the prose can
    provide itself.
 
-### Live gate check (AC38), 2026-10-21 — no API key in the environment
+### Live gate check (AC38), 2026-10-21 — run on 2.1.303 with `PORTAGE_EVAL_RUNNER` pinned, no API key in the environment
 
 A throwaway clone of the repo with one synthetic commit that edits `expected.md` inside the lore case
 `track-unknown-fix-phrased-as-fix-it-now`, which selects that case alone. The real `portage eval-gate` ran
@@ -257,6 +257,54 @@ clean trees and the stand-in calls the real `plan`, whose first `state:` line is
 
 A reviewer noted that `a-failing-eval-gate-stops-the-push/expected.md` cites AC36 where the stop-on-fail
 criterion is AC35. `expected.md` was pre-registered and is left as written.
+
+### Re-measure on 2.1.308 with the runner's TMPDIR under the cache, 2026-10-22
+
+Updater revision `0ac64947` (the trust-model and state-line revision; `99a1efff` changes gate code only),
+fixtures `a22bb807`, runner 2.1.308, run as `env -i PATH HOME TMPDIR=<a fresh directory under ~/.cache>`,
+claude-opus-5-5, 3 runs each, foreground:
+
+| Case | Run scores | Graders | Cost (USD) |
+|---|---|---|---|
+| a-failing-eval-gate-stops-the-push | 1, 1, 1 (3 of 3) | all five passed in every run | 0.57 |
+| an-unrunnable-eval-gate-still-pushes-and-says-so | 1, 1, 1 (3 of 3) | all five passed in every run | 0.70 |
+
+The scratch repos are clean trees and `tree-dirty` did not fire. The failing-gate window's lore snapshots were
+identical; the not-run window changed vault files, all `lore: andromeda published` or `lore: toms-macbook-pro
+published` commits by other sessions' publish workers (no run invoked lore; no fixture name appears in any lore
+file). Supersedes the "not re-measured" entry above.
+
+### Live gate check (AC38) redone on 2.1.308, 2026-10-22 — the default did NOT pass
+
+The earlier pair above ran on 2.1.303 with `PORTAGE_EVAL_RUNNER` pinned. This pair uses the real
+`portage eval-gate` CLI at `99a1efff` in a throwaway clone with one synthetic edit inside
+`track-unknown-fix-phrased-as-fix-it-now`, under `env -i` with PATH (including `~/.local/bin`) and HOME only:
+
+| | (a) default, `claude` 2.1.308 on PATH | (b) as (a) with `XDG_CACHE_HOME` a fresh directory under `/tmp` |
+|---|---|---|
+| canary | score 0 (`canary.txt missing`), 0.0035 USD | score 0, 0.0036 USD |
+| `run` | `not-run`, `runner-sandbox-unwritable`; case never started | the same |
+| `verdict` | exit 0, `eval-gate: not-run`, `persistent: runner-sandbox-unwritable`, section names the reason | the same |
+
+Expected for (a): canary pass and a scored case. It did not. Diagnosis, measured with the canary run directly
+against 2.1.308 with only `TMPDIR` varied (0.003 USD each):
+
+| `TMPDIR` | canary |
+|---|---|
+| unset (`/tmp`) | 0 |
+| `~/.cache/egp-XXXXXX` | 1 |
+| `~/.cache/egp-deep-XXXXXX/a/b` | 1 |
+| `~/.cache/portage-flat-XXXXXX` | 1 |
+| `~/.cache/portage/probe-XXXXXX` | 1 |
+| `~/.cache/egp-n2-N/x/call-zz` | 1 |
+| `~/.cache/portage/eval-gate-tmp/call-XXXXXXXX` (what the gate creates) | 0 |
+| `~/.cache/egp-name-N/eval-gate-tmp/call-zz` | 0 |
+| `~/.cache/egp-n2-N/eval-gate-tmp/zz` | 0 |
+
+Every path with a component named `eval-gate-tmp` fails and every path without one passes, so on this host and
+build the runner's sandbox cannot write under a temp directory whose path includes that component. The cause
+inside the runner is not known; only the correlation is measured. The gate's base directory name needs to
+change. Until it does, the gate's default path on this host skips every case.
 
 ### Limitations
 
