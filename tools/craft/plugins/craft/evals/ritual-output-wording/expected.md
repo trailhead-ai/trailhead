@@ -1648,3 +1648,211 @@ three 64-hex lore record revisions became `<revision-1>` to `<revision-3>`, cons
 quoted from the credential-scrub text the session read (`SECRET_KEY=` and two like it) gained brackets (`SECRET_KEY[=]`).
 The step 8 statement and the session's readings are unaffected. The capture carries neither the operator's home path nor
 username: `grep -rn "$HOME\|$USER"` over `runs/proposal-realrun-baseline.*` returns 0 hits. The raw stream-json was not kept.
+
+## Real run on the branch, 2026-10-22 — one real `/craft:slice` session on the branch composition, step 8 read by eye
+
+Registered here before the session ran. One run only, no eval arm and no batch, by the `Real-run recipe` above and by the
+staging of `Real run at base B` above; only the snapshot changes. It is a go/no-go observation read by eye, not a rate, and
+it adds no row to any tally.
+
+**Snapshot.** `git archive` of branch HEAD `a8318a0c` (craft plugin tree without `evals/`, lore plugin tree with its `lore`
+CLI, the shared `trailhead/` library), in place of `437bbe8e`. The invocation and prompt are those of
+`runs/proposal-realrun-baseline.cmd.txt`, unchanged. The treated step 8 (commit P) is in this snapshot's
+`slice/SKILL.md`. Seeding is as at base B: spec `spec/holds-and-pickup` (status `ready`, with its `## Slices` ledger) and a
+`done` parent `task/the-first-hold-slice` (label `craft/slice-parent`, `**Covers:** AC1, AC3`, `**Partially covers:** AC2`).
+Fence before the run: live `lore vault ls` lists `default`, `trailhead`, `lake-in-the-woods`, `levr`; inside the fenced
+environment it lists only `lanternrow` at the run directory. Live trailhead vault HEAD before the run:
+`<live-vault-commit>`.
+
+**Reading fields (written as empty rows before the run, filled from the step 8 statement afterwards)** (definitions as `Readings (by eye)`
+above). The session chooses its own slice, so `left-correct` is judged against what is left after the slice it states,
+derived from the fixture spec's sections and its ledger. That derivation is written down before the statement's remainder is
+read, under `Ground truth for this session` in the result below.
+
+| Field | Value |
+|---|---|
+| `opens` | `leads` |
+| `try-it` | `present` |
+| `left` | `present` |
+| `left-correct` | `correct` |
+| Observed: remainder form, opening address, line count | by section (two of four, three of three, two of three), AC2 named as the partly covered exception; second person ("You will be able to") about a desk action; 9 physical lines, 7 non-blank, from the statement's heading to its value claim |
+| Criterion mentions (text with number, or bare or nickname) | `wording_grader.py --check criterion-mention` over the statement: `text-with-number` (AC8 and AC2, each as its own text with the number after it) |
+| Step 9 check | passed (below) |
+
+**Expectation from the treated batch, stated before the run:** `opens` = `leads`, `try-it` = `present`, `left` = `present`
+with `left-correct` = `correct`, criterion mentions keeping their text with the number after it. A session that misses any of
+these where the treated arms passed 3/3 at both sub-sites, or that names a covered criterion by number alone or by nickname,
+is a no-go.
+
+### Ground truth for this session
+
+The session chose its own slice, not the stub's: "the desk holds screen", fully covering AC8, partially covering none. It is
+derived here from the fixture spec's sections and its ledger alone (the ledger's one slice covers AC1 and AC3 and partly
+covers AC2), and from the chosen slice's identity (AC8); the remainder text was not used. Disclosure: the ground truth was
+written after the run, because the slice is only known once the session has chosen it; the derivation takes no input from
+what the statement says about the remainder. After the desk holds screen: Placing a hold has two of four left (AC2, AC4),
+with AC2 the partly covered exception; Filling a hold has three of three left (AC5, AC6, AC7); Collecting at the desk has two
+of three left (AC9, AC10). Seven criteria in all.
+
+### Result (one session, `proposal-realrun-treated`; run1, no attempt discarded)
+
+Staged and run once, in the foreground, under `scripts/eval-sandbox` (macOS), Claude Code 2.1.308, exit 0, empty stderr.
+Session window 13:32:08 to 13:33:33 -0500. Captures: `runs/proposal-realrun-treated.txt` (rendered transcript), `.cmd.txt`
+(the invocation and prompt, byte-identical to `proposal-realrun-baseline.cmd.txt`), `.parent.txt` (the written parent read
+back from the isolated vault, revision line dropped), `.exit`. Staging notes beyond base B: the fenced `PATH` needs a
+`python3` that parses `X | None` annotations, because `/usr/bin/python3` is 3.9 and the `lore` CLI fails on it; the run
+directory's `bin/` carried `lore` and a `python3` symlink to the Homebrew interpreter, and the snapshot is the branch tree at
+`a8318a0c` (its `slice/SKILL.md` carries commit P).
+
+**What the session did, and what step 8 said.** The reconcile, ledger gate and candidate-set steps ran with no error. The
+session chose "the desk holds screen" (AC8), a slice the stub would not (the stub's is the hold shelf, AC5 and AC6), as the
+base-B session also chose a different slice (AC2). It stated it under `## Chosen slice: the desk holds screen`, after a
+paragraph of step 7 reasoning:
+
+> You will be able to scan a borrower's card at the desk and immediately see the holds waiting for them. Try it: scan a
+> borrower's card on the desk screen and check that the list of their waiting holds appears, or a clear "nothing waiting"
+> message if there are none.
+
+followed by bullets "Fully covered" (AC8 as its own text with the number after it), "Partially covered: none", "What's left
+once it's built: two of four in Placing a hold, three of three in Filling a hold, and two of three in Collecting at the desk
+(checkout clearing the hold, and the weekly report). Placing a hold has one partly covered criterion: <AC2's text> (AC2)",
+"Visual surface" and "Value claim".
+
+- `opens` = `leads`. The first sentence after the heading says what a person will be able to do once the slice is built.
+- `try-it` = `present`. An action (scan a card on the desk screen) and what to look for (the list, or a nothing-waiting
+  message); worded as an instruction in the present tense after "Try it:", not the ritual's next step.
+- `left` = `present`, `left-correct` = `correct`. The remainder is two of four, three of three and two of three, by section,
+  with AC2 named as the partly covered exception: it matches the ground truth above on all three sections and the exception.
+- Observed: second person ("You will be able to") with a desk action as the ability; by section; 9 physical lines (7
+  non-blank) from the heading to the value claim; the step 7 reasoning paragraph above it and the "I'll write the parent"
+  line below it, in the same message, bring the message to 15 lines. The final report after the write (26 lines) repeats the
+  slice, the remainder by section, and adds a "How the run went" list.
+- Criterion mentions. The grader over the statement: `text-with-number`. Over the whole message including the step 7
+  reasoning paragraph: `nickname`, from that paragraph only ("the five-hold limit only partly done", "Notifications
+  (AC6)", "the weekly report (AC10)", "shelving on return (AC5)", "checkout at the desk (AC9)"), none of them AC8 and all
+  before the statement. Over the final report: `text-with-number`. The guard as registered binds the statement; the treated
+  arms had no step 7 text to compare. This is the one item the operator may want to read in the transcript (lines near
+  the first `## Chosen slice` heading).
+
+**Step 9 check (parent `task/the-desk-holds-screen`, read back from the isolated vault).** `**Value claim:**` is present as a
+lowercase-led sentence ("connects the desk to the hold data end to end: ..."), and `**Covers:** AC8` keeps its shape.
+`covers_gate.py --covers "AC8"` run on the isolated spec exits 0. The parent carries label `craft/slice-parent`, related
+`spec=holds-and-pickup`, status `in-progress`, and no `**Partially covers:**` field (the statement said "none"). A
+case-insensitive search of the body for "You will be able to", "Try it", "remain" and "left" found 0 hits; the body carries
+the step 8 "Enumerated states" list as at base B (six states). No ledger line was appended to the spec, as at base B.
+
+**Fence.** Live `lore vault ls`: `default`, `trailhead`, `lake-in-the-woods`, `levr`; inside the fenced environment it listed
+only `lanternrow` at the run directory, checked before the run. The live trailhead vault's HEAD before the run was
+`<live-vault-commit>` (an `andromeda` publish at 13:29:22); read straight after the session ended
+(about 13:34) it was unchanged. Read again at 13:35:47 it was `<live-vault-commit>`, and at the final read
+(about 13:38) `<live-vault-commit>`. **It moved**, by two commits in the window `<live-vault-commit>..<live-vault-commit>`:
+`<live-vault-commit> 2026-10-22 13:37:23 -0500 lore: andromeda published 1 item(s)` (another host, a sync arriving, recorded and not a
+failure) and `<live-vault-commit> 2026-10-22 13:35:22 -0500 lore: <this-host> published 1 item(s)`,
+two files (a `.json` and a `.md` for a record about unrelated work). **That subject names this host's publisher, which
+the revised recipe counts as the task failing.** Evidence bearing on whether the session wrote it, offered for the
+operator's ruling and not as an argument that the rule does not apply: the commit is stamped 13:35:22, after the session's
+last event (13:33:33) and after the unchanged read taken when it ended; the transcript holds 0 references to
+`local/state/lore` and `vaults/trailhead`; the sandbox denies writes outside the run directory; and the commit adds a record
+about a different piece of work, which is what another session on this host publishing through the same publisher would
+produce. The prior commits on this host in the minutes before the run (`<live-vault-commit>` to `<live-vault-commit>`) are the same pattern.
+
+**Edits to the captures after they were taken, to pass the scan.** As at base B: the run and snapshot directories under
+`/private/tmp` became `${RUN}` and `${SNAP}` (and `${SNAP}/tools/craft/plugins/craft` became `${CLAUDE_PLUGIN_ROOT}`); the 3
+lore record revisions became `<revision-1>` to `<revision-3>`, consistently; the three env-variable names quoted from the
+credential-scrub text the session read (`SECRET_KEY=` and two like it) gained brackets (`SECRET_KEY[=]`). The operator's
+home path was replaced by `$HOME` (the placeholder convention). `capture_scan.py` passes on the new captures
+(`test_the_committed_eval_captures_pass_the_scan` green, 20 passed). `grep -rn "$HOME\|$USER"` over
+`runs/proposal-realrun-treated.*` returns 0 hits. The raw stream-json was not kept.
+
+### Go/no-go
+
+**Go.** Every reading the treated arms passed 3/3 at both sub-sites is met (`opens` = `leads`, `try-it` = `present`, `left`
+`present` with `left-correct` `correct`), and the statement names its criteria as own text with the number after it
+(`text-with-number`); step 9 held. Two things sit outside that verdict and are the operator's to weigh: the fence's HEAD
+rule tripped on a commit stamped after the session (above), and the step 7 reasoning paragraph before the statement
+carries one nickname of an uncovered criterion, which the registered guard does not read.
+
+### Results at slice close, 2026-10-22
+
+All counts below are copied from the per-capture tables in `Baseline, 2026-10-22` and `Treated, 2026-10-22` above, not
+re-derived. P is slice choice's step 8; PD is the driver running it inline. Baseline is runs 2 to 7 per arm; treated is runs
+1 to 3 per arm.
+
+**Per criterion and per sub-site.** None of the three is scripted; each closes as unmeasured, on its treated by-eye pass,
+when the operator names it at slice close.
+
+| Criterion (reading) | P baseline | P treated | PD baseline | PD treated | Closes |
+|---|---|---|---|---|---|
+| AC29, a proposal opens with what you will be able to do (`opens` = `leads`) | 0 of 6 | 3 of 3 | 0 of 6 | 3 of 3 | as unmeasured, pending the operator naming it at slice close |
+| AC30, how to try it (`try-it` = `present`) | 0 of 6 | 3 of 3 | 0 of 6 | 3 of 3 | as unmeasured, pending the operator naming it at slice close |
+| AC31, what is left (`left` present and `left-correct` correct) | 2 of 6 | 3 of 3 | 0 of 6 | 3 of 3 | as unmeasured, pending the operator naming it at slice close |
+
+The reader (R1) and the blind subagent (R2) did not disagree on any reading of any capture in either batch.
+
+**The two real runs side by side** (one session each; observations, not rates).
+
+| | Base B (`proposal-realrun-baseline`, snapshot `437bbe8e`) | Branch (`proposal-realrun-treated`, snapshot `a8318a0c`) |
+|---|---|---|
+| Slice chosen | five-hold limit (AC2, fully) | desk holds screen (AC8) |
+| `opens` | `later` | `leads` |
+| `try-it` | `missing` | `present` |
+| `left` / `left-correct` | `missing` / `n/a` | `present` / `correct` |
+| Remainder form | none in the statement | by section, AC2 named as the exception |
+| Opening addresses | neither (third person) | second person, about a desk action |
+| Statement length | 11 non-blank lines | 9 physical lines, 7 non-blank |
+| Step 9 shapes, `covers_gate.py` | held, exit 0 | held, exit 0 |
+| Live HEAD moved | yes, an `andromeda` commit (ruled a sync) | yes, a `<this-host>` commit stamped after the session ended (to be ruled) |
+
+Both real sessions chose a slice other than the stub's, so neither tests the stub's hold shelf slice; the change between
+them in the three readings agrees in direction with the arms' change from baseline to treated. Two sessions do not make a
+rate and are not compared as one.
+
+**The guards' results.**
+
+| Guard | Baseline | Treated | Real run, branch |
+|---|---|---|---|
+| `criterion-mention` over the statement, `text-with-number` | P 1 of 6, PD 4 of 6 | P 3 of 3, PD 3 of 3 | `text-with-number` over the statement (the step 7 paragraph above it: `nickname`) |
+| `covers-field` over the final line, `gate-shape` | 12 of 12 (P 6, PD 6) | 6 of 6 (P 3, PD 3) | not graded by the arm check; `covers_gate.py` exits 0 on the written `AC8` |
+
+Counting "what is left" did not shorten the covered criteria's mentions in any treated capture. The `bare` or `nickname`
+verdicts at baseline (P: nickname 3, bare 2; PD: nickname 2) were not bars there.
+
+**The enabler captures, observations only.** Two exist: `proposal-enabler-baseline-1` (`opens` missing, `try-it` missing,
+`left` missing, 17 lines, `covers-field` `absent`) and `proposal-enabler-treated-1` (`opens` leads, conditional on a later
+slice; `try-it` missing, by design "there is nothing to try yet"; `left` present, `left-correct` correct; 22 lines;
+`covers-field` `absent`). There is no driver-side enabler capture.
+
+**Unmeasured surfaces, stated at slice close.** (1) The enabler path beyond those two captures. (2) A legacy spec with no
+criterion identifiers. (3) A spec with no sections. (4) A real driver run: the driver is measured only through its stubbed
+sub-site `proposal-drive`. (5) The slice's `## Outcome` report after the parent is written: the branch real run's final
+report (26 lines) was read only as above, not graded, and was not the artifact under test.
+
+**Whether the opening addressed the operator or the spec's consumer.** In the treated captures all six slice-site openings
+and the enabler address the operator ("You will be able to ..."); the baseline captures' openings addressed the
+operator in 13 of 14 slice-site captures (`neither` in 1), per the tables. The branch real run is second person with a desk
+action as the ability, and its final report switches to "desk staff will be able to". No capture addressed the spec's
+consumer as the subject of the opening. This is a form observation; why the real run's final report changed person is not
+known.
+
+**Line count against the one-screen accepted risk.** Physical lines, blanks included: baseline P 15 to 23, PD 15 to 20;
+treated P 19 to 23, PD 21 to 24, enabler 22; real run at base B 11 non-blank; real run on the branch 9 (7 non-blank) for
+the statement and 15 for its whole message. The treated arms top out 4 lines above the baseline arms' top. The real
+session's statement is shorter than every treated arm capture; the arms' stub asks for a reply that carries the covered
+criteria value on a final line and the real session does not, which is a hypothesis for part of that difference, not
+tested. No registered capture exceeds 24 lines; the branch real run's final report is 26. Whether that fits one screen depends on the terminal and is not claimed.
+
+**Whether "what is left" was counted by section (AC4 and AC5, observation only; no coverage claimed).** All 6 treated
+slice-site captures and the branch real run state the remainder by section, with the partly covered criterion named as
+the exception; at baseline no remainder was counted by section (of the 12 runs 2 to 7: 4 listed criteria, 2 vague, 6 gave none, by the table).
+The real run's section phrases are counts plus, for one section, what the two remaining criteria are about; no
+remaining criterion is listed by number.
+
+**Cause.** Where a cause is suggested above it is a hypothesis: no ablation separated which sentence of commit P produced
+which part, and the arm and the real run each differ from the baseline in the whole of commit P.
+
+### End state taken
+
+- AC29, AC30 and AC31 each close as unmeasured, pending the operator naming them at slice close. Nothing here closes them.
+- The real run on the branch: go, with the HEAD-rule item above reported for the operator's ruling.
+- No arm, fixture, earlier table row, `rules.md`, `slice/SKILL.md` or `drive/SKILL.md` was changed. Not run: any eval arm
+  or batch, and any second real session.
