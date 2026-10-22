@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 import _portage_cli  # noqa: F401  (prepends the plugin root onto sys.path)
+from _portage_cli import contained_tempdir  # noqa: F401  (autouse fixture)
 
 from portage.cli import dispatch
 from portage.eval_gate import verdict as verdict_mod
