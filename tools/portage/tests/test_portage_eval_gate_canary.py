@@ -17,7 +17,6 @@ import pytest
 import _portage_cli  # noqa: F401  (prepends the plugin root onto sys.path)
 from _portage_cli import contained_tempdir  # noqa: F401  (autouse fixture)
 
-from portage.cli import dispatch
 from portage.eval_gate import canary, unmapped_runner_cases
 from test_portage_eval_gate_plan import _commit, _corpus, _git, _plan, _write
 from test_portage_eval_gate_run import ERR, FAIL, PASS, Env, _fixture, _result

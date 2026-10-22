@@ -116,8 +116,11 @@ def _selected(repo: Path, capsys) -> tuple[str, list[str]]:
     capsys.readouterr()
     dispatch.main(["eval-gate", "plan", "--repo", str(repo), "--base", "main"])
     out = capsys.readouterr().out
-    status = next(l for l in out.splitlines() if l.startswith("status: "))[len("status: "):]
-    cases = sorted(l for l in out.splitlines() if re.match(r"^\S+:[a-z0-9][a-z0-9._-]*$", l) and not l.startswith(("state:", "status:", "cases:")))
+    status = next(ln for ln in out.splitlines() if ln.startswith("status: "))[len("status: "):]
+    cases = sorted(
+        ln for ln in out.splitlines()
+        if re.match(r"^\S+:[a-z0-9][a-z0-9._-]*$", ln) and not ln.startswith(("state:", "status:", "cases:"))
+    )
     return status, cases
 
 

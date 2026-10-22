@@ -10,7 +10,6 @@ from __future__ import annotations
 import json
 import os
 import re
-from pathlib import Path
 
 import pytest
 
@@ -154,7 +153,7 @@ def test_no_cases_mapped_exits_0_with_single_line_section(st, capsys):
     assert code == 0
     sec = section_of(out)
     assert "No eval cases are mapped to this change." in sec
-    assert len([l for l in sec.splitlines() if l.strip() and l not in (START, END, "## Eval gate")]) == 1
+    assert len([ln for ln in sec.splitlines() if ln.strip() and ln not in (START, END, "## Eval gate")]) == 1
 
 
 def _invalid_plan(st, revision):
@@ -167,7 +166,10 @@ def test_a_base_revision_mapping_fault_says_the_fix_must_land_on_the_base(st, ca
     _invalid_plan(st, "base")
     code, out, _ = verdict(capsys, st)
     assert code == 1
-    assert "The base revision's mapping is invalid; the fix must land on the base (or be pushed directly), not on the branch" in out.split("<!--")[0]
+    assert (
+        "The base revision's mapping is invalid; the fix must land on the base "
+        "(or be pushed directly), not on the branch"
+    ) in out.split("<!--")[0]
     assert ("The eval-case mapping `plugins/demo/evals/eval-gate.json` is invalid at the base revision, "
             "so no case was selected. Fixing it on the branch will not clear this: the fix must land "
             "on the base (or be pushed directly).") in section_of(out)

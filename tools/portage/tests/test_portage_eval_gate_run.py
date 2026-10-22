@@ -24,7 +24,7 @@ import _portage_cli  # noqa: F401  (prepends the plugin root onto sys.path)
 from _portage_cli import contained_tempdir  # noqa: F401  (autouse fixture)
 
 from portage.cli import dispatch
-from portage.eval_gate.run import RunRefused, run_case
+from portage.eval_gate.run import run_case
 from trailhead.harness import ClaudeCodeHarness, Harness
 from trailhead.harness.base import EvalRunner
 
@@ -604,7 +604,7 @@ class TestRunnerTempDirLength:
 
 
 class TestSeamSmoke:
-    def test_claude_code_runner_program_resolves_on_the_runner_path(self, env):  # inert-gate: allow seam smoke: the hook's argv program resolves through the same bare `claude` PATH lookup the harness's other claude calls use
+    def test_claude_code_runner_program_resolves_on_runner_path(self, env):  # inert-gate: allow seam smoke
         env.fake(_result([PASS] * 3))
         runner = ClaudeCodeHarness().eval_runner(
             plugin_dir=env.repo, case="c1", runs=3, model="sonnet", allow_tools=["Read"],

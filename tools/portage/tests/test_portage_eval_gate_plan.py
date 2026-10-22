@@ -74,7 +74,7 @@ def _plan(repo: Path, capsys, *extra: str):
     capsys.readouterr()
     rc = dispatch.main(["eval-gate", "plan", "--repo", str(repo), *extra])
     out = capsys.readouterr().out
-    state = Path(next(l for l in out.splitlines() if l.startswith("state: "))[len("state: "):])
+    state = Path(next(ln for ln in out.splitlines() if ln.startswith("state: "))[len("state: "):])
     plan = json.loads((state / "plan.json").read_text())
     return rc, plan, out
 
@@ -327,7 +327,7 @@ class TestLookupAndStateDir:
         _corpus(repo, "p", M)
         _commit(repo)
         _, _, out = _plan(repo, capsys, "--base", "main")
-        state = Path(next(l for l in out.splitlines() if l.startswith("state: "))[len("state: "):])
+        state = Path(next(ln for ln in out.splitlines() if ln.startswith("state: "))[len("state: "):])
         assert stat.S_IMODE(os.stat(state).st_mode) == 0o700
 
 
@@ -398,7 +398,7 @@ class TestBranchHistoryShapes:
         _write(repo, "p/skills/a.md", PROSE + "edited\n")
         _commit(repo)
         _, plan, out = _plan(repo, capsys, "--base", "base")
-        state = Path(next(l for l in out.splitlines() if l.startswith("state: "))[len("state: "):])
+        state = Path(next(ln for ln in out.splitlines() if ln.startswith("state: "))[len("state: "):])
         empty = tmp_path / "empty-bin"
         empty.mkdir()
         monkeypatch.setenv("PATH", str(empty))
@@ -481,7 +481,7 @@ class TestHostileBranchStrings:
         rc, plan, out = _plan(repo, capsys, "--base", "base")
         assert rc == 0
         assert plan["status"] == "mapping-invalid"
-        assert len([l for l in out.splitlines() if l.startswith("state:")]) == 1
+        assert len([ln for ln in out.splitlines() if ln.startswith("state:")]) == 1
 
     def test_a_clean_corpus_path_is_still_planned(self, repo, capsys):
         _write(repo, "README.md")

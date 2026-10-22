@@ -135,7 +135,9 @@ def _select(repo: Path, merge_base: str, changed: list[str]) -> list[dict]:
         for name in names:
             base_case = base_map.cases.get(name) if base_map else None
             head_case = head_map.cases.get(name) if head_map else None
-            measures = tuple(dict.fromkeys((base_case.measures if base_case else ()) + (head_case.measures if head_case else ())))
+            measures = tuple(dict.fromkeys(
+                (base_case.measures if base_case else ()) + (head_case.measures if head_case else ())
+            ))
             if not _touches(name, measures, plugin, changed):
                 continue
             case = base_case or head_case
@@ -174,7 +176,8 @@ def plan(repo: Path, base: str | None) -> tuple[Path, dict]:
         result["status"] = "base-unresolved"
     else:
         result["base"], result["merge_base"] = resolved
-        changed = [c for c in _git(repo, "diff", "--name-only", "--no-renames", "-z", f"{resolved[1]}...HEAD").split("\0") if c]
+        diff_out = _git(repo, "diff", "--name-only", "--no-renames", "-z", f"{resolved[1]}...HEAD")
+        changed = [c for c in diff_out.split("\0") if c]
         result["changed_files"] = changed
         try:
             cases = _select(repo, resolved[1], changed)

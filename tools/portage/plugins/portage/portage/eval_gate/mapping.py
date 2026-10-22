@@ -12,8 +12,8 @@ Shape::
 own ``pass_at``, which must lie in ``1..runs``. ``case.yaml`` is checked for
 presence only. ``runs`` lies in 1..10; ``runner.model`` is a conservative model id, each
 ``runner.allow_tools`` entry a tool name (letters, digits, ``_``) with at most one
-single-line parenthesised argument, and ``runner.max_cost_usd`` a finite number in (0, 25]. Every fault raises ``MappingError`` carrying the mapping file and a
-one-line fault, never a traceback.
+single-line parenthesised argument, and ``runner.max_cost_usd`` a finite number in (0, 25].
+Every fault raises ``MappingError`` carrying the mapping file and a one-line fault, never a traceback.
 """
 
 from __future__ import annotations

@@ -8,8 +8,8 @@ writes ``<state>/plan.json`` into a fresh 0700 state directory (shape documented
 ``portage.eval_gate.select``). Output: ``state: <dir>``, ``status: <status>``,
 ``cases: <n>``, ``max_cost_usd: <sum>``, then one ``<plugin_root>:<case>`` line per
 selected case (and a ``mapping-invalid: <file>: <fault>`` line when a mapping is
-refused); every branch-controlled string is printed through ``verdict._safe``. Exit 0 whenever a plan was written, including every non-selecting
-status; exit 2 only for usage errors (e.g. ``--repo`` is not a git work tree).
+refused); every branch-controlled string is printed through ``verdict._safe``. Exit 0 whenever a plan was written,
+including every non-selecting status; exit 2 only for usage errors (e.g. ``--repo`` is not a git work tree).
 
 ``run --state <dir> --case <name> [--timeout-seconds N]`` runs one planned case and
 writes ``<state>/results/<case>.json`` (shape in ``portage.eval_gate.run``). Output:
