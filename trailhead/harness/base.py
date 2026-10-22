@@ -610,6 +610,7 @@ class Harness(ABC):
         output_dir: Path,
         env: dict[str, str],
         eval_dir: str | None = None,
+        tmpdir: Path | None = None,
     ) -> EvalRunner | None:
         """The argv and allowlist environment that run one eval case, or ``None``.
 
@@ -617,7 +618,9 @@ class Harness(ABC):
         caller's environment, which the harness filters down to what its runner
         needs; nothing outside that allowlist may reach the child. ``eval_dir``
         names the directory below the plugin that holds the cases, when it is
-        not the runner's default.
+        not the runner's default. ``tmpdir`` is a private directory the caller
+        created and will remove; a runner that needs its temp directory placed
+        puts it in the child environment.
         """
         return None
 

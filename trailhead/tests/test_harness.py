@@ -2319,6 +2319,16 @@ class TestEvalRunnerHook:
         assert named[named.index("--eval-dir") + 1] == "eval-canary"
         assert "--eval-dir" not in argv()
 
+    def test_tmpdir_is_placed_in_the_child_env_and_overrides_the_parent(self):
+        env = {"PATH": "/bin", "TMPDIR": "/tmp/parent"}
+        placed = ClaudeCodeHarness().eval_runner(env=env, tmpdir=Path("/c/x"), **self.KW)
+        assert placed.env == {"PATH": "/bin", "TMPDIR": "/c/x"}
+        unplaced = ClaudeCodeHarness().eval_runner(env=env, **self.KW)
+        assert unplaced.env == {"PATH": "/bin"}
+
+    def test_base_harness_accepts_tmpdir_and_has_no_runner(self):
+        assert _BareHarness().eval_runner(env={}, tmpdir=Path("/c/x"), **self.KW) is None
+
     def test_runs_drive_parallelism_up_to_eight(self):
         def j(runs):
             argv = ClaudeCodeHarness().eval_runner(env={}, **{**self.KW, "runs": runs}).argv

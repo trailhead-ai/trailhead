@@ -53,7 +53,8 @@ call, so give the tool call a 600000 ms timeout) and records a verdict in the st
   grants). A not-run case is never a pass and never a fail.
 
 The runner is the harness's `claude plugin eval`, started with an allowlist environment (`PATH`, `HOME`,
-`USER`, `LANG`, `TERM`, `LC_*`), so API keys and tokens in the caller's environment are not passed on. With
+`USER`, `LANG`, `TERM`, `LC_*`, plus the gate's own `TMPDIR`), so API keys and tokens in the caller's
+environment are not passed on. With
 that environment a runner authenticated on the operator's Claude Code login on a Linux host (shown there only;
 macOS was not checked). `HOME` is forwarded, so settings in the user's Claude configuration (an `env` block or an
 `apiKeyHelper`) can still change which credential a run uses and could move it onto API billing.
@@ -69,8 +70,14 @@ creates a file through its sandboxed Bash. If the runner's sandbox cannot write,
 case is recorded as not-run `runner-sandbox-unwritable` instead of a false fail. The canary result is reused
 for the rest of that state directory.
 
-On the Linux host this was built on (2026-10-21), runner 2.1.303 passes the canary and 2.1.306, the `claude`
-on `PATH`, fails it. Another host or version may behave differently; the canary is how the gate finds out.
+The gate places the runner's temp directory under the user cache, because the runner's sandbox could not
+write when its temp dir was under `/tmp` on the tested Linux host (where `/tmp` is a separate mount; measured
+2026-10-22, macOS not checked). Each runner call, the canary and the case, gets a private directory
+`$XDG_CACHE_HOME/portage/eval-gate-tmp/call-*` (`$HOME/.cache/...` when `XDG_CACHE_HOME` is unset or not
+absolute) as its `TMPDIR`, removed when the call ends. A base directory that is a symlink, owned by another
+user or group- or world-writable makes the case not-run `runner-error` and no runner starts. A `TMPDIR` in the
+caller's environment is never passed on. On that host, with the directory placed there, the canary passed on
+runner 2.1.308. The canary still catches a runner that cannot write on another host or version.
 
 `PORTAGE_EVAL_RUNNER` pins the runner binary for the gate on one machine: an absolute path to an executable
 file, used for both the canary and the case in place of the harness's own `claude` lookup. A value that is

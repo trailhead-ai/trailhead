@@ -55,7 +55,9 @@ CANARY = "--eval-dir" in sys.argv
 open(LOG + ".started", "w").write("1")
 json.dump({{"argv": sys.argv, "env": dict(os.environ), "cwd": os.getcwd()}}, open(LOG + ".seen", "w"))
 open(LOG + ".calls", "a").write(json.dumps(
-    {{"canary": CANARY, "argv": sys.argv, "env": dict(os.environ)}}) + "\\n")
+    {{"canary": CANARY, "argv": sys.argv, "env": dict(os.environ),
+      "tmpdir_exists": os.path.isdir(os.environ.get("TMPDIR", "")),
+      "tmpdir_mode": (os.stat(os.environ["TMPDIR"]).st_mode & 0o777) if os.environ.get("TMPDIR") else None}}) + "\\n")
 payload, code, sleep = ({canary_payload!r}, {canary_code!r}, {canary_sleep!r}) if CANARY else (
     {payload!r}, {code!r}, {sleep!r})
 if {grandchild!r} and not CANARY:
@@ -92,6 +94,8 @@ class Env:
         monkeypatch.setenv("PATH", str(self.bin))
         monkeypatch.setenv("USER", "tester")
         monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+        monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
+        monkeypatch.setenv("TMPDIR", str(tmp_path / "inherited-tmp"))
         self.cases = [{"plugin_root": "plugins/p", "case": "c1", "runs": 3, "pass_at": 2,
                        "runner": RUNNER, "new_runner_grants": False}]
 
@@ -246,12 +250,12 @@ class TestRunnerFailures:
         for abstract in Harness.__abstractmethods__:
             setattr(Bare, abstract, lambda self, *a, **k: None)
         Bare.__abstractmethods__ = frozenset()
-        result = run_case(env.state, "c1", harnesses=[Bare()], env={})
+        result = run_case(env.state, "c1", harnesses=[Bare()], env={"HOME": str(env.home)})
         assert (result["verdict"], result["reason"]) == ("not-run", "harness-has-no-eval-runner")
         assert env.result()["reason"] == "harness-has-no-eval-runner"
 
     def test_no_detected_harness_has_no_eval_runner(self, env):
-        result = run_case(env.state, "c1", harnesses=[], env={})
+        result = run_case(env.state, "c1", harnesses=[], env={"HOME": str(env.home)})
         assert result["reason"] == "harness-has-no-eval-runner"
 
     def test_timeout_kills_the_runner_and_its_children(self, env):
@@ -373,7 +377,7 @@ class TestChildEnvironment:
         assert env.run() == 0
         child = env.seen["env"]
         assert set(child) <= {"PATH", "HOME", "USER", "LANG", "TERM", "PWD", "SHLVL", "_",
-                              "LC_CTYPE"}
+                              "LC_CTYPE", "TMPDIR"}
         assert child["HOME"] == str(env.home)
         assert child["USER"] == "tester"
         assert child["LANG"] == "en_US.UTF-8"
@@ -428,7 +432,7 @@ class TestHarnessSelection:
                 return EvalRunner(argv=[str(env.bin / "claude"), self.tag], env={})
 
         first, second = Stub("first"), Stub("second")
-        run_case(env.state, "c1", harnesses=[first, second], env={})
+        run_case(env.state, "c1", harnesses=[first, second], env={"HOME": str(env.home)})
         assert (first.calls, second.calls) == (1, 0)
         assert env.seen["argv"][1] == "first"
 
@@ -449,9 +453,113 @@ class TestHarnessSelection:
             return [Stub("first"), Stub("second")]
 
         env.mp.setattr("trailhead.harness.detect_harnesses", detect)
-        run_case(env.state, "c1", env={"HOME": "marker"})
+        run_case(env.state, "c1", env={"HOME": str(env.home)})
         assert env.seen["argv"][1] == "first"
-        assert seen_env == {"HOME": "marker"}
+        assert seen_env == {"HOME": str(env.home)}
+
+
+def _children(base: Path) -> list[Path]:
+    return sorted(base.iterdir()) if base.exists() else []
+
+
+class TestRunnerTempDir:
+    def test_each_call_gets_a_private_dir_under_the_cache_base_and_outside_tmp(self, env):
+        env.fake(_result([PASS] * 3))
+        assert env.run() == 0
+        base = env.home / ".cache" / "portage" / "eval-gate-tmp"
+        assert len(env.calls) == 2
+        dirs = []
+        for call in env.calls:
+            d = Path(call["env"]["TMPDIR"])
+            assert d.parent == base
+            assert (call["tmpdir_exists"], call["tmpdir_mode"]) == (True, 0o700)
+            dirs.append(d)
+        assert dirs[0] != dirs[1]
+        assert (base.stat().st_mode & 0o777) == 0o700
+
+    def test_the_dirs_are_gone_after_the_call(self, env):
+        env.fake(_result([PASS] * 3))
+        assert env.run() == 0
+        assert _children(env.home / ".cache" / "portage" / "eval-gate-tmp") == []
+
+    def test_the_dirs_are_gone_after_a_timeout(self, env):
+        env.fake(_result([PASS] * 3), sleep=30)
+        env.seed_canary()
+        run_case(env.state, "c1", timeout_seconds=1)
+        assert Path(env.calls[0]["env"]["TMPDIR"]).parent.name == "eval-gate-tmp"
+        assert _children(env.home / ".cache" / "portage" / "eval-gate-tmp") == []
+
+    def test_the_dirs_are_gone_after_the_runner_raises(self, env):
+        env.fake(_result([PASS] * 3))
+        env.seed_canary()
+        seen = []
+
+        def boom(runner, state, timeout):
+            seen.append(runner.env["TMPDIR"])
+            raise RuntimeError("boom")
+
+        env.mp.setattr("portage.eval_gate.run._execute", boom)
+        with pytest.raises(RuntimeError):
+            run_case(env.state, "c1")
+        assert Path(seen[0]).parent.name == "eval-gate-tmp"
+        assert _children(env.home / ".cache" / "portage" / "eval-gate-tmp") == []
+
+    def test_only_the_per_call_dir_is_removed(self, env):
+        env.fake(_result([PASS] * 3))
+        base = env.home / ".cache" / "portage" / "eval-gate-tmp"
+        base.mkdir(parents=True, mode=0o700)
+        (base / "other").mkdir()
+        assert env.run() == 0
+        assert _children(base) == [base / "other"]
+
+    def test_xdg_cache_home_is_honoured(self, env):
+        xdg = env.tmp / "xdg"
+        env.mp.setenv("XDG_CACHE_HOME", str(xdg))
+        env.fake(_result([PASS] * 3))
+        assert env.run() == 0
+        assert Path(env.calls[0]["env"]["TMPDIR"]).parent == xdg / "portage" / "eval-gate-tmp"
+        assert not (env.home / ".cache").exists()
+
+    def test_a_relative_xdg_cache_home_falls_back_to_home(self, env):
+        env.mp.setenv("XDG_CACHE_HOME", "relative/cache")
+        env.fake(_result([PASS] * 3))
+        assert env.run() == 0
+        assert Path(env.calls[0]["env"]["TMPDIR"]).parent == (
+            env.home / ".cache" / "portage" / "eval-gate-tmp")
+
+    def test_an_inherited_tmpdir_never_reaches_the_child(self, env):
+        env.fake(_result([PASS] * 3))
+        assert env.run() == 0
+        for call in env.calls:
+            assert call["env"]["TMPDIR"] != str(env.tmp / "inherited-tmp")
+
+    def _refused(self, env):
+        env.fake(_result([PASS] * 3))
+        assert env.run() == 0
+        r = env.result()
+        assert (r["verdict"], r["reason"]) == ("not-run", "runner-error")
+        assert env.calls == [] and not env.started
+
+    def test_a_symlinked_base_is_refused_and_no_runner_starts(self, env):
+        base = env.home / ".cache" / "portage" / "eval-gate-tmp"
+        base.parent.mkdir(parents=True)
+        real = env.tmp / "real"
+        real.mkdir(mode=0o700)
+        base.symlink_to(real)
+        self._refused(env)
+
+    def test_a_group_writable_base_is_refused_and_no_runner_starts(self, env):
+        base = env.home / ".cache" / "portage" / "eval-gate-tmp"
+        base.mkdir(parents=True)
+        base.chmod(0o770)
+        self._refused(env)
+
+    def test_a_foreign_owned_base_is_refused_and_no_runner_starts(self, env):
+        base = env.home / ".cache" / "portage" / "eval-gate-tmp"
+        base.mkdir(parents=True, mode=0o700)
+        env.mp.setattr("portage.eval_gate.run._check_state", lambda state: None)
+        env.mp.setattr(os, "geteuid", lambda: os.stat(base).st_uid + 1)
+        self._refused(env)
 
 
 class TestSeamSmoke:

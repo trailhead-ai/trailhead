@@ -1720,6 +1720,7 @@ class ClaudeCodeHarness(Harness):
         output_dir: Path,
         env: dict[str, str],
         eval_dir: str | None = None,
+        tmpdir: Path | None = None,
     ) -> EvalRunner:
         """``claude plugin eval`` for one case, with an allowlist-only environment.
 
@@ -1728,6 +1729,11 @@ class ClaudeCodeHarness(Harness):
 
         ``eval_dir`` names the directory below the plugin that holds the cases
         (``--eval-dir``); omitted, the runner's own default applies.
+
+        ``tmpdir`` becomes the child's ``TMPDIR``, the one variable set rather
+        than inherited: the runner's sandbox could not write when its temp dir
+        was under ``/tmp`` on the tested Linux host, so the caller supplies a
+        directory elsewhere. The parent's ``TMPDIR`` is never forwarded.
         """
         argv = [
             "claude", "plugin", "eval", str(plugin_dir),
@@ -1751,6 +1757,8 @@ class ClaudeCodeHarness(Harness):
             for k, v in env.items()
             if k in _EVAL_ENV_ALLOWLIST or k.startswith(_EVAL_ENV_PREFIXES)
         }
+        if tmpdir is not None:
+            child["TMPDIR"] = str(tmpdir)
         return EvalRunner(argv=argv, env=child)
 
     def session_enumerate(self, workspace: Path | None = None) -> list[str]:

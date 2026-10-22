@@ -48,6 +48,15 @@ regular file, else the case is not-run ``runner-missing`` (a stderr line names t
 variable) and nothing starts. It replaces the harness's own ``claude`` lookup and is
 never forwarded into the child's environment.
 
+Each runner call, the canary and the case, gets a private temp directory as ``TMPDIR``,
+created by ``run`` under ``$XDG_CACHE_HOME/portage/eval-gate-tmp`` (``$HOME/.cache/...`` when
+``XDG_CACHE_HOME`` is unset or not absolute, both read from the gate's own environment) and
+removed when the call ends. The runner's sandbox could not write when its temp dir was under
+``/tmp`` on the tested Linux host; the canary still catches a runner that cannot write. A base
+that is a symlink, owned by another user or group- or world-writable makes the case not-run
+``runner-error`` (a stderr line names the problem) and no runner starts. The directory is placed
+through the harness's ``eval_runner`` hook (``tmpdir``).
+
 A plan entry with ``new_runner_grants`` true (its corpus has no mapping at the base, so its
 runner grants are unreviewed) is recorded as not-run ``corpus-new-on-branch`` the same way: no
 harness lookup, no canary, no runner.
@@ -73,8 +82,10 @@ import signal
 import stat
 import subprocess
 import sys
+import shutil
 import tempfile
 import time
+from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
 
 from . import canary
@@ -112,6 +123,44 @@ def _check_state(state: Path) -> None:
         raise RunRefused(f"state directory {state} is owned by another user")
     if st.st_mode & 0o777 != 0o700:
         raise RunRefused(f"state directory {state} must be mode 0700")
+
+
+class TmpBaseRefused(Exception):
+    pass
+
+
+def _tmp_base(env: dict[str, str]) -> Path:
+    xdg = env.get("XDG_CACHE_HOME")
+    if xdg and os.path.isabs(xdg):
+        cache = Path(xdg)
+    else:
+        home = env.get("HOME")
+        if not home or not os.path.isabs(home):
+            raise TmpBaseRefused("no usable XDG_CACHE_HOME or HOME for the runner temp directory")
+        cache = Path(home) / ".cache"
+    base = cache / "portage" / "eval-gate-tmp"
+    try:
+        base.mkdir(mode=0o700, parents=True, exist_ok=True)
+        st = os.lstat(base)
+    except OSError as e:
+        raise TmpBaseRefused(f"runner temp base {base} unusable: {e}") from e
+    if stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode):
+        raise TmpBaseRefused(f"runner temp base {base} is a symlink or not a directory")
+    if st.st_uid != os.geteuid():
+        raise TmpBaseRefused(f"runner temp base {base} is owned by another user")
+    if st.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+        raise TmpBaseRefused(f"runner temp base {base} is group- or world-writable")
+    return base
+
+
+@contextmanager
+def _call_tmpdir(env: dict[str, str]):
+    """A private directory for one runner call, removed on exit."""
+    path = Path(tempfile.mkdtemp(prefix="call-", dir=_tmp_base(env)))
+    try:
+        yield path
+    finally:
+        shutil.rmtree(path, ignore_errors=True)
 
 
 def _load_case(state: Path, case: str) -> tuple[dict, dict]:
@@ -291,7 +340,19 @@ def run_case(
     def request(**kw):
         return harnesses[0].eval_runner(env=env, **kw) if harnesses else None
 
+    try:
+        with _call_tmpdir(env) as case_tmp:
+            return _run_planned(state, case, n, pass_at, plugin_dir, runner_cfg, runs_dir,
+                                json_path, timeout_seconds, request, override, env, case_tmp)
+    except TmpBaseRefused as e:
+        print(f"eval-gate run: {e}", file=sys.stderr)
+        return _record(state, case, _not_run(case, n, RUNNER_ERROR))
+
+
+def _run_planned(state, case, n, pass_at, plugin_dir, runner_cfg, runs_dir, json_path,
+                 timeout_seconds, request, override, env, case_tmp) -> dict:
     runner = _pin(request(
+        tmpdir=case_tmp,
         plugin_dir=plugin_dir,
         case=case,
         runs=n,
@@ -307,7 +368,7 @@ def run_case(
     started = time.monotonic()
     gate = canary.read_cached(state)
     if gate is None:
-        gate = _run_canary(state, request, override, min(canary.TIMEOUT_SECONDS, timeout_seconds))
+        gate = _run_canary(state, request, override, min(canary.TIMEOUT_SECONDS, timeout_seconds), env)
         _write_json(state / canary.CACHE_NAME, gate)
     if gate["verdict"] != "pass":
         reason = SANDBOX_UNWRITABLE if gate["verdict"] == "fail" else gate["reason"]
@@ -379,10 +440,17 @@ def _pin(runner, override: str | None):
     return type(runner)(argv=[override, *runner.argv[1:]], env=runner.env)
 
 
-def _run_canary(state: Path, request, override: str | None, timeout: float) -> dict:
+def _run_canary(state: Path, request, override: str | None, timeout: float,
+                env: dict[str, str]) -> dict:
     run_json = state / canary.RUN_JSON
     run_json.unlink(missing_ok=True)
+    with _call_tmpdir(env) as canary_tmp:
+        return _canary_result(state, request, override, timeout, run_json, canary_tmp)
+
+
+def _canary_result(state, request, override, timeout, run_json, canary_tmp) -> dict:
     runner = _pin(request(
+        tmpdir=canary_tmp,
         plugin_dir=canary.plugin_dir(),
         case=canary.CASE,
         runs=1,
