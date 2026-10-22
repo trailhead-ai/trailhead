@@ -1,0 +1,7 @@
+.ref-head { padding: 1rem 1.5rem 0.75rem; border-bottom: 1px solid var(--rule); }
+.ref-head h1 { margin: 0; font-size: 1.9rem; font-weight: normal; }
+.ref-chosen { margin: 0.25rem 0 0; color: var(--faint); }
+.ref-cards { display: flex; flex-direction: column; gap: 1.5rem; padding: 1rem 1.5rem; }
+.ref-card { width: 100%; max-width: none; flex: none; }
+.ref-round { margin: 0 0 0.25rem; color: var(--faint); }
+.ref-card .pad-prompt { margin-bottom: 0.5rem; }

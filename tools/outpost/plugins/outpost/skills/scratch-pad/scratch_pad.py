@@ -158,6 +158,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import datetime
 import fcntl
 import hashlib
 import json
@@ -175,6 +176,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 DEFAULT_KIT_DIR = Path(__file__).resolve().parent / "kit"
+DEFAULT_REFERENCE_DIR = Path(__file__).resolve().parent / "reference"
 PUBLISHER_PATH = Path(__file__).resolve().parent.parent / "publish-site" / "publish_site.py"
 PUBLISH_TIMEOUT_SECONDS = 60.0
 
@@ -186,6 +188,8 @@ _QUESTION_KEYS = ("prompt", "options")
 _OPTION_KEYS = ("name", "cost", "pick", "layout", "flow")
 _ROUND_JS_PREFIX = "window.PAD_ROUND = JSON.parse("
 _ROUNDS_JS_PREFIX = "window.PAD_ROUNDS = JSON.parse("
+_REFERENCE_JS_PREFIX = "window.PAD_REFERENCE = JSON.parse("
+_REFERENCE_KIT_FILES = ("pen.js", "flow.js", "pad.css", "ArchitectsDaughter-Regular.ttf", "OFL.txt")
 _ROUND_DIR = re.compile(r"round-([1-9][0-9]*)")
 _PAD_FILES = ("index.html", "rounds.js")
 _LOCK_POLL_SECONDS = 0.05
@@ -1189,6 +1193,65 @@ def read_reference(
     if problems:
         raise Refusal(problems)
     return Reference(data["site"], data["title"], chosen)
+
+
+def _reference_entry(drawing: ChosenDrawing) -> dict:
+    """The fields of one chosen drawing the page needs; the option's other keys are left behind."""
+    option = drawing.option
+    entry = {
+        "question": drawing.question,
+        "letter": drawing.letter,
+        "roundTitle": drawing.round_title,
+        "prompt": drawing.prompt,
+        "name": option["name"],
+        "cost": option["cost"],
+    }
+    if "flow" in option:
+        entry["flow"] = option["flow"]
+    else:
+        entry["layout"] = option["layout"]
+    return entry
+
+
+def build_reference_page(
+    target: Path | str,
+    reference: Reference,
+    date: datetime.date | str | None = None,
+    *,
+    kit_dir: Path | str = DEFAULT_KIT_DIR,
+    reference_dir: Path | str = DEFAULT_REFERENCE_DIR,
+) -> None:
+    """Write the reference page for *reference* into the folder *target*, to be opened from disk.
+
+    *target* is created when absent and is meant to be new: files of the same names are overwritten. It gets the
+    reference page's own files, the kit's ``pen.js``, ``flow.js``, ``pad.css``, font and ``OFL.txt``, and
+    ``reference-data.js``, whose data is encoded as ``round.js`` is (ASCII JSON as a string literal handed to
+    ``JSON.parse``). Only each drawing's place, round title, prompt, name, cost and ``layout`` or ``flow`` are
+    written. *date* (a ``datetime.date`` or text; today by default) is the day the drawings are said to have
+    been chosen. Raises :class:`Refusal` when a source folder is missing or the target cannot be written.
+    """
+    target, kit_dir, reference_dir = Path(target), Path(kit_dir), Path(reference_dir)
+    for noun, folder in (("kit", kit_dir), ("reference", reference_dir)):
+        if not folder.is_dir():
+            raise Refusal([_line(noun, f"{_q(str(folder))} is not a directory — the pad {noun} is missing")])
+    day = datetime.date.today() if date is None else date
+    data = {
+        "title": reference.title,
+        "date": day.isoformat() if isinstance(day, datetime.date) else str(day),
+        "drawings": [_reference_entry(d) for d in reference.drawings],
+    }
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+        for source in sorted(reference_dir.iterdir()):
+            if source.is_file():
+                shutil.copyfile(source, target / source.name)
+        for name in _REFERENCE_KIT_FILES:
+            shutil.copyfile(kit_dir / name, target / name)
+        (target / "reference-data.js").write_text(
+            _REFERENCE_JS_PREFIX + _js_string_literal(data) + ");\n", encoding="utf-8"
+        )
+    except OSError as exc:
+        raise _build_failed(target, exc)
 
 
 def _build(
