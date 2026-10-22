@@ -8,8 +8,9 @@
 # arms/system-prompt.md, the operating brief plus the live rules.md). The instruction files are chosen
 # here from the repo, never from the fixture.
 #
-# A variant with a next turn (the builder leaves prompt-2.md) is run a second time with --resume on the
-# first turn's session id, after the vault's sites/ listing is recorded.
+# A variant with a next turn (the builder leaves prompt-2.md) runs both turns in one process through
+# drive-turns.py (the sandbox cannot read the session store, so --resume is not available), recording the
+# vault's sites/ listing between them.
 #
 # <runs-root>/ids.txt lists every run id of the batch, one per line; the other runs' directories, their
 # TMPDIRs, the captures and ids.txt are denied for reading, so one run cannot read another. Run
@@ -42,41 +43,32 @@ while read -r other; do
 done < "$root/ids.txt"
 deny="$deny$root/ids.txt:$root/manifest.tsv:"
 
-turn() {
-  # turn <capture> <prompt-file> [--resume <session-id>]
-  local capture="$1" prompt="$2"; shift 2
-  HOME_REAL="$HOME" DENY_EXTRA="$deny" HOME="$HOME" "$repo/scripts/eval-sandbox" "$run" -- \
+sandboxed() {
+  # sandboxed <claude args...>: the confined command line, run from the run's project folder
+  "$repo/scripts/eval-sandbox" "$run" -- \
     env -i $(cat "$run/run.env") HOME="$HOME" USER="$USER" TMPDIR="$tmp" \
     /bin/sh -c 'cd "$0" && exec "$@"' "$(cat "$run/cwd")" \
     "$claude_bin" -p --setting-sources project --plugin-dir "$run/plugin" \
     --append-system-prompt "$(cat "$system")" \
-    --allowedTools "Bash,Read,Write,Edit,Skill" --output-format stream-json --verbose "$@" \
-    "$(cat "$prompt")" > "$capture" 2>> "$root/run-$id.stderr"
+    --allowedTools "Bash,Read,Write,Edit,Skill" --output-format stream-json --verbose "$@"
 }
 
-turn "$root/run-$id.capture.jsonl" "$run/prompt.md"
-code=$?
-(cd "$run/xdg-state/lore/vaults/acme/sites" && find . -mindepth 1 | sort) > "$root/run-$id.after-1.txt" 2>&1
-
-if [ "$code" -eq 0 ] && [ -f "$run/prompt-2.md" ]; then
-  sid="$(python3 - "$root/run-$id.capture.jsonl" <<'PY'
-import json, sys
-sid = ""
-for line in open(sys.argv[1]):
-    try:
-        event = json.loads(line)
-    except ValueError:
-        continue
-    if event.get("type") == "result" and event.get("session_id"):
-        sid = event["session_id"]
-print(sid)
-PY
-)"
-  if [ -n "$sid" ]; then
-    turn "$root/run-$id.capture-2.jsonl" "$run/prompt-2.md" --resume "$sid"
-    code=$?
-  else
-    code=3
-  fi
+export HOME_REAL="$HOME" DENY_EXTRA="$deny"
+if [ -f "$run/prompt-2.md" ]; then
+  python3 "$case_dir/drive-turns.py" \
+    "$root/run-$id.capture.jsonl" "$root/run-$id.capture-2.jsonl" "$root/run-$id.after-1.txt" \
+    "$run/xdg-state/lore/vaults/acme/sites" "$run/prompt.md" "$run/prompt-2.md" -- \
+    "$repo/scripts/eval-sandbox" "$run" -- \
+    env -i $(cat "$run/run.env") HOME="$HOME" USER="$USER" TMPDIR="$tmp" \
+    /bin/sh -c 'cd "$0" && exec "$@"' "$(cat "$run/cwd")" \
+    "$claude_bin" -p --setting-sources project --plugin-dir "$run/plugin" \
+    --append-system-prompt "$(cat "$system")" \
+    --allowedTools "Bash,Read,Write,Edit,Skill" --input-format stream-json \
+    --output-format stream-json --verbose 2> "$root/run-$id.stderr"
+  code=$?
+else
+  sandboxed "$(cat "$run/prompt.md")" > "$root/run-$id.capture.jsonl" 2> "$root/run-$id.stderr"
+  code=$?
+  (cd "$run/xdg-state/lore/vaults/acme/sites" && find . -mindepth 1 | sort) > "$root/run-$id.after-1.txt" 2>&1
 fi
 echo "$code" > "$root/run-$id.done"

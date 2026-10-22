@@ -264,3 +264,52 @@ def test_a_remark_only_run_that_ran_a_reference_command_misses_the_vault_criteri
 def test_a_remark_only_run_with_no_reply_misses_the_reply_criterion(tmp_path):
     graded = _graded(tmp_path, "remark-only", publish=False, final1="")
     assert graded["K1 the session replied"] is False
+
+
+DRIVER = CASE_DIR / "drive-turns.py"
+FAKE_CLAUDE = '''\
+import json, sys
+from pathlib import Path
+sites = Path(sys.argv[1])
+for n, line in enumerate(sys.stdin, start=1):
+    text = json.loads(line)["message"]["content"][0]["text"]
+    if n == 2:
+        (sites / "made-after-turn-one").mkdir()
+    print(json.dumps({"type": "result", "is_error": text == "boom", "result": f"turn {n} got: {text}"}), flush=True)
+'''
+
+
+def _drive(tmp_path: Path, first: str, second: str = "second"):
+    sites = tmp_path / "sites"
+    sites.mkdir()
+    (tmp_path / "p1").write_text(first)
+    (tmp_path / "p2").write_text(second)
+    (tmp_path / "fake.py").write_text(FAKE_CLAUDE)
+    args = [str(tmp_path / n) for n in ("c1", "c2", "after")] + [str(sites), str(tmp_path / "p1"), str(tmp_path / "p2")]
+    done = subprocess.run(
+        [sys.executable, str(DRIVER), *args, "--", sys.executable, str(tmp_path / "fake.py"), str(sites)],
+        capture_output=True, text=True, timeout=60,
+    )
+    return done, tmp_path
+
+
+def test_the_driver_sends_each_prompt_to_one_process_and_splits_the_captures_at_the_first_result(tmp_path):
+    done, root = _drive(tmp_path, "first", "second")
+    assert done.returncode == 0, done.stderr
+    assert "turn 1 got: first" in (root / "c1").read_text() and "second" not in (root / "c1").read_text()
+    assert "turn 2 got: second" in (root / "c2").read_text()
+    assert (root / "after").read_text() == ""
+
+
+def test_the_driver_records_the_sites_listing_before_the_second_prompt_is_sent(tmp_path):
+    done, root = _drive(tmp_path, "first")
+    assert done.returncode == 0, done.stderr
+    assert (root / "after").read_text() == ""
+    assert (root / "sites" / "made-after-turn-one").is_dir()
+
+
+def test_a_first_turn_that_ends_in_error_stops_the_run_without_a_second_prompt(tmp_path):
+    done, root = _drive(tmp_path, "boom")
+    assert done.returncode == 3
+    assert not (root / "c2").exists() or (root / "c2").read_text() == ""
+    assert not (root / "sites" / "made-after-turn-one").exists()

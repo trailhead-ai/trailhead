@@ -53,8 +53,8 @@ pad, the user's pasted reply) and the new message.
 | `name-the-reference` | "B on the header question is the one we're building; keep it for the team." | 2: the second is "Yes, go ahead." | R1-R5 below |
 | `remark-only` | "Honestly I like B on the header question, the tabs feel cleaner than the other two. Still undecided on the line items." | 1 | K1-K2 below |
 
-The second turn of `name-the-reference` is sent to both arms with `claude --resume`, whatever the first
-turn said. Signals are read from the run directory's tree, the listing of the vault's `sites/` folder that
+The second turn of `name-the-reference` is sent to both arms, in the same `claude` process, whatever the
+first turn said. Signals are read from the run directory's tree, the listing of the vault's `sites/` folder that
 `run-arm.sh` takes after each turn, `lore-argv.txt`, and the captures' tool calls and final messages,
 finished runs only (`run-<id>.done` present). `grade-run.py` computes them; the message criteria are phrase
 heuristics and every final message is hand-read against them.
@@ -111,8 +111,9 @@ variant, a missing skill file, a non-empty run directory or an interpreter witho
 prompt> --allowedTools Bash,Read,Write,Edit,Skill --output-format stream-json --verbose <prompt>` inside
 `scripts/eval-sandbox` with `env -i` and the `run.env` lines, the real `HOME` and `USER` (the `claude`
 login needs both), a per-run `TMPDIR` under `/private/tmp/claude-<uid>`, and every other run directory,
-TMPDIR and capture in `DENY_EXTRA`. For `name-the-reference` it then records the vault listing, reads the
-first turn's `session_id` and runs the same command with `--resume <session_id>` and `prompt-2.md`. The
+TMPDIR and capture in `DENY_EXTRA`. For `name-the-reference` the command takes stream-json input and `drive-turns.py` sends `prompt.md`,
+reads the stream to the first result, records the vault listing, then sends `prompt-2.md` to the same
+process (`--resume` is not available: the sandbox cannot read the session store). The
 captures go beside the run directory, and `run-<id>.done`, holding the last exit code, is written last.
 
 Before the batch the real `scratch_pad.py --reference` is run through the sandbox against a built fixture
