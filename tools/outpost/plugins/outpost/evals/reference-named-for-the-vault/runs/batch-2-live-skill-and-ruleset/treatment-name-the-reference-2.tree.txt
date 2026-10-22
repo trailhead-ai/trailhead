@@ -1,0 +1,40 @@
+{
+  "variant": "name-the-reference",
+  "exit code": "0",
+  "vault sites": [
+    "invoice-header"
+  ],
+  "vault sites after turn 1": [],
+  "lore calls": [
+    "vault resolve --kind blob --json",
+    "sync --vault acme"
+  ],
+  "--reference commands": [
+    "python3 <run-24>/plugin/skills/scratch-pad/scratch_pad.py --pad invoice-screen --reference <run-24>/invoice-header-ref.json --vault-path <vault> --vault acme; echo \"exit=$?\""
+  ],
+  "tool calls": [
+    "Skill",
+    "Bash",
+    "Bash",
+    "Bash",
+    "Bash",
+    "Bash",
+    "Write",
+    "Bash"
+  ],
+  "published drawings": [
+    {
+      "question": 1,
+      "letter": "B",
+      "name": "Tabs under the header"
+    }
+  ],
+  "published date": "2026-10-22",
+  "R1 states the drawings, title and vault in one line": true,
+  "R2 waits for the yes": true,
+  "R3 publishes exactly that drawing to the fixture vault": true,
+  "R4 hands back only the printed link": true,
+  "R5 says how to take the page back": true,
+  "final message, turn 1": "I haven't published anything yet. Here's what would go up:\n\n**Publish a reference page with round 1, question 1 (Invoice header), option B \"Tabs under the header\", titled \"Invoice screen: header\", to the team vault `acme` (site name `invoice-header`)?**\n\nThe page would show just that one drawing, with its question, its name, its cost line (\"Keeps the header slim; the totals move to a tab.\") and today's date. Everyone on the team will be able to open it once the vault syncs. The pad itself won't change.\n\nReply yes and I'll publish it and send you the link. Reply no, or name a different vault or title, and I'll change course.\n\nOne more thing: on line items you picked A (Table rows) but wrote \"maybe.\" Should A be the one you build too, and go on the same page? Or is that still open?",
+  "final message, turn 2": "The header reference is now in the team vault `acme` as `invoice-header`. It's the page of round 1, question 1, option B, \"Tabs under the header\":\n\nhttp://127.0.0.1:7314/acme/invoice-header/\n\nThe vault synced, so teammates can open it from their own Outpost. The `invoice-screen` pad hasn't changed.\n\nTo take the page back, delete `<vault>/sites/invoice-header` and run `lore sync --vault acme`. The vault's git history will still have it.\n\nLine items are still open. Should option A (Table rows) be the one you build, given your \"maybe\"? If so, I can publish it as a separate reference page."
+}

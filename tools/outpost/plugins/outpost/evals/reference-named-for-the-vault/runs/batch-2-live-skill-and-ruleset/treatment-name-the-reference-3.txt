@@ -1,0 +1,27 @@
+I haven't published anything yet. Here's what's ready:
+
+**Publish round 1, question 1 ("Invoice header"), option B "Tabs under the header" as a page titled "Invoice screen: header" (site `invoice-screen-header`) to the team vault `acme`? Yes or no?**
+
+The page will show only that drawing, with the trade-off it lists (a slim header, with the totals moved to a tab) and today's date. Once it's published, anyone on the team who opens the `acme` vault can see it. The invoice-screen pad itself stays as it is and is not shared.
+
+If you say yes, I'll run this command and give you the link it prints:
+
+```
+python3 <run-28>/plugin/skills/scratch-pad/scratch_pad.py \
+  --pad invoice-screen --reference <run-28>/invoice-header-reference.json \
+  --vault-path <vault> --vault acme
+```
+
+The line items question isn't part of this page. You picked A (table rows) but added the note "maybe," so I'm treating it as still open. Is table rows settled, or do you want to look at it again? If it's settled, I can add it to the same page.
+
+--- turn 2 ---
+
+The page is up as `invoice-screen-header` in the `acme` vault, and it has synced, so the team can open it now:
+
+http://127.0.0.1:7314/acme/invoice-screen-header/
+
+It holds only round 1, "Invoice header", option B "Tabs under the header". Your invoice-screen pad hasn't changed.
+
+To take the page down, delete `<vault>/sites/invoice-screen-header` and run `lore sync --vault acme`. The vault's git history will still have it.
+
+One question is still open from before: is table rows (A) settled for the line items, or did your "maybe" mean you want to look at it again? If it's settled, I can publish it as a second page. The new page needs a name that isn't taken already, because this one can't be overwritten.

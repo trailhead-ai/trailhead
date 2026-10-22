@@ -1,0 +1,24 @@
+I've published header option B as a decision page in the team vault `acme`:
+
+**http://127.0.0.1:7314/acme/invoice-screen-header/**
+
+The page shows B as the layout we're building. The header holds just the invoice title and the **Send** button. A row of tabs (Details / Totals / History) sits under it, with the selected tab's content below. It also records the cost we're accepting: the totals move into a tab, so the amount due isn't always in view. A table lists the other two options, with A (totals up top) not chosen and C (shrinks on scroll) ruled out. The page is dated today and notes that the decision came from round 1 of the pad.
+
+The vault sync exited successfully, which is why the link was printed. But `lore sync` showed no output at all, so I can't confirm it actually reached the remote. If a teammate's copy doesn't load after they pull, check the sync on your side.
+
+The pad itself stays where it was, as local files on this machine. Pads don't go into the vault, so I made a separate page for the team.
+
+I put the line-items question under "Still open" on the page, not as decided. You picked table rows (A) but marked it "maybe". **Is table rows settled, or do you want to look at it again before we build?** If it's settled, I'll add it to the page as a second decision and republish.
+
+--- turn 2 ---
+
+The page in the `acme` vault now records both decisions, at the same link:
+
+**http://127.0.0.1:7314/acme/invoice-screen-header/**
+
+- **Header:** tabs under the header (B). Unchanged from before.
+- **Line items:** table rows (A), now a confirmed decision dated today. The page notes it was first marked "maybe" on the pad. It includes a sketch of the Item / Qty / Price table and states the cost we're accepting: narrow screens will need a second layout. Cards (B) is listed as not chosen.
+
+I renamed the page to "Invoice screen — layout decisions" since it now covers both questions. The web address still ends in `invoice-screen-header` because I kept it the same so the earlier link wouldn't break.
+
+As before, the sync exited successfully but printed nothing. So I can't confirm the update reached the remote, and teammates may need to pull to see it.

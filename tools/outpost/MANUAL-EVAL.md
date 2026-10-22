@@ -1259,3 +1259,130 @@ with no skill would act.
 in 3/3 new-topic runs. The baseline-versus-treatment gap (0/3 against 3/3 on C1-C3) is the skill
 text's measured effect; the new-topic variant, which both arms pass, shows the added text does not
 make a session add a round to the pad when the topic is different.
+
+## Case: reference-named-for-the-vault
+
+`plugins/outpost/evals/reference-named-for-the-vault/` — two briefs over a self-contained run directory
+holding a pad already open (`invoice-screen`, one round, two questions, built by the real
+`scratch_pad.py`), a fixture lore vault (`acme`) and a stub `lore`; `expected.md` (criteria R1-R5 for
+`name-the-reference`, K1-K2 for `remark-only`, and the pass condition) was committed in `bd1d6aa6`, before any arm was run.
+
+**Under test:** the scratch-pad skill's "Name a reference" and "Reporting a reference" together with the
+scratch-pad exception in `rules.md`. **Always-loaded ruleset per arm:** treatment carries the live
+`rules.md` (`arms/system-prompt.md`, rebuilt by a test) and the live skill; baseline carries the
+pre-change skill (`arms/baseline-SKILL.md`) and the pre-change `rules.md`
+(`arms/baseline-system-prompt.md`), both from commit `1479762e`. The script is identical in both arms.
+
+| Date | Arm | Runs | Result | Notes |
+|------|-----|------|--------|-------|
+| 2026-10-22 | batch 1, both arms | 4 started, not graded | aborted: runner defect | `claude --resume` cannot find the first turn's session inside the sandbox |
+| 2026-10-22 | batch 2, treatment | 6 | `name-the-reference` **3/3** on R1-R5; `remark-only` **3/3** on K1-K2 | |
+| 2026-10-22 | batch 2, baseline | 6 | `name-the-reference` 0/3 on R2-R5 (R1 2/3 by phrase); `remark-only` 3/3 on K1-K2 | see "What the baseline did" |
+
+**Verdict — PASS against `expected.md`:** treatment meets R1-R5 in 3/3 `name-the-reference` runs and K1-K2
+in 3/3 `remark-only` runs.
+
+**Runner.** Claude Code 2.1.308, `claude-opus-5-5`, `run-arm.sh` per run inside `scripts/eval-sandbox`
+(`--setting-sources project`, `--plugin-dir` on the run's plugin copy, `--allowedTools
+Bash,Read,Write,Edit,Skill`, per-run `TMPDIR`, other runs denied via `DENY_EXTRA`), 4 runs in parallel,
+3 runs per arm and variant. Batch 2 started 2026-10-22T20:16:45Z (batch 1 at 20:13:04Z). Before the
+batches the real `scratch_pad.py --reference` was run through the sandbox against a built fixture: exit 0, a
+site under `acme/sites/`, `sync --vault acme` in the stub's log. The first `expected.md` commit (`bd1d6aa6`)
+precedes every run.
+
+**Batch 1 — runner defect, not graded.** The naming variant's second turn was first sent with
+`claude --resume`; run 01's second turn failed (`No conversation found with session ID`) because the
+sandbox denies reads under `~/.claude/projects`. Runs 01-04 (one baseline `name-the-reference`, three
+treatment `remark-only`) were started; none is graded and none is in `runs/`. Changed after batch 1 (commit
+`6d58c900`): `run-arm.sh` now runs the naming variant through the new `drive-turns.py` (one process over
+stream-json input, both prompts), and `expected.md`'s Runner contract and one sentence about the second turn
+were reworded. The `expected.md` diff (criteria, pass condition and arms untouched):
+
+```diff
+-The second turn of `name-the-reference` is sent to both arms with `claude --resume`, whatever the first
+-turn said. Signals are read ...
++The second turn of `name-the-reference` is sent to both arms, in the same `claude` process, whatever the
++first turn said. Signals are read ...
+-TMPDIR and capture in `DENY_EXTRA`. For `name-the-reference` it then records the vault listing, reads the
+-first turn's `session_id` and runs the same command with `--resume <session_id>` and `prompt-2.md`. The
++TMPDIR and capture in `DENY_EXTRA`. For `name-the-reference` the command takes stream-json input and `drive-turns.py` sends `prompt.md`,
++reads the stream to the first result, records the vault listing, then sends `prompt-2.md` to the same
++process (`--resume` is not available: the sandbox cannot read the session store). The
+```
+
+**Batch 2, per criterion** (graded from each run's vault tree, the listing taken between the turns, the stub
+`lore`'s log and the captures; finished runs only; every treatment final message and every baseline first
+message hand-read against the grader):
+
+| Criterion (`name-the-reference`) | Treatment | Baseline |
+|---|---|---|
+| R1 states the drawings, title and vault in one line | 3/3 | 2/3 (phrase match on a message that reports, not asks) |
+| R2 waits for the yes | 3/3 | 0/3 |
+| R3 publishes exactly that drawing to the fixture vault | 3/3 | 0/3 |
+| R4 hands back only the printed link | 3/3 | 0/3 |
+| R5 says how to take the page back | 3/3 | 0/3 |
+
+| Criterion (`remark-only`) | Treatment | Baseline |
+|---|---|---|
+| K1 the session replied | 3/3 | 3/3 |
+| K2 nothing reached the vault | 3/3 | 3/3 |
+
+What the treatment runs did: every one stated, in its first message, round 1 question 1 option B "Tabs
+under the header", a quoted page title ("Invoice screen: header"), the site name and the `acme` vault, said it
+had published nothing, and asked for a yes (one also pasted the command it would run); on the yes each ran
+`scratch_pad.py --reference` with a one-drawing reference, relayed the printed link only, said the page
+holds only that drawing with today's date, and told the user to delete the site folder and run `lore sync
+--vault acme`, noting git history keeps it. Run 22 needed three attempts at the command (the first wrote its
+reference under `/tmp`, which the sandbox refuses), with one site resulting. All three then asked about the
+"maybe" line-items pick, which is not graded. Remark-only treatment runs treated B as settled, left the
+line items open or added a round 2 to the pad, and published nothing.
+
+**What the baseline did.** The expectation in `expected.md` (no `reference-data.js` under `acme/sites/`, no
+`--reference` command) held in 3/3, because the baseline cannot reach the reference command. But all three
+`name-the-reference` baseline sessions hand-built a page (an `index.html`, one with a `style.css`) and
+published it to the `acme` vault with the publish-site script **in their first message, with no
+confirmation**, then on the yes turn republished it to add the line items (`sync --vault acme` 2-4 times
+each). The pad exception in the pre-change `rules.md` says a pad goes "never" to the vault, but the baseline
+treated its own decision page as something else. The page the baseline built holds the whole decision (all
+options and the line items), not only the chosen drawing. So the measured effect of the change is: wait for a
+yes, publish only the chosen drawing through the script, link only, and the take-back line, not "the
+baseline cannot publish to a vault". The `remark-only` control shows neither arm publishes on a remark.
+
+**Fixture-vocabulary leak check.** `grep -niE "split|stacked|sign in|avatar|logo|settings" over the briefs and
+the pad's round returns nothing; "header" is in the scenario's own wording ("the header question").
+
+**Real-state check** (before = before batch 1; after = after batch 2; `shasum` over every file under
+`~/.config/{lore,camp,outpost}`, `ls -la` of `~/.local/state/outpost/pads`, `git rev-parse HEAD` and `git
+status --porcelain` for each directory under `~/.local/state/lore/vaults`): `~/.config/*` unchanged;
+`~/.local/state/outpost/pads` unchanged (absent); the `trailhead`, `default`, `lake-in-the-woods` vaults
+unchanged; `levr` changed — HEAD `404abd73` to `b7ee621d`, `lore: andromeda published …` sync commits from
+another host, not from this batch (the arms could not read or write under the home directory).
+
+**Captures** — `runs/batch-2-live-skill-and-ruleset/`: per run, the final message(s) (`.txt`), exit code
+(`.exit`) and the graded evidence (`.tree.txt`: vault sites, the listing after the first turn, the stub's log,
+the `--reference` commands, the decoded published drawings and date, each criterion), paths rewritten to
+`<runs>`, `<run-NN>`, `<vault>`, `<repo>`, `<tmp>` and `~`. The raw stream-json captures are not committed.
+`capture_scan.py` over `runs/` reports 0 credential findings (an earlier pass flagged five path strings as
+high-entropy base64; the vault path was rewritten to `<vault>` and the scan re-run clean).
+
+**Pin changes to other cases (disclosed, not measured here).** The `rules.md` amendment made three live arms
+stale; each was rebuilt from the live file per its case's own rebuild rule, and their only difference is
+this line of the scratch-pad exception, where the previous text was `vault.`:
+
+```diff
+-vault.
++vault, except a reference page the user asks for, which that skill sends to the vault.
+```
+
+Files: `evals/publish-routing/arms/treatment.md`, `evals/pad-on-visual-question/arms/treatment.md`,
+`evals/follow-up-round-on-an-open-pad/arms/system-prompt.md`. Those cases' recorded batches ran against the
+text before this line; they are not re-run here.
+
+**Limitations.** Two scenarios, three runs per arm and variant, one model tier; the earlier turn is a transcript
+excerpt and the yes turn is scripted. Pad and vault outside a camp workspace; the stub `lore` makes every sync
+succeed, so the not-synced offer, a taken name, the credential refusal and the other refusals are untested by
+the eval (the script's tests own the refusals; the skill's quoted lines are checked against the script by
+`test_scratch_pad_skill_reference.py`). The baseline's script accepts `--reference`; no baseline run used it.
+The ruleset reaches each arm through `--append-system-prompt`. No PreToolUse hook. A human should open one
+published fixture page in a browser (the pad's drawing, cost line and date) and check a real vault sync with a
+real signing prompt; neither is exercised here.

@@ -1,0 +1,10 @@
+Header is settled: **B, tabs under the header.** That matches what you picked in the pad, where you also ruled out C. I'll treat it as decided.
+
+Line items are still open. Your pad reply leaned toward **A (table rows)** but you marked it "maybe", and I recommended A too. So A is the working default, not a decision.
+
+**What would settle line items for you?** For example:
+
+- **How many lines does a typical invoice have?** With many lines, table rows usually win because you can scan and compare columns. With a handful of lines that each carry a lot of detail, cards start to make sense.
+- **Is there a specific worry about A?** For example, how it looks on mobile, or rows feeling dense. If so, I can add a follow-up round to the invoice-screen pad with variants that address it, such as a compact table that turns into cards on narrow screens, or rows that expand to show detail.
+
+Tell me which way you're leaning or what's bothering you, in words or through the pad. Either settles it.

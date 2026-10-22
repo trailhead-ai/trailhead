@@ -1,0 +1,25 @@
+I published header option B (tabs under the header) as a decision page in the team vault `acme`:
+
+**http://127.0.0.1:7314/acme/invoice-screen-header/**
+
+The publish script ran the vault sync, and it only prints this link when the sync succeeds, so it's live for anyone who syncs `acme`. The sync itself printed nothing, so there's no message confirming it was pushed to a remote.
+
+The page has a sketch of the layout: the title and Send on one row, with Details, Totals and History tabs below it. It also gives the trade-off you accepted (the amount due is no longer always in view), all three options with A not chosen and C ruled out, and a "Still open" note for line items.
+
+I didn't put the pad itself in the vault. Pads are scratch files that stay on this machine.
+
+One thing is still open: on line items you picked A (table rows), but your note said "maybe." Should I treat table rows as settled and add it to the team page, or are cards still in the running? You can answer here or paste a new reply from the pad.
+
+--- turn 2 ---
+
+Table rows is now settled for line items. I added it to the team page and republished it to the `acme` vault, replacing the earlier version:
+
+**http://127.0.0.1:7314/acme/invoice-screen-header/**
+
+The sync ran and succeeded, so teammates get the update when they sync `acme`. As before, it printed nothing, so there's no message confirming it was pushed to a remote.
+
+The page is now titled "Invoice screen: layout decisions" and has two sections:
+- **Header:** option B, tabs under the header (unchanged).
+- **Line items:** option A, table rows. It has a sketch with Item, Qty and Price columns and notes the trade-off you accepted: it's dense and easy to scan, but narrow screens will need a second layout. Cards is listed as not chosen.
+
+Both questions from round 1 are now settled.
