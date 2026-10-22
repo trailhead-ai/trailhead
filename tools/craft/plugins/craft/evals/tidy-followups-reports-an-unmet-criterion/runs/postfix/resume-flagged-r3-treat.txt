@@ -1,0 +1,31 @@
+Progress, as the resume reported it:
+
+removed from the list: task/lens-house-reject-negative-hours
+nested task/lens-oil-round-the-litres-to-one-decimal
+
+## Closing report
+
+I resumed the parent instead of creating one, so steps 8 to 12 didn't run: no refinement, drops, merges or new parent.
+
+- **Nested:** Lens oil: round the litres to one decimal (`lens-oil-round-the-litres-to-one-decimal`).
+- **Removed from the parent's list:** Lens house: reject negative hours (`lens-house-reject-negative-hours`). It's flagged as an unmet criterion, so it wasn't nested and is back among the spec's follow-ups.
+- **Failed writes:** none.
+- **Parent:** `task/build-the-follow-ups-of-fixture-lens-house-spec-chosen-2026-10-22` is now `ready` and buildable.
+
+unmet-criterion check: 1 flagged; 0 blocked not checked
+- Lens house: reject negative hours (`lens-house-reject-negative-hours`), against **AC2**: `lens_turns` has no check for negative hours, so it returns a negative count instead of raising the error the criterion requires.
+
+/craft:execute task/build-the-follow-ups-of-fixture-lens-house-spec-chosen-2026-10-22
+
+The ritual can't tell who created this parent. If you didn't, this command removes its marker label so the follow-up gather stops counting it, and leaves the record otherwise alone:
+
+lore record update task/build-the-follow-ups-of-fixture-lens-house-spec-chosen-2026-10-22 --vault default --unset-label craft/followup-parent
+
+No distill command is printed, because a follow-up is still flagged.
+
+**Options for the flagged follow-up:**
+- **Build the criterion as a new spec.** The spec's status is `complete`, so AC2 can't be reopened as a slice on this spec; start a new spec that covers it.
+- **Change the spec.** Amend it to remove or reword AC2.
+- **Clear the flag.** If AC2 isn't really unmet, re-run this ritual and answer `not unmet lens-house-reject-negative-hours`. A live parent remains, so wait until that parent has been built or dropped before re-running:
+
+/craft:tidy-followups spec/fixture-lens-house-spec

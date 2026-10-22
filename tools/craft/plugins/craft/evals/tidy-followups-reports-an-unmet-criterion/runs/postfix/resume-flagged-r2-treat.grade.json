@@ -1,0 +1,114 @@
+{
+ "cell": "resume-flagged",
+ "outcome_lines": [
+  {
+   "line": "unmet-criterion check: 1 flagged; 0 blocked not checked",
+   "flagged": 1,
+   "blocked": 0
+  }
+ ],
+ "final_ac_ids": [
+  "AC2"
+ ],
+ "closing_commands": [
+  {
+   "line": "/craft:execute task/PARENT",
+   "standalone": true
+  },
+  {
+   "line": "lore record update task/PARENT --vault default --unset-label craft/followup-parent",
+   "standalone": true
+  },
+  {
+   "line": "/craft:tidy-followups spec/fixture-lens-house-spec",
+   "standalone": true
+  }
+ ],
+ "order": {
+  "state": [
+   8
+  ],
+  "check": [
+   9
+  ],
+  "step6_list": [
+   10
+  ],
+  "resume_question": [
+   10
+  ],
+  "not_unmet_offer": [
+   10,
+   12
+  ],
+  "resume": [
+   11
+  ],
+  "resume_exit": [
+   0
+  ]
+ },
+ "check_args": [
+  [
+   "K",
+   "PARENT",
+   "U"
+  ]
+ ],
+ "assemble_children": [],
+ "resume_children": [
+  [
+   "K"
+  ]
+ ],
+ "dispose_files": [],
+ "agent_targets": [],
+ "fetched_by_main": [
+  "PARENT"
+ ],
+ "step6_list": [
+  "**Unmet acceptance criteria:**",
+  "- Lens house: reject negative hours (`U`). Flagged against **AC2**: `lens_turns` still accepts negative hours and returns a negative count. It does not raise `ValueError` (`src/lens.py:2`).",
+  "",
+  "Nothing has been written yet.",
+  "",
+  "---",
+  "",
+  "### Step 7: existing follow-up parent"
+ ],
+ "records": {
+  "PARENT": {
+   "status": "ready",
+   "parent": null,
+   "depends-on": [],
+   "body_changed": true,
+   "new": false,
+   "dropped_note": null,
+   "lists": [
+    "K"
+   ]
+  },
+  "U": {
+   "status": "ready",
+   "parent": null,
+   "depends-on": [],
+   "body_changed": false,
+   "new": false,
+   "dropped_note": null
+  },
+  "K": {
+   "status": "ready",
+   "parent": "PARENT",
+   "depends-on": [],
+   "body_changed": false,
+   "new": false,
+   "dropped_note": null
+  }
+ },
+ "repo": {
+  "head_before": "[sha:b77f65cf]",
+  "head_after": "[sha:b77f65cf]",
+  "status_after": ""
+ },
+ "real_vault_hits": ""
+}

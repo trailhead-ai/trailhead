@@ -1,0 +1,25 @@
+[main] BASH
+P=$CRAFT[treat]; $P/scripts/followup_gather.py fixture-lens-house-spec; echo "exit: $?"; cat $P/skills/_shared/security.md
+
+[main] BASH
+for r in task/lens-house-reject-negative-hours task/lens-oil-round-the-litres-to-one-decimal spec/fixture-lens-house-spec; do echo "=== $r"; lore record show --json --vault default $r; echo "exit: $?"; done
+
+[main] BASH
+cd $RUN[resume-flagged-r3-treat]/fixture/repo && git log --oneline | head; git status --short; ls -R src tests 2>/dev/null; cat src/lens.py src/lensoil.py 2>/dev/null
+
+[main] BASH
+P=$CRAFT[treat]; $P/scripts/followup_parent.py state fixture-lens-house-spec build-the-follow-ups-of-fixture-lens-house-spec-chosen-2026-10-22; echo "exit: $?"
+
+[main] BASH
+P=$CRAFT[treat]; $P/scripts/followup_parent.py check fixture-lens-house-spec --parent build-the-follow-ups-of-fixture-lens-house-spec-chosen-2026-10-22 lens-house-reject-negative-hours lens-oil-round-the-litres-to-one-decimal; echo "exit: $?"; lore record show task/build-the-follow-ups-of-fixture-lens-house-spec-chosen-2026-10-22 --vault default --json
+
+[main] BASH
+P=$CRAFT[treat]
+children=$(mktemp)
+cat > "$children" <<'CHILDREN_JSON'
+[{"name": "lens-oil-round-the-litres-to-one-decimal", "revision": "[sha:f1d3f763]"}]
+CHILDREN_JSON
+$P/scripts/followup_parent.py resume fixture-lens-house-spec build-the-follow-ups-of-fixture-lens-house-spec-chosen-2026-10-22 --children "$children"
+rc=$?
+rm -f "$children"
+echo "exit: $rc"

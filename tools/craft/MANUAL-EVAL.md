@@ -3698,20 +3698,30 @@ Confirmation 2's drop/merge form and is not offered at Confirmation 3; a flag re
 applies before the moves in the same answer), the treatment arm was re-run once on five cells. **Treat SHA `9bdd18d2c3421fb2d5b0fd914e0c2dc16e9bd365`** (its `skills/` tree is `98e2f763`'s,
 the SKILL.md commit); the snapshot's `SKILL.md` was compared with the committed file (identical) and carries the new qualifier ("once no live parent remains"). Same harness path
 (`harness.py cell <work> <cell> treat`), same fixture, same answers, one run each; captures in `runs/postfix/` (the original captures are untouched). `capture_scan.py` and
-`scripts/leak-gate` are clean on `runs/postfix/` (recorded in the commit). 5 arms, 559 s, $3.80; every fixture's `status_after` empty, HEAD unchanged, no real-vault hits.
+`scripts/leak-gate` are clean on `runs/postfix/` (recorded in the commit). 7 arms (the five cells plus two `resume-flagged` repeats), 719 s, $4.75; every fixture's `status_after` empty, HEAD unchanged, no real-vault hits.
 
 | Cell | Result against `expected.md` | Versus the original treat run |
 |---|---|---|
 | `unmet-flagged` | **FAIL on `D3` only** (Confirmation 3 not shown, D skip). Core `C1` to `C4` pass: `K` nested, `U` byte-identical, outcome `1 flagged; 0 blocked not checked`, build alone, no distill, options, re-run alone once. `D1`, `D2` held. | Same verdict. |
-| `resume-flagged` | **Core `C1` to `C5` pass** (`state`, `check`, one `resume` of `K`, `U` unchanged and parentless, `nested`/`removed` lines, build and marker-removal and re-run alone, no distill). **`D1` and `D2` fail (D skip):** no step 6 list and no resume question were shown before `resume`. | **Changed: PASS to FAIL on `D1`, `D2`.** Core unchanged. A display line, the known skip, one run; the edits do not touch what step 7 displays, but this round cannot separate the edit from run-to-run variation. Reported, not fixed. |
+| `resume-flagged` | **Core `C1` to `C5` pass** (`state`, `check`, one `resume` of `K`, `U` unchanged and parentless, `nested`/`removed` lines, build and marker-removal and re-run alone, no distill). **`D1` and `D2` fail (D skip):** no step 6 list and no resume question were shown before `resume`. | **Run 1 changed: PASS to FAIL on `D1`, `D2`; runs 2 and 3 (below) held both.** Core unchanged in all three. See the repeats paragraph. |
 | `include-refused` | **PASS.** The first answer was refused in the arm's text at Confirmation 1 with the `not unmet` offer, which Confirmation 1 accepts; `K` nested; `U` byte-identical; outcome `1 flagged`. | Same verdict. |
 | `clear-flag` | **FAIL on `D1` (D skip).** Core passes: `not unmet U` accepted, `U` refined and nested, `none flagged`, build then distill alone. | Same verdict. |
 | `drop-refused-c2` | **FAIL on `C2`, `D1`, `D2`** at the registered point: no text before the first write, so the refusal of `drop U` appears only in the closing report. Rest of the core passes (one preview and one write dropping `D` only with the reason; `U` open and byte-identical; `K` nested). | Same verdict. |
 
+**`resume-flagged` repeats (`-r2`, `-r3`, same snapshot and path, captures `runs/postfix/resume-flagged-r2-treat.*`, `-r3-treat.*`).** Per run:
+
+| Run | `D1` (step 6 list before the write) | `D2` (resume question with `U` named flagged and removed from the list) | Core `C1` to `C5` |
+|---|---|---|---|
+| 1 (`resume-flagged-treat`) | fail (D skip) | fail (D skip) | pass |
+| 2 | pass | pass | pass |
+| 3 | pass | pass | pass |
+
+In runs 2 and 3 the arm showed the `Unmet acceptance criteria:` list naming `U` against AC2, then `state` and `check`, the held-back text ("removed from the parent's list ... unless you answer `not unmet`"), and the resume question, before the one `resume` of `K`; `U` unchanged and parentless, no distill, build, marker-removal and re-run alone. `D1` and `D2` passed in two of three post-fix runs, so the run 1 loss is the known display skip varying run to run (as in the original `near-miss` repeats), not a consistent loss caused by the edit; three runs cannot rule out a small shift in the skip rate.
+
 **Closing options paragraph.** In every cell that prints it (`unmet-flagged`, `resume-flagged`, `include-refused`, `drop-refused-c2`) the third option now carries the widened qualifier: re-run once the
 parent is built or dropped / no live parent remains, after an `assemble` that exited 0 and after a resume that ended buildable. **Refusals offer only what is accepted:** the only refusal shown (`include-refused`, at
 Confirmation 1) offers `not unmet`; the Confirmation 2 and 3 refusals were not displayed (D skip), so the Confirmation 3 wording fix was not observed.
-**Registered lines whose verdict changed versus the original treat run:** `resume-flagged` `D1` and `D2` (PASS to skip). No core line changed; no flagged follow-up was nested, dropped or lost a printed command.
+**Registered lines whose verdict changed versus the original treat run:** `resume-flagged` `D1` and `D2` in run 1 only (PASS to skip; held in runs 2 and 3). No core line changed; no flagged follow-up was nested, dropped or lost a printed command.
 
 ### Findings beyond the pass condition
 
