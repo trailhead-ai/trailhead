@@ -639,3 +639,119 @@ def test_every_credential_match_is_named_in_one_pass(mod, rig, tmp_path):
     lines = _refusal(mod, rig, tmp_path, {**_ref([_d(1, 1, "A")]), "title": PEM})
 
     assert [line.split(":")[1].strip().split(" ")[0] for line in lines] == ["title", "drawings[0]", "drawings[0]"]
+
+
+# --- a chosen drawing the page cannot be built from -------------------------------------------------
+
+
+def _hand_edit_option(pad_dir: Path, rnd: int, q: int, letter: str, option):
+    """Replace one option in a round's round.js, as a hand edit would, keeping the file's other lines."""
+    js = pad_dir / f"round-{rnd}" / "round.js"
+    lines = js.read_text(encoding="utf-8").splitlines(keepends=True)
+    prefix = "window.PAD_ROUND = JSON.parse("
+    data = json.loads(json.loads(lines[0][len(prefix) : -3]))
+    data["questions"][q - 1]["options"][ord(letter) - ord("A")] = option
+    lines[0] = prefix + json.dumps(json.dumps(data)) + ");\n"
+    js.write_text("".join(lines), encoding="utf-8")
+
+
+WHERE = "scratch-pad: drawings[0] (round 1, question 1, option A)"
+NO_SHAPE = 'no "layout" or "flow" — give it either a layout or a flow'
+MALFORMED = [
+    pytest.param({"name": "n", "cost": "c"}, [f"{WHERE}: {NO_SHAPE}"], id="no-shape"),
+    pytest.param(
+        {},
+        [
+            f'{WHERE}: no "name" — every option has a name',
+            f'{WHERE}: no "cost" — every option states what it costs',
+            f"{WHERE}: {NO_SHAPE}",
+        ],
+        id="empty-object",
+    ),
+    pytest.param(
+        {"cost": "c", "layout": {}}, [f'{WHERE}: no "name" — every option has a name'], id="missing-name"
+    ),
+    pytest.param(
+        {"name": "n", "layout": {}}, [f'{WHERE}: no "cost" — every option states what it costs'], id="missing-cost"
+    ),
+    pytest.param({"name": 7, "cost": "c", "layout": {}}, [f"{WHERE}.name: must be a string"], id="name-not-a-string"),
+    pytest.param(
+        {"name": "n", "cost": None, "layout": {}}, [f"{WHERE}.cost: must be a string"], id="cost-not-a-string"
+    ),
+    pytest.param(
+        {"name": "n", "cost": "c", "flow": ["(A) -> [B]"]}, [f"{WHERE}.flow: must be a string"], id="flow-a-list"
+    ),
+]
+
+
+@pytest.mark.parametrize("option, expected", MALFORMED)
+def test_a_chosen_option_the_page_cannot_be_built_from_is_refused_naming_the_drawing_and_the_fault(
+    mod, rig, tmp_path, option, expected
+):
+    pad_dir = _build(mod, rig, tmp_path)
+    _hand_edit_option(pad_dir, 1, 1, "A", option)
+
+    lines = _untouched(rig, tmp_path, lambda: _refusal(mod, rig, tmp_path, _ref([_d(1, 1, "A")])))
+
+    assert lines == expected
+
+
+def test_the_same_pad_with_a_valid_chosen_option_reads_back_and_the_page_builds_from_it(mod, rig, tmp_path):
+    pad_dir = _build(mod, rig, tmp_path)
+    _hand_edit_option(pad_dir, 1, 1, "A", {"name": "n", "cost": "c", "layout": {"rule": True}})
+
+    got = _read(mod, rig, tmp_path, _ref([_d(1, 1, "A")]))
+    out = tmp_path / "page"
+    mod.build_reference_page(out, got)
+
+    assert got.drawings[0].option["name"] == "n"
+    literal = (out / "reference-data.js").read_text(encoding="utf-8").split("JSON.parse(", 1)[1].rsplit(");", 1)[0]
+    (page_drawing,) = json.loads(json.loads(literal))["drawings"]
+    assert (page_drawing["name"], page_drawing["cost"], page_drawing["layout"]) == ("n", "c", {"rule": True})
+
+
+@pytest.mark.parametrize("layout", [None, "x"])
+def test_a_layout_the_add_path_accepts_is_accepted_by_the_reference_too(mod, rig, tmp_path, layout):
+    pad_dir = _build(mod, rig, tmp_path)
+    option = {"name": "n", "cost": "c", "layout": layout}
+    _hand_edit_option(pad_dir, 1, 1, "A", option)
+    round_data = {"title": "T", "questions": [{"prompt": "P", "options": [{**option, "pick": True}]}]}
+    assert mod.check_round(round_data) == []
+
+    got = _read(mod, rig, tmp_path, _ref([_d(1, 1, "A")]))
+    mod.build_reference_page(tmp_path / "page", got)
+
+    assert got.drawings[0].option["layout"] == layout
+
+
+def test_a_malformed_option_the_reference_does_not_name_does_not_refuse_it(mod, rig, tmp_path):
+    pad_dir = _build(mod, rig, tmp_path)
+    _hand_edit_option(pad_dir, 1, 1, "B", {})
+
+    got = _read(mod, rig, tmp_path, _ref([_d(1, 1, "A"), _d(2, 1, "A")]))
+
+    assert [d.option["name"] for d in got.drawings] == ["Logo left", "Retry in place"]
+
+
+def test_two_malformed_chosen_drawings_are_both_reported_in_one_pass(mod, rig, tmp_path):
+    pad_dir = _build(mod, rig, tmp_path)
+    _hand_edit_option(pad_dir, 1, 1, "A", {"name": "n", "cost": "c"})
+    _hand_edit_option(pad_dir, 2, 1, "C", {"name": 7, "cost": "c", "flow": "(A) -> [B]"})
+
+    lines = _refusal(mod, rig, tmp_path, _ref([_d(1, 1, "A"), _d(2, 1, "B"), _d(2, 1, "C")]))
+
+    assert lines == [
+        f"{WHERE}: {NO_SHAPE}",
+        "scratch-pad: drawings[2] (round 2, question 1, option C).name: must be a string",
+    ]
+
+
+def test_a_malformed_chosen_drawing_is_refused_for_its_shape_before_its_text_is_checked_for_credentials(
+    mod, rig, tmp_path
+):
+    pad_dir = _build(mod, rig, tmp_path)
+    _hand_edit_option(pad_dir, 1, 1, "A", {"name": KEYLIKE, "cost": "c"})
+
+    lines = _refusal(mod, rig, tmp_path, _ref([_d(1, 1, "A")]))
+
+    assert lines == [f"{WHERE}: {NO_SHAPE}"]

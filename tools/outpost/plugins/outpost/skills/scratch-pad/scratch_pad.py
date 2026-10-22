@@ -1130,6 +1130,11 @@ def _resolve_drawings(drawings: Sequence[dict], titles: Sequence[str], rounds: M
             )
             continue
         seen[key] = i
+        option_problems: list[str] = []
+        _check_option(options[index], f"{where} (round {number}, question {qn}, option {letter})", option_problems)
+        if option_problems:
+            problems.extend(option_problems)
+            continue
         chosen.append(
             ChosenDrawing(number, qn, letter, titles[number - 1], questions[qn - 1]["prompt"], options[index])
         )
