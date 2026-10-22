@@ -1638,7 +1638,7 @@ the commits just before it (`<live-vault-commit>`, `<live-vault-commit>`, `<live
 that single `andromeda` commit among them. The transcript contains no reference to the live
 vault path (0 hits for `local/state/lore` and `vaults/trailhead`) and the sandbox denies writes outside the run directory.
 **Ruling (controller, 2026-10-22):** the run stands. `andromeda` is a different machine; the run was on host
-`<this-host>`, whose own publishes are named `<this-host>` in the same log. The move is that machine's publish arriving
+`<this-host>`, whose own publishes carry that host's name in the same log. The move is that machine's publish arriving
 through sync, not a write by the session under test, which is what the HEAD check exists to catch. The close-out run's check
 therefore reads every commit in the window and fails only on a commit published from this host.
 
@@ -1776,7 +1776,8 @@ home path was replaced by `$HOME` (the placeholder convention). `capture_scan.py
 `present` with `left-correct` `correct`), and the statement names its criteria as own text with the number after it
 (`text-with-number`); step 9 held. Two things sit outside that verdict and are the operator's to weigh: the fence's HEAD
 rule tripped on a commit stamped after the session (above), and the step 7 reasoning paragraph before the statement
-carries one nickname of an uncovered criterion, which the registered guard does not read.
+names uncovered criteria by nickname (the phrases quoted under the criterion mentions above), which the registered
+guard does not read.
 
 **Ruling (controller, 2026-10-22):** go stands on both. The fence item is ruled above. The step 7 nicknames are not
 caused by commit P: the base-B real run's step 7 reasoning names uncovered criteria the same way ("the weekly report
@@ -1864,6 +1865,30 @@ which part, and the arm and the real run each differ from the baseline in the wh
 ### End state taken
 
 - AC29, AC30 and AC31 each close as unmeasured, pending the operator naming them at slice close. Nothing here closes them.
-- The real run on the branch: go, with the HEAD-rule item above reported for the operator's ruling.
+- The real run on the branch: go. The HEAD-rule item and the step 7 nicknames were both ruled by the controller (above).
 - No arm, fixture, earlier table row, `rules.md`, `slice/SKILL.md` or `drive/SKILL.md` was changed. Not run: any eval arm
   or batch, and any second real session.
+
+### Amendments at slice close, 2026-10-22
+
+Recorded after the whole-change review; no capture, table row or verdict above changes.
+
+- **Where the `proposal-drive` stub sits.** The site table says the driver is stubbed "after its single-repo check". In
+  `drive/SKILL.md` slice choice's step 8 runs inside drive step 4, before drive step 5's single-repo check, so the stub
+  stages a point the driver reaches in a different order: it tells the session the check already passed. The plan
+  recorded this when the pilots ran; it is recorded here too.
+- **The real-run fence rule, as applied.** The recipe above says to fail the task if the live vault's HEAD moved. Both
+  real runs applied this instead, and a later real run should use it: record the live HEAD before the session and again
+  the moment the session exits; fail only on a commit landing in that window that was published from the host running
+  the session. A commit published from another host is a sync arriving; it is recorded, not a failure. A read taken
+  minutes after the exit, as both runs also did, cannot tell another session on the same host from the session under
+  test.
+- **Two more unmeasured surfaces.** (6) The driver's own report after the parent is written (`drive/SKILL.md` step 6,
+  "Report the chosen slice, its value claim, and the parent task id"), which commit P does not edit. (7) A criterion
+  the chosen slice newly covers only in part: step 8 names as exceptions only the criteria in step 4's `partial:` token,
+  so such a criterion is counted as left but not named as an exception. No fixture reaches that case.
+- **A sentence the plan specified and commit P does not carry.** The plan's commit P item says the statement's opening
+  is what the operator gains and the value claim is why this slice is next. Step 8 as shipped (`57da08ac`) does not say
+  so, and in `proposal-treated-1` and `proposal-treated-3` the value claim restates the opening. Every result above was
+  measured on step 8 without that sentence. The operator chose on 2026-10-22 to ship it as measured; adding the sentence
+  is a follow-up, measured as its own change.
