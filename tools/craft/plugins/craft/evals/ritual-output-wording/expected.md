@@ -1591,8 +1591,9 @@ the shared `trailhead/` library the CLI imports), with `LORE_CONFIG_DIR`, `LORE_
 ### Result (one session, `proposal-realrun-baseline`; run1, no attempt discarded)
 
 Staged and run once, in the foreground, under `scripts/eval-sandbox` (macOS), Claude Code 2.1.308, exit 0, empty stderr.
-Captures: `runs/proposal-realrun-baseline.txt` (rendered transcript), `.cmd.txt` (the invocation and the prompt),
-`.parent.txt` (the written parent read back from the isolated vault), `.exit`.
+Real-run captures are `.md`, like `pw-realrun-*`, so the numbered-capture grading in `test_wording_grader.py` (which reads
+`runs/*.txt`) does not take them for a batch run; the credential scan reads every file. Captures: `runs/proposal-realrun-baseline.md` (rendered transcript), `.cmd.md` (the invocation and the prompt),
+`.parent.md` (the written parent read back from the isolated vault), `.exit`.
 
 **Unknown resolved.** The slice gates and `lore record criteria` work in isolation at B: `ledger_gate.py` exited 0 with
 `parent-cross-check: checked`, `lore record criteria` exited 0 with the ten declared criteria, `candidate_set.py` exited 0 with
@@ -1657,7 +1658,7 @@ it adds no row to any tally.
 
 **Snapshot.** `git archive` of branch HEAD `a8318a0c` (craft plugin tree without `evals/`, lore plugin tree with its `lore`
 CLI, the shared `trailhead/` library), in place of `437bbe8e`. The invocation and prompt are those of
-`runs/proposal-realrun-baseline.cmd.txt`, unchanged. The treated step 8 (commit P) is in this snapshot's
+`runs/proposal-realrun-baseline.cmd.md`, unchanged. The treated step 8 (commit P) is in this snapshot's
 `slice/SKILL.md`. Seeding is as at base B: spec `spec/holds-and-pickup` (status `ready`, with its `## Slices` ledger) and a
 `done` parent `task/the-first-hold-slice` (label `craft/slice-parent`, `**Covers:** AC1, AC3`, `**Partially covers:** AC2`).
 Fence before the run: live `lore vault ls` lists `default`, `trailhead`, `lake-in-the-woods`, `levr`; inside the fenced
@@ -1697,8 +1698,8 @@ of three left (AC9, AC10). Seven criteria in all.
 ### Result (one session, `proposal-realrun-treated`; run1, no attempt discarded)
 
 Staged and run once, in the foreground, under `scripts/eval-sandbox` (macOS), Claude Code 2.1.308, exit 0, empty stderr.
-Session window 13:32:08 to 13:33:33 -0500. Captures: `runs/proposal-realrun-treated.txt` (rendered transcript), `.cmd.txt`
-(the invocation and prompt, byte-identical to `proposal-realrun-baseline.cmd.txt`), `.parent.txt` (the written parent read
+Session window 13:32:08 to 13:33:33 -0500. Captures: `runs/proposal-realrun-treated.md` (rendered transcript), `.cmd.md`
+(the invocation and prompt, byte-identical to `proposal-realrun-baseline.cmd.md`), `.parent.md` (the written parent read
 back from the isolated vault, revision line dropped), `.exit`. Staging notes beyond base B: the fenced `PATH` needs a
 `python3` that parses `X | None` annotations, because `/usr/bin/python3` is 3.9 and the `lore` CLI fails on it; the run
 directory's `bin/` carried `lore` and a `python3` symlink to the Homebrew interpreter, and the snapshot is the branch tree at
@@ -1779,7 +1780,7 @@ carries one nickname of an uncovered criterion, which the registered guard does 
 
 **Ruling (controller, 2026-10-22):** go stands on both. The fence item is ruled above. The step 7 nicknames are not
 caused by commit P: the base-B real run's step 7 reasoning names uncovered criteria the same way ("the weekly report
-(AC10)", the "item is waiting" message (AC6), `runs/proposal-realrun-baseline.txt:339-342`), and commit P edits step 8
+(AC10)", the "item is waiting" message (AC6), `runs/proposal-realrun-baseline.md:339-342`), and commit P edits step 8
 only. They are recorded as a follow-up against step 7, outside this slice.
 
 ### Results at slice close, 2026-10-22
