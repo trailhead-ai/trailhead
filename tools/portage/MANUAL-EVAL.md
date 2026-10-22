@@ -306,6 +306,32 @@ build the runner's sandbox cannot write under a temp directory whose path includ
 inside the runner is not known; only the correlation is measured. The gate's base directory name needs to
 change. Until it does, the gate's default path on this host skips every case.
 
+### Live gate check (AC38) on 2.1.308 after the short temp path (`2a6305b2`), 2026-10-22 — passed
+
+Controller probes first, shipped canary, runner 2.1.308, one run per point, only `TMPDIR` varied. A
+`TMPDIR` outside `/tmp` passes at 51 characters and fails at 52, 53, 54, 55 and 62, whatever the
+component names. `TMPDIR=/tmp` also fails. The earlier "`eval-gate-tmp` component" correlation was
+this length limit: that path was about 60 characters. The gate now uses `<cache>/pegt/<8 random>`,
+about 36 characters here, and refuses a per-call path over 51 characters before starting any
+runner.
+
+Same setup as before: a throwaway clone at `2a6305b2` with one synthetic commit inside
+`track-unknown-fix-phrased-as-fix-it-now`'s own directory, and the real `portage eval-gate` CLI
+under `env -i` with only PATH (including `~/.local/bin`, `claude` 2.1.308) and HOME. No API key and
+no `PORTAGE_EVAL_RUNNER`.
+
+| | (a) default cache | (b) `XDG_CACHE_HOME` = a fresh dir under `/tmp` |
+|---|---|---|
+| `plan` | `cases-selected`, 1 case, `max_cost_usd: 1.5` | the same |
+| canary | pass | fail |
+| case | 3 of 3 at 1.0, 37 s, $0.644 | runner never started |
+| `verdict` | exit 0, `eval-gate: passed`, `persistent: none` | exit 0, `eval-gate: not-run`, `persistent: runner-sandbox-unwritable` |
+
+The default path now scores cases on the current runner, and a runner that cannot write is
+reported, not scored. The `runner-sandbox-unwritable` gloss still names only `PORTAGE_EVAL_RUNNER`
+as the remedy; on this host a short `XDG_CACHE_HOME` outside `/tmp` is the relevant knob (logged
+as a follow-up).
+
 ### Limitations
 
 - The live gate check (AC38) and every run here were on Linux only; nothing was checked on macOS. The runner's
@@ -325,5 +351,5 @@ change. Until it does, the gate's default path on this host skips every case.
 - The sandbox forbids redirection, so the splice path was exercised through `pr_body_file`, a file the stand-in
   provides; the path that saves a body with a shell redirect is not exercised by any case.
 - The kept-state cleanup (`rm -rf`) is denied in the sandbox and is not exercised.
-- Runner 2.1.303 on this host; other builds were not measured except the canary on 2.1.306.
+- Runners 2.1.303 (pinned, since pruned by the Claude updater) and 2.1.308 on this host; the canary was also run on 2.1.306 and 2.1.307.
 
