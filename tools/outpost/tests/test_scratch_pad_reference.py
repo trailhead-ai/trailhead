@@ -850,3 +850,507 @@ def test_an_add_to_a_pad_holding_a_non_finite_option_still_builds_and_the_fixed_
     drawings = json.loads(json.loads(literal))["drawings"]
     assert drawings[0]["layout"] == {"w": 1.5}
     assert drawings[1]["name"] == "Logo centre"
+
+
+# --- publishing the reference to the vault ------------------------------------------------------------
+
+import subprocess  # noqa: E402
+import sys  # noqa: E402
+import tempfile  # noqa: E402
+
+import chromium_harness as ch  # noqa: E402
+
+PUBLISHER = SCRIPT_PATH.parent.parent / "publish-site" / "publish_site.py"
+SERVED_SITES_PORT = 7314
+REF = _ref([_d(2, 1, "A"), _d(1, 2, "B")])
+
+
+def _stub_lore(bin_dir: Path, record: Path, *, exit_code=0, out="", err="", hold: Path | None = None):
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    lines = ["#!/bin/sh", f'echo "$@" >> "{record}"']
+    if out:
+        lines.append(f'echo "{out}"')
+    if err:
+        lines.append(f'echo "{err}" >&2')
+    if hold is not None:
+        lines.append(f'n=0; while [ ! -e "{hold}" ] && [ $n -lt 600 ]; do sleep 0.05; n=$((n+1)); done')
+    lines.append(f"exit {exit_code}")
+    stub = bin_dir / "lore"
+    stub.write_text("\n".join(lines) + "\n")
+    stub.chmod(0o755)
+
+
+class Vault:
+    def __init__(self, tmp_path, rig, name="acme"):
+        self.env, self.work, self.state, self.kit = rig
+        self.tmp = tmp_path
+        self.bin = tmp_path / "bin"
+        self.record = tmp_path / "lore-argv.txt"
+        self.scratch = tmp_path / "scratch-tmp"
+        self.scratch.mkdir()
+        self.name = name
+        self.path = tmp_path / "xdg" / "lore" / "vaults" / name
+        self.path.mkdir(parents=True)
+        self.env = {
+            **self.env,
+            "PATH": f"{self.bin}:/usr/bin:/bin",
+            "TMPDIR": str(self.scratch),
+        }
+        _stub_lore(self.bin, self.record)
+
+    def ref_file(self, ref=REF):
+        return _write_json(self.tmp / "ref.json", ref)
+
+    def argv(self, ref=REF, *, vault=True, vault_path=None):
+        out = ["--pad", "p", "--reference", str(self.ref_file(ref)), "--vault-path", str(vault_path or self.path)]
+        return out + (["--vault", self.name] if vault else [])
+
+    def sites(self, site="header-and-sign-in"):
+        return self.path / "sites" / site
+
+    def lore_calls(self):
+        return self.record.read_text().splitlines() if self.record.exists() else []
+
+
+@pytest.fixture
+def vault(mod, rig, tmp_path, monkeypatch):
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path / "scratch-tmp"))
+    v = Vault(tmp_path, rig)
+    _build(mod, rig, tmp_path)
+    return v
+
+
+def _run_main(mod, vault, argv=None, **kw):
+    return mod.main(argv or vault.argv(), env=vault.env, cwd=vault.work, **kw)
+
+
+def _link(vault, site="header-and-sign-in"):
+    return f"http://127.0.0.1:{SERVED_SITES_PORT}/{vault.name}/{site}/"
+
+
+def test_a_reference_run_publishes_the_page_and_syncs_that_vault_and_prints_the_link_last(mod, vault, capfd):
+    assert _run_main(mod, vault) == 0
+
+    out = capfd.readouterr().out.splitlines()
+    assert (vault.sites() / "index.html").is_file()
+    data = (vault.sites() / "reference-data.js").read_text(encoding="utf-8")
+    assert "Retry in place" in data and "Controls stacked" in data
+    assert vault.lore_calls() == ["sync --vault acme"]
+    assert out[-1] == _link(vault)
+
+
+def test_a_reference_run_with_no_vault_name_syncs_bare(mod, vault, capfd):
+    assert _run_main(mod, vault, vault.argv(vault=False)) == 0
+
+    assert vault.lore_calls() == ["sync"]
+    assert capfd.readouterr().out.splitlines()[-1] == _link(vault)
+
+
+def test_the_published_reference_opens_from_the_vault_folder_and_draws(mod, rig, vault, tmp_path):
+    env, work, _state, kit = rig
+    drawable = {
+        "title": "Drawn",
+        "questions": [
+            {
+                "prompt": "Where?",
+                "options": [
+                    _opt("Boxy", pick=True, layout={"box": [{"text": "Alpha"}, {"button": "Go"}]}),
+                    _opt("Other"),
+                ],
+            }
+        ],
+    }
+    mod.build_pad(_write_json(tmp_path / "d.json", drawable), "d", kit_dir=kit, env=env, cwd=work)
+    argv = vault.argv(_ref([_d(1, 1, "A")], site="drawn"))
+    argv[1] = "d"
+
+    assert _run_main(mod, vault, argv) == 0
+
+    got = ch.run_probe(
+        vault.sites("drawn"),
+        "await new Promise((r) => setTimeout(r, 200));"
+        " return {cards: document.querySelectorAll('.ref-card').length,"
+        " strokes: document.querySelectorAll('svg.pad-ink path').length};",
+    )
+    assert got["cards"] == 1
+    assert got["strokes"] > 0
+
+
+def test_one_line_says_it_is_publishing_to_the_vault_and_the_sync_can_wait_before_the_link(mod, vault, capfd):
+    assert _run_main(mod, vault) == 0
+
+    out = capfd.readouterr().out.splitlines()
+    assert out[0] == mod.PUBLISHING_LINE
+    assert out.count(mod.PUBLISHING_LINE) == 1
+    assert "vault" in mod.PUBLISHING_LINE and "lock" in mod.PUBLISHING_LINE and "signing" in mod.PUBLISHING_LINE
+
+
+def test_a_reference_from_a_workspace_member_reads_the_workspace_pad_and_writes_nothing_else_there(
+    mod, rig, vault, tmp_path, capfd
+):
+    env = vault.env
+    ws = Path(env["CAMP_STATE_DIR"]) / "grp" / "worktrees" / "ws"
+    member = ws / "repo"
+    member.mkdir(parents=True)
+    env["CAMP_CONFIG_DIR"] = str(tmp_path / "camp-config")
+    shutil.rmtree(vault.state / "pads" / "p")
+    first = _write_json(tmp_path / "r0.json", ROUND_ONE)
+    assert mod.main(["--pad", "p", "--round", str(first)], env=env, cwd=member) == 0
+    assert mod.main(
+        ["--pad", "p", "--round", str(_write_json(tmp_path / "r1.json", ROUND_TWO)), "--add"], env=env, cwd=member
+    ) == 0
+    capfd.readouterr()
+    before = _snapshot(ws.resolve() / "sites")
+
+    assert mod.main(vault.argv(), env=env, cwd=member) == 0
+
+    assert (vault.sites() / "index.html").is_file()
+    assert _snapshot(ws.resolve() / "sites") == before
+    assert list((ws.resolve() / "sites").iterdir()) == [ws.resolve() / "sites" / "p"]
+    assert capfd.readouterr().out.splitlines()[-1] == _link(vault)
+
+
+def _no_runner(*_a):
+    pytest.fail("the publisher ran")
+
+
+def test_a_site_name_already_in_the_vault_is_refused_before_the_publisher_runs(mod, vault, capsys):
+    vault.sites().mkdir(parents=True)
+    (vault.sites() / "mine.txt").write_text("keep")
+
+    assert _run_main(mod, vault, publish_runner=_no_runner) == 1
+
+    err = capsys.readouterr().err.splitlines()
+    assert err == [mod._line('site "header-and-sign-in"', "already exists in the vault — choose another site name")]
+    assert (vault.sites() / "mine.txt").read_text() == "keep"
+    assert vault.lore_calls() == []
+
+
+def test_a_dangling_symlink_at_the_site_name_counts_as_taken(mod, vault, capsys):
+    (vault.path / "sites").mkdir()
+    vault.sites().symlink_to(vault.path / "nowhere")
+
+    assert _run_main(mod, vault, publish_runner=_no_runner) == 1
+
+    assert "already exists in the vault" in capsys.readouterr().err
+
+
+def test_a_different_site_name_publishes_while_the_taken_one_stays(mod, vault, capfd):
+    vault.sites().mkdir(parents=True)
+    (vault.sites() / "mine.txt").write_text("keep")
+
+    assert _run_main(mod, vault, vault.argv(_ref([_d(1, 1, "A")], site="another-name"))) == 0
+
+    assert (vault.sites("another-name") / "index.html").is_file()
+    assert (vault.sites() / "mine.txt").read_text() == "keep"
+    assert capfd.readouterr().out.splitlines()[-1] == _link(vault, "another-name")
+
+
+def _failing_sync(vault):
+    _stub_lore(vault.bin, vault.record, exit_code=1, err="remote said no")
+
+
+def test_a_failed_sync_exits_non_zero_and_relays_the_not_synced_lines(mod, vault, capfd):
+    _failing_sync(vault)
+
+    assert _run_main(mod, vault) == 1
+
+    err = capfd.readouterr().err.splitlines()
+    assert "scratch-pad: publish: remote said no" in err
+    not_synced = "published locally but NOT synced \\u2014 `lore sync` exited 1 (its output is above)."
+    assert f"scratch-pad: publish: error: {not_synced}" in err
+    assert all(line.startswith("scratch-pad: publish: ") for line in err)
+
+
+def test_a_failed_sync_prints_no_link(mod, vault, capfd):
+    _failing_sync(vault)
+
+    _run_main(mod, vault)
+
+    assert "http://" not in capfd.readouterr().out
+
+
+def test_a_failed_sync_leaves_the_page_in_the_vault(mod, vault):
+    _failing_sync(vault)
+
+    _run_main(mod, vault)
+
+    assert (vault.sites() / "index.html").is_file()
+
+
+def test_after_a_failed_sync_the_same_site_is_refused_as_taken(mod, vault, capsys):
+    _failing_sync(vault)
+    _run_main(mod, vault)
+    capsys.readouterr()
+
+    assert _run_main(mod, vault, publish_runner=_no_runner) == 1
+
+    assert "already exists in the vault" in capsys.readouterr().err
+
+
+def test_after_the_site_folder_is_removed_the_same_rerun_publishes(mod, vault, capfd):
+    _failing_sync(vault)
+    _run_main(mod, vault)
+    shutil.rmtree(vault.sites())
+    _stub_lore(vault.bin, vault.record)
+    capfd.readouterr()
+
+    assert _run_main(mod, vault) == 0
+
+    assert capfd.readouterr().out.splitlines()[-1] == _link(vault)
+    assert (vault.sites() / "index.html").is_file()
+
+
+def _start_cli(vault, argv):
+    import queue
+    import threading
+
+    proc = subprocess.Popen(
+        [sys.executable, str(SCRIPT_PATH), *argv],
+        env=vault.env,
+        cwd=vault.work,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    lines: queue.Queue = queue.Queue()
+
+    def pump():
+        for line in proc.stdout:
+            lines.put(line.rstrip("\n"))
+        lines.put(None)
+
+    threading.Thread(target=pump, daemon=True).start()
+    return proc, lines
+
+
+def _next_line(lines, seconds=20):
+    import queue
+
+    try:
+        return lines.get(timeout=seconds)
+    except queue.Empty:
+        pytest.fail("no output line arrived in time")
+
+
+def test_the_wait_line_and_the_syncs_own_line_are_readable_before_the_run_exits_and_an_add_completes_meanwhile(
+    mod, vault, tmp_path
+):
+    release = tmp_path / "release"
+    _stub_lore(vault.bin, vault.record, out="signing in to the remote", hold=release)
+    proc, lines = _start_cli(vault, vault.argv())
+    try:
+        assert _next_line(lines) == mod.PUBLISHING_LINE
+        assert _next_line(lines) == "signing in to the remote"
+        assert proc.poll() is None
+
+        add = _write_json(tmp_path / "r3.json", {**ROUND_TWO, "title": "Third round"})
+        argv = ["--pad", "p", "--round", str(add), "--add"]
+        assert mod.main(argv, env=vault.env, cwd=vault.work, publish_timeout=1) == 0
+        assert proc.poll() is None
+
+        release.write_text("go")
+        assert _next_line(lines) == _link(vault)
+        assert proc.wait(timeout=20) == 0
+    finally:
+        release.write_text("go")
+        if proc.poll() is None:
+            proc.kill()
+        proc.wait()
+        proc.stdout.close()
+        proc.stderr.close()
+
+
+def test_a_publish_that_waits_longer_than_the_publish_timeout_is_not_killed(mod, vault, tmp_path, capfd):
+    release = tmp_path / "release"
+    _stub_lore(vault.bin, vault.record, hold=release)
+    import threading
+
+    timer = threading.Timer(1.0, lambda: release.write_text("go"))
+    timer.start()
+    try:
+        assert _run_main(mod, vault, publish_timeout=0.2) == 0
+    finally:
+        release.write_text("go")
+        timer.cancel()
+
+    assert capfd.readouterr().out.splitlines()[-1] == _link(vault)
+
+
+def test_a_publisher_refusal_is_relayed_and_nothing_is_left_in_the_vault(mod, vault, tmp_path, capsys):
+    elsewhere = tmp_path / "not-under-the-vaults-root"
+    elsewhere.mkdir()
+
+    assert _run_main(mod, vault, vault.argv(vault_path=elsewhere)) == 1
+
+    err = capsys.readouterr().err.splitlines()
+    assert err and all(line.startswith("scratch-pad: publish: error: ") for line in err)
+    assert "is not a direct child of the vaults root" in err[0]
+    assert list(elsewhere.iterdir()) == []
+    assert vault.lore_calls() == []
+
+
+def test_a_publisher_that_cannot_be_started_is_refused_under_publish(mod, vault, capsys):
+    def cannot(cmd, env, timeout):
+        raise FileNotFoundError(2, "No such file or directory")
+
+    assert _run_main(mod, vault, publish_runner=cannot) == 1
+
+    assert capsys.readouterr().err.splitlines() == [
+        "scratch-pad: publish: could not start the publisher: No such file or directory"
+    ]
+
+
+def test_a_publisher_that_exits_non_zero_with_no_stderr_is_still_refused_visibly(mod, vault, capsys):
+    def silent(cmd, env, timeout):
+        return subprocess.CompletedProcess(cmd, 3, None, "")
+
+    assert _run_main(mod, vault, publish_runner=silent) == 1
+
+    assert capsys.readouterr().err.splitlines() == ["scratch-pad: publish: the publisher exited with status 3"]
+
+
+def test_publisher_stderr_is_escaped_when_relayed(mod, vault, capsys):
+    def noisy(cmd, env, timeout):
+        return subprocess.CompletedProcess(cmd, 1, None, "bad \x1b[31m red\n")
+
+    assert _run_main(mod, vault, publish_runner=noisy) == 1
+
+    assert capsys.readouterr().err.splitlines() == ["scratch-pad: publish: bad \\x1b[31m red"]
+
+
+def test_the_publisher_stderr_of_a_successful_publish_is_still_shown(mod, vault, capfd):
+    _stub_lore(vault.bin, vault.record, err="no remote configured")
+
+    assert _run_main(mod, vault) == 0
+
+    assert "no remote configured" in capfd.readouterr().err
+
+
+def _residue(vault):
+    return sorted(p.name for p in vault.scratch.iterdir())
+
+
+def test_no_temp_folder_survives_a_successful_publish(mod, vault):
+    assert _run_main(mod, vault) == 0
+    assert _residue(vault) == []
+
+
+def test_no_temp_folder_survives_a_publisher_refusal(mod, vault, tmp_path):
+    elsewhere = tmp_path / "not-under-the-vaults-root"
+    elsewhere.mkdir()
+    assert _run_main(mod, vault, vault.argv(vault_path=elsewhere)) == 1
+    assert _residue(vault) == []
+
+
+def test_no_temp_folder_survives_an_exception_raised_by_the_publisher_runner(mod, vault):
+    seen = []
+
+    def boom(cmd, env, timeout):
+        seen.append(Path(cmd[2]))
+        assert seen[0].is_dir()
+        raise RuntimeError("runner blew up")
+
+    with pytest.raises(RuntimeError):
+        _run_main(mod, vault, publish_runner=boom)
+
+    assert seen and not seen[0].exists()
+    assert _residue(vault) == []
+
+
+def test_no_temp_folder_survives_an_exception_raised_while_building_the_page(mod, vault, monkeypatch):
+    def boom(target, reference, *a, **k):
+        assert Path(target).is_dir()
+        raise RecursionError("too deep")
+
+    monkeypatch.setattr(mod, "build_reference_page", boom)
+
+    with pytest.raises(RecursionError):
+        _run_main(mod, vault, publish_runner=_no_runner)
+
+    assert _residue(vault) == []
+
+
+def test_the_temp_folder_is_owner_only_and_outside_the_vault(mod, vault):
+    seen = []
+
+    def look(cmd, env, timeout):
+        folder = Path(cmd[2])
+        seen.append((folder.stat().st_mode & 0o777, folder.resolve()))
+        return subprocess.CompletedProcess(cmd, 0, None, "")
+
+    assert _run_main(mod, vault, publish_runner=look) == 0
+
+    mode, folder = seen[0]
+    assert mode == 0o700
+    assert vault.path.resolve() not in folder.parents
+
+
+def test_the_publisher_is_given_the_vault_and_site_and_never_overwrite_or_a_timer(mod, vault):
+    seen = []
+
+    def look(cmd, env, timeout):
+        seen.append((list(cmd), timeout))
+        return subprocess.CompletedProcess(cmd, 0, None, "")
+
+    assert _run_main(mod, vault, publish_runner=look) == 0
+
+    cmd, timeout = seen[0]
+    assert cmd[1] == str(PUBLISHER)
+    assert cmd[3:] == ["header-and-sign-in", "--vault-path", str(vault.path), "--vault", "acme"]
+    assert "--overwrite" not in cmd
+    assert timeout is None
+
+
+def test_a_missing_pad_is_refused_with_nothing_published_and_no_wait_line(mod, vault, capfd):
+    shutil.rmtree(vault.state / "pads" / "p")
+
+    assert _run_main(mod, vault, publish_runner=_no_runner) == 1
+
+    got = capfd.readouterr()
+    assert got.out == ""
+    assert got.err.splitlines() == ['scratch-pad: pad "p": does not exist — build it first, or name the pad it is on']
+    assert not (vault.path / "sites").exists()
+    assert _residue(vault) == []
+
+
+def test_the_reference_run_leaves_the_pad_unchanged_and_takes_no_lock_that_outlives_it(mod, vault):
+    pad = vault.state / "pads" / "p"
+    before = _snapshot(pad)
+
+    assert _run_main(mod, vault) == 0
+
+    assert _snapshot(pad) == before
+    lock = _lock_path(vault.env, pad)
+    assert _try_lock(lock)
+
+
+def _usage(mod, argv, capsys):
+    with pytest.raises(SystemExit) as exc:
+        mod.main(argv, env={})
+    assert exc.value.code == 2
+    return capsys.readouterr().err
+
+
+def test_a_reference_run_is_refused_alongside_a_round_or_add(mod, capsys):
+    for extra in (["--round", "r.json"], ["--add"]):
+        err = _usage(mod, ["--pad", "p", "--reference", "x.json", "--vault-path", "v", *extra], capsys)
+        assert err.splitlines()[-1] == f"scratch_pad.py: error: --reference cannot be used with {extra[0]}"
+
+
+def test_a_reference_run_needs_a_vault_path(mod, capsys):
+    err = _usage(mod, ["--pad", "p", "--reference", "x.json"], capsys)
+    assert err.splitlines()[-1] == "scratch_pad.py: error: --reference needs --vault-path"
+
+
+def test_a_vault_path_or_name_without_a_reference_is_refused(mod, capsys):
+    for flag in (["--vault-path", "v"], ["--vault", "n"]):
+        err = _usage(mod, ["--pad", "p", "--round", "r.json", *flag], capsys)
+        assert err.splitlines()[-1] == f"scratch_pad.py: error: {flag[0]} is only valid with --reference"
+
+
+def test_without_a_reference_the_round_stays_required_with_its_old_wording(mod, capsys):
+    err = _usage(mod, ["--pad", "p"], capsys)
+    assert err.splitlines()[-1] == "scratch_pad.py: error: the following arguments are required: --round"
+    err = _usage(mod, [], capsys)
+    assert err.splitlines()[-1] == "scratch_pad.py: error: the following arguments are required: --pad, --round"

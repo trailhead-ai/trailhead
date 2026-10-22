@@ -135,6 +135,25 @@ Contract
   and every string inside a layout, dictionary keys included) is matched against the credential-pattern
   classes in ``_CREDENTIAL_PATTERNS`` (mirroring craft's credential-pattern scrub list); a match refuses the
   reference naming the drawing and field, never the matched text.
+* ``--pad <slug> --reference <json> --vault-path <p> [--vault <n>]`` publishes a reference page to a lore vault,
+  from inside a camp workspace or outside one. ``--reference`` cannot be used with ``--round`` or ``--add``, and
+  needs ``--vault-path``; ``--vault-path`` and ``--vault`` are only valid with ``--reference``; without
+  ``--reference``, ``--pad`` and ``--round`` stay required (``--pad`` is checked first). The reference is read as
+  above (the pad's lock is released before anything is published). A ``<vault>/sites/<site>`` that already holds
+  anything, a dangling symlink included, is refused as ``scratch-pad: site "<site>": already exists in the vault
+  — choose another site name``, before the publisher runs. The page is built by ``build_reference_page`` in a
+  fresh owner-only ``scratch-pad-reference-`` temp folder outside the vault and published by the sibling
+  ``publish-site/publish_site.py``, run as ``<python> <publish_site.py> <tmp> <site> --vault-path <p>`` (plus
+  ``--vault <n>`` when given), never with ``--overwrite`` and with no timer: the publisher's sync may wait on a
+  lock or a signing prompt for as long as it takes. Just before the publisher starts, stdout gets
+  ``PUBLISHING_LINE`` (and is flushed); the publisher's stdout (the sync's own lines, then the link
+  ``http://127.0.0.1:<port>/<vault>/<site>/``, last) is passed through as it is written, not captured. Its stderr
+  is captured: on success it is shown on stderr unchanged; on a non-zero exit each non-blank line is refused as
+  ``scratch-pad: publish: <line>`` (escaped as on the workspace path; a bare ``the publisher exited with status
+  <n>`` when it said nothing) and nothing more is printed, so a failed sync prints no link and leaves the page in
+  ``<vault>/sites/<site>`` as the publisher leaves it. A publisher that cannot be started is refused as
+  ``scratch-pad: publish: could not start the publisher: <why>``. The temp folder is removed on every path,
+  exceptions included. The pad is never changed.
 * Every refusal prints ``scratch-pad: <where>: <what>`` lines on stderr -- every
   problem found in one pass -- and exits non-zero. No pad and no temp folder
   are left behind; a pads folder this run had to create may remain, empty.
@@ -198,6 +217,7 @@ _WAY_ON = "start a new pad with a different --pad name"
 _MOVE_OUT = "move it out of the pad folder and rerun --add"
 _OS_METADATA = re.compile(r"\.DS_Store|\._.*", re.DOTALL)
 _UNCONFIRMED = "note: the pad was published but the publisher did not confirm it in time"
+PUBLISHING_LINE = "publishing to the vault; the sync can wait on a lock or a signing prompt"
 
 
 def _pad_index(number: int) -> str:
@@ -453,6 +473,13 @@ def _run_publisher(cmd: Sequence[str], env: Mapping[str, str], timeout: float):
     """Run the publisher; raises ``subprocess.TimeoutExpired`` after killing it."""
     return subprocess.run(
         list(cmd), env=dict(env), capture_output=True, text=True, errors="backslashreplace", timeout=timeout
+    )
+
+
+def _stream_publisher(cmd: Sequence[str], env: Mapping[str, str], timeout: float | None = None):
+    """Run the publisher with its stdout passed through as written; only stderr is captured. No timer unless given."""
+    return subprocess.run(
+        list(cmd), env=dict(env), stderr=subprocess.PIPE, text=True, errors="backslashreplace", timeout=timeout
     )
 
 
@@ -811,7 +838,20 @@ def _require_publisher() -> None:
 
 
 def _publisher_cmd(tmp: Path, pad: str, workspace: Path, *extra: str) -> list[str]:
-    return [sys.executable, str(PUBLISHER_PATH), str(tmp), pad, "--workspace-path", str(workspace), *extra]
+    return _publisher_argv(tmp, pad, "--workspace-path", str(workspace), *extra)
+
+
+def _publisher_argv(tmp: Path, site: str, *target: str) -> list[str]:
+    return [sys.executable, str(PUBLISHER_PATH), str(tmp), site, *target]
+
+
+def _cannot_start(exc: OSError) -> Refusal:
+    return Refusal([_line("publish", f"could not start the publisher: {exc.strerror or exc}")])
+
+
+def _publish_refused(result) -> Refusal:
+    reasons = [_line("publish", _esc(line)) for line in result.stderr.splitlines() if line.strip()]
+    return Refusal(reasons or [_line("publish", f"the publisher exited with status {result.returncode}")])
 
 
 def _publish(runner, cmd: Sequence[str], env: Mapping[str, str], timeout: float, final: Path, timed_out) -> Built:
@@ -819,12 +859,11 @@ def _publish(runner, cmd: Sequence[str], env: Mapping[str, str], timeout: float,
     try:
         result = runner(cmd, env, timeout)
     except OSError as exc:
-        raise Refusal([_line("publish", f"could not start the publisher: {exc.strerror or exc}")])
+        raise _cannot_start(exc)
     except subprocess.TimeoutExpired:
         return timed_out()
     if result.returncode != 0:
-        reasons = [_line("publish", _esc(line)) for line in result.stderr.splitlines() if line.strip()]
-        raise Refusal(reasons or [_line("publish", f"the publisher exited with status {result.returncode}")])
+        raise _publish_refused(result)
     return Built(final, result.stdout.splitlines())
 
 
@@ -1370,6 +1409,50 @@ def build_pad(
     return folder / "index.html", folder
 
 
+def publish_reference(
+    reference_path: Path | str,
+    pad: str,
+    vault_path: Path | str,
+    vault: str | None = None,
+    *,
+    env: Mapping[str, str] | None = None,
+    cwd: Path | str | None = None,
+    publish_runner=None,
+    publish_timeout: float = PUBLISH_TIMEOUT_SECONDS,
+) -> None:
+    """Publish the reference named by *reference_path* from *pad* into the vault at *vault_path*.
+
+    Raises :class:`Refusal` for every problem; the pad is only read. The publisher is run without
+    ``--overwrite`` and without a timer, its stdout passed through as written; *publish_runner* is
+    ``(cmd, env, None) -> CompletedProcess`` with the publisher's stderr captured.
+    """
+    env = os.environ if env is None else env
+    reference = read_reference(reference_path, pad, env=env, cwd=cwd, publish_timeout=publish_timeout)
+    site = reference.site
+    if os.path.lexists(Path(vault_path) / "sites" / site):
+        raise Refusal([_line(f"site {_q(site)}", "already exists in the vault — choose another site name")])
+    runner = publish_runner or _stream_publisher
+    try:
+        tmp = Path(tempfile.mkdtemp(prefix="scratch-pad-reference-"))
+    except OSError as exc:
+        raise Refusal([_line("publish", f"could not make a temp folder: {exc.strerror or exc}")])
+    try:
+        build_reference_page(tmp, reference)
+        target = ["--vault-path", str(vault_path)] + (["--vault", vault] if vault else [])
+        print(PUBLISHING_LINE)
+        sys.stdout.flush()
+        try:
+            result = runner(_publisher_argv(tmp, site, *target), env, None)
+        except OSError as exc:
+            raise _cannot_start(exc)
+        if result.returncode != 0:
+            raise _publish_refused(result)
+        if result.stderr:
+            sys.stderr.write(result.stderr)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def main(
     argv: Sequence[str] | None = None,
     env: Mapping[str, str] | None = None,
@@ -1381,10 +1464,44 @@ def main(
     parser = argparse.ArgumentParser(
         prog="scratch_pad.py", description="Build a scratch pad from a round of questions."
     )
-    parser.add_argument("--pad", required=True, help="pad name: ^[a-z0-9][a-z0-9._-]*$")
-    parser.add_argument("--round", required=True, dest="round_path", help="path to the round's JSON file")
+    parser.add_argument("--pad", help="pad name: ^[a-z0-9][a-z0-9._-]*$")
+    parser.add_argument("--round", dest="round_path", help="path to the round's JSON file")
     parser.add_argument("--add", action="store_true", help="add the round to the existing pad instead of starting one")
+    parser.add_argument("--reference", help="path to a reference's JSON file: publish the chosen drawings to a vault")
+    parser.add_argument("--vault-path", help="the vault's folder (with --reference)")
+    parser.add_argument("--vault", help="the vault's configured name (with --reference)")
     args = parser.parse_args(argv)
+    if args.reference is None:
+        missing = [flag for flag, value in (("--pad", args.pad), ("--round", args.round_path)) if value is None]
+        if missing:
+            parser.error("the following arguments are required: " + ", ".join(missing))
+        for flag, value in (("--vault-path", args.vault_path), ("--vault", args.vault)):
+            if value is not None:
+                parser.error(f"{flag} is only valid with --reference")
+    else:
+        for flag, used in (("--round", args.round_path is not None), ("--add", args.add)):
+            if used:
+                parser.error(f"--reference cannot be used with {flag}")
+        if args.pad is None:
+            parser.error("the following arguments are required: --pad")
+        if args.vault_path is None:
+            parser.error("--reference needs --vault-path")
+        try:
+            publish_reference(
+                args.reference,
+                args.pad,
+                args.vault_path,
+                args.vault,
+                env=env,
+                cwd=cwd,
+                publish_runner=publish_runner,
+                publish_timeout=publish_timeout,
+            )
+        except Refusal as exc:
+            for line in exc.lines:
+                print(line, file=sys.stderr)
+            return 1
+        return 0
     try:
         built = _build(args.round_path, args.pad, DEFAULT_KIT_DIR, env, cwd, publish_runner, publish_timeout, args.add)
     except Refusal as exc:
