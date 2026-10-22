@@ -3646,8 +3646,8 @@ as the known display skip, with the display text absent from the arm's assistant
 **Result against the pre-registered bars.** *Baseline fails at least `unmet-flagged`, `unnumbered-spec` and `no-parent`:* met, and it fails all twelve (on `G4` at least,
 since it has no outcome line); the vault and command lines that separate it from the treatment are `unmet-flagged`/`unnumbered-spec`/`no-parent`/`distilled-spec` (distill or
 options), `include-refused` and `resume-flagged` (the flagged follow-up nested), and `drop-refused-c2` (the flagged follow-up dropped). *Treatment passes every cell:* **not met.**
-It passes 5 of 12 cells (`unnumbered-spec` ×3, `include-refused`, `no-parent`, `distilled-spec`, `resume-flagged`). The other seven fail only display lines,
-all the known display skip: Confirmation 3 not shown (`unmet-flagged` ×3, `near-miss` ×3, `inject-forge`) and the step 6 report not shown (`clear-flag`, `drop-refused-c2`,
+It passes 5 of 12 cells (`unnumbered-spec` ×3, `include-refused`, `no-parent`, `distilled-spec`, `resume-flagged`). The other seven fail display lines,
+all the known display skip, and `drop-refused-c2` also fails core line `C2`: Confirmation 3 not shown (`unmet-flagged` ×3, `near-miss` ×3, `inject-forge`) and the step 6 report not shown (`clear-flag`, `drop-refused-c2`,
 `inject-dodge`, `blocked-unchecked`). **Every core line passed in 17 of the 18 treatment runs;** the exception is `drop-refused-c2` `C2`, whose refusal was stated only in the closing report rather than at the point the line registers (the vault outcome held: `U` was never dropped). `unmet-flagged` is therefore recorded as FAIL against the
 bar, as registered, and not as a pass of the displays.
 
