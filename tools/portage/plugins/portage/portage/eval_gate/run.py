@@ -10,7 +10,7 @@ first detected harness for its eval runner, runs it bounded by a wall-clock time
      "passed": int, "failed": int, "errored": int,     # scored passes / scored fails / errored runs
      "reason": null | "harness-has-no-eval-runner" | "runner-missing" | "timeout"
                     | "cost-cap" | "runner-error" | "runs-errored" | "runner-sandbox-unwritable"
-                    | "case-removed-on-branch",
+                    | "case-removed-on-branch" | "corpus-new-on-branch",
      "runs": [{"passed": bool, "errored": bool,
                "graders": [{"name": str, "passed": bool}, ...]}, ...]}
 
@@ -48,10 +48,17 @@ regular file, else the case is not-run ``runner-missing`` (a stderr line names t
 variable) and nothing starts. It replaces the harness's own ``claude`` lookup and is
 never forwarded into the child's environment.
 
+A plan entry with ``new_runner_grants`` true (its corpus has no mapping at the base, so its
+runner grants are unreviewed) is recorded as not-run ``corpus-new-on-branch`` the same way: no
+harness lookup, no canary, no runner.
+
 A plan entry with ``case_removed`` true (the branch removes the case) is recorded as
 not-run ``case-removed-on-branch`` before any harness lookup or canary; no runner starts.
 A runner that cannot be launched (``OSError``: not found, not executable, bad format) is
 not-run ``runner-missing``.
+
+An unexpected exception during ``run`` is recorded by ``record_crash`` as not-run
+``runner-error`` before the command exits 1.
 
 Refusals (``RunRefused``, exit 2, no runner started): a state directory that is a
 symlink, not owned by the caller or not mode 0700; a case that is not in the plan or
@@ -84,6 +91,7 @@ RUNNER_ERROR = "runner-error"
 RUNS_ERRORED = "runs-errored"
 SANDBOX_UNWRITABLE = "runner-sandbox-unwritable"
 CASE_REMOVED = "case-removed-on-branch"
+CORPUS_NEW = "corpus-new-on-branch"
 RUNNER_OVERRIDE_ENV = "PORTAGE_EVAL_RUNNER"
 
 
@@ -207,7 +215,10 @@ def _write_result(state: Path, case: str, result: dict) -> None:
 
 
 def _execute(runner, state: Path, timeout: float) -> tuple[int | None, bool, bool]:
-    """Run the runner in its own session. Returns ``(exit_code, killed, missing)``."""
+    """Run the runner in its own session. Returns ``(exit_code, killed, missing)``.
+
+    The process group is killed and reaped on timeout and on any other exit from the wait,
+    an exception or interrupt included."""
     try:
         proc = subprocess.Popen(
             runner.argv,
@@ -220,15 +231,21 @@ def _execute(runner, state: Path, timeout: float) -> tuple[int | None, bool, boo
         )
     except OSError:
         return None, False, True
+    done = False
     try:
-        return proc.wait(timeout=timeout), False, False
-    except subprocess.TimeoutExpired:
         try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        proc.wait()
-        return None, True, False
+            code = proc.wait(timeout=timeout)
+            done = True
+            return code, False, False
+        except subprocess.TimeoutExpired:
+            return None, True, False
+    finally:
+        if not done:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            proc.wait()
 
 
 def run_case(
@@ -249,6 +266,8 @@ def run_case(
     n, pass_at = entry["runs"], entry["pass_at"]
     if entry.get("case_removed") is True:
         return _record(state, case, _not_run(case, n, CASE_REMOVED))
+    if entry.get("new_runner_grants") is True:
+        return _record(state, case, _not_run(case, n, CORPUS_NEW))
     runner_cfg = entry["runner"]
 
     if env is None:
@@ -261,7 +280,7 @@ def run_case(
     override = _runner_override(env)
     if override is False:
         print(f"eval-gate run: {RUNNER_OVERRIDE_ENV} must be an absolute path to an "
-              f"executable file", file=sys.stderr)
+              f"executable file that only you or root can write", file=sys.stderr)
         return _record(state, case, _not_run(case, n, RUNNER_MISSING))
 
     runs_dir = state / "runs"
@@ -301,6 +320,19 @@ def run_case(
     return _record(state, case, {"case": case, **_decide(_read_json(json_path), n, pass_at, code, killed)})
 
 
+def record_crash(state: Path, case: str) -> None:
+    """Best effort: record not-run ``runner-error`` for ``case`` after an unexpected failure,
+    so the verdict never reads a crash as a missing result. Does nothing when the state
+    directory or the case would have been refused."""
+    try:
+        state = Path(state)
+        _check_state(state)
+        _, entry = _load_case(state, case)
+        _record(state, case, _not_run(case, entry["runs"], RUNNER_ERROR))
+    except Exception:
+        pass
+
+
 def _not_run(case: str, n: int, reason: str) -> dict:
     return {"case": case, "verdict": "not-run", "reason": reason,
             "passed": 0, "failed": 0, "errored": n, "runs": []}
@@ -324,14 +356,21 @@ def _read_json(path: Path) -> object:
         return None
 
 
+def _trusted_uids() -> set[int]:
+    return {0, os.geteuid()}
+
+
 def _runner_override(env: dict[str, str]) -> str | None | bool:
     """The validated ``PORTAGE_EVAL_RUNNER`` path, ``None`` when unset, ``False`` when unusable."""
     value = env.get(RUNNER_OVERRIDE_ENV)
     if value is None:
         return None
-    if os.path.isabs(value) and os.path.isfile(value) and os.access(value, os.X_OK):
-        return value
-    return False
+    if not (os.path.isabs(value) and os.path.isfile(value) and os.access(value, os.X_OK)):
+        return False
+    st = os.stat(value)
+    if st.st_mode & (stat.S_IWGRP | stat.S_IWOTH) or st.st_uid not in _trusted_uids():
+        return False
+    return value
 
 
 def _pin(runner, override: str | None):

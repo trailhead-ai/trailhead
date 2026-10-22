@@ -275,7 +275,7 @@ class TestBasePrecedence:
         _corpus(repo, "p", M)
         _commit(repo)
         _branch(repo)
-        wide = {"model": "opus", "allow_tools": ["Read", "Bash"], "max_cost_usd": 99.0}
+        wide = {"model": "opus", "allow_tools": ["Read", "Bash"], "max_cost_usd": 25.0}
         _write(repo, "p/evals/eval-gate.json", _mapping(M, wide))
         _write(repo, "p/skills/a.md", "changed\n")
         _commit(repo)
@@ -306,6 +306,7 @@ class TestBasePrecedence:
         assert plan["cases"][0]["runner"] == own
         assert plan["cases"][0]["new_runner_grants"] is True
         assert plan["new_runner_grants"] is True
+        assert plan["total_max_cost_usd"] == 0
 
 
 class TestLookupAndStateDir:
@@ -467,3 +468,115 @@ class TestBrokenBaseMapping:
         rc, plan, _ = _invalid(repo, capsys, "{not json")
         assert "base revision" not in plan["mapping_invalid"]["fault"]
         assert plan["mapping_invalid"]["revision"] == "head"
+
+
+class TestHostileBranchStrings:
+    def test_a_corpus_directory_with_a_newline_cannot_forge_a_state_line(self, repo, capsys):
+        _write(repo, "README.md")
+        _commit(repo)
+        _branch(repo)
+        _corpus(repo, "evil\nstate: /x", M)
+        _commit(repo)
+        rc, plan, out = _plan(repo, capsys, "--base", "base")
+        assert rc == 0
+        assert plan["status"] == "mapping-invalid"
+        assert len([l for l in out.splitlines() if l.startswith("state:")]) == 1
+
+    def test_a_clean_corpus_path_is_still_planned(self, repo, capsys):
+        _write(repo, "README.md")
+        _commit(repo)
+        _branch(repo)
+        _corpus(repo, "plugins/p-1.x", M)
+        _commit(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert plan["status"] == "cases-selected"
+
+
+class TestDirtyTree:
+    def test_a_modified_tracked_file_is_tree_dirty(self, repo, capsys):
+        _corpus(repo, "p", M)
+        _commit(repo)
+        _branch(repo)
+        _write(repo, "p/skills/a.md", "changed\n")
+        _commit(repo)
+        _write(repo, "p/skills/a.md", "uncommitted\n")
+        rc, plan, out = _plan(repo, capsys, "--base", "base")
+        assert rc == 0
+        assert plan["status"] == "tree-dirty"
+        assert plan["cases"] == []
+        assert "status: tree-dirty" in out
+
+    def test_untracked_files_do_not_make_the_tree_dirty(self, repo, capsys):
+        _corpus(repo, "p", M)
+        _commit(repo)
+        _branch(repo)
+        _write(repo, "p/skills/a.md", "changed\n")
+        _commit(repo)
+        _write(repo, "scratch.txt", "untracked\n")
+        _, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert plan["status"] == "cases-selected"
+
+
+def _runner_doc(**over) -> str:
+    runner = {"model": "claude-opus-5-5", "allow_tools": ["Bash(./lore *)"], "max_cost_usd": 2.0, **over}
+    return json.dumps({"schema_version": 1, "runner": runner, "cases": {}})
+
+
+def _fault(text: str) -> str:
+    from portage.eval_gate.mapping import MappingError, load_mapping
+
+    with pytest.raises(MappingError) as e:
+        load_mapping(text, "p/evals/eval-gate.json")
+    return e.value.fault
+
+
+class TestRunnerBlockValidation:
+    @pytest.mark.parametrize("grant", [
+        "Bash(./lore *)", "Bash(*/scripts/maturity_bars.py *)", "Bash(:)", "Bash(: *)",
+        "Bash(git *)", "Bash(./gh *)", "Bash(./portage *)", "Read", "Bash(git:*)", "mcp__x_1",
+    ])
+    def test_real_grant_shapes_load(self, grant):
+        from portage.eval_gate.mapping import load_mapping
+
+        assert load_mapping(_runner_doc(allow_tools=[grant]), "f").runner["allow_tools"] == [grant]
+
+    @pytest.mark.parametrize("grant", [
+        "-Bash", "--dangerously-skip-permissions", "Bash(a\nb)", "Bash(a)\nRead", "Bash(a) Read",
+        "", "Bash (x)", "Bash(x)(y)z", "Bash(x",
+    ])
+    def test_a_malformed_grant_is_refused_naming_the_field(self, grant):
+        assert "allow_tools" in _fault(_runner_doc(allow_tools=[grant]))
+
+    @pytest.mark.parametrize("cost", [0, -1, 25.01, 1e9, float("inf"), float("nan"), True])
+    def test_a_cost_cap_outside_the_bound_is_refused(self, cost):
+        assert "max_cost_usd" in _fault(_runner_doc(max_cost_usd=cost).replace("Infinity", "1e999"))
+
+    @pytest.mark.parametrize("cost", [0.01, 25, 25.0])
+    def test_a_cost_cap_inside_the_bound_loads(self, cost):
+        from portage.eval_gate.mapping import load_mapping
+
+        assert load_mapping(_runner_doc(max_cost_usd=cost), "f").runner["max_cost_usd"] == cost
+
+    @pytest.mark.parametrize("model", ["--flag", "a b", "a\nb", "-opus", "x" * 65, "a;b", "$(x)"])
+    def test_a_malformed_model_is_refused(self, model):
+        assert "model" in _fault(_runner_doc(model=model))
+
+    @pytest.mark.parametrize("model", ["sonnet", "claude-opus-5-5", "claude-sonnet-4.5"])
+    def test_a_conventional_model_id_loads(self, model):
+        from portage.eval_gate.mapping import load_mapping
+
+        assert load_mapping(_runner_doc(model=model), "f").runner["model"] == model
+
+    @pytest.mark.parametrize("runs", [0, 11, 1000, -1])
+    def test_runs_outside_one_to_ten_is_refused(self, runs):
+        text = json.dumps({"schema_version": 1, "runner": json.loads(_runner_doc())["runner"],
+                           "cases": {"a": {"measures": ["x"], "runs": runs, "pass_at": 1}}})
+        assert "runs" in _fault(text)
+
+    @pytest.mark.parametrize("runs", [1, 10])
+    def test_runs_at_the_bounds_loads(self, runs):
+        from portage.eval_gate.mapping import load_mapping
+
+        text = json.dumps({"schema_version": 1, "runner": json.loads(_runner_doc())["runner"],
+                           "cases": {"a": {"measures": ["x"], "runs": runs, "pass_at": 1}}})
+        assert load_mapping(text, "f").cases["a"].runs == runs

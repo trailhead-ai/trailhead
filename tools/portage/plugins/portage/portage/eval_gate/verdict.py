@@ -24,18 +24,19 @@ Markers, each on its own line, wrapping the section::
 
 1. the leading report line ``eval-gate: <outcome>`` with outcome one of ``passed``,
    ``failed``, ``not-run``, ``no-cases-mapped``, ``base-unresolved``,
-   ``mapping-invalid``, ``gate-error``;
+   ``mapping-invalid``, ``tree-dirty``, ``gate-error``;
 2. ``persistent: <codes>`` — the sorted, comma-joined persistent reason codes among
    the not-run cases (``runner-missing``, ``harness-has-no-eval-runner``,
    ``runner-sandbox-unwritable``: nothing about the branch will change them), or
    ``persistent: none``. When the outcome is ``base-unresolved`` the line is
    ``persistent: base-unresolved`` (a repo with no resolvable base hits it on every
-   push). ``case-removed-on-branch`` is not persistent. ``persistent_reasons`` is the
+   push). ``case-removed-on-branch`` and ``corpus-new-on-branch`` are not persistent. ``persistent_reasons`` is the
    classification of reason codes;
 3. ``ignored:`` lines for result files whose case is not in the plan;
 4. on exit 1, the failing cases with counts (``<case>: passed P, failed F, errored E``),
    ``state kept: <dir>``, per-run grader verdicts (``run N: <grader>=pass|fail ...``) and
-   the sanctioned ways forward, or ``mapping-invalid: <file>: <fault>``;
+   the sanctioned ways forward, or ``mapping-invalid: <file>: <fault>``; for ``tree-dirty``
+   (exit 1) the one line telling the user to commit or stash and push again;
 5. the section, markers included.
 
 The section is also written to ``<state>/eval-gate-section.md`` (the printed section
@@ -61,13 +62,14 @@ import json
 import os
 import re
 import stat
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
-from .mapping import CASE_NAME
+from .mapping import CASE_NAME, valid_corpus_path
 from .run import (
     NO_RUNNER,
     RUNNER_MISSING,
     CASE_REMOVED,
+    CORPUS_NEW,
     SANDBOX_UNWRITABLE,
     RunRefused,
     _check_state,
@@ -94,13 +96,17 @@ REASONS = {
         "a fixed runner"
     ),
     CASE_REMOVED: "the branch removes this case; it was not run — review the removal",
+    CORPUS_NEW: ("this corpus is new on the branch, so its runner grants are unreviewed and its "
+                 "cases were not run — review the grants"),
     NO_RESULT: "no usable result was recorded for this case",
 }
 
 _STEP = re.compile(r"^[a-z][a-z0-9-]{0,31}\Z")
 _GRADER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}\Z")
-_CORPUS = re.compile(r"^[A-Za-z0-9._][A-Za-z0-9._/-]{0,199}\Z")
-_STATUSES = ("cases-selected", "no-cases-mapped", "base-unresolved", "mapping-invalid")
+_STATUSES = ("cases-selected", "no-cases-mapped", "base-unresolved", "mapping-invalid", "tree-dirty")
+
+TREE_DIRTY = ("the working tree has uncommitted changes to tracked files; the gate grades committed "
+              "prose — commit or stash, then push again")
 
 
 class Fault(Exception):
@@ -121,7 +127,7 @@ def one_line(exc: BaseException) -> str:
 
 
 def _corpus(root: object) -> str:
-    if isinstance(root, str) and _CORPUS.match(root) and ".." not in PurePosixPath(root).parts:
+    if isinstance(root, str) and root and valid_corpus_path(root):
         return root
     return "<invalid-corpus-path>"
 
@@ -287,6 +293,9 @@ def verdict(state: Path) -> tuple[int, list[str], str]:
             way = "The mapping must be fixed on the branch; there is no override."
         return 1, ["eval-gate: mapping-invalid", "persistent: none",
                    f"mapping-invalid: {file}: {fault}", way], section
+    if status == "tree-dirty":
+        return 1, ["eval-gate: tree-dirty", "persistent: none", TREE_DIRTY], _wrap(
+            [f"The eval gate stopped the push: {TREE_DIRTY}."])
     if status == "base-unresolved":
         return 0, ["eval-gate: base-unresolved", "persistent: base-unresolved"], _wrap(
             ["The eval gate could not determine the changed files (the base ref did not resolve), "

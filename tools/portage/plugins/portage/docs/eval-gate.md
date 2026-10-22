@@ -37,7 +37,9 @@ call, so give the tool call a 600000 ms timeout) and records a verdict in the st
 - **fail**: so many scored runs failed that `pass_at` is out of reach.
 - **not-run**, with a reason: the runner errored, timed out, hit its cost cap, was missing, or cannot write
   (below), or the branch removes the case (`case-removed-on-branch`: the case was selected but its
-  `case.yaml` is gone, so nothing ran). A not-run case is never a pass and never a fail.
+  `case.yaml` is gone, so nothing ran), or its corpus is new on the branch (`corpus-new-on-branch`: this
+  corpus is new on the branch, so its runner grants are unreviewed and its cases were not run — review the
+  grants). A not-run case is never a pass and never a fail.
 
 The runner is the harness's `claude plugin eval`, started with an allowlist environment (`PATH`, `HOME`,
 `USER`, `LANG`, `TERM`, `LC_*`), so API keys and tokens in the caller's environment are not passed on. With

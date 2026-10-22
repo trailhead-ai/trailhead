@@ -239,3 +239,50 @@ class TestCanaryIsNeverAGatedCase:
     def test_the_corpus_beside_the_canary_reports_no_unmapped_case(self, tmp_path):
         repo = self._repo_with_canary(tmp_path)
         assert unmapped_runner_cases(repo / "plugins" / "portage" / "evals") == []
+
+
+class TestOverrideTrust:
+    def test_a_group_writable_override_is_runner_missing_naming_the_variable(self, env, capsys):
+        pinned = env.fake(_result([PASS] * 3), path=env.tmp / "pinned-claude")
+        pinned.chmod(0o775)
+        env.mp.setenv("PORTAGE_EVAL_RUNNER", str(pinned))
+        assert env.run() == 0
+        assert env.calls == []
+        assert env.result()["reason"] == "runner-missing"
+        assert "PORTAGE_EVAL_RUNNER" in capsys.readouterr().err
+
+    def test_a_world_writable_override_is_refused(self, env):
+        pinned = env.fake(_result([PASS] * 3), path=env.tmp / "pinned-claude")
+        pinned.chmod(0o757)
+        env.mp.setenv("PORTAGE_EVAL_RUNNER", str(pinned))
+        assert env.run() == 0
+        assert env.calls == []
+        assert env.result()["reason"] == "runner-missing"
+
+    def test_a_symlink_is_judged_by_its_target(self, env):
+        target = env.fake(_result([PASS] * 3), path=env.tmp / "real-claude")
+        target.chmod(0o777)
+        link = env.tmp / "link-claude"
+        link.symlink_to(target)
+        env.mp.setenv("PORTAGE_EVAL_RUNNER", str(link))
+        assert env.run() == 0
+        assert env.calls == []
+        assert env.result()["reason"] == "runner-missing"
+
+    def test_a_symlink_to_a_private_target_is_accepted(self, env):
+        target = env.fake(_result([PASS] * 3), path=env.tmp / "real-claude")
+        link = env.tmp / "link-claude"
+        link.symlink_to(target)
+        env.mp.setenv("PORTAGE_EVAL_RUNNER", str(link))
+        assert env.run() == 0
+        assert env.result()["verdict"] == "pass"
+
+    def test_an_override_owned_by_someone_else_is_refused(self, env, monkeypatch):
+        from portage.eval_gate import run as run_mod
+
+        pinned = env.fake(_result([PASS] * 3), path=env.tmp / "pinned-claude")
+        env.mp.setenv("PORTAGE_EVAL_RUNNER", str(pinned))
+        monkeypatch.setattr(run_mod, "_trusted_uids", lambda: {424242})
+        assert env.run() == 0
+        assert env.calls == []
+        assert env.result()["reason"] == "runner-missing"

@@ -462,3 +462,73 @@ class TestSeamSmoke:
             max_cost_usd=1.0, json_path=env.state / "r.json", output_dir=env.state / "o",
             env={"PATH": str(env.bin), "HOME": str(env.home)})
         assert shutil.which(runner.argv[0], path=runner.env["PATH"]) == str(env.bin / "claude")
+
+
+class TestCorpusNewOnBranch:
+    def test_a_case_of_a_corpus_new_on_the_branch_is_not_run_and_starts_no_runner(self, env):
+        env.cases[0]["new_runner_grants"] = True
+        env.plan()
+        env.fake(_result([PASS] * 3))
+        assert env.run() == 0
+        r = env.result()
+        assert (r["verdict"], r["reason"], r["errored"]) == ("not-run", "corpus-new-on-branch", 3)
+        assert env.calls == []
+        assert not (env.state / "canary.json").exists()
+
+    def test_a_case_of_a_reviewed_corpus_still_runs(self, env):
+        env.fake(_result([PASS] * 3))
+        assert env.run() == 0
+        assert env.result()["verdict"] == "pass"
+
+
+class TestUnexpectedErrors:
+    def test_a_crash_inside_the_run_records_runner_error_and_exits_non_zero(self, env, monkeypatch, capsys):
+        from portage.eval_gate import canary
+
+        def boom(state):
+            raise RuntimeError("kaboom")
+
+        monkeypatch.setattr(canary, "read_cached", boom)
+        env.fake(_result([PASS] * 3))
+        assert env.run() == 1
+        r = env.result()
+        assert (r["verdict"], r["reason"], r["errored"]) == ("not-run", "runner-error", 3)
+        assert "Traceback" not in capsys.readouterr().err
+
+    def test_a_refusal_is_still_exit_2_and_records_nothing(self, env):
+        assert env.run("nope") == 2
+        assert not (env.state / "results").exists()
+
+
+class TestChildIsReaped:
+    def test_an_exception_after_launch_kills_the_runner_process_group(self, env, monkeypatch):
+        import subprocess
+
+        env.fake(sleep=60, grandchild=True)
+        real_wait = subprocess.Popen.wait
+        calls = []
+
+        def interrupted(self, timeout=None):
+            if calls:
+                return real_wait(self, timeout)
+            calls.append(1)
+            for _ in range(100):
+                if Path(env.log + ".pid").exists():
+                    break
+                time.sleep(0.1)
+            raise RuntimeError("interrupted")
+
+        monkeypatch.setattr(subprocess.Popen, "wait", interrupted)
+        env.seed_canary()
+        with pytest.raises(RuntimeError, match="interrupted"):
+            run_case(env.state, "c1")
+        pid = int(Path(env.log + ".pid").read_text())
+        for _ in range(40):
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.1)
+        else:
+            os.kill(pid, 9)
+            pytest.fail("the runner's process group survived the interrupt")

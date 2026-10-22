@@ -579,3 +579,56 @@ def test_corpus_path_with_trailing_newline_is_not_echoed(st, capsys):
 
 def test_gate_error_step_with_trailing_newline_is_refused():
     assert dispatch.main(["eval-gate", "verdict", "--gate-error", "plan\n"]) == 2
+
+
+# --- corpus-new-on-branch and tree-dirty -----------------------------------
+
+def test_a_not_run_for_a_new_corpus_says_the_grants_are_unreviewed_and_still_pushes(st, capsys):
+    st.plan([_entry("fresh", root="plugins/newcorpus", grants=True)], grants=True)
+    st.result("fresh", verdict="not-run", reason="corpus-new-on-branch", passed=0, errored=3)
+    code, out, _ = verdict(capsys, st)
+    assert code == 0
+    lines = out.splitlines()
+    assert lines[0] == "eval-gate: not-run"
+    assert lines[1] == "persistent: none"
+    sec = section_of(out)
+    assert ("`fresh` — `corpus-new-on-branch`: this corpus is new on the branch, so its runner "
+            "grants are unreviewed and its cases were not run — review the grants") in sec
+    assert "new-runner-grants" in sec
+
+
+def test_tree_dirty_stops_the_push_with_the_commit_or_stash_message(st, capsys):
+    st.plan([], status="tree-dirty")
+    code, out, _ = verdict(capsys, st)
+    assert code == 1
+    assert out.splitlines()[0] == "eval-gate: tree-dirty"
+    msg = ("the working tree has uncommitted changes to tracked files; the gate grades committed "
+           "prose — commit or stash, then push again")
+    assert msg in out
+    assert msg in section_of(out)
+    assert (st.dir / "eval-gate-section.md").read_text().startswith(START)
+
+
+# --- splice --out is written atomically and never through a symlink -------
+
+def test_splice_out_refuses_an_existing_symlink_and_leaves_its_target_alone(tmp_path, capsys):
+    target = tmp_path / "victim.txt"
+    target.write_text("precious\n")
+    link = tmp_path / "out.md"
+    link.symlink_to(target)
+    code, out, err, _ = splice(capsys, "body\n", tmp_path, "--out", str(link))
+    assert code == 2
+    assert err.startswith("eval-gate splice:")
+    assert target.read_text() == "precious\n"
+    assert link.is_symlink()
+
+
+def test_splice_out_replaces_the_file_instead_of_writing_through_its_inode(tmp_path, capsys):
+    outp = tmp_path / "out.md"
+    outp.write_text("old\n")
+    peer = tmp_path / "peer.md"
+    os.link(outp, peer)
+    code, *_ = splice(capsys, "body\n", tmp_path, "--out", str(outp))
+    assert code == 0
+    assert outp.read_text().startswith("body\n")
+    assert peer.read_text() == "old\n"

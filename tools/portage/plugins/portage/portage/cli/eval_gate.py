@@ -8,18 +8,20 @@ writes ``<state>/plan.json`` into a fresh 0700 state directory (shape documented
 ``portage.eval_gate.select``). Output: ``state: <dir>``, ``status: <status>``,
 ``cases: <n>``, ``max_cost_usd: <sum>``, then one ``<plugin_root>:<case>`` line per
 selected case (and a ``mapping-invalid: <file>: <fault>`` line when a mapping is
-refused). Exit 0 whenever a plan was written, including every non-selecting
+refused); every branch-controlled string is printed through ``verdict._safe``. Exit 0 whenever a plan was written, including every non-selecting
 status; exit 2 only for usage errors (e.g. ``--repo`` is not a git work tree).
 
 ``run --state <dir> --case <name> [--timeout-seconds N]`` runs one planned case and
 writes ``<state>/results/<case>.json`` (shape in ``portage.eval_gate.run``). Output:
 ``case: <name>``, ``verdict: pass|fail|not-run``, ``reason: <code>`` (not-run only).
 Exit 0 whenever a result was written, whatever the verdict; exit 2 on a refusal
-(state directory, case name, plugin root, timeout) with no runner started.
+(state directory, case name, plugin root, timeout) with no runner started; exit 1 on an
+unexpected error, after recording the case not-run ``runner-error``.
 
 ``verdict (--state <dir> | --gate-error <step>)`` aggregates the results into a push
 decision (exit 0 push, 1 stop, 2 fault) and prints the PR section; ``splice --body-file
-<f> (--state <dir> | --section-file <f>) [--out <path>]`` inserts it into a PR body. Output
+<f> (--state <dir> | --section-file <f>) [--out <path>]`` inserts it into a PR body (``--out`` is
+written atomically and refused, exit 2, when it is a symlink). Output
 format, markers, exit codes and the ``persistent:`` line are documented in
 ``portage.eval_gate.verdict``.
 """
@@ -27,10 +29,11 @@ format, markers, exit codes and the ``persistent:`` line are documented in
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
-from ..eval_gate.run import DEFAULT_TIMEOUT_SECONDS, RunRefused, run_case
+from ..eval_gate.run import DEFAULT_TIMEOUT_SECONDS, RunRefused, atomic_write, record_crash, run_case
 from ..eval_gate import verdict as gate_verdict
 from ..eval_gate.select import GitError, plan
 
@@ -71,9 +74,9 @@ def cmd_plan(args: argparse.Namespace) -> int:
     print(f"max_cost_usd: {result['total_max_cost_usd']}")
     if result["mapping_invalid"]:
         bad = result["mapping_invalid"]
-        print(f"mapping-invalid: {bad['file']}: {bad['fault']}")
+        print(f"mapping-invalid: {gate_verdict._safe(bad['file'])}: {gate_verdict._safe(bad['fault'])}")
     for c in result["cases"]:
-        print(f"{c['plugin_root']}:{c['case']}")
+        print(f"{gate_verdict._safe(c['plugin_root'])}:{gate_verdict._safe(c['case'])}")
     return 0
 
 
@@ -96,6 +99,10 @@ def cmd_run(args: argparse.Namespace) -> int:
     except RunRefused as e:
         print(f"eval-gate run: {e}", file=sys.stderr)
         return 2
+    except Exception as e:
+        record_crash(Path(args.state), args.case)
+        print(f"eval-gate run: unexpected {type(e).__name__}; recorded runner-error", file=sys.stderr)
+        return 1
     print(f"case: {result['case']}")
     print(f"verdict: {result['verdict']}")
     if result["reason"]:
@@ -164,7 +171,9 @@ def cmd_splice(args: argparse.Namespace) -> int:
         section = section_path.read_text()
         result = gate_verdict.splice(body, section)
         if args.out:
-            Path(args.out).write_text(result)
+            if os.path.islink(args.out):
+                raise gate_verdict.Fault(f"--out {args.out} is a symlink")
+            atomic_write(Path(args.out), result)
     except (gate_verdict.Fault, OSError, UnicodeDecodeError) as e:
         print(f"eval-gate splice: {gate_verdict.one_line(e)}", file=sys.stderr)
         return 2

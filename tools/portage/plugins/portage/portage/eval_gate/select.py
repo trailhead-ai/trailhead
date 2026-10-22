@@ -5,7 +5,8 @@ mode 0700) and returns ``(state, plan)``. The plan is consumed by the later
 ``run``/``verdict``/``splice`` subcommands::
 
     {"schema_version": 1,
-     "status": "cases-selected" | "no-cases-mapped" | "base-unresolved" | "mapping-invalid",
+     "status": "cases-selected" | "no-cases-mapped" | "base-unresolved" | "mapping-invalid"
+               | "tree-dirty",
      "repo": "<absolute repo path>",
      "base": "<ref as given or resolved>" | null,
      "merge_base": "<sha>" | null,
@@ -14,7 +15,7 @@ mode 0700) and returns ``(state, plan)``. The plan is consumed by the later
                          "revision": "base" | "head"} | null,
                           # revision: which side's mapping is faulty; "base" faults also say so in the text
      "new_runner_grants": bool,          # any selected case runs under a branch-authored runner block
-     "total_max_cost_usd": number,       # sum of the selected cases' runner.max_cost_usd
+     "total_max_cost_usd": number,       # sum of the runner.max_cost_usd of the selected cases that will run
      "cases": [{"plugin_root": "<repo-relative>", "case": "<name>",
                 "runs": int, "pass_at": int,
                 "runner": {"model": str, "allow_tools": [str], "max_cost_usd": number},
@@ -24,10 +25,15 @@ mode 0700) and returns ``(state, plan)``. The plan is consumed by the later
 Base takes precedence over the branch: cases are selected from the base and head
 mappings combined, and a corpus whose mapping exists at the base runs under the
 base's runner block, runs and pass_at. A corpus new on the branch uses its own and
-is flagged ``new_runner_grants``. A selected case whose ``case.yaml`` is gone at head
+is flagged ``new_runner_grants``; ``run`` records each of its cases as not-run
+``corpus-new-on-branch`` without starting a runner (the grants are unreviewed), and they add
+nothing to ``total_max_cost_usd``. A selected case whose ``case.yaml`` is gone at head
 stays in the plan with ``case_removed`` true; ``run`` records it as not-run
 ``case-removed-on-branch`` without starting a runner, and it adds nothing to
-``total_max_cost_usd``. Changed files come from ``git diff --no-renames``, so a renamed
+``total_max_cost_usd``. Every corpus path must pass ``mapping.valid_corpus_path``, else the
+plan is ``mapping-invalid``. A tracked file modified in the working tree
+(``git status --porcelain --untracked-files=no`` non-empty) makes the status ``tree-dirty``: the
+gate grades committed prose, so it selects nothing. Changed files come from ``git diff --no-renames``, so a renamed
 file counts as both its old and its new path.
 """
 
@@ -38,7 +44,7 @@ import subprocess
 import tempfile
 from pathlib import Path, PurePosixPath
 
-from .mapping import Mapping, MappingError, load_mapping
+from .mapping import Mapping, MappingError, load_mapping, valid_corpus_path
 
 MAPPING_NAME = "eval-gate.json"
 SCHEMA_VERSION = 1
@@ -117,10 +123,13 @@ def _select(repo: Path, merge_base: str, changed: list[str]) -> list[dict]:
     at_base = set(_git(repo, "ls-tree", "-r", "-z", "--name-only", merge_base).split("\0")) - {""}
     selected: list[dict] = []
     for path in sorted(p for p in tracked | at_base if _is_mapping(p)):
+        plugin = PurePosixPath(path).parent.parent
+        root = "" if str(plugin) == "." else plugin.as_posix()
+        if not valid_corpus_path(root):
+            raise MappingError(path, "the corpus path has characters outside A-Za-z0-9._/- or a '..' segment")
         base_text = _show(repo, merge_base, path) if path in at_base else None
         base_map = _load_base(path, base_text) if base_text is not None else None
         head_map = _load_head(repo, path, tracked)
-        plugin = PurePosixPath(path).parent.parent
         evals = (repo / path).parent
         names = sorted(set(base_map.cases if base_map else ()) | set(head_map.cases if head_map else ()))
         for name in names:
@@ -132,7 +141,7 @@ def _select(repo: Path, merge_base: str, changed: list[str]) -> list[dict]:
             case = base_case or head_case
             runner = (base_map or head_map).runner
             selected.append({
-                "plugin_root": plugin.as_posix() if str(plugin) != "." else "",
+                "plugin_root": root,
                 "case": name,
                 "runs": case.runs,
                 "pass_at": case.pass_at,
@@ -141,6 +150,10 @@ def _select(repo: Path, merge_base: str, changed: list[str]) -> list[dict]:
                 "case_removed": not (evals / name / "case.yaml").is_file(),
             })
     return selected
+
+
+def _runs(case: dict) -> bool:
+    return not case["case_removed"] and not case["new_runner_grants"]
 
 
 def plan(repo: Path, base: str | None) -> tuple[Path, dict]:
@@ -155,7 +168,9 @@ def plan(repo: Path, base: str | None) -> tuple[Path, dict]:
         "new_runner_grants": False, "total_max_cost_usd": 0, "cases": [],
     }
     resolved = _resolve_base(repo, base)
-    if resolved is None:
+    if _git(repo, "status", "--porcelain", "--untracked-files=no").strip():
+        result["status"] = "tree-dirty"
+    elif resolved is None:
         result["status"] = "base-unresolved"
     else:
         result["base"], result["merge_base"] = resolved
@@ -171,7 +186,7 @@ def plan(repo: Path, base: str | None) -> tuple[Path, dict]:
                 result["status"] = "cases-selected"
                 result["cases"] = cases
                 result["new_runner_grants"] = any(c["new_runner_grants"] for c in cases)
-                result["total_max_cost_usd"] = sum(c["runner"]["max_cost_usd"] for c in cases if not c["case_removed"])
+                result["total_max_cost_usd"] = sum(c["runner"]["max_cost_usd"] for c in cases if _runs(c))
     state = Path(tempfile.mkdtemp(prefix="portage-eval-gate-"))
     (state / "plan.json").write_text(json.dumps(result, indent=2) + "\n")
     return state, result

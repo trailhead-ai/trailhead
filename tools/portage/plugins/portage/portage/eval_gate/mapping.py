@@ -10,7 +10,9 @@ Shape::
 
 ``pass_at`` defaults to 2 when ``runs`` is 3; any other ``runs`` must declare its
 own ``pass_at``, which must lie in ``1..runs``. ``case.yaml`` is checked for
-presence only. Every fault raises ``MappingError`` carrying the mapping file and a
+presence only. ``runs`` lies in 1..10; ``runner.model`` is a conservative model id, each
+``runner.allow_tools`` entry a tool name (letters, digits, ``_``) with at most one
+single-line parenthesised argument, and ``runner.max_cost_usd`` a finite number in (0, 25]. Every fault raises ``MappingError`` carrying the mapping file and a
 one-line fault, never a traceback.
 """
 
@@ -25,6 +27,11 @@ SCHEMA_VERSION = 1
 DEFAULT_RUNS = 3
 DEFAULT_PASS_AT = 2
 CASE_NAME = re.compile(r"^[a-z0-9][a-z0-9._-]*\Z")
+CORPUS_PATH = re.compile(r"^[A-Za-z0-9._][A-Za-z0-9._/-]{0,199}\Z")
+TOOL_GRANT = re.compile(r"^[A-Za-z0-9_]+(?:\([^\n\r]*\))?\Z")
+MODEL_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}\Z")
+MAX_COST_USD = 25
+MAX_RUNS = 10
 
 _TOP_KEYS = {"schema_version", "runner", "cases"}
 _RUNNER_KEYS = {"model", "allow_tools", "max_cost_usd"}
@@ -53,6 +60,14 @@ class Mapping:
     cases: dict[str, Case]
 
 
+def valid_corpus_path(root: object) -> bool:
+    """A repo-relative corpus (plugin root) path safe to print: the empty root, or
+    a conservative-character path with no ``..`` segment."""
+    if root == "":
+        return True
+    return isinstance(root, str) and bool(CORPUS_PATH.match(root)) and ".." not in PurePosixPath(root).parts
+
+
 def _is_int(v) -> bool:
     return isinstance(v, int) and not isinstance(v, bool)
 
@@ -70,14 +85,18 @@ def _runner(obj, file: str) -> dict:
     missing = sorted(_RUNNER_KEYS - set(obj))
     if missing:
         raise MappingError(file, f"runner is missing {missing[0]!r}")
-    if not isinstance(obj["model"], str) or not obj["model"]:
-        raise MappingError(file, "runner.model must be a non-empty string")
+    if not isinstance(obj["model"], str) or not MODEL_ID.match(obj["model"]):
+        raise MappingError(file, f"runner.model must match {MODEL_ID.pattern}")
     tools = obj["allow_tools"]
     if not isinstance(tools, list) or not all(isinstance(t, str) for t in tools):
         raise MappingError(file, "runner.allow_tools must be a list of strings")
+    for t in tools:
+        if not TOOL_GRANT.match(t):
+            raise MappingError(file, f"runner.allow_tools entry {t!r} must be a tool name, "
+                                     "optionally followed by one parenthesised argument on one line")
     cost = obj["max_cost_usd"]
-    if isinstance(cost, bool) or not isinstance(cost, (int, float)) or cost <= 0:
-        raise MappingError(file, "runner.max_cost_usd must be a positive number")
+    if isinstance(cost, bool) or not isinstance(cost, (int, float)) or not 0 < cost <= MAX_COST_USD:
+        raise MappingError(file, f"runner.max_cost_usd must be a finite number in (0, {MAX_COST_USD}]")
     return {"model": obj["model"], "allow_tools": list(tools), "max_cost_usd": cost}
 
 
@@ -106,8 +125,8 @@ def _case(name: str, obj, file: str, plugin_root: Path | None, evals_dir: Path |
         raise MappingError(file, f"case {name!r}: measures must be a non-empty list")
     paths = tuple(_measure(m, name, file, plugin_root) for m in measures)
     runs = obj.get("runs", DEFAULT_RUNS)
-    if not _is_int(runs) or runs < 1:
-        raise MappingError(file, f"case {name!r}: runs must be an integer >= 1")
+    if not _is_int(runs) or not 1 <= runs <= MAX_RUNS:
+        raise MappingError(file, f"case {name!r}: runs must be an integer in 1..{MAX_RUNS}")
     if "pass_at" in obj:
         pass_at = obj["pass_at"]
         if not _is_int(pass_at) or not 1 <= pass_at <= runs:
