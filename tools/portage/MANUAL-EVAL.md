@@ -243,6 +243,21 @@ by another user. No run in these batches invoked lore, this session made no lore
 index file contains any of the fixtures' names (`ledger-roundtrip`, `export-header-order`, `ledgerkit`,
 `invoicer`).
 
+### Trust-model revision, 2026-10-22: not re-measured
+
+`0ac64947` adds the trust-model statement, the first-`state:`-line check and the `tree-dirty` and
+`corpus-new-on-branch` report wording to `agents/updater.md`. The two cases were **not** re-run against it:
+runner 2.1.303, the only build that passed the sandbox-write canary on this host, is no longer installed
+(`~/.local/share/claude/versions/` now holds 2.1.306, 2.1.307 and 2.1.308), and the canary run directly against
+2.1.307 and 2.1.308 scored 0 on both (`wrote-a-file` failed, error null, 0.003 USD each). A case run on a runner
+whose sandbox cannot write would measure the runner, not the updater. The last measured updater revision
+remains `d6027228` (3 of 3 on both cases, fixtures `a22bb807`); `0ac64947` is unmeasured. The scratch repos are
+clean trees and the stand-in calls the real `plan`, whose first `state:` line is an absolute
+`portage-eval-gate-*` path, so no fixture change is expected, but that is reasoned, not run.
+
+A reviewer noted that `a-failing-eval-gate-stops-the-push/expected.md` cites AC36 where the stop-on-fail
+criterion is AC35. `expected.md` was pre-registered and is left as written.
+
 ### Limitations
 
 - The live gate check (AC38) and every run here were on Linux only; nothing was checked on macOS. The runner's
