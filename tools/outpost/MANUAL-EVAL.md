@@ -1382,7 +1382,7 @@ text before this line; they are not re-run here.
 excerpt and the yes turn is scripted. Pad and vault outside a camp workspace; the stub `lore` makes every sync
 succeed, so the not-synced offer, a taken name, the credential refusal and the other refusals are untested by
 the eval (the script's tests own the refusals; the skill's quoted lines are checked against the script by
-`test_scratch_pad_skill_reference.py`). The baseline's script accepts `--reference`; no baseline run used it.
+`test_scratch_pad_skill_reference.py`). The baseline's script accepts `--reference`; no baseline run used it. Reads outside the home directory are not confined: baseline run 21 and treatment run 22 each ran a root-wide `find / -name invoice-screen*`; run 22's listing included a leftover pytest fixture directory from this task's own test runs, and the run went on with its own pad (its published page holds the right drawing).
 The ruleset reaches each arm through `--append-system-prompt`. No PreToolUse hook. A human should open one
 published fixture page in a browser (the pad's drawing, cost line and date) and check a real vault sync with a
 real signing prompt; neither is exercised here.
