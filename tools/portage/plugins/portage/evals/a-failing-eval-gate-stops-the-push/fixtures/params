@@ -1,0 +1,5 @@
+PLUGIN=ledgerkit
+SKILL=rounding
+CASE=ledger-roundtrip
+BRANCH=topic/ledger-rounding
+MODE=fail

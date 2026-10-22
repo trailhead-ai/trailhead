@@ -1,0 +1,74 @@
+{
+  "_provenance": "claude 2.1.306 (claude plugin eval), run 2026-10-21 on Linux; outcome: --max-cost-usd 0.01 breached after first run; top-level partial true partialReason cost_ceiling, only 1 of 3 runs present, error null, skippedPaidGraders true; runner exit 2. Trimmed: prompts, grader explanations, grader evidence and config, trace paths, suite paths removed.",
+  "schemaVersion": 1,
+  "claudeVersion": "2.1.306",
+  "startedAt": "2026-10-21T15:49:19.438Z",
+  "durationSeconds": 2,
+  "costUsd": 0.014942800000000001,
+  "partial": true,
+  "partialReason": "cost_ceiling",
+  "suite": {
+    "ablation": "none",
+    "modelOverride": "claude-haiku-4-5",
+    "caseFilter": "ok",
+    "threshold": 1,
+    "concurrency": 1,
+    "plugins": [
+      {
+        "name": "probe",
+        "version": "0.0.1"
+      }
+    ]
+  },
+  "cases": [
+    {
+      "name": "ok",
+      "source": "mixed",
+      "runsPerCase": 3,
+      "timeoutSeconds": 300,
+      "maxTurns": 3,
+      "graders": [
+        {
+          "name": "says",
+          "type": "llm",
+          "weight": 1
+        }
+      ],
+      "arms": {
+        "with": [
+          {
+            "score": 0,
+            "passed": false,
+            "turns": 1,
+            "costUsd": 0.014942800000000001,
+            "judgeCostUsd": 0,
+            "durationSeconds": 2,
+            "startedAt": "2026-10-21T15:49:19.457Z",
+            "error": null,
+            "skippedPaidGraders": true,
+            "graders": [
+              {
+                "name": "says",
+                "passed": false,
+                "weight": 1,
+                "explanation": "<removed>",
+                "withOnly": false,
+                "scored": true
+              }
+            ]
+          }
+        ]
+      },
+      "aggregates": {
+        "score": 0,
+        "passRate": 0
+      }
+    }
+  ],
+  "aggregates": {
+    "casesTotal": 1,
+    "casesPassed": 0,
+    "overallScore": 0,
+    "overallPassRate": 0
+  }
+}

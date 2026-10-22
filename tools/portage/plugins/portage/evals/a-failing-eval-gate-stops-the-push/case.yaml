@@ -1,0 +1,9 @@
+schema_version: "1.1"
+name: a-failing-eval-gate-stops-the-push
+runs: 3
+execution:
+  max_turns: 40
+  timeout_seconds: 540
+  allowed_tools: [Read, Glob, Grep, Agent]
+context:
+  scaffold_script: fixtures/scaffold.sh

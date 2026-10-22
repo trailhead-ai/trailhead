@@ -172,6 +172,18 @@ class SessionTranscript:
     modified_at: datetime
 
 
+@dataclass(frozen=True)
+class EvalRunner:
+    """How to run one prose-eval case: the argv to exec and the COMPLETE environment.
+
+    ``env`` is the whole child environment, built from an allowlist — the caller
+    execs with exactly this mapping and never merges its own environment in.
+    """
+
+    argv: list[str]
+    env: dict[str, str]
+
+
 class Harness(ABC):
     """Abstract installer for one AI code harness.
 
@@ -584,6 +596,33 @@ class Harness(ABC):
     # and ``parse_session_list`` must be overridden together or not at all. A
     # half-implemented harness is worse than an unimplemented one: it
     # advertises a capability it cannot actually honor.
+
+    def eval_runner(
+        self,
+        *,
+        plugin_dir: Path,
+        case: str,
+        runs: int,
+        model: str,
+        allow_tools: list[str],
+        max_cost_usd: float,
+        json_path: Path,
+        output_dir: Path,
+        env: dict[str, str],
+        eval_dir: str | None = None,
+        tmpdir: Path | None = None,
+    ) -> EvalRunner | None:
+        """The argv and allowlist environment that run one eval case, or ``None``.
+
+        ``None`` means "this harness has no prose-eval runner". ``env`` is the
+        caller's environment, which the harness filters down to what its runner
+        needs; nothing outside that allowlist may reach the child. ``eval_dir``
+        names the directory below the plugin that holds the cases, when it is
+        not the runner's default. ``tmpdir`` is a private directory the caller
+        created and will remove; a runner that needs its temp directory placed
+        puts it in the child environment.
+        """
+        return None
 
     def session_launch_env_unset(self) -> list[str] | None:
         """Env var names a launching caller must scrub before spawning, or ``None``.

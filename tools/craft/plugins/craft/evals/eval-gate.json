@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "runner": {
+    "model": "claude-opus-5-5",
+    "allow_tools": [
+      "Bash(./lore *)",
+      "Bash(*/scripts/maturity_bars.py *)",
+      "Bash(:)",
+      "Bash(: *)"
+    ],
+    "max_cost_usd": 3.5
+  },
+  "cases": {
+    "accepted-review-correction-is-applied-not-parked": {
+      "measures": [
+        "skills/receiving-code-review/SKILL.md"
+      ]
+    },
+    "consult-lists-a-sibling-correction-without-writing-it": {
+      "measures": [
+        "skills/_shared/council.md",
+        "skills/consult/SKILL.md"
+      ]
+    },
+    "declined-review-correction-is-left-alone": {
+      "measures": [
+        "skills/receiving-code-review/SKILL.md"
+      ]
+    }
+  }
+}

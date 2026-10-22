@@ -14,7 +14,7 @@ description: >
 
 **Agents:** `updater` (push orchestration), `monitor` (background watch + merge loop)
 **CLI:** `portage` (subcommands `detect-repos`, `check-status`, `evaluate-status`,
-`summarize`, `merge`, `wait-for-actionable`, `sidecar` — run `portage --help` for
+`summarize`, `merge`, `wait-for-actionable`, `sidecar`, `eval-gate` — run `portage --help` for
 the full list) — on `$PATH` when the plugin is enabled
 
 ## Verb parsing
@@ -53,6 +53,20 @@ not aliased:
 | `/portage:update` | `/portage:pull_request update` |
 | `/portage:monitor` | `/portage:pull_request monitor` |
 | `/portage:merge` | `/portage:pull_request merge` |
+
+## The eval gate line
+
+Before it pushes, `updater` runs the prose-eval cases the branch touches and leads its summary with an
+`**Eval gate:**` line. **Relay that line first, before anything else in the summary**, in the
+updater's own words:
+
+- It says the push was **stopped**: a case scored below its bar and nothing was pushed or updated in any
+  repo. Name the failing case(s) and the kept state path it gives, pass on its ways forward, and do not
+  launch `monitor` (there are no PRs to watch).
+- It says the gate **did not run**: the push went ahead and the PR body says why. When the line marks the
+  reason as persistent, tell the operator plainly that every push will skip the gate until they fix it, and
+  repeat the remedy the line gives.
+- It says the gate passed, or that no eval cases are mapped to what changed: say so in one clause.
 
 ## `create` — open PRs
 
@@ -101,7 +115,7 @@ Agent({
 ```
 
 Tell the user: "Watching PRs in the background — I'll notify you when they're merged
-or need attention." Then relay updater's summary and return.
+or need attention." Then relay updater's summary (its `**Eval gate:**` line first) and return.
 
 ## `update` — push new commits to existing PRs
 
@@ -151,7 +165,7 @@ Agent({
 ```
 
 Tell the user: "Watching PRs in the background — I'll notify you when they're merged
-or need attention." Then relay updater's summary and return.
+or need attention." Then relay updater's summary (its `**Eval gate:**` line first) and return.
 
 ## `monitor` — watch CI
 
