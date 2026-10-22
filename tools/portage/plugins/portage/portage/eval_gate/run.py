@@ -49,10 +49,13 @@ variable) and nothing starts. It replaces the harness's own ``claude`` lookup an
 never forwarded into the child's environment.
 
 Each runner call, the canary and the case, gets a private temp directory as ``TMPDIR``,
-created by ``run`` under ``$XDG_CACHE_HOME/portage/eval-gate-tmp`` (``$HOME/.cache/...`` when
+created by ``run`` under ``$XDG_CACHE_HOME/pegt`` (``$HOME/.cache/pegt`` when
 ``XDG_CACHE_HOME`` is unset or not absolute, both read from the gate's own environment) and
 removed when the call ends. The runner's sandbox could not write when its temp dir was under
-``/tmp`` on the tested Linux host; the canary still catches a runner that cannot write. A base
+``/tmp`` or when the path was longer than 51 characters (runner 2.1.308, the tested Linux
+host; an empirical limit of that runner). A per-call path over 51 characters is recorded
+not-run ``runner-sandbox-unwritable`` before any runner starts, the canary included, with a
+stderr line naming the length. The canary still catches a runner that cannot write. A base
 that is a symlink, owned by another user or group- or world-writable makes the case not-run
 ``runner-error`` (a stderr line names the problem) and no runner starts. The directory is placed
 through the harness's ``eval_runner`` hook (``tmpdir``).
@@ -125,7 +128,15 @@ def _check_state(state: Path) -> None:
         raise RunRefused(f"state directory {state} must be mode 0700")
 
 
+MAX_TMPDIR_CHARS = 51
+_CALL_DIR_CHARS = 8
+
+
 class TmpBaseRefused(Exception):
+    pass
+
+
+class TmpPathTooLong(Exception):
     pass
 
 
@@ -138,7 +149,7 @@ def _tmp_base(env: dict[str, str]) -> Path:
         if not home or not os.path.isabs(home):
             raise TmpBaseRefused("no usable XDG_CACHE_HOME or HOME for the runner temp directory")
         cache = Path(home) / ".cache"
-    base = cache / "portage" / "eval-gate-tmp"
+    base = cache / "pegt"
     try:
         base.mkdir(mode=0o700, parents=True, exist_ok=True)
         st = os.lstat(base)
@@ -156,7 +167,13 @@ def _tmp_base(env: dict[str, str]) -> Path:
 @contextmanager
 def _call_tmpdir(env: dict[str, str]):
     """A private directory for one runner call, removed on exit."""
-    path = Path(tempfile.mkdtemp(prefix="call-", dir=_tmp_base(env)))
+    base = _tmp_base(env)
+    length = len(str(base)) + 1 + _CALL_DIR_CHARS
+    if length > MAX_TMPDIR_CHARS:
+        raise TmpPathTooLong(
+            f"runner temp path would be {length} characters, over the {MAX_TMPDIR_CHARS} the "
+            f"runner's sandbox wrote through; set a shorter XDG_CACHE_HOME")
+    path = Path(tempfile.mkdtemp(prefix="", dir=base))
     try:
         yield path
     finally:
@@ -344,6 +361,9 @@ def run_case(
         with _call_tmpdir(env) as case_tmp:
             return _run_planned(state, case, n, pass_at, plugin_dir, runner_cfg, runs_dir,
                                 json_path, timeout_seconds, request, override, env, case_tmp)
+    except TmpPathTooLong as e:
+        print(f"eval-gate run: {e}", file=sys.stderr)
+        return _record(state, case, _not_run(case, n, SANDBOX_UNWRITABLE))
     except TmpBaseRefused as e:
         print(f"eval-gate run: {e}", file=sys.stderr)
         return _record(state, case, _not_run(case, n, RUNNER_ERROR))

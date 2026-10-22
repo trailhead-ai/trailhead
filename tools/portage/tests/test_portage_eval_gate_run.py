@@ -14,6 +14,7 @@ import json
 import os
 import shutil
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -81,7 +82,8 @@ class Env:
         self.tmp = tmp_path
         self.bin = tmp_path / "bin"
         self.bin.mkdir()
-        self.home = tmp_path / "home"
+        self.root = Path(tempfile.mkdtemp(dir="/tmp", prefix="pg"))
+        self.home = self.root / "h"
         (self.home / ".claude").mkdir(parents=True)
         self.log = str(tmp_path / "fake")
         self.repo = tmp_path / "repo"
@@ -157,7 +159,8 @@ class Env:
 def env(tmp_path, monkeypatch):
     e = Env(tmp_path, monkeypatch)
     e.plan()
-    return e
+    yield e
+    shutil.rmtree(e.root, ignore_errors=True)
 
 
 def _verdict(env, runs, code=1, **top):
@@ -466,7 +469,7 @@ class TestRunnerTempDir:
     def test_each_call_gets_a_private_dir_under_the_cache_base_and_outside_tmp(self, env):
         env.fake(_result([PASS] * 3))
         assert env.run() == 0
-        base = env.home / ".cache" / "portage" / "eval-gate-tmp"
+        base = env.home / ".cache" / "pegt"
         assert len(env.calls) == 2
         dirs = []
         for call in env.calls:
@@ -480,14 +483,14 @@ class TestRunnerTempDir:
     def test_the_dirs_are_gone_after_the_call(self, env):
         env.fake(_result([PASS] * 3))
         assert env.run() == 0
-        assert _children(env.home / ".cache" / "portage" / "eval-gate-tmp") == []
+        assert _children(env.home / ".cache" / "pegt") == []
 
     def test_the_dirs_are_gone_after_a_timeout(self, env):
         env.fake(_result([PASS] * 3), sleep=30)
         env.seed_canary()
         run_case(env.state, "c1", timeout_seconds=1)
-        assert Path(env.calls[0]["env"]["TMPDIR"]).parent.name == "eval-gate-tmp"
-        assert _children(env.home / ".cache" / "portage" / "eval-gate-tmp") == []
+        assert Path(env.calls[0]["env"]["TMPDIR"]).parent.name == "pegt"
+        assert _children(env.home / ".cache" / "pegt") == []
 
     def test_the_dirs_are_gone_after_the_runner_raises(self, env):
         env.fake(_result([PASS] * 3))
@@ -501,23 +504,23 @@ class TestRunnerTempDir:
         env.mp.setattr("portage.eval_gate.run._execute", boom)
         with pytest.raises(RuntimeError):
             run_case(env.state, "c1")
-        assert Path(seen[0]).parent.name == "eval-gate-tmp"
-        assert _children(env.home / ".cache" / "portage" / "eval-gate-tmp") == []
+        assert Path(seen[0]).parent.name == "pegt"
+        assert _children(env.home / ".cache" / "pegt") == []
 
     def test_only_the_per_call_dir_is_removed(self, env):
         env.fake(_result([PASS] * 3))
-        base = env.home / ".cache" / "portage" / "eval-gate-tmp"
+        base = env.home / ".cache" / "pegt"
         base.mkdir(parents=True, mode=0o700)
         (base / "other").mkdir()
         assert env.run() == 0
         assert _children(base) == [base / "other"]
 
     def test_xdg_cache_home_is_honoured(self, env):
-        xdg = env.tmp / "xdg"
+        xdg = env.root / "x"
         env.mp.setenv("XDG_CACHE_HOME", str(xdg))
         env.fake(_result([PASS] * 3))
         assert env.run() == 0
-        assert Path(env.calls[0]["env"]["TMPDIR"]).parent == xdg / "portage" / "eval-gate-tmp"
+        assert Path(env.calls[0]["env"]["TMPDIR"]).parent == xdg / "pegt"
         assert not (env.home / ".cache").exists()
 
     def test_a_relative_xdg_cache_home_falls_back_to_home(self, env):
@@ -525,7 +528,7 @@ class TestRunnerTempDir:
         env.fake(_result([PASS] * 3))
         assert env.run() == 0
         assert Path(env.calls[0]["env"]["TMPDIR"]).parent == (
-            env.home / ".cache" / "portage" / "eval-gate-tmp")
+            env.home / ".cache" / "pegt")
 
     def test_an_inherited_tmpdir_never_reaches_the_child(self, env):
         env.fake(_result([PASS] * 3))
@@ -541,7 +544,7 @@ class TestRunnerTempDir:
         assert env.calls == [] and not env.started
 
     def test_a_symlinked_base_is_refused_and_no_runner_starts(self, env):
-        base = env.home / ".cache" / "portage" / "eval-gate-tmp"
+        base = env.home / ".cache" / "pegt"
         base.parent.mkdir(parents=True)
         real = env.tmp / "real"
         real.mkdir(mode=0o700)
@@ -549,17 +552,54 @@ class TestRunnerTempDir:
         self._refused(env)
 
     def test_a_group_writable_base_is_refused_and_no_runner_starts(self, env):
-        base = env.home / ".cache" / "portage" / "eval-gate-tmp"
+        base = env.home / ".cache" / "pegt"
         base.mkdir(parents=True)
         base.chmod(0o770)
         self._refused(env)
 
     def test_a_foreign_owned_base_is_refused_and_no_runner_starts(self, env):
-        base = env.home / ".cache" / "portage" / "eval-gate-tmp"
+        base = env.home / ".cache" / "pegt"
         base.mkdir(parents=True, mode=0o700)
         env.mp.setattr("portage.eval_gate.run._check_state", lambda state: None)
         env.mp.setattr(os, "geteuid", lambda: os.stat(base).st_uid + 1)
         self._refused(env)
+
+
+class TestRunnerTempDirLength:
+    """The runner's sandbox wrote only when the temp path was at most 51 characters."""
+
+    def _cache_of_call_path_length(self, env, n: int) -> Path:
+        # per-call path = cache + "/pegt/" + 8 random characters
+        cache = env.root
+        pad = n - 14 - len(str(cache)) - 1
+        cache = cache / ("c" * pad)
+        env.mp.setenv("XDG_CACHE_HOME", str(cache))
+        assert len(str(cache)) + 14 == n
+        return cache
+
+    def test_the_base_is_short_enough_for_a_typical_home(self, env):
+        env.fake(_result([PASS] * 3))
+        assert env.run() == 0
+        assert all(len(c["env"]["TMPDIR"]) <= 51 for c in env.calls)
+        assert Path(env.calls[0]["env"]["TMPDIR"]).parent == env.home / ".cache" / "pegt"
+
+    def test_a_per_call_path_of_51_characters_runs(self, env):
+        self._cache_of_call_path_length(env, 51)
+        env.fake(_result([PASS] * 3))
+        assert env.run() == 0
+        assert [len(c["env"]["TMPDIR"]) for c in env.calls] == [51, 51]
+        assert env.result()["verdict"] == "pass"
+
+    def test_a_per_call_path_of_52_characters_is_unwritable_and_no_runner_starts(self, env, capsys):
+        self._cache_of_call_path_length(env, 52)
+        env.fake(_result([PASS] * 3))
+        assert env.run() == 0
+        r = env.result()
+        assert (r["verdict"], r["reason"]) == ("not-run", "runner-sandbox-unwritable")
+        assert env.calls == [] and not env.started
+        err = capsys.readouterr().err
+        assert "52" in err and "XDG_CACHE_HOME" in err
+        assert not (env.state / "canary.json").exists()
 
 
 class TestSeamSmoke:

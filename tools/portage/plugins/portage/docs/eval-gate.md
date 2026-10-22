@@ -72,12 +72,16 @@ for the rest of that state directory.
 
 The gate places the runner's temp directory under the user cache, because the runner's sandbox could not
 write when its temp dir was under `/tmp` on the tested Linux host (where `/tmp` is a separate mount; measured
-2026-10-22, macOS not checked). Each runner call, the canary and the case, gets a private directory
-`$XDG_CACHE_HOME/portage/eval-gate-tmp/call-*` (`$HOME/.cache/...` when `XDG_CACHE_HOME` is unset or not
-absolute) as its `TMPDIR`, removed when the call ends. A base directory that is a symlink, owned by another
-user or group- or world-writable makes the case not-run `runner-error` and no runner starts. A `TMPDIR` in the
-caller's environment is never passed on. On that host, with the directory placed there, the canary passed on
-runner 2.1.308. The canary still catches a runner that cannot write on another host or version.
+2026-10-22, macOS not checked). On runner 2.1.308 there, a temp path outside `/tmp` worked at 51 characters or
+fewer and failed at 52 or more; `TMPDIR=/tmp` itself failed. That is an empirical limit of that runner, not a
+documented one. Each runner call, the canary and the case, gets a private directory
+`$XDG_CACHE_HOME/pegt/<8 characters>` (`$HOME/.cache/pegt/...` when `XDG_CACHE_HOME` is unset or not absolute)
+as its `TMPDIR`, removed when the call ends. A per-call path over 51 characters is recorded not-run
+`runner-sandbox-unwritable` before any runner starts, canary included, and a stderr line names the length;
+set a shorter `XDG_CACHE_HOME`. A base directory that is a symlink, owned by another user or group- or
+world-writable makes the case not-run `runner-error` and no runner starts. A `TMPDIR` in the caller's
+environment is never passed on. The canary still catches a runner that cannot write on another host or
+version.
 
 `PORTAGE_EVAL_RUNNER` pins the runner binary for the gate on one machine: an absolute path to an executable
 file, used for both the canary and the case in place of the harness's own `claude` lookup. A value that is
