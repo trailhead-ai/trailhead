@@ -1632,8 +1632,9 @@ said "none".
 listed only `lanternrow` at the run directory, checked before the run. The live trailhead vault's HEAD before the run was
 `<live-vault-commit>` and after it `<live-vault-commit>`. **It moved**, which
 the recipe counts as the task failing. The one commit between them is `<live-vault-commit>`, `lore: andromeda published 2 item(s)`,
-13:20:09 -0500, touching three records about amend (`<live-vault-record>`, `<live-vault-record>`);
-the preceding commits are one to eleven minutes apart from the same publisher. The transcript contains no reference to the live
+13:20:09 -0500, publishing two items about amend (three files: `<live-vault-record>`, `<live-vault-record>`);
+the commits just before it (`<live-vault-commit>`, `<live-vault-commit>`, `<live-vault-commit>`) are this host's own `<this-host>` publishes, so the window holds
+that single `andromeda` commit among them. The transcript contains no reference to the live
 vault path (0 hits for `local/state/lore` and `vaults/trailhead`) and the sandbox denies writes outside the run directory.
 **Ruling (controller, 2026-10-22):** the run stands. `andromeda` is a different machine; the run was on host
 `<this-host>`, whose own publishes are named `<this-host>` in the same log. The move is that machine's publish arriving
