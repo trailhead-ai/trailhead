@@ -118,7 +118,9 @@ by name rather than shown as done. The ritual
 refines each chosen follow-up one at a time, shows each eligible one's scope for
 confirmation, and nests the confirmed ones under one new parent through
 `scripts/followup_parent.py` (`check`, then `assemble`), ending with the commands
-to build and distill. When a follow-up parent already exists it acts on it instead:
+to build and distill. A follow-up that is really one of the spec's own unmet
+acceptance criteria is reported as such, held out of the parent, and ends the run
+without a distill command. When a follow-up parent already exists it acts on it instead:
 an `open` parent is resumed (`state`, `check`, then `resume` nests the follow-ups
 it lists and makes it buildable), a `ready`, `in-progress` or `blocked` parent is
 refused with its build command, and a drop (`drop`, from any of these) un-nests the
