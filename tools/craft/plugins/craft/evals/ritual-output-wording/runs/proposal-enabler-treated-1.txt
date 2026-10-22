@@ -1,0 +1,22 @@
+You will be able to see a returned held item set aside for the next borrower in line and shown as waiting on the hold shelf, once the hold shelf slice that comes after this one lands. This slice is an enabler that makes that possible.
+
+Try it: there is nothing to try yet. This slice stores a record that nothing reads until the hold shelf slice is built.
+
+**Chosen slice:** The shelf record slice, chosen on the enabler path.
+
+**Criteria this slice makes fully green:** none. It is an enabler, and an enabler makes no criterion green.
+
+**Criteria this slice makes partly green:** none, for the same reason.
+
+**What is left of the spec once this slice is built:** the same as now, since this slice covers nothing.
+- **Placing a hold:** two of four criteria left. The partly covered one is the exception: "a borrower can hold at most five items at once, and a sixth hold is refused with a message saying why" (AC2). The first hold slice covered it in part. The other is cancelling a hold.
+- **Filling a hold:** three of three left. These cover setting the item aside, the waiting message and lapsing.
+- **Collecting at the desk:** three of three left. These cover the desk list, checkout and the weekly report.
+
+**Visual surface:** this slice touches no visual surface. It stores a record and nothing reads it yet, so no enumerated states apply.
+
+**Enabler justification (in place of a value claim):** this slice adds a stored record of which shelf slot each set-aside item sits in, and the pickup deadline for that item. The hold shelf slice and the lapse slice both read that record. Folding it into the hold shelf slice would put a change to the stored format and the behaviour that reads it into one slice, and the two could not be reviewed separately. The hold shelf slice is the one this enables, and it comes next.
+
+If this is the slice you want, I'll write the parent task `task/the-shelf-record-slice`. If not, now is the time to reject it, before anything is written.
+
+(none — enabler slice: no `--covers` value is drafted and no `**Covers:**` field is written)

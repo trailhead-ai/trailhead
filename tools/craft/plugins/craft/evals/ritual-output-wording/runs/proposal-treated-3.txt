@@ -1,0 +1,23 @@
+You will be able to return an item that has a hold on it and have the system set it aside for the first borrower waiting for it, and that borrower will get one message telling them it is ready and when they must collect it by. Try it: once this is built, place a hold on an item that is out on loan, check that item back in, and you will see it marked as on the hold shelf for that borrower, with one message sent to them that names the pickup deadline.
+
+**Chosen slice:** The hold shelf slice.
+
+**Criteria this slice fully meets:**
+- When a held item is returned, it is set aside for the first borrower in its queue and shown as on the hold shelf (AC5).
+- The first borrower is sent one message that the item is waiting, naming the pickup deadline (AC6).
+
+**Criteria this slice only partly meets:** none.
+
+**What's left of the spec after this slice:** six of the ten criteria.
+- **Placing a hold:** two of four left. They cover cancelling a hold and the limit on how many holds a borrower can have.
+- **Filling a hold:** one of three left. It's the seven-day lapse when a hold isn't collected.
+- **Collecting at the desk:** all three left.
+- **Partly done:** the rule that a borrower can hold at most five items at once, and a sixth hold is refused with a message saying why (AC2). An earlier slice covered part of it, and this slice doesn't finish it.
+
+**Visual surface:** none. This slice changes what the system does when an item comes back and which message goes out. It adds or changes no screen, so no enumerated states apply.
+
+**Value claim:** when an item with a hold on it is returned, it is set aside for the first borrower in that item's queue, and that borrower gets one message naming the pickup deadline. Held items stop going back onto the open shelf.
+
+Nothing has been written yet. If you accept this slice, the next step creates the parent task `task/the-hold-shelf-slice`.
+
+AC5, AC6

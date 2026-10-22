@@ -1,0 +1,22 @@
+You will be able to rely on a returned item that someone is waiting for being kept for them rather than going back on the open shelf, with that borrower told when to collect it. Try it: once this is built, place a hold on an item that is out on loan, return that item, and check that it is set aside for the borrower whose hold is first in line and that they get one message naming the pickup deadline.
+
+**The chosen slice: the hold shelf slice.** Of the remaining candidates, this is the smallest next slice that still clears the value floor.
+
+**Value claim:** At the moment, held items go back onto the open shelf when they are returned. With this slice, a returned item that has holds on it is set aside for the first borrower in its queue, and that borrower gets one message naming the pickup deadline.
+
+**This slice fully covers two criteria:**
+- When a held item is returned, it is set aside for the first borrower in its queue and shown as on the hold shelf (AC5).
+- The first borrower is sent one message that the item is waiting, naming the pickup deadline (AC6).
+
+**Partial coverage:** none. This slice covers no criterion only in part.
+
+**Visual surface:** none. The slice changes what the system does when an item comes back and which message goes out. It adds or changes no screen, so there are no enumerated states.
+
+**What is left of the spec once this slice is built:**
+- **Placing a hold:** two of four left. One is only partly covered: a borrower can hold at most five items at once, and a sixth hold is refused with a message saying why (AC2). The other lets a borrower cancel a hold before it is filled.
+- **Filling a hold:** one of three left, about letting an uncollected hold lapse after seven days.
+- **Collecting at the desk:** three of three left. They cover the desk screen showing a borrower's waiting holds, the rules for checking out a held item, and the weekly holds report.
+
+If you accept this slice, the next step writes the parent task `task/the-hold-shelf-slice` with these two criteria as its coverage. If you'd rather pick a different slice, say so now, before anything is written.
+
+AC5, AC6

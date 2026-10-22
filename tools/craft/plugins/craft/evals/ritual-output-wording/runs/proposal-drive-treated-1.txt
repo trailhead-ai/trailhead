@@ -1,0 +1,24 @@
+You will be able to return an item that someone has a hold on and have it set aside for the first borrower waiting for it, who then gets one message telling them the date they must collect it by. Try it: once the slice is built, place a hold on an item that is out on loan, check that item back in, and confirm it is set aside for that borrower and that they get one message naming the pickup deadline.
+
+**Chosen slice:** The hold shelf slice
+
+**What it fully covers:** this slice fully meets two acceptance criteria:
+- "When a held item is returned, it is set aside for the first borrower in its queue and shown as on the hold shelf" (AC5)
+- "The first borrower is sent one message that the item is waiting, naming the pickup deadline" (AC6)
+
+**What it partly covers:** nothing. This slice doesn't partly meet any acceptance criterion.
+
+**What's left of the spec once this slice is built:**
+- **Placing a hold:** two of four left.
+  - One of them is already partly done: "A borrower can hold at most five items at once, and a sixth hold is refused with a message saying why" (AC2). The first hold slice started it and this slice doesn't finish it.
+  - The other is cancelling a hold.
+- **Filling a hold:** one of three left, which is uncollected holds lapsing after seven days.
+- **Collecting at the desk:** three of three left.
+
+**Visual surface:** this slice touches no visual surface. It changes what the system does when a held item comes back and which message goes out. It adds or changes no screen, so it has no states to list.
+
+**Value claim:** a returned item with a hold queued against it is set aside for the first borrower in that queue. That borrower gets one message naming the pickup deadline, so held items stop going back onto the open shelf.
+
+Nothing has been written yet. If you accept this slice, I'll create the parent task `task/the-hold-shelf-slice` and start the plan phase. If you'd rather a different slice came next, say so now.
+
+AC5, AC6

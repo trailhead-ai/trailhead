@@ -1469,3 +1469,91 @@ Counting the pilot does not change a verdict.
 
 Captures, rows and this section only. No arm, fixture, earlier table row, `rules.md`, `slice/SKILL.md` or
 `drive/SKILL.md` was changed. Not run: any treated arm, any paired control, any real `/craft:slice` session.
+
+## Treated, 2026-10-22 — the proposal treated batches captured, graded and read; every reading is a clean-majority pass at both sub-sites
+
+Run against the frozen registration above, unchanged. **Provenance:** the treated arms were added at `9fad4e27`, with
+`slice/SKILL.md` at commit P `57da08ac` (the `## Arms` table above is untouched). Arm sizes as run: `proposal-treated`
+59315 bytes, `proposal-drive-treated` 105190 bytes (`wc -c`), both under the 131072 per-argument limit, so each went by
+`--append-system-prompt`. Each run was its own `claude -p` process by the `## Dispatch` command (`--setting-sources
+project`, `--allowedTools "Read"`, fixtures copied to a fresh empty directory under `/tmp` with `FIXTURES_DIR` replaced,
+the process started from a second empty directory, both removed by their recorded path after the run), strictly one after
+another, one process per tool step. Seven captures: runs 1 to 3 of each treated arm and one enabler capture
+(`proposal-enabler-treated-1`, the `proposal-treated` arm with `fixtures/prompt-proposal-enabler.md`). All seven exited 0
+with empty stderr; none was excluded; no run failed, so no number was skipped. Because every reading was 3 of 3 and no
+guard missed, neither registered trigger to six fired, so there are three runs per arm, no re-run, and no paired control.
+
+### Per-capture table
+
+Readings: in-session reader (R1) and a blind subagent (R2) given only the registered readings, derivation rule and
+protocol text, the spec and the three stub fixtures, and the captures renamed. The mapping, kept by the caller:
+`cap-A` = `proposal-treated-3`, `cap-B` = `proposal-drive-treated-3`, `cap-C` = `proposal-enabler-treated-1`,
+`cap-D` = `proposal-treated-2`, `cap-E` = `proposal-drive-treated-1`, `cap-F` = `proposal-drive-treated-2`,
+`cap-G` = `proposal-treated-1`. R2 gave the same value as R1 on every reading of every capture, so one value is shown.
+Guards are `wording_grader.py` (`criterion-mention` over the statement with `--drop-value-line`, then `covers-field`).
+
+| Capture | Site | `opens` | `try-it` | `left` | `left-correct` | Remainder form | Opening addresses | Lines | `criterion-mention` | `covers-field` |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `proposal-treated-1` | P | leads | present | present | correct | by section, one paragraph | operator | 19 | text-with-number | gate-shape |
+| `proposal-treated-2` | P | leads | present | present | correct | by section | operator | 22 | text-with-number | gate-shape |
+| `proposal-treated-3` | P | leads | present | present | correct | by section, plus a total | operator | 23 | text-with-number | gate-shape |
+| `proposal-drive-treated-1` | PD | leads | present | present | correct | by section | operator | 24 | text-with-number | gate-shape |
+| `proposal-drive-treated-2` | PD | leads | present | present | correct | by section | operator | 21 | text-with-number | gate-shape |
+| `proposal-drive-treated-3` | PD | leads | present | present | correct | by section | operator | 24 | text-with-number | gate-shape |
+| `proposal-enabler-treated-1` | enabler | leads | missing | present | correct | by section | operator | 22 | text-with-number | absent |
+
+**Disagreements between the two readers: none.** Borderline calls flagged (neither changes a count):
+`proposal-treated-2` opens "You will be able to rely on a returned item ... being kept for them" (read as a person's
+ability, `leads`; the weakest of the six openings); `proposal-drive-treated-2` states Collecting at the desk as "none of
+the three criteria are done yet" (read as three of three left); `proposal-treated-1` gives the remainder in prose with AC2
+inside it (read `correct`); `proposal-treated-3` gives both a total and per-section counts, AC2 on its own "Partly done"
+line (read `correct`). The enabler capture's `opens` is conditional on a later slice ("once the hold shelf slice ... lands",
+read `leads`) and its `try-it` is a deliberate "there is nothing to try yet" (read `missing`); observed only, not a bar.
+
+### Counts, derived from the table above (runs 1 to 3 per arm)
+
+| Reading | P pass | PD pass |
+|---|---|---|
+| `opens` = `leads` | 3 of 3 (runs 1, 2, 3) | 3 of 3 (runs 1, 2, 3) |
+| `try-it` = `present` | 3 of 3 | 3 of 3 |
+| `left` present | 3 of 3 | 3 of 3 |
+| `left` + `left-correct` pass | 3 of 3 | 3 of 3 |
+
+Guards: `criterion-mention` `text-with-number` 3 of 3 at P and 3 of 3 at PD, no `bare` or `nickname`; `covers-field`
+`gate-shape` 3 of 3 at P and 3 of 3 at PD, no `off-shape` or `absent`. Enabler (observed): `text-with-number`, `absent`.
+Against the baseline (runs 2 to 7): `criterion-mention` `text-with-number` was 1 of 6 at P and 4 of 6 at PD, so counting
+"what is left" did not shorten the criterion mentions in any treated capture. Lines: P 19 to 23, PD 21 to 24, enabler 22
+(baseline P 15 to 23, PD 15 to 20); the one-screen risk is observed, not a bar, and the treated statements are 0 to 4
+lines longer at the top of the range. Remainders: all six slice-site captures state it by section; none lists only a total.
+
+### Verdicts re-read against their registered rules
+
+- `opens`, `try-it`, `left`, `left-correct`: each is a clean-majority pass (3 of 3) at both sub-sites, the registered bar.
+- Guard: no `bare`, `nickname`, `off-shape` or `absent` in any treated slice-site capture, so 0 of 3 per arm, below the
+  2-of-6 miss bar and no first-three trigger; the registered run to six, and the paired control, did not apply.
+- One capture per verdict word checked by hand against the grader's rule: `proposal-treated-1` is `text-with-number`
+  (each criterion appears as its own text followed by its number, "... shown as on the hold shelf (AC5)"); the same
+  capture's final line `AC5, AC6` is `gate-shape`; `proposal-enabler-treated-1`'s final line is prose in parentheses with
+  no criterion identifiers, so `absent`. The grader agreed in each case.
+
+### What the table shows, and what it does not
+
+- Per capture, all six slice-site statements open with a "You will be able to" sentence, give a "Try it" with an action
+  and what to look for, and state the remainder by section with AC2 named as the partly covered exception. At the
+  baseline none of these appeared in 12 captures for `opens` and `try-it`. The by-eye readings are the claim; the arms
+  carry commit P and are otherwise the baseline arms, so the change from 0 of 6 to 3 of 3 on each is the observed
+  difference. No ablation separated which sentence of the step 8 edit produced which part, so any cause finer than "the
+  arm with commit P" is a hypothesis.
+- Three runs per arm is the registered minimum; it does not establish a rate.
+
+### End state taken
+
+- AC29 (`opens`): clean-majority pass at P (3 of 3) and PD (3 of 3); recorded as closing its criterion as unmeasured,
+  pending the operator naming it at slice close.
+- AC30 (`try-it`): clean-majority pass at P (3 of 3) and PD (3 of 3); closes as unmeasured, pending the operator.
+- AC31 (`left` and `left-correct`): clean-majority pass at both (3 of 3 and 3 of 3 at each sub-site); closes as
+  unmeasured, pending the operator.
+- Guards: no miss; no paired control run. Treated miss: none. Nothing was reverted or reworded.
+
+Captures, rows and this section only. No arm, fixture, earlier table row, `rules.md`, `slice/SKILL.md` or `drive/SKILL.md`
+was changed. Not run: any baseline arm, any real `/craft:slice` session.

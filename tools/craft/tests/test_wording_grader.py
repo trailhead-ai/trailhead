@@ -764,6 +764,19 @@ CAPTURE_EXPECTATIONS = {
         ("criterion-mention", ["--drop-value-line", "--criteria", str(PROPOSAL_SPEC)], "text-with-number"),
         ("covers-field", [], "absent"),
     ],
+    # The treated arms carry commit P; their guards bind (a miss in 2 or more of 6 is a guard miss).
+    "proposal-treated": [
+        ("criterion-mention", ["--drop-value-line", "--criteria", str(PROPOSAL_SPEC)], "text-with-number"),
+        ("covers-field", [], "gate-shape"),
+    ],
+    "proposal-drive-treated": [
+        ("criterion-mention", ["--drop-value-line", "--criteria", str(PROPOSAL_SPEC)], "text-with-number"),
+        ("covers-field", [], "gate-shape"),
+    ],
+    "proposal-enabler-treated": [
+        ("criterion-mention", ["--drop-value-line", "--criteria", str(PROPOSAL_SPEC)], "text-with-number"),
+        ("covers-field", [], "absent"),
+    ],
 }
 
 # A capture whose verdict differs from its prefix's is listed here by stem, with the verdict per check.
@@ -797,6 +810,14 @@ CAPTURE_OVERRIDES = {
     "proposal-drive-baseline-5": {"criterion-mention": "nickname"},
     "proposal-drive-baseline-6": {"criterion-mention": "text-with-number"},
     "proposal-drive-baseline-7": {"criterion-mention": "text-with-number"},
+    # The proposal treated batch (2026-10-22): one row per capture, per check, including the ones equal to the prefix default.
+    "proposal-treated-1": {"criterion-mention": "text-with-number", "covers-field": "gate-shape"},
+    "proposal-treated-2": {"criterion-mention": "text-with-number", "covers-field": "gate-shape"},
+    "proposal-treated-3": {"criterion-mention": "text-with-number", "covers-field": "gate-shape"},
+    "proposal-drive-treated-1": {"criterion-mention": "text-with-number", "covers-field": "gate-shape"},
+    "proposal-drive-treated-2": {"criterion-mention": "text-with-number", "covers-field": "gate-shape"},
+    "proposal-drive-treated-3": {"criterion-mention": "text-with-number", "covers-field": "gate-shape"},
+    "proposal-enabler-treated-1": {"criterion-mention": "text-with-number", "covers-field": "absent"},
 }
 
 CAPTURES = sorted(p for p in RUNS.glob("*.txt") if not p.name.endswith(".stderr.txt"))

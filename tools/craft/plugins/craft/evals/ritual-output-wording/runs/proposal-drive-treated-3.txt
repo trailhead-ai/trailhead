@@ -1,0 +1,24 @@
+You will be able to have a returned item that someone is waiting for set aside for the first borrower in its queue, and that borrower will get one message telling them it is ready and when they must collect it by.
+
+Try it: once this is built, place a hold on an item that is out on loan, check that item back in, and confirm that it shows as on the hold shelf rather than going back to the open shelf, and that the borrower who placed the hold gets one message naming the pickup deadline.
+
+**The slice I've chosen is the hold shelf slice.** It is the smallest next step that still delivers something of value.
+
+**What this slice makes fully green:**
+- When a held item is returned, it is set aside for the first borrower in its queue and shown as on the hold shelf (AC5).
+- The first borrower is sent one message that the item is waiting, naming the pickup deadline (AC6).
+
+**What this slice makes only partially green:** nothing. It claims no partial coverage of any criterion.
+
+**What will be left of the spec after this slice:**
+- **Placing a hold:** two of four criteria left. One is cancelling a hold before it is filled. The other is already partly covered by an earlier slice: a borrower can hold at most five items at once, and a sixth hold is refused with a message saying why (AC2).
+- **Filling a hold:** one of three left. It is the hold that lapses when the item isn't collected within seven days.
+- **Collecting at the desk:** three of three left. These are the desk screen, check-out rules for held items, and the weekly holds report.
+
+**Visual surface:** this slice touches none. It changes what the system does when an item comes back and which message goes out. No screen is added or changed, so no enumerated states apply.
+
+**Value claim:** held items stop going back onto the open shelf. A returned item with a hold queued against it is kept for the first borrower in that queue, and that borrower gets one message with the pickup deadline.
+
+Nothing has been written yet. If you accept this slice, I'll create the parent task `task/the-hold-shelf-slice` and start planning it. If you'd rather choose a different slice, now is the time to say so.
+
+**Covers:** AC5, AC6
