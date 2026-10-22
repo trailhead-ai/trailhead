@@ -220,21 +220,21 @@ def _tree(path: Path) -> dict:
     }
 
 
-def _grade(tmp_path, final_report):
+def _grade(tmp_path, final_report, cell="unmet-flagged", events=None):
     work = tmp_path / "work"
     (work / "meta").mkdir(parents=True)
     (work / "snap-treat").mkdir()
     (work / "snap-treat" / "tools").symlink_to(LORE_BIN.parents[4])
     built = build(work / "built")
-    key = "unmet-flagged-r2-treat"
+    key = f"{cell}-r2-treat"
     (work / "meta" / f"{key}.manifest.json").write_text(json.dumps(built))
     vault = Path(built["env"]["XDG_STATE_HOME"]).parent / "vault"
     repo = {"head": "h", "status": "", "tree": {}}
     (work / "meta" / f"{key}.before.json").write_text(json.dumps({"vault": _tree(vault), "repo": repo}))
-    names = built["followups"]["unmet-flagged"]
-    spec = built["specs"]["unmet-flagged"]
-    children = json.dumps([{"name": names["K"], "reason": "r", "revision": "x"}])
-    stream = [
+    names = built["followups"][cell]
+    spec = built["specs"][cell]
+    children = json.dumps([{"name": names["K"], "reason": "r", "revision": "x"}]) if "K" in names else ""
+    stream = events(built) if events else [
         _text("Recommended: none.\n**Unmet acceptance criteria:**\n"
               f"- task/{names['U']} against AC2: hour 24 is not refused"),
         _text("Which listed follow-ups do you want to move onto the shortlist? "
@@ -250,8 +250,9 @@ def _grade(tmp_path, final_report):
             f"${{CLAUDE_PLUGIN_ROOT}}/scripts/followup_parent.py assemble {spec} --children \"$children\"\n")),
         _result("t4", "{}"),
     ]
-    run(built["env"], "lore", "record", "update", f"task/{names['U']}", "--vault", "default", "--status", "dropped",
-        stdin="a rewritten body\n")
+    if not events:
+        run(built["env"], "lore", "record", "update", f"task/{names['U']}", "--vault", "default",
+            "--status", "dropped", stdin="a rewritten body\n")
     (work / "meta" / f"{key}.after.json").write_text(json.dumps({"vault": _tree(vault), "repo": repo}))
     stream.append({"type": "result", "result": final_report})
     (work / "meta" / f"{key}.stream.jsonl").write_text("\n".join(json.dumps(e) for e in stream))
@@ -304,3 +305,80 @@ def test_the_grader_reads_none_flagged_with_a_blocked_count_and_a_missing_line(t
     assert graded["final_ac_ids"] == []
     _, missing = _grade(tmp_path / "b", "Nothing else to say.\n")
     assert missing["outcome_lines"] == []
+
+
+def _children_command(script, spec, entries):
+    return (
+        f"children=$(mktemp)\ncat > \"$children\" <<'CHILDREN_JSON'\n{json.dumps(entries)}\nCHILDREN_JSON\n"
+        f"${{CLAUDE_PLUGIN_ROOT}}/scripts/followup_parent.py {script} {spec} --children \"$children\"\n"
+    )
+
+
+def test_the_grader_reads_the_children_a_resume_nested_and_only_for_a_resume(tmp_path):
+    def stream(built):
+        names, spec = built["followups"]["resume-flagged"], built["specs"]["resume-flagged"]
+        return [
+            _tool("r1", "Bash", command=_children_command(
+                "resume", spec, [{"name": names["K"], "revision": "x"}])),
+            _result("r1", "nested task/k\nexit: 0"),
+            _tool("r2", "Bash", command=_children_command(
+                "check", spec, [{"name": names["U"], "revision": "x"}])),
+            _result("r2", "{}"),
+        ]
+
+    _, graded = _grade(tmp_path / "a", "x\n", cell="resume-flagged", events=stream)
+    assert graded["resume_children"] == [["K"]]
+    assert graded["order"]["resume_exit"] == [0]
+    assert graded["assemble_children"] == []
+
+    def both(built):
+        names, spec = built["followups"]["resume-flagged"], built["specs"]["resume-flagged"]
+        return [
+            _tool("r1", "Bash", command=_children_command("resume", spec, [
+                {"name": names["U"], "revision": "x"}, {"name": names["K"], "revision": "x"}])),
+            _result("r1", "exit: 1"),
+        ]
+
+    _, graded = _grade(tmp_path / "b", "x\n", cell="resume-flagged", events=both)
+    assert graded["resume_children"] == [["K", "U"]]
+    assert graded["order"]["resume_exit"] == [1]
+
+
+def _dispose_command(spec, doc, preview):
+    flag = " --preview" if preview else ""
+    return (
+        f"disp=$(mktemp)\ncat > \"$disp\" <<'DISPOSITIONS_JSON'\n{json.dumps(doc)}\nDISPOSITIONS_JSON\n"
+        f"${{CLAUDE_PLUGIN_ROOT}}/scripts/followup_dispose.py{flag} {spec} --file \"$disp\"\n"
+    )
+
+
+def test_the_grader_reads_each_dispose_runs_file_and_exit_and_ignores_other_commands(tmp_path):
+    def stream(built):
+        names, spec = built["followups"]["drop-refused-c2"], built["specs"]["drop-refused-c2"]
+        doc = {"reason": "obsolete", "drops": [{"name": names["D"], "revision": "x"}], "merges": []}
+        return [
+            _tool("d1", "Bash", command=_dispose_command(spec, doc, True)),
+            _result("d1", "preview ok\nexit: 0"),
+            _tool("d2", "Bash", command=_dispose_command(spec, doc, False)),
+            _result("d2", "dropped task/d\nexit: 0"),
+            _tool("d3", "Bash", command=f"${{CLAUDE_PLUGIN_ROOT}}/scripts/followup_gather.py {spec}\n"),
+            _result("d3", "{}\nexit: 0"),
+        ]
+
+    _, graded = _grade(tmp_path / "a", "x\n", cell="drop-refused-c2", events=stream)
+    file = {"reason": "obsolete", "drops": ["D"], "merges": 0}
+    assert [(d["preview"], d["file"], d["exit"]) for d in graded["dispose_files"]] == [
+        (True, file, 0), (False, file, 0)]
+
+    def other(built):
+        names, spec = built["followups"]["drop-refused-c2"], built["specs"]["drop-refused-c2"]
+        doc = {"reason": "r", "drops": [{"name": names["D"]}, {"name": names["U"]}], "merges": [{}]}
+        return [
+            _tool("d1", "Bash", command=_dispose_command(spec, doc, False)),
+            _result("d1", "exit: 2"),
+        ]
+
+    _, graded = _grade(tmp_path / "b", "x\n", cell="drop-refused-c2", events=other)
+    [run_] = graded["dispose_files"]
+    assert run_["file"] == {"reason": "r", "drops": ["D", "U"], "merges": 1}
+    assert run_["exit"] == 2
