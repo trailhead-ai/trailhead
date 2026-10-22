@@ -1,0 +1,19 @@
+Here is the slice I've chosen for `spec/holds-and-pickup`. I haven't written anything yet, so you can still reject it.
+
+**Chosen slice: The hold shelf slice.** It's the smallest next slice that is still worth shipping on its own.
+
+The last pass of the candidate-set check was gate-certified. Two criteria are already covered by the first hold slice: placing a hold on an item that is out on loan (AC1), and filling holds on the same item in the order they were placed (AC3). That same slice also partly covers the limit of five holds at once, with a sixth refused (AC2). Eight criteria are still open: AC2, AC4, AC5, AC6, AC7, AC8, AC9 and AC10.
+
+**Value claim:** when an item comes back with a hold queued on it, it is set aside for the first borrower in that queue, and that borrower gets one message with the pickup deadline. Held items stop going back onto the open shelf.
+
+**Visual surface:** none. The slice changes what the system does when an item is returned and which message goes out. It adds or changes no screen, so there are no states to list.
+
+**Criteria this slice makes fully green:**
+- When a held item is returned, it is set aside for the first borrower in its queue and shown as on the hold shelf (AC5).
+- The first borrower is sent one message that the item is waiting, naming the pickup deadline (AC6).
+
+**Criteria this slice makes only partly green:** none.
+
+If you accept, I'll create the parent task `task/the-hold-shelf-slice` at `in-progress`, linked to the spec. Before that, the covers gate has to approve the coverage list below.
+
+AC5, AC6

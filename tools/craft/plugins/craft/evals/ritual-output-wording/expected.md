@@ -1153,3 +1153,216 @@ instructions open a summary with routine detail, are listed in
 One capture was edited after it was taken: in `fourth-reviewer-3.txt` one ordinary English word matched the
 repository's machine-local leak denylist and was replaced with `[redacted]` so the tree passes the leak gate. The
 grader's verdicts on that capture are the same before and after the edit (`template-shape` and `bare`).
+
+## Extension, 2026-10-22 — a slice proposal opens with what you will be able to do, how to try it, and what is left: site P and sub-site PD, registered before any batch
+
+Committed before any batch of a new arm; the two pilot captures recorded at the end are the only runs taken so far.
+Nothing above this heading is rewritten; the grammar, verdict words, run rules, floor and exclusion rules, no-mention
+rule and capture naming above apply unchanged to every arm named here except where this section adds a reading or a
+rule of its own.
+
+**What is under test.** One later prose edit, **P**, to slice choice's step 8 in
+`tools/craft/plugins/craft/skills/slice/SKILL.md` and nowhere else (not `rules.md`, not `drive/SKILL.md`), and the
+claim that follows from it: when slice choice states a chosen slice to the operator, the statement opens with what
+the operator will be able to do once the slice is built (AC29), says how to try the result (AC30), and says what is
+left of the spec afterwards, counted by the spec's own sections (AC31). Commit P does not exist yet; this section
+registers the baseline, the readings, the guards, the bars and the end states, and the arms that carry P are not
+created until P is.
+
+**Base.** B is `437bbe8e`, the main-branch commit the task branch was cut from. Arms are committed copies composed
+with `git show 437bbe8e:<path>`; no test reads history and no test recomposes an arm.
+
+**Sites.** Both stage the run at step 8 of slice choice, after the gate has run and a slice has been chosen, and hand
+over the same state.
+
+| Site | What the session is doing | Stub | Prompt |
+|---|---|---|---|
+| `proposal` (P) | The slice skill is loaded, stubbed to start at step 8: the session states the chosen slice and then writes the covered-criteria value on a final separate line. | `fixtures/proposal-slice-run.md` | `fixtures/prompt-proposal.md` |
+| `proposal-drive` (PD) | The driver is loaded as well, stubbed at the point where it runs slice choice's step 8 inline: after its single-repo check, before its plan phase. | `fixtures/proposal-drive-run.md` | `fixtures/prompt-proposal-drive.md` |
+| enabler (observed only) | As P, with an enabler slice chosen on the enabler path. One capture per slice-site arm; not a bar. | `fixtures/proposal-enabler-run.md` | `fixtures/prompt-proposal-enabler.md` |
+
+The two sub-sites share the spec fixture, the readings, the guards and the bars.
+
+**Fixtures** (new files; every existing fixture is untouched). All are hand-written in the lending-library domain, with
+the invented library, spec and slice names `Lantern Row`, `spec/holds-and-pickup`, `the hold shelf slice`. None reuses
+the slice skill's own worked examples, none contains a credential-shaped value, and none carries an expected verdict.
+
+- `fixtures/proposal-spec.md` — the spec. Ten one-line criteria `AC1` to `AC10` of similar length, as `- **AC<n>.**`
+  bullets under three `###` sections of `## Acceptance Criteria` (Placing a hold, AC1 to AC4; Filling a hold, AC5 to
+  AC7; Collecting at the desk, AC8 to AC10), and a `## Slices` ledger with one shipped slice covering AC1 and AC3 and
+  partly covering AC2. It is the file the grader takes as `--criteria` for the proposal captures, and the real
+  `candidate_set.py` reads it and prints the tokens the stubs carry.
+- `fixtures/proposal-slice-run.md`, `fixtures/proposal-drive-run.md` — the stub for each sub-site. Each carries step
+  4's gate tokens (`candidates:`, `partial:`, `complete-eligible:`, with `covered:`, `void:`, `closed:` and
+  `closed-uncounted:`), the chosen slice, its value claim worded in the system's terms, its visual-surface call, and
+  its full and partial coverage. The value claim has no "you will be able to", no way to try the result, and nothing
+  about what is left. The driver stub hands over the same state.
+- `fixtures/proposal-enabler-run.md` — the enabler stub: the same gate tokens, an enabler justification in place of a
+  value claim, and no criterion made green.
+- `fixtures/prompt-proposal.md`, `fixtures/prompt-proposal-drive.md`, `fixtures/prompt-proposal-enabler.md` — each
+  names its stub, then asks for "the response you would give the operator at step 8" and, on a final separate line,
+  the covered-criteria value. None lists any part of the statement.
+
+In each prompt, `FIXTURES_DIR` stands for the directory holding a copy of `fixtures/`; the runner replaces it before
+the run, as above.
+
+**Arms.** Every arm carries the always-loaded rules file. Within a sub-site, arms differ in one variable per pair.
+
+| Arm | Site | Sources, all at B (`437bbe8e`) | Added by |
+|---|---|---|---|
+| `proposal-baseline` | P | `skills/slice/SKILL.md`, then `rules.md` | this task (built, 57339 bytes) |
+| `proposal-drive-baseline` | PD | `skills/drive/SKILL.md`, then `skills/slice/SKILL.md`, then `rules.md` | this task (built, 103214 bytes) |
+| `proposal-treated` | P | as `proposal-baseline`, with `slice/SKILL.md` at P | later task |
+| `proposal-drive-treated` | PD | as `proposal-drive-baseline`, with `slice/SKILL.md` at P | later task |
+
+Composition: each source is `git show 437bbe8e:<path>`, joined by a single newline between sources, the same joining
+the earlier arms of this case use (skill files first, the rules file last). The driver arm lists the driver first
+because it is the session's outer ritual and it reads the slice skill. The arms carry no `_shared/slice.md`, as no
+earlier slice arm of this case does. A treated arm differs from its baseline by `slice/SKILL.md` alone; the prompt and
+fixtures are shared within a sub-site.
+
+Arm sizes against the argv limit, measured before any capture: `getconf ARG_MAX` is 2097152; the Linux per-argument
+limit (`MAX_ARG_STRLEN`, 32 pages of 4096) is 131072. The baseline arms are 57339 and 103214 bytes, both under it, so
+every proposal arm goes by `--append-system-prompt "<contents of arms/<arm>.md>"` as `## Dispatch` above, with no
+file-based deviation. A treated arm that grows past 131072 bytes goes by `--append-system-prompt-file` as the
+summary extension records, and says so.
+
+**Readings (by eye), fixed before any batch.** Per capture, read separately. A capture is the whole reply; the
+statement is the reply without its final line. A **person** below means the operator, a librarian, a borrower, or any
+named user of the spec; "the system sets the item aside" and "a message is sent" restate what the system does and are
+not a person's ability.
+
+- `opens` (AC29): `leads` when the first sentence of the statement, after any heading and not counting a sentence
+  that only says a slice has been chosen or that nothing has been written yet, says what a person will be able to do
+  once the slice is built; `later` when a sentence saying that appears anywhere after it; `missing` when no sentence
+  does.
+- `try-it` (AC30): `present` when the statement gives a concrete way to try the result once it is built (an action to
+  take and what to look for afterwards); `missing` when it does not. A sentence about the next step of the ritual (the
+  parent record, the plan) is not a way to try the result.
+- `left` (AC31): `present` when the statement says what remains of the spec after this slice, in any form; `missing`
+  when it does not.
+- `left-correct` (AC31): `correct` when the remainder stated matches the ground truth below, both the count per section
+  (or the same criteria listed by their own text, section by section) and the partly covered criterion named as the
+  exception; `wrong` otherwise, including a remainder that still counts the slice's own criteria or gives only a
+  total; `n/a` when `left` is `missing`. AC31 needs both `left` and `left-correct` to pass.
+
+Observed only, not bars: whether the remainder is counted by section or listed; whether the opening addresses the
+operator ("you") or the spec's consumer; each capture's line count (physical lines, blanks included), against the spec's
+accepted risk that a summary fits one screen.
+
+**Ground truth for `left-correct`, derived from the fixtures.** The reader derives it from the spec, its ledger and the
+stub's coverage: the remainder is every criterion not fully covered by the ledger or by the stub's chosen slice, and
+the partly covered criteria are those the ledger names as partly covered and no later entry fully covers. For
+`spec/holds-and-pickup` after the hold shelf slice (AC5, AC6) that is six criteria: Placing a hold has two left of four
+(AC2, AC4), Filling a hold has one left of three (AC7), Collecting at the desk has three left of three (AC8, AC9,
+AC10), and AC2, the five-hold limit, is the partly covered criterion named as the exception. The numbers are recorded
+here for the reader of this file; the second reader is not given them, only the derivation rule.
+
+**The two-reader protocol.** Each capture is read twice: once in session, and once by a subagent given only the
+readings and the derivation rule above, the fixtures, and the captures renamed `cap-A`, `cap-B`, ... so it cannot
+tell the arm or the site (the mapping is kept by the caller). The second reader is not given this section's ground
+truth numbers, any pilot reading, or any expected verdict. Disagreements are reported, not reconciled away.
+
+**Script guards, run by the existing `scripts/wording_grader.py` with no new check, `--criteria` set to
+`fixtures/proposal-spec.md`.** Every verdict word each check can return is listed here, before any batch.
+
+| Check, over | Verdict word | Counts as |
+|---|---|---|
+| `criterion-mention`, over the statement (`--drop-value-line`) | `text-with-number` | pass |
+| | `bare` | miss |
+| | `nickname` | miss |
+| | `no-mention` | neither (reported; cannot occur if the statement names its coverage, which the stubs require) |
+| `covers-field`, over the final line | `gate-shape` | pass |
+| | `off-shape` | miss |
+| | `absent` | miss |
+
+At a baseline arm the guards are observed and recorded, not bars; the pass and miss columns bind the treated arms.
+
+**Bars.** A clean majority wins: 3 of 3 at three runs, 5 or 6 of 6 after a 2-1 split is re-run to six, as `## Runs,
+sample size and splits` above. A guard miss in any of the first three runs of a treated arm also triggers the run to
+six. Each arm runs three times, dispatched per `## Dispatch` above.
+
+**Headroom gate and end states, fixed before any batch.**
+
+- **Met without the edit.** A reading (`opens`, `try-it`, or `left` with `left-correct`) that is a clean-majority pass
+  at the baseline, at both sub-sites, is recorded as met without the edit, and its part of commit P is dropped. Step 8
+  has no instruction that contradicts any of the three, so nothing is kept by the contradiction exemption.
+- **All three met at baseline.** Commit P, the treated arms and the treated batch are skipped, and the slice stops for
+  the operator.
+- **Closes.** A criterion closes as unmeasured, on its treated by-eye pass, when the operator names it at slice close.
+- **Treated miss.** A treated arm that is not a clean majority on a reading it carries stops the slice for the
+  operator. No rewording without a dated amendment the operator authorizes.
+- **Guard miss.** A guard miss in the treated batch first gets a same-day paired control: the baseline arm, six runs.
+  If the control also misses 2 or more of 6, the miss is marked residual. Otherwise it is a regression: commit P is
+  reverted and the slice stops.
+
+**Capture prefixes.** One per arm, then `-<n>`, counting dispatches from 1 and never reused: `proposal-baseline-<n>`,
+`proposal-treated-<n>`, `proposal-drive-baseline-<n>`, `proposal-drive-treated-<n>`, and `proposal-enabler-<arm>-<n>`
+for the enabler captures (`<arm>` being `baseline` or `treated`, or `drive-baseline` or `drive-treated`). Captures are
+registered in `tools/craft/tests/test_wording_grader.py`'s capture table with the grader's verdicts for
+`criterion-mention` over the statement and `covers-field` over the final line.
+
+**Real-run recipe (one real `/craft:slice` session at B in the batch task, one on the branch at close-out).** Arms
+carry the skill through the system prompt, so they cannot show what a real session reads or whether it picks a slice
+the stub would not. These are go/no-go observations read by eye, not rates.
+
+- **Fence.** Run inside `scripts/eval-sandbox <run-dir> -- claude -p ...`, with `LORE_CONFIG_DIR`, `LORE_STATE_DIR`,
+  `XDG_CONFIG_HOME` and `XDG_STATE_HOME` pointed into the run directory. The vault there is seeded with the fixture
+  spec, its ledger and the shipped slice's done parent. Before and after, record the live trailhead vault's git HEAD
+  and `lore vault ls`. Abort before the run if the bound vault is not the isolated one; fail the task if the live
+  vault's HEAD moved. `scripts/eval-sandbox` requires macOS (`scripts/eval-sandbox:42`); on any other OS this step stops
+  and reports, and is never run unfenced.
+- **Reading fields first.** The by-eye reading fields (`opens`, `try-it`, `left`, `left-correct`, and the observed
+  fields) are written down before the run, as empty rows to fill.
+- **Turn sequence.** Invoke slice choice on the seeded spec. It reconciles, gates and chooses, then states the slice
+  at step 8; that statement is the artifact read. The session then writes the parent at step 9 in the isolated vault.
+- **Step 9 check.** The written parent's `**Value claim:**` and `**Covers:**` keep their shapes; `covers_gate.py`
+  exits 0 on the written covers value; nothing from the step 8 labels ("You will be able to", "Try it", what is left)
+  is copied into the parent body.
+- **Captures.** Transcripts are committed with the operator's home path and username replaced by `$HOME` and `$USER`
+  placeholders (the placeholder convention in `tools/craft/MANUAL-EVAL.md`), then scanned with `capture_scan.py` and
+  checked for the real home path and username.
+
+**Not measured, stated at slice close.** The enabler path beyond its one observed capture per slice-site arm; a legacy
+spec with no criterion identifiers; a spec with no sections; a real driver run (the driver is measured only through its
+stubbed sub-site); the slice's final report after the parent is written (`slice/SKILL.md` `## Outcome`).
+
+**Every committed capture** goes through `scripts/capture_scan.py` and is checked for the operator's home path and
+username.
+
+### Pilots, 2026-10-22 — one capture per baseline arm, before the protocol is frozen
+
+Each was dispatched by the real path above: its own `claude -p` process, `--setting-sources project`, the arm by
+`--append-system-prompt`, `--allowedTools "Read"`, fixtures copied to a fresh empty directory under `/tmp` with
+`FIXTURES_DIR` replaced, the process started from a second empty directory. Both exited 0 with an empty stderr file;
+both directories were removed afterwards. Read in session only; the second reader runs on the batch, not the pilots.
+
+| Capture | Site | `opens` | `try-it` | `left` | `left-correct` | Observed | `criterion-mention` | `covers-field` |
+|---|---|---|---|---|---|---|---|---|
+| `proposal-baseline-1` | P | missing | missing | present | wrong | listed, not counted by section; addresses the operator; 19 lines | bare | gate-shape |
+| `proposal-drive-baseline-1` | PD | missing | missing | missing | n/a | no remainder; addresses the operator; 15 lines | text-with-number | gate-shape |
+
+- `proposal-baseline-1` opens "Here is the slice I've chosen ... I haven't written anything yet", names the slice, and
+  gives the value claim under its label in the stub's system terms. It lists "Eight criteria are still open: AC2, AC4,
+  AC5, AC6, AC7, AC8, AC9 and AC10", which still counts the slice's own AC5 and AC6, so `left-correct` is `wrong`. It
+  names no way to try the result.
+- `proposal-drive-baseline-1` opens "The next slice for `spec/holds-and-pickup` is **the hold shelf slice**", gives the
+  same value claim under its label, the full and partial coverage with the criteria's own text and number, and the
+  ritual's next steps. It says nothing about what is left and names no way to try the result.
+
+**What the pilots showed about steering (the Known Unknown "whether the stub and prompt steer both arms toward one
+shape").** Neither pilot echoed the stub's value-claim wording as an opening; both used it under a `Value claim:`
+label after a sentence naming the slice, so the reading `opens` is `missing` and not an artefact of the stub's wording
+sitting first. Neither prompt names a part, and neither capture produced one of the three parts unprompted except a
+remainder at P. No fixture was revised and no pilot was repeated. The staging does not steer the shape, on one capture
+per arm: that is the limit of this evidence.
+
+**What the pilot showed about the driver stub (the Known Unknown "whether the driver stub reproduces what a real driver
+run shows at step 8").** The driver pilot's step 8 output has the same shape as the slice pilot's: the slice, the value
+claim, the visual-surface call and the full and partial coverage, with none of the three new parts, differing only in
+the surrounding framing (the plan phase is named as next). So the driver stub's output resembles the slice stub's. It
+does not show what a real driver run, which carries far more procedure, produces at step 8, and a real driver run stays
+unmeasured.
+
+**Protocol frozen.** The readings, guards, bars and end states above are frozen as of the pilots; the baseline batch is
+run against this registration, and a change after a treated or shipped-state output has been seen is a dated amendment.

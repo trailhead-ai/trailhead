@@ -23,6 +23,7 @@ CRAFT_ROOT = Path(__file__).parent.parent
 GRADER = CRAFT_ROOT / "plugins" / "craft" / "scripts" / "wording_grader.py"
 CASE = CRAFT_ROOT / "plugins" / "craft" / "evals" / "ritual-output-wording"
 SPEC = CASE / "fixtures" / "spec.md"
+PROPOSAL_SPEC = CASE / "fixtures" / "proposal-spec.md"
 RUNS = CASE / "runs"
 EVALS = CASE.parent
 
@@ -672,7 +673,8 @@ def test_long_covers_line_grades_promptly():
 
 # Each capture prefix names its checks. An entry is (check, extra arguments, expected verdict);
 # `--drop-value-line` is how a capture that ends in the covered-criteria value is graded without that final line.
-# Every check runs with `--criteria` set to the case's spec fixture.
+# Every check runs with `--criteria` set to the case's spec fixture, unless its extra arguments name another
+# `--criteria` (the proposal sites grade against their own spec fixture).
 # A verdict is the grader's reading of a capture under the thresholds fixed before any run; where a capture read by eye
 # differs, CAPTURE_OVERRIDES records the grader's verdict.
 CAPTURE_EXPECTATIONS = {
@@ -748,6 +750,15 @@ CAPTURE_EXPECTATIONS = {
         ("reviewer-report", [], "template-shape"),
         ("criterion-mention", [], "bare"),
     ],
+    # The proposal sites (extension of 2026-10-22). The statement is read as the reply without its final line.
+    "proposal-baseline": [
+        ("criterion-mention", ["--drop-value-line", "--criteria", str(PROPOSAL_SPEC)], "bare"),
+        ("covers-field", [], "gate-shape"),
+    ],
+    "proposal-drive-baseline": [
+        ("criterion-mention", ["--drop-value-line", "--criteria", str(PROPOSAL_SPEC)], "text-with-number"),
+        ("covers-field", [], "gate-shape"),
+    ],
 }
 
 # A capture whose verdict differs from its prefix's is listed here by stem, with the verdict per check.
@@ -783,7 +794,8 @@ def test_every_capture_grades_to_the_verdict_its_prefix_is_mapped_to(capture):
     assert prefix in CAPTURE_EXPECTATIONS, f"{capture.name} has no mapped prefix {prefix!r}"
     for check, extra, verdict in CAPTURE_EXPECTATIONS[prefix]:
         verdict = CAPTURE_OVERRIDES.get(capture.stem, {}).get(check, verdict)
-        args = ["--check", check, "--criteria", str(SPEC), *extra]
+        criteria = [] if "--criteria" in extra else ["--criteria", str(SPEC)]
+        args = ["--check", check, *criteria, *extra]
         result = run_grader(args, capture.read_bytes())
         assert result.stdout.decode("utf-8") == f"{check}: {verdict}\n", (capture.name, result.stderr)
         assert result.returncode == (0 if verdict in PASSING else 1)

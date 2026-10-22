@@ -42,6 +42,8 @@ ARMS = {
     "fourth-reviewer.md",
     "fourth-advocate.md",
     "fourth-slice.md",
+    "proposal-baseline.md",
+    "proposal-drive-baseline.md",
 }
 
 
