@@ -1,0 +1,73 @@
+[main] BASH
+$CRAFT[treat]/scripts/followup_gather.py fixture-ferry-timetable-spec; echo "exit: $?"
+
+[main] BASH
+for r in task/ferry-timetable-accept-a-clock-time-written-as-text task/ferry-timetable-tidy-a-variable-name spec/fixture-ferry-timetable-spec; do echo "=== $r"; lore record show --json --vault default $r; echo "exit: $?"; done
+
+[main] AGENT
+Refine the follow-up task `task/ferry-timetable-accept-a-clock-time-written-as-text` in the lore vault `default`.
+
+- Read $CRAFT[treat]/skills/_shared/refine.md yourself and follow it in full, in its unattended mode, against that one task only. `${CLAUDE_PLUGIN_ROOT}` is $CRAFT[treat]. The `lore` command on PATH reads the vault.
+- The code the task refers to is the git repository at $RUN[near-miss-r2-treat]/fixture/repo. Read it as refine.md directs. Do not modify that repositor... [cut 319 chars]
+
+[sub] BASH
+lore record show task/ferry-timetable-accept-a-clock-time-written-as-text --vault default 2>&1 || lore record show task/ferry-timetable-accept-a-clock-time-written-as-text 2>&1; echo ---; lore task graph ferry-timetable-accept-a-clock-time-written-as-text 2>&1
+
+[sub] BASH
+lore record show --help 2>&1 | head -30; lore record show task/ferry-timetable-accept-a-clock-time-written-as-text --json 2>&1 | head -40
+
+[sub] BASH
+lore record show task/fixture-ferry-timetable-spec-the-slice --vault default --json 2>&1; echo ---; cd $RUN[near-miss-r2-treat]/fixture/repo && git status --short && git log --oneline | head && git ls-files
+
+[sub] BASH
+cd $RUN[near-miss-r2-treat]/fixture/repo && HOME=/tmp GIT_CONFIG_NOSYSTEM=1 git ls-files; HOME=/tmp git log --oneline | head; ls -la; find . -path ./.git -prune -o -type f -print
+
+[sub] BASH
+lore record show spec/fixture-ferry-timetable-spec --vault default 2>&1; echo ---; lore search ferry --vault default 2>&1 | head -30; echo ---; lore search "kind:area ferry" 2>&1 | head; lore search "timetable" 2>&1 | head; lore search "next_departure" 2>&1|head; lore search "HH:MM" 2>&1|head; lore search "tests pytest" 2>&1 | head
+
+[sub] BASH
+cd $RUN[near-miss-r2-treat]/fixture/repo && cat -n src/ferry.py README.md src/__init__.py; grep -rn "ferry\|next_departure\|HH\|split(\":\")\|:%M\|60 \*\|\* 60" src | head -30; lore search "kind:area" 2>&1 | head -20; lore search "kind:adr" 2>&1|head; lore search "kind:lesson" 2>&1|head; lore search "clock" 2>&1|head; lore search "test" 2>&1 | head -20
+
+[sub] BASH
+cd $RUN[near-miss-r2-treat]/fixture/repo/src && for f in *.py; do echo "== $f"; cat -n $f; done; lore record show task/lens-house-reject-negative-hours 2>&1
+
+[sub] BASH
+set -e; T=$(mktemp); lore record show task/ferry-timetable-accept-a-clock-time-written-as-text --vault default --json | python3 -I -c 'import json,sys; sys.stdout.write(json.load(sys.stdin)["body"])' > "$T"; cat >> "$T" <<'EOF'
+
+**Delivers:** `next_departure` (`src/ferry.py:1`) accepts `minute` either as an integer minute of the day, compared against `times` exactly as now (`src/ferry.py:2-5`), or as a string `HH:MM`, which is converted to `HH * 60 + MM` before the same comparison. Return values are unchanged: the first departure at or after that minute, or `None` when none is left (spec ACs, [[spec/fixture-ferry-timetable-spec]]). Strings not in `HH:MM` form are outside the agreed behaviour and not part of this delivery.
+
+**Test contract:** New tests in `tests/test_ferry.py` (the repository has no tests yet) assert, with `times = [360, 600, 1080]`:
+- `next_departure(times, "09:30")` is 600 (570 minutes: next departure after it);
+- `next_departure(times, "10:00")` is 600 (exact match counts as "at or after");
+- `next_departure(times, "18:01")` is `None` (none left that day);
+- `next_departure(times, 570)` is 600 and `next_departure(times, 1081)` is `None` (integer behaviour unchanged).
+Run with `python -m pytest tests/test_ferry.py`; all pass.
+
+**Files:** `src/ferry.py`, `tests/test_ferry.py` (new)
+
+## Flow-out
+
+- [ ] Touched area/subsystem profiles updated with what changed
+- [ ] Prover-validated assumptions captured as session candidates (durable at flush)
+- [ ] New decisions / lessons / follow-ups surfaced during the build recorded
+EOF
+grep -n "Flow-out" -A4 $CRAFT[treat]/templates/plan.md; echo "$T"
+
+[sub] BASH
+sed -n 24,40p $CRAFT[treat]/templates/plan.md; grep -n "Delivers\|Test contract\|Files" $CRAFT[treat]/templates/task.md; wc -l $RUN[near-miss-r2-treat]/fixture/repo/src/ferry.py; lore record show spec/fixture-ferry-timetable-spec >/dev/null && echo spec-ok
+
+[sub] BASH
+T=$RUN[near-miss-r2-treat]/tmp/tmp.SAHVpkhZi7; lore record update --help 2>&1 | grep -E "vault|status|unset" ; lore record update task/ferry-timetable-accept-a-clock-time-written-as-text --vault default --status ready < "$T" 2>&1; rm -f "$T"; lore record show task/ferry-timetable-accept-a-clock-time-written-as-text --vault default; lore task graph ferry-timetable-accept-a-clock-time-written-as-text
+
+[main] BASH
+$CRAFT[treat]/scripts/followup_parent.py check fixture-ferry-timetable-spec ferry-timetable-accept-a-clock-time-written-as-text; echo "exit: $?"
+
+[main] BASH
+children=$(mktemp)
+cat > "$children" <<'CHILDREN_JSON'
+[{"name": "ferry-timetable-accept-a-clock-time-written-as-text", "reason": "Right now every caller has to turn a clock time into minutes itself. Each caller written before this lands copies that conversion, so the cleanup grows the longer it waits.", "revision": "[sha:0739387b]"}]
+CHILDREN_JSON
+$CRAFT[treat]/scripts/followup_parent.py assemble fixture-ferry-timetable-spec --children "$children"
+rc=$?
+rm -f "$children"
+echo "exit: $rc"

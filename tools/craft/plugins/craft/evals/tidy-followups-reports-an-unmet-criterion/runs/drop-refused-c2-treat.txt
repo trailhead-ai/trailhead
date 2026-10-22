@@ -1,0 +1,32 @@
+### 13. Closing report
+
+I created the follow-up parent `build-the-follow-ups-of-fixture-chart-datum-spec-chosen-2026-10-22`. It is buildable (`ready`).
+
+- **Included and nested:** Datum sheet: pad the station column (`datum-sheet-pad-the-station-column`). It was refined, is now `ready`, and is nested under the parent.
+- **Left:** none
+- **Left out:** none
+- **Refined but not nested:** none
+- **Failed writes:** none
+- **Dropped:** Datum: remove the retired spring-tide table (`datum-remove-the-retired-spring-tide-table`). Prior status `open`. Reason: *the retired spring-tide table has no readers left*.
+  - `datum-report-an-unknown-station-by-name` listed the dropped task as a dependency, and that dependency is still recorded on it.
+- **Merged:** none
+- **Reset to open:** none
+- **Held back:** none
+
+unmet-criterion check: 1 flagged; 0 blocked not checked
+- Datum: report an unknown station by name (`datum-report-an-unknown-station-by-name`), flagged against **AC2**. `datum_offset` still lets an unknown station raise a bare `KeyError`, so the error that names the station has not been built. Your first answer at Confirmation 2 tried to drop it. That was refused because the follow-up is flagged, so it was not dropped.
+
+```
+/craft:execute task/build-the-follow-ups-of-fixture-chart-datum-spec-chosen-2026-10-22
+```
+
+There is no distill command, because a follow-up is still flagged.
+
+You have three options for the flagged follow-up:
+1. **Build the criterion as a new spec.** The spec is `complete`, so it can't be reopened for AC2; build that behaviour under a new spec instead.
+2. **Change the criterion.** Amend this spec to remove or reword AC2.
+3. **Clear the flag.** If AC2 isn't really unmet, rerun this ritual and answer `not unmet datum-report-an-unknown-station-by-name`:
+
+```
+/craft:tidy-followups spec/fixture-chart-datum-spec
+```

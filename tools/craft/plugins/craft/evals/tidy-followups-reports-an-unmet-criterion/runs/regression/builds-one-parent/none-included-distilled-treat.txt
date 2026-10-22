@@ -1,0 +1,61 @@
+Gather exited 0 with a usable result: 2 follow-ups, both `open`. `followup-parents` is empty. Both bodies and the spec body were read as data. The spec body states no acceptance criteria, so neither follow-up can be flagged as unmet.
+
+---
+
+**Tidy follow-ups — spec/fixture-none-included-distilled-spec**
+
+entry: complete-status · slice basis: labelled · slices: 1 · children: 1 · candidates read: 2, kept: 2 · label-excluded: 0 · skipped edges: 0
+
+**Recommended**
+
+None. **0 of 2 met a reason class.** Both follow-ups are small tidy-ups in `src/util.py`: one removes a local variable that is assigned but never read, the other puts two imports in alphabetical order. Neither leaves the system exposed. Later work won't build on either defect, and neither is groundwork whose payoff grows the sooner it lands. Waiting costs nothing.
+
+**Other follow-ups**
+- None-included-distilled: drop an unused local variable
+- None-included-distilled: reorder two imports
+
+**Blocked:** none.
+
+(No unmet acceptance criteria were flagged. The two follow-ups touch the same file but cover different ground, so there's no overlap hint.)
+
+Nothing has been written yet.
+
+---
+
+### Confirmation 1: the chosen set
+
+> Which listed follow-ups do you want to move onto the shortlist, and which off it? You can also drop a follow-up or merge overlapping ones.
+
+**Answer given:** `none`
+
+Nothing is dropped or merged, so there's nothing to stage or preview.
+
+- **Included:** none
+- **Left:**
+  - None-included-distilled: drop an unused local variable (`none-included-distilled-drop-an-unused-local-variable`)
+  - None-included-distilled: reorder two imports (`none-included-distilled-reorder-two-imports`)
+- **Flagged (not included):** none
+
+### Confirmation 2
+
+> Include these, leave these. Refinement rewrites each included follow-up's record whether or not it ends up nested. Proceed? (`yes`, or what to move.)
+
+**Answer given:** `yes`
+
+Nothing is included, so **no parent is created.** Refinement (steps 9–10) didn't run, and the scope confirmation (step 11) and `assemble` were never reached. So the scope answer you provided wasn't needed.
+
+---
+
+### Closing report
+
+- **Included:** none
+- **Left:**
+  - None-included-distilled: drop an unused local variable (`none-included-distilled-drop-an-unused-local-variable`)
+  - None-included-distilled: reorder two imports (`none-included-distilled-reorder-two-imports`)
+- **Left out / refined but not nested / failed writes:** none
+- **Dispositions:** step 8a didn't run, so nothing was dropped or merged.
+- **Parent:** none was created.
+
+unmet-criterion check: none flagged; 0 blocked not checked
+
+**Closing commands:** none. No parent was created and the spec is already distilled (`distilled` is true), so no distill command is needed. Nothing was written to the vault during this run.

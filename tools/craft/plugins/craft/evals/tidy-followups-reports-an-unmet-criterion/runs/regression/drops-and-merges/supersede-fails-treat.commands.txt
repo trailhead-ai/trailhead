@@ -1,0 +1,28 @@
+[main] BASH
+$CRAFT[treat]/scripts/followup_gather.py fixture-hat-peg-spec; echo "exit: $?"
+
+[main] BASH
+for n in hat-pegs-report-how-many-pegs-are-free hat-pegs-report-how-many-pegs-are-in-use hat-pegs-report-the-pegs-in-use-as-a-ratio-of-all-pegs; do echo "=== $n"; lore record show --json --vault default task/$n; echo "exit: $?"; done; echo "=== spec"; lore record show --json --vault default spec/fixture-hat-peg-spec; echo "exit: $?"
+
+[main] BASH
+dispositions=$(mktemp)
+cat > "$dispositions" <<'DISPOSITIONS_JSON'
+{"reason": "", "drops": [], "merges": [{"survivor": {"name": "hat-pegs-report-how-many-pegs-are-in-use", "revision": "[sha:88e86954]"}, "absorbed": [{"name": "hat-pegs-report-how-many-pegs-are-free", "revision": "[sha:4eb1f737]", "intent": "Also report how many pegs are free (not holding a hat)."}, {"name": "hat-pegs-report-the-pegs-in-use-as-a-ratio-of-all-pegs", "revision": "[sha:1eaf376b]", "intent": "Also report the in-use count as a ratio of all pegs on the wall."}]}]}
+DISPOSITIONS_JSON
+$CRAFT[treat]/scripts/followup_dispose.py dispose fixture-hat-peg-spec --dispositions "$dispositions" --preview
+rc=$?
+rm -f "$dispositions"
+echo "exit: $rc"
+
+[main] BASH
+dispositions=$(mktemp)
+cat > "$dispositions" <<'DISPOSITIONS_JSON'
+{"reason": "", "drops": [], "merges": [{"survivor": {"name": "hat-pegs-report-how-many-pegs-are-in-use", "revision": "[sha:88e86954]"}, "absorbed": [{"name": "hat-pegs-report-how-many-pegs-are-free", "revision": "[sha:4eb1f737]", "intent": "Also report how many pegs are free (not holding a hat)."}, {"name": "hat-pegs-report-the-pegs-in-use-as-a-ratio-of-all-pegs", "revision": "[sha:1eaf376b]", "intent": "Also report the in-use count as a ratio of all pegs on the wall."}]}]}
+DISPOSITIONS_JSON
+$CRAFT[treat]/scripts/followup_dispose.py dispose fixture-hat-peg-spec --dispositions "$dispositions"
+rc=$?
+rm -f "$dispositions"
+echo "exit: $rc"
+
+[main] BASH
+$CRAFT[treat]/scripts/followup_gather.py fixture-hat-peg-spec; echo "exit: $?"

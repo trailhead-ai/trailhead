@@ -1,0 +1,29 @@
+### Closing report
+
+I created a new parent task, `build-the-follow-ups-of-fixture-pennant-spec-chosen-2026-10-22`, with the signal-lamp follow-up nested under it, and it's ready to build. Your first shortlist answer wasn't accepted because the lower-case-letter follow-up is flagged as an unmet AC2, so the run went on with your second answer.
+
+- **Included and nested:** Signal lamp: report a low battery under twenty percent (`signal-lamp-report-a-low-battery-under-twenty-percent`). It was refined to `ready`.
+- **Left:** Pennants: sort the table by letter (`pennants-sort-the-table-by-letter`)
+- **Left out at step 10:** none
+- **Refined but not nested:** none
+- **Failed writes:** none
+- **Dropped or merged:** nothing
+
+unmet-criterion check: 1 flagged; 0 blocked not checked
+- Pennants: accept a lower-case letter (`pennants-accept-a-lower-case-letter`), **AC2**: `pennant_for` still looks the code up exactly as given, so a lower-case letter fails instead of returning its capital's pennant.
+
+To build the parent:
+
+```
+/craft:execute task/build-the-follow-ups-of-fixture-pennant-spec-chosen-2026-10-22
+```
+
+I've left out the distill command because a follow-up is still flagged. You have three ways to deal with the flagged AC2 follow-up:
+
+1. **Build it as a new spec.** This spec's status is `complete`, so AC2 can't be reopened here; start a new spec for it.
+2. **Change the spec.** Amend it to remove or reword AC2.
+3. **Clear the flag.** If you judge it isn't really unmet, re-run this ritual and answer `not unmet pennants-accept-a-lower-case-letter`:
+
+```
+/craft:tidy-followups spec/fixture-pennant-spec
+```

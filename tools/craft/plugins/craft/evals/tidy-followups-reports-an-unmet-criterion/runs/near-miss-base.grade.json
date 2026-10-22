@@ -1,0 +1,90 @@
+{
+ "cell": "near-miss",
+ "outcome_lines": [],
+ "final_ac_ids": [],
+ "closing_commands": [
+  {
+   "line": "I ran `/craft:tidy-followups` on `fixture-ferry-timetable-spec`. It created one new parent task, `task/build-the-follow-ups-of-fixture-ferry-timetable-spec-chosen-2026-10-22`, with one follow-up nested under it. The parent is `ready` and can be built now.",
+   "standalone": false
+  },
+  {
+   "line": "/craft:execute task/build-the-follow-ups-of-fixture-ferry-timetable-spec-chosen-2026-10-22",
+   "standalone": true
+  },
+  {
+   "line": "/craft:distill spec/fixture-ferry-timetable-spec",
+   "standalone": true
+  }
+ ],
+ "order": {
+  "agent": [
+   6
+  ],
+  "check": [
+   8
+  ],
+  "assemble": [
+   9
+  ],
+  "assemble_exit": [
+   0
+  ]
+ },
+ "check_args": [
+  [
+   "N"
+  ]
+ ],
+ "assemble_children": [
+  [
+   "N"
+  ]
+ ],
+ "resume_children": [],
+ "dispose_files": [],
+ "agent_targets": [
+  [
+   "N"
+  ]
+ ],
+ "fetched_by_main": [
+  "L",
+  "N"
+ ],
+ "step6_list": [],
+ "records": {
+  "N": {
+   "status": "ready",
+   "parent": "build-the-follow-ups-of-fixture-ferry-timetable-spec-chosen-2026-10-22",
+   "depends-on": [],
+   "body_changed": true,
+   "new": false,
+   "dropped_note": null
+  },
+  "L": {
+   "status": "open",
+   "parent": null,
+   "depends-on": [],
+   "body_changed": false,
+   "new": false,
+   "dropped_note": null
+  },
+  "NEW": {
+   "status": "ready",
+   "parent": null,
+   "depends-on": [],
+   "body_changed": true,
+   "new": true,
+   "dropped_note": null,
+   "lists": [
+    "N"
+   ]
+  }
+ },
+ "repo": {
+  "head_before": "[sha:baf20b92]",
+  "head_after": "[sha:baf20b92]",
+  "status_after": ""
+ },
+ "real_vault_hits": ""
+}

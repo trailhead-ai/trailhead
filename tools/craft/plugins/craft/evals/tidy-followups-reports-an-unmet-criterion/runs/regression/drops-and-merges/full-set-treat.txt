@@ -1,0 +1,31 @@
+I tidied the follow-ups of `spec/fixture-crate-sorter-spec`. The sorter fix was refined and nested under a new parent that is now buildable, and every write landed.
+
+The run went through each step with the answers you supplied. The spec defines no acceptance criteria, so nothing was flagged as an unmet criterion. Only one of the six follow-ups met a reason class (the zero-mass refusal).
+
+At Confirmation 2 I added the second chute follow-up to the drop. It was the only task waiting on the first chute follow-up, and you chose to drop it.
+
+### Closing report
+
+**Included:** Sorter: refuse a crate mass of zero (`sorter-refuse-a-crate-mass-of-zero`). It was refined to `ready` and nested.
+
+**Left:**
+- Belt: say the speed unit in the comment (`belt-say-the-speed-unit-in-the-comment`)
+- Bin log: write the chosen bin to the log (`bin-log-write-the-chosen-bin-to-the-log`). It now carries the merged intent.
+
+**Left out:** none. **Refined but not nested:** none. **Failed writes:** none.
+
+**Dropped**, for the reason *the chute work moved into the supplier's own firmware*:
+- Chutes: remove the legacy chute table (`chutes-remove-the-legacy-chute-table`), previously `open`
+- Chutes: remove the table of legacy chute names (`chutes-remove-the-table-of-legacy-chute-names`), previously `open`
+
+**Merged:** Bin log: write the crate id with the chosen bin (`bin-log-write-the-crate-id-with-the-chosen-bin`) was folded into Bin log: write the chosen bin to the log (`bin-log-write-the-chosen-bin-to-the-log`). The survivor was previously `open`.
+
+**Reset to open:** none. **Held back:** none.
+
+**Parent:** `build-the-follow-ups-of-fixture-crate-sorter-spec-chosen-2026-10-22`, ready to build.
+
+unmet-criterion check: none flagged; 0 blocked not checked
+
+/craft:execute task/build-the-follow-ups-of-fixture-crate-sorter-spec-chosen-2026-10-22
+
+/craft:distill spec/fixture-crate-sorter-spec

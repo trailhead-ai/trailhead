@@ -1,0 +1,16 @@
+### 13. Closing report
+
+The new parent `build-the-follow-ups-of-fixture-ferry-timetable-spec-chosen-2026-10-22` was created and is now `ready` to build. It holds one follow-up.
+
+- **Included:** Ferry timetable: accept a clock time written as text (`ferry-timetable-accept-a-clock-time-written-as-text`). It was refined, which moved it from `open` to `ready`, and then nested under the parent.
+- **Left:** Ferry timetable: tidy a variable name (`ferry-timetable-tidy-a-variable-name`). It was not touched.
+- **Left out at step 10:** none.
+- **Refined but not nested:** none.
+- **Failed writes:** none.
+- **Dropped, merged or reset:** none.
+
+One decision is yours before building. During refinement it was decided that badly formed strings such as `"25:00"` or `"abc"` are out of scope, and no validation is added for them. If you want a defined error for bad input, settle that before the task is built.
+
+/craft:execute task/build-the-follow-ups-of-fixture-ferry-timetable-spec-chosen-2026-10-22
+
+/craft:distill spec/fixture-ferry-timetable-spec

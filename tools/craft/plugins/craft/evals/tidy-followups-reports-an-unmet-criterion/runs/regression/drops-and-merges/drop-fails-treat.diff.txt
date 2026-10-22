@@ -1,0 +1,4 @@
+vault CHANGED task/mugs-count-the-mugs-hanging-on-the-rack.json
+vault CHANGED task/mugs-count-the-mugs-hanging-on-the-rack.md
+repo head before=[sha:c80558df] after=[sha:c80558df]
+repo status after=''

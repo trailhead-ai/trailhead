@@ -1,0 +1,27 @@
+I resumed the existing follow-up parent and it is now ready to build. It holds both follow-ups the earlier run had chosen.
+
+nested task/ledger-posting-print-the-order-total-on-the-receipt-footer
+
+- **Parent:** `build-the-follow-ups-of-fixture-ledger-posting-spec-chosen-2026-10-12`, now `ready`.
+- **What it holds:**
+  - Ledger posting: refuse an entry with a negative amount (`ledger-posting-refuse-an-entry-with-a-negative-amount`) was already nested before this run.
+  - Ledger posting: print the order total on the receipt footer (`ledger-posting-print-the-order-total-on-the-receipt-footer`) was nested this run.
+- **Nothing else changed:** nothing was removed from the parent's list, and no write failed.
+- **No new parent:** the ritual didn't create a second parent, and no refinement ran.
+- **Selection reason:** the receipt-footer follow-up meets none of the "waiting makes it costlier" reasons. The parent still lists it with the earlier run's generic "waiting makes it costlier".
+
+unmet-criterion check: none flagged; 0 blocked not checked
+
+The spec body declares no acceptance criteria, so nothing could be flagged.
+
+Build the parent with:
+
+```
+/craft:execute task/build-the-follow-ups-of-fixture-ledger-posting-spec-chosen-2026-10-12
+```
+
+The ritual can't tell who created the parent. If you didn't create it, this command removes its marker label so the follow-up gather stops counting it, and leaves the record otherwise alone:
+
+```
+lore record update task/build-the-follow-ups-of-fixture-ledger-posting-spec-chosen-2026-10-12 --vault default --unset-label craft/followup-parent
+```

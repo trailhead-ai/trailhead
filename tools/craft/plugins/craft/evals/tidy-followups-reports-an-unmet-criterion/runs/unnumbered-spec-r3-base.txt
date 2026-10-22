@@ -1,0 +1,26 @@
+I tidied the follow-ups of `fixture-lantern-rota-spec`. The one you chose was refined and is now the only child of a new buildable parent task, `task/build-the-follow-ups-of-fixture-lantern-rota-spec-chosen-2026-10-22`.
+
+**What happened**
+- **Recommendation:** the gather found 3 open follow-ups. I recommended only one, "Lantern rota: a crew of one keeper", because its bug gets costlier to fix as more code builds on the rota.
+- **Your answers:** you swapped the shortlist to "Keeper board: print the names in capitals", so the crew-of-one fix was left with the others. Nothing was dropped or merged.
+- **Refinement:** a subagent moved the keeper-board task from `open` to `ready`. The record now says it delivers upper-cased names joined by `, `, and lists `src/board.py` and a new `tests/test_board.py`. I confirmed this with the eligibility check, not just the subagent's report.
+- **Nesting:** you answered yes, the parent was created, and the task was nested under it with no failed writes.
+
+**Closing report**
+- **Included and nested:** Keeper board: print the names in capitals (`keeper-board-print-the-names-in-capitals`)
+- **Left:**
+  - Lantern rota: a crew of one keeper (`lantern-rota-a-crew-of-one-keeper`)
+  - Lantern rota: reword the module comment (`lantern-rota-reword-the-module-comment`)
+- **Left out, or refined but not nested:** none.
+- **Failed writes:** none.
+- **Parent:** `build-the-follow-ups-of-fixture-lantern-rota-spec-chosen-2026-10-22`
+
+The spec isn't distilled yet, so there are two commands. The first builds the parent; the second distills the spec:
+
+```
+/craft:execute task/build-the-follow-ups-of-fixture-lantern-rota-spec-chosen-2026-10-22
+```
+
+```
+/craft:distill spec/fixture-lantern-rota-spec
+```

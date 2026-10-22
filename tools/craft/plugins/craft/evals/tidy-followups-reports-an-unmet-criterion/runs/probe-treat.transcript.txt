@@ -1,0 +1,112 @@
+[main] BASH
+command -v python3 lore mktemp; python3 -c "import sys; print(sys.version)"
+
+[main] RESULT
+$RUN[probe-treat]/fixture/bin/python3
+$RUN[probe-treat]/fixture/bin/lore
+$RUN[probe-treat]/fixture/bin/mktemp
+3.14.6 (main, Jun 10 2026, 10:03:53) [Clang 21.0.0 (clang-2100.0.123.102)]
+
+[main] BASH
+echo $HOME
+
+[main] RESULT
+$HOME
+
+[main] BASH
+ls ~/.local/state/lore; ls ~/.config/lore; ls ~/.local/state/trailhead
+
+[main] RESULT
+Exit code 1
+ls: $HOME/.local/state/lore: Operation not permitted
+ls: $HOME/.config/lore: Operation not permitted
+ls: $HOME/.local/state/trailhead: Operation not permitted
+
+[main] BASH
+lore task list --vault default | head -5
+
+[main] RESULT
+chart-printer-zero-pad-the-hour-column status=open created-at=2026-10-22T14:20:53Z parent=none depends-on=none children=none
+fixture-tide-table-spec-a-finished-child status=done created-at=2026-10-22T14:20:53Z parent=fixture-tide-table-spec-the-slice depends-on=none children=none
+fixture-tide-table-spec-the-slice status=done created-at=2026-10-22T14:20:53Z parent=none depends-on=none children=fixture-tide-table-spec-a-finished-child
+tide-table-mention-the-unit-in-the-module-comment status=open created-at=2026-10-22T14:20:53Z parent=none depends-on=none children=none
+tide-table-reject-an-hour-outside-the-day status=open created-at=2026-10-22T14:20:53Z parent=none depends-on=none children=none
+
+[main] BASH
+head -3 $CRAFT[treat]/skills/tidy-followups/SKILL.md; ls $CRAFT[treat]/evals
+
+[main] RESULT
+Exit code 1
+---
+name: tidy-followups
+description: >
+ls: $CRAFT[treat]/evals: No such file or directory
+
+[main] BASH
+f=$(mktemp); cat > "$f" <<EOF
+heredoc-ok
+EOF
+cat "$f"
+
+[main] BASH
+$CRAFT[treat]/scripts/followup_gather.py --help 2>&1 | head -3
+
+[main] RESULT
+heredoc-ok
+
+[main] RESULT
+usage: followup_gather.py [-h] spec_name
+
+Decide whether a spec's slice loop has ended.
+
+[main] TEXT
+I ran all seven commands without changing anything. Two returned errors: step 3 was denied on every path, and step 5 found no `evals` directory.
+
+**(1)** All three tools come from the fixture's bin directory:
+```
+$RUN[probe-treat]/fixture/bin/python3
+$RUN[probe-treat]/fixture/bin/lore
+$RUN[probe-treat]/fixture/bin/mktemp
+3.14.6 (main, Jun 10 2026, 10:03:53) [Clang 21.0.0 (clang-2100.0.123.102)]
+```
+
+**(2)**
+```
+$HOME
+```
+
+**(3)** All three were denied (exit 1):
+```
+ls: $HOME/.local/state/lore: Operation not permitted
+ls: $HOME/.config/lore: Operation not permitted
+ls: $HOME/.local/state/trailhead: Operation not permitted
+```
+
+**(4)**
+```
+chart-printer-zero-pad-the-hour-column status=open created-at=2026-10-22T14:20:53Z parent=none depends-on=none children=none
+fixture-tide-table-spec-a-finished-child status=done created-at=2026-10-22T14:20:53Z parent=fixture-tide-table-spec-the-slice depends-on=none children=none
+fixture-tide-table-spec-the-slice status=done created-at=2026-10-22T14:20:53Z parent=none depends-on=none children=fixture-tide-table-spec-a-finished-child
+tide-table-mention-the-unit-in-the-module-comment status=open created-at=2026-10-22T14:20:53Z parent=none depends-on=none children=none
+tide-table-reject-an-hour-outside-the-day status=open created-at=2026-10-22T14:20:53Z parent=none depends-on=none children=none
+```
+
+**(5)** The `head` worked, but the `evals` directory doesn't exist (exit 1):
+```
+---
+name: tidy-followups
+description: >
+ls: $CRAFT[treat]/evals: No such file or directory
+```
+
+**(6)**
+```
+heredoc-ok
+```
+
+**(7)**
+```
+usage: followup_gather.py [-h] spec_name
+
+Decide whether a spec's slice loop has ended.
+```

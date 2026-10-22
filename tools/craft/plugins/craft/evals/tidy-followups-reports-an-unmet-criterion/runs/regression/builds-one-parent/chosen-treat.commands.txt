@@ -1,0 +1,213 @@
+[main] BASH
+$CRAFT[treat]/scripts/followup_gather.py fixture-chosen-spec; echo "exit: $?"
+
+[main] BASH
+for n in chosen-fix-a-typo-in-a-docstring chosen-reject-path-traversal-in-the-export-endpoint chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it chosen-stop-writing-bearer-tokens-to-the-request-trace; do echo "=== $n"; lore record show --json --vault default task/$n; echo "exit: $?"; done; echo "=== spec"; lore record show --json --vault default spec/fixture-chosen-spec; echo "exit: $?"
+
+[main] AGENT
+You are refining one task record: `task/chosen-reject-path-traversal-in-the-export-endpoint` in lore vault `default`.
+
+- Read $CRAFT[treat]/skills/_shared/refine.md yourself and follow it in full, in its unattended mode, against that one task only. (`${CLAUDE_PLUGIN_ROOT}` is $CRAFT[treat].)
+- The code the task refers to is the git repository at $RUN[chosen-treat]/fixture/repo. Work against it read-only; do not modify the repo.
+- Stage any body y... [cut 281 chars]
+
+[sub] BASH
+lore record show task/chosen-reject-path-traversal-in-the-export-endpoint; echo ---; lore task graph chosen-reject-path-traversal-in-the-export-endpoint; echo ---; lore --help 2>&1 | head -40
+
+[sub] BASH
+lore record show --help; lore record update --help | head -50; cd $RUN[chosen-treat]/fixture/repo && git status --short && git log --oneline | head; find . -path ./.git -prune -o -type f -print
+
+[sub] BASH
+cd $RUN[chosen-treat]/fixture/repo && lore record show --json task/chosen-reject-path-traversal-in-the-export-endpoint | python3 -I -c 'import json,sys;d=json.load(sys.stdin);print(d["sidecar"])'; cat -n src/export.py; cat -n README.md; grep -rn "export\|safe\|resolve\|realpath\|commonpath\|\.\." src/ | grep -v "^src/export.py"
+
+[sub] BASH
+cd $RUN[chosen-treat]/fixture/repo && lore record show task/fixture-chosen-spec-the-slice; echo ---; for f in src/*.py; do echo "== $f"; cat -n $f; done; echo ---; lore search "export"; lore search "path traversal"; lore search "kind:area"; lore search "kind:adr"; lore search "kind:decision"; lore search "kind:lesson"; lore search "validation"
+
+[sub] BASH
+lore areas; lore search "test"; lore search "ValueError"; lore search "error handling"; lore search "src/export.py"; lore search "kind:spec"; ls $CRAFT[treat]/templates/
+
+[sub] BASH
+lore record show task/left-out-pin-the-tls-minimum-version-in-the-client; lore search 'src/export.py' ; lore record show spec/fixture-chosen-spec; cd $CRAFT[treat]/templates/ && grep -n -A6 "Flow-out" plan.md; grep -n "Delivers\|Test contract\|Files" task.md
+
+[sub] BASH
+sed -n 24,40p $CRAFT[treat]/templates/plan.md
+
+[sub] BASH
+set -e; T=$(mktemp); trap 'rm -f "$T"' EXIT
+lore record show task/chosen-reject-path-traversal-in-the-export-endpoint | tail -n +2 > "$T"
+cat >> "$T" <<'EOF'
+
+**Delivers:**
+- `export_path` (src/export.py:4) rejects any `name` whose joined path resolves outside `base`, raising `ValueError` instead of returning a path. Today it returns the bare join with no check (src/export.py:5). Containment is decided on resolved paths (`os.path.realpath` of both sides, then `os.path.commonpath` against the resolved base), so `..` segments, absolute names (which `os.path.join` lets replace `base` entirely), and symlinks pointing out of `base` are all rejected.
+- Names that stay inside `base` keep their current return value, `os.path.join(base, name)` (src/export.py:5), so existing legitimate callers see no change.
+- `ValueError` is used because the repo defines no custom exception types (src/ has none; see src/export.py:1-5, src/util.py:1-3) and it is the stdlib's error for a bad argument value.
+
+**Test contract:** New tests in `tests/test_export.py`, written failing first. They follow the repo's precedent of new per-module test files under `tests/` ([[task/left-out-pin-the-tls-minimum-version-in-the-client]]).
+- `export_path(base, "../../etc/passwd")` raises `ValueError`.
+- `export_path(base, "/etc/passwd")` (absolute name) raises `ValueError`.
+- `export_path(base, "sub/../../x")` (escape after normalization) raises `ValueError`.
+- A symlink inside `base` that points outside it, passed as `name`, raises `ValueError` (use a `tmp_path` fixture).
+- `export_path(base, "report.csv")` and `export_path(base, "sub/report.csv")` return `os.path.join(base, name)` unchanged.
+- `export_path(base, "sub/../report.csv")` (stays inside `base`) is accepted.
+
+**Files:** `src/export.py`, `tests/test_export.py` (new)
+
+## Flow-out
+
+- [ ] Touched area/subsystem profiles updated with what changed
+- [ ] Prover-validated assumptions captured as session candidates (durable at flush)
+- [ ] New decisions / lessons / follow-ups surfaced during the build recorded
+EOF
+grep -inE "secret|password|token|api[_-]?key|BEGIN .*PRIVATE|AKIA|hunter2" "$T" || echo "scrub: clean"
+lore record show task/left-out-pin-the-tls-minimum-version-in-the-client >/dev/null && echo "cite ok"
+wc -l $RUN[chosen-treat]/fixture/repo/src/export.py $RUN[chosen-treat]/fixture/repo/src/util.py
+lore record update task/chosen-reject-path-traversal-in-the-export-endpoint --status ready < "$T"
+lore record show task/chosen-reject-path-traversal-in-the-export-endpoint
+
+[sub] BASH
+set -e; T=$(mktemp); trap 'rm -f "$T"' EXIT
+{ printf '%s\n' '`src/export.py` joins a caller-supplied name onto the export directory with no validation, so a crafted name such as `../../etc/passwd` reads files outside the export directory. Reachable today by any caller of `export_path`.'; lore record show --json task/chosen-reject-path-traversal-in-the-export-endpoint | python3 -I -c 'import json,sys;sys.stdout.write(json.load(sys.stdin)["body"])'; } > "$T"
+head -3 "$T"
+lore record update task/chosen-reject-path-traversal-in-the-export-endpoint < "$T"
+lore record show task/chosen-reject-path-traversal-in-the-export-endpoint | head -8; lore record show --json task/chosen-reject-path-traversal-in-the-export-endpoint | python3 -I -c 'import json,sys;print(json.load(sys.stdin)["sidecar"]["status"])'
+
+[main] AGENT
+You are refining one task record: `task/chosen-stop-writing-bearer-tokens-to-the-request-trace` in lore vault `default`.
+
+- Read $CRAFT[treat]/skills/_shared/refine.md yourself and follow it in full, in its unattended mode, against that one task only. (`${CLAUDE_PLUGIN_ROOT}` is $CRAFT[treat].)
+- The code the task refers to is the git repository at $RUN[chosen-treat]/fixture/repo. Work against it read-only; do not modify the repo.
+- Stage any bod... [cut 284 chars]
+
+[sub] BASH
+lore record show task/chosen-stop-writing-bearer-tokens-to-the-request-trace; echo ---; lore task graph chosen-stop-writing-bearer-tokens-to-the-request-trace; echo ---; lore --help 2>&1 | head -40
+
+[sub] BASH
+lore record show --help; lore record update --help; lore vault ls
+
+[sub] BASH
+cd $RUN[chosen-treat]/fixture/repo && git status --short && git log --oneline | head && git ls-files
+
+[sub] BASH
+lore record show --json task/chosen-stop-writing-bearer-tokens-to-the-request-trace; echo; find $RUN[chosen-treat]/fixture/repo -not -path '*/.git/*' -type f
+
+[sub] BASH
+cd $RUN[chosen-treat]/fixture/repo && for f in README.md src/*.py; do echo "=== $f"; cat -n "$f"; done
+
+[sub] BASH
+lore record show task/fixture-chosen-spec-the-slice; echo ---; for q in trace "Authorization" redact "log_request" "src/trace.py" headers credential token "kind:area" "kind:decision" "kind:adr" logging secret; do echo "### $q"; lore search "$q" 2>&1 | head -20; done; lore areas
+
+[sub] BASH
+T=$(mktemp); cat > "$T" <<'EOF'
+`src/trace.py` writes every request header, the Authorization header included, verbatim to the shared log, so live credentials already sit in logs people read.
+
+**Delivers:** `log_request` in `src/trace.py` (src/trace.py:1-2) stops writing the Authorization header's value to the logger, matched case-insensitively (HTTP header names are case-insensitive), while every other header is still logged as it is today. Whether the header is redacted to a placeholder or dropped is still open; see `## Refine — unresolved`. Out of scope: the Cookie header in `src/cookies.py` (src/cookies.py:2), which is tracked separately as [[task/nest-fail-stop-logging-session-cookies]].
+
+**Test contract:** Write these failing tests first, using a fake logger that records each `write` call:
+- the Authorization header's value never shows up in the written output, whether the key is spelled `Authorization`, `authorization`, or `AUTHORIZATION`;
+- non-credential headers (for example `Content-Type`, `User-Agent`) still show up in the output with their values;
+- headers with no Authorization key are logged the same way as today (src/trace.py:2).
+The repo has no test suite yet, so this adds the first test file.
+
+**Files:** `src/trace.py` (modified); `tests/test_trace.py` (new)
+
+## Flow-out
+
+- [ ] Touched area/subsystem profiles updated with what changed
+- [ ] Prover-validated assumptions captured as session candidates (durable at flush)
+- [ ] New decisions / lessons / follow-ups surfaced during the build recorded
+
+## Refine — unresolved
+
+**Question:** Should `log_request` keep the Authorization key and replace its value with a fixed placeholder (for example `[REDACTED]`), or drop the header from the logged output altogether?
+
+**Evidence gathered:** src/trace.py:2 logs `repr(dict(headers))` and does no filtering, so nothing in the code picks either option. src/cookies.py:2 has the same leak for Cookie and does no filtering either, so it sets no precedent. Vault searches for trace, Authorization, redact, headers, credential, token, logging, secret, kind:area, kind:decision and kind:adr found no decision, ADR, or area profile on log redaction (`lore areas`: no areas defined). The only related records are open tasks: [[task/nest-fail-stop-logging-session-cookies]] and [[task/left-out-rotate-the-hard-coded-session-signing-secret]].
+
+**Recommended answer:** Redact to a fixed placeholder and keep the key. People reading the trace can still see that the request was authenticated, and the token value still never reaches the log. The same rule could later be reused for the Cookie task.
+EOF
+lore record update task/chosen-stop-writing-bearer-tokens-to-the-request-trace < "$T"; rc=$?; rm -f "$T"; echo rc=$rc
+for r in task/nest-fail-stop-logging-session-cookies task/left-out-rotate-the-hard-coded-session-signing-secret; do lore record show $r >/dev/null && echo ok $r; done
+lore record show task/chosen-stop-writing-bearer-tokens-to-the-request-trace | head -3; lore task graph chosen-stop-writing-bearer-tokens-to-the-request-trace
+
+[main] AGENT
+You are refining one task record: `task/chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it` in lore vault `default`.
+
+- Read $CRAFT[treat]/skills/_shared/refine.md yourself and follow it in full, in its unattended mode, against that one task only. (`${CLAUDE_PLUGIN_ROOT}` is $CRAFT[treat].)
+- The code the task refers to is the git repository at $RUN[chosen-treat]/fixture/repo. Work against it read-only; do not modify the re... [cut 303 chars]
+
+[sub] BASH
+lore record show task/chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it; lore task graph chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it
+
+[sub] BASH
+cd $RUN[chosen-treat]/fixture/repo && git log --oneline | head; git ls-files
+
+[sub] BASH
+cd $RUN[chosen-treat]/fixture/repo && find . -path ./.git -prune -o -type f -print; for f in $(find . -path ./.git -prune -o -type f -print); do echo "== $f"; cat -n "$f"; done; lore record show task/chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it --help 2>&1 | head -30
+
+[sub] BASH
+lore record show --json task/chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it | python3 -I -c 'import json,sys;print(json.load(sys.stdin)["sidecar"])'; for q in money rounding cents "round half up" decimal to_cents "kind:area money" "kind:adr" "kind:area" test; do echo "## $q"; lore search "$q" 2>&1 | head -15; done
+
+[sub] BASH
+lore record show task/fixture-chosen-spec-the-slice; echo ====; lore record show task/left-out-pin-the-tls-minimum-version-in-the-client; echo ===; lore record show task/chosen-reject-path-traversal-in-the-export-endpoint; cat $CRAFT[treat]/templates/plan.md | grep -A6 "Flow-out"
+
+[sub] BASH
+lore record show task/left-out-pin-the-tls-minimum-version-in-the-client; echo ====; lore record show task/chosen-reject-path-traversal-in-the-export-endpoint; echo ====; grep -A6 "Flow-out" $CRAFT[treat]/templates/plan.md; lore task graph fixture-chosen-spec-the-slice
+
+[sub] BASH
+lore record show task/chosen-reject-path-traversal-in-the-export-endpoint
+
+[sub] BASH
+grep -n -A6 "Flow-out" $CRAFT[treat]/templates/plan.md
+
+[sub] BASH
+lore task graph fixture-chosen-spec-the-slice
+
+[sub] BASH
+set -e; T=$(mktemp); trap 'rm -f "$T"' EXIT
+cat > "$T" <<'EOF'
+`src/money.py` converts an amount to cents with `int(amount * 100)`, which truncates and is off by one cent for amounts such as 19.99. The house rule is to round half up to the nearest cent, using `decimal`. Two more features are about to call `to_cents`, and each will bake the error further in.
+
+**Delivers:**
+- `to_cents` (src/money.py:1) stops truncating. Today it returns `int(amount * 100)` (src/money.py:2), so float error such as 19.99 * 100 = 1998.999... drops a cent. It now converts the amount to `decimal.Decimal`, rounds to the nearest cent with `decimal.ROUND_HALF_UP` (the house rule stated in this task's captured prose), and returns the cent count as an `int`. The return type stays `int`, as it is today (src/money.py:2).
+- Float inputs are converted through `Decimal(str(amount))`, not `Decimal(amount)`. `Decimal(1.005)` holds the binary value 1.00499999..., which rounds down and breaks the half-up rule for the amount the caller actually wrote; `str()` gives the shortest round-trip decimal form. `int` and `Decimal` inputs go through the same path unchanged.
+
+**Test contract:** New tests in `tests/test_money.py`, written failing first. They follow the repo's precedent of new per-module test files under `tests/` ([[task/left-out-pin-the-tls-minimum-version-in-the-client]]).
+- `to_cents(19.99) == 1999` (the regression in the captured prose; fails today with 1998).
+- `to_cents(0.29) == 29` and `to_cents(1.15) == 115` (more float-truncation cases).
+- Half-up on exact halves: `to_cents(1.005) == 101`, `to_cents(0.125) == 13`, `to_cents(2.675) == 268`.
+- Below the half rounds down: `to_cents(1.004) == 100`.
+- Whole and integer amounts are unchanged: `to_cents(5) == 500`, `to_cents(0) == 0`, `to_cents(10.0) == 1000`.
+- `Decimal` input: `to_cents(Decimal("19.995")) == 2000`.
+- The return value is an `int` (`isinstance(to_cents(19.99), int)`).
+
+**Files:** `src/money.py`, `tests/test_money.py` (new)
+
+## Flow-out
+
+- [ ] Touched area/subsystem profiles updated with what changed
+- [ ] Prover-validated assumptions captured as session candidates (durable at flush)
+- [ ] New decisions / lessons / follow-ups surfaced during the build recorded
+EOF
+python3 -I - <<'P'
+from decimal import Decimal, ROUND_HALF_UP
+f=lambda a:int((Decimal(str(a))*100).quantize(Decimal('1'),rounding=ROUND_HALF_UP))
+print([f(x) for x in (19.99,0.29,1.15,1.005,0.125,2.675,1.004,5,0,10.0)], f(Decimal("19.995")), int(19.99*100), int(0.29*100), int(1.15*100))
+P
+lore record show task/left-out-pin-the-tls-minimum-version-in-the-client >/dev/null && echo ok
+lore record update task/chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it --status ready < "$T"
+lore record show task/chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it | head -3
+
+[sub] BASH
+lore task graph chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it
+
+[main] BASH
+$CRAFT[treat]/scripts/followup_parent.py check fixture-chosen-spec chosen-reject-path-traversal-in-the-export-endpoint chosen-stop-writing-bearer-tokens-to-the-request-trace chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it; echo "exit: $?"
+
+[main] BASH
+children=$(mktemp)
+cat > "$children" <<'CHILDREN_JSON'
+[{"name": "chosen-reject-path-traversal-in-the-export-endpoint", "reason": "Open security exposure: any caller can read files outside the export directory today.", "revision": "[sha:f0ba53df]"}, {"name": "chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it", "reason": "A fix that gets more expensive as work builds on it: two features are about to adopt the truncating cent conversion.", "revision": "[sha:d25a747e]"}]
+CHILDREN_JSON
+$CRAFT[treat]/scripts/followup_parent.py assemble fixture-chosen-spec --children "$children"
+rc=$?
+rm -f "$children"
+echo "exit: $rc"

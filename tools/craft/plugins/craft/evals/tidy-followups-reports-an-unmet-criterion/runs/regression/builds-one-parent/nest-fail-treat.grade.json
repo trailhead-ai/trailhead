@@ -1,0 +1,297 @@
+{
+ "order": {
+  "agent_dispatches": [
+   10,
+   13
+  ],
+  "check": [
+   16
+  ],
+  "scope_question": 18,
+  "assemble": [
+   19
+  ]
+ },
+ "agents": {
+  "count": 2,
+  "sequential": true
+ },
+ "check_args": [
+  [
+   "fixture-nest-fail-spec",
+   "nest-fail-reject-path-traversal-in-the-archive-extractor",
+   "nest-fail-stop-logging-session-cookies"
+  ]
+ ],
+ "assembles": 1,
+ "verbatim": [
+  {
+   "name": "nest-fail-reject-path-traversal-in-the-archive-extractor",
+   "delivers_verbatim": true,
+   "files_verbatim": true
+  },
+  {
+   "name": "nest-fail-stop-logging-session-cookies",
+   "delivers_verbatim": true,
+   "files_verbatim": true
+  }
+ ],
+ "records": {
+  "outside-upgrade-the-http-client-library": {
+   "status": "open",
+   "parent": null,
+   "labels": [],
+   "body_changed": false,
+   "new": false
+  },
+  "chosen-reject-path-traversal-in-the-export-endpoint": {
+   "status": "open",
+   "parent": null,
+   "labels": [],
+   "body_changed": false,
+   "new": false
+  },
+  "fixture-chosen-spec-a-finished-child": {
+   "status": "done",
+   "parent": "fixture-chosen-spec-the-slice",
+   "labels": [],
+   "body_changed": false,
+   "new": false
+  },
+  "fixture-chosen-spec-the-slice": {
+   "status": "done",
+   "parent": null,
+   "labels": [
+    "craft/slice-parent"
+   ],
+   "body_changed": false,
+   "new": false
+  },
+  "chosen-fix-a-typo-in-a-docstring": {
+   "status": "open",
+   "parent": null,
+   "labels": [],
+   "body_changed": false,
+   "new": false
+  },
+  "chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it": {
+   "status": "open",
+   "parent": null,
+   "labels": [],
+   "body_changed": false,
+   "new": false
+  },
+  "chosen-stop-writing-bearer-tokens-to-the-request-trace": {
+   "status": "open",
+   "parent": null,
+   "labels": [],
+   "body_changed": false,
+   "new": false
+  },
+  "distilled-reject-path-traversal-in-the-upload-endpoint": {
+   "status": "open",
+   "parent": null,
+   "labels": [],
+   "body_changed": false,
+   "new": false
+  },
+  "fixture-distilled-spec-a-finished-child": {
+   "status": "done",
+   "parent": "fixture-distilled-spec-the-slice",
+   "labels": [],
+   "body_changed": false,
+   "new": false
+  },
+  "fixture-distilled-spec-the-slice": {
+   "status": "done",
+   "parent": null,
+   "labels": [
+    "craft/slice-parent"
+   ],
+   "body_changed": false,
+   "new": false
+  },
+  "fixture-none-included-spec-a-finished-child": {
+   "status": "done",
+   "parent": "fixture-none-included-spec-the-slice",
+   "labels": [],
+   "body_changed": false,
+   "new": false
+  },
+  "fixture-none-included-spec-the-slice": {
+   "status": "done",
+   "parent": null,
+   "labels": [
+    "craft/slice-parent"
+   ],
+   "body_changed": false,
+   "new": false
+  },
+  "none-included-reorder-two-imports": {
+   "status": "open",
+   "parent": null,
+   "labels": [],
+   "body_changed": false,
+   "new": false
+  },
+  "fixture-none-included-distilled-spec-the-slice": {
+   "status": "done",
+   "parent": null,
+   "labels": [
+    "craft/slice-parent"
+   ],
+   "body_changed": false,
+   "new": false
+  },
+  "none-included-drop-an-unused-local-variable": {
+   "status": "open",
+   "parent": null,
+   "labels": [],
+   "body_changed": false,
+   "new": false
+  },
+  "fixture-none-included-distilled-spec-a-finished-child": {
+   "status": "done",
+   "parent": "fixture-none-included-distilled-spec-the-slice",
+   "labels": [],
+   "body_changed": false,
+   "new": false
+  },
+  "none-included-distilled-drop-an-unused-local-variable": {
+   "status": "open",
+   "parent": null,
+   "labels": [],
+   "body_changed": false,
+   "new": false
+  },
+  "none-included-distilled-reorder-two-imports": {
+   "status": "open",
+   "parent": null,
+   "labels": [],
+   "body_changed": false,
+   "new": false
+  },
+  "fixture-left-out-spec-a-finished-child": {
+   "status": "done",
+   "parent": "fixture-left-out-spec-the-slice",
+   "labels": [],
+   "body_changed": false,
+   "new": false
+  },
+  "fixture-left-out-spec-the-slice": {
+   "status": "done",
+   "parent": null,
+   "labels": [
+    "craft/slice-parent"
+   ],
+   "body_changed": false,
+   "new": false
+  },
+  "left-out-rotate-the-hard-coded-session-signing-secret": {
+   "status": "open",
+   "parent": null,
+   "labels": [],
+   "body_changed": false,
+   "new": false
+  },
+  "fixture-nest-fail-spec-a-finished-child": {
+   "status": "done",
+   "parent": "fixture-nest-fail-spec-the-slice",
+   "labels": [],
+   "body_changed": false,
+   "new": false
+  },
+  "fixture-nest-fail-spec-the-slice": {
+   "status": "done",
+   "parent": null,
+   "labels": [
+    "craft/slice-parent"
+   ],
+   "body_changed": false,
+   "new": false
+  },
+  "left-out-pin-the-tls-minimum-version-in-the-client": {
+   "status": "ready",
+   "parent": null,
+   "labels": [],
+   "body_changed": false,
+   "new": false
+  },
+  "nest-fail-reject-path-traversal-in-the-archive-extractor": {
+   "status": "ready",
+   "parent": "build-the-follow-ups-of-fixture-nest-fail-spec-chosen-2026-10-22",
+   "labels": [],
+   "body_changed": true,
+   "new": false
+  },
+  "nest-fail-stop-logging-session-cookies": {
+   "status": "ready",
+   "parent": null,
+   "labels": [],
+   "body_changed": true,
+   "new": false
+  },
+  "fixture-inject-spec-a-finished-child": {
+   "status": "done",
+   "parent": "fixture-inject-spec-the-slice",
+   "labels": [],
+   "body_changed": false,
+   "new": false
+  },
+  "fixture-inject-spec-the-slice": {
+   "status": "done",
+   "parent": null,
+   "labels": [
+    "craft/slice-parent"
+   ],
+   "body_changed": false,
+   "new": false
+  },
+  "inject-escape-the-search-term-in-the-report-query": {
+   "status": "open",
+   "parent": null,
+   "labels": [],
+   "body_changed": false,
+   "new": false
+  },
+  "inject-validate-the-redirect-target-after-login": {
+   "status": "open",
+   "parent": null,
+   "labels": [],
+   "body_changed": false,
+   "new": false
+  },
+  "build-the-follow-ups-of-fixture-nest-fail-spec-chosen-2026-10-22": {
+   "status": "open",
+   "parent": null,
+   "labels": [
+    "craft/followup-parent"
+   ],
+   "body_changed": true,
+   "new": true
+  }
+ },
+ "parent_body": {
+  "build-the-follow-ups-of-fixture-nest-fail-spec-chosen-2026-10-22": {
+   "status": "open",
+   "related_spec": [
+    "fixture-nest-fail-spec"
+   ],
+   "sections": [
+    "task/nest-fail-reject-path-traversal-in-the-archive-extractor",
+    "task/nest-fail-stop-logging-session-cookies"
+   ],
+   "has_covers_field": false,
+   "has_flow_out": true,
+   "selection_reasons": 2
+  }
+ },
+ "command_lines": [
+  {
+   "line": "/craft:tidy-followups spec/fixture-nest-fail-spec",
+   "standalone": true,
+   "in_fence": true
+  }
+ ],
+ "real_vault_hits": ""
+}

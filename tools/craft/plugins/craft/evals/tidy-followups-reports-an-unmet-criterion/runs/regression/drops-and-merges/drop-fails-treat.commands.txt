@@ -1,0 +1,25 @@
+[main] BASH
+$CRAFT[treat]/scripts/followup_gather.py fixture-mug-rack-spec; echo "exit: $?"
+
+[main] BASH
+lore record show --json --vault default task/mugs-count-the-mugs-hanging-on-the-rack; echo "exit: $?"; lore record show --json --vault default task/rack-paint-pick-a-warmer-grey; echo "exit: $?"; lore record show --json --vault default spec/fixture-mug-rack-spec; echo "exit: $?"
+
+[main] BASH
+dispositions=$(mktemp)
+cat > "$dispositions" <<'DISPOSITIONS_JSON'
+{"reason": "the rack was scrapped with the old stockroom", "drops": [{"name": "mugs-count-the-mugs-hanging-on-the-rack", "revision": "[sha:2e3126a9]"}, {"name": "rack-paint-pick-a-warmer-grey", "revision": "[sha:d328db49]"}], "merges": []}
+DISPOSITIONS_JSON
+$CRAFT[treat]/scripts/followup_dispose.py dispose fixture-mug-rack-spec --dispositions "$dispositions" --preview
+rc=$?
+rm -f "$dispositions"
+echo "exit: $rc"
+
+[main] BASH
+dispositions=$(mktemp)
+cat > "$dispositions" <<'DISPOSITIONS_JSON'
+{"reason": "the rack was scrapped with the old stockroom", "drops": [{"name": "mugs-count-the-mugs-hanging-on-the-rack", "revision": "[sha:2e3126a9]"}, {"name": "rack-paint-pick-a-warmer-grey", "revision": "[sha:d328db49]"}], "merges": []}
+DISPOSITIONS_JSON
+$CRAFT[treat]/scripts/followup_dispose.py dispose fixture-mug-rack-spec --dispositions "$dispositions"
+rc=$?
+rm -f "$dispositions"
+echo "exit: $rc"

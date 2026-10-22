@@ -1,0 +1,72 @@
+No follow-ups were found for `fixture-customer-poll-spec`. The gather checked one slice, `fixture-customer-poll-spec-the-slice`, found by the `labelled` slice basis. Nothing is created.
+
+**Header:** entry `complete-status` · slice basis `labelled` · 1 slice, 1 child · 3 candidates read, 0 kept · 0 excluded by label · 0 skipped edges
+
+Nothing has been written yet.
+
+The gather found one existing follow-up parent, which hides its follow-ups from the gather, so I went to step 7.
+
+### Step 7: the existing follow-up parent
+
+The state read gives exactly one live parent, `task/build-the-follow-ups-of-fixture-customer-poll-spec-chosen-2026-10-12`, with status **`in-progress`** (branch (c)). The ritual refuses to resume it or nest anything into it. Its build command:
+
+```
+/craft:execute task/build-the-follow-ups-of-fixture-customer-poll-spec-chosen-2026-10-12
+```
+
+**Warning:** if a build is already running against this parent, stop it before dropping. A drop un-nests the parent's unfinished children from under it.
+
+> **Build it with the command above, or drop it? (`drop` and a reason, or nothing)**
+
+Operator's answer: **drop**
+
+### Drop flow
+
+**1.** I ran the state read again. It exited 0 and still shows the parent `in-progress`, with no unlisted children and 0 skipped headings.
+
+**2. What the drop will do:**
+- **Un-nest:** `task/customer-poll-zero-pad-the-ballot-number` (`ready`)
+- **Keep nested** as the record of finished work: `task/customer-poll-return-the-average-of-an-empty-poll-as-zero` (`done`)
+
+No child is `in-progress`, so nothing suggests a build is running against this parent. An un-nested child that is `in-progress` would not be gathered again until its status changed, but this drop has none.
+
+**3.**
+> **Why is task/build-the-follow-ups-of-fixture-customer-poll-spec-chosen-2026-10-12 being dropped? (one line)**
+
+Operator's answer: "The poll tooling was retired, so this batch is no longer wanted."
+
+**4.**
+> **Un-nest `task/customer-poll-zero-pad-the-ballot-number`, keep `task/customer-poll-return-the-average-of-an-empty-poll-as-zero` (done), and drop task/build-the-follow-ups-of-fixture-customer-poll-spec-chosen-2026-10-12 with this reason: "The poll tooling was retired, so this batch is no longer wanted."? (`yes` or `stop`)**
+
+Operator's answer: **yes**
+
+**5–6.** I staged the reason as a JSON string in a private temp file, ran the drop, then removed the file. Drop exited 0:
+
+```
+un-nested task/customer-poll-zero-pad-the-ballot-number
+kept task/customer-poll-return-the-average-of-an-empty-poll-as-zero (done)
+```
+
+The parent is dropped. No write failed, and there are no `reset` commands because no un-nested child was `in-progress`.
+
+### Closing report
+
+- **Dropped parent:** `task/build-the-follow-ups-of-fixture-customer-poll-spec-chosen-2026-10-12`, with the reason "The poll tooling was retired, so this batch is no longer wanted."
+- **Un-nested:** Customer poll: zero-pad the ballot number (`customer-poll-zero-pad-the-ballot-number`). It is now a plain follow-up again, and a fresh gather will pick it up.
+- **Kept nested:** Customer poll: return the average of an empty poll as zero (`customer-poll-return-the-average-of-an-empty-poll-as-zero`), which is `done`.
+- **Failed writes:** none.
+- No follow-ups were gathered this run, so none were included, left, refined, left out, dropped or merged.
+
+unmet-criterion check: none flagged; 0 blocked not checked
+
+Rerun the ritual to gather the un-nested follow-up again. There is no distill command because this run ended in a parent drop.
+
+```
+/craft:tidy-followups spec/fixture-customer-poll-spec
+```
+
+To remove the parent's marker label (the ritual can't tell who created the parent):
+
+```
+lore record update task/build-the-follow-ups-of-fixture-customer-poll-spec-chosen-2026-10-12 --vault default --unset-label craft/followup-parent
+```

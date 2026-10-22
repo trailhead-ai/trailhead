@@ -1,0 +1,169 @@
+[main] TOOL Read {"file_path": "$CRAFT[treat]/skills/tidy-followups/SKILL.md"}
+
+[main] RESULT
+1	---
+2	name: tidy-followups
+3	description: >
+4	  Present a finished spec's recorded follow-ups as a reasoned shortlist — which are worth doing
+5	  now rather than later, each with a one-line reason — and list the rest by title; then, once the
+6	  operator has chosen, refine the chosen follow-ups and nest the ones that qualify under one new
+7	  buildable parent. Gathers with a deterministic script, ranks, and writes nothing until the
+8	  operator has confirmed the chosen set.
+9	  TRIGGER when: user says "tidy the follow-ups of spec X", "which follow-ups of this spec should
+10	  we do", "what follow-ups does this spec have", or invokes /craft:tidy-followups explicitly.
+11	  DO NOT TRIGGER when: the ask is a batch of in-session code fix-ups to run now (that is
+12	  `/craft:polish`'s), or the spec's slice loop is still running (follow-ups that matter
+13	  mid-loop reach the next slice through `/craft:plan`).
+14	---
+15	
+16	# Tidy follow-ups
+17	
+18	A spec built slice by slice leaves follow-ups: tasks the slices deliberately did not act on, linked
+19	back to the slice they came from. Once the spec closes they sink into the general backlog. This
+20	ritual brings one finished spec's follow... [cut 65507 chars]
+
+[main] TEXT
+Step 1: `fixture-hat-peg-spec` matches the safe shape, doesn't start with `-`, no `..`. Valid.
+
+[main] BASH
+$CRAFT[treat]/scripts/followup_gather.py fixture-hat-peg-spec; echo "exit: $?"
+
+[main] TOOL Read {"file_path": "$CRAFT[treat]/skills/_shared/security.md"}
+
+[main] RESULT
+{"spec": "fixture-hat-peg-spec", "vault": "default", "entry": "complete-status", "distilled": false, "followup-parents": [], "followups": [{"name": "hat-pegs-report-how-many-pegs-are-free", "title": "Hat pegs: report how many pegs are free", "status": "open"}, {"name": "hat-pegs-report-how-many-pegs-are-in-use", "title": "Hat pegs: report how many pegs are in use", "status": "open"}, {"name": "hat-pegs-report-the-pegs-in-use-as-a-ratio-of-all-pegs", "title": "Hat pegs: report the pegs in use as a ratio of all pegs", "status": "open"}], "slice-basis": "labelled", "slices": ["fixture-hat-peg-spec-the-slice"], "child-count": 1, "candidates-read": 3, "kept": 3, "excluded-by-label": {"count": 0, "names": []}, "skipped-edges": 0}
+exit: 0
+
+[main] RESULT
+1	# Security posture — credential scrub and untrusted-value validation
+2	
+3	Two rules every craft surface applies, stated once here so no citing surface restates them.
+4	
+5	## Credential-pattern scrub
+6	
+7	**Credential-pattern scrub (mechanical, runs first).** This is the general rule for the whole run,
+8	not one phase's step: **any finding or note text entering a record body or a report — session
+9	candidates, `blocked` bodies, task-body notes from the per-task loop, raw command stderr quoted into
+10	either — runs through this list first.** A vault is git-backed and has its own push path, so a
+11	credential transcribed into a task body ships as surely as one committed to code. Report bodies are
+12	**summarized, never captured verbatim** — quote only `file:line` references for anything caught. Run
+13	the text through this credential-pattern scrub regex list and drop/redact any match rather than
+14	capturing it:
+15	
+16	- **Key-like tokens** — `(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s*[=:]\s*\S+`
+17	  — the trailing character class is load-bearing: it lets the keyword carry qualifier text before
+18	  the separator, which is what catches `[redacted:key-like] `AWS_SECRE... [cut 2830 chars]
+
+[main] TEXT
+All gathered names pass the step 1 shape. Fetching bodies (step 4).
+
+[main] BASH
+for n in hat-pegs-report-how-many-pegs-are-free hat-pegs-report-how-many-pegs-are-in-use hat-pegs-report-the-pegs-in-use-as-a-ratio-of-all-pegs; do echo "=== $n"; lore record show --json --vault default task/$n; echo "exit: $?"; done; echo "=== spec"; lore record show --json --vault default spec/fixture-hat-peg-spec; echo "exit: $?"
+
+[main] RESULT
+=== hat-pegs-report-how-many-pegs-are-free
+{
+  "body": "`peg_report` in `src/pegs.py` counts every peg and says nothing of the free ones.\n",
+  "kind": "task",
+  "layer": "personal",
+  "name": "hat-pegs-report-how-many-pegs-are-free",
+  "record_id": "task/hat-pegs-report-how-many-pegs-are-free",
+  "revision": "[sha:4eb1f737]",
+  "sidecar": {
+    "created-at": "2026-10-22T16:29:15Z",
+    "created-by": "fixture@example.com",
+    "kind": "task",
+    "related": {
+      "task": [
+        "fixture-hat-peg-spec-the-slice"
+      ]
+    },
+    "status": "open",
+    "title": "Hat pegs: report how many pegs are free",
+    "updated-at": "2026-10-22T16:29:15Z",
+    "updated-by": "fixture@example.com",
+    "version": "v1"
+  }
+}
+exit: 0
+=== hat-pegs-report-how-many-pegs-are-in-use
+{
+  "body": "`peg_report` in `src/pegs.py` counts every peg. Agreed behaviour: it returns the number of pegs that hold a hat. The repository has no tests yet; add `tests/test_pegs.py`.\n",
+  "kind": "task",
+  "layer": "personal",
+  "name": "hat-pegs-report-how-many-pegs-are-in-use",
+  "record_id": "task/hat-pegs-report-how-many-pegs-are-in-use",
+  "revision": "88e869548ad... [cut 1887 chars]
+
+[main] BASH
+dispositions=$(mktemp)
+cat > "$dispositions" <<'DISPOSITIONS_JSON'
+{"reason": "", "drops": [], "merges": [{"survivor": {"name": "hat-pegs-report-how-many-pegs-are-in-use", "revision": "[sha:88e86954]"}, "absorbed": [{"name": "hat-pegs-report-how-many-pegs-are-free", "revision": "[sha:4eb1f737]", "intent": "Also report how many pegs are free (not holding a hat)."}, {"name": "hat-pegs-report-the-pegs-in-use-as-a-ratio-of-all-pegs", "revision": "[sha:1eaf376b]", "intent": "Also report the in-use count as a ratio of all pegs on the wall."}]}]}
+DISPOSITIONS_JSON
+$CRAFT[treat]/scripts/followup_dispose.py dispose fixture-hat-peg-spec --dispositions "$dispositions" --preview
+rc=$?
+rm -f "$dispositions"
+echo "exit: $rc"
+
+[main] RESULT
+{"drops": [], "merges": [{"survivor": "hat-pegs-report-how-many-pegs-are-in-use", "status": "open", "reset-to-open": false, "absorbed": [{"name": "hat-pegs-report-how-many-pegs-are-free", "status": "open", "note": "## Merged from task/hat-pegs-report-how-many-pegs-are-free\n\nIntent: Also report how many pegs are free (not holding a hat).\n"}, {"name": "hat-pegs-report-the-pegs-in-use-as-a-ratio-of-all-pegs", "status": "open", "note": "## Merged from task/hat-pegs-report-the-pegs-in-use-as-a-ratio-of-all-pegs\n\nIntent: Also report the in-use count as a ratio of all pegs on the wall.\n"}], "supersedes": [{"name": "hat-pegs-report-how-many-pegs-are-free", "by": "hat-pegs-report-how-many-pegs-are-in-use"}, {"name": "hat-pegs-report-the-pegs-in-use-as-a-ratio-of-all-pegs", "by": "hat-pegs-report-how-many-pegs-are-in-use"}]}], "dependents": {}}
+exit: 0
+
+[main] BASH
+dispositions=$(mktemp)
+cat > "$dispositions" <<'DISPOSITIONS_JSON'
+{"reason": "", "drops": [], "merges": [{"survivor": {"name": "hat-pegs-report-how-many-pegs-are-in-use", "revision": "[sha:88e86954]"}, "absorbed": [{"name": "hat-pegs-report-how-many-pegs-are-free", "revision": "[sha:4eb1f737]", "intent": "Also report how many pegs are free (not holding a hat)."}, {"name": "hat-pegs-report-the-pegs-in-use-as-a-ratio-of-all-pegs", "revision": "[sha:1eaf376b]", "intent": "Also report the in-use count as a ratio of all pegs on the wall."}]}]}
+DISPOSITIONS_JSON
+$CRAFT[treat]/scripts/followup_dispose.py dispose fixture-hat-peg-spec --dispositions "$dispositions"
+rc=$?
+rm -f "$dispositions"
+echo "exit: $rc"
+
+[main] RESULT
+reason-code: dispose-incomplete
+subject: hat-pegs-report-the-pegs-in-use-as-a-ratio-of-all-pegs
+{"dropped": [], "merged": [], "reset-to-open": [], "failed": [{"name": "hat-pegs-report-the-pegs-in-use-as-a-ratio-of-all-pegs", "write": "supersede", "command": "lore record supersede task/hat-pegs-report-the-pegs-in-use-as-a-ratio-of-all-pegs --by task/hat-pegs-report-how-many-pegs-are-in-use --vault default"}], "incomplete-merges": [{"survivor": "hat-pegs-report-how-many-pegs-are-in-use", "absorbed": ["hat-pegs-report-how-many-pegs-are-free", "hat-pegs-report-the-pegs-in-use-as-a-ratio-of-all-pegs"]}]}
+exit: 2
+
+[main] BASH
+$CRAFT[treat]/scripts/followup_gather.py fixture-hat-peg-spec; echo "exit: $?"
+
+[main] RESULT
+{"spec": "fixture-hat-peg-spec", "vault": "default", "entry": "complete-status", "distilled": false, "followup-parents": [], "followups": [{"name": "hat-pegs-report-how-many-pegs-are-in-use", "title": "Hat pegs: report how many pegs are in use", "status": "open"}, {"name": "hat-pegs-report-the-pegs-in-use-as-a-ratio-of-all-pegs", "title": "Hat pegs: report the pegs in use as a ratio of all pegs", "status": "open"}], "slice-basis": "labelled", "slices": ["fixture-hat-peg-spec-the-slice"], "child-count": 1, "candidates-read": 3, "kept": 2, "excluded-by-label": {"count": 0, "names": []}, "skipped-edges": 0}
+exit: 0
+
+[main] TEXT
+### 13. Closing report
+
+- **Included:** Hat pegs: report how many pegs are in use (`hat-pegs-report-how-many-pegs-are-in-use`). It was held back and was neither refined nor nested.
+- **Left:** none
+- **Left out:** none, because refinement did not run.
+- **Refined but not nested:** none
+- **Dropped:** none
+- **Merged:** none. The script's `merged` list is empty because the merge did not fully land.
+- **Reset to open:** none
+- **Failed:** the supersede of Hat pegs: report the pegs in use as a ratio of all pegs (`hat-pegs-report-the-pegs-in-use-as-a-ratio-of-all-pegs`).
+- **Held back:** Hat pegs: report how many pegs are in use (`hat-pegs-report-how-many-pegs-are-in-use`). It was not refined or nested this run because its merge is incomplete: the supersede of `hat-pegs-report-the-pegs-in-use-as-a-ratio-of-all-pegs` did not land.
+- No parent was created.
+
+unmet-criterion check: none flagged; 0 blocked not checked
+
+**Commands**
+
+This finishes the failed supersede. Run it only while `task/hat-pegs-report-the-pegs-in-use-as-a-ratio-of-all-pegs` is still not superseded:
+
+```
+lore record supersede task/hat-pegs-report-the-pegs-in-use-as-a-ratio-of-all-pegs --by task/hat-pegs-report-how-many-pegs-are-in-use --vault default
+```
+
+Give this answer again at the next run's Confirmation 1. `hat-pegs-report-how-many-pegs-are-free` is left out because it is already superseded and is no longer gathered:
+
+```
+merge hat-pegs-report-the-pegs-in-use-as-a-ratio-of-all-pegs into hat-pegs-report-how-many-pegs-are-in-use
+```
+
+The dispositions are unsettled, so this re-run line is printed and no distill command is:
+
+```
+/craft:tidy-followups spec/fixture-hat-peg-spec
+```

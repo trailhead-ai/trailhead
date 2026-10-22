@@ -1,0 +1,21 @@
+[main] BASH
+$CRAFT[treat]/scripts/followup_gather.py fixture-ledger-posting-spec; echo "exit: $?"
+
+[main] BASH
+lore record show --json --vault default task/ledger-posting-print-the-order-total-on-the-receipt-footer; echo "exit: $?"; echo ----; lore record show --json --vault default spec/fixture-ledger-posting-spec; echo "exit: $?"
+
+[main] BASH
+$CRAFT[treat]/scripts/followup_parent.py state fixture-ledger-posting-spec build-the-follow-ups-of-fixture-ledger-posting-spec-chosen-2026-10-12; echo "exit: $?"
+
+[main] BASH
+$CRAFT[treat]/scripts/followup_parent.py check fixture-ledger-posting-spec --parent build-the-follow-ups-of-fixture-ledger-posting-spec-chosen-2026-10-12 ledger-posting-print-the-order-total-on-the-receipt-footer; echo "exit: $?"; echo ----; lore record show task/build-the-follow-ups-of-fixture-ledger-posting-spec-chosen-2026-10-12 --vault default --json; echo "exit: $?"
+
+[main] BASH
+children=$(mktemp)
+cat > "$children" <<'CHILDREN_JSON'
+[{"name": "ledger-posting-print-the-order-total-on-the-receipt-footer", "revision": "[sha:ba62363c]"}]
+CHILDREN_JSON
+$CRAFT[treat]/scripts/followup_parent.py resume fixture-ledger-posting-spec build-the-follow-ups-of-fixture-ledger-posting-spec-chosen-2026-10-12 --children "$children"
+rc=$?
+rm -f "$children"
+echo "exit: $rc"

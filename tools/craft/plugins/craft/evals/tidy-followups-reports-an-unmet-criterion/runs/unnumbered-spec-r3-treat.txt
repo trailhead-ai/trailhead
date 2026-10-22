@@ -1,0 +1,30 @@
+I ran the procedure through to the end. It created one buildable parent with the keeper-board follow-up nested in it, and printed no distill command because one follow-up is flagged as unmet acceptance-criterion work.
+
+**What happened to each follow-up**
+- **Included and nested:** Keeper board: print the names in capitals (`keeper-board-print-the-names-in-capitals`). Its refinement landed, and the check confirmed it eligible and at `ready`.
+- **Left:** Lantern rota: reword the module comment (`lantern-rota-reword-the-module-comment`).
+- **Not included (flagged):** Lantern rota: a crew of one keeper (`lantern-rota-a-crew-of-one-keeper`).
+- **Left out, refined but not nested, failed writes:** none.
+- **Dropped or merged:** nothing.
+
+**Parent created:** `build-the-follow-ups-of-fixture-lantern-rota-spec-chosen-2026-10-22`. It is ready to build.
+
+unmet-criterion check: 1 flagged; 0 blocked not checked
+- Lantern rota: a crew of one keeper (`lantern-rota-a-crew-of-one-keeper`). The spec doesn't number its criteria. In my words, this is the `night_watch` criterion that a crew of fewer than two keepers must be refused with `ValueError`. It is still undone: `night_watch` only does modulo indexing and never raises that error.
+
+```
+/craft:execute task/build-the-follow-ups-of-fixture-lantern-rota-spec-chosen-2026-10-22
+```
+
+The flagged follow-up leaves you three options:
+1. **Build the criterion as a slice.** The spec's status is `complete` and its criteria have no numbers, so this means starting a new spec for it.
+2. **Change the spec instead.** Amend it to remove or reword that criterion.
+3. **Clear the flag.** If the work is not really unmet, re-run this ritual and answer `not unmet lantern-rota-a-crew-of-one-keeper`:
+
+```
+/craft:tidy-followups spec/fixture-lantern-rota-spec
+```
+
+The refinement subagent made two choices you might want to review:
+- It kept `keeper_board` returning a string rather than printing, which matches the follow-up's own "agreed behaviour" line.
+- It chose stdlib `unittest` for the new `tests/test_board.py`, but did not run that test command.

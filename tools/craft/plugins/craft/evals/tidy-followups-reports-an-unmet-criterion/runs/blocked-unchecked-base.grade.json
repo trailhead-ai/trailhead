@@ -1,0 +1,85 @@
+{
+ "cell": "blocked-unchecked",
+ "outcome_lines": [],
+ "final_ac_ids": [],
+ "closing_commands": [
+  {
+   "line": "/craft:execute task/build-the-follow-ups-of-fixture-mooring-spec-chosen-2026-10-22",
+   "standalone": true
+  },
+  {
+   "line": "/craft:distill spec/fixture-mooring-spec",
+   "standalone": true
+  }
+ ],
+ "order": {
+  "agent": [
+   6
+  ],
+  "check": [
+   8
+  ],
+  "assemble": [
+   9
+  ],
+  "assemble_exit": [
+   0
+  ]
+ },
+ "check_args": [
+  [
+   "K"
+  ]
+ ],
+ "assemble_children": [
+  [
+   "K"
+  ]
+ ],
+ "resume_children": [],
+ "dispose_files": [],
+ "agent_targets": [
+  [
+   "K"
+  ]
+ ],
+ "fetched_by_main": [
+  "K"
+ ],
+ "step6_list": [],
+ "records": {
+  "K": {
+   "status": "ready",
+   "parent": "build-the-follow-ups-of-fixture-mooring-spec-chosen-2026-10-22",
+   "depends-on": [],
+   "body_changed": true,
+   "new": false,
+   "dropped_note": null
+  },
+  "B": {
+   "status": "blocked",
+   "parent": null,
+   "depends-on": [],
+   "body_changed": false,
+   "new": false,
+   "dropped_note": null
+  },
+  "NEW": {
+   "status": "ready",
+   "parent": null,
+   "depends-on": [],
+   "body_changed": true,
+   "new": true,
+   "dropped_note": null,
+   "lists": [
+    "K"
+   ]
+  }
+ },
+ "repo": {
+  "head_before": "[sha:125e4299]",
+  "head_after": "[sha:125e4299]",
+  "status_after": ""
+ },
+ "real_vault_hits": ""
+}

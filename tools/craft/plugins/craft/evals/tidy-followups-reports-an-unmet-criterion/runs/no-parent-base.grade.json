@@ -1,0 +1,53 @@
+{
+ "cell": "no-parent",
+ "outcome_lines": [],
+ "final_ac_ids": [],
+ "closing_commands": [
+  {
+   "line": "/craft:distill spec/fixture-harbour-dues-spec",
+   "standalone": true
+  }
+ ],
+ "order": {
+  "confirmation_1": [
+   5
+  ],
+  "confirmation_2_plain": [
+   5
+  ]
+ },
+ "check_args": [],
+ "assemble_children": [],
+ "resume_children": [],
+ "dispose_files": [],
+ "agent_targets": [],
+ "fetched_by_main": [
+  "L",
+  "U"
+ ],
+ "step6_list": [],
+ "records": {
+  "L": {
+   "status": "open",
+   "parent": null,
+   "depends-on": [],
+   "body_changed": false,
+   "new": false,
+   "dropped_note": null
+  },
+  "U": {
+   "status": "open",
+   "parent": null,
+   "depends-on": [],
+   "body_changed": false,
+   "new": false,
+   "dropped_note": null
+  }
+ },
+ "repo": {
+  "head_before": "[sha:49f45eda]",
+  "head_after": "[sha:49f45eda]",
+  "status_after": ""
+ },
+ "real_vault_hits": ""
+}

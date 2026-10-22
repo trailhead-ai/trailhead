@@ -1,0 +1,73 @@
+{
+ "cell": "no-parent",
+ "outcome_lines": [
+  {
+   "line": "unmet-criterion check: 1 flagged; 0 blocked not checked",
+   "flagged": 1,
+   "blocked": 0
+  }
+ ],
+ "final_ac_ids": [
+  "AC2"
+ ],
+ "closing_commands": [
+  {
+   "line": "/craft:tidy-followups spec/fixture-harbour-dues-spec",
+   "standalone": true
+  }
+ ],
+ "order": {
+  "step6_list": [
+   10
+  ],
+  "confirmation_1": [
+   10
+  ],
+  "confirmation_2_plain": [
+   10
+  ],
+  "not_unmet_offer": [
+   10
+  ]
+ },
+ "check_args": [],
+ "assemble_children": [],
+ "resume_children": [],
+ "dispose_files": [],
+ "agent_targets": [],
+ "fetched_by_main": [],
+ "step6_list": [
+  "**Unmet acceptance criteria:**",
+  "- Harbour dues: waive dues under ten tons (`U`). Flagged against **AC2**. `dues` still charges small vessels the per-ton rate, when it should charge nothing below the ten-ton threshold.",
+  "",
+  "Nothing has been written yet.",
+  "",
+  "---",
+  "",
+  "## Step 8: Confirmation 1"
+ ],
+ "records": {
+  "L": {
+   "status": "open",
+   "parent": null,
+   "depends-on": [],
+   "body_changed": false,
+   "new": false,
+   "dropped_note": null
+  },
+  "U": {
+   "status": "open",
+   "parent": null,
+   "depends-on": [],
+   "body_changed": false,
+   "new": false,
+   "dropped_note": null
+  }
+ },
+ "repo": {
+  "head_before": "[sha:ed98f3e5]",
+  "head_after": "[sha:ed98f3e5]",
+  "status_after": ""
+ },
+ "real_vault_hits": ""
+}

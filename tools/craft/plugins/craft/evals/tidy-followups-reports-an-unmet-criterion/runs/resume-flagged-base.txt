@@ -1,0 +1,35 @@
+nested task/lens-house-reject-negative-hours
+nested task/lens-oil-round-the-litres-to-one-decimal
+
+---
+
+## Closing report
+
+I resumed the existing follow-up parent, and it is now `ready` and buildable. Steps 8 to 12 did not run, and no second parent was created.
+
+- **Parent:** `build-the-follow-ups-of-fixture-lens-house-spec-chosen-2026-10-22`
+- **Nested:**
+  - Lens house: reject negative hours (`lens-house-reject-negative-hours`)
+  - Lens oil: round the litres to one decimal (`lens-oil-round-the-litres-to-one-decimal`)
+- **Removed from the list:** none
+- **Left out:** none
+- **Failed writes:** none
+- **Dropped or merged:** nothing; step 8a did not run.
+
+The resume skipped refinement: both follow-ups were already `ready`, and the check confirmed them eligible against the repo they point at.
+
+The parent's selection reasons are generic. I judged only the negative-hours fix as getting costlier with delay. The rounding fix is in the parent because the earlier run listed it, and you kept it by answering `yes`.
+
+To build it:
+
+```
+/craft:execute task/build-the-follow-ups-of-fixture-lens-house-spec-chosen-2026-10-22
+```
+
+The ritual can't tell who created a parent. If you didn't create this one, this command removes its marker label so the follow-up gather stops counting it, and leaves the record alone:
+
+```
+lore record update task/build-the-follow-ups-of-fixture-lens-house-spec-chosen-2026-10-22 --vault default --unset-label craft/followup-parent
+```
+
+There's no distill command yet, because distilling waits on the parent.

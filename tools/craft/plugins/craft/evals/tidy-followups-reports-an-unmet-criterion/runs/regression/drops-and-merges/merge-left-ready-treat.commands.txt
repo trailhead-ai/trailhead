@@ -1,0 +1,25 @@
+[main] BASH
+$CRAFT[treat]/scripts/followup_gather.py fixture-crate-docket-spec; echo "exit: $?"
+
+[main] BASH
+for n in crate-docket-print-the-destination-city-on-the-docket crate-docket-print-the-destination-postcode-on-the-docket forklift-log-add-a-closing-full-stop-to-the-module-docstring; do echo "=== $n"; lore record show --json --vault default task/$n; echo "exit: $?"; done; echo "=== spec"; lore record show --json --vault default spec/fixture-crate-docket-spec; echo "exit: $?"
+
+[main] BASH
+dispositions=$(mktemp)
+cat > "$dispositions" <<'DISPOSITIONS_JSON'
+{"reason": "", "drops": [], "merges": [{"survivor": {"name": "crate-docket-print-the-destination-city-on-the-docket", "revision": "[sha:f154b8b6]"}, "absorbed": [{"name": "crate-docket-print-the-destination-postcode-on-the-docket", "revision": "[sha:d44e096c]", "intent": "Also print the crate's destination postcode at the end of the docket, for the courier."}]}]}
+DISPOSITIONS_JSON
+$CRAFT[treat]/scripts/followup_dispose.py dispose fixture-crate-docket-spec --dispositions "$dispositions" --preview
+rc=$?
+rm -f "$dispositions"
+echo "exit: $rc"
+
+[main] BASH
+dispositions=$(mktemp)
+cat > "$dispositions" <<'DISPOSITIONS_JSON'
+{"reason": "", "drops": [], "merges": [{"survivor": {"name": "crate-docket-print-the-destination-city-on-the-docket", "revision": "[sha:f154b8b6]"}, "absorbed": [{"name": "crate-docket-print-the-destination-postcode-on-the-docket", "revision": "[sha:d44e096c]", "intent": "Also print the crate's destination postcode at the end of the docket, for the courier."}]}]}
+DISPOSITIONS_JSON
+$CRAFT[treat]/scripts/followup_dispose.py dispose fixture-crate-docket-spec --dispositions "$dispositions"
+rc=$?
+rm -f "$dispositions"
+echo "exit: $rc"

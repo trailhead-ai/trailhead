@@ -1,0 +1,19 @@
+I ran `/craft:tidy-followups` on `fixture-ferry-timetable-spec`. It created one new parent task, `task/build-the-follow-ups-of-fixture-ferry-timetable-spec-chosen-2026-10-22`, with one follow-up nested under it. The parent is `ready` and can be built now.
+
+**What happened to each follow-up**
+- **Included, refined and nested:** "Ferry timetable: accept a clock time written as text" (`ferry-timetable-accept-a-clock-time-written-as-text`). It went from `open` to `ready`, and the eligibility check passed it.
+- **Left as it was:** "Ferry timetable: tidy a variable name" (`ferry-timetable-tidy-a-variable-name`). It only renames a variable, so delaying it costs nothing more.
+- **Dropped or merged:** none.
+- **Failed writes:** none.
+
+**One choice to review:** the agreed behaviour only covers `HH:MM` strings. The refinement says strings in any other form are out of scope and adds no extra validation. Rather than make up rules, it left that open. Check you agree before building.
+
+To build the parent:
+```
+/craft:execute task/build-the-follow-ups-of-fixture-ferry-timetable-spec-chosen-2026-10-22
+```
+
+The spec hasn't been distilled yet. To distill it:
+```
+/craft:distill spec/fixture-ferry-timetable-spec
+```

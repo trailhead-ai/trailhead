@@ -1,0 +1,4 @@
+vault CHANGED task/build-the-follow-ups-of-fixture-shelf-sticker-spec-chosen-2026-10-12.json
+vault CHANGED task/build-the-follow-ups-of-fixture-shelf-sticker-spec-chosen-2026-10-12.md
+repo head before=[sha:52de126d] after=[sha:52de126d]
+repo status after=''

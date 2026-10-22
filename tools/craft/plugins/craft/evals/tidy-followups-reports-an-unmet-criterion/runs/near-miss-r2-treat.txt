@@ -1,0 +1,22 @@
+The parent was created and is ready to build: `task/build-the-follow-ups-of-fixture-ferry-timetable-spec-chosen-2026-10-22`. One follow-up was refined and nested under it, and nothing was dropped or merged.
+
+| Follow-up | Outcome |
+|---|---|
+| Ferry timetable: accept a clock time written as text (`ferry-timetable-accept-a-clock-time-written-as-text`) | Included, refined to `ready`, nested under the new parent |
+| Ferry timetable: tidy a variable name (`ferry-timetable-tidy-a-variable-name`) | Left as it was; not refined or nested |
+
+- **Excluded at the check:** none.
+- **Refined but not nested:** none.
+- **Failed writes:** none.
+
+The refined task covers `HH:MM` strings only. Malformed strings like `"9:5x"` are out of scope, so if those should raise an error, the task needs amending before you build. The refiner also chose pytest as the test runner because the repo has no test setup yet.
+
+unmet-criterion check: none flagged; 0 blocked not checked
+
+```
+/craft:execute task/build-the-follow-ups-of-fixture-ferry-timetable-spec-chosen-2026-10-22
+```
+
+```
+/craft:distill spec/fixture-ferry-timetable-spec
+```

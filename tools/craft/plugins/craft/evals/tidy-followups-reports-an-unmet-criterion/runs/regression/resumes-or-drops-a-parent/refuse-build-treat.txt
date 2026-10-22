@@ -1,0 +1,42 @@
+No follow-ups were gathered for `fixture-shelf-count-spec`. The gather checked one slice, `fixture-shelf-count-spec-the-slice`, found by the `labelled` slice basis. Nothing is created.
+
+**Header:** entry `complete-status` · slice basis `labelled` · 1 slice, 1 child · 3 candidates read, 0 kept · 1 excluded by label · 0 skipped edges
+
+Nothing has been written yet.
+
+### Step 7: existing follow-up parent
+
+The spec already has one follow-up parent. The label exclusion hides it and its follow-ups from the gather.
+
+- `task/build-the-follow-ups-of-fixture-shelf-count-spec-chosen-2026-10-12`: status **`ready`** (taken from the state read). It holds 2 children, both `ready`: `shelf-count-ignore-negative-counts-in-the-shelf-total` and `shelf-count-report-an-empty-pallet-load-as-zero`.
+
+This is branch (c), exactly one `ready` parent, so the ritual won't resume it or nest anything into it. Build command:
+
+```
+/craft:execute task/build-the-follow-ups-of-fixture-shelf-count-spec-chosen-2026-10-12
+```
+
+**Warning:** if a build is already running against this parent, stop it before dropping. A drop un-nests the unfinished children underneath it.
+
+> *Build it with the command above, or drop it? (`drop` and a reason, or nothing)*
+
+**Answer given:** build it; drop nothing. With no drop, the drop flow doesn't run and nothing is written.
+
+### Closing report
+
+- **Included / left / left out / refined but not nested:** none. No follow-ups were gathered, and steps 8 to 12 don't run when a parent exists.
+- **Dispositions:** none. Step 8a did not run, and nothing was dropped or merged.
+- **Writes:** none.
+- **Parent:** `build-the-follow-ups-of-fixture-shelf-count-spec-chosen-2026-10-12` is unchanged and still `ready`. It was neither created nor resumed in this run.
+
+unmet-criterion check: none flagged; 0 blocked not checked
+
+(The gather returned no follow-ups, so there were no bodies to check against the spec's criteria.)
+
+The ritual can't tell who created a parent. If you didn't create this one, the command below removes its marker label. The gather then stops counting it, and the record itself is left alone:
+
+```
+lore record update task/build-the-follow-ups-of-fixture-shelf-count-spec-chosen-2026-10-12 --vault default --unset-label craft/followup-parent
+```
+
+I printed no distill command because distilling waits on this parent. To build it, run the `/craft:execute` command shown above.

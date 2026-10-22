@@ -1,0 +1,36 @@
+I ran the tidy for spec/fixture-lantern-rota-spec. It created a new parent, `task/build-the-follow-ups-of-fixture-lantern-rota-spec-chosen-2026-10-22`, which holds your one chosen follow-up and is `ready` to build. One other follow-up was flagged as unfinished work the spec still requires.
+
+### Step 13: closing report
+
+**Included**
+- Keeper board: print the names in capitals (`keeper-board-print-the-names-in-capitals`). It was refined, nested and is now `ready`.
+
+**Left**
+- Lantern rota: reword the module comment (`lantern-rota-reword-the-module-comment`)
+
+**Left out:** none. **Refined but not nested:** none. **Failed writes:** none. Nothing was dropped or merged.
+
+**Parent created:** `build-the-follow-ups-of-fixture-lantern-rota-spec-chosen-2026-10-22`, holding `keeper-board-print-the-names-in-capitals`, `buildable`.
+
+unmet-criterion check: 1 flagged; 0 blocked not checked
+
+- Lantern rota: a crew of one keeper (`lantern-rota-a-crew-of-one-keeper`). It is flagged against the spec's first criterion, which is unnumbered. `night_watch` in `src/rota.py` still assigns a one-keeper crew to every night and fails with a division error on an empty crew. The criterion says it should turn away any crew of fewer than two.
+
+To build the new parent:
+
+```
+/craft:execute task/build-the-follow-ups-of-fixture-lantern-rota-spec-chosen-2026-10-22
+```
+
+No distill command is printed while a follow-up is still flagged.
+
+You have three ways to deal with the flagged follow-up:
+1. **Build the criterion as new work.** The spec is `complete` and the criterion has no number, so it can't be reopened. Start a new spec for it.
+2. **Amend the spec** to remove or reword that criterion.
+3. **Re-run this tidy** and clear the flag with `not unmet lantern-rota-a-crew-of-one-keeper` if the work isn't really required:
+
+```
+/craft:tidy-followups spec/fixture-lantern-rota-spec
+```
+
+The refinement subagent picked pytest as the test runner without asking, because the repo has no test setup and the vault records no testing decision. Check the new `tests/test_board.py` contract before building if you'd rather use something else.

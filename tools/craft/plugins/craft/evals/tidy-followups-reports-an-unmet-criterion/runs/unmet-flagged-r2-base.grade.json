@@ -1,0 +1,97 @@
+{
+ "cell": "unmet-flagged",
+ "outcome_lines": [],
+ "final_ac_ids": [],
+ "closing_commands": [
+  {
+   "line": "/craft:execute task/build-the-follow-ups-of-fixture-tide-table-spec-chosen-2026-10-22",
+   "standalone": true
+  },
+  {
+   "line": "/craft:distill spec/fixture-tide-table-spec",
+   "standalone": true
+  }
+ ],
+ "order": {
+  "confirmation_1": [
+   6
+  ],
+  "confirmation_2_plain": [
+   6
+  ],
+  "agent": [
+   7
+  ],
+  "check": [
+   9
+  ],
+  "assemble": [
+   10
+  ],
+  "assemble_exit": [
+   0
+  ]
+ },
+ "check_args": [
+  [
+   "K"
+  ]
+ ],
+ "assemble_children": [
+  [
+   "K"
+  ]
+ ],
+ "resume_children": [],
+ "dispose_files": [],
+ "agent_targets": [
+  [
+   "K"
+  ]
+ ],
+ "fetched_by_main": [],
+ "step6_list": [],
+ "records": {
+  "K": {
+   "status": "ready",
+   "parent": "build-the-follow-ups-of-fixture-tide-table-spec-chosen-2026-10-22",
+   "depends-on": [],
+   "body_changed": true,
+   "new": false,
+   "dropped_note": null
+  },
+  "U": {
+   "status": "open",
+   "parent": null,
+   "depends-on": [],
+   "body_changed": false,
+   "new": false,
+   "dropped_note": null
+  },
+  "L": {
+   "status": "open",
+   "parent": null,
+   "depends-on": [],
+   "body_changed": false,
+   "new": false,
+   "dropped_note": null
+  },
+  "NEW": {
+   "status": "ready",
+   "parent": null,
+   "depends-on": [],
+   "body_changed": true,
+   "new": true,
+   "dropped_note": null,
+   "lists": [
+    "K"
+   ]
+  }
+ },
+ "repo": {
+  "head_before": "[sha:c20010d5]",
+  "head_after": "[sha:c20010d5]",
+  "status_after": ""
+ },
+ "real_vault_hits": ""
+}

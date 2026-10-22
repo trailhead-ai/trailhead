@@ -1,0 +1,6 @@
+vault ADDED task/build-the-follow-ups-of-fixture-sundial-spec-chosen-2026-10-22.json
+vault ADDED task/build-the-follow-ups-of-fixture-sundial-spec-chosen-2026-10-22.md
+vault CHANGED task/dial-plate-put-the-north-mark-first.json
+vault CHANGED task/dial-plate-put-the-north-mark-first.md
+repo head before=[sha:0806e055] after=[sha:0806e055]
+repo status after=''

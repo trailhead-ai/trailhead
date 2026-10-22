@@ -1,0 +1,8 @@
+[main] BASH
+$CRAFT[treat]/scripts/followup_gather.py fixture-chosen-spec; echo "exit: $?"
+
+[main] BASH
+lore record show --json --vault default task/chosen-fix-a-typo-in-a-docstring; echo "exit: $?"; lore record show --json --vault default task/chosen-stop-writing-bearer-tokens-to-the-request-trace; echo "exit: $?"; lore record show --json --vault default spec/fixture-chosen-spec; echo "exit: $?"
+
+[main] BASH
+$CRAFT[treat]/scripts/followup_parent.py state fixture-chosen-spec build-the-follow-ups-of-fixture-chosen-spec-chosen-2026-10-22; echo "exit: $?"

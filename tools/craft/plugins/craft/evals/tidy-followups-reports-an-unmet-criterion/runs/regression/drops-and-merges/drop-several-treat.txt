@@ -1,0 +1,27 @@
+dropped task/dials-rename-the-two-dial-constants-to-match-the-manual
+dropped task/journal-note-the-preheat-time-beside-each-loaf
+dropped task/thermostat-swap-the-probe-supplier
+
+Every write landed and read back. Nothing is included, so no refinement ran and no parent is created. Steps 9–12 did not run.
+
+---
+
+## Closing report
+
+- **Included:** none
+- **Left:** Hinge: reword the swing comment (`hinge-reword-the-swing-comment`)
+- **Left out / refined but not nested:** none
+- **Dropped:** reason: *the oven line was closed when the bakery gave up its second site*
+  - Dials: rename the two dial constants to match the manual (`dials-rename-the-two-dial-constants-to-match-the-manual`): was `ready`
+  - Journal: note the preheat time beside each loaf (`journal-note-the-preheat-time-beside-each-loaf`): was `open`
+  - Thermostat: swap the probe supplier (`thermostat-swap-the-probe-supplier`): was `blocked`
+- **Merged:** none
+- **Reset to open:** none
+- **Failed:** none
+- **Held back:** none
+
+unmet-criterion check: none flagged; 1 blocked not checked
+
+```
+/craft:distill spec/fixture-bakery-oven-spec
+```

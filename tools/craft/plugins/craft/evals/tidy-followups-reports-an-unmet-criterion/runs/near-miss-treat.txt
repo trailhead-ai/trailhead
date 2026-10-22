@@ -1,0 +1,21 @@
+I created one buildable parent for spec/fixture-ferry-timetable-spec. It holds the clock-time follow-up, which is refined and now `ready`.
+
+**What happened**
+- **Included and nested:** Ferry timetable: accept a clock time written as text (`ferry-timetable-accept-a-clock-time-written-as-text`). Refinement moved it from `open` to `ready`. Its scope: `next_departure` takes either an integer minute (as before) or an `HH:MM` string, with new tests in `tests/test_ferry.py`. What a malformed string should do is left out of scope.
+- **Left as it was:** Ferry timetable: tidy a variable name (`ferry-timetable-tidy-a-variable-name`).
+- **Not done:** nothing was left out, nothing was refined without being nested, nothing was dropped or merged, and no write failed.
+- **New parent:** `build-the-follow-ups-of-fixture-ferry-timetable-spec-chosen-2026-10-22`, now `ready`.
+
+unmet-criterion check: none flagged; 0 blocked not checked
+
+I didn't flag the clock-time follow-up as an unmet criterion. AC1 only asks for the next departure from a minute of the day, so accepting an `HH:MM` string adds to it rather than finishing it. The rename is just polish.
+
+Next commands:
+
+```
+/craft:execute task/build-the-follow-ups-of-fixture-ferry-timetable-spec-chosen-2026-10-22
+```
+
+```
+/craft:distill spec/fixture-ferry-timetable-spec
+```

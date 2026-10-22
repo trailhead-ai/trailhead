@@ -1,0 +1,87 @@
+[main] BASH
+$CRAFT[base]/scripts/followup_gather.py fixture-tide-table-spec; echo "exit: $?"
+
+[main] BASH
+for n in chart-printer-zero-pad-the-hour-column tide-table-mention-the-unit-in-the-module-comment tide-table-reject-an-hour-outside-the-day; do echo "=== $n"; lore record show --json --vault default task/$n; echo "exit: $?"; done
+
+[main] BASH
+ls $CRAFT[base]/skills/_shared/
+
+[main] AGENT
+You are refining exactly one task record: `task/chart-printer-zero-pad-the-hour-column` in the lore vault `default` (the `lore` command on your PATH reads that vault).
+
+Instructions:
+- Read $CRAFT[base]/skills/_shared/refine.md yourself and follow it in full, in its **unattended** mode, against this one task only. `${CLAUDE_PLUGIN_ROOT}` is $CRAFT[base]. No operator is available, so do not wait for answers; where refine.md's unattended mode says what to do with a question only the operator can answer,... [cut 583 chars]
+
+[sub] BASH
+lore record show task/chart-printer-zero-pad-the-hour-column; echo ---; lore task graph chart-printer-zero-pad-the-hour-column
+
+[sub] BASH
+cd $RUN[unmet-flagged-base]/fixture/repo && git status --short && git log --oneline | head && git ls-files
+
+[sub] BASH
+cd $RUN[unmet-flagged-base]/fixture/repo && ls -laR . | grep -v '^\.git' | head -50; cat src/chartprint.py 2>/dev/null | cat -n; lore record show --help 2>&1 | head -30
+
+[sub] BASH
+cd $RUN[unmet-flagged-base]/fixture/repo && ls -la src; cat README.md; lore record show --json task/chart-printer-zero-pad-the-hour-column
+
+[sub] BASH
+cd $RUN[unmet-flagged-base]/fixture/repo/src && for f in *.py; do echo "== $f"; cat "$f"; done; grep -rn "chartprint\|render_row" . 
+
+[sub] BASH
+lore record show task/fixture-tide-table-spec-the-slice; echo ---; lore search "chartprint"; echo ---; lore search "render_row"; echo ---; lore search "zero-pad hour"; echo ---; lore search "chart printer"; echo ---; lore search "kind:area chart"; echo; lore search "test convention pytest"; lore search "kind:adr"; lore search "kind:area"
+
+[sub] BASH
+d=$(mktemp -d) && cp -R $RUN[unmet-flagged-base]/fixture/repo/src "$d/" && mkdir "$d/tests" && cat > "$d/tests/test_chartprint.py" <<'EOF'
+import unittest
+from src.chartprint import render_row
+class T(unittest.TestCase):
+    def test_pad(self):
+        self.assertEqual(render_row(7, 1.5), '07 1.5')
+EOF
+cd "$d" && python3 -I -m unittest tests.test_chartprint 2>&1 | tail -3; python3 -m unittest tests.test_chartprint 2>&1 | tail -3; python3 -m pytest --version 2>&1; rm -rf "$d"
+
+[sub] BASH
+f=$(mktemp) && cat > "$f" <<'EOF'
+`render_row` in `src/chartprint.py` prints the hour as it comes, so 7 sorts after 18 in a listing. Agreed behaviour: `render_row(7, 1.5)` returns `07 1.5`: the hour zero-padded to two digits, a space, then the height with one decimal. The repository has no tests yet; add `tests/test_chartprint.py`.
+
+**Delivers:** `render_row(hour, height)` (src/chartprint.py:1) returns the hour zero-padded to two digits, one space, then the height formatted to exactly one decimal place — e.g. `render_row(7, 1.5)` returns `07 1.5`. Today the return at src/chartprint.py:2 interpolates both values unformatted. No other module calls `render_row` (repo-wide grep finds only its definition), so the signature and return type (str) are unchanged.
+
+**Test contract:** new `tests/test_chartprint.py`, written as `unittest.TestCase` tests (the repo has no test suite or runner config yet; `unittest` needs no extra dependency and pytest also collects it), importing `from src.chartprint import render_row` (`src/__init__.py` makes `src` a package). Tests to write first, failing against the current code:
+- `render_row(7, 1.5)` returns `07 1.5` (single-digit hour is padded).
+- `render_row(18, 1.5)` returns `18 1.5` (two-digit hour unchanged).
+- `render_row(0, 2)` returns `00 2.0` (zero hour padded; height always shows one decimal).
+- `render_row(9, 3.25)` returns a string starting `09 3.` with exactly one digit after the decimal point (height is formatted to one decimal, not printed raw).
+Run from the repo root: `python3 -m unittest tests.test_chartprint` — expected after the fix: all tests pass (`OK`).
+
+**Files:** `src/chartprint.py` (modified), `tests/test_chartprint.py` (created)
+
+## Flow-out
+
+- [ ] Touched area/subsystem profiles updated with what changed
+- [ ] Prover-validated assumptions captured as session candidates (durable at flush)
+- [ ] New decisions / lessons / follow-ups surfaced during the build recorded
+EOF
+sed -n '1,30p' $CRAFT[base]/templates/plan.md | grep -n -A5 "Flow-out"; echo "$f"
+
+[sub] BASH
+sed -n '30,40p' $CRAFT[base]/templates/plan.md; lore record update --help | head -30
+
+[sub] BASH
+f=$RUN[unmet-flagged-base]/tmp/tmp.FmibZVBp8g; wc -l $RUN[unmet-flagged-base]/fixture/repo/src/chartprint.py; lore record update task/chart-printer-zero-pad-the-hour-column --vault default --status ready --unset-label route < "$f" && rm -f "$f"; lore record show task/chart-printer-zero-pad-the-hour-column
+
+[sub] BASH
+f=$(mktemp) && lore record show --json task/chart-printer-zero-pad-the-hour-column | python3 -I -c 'import sys,json; b=json.load(sys.stdin)["body"]; sys.stdout.write(b.replace("Tests to write first, failing against the current code:", "Tests to write first (all but the two-digit-hour case fail against the current code):"))' > "$f" && grep -c "all but the two-digit" "$f" && lore record update task/chart-printer-zero-pad-the-hour-column --vault default < "$f"; rm -f "$f"; lore record show --json task/chart-printer-zero-pad-the-hour-column | python3 -I -c 'import sys,json; d=json.load(sys.stdin); print(d["sidecar"]["status"]); print("all but" in d["body"])'
+
+[main] BASH
+$CRAFT[base]/scripts/followup_parent.py check fixture-tide-table-spec chart-printer-zero-pad-the-hour-column; echo "exit: $?"
+
+[main] BASH
+children=$(mktemp)
+cat > "$children" <<'CHILDREN_JSON'
+[{"name": "chart-printer-zero-pad-the-hour-column", "reason": "Waiting gets costlier: every listing or script that consumes the printed rows meanwhile adapts to the unpadded, mis-sorting hour format, so a later format change breaks more consumers.", "revision": "[sha:d04a4704]"}]
+CHILDREN_JSON
+$CRAFT[base]/scripts/followup_parent.py assemble fixture-tide-table-spec --children "$children"
+rc=$?
+rm -f "$children"
+echo "exit: $rc"

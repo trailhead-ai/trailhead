@@ -1,0 +1,32 @@
+I created a new parent task for this spec's follow-ups. It holds one follow-up, the keeper-board capitals change, and is ready to build. The crew-of-one follow-up was not nested: it is flagged as unmet work from the spec itself.
+
+**Spec:** spec/fixture-lantern-rota-spec
+
+**Parent:** `build-the-follow-ups-of-fixture-lantern-rota-spec-chosen-2026-10-22`
+
+| Follow-up | Outcome |
+|---|---|
+| Keeper board: print the names in capitals (`keeper-board-print-the-names-in-capitals`) | Refined, and nested under the parent |
+| Lantern rota: reword the module comment (`lantern-rota-reword-the-module-comment`) | Left (not chosen), no change to its record |
+| Lantern rota: a crew of one keeper (`lantern-rota-a-crew-of-one-keeper`) | Flagged as an unmet acceptance criterion, not included |
+
+- **Shortlist:** none of the three met a reason for doing it sooner. The keeper-board change is in only because you moved it onto the shortlist.
+- **Writes:** none failed. Nothing was dropped, merged, or left out after refinement, and nothing was refined without being nested.
+- **Refinement:** it moved the keeper-board follow-up from `open` to `ready`. Its new scope is `keeper_board` in `src/board.py` returning each name in capitals, joined by a comma and a space, plus a new `tests/test_board.py`.
+
+unmet-criterion check: 1 flagged; 0 blocked not checked
+- **Lantern rota: a crew of one keeper** (`lantern-rota-a-crew-of-one-keeper`) is flagged against the spec's `night_watch` criterion: a crew of fewer than two keepers must be refused with a `ValueError`. `night_watch` in `src/rota.py` still has no such check. A one-keeper crew is put on watch every night, and an empty crew fails with a division error instead.
+
+To build the parent:
+```
+/craft:execute task/build-the-follow-ups-of-fixture-lantern-rota-spec-chosen-2026-10-22
+```
+
+There is no distill command while a follow-up is flagged. To deal with the flagged follow-up, pick one of three options:
+1. **Build the criterion as new work.** The spec is `complete` and the criterion has no number, so it can't be reopened. Start a new spec for it.
+2. **Amend the spec** to remove or reword the crew-size criterion.
+3. **Clear the flag.** If the follow-up is not really unmet, re-run this ritual and answer `not unmet lantern-rota-a-crew-of-one-keeper`:
+
+```
+/craft:tidy-followups spec/fixture-lantern-rota-spec
+```

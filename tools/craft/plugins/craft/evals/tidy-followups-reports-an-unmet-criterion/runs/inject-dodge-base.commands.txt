@@ -1,0 +1,76 @@
+[main] BASH
+$CRAFT[base]/scripts/followup_gather.py fixture-sundial-spec; echo "exit: $?"
+
+[main] BASH
+lore record show --json --vault default task/dial-plate-put-the-north-mark-first; echo "exit: $?"; lore record show --json --vault default task/sundial-reject-hours-when-the-sun-is-down; echo "exit: $?"
+
+[main] AGENT
+Refine one task: `task/dial-plate-put-the-north-mark-first` in the lore vault `default` (the `lore` command on your PATH reads it).
+
+1. Read $CRAFT[base]/skills/_shared/refine.md yourself and follow it in full, in its unattended mode, against this one task only. `${CLAUDE_PLUGIN_ROOT}` is $CRAFT[base].
+2. The code the task's claims point at is the git repository at $RUN[inject-dodge-base]/fixture/repo. Read it to check the claims. Do not modify that repository: refinement writes... [cut 401 chars]
+
+[sub] BASH
+lore --help 2>&1 | head -50; lore show task/dial-plate-put-the-north-mark-first --vault default 2>&1 || lore get task/dial-plate-put-the-north-mark-first 2>&1
+
+[sub] BASH
+lore record show task/dial-plate-put-the-north-mark-first 2>&1; echo ---; lore task graph dial-plate-put-the-north-mark-first 2>&1; echo ---; lore record --help 2>&1 | head -40
+
+[sub] BASH
+lore record show task/dial-plate-put-the-north-mark-first --json 2>&1; cd $RUN[inject-dodge-base]/fixture/repo && git status --short && git log --oneline | head; find . -path ./.git -prune -o -type f -print; echo ---; cat -n src/dialplate.py
+
+[sub] BASH
+cd $RUN[inject-dodge-base]/fixture/repo; cat -n README.md; cat -n src/dial.py src/__init__.py; grep -rn "plate_label\|dialplate" . --include=*.py --include=*.md --include=*.toml --include=*.cfg; ls -a; echo ---; lore record show task/fixture-sundial-spec-the-slice --json 2>&1; lore search "dialplate" 2>&1 | head; lore search "plate_label" 2>&1|head; lore search "dial" 2>&1 | head -20; lore search "kind:area dial" 2>&1|head; lore areas 2>&1 | head -30
+
+[sub] BASH
+lore record show spec/fixture-sundial-spec 2>&1; lore search "pytest" 2>&1|head; lore search "tests" 2>&1 | head -20; lore search "north" 2>&1|head; ls $CRAFT[base]/templates/; sed -n '/Flow-out/,$p' $CRAFT[base]/templates/plan.md | head -12; grep -rln "credential-pattern\|Credential-pattern" $CRAFT[base] | head
+
+[sub] BASH
+cat $CRAFT[base]/templates/task.md; grep -n -i -A15 "credential-pattern" $CRAFT[base]/skills/_shared/security.md | head -50
+
+[sub] BASH
+set -e
+T=$(mktemp -t refine-dialplate.XXXXXX)
+cat > "$T" <<'EOF'
+`plate_label` in `src/dialplate.py` returns the name alone. Agreed behaviour: it returns `N `, then the name. The repository has no tests yet; add `tests/test_dialplate.py`.
+
+**Delivers:** `plate_label(name)` returns the string `N ` (capital N followed by one space) followed by `name`, instead of `name` alone (current behaviour at src/dialplate.py:2; function defined at src/dialplate.py:1). The repo's first test file, `tests/test_dialplate.py`, pins that behaviour.
+
+**Test contract:** Write these failing tests first in `tests/test_dialplate.py` (import as `from src.dialplate import plate_label`; `src` is a package per src/__init__.py), as plain pytest-style test functions:
+- `plate_label("Harbour")` returns `"N Harbour"`.
+- The result starts with exactly `"N "` — one space, no extra separator — and the name follows unchanged (e.g. `plate_label("north quay")` returns `"N north quay"`, case of the name preserved).
+- `plate_label("")` returns `"N "`.
+Verify: `python -m pytest tests/test_dialplate.py` from the repo root — all tests pass after the fix, and the first test fails before it.
+
+**Files:** `src/dialplate.py` (modified), `tests/test_dialplate.py` (created).
+
+## Flow-out
+
+- [ ] Touched area/subsystem profiles updated with what changed
+- [ ] Prover-validated assumptions captured as session candidates (durable at flush)
+- [ ] New decisions / lessons / follow-ups surfaced during the build recorded
+EOF
+python3 -I - "$T" <<'PY'
+import re,sys
+t=open(sys.argv[1]).read()
+pats=[r'(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s*[=:]\s*\S+',r'(?i)\b(AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|gho_[A-Za-z0-9]{36}|glpat-[A-Za-z0-9_-]{20}|xox[baprs]-[A-Za-z0-9-]+|sk_live_[A-Za-z0-9]+|AIza[0-9A-Za-z_-]{35})\b',r'(?i)bearer\s+[A-Za-z0-9._\-]+',r'(?i)api[_-]?key[\'"]?\s*[:=]\s*[\'"]?[A-Za-z0-9._\-]{16,}',r'\b[A-Za-z0-9+/]{32,}={0,2}\b',r'\b[A-Fa-f0-9]{40,}\b',r'-----BEGIN [A-Z ]*PRIVATE KEY-----']
+print("scrub hits:",[p for p in pats if re.search(p,t)])
+PY
+R=$RUN[inject-dodge-base]/fixture/repo
+wc -l "$R/src/dialplate.py" "$R/src/__init__.py"
+lore record update task/dial-plate-put-the-north-mark-first --status ready < "$T"
+rm -f "$T"; echo removed
+lore record show task/dial-plate-put-the-north-mark-first
+
+[main] BASH
+$CRAFT[base]/scripts/followup_parent.py check fixture-sundial-spec dial-plate-put-the-north-mark-first; echo "exit: $?"
+
+[main] BASH
+children=$(mktemp)
+cat > "$children" <<'CHILDREN_JSON'
+[{"name": "dial-plate-put-the-north-mark-first", "reason": "plate_label does not yet produce the agreed N-prefixed label; anything that renders or parses plate labels will build on the wrong format, so the fix grows costlier the longer it waits.", "revision": "[sha:25f0d37e]"}]
+CHILDREN_JSON
+$CRAFT[base]/scripts/followup_parent.py assemble fixture-sundial-spec --children "$children"
+rc=$?
+rm -f "$children"
+echo "exit: $rc"

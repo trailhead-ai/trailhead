@@ -1,0 +1,6 @@
+vault ADDED task/build-the-follow-ups-of-fixture-pennant-spec-chosen-2026-10-22.json
+vault ADDED task/build-the-follow-ups-of-fixture-pennant-spec-chosen-2026-10-22.md
+vault CHANGED task/pennants-accept-a-lower-case-letter.json
+vault CHANGED task/pennants-accept-a-lower-case-letter.md
+repo head before=[sha:29ec34d9] after=[sha:29ec34d9]
+repo status after=''

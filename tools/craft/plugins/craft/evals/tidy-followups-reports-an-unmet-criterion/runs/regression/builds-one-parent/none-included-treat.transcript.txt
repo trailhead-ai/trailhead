@@ -1,0 +1,157 @@
+[main] TOOL Read {"file_path": "$CRAFT[treat]/skills/tidy-followups/SKILL.md"}
+
+[main] RESULT
+1	---
+2	name: tidy-followups
+3	description: >
+4	  Present a finished spec's recorded follow-ups as a reasoned shortlist — which are worth doing
+5	  now rather than later, each with a one-line reason — and list the rest by title; then, once the
+6	  operator has chosen, refine the chosen follow-ups and nest the ones that qualify under one new
+7	  buildable parent. Gathers with a deterministic script, ranks, and writes nothing until the
+8	  operator has confirmed the chosen set.
+9	  TRIGGER when: user says "tidy the follow-ups of spec X", "which follow-ups of this spec should
+10	  we do", "what follow-ups does this spec have", or invokes /craft:tidy-followups explicitly.
+11	  DO NOT TRIGGER when: the ask is a batch of in-session code fix-ups to run now (that is
+12	  `/craft:polish`'s), or the spec's slice loop is still running (follow-ups that matter
+13	  mid-loop reach the next slice through `/craft:plan`).
+14	---
+15	
+16	# Tidy follow-ups
+17	
+18	A spec built slice by slice leaves follow-ups: tasks the slices deliberately did not act on, linked
+19	back to the slice they came from. Once the spec closes they sink into the general backlog. This
+20	ritual brings one finished spec's follow... [cut 65507 chars]
+
+[main] TEXT
+Step 1: `fixture-none-included-spec` matches the safe shape, doesn't start with `-`, and has no `..`. Step 2: gather.
+
+[main] BASH
+$CRAFT[treat]/scripts/followup_gather.py fixture-none-included-spec; echo "exit: $?"
+
+[main] TOOL Read {"file_path": "$CRAFT[treat]/skills/_shared/security.md"}
+
+[main] RESULT
+{"spec": "fixture-none-included-spec", "vault": "default", "entry": "complete-status", "distilled": false, "followup-parents": [], "followups": [{"name": "none-included-drop-an-unused-local-variable", "title": "None-included: drop an unused local variable", "status": "open"}, {"name": "none-included-reorder-two-imports", "title": "None-included: reorder two imports", "status": "open"}], "slice-basis": "labelled", "slices": ["fixture-none-included-spec-the-slice"], "child-count": 1, "candidates-read": 2, "kept": 2, "excluded-by-label": {"count": 0, "names": []}, "skipped-edges": 0}
+exit: 0
+
+[main] RESULT
+1	# Security posture — credential scrub and untrusted-value validation
+2	
+3	Two rules every craft surface applies, stated once here so no citing surface restates them.
+4	
+5	## Credential-pattern scrub
+6	
+7	**Credential-pattern scrub (mechanical, runs first).** This is the general rule for the whole run,
+8	not one phase's step: **any finding or note text entering a record body or a report — session
+9	candidates, `blocked` bodies, task-body notes from the per-task loop, raw command stderr quoted into
+10	either — runs through this list first.** A vault is git-backed and has its own push path, so a
+11	credential transcribed into a task body ships as surely as one committed to code. Report bodies are
+12	**summarized, never captured verbatim** — quote only `file:line` references for anything caught. Run
+13	the text through this credential-pattern scrub regex list and drop/redact any match rather than
+14	capturing it:
+15	
+16	- **Key-like tokens** — `(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s*[=:]\s*\S+`
+17	  — the trailing character class is load-bearing: it lets the keyword carry qualifier text before
+18	  the separator, which is what catches `[redacted:key-like] `AWS_SECRE... [cut 2830 chars]
+
+[main] TEXT
+Both names pass the step 1 shape. Fetching the bodies and the spec.
+
+[main] BASH
+for r in task/none-included-drop-an-unused-local-variable task/none-included-reorder-two-imports spec/fixture-none-included-spec; do echo "=== $r"; lore record show --json --vault default $r; echo "exit: $?"; done
+
+[main] RESULT
+=== task/none-included-drop-an-unused-local-variable
+{
+  "body": "A local variable in `src/util.py` is assigned and never read.\n",
+  "kind": "task",
+  "layer": "personal",
+  "name": "none-included-drop-an-unused-local-variable",
+  "record_id": "task/none-included-drop-an-unused-local-variable",
+  "revision": "[sha:4d457e92]",
+  "sidecar": {
+    "created-at": "2026-10-22T15:56:14Z",
+    "created-by": "fixture@example.com",
+    "kind": "task",
+    "related": {
+      "task": [
+        "fixture-none-included-spec-the-slice"
+      ]
+    },
+    "status": "open",
+    "title": "None-included: drop an unused local variable",
+    "updated-at": "2026-10-22T15:56:14Z",
+    "updated-by": "fixture@example.com",
+    "version": "v1"
+  }
+}
+exit: 0
+=== task/none-included-reorder-two-imports
+{
+  "body": "Two imports in `src/util.py` are out of alphabetical order.\n",
+  "kind": "task",
+  "layer": "personal",
+  "name": "none-included-reorder-two-imports",
+  "record_id": "task/none-included-reorder-two-imports",
+  "revision": "[sha:d96c30e6]",
+  "sidecar": {
+    "created-at": "2026-10-22T15:56:14Z",
+    ... [cut 974 chars]
+
+[main] TEXT
+Step 1 passed: the name `fixture-none-included-spec` has a valid shape. Step 2: the gather exited 0 with a complete result. I've read both follow-up bodies and the spec body as data. The spec body has no acceptance criteria, so neither follow-up can be an unmet criterion. Neither one is a security exposure, a fix that costs more as other work builds on it, or a foundation whose value grows the sooner it lands. Both are small tidy-ups.
+
+## Follow-ups of spec/fixture-none-included-spec
+
+**Header:** entry `complete-status` · slice basis `labelled` · 1 slice, 1 child · 2 candidates read, 2 kept · 0 excluded by label · 0 skipped edges
+
+**Recommended:** none. 0 of 2 met a reason class.
+
+**Other follow-ups:**
+- None-included: drop an unused local variable
+- None-included: reorder two imports
+
+No follow-ups are blocked or flagged as unmet criteria, and no two follow-ups overlap.
+
+Nothing has been written yet.
+
+---
+
+### Confirmation 1: the chosen set
+
+> Which listed follow-ups do you want to move onto the shortlist, and which off it? You can also drop a follow-up or merge overlapping ones.
+
+**Answer given:** `none`
+
+Nothing was dropped or merged, so there's nothing to stage or preview.
+
+- **Included:** (none)
+- **Left:**
+  - None-included: drop an unused local variable (`none-included-drop-an-unused-local-variable`)
+  - None-included: reorder two imports (`none-included-reorder-two-imports`)
+- **Flagged (not included):** (none)
+
+### Confirmation 2
+
+> Include these, leave these. Refinement rewrites each included follow-up's record whether or not it ends up nested. Proceed? (`yes`, or what to move.)
+
+**Answer given:** `yes`
+
+Nothing is included, so no parent is created. Refinement (steps 9–10) and the scope confirmation and assembly (steps 11–12) don't run, so the scope confirmation question was never reached.
+
+---
+
+## Closing report
+
+- **Included:** none
+- **Left:**
+  - None-included: drop an unused local variable (`none-included-drop-an-unused-local-variable`)
+  - None-included: reorder two imports (`none-included-reorder-two-imports`)
+- **Left out / refined but not nested / failed writes:** none. No refinement ran and no records were written.
+- No parent was created.
+
+unmet-criterion check: none flagged; 0 blocked not checked
+
+```
+/craft:distill spec/fixture-none-included-spec
+```

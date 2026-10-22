@@ -1,0 +1,78 @@
+[main] BASH
+$CRAFT[treat]/scripts/followup_gather.py fixture-lantern-rota-spec; echo "exit: $?"
+
+[main] BASH
+for n in keeper-board-print-the-names-in-capitals lantern-rota-a-crew-of-one-keeper lantern-rota-reword-the-module-comment; do echo "=== $n"; lore record show --json --vault default task/$n; echo "exit: $?"; done; echo "=== spec"; lore record show --json --vault default spec/fixture-lantern-rota-spec; echo "exit: $?"
+
+[main] BASH
+cd $RUN[unnumbered-spec-r2-treat]/fixture/repo && git log --oneline | head; ls -R src tests 2>/dev/null; cat src/*.py
+
+[main] AGENT
+Refine the vault task `task/keeper-board-print-the-names-in-capitals` in the lore vault `default` (the `lore` command on PATH reads this vault).
+
+1. Read $CRAFT[treat]/skills/_shared/refine.md yourself and follow it in full, in its unattended mode, against that one task only. `${CLAUDE_PLUGIN_ROOT}` is $CRAFT[treat]. The code the task points at is the git repository at $RUN[unnumbered-spec-r2-treat]/fixture/repo — read it there; do not modify the code.
+2. Stage any body you writ... [cut 252 chars]
+
+[sub] BASH
+lore record show task/keeper-board-print-the-names-in-capitals; echo ---; lore task graph keeper-board-print-the-names-in-capitals; echo ---; lore --help 2>&1 | head -40
+
+[sub] BASH
+lore record show --help 2>&1 | head -30; lore record update --help 2>&1 | head -50; lore vault ls 2>&1
+
+[sub] BASH
+lore record show --json --vault default task/keeper-board-print-the-names-in-capitals; echo; cd $RUN[unnumbered-spec-r2-treat]/fixture/repo && git status --short && git log --oneline | head && git ls-files && cat -n src/board.py
+
+[sub] BASH
+find . -path ./.git -prune -o -type f -print; echo ---; cat -n src/board.py; echo ---; lore record show task/fixture-lantern-rota-spec-the-slice
+
+[sub] BASH
+cat -n README.md; for f in src/*.py; do echo "== $f"; cat -n $f; done; ls -a; cat pyproject.toml setup.cfg pytest.ini 2>/dev/null
+
+[sub] BASH
+lore search "keeper board" ; echo ---; lore search "board"; echo ---; lore search "capitals upper"; echo ---; lore search "kind:area"; echo ---; lore search "tests"; echo ---; lore search "lantern rota"
+
+[sub] BASH
+lore record show task/lens-oil-round-the-litres-to-one-decimal; echo ---; lore record show spec/fixture-lantern-rota-spec; echo ---; lore search "src/board.py"; lore search "upper-case"; echo ---; grep -n -A8 "Flow-out" $CRAFT[treat]/templates/plan.md; grep -n -B2 -A10 "Delivers" $CRAFT[treat]/templates/task.md
+
+[sub] BASH
+sed -n 30,40p $CRAFT[treat]/templates/plan.md; lore search 'kind:area'; lore search 'kind:adr'; lore search 'kind:lesson'; lore search 'kind:decision'
+
+[sub] BASH
+set -e; T=$(mktemp); trap 'rm -f "$T"' EXIT
+cat > "$T" <<'EOF'
+`keeper_board` in `src/board.py` prints the names as typed. Agreed behaviour: it returns the names upper-cased and joined by a comma and a space. The repository has no tests yet; add `tests/test_board.py`.
+
+**Delivers:** `keeper_board(names)` in `src/board.py` returns each name upper-cased, joined by `', '` (comma and a space). Today it joins the names unchanged (`src/board.py:2`); the separator is kept as-is and only the case changes, per the agreed behaviour stated in the task prose above.
+
+**Test contract:** New `tests/test_board.py` (the repository has no tests yet, so this file is the first):
+- `keeper_board(['ada', 'Bo'])` returns `'ADA, BO'` (fails against the current `src/board.py:2`, which returns `'ada, Bo'`).
+- `keeper_board(['Cy'])` returns `'CY'` (single name, no separator).
+
+**Files:** `src/board.py`, `tests/test_board.py` (new)
+
+## Flow-out
+
+- [ ] Touched area/subsystem profiles updated with what changed
+- [ ] Prover-validated assumptions captured as session candidates (durable at flush)
+- [ ] New decisions / lessons / follow-ups surfaced during the build recorded
+EOF
+grep -nEi 'key|token|secret|password|AKIA|BEGIN|ghp_|sk-' "$T" || echo "scrub: no credential patterns"
+test -f $RUN[unnumbered-spec-r2-treat]/fixture/repo/src/board.py && [ $(wc -l < $RUN[unnumbered-spec-r2-treat]/fixture/repo/src/board.py) -ge 2 ] && echo "citation src/board.py:2 resolves"
+lore record update task/keeper-board-print-the-names-in-capitals --vault default --status ready < "$T"
+echo "tmp: $T"
+
+[sub] BASH
+ls $RUN[unnumbered-spec-r2-treat]/tmp/tmp.x6EpzhqauC 2>&1; lore record show --json task/keeper-board-print-the-names-in-capitals | grep '"status"'; lore record show task/keeper-board-print-the-names-in-capitals
+
+[main] BASH
+$CRAFT[treat]/scripts/followup_parent.py check fixture-lantern-rota-spec keeper-board-print-the-names-in-capitals; echo "exit: $?"
+
+[main] BASH
+children=$(mktemp)
+cat > "$children" <<'CHILDREN_JSON'
+[{"name": "keeper-board-print-the-names-in-capitals", "reason": "Moved onto the shortlist by the operator; the longer callers rely on the as-typed board output, the more must be revisited when the agreed upper-case format lands.", "revision": "[sha:ed9bfd29]"}]
+CHILDREN_JSON
+$CRAFT[treat]/scripts/followup_parent.py assemble fixture-lantern-rota-spec --children "$children"
+rc=$?
+rm -f "$children"
+echo "exit: $rc"

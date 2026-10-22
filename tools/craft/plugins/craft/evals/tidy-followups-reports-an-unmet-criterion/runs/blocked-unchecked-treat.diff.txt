@@ -1,0 +1,6 @@
+vault CHANGED task/berth-sign-zero-pad-the-berth-number.json
+vault CHANGED task/berth-sign-zero-pad-the-berth-number.md
+vault ADDED task/build-the-follow-ups-of-fixture-mooring-spec-chosen-2026-10-22.json
+vault ADDED task/build-the-follow-ups-of-fixture-mooring-spec-chosen-2026-10-22.md
+repo head before=[sha:25902437] after=[sha:25902437]
+repo status after=''

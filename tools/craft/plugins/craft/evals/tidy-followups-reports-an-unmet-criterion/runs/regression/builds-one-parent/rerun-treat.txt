@@ -1,0 +1,57 @@
+I ran `/craft:tidy-followups spec/fixture-chosen-spec` up to step 7. It stopped there and wrote nothing, because the spec already has a follow-up parent at `ready` and no answer was given for the question that branch asks. Your three answers are for steps 8 and 11, which don't run when a parent already exists.
+
+**Gather:** the gather script exited 0 with a complete result. The spec name passed the step 1 checks.
+
+---
+
+**Header:** entry `complete-status` · slice basis `labelled` · 1 slice, 1 child · 5 candidates read, 2 kept · 1 excluded by label · 0 skipped edges
+
+**Recommended**
+- Chosen: stop writing [REDACTED] to the request trace — `chosen-stop-writing-bearer-tokens-to-the-request-trace`
+  - **Reason:** the request trace writes the Authorization header's value as-is to a shared log. Every request until this is fixed puts another live credential into logs people read.
+  - **Class:** open security exposure
+
+1 of 2 met a reason class.
+
+**Other follow-ups**
+- Chosen: fix a typo in a docstring
+
+**Blocked:** none.
+
+No unmet acceptance criteria: the spec body states none, so no follow-up is flagged. The two follow-ups cover unrelated ground, so there is no possible-overlap line.
+
+Nothing has been written yet.
+
+---
+
+### Step 7: the existing follow-up parent
+
+The gather found one parent, `build-the-follow-ups-of-fixture-chosen-spec-chosen-2026-10-22`, and its state read exited 0. That parent's status is **`ready`**, so branch (c) applies: it cannot be resumed or have anything nested into it. No second parent will be created, and steps 8 to 12 do not run. It already holds two `ready` follow-ups:
+- `chosen-reject-path-traversal-in-the-export-endpoint`
+- `chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it`
+
+```
+/craft:execute task/build-the-follow-ups-of-fixture-chosen-spec-chosen-2026-10-22
+```
+
+Warning: if a build is already running against this parent, stop it before dropping, because a drop un-nests the unfinished children underneath it.
+
+> **Build it with the command above, or drop it? (`drop` and a reason, or nothing)**
+
+No answer to this question was supplied. The procedure does not let me continue on an assumed answer, so the run stops here and nothing has been written.
+
+---
+
+### Closing report
+
+- **Included / left / left out / refined:** none. Steps 8 to 12 did not run on this branch.
+- **Writes:** nothing was dropped, merged, refined or nested.
+- unmet-criterion check: none flagged; 0 blocked not checked
+
+If you created this parent yourself, ignore this command. If you didn't, it removes the marker label so the follow-up gather stops counting the parent, and leaves the record otherwise alone:
+
+```
+lore record update task/build-the-follow-ups-of-fixture-chosen-spec-chosen-2026-10-22 --vault default --unset-label craft/followup-parent
+```
+
+There is no distill command, because distilling waits on the parent. To build what the parent holds, use the `/craft:execute` command above. To drop the parent instead, rerun the ritual and answer `drop` at this question. It will then show what the drop would un-nest and ask for a reason.

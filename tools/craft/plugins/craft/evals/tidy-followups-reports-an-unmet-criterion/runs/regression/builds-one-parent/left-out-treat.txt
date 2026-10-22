@@ -1,0 +1,23 @@
+Left out:
+- **Left-out: pin the TLS minimum version in the client** (`left-out-pin-the-tls-minimum-version-in-the-client`): it depends on unfinished work outside this set, `outside-upgrade-the-http-client-library`.
+- **Left-out: rotate the hard-coded session signing secret** (`left-out-rotate-the-hard-coded-session-signing-secret`): refinement left a question only you can answer, so it is not ready to build.
+
+Refinement ran, but both included follow-ups were left out, so no parent was created. That means step 11 (Confirmation 3, the scope question) and step 12 (`assemble`) are never reached, and the "yes" you supplied for the scope question went unused.
+
+---
+
+## Closing report
+
+- **Included:** Left-out: rotate the hard-coded session signing secret (`left-out-rotate-the-hard-coded-session-signing-secret`); Left-out: pin the TLS minimum version in the client (`left-out-pin-the-tls-minimum-version-in-the-client`)
+- **Left:** none
+- **Left out:**
+  - Left-out: pin the TLS minimum version in the client (`left-out-pin-the-tls-minimum-version-in-the-client`): it depends on the unfinished dependency `outside-upgrade-the-http-client-library`, which is not part of this set.
+  - Left-out: rotate the hard-coded session signing secret (`left-out-rotate-the-hard-coded-session-signing-secret`): refinement left a question only you can answer, so it is not ready to build.
+- **Refined but not nested:** both follow-ups above.
+- **Failed writes:** none.
+- **Dropped / merged:** none. Step 8a did not run.
+- **Parent:** none created.
+
+unmet-criterion check: none flagged; 0 blocked not checked
+
+/craft:distill spec/fixture-left-out-spec

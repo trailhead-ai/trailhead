@@ -1,0 +1,6 @@
+vault ADDED task/build-the-follow-ups-of-fixture-pilot-boat-spec-chosen-2026-10-22.json
+vault ADDED task/build-the-follow-ups-of-fixture-pilot-boat-spec-chosen-2026-10-22.md
+vault CHANGED task/crew-roster-put-the-boat-name-first-on-each-line.json
+vault CHANGED task/crew-roster-put-the-boat-name-first-on-each-line.md
+repo head before=[sha:090ed26c] after=[sha:090ed26c]
+repo status after=''

@@ -1,0 +1,22 @@
+The new parent `build-the-follow-ups-of-fixture-tide-table-spec-chosen-2026-10-22` was created with the zero-pad follow-up nested under it, and it is now `ready` to build. The script exited 0 with no failed writes.
+
+The operator moved `tide-table-reject-an-hour-outside-the-day` off the shortlist, so it stays in the backlog. I had recommended it, because callers may come to rely on hour -1 quietly wrapping round to the day's last entry, so that fix gets costlier the longer it waits.
+
+**Nested under the new parent**
+- Chart printer: zero-pad the hour column (`chart-printer-zero-pad-the-hour-column`). The refinement subagent moved it from `open` to `ready` and added a delivers section, a test contract for a new `tests/test_chartprint.py`, and a file list. It made two calls on its own: plain `unittest`-style tests, since the repo has no test convention yet, and always showing one decimal place, so a height of `2` prints as `2.0`. Neither came from a recorded decision.
+
+**Left in the backlog**
+- Tide table: reject an hour outside the day (`tide-table-reject-an-hour-outside-the-day`)
+- Tide table: mention the unit in the module comment (`tide-table-mention-the-unit-in-the-module-comment`)
+
+Nothing was dropped or merged, no follow-up was left out at the check, and no write failed.
+
+To build the parent, then distill the spec:
+
+```
+/craft:execute task/build-the-follow-ups-of-fixture-tide-table-spec-chosen-2026-10-22
+```
+
+```
+/craft:distill spec/fixture-tide-table-spec
+```

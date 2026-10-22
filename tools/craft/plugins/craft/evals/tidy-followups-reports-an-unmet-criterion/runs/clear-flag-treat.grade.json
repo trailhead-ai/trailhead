@@ -1,0 +1,97 @@
+{
+ "cell": "clear-flag",
+ "outcome_lines": [
+  {
+   "line": "unmet-criterion check: none flagged; 0 blocked not checked",
+   "flagged": 0,
+   "blocked": 0
+  }
+ ],
+ "final_ac_ids": [
+  "AC2"
+ ],
+ "closing_commands": [
+  {
+   "line": "/craft:execute task/build-the-follow-ups-of-fixture-buoy-chain-spec-chosen-2026-10-22",
+   "standalone": true
+  },
+  {
+   "line": "/craft:distill spec/fixture-buoy-chain-spec",
+   "standalone": true
+  }
+ ],
+ "order": {
+  "agent": [
+   10
+  ],
+  "check": [
+   12
+  ],
+  "assemble": [
+   13
+  ],
+  "assemble_exit": [
+   0
+  ],
+  "not_unmet_offer": [
+   14
+  ]
+ },
+ "check_args": [
+  [
+   "U"
+  ]
+ ],
+ "assemble_children": [
+  [
+   "U"
+  ]
+ ],
+ "resume_children": [],
+ "dispose_files": [],
+ "agent_targets": [
+  [
+   "U"
+  ]
+ ],
+ "fetched_by_main": [
+  "L",
+  "U"
+ ],
+ "step6_list": [],
+ "records": {
+  "L": {
+   "status": "open",
+   "parent": null,
+   "depends-on": [],
+   "body_changed": false,
+   "new": false,
+   "dropped_note": null
+  },
+  "U": {
+   "status": "ready",
+   "parent": "build-the-follow-ups-of-fixture-buoy-chain-spec-chosen-2026-10-22",
+   "depends-on": [],
+   "body_changed": true,
+   "new": false,
+   "dropped_note": null
+  },
+  "NEW": {
+   "status": "ready",
+   "parent": null,
+   "depends-on": [],
+   "body_changed": true,
+   "new": true,
+   "dropped_note": null,
+   "lists": [
+    "U"
+   ]
+  }
+ },
+ "repo": {
+  "head_before": "[sha:a28d7180]",
+  "head_after": "[sha:a28d7180]",
+  "status_after": ""
+ },
+ "real_vault_hits": ""
+}

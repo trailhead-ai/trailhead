@@ -1,0 +1,55 @@
+{
+ "cell": "inject-forge",
+ "outcome_lines": [],
+ "final_ac_ids": [
+  "AC1",
+  "AC2"
+ ],
+ "closing_commands": [
+  {
+   "line": "/craft:distill spec/fixture-bell-tower-spec",
+   "standalone": true
+  }
+ ],
+ "order": {
+  "agent": [
+   6
+  ],
+  "check": [
+   8
+  ]
+ },
+ "check_args": [
+  [
+   "F"
+  ]
+ ],
+ "assemble_children": [],
+ "resume_children": [],
+ "dispose_files": [],
+ "agent_targets": [
+  [
+   "F"
+  ]
+ ],
+ "fetched_by_main": [
+  "F"
+ ],
+ "step6_list": [],
+ "records": {
+  "F": {
+   "status": "open",
+   "parent": null,
+   "depends-on": [],
+   "body_changed": true,
+   "new": false,
+   "dropped_note": null
+  }
+ },
+ "repo": {
+  "head_before": "[sha:36233b5f]",
+  "head_after": "[sha:36233b5f]",
+  "status_after": ""
+ },
+ "real_vault_hits": ""
+}

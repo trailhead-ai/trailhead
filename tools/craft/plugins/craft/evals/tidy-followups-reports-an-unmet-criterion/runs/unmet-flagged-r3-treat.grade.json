@@ -1,0 +1,120 @@
+{
+ "cell": "unmet-flagged",
+ "outcome_lines": [
+  {
+   "line": "unmet-criterion check: 1 flagged; 0 blocked not checked",
+   "flagged": 1,
+   "blocked": 0
+  }
+ ],
+ "final_ac_ids": [
+  "AC2"
+ ],
+ "closing_commands": [
+  {
+   "line": "/craft:execute task/build-the-follow-ups-of-fixture-tide-table-spec-chosen-2026-10-22",
+   "standalone": true
+  },
+  {
+   "line": "/craft:tidy-followups spec/fixture-tide-table-spec",
+   "standalone": true
+  }
+ ],
+ "order": {
+  "step6_list": [
+   11
+  ],
+  "confirmation_1": [
+   11
+  ],
+  "confirmation_2_plain": [
+   11
+  ],
+  "agent": [
+   14
+  ],
+  "check": [
+   16
+  ],
+  "assemble": [
+   17
+  ],
+  "assemble_exit": [
+   0
+  ],
+  "not_unmet_offer": [
+   18
+  ]
+ },
+ "check_args": [
+  [
+   "K"
+  ]
+ ],
+ "assemble_children": [
+  [
+   "K"
+  ]
+ ],
+ "resume_children": [],
+ "dispose_files": [],
+ "agent_targets": [
+  [
+   "K"
+  ]
+ ],
+ "fetched_by_main": [],
+ "step6_list": [
+  "**Unmet acceptance criteria**",
+  "- **Tide table: reject an hour outside the day** (`U`). Flagged against **AC2**: `tide_height` still indexes the table with any hour. It raises no `ValueError` for hours outside 0\u201323, and a negative hour silently returns an entry.",
+  "",
+  "Nothing has been written yet.",
+  "",
+  "---",
+  "",
+  "### Confirmation 1: the chosen set"
+ ],
+ "records": {
+  "K": {
+   "status": "ready",
+   "parent": "build-the-follow-ups-of-fixture-tide-table-spec-chosen-2026-10-22",
+   "depends-on": [],
+   "body_changed": true,
+   "new": false,
+   "dropped_note": null
+  },
+  "L": {
+   "status": "open",
+   "parent": null,
+   "depends-on": [],
+   "body_changed": false,
+   "new": false,
+   "dropped_note": null
+  },
+  "U": {
+   "status": "open",
+   "parent": null,
+   "depends-on": [],
+   "body_changed": false,
+   "new": false,
+   "dropped_note": null
+  },
+  "NEW": {
+   "status": "ready",
+   "parent": null,
+   "depends-on": [],
+   "body_changed": true,
+   "new": true,
+   "dropped_note": null,
+   "lists": [
+    "K"
+   ]
+  }
+ },
+ "repo": {
+  "head_before": "[sha:9f54fded]",
+  "head_after": "[sha:9f54fded]",
+  "status_after": ""
+ },
+ "real_vault_hits": ""
+}

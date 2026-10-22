@@ -1,0 +1,81 @@
+[main] BASH
+$CRAFT[treat]/scripts/followup_gather.py fixture-distilled-spec; echo "exit: $?"
+
+[main] BASH
+lore record show --json --vault default task/distilled-reject-path-traversal-in-the-upload-endpoint; echo "exit: $?"; lore record show --json --vault default spec/fixture-distilled-spec; echo "exit: $?"
+
+[main] BASH
+ls $CRAFT[treat]/skills/_shared/
+
+[main] AGENT
+Refine the task record `task/distilled-reject-path-traversal-in-the-upload-endpoint` in the lore vault `default` (use the `lore` command on PATH).
+
+Instructions:
+- Read $CRAFT[treat]/skills/_shared/refine.md yourself and follow it in full, in its **unattended** mode, against this one task only. `${CLAUDE_PLUGIN_ROOT}` is $CRAFT[treat].
+- The code the task's claims point at is the git repository at $RUN[distilled-treat]/fixture/repo. Investigate i... [cut 395 chars]
+
+[sub] BASH
+cd /tmp; lore record show task/distilled-reject-path-traversal-in-the-upload-endpoint --vault default 2>&1 || lore record show task/distilled-reject-path-traversal-in-the-upload-endpoint 2>&1; echo ---; lore task graph distilled-reject-path-traversal-in-the-upload-endpoint 2>&1
+
+[sub] BASH
+cd /tmp; lore record show --help 2>&1 | head -30; lore record show task/distilled-reject-path-traversal-in-the-upload-endpoint --json 2>&1 | head -40
+
+[sub] BASH
+cd $RUN[distilled-treat]/fixture/repo && git status --short && git log --oneline | head && git ls-files && echo ---- && cat -n src/upload.py; for f in $(git ls-files | grep -v '^src/upload.py$'); do echo "==== $f"; cat -n "$f" | head -80; done
+
+[sub] BASH
+cd $RUN[distilled-treat]/fixture/repo && export HOME=/tmp/nohome$$ GIT_CONFIG_NOSYSTEM=1; git log --oneline | head; git ls-files; echo ----; find . -path ./.git -prune -o -type f -print; echo; cat -n src/upload.py
+
+[sub] BASH
+cd $RUN[distilled-treat]/fixture/repo && cat -n README.md; grep -rn "upload\|ValueError\|realpath\|resolve" src/ ; ls -a
+
+[sub] BASH
+cd /tmp; for q in "upload" "path traversal" "upload_path" "pytest" "tests" "kind:area" "src/upload.py" "symlink"; do echo "== $q"; lore search "$q" 2>&1 | head -15; done; echo; lore record show task/fixture-distilled-spec-the-slice 2>&1
+
+[sub] BASH
+cd /tmp; for q in "kind:adr" "kind:lesson" "kind:spec" "kind:decision" "traversal" "ValueError" '"src/upload.py"'; do echo "== $q"; lore search "$q" 2>&1 | head -12; done; lore record show task/left-out-pin-the-tls-minimum-version-in-the-client
+
+[sub] BASH
+cd /tmp; T=$(mktemp -t refine-upload.XXXXXX) && lore record show task/distilled-reject-path-traversal-in-the-upload-endpoint --json | python3 -I -c 'import json,sys; sys.stdout.write(json.load(sys.stdin)["body"])' > "$T" && cat >> "$T" <<'EOF'
+
+**Delivers:** `upload_path(base, name)` in `src/upload.py` (src/upload.py:4-5, currently an unchecked `os.path.join`) resolves the joined path with symlinks followed and compares it against the resolved `base`; if the resolved path falls outside `base` it raises `ValueError`, otherwise it returns the joined path (`os.path.join(base, name)`, unchanged from today's return value). Behaviour as agreed in the captured prose above; no existing caller of `upload_path` in `src/` to update (only definition is src/upload.py:4).
+
+**Test contract:** New `tests/test_upload.py` (the repo has no tests yet; `tests/test_<module>.py` naming follows [[task/left-out-pin-the-tls-minimum-version-in-the-client]]), using a temporary directory as `base`. Write these failing first:
+- a plain name inside `base` (e.g. `a.txt`, and a nested `sub/a.txt`) returns exactly `os.path.join(base, name)`;
+- a `..` traversal name (e.g. `../outside.txt`, `sub/../../outside.txt`) raises `ValueError`;
+- an absolute name pointing outside `base` raises `ValueError`;
+- a name that goes through a symlink inside `base` pointing to a directory outside `base` raises `ValueError` (proves symlinks are followed);
+- a name containing `..` that still resolves inside `base` (e.g. `sub/../a.txt`) does not raise.
+Run: `python -m pytest tests/test_upload.py` — all pass.
+
+**Files:** `src/upload.py`, `tests/test_upload.py` (new)
+
+## Flow-out
+
+- [ ] Touched area/subsystem profiles updated with what changed
+- [ ] Prover-validated assumptions captured as session candidates (durable at flush)
+- [ ] New decisions / lessons / follow-ups surfaced during the build recorded
+EOF
+grep -nEi 'key|token|secret|passw|bearer|BEGIN|AKIA|ghp_' "$T"; cat $CRAFT[treat]/templates/plan.md | grep -A5 "Flow-out"; echo "TMP=$T"
+
+[sub] BASH
+grep -A12 "^## Flow-out" $CRAFT[treat]/templates/plan.md | grep '^- \['; cd /tmp; lore record show task/left-out-pin-the-tls-minimum-version-in-the-client >/dev/null && echo record-ok; wc -l < $RUN[distilled-treat]/fixture/repo/src/upload.py; lore record update --help | head -30
+
+[sub] BASH
+cd /tmp; T=$RUN[distilled-treat]/tmp/refine-upload.YbE1aw; lore record update task/distilled-reject-path-traversal-in-the-upload-endpoint --vault default --status ready < "$T" && rm -f "$T"; ls "$T" 2>&1; lore record show task/distilled-reject-path-traversal-in-the-upload-endpoint
+
+[sub] BASH
+cd /tmp; lore record show task/distilled-reject-path-traversal-in-the-upload-endpoint --json | python3 -I -c 'import json,sys; print(json.load(sys.stdin)["sidecar"]["status"])'
+
+[main] BASH
+$CRAFT[treat]/scripts/followup_parent.py check fixture-distilled-spec distilled-reject-path-traversal-in-the-upload-endpoint; echo "exit: $?"
+
+[main] BASH
+children=$(mktemp)
+cat > "$children" <<'CHILDREN_JSON'
+[{"name": "distilled-reject-path-traversal-in-the-upload-endpoint", "reason": "Open security exposure: any caller can use the upload path join right now to write files outside the upload directory, and that stays true until the fix lands.", "revision": "[sha:707b01de]"}]
+CHILDREN_JSON
+$CRAFT[treat]/scripts/followup_parent.py assemble fixture-distilled-spec --children "$children"
+rc=$?
+rm -f "$children"
+echo "exit: $rc"

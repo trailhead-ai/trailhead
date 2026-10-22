@@ -1,0 +1,5 @@
+[main] BASH
+$CRAFT[treat]/scripts/followup_gather.py fixture-none-included-spec; echo "exit: $?"
+
+[main] BASH
+for r in task/none-included-drop-an-unused-local-variable task/none-included-reorder-two-imports spec/fixture-none-included-spec; do echo "=== $r"; lore record show --json --vault default $r; echo "exit: $?"; done

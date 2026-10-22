@@ -1,0 +1,34 @@
+### 13. Closing report
+
+- **Included:** Hat pegs: report how many pegs are in use (`hat-pegs-report-how-many-pegs-are-in-use`). It was held back and was neither refined nor nested.
+- **Left:** none
+- **Left out:** none, because refinement did not run.
+- **Refined but not nested:** none
+- **Dropped:** none
+- **Merged:** none. The script's `merged` list is empty because the merge did not fully land.
+- **Reset to open:** none
+- **Failed:** the supersede of Hat pegs: report the pegs in use as a ratio of all pegs (`hat-pegs-report-the-pegs-in-use-as-a-ratio-of-all-pegs`).
+- **Held back:** Hat pegs: report how many pegs are in use (`hat-pegs-report-how-many-pegs-are-in-use`). It was not refined or nested this run because its merge is incomplete: the supersede of `hat-pegs-report-the-pegs-in-use-as-a-ratio-of-all-pegs` did not land.
+- No parent was created.
+
+unmet-criterion check: none flagged; 0 blocked not checked
+
+**Commands**
+
+This finishes the failed supersede. Run it only while `task/hat-pegs-report-the-pegs-in-use-as-a-ratio-of-all-pegs` is still not superseded:
+
+```
+lore record supersede task/hat-pegs-report-the-pegs-in-use-as-a-ratio-of-all-pegs --by task/hat-pegs-report-how-many-pegs-are-in-use --vault default
+```
+
+Give this answer again at the next run's Confirmation 1. `hat-pegs-report-how-many-pegs-are-free` is left out because it is already superseded and is no longer gathered:
+
+```
+merge hat-pegs-report-the-pegs-in-use-as-a-ratio-of-all-pegs into hat-pegs-report-how-many-pegs-are-in-use
+```
+
+The dispositions are unsettled, so this re-run line is printed and no distill command is:
+
+```
+/craft:tidy-followups spec/fixture-hat-peg-spec
+```

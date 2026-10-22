@@ -1,0 +1,99 @@
+[main] BASH
+$CRAFT[base]/scripts/followup_gather.py fixture-pilot-boat-spec; echo "exit: $?"
+
+[main] BASH
+lore record show --json --vault default task/crew-roster-put-the-boat-name-first-on-each-line; echo "exit: $?"; lore record show --json --vault default task/pilot-boat-reject-a-trip-of-no-distance; echo "exit: $?"
+
+[main] AGENT
+Refine the vault task `task/crew-roster-put-the-boat-name-first-on-each-line` in the lore vault `default`.
+
+- Read $CRAFT[base]/skills/_shared/refine.md yourself and follow it in full, in its unattended mode, against this one task only. (`${CLAUDE_PLUGIN_ROOT}` is $CRAFT[base].) The `lore` command on PATH reads the vault.
+- The code the task's claims point at is the git repository at $RUN[distilled-spec-base]/fixture/repo; check claims against it. Do not modify that repository.
+... [cut 410 chars]
+
+[sub] BASH
+lore record show task/crew-roster-put-the-boat-name-first-on-each-line; echo ---; lore task graph crew-roster-put-the-boat-name-first-on-each-line; echo ---; lore --help 2>&1 | head -40
+
+[sub] BASH
+lore record show --help; lore record show task/crew-roster-put-the-boat-name-first-on-each-line --json 2>&1 | head -40; cd $RUN[distilled-spec-base]/fixture/repo && git status && git ls-files && cat -n src/roster.py
+
+[sub] BASH
+cd $RUN[distilled-spec-base]/fixture/repo && ls -la . src tests 2>&1; HOME=/tmp GIT_CONFIG_NOSYSTEM=1 git -c safe.directory='*' ls-files; HOME=/tmp git -c safe.directory='*' status --short; cat -n src/roster.py
+
+[sub] BASH
+lore record show task/fixture-pilot-boat-spec-the-slice --json; lore search "roster"; lore search "crew"; lore search "boat"; lore search "kind:area"
+
+[sub] BASH
+cat $RUN[distilled-spec-base]/fixture/repo/README.md; lore record show spec/fixture-pilot-boat-spec; lore search "test"; lore search "pytest"; lore search "kind:adr"; lore search "kind:lesson"; lore areas; grep -rn "roster_line\|import" $RUN[distilled-spec-base]/fixture/repo/src | head
+
+[sub] BASH
+lore record show task/lens-oil-round-the-litres-to-one-decimal; lore record show task/lens-house-reject-negative-hours; cat $CRAFT[base]/templates/plan.md | grep -n -A6 "Flow-out"; ls $CRAFT[base]/skills/ | head -50
+
+[sub] BASH
+sed -n 24,45p $CRAFT[base]/templates/plan.md; grep -rln "credential-pattern scrub" $CRAFT[base] | head
+
+[sub] BASH
+grep -n -i -A25 "credential-pattern" $CRAFT[base]/skills/_shared/security.md | head -60
+
+[sub] BASH
+set -e; T=$(mktemp -t refine-roster.XXXXXX); trap 'rm -f "$T"' EXIT
+cat > "$T" <<'EOF'
+`roster_line` in `src/roster.py` prints the crew count before the boat. Agreed behaviour: it returns the boat name, a space, then the crew count. The repository has no tests yet; add `tests/test_roster.py`.
+
+**Delivers:** `roster_line(boat, crew)` returns the boat name, a single space, then the crew count — reversing the current crew-first order at `src/roster.py:2` (signature at `src/roster.py:1` is unchanged). The required order is the agreed behaviour stated in this task's captured prose.
+
+**Test contract:** A new `tests/test_roster.py` (no tests exist in the repo yet; same new-test-file shape as [[task/lens-oil-round-the-litres-to-one-decimal]]) asserts `roster_line('Gull', 3) == 'Gull 3'` — fails against the current code, which returns `3 Gull`.
+
+**Files:** `src/roster.py`, `tests/test_roster.py` (new)
+
+## Flow-out
+
+- [ ] Touched area/subsystem profiles updated with what changed
+- [ ] Prover-validated assumptions captured as session candidates (durable at flush)
+- [ ] New decisions / lessons / follow-ups surfaced during the build recorded
+EOF
+python3 -I - "$T" <<'PY'
+import re,sys
+t=open(sys.argv[1]).read()
+pats=[r'(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s*[=:]\s*\S+',r'(?i)\b(AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|gho_[A-Za-z0-9]{36}|glpat-[A-Za-z0-9_-]{20}|xox[baprs]-[A-Za-z0-9-]+|sk_live_[A-Za-z0-9]+|AIza[0-9A-Za-z_-]{35})\b',r'(?i)bearer\s+[A-Za-z0-9._\-]+',r'(?i)api[_-]?key[\'"]?\s*[:=]\s*[\'"]?[A-Za-z0-9._\-]{16,}',r'\b[A-Za-z0-9+/]{32,}={0,2}\b',r'\b[A-Fa-f0-9]{40,}\b',r'-----BEGIN [A-Z ]*PRIVATE KEY-----']
+print("scrub hits:",[m.group(0) for p in pats for m in re.finditer(p,t)])
+PY
+wc -l < $RUN[distilled-spec-base]/fixture/repo/src/roster.py
+lore record show task/lens-oil-round-the-litres-to-one-decimal >/dev/null && echo record-ok
+lore record update --help | head -30
+
+[sub] BASH
+lore vault ls 2>&1 | head
+
+[sub] BASH
+set -e; T=$(mktemp -t refine-roster.XXXXXX); trap 'rm -f "$T"' EXIT
+cat > "$T" <<'EOF'
+`roster_line` in `src/roster.py` prints the crew count before the boat. Agreed behaviour: it returns the boat name, a space, then the crew count. The repository has no tests yet; add `tests/test_roster.py`.
+
+**Delivers:** `roster_line(boat, crew)` returns the boat name, a single space, then the crew count — reversing the current crew-first order at `src/roster.py:2` (signature at `src/roster.py:1` is unchanged). The required order is the agreed behaviour stated in this task's captured prose.
+
+**Test contract:** A new `tests/test_roster.py` (no tests exist in the repo yet; same new-test-file shape as [[task/lens-oil-round-the-litres-to-one-decimal]]) asserts `roster_line('Gull', 3) == 'Gull 3'` — fails against the current code, which returns `3 Gull`.
+
+**Files:** `src/roster.py`, `tests/test_roster.py` (new)
+
+## Flow-out
+
+- [ ] Touched area/subsystem profiles updated with what changed
+- [ ] Prover-validated assumptions captured as session candidates (durable at flush)
+- [ ] New decisions / lessons / follow-ups surfaced during the build recorded
+EOF
+lore record update task/crew-roster-put-the-boat-name-first-on-each-line --vault default --status ready < "$T"
+lore record show task/crew-roster-put-the-boat-name-first-on-each-line; lore record show task/crew-roster-put-the-boat-name-first-on-each-line --json | grep '"status"'
+
+[main] BASH
+$CRAFT[base]/scripts/followup_parent.py check fixture-pilot-boat-spec crew-roster-put-the-boat-name-first-on-each-line; echo "exit: $?"
+
+[main] BASH
+children=$(mktemp)
+cat > "$children" <<'CHILDREN_JSON'
+[{"name": "crew-roster-put-the-boat-name-first-on-each-line", "reason": "Anything written now that prints or parses roster lines will assume crew-first order, so the later the reorder lands, the more of that code it breaks.", "revision": "[sha:bb28f6ef]"}]
+CHILDREN_JSON
+$CRAFT[base]/scripts/followup_parent.py assemble fixture-pilot-boat-spec --children "$children"
+rc=$?
+rm -f "$children"
+echo "exit: $rc"

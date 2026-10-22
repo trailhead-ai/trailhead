@@ -1,0 +1,64 @@
+[main] BASH
+$CRAFT[base]/scripts/followup_gather.py fixture-buoy-chain-spec; echo "exit: $?"
+
+[main] BASH
+lore record show --json --vault default task/buoy-chain-name-the-unit-in-the-module; echo "exit: $?"; lore record show --json --vault default task/buoy-chain-reject-a-depth-of-zero-or-less; echo "exit: $?"
+
+[main] AGENT
+Refine the follow-up task `task/buoy-chain-reject-a-depth-of-zero-or-less` in the lore vault `default` (the `lore` command on PATH reads this vault).
+
+Instructions:
+- Read $CRAFT[base]/skills/_shared/refine.md yourself and follow it in full, in its unattended mode, against that one task only. `${CLAUDE_PLUGIN_ROOT}` is $CRAFT[base].
+- The code the task's claims refer to is the git repository at $RUN[clear-flag-base]/fixture/repo. Read it to verify claims; do not modify the repos... [cut 341 chars]
+
+[sub] BASH
+lore record show task/buoy-chain-reject-a-depth-of-zero-or-less; echo ---; lore task graph buoy-chain-reject-a-depth-of-zero-or-less; echo ---; lore --help 2>&1 | head -40
+
+[sub] BASH
+lore record show --help 2>&1 | head -30; lore record show task/buoy-chain-reject-a-depth-of-zero-or-less --json 2>&1 | head -40; cd $RUN[clear-flag-base]/fixture/repo && git status --short && git log --oneline | head && find . -path ./.git -prune -o -type f -print && cat -n src/buoy.py
+
+[sub] BASH
+cd $RUN[clear-flag-base]/fixture/repo && find . -path ./.git -prune -o -type f -print && cat -n src/buoy.py; ls tests 2>&1; cat pyproject.toml setup.cfg 2>/dev/null
+
+[sub] BASH
+cd $RUN[clear-flag-base]/fixture/repo && cat -n README.md; grep -rn "ValueError\|import" src | head -30; lore record show task/fixture-buoy-chain-spec-the-slice; lore search buoy; lore search "chain_length"; lore search "kind:area buoy"; lore search "test convention"; lore search ValueError
+
+[sub] BASH
+lore record show spec/fixture-buoy-chain-spec; lore record show task/lens-house-reject-negative-hours; lore record show task/buoy-chain-name-the-unit-in-the-module; lore areas; cat $CRAFT[base]/templates/plan.md | grep -n -A6 "Flow-out"
+
+[sub] BASH
+sed -n 24,45p $CRAFT[base]/templates/plan.md; lore record update --help | head -40
+
+[sub] BASH
+set -e; T=$(mktemp); trap 'rm -f "$T"' EXIT
+cat > "$T" <<'EOF'
+`chain_length` in `src/buoy.py` returns 0 for a depth of 0 and a negative length for a negative depth. Agreed behaviour: raise `ValueError` for a depth of zero or less; any other depth behaves as before. The repository has no tests yet; add `tests/test_buoy.py`.
+
+**Delivers:** `chain_length` in `src/buoy.py` raises `ValueError` for a depth of zero or less (spec AC2, [[spec/fixture-buoy-chain-spec]]); every positive depth keeps the current result of three times the depth rounded up to a whole metre (`src/buoy.py:5`, spec AC1).
+
+**Test contract:** New `tests/test_buoy.py` asserts `chain_length(0)` and `chain_length(-1)` each raise `ValueError`, and that positive depths are unchanged: `chain_length(2)` is 6 and `chain_length(0.5)` is 2 (rounded up). The `ValueError` cases fail before the fix.
+
+**Files:** `src/buoy.py`, `tests/test_buoy.py` (new)
+
+## Flow-out
+
+- [ ] Touched area/subsystem profiles updated with what changed
+- [ ] Prover-validated assumptions captured as session candidates (durable at flush)
+- [ ] New decisions / lessons / follow-ups surfaced during the build recorded
+EOF
+lore record show spec/fixture-buoy-chain-spec >/dev/null && echo spec-ok
+lore record update task/buoy-chain-reject-a-depth-of-zero-or-less --status ready < "$T"
+lore record show task/buoy-chain-reject-a-depth-of-zero-or-less --json | python3 -I -c 'import json,sys;d=json.load(sys.stdin);print(d["sidecar"]["status"]);print(d["body"])'
+
+[main] BASH
+$CRAFT[base]/scripts/followup_parent.py check fixture-buoy-chain-spec buoy-chain-reject-a-depth-of-zero-or-less; echo "exit: $?"
+
+[main] BASH
+children=$(mktemp)
+cat > "$children" <<'CHILDREN_JSON'
+[{"name": "buoy-chain-reject-a-depth-of-zero-or-less", "reason": "Callers written before the fix may rely on the silent zero or negative length, or add guards around it, and each one needs rework once the function raises. The longer it waits, the more the fix costs.", "revision": "[sha:b5d2251f]"}]
+CHILDREN_JSON
+$CRAFT[base]/scripts/followup_parent.py assemble fixture-buoy-chain-spec --children "$children"
+rc=$?
+rm -f "$children"
+echo "exit: $rc"

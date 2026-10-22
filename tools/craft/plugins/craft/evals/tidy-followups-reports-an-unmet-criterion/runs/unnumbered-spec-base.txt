@@ -1,0 +1,21 @@
+### Closing report
+
+The run created one new parent task, ready to build: `task/build-the-follow-ups-of-fixture-lantern-rota-spec-chosen-2026-10-22`. Its only child is the keeper-board follow-up.
+
+- **Included and nested:** Keeper board: print the names in capitals (`keeper-board-print-the-names-in-capitals`). It was refined, moved to `ready`, and nested under the new parent.
+- **Left (not touched):**
+  - Lantern rota: a crew of one keeper (`lantern-rota-a-crew-of-one-keeper`). This was the only follow-up I had recommended; your answer took it off the shortlist.
+  - Lantern rota: reword the module comment (`lantern-rota-reword-the-module-comment`).
+- **Not changed:** nothing was dropped or merged, and the eligibility check left nothing out.
+- **Failed writes:** none.
+- **Refined but not nested:** none.
+
+The refinement subagent reported one slip, which it fixed itself. One of its writes cut the task's original first line, and it restored that line in a later write. Its record passed the eligibility check afterwards.
+
+```
+/craft:execute task/build-the-follow-ups-of-fixture-lantern-rota-spec-chosen-2026-10-22
+```
+
+```
+/craft:distill spec/fixture-lantern-rota-spec
+```

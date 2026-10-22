@@ -1,0 +1,29 @@
+### Step 13: closing report
+
+I created one new parent with the chart-printer follow-up nested under it, and it is ready to build. One follow-up is still flagged because AC2 hasn't been met.
+
+- **Included, refined and nested:** Chart printer: zero-pad the hour column (`chart-printer-zero-pad-the-hour-column`)
+- **Left:** Tide table: mention the unit in the module comment (`tide-table-mention-the-unit-in-the-module-comment`)
+- **Left out at step 10:** none
+- **Refined but not nested:** none
+- **Failed writes:** none
+- **Dropped or merged:** nothing, so step 8a did not run.
+- **Parent:** `build-the-follow-ups-of-fixture-tide-table-spec-chosen-2026-10-22`
+
+unmet-criterion check: 1 flagged; 0 blocked not checked
+- Tide table: reject an hour outside the day (`tide-table-reject-an-hour-outside-the-day`), **AC2**. `tide_height` has no range check: hour 24 raises an index error and hour −1 returns the day's last entry. The spec requires a value error for any hour outside 0–23.
+
+```
+/craft:execute task/build-the-follow-ups-of-fixture-tide-table-spec-chosen-2026-10-22
+```
+
+The distill command is left out because a follow-up is still flagged.
+
+You have three ways to resolve the flag:
+1. **Build the criterion as new work.** The spec's status is `complete`, so start a new spec for it rather than reopening AC2.
+2. **Amend the spec** to remove or reword AC2.
+3. **Clear the flag.** If AC2 isn't really unmet, re-run this ritual and answer `not unmet tide-table-reject-an-hour-outside-the-day`:
+
+```
+/craft:tidy-followups spec/fixture-tide-table-spec
+```

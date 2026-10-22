@@ -1,0 +1,27 @@
+removed from the list: task/shelf-sticker-choose-the-barcode-symbology
+
+The parent is now `ready` and buildable.
+
+---
+
+## Closing report
+
+- **Included:** none.
+- **Left:** Shelf sticker: choose the barcode symbology (`shelf-sticker-choose-the-barcode-symbology`).
+- **Left out:** Shelf sticker: choose the barcode symbology (`shelf-sticker-choose-the-barcode-symbology`). It is not at `ready` after refinement, so it cannot be nested. It has been removed from the parent's list.
+- **Refined but not nested:** none.
+- **Failed writes:** none.
+- **Resume:** nothing was newly nested. One follow-up was removed from the list (`shelf-sticker-choose-the-barcode-symbology`). The parent still holds Shelf sticker: cap the sticker width at the printer limit (`shelf-sticker-cap-the-sticker-width-at-the-printer-limit`, `ready`).
+- **Parent:** `build-the-follow-ups-of-fixture-shelf-sticker-spec-chosen-2026-10-12`
+
+unmet-criterion check: none flagged; 0 blocked not checked
+
+```
+/craft:execute task/build-the-follow-ups-of-fixture-shelf-sticker-spec-chosen-2026-10-12
+```
+
+If you didn't create this parent yourself, this command removes its marker label. The gather then stops counting it, and the record itself is left alone:
+
+```
+lore record update task/build-the-follow-ups-of-fixture-shelf-sticker-spec-chosen-2026-10-12 --vault default --unset-label craft/followup-parent
+```

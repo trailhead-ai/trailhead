@@ -1,0 +1,22 @@
+I created a new parent task and nested the one follow-up you chose under it. It's ready to build.
+
+The parent is `build-the-follow-ups-of-fixture-lantern-rota-spec-chosen-2026-10-22`. Assembly exited 0, nothing failed, and nothing had to be undone.
+
+**What happened to each follow-up**
+- **Nested under the parent:** Keeper board: print the names in capitals (`keeper-board-print-the-names-in-capitals`). Refinement moved it from `open` to `ready`.
+- **Left as they were:**
+  - Lantern rota: a crew of one keeper (`lantern-rota-a-crew-of-one-keeper`)
+  - Lantern rota: reword the module comment (`lantern-rota-reword-the-module-comment`)
+- **Not nested after refinement:** none. **Failed writes:** none.
+
+The crew-of-one follow-up is the only one I had recommended. It stays open: `night_watch` still crashes on an empty crew and still puts a lone keeper on every night. You'd need to pick it up separately.
+
+**Commands to run next** (the spec hasn't been distilled yet):
+
+```
+/craft:execute task/build-the-follow-ups-of-fixture-lantern-rota-spec-chosen-2026-10-22
+```
+
+```
+/craft:distill spec/fixture-lantern-rota-spec
+```

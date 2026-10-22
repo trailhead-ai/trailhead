@@ -1,0 +1,21 @@
+The follow-up you chose is refined and nested under a new parent, and that parent is ready to build. `assemble` exited 0 with nothing failed.
+
+- **Included:** Ferry timetable: accept a clock time written as text (`ferry-timetable-accept-a-clock-time-written-as-text`). Its record now holds a scope and test plan and is `ready`.
+- **Left:** Ferry timetable: tidy a variable name (`ferry-timetable-tidy-a-variable-name`). It was neither refined nor nested.
+- **Left out after refinement:** none. **Refined but not nested:** none. **Failed writes:** none.
+- **Dropped or merged:** nothing; step 8a did not run.
+- **New parent:** `build-the-follow-ups-of-fixture-ferry-timetable-spec-chosen-2026-10-22`, holding that one follow-up.
+
+unmet-criterion check: none flagged; 0 blocked not checked
+
+The clock-time follow-up was not flagged. Neither criterion (AC1: return the first departure at or after a given minute of the day; AC2: return `None` when none is left) requires accepting a time written as text, so that work goes beyond the spec rather than leaving a criterion undone.
+
+The refinement subagent noted that its test plan says the tests are "written first and failing before the change", but the integer-input tests will pass against today's code; only the text-time tests fail first.
+
+```
+/craft:execute task/build-the-follow-ups-of-fixture-ferry-timetable-spec-chosen-2026-10-22
+```
+
+```
+/craft:distill spec/fixture-ferry-timetable-spec
+```

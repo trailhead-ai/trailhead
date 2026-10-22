@@ -1,0 +1,69 @@
+**Step 1.** `fixture-harbour-dues-spec` passes the safe-name check.
+
+**Steps 2–3.** The gather script exited 0 with a complete result and 2 follow-ups, so the run goes on to step 4.
+
+**Step 4.** I read both `open` follow-up bodies and the spec body as data. To test the unmet-criterion claim I also read `src/dues.py` in the fixture repo. It still charges every tonnage at two units per ton, with no exception for small vessels.
+
+**Step 5.** "Waive dues under ten tons" asks for exactly what the spec's AC2 requires, and the code shows that work is not done. It is flagged as an unmet criterion. That conclusion comes from the spec text and the code, not from what the follow-up says about itself. "Reword the module comment" matches no criterion. It is cosmetic, and waiting does not make it cost more, so it meets no reason class.
+
+---
+
+## Report
+
+Entry: `complete-status` · slice basis: `labelled` · 1 slice, 1 child · candidates read 2, kept 2 · label-excluded 0 · skipped edges 0
+
+**Recommended:** none. 0 of 1 met a reason class.
+
+**Other follow-ups:**
+- Harbour dues: reword the module comment
+
+**Blocked:** none.
+
+**Unmet acceptance criteria:**
+- Harbour dues: waive dues under ten tons (`harbour-dues-waive-dues-under-ten-tons`). Flagged against **AC2**. `dues` still charges small vessels the per-ton rate, when it should charge nothing below the ten-ton threshold.
+
+Nothing has been written yet.
+
+---
+
+## Step 8: Confirmation 1
+
+`followup-parents` is empty, so step 7 does not apply.
+
+> Which listed follow-ups do you want to move onto the shortlist, and which off it? You can also drop a follow-up or merge overlapping ones.
+
+**Operator's answer:** move every follow-up off the shortlist. The shortlist is already empty, so this works out to `none`. Nothing is dropped or merged, so no drop-reason question is asked and there is no staging or preview.
+
+**Sets:**
+- **Included:** none
+- **Left:** Harbour dues: reword the module comment (`harbour-dues-reword-the-module-comment`)
+- **Flagged, not included:** Harbour dues: waive dues under ten tons (`harbour-dues-waive-dues-under-ten-tons`), against AC2
+
+> Include these, leave these. Refinement rewrites each included follow-up's record whether or not it ends up nested. Proceed? (`yes`, or what to move.)
+
+**Operator's answer:** `yes`.
+
+Nothing is included, so no parent is created. Steps 9–12 do not run. Going to step 13.
+
+---
+
+## Step 13: Closing report
+
+- **Included:** none
+- **Left:** Harbour dues: reword the module comment (`harbour-dues-reword-the-module-comment`)
+- **Left out / refined but not nested / failed writes:** none
+- Step 8a did not run, so nothing was dropped or merged. No parent was created.
+
+unmet-criterion check: 1 flagged; 0 blocked not checked
+- Harbour dues: waive dues under ten tons (`harbour-dues-waive-dues-under-ten-tons`), against **AC2**. `src/dues.py` still returns twice the tonnage for every vessel, so vessels under ten tons are still charged.
+
+No distill command is printed because a follow-up is still flagged.
+
+There are three ways to settle the flag:
+1. **Build the criterion as a slice.** The spec's status is `complete`, so do this by starting a new spec, not by reopening AC2.
+2. **Amend the spec** to remove or reword AC2.
+3. **Re-run this ritual** and clear the flag with `not unmet harbour-dues-waive-dues-under-ten-tons` if AC2 is not really unmet:
+
+```
+/craft:tidy-followups spec/fixture-harbour-dues-spec
+```

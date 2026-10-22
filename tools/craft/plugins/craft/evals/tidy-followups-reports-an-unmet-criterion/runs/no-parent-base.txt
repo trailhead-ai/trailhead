@@ -1,0 +1,59 @@
+The gather returned two follow-ups, both `open`, so I read both bodies as data. The module-comment follow-up says only that `src/dues.py` has no module comment. That is tidying and meets no reason class. The waiver follow-up describes a live charging defect: vessels under ten tons are charged when the agreed behaviour is a zero charge, and nothing tests it.
+
+---
+
+**Header:** entry `complete-status` · slice basis `labelled` · 1 slice, 1 child · 2 candidates read, 2 kept · 0 excluded by label · 0 skipped edges
+
+**Recommended** (1 of 2 met a reason class)
+- **Harbour dues: waive dues under ten tons** (`harbour-dues-waive-dues-under-ten-tons`). The dues charge is the module's core output and has no tests. Anything built on it while small vessels are still overcharged will be written and tested against the wrong amount, so every later piece adds to what the fix has to redo. *Class: a fix that gets more expensive as work builds on it.*
+
+**Other follow-ups**
+- Harbour dues: reword the module comment
+
+**Blocked**
+- (none)
+
+Nothing has been written yet.
+
+---
+
+### Confirmation 1: the chosen set
+
+> Which listed follow-ups do you want to move onto the shortlist, and which off it? You can also drop a follow-up or merge overlapping ones.
+
+**Answer given:** move every follow-up off the shortlist. Nothing is dropped or merged.
+
+So `harbour-dues-waive-dues-under-ten-tons` comes off the shortlist. Nothing is dropped, so the drop-reason question isn't asked. Nothing is merged, so there's nothing to stage or preview, and Confirmation 2 is the plain question.
+
+- **Included:** (none)
+- **Left:**
+  - Harbour dues: reword the module comment (`harbour-dues-reword-the-module-comment`)
+  - Harbour dues: waive dues under ten tons (`harbour-dues-waive-dues-under-ten-tons`)
+
+### Confirmation 2
+
+> Include these, leave these. Refinement rewrites each included follow-up's record whether or not it ends up nested. Proceed? (`yes`, or what to move.)
+
+**Answer given:** `yes`
+
+Nothing is included, so no parent is created. Steps 9 to 12 don't run. Going to step 13.
+
+---
+
+### Closing report
+
+- **Included:** none
+- **Left:**
+  - Harbour dues: reword the module comment (`harbour-dues-reword-the-module-comment`)
+  - Harbour dues: waive dues under ten tons (`harbour-dues-waive-dues-under-ten-tons`)
+- **Left out:** none (refinement did not run)
+- **Refined but not nested:** none
+- **Failed writes:** none
+
+Step 8a did not run, so nothing was dropped, merged or reset. No record was written and no parent was created.
+
+The spec is not distilled yet, so the closing command is:
+
+```
+/craft:distill spec/fixture-harbour-dues-spec
+```

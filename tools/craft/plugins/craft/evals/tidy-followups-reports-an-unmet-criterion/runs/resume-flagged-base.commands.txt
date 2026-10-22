@@ -1,0 +1,27 @@
+[main] BASH
+$CRAFT[base]/scripts/followup_gather.py fixture-lens-house-spec; echo "exit: $?"
+
+[main] BASH
+lore record show --json --vault default task/lens-house-reject-negative-hours; echo "exit: $?"
+
+[main] BASH
+lore record show --json --vault default task/lens-oil-round-the-litres-to-one-decimal; echo "exit: $?"
+
+[main] BASH
+$CRAFT[base]/scripts/followup_parent.py state fixture-lens-house-spec build-the-follow-ups-of-fixture-lens-house-spec-chosen-2026-10-22; echo "exit: $?"
+
+[main] BASH
+$CRAFT[base]/scripts/followup_parent.py check fixture-lens-house-spec --parent build-the-follow-ups-of-fixture-lens-house-spec-chosen-2026-10-22 lens-house-reject-negative-hours lens-oil-round-the-litres-to-one-decimal; echo "exit: $?"
+
+[main] BASH
+lore record show task/build-the-follow-ups-of-fixture-lens-house-spec-chosen-2026-10-22 --vault default --json; echo "exit: $?"
+
+[main] BASH
+children=$(mktemp)
+cat > "$children" <<'CHILDREN_JSON'
+[{"name": "lens-house-reject-negative-hours", "revision": "[sha:24ac923e]"}, {"name": "lens-oil-round-the-litres-to-one-decimal", "revision": "[sha:f1d3f763]"}]
+CHILDREN_JSON
+$CRAFT[base]/scripts/followup_parent.py resume fixture-lens-house-spec build-the-follow-ups-of-fixture-lens-house-spec-chosen-2026-10-22 --children "$children"
+rc=$?
+rm -f "$children"
+echo "exit: $rc"

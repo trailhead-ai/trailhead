@@ -1,0 +1,5 @@
+[main] BASH
+$CRAFT[base]/scripts/followup_gather.py fixture-harbour-dues-spec; echo "exit: $?"
+
+[main] BASH
+lore record show --json --vault default task/harbour-dues-reword-the-module-comment; echo "exit: $?"; lore record show --json --vault default task/harbour-dues-waive-dues-under-ten-tons; echo "exit: $?"

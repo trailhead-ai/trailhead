@@ -1,0 +1,6 @@
+vault ADDED task/build-the-follow-ups-of-fixture-buoy-chain-spec-chosen-2026-10-22.json
+vault ADDED task/build-the-follow-ups-of-fixture-buoy-chain-spec-chosen-2026-10-22.md
+vault CHANGED task/buoy-chain-reject-a-depth-of-zero-or-less.json
+vault CHANGED task/buoy-chain-reject-a-depth-of-zero-or-less.md
+repo head before=[sha:a28d7180] after=[sha:a28d7180]
+repo status after=''

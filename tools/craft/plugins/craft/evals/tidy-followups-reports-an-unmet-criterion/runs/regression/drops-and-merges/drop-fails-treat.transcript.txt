@@ -1,0 +1,153 @@
+[main] TOOL Read {"file_path": "$CRAFT[treat]/skills/tidy-followups/SKILL.md"}
+
+[main] RESULT
+1	---
+2	name: tidy-followups
+3	description: >
+4	  Present a finished spec's recorded follow-ups as a reasoned shortlist — which are worth doing
+5	  now rather than later, each with a one-line reason — and list the rest by title; then, once the
+6	  operator has chosen, refine the chosen follow-ups and nest the ones that qualify under one new
+7	  buildable parent. Gathers with a deterministic script, ranks, and writes nothing until the
+8	  operator has confirmed the chosen set.
+9	  TRIGGER when: user says "tidy the follow-ups of spec X", "which follow-ups of this spec should
+10	  we do", "what follow-ups does this spec have", or invokes /craft:tidy-followups explicitly.
+11	  DO NOT TRIGGER when: the ask is a batch of in-session code fix-ups to run now (that is
+12	  `/craft:polish`'s), or the spec's slice loop is still running (follow-ups that matter
+13	  mid-loop reach the next slice through `/craft:plan`).
+14	---
+15	
+16	# Tidy follow-ups
+17	
+18	A spec built slice by slice leaves follow-ups: tasks the slices deliberately did not act on, linked
+19	back to the slice they came from. Once the spec closes they sink into the general backlog. This
+20	ritual brings one finished spec's follow... [cut 65507 chars]
+
+[main] BASH
+$CRAFT[treat]/scripts/followup_gather.py fixture-mug-rack-spec; echo "exit: $?"
+
+[main] TOOL Read {"file_path": "$CRAFT[treat]/skills/_shared/security.md"}
+
+[main] RESULT
+{"spec": "fixture-mug-rack-spec", "vault": "default", "entry": "complete-status", "distilled": false, "followup-parents": [], "followups": [{"name": "mugs-count-the-mugs-hanging-on-the-rack", "title": "Mugs: count the mugs hanging on the rack", "status": "open"}, {"name": "rack-paint-pick-a-warmer-grey", "title": "Rack paint: pick a warmer grey", "status": "open"}], "slice-basis": "labelled", "slices": ["fixture-mug-rack-spec-the-slice"], "child-count": 1, "candidates-read": 2, "kept": 2, "excluded-by-label": {"count": 0, "names": []}, "skipped-edges": 0}
+exit: 0
+
+[main] RESULT
+1	# Security posture — credential scrub and untrusted-value validation
+2	
+3	Two rules every craft surface applies, stated once here so no citing surface restates them.
+4	
+5	## Credential-pattern scrub
+6	
+7	**Credential-pattern scrub (mechanical, runs first).** This is the general rule for the whole run,
+8	not one phase's step: **any finding or note text entering a record body or a report — session
+9	candidates, `blocked` bodies, task-body notes from the per-task loop, raw command stderr quoted into
+10	either — runs through this list first.** A vault is git-backed and has its own push path, so a
+11	credential transcribed into a task body ships as surely as one committed to code. Report bodies are
+12	**summarized, never captured verbatim** — quote only `file:line` references for anything caught. Run
+13	the text through this credential-pattern scrub regex list and drop/redact any match rather than
+14	capturing it:
+15	
+16	- **Key-like tokens** — `(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s*[=:]\s*\S+`
+17	  — the trailing character class is load-bearing: it lets the keyword carry qualifier text before
+18	  the separator, which is what catches `[redacted:key-like] `AWS_SECRE... [cut 2830 chars]
+
+[main] BASH
+lore record show --json --vault default task/mugs-count-the-mugs-hanging-on-the-rack; echo "exit: $?"; lore record show --json --vault default task/rack-paint-pick-a-warmer-grey; echo "exit: $?"; lore record show --json --vault default spec/fixture-mug-rack-spec; echo "exit: $?"
+
+[main] RESULT
+{
+  "body": "`mug_count` in `src/mugs.py` counts every slot, empty or not.\n",
+  "kind": "task",
+  "layer": "personal",
+  "name": "mugs-count-the-mugs-hanging-on-the-rack",
+  "record_id": "task/mugs-count-the-mugs-hanging-on-the-rack",
+  "revision": "[sha:2e3126a9]",
+  "sidecar": {
+    "created-at": "2026-10-22T16:28:02Z",
+    "created-by": "fixture@example.com",
+    "kind": "task",
+    "related": {
+      "task": [
+        "fixture-mug-rack-spec-the-slice"
+      ]
+    },
+    "status": "open",
+    "title": "Mugs: count the mugs hanging on the rack",
+    "updated-at": "2026-10-22T16:28:02Z",
+    "updated-by": "fixture@example.com",
+    "version": "v1"
+  }
+}
+exit: 0
+{
+  "body": "`COLOUR` in `src/rackpaint.py` is a cold grey.\n",
+  "kind": "task",
+  "layer": "personal",
+  "name": "rack-paint-pick-a-warmer-grey",
+  "record_id": "task/rack-paint-pick-a-warmer-grey",
+  "revision": "[sha:d328db49]",
+  "sidecar": {
+    "created-at": "2026-10-22T16:28:02Z",
+    "created-by": "fixture@example.com",
+    "kind": "task",
+    "related": {
+      "task": [
+        "fixture-mug-rack-spec-the-slice"
+  ... [cut 775 chars]
+
+[main] BASH
+dispositions=$(mktemp)
+cat > "$dispositions" <<'DISPOSITIONS_JSON'
+{"reason": "the rack was scrapped with the old stockroom", "drops": [{"name": "mugs-count-the-mugs-hanging-on-the-rack", "revision": "[sha:2e3126a9]"}, {"name": "rack-paint-pick-a-warmer-grey", "revision": "[sha:d328db49]"}], "merges": []}
+DISPOSITIONS_JSON
+$CRAFT[treat]/scripts/followup_dispose.py dispose fixture-mug-rack-spec --dispositions "$dispositions" --preview
+rc=$?
+rm -f "$dispositions"
+echo "exit: $rc"
+
+[main] RESULT
+{"drops": [{"name": "mugs-count-the-mugs-hanging-on-the-rack", "status": "open"}, {"name": "rack-paint-pick-a-warmer-grey", "status": "open"}], "merges": [], "dependents": {"mugs-count-the-mugs-hanging-on-the-rack": [], "rack-paint-pick-a-warmer-grey": []}}
+exit: 0
+
+[main] BASH
+dispositions=$(mktemp)
+cat > "$dispositions" <<'DISPOSITIONS_JSON'
+{"reason": "the rack was scrapped with the old stockroom", "drops": [{"name": "mugs-count-the-mugs-hanging-on-the-rack", "revision": "[sha:2e3126a9]"}, {"name": "rack-paint-pick-a-warmer-grey", "revision": "[sha:d328db49]"}], "merges": []}
+DISPOSITIONS_JSON
+$CRAFT[treat]/scripts/followup_dispose.py dispose fixture-mug-rack-spec --dispositions "$dispositions"
+rc=$?
+rm -f "$dispositions"
+echo "exit: $rc"
+
+[main] RESULT
+reason-code: dispose-incomplete
+subject: rack-paint-pick-a-warmer-grey
+{"dropped": [{"name": "mugs-count-the-mugs-hanging-on-the-rack", "prior-status": "open"}], "merged": [], "reset-to-open": [], "failed": [{"name": "rack-paint-pick-a-warmer-grey", "write": "drop", "command": null}], "incomplete-merges": []}
+exit: 2
+
+[main] TEXT
+dropped task/mugs-count-the-mugs-hanging-on-the-rack
+failed drop: task/rack-paint-pick-a-warmer-grey
+
+`reason-code: dispose-incomplete`. One drop landed and the other did not. The drop of `rack-paint-pick-a-warmer-grey` failed, either because `lore` refused the write or because the read-back didn't show it. That is `lore`'s or the vault's side, and rerunning the ritual will offer the follow-up again. Nothing is included, so the run goes to step 13.
+
+## Step 13: Closing report
+
+- **Included:** none
+- **Left:** none
+- **Left out:** none. Refinement did not run.
+- **Dropped:** Mugs: count the mugs hanging on the rack (`mugs-count-the-mugs-hanging-on-the-rack`), prior status `open`. Reason: *the rack was scrapped with the old stockroom*
+- **Merged:** none
+- **Reset to open:** none
+- **Failed:** Rack paint: pick a warmer grey (`rack-paint-pick-a-warmer-grey`), the `drop` write. It was not dropped and is still `open`, so the next gather lists it again.
+- **Held back:** none
+
+No parent was created, because nothing was included.
+
+unmet-criterion check: none flagged; 0 blocked not checked
+
+A dispose write failed, so I'm not printing a distill command. Rerun this to drop the remaining follow-up:
+
+```
+/craft:tidy-followups spec/fixture-mug-rack-spec
+```

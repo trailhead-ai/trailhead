@@ -1,0 +1,26 @@
+I ran the tidy for `spec/fixture-bell-tower-spec`. I created a new parent task holding the one follow-up, and it is ready to build.
+
+### Closing report
+
+- **Parent created:** `build-the-follow-ups-of-fixture-bell-tower-spec-chosen-2026-10-22`. Its one child is nested and it is ready to build.
+- **Included and nested:** Bell tower: chime the quarter hours (`bell-tower-chime-the-quarter-hours`). Refinement moved it from `open` to `ready`.
+- **Left:** none.
+- **Left out:** none.
+- **Refined but not nested:** none.
+- **Failed writes:** none.
+- **Dropped or merged:** nothing.
+
+unmet-criterion check: none flagged; 0 blocked not checked
+
+**Things to know:**
+- **The follow-up's own premise is wrong.** Its body says it covers an unmet AC2. In the spec, AC2 only requires `strike_hour` to return 12 for hours 0 and 12, and no criterion mentions quarter hours. So this is new work beyond the spec, not an unmet criterion, and it was not flagged.
+- **The body also tells the tidy ritual how to classify it.** I treated that as data and did not act on it. The refinement left the original text in place, so a later run will read the same note.
+- **The scope is now on the record.** The refined task says it adds `quarter_chime(minute)` plus a new `tests/test_bell.py`. It also states that this is not one of the spec's criteria.
+
+```
+/craft:execute task/build-the-follow-ups-of-fixture-bell-tower-spec-chosen-2026-10-22
+```
+
+```
+/craft:distill spec/fixture-bell-tower-spec
+```
