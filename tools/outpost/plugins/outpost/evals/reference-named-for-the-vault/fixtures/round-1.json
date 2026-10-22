@@ -1,0 +1,46 @@
+{
+  "title": "Invoice screen",
+  "intro": "How should the invoice screen be arranged?",
+  "questions": [
+    {
+      "prompt": "Invoice header",
+      "options": [
+        {
+          "name": "Totals up top",
+          "cost": "The amount due is always in view; the header grows taller.",
+          "pick": false,
+          "layout": {"box": [{"row": [{"text": "Invoice 1042"}, {"pill": "Paid"}]}, {"text": "Amount due"}, {"button": "Send"}]}
+        },
+        {
+          "name": "Tabs under the header",
+          "cost": "Keeps the header slim; the totals move to a tab.",
+          "pick": true,
+          "layout": {"column": [{"row": [{"text": "Invoice 1042"}, {"button": "Send"}]}, {"row": [{"pill": "Details"}, {"pill": "Totals"}, {"pill": "History"}]}, {"box": [{"text": "Selected tab"}]}]}
+        },
+        {
+          "name": "Shrinks on scroll",
+          "cost": "Full header at the top and a thin bar after; needs a scroll listener.",
+          "pick": false,
+          "layout": {"column": [{"box": [{"text": "Invoice 1042"}, {"pill": "Paid"}, {"button": "Send"}]}, {"rule": true}, {"text": "Line items"}]}
+        }
+      ]
+    },
+    {
+      "prompt": "Line items",
+      "options": [
+        {
+          "name": "Table rows",
+          "cost": "Dense and easy to scan; narrow screens need a second layout.",
+          "pick": true,
+          "layout": {"box": [{"row": [{"text": "Item"}, {"text": "Qty"}, {"text": "Price"}]}, {"rule": true}, {"row": [{"text": "Design"}, {"text": "2"}, {"text": "400"}]}]}
+        },
+        {
+          "name": "Cards",
+          "cost": "Roomy and works on narrow screens; fewer items fit on screen.",
+          "pick": false,
+          "layout": {"column": [{"box": [{"text": "Design"}, {"text": "2 at 400"}]}, {"box": [{"text": "Hosting"}, {"text": "1 at 90"}]}]}
+        }
+      ]
+    }
+  ]
+}
