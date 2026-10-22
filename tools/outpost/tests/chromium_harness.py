@@ -29,11 +29,14 @@ point, receives a ``harness`` object.
 - ``run_probe_steps(page_dir, steps, ...)``: ``steps`` is a list of probe bodies, one per page load.
   A step that is not the last must end by calling ``harness.reload()`` or ``harness.goto(url)``
   (``url`` resolved against the current page); the harness then loads that page and runs the next
-  step there. State survives the move through ``localStorage`` / ``sessionStorage``; the value
-  returned is the last step's. A step that does not move on, or a last step that does, raises
-  ``ProbeFailed``. Two pages in different folders of ``page_dir`` share one ``file://`` origin, so
-  ``entry="a/index.html"``, ``inject_into=["a/index.html", "b/index.html"]`` and
-  ``harness.goto("../b/index.html")`` carry ``localStorage`` from a to b.
+  step there. State survives the move through ``sessionStorage``; the value returned is the last
+  step's. ``localStorage`` usually survives it too, but on a ``file://`` page under load the
+  browser can drop what the outgoing document wrote before the next one reads it, so a test that
+  needs a value across the move deterministically carries it in ``sessionStorage``. A step that
+  does not move on, or a last step that does, raises ``ProbeFailed``. Two pages in different
+  folders of ``page_dir`` share one ``file://`` origin, so ``entry="a/index.html"``,
+  ``inject_into=["a/index.html", "b/index.html"]`` and ``harness.goto("../b/index.html")`` carry
+  storage from a to b.
 - ``run_probe_pair(page_dir, probe_one, probe_two, ...)`` returns ``(value_one, value_two)``. The page
   is opened twice at once (the second copy through ``window.open``, so it works from ``file://``
   and served; a framing wrapper does not, the sites CSP forbids framing). Each copy runs its probe

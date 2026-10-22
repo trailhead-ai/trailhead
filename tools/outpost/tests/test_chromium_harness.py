@@ -239,22 +239,22 @@ FULL_STORAGE = (
 
 @SERVE_MODES
 def test_a_probe_that_reloads_carries_on_in_the_reloaded_page(serve):
-    # The reload is observed through the document itself (a global that does not survive it, the
-    # navigation type, the page's own ready flag), not through localStorage: a write made moments
-    # before the old document unloads can reach the new one late, which is the browser's storage
-    # timing and not the harness's.
+    # State is carried through sessionStorage, not localStorage: on a file:// page under load the
+    # browser can drop localStorage written by the outgoing document before the reloaded one reads
+    # it, which is the browser's storage commit and not the harness's.
     steps = [
-        "window.leftBehind = 'old document'; harness.reload();",
+        "sessionStorage.setItem('carried', 'from step 0'); window.leftBehind = 'old document';"
+        " harness.reload();",
         """return {
+          carried: sessionStorage.getItem('carried'),
           leftBehind: typeof window.leftBehind,
           navigation: performance.getEntriesByType('navigation')[0].type,
-          ready: document.documentElement.hasAttribute('data-pad-ready'),
         };""",
     ]
     assert ch.run_probe_steps(FIXTURES / "counter", steps, serve=serve) == {
+        "carried": "from step 0",
         "leftBehind": "undefined",
         "navigation": "reload",
-        "ready": True,
     }
 
 
@@ -267,9 +267,11 @@ def test_a_second_run_of_the_same_page_starts_from_a_fresh_profile(serve):
 
 @SERVE_MODES
 def test_a_value_stored_on_page_a_is_read_on_page_b_in_another_folder(serve):
+    # sessionStorage is keyed by origin, so reading A's value on B shows the two folders share one;
+    # localStorage would show the same but can lose A's write on file:// under load.
     steps = [
-        "localStorage.setItem('x', 'from-a'); harness.goto('../b/index.html');",
-        "return {x: localStorage.getItem('x'), page: location.pathname.split('/').slice(-2).join('/')};",
+        "sessionStorage.setItem('x', 'from-a'); harness.goto('../b/index.html');",
+        "return {x: sessionStorage.getItem('x'), page: location.pathname.split('/').slice(-2).join('/')};",
     ]
     result = ch.run_probe_steps(
         FIXTURES / "two-pads",
