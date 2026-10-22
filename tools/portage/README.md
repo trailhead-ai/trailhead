@@ -64,6 +64,12 @@ changed (the mapping is each corpus's `evals/eval-gate.json`). A case that score
 every push and is named in the report; a gate that cannot run lets the push through, and the PR body
 carries a `## Eval gate` section giving the reason. The runner is started without the caller's API keys and tokens; see the docs below for what that does and does not guarantee about billing.
 
+Trust model: the gate runs the branch's own eval cases with the runner's `--scaffold` and `--trust-plugin`
+flags, so scaffold scripts (and repo scripts they call) run as the operator with their real home directory.
+It detects regressions on your own branches and does not defend against a hostile one, so only push
+branches you would run yourself. A branch can make the gate not run, and the PR shows that rather than
+preventing it. A corpus new on the branch is not run until its grants are reviewed.
+
 A sandbox-write canary runs first. If the runner's sandbox cannot write, the cases are skipped with
 `runner-sandbox-unwritable` rather than scored as failures. `PORTAGE_EVAL_RUNNER` (an absolute path to
 an executable) pins the runner binary the gate uses on this machine, for the canary and the cases.

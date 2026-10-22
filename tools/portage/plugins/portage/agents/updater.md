@@ -64,7 +64,11 @@ is empty, report a noop and finish — nothing to push.
 ### Step 2 — Eval gate (per repo, one repo at a time, before any preflight or push)
 
 The gate runs the prose-eval cases that the branch's diff touches and decides whether the push may
-go ahead. Run it for every active repo from Step 1, **serially — never two repos at once, never in
+go ahead. **Trust model:** it runs the branch's own eval cases with the runner's `--scaffold` and
+`--trust-plugin` flags, so their scaffold scripts, and repo scripts those call, run as the operator with
+their real home directory. It detects regressions on the operator's own branches and is no control against
+a hostile one: a branch can make the gate not run (delete a case, break a scaffold), which the PR section
+shows but nothing prevents. A corpus new on the branch is not run until its grants are reviewed. Run it for every active repo from Step 1, **serially — never two repos at once, never in
 parallel subagents**: each case holds a runner open for minutes on one login. Nothing is
 preflighted, pushed or opened in any repo until every repo has its verdict.
 
@@ -79,7 +83,9 @@ tool result.
    ```
 
    It prints `state: <dir>`, `status:`, `cases: N`, `max_cost_usd: X`, then one
-   `<plugin_root>:<case>` line per selected case. Keep the state directory. Note
+   `<plugin_root>:<case>` line per selected case. Take only the **first** `state:` line, and check that it
+   is an absolute path with no `..` whose last component starts with `portage-eval-gate-`; if it is not,
+   treat `plan` as failed (a gate error) and remove nothing. Keep that state directory. Note
    "N cases, up to $X" for the report. With `cases: 0` skip the next item.
 
 2. **Run each printed case: one foreground call per case, one case at a time.** Pass the case name
@@ -135,7 +141,9 @@ created and noted. Remove nothing else. A stop keeps the failing repo's director
 grader verdicts are the evidence; remove the other repos' (and your own `mktemp -d` ones).
 
 **On a stop**, gate no further repo, skip Steps 3-7, and report: the `**Eval gate:**`
-line says the push was stopped; name every failing case with its repo and the kept state path;
+line says the push was stopped; name every failing case with its repo and the kept state path (for
+`eval-gate: tree-dirty`, say the working tree has uncommitted tracked changes, nothing was pushed, and the
+operator should commit or stash, then push again);
 copy the "ways forward" the verdict printed; `**PRs:**` says none were pushed or updated; leave
 `pr_pairs:` empty.
 
@@ -236,7 +244,7 @@ background agent from the top-level session.
 ## Report structure
 
 ```
-**Eval gate:** <per repo: passed | no cases mapped | base unresolved | did not run (<reason>; for case-removed-on-branch say the branch removes the case and the removal needs review) | gate error at <plan|verdict> | FAILED, push stopped> — N cases, $X ceiling; persistent: <codes from the persistent: line, or none>
+**Eval gate:** <per repo: passed | no cases mapped | base unresolved | did not run (<reason>; for case-removed-on-branch say the branch removes the case and the removal needs review; for corpus-new-on-branch say the corpus is new on the branch and its grants need review before it runs) | gate error at <plan|verdict> | FAILED or tree-dirty, push stopped> — N cases, $X ceiling; persistent: <codes from the persistent: line, or none>
 **Mode:** create | update
 **Group/Slug:** <group>/<slug>
 **Repos:** <count> (<list of names>)

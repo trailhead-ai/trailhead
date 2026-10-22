@@ -5,6 +5,17 @@ that scores below its bar stops the push. A gate that cannot run lets the push t
 pull request. The decisions live in code (`portage eval-gate`); `agents/updater.md` only calls it and obeys
 the verdict.
 
+## Trust model
+
+The gate runs the branch's own eval cases with the runner's `--scaffold` and `--trust-plugin` flags. Scaffold
+scripts, and repo scripts they call such as `tools/lore/scripts/seed-eval-vault`, therefore run as the operator
+with their real home directory. The gate is a regression detector for the operator's own branches, not a
+control against a hostile branch: only push branches you would run yourself. A branch can also make the gate
+not run (delete a case, break a scaffold); the PR section shows that skip, and nothing prevents it. The
+environment allowlist below keeps environment-borne keys and tokens out of the runner; it is billing hygiene,
+not isolation. A corpus that is new on the branch is not run until its grants are reviewed
+(`corpus-new-on-branch`).
+
 ## What it runs
 
 `portage eval-gate plan --repo <path> [--base <ref>]` diffs the branch against its base (default: the target
@@ -77,7 +88,10 @@ with `eval-gate: <outcome>` and `persistent: <codes>|none`, and ends with the PR
 `<!-- portage:eval-gate:start -->` and `<!-- portage:eval-gate:end -->`. The section is also saved to
 `<state>/eval-gate-section.md`.
 
-- Exit 1: a case failed or the mapping is broken. The state directory is kept, with the per-run grader
+- Exit 1: a case failed, the mapping is broken, or the working tree has uncommitted tracked changes
+  (`eval-gate: tree-dirty`; nothing is pushed, commit or stash and push again). A corpus new on the branch
+  is recorded not-run `corpus-new-on-branch`, which is not persistent and does not stop the push.
+  After a failed case or a broken mapping the state directory is kept, with the per-run grader
   verdicts, and the output lists the ways forward (fix the prose or the case, or re-run; there is no
   override).
 - Exit 0 with a not-run case: the push goes ahead and the section lists each case with its reason.
