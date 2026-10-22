@@ -283,10 +283,11 @@ children file in the last step is the empty list.
 
 `yes` keeps every eligible follow-up; a list of names removes those from the nest and, because
 resume never leaves a listed follow-up unexplained, from the parent's list too. `stop` ends the run
-here with nothing written and nothing else printed except the marker-removal command. `drop` runs
-the drop flow below. A name that is not an eligible follow-up is not accepted: say so and ask again.
-The refusal rule of step 8 applies here: a flagged follow-up is not nested, and an answer that tries
-is not accepted. Nothing is written before a `yes` or a list of names.
+here with nothing written and nothing else printed except the marker-removal command, the outcome
+line and the flagged follow-ups the closing step requires (with the options paragraph when one is
+flagged). `drop` runs the drop flow below. A name that is not an eligible follow-up is not accepted:
+say so and ask again. The refusal rule of step 8 applies here: a flagged follow-up is not nested,
+and an answer that tries is not accepted. Nothing is written before a `yes` or a list of names.
 7. Stage the children file privately and in the same shell call, exactly as step 12 stages its own,
    through a heredoc whose delimiter is quoted:
 
@@ -424,7 +425,10 @@ Only when `followup-parents` is empty.
 **The refusal rule**, stated once and applied at every answer the ritual accepts (Confirmations 1, 2
 and 3 below, and step 7's resume question): an answer that includes, nests, merges (as survivor or
 folded in) or drops a flagged follow-up is not accepted. Say it is flagged as an unmet criterion,
-offer `not unmet <name>`, and ask again. A flag is cleared only by `not unmet`.
+offer `not unmet <name>` wherever that answer is accepted (Confirmations 1 and 2 and step 7's resume
+question), and ask again; at Confirmation 3 a flagged follow-up was never refined, so say instead
+that it is cleared with `not unmet` at Confirmation 1 of a re-run. A flag is cleared only by
+`not unmet`.
 
 The shortlist is the default chosen set. Ask the operator one question: *which listed follow-ups do
 you want to move onto the shortlist, and which off it? You can also drop a follow-up or merge
@@ -435,8 +439,9 @@ overlapping ones.* The expected answer is one or more of:
 - `merge <names> into <survivor>`: the follow-ups to fold into the survivor, which stays and carries
   their intent;
 - `not unmet <names>`: clear the flag on follow-ups flagged as unmet criteria. It is accepted only
-  for names currently flagged; any other name: say so and ask again. It clears the flag for this run
-  only and returns each to the other follow-ups, movable like any other.
+  for names currently flagged; any other name: say so and ask again. It applies before the moves in
+  the same answer, so `not unmet U` with an include of U is accepted. It clears the flag for this
+  run only and returns each to the other follow-ups, movable like any other.
 
 Any listed follow-up that is not flagged can move either way, including one from the blocked list,
 and can be dropped, including a blocked one. A flagged follow-up can only be cleared with
@@ -548,13 +553,14 @@ Then ask:
 > Drop, merge, include and leave as shown? Refinement rewrites each included follow-up's record
 > whether or not it ends up nested. Proceed? (`yes`, further moves, or `intent <name>: <text>`.)
 
-Expected answer: `yes`; further moves, or `drop <name>` for a dependent (a flagged dependent is
-refused by the rule above), after which the sets are shown again (re-running the preview) and the
-question is asked again; or `intent <name>: <text>`, which replaces the intent drafted for that
-folded-in follow-up with the operator's text, is re-staged, previewed again, and shown again so the
-operator sees the exact new note. An `intent` for a name that is not folded in is not accepted.
-Nothing is written before a `yes`. On `yes`, go to step 8a when anything is dropped or merged.
-Otherwise, when nothing is included, say no parent is created and go to step 13.
+Expected answer: `yes`; further moves, `not unmet <names>` as at Confirmation 1, or `drop <name>`
+for a dependent (a flagged dependent is refused by the rule above), after which the sets are shown
+again (re-running the preview) and the question is asked again; or `intent <name>: <text>`, which
+replaces the intent drafted for that folded-in follow-up with the operator's text, is re-staged,
+previewed again, and shown again so the operator sees the exact new note. An `intent` for a name
+that is not folded in is not accepted. Nothing is written before a `yes`. On `yes`, go to step 8a
+when anything is dropped or merged. Otherwise, when nothing is included, say no parent is created
+and go to step 13.
 
 ### 8a. Write the dispositions
 
@@ -824,10 +830,11 @@ unsettled:
 
 The case that matches still decides the other commands; a parent that ended `buildable` still gets
 its build command. When any follow-up is still flagged, **no distill command is printed in any case
-below**, including after a step 7 outcome and when `distilled` is true; a flag changes only the
-distill line, and every build and re-run line below is printed as it otherwise would be. Every
-vault-sourced value in them (the parent name from `parent`, the spec name) is validated against the
-step 1 shape first; one that fails is not printed. Take the first case that matches, in this order:
+below**, including after a step 7 outcome and when `distilled` is true; a flag removes the distill
+line and adds the options paragraph with its re-run line, and nothing else changes: every build and
+re-run line below is printed as it otherwise would be. Every vault-sourced value in them (the parent
+name from `parent`, the spec name) is validated against the step 1 shape first; one that fails is
+not printed. Take the first case that matches, in this order:
 
 - An `assemble` refused or removed on a live parent (`followup-parent-exists`,
   `concurrent-followup-parent`): no distill command, since distilling waits on that parent. Print
@@ -866,8 +873,9 @@ step 1 shape first; one that fails is not printed. Take the first case that matc
   command.
 - Any other step 7 outcome, which wrote nothing: no distill command, since distilling waits on the
   parent. After branch (a) or (c) answered without a drop, or a parent of another status, print
-  nothing beyond what step 7 printed. After a `stop`, or an exit-1 refusal from `state`, `resume` or
-  `drop`, print the re-run line above.
+  nothing beyond what step 7 printed, except the options paragraph when a follow-up is flagged.
+  After a `stop`, or an exit-1 refusal from `state`, `resume` or `drop`, print the re-run line
+  above.
 - A failed `assemble` that wrote nothing, or no parent at all, whether or not step 8a wrote
   dispositions that all landed: the distill command only, or nothing when `distilled` is true. When
   a dispose write failed, or the preview or step 8a stopped the run, the re-run line replaces it, as
@@ -876,8 +884,9 @@ step 1 shape first; one that fails is not printed. Take the first case that matc
 
 The cases above match whether or not a follow-up is flagged. The ones that never printed a distill
 command (the refused or removed live parent, a failed nesting, a `drop-incomplete`, a completed drop
-and any other step 7 outcome) are unchanged by a flag, and an `assemble` that ended `buildable` with
-`distilled` true already printed none.
+and any other step 7 outcome) change only by the options paragraph and its re-run line when a
+follow-up is flagged, and an `assemble` that ended `buildable` with `distilled` true already printed
+none.
 
 When any follow-up is still flagged, state three options after the commands, in prose and printing
 none of them as a command. First, build the criterion as a slice: for a numbered criterion on a spec
@@ -885,9 +894,10 @@ whose status is not `complete`, reopen it by amending the spec record with `lore
 amend` and its `--reopen` flag naming that criterion, and then run the slice ritual on the spec; for
 a `complete` spec or a criterion with no number, start a new spec. Second, amend the spec to remove
 or reword the criterion. Third, re-run this ritual and clear the flag with `not unmet <name>` if it
-is not really unmet; after a step 7 refusal, re-run once the parent is built or dropped. Print the
-re-run line beside the third option, alone on its own line and once even when a case above printed
-it too:
+is not really unmet; where a live parent remains, whether after an `assemble` that exited 0, a
+resume that ended `buildable` or a step 7 refusal, re-run once no live parent remains, that is, once
+the parent is built or dropped. Print the re-run line beside the third option, alone on its own line
+and once even when a case above printed it too:
 
 ```
 /craft:tidy-followups spec/<spec-name>
