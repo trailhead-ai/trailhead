@@ -123,6 +123,18 @@ Contract
                                   ``<s>`` is the ASCII JSON list of one
                                   ``{"title": ...}`` per round, encoded the same way
 
+* ``read_reference(reference_path, pad, ...)`` reads drawings back for a reference page; it builds and changes
+  nothing and has no command-line wiring. The reference is one JSON object: ``site`` (a slug as ``--pad``),
+  ``title`` (non-empty) and ``drawings`` (at least one ``{round, question, option}``: whole numbers from 1 and
+  a capital letter; an unknown key is refused, the same drawing twice is refused). The pad is found where
+  ``--add`` finds it, read under its lock through the add's read-back (refusals worded for a reference, not an
+  add), each named round's data decoded from ``round.js`` as data, and the lock released before it returns.
+  It returns a ``Reference(site, title, drawings)`` whose drawings are ``ChosenDrawing(round, question, letter,
+  round_title, prompt, option)`` in the order named, or raises :class:`Refusal` with every problem found.
+  Before it returns, every string bound for the page (title, site, each round title, prompt, name, cost, flow
+  and every string inside a layout, dictionary keys included) is matched against the credential-pattern
+  classes in ``_CREDENTIAL_PATTERNS`` (mirroring craft's credential-pattern scrub list); a match refuses the
+  reference naming the drawing and field, never the matched text.
 * Every refusal prints ``scratch-pad: <where>: <what>`` lines on stderr -- every
   problem found in one pass -- and exits non-zero. No pad and no temp folder
   are left behind; a pads folder this run had to create may remain, empty.
@@ -259,12 +271,12 @@ def _reject_constant(name: str):
     raise ValueError(f"{name} is not valid JSON")
 
 
-def _read_round(round_path: Path) -> object:
+def _read_round(round_path: Path, what: str = "round") -> object:
     where = _q(str(round_path))
     try:
         raw = round_path.read_bytes()
     except OSError as exc:
-        raise Refusal([_line(where, f"cannot read the round: {exc.strerror or exc}")])
+        raise Refusal([_line(where, f"cannot read the {what}: {exc.strerror or exc}")])
     try:
         text = raw.decode("utf-8")
     except UnicodeDecodeError as exc:
@@ -388,15 +400,15 @@ def _check_option(option: object, where: str, problems: list[str]) -> int:
     return 1 if pick else 0
 
 
-def _check_slug(pad: str) -> list[str]:
+def _check_slug(pad: str, where: str = "--pad", noun: str = "pad") -> list[str]:
     if len(pad) > _MAX_SLUG and _SLUG.fullmatch(pad):
-        return [_line("--pad", f"the pad name is too long ({len(pad)} characters) — the limit is {_MAX_SLUG}")]
+        return [_line(where, f"the {noun} name is too long ({len(pad)} characters) — the limit is {_MAX_SLUG}")]
     if _SLUG.fullmatch(pad):
         return []
     return [
         _line(
-            "--pad",
-            f"{_q(pad)} is not a valid pad name — start with a lowercase letter or digit, then use "
+            where,
+            f"{_q(pad)} is not a valid {noun} name — start with a lowercase letter or digit, then use "
             "lowercase letters, digits, '.', '_' or '-'",
         )
     ]
@@ -610,8 +622,8 @@ def _tree_problems(root: Path) -> list[str]:
     return problems
 
 
-def _round_title(round_js: Path) -> str:
-    """The title in a ``round.js`` first line, decoded as data; ``ValueError`` when it cannot be."""
+def _round_data(round_js: Path) -> object:
+    """The round in a ``round.js`` first line, decoded as data; ``ValueError`` when it cannot be."""
     with open(round_js, encoding="utf-8") as handle:
         first = handle.readline().rstrip("\n")
     if not first.startswith(_ROUND_JS_PREFIX):
@@ -619,8 +631,16 @@ def _round_title(round_js: Path) -> str:
     if not first.endswith(");"):
         raise ValueError("its first line does not end the way this script writes it")
     try:
-        title = json.loads(json.loads(first[len(_ROUND_JS_PREFIX) : -2]))["title"]
-    except (ValueError, KeyError, TypeError, RecursionError):
+        return json.loads(json.loads(first[len(_ROUND_JS_PREFIX) : -2]))
+    except (ValueError, RecursionError):
+        raise ValueError("its first line does not hold a round") from None
+
+
+def _round_title(round_js: Path) -> str:
+    """The title in a ``round.js`` first line, decoded as data; ``ValueError`` when it cannot be."""
+    try:
+        title = _round_data(round_js)["title"]
+    except (KeyError, TypeError):
         raise ValueError("its first line does not hold a round") from None
     if not isinstance(title, str):
         raise ValueError("its round has no title")
@@ -635,15 +655,15 @@ def _cannot_take(pad: str, problems: Sequence[str], strays: Sequence[str] = ()) 
     )
 
 
-def _read_pad(final: Path, pad: str) -> list[str]:
-    """The pad's round titles in order, or a :class:`Refusal` naming everything that stops a new round."""
+def _read_pad(final: Path, pad: str, refuse=_cannot_take) -> list[str]:
+    """The pad's round titles in order, or the :class:`Refusal` *refuse* builds naming every problem."""
     problems: list[str] = []
     strays: list[str] = []
     titles: list[str] = []
     try:
         mode = os.lstat(final).st_mode
     except OSError as exc:
-        raise _cannot_take(pad, [f"the pad folder can't be read: {_esc(exc.strerror or str(exc))}"])
+        raise refuse(pad, [f"the pad folder can't be read: {_esc(exc.strerror or str(exc))}"])
     if stat.S_ISLNK(mode):
         problems.append("the pad folder is a symlink")
     elif not stat.S_ISDIR(mode):
@@ -652,7 +672,7 @@ def _read_pad(final: Path, pad: str) -> list[str]:
         try:
             entries = sorted(os.listdir(final))
         except OSError as exc:
-            raise _cannot_take(pad, [f"the pad folder can't be read: {_esc(exc.strerror or str(exc))}"])
+            raise refuse(pad, [f"the pad folder can't be read: {_esc(exc.strerror or str(exc))}"])
         problems.extend(_tree_problems(final))
         strays.extend(
             f"{_esc(e)} is not part of a pad this script builds"
@@ -687,7 +707,7 @@ def _read_pad(final: Path, pad: str) -> list[str]:
                 except (OSError, ValueError) as exc:
                     problems.append(f"round-{k}/round.js: {_esc(str(exc))}")
     if problems or strays:
-        raise _cannot_take(pad, problems, strays)
+        raise refuse(pad, problems, strays)
     return titles
 
 
@@ -898,6 +918,277 @@ def _add_to_workspace(
         return tempfile.mkdtemp(prefix="scratch-pad-")
 
     return _add_round(workspace / "sites", pad, kit_dir, encoded, publish, make_tmp)
+
+
+_REFERENCE_KEYS = ("site", "title", "drawings")
+_DRAWING_KEYS = ("round", "question", "option")
+_DRAWING_HINTS = {
+    "round": "name the round's number",
+    "question": "name the question's number in that round",
+    "option": "name the option's letter",
+}
+_LETTER = re.compile(r"[A-Z]")
+
+# Credential-pattern classes, mirroring craft's credential-pattern scrub list (the outpost plugin cannot
+# import craft). Each is tried independently, so a string can match more than one class.
+_CREDENTIAL_PATTERNS: tuple[tuple[str, re.Pattern], ...] = (
+    ("pem-private-key", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
+    (
+        "vendor-prefix",
+        re.compile(
+            r"(?i)\b(AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|gho_[A-Za-z0-9]{36}"
+            r"|glpat-[A-Za-z0-9_-]{20}|xox[baprs]-[A-Za-z0-9-]+|sk_live_[A-Za-z0-9]+"
+            r"|AIza[0-9A-Za-z_-]{35})\b"
+        ),
+    ),
+    ("key-like", re.compile(r"(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s*[=:]\s*\S+")),
+    ("api-key-shape", re.compile(r"(?i)api[_-]?key['\"]?\s*[:=]\s*['\"]?[A-Za-z0-9._\-]{16,}")),
+    ("bearer", re.compile(r"(?i)bearer\s+[A-Za-z0-9._\-]+")),
+    ("high-entropy-hex", re.compile(r"\b[A-Fa-f0-9]{40,}\b")),
+    ("high-entropy-base64", re.compile(r"\b[A-Za-z0-9+/]{32,}={0,2}\b")),
+)
+
+
+class ChosenDrawing(NamedTuple):
+    """One drawing a reference names: its place on the pad, its round's title, its question's prompt and the
+    option as the pad holds it (``name``, ``cost``, ``pick`` and a ``layout`` or ``flow``)."""
+
+    round: int
+    question: int
+    letter: str
+    round_title: str
+    prompt: str
+    option: dict
+
+
+class Reference(NamedTuple):
+    site: str
+    title: str
+    drawings: list[ChosenDrawing]
+
+
+def credential_patterns(text: str) -> list[str]:
+    """The names of the credential-pattern classes *text* matches, in a fixed order; empty when none."""
+    return [name for name, pattern in _CREDENTIAL_PATTERNS if pattern.search(text)]
+
+
+def check_reference(data: object) -> list[str]:
+    """Return a ``scratch-pad:`` line for every outer-shape problem in a reference file's *data*."""
+    if not isinstance(data, dict):
+        return [_line("reference", "must be a JSON object")]
+    problems: list[str] = []
+    _unknown_keys(data, _REFERENCE_KEYS, "reference", problems)
+    if "site" not in data:
+        problems.append(_line("site", 'no "site" — name the page'))
+    elif not isinstance(data["site"], str):
+        problems.append(_line("site", "must be a string"))
+    else:
+        problems.extend(_check_slug(data["site"], "site", "site"))
+    if "title" not in data:
+        problems.append(_line("title", 'no "title" — name the page'))
+    elif not isinstance(data["title"], str):
+        problems.append(_line("title", "must be a string"))
+    elif not data["title"].strip():
+        problems.append(_line("title", "empty — name the page"))
+    drawings = data.get("drawings")
+    if drawings is None or drawings == []:
+        problems.append(_line("drawings", "name at least one drawing"))
+    elif not isinstance(drawings, list):
+        problems.append(_line("drawings", "must be a list"))
+    else:
+        for i, drawing in enumerate(drawings):
+            _check_drawing(drawing, f"drawings[{i}]", problems)
+    return problems
+
+
+def _check_drawing(drawing: object, where: str, problems: list[str]) -> None:
+    if not isinstance(drawing, dict):
+        problems.append(_line(where, "must be an object"))
+        return
+    _unknown_keys(drawing, _DRAWING_KEYS, where, problems)
+    for key in ("round", "question"):
+        value = drawing.get(key)
+        if key not in drawing:
+            problems.append(_line(where, f'no "{key}" — {_DRAWING_HINTS[key]}'))
+        elif isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            problems.append(_line(f"{where}.{key}", "must be a whole number from 1"))
+    if "option" not in drawing:
+        problems.append(_line(where, f'no "option" — {_DRAWING_HINTS["option"]}'))
+    elif not isinstance(drawing["option"], str) or not _LETTER.fullmatch(drawing["option"]):
+        problems.append(_line(f"{where}.option", "must be one capital letter, A to Z"))
+
+
+def _cannot_reference(pad: str, problems: Sequence[str], strays: Sequence[str] = ()) -> Refusal:
+    """The read-back's refusal in a reference's wording: the reasons, with no way on for an add."""
+    return Refusal([f"scratch-pad: pad {_q(pad)} can't be referenced: {'; '.join([*problems, *strays])}"])
+
+
+def _questions_of(data: object) -> list | None:
+    """The round's questions when the data has the shape this script writes, else ``None``."""
+    questions = data.get("questions") if isinstance(data, dict) else None
+    if not isinstance(questions, list):
+        return None
+    for question in questions:
+        if not isinstance(question, dict) or not isinstance(question.get("prompt"), str):
+            return None
+        options = question.get("options")
+        if not isinstance(options, list) or not all(isinstance(o, dict) for o in options):
+            return None
+    return questions
+
+
+def _strings_in(value: object):
+    """Every string in *value*, dictionary keys included, as ``(is_key, text)``."""
+    stack = [(False, value)]
+    while stack:
+        is_key, item = stack.pop()
+        if isinstance(item, str):
+            yield is_key, item
+        elif isinstance(item, dict):
+            for key, child in item.items():
+                stack.append((False, child))
+                stack.append((True, key))
+        elif isinstance(item, list):
+            stack.extend((False, child) for child in item)
+
+
+def _credential_problems(site: str, title: str, drawings: Sequence[ChosenDrawing]) -> list[str]:
+    """A line for every page-bound field that matches a credential pattern; never the matched text."""
+    problems: list[str] = []
+
+    def check(where: str, field: str, texts: Sequence[str]) -> None:
+        classes = sorted(
+            {c for text in texts for c in credential_patterns(text)},
+            key=lambda c: [n for n, _ in _CREDENTIAL_PATTERNS].index(c),
+        )
+        if classes:
+            problems.append(
+                _line(
+                    where, f"{field} matches a credential pattern ({', '.join(classes)}) — this is shared with the team"
+                )
+            )
+
+    check("title", "title", [title])
+    check("site", "site", [site])
+    for i, d in enumerate(drawings):
+        where = f"drawings[{i}] (round {d.round}, question {d.question}, option {d.letter})"
+        check(where, "round title", [d.round_title])
+        check(where, "prompt", [d.prompt])
+        for field in ("name", "cost", "flow"):
+            if field in d.option:
+                check(where, field, [t for _, t in _strings_in(d.option[field])])
+        if "layout" in d.option:
+            strings = list(_strings_in(d.option["layout"]))
+            check(where, "layout", [t for is_key, t in strings if not is_key])
+            check(where, "layout (a key)", [t for is_key, t in strings if is_key])
+    return problems
+
+
+def _resolve_drawings(drawings: Sequence[dict], titles: Sequence[str], rounds: Mapping[int, object]) -> tuple:
+    """Match each named drawing to the pad: ``(chosen, problems)``; every problem is named."""
+    chosen: list[ChosenDrawing] = []
+    problems: list[str] = []
+    seen: dict[tuple, int] = {}
+    for i, drawing in enumerate(drawings):
+        where = f"drawings[{i}]"
+        number, qn, letter = drawing["round"], drawing["question"], drawing["option"]
+        if number > len(titles):
+            problems.append(_line(f"{where}.round", f"{number} — the pad has {_plural(len(titles), 'round')}"))
+            continue
+        questions = _questions_of(rounds[number])
+        if questions is None:
+            problems.append(
+                _line(f"{where}.round", f"{number} — round {number}'s data does not hold a list of questions")
+            )
+            continue
+        if qn > len(questions):
+            problems.append(
+                _line(f"{where}.question", f"{qn} — round {number} has {_plural(len(questions), 'question')}")
+            )
+            continue
+        options = questions[qn - 1]["options"]
+        index = ord(letter) - ord("A")
+        if index >= len(options):
+            problems.append(
+                _line(
+                    f"{where}.option",
+                    f"{letter} — question {qn} of round {number} has {_plural(len(options), 'option')} "
+                    f"(A to {chr(64 + len(options))})",
+                )
+            )
+            continue
+        key = (number, qn, letter)
+        if key in seen:
+            problems.append(
+                _line(
+                    where, f"the same drawing as drawings[{seen[key]}] (round {number}, question {qn}, option {letter})"
+                )
+            )
+            continue
+        seen[key] = i
+        chosen.append(
+            ChosenDrawing(number, qn, letter, titles[number - 1], questions[qn - 1]["prompt"], options[index])
+        )
+    return chosen, problems
+
+
+def _plural(count: int, noun: str) -> str:
+    return f"{count} {noun}" + ("" if count == 1 else "s")
+
+
+def read_reference(
+    reference_path: Path | str,
+    pad: str,
+    *,
+    env: Mapping[str, str] | None = None,
+    cwd: Path | str | None = None,
+    publish_timeout: float = PUBLISH_TIMEOUT_SECONDS,
+) -> Reference:
+    """Check a reference file and read the drawings it names back from *pad*; nothing is built or changed.
+
+    The pad is found where ``--add`` finds it (``<workspace>/sites/<pad>`` inside a camp workspace, otherwise
+    under Outpost's pads folder), read under its lock through the add's read-back, and each named round's
+    ``round.js`` is decoded as data, never evaluated. The lock is released before this returns. Raises
+    :class:`Refusal` (every problem found, as ``scratch-pad:`` lines) when the file, the pad, a named drawing
+    or any string bound for the page is wrong. Returns the chosen drawings in the order named.
+    """
+    env = os.environ if env is None else env
+    if cwd is None:
+        try:
+            cwd = Path.cwd()
+        except OSError:
+            cwd = None
+    problems = _check_slug(pad)
+    data = None
+    try:
+        data = _read_round(Path(reference_path), "reference")
+    except Refusal as exc:
+        problems.extend(exc.lines)
+    else:
+        problems.extend(check_reference(data))
+    if problems:
+        raise Refusal(problems)
+
+    workspace = None if cwd is None else enclosing_workspace(Path(cwd), env)
+    if workspace is not None:
+        root = workspace / "sites"
+        _require_plain_sites(root)
+    else:
+        root = _pads_root(env)
+    final = root / pad
+    rounds: dict[int, object] = {}
+    with _pad_lock(env, root, pad, 2 * publish_timeout):
+        if not os.path.lexists(final):
+            raise Refusal([_line(f"pad {_q(pad)}", "does not exist — build it first, or name the pad it is on")])
+        titles = _read_pad(final, pad, _cannot_reference)
+        for number in sorted({d["round"] for d in data["drawings"] if d["round"] <= len(titles)}):
+            rounds[number] = _round_data(final / f"round-{number}" / "round.js")
+
+    chosen, problems = _resolve_drawings(data["drawings"], titles, rounds)
+    problems.extend(_credential_problems(data["site"], data["title"], chosen))
+    if problems:
+        raise Refusal(problems)
+    return Reference(data["site"], data["title"], chosen)
 
 
 def _build(
