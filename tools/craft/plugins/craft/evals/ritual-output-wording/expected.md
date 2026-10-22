@@ -1634,9 +1634,11 @@ listed only `lanternrow` at the run directory, checked before the run. The live 
 the recipe counts as the task failing. The one commit between them is `<live-vault-commit>`, `lore: andromeda published 2 item(s)`,
 13:20:09 -0500, touching three records about amend (`<live-vault-record>`, `<live-vault-record>`);
 the preceding commits are one to eleven minutes apart from the same publisher. The transcript contains no reference to the live
-vault path (0 hits for `local/state/lore` and `vaults/trailhead`) and the sandbox denies writes outside the run directory. The
-move is therefore evidence of another session on this host publishing during the run window, not of the session under test;
-the recipe's rule is still applied as written and the move is reported rather than argued away.
+vault path (0 hits for `local/state/lore` and `vaults/trailhead`) and the sandbox denies writes outside the run directory.
+**Ruling (controller, 2026-10-22):** the run stands. `andromeda` is a different machine; the run was on host
+`<this-host>`, whose own publishes are named `<this-host>` in the same log. The move is that machine's publish arriving
+through sync, not a write by the session under test, which is what the HEAD check exists to catch. The close-out run's check
+therefore reads every commit in the window and fails only on a commit published from this host.
 
 **Edits to the captures after they were taken, to pass the scan.** `capture_scan.py` flagged three shapes, none a credential;
 each was rewritten in the committed files only: the run and snapshot directories under `/private/tmp` became `${RUN}` and
