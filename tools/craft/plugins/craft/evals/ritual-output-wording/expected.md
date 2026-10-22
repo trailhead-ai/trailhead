@@ -1557,3 +1557,91 @@ lines longer at the top of the range. Remainders: all six slice-site captures st
 
 Captures, rows and this section only. No arm, fixture, earlier table row, `rules.md`, `slice/SKILL.md` or `drive/SKILL.md`
 was changed. Not run: any baseline arm, any real `/craft:slice` session.
+
+## Real run at base B, 2026-10-22 — one real `/craft:slice` session on an isolated vault, step 8 read by eye
+
+Registered here before the session ran. One run only, no eval arm and no batch, by the recipe in `Real-run recipe` above.
+It is a go/no-go observation read by eye, not a rate, and it adds no row to any tally.
+
+**Reading fields, written before the run, to be filled from the step 8 statement** (the text the session prints before it writes
+the parent; definitions as `Readings (by eye)` above, ground truth as `Ground truth for left-correct`, derived from the
+seeded spec and ledger: Placing a hold has AC2 and AC4 left, Filling a hold has AC7 left, Collecting at the desk has AC8, AC9
+and AC10 left, once the session's chosen slice is subtracted; the session chooses its own slice, so the remainder is derived
+from what it says it covers, not from the stub's hold shelf slice).
+
+| Field | Value |
+|---|---|
+| `opens` | `later` |
+| `try-it` | `missing` |
+| `left` | `missing` (in the statement) |
+| `left-correct` | `n/a` |
+| Observed: remainder form, opening address, line count | none in the statement; neither (third person, "A borrower"); 11 non-blank lines (12 with the trailing blank) |
+| Step 9 check | passed (below) |
+
+**Expectation from the baseline batch, stated before the run:** `opens` = `later` or `missing`, `try-it` = `missing`, `left`
+`present` or `missing`. What is seen is recorded whatever it is.
+
+**Staging.** The vault is isolated under a run directory in `/private/tmp`: spec `spec/holds-and-pickup` (the body of
+`fixtures/proposal-spec.md` from `## Acceptance Criteria` on, status `ready`, with its `## Slices` ledger), and a `done`
+parent `task/the-first-hold-slice` labelled `craft/slice-parent` with `**Covers:** AC1, AC3` and `**Partially covers:** AC2`.
+The session reads a `git archive` of `437bbe8e` (craft plugin tree without `evals/`, lore plugin tree with its `lore` CLI, and
+the shared `trailhead/` library the CLI imports), with `LORE_CONFIG_DIR`, `LORE_STATE_DIR`, `XDG_CONFIG_HOME` and
+`XDG_STATE_HOME` in the run directory.
+
+### Result (one session, `proposal-realrun-baseline`; run1, no attempt discarded)
+
+Staged and run once, in the foreground, under `scripts/eval-sandbox` (macOS), Claude Code 2.1.308, exit 0, empty stderr.
+Captures: `runs/proposal-realrun-baseline.txt` (rendered transcript), `.cmd.txt` (the invocation and the prompt),
+`.parent.txt` (the written parent read back from the isolated vault), `.exit`.
+
+**Unknown resolved.** The slice gates and `lore record criteria` work in isolation at B: `ledger_gate.py` exited 0 with
+`parent-cross-check: checked`, `lore record criteria` exited 0 with the ten declared criteria, `candidate_set.py` exited 0 with
+`candidates: AC2, AC4, AC5, AC6, AC7, AC8, AC9, AC10`, `partial: AC2`, `termination basis: gate-certified`. Staging needed the
+snapshot to carry the shared `trailhead/` library beside the lore plugin, because the `lore` CLI imports it and the fenced
+environment has no `TRAILHEAD_ROOT`.
+
+**What the session chose, and what step 8 said.** It did not choose the stub's hold shelf slice. It chose "Five-hold limit with
+refusal reason", fully covering AC2 (the criterion the ledger records as partly covered), and stated it under a heading
+`## Step 8: the chosen slice`, as a bulleted list, opening with the bullet "**Slice:** *Five-hold limit with a refusal reason*"
+and then "**Value claim:** Finishes the create path. A borrower can keep placing holds up to five. When they try a sixth ... it is
+refused and they are told why ...", then "Fully green", "Partially green: none", and a visual-surface call with four states.
+
+- `opens` = `later`. The first sentence after the slice-name bullet is "Finishes the create path", which restates what the system
+  does; the sentence saying what a person can do ("A borrower can keep placing holds up to five") comes second. This is
+  the borderline between `later` and `missing`; the person sentence is in the claim, not the lead.
+- `try-it` = `missing`. No action to take and nothing to look for afterwards; the only next step is `/craft:plan <parent>`,
+  which is the ritual's next step, not a way to try the result.
+- `left` = `missing` in the statement. The statement says nothing about what remains of the spec. The candidates were sorted by
+  phase in the reasoning text just before step 8, and the closing report after the parent was written lists the other
+  candidates by criterion, outside the statement and not counted by section; neither is read as the statement.
+- `left-correct` = `n/a`.
+- Observed: the opening is not addressed to the operator; the statement is 11 non-blank lines; the final report adds a second
+  summary of the same slice after the write.
+
+This matches the stated expectation (`later` or `missing`, `missing`, `missing`). One capture, read by one reader in session; no
+second reader was run, since this is an observation and not a tallied reading.
+
+**Step 9 check (parent `task/five-hold-limit-with-refusal-reason`, read back from the isolated vault).** `**Value claim:**` is
+present, as a lowercase-led sentence, and `**Covers:** AC2` keeps its shape. `covers_gate.py --covers "AC2"` run on the spec
+exits 0 (the session ran the same command before writing, exit 0). The parent carries `craft/slice-parent`, `spec=holds-and-pickup`,
+status `in-progress`. A search of the body for "You will be able to", "Try it" and "remain" found no hit, and the body does not
+copy a step 8 label; it does carry the step 8 "Enumerated states" list. No `**Partially covers:**` field, as the statement
+said "none".
+
+**Fence.** `lore vault ls` live listed `default`, `trailhead`, `lake-in-the-woods`, `levr`; inside the fenced environment it
+listed only `lanternrow` at the run directory, checked before the run. The live trailhead vault's HEAD before the run was
+`<live-vault-commit>` and after it `<live-vault-commit>`. **It moved**, which
+the recipe counts as the task failing. The one commit between them is `<live-vault-commit>`, `lore: andromeda published 2 item(s)`,
+13:20:09 -0500, touching three records about amend (`<live-vault-record>`, `<live-vault-record>`);
+the preceding commits are one to eleven minutes apart from the same publisher. The transcript contains no reference to the live
+vault path (0 hits for `local/state/lore` and `vaults/trailhead`) and the sandbox denies writes outside the run directory. The
+move is therefore evidence of another session on this host publishing during the run window, not of the session under test;
+the recipe's rule is still applied as written and the move is reported rather than argued away.
+
+**Edits to the captures after they were taken, to pass the scan.** `capture_scan.py` flagged three shapes, none a credential;
+each was rewritten in the committed files only: the run and snapshot directories under `/private/tmp` became `${RUN}` and
+`${SNAP}` (and `${SNAP}/tools/craft/plugins/craft` became `${CLAUDE_PLUGIN_ROOT}`, which is what the prompt set it to); the
+three 64-hex lore record revisions became `<revision-1>` to `<revision-3>`, consistently; and the three env-variable names
+quoted from the credential-scrub text the session read (`SECRET_KEY=` and two like it) gained brackets (`SECRET_KEY[=]`).
+The step 8 statement and the session's readings are unaffected. The capture carries neither the operator's home path nor
+username: `grep -rn "$HOME\|$USER"` over `runs/proposal-realrun-baseline.*` returns 0 hits. The raw stream-json was not kept.
