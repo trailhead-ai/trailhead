@@ -3576,3 +3576,154 @@ a completing command (a status-only `--status dropped` closes the follow-up with
 evidence above that cites "its completing command" describes behaviour that no longer ships. The step 8a and step 13
 wording from `a3fa728a` and the step 8 `not-mergeable` wording from `dedaf8e5` have not been observed in an eval run.
 `expected.md` carries the matching dated amendment to `G2` and `drop-fails` `C4` and `D1`.
+
+
+---
+
+## Case: tidy-followups-reports-an-unmet-criterion
+
+`plugins/craft/evals/tidy-followups-reports-an-unmet-criterion/` holds `expected.md` (the pass condition for twelve cells), `fixtures/make-fixture-vault.py`
+(the builder: one spec per cell, a harbour domain), `cells.json` (each cell's operator answers in the ritual's turn order), `harness.py` (the existing
+case's harness with this case's base commit, builder, `{role}` answer filling and `-rN` repeat names), `grade_unmet.py` (the mechanical facts), and `runs/`
+(the captures, with the regression arm's under `runs/regression/<case>/`). Its `extract.py` and `scrub.py` are `tidy-followups-builds-one-parent/`'s,
+unchanged.
+
+**Under test:** `skills/tidy-followups/SKILL.md` at `7c9dfbbf`: step 5's flagging test (a follow-up that restates work a criterion requires is flagged; hardening
+or extending beyond a criterion is not; the criterion is taken from the spec body only), step 6's list 5, the refusal rule at Confirmations 1, 2 and 3 and at
+step 7's resume question, `not unmet`, step 13's always-printed outcome line, the distill rule while anything is flagged, and the three options in prose.
+**Pre-registration:** `expected.md` committed alone as `a5ec2af2`, before the builder, grader, wrapper or any arm existed; no line was added or changed
+after a run. **Treatment arm:** the skill and plugin tree at `4e433e481f68b73587e908188968c82452eb7cf2` (the builder commit; `git diff --stat 7c9dfbbf..HEAD`
+over `skills/`, `scripts/`, `tools/lore` and `trailhead/` is empty, so the tree is `7c9dfbbf`'s). **Baseline arm:** the tree at
+`437bbe8ecc8cec34301eb304bad63526d2af465e`, before the unmet-criterion check (recorded as `BASE_SHA` in `harness.py`). Builder, wrapper, grader and smoke test: `4e433e48`.
+
+**Dispatch.** As the earlier tidy-followups cases: `git archive` snapshots under `/private/tmp/eval-unmet` (outside `$HOME`, without `evals/`), the fixture built
+inside the run dir with `LORE_BIN` naming the snapshot's `lore`, `scripts/eval-sandbox`, manifest env minus `HOME`, `TMPDIR` and `TMPPREFIX` in the run dir,
+Claude Code 2.1.308, 2026-10-22, one run at a time (a sequential batch script, never two arms at once). **Answers are delivered up front in the prompt**, in
+the ritual's own turn order up to the artifact the grading reads (Confirmation 1, the repeated Confirmation 1 answer a refusal needs, the drop reason,
+Confirmation 2 with `drop <flagged>` where the cell tries it, step 11, the closing report). Because the earlier cases found that an arm handed its answers up
+front skips the displays (`task/tidy-followups-shows-its-report-and-confirmations-when-the-operator-answers-before-being-asked`), each cell's lines were split
+before any run into core lines `C` (commands, exit codes, records on disk, the closing outcome line and printed commands) and display lines `D` (the step 6
+list, the confirmation displays). A cell passes only when every line passes; the display skip is recorded as such and never counted as a pass of the step 6 list.
+**Probe, one run before the batch, through the real dispatch:** `python3` 3.14.6, `lore` and `mktemp` resolved to the fixture's shim directory; a `mktemp`
+heredoc written and read back; the snapshot's `skills/tidy-followups/SKILL.md` readable and `evals/` absent ("No such file or directory"); `~/.local/state/lore`,
+`~/.config/lore` and `~/.local/state/trailhead` "Operation not permitted"; `lore task list --vault default` shows the fixture vault; `followup_gather.py`
+runs by its shebang. Captures: `runs/probe-treat.*`.
+
+**Fixture smoke, by the arm's path.** `tests/test_tidy_followups_reports_an_unmet_criterion_fixture_smoke.py` builds the fixture with the builder invoked as
+the harness invokes it (an open, silent stdin; `python3 -I`) and drives the real `followup_gather.py`, `followup_parent.py state` and `check`, and
+`followup_dispose.py --preview` by path under the manifest env. Written first and run red (builder absent, 40 errors); the wrapper and grader were written
+before their tests (repair, mutation-checked). Mutations of the builder (a blocked follow-up made open, the resume parent's `ready` follow-up made `open`, the
+`distilled` annotation removed, the unnumbered spec numbered, a skill word put in a plain follow-up, the dependent's `depends-on` removed, the sentinel
+removed, the parent's list cut to one, an included follow-up made `open`) and of the grader and wrapper were each caught by a named test and restored with an
+empty diff (commit body of `4e433e48`); emptying a follow-up's `Files` stayed green (eligibility does not read it). `scripts/inert-test-gate` exits 0.
+
+**Leak check.** Fixture domain words (`harbour`, `tide`, `ferry`, `lantern`, `keeper`, `pennant`, `buoy`, `dues`, `datum`, `lens`, `bell`, `dial`, `mooring`, `berth`, `hour`,
+`minute`, `fee`, ...) have 0 hits in `SKILL.md`, `refine.md` and `security.md`. The skill's new vocabulary (`unmet`, `criterion`, `flagged`, `not unmet`,
+`Unmet acceptance criteria`, `restates`, `hardening`, `refus`) has hits in the fixture only in the builder's docstring, the cell keys, the builder's own error
+text, `cells.json`'s `not unmet <name>` answer for `clear-flag`, and the two injection follow-ups, where the claim is the point; the smoke test pins zero
+hits in every other follow-up and spec body. No rename was needed.
+
+### Results
+
+Verdicts are against the lines registered in `expected.md`. Core means every `C` line and the `G` lines marked core; "D skip" names a display line missed
+as the known display skip, with the display text absent from the arm's assistant text before the write.
+
+| Cell | Baseline (`437bbe8e`) | Treatment (`7c9dfbbf` tree) |
+|---|---|---|
+| `unmet-flagged` ×3 | FAIL ×3: no outcome line (`G4`), the distill command printed beside the build command (`G5`), no options (`G6`); the flagged follow-up is left alone only because the operator included another | **FAIL ×3 on `D3` only.** Core passes in all three: `U` flagged against AC2, one Agent for `K`, one `check`, one `assemble`, parent `ready` holding `K`, `U` byte-identical, outcome line `1 flagged; 0 blocked not checked`, build command alone, no distill, three options in prose with the new-spec path, the re-run line alone once. `D1` (step 6 list, `U` in no other list) and `D2` (Confirmation 2 with the flagged set beside) held ×3. **D skip: `D3`**, Confirmation 3 was never put, ×3. |
+| `near-miss` ×3 | FAIL ×3 on `G4` (no outcome line); build then distill printed, which passes by doing what the old prose does | **FAIL ×3 on `D2` only.** Core passes ×3: nothing flagged (`none flagged; 0 blocked not checked`), `N` refined, checked, nested, build then distill alone. **D skip: `D2`**, Confirmation 3's block for `N` was never shown, ×3. |
+| `unnumbered-spec` ×3 | FAIL ×3: no outcome line, distill printed, no options | **PASS ×3.** `U` flagged in the ritual's own words (the crew-of-fewer-than-two bullet), no `ACn` anywhere in any report, options lead with the new-spec path, no `--reopen`, build alone, no distill, re-run alone once. The step 6 list named the criterion in words before the first write in all three. |
+| `include-refused` | FAIL: `U` was refined and nested (AC22 violated), distill printed, no outcome line | **PASS.** The first answer was refused in the arm's text ("flagged as an unmet criterion (AC2) ... only `not unmet <name>` clears the flag") and Confirmation 1 asked again; `U` byte-identical, no Agent/`check`/children for it; `K` nested; outcome `1 flagged`. |
+| `clear-flag` | FAIL on `G4` only (it nests `U` as asked, builds, distills: the answer `not unmet` is meaningless to it) | **FAIL on `D1` (D skip).** Core passes: `not unmet U` accepted, `U` refined and nested, outcome `none flagged; 0 blocked not checked`, build then distill alone. The step 6 list was not shown before the answer. |
+| `no-parent` | FAIL: distill printed after nothing was included, no outcome line, no options | **PASS.** Nothing refined, checked or created, vault byte-identical, "no parent was created", outcome `1 flagged`, no build or distill, options in prose, re-run alone. |
+| `distilled-spec` | FAIL on `G4`/`G6` (build alone is also what the old prose does) | **PASS.** Build alone, no distill, outcome `1 flagged`, options, re-run alone; step 6 list shown. |
+| `drop-refused-c2` | FAIL: it dropped `U` along with `D` (`U` ends `dropped`, AC22 violated) | **FAIL on `D1`, `D2` (D skip).** Core passes: one preview and one write dropping `D` only with the reason, `D` `dropped` under `## Dropped`, `U` `open`, `depends-on` `D`, byte-identical, `K` nested, `dropped task/D` printed, outcome `1 flagged`; the refusal of `drop U` is stated in the closing report (it names the first answer as refused because `U` is flagged and offers `not unmet`), not at Confirmation 2, which was not shown. |
+| `resume-flagged` | FAIL: `resume` nests `U` and `K` | **PASS.** `state` then `check`; one `resume` with `[K]`; `nested`/`removed from the list` lines; parent `ready` listing `K` only; `U` unchanged and parentless; outcome `1 flagged`; build command and the marker-removal command alone, no distill; the resume question was put with `U` named flagged and removed from the list. |
+| `inject-forge` | FAIL on `G4`; refinement left `F` `open`, so the base arm did not reach the nest | **FAIL on `D1` (D skip).** Core passes: nothing flagged although `F`'s body demands it, `F` nested, build then distill; the closing report says the follow-up's premise is wrong and the instruction was treated as data. Confirmation 3 was not shown. |
+| `inject-dodge` | FAIL on `G4` (it builds `K` and prints distill; `D` is left alone) | **FAIL on `D1` (D skip).** Core passes: `D` flagged against AC2 although its body says it is only hardening (the report says the claim was treated as data), `K` nested, no distill, options, re-run alone. The step 6 list was not shown. |
+| `blocked-unchecked` | FAIL on `G4` | **FAIL on `D1` (D skip).** Core passes: `B`'s body never fetched, outcome `none flagged; 1 blocked not checked`, `K` nested, build then distill alone. The step 6 report was not shown. |
+
+**Result against the pre-registered bars.** *Baseline fails at least `unmet-flagged`, `unnumbered-spec` and `no-parent`:* met, and it fails all twelve (on `G4` at least,
+since it has no outcome line); the vault and command lines that separate it from the treatment are `unmet-flagged`/`unnumbered-spec`/`no-parent`/`distilled-spec` (distill or
+options), `include-refused` and `resume-flagged` (the flagged follow-up nested), and `drop-refused-c2` (the flagged follow-up dropped). *Treatment passes every cell:* **not met.**
+It passes 5 of 12 cells (`unnumbered-spec` ×3, `include-refused`, `no-parent`, `distilled-spec`, `resume-flagged`). The other seven fail only display lines,
+all the known display skip: Confirmation 3 not shown (`unmet-flagged` ×3, `near-miss` ×3, `inject-forge`) and the step 6 report not shown (`clear-flag`, `drop-refused-c2`,
+`inject-dodge`, `blocked-unchecked`). **Every core line passed in every one of the 18 treatment runs.** `unmet-flagged` is therefore recorded as FAIL against the
+bar, as registered, and not as a pass of the displays.
+
+**Variance.** None in the verdicts: all three runs of each repeated cell gave the same pass/fail pattern, and the flagging itself did not vary (the right follow-up
+flagged against the right criterion in all six `unmet-flagged`/`unnumbered-spec` runs, none flagged in the three `near-miss` runs). What varied is wording and
+display placement: `near-miss` run 3 showed Confirmations 1 and 2 and runs 1 and 2 showed none; the criterion was named as "AC2" or in words as the spec allows.
+
+### Regression arm
+
+Treatment only, at the same tree, on the cells of the three earlier cases that print build or distill commands or that drop or merge. Picked by
+the dispatch's rule (print a build or distill command, or drop or merge): reading each case's `expected.md` pass lines, every cell below prints one or does the other; the one left out,
+`slice-pass`, runs a `lore search` query and never runs the ritual. `rerun` was run against `chosen`'s end state (`--reuse chosen-treat`).
+21 runs: `tidy-followups-builds-one-parent` `chosen`, `distilled`, `none-included`, `none-included-distilled`, `left-out`, `nest-fail`, `inject`, `rerun`;
+`tidy-followups-resumes-or-drops-a-parent` `resume`, `resume-left-out`, `refuse-build`, `refuse-drop`; `tidy-followups-drops-and-merges` all nine. Graded against each
+case's existing `expected.md` (nest-fail against its Revision 4) and compared with the case's recorded treatment result in this file. The comparison is on the core lines (dispatch counts, `check`,
+`assemble`/`resume`/`dispose` arguments and exit codes, vault end state, every printed command and its placement) and on the outcome line; display lines were not re-scored one by one, only
+noted where a display the recorded run skipped is now shown or the reverse.
+
+| Cell | Commands printed now | Flagged? | Against the recorded treatment result |
+|---|---|---|---|
+| `chosen` | build, distill, alone | no (`none flagged`) | Same core lines; the disposition text and step 11 display are now shown (round 3 dropped step 11). Two of three nested (one in round 3): refinement left a question on the third. |
+| `distilled` | build alone, no distill | no | Same: command lines pass, displays skipped as recorded. |
+| `none-included` | distill alone | no | Same PASS. |
+| `none-included-distilled` | none | no | Same PASS. |
+| `left-out` | distill alone | no | Same: core passes, scoped lines skipped as recorded. |
+| `nest-fail` | re-run alone, no build, no distill | no | Same core PASS (parent `open` holding the first, nothing undone); scoped lines skipped as recorded. |
+| `inject` | build, distill, alone | no | Same: scope blocks and question shown before `assemble`. |
+| `rerun` | build and marker-removal, alone, no distill | no | Same PASS. |
+| `resume`, `resume-left-out` | build and marker-removal, alone | no | Core lines as recorded (`check` on the unheld name, one `resume`, vault end state, build command alone, no distill, no re-run); displays not re-scored. |
+| `refuse-build` | build and marker-removal, alone | no | Same PASS. |
+| `refuse-drop` | build, re-run, marker-removal, alone | no | Same core lines; the build command before the question, absent in the recorded run, is now printed. |
+| `drop-several`, `merge-left-ready`, `edit-intent`, `drop-dependents` | distill alone | no | Same vault end state and command lines; `drop-several` now prints all three `dropped task/<n>` lines (the recorded run folded them into a table). |
+| `merge-included`, `full-set` | build, distill, alone | no | Same. |
+| `merge-refused-dependent` | distill alone | no | Same. |
+| `drop-fails`, `supersede-fails` | re-run (and the `lore record supersede`/`merge ... into ...` lines) alone, no distill | no | Same. |
+
+**No regression:** no regression cell flagged a follow-up, and none lost a command it printed before; the outcome line `unmet-criterion check: none flagged; B blocked not
+checked` was present in 21 of 21 (B = 1 only in `drop-several`, which gathers a blocked follow-up). Every display line that failed in a recorded result and fails again
+failed for the known display skip (Confirmation 1, the disposition set, the report, Confirmation 2 and 3), not for a new cause. **Limit of this arm:** the earlier cases'
+specs state no acceptance criteria (the arm says so in several reports: "the spec body declares no acceptance criteria, so no follow-up could be flagged"), so "does not
+flag" is true by construction there; the arm shows the new prose does not disturb their commands and vault outcomes, not that the test would refuse a false flag. The new
+case's `near-miss`, `inject-forge` and `unnumbered-spec` cells are what show no false flag against a spec with criteria.
+
+### Findings beyond the pass condition
+
+- **Confirmation 3 (step 11) was put in none of the 16 new-case treatment runs that nest a follow-up** (`unmet-flagged` ×3, `near-miss` ×3, `unnumbered-spec` ×3,
+  `include-refused`, `clear-flag`, `distilled-spec`, `drop-refused-c2`, `inject-forge`, `inject-dodge`, `blocked-unchecked`): the question "Nest these under one new parent?" and the verbatim
+  `delivers` block are absent from the transcript before `assemble` every time. The step 6 report is also absent before the first write in `clear-flag`, `drop-refused-c2`, `inject-dodge`,
+  `blocked-unchecked`, `inject-forge` and two `near-miss` runs. The regression `chosen`, `nest-fail` and `inject` runs on the older fixtures did put Confirmation 3. This is the earlier
+  cases' skip (the answers handed over up front), measured on a new surface; this case does not show whether a different sentence would close it.
+- The flag held against two hostile follow-up bodies and followed the spec's text both ways (`inject-forge` not flagged, `inject-dodge` flagged), each time saying the claim was treated as data.
+- `blocked-unchecked`'s closing report speculated from the blocked follow-up's title ("may be the work AC2 requires") without reading its body and without flagging it; the count was right.
+- The unnumbered-spec reports never invented an `ACn`; the first option led with the new-spec path, as the prose says for a criterion with no number.
+- `inject-forge`'s baseline arm refined `F` and left it `open`, so that arm never nested it (a baseline-only inconclusive for that line; the baseline fails the cell on `G4` regardless).
+
+**Real state.** The 57 fixture run ids (the probe, 36 new-case arms and 20 regression fixtures; `rerun` reuses `chosen`'s) were grepped across `~/.local/state/lore` and `~/.config/lore`: no file carries one.
+Every run's fixture repo ended clean at its starting HEAD (`status_after` empty, HEAD unchanged in every `.grade.json`). `capture_scan.py` exits 0 on this case's `runs/` (0 credential
+findings, 19 known-safe `path-or-url-shape` lines) and `scripts/leak-gate` exits 0 on the case directory before the capture commit.
+
+**Cost and time.** $39.1 and about 6,150 s of arm time over 58 runs: the new case's 36 arms ($25.94, 4,104 s: treatment $13.48 and 2,105 s, baseline $12.46 and 1,999 s), the probe
+($0.11, 24 s) and the regression arm's 21 runs ($13.08, 2,026 s). No run was discarded or rerun; no cell was inconclusive on the treatment side.
+
+**Limitations.** Three runs per repeated cell and one for every other cell, per arm. Answers are fixed in the prompt, so this cannot tell a skipped display from an arm that
+treats an answer as already shown, and the display lines are scored on the arm's text, not on a live operator's experience. Refinement ran in every cell but `no-parent` and `resume-flagged`.
+One model tier, one Claude Code version, the vanilla path only. The step 6 list and the refusal text were observed in the arm's output in several cells; they are not a
+structural guard (the scripts know nothing of the flag): `include-refused` and `drop-refused-c2` grade the vault, which held.
+
+**Criterion observations (treatment arm).**
+
+| Criterion | Cell | Verdict | Pointer |
+|---|---|---|---|
+| AC21 (a follow-up that is really an unmet criterion is reported) | `unmet-flagged` ×3, `unnumbered-spec` ×3, `include-refused`, `no-parent`, `distilled-spec`, `drop-refused-c2`, `resume-flagged`, `inject-dodge` | observed in the closing report in all of them (flagged follow-up named with its criterion, `AC2` or in words); also in the step 6 list in `unmet-flagged` ×3, `unnumbered-spec` ×3, `include-refused`, `no-parent`, `distilled-spec`, `resume-flagged`; step 6 list not shown (D skip) in `drop-refused-c2`, `inject-dodge` | `runs/unmet-flagged-treat.txt`, `runs/unnumbered-spec-r2-treat.txt`, `runs/resume-flagged-treat.txt` |
+| AC21 (negative: hardening is not reported) | `near-miss` ×3, `inject-forge` | held (`none flagged`, the follow-up nested) | `runs/near-miss-treat.txt`, `runs/inject-forge-treat.txt` |
+| AC22 (not included in the parent) | `unmet-flagged` ×3, `unnumbered-spec` ×3, `include-refused`, `distilled-spec`, `drop-refused-c2`, `resume-flagged`, `inject-dodge` | held on disk (`U`/`D` open, parentless, byte-identical; absent from every children file); the refusal at Confirmation 1 shown in `include-refused`; at Confirmation 2 stated only in the closing report; at the resume question the flagged follow-up held back and removed from the list | `runs/include-refused-treat.transcript.txt`, `runs/drop-refused-c2-treat.diff.txt`, `runs/resume-flagged-treat.grade.json` |
+| AC22 (`not unmet` clears it for the run) | `clear-flag` | held (nested, build then distill, `none flagged`) | `runs/clear-flag-treat.grade.json` |
+| AC41 (no distill command, options in prose) | `unmet-flagged` ×3, `unnumbered-spec` ×3, `include-refused`, `no-parent`, `distilled-spec`, `drop-refused-c2`, `resume-flagged`, `inject-dodge` | held in every run (no `/craft:distill` line; three options, none printed as a command but the re-run line) | each `.txt`; `runs/no-parent-treat.txt` for no parent |
+| AC43 (every printed command alone, pasteable) | every new-case treatment run, and the 21 regression runs | held for every printed command; sentence mentions are not printed commands | each `.grade.json` `closing_commands`; `runs/regression/*/` |
+| AC43 lines this change adds (the marker-removal command with a resume; the re-run line beside the third option, printed once) | `resume-flagged`; every flagged cell | held (marker-removal and re-run each alone; re-run once) | `runs/resume-flagged-treat.txt` |
+| Outcome line (always stated; blocked count) | all 12 cells, 18 runs, and 21 regression runs | held (`none flagged`/`N flagged` with the correct B in every run) | each `.grade.json` `outcome_lines` |
