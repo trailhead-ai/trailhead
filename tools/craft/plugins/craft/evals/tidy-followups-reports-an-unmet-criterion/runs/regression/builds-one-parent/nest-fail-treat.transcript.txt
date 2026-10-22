@@ -191,7 +191,7 @@ Exit code 128
   }
 }
 
-fatal: unable to access '/Users/tdu... [cut 122 chars]
+fatal: unable to access '$HOME... [cut 122 chars]
 
 [sub] BASH
 cd $RUN[nest-fail-treat]/fixture/repo; find . -path ./.git -prune -o -type f -print; echo ---; cat -n src/extract.py; ls -la

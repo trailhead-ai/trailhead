@@ -206,7 +206,7 @@ total 128
 drwxr-xr-x@ 16 $USER  wheel   512 Oct 22 09:24 .
 drwxr-xr-x@ 12 $USER  wheel   384 Oct 22 09:25 ..
 -rwxr-xr-x@  1 $USER  wheel   478 Oct 22 09:24 applypatch-msg.sample
--rwxr-xr-x@  1 tduff... [cut 1784 chars]
+-rwxr-xr-x@  1 $USER... [cut 1784 chars]
 
 [sub] BASH
 cd $RUN[near-miss-treat]/fixture/repo && ls -la src; cat -n README.md; HOME=/tmp git status --short 2>/dev/null
