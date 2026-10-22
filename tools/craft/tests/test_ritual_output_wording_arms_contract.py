@@ -44,6 +44,12 @@ ARMS = {
     "fourth-slice.md",
     "proposal-baseline.md",
     "proposal-drive-baseline.md",
+    # Same composition as the two proposal baselines, with slice/SKILL.md as
+    # edited at commit 57da08ac (step 8 opens with what the operator will be
+    # able to do, how to try it, and what is left); rules.md and drive/SKILL.md
+    # are unchanged from the baselines.
+    "proposal-treated.md",
+    "proposal-drive-treated.md",
 }
 
 
