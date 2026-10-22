@@ -781,7 +781,8 @@ CAPTURE_EXPECTATIONS = {
     ],
 }
 
-# A capture whose verdict differs from its prefix's is listed here by stem, with the verdict per check.
+# A capture whose verdict differs from its prefix's is listed here by stem, with the verdict per check. A batch may
+# also list every one of its captures, equal to the default or not, as its per-capture record (the proposal batches do).
 # Each entry records the grader's verdict, under the thresholds fixed before any run, and those thresholds are the ones
 # that count; read by eye, a capture may look like `text-with-number` or a combination of forms instead.
 CAPTURE_OVERRIDES = {
