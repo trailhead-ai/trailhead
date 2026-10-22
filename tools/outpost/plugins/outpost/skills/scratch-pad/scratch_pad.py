@@ -162,6 +162,7 @@ import datetime
 import fcntl
 import hashlib
 import json
+import math
 import os
 import re
 import secrets
@@ -1088,6 +1089,20 @@ def _credential_problems(site: str, title: str, drawings: Sequence[ChosenDrawing
     return problems
 
 
+def _non_finite(value: object) -> str | None:
+    """The first NaN, Infinity or -Infinity held anywhere in decoded JSON *value*, as JSON writes it; else ``None``."""
+    stack = [value]
+    while stack:
+        item = stack.pop()
+        if isinstance(item, float) and not math.isfinite(item):
+            return "NaN" if math.isnan(item) else ("Infinity" if item > 0 else "-Infinity")
+        if isinstance(item, dict):
+            stack.extend(item.values())
+        elif isinstance(item, list):
+            stack.extend(item)
+    return None
+
+
 def _resolve_drawings(drawings: Sequence[dict], titles: Sequence[str], rounds: Mapping[int, object]) -> tuple:
     """Match each named drawing to the pad: ``(chosen, problems)``; every problem is named."""
     chosen: list[ChosenDrawing] = []
@@ -1131,7 +1146,12 @@ def _resolve_drawings(drawings: Sequence[dict], titles: Sequence[str], rounds: M
             continue
         seen[key] = i
         option_problems: list[str] = []
-        _check_option(options[index], f"{where} (round {number}, question {qn}, option {letter})", option_problems)
+        option_where = f"{where} (round {number}, question {qn}, option {letter})"
+        _check_option(options[index], option_where, option_problems)
+        constant = _non_finite(options[index])
+        if constant is not None:
+            message = f"holds {constant}, which is not valid JSON — a number must be finite"
+            option_problems.append(_line(option_where, message))
         if option_problems:
             problems.extend(option_problems)
             continue

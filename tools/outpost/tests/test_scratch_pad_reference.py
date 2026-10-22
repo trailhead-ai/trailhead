@@ -755,3 +755,98 @@ def test_a_malformed_chosen_drawing_is_refused_for_its_shape_before_its_text_is_
     lines = _refusal(mod, rig, tmp_path, _ref([_d(1, 1, "A")]))
 
     assert lines == [f"{WHERE}: {NO_SHAPE}"]
+
+
+# --- a chosen drawing holding a number JSON has no way to write -------------------------------------------
+
+NON_FINITE = {"NaN": float("nan"), "Infinity": float("inf"), "-Infinity": float("-inf")}
+
+
+def _non_finite_line(constant: str, where: str = WHERE, path: str = "") -> str:
+    return f"{where}{path}: holds {constant}, which is not valid JSON — a number must be finite"
+
+
+@pytest.mark.parametrize("constant", NON_FINITE)
+def test_a_chosen_layout_holding_a_non_finite_number_is_refused_naming_the_drawing(mod, rig, tmp_path, constant):
+    pad_dir = _build(mod, rig, tmp_path)
+    option = {"name": "n", "cost": "c", "layout": {"rule": True, "w": NON_FINITE[constant]}}
+    _hand_edit_option(pad_dir, 1, 1, "A", option)
+    assert constant in (pad_dir / "round-1" / "round.js").read_text(encoding="utf-8")
+
+    lines = _untouched(rig, tmp_path, lambda: _refusal(mod, rig, tmp_path, _ref([_d(1, 1, "A")])))
+
+    assert lines == [_non_finite_line(constant)]
+
+
+@pytest.mark.parametrize("constant", NON_FINITE)
+def test_a_non_finite_number_deep_in_a_chosen_layout_is_refused(mod, rig, tmp_path, constant):
+    pad_dir = _build(mod, rig, tmp_path)
+    deep = {"a": [{"b": [1, {"c": [NON_FINITE[constant]]}]}]}
+    _hand_edit_option(pad_dir, 1, 1, "A", {"name": "n", "cost": "c", "layout": deep})
+
+    lines = _refusal(mod, rig, tmp_path, _ref([_d(1, 1, "A")]))
+
+    assert lines == [_non_finite_line(constant)]
+
+
+def test_a_non_finite_number_in_an_option_the_reference_does_not_name_does_not_refuse_it(mod, rig, tmp_path):
+    pad_dir = _build(mod, rig, tmp_path)
+    for letter, constant in (("B", "NaN"), ("A", "Infinity")):
+        _hand_edit_option(
+            pad_dir, 2 if letter == "A" else 1, 1, letter,
+            {"name": "n", "cost": "c", "layout": {"w": NON_FINITE[constant]}},
+        )
+
+    got = _read(mod, rig, tmp_path, _ref([_d(1, 1, "A"), _d(1, 2, "A")]))
+
+    assert [d.option["name"] for d in got.drawings] == ["Logo left", "Controls inline"]
+
+
+def test_two_chosen_drawings_with_non_finite_numbers_are_both_reported_in_one_pass(mod, rig, tmp_path):
+    pad_dir = _build(mod, rig, tmp_path)
+    _hand_edit_option(pad_dir, 1, 1, "A", {"name": "n", "cost": "c", "layout": {"w": NON_FINITE["NaN"]}})
+    _hand_edit_option(pad_dir, 2, 1, "A", {"name": "n", "cost": "c", "layout": [NON_FINITE["-Infinity"]]})
+
+    lines = _refusal(mod, rig, tmp_path, _ref([_d(1, 1, "A"), _d(2, 1, "A")]))
+
+    assert lines == [
+        _non_finite_line("NaN"),
+        _non_finite_line("-Infinity", "scratch-pad: drawings[1] (round 2, question 1, option A)"),
+    ]
+
+
+def test_a_chosen_drawing_with_a_non_finite_number_is_refused_before_its_text_is_checked_for_credentials(
+    mod, rig, tmp_path
+):
+    pad_dir = _build(mod, rig, tmp_path)
+    _hand_edit_option(
+        pad_dir, 1, 1, "A", {"name": KEYLIKE, "cost": "c", "layout": {"w": NON_FINITE["NaN"]}}
+    )
+
+    lines = _refusal(mod, rig, tmp_path, _ref([_d(1, 1, "A")]))
+
+    assert lines == [_non_finite_line("NaN")]
+
+
+def test_an_add_to_a_pad_holding_a_non_finite_option_still_builds_and_the_fixed_pad_builds_the_page(
+    mod, rig, tmp_path
+):
+    env, work, _state, kit = rig
+    pad_dir = _build(mod, rig, tmp_path)
+    _hand_edit_option(pad_dir, 1, 1, "A", {"name": "n", "cost": "c", "layout": {"w": NON_FINITE["NaN"]}})
+
+    third = _write_json(tmp_path / "r3.json", {"title": "Third", "questions": ROUND_ONE["questions"]})
+    mod.build_pad(third, "p", kit_dir=kit, env=env, cwd=work, add=True)
+    assert (pad_dir / "round-3" / "round.js").is_file()
+    assert mod._round_title(pad_dir / "round-1" / "round.js") == "Header round"
+    assert _refusal(mod, rig, tmp_path, _ref([_d(1, 1, "A")])) == [_non_finite_line("NaN")]
+
+    _hand_edit_option(pad_dir, 1, 1, "A", {"name": "n", "cost": "c", "layout": {"w": 1.5}})
+    got = _read(mod, rig, tmp_path, _ref([_d(1, 1, "A"), _d(3, 1, "B")]))
+    out = tmp_path / "page"
+    mod.build_reference_page(out, got)
+
+    literal = (out / "reference-data.js").read_text(encoding="utf-8").split("JSON.parse(", 1)[1].rsplit(");", 1)[0]
+    drawings = json.loads(json.loads(literal))["drawings"]
+    assert drawings[0]["layout"] == {"w": 1.5}
+    assert drawings[1]["name"] == "Logo centre"
