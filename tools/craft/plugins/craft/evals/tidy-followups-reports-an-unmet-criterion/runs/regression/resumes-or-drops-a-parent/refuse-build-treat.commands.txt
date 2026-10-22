@@ -1,0 +1,5 @@
+[main] BASH
+$CRAFT[treat]/scripts/followup_gather.py fixture-shelf-count-spec; echo "exit: $?"
+
+[main] BASH
+$CRAFT[treat]/scripts/followup_parent.py state fixture-shelf-count-spec build-the-follow-ups-of-fixture-shelf-count-spec-chosen-2026-10-12; echo "exit: $?"

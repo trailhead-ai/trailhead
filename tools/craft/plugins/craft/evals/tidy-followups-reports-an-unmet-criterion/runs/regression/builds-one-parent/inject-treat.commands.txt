@@ -1,0 +1,148 @@
+[main] BASH
+$CRAFT[treat]/scripts/followup_gather.py fixture-inject-spec; echo "exit: $?"
+
+[main] BASH
+lore record show --json --vault default task/inject-escape-the-search-term-in-the-report-query; echo "exit: $?"; lore record show --json --vault default task/inject-validate-the-redirect-target-after-login; echo "exit: $?"; lore record show --json --vault default spec/fixture-inject-spec; echo "exit: $?"
+
+[main] AGENT
+Refine one task record: `task/inject-escape-the-search-term-in-the-report-query` in lore vault `default`.
+
+- Read $CRAFT[treat]/skills/_shared/refine.md yourself and follow it in full, in its unattended mode, against that one task only. `${CLAUDE_PLUGIN_ROOT}` is $CRAFT[treat]. The `lore` command on PATH reads the vault.
+- The code the task's claims point at is the git repository at $RUN[inject-treat]/fixture/repo. Read it to ground the refinemen... [cut 494 chars]
+
+[sub] BASH
+cd $RUN[inject-treat]; lore record show task/inject-escape-the-search-term-in-the-report-query; echo ---; lore task graph inject-escape-the-search-term-in-the-report-query; echo; lore --help 2>&1 | head -40
+
+[sub] BASH
+cd $RUN[inject-treat]; lore record show --help; lore record update --help; lore vault ls
+
+[sub] BASH
+cd $RUN[inject-treat]; lore record show --vault default --json task/inject-escape-the-search-term-in-the-report-query; echo; cd fixture/repo && git status --short && git log --oneline | head; find . -path ./.git -prune -o -type f -print | xargs wc -l
+
+[sub] BASH
+cd $RUN[inject-treat]/fixture/repo; for f in README.md src/*.py; do echo "== $f"; cat -n "$f"; done; ls -la; ls tests 2>&1
+
+[sub] BASH
+cd $RUN[inject-treat]; grep -rn "report_query\|sqlite\|pytest" fixture/repo --exclude-dir=.git; lore record show task/fixture-inject-spec-the-slice; echo ---; lore search "report"; lore search "sql"; lore search "kind:area report"; lore search "parameterized"; lore search "test"; lore areas; P=$CRAFT[treat]; sed -n '1,200p' $P/templates/task.md; grep -n -A6 "Flow-out" $P/templates/plan.md
+
+[sub] BASH
+P=$CRAFT[treat]; sed -n 24,45p $P/templates/plan.md; grep -rln "credential-pattern scrub" $P | head
+
+[sub] BASH
+cd $RUN[inject-treat]; lore record show task/left-out-pin-the-tls-minimum-version-in-the-client
+
+[sub] BASH
+cd $RUN[inject-treat]; T=$(mktemp); lore record show --vault default --json task/inject-escape-the-search-term-in-the-report-query | python3 -I -c 'import json,sys; sys.stdout.write(json.load(sys.stdin)["body"])' > "$T"; cat >> "$T" <<'EOF'
+
+**Delivers:** `report_query(term)` in `src/report.py` stops concatenating the search term into the SQL (src/report.py:2) and instead returns a pair: the same query (`SELECT * FROM events WHERE name = ?`) with a `?` placeholder in place of the quoted term, and a one-element parameter tuple `(term,)`. No other caller exists in the repo (`report_query` is defined at src/report.py:1 and referenced nowhere else), so the return-shape change needs no caller updates.
+
+**Test contract:** New `tests/test_report.py` (the repo has no tests yet), written failing first:
+- `report_query("x")` returns a 2-tuple whose first element contains a `?` placeholder and whose second element is `("x",)`.
+- A crafted term containing a single quote and SQL (e.g. `"x' OR '1'='1"`) does not appear anywhere in the returned SQL string; it appears only, unchanged, as the sole element of the parameter tuple.
+- The returned SQL is identical regardless of the term passed (term never influences the query text).
+- Run: `python -m pytest tests/test_report.py` (or `python -m unittest` discovery) passes.
+
+**Files:** `src/report.py`, `tests/test_report.py` (new)
+
+## Flow-out
+
+- [ ] Touched area/subsystem profiles updated with what changed
+- [ ] Prover-validated assumptions captured as session candidates (durable at flush)
+- [ ] New decisions / lessons / follow-ups surfaced during the build recorded
+EOF
+cat "$T"; echo ====; test -f fixture/repo/src/report.py && wc -l fixture/repo/src/report.py
+lore record update --vault default task/inject-escape-the-search-term-in-the-report-query --status ready < "$T"; rc=$?; rm -f "$T"; echo rc=$rc; lore record show task/inject-escape-the-search-term-in-the-report-query; lore record show --json task/inject-escape-the-search-term-in-the-report-query | grep '"status"'
+
+[sub] BASH
+cd $RUN[inject-treat]; lore record show --json task/inject-escape-the-search-term-in-the-report-query | grep -E '"status"|Delivers' | head; ls -t ${TMPDIR:-/tmp} | head -3
+
+[sub] BASH
+cd $RUN[inject-treat]; T="${TMPDIR:-/tmp}/tmp.rwVN8lNQTp"; T="${T//\/\//\/}"; grep -c "Delivers" "$T" && head -c 80 "$T"; echo; lore record update --vault default task/inject-escape-the-search-term-in-the-report-query --status ready < "$T"; echo rc=$?; rm -f "$T"; ls "$T" 2>&1
+
+[sub] BASH
+cd $RUN[inject-treat]; lore record show --json task/inject-escape-the-search-term-in-the-report-query | grep '"status"'; lore record show task/inject-escape-the-search-term-in-the-report-query
+
+[main] AGENT
+Refine one task record: `task/inject-validate-the-redirect-target-after-login` in lore vault `default`.
+
+- Read $CRAFT[treat]/skills/_shared/refine.md yourself and follow it in full, in its unattended mode, against that one task only. `${CLAUDE_PLUGIN_ROOT}` is $CRAFT[treat]. The `lore` command on PATH reads the vault.
+- The code the task's claims point at is the git repository at $RUN[inject-treat]/fixture/repo. Read it to ground the refinement.... [cut 492 chars]
+
+[sub] BASH
+lore record show task/inject-validate-the-redirect-target-after-login --vault default 2>&1 || lore record show task/inject-validate-the-redirect-target-after-login 2>&1; echo ---; lore task graph inject-validate-the-redirect-target-after-login 2>&1
+
+[sub] BASH
+lore record show --help 2>&1 | head -30; lore record update --help 2>&1 | head -40; cd $RUN[inject-treat]/fixture/repo && git status --short && git ls-files && cat -n src/login.py
+
+[sub] BASH
+lore record show --json --vault default task/inject-validate-the-redirect-target-after-login 2>&1 | python3 -I -c 'import json,sys; d=json.load(sys.stdin); print(d["sidecar"])'; ls -laR $RUN[inject-treat]/fixture/repo | grep -v '\.git' | head -40
+
+[sub] BASH
+cd $RUN[inject-treat]/fixture/repo; ls -la src; for f in README.md src/*; do echo "=== $f"; cat -n "$f"; done
+
+[sub] BASH
+for q in "redirect" "login" "open redirect" "next parameter" "kind:area login" "tests" "pytest"; do echo "### $q"; lore search "$q" 2>&1 | head -15; done; echo; lore record show task/fixture-inject-spec-the-slice 2>&1 | head -30; which pytest python3; python3 -c 'import pytest' 2>&1
+
+[sub] BASH
+lore record show --vault default task/inject-escape-the-search-term-in-the-report-query 2>&1; lore record show --vault default task/left-out-pin-the-tls-minimum-version-in-the-client 2>&1; cat $CRAFT[treat]/templates/plan.md | grep -n -A6 'Flow-out'
+
+[sub] BASH
+T=$(mktemp -d); cp -R $RUN[inject-treat]/fixture/repo/src "$T/"; mkdir "$T/tests"; printf 'import unittest\nfrom src.login import after_login_target\nclass R:\n    def __init__(s,a): s.args=a\nclass T(unittest.TestCase):\n    def test_x(self): self.assertEqual(after_login_target(R({})), "/")\n' > "$T/tests/test_login.py"; (cd "$T" && python3 -I -m unittest tests.test_login 2>&1 | tail -3); rm -rf "$T"; grep -rln -i 'credential-pattern' $CRAFT[treat] | head
+
+[sub] BASH
+T=$(mktemp -d); cp -R $RUN[inject-treat]/fixture/repo/src "$T/"; mkdir "$T/tests"; printf 'import unittest\nfrom src.login import after_login_target\nclass R:\n    def __init__(s,a): s.args=a\nclass T(unittest.TestCase):\n    def test_x(self): self.assertEqual(after_login_target(R({})), "/")\n' > "$T/tests/test_login.py"; (cd "$T" && python3 -m unittest tests.test_login 2>&1 | tail -3); rm -rf "$T"; grep -n -i -A25 'credential-pattern' $CRAFT[treat]/skills/_shared/security.md | head -50
+
+[sub] BASH
+set -e
+F=$(mktemp -t refine-inject-redirect.XXXXXX)
+lore record show --json --vault default task/inject-validate-the-redirect-target-after-login | python3 -I -c 'import json,sys; sys.stdout.write(json.load(sys.stdin)["body"].rstrip("\n")+"\n")' > "$F"
+cat >> "$F" <<'EOF'
+
+**Delivers:** `after_login_target(request)` in `src/login.py` stops returning the `next` argument unchecked (src/login.py:2). It returns the `next` value only when it is a relative path whose first character is `/` and whose second character is not `/`. Any other value, including an absolute URL (`https://evil.example`), a scheme-relative URL (`//evil.example`), a bare host or path with no leading `/` (`evil.example`), or an empty string, falls back to `/`. A missing `next` keeps today's default of `/` (src/login.py:2). The function signature and its `request.args.get` access pattern (src/login.py:1-2) stay unchanged. No other caller exists in the repo (`after_login_target` is defined at src/login.py:1 and referenced nowhere else).
+
+**Test contract:** New `tests/test_login.py` (the repo has no tests yet), written to fail first. It uses a minimal stand-in request object exposing an `args` dict.
+- No `next` returns `/`.
+- `next="/dashboard"` and `next="/a/b?x=1"` are returned unchanged.
+- `next="//evil.example"` returns `/`.
+- `next="https://evil.example/"` and `next="http://evil.example"` return `/`.
+- `next="evil.example"` (no leading slash) returns `/`.
+- `next=""` returns `/`.
+- Run from the repo root: `python3 -m unittest tests.test_login` should report every test OK. pytest is not installed in this environment, so the test uses stdlib `unittest`.
+
+**Files:** `src/login.py`, `tests/test_login.py` (new)
+
+## Flow-out
+
+- [ ] Touched area/subsystem profiles updated with what changed
+- [ ] Prover-validated assumptions captured as session candidates (durable at flush)
+- [ ] New decisions / lessons / follow-ups surfaced during the build recorded
+EOF
+python3 -I - "$F" <<'PY'
+import re,sys
+t=open(sys.argv[1]).read()
+pats=[r'(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s*[=:]\s*\S+',
+r'(?i)\b(AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|gho_[A-Za-z0-9]{36}|glpat-[A-Za-z0-9_-]{20}|xox[baprs]-[A-Za-z0-9-]+|sk_live_[A-Za-z0-9]+|AIza[0-9A-Za-z_-]{35})\b',
+r'(?i)bearer\s+[A-Za-z0-9._\-]+',r'(?i)api[_-]?key[\'"]?\s*[:=]\s*[\'"]?[A-Za-z0-9._\-]{16,}',
+r'\b[A-Za-z0-9+/]{32,}={0,2}\b',r'\b[A-Fa-f0-9]{40,}\b',r'-----BEGIN [A-Z ]*PRIVATE KEY-----']
+hits=[m.group(0) for p in pats for m in re.finditer(p,t)]
+print("scrub hits:",hits)
+PY
+# citation gate
+wc -l $RUN[inject-treat]/fixture/repo/src/login.py
+grep -rn after_login_target $RUN[inject-treat]/fixture/repo --exclude-dir=.git
+lore record update --vault default task/inject-validate-the-redirect-target-after-login --status ready < "$F"
+rm -f "$F"; echo removed $F
+lore record show --vault default task/inject-validate-the-redirect-target-after-login
+
+[main] BASH
+$CRAFT[treat]/scripts/followup_parent.py check fixture-inject-spec inject-escape-the-search-term-in-the-report-query inject-validate-the-redirect-target-after-login; echo "exit: $?"
+
+[main] BASH
+children=$(mktemp)
+cat > "$children" <<'CHILDREN_JSON'
+[{"name": "inject-escape-the-search-term-in-the-report-query", "reason": "Open security exposure: any caller of the report query can inject SQL right now, so the system stays exposed until this is fixed.", "revision": "[sha:cdc167d2]"}, {"name": "inject-validate-the-redirect-target-after-login", "reason": "Open security exposure: an attacker can use a crafted login link to send signed-in users to their site, so every day this waits leaves that open.", "revision": "[sha:19e2a94d]"}]
+CHILDREN_JSON
+$CRAFT[treat]/scripts/followup_parent.py assemble fixture-inject-spec --children "$children"
+rc=$?
+rm -f "$children"
+echo "exit: $rc"

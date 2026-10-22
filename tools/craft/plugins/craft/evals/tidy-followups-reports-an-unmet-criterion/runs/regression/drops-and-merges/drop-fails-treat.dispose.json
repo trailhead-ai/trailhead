@@ -1,0 +1,144 @@
+{
+ "dispose_runs": [
+  {
+   "at": 4,
+   "preview": true,
+   "file": {
+    "reason": "the rack was scrapped with the old stockroom",
+    "drops": [
+     {
+      "role": "F1",
+      "revision": true
+     },
+     {
+      "role": "F2",
+      "revision": true
+     }
+    ],
+    "merges": []
+   },
+   "exit": 0,
+   "stderr_lines": [],
+   "result": {
+    "drops": [
+     {
+      "name": "F1",
+      "status": "open"
+     },
+     {
+      "name": "F2",
+      "status": "open"
+     }
+    ],
+    "merges": [],
+    "dependents": {
+     "F1": [],
+     "F2": []
+    }
+   }
+  },
+  {
+   "at": 5,
+   "preview": false,
+   "file": {
+    "reason": "the rack was scrapped with the old stockroom",
+    "drops": [
+     {
+      "role": "F1",
+      "revision": true
+     },
+     {
+      "role": "F2",
+      "revision": true
+     }
+    ],
+    "merges": []
+   },
+   "exit": 2,
+   "stderr_lines": [
+    "reason-code: dispose-incomplete",
+    "subject: F2"
+   ],
+   "result": {
+    "dropped": [
+     {
+      "name": "F1",
+      "prior-status": "open"
+     }
+    ],
+    "merged": [],
+    "reset-to-open": [],
+    "failed": [
+     {
+      "name": "F2",
+      "write": "drop",
+      "command": null
+     }
+    ],
+    "incomplete-merges": []
+   }
+  }
+ ],
+ "order": {
+  "write_dispose": [
+   5
+  ]
+ },
+ "children_files": [],
+ "fetched_by_main": [
+  "F1",
+  "F2"
+ ],
+ "progress": {
+  "assistant_text": [
+   {
+    "at": 6,
+    "line": "dropped task/F1"
+   },
+   {
+    "at": 6,
+    "line": "failed drop: task/F2"
+   }
+  ],
+  "final_report": [
+   "dropped task/F1",
+   "failed drop: task/F2"
+  ]
+ },
+ "closing_commands": [
+  {
+   "line": "/craft:tidy-followups spec/fixture-mug-rack-spec",
+   "standalone": true
+  }
+ ],
+ "records": {
+  "F1": {
+   "status": "dropped",
+   "parent": null,
+   "supersedes": [],
+   "depends-on": [],
+   "dropped_note": "Reason: the rack was scrapped with the old stockroom",
+   "merged_sections": [],
+   "body_changed": true,
+   "new": false,
+   "body_has_5000": false
+  },
+  "F2": {
+   "status": "open",
+   "parent": null,
+   "supersedes": [],
+   "depends-on": [],
+   "dropped_note": null,
+   "merged_sections": [],
+   "body_changed": false,
+   "new": false,
+   "body_has_5000": false
+  }
+ },
+ "repo": {
+  "head_before": "[sha:c80558df]",
+  "head_after": "[sha:c80558df]",
+  "status_after": ""
+ },
+ "real_vault_hits": ""
+}

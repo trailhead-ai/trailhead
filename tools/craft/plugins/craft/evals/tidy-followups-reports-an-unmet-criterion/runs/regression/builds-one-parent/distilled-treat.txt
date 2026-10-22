@@ -1,0 +1,17 @@
+### Step 13 — closing report
+
+- **Included:** Distilled: reject path traversal in the upload endpoint — `distilled-reject-path-traversal-in-the-upload-endpoint`. It was refined (`open` to `ready`) and nested.
+- **Left:** none
+- **Left out:** none
+- **Refined but not nested:** none
+- **Failed writes:** none
+- **Dropped or merged:** none; step 8a did not run.
+- **Parent created:** `build-the-follow-ups-of-fixture-distilled-spec-chosen-2026-10-22`. It is now `ready` and buildable, holding the one nested child.
+
+unmet-criterion check: none flagged; 0 blocked not checked
+
+The spec is already distilled, so no distill command is printed. To build the parent:
+
+```
+/craft:execute task/build-the-follow-ups-of-fixture-distilled-spec-chosen-2026-10-22
+```

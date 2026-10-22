@@ -1,0 +1,84 @@
+[main] BASH
+$CRAFT[base]/scripts/followup_gather.py fixture-pennant-spec; echo "exit: $?"
+
+[main] BASH
+for n in pennants-accept-a-lower-case-letter pennants-sort-the-table-by-letter signal-lamp-report-a-low-battery-under-twenty-percent; do echo "=== $n"; lore record show --json --vault default task/$n; echo "exit: $?"; done
+
+[main] AGENT
+Refine the vault task `task/pennants-accept-a-lower-case-letter` in the lore vault `default`.
+
+- Read $CRAFT[base]/skills/_shared/refine.md yourself and follow it in full, in its unattended mode, against that one task only. (`${CLAUDE_PLUGIN_ROOT}` is $CRAFT[base].)
+- The code the task's claims point at is the git repository at $RUN[include-refused-base]/fixture/repo. Work against it read-only for verification; do not modify the repository.
+- Stage any body you write through you... [cut 296 chars]
+
+[sub] BASH
+cd $RUN[include-refused-base]; which lore; lore --help 2>&1 | head -40; lore record show task/pennants-accept-a-lower-case-letter 2>&1
+
+[sub] BASH
+cd $RUN[include-refused-base]; lore record show --help 2>&1 | head -30; lore task graph pennants-accept-a-lower-case-letter 2>&1; lore record show task/pennants-accept-a-lower-case-letter --json 2>&1 | head -40; lore vault ls 2>&1
+
+[sub] BASH
+cd $RUN[include-refused-base]/fixture/repo; git status --short; git log --oneline | head; git ls-files; echo ---; cat -n src/pennants.py; echo ---; lore record show task/fixture-pennant-spec-the-slice 2>&1; lore task graph fixture-pennant-spec-the-slice 2>&1
+
+[sub] BASH
+cd $RUN[include-refused-base]/fixture/repo; HOME=/tmp GIT_CONFIG_NOSYSTEM=1 git -c safe.directory='*' ls-files; HOME=/tmp git -c safe.directory='*' log --oneline|head; ls -la . src; cd ..; lore search "pennant" 2>&1 | head -30; lore search "kind:area pennants" 2>&1|head; lore areas 2>&1 | head; lore search "test convention pytest" 2>&1 | head; lore search "upper-case case-insensitive" 2>&1|head
+
+[sub] BASH
+cd $RUN[include-refused-base]/fixture; lore record show spec/fixture-pennant-spec; cat repo/README.md; lore search "tests" | head -20; lore search "kind:adr" | head; lore search "kind:lesson" | head; cat $CRAFT[base]/templates/plan.md | grep -n -A6 "Flow-out"
+
+[sub] BASH
+sed -n 24,45p $CRAFT[base]/templates/plan.md; grep -n -B2 -A12 "Delivers" $CRAFT[base]/templates/task.md; grep -rln "credential-pattern scrub\|credential pattern" $CRAFT[base] | head
+
+[sub] BASH
+cd $RUN[include-refused-base]/fixture; lore search "pytest" | head; lore search "unittest" | head; grep -rl "Test contract" vault | head; ls vault; ls repo/.git >/dev/null; find repo -name "*.toml" -o -name "*.cfg" -o -name "*.ini" | grep -v .git
+
+[sub] BASH
+cd $RUN[include-refused-base]/fixture; lore record show task/lens-house-reject-negative-hours; lore record show task/lens-oil-round-the-litres-to-one-decimal
+
+[sub] BASH
+cd $RUN[include-refused-base]/fixture; lore record update --help 2>&1 | head -40
+
+[sub] BASH
+set -e; T=$(mktemp); trap 'rm -f "$T"' EXIT
+cat > "$T" <<'EOF'
+`pennant_for` in `src/pennants.py` looks the code up as given, so `pennant_for('a')` fails with `KeyError`. Agreed behaviour: upper-case the code before the lookup, so `pennant_for('a')` returns `alpha`; a capital behaves as before. The repository has no tests yet; add `tests/test_pennants.py`.
+
+**Delivers:** `pennant_for` in `src/pennants.py` upper-cases the code before looking it up in `PENNANTS`, so a lower-case letter returns the same pennant as its capital and a capital behaves as before. The map is keyed by capitals only (src/pennants.py:1) and the lookup uses the code as given (src/pennants.py:5); the required behaviour is AC2 of [[spec/fixture-pennant-spec]], with AC1 (capitals A to F) unchanged.
+
+**Test contract:** A test asserts `pennant_for('a')` is `alpha` and `pennant_for('f')` is `foxtrot` (fails today with `KeyError`), and that `pennant_for('A')` is still `alpha` (AC1 regression guard).
+
+**Files:** `src/pennants.py`, `tests/test_pennants.py` (new)
+
+## Flow-out
+
+- [ ] Touched area/subsystem profiles updated with what changed
+- [ ] Prover-validated assumptions captured as session candidates (durable at flush)
+- [ ] New decisions / lessons / follow-ups surfaced during the build recorded
+EOF
+python3 -I - "$T" <<'PY'
+import re,sys
+t=open(sys.argv[1]).read()
+pats=[r'(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s*[=:]\s*\S+',r'(?i)\b(AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|gho_[A-Za-z0-9]{36}|glpat-[A-Za-z0-9_-]{20}|xox[baprs]-[A-Za-z0-9-]+|sk_live_[A-Za-z0-9]+|AIza[0-9A-Za-z_-]{35})\b',r'(?i)bearer\s+[A-Za-z0-9._\-]+',r'(?i)api[_-]?key[\'"]?\s*[:=]\s*[\'"]?[A-Za-z0-9._\-]{16,}',r'\b[A-Za-z0-9+/]{32,}={0,2}\b',r'\b[A-Fa-f0-9]{40,}\b',r'-----BEGIN [A-Z ]*PRIVATE KEY-----']
+print("scrub hits:",[p for p in pats if re.search(p,t)])
+PY
+cd $RUN[include-refused-base]/fixture
+test $(wc -l < repo/src/pennants.py) -ge 5 && echo "pennants.py lines ok: $(wc -l < repo/src/pennants.py)"
+lore record show spec/fixture-pennant-spec >/dev/null && echo spec resolves
+lore record update task/pennants-accept-a-lower-case-letter --vault default --status ready < "$T"
+echo "tmp: $T"
+
+[sub] BASH
+cd $RUN[include-refused-base]/fixture; ls $RUN[include-refused-base]/tmp/tmp.7WZcLs5K3D 2>&1; lore record show task/pennants-accept-a-lower-case-letter --json | python3 -I -c 'import json,sys;d=json.load(sys.stdin);print(d["sidecar"]["status"])'; lore record show task/pennants-accept-a-lower-case-letter
+
+[main] BASH
+$CRAFT[base]/scripts/followup_parent.py check fixture-pennant-spec pennants-accept-a-lower-case-letter; echo "exit: $?"
+
+[main] BASH
+children=$(mktemp)
+cat > "$children" <<'CHILDREN_JSON'
+[{"name": "pennants-accept-a-lower-case-letter", "reason": "Right now a lower-case code raises an error instead of returning a pennant. Every caller written before the fix has to upper-case the code itself or work around the error, so the fix gets more expensive the longer it waits.", "revision": "[sha:3a9df150]"}]
+CHILDREN_JSON
+$CRAFT[base]/scripts/followup_parent.py assemble fixture-pennant-spec --children "$children"
+rc=$?
+rm -f "$children"
+echo "exit: $rc"

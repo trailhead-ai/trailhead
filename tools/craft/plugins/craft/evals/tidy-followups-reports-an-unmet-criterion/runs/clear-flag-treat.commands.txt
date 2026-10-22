@@ -1,0 +1,71 @@
+[main] BASH
+$CRAFT[treat]/scripts/followup_gather.py fixture-buoy-chain-spec; echo "exit: $?"
+
+[main] BASH
+lore record show --json --vault default task/buoy-chain-name-the-unit-in-the-module; echo "exit: $?"; lore record show --json --vault default task/buoy-chain-reject-a-depth-of-zero-or-less; echo "exit: $?"; lore record show --json --vault default spec/fixture-buoy-chain-spec; echo "exit: $?"
+
+[main] BASH
+cd $RUN[clear-flag-treat]/fixture/repo && git status --short && ls -R . | grep -v '^\./\.git' | head -30 && cat src/buoy.py
+
+[main] AGENT
+You are refining exactly one task record: `task/buoy-chain-reject-a-depth-of-zero-or-less` in the lore vault `default` (the `lore` command on your PATH reads this vault).
+
+Instructions:
+- Read $CRAFT[treat]/skills/_shared/refine.md yourself and follow it in full, in its **unattended** mode, against this one task only. `${CLAUDE_PLUGIN_ROOT}` is $CRAFT[treat].
+- The code the task's claims point at is the git repository at $RUN[clear-flag-treat]/fixture/repo. Read it to ground the... [cut 695 chars]
+
+[sub] BASH
+lore record show task/buoy-chain-reject-a-depth-of-zero-or-less; echo ---; lore task graph buoy-chain-reject-a-depth-of-zero-or-less
+
+[sub] BASH
+lore --help 2>&1 | head -40; lore record show --help 2>&1 | head -30
+
+[sub] BASH
+cd $RUN[clear-flag-treat]/fixture/repo && find . -path ./.git -prune -o -type f -print; echo ---; cat -n src/buoy.py
+
+[sub] BASH
+lore record show --json task/buoy-chain-reject-a-depth-of-zero-or-less | python3 -I -c "import json,sys;print(json.load(sys.stdin)['sidecar'])"; cd $RUN[clear-flag-treat]/fixture/repo && cat README.md; grep -rn "ValueError\|raise" src | head; ls -a
+
+[sub] BASH
+lore record show task/fixture-buoy-chain-spec-the-slice; echo ---; lore search buoy; echo ---; lore search "chain_length"; echo ---; lore search pytest; echo ---; lore search "kind:area"; lore areas
+
+[sub] BASH
+lore record show spec/fixture-buoy-chain-spec; echo ---; lore record show task/buoy-chain-name-the-unit-in-the-module; lore search "test"; lore search "kind:decision"; lore search "kind:adr"; lore search "kind:lesson"
+
+[sub] BASH
+lore record show task/lens-house-reject-negative-hours; cat -n $RUN[clear-flag-treat]/fixture/repo/src/lens.py; cat $CRAFT[treat]/templates/plan.md | grep -n -A6 "Flow-out"
+
+[sub] BASH
+sed -n 24,45p $CRAFT[treat]/templates/plan.md; grep -rn -i "credential-pattern\|credential pattern" $CRAFT[treat] --include=*.md -l | head
+
+[sub] BASH
+T=$(mktemp) && cat > "$T" <<'EOF'
+`chain_length` in `src/buoy.py` returns 0 for a depth of 0 and a negative length for a negative depth. Agreed behaviour: raise `ValueError` for a depth of zero or less; any other depth behaves as before. The repository has no tests yet; add `tests/test_buoy.py`.
+
+**Delivers:** `chain_length` in `src/buoy.py` (src/buoy.py:4-5) raises `ValueError` when `depth_m` is zero or less, and for any positive depth still returns three times the depth rounded up to a whole metre, unchanged from today (src/buoy.py:5). Matches AC1 and AC2 of [[spec/fixture-buoy-chain-spec]].
+
+**Test contract:** New tests in `tests/test_buoy.py`: `chain_length(0)` raises `ValueError`; `chain_length(-1)` raises `ValueError`; `chain_length(2)` is 6; `chain_length(0.5)` is 2 (rounds up, unchanged behaviour). The zero and negative cases fail against the current code.
+
+**Files:** `src/buoy.py`, `tests/test_buoy.py` (new)
+
+## Flow-out
+
+- [ ] Touched area/subsystem profiles updated with what changed
+- [ ] Prover-validated assumptions captured as session candidates (durable at flush)
+- [ ] New decisions / lessons / follow-ups surfaced during the build recorded
+EOF
+lore record show spec/fixture-buoy-chain-spec >/dev/null && echo spec-ok; wc -l < $RUN[clear-flag-treat]/fixture/repo/src/buoy.py
+lore record update task/buoy-chain-reject-a-depth-of-zero-or-less --status ready < "$T"; rc=$?; rm -f "$T"; echo rc=$rc; lore record show task/buoy-chain-reject-a-depth-of-zero-or-less; lore record show --json task/buoy-chain-reject-a-depth-of-zero-or-less | python3 -I -c "import json,sys;print(json.load(sys.stdin)['sidecar']['status'])"
+
+[main] BASH
+$CRAFT[treat]/scripts/followup_parent.py check fixture-buoy-chain-spec buoy-chain-reject-a-depth-of-zero-or-less; echo "exit: $?"
+
+[main] BASH
+children=$(mktemp)
+cat > "$children" <<'CHILDREN_JSON'
+[{"name": "buoy-chain-reject-a-depth-of-zero-or-less", "reason": "Any depth of zero or less currently gives a chain length of zero or below, with no error. Every caller written before the guard lands inherits that silent bad value, and there are no tests holding the behaviour in place.", "revision": "[sha:62b6eeb3]"}]
+CHILDREN_JSON
+$CRAFT[treat]/scripts/followup_parent.py assemble fixture-buoy-chain-spec --children "$children"
+rc=$?
+rm -f "$children"
+echo "exit: $rc"

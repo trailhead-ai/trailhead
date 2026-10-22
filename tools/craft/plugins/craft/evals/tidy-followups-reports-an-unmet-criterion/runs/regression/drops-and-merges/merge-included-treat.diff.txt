@@ -1,0 +1,7 @@
+vault ADDED task/build-the-follow-ups-of-fixture-parcel-scale-spec-chosen-2026-10-22.json
+vault ADDED task/build-the-follow-ups-of-fixture-parcel-scale-spec-chosen-2026-10-22.md
+vault CHANGED task/parcel-scale-refuse-a-mass-figure-above-the-load-cell-ceiling.json
+vault CHANGED task/parcel-scale-refuse-a-mass-figure-below-zero.json
+vault CHANGED task/parcel-scale-refuse-a-mass-figure-below-zero.md
+repo head before=[sha:7b86b664] after=[sha:7b86b664]
+repo status after=''

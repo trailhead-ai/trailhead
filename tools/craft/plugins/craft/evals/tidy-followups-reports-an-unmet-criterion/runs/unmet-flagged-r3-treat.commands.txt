@@ -1,0 +1,121 @@
+[main] BASH
+$CRAFT[treat]/scripts/followup_gather.py fixture-tide-table-spec; echo "exit: $?"
+
+[main] BASH
+for n in chart-printer-zero-pad-the-hour-column tide-table-mention-the-unit-in-the-module-comment tide-table-reject-an-hour-outside-the-day; do echo "=== $n"; lore record show --json --vault default task/$n; echo "exit: $?"; done; echo "=== spec"; lore record show --json --vault default spec/fixture-tide-table-spec; echo "exit: $?"
+
+[main] BASH
+cd $RUN[unmet-flagged-r3-treat]/fixture/repo && git ls-files && for f in $(git ls-files 'src/*'); do echo "=== $f"; cat "$f"; done
+
+[main] AGENT
+Refine the task record `task/chart-printer-zero-pad-the-hour-column` in the lore vault `default`.
+
+1. Read $CRAFT[treat]/skills/_shared/refine.md yourself and follow it in full, in its **unattended** mode, against that one task only. `${CLAUDE_PLUGIN_ROOT}` is $CRAFT[treat]. The `lore` command on PATH reads the vault.
+2. The code the task refers to is the git repository at $RUN[unmet-flagged-r3-treat]/fixture/repo. Read it as needed but do not modify it. Refinement writes only t... [cut 544 chars]
+
+[sub] BASH
+cd /tmp; lore record show task/chart-printer-zero-pad-the-hour-column; echo ---; lore task graph chart-printer-zero-pad-the-hour-column; echo; lore --help 2>&1 | head -40
+
+[sub] BASH
+cd $RUN[unmet-flagged-r3-treat]/fixture/repo && git status --short | head; git log --oneline | head; git ls-files
+
+[sub] BASH
+cd /tmp; lore record show --help; lore record update --help; find $RUN[unmet-flagged-r3-treat]/fixture/repo -not -path '*/.git/*' -type f
+
+[sub] BASH
+cd /tmp; lore record show --vault default --json task/chart-printer-zero-pad-the-hour-column; cat -n $RUN[unmet-flagged-r3-treat]/fixture/repo/src/chartprint.py; cat -n $RUN[unmet-flagged-r3-treat]/fixture/repo/README.md; grep -rn "chartprint\|render_row" $RUN[unmet-flagged-r3-treat]/fixture/repo --include=*.py
+
+[sub] BASH
+cd /tmp; lore record show task/fixture-tide-table-spec-the-slice; echo ---; for q in chartprint render_row "chart printer" "zero-pad" pytest unittest tests "test convention" "kind:area" tidetable; do echo "== $q"; lore search "$q" 2>&1 | head -15; done
+
+[sub] BASH
+d=$(mktemp -d); cp -R $RUN[unmet-flagged-r3-treat]/fixture/repo/src $d/; mkdir $d/tests; cat > $d/tests/test_chartprint.py <<'EOF'
+import unittest
+from src.chartprint import render_row
+class T(unittest.TestCase):
+    def test_a(self):
+        self.assertEqual(render_row(7, 1.5), '07 1.5')
+EOF
+cd $d && python3 -m unittest discover -s tests 2>&1 | tail -4; cd /; rm -rf $d
+
+[sub] BASH
+cd /tmp; grep -n -A6 "Flow-out" $CRAFT[treat]/templates/plan.md; grep -n "Delivers\|Test contract\|Files" $CRAFT[treat]/templates/task.md; grep -rln "credential-pattern\|credential pattern" $CRAFT[treat] | head
+
+[sub] BASH
+sed -n 24,40p $CRAFT[treat]/templates/plan.md; grep -n -i -B2 -A25 "credential-pattern scrub\|canonical pattern" $CRAFT[treat]/skills/_shared/security.md | head -60
+
+[sub] BASH
+set -e; f=$(mktemp); trap 'rm -f "$f"' EXIT
+cd /tmp
+lore record show --vault default --json task/chart-printer-zero-pad-the-hour-column | python3 -I -c 'import json,sys; sys.stdout.write(json.load(sys.stdin)["body"])' > "$f"
+cat >> "$f" <<'EOF'
+
+**Delivers:** `render_row(hour, height)` in `src/chartprint.py` returns the hour zero-padded to two digits, a single space, then the height formatted with exactly one decimal place — e.g. `render_row(7, 1.5)` returns `07 1.5`. Today the f-string at `src/chartprint.py:2` interpolates both values unformatted, so hour 7 renders as `7` and sorts after `18`. The fix is confined to that one return expression (`src/chartprint.py:1-2` is the whole module); no other module in `src/` imports `chartprint`.
+
+**Test contract:** New `tests/test_chartprint.py` (the repository has no tests directory or test runner config yet, so this file establishes the surface). Write as a `unittest.TestCase` importing `from src.chartprint import render_row` (`src/__init__.py` makes `src` an importable package), so it runs under both `python -m unittest discover -s tests` and `python -m pytest` from the repo root. Failing tests to write first:
+- `render_row(7, 1.5)` returns `07 1.5` (single-digit hour is zero-padded; fails today, returns `7 1.5`).
+- `render_row(18, 2.25)`-style two-digit hour is unchanged in width, e.g. `render_row(18, 2.0)` returns `18 2.0`.
+- Height always carries one decimal: `render_row(0, 3)` returns `00 3.0`.
+- Rows sort chronologically as strings: sorting `[render_row(18, 1.0), render_row(7, 1.0)]` puts the `07` row first.
+Verify: `python -m unittest discover -s tests` from the repo root — red before the fix, green after.
+
+**Files:** `src/chartprint.py` (modified), `tests/test_chartprint.py` (created).
+
+## Flow-out
+
+- [ ] Touched area/subsystem profiles updated with what changed
+- [ ] Prover-validated assumptions captured as session candidates (durable at flush)
+- [ ] New decisions / lessons / follow-ups surfaced during the build recorded
+EOF
+python3 -I - "$f" <<'PY'
+import re,sys
+t=open(sys.argv[1]).read()
+pats=[r'(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s*[=:]\s*\S+',r'(?i)\b(AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|gho_[A-Za-z0-9]{36}|glpat-[A-Za-z0-9_-]{20}|xox[baprs]-[A-Za-z0-9-]+|sk_live_[A-Za-z0-9]+|AIza[0-9A-Za-z_-]{35})\b',r'(?i)bearer\s+[A-Za-z0-9._\-]+',r'(?i)api[_-]?key[\'"]?\s*[:=]\s*[\'"]?[A-Za-z0-9._\-]{16,}',r'\b[A-Za-z0-9+/]{32,}={0,2}\b',r'\b[A-Fa-f0-9]{40,}\b',r'-----BEGIN [A-Z ]*PRIVATE KEY-----']
+print("scrub hits:",[m.group(0) for p in pats for m in re.finditer(p,t)])
+PY
+R=$RUN[unmet-flagged-r3-treat]/fixture/repo
+wc -l < $R/src/chartprint.py; ls $R/src/__init__.py; ls $R/tests 2>&1 || true
+grep -l chartprint $R/src/*.py
+lore record update --vault default task/chart-printer-zero-pad-the-hour-column --status ready < "$f"
+lore record show --vault default task/chart-printer-zero-pad-the-hour-column; lore record show --vault default --json task/chart-printer-zero-pad-the-hour-column | grep '"status"'
+
+[sub] BASH
+set -e; f=$(mktemp); trap 'rm -f "$f"' EXIT; cd /tmp
+cat > "$f" <<'EOF'
+--- a
++++ b
+@@ -7,3 +7,3 @@
+ - `render_row(7, 1.5)` returns `07 1.5` (single-digit hour is zero-padded; fails today, returns `7 1.5`).
+-- `render_row(18, 2.25)`-style two-digit hour is unchanged in width, e.g. `render_row(18, 2.0)` returns `18 2.0`.
++- A two-digit hour is not padded further: `render_row(18, 2.0)` returns `18 2.0`.
+ - Height always carries one decimal: `render_row(0, 3)` returns `00 3.0`.
+EOF
+lore record update --vault default task/chart-printer-zero-pad-the-hour-column --diff < "$f"
+lore record show --vault default task/chart-printer-zero-pad-the-hour-column | sed -n 5,12p
+
+[sub] BASH
+set -e; f=$(mktemp); trap 'rm -f "$f"' EXIT; cd /tmp
+cat > "$f" <<'EOF'
+--- a
++++ b
+@@ -6,3 +6,3 @@
+ - `render_row(7, 1.5)` returns `07 1.5` (single-digit hour is zero-padded; fails today, returns `7 1.5`).
+-- `render_row(18, 2.25)`-style two-digit hour is unchanged in width, e.g. `render_row(18, 2.0)` returns `18 2.0`.
++- A two-digit hour is not padded further: `render_row(18, 2.0)` returns `18 2.0`.
+ - Height always carries one decimal: `render_row(0, 3)` returns `00 3.0`.
+EOF
+lore record update --vault default task/chart-printer-zero-pad-the-hour-column --diff < "$f"
+lore record show --vault default task/chart-printer-zero-pad-the-hour-column; lore record show --vault default --json task/chart-printer-zero-pad-the-hour-column | grep '"status"'
+
+[main] BASH
+$CRAFT[treat]/scripts/followup_parent.py check fixture-tide-table-spec chart-printer-zero-pad-the-hour-column; echo "exit: $?"
+
+[main] BASH
+children=$(mktemp)
+cat > "$children" <<'CHILDREN_JSON'
+[{"name": "chart-printer-zero-pad-the-hour-column", "reason": "Anything that reads, sorts or snapshots these rows will expect the unpadded hour format, so each consumer added before the fix is one more place to update.", "revision": "[sha:b527f8e0]"}]
+CHILDREN_JSON
+$CRAFT[treat]/scripts/followup_parent.py assemble fixture-tide-table-spec --children "$children"
+rc=$?
+rm -f "$children"
+echo "exit: $rc"

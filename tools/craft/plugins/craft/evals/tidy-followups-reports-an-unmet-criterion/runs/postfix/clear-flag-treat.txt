@@ -1,0 +1,19 @@
+### Closing report
+
+- **Included:** Buoy chain: reject a depth of zero or less (`buoy-chain-reject-a-depth-of-zero-or-less`). It was refined to `ready` and nested.
+- **Left:** Buoy chain: name the unit in the module (`buoy-chain-name-the-unit-in-the-module`).
+- **Left out at step 10:** none.
+- **Refined but not nested:** none.
+- **Failed writes:** none.
+- **Dropped / merged:** none, so step 8a did not run.
+- **Parent created:** `build-the-follow-ups-of-fixture-buoy-chain-spec-chosen-2026-10-22`. It holds 1 child and is `ready`.
+
+unmet-criterion check: none flagged; 0 blocked not checked
+
+```
+/craft:execute task/build-the-follow-ups-of-fixture-buoy-chain-spec-chosen-2026-10-22
+```
+
+```
+/craft:distill spec/fixture-buoy-chain-spec
+```

@@ -1,0 +1,6 @@
+vault ADDED task/build-the-follow-ups-of-fixture-distilled-spec-chosen-2026-10-22.json
+vault ADDED task/build-the-follow-ups-of-fixture-distilled-spec-chosen-2026-10-22.md
+vault CHANGED task/distilled-reject-path-traversal-in-the-upload-endpoint.json
+vault CHANGED task/distilled-reject-path-traversal-in-the-upload-endpoint.md
+repo head before=[sha:2b0fef52] after=[sha:2b0fef52]
+repo status after=''

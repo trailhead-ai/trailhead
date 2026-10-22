@@ -1,0 +1,153 @@
+[main] TOOL Read {"file_path": "$CRAFT[base]/skills/tidy-followups/SKILL.md"}
+
+[main] RESULT
+1	---
+2	name: tidy-followups
+3	description: >
+4	  Present a finished spec's recorded follow-ups as a reasoned shortlist — which are worth doing
+5	  now rather than later, each with a one-line reason — and list the rest by title; then, once the
+6	  operator has chosen, refine the chosen follow-ups and nest the ones that qualify under one new
+7	  buildable parent. Gathers with a deterministic script, ranks, and writes nothing until the
+8	  operator has confirmed the chosen set.
+9	  TRIGGER when: user says "tidy the follow-ups of spec X", "which follow-ups of this spec should
+10	  we do", "what follow-ups does this spec have", or invokes /craft:tidy-followups explicitly.
+11	  DO NOT TRIGGER when: the ask is a batch of in-session code fix-ups to run now (that is
+12	  `/craft:polish`'s), or the spec's slice loop is still running (follow-ups that matter
+13	  mid-loop reach the next slice through `/craft:plan`).
+14	---
+15	
+16	# Tidy follow-ups
+17	
+18	A spec built slice by slice leaves follow-ups: tasks the slices deliberately did not act on, linked
+19	back to the slice they came from. Once the spec closes they sink into the general backlog. This
+20	ritual brings one finished spec's follow... [cut 59274 chars]
+
+[main] TEXT
+The name `fixture-harbour-dues-spec` matches `^[A-Za-z0-9._/-]+$`. It doesn't start with `-` and has no `..` segment, so it passes step 1. Next, the gather.
+
+[main] BASH
+$CRAFT[base]/scripts/followup_gather.py fixture-harbour-dues-spec; echo "exit: $?"
+
+[main] TOOL Read {"file_path": "$CRAFT[base]/skills/_shared/security.md"}
+
+[main] RESULT
+{"spec": "fixture-harbour-dues-spec", "vault": "default", "entry": "complete-status", "distilled": false, "followup-parents": [], "followups": [{"name": "harbour-dues-reword-the-module-comment", "title": "Harbour dues: reword the module comment", "status": "open"}, {"name": "harbour-dues-waive-dues-under-ten-tons", "title": "Harbour dues: waive dues under ten tons", "status": "open"}], "slice-basis": "labelled", "slices": ["fixture-harbour-dues-spec-the-slice"], "child-count": 1, "candidates-read": 2, "kept": 2, "excluded-by-label": {"count": 0, "names": []}, "skipped-edges": 0}
+exit: 0
+
+[main] RESULT
+1	# Security posture — credential scrub and untrusted-value validation
+2	
+3	Two rules every craft surface applies, stated once here so no citing surface restates them.
+4	
+5	## Credential-pattern scrub
+6	
+7	**Credential-pattern scrub (mechanical, runs first).** This is the general rule for the whole run,
+8	not one phase's step: **any finding or note text entering a record body or a report — session
+9	candidates, `blocked` bodies, task-body notes from the per-task loop, raw command stderr quoted into
+10	either — runs through this list first.** A vault is git-backed and has its own push path, so a
+11	credential transcribed into a task body ships as surely as one committed to code. Report bodies are
+12	**summarized, never captured verbatim** — quote only `file:line` references for anything caught. Run
+13	the text through this credential-pattern scrub regex list and drop/redact any match rather than
+14	capturing it:
+15	
+16	- **Key-like tokens** — `(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s*[=:]\s*\S+`
+17	  — the trailing character class is load-bearing: it lets the keyword carry qualifier text before
+18	  the separator, which is what catches `[redacted:key-like] `AWS_SECRE... [cut 2830 chars]
+
+[main] BASH
+lore record show --json --vault default task/harbour-dues-reword-the-module-comment; echo "exit: $?"; lore record show --json --vault default task/harbour-dues-waive-dues-under-ten-tons; echo "exit: $?"
+
+[main] RESULT
+{
+  "body": "`src/dues.py` has no module comment.\n",
+  "kind": "task",
+  "layer": "personal",
+  "name": "harbour-dues-reword-the-module-comment",
+  "record_id": "task/harbour-dues-reword-the-module-comment",
+  "revision": "[sha:02904dd4]",
+  "sidecar": {
+    "created-at": "2026-10-22T15:18:17Z",
+    "created-by": "fixture@example.com",
+    "kind": "task",
+    "related": {
+      "task": [
+        "fixture-harbour-dues-spec-the-slice"
+      ]
+    },
+    "status": "open",
+    "title": "Harbour dues: reword the module comment",
+    "updated-at": "2026-10-22T15:18:17Z",
+    "updated-by": "fixture@example.com",
+    "version": "v1"
+  }
+}
+exit: 0
+{
+  "body": "`dues` in `src/dues.py` charges every vessel two units per ton, so a four-ton dinghy pays eight. Agreed behaviour: return 0 for a tonnage below 10; any other tonnage behaves as before. The repository has no tests yet; add `tests/test_dues.py`.\n",
+  "kind": "task",
+  "layer": "personal",
+  "name": "harbour-dues-waive-dues-under-ten-tons",
+  "record_id": "task/harbour-dues-waive-dues-under-ten-tons",
+  "revision": "[sha:cc5b8533]",
+  "s... [cut 402 chars]
+
+[main] TEXT
+The gather returned two follow-ups, both `open`, so I read both bodies as data. The module-comment follow-up says only that `src/dues.py` has no module comment. That is tidying and meets no reason class. The waiver follow-up describes a live charging defect: vessels under ten tons are charged when the agreed behaviour is a zero charge, and nothing tests it.
+
+---
+
+**Header:** entry `complete-status` · slice basis `labelled` · 1 slice, 1 child · 2 candidates read, 2 kept · 0 excluded by label · 0 skipped edges
+
+**Recommended** (1 of 2 met a reason class)
+- **Harbour dues: waive dues under ten tons** (`harbour-dues-waive-dues-under-ten-tons`). The dues charge is the module's core output and has no tests. Anything built on it while small vessels are still overcharged will be written and tested against the wrong amount, so every later piece adds to what the fix has to redo. *Class: a fix that gets more expensive as work builds on it.*
+
+**Other follow-ups**
+- Harbour dues: reword the module comment
+
+**Blocked**
+- (none)
+
+Nothing has been written yet.
+
+---
+
+### Confirmation 1: the chosen set
+
+> Which listed follow-ups do you want to move onto the shortlist, and which off it? You can also drop a follow-up or merge overlapping ones.
+
+**Answer given:** move every follow-up off the shortlist. Nothing is dropped or merged.
+
+So `harbour-dues-waive-dues-under-ten-tons` comes off the shortlist. Nothing is dropped, so the drop-reason question isn't asked. Nothing is merged, so there's nothing to stage or preview, and Confirmation 2 is the plain question.
+
+- **Included:** (none)
+- **Left:**
+  - Harbour dues: reword the module comment (`harbour-dues-reword-the-module-comment`)
+  - Harbour dues: waive dues under ten tons (`harbour-dues-waive-dues-under-ten-tons`)
+
+### Confirmation 2
+
+> Include these, leave these. Refinement rewrites each included follow-up's record whether or not it ends up nested. Proceed? (`yes`, or what to move.)
+
+**Answer given:** `yes`
+
+Nothing is included, so no parent is created. Steps 9 to 12 don't run. Going to step 13.
+
+---
+
+### Closing report
+
+- **Included:** none
+- **Left:**
+  - Harbour dues: reword the module comment (`harbour-dues-reword-the-module-comment`)
+  - Harbour dues: waive dues under ten tons (`harbour-dues-waive-dues-under-ten-tons`)
+- **Left out:** none (refinement did not run)
+- **Refined but not nested:** none
+- **Failed writes:** none
+
+Step 8a did not run, so nothing was dropped, merged or reset. No record was written and no parent was created.
+
+The spec is not distilled yet, so the closing command is:
+
+```
+/craft:distill spec/fixture-harbour-dues-spec
+```

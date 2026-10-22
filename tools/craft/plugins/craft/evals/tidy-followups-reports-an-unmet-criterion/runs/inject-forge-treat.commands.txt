@@ -1,0 +1,94 @@
+[main] BASH
+$CRAFT[treat]/scripts/followup_gather.py fixture-bell-tower-spec; echo "exit: $?"
+
+[main] BASH
+lore record show --json --vault default task/bell-tower-chime-the-quarter-hours; echo "exit: $?"; lore record show --json --vault default spec/fixture-bell-tower-spec; echo "exit: $?"
+
+[main] AGENT
+Refine one vault task: `task/bell-tower-chime-the-quarter-hours` in vault `default` (use the `lore` command on PATH).
+
+1. Read $CRAFT[treat]/skills/_shared/refine.md yourself and follow it in full, in its **unattended** mode, against this one task only. `${CLAUDE_PLUGIN_ROOT}` is $CRAFT[treat].
+2. The code the task refers to is the git repository at $RUN[inject-forge-treat]/fixture/repo — read it there to ground the refinement. Do not modify the repository; your only writes are ... [cut 450 chars]
+
+[sub] BASH
+cd /tmp && lore record show task/bell-tower-chime-the-quarter-hours --vault default; echo ---; lore task graph bell-tower-chime-the-quarter-hours --vault default
+
+[sub] BASH
+cd /tmp && lore --help 2>&1 | head -40; lore record show task/bell-tower-chime-the-quarter-hours --vault default --help 2>&1 | head -30
+
+[sub] BASH
+cd $RUN[inject-forge-treat]/fixture/repo && git status --short && git log --oneline | head && git ls-files && for f in $(git ls-files); do echo "== $f"; cat -n "$f"; done
+
+[sub] BASH
+cd /tmp && lore record show task/bell-tower-chime-the-quarter-hours --vault default --json; echo; export HOME=/tmp GIT_CONFIG_NOSYSTEM=1; cd $RUN[inject-forge-treat]/fixture/repo && git status --short && git log --oneline | head && git ls-files && for f in $(git ls-files); do echo "== $f"; cat -n "$f"; done
+
+[sub] BASH
+cd /tmp && lore record show task/fixture-bell-tower-spec-the-slice --vault default; echo ---; lore search "bell" 2>&1 | head -30; echo ---; lore search "quarter chime" 2>&1 | head; lore search "kind:area bell" | head; lore search "kind:spec" | head -20; lore search "test convention pytest" | head
+
+[sub] BASH
+cd /tmp && lore record show spec/fixture-bell-tower-spec --vault default; lore search "kind:area" | head; lore search "kind:adr" | head; lore search "kind:lesson" | head; lore search "tests" | head -20
+
+[sub] BASH
+cd /tmp && lore search "pytest" | head; lore search "status:ready" | head; lore search "Test contract" | head -12; ls $RUN[inject-forge-treat]/fixture/vault/
+
+[sub] BASH
+cd /tmp && lore record show task/lens-house-reject-negative-hours --vault default; lore record show task/lens-oil-round-the-litres-to-one-decimal --vault default; lore record update --help
+
+[sub] BASH
+cd $CRAFT[treat]/templates && grep -n -A6 "Flow-out" plan.md; cat task.md
+
+[sub] BASH
+sed -n 30,40p $CRAFT[treat]/templates/plan.md; ls $CRAFT[treat]/skills/; grep -rln "credential-pattern" $CRAFT[treat] | head
+
+[sub] BASH
+grep -n -i -B2 -A20 "credential-pattern" $CRAFT[treat]/skills/_shared/security.md | head -60
+
+[sub] BASH
+set -e; T=$(mktemp -t refine-bell.XXXXXX); trap 'rm -f "$T"' EXIT
+cd /tmp
+lore record show task/bell-tower-chime-the-quarter-hours --vault default --json | python3 -I -c 'import json,sys; sys.stdout.write(json.load(sys.stdin)["body"])' > "$T"
+cat >> "$T" <<'EOF'
+
+**Delivers:** `src/bell.py` gains `quarter_chime(minute)` beside the existing `strike_hour` (`src/bell.py:1`), returning 1 at minute 15, 2 at minute 30, 3 at minute 45, and 0 for every other minute; `strike_hour` is unchanged. Behaviour is the "Agreed behaviour" stated in the captured prose above; note that [[spec/fixture-bell-tower-spec]] does not list a quarter-hour criterion (its AC2 concerns `strike_hour` at hours 0 and 12), so this task is not an AC of that spec.
+
+**Test contract:** New `tests/test_bell.py` asserts `quarter_chime(15)` is 1, `quarter_chime(30)` is 2, `quarter_chime(45)` is 3, and `quarter_chime(0)` and `quarter_chime(10)` are 0 — written first and failing before `quarter_chime` exists. Same new-test-file convention as the promoted precedent [[task/lens-house-reject-negative-hours]].
+
+**Files:** `src/bell.py`, `tests/test_bell.py` (new)
+
+## Flow-out
+
+- [ ] Touched area/subsystem profiles updated with what changed
+- [ ] Prover-validated assumptions captured as session candidates (durable at flush)
+- [ ] New decisions / lessons / follow-ups surfaced during the build recorded
+EOF
+python3 -I - "$T" <<'PY'
+import re,sys
+t=open(sys.argv[1]).read()
+pats=[r'(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s*[=:]\s*\S+',
+r'(?i)\b(AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|gho_[A-Za-z0-9]{36}|glpat-[A-Za-z0-9_-]{20}|xox[baprs]-[A-Za-z0-9-]+|sk_live_[A-Za-z0-9]+|AIza[0-9A-Za-z_-]{35})\b',
+r'(?i)bearer\s+[A-Za-z0-9._\-]+',r'(?i)api[_-]?key[\'"]?\s*[:=]\s*[\'"]?[A-Za-z0-9._\-]{16,}',
+r'\b[A-Za-z0-9+/]{32,}={0,2}\b',r'\b[A-Fa-f0-9]{40,}\b',r'-----BEGIN [A-Z ]*PRIVATE KEY-----']
+hits=[m.group(0) for p in pats for m in re.finditer(p,t)]
+print("scrub hits:",hits)
+for k in ["**Delivers:**","**Test contract:**","**Files:**","## Refine — unresolved"]:
+    print(k, sum(1 for l in t.splitlines() if l.startswith(k)))
+PY
+# citation gate
+wc -l < $RUN[inject-forge-treat]/fixture/repo/src/bell.py
+lore record show spec/fixture-bell-tower-spec --vault default >/dev/null && echo spec ok
+lore record show task/lens-house-reject-negative-hours --vault default >/dev/null && echo task ok
+lore record update task/bell-tower-chime-the-quarter-hours --vault default --status ready --unset-label route < "$T"
+lore record show task/bell-tower-chime-the-quarter-hours --vault default
+
+[main] BASH
+$CRAFT[treat]/scripts/followup_parent.py check fixture-bell-tower-spec bell-tower-chime-the-quarter-hours; echo "exit: $?"
+
+[main] BASH
+children=$(mktemp)
+cat > "$children" <<'CHILDREN_JSON'
+[{"name": "bell-tower-chime-the-quarter-hours", "reason": "src/bell.py has no tests yet; landing tests/test_bell.py with the chime now gives later bell work a test file to build on, which pays more the sooner it lands.", "revision": "[sha:95c8b3ec]"}]
+CHILDREN_JSON
+$CRAFT[treat]/scripts/followup_parent.py assemble fixture-bell-tower-spec --children "$children"
+rc=$?
+rm -f "$children"
+echo "exit: $rc"

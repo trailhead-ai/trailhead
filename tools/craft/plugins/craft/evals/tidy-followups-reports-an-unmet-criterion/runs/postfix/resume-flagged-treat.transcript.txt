@@ -1,0 +1,197 @@
+[main] TOOL Read {"file_path": "$CRAFT[treat]/skills/tidy-followups/SKILL.md"}
+
+[main] RESULT
+1	---
+2	name: tidy-followups
+3	description: >
+4	  Present a finished spec's recorded follow-ups as a reasoned shortlist — which are worth doing
+5	  now rather than later, each with a one-line reason — and list the rest by title; then, once the
+6	  operator has chosen, refine the chosen follow-ups and nest the ones that qualify under one new
+7	  buildable parent. Gathers with a deterministic script, ranks, and writes nothing until the
+8	  operator has confirmed the chosen set.
+9	  TRIGGER when: user says "tidy the follow-ups of spec X", "which follow-ups of this spec should
+10	  we do", "what follow-ups does this spec have", or invokes /craft:tidy-followups explicitly.
+11	  DO NOT TRIGGER when: the ask is a batch of in-session code fix-ups to run now (that is
+12	  `/craft:polish`'s), or the spec's slice loop is still running (follow-ups that matter
+13	  mid-loop reach the next slice through `/craft:plan`).
+14	---
+15	
+16	# Tidy follow-ups
+17	
+18	A spec built slice by slice leaves follow-ups: tasks the slices deliberately did not act on, linked
+19	back to the slice they came from. Once the spec closes they sink into the general backlog. This
+20	ritual brings one finished spec's follow... [cut 66364 chars]
+
+[main] TEXT
+Step 1: name `fixture-lens-house-spec` is valid. Step 2: gather.
+
+[main] BASH
+$CRAFT[treat]/scripts/followup_gather.py fixture-lens-house-spec; echo "exit: $?"
+
+[main] RESULT
+{"spec": "fixture-lens-house-spec", "vault": "default", "entry": "complete-status", "distilled": false, "followup-parents": ["build-the-follow-ups-of-fixture-lens-house-spec-chosen-2026-10-22"], "followups": [{"name": "lens-house-reject-negative-hours", "title": "Lens house: reject negative hours", "status": "ready"}, {"name": "lens-oil-round-the-litres-to-one-decimal", "title": "Lens oil: round the litres to one decimal", "status": "ready"}], "slice-basis": "labelled", "slices": ["fixture-lens-house-spec-the-slice"], "child-count": 1, "candidates-read": 3, "kept": 2, "excluded-by-label": {"count": 1, "names": ["build-the-follow-ups-of-fixture-lens-house-spec-chosen-2026-10-22"]}, "skipped-edges": 0}
+exit: 0
+
+[main] TOOL Read {"file_path": "$CRAFT[treat]/skills/_shared/security.md"}
+
+[main] RESULT
+1	# Security posture — credential scrub and untrusted-value validation
+2	
+3	Two rules every craft surface applies, stated once here so no citing surface restates them.
+4	
+5	## Credential-pattern scrub
+6	
+7	**Credential-pattern scrub (mechanical, runs first).** This is the general rule for the whole run,
+8	not one phase's step: **any finding or note text entering a record body or a report — session
+9	candidates, `blocked` bodies, task-body notes from the per-task loop, raw command stderr quoted into
+10	either — runs through this list first.** A vault is git-backed and has its own push path, so a
+11	credential transcribed into a task body ships as surely as one committed to code. Report bodies are
+12	**summarized, never captured verbatim** — quote only `file:line` references for anything caught. Run
+13	the text through this credential-pattern scrub regex list and drop/redact any match rather than
+14	capturing it:
+15	
+16	- **Key-like tokens** — `(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s*[=:]\s*\S+`
+17	  — the trailing character class is load-bearing: it lets the keyword carry qualifier text before
+18	  the separator, which is what catches `[redacted:key-like] `AWS_SECRE... [cut 2830 chars]
+
+[main] BASH
+lore record show --json --vault default task/lens-house-reject-negative-hours; echo "exit: $?"; lore record show --json --vault default task/lens-oil-round-the-litres-to-one-decimal; echo "exit: $?"; lore record show --json --vault default spec/fixture-lens-house-spec; echo "exit: $?"
+
+[main] RESULT
+{
+  "body": "`lens_turns` in `src/lens.py` returns a negative count for negative hours.\n\n**Delivers:** `lens_turns` in `src/lens.py` raises `ValueError` for hours below zero and returns two turns per hour otherwise.\n\n**Test contract:** A test asserts `lens_turns(-1)` raises `ValueError` and `lens_turns(3)` is 6.\n\n**Files:** `src/lens.py`, `tests/test_lens.py` (new)\n\n",
+  "kind": "task",
+  "layer": "personal",
+  "name": "lens-house-reject-negative-hours",
+  "record_id": "task/lens-house-reject-negative-hours",
+  "revision": "[sha:24ac923e]",
+  "sidecar": {
+    "created-at": "2026-10-22T17:22:53Z",
+    "created-by": "fixture@example.com",
+    "kind": "task",
+    "related": {
+      "task": [
+        "fixture-lens-house-spec-the-slice"
+      ]
+    },
+    "status": "ready",
+    "title": "Lens house: reject negative hours",
+    "updated-at": "2026-10-22T17:22:53Z",
+    "updated-by": "fixture@example.com",
+    "version": "v1"
+  }
+}
+exit: 0
+{
+  "body": "`oil_litres` in `src/lensoil.py` returns a long fraction.\n\n**Delivers:** `oil_litres` in `src/lensoil.py` returns the litres rounded to one decimal.\n\n**Test contract:** A test as... [cut 1570 chars]
+
+[main] TEXT
+Step 5 asks whether each follow-up is an unmet criterion. I'll check the code the claims point at.
+
+[main] BASH
+cd $RUN[resume-flagged-treat]/fixture/repo && git log --oneline | head; ls -R src tests 2>/dev/null; cat src/lens.py src/lensoil.py 2>/dev/null
+
+[main] RESULT
+fatal: unable to access '$HOME/.gitconfig': Operation not permitted
+src:
+__init__.py
+bell.py
+berthsign.py
+board.py
+buoy.py
+chartprint.py
+datum.py
+datumsheet.py
+dial.py
+dialplate.py
+dues.py
+ferry.py
+lamp.py
+lens.py
+lensoil.py
+mooring.py
+pennants.py
+pilotboat.py
+roster.py
+rota.py
+tidetable.py
+def lens_turns(hours):
+    return hours * 2
+def oil_litres(hours):
+    return hours * 0.25
+
+[main] BASH
+$CRAFT[treat]/scripts/followup_parent.py state fixture-lens-house-spec build-the-follow-ups-of-fixture-lens-house-spec-chosen-2026-10-22; echo "exit: $?"
+
+[main] RESULT
+{"parent": "build-the-follow-ups-of-fixture-lens-house-spec-chosen-2026-10-22", "status": "open", "listed": ["lens-house-reject-negative-hours", "lens-oil-round-the-litres-to-one-decimal"], "held": [], "unheld": ["lens-house-reject-negative-hours", "lens-oil-round-the-litres-to-one-decimal"], "unlisted": [], "skipped": 0}
+exit: 0
+
+[main] TEXT
+This is branch (b): exactly one `open` parent. Both listed follow-ups are unheld, so I'll run the check on them.
+
+[main] BASH
+$CRAFT[treat]/scripts/followup_parent.py check fixture-lens-house-spec --parent build-the-follow-ups-of-fixture-lens-house-spec-chosen-2026-10-22 lens-house-reject-negative-hours lens-oil-round-the-litres-to-one-decimal; echo "exit: $?"; lore record show task/build-the-follow-ups-of-fixture-lens-house-spec-chosen-2026-10-22 --vault default --json; echo "exit: $?"
+
+[main] RESULT
+{"eligible": [{"name": "lens-house-reject-negative-hours", "revision": "[sha:24ac923e]", "delivers": "`lens_turns` in `src/lens.py` raises `ValueError` for hours below zero and returns two turns per hour otherwise.", "files": "`src/lens.py`, `tests/test_lens.py` (new)"}, {"name": "lens-oil-round-the-litres-to-one-decimal", "revision": "[sha:f1d3f763]", "delivers": "`oil_litres` in `src/lensoil.py` returns the litres rounded to one decimal.", "files": "`src/lensoil.py`, `tests/test_lensoil.py` (new)"}], "left-out": [], "overlaps": []}
+exit: 0
+{
+  "body": "**Goal:** Build the follow-ups below, each already refined to ready. `spec/fixture-lens-house-spec` is context only.\n\n**Delta design:** Build these follow-ups, each nested under this parent:\n\n### task/lens-house-reject-negative-hours\n\n**Selection reason:** waiting makes it costlier\n\n### task/lens-oil-round-the-litres-to-one-decimal\n\n**Selection reason:** waiting makes it costlier\n\n**Known Unknowns:**\n\n- None.\n\n",
+  "kind": "task",
+  "layer": "personal",
+  "name": "build-the-follow-ups-of-fixture-lens-house-spec-chosen... [cut 662 chars]
+
+[main] BASH
+children=$(mktemp)
+cat > "$children" <<'CHILDREN_JSON'
+[{"name": "lens-oil-round-the-litres-to-one-decimal", "revision": "[sha:f1d3f763]"}]
+CHILDREN_JSON
+$CRAFT[treat]/scripts/followup_parent.py resume fixture-lens-house-spec build-the-follow-ups-of-fixture-lens-house-spec-chosen-2026-10-22 --children "$children"
+rc=$?
+rm -f "$children"
+echo "exit: $rc"
+
+[main] RESULT
+{"parent": "build-the-follow-ups-of-fixture-lens-house-spec-chosen-2026-10-22", "removed": ["lens-house-reject-negative-hours"], "nested": ["lens-oil-round-the-litres-to-one-decimal"], "failed": [], "buildable": true}
+exit: 0
+
+[main] TEXT
+I resumed the follow-up parent `task/build-the-follow-ups-of-fixture-lens-house-spec-chosen-2026-10-22` and it is now buildable. It holds one follow-up. The other follow-up was not nested because it describes work one of the spec's acceptance criteria still requires.
+
+```
+nested task/lens-oil-round-the-litres-to-one-decimal
+removed from the list: task/lens-house-reject-negative-hours
+```
+
+- **Nested:** Lens oil: round the litres to one decimal (`lens-oil-round-the-litres-to-one-decimal`).
+- **Removed from the parent's list:** Lens house: reject negative hours (`lens-house-reject-negative-hours`). It was held back as an unmet criterion.
+- **Left out by the check:** none. **Failed writes:** none.
+- **Follow-up refinement:** not run, because steps 8 to 12 don't run when a parent is resumed.
+- **Dispositions:** nothing was dropped or merged.
+
+unmet-criterion check: 1 flagged; 0 blocked not checked
+
+- Lens house: reject negative hours (`lens-house-reject-negative-hours`), against **AC2**. `lens_turns` in `src/lens.py` still multiplies whatever it gets by two. It returns a negative turn count for negative hours instead of raising `ValueError`, which the spec requires.
+
+Build the parent:
+
+```
+/craft:execute task/build-the-follow-ups-of-fixture-lens-house-spec-chosen-2026-10-22
+```
+
+If you didn't create this parent yourself, this removes its marker label. The follow-up gather then stops counting it, and the record itself is left alone:
+
+```
+lore record update task/build-the-follow-ups-of-fixture-lens-house-spec-chosen-2026-10-22 --vault default --unset-label craft/followup-parent
+```
+
+There's no distill command because a follow-up is still flagged. You have three ways to deal with it:
+
+1. **Build the criterion as a slice.** The spec's status is `complete`, so this means starting a new spec for it.
+2. **Change the spec.** Amend it to remove or reword AC2.
+3. **Clear the flag.** If you judge it's not really unmet, re-run this skill and answer `not unmet lens-house-reject-negative-hours`. Do that only once no live parent remains, meaning after the parent above is built or dropped:
+
+```
+/craft:tidy-followups spec/fixture-lens-house-spec
+```

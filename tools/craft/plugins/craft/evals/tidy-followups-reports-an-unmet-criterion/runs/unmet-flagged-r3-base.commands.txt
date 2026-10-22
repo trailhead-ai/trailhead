@@ -1,0 +1,74 @@
+[main] BASH
+$CRAFT[base]/scripts/followup_gather.py fixture-tide-table-spec; echo "exit: $?"
+
+[main] BASH
+for n in chart-printer-zero-pad-the-hour-column tide-table-mention-the-unit-in-the-module-comment tide-table-reject-an-hour-outside-the-day; do echo "=== $n"; lore record show --json --vault default task/$n; echo "exit: $?"; done
+
+[main] AGENT
+You are refining one vault task, unattended.
+
+Task: `task/chart-printer-zero-pad-the-hour-column` in the lore vault `default` (the `lore` command on your PATH reads it).
+
+Instructions:
+1. Read $CRAFT[base]/skills/_shared/refine.md yourself and follow it in full, in its unattended mode, against that one task only. `${CLAUDE_PLUGIN_ROOT}` is $CRAFT[base].
+2. The code the task's claims point at is the git repository at $RUN[unmet-flagged-r3-base]/fixture/repo — verify claims agains... [cut 408 chars]
+
+[sub] BASH
+lore record show task/chart-printer-zero-pad-the-hour-column; echo ---; lore task graph chart-printer-zero-pad-the-hour-column
+
+[sub] BASH
+lore record show --help 2>&1 | head -30; lore record show task/chart-printer-zero-pad-the-hour-column --json 2>&1 | head -40
+
+[sub] BASH
+cd $RUN[unmet-flagged-r3-base]/fixture/repo && git status --short && git log --oneline | head && find . -path ./.git -prune -o -type f -print && cat -n src/chartprint.py 2>&1
+
+[sub] BASH
+cd $RUN[unmet-flagged-r3-base]/fixture/repo && find . -path ./.git -prune -o -type f -print; cat -n src/chartprint.py 2>&1
+
+[sub] BASH
+cd $RUN[unmet-flagged-r3-base]/fixture/repo && cat -n README.md; ls -a; grep -rn "chartprint\|render_row\|:02d\|:.1f" src README.md
+
+[sub] BASH
+lore search "chartprint" 2>&1 | head -20; echo ---; lore search "render_row" 2>&1|head; echo ---; lore search "zero-pad hour" 2>&1|head; echo ---; lore search "kind:area chart" 2>&1|head; echo ---; lore search "tests pytest" 2>&1|head; echo ---; lore record show task/fixture-tide-table-spec-the-slice 2>&1 | head -30
+
+[sub] BASH
+set -e; T=$(mktemp); lore record show task/chart-printer-zero-pad-the-hour-column --json | python3 -I -c 'import json,sys;sys.stdout.write(json.load(sys.stdin)["body"])' > "$T"
+cat >> "$T" <<'EOF'
+
+**Delivers:** `render_row(hour, height)` in `src/chartprint.py` (currently formats both values unpadded and unrounded at `src/chartprint.py:2`) returns the hour zero-padded to two digits, a single space, then the height formatted to exactly one decimal place — so `render_row(7, 1.5)` returns `07 1.5` (the agreed behaviour stated in the captured prose above). Signature at `src/chartprint.py:1` is unchanged.
+
+**Test contract:** New `tests/test_chartprint.py` (the repository has no tests yet; it declares no test dependency, so use stdlib `unittest`, which pytest also collects). Write these failing first:
+- `render_row(7, 1.5) == "07 1.5"` — single-digit hour is zero-padded.
+- `render_row(18, 2.25)` starts with `"18 "` — two-digit hour is unchanged.
+- `render_row(0, 1.5) == "00 1.5"` — midnight pads to two digits.
+- `render_row(18, 2) == "18 2.0"` — an integer height still renders with one decimal.
+Verify: `python3 -m unittest tests.test_chartprint` from the repo root exits 0.
+
+**Files:** `src/chartprint.py` (modified), `tests/test_chartprint.py` (created)
+
+## Flow-out
+
+- [ ] Touched area/subsystem profiles updated with what changed
+- [ ] Prover-validated assumptions captured as session candidates (durable at flush)
+- [ ] New decisions / lessons / follow-ups surfaced during the build recorded
+EOF
+sed -n '1,200p' $CRAFT[base]/templates/plan.md | grep -n -A6 "Flow-out"; echo "$T"
+
+[sub] BASH
+sed -n '30,40p' $CRAFT[base]/templates/plan.md; grep -n "Delivers\|Test contract\|Files" $CRAFT[base]/templates/task.md
+
+[sub] BASH
+T=$RUN[unmet-flagged-r3-base]/tmp/tmp.aTlljveezK; lore record update task/chart-printer-zero-pad-the-hour-column --status ready < "$T" && rm -f "$T"; ls "$T" 2>&1; lore record show task/chart-printer-zero-pad-the-hour-column --json | python3 -I -c 'import json,sys;d=json.load(sys.stdin);print(d["sidecar"]["status"]);print(d["body"])'
+
+[main] BASH
+$CRAFT[base]/scripts/followup_parent.py check fixture-tide-table-spec chart-printer-zero-pad-the-hour-column; echo "exit: $?"
+
+[main] BASH
+children=$(mktemp)
+cat > "$children" <<'CHILDREN_JSON'
+[{"name": "chart-printer-zero-pad-the-hour-column", "reason": "The unpadded hour makes rows sort in the wrong order. Any listing, parser or comparison built on the current output will be written around that format, so the fix breaks more of them the longer it waits.", "revision": "[sha:b2874119]"}]
+CHILDREN_JSON
+$CRAFT[base]/scripts/followup_parent.py assemble fixture-tide-table-spec --children "$children"
+rc=$?
+rm -f "$children"
+echo "exit: $rc"

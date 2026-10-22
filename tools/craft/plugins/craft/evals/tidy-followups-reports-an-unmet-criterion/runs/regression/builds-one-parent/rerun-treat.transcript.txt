@@ -1,0 +1,157 @@
+[main] TOOL Read {"file_path": "$CRAFT[treat]/skills/tidy-followups/SKILL.md"}
+
+[main] RESULT
+1	---
+2	name: tidy-followups
+3	description: >
+4	  Present a finished spec's recorded follow-ups as a reasoned shortlist — which are worth doing
+5	  now rather than later, each with a one-line reason — and list the rest by title; then, once the
+6	  operator has chosen, refine the chosen follow-ups and nest the ones that qualify under one new
+7	  buildable parent. Gathers with a deterministic script, ranks, and writes nothing until the
+8	  operator has confirmed the chosen set.
+9	  TRIGGER when: user says "tidy the follow-ups of spec X", "which follow-ups of this spec should
+10	  we do", "what follow-ups does this spec have", or invokes /craft:tidy-followups explicitly.
+11	  DO NOT TRIGGER when: the ask is a batch of in-session code fix-ups to run now (that is
+12	  `/craft:polish`'s), or the spec's slice loop is still running (follow-ups that matter
+13	  mid-loop reach the next slice through `/craft:plan`).
+14	---
+15	
+16	# Tidy follow-ups
+17	
+18	A spec built slice by slice leaves follow-ups: tasks the slices deliberately did not act on, linked
+19	back to the slice they came from. Once the spec closes they sink into the general backlog. This
+20	ritual brings one finished spec's follow... [cut 65507 chars]
+
+[main] TEXT
+Step 1: `fixture-chosen-spec` matches the safe shape, doesn't start with `-`, and has no `..`. Valid.
+
+[main] BASH
+$CRAFT[treat]/scripts/followup_gather.py fixture-chosen-spec; echo "exit: $?"
+
+[main] TOOL Read {"file_path": "$CRAFT[treat]/skills/_shared/security.md"}
+
+[main] RESULT
+{"spec": "fixture-chosen-spec", "vault": "default", "entry": "complete-status", "distilled": false, "followup-parents": ["build-the-follow-ups-of-fixture-chosen-spec-chosen-2026-10-22"], "followups": [{"name": "chosen-fix-a-typo-in-a-docstring", "title": "Chosen: fix a typo in a docstring", "status": "open"}, {"name": "chosen-stop-writing-bearer-tokens-to-the-request-trace", "title": "Chosen: stop writing [REDACTED] to the request trace", "status": "open"}], "slice-basis": "labelled", "slices": ["fixture-chosen-spec-the-slice"], "child-count": 1, "candidates-read": 5, "kept": 2, "excluded-by-label": {"count": 1, "names": ["build-the-follow-ups-of-fixture-chosen-spec-chosen-2026-10-22"]}, "skipped-edges": 0}
+exit: 0
+
+[main] RESULT
+1	# Security posture — credential scrub and untrusted-value validation
+2	
+3	Two rules every craft surface applies, stated once here so no citing surface restates them.
+4	
+5	## Credential-pattern scrub
+6	
+7	**Credential-pattern scrub (mechanical, runs first).** This is the general rule for the whole run,
+8	not one phase's step: **any finding or note text entering a record body or a report — session
+9	candidates, `blocked` bodies, task-body notes from the per-task loop, raw command stderr quoted into
+10	either — runs through this list first.** A vault is git-backed and has its own push path, so a
+11	credential transcribed into a task body ships as surely as one committed to code. Report bodies are
+12	**summarized, never captured verbatim** — quote only `file:line` references for anything caught. Run
+13	the text through this credential-pattern scrub regex list and drop/redact any match rather than
+14	capturing it:
+15	
+16	- **Key-like tokens** — `(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s*[=:]\s*\S+`
+17	  — the trailing character class is load-bearing: it lets the keyword carry qualifier text before
+18	  the separator, which is what catches `[redacted:key-like] `AWS_SECRE... [cut 2830 chars]
+
+[main] TEXT
+Exit 0 with all required keys. `followups` non-empty, and `followup-parents` is non-empty, so steps 4–6 run and then step 7. Both follow-up names pass the step 1 checks.
+
+[main] BASH
+lore record show --json --vault default task/chosen-fix-a-typo-in-a-docstring; echo "exit: $?"; lore record show --json --vault default task/chosen-stop-writing-bearer-tokens-to-the-request-trace; echo "exit: $?"; lore record show --json --vault default spec/fixture-chosen-spec; echo "exit: $?"
+
+[main] RESULT
+{
+  "body": "The docstring in `src/util.py` is missing its closing full stop.\n",
+  "kind": "task",
+  "layer": "personal",
+  "name": "chosen-fix-a-typo-in-a-docstring",
+  "record_id": "task/chosen-fix-a-typo-in-a-docstring",
+  "revision": "[sha:564142ab]",
+  "sidecar": {
+    "created-at": "2026-10-22T15:47:49Z",
+    "created-by": "fixture@example.com",
+    "kind": "task",
+    "related": {
+      "task": [
+        "fixture-chosen-spec-the-slice"
+      ]
+    },
+    "status": "open",
+    "title": "Chosen: fix a typo in a docstring",
+    "updated-at": "2026-10-22T15:47:49Z",
+    "updated-by": "fixture@example.com",
+    "version": "v1"
+  }
+}
+exit: 0
+{
+  "body": "`src/trace.py` writes every request header, the Authorization header included, verbatim to the shared log, so live credentials already sit in logs people read.\n\n**Delivers:** `log_request` in `src/trace.py` (src/trace.py:1-2) stops writing the Authorization header's value to the logger, matched case-insensitively (HTTP header names are case-insensitive), while every other header is still logged as it is today. Whether the header is redacted to a placeholder or dropped is still o... [cut 3396 chars]
+
+[main] TEXT
+Spec body declares no acceptance criteria, so no follow-up is flagged. Now the step 7 state read for the existing parent (name passes the step 1 shape).
+
+[main] BASH
+$CRAFT[treat]/scripts/followup_parent.py state fixture-chosen-spec build-the-follow-ups-of-fixture-chosen-spec-chosen-2026-10-22; echo "exit: $?"
+
+[main] RESULT
+{"parent": "build-the-follow-ups-of-fixture-chosen-spec-chosen-2026-10-22", "status": "ready", "listed": ["chosen-reject-path-traversal-in-the-export-endpoint", "chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it"], "held": [{"name": "chosen-reject-path-traversal-in-the-export-endpoint", "status": "ready", "title": "Chosen: reject path traversal in the export endpoint", "delivers": "- `export_path` (src/export.py:4) rejects any `name` whose joined path resolves outside `base`, raising `ValueError` instead of returning a path. Today it returns the bare join with no check (src/export.py:5). Containment is decided on resolved paths (`os.path.realpath` of both sides, then `os.path.commonpath` against the resolved base), so `..` segments, absolute names (which `os.path.join` lets replace `base` entirely), and symlinks pointing out of `base` are all rejected. - Names that stay inside `base` keep their current return value, `os.path.join(base, name)` (src/export.py:5), so existing legitimate callers see no change. - `ValueError` is used because the repo defines no custom exception types (src/ has none; see src/export.py:1-5, src/util.py:1-3) and it is the stdlib's e... [cut 1064 chars]
+
+[main] TEXT
+I ran `/craft:tidy-followups spec/fixture-chosen-spec` up to step 7. It stopped there and wrote nothing, because the spec already has a follow-up parent at `ready` and no answer was given for the question that branch asks. Your three answers are for steps 8 and 11, which don't run when a parent already exists.
+
+**Gather:** the gather script exited 0 with a complete result. The spec name passed the step 1 checks.
+
+---
+
+**Header:** entry `complete-status` · slice basis `labelled` · 1 slice, 1 child · 5 candidates read, 2 kept · 1 excluded by label · 0 skipped edges
+
+**Recommended**
+- Chosen: stop writing [REDACTED] to the request trace — `chosen-stop-writing-bearer-tokens-to-the-request-trace`
+  - **Reason:** the request trace writes the Authorization header's value as-is to a shared log. Every request until this is fixed puts another live credential into logs people read.
+  - **Class:** open security exposure
+
+1 of 2 met a reason class.
+
+**Other follow-ups**
+- Chosen: fix a typo in a docstring
+
+**Blocked:** none.
+
+No unmet acceptance criteria: the spec body states none, so no follow-up is flagged. The two follow-ups cover unrelated ground, so there is no possible-overlap line.
+
+Nothing has been written yet.
+
+---
+
+### Step 7: the existing follow-up parent
+
+The gather found one parent, `build-the-follow-ups-of-fixture-chosen-spec-chosen-2026-10-22`, and its state read exited 0. That parent's status is **`ready`**, so branch (c) applies: it cannot be resumed or have anything nested into it. No second parent will be created, and steps 8 to 12 do not run. It already holds two `ready` follow-ups:
+- `chosen-reject-path-traversal-in-the-export-endpoint`
+- `chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it`
+
+```
+/craft:execute task/build-the-follow-ups-of-fixture-chosen-spec-chosen-2026-10-22
+```
+
+Warning: if a build is already running against this parent, stop it before dropping, because a drop un-nests the unfinished children underneath it.
+
+> **Build it with the command above, or drop it? (`drop` and a reason, or nothing)**
+
+No answer to this question was supplied. The procedure does not let me continue on an assumed answer, so the run stops here and nothing has been written.
+
+---
+
+### Closing report
+
+- **Included / left / left out / refined:** none. Steps 8 to 12 did not run on this branch.
+- **Writes:** nothing was dropped, merged, refined or nested.
+- unmet-criterion check: none flagged; 0 blocked not checked
+
+If you created this parent yourself, ignore this command. If you didn't, it removes the marker label so the follow-up gather stops counting the parent, and leaves the record otherwise alone:
+
+```
+lore record update task/build-the-follow-ups-of-fixture-chosen-spec-chosen-2026-10-22 --vault default --unset-label craft/followup-parent
+```
+
+There is no distill command, because distilling waits on the parent. To build what the parent holds, use the `/craft:execute` command above. To drop the parent instead, rerun the ritual and answer `drop` at this question. It will then show what the drop would un-nest and ask for a reason.

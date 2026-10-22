@@ -1,0 +1,8 @@
+vault ADDED task/build-the-follow-ups-of-fixture-nest-fail-spec-chosen-2026-10-22.json
+vault ADDED task/build-the-follow-ups-of-fixture-nest-fail-spec-chosen-2026-10-22.md
+vault CHANGED task/nest-fail-reject-path-traversal-in-the-archive-extractor.json
+vault CHANGED task/nest-fail-reject-path-traversal-in-the-archive-extractor.md
+vault CHANGED task/nest-fail-stop-logging-session-cookies.json
+vault CHANGED task/nest-fail-stop-logging-session-cookies.md
+repo head before=[sha:ded091a8] after=[sha:ded091a8]
+repo status after=''

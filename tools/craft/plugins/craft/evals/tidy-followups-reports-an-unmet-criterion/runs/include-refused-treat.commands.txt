@@ -1,0 +1,80 @@
+[main] BASH
+$CRAFT[treat]/scripts/followup_gather.py fixture-pennant-spec; echo "exit: $?"
+
+[main] BASH
+for n in task/pennants-accept-a-lower-case-letter task/pennants-sort-the-table-by-letter task/signal-lamp-report-a-low-battery-under-twenty-percent spec/fixture-pennant-spec; do echo "=== $n"; lore record show --json --vault default $n; echo "exit: $?"; done
+
+[main] BASH
+cd $RUN[include-refused-treat]/fixture/repo && git log --oneline | head; ls -R src tests 2>/dev/null; cat src/pennants.py src/lamp.py
+
+[main] AGENT
+Refine the follow-up task `task/signal-lamp-report-a-low-battery-under-twenty-percent` in the lore vault `default`.
+
+- Read $CRAFT[treat]/skills/_shared/refine.md yourself and follow it in full, in its unattended mode, against that one task only. `${CLAUDE_PLUGIN_ROOT}` is $CRAFT[treat]. The `lore` command on PATH reads the vault.
+- The code the task's claims point at is the git repository at $RUN[include-refused-treat]/fixture/repo; work against it (read-only for code; only the... [cut 303 chars]
+
+[sub] BASH
+cd $RUN[include-refused-treat]/fixture/repo; lore --help 2>&1 | head -30; lore record show task/signal-lamp-report-a-low-battery-under-twenty-percent; lore task graph signal-lamp-report-a-low-battery-under-twenty-percent
+
+[sub] BASH
+cd $RUN[include-refused-treat]/fixture/repo; lore record show --help; lore record update --help | head -50; git status; git log --oneline | head; ls -R . | grep -v .git | head -40; cat -n src/lamp.py
+
+[sub] BASH
+cd $RUN[include-refused-treat]/fixture/repo; lore record show --json task/signal-lamp-report-a-low-battery-under-twenty-percent; ls -a; ls tests 2>&1; cat README.md; grep -rn "lamp\|battery" src README.md | head; cat src/bell.py
+
+[sub] BASH
+cd $RUN[include-refused-treat]/fixture/repo; lore search "lamp"; lore search "battery"; lore search "kind:area"; lore search "test"; lore search "pytest"; lore record show task/fixture-pennant-spec-the-slice; lore areas
+
+[sub] BASH
+lore record show task/lens-oil-round-the-litres-to-one-decimal; lore record show task/lens-house-reject-negative-hours; lore search "kind:decision"; lore search "kind:adr"; lore search "lesson"
+
+[sub] BASH
+cd $CRAFT[treat]; grep -n -A6 "Flow-out" templates/plan.md; grep -rln "credential-pattern" . | head
+
+[sub] BASH
+cd $CRAFT[treat]; sed -n 30,40p templates/plan.md; grep -n -i -A25 "credential-pattern" skills/_shared/security.md | head -60
+
+[sub] BASH
+set -e
+T=$(mktemp)
+cat > "$T" <<'EOF'
+`battery_state` in `src/lamp.py` always returns `ok`. Agreed behaviour: return `low` for a percent below 20 and `ok` otherwise. The repository has no tests yet; add `tests/test_lamp.py`.
+
+**Delivers:** `battery_state` in `src/lamp.py` (currently a constant `ok`, src/lamp.py:1-2) returns `low` when `percent` is below 20 and `ok` otherwise — so 20 itself is `ok`.
+
+**Test contract:** A test asserts `battery_state(19)` is `low`, `battery_state(20)` is `ok`, and `battery_state(80)` is `ok`.
+
+**Files:** `src/lamp.py`, `tests/test_lamp.py` (new)
+
+## Flow-out
+
+- [ ] Touched area/subsystem profiles updated with what changed
+- [ ] Prover-validated assumptions captured as session candidates (durable at flush)
+- [ ] New decisions / lessons / follow-ups surfaced during the build recorded
+EOF
+python3 -I - "$T" <<'PY'
+import re,sys
+t=open(sys.argv[1]).read()
+pats=[r'(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s*[=:]\s*\S+',r'(?i)\b(AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|gho_[A-Za-z0-9]{36}|glpat-[A-Za-z0-9_-]{20}|xox[baprs]-[A-Za-z0-9-]+|sk_live_[A-Za-z0-9]+|AIza[0-9A-Za-z_-]{35})\b',r'(?i)bearer\s+[A-Za-z0-9._\-]+',r'(?i)api[_-]?key[\'"]?\s*[:=]\s*[\'"]?[A-Za-z0-9._\-]{16,}',r'\b[A-Za-z0-9+/]{32,}={0,2}\b',r'\b[A-Fa-f0-9]{40,}\b',r'-----BEGIN [A-Z ]*PRIVATE KEY-----']
+print("scrub hits:",[p for p in pats if re.search(p,t)])
+PY
+wc -l < $RUN[include-refused-treat]/fixture/repo/src/lamp.py
+lore record update task/signal-lamp-report-a-low-battery-under-twenty-percent --vault default --status ready < "$T"
+rm -f "$T"
+lore record show task/signal-lamp-report-a-low-battery-under-twenty-percent
+
+[sub] BASH
+lore task graph signal-lamp-report-a-low-battery-under-twenty-percent
+
+[main] BASH
+$CRAFT[treat]/scripts/followup_parent.py check fixture-pennant-spec signal-lamp-report-a-low-battery-under-twenty-percent; echo "exit: $?"
+
+[main] BASH
+children=$(mktemp)
+cat > "$children" <<'CHILDREN_JSON'
+[{"name": "signal-lamp-report-a-low-battery-under-twenty-percent", "reason": "The battery check is a stub that never reports low. Any alerting or display built on it now gets written and tested against a value that never changes, so each new caller adds to the cost of the fix.", "revision": "[sha:580d5d2c]"}]
+CHILDREN_JSON
+$CRAFT[treat]/scripts/followup_parent.py assemble fixture-pennant-spec --children "$children"
+rc=$?
+rm -f "$children"
+echo "exit: $rc"

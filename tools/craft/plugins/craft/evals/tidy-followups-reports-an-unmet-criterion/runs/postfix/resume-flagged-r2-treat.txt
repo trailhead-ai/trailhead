@@ -1,0 +1,35 @@
+nested task/lens-oil-round-the-litres-to-one-decimal
+removed from the list: task/lens-house-reject-negative-hours
+
+---
+
+### Closing report
+
+I resumed parent `build-the-follow-ups-of-fixture-lens-house-spec-chosen-2026-10-22` and it is now buildable (`ready`). It holds one follow-up:
+
+- **Nested:** Lens oil: round the litres to one decimal (`lens-oil-round-the-litres-to-one-decimal`)
+- **Removed from the parent's list:** Lens house: reject negative hours (`lens-house-reject-negative-hours`), because it is flagged as an unmet criterion.
+- **Failed writes:** none.
+
+unmet-criterion check: 1 flagged; 0 blocked not checked
+
+- Lens house: reject negative hours (`lens-house-reject-negative-hours`), against **AC2**: the code never rejects negative hours, so the spec's own requirement is undone, not just hardening.
+
+```
+/craft:execute task/build-the-follow-ups-of-fixture-lens-house-spec-chosen-2026-10-22
+```
+
+If you did not create this parent, this command removes the marker label so the follow-up gather stops counting it, and leaves the record otherwise unchanged:
+
+```
+lore record update task/build-the-follow-ups-of-fixture-lens-house-spec-chosen-2026-10-22 --vault default --unset-label craft/followup-parent
+```
+
+**Options for the flagged follow-up:**
+1. **Build AC2 as a slice.** The spec is `complete`, so this means starting a new spec for it.
+2. **Amend the spec** to remove or reword AC2.
+3. **Re-run this ritual** and clear the flag with `not unmet lens-house-reject-negative-hours` if it is not really unmet. A live parent remains, so do this once that parent is built or dropped.
+
+```
+/craft:tidy-followups spec/fixture-lens-house-spec
+```

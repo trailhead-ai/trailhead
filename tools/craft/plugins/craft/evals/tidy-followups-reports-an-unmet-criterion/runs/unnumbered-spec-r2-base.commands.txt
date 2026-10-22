@@ -1,0 +1,65 @@
+[main] BASH
+P=$CRAFT[base]; $P/scripts/followup_gather.py fixture-lantern-rota-spec; echo "exit: $?"; cat $P/skills/_shared/security.md
+
+[main] BASH
+for n in keeper-board-print-the-names-in-capitals lantern-rota-a-crew-of-one-keeper lantern-rota-reword-the-module-comment; do lore record show --json --vault default task/$n; echo "exit: $?"; done
+
+[main] AGENT
+Refine the task `task/keeper-board-print-the-names-in-capitals` in the lore vault `default` (the `lore` command on your PATH reads that vault).
+
+Instructions:
+- Read $CRAFT[base]/skills/_shared/refine.md yourself and follow it in full, in its **unattended mode**, against this one task only. `${CLAUDE_PLUGIN_ROOT}` is $CRAFT[base].
+- The code the task's claims point at is the git repository at $RUN[unnumbered-spec-r2-base]/fixture/repo. Read it to verify claims; do not modify the... [cut 478 chars]
+
+[sub] BASH
+lore show task/keeper-board-print-the-names-in-capitals 2>&1 || lore --help
+
+[sub] BASH
+lore record show task/keeper-board-print-the-names-in-capitals; echo ---; lore task graph keeper-board-print-the-names-in-capitals; echo ---; lore record --help; lore record show --help
+
+[sub] BASH
+lore record show --json task/keeper-board-print-the-names-in-capitals; cd $RUN[unnumbered-spec-r2-base]/fixture/repo && git status --short && git log --oneline | head; find . -path ./.git -prune -o -type f -print; echo ---; cat -n src/board.py
+
+[sub] BASH
+cd $RUN[unnumbered-spec-r2-base]/fixture/repo; cat -n README.md; grep -rn "keeper_board\|board\|upper" src README.md; ls -a; ls tests 2>&1; echo ---; lore record show task/fixture-lantern-rota-spec-the-slice; echo ---; lore search "keeper board"; lore search "board"; lore search "kind:area"; lore search "tests"; lore search "upper-case"
+
+[sub] BASH
+lore record show task/lens-oil-round-the-litres-to-one-decimal; lore record show spec/fixture-lantern-rota-spec; cat $CRAFT[base]/templates/plan.md | grep -n -A6 "Flow-out"
+
+[sub] BASH
+sed -n 30,40p $CRAFT[base]/templates/plan.md; lore record update --help | head -40
+
+[sub] BASH
+set -e; T=$(mktemp); trap 'rm -f "$T"' EXIT
+cat > "$T" <<'EOF'
+`keeper_board` in `src/board.py` prints the names as typed. Agreed behaviour: it returns the names upper-cased and joined by a comma and a space. The repository has no tests yet; add `tests/test_board.py`.
+
+**Delivers:** `keeper_board(names)` (src/board.py:1) returns each name upper-cased, joined by a comma and a space; today it joins the names unchanged (src/board.py:2). The separator stays as it is; only the case changes.
+
+**Test contract:** New `tests/test_board.py` (the repo has no `tests/` directory yet) asserts `keeper_board(['ada', 'Bo'])` returns `ADA, BO` and that a single name `['ada']` returns `ADA`. The test fails against the current code before the fix.
+
+**Files:** `src/board.py`, `tests/test_board.py` (new)
+
+## Flow-out
+
+- [ ] Touched area/subsystem profiles updated with what changed
+- [ ] Prover-validated assumptions captured as session candidates (durable at flush)
+- [ ] New decisions / lessons / follow-ups surfaced during the build recorded
+EOF
+grep -niE 'key|token|secret|password|AKIA|BEGIN .*PRIVATE' "$T" || echo "scrub clean"
+wc -l < $RUN[unnumbered-spec-r2-base]/fixture/repo/src/board.py
+lore record update task/keeper-board-print-the-names-in-capitals --status ready < "$T"
+lore record show task/keeper-board-print-the-names-in-capitals; lore record show --json task/keeper-board-print-the-names-in-capitals | grep status
+
+[main] BASH
+$CRAFT[base]/scripts/followup_parent.py check fixture-lantern-rota-spec keeper-board-print-the-names-in-capitals; echo "exit: $?"
+
+[main] BASH
+children=$(mktemp)
+cat > "$children" <<'CHILDREN_JSON'
+[{"name": "keeper-board-print-the-names-in-capitals", "reason": "The agreed upper-case output is not in place yet; anything built on the board's output meanwhile is written against names as typed, so changing it later means fixing those consumers too.", "revision": "[sha:41aad6e0]"}]
+CHILDREN_JSON
+$CRAFT[base]/scripts/followup_parent.py assemble fixture-lantern-rota-spec --children "$children"
+rc=$?
+rm -f "$children"
+echo "exit: $rc"

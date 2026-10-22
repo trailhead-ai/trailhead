@@ -1,0 +1,27 @@
+### Closing report
+
+I created one buildable parent with the chart-printer follow-up nested under it. Nothing was dropped or merged. `assemble` exited 0, nested the one child with no failed writes, and marked the parent buildable.
+
+**Parent:** `build-the-follow-ups-of-fixture-tide-table-spec-chosen-2026-10-22`
+
+| Set | Follow-ups |
+|---|---|
+| **Included, refined and nested** | Chart printer: zero-pad the hour column (`chart-printer-zero-pad-the-hour-column`) |
+| **Left** | Tide table: reject an hour outside the day (`tide-table-reject-an-hour-outside-the-day`)<br>Tide table: mention the unit in the module comment (`tide-table-mention-the-unit-in-the-module-comment`) |
+| **Left out at step 10** | none |
+| **Refined but not nested** | none |
+| **Failed writes** | none |
+
+Note that `tide-table-reject-an-hour-outside-the-day` was on my shortlist and you moved it off, so it is in the left set. It stays in the backlog as an open follow-up.
+
+To build the parent:
+
+```
+/craft:execute task/build-the-follow-ups-of-fixture-tide-table-spec-chosen-2026-10-22
+```
+
+To distill the spec:
+
+```
+/craft:distill spec/fixture-tide-table-spec
+```

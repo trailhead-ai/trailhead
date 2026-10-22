@@ -1,0 +1,194 @@
+{
+ "dispose_runs": [
+  {
+   "at": 5,
+   "preview": true,
+   "file": {
+    "reason": "",
+    "drops": [],
+    "merges": [
+     {
+      "survivor": "E1",
+      "absorbed": [
+       {
+        "role": "E2",
+        "intent": "Adds a # border on each side of the banner text, which the centring follow-up does not cover."
+       }
+      ]
+     }
+    ]
+   },
+   "exit": 0,
+   "stderr_lines": [],
+   "result": {
+    "drops": [],
+    "merges": [
+     {
+      "survivor": "E1",
+      "status": "open",
+      "reset-to-open": false,
+      "absorbed": [
+       {
+        "name": "E2",
+        "status": "open",
+        "note": "## Merged from task/E2\n\nIntent: Adds a # border on each side of the banner text, which the centring follow-up does not cover.\n"
+       }
+      ],
+      "supersedes": [
+       {
+        "name": "E2",
+        "by": "E1"
+       }
+      ]
+     }
+    ],
+    "dependents": {}
+   }
+  },
+  {
+   "at": 6,
+   "preview": true,
+   "file": {
+    "reason": "",
+    "drops": [],
+    "merges": [
+     {
+      "survivor": "E1",
+      "absorbed": [
+       {
+        "role": "E2",
+        "intent": "Also keep any border one character wide and centre the banner on a forty column line, as the sign painter asked"
+       }
+      ]
+     }
+    ]
+   },
+   "exit": 0,
+   "stderr_lines": [],
+   "result": {
+    "drops": [],
+    "merges": [
+     {
+      "survivor": "E1",
+      "status": "open",
+      "reset-to-open": false,
+      "absorbed": [
+       {
+        "name": "E2",
+        "status": "open",
+        "note": "## Merged from task/E2\n\nIntent: Also keep any border one character wide and centre the banner on a forty column line, as the sign painter asked\n"
+       }
+      ],
+      "supersedes": [
+       {
+        "name": "E2",
+        "by": "E1"
+       }
+      ]
+     }
+    ],
+    "dependents": {}
+   }
+  },
+  {
+   "at": 7,
+   "preview": false,
+   "file": {
+    "reason": "",
+    "drops": [],
+    "merges": [
+     {
+      "survivor": "E1",
+      "absorbed": [
+       {
+        "role": "E2",
+        "intent": "Also keep any border one character wide and centre the banner on a forty column line, as the sign painter asked"
+       }
+      ]
+     }
+    ]
+   },
+   "exit": 0,
+   "stderr_lines": [],
+   "result": {
+    "dropped": [],
+    "merged": [
+     {
+      "survivor": "E1",
+      "absorbed": [
+       "E2"
+      ],
+      "survivor-prior-status": "open"
+     }
+    ],
+    "reset-to-open": [],
+    "failed": [],
+    "incomplete-merges": []
+   }
+  }
+ ],
+ "order": {
+  "write_dispose": [
+   7
+  ]
+ },
+ "children_files": [],
+ "fetched_by_main": [
+  "E1",
+  "E2"
+ ],
+ "progress": {
+  "assistant_text": [
+   {
+    "at": 8,
+    "line": "merged task/E2 into task/E1"
+   }
+  ],
+  "final_report": [
+   "merged task/E2 into task/E1"
+  ]
+ },
+ "closing_commands": [
+  {
+   "line": "/craft:distill spec/fixture-banner-printer-spec",
+   "standalone": true
+  }
+ ],
+ "records": {
+  "E1": {
+   "status": "open",
+   "parent": null,
+   "supersedes": [
+    "E2"
+   ],
+   "depends-on": [],
+   "dropped_note": null,
+   "merged_sections": [
+    {
+     "from": "E2",
+     "first_line": "Intent: Also keep any border one character wide and centre the banner on a forty column line, as the sign painter asked"
+    }
+   ],
+   "body_changed": true,
+   "new": false,
+   "body_has_5000": false
+  },
+  "E2": {
+   "status": "superseded",
+   "parent": null,
+   "supersedes": [],
+   "depends-on": [],
+   "dropped_note": null,
+   "merged_sections": [],
+   "body_changed": false,
+   "new": false,
+   "body_has_5000": false
+  }
+ },
+ "repo": {
+  "head_before": "[sha:e093cf95]",
+  "head_after": "[sha:e093cf95]",
+  "status_after": ""
+ },
+ "real_vault_hits": ""
+}

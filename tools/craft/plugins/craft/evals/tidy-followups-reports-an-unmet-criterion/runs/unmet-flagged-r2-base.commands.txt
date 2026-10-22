@@ -1,0 +1,89 @@
+[main] BASH
+$CRAFT[base]/scripts/followup_gather.py fixture-tide-table-spec; echo "exit: $?"
+
+[main] BASH
+for n in chart-printer-zero-pad-the-hour-column tide-table-mention-the-unit-in-the-module-comment tide-table-reject-an-hour-outside-the-day; do echo "=== $n"; lore record show --json --vault default task/$n; echo "exit: $?"; done
+
+[main] AGENT
+You are refining one vault task: `task/chart-printer-zero-pad-the-hour-column` in the lore vault `default` (the `lore` command on your PATH reads it).
+
+Instructions:
+- Read $CRAFT[base]/skills/_shared/refine.md yourself and follow it in full, in its unattended mode, against this one task only. (`${CLAUDE_PLUGIN_ROOT}` is $CRAFT[base].)
+- The code the task's claims point at is the git repository at $RUN[unmet-flagged-r2-base]/fixture/repo. Work against it read-only for verificati... [cut 428 chars]
+
+[sub] BASH
+lore record show task/chart-printer-zero-pad-the-hour-column; echo ---; lore task graph chart-printer-zero-pad-the-hour-column
+
+[sub] BASH
+lore record show --help 2>&1 | head -30; cd $RUN[unmet-flagged-r2-base]/fixture/repo && git status --short && git log --oneline | head; ls -R . | grep -v .git | head -30; cat -n src/chartprint.py
+
+[sub] BASH
+lore record show --json task/chart-printer-zero-pad-the-hour-column | python3 -I -c "import json,sys;d=json.load(sys.stdin);print(d['sidecar'])"; cd $RUN[unmet-flagged-r2-base]/fixture/repo; cat -n README.md; ls -a; grep -rn "chartprint\|render_row" . --exclude-dir=.git
+
+[sub] BASH
+lore record show task/fixture-tide-table-spec-the-slice; echo ---; for q in chartprint "chart printer" render_row "zero-pad" "test convention" pytest tests "kind:area chart" "kind:area"; do echo "== $q"; lore search "$q" 2>&1 | head -15; done
+
+[sub] BASH
+for q in "kind:adr" "kind:lesson" "kind:spec" "kind:decision" "harbour" "test framework" unittest "one decimal" height; do echo "== $q"; lore search "$q" 2>&1 | head -8; done; ls $RUN[unmet-flagged-r2-base]/fixture/vault
+
+[sub] BASH
+lore record show task/lens-oil-round-the-litres-to-one-decimal; echo ---; lore record show spec/fixture-tide-table-spec
+
+[sub] BASH
+cd $CRAFT[base]/templates; grep -n -A6 "Flow-out" plan.md; cat task.md; grep -rln "credential-pattern scrub\|Credential-pattern" ../skills | head
+
+[sub] BASH
+cd $CRAFT[base]; sed -n 30,40p templates/plan.md; grep -n -i -B2 -A25 "credential-pattern" skills/_shared/security.md | head -60
+
+[sub] BASH
+set -e; T=$(mktemp); cat > "$T" <<'EOF'
+`render_row` in `src/chartprint.py` prints the hour as it comes, so 7 sorts after 18 in a listing. Agreed behaviour: `render_row(7, 1.5)` returns `07 1.5`: the hour zero-padded to two digits, a space, then the height with one decimal. The repository has no tests yet; add `tests/test_chartprint.py`.
+
+**Delivers:** `render_row(hour, height)` in `src/chartprint.py` (currently formats both values unpadded and unrounded, `src/chartprint.py:2`) returns the hour zero-padded to two digits, a single space, then the height formatted to exactly one decimal place — so `render_row(7, 1.5)` returns `07 1.5`, per the agreed behaviour captured above. Two digits cover every valid hour, since the tide table's hours run 0 to 23 ([[spec/fixture-tide-table-spec]] AC1).
+
+**Test contract:** New `tests/test_chartprint.py` (the repository has no tests yet) asserts, written failing first:
+- `render_row(7, 1.5)` returns `07 1.5` (single-digit hour is zero-padded);
+- `render_row(18, 2.25)`-style two-digit hours are left unpadded, e.g. `render_row(18, 3.0)` returns `18 3.0`;
+- `render_row(0, 2)` returns `00 2.0` (hour 0 padded; whole-number height still shows one decimal).
+Verify with `python -m pytest tests/test_chartprint.py` — all pass.
+
+**Files:** `src/chartprint.py`, `tests/test_chartprint.py` (new)
+
+## Flow-out
+
+- [ ] Touched area/subsystem profiles updated with what changed
+- [ ] Prover-validated assumptions captured as session candidates (durable at flush)
+- [ ] New decisions / lessons / follow-ups surfaced during the build recorded
+EOF
+echo "$T"
+
+[sub] BASH
+set -e; T=$RUN[unmet-flagged-r2-base]/tmp/tmp.Y50rR8ubV2
+python3 -I - "$T" <<'EOF'
+import sys,re
+p=sys.argv[1]; s=open(p).read()
+s=s.replace("- `render_row(18, 2.25)`-style two-digit hours are left unpadded, e.g. `render_row(18, 3.0)` returns `18 3.0`;","- a two-digit hour is left as is: `render_row(18, 3.0)` returns `18 3.0`;")
+open(p,'w').write(s)
+pats=[r'(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s*[=:]\s*\S+',
+r'(?i)\b(AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|gho_[A-Za-z0-9]{36}|glpat-[A-Za-z0-9_-]{20}|xox[baprs]-[A-Za-z0-9-]+|sk_live_[A-Za-z0-9]+|AIza[0-9A-Za-z_-]{35})\b',
+r'(?i)bearer\s+[A-Za-z0-9._\-]+',r'(?i)api[_-]?key[\'"]?\s*[:=]\s*[\'"]?[A-Za-z0-9._\-]{16,}',
+r'\b[A-Za-z0-9+/]{32,}={0,2}\b',r'\b[A-Fa-f0-9]{40,}\b',r'-----BEGIN [A-Z ]*PRIVATE KEY-----']
+print("scrub hits:",[m.group(0) for q in pats for m in re.finditer(q,s)])
+EOF
+wc -l < $RUN[unmet-flagged-r2-base]/fixture/repo/src/chartprint.py; lore record show spec/fixture-tide-table-spec >/dev/null && echo spec-ok; grep -c '^\*\*Delivers:\*\*\|^\*\*Test contract:\*\*\|^\*\*Files:\*\*' "$T"
+
+[sub] BASH
+T=$RUN[unmet-flagged-r2-base]/tmp/tmp.Y50rR8ubV2; lore record update task/chart-printer-zero-pad-the-hour-column --status ready < "$T" && rm -f "$T"; ls "$T" 2>&1; lore record show task/chart-printer-zero-pad-the-hour-column
+
+[main] BASH
+$CRAFT[base]/scripts/followup_parent.py check fixture-tide-table-spec chart-printer-zero-pad-the-hour-column; echo "exit: $?"
+
+[main] BASH
+children=$(mktemp)
+cat > "$children" <<'CHILDREN_JSON'
+[{"name": "chart-printer-zero-pad-the-hour-column", "reason": "Unpadded hours make listings sort out of order; anything that parses, sorts or snapshots the printed rows before the fix is built around the wrong format and has to change too, so the fix costs more the longer it waits.", "revision": "[sha:09a32b01]"}]
+CHILDREN_JSON
+$CRAFT[base]/scripts/followup_parent.py assemble fixture-tide-table-spec --children "$children"
+rc=$?
+rm -f "$children"
+echo "exit: $rc"

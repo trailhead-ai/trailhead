@@ -1,0 +1,24 @@
+## Result
+
+I nested 2 of the 3 shortlisted follow-ups under a new parent, `task/build-the-follow-ups-of-fixture-chosen-spec-chosen-2026-10-22`. The parent is now `ready` to build. The third, the request-trace credential leak, is still `open` because refinement left a question only you can answer.
+
+- **Nested under the new parent:**
+  - Chosen: reject path traversal in the export endpoint (`chosen-reject-path-traversal-in-the-export-endpoint`)
+  - Chosen: replace the truncating money rounding before more callers adopt it (`chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it`)
+- **Refined but not nested:** Chosen: stop writing [REDACTED] to the request trace (`chosen-stop-writing-bearer-tokens-to-the-request-trace`). The open question is whether the Authorization header should be replaced with a fixed placeholder in the log or dropped entirely. The refinement suggests a placeholder.
+- **Left alone:** Chosen: fix a typo in a docstring (`chosen-fix-a-typo-in-a-docstring`).
+- **Nothing dropped or merged, and no write failed.**
+
+unmet-criterion check: none flagged; 0 blocked not checked
+
+The spec body declares no acceptance criteria, so no follow-up could be flagged against one.
+
+Next commands:
+
+```
+/craft:execute task/build-the-follow-ups-of-fixture-chosen-spec-chosen-2026-10-22
+```
+
+```
+/craft:distill spec/fixture-chosen-spec
+```

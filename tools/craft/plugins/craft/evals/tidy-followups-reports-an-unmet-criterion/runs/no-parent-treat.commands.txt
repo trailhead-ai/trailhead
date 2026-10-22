@@ -1,0 +1,8 @@
+[main] BASH
+$CRAFT[treat]/scripts/followup_gather.py fixture-harbour-dues-spec; echo "exit: $?"
+
+[main] BASH
+for n in task/harbour-dues-reword-the-module-comment task/harbour-dues-waive-dues-under-ten-tons spec/fixture-harbour-dues-spec; do echo "=== $n"; lore record show --json --vault default $n; echo "exit: $?"; done
+
+[main] BASH
+cd $RUN[no-parent-treat]/fixture/repo && git log --oneline | head && git ls-files && cat src/dues.py

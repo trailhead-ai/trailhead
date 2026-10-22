@@ -1,0 +1,114 @@
+{
+ "cell": "resume-flagged",
+ "outcome_lines": [
+  {
+   "line": "unmet-criterion check: 1 flagged; 0 blocked not checked",
+   "flagged": 1,
+   "blocked": 0
+  }
+ ],
+ "final_ac_ids": [
+  "AC2"
+ ],
+ "closing_commands": [
+  {
+   "line": "/craft:execute task/PARENT",
+   "standalone": true
+  },
+  {
+   "line": "lore record update task/PARENT --vault default --unset-label craft/followup-parent",
+   "standalone": true
+  },
+  {
+   "line": "/craft:tidy-followups spec/fixture-lens-house-spec",
+   "standalone": true
+  }
+ ],
+ "order": {
+  "state": [
+   8
+  ],
+  "check": [
+   10
+  ],
+  "step6_list": [
+   11
+  ],
+  "resume_question": [
+   11
+  ],
+  "not_unmet_offer": [
+   11,
+   13
+  ],
+  "resume": [
+   12
+  ],
+  "resume_exit": [
+   0
+  ]
+ },
+ "check_args": [
+  [
+   "K",
+   "PARENT",
+   "U"
+  ]
+ ],
+ "assemble_children": [],
+ "resume_children": [
+  [
+   "K"
+  ]
+ ],
+ "dispose_files": [],
+ "agent_targets": [],
+ "fetched_by_main": [
+  "PARENT"
+ ],
+ "step6_list": [
+  "**Unmet acceptance criteria:**",
+  "- Lens house: reject negative hours (`U`). Flagged against **AC2**: `lens_turns` still has no guard for negative hours, so the error the criterion requires is never raised. It returns a negative count instead (`src/lens.py:2`).",
+  "",
+  "Nothing has been written yet.",
+  "",
+  "---",
+  "",
+  "## Step 7 \u2014 existing follow-up parent"
+ ],
+ "records": {
+  "U": {
+   "status": "ready",
+   "parent": null,
+   "depends-on": [],
+   "body_changed": false,
+   "new": false,
+   "dropped_note": null
+  },
+  "K": {
+   "status": "ready",
+   "parent": "PARENT",
+   "depends-on": [],
+   "body_changed": false,
+   "new": false,
+   "dropped_note": null
+  },
+  "PARENT": {
+   "status": "ready",
+   "parent": null,
+   "depends-on": [],
+   "body_changed": true,
+   "new": false,
+   "dropped_note": null,
+   "lists": [
+    "K"
+   ]
+  }
+ },
+ "repo": {
+  "head_before": "[sha:15f6806c]",
+  "head_after": "[sha:15f6806c]",
+  "status_after": ""
+ },
+ "real_vault_hits": ""
+}

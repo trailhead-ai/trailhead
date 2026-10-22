@@ -1,0 +1,25 @@
+The merge went through: the emphasis-marks follow-up is now superseded by the capitals one, which carries its intent. The ritual stopped there because nothing was included, so no refinement ran and no parent task was created.
+
+**How it went:**
+- **No shortlist.** Neither follow-up met a reason class (0 of 2). Both only change how the tote id is formatted on the tag, so waiting doesn't make them costlier.
+- **First merge refused.** Folding the capitals follow-up into the emphasis-marks one was refused because another task, `tote-tag-reprint-the-day-s-tags-in-one-batch`, depends on the capitals follow-up. Nothing was written. Per your answer, I accepted the reverse merge the ritual offered.
+- **Reverse merge confirmed and written.** The preview passed, you answered `yes` at Confirmation 2, and every write landed and read back with no failures.
+
+`merged task/tote-tag-print-the-tote-id-with-emphasis-marks into task/tote-tag-print-the-tote-id-in-capitals`
+
+### Closing report
+
+- **Included:** none, so refinement did not run and no parent was created.
+- **Left:** Tote tag: print the tote id in capitals (`tote-tag-print-the-tote-id-in-capitals`)
+- **Left out / refined but not nested:** none
+- **Dropped:** none
+- **Merged:** Tote tag: print the tote id in capitals (`tote-tag-print-the-tote-id-in-capitals`), which was `open` before the merge, now carries Tote tag: print the tote id with emphasis marks (`tote-tag-print-the-tote-id-with-emphasis-marks`).
+- **Reset to open:** none
+- **Failed writes:** none
+- **Held back:** none
+
+unmet-criterion check: none flagged; 0 blocked not checked
+
+```
+/craft:distill spec/fixture-tote-tag-spec
+```

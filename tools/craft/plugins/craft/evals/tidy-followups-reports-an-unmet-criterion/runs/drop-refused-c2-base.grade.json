@@ -1,0 +1,132 @@
+{
+ "cell": "drop-refused-c2",
+ "outcome_lines": [],
+ "final_ac_ids": [],
+ "closing_commands": [
+  {
+   "line": "/craft:execute task/build-the-follow-ups-of-fixture-chart-datum-spec-chosen-2026-10-22",
+   "standalone": true
+  },
+  {
+   "line": "/craft:distill spec/fixture-chart-datum-spec",
+   "standalone": true
+  }
+ ],
+ "order": {
+  "agent": [
+   11
+  ],
+  "check": [
+   13
+  ],
+  "assemble": [
+   14
+  ],
+  "assemble_exit": [
+   0
+  ]
+ },
+ "check_args": [
+  [
+   "K"
+  ]
+ ],
+ "assemble_children": [
+  [
+   "K"
+  ]
+ ],
+ "resume_children": [],
+ "dispose_files": [
+  {
+   "at": 6,
+   "preview": true,
+   "file": {
+    "reason": "the retired spring-tide table has no readers left",
+    "drops": [
+     "D"
+    ],
+    "merges": 0
+   },
+   "exit": 0
+  },
+  {
+   "at": 7,
+   "preview": true,
+   "file": {
+    "reason": "the retired spring-tide table has no readers left",
+    "drops": [
+     "D",
+     "U"
+    ],
+    "merges": 0
+   },
+   "exit": 0
+  },
+  {
+   "at": 8,
+   "preview": false,
+   "file": {
+    "reason": "the retired spring-tide table has no readers left",
+    "drops": [
+     "D",
+     "U"
+    ],
+    "merges": 0
+   },
+   "exit": 0
+  }
+ ],
+ "agent_targets": [
+  [
+   "K"
+  ]
+ ],
+ "fetched_by_main": [],
+ "step6_list": [],
+ "records": {
+  "D": {
+   "status": "dropped",
+   "parent": null,
+   "depends-on": [],
+   "body_changed": true,
+   "new": false,
+   "dropped_note": "Reason: the retired spring-tide table has no readers left"
+  },
+  "U": {
+   "status": "dropped",
+   "parent": null,
+   "depends-on": [
+    "D"
+   ],
+   "body_changed": true,
+   "new": false,
+   "dropped_note": "Reason: the retired spring-tide table has no readers left"
+  },
+  "K": {
+   "status": "ready",
+   "parent": "build-the-follow-ups-of-fixture-chart-datum-spec-chosen-2026-10-22",
+   "depends-on": [],
+   "body_changed": true,
+   "new": false,
+   "dropped_note": null
+  },
+  "NEW": {
+   "status": "ready",
+   "parent": null,
+   "depends-on": [],
+   "body_changed": true,
+   "new": true,
+   "dropped_note": null,
+   "lists": [
+    "K"
+   ]
+  }
+ },
+ "repo": {
+  "head_before": "[sha:4b81000f]",
+  "head_after": "[sha:4b81000f]",
+  "status_after": ""
+ },
+ "real_vault_hits": ""
+}

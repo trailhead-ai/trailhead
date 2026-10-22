@@ -1,0 +1,109 @@
+[main] BASH
+$CRAFT[treat]/scripts/followup_gather.py fixture-parcel-scale-spec; echo "exit: $?"
+
+[main] BASH
+for n in parcel-scale-refuse-a-mass-figure-above-the-load-cell-ceiling parcel-scale-refuse-a-mass-figure-below-zero sticker-press-add-a-closing-full-stop-to-the-module-docstring; do echo "=== $n"; lore record show --json --vault default task/$n; echo "exit: $?"; done; echo "=== spec"; lore record show --json --vault default spec/fixture-parcel-scale-spec; echo "exit: $?"
+
+[main] BASH
+dispositions=$(mktemp)
+cat > "$dispositions" <<'DISPOSITIONS_JSON'
+{"reason": "", "drops": [], "merges": [{"survivor": {"name": "parcel-scale-refuse-a-mass-figure-below-zero", "revision": "[sha:58507d9b]"}, "absorbed": [{"name": "parcel-scale-refuse-a-mass-figure-above-the-load-cell-ceiling", "revision": "[sha:e3bda382]", "intent": "Also refuse a figure above the load cell's 5000 gram ceiling with ValueError, which the below-zero check alone does not cover."}]}]}
+DISPOSITIONS_JSON
+$CRAFT[treat]/scripts/followup_dispose.py dispose fixture-parcel-scale-spec --dispositions "$dispositions" --preview
+rc=$?
+rm -f "$dispositions"
+echo "exit: $rc"
+
+[main] BASH
+dispositions=$(mktemp)
+cat > "$dispositions" <<'DISPOSITIONS_JSON'
+{"reason": "", "drops": [], "merges": [{"survivor": {"name": "parcel-scale-refuse-a-mass-figure-below-zero", "revision": "[sha:58507d9b]"}, "absorbed": [{"name": "parcel-scale-refuse-a-mass-figure-above-the-load-cell-ceiling", "revision": "[sha:e3bda382]", "intent": "Also refuse a figure above the load cell's 5000 gram ceiling with ValueError, which the below-zero check alone does not cover."}]}]}
+DISPOSITIONS_JSON
+$CRAFT[treat]/scripts/followup_dispose.py dispose fixture-parcel-scale-spec --dispositions "$dispositions"
+rc=$?
+rm -f "$dispositions"
+echo "exit: $rc"
+
+[main] AGENT
+Refine one vault task: `task/parcel-scale-refuse-a-mass-figure-below-zero` in the lore vault `default`.
+
+1. First read $CRAFT[treat]/skills/_shared/refine.md yourself and follow it in full, in its **unattended** mode, against this one task only. `${CLAUDE_PLUGIN_ROOT}` is $CRAFT[treat]. Use the `lore` command on PATH; it reads a throwaway vault.
+2. The code the task's claims point at is the git repository at $RUN[merge-included-treat]/fixture/repo. ... [cut 443 chars]
+
+[sub] BASH
+lore record show task/parcel-scale-refuse-a-mass-figure-below-zero; echo ---; lore task graph parcel-scale-refuse-a-mass-figure-below-zero
+
+[sub] BASH
+lore record show --help 2>&1 | head -30; lore record show task/parcel-scale-refuse-a-mass-figure-below-zero --json 2>&1 | head -50
+
+[sub] BASH
+cd $RUN[merge-included-treat]/fixture/repo && git status --short && git log --oneline | head && git ls-files && for f in $(git ls-files); do echo "=== $f"; cat -n "$f"; done
+
+[sub] BASH
+cd $RUN[merge-included-treat]/fixture/repo && export HOME=/tmp GIT_CONFIG_NOSYSTEM=1; git log --oneline | head; find . -path ./.git -prune -o -type f -print | while read f; do echo "=== $f"; cat -n "$f"; done
+
+[sub] BASH
+for q in "parcel scale" "scale" "load cell" "ceiling" "5000" "read_weight" "src/scale.py" "kind:area scale" "kind:area parcel" "sensor" "weight"; do echo "### $q"; lore search "$q" 2>&1 | head -20; done; lore record show task/fixture-parcel-scale-spec-the-slice 2>&1; lore record show task/parcel-scale-refuse-a-mass-figure-above-the-load-cell-ceiling 2>&1
+
+[sub] BASH
+lore record show spec/fixture-parcel-scale-spec; lore record show task/sorter-refuse-a-crate-mass-of-zero; lore search "test" | head -20
+
+[sub] BASH
+lore record show task/dials-rename-the-two-dial-constants-to-match-the-manual; grep -n -A8 "Flow-out" $CRAFT[treat]/templates/plan.md; grep -n "Delivers\|Test contract\|Files" $CRAFT[treat]/templates/task.md; grep -rln "credential-pattern scrub" $CRAFT[treat] | head
+
+[sub] BASH
+sed -n 24,40p $CRAFT[treat]/templates/plan.md; grep -n -i -A25 "credential-pattern" $CRAFT[treat]/skills/_shared/security.md | head -50
+
+[sub] BASH
+set -e
+T=$(mktemp -t refine-parcel-scale.XXXXXX)
+lore record show task/parcel-scale-refuse-a-mass-figure-below-zero --json | python3 -I -c 'import json,sys; sys.stdout.write(json.load(sys.stdin)["body"])' > "$T"
+cat >> "$T" <<'EOF'
+
+**Delivers:** `read_weight` in `src/scale.py` (today it returns the sensor's raw figure unchanged, `src/scale.py:1-2`) reads the sensor once and validates the figure:
+- raises `ValueError` for a figure below zero (the captured agreed behaviour above);
+- raises `ValueError` for a figure above the load cell's 5000 gram ceiling (merged intent, from [[task/parcel-scale-refuse-a-mass-figure-above-the-load-cell-ceiling]], whose agreed behaviour is "raise for a figure above 5000");
+- returns every other figure unchanged, including the boundaries 0 and 5000 (neither is below zero nor above 5000).
+
+**Test contract:** New `tests/test_scale.py` (the repository has no tests yet), using a stub sensor whose `raw()` returns a fixed figure and importing `read_weight` from `src.scale` (`src/__init__.py` makes `src` a package). Failing tests to write first:
+- a negative figure (e.g. -1) raises `ValueError`;
+- a figure above the ceiling (e.g. 5001) raises `ValueError`;
+- in-range figures (e.g. 0, 1200, 5000) are returned unchanged.
+Verify with `python -m pytest tests/test_scale.py` from the repository root; expected: all tests pass.
+
+**Files:** `src/scale.py`, `tests/test_scale.py` (new)
+
+## Flow-out
+
+- [ ] Touched area/subsystem profiles updated with what changed
+- [ ] Prover-validated assumptions captured as session candidates (durable at flush)
+- [ ] New decisions / lessons / follow-ups surfaced during the build recorded
+EOF
+python3 -I - "$T" <<'PY'
+import re,sys
+t=open(sys.argv[1]).read()
+pats=[r'(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s*[=:]\s*\S+',r'(?i)\b(AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|gho_[A-Za-z0-9]{36}|glpat-[A-Za-z0-9_-]{20}|xox[baprs]-[A-Za-z0-9-]+|sk_live_[A-Za-z0-9]+|AIza[0-9A-Za-z_-]{35})\b',r'(?i)bearer\s+[A-Za-z0-9._\-]+',r'(?i)api[_-]?key[\'"]?\s*[:=]\s*[\'"]?[A-Za-z0-9._\-]{16,}',r'\b[A-Za-z0-9+/]{32,}={0,2}\b',r'\b[A-Fa-f0-9]{40,}\b',r'-----BEGIN [A-Z ]*PRIVATE KEY-----']
+print("scrub hits:",[p for p in pats if re.search(p,t)])
+PY
+R=$RUN[merge-included-treat]/fixture/repo
+wc -l $R/src/scale.py; ls $R/src/__init__.py
+lore record show task/parcel-scale-refuse-a-mass-figure-above-the-load-cell-ceiling >/dev/null && echo record-ok
+grep -c '^\*\*Delivers:\*\*\|^## Refine — unresolved' "$T"
+echo "$T"
+
+[sub] BASH
+T=$RUN[merge-included-treat]/tmp/refine-parcel-scale.bJp66a
+lore record update task/parcel-scale-refuse-a-mass-figure-below-zero --status ready < "$T" && rm -f "$T"; ls "$T" 2>&1; lore record show task/parcel-scale-refuse-a-mass-figure-below-zero --json | python3 -I -c 'import json,sys; d=json.load(sys.stdin); print(d["sidecar"]["status"], d["sidecar"].get("labels")); print(d["body"])'
+
+[main] BASH
+$CRAFT[treat]/scripts/followup_parent.py check fixture-parcel-scale-spec parcel-scale-refuse-a-mass-figure-below-zero; echo "exit: $?"
+
+[main] BASH
+children=$(mktemp)
+cat > "$children" <<'CHILDREN_JSON'
+[{"name": "parcel-scale-refuse-a-mass-figure-below-zero", "reason": "A faulty sensor's negative or above-ceiling figure reaches the recorded parcel mass today, and every piece of work that consumes recorded masses has to put up with bad values, so the fix costs more the longer it waits.", "revision": "[sha:5587592d]"}]
+CHILDREN_JSON
+$CRAFT[treat]/scripts/followup_parent.py assemble fixture-parcel-scale-spec --children "$children"
+rc=$?
+rm -f "$children"
+echo "exit: $rc"

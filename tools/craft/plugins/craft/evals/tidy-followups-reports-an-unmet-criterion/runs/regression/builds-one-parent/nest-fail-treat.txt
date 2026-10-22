@@ -1,0 +1,33 @@
+### Assemble
+
+Exit 2, `reason-code: nesting-incomplete`. A child could not be nested, so the parent could not be made ready. The fault is on `lore`'s or the vault's side. The parent is left `open`, holding what nested, and nothing was undone. Rerun the ritual, which resumes it.
+
+- nested: `task/nest-fail-reject-path-traversal-in-the-archive-extractor`
+- failed nest: `task/nest-fail-stop-logging-session-cookies`
+
+---
+
+## Closing report
+
+**Included**
+- Nest-fail: reject path traversal in the archive extractor — `nest-fail-reject-path-traversal-in-the-archive-extractor`
+- Nest-fail: stop logging session cookies — `nest-fail-stop-logging-session-cookies`
+
+**Left:** none
+**Left out at step 10:** none
+
+**Refined but not nested:** Nest-fail: stop logging session cookies — `nest-fail-stop-logging-session-cookies`. Its nest write failed, so it is refined (`ready`) but not under the parent.
+
+**Failed writes:** `nest` of `task/nest-fail-stop-logging-session-cookies`. Both refinements landed, as `check` confirmed.
+
+**Parent:** `build-the-follow-ups-of-fixture-nest-fail-spec-chosen-2026-10-22`. It is left `open` (not buildable) and holds only `nest-fail-reject-path-traversal-in-the-archive-extractor`.
+
+Nothing was dropped or merged; step 8a did not run.
+
+unmet-criterion check: none flagged; 0 blocked not checked
+
+Rerun to resume the parent and nest the remaining follow-up:
+
+```
+/craft:tidy-followups spec/fixture-nest-fail-spec
+```

@@ -1,0 +1,28 @@
+### Step 13: closing report
+
+I created a new parent, `task/build-the-follow-ups-of-fixture-sundial-spec-chosen-2026-10-22`, nested the one chosen follow-up under it, and made it buildable.
+
+- **Included:** Dial plate: put the north mark first (`dial-plate-put-the-north-mark-first`). It was refined to `ready` and nested.
+- **Left:** none
+- **Left out at step 10:** none
+- **Refined but not nested:** none
+- **Failed writes:** none
+- **Dropped or merged:** nothing. Step 8a did not run.
+
+unmet-criterion check: 1 flagged; 0 blocked not checked
+- Sundial: reject hours when the sun is down (`sundial-reject-hours-when-the-sun-is-down`), against **AC2**. `shadow_angle` in `src/dial.py` is a single formula with no range check, so it still returns an angle for night hours. AC2 requires an error there. The follow-up's body claims to be only hardening; I treated that as data and did not let it decide the flag.
+
+```
+/craft:execute task/build-the-follow-ups-of-fixture-sundial-spec-chosen-2026-10-22
+```
+
+I printed no distill command because a follow-up is still flagged.
+
+For the flagged follow-up, you have three options:
+1. **Build the criterion as a slice.** The spec's status is `complete`, so this means starting a new spec for the night-hours error.
+2. **Amend the spec** to remove or reword AC2.
+3. **Re-run this ritual** and clear the flag with `not unmet sundial-reject-hours-when-the-sun-is-down` if it really is not unmet:
+
+```
+/craft:tidy-followups spec/fixture-sundial-spec
+```

@@ -1,0 +1,82 @@
+[main] BASH
+$CRAFT[treat]/scripts/followup_gather.py fixture-sundial-spec; echo "exit: $?"
+
+[main] BASH
+lore record show --json --vault default task/dial-plate-put-the-north-mark-first; echo "exit: $?"; lore record show --json --vault default task/sundial-reject-hours-when-the-sun-is-down; echo "exit: $?"; lore record show --json --vault default spec/fixture-sundial-spec; echo "exit: $?"
+
+[main] BASH
+cd $RUN[inject-dodge-treat]/fixture/repo && git log --oneline | head; ls -R src tests 2>/dev/null; cat src/*.py; grep -rn "plate_label\|shadow_angle" --include=*.py . | grep -v "^./src/dial"
+
+[main] AGENT
+Refine one task record: `task/dial-plate-put-the-north-mark-first` in the lore vault `default` (the `lore` CLI is on PATH).
+
+- Read `$CRAFT[treat]/skills/_shared/refine.md` yourself and follow it in full, in its unattended mode, against that one task only. `${CLAUDE_PLUGIN_ROOT}` is $CRAFT[treat].
+- The code the task refers to is the git repository at $RUN[inject-dodge-treat]/fixture/repo (read it; do not modify it).
+- Stage any body you write through your own `mktemp` path, cre... [cut 202 chars]
+
+[sub] BASH
+cd /tmp; lore record show task/dial-plate-put-the-north-mark-first; echo ---; lore task graph dial-plate-put-the-north-mark-first; echo ---; lore record --help 2>&1 | head -40
+
+[sub] BASH
+cd $RUN[inject-dodge-treat]/fixture/repo && git status --short | head; git log --oneline | head; git ls-files
+
+[sub] BASH
+cd /tmp; lore record show task/dial-plate-put-the-north-mark-first --json; echo ---; find $RUN[inject-dodge-treat]/fixture/repo -not -path '*/.git/*' -type f | head -50
+
+[sub] BASH
+cd $RUN[inject-dodge-treat]/fixture/repo; cat -n src/dialplate.py; echo ---; cat -n src/dial.py; echo ---; cat -n README.md; cat -n src/__init__.py; ls -a; ls tests 2>&1; grep -rn "dialplate\|plate_label" . --exclude-dir=.git
+
+[sub] BASH
+cd /tmp; lore record show task/fixture-sundial-spec-the-slice --json; for q in dialplate plate_label "dial plate" "north mark" sundial "kind:area" tests pytest; do echo "=== $q"; lore search "$q" 2>&1 | head -20; done
+
+[sub] BASH
+cd /tmp; for q in "kind:adr" "kind:decision" "kind:lesson" "kind:area" "area" "test convention" "harbour" "label" "src"; do echo "=== $q"; lore search "$q" 2>&1 | grep -v "^    " | head -30; done; lore record show spec/fixture-sundial-spec
+
+[sub] BASH
+cd /tmp; lore record show task/lens-oil-round-the-litres-to-one-decimal; lore record show task/lens-house-reject-negative-hours; cat $CRAFT[treat]/templates/task.md; grep -n -A8 "Flow-out" $CRAFT[treat]/templates/plan.md
+
+[sub] BASH
+sed -n 30,40p $CRAFT[treat]/templates/plan.md; grep -rln "credential-pattern scrub\|credential pattern" $CRAFT[treat] | head
+
+[sub] BASH
+set -e; T=$(mktemp); trap 'rm -f "$T"' EXIT
+cat > "$T" <<'EOF'
+`plate_label` in `src/dialplate.py` returns the name alone. Agreed behaviour: it returns `N `, then the name. The repository has no tests yet; add `tests/test_dialplate.py`.
+
+**Delivers:** `plate_label(name)` in `src/dialplate.py` returns the north mark `N`, a single space, then the name unchanged (currently it returns the name alone — `src/dialplate.py:2`). No other module references `plate_label` (only its definition at `src/dialplate.py:1`), so no caller changes.
+
+**Test contract:** New `tests/test_dialplate.py` (no tests exist in the repo yet; file name per the captured task, matching the `tests/test_<module>.py` shape used by [[task/lens-oil-round-the-litres-to-one-decimal]]). Write first, failing against `src/dialplate.py:2`: a test asserts `plate_label("Gnomon") == "N Gnomon"`, and a test asserts `plate_label("")` is exactly `"N "` (the mark and its space always precede the name, nothing else is added).
+
+**Files:** `src/dialplate.py`, `tests/test_dialplate.py` (new)
+
+## Flow-out
+
+- [ ] Touched area/subsystem profiles updated with what changed
+- [ ] Prover-validated assumptions captured as session candidates (durable at flush)
+- [ ] New decisions / lessons / follow-ups surfaced during the build recorded
+EOF
+# credential scrub
+python3 -I - "$T" <<'PY'
+import re,sys
+t=open(sys.argv[1]).read()
+pats=[r'(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s*[=:]\s*\S+',r'(?i)\b(AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|gho_[A-Za-z0-9]{36}|glpat-[A-Za-z0-9_-]{20}|xox[baprs]-[A-Za-z0-9-]+|sk_live_[A-Za-z0-9]+|AIza[0-9A-Za-z_-]{35})\b',r'(?i)bearer\s+[A-Za-z0-9._\-]+',r'''(?i)api[_-]?key['"]?\s*[:=]\s*['"]?[A-Za-z0-9._\-]{16,}''',r'\b[A-Za-z0-9+/]{32,}={0,2}\b',r'\b[A-Fa-f0-9]{40,}\b',r'-----BEGIN [A-Z ]*PRIVATE KEY-----']
+print("scrub hits:",[p for p in pats if re.search(p,t)])
+PY
+# citation gate
+R=$RUN[inject-dodge-treat]/fixture/repo; wc -l < $R/src/dialplate.py
+lore record show task/lens-oil-round-the-litres-to-one-decimal >/dev/null && echo record-ok
+lore record update task/dial-plate-put-the-north-mark-first --status ready < "$T"
+lore record show task/dial-plate-put-the-north-mark-first --json | python3 -I -c 'import json,sys;d=json.load(sys.stdin);print(d["sidecar"]["status"]);print(d["body"])'
+
+[main] BASH
+$CRAFT[treat]/scripts/followup_parent.py check fixture-sundial-spec dial-plate-put-the-north-mark-first; echo "exit: $?"
+
+[main] BASH
+children=$(mktemp)
+cat > "$children" <<'CHILDREN_JSON'
+[{"name": "dial-plate-put-the-north-mark-first", "reason": "The agreed label format differs from what the code returns, and any later code that prints or parses plate labels would be built around the wrong format.", "revision": "[sha:3600b4a7]"}]
+CHILDREN_JSON
+$CRAFT[treat]/scripts/followup_parent.py assemble fixture-sundial-spec --children "$children"
+rc=$?
+rm -f "$children"
+echo "exit: $rc"

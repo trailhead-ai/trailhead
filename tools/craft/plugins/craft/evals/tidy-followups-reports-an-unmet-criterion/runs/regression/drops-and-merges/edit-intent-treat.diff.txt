@@ -1,0 +1,5 @@
+vault CHANGED task/banner-printer-centre-the-banner-text.json
+vault CHANGED task/banner-printer-centre-the-banner-text.md
+vault CHANGED task/banner-printer-pad-the-banner-text-with-a-border.json
+repo head before=[sha:e093cf95] after=[sha:e093cf95]
+repo status after=''

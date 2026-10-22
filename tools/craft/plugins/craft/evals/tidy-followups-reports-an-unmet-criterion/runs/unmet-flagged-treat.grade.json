@@ -1,0 +1,120 @@
+{
+ "cell": "unmet-flagged",
+ "outcome_lines": [
+  {
+   "line": "unmet-criterion check: 1 flagged; 0 blocked not checked",
+   "flagged": 1,
+   "blocked": 0
+  }
+ ],
+ "final_ac_ids": [
+  "AC2"
+ ],
+ "closing_commands": [
+  {
+   "line": "/craft:execute task/build-the-follow-ups-of-fixture-tide-table-spec-chosen-2026-10-22",
+   "standalone": true
+  },
+  {
+   "line": "/craft:tidy-followups spec/fixture-tide-table-spec",
+   "standalone": true
+  }
+ ],
+ "order": {
+  "step6_list": [
+   11
+  ],
+  "confirmation_1": [
+   11
+  ],
+  "confirmation_2_plain": [
+   11
+  ],
+  "agent": [
+   12
+  ],
+  "check": [
+   14
+  ],
+  "assemble": [
+   15
+  ],
+  "assemble_exit": [
+   0
+  ],
+  "not_unmet_offer": [
+   16
+  ]
+ },
+ "check_args": [
+  [
+   "K"
+  ]
+ ],
+ "assemble_children": [
+  [
+   "K"
+  ]
+ ],
+ "resume_children": [],
+ "dispose_files": [],
+ "agent_targets": [
+  [
+   "K"
+  ]
+ ],
+ "fetched_by_main": [],
+ "step6_list": [
+  "**Unmet acceptance criteria**",
+  "- **Tide table: reject an hour outside the day** \u2014 `U` \u2014 against **AC2**: `tide_height` still indexes with any hour it's given and never raises for an hour outside 0\u201323, so out-of-range hours either crash with the wrong error or return a wrong entry.",
+  "",
+  "Nothing has been written yet.",
+  "",
+  "---",
+  "",
+  "### Confirmation 1"
+ ],
+ "records": {
+  "K": {
+   "status": "ready",
+   "parent": "build-the-follow-ups-of-fixture-tide-table-spec-chosen-2026-10-22",
+   "depends-on": [],
+   "body_changed": true,
+   "new": false,
+   "dropped_note": null
+  },
+  "U": {
+   "status": "open",
+   "parent": null,
+   "depends-on": [],
+   "body_changed": false,
+   "new": false,
+   "dropped_note": null
+  },
+  "L": {
+   "status": "open",
+   "parent": null,
+   "depends-on": [],
+   "body_changed": false,
+   "new": false,
+   "dropped_note": null
+  },
+  "NEW": {
+   "status": "ready",
+   "parent": null,
+   "depends-on": [],
+   "body_changed": true,
+   "new": true,
+   "dropped_note": null,
+   "lists": [
+    "K"
+   ]
+  }
+ },
+ "repo": {
+  "head_before": "[sha:57640973]",
+  "head_after": "[sha:57640973]",
+  "status_after": ""
+ },
+ "real_vault_hits": ""
+}

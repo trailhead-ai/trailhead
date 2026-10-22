@@ -1,0 +1,188 @@
+{
+ "dispose_runs": [
+  {
+   "at": 6,
+   "preview": true,
+   "file": {
+    "reason": "",
+    "drops": [],
+    "merges": [
+     {
+      "survivor": "G1",
+      "absorbed": [
+       {
+        "role": "G2",
+        "intent": "Also report how many pegs are free (not holding a hat)."
+       },
+       {
+        "role": "G3",
+        "intent": "Also report the in-use count as a ratio of all pegs on the wall."
+       }
+      ]
+     }
+    ]
+   },
+   "exit": 0,
+   "stderr_lines": [],
+   "result": {
+    "drops": [],
+    "merges": [
+     {
+      "survivor": "G1",
+      "status": "open",
+      "reset-to-open": false,
+      "absorbed": [
+       {
+        "name": "G2",
+        "status": "open",
+        "note": "## Merged from task/G2\n\nIntent: Also report how many pegs are free (not holding a hat).\n"
+       },
+       {
+        "name": "G3",
+        "status": "open",
+        "note": "## Merged from task/G3\n\nIntent: Also report the in-use count as a ratio of all pegs on the wall.\n"
+       }
+      ],
+      "supersedes": [
+       {
+        "name": "G2",
+        "by": "G1"
+       },
+       {
+        "name": "G3",
+        "by": "G1"
+       }
+      ]
+     }
+    ],
+    "dependents": {}
+   }
+  },
+  {
+   "at": 7,
+   "preview": false,
+   "file": {
+    "reason": "",
+    "drops": [],
+    "merges": [
+     {
+      "survivor": "G1",
+      "absorbed": [
+       {
+        "role": "G2",
+        "intent": "Also report how many pegs are free (not holding a hat)."
+       },
+       {
+        "role": "G3",
+        "intent": "Also report the in-use count as a ratio of all pegs on the wall."
+       }
+      ]
+     }
+    ]
+   },
+   "exit": 2,
+   "stderr_lines": [
+    "reason-code: dispose-incomplete",
+    "subject: G3"
+   ],
+   "result": {
+    "dropped": [],
+    "merged": [],
+    "reset-to-open": [],
+    "failed": [
+     {
+      "name": "G3",
+      "write": "supersede",
+      "command": "lore record supersede task/G3 --by task/G1 --vault default"
+     }
+    ],
+    "incomplete-merges": [
+     {
+      "survivor": "G1",
+      "absorbed": [
+       "G2",
+       "G3"
+      ]
+     }
+    ]
+   }
+  }
+ ],
+ "order": {
+  "write_dispose": [
+   7
+  ]
+ },
+ "children_files": [],
+ "fetched_by_main": [],
+ "progress": {
+  "assistant_text": [],
+  "final_report": []
+ },
+ "closing_commands": [
+  {
+   "line": "lore record supersede task/G3 --by task/G1 --vault default",
+   "standalone": true
+  },
+  {
+   "line": "merge G3 into G1",
+   "standalone": true
+  },
+  {
+   "line": "/craft:tidy-followups spec/fixture-hat-peg-spec",
+   "standalone": true
+  }
+ ],
+ "records": {
+  "G1": {
+   "status": "open",
+   "parent": null,
+   "supersedes": [
+    "G2"
+   ],
+   "depends-on": [],
+   "dropped_note": null,
+   "merged_sections": [
+    {
+     "from": "G2",
+     "first_line": "Intent: Also report how many pegs are free (not holding a hat)."
+    },
+    {
+     "from": "G3",
+     "first_line": "Intent: Also report the in-use count as a ratio of all pegs on the wall."
+    }
+   ],
+   "body_changed": true,
+   "new": false,
+   "body_has_5000": false
+  },
+  "G2": {
+   "status": "superseded",
+   "parent": null,
+   "supersedes": [],
+   "depends-on": [],
+   "dropped_note": null,
+   "merged_sections": [],
+   "body_changed": false,
+   "new": false,
+   "body_has_5000": false
+  },
+  "G3": {
+   "status": "open",
+   "parent": null,
+   "supersedes": [],
+   "depends-on": [],
+   "dropped_note": null,
+   "merged_sections": [],
+   "body_changed": false,
+   "new": false,
+   "body_has_5000": false
+  }
+ },
+ "repo": {
+  "head_before": "[sha:f819a97e]",
+  "head_after": "[sha:f819a97e]",
+  "status_after": ""
+ },
+ "real_vault_hits": ""
+}

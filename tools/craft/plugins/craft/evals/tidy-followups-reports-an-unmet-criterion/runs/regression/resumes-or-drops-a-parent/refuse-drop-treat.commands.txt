@@ -1,0 +1,18 @@
+[main] BASH
+$CRAFT[treat]/scripts/followup_gather.py fixture-customer-poll-spec; echo "exit: $?"
+
+[main] BASH
+$CRAFT[treat]/scripts/followup_parent.py state fixture-customer-poll-spec build-the-follow-ups-of-fixture-customer-poll-spec-chosen-2026-10-12; echo "exit: $?"
+
+[main] BASH
+$CRAFT[treat]/scripts/followup_parent.py state fixture-customer-poll-spec build-the-follow-ups-of-fixture-customer-poll-spec-chosen-2026-10-12; echo "exit: $?"
+
+[main] BASH
+reason=$(mktemp)
+cat > "$reason" <<'REASON_JSON'
+"The poll tooling was retired, so this batch is no longer wanted."
+REASON_JSON
+$CRAFT[treat]/scripts/followup_parent.py drop fixture-customer-poll-spec build-the-follow-ups-of-fixture-customer-poll-spec-chosen-2026-10-12 --reason-file "$reason"
+rc=$?
+rm -f "$reason"
+echo "exit: $rc"

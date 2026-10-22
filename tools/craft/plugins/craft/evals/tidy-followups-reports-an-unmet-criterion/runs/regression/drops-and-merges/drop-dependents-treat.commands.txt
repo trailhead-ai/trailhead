@@ -1,0 +1,35 @@
+[main] BASH
+$CRAFT[treat]/scripts/followup_gather.py fixture-shelf-lamp-spec; echo "exit: $?"
+
+[main] BASH
+lore record show --json --vault default task/dimmer-remove-the-dim-table-s-step-comments; echo "exit: $?"; lore record show --json --vault default task/dimmer-remove-the-unused-dim-table; echo "exit: $?"; lore record show --json --vault default spec/fixture-shelf-lamp-spec; echo "exit: $?"
+
+[main] BASH
+dispositions=$(mktemp)
+cat > "$dispositions" <<'DISPOSITIONS_JSON'
+{"reason": "the lamp shelf was taken out of the plan", "drops": [{"name": "dimmer-remove-the-unused-dim-table", "revision": "[sha:1caf0233]"}], "merges": []}
+DISPOSITIONS_JSON
+$CRAFT[treat]/scripts/followup_dispose.py dispose fixture-shelf-lamp-spec --dispositions "$dispositions" --preview
+rc=$?
+rm -f "$dispositions"
+echo "exit: $rc"
+
+[main] BASH
+dispositions=$(mktemp)
+cat > "$dispositions" <<'DISPOSITIONS_JSON'
+{"reason": "the lamp shelf was taken out of the plan", "drops": [{"name": "dimmer-remove-the-unused-dim-table", "revision": "[sha:1caf0233]"}, {"name": "dimmer-remove-the-dim-table-s-step-comments", "revision": "[sha:e86a469b]"}], "merges": []}
+DISPOSITIONS_JSON
+$CRAFT[treat]/scripts/followup_dispose.py dispose fixture-shelf-lamp-spec --dispositions "$dispositions" --preview
+rc=$?
+rm -f "$dispositions"
+echo "exit: $rc"
+
+[main] BASH
+dispositions=$(mktemp)
+cat > "$dispositions" <<'DISPOSITIONS_JSON'
+{"reason": "the lamp shelf was taken out of the plan", "drops": [{"name": "dimmer-remove-the-unused-dim-table", "revision": "[sha:1caf0233]"}, {"name": "dimmer-remove-the-dim-table-s-step-comments", "revision": "[sha:e86a469b]"}], "merges": []}
+DISPOSITIONS_JSON
+$CRAFT[treat]/scripts/followup_dispose.py dispose fixture-shelf-lamp-spec --dispositions "$dispositions"
+rc=$?
+rm -f "$dispositions"
+echo "exit: $rc"

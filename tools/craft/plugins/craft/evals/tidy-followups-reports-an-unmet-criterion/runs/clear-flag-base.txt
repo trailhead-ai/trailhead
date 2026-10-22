@@ -1,0 +1,18 @@
+I created a parent task for spec `fixture-buoy-chain-spec`. Its one follow-up is refined, nested, and ready to build.
+
+**Parent:** `build-the-follow-ups-of-fixture-buoy-chain-spec-chosen-2026-10-22`. `assemble` exited 0: the follow-up is nested, no writes failed, and the parent is now `ready`.
+
+- **Shortlist:** I recommended only "Buoy chain: reject a depth of zero or less" (`buoy-chain-reject-a-depth-of-zero-or-less`). It was the only one of the two follow-ups that met a reason class. Your Confirmation 1 answer changed nothing because the shortlist was already exactly that follow-up. `not unmet` isn't a move the skill recognises, so I read your answer by its explicit instruction.
+- **Included and nested:** the depth follow-up. Refinement moved it from `open` to `ready`. It now raises `ValueError` for a depth of zero or less, keeps the current result for positive depths, and adds `tests/test_buoy.py`. `check` confirmed it was eligible, so this rests on the record, not the subagent's reply.
+- **Left:** "Buoy chain: name the unit in the module" (`buoy-chain-name-the-unit-in-the-module`). It's small and tidy, but waiting doesn't make it costlier.
+- **Nothing else:** nothing was left out at the check, nothing was refined and then left un-nested, and nothing was dropped or merged.
+
+To build it:
+```
+/craft:execute task/build-the-follow-ups-of-fixture-buoy-chain-spec-chosen-2026-10-22
+```
+
+The spec isn't distilled yet. To distill it:
+```
+/craft:distill spec/fixture-buoy-chain-spec
+```

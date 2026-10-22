@@ -1,0 +1,80 @@
+[main] BASH
+$CRAFT[base]/scripts/followup_gather.py fixture-lantern-rota-spec; echo "exit: $?"
+
+[main] BASH
+for n in keeper-board-print-the-names-in-capitals lantern-rota-a-crew-of-one-keeper lantern-rota-reword-the-module-comment; do echo "=== $n"; lore record show --json --vault default task/$n; echo "exit: $?"; done
+
+[main] BASH
+ls $CRAFT[base]/skills/_shared/
+
+[main] AGENT
+Refine one task record: `task/keeper-board-print-the-names-in-capitals` in the lore vault `default` (use the `lore` command on PATH).
+
+Instructions:
+- Read $CRAFT[base]/skills/_shared/refine.md yourself and follow it in full, in its **unattended** mode, against that one task only. `${CLAUDE_PLUGIN_ROOT}` is $CRAFT[base].
+- The code the task's claims refer to is the git repository at $RUN[unnumbered-spec-r3-base]/fixture/repo. Check claims against it; do not modify that repositor... [cut 426 chars]
+
+[sub] BASH
+lore --help 2>&1 | head -50; lore show task/keeper-board-print-the-names-in-capitals --vault default 2>&1 || lore read task/keeper-board-print-the-names-in-capitals 2>&1
+
+[sub] BASH
+lore record show task/keeper-board-print-the-names-in-capitals 2>&1; echo ---; lore task graph keeper-board-print-the-names-in-capitals 2>&1
+
+[sub] BASH
+lore record show --help 2>&1 | head -30; lore record update --help 2>&1 | head -50
+
+[sub] BASH
+cd $RUN[unnumbered-spec-r3-base]/fixture/repo && git status --short && git log --oneline | head && find . -path ./.git -prune -o -type f -print && cat -n src/board.py
+
+[sub] BASH
+lore record show --json task/keeper-board-print-the-names-in-capitals 2>&1; cd $RUN[unnumbered-spec-r3-base]/fixture/repo && find . -path ./.git -prune -o -type f -print && cat -n src/board.py
+
+[sub] BASH
+cd $RUN[unnumbered-spec-r3-base]/fixture/repo && cat -n README.md; ls -la; ls tests 2>&1; grep -rn "board\|keeper" --include=*.py . ; lore record show task/fixture-lantern-rota-spec-the-slice 2>&1
+
+[sub] BASH
+cd /tmp; lore areas 2>&1 | head -30; for q in "keeper board" "board" "keeper_board" "src/board.py" "test" "pytest" "unittest" "capitals" "upper"; do echo "== $q"; lore search "$q" 2>&1 | head -15; done; cat -n $RUN[unnumbered-spec-r3-base]/fixture/repo/src/roster.py $RUN[unnumbered-spec-r3-base]/fixture/repo/src/__init__.py
+
+[sub] BASH
+cd /tmp; lore record show task/lens-oil-round-the-litres-to-one-decimal; echo ----; lore record show task/lens-house-reject-negative-hours; echo ----; lore record show spec/fixture-lantern-rota-spec
+
+[sub] BASH
+grep -n -A6 "## Flow-out" $CRAFT[base]/templates/plan.md; grep -n "Delivers\|Test contract\|Files:" $CRAFT[base]/templates/task.md
+
+[sub] BASH
+sed -n 30,40p $CRAFT[base]/templates/plan.md
+
+[sub] BASH
+set -e; T=$(mktemp); trap 'rm -f "$T"' EXIT
+cat > "$T" <<'EOF'
+`keeper_board` in `src/board.py` prints the names as typed. Agreed behaviour: it returns the names upper-cased and joined by a comma and a space. The repository has no tests yet; add `tests/test_board.py`.
+
+**Delivers:** `keeper_board` in `src/board.py` returns the names upper-cased and joined by `, ` (currently it joins them unchanged, `src/board.py:2`).
+
+**Test contract:** A test in `tests/test_board.py` asserts `keeper_board(['Ann', 'bo'])` is `'ANN, BO'` and `keeper_board(['Cy'])` is `'CY'`; it fails against the current `src/board.py:2`.
+
+**Files:** `src/board.py`, `tests/test_board.py` (new)
+
+## Flow-out
+
+- [ ] Touched area/subsystem profiles updated with what changed
+- [ ] Prover-validated assumptions captured as session candidates (durable at flush)
+- [ ] New decisions / lessons / follow-ups surfaced during the build recorded
+EOF
+grep -niE "key|token|secret|password|BEGIN|AKIA|ghp_|sk-" "$T" || echo "scrub: no matches"
+test -f $RUN[unnumbered-spec-r3-base]/fixture/repo/src/board.py && wc -l < $RUN[unnumbered-spec-r3-base]/fixture/repo/src/board.py
+lore record update task/keeper-board-print-the-names-in-capitals --vault default --status ready < "$T"
+echo; lore record show task/keeper-board-print-the-names-in-capitals; lore record show --json task/keeper-board-print-the-names-in-capitals | grep '"status"'
+
+[main] BASH
+$CRAFT[base]/scripts/followup_parent.py check fixture-lantern-rota-spec keeper-board-print-the-names-in-capitals; echo "exit: $?"
+
+[main] BASH
+children=$(mktemp)
+cat > "$children" <<'CHILDREN_JSON'
+[{"name": "keeper-board-print-the-names-in-capitals", "reason": "Operator-chosen: the board's output format is still unsettled, so every caller or test written against the current mixed-case output would have to change once capitals land.", "revision": "[sha:792e8eba]"}]
+CHILDREN_JSON
+$CRAFT[base]/scripts/followup_parent.py assemble fixture-lantern-rota-spec --children "$children"
+rc=$?
+rm -f "$children"
+echo "exit: $rc"

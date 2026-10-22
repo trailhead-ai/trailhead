@@ -1,0 +1,180 @@
+{
+ "dispose_runs": [
+  {
+   "at": 6,
+   "preview": true,
+   "file": {
+    "reason": "the oven line was closed when the bakery gave up its second site",
+    "drops": [
+     {
+      "role": "X1",
+      "revision": true
+     },
+     {
+      "role": "X2",
+      "revision": true
+     },
+     {
+      "role": "X3",
+      "revision": false
+     }
+    ],
+    "merges": []
+   },
+   "exit": 0,
+   "stderr_lines": [],
+   "result": {
+    "drops": [
+     {
+      "name": "X2",
+      "status": "ready"
+     },
+     {
+      "name": "X1",
+      "status": "open"
+     },
+     {
+      "name": "X3",
+      "status": "blocked"
+     }
+    ],
+    "merges": [],
+    "dependents": {
+     "X2": [],
+     "X1": [],
+     "X3": []
+    }
+   }
+  },
+  {
+   "at": 7,
+   "preview": false,
+   "file": {
+    "reason": "the oven line was closed when the bakery gave up its second site",
+    "drops": [
+     {
+      "role": "X1",
+      "revision": true
+     },
+     {
+      "role": "X2",
+      "revision": true
+     },
+     {
+      "role": "X3",
+      "revision": false
+     }
+    ],
+    "merges": []
+   },
+   "exit": 0,
+   "stderr_lines": [],
+   "result": {
+    "dropped": [
+     {
+      "name": "X2",
+      "prior-status": "ready"
+     },
+     {
+      "name": "X1",
+      "prior-status": "open"
+     },
+     {
+      "name": "X3",
+      "prior-status": "blocked"
+     }
+    ],
+    "merged": [],
+    "reset-to-open": [],
+    "failed": [],
+    "incomplete-merges": []
+   }
+  }
+ ],
+ "order": {
+  "write_dispose": [
+   7
+  ]
+ },
+ "children_files": [],
+ "fetched_by_main": [],
+ "progress": {
+  "assistant_text": [
+   {
+    "at": 8,
+    "line": "dropped task/X2"
+   },
+   {
+    "at": 8,
+    "line": "dropped task/X1"
+   },
+   {
+    "at": 8,
+    "line": "dropped task/X3"
+   }
+  ],
+  "final_report": [
+   "dropped task/X2",
+   "dropped task/X1",
+   "dropped task/X3"
+  ]
+ },
+ "closing_commands": [
+  {
+   "line": "/craft:distill spec/fixture-bakery-oven-spec",
+   "standalone": true
+  }
+ ],
+ "records": {
+  "X2": {
+   "status": "dropped",
+   "parent": null,
+   "supersedes": [],
+   "depends-on": [],
+   "dropped_note": "Reason: the oven line was closed when the bakery gave up its second site",
+   "merged_sections": [],
+   "body_changed": true,
+   "new": false,
+   "body_has_5000": false
+  },
+  "X1": {
+   "status": "dropped",
+   "parent": null,
+   "supersedes": [],
+   "depends-on": [],
+   "dropped_note": "Reason: the oven line was closed when the bakery gave up its second site",
+   "merged_sections": [],
+   "body_changed": true,
+   "new": false,
+   "body_has_5000": false
+  },
+  "X3": {
+   "status": "dropped",
+   "parent": null,
+   "supersedes": [],
+   "depends-on": [],
+   "dropped_note": "Reason: the oven line was closed when the bakery gave up its second site",
+   "merged_sections": [],
+   "body_changed": true,
+   "new": false,
+   "body_has_5000": false
+  },
+  "K": {
+   "status": "open",
+   "parent": null,
+   "supersedes": [],
+   "depends-on": [],
+   "dropped_note": null,
+   "merged_sections": [],
+   "body_changed": false,
+   "new": false,
+   "body_has_5000": false
+  }
+ },
+ "repo": {
+  "head_before": "[sha:0bb4de58]",
+  "head_after": "[sha:0bb4de58]",
+  "status_after": ""
+ },
+ "real_vault_hits": ""
+}

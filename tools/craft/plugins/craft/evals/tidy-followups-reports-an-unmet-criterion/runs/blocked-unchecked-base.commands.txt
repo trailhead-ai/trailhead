@@ -1,0 +1,78 @@
+[main] BASH
+$CRAFT[base]/scripts/followup_gather.py fixture-mooring-spec; echo "exit: $?"
+
+[main] BASH
+lore record show --json --vault default task/berth-sign-zero-pad-the-berth-number; echo "exit: $?"
+
+[main] AGENT
+Refine one task record: `task/berth-sign-zero-pad-the-berth-number` in the lore vault `default` (the `lore` command on your PATH reads this vault).
+
+Instructions:
+- Read $CRAFT[base]/skills/_shared/refine.md yourself and follow it in full, in its **unattended** mode, against that one task only. `${CLAUDE_PLUGIN_ROOT}` is $CRAFT[base].
+- The code the task's claims point at is the git repository at $RUN[blocked-unchecked-base]/fixture/repo. Work against it read-only (refinement re... [cut 469 chars]
+
+[sub] BASH
+lore record show task/berth-sign-zero-pad-the-berth-number; echo ---; lore task graph berth-sign-zero-pad-the-berth-number
+
+[sub] BASH
+lore record show --help 2>&1 | head -30; lore record show task/berth-sign-zero-pad-the-berth-number --json 2>&1 | head -40
+
+[sub] BASH
+cd $RUN[blocked-unchecked-base]/fixture/repo && git status --short && git log --oneline | head && git ls-files && cat -n src/berthsign.py; ls -la; cat pyproject.toml setup.cfg pytest.ini 2>/dev/null; echo ---; lore record show task/fixture-mooring-spec-the-slice --json
+
+[sub] BASH
+cd $RUN[blocked-unchecked-base]/fixture/repo && ls src; cat -n README.md; cat -n src/berthsign.py
+
+[sub] BASH
+cd $RUN[blocked-unchecked-base]/fixture/repo/src && for f in *.py; do echo "== $f"; cat -n $f; done; git -C .. --no-pager log --oneline 2>&1 | head
+
+[sub] BASH
+for q in "berth sign" berthsign "zero-pad" "zero pad" "berth number" "kind:area harbour" "kind:area" "sign" "test convention" "pytest" "tests" "fixture harbour" "mooring"; do echo "### $q"; lore search "$q" 2>&1 | head -15; done
+
+[sub] BASH
+lore record show task/chart-printer-zero-pad-the-hour-column; echo ---; lore record show task/dial-plate-put-the-north-mark-first; echo ---; lore record show spec/fixture-mooring-spec; echo ---; lore search "status:ready" 2>&1 | head; lore search "Delivers" 2>&1 | head -20
+
+[sub] BASH
+lore record show task/lens-oil-round-the-litres-to-one-decimal; echo ---; lore record show task/lens-house-reject-negative-hours; echo; cat $CRAFT[base]/templates/task.md; echo ----; grep -n -A8 "Flow-out" $CRAFT[base]/templates/plan.md
+
+[sub] BASH
+sed -n 24,40p $CRAFT[base]/templates/plan.md; lore record update --help 2>&1 | head -40
+
+[sub] BASH
+set -e
+T=$(mktemp -t refine-berthsign.XXXXXX)
+cat > "$T" <<'EOF'
+`berth_sign` in `src/berthsign.py` prints the number as it comes. Agreed behaviour: it returns `B`, then the number zero-padded to two digits. The repository has no tests yet; add `tests/test_berthsign.py`.
+
+**Delivers:** `berth_sign(n)` in `src/berthsign.py` (currently returns the bare number, `src/berthsign.py:2`) returns the letter `B` immediately followed by `n` zero-padded to a minimum width of two digits, with no separator — e.g. `B07` for 7, `B12` for 12; numbers of three or more digits are not truncated (`B100`). No separator because the captured prose names none, whereas the sibling capture that wants one spells it out explicitly (`N ` with a trailing space, [[task/dial-plate-put-the-north-mark-first]]).
+
+**Test contract:** New `tests/test_berthsign.py` (the repo has no tests yet; `src/` is a package, so import from `src.berthsign`), run from the repo root with `python -m pytest tests/test_berthsign.py`. Tests assert `berth_sign(7) == 'B07'`, `berth_sign(0) == 'B00'`, `berth_sign(12) == 'B12'`, and `berth_sign(100) == 'B100'`. The single-digit cases fail against the current code first.
+
+**Files:** `src/berthsign.py`, `tests/test_berthsign.py` (new)
+
+## Flow-out
+
+- [ ] Touched area/subsystem profiles updated with what changed
+- [ ] Prover-validated assumptions captured as session candidates (durable at flush)
+- [ ] New decisions / lessons / follow-ups surfaced during the build recorded
+EOF
+# citation gate
+test -f $RUN[blocked-unchecked-base]/fixture/repo/src/berthsign.py && wc -l < $RUN[blocked-unchecked-base]/fixture/repo/src/berthsign.py
+test -f $RUN[blocked-unchecked-base]/fixture/repo/src/__init__.py && echo init-ok
+lore record show task/dial-plate-put-the-north-mark-first >/dev/null && echo rec-ok
+lore record update task/berth-sign-zero-pad-the-berth-number --vault default --status ready < "$T"
+rm -f "$T"; echo removed
+lore record show task/berth-sign-zero-pad-the-berth-number --json | python3 -I -c 'import json,sys;d=json.load(sys.stdin);print(d["sidecar"]["status"]);print(d["body"])'
+
+[main] BASH
+$CRAFT[base]/scripts/followup_parent.py check fixture-mooring-spec berth-sign-zero-pad-the-berth-number; echo "exit: $?"
+
+[main] BASH
+children=$(mktemp)
+cat > "$children" <<'CHILDREN_JSON'
+[{"name": "berth-sign-zero-pad-the-berth-number", "reason": "Operator-chosen: the berth sign prints an unpadded number today, and anything built on that output adds to what must change later; no tests yet guard the change.", "revision": "[sha:37605baf]"}]
+CHILDREN_JSON
+$CRAFT[base]/scripts/followup_parent.py assemble fixture-mooring-spec --children "$children"
+rc=$?
+rm -f "$children"
+echo "exit: $rc"

@@ -1,0 +1,10 @@
+vault ADDED task/build-the-follow-ups-of-fixture-chosen-spec-chosen-2026-10-22.json
+vault ADDED task/build-the-follow-ups-of-fixture-chosen-spec-chosen-2026-10-22.md
+vault CHANGED task/chosen-reject-path-traversal-in-the-export-endpoint.json
+vault CHANGED task/chosen-reject-path-traversal-in-the-export-endpoint.md
+vault CHANGED task/chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it.json
+vault CHANGED task/chosen-replace-the-truncating-money-rounding-before-more-callers-adopt-it.md
+vault CHANGED task/chosen-stop-writing-bearer-tokens-to-the-request-trace.json
+vault CHANGED task/chosen-stop-writing-bearer-tokens-to-the-request-trace.md
+repo head before=[sha:2c97e763] after=[sha:2c97e763]
+repo status after=''

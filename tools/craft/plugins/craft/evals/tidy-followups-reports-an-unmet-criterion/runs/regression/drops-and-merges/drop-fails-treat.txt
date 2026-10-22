@@ -1,0 +1,25 @@
+dropped task/mugs-count-the-mugs-hanging-on-the-rack
+failed drop: task/rack-paint-pick-a-warmer-grey
+
+`reason-code: dispose-incomplete`. One drop landed and the other did not. The drop of `rack-paint-pick-a-warmer-grey` failed, either because `lore` refused the write or because the read-back didn't show it. That is `lore`'s or the vault's side, and rerunning the ritual will offer the follow-up again. Nothing is included, so the run goes to step 13.
+
+## Step 13: Closing report
+
+- **Included:** none
+- **Left:** none
+- **Left out:** none. Refinement did not run.
+- **Dropped:** Mugs: count the mugs hanging on the rack (`mugs-count-the-mugs-hanging-on-the-rack`), prior status `open`. Reason: *the rack was scrapped with the old stockroom*
+- **Merged:** none
+- **Reset to open:** none
+- **Failed:** Rack paint: pick a warmer grey (`rack-paint-pick-a-warmer-grey`), the `drop` write. It was not dropped and is still `open`, so the next gather lists it again.
+- **Held back:** none
+
+No parent was created, because nothing was included.
+
+unmet-criterion check: none flagged; 0 blocked not checked
+
+A dispose write failed, so I'm not printing a distill command. Rerun this to drop the remaining follow-up:
+
+```
+/craft:tidy-followups spec/fixture-mug-rack-spec
+```

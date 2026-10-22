@@ -1,0 +1,12 @@
+I created a new parent task and nested the crew-roster follow-up under it; the parent is ready to build. Assembly finished cleanly (exit 0), with no failed writes.
+
+- **Parent created:** `build-the-follow-ups-of-fixture-pilot-boat-spec-chosen-2026-10-22`
+- **Included and nested:** Crew roster: put the boat name first on each line (`crew-roster-put-the-boat-name-first-on-each-line`). The refinement check found it eligible and it is now `ready`.
+- **Left:** Pilot boat: reject a trip of no distance (`pilot-boat-reject-a-trip-of-no-distance`). It is still `open` and was not refined. I had recommended it because the crew calculation currently returns zero or negative crew for bad distances; your answer took it off the shortlist.
+- **Not touched:** nothing was dropped or merged, and the step 10 check left nothing out.
+
+There's no distill command because the spec is already distilled. To build the parent:
+
+```
+/craft:execute task/build-the-follow-ups-of-fixture-pilot-boat-spec-chosen-2026-10-22
+```

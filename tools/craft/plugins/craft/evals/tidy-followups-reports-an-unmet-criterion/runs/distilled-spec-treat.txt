@@ -1,0 +1,31 @@
+I ran the tidy-followups procedure on `fixture-pilot-boat-spec`. It created one parent task, `task/build-the-follow-ups-of-fixture-pilot-boat-spec-chosen-2026-10-22`, which is now ready to build. It holds the refined crew-roster follow-up. The other follow-up was not included because it is work the spec's AC2 still requires.
+
+## Closing report
+
+- **Included:** Crew roster: put the boat name first on each line (`crew-roster-put-the-boat-name-first-on-each-line`). It was refined, which took it from `open` to `ready`, and then nested.
+- **Left:** none
+- **Left out:** none
+- **Refined but not nested:** none
+- **Failed writes:** none
+- **Nothing was dropped or merged** (step 8a did not run).
+- **Parent created:** `build-the-follow-ups-of-fixture-pilot-boat-spec-chosen-2026-10-22`
+
+unmet-criterion check: 1 flagged; 0 blocked not checked
+- **Pilot boat: reject a trip of no distance** (`pilot-boat-reject-a-trip-of-no-distance`), AC2. `crew_needed` still returns a value for a distance of zero or less (zero, or a negative crew) when the spec says it must refuse it.
+
+Build command:
+
+```
+/craft:execute task/build-the-follow-ups-of-fixture-pilot-boat-spec-chosen-2026-10-22
+```
+
+No distill command is printed, because the spec is already distilled and a follow-up is still flagged.
+
+**Three ways to settle the flagged follow-up:**
+1. **Build AC2 as new work.** The spec is `complete`, so reopening it for a slice is not the route; start a new spec that covers the zero-or-less distance check.
+2. **Amend the spec** to remove or reword AC2.
+3. **Re-run this ritual** and clear the flag with `not unmet pilot-boat-reject-a-trip-of-no-distance`, if it is not really unmet.
+
+```
+/craft:tidy-followups spec/fixture-pilot-boat-spec
+```

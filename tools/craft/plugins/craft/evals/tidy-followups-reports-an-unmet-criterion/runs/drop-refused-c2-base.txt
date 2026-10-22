@@ -1,0 +1,23 @@
+I ran the tidy for `spec/fixture-chart-datum-spec`. The two follow-ups you chose to drop are dropped, the station-column one is refined, and it now sits under a new parent task that is ready to build.
+
+**Dropped**, with the reason "the retired spring-tide table has no readers left" (it covers both):
+- Datum: remove the retired spring-tide table (`datum-remove-the-retired-spring-tide-table`), previously `open`
+- Datum: report an unknown station by name (`datum-report-an-unknown-station-by-name`), previously `open`
+
+The second one is dropped with that reason even though it isn't about the table. It depended on the first, and you added it to the drop at the second confirmation. It was also the only follow-up that met a reason class in my shortlist: an unknown station raises a bare `KeyError` that doesn't name the station.
+
+**Included and nested:** Datum sheet: pad the station column (`datum-sheet-pad-the-station-column`). Refinement moved it to `ready`, and the eligibility check confirmed it. It now sits under the new parent `build-the-follow-ups-of-fixture-chart-datum-spec-chosen-2026-10-22`.
+
+The refinement made two judgment calls you may want to check:
+- **Test framework:** the repo has no test setup, so it specified standard-library `unittest`.
+- **Long names:** a station name of 12 characters or more is left as is, not cut short.
+
+Nothing was merged, nothing was left over or left out, and every write succeeded.
+
+```
+/craft:execute task/build-the-follow-ups-of-fixture-chart-datum-spec-chosen-2026-10-22
+```
+
+```
+/craft:distill spec/fixture-chart-datum-spec
+```

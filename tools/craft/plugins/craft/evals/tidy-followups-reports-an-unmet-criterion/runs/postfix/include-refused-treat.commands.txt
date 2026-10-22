@@ -1,0 +1,86 @@
+[main] BASH
+$CRAFT[treat]/scripts/followup_gather.py fixture-pennant-spec; echo "exit: $?"
+
+[main] BASH
+for n in pennants-accept-a-lower-case-letter pennants-sort-the-table-by-letter signal-lamp-report-a-low-battery-under-twenty-percent; do echo "=== $n"; lore record show --json --vault default task/$n; echo "exit: $?"; done; echo "=== spec"; lore record show --json --vault default spec/fixture-pennant-spec; echo "exit: $?"
+
+[main] BASH
+cd $RUN[include-refused-treat]/fixture/repo && git ls-files && cat src/pennants.py src/lamp.py
+
+[main] AGENT
+Refine one lore task: `task/signal-lamp-report-a-low-battery-under-twenty-percent` in vault `default`.
+
+- Read $CRAFT[treat]/skills/_shared/refine.md yourself and follow it in full, in its unattended mode, against that one task only. `${CLAUDE_PLUGIN_ROOT}` is $CRAFT[treat]. The `lore` command on PATH reads the vault.
+- The code the task's claims point at is the git repository at $RUN[include-refused-treat]/fixture/repo. Work against it read-only; do not ... [cut 325 chars]
+
+[sub] BASH
+cd /tmp; lore record show task/signal-lamp-report-a-low-battery-under-twenty-percent; echo ---; lore task graph signal-lamp-report-a-low-battery-under-twenty-percent
+
+[sub] BASH
+cd /tmp; lore record show --help 2>&1 | head -30; lore record show task/signal-lamp-report-a-low-battery-under-twenty-percent --json 2>&1 | head -40
+
+[sub] BASH
+cd $RUN[include-refused-treat]/fixture/repo; git status --short; git log --oneline | head; git ls-files; echo ---; cat -n src/lamp.py; ls -a; cat pyproject.toml setup.cfg 2>/dev/null
+
+[sub] BASH
+cd $RUN[include-refused-treat]/fixture/repo; cat -n README.md; find . -path ./.git -prune -o -type f -print; HOME=/tmp/nohome-$$ git log --oneline 2>&1 | head
+
+[sub] BASH
+cd /tmp; lore search "signal lamp" 2>&1 | head -20; echo ---; lore search "battery" 2>&1 | head -20; echo ---; lore search "lamp.py" 2>&1|head; echo ---; lore search "kind:area lamp" 2>&1|head; echo ---; lore record show task/fixture-pennant-spec-the-slice 2>&1 | head -30
+
+[sub] BASH
+cd $CRAFT[treat]; cat templates/task.md; echo ----; grep -n -A6 "Flow-out" templates/plan.md; echo ----; grep -rln "credential-pattern scrub" . | head; cat $RUN[include-refused-treat]/fixture/repo/src/__init__.py; head -20 $RUN[include-refused-treat]/fixture/repo/src/buoy.py
+
+[sub] BASH
+cd $CRAFT[treat]; sed -n 30,40p templates/plan.md; grep -n -i -B2 -A25 "canonical pattern list\|credential-pattern" skills/_shared/security.md | head -60
+
+[sub] BASH
+d=$(mktemp -d); cp -R $RUN[include-refused-treat]/fixture/repo/src "$d/"; mkdir "$d/tests"; printf 'import unittest\nfrom src.lamp import battery_state\nclass T(unittest.TestCase):\n    def test_low(self):\n        self.assertEqual(battery_state(19), "low")\n' > "$d/tests/test_lamp.py"; cd "$d" && python3 -m unittest discover -s tests 2>&1 | tail -3; rm -rf "$d"
+
+[sub] BASH
+f=$(mktemp); cat > "$f" <<'EOF'
+`battery_state` in `src/lamp.py` always returns `ok`. Agreed behaviour: return `low` for a percent below 20 and `ok` otherwise. The repository has no tests yet; add `tests/test_lamp.py`.
+
+**Delivers:** `battery_state(percent)` returns `low` when `percent` is below 20 and `ok` otherwise (20 itself is `ok`), replacing the unconditional `ok` at src/lamp.py:2 (function defined at src/lamp.py:1). Threshold and return values are the agreed behaviour stated in the captured prose above. A new `tests/test_lamp.py` pins it — the repo has no test suite and no dependency manifest (only README.md and src/ are tracked), so the test uses the stdlib `unittest` module and imports `battery_state` from `src.lamp` (`src` is a package: src/__init__.py exists).
+
+**Test contract:** Write first, in `tests/test_lamp.py` (stdlib `unittest`, `from src.lamp import battery_state`), failing against the current src/lamp.py:2:
+- `battery_state(19)` returns `low` (just below the threshold)
+- `battery_state(0)` returns `low`
+- `battery_state(20)` returns `ok` (the boundary is not low — "below 20")
+- `battery_state(100)` returns `ok`
+Verification: from the repo root, `python3 -m unittest discover -s tests` reports all tests passing (`OK`).
+
+**Files:** `src/lamp.py` (modified), `tests/test_lamp.py` (created)
+
+## Flow-out
+
+- [ ] Touched area/subsystem profiles updated with what changed
+- [ ] Prover-validated assumptions captured as session candidates (durable at flush)
+- [ ] New decisions / lessons / follow-ups surfaced during the build recorded
+EOF
+python3 -I - "$f" <<'PY'
+import re,sys
+t=open(sys.argv[1]).read()
+pats=[r'(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s*[=:]\s*\S+',r'(?i)\b(AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|gho_[A-Za-z0-9]{36}|glpat-[A-Za-z0-9_-]{20}|xox[baprs]-[A-Za-z0-9-]+|sk_live_[A-Za-z0-9]+|AIza[0-9A-Za-z_-]{35})\b',r'(?i)bearer\s+[A-Za-z0-9._\-]+',r'(?i)api[_-]?key[\'"]?\s*[:=]\s*[\'"]?[A-Za-z0-9._\-]{16,}',r'\b[A-Za-z0-9+/]{32,}={0,2}\b',r'\b[A-Fa-f0-9]{40,}\b',r'-----BEGIN [A-Z ]*PRIVATE KEY-----']
+print('scrub hits:',[m.group(0) for p in pats for m in re.finditer(p,t)])
+PY
+R=$RUN[include-refused-treat]/fixture/repo
+wc -l $R/src/lamp.py; test -f $R/src/__init__.py && test -f $R/README.md && echo cites-ok
+lore record update --help 2>&1 | head -30
+echo "$f"
+
+[sub] BASH
+f=$RUN[include-refused-treat]/tmp/tmp.CsKhnLeOL7; lore record update task/signal-lamp-report-a-low-battery-under-twenty-percent --vault default --status ready < "$f" && rm -f "$f"; ls "$f" 2>&1; lore record show task/signal-lamp-report-a-low-battery-under-twenty-percent --json | python3 -I -c 'import json,sys;d=json.load(sys.stdin);print(d["sidecar"]["status"], d["sidecar"].get("labels"));print(d["body"])'
+
+[main] BASH
+$CRAFT[treat]/scripts/followup_parent.py check fixture-pennant-spec signal-lamp-report-a-low-battery-under-twenty-percent; echo "exit: $?"
+
+[main] BASH
+children=$(mktemp)
+cat > "$children" <<'CHILDREN_JSON'
+[{"name": "signal-lamp-report-a-low-battery-under-twenty-percent", "reason": "battery_state always reports ok, so every caller built on it now is written against a value that is never low, and each one adds to the cost of the fix.", "revision": "[sha:adc548a4]"}]
+CHILDREN_JSON
+$CRAFT[treat]/scripts/followup_parent.py assemble fixture-pennant-spec --children "$children"
+rc=$?
+rm -f "$children"
+echo "exit: $rc"

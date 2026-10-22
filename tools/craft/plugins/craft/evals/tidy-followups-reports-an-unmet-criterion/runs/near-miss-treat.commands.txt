@@ -1,0 +1,91 @@
+[main] BASH
+$CRAFT[treat]/scripts/followup_gather.py fixture-ferry-timetable-spec; echo "exit: $?"
+
+[main] BASH
+lore record show --json --vault default task/ferry-timetable-accept-a-clock-time-written-as-text; echo "exit: $?"; lore record show --json --vault default task/ferry-timetable-tidy-a-variable-name; echo "exit: $?"; lore record show --json --vault default spec/fixture-ferry-timetable-spec; echo "exit: $?"
+
+[main] AGENT
+Refine one task record: `task/ferry-timetable-accept-a-clock-time-written-as-text` in the lore vault `default` (the `lore` command on PATH reads it).
+
+Instructions:
+- Read $CRAFT[treat]/skills/_shared/refine.md yourself and follow it in full, in its unattended mode, against that one task only. `${CLAUDE_PLUGIN_ROOT}` is $CRAFT[treat].
+- The code this task's claims point at is the git repository at $RUN[near-miss-treat]/fixture/repo. Read it there. Do not modify that repository: ... [cut 328 chars]
+
+[sub] BASH
+lore record show task/ferry-timetable-accept-a-clock-time-written-as-text; echo ---; lore task graph ferry-timetable-accept-a-clock-time-written-as-text
+
+[sub] BASH
+lore record show --help 2>&1 | head -30; lore record show task/ferry-timetable-accept-a-clock-time-written-as-text --json 2>&1 | head -40
+
+[sub] BASH
+cd $RUN[near-miss-treat]/fixture/repo && git status --short && git ls-files && cat -n src/ferry.py
+
+[sub] BASH
+cd $RUN[near-miss-treat]/fixture/repo && ls -laR | grep -v '^\s*$' | grep -v '.git/' | head -50; cat -n src/ferry.py; HOME=/tmp git -C . log --oneline 2>&1 | head
+
+[sub] BASH
+cd $RUN[near-miss-treat]/fixture/repo && ls -la src; cat -n README.md; HOME=/tmp git status --short 2>/dev/null
+
+[sub] BASH
+cd $RUN[near-miss-treat]/fixture/repo/src && for f in *.py; do echo "== $f"; cat -n $f; done
+
+[sub] BASH
+lore record show task/fixture-ferry-timetable-spec-the-slice --json 2>&1 | head -60; echo ---; lore search "ferry" 2>&1 | head -30; echo ---; lore search "kind:area ferry" 2>&1 | head; lore search "timetable" 2>&1|head; lore search "next_departure" 2>&1|head; lore search "clock time" 2>&1|head; lore search "HH:MM" 2>&1 | head; lore search "tests" 2>&1 | head -20
+
+[sub] BASH
+lore record show spec/fixture-ferry-timetable-spec; echo ---; lore record show task/fixture-ferry-timetable-spec-a-finished-child; echo ---; lore record show task/ferry-timetable-tidy-a-variable-name; lore search "kind:area" 2>&1 | head; lore search "kind:adr" 2>&1|head; lore search "kind:decision" 2>&1|head; lore search "kind:lesson" 2>&1|head
+
+[sub] BASH
+lore search "status:ready" 2>&1 | head -30; lore search "pytest" 2>&1 | head; lore search "unittest" 2>&1|head; ls $RUN[near-miss-treat]/fixture/repo/.. 
+
+[sub] BASH
+lore record show task/lens-house-reject-negative-hours; echo ---; lore record show task/lens-oil-round-the-litres-to-one-decimal; cat $CRAFT[treat]/templates/plan.md | grep -n -A6 "Flow-out"
+
+[sub] BASH
+sed -n 30,45p $CRAFT[treat]/templates/plan.md; grep -rl -i "credential" $CRAFT[treat]/skills | head
+
+[sub] BASH
+set -e; T=$(mktemp); cat > "$T" <<'EOF'
+`next_departure` in `src/ferry.py` takes only minutes since midnight, so every caller converts a clock time itself. Agreed behaviour: when `minute` is a string `HH:MM`, treat it as that minute of the day; an integer behaves as before. The repository has no tests yet; add `tests/test_ferry.py`.
+
+**Delivers:** `next_departure(times, minute)` in `src/ferry.py` (src/ferry.py:1-5) accepts `minute` either as an integer minute of the day (unchanged behaviour, per AC1/AC2 of [[spec/fixture-ferry-timetable-spec]]) or as a string `HH:MM`, which it converts to `HH * 60 + MM` before the existing comparison at src/ferry.py:3. `times` stays a list of integer minutes. Behaviour for a malformed string is not specified by the capture and is out of scope (no test asserts it).
+
+**Test contract:** New `tests/test_ferry.py` (the repo has no tests yet; import via the `src` package, `src/__init__.py`), with times `[360, 540, 1020]`:
+- `next_departure(times, "09:00")` is 540 (exact match counts, per AC1).
+- `next_departure(times, "09:01")` is 1020.
+- `next_departure(times, "00:00")` is 360.
+- `next_departure(times, "17:01")` is `None` (per AC2).
+- `next_departure(times, 540)` is 540 and `next_departure(times, 1021)` is `None` (integer path unchanged).
+
+**Files:** `src/ferry.py`, `tests/test_ferry.py` (new)
+
+## Flow-out
+
+- [ ] Touched area/subsystem profiles updated with what changed
+- [ ] Prover-validated assumptions captured as session candidates (durable at flush)
+- [ ] New decisions / lessons / follow-ups surfaced during the build recorded
+EOF
+python3 -I - "$T" <<'PY'
+import re,sys
+t=open(sys.argv[1]).read()
+pats=[r'(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s*[=:]\s*\S+',r'(?i)\b(AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|gho_[A-Za-z0-9]{36}|glpat-[A-Za-z0-9_-]{20}|xox[baprs]-[A-Za-z0-9-]+|sk_live_[A-Za-z0-9]+|AIza[0-9A-Za-z_-]{35})\b',r'(?i)bearer\s+[A-Za-z0-9._\-]+',r'(?i)api[_-]?key[\'"]?\s*[:=]\s*[\'"]?[A-Za-z0-9._\-]{16,}',r'\b[A-Za-z0-9+/]{32,}={0,2}\b',r'\b[A-Fa-f0-9]{40,}\b',r'-----BEGIN [A-Z ]*PRIVATE KEY-----']
+print("scrub hits:",[m.group(0) for p in pats for m in re.finditer(p,t)])
+PY
+R=$RUN[near-miss-treat]/fixture/repo; wc -l < $R/src/ferry.py; test -f $R/src/__init__.py && echo init-ok; lore record show spec/fixture-ferry-timetable-spec >/dev/null && echo spec-ok
+lore record update task/ferry-timetable-accept-a-clock-time-written-as-text --status ready < "$T"; rm -f "$T"; echo rc=$?
+
+[sub] BASH
+lore record show task/ferry-timetable-accept-a-clock-time-written-as-text --json | python3 -I -c "import json,sys;d=json.load(sys.stdin);print(d['sidecar']['status']);print(d['body'])"
+
+[main] BASH
+$CRAFT[treat]/scripts/followup_parent.py check fixture-ferry-timetable-spec ferry-timetable-accept-a-clock-time-written-as-text; echo "exit: $?"
+
+[main] BASH
+children=$(mktemp)
+cat > "$children" <<'CHILDREN_JSON'
+[{"name": "ferry-timetable-accept-a-clock-time-written-as-text", "reason": "Every caller of next_departure converts clock times to minutes itself, and each new caller copies that conversion, so the fix costs more the longer it waits.", "revision": "[sha:171d34ba]"}]
+CHILDREN_JSON
+$CRAFT[treat]/scripts/followup_parent.py assemble fixture-ferry-timetable-spec --children "$children"
+rc=$?
+rm -f "$children"
+echo "exit: $rc"

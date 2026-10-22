@@ -1,0 +1,21 @@
+I ran the ritual on `spec/fixture-buoy-chain-spec` and it created a new parent task, `task/build-the-follow-ups-of-fixture-buoy-chain-spec-chosen-2026-10-22`. That parent is now `ready` and holds one follow-up.
+
+**What happened to the two follow-ups:**
+- **Nested under the parent:** "Buoy chain: reject a depth of zero or less" (`buoy-chain-reject-a-depth-of-zero-or-less`). Before your answer I had flagged it as AC2 not yet met: `src/buoy.py:4-5` never raises on a depth of zero or less. Your `not unmet` cleared that flag for this run, it went onto the shortlist, refinement moved it from `open` to `ready`, and the check script found it eligible.
+- **Left, not touched:** "Buoy chain: name the unit in the module" (`buoy-chain-name-the-unit-in-the-module`). It is small tidy-up work and didn't meet any of the reasons that make waiting costly.
+
+**Nothing went wrong along the way:** nothing was dropped or merged, the check left nothing out, and no write failed. The one record that changed besides the new parent is the nested follow-up, which refinement rewrote. The new parent's name passes the safe-name check.
+
+The flag was cleared, not resolved: AC2 is still not implemented in the code. It only stops counting as flagged here because building the parent will deliver it.
+
+unmet-criterion check: none flagged; 0 blocked not checked
+
+**Next commands:**
+
+```
+/craft:execute task/build-the-follow-ups-of-fixture-buoy-chain-spec-chosen-2026-10-22
+```
+
+```
+/craft:distill spec/fixture-buoy-chain-spec
+```

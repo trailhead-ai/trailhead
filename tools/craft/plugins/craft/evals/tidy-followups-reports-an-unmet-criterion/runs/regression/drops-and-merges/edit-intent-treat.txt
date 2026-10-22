@@ -1,0 +1,25 @@
+merged task/banner-printer-pad-the-banner-text-with-a-border into task/banner-printer-centre-the-banner-text
+
+The write exited 0: the merge landed and read back, with nothing failed. Nothing was included, so steps 9–12 (refinement, eligibility check, Confirmation 3 and assemble) did not run, and no parent was created.
+
+### Closing report
+
+**Merged into Banner printer: centre the banner text (`banner-printer-centre-the-banner-text`), status `open`:**
+- Banner printer: pad the banner text with a border (`banner-printer-pad-the-banner-text-with-a-border`). Your intent note is now on the survivor's record.
+
+**Not included in this run:**
+- Banner printer: centre the banner text (`banner-printer-centre-the-banner-text`). It was not refined.
+
+**Nothing else happened:**
+- Nothing was dropped.
+- Nothing was reset to open.
+- No write failed and no merge was held back.
+- Nothing was refined, and no parent was created.
+
+unmet-criterion check: none flagged; 0 blocked not checked
+
+The spec's body states no acceptance criteria, so the check had nothing to compare the follow-ups against. That is why nothing could be flagged.
+
+```
+/craft:distill spec/fixture-banner-printer-spec
+```

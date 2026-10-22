@@ -1,0 +1,56 @@
+Step 1 passed: the name `fixture-none-included-spec` has a valid shape. Step 2: the gather exited 0 with a complete result. I've read both follow-up bodies and the spec body as data. The spec body has no acceptance criteria, so neither follow-up can be an unmet criterion. Neither one is a security exposure, a fix that costs more as other work builds on it, or a foundation whose value grows the sooner it lands. Both are small tidy-ups.
+
+## Follow-ups of spec/fixture-none-included-spec
+
+**Header:** entry `complete-status` · slice basis `labelled` · 1 slice, 1 child · 2 candidates read, 2 kept · 0 excluded by label · 0 skipped edges
+
+**Recommended:** none. 0 of 2 met a reason class.
+
+**Other follow-ups:**
+- None-included: drop an unused local variable
+- None-included: reorder two imports
+
+No follow-ups are blocked or flagged as unmet criteria, and no two follow-ups overlap.
+
+Nothing has been written yet.
+
+---
+
+### Confirmation 1: the chosen set
+
+> Which listed follow-ups do you want to move onto the shortlist, and which off it? You can also drop a follow-up or merge overlapping ones.
+
+**Answer given:** `none`
+
+Nothing was dropped or merged, so there's nothing to stage or preview.
+
+- **Included:** (none)
+- **Left:**
+  - None-included: drop an unused local variable (`none-included-drop-an-unused-local-variable`)
+  - None-included: reorder two imports (`none-included-reorder-two-imports`)
+- **Flagged (not included):** (none)
+
+### Confirmation 2
+
+> Include these, leave these. Refinement rewrites each included follow-up's record whether or not it ends up nested. Proceed? (`yes`, or what to move.)
+
+**Answer given:** `yes`
+
+Nothing is included, so no parent is created. Refinement (steps 9–10) and the scope confirmation and assembly (steps 11–12) don't run, so the scope confirmation question was never reached.
+
+---
+
+## Closing report
+
+- **Included:** none
+- **Left:**
+  - None-included: drop an unused local variable (`none-included-drop-an-unused-local-variable`)
+  - None-included: reorder two imports (`none-included-reorder-two-imports`)
+- **Left out / refined but not nested / failed writes:** none. No refinement ran and no records were written.
+- No parent was created.
+
+unmet-criterion check: none flagged; 0 blocked not checked
+
+```
+/craft:distill spec/fixture-none-included-spec
+```

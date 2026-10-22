@@ -1,0 +1,75 @@
+[main] BASH
+$CRAFT[treat]/scripts/followup_gather.py fixture-pilot-boat-spec; echo "exit: $?"
+
+[main] BASH
+for n in crew-roster-put-the-boat-name-first-on-each-line pilot-boat-reject-a-trip-of-no-distance; do lore record show --json --vault default task/$n; echo "exit: $?"; done; lore record show --json --vault default spec/fixture-pilot-boat-spec; echo "exit: $?"
+
+[main] BASH
+cd $RUN[distilled-spec-treat]/fixture/repo && git log --oneline | head; ls -R src tests 2>/dev/null; cat src/*.py
+
+[main] AGENT
+Refine one task record: `task/crew-roster-put-the-boat-name-first-on-each-line` in the lore vault `default` (the `lore` command on your PATH reads this vault).
+
+Instructions:
+- Read $CRAFT[treat]/skills/_shared/refine.md yourself and follow it in full, in its unattended mode, against that one task only. `${CLAUDE_PLUGIN_ROOT}` is $CRAFT[treat].
+- The code the task's claims point at is the git repository at $RUN[distilled-spec-treat]/fixture/repo. Work against it read-only for in... [cut 423 chars]
+
+[sub] BASH
+cd $RUN[distilled-spec-treat]/fixture/repo; lore record show task/crew-roster-put-the-boat-name-first-on-each-line; echo ---; lore task graph crew-roster-put-the-boat-name-first-on-each-line; echo; git log --oneline | head; ls -R | head -50
+
+[sub] BASH
+cd $RUN[distilled-spec-treat]/fixture/repo; cat -n src/roster.py; cat README.md; lore record show --help 2>&1 | head -30; lore record update --help 2>&1 | head -40
+
+[sub] BASH
+cd /tmp; lore record show --json --vault default task/crew-roster-put-the-boat-name-first-on-each-line; echo; lore search roster 2>&1 | head; lore search "kind:area roster" 2>&1|head; lore search "crew" 2>&1|head; lore search "boat" | head; lore search "tests" | head; lore search "pytest" | head
+
+[sub] BASH
+cd /tmp; lore record show spec/fixture-pilot-boat-spec | head -40; lore record show task/fixture-pilot-boat-spec-the-slice; lore search "kind:area" | head; lore search "test convention"|head; lore search "kind:adr"|head; P=$CRAFT[treat]; cat $P/templates/task.md; grep -n -A6 "Flow-out" $P/templates/plan.md; grep -rln "credential-pattern scrub" $P | head
+
+[sub] BASH
+P=$CRAFT[treat]; sed -n 30,40p $P/templates/plan.md; grep -n -i -B2 -A25 "credential-pattern" $P/skills/_shared/security.md | head -60
+
+[sub] BASH
+T=$(mktemp); cat > "$T" <<'EOF'
+`roster_line` in `src/roster.py` prints the crew count before the boat. Agreed behaviour: it returns the boat name, a space, then the crew count. The repository has no tests yet; add `tests/test_roster.py`.
+
+**Delivers:** `roster_line(boat, crew)` returns the boat name, a single space, then the crew count (boat first), replacing the current crew-first ordering at `src/roster.py:2` (function defined at `src/roster.py:1`). The agreed format is the task's captured statement above. `roster_line` has no other callers in the repository (grep over the repo matches only `src/roster.py:1`), so no call sites change. The repository's first test file, `tests/test_roster.py`, pins the new behaviour.
+
+**Test contract:** Write first, and see it fail against the current crew-first ordering:
+- `roster_line("Gull", 3)` returns exactly `"Gull 3"` (boat name, one space, crew count).
+- A multi-word boat name keeps its position first, e.g. `roster_line("Sea Gull", 4)` returns `"Sea Gull 4"`.
+- The repo has no test convention yet (no `tests/` dir, no test config at the repo root), so write the test with stdlib `unittest`, importing `from src.roster import roster_line` (`src/__init__.py` makes `src` a package); it also runs under pytest. Verify from the repo root with `python3 -m unittest discover -s tests -t .` — expected: all tests pass, `OK`.
+
+**Files:** `src/roster.py` (modify), `tests/test_roster.py` (create)
+
+## Flow-out
+
+- [ ] Touched area/subsystem profiles updated with what changed
+- [ ] Prover-validated assumptions captured as session candidates (durable at flush)
+- [ ] New decisions / lessons / follow-ups surfaced during the build recorded
+EOF
+python3 -I - "$T" <<'PY'
+import re,sys
+t=open(sys.argv[1]).read()
+pats=[r'(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s*[=:]\s*\S+',r'(?i)\b(AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|gho_[A-Za-z0-9]{36}|glpat-[A-Za-z0-9_-]{20}|xox[baprs]-[A-Za-z0-9-]+|sk_live_[A-Za-z0-9]+|AIza[0-9A-Za-z_-]{35})\b',r'(?i)bearer\s+[A-Za-z0-9._\-]+',r'(?i)api[_-]?key[\'"]?\s*[:=]\s*[\'"]?[A-Za-z0-9._\-]{16,}',r'\b[A-Za-z0-9+/]{32,}={0,2}\b',r'\b[A-Fa-f0-9]{40,}\b',r'-----BEGIN [A-Z ]*PRIVATE KEY-----']
+print("scrub hits:",[m.group(0) for p in pats for m in re.finditer(p,t)])
+PY
+R=$RUN[distilled-spec-treat]/fixture/repo; wc -l $R/src/roster.py; ls $R/src/__init__.py; ls $R/tests 2>&1
+lore record update --vault default task/crew-roster-put-the-boat-name-first-on-each-line --status ready < "$T" && rm -f "$T"; ls "$T" 2>&1
+lore record show --vault default task/crew-roster-put-the-boat-name-first-on-each-line; lore task graph crew-roster-put-the-boat-name-first-on-each-line
+
+[sub] BASH
+T=$(mktemp); lore record show --json --vault default task/crew-roster-put-the-boat-name-first-on-each-line | python3 -I -c 'import json,sys;sys.stdout.write(json.load(sys.stdin)["body"].replace("discover -s tests -t .","discover -s tests"))' > "$T"; grep -c "discover -s tests\`" "$T"; lore record update --vault default task/crew-roster-put-the-boat-name-first-on-each-line < "$T" >/dev/null && rm -f "$T"; lore record show --vault default task/crew-roster-put-the-boat-name-first-on-each-line | grep -n "discover"; lore record show --json --vault default task/crew-roster-put-the-boat-name-first-on-each-line | grep '"status"'
+
+[main] BASH
+$CRAFT[treat]/scripts/followup_parent.py check fixture-pilot-boat-spec crew-roster-put-the-boat-name-first-on-each-line; echo "exit: $?"
+
+[main] BASH
+children=$(mktemp)
+cat > "$children" <<'CHILDREN_JSON'
+[{"name": "crew-roster-put-the-boat-name-first-on-each-line", "reason": "Each caller, test or roster output built on roster_line would inherit the crew-first order; fixing it now costs one function, fixing it later also means redoing what was built on it.", "revision": "[sha:70f2de10]"}]
+CHILDREN_JSON
+$CRAFT[treat]/scripts/followup_parent.py assemble fixture-pilot-boat-spec --children "$children"
+rc=$?
+rm -f "$children"
+echo "exit: $rc"

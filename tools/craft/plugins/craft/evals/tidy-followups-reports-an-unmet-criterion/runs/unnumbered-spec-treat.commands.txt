@@ -1,0 +1,69 @@
+[main] BASH
+$CRAFT[treat]/scripts/followup_gather.py fixture-lantern-rota-spec; echo "exit: $?"
+
+[main] BASH
+for n in keeper-board-print-the-names-in-capitals lantern-rota-a-crew-of-one-keeper lantern-rota-reword-the-module-comment; do lore record show --json --vault default task/$n; echo "exit: $?"; done; lore record show --json --vault default spec/fixture-lantern-rota-spec; echo "exit: $?"
+
+[main] BASH
+cd $RUN[unnumbered-spec-treat]/fixture/repo && git log --oneline | head && ls -R . | grep -v .git | head -30 && cat src/*.py
+
+[main] AGENT
+Refine one task record: `task/keeper-board-print-the-names-in-capitals` in the lore vault `default`.
+
+Instructions:
+- First read $CRAFT[treat]/skills/_shared/refine.md yourself and follow it in full, in its **unattended** mode, against this one task only. `${CLAUDE_PLUGIN_ROOT}` is $CRAFT[treat]. The `lore` command on PATH reads the vault.
+- The code the task's claims point at is the git repository at $RUN[unnumbered-spec-treat]/fixture/repo; read it there. Do not edit code in t... [cut 564 chars]
+
+[sub] BASH
+lore record show task/keeper-board-print-the-names-in-capitals; echo ---; lore task graph keeper-board-print-the-names-in-capitals; echo ---; ls $RUN[unnumbered-spec-treat]/fixture/repo; git -C $RUN[unnumbered-spec-treat]/fixture/repo log --oneline | head
+
+[sub] BASH
+lore record show --help 2>&1 | head -30; lore record show task/keeper-board-print-the-names-in-capitals --json 2>&1 | head -40; cd $RUN[unnumbered-spec-treat]/fixture/repo && find . -type f -not -path './.git/*' | head; cat -n README.md; cat -n src/*
+
+[sub] BASH
+cat -n src/board.py; ls tests 2>&1; lore record show task/fixture-lantern-rota-spec-the-slice 2>&1 | head -40; for q in board keeper_board "keeper board" capitals uppercase tests pytest "area"; do echo "== $q"; lore search "$q" 2>&1 | head -10; done; lore search "kind:area board" 2>&1 | head
+
+[sub] BASH
+lore record show spec/fixture-lantern-rota-spec 2>&1 | head -40; lore record show task/berth-sign-zero-pad-the-berth-number --json 2>&1 | head -30; ls -a $RUN[unnumbered-spec-treat]/fixture/repo; cat $CRAFT[treat]/templates/plan.md | grep -A6 "Flow-out"
+
+[sub] BASH
+grep -A12 "^## Flow-out" $CRAFT[treat]/templates/plan.md | tail -6; grep -n "Delivers\|Test contract\|Files" $CRAFT[treat]/templates/task.md; lore record update --help | head -30
+
+[sub] BASH
+set -e; T=$(mktemp); lore record show task/keeper-board-print-the-names-in-capitals --json | python3 -I -c 'import json,sys; sys.stdout.write(json.load(sys.stdin)["body"])' > "$T"
+cat >> "$T" <<'EOF'
+
+**Delivers:** `keeper_board(names)` returns each name upper-cased, joined by a comma and a space (`", "`), in input order. Today it joins the names as typed (src/board.py:1-2); the agreed behaviour is the one captured in this task's prose above. The join separator is unchanged; only the upper-casing is new.
+
+**Test contract:** new `tests/test_board.py` (the repo has no `tests/` directory yet; captured prose names this path), written failing-first against src/board.py:1-2, verifying:
+- mixed/lower-case names come back upper-cased and comma-space joined, e.g. `["ada", "Bo"]` -> `"ADA, BO"`;
+- input order is preserved;
+- a single name returns just that name upper-cased, with no separator;
+- an empty list returns `""`.
+Run from the repo root: `python -m pytest tests/test_board.py` — all tests pass (they fail against the current src/board.py:2 for every case containing a lower-case letter).
+
+**Files:** `src/board.py` (modified), `tests/test_board.py` (created)
+
+## Flow-out
+
+- [ ] Touched area/subsystem profiles updated with what changed
+- [ ] Prover-validated assumptions captured as session candidates (durable at flush)
+- [ ] New decisions / lessons / follow-ups surfaced during the build recorded
+EOF
+lore record update task/keeper-board-print-the-names-in-capitals --vault default --status ready < "$T"; rm -f "$T"; lore record show task/keeper-board-print-the-names-in-capitals
+
+[sub] BASH
+lore record show task/keeper-board-print-the-names-in-capitals --json | python3 -I -c 'import json,sys; print(json.load(sys.stdin)["sidecar"].get("status"))'
+
+[main] BASH
+$CRAFT[treat]/scripts/followup_parent.py check fixture-lantern-rota-spec keeper-board-print-the-names-in-capitals; echo "exit: $?"
+
+[main] BASH
+children=$(mktemp)
+cat > "$children" <<'CHILDREN_JSON'
+[{"name": "keeper-board-print-the-names-in-capitals", "reason": "Operator's choice; waiting costs little - a small output-format change, cheaper before more callers come to rely on the names as typed.", "revision": "[sha:cd1ee7fc]"}]
+CHILDREN_JSON
+$CRAFT[treat]/scripts/followup_parent.py assemble fixture-lantern-rota-spec --children "$children"
+rc=$?
+rm -f "$children"
+echo "exit: $rc"

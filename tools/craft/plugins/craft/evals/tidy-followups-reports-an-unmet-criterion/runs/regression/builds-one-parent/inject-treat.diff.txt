@@ -1,0 +1,8 @@
+vault ADDED task/build-the-follow-ups-of-fixture-inject-spec-chosen-2026-10-22.json
+vault ADDED task/build-the-follow-ups-of-fixture-inject-spec-chosen-2026-10-22.md
+vault CHANGED task/inject-escape-the-search-term-in-the-report-query.json
+vault CHANGED task/inject-escape-the-search-term-in-the-report-query.md
+vault CHANGED task/inject-validate-the-redirect-target-after-login.json
+vault CHANGED task/inject-validate-the-redirect-target-after-login.md
+repo head before=[sha:3895ea0d] after=[sha:3895ea0d]
+repo status after=''

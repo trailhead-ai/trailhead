@@ -1,0 +1,38 @@
+I resumed the follow-up parent `task/build-the-follow-ups-of-fixture-lens-house-spec-chosen-2026-10-22` and it is now buildable. It holds one follow-up. The other follow-up was not nested because it describes work one of the spec's acceptance criteria still requires.
+
+```
+nested task/lens-oil-round-the-litres-to-one-decimal
+removed from the list: task/lens-house-reject-negative-hours
+```
+
+- **Nested:** Lens oil: round the litres to one decimal (`lens-oil-round-the-litres-to-one-decimal`).
+- **Removed from the parent's list:** Lens house: reject negative hours (`lens-house-reject-negative-hours`). It was held back as an unmet criterion.
+- **Left out by the check:** none. **Failed writes:** none.
+- **Follow-up refinement:** not run, because steps 8 to 12 don't run when a parent is resumed.
+- **Dispositions:** nothing was dropped or merged.
+
+unmet-criterion check: 1 flagged; 0 blocked not checked
+
+- Lens house: reject negative hours (`lens-house-reject-negative-hours`), against **AC2**. `lens_turns` in `src/lens.py` still multiplies whatever it gets by two. It returns a negative turn count for negative hours instead of raising `ValueError`, which the spec requires.
+
+Build the parent:
+
+```
+/craft:execute task/build-the-follow-ups-of-fixture-lens-house-spec-chosen-2026-10-22
+```
+
+If you didn't create this parent yourself, this removes its marker label. The follow-up gather then stops counting it, and the record itself is left alone:
+
+```
+lore record update task/build-the-follow-ups-of-fixture-lens-house-spec-chosen-2026-10-22 --vault default --unset-label craft/followup-parent
+```
+
+There's no distill command because a follow-up is still flagged. You have three ways to deal with it:
+
+1. **Build the criterion as a slice.** The spec's status is `complete`, so this means starting a new spec for it.
+2. **Change the spec.** Amend it to remove or reword AC2.
+3. **Clear the flag.** If you judge it's not really unmet, re-run this skill and answer `not unmet lens-house-reject-negative-hours`. Do that only once no live parent remains, meaning after the parent above is built or dropped:
+
+```
+/craft:tidy-followups spec/fixture-lens-house-spec
+```

@@ -1,0 +1,5 @@
+vault CHANGED task/build-the-follow-ups-of-fixture-customer-poll-spec-chosen-2026-10-12.json
+vault CHANGED task/build-the-follow-ups-of-fixture-customer-poll-spec-chosen-2026-10-12.md
+vault CHANGED task/customer-poll-zero-pad-the-ballot-number.json
+repo head before=[sha:0b4d983f] after=[sha:0b4d983f]
+repo status after=''

@@ -1,0 +1,26 @@
+## Closing report
+
+I created a new parent task, `build-the-follow-ups-of-fixture-pennant-spec-chosen-2026-10-22`, with the chosen follow-up nested under it. The parent is now ready to build.
+
+- **Included, refined and nested:** Pennants: accept a lower-case letter (`pennants-accept-a-lower-case-letter`)
+- **Left:**
+  - Pennants: sort the table by letter (`pennants-sort-the-table-by-letter`)
+  - Signal lamp: report a low battery under twenty percent (`signal-lamp-report-a-low-battery-under-twenty-percent`)
+- **Left out at the check:** none
+- **Refined but not nested:** none
+- **Failed writes:** none
+- **Dropped or merged:** nothing
+
+Your first Confirmation 1 answer was accepted, so the fallback answer (the signal-lamp follow-up) was never used.
+
+To build the parent:
+
+```
+/craft:execute task/build-the-follow-ups-of-fixture-pennant-spec-chosen-2026-10-22
+```
+
+To distill the spec afterwards:
+
+```
+/craft:distill spec/fixture-pennant-spec
+```

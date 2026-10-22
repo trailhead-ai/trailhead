@@ -1,0 +1,37 @@
+I tidied the follow-ups of spec/fixture-parcel-scale-spec. The two parcel-scale follow-ups are now one task, refined to `ready` and nested under a new parent you can build. Nothing failed.
+
+**Parent:** `build-the-follow-ups-of-fixture-parcel-scale-spec-chosen-2026-10-22`. It is `ready` and holds one task.
+
+**Merged:**
+- *Parcel scale: refuse a mass figure above the load-cell ceiling* (`parcel-scale-refuse-a-mass-figure-above-the-load-cell-ceiling`) was folded into *Parcel scale: refuse a mass figure below zero* (`parcel-scale-refuse-a-mass-figure-below-zero`).
+- The surviving task's status before the merge was `open`.
+
+**Included and nested:**
+- *Parcel scale: refuse a mass figure below zero* (`parcel-scale-refuse-a-mass-figure-below-zero`).
+- Its refined scope now covers both checks:
+  - `read_weight` raises `ValueError` for a figure below zero.
+  - It also raises `ValueError` for a figure above 5000 g.
+  - Every other figure, including 0 and 5000, comes back unchanged.
+- The refinement also added a new test file, `tests/test_scale.py`.
+
+**Left:** *Sticker press: add a closing full stop to the module docstring* (`sticker-press-add-a-closing-full-stop-to-the-module-docstring`).
+
+**Nothing else:**
+- Nothing was dropped.
+- No task was reset to open.
+- No task was left out at the check, and none was refined without being nested.
+- No write failed.
+
+unmet-criterion check: none flagged; 0 blocked not checked
+
+The spec body declares no acceptance criteria, so none of the follow-ups could count as an unmet criterion.
+
+**Next commands:**
+
+```
+/craft:execute task/build-the-follow-ups-of-fixture-parcel-scale-spec-chosen-2026-10-22
+```
+
+```
+/craft:distill spec/fixture-parcel-scale-spec
+```

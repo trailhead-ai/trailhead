@@ -1,0 +1,87 @@
+{
+ "cell": "resume-flagged",
+ "outcome_lines": [],
+ "final_ac_ids": [],
+ "closing_commands": [
+  {
+   "line": "/craft:execute task/PARENT",
+   "standalone": true
+  },
+  {
+   "line": "lore record update task/PARENT --vault default --unset-label craft/followup-parent",
+   "standalone": true
+  }
+ ],
+ "order": {
+  "state": [
+   6
+  ],
+  "check": [
+   7
+  ],
+  "resume": [
+   9
+  ],
+  "resume_exit": [
+   0
+  ]
+ },
+ "check_args": [
+  [
+   "K",
+   "PARENT",
+   "U"
+  ]
+ ],
+ "assemble_children": [],
+ "resume_children": [
+  [
+   "K",
+   "U"
+  ]
+ ],
+ "dispose_files": [],
+ "agent_targets": [],
+ "fetched_by_main": [
+  "K",
+  "PARENT",
+  "U"
+ ],
+ "step6_list": [],
+ "records": {
+  "U": {
+   "status": "ready",
+   "parent": "PARENT",
+   "depends-on": [],
+   "body_changed": false,
+   "new": false,
+   "dropped_note": null
+  },
+  "K": {
+   "status": "ready",
+   "parent": "PARENT",
+   "depends-on": [],
+   "body_changed": false,
+   "new": false,
+   "dropped_note": null
+  },
+  "PARENT": {
+   "status": "ready",
+   "parent": null,
+   "depends-on": [],
+   "body_changed": true,
+   "new": false,
+   "dropped_note": null,
+   "lists": [
+    "U",
+    "K"
+   ]
+  }
+ },
+ "repo": {
+  "head_before": "[sha:9f74fee4]",
+  "head_after": "[sha:9f74fee4]",
+  "status_after": ""
+ },
+ "real_vault_hits": ""
+}

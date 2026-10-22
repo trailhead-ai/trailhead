@@ -1,0 +1,31 @@
+I created a new parent task, nested the one follow-up you chose under it, and the parent is now `ready` to build.
+
+**What happened along the way:**
+- **Shortlist:** I recommended nothing. The only open follow-up (0 of 1) is a small formatting fix, and nothing in it says waiting would cost more. You moved it onto the shortlist yourself.
+- **Refinement:** it changed the record from `open` to `ready` and added what the change delivers, the files it touches and a test contract. The `check` script confirmed it was eligible to nest.
+- **Choices refinement made on its own:**
+  - There is no separator after `B`, so 7 shows as `B07`. The follow-up's wording names none, while a similar task that wants one says so explicitly.
+  - Two digits is a minimum, so numbers of three or more digits print in full (`B100`).
+
+  Look at both before building.
+
+**Closing report**
+- **Included and nested:** Berth sign: zero-pad the berth number (`berth-sign-zero-pad-the-berth-number`)
+- **Left:** Mooring: waive the fee for boats under four metres (`mooring-waive-the-fee-for-boats-under-four-metres`). It is blocked, so I listed it by title only and did not read its body.
+- **Left out at step 10:** none
+- **Refined but not nested:** none
+- **Failed writes:** none
+- **Dropped or merged:** none; there was nothing to drop or merge, so that step did not run.
+- **Parent:** `build-the-follow-ups-of-fixture-mooring-spec-chosen-2026-10-22`
+
+To build the parent:
+
+```
+/craft:execute task/build-the-follow-ups-of-fixture-mooring-spec-chosen-2026-10-22
+```
+
+To distill the spec:
+
+```
+/craft:distill spec/fixture-mooring-spec
+```

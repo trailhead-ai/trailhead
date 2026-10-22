@@ -1,0 +1,32 @@
+I ran the tidy-followups ritual on `fixture-tide-table-spec`. It created one buildable parent task holding the chart-printer follow-up. One other follow-up is flagged because AC2 (reject an hour outside 0–23) has not been built, so no distill command is printed.
+
+**Parent created:** `build-the-follow-ups-of-fixture-tide-table-spec-chosen-2026-10-22`. It is `ready` and its child is nested.
+
+**What happened to each follow-up**
+- **Included:** Chart printer: zero-pad the hour column (`chart-printer-zero-pad-the-hour-column`). It was refined and moved from `open` to `ready`, passed the eligibility check and was nested under the parent.
+- **Left:** Tide table: mention the unit in the module comment (`tide-table-mention-the-unit-in-the-module-comment`). It is untouched.
+- **Flagged:** Tide table: reject an hour outside the day (`tide-table-reject-an-hour-outside-the-day`). It is not included or nested.
+
+**Not done**
+- Nothing was dropped or merged, so the drop-reason question was not asked and no dispositions were written.
+- No follow-up was refined and then left out of the parent, and no write failed.
+
+**Flag**
+
+unmet-criterion check: 1 flagged; 0 blocked not checked
+- Tide table: reject an hour outside the day (`tide-table-reject-an-hour-outside-the-day`), against **AC2**. In `src/tidetable.py`, `tide_height` indexes the table with whatever hour it is given. It raises no `ValueError` for an hour outside 0–23: hour 24 fails with an `IndexError`, and a negative hour quietly returns an entry.
+
+Build command for the new parent:
+
+```
+/craft:execute task/build-the-follow-ups-of-fixture-tide-table-spec-chosen-2026-10-22
+```
+
+**Options for the flagged AC2 follow-up.** You need to choose one of these:
+1. **Build it as new work.** The spec's status is `complete`, so AC2 can't be reopened on it; you'd start a new spec for the out-of-range-hour behaviour.
+2. **Change the spec.** Amend it to remove or reword AC2.
+3. **Clear the flag.** If AC2 isn't really unmet, rerun this ritual and answer `not unmet tide-table-reject-an-hour-outside-the-day` to clear it:
+
+```
+/craft:tidy-followups spec/fixture-tide-table-spec
+```

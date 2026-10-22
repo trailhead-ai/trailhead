@@ -1,0 +1,20 @@
+The parent `task/build-the-follow-ups-of-fixture-mooring-spec-chosen-2026-10-22` was created and is buildable. It holds the one follow-up you chose; the other is still blocked and wasn't checked.
+
+**What happened:**
+- **Shortlist:** I recommended none of the follow-ups (0 of 1 met a reason class). The berth-sign fix was added on your answer.
+- **Refined:** Berth sign: zero-pad the berth number (`berth-sign-zero-pad-the-berth-number`) went from `open` to `ready`. It now delivers `B07` for 7 and `B12` for 12, and changes `src/berthsign.py` and a new `tests/test_berthsign.py`.
+- **Nested:** that follow-up is the parent's only child. The parent is `ready`.
+- **Left:** Mooring: waive the fee for boats under four metres (`mooring-waive-the-fee-for-boats-under-four-metres`) stays `blocked`. Its body wasn't read, so it wasn't checked against the spec. Its title suggests it may be the work AC2 (zero fee under four metres) requires, so take a look once it's unblocked.
+- **Not written:** nothing was dropped or merged, no follow-up was left out, and no write failed.
+
+**Decision for you:** the follow-up didn't say whether there's a space between `B` and the digits. Refinement chose none (`B07`, not `B 07`). If the sign should have a space, re-refine the task before building.
+
+unmet-criterion check: none flagged; 1 blocked not checked
+
+```
+/craft:execute task/build-the-follow-ups-of-fixture-mooring-spec-chosen-2026-10-22
+```
+
+```
+/craft:distill spec/fixture-mooring-spec
+```
